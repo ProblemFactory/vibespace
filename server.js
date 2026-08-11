@@ -4651,12 +4651,30 @@ hosts.onUsageEvents = (hostId, text) => {
   // Remote discovery went stale (create / terminate / external kill / device
   // push) — every connected client's cached host list must re-fetch. Trailing-
   // debounced per host so a burst of invalidations is one broadcast.
+  // …and the ORCHESTRATOR computes it ONCE and pushes the RESULT (2.310.0).
+  // The first cut broadcast a bare "dirty" and let every client re-fetch with
+  // ?fresh=1 — which puts the trigger for a heavy scan on the orchestration
+  // side and multiplies it by the number of connected clients. The three-tier
+  // rule is the opposite: the machine that OWNS the facts computes them (the
+  // capability-gated `discovery-claims` op runs the whole claim algorithm on
+  // the device, next to the bytes), the orchestrator forwards, the client is a
+  // view. One dirty signal ⇒ one computation ⇒ one broadcast, whatever the
+  // client count. Skipped entirely when nobody is connected.
   const discDirtyTimers = new Map();
   hosts.onDiscoveryDirty = (hostId) => {
     if (!hostId || discDirtyTimers.has(hostId)) return;
-    discDirtyTimers.set(hostId, setTimeout(() => {
+    discDirtyTimers.set(hostId, setTimeout(async () => {
       discDirtyTimers.delete(hostId);
-      try { bcastAll({ type: 'remote-discovery-dirty', hostId }); } catch { }
+      try {
+        if (!wss.clients.size) return; // nobody to tell — do not spend the scan
+        const d = await hosts.discoverSessions(hostId, { ttlMs: 0 });
+        bcastAll({ type: 'remote-sessions', hostId, sessions: d?.sessions || [], at: Date.now() });
+      } catch (e) {
+        // An unreachable machine must not silently freeze the list at a state
+        // we know is wrong — say so, and let the client keep its labelled
+        // last-known copy (the same degrade the pull path already does).
+        try { bcastAll({ type: 'remote-sessions', hostId, error: String(e?.message || e), at: Date.now() }); } catch { }
+      }
     }, 400));
   };
   hosts.onDeviceDirty = (hostId) => {

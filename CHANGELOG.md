@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.310.0
+
+### Changed
+- **Remote session lists arrive as a PUSH, computed on the machine that owns the facts.** 2.309.0 broadcast a bare "your list is stale" and let each client re-fetch — which puts the trigger for a heavy scan on the orchestration side and multiplies it by the number of connected clients. Now one dirty signal costs one computation (the capability-gated `discovery-claims` op runs the whole claim algorithm on the device, next to the bytes) and one broadcast of the RESULT, whatever the client count; nothing is computed at all when no client is connected. An unreachable machine pushes an error instead, and clients keep their labelled last-known list rather than freezing on a state we know is wrong.
+
 ## 2.309.0
 
 ### Fixed

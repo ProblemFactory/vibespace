@@ -153,22 +153,28 @@ export function installSidebarWorkbench(Sidebar) {
         .finally(() => { this._hostsDataLoading = false; });
     },
 
-    // The server tells us when a host's discovery went stale (2.309.0) —
-    // remote create/terminate/external-kill/device-push. Our per-host list has
-    // NO TTL by design (an ssh scan is expensive), so without this signal a
-    // terminated remote session stayed "live" in Recent until the user hit ⟳.
-    // A DISPLAYED host re-scans immediately; any other host just drops its
-    // entry so the next render that needs it fetches fresh — never a fan-out
-    // of ssh scans for zones nobody is looking at.
+    // The server PUSHES a host's recomputed session list whenever its
+    // discovery goes stale (remote create/terminate/external-kill/device
+    // watch). We never re-fetch on that signal: the computation belongs to the
+    // machine that owns the facts, and one dirty event must cost one
+    // computation no matter how many clients are connected. Without this a
+    // terminated remote session stayed "live" in Recent until a manual ⟳ —
+    // our per-host list has no TTL by design (a scan is expensive).
     _initRemoteDirtySync() {
       if (this._remoteDirtyInit) return;
       this._remoteDirtyInit = true;
       this.app.ws.onGlobal((msg) => {
-        if (msg?.type !== 'remote-discovery-dirty' || !msg.hostId) return;
-        const id = msg.hostId;
-        if (!this._wbRemoteHosts?.has(id)) return;
-        if (this._wbRecentHost === id || this._wbHistoryHost === id) this._loadRemoteHost(id, { fresh: true });
-        else this._wbRemoteHosts.delete(id);
+        if (msg?.type !== 'remote-sessions' || !msg.hostId) return;
+        const id = msg.hostId, map = this._wbRemoteHosts;
+        if (!map?.has(id)) return;   // never seen this host — nothing to correct
+        const cur = map.get(id);
+        if (msg.error) {
+          // keep the last good list, labelled — same degrade as a failed pull
+          map.set(id, { loading: false, sessions: cur?.sessions || null, error: msg.error, fetchedAt: cur?.fetchedAt || 0, lastFailAt: Date.now() });
+        } else {
+          map.set(id, { loading: false, sessions: msg.sessions || [], error: null, fetchedAt: msg.at || Date.now(), lastFailAt: 0 });
+        }
+        if (this._wbRecentHost === id || this._wbHistoryHost === id || (document.getElementById('session-filter')?.value || '').trim()) this._render();
       });
     },
 
