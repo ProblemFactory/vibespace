@@ -1344,15 +1344,22 @@ function serveConnection(sock) {
                     const trimmed = line.trim();
                     if (!trimmed) continue;
                     let rec = null; try { rec = JSON.parse(trimmed); } catch { continue; }
+                    (t.raw ||= []).push(trimmed);
                     try { t.mm.processLive(rec); } catch { }
                   }
-                  if (t.ops.length) {
+                  // raw records ride ALONGSIDE the normalized ops (step 3:
+                  // the server's side-effect consumers eat raw records — same
+                  // shapes its own parse dispatches on; ops stay for parity)
+                  const rawOut = (t.raw || []).splice(0, (t.raw || []).length);
+                  if (t.ops.length || rawOut.length) {
                     const seq = ++st.seq;
                     const events = t.ops.splice(0, t.ops.length).map((op) => {
                       try { return JSON.stringify(op).slice(0, 32 * 1024); } catch { return null; }
                     }).filter(Boolean);
-                    for (let i = 0; i < events.length; i += 200) {
-                      try { mux.control({ op: 'session-events', sid, batch: events.slice(i, i + 200), seq: i + 200 >= events.length ? seq : undefined }); } catch { }
+                    const rawStr = rawOut.map((r) => r.length > 64 * 1024 ? null : r).filter(Boolean);
+                    const n2 = Math.max(events.length, rawStr.length);
+                    for (let i = 0; i < Math.max(n2, 1); i += 200) {
+                      try { mux.control({ op: 'session-events', sid, batch: events.slice(i, i + 200), raw: rawStr.slice(i, i + 200), seq: i + 200 >= n2 ? seq : undefined }); } catch { }
                     }
                   }
                 }

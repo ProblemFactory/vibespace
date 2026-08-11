@@ -1969,6 +1969,15 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // own models — without the guard a haiku subagent both spuriously
             // triggered repins AND masked a real main-thread reroute when it
             // answered last.
+            // STEP 3 record REGISTRATION (first-writer-wins, parse-primary):
+            // the parse marks every record it processes; the DEVICE feed runs
+            // the side-effect families only for records the parse has NOT yet
+            // seen (relay lag, wrapper reconnect windows, a dead relay). The
+            // parse keeps full authority when healthy — the device stream
+            // fills its gaps and beats its latency, never double-fires. Every
+            // family is idempotent by design regardless (stdout re-emits the
+            // same msg.id up to 3×), so the gate is belt, not the only guard.
+            sbSeenFirst(session, msg);
             if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain
                 && msg.message?.model && !String(msg.message.model).startsWith('<')) {
               session._servedModel = msg.message.model; session._servedModelAt = Date.now();
@@ -4831,9 +4840,95 @@ function sbCompare(hostId, sid, r) {
     }
   }
 }
+// ── Session-brain STEP 3 (2.317.0): consumers go DEVICE-FIRST ──────────────
+// The six side-effect families (served model, usage odometer, rate-limit
+// events, limit banners, fallback belts, task/todo state) now run from the
+// DEVICE's raw-record stream when the daemon owns the session's stdout, with
+// the server's own parse as the automatic backstop. Single-owner per RECORD,
+// not per session: a bounded first-writer-wins gate keyed by record identity
+// means the transition needs no offset surgery — whichever feed sees a record
+// first performs its side effects, the other finds the key taken and skips.
+// A dead device stream degrades to exactly the pre-step-3 world with zero
+// coordination. The NORMALIZER/msg-broadcast path deliberately stays
+// server-owned until R6 (the client protocol is untouched by this step).
+const SB_SEEN_MAX = 600;
+function sbSeenFirst(session, rec) {
+  const key = rec.uuid || ((rec.requestId || rec.message?.id || '') + ':' + (rec.type || '') + ':' + (rec.subtype || ''));
+  if (!key || key === '::') return true; // unidentifiable records: let both run (idempotent families only)
+  const seen = session._sbSeen || (session._sbSeen = new Set());
+  if (seen.has(key)) return false;
+  seen.add(key);
+  if (seen.size > SB_SEEN_MAX) { const it = seen.values(); for (let i = 0; i < 100; i++) seen.delete(it.next().value); }
+  return true;
+}
+// The side-effect families, ONE implementation fed by either stream. Kept
+// deliberately to the granular consumer functions — inline duplication of the
+// parse block is the drift the CS rules ban.
+function claudeSideEffects(session, sid, msg) {
+  try {
+    if (msg.type === 'assistant' && msg.message?.model && msg.message.model !== '<synthetic>' && !msg.parent_tool_use_id && !msg.isSidechain) {
+      session._servedModel = msg.message.model; session._servedModelAt = Date.now();
+    }
+    if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id) && !(session.host && !session._accountId)) {
+      try {
+        const u = msg.message.usage; const cc = u.cache_creation || {};
+        const acctKey = resolveUsageKey(session);
+        const mkCost = (i, o, cw5, cw1, cr) => usageHistory._cost({ acct: acctKey === '__global__' ? null : acctKey, model: msg.message.model, i, o, cw5, cw1, cr });
+        usageEstimator.noteLive({ rid: msg.requestId || msg.message.id, accountId: acctKey, model: msg.message.model,
+          usd: mkCost(u.input_tokens || 0, u.output_tokens || 0, cc.ephemeral_5m_input_tokens || 0, cc.ephemeral_1h_input_tokens || 0, u.cache_read_input_tokens || 0),
+          cwUsd: mkCost(0, 0, cc.ephemeral_5m_input_tokens || 0, cc.ephemeral_1h_input_tokens || 0, 0),
+          crUsd: mkCost(0, 0, 0, 0, u.cache_read_input_tokens || 0) });
+        kickPoolEval();
+      } catch { }
+    }
+    if (msg.type === 'rate_limit_event') recordRateLimitEvent(session, msg);
+    if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      for (const b of msg.message.content) {
+        if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
+          global.__vsEvent?.('cli-usage-limit');
+          markLimitBanner(session, b.text);
+        } else if (b?.type === 'fallback') {
+          global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
+          if (!msg.parent_tool_use_id && !msg.isSidechain) maybeStopOnFallback(session, sid, b.from?.model, b.to?.model);
+        }
+      }
+    }
+    if (msg.type === 'system' && msg.subtype === 'model_refusal_fallback') {
+      maybeStopOnFallback(session, sid, msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
+    }
+    // todo/task families mirror the parse's exact consumption (lines above):
+    // TodoWrite carries the whole list; TaskUpdate patches by id; TaskCreate's
+    // id only exists in the tool RESULT, which the parse stashes — the device
+    // feed leaves creates to the parse (the seen-gate does not cover them, so
+    // nothing is lost; the parse path still sees every record).
+    if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+      for (const b of msg.message.content) {
+        if (b?.type !== 'tool_use') continue;
+        try {
+          if (b.name === 'TodoWrite' && Array.isArray(b.input?.todos)) updateSessionTodos(session, b.input.todos);
+          else if (b.name === 'TaskUpdate' && b.input?.taskId) applyTaskToolUpdate(session, b.input);
+        } catch { }
+      }
+    }
+  } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
+}
 hosts.onSessionEvents = (hostId, m) => {
   try {
-    if (!m?.sid || !Array.isArray(m.batch)) return;
+    if (!m?.sid) return;
+    // STEP 3: raw records → the shared side-effect consumers, device-first.
+    // Session lookup by the DAEMON's sid (keeperSid); miss = not ours (an
+    // externally-adopted pipe session) — parity ring still records below.
+    if (Array.isArray(m.raw) && m.raw.length) {
+      let sess = null;
+      for (const [, s3] of activeSessions) { if (s3.host === hostId && s3.keeperSid === m.sid && s3.backend !== 'codex') { sess = s3; break; } }
+      if (sess) {
+        for (const line of m.raw) {
+          let rec = null; try { rec = JSON.parse(line); } catch { continue; }
+          if (sbSeenFirst(sess, rec)) claudeSideEffects(sess, sess._webuiId || null, rec);
+        }
+      }
+    }
+    if (!Array.isArray(m.batch)) return;
     const r = _sbRing(hostId + ':' + m.sid);
     for (const ej of m.batch) {
       let op = null; try { op = JSON.parse(ej); } catch { continue; }
