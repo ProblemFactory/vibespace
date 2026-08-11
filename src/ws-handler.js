@@ -333,7 +333,19 @@ function registerWsHandler(wss, ctx) {
               }
             } catch { }
           }
-          const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
+          // ONE counter value for BOTH the id and the socket name (a fleet user's
+          // 2026-08-11 incident, proven in production data): sockName re-read
+          // `sessionCounterRef.value` ~100 lines and several AWAITS later
+          // (cwd preflight, host inference, findKeeperFor), so a burst of
+          // concurrent creates — exactly what a multi-agent orchestrator
+          // produces — had every session read the counter's LATEST value:
+          // four sessions with ids sess-21/22/31/34 all took sockName cw-36,
+          // differing only in the Date.now() millisecond. Two landing in the
+          // SAME millisecond share a socket path AND a session-meta file, so
+          // one session's metadata (name, claudeSessionId, account, taskId)
+          // silently overwrites the other's — the state-crossing class.
+          const seq = ++sessionCounterRef.value;
+          const id = 'sess-' + seq + '-' + Date.now();
           // cwd default: a REMOTE/DIAL session with no explicit cwd must land
           // in the DEVICE's home, NOT this server's (B-0d70: the pod's
           // /home/<user> doesn't exist on a Mac → `cd` failed and, on the
@@ -430,7 +442,7 @@ function registerWsHandler(wss, ctx) {
               break;
             }
           }
-          const sockName = 'cw-' + sessionCounterRef.value + '-' + Date.now();
+          const sockName = 'cw-' + seq + '-' + Date.now(); // SAME seq as the id — never a re-read (see above)
           const socketPath = path.join(SOCKETS_DIR, sockName);
           const sessionMode = data.mode === 'chat' ? 'chat' : 'terminal';
           // Shell-style tokenization: quoted segments stay one argument
@@ -618,7 +630,7 @@ function registerWsHandler(wss, ctx) {
           const session = {
             mode: sessionMode,
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
-            cwd, name: data.sessionName || `Session ${sessionCounterRef.value}`,
+            cwd, name: data.sessionName || `Session ${seq}`, // seq, not a re-read — two concurrent creates otherwise BOTH default to 'Session N'
             createdAt: Date.now(),
             // Per-session bearer for the agent-facing API (vibespace-status):
             // spawned into the CLI's env, scopes writes to this session only
