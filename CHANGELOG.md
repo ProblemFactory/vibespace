@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.314.0
+
+### Changed
+- **Machine snapshots (System panel) now share ONE implementation across local and remote** — a missed twin-set from the CS unification: the local panel read cgroups in-process while remote machines ran a separate ssh script, and the two interpretations of "used memory" had already drifted once (the false-100% incident: raw `memory.current` vs working set). The daemon now bundles `src/sysinfo.js` and serves a `sysinfo` op (capability-gated), so the same module runs where the facts live; the ssh script survives only as the fallback rung for daemon-less hosts. Bonus: a containerized remote machine now reports its cgroup limit instead of the host's MemTotal, and macOS gets the vm_stat working-set semantics through the same module. Test: scripts/test-sysinfo-op.mjs (11, real daemon).
+
+### Fixed
+- The unknown-stream-type breadcrumb cried "unhandled" for `rate_limit_event`, which has been handled since 2.289.0 — the known-types set lagged the handler and the false alarm misled an incident read.
+
 ## 2.313.0
 
 ### Fixed

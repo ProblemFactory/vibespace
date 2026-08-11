@@ -1123,7 +1123,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo'],
         });
         return;
       }
@@ -1457,6 +1457,26 @@ function serveConnection(sock) {
           fs.renameSync(tmp, norm);
           mux.control({ op: 'secret-result', id: msg.id, ok: true, path: norm });
         } catch (e) { mux.control({ op: 'secret-result', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'sysinfo') {
+        // Machine snapshot via THE shared implementation (src/sysinfo.js) —
+        // the same module the server runs for device #0, executed where the
+        // facts live. This retires the ssh script's separate interpretation
+        // (the script remains the fallback rung for daemon-less ssh hosts):
+        // the local/remote memory-semantics drift (working set vs raw
+        // memory.current — the false-100% incident) is exactly what one
+        // implementation makes impossible. Bonus over the script: a
+        // CONTAINERIZED machine reports its cgroup limit, not the host's.
+        (async () => {
+          try {
+            const si = require('./../sysinfo.js');
+            const r = await si.read(process.env.HOME || require('os').homedir());
+            // op REQUIRED on the reply: the client routes by an id-keyed op
+            // set (the 2.300.0 three-touch rule); an op-less reply times out.
+            mux.control({ op: 'sysinfo-result', id: msg.id, ...r });
+          } catch (e) { mux.control({ op: 'sysinfo-result', id: msg.id, error: String(e.message || e) }); }
+        })();
         return;
       }
       if (msg.op === 'quota-refresh') {

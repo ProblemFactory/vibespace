@@ -79,6 +79,38 @@ function memInfo() {
   return { used: avail ? Math.max(0, total - avail) : raw, limit: total, raw, source: 'host' };
 }
 
+// macOS has no /proc and no cgroups: the working-set analogue is vm_stat's
+// active + wired + compressor pages (what the old remote SCRIPT computed —
+// its interpretation moved here when the script became the fallback rung).
+// Async because vm_stat is a child process; the sync memInfo() stays the
+// cheap /sys path for the Linux watch loop.
+function memInfoDarwin() {
+  return new Promise((resolve) => {
+    execFile('sysctl', ['-n', 'hw.memsize', 'vm.pagesize'], { timeout: 4000 }, (e1, out1) => {
+      const [total, pageRaw] = String(out1 || '').split('\n').map((x) => parseInt(x, 10));
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 4096;
+      if (e1 || !Number.isFinite(total) || !total) return resolve(null);
+      execFile('vm_stat', [], { timeout: 4000 }, (e2, out2) => {
+        if (e2) return resolve(null);
+        let pages = 0;
+        for (const ln of String(out2).split('\n')) {
+          const m = /^Pages (active|wired down|occupied by compressor):\s+(\d+)/.exec(ln);
+          if (m) pages += Number(m[2]);
+        }
+        resolve({ used: pages * page, limit: total, raw: pages * page, source: 'darwin' });
+      });
+    });
+  });
+}
+
+async function memInfoAsync() {
+  if (process.platform === 'darwin') {
+    const d = await memInfoDarwin();
+    if (d) return d;
+  }
+  return memInfo();
+}
+
 function topProcs(n = 8) {
   return new Promise((resolve) => {
     execFile('ps', ['aux', '--sort=-rss'], { timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => {
@@ -109,7 +141,7 @@ function diskInfo(dir) {
 }
 
 async function read(dataDir) {
-  const mem = memInfo();
+  const mem = await memInfoAsync();
   const [disk, procs] = await Promise.all([diskInfo(dataDir || process.cwd()), topProcs()]);
   return {
     mem: { ...mem, pct: mem.limit ? Math.round(mem.used / mem.limit * 100) : 0 },
@@ -256,4 +288,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, memInfo, history, persistHistory };
+module.exports = { read, startWatch, memInfo, memInfoAsync, history, persistHistory };
