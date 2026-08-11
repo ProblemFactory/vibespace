@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.302.0
+
+**Session id / socket-name counter race (found in production data on a fleet instance, 7 of 15 live sessions affected).** `id` incremented the session counter, then `sockName` RE-READ that counter about a hundred lines and several `await`s later (cwd preflight, resume host inference, keeper probe). A burst of concurrent creates — exactly what a multi-agent orchestrator produces — therefore had every session read the counter's LATEST value: four sessions with ids `sess-21/22/31/34` all took socket name `cw-36`, separated only by the `Date.now()` millisecond. **The measured gap between them was 1 ms.** Two landing in the SAME millisecond share a socket path AND a session-meta filename, so one session's metadata — name, claudeSessionId, billing account, task id — silently overwrites the other's.
+
+- One captured `seq` now feeds the id, the socket name and the default session name; the same re-read is fixed in the server-side adopt path. `scripts/test-session-id-race.mjs` pins it structurally (zero bare re-reads allowed) and behaviourally, with a negative control that reproduces the production symptom.
+- **Client state-key collisions are no longer silent**: when the key migration maps two stored keys onto one session with different values, one value was being DROPPED with no trace — that is how a session can end up wearing another session's custom name while the rightful owner loses its own. It now leaves an `state-key-collision` breadcrumb in the incident ring plus a telemetry event, so a recurrence is provable from a bundle instead of reconstructed by hand.
+
+
 ## 2.301.0
 
 **Paging bounce-back fixed (inc-mso818ry — the 2.264.0 scroll tracer's first real catch).** Paging up in a busy chat window could bounce back to the live tail every ~1 second: while content-visibility left a freshly inserted batch unresolved, the list's scrollHeight collapsed to about one viewport (trace: `sh 782` on every pathological landing vs `2857+` on healthy ones), making "at top" and "at bottom" SIMULTANEOUSLY true — the pin re-engaged at scrollTop 0, extendBottom yanked the window back to the live tail, and the loop repeated for 50 straight seconds in the captured incident.

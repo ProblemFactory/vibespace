@@ -2830,8 +2830,11 @@ async function readoptOrphanKeeperSessions() {
     if (!out || !out.includes('PID=')) continue; // host down or claude gone — leave the orphan for a later boot
     const rport = Number((/VIBESPACE_API=http:\/\/127\.0\.0\.1:(\d+)/.exec(out) || [])[1]) || null;
 
-    const id = 'sess-' + (++sessionCounterRef.value) + '-' + Date.now();
-    const sockName = 'cw-' + sessionCounterRef.value + '-' + Date.now();
+    // one counter value for both (the ws-handler race's twin — this adopt
+    // loop awaits per host, so a re-read is the same hazard)
+    const seqA = ++sessionCounterRef.value;
+    const id = 'sess-' + seqA + '-' + Date.now();
+    const sockName = 'cw-' + seqA + '-' + Date.now();
     const socketPath = path.join(SOCKETS_DIR, sockName);
     const bufFile = path.join(BUFFERS_DIR, id + '.buf');
     const metaFileW = path.join(BUFFERS_DIR, id + '.json');

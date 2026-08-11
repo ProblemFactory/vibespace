@@ -150,7 +150,17 @@ export function installSidebarState(SidebarClass) {
         || (rawKey.includes(':') ? rawKey : (this._lookupLegacySessionKey(rawKey, sessions) || rawKey));
       if (mappedKey !== rawKey) changed = true;
       if (!Object.hasOwn(next, mappedKey)) next[mappedKey] = value;
-      else if (next[mappedKey] !== value) changed = true;
+      else if (next[mappedKey] !== value) {
+        // TWO raw keys mapped onto ONE session with DIFFERENT values — one of
+        // them is about to be DROPPED silently. That is how a session ends up
+        // wearing another session's custom name (and how the rightful owner
+        // loses its own): user-visible state disappearing with no trace.
+        // Never silent again — breadcrumb + telemetry so a recurrence is
+        // provable from an incident bundle (2026-08-11 field report).
+        try { window.__vsOp?.('state-key-collision', { key: String(mappedKey).slice(0, 40), kept: String(next[mappedKey]).slice(0, 30), dropped: String(value).slice(0, 30) }); } catch {}
+        try { window.__vsTelemetry?.event?.('state-key-collision'); } catch {}
+        changed = true;
+      }
     }
     return { next, changed };
   };
