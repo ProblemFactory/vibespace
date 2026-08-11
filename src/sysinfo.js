@@ -14,20 +14,69 @@ const { execFile } = require('child_process');
 
 // Container-aware memory: cgroup v2 → v1 → host meminfo. /sys reads are
 // kernel-backed and never hang (unlike FUSE paths — safe to read sync).
+//
+// ⚠ WHAT "USED" MEANS (2.312.0, a fleet user's false 100% alarm): a cgroup's
+// `memory.current` COUNTS THE PAGE CACHE. A pod that merely reads big files
+// (transcripts, a dataset pass) parks tens of GB of reclaimable file cache
+// there and sits pinned at the limit forever — memory.events showed `max 770`
+// reclaim events and `oom_kill 0`, i.e. the kernel calmly reclaiming, while
+// the panel screamed 100% and every process together held 2.7 GB. Reporting
+// raw `current` is therefore not "conservative", it is WRONG: the number never
+// falls, so the one alert that matters (a real leak) can never stand out.
+// We report the WORKING SET (`current − inactive_file`) — the same definition
+// kubectl top / cadvisor use and the one Kubernetes evicts on — and carry the
+// raw + cache figures alongside so the UI can explain the difference.
+// NOTE this is also what the REMOTE host probe already computed (MemTotal −
+// MemAvailable, which excludes reclaimable cache): the local twin had drifted.
+/** key→number over a "<key> <num>[ unit]" file — covers BOTH cgroup
+ *  memory.stat ("anon 1659514880") and /proc/meminfo ("MemAvailable: 12 kB",
+ *  aligned with spaces and unit-suffixed; a naive first-space split yields NaN
+ *  there). Units are NOT converted — callers know their file. */
+function memStat(file) {
+  const m = new Map();
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const mm = /^(\S+?):?\s+(\d+)/.exec(line);
+      if (mm) m.set(mm[1], Number(mm[2]));
+    }
+  } catch { }
+  return m;
+}
+
 function memInfo() {
   try { // cgroup v2
-    const used = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8'), 10);
+    const raw = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8'), 10);
     const maxRaw = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
     const limit = maxRaw === 'max' ? 0 : parseInt(maxRaw, 10);
-    if (Number.isFinite(used)) return { used, limit: limit || os.totalmem(), source: 'cgroup2' };
+    if (Number.isFinite(raw)) {
+      const st = memStat('/sys/fs/cgroup/memory.stat');
+      const inactiveFile = st.get('inactive_file') || 0;
+      const cache = st.get('file') || 0;
+      const anon = st.get('anon') || 0;
+      const used = Math.max(0, raw - inactiveFile);
+      return { used, limit: limit || os.totalmem(), raw, cache, anon, source: 'cgroup2' };
+    }
   } catch { }
   try { // cgroup v1
-    const used = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8'), 10);
+    const raw = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8'), 10);
     let limit = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8'), 10);
     if (!Number.isFinite(limit) || limit > os.totalmem() * 4) limit = 0; // "unlimited" sentinel
-    if (Number.isFinite(used)) return { used, limit: limit || os.totalmem(), source: 'cgroup1' };
+    if (Number.isFinite(raw)) {
+      const st = memStat('/sys/fs/cgroup/memory/memory.stat');
+      const inactiveFile = st.get('total_inactive_file') ?? st.get('inactive_file') ?? 0;
+      const cache = st.get('total_cache') ?? st.get('cache') ?? 0;
+      const anon = st.get('total_rss') ?? st.get('rss') ?? 0;
+      const used = Math.max(0, raw - inactiveFile);
+      return { used, limit: limit || os.totalmem(), raw, cache, anon, source: 'cgroup1' };
+    }
   } catch { }
-  return { used: os.totalmem() - os.freemem(), limit: os.totalmem(), source: 'host' };
+  // Bare host: os.freemem() also ignores reclaimable cache — prefer
+  // MemAvailable, the kernel's own "can be handed out without swapping".
+  const total = os.totalmem();
+  const mi = memStat('/proc/meminfo'); // kB values
+  const avail = (mi.get('MemAvailable') || 0) * 1024;
+  const raw = total - os.freemem();
+  return { used: avail ? Math.max(0, total - avail) : raw, limit: total, raw, source: 'host' };
 }
 
 function topProcs(n = 8) {

@@ -1227,8 +1227,21 @@ function maybePoolAutoSwitchForPool(poolId) {
     // is down/upgrading, and an unobserved rejection is a process-level
     // unhandledRejection on every eval tick (the deviceBounded ② rule)
     pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
-    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts() });
+    const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts(), explain: true });
     if (!d) return;
+    if (!d.to) {
+      // A pool sitting on a DEAD account with nowhere to go used to be
+      // completely silent — the user found out by hitting a limit mid-turn
+      // (real incident 2026-08-11). Say it, once per hour per pool: this is
+      // the state where only the user can act (add a member, wait for a
+      // reset, switch that conversation off the pool).
+      if (d.reason === 'stuck') {
+        const stuckKey = `pool-stuck-${poolId}-${Math.floor(now / 3600000)}`;
+        const alt = d.bestRemaining != null ? ` — the best other member is at ${Math.round(d.bestRemaining)}%` : '';
+        serverNotice(stuckKey, `Pool "${a.name}" is stuck: every member is out of quota${alt}. Conversations on it will hit a limit until a window resets or you add a member.`, { level: 'warn' });
+      }
+      return;
+    }
     // DWELL belt (2.266.1, real oscillation report): every switch cold-starts
     // the running sessions' prompt caches on BOTH accounts — expensive. After
     // any switch, further switches wait 3min unless the current target is

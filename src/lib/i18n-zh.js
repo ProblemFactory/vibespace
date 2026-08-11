@@ -903,6 +903,7 @@ export default {
   "Top processes (by memory)": "Top 进程（按内存）",
   "Top consumer:": "最大占用：",
   "Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.": "接近容器内存上限——内核可能 OOM 击杀整个实例（所有会话一起死）。请停掉下方占用最高的进程。",
+  "cgroup total {raw} incl. {cache} file cache (reclaimable, not counted above)": "cgroup 总计 {raw}，其中 {cache} 是文件缓存（可回收，未计入上方）",
   "Orphaned dev servers show in Ports with a Kill button": "孤儿 dev server 在\"端口\"面板有 Kill 按钮",
   "Memory at {pct}% of the container limit — an OOM kill would end EVERY session.": "内存已达容器上限的 {pct}%——一旦 OOM 击杀，所有会话都会终结。",
   "· logged in on {host}": "· 已在 {host} 登录",
