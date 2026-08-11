@@ -40,6 +40,17 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (winBounds.gridBounds) { winInfo.gridBounds = { ...winBounds.gridBounds }; this.wm._applyGridBounds(winInfo); }
       if (winBounds.preSnapBounds) winInfo.preSnapBounds = { ...winBounds.preSnapBounds };
       if (winBounds.isMaximized) this.wm.toggleMaximize(winInfo.id);
+      // Keep the resumed conversation on its ORIGINAL desktop (see
+      // _snapshotWinBounds). createWindow tagged it with the active desktop;
+      // move it back when the source lived elsewhere AND that desktop still
+      // exists (a since-deleted one just leaves the window active).
+      const dm = this.desktopManager;
+      const destDesktop = winBounds.desktopId;
+      const desktopExists = !!destDesktop && destDesktop !== '__stage__'
+        && (dm?._desktops || []).some((d) => d.id === destDesktop);
+      if (desktopExists && destDesktop !== winInfo._desktopId && dm?.moveWindowToDesktop) {
+        try { dm.moveWindowToDesktop(winInfo.id, destDesktop); } catch {}
+      }
     }
     // Correlation id: concurrent creates (e.g. group resume-all) must each
     // match their OWN 'created' reply — an untagged match binds the ChatView
@@ -688,6 +699,13 @@ export function installSessionLifecycle(App, ctx = {}) {
       gridBounds: win.gridBounds ? { ...win.gridBounds } : null,
       preSnapBounds: win.preSnapBounds ? { ...win.preSnapBounds } : null,
       isMaximized: !!win.isMaximized,
+      // The resumed conversation must stay on its HOME desktop — not the one
+      // that happens to be active. A single billing switch usually resumes a
+      // session on the visible desktop (so this is a no-op there), but the
+      // pool cold-restart kills+resumes sessions across EVERY desktop at once
+      // while one is active: without this every one of them piled onto the
+      // active desktop and flattened the whole layout (a fleet user, inc-mso43urh).
+      desktopId: win._desktopId || null,
     };
   },
 

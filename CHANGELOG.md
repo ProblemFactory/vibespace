@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.295.0
+
+**Pool cold-switch no longer collapses your whole layout onto one desktop** (a fleet user, inc-mso43urh — a pool target switch pulled every session out of every desktop and piled them onto the active one).
+
+A cold pool switch (and cold auto-switch) kill+resumes each affected conversation to re-bill it on the new account. The resume carried the window's geometry but NOT its home desktop — `_snapshotWinBounds` dropped `_desktopId`, so every resumed window landed on whatever desktop was active. A single billing switch was fine (you're looking at that session's desktop), but the pool restart fires against sessions on EVERY desktop at once while one is active, so all of them flattened onto it.
+
+`_snapshotWinBounds` now captures the source window's `desktopId`, and the resume moves the new window back to it — guarded on the desktop still existing (a since-deleted one leaves the window active rather than stranding it) and never onto the Stage. A single switch on the visible desktop is unchanged (home == active, no move). Test: scripts/test-resume-desktop.mjs (13 asserts incl. a simulated multi-desktop pile that must spread back, not collapse).
+
+
 ## 2.294.0
 
 **Remote messages now show the ACCOUNT they billed to, not just the machine** (owner report from a live agentic-search conversation: the message-meta popup could only say "AIDev's machine login").
