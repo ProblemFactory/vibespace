@@ -382,6 +382,11 @@ const SETTINGS_SCHEMA = {
     description: t('The https/http URL a remote machine uses to reach THIS VibeSpace — needed to mount this instance\'s storage on a remote host ("互挂云盘" reverse direction). Example: https://vibe.example.com or http://100.x.x.x:3456 (Tailscale). Leave blank to use the cluster-injected address (shown as the placeholder when present) or auto-detect from the request.'),
     category: t('Session'), liveApply: true,
   },
+  'agentd.autoGraduate': {
+    type: 'boolean', default: true, category: 'Integration',
+    label: t('Move machines to a ws link automatically'),
+    description: t('When an SSH machine\u2019s agent is reachable, install it as a service so it dials back over WebSocket \u2014 fewer per-command SSH spawns and a link that notices breakage. Only runs when a public URL is set above; SSH always stays as the rescue channel.'),
+  },
   'agents.injectPreamble': {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.311.0
+
+### Changed
+- **SSH machines move themselves to a ws link.** Graduation has existed since 2.248.0 but was button-only, so in practice every machine stayed on ssh forever — a per-op child spawn per command, banner hangs on lossy paths, and a ControlMaster whose ESTABLISHED flow survives network changes that every NEW connection fails. Once the daemon answers over ssh, the machine is now installed as a service and dials back over WebSocket in the background. Deliberately conservative: only with an operator-declared public URL (never self-publishes this instance to the relay), the machine is still asked whether it can reach that URL before anything is installed, one attempt per machine per 6h, and any failure is reported and leaves it on ssh. Setting `agentd.autoGraduate` (default on) plus a per-machine opt-out; ssh remains the bootstrap and rescue channel forever.
+
 ## 2.310.0
 
 ### Changed

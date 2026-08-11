@@ -920,6 +920,11 @@ class HostManager {
     await dm.connect();
     this._devices.set(id, dm);
     this._armDirtyPush(id, dm);
+    // We are now talking to this machine's daemon — but over an ssh child
+    // (per-op spawns, banner hangs, ControlMaster staleness). ws is strictly
+    // better once it exists, so tell the server it may graduate this machine
+    // in the background. ssh stays the bootstrap + rescue channel forever.
+    try { this.onSshConnected?.(id); } catch { }
     return dm;
   }
 
