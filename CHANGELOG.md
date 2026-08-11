@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.304.0
+
+**Root fix for the session-identity crossing: the socket name is now DERIVED from the session id instead of minted independently.** 2.302.0 made both expressions read one captured counter — that patched the day's symptom. The actual defect is older and structural: **a session had TWO identities built by two separate expressions** (`sess-<seq>-<now>` and `cw-<seq>-<now>`), while the session-meta file is keyed by one and everything else by the other. Any divergence — a re-read counter, a millisecond of drift, a future edit to one line and not the other — silently maps two sessions onto one metadata file.
+
+`sockName = 'cw-' + id.slice('sess-'.length)` makes divergence unrepresentable: the meta filename is a pure function of the session id, so a collision would require duplicate session ids, which the counter+timestamp already excludes. The test now pins DERIVATION structurally (a `sockName` expression containing `Date.now()` fails the suite) and models a same-millisecond burst, which the two-expression shape could never survive.
+
+
 ## 2.303.0
 
 **The counter race's consequence, traced end to end in production: sessions carrying ANOTHER conversation's id.** A pool cold-switch restarted ~22 chat sessions in one burst; every one was created with the correct name and the correct resume id (`"D-Triage" resume=c2c951eb`, `"Majordomo" resume=2dfb67bb`, …). Because `sockName` re-read the session counter after the awaits (fixed in 2.302.0), the burst produced colliding socket names — **only 15 session-meta files survived 22 creates, and every survivor held one session's identity merged with another session's conversation id**: the record for `D-Workforce` carried `D-Triage`'s conversation, `Sega-ToB-signing` carried `GPU-insurace`'s, and so on. The sidebar then showed those conversations' names, which is what the report looked like from outside.
