@@ -167,13 +167,14 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
       yield { ts: T0 + 1, acct: 'sub-a', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 };
       yield { ts: T0 + 2, acct: '__global__', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 };
       yield { ts: T0 + 3, acct: 'sub-b', model: 'claude-opus-4-8', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 };
-      yield { ts: T0 + 4, acct: 'sub-a', model: 'claude-fable-5', host: 'h1', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 };
+      yield { ts: T0 + 4, acct: 'sub-a', model: 'claude-fable-5', host: 'h1', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 }; // RESOLVED remote — counts since 2.297.0
+      yield { ts: T0 + 5, acct: 'host-h1', atype: 'host', model: 'x', host: 'h1', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 }; // unresolved host bucket — never counts
     },
     _cost: () => 10,
   };
   const m = costBetweenMulti(fakeHistory, ['sub-a', '__global__'], T0, T0 + 10);
-  ck('multi: sums the identity ids, skips others + host events', m.total === 20 && m.requests === 2);
-  ck('single costBetween unchanged (delegates)', costBetween(fakeHistory, 'sub-a', T0, T0 + 10).total === 10);
+  ck('multi: sums identity ids + RESOLVED remote spend, skips others + the host bucket', m.total === 30 && m.requests === 3);
+  ck('single costBetween unchanged (delegates)', costBetween(fakeHistory, 'sub-a', T0, T0 + 10).total === 20); // sub-a local + sub-a resolved-remote
 }
 
 // ── UsageEstimator class: anchors dir + memo + invalidate + rates.json ───────

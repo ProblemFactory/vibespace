@@ -17,6 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { runUsageWalk } = require('./usage-walker.js');
 
 // API-equivalent prices, USD per MILLION tokens. Subscription sessions don't
 // actually cost this — it's shown as a reference ("what this would cost on the
@@ -250,169 +251,47 @@ class UsageHistory {
         (shardBuffers[shard] = shardBuffers[shard] || []).push(JSON.stringify(ev));
         added++;
       };
-      const cursorFor = (fp, size) => {
-        const cur = this._cursors[fp] || { offset: 0, lastRid: null };
-        if (size < cur.offset) { cur.offset = 0; cur.lastRid = null; } // rotated/truncated → re-read
-        return cur;
-      };
-
-      // ── Claude transcripts (~/.claude/projects/<proj>/<sid>.jsonl) ──
-      let projDirs = [];
-      try { projDirs = fs.readdirSync(this.projectsDir); } catch {}
-      for (const pd of projDirs) {
-        const pdAbs = path.join(this.projectsDir, pd);
-        let entries = [];
-        try { entries = fs.readdirSync(pdAbs); } catch { continue; }
-        // Per-file scan bodies collected first, run below — top-level session
-        // transcripts PLUS subagent/workflow agent transcripts (2.265.0):
-        // <sid>/subagents/agent-*.jsonl and <sid>/subagents/workflows/wf_*/
-        // agent-*.jsonl. WORKFLOW agents' API usage exists ONLY in those files
-        // (the parent stream carries just the tool_use + async ack) — the
-        // "top-level only" scan under-counted every workflow run (~$205 for
-        // one 15-agent review run, measured; the dead-reckoning calibration
-        // caught it as a 3-4× hot learned 5h rate). Events attribute to the
-        // PARENT session id, so account/pool by-time attribution follows the
-        // parent (workflow agents bill the parent's account). Normal Agent-
-        // tool sidechains also live in the parent jsonl — the read-time
-        // requestId dedup absorbs the overlap.
-        const claudeFiles = []; // {fp, sid}
-        for (const fn of entries) {
-          if (fn.endsWith('.jsonl')) { claudeFiles.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, '') }); continue; }
-          if (!/^[0-9a-f-]{36}$/i.test(fn)) continue; // session dirs only
-          const subDir = path.join(pdAbs, fn, 'subagents');
-          let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
-          for (const sf of subs) {
-            if (sf.endsWith('.jsonl')) { claudeFiles.push({ fp: path.join(subDir, sf), sid: fn }); continue; }
-            if (sf !== 'workflows') continue;
-            let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
-            for (const wf of wfs) {
-              let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
-              for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) claudeFiles.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn });
-            }
-          }
-        }
-        for (const { fp, sid } of claudeFiles) {
-          let st; try { st = fs.statSync(fp); } catch { continue; }
-          if (!st.isFile()) continue;
-          const cur = cursorFor(fp, st.size);
-          if (st.size === cur.offset) continue; // unchanged
-          const minfo = meta[sid] || {};
-          filesTouched++;
-          this._scanFileLines(fp, cur, st.size, (line) => {
-            if (line.indexOf('"usage"') < 0) return;
-            let r; try { r = JSON.parse(line); } catch { return; }
-            if (r.type !== 'assistant') return;
-            const msg = r.message; if (!msg || typeof msg !== 'object') return;
-            const u = msg.usage; if (!u || typeof u !== 'object') return;
-            const rid = r.requestId || r.message?.id || r.uuid;
-            if (!rid) return;
-            if (rid === cur.lastRid) return; // contiguous duplicate of the same request
-            cur.lastRid = rid;
-            const cc = u.cache_creation || {};
-            const ts = Date.parse(r.timestamp) || Date.now();
-            // WHICH account: per-request by time from the attribution log, else
-            // the session's current meta account. atype = its billing TYPE, baked
-            // now so subscription vs API never mix (and it survives account
-            // deletion). name = a human label frozen at scan time.
-            const acct = this._acctAt(sid, ts, attrib, minfo.acct);
-            const pool = this._poolAt(sid, ts, attrib);
-            const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
-            push({
-              rid, ts, sid,
-              // message.id ALONGSIDE the requestId (2.267.3, the est-2×
-              // incident): STDOUT stream records carry NO requestId, so the
-              // live odometer keys its ring on msg.id — without this join
-              // field the ledger's rid set could never exclude a streamed
-              // entry once scanned, and every request counted TWICE while a
-              // conversation was active (user saw est 27% vs actual 9%).
-              mid: (msg.id && msg.id !== rid) ? msg.id : undefined,
-              be: minfo.backend || 'claude',
-              model: msg.model || null,
-              acct: acct || null,
-              pool: pool || undefined, // billed THROUGH this pool (acct = its real target)
-              atype: ainfo ? ainfo.type : (acct ? 'unknown' : 'global'),
-              aname: ainfo ? (ainfo.name || null) : null,
-              mode: minfo.mode || null,
-              host: minfo.host || null,
-              cwd: r.cwd || null,
-              i: u.input_tokens || 0,
-              cw5: cc.ephemeral_5m_input_tokens || 0,
-              cw1: cc.ephemeral_1h_input_tokens || 0,
-              cr: u.cache_read_input_tokens || 0,
-              o: u.output_tokens || 0,
-              tier: u.service_tier || null,
-            });
-          });
-          this._cursors[fp] = cur;
-        }
-      }
-
-      // ── Codex rollouts (~/.codex/sessions/YYYY/MM/DD/rollout-*-<threadId>.jsonl) ──
-      // Per-request usage rides `event_msg`/`token_count` records:
-      // payload.info.last_token_usage = the LAST model request's tokens
-      // ({input_tokens ⊇ cached_input_tokens, output_tokens ⊇ reasoning}), while
-      // info === null marks rate-limit-only heartbeats (skip). There is no
-      // requestId — the synthetic rid is the CUMULATIVE total (strictly
-      // monotonic per thread), so re-emits/replays dedup exactly like Claude's
-      // 2-3 identical records. model/cwd come from the preceding `turn_context`
-      // record and PERSIST IN THE CURSOR — an incremental scan may start
-      // mid-file, long after the last turn_context line.
-      let rollouts = [];
-      try { rollouts = fs.readdirSync(this.codexSessionsDir, { recursive: true }); } catch {}
-      for (const rel of rollouts) {
-        const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(String(rel));
-        if (!m) continue;
-        const fp = path.join(this.codexSessionsDir, String(rel));
-        let st; try { st = fs.statSync(fp); } catch { continue; }
-        if (!st.isFile()) continue;
-        const cur = cursorFor(fp, st.size);
-        if (st.size === cur.offset) continue;
-        const sid = m[1].toLowerCase();
-        const minfo = meta[sid] || {};
-        filesTouched++;
-        this._scanFileLines(fp, cur, st.size, (line) => {
-          if (line.indexOf('"turn_context"') >= 0) {
-            let r; try { r = JSON.parse(line); } catch { return; }
-            if (r.type === 'turn_context' && r.payload) {
-              if (r.payload.model) cur.model = r.payload.model;
-              if (r.payload.cwd) cur.cwd = r.payload.cwd;
-            }
-            return;
-          }
-          if (line.indexOf('"token_count"') < 0) return;
-          let r; try { r = JSON.parse(line); } catch { return; }
-          if (r.type !== 'event_msg' || r.payload?.type !== 'token_count') return;
-          const info = r.payload.info;
-          const last = info && info.last_token_usage;
-          if (!last || !(last.input_tokens || last.output_tokens)) return;
-          const ts = Date.parse(r.timestamp) || Date.now();
-          const cum = info.total_token_usage ? info.total_token_usage.total_tokens : null;
-          const rid = `cx:${sid}:${cum != null ? cum : cur.offset + '-' + ts}`;
-          if (rid === cur.lastRid) return;
-          cur.lastRid = rid;
-          const cached = last.cached_input_tokens || 0;
-          const acct = this._acctAt(sid, ts, attrib, minfo.acct);
-          const pool = this._poolAt(sid, ts, attrib);
+      // ── ONE WALK (2.297.0, the twin-killer): the local ledger walk IS
+      // src/usage-walker.js — the SAME module the device daemon runs for
+      // remote machines (`usage-scan` op) and the shipped scanner mirrors for
+      // checkout-less ssh hosts. Local invokes it IN-PROCESS with its own
+      // cursor store injected (CS principle 2: shared implementation, not
+      // mandatory socket transit). Enrichment (attribution / meta / pool /
+      // account type) happens HERE because only the orchestrator holds those
+      // maps — the walker stays a pure per-machine fact collector. Rotation
+      // reset, byte cursors, subagent/workflow coverage, codex rollouts and
+      // the rid/mid join fields are all the walker's single implementation
+      // now; scripts/test-usage-walk-parity.mjs pins it against the shipped
+      // scanner (the one remaining, documented copy).
+      const walk = runUsageWalk({
+        projectsDir: this.projectsDir,
+        codexSessionsDir: this.codexSessionsDir,
+        cursors: this._cursors,
+        onEvent: (ev) => {
+          const minfo = meta[ev.sid] || {};
+          const acct = this._acctAt(ev.sid, ev.ts, attrib, minfo.acct);
+          const pool = this._poolAt(ev.sid, ev.ts, attrib);
           const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
           push({
-            rid, ts, sid, be: 'codex',
-            model: cur.model || null,
+            rid: ev.rid,
+            mid: ev.mid, // message.id join field (2.267.3, the est-2× incident)
+            ts: ev.ts, sid: ev.sid,
+            be: ev.be === 'codex' ? 'codex' : (minfo.backend || 'claude'),
+            model: ev.model,
             acct: acct || null,
-            pool: pool || undefined,
+            pool: pool || undefined, // billed THROUGH this pool (acct = its real target)
             atype: ainfo ? ainfo.type : (acct ? 'unknown' : 'global'),
             aname: ainfo ? (ainfo.name || null) : null,
             mode: minfo.mode || null,
             host: minfo.host || null,
-            cwd: cur.cwd || null,
-            i: Math.max(0, (last.input_tokens || 0) - cached), // input INCLUDES cached → fresh = the difference
-            cw5: 0, cw1: 0, // rollouts don't report cache-write token counts
-            cr: cached,
-            o: last.output_tokens || 0, // includes reasoning tokens (billed as output)
-            tier: null,
+            cwd: ev.cwd,
+            i: ev.i, cw5: ev.cw5, cw1: ev.cw1, cr: ev.cr, o: ev.o,
+            tier: ev.tier,
           });
-        });
-        this._cursors[fp] = cur;
-      }
+        },
+      });
+      filesTouched = walk.filesTouched;
+      this._cursors = walk.cursors;
 
       for (const [shard, lines] of Object.entries(shardBuffers)) {
         if (lines.length) fs.appendFileSync(shard, lines.join('\n') + '\n');
@@ -488,24 +367,6 @@ class UsageHistory {
   // inflate). A chunk may end mid-UTF-8-sequence; everything up to the last
   // newline still decodes cleanly (continuation bytes can't be '\n'), and the
   // partial char is re-read from the byte-accurate offset next iteration.
-  _scanFileLines(fp, cur, size, onLine) {
-    const CHUNK = 32 * 1024 * 1024;
-    let fd; try { fd = fs.openSync(fp, 'r'); } catch { return; }
-    try {
-      while (cur.offset < size) {
-        const len = Math.min(CHUNK, size - cur.offset);
-        const buf = Buffer.allocUnsafe(len);
-        const read = fs.readSync(fd, buf, 0, len, cur.offset);
-        if (read <= 0) break;
-        const text = buf.toString('utf-8', 0, read);
-        const lastNl = text.lastIndexOf('\n');
-        if (lastNl < 0) break; // no complete line in this chunk (partial tail)
-        const chunk = text.slice(0, lastNl + 1);
-        for (const line of chunk.split('\n')) if (line) onLine(line);
-        cur.offset += Buffer.byteLength(chunk, 'utf-8');
-      }
-    } catch {} finally { try { fs.closeSync(fd); } catch {} }
-  }
 
   _tier(model) {
     // Data-driven: longest tier key that substring-matches the model id wins
@@ -548,7 +409,7 @@ class UsageHistory {
   // between a shard append and the cursor write). Without this, every Usage
   // window request re-read + re-parsed every shard (~seconds at 100k+ events).
   _loadEvents() {
-    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set(), mids: new Set() };
+    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set(), mids: new Set(), srcWm: new Map() };
     const c = this._evCache;
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
@@ -574,6 +435,12 @@ class UsageHistory {
         let ev; try { ev = JSON.parse(line); } catch { continue; }
         if (ev.rid) { if (c.rids.has(ev.rid)) continue; c.rids.add(ev.rid); }
         if (ev.mid) c.mids.add(ev.mid); // stream-side id space (live-odometer exclusion join)
+        // per-SOURCE watermark (offline-bias defense, 2.297.0): the newest
+        // event timestamp we hold from each machine — 'local' for this one.
+        // Free here (rides the incremental append walk); consumers ask
+        // sourceWatermarks() to detect an ACTIVE source that has gone dark.
+        const src = ev.host || 'local';
+        if ((ev.ts || 0) > (c.srcWm.get(src) || 0)) c.srcWm.set(src, ev.ts);
         c.events.push(ev);
       }
       c.consumed.set(fn, consumed + lastNl + 1);
@@ -584,6 +451,17 @@ class UsageHistory {
   // Pre-load the event cache (called once at boot so the first Usage window
   // open doesn't pay the full-ledger parse).
   warm() { try { this._loadEvents(); } catch {} }
+
+  /** Per-source (per-machine) newest-event-timestamp map: {local: ts, <hostId>: ts}.
+   *  The offline-bias defense reads this to tell "idle" from "dark": a source
+   *  with RECENT events whose link is down is actively-consuming-but-invisible
+   *  — the dangerous underestimate direction. */
+  sourceWatermarks() {
+    try { this._loadEvents(); } catch {}
+    const out = {};
+    for (const [k, v] of (this._evCache?.srcWm || new Map())) out[k] = v;
+    return out;
+  }
 
   // Which ledger event carries this requestId — the per-message meta popup's
   // "which account handled this?" (2.266.1, user request). Backwards search:

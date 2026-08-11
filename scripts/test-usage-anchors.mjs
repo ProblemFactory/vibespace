@@ -24,9 +24,12 @@ const last = ua.lastAnchor('email:a@b.c');
 ck('lastAnchor = newest, carries prevFetchedAt + costSince', last.fetchedAt===2000 && last.prevFetchedAt===1000 && last.costSince.total===1.5);
 ck('buckets serialized (Fable kept)', last.buckets.scopedWeekly[0].name==='Fable');
 // costBetween over a fake ledger
-const fakeUH = { _events: function*(){ yield {acct:'sub-1',ts:1500,model:'claude-fable-5',host:null}; yield {acct:'sub-1',ts:1600,model:'claude-opus-4-8',host:null}; yield {acct:'other',ts:1500,model:'claude-fable-5',host:null}; yield {acct:'sub-1',ts:1500,model:'x',host:'h1'}; }, _cost: ()=>2 };
+// host event WITH a resolved acct COUNTS since 2.297.0 (quota is per-account
+// GLOBAL — another machine's spend is still this account's spend); only the
+// unresolved host-bucket (atype:'host') stays out of the odometer.
+const fakeUH = { _events: function*(){ yield {acct:'sub-1',ts:1500,model:'claude-fable-5',host:null}; yield {acct:'sub-1',ts:1600,model:'claude-opus-4-8',host:null}; yield {acct:'other',ts:1500,model:'claude-fable-5',host:null}; yield {acct:'sub-1',ts:1500,model:'x',host:'h1'}; yield {acct:'host-h1',atype:'host',ts:1500,model:'x',host:'h1'}; }, _cost: ()=>2 };
 const cb = costBetween(fakeUH, 'sub-1', 1000, 2000);
-ck('costBetween: filters account + local-only, splits family', cb.total===4 && cb.byFamily.fable===2 && cb.byFamily.opus===2 && cb.requests===2);
+ck('costBetween: filters account, counts RESOLVED remote spend, excludes the host bucket', cb.total===6 && cb.byFamily.fable===2 && cb.byFamily.opus===2 && cb.byFamily.other===2 && cb.requests===3);
 // fabricated placeholder buckets (status 'unknown', the statusline hook's
 // defensive fallback) must never anchor — a u:0 fabrication paired with the
 // next real reading forged a du=+full pair (~6× rate inflation, verifier repro)

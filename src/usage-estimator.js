@@ -105,6 +105,12 @@ function extractPairs(lines, opts = {}) {
     if (distinctIds.size > 1 && !Array.isArray(l.accountIds)) continue; // legacy under-counted pair
     const base = byFetched.get(l.prevFetchedAt);
     if (!base || !base.buckets || !l.buckets) continue;
+    // OFFLINE-GAP exclusion (2.297.0, design §Cross-device): either side
+    // recorded while a tainted source was ACTIVE-DARK ⇒ the pair's Δu is real
+    // but its cost is missing that machine's spend — learning from it teaches
+    // a falsely HOT rate (the exact multi-device bias this stack exists to
+    // absorb, now excluded instead of averaged in).
+    if ((Array.isArray(l.dark) && l.dark.length) || (Array.isArray(base.dark) && base.dark.length)) continue;
     const spanSec = (l.fetchedAt - base.fetchedAt) / 1000;
     let liveCost = null; // lazily recomputed once per pair when costFn given
     const pairBucket = (key, b0, b1) => {
