@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.309.0
+
+### Fixed
+- **Remote "Recent" stayed stale after a terminate.** Opening a chat on a remote machine and terminating it left the card showing as live until a manual ⟳. The server dropped its own discovery cache and told nobody, while the client's per-host list has no TTL by design (an ssh scan is expensive) — so the staleness was invisible and permanent. `hosts.invalidateDiscovery` now notifies, and clients re-scan the host they are displaying (other hosts just drop their cached entry — no fan-out of ssh scans for zones nobody is looking at). The notification hangs off the single invalidation entry point rather than each of the ~8 call sites: the bug existed precisely because the `/api/kill-pid` path had a hand-wired refresh and the ws terminate path did not.
+
 ## 2.308.0
 
 ### Fixed

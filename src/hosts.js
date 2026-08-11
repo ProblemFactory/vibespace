@@ -77,7 +77,18 @@ class HostManager {
   /** Drop the in-memory discovery cache for a host so the NEXT sidebar poll
    *  re-probes immediately — called after remote create/kill/exit so the list
    *  doesn't stay wrong for the cache TTL (state-sync pass, 2.124.0). */
-  invalidateDiscovery(id) { this._discoveryCache.delete(id); }
+  invalidateDiscovery(id) {
+    this._discoveryCache.delete(id);
+    // …and TELL THE CLIENTS (2.309.0, real report: terminate a remote chat and
+    // the Recent zone kept showing it live until a manual ⟳). The client's
+    // per-host list has no TTL — it is loaded on demand and kept — so dropping
+    // only the SERVER cache made the staleness invisible-but-permanent. The
+    // notification hangs off the one invalidation entry point rather than each
+    // of the ~8 call sites, because "someone remembered one site" is exactly
+    // how this bug existed (the /api/kill-pid path had a hand-wired refresh;
+    // the ws terminate path did not).
+    try { this.onDiscoveryDirty?.(id); } catch { }
+  }
 
   /** Drop the cached DeviceManager for a host (called when a dial device
    *  re-dials with a fresh stream) so hosts.device() rebuilds it. */
@@ -624,7 +635,7 @@ class HostManager {
     if (!out) out = String(await this._ssh(h, cmd));
     if (out.includes('VS_NOTAGENT')) throw new Error('that PID is not a claude/codex process on the host');
     if (!out.includes('VS_OK') && !out.includes('VS_GONE')) throw new Error('kill failed: ' + out.trim().slice(0, 120));
-    this._discoveryCache.delete(id); // the card should flip on the next poll
+    this.invalidateDiscovery(id); // the card should flip on the next poll
     return { success: true, gone: out.includes('VS_GONE') };
   }
 

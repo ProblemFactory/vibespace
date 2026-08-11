@@ -153,9 +153,29 @@ export function installSidebarWorkbench(Sidebar) {
         .finally(() => { this._hostsDataLoading = false; });
     },
 
+    // The server tells us when a host's discovery went stale (2.309.0) —
+    // remote create/terminate/external-kill/device-push. Our per-host list has
+    // NO TTL by design (an ssh scan is expensive), so without this signal a
+    // terminated remote session stayed "live" in Recent until the user hit ⟳.
+    // A DISPLAYED host re-scans immediately; any other host just drops its
+    // entry so the next render that needs it fetches fresh — never a fan-out
+    // of ssh scans for zones nobody is looking at.
+    _initRemoteDirtySync() {
+      if (this._remoteDirtyInit) return;
+      this._remoteDirtyInit = true;
+      this.app.ws.onGlobal((msg) => {
+        if (msg?.type !== 'remote-discovery-dirty' || !msg.hostId) return;
+        const id = msg.hostId;
+        if (!this._wbRemoteHosts?.has(id)) return;
+        if (this._wbRecentHost === id || this._wbHistoryHost === id) this._loadRemoteHost(id, { fresh: true });
+        else this._wbRemoteHosts.delete(id);
+      });
+    },
+
     // Per-host discovery cache — Recent and History can point at DIFFERENT
     // hosts simultaneously; a shared host costs one fetch.
     _loadRemoteHost(hostId, { fresh = false } = {}) {
+      this._initRemoteDirtySync();
       const map = this._wbRemoteHosts = this._wbRemoteHosts || new Map();
       const cur = map.get(hostId);
       if (!fresh && cur && (cur.loading || cur.sessions)) return;

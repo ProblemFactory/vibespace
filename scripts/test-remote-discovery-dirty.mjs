@@ -1,0 +1,54 @@
+#!/usr/bin/env node
+/**
+ * The remote "Recent" zone kept showing a terminated session as live until the
+ * user pressed ⟳: the server dropped ITS discovery cache and told nobody, and
+ * the client's per-host list has no TTL. This pins the notification to the one
+ * invalidation entry point — the bug existed precisely because one call site
+ * (/api/kill-pid) had a hand-wired refresh and the ws terminate path did not.
+ */
+import { readFileSync } from 'fs';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { HostManager } = require('../src/hosts.js');
+
+let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+
+const h = new HostManager({ dataDir: '/tmp/vs-disc-dirty-' + process.pid });
+const seen = [];
+h.onDiscoveryDirty = (id) => seen.push(id);
+
+h._discoveryCache.set('h1', { at: Date.now(), sessions: [{ id: 'a' }] });
+h.invalidateDiscovery('h1');
+ok(!h._discoveryCache.has('h1'), 'invalidateDiscovery drops the cached list');
+ok(seen.length === 1 && seen[0] === 'h1', 'invalidateDiscovery notifies with the host id');
+
+// no hook installed must never throw (server may not have wired it yet at boot)
+h.onDiscoveryDirty = null;
+let threw = false;
+try { h.invalidateDiscovery('h2'); } catch { threw = true; }
+ok(!threw, 'a missing hook is harmless');
+h.onDiscoveryDirty = () => { throw new Error('boom'); };
+threw = false;
+try { h.invalidateDiscovery('h3'); } catch { threw = true; }
+ok(!threw, 'a throwing consumer cannot break invalidation');
+
+// DRIFT GUARD: every other site must route through invalidateDiscovery, or the
+// next feature silently reintroduces "server knows, client does not".
+const src = readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf-8');
+const raw = src.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => l.includes('_discoveryCache.delete'));
+// allowed: inside invalidateDiscovery itself, and host REMOVAL (the record is
+// gone; a dirty signal for a host that no longer exists is meaningless —
+// hosts-updated covers that case)
+ok(raw.length <= 2, `raw _discoveryCache.delete confined to invalidate+remove (found ${raw.length}: lines ${raw.map(([n]) => n).join(',')})`);
+
+// The client must react to the broadcast — and must NOT fan out ssh scans for
+// hosts nobody is displaying.
+const wb = readFileSync(new URL('../src/lib/sidebar-workbench.js', import.meta.url), 'utf-8');
+ok(/remote-discovery-dirty/.test(wb), 'client listens for remote-discovery-dirty');
+ok(/_wbRecentHost === id \|\| this\._wbHistoryHost === id/.test(wb), 'displayed host re-scans, others just drop their entry');
+const srv = readFileSync(new URL('../server.js', import.meta.url), 'utf-8');
+ok(/onDiscoveryDirty[\s\S]{0,400}remote-discovery-dirty/.test(srv), 'server broadcasts the dirty signal');
+
+console.log(fail ? `\n${fail} FAILED` : '\nALL PASS');
+process.exit(fail ? 1 : 0);
