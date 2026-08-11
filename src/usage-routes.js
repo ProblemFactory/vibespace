@@ -168,6 +168,26 @@ function _parseUsage(u) {
   };
 }
 
+// Consume RAW vendor reply bodies the DEVICE op returned (quota-refresh runs
+// the human-gated fetch ON the machine holding the login — design §Quota
+// refresh origin; the parse stays here, one implementation for both origins).
+function _consumeDeviceQuota(r) {
+  if (!r || !r.usage) return null;
+  if (r.usage.status === 429) { _rateLimitBackoffUntil = Date.now() + 300000; return null; }
+  if (r.usage.status !== 200) return null;
+  let u = null; try { u = _parseUsage(JSON.parse(r.usage.body)); } catch { return null; }
+  if (r.roles && r.roles.status === 200) {
+    try {
+      const j = JSON.parse(r.roles.body);
+      if (j.organization_uuid) {
+        const m = /^(\S+@\S+)'s Organization$/.exec(j.organization_name || '');
+        Object.assign(u, { orgUuid: j.organization_uuid, orgName: j.organization_name || '', ...(m ? { orgEmail: m[1] } : {}) });
+      }
+    } catch { }
+  }
+  return u;
+}
+
 // cb(usageObj) on a 200; cb(null) on any failure (caller keeps last-known).
 function _fetchOAuthUsage(token, cb) {
   cb = cb || ((u) => { if (u) { _rateLimitCache = u; writeUsageCache(); } });
@@ -459,7 +479,29 @@ app.post('/api/usage/refresh', async (req, res) => {
       // Throttle is stamped only AFTER a probe actually reached the host
       // (2.271.0 T2-12) — stamping first meant an immediate retry after an
       // unreachable-host failure answered {throttled:true} for 60s.
-      hosts.readRemoteSubOAuth(hid, aid).then((token) => {
+      // DEVICE-EXECUTED refresh first (2.298.0, §Quota refresh origin): the
+      // token is used FROM THE MACHINE that holds it — the server never sees
+      // it and the token-from-a-foreign-IP signal is gone. Old daemons /
+      // failures fall through to the legacy token-peek path unchanged.
+      const deviceLeg = async () => {
+        const dm = await hosts.device(hid);
+        const r = await dm.quotaRefresh({ subDir: aid, humanGated: true });
+        const u = _consumeDeviceQuota(r);
+        if (!u) throw new Error('device refresh returned no usable reading');
+        return u;
+      };
+      deviceLeg().then((u) => {
+        _onDemandUsageAt[tkey] = Date.now();
+        u.source = 'on-demand';
+        u.scopedFetchedAt = Date.now();
+        _hostAcctUsage[hid + ':' + aid] = { ...u, name: acctMeta2.name, email: acctMeta2.email };
+        try {
+          fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+          const f = path.join(USAGE_CACHE_DIR, 'host-' + hid.replace(/[^\w-]/g, '_') + '-' + aid + '.json');
+          fs.writeFileSync(f + '.tmp', JSON.stringify(_hostAcctUsage[hid + ':' + aid])); fs.renameSync(f + '.tmp', f);
+        } catch {}
+        res.json({ success: true, origin: 'device' });
+      }).catch(() => hosts.readRemoteSubOAuth(hid, aid).then((token) => {
         _onDemandUsageAt[tkey] = Date.now();
         if (!token) return res.json({ error: 'no currently-valid login for this account on the host — run a session on it there first' });
         _fetchOAuthUsage(token, (u) => {
@@ -479,12 +521,30 @@ app.post('/api/usage/refresh', async (req, res) => {
         });
       }).catch((e) => res.json({ error: e?.code === 'host-unreachable'
         ? `${hMeta2?.name || hid} isn’t responding — couldn’t check its login. Retry when it’s back.`
-        : String(e.message || e).slice(0, 160) }));
+        : String(e.message || e).slice(0, 160) })));
       return;
     }
     if (Date.now() - (_onDemandUsageAt['host:' + hid] || 0) < 60000) return res.json({ throttled: true });
     let hMeta; try { hMeta = hosts.get(hid); } catch { return res.status(404).json({ error: 'unknown host' }); }
-    hosts.readRemoteOAuth(hid).then((token) => {
+    const deviceLegG = async () => {
+      const dm = await hosts.device(hid);
+      const r = await dm.quotaRefresh({ humanGated: true });
+      const u = _consumeDeviceQuota(r);
+      if (!u) throw new Error('device refresh returned no usable reading');
+      return u;
+    };
+    deviceLegG().then((u) => {
+      _onDemandUsageAt['host:' + hid] = Date.now();
+      u.source = 'on-demand-remote';
+      u.scopedFetchedAt = Date.now();
+      _hostUsage[hid] = { ...u, name: hMeta.name };
+      try {
+        fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+        const f = path.join(USAGE_CACHE_DIR, 'host-' + hid.replace(/[^\w-]/g, '_') + '.json');
+        fs.writeFileSync(f + '.tmp', JSON.stringify(_hostUsage[hid])); fs.renameSync(f + '.tmp', f);
+      } catch {}
+      res.json({ success: true, origin: 'device' });
+    }).catch(() => hosts.readRemoteOAuth(hid).then((token) => {
       _onDemandUsageAt['host:' + hid] = Date.now(); // stamp only after the probe reached the host
       if (!token) return res.json({ error: 'no currently-valid login token on the host — log in / run claude there first' });
       _fetchOAuthUsage(token, (u) => {
@@ -504,7 +564,7 @@ app.post('/api/usage/refresh', async (req, res) => {
       });
     }).catch((e) => res.json({ error: e?.code === 'host-unreachable'
       ? `${hMeta?.name || hid} isn’t responding — couldn’t check its login. Retry when it’s back.`
-      : String(e.message || e).slice(0, 160) }));
+      : String(e.message || e).slice(0, 160) })));
     return;
   }
   const key = String(req.body?.account || '__global__');

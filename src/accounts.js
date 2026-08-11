@@ -808,13 +808,10 @@ class AccountManager {
     const target = this.get(subId);
     if (!target || this._acctType(target) !== 'subscription' || this._acctBackend(target) !== 'claude') throw new Error('not a Claude subscription: ' + subId);
     if (!this.readSubCreds(subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
-    const link = this.subDir(id);
-    // Refuse to clobber a REAL directory — that would be someone's creds.
-    try { const st = fs.lstatSync(link); if (!st.isSymbolicLink()) throw new Error('pool path is a real directory, refusing to replace: ' + link); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    const tmp = link + '.swap-' + crypto.randomBytes(4).toString('hex');
-    fs.symlinkSync(this.subDir(subId), tmp);
-    fs.renameSync(tmp, link);
-    try { const now = Date.now() / 1000; fs.utimesSync(this.subCredsPath(subId), now, now); } catch { }
+    // ONE material implementation (src/account-material.js, 2.298.0): the
+    // same primitive the daemon's sealed-orders reflex executes — data/subs
+    // is device #0's account store, and the mechanical act is device-tier.
+    require('./account-material.js').repointPoolSymlink(this.subDir(id), this.subDir(subId), this.subCredsPath(subId));
     this._notify();
     return { id, current: subId, name: target.name };
   }
