@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.322.0
+
+### Fixed / Corrected
+- **inc-msp3klen diagnosis CORRECTED — the freeze theory is retracted** (the user confirms the tab was foreground throughout; 证伪归档). Telemetry then cleared two more suspects: `srv-normalizer-msgs` jumped +3402 in the 12:54→12:59 bucket and went flat after — the server parsed and broadcast the reply ON TIME at 12:57:55, so the daemon pty relay and the mux credit flow are innocent too. What remains proven: a complete reply crossed the last mile (server ws → browser onmessage, same connection, heartbeat green both directions) 14.5 minutes late, flushing in an 11ms burst at the moment the user interacted. The remaining candidate seams (a lost `session.clients` registration; a wedged ws send queue with RFC6455 control frames interleaving past it) cannot be distinguished from this capture.
+- **Delivery-stall WATCHDOG (self-heal + fingerprint)**: if a chat view believes the model is responding but NOTHING for its session has arrived in 120s (long tool runs emit `tool_progress` heartbeats, so true 120s silence is abnormal), it forces a re-attach — idempotent; the server replies with current history and streaming state, which repairs a lost registration AND re-syncs a wedged view alike. Caps the whole failure class at ~2 minutes instead of "until the user types", and each firing records `chat-stall-reattach` with the silence length — the instrument that convicts the real seam on the next occurrence. At most once per 5 minutes per view; read-only views exempt.
+
 ## 2.321.0
 
 ### Added
