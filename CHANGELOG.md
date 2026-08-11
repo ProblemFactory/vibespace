@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.303.0
+
+**The counter race's consequence, traced end to end in production: sessions carrying ANOTHER conversation's id.** A pool cold-switch restarted ~22 chat sessions in one burst; every one was created with the correct name and the correct resume id (`"D-Triage" resume=c2c951eb`, `"Majordomo" resume=2dfb67bb`, …). Because `sockName` re-read the session counter after the awaits (fixed in 2.302.0), the burst produced colliding socket names — **only 15 session-meta files survived 22 creates, and every survivor held one session's identity merged with another session's conversation id**: the record for `D-Workforce` carried `D-Triage`'s conversation, `Sega-ToB-signing` carried `GPU-insurace`'s, and so on. The sidebar then showed those conversations' names, which is what the report looked like from outside.
+
+This is not cosmetic: a session whose meta names another conversation would RESUME that conversation on the next restart — and those conversations are live elsewhere, i.e. the double-writer hazard.
+
+- `writeSessionMeta` now detects an owner conflict (a meta file already owned by a different webui session) and logs it loudly with a metric — the collision can never again be silent.
+- The id-capture merge refuses to INHERIT a foreign meta: spreading a colliding record grafted another session's name/cwd/account onto this one, which is what turned a socket-name collision into a full identity crossing. It also writes `webuiSessionId` explicitly so ownership is always recorded.
+
+
 ## 2.302.0
 
 **Session id / socket-name counter race (found in production data on a fleet instance, 7 of 15 live sessions affected).** `id` incremented the session counter, then `sockName` RE-READ that counter about a hundred lines and several `await`s later (cwd preflight, resume host inference, keeper probe). A burst of concurrent creates — exactly what a multi-agent orchestrator produces — therefore had every session read the counter's LATEST value: four sessions with ids `sess-21/22/31/34` all took socket name `cw-36`, separated only by the `Date.now()` millisecond. **The measured gap between them was 1 ms.** Two landing in the SAME millisecond share a socket path AND a session-meta filename, so one session's metadata — name, claudeSessionId, billing account, task id — silently overwrites the other's.

@@ -2317,8 +2317,28 @@ function readSessionMeta(sockName) {
 // restart-data-loss chain). sockNames are unique per spawn, so a deleted one
 // is never legitimately written again.
 const _metaTombstones = new Map(); // sockName → deletedAt
+// COLLISION DETECTOR (a fleet user's 2026-08-11 incident, root-fixed in 2.302.0 —
+// this is the belt): a session-meta file belongs to ONE webui session. If a
+// write would land on a file already owned by a DIFFERENT session, two
+// sessions are sharing a sockName and the identity fields are about to
+// cross — that is how a session ended up carrying ANOTHER conversation's
+// claudeSessionId (and then resuming the wrong, possibly-live conversation:
+// the double-writer hazard, not a cosmetic bug). Never silent.
+function sessionMetaOwnerConflict(sockName, meta) {
+  try {
+    const prev = readSessionMeta(sockName);
+    const a = prev && prev.webuiSessionId, b = meta && meta.webuiSessionId;
+    if (a && b && a !== b) {
+      console.error(`[session] META COLLISION on ${sockName}: owned by ${a}, written by ${b} — two sessions share a socket name (identity fields would cross)`);
+      try { global.__vsMetric?.('session-meta-collision', 1); } catch {}
+      return true;
+    }
+  } catch {}
+  return false;
+}
 function writeSessionMeta(sockName, meta) {
   if (_metaTombstones.has(sockName)) return;
+  sessionMetaOwnerConflict(sockName, meta);
   // SESSION-BRAIN step 1 (design §session-brain campaign): the buffer's OWNER
   // is EXPLICIT in every session record. Today the server writes
   // data/session-buffers/<id>.buf for every session including remote ones

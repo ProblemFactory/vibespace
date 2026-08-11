@@ -1666,8 +1666,16 @@ function registerWsHandler(wss, ctx) {
                     // MERGE into the existing meta (spread base) — a hardcoded
                     // field list here silently dropped later-added keys
                     // (agentToken, taskId, accountId) on id capture.
+                    // Spread the base ONLY when the on-disk meta is ours — a
+                    // foreign meta (sockName collision) would graft another
+                    // session's name/cwd/account onto this record, which is
+                    // exactly how the identity crossing was produced.
+                    const base = readSessionMeta(sockName) || {};
+                    const own = !base.webuiSessionId || base.webuiSessionId === id;
+                    if (!own) console.error(`[session] refusing to inherit foreign meta ${sockName} (owner ${base.webuiSessionId}, me ${id})`);
                     writeSessionMeta(sockName, {
-                      ...(readSessionMeta(sockName) || {}),
+                      ...(own ? base : {}),
+                      webuiSessionId: id,
                       backendSessionId: session.backendSessionId,
                       claudeSessionId: session.claudeSessionId,
                     });
