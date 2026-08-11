@@ -1259,13 +1259,25 @@ class ChatView {
 
     // Scroll to the target message (gap-loaded elements are outside the
     // window index space — exclude them so relIdx maps to the right element)
+    // Fold runs NOW, before the landing measurement — the 180ms-debounced
+    // observer pass otherwise collapses a tool-heavy window right AFTER the
+    // scroll landed, moving the target out from under the viewport (incident
+    // trace: land at 145px → yanked to 0 → spurious extendBottom on the
+    // collapsed heights → user reads ~20 messages before the one they chose).
+    this._updateRuns();
     const relIdx = targetIdx - start;
     const allMsgs = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
     if (relIdx >= 0 && relIdx < allMsgs.length) {
       const targetEl = allMsgs[relIdx];
       for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
       targetEl.style.contentVisibility = 'visible';
-      requestAnimationFrame(() => targetEl.scrollIntoView({ block: 'center' }));
+      // The INDEX-mode landing was a single-rAF scrollIntoView while the
+      // teleport path got the full content-visibility landing machinery —
+      // heights keep resolving for ~1s after a window rebuild, so one shot
+      // always drifts (the recurring "minimap jump lands wrong" class).
+      // _scrollElStable = 12-frame convergence + 180/400/750ms re-centers +
+      // the programmatic-scroll guard + _lastJumpTargetEl replay.
+      this._scrollElStable(targetEl);
     }
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
   }
