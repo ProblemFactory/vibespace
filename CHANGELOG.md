@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.313.0
+
+### Fixed
+- **The other silent branch of the stuck-pool incident.** 2.312.0 made a stuck pool speak, but only through the `stuck` return. When the candidate gate drops EVERY member the code returns through `no-members` instead — still completely silent, the same "the pool sits on a dead account and the user finds out by hitting a limit" failure down a different path. Every blocked outcome now reports (`stuck`, `no-members`, `no-settleable`), keyed per hour so a recurrence is reported again (`_sentNotices` is a per-boot permanent Set).
+- **"Every member is out of quota" was the wrong sentence.** Under the nested bucket model it is usually one *model's* weekly cap that is spent while the 7-day budget still has 40% left — and those point at completely different user actions (wait a week / pay, versus just run a different model). Buckets carry a reporting `label` now, and the notice names exactly what is spent and what is still available: *"spent: Fable 0% (still available: 5h 100%, 7d 39%)"*.
+
 ## 2.312.0
 
 ### Fixed

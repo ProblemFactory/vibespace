@@ -178,5 +178,28 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
     decidePoolSwitch({ currentId: 'b', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: opusDead, b: acct(0.99, 3 * D) })[id] ?? null, nowSec: NOW }) === null);
 }
 
+
+// ── every blocked outcome must be REPORTABLE, with the right buckets named ──
+// 2.313.0: only 'stuck' was surfaced; when the candidate gate drops EVERY
+// member the code returns through 'no-members' instead and said nothing —
+// the same incident class down a different branch.
+{
+  const spentCap = (u7) => ({ fiveHour: { utilization: 0, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + 3 * D },
+    scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: NOW + 3 * D }] });
+  const m = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const rc = (id) => ({ a: spentCap(0.6), b: spentCap(0.5), c: spentCap(0.55) })[id] ?? null;
+  const v = decidePoolSwitch({ currentId: 'a', members: m, readCache: rc, nowSec: NOW, explain: true });
+  ck('blocked: every member gated out returns no-members (was silent)', v?.to === null && v.reason === 'no-members');
+  ck('blocked: names the SPENT bucket, not "out of quota"', v.deadBuckets.join() === 'Fable 0%');
+  ck('blocked: …and names what is still available (the nested-model truth)',
+    v.liveBuckets.includes('7d 40%') && v.liveBuckets.some((x) => x.startsWith('5h ')));
+  ck('blocked: without explain the contract is still a bare null',
+    decidePoolSwitch({ currentId: 'a', members: m, readCache: rc, nowSec: NOW }) === null);
+  // a 5h-only block must report 5h, not the weekly caps
+  const burst = { fiveHour: { utilization: 0.99, resetsAt: NOW + 1800 }, sevenDay: { utilization: 0.2, resetsAt: NOW + 3 * D }, scopedWeekly: [] };
+  const v5 = decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: burst, b: burst })[id] ?? null, nowSec: NOW, explain: true });
+  ck('blocked: a 5h burst block names 5h and shows the healthy 7d', v5.deadBuckets.join() === '5h 1%' && v5.liveBuckets.join() === '7d 80%');
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
