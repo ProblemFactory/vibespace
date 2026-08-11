@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.321.0
+
+### Added
+- **Page-suspend wake detector** (inc-msp3klen: "对话一直卡在输出，直到我发下一条消息才突然回复"). Forensics: the transcript proves the reply was COMPLETE at 12:57:55 — then a 14.5-minute hole, and the ws ring shows the whole backlog arriving in an 11ms burst on the SAME connection at the exact moment the user interacted, with zero reconnect markers and all three client rings silent for the window. Best-fit diagnosis: the BROWSER froze the page (Page Lifecycle / energy saver) — ws frames queue in the frozen renderer while the browser's network process keeps auto-answering the server's heartbeat pings, so the server correctly sees a live transport and never evicts. The page cannot prevent the freeze; it now DETECTS the wake (a 5s timer that should never gap — >45s between ticks = we were suspended), reports the gap to telemetry (`page-suspend-wake`), belt-resyncs the versioned stores, and shows an honest labelled toast ("Browser suspended this page for Ns — caught up now") instead of leaving a mystery stall. The hypothesis is deliberately INSTRUMENTED rather than declared: if a future stall recurs WITHOUT the wake event, the freeze theory is refuted by its own instrument and the investigation reopens with better data.
+
 ## 2.320.0
 
 ### Fixed

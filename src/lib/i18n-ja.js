@@ -2571,4 +2571,6 @@ export default {
   "session-level (no request id on this record)": "セッション単位（このレコードにリクエストIDなし）",
   "Move machines to a ws link automatically": "\u30de\u30b7\u30f3\u3092\u81ea\u52d5\u7684\u306b ws \u30ea\u30f3\u30af\u3078\u79fb\u884c",
   "When an SSH machine\u2019s agent is reachable, install it as a service so it dials back over WebSocket \u2014 fewer per-command SSH spawns and a link that notices breakage. Only runs when a public URL is set above; SSH always stays as the rescue channel.": "SSH \u30de\u30b7\u30f3\u306e\u30a8\u30fc\u30b8\u30a7\u30f3\u30c8\u306b\u5230\u9054\u3067\u304d\u305f\u3089\u3001\u30b5\u30fc\u30d3\u30b9\u3068\u3057\u3066\u5c0e\u5165\u3057\u3066 WebSocket \u3067\u30c0\u30a4\u30e4\u30eb\u30d0\u30c3\u30af\u3055\u305b\u307e\u3059 \u2014 \u30b3\u30de\u30f3\u30c9\u3054\u3068\u306e SSH \u8d77\u52d5\u304c\u306a\u304f\u306a\u308a\u3001\u5207\u65ad\u3082\u3059\u3050\u5206\u304b\u308a\u307e\u3059\u3002\u4e0a\u306e\u516c\u958b URL \u304c\u8a2d\u5b9a\u3055\u308c\u3066\u3044\u308b\u5834\u5408\u306e\u307f\u5b9f\u884c\u3057\u3001SSH \u306f\u5e38\u306b\u5fa9\u65e7\u7528\u306e\u7d4c\u8def\u3068\u3057\u3066\u6b8b\u308a\u307e\u3059\u3002",
+  'Browser suspended this page for {n}s — caught up now': 'ブラウザがこのページを {n} 秒間停止しました — 追いつきました',
+
 };
