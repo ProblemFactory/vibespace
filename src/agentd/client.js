@@ -248,6 +248,10 @@ class DeviceManager {
             for (const [port] of this._reverseForwards) {
               this._request({ op: 'tcp-listen', port }).catch(() => { });
             }
+            // re-arm the discovery watch (R4: it also drives the push-
+            // triggered usage harvest) — the daemon-side watch survives, but
+            // a RESTARTED daemon starts unwatched; idempotent either way
+            if (this._onDiscoveryDirty) this._request({ op: 'discovery-watch' }).catch(() => { });
             return;
           }
           if (msg.op === 'auth-fail') fail(new Error('agentd auth failed — token mismatch'));

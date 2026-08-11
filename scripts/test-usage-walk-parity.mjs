@@ -120,6 +120,50 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(r3.events.length === 1, 'module picks up an append past the committed cursor');
 }
 
+// ── CODEX rollouts (walker v2, R4 step 2): all three walkers must count the
+// same rollout events — synthetic rid = cumulative total, model/cwd from the
+// preceding turn_context, input-minus-cached split, heartbeats skipped. ──
+{
+  const TID = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+  const cxDir = path.join(home, '.codex', 'sessions', '2026', '08', '11');
+  const cxts = (i) => new Date(Date.UTC(2026, 7, 11, 0, 0, i)).toISOString();
+  const rollout = [
+    { timestamp: cxts(0), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/tmp/cx' } },
+    { timestamp: cxts(1), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 1000, cached_input_tokens: 800, output_tokens: 50 }, total_token_usage: { total_tokens: 1050 } } } },
+    { timestamp: cxts(2), type: 'event_msg', payload: { type: 'token_count', info: null } }, // rate-limit heartbeat — skip
+    { timestamp: cxts(3), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 1200, cached_input_tokens: 1100, output_tokens: 80 }, total_token_usage: { total_tokens: 2330 } } } },
+  ];
+  fs.mkdirSync(cxDir, { recursive: true });
+  fs.writeFileSync(path.join(cxDir, `rollout-2026-08-11T00-00-00-${TID}.jsonl`), rollout.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+  const runScanner = (cursorEnv) => execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
+    encoding: 'utf8', env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, '.codex'), VIBESPACE_USAGE_CURSOR: cursorEnv }, timeout: 30000,
+  });
+  const scOut = runScanner(path.join(dataDir, 'cx-scan-cursor.json'));
+  const scEvs = scOut.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const scCx = scEvs.filter((e) => e.be === 'codex');
+  ok(scCx.length === 2, `scanner emits 2 codex events, heartbeat skipped (${scCx.length})`);
+  ok(scCx[0].rid === 'cx:' + TID + ':1050' && scCx[1].rid === 'cx:' + TID + ':2330', 'codex rids = cumulative totals (replay-dedupable)');
+  ok(scCx[0].model === 'gpt-5.6-sol' && scCx[0].cwd === '/tmp/cx', 'model/cwd carried from the preceding turn_context');
+  ok(scCx[0].i === 200 && scCx[0].cr === 800 && scCx[0].o === 50, 'input-minus-cached split (i=fresh, cr=cached)');
+
+  const { runUsageWalk: walk2 } = require(path.join(REPO, 'src/usage-walker.js'));
+  const prevCodexHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = path.join(home, '.codex');
+  const mod = walk2({ home, cursorFile: path.join(dataDir, 'cx-mod-cursor.json') });
+  if (prevCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCodexHome;
+  const modCx = mod.events.map((l) => JSON.parse(l)).filter((e) => e.be === 'codex');
+  ok(JSON.stringify(modCx) === JSON.stringify(scCx), 'module codex events BYTE-IDENTICAL to the scanner');
+
+  process.env.CODEX_HOME = path.join(home, '.codex');
+  const uh3 = new UsageHistory({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-cx2-')), homeDir: home });
+  uh3.scan({ force: true });
+  if (prevCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCodexHome;
+  const l3 = uh3._loadEvents();
+  const localCx = (l3?.events || l3 || []).filter((e) => e.be === 'codex');
+  ok(localCx.length === 2 && localCx.every((e, i) => e.rid === scCx[i].rid), 'LOCAL walk counts the same codex rids (three-walker parity)');
+}
+
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

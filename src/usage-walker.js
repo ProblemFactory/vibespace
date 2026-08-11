@@ -68,7 +68,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
     }));
   }
 
-  function scanFile(fp, cur, size) {
+  function scanFileWith(fp, cur, size, onLine) {
     let fd;
     try { fd = fs.openSync(fp, 'r'); } catch { return; }
     try {
@@ -88,7 +88,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
           const line = data.subarray(lineStart, idx).toString('utf8');
           lineStart = idx + 1;
           cur.offset += Buffer.byteLength(line, 'utf8') + 1; // BYTES, never string length (CJK)
-          handleLine(line, cur);
+          onLine(line);
         }
         rest = data.subarray(lineStart);
       }
@@ -130,10 +130,66 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile() } 
       // NOTE: the unchanged-file path keeps cur.sid in the cursor entry —
       // matching the shipped scanner exactly (parity over cursor bytes too)
       if (st.size === cur.offset) { cursors[fp] = cur; continue; }
-      scanFile(fp, cur, st.size);
+      scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur));
       delete cur.sid;
       cursors[fp] = cur;
     }
+  }
+
+  // ── Codex rollouts (v2, R4): ~/.codex/sessions/**/rollout-*-<threadId>.jsonl
+  // (CODEX_HOME honored like the local walk). Per-request usage rides
+  // event_msg/token_count records (info.last_token_usage; info===null =
+  // rate-limit heartbeat, skip). NO requestId — the synthetic rid is the
+  // CUMULATIVE token total (strictly monotonic per thread → replays dedup);
+  // model/cwd come from the preceding turn_context and PERSIST IN THE CURSOR
+  // (an incremental scan may start mid-file). input INCLUDES cached → fresh =
+  // difference; rollouts report no cache-write counts (cw 0).
+  const codexDir = path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions');
+  let rollouts = [];
+  try { rollouts = fs.readdirSync(codexDir, { recursive: true }); } catch { }
+  for (const rel of rollouts) {
+    const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(String(rel));
+    if (!m) continue;
+    const fp = path.join(codexDir, String(rel));
+    let st; try { st = fs.statSync(fp); } catch { continue; }
+    if (!st.isFile()) continue;
+    const cur = cursors[fp] || { offset: 0, lastRid: null };
+    if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; }
+    if (st.size === cur.offset) { cursors[fp] = cur; continue; }
+    const sid = m[1].toLowerCase();
+    scanFileWith(fp, cur, st.size, (line) => {
+      if (line.indexOf('"turn_context"') >= 0) {
+        let r; try { r = JSON.parse(line); } catch { return; }
+        if (r.type === 'turn_context' && r.payload) {
+          if (r.payload.model) cur.model = r.payload.model;
+          if (r.payload.cwd) cur.cwd = r.payload.cwd;
+        }
+        return;
+      }
+      if (line.indexOf('"token_count"') < 0) return;
+      let r; try { r = JSON.parse(line); } catch { return; }
+      if (r.type !== 'event_msg' || r.payload?.type !== 'token_count') return;
+      const info = r.payload.info;
+      const last = info && info.last_token_usage;
+      if (!last || !(last.input_tokens || last.output_tokens)) return;
+      const ts = Date.parse(r.timestamp) || Date.now();
+      const cum = info.total_token_usage ? info.total_token_usage.total_tokens : null;
+      const rid = `cx:${sid}:${cum != null ? cum : cur.offset + '-' + ts}`;
+      if (rid === cur.lastRid) return;
+      cur.lastRid = rid;
+      const cached = last.cached_input_tokens || 0;
+      out.push(JSON.stringify({
+        rid, be: 'codex', ts, sid,
+        model: cur.model || null,
+        cwd: cur.cwd || null,
+        i: Math.max(0, (last.input_tokens || 0) - cached),
+        cw5: 0, cw1: 0,
+        cr: cached,
+        o: last.output_tokens || 0,
+        tier: null,
+      }));
+    });
+    cursors[fp] = cur;
   }
 
   return { events: out, cursors, cursorFile };

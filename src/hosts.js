@@ -838,6 +838,20 @@ class HostManager {
     return p;
   }
 
+  /** R4: every connected device pushes transcript-growth dirt (the daemon
+   *  fs.watches .claude/sessions+projects and .codex/sessions). One signal,
+   *  two consumers: discovery cache freshness + the push-triggered usage
+   *  harvest (server wires onDeviceDirty). Idempotent per dm; the client
+   *  re-arms it on reconnect. Failure is harmless — polling remains. */
+  _armDirtyPush(id, dm) {
+    try {
+      dm.watchDiscovery(() => {
+        try { this.invalidateDiscovery(id); } catch { }
+        try { this.onDeviceDirty?.(id); } catch { }
+      }).catch(() => { });
+    } catch { }
+  }
+
   async _deviceConnect(id) {
     if (!this.agentdDeps) throw new Error('agentd deps not wired');
     const h = this.get(id);
@@ -847,6 +861,7 @@ class HostManager {
       if (!this.agentdDeps.deviceForDial) throw new Error('dial transport not wired');
       const dm = await this.agentdDeps.deviceForDial(h.deviceId);
       this._devices.set(id, dm);
+      this._armDirtyPush(id, dm);
       return dm;
     }
     // GRADUATED ssh host with a LIVE dial-in link (B-6640): ride the ws
@@ -857,6 +872,7 @@ class HostManager {
       try {
         const dm = await this.agentdDeps.deviceForDial(h.deviceId);
         this._devices.set(id, dm);
+        this._armDirtyPush(id, dm);
         return dm;
       } catch { /* ssh fallback below */ }
     }
@@ -872,6 +888,7 @@ class HostManager {
     });
     await dm.connect();
     this._devices.set(id, dm);
+    this._armDirtyPush(id, dm);
     return dm;
   }
 
