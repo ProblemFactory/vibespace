@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.290.0
+
+**R5 step 2 (three-tier): the discovery claim algorithm becomes one shared function** (docs/design-three-tier.md `discovery.v2`).
+
+`hosts.discoverSessions` interpreted the raw fact lines (LOCK/J/H/N/T/C/HC/K) into resumable session cards inline — ~120 lines of the lock-first claim algorithm (exact-id → tail-id → mtime fallback), keeper adoption, codex rollout cards, and the brand-new-lock case. That logic is extracted verbatim into `discovery-facts.interpretDiscoveryLines(out, { hostId, hostName, claimJsonls })` (the tiny shared module the device daemon already bundles), with `claimJsonls` injected so the module stays dependency-light. Pure refactor — hosts.js calls it and keeps only the cache write; behavior is unchanged.
+
+Why it matters: the interpretation is now runnable WHERE the facts live (the future dark `discovery.v2` op — the device computes its own claims, the orchestrator only merges across machines), with byte-identical logic instead of a fourth reimplementation. New golden-fixture test `scripts/test-discovery-interpret.mjs` (9 asserts) pins the claim algorithm's tricky cases — resumed-session tail-id claim, N-parallel-in-one-cwd (the mis-attribution incident), lock-with-no-transcript, stopped card + shared naming, codex rollout, keeper adoption.
+
+
 ## 2.289.0
 
 **Passive quota capture from the CLI's own `rate_limit_event` records** (B-e5c9 — answers the owner's "can we get usage from `claude -p`?" with something better and safe).
