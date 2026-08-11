@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.289.0
+
+**Passive quota capture from the CLI's own `rate_limit_event` records** (B-e5c9 — answers the owner's "can we get usage from `claude -p`?" with something better and safe).
+
+Binary forensics on the 2.1.226 CLI (zero API calls) turned up a first-class stream-json stdout record VibeSpace had always dropped as unknown: `{type:"rate_limit_event", rate_limit_info:{…}}`, documented in the CLI as "emitted when rate limit info changes" — it rides real API responses, so capturing it costs NOTHING extra (§ban-safety: purely passive, unlike the banned auto-`get_usage` or a billable `-p` probe, which must carry a prompt and returns no 5h/7d data anyway).
+
+This closes the long-standing gap where chat/stream-json sessions — which have no statusline — could only show last-known quota. Now:
+- **`status:"rejected"`** is a STRUCTURED exhaustion signal (the banner-text parse's typed sibling) → marks the bucket dead + immediate pool re-evaluation.
+- **`utilization`** readings write straight into the usage cache and become dead-reckoning **anchors** at the next sweep — so the estimator self-calibrates from live chat activity, exactly like the statusline does for terminal sessions.
+
+`src/rate-limit-capture.js` is ONE shared implementation for local AND remote sessions (remote chat stdout relays through the same server parse; the caller resolves the cache key — a host-login remote session lands on its host bucket, not `__global__`, which also fixes remote limit-banner attribution). It carries the identity-group cache discipline (2.267.0 anti-poison) with one addition: `fetchedAt` bumps ONLY for a real reading (utilization or rejected), so a resetsAt/overage-only event updates bucket fields in place without falsely promoting a stale file to "freshest" for the anchor sweep. All 16 `rate_limit_info` fields decoded; both key casings accepted defensively (2.227.6); unknown bucket types surface rather than drop silently. Test: scripts/test-rate-limit-capture.mjs (20 asserts).
+
+
 ## 2.288.0
 
 **R5 step 1 (three-tier): the discovery snapshot moves off the daemon loop** (docs/design-three-tier.md `discovery.v2`).
