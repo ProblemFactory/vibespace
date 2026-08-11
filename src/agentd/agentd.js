@@ -630,7 +630,20 @@ const sealedOrders = {
         let fd; try { fd = fs.openSync(outFp, 'r'); fs.readSync(fd, buf, 0, want, pos); } catch { continue; } finally { try { fs.closeSync(fd); } catch { } }
         this._tails.set(sid, pos + want);
         const banner = parseLimitBanner(buf.toString('utf8'));
-        if (banner) { this._execute(sid, banner); return; }
+        if (!banner) continue;
+        // LINKAGE (adversarial review): the banner must come from a session
+        // that actually BILLS this pool, or an unrelated session hitting its
+        // own limit re-points the pool off a healthy target and moves billing
+        // for every live pool conversation mid-turn. The spawn line in the
+        // session meta carries the credential dir, so it is checkable — and
+        // the daemon must refuse rather than guess when it cannot tell.
+        const o0 = this.pools.values().next().value;
+        const spawn = JSON.stringify(meta.cmd || '');
+        if (!o0 || !o0.linkPath || spawn.indexOf(o0.linkPath) < 0) {
+          log(`sealed-orders: limit banner in ${sid} but its spawn does not reference the pool credential dir — ignoring (not this pool's session)`);
+          continue;
+        }
+        this._execute(sid, banner); return;
       }
     } catch (e) { log('sealed-orders scan failed: ' + e.message); }
   },

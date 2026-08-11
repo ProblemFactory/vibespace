@@ -216,7 +216,15 @@ class ChatView {
       e.preventDefault();
       this._showMsgMeta(msg, e.clientX, e.clientY);
     });
-    this._messageList.addEventListener('wheel', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
+    this._messageList.addEventListener('wheel', (e) => {
+      this._lastUserScrollAt = Date.now();
+      // DIRECTION of the user's intent. Content growth (content-visibility
+      // resolving a freshly paged batch) moves scrollTop with NO direction of
+      // its own — native scroll anchoring pushes it numerically DOWN to keep
+      // the view stable — and that was being read as "the user is scrolling
+      // toward the end". This is the only reliable discriminator.
+      if (e.deltaY) { this._wheelDir = e.deltaY > 0 ? 1 : -1; this._wheelDirAt = Date.now(); }
+    }, { passive: true });
     this._messageList.addEventListener('touchmove', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
     this._messageList.addEventListener('wheel', (e) => {
       if (this._loading || !this._canPaginate) return;
@@ -297,7 +305,19 @@ class ChatView {
           this._pinned = false;
           this._scrollBtn.classList.remove('hidden');
         }
-        if (scrollTop < 100 && !this._loading && this._canPaginate) {
+        // INTENT GATE (inc-msorcsrl, the third capture — this is the real
+        // mechanism): after paging UP, the fresh batch's heights resolve and
+        // native scroll anchoring raises scrollTop to keep the view stable
+        // (captured: 85 → 1466 in 26ms, which no wheel can produce). The
+        // "near the end ⇒ extendBottom" rule read that as the user scrolling
+        // down, trimmed the top, walked the window back toward the live tail
+        // — and the user, still scrolling up, saw the page jump back. A
+        // boundary EXTENSION must therefore agree with the user's actual
+        // wheel direction; content-growth displacement has no direction.
+        const dirAge = Date.now() - (this._wheelDirAt || 0);
+        const goingUp = this._wheelDir < 0 && dirAge < 1200;
+        const goingDown = this._wheelDir > 0 && dirAge < 1200;
+        if (scrollTop < 100 && !this._loading && this._canPaginate && !goingDown) {
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
           else if (this._windowStart > 0) this._extendTop();
           else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
@@ -305,7 +325,7 @@ class ChatView {
         // Extend bottom when scrolling near end of rendered window. Teleport
         // mode seeks NEWER slabs by file line instead, so browsing continues
         // downward from a jump just like it does upward.
-        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate) {
+        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate && !goingUp) {
           if (this._teleported) this._maybeSeekLater();
           else if (this._windowEnd < this._total) this._extendBottom();
         }
