@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.294.0
+
+**Remote messages now show the ACCOUNT they billed to, not just the machine** (owner report from a live agentic-search conversation: the message-meta popup could only say "AIDev's machine login").
+
+The data was there all along. VibeSpace records which account it spawned a remote session with — `writeSessionMeta` writes it into `attribution.ndjson` exactly like a local one — but `ingestRemoteEvents` hardcoded every remote event to the host bucket (`acct: hostId, atype: 'host'`), throwing that away. Remote events now resolve their account with the same by-time walk local events use (pool tag included), so a remote reply's billing row names the real account, and per-account cost stops under-counting everything that ran on another machine. This is R4's "remote per-account ledger attribution" deliverable.
+
+The fallback stays honest and is the point of the design: a session VibeSpace never spawned (an external terminal on that machine, or one predating attribution) has no entry and keeps the host bucket — `atype: 'host'` now means what it always claimed, "billed by that machine's own login", instead of "remote, we didn't look". Requests older than the attribution entry are not back-billed (the 2.84.0 grace-window rule). The machine dimension is untouched, so the Usage window's device filter keeps working — and the popup now names both: `account · on <machine>`.
+
+Also corrects the popup's stale "harvested every ~15 min" line (2.287.0 made it event-driven, ~1 min). Test: scripts/test-remote-attribution.mjs (8 asserts, incl. the never-invent-an-account and no-back-billing guards).
+
+
 ## 2.293.0
 
 **The huge-file seek family switches to the device too — atomically** (closes the last carve-out from 2.292.0; R3 is now complete).

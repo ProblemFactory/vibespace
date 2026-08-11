@@ -148,7 +148,40 @@ hash identically across transports or messages double-render.
 | R4 ◐ steps 1–2 = 2.286.0/2.287.0 | Usage + events | walker into the daemon (DONE: `src/usage-walker.js` bundled, `usage-scan` op in a child process, two-phase cursor commit, per-op capability gating via hello `capabilities`) → push-triggered harvest (DONE: daemon transcript-dir watch incl. codex → debounced dirty → server harvest kick + discovery invalidation; ~1min ledger freshness for any remote activity) → codex rollouts in all three walkers (DONE — the remote codex coverage gap closed) → full `session.events` typed stream; local double-feeds during cutover (id dedup makes overlap harmless) | remote live-estimate gap; the shipped scanner and its parity test |
 | R5 ✅ 2.288.0/2.290.0/2.291.0/2.292.0 | Discovery | snapshot walk into a daemon child (loop never blocks on a slow home fs) → claim algorithm + line synthesis extracted to `discovery-facts` (one shared impl, golden fixture) → **on-device claims `discovery-claims` op, DARK + byte-identical parity (DONE)** → **remote discovery SWITCHED (2.292.0, ladder: claims op → server-side interpretation → ssh script → stale cache)** → local discovery harvests device #0 behind a flag once poll latency is proven | the ssh discovery script (to fallback) |
 | R6 | Session ownership | local creates via device #0 `session.open`; adoption-based — existing sessions stay attachable forever, nothing force-migrated | the local-dtach special path |
-| — | Session brain | device-side live stdout parsing + buffer ownership + spawn resolution | a separate campaign; the above is its prerequisite |
+| — | Session brain | device-side live stdout parsing + buffer ownership + spawn resolution | a separate campaign; the above is its prerequisite. R4's remaining `session.events` stream and R6's `session.open` are BOTH parts of it — see the plan below |
+
+## The session-brain campaign (R4-events + R6, one body of work)
+
+Everything else in this design moved FACTS about a machine to that machine. This
+last campaign moves the LIVE SESSION itself, which is why it is separate: it
+changes where a running conversation's stdout is parsed and where its buffer
+lives — the one place where a mistake loses a user's in-flight work rather than
+degrading a read. Its steps, in dependency order:
+
+1. **Buffer ownership.** Today the server writes `data/session-buffers/<id>.buf`
+   for every session including remote ones (the relayed stdout). The device
+   already owns buffers for its pipe sessions. Step one is making the buffer's
+   OWNER explicit in the session record (`bufferOwner: 'server' | 'device'`) with
+   both readers working — no behavior change, but the attach path stops assuming.
+2. **Device-side parse, double-fed.** The daemon runs the SAME normalizer
+   (already bundled since R3) over its session's stdout and emits typed
+   `session.events`. The server keeps its own parse and DISCARDS the device
+   stream, comparing the two: identical ids (R0 made them content-derived) mean
+   the device stream is trustworthy. This is the dark+parity pattern every
+   previous round used, and it is why R0 came first.
+3. **Consumers switch, server parse retires.** Streaming labels, todos, tool
+   progress, served-model changes, limit banners, id adoption and usage records
+   come from the device stream; the server stops parsing relayed stdout. The
+   relay itself stays (the client still needs bytes for terminal mode).
+4. **`session.open` (R6), adoption-based.** New LOCAL sessions spawn through
+   device #0 instead of the server's dtach path. Existing sessions are NEVER
+   migrated — they stay attachable through the current path forever, which is
+   what makes this safe to ship incrementally: the two mechanisms coexist and
+   the old one dies only when no session uses it.
+
+Sequencing rule: do not start step 4 before step 3 soaks — a session created by
+the device but parsed by the server is the worst of both worlds (two owners for
+one conversation, the double-writer class in a new costume).
 
 ## Risk register
 

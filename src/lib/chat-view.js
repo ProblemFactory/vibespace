@@ -698,16 +698,20 @@ class ChatView {
         let val;
         if (r?.found) {
           if (r.atype === 'host') {
-            // remote sessions bill through THAT machine's own login — the
-            // ledger buckets them per machine, not per named account.
-            val = t('{host}’s machine login (remote ledger)', { host: r.aname || r.acct || t('remote host') });
+            // NO account resolved: this machine ran the session on its OWN
+            // login (an external terminal there, or one VibeSpace never
+            // spawned). Honest bucket — never invent an account.
+            val = t('{host}’s machine login (remote ledger)', { host: r.hostName || r.aname || r.acct || t('remote host') });
           } else {
             val = r.aname || (r.atype === 'global' || !r.acct ? t('CLI login') : r.acct);
             if (r.poolName) val += ` · ${t('via pool “{name}”', { name: r.poolName })}`;
+            // a remote request bills to a real account AND ran on a machine —
+            // both matter (2.294.0), so name the machine after the account
+            if (r.host && r.hostName) val += ` · ${t('on {host}', { host: r.hostName })}`;
           }
         } else if (isRemote) {
           const sb = sessionBilling();
-          val = (sb ? sb + ' · ' : '') + t('remote — harvested into the ledger every ~15 min');
+          val = (sb ? sb + ' · ' : '') + t('remote — reaches the ledger about a minute after the turn ends');
         } else {
           val = t('not in the ledger yet');
         }

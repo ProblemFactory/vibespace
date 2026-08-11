@@ -4067,7 +4067,9 @@ app.get('/api/usage-stats/rid-info', (req, res) => {
     if (!ev) return res.json({ found: false });
     let poolName = null;
     try { poolName = ev.pool ? (accounts.get(ev.pool)?.name || null) : null; } catch { }
-    res.json({ found: true, acct: ev.acct || null, aname: ev.aname || null, atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null });
+    let hostName = null;
+    try { hostName = ev.host ? (hosts.get(ev.host)?.name || null) : null; } catch { }
+    res.json({ found: true, acct: ev.acct || null, aname: ev.aname || null, atype: ev.atype || 'global', pool: ev.pool || null, poolName, host: ev.host || null, hostName });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/usage-stats/pricing', (req, res) => res.json({ pricing: usageHistory.pricingTable() }));
