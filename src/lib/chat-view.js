@@ -473,8 +473,36 @@ class ChatView {
       }
     });
 
+    // ── DELIVERY-STALL WATCHDOG (2.322.0, inc-msp3klen: a COMPLETE reply
+    // reached this client 14.5min late on a live connection — heartbeat green
+    // both ways, tab foreground, server parse proven on time by telemetry;
+    // the last-mile seam is still at large, so this self-heals EVERY flavor:
+    // if the UI believes the model is responding but NOTHING for this session
+    // has arrived in 120s (long tool runs emit tool_progress heartbeats, so
+    // true silence at 120s is abnormal), force a re-attach — idempotent, and
+    // the server replies with current history + streaming state, which both
+    // repairs a lost clients-map registration and re-syncs a wedged view.
+    // Telemetry fingerprint `chat-stall-reattach` records each firing with
+    // the silence length — the instrument that convicts the real seam on the
+    // next occurrence. Fires at most once per 5min per view.
+    this._stallWatch = setInterval(() => {
+      try {
+        if (this._readOnly || !this._typingSince) return;
+        const silence = Date.now() - Math.max(this._lastInboundAt || 0, this._typingSince);
+        if (silence < 120000) return;
+        if (Date.now() - (this._stallReattachAt || 0) < 300000) return;
+        this._stallReattachAt = Date.now();
+        try { window.__vsEvent?.('chat-stall-reattach', { detail: `${Math.round(silence / 1000)}s sid=${String(sessionId).slice(0, 24)}` }); } catch { }
+        console.warn(`[chat] delivery stall: streaming ${Math.round(silence / 1000)}s with zero inbound — forcing re-attach`);
+        this._reattach();
+      } catch { }
+    }, 15000);
+
     // Listen for normalized message ops from server
     this._handler = (msg) => {
+      // Delivery-stall watchdog input (2.322.0, inc-msp3klen): any inbound
+      // for THIS session is proof of delivery liveness.
+      if (msg.sessionId === sessionId) this._lastInboundAt = Date.now();
       if (msg.type === 'msg' && msg.sessionId === sessionId) {
         // Any live op for this session proves the socket that carried the last
         // send was alive server-side — finalize the deferred draft clear
@@ -1779,6 +1807,7 @@ class ChatView {
 
   // _showTyping / _hideTyping delegate to ChatInput (normal) or readOnly _streamStatus
   _showTyping(label = t('thinking...')) {
+    this._typingSince = this._typingSince || Date.now(); // watchdog arm
     if (this._chatInput) { this._chatInput.showTyping(label); return; }
     // readOnly fallback
     if (!this._streamStatus) return;
@@ -1787,6 +1816,7 @@ class ChatView {
   }
 
   _hideTyping() {
+    this._typingSince = null; // watchdog disarm
     if (this._chatInput) { this._chatInput.hideTyping(); return; }
     // readOnly fallback
     if (!this._streamStatus) return;
@@ -2885,6 +2915,7 @@ class ChatView {
     if (this._searchBarObserver) { this._searchBarObserver.disconnect(); this._searchBarObserver = null; }
     if (this._runsTimer) { clearTimeout(this._runsTimer); this._runsTimer = null; }
     if (this._traceWatchTimer) { clearInterval(this._traceWatchTimer); this._traceWatchTimer = null; }
+    if (this._stallWatch) { clearInterval(this._stallWatch); this._stallWatch = null; }
     if (this._readOnlyPollTimer) clearTimeout(this._readOnlyPollTimer);
     this.ws.offGlobal(this._handler);
     this.ws.offStateChange(this._stateHandler);
