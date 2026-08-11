@@ -275,6 +275,7 @@ export function installManageAgents(App, ctx = {}) {
   },
   _poolColdRestart(sess, poolId) {
     if (!sess.backendSessionId) return; // nothing to resume by — leave it be
+    try { window.__vsOp?.('pool-cold-restart', { pool: poolId, sid: sess.backendSessionId, serverId: sess.serverId, host: sess.host || null }); } catch {}
     const live = (this.sidebar?._allSessions || []).find((x) => x.webuiId === sess.serverId);
     const name = this.sidebar?.getCustomName?.({ backend: sess.backend, backendSessionId: sess.backendSessionId }) || live?.name || sess.name || '';
     const mode = live?.webuiMode || 'chat';

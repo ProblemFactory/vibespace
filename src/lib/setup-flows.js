@@ -413,6 +413,49 @@ export function installSetupFlows(App) {
     render();
   },
 
+  // Layout rollback (2.296.0). Sessions survive almost everything, but WHERE
+  // they lived does not: a bug that rewrites window→desktop placement used to
+  // be unrecoverable (hand-editing layouts.json was the only path, and if the
+  // damage emptied a desktop the pre-damage mapping was simply gone). The
+  // server writes a rollback point before every layout SHAPE change; this is
+  // the one click that uses them.
+  async _showLayoutHistory() {
+    const { body, close } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true });
+    body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
+    const r = await fetchJson('/api/layout-history').catch(() => null);
+    const entries = r?.entries || [];
+    if (!entries.length) {
+      body.innerHTML = `<div class="usage-note">${escHtml(t('No rollback points yet — one is written whenever your window layout changes shape.'))}</div>`;
+      return;
+    }
+    body.innerHTML = `
+      <div class="usage-note">${escHtml(t('Each entry is the layout as it was BEFORE a change. Restoring reloads the page; your sessions are not touched.'))}</div>
+      <div class="lh-list">${entries.map((e) => {
+        const per = Object.entries(e.summary || {}).map(([n, c]) => `${escHtml(n)} ${c}`).join(' · ');
+        return `<div class="lh-row"><div class="lh-main"><b>${escHtml(new Date(e.at).toLocaleString())}</b>
+            <div class="lh-sub">${escHtml(t('{n} windows', { n: e.totalWindows || 0 }))}${per ? ' — ' + escHtml('') + per : ''}</div></div>
+          <button class="agent-btn lh-restore" data-id="${escHtml(e.id)}">${escHtml(t('Restore'))}</button></div>`;
+      }).join('')}</div>`;
+    body.querySelectorAll('.lh-restore').forEach((b) => {
+      b.onclick = async () => {
+        // showConfirmDialog takes an OPTIONS OBJECT (utils.js:91) — a bare
+        // string destructures to undefined for every field, rendering a
+        // generic "Confirm"/empty body on an action that replaces the whole
+        // layout and reloads the page.
+        if (!(await showConfirmDialog({
+          title: t('Restore a previous layout'),
+          message: t('Restore this layout? Your current one becomes a rollback point too, so this is undoable.'),
+          confirmText: t('Restore'),
+        }))) return;
+        const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST' }).catch(() => null);
+        if (!res?.success) { showToast(res?.error || t('Restore failed'), { type: 'error' }); return; }
+        close();
+        showToast(t('Layout restored — reloading…'));
+        setTimeout(() => location.reload(), 800);
+      };
+    });
+  },
+
     async _openDiagnostics() {
     const [d, c] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14'),

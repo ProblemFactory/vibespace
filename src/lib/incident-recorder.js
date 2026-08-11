@@ -14,7 +14,7 @@
 import { t } from './i18n.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml } from './utils.js';
 
-const CAP = { action: 500, ws: 700, console: 250 };
+const CAP = { action: 500, ws: 700, console: 250, op: 300 };
 
 function push(ring, cap, entry) {
   ring.push(entry);
@@ -39,7 +39,7 @@ function describeEl(el) {
 }
 
 export function installIncidentRecorder(app) {
-  const rings = { action: [], ws: [], console: [] };
+  const rings = { action: [], ws: [], console: [], op: [] };
   const t0 = Date.now();
 
   // ── action ring: clicks + coarse keys + window lifecycle ──
@@ -77,6 +77,19 @@ export function installIncidentRecorder(app) {
     });
     ws.onStateChange?.((state) => push(rings.ws, CAP.ws, { t: Date.now(), d: '=', ty: 'ws-' + state }));
   } catch {}
+
+  // ── semantic op breadcrumbs (2.296.0, the pool-collapse lesson) ──
+  // Clicks and ws types could not answer "what MOVED these windows?": the
+  // incident that flattened a whole layout left no trace of the desktop
+  // reassignments at all, so the sequence had to be reconstructed by reading
+  // code. Any module can now drop a typed breadcrumb for an operation that
+  // RELOCATES OR REPLACES a window/session — the class where "what did the
+  // app just do to my layout" is the whole question. Names + ids only, never
+  // content (the privacy rule above is unchanged).
+  const opRing = rings.op = [];
+  window.__vsOp = (name, data) => {
+    try { push(opRing, CAP.op, { t: Date.now(), op: String(name).slice(0, 40), ...(data || {}) }); } catch {}
+  };
 
   // ── console ring: errors/warnings that scrolled away long ago ──
   for (const level of ['error', 'warn']) {

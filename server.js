@@ -3578,6 +3578,25 @@ function _incidentServerState() {
   // currently blocks and what remote DISCOVERY last believed — both were
   // load-bearing in the userN incident and neither survives anywhere else.
   try { out.resumeBreakers = [...noConvoRef.map.entries()].map(([cid, at]) => ({ cid, agoS: Math.round((Date.now() - at) / 1000) })); } catch {}
+  // LAYOUT state + rollback points (2.296.0): for a layout-destroying bug the
+  // window→desktop mapping IS the evidence, and the history index tells a
+  // responder whether an intact pre-damage state still exists (it makes the
+  // difference between "restore in one click" and hand-editing layouts.json).
+  try {
+    const lay = persistenceRouter.readLayouts?.() || {};
+    out.layout = {
+      desktops: (lay.desktopMeta || []).map((m) => ({ id: m.id, name: m.name })),
+      windowsPerDesktop: Object.fromEntries(Object.entries(lay.desktops || {}).map(([dk, v]) => [dk, ((v?.autoSave || {}).windows || []).length])),
+      // window→desktop with its session id: the exact table needed to put a
+      // flattened layout back, and small enough to always include
+      windows: Object.entries(lay.desktops || {}).flatMap(([dk, v]) => (((v?.autoSave || {}).windows) || []).map((w) => ({
+        desk: dk, id: w.id, type: w.type,
+        sid: w.openSpec?.backendSessionId || w.openSpec?.serverId || null,
+        title: String(w.title || '').slice(0, 40),
+      }))).slice(0, 300),
+    };
+    out.layoutHistory = (persistenceRouter.listLayoutHistory?.() || []).slice(0, 40);
+  } catch (e) { out.layout = 'failed: ' + e.message; }
   try {
     const dc = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'remote-sessions-cache.json'), 'utf8'));
     out.discoveryCache = Object.fromEntries(Object.entries(dc.hosts || dc || {}).map(([hid, v]) => {

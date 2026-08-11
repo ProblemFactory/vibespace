@@ -315,6 +315,7 @@ export class DesktopManager {
   moveWindowToDesktop(winId, desktopId) {
     let win = this.app.wm.windows.get(winId);
     if (!win) return;
+
     // Stage↔desktop moves are blocked in BOTH directions (user directive
     // 2.112.4, superseding the earlier unbind+move design): stage-view
     // windows stay on the stage, and nothing moves ONTO the stage.
@@ -327,6 +328,10 @@ export class DesktopManager {
     if (win._tabChain) win = members[0]; // host owns the visible element
     if (!win || win._desktopId === desktopId) return;
 
+    // breadcrumb AFTER the guards — the ONE op that relocates a window between
+    // desktops, and an incident bundle must be able to answer "what moved my
+    // windows". Logging above the guards recorded moves that never happened.
+    try { window.__vsOp?.('desktop-move', { win: win.id, from: win._desktopId, to: desktopId, chain: members.length }); } catch {}
     for (const m of members) m._desktopId = desktopId;
 
     // If moving to a non-active desktop, hide (host element carries the group)
