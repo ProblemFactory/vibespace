@@ -1012,7 +1012,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events'],
         });
         return;
       }
@@ -1173,6 +1173,85 @@ function serveConnection(sock) {
           }
           mux.control({ op: 'discovery-watching', id: msg.id });
         } catch (e) { mux.control({ op: 'discovery-watching', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'usage-events-watch') {
+        // R4 FINALE — the usage-events PUSH stream: transcript-dir changes run
+        // an INCREMENTAL walk (the bundled walker child, which NEVER persists
+        // its cursor) and the NEW events push to the subscribed server as
+        // chan-0 batches. TWO-PHASE stays intact with the roles inverted: the
+        // daemon holds proposed cursors IN MEMORY and persists them ONLY when
+        // the server acks the batch seq — an unacked batch re-walks and
+        // re-emits, and the server's rid dedup absorbs the replay. This turns
+        // the remote ledger from pull-with-a-60s-floor into seconds-fresh,
+        // and covers what the live stdout relay never could: EXTERNAL
+        // sessions and workflow/subagent transcripts (file-only usage).
+        try {
+          if (!this._usageEvWatch) {
+            const home = os.homedir();
+            const cursorFile = msg.cursorFile || path.join(STATE, 'usage-push-cursor.json');
+            const st = { cursorFile, running: false, again: false, seq: 0, pendingCursors: new Map(), watches: [] };
+            this._usageEvWatch = st;
+            const runWalk = () => {
+              if (st.running) { st.again = true; return; }
+              st.running = true;
+              require('child_process').execFile(process.execPath, [__filename, '--usage-scan-child', cursorFile],
+                { timeout: 120000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
+                  st.running = false;
+                  try {
+                    if (err) log('usage-events walk failed: ' + err.message);
+                    if (!err && stdout) {
+                      const lines = String(stdout).split('\n').filter(Boolean);
+                      const last = lines.pop();
+                      let manifest = null; try { manifest = JSON.parse(last || ''); } catch { }
+                      if (manifest && manifest.__cursors__ && lines.length) {
+                        const seq = ++st.seq;
+                        st.pendingCursors.set(seq, manifest.__cursors__);
+                        // ≤500-event chunks; the FINAL chunk carries the seq
+                        // the server must ack for the cursor to commit
+                        for (let i = 0; i < lines.length; i += 500) {
+                          const slice = lines.slice(i, i + 500);
+                          const isLast = i + 500 >= lines.length;
+                          try { mux.control({ op: 'usage-events', batch: slice, ...(isLast ? { seq } : {}) }); } catch { }
+                        }
+                      } else if (manifest && manifest.__cursors__) {
+                        // no new events — commit directly (nothing to lose)
+                        try {
+                          fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
+                          fs.writeFileSync(cursorFile + '.tmp', JSON.stringify(manifest.__cursors__));
+                          fs.renameSync(cursorFile + '.tmp', cursorFile);
+                        } catch { }
+                      }
+                    }
+                  } catch (e) { log('usage-events push failed: ' + e.message); }
+                  if (st.again) { st.again = false; setTimeout(runWalk, 200); }
+                });
+            };
+            let timer = null;
+            const kick = () => { if (timer) return; timer = setTimeout(() => { timer = null; runWalk(); }, 1500); };
+            st.kick = kick;
+            for (const d of [path.join(home, '.claude', 'projects'),
+              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
+              try { st.watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { st.watches.push(fs.watch(d, kick)); } catch { } }
+            }
+            runWalk(); // initial drain so the subscriber starts complete
+          }
+          mux.control({ op: 'usage-events-watching', id: msg.id });
+        } catch (e) { mux.control({ op: 'usage-events-watching', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'usage-events-ack') {
+        // the server confirmed durable ingest of batch `seq` → commit cursor
+        try {
+          const st = this._usageEvWatch;
+          const cur = st && st.pendingCursors.get(msg.seq);
+          if (st && cur) {
+            for (const k of [...st.pendingCursors.keys()]) if (k <= msg.seq) st.pendingCursors.delete(k);
+            fs.mkdirSync(path.dirname(st.cursorFile), { recursive: true });
+            fs.writeFileSync(st.cursorFile + '.tmp', JSON.stringify(cur));
+            fs.renameSync(st.cursorFile + '.tmp', st.cursorFile);
+          }
+        } catch { }
         return;
       }
       // ── M4: bounded one-shot command (clipboard/xclip class; NOT a shell —
@@ -1509,6 +1588,7 @@ function serveConnection(sock) {
       // outlive the server that asked for it (ExitManager re-creates on reconnect)
       for (const [port, s] of socksServers) { if (s.owner === mux) { try { s.server.close(); } catch { } socksServers.delete(port); } }
       if (this._discoWatch) { for (const w of this._discoWatch) { try { w.close(); } catch { } } this._discoWatch = null; }
+      if (this._usageEvWatch) { try { for (const w of this._usageEvWatch.watches) w.close(); } catch { } this._usageEvWatch = null; }
       pipeSessions.detachAll(mux);
     },
   });

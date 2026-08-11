@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.299.0
+
+**Three-tier closure, batch 3 — R4 COMPLETE: the `usage-events` push stream. The remote ledger goes from pull-with-a-60s-floor to seconds-fresh, with local and remote running the same machinery.**
+
+The owner's question that started this ("why can't monitoring live on the device and stream back in real time?") is now the shipped architecture: the daemon watches its transcript dirs (`~/.claude/projects` + codex sessions), runs the bundled walker incrementally on change, and PUSHES new ledger events to the subscribed server in chan-0 batches. The two-phase cursor discipline survives with the roles inverted — the daemon holds proposed cursors in memory and persists them ONLY when the server acks the batch seq after durable ingest; an unacked batch re-walks and re-emits, and rid dedup absorbs the replay. This covers exactly what the live stdout relay never could: EXTERNAL sessions on the machine and workflow/subagent transcripts (file-only usage). The dirty-kick harvest (60s floor) stays armed as the fallback rung for old daemons and lapsed streams — retirement-order law.
+
+- Daemon: `usage-events-watch`/`usage-events-ack` ops (capability `usage-events`); ≤500-event chunks, final chunk carries the ack seq; walk failures LOG (a degrade path that swallows its own bug hid a routing miss for two debug cycles — 2.284.2 lesson re-learned live).
+- Client: `watchUsageEvents(onBatch)` + `ackUsageEvents(seq)`, re-armed on reconnect like the discovery watch; an error-ack THROWS instead of resolving silently.
+- Server: batches ingest through the SAME pipeline the pull harvest uses (attribution, rid namespacing, host-bucket honesty), then the estimator invalidates and the pool re-evaluates — remote spend now reaches pool decisions in seconds.
+- E2E `scripts/test-usage-events-push.mjs` (7 asserts, real daemon): initial drain, incremental-after-ack, and the loss-window proof — an unacked batch delivers but does NOT advance the cursor.
+
+
 ## 2.298.0
 
 **Three-tier closure, batch 2: the account-management §-obligations (design §Account split / §Quota refresh origin), all previously unimplemented.**
