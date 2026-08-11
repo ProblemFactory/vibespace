@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.293.0
+
+**The huge-file seek family switches to the device too — atomically** (closes the last carve-out from 2.292.0; R3 is now complete).
+
+2.292.0 deliberately left the seek family (gap info / slabs / full turn map / full-file search) on the local transcript cache, because it speaks in FILE LINE NUMBERS and had no device search op: serving line numbers from the device while search read a cache copy would put offsets on two sources of truth and teleport readers to the wrong place. The daemon now has a `searchFull` op, so the family switches as ONE unit.
+
+Mechanism: `gapInfo` returns an opaque HANDLE instead of a bare path — `device:<host>` when the device serves, else the local file path — and every follow-up (slab, search, turn map) honours it. The route already treated `fp` as opaque (it only checks truthiness and passes it back), so nothing above the service changed and there is no half-switched state. Streaming search over the device degrades honestly to one batch (matches still arrive as NDJSON, just together, and the wire carries matches instead of the whole transcript). Without the capability the whole family stays local — one source of truth either way.
+
+Tests: `test-transcript-switchover` 13 asserts (handle propagation through every follow-up, streaming contract, no-capability path), `test-transcript-parity` 20 (searchFull now byte-identical against a real daemon).
+
+
 ## 2.292.0
 
 **Switchover: remote transcript reads and remote discovery are now served BY THE MACHINE THAT OWNS THE DATA** (owner directive; R3 + R5 of docs/design-three-tier.md go live behind per-op fallback ladders).

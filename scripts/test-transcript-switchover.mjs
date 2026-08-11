@@ -16,7 +16,15 @@ const mkSvc = (opts) => createTranscriptService({
 const deviceHosts = (behavior) => ({
   deviceBounded: async () => ({
     connect: async () => ({ info: { capabilities: behavior.caps ?? ['transcript-op'] } }),
-    transcriptOp: async (m, ref, p) => { calls.push(m); if (behavior.throw) throw new Error('link down'); return { served: 'device', method: m, params: p }; },
+    transcriptOp: async (m, ref, p) => {
+      calls.push(m); if (behavior.throw) throw new Error('link down');
+      // method-shaped replies, exactly as the daemon composes them
+      if (m === 'gapInfo') return { gap: { headEndLine: 10, tailStartLine: 900, totalLines: 1000, gapRecords: 890 }, hasFile: true };
+      if (m === 'gapSlab') return { messages: [{ id: 'g1' }] };
+      if (m === 'searchFull') return { matches: [{ line: 42 }, { line: 77 }], truncated: false };
+      if (m === 'fullTurnmap') return { turns: [{ ts: 1, line: 3 }] };
+      return { served: 'device', method: m, params: p };
+    },
   }),
   fetchSessionJsonl: async () => {},
 });
@@ -61,5 +69,32 @@ const deviceHosts = (behavior) => ({
   const r = await svc.page({ backend: 'claude', sessionId: 's1', cwd: '/w', host: 'host-a' }, {});
   ok(calls.length === 0 && r.total === 3, 'a LIVE remote session keeps the server-side normalizer + stdout overlay (device skipped)');
 }
+// 6. SEEK FAMILY switches as ONE UNIT (line numbers must stay single-source)
+{
+  calls.length = 0;
+  const svc = mkSvc({ hosts: deviceHosts({ caps: ['transcript-op'] }) });
+  const ref = { backend: 'claude', sessionId: 's1', cwd: '/w', host: 'host-a' };
+  const gi = await svc.gapInfo(ref);
+  ok(typeof gi.fp === 'string' && gi.fp.startsWith('\u0000device:'), 'gapInfo returns an opaque DEVICE handle (route treats fp as opaque)');
+  const slab = await svc.gapSlab(ref, gi.fp, 0, 100);
+  ok(calls.includes('gapSlab'), 'a device handle routes the slab read to the device (never a local file)');
+  const sf = await svc.searchFull(ref, gi.fp, 'q');
+  ok(calls.includes('searchFull'), 'search on a device handle uses the device search op');
+  const ft = await svc.fullTurnmap(ref, gi.fp);
+  ok(calls.includes('fullTurnmap'), 'full turnmap on a device handle uses the device op');
+  // streaming contract preserved (one batch, same NDJSON callback shape)
+  calls.length = 0;
+  const got = [];
+  const r = await svc.searchFullStream(ref, gi.fp, 'q', (m) => got.push(m), {});
+  ok(calls.includes('searchFull') && typeof r.total === 'number', 'streaming search over the device replays matches through onMatch (contract kept)');
+}
+// 7. no device → the whole family stays on the local file path
+{
+  calls.length = 0;
+  const svc = mkSvc({ hosts: deviceHosts({ caps: [] }) });
+  const gi = await svc.gapInfo({ backend: 'claude', sessionId: 's1', cwd: '/w', host: 'host-a' });
+  ok(!(typeof gi.fp === 'string' && gi.fp.startsWith('\u0000device:')), 'without the capability the family stays on the LOCAL file (one source of truth either way)');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail?1:0);

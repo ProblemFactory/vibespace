@@ -141,6 +141,9 @@ await parity('codex page', svc.page(cref, {}), ['page', cref, {}]);
 const cg = await svc.gapInfo(cref);
 await parity('codex gapInfo', Promise.resolve({ gap: cg.gap, hasFile: !!cg.fp }), ['gapInfo', cref, {}]);
 
+// searchFull op (2.293.0 — the last read the seek family needed to switch)
+await parity('searchFull', (async () => { const g2 = await svc.gapInfo(href); return svc.searchFull(href, g2.fp, '问题'); })(), ['searchFull', href, { q: '问题' }]);
+
 // contract hygiene
 let unknownErr = null;
 try { await dm.transcriptOp('rm-rf', ref, {}); } catch (e) { unknownErr = e; }
