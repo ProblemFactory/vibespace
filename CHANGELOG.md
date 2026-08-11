@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.296.0
+
+**Incident reports gain the two things the layout-collapse investigation lacked: a trail of what MOVED windows, and a way to put them back** (owner request after the pool-collapse incident: "record more information so future bugs like this are solvable").
+
+That investigation exposed two separate gaps. Diagnosis: the action ring had clicks and the ws ring had message types, but NOTHING recorded the desktop reassignments — the sequence had to be reconstructed by reading code. Recovery, worse: sessions survive, but WHERE they lived does not, and because the damage EMPTIED two desktops even the pre-damage mapping was gone; the only path was hand-editing layouts.json, and the emptied desktops' windows could not be placed at all.
+
+- **Semantic breadcrumbs**: `window.__vsOp(name, data)` feeds a 4th incident ring (cap 300), wired at the three ops that RELOCATE or REPLACE a window/session (desktop-move, pool-cold-restart, resume-place). Names and ids only — the privacy rules are unchanged.
+- **Layout rollback points**: `writeLayouts` — the one choke point every layout write passes through — preserves the previous state in `data/layout-history/` whenever the desktop→window SHAPE changes (geometry drags ignored, or one drag would evict the whole ring). ⚙ → **Restore a previous layout…** turns what was JSON surgery into one click, and restoring is itself undoable.
+- Incident bundles now carry the window→desktop→session table and the rollback-point index.
+
+An adversarial review pass (4 dimensions, every finding independently verified) caught **two critical defects in this very feature** before it shipped, both of which would have made it silently useless:
+1. **Persisted windows carry `winId`, not `id`** (confirmed against a real production layouts.json). The shape signature read `id`, so it was permanently empty and NO rollback point would ever have been written — while the tests passed on a fixture that used `id`.
+2. **`readLayouts()` returns the live cache and every production caller mutates it in place**, so the snapshot captured the ALREADY-DAMAGED state: restoring would have re-applied the collapse. Fixed with a detached copy (plus a disk read for the cold-cache case); the test now mirrors the real read-modify-write pattern, and a negative control confirms it catches the bug.
+
+Also from that review: restore now forces a rollback point (an equal-shape restore silently overwrote presets/grids), broadcasts `layout-restored` so another open tab can't write the damaged layout back seconds later, does its IO off the layout-sync hot path, writes atomically with a sidecar header (listing no longer parses 40 whole layouts), keeps the OLDEST entries as well as the newest (a resume storm must not evict the pre-storm state), disambiguates duplicate desktop names, and surfaces a permanently unwritable history dir instead of failing silently. The confirm dialog was being called with a string where an options object was required, so the destructive-restore warning rendered blank.
+
+
 ## 2.295.0
 
 **Pool cold-switch no longer collapses your whole layout onto one desktop** (a fleet user, inc-mso43urh — a pool target switch pulled every session out of every desktop and piled them onto the active one).

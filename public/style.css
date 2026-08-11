@@ -3377,3 +3377,11 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .host-state-error { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
 .host-state-ok { color: var(--green, #3fb950); background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); }
 @keyframes host-chip-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* Layout rollback points (⚙ → Restore a previous layout) */
+.lh-list { max-height: 420px; overflow-y: auto; margin-top: 8px; }
+.lh-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.lh-row:last-child { border-bottom: none; }
+.lh-main { flex: 1; min-width: 0; font-size: 12px; }
+.lh-sub { color: var(--text-secondary); font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-restore { flex-shrink: 0; }

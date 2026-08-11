@@ -55,10 +55,164 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
     if (_layoutsCache) { try { ensureDir(dataDir); writeJsonAtomic(LAYOUTS_FILE, _layoutsCache); } catch {} }
   }
+  // ── LAYOUT HISTORY (2.296.0, after a bug flattened a user's whole desktop
+  // layout and the only good copy was gone). Layouts are the one piece of
+  // state a bug can destroy in a way no transcript recovers: sessions survive,
+  // but WHERE they lived is unrecoverable. Every write passes through here, so
+  // this is the one place a rollback point can exist.
+  //
+  // Snapshot the PREVIOUS state (the about-to-be-replaced one) whenever the
+  // desktop→window SHAPE changes — geometry drags and z-order churn are
+  // deliberately ignored, or a drag would evict every useful restore point in
+  // seconds. A destructive write therefore always leaves the last good shape
+  // on disk. Bounded: 40 files, newest kept, tiny JSON.
+  const HISTORY_DIR = path.join(dataDir, 'layout-history');
+  const HISTORY_MAX = 40;
+  // shape = per-desktop sorted window ids. Catches windows moving between
+  // desktops, disappearing, or a desktop being emptied — the damage classes.
+  // CRITICAL (adversarial review, verified against a real production
+  // layouts.json): PERSISTED windows carry `winId`, not `id` — `id` exists
+  // only on in-memory window objects. Reading `w.id` made every shape
+  // signature EMPTY, so NO rollback point would ever be written for a window
+  // change: the feature would have been silently dead in production while its
+  // tests passed on a fixture that used `id`. Same tolerant read the restore
+  // path already uses (src/lib/layout.js:108, :229).
+  const winKey = (w) => w?.winId || w?.id;
+  function layoutShape(data) {
+    if (!data) return '';
+    const parts = [];
+    for (const [dk, v] of Object.entries(data.desktops || {})) {
+      const ids = ((v?.autoSave || {}).windows || []).map(winKey).filter(Boolean).sort();
+      parts.push(dk + ':' + ids.join(','));
+    }
+    const top = ((data.autoSave || {}).windows || []).map(winKey).filter(Boolean).sort();
+    if (top.length) parts.push('_top:' + top.join(','));
+    return parts.sort().join('|');
+  }
+  function layoutSummary(data) {
+    const perDesktop = {};
+    for (const [dk, v] of Object.entries(data?.desktops || {})) {
+      // Desktop names are NOT unique (both creation sites use `Desktop N` with
+      // no uniqueness check after a delete, and rename accepts anything), so
+      // keying by name alone dropped a whole desktop's row AND under-counted
+      // totalWindows in the picker and in incident bundles.
+      let key = (data.desktopMeta || []).find((m) => m.id === dk)?.name || dk;
+      if (key in perDesktop) key += ` (${dk.slice(-4)})`;
+      perDesktop[key] = ((v?.autoSave || {}).windows || []).length;
+    }
+    // Instances that never created a virtual desktop keep their windows in the
+    // LEGACY top-level autoSave — summarizing only `desktops` reported "0
+    // windows" for them, which makes every rollback point look worthless
+    // exactly where the user has no desktops to reason about (caught live).
+    const top = ((data?.autoSave || {}).windows || []).length;
+    if (top) perDesktop[''] = top;
+    return perDesktop;
+  }
+  let _lastShape = null;
+  let _histSeq = 0;
+  let _histWarned = false;
+  // CRITICAL (adversarial review): readLayouts() hands out the LIVE cache
+  // object and EVERY production caller mutates it in place before calling
+  // writeLayouts (ws layout-sync, desktop create/delete/rename/reorder,
+  // /api/layouts-autosave …). Snapshotting `_layoutsCache` therefore captured
+  // the ALREADY-DAMAGED state — the feature would have stored exactly the
+  // thing it exists to undo. Keep a DETACHED copy of the last written state
+  // instead. (The first test passed only because it always handed writeLayouts
+  // a fresh object — a shape production never uses; the test now mirrors the
+  // real read-modify-write pattern.)
+  let _lastGood = null;
+  function snapshotLayout(prev, nextShape) {
+    try {
+      // No detached copy yet (first write after boot, or a restore issued
+      // before anything read layouts): fall back to what is ON DISK — that IS
+      // the previous state, and skipping here silently drops the very first
+      // change after every restart, which is when a layout bug is most likely
+      // to strike (a restart is the usual remedy someone tries first).
+      if (!prev) {
+        try { prev = JSON.parse(fs.readFileSync(LAYOUTS_FILE, 'utf-8')); } catch { return; }
+      }
+      const prevShape = layoutShape(prev);
+      if (prevShape === nextShape) return;         // shape unchanged — nothing to preserve
+      if (!prevShape) return;                      // nothing meaningful yet (boot)
+      // Persist OFF the write path: writeLayouts runs per layout-sync message
+      // per client — the 500ms debounce right above exists precisely because a
+      // sync write there was a hot path. Only the shape compare (µs) stays
+      // inline; mkdir/stringify/write/prune ride a setImmediate over a
+      // DETACHED copy, so a later mutation of the caller's object cannot reach
+      // the snapshot either.
+      const snap = detach(prev);
+      if (!snap) return;
+      setImmediate(() => {
+        try {
+          fs.mkdirSync(HISTORY_DIR, { recursive: true });
+          const before = layoutSummary(snap);
+          // UNIQUE filename: ISO stamps have millisecond resolution and a burst
+          // of shape changes (what a mass-resume storm produces) lands inside
+          // one millisecond — a bare timestamp silently OVERWROTE the older
+          // entry, destroying the pre-damage state precisely in the incident
+          // this feature exists for.
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-') + '-' + (_histSeq++).toString(36);
+          const total = Object.values(before).reduce((a, b) => a + b, 0);
+          const at = Date.now();
+          // atomic like layouts.json next door — a torn rollback point fails
+          // exactly when it is finally needed
+          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.json`), { at, summary: before, totalWindows: total, layouts: snap });
+          // tiny sidecar header: listing must not parse 40 whole layouts on the
+          // panic-button path
+          writeJsonAtomic(path.join(HISTORY_DIR, `layout-${stamp}.meta.json`), { at, summary: before, totalWindows: total });
+          pruneHistory();
+        } catch (e) {
+          // never silent: the UI asserts this protection exists
+          if (!_histWarned) { _histWarned = true; console.warn('[layout-history] snapshot FAILED — rollback points are not being written:', e.message); }
+        }
+      });
+    } catch {}
+  }
+  // TIERED retention (adversarial review): a flat newest-40 ring is exactly
+  // wrong for this feature's motivating case — a mass-resume storm produces
+  // dozens of shape changes in seconds and would evict every PRE-storm point,
+  // i.e. the only ones worth having. Keep the newest N *and* the oldest few,
+  // so the state from before a burst always survives it.
+  const KEEP_OLDEST = 10;
+  function pruneHistory() {
+    const files = fs.readdirSync(HISTORY_DIR).filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort();
+    if (files.length <= HISTORY_MAX) return;
+    const keep = new Set([...files.slice(0, KEEP_OLDEST), ...files.slice(-(HISTORY_MAX - KEEP_OLDEST))]);
+    for (const f of files) {
+      if (keep.has(f)) continue;
+      try { fs.unlinkSync(path.join(HISTORY_DIR, f)); } catch {}
+      try { fs.unlinkSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json'))); } catch {}
+    }
+  }
+  const detach = (o) => { try { return structuredClone(o); } catch { try { return JSON.parse(JSON.stringify(o)); } catch { return null; } } };
   function writeLayouts(data) {
+    try {
+      const nextShape = layoutShape(data);
+      snapshotLayout(_lastGood, nextShape);   // the DETACHED previous state, never the live cache
+      _lastShape = nextShape;
+      _lastGood = detach(data);
+    } catch {}
     _layoutsCache = data;
     if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer);
     _layoutsSaveTimer = setTimeout(flushLayouts, 500);
+  }
+  function listLayoutHistory() {
+    try {
+      return fs.readdirSync(HISTORY_DIR)
+        .filter((f) => /^layout-.*\.json$/.test(f) && !f.endsWith('.meta.json')).sort().reverse()
+        .map((f) => {
+          // header from the tiny sidecar; the full snapshot (a whole
+          // layouts.json each) is read only when actually restoring
+          try {
+            const m = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f.replace(/\.json$/, '.meta.json')), 'utf-8'));
+            return { id: f, at: m.at, summary: m.summary, totalWindows: m.totalWindows };
+          } catch {}
+          try {
+            const j = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), 'utf-8'));
+            return { id: f, at: j.at, summary: j.summary, totalWindows: j.totalWindows };
+          } catch { return null; } // unparseable → omit, never a 1970/0-window row
+        }).filter(Boolean);
+    } catch { return []; }
   }
 
   router.get('/api/layouts', (req, res) => res.json(readLayouts()));
@@ -118,7 +272,50 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     res.json({ success: true });
   });
 
+  // Layout rollback points. A layout-destroying bug is otherwise
+  // unrecoverable (see LAYOUT HISTORY above) — this is what turns a support
+  // incident into one click.
+  router.get('/api/layout-history', (req, res) => res.json({ entries: listLayoutHistory() }));
+  router.post('/api/layout-history/:id/restore', (req, res) => {
+    const id = String(req.params.id || '');
+    if (!/^layout-[\w.-]+\.json$/.test(id)) return res.status(400).json({ error: 'bad id' });
+    let saved;
+    try { saved = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, id), 'utf-8')); }
+    catch { return res.status(404).json({ error: 'not found' }); }
+    if (!saved?.layouts) return res.status(400).json({ error: 'entry has no layout' });
+    // Warm the cache first: a restore issued before anything else read layouts
+    // (server restarted while the tab stayed open — the usual sequence right
+    // after a layout bug) left _lastGood null, so no rollback point was
+    // written and the pre-restore layout was destroyed. The dialog PROMISES
+    // this is undoable; make that true. (snapshotLayout also reads from disk
+    // as a belt, so both halves are covered.)
+    readLayouts();
+    if (!_lastGood) _lastGood = detach(_layoutsCache);
+    // FORCE a rollback point: a restore whose window SHAPE happens to match the
+    // current one (reachable via a move-and-move-back round trip) would skip
+    // the shape gate while still overwriting `saved` presets, customGrids and
+    // all geometry — silently, on an action whose dialog promises it is
+    // undoable. The restore is the one write that must never be gated.
+    snapshotLayout(_lastGood, '\u0000force-' + Date.now());
+    // the CURRENT state becomes a rollback point too — restoring is itself
+    // undoable, so a mis-click can never be the end of the story
+    writeLayouts(saved.layouts);
+    flushLayouts();
+    // BROADCAST (adversarial review): every other layout mutation broadcasts;
+    // this one did not. Another open tab keeps its pre-restore state and the
+    // next window change there writes that desktop's OLD window set straight
+    // back — the user watches the restore succeed and the layout re-flatten
+    // seconds later, with nothing in any log. Tell every client to reload,
+    // exactly what the restoring client does.
+    try {
+      const j = JSON.stringify({ type: 'layout-restored' });
+      wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } });
+    } catch {}
+    res.json({ success: true, summary: saved.summary, restoredFrom: saved.at });
+  });
+
   // Expose for server.js to use directly
+  router.listLayoutHistory = listLayoutHistory;
   router.readLayouts = readLayouts;
   router.writeLayouts = writeLayouts;
   router.flushLayouts = flushLayouts;

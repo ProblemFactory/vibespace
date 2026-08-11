@@ -241,6 +241,14 @@ class App {
         // client acting would race duplicate resumes.
         for (const sess of msg.affected) { try { this._poolColdRestart(sess, msg.poolId); } catch {} }
       }
+      if (msg.type === 'layout-restored') {
+        // Another client restored a rollback point. Without this our stale
+        // in-memory layout would be written back on the next window change,
+        // silently undoing the restore (adversarial review).
+        showToast(t('Layout restored on another device — reloading…'));
+        setTimeout(() => location.reload(), 900);
+        return;
+      }
       if (msg.type === 'server-notice' && msg.text) {
         // Probe-reported condition (2.226.0): server-side silent failures now
         // surface as toasts (+ notification history) instead of dying in the
@@ -1061,7 +1069,8 @@ class App {
       item(I.puzzle, t('Plugins\u2026'), () => this.openPluginsDialog()),
       item(I.chart, t('Usage\u2026'), () => this.openUsage()),
       item(I.pulse, t('Diagnostics report\u2026'), () => this._openDiagnostics()),
-      item(I.alert || I.pulse, t('Report a problem\u2026'), () => this.captureIncident?.()));
+      item(I.alert || I.pulse, t('Report a problem\u2026'), () => this.captureIncident?.()),
+      item(I.exp || I.pulse, t('Restore a previous layout\u2026'), () => this._showLayoutHistory()));
     menu.append(sep(),
       item(I.exp, t('Backup & migrate\u2026'), () => this._showTransferDialog()),
       item(I.lock, this._authEnabled ? t('Change password\u2026') : t('Set password\u2026'), () => this._showPasswordDialog()));

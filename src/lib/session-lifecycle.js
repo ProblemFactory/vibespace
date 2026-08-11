@@ -51,6 +51,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (desktopExists && destDesktop !== winInfo._desktopId && dm?.moveWindowToDesktop) {
         try { dm.moveWindowToDesktop(winInfo.id, destDesktop); } catch {}
       }
+      try { window.__vsOp?.('resume-place', { win: winInfo.id, home: destDesktop || null, exists: desktopExists, landed: winInfo._desktopId }); } catch {}
     }
     // Correlation id: concurrent creates (e.g. group resume-all) must each
     // match their OWN 'created' reply — an untagged match binds the ChatView
