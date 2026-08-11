@@ -109,6 +109,35 @@ function bucketRems(cache, nowSec) {
 // remaining is docked by pct on BOTH sides of a decision — the current
 // target trips exhaustion earlier AND a dark-tainted candidate looks worse
 // (switching ONTO invisible burn is as dangerous as staying on it).
+// EDF comparator — ONE implementation for the live decision AND the
+// sealed-orders ranked snapshot the daemon holds (design §Pool management).
+function edfCompare(a, b) {
+  if (a.deadline != null && b.deadline != null) {
+    if (Math.abs(a.deadline - b.deadline) > 60) return a.deadline - b.deadline;
+    return b.eff - a.eff;
+  }
+  if (a.deadline != null) return -1;
+  if (b.deadline != null) return 1;
+  return b.eff - a.eff;
+}
+
+/** The ranked member snapshot pushed to the holding device (sealed orders):
+ *  usable members in EDF order — the device executes a LOCAL fallback switch
+ *  down this list only when it both sees a hard limit banner AND cannot
+ *  reach the orchestrator. */
+function rankPoolMembers({ members, readCache, nowSec }) {
+  const out = [];
+  for (const m of members) {
+    const c = readCache(m.id);
+    const r = accountRemaining(c, nowSec);
+    const br = bucketRems(c, nowSec);
+    if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) continue;
+    out.push({ id: m.id, name: m.name, eff: r.known ? r.remaining : UNKNOWN_REMAINING_PCT, deadline: weeklyDeadline(c, nowSec) });
+  }
+  out.sort(edfCompare);
+  return out;
+}
+
 function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {} }) {
   const dock = (id, brs) => brs.map((b) => ({ ...b, remaining: Math.max(0, b.remaining - (pessimism[id] || 0)) }));
   const dockRem = (id, r) => (r.known ? { ...r, remaining: Math.max(0, r.remaining - (pessimism[id] || 0)) } : r);
@@ -147,15 +176,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     const settleOk = r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT);
     ranked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk, remaining: r.known ? r.remaining : null, deadline: weeklyDeadline(c, nowSec) });
   }
-  ranked.sort((a, b) => {
-    if (a.deadline != null && b.deadline != null) {
-      if (Math.abs(a.deadline - b.deadline) > 60) return a.deadline - b.deadline;
-      return b.eff - a.eff;
-    }
-    if (a.deadline != null) return -1;
-    if (b.deadline != null) return 1;
-    return b.eff - a.eff;
-  });
+  ranked.sort(edfCompare);
   if (!ranked.length) return null;
 
   const bestSettle = ranked.find((r) => r.settleOk) || null;
@@ -183,4 +204,4 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   return null;
 }
 
-module.exports = { SWITCH_THRESHOLD_PCT, THRESH, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };
+module.exports = { SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };

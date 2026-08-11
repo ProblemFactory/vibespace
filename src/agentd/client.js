@@ -201,7 +201,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -223,6 +223,7 @@ class DeviceManager {
               if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'usage-events') { this._onUsageEvents?.(m); return; }
+              if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || []); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
@@ -440,6 +441,21 @@ class DeviceManager {
     if (r?.error) throw new Error(r.error); // an error-ack resolves — never swallow it
     return true;
   }
+  /** Push a pool's sealed orders (ranked member snapshot) to the device;
+   *  null clears. onExecuted(events) receives fallback switches the device
+   *  performed while no orchestrator was reachable — call ackPoolOrdersLog()
+   *  after recording them. */
+  async poolOrders(orders, onExecuted) {
+    if (onExecuted) this._onPoolOrdersExecuted = onExecuted;
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('pool-orders')) throw new Error('daemon lacks pool-orders (capabilities gate)');
+    const r = await this._request({ op: 'pool-orders', orders, timeoutMs: 15000 });
+    if (r?.error) throw new Error(r.error);
+    if (r?.events?.length && this._onPoolOrdersExecuted) this._onPoolOrdersExecuted(r.events);
+    return r?.events || [];
+  }
+  ackPoolOrdersLog() { try { this._conn?.mux?.control({ op: 'pool-orders-log-ack' }); } catch { } }
+
   ackUsageEvents(seq) {
     try { this._conn?.mux?.control({ op: 'usage-events-ack', seq }); } catch { }
   }

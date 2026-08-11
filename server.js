@@ -731,7 +731,7 @@ function broadcastToSession(session, id, msg) {
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('./src/account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('./src/account-pool-auto.js');
 const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
@@ -839,6 +839,33 @@ function darkTaintedAccounts() {
 }
 const DARK_PESSIMISM_PCT = 8; // dock: ~1 long turn of 5h headroom / real weekly $
 
+const _sealedOrdersSent = new Map(); // poolId → last pushed JSON (skip no-ops)
+async function pushSealedOrders(poolId) {
+  const a = accounts.get(poolId);
+  if (!a || a.type !== 'pooled') return;
+  const members = accounts.poolMembers(poolId);
+  const ranked = rankPoolMembers({
+    members,
+    readCache: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } },
+    nowSec: Date.now() / 1000,
+  }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
+  const orders = { poolId, linkPath: accounts.subDir(poolId), ranked, currentId: accounts.poolCurrent(poolId) || null };
+  const j = JSON.stringify(orders);
+  if (_sealedOrdersSent.get(poolId) === j) return;
+  const dm = await hosts.device(null); // device #0 — pools are local-only
+  await dm.poolOrders(orders, (events) => {
+    // fallback switches executed while this server was down: surface + let
+    // the by-time ledger attribution reconcile billing (it already keys on
+    // the symlink target's real account at scan time)
+    for (const ev of events) {
+      serverNotice('sealed-orders-' + ev.ts, `账号池 ${accounts.get(ev.poolId)?.name || ev.poolId} 在服务器离线期间因触限自动切换到 ${accounts.get(ev.to)?.name || ev.to}（sealed-orders 应急反射）`, { level: 'warn' });
+      try { console.log('[sealed-orders] device-executed fallback switch:', JSON.stringify(ev)); } catch { }
+    }
+    try { dm.ackPoolOrdersLog(); } catch { }
+  });
+  _sealedOrdersSent.set(poolId, j);
+}
+
 function sweepUsageAnchors() {
   // GROUPED BY IDENTITY (2.263.0): recording per cache-file double-anchored
   // org-merged logins (__global__ + named sub interleaved in one identity
@@ -874,6 +901,12 @@ function sweepUsageAnchors() {
     } catch { }
   }
 }
+// boot-time sealed-orders push: a restarted server re-arms every pool's
+// device-side fallback snapshot AND collects executions from its own down
+// window (the report rides the pool-orders reply)
+setTimeout(() => {
+  try { for (const a of (accounts.list().accounts || [])) if (accounts.get(a.id)?.type === 'pooled') pushSealedOrders(a.id).catch(() => { }); } catch { }
+}, 15000);
 setInterval(() => { try { sweepUsageAnchors(); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
 
@@ -1164,6 +1197,12 @@ function maybePoolAutoSwitchForPool(poolId) {
     // cold pools switch on exhaustion only (each switch restarts conversations).
     // Hot pools also treat est<10% as exhaustion (提前切 — switch BEFORE the
     // limit interrupts a long-running workflow; cold keeps 5%).
+    // SEALED ORDERS push (design §Pool management, 2.300.0): after every
+    // evaluation the holding device (device #0 — pools are local-only) gets
+    // the pool's ranked member snapshot. It executes a LOCAL fallback switch
+    // ONLY when it both sees a hard limit banner AND cannot reach this
+    // server; executions are reported on reconnect and re-attributed below.
+    try { pushSealedOrders(poolId); } catch { }
     const d = decidePoolSwitch({ currentId, members: accounts.poolMembers(poolId), readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts() });
     if (!d) return;
     // DWELL belt (2.266.1, real oscillation report): every switch cold-starts
@@ -2280,6 +2319,14 @@ function readSessionMeta(sockName) {
 const _metaTombstones = new Map(); // sockName → deletedAt
 function writeSessionMeta(sockName, meta) {
   if (_metaTombstones.has(sockName)) return;
+  // SESSION-BRAIN step 1 (design §session-brain campaign): the buffer's OWNER
+  // is EXPLICIT in every session record. Today the server writes
+  // data/session-buffers/<id>.buf for every session including remote ones
+  // (the relayed stdout) — 'server'. When session.open (R6) moves parsing +
+  // buffer ownership device-side, those records say 'device' and the attach
+  // path routes by THIS FIELD instead of assuming. Both readers work either
+  // way; no behavior changes until a record actually says 'device'.
+  if (meta && typeof meta === 'object' && !meta.bufferOwner) meta.bufferOwner = 'server';
   ensureDir(META_DIR);
   // tmp+rename (2.219.0): the most frequently written core store was the only
   // non-atomic one — an OOM kill mid-write left truncated JSON that poisoned
