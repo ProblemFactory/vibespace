@@ -114,6 +114,107 @@ function getTranscriptService() {
   });
   return _transcriptSvc;
 }
+
+// ── R5 discovery-snapshot child: the same computation, isolated in a child
+// process so a slow home filesystem can never starve the daemon loop. Placed
+// AFTER the module requires (extractTailIds/pidLooksClaude are consts — a
+// top-of-file branch would hit their TDZ) and before any daemon side effect.
+function computeDiscoverySnapshot() {
+  const home = os.homedir();
+  const locks = [];
+  try {
+    for (const f of fs.readdirSync(path.join(home, '.claude', 'sessions'))) {
+      if (!f.endsWith('.json')) continue;
+      const pid = Number(f.slice(0, -5));
+      let alive = false; try { process.kill(pid, 0); alive = true; } catch { }
+      if (!alive) continue;
+      // PID-reuse guard (discovery-facts, 2.278.0): liveness alone let
+      // a recycled pid surface a phantom "running" session — the hole
+      // the LOCAL sweep closed years ago and this snapshot never had.
+      if (!pidLooksClaude(pid)) continue;
+      try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }
+    }
+  } catch { }
+  const jsonls = [];
+  try {
+    const projRoot = path.join(home, '.claude', 'projects');
+    for (const d of fs.readdirSync(projRoot).slice(0, 500)) {
+      const dp = path.join(projRoot, d);
+      let files = []; try { files = fs.readdirSync(dp); } catch { continue; }
+      for (const f of files) {
+        if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue;
+        try {
+          const st = fs.statSync(path.join(dp, f));
+          jsonls.push({ projDir: d, file: f, size: st.size, mtimeMs: st.mtimeMs });
+        } catch { }
+      }
+    }
+  } catch { }
+  jsonls.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const top = jsonls.slice(0, 200);
+  // raw-facts enrichment for the newest files (the ssh script's H/N/T
+  // lines): head cwd, first user lines (name candidates), tail ids
+  const home2 = os.homedir();
+  for (const j of top.slice(0, 60)) {
+    try {
+      const fp = path.join(home2, '.claude', 'projects', j.projDir, j.file);
+      const fd = fs.openSync(fp, 'r');
+      try {
+        const headB = Buffer.alloc(Math.min(16000, j.size));
+        fs.readSync(fd, headB, 0, headB.length, 0);
+        const head = headB.toString('utf-8');
+        j.headCwd = (head.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
+        const users = [];
+        for (const line of head.split('\n')) {
+          if (users.length >= 6) break;
+          if (line.includes('"type":"user"')) users.push(line.slice(0, 2000));
+        }
+        j.userLines = users;
+        const tailStart = Math.max(0, j.size - 65536);
+        const tailB = Buffer.alloc(j.size - tailStart);
+        fs.readSync(fd, tailB, 0, tailB.length, tailStart);
+        j.tailIds = extractTailIds(tailB.toString('utf-8')); // ONE rule (discovery-facts)
+      } finally { fs.closeSync(fd); }
+    } catch { }
+  }
+  // codex rollouts (B-10ed): stopped codex sessions on the device
+  // must reappear as resumable cards like claude's
+  const codexRollouts = [];
+  try {
+    const croot = path.join(home, '.codex', 'sessions');
+    const walk = (d, depth) => {
+      if (depth > 4) return;
+      let ents = []; try { ents = fs.readdirSync(d); } catch { return; }
+      for (const f of ents) {
+        const fp = path.join(d, f);
+        let st; try { st = fs.statSync(fp); } catch { continue; }
+        if (st.isDirectory()) walk(fp, depth + 1);
+        else if (/^rollout-.*\.jsonl$/.test(f)) codexRollouts.push({ path: fp, size: st.size, mtimeMs: st.mtimeMs });
+      }
+    };
+    walk(croot, 0);
+    codexRollouts.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    codexRollouts.length = Math.min(codexRollouts.length, 100);
+    for (const r of codexRollouts.slice(0, 30)) {
+      try {
+        const fd = fs.openSync(r.path, 'r');
+        try {
+          const b = Buffer.alloc(Math.min(32000, r.size));
+          fs.readSync(fd, b, 0, b.length, 0);
+          r.headCwd = (b.toString('utf-8').match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
+        } finally { fs.closeSync(fd); }
+      } catch { }
+    }
+  } catch { }
+  return { locks, jsonls: top, codexRollouts };
+}
+if (process.argv.includes('--discovery-snapshot-child')) {
+  try {
+    process.stdout.on('error', () => process.exit(1));
+    process.stdout.write(JSON.stringify(computeDiscoverySnapshot()), () => process.exit(0));
+  } catch (e) { console.error(e.message); process.exit(1); }
+  return;
+}
 const os = require('os');
 const path = require('path');
 const net = require('net');
@@ -993,95 +1094,30 @@ function serveConnection(sock) {
       // ── M3: session discovery RAW FACTS (locks + jsonl inventory + tail
       // bytes); the lock-first CLAIM algorithm stays server-side ──
       if (msg.op === 'discovery-snapshot') {
-        try {
-          const home = os.homedir();
-          const locks = [];
+        // R5 step 1 (three-tier): the snapshot walk runs in a CHILD process —
+        // readdir over hundreds of project dirs + 60 head/tail reads + a
+        // codex tree walk is exactly the sync-fs-on-the-loop class the R2
+        // rule exists for (a slow/NFS home starved the loop holding every
+        // session pipe). Child failure ⇒ inline fallback, behavior identical
+        // (same function); msg.forceInline lets the parity test pin that.
+        (async () => {
           try {
-            for (const f of fs.readdirSync(path.join(home, '.claude', 'sessions'))) {
-              if (!f.endsWith('.json')) continue;
-              const pid = Number(f.slice(0, -5));
-              let alive = false; try { process.kill(pid, 0); alive = true; } catch { }
-              if (!alive) continue;
-              // PID-reuse guard (discovery-facts, 2.278.0): liveness alone let
-              // a recycled pid surface a phantom "running" session — the hole
-              // the LOCAL sweep closed years ago and this snapshot never had.
-              if (!pidLooksClaude(pid)) continue;
-              try { locks.push({ pid, ...JSON.parse(fs.readFileSync(path.join(home, '.claude', 'sessions', f), 'utf-8')) }); } catch { }
-            }
-          } catch { }
-          const jsonls = [];
-          try {
-            const projRoot = path.join(home, '.claude', 'projects');
-            for (const d of fs.readdirSync(projRoot).slice(0, 500)) {
-              const dp = path.join(projRoot, d);
-              let files = []; try { files = fs.readdirSync(dp); } catch { continue; }
-              for (const f of files) {
-                if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue;
+            let snap = null;
+            if (!msg.forceInline) {
+              snap = await new Promise((resolve) => {
                 try {
-                  const st = fs.statSync(path.join(dp, f));
-                  jsonls.push({ projDir: d, file: f, size: st.size, mtimeMs: st.mtimeMs });
-                } catch { }
-              }
+                  const { execFile } = require('child_process');
+                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
+                    if (err) return resolve(null);
+                    try { const r = JSON.parse(stdout); resolve(r && r.jsonls ? r : null); } catch { resolve(null); }
+                  });
+                } catch { resolve(null); }
+              });
             }
-          } catch { }
-          jsonls.sort((a, b) => b.mtimeMs - a.mtimeMs);
-          const top = jsonls.slice(0, 200);
-          // raw-facts enrichment for the newest files (the ssh script's H/N/T
-          // lines): head cwd, first user lines (name candidates), tail ids
-          const home2 = os.homedir();
-          for (const j of top.slice(0, 60)) {
-            try {
-              const fp = path.join(home2, '.claude', 'projects', j.projDir, j.file);
-              const fd = fs.openSync(fp, 'r');
-              try {
-                const headB = Buffer.alloc(Math.min(16000, j.size));
-                fs.readSync(fd, headB, 0, headB.length, 0);
-                const head = headB.toString('utf-8');
-                j.headCwd = (head.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
-                const users = [];
-                for (const line of head.split('\n')) {
-                  if (users.length >= 6) break;
-                  if (line.includes('"type":"user"')) users.push(line.slice(0, 2000));
-                }
-                j.userLines = users;
-                const tailStart = Math.max(0, j.size - 65536);
-                const tailB = Buffer.alloc(j.size - tailStart);
-                fs.readSync(fd, tailB, 0, tailB.length, tailStart);
-                j.tailIds = extractTailIds(tailB.toString('utf-8')); // ONE rule (discovery-facts)
-              } finally { fs.closeSync(fd); }
-            } catch { }
-          }
-          // codex rollouts (B-10ed): stopped codex sessions on the device
-          // must reappear as resumable cards like claude's
-          const codexRollouts = [];
-          try {
-            const croot = path.join(home, '.codex', 'sessions');
-            const walk = (d, depth) => {
-              if (depth > 4) return;
-              let ents = []; try { ents = fs.readdirSync(d); } catch { return; }
-              for (const f of ents) {
-                const fp = path.join(d, f);
-                let st; try { st = fs.statSync(fp); } catch { continue; }
-                if (st.isDirectory()) walk(fp, depth + 1);
-                else if (/^rollout-.*\.jsonl$/.test(f)) codexRollouts.push({ path: fp, size: st.size, mtimeMs: st.mtimeMs });
-              }
-            };
-            walk(croot, 0);
-            codexRollouts.sort((a, b) => b.mtimeMs - a.mtimeMs);
-            codexRollouts.length = Math.min(codexRollouts.length, 100);
-            for (const r of codexRollouts.slice(0, 30)) {
-              try {
-                const fd = fs.openSync(r.path, 'r');
-                try {
-                  const b = Buffer.alloc(Math.min(32000, r.size));
-                  fs.readSync(fd, b, 0, b.length, 0);
-                  r.headCwd = (b.toString('utf-8').match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
-                } finally { fs.closeSync(fd); }
-              } catch { }
-            }
-          } catch { }
-          mux.control({ op: 'discovery-result', id: msg.id, locks, jsonls: top, codexRollouts });
-        } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
+            if (!snap) snap = computeDiscoverySnapshot();
+            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts });
+          } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
+        })();
         return;
       }
       if (msg.op === 'discovery-watch') {
