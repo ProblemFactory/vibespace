@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.301.0
+
+**Paging bounce-back fixed (inc-mso818ry — the 2.264.0 scroll tracer's first real catch).** Paging up in a busy chat window could bounce back to the live tail every ~1 second: while content-visibility left a freshly inserted batch unresolved, the list's scrollHeight collapsed to about one viewport (trace: `sh 782` on every pathological landing vs `2857+` on healthy ones), making "at top" and "at bottom" SIMULTANEOUSLY true — the pin re-engaged at scrollTop 0, extendBottom yanked the window back to the live tail, and the loop repeated for 50 straight seconds in the captured incident.
+
+- **Collapsed-geometry guard**: with messages outside the rendered window and >10 rendered, a scrollHeight within 200px of clientHeight is INDETERMINATE — the scroll handler makes no boundary decision (no re-pin, no extend either way) and self-documents a `collapsedGeomSkip` trace entry; heights resolve within ~1s and the next event re-evaluates honestly.
+- **Top-edge anchoring**: `_withViewportAnchor` captured NO anchor at scrollTop 0 (`if (st > 0)`), so every extendTop while sitting at the top landed un-anchored and clamped into the fresh batch — the previously-first message is now the anchor (it scrolls back to the top edge, where the reader's eyes were). All-collapsed children (offsetHeight 0) also anchor by position now instead of falling to the estimate-skewed delta path.
+
+Verified against the real-browser paging suite (scrollTop-write interceptor, zero anchor-shift jumps), minimap jumps, and sidebar scroll.
+
+
 ## 2.300.0
 
 **Three-tier closure, batch 4: the sealed-orders emergency reflex (design §Pool management) + session-brain step 1.**
