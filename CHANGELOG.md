@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.292.0
+
+**Switchover: remote transcript reads and remote discovery are now served BY THE MACHINE THAT OWNS THE DATA** (owner directive; R3 + R5 of docs/design-three-tier.md go live behind per-op fallback ladders).
+
+- **Remote reads (R3)**: attach history, pagination, turn map, indexed search, chat status and task state for a remote session now run as `transcript-op` on that machine's daemon — the wire carries parsed KBs instead of a multi-MB raw transcript pull. Dark since 2.285.0 with a byte-identical parity suite; capability-gated.
+- **Remote discovery (R5)**: `discovery-claims` returns finished session cards computed on the device; the orchestrator only merges across machines. Dark since 2.291.0 with byte-identical parity; capability-gated.
+
+Both switches are **ladders, not replacements** (the design's per-op rule): device op → the previous implementation (transcript cache pull / server-side snapshot interpretation) → the legacy ssh script → stale cache. An un-upgraded daemon is never even asked (capability gate — unknown ops would hang), a link failure degrades with a visible throttled warning rather than silently, and every rung stays exercised by the suites. `scripts/test-transcript-switchover.mjs` (7 asserts) pins the whole ladder.
+
+TWO invariants the switch deliberately preserves:
+- **A LIVE session never reads from the device.** The server owns its stdout buffer overlay (the 2.74.0 position-preserving merge) and the live normalizer; asking the device there would drop the not-yet-flushed tail. Only rebuild-from-file reads switch.
+- **The huge-file seek family stays on one source of truth.** It speaks in FILE LINE NUMBERS and its streaming full-file search has no device op yet — serving gap info from the device while search reads a local cache copy would put line offsets on two sources and teleport readers to the wrong place. It switches as a whole (with a search op) or not at all.
+
+
 ## 2.291.0
 
 **R5 step 3 (three-tier): `discovery.v2` — the device computes its own session claims** (dark, byte-identical parity proven).
