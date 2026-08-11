@@ -1207,7 +1207,11 @@ function serveConnection(sock) {
             }
             else if (m === 'searchFull') {
               const g = await svc.gapInfo(ref);
-              result = g.fp ? svc.searchFull(ref, g.fp, String(msg.params?.q || '')) : { matches: [], truncated: false };
+              // AWAIT: searchFull became async when the seek family switched
+              // (2.293.0) — an un-awaited Promise serializes as `{}` and the
+              // parity suite caught exactly that. Any service method that
+              // gains async-ness must be re-checked at THIS call site.
+              result = g.fp ? await svc.searchFull(ref, g.fp, String(msg.params?.q || '')) : { matches: [], truncated: false };
             }
             else if (m === 'fullTurnmap') {
               const g = await svc.gapInfo(ref);

@@ -436,16 +436,33 @@ class UsageHistory {
       if (!line.trim()) continue;
       let e; try { e = JSON.parse(line); } catch { continue; }
       if (!e || !e.rid || !e.ts) continue;
+      const ts = Number(e.ts) || Date.now();
+      // ── PER-ACCOUNT attribution for remote events (2.294.0, R4 deliverable;
+      // the owner's live complaint: a remote message's billing row could only
+      // say "<host>'s machine login"). VibeSpace ALREADY knows which account
+      // it spawned a remote session with — writeSessionMeta records it into
+      // attribution.ndjson exactly like a local one — and the walker carries
+      // the session id, so the by-time walk resolves the real account.
+      // FALLBACK STAYS HONEST: a session VibeSpace did not spawn (an external
+      // terminal on that machine, or one predating attribution) has no entry,
+      // and those keep the host bucket rather than being invented into some
+      // account. atype 'host' therefore now means "billed by that machine's
+      // own login", which is what it always claimed. ──
+      const attrib = this._attribMap();
+      const resolved = e.sid ? this._acctAt(e.sid, ts, attrib, null) : null;
+      const rinfo = resolved ? (this._resolveAccount(resolved) || null) : null;
+      const rpool = e.sid ? this._poolAt(e.sid, ts, attrib) : null;
       const ev = {
         rid: `h:${hostId}:${e.rid}`,
         mid: e.mid || undefined, // message.id join field — see eventForMid
-        ts: Number(e.ts) || Date.now(),
+        ts,
         sid: e.sid || null,
         be: e.be === 'codex' ? 'codex' : 'claude', // v2 walkers emit codex rollout events too
         model: e.model || null,
-        acct: hostId, // host ids are already 'host-…' — distinct from acct-/sub-/cxs- account ids
-        atype: 'host',
-        aname: hostName || hostId,
+        acct: resolved || hostId, // host ids are already 'host-…' — distinct from acct-/sub-/cxs- account ids
+        pool: rpool || undefined,
+        atype: resolved ? (rinfo ? rinfo.type : 'unknown') : 'host',
+        aname: resolved ? (rinfo ? (rinfo.name || null) : null) : (hostName || hostId),
         mode: null,
         host: hostId,
         cwd: e.cwd || null,
