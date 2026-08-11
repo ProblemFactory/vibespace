@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.312.0
+
+### Fixed
+- **A pooled account could lock onto a dead member and never leave.** When the current target is genuinely out of quota, the switch picked `ranked[0]` — the EDF choice, i.e. the member whose weekly window resets soonest. That is the right policy while there is still a choice about *when* to burn quota; it is the wrong one when there is no quota at all, because a member whose window just ROLLED has no known deadline and therefore sorts LAST by design. So a fully-fresh account was invisible as an escape hatch: reproduced from a reporter's own usage cache, a pool at 0% with a 100%-on-every-bucket member present returned "no switch" for hot AND cold. Liveness now beats efficiency in the hard-dead branch — prefer the EDF-first member that can actually settle, else the most MEASURED headroom (an unknown-data member's fabricated 50% must never win, or "escape the dead account" becomes "jump onto ignorance").
+- **A stuck pool said nothing.** With every member out of quota there is genuinely nowhere to go, but the user only found out by hitting a limit mid-turn. `decidePoolSwitch` gained an opt-in `explain` channel (the historical `null` contract is unchanged for every existing caller) and the engine now emits an hourly notice naming the best remaining member — the state where only the user can act.
+
+### Tests
+- Liveness, its negative control, the unknown-data guard, and the explain channel are pinned in scripts/test-pool-auto.mjs.
+- **The model-scoped bucket semantics are now pinned too** — an adversarial pass found them unpinned despite being load-bearing: every model-scoped weekly is flattened into kind `weekly` and `accountRemaining` is min-across-all, so one spent cap for a model *nobody is using* declares the whole account unusable. That is today's contract; a model-aware version must deliberately update those asserts rather than discover them.
+
 ## 2.311.0
 
 ### Changed

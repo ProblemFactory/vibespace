@@ -902,6 +902,7 @@ export default {
   "Top processes (by memory)": "上位プロセス（メモリ順）",
   "Top consumer:": "最大消費：",
   "Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.": "コンテナのメモリ上限に接近——カーネルがインスタンス全体を OOM kill する可能性があります（全セッションが終了）。下の上位プロセスを停止してください。",
+  "cgroup total {raw} incl. {cache} file cache (reclaimable, not counted above)": "cgroup 合計 {raw}（うち {cache} はファイルキャッシュ＝回収可能、上記には非計上）",
   "Orphaned dev servers show in Ports with a Kill button": "孤児 dev サーバーは「ポート」パネルに Kill ボタン付きで表示されます",
   "Memory at {pct}% of the container limit — an OOM kill would end EVERY session.": "メモリがコンテナ上限の {pct}% に到達——OOM kill されると全セッションが終了します。",
   "· logged in on {host}": "・{host} でログイン済み",

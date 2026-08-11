@@ -138,7 +138,11 @@ function rankPoolMembers({ members, readCache, nowSec }) {
   return out;
 }
 
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {} }) {
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, explain = false }) {
+  // `explain` keeps the historical contract (null = no switch) for every
+  // existing caller and test, while letting the engine ask WHY nothing
+  // happened — a pool sitting on a dead account must not be silent.
+  const none = (why, extra) => (explain ? { to: null, reason: why, ...extra } : null);
   const dock = (id, brs) => brs.map((b) => ({ ...b, remaining: Math.max(0, b.remaining - (pessimism[id] || 0)) }));
   const dockRem = (id, r) => (r.known ? { ...r, remaining: Math.max(0, r.remaining - (pessimism[id] || 0)) } : r);
   const curCache = readCache(currentId);
@@ -154,8 +158,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const hardDead = cur.known && curBr.some(dead);
   // No data on the current target → we cannot judge exhaustion; staying put is
   // safer than flapping on ignorance (the ledger will teach us eventually).
-  if (!cur.known && !proactive) return null;
-  if (!exhausted && !proactive) return null;
+  if (!cur.known && !proactive) return none('no-data');
+  if (!exhausted && !proactive) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
 
   // Rank candidates by EDF: known weekly deadline ascending; same deadline
   // (±60s) → MORE remaining first (equal-deadline order can't change total
@@ -177,20 +181,36 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     ranked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk, remaining: r.known ? r.remaining : null, deadline: weeklyDeadline(c, nowSec) });
   }
   ranked.sort(edfCompare);
-  if (!ranked.length) return null;
+  if (!ranked.length) return none('no-members', { fromRemaining: cur.known ? cur.remaining : null });
 
   const bestSettle = ranked.find((r) => r.settleOk) || null;
   if (exhausted) {
     if (hardDead) {
       // genuinely unusable — any meaningfully-better member beats staying,
       // even one below the settle bar (scraps > nothing)
-      const best = ranked[0];
-      if (best.eff <= cur.remaining + MIN_GAIN_PCT) return null;
+      // LIVENESS BEATS EFFICIENCY once the current target is genuinely dead.
+      // ranked[0] is the EDF pick — soonest weekly deadline — which is the
+      // right policy while we still have a CHOICE about when to burn quota.
+      // It is the wrong pick when we have none: a member whose window just
+      // ROLLED has no known deadline and therefore sorts LAST by design, so a
+      // fully-fresh account was invisible as an escape hatch and the pool
+      // stayed locked on a dead one until the user hit a limit (real incident
+      // 2026-08-11, reproduced from the reporter's own usage cache: current at
+      // 0% with a 100%-on-every-bucket member present returned null for hot
+      // AND cold). Prefer the EDF-first member that can actually SETTLE; with
+      // none, take the most headroom rather than the soonest deadline.
+      // "Most headroom" only means something when the headroom was MEASURED:
+      // an unknown member carries the fabricated UNKNOWN_REMAINING_PCT, which
+      // would otherwise beat every real reading and turn "escape the dead
+      // account" into "jump onto ignorance" (caught by the anti-flap test).
+      const knownRanked = ranked.filter((r) => r.known);
+      const best = bestSettle || (knownRanked.length ? knownRanked.reduce((x, y) => (y.eff > x.eff ? y : x)) : ranked[0]);
+      if (best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id });
       return { to: best.id, toName: best.name, fromRemaining: cur.remaining, toRemaining: best.remaining, reason: 'exhausted' };
     }
     // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
-    if (!bestSettle) return null;
+    if (!bestSettle) return none('no-settleable', { fromRemaining: cur.remaining });
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.remaining, toRemaining: bestSettle.remaining, reason: 'exhausted' };
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
@@ -201,7 +221,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC) {
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'edf' };
   }
-  return null;
+  return none('hold', { fromRemaining: cur.known ? cur.remaining : null });
 }
 
 module.exports = { SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };

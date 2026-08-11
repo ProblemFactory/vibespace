@@ -133,5 +133,50 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
   ck('dark-tainted candidate fails the settle bar after docking — pool stays', noSettle === null);
 }
 
+
+// ── LIVENESS: escaping a dead target beats EDF efficiency (2.312.0) ──────────
+// Real incident 2026-08-11, reproduced from the reporter's own usage cache: the
+// pool sat on a 0%-remaining account while a member with 100% on EVERY bucket
+// was present, returning null for hot AND cold. Cause: that member's windows
+// had ROLLED, so it has no known deadline and sorts LAST by design, and the
+// hard-dead branch only ever looked at ranked[0].
+{
+  const rolled = { fiveHour: { utilization: 0.9, resetsAt: past }, sevenDay: { utilization: 0.9, resetsAt: past }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: past }] };
+  const dead = acct(0.55, 3 * D, { uf: 1 });      // scoped spent → 0% remaining
+  const nearly = acct(0.56, 3 * D, { uf: 0.97 }); // 3% — a real deadline, so EDF-first
+  const m3 = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }];
+  const dec = (opts = {}) => decidePoolSwitch({ currentId: 'a', members: m3, readCache: (id) => ({ a: dead, b: nearly, c: rolled })[id] ?? null, nowSec: NOW, ...opts });
+  ck('liveness: a hard-dead pool escapes to the rolled-window member, not the EDF-first scraps', dec()?.to === 'c');
+  ck('liveness: same for a hot pool', dec({ hot: true })?.to === 'c');
+  // negative control: with the rolled member REMOVED the old behaviour stands —
+  // 3% is not a meaningful gain over 0% + margin, so staying put is correct.
+  ck('liveness control: no better member ⇒ still no switch',
+    decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: dead, b: nearly })[id] ?? null, nowSec: NOW }) === null);
+  // ...and it must SAY so rather than fail silently (the notice the engine emits)
+  const why = decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: dead, b: nearly })[id] ?? null, nowSec: NOW, explain: true });
+  ck('explain: a stuck pool reports reason "stuck" with both numbers', why?.to === null && why.reason === 'stuck' && why.fromRemaining === 0 && Math.round(why.bestRemaining) === 3);
+  ck('explain: the historical null contract is unchanged without it',
+    decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: dead, b: nearly })[id] ?? null, nowSec: NOW }) === null);
+  // UNKNOWN data must never win the headroom scan: its fabricated 50% would
+  // beat every real reading and turn "escape" into "jump onto ignorance".
+  ck('liveness: an unknown-data member does NOT beat a measured one',
+    decidePoolSwitch({ currentId: 'a', members: m3, readCache: (id) => ({ a: dead, b: acct(0.2, 3 * D) })[id] ?? null, nowSec: NOW })?.to === 'b');
+}
+
+// ── SCOPED buckets are model-BLIND (pinned so any change is deliberate) ──────
+// The decision flattens every model-scoped weekly into kind 'weekly' and takes
+// min-across-all, so a spent cap for a model NOBODY IS USING declares the whole
+// account unusable. That is today's contract; a model-aware version must
+// deliberately update these asserts, not discover them.
+{
+  const opusDead = { fiveHour: { utilization: 0.1, resetsAt: NOW + 1800 }, sevenDay: { utilization: 0.4, resetsAt: NOW + 3 * D },
+    scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: NOW + 3 * D }, { name: 'Opus', utilization: 0.99, resetsAt: NOW + 3 * D }] };
+  ck('scoped: ONE spent model cap drags accountRemaining to that bucket', accountRemaining(opusDead, NOW).remaining === 1);
+  ck('scoped: …so the account is treated as exhausted even with 60% of its 7d left',
+    decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: opusDead, b: acct(0.3, 3 * D) })[id] ?? null, nowSec: NOW })?.to === 'b');
+  ck('scoped: …and it is gated OUT as a candidate for the same reason',
+    decidePoolSwitch({ currentId: 'b', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: opusDead, b: acct(0.99, 3 * D) })[id] ?? null, nowSec: NOW }) === null);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

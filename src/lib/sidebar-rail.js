@@ -385,6 +385,13 @@ export function installSidebarRail(Sidebar) {
         if (d.mem) {
           parts.push(`<div class="usage-section-title">${escHtml(tr('Memory'))}</div>`);
           parts.push(bar(d.mem.pct, `${fmt(d.mem.used)} / ${fmt(d.mem.limit)} · ${d.mem.pct}%`));
+          // The cgroup's own total counts reclaimable page cache; a
+          // file-heavy pod sits at 100% of it forever while nothing is wrong.
+          // We show the working set (kubectl-top definition) and name the
+          // difference, so this panel and any other tool can be reconciled.
+          if (d.mem.raw > d.mem.used * 1.15 && d.mem.cache > 0) {
+            parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('cgroup total {raw} incl. {cache} file cache (reclaimable, not counted above)', { raw: fmt(d.mem.raw), cache: fmt(d.mem.cache) }))}</div>`);
+          }
           if (!hostId && d.mem.pct >= 80) parts.push(`<div class="usage-warn">${escHtml(tr('Close to the container limit — the kernel may OOM-kill the whole instance (all sessions die). Stop the top consumers below.'))}</div>`);
         }
         if (d.disk) {
