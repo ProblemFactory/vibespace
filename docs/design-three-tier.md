@@ -191,9 +191,22 @@ sb-parity-hit/miss metrics + throttled divergence log; harness parity proven
 (scripts/test-session-brain-dark.mjs, real daemon, byte-identical create mids).
 KEY MECHANIC recorded for step 3: mids are PREFIXED with the emitting
 normalizer's session id (device = its sid/keeperSid, server = the webui id),
-so ALL cross-parse comparison is suffix-wise (`_sbMidCore`). Step 3 (consumers
-switch) is now gated ONLY on live parity holding at zero misses — watch the
-sb-parity-* metrics in Diagnostics. The step-2 substrate exists — the daemon now owns a stdout tailer
+so ALL cross-parse comparison is suffix-wise (`_sbMidCore`). **Step 3 SHIPPED 2.317.0** (device-assisted consumers: raw records ride
+session-events; `claudeSideEffects` = the six families' ONE implementation;
+record-level first-writer-wins — parse primary + registers, the device feed
+covers only records the parse missed; TaskCreate stays parse-only, its id
+exists only in the tool RESULT). **Step 4 / R6 SHIPPED 2.318.0, FLAG-GATED
+default OFF** (`agentd.localPipeSessions`): new local chat sessions as daemon
+pipe sessions — same chat-wrapper, same buffer/meta paths, dtach retired for
+them; adoption-based (existing sessions never migrate, spawn falls back to
+dtach, kill → kill-pipe-session, boot re-opens agentdPipe metas by sid).
+ACTIVATION RULE: flip the flag only after the step-3 sb-parity-*/device-feed
+metrics have soaked live — the sequencing law's final application.
+Remaining in this campaign: B-47e2 (local discovery leg — swap ONLY the FS
+scan segment of /api/sessions to dm.discoverySnapshot() facts, keep webui-pid
+/tmux enrichment, CDP latency proof before the flag) and B-0f13 (remote
+statusline — plan parked in the backlog; the --settings quoting through the
+five remote builders needs a focused session). The step-2 substrate exists — the daemon now owns a stdout tailer
 (sealed-orders) and bundles the shared adapter; the usage/banner/rate-limit
 event families already flow device-side (usage-events push; banner reflex).
 Steps 2 (full-normalizer double-feed, dark) and 3 (message-family consumers
