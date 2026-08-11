@@ -238,4 +238,30 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
   return sessions;
 }
 
-module.exports = { extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, pidLooksClaude, interpretDiscoveryLines, NAME_MAX };
+
+/**
+ * synthesizeDiscoveryLines — device SNAPSHOT (raw facts) → the LOCK/J/H/N/T/
+ * C/HC line format interpretDiscoveryLines consumes. It was inline in
+ * hosts.discoverSessions; extracted with the interpreter (R5) so the whole
+ * chain (snapshot → synthesize → interpret) can run ON the device — the
+ * `discovery.v2` op — with byte-identical logic. The ssh script emits these
+ * same lines directly, which is why the format is the seam.
+ */
+function synthesizeDiscoveryLines(snap) {
+  const lines = [];
+  for (const l of (snap?.locks || [])) lines.push('LOCK ' + JSON.stringify(l));
+  for (const j of (snap?.jsonls || [])) {
+    const fp = `/HOME/.claude/projects/${j.projDir}/${j.file}`;
+    lines.push(`J ${(j.mtimeMs / 1000).toFixed(4)} ${j.size} ${fp}`);
+    if (j.headCwd !== undefined) lines.push(`H ${fp}\t"cwd":"${j.headCwd || ''}"`);
+    for (const u of j.userLines || []) lines.push(`N ${fp}\t${u}`);
+    if (j.tailIds) lines.push(`T ${fp}\t${j.tailIds.join(',')},`);
+  }
+  for (const r of (snap?.codexRollouts || [])) {
+    lines.push(`C ${(r.mtimeMs / 1000).toFixed(4)} ${r.size} ${r.path}`);
+    if (r.headCwd) lines.push(`HC ${r.path}\t"cwd":"${r.headCwd}"`);
+  }
+  return lines.join('\n');
+}
+
+module.exports = { extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX };

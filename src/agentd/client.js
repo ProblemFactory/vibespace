@@ -416,6 +416,14 @@ class DeviceManager {
     return { size: ack.size, data: Buffer.concat(chunks) };
   }
   discoverySnapshot() { return this._request({ op: 'discovery-snapshot' }); }
+  /** R5 `discovery.v2` (DARK): the device interprets its OWN snapshot into
+   *  session cards with the shared functions — the server's job shrinks to
+   *  cross-machine merging. Capability-gated (unknown ops hang old daemons). */
+  async discoveryClaims({ hostId, hostName, forceInline } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('discovery-claims')) throw new Error('daemon lacks discovery-claims (capabilities gate)');
+    return this._request({ op: 'discovery-claims', hostId, hostName, forceInline, timeoutMs: 40000 });
+  }
   async watchDiscovery(onDirty) { this._onDiscoveryDirty = onDirty; return this._request({ op: 'discovery-watch' }); }
   // ── M4 ──
   /** R1 machine facts (shared src/machine-probes.js runs daemon-side).

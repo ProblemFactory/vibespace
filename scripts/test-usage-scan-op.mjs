@@ -125,6 +125,28 @@ const strip = (r) => JSON.stringify({ locks: r.locks, jsonls: r.jsonls, codexRol
 ok(strip(snapChild) === strip(snapInline), 'child-served snapshot BYTE-IDENTICAL to the inline fallback (same function, two isolation modes)');
 ok(snapChild.jsonls[0].tailIds?.includes(SID), 'tail-id enrichment survives the child hop');
 
+// ── R5 step 3: discovery.v2 — the DEVICE interprets its own snapshot into
+// session cards. Byte-identical to the server doing it (same three shared
+// functions), which is what makes the later switchover a transport swap. ──
+{
+  const { interpretDiscoveryLines, synthesizeDiscoveryLines } = require(REPO + '/src/discovery-facts.js');
+  const { claimJsonls } = require(REPO + '/src/session-store.js');
+  const viaDevice = await dm.discoveryClaims({ hostId: 'host-t', hostName: 'BoxT' });
+  const serverSide = interpretDiscoveryLines(synthesizeDiscoveryLines(snapChild), { hostId: 'host-t', hostName: 'BoxT', claimJsonls });
+  ok(!viaDevice.error && Array.isArray(viaDevice.sessions), 'device answers discovery-claims');
+  ok(JSON.stringify(viaDevice.sessions) === JSON.stringify(serverSide),
+    `device-computed claims BYTE-IDENTICAL to server-side interpretation (${viaDevice.sessions?.length} cards)`);
+  ok(viaDevice.sessions.some((x) => x.sessionId === SID), 'the fixture transcript appears as a card');
+  ok(viaDevice.sessions.some((x) => x.backend === 'codex'), 'the codex rollout appears as a card');
+  const caps = (await dm.connect()).info.capabilities;
+  const saved = caps.slice();
+  (await dm.connect()).info.capabilities = [];
+  let gate = null;
+  try { await dm.discoveryClaims({}); } catch (e) { gate = e; }
+  (await dm.connect()).info.capabilities = saved;
+  ok(gate && /lacks discovery-claims/.test(gate.message), 'discovery-claims is capability-gated (fast fail on old daemons)');
+}
+
 // ── forced-fallback smoke (design law: fallbacks rot unless exercised) —
 // the script-SHIP lane hosts.harvestUsage degrades to when the op is
 // unavailable: fsWrite the scanner + runStream it, default cursor. ──
