@@ -1397,6 +1397,28 @@ class HostManager {
           const deadline = (p, ms, what) => Promise.race([p,
             new Promise((_, rj) => setTimeout(() => rj(new Error(`${what} deadline`)), ms).unref())]);
           const dm = await this.deviceBounded(id);
+          // ── R5 SWITCHOVER (2.292.0): ask the DEVICE for finished session
+          // cards (`discovery-claims`, dark since 2.291.0 with byte-identical
+          // parity). The claim algorithm runs where the facts are; the
+          // orchestrator's job shrinks to cross-machine merging. Ladder:
+          // claims op → the snapshot+synthesize path (SAME shared functions,
+          // just executed here) → legacy ssh script → stale cache. All three
+          // rungs stay exercised; capability-gating degrades old daemons.
+          let claimed = null;
+          if ((await dm.connect?.())?.info?.capabilities?.includes?.('discovery-claims')) {
+            try {
+              const res = await deadline(dm.discoveryClaims({ hostId: h.id, hostName: h.name }), 15000, 'device-claims');
+              if (res?.error) throw new Error(res.error);
+              if (Array.isArray(res?.sessions)) claimed = res.sessions;
+            } catch (e3) {
+              console.warn(`[discovery] device claims failed for ${h.name} — falling back to server-side interpretation:`, e3.message);
+            }
+          }
+          if (claimed) {
+            this._discoveryCache.set(id, { at: Date.now(), sessions: claimed });
+            this._persistDiscovery(id, claimed);
+            return claimed;
+          }
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
           out = synthesizeDiscoveryLines(snap); // shared with the device's own discovery.v2 chain
         } catch (e2) { out = null; /* legacy fallback below */ }

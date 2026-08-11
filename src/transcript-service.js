@@ -30,6 +30,37 @@ const {
 } = require('./adapters/codex');
 
 function createTranscriptService({ activeSessions, createSessionMessages, hosts }) {
+  // ── R3 SWITCHOVER (2.292.0): remote reads are served BY THE MACHINE THAT
+  // HOLDS THE BYTES (the daemon's `transcript-op`, dark since 2.285.0 with a
+  // byte-identical parity suite). The wire now carries parsed KBs instead of
+  // multi-MB raw transcripts, which retires the whole partial-transfer
+  // integrity class (2.187.0/2.188.1) for reads.
+  // FALLBACK LADDER, per the design (never per-host, always per-op): device
+  // op → the legacy fetch-to-data/remote-jsonl cache + local parse → honest
+  // error. Capability-gated, so an un-upgraded daemon degrades silently.
+  // LIVE SESSIONS DELIBERATELY SKIP THE DEVICE: the server owns the stdout
+  // buffer overlay (the 2.74.0 position-preserving merge) and the live
+  // normalizer, which the daemon-side service has no knowledge of — asking
+  // the device there would drop the not-yet-flushed tail.
+  let _devWarnedAt = 0;
+  async function tryDevice(r, method, params) {
+    if (!r.host || !hosts?.deviceBounded) return undefined;
+    if (liveWithHistory(r)) return undefined; // server-owned overlay wins
+    try {
+      const dm = await hosts.deviceBounded(r.host, 6000);
+      if (!dm?.transcriptOp) return undefined;
+      if (!(await dm.connect?.())?.info?.capabilities?.includes?.('transcript-op')) return undefined;
+      return await dm.transcriptOp(method, { backend: r.backend, sessionId: r.sessionId, cwd: r.cwd }, params || {});
+    } catch (e) {
+      // Degradation must be VISIBLE (the swallowed-degrade lesson): one log
+      // per minute, then the legacy path runs — never a silent hang.
+      if (Date.now() - _devWarnedAt > 60000) {
+        _devWarnedAt = Date.now();
+        console.warn(`[transcript] device read failed for ${r.host} (${method}) — falling back to the transcript cache:`, e.message);
+      }
+      return undefined;
+    }
+  }
   // Per-(host,session) throttle for the gap family: slabs hit this endpoint
   // once per scroll step, and old lines never change on an append-only file.
   const hostRefreshAt = new Map();
@@ -48,6 +79,14 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       if ((s.backendSessionId || s.claudeSessionId) === r.sessionId) return s;
     }
     return null;
+  };
+
+  /** A live session whose normalizer already holds the FULL history — the
+   *  only case where the server's in-memory view beats re-reading the file
+   *  (and the only case that carries the un-flushed stdout tail). */
+  const liveWithHistory = (r) => {
+    const s2 = liveSession(r);
+    return !!(s2?._normalizer && s2._normalizer.total > 0 && s2._historyLoaded);
   };
 
   /** ?host= transcript cache refresh. throttled=true is the gap-family mode.
@@ -100,6 +139,9 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   }
 
   async function page(ref, { offset, limit, untilUuid } = {}) {
+    const r0 = norm(ref);
+    const viaDev = await tryDevice(r0, 'page', { offset, limit, untilUuid });
+    if (viaDev) return viaDev;
     const { mm } = await view(ref);
     if (untilUuid) {
       const idx = mm.messages.findIndex((m) => m.uuid === untilUuid);
@@ -114,11 +156,15 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   }
 
   async function turnmap(ref) {
+    const viaDev = await tryDevice(norm(ref), 'turnmap', {});
+    if (viaDev) return viaDev;
     const { mm } = await view(ref);
     return { turns: mm.turnMap(), total: mm.total };
   }
 
   async function searchIndexed(ref, q) {
+    const viaDev = await tryDevice(norm(ref), 'searchIndexed', { q });
+    if (viaDev) return viaDev;
     const { mm } = await view(ref);
     return { matches: mm.search(q), total: mm.total };
   }
@@ -129,6 +175,13 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   async function status(ref) {
     const r = norm(ref);
     const session = liveSession(r);
+    const viaDev = await tryDevice(r, 'status', {});
+    if (viaDev) {
+      // permissionMode is NOT in the transcript — it only exists in the live
+      // session's spawn args, so the merge stays server-side either way
+      if (session?._permissionMode && viaDev.chatStatus && !viaDev.chatStatus.permissionMode) viaDev.chatStatus.permissionMode = session._permissionMode;
+      return viaDev;
+    }
     const sm = createSessionMessages(sessionShape(r, session));
     const chatStatus = sm.chatStatus();
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
@@ -139,6 +192,8 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
 
   async function taskState(ref) {
     const r = norm(ref);
+    const viaDev = await tryDevice(r, 'taskState', {});
+    if (viaDev) return viaDev;
     await refreshRemote(r);
     const sm = createSessionMessages(sessionShape(r, liveSession(r)));
     return sm.taskState() || {};
@@ -151,7 +206,15 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       : findSessionJsonlPath(r.sessionId, r.cwd);
   }
 
-  /** Huge-file seek family. gapInfo → {gap, fp, hostFetchError}. */
+  /** Huge-file seek family. gapInfo → {gap, fp, hostFetchError}.
+   *  DELIBERATELY NOT device-switched (2.292.0): this family speaks in FILE
+   *  LINE NUMBERS, and the streaming full-file search (searchFullStream) has
+   *  no device op — it must read a real local file. Serving gapInfo/slabs
+   *  from the device while search read a local cache copy would put line
+   *  offsets on TWO sources of truth: any divergence teleports the reader to
+   *  the wrong place. One source wins; the cache pull that already happens
+   *  for search serves all three. (Switch the whole family together, with a
+   *  search op, or not at all.) */
   async function gapInfo(ref) {
     const r = norm(ref);
     const hostFetchError = await refreshRemote(r, { throttled: true });
