@@ -45,10 +45,13 @@ ok(raw.length <= 2, `raw _discoveryCache.delete confined to invalidate+remove (f
 // The client must react to the broadcast — and must NOT fan out ssh scans for
 // hosts nobody is displaying.
 const wb = readFileSync(new URL('../src/lib/sidebar-workbench.js', import.meta.url), 'utf-8');
-ok(/remote-discovery-dirty/.test(wb), 'client listens for remote-discovery-dirty');
-ok(/_wbRecentHost === id \|\| this\._wbHistoryHost === id/.test(wb), 'displayed host re-scans, others just drop their entry');
+ok(/'remote-sessions'/.test(wb), 'client applies the pushed session list');
+ok(!/_loadRemoteHost\(id, \{ fresh: true \}\)[\s\S]{0,80}remote-sessions/.test(wb) && !/remote-discovery-dirty/.test(wb),
+   'client does NOT re-fetch on the signal (the computation is not the orchestrator-side clients\' job)');
+ok(/msg\.error[\s\S]{0,200}sessions: cur\?\.sessions \|\| null/.test(wb), 'an unreachable machine degrades to the labelled last-known list');
 const srv = readFileSync(new URL('../server.js', import.meta.url), 'utf-8');
-ok(/onDiscoveryDirty[\s\S]{0,400}remote-discovery-dirty/.test(srv), 'server broadcasts the dirty signal');
+ok(/onDiscoveryDirty[\s\S]{0,900}discoverSessions[\s\S]{0,300}remote-sessions/.test(srv), 'server computes once and pushes the RESULT');
+ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation when nobody is connected');
 
 console.log(fail ? `\n${fail} FAILED` : '\nALL PASS');
 process.exit(fail ? 1 : 0);
