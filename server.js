@@ -2961,6 +2961,50 @@ function restoreSessions() {
   }
 }
 
+// ── R6: boot RE-OPEN of local daemon PIPE sessions (agentdPipe metas) ────────
+// These sessions have NO dtach socket — the daemon supervises the wrapper and
+// survives server restarts by itself. Restore = re-open the pipe by sid with
+// the daemon's offset-reattach; failure leaves the meta for the view-only
+// rescue (never deletes — the transcript is intact either way).
+function restoreAgentdPipeSessions() {
+  let metas = [];
+  try { metas = fs.readdirSync(META_DIR).filter((f) => f.endsWith('.json')); } catch { return; }
+  for (const mf of metas) {
+    let meta = null; try { meta = JSON.parse(fs.readFileSync(path.join(META_DIR, mf), 'utf-8')); } catch { continue; }
+    if (!meta?.agentdPipe) continue;
+    const sockFile = mf.slice(0, -5);
+    const id = 'sess-' + sockFile.replace(/^cw-/, '');
+    if (activeSessions.has(id)) continue;
+    const session = {
+      mode: 'chat', backend: meta.backend || 'claude', cwd: meta.cwd || os.homedir(),
+      name: meta.name || 'Session', createdAt: meta.createdAt || Date.now(), sockName: sockFile,
+      clients: new Map(), buffer: '', agentToken: meta.agentToken || null, taskId: meta.taskId || null,
+      _accountId: meta.accountId || null, claudeSessionId: meta.claudeSessionId || null,
+      backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
+      agentdSession: true, keeperSid: id, agentdPipe: true,
+      _permissionMode: meta.permissionMode || null, _effort: meta.effort || null,
+      _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
+    };
+    hosts.device(null).then(async (dm) => {
+      let offset = 0;
+      try { offset = fs.statSync(path.join(BUFFERS_DIR, id + '.buf')).size; } catch { }
+      const h = await dm.openPipeSession({ sid: id, offset });
+      const shim = {
+        pid: h.pid || -1,
+        onData: (cb) => { h.onData = (buf) => cb(buf.toString('utf-8')); },
+        onExit: (cb) => { h.onExit = (code) => cb({ exitCode: code ?? 0 }); },
+        write: (str) => { try { h.write(str); } catch { } },
+        resize: () => { }, kill: () => { try { h.kill(); } catch { } },
+      };
+      activeSessions.set(id, session);
+      session._webuiId = id;
+      setupSessionPty(session, id, shim);
+      console.log(`[restore] re-opened daemon pipe session ${id} "${session.name}"`);
+    }).catch((e) => console.warn(`[restore] daemon pipe session ${id} not re-opened (view-only rescue covers it): ${e.message}`));
+  }
+}
+try { restoreAgentdPipeSessions(); } catch (e) { console.warn('[restore] agentd pipe scan failed:', e.message); }
+
 // ── B-1525 second half: boot AUTO RE-ADOPT of orphaned remote keeper sessions ──
 // Pod-level death kills every local dtach; the dead-socket cleanup preserves
 // REMOTE sessions' metas as .orphan files. For each orphan whose keeper child

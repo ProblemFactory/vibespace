@@ -387,6 +387,11 @@ const SETTINGS_SCHEMA = {
     label: t('Move machines to a ws link automatically'),
     description: t('When an SSH machine\u2019s agent is reachable, install it as a service so it dials back over WebSocket \u2014 fewer per-command SSH spawns and a link that notices breakage. Only runs when a public URL is set above; SSH always stays as the rescue channel.'),
   },
+  'agentd.localPipeSessions': {
+    type: 'boolean', default: false, category: 'Integration',
+    label: t('Local sessions via device daemon (R6)'),
+    description: t('New local chat sessions run as device-daemon pipe sessions instead of dtach — the session-brain final form (survives server restarts via the daemon). Existing sessions are never migrated; any daemon failure falls back to dtach at spawn. Leave off until the device-assisted consumer path has soaked.'),
+  },
   'agents.injectPreamble': {
     type: 'text', default: '',
     label: t('Custom agent instructions (injected)'),

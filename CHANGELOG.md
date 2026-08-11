@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.318.0
+
+### Added
+- **Session-brain step 4 / R6: local chat sessions via device #0 `session.open` — FLAG-GATED, default OFF** (`agentd.localPipeSessions`, Integration). When enabled, a NEW local claude chat session runs the SAME chat-wrapper with the SAME buffer/meta paths as a daemon PIPE session instead of under dtach — the daemon supervises it (setsid child + offset reattach), so it survives server restarts through the daemon rather than through dtach, and the step-2/3 device streams cover it natively (`keeperSid` = the session id). Adoption-based per the design: existing sessions are never migrated, any daemon failure at spawn falls back to dtach (never worse), kill routes to `kill-pipe-session`, and boot re-opens `agentdPipe` metas by sid with the buffer-size offset (failure degrades to the view-only rescue). The flag stays OFF by the design's own sequencing law — flip it once the step-3 consumer metrics have soaked; the code path being complete is what "done" means here, activation is a one-toggle decision with a structural fallback.
+
 ## 2.317.0
 
 ### Added
