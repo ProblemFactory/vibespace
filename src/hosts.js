@@ -851,6 +851,25 @@ class HostManager {
         try { this.onDeviceDirty?.(id); } catch { }
       }).catch(() => { });
     } catch { }
+    // usage-events PUSH (R4 finale): events stream in seconds-fresh; the ack
+    // AFTER durable ingest commits the device cursor (two-phase). When this
+    // stream is live the 60s-floor dirty-kick harvest becomes the fallback
+    // rung (it stays armed — a lapsed push heals through it). Capability-
+    // gated; old daemons just keep the pull path.
+    try {
+      dm.watchUsageEvents?.((m) => {
+        try {
+          const text = (m.batch || []).join('\n');
+          const r = this.onUsageEvents?.(id, text);
+          if (m.seq != null) {
+            // ingest is synchronous today (ingestRemoteEvents appends + fsyncs
+            // via appendFileSync) — ack only on success; a throw above leaves
+            // the batch unacked and it re-emits
+            if (r !== false) dm.ackUsageEvents(m.seq);
+          }
+        } catch { /* unacked → re-emitted → rid dedup absorbs */ }
+      }).catch(() => { });
+    } catch { }
   }
 
   async _deviceConnect(id) {

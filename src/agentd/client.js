@@ -201,7 +201,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -222,6 +222,7 @@ class DeviceManager {
               }
               if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
+              if (m.op === 'usage-events') { this._onUsageEvents?.(m); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
               if (m.op === 'session-error') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onError?.(m.error); return; }
@@ -252,6 +253,7 @@ class DeviceManager {
             // triggered usage harvest) — the daemon-side watch survives, but
             // a RESTARTED daemon starts unwatched; idempotent either way
             if (this._onDiscoveryDirty) this._request({ op: 'discovery-watch' }).catch(() => { });
+            if (this._onUsageEvents) this._request({ op: 'usage-events-watch' }).catch(() => { });
             return;
           }
           if (msg.op === 'auth-fail') fail(new Error('agentd auth failed — token mismatch'));
@@ -425,6 +427,22 @@ class DeviceManager {
     return this._request({ op: 'discovery-claims', hostId, hostName, forceInline, timeoutMs: 40000 });
   }
   async watchDiscovery(onDirty) { this._onDiscoveryDirty = onDirty; return this._request({ op: 'discovery-watch' }); }
+
+  /** Subscribe the usage-events PUSH stream (R4 finale). onBatch({batch, seq})
+   *  fires per chunk; when a chunk carries `seq`, call ackUsageEvents(seq)
+   *  AFTER durable ingest — that commits the device-side cursor (two-phase;
+   *  an unacked batch re-emits and the server's rid dedup absorbs it). */
+  async watchUsageEvents(onBatch) {
+    this._onUsageEvents = onBatch;
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('usage-events')) throw new Error('daemon lacks usage-events (capabilities gate)');
+    const r = await this._request({ op: 'usage-events-watch', timeoutMs: 20000 });
+    if (r?.error) throw new Error(r.error); // an error-ack resolves — never swallow it
+    return true;
+  }
+  ackUsageEvents(seq) {
+    try { this._conn?.mux?.control({ op: 'usage-events-ack', seq }); } catch { }
+  }
   // ── M4 ──
   /** R1 machine facts (shared src/machine-probes.js runs daemon-side).
    *  Old daemons don't know these ops — callers bound with a timeout and

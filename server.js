@@ -4529,6 +4529,23 @@ hosts.dialOnline = (deviceId) => agentdDials.has(deviceId);
 // (mid-turn tool storms, codex, external terminals) reaches the ledger and
 // the billing popup within ~a minute. One dirty signal, two consumers: this
 // kick + discovery cache invalidation (armed in hosts._armDirtyPush). ──
+// usage-events PUSH consumer (R4 finale, 2.299.0): batches arrive
+// seconds-fresh over the device link; ingest through the SAME pipeline the
+// pull harvest uses (attribution + rid namespacing + host-bucket honesty),
+// then invalidate the estimator so the next pool decision sees the spend.
+// Returning normally (not false) tells hosts to ACK — which is what commits
+// the device-side cursor (two-phase). A throw leaves the batch unacked → the
+// daemon re-emits → rid dedup absorbs the replay.
+hosts.onUsageEvents = (hostId, text) => {
+  if (!text) return true;
+  const h = hosts.get(hostId);
+  const r = usageHistory.ingestRemoteEvents(hostId, h?.name || hostId, text);
+  if (r.added > 0) {
+    try { for (const [ik] of usageIdentityGroups()) usageEstimator.invalidate(ik); } catch { }
+    try { kickPoolEval(); } catch { }
+  }
+  return true;
+};
 {
   const dirtyTimers = new Map();
   hosts.onDeviceDirty = (hostId) => {
