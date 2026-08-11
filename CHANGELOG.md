@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.320.0
+
+### Fixed
+- **Remote machine zones looked EMPTY for the first 10–60s after a server restart** (inc-msp2srj2: "AIDev 默认没有 session, 必须手动刷新"). A cold discovery sweep blocks for the whole device-bootstrap / daemon-self-upgrade / ssh-master-rebuild window (12.3s measured on a healthy link, worse at real boot) — and for that whole window the zone rendered nothing, while the persisted last-known list (71 sessions) sat on disk consulted only on FAILURE. Cold calls now serve the persisted list INSTANTLY, stale-marked (measured 12.3s → 1ms), and kick ONE background refresh through the existing dirty→push channel — every client gets the fresh list when the scan lands. An explicit ⟳ still blocks for the real scan: "refresh" keeps meaning refresh.
+
 ## 2.319.0
 
 ### Added

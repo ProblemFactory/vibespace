@@ -1385,6 +1385,19 @@ class HostManager {
     const h = this.get(id);
     const hit = this._discoveryCache.get(id);
     if (hit && Date.now() - hit.at < ttlMs) return hit.sessions;
+    // STALE-WHILE-REVALIDATE (2.320.0, inc-msp2srj2 "AIDev默认没有session"):
+    // a COLD sweep blocks 10-60s right after a server restart (device
+    // bootstrap, daemon self-upgrade, ssh master rebuild — measured 12.3s on
+    // a healthy link), and for that whole window the zone renders EMPTY.
+    // The persisted last-known list was sitting on disk the entire time but
+    // was only consulted on FAILURE. Serve it IMMEDIATELY (stale-marked) and
+    // refresh in the BACKGROUND — the 2.310.0 remote-sessions push delivers
+    // the fresh result to every client when it lands. An explicit ⟳
+    // (ttlMs 0) still blocks for the real scan, so "refresh" means refresh.
+    if (ttlMs > 0 && !hit && this._persistedDisc[id]?.sessions?.length) {
+      try { this.onDiscoveryDirty?.(id); } catch { } // debounced: one background compute + one broadcast
+      return this._persistedDisc[id].sessions.map((x) => ({ ...x, stale: true }));
+    }
     // One round trip: alive lock files + all project JSONLs (path, mtime, size)
     const script = `
       find "$HOME"/.claude/sessions -maxdepth 1 -name '*.json' 2>/dev/null | while read -r f; do
