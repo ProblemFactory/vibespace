@@ -333,7 +333,12 @@ class UsageHistory {
       const rpool = e.sid ? this._poolAt(e.sid, ts, attrib) : null;
       const ev = {
         rid: `h:${hostId}:${e.rid}`,
-        mid: e.mid || undefined, // message.id join field — see eventForMid
+        // JOIN-FIELD completeness (adversarial review): when the host
+        // transcript record had no requestId the walker's rid FELL BACK to
+        // msg.id and omitted mid — the namespaced 'h:<host>:msg_X' then
+        // matched neither of _liveDelta's id sets, so that request counted
+        // TWICE in the live odometer forever (the ring has no age-out).
+        mid: e.mid || (/^msg_/.test(String(e.rid || '')) ? e.rid : undefined),
         ts,
         sid: e.sid || null,
         be: e.be === 'codex' ? 'codex' : 'claude', // v2 walkers emit codex rollout events too

@@ -314,12 +314,18 @@ class ClaudeCodeAdapter extends BackendAdapter {
         severity: s.severity || 'normal',
       });
     }
-    // LIVE-envelope fallback (verified): no model_scoped array — scoped caps
-    // ride as named nullable top-level fields (seven_day_opus/seven_day_sonnet
-    // + internal codename buckets). Include any object field with a numeric
-    // utilization AND a resets_at (codename buckets without a reset carry no
-    // usable deadline and are skipped); prettify the field name.
-    if (!scopedWeekly.length) {
+    // NAMED scoped buckets (seven_day_opus/seven_day_sonnet + internal
+    // codename buckets) are MERGED, never used as a mere fallback.
+    // 2.305.0 (inc-msof8i22, user report "没有自动切换还有opus用量的账号"): this
+    // was `if (!scopedWeekly.length)`, so an account whose model_scoped array
+    // held ONE entry (Fable) never had its `seven_day_opus` field read — the
+    // Opus cap was INVISIBLE to every consumer, including the pool's
+    // exhaustion test. The pool therefore saw 5h/7d/Fable all healthy and
+    // stayed on an account whose Opus was spent, which is exactly the switch
+    // the feature exists to make. An array entry wins over a named field of
+    // the same bucket (dedupe by name).
+    {
+      const have = new Set(scopedWeekly.map((x) => String(x.name).toLowerCase()));
       const SKIP = new Set(['five_hour', 'seven_day', 'extra_usage', 'seven_day_oauth_apps']);
       for (const [k, v] of Object.entries(rl)) {
         if (SKIP.has(k) || !v || typeof v !== 'object') continue;
@@ -327,6 +333,8 @@ class ClaudeCodeAdapter extends BackendAdapter {
         if (!v.resets_at) continue;
         const w = toWin(v);
         const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        if (have.has(name.toLowerCase())) continue; // array entry wins
+        have.add(name.toLowerCase());
         scopedWeekly.push({ name, utilization: w.utilization, resetsAt: w.resetsAt, severity: w.utilization >= 1 ? 'exceeded' : 'normal' });
       }
     }

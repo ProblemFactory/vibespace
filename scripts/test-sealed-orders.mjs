@@ -78,6 +78,22 @@ check('the next orders push delivers the executed report', reported.length === 1
 for (let i = 0; i < 20 && fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson')); i++) await sleep(300);
 check('ack clears the execution log (no duplicate reports)', !fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson')));
 
+// ── MULTI-POOL (adversarial review): two pools must BOTH stay armed, and with
+// several armed the device must refuse to guess which pool a banner belongs to
+{
+  const link2 = path.join(subs, 'pool-y');
+  fs.symlinkSync(path.join(subs, 'sub-a'), link2);
+  const orders2 = { poolId: 'pool-y', linkPath: link2, currentId: 'sub-a', ranked: orders.ranked };
+  await dm2.poolOrders(orders);      // re-arm pool-x
+  await dm2.poolOrders(orders2);     // arm pool-y — must NOT evict pool-x
+  const stored = JSON.parse(fs.readFileSync(path.join(ROOT, 'state', 'pool-orders.json'), 'utf8'));
+  check('both pools are stored (single-slot bug fixed)', !!(stored['pool-x'] && stored['pool-y']), Object.keys(stored).join(','));
+  // clear one → the other survives
+  await dm2.poolOrders({ clearPool: 'pool-y' });
+  const stored2 = JSON.parse(fs.readFileSync(path.join(ROOT, 'state', 'pool-orders.json'), 'utf8'));
+  check('clearPool disarms ONLY that pool', !!stored2['pool-x'] && !stored2['pool-y'], Object.keys(stored2).join(','));
+}
+
 if (failed) { try { console.error('--- daemon log ---\n' + fs.readFileSync(path.join(ROOT, 'state', 'agentd.log'), 'utf8').slice(-1200)); } catch { } }
 try { await dm2.stop?.(); } catch { }
 fs.rmSync(tmp, { recursive: true, force: true });

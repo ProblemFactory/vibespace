@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.305.0
+
+**The pool never switched away from an account whose OPUS quota was spent, because the Opus bucket was invisible to it** (inc-msof8i22, "没有自动切换还有opus用量的账号"). Both quota parsers read model-scoped weekly caps from a LIST, and treated the vendor's *named* fields (`seven_day_opus`, `seven_day_sonnet`, …) as a fallback used ONLY when that list came back empty. Every account here reports one list entry (Fable) — so `seven_day_opus` was never read on ANY path, and the pool's exhaustion test saw 5h/7d/Fable all healthy on a target whose Opus was gone. Verified against the live caches: ten usage-cache files, every one carrying a Fable bucket and no Opus bucket, from the ⟳, statusline and get_usage sources alike.
+
+- Named scoped buckets are now MERGED with the list (dedupe by model name, list entry wins) in BOTH the `get_usage` control-channel parser and the on-demand ⟳ REST parser.
+- Regression legs pin the merge, the exhausted-Opus survival, list-only and named-only payloads, and that a codename bucket without a reset is still skipped.
+
+**Sealed-orders fixes from the adversarial review** (all three confirmed findings):
+- The daemon stored ONE orders object, so with several pools the last push evicted the rest and a limit banner from pool A could re-point pool B while A stayed stranded. Orders are keyed by pool now (legacy file migrates on read), and with more than one pool armed the device REFUSES to guess which pool a banner belongs to rather than switching the wrong one.
+- Orders are DISARMED on pool delete and on auto→off, and the boot arm is gated on `auto` like every runtime path — a manual-only pool was being armed once at boot with a snapshot that then froze forever.
+- The eval-site push observes its rejection (warn once per boot) instead of leaking an unhandledRejection every tick while the local daemon is down.
+- Remote events whose walker rid fell back to `msg.id` now carry `mid`, so the live odometer can retire them — without it such a request counted twice forever (the ring has no age-out).
+
+
 ## 2.304.0
 
 **Root fix for the session-identity crossing: the socket name is now DERIVED from the session id instead of minted independently.** 2.302.0 made both expressions read one captured counter — that patched the day's symptom. The actual defect is older and structural: **a session had TWO identities built by two separate expressions** (`sess-<seq>-<now>` and `cw-<seq>-<now>`), while the session-meta file is keyed by one and everything else by the other. Any divergence — a re-read counter, a millisecond of drift, a future edit to one line and not the other — silently maps two sessions onto one metadata file.
