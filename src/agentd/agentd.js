@@ -1613,7 +1613,18 @@ function serveConnection(sock) {
             const usage = await get('/api/oauth/usage');
             let roles = null;
             if (usage.status === 200) { try { roles = await get('/api/oauth/claude_cli/roles'); } catch { } }
-            mux.control({ op: 'quota-result', id: msg.id, usage, roles });
+            // B-0f13 read path: ship the PASSIVE statusline cache alongside —
+            // pure file reads (the remote vibespace-usage hook writes them),
+            // zero extra vendor calls. The server merges fetchedAt-guarded.
+            const passive = {};
+            try {
+              const cdir = path.join(home, '.vibespace', 'usage-cache');
+              for (const f of fs.readdirSync(cdir)) {
+                if (!f.endsWith('.json') || f.startsWith('__models__')) continue;
+                try { const j = JSON.parse(fs.readFileSync(path.join(cdir, f), 'utf-8')); if (j && j.fetchedAt) passive[f.slice(0, -5)] = j; } catch { }
+              }
+            } catch { }
+            mux.control({ op: 'quota-result', id: msg.id, usage, roles, passive });
           } catch (e) { mux.control({ op: 'quota-result', id: msg.id, error: e.message }); }
         })();
         return;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.319.0
+
+### Added
+- **B-47e2 — local session discovery via device #0, flag-gated** (`agentd.localDiscovery`, default OFF): the 5s `/api/sessions` sweep can read its filesystem FACTS (lock files, transcript listing, tail ids) from the device daemon's snapshot — computed in a daemon CHILD process, so a slow or NFS-mounted home can never stall the server's hot path. Everything local stays local (webui-pid mapping, tmux enrichment, claimJsonls, assembly); device lock facts arrive pre-verified (liveness + pidLooksClaude) so the per-lock re-probe is skipped; snapshot failure falls back to the local scan. Proven by scripts/test-local-discovery-device.mjs: output PARITY against the local scan on a synthetic HOME (incl. a live lock claiming its transcript), 44ms latency, and the daemon-down fallback — the test also learned to bust the sweep's own 4.5s TTL cache, without which parity was VACUOUS (the second call was served from cache).
+- **B-0f13 — remote terminal sessions get the passive statusline quota capture** local ones have had since 2.60.0, closing #14's last gap. Three legs: `vibespace-usage` ships with the agent tools (per-spawn tar, sha-compared); remote claude TERMINAL spawns inject the statusLine `--settings` (the JSON rides the normal per-arg shq quoting — and the cache-dir env var was deliberately DROPPED after review: `$HOME` never expands inside shq's single quotes, and none is needed because the script's `__dirname/../usage-cache` default resolves to `~/.vibespace/usage-cache` at its shipped location); the `quota-refresh` device op ships the host's passive cache files back alongside its reply (pure file reads, zero extra vendor calls), merged server-side fetchedAt-GUARDED (a stale file never displaces a fresher reading) into the `host-<id>` / host-held account buckets.
+
 ## 2.318.0
 
 ### Added

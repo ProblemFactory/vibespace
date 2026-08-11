@@ -592,7 +592,7 @@ class DeviceManager {
     if (!conn.info?.capabilities?.includes?.('quota-refresh')) throw new Error('daemon lacks quota-refresh (capabilities gate)');
     const r = await this._request({ op: 'quota-refresh', subDir, humanGated, timeoutMs: 40000 });
     if (r.error) throw new Error(r.error);
-    return { usage: r.usage, roles: r.roles };
+    return { usage: r.usage, roles: r.roles, passive: r.passive || null };
   }
 
   async usageScan({ cursorFile } = {}) {

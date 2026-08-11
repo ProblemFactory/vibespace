@@ -5823,7 +5823,7 @@ function createSessionMessages(session, sessionId) {
 
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
-setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth });
+setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting });
 // Backend readiness for onboarding: is each CLI installed + logged in?
 // Login detection is best-effort file existence — never spawns the CLIs.
 app.get('/api/backend-status', async (req, res) => {

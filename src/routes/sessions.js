@@ -52,7 +52,7 @@ function withSessionKey(session = {}) {
 
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
-  const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts } = ctx;
+  const { activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, serverSetting } = ctx;
   // R3 (three-tier): the transcript read composite lives in ONE service —
   // this interface is the future `transcript.*` device op schema.
   const { createTranscriptService } = require('../transcript-service');
@@ -472,6 +472,33 @@ function setup(ctx) {
   const _runSessionsSweep = async () => {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
 
+    // B-47e2 (R5's local leg, FLAG-GATED default OFF: agentd.localDiscovery):
+    // the FS-scan FACTS (lock files, project-dir listing, tail ids) come from
+    // device #0's discovery snapshot — computed in a daemon CHILD process, so
+    // a slow/NFS home can never stall this 5s-polled hot path. Everything
+    // LOCAL about the sweep stays local: webui-pid mapping, tmux enrichment,
+    // claimJsonls, assembly. Snapshot failure ⇒ the local scan below, i.e.
+    // exactly the pre-flag behaviour. Latency is metered (local-disc-snap-ms)
+    // — the design's own gate for defaulting this on.
+    let devSnap = null;
+    if (serverSetting?.('agentd.localDiscovery') === true && hosts?.device) {
+      try {
+        const t0 = Date.now();
+        const dm = await hosts.device(null);
+        const r = await dm.discoverySnapshot();
+        if (r && Array.isArray(r.jsonls) && Array.isArray(r.locks)) {
+          devSnap = r;
+          global.__vsMetric?.('local-disc-snap-ms', Date.now() - t0);
+        }
+      } catch (e) { global.__vsEvent?.('local-disc-snap-failed', String(e.message).slice(0, 80)); }
+    }
+    // snapshot jsonls grouped by projDir for the walk below
+    const snapByDir = devSnap ? (() => {
+      const m = new Map();
+      for (const j of devSnap.jsonls) { if (!m.has(j.projDir)) m.set(j.projDir, new Map()); m.get(j.projDir).set(j.file, j); }
+      return m;
+    })() : null;
+
     // Step 0: Use cached webuiPids (updated on session create/kill/restore)
 
     // Step 1: Scan lock files + tmux panes -> build map of RUNNING sessions
@@ -500,9 +527,12 @@ function setup(ctx) {
 
     const paneMap = await getTmuxPaneMapAsync();
     const runningByProjDir = new Map(); // projDirName -> [{lock, tmuxTarget, assigned, claudeSessionId}]
-    if (fs.existsSync(SESSIONS_DIR)) {
-      const lockDatas = [];
-      for (const f of fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
+    if (devSnap || fs.existsSync(SESSIONS_DIR)) {
+      let lockDatas = [];
+      if (devSnap) {
+        // device facts: liveness + pidLooksClaude already applied device-side
+        lockDatas = devSnap.locks;
+      } else for (const f of fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
         try {
           const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
           if (!isPidAlive(data.pid)) continue;
@@ -513,7 +543,7 @@ function setup(ctx) {
       // fallback + the firstRunning cwd pick depend on stable entry order)
       const probed = await Promise.all(lockDatas.map(async (data) => {
         try {
-          if (!(await isLockClaude(data))) return null; // B-2104: procStart file-read, ps only as fallback
+          if (!devSnap && !(await isLockClaude(data))) return null; // B-2104: procStart file-read, ps only as fallback (device facts arrive pre-verified)
           return { data, tmuxTarget: await findTmuxTargetAsync(data.pid, paneMap) };
         } catch { return null; }
       }));
@@ -529,15 +559,18 @@ function setup(ctx) {
       // Step 2: Scan JSONL files, match with running locks
       const sessions = [];
       const sessionMap = new Map(); // sessionId → index in sessions[] (dedup: running wins over stopped)
-      if (fs.existsSync(projectsDir)) {
-        for (const projDir of fs.readdirSync(projectsDir)) {
+      if (snapByDir || fs.existsSync(projectsDir)) {
+        for (const projDir of (snapByDir ? [...snapByDir.keys()] : fs.readdirSync(projectsDir))) {
           const projPath = path.join(projectsDir, projDir);
-          try { if (!fs.statSync(projPath).isDirectory()) continue; } catch { continue; }
+          const snapFiles = snapByDir?.get(projDir) || null;
+          if (!snapFiles) { try { if (!fs.statSync(projPath).isDirectory()) continue; } catch { continue; } }
 
-          // Pre-fetch stats for sorting + mtime lookup
-          const jsonls = fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl') && !f.startsWith('agent-'));
+          // Pre-fetch stats for sorting + mtime lookup (device facts carry them)
+          const jsonls = snapFiles ? [...snapFiles.keys()]
+            : fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl') && !f.startsWith('agent-'));
           const statMap = new Map();
           for (const f of jsonls) {
+            if (snapFiles) { statMap.set(f, snapFiles.get(f)?.mtimeMs || 0); continue; }
             try { statMap.set(f, fs.statSync(path.join(projPath, f)).mtimeMs); } catch { statMap.set(f, 0); }
           }
           // Sort by mtime desc (display recency; claiming no longer relies on it alone)
@@ -558,7 +591,13 @@ function setup(ctx) {
           const claims = runningEntries.length ? claimJsonls(
             runningEntries.map(e => ({ sessionId: e.claudeSessionId || e.lock.sessionId || null, exactOnly: !!e.claudeSessionId, entry: e })),
             jsonls.map(f => ({ id: f.replace(/\.jsonl$/, ''), mtime: statMap.get(f) || 0 })),
-            (j) => readJsonlTailIds(path.join(projPath, j.id + '.jsonl')),
+            (j) => {
+              // device facts carry tail ids for the newest 60 files; older
+              // files with a running lock (rare) fall back to a local read —
+              // extractTailIds' null-on-unreadable contract is preserved
+              const sf = snapFiles?.get(j.id + '.jsonl');
+              return sf && 'tailIds' in sf ? sf.tailIds : readJsonlTailIds(path.join(projPath, j.id + '.jsonl'));
+            },
           ) : new Map();
 
           for (const f of jsonls) {
