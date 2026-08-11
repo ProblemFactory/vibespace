@@ -141,6 +141,7 @@ hash identically across transports or messages double-render.
 
 | # | Round | Contents | Retires / unlocks |
 |---|---|---|---|
+| — | **Closure marathon 2.297.0–2.300.0 (owner directive: finish ALL of it)** | vendor whitelist guard test (23 asserts) · offline-bias defenses (watermarks, active-dark detection, per-account pessimism docking, dark-marked anchors excluded from learning; two live bugs fixed: resolved remote spend never counted in the odometer, host-login remote sessions credited the local ring) · local ledger walk = the shared walker in-process (3 copies → 2) · conversation-location index (R3 tail) · place-secret op (0600-at-open) · quota-refresh executed ON the login-holding machine (§Quota refresh origin DONE) · account-material extraction (data/subs = device #0's store) · **R4 COMPLETE: usage-events push (seconds-fresh remote ledger, two-phase acks)** · sealed-orders reflex (§Pool management DONE) · bufferOwner explicit (session-brain step 1) | — |
 | R0 ✅ 2.280.0 | Message ids | content-derived mids, server-only, soak | prerequisite for all device-side parsing |
 | R1 ✅ 2.281.0 | Machine facts | `probe.*` family (`src/machine-probes.js`); hosts consume op-first, local calls in-proc | probe twin-scripts demoted to fallback |
 | R2 ✅ 2.282.0 | Worker isolation | embedded worker tier (FS_ACTIONS single object); fs-ops through it with deadline/terminate/respawn; loop-lag canary; hang-isolation proven on a real FIFO wedge | unlocks file-ops unification and all later heavy ops |
@@ -182,6 +183,15 @@ degrading a read. Its steps, in dependency order:
 Sequencing rule: do not start step 4 before step 3 soaks — a session created by
 the device but parsed by the server is the worst of both worlds (two owners for
 one conversation, the double-writer class in a new costume).
+
+**Status after the 2.297–2.30x closure marathon**: step 1 (bufferOwner) SHIPPED
+2.300.0. The step-2 substrate exists — the daemon now owns a stdout tailer
+(sealed-orders) and bundles the shared adapter; the usage/banner/rate-limit
+event families already flow device-side (usage-events push; banner reflex).
+Steps 2 (full-normalizer double-feed, dark) and 3 (message-family consumers
+switch) remain gated by THIS sequencing rule and the retirement-order law —
+they are the deliberate soak-gated remainder, not unscheduled debt. Step 4
+(R6 session.open) waits on step 3 by the rule above.
 
 ## Risk register
 
