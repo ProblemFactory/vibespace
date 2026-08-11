@@ -185,7 +185,15 @@ the device but parsed by the server is the worst of both worlds (two owners for
 one conversation, the double-writer class in a new costume).
 
 **Status after the 2.297–2.30x closure marathon**: step 1 (bufferOwner) SHIPPED
-2.300.0. The step-2 substrate exists — the daemon now owns a stdout tailer
+2.300.0. **Step 2 (device-side normalizer double-feed, DARK) SHIPPED 2.316.0**
+— `session-events` op (capability-gated), server-side comparator with
+sb-parity-hit/miss metrics + throttled divergence log; harness parity proven
+(scripts/test-session-brain-dark.mjs, real daemon, byte-identical create mids).
+KEY MECHANIC recorded for step 3: mids are PREFIXED with the emitting
+normalizer's session id (device = its sid/keeperSid, server = the webui id),
+so ALL cross-parse comparison is suffix-wise (`_sbMidCore`). Step 3 (consumers
+switch) is now gated ONLY on live parity holding at zero misses — watch the
+sb-parity-* metrics in Diagnostics. The step-2 substrate exists — the daemon now owns a stdout tailer
 (sealed-orders) and bundles the shared adapter; the usage/banner/rate-limit
 event families already flow device-side (usage-events push; banner reflex).
 Steps 2 (full-normalizer double-feed, dark) and 3 (message-family consumers
