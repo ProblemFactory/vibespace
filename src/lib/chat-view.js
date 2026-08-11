@@ -246,6 +246,22 @@ class ChatView {
         scrollTick = false;
         if (this._programmaticScroll) return; // don't interfere with programmatic scrolls
         const { scrollTop, scrollHeight, clientHeight } = this._messageList;
+        // COLLAPSED-GEOMETRY GUARD (inc-mso818ry, first real catch by the
+        // 2.264.0 scroll tracer): while content-visibility leaves a fresh
+        // batch unresolved, scrollHeight collapses to ≈clientHeight — "at
+        // top" AND "at bottom" become SIMULTANEOUSLY true, so the pin
+        // re-engaged at scrollTop 0, extendBottom yanked the window back to
+        // the live tail, and paging up bounced the user to the bottom every
+        // ~1s for 50 seconds straight (trace: sh 782 on every pathological
+        // landing vs 2857+ on healthy ones). With messages outside the
+        // window and >10 rendered, that geometry is INDETERMINATE — make NO
+        // boundary decision; heights resolve within ~1s and the next scroll
+        // event re-evaluates honestly.
+        const partialWindow = this._windowStart > 0 || this._windowEnd < this._total;
+        if (partialWindow && scrollHeight - clientHeight < 200 && this._messageList.childElementCount > 10) {
+          this._trace('collapsedGeomSkip', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight });
+          return;
+        }
         const atBottom = scrollHeight - scrollTop - clientHeight < 50;
         if (atBottom && !this._pinned) {
           this._pinned = true;
@@ -2488,6 +2504,21 @@ class ChatView {
       for (const c of list.children) {
         if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) { el = c; delta = c.offsetTop - st; break; }
       }
+      // ALL children content-visibility-collapsed (offsetHeight 0) — their
+      // offsetTop is still valid layout truth, so anchor on position alone
+      // rather than giving up to the estimate-skewed delta fallback
+      if (!el) {
+        for (const c of list.children) {
+          if (c.offsetTop + c.offsetHeight >= st) { el = c; delta = c.offsetTop - st; break; }
+        }
+      }
+    } else if (list.children.length) {
+      // AT THE TOP EDGE (inc-mso818ry): st===0 captured NO anchor at all, so
+      // every extendTop while sitting at the top landed un-anchored and
+      // clamped into the fresh batch. The previously-first message IS the
+      // anchor — after the insert it scrolls back to the top edge, which is
+      // exactly where the reader's eyes were.
+      el = list.children[0]; delta = 0;
     }
     fn();
     if (el && el.isConnected) {
