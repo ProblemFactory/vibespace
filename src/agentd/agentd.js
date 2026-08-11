@@ -1131,7 +1131,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events'],
         });
         return;
       }
@@ -1292,6 +1292,77 @@ function serveConnection(sock) {
           }
           mux.control({ op: 'discovery-watching', id: msg.id });
         } catch (e) { mux.control({ op: 'discovery-watching', id: msg.id, error: e.message }); }
+        return;
+      }
+      if (msg.op === 'session-events-watch') {
+        // SESSION-BRAIN STEP 2 (design §session-brain; DARK): the daemon runs
+        // the SAME normalizer (bundled since R3) over each of its pipe
+        // sessions' stdout and pushes typed ops to the subscribed server.
+        // The server keeps its own parse and only COMPARES — content-derived
+        // mids (R0) make the two streams id-comparable, and only proven
+        // parity earns step 3 (consumers switch). Line-aligned incremental
+        // tail per session; batches are fire-and-forget WITH seq numbers so
+        // the dark comparator can detect loss (step 3 will add acks if the
+        // loss rate is nonzero in practice — measure first, engineer after).
+        try {
+          if (!this._sessEvWatch) {
+            const st = { tails: new Map(), timer: null, seq: 0 }; // sid → {pos, mm, buf}
+            this._sessEvWatch = st;
+            const { createMessageManager } = require('./../normalizers.js');
+            const tick = () => {
+              try {
+                let entries = []; try { entries = fs.readdirSync(SESS_DIR).filter((f) => f.endsWith('.json')); } catch { }
+                for (const mf of entries) {
+                  const sid = mf.slice(0, -5);
+                  let meta = null; try { meta = JSON.parse(fs.readFileSync(path.join(SESS_DIR, mf), 'utf-8')); } catch { continue; }
+                  if (!meta || meta.exited != null) { st.tails.delete(sid); continue; }
+                  if ((meta.backend || 'claude') !== 'claude') continue; // codex rides JSON-RPC, not this stream
+                  const outFp = path.join(SESS_DIR, sid + '.out');
+                  let st2 = null; try { st2 = fs.statSync(outFp); } catch { continue; }
+                  let t = st.tails.get(sid);
+                  if (!t) {
+                    // start at NOW: history replay is the transcript service's
+                    // job; this stream is the LIVE feed only
+                    t = { pos: st2.size, buf: '', mm: null, ops: [] };
+                    st.tails.set(sid, t);
+                    continue;
+                  }
+                  if (st2.size <= t.pos) { t.pos = Math.min(t.pos, st2.size); continue; }
+                  const want = Math.min(st2.size - t.pos, 1024 * 1024);
+                  const buf = Buffer.alloc(want);
+                  let fd = null;
+                  try { fd = fs.openSync(outFp, 'r'); fs.readSync(fd, buf, 0, want, t.pos); } catch { continue; } finally { if (fd != null) try { fs.closeSync(fd); } catch { } }
+                  t.pos += want;
+                  t.buf += buf.toString('utf8');
+                  const lines = t.buf.split('\n');
+                  t.buf = lines.pop(); // partial tail carries over
+                  if (!t.mm) {
+                    t.mm = createMessageManager('claude', sid);
+                    t.mm.onOp((op) => t.ops.push(op));
+                  }
+                  for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    let rec = null; try { rec = JSON.parse(trimmed); } catch { continue; }
+                    try { t.mm.processLive(rec); } catch { }
+                  }
+                  if (t.ops.length) {
+                    const seq = ++st.seq;
+                    const events = t.ops.splice(0, t.ops.length).map((op) => {
+                      try { return JSON.stringify(op).slice(0, 32 * 1024); } catch { return null; }
+                    }).filter(Boolean);
+                    for (let i = 0; i < events.length; i += 200) {
+                      try { mux.control({ op: 'session-events', sid, batch: events.slice(i, i + 200), seq: i + 200 >= events.length ? seq : undefined }); } catch { }
+                    }
+                  }
+                }
+              } catch (e) { log('session-events tick failed: ' + e.message); }
+            };
+            st.timer = setInterval(tick, 1000);
+            st.timer.unref?.();
+          }
+          mux.control({ op: 'session-events-watching', id: msg.id });
+        } catch (e) { mux.control({ op: 'session-events-watching', id: msg.id, error: e.message }); }
         return;
       }
       if (msg.op === 'usage-events-watch') {

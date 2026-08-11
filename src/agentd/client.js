@@ -201,7 +201,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -223,6 +223,7 @@ class DeviceManager {
               if (m.op === 'tcp-close') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onClose?.(); return; }
               if (m.op === 'discovery-dirty') { this._onDiscoveryDirty?.(); return; }
               if (m.op === 'usage-events') { this._onUsageEvents?.(m); return; }
+              if (m.op === 'session-events') { this._onSessionEvents?.(m); return; } // step-2 dark stream (unsolicited push branch — the three-touch rule)
               if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || []); return; }
               if (m.op === 'session-open' || m.op === 'pipe-session-open') { sessions.get(m.chan)?.onOpen?.(m); return; }
               if (m.op === 'session-exit') { const h = sessions.get(m.chan); sessions.delete(m.chan); h?.onExit?.(m.code); return; }
@@ -255,6 +256,7 @@ class DeviceManager {
             // a RESTARTED daemon starts unwatched; idempotent either way
             if (this._onDiscoveryDirty) this._request({ op: 'discovery-watch' }).catch(() => { });
             if (this._onUsageEvents) this._request({ op: 'usage-events-watch' }).catch(() => { });
+            if (this._onSessionEvents) this._request({ op: 'session-events-watch' }).catch(() => { }); // session-brain step 2 re-arm
             return;
           }
           if (msg.op === 'auth-fail') fail(new Error('agentd auth failed — token mismatch'));
@@ -567,6 +569,15 @@ class DeviceManager {
 
   /** Human-gated quota refresh executed ON the device (its own token, its own
    *  IP — design §Quota refresh origin). Never called from any scheduler. */
+  async watchSessionEvents(cb) {
+    // Session-brain step 2: subscribe to the daemon's device-side normalizer
+    // stream (dark — the caller compares, it must NOT act on these yet).
+    this._onSessionEvents = cb;
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('session-events')) throw new Error('daemon lacks session-events (capabilities gate)');
+    await this._request({ op: 'session-events-watch' });
+  }
+
   async sysinfo() {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('sysinfo')) throw new Error('daemon lacks sysinfo (capabilities gate)');

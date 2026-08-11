@@ -861,6 +861,9 @@ class HostManager {
         try { this.invalidateDiscovery(id); } catch { }
         try { this.onDeviceDirty?.(id); } catch { }
       }).catch(() => { });
+    // session-brain step 2 (DARK): device-side normalizer stream — consumer
+    // only COMPARES until parity earns the switch. Failure harmless.
+    try { dm.watchSessionEvents?.((m) => { try { this.onSessionEvents?.(id, m); } catch { } }).catch(() => { }); } catch { }
     } catch { }
     // usage-events PUSH (R4 finale): events stream in seconds-fresh; the ack
     // AFTER durable ingest commits the device cursor (two-phase). When this
