@@ -1094,7 +1094,10 @@ function serveConnection(sock) {
             let timer = null;
             const kick = () => { if (timer) return; timer = setTimeout(() => { timer = null; try { mux.control({ op: 'discovery-dirty' }); } catch { } }, 500); };
             const watches = [];
-            for (const d of [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects')]) {
+            // .codex/sessions joined in R4: rollout growth drives BOTH codex
+            // discovery freshness and the push-triggered usage harvest
+            for (const d of [path.join(home, '.claude', 'sessions'), path.join(home, '.claude', 'projects'),
+              path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')]) {
               try { watches.push(fs.watch(d, { recursive: true }, kick)); } catch { try { watches.push(fs.watch(d, kick)); } catch { } }
             }
             this._discoWatch = watches;

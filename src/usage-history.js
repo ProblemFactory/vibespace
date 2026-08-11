@@ -441,7 +441,7 @@ class UsageHistory {
         mid: e.mid || undefined, // message.id join field — see eventForMid
         ts: Number(e.ts) || Date.now(),
         sid: e.sid || null,
-        be: 'claude',
+        be: e.be === 'codex' ? 'codex' : 'claude', // v2 walkers emit codex rollout events too
         model: e.model || null,
         acct: hostId, // host ids are already 'host-…' — distinct from acct-/sub-/cxs- account ids
         atype: 'host',

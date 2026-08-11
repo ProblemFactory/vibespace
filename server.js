@@ -4414,6 +4414,29 @@ const bcastAll = (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c
 try { hosts.migrateDialTokenFile(path.join(AGENTD_DIR, 'dial-tokens.json')); }
 catch (e) { console.warn('[hosts] dial-token migration failed:', e.message); }
 hosts.dialOnline = (deviceId) => agentdDials.has(deviceId);
+// ── R4 push-triggered remote ledger (docs/design-three-tier.md): a connected
+// daemon fs.watches its transcript dirs (.claude/sessions+projects and
+// .codex/sessions) and pushes one debounced dirty per change burst; we
+// harvest promptly instead of waiting for a turn-end result or the idle
+// 15-min cadence. harvestUsage's own 60s/host floor bounds frequency, and
+// the op harvest (2.286.0) is incremental + cheap — so ANY remote activity
+// (mid-turn tool storms, codex, external terminals) reaches the ledger and
+// the billing popup within ~a minute. One dirty signal, two consumers: this
+// kick + discovery cache invalidation (armed in hosts._armDirtyPush). ──
+{
+  const dirtyTimers = new Map();
+  hosts.onDeviceDirty = (hostId) => {
+    if (dirtyTimers.has(hostId)) return; // trailing-debounce per host
+    dirtyTimers.set(hostId, setTimeout(() => {
+      dirtyTimers.delete(hostId);
+      try {
+        hosts.harvestUsage(hostId, { minIntervalMs: 60 * 1000, scannerPath: USAGE_SCANNER_PATH })
+          .then((txt) => { if (txt) usageHistory.ingestRemoteEvents(hostId, hosts.get(hostId)?.name, txt); })
+          .catch(() => { });
+      } catch { }
+    }, 3000));
+  };
+}
 const { MachineMounts } = require('./src/machine-mounts');
 const machineMounts = new MachineMounts({
   dataDir: path.join(__dirname, 'data'), hosts, mountTokens,

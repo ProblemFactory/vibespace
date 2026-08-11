@@ -32,6 +32,13 @@ const rec = () => JSON.stringify({
 const write = (p, body) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); };
 write(path.join(proj, SID + '.jsonl'), rec() + rec());
 write(path.join(proj, SID, 'subagents', 'workflows', 'wf_r1', 'agent-a.jsonl'), rec());
+// codex rollout (walker v2 — the op must serve it too; dir also exercises the
+// daemon's codex fs.watch below)
+const TID = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+const cxDir = path.join(home, '.codex', 'sessions', '2026', '08', '11');
+write(path.join(cxDir, `rollout-2026-08-11T00-00-00-${TID}.jsonl`),
+  JSON.stringify({ timestamp: new Date().toISOString(), type: 'turn_context', payload: { model: 'gpt-5.6-sol', cwd: '/tmp/cx' } }) + '\n'
+  + JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 1000, cached_input_tokens: 800, output_tokens: 50 }, total_token_usage: { total_tokens: 1050 } } } }) + '\n');
 
 // reference: the shipped scanner, its own throwaway cursor
 const refCursor = path.join(home, 'ref-cursor.json');
@@ -50,9 +57,10 @@ await dm.connect();
 const opCursor = path.join(home, 'op-cursor.json');
 const r1 = await dm.usageScan({ cursorFile: opCursor });
 const opLines = r1.ndjson.split('\n').filter(Boolean);
-ok(opLines.length === 3, `op streamed all 3 events (${opLines.length})`);
+ok(opLines.length === 4, `op streamed all 4 events incl. the codex rollout (${opLines.length})`);
+ok(opLines.some((l) => { const e = JSON.parse(l); return e.be === 'codex' && e.rid === 'cx:' + TID + ':1050'; }), 'codex event served through the op');
 ok(JSON.stringify(opLines) === JSON.stringify(refLines), 'op events BYTE-IDENTICAL to the shipped scanner over the same fixture');
-ok(r1.cursors && Object.keys(r1.cursors).length === 2, 'cursor manifest returned to the caller');
+ok(r1.cursors && Object.keys(r1.cursors).length === 3, 'cursor manifest covers all walked files (claude + codex)');
 ok(r1.cursorFile === opCursor, 'manifest names the cursor file');
 ok(!fs.existsSync(opCursor), 'daemon did NOT persist the cursor (two-phase: commit is the server’s move)');
 
@@ -67,6 +75,29 @@ ok(r2.ndjson === '', 'committed cursor makes the next op incremental (nothing re
 fs.appendFileSync(path.join(proj, SID + '.jsonl'), rec());
 const r3 = await dm.usageScan({ cursorFile: opCursor });
 ok(r3.ndjson.split('\n').filter(Boolean).length === 1, 'append picked up past the committed cursor');
+// commit r3's cursor too — an UNCOMMITTED cursor re-emits by design (that IS
+// the two-phase guarantee), and the next section asserts exact deltas
+await dm.fsWrite(opCursor + '.tmp', JSON.stringify(r3.cursors));
+await dm.fsRename(opCursor + '.tmp', opCursor);
+
+// ── dirty push (R4): the daemon fs.watches transcript dirs and pushes one
+// debounced discovery-dirty per change burst — the server's harvest kick +
+// discovery invalidation both ride it. Assert claude AND codex dirs push. ──
+let dirtyCount = 0;
+await dm.watchDiscovery(() => { dirtyCount++; });
+await new Promise((r) => setTimeout(r, 800)); // let any startup churn drain
+const dirtyBase = dirtyCount;
+fs.appendFileSync(path.join(proj, SID + '.jsonl'), rec());
+await new Promise((r) => setTimeout(r, 1800));
+ok(dirtyCount > dirtyBase, `claude transcript growth pushes discovery-dirty (${dirtyCount - dirtyBase})`);
+const dirtyBase2 = dirtyCount;
+fs.appendFileSync(path.join(cxDir, `rollout-2026-08-11T00-00-00-${TID}.jsonl`),
+  JSON.stringify({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 5 }, total_token_usage: { total_tokens: 1155 } } } }) + '\n');
+await new Promise((r) => setTimeout(r, 1800));
+ok(dirtyCount > dirtyBase2, `codex rollout growth pushes discovery-dirty too (${dirtyCount - dirtyBase2})`);
+const r4 = await dm.usageScan({ cursorFile: opCursor });
+const r4l = r4.ndjson.split('\n').filter(Boolean);
+ok(r4l.length === 2 && r4l.some((l) => JSON.parse(l).be === 'codex'), 'post-dirty harvest returns exactly the two appended events (claude + codex)');
 
 // capability gate: an old daemon (no usage-scan capability in its hello-ack)
 // must throw FAST pre-wire — unknown ops get no reply and would hang the

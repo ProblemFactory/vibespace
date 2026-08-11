@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.287.0
+
+**R4 step 2 (three-tier): push-triggered remote ledger + codex coverage for every walker** (docs/design-three-tier.md `usage.scan`).
+
+- **Push-triggered harvest**: a connected device daemon fs.watches its transcript dirs (`.claude/sessions`+`projects`, and now `.codex/sessions`) and pushes one debounced `discovery-dirty` per change burst; the server rides it with a per-host trailing-debounced harvest kick (60s/host floor unchanged). Any remote activity — mid-turn tool storms, codex turns, external terminals on that machine — now reaches the ledger and the message billing popup within ~a minute, not just at webui turn ends. The same signal also invalidates the host's discovery cache (it previously had NO consumer — the daemon has pushed it since M4, unheard). The client re-arms the watch on reconnect (a restarted daemon starts unwatched — same class as reverse-forward re-own).
+- **Codex rollouts in all THREE walkers** (local UsageHistory walk had it; the shipped scanner and the daemon module were claude-only): synthetic rid = cumulative token total (monotonic per thread → replays dedup), model/cwd carried from the preceding `turn_context` and persisted in the cursor, `input − cached` split, rate-limit heartbeats skipped, CODEX_HOME honored. `ingestRemoteEvents` now honors the event's `be` so remote codex usage stops vanishing from the ledger — the "remote codex coverage gap" from the R4 table is closed.
+- Parity net extended: `test-usage-walk-parity` (21 asserts) adds the codex three-walker leg with byte-identical scanner↔module events; `test-usage-scan-op` (13) drives the codex event through a real daemon plus the dirty-push e2e (claude AND codex appends each push a dirty; the post-dirty harvest returns exactly the appended deltas).
+
+
 ## 2.286.1
 
 **Index-mode minimap jumps land wrong on tool-heavy sessions** (incident-diagnosed from an owner report — the auto-shipped scroll tracer told the whole story: `jumpToIndex` landed, then the 180ms-debounced run-collapse pass folded the freshly rendered window and content-visibility height resolution yanked the view to scrollTop 0, firing a spurious `extendBottom` on the collapsed heights — the reader ends up ~20 messages BEFORE the one they clicked).
