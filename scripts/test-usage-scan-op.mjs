@@ -110,6 +110,35 @@ try { await dm.usageScan(); } catch (e) { gateErr = e; }
 conn.info.capabilities = realCaps;
 ok(gateErr && /lacks usage-scan/.test(gateErr.message), 'pre-op capability gate throws fast for old daemons (unknown ops would hang)');
 
+// ── R5 step 1: discovery snapshot runs in a CHILD process — pin that the
+// child-served snapshot equals the inline computation over the same fixture
+// (forceInline = the fallback lane, exercised so it can't rot). ──
+// a realistic tail: the resumed-session id mention extractTailIds looks for
+fs.appendFileSync(path.join(proj, SID + '.jsonl'),
+  JSON.stringify({ type: 'user', sessionId: SID, timestamp: new Date().toISOString(), message: { role: 'user', content: 'tail marker' } }) + '\n');
+const snapChild = await dm.discoverySnapshot();
+const snapInline = await dm._request({ op: 'discovery-snapshot', forceInline: true });
+ok(!snapChild.error && snapChild.jsonls?.length === 1 && snapChild.jsonls[0].file === SID + '.jsonl',
+  `snapshot lists exactly the TOP-LEVEL transcript (subagent files are not resumable sessions) (${snapChild.jsonls?.length})`);
+ok(Array.isArray(snapChild.codexRollouts) && snapChild.codexRollouts.length === 1, 'snapshot (child) sees the codex rollout');
+const strip = (r) => JSON.stringify({ locks: r.locks, jsonls: r.jsonls, codexRollouts: r.codexRollouts });
+ok(strip(snapChild) === strip(snapInline), 'child-served snapshot BYTE-IDENTICAL to the inline fallback (same function, two isolation modes)');
+ok(snapChild.jsonls[0].tailIds?.includes(SID), 'tail-id enrichment survives the child hop');
+
+// ── forced-fallback smoke (design law: fallbacks rot unless exercised) —
+// the script-SHIP lane hosts.harvestUsage degrades to when the op is
+// unavailable: fsWrite the scanner + runStream it, default cursor. ──
+{
+  const scannerSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-usage-scan'), 'utf8');
+  const scanPath = path.join(home, '.vibespace', 'bin', 'vibespace-usage-scan');
+  await dm.fsWrite(scanPath, scannerSrc);
+  const chunks2 = [];
+  const r5 = await dm.runStream(process.execPath, [scanPath], { onData: (b) => chunks2.push(b) });
+  ok(r5.code === 0 && !r5.error, 'ship-lane fallback: scanner runs via fsWrite+runStream');
+  const shipEvs = Buffer.concat(chunks2).toString('utf8').split('\n').filter(Boolean);
+  ok(shipEvs.length >= 5 && shipEvs.some((l) => JSON.parse(l).be === 'codex'), `ship-lane emits the full fixture incl. codex (${shipEvs.length} events, own default cursor)`);
+}
+
 try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf-8')); if (pid) process.kill(pid); } catch { }
 fs.rmSync(home, { recursive: true, force: true });
 fs.rmSync(dataDir, { recursive: true, force: true });

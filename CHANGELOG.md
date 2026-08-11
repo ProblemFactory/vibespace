@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.288.0
+
+**R5 step 1 (three-tier): the discovery snapshot moves off the daemon loop** (docs/design-three-tier.md `discovery.v2`).
+
+The device daemon's `discovery-snapshot` — a readdir over up to 500 project dirs, stat on every transcript, 60 head+tail enrichment reads, plus a codex tree walk — ran INLINE on the daemon loop, i.e. sync filesystem work on the thread holding every session pipe (the exact class the R2 worker rule exists for; on a loaded machine with a slow home filesystem each discovery poll stalled the pipes). It now runs in a CHILD process (single-artifact rule: the daemon re-execs its own bundle with `--discovery-snapshot-child`); child failure falls back to the same function inline, so behavior is identical either way and the wire shape is unchanged — old servers notice nothing.
+
+Also lands the design's **forced-fallback smoke** requirement: fallback lanes rot unless exercised, so `test-usage-scan-op` (19 asserts now) pins the snapshot's inline fallback byte-identical to the child path, and drives the usage harvest's script-SHIP lane (fsWrite + runStream, the degradation path for op-less daemons) end to end against a real daemon.
+
+
 ## 2.287.0
 
 **R4 step 2 (three-tier): push-triggered remote ledger + codex coverage for every walker** (docs/design-three-tier.md `usage.scan`).
