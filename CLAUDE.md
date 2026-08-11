@@ -30,6 +30,25 @@ journalctl --user -u vibespace -f   # logs (no more /tmp/vibespace-server.log)
 
 ## Architecture
 
+### ⚑ THE THREE-TIER FINAL FORM (2.319.0) — where a NEW CHANGE goes, and which test gates it
+
+The 2026-08 campaign (docs/design-three-tier.md, R0–R6 + session-brain + closure marathon) reached its terminal shape. Before writing code, route the change:
+
+| The change touches… | It belongs in… | Gated by (run BEFORE commit) |
+|---|---|---|
+| **Facts about a machine** (discovery, sysinfo, probes, usage walk, transcript parse, ctx sync, writer sweep, shell prelude) | The SHARED module (src/discovery-facts, sysinfo, machine-probes, usage-walker, transcript-service, ctx-sync, writer-sweep, remote-shell) — the daemon bundles it, one implementation runs where the facts live; ssh scripts are FALLBACK RUNGS only | The module's parity suite: test-discovery-interpret / test-sysinfo-op / test-usage-walk-parity / test-transcript-parity / test-ctx-sync / test-writer-sweep / test-remote-shell — a one-sided edit FAILS them |
+| **A new device op** | src/agentd/agentd.js handler + capability in the hello-ack + client method. THREE-TOUCH RULE (2.300.0, bit twice): reply carries `op` in the client's id-keyed routing set; unsolicited pushes get their own branch BEFORE prevControl; watches re-arm on reconnect. Reply via `mux.control`, never an invented helper | A real-daemon test (test-sysinfo-op is the template); capability-gate assert (old daemons are never asked — unknown ops HANG) |
+| **Live session stdout consumers** (served model, usage odometer, banners, todos…) | `claudeSideEffects` in server.js — ONE implementation fed by the parse AND the device stream through `sbSeenFirst` (parse registers, device fills gaps). Never a new inline consumer in the parse block | test-session-brain-dark (mid parity is suffix-wise — every normalizer prefixes its own session id) |
+| **Session creation/supervision** | The daemon pipe-session path (R6, `agentd.localPipeSessions`) is the FINAL form; dtach is the legacy path that dies by attrition. New spawn features go through buildRemoteExec (remote) / the r6Argv seam (local) | test-remote-shell drift guard; test-agentd-session |
+| **Quota/vendor calls** | NOWHERE new. Exactly two files may construct vendor requests; the quota-refresh op (human-gated, on the login-holding machine) is the ONE device-side vendor surface. Passive capture (statusline/rate_limit_event/banners) is always preferred | test-vendor-whitelist (23) FAILS any new vendor call until deliberately allowlisted with its gates |
+| **Pool/billing decisions** | src/account-pool-auto.js (pure) + the engine in server.js; per-session links (plan C) resolve via poolCurrentFor(pool, webuiId). Every blocked outcome must SPEAK with named buckets | test-pool-auto (56) + test-account-pool (31) + test-account-verdicts (45) |
+| **A server cache a client also caches** | The invalidation entry point must NOTIFY (the 2.309.0 rule) — hook on the ONE entry point, never per call site | test-remote-discovery-dirty's drift guard pattern |
+
+**ACTIVATION SWITCHES (code complete, soak-gated — flip deliberately, in order):** ① watch `sb-parity-hit/miss` in Diagnostics (step-2/3 live parity) → ② `agentd.localDiscovery` on (after `local-disc-snap-ms` looks sane on YOUR storage) → ③ `agentd.localPipeSessions` on (R6 — only after ①② soak; the design's sequencing law). Rollback = flip off; every path falls back structurally.
+
+**STANDING SWEEP (the sysinfo lesson, 2.314.0): "twin-sets = 0" is not a state, it's a metric to re-measure.** A user caught a missed local/remote twin AFTER closure. When touching any "how much X" reader, grep for its sibling on the other transport first.
+
+
 ### Stack
 - **Backend**: Node.js + Express + WebSocket (`ws`) + `node-pty` + dtach
 - **Frontend**: Vanilla JS (ES modules) bundled with esbuild, xterm.js for terminals, CodeMirror 6 for editor

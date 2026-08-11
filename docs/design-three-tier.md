@@ -147,8 +147,8 @@ hash identically across transports or messages double-render.
 | R2 ✅ 2.282.0 | Worker isolation | embedded worker tier (FS_ACTIONS single object); fs-ops through it with deadline/terminate/respawn; loop-lag canary; hang-isolation proven on a real FIFO wedge | unlocks file-ops unification and all later heavy ops |
 | R3 ✅ 2.283.0/2.285.0/2.292.0 | Transcript service | extract the parse stack behind one interface (pure refactor — DONE: src/transcript-service.js, HTTP read family rerouted) → daemon-hosted `transcript-op` dark + byte-identical parity suite (DONE: scripts/test-transcript-parity.mjs, 19 asserts incl. multi-window payloads and the huge-file seek family) → remote reads switch. Replacement substrate (mirror + location index) proven BEFORE the raw remote cache demotes to fallback | the slab-sync integrity class; faster remote history |
 | R4 ◐ steps 1–2 = 2.286.0/2.287.0 | Usage + events | walker into the daemon (DONE: `src/usage-walker.js` bundled, `usage-scan` op in a child process, two-phase cursor commit, per-op capability gating via hello `capabilities`) → push-triggered harvest (DONE: daemon transcript-dir watch incl. codex → debounced dirty → server harvest kick + discovery invalidation; ~1min ledger freshness for any remote activity) → codex rollouts in all three walkers (DONE — the remote codex coverage gap closed) → full `session.events` typed stream; local double-feeds during cutover (id dedup makes overlap harmless) | remote live-estimate gap; the shipped scanner and its parity test |
-| R5 ✅ 2.288.0/2.290.0/2.291.0/2.292.0 | Discovery | snapshot walk into a daemon child (loop never blocks on a slow home fs) → claim algorithm + line synthesis extracted to `discovery-facts` (one shared impl, golden fixture) → **on-device claims `discovery-claims` op, DARK + byte-identical parity (DONE)** → **remote discovery SWITCHED (2.292.0, ladder: claims op → server-side interpretation → ssh script → stale cache)** → local discovery harvests device #0 behind a flag once poll latency is proven | the ssh discovery script (to fallback) |
-| R6 | Session ownership | local creates via device #0 `session.open`; adoption-based — existing sessions stay attachable forever, nothing force-migrated | the local-dtach special path |
+| R5 ✅ 2.288.0…2.292.0 + 2.319.0 (local leg, flag) | Discovery | snapshot walk into a daemon child (loop never blocks on a slow home fs) → claim algorithm + line synthesis extracted to `discovery-facts` (one shared impl, golden fixture) → **on-device claims `discovery-claims` op, DARK + byte-identical parity (DONE)** → **remote discovery SWITCHED (2.292.0, ladder: claims op → server-side interpretation → ssh script → stale cache)** → local discovery harvests device #0 behind a flag once poll latency is proven | the ssh discovery script (to fallback) |
+| R6 ✅ 2.318.0 (flag) | Session ownership | local creates via device #0 pipe sessions (`agentd.localPipeSessions`, default OFF until step-3 soak); adoption-based — existing sessions stay attachable forever, nothing force-migrated; spawn falls back to dtach on any daemon failure | the local-dtach special path (dies by attrition once the flag is on) |
 | — | Session brain | device-side live stdout parsing + buffer ownership + spawn resolution | a separate campaign; the above is its prerequisite. R4's remaining `session.events` stream and R6's `session.open` are BOTH parts of it — see the plan below |
 
 ## The session-brain campaign (R4-events + R6, one body of work)
@@ -202,11 +202,15 @@ them; adoption-based (existing sessions never migrate, spawn falls back to
 dtach, kill → kill-pipe-session, boot re-opens agentdPipe metas by sid).
 ACTIVATION RULE: flip the flag only after the step-3 sb-parity-*/device-feed
 metrics have soaked live — the sequencing law's final application.
-Remaining in this campaign: B-47e2 (local discovery leg — swap ONLY the FS
-scan segment of /api/sessions to dm.discoverySnapshot() facts, keep webui-pid
-/tmux enrichment, CDP latency proof before the flag) and B-0f13 (remote
-statusline — plan parked in the backlog; the --settings quoting through the
-five remote builders needs a focused session). The step-2 substrate exists — the daemon now owns a stdout tailer
+**CAMPAIGN CODE-COMPLETE (2.319.0)**: B-47e2 SHIPPED (flag `agentd.localDiscovery`
+— FS facts from the device snapshot, parity+latency+fallback proven in
+test-local-discovery-device.mjs incl. the TTL-cache vacuous-parity trap) and
+B-0f13 SHIPPED (remote statusline: script ships with the agent tools, the
+--settings JSON rides per-arg shq quoting, quota-refresh returns the host's
+passive cache fetchedAt-guarded). Every round has landed; what remains is
+ACTIVATION, in order: sb-parity soak → agentd.localDiscovery → 
+agentd.localPipeSessions. The routing table for future changes lives in
+CLAUDE.md §THE THREE-TIER FINAL FORM. The step-2 substrate exists — the daemon now owns a stdout tailer
 (sealed-orders) and bundles the shared adapter; the usage/banner/rate-limit
 event families already flow device-side (usage-events push; banner reflex).
 Steps 2 (full-normalizer double-feed, dark) and 3 (message-family consumers
