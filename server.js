@@ -4660,6 +4660,39 @@ hosts.onUsageEvents = (hostId, text) => {
   // the device, next to the bytes), the orchestrator forwards, the client is a
   // view. One dirty signal ⇒ one computation ⇒ one broadcast, whatever the
   // client count. Skipped entirely when nobody is connected.
+  // AUTO-GRADUATE ssh → ws (2.311.0). The graduation mechanism has existed
+  // since 2.248.0 but was button-only, so in practice every machine stayed on
+  // ssh forever — per-op child spawns, banner hangs on lossy paths, and a
+  // ControlMaster whose ESTABLISHED flow survives network changes that every
+  // NEW connection fails (the 2.228.1 lie). Once we have proven we can reach
+  // the machine, moving to our own ws link is strictly better.
+  // DELIBERATELY CONSERVATIVE: only with an operator-declared base URL — never
+  // auto-publish this instance to the public relay, which is a side effect the
+  // operator has to choose. The machine is still asked whether it can reach
+  // that URL BEFORE anything is installed, and any failure leaves it on ssh.
+  const gradTried = new Map();
+  hosts.onSshConnected = (hostId) => {
+    try {
+      if (!hostId || serverSetting('agentd.autoGraduate') === false) return;
+      const h = hosts.get(hostId);
+      if (!h || h.transport === 'dial' || h.deviceId || h.autoGraduate === false) return; // already graduated / opted out
+      if (!(agentdDeps.publicUrl?.() || '')) return;                    // nothing to dial back to
+      const last = gradTried.get(hostId) || 0;
+      if (Date.now() - last < 6 * 60 * 60 * 1000) return;               // one attempt per machine per 6h
+      gradTried.set(hostId, Date.now());
+      setTimeout(async () => {
+        try {
+          const out = await graduateHostToDial(hosts.get(hostId), {});
+          serverNotice('grad-' + hostId, `"${h.name}" now talks to VibeSpace over its own ws link${out.dialedIn ? '' : ' (dialing in shortly)'} — ssh stays as the rescue channel.`);
+        } catch (e) {
+          // Never silent: the operator asked for ws and did not get it.
+          console.warn('[graduate] auto attempt failed for', hostId, e.message);
+          serverNotice('grad-fail-' + hostId, `Could not move "${h.name}" to a ws link — staying on ssh. ${String(e.message).slice(0, 180)}`, { level: 'warn' });
+        }
+      }, 3000); // let the connect that triggered us finish its own work first
+    } catch { }
+  };
+
   const discDirtyTimers = new Map();
   hosts.onDiscoveryDirty = (hostId) => {
     if (!hostId || discDirtyTimers.has(hostId)) return;
@@ -4981,6 +5014,60 @@ try {
 // relay (viaRelay); the host-side REACHABILITY PRECHECK runs before anything
 // is installed — unreachable ⇒ abort, stay pure-ssh. {remove:true} rolls the
 // whole thing back (service + root on the host, dial fields on the record).
+/** SSH → WS graduation, install half (2.311.0 extracted so it can run
+ *  AUTOMATICALLY, not only from a button — the mechanism shipped in 2.248.0
+ *  but every machine stayed on ssh because someone had to click it).
+ *  Installs the daemon as a persistent service on the machine and has it DIAL
+ *  BACK over ws. Throws with a user-readable reason; ssh always remains as the
+ *  bootstrap + rescue channel. */
+async function graduateHostToDial(h, { serverUrl, viaRelay } = {}) {
+  const sshRun = (script, timeout = 30000) => new Promise((resolve) => {
+    const { execFile } = require('child_process');
+    execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
+      { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
+  });
+    // ── install ──
+    let base = String(serverUrl || '').replace(/\/$/, '') || agentdDeps.publicUrl?.() || null;
+    if (!base && viaRelay) {
+      const st = plugins.status('frp');
+      const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub: st?.selfDialSub || '' });
+      if (r?.url) { base = r.url.replace(/\/$/, ''); try { plugins.setSelfDialSub?.(r.subdomain || ''); } catch { } }
+    }
+    if (!base) throw new Error('no reachable base URL: set agentd.publicUrl, pass serverUrl, or use viaRelay (frp plugin)');
+    // reachability PRECHECK from the HOST (any HTTP status = reachable; 000 = not)
+    const chk = await sshRun(`curl -s -o /dev/null -w '%{http_code}' --max-time 10 ${JSON.stringify(base + '/api/home')} 2>/dev/null || echo 000`, 20000);
+    const code = (chk.out.trim().match(/\d{3}$/) || ['000'])[0];
+    if (code === '000') throw new Error(`the machine cannot reach ${base} — graduation aborted (staying on ssh). If this instance is behind NAT, use viaRelay.`);
+    // mint onto the EXISTING ssh record (deviceId first so setDialToken finds it)
+    // dialRoot must mirror the INSTALLER's derivation byte-for-byte (it does
+    // sed hostname-only + tr -cd 'A-Za-z0-9.-') or the removal path tears
+    // down the wrong directory.
+    const dialHost = (new URL(base).hostname || 'dial').replace(/[^A-Za-z0-9.-]/g, '');
+    const root = `$HOME/.vibespace/device@${dialHost || 'dial'}`;
+    hosts.graduateDial(h.id, { dialRoot: root });
+    const pair = agentdMintDialPair(hosts.get(h.id).deviceId);
+    const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${pair.deviceId}`;
+    // ship + run the installer over ssh stdin (never argv — 2.126.0 rule is
+    // about secrets; tokens ride the arg list INSIDE the remote bash, same
+    // exposure class as the pairing dialog's copy-paste command)
+    const installer = fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
+    const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken}`;
+    const inst = await new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', `bash -s -- ${args}`],
+        { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
+      child.stdin.on('error', () => { });
+      child.stdin.end(installer);
+    });
+    if (!inst.ok) { hosts.ungraduateDial(h.id); bcastAll({ type: 'hosts-updated' }); throw new Error('installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600)); }
+    // wait for the dial-in (installer verifies the daemon started; the dial
+    // itself can lag a few seconds)
+    let dialed = false;
+    for (let i = 0; i < 15; i++) { if (hosts.dialOnline?.(pair.deviceId)) { dialed = true; break; } await new Promise(r => setTimeout(r, 2000)); }
+    bcastAll({ type: 'hosts-updated' });
+  return { success: true, dialedIn: dialed, base, deviceId: pair.deviceId, note: dialed ? 'dial link live — data-plane ops now prefer it (ssh stays as rescue)' : 'installed — daemon not dialed in yet; check again shortly or see the machine row' };
+}
+
 app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
   try {
     const h = hosts.get(req.params.id);
@@ -5006,46 +5093,8 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       bcastAll({ type: 'hosts-updated' });
       return res.json({ success: true, removed: true });
     }
-    // ── install ──
-    let base = String(req.body?.serverUrl || '').replace(/\/$/, '') || agentdDeps.publicUrl?.() || null;
-    if (!base && req.body?.viaRelay) {
-      const st = plugins.status('frp');
-      const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub: st?.selfDialSub || '' });
-      if (r?.url) { base = r.url.replace(/\/$/, ''); try { plugins.setSelfDialSub?.(r.subdomain || ''); } catch { } }
-    }
-    if (!base) return res.status(400).json({ error: 'no reachable base URL: set agentd.publicUrl, pass serverUrl, or use viaRelay (frp plugin)' });
-    // reachability PRECHECK from the HOST (any HTTP status = reachable; 000 = not)
-    const chk = await sshRun(`curl -s -o /dev/null -w '%{http_code}' --max-time 10 ${JSON.stringify(base + '/api/home')} 2>/dev/null || echo 000`, 20000);
-    const code = (chk.out.trim().match(/\d{3}$/) || ['000'])[0];
-    if (code === '000') return res.status(400).json({ error: `the machine cannot reach ${base} — graduation aborted (staying on ssh). If this instance is behind NAT, use viaRelay.` });
-    // mint onto the EXISTING ssh record (deviceId first so setDialToken finds it)
-    // dialRoot must mirror the INSTALLER's derivation byte-for-byte (it does
-    // sed hostname-only + tr -cd 'A-Za-z0-9.-') or the removal path tears
-    // down the wrong directory.
-    const dialHost = (new URL(base).hostname || 'dial').replace(/[^A-Za-z0-9.-]/g, '');
-    const root = `$HOME/.vibespace/device@${dialHost || 'dial'}`;
-    hosts.graduateDial(h.id, { dialRoot: root });
-    const pair = agentdMintDialPair(hosts.get(h.id).deviceId);
-    const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${pair.deviceId}`;
-    // ship + run the installer over ssh stdin (never argv — 2.126.0 rule is
-    // about secrets; tokens ride the arg list INSIDE the remote bash, same
-    // exposure class as the pairing dialog's copy-paste command)
-    const installer = fs.readFileSync(path.join(__dirname, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
-    const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken}`;
-    const inst = await new Promise((resolve) => {
-      const { execFile } = require('child_process');
-      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', `bash -s -- ${args}`],
-        { timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
-      child.stdin.on('error', () => { });
-      child.stdin.end(installer);
-    });
-    if (!inst.ok) { hosts.ungraduateDial(h.id); bcastAll({ type: 'hosts-updated' }); return res.status(400).json({ error: 'installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600) }); }
-    // wait for the dial-in (installer verifies the daemon started; the dial
-    // itself can lag a few seconds)
-    let dialed = false;
-    for (let i = 0; i < 15; i++) { if (hosts.dialOnline?.(pair.deviceId)) { dialed = true; break; } await new Promise(r => setTimeout(r, 2000)); }
-    bcastAll({ type: 'hosts-updated' });
-    res.json({ success: true, dialedIn: dialed, base, deviceId: pair.deviceId, note: dialed ? 'dial link live — data-plane ops now prefer it (ssh stays as rescue)' : 'installed — daemon not dialed in yet; check again shortly or see the machine row' });
+    const out = await graduateHostToDial(h, { serverUrl: req.body?.serverUrl, viaRelay: req.body?.viaRelay });
+    res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

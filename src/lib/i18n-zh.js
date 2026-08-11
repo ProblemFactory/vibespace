@@ -2568,4 +2568,6 @@ export default {
   "{host}’s machine login (remote ledger)": "{host} 的机器登录（远程账本按机器归账）",
   "remote — harvested into the ledger every ~15 min": "远程会话——账本约每 15 分钟收割一次",
   "session-level (no request id on this record)": "会话级（该记录无请求 ID，无法逐请求归账）",
+  "Move machines to a ws link automatically": "\u81ea\u52a8\u628a\u673a\u5668\u8f6c\u5230 ws \u94fe\u8def",
+  "When an SSH machine\u2019s agent is reachable, install it as a service so it dials back over WebSocket \u2014 fewer per-command SSH spawns and a link that notices breakage. Only runs when a public URL is set above; SSH always stays as the rescue channel.": "\u5f53\u4e00\u53f0 SSH \u673a\u5668\u4e0a\u7684\u4ee3\u7406\u53ef\u8fbe\u65f6\uff0c\u628a\u5b83\u88c5\u6210\u670d\u52a1\u5e76\u56de\u62e8 WebSocket \u2014\u2014 \u5c11\u6389\u6bcf\u6761\u547d\u4ee4\u4e00\u6b21\u7684 SSH \u8fdb\u7a0b\uff0c\u94fe\u8def\u65ad\u4e86\u4e5f\u80fd\u7acb\u523b\u53d1\u73b0\u3002\u4ec5\u5728\u4e0a\u9762\u586b\u4e86\u516c\u5f00\u5730\u5740\u65f6\u624d\u4f1a\u6267\u884c\uff1bSSH \u59cb\u7ec8\u4fdd\u7559\u4e3a\u6551\u63f4\u901a\u9053\u3002",
 };
