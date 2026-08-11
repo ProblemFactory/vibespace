@@ -1503,9 +1503,19 @@ function registerWsHandler(wss, ctx) {
               console.warn('[session] local pre-resume sweep skipped:', e.message);
             }
           }
+          // R6 / session-brain step 4 (2.318.0, FLAG-GATED default OFF —
+          // the design's own sequencing law: step 3 must soak first): a local
+          // CHAT session spawns as a device-#0 PIPE session — the SAME
+          // chat-wrapper with the SAME buffer/meta paths, supervised by the
+          // daemon instead of dtach. Adoption-based: existing sessions stay
+          // on their dtach path forever; only NEW creates route here, and any
+          // failure falls through to the dtach spawn below (never worse).
+          let r6Handle = null;
+          const r6Wanted = !session.host && sessionMode === 'chat' && backend === 'claude'
+            && serverSetting?.('agentd.localPipeSessions') === true;
           let createPty;
           try {
-            createPty = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none',
+            const r6Argv = [
               NODE_CMD, wrapper,
               bufFile, metaFileW,
               ENV_CMD, `EDITOR=${EDITOR_CMD}`, `CLAUDE_WEBUI_PORT=${PORT}`, `CLAUDE_WEBUI_SESSION_ID=${id}`,
@@ -1533,9 +1543,8 @@ function registerWsHandler(wss, ctx) {
               `TERM=xterm-256color`, `COLORTERM=truecolor`,
               ...spawnEnvPairs,
               spawnCmd, ...spawnArgs,
-            ], {
-              name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30,
-              cwd: spawnCwd, env: (() => {
+            ];
+            const r6Env = (() => {
                 const env = {
                   ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor',
                   // The WRAPPER (always local, even for remote sessions) needs the
@@ -1569,13 +1578,36 @@ function registerWsHandler(wss, ctx) {
                 // is left as-is (CODEX_HOME inherited from the server, if any).
                 if (spawnAccount?.localEnv) Object.assign(env, spawnAccount.localEnv);
                 return env;
-              })(),
+              })();
+            if (r6Wanted && hosts?.device) {
+              try {
+                const dm = await hosts.device(null);
+                r6Handle = await dm.openPipeSession({ sid: id, cmd: r6Argv[0], args: r6Argv.slice(1), cwd: spawnCwd, env: r6Env });
+                // kill/terminate + the step-2/3 device streams key on the daemon sid
+                session.agentdSession = true; session.keeperSid = id;
+              } catch (e) { console.warn('[r6] device session.open failed — dtach fallback:', e.message); r6Handle = null; }
+            }
+            if (!r6Handle) createPty = pty.spawn(DTACH_CMD, ['-c', socketPath, '-E', '-r', 'none', ...r6Argv], {
+              name: 'xterm-256color', cols: data.cols || 120, rows: data.rows || 30, cwd: spawnCwd, env: r6Env,
             });
           } catch (err) {
             ws.send(JSON.stringify({ type: 'error', message: `Failed to spawn session: ${err.message}\ndtach=${DTACH_CMD} node=${NODE_CMD} env=${ENV_CMD} cwd=${cwd}` }));
             return;
           }
-          setupSessionPty(session, id, createPty);
+          if (r6Handle) {
+            // pipe → pty-shaped shim: setupSessionPty consumes onData(string)/
+            // onExit({exitCode})/write/kill/pid; resize is a chat no-op.
+            const h = r6Handle;
+            const shim = {
+              pid: h.pid || -1,
+              onData: (cb) => { h.onData = (buf) => cb(buf.toString('utf-8')); },
+              onExit: (cb) => { h.onExit = (code) => cb({ exitCode: code ?? 0 }); },
+              write: (str) => { try { h.write(str); } catch { } },
+              resize: () => { },
+              kill: () => { try { h.kill(); } catch { } },
+            };
+            setupSessionPty(session, id, shim);
+          } else setupSessionPty(session, id, createPty);
 
           session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once
           activeSessions.set(id, session);
@@ -1617,6 +1649,7 @@ function registerWsHandler(wss, ctx) {
             name: session.name,
             cwd,
             spawnModel: data.model || null, // plan C model ladder's floor — survives restarts
+            agentdPipe: r6Handle ? true : undefined, // R6: daemon-owned pipe session (restore re-opens it, no dtach socket exists)
             host: session.host || null,
             hostName: session.hostName || null,
             keeperSid: session.keeperSid || null,
@@ -2482,6 +2515,11 @@ function registerWsHandler(wss, ctx) {
             // 'exited' silently broke terminate-from-sidebar.
             broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
             try { if (session._accountId && accounts?.get?.(session._accountId)?.type === 'pooled') accounts.dropSessionPoolLink(session._accountId, data.sessionId); } catch { }
+            // R6: a LOCAL daemon pipe session has no dtach socket — kill the
+            // daemon-side child explicitly (mirrors the dial branch's shape)
+            if (!session.host && session.agentdSession && session.keeperSid) {
+              try { hosts.device(null).then((dm) => dm.killPipeSession(session.keeperSid)).catch(() => { }); } catch { }
+            }
             activeSessions.delete(data.sessionId);
             refreshWebuiPids();
             broadcastActiveSessions();
