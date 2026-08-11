@@ -89,10 +89,15 @@ function weeklyDeadline(cache, nowSec) {
 function bucketRems(cache, nowSec) {
   if (!cache || typeof cache !== 'object') return [];
   const out = [];
-  const push = (kind, b) => { const r = bucketRemaining(b, nowSec); if (r != null) out.push({ kind, remaining: r }); };
-  push('fiveHour', cache.fiveHour);
-  push('weekly', cache.sevenDay);
-  for (const b of Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : []) push('weekly', b);
+  // `label` is REPORTING-only (kind drives every threshold) but it is what
+  // makes an honest message possible: "every member is out of quota" was
+  // flatly wrong under the nested model — the truth is usually "every
+  // member's <one model>'s weekly cap is spent, the 7-day budget still has
+  // 40% left", which points at a completely different user action.
+  const push = (kind, b, label) => { const r = bucketRemaining(b, nowSec); if (r != null) out.push({ kind, remaining: r, label }); };
+  push('fiveHour', cache.fiveHour, '5h');
+  push('weekly', cache.sevenDay, '7d');
+  for (const b of Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : []) push('weekly', b, String(b?.name || 'model cap'));
   return out;
 }
 
@@ -143,6 +148,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // existing caller and test, while letting the engine ask WHY nothing
   // happened — a pool sitting on a dead account must not be silent.
   const none = (why, extra) => (explain ? { to: null, reason: why, ...extra } : null);
+  // Which buckets are actually holding this decision back, by name.
+  const bucketDetail = (brs) => ({
+    deadBuckets: brs.filter((b) => b.remaining < THRESH[b.kind].hard).map((b) => `${b.label} ${Math.round(b.remaining)}%`),
+    liveBuckets: brs.filter((b) => b.remaining >= THRESH[b.kind].hard).map((b) => `${b.label} ${Math.round(b.remaining)}%`),
+  });
   const dock = (id, brs) => brs.map((b) => ({ ...b, remaining: Math.max(0, b.remaining - (pessimism[id] || 0)) }));
   const dockRem = (id, r) => (r.known ? { ...r, remaining: Math.max(0, r.remaining - (pessimism[id] || 0)) } : r);
   const curCache = readCache(currentId);
@@ -181,7 +191,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     ranked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk, remaining: r.known ? r.remaining : null, deadline: weeklyDeadline(c, nowSec) });
   }
   ranked.sort(edfCompare);
-  if (!ranked.length) return none('no-members', { fromRemaining: cur.known ? cur.remaining : null });
+  if (!ranked.length) return none('no-members', { fromRemaining: cur.known ? cur.remaining : null, ...bucketDetail(curBr) });
 
   const bestSettle = ranked.find((r) => r.settleOk) || null;
   if (exhausted) {
@@ -205,12 +215,12 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // account" into "jump onto ignorance" (caught by the anti-flap test).
       const knownRanked = ranked.filter((r) => r.known);
       const best = bestSettle || (knownRanked.length ? knownRanked.reduce((x, y) => (y.eff > x.eff ? y : x)) : ranked[0]);
-      if (best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id });
+      if (best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, ...bucketDetail(curBr) });
       return { to: best.id, toName: best.name, fromRemaining: cur.remaining, toRemaining: best.remaining, reason: 'exhausted' };
     }
     // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
-    if (!bestSettle) return none('no-settleable', { fromRemaining: cur.remaining });
+    if (!bestSettle) return none('no-settleable', { fromRemaining: cur.remaining, ...bucketDetail(curBr) });
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.remaining, toRemaining: bestSettle.remaining, reason: 'exhausted' };
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —

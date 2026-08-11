@@ -1235,10 +1235,27 @@ function maybePoolAutoSwitchForPool(poolId) {
       // (real incident 2026-08-11). Say it, once per hour per pool: this is
       // the state where only the user can act (add a member, wait for a
       // reset, switch that conversation off the pool).
-      if (d.reason === 'stuck') {
-        const stuckKey = `pool-stuck-${poolId}-${Math.floor(now / 3600000)}`;
-        const alt = d.bestRemaining != null ? ` — the best other member is at ${Math.round(d.bestRemaining)}%` : '';
-        serverNotice(stuckKey, `Pool "${a.name}" is stuck: every member is out of quota${alt}. Conversations on it will hit a limit until a window resets or you add a member.`, { level: 'warn' });
+      // EVERY non-actionable outcome must speak, not just 'stuck' (2.313.0):
+      // when the candidate gate drops every member the code returns through
+      // 'no-members' instead, which was silent — the same "pool sits on a dead
+      // account while the user finds out by hitting a limit" incident down a
+      // different branch. `_sentNotices` is a per-BOOT permanent Set, so the
+      // key must carry an hour bucket or a recurrence is never reported again.
+      if (d.reason === 'stuck' || d.reason === 'no-members' || d.reason === 'no-settleable') {
+        // Say WHICH buckets are dead. "Every member is out of quota" is wrong
+        // under the nested model and points at the wrong action (pay/wait a
+        // week) when the truth is usually "one model's weekly cap is spent
+        // while the 7-day budget still has 40% left".
+        const dead = (d.deadBuckets || []).join(', ');
+        const live = (d.liveBuckets || []).join(', ');
+        const what = dead ? `spent: ${dead}` : 'out of quota';
+        const rest = live ? ` (still available: ${live})` : '';
+        const alt = d.bestRemaining != null ? ` The best other member is at ${Math.round(d.bestRemaining)}%.` : '';
+        const why = d.reason === 'no-members'
+          ? `no member can serve it — ${what}${rest}`
+          : `nowhere better to go — ${what}${rest}`;
+        serverNotice(`pool-blocked-${poolId}-${d.reason}-${Math.floor(now / 3600000)}`,
+          `Pool "${a.name}": ${why}.${alt} Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.`, { level: 'warn' });
       }
       return;
     }
