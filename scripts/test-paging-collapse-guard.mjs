@@ -69,5 +69,30 @@ ok(!indeterminate({ scrollHeight: 780, clientHeight: 700, children: 50, windowSt
 ok(!indeterminate({ scrollHeight: 780, clientHeight: 700, children: 4, windowStart: 10, windowEnd: 60, total: 900 }),
   'a nearly-empty list is not treated as collapsed (needs >10 rendered)');
 
+// ── INTENT GATE (inc-msorcsrl — the mechanism the first two fixes missed) ──
+// After paging up, content-visibility resolves the fresh batch and NATIVE
+// SCROLL ANCHORING raises scrollTop to keep the view stable. The capture shows
+// 85 → 1466 in 26 ms, which no wheel can produce. Without an intent gate the
+// "near the end ⇒ extendBottom" rule read that as the user scrolling down.
+const extendsBottom = ({ scrollHeight, scrollTop, clientHeight, wheelDir, dirAgeMs }) => {
+  const goingUp = wheelDir < 0 && dirAgeMs < 1200;
+  return scrollHeight - scrollTop - clientHeight < 300 && !goingUp;
+};
+const extendsTop = ({ scrollTop, wheelDir, dirAgeMs }) => {
+  const goingDown = wheelDir > 0 && dirAgeMs < 1200;
+  return scrollTop < 100 && !goingDown;
+};
+// the captured geometry right before the bounce: st 2297, sh ~3100, ch 755
+ok(!extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: -1, dirAgeMs: 20 }),
+  'content growth pushed the view toward the end while the user wheels UP → NO extendBottom');
+ok(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: 1, dirAgeMs: 20 }),
+  'the same geometry with the user actually wheeling DOWN still extends (paging down keeps working)');
+ok(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: -1, dirAgeMs: 5000 }),
+  'a STALE upward direction does not veto forever (keyboard/programmatic scrolling still pages)');
+ok(!extendsTop({ scrollTop: 20, wheelDir: 1, dirAgeMs: 20 }),
+  'mirror: at the top edge while wheeling DOWN → no extendTop (no reverse bounce)');
+ok(extendsTop({ scrollTop: 20, wheelDir: -1, dirAgeMs: 20 }),
+  'at the top edge while wheeling UP → extendTop, the normal paging path');
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

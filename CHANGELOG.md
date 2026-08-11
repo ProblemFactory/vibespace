@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.307.0
+
+**The paging bounce, third capture — and this one shows the actual mechanism** (inc-msorcsrl). It was never about the top/bottom edge test. After paging UP, content-visibility resolves the freshly inserted batch and **native scroll anchoring raises scrollTop to keep the view visually stable** — the capture measured 85 → 1466 in 26 ms, which no wheel can produce. The "near the end ⇒ extendBottom" rule read that displacement as *the user scrolling down*, trimmed the top and walked the window back toward the live tail, so a user who was still scrolling up watched the page jump back. My two earlier fixes (2.301.0 scroll guard, 2.306.0 wheel guard) both hardened *edge detection*, which is why the trace kept showing the guards firing while the bounce continued.
+
+- **Intent gate**: a boundary EXTENSION must agree with the user's actual wheel direction. The wheel listener records the direction and its timestamp; `extendBottom` is vetoed while the user's recent wheel was UPWARD, and `extendTop` while it was DOWNWARD. Content-growth displacement has no direction of its own, so it can no longer masquerade as intent. The veto expires after 1.2 s, so keyboard/programmatic scrolling still pages normally.
+- `scripts/test-paging-collapse-guard.mjs` (31 asserts) adds the captured geometry: the same position extends when the user really is going down, and a stale direction never vetoes forever.
+
+**Sealed orders: the reflex could fire on a banner from a session that does not bill the pool** (final confirmed finding of the review). `_scan` tails every live pipe session and acted on the first limit banner, so an unrelated session hitting its own limit would re-point the pool off a healthy target and move billing for every live pool conversation mid-turn. The daemon now requires the session's recorded spawn line to reference the pool's credential directory, and refuses (loudly) when it cannot tell. E2E covers both directions.
+
+
 ## 2.306.0
 
 **The paging bounce, actually fixed** (inc-msor3oax — still reproducing on 2.305.0, and the new capture shows exactly why). 2.301.0 guarded the SCROLL handler against collapsed geometry, and the trace confirms that guard firing (`collapsedGeomSkip {sh:755, ch:755}`) — yet the window still got yanked to the live tail about once a second. **A collapsed list emits no scroll events at all**: with `scrollHeight === clientHeight` there is nothing to scroll, so the WHEEL handler is the only path that runs, and its bottom-edge branch was unguarded. With no scrollable range, "parked at the bottom edge" and "parked at the top edge" are the same position, so one downward tick — the momentum tail of the user's own UPWARD gesture is enough — fired `extendBottom`.

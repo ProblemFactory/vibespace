@@ -50,7 +50,14 @@ check('orders accepted + persisted', fs.existsSync(path.join(ROOT, 'state', 'poo
 
 // a fake LIVE pipe session the tailer will scan
 const SESS = path.join(ROOT, 'state', 'sessions'); fs.mkdirSync(SESS, { recursive: true });
-fs.writeFileSync(path.join(SESS, 'sess-t1.json'), JSON.stringify({ childPid: process.pid, startedAt: Date.now() }));
+// the meta's spawn line must reference the pool credential dir — that is how
+// the daemon tells "this session bills the pool" from "some other session"
+fs.writeFileSync(path.join(SESS, 'sess-t1.json'), JSON.stringify({ childPid: process.pid, startedAt: Date.now(),
+  cmd: ['sh', '-lc', `exec env CLAUDE_SECURESTORAGE_CONFIG_DIR=${link} claude`] }));
+// …and a FOREIGN session (its own credentials) must never trigger the reflex
+fs.writeFileSync(path.join(SESS, 'sess-foreign.json'), JSON.stringify({ childPid: process.pid, startedAt: Date.now(),
+  cmd: ['sh', '-lc', 'exec env CLAUDE_SECURESTORAGE_CONFIG_DIR=/somewhere/else claude'] }));
+fs.writeFileSync(path.join(SESS, 'sess-foreign.out'), 'quiet\n');
 fs.writeFileSync(path.join(SESS, 'sess-t1.out'), 'normal output line\n');
 await sleep(3200); // let the tailer register the current size
 
@@ -66,6 +73,13 @@ fs.appendFileSync(path.join(SESS, 'sess-t1.out'), JSON.stringify({ type: 'user',
 let flipped = false;
 for (let i = 0; i < 24 && !flipped; i++) { await sleep(500); flipped = fs.readlinkSync(link).endsWith('sub-b'); }
 check('server down + banner ⇒ the device re-points the pool symlink to the ranked fallback', flipped);
+// a FOREIGN session's banner must NOT move the pool (adversarial review)
+{
+  const before2 = fs.readlinkSync(link);
+  fs.appendFileSync(path.join(SESS, 'sess-foreign.out'), JSON.stringify({ type: 'user', text: "You've reached your 5-hour limit" }) + '\n');
+  await sleep(5000);
+  check('a banner from a session that does NOT bill this pool is ignored', fs.readlinkSync(link) === before2);
+}
 check('execution logged for the reconnect report', fs.existsSync(path.join(ROOT, 'state', 'pool-orders-log.ndjson')));
 
 // ── reconnect: the executed report arrives + ack clears the log ──
@@ -97,5 +111,5 @@ check('ack clears the execution log (no duplicate reports)', !fs.existsSync(path
 if (failed) { try { console.error('--- daemon log ---\n' + fs.readFileSync(path.join(ROOT, 'state', 'agentd.log'), 'utf8').slice(-1200)); } catch { } }
 try { await dm2.stop?.(); } catch { }
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(failed ? `FAIL (${failed})` : 'ALL PASS (7)');
+console.log(failed ? `FAIL (${failed})` : 'ALL PASS (10)');
 process.exit(failed ? 1 : 0);
