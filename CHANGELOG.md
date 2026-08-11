@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.317.0
+
+### Added
+- **Session-brain step 3: side-effect consumers go device-assisted (first-writer-wins).** The daemon's `session-events` stream now carries the RAW records alongside the normalized ops, and the server feeds them into ONE shared consumer implementation (`claudeSideEffects`: served model, usage odometer, rate-limit events, limit banners, fallback belts, TodoWrite/TaskUpdate) through a bounded per-record seen-gate. The parse remains primary and registers every record it processes; the device feed runs the families only for records the parse has NOT seen — it fills relay gaps and beats relay latency (wrapper reconnect windows, a dead relay) and can never double-fire. A session without a device stream behaves exactly as before. TaskCreate stays parse-only by design (its id only exists in the tool RESULT the parse stashes). The normalizer/msg-broadcast path deliberately remains server-owned until R6 — this step moves the FACTS, not the client protocol.
+
 ## 2.316.0
 
 ### Added
