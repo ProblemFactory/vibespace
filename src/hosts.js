@@ -19,7 +19,7 @@ const crypto = require('crypto');
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
 const { execFile } = require('child_process');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
-const { nameFromUserLine, interpretDiscoveryLines } = require('./discovery-facts');
+const { nameFromUserLine, interpretDiscoveryLines, synthesizeDiscoveryLines } = require('./discovery-facts');
 const { classifyPrivateKey } = require('./ssh-key-format');
 
 const SSH_BASE_OPTS = [
@@ -1398,21 +1398,7 @@ class HostManager {
             new Promise((_, rj) => setTimeout(() => rj(new Error(`${what} deadline`)), ms).unref())]);
           const dm = await this.deviceBounded(id);
           const snap = await deadline(dm.discoverySnapshot(), 12000, 'device-discovery');
-          const home = '~'; // path prefix only cosmetic in J/H/N/T keys — build real-looking paths
-          const lines = [];
-          for (const l of snap.locks) lines.push('LOCK ' + JSON.stringify(l));
-          for (const j of snap.jsonls) {
-            const fp = `/HOME/.claude/projects/${j.projDir}/${j.file}`;
-            lines.push(`J ${(j.mtimeMs / 1000).toFixed(4)} ${j.size} ${fp}`);
-            if (j.headCwd !== undefined) lines.push(`H ${fp}\t"cwd":"${j.headCwd || ''}"`);
-            for (const u of j.userLines || []) lines.push(`N ${fp}\t${u}`);
-            if (j.tailIds) lines.push(`T ${fp}\t${j.tailIds.join(',')},`);
-          }
-          for (const r of snap.codexRollouts || []) {
-            lines.push(`C ${(r.mtimeMs / 1000).toFixed(4)} ${r.size} ${r.path}`);
-            if (r.headCwd) lines.push(`HC ${r.path}\t"cwd":"${r.headCwd}"`);
-          }
-          out = lines.join('\n');
+          out = synthesizeDiscoveryLines(snap); // shared with the device's own discovery.v2 chain
         } catch (e2) { out = null; /* legacy fallback below */ }
       }
       if (out == null) out = await this._ssh(h, script, { timeoutMs: 20000 });

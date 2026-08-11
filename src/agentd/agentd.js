@@ -92,7 +92,7 @@ if (process.argv.includes('--usage-scan-child')) {
   return;
 }
 const fs = require('fs');
-const { extractTailIds, pidLooksClaude } = require('./../discovery-facts.js');
+const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
 // R3: the SHARED transcript service, constructed lazily on first use — the
 // parse stack (session-store/normalizers/adapters) is heavy and most daemons
@@ -1012,7 +1012,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims'],
         });
         return;
       }
@@ -1116,6 +1116,39 @@ function serveConnection(sock) {
             }
             if (!snap) snap = computeDiscoverySnapshot();
             mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts });
+          } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
+        })();
+        return;
+      }
+      // ── R5 step 3 (three-tier `discovery.v2`): the device computes its OWN
+      // session claims — snapshot → synthesize → interpret, all three the
+      // SHARED functions the server runs, so the result is byte-identical by
+      // construction (the parity suite proves it). DARK: no production
+      // consumer; hosts keeps synthesizing server-side until this soaks. The
+      // orchestrator's remaining job in the target state is cross-machine
+      // merging, not interpretation. ──
+      if (msg.op === 'discovery-claims') {
+        (async () => {
+          try {
+            let snap = null;
+            if (!msg.forceInline) {
+              snap = await new Promise((resolve) => {
+                try {
+                  const { execFile } = require('child_process');
+                  execFile(process.execPath, [__filename, '--discovery-snapshot-child'], { timeout: 30000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
+                    if (err) return resolve(null);
+                    try { const r = JSON.parse(stdout); resolve(r && r.jsonls ? r : null); } catch { resolve(null); }
+                  });
+                } catch { resolve(null); }
+              });
+            }
+            if (!snap) snap = computeDiscoverySnapshot();
+            const { claimJsonls } = require('./../session-store.js');
+            const sessions = interpretDiscoveryLines(
+              synthesizeDiscoveryLines(snap),
+              { hostId: msg.hostId || null, hostName: msg.hostName || null, claimJsonls },
+            );
+            mux.control({ op: 'discovery-result', id: msg.id, sessions });
           } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         })();
         return;

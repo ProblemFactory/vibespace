@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.291.0
+
+**R5 step 3 (three-tier): `discovery.v2` — the device computes its own session claims** (dark, byte-identical parity proven).
+
+With the claim algorithm extracted in 2.290.0, the second half — snapshot → fact lines — moves into the shared module too (`synthesizeDiscoveryLines`), so the WHOLE chain (snapshot → synthesize → interpret) now runs on the device as one op: `discovery-claims`. The daemon returns finished session cards; the orchestrator's remaining job in the target state is cross-machine merging, not interpretation. Capability-gated via the hello `capabilities` array (unknown ops on old daemons hang the request, never version strings).
+
+DARK by the retirement-order law: no production consumer — `hosts.discoverSessions` keeps synthesizing server-side (now through the same shared function) until this soaks. The parity suite is the only caller and proves the switchover is a transport swap: device-computed claims are **byte-identical** to the server-side interpretation of the same snapshot, cards and all (`test-usage-scan-op`, 24 asserts).
+
+
 ## 2.290.0
 
 **R5 step 2 (three-tier): the discovery claim algorithm becomes one shared function** (docs/design-three-tier.md `discovery.v2`).
