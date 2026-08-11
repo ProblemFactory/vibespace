@@ -317,7 +317,18 @@ class ChatView {
         const dirAge = Date.now() - (this._wheelDirAt || 0);
         const goingUp = this._wheelDir < 0 && dirAge < 1200;
         const goingDown = this._wheelDir > 0 && dirAge < 1200;
-        if (scrollTop < 100 && !this._loading && this._canPaginate && !goingDown) {
+        // DIRECTION LOCKOUT (2.308.0): the wheel gate above needs a recent
+        // wheel event, so it does nothing for touch / scrollbar-drag /
+        // keyboard readers, or when the reader pauses while a batch settles.
+        // A mutation-induced displacement can never be evidence for the
+        // OPPOSITE direction, whatever the input device — so for a moment
+        // after each structural change, only the trigger that CONTINUES that
+        // direction may fire. Short enough that a genuine reversal is never
+        // held up (the reader cannot cross a viewport in 600ms).
+        const structAge = Date.now() - (this._lastStructuralAt || 0);
+        const lockUp = structAge < 600 && this._lastStructuralDir === 'down';
+        const lockDown = structAge < 600 && this._lastStructuralDir === 'up';
+        if (scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp) {
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
           else if (this._windowStart > 0) this._extendTop();
           else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
@@ -325,7 +336,7 @@ class ChatView {
         // Extend bottom when scrolling near end of rendered window. Teleport
         // mode seeks NEWER slabs by file line instead, so browsing continues
         // downward from a jump just like it does upward.
-        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate && !goingUp) {
+        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate && !goingUp && !lockDown) {
           if (this._teleported) this._maybeSeekLater();
           else if (this._windowEnd < this._total) this._extendBottom();
         }
@@ -980,7 +991,7 @@ class ChatView {
         this._traceExpect();
         this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
       }
-      this._lastStructuralAt = Date.now(); this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
+      this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } catch (e) {
       // Unhandled before: the scroll handler calls this un-awaited, so a
@@ -1223,7 +1234,7 @@ class ChatView {
 
       // Same-task fold of the newly appended cards (see _extendTop)
       this._updateRuns();
-      this._lastStructuralAt = Date.now(); this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
+      this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } catch (e) {
@@ -1252,7 +1263,7 @@ class ChatView {
     }
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowEnd -= toRemove;
-    this._lastStructuralAt = Date.now(); this._trace('trimBottom', { removed: toRemove });
+    this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('trimBottom', { removed: toRemove });
     this._pinned = false; // we trimmed the bottom, can't be pinned
   }
 
@@ -1282,7 +1293,7 @@ class ChatView {
     });
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowStart += toRemove;
-    this._lastStructuralAt = Date.now(); this._trace('trimTop', { removed: toRemove, anchored });
+    this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('trimTop', { removed: toRemove, anchored });
     if (!anchored) {
       this._traceExpect();
       this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);

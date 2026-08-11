@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.308.0
+
+### Fixed
+- **Paging bounce — device-independent direction lockout.** 2.307.0's intent gate needs a recent wheel event, so it does nothing for touch, scrollbar-drag or keyboard readers, or when the reader simply pauses while a batch settles. A structural mutation now stamps its DIRECTION, and for 600ms afterwards only the trigger that continues that direction may fire: a mutation-induced displacement can never be evidence for the opposite direction, whatever the input device.
+
+### Investigated and rejected
+- **Native scroll anchoring is NOT the culprit.** The obvious next hypothesis was that the browser's scroll anchoring and our own `_withViewportAnchor` were both compensating for the same event. Disabling it — globally, and then scoped to just our mutation window — made the paging regression suite FAIL (189px oscillations), because `content-visibility: auto` makes every off-screen message's height a moving target and native anchoring is what absorbs that churn. Recorded here so the next person does not spend the same afternoon: the suite is the control, and it says the browser is helping.
+
 ## 2.307.0
 
 **The paging bounce, third capture — and this one shows the actual mechanism** (inc-msorcsrl). It was never about the top/bottom edge test. After paging UP, content-visibility resolves the freshly inserted batch and **native scroll anchoring raises scrollTop to keep the view visually stable** — the capture measured 85 → 1466 in 26 ms, which no wheel can produce. The "near the end ⇒ extendBottom" rule read that displacement as *the user scrolling down*, trimmed the top and walked the window back toward the live tail, so a user who was still scrolling up watched the page jump back. My two earlier fixes (2.301.0 scroll guard, 2.306.0 wheel guard) both hardened *edge detection*, which is why the trace kept showing the guards firing while the bounce continued.
