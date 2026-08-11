@@ -704,6 +704,7 @@ const WS_OPEN = 1;
 const CLAUDE_STREAM_TYPES = new Set([
   'assistant', 'user', 'system', 'result', 'attachment', 'control_request',
   'control_response', 'tool_progress', 'stream_event', 'summary',
+  'rate_limit_event', // handled since 2.289.0 — the set lagged the handler, so the breadcrumb cried 'unhandled' for a handled type (misled the inc-msozeyw2 read)
   '_stdin_ack', '_remote_state', '_remote_exit',
 ]);
 const _seenStreamTypes = new Set();
@@ -3678,11 +3679,17 @@ const tasks = new TaskGroupManager({
 // System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
 // the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
 const sysinfo = require('./src/sysinfo');
-// Remote machine snapshot for the System panel's machine switcher (2.226.3):
-// one bounded probe over the shared read-only channel (hosts._hostShell —
-// ssh AND dial devices). Raw-host semantics: MemTotal is the limit (no
-// cgroup), disk = the $HOME filesystem; macOS handled (no /proc). History
-// stays LOCAL-only — the sampler runs in this server.
+// Remote machine snapshot for the System panel's machine switcher.
+// ONE IMPLEMENTATION (2.314.0, CS separation — this was a missed twin-set):
+// the daemon bundles src/sysinfo.js and the `sysinfo` op runs it ON the
+// machine, so local and remote share one interpretation of "used memory"
+// (working set). The interpretation had already drifted once between the two
+// copies — the local panel read raw memory.current (page cache included) and
+// pinned at a false 100% while this script correctly used MemTotal −
+// MemAvailable. The script below is now only the FALLBACK RUNG for
+// daemon-less ssh hosts; its raw-host semantics (MemTotal = limit, no
+// cgroup awareness) are the fallback's known limitation, not the contract.
+// History stays LOCAL-only — the sampler runs in this server.
 const REMOTE_SYSINFO_SCRIPT = `
 U=$(uname)
 if [ "$U" = Darwin ]; then
@@ -3704,6 +3711,14 @@ fi`;
 async function remoteSysinfo(hostId) {
   const h = hosts.get(hostId);
   if (!h) throw new Error('unknown machine');
+  // Ladder: device op (the shared module, run where the facts live) → ssh
+  // script (daemon-less hosts) — the per-op fallback pattern every other
+  // device op follows. Capability-gated: an old daemon is never asked.
+  try {
+    const dm = await hosts.deviceBounded(hostId, 6000);
+    const r = await dm.sysinfo();
+    if (r?.mem) return { host: hostId, ...r };
+  } catch { /* fall through to the ssh script */ }
   const out = await hosts._hostShell(h, REMOTE_SYSINFO_SCRIPT, { timeoutMs: 8000 });
   const r = { host: hostId, procs: [] };
   for (const line of String(out).split('\n')) {
