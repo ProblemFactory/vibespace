@@ -225,7 +225,19 @@ class ChatView {
         if (this._teleported) this._maybeSeekEarlier();        // teleported: seek older by line
         else if (this._windowStart > 0) this._extendTop();
         else this._maybeSeekEarlier();                         // registered tail exhausted → seek gap
-      } else if (e.deltaY > 0 && list.scrollHeight - list.scrollTop - list.clientHeight < 10) {
+      } else if (e.deltaY > 0 && list.scrollHeight - list.clientHeight > 50
+                 && list.scrollHeight - list.scrollTop - list.clientHeight < 10) {
+        // THE BOUNCE (inc-msor3oax, still reproducing on 2.305.0): with a
+        // fresh batch's heights unresolved the list has NO scrollable range
+        // (sh === ch === 755 in the capture), so "parked at the bottom edge"
+        // and "parked at the top edge" are the SAME position — one downward
+        // wheel tick (or the momentum tail of the user's UPWARD gesture)
+        // fired extendBottom and yanked the window back to the live tail,
+        // about once a second for as long as they kept paging up. The 2.301.0
+        // guard covered the SCROLL handler, but a collapsed list produces NO
+        // scroll events — the wheel handler is the only path that runs, and
+        // it was unguarded. Requiring a REAL scrollable range is what makes
+        // the bottom edge distinguishable from the top edge at all.
         // BOTTOM edge mirror of the top-edge fix above: parked at max
         // scrollTop, wheel events keep coming but scroll events DON'T — the
         // window-mode branch was missing here, so scrolling back down through
@@ -257,8 +269,21 @@ class ChatView {
         // window and >10 rendered, that geometry is INDETERMINATE — make NO
         // boundary decision; heights resolve within ~1s and the next scroll
         // event re-evaluates honestly.
+        // The indeterminacy is TRANSIENT — it lasts only while content-
+        // visibility resolves the batch we just inserted — so the guard is
+        // scoped to a settling window after a structural mutation rather than
+        // to an absolute pixel threshold. A fixed 200px (2.301.0) was too
+        // tight for the field data: the incident's landings measured 782, 923
+        // and 997 against a ~600-700px list, so two of the three slipped
+        // through; widening the pixel bar instead would make a genuinely
+        // SHORT partial window skip decisions forever and paging up would
+        // stop working. "Less than one viewport of scrollable range, within
+        // 1.5s of a structural change" catches every recorded landing and can
+        // never stick.
         const partialWindow = this._windowStart > 0 || this._windowEnd < this._total;
-        if (partialWindow && scrollHeight - clientHeight < 200 && this._messageList.childElementCount > 10) {
+        const settling = Date.now() - (this._lastStructuralAt || 0) < 1500;
+        if (partialWindow && settling && scrollHeight - clientHeight < clientHeight
+            && this._messageList.childElementCount > 10) {
           this._trace('collapsedGeomSkip', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight });
           return;
         }
@@ -935,7 +960,7 @@ class ChatView {
         this._traceExpect();
         this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
       }
-      this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
+      this._lastStructuralAt = Date.now(); this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } catch (e) {
       // Unhandled before: the scroll handler calls this un-awaited, so a
@@ -1178,7 +1203,7 @@ class ChatView {
 
       // Same-task fold of the newly appended cards (see _extendTop)
       this._updateRuns();
-      this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
+      this._lastStructuralAt = Date.now(); this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
     } catch (e) {
@@ -1207,7 +1232,7 @@ class ChatView {
     }
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowEnd -= toRemove;
-    this._trace('trimBottom', { removed: toRemove });
+    this._lastStructuralAt = Date.now(); this._trace('trimBottom', { removed: toRemove });
     this._pinned = false; // we trimmed the bottom, can't be pinned
   }
 
@@ -1237,7 +1262,7 @@ class ChatView {
     });
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     this._windowStart += toRemove;
-    this._trace('trimTop', { removed: toRemove, anchored });
+    this._lastStructuralAt = Date.now(); this._trace('trimTop', { removed: toRemove, anchored });
     if (!anchored) {
       this._traceExpect();
       this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);

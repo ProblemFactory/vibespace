@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.306.0
+
+**The paging bounce, actually fixed** (inc-msor3oax — still reproducing on 2.305.0, and the new capture shows exactly why). 2.301.0 guarded the SCROLL handler against collapsed geometry, and the trace confirms that guard firing (`collapsedGeomSkip {sh:755, ch:755}`) — yet the window still got yanked to the live tail about once a second. **A collapsed list emits no scroll events at all**: with `scrollHeight === clientHeight` there is nothing to scroll, so the WHEEL handler is the only path that runs, and its bottom-edge branch was unguarded. With no scrollable range, "parked at the bottom edge" and "parked at the top edge" are the same position, so one downward tick — the momentum tail of the user's own UPWARD gesture is enough — fired `extendBottom`.
+
+- The wheel bottom-edge branch now requires a REAL scrollable range (>50px) before it can believe it is at the end. The 2.193.0 stall fix it exists for keeps working (a genuinely parked-at-the-end list still extends).
+- The scroll-handler guard moved from a fixed 200px bar to **"less than one viewport of scrollable range, within 1.5s of a structural change"**. The field data forced this: the incident's landings measured 782, 923 and 997 against a ~755px list, so two of three slipped past 200px; simply widening the bar would make a genuinely short partial window skip decisions forever and paging up would stop working. The settling window makes the skip transient by construction.
+- `scripts/test-paging-collapse-guard.mjs` pins both predicates against the captured numbers (26 asserts), including that the skip cannot stick and that a real parked-at-the-end list still pages.
+
+
 ## 2.305.0
 
 **The pool never switched away from an account whose OPUS quota was spent, because the Opus bucket was invisible to it** (inc-msof8i22, "没有自动切换还有opus用量的账号"). Both quota parsers read model-scoped weekly caps from a LIST, and treated the vendor's *named* fields (`seven_day_opus`, `seven_day_sonnet`, …) as a fallback used ONLY when that list came back empty. Every account here reports one list entry (Fable) — so `seven_day_opus` was never read on ANY path, and the pool's exhaustion test saw 5h/7d/Fable all healthy on a target whose Opus was gone. Verified against the live caches: ten usage-cache files, every one carrying a Fable bucket and no Opus bucket, from the ⟳, statusline and get_usage sources alike.
