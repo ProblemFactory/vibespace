@@ -903,11 +903,39 @@ app.locals.usageIdentityAccountIds = usageIdentityAccountIds;
 // "You've reached your … limit" banner marks the bucket dead in the cache and
 // immediately re-evaluates the pool — this is what makes auto-switch work for
 // chat-only accounts (the statusline never runs there).
+// Which usage-cache identity does a session's quota belong to? Account-billed
+// sessions (local, host-held, linked, pool→target) → the account key (quota
+// is a per-account GLOBAL fact — readings merge across machines by identity,
+// three-tier design). A REMOTE session on the host's own CLI login has no
+// account id → the host bucket (usage-cache/host-<id>.json, the popup's
+// machine rows) — resolveUsageKey alone mapped those to '__global__' and
+// misattributed the HOST's quota to the LOCAL machine login.
+function usageCacheKeyFor(session) {
+  if (session?.host && !session._accountId) return 'host-' + session.host;
+  return resolveUsageKey(session);
+}
+// Passive quota capture from the CLI's own rate_limit_event records (B-e5c9,
+// 2.289.0) — ONE shared implementation (src/rate-limit-capture.js) for local
+// AND remote chat sessions; the caller resolves key/identity as parameters.
+function recordRateLimitEvent(session, msg) {
+  try {
+    const ev = parseRateLimitEvent(msg);
+    if (!ev) return;
+    const key = usageCacheKeyFor(session);
+    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key, identityIds: usageIdentityAccountIds(key), ev });
+    if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); return; }
+    global.__vsEvent?.('rate-limit-event', `${key}:${ev.kind}:${ev.status}${r.wroteReading ? ':reading' : ''}`);
+    // a reading busts the estimator memo via fetchedAt and becomes an anchor
+    // at the next sweep; exhaustion acts NOW (banner parity)
+    if (r.dead) maybePoolAutoSwitch(session);
+    else if (r.wroteReading) kickPoolEval();
+  } catch (e) { console.warn('[usage] rate_limit_event capture failed:', e.message); }
+}
 function markLimitBanner(session, text) {
   try {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
-    const key = resolveUsageKey(session);
+    const key = usageCacheKeyFor(session); // host-aware (2.289.0) — a remote host-login banner belongs to the host bucket, not __global__
     const nowSec = Math.floor(Date.now() / 1000);
     const bump = (b, fallbackResetSec) => ({
       ...(b || {}),
@@ -1746,6 +1774,10 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 kickPoolEval();
               } catch { }
             }
+            // CLI-native quota push (B-e5c9): emitted when rate limit info
+            // changes, riding real API responses — zero extra calls; covers
+            // chat sessions the statusline never could, local AND remote.
+            if (msg.type === 'rate_limit_event') recordRateLimitEvent(session, msg);
             if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
               for (const b of msg.message.content) {
                 if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
@@ -3708,6 +3740,7 @@ app.post('/api/tasks/import', (req, res) => {
 // → the local signature changes → every member re-injects next turn. ──
 const { syncGroupCtx, FILE_CAP: CTX_FILE_CAP, MAX_FILES: MAX_CTX_FILES } = require('./src/ctx-sync');
 const machineProbes = require('./src/machine-probes');
+const { parseRateLimitEvent, captureRateLimitEvent } = require('./src/rate-limit-capture.js');
 const _ctxSyncBusy = new Set(); // `${hostId}:${groupId}` in-flight guard
 const _ctxSkipNoticed = new Set(); // one honest notice per host:group:file per boot
 async function syncRemoteGroupCtx(h, g) {
