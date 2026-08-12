@@ -26,7 +26,7 @@ ok(buildRemoteShellPrelude({ withNodeFinder: true }).includes('VS_NODE'), 'withN
 // THE DRIFT GUARD: no remote-command file may re-inline the prelude or finder.
 const LIT_PRE = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ]';
 const LIT_NF = 'VS_NODE="$(command -v node';
-for (const f of ['src/hosts.js', 'src/ws-handler.js']) {
+for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
   const src = fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
   ok(!src.includes(LIT_PRE), `${f} has no inlined prelude copy (must import REMOTE_PRELUDE)`);
   ok(!src.includes(LIT_NF), `${f} has no inlined node finder (must import nodeFinder)`);
@@ -49,7 +49,8 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js']) {
   const tailLine = buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' });
   ok(tailLine.endsWith('exec env K=v node keeper run sid 0 --'), 'tail form (keeper runTail) appends verbatim');
   // drift guard: ws-handler must never hand-assemble a spawn line again
-  const ws = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf-8');
+  const ws = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf-8')
+    + fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf-8');
   const handRolled = (ws.match(/exec env `/g) || []).length + (ws.match(/`exec env/g) || []).length;
   ok(handRolled === 0, `no hand-assembled 'exec env' spawn lines left in ws-handler (found ${handRolled})`);
   ok((ws.match(/buildRemoteExec\(\{/g) || []).length === 5, 'all five builders route through buildRemoteExec');

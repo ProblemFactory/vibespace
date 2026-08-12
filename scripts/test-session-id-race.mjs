@@ -19,7 +19,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 // a shared counter value only patched the symptom of the day. Derivation
 // makes divergence unrepresentable: the meta filename is a pure function of
 // the id, so a collision would require duplicate ids.
-for (const rel of ['src/ws-handler.js', 'src/server/boot-restore.js']) {
+for (const rel of ['src/ws-create.js', 'src/server/boot-restore.js']) {
   const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
   const mints = src.split('\n').filter((l) => /const sockName =/.test(l) && !/^\s*\/\//.test(l));
   ok(mints.length > 0, `${rel}: has a sockName mint site`);
@@ -30,7 +30,7 @@ for (const rel of ['src/ws-handler.js', 'src/server/boot-restore.js']) {
 }
 
 // ── 1. source invariant: no site may RE-READ the counter for a name/id ──
-for (const rel of ['src/ws-handler.js', 'src/server/boot-restore.js']) {
+for (const rel of ['src/ws-create.js', 'src/server/boot-restore.js']) {
   const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
   const reReads = src.split('\n')
     .map((l, i) => ({ l, i: i + 1 }))
