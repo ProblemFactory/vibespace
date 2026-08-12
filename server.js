@@ -1846,6 +1846,11 @@ server.listen(PORT, HOST, () => {
   }
 
   // Restore existing dtach sessions from before restart
+  // One-shot data migrations (src/server/migrations.js, plan B step 1): the
+  // ledger-driven registry runs BEFORE any session restore touches the data
+  // it may reshape. Failures notice + retry next boot, never block startup.
+  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice }).runLocalMigrations(); }
+  catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
   migrateLegacyHomeProjects();
   restoreSessions();
   // Plan C boot reconciliation: a per-session pool link whose session did not
