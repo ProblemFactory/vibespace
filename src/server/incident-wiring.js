@@ -113,7 +113,7 @@ app.post('/api/incident', (req, res) => {
     fs.writeFileSync(path.join(dir, 'env.json.pending'), JSON.stringify({ startedAt: new Date().toISOString(), targets }, null, 1));
     (async () => {
       try {
-        const inc = require('./src/incident');
+        const inc = require('../incident.js');
         const local = await inc.captureLocal(dir, { dataDir: path.join(rootDir, 'data'), cids: targets.cids });
         fs.writeFileSync(path.join(dir, 'env.json'), JSON.stringify({ targets, local }, null, 1));
         if (hosts && targets.hostIds.length) {
