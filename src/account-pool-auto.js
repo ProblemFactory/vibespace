@@ -234,4 +234,32 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   return none('hold', { fromRemaining: cur.known ? cur.remaining : null });
 }
 
-module.exports = { SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };
+
+// ── auto-cli quota refresh decision (2.329.0, owner-approved 2026-08-12 after
+// the ToS explicit-permit argument; cadence made BURN-AWARE per the owner's
+// "30min太慢, workflow快跑时容易挂") ──
+// Pure: pick which accounts to ground-truth via `claude -p /usage` this tick.
+// list: [{ key, fetchedAt, lastAttemptAt, estDriftPct, activeBurn }]
+//   estDriftPct = max over buckets of |estimated - last reading| in POINTS —
+//   the dead-reckoner's own signal that real burn happened since the reading.
+//   activeBurn  = any estimated movement at all since fetchedAt.
+// Rules: refresh when the ESTIMATE has drifted ≥ driftPct (a fast workflow
+// burst trips this within minutes) OR the reading is older than maxAgeMs
+// WITH activity since (idle accounts are NEVER polled — the strongest
+// ban-postmortem signal stays structurally impossible). Per-account floor
+// keeps bursts from hammering one account; one refresh per tick serializes
+// the CLI spawns fleet-wide.
+function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeMs = 45 * 60e3, maxPerTick = 1 } = {}) {
+  const eligible = (list || []).filter((a) => {
+    if (!a || !a.key) return false;
+    if (now - (a.lastAttemptAt || 0) < floorMs) return false;
+    const age = now - (a.fetchedAt || 0);
+    if ((a.estDriftPct || 0) >= driftPct) return true;
+    return age >= maxAgeMs && !!a.activeBurn;
+  });
+  eligible.sort((x, y) => (y.estDriftPct || 0) - (x.estDriftPct || 0));
+  return eligible.slice(0, maxPerTick).map((a) => a.key);
+}
+
+module.exports = {
+  decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };

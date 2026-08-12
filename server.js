@@ -1516,6 +1516,53 @@ app.use(sessionsRouter);
 // ── Usage / Rate Limit ── (extracted to src/usage-routes.js in the 2.92.0 split)
 const { setupUsage } = require('./src/usage-routes');
 const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, CLAUDE_CMD });
+
+const { decideCliRefresh } = require('./src/account-pool-auto.js');
+// ── auto-cli quota refresh loop (2.329.0, owner-approved after the ToS
+// explicitly-permit argument; §ban-safety posture: the fetch is made by the
+// official CLI exactly as if the user typed /usage — this instance never
+// touches the vendor API). Setting accounts.onDemandQuotaRefresh='auto-cli';
+// cadence is BURN-AWARE, not fixed: the dead-reckoner's own drift signal
+// (est vs last reading) triggers refreshes within minutes during a fast
+// workflow burst, while idle accounts are never polled at all (activeBurn
+// gate) — the ban-postmortem's idle-account-on-a-timer signal stays
+// structurally impossible. One CLI spawn per tick, per-account 5min floor,
+// 45min+jitter staleness cap for accounts with ANY activity.
+{
+  const attempts = new Map(); // key → last attempt ts
+  const jitter = 1 + Math.random() * 0.4; // per-boot 45–63min cap
+  setInterval(async () => {
+    try {
+      if (serverSetting('accounts.onDemandQuotaRefresh') !== 'auto-cli') return;
+      const now = Date.now();
+      const list = [];
+      for (const a of (accounts.list().accounts || [])) {
+        if (a.type !== 'subscription' || !a.loggedIn || a.pooled) continue;
+        let raw = null;
+        try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, a.id + '.json'), 'utf-8')); } catch { }
+        try {
+          for (const [, g] of usageIdentityGroupsCached()) {
+            if (g.accountIds.includes(a.id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
+          }
+        } catch { }
+        if (!raw?.fetchedAt) continue; // never-read accounts stay manual (no drift baseline)
+        let est = null; try { est = usageEstimator.estimateFor(a.id, raw, now); } catch { }
+        let drift = 0, moved = false;
+        const cmp = (e, r) => { if (e && r && typeof e.utilization === 'number' && typeof r.utilization === 'number') { const d = Math.abs(e.utilization - r.utilization) * 100; drift = Math.max(drift, d); if (d > 0.2) moved = true; } };
+        cmp(est?.fiveHour, raw.fiveHour); cmp(est?.sevenDay, raw.sevenDay);
+        for (const s of est?.scopedWeekly || []) cmp(s, (raw.scopedWeekly || []).find((x) => x.name === s.name));
+        list.push({ key: a.id, fetchedAt: raw.fetchedAt, lastAttemptAt: attempts.get(a.id) || 0, estDriftPct: drift, activeBurn: moved });
+      }
+      const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter });
+      for (const key of picks) {
+        attempts.set(key, now);
+        const ok = await usage.refreshViaCliPanel(key).catch(() => false);
+        console.log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (drift ${Math.round(list.find((x) => x.key === key)?.estDriftPct || 0)}pt)`);
+        global.__vsMetric?.('auto-cli-refresh-ms', 0);
+      }
+    } catch (e) { console.warn('[auto-cli] tick failed:', e.message); }
+  }, 60000).unref();
+}
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
