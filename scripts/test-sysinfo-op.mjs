@@ -45,7 +45,7 @@ ok(r.mem.source === local.mem.source, `same source tag both sides (${r.mem.sourc
 
 // 3. drift guard: the ssh fallback script must keep producing the SAME field
 // names the route serves, or a daemon-less host silently changes shape.
-const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
+const srv = fs.readFileSync(path.join(REPO, 'src/server/sysinfo-wiring.js'), 'utf-8'); // moved in decomposition #3
 ok(/REMOTE_SYSINFO_SCRIPT[\s\S]{0,200}FALLBACK RUNG/i.test(srv) || /fallback rung/i.test(srv.slice(srv.indexOf('REMOTE_SYSINFO_SCRIPT') - 800, srv.indexOf('REMOTE_SYSINFO_SCRIPT'))), 'script is documented as the fallback rung');
 ok(/dm\.sysinfo\(\)/.test(srv), 'remoteSysinfo tries the device op first');
 const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf-8');
