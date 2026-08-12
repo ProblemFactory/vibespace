@@ -535,6 +535,50 @@ app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
   } finally { _harvestLease = 0; }
   res.json({ hosts: out });
 });
+
+// The CLI-panel refresher, callable from the route AND the auto-cli loop
+// (2.329.0). One spawn = one first-party `/usage` fetch by the official
+// binary; writes the same per-account cache the statusline hook uses. Returns
+// true when a parseable panel landed.
+async function refreshViaCliPanel(key) {
+  const isGlobal = key === '__global__';
+  let acctMeta = null;
+  if (!isGlobal) {
+    acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
+    if (!acctMeta) return false;
+  }
+  const cliPanel = await new Promise((resolve) => {
+    try {
+      const { execFile } = require('child_process');
+      const env = { ...process.env };
+      delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
+      // ONLY the secret store relocates (session-spawn parity): the token IS
+      // the identity the panel reports; projects/settings stay shared.
+      if (!isGlobal) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = accounts.subDir(key);
+      const bin = CLAUDE_CMD || 'claude';
+      execFile(bin, ['-p', '/usage'], { env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+        if (err) return resolve(null);
+        resolve(parseCliUsageText(stdout));
+      });
+    } catch { resolve(null); }
+  });
+  if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) return false;
+  _onDemandUsageAt[key] = Date.now();
+  const u = { ...cliPanel, source: 'on-demand', scopedFetchedAt: Date.now() };
+  try {
+    fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+    const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
+    // preserve org identity + any fields the panel doesn't carry
+    let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
+    const merged = { ...prev, ...u, scopedWeekly: u.scopedWeekly?.length ? u.scopedWeekly : (prev.scopedWeekly || []) };
+    fs.writeFileSync(f + '.tmp', JSON.stringify(merged)); fs.renameSync(f + '.tmp', f);
+    if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
+    else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
+    try { ingestPassiveUsage(); } catch { }
+  } catch { }
+  return true;
+}
+
 app.post('/api/usage/refresh', async (req, res) => {
   // User-facing kill switch (accounts.onDemandQuotaRefresh = 'off'): never
   // contact Anthropic, even if a stale client asks.
@@ -705,37 +749,8 @@ app.post('/api/usage/refresh', async (req, res) => {
   // the ⟳ click) + the same 60s throttle; any failure falls through to the
   // token ladder below. Ambient key/oat env is stripped so the CLI reads the
   // subscription login, not an inherited API key.
-  const cliPanel = await new Promise((resolve) => {
-    try {
-      const { execFile } = require('child_process');
-      const env = { ...process.env };
-      delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
-      // ONLY the secret store relocates (session-spawn parity): the token IS
-      // the identity the panel reports; projects/settings stay shared.
-      if (!isGlobal) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = accounts.subDir(key);
-      const bin = CLAUDE_CMD || 'claude';
-      execFile(bin, ['-p', '/usage'], { env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
-        if (err) return resolve(null);
-        resolve(parseCliUsageText(stdout));
-      });
-    } catch { resolve(null); }
-  });
-  if (cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay)) {
-    _onDemandUsageAt[key] = Date.now();
-    const u = { ...cliPanel, source: 'on-demand', scopedFetchedAt: Date.now() };
-    try {
-      fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
-      const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
-      // preserve org identity + any fields the panel doesn't carry
-      let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
-      const merged = { ...prev, ...u, scopedWeekly: u.scopedWeekly?.length ? u.scopedWeekly : (prev.scopedWeekly || []) };
-      fs.writeFileSync(f + '.tmp', JSON.stringify(merged)); fs.renameSync(f + '.tmp', f);
-      if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
-      else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
-      try { ingestPassiveUsage(); } catch { }
-    } catch { }
-    return res.json({ success: true, via: 'cli-panel' });
-  }
+  const cliOk = await refreshViaCliPanel(key);
+  if (cliOk) return res.json({ success: true, via: 'cli-panel' });
   let token = isGlobal ? getOAuthToken() : accounts.usageToken(key);
   // Same-account fallback (2.181.0, real report): a named subscription's dir
   // token is only refreshed while a session RUNS on that dir — but when the
@@ -1032,7 +1047,7 @@ app.get('/api/usage', (req, res) => {
 });
 
 
-  return { getOAuthToken, usagePollingEnabled, refreshRateLimit, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
+  return { refreshViaCliPanel, getOAuthToken, usagePollingEnabled, refreshRateLimit, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
 module.exports = { setupUsage, parseCliUsageText };
