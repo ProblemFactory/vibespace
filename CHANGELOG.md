@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.324.0
+
+### Changed
+- **Physical decomposition campaign STARTED (owner green light: "直接按照终态启动").** server.js begins its march from a 6423-line god-closure to a bootstrap + `src/server/*` modules, with the 2.323.0 architecture conformance suite as the safety net (every extraction step runs inside `npm run build`). Extraction discipline: verbatim code behind a `create(deps)` factory, server.js destructures the SAME names (zero downstream renames), boot smoke + full gates per step. Landed: **#1 agent-tool generators + hook registration** (457 lines → src/server/agent-tool-generators.js; two leaked closure helpers localized, and module-relative `__dirname` corrected to rootDir — inside src/server/ it would have silently pointed the hook-optout file AND the temp-server hook guard at the wrong directory, the exact bug class the red test cannot see but boot smoke caught); **#2 goal-status sync** (82 lines → src/server/goal-sync.js, lazy hosts getter for boot order). server.js: 6423 → 5973 lines. Next: sysinfo-wiring, incident-wiring, then the pool/usage cluster.
+
 ## 2.323.0
 
 ### Added
