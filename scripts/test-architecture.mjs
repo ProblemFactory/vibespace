@@ -48,8 +48,8 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   'src/adapters/shell.js', 'src/adapters/index.js', 'src/usage-estimator.js', 'src/usage-anchors.js', 'src/safe-fs.js',
   'src/transcript-worker.js', 'src/ssh-key.js']);
 const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
-const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/agentd/client.js'];
-const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
+const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
+const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
   || p.startsWith('src/routes/') || p.startsWith('src/server/') || ['src/mounts.js', 'src/accounts.js', 'src/task-groups.js', 'src/usage-history.js',
     'src/usage-routes.js', 'src/agent-routes.js', 'src/session-status.js', 'src/user-todos.js', 'src/webdav.js', 'src/vnc.js',
     'src/auth.js', 'src/clerk-auth.js', 'src/telemetry.js', 'src/opslog.js', 'src/incident.js', 'src/remote-fs.js',
@@ -105,7 +105,7 @@ const bundle = read('data/bin/vibespace-agentd.js');
 ok(bundle.length > 0, 'daemon bundle exists');
 // match module MARKERS (esbuild emits '// src/<path>' banners per bundled
 // file), not free text — comments legitimately mention orchestrator names
-ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/hosts\.js|\/\/ server\.js/.test(bundle), 'daemon bundle contains no orchestrator modules');
+ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ server\.js/.test(bundle), 'daemon bundle contains no orchestrator modules');
 
 // 6) server.js is BOOTSTRAP + WIRING only (2.325.0 decomposition terminal
 //    state: 6423 → ~1900 lines, mechanisms live in src/server/*). The budget

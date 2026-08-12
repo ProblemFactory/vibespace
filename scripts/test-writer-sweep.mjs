@@ -97,7 +97,8 @@ if (fs.existsSync('/proc/self')) {
 // so EVERY sweepWriters call site in the create handler must sit under a
 // `!data.fork` gate. This guard fails anyone adding a new site without it.
 {
-  const src = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../src/ws-handler.js', import.meta.url), 'utf8')
+    + fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf8');
   const lines = src.split('\n');
   let sites = 0, gated = 0;
   lines.forEach((l, i) => {
