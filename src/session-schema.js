@@ -1,0 +1,86 @@
+'use strict';
+// SESSION FIELD SCHEMA (拆分P3 — the blackboard gets owners).
+// The live session object in activeSessions accumulated ~50 underscore fields
+// written from anywhere ("blackboard" anti-pattern): nothing said which module
+// owned a field, what persisted it, or whether two writers raced. This module
+// is the AUTHORITATIVE registry — every `session._field` write site must have
+// a row here. scripts/test-session-schema.mjs enforces it: an unregistered
+// write FAILS the suite until the field is added WITH an owner; a dead row
+// must be removed. PURE module (no requires) — safe to import anywhere.
+//
+// owner values name the module that conceptually owns writes:
+//   stdout    src/server/session-stdout.js (the parse + meta store)
+//   ws        src/ws-handler.js / src/ws-create.js (protocol handlers)
+//   goal      src/server/goal-sync.js + the set-goal ws case
+//   pool      src/server/usage-pool-engine.js (model lock / pool identity)
+//   brain     src/server/session-brain.js (dual-feed gate)
+//   boot      src/server/boot-restore.js (restore-time backfill)
+//   dial      dial/agentd transport plumbing
+// persisted: 'meta' = session-meta json, 'wrapper' = wrapper meta file,
+//            null = in-memory only (dies with the process by design).
+
+const SESSION_FIELDS = {
+  // identity / lifecycle
+  _webuiId:            { owner: 'brain',  persisted: null,      note: 'webui id stamped for device-feed side effects' },
+  _normalizer:         { owner: 'stdout', persisted: null,      note: 'MessageManager instance for the live stream' },
+  _normEpoch:          { owner: 'stdout', persisted: null,      note: 'normalizer identity epoch — client full-reset discriminator (2.89.x)' },
+  _subNormalizers:     { owner: 'stdout', persisted: null,      note: 'per-subagent normalizers map' },
+  _historyLoaded:      { owner: 'ws',     persisted: null,      note: 'first-attach full-JSONL rebuild flag (set AFTER success, 2.89.2)' },
+  _startSubagentWatcher: { owner: 'stdout', persisted: null,    note: 'bound helper for restart re-arm of agent watchers' },
+
+  // streaming / turn state
+  _isStreaming:        { owner: 'stdout', persisted: 'wrapper', note: 'explicit protocol-signal streaming flag (never heuristic)' },
+  _streamingLabel:     { owner: 'stdout', persisted: null,      note: 'current activity label (thinking/tool/responding)' },
+  _interruptTimer:     { owner: 'ws',     persisted: null,      note: 'delayed-SIGINT fallback handle (2s, cancel on protocol success)' },
+  _stdinAckReceived:   { owner: 'stdout', persisted: null,      note: 'wrapper _stdin_ack seen — broken-pty detector input' },
+  _pendingEditor:      { owner: 'ws',     persisted: null,      note: 'Ctrl+G editor open in flight' },
+
+  // goal
+  _goal:               { owner: 'goal',   persisted: 'wrapper', note: 'active objective text' },
+  _goalStatus:         { owner: 'goal',   persisted: 'wrapper', note: 'active/paused/blocked/usageLimited/…' },
+  _goalElapsed:        { owner: 'goal',   persisted: 'wrapper', note: 'seconds used' },
+  _goalTokensUsed:     { owner: 'goal',   persisted: 'wrapper', note: 'tokens used' },
+  _prevGoal:           { owner: 'goal',   persisted: 'wrapper', note: 'replaced goal for /goal resume' },
+  _lastGoalStatusUuid: { owner: 'goal',   persisted: null,      note: 'JSONL goal_status dedup cursor' },
+  _goalJsonlFetchAt:   { owner: 'goal',   persisted: null,      note: 'remote transcript pull throttle for goal sync' },
+
+  // model / billing identity
+  _servedModel:        { owner: 'stdout', persisted: null,      note: 'last MAIN-THREAD assistant model (never sidechain)' },
+  _servedModelAt:      { owner: 'stdout', persisted: null,      note: 'timestamp of the above' },
+  _pickedModel:        { owner: 'pool',   persisted: 'meta',    note: 'set-model pick (plan C identity ladder)' },
+  _pickedModelAt:      { owner: 'pool',   persisted: 'meta',    note: 'timestamp of the pick' },
+  _spawnModel:         { owner: 'ws',     persisted: 'meta',    note: 'model at spawn (identity ladder fallback)' },
+  _modelLocked:        { owner: 'pool',   persisted: 'meta',    note: 'per-conversation model lock flag' },
+  _lockedModel:        { owner: 'pool',   persisted: 'meta',    note: 'lock target (full id upgraded from the CLI echo)' },
+  _fallbackStopFired:  { owner: 'pool',   persisted: null,      note: 'once-per-turn stop-on-fallback belt latch' },
+  _apiKeySource:       { owner: 'stdout', persisted: 'meta',    note: "CLI's own init apiKeySource (billing truth)" },
+  _effort:             { owner: 'ws',     persisted: 'meta',    note: 'last COMMANDED effort (CLI never reports it back)' },
+  _permissionMode:     { owner: 'ws',     persisted: 'meta',    note: 'launch/set permission mode (not in JSONL)' },
+
+  // resume / fork
+  _forkRequested:      { owner: 'ws',     persisted: null,      note: 'one-shot fork flag gating id adoption (2.156.1)' },
+  _resumeSpawn:        { owner: 'ws',     persisted: 'meta',    note: 'spawn was a --resume (implicit-fork adoption gate)' },
+  _sawFirstId:         { owner: 'stdout', persisted: 'meta',    note: 'first id line consumed (adoption bookkeeping)' },
+  _resumeSwept:        { owner: 'ws',     persisted: null,      note: 'writer sweep SWEPT: pids for the created reply' },
+  _resumeWarning:      { owner: 'ws',     persisted: null,      note: 'non-fatal resume degradation note for the client' },
+  _reattachAttempts:   { owner: 'stdout', persisted: null,      note: 'bounded dead-socket re-attach counter' },
+  _cwdRecreated:       { owner: 'ws',     persisted: 'meta',    note: 'B-7812 recreate-cwd notice armed' },
+
+  // remote / transport
+  _remoteState:        { owner: 'stdout', persisted: 'wrapper', note: 'remote keeper link state (reconnecting chip)' },
+  _remotePort:         { owner: 'ws',     persisted: null,      note: 'reverse-tunnel port for VIBESPACE_API' },
+  _agentdSession:      { owner: 'ws',     persisted: 'meta',    note: 'daemon pipe-session marker (R6/M2)' },
+  _agentdCfgFile:      { owner: 'ws',     persisted: null,      note: 'attach-cli cfg file path (cleanup)' },
+  _dialDeviceId:       { owner: 'dial',   persisted: 'meta',    note: 'owning dial device id' },
+  _dialReversePort:    { owner: 'dial',   persisted: null,      note: 'device-side reverse forward port' },
+  _bridgePort:         { owner: 'dial',   persisted: 'meta',    note: 'DialSessionBridge loopback port' },
+
+  // misc consumers
+  _sizeOwnerWs:        { owner: 'ws',     persisted: null,      note: 'size-override owner connection' },
+  _todos:              { owner: 'stdout', persisted: null,      note: 'TodoWrite/TaskCreate-derived {done,total,current}' },
+  _sbSeen:             { owner: 'brain',  persisted: null,      note: 'first-writer-wins record gate (bounded set)' },
+  _codexThreadBaseline: { owner: 'ws',    persisted: null,      note: 'codex thread listing baseline for capture' },
+  _captureReservedThreadId: { owner: 'ws', persisted: null,     note: 'codex reserved thread id during create' },
+};
+
+module.exports = { SESSION_FIELDS };
