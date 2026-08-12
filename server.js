@@ -344,6 +344,7 @@ let deviceMgr = null;
 // Per-host vsht_ token: plaintext in a 0600 local file (the attach bridge
 // reads it at spawn; never argv), sha256 recorded alongside for audit.
 const AGENTD_DIR = path.join(__dirname, 'data', 'agentd');
+function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 function agentdHostToken(hostId) {
   ensureDir(AGENTD_DIR);
   const f = path.join(AGENTD_DIR, 'host-' + hostId + '.token');
