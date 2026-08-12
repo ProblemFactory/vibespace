@@ -46,6 +46,8 @@ The 2026-08 campaign (docs/design-three-tier.md, R0–R6 + session-brain + closu
 
 **ACTIVATION SWITCHES (code complete, soak-gated — flip deliberately, in order):** ① watch `sb-parity-hit/miss` in Diagnostics (step-2/3 live parity) → ② `agentd.localDiscovery` on (after `local-disc-snap-ms` looks sane on YOUR storage) → ③ `agentd.localPipeSessions` on (R6 — only after ①② soak; the design's sequencing law). Rollback = flip off; every path falls back structurally.
 
+**ENFORCEMENT (2.323.0): the tier rules above are a RED TEST, not prose** — scripts/test-architecture.mjs (38 asserts, runs INSIDE `npm run build` before esbuild) walks the real require/import graph: PURE imports nothing, SHARED never reaches up, DEVICE pulls only shared+pure, CLIENT crosses only the wire, the daemon bundle carries no orchestrator markers. Cross-tier edges need an allowlist entry WITH a reason; dead allowlist entries fail the suite. Adding a module = add it to the right tier set in that file (path-based defaults cover src/lib/ and src/routes/).
+
 **STANDING SWEEP (the sysinfo lesson, 2.314.0): "twin-sets = 0" is not a state, it's a metric to re-measure.** A user caught a missed local/remote twin AFTER closure. When touching any "how much X" reader, grep for its sibling on the other transport first.
 
 
