@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.329.0
+
+### Added
+- **auto-cli quota refresh (owner-approved, reversing the 2026-08-09 blanket auto-refresh ban for the CLI-panel channel specifically).** New `accounts.onDemandQuotaRefresh` mode **auto-cli**: a background loop ground-truths subscription quotas by spawning `claude -p /usage` — the OFFICIAL binary makes the fetch exactly as if the user typed /usage (ToS "explicitly permit" lane: headless mode + the documented GitHub-Actions subscription flow; this instance still never calls the vendor endpoint itself, vendor-whitelist unchanged). Cadence is **BURN-AWARE, not fixed** (the owner's "30min太慢, workflow快跑容易挂"): the dead-reckoner's own drift signal (estimate vs last reading, ≥4pt on any bucket) triggers a refresh within minutes during a fast burst; active-but-slow accounts refresh at a 45min+jitter staleness cap; **idle accounts are NEVER polled** (activeBurn gate — the ban-postmortem's idle-account-on-a-timer signal stays structurally impossible); 5min per-account floor + one CLI spawn per tick serialize everything. The decision is a PURE function (decideCliRefresh in src/account-pool-auto.js, suite scripts/test-auto-cli-refresh.mjs 7); the refresher (refreshViaCliPanel, extracted from the ⟳ route's rung 2) writes the same per-account cache the statusline uses, so pool switching, estimator anchors and the popup all sharpen automatically. Default stays 'manual'; this instance is switched to auto-cli.
+
 ## 2.328.1
 
 ### Fixed
