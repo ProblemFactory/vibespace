@@ -18,7 +18,7 @@ const { normalizeCodexSource } = require('../adapters/codex');
 function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions, engine,
   checkClaudeGoalStatus, broadcastToSession, broadcastActiveSessions,
-  noteModelSeen, recordUsageAttribution, daemonPtyShim, sbSeenFirst,
+  noteModelSeen, recordUsageAttribution, daemonPtyShim, sbSeenFirst, getDeviceMgr,
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback,
@@ -1014,6 +1014,7 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
   // M1: daemon owns the pty when enabled — the dtach attach runs INSIDE agentd
   // and relays over the mux. On ANY failure fall back to the local pty so a
   // daemon hiccup never loses a session.
+  const deviceMgr = getDeviceMgr();
   if (deviceMgr && !session.host) {
     deviceMgr.openSession({ cmd: DTACH_CMD, args: ['-a', socketPath, '-E', '-r', 'winch'], cols: 120, rows: 30 })
       .then((h) => { setupSessionPty(session, id, daemonPtyShim(h)); repaintClients(); })
