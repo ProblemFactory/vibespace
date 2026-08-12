@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.328.0
+
+### Added
+- **One-shot migration framework, BOTH tiers (owner plan B: "本地和device都跑").** `src/migration-runner.js` (SHARED — the daemon bundles it) = ledger-keyed run-at-most-once semantics: failed migrations log verbatim + retry next boot and never block startup; archive-never-destroy; append-only dated ids. Local registry `src/server/migrations.js` runs at boot before restoreSessions (ledger data/migrations.json) and ships its first real entry — the dormant checklist `plan` arrays (feature removed 2.121.0) are archived to data/archive/task-plans-legacy.json and stripped from the live store. Device registry (`DEVICE_MIGRATIONS` in agentd.js, ledger `$ROOT/state/migrations.json`) runs at daemon boot after the singleton — the sanctioned channel for eventually retiring device-local wire residue (a future entry can rewrite dial.json endpoints; once fleet telemetry shows every daemon past it, the permanent alias can go). Pre-framework one-shots (home-rename, store `.migrated` markers) stay where they are with their own guards. Scope note recorded in the routing table: wire-compat residue on machines we don't control (410 responders, capability gates) is NOT migratable — it retires by fleet-telemetry condition, not by a local run. Suite: scripts/test-migrations.mjs (11).
+
+### Fixed
+- **"Natural Max 已登出" forensics (user question — NOT env pollution, direction was the opposite):** the machine login is intact (token refreshed hours later); what died was the HELD COPY in data/subs — wiped to a token-less husk at 14:17, the same minute the pool pointed the VibeSpace Debugger session at it. The user's `/logout` in a terminal revoked/rotated the SAME login's other copy, so our held copy's next refresh was rejected and the CLI cleared it by design — the documented two-copies-of-one-login fork (the exact reason macOS Keychain shadows are never copied and subscriptions don't ship by default). Per-session spawn env (CLAUDE_SECURESTORAGE_CONFIG_DIR) is per-account-dir and structurally cannot leak into ~/.claude. Remedy: re-login Natural Max via Manage Agents; the pool had already routed around it.
+
 ## 2.327.0
 
 ### Fixed
