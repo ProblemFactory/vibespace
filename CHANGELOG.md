@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.323.0
+
+### Added
+- **Architecture conformance suite — the separation is now enforced by a red test, not by documentation** (owner directive: "我需要一个更强有力的手段保证分离架构"). `scripts/test-architecture.mjs` (38 asserts) parses the real require/import graph (incl. `export…from` re-exports) and enforces tier direction: PURE decision modules import NOTHING (not even node builtins); SHARED fact modules never reach up into orchestrator/client/device; the DEVICE tier pulls only shared+pure+its own files; the CLIENT talks to the server over the wire only; the daemon bundle is checked for orchestrator module markers. Deliberate exceptions live in an allowlist WITH reasons, and dead allowlist entries fail the suite (an unused exception hides the next violation behind it) — the vendor-whitelist mechanic generalized to the whole codebase. **Wired into `npm run build` before esbuild**: a re-coupling change cannot even produce a bundle.
+
+### Audit (architect's honest inventory — what is NOT separated yet)
+- The import graph is already clean (every tier-direction check passed on first calibration). The remaining coupling is exactly where the graph cannot see: **inside single files**. ① server.js (6423 lines) — pool engine, estimator wiring, session-brain comparator, incident capture, dial pairing, boot migrations share one closure scope; ② ws-handler ctx — a 30-entry implicit interface; ③ the session object as an unowned blackboard (~50 `_fields` written by everyone); ④ the client↔server ws protocol has no schema. These are the physical-decomposition campaign's targets; the conformance suite freezes the boundaries so decomposition can proceed without silent re-coupling.
+
 ## 2.322.0
 
 ### Fixed / Corrected

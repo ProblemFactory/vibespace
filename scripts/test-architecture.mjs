@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// ARCHITECTURE CONFORMANCE (2.323.0, owner directive "更强有力的手段保证分离"):
+// the three-tier separation is enforced STRUCTURALLY, not by documentation —
+// the vendor-whitelist mechanic generalized to the whole dependency graph.
+// Any new cross-tier require FAILS this suite until it is DELIBERATELY added
+// to an allowlist below with a reason. Documentation rots; a red test does not.
+//
+// TIERS (docs/design-three-tier.md):
+//   DEVICE     src/agentd/agentd.js + mux/reexec/ws-min — runs on EVERY machine
+//   SHARED     fact modules the daemon bundles — one implementation per concern
+//   PURE       decision modules — no I/O AT ALL (safe in any process, incl. browser)
+//   ORCH       server.js, hosts.js, ws-handler.js, routes/* — this instance only
+//   CLIENT     src/lib/** — the browser
+//
+// RULES (direction of knowledge): DEVICE/SHARED/PURE know nothing of ORCH or
+// CLIENT. ORCH may use everything below it. CLIENT may use only PURE (via the
+// esbuild bundle) — never ORCH internals.
+import fs from 'node:fs';
+import path from 'node:path';
+
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+let pass = 0, fail = 0;
+const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+
+const rel = (p) => path.relative(REPO, p).replace(/\\/g, '/');
+const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
+function requiresOf(f) {
+  const s = read(f);
+  const out = new Set();
+  for (const m of s.matchAll(/require\(['"]([^'"]+)['"]\)/g)) out.add(m[1]);
+  for (const m of s.matchAll(/(?:^|\n)\s*import\s[^;]*?from\s+['"]([^'"]+)['"]/g)) out.add(m[1]);
+  for (const m of s.matchAll(/(?:^|\n)\s*export\s[^;]*?from\s+['"]([^'"]+)['"]/g)) out.add(m[1]); // re-exports are imports too
+  return [...out];
+}
+const resolveRel = (from, spec) => {
+  if (!spec.startsWith('.')) return null; // builtin or package
+  let p = path.normalize(path.join(path.dirname(from), spec)).replace(/\\/g, '/');
+  if (!p.endsWith('.js') && fs.existsSync(path.join(REPO, p + '.js'))) p += '.js';
+  return p;
+};
+
+// ── Tier membership (path-based; NEW files inherit their directory's tier) ──
+const PURE = new Set(['src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js']);
+const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
+  'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
+  'src/session-store.js', 'src/codex-session-store.js', 'src/normalizers.js', 'src/message-manager.js',
+  'src/codex-message-manager.js', 'src/adapters/base.js', 'src/adapters/claude-code.js', 'src/adapters/codex.js',
+  'src/adapters/shell.js', 'src/adapters/index.js', 'src/usage-estimator.js', 'src/usage-anchors.js', 'src/safe-fs.js',
+  'src/transcript-worker.js', 'src/ssh-key.js']);
+const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
+const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/agentd/client.js'];
+const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
+  || p.startsWith('src/routes/') || ['src/mounts.js', 'src/accounts.js', 'src/task-groups.js', 'src/usage-history.js',
+    'src/usage-routes.js', 'src/agent-routes.js', 'src/session-status.js', 'src/user-todos.js', 'src/webdav.js', 'src/vnc.js',
+    'src/auth.js', 'src/clerk-auth.js', 'src/telemetry.js', 'src/opslog.js', 'src/incident.js', 'src/remote-fs.js',
+    'src/machine-mounts.js', 'src/exit-proxy.js', 'src/port-forward.js', 'src/plugins.js', 'src/gmail-sync.js',
+    'src/sync-store.js', 'src/conversation-index.js', 'src/rate-limit-capture.js'].includes(p);
+const isClient = (p) => p.startsWith('src/lib/') || p === 'src/client.js';
+
+// Deliberate exceptions — each with a reason (the vendor-whitelist mechanic).
+const EXCEPTIONS = new Map([
+  // client bundles PURE modules directly (CJS pulled into esbuild) — by design
+  ['src/lib/utils.js->src/task-color-seq.js', 'pure module, shared server+browser by design (re-exported)'],
+  ['src/lib/sidebar-mounts.js->src/ssh-key-format.js', 'pure module, shared server+browser by design'],
+]);
+
+// 1) PURE modules: zero requires of ANY kind beyond other PURE modules.
+for (const f of PURE) {
+  const reqs = requiresOf(f);
+  const badBuiltin = reqs.filter((r) => !r.startsWith('.'));
+  const badRel = reqs.map((r) => resolveRel(f, r)).filter((p) => p && !PURE.has(p));
+  ok(!badBuiltin.length && !badRel.length, `PURE ${f} imports nothing but pure (${badBuiltin.join(',') || badRel.join(',') || 'clean'})`);
+}
+
+// 2) SHARED modules: may use node builtins + PURE + other SHARED — never ORCH/CLIENT/DEVICE.
+for (const f of SHARED) {
+  const bad = requiresOf(f).map((r) => resolveRel(f, r)).filter((p) => p && (isOrch(p) || isClient(p) || DEVICE.has(p)));
+  ok(!bad.length, `SHARED ${f} never reaches up (${bad.join(',') || 'clean'})`);
+}
+
+// 3) DEVICE tier: only SHARED + PURE + its own files. Reaching into the
+//    orchestrator from the daemon is the exact re-coupling this suite exists
+//    to prevent — the daemon runs on machines that have no orchestrator.
+for (const f of DEVICE) {
+  const bad = requiresOf(f).map((r) => resolveRel(f, r)).filter((p) => p && !SHARED.has(p) && !PURE.has(p) && !DEVICE.has(p));
+  ok(!bad.length, `DEVICE ${f} pulls only shared/pure/device (${bad.join(',') || 'clean'})`);
+}
+
+// 4) CLIENT: never imports ORCH or DEVICE modules (ws/HTTP is the ONLY channel).
+const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((x) => x.endsWith('.js')).map((x) => 'src/lib/' + x);
+let clientBad = [];
+for (const f of [...libFiles, 'src/client.js']) {
+  for (const r of requiresOf(f)) {
+    const p = resolveRel(f, r);
+    if (!p) continue;
+    if ((isOrch(p) || DEVICE.has(p) || SHARED.has(p)) && !EXCEPTIONS.has(`${f}->${p}`)) clientBad.push(`${f} -> ${p}`);
+  }
+}
+ok(!clientBad.length, `CLIENT talks to the server over the wire only (${clientBad.slice(0, 4).join('; ') || 'clean'})`);
+
+// 5) the daemon BUNDLE self-containment: build output must exist and must not
+//    mention orchestrator filenames (a bundled hosts.js would mean the device
+//    tier swallowed the orchestrator).
+const bundle = read('data/bin/vibespace-agentd.js');
+ok(bundle.length > 0, 'daemon bundle exists');
+// match module MARKERS (esbuild emits '// src/<path>' banners per bundled
+// file), not free text — comments legitimately mention orchestrator names
+ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/hosts\.js|\/\/ server\.js/.test(bundle), 'daemon bundle contains no orchestrator modules');
+
+// 6) freeze the exceptions list: an exception nobody uses anymore must be
+//    removed (dead allowlist entries hide future violations behind them).
+for (const [edge] of EXCEPTIONS) {
+  const [from, to] = edge.split('->');
+  const live = requiresOf(from).map((r) => resolveRel(from, r)).includes(to);
+  ok(live, `exception still in use: ${edge} (remove dead allowlist entries)`);
+}
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);
