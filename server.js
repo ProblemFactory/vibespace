@@ -1772,6 +1772,7 @@ const { exitAgentSession, remoteFs, sshKey,
   getMounts: () => { try { return mounts; } catch { return null; } },
   getPortForwards: () => { try { return portForwards; } catch { return null; } },
 });
+const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
 const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages,
 } = require('./src/server/mounts-plugins-wiring.js').create({
