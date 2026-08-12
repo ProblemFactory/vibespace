@@ -107,7 +107,20 @@ ok(bundle.length > 0, 'daemon bundle exists');
 // file), not free text — comments legitimately mention orchestrator names
 ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/hosts\.js|\/\/ server\.js/.test(bundle), 'daemon bundle contains no orchestrator modules');
 
-// 6) freeze the exceptions list: an exception nobody uses anymore must be
+// 6) server.js is BOOTSTRAP + WIRING only (2.325.0 decomposition terminal
+//    state: 6423 → ~1900 lines, mechanisms live in src/server/*). The budget
+//    is a ratchet — new server-side code goes in a src/server module (see the
+//    CLAUDE.md routing table), never back into server.js. If a legitimate
+//    wiring stanza pushes past the budget, raise it deliberately in the same
+//    commit that explains why.
+{
+  const serverLines = read('server.js').split('\n').length;
+  ok(serverLines <= 2100, `server.js stays bootstrap-sized (${serverLines} ≤ 2100 lines — new mechanisms go in src/server/*)`);
+  const mods = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js'));
+  ok(mods.length >= 14, `src/server/ holds the decomposed modules (${mods.length} ≥ 14)`);
+}
+
+// 7) freeze the exceptions list: an exception nobody uses anymore must be
 //    removed (dead allowlist entries hide future violations behind them).
 for (const [edge] of EXCEPTIONS) {
   const [from, to] = edge.split('->');

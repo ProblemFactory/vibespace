@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.325.0
+
+### Changed
+- **拆分P1 COMPLETE — server.js is now BOOTSTRAP + WIRING (6423 → ~1910 lines; 14 modules under `src/server/`).** The whole mechanism layer moved out verbatim behind `create(deps)` factories: agent-tool-generators, goal-sync, sysinfo-wiring, incident-wiring, **usage-pool-engine** (714 lines — fallback belt, pool auto-switch incl. the plan-C per-session pass, get_usage probe, anchors sweep, offline-bias, sealed orders, estimator), **session-stdout** (995 — setupSessionPty/attachToDtach + the session-meta store), **boot-restore** (555 — migrations + restoreSessions + R6 pipe re-open + keeper re-adoption), **session-brain** (parity comparator + sbSeenFirst + claudeSideEffects), **account-usage-routes** (385 — collector ingest + usage-stats + the full accounts route family), **exit-routes**, **ops-routes** (version/self-update/maintenance), **mounts-plugins-wiring** (498 — MountManager/PluginManager/DialSessionBridge/graduateHostToDial), **dial-pairing**, **cli-env** (X display + adapter registry + CLI probes + model registry). Late-created singletons arrive as lazy getters/Proxies (never cached); mutable `let` state (deviceMgr) crosses as an explicit `get*()` — a Proxy would erase its null check.
+- **The architecture suite is now also a SIZE RATCHET (40 asserts):** server.js must stay ≤2100 lines and `src/server/` must keep its module count — new server-side mechanisms go in a module per the CLAUDE.md routing table, never back into the bootstrap. The id-race and vendor-whitelist structural guards were re-pointed at the moved code (the vendor allowlist entry for the /v1/models fetch now names src/server/cli-env.js — same gates, new address).
+- **New permanent gate: `scripts/test-restore-smoke.mjs`** — a worktree-ISOLATED create→SIGKILL→reboot→reconnect cycle across the decomposition seam. Its first run caught the one real wiring bug of the campaign (session-stdout read the mutable `deviceMgr` binding as a stale capture), which the empty-data boot smoke could not reach. Two more decomposition bug classes found and fixed by loud degrade paths: `require('./package.json')` resolving module-relative after a move (three modules), and a hoisted file-level helper (`ensureDir`) silently traveling away with an unrelated block.
+- Smoke discipline hardened: boot smokes now ALWAYS run in a throwaway git worktree with its own empty data/ — running `node server.js` from the repo dir attaches to PRODUCTION dtach sessions (the #127 incident class) and is banned; the restore smoke encodes this in its header.
+
 ## 2.324.0
 
 ### Changed
