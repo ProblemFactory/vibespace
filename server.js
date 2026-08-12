@@ -340,7 +340,7 @@ const PTY_WRAPPER = path.join(__dirname, 'data', 'bin', 'pty-wrapper.js');
 // to today. daemonPtyShim presents the node-pty interface over a device
 // session handle so setupSessionPty is unchanged.
 let deviceMgr = null;
-// ── M2 host-level agentd provisioning (flag agentd.remoteSessions) ──
+// ── M2 host-level agentd provisioning (always on since the 2.175.0 flag graduation) ──
 // Per-host vsht_ token: plaintext in a 0600 local file (the attach bridge
 // reads it at spawn; never argv), sha256 recorded alongside for audit.
 const AGENTD_DIR = path.join(__dirname, 'data', 'agentd');
@@ -357,7 +357,7 @@ function agentdHostToken(hostId) {
 // records the last version shipped; matching = skip (one ssh round trip saved
 // per spawn; a bundle change reinstalls because the version bumps with it).
 // ── Dial pairing primitives (src/server/dial-pairing.js, decomposition #13) ──
-const { CHAT_WRAPPER, CODEX_CHAT_WRAPPER, agentdDialDevices, agentdDials,
+const { CHAT_WRAPPER, agentdDialDevices, agentdDials,
   agentdMintDialPair, daemonPtyShim, deviceForDial, ensureAgentdOnHost,
   unpairDialDevice,
 } = require('./src/server/dial-pairing.js').create({
@@ -1453,7 +1453,6 @@ app.post('/api/hosts/:id/allow-exit', (req, res) => {
     const on = !!(req.body || {}).on;
     hosts.setAllowExit(req.params.id, on);
     if (!on) exitProxy.onMachineUnpaired(req.params.id); // tearing down the egress when disabled
-    bcastAll({ type: 'hosts-updated' }); bcastAll({ type: 'exits-updated', exits: exitProxy.list() });
     res.json({ success: true, allowExit: on });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -1516,7 +1515,7 @@ app.use(sessionsRouter);
 // refreshed every ~5 min. See _fetchOAuthUsage below for the why.
 // ── Usage / Rate Limit ── (extracted to src/usage-routes.js in the 2.92.0 split)
 const { setupUsage } = require('./src/usage-routes');
-const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey });
+const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, CLAUDE_CMD });
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;

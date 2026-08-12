@@ -10,12 +10,13 @@
 const fs = require('fs');
 const path = require('path');
 
+const { mk } = require('./lazy.js');
+
 function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
   broadcastToSession, serverNotice, serverSetting, getAccounts, getHosts,
   getUsageHistory, recordUsageAttribution }) {
   // late-bound singletons: created after this module in boot order, used only
   // at runtime — the Proxy re-resolves per property access, never caches
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const accounts = mk(getAccounts);
   const hosts = mk(getHosts);
   const usageHistory = mk(getUsageHistory);

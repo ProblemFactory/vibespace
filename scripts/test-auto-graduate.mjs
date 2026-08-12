@@ -12,7 +12,8 @@ const { HostManager } = require('../src/hosts.js');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
 
-const srv = readFileSync(new URL('../server.js', import.meta.url), 'utf-8');
+const srv = readFileSync(new URL('../src/server/mounts-plugins-wiring.js', import.meta.url), 'utf-8')
+  + readFileSync(new URL('../server.js', import.meta.url), 'utf-8');
 const block = srv.slice(srv.indexOf('hosts.onSshConnected ='), srv.indexOf('const discDirtyTimers'));
 ok(block.length > 200, 'auto-graduate handler exists');
 ok(/serverSetting\('agentd\.autoGraduate'\) === false/.test(block), 'honours the off switch');

@@ -74,25 +74,52 @@ ok(!indeterminate({ scrollHeight: 780, clientHeight: 700, children: 4, windowSta
 // SCROLL ANCHORING raises scrollTop to keep the view stable. The capture shows
 // 85 → 1466 in 26 ms, which no wheel can produce. Without an intent gate the
 // "near the end ⇒ extendBottom" rule read that as the user scrolling down.
-const extendsBottom = ({ scrollHeight, scrollTop, clientHeight, wheelDir, dirAgeMs }) => {
+// ── ROUND 5 (inc-mspemym2): the time-boxed gates all EXPIRE before content-
+// visibility finishes resolving — the capture's extendBottom fired 2539 ms
+// after the last real wheel (wheel window 1200, lockout 600, both stale).
+// Two structural gates that do not depend on timing:
+//   PIN GATE — a pinned view is at the live tail; the scroll handler never
+//   pages it upward (the capture: st drifted 92→0 with pin=1 and no input,
+//   walked 4 slabs up, then ping-ponged 0→2141→0 against the pin machinery).
+//   POSITIVE EVIDENCE — while reading history (unpinned, partial window),
+//   extendBottom needs RECENT USER INPUT (wheel/touch/pointer/key ≤1.5 s),
+//   not merely the absence of contrary evidence.
+const extendsBottom = ({ scrollHeight, scrollTop, clientHeight, wheelDir, dirAgeMs, pinned = false, windowEnd = 50, total = 900, userAgoMs = 0 }) => {
   const goingUp = wheelDir < 0 && dirAgeMs < 1200;
-  return scrollHeight - scrollTop - clientHeight < 300 && !goingUp;
+  const reading = !pinned && windowEnd < total;
+  const userRecent = userAgoMs < 1500;
+  return scrollHeight - scrollTop - clientHeight < 300 && !goingUp && (!reading || userRecent);
 };
-const extendsTop = ({ scrollTop, wheelDir, dirAgeMs }) => {
+const extendsTop = ({ scrollTop, wheelDir, dirAgeMs, pinned = false }) => {
   const goingDown = wheelDir > 0 && dirAgeMs < 1200;
-  return scrollTop < 100 && !goingDown;
+  return !pinned && scrollTop < 100 && !goingDown;
 };
 // the captured geometry right before the bounce: st 2297, sh ~3100, ch 755
-ok(!extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: -1, dirAgeMs: 20 }),
+ok(!extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: -1, dirAgeMs: 20, userAgoMs: 20 }),
   'content growth pushed the view toward the end while the user wheels UP → NO extendBottom');
-ok(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: 1, dirAgeMs: 20 }),
+ok(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: 1, dirAgeMs: 20, userAgoMs: 20 }),
   'the same geometry with the user actually wheeling DOWN still extends (paging down keeps working)');
-ok(extendsBottom({ scrollHeight: 3100, scrollTop: 2297, clientHeight: 755, wheelDir: -1, dirAgeMs: 5000 }),
-  'a STALE upward direction does not veto forever (keyboard/programmatic scrolling still pages)');
 ok(!extendsTop({ scrollTop: 20, wheelDir: 1, dirAgeMs: 20 }),
   'mirror: at the top edge while wheeling DOWN → no extendTop (no reverse bounce)');
 ok(extendsTop({ scrollTop: 20, wheelDir: -1, dirAgeMs: 20 }),
   'at the top edge while wheeling UP → extendTop, the normal paging path');
+
+// ── ROUND 5 field scenarios (inc-mspemym2, exact capture numbers) ──
+// Segment 1: pin=1, scrollTop drifted 92→0 by height resolution, no input.
+ok(!extendsTop({ scrollTop: 0, wheelDir: 0, dirAgeMs: 99999, pinned: true }),
+  'PINNED view whose scrollTop drifted to 0 with no input → NO extendTop (kills the 4-slab walk)');
+ok(extendsTop({ scrollTop: 0, wheelDir: 0, dirAgeMs: 99999, pinned: false }),
+  'the same drift UNPINNED still lazy-loads upward (a paused reader keeps continuous scroll)');
+// Segment 2: anchoring pushed st into the near-end band 2539 ms after the
+// last wheel (dir -1, expired) while the user was reading history.
+ok(!extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: -1, dirAgeMs: 2539, windowEnd: 2483, total: 2685, userAgoMs: 2539 }),
+  'settling geometry 2.5s after the last input → NO extendBottom (both time gates expired; positive evidence required)');
+ok(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: 1, dirAgeMs: 300, windowEnd: 2483, total: 2685, userAgoMs: 300 }),
+  'a real downward reader (fresh input) still pages');
+ok(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: -1, dirAgeMs: 5000, windowEnd: 2483, total: 2685, userAgoMs: 400 }),
+  'stale wheel DIRECTION with recent keyboard/pointer input still pages (scrollbar/keyboard readers)');
+ok(extendsBottom({ scrollHeight: 2000, scrollTop: 1600, clientHeight: 300, wheelDir: 0, dirAgeMs: 99999, pinned: true, windowEnd: 900, total: 900, userAgoMs: 99999 }),
+  'a PINNED live view is exempt from the evidence gate (bottom-follow keeps working with no input)');
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

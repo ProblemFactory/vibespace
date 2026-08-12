@@ -10,13 +10,14 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
+const { mk } = require('./lazy.js');
+
 function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, activeSessions, auth, engine,
   serverSetting, recordUsageAttribution, liveAccountIdSet,
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts,
   getTelemetry, getUsageHistory }) {
   const { clearSealedOrders } = engine;
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const accounts = mk(getAccounts);
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);

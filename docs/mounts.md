@@ -68,7 +68,7 @@ folder icon ("share a folder onto this machine") → pick a folder + read-only /
 read-write. Active reverse-mounts appear as child rows under the host with an
 unmount button.
 
-Transport: with the device agent set up (`agentd.dataPlane` on), the remote
+Transport: with the device agent connected (default since 2.158.0), the remote
 reaches this instance **through the device tunnel** — a loopback port on the
 remote whose bytes ride the agent link, so it works through NAT with no public
 address, VPN, or Tailscale, and survives link drops without remounting. The

@@ -7,10 +7,11 @@
 // mechanism. Extracted VERBATIM. ORCH tier.
 const path = require('path');
 
+const { mk } = require('./lazy.js');
+
 function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory }) {
   const { kickPoolEval, markLimitBanner, maybeStopOnFallback,
     recordRateLimitEvent, resolveUsageKey, usageEstimator } = engine;
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const usageHistory = mk(getUsageHistory);
 // ── Session-brain step 2: the DARK comparator ───────────────────────────────
 // The daemon streams its own normalizer's ops for its pipe sessions; the

@@ -13,12 +13,13 @@ const { createMessageManager } = require('../normalizers');
 const { cwdToProjectDir, dedupWebuiSockets } = require('../session-store');
 const { pickCodexThreadCandidate } = require('../ws-handler');
 
+const { mk } = require('./lazy.js');
+
 function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
   refreshWebuiPids, sbNoteServerOp, getHosts, getDialBridge }) {
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
   const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };

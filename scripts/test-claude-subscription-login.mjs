@@ -285,7 +285,7 @@ try {
   assert.doesNotMatch(manageAgentsSource, /CLAUDE_SECURESTORAGE_CONFIG_DIR=.*claude (?:auth login|\/login)/);
   assert.match(manageAgentsSource, /loginStatus\.attempt !== loginAttempt/);
   assert.match(manageAgentsSource, /loginStatus\.state === 'success'\) complete\(false\)/);
-  const wsSource = fs.readFileSync(path.join(process.cwd(), 'src/ws-handler.js'), 'utf8');
+  const wsSource = fs.readFileSync(path.join(process.cwd(), 'src/ws-create.js'), 'utf8');
   assert.match(wsSource, /needsClaudeLoginHelper && !present\.includes\('vibespace-claude-subscription-login\.mjs'\)/);
   // Adapted from the PR's literal pattern: current master keeps the B-211a
   // nuance (held billing rides dialAcctAssign — _hostSubReady exempts it from
@@ -295,7 +295,7 @@ try {
     2,
     'dial helper placement failures must not degrade to a helper-less terminal',
   );
-  const serverSource = fs.readFileSync(path.join(process.cwd(), 'server.js'), 'utf8');
+  const serverSource = fs.readFileSync(path.join(process.cwd(), 'src/server/account-usage-routes.js'), 'utf8');
   assert.match(serverSource, /r\.platform && r\.platform !== 'darwin'/);
   assert.match(serverSource, /!fin\.localOnly/);
 

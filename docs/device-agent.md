@@ -67,7 +67,7 @@ inbound access is needed.
    The daemon keeps a persistent outbound connection (auto-reconnect with
    backoff), so the machine stays reachable to VibeSpace even behind NAT.
 
-To stop it: `pkill -f "$HOME/.vibespace/agentd/current/agentd.js"`.
+To stop it: kill the daemon under its INSTANCE ROOT — dial pairings install per instance at `~/.vibespace/agentd@<dialhost>/` (or `device@<dialhost>`), so match that path: `pgrep -f "[v]ibespace-agentd" | xargs -r kill` (never `pkill -f vibespace-agentd`, which matches your own ssh command line).
 State (including the login/host token and the node key) lives under
 `~/.vibespace/agentd/` — a reboot + re-run reconnects with no re-pairing.
 
@@ -185,7 +185,7 @@ Say your Mac runs the agent (dial-out) and connects to `vibe.example.com`:
   `rclone serve webdav` on the Mac loopback + reach it via the tunnel" ships
   incrementally; the transport primitive is acceptance-tested.)*
 
-## Enabling (all default OFF — opt-in)
+## Enabling (default ON since 2.158.0 — this section is historical)
 
 Settings → Session:
 - `agentd.sessions` — local sessions run in the device agent (survive restarts).

@@ -781,111 +781,6 @@ export function installManageAgents(App, ctx = {}) {
     };
   },
 
-  _showAccountsWizard() {
-    if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; }
-    const { body, close: done } = createModalShell({
-      id: 'acct-wizard-overlay', title: t('Set up both Anthropic accounts'), bodyClass: 'acct-wizard-body',
-      onClose: () => { if (this._acctWatch) { clearInterval(this._acctWatch); this._acctWatch = null; } },
-    });
-    body.innerHTML = `<div class="ob-loading">${t('Checking…')}</div>`;
-
-    // Background watcher: poll until cond(data) is true, then act. Used while a
-    // login terminal is open (the wizard closes so the terminal is usable) —
-    // completion reopens the wizard at the recomputed next step.
-    const watch = (cond, act) => {
-      let tries = 0;
-      this._acctWatch = setInterval(async () => {
-        if (++tries > 100) { // say it — the wizard promised automatic detection
-          clearInterval(this._acctWatch); this._acctWatch = null;
-          showToast(t('Stopped watching for the login after 5 min. If you completed it, reopen the setup to continue.'), { type: 'error', duration: 10000 });
-          return;
-        }
-        let d = null;
-        try { d = await fetchJson('/api/accounts'); } catch { return; }
-        if (d && cond(d)) {
-          clearInterval(this._acctWatch); this._acctWatch = null;
-          await act(d);
-        }
-      }, 3000);
-    };
-
-    const render = async () => {
-      let d = null;
-      try { d = await fetchJson('/api/accounts'); } catch {}
-      if (!d) { body.innerHTML = `<div class="ob-loading">${t('Server unreachable')}</div>`; return; }
-      const sub = !!d.subscription?.loggedIn;
-      const hasKey = (d.accounts || []).length > 0;
-      const importable = d.cliKey?.present && !d.cliKey.imported;
-      const step = (n, state, title, desc, btn) => `
-        <div class="acct-step ${state}">
-          <span class="acct-step-n">${state === 'done' ? '✓' : n}</span>
-          <div class="acct-step-body"><b>${title}</b><div class="agents-note">${desc}</div>${btn || ''}</div>
-        </div>`;
-      if (sub && hasKey) {
-        const nKeys = d.accounts.length;
-        const savedLine = nKeys > 1
-          ? t("Subscription is the global login and {n} API keys are saved. Every session can pick its account in the New Session dialog or the card's ⚙ — you'll never need /login switching again.", { n: nKeys })
-          : t("Subscription is the global login and {n} API key is saved. Every session can pick its account in the New Session dialog or the card's ⚙ — you'll never need /login switching again.", { n: nKeys });
-        body.innerHTML = `<div class="acct-wizard-done"><span class="ob-ok" style="font-size:15px">${t('✓ All set')}</span>
-          <p class="agents-note">${savedLine}</p></div>`;
-        return;
-      }
-      let html = '';
-      // Step 1 — get an API key into VibeSpace
-      if (hasKey) {
-        html += step(1, 'done', t('API key saved'), `${escHtml(d.accounts[0].name)} (…${escHtml(d.accounts[0].tail)})`);
-      } else if (importable) {
-        html += step(1, 'active', t('Save your Console key'), t('Your current Console login already minted an API key — one click saves it into VibeSpace (encrypted).'), `<button class="agent-btn primary" id="acct-w-import">${t('Import it')}</button>`);
-      } else {
-        html += step(1, 'active', t('Log in to your Console account once'),
-          t('A terminal will open — in the login menu pick <b>“Anthropic Console account”</b>. This temporarily replaces the subscription login; step 2 restores it right after. VibeSpace auto-captures the key the moment it appears.'),
-          `<button class="agent-btn primary" id="acct-w-console">${t('Open login terminal')}</button>`
-          + `<div class="agents-note">${t('Or, if you already have a key: <a href="#" id="acct-w-paste">paste an API key</a>')}</div>`);
-      }
-      // Step 2 — subscription owns the global login
-      if (sub) {
-        html += step(2, 'done', t('Subscription logged in'), escHtml(d.subscription.email || ''));
-      } else {
-        html += step(2, hasKey || importable ? 'active' : 'pending', t('Log back in to your subscription'),
-          t('A terminal will open — pick <b>“Claude account with subscription”</b> and finish in the browser. VibeSpace detects it automatically.'),
-          (hasKey || importable) ? `<button class="agent-btn primary" id="acct-w-sub">${t('Open login terminal')}</button>` : '');
-      }
-      body.innerHTML = html;
-      body.querySelector('#acct-w-import')?.addEventListener('click', async () => {
-        try { const r = await fetchJson('/api/accounts/import-cli', { method: 'POST' }); showToast(t('Imported: {name}', { name: r.account.name })); } catch { showToast(t('Import failed'), { type: 'error' }); }
-        render();
-      });
-      body.querySelector('#acct-w-console')?.addEventListener('click', () => {
-        done();
-        this.openShellTerminal(undefined, { initialCommand: 'claude /login' });
-        showToast(t('Complete the Console login — setup continues automatically'));
-        watch((x) => x.cliKey?.present && !x.cliKey.imported, async () => {
-          try { await fetchJson('/api/accounts/import-cli', { method: 'POST' }); } catch {}
-          showToast(t('Console key captured ✓ — one step left'));
-          this._showAccountsWizard();
-        });
-      });
-      body.querySelector('#acct-w-paste')?.addEventListener('click', async (e) => {
-        e.preventDefault();
-        const key = await showInputDialog({ title: t('Add API key'), label: t('Anthropic API key (from console.anthropic.com)'), placeholder: 'sk-ant-…', confirmText: t('Save') });
-        if (key && key.trim()) {
-          try { await api('/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) }); }
-          catch (err) { showToast(t('Could not save the API key — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error' }); }
-        }
-        render();
-      });
-      body.querySelector('#acct-w-sub')?.addEventListener('click', () => {
-        done();
-        this.openShellTerminal(undefined, { initialCommand: 'claude /login' });
-        showToast(t('Complete the subscription login — setup continues automatically'));
-        watch((x) => x.subscription?.loggedIn, async () => {
-          showToast(t('Subscription restored ✓ — accounts setup complete'));
-          this._showAccountsWizard();
-        });
-      });
-    };
-    render();
-  },
 
   _showAgentsDialog({ container, forceModal, onClose } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source).
@@ -1815,9 +1710,9 @@ export function installManageAgents(App, ctx = {}) {
       const items = [];
       if (!selectedHost) {
         // 'Set up both…' (the 2.43.0 console+subscription wizard) retired from
-        // the menu in 2.268.3 (user: 没啥意义了) — pooling/named accounts made
-        // the machine-global dual-login dance obsolete. _showAccountsWizard
-        // stays for the onboarding import path only.
+        // the menu in 2.268.3 (user: 没啥意义了) and DELETED in 2.327.0 —
+        // pooling/named accounts made the dual-login dance obsolete, and the
+        // audit confirmed zero reachable callers remained.
         if (importable) items.push({
           label: t('Import CLI key') + ` (…${acct.cliKey.tail || ''})`,
           action: async () => {

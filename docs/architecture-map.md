@@ -1,5 +1,7 @@
 # VibeSpace Architecture Map
 
+> **HISTORICAL DOCUMENT (frozen 2026-08).** Everything below describes the codebase BEFORE the 2.323.0–2.326.0 physical decomposition and was the plan that drove it. The plan **was executed**: server.js is now bootstrap-only (~1900 lines) with mechanisms in `src/server/*` factory modules, the ws `create` family lives in `src/ws-create.js` behind the validated `WS_CTX_CONTRACT`, and session fields are registered in `src/session-schema.js`. The CURRENT map lives in CLAUDE.md (§THE THREE-TIER FINAL FORM routing table + File Structure) and `SharedContext/vibespace-decomposition-map.md`; conformance is enforced by scripts/test-architecture.mjs inside `npm run build`. Line counts and "lives in server.js" claims below are stale by design — do not navigate by them.
+
 > **Status:** routing document for future agents. Derived from a 6-subsystem cartography pass + a 17-defect confirmed-bug pass (2026-08). Line numbers are *as of that pass* and drift — always re-grep. `CLAUDE.md` remains the invariant/incident record; this file is the **"which file owns this decision"** index that CLAUDE.md does not provide.
 >
 > **Read order for a new change:** (1) the decision table at the bottom → (2) the owning subsystem's module table → (3) the Ownership Rules it cites → (4) only then the code.

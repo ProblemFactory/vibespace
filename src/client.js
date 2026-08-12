@@ -2,7 +2,6 @@ import { App } from './lib/app.js';
 import { applyUiPrefs } from './lib/utils.js';
 import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
-import { installTelemetry, track, reportBootTime, installOverlapTracer } from './lib/telemetry-client.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 // ── Page-SUSPEND wake detector (2.321.0, inc-msp3klen "对话卡在输出直到我发
@@ -31,7 +30,6 @@ installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
     }
   }, 5000);
 }
-installOverlapTracer(); // TEMPORARY (code-line overlap diagnosis — see telemetry-client.js)
 window.addEventListener('DOMContentLoaded', async () => {
   applyUiPrefs(); // DPI zoom + UI font scale BEFORE App measures anything (no post-boot jump)
   applyI18nToDom(); // translate index.html static text BEFORE App reads/moves DOM

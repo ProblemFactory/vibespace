@@ -226,10 +226,23 @@ class ChatView {
       if (e.deltaY) { this._wheelDir = e.deltaY > 0 ? 1 : -1; this._wheelDirAt = Date.now(); }
     }, { passive: true });
     this._messageList.addEventListener('touchmove', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
+    // Scrollbar drags and keyboard paging produce NO wheel/touch events — they
+    // must still count as user input for the positive-evidence gate below
+    // (inc-mspemym2 round 5), or those readers stall at the window end.
+    this._messageList.addEventListener('pointerdown', () => { this._lastUserScrollAt = Date.now(); }, { passive: true });
+    this._messageList.addEventListener('keydown', (e) => {
+      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(e.key)) this._lastUserScrollAt = Date.now();
+    });
     this._messageList.addEventListener('wheel', (e) => {
       if (this._loading || !this._canPaginate) return;
       const list = this._messageList;
       if (e.deltaY < 0 && list.scrollTop < 10) {
+        // A wheel-up that PAGES is also a statement of intent to leave the
+        // live tail — unpin explicitly (inc-mspemym2, round 5): under
+        // collapsed geometry scrollTop can be 0 while still pinned, and a
+        // pinned view that pages up gets yanked straight back to the bottom
+        // by the pin machinery on the next live edit — the visible bounce.
+        this._pinned = false;
         if (this._teleported) this._maybeSeekEarlier();        // teleported: seek older by line
         else if (this._windowStart > 0) this._extendTop();
         else this._maybeSeekEarlier();                         // registered tail exhausted → seek gap
@@ -328,7 +341,16 @@ class ChatView {
         const structAge = Date.now() - (this._lastStructuralAt || 0);
         const lockUp = structAge < 600 && this._lastStructuralDir === 'down';
         const lockDown = structAge < 600 && this._lastStructuralDir === 'up';
-        if (scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp) {
+        // PIN GATE (inc-mspemym2, round 5 — the first bounce's whole cascade):
+        // a PINNED view is at the live tail by definition; the user is not
+        // reading history, so the scroll handler must never page it upward.
+        // The capture: content-visibility height resolution drifted scrollTop
+        // 92→0 over 400ms with NO user input while pin stayed 1, the st<100
+        // branch then walked the window up 4 slabs (200 messages), and the
+        // pin machinery yanked 0→2141→0 against the pager's anchor restore —
+        // the visible bounce. Real upward intent always arrives as a wheel-up,
+        // which unpins first (wheel branch above + the atBottom update).
+        if (!this._pinned && scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp) {
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
           else if (this._windowStart > 0) this._extendTop();
           else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
@@ -336,7 +358,22 @@ class ChatView {
         // Extend bottom when scrolling near end of rendered window. Teleport
         // mode seeks NEWER slabs by file line instead, so browsing continues
         // downward from a jump just like it does upward.
-        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate && !goingUp && !lockDown) {
+        // POSITIVE-EVIDENCE GATE (inc-mspemym2, the second bounce): while the
+        // user is READING HISTORY (unpinned, partial window), extendBottom is
+        // the destructive direction — its trimTop yanks the view toward the
+        // live tail. The time-boxed gates above all EXPIRED in the capture
+        // (cv height resolution outlasted the 1200ms wheel window and the
+        // 600ms lockout; anchoring then pushed scrollTop into the "near the
+        // end" band 2.5s after the last real wheel and extendBottom fired
+        // with zero user input). Displacement is not intent (2.307.0) — so
+        // this branch now requires RECENT USER INPUT (wheel/touch/pointer/
+        // key, 1.5s), not merely the absence of contrary evidence. A real
+        // downward reader produces a continuous input stream and never
+        // notices; settling geometry produces none and can no longer fire it.
+        const userRecent = this._lastUserScrollAt && (Date.now() - this._lastUserScrollAt < 1500);
+        const reading = !this._pinned && this._windowEnd < this._total;
+        if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate
+            && !goingUp && !lockDown && (!reading || userRecent)) {
           if (this._teleported) this._maybeSeekLater();
           else if (this._windowEnd < this._total) this._extendBottom();
         }

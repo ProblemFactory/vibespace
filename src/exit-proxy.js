@@ -106,7 +106,6 @@ class ExitProxyManager {
     });
     this._live.set(h.id, { server, sockets, localPort, deviceSocksPort: socksPort });
     this.log(`exit ${h.name || h.id}: socks5h://127.0.0.1:${localPort} → device SOCKS ${socksPort}`);
-    this.broadcast?.({ type: 'exits-updated', exits: this.list() });
     return { machine: h.name || h.id, hostId: h.id, localPort, url: `socks5h://127.0.0.1:${localPort}` };
   }
 
@@ -118,7 +117,6 @@ class ExitProxyManager {
     try { l.server.close(); } catch {}
     this._live.delete(hostId);
     try { const dm = await this.hosts.deviceBounded(hostId); await dm.unserveSocks(l.deviceSocksPort); } catch {}
-    this.broadcast?.({ type: 'exits-updated', exits: this.list() });
   }
 
   /** A machine was unpaired / disabled as an exit — drop its forward. */

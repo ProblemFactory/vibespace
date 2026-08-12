@@ -11,7 +11,64 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey }) {
+
+// ── `claude -p /usage` output parser (2.327.0, user-verified channel) ──
+// The CLI's own /usage panel is the ONLY quota source that carries ALL THREE
+// buckets (5h + 7d + model-scoped weeklies) without a live chat session and
+// without this server touching the vendor API — the CLI makes the fetch as
+// the first party, exactly like the user typing /usage. Text format pinned by
+// scripts/test-cli-usage-parse.mjs against a captured real output; any parse
+// failure returns null and the ladder falls through to the token read.
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function zonedEpoch(y, mon, d, h, min, tz) {
+  // epoch for wall-clock (y,mon,d,h,min) IN tz: guess as UTC, then correct by
+  // the zone's offset at that instant (second pass absorbs DST boundaries)
+  let t = Date.UTC(y, mon, d, h, min);
+  for (let i = 0; i < 2; i++) {
+    try {
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false })
+        .formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+      const asIf = Date.UTC(+p.year, +p.month - 1, +p.day, p.hour === '24' ? 0 : +p.hour, +p.minute);
+      t += Date.UTC(y, mon, d, h, min) - asIf;
+    } catch { return null; }
+  }
+  return Math.floor(t / 1000);
+}
+function _parseCliResetTime(when, tz, nowMs) {
+  // "Aug 12, 12:20am" / "Aug 13, 2am"
+  const m = /^(\w{3})\w*\s+(\d{1,2}),\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i.exec(String(when).trim());
+  if (!m || !(m[1].toLowerCase() in MONTHS)) return null;
+  const mon = MONTHS[m[1].toLowerCase()];
+  let h = +m[3] % 12; if (/pm/i.test(m[5])) h += 12;
+  const now = new Date(nowMs || Date.now());
+  let y = now.getUTCFullYear();
+  let t = zonedEpoch(y, mon, +m[2], h, +(m[4] || 0), tz);
+  if (t == null) return null;
+  // resets are always in the future ≤ ~8 days out; a January reset read in
+  // late December belongs to NEXT year
+  if (t * 1000 < (nowMs || Date.now()) - 6 * 3600e3) t = zonedEpoch(y + 1, mon, +m[2], h, +(m[4] || 0), tz);
+  return t;
+}
+function parseCliUsageText(text, nowMs) {
+  const s = String(text || '');
+  const line = (re) => re.exec(s);
+  const bucket = (m) => m && {
+    utilization: Math.min(1, Math.max(0, (+m[1]) / 100)),
+    ...(m[2] && m[3] ? { resetsAt: _parseCliResetTime(m[2], m[3], nowMs) || undefined } : {}),
+  };
+  const fiveHour = bucket(line(/^Current session:\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/m));
+  const sevenDay = bucket(line(/^Current week \(all models\):\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/m));
+  if (!fiveHour && !sevenDay) return null; // API-key mode / format drift — not a subscription usage panel
+  const scopedWeekly = [];
+  for (const m of s.matchAll(/^Current week \(([^)]+)\):\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/gm)) {
+    if (/^all models$/i.test(m[1])) continue;
+    scopedWeekly.push({ name: m[1], utilization: Math.min(1, Math.max(0, (+m[2]) / 100)),
+      ...(m[3] && m[4] ? { resetsAt: _parseCliResetTime(m[3], m[4], nowMs) || undefined } : {}) });
+  }
+  return { fiveHour: fiveHour || undefined, sevenDay: sevenDay || undefined, scopedWeekly, fetchedAt: nowMs || Date.now() };
+}
+
+function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -640,6 +697,45 @@ app.post('/api/usage/refresh', async (req, res) => {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
     if (!acctMeta) return res.status(404).json({ error: 'unknown subscription account' });
   }
+  // CLI-PANEL rung (2.327.0, user-verified: `claude -p /usage` prints ALL
+  // THREE buckets incl. model-scoped weeklies): spawn the CLI pointed at the
+  // account's own creds dir and let IT make the first-party fetch — no token
+  // ever touches this server, and accounts with NO live session (the old
+  // 'no valid token' dead end) become refreshable. Human-gated (this route IS
+  // the ⟳ click) + the same 60s throttle; any failure falls through to the
+  // token ladder below. Ambient key/oat env is stripped so the CLI reads the
+  // subscription login, not an inherited API key.
+  const cliPanel = await new Promise((resolve) => {
+    try {
+      const { execFile } = require('child_process');
+      const env = { ...process.env };
+      delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
+      // ONLY the secret store relocates (session-spawn parity): the token IS
+      // the identity the panel reports; projects/settings stay shared.
+      if (!isGlobal) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = accounts.subDir(key);
+      const bin = CLAUDE_CMD || 'claude';
+      execFile(bin, ['-p', '/usage'], { env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+        if (err) return resolve(null);
+        resolve(parseCliUsageText(stdout));
+      });
+    } catch { resolve(null); }
+  });
+  if (cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay)) {
+    _onDemandUsageAt[key] = Date.now();
+    const u = { ...cliPanel, source: 'on-demand', scopedFetchedAt: Date.now() };
+    try {
+      fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+      const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
+      // preserve org identity + any fields the panel doesn't carry
+      let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
+      const merged = { ...prev, ...u, scopedWeekly: u.scopedWeekly?.length ? u.scopedWeekly : (prev.scopedWeekly || []) };
+      fs.writeFileSync(f + '.tmp', JSON.stringify(merged)); fs.renameSync(f + '.tmp', f);
+      if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
+      else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
+      try { ingestPassiveUsage(); } catch { }
+    } catch { }
+    return res.json({ success: true, via: 'cli-panel' });
+  }
   let token = isGlobal ? getOAuthToken() : accounts.usageToken(key);
   // Same-account fallback (2.181.0, real report): a named subscription's dir
   // token is only refreshed while a session RUNS on that dir — but when the
@@ -939,4 +1035,4 @@ app.get('/api/usage', (req, res) => {
   return { getOAuthToken, usagePollingEnabled, refreshRateLimit, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
-module.exports = { setupUsage };
+module.exports = { setupUsage, parseCliUsageText };

@@ -61,6 +61,6 @@ A NEW parallel implementation needs a table row with its justification, or it's 
 
 ## Remaining (next rounds, in order)
 
-1. **Discovery collectors** — collapse the local sweep onto device #0's snapshot (snapshot must first gain tmux facts + webui-pid enrichment without regressing the 5s-poll hot path).
+1. ~~**Discovery collectors**~~ DONE (2.291.0 remote switched; 2.319.0 local via `agentd.localDiscovery`, flag-gated) — collapse the local sweep onto device #0's snapshot (snapshot must first gain tmux facts + webui-pid enrichment without regressing the 5s-poll hot path).
 2. **Spawn ladder control flow** — the decisions AROUND the line (tool shipping, account placement, adopt-vs-spawn) are still per-transport.
 3. **Daemon-side fs isolation** — the unlock condition for the file-ops exception.

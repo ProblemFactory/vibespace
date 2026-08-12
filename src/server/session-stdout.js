@@ -15,6 +15,8 @@ const { MessageManager } = require('../message-manager');
 const { cwdToProjectDir } = require('../session-store');
 const { normalizeCodexSource } = require('../adapters/codex');
 
+const { mk } = require('./lazy.js');
+
 function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions, engine,
   checkClaudeGoalStatus, broadcastToSession, broadcastActiveSessions,
@@ -23,7 +25,6 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback,
     modelsMatch, recordRateLimitEvent, resolveUsageKey, usageEstimator } = engine;
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const hosts = mk(getHosts);
   const usageHistory = mk(getUsageHistory);
   const telemetry = mk(getTelemetry);

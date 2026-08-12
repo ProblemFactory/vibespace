@@ -170,7 +170,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
           }
           return '';
         })()}
-        <span class="session-card-badge badge-config" style="display:none"></span>
         ${s.hostName ? `<span class="session-host-badge" data-tip="Remote session on ${escHtml(s.hostName)}">${escHtml(s.hostName)}</span>` : ''}
         ${s.todo && s.todo.total > 0 && s.todo.done < s.todo.total ? `<span class="session-todo-pill" data-tip="${escHtml(s.todo.current ? tr('Now: {step}', { step: s.todo.current }) : tr('Agent steps'))} ${tr('({done}/{total} done)', { done: s.todo.done, total: s.todo.total })}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5l1.2 1.2L5.5 3.4M2 9.5l1.2 1.2 2.3-2.3M8 4.5h6M8 9.5h6M8 13h4"/></svg>${s.todo.done}/${s.todo.total}</span>` : ''}
         <span class="sess-state-chip" style="display:none"></span>
@@ -248,7 +247,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     stateChip?.after(schip);
   }
   // Custom config marker: shown when this session has persisted model/effort/permission overrides
-  const cfgBadge = row.querySelector('.badge-config');
   // Custom-config indicator = BOTTOM-LEFT corner dot on the backend icon
   // (2.224.1, user-directed — the row pill cost ~20px for a pure indicator;
   // the icon's corners now carry conn (top-right), mode (bottom-right) and
@@ -259,7 +257,6 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       : cfg.account ? ((app._accounts?.accounts || []).find(a => a.id === cfg.account)?.name || cfg.account) : null;
     const parts = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => `${k}: ${cfg[k]}`);
     if (acctLabel) parts.push(`account: ${acctLabel}`);
-    cfgBadge.style.display = 'none'; // legacy row pill stays retired
     let dot = card.querySelector('.config-corner-dot');
     if (!parts.length) { dot?.remove(); return; }
     if (!dot) {
