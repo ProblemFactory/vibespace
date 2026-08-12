@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.328.1
+
+### Fixed
+- **The "machine CLI login expired" usage-popup notice now says it is NORMAL and warns against /logout (the Natural Max incident's real product lesson).** Round-4 forensics: the user saw the benign 2.266.2 expiry notice, opened claude (the TUI opens with no login wall — "it opened fine" proves nothing about login state), concluded something was wrong, and ran `/logout` as a manual remedy. The /logout was a no-op on everything observable (machine login's refresh chain was alive at 18:05 the same day; a revoked chain cannot refresh) and structurally could never touch Natural Max (cross-account revocation does not exist) — but the notice INVITED a destructive self-remedy on a multi-copy account class where /logout revokes the login everywhere. The wording now says: normal under pooling, no action needed, do NOT /logout to clean up. All three languages.
+
 ## 2.328.0
 
 ### Added

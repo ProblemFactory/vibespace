@@ -1280,7 +1280,7 @@ export default {
   "pool": "池",
   "pool (this machine only)": "池（仅限本机）",
   "Pooled accounts are local-only (the pool switches a credentials directory on THIS machine)": "池化账号仅限本机使用（池通过切换本机上的凭据目录工作）",
-  "⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). Named accounts are unaffected; run /login in a terminal only if you use the bare CLI login.": "⚠ 机器自身的 CLI 登录已无有效 token（长期闲置直到 refresh token 过期——会话都由命名/池化账号承担，它不再被刷新）。命名账号不受影响；只有需要使用裸 CLI 登录时才需在终端运行 /login。",
+  "⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). This is NORMAL under pooling and needs no action; named accounts are unaffected. Do NOT run /logout to “clean it up” — on a multi-copy account that revokes the login everywhere. Run /login in a terminal only if you actually use the bare CLI login.": "⚠ 本机自身的 CLI 登录没有有效 token（它一直闲置直到 refresh token 过期——named/池化账号承担了所有会话，没有任何东西刷新它）。这在池化下是正常现象、无需任何操作；named 账号不受影响。不要为了“清理”去执行 /logout——多副本持有的账号会被全局登出。只有你确实在用裸 CLI 登录时才需要在终端里 /login。",
   "via pool “{name}”": "经由池“{name}”",
   "not in the ledger yet": "尚未入账",
   "Transfer status lost (server restarted) — it may still have completed": "传输状态丢失（服务器已重启）——操作可能仍已完成",

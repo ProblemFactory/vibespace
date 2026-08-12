@@ -384,7 +384,7 @@ export function installUsageMeter(App, ctx = {}) {
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'
         ? t('⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.')
-        : t('⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). Named accounts are unaffected; run /login in a terminal only if you use the bare CLI login.')}</div>` : ''}
+        : t('⚠ The machine’s own CLI login has no valid token (it sat idle until its refresh token expired — named/pooled accounts handle the sessions, so nothing refreshes it). This is NORMAL under pooling and needs no action; named accounts are unaffected. Do NOT run /logout to “clean it up” — on a multi-copy account that revokes the login everywhere. Run /login in a terminal only if you actually use the bare CLI login.')}</div>` : ''}
       ${gl.identityMismatch && showingGlobal ? `<div class="usage-warn">${t('⚠ The CLI config file says {cfg}, but the login token actually belongs to {actual} — quotas shown are {actual}’s. Run /login in a terminal to refresh the recorded identity.', { cfg: gl.email || '?', actual: gl.actualEmail || '?' })}</div>` : ''}
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(rl.fetchedAt) })}</div>`;
       const odMode = this.settings.get('accounts.onDemandQuotaRefresh') || 'manual';
