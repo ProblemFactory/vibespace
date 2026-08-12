@@ -495,6 +495,22 @@ if (!acquireSingleton()) {
   process.exit(3);
 }
 
+// ── Device-side one-shot migrations (2.328.0, plan B step 2) ────────────────
+// The SAME shared runner the orchestrator uses (src/migration-runner.js is
+// bundled), with the device's own registry + ledger under STATE. A daemon
+// self-upgrading old→new normalizes its on-disk state here exactly once —
+// this is the sanctioned channel for eventually retiring wire-compat residue
+// (e.g. a future entry can rewrite dial.json's endpoint path, and once fleet
+// telemetry shows every daemon past that version the permanent alias can go).
+// Append-only, dated ids, archive-never-destroy — same rules as the local
+// registry. Currently EMPTY by design: the framework lands with the version
+// that needs it next, not with a speculative first entry.
+try {
+  const { runMigrations } = require('../migration-runner.js');
+  const DEVICE_MIGRATIONS = [];
+  runMigrations({ ledgerPath: path.join(STATE, 'migrations.json'), migrations: DEVICE_MIGRATIONS, log: (m) => process.stderr.write(m + '\n'), warn: (m) => process.stderr.write(m + '\n') });
+} catch (e) { process.stderr.write('[migrate] device registry failed: ' + e.message + '\n'); }
+
 // read FRESH on every hello (was a startup const): a re-pair rotates the host
 // token on disk while the daemon keeps running — a cached hash rejected every
 // server hello after an identity rotation until the daemon restarted
