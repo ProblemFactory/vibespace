@@ -28,7 +28,7 @@ for (const _lvl of ['log', 'warn', 'error']) {
 }
 const INCIDENTS_DIR = path.join(rootDir, 'data', 'incidents');
 function _incidentServerState() {
-  const out = { t: Date.now(), version: (() => { try { return require('./package.json').version; } catch { return ''; } })(), uptimeS: Math.round(process.uptime()), rssMB: Math.round(process.memoryUsage().rss / 1048576) };
+  const out = { t: Date.now(), version: (() => { try { return require(require('path').join(rootDir, 'package.json')).version; } catch { return ''; } })(), uptimeS: Math.round(process.uptime()), rssMB: Math.round(process.memoryUsage().rss / 1048576) };
   try {
     out.sessions = [...activeSessions.entries()].map(([id, s]) => ({
       id, mode: s.mode, backend: s.backend, host: s.host || null,

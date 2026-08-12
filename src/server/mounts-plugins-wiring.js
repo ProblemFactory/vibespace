@@ -41,7 +41,7 @@ try {
   hosts.agentdDeps = {
     ensureAgentdOnHost, agentdHostToken, deviceForDial,
     bundlePath: path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js'),
-    version: require('./package.json').version,
+    version: require(require('path').join(rootDir, 'package.json')).version,
   };
   hosts.dataPlaneOn = () => true; // GRADUATED (agentd.dataPlane flag removed) — ssh per-op remains the per-path failure fallback
 } catch (e) { console.warn('[device] data-plane deps wiring failed:', e.message); }

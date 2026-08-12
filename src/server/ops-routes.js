@@ -128,7 +128,7 @@ app.get('/api/version', async (req, res) => {
       if (r.ok) versionInfo.latest = (await r.json()).version || null;
     } catch {}
   }
-  res.json({ version: require('./package.json').version, commit: versionInfo.commit || null, latest: versionInfo.latest });
+  res.json({ version: require(require('path').join(rootDir, 'package.json')).version, commit: versionInfo.commit || null, latest: versionInfo.latest });
 });
 
 // Changelog diff for the update-confirm dialog (user directive: clicking
@@ -143,7 +143,7 @@ function versionNewerThan(a, b) {
   return false;
 }
 app.get('/api/changelog-diff', async (req, res) => {
-  const cur = require('./package.json').version;
+  const cur = require(require('path').join(rootDir, 'package.json')).version;
   if (Date.now() - (versionInfo.clFetchedAt || 0) > (req.query.fresh ? 60 * 1000 : 15 * 60 * 1000)) {
     versionInfo.clFetchedAt = Date.now(); // stamped even on failure — offline-safe
     try {
