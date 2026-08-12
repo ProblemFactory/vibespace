@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.326.0
+
+### Changed
+- **拆分P2 — the ws-handler contract is EXPLICIT and the create family is its own module.** `src/ws-create.js` holds the 1633-line session-CREATE case verbatim (new/resume/fork, local + ssh/dial/daemon-pipe spawn, account resolution, crash-loop + resume breakers, writer sweep, keeper adoption); the body runs inside `do { … } while (0)` so every case-level `break;` keeps its exact pre-extraction meaning. ws-handler: 2723 → ~1100 lines. `WS_CTX_CONTRACT` names every dependency and registration VALIDATES it — a missing key is a loud boot error naming itself, never an `undefined` surfacing mid-create. New guard `scripts/test-ws-contract.mjs` pins the destructures, every late `ctx.*` access, and server.js's call site to the contract. The remote-shell / writer-sweep / id-race / architecture drift guards were re-pointed to scan ws-create too.
+- **拆分P3 — the session blackboard has OWNERS.** `src/session-schema.js` (PURE tier) registers all 47 live-session `_fields` with owner module, persistence home (session-meta / wrapper-meta / in-memory), and a one-line note; `scripts/test-session-schema.mjs` fails any NEW unregistered field write in the server-side session files and any dead schema row. The blackboard can still grow — but never anonymously.
+- Both new guards + the architecture suite run inside `npm run build`. **Build-order fix:** the architecture suite now runs AFTER esbuild — it validates the just-built daemon bundle, and a fresh checkout's FIRST build no longer fails on the not-yet-existing artifact (caught by test-attach-rescue's worktree build, which builds from a pristine tree).
+
 ## 2.325.0
 
 ### Changed
