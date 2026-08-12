@@ -7,10 +7,11 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
+const { mk } = require('./lazy.js');
+
 function create({ app, rootDir, AGENT_BIN_DIR, activeSessions, auth, wss, WS_OPEN,
   bcastAll, integrationEnabled, unpairDialDevice, hosts,
   getExitProxy, getMounts, getPortForwards }) {
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const exitProxy = mk(getExitProxy);
   const mounts = mk(getMounts);
   const portForwards = mk(getPortForwards);

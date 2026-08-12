@@ -1460,7 +1460,7 @@ class HostManager {
     `.trim();
     let out;
     try {
-      // CS data-plane (flag agentd.dataPlane): the daemon's raw-facts snapshot
+      // CS data-plane (device data plane — always on since the 2.175.0 flag graduation): the daemon's raw-facts snapshot
       // SYNTHESIZED into the exact LOCK/J/H/N/T line format the ssh script
       // emits — the parser below runs UNCHANGED (zero interpretation drift).
       // Any failure falls through to the classic ssh script.

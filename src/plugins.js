@@ -61,7 +61,6 @@ class PluginManager {
   }
 
   _rec(id) { return (this._state.plugins[id] = this._state.plugins[id] || {}); }
-  _notify() { this.broadcast({ type: 'plugins-updated', plugins: this.list() }); }
 
   // ── registry ──
   defs() {

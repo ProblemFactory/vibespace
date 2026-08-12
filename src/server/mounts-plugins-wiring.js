@@ -13,11 +13,12 @@ const { SessionMessages } = require('../session-store');
 const { CodexSessionMessages } = require('../codex-session-store');
 const { MountTokens } = require('../webdav');
 
+const { mk } = require('./lazy.js');
+
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter,
   hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
   ensureAgentdOnHost, getPortForwards }) {
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const portForwards = mk(getPortForwards);
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──

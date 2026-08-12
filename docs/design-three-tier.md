@@ -1,6 +1,6 @@
 # Three-tier architecture: frontend / orchestrator / device layer
 
-**Status**: APPROVED (2026-08-10) — rounds R0–R6 in progress. This is the formal design record;
+**Status**: EXECUTED — rounds R0–R6 code-complete as of 2.319.0 (2026-08-11); session-brain steps 1–4 shipped (2.316.0–2.318.0, flag-gated per the activation order); physical decomposition landed 2.325.0–2.326.0. Remaining: flip the three activation switches after soak. This is the formal design record;
 requirement discussions happen outside this repository.
 **Companion**: docs/design-cs-unification.md (the module-level migration ledger this generalizes).
 
@@ -146,7 +146,7 @@ hash identically across transports or messages double-render.
 | R1 ✅ 2.281.0 | Machine facts | `probe.*` family (`src/machine-probes.js`); hosts consume op-first, local calls in-proc | probe twin-scripts demoted to fallback |
 | R2 ✅ 2.282.0 | Worker isolation | embedded worker tier (FS_ACTIONS single object); fs-ops through it with deadline/terminate/respawn; loop-lag canary; hang-isolation proven on a real FIFO wedge | unlocks file-ops unification and all later heavy ops |
 | R3 ✅ 2.283.0/2.285.0/2.292.0 | Transcript service | extract the parse stack behind one interface (pure refactor — DONE: src/transcript-service.js, HTTP read family rerouted) → daemon-hosted `transcript-op` dark + byte-identical parity suite (DONE: scripts/test-transcript-parity.mjs, 19 asserts incl. multi-window payloads and the huge-file seek family) → remote reads switch. Replacement substrate (mirror + location index) proven BEFORE the raw remote cache demotes to fallback | the slab-sync integrity class; faster remote history |
-| R4 ◐ steps 1–2 = 2.286.0/2.287.0 | Usage + events | walker into the daemon (DONE: `src/usage-walker.js` bundled, `usage-scan` op in a child process, two-phase cursor commit, per-op capability gating via hello `capabilities`) → push-triggered harvest (DONE: daemon transcript-dir watch incl. codex → debounced dirty → server harvest kick + discovery invalidation; ~1min ledger freshness for any remote activity) → codex rollouts in all three walkers (DONE — the remote codex coverage gap closed) → full `session.events` typed stream; local double-feeds during cutover (id dedup makes overlap harmless) | remote live-estimate gap; the shipped scanner and its parity test |
+| R4 ✓ complete = 2.286.0–2.299.0 (usage-events push, two-phase cursor) | Usage + events | walker into the daemon (DONE: `src/usage-walker.js` bundled, `usage-scan` op in a child process, two-phase cursor commit, per-op capability gating via hello `capabilities`) → push-triggered harvest (DONE: daemon transcript-dir watch incl. codex → debounced dirty → server harvest kick + discovery invalidation; ~1min ledger freshness for any remote activity) → codex rollouts in all three walkers (DONE — the remote codex coverage gap closed) → full `session.events` typed stream; local double-feeds during cutover (id dedup makes overlap harmless) | remote live-estimate gap; the shipped scanner and its parity test |
 | R5 ✅ 2.288.0…2.292.0 + 2.319.0 (local leg, flag) | Discovery | snapshot walk into a daemon child (loop never blocks on a slow home fs) → claim algorithm + line synthesis extracted to `discovery-facts` (one shared impl, golden fixture) → **on-device claims `discovery-claims` op, DARK + byte-identical parity (DONE)** → **remote discovery SWITCHED (2.292.0, ladder: claims op → server-side interpretation → ssh script → stale cache)** → local discovery harvests device #0 behind a flag once poll latency is proven | the ssh discovery script (to fallback) |
 | R6 ✅ 2.318.0 (flag) | Session ownership | local creates via device #0 pipe sessions (`agentd.localPipeSessions`, default OFF until step-3 soak); adoption-based — existing sessions stay attachable forever, nothing force-migrated; spawn falls back to dtach on any daemon failure | the local-dtach special path (dies by attrition once the flag is on) |
 | — | Session brain | device-side live stdout parsing + buffer ownership + spawn resolution | a separate campaign; the above is its prerequisite. R4's remaining `session.events` stream and R6's `session.open` are BOTH parts of it — see the plan below |
@@ -213,7 +213,7 @@ agentd.localPipeSessions. The routing table for future changes lives in
 CLAUDE.md §THE THREE-TIER FINAL FORM. The step-2 substrate exists — the daemon now owns a stdout tailer
 (sealed-orders) and bundles the shared adapter; the usage/banner/rate-limit
 event families already flow device-side (usage-events push; banner reflex).
-Steps 2 (full-normalizer double-feed, dark) and 3 (message-family consumers
+HISTORICAL NOTE (superseded — steps 2/3/4 shipped in 2.316.0–2.318.0, gated by the activation switches): Steps 2 (full-normalizer double-feed, dark) and 3 (message-family consumers
 switch) remain gated by THIS sequencing rule and the retirement-order law —
 they are the deliberate soak-gated remainder, not unscheduled debt. Step 4
 (R6 session.open) waits on step 3 by the rule above.

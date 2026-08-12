@@ -6,9 +6,10 @@
 const fs = require('fs');
 const path = require('path');
 
+const { mk } = require('./lazy.js');
+
 function create({ rootDir, AGENTD_DIR, agentdHostToken, getHosts, getMounts,
   getMachineMounts, getPortForwards, getExitProxy }) {
-  const mk = (get) => new Proxy({}, { get: (_, k) => { const o = get(); if (!o) return undefined; const v = o[k]; return typeof v === 'function' ? v.bind(o) : v; } });
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
   const machineMounts = mk(getMachineMounts);
@@ -125,11 +126,10 @@ function daemonPtyShim(handle) {
   };
 }
 const CHAT_WRAPPER = path.join(rootDir, 'data', 'bin', 'chat-wrapper.js');
-const CODEX_CHAT_WRAPPER = path.join(rootDir, 'data', 'bin', 'codex-chat-wrapper.js');
 
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 
-  return { CHAT_WRAPPER, CODEX_CHAT_WRAPPER, agentdDialDevices, agentdDials,
+  return { CHAT_WRAPPER, agentdDialDevices, agentdDials,
     agentdMintDialPair, daemonPtyShim, deviceForDial, ensureAgentdOnHost,
     unpairDialDevice };
 }
