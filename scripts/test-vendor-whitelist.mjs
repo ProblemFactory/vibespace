@@ -70,8 +70,9 @@ const ALLOW = {
   // each URL line + its anthropic-beta header line sit inside one https.request
   // context window; counts pin the shape, not exact line numbers.
   'src/usage-routes.js': { max: 6, gates: ['usagePollingEnabled', '_rateLimitBackoffUntil', "onDemandQuotaRefresh"] },
-  // refreshAvailableModels' v1/models fetch (both auth types)
-  'server.js': { max: 4, gates: ['usagePollingEnabled'] },
+  // refreshAvailableModels' v1/models fetch (both auth types) — lived in
+  // server.js until the 2.325.0 decomposition moved the CLI environment out
+  'src/server/cli-env.js': { max: 4, gates: ['usagePollingEnabled'] },
 };
 for (const [rel, n] of Object.entries(constructions)) {
   const a = ALLOW[rel];
