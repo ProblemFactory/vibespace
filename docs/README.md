@@ -35,3 +35,15 @@ See [CLAUDE.md](../CLAUDE.md) in the project root for:
 
 - **[Collaboration Design](design-collaboration.md)** — Remote sessions, multi-host gateway, shared storage, session migration (roadmap)
 - **[Codex Support Plan](codex-support-plan.md)** — Research notes, parity gaps, and phased integration plan for first-class Codex support
+
+## Knowledge base (agent operating manual detail tier)
+
+CLAUDE.md is the auto-loaded INDEX + laws; the full operating essays live here and are read on demand:
+
+- [kb-file-structure.md](kb-file-structure.md) — per-file operating essays (invariants, incidents, gotchas)
+- [kb-design-lessons.md](kb-design-lessons.md) — design decisions §1–§17 + the two full-project review invariant lists
+- [kb-features.md](kb-features.md) — shipped-behavior reference per feature area
+- [kb-patterns.md](kb-patterns.md) — cross-cutting coding patterns
+- [kb-api.md](kb-api.md) — REST + WebSocket reference
+- [kb-bugfix-invariants.md](kb-bugfix-invariants.md) — invariant-bearing incident essays
+- [history-archive.md](history-archive.md) — ancient chronicle (superseded approaches, one-liner fix log)
