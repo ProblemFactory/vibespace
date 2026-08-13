@@ -3,7 +3,7 @@ import { applyUiPrefs } from './lib/utils.js';
 import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
-import { installTelemetry } from './lib/telemetry-client.js';
+import { installTelemetry, track, metric, reportBootTime } from './lib/telemetry-client.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 // ── Page-SUSPEND wake detector (2.321.0, inc-msp3klen "对话卡在输出直到我发
 // 消息"). Best-fit diagnosis: the browser FROZE the page (Page Lifecycle /
