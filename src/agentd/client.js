@@ -28,6 +28,14 @@ class DeviceManager {
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
+    // The version a freshly-upgraded daemon will REPORT is the one baked into
+    // the bundle we ship — not this server's package version. They diverge
+    // whenever the repo is rebuilt without restarting the server (or vice
+    // versa), and comparing against the wrong one makes the upgrade check
+    // UNSATISFIABLE: every reconnect sees a mismatch and upgrades again,
+    // forever (real incident 2026-08-13: ~8h of 10s-cycle re-installs, 20GB
+    // RSS). Read it from the bundle, cached by mtime+size.
+    this._bundleVerCache = null;
     this._nodeModules = nodeModules || null; // so the daemon can require node-pty (M1 localhost)
     this._log = log;
     this._root = process.env.VIBESPACE_AGENTD_ROOT || path.join(os.homedir(), '.vibespace', 'agentd');
@@ -73,6 +81,21 @@ class DeviceManager {
       try { fs.writeFileSync(this._tokFile, JSON.stringify(this._tokens, null, 2), { mode: 0o600 }); } catch { }
     }
     return raw;
+  }
+
+  // Version baked into the bundle we ship (what an upgraded daemon reports).
+  // Falls back to our package version when the marker is unreadable.
+  _expectedVersion() {
+    try {
+      const st = fs.statSync(this._bundlePath);
+      const key = st.mtimeMs + ':' + st.size;
+      if (this._bundleVerCache?.key === key) return this._bundleVerCache.v;
+      const head = fs.readFileSync(this._bundlePath, 'utf-8').slice(0, 400000);
+      const m = /VERSION\s*:\s*"([\d.]+)"/.exec(head);
+      const v = m ? m[1] : this._version;
+      this._bundleVerCache = { key, v };
+      return v;
+    } catch { return this._version; }
   }
 
   // ── install: land the built bundle into <root>/<version>/ + repoint current ──
@@ -175,9 +198,25 @@ class DeviceManager {
         onControl: (msg) => {
           if (msg.op === 'hello-ack') {
             clearTimeout(timer);
-            if (msg.daemonVersion !== this._version && fs.existsSync(this._bundlePath)) {
+            const expected = this._expectedVersion();
+            // LOOP BREAKER (2.330.0): an upgrade that does not change the
+            // reported version can never converge — a daemon that fails to
+            // install, a stale singleton that will not die, a host missing
+            // node. Retry a bounded number of times, then KEEP THE LINK and
+            // say so loudly. Capability gating already makes an older daemon
+            // safe to talk to; spinning forever is not (it re-installed every
+            // ~10s for 8h, drove RSS to 20GB and produced no error anywhere).
+            if (msg.daemonVersion !== expected && this._upgradeTries > 2) {
+              if (!this._upgradeGaveUp) {
+                this._upgradeGaveUp = true;
+                this._log(`[agentd] daemon stays at ${msg.daemonVersion} after ${this._upgradeTries} upgrade attempts to ${expected} — GIVING UP and using it as-is (capability-gated). Fix the device install manually; no further attempts this connection.`);
+                try { global.__vsEvent?.('agentd-upgrade-stuck', { detail: `${msg.daemonVersion}→${expected}` }); } catch { }
+                try { this._onUpgradeStuck?.(msg.daemonVersion, expected); } catch { }
+              }
+            } else if (msg.daemonVersion !== expected && fs.existsSync(this._bundlePath)) {
+              this._upgradeTries = (this._upgradeTries || 0) + 1;
               // version drift → stream the new bundle (self-upgrade), then reconnect
-              this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${this._version} — upgrading`);
+              this._log(`[agentd] daemon ${msg.daemonVersion} ≠ ${expected} — upgrading (attempt ${this._upgradeTries}/3)`);
               this._upgrade(mux).then(() => {
                 settled = true;
                 try { sock.destroy(); } catch { }
@@ -185,6 +224,7 @@ class DeviceManager {
               }).catch(fail);
               return;
             }
+            if (msg.daemonVersion === expected) { this._upgradeTries = 0; this._upgradeGaveUp = false; }
             mux.control({ op: 'ok' });
             settled = true;
             const sessions = new Map(); // chan → { onData, onExit }
