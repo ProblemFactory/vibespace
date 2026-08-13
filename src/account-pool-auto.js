@@ -245,19 +245,25 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
 //   activeBurn  = any estimated movement at all since fetchedAt.
 // Rules: refresh when the ESTIMATE has drifted ≥ driftPct (a fast workflow
 // burst trips this within minutes) OR the reading is older than maxAgeMs
-// WITH activity since (idle accounts are NEVER polled — the strongest
-// ban-postmortem signal stays structurally impossible). Per-account floor
-// keeps bursts from hammering one account; one refresh per tick serializes
-// the CLI spawns fleet-wide.
-function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeMs = 45 * 60e3, maxPerTick = 1 } = {}) {
+// WITH activity since, OR — owner-directed 2026-08-13 — the reading is older
+// than idleMaxAgeMs regardless of activity (idle accounts get a SLOW rung so
+// the roster never shows week-stale numbers; the caller passes a per-tick
+// RANDOMIZED idleMaxAgeMs in the 30–60min band so the cadence wanders instead
+// of the metronomic fixed-interval pattern the ban postmortem flagged, and
+// the official-binary channel is the whole §ban-safety posture). Per-account
+// floor keeps bursts from hammering one account; one refresh per tick
+// serializes the CLI spawns fleet-wide; drift beats stale-idle in priority,
+// then oldest reading first.
+function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeMs = 45 * 60e3, idleMaxAgeMs = 60 * 60e3, maxPerTick = 1 } = {}) {
   const eligible = (list || []).filter((a) => {
     if (!a || !a.key) return false;
     if (now - (a.lastAttemptAt || 0) < floorMs) return false;
     const age = now - (a.fetchedAt || 0);
     if ((a.estDriftPct || 0) >= driftPct) return true;
-    return age >= maxAgeMs && !!a.activeBurn;
+    if (age >= maxAgeMs && a.activeBurn) return true;
+    return age >= idleMaxAgeMs;
   });
-  eligible.sort((x, y) => (y.estDriftPct || 0) - (x.estDriftPct || 0));
+  eligible.sort((x, y) => ((y.estDriftPct || 0) - (x.estDriftPct || 0)) || ((x.fetchedAt || 0) - (y.fetchedAt || 0)));
   return eligible.slice(0, maxPerTick).map((a) => a.key);
 }
 

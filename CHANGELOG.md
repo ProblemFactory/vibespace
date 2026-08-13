@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.334.0
+
+- **auto-cli idle slow rung (owner-directed)** — accounts with NO active burn now also refresh via `claude -p /usage` once their reading is older than a per-tick-RANDOMIZED 30–60min threshold (a wandering threshold, never a fixed metronomic cadence), so the roster never shows week-stale quota; never-read accounts bootstrap their first reading through the same rung. Consecutive failures back off exponentially (5min×2^n, cap ~5h) so an unparseable account can never spawn claude every 5 minutes forever. Drift still outranks stale-idle for the one serialized refresh per tick. Tests: scripts/test-auto-cli-refresh.mjs (10).
+
 ## 2.333.0
 
 - **Fix: /api/agent-hooks 500 (Manage-Agents "无法读取 hook 状态")** — `agentHooksStatus` was never exported from the `src/server/agent-tool-generators.js` factory (2.325.0 decomposition casualty; the ReferenceError only fires when the route runs, so every build gate stayed green). Exported + destructured in server.js.

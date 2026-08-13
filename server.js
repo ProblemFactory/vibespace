@@ -1524,13 +1524,18 @@ const { decideCliRefresh } = require('./src/account-pool-auto.js');
 // touches the vendor API). Setting accounts.onDemandQuotaRefresh='auto-cli';
 // cadence is BURN-AWARE, not fixed: the dead-reckoner's own drift signal
 // (est vs last reading) triggers refreshes within minutes during a fast
-// workflow burst, while idle accounts are never polled at all (activeBurn
-// gate) — the ban-postmortem's idle-account-on-a-timer signal stays
-// structurally impossible. One CLI spawn per tick, per-account 5min floor,
-// 45min+jitter staleness cap for accounts with ANY activity.
+// workflow burst; idle accounts get a SLOW rung (owner-directed 2026-08-13):
+// a reading older than a per-tick-randomized 30–60min threshold refreshes
+// even with zero activity, so the roster never shows week-stale numbers —
+// the wandering threshold avoids the metronomic fixed-interval pattern the
+// ban postmortem flagged, and never-read accounts bootstrap their first
+// reading through the same rung. One CLI spawn per tick, per-account 5min
+// floor, exponential backoff on consecutive failures (an unparseable
+// account must not spawn claude every 5min forever).
 {
   const attempts = new Map(); // key → last attempt ts
-  const jitter = 1 + Math.random() * 0.4; // per-boot 45–63min cap
+  const fails = new Map(); // key → consecutive failures (backoff exponent)
+  const jitter = 1 + Math.random() * 0.4; // per-boot 45–63min active-burn cap
   setInterval(async () => {
     try {
       if (serverSetting('accounts.onDemandQuotaRefresh') !== 'auto-cli') return;
@@ -1545,18 +1550,25 @@ const { decideCliRefresh } = require('./src/account-pool-auto.js');
             if (g.accountIds.includes(a.id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
           }
         } catch { }
-        if (!raw?.fetchedAt) continue; // never-read accounts stay manual (no drift baseline)
-        let est = null; try { est = usageEstimator.estimateFor(a.id, raw, now); } catch { }
+        // never-read accounts (no cache at all) ride the idle rung with fetchedAt 0 —
+        // their first auto-cli read IS the bootstrap; failure backoff bounds retries
+        const f = fails.get(a.id) || 0;
+        if (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6))) continue;
+        let est = null; try { est = raw ? usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
         let drift = 0, moved = false;
         const cmp = (e, r) => { if (e && r && typeof e.utilization === 'number' && typeof r.utilization === 'number') { const d = Math.abs(e.utilization - r.utilization) * 100; drift = Math.max(drift, d); if (d > 0.2) moved = true; } };
-        cmp(est?.fiveHour, raw.fiveHour); cmp(est?.sevenDay, raw.sevenDay);
-        for (const s of est?.scopedWeekly || []) cmp(s, (raw.scopedWeekly || []).find((x) => x.name === s.name));
-        list.push({ key: a.id, fetchedAt: raw.fetchedAt, lastAttemptAt: attempts.get(a.id) || 0, estDriftPct: drift, activeBurn: moved });
+        cmp(est?.fiveHour, raw?.fiveHour); cmp(est?.sevenDay, raw?.sevenDay);
+        for (const s of est?.scopedWeekly || []) cmp(s, (raw?.scopedWeekly || []).find((x) => x.name === s.name));
+        list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: attempts.get(a.id) || 0, estDriftPct: drift, activeBurn: moved });
       }
-      const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter });
+      // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
+      // a wandering threshold, not a fixed cadence
+      const idleMaxAgeMs = 30 * 60e3 * (1 + Math.random());
+      const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs });
       for (const key of picks) {
         attempts.set(key, now);
         const ok = await usage.refreshViaCliPanel(key).catch(() => false);
+        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1);
         console.log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (drift ${Math.round(list.find((x) => x.key === key)?.estDriftPct || 0)}pt)`);
         global.__vsMetric?.('auto-cli-refresh-ms', 0);
       }
