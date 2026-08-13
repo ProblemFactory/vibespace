@@ -253,11 +253,21 @@ export function installManageAgents(App, ctx = {}) {
         return;
       }
       try {
-        const fin = await fetchJson(`/api/accounts/subscription/${encodeURIComponent(id)}/finalize`, { method: 'POST' });
+        const fin = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/relogin-finalize`, { method: 'POST' });
         const freshAttempt = fin?.loginAttempt && fin.loginAttempt !== baseline;
-        if (fin?.loggedIn && (freshAttempt || !baseline)) {
+        if (fin?.outcome === 'same' && (freshAttempt || !baseline)) {
           clearInterval(iv);
-          showToast(t('✓ “{name}” signed in again', { name: fin.name || a?.name || '' }), { duration: 6000 });
+          showToast(t('✓ “{name}” signed in again', { name: fin.account?.name || a?.name || '' }), { duration: 6000 });
+          refresh?.();
+        } else if (fin?.outcome === 'split') {
+          // identity guard (owner directive): wrong account ⇒ NEW entry, the
+          // original record stays signed-out and keeps its history
+          clearInterval(iv);
+          showToast(t('The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.', { email: fin.freshEmail || '?', new: fin.account?.name || '', name: fin.keptName || a?.name || '' }), { duration: 10000 });
+          refresh?.();
+        } else if (fin?.outcome === 'moved') {
+          clearInterval(iv);
+          showToast(t('The login belongs to “{other}” ({email}) — its login was refreshed there instead. “{name}” stays signed out.', { other: fin.movedTo?.name || '', email: fin.freshEmail || '?', name: fin.keptName || a?.name || '' }), { duration: 10000 });
           refresh?.();
         } else if (freshAttempt && fin?.loginState === 'error') {
           clearInterval(iv);

@@ -29,6 +29,36 @@ try {
   ok(!am.readSubCreds(id).loggedIn, 'husk reads as signed out');
   const cmd2 = buildClaudeSubscriptionLoginCommand({ nodeCmd: 'node', helperPath: '/x/helper.mjs', claudeCmd: 'claude', configDir: am.subDir(id) });
   ok(cmd2.includes(dir), 'signed-out account still gets a valid re-login command into the SAME dir');
+
+  // ── identity guard (2.333.0, owner: "orgid不对得自动变成新条目") ──
+  const login = (accId, email) => {
+    fs.writeFileSync(path.join(am.subDir(accId), '.credentials.json'), JSON.stringify({
+      claudeAiOauth: { accessToken: 'at-' + email, refreshToken: 'rt', expiresAt: Date.now() + 3600e3, email },
+    }));
+  };
+  // 1. same identity → in-place refresh, no new records
+  am.setEmail(id, 'me@x.com'); login(id, 'me@x.com');
+  const before = am.list().accounts.length;
+  let r = am.reloginResolve(id);
+  ok(r.outcome === 'same' && am.list().accounts.length === before, 'same identity → in-place refresh, no split', r.outcome);
+  // 2. mismatched identity, no matching record → NEW entry; original reverts signed-out
+  login(id, 'stranger@y.com');
+  r = am.reloginResolve(id);
+  ok(r.outcome === 'split', 'unknown identity → split to a NEW entry', r.outcome);
+  ok(am.list().accounts.length === before + 1, 'a new record exists');
+  ok(!am.readSubCreds(id).loggedIn, 'the ORIGINAL record reverts to signed-out (history intact)');
+  const nw = am.list().accounts.find((x) => (x.email || x.name || '').includes('stranger'));
+  ok(nw && am.readSubCreds(nw.id).loggedIn, 'the new record holds the fresh login');
+  // 3. mismatched identity matching ANOTHER record → creds move there
+  const otherId = am.createSubscription({ name: 'OtherAcct' }).id;
+  am.setEmail(otherId, 'other@z.com');
+  login(id, 'other@z.com');
+  r = am.reloginResolve(id);
+  ok(r.outcome === 'moved' && r.movedTo?.id === otherId, 'identity matching an EXISTING record → login moves there', r);
+  ok(am.readSubCreds(otherId).loggedIn && !am.readSubCreds(id).loggedIn, 'creds landed on the matching record; original signed out');
+  // 4. not-yet-completed login → pending, nothing changes
+  fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { scopes: [] } }));
+  ok(am.reloginResolve(id).outcome === 'pending', 'husk (login not finished) → pending, no action');
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

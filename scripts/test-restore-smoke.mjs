@@ -46,8 +46,28 @@ await new Promise((r) => setTimeout(r, 1500));
 ws.close(); srv.kill('SIGKILL');
 await new Promise((r) => setTimeout(r, 800));
 srv = boot(); const out2 = await waitReady(srv);
-const ok = /Reconnected/.test(out2);
+let ok = /Reconnected/.test(out2);
 console.log(ok ? 'RESTORE OK — session reconnected after SIGKILL restart' : 'RESTORE FAILED:\n' + out2);
+
+// ── GET-route battery (2.333.0, after /api/agent-hooks 500'd in production):
+// a factory function used by server.js but never EXPORTED throws a
+// ReferenceError only when the route actually runs — no boot log, no build
+// gate. Hit every cheap read route on the live worktree server and fail on
+// any 5xx (the lost-export class always presents as 500).
+const ROUTES = ['/api/version', '/api/home', '/api/agent-hooks', '/api/accounts',
+  '/api/sessions', '/api/active', '/api/usage', '/api/backend-status',
+  '/api/settings', '/api/user-state', '/api/tasks', '/api/hosts',
+  '/api/session-status', '/api/user-todos', '/api/sysinfo', '/api/vnc/status',
+  '/api/bookmarks', '/api/layouts', '/api/plugins', '/api/machine-mounts',
+  '/api/mounts', '/api/port-forwards', '/api/exits', '/api/incidents',
+  '/api/session-options', '/api/available-models', '/api/custom-themes'];
+for (const r of ROUTES) {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${PORT}${r}`);
+    if (resp.status >= 500) { ok = false; console.error(`  ✗ GET ${r} → ${resp.status} (lost-export class)`); }
+    else console.log(`  ✓ GET ${r} → ${resp.status}`);
+  } catch (e) { ok = false; console.error(`  ✗ GET ${r} threw — ${e.message}`); }
+}
 const ws2 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((r) => ws2.on('open', r));
 ws2.send(JSON.stringify({ type: 'kill', sessionId: sid }));

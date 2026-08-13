@@ -366,6 +366,23 @@ app.post('/api/accounts/:id/relogin', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+
+// Re-login watcher endpoint (2.333.0): finalize WITH the identity guard —
+// a fresh login that belongs to a different account than this record MOVES
+// OUT (into the matching record, or a brand-new one) instead of rebranding
+// the record and splicing two accounts' history together. Regular Add-flow
+// finalize keeps its own merge semantics (there the record IS a throwaway).
+app.post('/api/accounts/:id/relogin-finalize', (req, res) => {
+  try {
+    const r = accounts.reloginResolve(req.params.id);
+    try {
+      const ls = accounts._subscriptionLoginStatus?.(req.params.id);
+      if (ls) { r.loginAttempt = ls.attempt || null; r.loginState = ls.state || null; }
+    } catch { }
+    res.json({ success: true, ...r });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
   try {
     const fin = accounts.finalizeSubscription(req.params.id);
