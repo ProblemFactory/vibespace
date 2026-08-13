@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.330.0
+
+### Fixed
+- **CRITICAL — the app would not boot at all on 2.327.0+ (blank loading screen).** `Uncaught ReferenceError: installTelemetry is not defined`: the 2.327.0 dead-code deletion removed `installOverlapTracer` with a LINE-based regex, and the import it sat on was shared — `import { installTelemetry, installOverlapTracer } from './lib/telemetry-client.js'` — so the whole line went, leaving `installTelemetry()` as an undefined global at the very top of client.js. esbuild happily bundles an unresolved free identifier (it is a legal global reference), so the build stayed green and every gate passed; the first line of app boot then threw and nothing after it ran. Import restored. **Lesson (recorded): a line-oriented deletion regex must be verified against the LINE, not the symbol — and a green build is not evidence that the client boots.**
+- **agentd self-upgrade could never converge, and retried forever** (this instance: ~10s cycles for 8h, RSS 20.5GB). The expected daemon version was the SERVER's `package.json` version while the bundle actually shipped is whatever is on disk — the two diverge whenever the repo is rebuilt without restarting (all of dev, plus a few seconds of every update.sh). A daemon that installs the shipped bundle then reports the bundle's version and is judged wrong AGAIN. Two independent fixes: (1) the expected version now comes from the shipped bundle's own baked `VERSION` marker (cached by mtime+size, falls back to package.json, never throws); (2) a LOOP BREAKER — an upgrade that does not move the reported version can never converge, so after 3 attempts the link is kept and used as-is (capability gating already makes an older daemon safe) with a loud one-time log + `agentd-upgrade-stuck` telemetry. Suite: scripts/test-agentd-upgrade-loop.mjs (9, incl. the incident's exact version shape).
+
 ## 2.329.0
 
 ### Added
