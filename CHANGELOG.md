@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.333.0
+
+- **Fix: /api/agent-hooks 500 (Manage-Agents "无法读取 hook 状态")** — `agentHooksStatus` was never exported from the `src/server/agent-tool-generators.js` factory (2.325.0 decomposition casualty; the ReferenceError only fires when the route runs, so every build gate stayed green). Exported + destructured in server.js.
+- **Structural guard: GET-route battery in the restore smoke** — `scripts/test-restore-smoke.mjs` now hits 27 cheap read routes on the live worktree server and fails on any 5xx; the lost-factory-export class always presents as a 500 with no boot log. Verified: the battery catches this exact bug on the pre-fix HEAD.
+- **Re-login identity guard (owner directive: "orgid不对得自动变成新条目")** — `accounts.reloginResolve(id)`: after an on-this-machine re-login, the fresh login's identity (creds email / dir .claude.json) is compared to the record's. Same → in-place refresh; matches ANOTHER record → credentials move there ("moved", that account refreshed instead); unknown identity → a NEW entry is created and the fresh login moves into it ("split") while the original record stays signed-out with its history/usage attribution intact. New `POST /api/accounts/:id/relogin-finalize`; the re-login watcher toasts all three outcomes. Matrix test: scripts/test-account-relogin.mjs (13).
+
 ## 2.332.0
 
 ### Added

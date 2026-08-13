@@ -532,7 +532,7 @@ const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
   ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
-  HOOK_OPTOUT_FILE,
+  agentHooksStatus, HOOK_OPTOUT_FILE,
 } = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT });
 // Generic operator-visible notice channel (2.226.0, user directive "不要静默
 // 失败"): server-side probes report through this instead of dying in the log —

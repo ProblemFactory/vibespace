@@ -1010,6 +1010,8 @@ export default {
   "Log in on this machine…": "このマシンでログイン…",
   "A terminal opened — sign in as “{name}”. Only this account’s login is refreshed; every other login is untouched.": "ターミナルを開きました——「{name}」としてサインインしてください。更新されるのはこのアカウントのログインのみで、他のログインには影響しません。",
   "✓ “{name}” signed in again": "✓ 「{name}」が再ログインしました",
+  "The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.": "このログインは別のアカウント（{email}）のものです——新しいエントリ「{new}」として保存しました。「{name}」はログアウトのままです。",
+  "The login belongs to “{other}” ({email}) — its login was refreshed there instead. “{name}” stays signed out.": "このログインは「{other}」（{email}）のものです——そのエントリのログインを更新しました。「{name}」はログアウトのままです。",
   "⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.": "⚠ サブスクリプションからサインアウトされました（Console ログインが置き換えました）——円グラフは最後に判明したクォータを表示します。API 課金のセッションはここには表示されません。",
   "✓ All set": "✓ すべて完了",
   "✓ {n} more completed…": "✓ 他 {n} 件完了…",

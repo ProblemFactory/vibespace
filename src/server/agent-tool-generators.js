@@ -474,6 +474,7 @@ function removeAgentHooks() {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
     createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
     ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
+    agentHooksStatus,
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };
 }

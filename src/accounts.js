@@ -193,6 +193,55 @@ class AccountManager {
 
   // After the login terminal wrote creds: pull identity, default the name to
   // the email/plan if the user didn't set one. Returns loggedIn.
+
+  // Re-login IDENTITY GUARD (2.333.0, owner directive "orgid不对得自动变成新条
+  // 目"): after a re-login into an EXISTING record's dir, the fresh login may
+  // belong to a DIFFERENT Anthropic account (wrong browser profile, shared
+  // machine). Silently rebranding the record would splice two accounts' ledger
+  // history and pool identity together — so a mismatched login MOVES OUT:
+  //   · fresh identity matches ANOTHER existing record → its creds move into
+  //     that record's dir (fresh login wins there); this record reverts to
+  //     signed-out untouched
+  //   · fresh identity matches NO record → a NEW record is minted around it;
+  //     this record reverts to signed-out untouched
+  //   · same identity (or the record never had one) → normal in-place refresh
+  // Identity = orgUuid when both sides have it, else email (case-insensitive).
+  // The dir's .claude.json rides along with the creds — it carries the fresh
+  // identity and belongs with the login, not with the old record.
+  reloginResolve(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
+    const fresh = this.readSubCreds(id);
+    if (!fresh.loggedIn) return { outcome: 'pending' };
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const freshEmail = norm(fresh.email);
+    const knownEmail = norm(a.email || (String(a.name || '').includes('@') ? a.name : ''));
+    const sameIdentity = !knownEmail || !freshEmail || freshEmail === knownEmail;
+    if (sameIdentity) return { outcome: 'same', account: this.finalizeSubscription(id) };
+
+    // ── mismatch: move the fresh login out of this record's dir ──
+    const src = this.subDir(id);
+    const moveLogin = (destDir) => {
+      fs.mkdirSync(destDir, { recursive: true, mode: 0o700 });
+      for (const f of ['.credentials.json', '.claude.json']) {
+        try { fs.renameSync(path.join(src, f), path.join(destDir, f)); } catch { }
+      }
+    };
+    const other = this._state.accounts.find((x) => x.id !== id
+      && this._acctBackend(x) === 'claude' && this._acctType(x) === 'subscription'
+      && norm(x.email || (String(x.name || '').includes('@') ? x.name : '')) === freshEmail);
+    if (other) {
+      moveLogin(this.subDir(other.id));
+      this._notify();
+      return { outcome: 'moved', movedTo: { id: other.id, name: other.name }, freshEmail: fresh.email, keptName: a.name };
+    }
+    const created = this.createSubscription({ name: (fresh.email || 'Subscription').slice(0, 60) });
+    moveLogin(this.subDir(created.id));
+    const finalized = this.finalizeSubscription(created.id);
+    this._notify();
+    return { outcome: 'split', account: finalized, freshEmail: fresh.email, keptName: a.name };
+  }
+
   finalizeSubscription(id) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') throw new Error('not a subscription account');
