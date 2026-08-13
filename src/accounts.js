@@ -911,10 +911,28 @@ class AccountManager {
     if (!a) throw new Error('unknown account: ' + id);
     if (this._acctBackend(a) !== 'claude') throw new Error('not a Claude account: ' + a.name);
     if (this._acctType(a) === 'pooled') {
-      const cur = this.poolCurrent(id);
-      if (!cur) throw new Error('pooled account has no target: ' + a.name);
-      // readSubCreds resolves THROUGH the symlink, so this is the real login.
-      if (!this.readSubCreds(id).loggedIn) throw new Error('pooled target is not logged in: ' + a.name);
+      let cur = this.poolCurrent(id);
+      // SELF-HEAL (2.330.2, real outage: BOTH the pool's target and every
+      // per-session link pointed at accounts whose refresh token had aged out
+      // while idle, so EVERY resume failed with "pooled target is not logged
+      // in" and the user had no way forward). Routing around a dead member is
+      // the entire point of a pool — a dead target must re-point, not throw.
+      // poolMembers() is already filtered to still-valid logins.
+      const liveTarget = (x) => !!x && this.readSubCreds(x).loggedIn;
+      if (!cur || !this.readSubCreds(id).loggedIn) {
+        const alive = this.poolMembers(id).map((m) => m.id);
+        if (!alive.length) {
+          throw new Error(`every member of pool "${a.name}" is signed out — re-login one in Manage Agents (the pool cannot route around a fully signed-out member set)`);
+        }
+        let pick = null;
+        try { const c = opts.chooseMember?.(); if (alive.includes(c)) pick = c; } catch { }
+        pick = pick || alive[0];
+        const was = cur;
+        this.setPoolTarget(id, pick);
+        cur = pick;
+        console.warn(`[pool] "${a.name}" target ${was || '(none)'} is signed out — re-pointed to ${this.get(pick)?.name || pick} so the session can start; re-login the dead account in Manage Agents`);
+        try { global.__vsEvent?.('pool-target-signed-out', { detail: `${was || 'none'}→${pick}` }); } catch { }
+      }
       // No remoteCreds: shipping would copy the symlink's CONTENTS to a fixed
       // remote dir, freezing the pool at spawn time and (on a macOS host)
       // landing in a per-path keychain entry. Pools are local-only for now.
@@ -926,6 +944,14 @@ class AccountManager {
       if (opts.sessionKey) {
         let member = null;
         try { member = opts.chooseMember?.(); } catch { }
+        // The chooser ranks by QUOTA (it reads the usage caches); credentials
+        // are this store's authority. A member that is signed out is not a
+        // candidate no matter how much quota it shows — same outage, second
+        // door (a per-session link pinned to a dead account).
+        if (!liveTarget(member)) {
+          if (member) console.warn(`[pool] chooser picked signed-out member ${member} — falling back to the live target`);
+          member = null;
+        }
         member = member || cur;
         const link = this.ensureSessionPoolLink(id, opts.sessionKey, member);
         return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: member, sessionLink: true, localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: link }, secret: null };

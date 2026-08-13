@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.330.2
+
+### Fixed
+- **A pool with a signed-out target became a hard stop instead of routing around it** (real outage: every session resume failed with `pooled target is not logged in`). Two of the pool's subscriptions had their refresh tokens age out while idle — the CLI clears credentials when a refresh is rejected, leaving a token-less husk — and the pool's default target plus ALL THREE per-session links pointed at one of them. `poolMembers()` had always excluded signed-out accounts, but `resolveForSpawn` only ever THREW when the current target was dead, so the exclusion never got a chance to matter and the UI offered no way forward. Now: a dead target (or a dead per-session link) RE-POINTS to a live member and the session starts, with a loud log + `pool-target-signed-out` telemetry naming both accounts; the quota chooser's pick is validated against credentials before use (quota ranking cannot outrank being signed in — same outage, second door); and a pool whose members are ALL signed out fails with an actionable message naming Manage Agents instead of a bare "not logged in". Suite: scripts/test-pool-signed-out.mjs (9), including the exact husk shape the CLI leaves behind.
+
 ## 2.330.1
 
 ### Fixed
