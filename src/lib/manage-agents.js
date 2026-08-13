@@ -229,6 +229,44 @@ export function installManageAgents(App, ctx = {}) {
     };
   },
 
+
+  // Re-login an EXISTING subscription on THIS machine (2.332.0, real ask —
+  // until now the only path was remove + re-add, which loses pool membership
+  // and identity continuity): same env-scoped helper terminal as the Add
+  // flow, pointed at the account's own creds dir. Success is judged by the
+  // helper's ATTEMPT id (a fresh run mints a new one), so re-logging a
+  // still-logged-in account never reports success before the user actually
+  // completes the browser flow.
+  async _reloginSubscription(id, a, refresh) {
+    let r;
+    try { r = await fetchJson(`/api/accounts/${encodeURIComponent(id)}/relogin`, { method: 'POST' }); }
+    catch { showToast(t('Could not start — server unreachable'), { type: 'error' }); return; }
+    if (!r?.loginCmd) { showToast(r?.error || t('Could not start'), { type: 'error' }); return; }
+    const baseline = r.baselineAttempt || null;
+    this.openShellTerminal(undefined, { initialCommand: r.loginCmd });
+    showToast(t('A terminal opened — sign in as “{name}”. Only this account’s login is refreshed; every other login is untouched.', { name: a?.name || '' }), { duration: 6000 });
+    let tries = 0;
+    const iv = setInterval(async () => {
+      if (++tries > 100) {
+        clearInterval(iv);
+        showToast(t('Stopped watching for the login after 5 min. If you completed it, press Re-check in Manage agents to finish capturing it.'), { type: 'error', duration: 10000 });
+        return;
+      }
+      try {
+        const fin = await fetchJson(`/api/accounts/subscription/${encodeURIComponent(id)}/finalize`, { method: 'POST' });
+        const freshAttempt = fin?.loginAttempt && fin.loginAttempt !== baseline;
+        if (fin?.loggedIn && (freshAttempt || !baseline)) {
+          clearInterval(iv);
+          showToast(t('✓ “{name}” signed in again', { name: fin.name || a?.name || '' }), { duration: 6000 });
+          refresh?.();
+        } else if (freshAttempt && fin?.loginState === 'error') {
+          clearInterval(iv);
+          showToast(t('Subscription login could not be saved. Check the login terminal for details, then try again.'), { type: 'error', duration: 8000 });
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
+  },
+
   // Add a subscription record and go STRAIGHT to minting its long-lived token
   // (B-211a #2, user request 'why can oat only be added to an existing
   // account'): no local login step — the setup-token browser flow decides the
@@ -2010,6 +2048,12 @@ export function installManageAgents(App, ctx = {}) {
             run(login.command);
             showToast(t('Sign in as “{name}” in the terminal — this login lives ON {host} only; the machine’s own login is untouched.', { name: a?.name, host: hostLabel }), { duration: 7000 });
           } });
+        }
+        // Re-login on THIS machine (2.332.0): most useful when the row shows
+        // signed-out (idle refresh-token expiry, external revocation) — but
+        // also offered while logged in, for rotating to a different login.
+        if (isSub && !a?.pooled && !selectedHost) {
+          items.splice(1, 0, { label: a?.loggedIn ? t('Re-login on this machine…') : t('Log in on this machine…'), action: () => this._reloginSubscription(id, a, refresh) });
         }
         if (isSub && !a?.pooled) items.push({ label: a?.oat ? (a.oatDaysLeft <= 0 ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
         if (isSub && a.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });

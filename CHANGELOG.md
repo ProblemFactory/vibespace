@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.332.0
+
+### Added
+- **Account ⋯ menu: "Re-login on this machine…"** (user request; until now the only way to refresh a dead login was remove + re-add, which loses pool membership and identity continuity — exactly the dance the Natural Max token-death would have required). `POST /api/accounts/:id/relogin` returns the SAME env-scoped helper command the Add-subscription flow uses, pointed at the account's EXISTING creds dir; the client opens the login terminal and watches finalize. Success is judged by the helper's ATTEMPT id (finalize now reports `loginAttempt`/`loginState`, and the route hands the client a pre-login baseline) — so re-logging a still-logged-in account (rotating to a different login) never reports success before the browser flow actually completes, and a failed attempt surfaces the helper's error instead of polling forever. Signed-out rows show "Log in on this machine…", logged-in rows "Re-login on this machine…"; local Claude subscriptions only (host logins keep the dedicated "Log in on {host}…" path; pools have no login of their own). Suite: scripts/test-account-relogin.mjs.
+
 ## 2.331.0
 
 ### Fixed
