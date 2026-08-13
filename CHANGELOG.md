@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.331.0
+
+### Fixed
+- **The boot resume-all offer now covers EVERY desktop, not just the active one** (real report: "重启后那个批量resume弹窗只会批量resume当前desktop里的窗口"). Mechanism: at boot, restoreState — where the offer's collector lives — runs only for the ACTIVE desktop; every other desktop's windows are lazy saved states that replay on first visit, so their interrupted sessions never reached the popup. `scanStoppedInDesktopStates` (PURE, exported) now scans the non-active desktops' saved window states directly from the same /api/layouts payload, mirroring restoreState's aliveness logic exactly (live sessions skipped; remote windows — which can never match LOCAL discovery — collected from their openSpec identity with hostId). Collection only: the lazy desktops keep their saved states, and each resumed session lands back on its HOME desktop at its saved spot via `winBounds.desktopId` (the 2.295.0 placement); when a lazy desktop is later visited, its replay attaches by serverId and dedups against the already-resumed window. Suite: scripts/test-resume-all-desktops.mjs (9 — active-desktop exclusion, live skip, remote identity, custom names, home-desktop bounds, hostile input).
+
 ## 2.330.2
 
 ### Fixed

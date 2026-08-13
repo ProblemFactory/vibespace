@@ -6,6 +6,47 @@ import { cssVarDefault } from './utils.js';
 // 'created'; the stage placeholder is a stage-only pseudo-window.
 const TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder']);
 
+
+// Boot-time scan of NON-ACTIVE desktops' SAVED window states for dead session
+// windows (2.331.0, real report "只会批量resume当前desktop里的窗口"): the
+// resume-all collector only sees restoreState, and at boot restoreState runs
+// for the ACTIVE desktop only — every other desktop's windows are LAZY
+// (_savedStates) and replay on first visit, so their interrupted sessions
+// never reached the offer. PURE (data in, list out) so the matrix is
+// testable: mirrors restoreState's aliveness logic exactly (backendSessionId
+// beats serverSessionId; remote windows can never stoppedMatch against LOCAL
+// discovery and are collected from their openSpec identity instead).
+export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomName) {
+  const out = [];
+  for (const meta of data?.desktopMeta || []) {
+    if (!meta?.id || meta.id === activeId) continue;
+    for (const ws of data.desktops?.[meta.id]?.autoSave?.windows || []) {
+      if (ws.type !== 'terminal' && ws.type !== 'chat') continue;
+      const backend = ws.backend || ws.openSpec?.backend || 'claude';
+      const bsid0 = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId;
+      const backendSessionId = bsid0 && bsid0 !== ws.serverSessionId ? bsid0 : null;
+      if (!backendSessionId) continue;
+      const alive = live.find((s) => (s.backend || 'claude') === backend && (s.backendSessionId || s.claudeSessionId) === backendSessionId)
+        || (ws.serverSessionId && live.find((s) => s.id === ws.serverSessionId));
+      if (alive) continue;
+      const customName = getCustomName?.(backendSessionId);
+      // land the resumed window back on ITS desktop at its saved spot
+      const winBounds = { gridBounds: ws.gridBounds || null, desktopId: meta.id };
+      const stoppedMatch = all.find((s) => (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend);
+      if (stoppedMatch) {
+        out.push({ sessionId: stoppedMatch.sessionId, cwd: stoppedMatch.cwd,
+          name: customName || stoppedMatch.name || ws.title || 'Session',
+          opts: { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined, winBounds } });
+      } else if (ws.openSpec?.hostId) {
+        out.push({ sessionId: backendSessionId, cwd: ws.cwd || '',
+          name: customName || ws.title || 'Session',
+          opts: { backend, backendSessionId, hostId: ws.openSpec.hostId, winBounds } });
+      }
+    }
+  }
+  return out;
+}
+
 class LayoutManager {
   constructor(app) {
     this.app = app;
