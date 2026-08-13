@@ -338,9 +338,43 @@ app.post('/api/accounts/subscription', (req, res) => {
     res.json({ success: true, id, dir, loginCmd });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+
+// Re-login an EXISTING Claude subscription on THIS machine (2.332.0, real ask
+// after two token-death incidents made "remove + re-add" the only path): the
+// SAME env-scoped helper the Add flow uses, pointed at the account's existing
+// creds dir — identity, pool membership, ledger history all stay intact; only
+// the login is refreshed. Returns the CURRENT helper attempt id as a baseline
+// so the client can tell the NEW login from a pre-existing one (a re-login of
+// a still-logged-in account would otherwise report success instantly).
+app.post('/api/accounts/:id/relogin', (req, res) => {
+  try {
+    const a = accounts.get(req.params.id);
+    if (!a || a.type !== 'subscription' || (a.backend || 'claude') !== 'claude') {
+      return res.status(400).json({ error: 'not a Claude subscription account' });
+    }
+    const dir = accounts.subDir(a.id);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const loginCmd = buildClaudeSubscriptionLoginCommand({
+      nodeCmd: NODE_CMD,
+      helperPath: CLAUDE_SUBSCRIPTION_LOGIN_HELPER,
+      claudeCmd: CLAUDE_CMD,
+      configDir: dir,
+    });
+    let baselineAttempt = null;
+    try { baselineAttempt = accounts._subscriptionLoginStatus?.(a.id)?.attempt || null; } catch { }
+    res.json({ success: true, id: a.id, loginCmd, baselineAttempt });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
   try {
     const fin = accounts.finalizeSubscription(req.params.id);
+    // attempt identity for the re-login watcher (2.332.0): which helper RUN
+    // produced the current state — lets the client ignore a pre-existing login
+    try {
+      const ls = accounts._subscriptionLoginStatus?.(req.params.id);
+      if (fin && ls) { fin.loginAttempt = ls.attempt || null; fin.loginState = ls.state || null; }
+    } catch { }
     // Same-account auto-recognition (2.205.0, real ask "这个不能自动识别吗"):
     // a fresh login whose identity email matches an EXISTING subscription is
     // the SAME account — fold the new record into the existing one (fresh
