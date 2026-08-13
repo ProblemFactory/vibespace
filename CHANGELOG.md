@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.330.1
+
+### Fixed
+- **The blank-boot fix was itself incomplete — the deleted import line carried FOUR names, and 2.330.0 restored one.** `reportBootTime` (and `track`/`metric`) were still unbound, so the app still threw on boot. Full line restored. Root discipline failure recorded: I patched the symbol whose error text the user pasted instead of restoring the line the deletion actually removed — the same "fix the visible surface, not the cause" trap the account-semantics chain taught, one release apart.
+
+### Added
+- **`scripts/test-bundle-globals.mjs` — the guard that makes this class impossible to ship**, wired into `npm run build` right after esbuild. It exploits a property of the build itself: `esbuild --minify` renames every BOUND name to 1-3 characters, so any of OUR OWN symbols (collected from src/lib/**/*.js + src/client.js exports and declarations) surviving verbatim **in call position** in the minified bundle is a name esbuild could not resolve — a free variable, i.e. used-but-never-imported. A matching-paren test separates real calls from method definitions (esbuild never renames properties), which is what keeps the signal clean. **Negative-controlled against the real regression**: with the import line removed and a genuine rebuild, the guard FAILS naming both symbols; with it restored, it passes. A source-side twin was written and DELETED — deciding "used but not bound" in source needs real scope analysis (destructuring, params, closures) and the approximation produced false positives; esbuild has already done that analysis, and reading its answer out of the output is exact. One check that cannot lie beats two where one does.
+
 ## 2.330.0
 
 ### Fixed
