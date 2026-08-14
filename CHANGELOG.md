@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.335.0
+
+- **Pool survives member deletion (owner report ×2)** — `accounts.remove()` of a claude subscription now heals every pool NOW instead of leaving wreckage for a lucky spawn to fix: the id is stripped from explicit member lists, a default symlink that targeted the deleted account re-points to a live member (or is unlinked — the pool reads honestly signed-out instead of dangling), and per-session links that billed to it re-point (or drop when no member is left). test-pool-signed-out grows to 17.
+- **Resume survives a DELETED billing account** — resuming a conversation whose stored account id no longer exists degrades to the global login with a server notice, instead of bricking on "unknown account" forever (nothing to re-login — the record is gone). Fresh creates keep the loud failure.
+- **Auth-class failures now trigger pool switching (owner report: 封号/欠费/过期从不切换)** — new pure `classifyAuthFailure` (403 immediate; 401 only on retry ≥2 — a lone first 401 is the token-refresh race; ban/credit/oauth-expired messages immediate; 5xx/overload never) feeds `notePoolAuthFailure` from the CLI's own api_retry and error-result records: the failing member is marked (10min TTL, cleared the moment its creds file is rewritten by a re-login), the session's link and the pool default move to the best other member by the same EDF ranking, the user is told, and cold pools get the conversation-restart ask. Quota evaluation and the model chooser exclude marked members. Runs regardless of the pool's `auto` flag — routing around a dead account is healing, not optimization. test-pool-auto grows to 65.
+
 ## 2.334.1
 
 - **Fix: ghost host selection bricks Recent/History (fleet report)** — a persisted Recent/History host pick whose host record was later REMOVED left the switcher `<select>` rendering BLANK (a value with no matching option) and both zones stuck on "发现失败: host not found" + 无法连接 forever, with zero affordance hinting the fix. The zones now SELF-HEAL: once the roster has actually loaded, a selection not in it resets to Local (memory + localStorage) with a one-time toast; a transient /api/hosts failure never wipes a valid pick, and a roster load with zero remaining hosts still triggers the heal render. CDP smoke: scripts/test-ghost-host-heal.mjs (7, incl. the negative control).

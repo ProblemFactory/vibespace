@@ -28,7 +28,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
-    USAGE_STATUSLINE_CMD, userStatuslineCmd,
+    USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice,
   } = ctx;
   return async function handleCreate(ws, data, attachedSessions) {
     do {
@@ -357,7 +357,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // host failed). Probe the host before failing the create; the
               // spawn then points at the host-side dir, nothing ships.
               let rescued = null;
-              if (data.hostId && hosts && backend === 'claude'
+              // DELETED billing account on a RESUME (2.335.0, real report):
+              // the stored accountId no longer exists — nothing to re-login,
+              // so a hard throw bricks the conversation forever. Degrade to
+              // the global login and SAY so; a fresh create keeps the throw
+              // (the user just picked that account — failing loud is right).
+              if (data.resumeId && /unknown account/.test(String(e.message))) {
+                try { serverNotice?.(`resume-acct-gone-${id}`, `The billing account this conversation used was deleted — it resumed on the default login instead. Pick a new account in its billing switcher if needed.`, { level: 'warn' }); } catch { }
+                console.warn(`[session] resume ${id}: stored account ${String(data.accountId).slice(0, 16)} no longer exists — degrading to global login`);
+                rescued = { id: null, kind: null, _acctGone: true };
+              }
+              if (!rescued && data.hostId && hosts && backend === 'claude'
                   && typeof data.accountId === 'string' && /^sub-[\w-]{1,40}$/.test(data.accountId)
                   && /not logged in/.test(String(e.message))) {
                 try {
@@ -392,6 +402,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // email-linked rescue resolves to the host's own login = the
               // same null the 'subscription' sentinel produces downstream
               if (spawnAccount && spawnAccount._useHostLogin) { linkedAccountId = data.accountId; spawnAccount = null; }
+              if (spawnAccount && spawnAccount._acctGone) spawnAccount = null; // deleted-account degrade = plain global login
             }
             // REMOTE + the account came from the DEFAULT (nothing specified) +
             // it could only reach the host by shipping subscription creds →

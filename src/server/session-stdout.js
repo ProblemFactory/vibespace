@@ -23,7 +23,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   noteModelSeen, recordUsageAttribution, daemonPtyShim, sbSeenFirst, getDeviceMgr,
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
-    maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback,
+    maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     modelsMatch, recordRateLimitEvent, resolveUsageKey, usageEstimator } = engine;
   const hosts = mk(getHosts);
   const usageHistory = mk(getUsageHistory);
@@ -622,6 +622,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 const attempt = msg.attempt || '?', max = msg.max_retries || 10;
                 const why = msg.error_status ? `HTTP ${msg.error_status}` : (msg.error && msg.error !== 'unknown' ? msg.error : 'connection error');
                 newLabel = `API retrying (${attempt}/${max}, ${why})…`;
+                // AUTH-class failure (2.335.0): a pooled session must route
+                // AROUND a banned/expired member, not retry into it forever
+                try { notePoolAuthFailure?.(session, id, { status: msg.error_status, message: msg.error, attempt: msg.attempt }); } catch { }
               }
               if (newLabel !== null && session._streamingLabel !== newLabel) {
                 session._streamingLabel = newLabel;
@@ -656,6 +659,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // Immediate check + one delayed re-check (the Stop hook may write
             // the attachment slightly after the result reaches stdout).
             if (msg.type === 'result') maybePoolAutoSwitch(session);
+            // error results carry ban/credit/oauth text the retry path never
+            // sees (the CLI gives up without a final api_retry record)
+            if (msg.type === 'result' && msg.is_error) { try { notePoolAuthFailure?.(session, id, { message: String(msg.result || msg.error || '') }); } catch { } }
             // Event-driven remote ledger harvest (owner question "为什么15分钟
             // 不实时"): a remote session's turn just ENDED — its usage now
             // exists in the remote transcript, so harvest promptly (60s/host

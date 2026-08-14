@@ -7,7 +7,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch } = require(path.resolve('src/account-pool-auto.js'));
+const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, classifyAuthFailure } = require(path.resolve('src/account-pool-auto.js'));
 
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
@@ -200,6 +200,17 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
   const v5 = decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: burst, b: burst })[id] ?? null, nowSec: NOW, explain: true });
   ck('blocked: a 5h burst block names 5h and shows the healthy 7d', v5.deadBuckets.join() === '5h 1%' && v5.liveBuckets.join() === '7d 80%');
 }
+
+// ── classifyAuthFailure (2.335.0: auth-class failures must evict, quota can't see them) ──
+ck('auth: 403 qualifies immediately (refused identity, never a refresh race)', classifyAuthFailure({ status: 403 }) === true);
+ck('auth: a LONE first-attempt 401 does not qualify (mid-refresh race shape)', classifyAuthFailure({ status: 401, attempt: 1 }) === false);
+ck('auth: 401 on attempt ≥2 qualifies (the refresh had its chance)', classifyAuthFailure({ status: 401, attempt: 2 }) === true);
+ck('auth: credit-balance message qualifies', classifyAuthFailure({ message: 'Your credit balance is too low to access the Anthropic API' }) === true);
+ck('auth: org-disabled (ban) message qualifies', classifyAuthFailure({ message: 'This organization has been disabled' }) === true);
+ck('auth: expired-oauth message qualifies', classifyAuthFailure({ message: 'OAuth token has expired' }) === true);
+ck('auth: 5xx never qualifies no matter how many retries', classifyAuthFailure({ status: 500, message: 'Internal server error', attempt: 9 }) === false);
+ck('auth: overload is not an identity problem', classifyAuthFailure({ status: 529, message: 'Overloaded' }) === false);
+ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && classifyAuthFailure() === false);
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

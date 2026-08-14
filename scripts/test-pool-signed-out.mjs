@@ -65,6 +65,32 @@ try {
   try { am.resolveForSpawn(pool.id); } catch (e) { msg = e.message; }
   ok(/signed out/.test(msg) && /Manage Agents/.test(msg),
     'a fully signed-out pool fails with an actionable message naming the fix', msg);
+
+  // ── DELETE hygiene (2.335.0, owner report: deleting the account a pool sat
+  // on left the whole pool broken — dangling default symlink + dangling
+  // per-session links + stale member lists, healed only by a lucky spawn) ──
+  const m1 = live('M1'), m2 = live('M2'), m3 = live('M3');
+  const pool2 = am.createPool({ name: 'P2', members: [m1, m2, m3] });
+  am.setPoolTarget(pool2.id, m1);
+  am.ensureSessionPoolLink(pool2.id, 'sess-a', m1);
+  am.ensureSessionPoolLink(pool2.id, 'sess-b', m2);
+  am.remove(m1);
+  ok([m2, m3].includes(am.poolCurrent(pool2.id)), 'deleting the pool TARGET re-points the default link to a live member', am.poolCurrent(pool2.id));
+  ok(am.readSubCreds(pool2.id).loggedIn, 'the pool reads as logged-in immediately (no dangling-symlink limbo)');
+  ok(am.poolCurrentFor(pool2.id, 'sess-a') !== m1 && !!am.poolCurrentFor(pool2.id, 'sess-a'),
+    'a per-session link that billed to the deleted account is re-pointed', am.poolCurrentFor(pool2.id, 'sess-a'));
+  ok(am.poolCurrentFor(pool2.id, 'sess-b') === m2, 'a link on a SURVIVING member is untouched');
+  ok(!(am.get(pool2.id).members || []).includes(m1), 'the deleted id is stripped from the explicit member list');
+  // non-target member removal: default link stays put
+  const cur2 = am.poolCurrent(pool2.id);
+  am.remove(cur2 === m2 ? m3 : m2);
+  ok(am.poolCurrent(pool2.id) === cur2, 'removing a NON-target member leaves the default link alone');
+  // last member removal: pool goes honestly signed-out, resolve fails actionably
+  am.remove(cur2);
+  ok(am.poolCurrent(pool2.id) === null, 'last member deleted → pool target honestly absent (no dangling link)');
+  let msg2 = '';
+  try { am.resolveForSpawn(pool2.id); } catch (e) { msg2 = e.message; }
+  ok(/signed out|Manage Agents/.test(msg2), 'resolve on a memberless pool fails with the actionable message', msg2);
 } finally {
   console.warn = warn;
   fs.rmSync(tmp, { recursive: true, force: true });

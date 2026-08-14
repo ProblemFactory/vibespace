@@ -36,9 +36,17 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, classifyAuthFailure, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
+// ── member auth-health (2.335.0, owner report: a banned/expired/out-of-credit
+// account never triggered a switch — quota was the engine's ONLY signal, and a
+// dead-auth account often still SHOWS rich quota). memberId → {at, reason}.
+// Self-healing exit: TTL 10min, and a creds file NEWER than the mark (=
+// somebody re-logged-in) clears immediately.
+const _memberAuthFail = new Map();
+const _authNoteAt = new Map(); // memberId → last evict attempt (throttle)
+const AUTH_FAIL_TTL_MS = 10 * 60e3;
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
 // The get_usage control request makes the CLI (first-party client) fetch usage
 // itself — strictly better ToS posture than our bare /api/oauth/usage call.
@@ -278,7 +286,7 @@ function poolChooserForModel(poolId, { model } = {}) {
     // the default serves this family, stay (fewest distinct billing dirs);
     // if it doesn't, the switch verdict IS the placement.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
-    const d = decidePoolSwitch({ currentId: cur, members: accounts.poolMembers(poolId), readCache, nowSec: Date.now() / 1000, hot: true });
+    const d = decidePoolSwitch({ currentId: cur, members: healthyPoolMembers(poolId), readCache, nowSec: Date.now() / 1000, hot: true });
     return (d && d.to) || cur;
   } catch (e) { console.warn('[pool] chooser failed (falling back to default target):', e.message); return null; }
 }
@@ -547,6 +555,64 @@ setInterval(() => {
   // burn) but halves the blind window; anti-flap now lives in MIN_GAIN_PCT +
   // the proactive margin, not the cadence.
 }, 30000);
+function memberAuthFailed(id) {
+  const m = _memberAuthFail.get(id);
+  if (!m) return false;
+  if (Date.now() - m.at > AUTH_FAIL_TTL_MS) { _memberAuthFail.delete(id); return false; }
+  try { if (fs.statSync(accounts.subCredsPath(id)).mtimeMs > m.at) { _memberAuthFail.delete(id); return false; } } catch { }
+  return true;
+}
+function healthyPoolMembers(poolId) {
+  const all = accounts.poolMembers(poolId);
+  const ok = all.filter((m) => !memberAuthFailed(m.id));
+  return ok.length ? ok : all; // every member marked = marks are wrong or the pool is truly dead; let quota logic speak
+}
+
+// A running session's CLI reported an AUTH-class API failure (401×2+/403/ban/
+// credit message). Quota decisions can't see this — the failed account often
+// still shows plenty of remaining — so route around it NOW: mark the member,
+// re-point this session's link (and the pool default if it sits on the failed
+// member), and say what happened. Runs regardless of `auto`: this is routing
+// around a dead account (the 2.330.2 heal's live-session sibling), not quota
+// optimization.
+function notePoolAuthFailure(session, sid, info = {}) {
+  try {
+    const poolId = session?._accountId;
+    const a = poolId && accounts.get(poolId);
+    if (!a || a.type !== 'pooled' || session.host) return;
+    if (!classifyAuthFailure(info)) return;
+    const memberId = accounts.poolCurrentFor(poolId, sid);
+    if (!memberId) return;
+    const now = Date.now();
+    if (now - (_authNoteAt.get(memberId) || 0) < 60000) return;
+    _authNoteAt.set(memberId, now);
+    const why = info.message ? String(info.message).slice(0, 120) : `HTTP ${info.status}`;
+    _memberAuthFail.set(memberId, { at: now, reason: why });
+    try { global.__vsEvent?.('pool-member-auth-failed', { detail: `${memberId}: ${why}` }); } catch { }
+    const memberName = accounts.get(memberId)?.name || memberId;
+    const alive = accounts.poolMembers(poolId).filter((m) => m.id !== memberId && !memberAuthFailed(m.id));
+    if (!alive.length) {
+      serverNotice(`pool-authfail-stuck-${memberId}-${Math.floor(now / 3600000)}`,
+        `Pool "${a.name}": account ${memberName} is failing authentication (${why}) and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
+      return;
+    }
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000 });
+    const to = (ranked[0] && ranked[0].id) || alive[0].id;
+    const toName = accounts.get(to)?.name || to;
+    const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
+    if (hasOwnLink) accounts.ensureSessionPoolLink(poolId, sid, to);
+    if (accounts.poolCurrent(poolId) === memberId) accounts.setPoolTarget(poolId, to);
+    try { recordUsageAttribution({ claudeSessionId: session.claudeSessionId || session.backendSessionId, accountId: poolId }); } catch { }
+    serverNotice(`pool-authfail-${memberId}-${now}`,
+      `Pool "${a.name}": account ${memberName} is failing authentication (${why}) — switched to ${toName}.${a.hot ? '' : ' Restarting the conversation to apply it.'}`, { level: 'warn' });
+    console.log(`[pool] auth-failure evict ${poolId}/${sid}: ${memberId} → ${to} (${why})`);
+    if (!a.hot) {
+      const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected: [{ serverId: sid, backend: session.backend || 'claude', backendSessionId: session.claudeSessionId || session.backendSessionId || null, cwd: session.cwd || null, name: session.name || null, host: session.host || null }] });
+      for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch { } break; } }
+    }
+  } catch (e) { console.warn('[pool] auth-failure evict failed:', e.message); }
+}
+
 function maybePoolAutoSwitchForPool(poolId) {
   try {
     if (!poolId) return;
@@ -592,7 +658,7 @@ function maybePoolAutoSwitchForPool(poolId) {
     // FAMILY-PROJECTED view and re-point only their link — an opus session's
     // spent cap never evicts a fable session, and vice versa. Sessions whose
     // family is unknown project nothing (full view = legacy semantics).
-    const members = accounts.poolMembers(poolId);
+    const members = healthyPoolMembers(poolId); // auth-failed members are not candidates (2.335.0)
     for (const [sid, s2] of activeSessions) {
       if (s2._accountId !== poolId || s2.host) continue;
       let curFor = null;
@@ -737,7 +803,7 @@ function maybeStopOnFallback(session, id, from, to) {
   return {
     _vsuPending, usageAnchors, usageEstimator,
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
-    markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool,
+    markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
     probeUsageViaSession, recordRateLimitEvent, resolveUsageKey,
