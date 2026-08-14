@@ -1,0 +1,113 @@
+#!/usr/bin/env node
+// CHAT INFERENCE E2E (2.337.0, owner: "有long-lived token做CI, 用haiku就行").
+// The last uncovered face of 核心工作流: a REAL chat session through the
+// product's own pipeline — ws create → accounts oat plumbing → chat-wrapper
+// stream-json spawn → normalizer → ws msg push → status settle → kill. One
+// haiku turn per push (~500 tokens against the token's subscription quota).
+//
+// TOKEN SLOT: env VIBESPACE_CI_OAT, else ~/.config/vibespace/ci-oat (chmod
+// 600; fill with the output of `claude setup-token`). No token, or no claude
+// CLI → clean SKIP, so contributors and secretless CI stay green.
+// §ban-safety NOTE: this token slot is deliberately NOT wired into GitHub
+// Actions — a subscription token making inference calls from datacenter IPs
+// is a documented ban co-factor (2026-08-13 postmortem). Local pushes only,
+// where the traffic shape is indistinguishable from normal product use.
+import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+
+const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+let token = process.env.VIBESPACE_CI_OAT || '';
+if (!token) { try { token = fs.readFileSync(path.join(os.homedir(), '.config', 'vibespace', 'ci-oat'), 'utf-8').trim(); } catch { } }
+if (!token) { console.log('SKIP: no CI token (fill ~/.config/vibespace/ci-oat from `claude setup-token`)'); process.exit(0); }
+let hasCli = false; try { execSync('command -v claude', { stdio: 'ignore', shell: '/bin/bash' }); hasCli = true; } catch { }
+if (!hasCli) { console.log('SKIP: no claude CLI on PATH'); process.exit(0); }
+
+const MODEL = process.env.VIBESPACE_CI_MODEL || 'claude-haiku-4-5-20251001';
+const PORT = 3995;
+const wt = `/tmp/vs-chat-e2e-${process.pid}`;
+let failed = 0;
+const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + String(e).slice(0, 300) : ''}`); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
+for (const f of ['src', 'public', 'server.js', 'package.json']) {
+  execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
+}
+fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
+
+// seed the CI billing identity through the REAL account store (worktree data/)
+const { AccountManager } = require(path.join(wt, 'src', 'accounts.js'));
+const am = new AccountManager({ dataDir: path.join(wt, 'data') });
+const acct = am.createSubscription({ name: 'CI-oat' });
+am.setOat(acct.id, token);
+
+const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-chat-e2e-cwd-'));
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const cleanup = () => {
+  try { srv.kill('SIGKILL'); } catch {}
+  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+  try { fs.rmSync(cwd, { recursive: true, force: true }); } catch {}
+};
+process.on('exit', cleanup);
+for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+
+const WebSocket = require('ws');
+const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+await new Promise((r) => ws.on('open', r));
+const frames = [];
+ws.on('message', (d) => { const s = d.toString(); frames.push(s); });
+
+ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd, model: MODEL, accountId: acct.id, reqId: 'ci1' }));
+let sid = null;
+for (let i = 0; i < 60 && !sid; i++) {
+  const f = frames.map((s) => { try { return JSON.parse(s); } catch { return null; } }).find((m) => m?.type === 'created');
+  if (f) sid = f.sessionId; else await sleep(500);
+}
+check('chat session created through the real spawn path', !!sid, frames.slice(-3).join('\n'));
+if (!sid) { console.log('FAIL'); process.exit(1); }
+
+// the magic word is DERIVED in the reply, so our own prompt echo can't match
+ws.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'Do not use any tools. Concatenate the words CANARY and GREEN with an underscore and reply with only that.', msgId: 'ci-m1' }));
+let replied = false;
+for (let i = 0; i < 180 && !replied; i++) {
+  replied = frames.some((s) => s.includes('assistant') && s.includes('CANARY_GREEN'));
+  await sleep(1000);
+}
+check('haiku inference round-trip: assistant reply flows back over ws (chat-wrapper → normalizer → push)', replied);
+
+// the turn must SETTLE (result processed — the /compact-class "stuck on thinking" regressions)
+let settled = false;
+for (let i = 0; i < 30 && !settled; i++) {
+  try {
+    const act = await (await fetch(`http://127.0.0.1:${PORT}/api/active`)).json();
+    const s = (act.sessions || act || []).find?.((x) => x.id === sid || x.sessionId === sid);
+    settled = s ? !(s.isStreaming || s.chatStatus === 'streaming') : false;
+  } catch { }
+  if (!settled) await sleep(1000);
+}
+check('turn settles (result record processed, not stuck streaming)', settled);
+
+// billing identity really was the oat account (badge path)
+try {
+  const act = await (await fetch(`http://127.0.0.1:${PORT}/api/active`)).json();
+  const s = (act.sessions || act || []).find?.((x) => x.id === sid || x.sessionId === sid);
+  check('session bills through the seeded oat account', (s?.accountId || s?.account) === acct.id, JSON.stringify(s?.accountId));
+} catch (e) { check('session bills through the seeded oat account', false, e.message); }
+
+// kill + transcript-litter cleanup (the real ~/.claude is shared by design)
+ws.send(JSON.stringify({ type: 'kill', sessionId: sid }));
+await sleep(1500);
+try {
+  const { cwdToProjectDir } = require(path.join(wt, 'src', 'session-store.js'));
+  const projDir = path.join(os.homedir(), '.claude', 'projects', cwdToProjectDir(cwd));
+  fs.rmSync(projDir, { recursive: true, force: true });
+} catch { }
+ws.close();
+console.log(failed ? `\n${failed} FAILED` : '\nALL PASS (5)');
+process.exit(failed ? 1 : 0);

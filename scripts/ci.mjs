@@ -32,6 +32,7 @@ const SUITES = [
   'test-cli-usage-parse', 'test-agentd-upgrade-loop', 'test-vendor-whitelist',
   'test-local-device', 'test-sysinfo-op', 'test-transcript-parity',
   'test-writer-sweep', 'test-agentd-session', 'test-session-brain-dark',
+  'test-chat-e2e',      // ONE real haiku turn through the full chat pipeline (oat token slot; SKIPs without ~/.config/vibespace/ci-oat)
   'test-client-boot',   // headless-chrome app boot (the FRONTEND face of 打不开; SKIPs without chrome)
   'test-restore-smoke', // LAST: the end-to-end boot + session-lifecycle + route battery
 ];
