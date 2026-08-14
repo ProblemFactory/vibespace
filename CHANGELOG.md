@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.337.0
+
+- **Release gate covers chat INFERENCE end-to-end (owner-directed: long-lived token + haiku)** — new scripts/test-chat-e2e.mjs runs ONE real haiku turn per push through the product's own pipeline: ws `create` → oat account plumbing (seeded via the real AccountManager into the worktree store) → chat-wrapper stream-json spawn → normalizer → ws push, then asserts the reply round-trips (derived magic word, immune to prompt echo), the turn SETTLES (the /compact-class "stuck on thinking" regressions), and the session bills through the seeded account. Token slot: `~/.config/vibespace/ci-oat` (0600) or VIBESPACE_CI_OAT; no token / no CLI → clean SKIP. Deliberately NOT wired into GitHub Actions: a subscription token doing inference from datacenter IPs is a documented ban co-factor — the local pre-push gate runs it where traffic is indistinguishable from normal use. Gate now 24 suites.
+
 ## 2.336.1
 
 - **Release gate covers the FRONTEND face of "打不开"** — new scripts/test-client-boot.mjs boots the real app in headless chrome against a worktree server (working-tree overlay) and asserts what the user actually needs after an update: app.ready resolves, the loading screen is GONE (the 2.330.x symptom), the websocket is open, zero uncaught exceptions during boot. Negative-controlled: shipping a 2.330.0-shaped broken bundle makes the probe go red and captures the crash. In `npm run ci` (now 23 suites, ~55s) and the Actions mirror; environments without chrome skip it cleanly (the hook machine and CI both have chrome).
