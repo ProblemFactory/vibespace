@@ -634,8 +634,14 @@ class AccountManager {
     for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
       try {
         if (Array.isArray(pool.members) && pool.members.includes(removedId)) {
-          pool.members = pool.members.filter((m) => m !== removedId);
-          if (!pool.members.length) pool.members = null; // back to "all logged-in subs"
+          const rest = pool.members.filter((m) => m !== removedId);
+          // NEVER null out the list (review finding, high stakes): null/empty
+          // means "ALL logged-in subscriptions" — stripping the LAST explicit
+          // member would silently WIDEN the pool onto accounts the user
+          // deliberately excluded and re-point billing there. A list of only
+          // now-nonexistent ids yields zero members through poolMembers'
+          // filter, which is the honest "unusable pool" state.
+          if (rest.length) pool.members = rest;
         }
         const alive = this.poolMembers(pool.id);
         if (readTarget(this.subDir(pool.id)) === removedId) {

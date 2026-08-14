@@ -276,9 +276,15 @@ function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeM
 // refresh already had its chance. Explicit ban/credit/disabled messages
 // qualify immediately regardless of status.
 const AUTH_FAIL_RE = /oauth.*(revoked|invalid|expired)|token.*(revoked|expired)|authentication[_ ]error|credit balance|organization.*(disabled|suspended)|account.*(disabled|suspended|banned)|invalid.*api.?key|forbidden/i;
+// A message-ONLY qualification (no status code) additionally needs API-layer
+// context in the text — error-result records carry a whole turn's failure
+// text, and an agent's own tooling could legitimately print "authentication
+// error" about some third-party system. Real CLI API failures embed
+// "API Error: 4xx" / "Anthropic" / "OAuth" alongside the reason.
+const API_CTX_RE = /\bapi\b|anthropic|oauth|\b40[13]\b|claude\.ai/i;
 function classifyAuthFailure({ status, message, attempt } = {}) {
   const msg = String(message || '');
-  if (AUTH_FAIL_RE.test(msg)) return true;
+  if (AUTH_FAIL_RE.test(msg) && (status != null || API_CTX_RE.test(msg))) return true;
   const st = Number(status);
   if (st === 403) return true; // never a refresh race — an authenticated, refused identity
   if (st === 401) return (attempt || 0) >= 2;

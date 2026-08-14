@@ -85,8 +85,15 @@ try {
   const cur2 = am.poolCurrent(pool2.id);
   am.remove(cur2 === m2 ? m3 : m2);
   ok(am.poolCurrent(pool2.id) === cur2, 'removing a NON-target member leaves the default link alone');
-  // last member removal: pool goes honestly signed-out, resolve fails actionably
+  // WIDEN GUARD (review finding): deleting the LAST explicit member must NOT
+  // flip the list to null (= "ALL logged-in subs") — that would silently
+  // re-point billing onto an account the user deliberately excluded
+  const outsider = live('Personal'); // logged-in, deliberately NOT in P2's members
+  am.updatePool(pool2.id, { members: [cur2] });
   am.remove(cur2);
+  ok(!am.poolMembers(pool2.id).some((m) => m.id === outsider), 'deleting the last explicit member does NOT widen the pool onto excluded accounts');
+  ok(am.poolCurrent(pool2.id) !== outsider, 'billing never re-points to the excluded account', am.poolCurrent(pool2.id));
+  am.remove(outsider);
   ok(am.poolCurrent(pool2.id) === null, 'last member deleted → pool target honestly absent (no dangling link)');
   let msg2 = '';
   try { am.resolveForSpawn(pool2.id); } catch (e) { msg2 = e.message; }

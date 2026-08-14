@@ -206,8 +206,10 @@ ck('auth: 403 qualifies immediately (refused identity, never a refresh race)', c
 ck('auth: a LONE first-attempt 401 does not qualify (mid-refresh race shape)', classifyAuthFailure({ status: 401, attempt: 1 }) === false);
 ck('auth: 401 on attempt ≥2 qualifies (the refresh had its chance)', classifyAuthFailure({ status: 401, attempt: 2 }) === true);
 ck('auth: credit-balance message qualifies', classifyAuthFailure({ message: 'Your credit balance is too low to access the Anthropic API' }) === true);
-ck('auth: org-disabled (ban) message qualifies', classifyAuthFailure({ message: 'This organization has been disabled' }) === true);
+ck('auth: org-disabled (ban) in an API error result qualifies', classifyAuthFailure({ message: 'API Error: 403 {"error":{"message":"This organization has been disabled."}}' }) === true);
 ck('auth: expired-oauth message qualifies', classifyAuthFailure({ message: 'OAuth token has expired' }) === true);
+ck('auth: NEGATIVE — agent tool output about some OTHER system never qualifies', classifyAuthFailure({ message: 'test failed: authentication_error thrown by myapp login handler' }) === false);
+ck('auth: the same text WITH a status code still qualifies (api_retry channel)', classifyAuthFailure({ status: 403, message: 'authentication_error' }) === true);
 ck('auth: 5xx never qualifies no matter how many retries', classifyAuthFailure({ status: 500, message: 'Internal server error', attempt: 9 }) === false);
 ck('auth: overload is not an identity problem', classifyAuthFailure({ status: 529, message: 'Overloaded' }) === false);
 ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && classifyAuthFailure() === false);

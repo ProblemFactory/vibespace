@@ -16,6 +16,14 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const wt = `/tmp/vs-restore-smoke-${process.pid}`;
 const PORT = 3971 + (process.pid % 20);
 execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' });
+// Overlay the WORKING TREE's code (2.335.1, after this smoke passed while an
+// uncommitted server.js could not boot — a worktree checks out HEAD, so a
+// pre-commit run silently tests the PREVIOUS release). Data/ stays the
+// worktree's own empty dir — that isolation is the whole point (#127 class).
+for (const f of ['src', 'public', 'server.js', 'package.json']) {
+  execFileSync('rm', ['-rf', path.join(wt, f)]);
+  execFileSync('cp', ['-r', path.join(repo, f), path.join(wt, f)]);
+}
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 const cleanup = () => {
   try { execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { }
