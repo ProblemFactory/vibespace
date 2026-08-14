@@ -1012,6 +1012,7 @@ export default {
   "✓ “{name}” signed in again": "✓ 「{name}」が再ログインしました",
   "The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.": "このログインは別のアカウント（{email}）のものです——新しいエントリ「{new}」として保存しました。「{name}」はログアウトのままです。",
   "The login belongs to “{other}” ({email}) — its login was refreshed there instead. “{name}” stays signed out.": "このログインは「{other}」（{email}）のものです——そのエントリのログインを更新しました。「{name}」はログアウトのままです。",
+  "Switched back to Local — the previously selected remote host no longer exists.": "ローカルに戻しました——以前選択していたリモートホストはもう存在しません。",
   "⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.": "⚠ サブスクリプションからサインアウトされました（Console ログインが置き換えました）——円グラフは最後に判明したクォータを表示します。API 課金のセッションはここには表示されません。",
   "✓ All set": "✓ すべて完了",
   "✓ {n} more completed…": "✓ 他 {n} 件完了…",
