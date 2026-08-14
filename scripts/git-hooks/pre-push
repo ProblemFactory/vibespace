@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# MANDATORY release gate (2.336.0, owner directive): every push runs the core
+# CI battery (scripts/ci.mjs — build + 22 gate suites + worktree boot smoke,
+# ~90s). The global repo-guard pre-push (secret scan) CHAINS to this hook, so
+# both always run. Installed into .git/hooks by scripts/install-git-hooks.mjs
+# (npm postinstall). Escape hatches:
+#   docs-only pushes (every changed path is *.md or docs/**) skip automatically
+#   VIBESPACE_SKIP_CI=1 git push       — emergency bypass, use sparingly
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+[ "${VIBESPACE_SKIP_CI:-}" = "1" ] && { echo "[ci] VIBESPACE_SKIP_CI=1 — gate bypassed" >&2; exit 0; }
+
+# read ref updates (also keeps stdin drained for chained callers)
+mapfile -t REFS || true
+
+# docs-only fast path: diff every pushed range; if no code path changed, skip
+only_docs=1
+for line in "${REFS[@]:-}"; do
+  [ -z "$line" ] && continue
+  local_sha=$(echo "$line" | awk '{print $2}')
+  remote_sha=$(echo "$line" | awk '{print $4}')
+  [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue  # deletion
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    range="$local_sha"  # new branch: inspect the tip commit only (cheap approximation)
+    files=$(git show --name-only --format= "$range" 2>/dev/null)
+  else
+    files=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null)
+  fi
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      docs/*|*.md) ;;
+      *) only_docs=0 ;;
+    esac
+  done <<< "$files"
+done
+if [ "$only_docs" = "1" ] && [ "${#REFS[@]}" -gt 0 ]; then
+  echo "[ci] docs-only push — gate skipped" >&2
+  exit 0
+fi
+
+echo "[ci] release gate (VIBESPACE_SKIP_CI=1 to bypass in an emergency)…" >&2
+node scripts/ci.mjs || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }

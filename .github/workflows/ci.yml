@@ -1,0 +1,22 @@
+# Release gate mirror (2.336.0): the same battery the pre-push hook enforces
+# locally (scripts/ci.mjs — build + gate suites + worktree boot smoke), run on
+# every push/PR so a bypassed or missing local hook still gets caught in
+# minutes. Self-hosters see the badge state before pulling an update.
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dtach (session persistence layer the boot smoke needs)
+        run: sudo apt-get update && sudo apt-get install -y dtach
+      - run: npm ci
+      - run: node scripts/ci.mjs
