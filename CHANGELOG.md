@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.337.1
+
+- **Chat E2E now also runs in GitHub Actions (owner correction, verified against official docs)** — docs/en/github-actions explicitly documents `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) as a repository secret for subscription-authenticated CI; the previous "never wire the token into Actions" stance over-generalized the ban postmortem (whose datacenter-IP co-factor was about RAW token usage in unofficial shapes, not this sanctioned channel). Workflow installs the claude CLI and passes the VIBESPACE_CI_OAT secret; fork PRs get no secret and the test SKIPs.
+
 ## 2.337.0
 
 - **Release gate covers chat INFERENCE end-to-end (owner-directed: long-lived token + haiku)** — new scripts/test-chat-e2e.mjs runs ONE real haiku turn per push through the product's own pipeline: ws `create` → oat account plumbing (seeded via the real AccountManager into the worktree store) → chat-wrapper stream-json spawn → normalizer → ws push, then asserts the reply round-trips (derived magic word, immune to prompt echo), the turn SETTLES (the /compact-class "stuck on thinking" regressions), and the session bills through the seeded account. Token slot: `~/.config/vibespace/ci-oat` (0600) or VIBESPACE_CI_OAT; no token / no CLI → clean SKIP. Deliberately NOT wired into GitHub Actions: a subscription token doing inference from datacenter IPs is a documented ban co-factor — the local pre-push gate runs it where traffic is indistinguishable from normal use. Gate now 24 suites.

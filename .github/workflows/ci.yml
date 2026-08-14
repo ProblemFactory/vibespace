@@ -18,5 +18,11 @@ jobs:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smoke needs)
         run: sudo apt-get update && sudo apt-get install -y dtach
+      - name: Install claude CLI (chat E2E; subscription oat auth is the
+          officially documented CI channel — docs/en/github-actions)
+        run: npm i -g @anthropic-ai/claude-code
       - run: npm ci
       - run: node scripts/ci.mjs
+        env:
+          # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
+          VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}

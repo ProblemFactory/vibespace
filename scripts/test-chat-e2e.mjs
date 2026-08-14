@@ -8,10 +8,13 @@
 // TOKEN SLOT: env VIBESPACE_CI_OAT, else ~/.config/vibespace/ci-oat (chmod
 // 600; fill with the output of `claude setup-token`). No token, or no claude
 // CLI → clean SKIP, so contributors and secretless CI stay green.
-// §ban-safety NOTE: this token slot is deliberately NOT wired into GitHub
-// Actions — a subscription token making inference calls from datacenter IPs
-// is a documented ban co-factor (2026-08-13 postmortem). Local pushes only,
-// where the traffic shape is indistinguishable from normal product use.
+// §ban-safety NOTE (corrected 2026-08-14 by the owner + official docs): the
+// oat-in-Actions channel is OFFICIALLY documented (docs/en/github-actions —
+// CLAUDE_CODE_OAUTH_TOKEN as a repo secret authenticates a Claude
+// subscription in CI), i.e. the ToS "explicitly permit" carve-out. The ban
+// postmortem's datacenter-IP co-factor applied to RAW token usage in
+// unofficial shapes, not this sanctioned channel. Wired via the
+// VIBESPACE_CI_OAT secret; fork PRs get no secret and SKIP.
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
