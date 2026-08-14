@@ -607,12 +607,54 @@ class AccountManager {
     this._state.accounts.splice(i, 1);
     if (this._state.defaultAccountId === id) this._state.defaultAccountId = null;
     if (this._state.defaultCodexAccountId === id) this._state.defaultCodexAccountId = null;
+    // POOL HYGIENE (2.335.0, real report: deleting the account a pool was
+    // sitting on left the pool's default symlink AND per-session links
+    // dangling — the whole pool showed signed-out and running sessions read
+    // creds through a dead link until some spawn happened to heal it).
+    // Deleting a member must leave every pool self-consistent NOW.
+    if (this._acctBackend(a) === 'claude' && this._acctType(a) === 'subscription') {
+      this._save(); // poolMembers below must not offer the removed account
+      this._healPoolsAfterRemoval(id);
+    }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctBackend(a) === 'codex') { try { fs.rmSync(this.codexSubDir(id), { recursive: true, force: true }); } catch { } }
     else if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this.subDir(id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
     else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
     this._save();
     this._notify();
+  }
+
+  /** Every pool that referenced a just-removed member: strip it from explicit
+   *  member lists, re-point the default link if it targeted the removed
+   *  account, and re-point (or drop, when no member is left) per-session
+   *  links that targeted it. Symlink re-points don't care that the old
+   *  target dir is about to be rm'd — order-independent of the wipe. */
+  _healPoolsAfterRemoval(removedId) {
+    const readTarget = (p) => { try { return path.basename(fs.readlinkSync(p)); } catch { return null; } };
+    for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
+      try {
+        if (Array.isArray(pool.members) && pool.members.includes(removedId)) {
+          pool.members = pool.members.filter((m) => m !== removedId);
+          if (!pool.members.length) pool.members = null; // back to "all logged-in subs"
+        }
+        const alive = this.poolMembers(pool.id);
+        if (readTarget(this.subDir(pool.id)) === removedId) {
+          if (alive.length) {
+            this.setPoolTarget(pool.id, alive[0].id);
+            console.warn(`[pool] "${pool.name}" target was the deleted account — re-pointed to ${alive[0].name}`);
+          } else {
+            try { fs.unlinkSync(this.subDir(pool.id)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out
+            console.warn(`[pool] "${pool.name}" lost its only member to deletion — pool is unusable until a member logs in`);
+          }
+        }
+        for (const l of this.sessionPoolLinks(pool.id)) {
+          if (readTarget(l.path) !== removedId) continue;
+          const target = this.poolCurrent(pool.id);
+          if (target) require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));
+          else { try { fs.unlinkSync(l.path); } catch { } }
+        }
+      } catch (e) { console.warn(`[pool] hygiene after removing ${removedId} failed for ${pool.id}:`, e.message); }
+    }
   }
 
   // null = the CLI's own global login is the default for new sessions. Each

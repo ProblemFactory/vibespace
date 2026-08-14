@@ -267,5 +267,23 @@ function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeM
   return eligible.slice(0, maxPerTick).map((a) => a.key);
 }
 
+// ── auth-failure classification (2.335.0, owner report: a banned/expired/
+// out-of-credit account never triggered a pool switch — the engine only spoke
+// QUOTA). Pure: given the CLI's own error surface (api_retry status/message or
+// an error result text), is this an AUTH-CLASS failure the pool should route
+// around? 401 is also what a mid-refresh race looks like, so a lone first-
+// attempt 401 does NOT qualify — the CLI retries, and attempt ≥2 means the
+// refresh already had its chance. Explicit ban/credit/disabled messages
+// qualify immediately regardless of status.
+const AUTH_FAIL_RE = /oauth.*(revoked|invalid|expired)|token.*(revoked|expired)|authentication[_ ]error|credit balance|organization.*(disabled|suspended)|account.*(disabled|suspended|banned)|invalid.*api.?key|forbidden/i;
+function classifyAuthFailure({ status, message, attempt } = {}) {
+  const msg = String(message || '');
+  if (AUTH_FAIL_RE.test(msg)) return true;
+  const st = Number(status);
+  if (st === 403) return true; // never a refresh race — an authenticated, refused identity
+  if (st === 401) return (attempt || 0) >= 2;
+  return false;
+}
+
 module.exports = {
-  decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };
+  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };
