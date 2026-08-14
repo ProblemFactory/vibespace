@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.336.1
+
+- **Release gate covers the FRONTEND face of "打不开"** — new scripts/test-client-boot.mjs boots the real app in headless chrome against a worktree server (working-tree overlay) and asserts what the user actually needs after an update: app.ready resolves, the loading screen is GONE (the 2.330.x symptom), the websocket is open, zero uncaught exceptions during boot. Negative-controlled: shipping a 2.330.0-shaped broken bundle makes the probe go red and captures the crash. In `npm run ci` (now 23 suites, ~55s) and the Actions mirror; environments without chrome skip it cleanly (the hook machine and CI both have chrome).
+
 ## 2.336.0
 
 - **Mandatory release gate (owner directive: "发版之前能有个强制CI，确保核心工作流能用")** — `npm run ci` (scripts/ci.mjs): build (arch/bundle-globals/ws-contract/session-schema/i18n inside) + the 21 gate suites the routing table names (discovery/remote-shell/usage-walk/ctx-sync/writer-sweep/transcript/sysinfo/local-device/session-brain/agentd-session/migrations/vendor-whitelist + the account/pool/usage batteries) + the worktree boot smoke with its 27-route battery LAST, ~90s total, fail-fast. **Enforced at `git push` by a tracked pre-push hook** (scripts/git-hooks/pre-push, installed via npm postinstall; composes with the global secret-scan guard which chains to it): docs-only pushes skip automatically, `VIBESPACE_SKIP_CI=1` is the emergency bypass. Mirrored in GitHub Actions (.github/workflows/ci.yml) so a bypassed local hook is still caught in minutes. The four lost-binding boot breaks (2.330.0/2.330.1/2.333.0/2.335.0) are the class this exists for — each passed every static gate and died only at boot or route-run time.

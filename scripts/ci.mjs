@@ -5,7 +5,10 @@
 //                        session-schema + i18n (all already chained in build)
 //   2. every gate suite the CLAUDE.md routing table names + the account/pool/
 //      usage batteries (pure + store + real-daemon, all self-contained)
-//   3. test-restore-smoke — boots the WORKING TREE in an isolated worktree,
+//   3. test-client-boot — headless chrome boots the real app (splash gone,
+//      zero uncaught exceptions, ws open; negative-controlled) — the CLIENT
+//      face of "打不开" (2.330.x) that static checks only partially model
+//   4. test-restore-smoke — boots the WORKING TREE in an isolated worktree,
 //      creates a real session, SIGKILLs, reboots, reconnects, then fires the
 //      27-route GET battery (the lost-binding class ONLY manifests at boot or
 //      route-run time; 2.330.0/2.330.1/2.333.0/2.335.0 all slipped past every
@@ -29,6 +32,7 @@ const SUITES = [
   'test-cli-usage-parse', 'test-agentd-upgrade-loop', 'test-vendor-whitelist',
   'test-local-device', 'test-sysinfo-op', 'test-transcript-parity',
   'test-writer-sweep', 'test-agentd-session', 'test-session-brain-dark',
+  'test-client-boot',   // headless-chrome app boot (the FRONTEND face of 打不开; SKIPs without chrome)
   'test-restore-smoke', // LAST: the end-to-end boot + session-lifecycle + route battery
 ];
 
