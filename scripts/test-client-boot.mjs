@@ -37,8 +37,14 @@ for (const f of ['src', 'public', 'server.js', 'package.json']) {
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+// --no-sandbox + --disable-dev-shm-usage: the canonical CI flags — GitHub
+// runners have a tiny /dev/shm and chrome cold-starts slowly there (the
+// first Actions run died with a bare null-target TypeError at 10s)
+const chromeLog = [];
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  `--user-data-dir=/tmp/vs-client-boot-chrome-${process.pid}`, 'about:blank'], { stdio: 'ignore' });
+  '--no-sandbox', '--disable-dev-shm-usage',
+  `--user-data-dir=/tmp/vs-client-boot-chrome-${process.pid}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+chrome.stderr.on('data', (d) => { if (chromeLog.length < 40) chromeLog.push(d.toString()); });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv.kill('SIGKILL'); } catch {}
@@ -51,9 +57,14 @@ for (let i = 0; i < 60; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/h
 
 const WebSocket = require('ws');
 let target = null;
-for (let i = 0; i < 40 && !target; i++) {
+for (let i = 0; i < 120 && !target; i++) {
   try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); }
-  catch { await sleep(250); }
+  catch { }
+  if (!target) await sleep(250);
+}
+if (!target) {
+  console.error('✗ chrome never exposed a CDP page target (30s)\n' + chromeLog.join('').slice(0, 1500));
+  process.exit(1);
 }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));

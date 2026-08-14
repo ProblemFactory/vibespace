@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.337.2
+
+- **Fix client-boot smoke on GitHub runners** — chrome on ubuntu-latest needs `--no-sandbox --disable-dev-shm-usage` (tiny /dev/shm) and a longer CDP cold-start window; the first Actions run with the full gate died on a bare null-target TypeError at 10s while chat E2E itself passed (haiku turn green from the runner). Missing target now fails loudly with chrome's own stderr.
+
 ## 2.337.1
 
 - **Chat E2E now also runs in GitHub Actions (owner correction, verified against official docs)** — docs/en/github-actions explicitly documents `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) as a repository secret for subscription-authenticated CI; the previous "never wire the token into Actions" stance over-generalized the ban postmortem (whose datacenter-IP co-factor was about RAW token usage in unofficial shapes, not this sanctioned channel). Workflow installs the claude CLI and passes the VIBESPACE_CI_OAT secret; fork PRs get no secret and the test SKIPs.
