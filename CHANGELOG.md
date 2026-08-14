@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.335.1
+
+- **CRITICAL: 2.335.0 could not boot** — `notePoolAuthFailure` was exported by the pool engine and consumed at the session-stdout wiring, but never added to server.js's engine destructure: a free identifier at module load = instant ReferenceError = restart crash-loop. Fourth lost-binding incident; the reviewer caught it pre-release. Structural fix alongside: **scripts/test-restore-smoke.mjs now overlays the WORKING TREE's src/server.js/public into its worktree** — a pre-commit run used to silently test the previous release (worktrees check out HEAD), which is exactly how this one slipped past a green smoke.
+- Review hardening batch on 2.335.0: auth-evict throttle is per (member, session) — a member-keyed throttle left every other conversation pinned to the banned account for 60s each; a cold pool's default-link move now restarts every session billing through the default, not just the reporter; the auth-mark self-heal keys on TOKEN MATERIAL change, not creds mtime (repointPoolSymlink utimes-bumps creds on every re-point, clearing an mtime-based mark with no re-login); deleting a pool's LAST explicit member no longer flips the member list to null (= "all logged-in subs") — that silently widened the pool onto deliberately excluded accounts and re-pointed billing there; message-only auth classification requires API-layer context in the text (an agent's own tool output saying "authentication_error" about some third-party system can never evict a member); the resume degrade also clears the dead accountId so keeper-adopt gates open. test-pool-auto 67, test-pool-signed-out 19.
+
 ## 2.335.0
 
 - **Pool survives member deletion (owner report ×2)** — `accounts.remove()` of a claude subscription now heals every pool NOW instead of leaving wreckage for a lucky spawn to fix: the id is stripped from explicit member lists, a default symlink that targeted the deleted account re-points to a live member (or is unlinked — the pool reads honestly signed-out instead of dangling), and per-session links that billed to it re-point (or drop when no member is left). test-pool-signed-out grows to 17.

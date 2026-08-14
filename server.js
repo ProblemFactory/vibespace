@@ -417,7 +417,7 @@ function broadcastToSession(session, id, msg) {
 const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
-  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool,
+  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
   poolChooserForModel, poolReadCache, probeUsageForAccountKey,
   probeUsageViaSession, recordRateLimitEvent, resolveUsageKey,

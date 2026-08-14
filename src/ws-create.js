@@ -366,6 +366,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 try { serverNotice?.(`resume-acct-gone-${id}`, `The billing account this conversation used was deleted — it resumed on the default login instead. Pick a new account in its billing switcher if needed.`, { level: 'warn' }); } catch { }
                 console.warn(`[session] resume ${id}: stored account ${String(data.accountId).slice(0, 16)} no longer exists — degrading to global login`);
                 rescued = { id: null, kind: null, _acctGone: true };
+                data.accountId = null; // the dead id must not hold the keeper-adopt gates closed downstream
               }
               if (!rescued && data.hostId && hosts && backend === 'claude'
                   && typeof data.accountId === 'string' && /^sub-[\w-]{1,40}$/.test(data.accountId)

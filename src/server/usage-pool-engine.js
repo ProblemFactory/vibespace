@@ -45,7 +45,8 @@ const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell b
 // Self-healing exit: TTL 10min, and a creds file NEWER than the mark (=
 // somebody re-logged-in) clears immediately.
 const _memberAuthFail = new Map();
-const _authNoteAt = new Map(); // memberId → last evict attempt (throttle)
+const _authNoteAt = new Map(); // member:sid → last evict attempt (throttle)
+const _authNoticeAt = new Map(); // memberId → last user notice (anti-spam)
 const AUTH_FAIL_TTL_MS = 10 * 60e3;
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
 // The get_usage control request makes the CLI (first-party client) fetch usage
@@ -555,11 +556,17 @@ setInterval(() => {
   // burn) but halves the blind window; anti-flap now lives in MIN_GAIN_PCT +
   // the proactive margin, not the cadence.
 }, 30000);
+function credsTokenSig(id) {
+  // TOKEN MATERIAL signature, not mtime (review finding: repointPoolSymlink
+  // utimes-bumps the target's creds on EVERY re-point, so an mtime-based
+  // "somebody re-logged in" check is cleared by the pool's own plumbing).
+  try { return String(JSON.parse(fs.readFileSync(accounts.subCredsPath(id), 'utf-8'))?.claudeAiOauth?.accessToken || ''); } catch { return ''; }
+}
 function memberAuthFailed(id) {
   const m = _memberAuthFail.get(id);
   if (!m) return false;
   if (Date.now() - m.at > AUTH_FAIL_TTL_MS) { _memberAuthFail.delete(id); return false; }
-  try { if (fs.statSync(accounts.subCredsPath(id)).mtimeMs > m.at) { _memberAuthFail.delete(id); return false; } } catch { }
+  if (credsTokenSig(id) !== m.tok) { _memberAuthFail.delete(id); return false; } // token CHANGED = re-login/refresh — give it another chance
   return true;
 }
 function healthyPoolMembers(poolId) {
@@ -584,11 +591,17 @@ function notePoolAuthFailure(session, sid, info = {}) {
     const memberId = accounts.poolCurrentFor(poolId, sid);
     if (!memberId) return;
     const now = Date.now();
-    if (now - (_authNoteAt.get(memberId) || 0) < 60000) return;
-    _authNoteAt.set(memberId, now);
+    // throttle PER (member, session) — the member-keyed version left every
+    // OTHER conversation pinned to the banned account for 60s each (review
+    // finding: 3 sessions on A, A banned, only the first escaped)
+    const tkey = memberId + ':' + sid;
+    if (now - (_authNoteAt.get(tkey) || 0) < 60000) return;
+    _authNoteAt.set(tkey, now);
     const why = info.message ? String(info.message).slice(0, 120) : `HTTP ${info.status}`;
-    _memberAuthFail.set(memberId, { at: now, reason: why });
-    try { global.__vsEvent?.('pool-member-auth-failed', { detail: `${memberId}: ${why}` }); } catch { }
+    if (!memberAuthFailed(memberId)) {
+      _memberAuthFail.set(memberId, { at: now, reason: why, tok: credsTokenSig(memberId) });
+      try { global.__vsEvent?.('pool-member-auth-failed', { detail: `${memberId}: ${why}` }); } catch { }
+    }
     const memberName = accounts.get(memberId)?.name || memberId;
     const alive = accounts.poolMembers(poolId).filter((m) => m.id !== memberId && !memberAuthFailed(m.id));
     if (!alive.length) {
@@ -601,13 +614,30 @@ function notePoolAuthFailure(session, sid, info = {}) {
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
     if (hasOwnLink) accounts.ensureSessionPoolLink(poolId, sid, to);
-    if (accounts.poolCurrent(poolId) === memberId) accounts.setPoolTarget(poolId, to);
+    const defaultMoved = accounts.poolCurrent(poolId) === memberId;
+    if (defaultMoved) accounts.setPoolTarget(poolId, to);
+    _poolSwitchAt.set(poolId + ':' + sid, now); // keep the quota pass's dwell belt consistent with this move
     try { recordUsageAttribution({ claudeSessionId: session.claudeSessionId || session.backendSessionId, accountId: poolId }); } catch { }
-    serverNotice(`pool-authfail-${memberId}-${now}`,
-      `Pool "${a.name}": account ${memberName} is failing authentication (${why}) — switched to ${toName}.${a.hot ? '' : ' Restarting the conversation to apply it.'}`, { level: 'warn' });
+    if (now - (_authNoticeAt.get(memberId) || 0) > 60000) {
+      _authNoticeAt.set(memberId, now);
+      serverNotice(`pool-authfail-${memberId}-${now}`,
+        `Pool "${a.name}": account ${memberName} is failing authentication (${why}) — switched to ${toName}.${a.hot ? '' : ' Restarting the conversation to apply it.'}`, { level: 'warn' });
+    }
     console.log(`[pool] auth-failure evict ${poolId}/${sid}: ${memberId} → ${to} (${why})`);
     if (!a.hot) {
-      const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected: [{ serverId: sid, backend: session.backend || 'claude', backendSessionId: session.claudeSessionId || session.backendSessionId || null, cwd: session.cwd || null, name: session.name || null, host: session.host || null }] });
+      // a DEFAULT-link move affects every session billing through the default
+      // (no own link), not just the reporter — collect them all (review)
+      const affected = [];
+      const pack = (theSid, s3) => ({ serverId: theSid, backend: s3.backend || 'claude', backendSessionId: s3.claudeSessionId || s3.backendSessionId || null, cwd: s3.cwd || null, name: s3.name || null, host: s3.host || null });
+      affected.push(pack(sid, session));
+      if (defaultMoved) {
+        for (const [sid2, s2] of activeSessions) {
+          if (sid2 === sid || s2._accountId !== poolId || s2.host) continue;
+          const own = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid2)); return true; } catch { return false; } })();
+          if (!own) affected.push(pack(sid2, s2));
+        }
+      }
+      const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
       for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch { } break; } }
     }
   } catch (e) { console.warn('[pool] auth-failure evict failed:', e.message); }
