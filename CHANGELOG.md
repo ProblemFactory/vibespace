@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.334.1
+
+- **Fix: ghost host selection bricks Recent/History (fleet report)** — a persisted Recent/History host pick whose host record was later REMOVED left the switcher `<select>` rendering BLANK (a value with no matching option) and both zones stuck on "发现失败: host not found" + 无法连接 forever, with zero affordance hinting the fix. The zones now SELF-HEAL: once the roster has actually loaded, a selection not in it resets to Local (memory + localStorage) with a one-time toast; a transient /api/hosts failure never wipes a valid pick, and a roster load with zero remaining hosts still triggers the heal render. CDP smoke: scripts/test-ghost-host-heal.mjs (7, incl. the negative control).
+
 ## 2.334.0
 
 - **auto-cli idle slow rung (owner-directed)** — accounts with NO active burn now also refresh via `claude -p /usage` once their reading is older than a per-tick-RANDOMIZED 30–60min threshold (a wandering threshold, never a fixed metronomic cadence), so the roster never shows week-stale quota; never-read accounts bootstrap their first reading through the same rung. Consecutive failures back off exponentially (5min×2^n, cap ~5h) so an unparseable account can never spawn claude every 5 minutes forever. Drift still outranks stale-idle for the one serialized refresh per tick. Tests: scripts/test-auto-cli-refresh.mjs (10).

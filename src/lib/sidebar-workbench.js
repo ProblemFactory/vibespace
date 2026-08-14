@@ -148,7 +148,9 @@ export function installSidebarWorkbench(Sidebar) {
         if (!Array.isArray(d?.hosts)) throw new Error(d?.error || 'bad /api/hosts response');
         this._hostsData = d;
         this._hostsDataFailAt = 0;
-        if (d.hosts.length) this._render(); // switcher appears once hosts are known
+        // re-render when hosts are known OR a remote selection is pending —
+        // with ZERO remaining hosts the heal above still needs a render pass
+        if (d.hosts.length || this._wbRecentHost || this._wbHistoryHost) this._render();
       }).catch(() => { this._hostsDataFailAt = Date.now(); })
         .finally(() => { this._hostsDataLoading = false; });
     },
@@ -219,6 +221,27 @@ export function installSidebarWorkbench(Sidebar) {
     _remoteHostState(hostId) { return this._wbRemoteHosts?.get(hostId) || null; },
 
     // Compact host <select> shared by the Recent and History zone heads
+    // SELF-HEAL a persisted host selection whose record no longer exists
+    // (2.334.1, real fleet report): a removed host left wbRecentHost/
+    // wbHistoryHost pointing at a ghost id — the <select> rendered BLANK (a
+    // value with no matching option) and the zone bricked on 'host not found'
+    // forever, with no affordance hinting the fix. Heal ONLY against a
+    // successfully LOADED roster (transient /api/hosts failures must not wipe
+    // a valid pick). Returns the healed value.
+    _wbValidHost(id, storageKey, memKey) {
+      if (!id) return id;
+      const hosts = this._hostsData?.hosts;
+      if (!Array.isArray(hosts)) return id; // roster not loaded yet — keep
+      if (hosts.some(h => h.id === id)) return id;
+      this[memKey] = '';
+      try { localStorage.setItem(storageKey, ''); } catch { }
+      if (!this._wbHealToasted) {
+        this._wbHealToasted = true;
+        try { showToast(tr('Switched back to Local — the previously selected remote host no longer exists.')); } catch { }
+      }
+      return '';
+    },
+
     _buildHostSelect(value, onchange) {
       const sel = document.createElement('select');
       sel.className = 'wb-recent-host';
@@ -630,7 +653,7 @@ export function installSidebarWorkbench(Sidebar) {
       // machine's ~/.claude sessions (lock-first, 15s server cache) — stopped
       // remote sessions become visible and resumable, with zero polling cost
       // while the zone shows Local.
-      const recentHost = this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || '');
+      const recentHost = this._wbValidHost(this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || ''), 'wbRecentHost', '_wbRecentHost');
       this.listEl.appendChild(this._buildRecentHead(recentHost, recent.length, zoneHead));
       // With an active search query, sidebar search covers EVERY configured
       // remote host (not just the one selected in the switcher). Loads them on
@@ -725,7 +748,7 @@ export function installSidebarWorkbench(Sidebar) {
       } // end local RECENT branch
 
       // ── HISTORY (collapsed, search-first, paged; own host switcher) ──
-      const histHost = this._wbHistoryHost ?? (this._wbHistoryHost = localStorage.getItem('wbHistoryHost') || '');
+      const histHost = this._wbValidHost(this._wbHistoryHost ?? (this._wbHistoryHost = localStorage.getItem('wbHistoryHost') || ''), 'wbHistoryHost', '_wbHistoryHost');
       const histState = histHost ? this._remoteHostState(histHost) : null;
       const histLabel = histHost ? (this._hostsData?.hosts?.find(x => x.id === histHost)?.name || histHost) : '';
       if (histHost) this._loadRemoteHost(histHost);

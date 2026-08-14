@@ -1013,6 +1013,7 @@ export default {
   "✓ “{name}” signed in again": "✓ “{name}” 已重新登录",
   "The login belongs to a DIFFERENT account ({email}) — saved as the new entry “{new}”. “{name}” stays signed out.": "这次登录属于另一个账号（{email}）——已另存为新条目“{new}”。“{name}”保持登出状态。",
   "The login belongs to “{other}” ({email}) — its login was refreshed there instead. “{name}” stays signed out.": "这次登录属于“{other}”（{email}）——已把该账号的登录刷新到它自己的条目上。“{name}”保持登出状态。",
+  "Switched back to Local — the previously selected remote host no longer exists.": "已切回本机——之前选择的远程主机已不存在。",
   "⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.": "⚠ 订阅已登出（已被 Console 登录替换）——环形图显示其最后已知的配额。按 API 计费的会话不会出现在这里。",
   "✓ All set": "✓ 全部就绪",
   "✓ {n} more completed…": "✓ 另有 {n} 个已完成…",
