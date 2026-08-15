@@ -1281,6 +1281,7 @@ class WindowManager {
   }
 
   _updateOverlapIndicators() {
+    if (this._restoring) return;
     // _hiddenByDesktop windows are geometrically present (visibility:hidden) —
     // counting them lit the ⧉ indicator for windows the user can't see
     const allWins = [...this.windows.values()].filter(w => !w.isMinimized && !w._hiddenByDesktop && !w._hiddenByStage && !(w._tabChain && w._tabChain.tabs[0] !== w.id));
@@ -1313,7 +1314,12 @@ class WindowManager {
 
   // Tab grouping methods installed from tab-group.js mixin
 
-  _notify() { if (this.onWindowsChanged) this.onWindowsChanged(); }
+  // RESTORE BATCH MODE (2.338.0, Windows freeze audit): the boot restore
+  // loop creates N windows in one tick; each creation used to run the full
+  // O(windows) bookkeeping (taskbar rebuild + desktop-switcher digest +
+  // overlap rects with forced layout) = O(N²) at boot. While _restoring is
+  // set both are suppressed; layout.js fires ONE _notify at the end.
+  _notify() { if (this._restoring) return; if (this.onWindowsChanged) this.onWindowsChanged(); }
 }
 
 export { WindowManager };

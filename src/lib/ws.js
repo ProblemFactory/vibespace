@@ -19,6 +19,9 @@ class WsManager {
     };
     this.ws.onmessage = (e) => {
       let d; try { d = JSON.parse(e.data); } catch { return; }
+      // tiny attribution ring for the long-task telemetry (what was being
+      // processed when the main thread stalled) — cheap, 16 entries
+      try { const r = (window.__vsWsRing = window.__vsWsRing || []); r.push(d.type + (d.op ? ':' + d.op : '')); if (r.length > 16) r.shift(); } catch { }
       // Isolate each handler: one throwing handler (a disposed ChatView, a stale
       // closure) must NOT abort delivery to every later handler — layout-sync,
       // settings-updated, editor-open etc. all ride these same lists.

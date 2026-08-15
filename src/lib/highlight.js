@@ -42,6 +42,7 @@ import hljsMakefile from 'highlight.js/lib/languages/makefile';
 import hljsGroovy from 'highlight.js/lib/languages/groovy';
 import hljsThrift from 'highlight.js/lib/languages/thrift';
 import { escHtml } from './utils.js';
+import { t } from './i18n.js';
 
 hljs.registerLanguage('javascript', hljsJavascript);
 hljs.registerLanguage('typescript', hljsTypescript);
@@ -160,11 +161,22 @@ export function renderCodeBlock(code, filePath) {
   } catch {
     highlighted = escHtml(code);
   }
-  const lines = splitHighlightedLines(highlighted);
+  // Unhighlighted output has no spans to carry across lines — a plain split
+  // skips the per-line regex walk entirely (2.338.0, Windows freeze audit).
+  const lines = skipHighlight || !lang ? highlighted.split('\n') : splitHighlightedLines(highlighted);
+  // DOM CAP (2.338.0): 3 nodes per line with no ceiling meant a 300KB Read
+  // built ~24k nodes in ONE synchronous innerHTML inside the ws handler.
+  // 3000 lines ≈ 9k nodes renders instantly; the tail is announced honestly
+  // (the full text is still in the transcript / Ctrl+G editor).
+  const MAX_LINES = 3000;
+  const shown = Math.min(lines.length, MAX_LINES);
   const gutterW = String(lines.length).length;
   let body = '';
-  for (let i = 0; i < lines.length; i++) {
+  for (let i = 0; i < shown; i++) {
     body += `<div class="chat-code-line"><span class="chat-code-ln" style="width:${gutterW + 1}ch">${i + 1}</span><span class="chat-code-text">${lines[i] || ' '}</span></div>`;
+  }
+  if (lines.length > MAX_LINES) {
+    body += `<div class="chat-code-line chat-code-truncated"><span class="chat-code-ln" style="width:${gutterW + 1}ch">…</span><span class="chat-code-text">${escHtml(t('(+{n} more lines — open the file to see all)', { n: lines.length - MAX_LINES }))}</span></div>`;
   }
   const langLabel = lang || 'plain';
   const deferred = skipHighlight ? ' data-highlight-deferred="1"' : '';

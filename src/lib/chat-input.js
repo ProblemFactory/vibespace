@@ -76,16 +76,33 @@ export class ChatInput {
     const draft = loadDraft('chat', sessionId);
     if (draft) {
       this._textarea.value = draft;
-      setTimeout(() => { this._textarea.style.height = 'auto'; this._textarea.style.height = Math.min(this._textarea.scrollHeight, 200) + 'px'; }, 0);
+      setTimeout(() => this._autoSize?.(), 0);
     }
 
-    // Auto-grow textarea (skip in expanded mode)
+    // Auto-grow textarea (skip in expanded mode). rAF-COALESCED with a no-op
+    // skip (2.338.0, Windows freeze audit): the raw handler did write→read→
+    // write per keystroke = two forced layouts of the whole chat window, and
+    // every real height change rippled into the scroller (content-visibility
+    // re-resolution + scroll-anchoring drift → the paging self-feed loop).
+    // Mid-line keystrokes now cost zero layout; actual wraps stamp
+    // __vsInputResizeAt so the scroll handler can tell resize-drift from
+    // user scrolling (displacement is not intent, 2.307.0).
     this._draftTimer = null;
+    this._autoSizeRaf = null;
+    this._autoSize = () => {
+      if (this._autoSizeRaf || this._expanded) return;
+      this._autoSizeRaf = requestAnimationFrame(() => {
+        this._autoSizeRaf = null;
+        const ta = this._textarea;
+        if (!ta || this._expanded) return;
+        ta.style.height = 'auto';
+        const h = Math.min(ta.scrollHeight, 200);
+        ta.style.height = h + 'px';
+        if (h !== this._lastAutoH) { this._lastAutoH = h; try { window.__vsInputResizeAt = Date.now(); } catch { } }
+      });
+    };
     this._textarea.addEventListener('input', () => {
-      if (!this._expanded) {
-        this._textarea.style.height = 'auto';
-        this._textarea.style.height = Math.min(this._textarea.scrollHeight, 200) + 'px';
-      }
+      this._autoSize();
       // Debounced draft save
       clearTimeout(this._draftTimer);
       this._draftTimer = setTimeout(() => saveDraft('chat', this._sessionId, this._textarea.value), 300);
@@ -94,8 +111,7 @@ export class ChatInput {
     // Sync draft from other clients via StateSync
     this._draftSyncHandler = (value) => {
       this._textarea.value = value || '';
-      this._textarea.style.height = 'auto';
-      this._textarea.style.height = Math.min(this._textarea.scrollHeight, 200) + 'px';
+      this._autoSize?.();
     };
     const sync = getStateSync();
     if (sync) sync.on('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);
@@ -131,8 +147,7 @@ export class ChatInput {
         if (this._historyIdx > 0) {
           this._historyIdx--;
           this._textarea.value = this._sentHistory[this._historyIdx];
-          this._textarea.style.height = 'auto';
-          this._textarea.style.height = Math.min(this._textarea.scrollHeight, 200) + 'px';
+          this._autoSize?.();
         }
         return;
       }
@@ -145,8 +160,7 @@ export class ChatInput {
         } else {
           this._textarea.value = this._sentHistory[this._historyIdx];
         }
-        this._textarea.style.height = 'auto';
-        this._textarea.style.height = Math.min(this._textarea.scrollHeight, 200) + 'px';
+        this._autoSize?.();
         return;
       }
       if (this._historyIdx != null && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') this._historyIdx = null;
