@@ -485,6 +485,8 @@ class LayoutManager {
       }, 2000);
     };
 
+    this.app.wm._restoring = true; // batch mode: suppress per-window O(all-windows) bookkeeping (see window.js _notify)
+    try {
     for (const ws of state.windows) {
       if (ws.type === 'terminal') {
         const backend = ws.backend || ws.openSpec?.backend || 'claude';
@@ -613,6 +615,12 @@ class LayoutManager {
         }
       }
     }
+    } finally {
+      this.app.wm._restoring = false;
+      this.app.wm._notify(); // the ONE bookkeeping pass for the whole batch
+      this.app.wm._scheduleOverlapUpdate?.();
+    }
+
 
     // Restore tab chains after all windows are created
     // Collect unique chains from saved state, deduplicate by tab list

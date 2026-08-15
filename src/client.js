@@ -1,10 +1,11 @@
 import { App } from './lib/app.js';
-import { applyUiPrefs } from './lib/utils.js';
+import { applyUiPrefs, getStateSync } from './lib/utils.js';
 import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
-import { installTelemetry, track, metric, reportBootTime } from './lib/telemetry-client.js';
+import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, recentLongTasks } from './lib/telemetry-client.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
+installLongTaskWatch(); // main-thread stall ring — feeds the suspend-vs-block verdict below
 // ── Page-SUSPEND wake detector (2.321.0, inc-msp3klen "对话卡在输出直到我发
 // 消息"). Best-fit diagnosis: the browser FROZE the page (Page Lifecycle /
 // energy saver) — ws frames queue in the renderer while the network process
@@ -23,10 +24,21 @@ installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
     const gap = now - lastTick;
     lastTick = now;
     if (gap > 45000) {
-      try { track('page-suspend-wake', { detail: `${Math.round(gap / 1000)}s` }); } catch { }
+      // SUSPEND vs MAIN-THREAD BLOCK (2.338.0): a JS task that blocks 45s+
+      // gaps this timer exactly like a page freeze — but it also shows up in
+      // the longtask ring. One covering most of the gap = OUR code blocked.
+      let verdict = 'suspend';
+      try {
+        // SUM, not max (review): the observed freeze shape is MANY medium
+        // tasks (per-window resets, context creation), not one giant task
+        const lt = recentLongTasks().filter((x) => Date.now() - x.at < gap + 5000);
+        const total = lt.reduce((s, x) => s + x.ms, 0);
+        if (total >= gap * 0.5) verdict = 'main-thread-block';
+      } catch { }
+      try { track('event', `page-${verdict === 'suspend' ? 'suspend' : 'block'}-wake`, `${Math.round(gap / 1000)}s`); } catch { }
       // belt: re-request store deltas as if we had reconnected (the queued ws
       // frames usually already caught us up — this covers a dropped queue)
-      try { window.app?.stateSync?._stateHandler?.(true); } catch { }
+      try { getStateSync()?._stateHandler?.(true); } catch { } // was app.stateSync — never assigned, the belt was dead code
       try { showToast(t('Browser suspended this page for {n}s — caught up now', { n: Math.round(gap / 1000) })); } catch { }
     }
   }, 5000);

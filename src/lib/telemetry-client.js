@@ -103,6 +103,42 @@ export function installTelemetry() {
 }
 
 // Boot duration — call from client.js once app.ready resolves (nav start → workspace restored).
+// ── Main-thread stall watch (2.338.0, Windows freeze debugging) ──────────
+// PerformanceObserver('longtask') sees every main-thread task >50ms. We keep
+// a small ring of the BIG ones (≥400ms) and report each ≥1s stall as a
+// metric with attribution: what the user was doing (focused element) and the
+// last ws message types processed (window.__vsWsRing, maintained by ws.js).
+// This is the instrument that separates "the browser/OS froze the page" from
+// "our JS blocked the main thread" — the 45s suspend-wake detector reads the
+// ring to tell the two apart.
+const _longTasks = [];
+export function recentLongTasks() { return _longTasks.slice(); }
+export function installLongTaskWatch() {
+  try {
+    if (typeof PerformanceObserver === 'undefined') return;
+    const po = new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        if (e.duration < 200) continue; // finer ring — freezes are often many medium tasks
+        const rec = { at: Date.now(), ms: Math.round(e.duration) };
+        _longTasks.push(rec);
+        if (_longTasks.length > 40) _longTasks.shift();
+        if (e.duration >= 1000) {
+          let ctx = '';
+          try {
+            const ae = document.activeElement;
+            ctx = (ae && ae !== document.body) ? `${ae.tagName.toLowerCase()}.${String(ae.className).split(' ')[0] || ''}` : 'none';
+          } catch { }
+          let ws = '';
+          try { ws = (window.__vsWsRing || []).slice(-4).join(','); } catch { }
+          metric('client-longtask-ms', Math.round(e.duration));
+          track('event', 'client-longtask', `${Math.round(e.duration)}ms focus=${ctx} ws=${ws}`);
+        }
+      }
+    });
+    po.observe({ type: 'longtask', buffered: true });
+  } catch { }
+}
+
 export function reportBootTime() {
   try {
     const ms = performance.now();

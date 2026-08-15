@@ -1015,6 +1015,7 @@ export default {
   "Switched back to Local — the previously selected remote host no longer exists.": "ローカルに戻しました——以前選択していたリモートホストはもう存在しません。",
   "The machine’s global CLI login is this same subscription — its quota is shown merged here.": "このマシンのグローバル CLI ログインはこのアカウントと同じサブスクリプションです——クォータは統合表示されています。",
   "The CLI config file records {cfg} — residue of the most recent account login (relocated logins still write their identity into the global config). The active token belongs to {actual}, whose quota is shown. No action needed.": "CLI 設定ファイルに記録されている {cfg} は、直近のアカウントログインが残した痕跡です（リロケートされたログインも身分をグローバル設定に書き込みます）。実際に有効なトークンは {actual} のもので、表示中のクォータもそれです。対応は不要です。",
+  "(+{n} more lines — open the file to see all)": "（あと {n} 行——全文はファイルを開いて確認）",
   "⚠ Subscription signed out (a Console login replaced it) — pies show its last-known quota. API-billed sessions never appear here.": "⚠ サブスクリプションからサインアウトされました（Console ログインが置き換えました）——円グラフは最後に判明したクォータを表示します。API 課金のセッションはここには表示されません。",
   "✓ All set": "✓ すべて完了",
   "✓ {n} more completed…": "✓ 他 {n} 件完了…",

@@ -114,8 +114,16 @@ class TerminalSession {
     // column. WebGL removes that whole class of bugs (and repaints far faster =
     // less TUI flicker). Falls back to the DOM renderer when WebGL is unavailable.
     try {
+      // CONTEXT CAP (2.338.0, Windows freeze audit): one WebGL2 context per
+      // terminal with no ceiling — past Chrome's ~16-live-context limit the
+      // oldest silently dies and falls back to the (much slower) DOM
+      // renderer, and on Windows/ANGLE a burst of context creation stalls
+      // the GPU process = the WHOLE page freezes. Terminals beyond the cap
+      // start on the DOM renderer instead of evicting someone else's context.
+      if ((TerminalSession._webglCount || 0) >= 12) throw new Error('webgl-cap');
       const webgl = new WebglAddon();
-      webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} this._webgl = null; });
+      TerminalSession._webglCount = (TerminalSession._webglCount || 0) + 1;
+      webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} if (this._webgl) { TerminalSession._webglCount--; this._webgl = null; } });
       this.terminal.loadAddon(webgl);
       this._webgl = webgl;
     } catch { this._webgl = null; }
@@ -999,7 +1007,7 @@ class TerminalSession {
     this._fontLoadingDoneCleanup?.();
     if (this._pastePad) { try { this._pastePad.remove(); } catch {} this._pastePad = null; }
     if (this._dprCleanup) this._dprCleanup();
-    if (this._webgl) { try { this._webgl.dispose(); } catch {} this._webgl = null; }
+    if (this._webgl) { try { this._webgl.dispose(); } catch {} TerminalSession._webglCount = Math.max(0, (TerminalSession._webglCount || 1) - 1); this._webgl = null; }
     if (this._capEls) { for (const el of this._capEls) el.remove(); this._capEls = null; }
     if (this._blockEl) { this._blockEl.remove(); this._blockEl = null; }
     if (this._exitOverlayEl) { this._exitOverlayEl.remove(); this._exitOverlayEl = null; }

@@ -127,7 +127,14 @@ class ChatView {
       const tailAppend = list && records.length && records.every((r) =>
         r.type === 'childList' && r.removedNodes.length === 0 && r.addedNodes.length > 0
         && r.nextSibling === null);
-      if (tailAppend) { clearTimeout(this._runsTimer); this._runsTimer = null; this._updateRuns(); return; }
+      if (tailAppend) {
+        // rAF-coalesced (2.338.0): rAF callbacks run BEFORE the next paint,
+        // so the no-flash guarantee above holds — but a streaming burst now
+        // costs ONE full-list runs pass per frame instead of one per append.
+        clearTimeout(this._runsTimer); this._runsTimer = null;
+        if (!this._runsRaf) this._runsRaf = requestAnimationFrame(() => { this._runsRaf = null; if (!this._disposed) this._updateRuns(); });
+        return;
+      }
       clearTimeout(this._runsTimer);
       this._runsTimer = setTimeout(() => this._updateRuns(), 180);
     });
@@ -350,7 +357,18 @@ class ChatView {
         // pin machinery yanked 0→2141→0 against the pager's anchor restore —
         // the visible bounce. Real upward intent always arrives as a wheel-up,
         // which unpins first (wheel branch above + the atBottom update).
-        if (!this._pinned && scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp) {
+        // POSITIVE-EVIDENCE GATE for extendTop too (2.338.0, Windows freeze
+        // audit): typing grows the input box, the scroller's clientHeight
+        // shrinks, content-visibility re-resolution + scroll anchoring drift
+        // scrollTop toward 0 with ZERO user input, and this branch paged 50
+        // messages per bounce until history ran out — the round-5 disease
+        // through the door the round-5 gates didn't cover. Same rule as
+        // extendBottom below: recent REAL user input required; typing stamps
+        // __vsInputResizeAt (chat-input autosize) and that never qualifies.
+        const userRecentUp = this._lastUserScrollAt && (Date.now() - this._lastUserScrollAt < 1500);
+        const inputResizing = window.__vsInputResizeAt && (Date.now() - window.__vsInputResizeAt < 250);
+        if (!this._pinned && scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp
+            && userRecentUp && !inputResizing) {
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
           else if (this._windowStart > 0) this._extendTop();
           else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
@@ -370,10 +388,10 @@ class ChatView {
         // key, 1.5s), not merely the absence of contrary evidence. A real
         // downward reader produces a continuous input stream and never
         // notices; settling geometry produces none and can no longer fire it.
-        const userRecent = this._lastUserScrollAt && (Date.now() - this._lastUserScrollAt < 1500);
+        const userRecent = userRecentUp;
         const reading = !this._pinned && this._windowEnd < this._total;
         if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate
-            && !goingUp && !lockDown && (!reading || userRecent)) {
+            && !goingUp && !lockDown && (!reading || userRecent) && !inputResizing) {
           if (this._teleported) this._maybeSeekLater();
           else if (this._windowEnd < this._total) this._extendBottom();
         }
@@ -1462,15 +1480,23 @@ class ChatView {
 
   _forceScrollToBottom() {
     this._programmaticScroll = true;
+    // SINGLE CHAIN (2.338.0, Windows freeze audit): every create/edit/delta
+    // used to start its OWN 10-frame chain; overlapping chains each did a
+    // scrollTop=scrollHeight read-after-write = N forced full-document
+    // layouts per frame during streaming. One chain, countdown refreshed by
+    // each call — same convergence semantics, one forced layout per frame.
+    this._fsbFrames = 0;
+    if (this._fsbActive) return;
+    this._fsbActive = true;
     const list = this._messageList;
-    let n = 0;
     const step = () => {
+      if (this._disposed) { this._fsbActive = false; return; }
       list.scrollTop = list.scrollHeight;
       // Each frame scrolling reveals off-screen elements, browser computes
       // their real heights (replacing content-visibility estimates), scrollHeight
       // grows — repeat until converged or max 10 frames (~166ms)
-      if (++n < 10) requestAnimationFrame(step);
-      else this._programmaticScroll = false;
+      if (++this._fsbFrames < 10) requestAnimationFrame(step);
+      else { this._fsbActive = false; this._programmaticScroll = false; }
     };
     requestAnimationFrame(step);
   }
@@ -1668,11 +1694,17 @@ class ChatView {
       if (!this._streamRenderPending) this._streamRenderPending = new Set();
       this._streamRenderPending.add(id);
       if (!this._streamRenderRaf) {
-        this._streamRenderRaf = requestAnimationFrame(() => {
+        // 150ms throttle on top of the frame coalescing (2.338.0): each pass
+        // re-parses the FULL accumulated markdown (marked+DOMPurify+3 linkify
+        // regex sweeps) — per-frame on a long answer is O(n²) main-thread
+        // burn. 150ms is invisible next to token cadence.
+        const wait = Math.max(0, 150 - (Date.now() - (this._lastStreamRenderAt || 0)));
+        this._streamRenderRaf = setTimeout(() => requestAnimationFrame(() => {
           this._streamRenderRaf = null;
+          this._lastStreamRenderAt = Date.now();
           const ids = this._streamRenderPending; this._streamRenderPending = new Set();
           for (const mid of ids) this._renderStreamingText(mid);
-        });
+        }), wait);
       }
     }
 
@@ -2316,7 +2348,15 @@ class ChatView {
       // possibly-rebuilt normalizer silently drops messages (2.219.0 audit)
       const epochChanged = msg.normEpoch && msg.normEpoch !== epochBefore;
       if (msg.normEpoch) this._normEpoch = msg.normEpoch;
-      if (epochChanged) { this._fullViewReset(msg); return; }
+      if (epochChanged) {
+        // STAGGERED (2.338.0): after a server restart EVERY chat window used
+        // to wipe + re-render its 50-message tail in the same tick — N
+        // synchronous marked+DOMPurify passes back-to-back froze the page.
+        // A 0-500ms jitter splits them into separate tasks; the DOM wipe
+        // happens inside _fullViewReset so nothing is torn meanwhile.
+        setTimeout(() => { if (!this._disposed) this._fullViewReset(msg); }, Math.random() * 500);
+        return;
+      }
       // Sync streaming label from server
       if (msg.isStreaming) this._showTyping(msg.streamingLabel || t('thinking...'));
       else this._hideTyping();
@@ -2337,7 +2377,9 @@ class ChatView {
   // Same-epoch reconnect: fetch just the messages we missed while offline
   _reattachCatchUp() {
     const missedStart = this._windowEnd;
-    this._fetchMessages(missedStart, 200).then(msgs => {
+    // same stagger rationale as the epoch reset above — N windows × 200
+    // messages rendered in one tick is the non-restart reconnect freeze
+    this._fetchMessages(missedStart, 200).then(msgs => new Promise((res) => setTimeout(() => res(msgs), Math.random() * 400))).then(msgs => {
       if (!msgs.length) return;
       this._loadingHistory = true;
       for (const msg of msgs) this._onCreateMessage(msg);
