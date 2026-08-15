@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.337.3
+
+- **Usage popup identity note rewritten (owner confusion report)** — the "⚠ CLI config file says X but token belongs to Y — run /login" warning was factually right but semantically wrong twice over: the global config's oauthAccount is stamped by EVERY relocated account login (the flow only relocates the credential store — 2.244.2), so after adding any account it is expected residue, not the machine's login identity; and the /login advice would trigger a needless real global login switch. Now: a neutral note explains the org-merge ("the machine's global CLI login is this same subscription — quota merged") and the residue ("no action needed"). Data and linking (token-derived orgEmail/orgUuid) unchanged.
+
 ## 2.337.2
 
 - **Fix client-boot smoke on GitHub runners** — chrome on ubuntu-latest needs `--no-sandbox --disable-dev-shm-usage` (tiny /dev/shm) and a longer CDP cold-start window; the first Actions run with the full gate died on a bare null-target TypeError at 10s while chat E2E itself passed (haiku turn green from the runner). Missing target now fails loudly with chrome's own stderr.
