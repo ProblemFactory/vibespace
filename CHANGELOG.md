@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.339.0
+
+- **"For you" inbox badge grouped by urgency (owner request)** — the single total-count pill (colored by worst urgency) becomes up to three adjacent pills: urgent (red) · high (yellow) · rest (accent), zero tiers hidden, so the high-priority count is readable at a glance. Tooltip lists the breakdown.
+
 ## 2.338.0
 
 - **Windows Chrome freeze batch (owner report: typing past 3 lines / new messages / server-update refresh froze the page for seconds-to-30s, self-recovering)** — three audit maps, eleven mechanisms, the big ones:

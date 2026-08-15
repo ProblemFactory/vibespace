@@ -216,7 +216,7 @@ data/bin/vibespace-remote-keeper — REMOTE-side persistence for remote CHAT ses
 
 ### user-todos-panel.js
 
-    user-todos-panel.js  — "For you" inbox UI (2.65.0, installUserTodos(app)): taskbar button #taskbar-user-todos (count badge, worst-urgency color, blink + click-to-jump toast on NEW items — knownIds starts null so boot doesn't toast) + #user-todos-popup panel (items grouped by owning session urgent-first; group header → jump via sidebar._getSessionStateKey matching then goToWindow/attachTmuxSession/resumeSession; ✓ done / ✕ dismiss / ↺ reopen → POST /api/user-todos/:id; dimmed recently-resolved tail). Live via 'user-todos-updated'; chrome element (hideKey taskbar.showUserTodos, customize-mode registry)
+    user-todos-panel.js  — "For you" inbox UI (2.65.0, installUserTodos(app)): taskbar button #taskbar-user-todos (SEGMENTED count badge since 2.339.0 — up to three pills urgent-red/high-yellow/rest-accent, zero tiers hidden; worst-urgency data attr + blink + click-to-jump toast on NEW items — knownIds starts null so boot doesn't toast) + #user-todos-popup panel (items grouped by owning session urgent-first; group header → jump via sidebar._getSessionStateKey matching then goToWindow/attachTmuxSession/resumeSession; ✓ done / ✕ dismiss / ↺ reopen → POST /api/user-todos/:id; dimmed recently-resolved tail). Live via 'user-todos-updated'; chrome element (hideKey taskbar.showUserTodos, customize-mode registry)
 
 ### usage-window.js
 

@@ -1183,13 +1183,16 @@ html, body {
 }
 .taskbar-user-todos:hover { color: var(--text); background: var(--hover-overlay, rgba(255,255,255,0.06)); }
 .taskbar-user-todos.ut-has-items { color: var(--text-secondary); }
-.taskbar-user-todos.ut-has-items[data-urgency="high"] .ut-count { background: var(--yellow, #e5c07b); color: #000; }
-.taskbar-user-todos.ut-has-items[data-urgency="urgent"] .ut-count { background: var(--red, #e55); color: #fff; }
 .ut-count {
   min-width: 14px; height: 14px; padding: 0 4px; border-radius: 999px;
   background: var(--accent); color: var(--accent-fg, #fff);
   font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
 }
+/* segmented by urgency (2.339.0): adjacent pills, worst tier first */
+.ut-count + .ut-count { margin-left: 2px; }
+.ut-count.ut-seg-urgent { background: var(--red, #e55); color: #fff; }
+.ut-count.ut-seg-high { background: var(--yellow, #e5c07b); color: #000; }
+.ut-count.ut-seg-norm { background: var(--accent); color: var(--accent-fg, #fff); }
 .taskbar-user-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
 @keyframes ut-blink { 50% { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); } }
 .ut-popup { min-width: 320px; max-width: 400px; max-height: 480px; }
