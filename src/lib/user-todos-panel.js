@@ -91,8 +91,21 @@ export function installUserTodos(app) {
     const worst = todos.open.reduce((w, i) => Math.max(w, URG_RANK[i.urgency || 'normal'] || 1), 0);
     btn.classList.toggle('ut-has-items', n > 0);
     btn.dataset.urgency = n ? (Object.keys(URG_RANK).find((k) => URG_RANK[k] === worst) || 'normal') : '';
-    btn.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/></svg>${n ? `<span class="ut-count">${n}</span>` : ''}`;
-    btn.title = n ? t('{n} items waiting on you', { n }) : t('Nothing waiting on you');
+    // SEGMENTED badge (owner request): one pill per urgency tier so the
+    // high-priority count is readable at a glance — urgent (red) · high
+    // (yellow) · rest (accent). Zero tiers don't render; one tier looks
+    // exactly like the old single badge.
+    const cu = todos.open.filter((i) => i.urgency === 'urgent').length;
+    const ch = todos.open.filter((i) => i.urgency === 'high').length;
+    const cn = n - cu - ch;
+    const segs = [cu ? `<span class="ut-count ut-seg-urgent">${cu}</span>` : '',
+                  ch ? `<span class="ut-count ut-seg-high">${ch}</span>` : '',
+                  cn ? `<span class="ut-count ut-seg-norm">${cn}</span>` : ''].join('');
+    btn.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/></svg>${segs}`;
+    btn.title = n
+      ? [cu ? t('{n} urgent', { n: cu }) : '', ch ? t('{n} high', { n: ch }) : '', cn ? t('{n} normal', { n: cn }) : '']
+          .filter(Boolean).join(' · ') + ' — ' + t('waiting on you')
+      : t('Nothing waiting on you');
   };
 
   const renderPanel = () => {
