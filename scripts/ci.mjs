@@ -29,7 +29,7 @@ const SUITES = [
   'test-usage-walk-parity', 'test-ctx-sync', 'test-migrations',
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
-  'test-cli-usage-parse', 'test-agentd-upgrade-loop', 'test-vendor-whitelist',
+  'test-cli-usage-parse', 'test-agentd-upgrade-loop', 'test-vendor-whitelist', 'test-wrapper-files',
   'test-local-device', 'test-sysinfo-op', 'test-transcript-parity',
   'test-writer-sweep', 'test-agentd-session', 'test-session-brain-dark',
   'test-chat-e2e',      // ONE real haiku turn through the full chat pipeline (oat token slot; SKIPs without ~/.config/vibespace/ci-oat)

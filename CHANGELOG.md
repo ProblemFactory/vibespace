@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.339.2
+
+- **Stuck-on-thinking after a server restart, rootcaused (owner report: 设备运维大师/79928a2b)** — two fixes:
+  - **Counter-collision sessions restored from the wrong files**: boot-restore reads the wrapper sidecar/buffer as `<socket-derived id>.{json,buf}`, but sessions born in the 2.302.0 counter-collision window carry a DIFFERENT id in their wrapper argv/env — the reads hit nonexistent paths and a catch{} silently dropped streaming state, goal, todos, running-agent watchers and the buffer replay on EVERY restart. New src/server/wrapper-files.js resolves the real pair from the socket's dtach-master argv via /proc when the expected sidecar is missing (test-wrapper-files, 3, incl. a live decoy-process resolution).
+  - **Attach-time streaming reconciliation**: the wrapper sidecar flips `streaming:false` the moment the result record flows; if the server still believes a local chat session is mid-turn while the settled (>3s) sidecar disagrees, the attach heals it — a missed result (restart window / parse detach) can no longer show "thinking" forever.
+  - The stuck conversation itself: its turn had ENDED cleanly at 20:47:40 (result success, wrapper sidecar streaming:false) — the label was pure state residue; nothing was lost.
+
 ## 2.339.1
 
 - **Browser-window drag-resize freeze (inc-msv9aa69-si7p, the third door)** — the incident bundle showed the freeze hit a PRE-2.338.0 page (loaded 7.8h before the fixes shipped), and named a trigger the batch didn't cover: moving/resizing the Chrome window itself. During the drag all windows re-lay out per frame; each chat window's minimap ResizeObserver then read rects after layout and wrote styles (another forced layout per window per frame), and geometry drift fed the extend gates. Fixes: minimap syncBounds is rAF-coalesced, and a cheap per-frame viewport-resize stamp keeps BOTH chat extend branches closed for 400ms around any browser-window resize (same displacement-is-not-intent rule, third entry point).

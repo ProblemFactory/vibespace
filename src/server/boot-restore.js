@@ -195,8 +195,9 @@ function restoreSessions() {
     let bareRemote = false;
     let restoredRemote = null;
     let wrapperAgentTasks = null;
+    const wrapperFiles = require('./wrapper-files.js').resolveWrapperFiles(BUFFERS_DIR, id, path.join(SOCKETS_DIR, sockFile));
     try {
-      const wrapperMeta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8'));
+      const wrapperMeta = JSON.parse(fs.readFileSync(wrapperFiles.sidecar, 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
       if (wrapperMeta.streaming != null) wrapperStreaming = !!wrapperMeta.streaming;
       if (wrapperMeta.goal) { wrapperGoal = wrapperMeta.goal; wrapperGoalStatus = wrapperMeta.goalStatus || null; wrapperGoalElapsed = wrapperMeta.goalElapsed || 0; wrapperGoalTokens = wrapperMeta.goalTokensUsed || 0; }
@@ -228,7 +229,7 @@ function restoreSessions() {
     } catch {}
 
     let savedBuffer = '';
-    try { savedBuffer = fs.readFileSync(path.join(BUFFERS_DIR, id + '.buf'), 'utf-8'); } catch {}
+    try { savedBuffer = fs.readFileSync(wrapperFiles.buf, 'utf-8'); } catch {}
 
     const session = {
       mode: sessionMode,

@@ -726,6 +726,25 @@ function registerWsHandler(wss, ctx) {
               // session._isStreaming is tracked explicitly from protocol signals
               // (result/compact_boundary/user for Claude, turn events for Codex).
               // Falls back to wrapper metadata file for sessions not yet tracked.
+              // STREAMING RECONCILIATION (2.339.2, stuck-thinking incident):
+              // the wrapper's sidecar flips streaming:false the moment the
+              // result record flows — if the server still believes this LOCAL
+              // chat session is mid-turn while the wrapper disagrees (and the
+              // sidecar has been settled >3s, so no mid-pipeline race), the
+              // server missed the turn end (restart window / parse detach).
+              // Heal here so an attach can never show thinking forever.
+              if (session._isStreaming && !session.host && session.mode === 'chat') {
+                try {
+                  const wf = require('./server/wrapper-files.js').resolveWrapperFiles(BUFFERS_DIR, data.sessionId, path.join(SOCKETS_DIR, data.sessionId.replace(/^sess-/, 'cw-')));
+                  const st = fs.statSync(wf.sidecar);
+                  const sc = JSON.parse(fs.readFileSync(wf.sidecar, 'utf-8'));
+                  if (sc.streaming === false && Date.now() - st.mtimeMs > 3000) {
+                    console.log(`[session] ${data.sessionId}: wrapper says the turn ENDED but server still streaming — healing (missed result)`);
+                    session._isStreaming = false;
+                    session._streamingLabel = '';
+                  }
+                } catch { }
+              }
               const isStreaming = session._isStreaming ?? sm.isStreaming;
               const streamingLabel = isStreaming ? (session._streamingLabel || 'thinking...') : '';
               // Merge session-known permission mode into chatStatus — the JSONL
