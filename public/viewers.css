@@ -563,3 +563,8 @@
 .eml-atts:empty { display: none; }
 .eml-att { font-size: 12px; color: var(--accent); text-decoration: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; }
 .eml-att:hover { border-color: var(--accent); }
+
+/* Viewer-window floating reload (2.341.0) — sits over the render, out of the
+   way of per-type toolbars; .window-content is position:relative */
+.viewer-reload-btn { position: absolute; top: 8px; right: 12px; z-index: 30; opacity: 0.55; }
+.viewer-reload-btn:hover { opacity: 1; }

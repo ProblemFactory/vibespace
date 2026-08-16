@@ -68,6 +68,20 @@ class FileViewer {
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);
     winInfo.onClose = () => { try { container._viewerCtl?.abort(); } catch {} };
+    // Reload from disk (2.341.0): viewers render once and never look back —
+    // a file rewritten while open (agent output, re-export) was unreachable
+    // without closing the window. _bustTs defeats the browser memory cache on
+    // media src URLs (no cache headers on /api/file/raw ⇒ same-URL img/video
+    // can serve stale from memory cache).
+    const btnReload = document.createElement('button');
+    btnReload.className = 'file-tool-btn media-btn viewer-reload-btn';
+    btnReload.textContent = '⟳'; btnReload.title = t('Reload from disk');
+    btnReload.onclick = async () => {
+      container._bustTs = Date.now();
+      container.innerHTML = '';
+      await FileViewer.renderInto(container, filePath, fileName, app, host);
+    };
+    winInfo.content.appendChild(btnReload);
     const rendered = await FileViewer.renderInto(container, filePath, fileName, app, host);
     if (!rendered) {
       // No dedicated viewer — open in code editor
@@ -92,7 +106,7 @@ class FileViewer {
     const ext = (fileName || filePath.split('/').pop()).split('.').pop().toLowerCase();
     const viewerType = getViewerType(ext);
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
-    const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
+    const rawUrl = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
 
     try {
       if (viewerType === 'archive') {
@@ -280,7 +294,7 @@ class FileViewer {
     imgWrap.className = 'media-content';
 
     const img = document.createElement('img');
-    img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
+    img.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     img.className = 'media-image';
     img.draggable = false;
 
@@ -342,7 +356,7 @@ class FileViewer {
     videoWrap.className = 'media-content';
 
     const video = document.createElement('video');
-    video.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
+    video.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     video.controls = true;
     video.className = 'media-video';
     video.preload = 'metadata';
@@ -363,7 +377,7 @@ class FileViewer {
     label.textContent = fileName;
 
     const audio = document.createElement('audio');
-    audio.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
+    audio.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     audio.controls = true;
     audio.className = 'media-audio';
     audio.preload = 'metadata';
@@ -457,7 +471,7 @@ class FileViewer {
     mediaViewer.className = 'media-viewer';
 
     const embed = document.createElement('iframe');
-    embed.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}`;
+    embed.src = `/api/file/raw?path=${encodeURIComponent(filePath)}${hq}${container._bustTs ? '&_r=' + container._bustTs : ''}`;
     embed.className = 'media-pdf';
 
     mediaViewer.appendChild(embed);

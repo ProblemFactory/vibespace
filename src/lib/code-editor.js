@@ -11,7 +11,8 @@ import { keymap } from '@codemirror/view';
 let _mermaid = null; // lazy-loaded from CDN
 import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
-import { escHtml } from './utils.js';
+import { escHtml, showConfirmDialog } from './utils.js';
+import { t } from './i18n.js';
 import DOMPurify from 'dompurify';
 import * as prettier from 'prettier/standalone';
 import prettierBabel from 'prettier/plugins/babel';
@@ -150,6 +151,8 @@ class CodeEditor {
     this._gotoLine = opts.line || null;
     this._isReadOnly = opts._tempFile || false;
     this.modified = false;
+    this._diskMtime = 0; // on-disk mtime of the loaded copy (freshness watch)
+    this._reloading = false;
     this._settings = loadEditorSettings();
 
     const container = document.createElement('div'); container.className = 'editor-container';
@@ -159,7 +162,16 @@ class CodeEditor {
 
     const toolbarLeft = document.createElement('div'); toolbarLeft.className = 'editor-toolbar-left';
     this.saveIndicator = document.createElement('span'); this.saveIndicator.className = 'save-indicator';
-    toolbarLeft.append(this.saveIndicator);
+    // Disk-change notice: shown when the on-disk file is newer than the loaded
+    // copy AND the editor holds unsaved edits (clean editors auto-reload).
+    // Click = reload, which confirms the discard — edits are never silently lost.
+    this._diskChip = document.createElement('button');
+    this._diskChip.className = 'file-tool-btn media-btn';
+    this._diskChip.textContent = '⚠ ' + t('File changed on disk');
+    this._diskChip.title = t('Reload from disk');
+    this._diskChip.style.cssText = 'display:none;color:var(--yellow)';
+    this._diskChip.onclick = () => this.reloadFromDisk();
+    toolbarLeft.append(this.saveIndicator, this._diskChip);
 
     const toolbarRight = document.createElement('div'); toolbarRight.className = 'editor-toolbar-right';
 
@@ -183,47 +195,7 @@ class CodeEditor {
       this._btnPreview.classList.toggle('active', this._previewing);
       if (this._previewing) {
         this.editorBody.style.display = 'none';
-        const src = this.editorView?.state.doc.toString() || '';
-        if (this._previewType === 'html') {
-          this._renderHtmlPreview(src);
-          // Re-render on resize so JS-computed layouts recalculate at new size
-          if (!this._previewRO) {
-            this._previewRO = new ResizeObserver(() => {
-              if (!this._previewing || this._previewType !== 'html') return;
-              if (this._previewResizeTimer) clearTimeout(this._previewResizeTimer);
-              this._previewResizeTimer = setTimeout(() => {
-                const s = this.editorView?.state.doc.toString() || '';
-                this._renderHtmlPreview(s);
-              }, 300);
-            });
-            this._previewRO.observe(this._previewBody);
-          }
-        } else {
-          this._previewBody.innerHTML = DOMPurify.sanitize(marked.parse(src)); // previewed files may be untrusted (cloned repos)
-          // Render mermaid diagrams: convert <code class="language-mermaid"> to mermaid divs
-          this._previewBody.querySelectorAll('code.language-mermaid').forEach(code => {
-            const pre = code.parentElement;
-            const div = document.createElement('div');
-            div.className = 'mermaid';
-            div.textContent = code.textContent;
-            pre.replaceWith(div);
-          });
-          const mermaidNodes = this._previewBody.querySelectorAll('.mermaid');
-          if (mermaidNodes.length) {
-            (async () => {
-              if (!_mermaid) {
-                // Load mermaid from CDN to avoid 3MB bundle increase
-                const script = document.createElement('script');
-                script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
-                await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.appendChild(script); });
-                _mermaid = window.mermaid;
-              }
-              const isDark = !(document.documentElement.dataset.theme?.includes('light') || document.documentElement.dataset.theme === 'solarized');
-              _mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
-              _mermaid.run({ nodes: mermaidNodes }).catch(() => {});
-            })();
-          }
-        }
+        this._renderPreviewNow();
         this._previewBody.style.display = 'block';
       } else {
         this._previewBody.style.display = 'none';
@@ -263,8 +235,14 @@ class CodeEditor {
     const btnDownload = this._btn('\u21E9'); btnDownload.title = 'Download';
     btnDownload.onclick = () => window.open(`/api/download?path=${encodeURIComponent(filePath)}`);
 
+    // Reload from disk (2.341.0): the editor loaded once and never looked back
+    // \u2014 files rewritten by agents/other windows were unreachable without
+    // closing and reopening (owner report, html case).
+    const btnReload = this._btn('\u27F3'); btnReload.title = t('Reload from disk');
+    btnReload.onclick = () => this.reloadFromDisk();
+
     if (this._isReadOnly) btnFormat.style.display = 'none';
-    toolbarRight.append(this.langSelect, this._btnPreview, sep(), btnWrap, btnFormat, sizeDown, this.fontSizeDisplay, sizeUp, sep(), btnSave, btnDownload);
+    toolbarRight.append(this.langSelect, this._btnPreview, sep(), btnWrap, btnFormat, sizeDown, this.fontSizeDisplay, sizeUp, sep(), btnReload, btnSave, btnDownload);
     toolbar.append(toolbarLeft, toolbarRight);
 
     this.editorBody = document.createElement('div'); this.editorBody.className = 'editor-body';
@@ -372,7 +350,7 @@ class CodeEditor {
             { key: 'Shift-Alt-f', run: () => { self.format(); return true; } },
           ]),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) { self.modified = true; self.saveIndicator.textContent = '● Modified'; self.saveIndicator.style.color = 'var(--yellow)'; }
+            if (update.docChanged && !self._reloading) { self.modified = true; self.saveIndicator.textContent = '● Modified'; self.saveIndicator.style.color = 'var(--yellow)'; }
           }),
           ...(this._isReadOnly ? [EditorState.readOnly.of(true)] : []),
         ],
@@ -401,6 +379,74 @@ class CodeEditor {
       if (this.onSaveAndClose) { this.save().then(() => this.onSaveAndClose()); }
       if (prevOnClose) prevOnClose();
     };
+
+    this._baselineMtime();
+    this._startFreshnessWatch();
+  }
+
+  // ── Disk freshness (2.341.0) ──────────────────────────────────────────────
+  // Baseline the on-disk mtime at load/save, then watch for the file changing
+  // underneath the editor: clean editor → auto-reload; dirty editor → show the
+  // disk chip (edits are never silently discarded).
+
+  async _baselineMtime() {
+    try {
+      const res = await fetch(`/api/file/info?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
+      const info = await res.json();
+      if (info && !info.error && info.modified) this._diskMtime = new Date(info.modified).getTime() || 0;
+    } catch {}
+  }
+
+  _startFreshnessWatch() {
+    if (this._freshTimer || this._isReadOnly) return;
+    const check = async () => {
+      if (document.hidden || this._reloading || !this._diskMtime || !this.editorView) return;
+      try {
+        const res = await fetch(`/api/file/info?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
+        const info = await res.json();
+        const m = info && !info.error && info.modified ? new Date(info.modified).getTime() : 0;
+        if (!m || m <= this._diskMtime) return;
+        if (this.modified) this._diskChip.style.display = '';
+        else await this.reloadFromDisk({ auto: true });
+      } catch {}
+    };
+    const signal = this.winInfo._listenerCtl?.signal;
+    // Local files: light stat poll. Remote hosts are ssh-per-op — polling
+    // would spawn an ssh every tick forever; they check on tab refocus only
+    // (and always via the explicit ⟳ button).
+    if (!this._host) this._freshTimer = setInterval(check, 15000);
+    window.addEventListener('focus', check, signal ? { signal } : undefined);
+    signal?.addEventListener('abort', () => clearInterval(this._freshTimer));
+  }
+
+  async reloadFromDisk(opts = {}) {
+    if (this._reloading || !this.editorView) return;
+    if (this.modified) {
+      if (opts.auto) return; // never auto-discard edits
+      const ok = await showConfirmDialog({ title: t('Reload from disk'), message: t('This file has unsaved changes. Reloading from disk will discard them. Continue?'), confirmText: t('Reload'), danger: true });
+      if (!ok) return;
+    }
+    this._reloading = true;
+    try {
+      const res = await fetch(`/api/file/content?path=${encodeURIComponent(this.filePath)}${this._host ? '&host=' + encodeURIComponent(this._host) : ''}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const content = data.content || '';
+      const view = this.editorView;
+      const prevScroll = view.scrollDOM.scrollTop;
+      const prevHead = Math.min(view.state.selection.main.head, content.length);
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content }, selection: EditorSelection.cursor(prevHead) });
+      view.scrollDOM.scrollTop = prevScroll;
+      this.modified = false;
+      this._diskChip.style.display = 'none';
+      if (this._previewing) this._renderPreviewNow();
+      this._formatStatus('⟳ ' + t('Reloaded from disk'), 'var(--green)', 2000);
+      await this._baselineMtime();
+    } catch (err) {
+      this._formatStatus(t('Reload failed: {msg}', { msg: err.message || 'error' }), 'var(--red)', 4000);
+    } finally {
+      this._reloading = false;
+    }
   }
 
   _changeLang(langId) {
@@ -408,6 +454,52 @@ class CodeEditor {
     const actualId = langId === 'auto' ? detectLang(this.filePath) : langId;
     this.editorView.dispatch({ effects: this._langCompartment.reconfigure(getLangExtension(actualId)) });
     this._updatePreviewSupport(actualId);
+  }
+
+  /** (Re)render the preview pane from the CURRENT document. Shared by the
+   * Preview toggle and reloadFromDisk — a reload must refresh a visible preview. */
+  _renderPreviewNow() {
+    const src = this.editorView?.state.doc.toString() || '';
+    if (this._previewType === 'html') {
+      this._renderHtmlPreview(src);
+      // Re-render on resize so JS-computed layouts recalculate at new size
+      if (!this._previewRO) {
+        this._previewRO = new ResizeObserver(() => {
+          if (!this._previewing || this._previewType !== 'html') return;
+          if (this._previewResizeTimer) clearTimeout(this._previewResizeTimer);
+          this._previewResizeTimer = setTimeout(() => {
+            const s = this.editorView?.state.doc.toString() || '';
+            this._renderHtmlPreview(s);
+          }, 300);
+        });
+        this._previewRO.observe(this._previewBody);
+      }
+    } else {
+      this._previewBody.innerHTML = DOMPurify.sanitize(marked.parse(src)); // previewed files may be untrusted (cloned repos)
+      // Render mermaid diagrams: convert <code class="language-mermaid"> to mermaid divs
+      this._previewBody.querySelectorAll('code.language-mermaid').forEach(code => {
+        const pre = code.parentElement;
+        const div = document.createElement('div');
+        div.className = 'mermaid';
+        div.textContent = code.textContent;
+        pre.replaceWith(div);
+      });
+      const mermaidNodes = this._previewBody.querySelectorAll('.mermaid');
+      if (mermaidNodes.length) {
+        (async () => {
+          if (!_mermaid) {
+            // Load mermaid from CDN to avoid 3MB bundle increase
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+            await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = reject; document.head.appendChild(script); });
+            _mermaid = window.mermaid;
+          }
+          const isDark = !(document.documentElement.dataset.theme?.includes('light') || document.documentElement.dataset.theme === 'solarized');
+          _mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
+          _mermaid.run({ nodes: mermaidNodes }).catch(() => {});
+        })();
+      }
+    }
   }
 
   _renderHtmlPreview(src) {
@@ -455,6 +547,8 @@ class CodeEditor {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       this.modified = false; this.saveIndicator.textContent = '✓ Saved'; this.saveIndicator.style.color = 'var(--green)';
+      this._diskChip.style.display = 'none';
+      this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
       setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);
     } catch (err) {
       this.saveIndicator.textContent = `✕ ${err.message || 'Error'}`; this.saveIndicator.style.color = 'var(--red)';
