@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.339.3
+
+- **The Windows freeze is COMPOSITOR/GPU-side, not main-thread (inc-msvadwtt-8ksy, first instrumented capture)** — the 2.339.1 tab caught a 26s freeze while the longtask ring showed a maximum task of 168ms all evening: the main thread was idle, so the stall lives in raster/composite (input is delivered through the compositor, which is why even the OS cursor freezes — and why moving the CHROME window, which forces present-sync against a backlogged GPU process, is a trigger). Fixes: every workspace window gets its OWN compositor layer (`will-change: transform` — moving/overlapping windows now re-composites cached textures instead of re-rasterizing the huge chat DOMs each frame; hidden-desktop windows are visibility:hidden and don't rasterize). Forensics: a GPU-renderer probe (UNMASKED_RENDERER) lands in boot telemetry and incident snapshots — the next report answers "real GPU (ANGLE/D3D11) or SwiftShader software rendering" definitively. Also fixed: incident bundles' clientVersion was always empty (app._version never existed — now BUILD_VERSION).
+
 ## 2.339.2
 
 - **Stuck-on-thinking after a server restart, rootcaused (owner report: 设备运维大师/79928a2b)** — two fixes:

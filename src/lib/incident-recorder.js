@@ -12,6 +12,7 @@
 // captured (transcripts already live on disk — the bundle's timestamps point
 // at them). The user-supplied note is the only free text.
 import { t } from './i18n.js';
+import { BUILD_VERSION } from './build-version.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml } from './utils.js';
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
@@ -110,7 +111,7 @@ export function installIncidentRecorder(app) {
 
   // ── full client-state snapshot at capture time ──
   const snapshot = () => {
-    const out = { t: Date.now(), sinceLoadMs: Date.now() - t0, ua: navigator.userAgent, viewport: `${innerWidth}x${innerHeight}`, lang: document.documentElement.lang || '' };
+    const out = { t: Date.now(), sinceLoadMs: Date.now() - t0, ua: navigator.userAgent, viewport: `${innerWidth}x${innerHeight}`, lang: document.documentElement.lang || '', gpu: window.__vsGpu || null };
     try { out.heapMB = Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576); } catch {}
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
@@ -166,7 +167,7 @@ export function installIncidentRecorder(app) {
       btn.textContent = t('Capturing\u2026');
       const r = await fetchJson('/api/incident', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: ta.value.slice(0, 2000), rings, snapshot: snapshot(), version: app._version || '' }),
+        body: JSON.stringify({ note: ta.value.slice(0, 2000), rings, snapshot: snapshot(), version: BUILD_VERSION }),
       });
       if (!r?.id) {
         btn.disabled = false;
