@@ -2585,5 +2585,11 @@ export default {
   "Move machines to a ws link automatically": "\u81ea\u52a8\u628a\u673a\u5668\u8f6c\u5230 ws \u94fe\u8def",
   "When an SSH machine\u2019s agent is reachable, install it as a service so it dials back over WebSocket \u2014 fewer per-command SSH spawns and a link that notices breakage. Only runs when a public URL is set above; SSH always stays as the rescue channel.": "\u5f53\u4e00\u53f0 SSH \u673a\u5668\u4e0a\u7684\u4ee3\u7406\u53ef\u8fbe\u65f6\uff0c\u628a\u5b83\u88c5\u6210\u670d\u52a1\u5e76\u56de\u62e8 WebSocket \u2014\u2014 \u5c11\u6389\u6bcf\u6761\u547d\u4ee4\u4e00\u6b21\u7684 SSH \u8fdb\u7a0b\uff0c\u94fe\u8def\u65ad\u4e86\u4e5f\u80fd\u7acb\u523b\u53d1\u73b0\u3002\u4ec5\u5728\u4e0a\u9762\u586b\u4e86\u516c\u5f00\u5730\u5740\u65f6\u624d\u4f1a\u6267\u884c\uff1bSSH \u59cb\u7ec8\u4fdd\u7559\u4e3a\u6551\u63f4\u901a\u9053\u3002",
   'Browser suspended this page for {n}s — caught up now': '浏览器暂停了此页面 {n} 秒 — 已自动补齐',
+  'Reload from disk': '从磁盘重新加载',
+  'File changed on disk': '磁盘上的文件已更改',
+  'This file has unsaved changes. Reloading from disk will discard them. Continue?': '此文件有未保存的修改。从磁盘重新加载将丢弃这些修改。继续？',
+  'Reload': '重新加载',
+  'Reloaded from disk': '已从磁盘重新加载',
+  'Reload failed: {msg}': '重新加载失败：{msg}',
 
 };

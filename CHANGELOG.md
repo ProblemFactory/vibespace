@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.341.0
+
+- **File editors/viewers can reload from disk** (owner report: an HTML file changed on disk was unreachable without closing the window). CodeEditor: new ⟳ toolbar button + a freshness watch — the on-disk mtime is baselined at load/save and polled every 15s while the tab is visible (local files; remote ssh hosts check on tab refocus only — no ssh-per-tick polling); a clean editor auto-reloads (scroll/cursor preserved, visible preview re-rendered), a dirty editor shows a "⚠ File changed on disk" chip and reload always confirms before discarding edits — never silently. Viewer windows (image/video/pdf/csv/xlsx/eml/docx/pptx…) get a floating ⟳ that re-renders with a cache-bust param on media URLs (/api/file/raw sends no cache headers, so a same-URL img/video could re-serve stale from the browser memory cache). Preview rendering extracted to `_renderPreviewNow()` shared by the Preview toggle and reload.
+
+
 ## 2.340.3
 
 - **Renderer-freeze self-gap channel** — the rAF-vs-timer stall detector can't see a freeze where BOTH stop together, and the suspend detector needs 45s; the stall watch's own 1s timer now reports its late-fire gap (>4s) as `renderer-freeze`, covering the 5-45s whole-renderer/system band. First fully-instrumented freeze capture (00:43 typing freeze) showed the OPPOSITE shape though: our tab's timers ticked ON TIME through the user-perceived 30s system freeze, longtask max 98ms, zero compositor stalls — the page was healthy while the SYSTEM froze, pointing squarely at host-level GPU/driver or another process on the machine.

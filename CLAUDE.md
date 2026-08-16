@@ -215,9 +215,9 @@ src/
     file-explorer-uploads.js — installExplorerUploads: upload popover, batched multipart, inline progress + ring, synced history
     file-explorer-ops.js — installExplorerOps: context/background menus, clipboard copy/cut/paste, rename/delete/duplicate, archive compress/extract, properties
     setup-flows.js     — installSetupFlows(App): onboarding wizard, Backup & migrate, password dialogs, diagnostics report (2.93.0 split from app.js)
-    file-viewer.js     — FileViewer (dispatch by type via file-types registry, renderInto shared method)
+    file-viewer.js     — FileViewer (dispatch by type via file-types registry, renderInto shared method; 2.341.0 floating ⟳ reload w/ media cache-bust)
     file-types.js      — File type registry (extension → category, icon, viewer, bypassBinary)
-    code-editor.js     — CodeEditor (CodeMirror 6, Prettier format, server-side format, HTML/MD preview)
+    code-editor.js     — CodeEditor (CodeMirror 6, Prettier format, server-side format, HTML/MD preview; 2.341.0 disk-freshness watch + ⟳ reload — kb-features §File Management)
     chat-view.js       — ChatView controller (virtual scroll, op dispatch, lifecycle; gap-seek mixin split out 2.92.0)
     chat-view-seek.js  — installChatSeek(ChatView): the huge-JSONL continuous-scroll machinery (sentinel, slab loading, teleport, stable-height landings; 17 methods)
     chat-renderers.js  — Message rendering (user/assistant/tool/system, linkify, diffs, permissions)
