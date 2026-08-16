@@ -16,12 +16,34 @@ let flushTimer = null;
 let seq = 0;
 const SESSION_START = Date.now();
 
-function send(events) {
+// SURVIVABLE SEND (2.340.1): the update-window freezes are exactly when the
+// server is DOWN — beacon/fetch failures silently dropped the one telemetry
+// window we care about. Failed batches park in localStorage (cap 200) and
+// drain on the next boot; pagehide still uses best-effort beacon.
+const PENDING_KEY = 'vsTelemetryPending';
+function parkFailed(events) {
+  try {
+    const cur = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+    const next = cur.concat(events).slice(-200);
+    localStorage.setItem(PENDING_KEY, JSON.stringify(next));
+  } catch { }
+}
+export function drainParked() {
+  try {
+    const cur = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
+    if (!cur.length) return;
+    localStorage.removeItem(PENDING_KEY);
+    send(cur.map((e) => ({ ...e, parked: true })));
+  } catch { }
+}
+function send(events, { beacon = false } = {}) {
   try {
     const body = JSON.stringify({ events });
-    if (navigator.sendBeacon) navigator.sendBeacon('/api/telemetry', new Blob([body], { type: 'application/json' }));
-    else fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
-  } catch {}
+    if (beacon && navigator.sendBeacon) { navigator.sendBeacon('/api/telemetry', new Blob([body], { type: 'application/json' })); return; }
+    fetch('/api/telemetry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true })
+      .then((r) => { if (!r.ok) parkFailed(events); })
+      .catch(() => parkFailed(events));
+  } catch { }
 }
 
 function flush() {
@@ -56,6 +78,7 @@ export function track(kind, name, detail, stack) {
 }
 
 export function installTelemetry() {
+  setTimeout(drainParked, 3000); // failed batches from a server-restart window resend after boot
   window.addEventListener('error', (e) => {
     track('error', (e.error && e.error.message) || e.message || 'window.onerror',
       `${e.filename || ''}:${e.lineno || 0}`, e.error && e.error.stack);
@@ -66,7 +89,9 @@ export function installTelemetry() {
   });
   window.addEventListener('pagehide', () => {
     track('event', 'page-session-end', String(Math.round((Date.now() - SESSION_START) / 1000)) + 's');
-    flush();
+    // page is going away — fetch won't complete; beacon is the only channel
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    if (QUEUE.length) send(QUEUE.splice(0), { beacon: true });
   });
   track('boot', 'page-load');
 
