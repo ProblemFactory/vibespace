@@ -883,6 +883,11 @@ class App {
     // at boot + gs-menu change, so crossing the 768px mobile boundary either
     // stranded the saved scale (narrow-at-boot) or left the zoom active under
     // the mobile CSS (wide→narrow, 100vw sidebar × zoom = overflow).
+    // cheap stamp on EVERY resize frame — chat scroll handlers read it to
+    // tell drag-resize displacement from user scrolling (2.339.1 incident:
+    // moving/resizing the Chrome window froze the page on the old ungated
+    // extends; the stamp keeps the new gates closed for the whole drag)
+    window.addEventListener('resize', () => { try { window.__vsViewportResizeAt = Date.now(); } catch { } }, { passive: true });
     let uiRz = null;
     window.addEventListener('resize', () => {
       clearTimeout(uiRz);

@@ -366,7 +366,8 @@ class ChatView {
         // extendBottom below: recent REAL user input required; typing stamps
         // __vsInputResizeAt (chat-input autosize) and that never qualifies.
         const userRecentUp = this._lastUserScrollAt && (Date.now() - this._lastUserScrollAt < 1500);
-        const inputResizing = window.__vsInputResizeAt && (Date.now() - window.__vsInputResizeAt < 250);
+        const inputResizing = (window.__vsInputResizeAt && (Date.now() - window.__vsInputResizeAt < 250))
+          || (window.__vsViewportResizeAt && (Date.now() - window.__vsViewportResizeAt < 400)); // browser-window drag-resize = the same displacement, third door (2.339.1)
         if (!this._pinned && scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp
             && userRecentUp && !inputResizing) {
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line

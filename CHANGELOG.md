@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.339.1
+
+- **Browser-window drag-resize freeze (inc-msv9aa69-si7p, the third door)** — the incident bundle showed the freeze hit a PRE-2.338.0 page (loaded 7.8h before the fixes shipped), and named a trigger the batch didn't cover: moving/resizing the Chrome window itself. During the drag all windows re-lay out per frame; each chat window's minimap ResizeObserver then read rects after layout and wrote styles (another forced layout per window per frame), and geometry drift fed the extend gates. Fixes: minimap syncBounds is rAF-coalesced, and a cheap per-frame viewport-resize stamp keeps BOTH chat extend branches closed for 400ms around any browser-window resize (same displacement-is-not-intent rule, third entry point).
+
 ## 2.339.0
 
 - **"For you" inbox badge grouped by urgency (owner request)** — the single total-count pill (colored by worst urgency) becomes up to three adjacent pills: urgent (red) · high (yellow) · rest (accent), zero tiers hidden, so the high-priority count is readable at a glance. Tooltip lists the breakdown.
