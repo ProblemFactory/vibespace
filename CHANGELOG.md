@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.340.2
+
+- **CRITICAL latent: passive rate_limit_event capture dead since the 2.325.0 decomposition** — `parseRateLimitEvent`/`captureRateLimitEvent` were free identifiers in usage-pool-engine.js from extraction #5 onward; recordRateLimitEvent's own try/catch swallowed the ReferenceError into a `[usage] capture failed` log line (48 occurrences since Aug 13, found while diagnosing a stuck session). Fifth lost-binding incident, first LATENT one — the runtime-throw class the boot/route batteries can't see when a catch eats it. Consequences while dead: no limit-banner→pool-eval reflex from rate_limit_events, no rate_limit anchors (part of the scoped-bucket anchor starvation the 2.340.0 audit measured). Import restored.
+- Degrade-gracefully lesson re-pinned: the 2.284-era rule — a catch that logs the message VERBATIM is the only reason this was EVER found — now needs its sibling: **grep the journals for "capture failed"-shaped lines after every decomposition.**
+
 ## 2.340.1
 
 - **Telemetry survives the server-restart window** — failed sends (exactly the "froze during the update" window the owner keeps hitting) parked events into localStorage (cap 200) and drain on the next boot; the old path silently dropped them. Pagehide keeps best-effort beacon. This occurrence itself produced no data for two now-closed reasons: the tab's bundle predated the 2.339.4 compositor-stall detector (it only arrives via the post-restart reload), and the freeze-window telemetry was dropped by the old send path.
