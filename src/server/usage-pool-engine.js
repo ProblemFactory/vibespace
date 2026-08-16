@@ -37,6 +37,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { decidePoolSwitch, rankPoolMembers, classifyAuthFailure, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { parseRateLimitEvent, captureRateLimitEvent } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line)
 const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // ── member auth-health (2.335.0, owner report: a banned/expired/out-of-credit
