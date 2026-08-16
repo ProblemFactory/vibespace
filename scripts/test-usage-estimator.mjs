@@ -120,7 +120,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const rates = { fiveHour: { rate: 1 / 500 }, sevenDay: { rate: 1 / 1730 }, 'scoped:fable': { rate: 1 / 875 } };
   const anchor = mkAnchor(T0, { u5: 0.40, u7: 0.40, uf: 0.60 });
   const costFn = () => cs(173, 87.5); // $173 total, $87.5 fable since anchor
-  const e = est.estimateBuckets({ anchor, rates, costFn, nowMs: T0 + HR });
+  const e = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: T0 + HR });
   ck('est: 7d 0.40 + 173/1730 = 0.50', approx(e.sevenDay.utilization, 0.50, 0.001));
   ck('est: fable 0.60 + 87.5/875 = 0.70', approx(e.scopedWeekly[0].utilization, 0.70, 0.001));
   ck('est: 5h 0.40 + 173/500 clamped fine', approx(e.fiveHour.utilization, 0.40 + 173 / 500, 0.001));
@@ -130,14 +130,14 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const nowAfter = (RESET + 3600) * 1000;
   const calls = [];
   const costFn2 = (fromMs) => { calls.push(fromMs); return cs(17.3, 8.75); };
-  const e2 = est.estimateBuckets({ anchor, rates, costFn: costFn2, nowMs: nowAfter });
+  const e2 = est.estimateBuckets({ lagS: 0, anchor, rates, costFn: costFn2, nowMs: nowAfter });
   ck('roll: 7d re-based from 0 at the old reset → 17.3/1730 = 0.01', approx(e2.sevenDay.utilization, 0.01, 0.001));
   ck('roll: new resetsAt advanced one week', e2.sevenDay.resetsAt === RESET + WK);
   ck('roll: cost window starts AT the reset, not the anchor', calls.every((f) => f === RESET * 1000));
   ck('roll: 5h abstains (window start unknowable)', e2.fiveHour === null);
   ck('roll: fable re-based too', approx(e2.scopedWeekly[0].utilization, 8.75 / 875, 0.001));
 
-  ck('nothing estimable → null', est.estimateBuckets({ anchor: mkAnchor(T0, {}), rates, costFn, nowMs: T0 + 1 }) === null);
+  ck('nothing estimable → null', est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, {}), rates, costFn, nowMs: T0 + 1 }) === null);
 }
 
 // ── overlayCache + estDisplay roll rule (server side of the UI contract) ─────
@@ -190,7 +190,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     yield { ts: T0 + HR + 1, acct: 'sub-x', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 };
     yield { ts: T0 + 3 * HR + 500, acct: 'sub-x', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 };
   }, _cost: () => 17.3 };
-  const ue = new est.UsageEstimator({
+  const ue = new est.UsageEstimator({ lagS: 0,
     anchorsDir: dir, usageHistory: fakeHistory,
     resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null),
     priorsFor: () => null,
@@ -217,7 +217,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const rates = { sevenDay: { rate: 1 / 1730 } };
   const anchor = mkAnchor(T0, { u7: 0.40 });
   const calls = [];
-  const e = est.estimateBuckets({ anchor, rates, costFn: (f) => { calls.push(f); return cs(17.3); }, nowMs: (RESET + WEEK_SEC_ + 3600) * 1000 });
+  const e = est.estimateBuckets({ lagS: 0, anchor, rates, costFn: (f) => { calls.push(f); return cs(17.3); }, nowMs: (RESET + WEEK_SEC_ + 3600) * 1000 });
   ck('multi-week roll: cost window starts at the LAST passed boundary', calls.every((f) => f === (RESET + WEEK_SEC_) * 1000));
   ck('multi-week roll: resetsAt advanced two weeks', e.sevenDay.resetsAt === RESET + 2 * WEEK_SEC_);
 
@@ -234,14 +234,14 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('resetsAt=0: a 5h pair spanning 6h is skipped (window definitionally rolled)', !est.extractPairs([z0, z1]).fiveHour);
   const z2 = mkAnchor(T0 + HR, { u5: 0.35, r5: 0, prevFetchedAt: T0, costSince: cs(20) });
   ck('resetsAt=0: an in-window 5h pair still forms', approx(est.extractPairs([z0, z2]).fiveHour[0].du, 0.05));
-  const ez = est.estimateBuckets({ anchor: mkAnchor(T0, { u7: 0.4, rw: 0 }), rates, costFn: () => cs(17.3), nowMs: T0 + HR });
+  const ez = est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, { u7: 0.4, rw: 0 }), rates, costFn: () => cs(17.3), nowMs: T0 + HR });
   ck('resetsAt=0: estimate emits without a roll, resetsAt undefined', approx(ez.sevenDay.utilization, 0.41, 0.001) && ez.sevenDay.resetsAt === undefined);
 
   // scoped asOf: stale ⟳ reading — cost window starts at the READING time
   const sa = mkAnchor(T0 + 2 * HR, { u7: 0.4 });
   sa.buckets.scopedWeekly = [{ name: 'Fable', u: 0.6, resetsAt: RESET, asOf: T0 }];
   const scCalls = [];
-  const se = est.estimateBuckets({ anchor: sa, rates: { 'scoped:fable': { rate: 1 / 875 } }, costFn: (f) => { scCalls.push(f); return cs(87.5, 87.5); }, nowMs: T0 + 3 * HR });
+  const se = est.estimateBuckets({ lagS: 0, anchor: sa, rates: { 'scoped:fable': { rate: 1 / 875 } }, costFn: (f) => { scCalls.push(f); return cs(87.5, 87.5); }, nowMs: T0 + 3 * HR });
   ck('scoped asOf: cost accrues from the reading time, not the anchor write', scCalls.includes(T0) && approx(se.scopedWeekly[0].utilization, 0.70, 0.001));
   // two anchors carrying the SAME stale scoped reading = zero information
   const p0 = mkAnchor(T0, {}); p0.buckets.scopedWeekly = [{ name: 'Fable', u: 0.6, resetsAt: RESET, asOf: T0 - HR }];
@@ -262,9 +262,27 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   fs.writeFileSync(path.join(dir, 'anchors-org_test2.ndjson'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   const evs = [];
   const fakeHistory = { *_events() { yield* evs; }, _cost: () => 17.3 };
-  const ue = new est.UsageEstimator({ anchorsDir: dir, usageHistory: fakeHistory, resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null), priorsFor: () => null });
+  const ue = new est.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: fakeHistory, resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null), priorsFor: () => null });
   const ids = ue.accountIdsFor(key, ['sub-x']);
-  ck('__global__ from history is NOT unioned (reassignable)', !ids.includes('__global__') && ids.includes('sub-old') && ids.includes('sub-x'));
+  // 2.340.0 REVERSAL (measured under-count won over the reassignment worry):
+  // a RECENT (<14d stream-time) __global__ anchor means this identity IS the
+  // machine org — union it so global-login spend counts; the reassignment
+  // case self-heals via the recency gate (≤14d overlap = conservative
+  // over-count only). This fixture's global anchor is 1h old → unioned.
+  ck('recent __global__ IS unioned (2.340.0, recency-gated)', ids.includes('__global__') && ids.includes('sub-old') && ids.includes('sub-x'));
+  // and a STALE global lineage (>14d of stream time since the last global
+  // anchor) stays excluded — the original reassignable concern, still pinned
+  {
+    const key3 = 'org:test3';
+    const stale = [
+      { ...mkAnchor(T0, { u7: 0.40 }), identityKey: key3, accountId: '__global__' },
+      { ...mkAnchor(T0 + 15 * 86400e3, { u7: 0.45, prevFetchedAt: T0, costSince: cs(86.5) }), identityKey: key3, accountId: 'sub-new', accountIds: ['sub-new'] },
+    ];
+    fs.writeFileSync(path.join(dir, 'anchors-org_test3.ndjson'), stale.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const ue3 = new est.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: fakeHistory, resolveIdentity: () => ({ identityKey: key3 }), priorsFor: () => null });
+    const ids3 = ue3.accountIdsFor(key3, []);
+    ck('stale __global__ lineage (>14d) stays excluded (reassignable concern)', !ids3.includes('__global__'));
+  }
   // multi-id union THROUGH estimateFor: events under the current AND old id both count
   evs.push({ ts: T0 + HR + 1, acct: 'sub-x', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 });
   evs.push({ ts: T0 + HR + 2, acct: 'sub-old', model: 'claude-fable-5', i: 0, o: 0, cw5: 0, cw1: 0, cr: 0 });
@@ -283,9 +301,9 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   // 5h bucket with resetsAt 0 and a 3-day-old anchor: MUST abstain (verifier
   // repro: it dead-reckoned days of cost into a 120% five-hour arc)
   const stale = mkAnchor(T0, { u5: 0.4, r5: 0 });
-  const eS = est.estimateBuckets({ anchor: stale, rates, costFn: () => cs(600), nowMs: T0 + 72 * HR });
+  const eS = est.estimateBuckets({ lagS: 0, anchor: stale, rates, costFn: () => cs(600), nowMs: T0 + 72 * HR });
   ck('resetsAt=0 + anchor older than the window → 5h abstains', eS === null || eS.fiveHour === null);
-  const eF = est.estimateBuckets({ anchor: mkAnchor(T0, { u5: 0.4, r5: 0 }), rates, costFn: () => cs(50), nowMs: T0 + HR });
+  const eF = est.estimateBuckets({ lagS: 0, anchor: mkAnchor(T0, { u5: 0.4, r5: 0 }), rates, costFn: () => cs(50), nowMs: T0 + HR });
   ck('resetsAt=0 within the window still estimates', approx(eF.fiveHour.utilization, 0.5, 0.001));
 
   // legacy v1 interleaved records: mixed-id file, unmarked pair → skipped
@@ -348,11 +366,11 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('class regression: blended rate still present (display/fallback)', Number.isFinite(r.fiveHour.rate));
   // class-aware prediction: a cr-dominated window must NOT be priced blended
   const anchor = { fetchedAt: T0, buckets: { fiveHour: { u: 0.10, resetsAt: R5 }, sevenDay: null, scopedWeekly: [] } };
-  const eC = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(1, 32, 1), nowMs: T0 + HR });
+  const eC = est.estimateBuckets({ lagS: 0, anchor, rates: { fiveHour: r.fiveHour }, costFn: () => csC(1, 32, 1), nowMs: T0 + HR });
   const expC = 0.10 + 1 / r.fiveHour.impliedFullCwUsd + 32 / r.fiveHour.impliedFullCrUsd + 1 / r.fiveHour.impliedFullFreshUsd;
   ck('class-aware estimate: cr-dominated window priced per component', approx(eC.fiveHour.utilization, expC, 0.01));
   // no byClass in the cost source → blended fallback
-  const eB = est.estimateBuckets({ anchor, rates: { fiveHour: r.fiveHour }, costFn: () => cs(80, 80), nowMs: T0 + HR });
+  const eB = est.estimateBuckets({ lagS: 0, anchor, rates: { fiveHour: r.fiveHour }, costFn: () => cs(80, 80), nowMs: T0 + HR });
   ck('no class split in cost source → blended fallback', approx(eB.fiveHour.utilization, 0.10 + 80 * r.fiveHour.rate, 0.005));
   // absurd data (massive cw spend against ~zero du ⇒ implied cw full beyond
   // the $20k sanity bound) must NOT emit class rates — blended only
@@ -376,7 +394,7 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const ledgerRids = new Set();
   const ledgerMids = new Set();
   const fakeHistory = { *_events() {}, _cost: () => 0, _evCache: { rids: ledgerRids, mids: ledgerMids } };
-  const ue = new est.UsageEstimator({
+  const ue = new est.UsageEstimator({ lagS: 0,
     anchorsDir: dir, usageHistory: fakeHistory,
     resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null),
     priorsFor: () => ({ sevenDay: 1730 }),
@@ -421,6 +439,40 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
     return approx(e4.sevenDay.utilization, 0.40 + 17.3 / 1730, 0.001);
   })());
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ── 2.340.0 calibration batch: pair hygiene + ledger tail ────────────────────
+{
+  // ① cross-source pair is excluded from rate learning
+  const a0 = { ...mkAnchor(T0, { u7: 0.10 }), source: 'statusline' };
+  const a1 = { ...mkAnchor(T0 + HR, { u7: 0.30, prevFetchedAt: T0, costSince: cs(10) }), source: 'cli-panel' };
+  const rX = est.learnRates([a0, a1], { priors: null });
+  ck('① cross-source pair excluded (no rate from a statusline→cli-panel step)', !rX.sevenDay);
+  const a1s = { ...a1, source: 'statusline', costSince: cs(340) }; // plausible cost — must clear the corroboration floor too
+  const rY = est.learnRates([a0, a1s], { priors: null });
+  ck('① same-source pair still learns', !!rY.sevenDay);
+  // ① uncorroborated jump: 20pt in a minute with $0.10 of ledger cost = poison
+  const j0 = { ...mkAnchor(T0, { u7: 0.10 }), source: 'statusline' };
+  const j1 = { ...mkAnchor(T0 + 60e3, { u7: 0.30, prevFetchedAt: T0, costSince: cs(0.1) }), source: 'statusline' };
+  const rJ = est.learnRates([j0, j1], { priors: null });
+  ck('① uncorroborated 20pt jump (cost ≪ prior-implied) does not teach a rate', !rJ.sevenDay);
+  // corroborated: same jump with plausible cost (20% of prior-implied ≈ $69) learns
+  const k1 = { ...mkAnchor(T0 + 60e3, { u7: 0.30, prevFetchedAt: T0, costSince: cs(340) }), source: 'statusline' };
+  const rK = est.learnRates([j0, k1], { priors: null });
+  ck('① corroborated jump still learns', !!rK.sevenDay);
+}
+{
+  // ③ ledger-tail extrapolation: burn in the last 120s extends the estimate
+  const rates = { sevenDay: { rate: 1 / 1730 } };
+  const anchor = mkAnchor(T0, { u7: 0.40 });
+  const costFn = (from, to) => (to - from <= 120000 ? cs(60) : cs(173)); // $60 of the $173 landed in the last 2min
+  const eOn = est.estimateBuckets({ anchor, rates, costFn, nowMs: T0 + HR });
+  const eOff = est.estimateBuckets({ lagS: 0, anchor, rates, costFn, nowMs: T0 + HR });
+  ck('③ trailing burn extrapolates the un-scanned tail (+$10 = 60/120×20)', eOn.sevenDay.utilization > eOff.sevenDay.utilization
+    && Math.abs((eOn.sevenDay.utilization - eOff.sevenDay.utilization) - (60 / 120 * 20) / 1730) < 0.0005);
+  const idleFn = (from, to) => (to - from <= 120000 ? cs(0) : cs(173));
+  const eIdle = est.estimateBuckets({ anchor, rates, costFn: idleFn, nowMs: T0 + HR });
+  ck('③ idle trail = zero extrapolation', Math.abs(eIdle.sevenDay.utilization - eOff.sevenDay.utilization) < 1e-9);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

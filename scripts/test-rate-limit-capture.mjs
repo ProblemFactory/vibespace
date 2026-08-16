@@ -73,5 +73,25 @@ const rS = captureRateLimitEvent({ cacheDir: dir, key: 'sub-A', identityIds: ['s
 ok(!rS.ok && rS.unknownType === 'weekly_scoped_fable', 'unknown bucket type surfaces unknownType (no silent drop)');
 
 fs.rmSync(dir, { recursive: true, force: true });
+// ── ④ scoped weekly capture (2.340.0): seven_day_<model> → scopedWeekly ─────
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-scoped-'));
+  fs.writeFileSync(path.join(dir, 'sub-s1.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, sevenDay: { utilization: 0.4 } }));
+  const ev = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day_opus', status: 'allowed_warning', utilization: 0.91, resetsAt: Math.floor(Date.now() / 1000) + 86400 } });
+  ok(ev.kind === 'scoped' && ev.scopedName === 'opus', '④ seven_day_opus parses as a scoped reading');
+  const r = captureRateLimitEvent({ cacheDir: dir, key: 'sub-s1', identityIds: ['sub-s1'], ev });
+  ok(r.ok && r.wroteReading, '④ scoped reading is written (freshest-bump discipline applies)');
+  const cache = JSON.parse(fs.readFileSync(path.join(dir, 'sub-s1.json'), 'utf-8'));
+  const s = (cache.scopedWeekly || []).find((x) => x.name === 'opus');
+  ok(s && Math.abs(s.utilization - 0.91) < 1e-9 && s.asOf > 0, '④ scopedWeekly entry carries utilization + asOf', JSON.stringify(s));
+  const evR = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day_opus', status: 'rejected' } });
+  captureRateLimitEvent({ cacheDir: dir, key: 'sub-s1', identityIds: ['sub-s1'], ev: evR });
+  const cache2 = JSON.parse(fs.readFileSync(path.join(dir, 'sub-s1.json'), 'utf-8'));
+  ok((cache2.scopedWeekly || []).find((x) => x.name === 'opus')?.utilization === 1, '④ scoped rejection marks the bucket dead (utilization 1)');
+  const evO = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { rateLimitType: 'seven_day_overage_included', status: 'allowed' } });
+  ok(evO.kind !== 'scoped', '④ seven_day_overage_included is NOT a scoped model bucket');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
