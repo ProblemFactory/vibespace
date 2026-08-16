@@ -112,6 +112,7 @@ export function installIncidentRecorder(app) {
   // ── full client-state snapshot at capture time ──
   const snapshot = () => {
     const out = { t: Date.now(), sinceLoadMs: Date.now() - t0, ua: navigator.userAgent, viewport: `${innerWidth}x${innerHeight}`, lang: document.documentElement.lang || '', gpu: window.__vsGpu || null };
+    try { out.compStalls = window.__vsCompStalls ? window.__vsCompStalls() : null; } catch { }
     try { out.heapMB = Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576); } catch {}
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({

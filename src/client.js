@@ -3,9 +3,11 @@ import { applyUiPrefs, getStateSync } from './lib/utils.js';
 import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
-import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, recentLongTasks, gpuRenderer } from './lib/telemetry-client.js';
+import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, recentCompositorStalls } from './lib/telemetry-client.js';
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 installLongTaskWatch(); // main-thread stall ring — feeds the suspend-vs-block verdict below
+installCompositorStallWatch(); // rAF-vs-timer discriminator — measures GPU/compositor freezes from inside the page
+window.__vsCompStalls = recentCompositorStalls; // incident snapshots read the ring
 setTimeout(() => { try { const g = gpuRenderer(); window.__vsGpu = g; if (g) track('event', 'gpu-renderer', g.slice(0, 120)); } catch { } }, 4000);
 // ── Page-SUSPEND wake detector (2.321.0, inc-msp3klen "对话卡在输出直到我发
 // 消息"). Best-fit diagnosis: the browser FROZE the page (Page Lifecycle /

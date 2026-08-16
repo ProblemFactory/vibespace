@@ -113,6 +113,34 @@ export function installTelemetry() {
 // ring to tell the two apart.
 const _longTasks = [];
 export function recentLongTasks() { return _longTasks.slice(); }
+// ── COMPOSITOR-STALL detector (2.339.4, the RTX-5090 verdict) ────────────
+// rAF callbacks are driven by the compositor's vsync; timers are not. When a
+// 1s timer observes the last rAF tick aging past 2s while the page is
+// visible, the COMPOSITOR/GPU pipeline is stalled — the exact freeze shape
+// the Windows incidents show (idle main thread, frozen OS cursor, zero
+// longtasks). Records duration on recovery; ring feeds incident bundles.
+const _compStalls = [];
+export function recentCompositorStalls() { return _compStalls.slice(); }
+export function installCompositorStallWatch() {
+  let lastRaf = Date.now();
+  let stallStart = 0;
+  const loop = () => { lastRaf = Date.now(); requestAnimationFrame(loop); };
+  try { requestAnimationFrame(loop); } catch { return; }
+  setInterval(() => {
+    if (document.hidden) { lastRaf = Date.now(); stallStart = 0; return; } // hidden tabs legitimately stop rAF
+    const age = Date.now() - lastRaf;
+    if (age > 2000 && !stallStart) stallStart = lastRaf;
+    if (age <= 2000 && stallStart) {
+      const dur = Math.round((Date.now() - stallStart) / 1000 * 10) / 10;
+      _compStalls.push({ at: stallStart, s: dur });
+      if (_compStalls.length > 20) _compStalls.shift();
+      metric('compositor-stall-s', dur);
+      track('event', 'compositor-stall', `${dur}s (rAF dead, timers alive — GPU/driver side)`);
+      stallStart = 0;
+    }
+  }, 1000);
+}
+
 // GPU tier probe (2.339.3): the compositor-stall verdict needs to know WHAT
 // is rasterizing — ANGLE/D3D11 (real GPU) vs SwiftShader (software = every
 // raster storm lands on the CPU). One throwaway context at boot, cached.
