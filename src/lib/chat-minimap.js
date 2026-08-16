@@ -52,7 +52,14 @@ export class ChatMinimap {
     container.appendChild(this._tocBtn);
 
     // Sync bounds on message list resize
-    this._ro = new ResizeObserver(() => this.syncBounds());
+    // rAF-coalesced (2.339.1, browser-window drag-resize incident): during a
+    // continuous resize this fired PER FRAME per chat window, and syncBounds
+    // reads rects after layout then writes styles = an extra forced layout
+    // per window per frame. One pass per frame is enough.
+    this._ro = new ResizeObserver(() => {
+      if (this._roRaf) return;
+      this._roRaf = requestAnimationFrame(() => { this._roRaf = null; this.syncBounds(); });
+    });
     this._ro.observe(messageList);
 
     this._setupDrag();
