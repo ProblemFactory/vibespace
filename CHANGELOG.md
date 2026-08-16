@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.340.0
+
+- **Dead-reckoning calibration batch (owner audit: burst intervals under-estimated 20-45%)** — four fixes: ① rate-learning pairs require SAME-SOURCE endpoints (cross-channel steps taught phantom rates); ② a ≥5pt Δu with ledger cost under 20% of the prior-implied movement cost is tainted (reading discontinuities / unattributed burn — the 11-13pt/1-minute contamination pairs); ③ org-merged identities union '__global__'-attributed cost under a 14-day stream-recency gate (global-login spend was silently excluded once any named sub existed — deliberate reversal of the 2.263 rule, reassignment concern kept via the gate, both semantics pinned in tests); ④ predictions extrapolate the ~20s un-scanned ledger tail at the trailing rate (lagS knob, idle untouched) and `seven_day_<model>` rate_limit_events now write scopedWeekly readings — the scoped buckets' only passive channel, previously dropped. Suites: usage-estimator 80, rate-limit-capture 25, anchors 12, pool-auto 67. Accuracy re-audit after a 1-2 day observation window.
+
 ## 2.339.4
 
 - **Compositor-stall detector (the RTX 5090 verdict)** — the GPU probe answered: ANGLE D3D11 on an RTX 5090, hardware acceleration fully on, main thread idle during the freezes — so the stall is in the driver/DWM pipeline (or GPU contention from another process on that machine), not page raster throughput. New in-page discriminator: rAF is vsync-driven while timers are not, so "timers alive + rAF dead >2s while visible" measures a compositor/GPU freeze directly — duration lands in telemetry (`compositor-stall`) and incident snapshots (`compStalls` ring). The next 卡顿 report carries its own measured freeze windows.

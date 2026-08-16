@@ -37,14 +37,21 @@ function parseRateLimitEvent(msg) {
   const info = msg.rate_limit_info || msg.rateLimitInfo;
   if (!info || typeof info !== 'object') return null;
   const rawType = String(info.rateLimitType ?? info.rate_limit_type ?? '') || null;
+  // ④ of the 2.340.0 calibration batch: seven_day_<model> types are the ONLY
+  // passive channel for scoped weekly buckets (statusline exports 5h/7d only,
+  // binary-verified vs claude 2.1.229) — map them to scoped readings instead
+  // of dropping to 'other', so warnings/rejections anchor the scoped
+  // estimator (its -45% burst error traced directly to anchor starvation).
+  const scopedM = /^seven_day_(?!overage)(\w+)$/.exec(rawType || '');
   const kind = rawType === 'five_hour' ? 'fiveHour'
     : (rawType === 'seven_day' || rawType === 'weekly') ? 'sevenDay'
-      : rawType ? 'other' : null;
+      : scopedM ? 'scoped'
+        : rawType ? 'other' : null;
   let u = info.utilization ?? info.used_percentage;
   if (typeof u === 'number' && u > 1.5) u = u / 100; // integer % (get_usage precedent)
   const resetsAt = Number(info.resetsAt ?? info.resets_at) || null;
   return {
-    kind, rawType,
+    kind, rawType, scopedName: scopedM ? scopedM[1] : null,
     status: String(info.status || '') || null, // allowed | rejected | (future values pass through)
     utilization: (typeof u === 'number' && u >= 0) ? Math.min(u, 1) : null,
     resetsAt,
@@ -75,15 +82,27 @@ function parseRateLimitEvent(msg) {
  *   (caller should treat it like a limit banner: immediate pool evaluation).
  */
 function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now() }) {
-  if (!ev || (ev.kind !== 'fiveHour' && ev.kind !== 'sevenDay')) {
-    // scoped/unknown bucket types: no cache mapping yet — surface, never
-    // silently drop (the api_retry lesson)
+  if (!ev || (ev.kind !== 'fiveHour' && ev.kind !== 'sevenDay' && ev.kind !== 'scoped')) {
+    // unknown bucket types: surface, never silently drop (the api_retry lesson)
     return { ok: false, dead: false, wroteReading: false, unknownType: ev?.rawType || null };
   }
   const dead = ev.status === 'rejected';
   const reading = dead || ev.utilization != null;
   const nowSec = Math.floor(now / 1000);
   const applyTo = (cache) => {
+    if (ev.kind === 'scoped') {
+      const list = Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly.slice() : [];
+      const i = list.findIndex((s) => String(s.name || '').toLowerCase() === ev.scopedName);
+      const s = { ...(i >= 0 ? list[i] : { name: ev.scopedName }) };
+      if (ev.status === 'rejected') { s.utilization = 1; s.status = 'limited'; }
+      else if (ev.utilization != null) { s.utilization = ev.utilization; s.status = ev.status || s.status; }
+      else if (ev.status) s.status = ev.status;
+      if (Number(ev.resetsAt) > 0) s.resetsAt = ev.resetsAt;
+      s.asOf = now; // fresh reading marker — the scoped pair guard keys on asOf
+      if (i >= 0) list[i] = s; else list.push(s);
+      cache.scopedWeekly = list;
+      return cache; // primary write path consumes the return value
+    }
     const b = { ...(cache[ev.kind] || {}) };
     if (dead) {
       b.utilization = 1; b.status = 'limited';

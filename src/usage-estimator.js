@@ -111,6 +111,11 @@ function extractPairs(lines, opts = {}) {
     // a falsely HOT rate (the exact multi-device bias this stack exists to
     // absorb, now excluded instead of averaged in).
     if ((Array.isArray(l.dark) && l.dark.length) || (Array.isArray(base.dark) && base.dark.length)) continue;
+    // ① SOURCE LINEAGE (2.340.0 audit): endpoints from different reading
+    // channels (statusline vs cli-panel vs get_usage vs banner) carry an
+    // unknown inter-source offset — the Δu of a cross-source pair includes
+    // that step and teaches phantom rates. Pairs must be same-source.
+    if ((base.source || 'unknown') !== (l.source || 'unknown')) continue;
     const spanSec = (l.fetchedAt - base.fetchedAt) / 1000;
     let liveCost = null; // lazily recomputed once per pair when costFn given
     const pairBucket = (key, b0, b1) => {
@@ -137,6 +142,20 @@ function extractPairs(lines, opts = {}) {
       if (du < -0.02) { (tainted[key] = tainted[key] || new Set()).add(l.fetchedAt); return; } // anomalous decrease without a reset change — and the NEXT pair off this anchor is the bounce-back
       if (du < 0) du = 0;
       if (opts.costFn && liveCost === null) { try { liveCost = opts.costFn(base.fetchedAt, l.fetchedAt) || null; } catch { liveCost = null; } }
+      // ① UNCORROBORATED JUMP (2.340.0 audit: 11-13pt steps inside 1-minute
+      // windows with near-zero cost — cache-file/source discontinuities and
+      // unattributed burn, both poison): a big Δu whose ledger cost is under
+      // 20% of what the measured Max-20x priors say that movement costs is
+      // not rate information. Taint like the anomalous decrease so the
+      // recovery pair off this anchor is skipped too.
+      if (du >= 0.05) {
+        const full = CLAUDE_MAX_PRIOR_FULL_USD[key] || CLAUDE_MAX_PRIOR_FULL_USD.sevenDay;
+        const corroborating = costForKey(key, (liveCost && liveCost.total > 0) ? liveCost : l.costSince);
+        if (corroborating != null && corroborating < du * full * 0.2) {
+          (tainted[key] = tainted[key] || new Set()).add(l.fetchedAt);
+          return;
+        }
+      }
       // A ZERO live total with a non-zero recorded snapshot means the ledger
       // no longer covers this window (retention/pruning) — the frozen
       // snapshot is then the better source, not zero.
@@ -242,7 +261,7 @@ function learnRates(lines, { priors = null, costFn = null } = {}) {
 // cadence). The 5h window is NOT fixed-cadence (it opens with the first
 // request after idle), so a passed 5h reset yields null (unknown — consumers
 // treat it as full-again, exactly like the raw cache path).
-function estimateBuckets({ anchor, rates, costFn, nowMs }) {
+function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
   if (!anchor || !anchor.buckets || !rates || !costFn) return null;
   const costMemo = new Map();
   const cost = (fromMs) => {
@@ -250,6 +269,16 @@ function estimateBuckets({ anchor, rates, costFn, nowMs }) {
     return costMemo.get(fromMs);
   };
   let sinceCostUsd = 0;
+  // ③ LEDGER TAIL (2.340.0 audit): the transcript scan is throttled (~15s)
+  // and writes lag the requests, so at predict time the last ~LAG seconds of
+  // burn are not in the ledger yet — during a fast burst that's a standing
+  // under-estimate. Extrapolate the missing tail at the trailing 120s burn
+  // rate; idle accounts have a zero trail and are untouched.
+  let trailMemo = null;
+  const trail = () => {
+    if (trailMemo === null) { try { trailMemo = costFn(nowMs - 120000, nowMs) || { total: 0 }; } catch { trailMemo = { total: 0 }; } }
+    return trailMemo;
+  };
   const estBucket = (key, b, { weekly }) => {
     const r = rates[key];
     if (!b || !r) return null;
@@ -273,8 +302,12 @@ function estimateBuckets({ anchor, rates, costFn, nowMs }) {
       while (resetSec * 1000 <= nowMs) { fromMs = resetSec * 1000; resetSec += WEEK_SEC; }
       baseU = 0;
     }
-    const c = costForKey(key, cost(fromMs));
+    let c = costForKey(key, cost(fromMs));
     if (c == null) return null;
+    if (lagS > 0) {
+      const trailC = costForKey(key, trail());
+      if (trailC != null && trailC > 0) c += (trailC / 120) * lagS;
+    }
     sinceCostUsd = Math.max(sinceCostUsd, (cost(fromMs).total || 0));
     // 5h class-aware prediction (B-536b): when the regression produced class
     // rates AND the cost source carries the split, predict per component —
@@ -371,7 +404,7 @@ function predictCalib(prevAnchor, newBuckets, rates, costSince, spanSec = 0) {
 // offline inspection. All reads are read-only — NEVER instantiate anything
 // that scans/advances ledger cursors here.
 class UsageEstimator {
-  constructor({ anchorsDir, usageHistory, resolveIdentity, priorsFor }) {
+  constructor({ anchorsDir, usageHistory, resolveIdentity, priorsFor, lagS }) {
     this.dir = anchorsDir;
     // May be the object OR a () => object thunk — server.js constructs this
     // estimator far above usageHistory's declaration (TDZ), so it passes a
@@ -379,6 +412,7 @@ class UsageEstimator {
     this._usageHistory = usageHistory;
     this.resolveIdentity = resolveIdentity; // (accountId|null) → {identityKey} | null
     this.priorsFor = priorsFor || (() => CLAUDE_MAX_PRIOR_FULL_USD);
+    this.lagS = lagS == null ? 20 : lagS; // ledger-tail extrapolation seconds (0 = off, exact-math tests)
     this._lineCache = new Map();  // identityKey → {mtimeMs, size, lines}
     this._rateCache = new Map();  // identityKey → {rates, at}
     this._estMemo = new Map();    // accountId|'__global__' → {at, est}
@@ -463,10 +497,25 @@ class UsageEstimator {
   // — it joins only via `extra` (the CURRENT identity-group mapping).
   accountIdsFor(identityKey, extra = []) {
     const ids = new Set(extra.filter(Boolean));
+    // ② of the 2.340.0 calibration batch: an org-merged identity (machine
+    // login + named sub) was EXCLUDING '__global__' the moment any named id
+    // existed — every global-login session's spend vanished from the
+    // identity's cost while its utilization still moved = systematic
+    // under-estimate (the burst-interval -20..-45% audit). If the identity
+    // was EVER anchored through the global login, it IS the machine org:
+    // include the pseudo-account always.
+    let lastGlobalTs = 0, lastTs = 0;
     for (const l of this.lines(identityKey)) {
-      if (l.accountId !== undefined && l.accountId !== null && l.accountId !== '__global__') ids.add(l.accountId);
+      const ts = l.ts || l.fetchedAt || 0;
+      if (ts > lastTs) lastTs = ts;
+      if (l.accountId === undefined || l.accountId === null || l.accountId === '__global__') { if (ts > lastGlobalTs) lastGlobalTs = ts; }
+      else ids.add(l.accountId);
     }
-    if (!ids.size) ids.add('__global__');
+    // RECENCY GATE (the 2.263 reassignment concern, kept): a machine login
+    // moved to another org stops producing __global__ anchors here — after
+    // 14 days of stream time without one, stop unioning (the ≤14d overlap
+    // over-counts for THIS identity = conservative, safe direction).
+    if (!ids.size || (lastGlobalTs && lastTs - lastGlobalTs < 14 * 86400e3)) ids.add('__global__');
     return [...ids];
   }
   ratesFor(identityKey) {
@@ -550,7 +599,7 @@ class UsageEstimator {
           baseFetchedAt = anchor.fetchedAt;
           const rates = this.ratesFor(ident.identityKey);
           const accountIds = this.accountIdsFor(ident.identityKey, [accountId || '__global__']);
-          est = estimateBuckets({ anchor, rates, costFn: this._costFn(accountIds), nowMs });
+          est = estimateBuckets({ anchor, rates, costFn: this._costFn(accountIds), nowMs, lagS: this.lagS });
         }
       }
     } catch { est = null; }
