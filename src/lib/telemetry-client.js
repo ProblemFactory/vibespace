@@ -151,7 +151,18 @@ export function installCompositorStallWatch() {
   let stallStart = 0;
   const loop = () => { lastRaf = Date.now(); requestAnimationFrame(loop); };
   try { requestAnimationFrame(loop); } catch { return; }
+  let lastTick = Date.now();
   setInterval(() => {
+    // SELF-GAP (2.340.3): if THIS 1s timer itself fired late by >3s, the whole
+    // renderer (or the OS) was frozen — a case rAF-vs-timer cannot see (both
+    // stop together) and the 45s suspend detector ignores. Covers the 5-45s
+    // whole-freeze band.
+    const tickNow = Date.now();
+    const tickGap = tickNow - lastTick; lastTick = tickNow;
+    if (tickGap > 4000 && !document.hidden) {
+      metric('renderer-freeze-s', Math.round((tickGap - 1000) / 100) / 10);
+      track('event', 'renderer-freeze', `${Math.round((tickGap - 1000) / 1000)}s (timer AND rAF stalled — whole renderer/system)`);
+    }
     if (document.hidden) { lastRaf = Date.now(); stallStart = 0; return; } // hidden tabs legitimately stop rAF
     const age = Date.now() - lastRaf;
     if (age > 2000 && !stallStart) stallStart = lastRaf;

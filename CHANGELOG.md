@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.340.3
+
+- **Renderer-freeze self-gap channel** — the rAF-vs-timer stall detector can't see a freeze where BOTH stop together, and the suspend detector needs 45s; the stall watch's own 1s timer now reports its late-fire gap (>4s) as `renderer-freeze`, covering the 5-45s whole-renderer/system band. First fully-instrumented freeze capture (00:43 typing freeze) showed the OPPOSITE shape though: our tab's timers ticked ON TIME through the user-perceived 30s system freeze, longtask max 98ms, zero compositor stalls — the page was healthy while the SYSTEM froze, pointing squarely at host-level GPU/driver or another process on the machine.
+
 ## 2.340.2
 
 - **CRITICAL latent: passive rate_limit_event capture dead since the 2.325.0 decomposition** — `parseRateLimitEvent`/`captureRateLimitEvent` were free identifiers in usage-pool-engine.js from extraction #5 onward; recordRateLimitEvent's own try/catch swallowed the ReferenceError into a `[usage] capture failed` log line (48 occurrences since Aug 13, found while diagnosing a stuck session). Fifth lost-binding incident, first LATENT one — the runtime-throw class the boot/route batteries can't see when a catch eats it. Consequences while dead: no limit-banner→pool-eval reflex from rate_limit_events, no rate_limit anchors (part of the scoped-bucket anchor starvation the 2.340.0 audit measured). Import restored.
