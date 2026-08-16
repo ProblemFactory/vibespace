@@ -113,6 +113,22 @@ export function installTelemetry() {
 // ring to tell the two apart.
 const _longTasks = [];
 export function recentLongTasks() { return _longTasks.slice(); }
+// GPU tier probe (2.339.3): the compositor-stall verdict needs to know WHAT
+// is rasterizing — ANGLE/D3D11 (real GPU) vs SwiftShader (software = every
+// raster storm lands on the CPU). One throwaway context at boot, cached.
+export function gpuRenderer() {
+  if (gpuRenderer._v !== undefined) return gpuRenderer._v;
+  let v = null;
+  try {
+    const cv = document.createElement('canvas');
+    const gl = cv.getContext('webgl', { failIfMajorPerformanceCaveat: false });
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    if (gl && ext) v = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '');
+    if (gl) { const lose = gl.getExtension('WEBGL_lose_context'); lose && lose.loseContext(); }
+  } catch { }
+  return (gpuRenderer._v = v);
+}
+
 export function installLongTaskWatch() {
   try {
     if (typeof PerformanceObserver === 'undefined') return;
