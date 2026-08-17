@@ -223,10 +223,22 @@ pendingNotice / task-context channel agent-routes already budgets):
   vibespace-job poll jb-3f9a`.
 - **Next user turn** (UserPromptSubmit): only NEW events since last delivery,
   one line each.
-- **Budget management (owner concern)**: the whole jobs section is byte-capped
-  (default 600 B, tail-first truncation to a count + `vibespace-job list`
-  pointer), sits AFTER tools/rules in the injection order (injection-budget
-  law), CJK-safe cuts, markers advance at render. Zero events ⇒ zero bytes.
+- **Budget management (owner concern; PROTOTYPE-VALIDATED 2026-08-17)**: the
+  jobs section is byte-capped (default 600 B) with tail-first truncation to a
+  `…+N more — vibespace-job list` pointer and a degenerate one-line floor
+  (`## Background jobs: N — vibespace-job list`, 44 B); name display is
+  code-point-clipped at 24 chars (CJK-safe — never a split multibyte char).
+  Placement: inside the existing SessionStart/prompt-context payload, after
+  tools/rules and group context, BEFORE activity logs; **sacrifice order** when
+  the global INLINE_CAP (9600 B, margin under the harness's exact-10240
+  persisted-output wrap) is tight: activity logs shrink first, then the jobs
+  digest folds to its floor line, then drops entirely — group context is never
+  displaced. Measured worst cases (prototype, seeds test-job-model): 40 jobs
+  with max-length CJK names → 558 B; 200 adversarial jobs → 547 B; 7-event
+  update block → 569 B; merged into a 9350 B existing payload → 9396 B (floor
+  applied), 9520 B → 9566 B, 9580 B → digest dropped; zero jobs/events ⇒ zero
+  bytes. Markers advance at render; delivery re-checks VISIBILITY at render
+  time (an access narrowed after an event queued is honored).
 No mid-turn injection, no autonomous turns, no Stop-hook extension: an idle
 conversation learns about job events when the user next engages it, or the
 agent polls — poll is the primary interface (owner decision).
@@ -298,6 +310,17 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
   security subsection before implementation (device-side 0600 files over the
   mux never argv; no subscription-account material in remote job env; watch
   re-arm on daemon reconnect as a three-touch assert).
+- **No existence oracle** (agent must never learn about jobs it cannot view):
+  every agent-facing read path filters by `view` BEFORE rendering — the
+  session-start digest, prompt-context updates, `list` (counts never include or
+  hint at hidden jobs), and name-collision handling (names are scope-namespaced
+  precisely so a collision error can only ever reference the caller's own
+  jobs). `poll`/`logs`/`stop` on a non-visible id return the IDENTICAL reply as
+  a nonexistent id — `no job "jb-x" visible to this session — vibespace-job
+  list` — never a 403 that confirms existence. `jobs-updated` WS broadcasts
+  carry full data but reach cookie-authed browser clients only (agents hold no
+  WS; their surfaces are the filtered vsst_ endpoints). Filter unit-pinned in
+  test-job-model (owner-lineage / groupmate / stranger fixture trio).
 - User (cookie-auth) always has full view+control; every denial teaches.
 
 ## 8. CLI — full specification (`vibespace-job`, static tracked)
