@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.343.1
+
+- **publish layer 2 (owner report "this._notify is not a function")** — with the Proxy fix in place the call finally reached PluginManager, which exposed an OLDER break: a dead-code sweep (dc37220, the audit batch) had deleted `_notify()` while its 8 call sites remained — every plugin-state broadcast (and the publish tail) has thrown since. Definition restored verbatim. New gate: test-architecture #9 — server-side `this._x()` calls must have an in-file definition (scoped to server tiers; src/lib mixins excluded), with this incident as the motivating case. Lesson re-pinned: a "dead code" deletion must grep BOTH the definition and its call sites (feedback_verify_what_you_commit, third instance).
+
+
 ## 2.343.0
 
 - **CRITICAL latent: port publish dead since the 拆分 (owner report "public URLs not available") — 7th decomposition incident, first PROXY-SWALLOWED-ASSIGNMENT** — src/server/lazy.js's mk() Proxy had a get trap but NO set trap, so mounts-plugins-wiring's `portForwards.plugins = plugins` (decomposition #12, 2.326.0) wrote to the Proxy's dummy target instead of the real PortForwardManager: `publish` threw "public URLs are not available on this instance" on every instance for 17 releases. Fixed with a forwarding set trap (class fix — every extracted `singleton.prop = value` works again) + new `scripts/test-lazy.mjs` gate in npm run ci with the incident as a negative control.

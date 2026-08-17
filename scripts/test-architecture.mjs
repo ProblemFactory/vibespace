@@ -156,5 +156,37 @@ for (const [edge] of EXCEPTIONS) {
   ok(!broken.length, `every relative require/import resolves (${broken.slice(0, 3).join('; ') || 'all resolve'})`);
 }
 
+// 9) SERVER-side private methods that are CALLED must be DEFINED in-file
+//    (2.343.1, the _notify incident: a dead-code sweep deleted PluginManager's
+//    _notify() while 8 call sites remained — every plugin broadcast and the
+//    publish path threw for weeks; no battery saw a call-time method miss).
+//    Scoped to server tiers only — src/lib uses prototype mixins (methods
+//    defined across files) and would false-positive.
+{
+  const svFiles = allFilesFor9().filter((f) => !f.startsWith('src/lib/'));
+  const broken = [];
+  for (const f of svFiles) {
+    const s9 = read(f);
+    const called = new Set([...s9.matchAll(/this\.(_[a-zA-Z0-9]+)\(/g)].map((m) => m[1]));
+    for (const name of called) {
+      const woCalls = s9.replace(new RegExp(`this\\.${name}\\(`, 'g'), '');
+      const defined = new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(woCalls) || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9);
+      if (!defined) broken.push(`${f}: this.${name}() called but never defined`);
+    }
+  }
+  ok(!broken.length, `server-side private methods are defined where called (${broken.slice(0, 3).join('; ') || 'clean'})`);
+  function allFilesFor9() {
+    const out = ['server.js'];
+    (function walk(dir) {
+      for (const e of fs.readdirSync(path.join(REPO, dir))) {
+        const p9 = dir + '/' + e;
+        if (fs.statSync(path.join(REPO, p9)).isDirectory()) walk(p9);
+        else if (p9.endsWith('.js')) out.push(p9);
+      }
+    })('src');
+    return out;
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
