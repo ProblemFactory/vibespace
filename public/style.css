@@ -3438,3 +3438,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .jobs-form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
 .jobs-form-row label { font-size: 11px; color: var(--text-dim); }
 .jobs-form-row input, .jobs-form-row select { width: 100%; box-sizing: border-box; }
+.jobs-chip-url { color: var(--accent); border-color: var(--accent-dim); cursor: pointer; }
+.jobs-chip-url:hover { background: var(--bg-hover); }
+.ports-svc { font-size: 10px; padding: 0 5px; border: 1px solid var(--accent-dim); border-radius: 8px; color: var(--accent); }
