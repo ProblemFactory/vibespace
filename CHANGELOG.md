@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.342.1
+
+- **Background Work in the activity rail + visual redesign** (owner feedback "界面也太简单了/为啥不放到rail里"): new rail item with live badge (red `N!` = failed/missed/unverified, amber `N?` = awaiting your input, green count = running) and a compact rail panel (shared renderer with the window); the window gets severity-colored cards (left border green/amber/red), kind-icon section heads with up/total counts, progress/port/group chips, a summary toolbar (`2 running · 1 failed`), a ＋New dialog (user-created jobs via the new cookie-authed POST /api/jobs — schedule floors don't apply to you), and a cleaner expandable detail (payload block, access row + 🔒 lock, run ring, redacted log tail). All strings still textContent-only; glyphs are text symbols (emoji ban).
+- **Injection placement fix (owner catch: "resume context里没有")** — the jobs digest had landed in prompt-context (per-turn, context burn) instead of task-context: now the digest rides SessionStart/RESUME (task-context, after group context, under the same 9600B cap) and prompt-context carries only NEW-event deltas. A resumed session rediscovers its background work in its resume context, as designed.
+- Screenshot-verified in a worktree instance (window + rail panel, demo jobs incl. failed/running/cron states).
+
+
 ## 2.342.0
 
 - **Background Work — agent-detachable services, long tasks, and cron** (docs/design-background-work.md, owner-approved v3.1; this machine only — cross-machine parked pending owner design). Agents get `vibespace-job`: `run "cmd" --name x --context "brief"` (the context payload is echoed verbatim at every poll — the amnesia-proof brief), `--keep-up` for supervised services (boot replay incl. across pod rebuilds, crash backoff with park-after-6, adopt-first restarts), `--every/--cron/--at` schedules (jittered, 15min agent floor, catch-up-once, missed⇒notify — never a silent skip), `--until "MARKER"` completion, blocking/non-blocking poll (CLI caps --wait at 100s under the harness 120s Bash timeout), `progress`, verified `stop` (services stay down), `rm` that refuses live jobs. Process identity = pid+starttime+bootId written by the wrapper as its FIRST act and re-verified at every adopt/kill (never pattern-kill, never pid-reuse roulette); single-engine lock (a second server against the same data/ goes read-only); engine initializes after listen and can never block boot; store is atomic + broadcast, runtime `_`-keys never persisted.

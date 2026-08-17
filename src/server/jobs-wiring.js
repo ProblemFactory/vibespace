@@ -26,6 +26,15 @@ function create({ app, dataDir, broadcastAll, userTodos, log }) {
     if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
     res.json({ jobs: [...jm.jobs.values()].map((j) => ({ ...jm.snapshot(j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], runs: (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger })) })) });
   });
+  // user-side create (the panel's ＋New — no vsst_ token in the browser)
+  app.post('/api/jobs', (req, res) => {
+    if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
+    const b = req.body || {};
+    const spec = { ...b, owner: { conversation: null, sessionId: null, sessionCreatedAt: 0, createdBy: 'user', groupsSnapshot: [] } };
+    const r = jm.create(spec, USER);
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.json({ success: true, job: r.job, renamed: r.renamed });
+  });
   app.get('/api/jobs/:id', (req, res) => {
     const job = jm.jobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: 'no such job' });
