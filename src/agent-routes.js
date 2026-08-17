@@ -929,7 +929,13 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   const ref = req.params.ref;
   const job = a.selfJob ? (a.selfJob.id === ref || a.selfJob.name === ref || !ref ? a.selfJob : null) : findVisible(a.jm, a.caller, ref);
-  if (!job) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  if (!job) {
+    // 2.343.4: boot-collapse tombstone — redirect ONLY when the caller could see
+    // the survivor anyway (no-existence-oracle: an invisible family stays a plain 404)
+    const kept = !a.selfJob && a.jm._collapsed && a.jm._collapsed.get(ref);
+    if (kept && findVisible(a.jm, a.caller, kept)) return res.status(404).json({ error: `run record ${ref} was consolidated into ${kept} (cron runs now share one record) — vibespace-job poll ${kept}` });
+    return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  }
   const wait = Math.min(Number(req.query.wait) || 0, 600) * 1000;
   if (wait && !jobModel.isTerminal(job) && !(req.query.answers && (job.interaction.answers || []).length)) {
     await a.jm.waitFor(req.query.answers ? a.jm.ansWaiters : a.jm.waiters, job.id, wait);

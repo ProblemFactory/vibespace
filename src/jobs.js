@@ -247,6 +247,7 @@ class JobManager {
         if (!['done', 'interrupted', 'failed', 'missed'].includes(old.state)) continue;
         if (this._verifyAlive(this._readStamp(old))) continue;
         this.jobs.delete(old.id); this._dirty = true;
+        (this._collapsed = this._collapsed || new Map()).set(old.id, kids[0].id); // poll of a stale id names the survivor
         try { fs.rmSync(path.join(this.logsDir, old.id), { recursive: true, force: true }); } catch { }
       }
     }

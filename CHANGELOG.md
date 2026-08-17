@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.343.4
+
+- **Collapsed cron-run ids now redirect instead of vanishing** (owner-reported agent confusion): the 2.343.3 boot collapse deletes stale per-fire child records, but an agent that noted such an id mid-flight got only the uniform not-found on its next poll — indistinguishable from a permission wall — and had to rediscover by name. The collapse now records id→survivor tombstones (in-memory, this boot's collapse only) and `vibespace-job poll <stale-id>` answers with the surviving consolidated record's id and a one-line explanation. Deliberately NOT a silent alias: the permission model's no-existence-oracle rule stays intact because a tombstone only exists for records the engine itself just consolidated.
+
+
 ## 2.343.3
 
 - **Cron run-record flooding (owner screenshot: 18 identical done cards)** — every cron fire minted a fresh first-class task record with a 14-day GC (a 10-minute cron ≈ 100+ cards/day) and emitted a "cron fired"/"done" event pair that spammed the per-turn injection channel of every group session. Now each cron keeps ONE persistent child record — every fire is a run in its ring (panel shows a ×N runs chip), routine successful scheduled runs are SILENT (quiet-success: ring entry only, no event, no notify — failures and awaiting-user still surface), and boot runs a one-shot collapse of the pre-existing pile (terminal, stamp-verified-dead duplicates only, newest kept). Engine gate extended: one-child-across-fires + quiet-success pinned (19 asserts).
