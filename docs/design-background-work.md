@@ -1,16 +1,19 @@
 # Design: Background Work — agent-detachable Services, Long Tasks, and Cron
 
-Status: **DRAFT v2 for owner review** (2026-08-17). Nothing implemented.
-v1 → v2: a three-lens adversarial review (lifecycle / security / ergonomics, 40
-findings, 5 critical) is fully incorporated; the criticals each reshaped a core
-section and are marked ⚠REDTEAM where they landed.
-Origin: owner request 2026-08-17 — "本地开启一个服务给外界用…不想绑定到对话上…在
-vibespace 里注册一个服务…长任务…允许 agent 在启动任务的时候注入更多 context 信息…
-再次 poll 结果的时候可以看到回传的 context 信息。cron 也差不多道理。"
-Evidence: full mine of this machine's agent history (2.1 GB transcripts / 32
-workspaces + instance production data + live systemd/crontab escapes) → ~45
-incidents → the archetypes in §2. Private verbatim evidence lives in the
-personal-group shared context, not this public doc.
+Status: **DRAFT v3 for owner review** (2026-08-17). Nothing implemented.
+v1→v2: three-lens red team (40 findings, 5 critical) incorporated.
+v2→v3 (owner decisions 2026-08-17): ① services must survive a pod rebuild via
+boot replay — that is sufficient; long tasks need NOT survive pod rebuilds.
+② **No automatic agent triggering from cron/task completion** — the automation
+red line stands (the only conceivably-acceptable future form would be an
+explicitly-metered `claude -p` run on an API-key account; deferred
+indefinitely). Instead, job events reach a conversation as **passively injected
+context at natural turn boundaries**, byte-budgeted. ③ Agents obtain results
+primarily via **poll**, not wakeups. ④ New: **Interaction Panels** — an agent
+running a user-interactive long task (verification codes, scan-QR-then-enter)
+can present a simple UI to the user; the definition mechanism is §6.4.
+Evidence base and archetypes: §2 (mined from 2.1 GB of this machine's agent
+history; private verbatim evidence in the personal-group shared context).
 
 ---
 
@@ -23,386 +26,456 @@ orphan dev-server incident behind B-16d9); escapes to `systemd --user` + crontab
 (a daily agent automation hand-built as timer + retry script + chat-mirror, with
 secrets baked into unit files and 4 silent failures in 3 weeks); sessions parked
 as pollers (CI watchers re-armed by hand a dozen times); future-dated backlog
-items as poor-man's cron ("session cron 撑不到该日期"); results landing in `/tmp`
-with no context after the launcher compacted; `pkill -f` matching the agent's own
-cmdline (twice); and post-restart recovery by human broadcast ("check whether
-your background tasks need restarting") because no inventory exists.
-
-Three kinds of registered work over one skeleton:
+items as poor-man's cron; results landing in `/tmp` with no context after the
+launcher compacted; `pkill -f` matching the agent's own cmdline (twice); and
+post-restart recovery by human broadcast because no inventory exists.
 
 | Kind | One-liner | Lifecycle |
 |---|---|---|
-| **Service** | "keep this process up" | boot replay, restart policy, health check, no completion |
-| **Long task** | "run to completion; I may be gone by then" | one-shot, interruptible, pollable (blocking or not), carries a context payload echoed at poll time |
-| **Cron** | "do X on a schedule / at a date" | fires an action: spawn a task, wake an agent, or notify the user |
+| **Service** | "keep this process up" | boot replay (incl. across pod rebuilds), restart policy, health check, no completion |
+| **Long task** | "run to completion; I may be gone by then" | one-shot, interruptible, pollable, carries a context payload echoed at poll time; dies with the pod (accepted) |
+| **Cron** | "do X on a schedule / at a date" | fires an action: **spawn a task** or **notify the user** (никогда an agent) |
 
 ## 2. Use-case archetypes (mined, deduplicated)
 
-**Services** — (1) dev server for verification that must be findable/stoppable
-after the conversation (today: port-sweep discovery after the fact; leaks on
-deleted cwd); (2) serve-to-the-outside (listening-test HTTP server, webhook/OAuth
-targets — external systems call in whether or not a conversation is alive; wants
-stable published URL + liveness); (3) shared auxiliary infra (headless-Chrome CDP
-rig, mock backends pgrep-checked before every test, VNC observation stack —
-"start if absent, reuse otherwise"); (4) always-on watchers with remediation (a
-tunnel was silently dead 9 days because nothing owned a health check); (5)
-interactive background process holding stdin across turns (device-auth code
-entry via mkfifo plumbing today).
+**Services** — (1) dev server for verification, findable/stoppable after the
+conversation; (2) serve-to-the-outside (test HTTP servers, webhook/OAuth targets
+— wants stable published URL + liveness); (3) shared auxiliary infra (headless-
+Chrome rig, mock backends, VNC stack — "start if absent, reuse otherwise"); (4)
+always-on watchers with remediation (a tunnel silently dead 9 days); (5)
+interactive background process holding stdin across turns → now §6.4.
 
-**Long tasks** — (6) multi-hour convergence watches (rebuilt as chopped 30-min
-shell loops today); (7) batch/collection jobs where overlapping restarts have
-corrupted output (needs single-instance locking); (8) await-external-event
-(human QR scan, hardware power-cycle, endpoint healthy — unbounded, must never
-silently expire); (9) **poll-later with amnesia**: the launcher has compacted or
-died before completion; the poller needs the original intent — the context
-payload — echoed with the result.
+**Long tasks** — (6) multi-hour convergence watches; (7) batch/collection jobs
+where overlapping restarts corrupted output (single-instance locking); (8)
+await-external-event (human QR scan, endpoint healthy — unbounded, never
+silently expires); (9) **poll-later with amnesia**: the poller needs the
+original intent — the context payload — echoed with the result.
 
-**Cron** — (10) recurring patrols (quiet-success, escalate-only); (11)
-future-dated one-shots weeks out ("verify the contract auto-terminated on Sep
-5"); (12) scheduled agent runs (retry/backoff, run history, failure surfacing —
-today a hand-built systemd timer with forensics-by-mtime); (13) periodic
-maintenance (cleanup, compaction).
+**Cron** — (10) recurring patrols (quiet-success, escalate-only notify); (11)
+future-dated one-shots weeks out; (12) periodic maintenance. (Scheduled *agent
+runs* are explicitly out of scope — red line, §3.)
 
-**Cross-cutting demands** — registration-first (discovery stays as the stray
-fallback); kill by handle only with kill-time re-verification; per-run history
-with retained logs and exit causes; boot = adopt-first, never respawn over a
-living process; first-class visualization (invisible wakeups have already
-confused the user once).
+**Cross-cutting** — registration-first (port-sweep discovery stays as the stray
+fallback); kill by handle only, re-verified at kill time; per-run history with
+retained logs and exit causes; boot = adopt-first; first-class visualization.
 
-## 3. Hard fences (honest version) ⚠REDTEAM
+## 3. Hard fences
 
-- **§ban-safety is enforced by policy + guardrails, not magically by structure.**
-  A job is arbitrary user-UID code: it *could* read credential files and curl a
-  vendor endpoint on a schedule — exactly the ban-postmortem pattern — and no
-  source-level whitelist can see inside stored argv. Therefore:
-  - **Create/edit-time refusal**: job argv/env/health-cmd and cron prompts are
-    scanned for vendor hosts and credential-material paths (`api.anthropic.com`,
-    `.credentials.json`, `data/subs`, `CLAUDE_CODE_OAUTH*`, …); matches are
-    refused with a teaching error citing §ban-safety. (Friction, not proof — but
-    it converts "easy accident" into "deliberate circumvention".)
-  - **Schedule floors + mandatory jitter**: agent-created recurring schedules
-    have a floor (default 15 min) and always jitter; fixed metronomes are not
-    expressible. Health probes get the same jitter and run through the same
-    sanitized async spawn path as jobs (probe env = agentEnv-stripped; hard
-    timeout; process-group kill) — a probe is never a side door.
-  - **Negative-control tests**: test-job-model refuses a vendor-credential job
-    spec; test-jobs-engine asserts probe env is stripped; test-vendor-whitelist
-    remains the source-level law for OUR code.
-  - The injected teaching block explicitly marks "cron + usage/quota polling" as
-    a ban-risk pattern to never build.
-- **No `-p` inference from jobs** (program-use billing): scheduled agent runs
-  happen only by waking/spawning **interactive** sessions (§6.3).
-- **Agent-created `wake-new-session` crons require explicit user approval before
-  first fire** (§6.3) — unattended recurring billed sessions are a user decision,
-  never an agent default. ⚠REDTEAM
-- **Not a plugin replacement** (plugins = installable host capabilities; the
-  Plugin 2.0 effort may later consume jobs as a runtime primitive). **Not a
-  distributed scheduler in v1** (`hostId` is a parameter from day one, local-only
-  M1; remote = agentd ops in M2 with its own security subsection). **Does not
-  replace** the goal loop or harness background Bash; §8 teaches the negative
-  space explicitly.
+- **No automatic agent triggering. (owner decision, v3)** Cron actions and task
+  completions never start or wake an agent. The passive channel (§6.3b) only
+  injects awareness into a conversation's *next natural turn*. Rationale: an
+  unattended agent run on a subscription identity is the automation red line
+  (ban postmortem); the only future-acceptable form would be an explicitly
+  metered `claude -p` on an API-key account, and that is deferred indefinitely —
+  it is NOT part of this design's M1–M3.
+- **§ban-safety by policy + guardrails** (red team: structure alone cannot see
+  inside stored argv): create/edit-time refusal of job argv/env/health-cmd
+  matching vendor hosts or credential-material paths (`api.anthropic.com`,
+  `.credentials.json`, `data/subs`, `CLAUDE_CODE_OAUTH*`, …) with a teaching
+  error; schedule floors (default 15 min for agent-created recurring) +
+  mandatory jitter; health probes run through the same sanitized async spawn
+  path (agentEnv-stripped, hard timeout, group-kill) with jittered intervals;
+  negative-control tests (a vendor-credential job spec must be refused).
+- **Not a plugin replacement**; **not a distributed scheduler in v1** (`hostId`
+  is a parameter from day one, local-only M1); **does not replace** the goal
+  loop or harness background Bash (§8 teaches the negative space).
 
 ## 4. Data model
 
-Store `data/jobs.json` (writeJsonAtomic, SIGINT/SIGTERM flush, every mutation
-broadcasts `jobs-updated`), per-run logs `data/job-logs/<jobId>/<runTs>.log`.
+Store `data/jobs.json` (writeJsonAtomic, SIGINT/SIGTERM flush, mutations
+broadcast `jobs-updated`), per-run logs `data/job-logs/<jobId>/<runTs>.log`.
 
 ```jsonc
 {
   "id": "jb-3f9a2c",
   "kind": "service|task|cron",
-  "name": "collect-x",              // unique per OWNER SCOPE (not global) ⚠REDTEAM:
-                                     // scope-namespaced; collision auto-suffixes with a
-                                     // warning; ids are the only global handle (no
-                                     // existence oracle / name squatting across groups)
+  "name": "collect-x",              // unique per OWNER SCOPE (not global): collision
+                                     // auto-suffixes with a warning; ids are the only
+                                     // global handle (no existence oracle / squatting)
   "note": "…", "hostId": null,       // null = this instance; machine id in M2
 
-  "cmd": { "argv": [...], "cwd": "/abs", "env": { /* NON-secret; values never rendered to non-owner viewers nor in jobs-updated payloads */ } },
-  "envFrom": ["MY_TOKEN"],           // resolved at spawn from the secrets store (§7)
+  "cmd": { "argv": [...], "cwd": "/abs", "env": { /* NON-secret; values render to owner/user only, never in jobs-updated payloads */ } },
+  "envFrom": ["MY_TOKEN"],           // resolved at spawn from the user-managed secrets store (§7)
 
   // service
   "restart": "on-failure|always|never",
-  "health": { "type": "port|http|cmd", "value": "8088", "intervalS": 60 },  // jittered; sanitized async spawn; harmless-probe law
-  "ports": [8088],
+  "health": { "type": "port|http|cmd", "value": "8088", "intervalS": 60 },  // jittered, sanitized, harmless-probe law
+  "ports": [8088], "publish": false,
 
   // task
-  "singleInstance": true,            // per-RECORD concurrent-run lock; enforcement
-                                     // re-verifies liveness of the last run's process
-                                     // (pid+stamp), NEVER record state alone ⚠REDTEAM
+  "singleInstance": true,            // per-RECORD concurrent-run lock; enforcement re-verifies
+                                     // liveness of the last run's process, never record state alone
   "timeoutMs": null,
-  "untilOutput": "COLLECTED|DONE",   // literal substring in M1; regex only if it passes a
-                                     // linear-time vet; matched against bounded appended
-                                     // tail chunks only (§5) ⚠REDTEAM
+  "untilOutput": "COLLECTED",        // literal substring in M1 (regex only via linear-time vet);
+                                     // matched against bounded appended tail chunks only (§5)
 
   // cron
   "schedule": { "cron": "41 9 * * *" } | { "everyMs": 1800000, "jitterPct": 20 } | { "at": "…" },
-  "catchUp": "once",                 // DEFAULT once for {at} one-shots ⚠REDTEAM; a passed
-                                     // {at} under catchUp:none goes terminal `missed` and
-                                     // FIRES THE NOTIFY PATH (no silent expiry)
+  "catchUp": "once",                 // default once for {at}; a passed {at} under catchUp:none
+                                     // goes terminal `missed` AND fires notify (no silent expiry)
   "expiry": null,
-  "action": { "type": "spawn-task"|"wake"|"notify", ... },
-  "approval": "none|pending|approved", // agent-created wake-new-session ⇒ pending (§6.3)
+  "action": { "type": "spawn-task", "task": { /* embedded task spec */ } }
+          | { "type": "notify", "text": "…", "urgency": "low|normal|high" },
+                                     // v3: wake-* actions REMOVED (red line)
 
-  "context": { "payload": "…" },     // cap 8 KB (fits the real 9600 B inline injection cap
-                                     // after wrapping; CJK-safe truncation) ⚠REDTEAM; full
-                                     // payload echoed on single-job poll; `list` shows
-                                     // first line + byte count (context-burn guard)
+  "context": { "payload": "…" },     // cap 8 KB (fits the 9600 B inline injection budget after
+                                     // wrapping; CJK-safe truncation); echoed on single-job poll;
+                                     // `list` shows first line + byte count
 
-  // ownership ⚠REDTEAM (the flagship resume-later case): keyed to CONVERSATION LINEAGE,
-  // not the webui session id — resume mints a new webui session.
+  "interaction": { "pending": null, "answers": [] },   // §6.4 panel state
+
+  // ownership: keyed to CONVERSATION LINEAGE (resume mints a new webui session id)
   "owner": {
-    "conversation": { "backend": "claude", "id": "<backendSessionId>" },  // + fork chain matching (forkedFrom)
-    "sessionId": "…", "sessionCreatedAt": 0,   // secondary; collision-proof tuple
+    "conversation": { "backend": "claude", "id": "<backendSessionId>" },   // + fork-chain match
+    "sessionId": "…", "sessionCreatedAt": 0,   // secondary, collision-proof tuple
     "createdBy": "agent|user",
-    "groupsSnapshot": ["T-…"]        // refreshed EAGERLY on every job mutation + periodic
-                                     // sweep while owner lives (session deaths rarely
-                                     // emit a delete event) ⚠REDTEAM
+    "groupsSnapshot": ["T-…"]        // refreshed eagerly on every mutation + periodic sweep
   },
   "access": { "view": "group", "control": "session", "lockedBy": null },
-                                     // agent-created defaults: view=group (fallback all
-                                     // when ungrouped), control=session ⚠REDTEAM
-  "stopWithOwner": false,            // detachment is the default everywhere (§9)
+                                     // agent defaults: view=group (fallback all when
+                                     // ungrouped), control=session; user locks stick (§7)
+  "stopWithOwner": false,
 
   "desiredUp": true,
-  "state": "up|down|starting|failed|done|interrupted|unverified|scheduled|missed",
+  "state": "up|down|starting|failed|done|interrupted|unverified|scheduled|missed|awaiting-user",
   "proc": { "pid": 0, "starttime": 0, "bootId": "…", "argvHash": "…" },
-                                     // identity = pid+starttime+bootId (argv-hash is
-                                     // secondary confirmation only) — pid reuse by an
-                                     // IDENTICAL-argv respawn is the COMMON case ⚠REDTEAM
-  "supervise": { "consecutiveFails": 0, "parkedAt": null },  // persisted: parked-failed
-                                     // services are NOT resurrected by boot replay
-  "runs": [ { "startedAt":0,"endedAt":0,"exit":143,"cause":"ok|ok(until-output)|error|interrupted|oom|timeout|env-restart|owner-dead|missed","log":"…","trigger":"manual|boot|cron|restart-policy" } ]
+                                     // identity = pid+starttime+bootId; argv-hash secondary only
+  "supervise": { "consecutiveFails": 0, "parkedAt": null },   // persisted; boot skips parked
+  "runs": [ { "startedAt":0,"endedAt":0,"exit":143,"cause":"ok|ok(until-output)|error|interrupted|oom|timeout|env-restart|missed","log":"…","trigger":"manual|boot|cron|restart-policy" } ]
 }
 ```
 
 ## 5. Engine
 
 Tier routing: PURE `src/job-model.js` (schedule math, jitter, state machine,
-permission predicates, vendor-pattern vet) · ORCH `src/jobs.js` + server.js
-wiring stanza · agent endpoints in `src/agent-routes.js` · REST `/api/jobs*` ·
-CLI `data/bin/vibespace-job` (static tracked, AGENT_TOOLS) · CLIENT
-`src/lib/jobs-panel.js` (window type `jobs`) · M2 DEVICE `job-*` agentd ops.
+permission predicates, vendor-pattern vet, panel-schema validation) · ORCH
+`src/jobs.js` + server.js wiring stanza · agent endpoints in agent-routes.js ·
+REST `/api/jobs*` · CLI `data/bin/vibespace-job` (static tracked, AGENT_TOOLS) ·
+CLIENT `src/lib/jobs-panel.js` (+ `src/lib/job-interact.js` §6.4) · M2 DEVICE
+`job-*` agentd ops.
 
-**Single-engine lock** ⚠REDTEAM: before adopt/replay the engine takes
-`data/jobs.lock` (pid+starttime, stale-safe re-verification). A second server
-process against the same data/ (the #127 class) gets a read-only registry view +
-a loud notice — it never adopts, replays, or fires crons (no double-spawned
-services, no double-billed cron sessions).
-
-**Failure isolation.** Engine initializes after listen, in try/catch; endpoints
-return 503-retry-after until engine-ready; **any** init failure (not just store
-corruption) files a persistent user notice + telemetry and renders an
-"engine down" banner in the panel — services-not-replayed must be loud. Per-job
-try/catch; crash-looping services: success = uptime ≥ 60 s (else "consecutive"
-never trips — the RestartSec pitfall), exponential backoff 5 s→10 m, cap 6 →
-park `failed` + notify; `consecutiveFails/parkedAt` persist and **boot replay
-skips parked services** (they need an explicit poke). Store corruption: rename
-`.corrupt-<ts>`, then **reconcile before accepting registrations** — rebuild a
-skeleton from surviving pidfiles + `data/job-logs/<id>/` names, mark entries
-`unverified` for adoption, block same-name re-registration until resolved,
-best-effort salvage-parse of the corrupt file (never convert one bad parse into
-orphans + double-spawns). ⚠REDTEAM
-
-**Process identity & spawn.** Spawn protocol closes the crash window: write
-intent first (`starting` + pidfile path, flushed), spawn setsid-detached through
-a tiny wrapper whose first act atomically writes its own pidfile with
-{pid, starttime, bootId, argvHash}; boot reconciles pidfiles + declared-port
-liveness BEFORE deciding to replay. Adopt and every kill re-verify the full
-stamp at act time; argv-hash alone never authorizes a kill. Tasks are
-adopt-first too; a non-adoptable-but-possibly-alive process parks its record
-`unverified` with a loud notice — never terminal-while-running. ⚠REDTEAM
-
-**Runtime-survival matrix** ⚠REDTEAM (detected at boot, surfaced in CLI success
-output + panel):
-
-| Runtime | Detach survives server restart? | Promise shown |
-|---|---|---|
-| systemd user unit (KillMode=process) | yes | full |
-| bare `node server.js` / run.sh | yes until the terminal/box dies | full (weaker host) |
-| container/pod (fleet) | **no** — pod rebuild kills the PID namespace | "replay-only: services restart, tasks die — checkpoint your work" |
-
-Container-mode task deaths record `cause:"env-restart"` (distinct from
-`interrupted`); catchUp storms after long downtime are budgeted (§6.3).
-
-**untilOutput mechanics** ⚠REDTEAM: per-job byte-offset cursor, incremental
-appended-tail reads only (per-tick byte budget), hard per-line length cap before
-matching; M1 = literal substrings (regex later only through a linear-time vet at
-create time, rejected with a teaching error). Match → grace 30 s → SIGTERM to
-the group → `ok(until-output)` (never leave the process running under a `done`
-record; never hard-kill at the marker — flush/checkpoint corruption lesson).
-
-**GC.** Age-based only; a record whose stamp still verifies alive is never GC'd
-regardless of state; a non-terminal run's log is never unlinked — size caps
-enforce by rotation (wrapper reopen), not unlink (deleted-but-open fd = the
-12 GB class self-inflicted). ⚠REDTEAM
-
-**Ports integration.** Registered `ports` annotate the sweep (service row
-instead of "new port" toast — annotation waits on engine-ready); orphan detector
-consults the registry; the orphan toast gains **"Track this"** — adoption
-creates a `restart:never`, health-check-only record marked "adopted — restart
-command unknown" (a /proc cmdline can't reconstruct env/venv; restart policies
-unlock only after cmd/cwd is supplied). ⚠REDTEAM `--publish` composes with the
-existing forward/frp path for the serve-to-the-outside case.
+- **Single-engine lock**: `data/jobs.lock` (pid+starttime, stale-safe) before
+  adopt/replay; a second server process (the #127 class) gets read-only view +
+  loud notice — never adopts, replays, or fires crons.
+- **Failure isolation**: engine init after listen, try/catch; endpoints 503
+  until engine-ready; ANY init failure files a persistent user notice + panel
+  banner. Per-job try/catch. Crash loops: success = uptime ≥ 60 s, backoff
+  5 s→10 m, cap 6 → park `failed` + notify; `consecutiveFails/parkedAt` persist;
+  boot replay skips parked services. Store corruption: rename `.corrupt-<ts>`,
+  reconcile from pidfiles + log-dir names into `unverified` records, block
+  same-name re-registration until resolved, salvage-parse best-effort.
+- **Process identity & spawn**: intent-before-spawn (`starting` + pidfile path
+  flushed); setsid-detached via a tiny wrapper whose first act writes its own
+  pidfile {pid, starttime, bootId, argvHash}; boot reconciles pidfiles +
+  declared-port liveness BEFORE replay decisions. Adopt and every kill re-verify
+  the full stamp at act time. Tasks are adopt-first too; non-adoptable-but-
+  possibly-alive parks `unverified`, never terminal-while-running.
+- **Survival promise (v3, simplified per owner decision)**: services survive ANY
+  restart — same-process-tree restarts by detach+adopt, pod rebuilds by **boot
+  replay** (respawn from spec; that is the accepted semantic). Long tasks
+  survive server restarts where detach holds (systemd/bare) and are honestly
+  marked `cause:"env-restart"` + owner notified when a pod rebuild kills them —
+  no checkpoint magic promised. CLI/panel state the per-runtime promise.
+- **untilOutput mechanics**: per-job byte-offset cursor, incremental
+  appended-tail reads with per-tick byte budget, per-line length cap; M1 literal
+  substrings; match → grace 30 s → SIGTERM group → `ok(until-output)`.
+- **GC**: age-based only; never GC a record whose stamp verifies alive; never
+  unlink a non-terminal run's log (rotate via wrapper reopen, don't unlink).
+- **Ports integration**: registered `ports` suppress the "new port" toast
+  (service row instead; annotation waits on engine-ready); orphan detector
+  consults the registry; orphan toast gains **"Track this"** (adopts as
+  `restart:never` health-only, "restart command unknown" — /proc can't
+  reconstruct env/venv); `--publish` composes with forward/frp for stable URLs.
 
 ## 6. Semantics
 
 ### 6.1 Service
-Register → `desiredUp:true` → supervised start. Stop **always** sets
-`desiredUp:false` (no systemctl stop-vs-disable footgun; resurrection requires
-explicit start). Health probes: sanitized env, async, hard timeout, jittered
-interval, harmless-probe law (the VNC blacklist incident).
+Register → `desiredUp:true` → supervised start. `stop` always sets
+`desiredUp:false` (resurrection needs explicit `start` — no stop-vs-disable
+footgun). Health probes: sanitized env, async, timeout, jittered.
 
 ### 6.2 Long task
-`vibespace-job run "cmd" --name X --context "…"` → id immediately.
-- **Poll (non-blocking)**: state + exit cause + context payload + bounded log
-  tail. **Poll --wait**: server long-poll, **server-side clamp 600 s**, waiter
-  caps per job and per token, resolve-with-state on server shutdown (never
-  dangle into SIGTERM); the **CLI caps --wait at 100 s** — under the harness
-  Bash 120 s default timeout — and traps termination to print current state, so
-  a harness kill still returns useful output; usage text teaches non-blocking +
-  completion wakeup as primary, `--wait` labeled "short tails only". ⚠REDTEAM
-- **Interrupt**: verified-kill (stamp re-check), graceful then hard.
-- **Progress**: `vibespace-job progress <id> "text"` (job env carries
-  VIBESPACE_JOB_ID); rendered escaped (§9).
-- **Completion**: owner conversation live → wakeup (§6.3 primitive); always →
-  `jobs-updated` + panel badge; `--notify-user` files an inbox item. Nothing is
-  lost if the owner is gone: any authorized session polls later.
+Created via `run`; id returned immediately. Poll (non-blocking) returns state +
+exit cause + payload + bounded log tail. `--wait` long-poll: server clamp 600 s,
+waiter caps per job/token, resolve-with-state on shutdown; **CLI caps --wait at
+100 s** (under the harness Bash 120 s default) and traps termination to print
+current state. Interrupt = verified kill, graceful→hard. Progress via
+`vibespace-job progress` (job env carries VIBESPACE_JOB_ID). **Completion is
+learned by polling** (owner decision); §6.3b's passive injection additionally
+tells the conversation at its next natural turn.
 
-### 6.3 Cron
-Schedules in the PURE model; jittered; floors per §3.
-- **spawn-task**: embedded task spec, full task semantics.
-- **wake (owner conversation)** — this is a **new primitive** and is specified,
-  not assumed ⚠REDTEAM: the server injects an autonomous user-turn into the
-  owner's chat session over the wrapper stdin, **queue-until-idle** (never while
-  the session is streaming, never while a synced draft exists in
-  data/drafts.json; delivered when idle), carrying `origin:{kind:'cron-wake',
-  jobId}` so the normalizer/renderer path shows the existing wakeup CARD (the
-  2.229.2 invisibility fix), not a fake "You" bubble. Terminal-mode or read-only
-  owners degrade to `notify`. Active native goal → defer until the goal loop is
-  idle. Payload rides inside the turn under the injection budget (head +
-  `vibespace-job poll <id>` pointer when over).
-- **wake (new-session)** (M2): spawns a fresh INTERACTIVE chat session (normal
-  spawn path: agentEnv, billing identity via the account system, transcript,
-  board integration), ordering pinned bind-group → ctx-sync → spawn so the
-  scheduled run has its 岗位 context. **Agent-created instances land
-  `approval:"pending"` — an inbox card (billing identity, schedule, est.
-  runs/day) the user confirms before the first fire**; user-created fire
-  immediately. maxConcurrent:1 + per-cron daily cap; boot catch-up spawns are
-  serialized with a global budget (default 2; the rest become notify items).
-  ⚠REDTEAM
-- **notify**: inbox item carrying the job id with one-click pause/delete;
-  per-job rate cap + dedupe window (identical text collapses with a counter);
-  agent-set `high` urgency on a schedule auto-downgrades after the first
-  unacked repeat. ⚠REDTEAM
-- **deadOwner default = `notify`** (inbox item with the full payload + one-click
-  "open a session with this brief"); `new-session` and `skip` are explicit
-  opt-ins, and a skipped fire still writes a run entry `cause:owner-dead` —
-  there is no silent skip anywhere in the subsystem. ⚠REDTEAM
+### 6.3a Cron actions (v3: two only)
+- **spawn-task** — embedded task spec, full task semantics.
+- **notify** — inbox item carrying the job id, one-click pause/delete; per-job
+  rate cap + dedupe window (identical text collapses with a counter); agent-set
+  `high` on a schedule auto-downgrades after the first unacked repeat.
+Schedules jittered with floors (§3); `catchUp:"once"` make-up runs are marked
+`trigger:boot`; a missed `{at}` under `catchUp:none` goes `missed` + notify —
+no silent skip exists anywhere.
+
+### 6.3b Passive context injection (replaces wake; owner decision)
+Job events for jobs owned by (or visible to) a conversation — finished, failed,
+parked, awaiting-user — queue per conversation and are delivered ONLY at
+natural injection points, through the existing prompt-context path (the
+pendingNotice / task-context channel agent-routes already budgets):
+- **SessionStart / first prompt**: the jobs digest — one line per visible job,
+  failed and awaiting-user first: `jb-3f9a task done 2h ago — collect-x —
+  vibespace-job poll jb-3f9a`.
+- **Next user turn** (UserPromptSubmit): only NEW events since last delivery,
+  one line each.
+- **Budget management (owner concern)**: the whole jobs section is byte-capped
+  (default 600 B, tail-first truncation to a count + `vibespace-job list`
+  pointer), sits AFTER tools/rules in the injection order (injection-budget
+  law), CJK-safe cuts, markers advance at render. Zero events ⇒ zero bytes.
+No mid-turn injection, no autonomous turns, no Stop-hook extension: an idle
+conversation learns about job events when the user next engages it, or the
+agent polls — poll is the primary interface (owner decision).
+
+### 6.4 Interaction Panels (agent-authored UI for user-interactive tasks)
+The mined cases: enter an SMS/2FA code, scan a QR then type the resulting code,
+choose an option mid-task, approve a step. Design principle: **declarative
+widgets, never agent HTML in our DOM** (stored-XSS law).
+
+**Tier 1 (this design): declarative panel schema.** The agent (or the running
+job itself) posts a panel:
+
+```jsonc
+// vibespace-job ask <id> --form '<json>'   (or --form @file.json)
+{
+  "title": "扫码登录",
+  "blocks": [
+    { "type": "md",     "text": "手机扫下面的二维码，然后把短信验证码填进来。" },
+    { "type": "image",  "path": "/tmp/qr-login.png" },      // served via the file API; path access-checked against the job cwd/allowlist
+    { "type": "input",  "id": "code", "label": "验证码", "placeholder": "6 位数字", "pattern": "\\d{6}" },
+    { "type": "choice", "id": "env",  "label": "环境", "options": ["prod", "staging"], "default": "prod" },
+    { "type": "buttons","options": [ { "id": "submit", "label": "提交", "style": "primary" },
+                                     { "id": "cancel", "label": "取消" } ] }
+  ],
+  "timeoutS": 1800                    // panel expires → job sees {expired:true}
+}
+```
+
+Widget set (M1): `md` (DOMPurify-sanitized markdown), `image` (file-API path,
+`.src` assignment never innerHTML), `input`, `textarea`, `choice` (radio/
+select), `checkbox`, `buttons`, `progress` (read-only bar the job can update).
+Validation (`pattern`, `required`) runs client-side AND server-side (PURE
+schema validator in job-model). Schema size cap 32 KB; one pending panel per
+job (a new `ask` replaces it, versioned so a stale submit is rejected loudly).
+
+Flow: job posts panel → job `state:"awaiting-user"` → amber badge segment +
+toast + inbox item ("collect-x 需要你输入 — 打开面板") → the panel renders in a
+small window (window type `job-interact`, openSpec-replayable, mobile-friendly
+since blocks stack vertically) → user submits → answers append to
+`interaction.answers` → the job reads them: `vibespace-job answers <id>
+[--wait 100]` (same long-poll mechanics as §6.2) or, if the job was started
+with `--stdin-open`, each answer is also written to the job's stdin as one JSON
+line (covers curses-less simple scripts). Multi-round: post another panel.
+Everything renders escaped; the user's answers are visible to owner/user only
+(they may contain codes — treated like secrets in logs: literal-redacted if
+they match envFrom values, and never echoed in `list`).
+
+**Tier 2 (M3, only if tier 1 proves insufficient): sandboxed HTML app** — agent
+writes an HTML file rendered in `<iframe sandbox="allow-scripts">` (no
+same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
+`vsui.progress(p)`); our DOM never touches agent markup. Deferred.
 
 ## 7. Permissions & secrets
 
-- `view` and `control` ∈ session|group|all; agent-created defaults **view=group**
-  (fallback `all` for ungrouped sessions — the resume-later case must work),
-  control=session. Owner = conversation-lineage match (§4) — verified on the
-  fast path and on wake delivery; mismatch ⇒ treated as dead-owner + surfaced
-  for re-owning in the panel.
-- **Mutation is NOT control** ⚠REDTEAM: editing cmd/env/envFrom/action/schedule
-  = owner or user only (group/all control covers start/stop/kill/ack). A
-  non-owner can never rewrite a wake prompt (cross-session prompt injection) or
-  repoint argv at the secrets store.
-- **User locks stick**: `lockedBy:'user'` refuses agent access-edits with a
-  teaching error, and survives rm+recreate via a (scope,name) tombstone for 30
-  days. Access widening by non-owner control holders requires owner or user.
-- **Secrets, honest threat model** ⚠REDTEAM: same-UID processes can ultimately
-  read anything; `envFrom`'s value is keeping secrets out of argv (/proc
-  cmdline), out of the store/broadcasts/UI, and out of casual log exposure — not
-  out of a determined same-UID reader. Concretely: the secrets file is written
-  from the user UI only (0600, values never in agent responses); the server
-  literal-redacts known secret values from log tails/progress before returning
-  or broadcasting; cmd.env values render only to owner/user. M2 remote jobs get
-  their own subsection before implementation: device-side secret files 0600
-  delivered over the mux never argv, wiped on rm, and an explicit refusal to
-  ship subscription-account material into remote job env (ban-postmortem rule),
-  plus job-state watch re-arm on daemon reconnect as a three-touch assert.
-- User (cookie-auth) always has full view+control. Every denial is a teaching
-  error naming the fix.
+- `view`/`control` ∈ session|group|all; agent defaults view=group (fallback
+  `all` when ungrouped), control=session. Owner = conversation-lineage match,
+  verified on the fast path; mismatch ⇒ surfaced for re-owning in the panel.
+- **Mutation ≠ control**: editing cmd/env/envFrom/action/schedule/panel = owner
+  or user only; group/all control covers start/stop/kill/ack only (no
+  cross-session prompt/argv injection).
+- **User locks stick**: `lockedBy:'user'` refuses agent access-edits (teaching
+  error) and survives rm+recreate via a (scope,name) tombstone (30 d).
+- **Secrets, honest threat model**: same-UID processes can ultimately read
+  anything; `envFrom` keeps secrets out of argv//proc-cmdline, the store,
+  broadcasts, and the UI — not away from a determined same-UID reader. Secrets
+  file written from the user UI only (0600); server literal-redacts known
+  secret values from log tails/progress/answers before returning or
+  broadcasting; cmd.env values render to owner/user only. M2 remote jobs get a
+  security subsection before implementation (device-side 0600 files over the
+  mux never argv; no subscription-account material in remote job env; watch
+  re-arm on daemon reconnect as a three-touch assert).
+- User (cookie-auth) always has full view+control; every denial teaches.
 
-## 8. Agent surface
+## 8. CLI — full specification (`vibespace-job`, static tracked)
 
-**One creation verb** ⚠REDTEAM: `vibespace-job run "cmd" [--keep-up] [--at T |
---every 30m | --cron "expr"] --name X --context "…"` — `--keep-up` makes it a
-service, a schedule flag makes it a cron; `service`/`cron` subcommands remain as
-human aliases. One injected example demonstrates all three kinds. Other verbs:
-`list`, `poll [--wait]`, `logs`, `progress`, `stop` (kind-appropriate; service ⇒
-desiredUp=false), `start`, `access`, `rm` — where **rm refuses on any
-non-terminal job** (`rm --stop` kills-verified then removes; `rm --orphan` is
-the only way to abandon a live process, logged and sweep-annotated). ⚠REDTEAM
+Conventions: `<ref>` = job id (`jb-…`) or scoped name; durations accept
+`30s/10m/6h`; all verbs honor access scopes server-side; every error names the
+fix; no-args prints usage + the caller's visible jobs. From inside a job
+process the same CLI works (env carries VIBESPACE_API + job token +
+VIBESPACE_JOB_ID, so `progress`/`ask`/`answers` need no `<ref>`).
 
-**Teaching the negative space** ⚠REDTEAM (one clause each in the injection
-line): turn-scoped → harness background Bash/Monitor; session-scoped
-continuation → goal loop; must outlive the conversation → `vibespace-job`;
-harness cron → don't (expires); machine-fireable dates → cron job, not a dated
-backlog item (`backlog-add` with a leading ⏰/date pattern prints a pointer to
-`cron add`; backlog remains for human-actioned items).
+```text
+CREATE (one verb; flags pick the kind)
+  vibespace-job run "CMD" --name NAME [common] [service|task|cron flags]
+    common:
+      --cwd DIR              default: caller session cwd
+      --context "TEXT"       amnesia-proof brief, ≤8KB, echoed on poll (@file to read from file)
+      --env K=V …            non-secret env (repeatable)
+      --secret NAME …        envFrom reference (values managed in the panel UI, never via CLI)
+      --view session|group|all     default group
+      --control session|group|all  default session
+      --host MACHINE         M2; default local
+    service (--keep-up):
+      --keep-up              makes it a service
+      --restart on-failure|always|never   default on-failure
+      --health port:3000 | http://127.0.0.1:3000/healthz | cmd:"CMD"   optional
+      --port N …             declared listeners (annotates port sweep)
+      --publish              expose via forward/frp; URL shown in panel + `poll`
+      --stop-with-owner      opt-in coupling to the owning conversation
+    task (default kind):
+      --until "TEXT"         literal marker in output ⇒ completion (grace 30s then TERM)
+      --timeout 6h           default unbounded
+      --stdin-open           keep stdin pipe open (interaction answers mirror to stdin)
+      --no-single-instance   allow concurrent runs of this record (default: locked)
+      --notify-user          file an inbox item on completion/failure
+    cron (a schedule flag makes it a cron; CMD becomes the spawned task):
+      --every 30m [--jitter 20%]   floor 15min for agent-created
+      --cron "41 9 * * *"
+      --at "2026-09-05 06:00"      one-shot; catchUp defaults once
+      --notify-on fail|done|always|never   default fail
+  vibespace-job notify-cron --name NAME (--every…|--cron…|--at…) --text "…" [--urgency low|normal|high]
+                                       # cron whose action is notify-only (no process)
 
-**Session-start jobs digest** ⚠REDTEAM: SessionStart/first-prompt injection
-includes a byte-budgeted one-line-per-job digest of jobs visible to the session
-(failed first, budgeted last per the injection law): `jb-3f9a running 3h —
-collect-x — vibespace-job poll jb-3f9a`. `run`/`--keep-up` warn on near-name or
-same-cwd+argv matches before creating (anti-double-register).
+READ
+  vibespace-job list [--kind service|task|cron] [--all] [--json]
+                                       # one line per job: id state name uptime/next-fire + payload first line
+  vibespace-job poll <ref> [--wait 100] [--tail 40] [--json]
+                                       # state, exit+cause, timestamps, FULL context payload,
+                                       # log tail; --wait long-polls (CLI cap 100s, prints
+                                       # state on timeout/TERM — never silent)
+  vibespace-job logs <ref> [--run N] [--tail 200]
 
-## 9. Visualization
+CONTROL
+  vibespace-job stop <ref> [--force]   # task: TERM→(grace)→KILL; service: desiredUp=false then stop
+  vibespace-job start <ref>            # service/cron (also un-parks a failed service)
+  vibespace-job rm <ref> [--stop]      # refuses on any non-terminal job; --stop kills-verified
+                                       # first; --orphan (logged) is the only live-abandon path
+  vibespace-job access <ref> [--view X] [--control X]   # refused if user-locked
+  vibespace-job progress "TEXT"        # from inside the job (or: progress <ref> "TEXT")
 
-- Jobs window (`jobs`, openSpec `openJobs`): three sections, **two-line rows**
-  (identity / status), coarse humanized next-fire on a 30 s unref'd tick, exact
-  times in detail. Detail: run ring (cause + log link), payload, access
-  controls (with lock), health config. Live via `jobs-updated`.
-- **XSS invariant** ⚠REDTEAM: every job-record string (name, note, progress,
-  payload, cron prompt, log tails) renders via escHtml/textContent — plain text
-  only, never innerHTML/markdown; the wake card reuses the existing escaped
-  renderer. An M1 gate asserts this.
-- Attention: failed service / completed-unacked task → severity-segmented
-  taskbar badge + toast; cron fires render as wakeup cards.
-- Session Properties "Background work" row; **kill paths never block**: default
-  everywhere (UI kill, agent kill, sweeps, resume-guard) is **keep running** —
-  the dialog is informational with stop checkboxes; `stopWithOwner:true` is the
-  opt-in coupling. ⚠REDTEAM
-- M1 also **lists detected systemd-user/crontab escapes read-only** in the
-  panel (visibility before migratability); M2 import = register + disable the
-  source unit in one atomic operation with a dry-run diff. ⚠REDTEAM
+INTERACTION (§6.4)
+  vibespace-job ask --form @panel.json [--timeout 30m]   # from inside the job (or ask <ref>)
+  vibespace-job answers [--wait 100] [--all]             # poll user replies (or answers <ref>)
+```
+
+Sample outputs (teaching-shaped):
+
+```text
+$ vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume" --until "COLLECTED"
+started jb-3f9a2c (task collect-x) — log data/job-logs/jb-3f9a2c/20260817-1102.log
+this job OUTLIVES your conversation. Poll it (even from a future session):
+  vibespace-job poll jb-3f9a2c
+runtime note: server restarts survive; a container rebuild kills tasks (checkpoint your work).
+
+$ vibespace-job poll jb-3f9a2c --tail 3
+jb-3f9a2c collect-x [task] state=done exit=0 cause=ok(until-output) ran 2h42m (ended 13:44Z)
+context: goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume
+log tail (3/48219 lines):
+  [498/500] prompt saved
+  [499/500] prompt saved
+  COLLECTED 500 prompts → /data/x.jsonl
+next: vibespace-job logs jb-3f9a2c --tail 200 · vibespace-job rm jb-3f9a2c
+```
+
+Injected teaching (ONE block, negative space included): *"turn-scoped waits →
+background Bash/Monitor · session continuation → /goal · anything that must
+OUTLIVE this conversation → `vibespace-job run "cmd" --name x --context "…"`
+(--keep-up = service · --every/--at = schedule) · never harness cron (expires)
+· machine-fireable dates → `--at`, not a dated backlog item"* — plus the
+session-start jobs digest (§6.3b) so resumed sessions rediscover their work
+(`backlog-add` with a leading ⏰/date pattern prints a pointer to `--at`).
+
+## 9. UI / UX
+
+**Entry points**: rail icon (stack/gears glyph) + ⚙ menu "Background Work" +
+window type `jobs` (openSpec `openJobs`, replayable); taskbar shows a
+severity-segmented badge (red failed · amber awaiting-user · green
+done-unacked) reusing the 2.339.0 segmented-badge pattern; every count
+clickable → panel filtered to that state.
+
+**Jobs window** (two-line rows; live via `jobs-updated`, no polling; countdown
+humanized on a 30 s unref'd tick):
+
+```
+┌ Background Work ────────────────────────────── [＋ New] [⚙] ┐
+│ SERVICES · 2 up · 1 parked                                   │
+│ ● dev-server      :3000 ↗ https://…frp…/        up 3h 12m    │
+│   会话「重构」· 组 个人项目 · on-failure · ♥port    [Stop][Logs] │
+│ ✖ mock-api        parked (6 crashes, exit 1)               │
+│   backoff exhausted 11:02 · 点 Start 重试            [Start][Logs] │
+│ TASKS · 1 running · 1 awaiting you · 1 done                  │
+│ ◐ collect-x       2h42m · 「347/500 done」          [Stop][Logs] │
+│   ctx: goal: 500 prompts; output: /data/x.jsonl…             │
+│ ✋ qr-login        awaiting your input (12m)        [Open panel] │
+│ ✔ export-pdf      done 08-16 · exit 0 · ok          [🗑][Logs]  │
+│ CRON · 2 scheduled                                           │
+│ ⏰ daily-patrol    41 9 * * * ±20% · next ~3h       [Pause][Runs]│
+│ ⏰ sep5-check      at 09-05 06:00 · in 18d          [Pause][Runs]│
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Detail view** (row click): identity (id copy-chip, owner conversation +
+group chips, host); state timeline; **run history ring** — one row per run
+(start/end · duration · exit+cause · trigger · log link opening the existing
+file viewer); context payload block (monospace, copy button); access row
+(view/control dropdowns + 🔒 user-lock toggle; agent-attempted changes show as
+refused events); health/schedule editors (owner/user only); publish URL with
+copy; danger zone (rm rules from §8 surfaced as buttons with the same
+refusals). All strings escHtml — plain text everywhere (XSS law; M1 gate
+asserts it).
+
+**Interaction panel window** (`job-interact`, small, centered, mobile = full
+width): title bar carries the job name + remaining timeout; blocks stack
+vertically; submit disabled until validation passes; after submit shows
+"已提交，任务继续运行" and auto-closes unless the job posts another panel.
+Arrival UX: toast + amber badge + inbox item; clicking any of them opens the
+panel window. Panel state is openSpec-replayable (restart-safe).
+
+**Toasts** (existing anchored-card system): service crash/park, task
+done/failed (with job name + one-click open), panel arrival. Quiet-success
+crons show nothing (their `notify-on fail` default only surfaces failures).
+
+**Session Properties** gains "Background work": jobs owned by this
+conversation; killing a session never blocks on jobs — informational dialog
+with per-job stop checkboxes, default keep-running (detachment is the thesis);
+`--stop-with-owner` jobs are pre-checked.
+
+**Escape visibility (M1)**: a collapsed "Outside the registry" section lists
+detected `systemd --user` units + crontab entries read-only, so hand-rolled
+escapes are at least visible where the registry lives; M2 import = register +
+disable source atomically.
 
 ## 10. Milestones & gates
 
 - **M1 (local core)**: store + PURE model + engine (service/task/cron with
-  spawn-task, wake-owner, notify) + adopt/replay + single-engine lock + CLI +
-  REST + panel + until-output + polls + orphan-track affordance + escape
-  listing. Gates: `test-job-model` (incl. vendor-pattern refusal negative
-  control), `test-jobs-engine` (worktree: spawn → SIGKILL server → reboot →
-  adopt-by-stamp; second-engine refusal; probe-env assert; until-output
-  completion; GC-never-on-live), restore-smoke assertion (registered service
-  survives restart), panel XSS assert, resume-owner-conversation poll test (the
-  flagship promise), arch-tier entries, kb + CHANGELOG same-commit.
-- **M2**: wake-new-session (+ approval flow) · remote hostId via agentd ops
-  (capability-gated, three-touch, parity test, remote-secrets subsection) ·
-  resource caps (prlimit; cgroup where available) · `--publish` deep
-  integration · systemd/crontab import.
+  spawn-task + notify) + adopt/replay + single-engine lock + full CLI (§8) +
+  REST + jobs window + detail + until-output + polls + passive injection
+  (§6.3b) + orphan-track + escape listing. Gates: test-job-model (schedule
+  math, state machine, vendor-pattern refusal, panel-schema validation),
+  test-jobs-engine (worktree: spawn → SIGKILL server → reboot → adopt-by-stamp;
+  second-engine refusal; probe-env assert; until-output completion;
+  GC-never-on-live), restore-smoke assertion (registered service survives
+  restart), panel XSS assert, resume-owner-conversation poll test, arch-tier
+  entries, kb + CHANGELOG same-commit.
+- **M1.5**: Interaction Panels tier 1 (§6.4) + `--stdin-open` + answers
+  long-poll + `job-interact` window.
+- **M2**: remote hostId via agentd ops (capability-gated, three-touch, parity,
+  remote-secrets subsection) · resource caps (prlimit; cgroup where available) ·
+  `--publish` deep integration · systemd/crontab import (register + disable
+  source atomically).
 - **M3**: job templates (deploy monitor, health watchdog + remediation, patrol
-  battery) · fleet/admin aggregate view · group dashboards.
+  battery) · fleet/admin aggregate view · panel tier 2 (sandboxed iframe) if
+  tier 1 proves insufficient.
 
-## 11. Open questions for the owner
+## 11. Remaining open questions
 
-1. **wake-new-session approval** — v2 bakes in "explicit user approval before
-   first fire" for agent-created scheduled sessions (red-team: unattended
-   recurring billed sessions must be a user decision). Confirm, or prefer a
-   softer default (auto-approve under N runs/day)?
-2. **Container fleet promise** — pods can't detach across rebuilds. Is
-   "replay-only + loud labeling" acceptable for fleet users in M1, or should M2
-   prioritize a device-daemon-hosted runner (jobs live under the machine's
-   agentd, not the pod) to give real survival there?
-3. **Retention defaults** — runs ring 20 / logs 50 MB/job (rotated) /
-   done-tasks 14 d?
-4. **Interactive stdin handle** (archetype 5) — M2 `vibespace-job send <id>`,
-   or park until a second real need?
-5. **Scope of M1 review** — proceed to implementation after this doc's review,
-   or want a thinner walking skeleton first (service + task only, cron in a
-   fast-follow)?
+1. Retention defaults: runs ring 20 / logs 50 MB per job (rotated) / done-task
+   records 14 d — tune?
+2. Interaction Panels in M1.5 as scoped here, or pull `input`+`buttons`-only
+   minimal panels into M1 (the QR/code case is the live pain)?
+3. The jobs digest budget (600 B default) — enough, or make it a setting under
+   `agents.*`?
