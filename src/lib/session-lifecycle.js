@@ -1385,6 +1385,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       case 'openTaskLog':
         this.openTaskLog(spec.taskId, { tab: spec.tab, syncId });
         break;
+      case 'openJobs':
+        this.openJobs({ syncId });
+        break;
+      case 'openJobInteract':
+        this.openJobInteract(spec.jobId, { syncId });
+        break;
       case 'openUsage':
         this.openUsage({ syncId });
         break;

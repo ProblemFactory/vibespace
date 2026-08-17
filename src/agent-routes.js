@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs }) {
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -227,6 +227,13 @@ function sessionToolsIntro(T) {
       '  vibespace-ask list  /  vibespace-ask resolve <id|text>',
       'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
       'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).');
+  }
+  if (T.jobs) {
+    L.push(
+      'Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get it back later BY POLLING, even from a future session:',
+      '  vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"',
+      '  vibespace-job poll <id>    (echoes your --context brief with the result — write one that explains everything to your future amnesiac self)',
+      'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. Run `vibespace-job` with no arguments for everything else (stop/logs/ask/answers).');
   }
   L.push(
     'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
@@ -468,6 +475,16 @@ app.get('/api/agent/prompt-context', (req, res) => {
       parts.push(MANAGER_INTRO);
       s._mgrIntroSeen = true;
     }
+    // Background jobs: NEW events since this session's last delivery (view-
+    // filtered at render time; ≤600B; zero events = zero bytes).
+    try {
+      const jm = getJobs && getJobs();
+      if (jm && jm.ready) {
+        const u = jm.updatesFor(jobsCaller(s, id), s._jobsEventsSeenTs || 0);
+        if (u.text) parts.push(u.text);
+        s._jobsEventsSeenTs = u.lastTs; // marker advances at render (accepted-lost on drop)
+      }
+    } catch { }
     // Oversize belt (2.113.0): full contexts + the mixed-delivery manifest
     // embed the persisted-output rescue line, lone diff blocks don't (each is
     // small) — but several parts can still cross Claude's ~10KB hook persist
@@ -520,6 +537,15 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // first) is always in-context; only the TAIL (oldest activity-log lines) is
     // dropped, and it's recoverable via `vibespace-task show --full`.
     let ctx = outParts.join('\n\n');
+    // Background jobs digest (2.342.0, design-background-work §6.3b): view-
+    // filtered, budget-fitted by the PURE model, yields before everything else.
+    try {
+      const jm = getJobs && getJobs();
+      if (jm && jm.ready) {
+        const dig = jm.digestFor(jobsCaller(s, id), Buffer.byteLength(ctx, 'utf-8'));
+        if (dig) ctx += '\n\n' + dig;
+      }
+    } catch { }
     const INLINE_CAP = 9600; // bytes; margin under the 10240 wrap threshold
     if (Buffer.byteLength(ctx, 'utf-8') > INLINE_CAP) {
       const ptr = `\n\n…[context trimmed to stay inline — run \`vibespace-task${injectGroups.length > 1 ? ' --group <id>' : ''} show --full\` for the rest]`;
@@ -600,7 +626,7 @@ function stopNudgeEnabled() {
 function toolOn(name) { // 'Status' | 'Ask' | 'Task'
   try { return serverSetting('agents.tool' + name) !== false; } catch { return true; }
 }
-function enabledTools() { return { status: toolOn('Status'), ask: toolOn('Ask'), task: toolOn('Task') }; }
+function enabledTools() { return { status: toolOn('Status'), ask: toolOn('Ask'), task: toolOn('Task'), jobs: toolOn('Jobs') }; }
 function ctxInjectionOn() {
   try { return serverSetting('agents.contextInjection') !== false; } catch { return true; }
 }
@@ -831,6 +857,111 @@ app.post('/api/agent/group-admin', (req, res) => {
 
 // ── Hook install management (Manage Agents dialog — auto-registers at boot,
 // this surfaces status + one-click repair/remove for non-engineers) ──
+
+// ── Background Work (2.342.0): agent-facing job endpoints ──────────────────
+// Auth: vsst_ session token (full caller) OR jbt_ job token (job-scoped: the
+// process may act on ITSELF only). Uniform not-found on invisible ids — no
+// existence oracle.
+function jobsCaller(s, id) {
+  const key = sessionStatusKey(s, id);
+  return {
+    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1),
+    sessionId: id, sessionCreatedAt: s.createdAt || 0,
+    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id)),
+  };
+}
+function jobAuth(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+  const jm = getJobs && getJobs();
+  if (!jm) { res.status(503).json({ error: 'jobs engine not available' }); return null; }
+  if (!jm.ready) { res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting — retry shortly' }); return null; }
+  if (token && token.startsWith('jbt_')) {
+    const job = jm.jobByToken(token);
+    if (!job) { res.status(401).json({ error: 'unknown job token' }); return null; }
+    return { jm, selfJob: job, caller: null };
+  }
+  const hit = agentSession(req, res);
+  if (!hit) return null;
+  if (!toolOn('Jobs')) { res.status(403).json({ error: 'the vibespace-job tool is disabled in Settings → Integration' }); return null; }
+  return { jm, caller: jobsCaller(hit[0], hit[1]), session: hit[0], sessionId: hit[1] };
+}
+const jobModel = require('./job-model.js');
+const NOT_VISIBLE = (ref) => `no job "${ref}" visible to this session — vibespace-job list`;
+function findVisible(jm, caller, ref) {
+  const all = [...jm.jobs.values()];
+  const vis = caller ? jobModel.visibleJobs(all, caller) : [];
+  return vis.find((j) => j.id === ref) || vis.find((j) => j.name === ref) || null;
+}
+app.post('/api/agent/jobs', (req, res) => {
+  const a = jobAuth(req, res); if (!a) return;
+  if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
+  const b = req.body || {};
+  const spec = {
+    kind: b.kind, name: b.name, note: b.note, cmd: b.cmd, envFrom: b.envFrom,
+    restart: b.restart, health: b.health, ports: b.ports, publish: b.publish,
+    singleInstance: b.singleInstance, timeoutMs: b.timeoutMs, untilOutput: b.untilOutput,
+    stdinOpen: b.stdinOpen, notifyUser: b.notifyUser, schedule: b.schedule,
+    catchUp: b.catchUp, action: b.action, context: b.context, access: b.access,
+    stopWithOwner: b.stopWithOwner,
+    owner: {
+      conversation: a.caller.conversationId ? { id: a.caller.conversationId } : null,
+      sessionId: a.sessionId, sessionCreatedAt: a.session.createdAt || 0,
+      createdBy: 'agent', groupsSnapshot: [...a.caller.groups],
+    },
+  };
+  if (!spec.cmd && b.action && b.action.type === 'spawn-task') { /* notify-cron / cron shapes carry cmd inside action */ }
+  else if (!spec.cmd && b.action && b.action.type === 'notify') { /* pure notify cron */ }
+  else if (!spec.cmd) return res.status(400).json({ error: 'cmd required' });
+  const r = a.jm.create(spec, a.caller);
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ success: true, job: r.job, renamed: r.renamed });
+});
+app.get('/api/agent/jobs', (req, res) => {
+  const a = jobAuth(req, res); if (!a) return;
+  const list = a.selfJob ? [a.selfJob] : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
+  res.json({ success: true, jobs: list.map((j) => a.jm.snapshot(j)) });
+});
+app.get('/api/agent/jobs/:ref', async (req, res) => {
+  const a = jobAuth(req, res); if (!a) return;
+  const ref = req.params.ref;
+  const job = a.selfJob ? (a.selfJob.id === ref || a.selfJob.name === ref || !ref ? a.selfJob : null) : findVisible(a.jm, a.caller, ref);
+  if (!job) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  const wait = Math.min(Number(req.query.wait) || 0, 600) * 1000;
+  if (wait && !jobModel.isTerminal(job) && !(req.query.answers && (job.interaction.answers || []).length)) {
+    await a.jm.waitFor(req.query.answers ? a.jm.ansWaiters : a.jm.waiters, job.id, wait);
+  }
+  res.json({ success: true, job: a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400) }) });
+});
+app.post('/api/agent/jobs/:ref/:act', (req, res) => {
+  const a = jobAuth(req, res); if (!a) return;
+  const { ref, act } = req.params;
+  const job = a.selfJob ? (a.selfJob.id === ref || a.selfJob.name === ref ? a.selfJob : null) : findVisible(a.jm, a.caller, ref);
+  if (!job) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  const selfActs = ['progress', 'ask'];
+  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress or ask' });
+  const needsControl = ['stop', 'start', 'rm'];
+  if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  if (!a.selfJob && act === 'access') {
+    if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+    if (job.access && job.access.lockedBy === 'user') return res.status(403).json({ error: "the user pinned this job's access — ask in chat instead of changing it" });
+  }
+  try {
+    let r;
+    if (act === 'stop') r = a.jm.stop(job, { force: !!req.body?.force });
+    else if (act === 'start') r = a.jm.start(job);
+    else if (act === 'rm') r = a.jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
+    else if (act === 'progress') r = a.jm.progress(job, req.body?.text || '');
+    else if (act === 'ask') r = a.jm.ask(job, req.body?.panel);
+    else if (act === 'access') {
+      for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
+      a.jm._touch(job); a.jm._save(); r = { ok: true };
+      return res.json({ success: true, access: job.access });
+    }
+    else return res.status(400).json({ error: `unknown action "${act}"` });
+    if (r.error) return res.status(400).json({ error: r.error });
+    res.json({ success: true, ...r });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 }
 
 module.exports = { setupAgentRoutes };

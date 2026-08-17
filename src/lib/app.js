@@ -33,6 +33,7 @@ import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
+import { openJobsWindow, openInteractWindow } from './jobs-panel.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
@@ -1073,6 +1074,7 @@ class App {
       item(I.key, t('Manage agents\u2026'), () => this._showAgentsDialog()),
       item(I.puzzle, t('Plugins\u2026'), () => this.openPluginsDialog()),
       item(I.chart, t('Usage\u2026'), () => this.openUsage()),
+      item(I.chart, t('Background Work\u2026'), () => this.openJobs()),
       item(I.pulse, t('Diagnostics report\u2026'), () => this._openDiagnostics()),
       item(I.alert || I.pulse, t('Report a problem\u2026'), () => this.captureIncident?.()),
       item(I.exp || I.pulse, t('Restore a previous layout\u2026'), () => this._showLayoutHistory()));
@@ -2027,6 +2029,8 @@ class App {
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
   openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }
   openUsage(opts) { return openUsageWindow(this, opts || {}); }
+  openJobs(opts) { return openJobsWindow(this, opts || {}); }
+  openJobInteract(jobId, opts) { return openInteractWindow(this, jobId, opts || {}); }
 
   // Diagnostics report: renders the local telemetry summary (client errors,
   // boot crashes, feature usage) as a static HTML page in the embedded

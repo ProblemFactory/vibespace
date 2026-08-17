@@ -352,6 +352,12 @@ const SETTINGS_SCHEMA = {
     description: t('Lets agents log finished work into the group activity log and park items in the group backlog. OFF: not taught, the progress/backlog write endpoints refuse with skip-and-continue guidance; reading group state (vibespace-task show) still works while context injection is on.'),
     category: t('Integration'), liveApply: true,
   },
+  'agents.toolJobs': {
+    type: 'boolean', default: true,
+    label: t('Agent tool: vibespace-job (background work)'),
+    description: t('Lets agents register services, long tasks and cron schedules that outlive their conversation (Background Work window). OFF: not taught, endpoints refuse with skip-and-continue guidance; existing jobs keep running and stay visible to you.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 0, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),
