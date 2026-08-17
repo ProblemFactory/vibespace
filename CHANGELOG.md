@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.341.1
+
+- **Dial-device ops broken since the 拆分 (userW's mount failure: "Cannot find module './package.json'")** — extraction #13 moved the dial-pairing primitives from server.js (repo root) into src/server/dial-pairing.js and two `require('./package.json')` came along verbatim, now resolving inside src/server/ where no package.json exists. Both sit on hot paths — `deviceForDial` (every dial-device op that constructs a fresh DeviceManager: mounts, terminals, probes) and `ensureAgentdOnHost` (ssh agentd install) — and throw only at CALL time, so no boot smoke, route battery, or free-variable check ever saw it. Sixth lost-binding incident; first of the RELATIVE-PATH subclass (the other five were free identifiers). Fixed to `require('../../package.json')`.
+- **New permanent gate**: test-architecture #8 statically resolves EVERY relative require/import under server.js + src/ (any of .js/.json/.mjs/index.js) and fails the build on a dangling one — negative-controlled against the exact pre-fix file. A full-tree sweep found exactly these two sites broken, nothing else.
+
+
 ## 2.341.0
 
 - **File editors/viewers can reload from disk** (owner report: an HTML file changed on disk was unreachable without closing the window). CodeEditor: new ⟳ toolbar button + a freshness watch — the on-disk mtime is baselined at load/save and polled every 15s while the tab is visible (local files; remote ssh hosts check on tab refocus only — no ssh-per-tick polling); a clean editor auto-reloads (scroll/cursor preserved, visible preview re-rendered), a dirty editor shows a "⚠ File changed on disk" chip and reload always confirms before discarding edits — never silently. Viewer windows (image/video/pdf/csv/xlsx/eml/docx/pptx…) get a floating ⟳ that re-renders with a cache-bust param on media URLs (/api/file/raw sends no cache headers, so a same-URL img/video could re-serve stale from the browser memory cache). Preview rendering extracted to `_renderPreviewNow()` shared by the Preview toggle and reload.
