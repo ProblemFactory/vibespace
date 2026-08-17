@@ -1,6 +1,6 @@
 # Design: Background Work — agent-detachable Services, Long Tasks, and Cron
 
-Status: **DRAFT v3 for owner review** (2026-08-17). Nothing implemented.
+Status: **IMPLEMENTED 2.342.0** (2026-08-17, owner-approved; per-machine only — cross-machine execution parked pending owner design). This doc remains the authoritative spec; deferred residue: remote hostId, resource caps, --publish deep wiring, port-sweep suppression, taskbar badge segment, Session Properties row, systemd/crontab one-click import, panel tier-2 iframe.
 v1→v2: three-lens red team (40 findings, 5 critical) incorporated.
 v2→v3 (owner decisions 2026-08-17): ① services must survive a pod rebuild via
 boot replay — that is sufficient; long tasks need NOT survive pod rebuilds.
