@@ -6,6 +6,8 @@
 // (read/write/delete + tombstones + owner-conflict guard). Extracted VERBATIM.
 // ORCH tier: it consumes the machine handle (hosts) and the usage/pool engine,
 // never vendor APIs. Late-created deps arrive lazily — all uses are at runtime.
+const { classifyCliDeath } = require('./agent-tool-generators.js');
+const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

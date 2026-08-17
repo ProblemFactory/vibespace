@@ -4,6 +4,7 @@
 // probes (PERMISSION_MODES / EFFORT_LEVELS / --name support), and the model
 // registry (known baseline + passive discovery via noteModelSeen +
 // /v1/models refresh). Extracted VERBATIM. ORCH tier.
+const https = require('https');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

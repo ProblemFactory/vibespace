@@ -357,23 +357,6 @@ function _patchHookFile(file, createIfMissing, mutate) {
   }
   throw new Error(`${file} kept changing under concurrent writes — gave up`);
 }
-// Known CLI death signatures → { reason, detail } (2.226.0, probe batch).
-// Patterns are the CLIs' OWN canned strings; keep them TIGHT — the buffer
-// tail can contain tool output, and a loose pattern would mislabel normal
-// exits. cli_missing additionally requires the shell's 126/127 exit code
-// (a bare "No such file or directory" also appears in ordinary tool output).
-function classifyCliDeath(tail, code) {
-  if (!tail) return null;
-  const line = (re) => { const m = tail.match(re); return m ? String(m[0]).replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 200) : null; };
-  let d;
-  if ((d = line(/(?:Not logged in|Please run \/login|OAuth token revoked)[^\n]*/))) return { reason: 'not_logged_in', detail: d };
-  if ((d = line(/No conversation found with session ID[^\n]*/))) return { reason: 'no_conversation', detail: d };
-  if ((d = line(/error: unknown (?:option|command)[^\n]*/))) return { reason: 'cli_arg_error', detail: d };
-  if ((d = line(/(?:Invalid API key|invalid x-api-key|authentication_error)[^\n]*/i))) return { reason: 'auth_error', detail: d };
-  if ((d = line(/Credit balance is too low[^\n]*/i))) return { reason: 'billing_error', detail: d };
-  if ((code === 127 || code === 126) && (d = line(/[^\n]*(?:command not found|No such file or directory)[^\n]*/))) return { reason: 'cli_missing', detail: d };
-  return null;
-}
 function agentHooksStatus() {
   const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE) };
@@ -478,4 +461,22 @@ function removeAgentHooks() {
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };
 }
-module.exports = { create };
+// Known CLI death signatures → { reason, detail } (2.226.0, probe batch).
+// Patterns are the CLIs' OWN canned strings; keep them TIGHT — the buffer
+// tail can contain tool output, and a loose pattern would mislabel normal
+// exits. cli_missing additionally requires the shell's 126/127 exit code
+// (a bare "No such file or directory" also appears in ordinary tool output).
+function classifyCliDeath(tail, code) {
+  if (!tail) return null;
+  const line = (re) => { const m = tail.match(re); return m ? String(m[0]).replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 200) : null; };
+  let d;
+  if ((d = line(/(?:Not logged in|Please run \/login|OAuth token revoked)[^\n]*/))) return { reason: 'not_logged_in', detail: d };
+  if ((d = line(/No conversation found with session ID[^\n]*/))) return { reason: 'no_conversation', detail: d };
+  if ((d = line(/error: unknown (?:option|command)[^\n]*/))) return { reason: 'cli_arg_error', detail: d };
+  if ((d = line(/(?:Invalid API key|invalid x-api-key|authentication_error)[^\n]*/i))) return { reason: 'auth_error', detail: d };
+  if ((d = line(/Credit balance is too low[^\n]*/i))) return { reason: 'billing_error', detail: d };
+  if ((code === 127 || code === 126) && (d = line(/[^\n]*(?:command not found|No such file or directory)[^\n]*/))) return { reason: 'cli_missing', detail: d };
+  return null;
+}
+
+module.exports = { create, classifyCliDeath }; // classifyCliDeath also consumed by session-stdout (was a free identifier there — 2.343.2 audit)

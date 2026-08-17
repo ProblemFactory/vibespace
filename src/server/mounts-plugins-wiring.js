@@ -72,7 +72,7 @@ async function graduateHostToDial(h, { serverUrl, viaRelay } = {}) {
       { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
   });
     // ── install ──
-    let base = String(serverUrl || '').replace(/\/$/, '') || agentdDeps.publicUrl?.() || null;
+    let base = String(serverUrl || '').replace(/\/$/, '') || String(serverSetting('agentd.publicUrl') || '').replace(/\/$/, '') || null; // was agentdDeps.publicUrl?.() — a free identifier since the split (2.343.2 audit)
     if (!base && viaRelay) {
       const st = plugins.status('frp');
       const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub: st?.selfDialSub || '' });

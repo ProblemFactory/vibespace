@@ -37,6 +37,7 @@ export function installUserTodos(app) {
       || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
   };
   const jump = (key) => {
+    if (key === 'jobs') { popup.classList.add('hidden'); app.openJobs?.(); return; } // Background Work notifications live in no session
     const s = sessionFor(key);
     if (!s) { showToast(t('Session not found in the list yet — try from the sidebar'), { type: 'error' }); return; }
     popup.classList.add('hidden');
