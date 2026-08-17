@@ -342,8 +342,8 @@ class TaskGroupManager {
     // Syntax edge cases still live in each CLI's own no-args output.
     // Per-feature toggles (2.211.0): a disabled tool is OMITTED — teaching a
     // command whose endpoint refuses would train agents into dead ends.
-    const T = tools || { status: true, ask: true, task: true };
-    const n = [T.task, T.status, T.ask].filter(Boolean).length;
+    const T = tools || { status: true, ask: true, task: true, jobs: true };
+    const n = [T.task, T.status, T.ask, T.jobs].filter(Boolean).length;
     if (!n) return [];
     const g = gid || '';
     const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage)`, '',
@@ -379,6 +379,13 @@ class TaskGroupManager {
       `vibespace-ask "the question" --detail "options + your recommendation" --urgency high`,
       `\`\`\``,
       'Resolve it YOURSELF the moment they answer (chat counts): `vibespace-ask resolve <id>`');
+    if (T.jobs) out.push(
+      '',
+      'Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get the result later BY POLLING, even from a future session:',
+      `\`\`\``,
+      `vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"`,
+      `\`\`\``,
+      '(`vibespace-job poll <id>` echoes your --context brief with the result — write one your amnesiac future self can act on. --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule · dated obligations go to --at, not the backlog. Run `vibespace-job` with no args for stop/logs/ask/answers.)');
     out.push(
       '',
       'In chat replies use ABSOLUTE file paths (e.g. /home/user/out/final.wav) — the UI makes them clickable; bare/relative names may not resolve.');

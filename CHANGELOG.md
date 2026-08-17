@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.342.2
+
+- **Chicken-and-egg teaching gap (owner catch)**: the `vibespace-job` teaching block only existed in the NO-GROUP baseline tools intro — grouped sessions (nearly all real ones) build their tools section in task-groups.js renderContext, which never mentioned the command, so agents in groups could never learn to create jobs (and with zero jobs the digest is deliberately zero bytes — nothing would ever bootstrap). The grouped intro now carries the same one-trigger-sentence + copy-ready example (`--keep-up`/`--every`/`--cron`/`--at` cheat line, dated-obligations→--at pointer), the per-turn micro-reminder lists vibespace-job, and both honor the agents.toolJobs toggle.
+
+
 ## 2.342.1
 
 - **Background Work in the activity rail + visual redesign** (owner feedback "界面也太简单了/为啥不放到rail里"): new rail item with live badge (red `N!` = failed/missed/unverified, amber `N?` = awaiting your input, green count = running) and a compact rail panel (shared renderer with the window); the window gets severity-colored cards (left border green/amber/red), kind-icon section heads with up/total counts, progress/port/group chips, a summary toolbar (`2 running · 1 failed`), a ＋New dialog (user-created jobs via the new cookie-authed POST /api/jobs — schedule floors don't apply to you), and a cleaner expandable detail (payload block, access row + 🔒 lock, run ring, redacted log tail). All strings still textContent-only; glyphs are text symbols (emoji ban).
