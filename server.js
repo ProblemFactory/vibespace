@@ -1205,7 +1205,14 @@ app.post('/api/user-todos/:id', (req, res) => {
 // /api/agent/session-status; writes scoped to the calling agent's own session.
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState() });
+// ── Background Work (2.342.0): jobs engine — constructed here, INITIALIZED
+// only after listen (failure isolated; §5 of docs/design-background-work.md).
+const jobsWiring = require('./src/server/jobs-wiring.js').create({
+  app, dataDir: path.join(__dirname, 'data'),
+  broadcastAll: (msg) => { const payload = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(payload); } catch {} } },
+  userTodos, log: (...a) => console.log(...a),
+});
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs });
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1875,6 +1882,7 @@ server.listen(PORT, HOST, () => {
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
   try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
+  setTimeout(() => jobsWiring.initAfterListen(), 1500); // Background Work engine: adopt-first, never blocks boot
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, env: ${ENV_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 
@@ -1978,6 +1986,7 @@ function shutdown() {
   try { userTodos.flush(); } catch {} // debounced user-todo writes
   try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
+  try { jobsWiring.shutdown(); } catch {} // jobs store flush + engine lock release
   process.exit(0);
 }
 process.on('SIGINT', () => {

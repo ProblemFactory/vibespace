@@ -1,0 +1,177 @@
+#!/usr/bin/env node
+// vibespace-job — Background Work CLI (STATIC tracked; docs/design-background-work.md §8).
+// Auth: VIBESPACE_SESSION_TOKEN (agent session) or VIBESPACE_JOB_TOKEN (from
+// inside a job process). Server scopes everything by token — no ids of other
+// people's work ever leak here (uniform not-found, no 403 oracle).
+'use strict';
+const API = process.env.VIBESPACE_API;
+const SESS = process.env.VIBESPACE_SESSION_TOKEN;
+const JOBT = process.env.VIBESPACE_JOB_TOKEN;
+const JOBID = process.env.VIBESPACE_JOB_ID;
+if (!API || (!SESS && !JOBT)) { console.error('vibespace-job: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
+
+const args = process.argv.slice(2);
+const flags = {};
+const pos = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a.startsWith('--')) {
+    const k = a.slice(2);
+    if (i + 1 < args.length && !args[i + 1].startsWith('--')) { flags[k] = args[++i]; }
+    else flags[k] = true;
+  } else pos.push(a);
+}
+const verb = pos[0];
+
+function dur(v) { // 30s/10m/6h/2d → ms
+  const m = /^(\d+(?:\.\d+)?)(s|m|h|d)?$/.exec(String(v || ''));
+  if (!m) return null;
+  return Math.round(+m[1] * ({ s: 1e3, m: 60e3, h: 3600e3, d: 86400e3 }[m[2] || 'm']));
+}
+function readArg(v) { // @file support
+  if (typeof v === 'string' && v.startsWith('@')) { try { return require('fs').readFileSync(v.slice(1), 'utf-8'); } catch (e) { console.error('cannot read ' + v.slice(1) + ': ' + e.message); process.exit(1); } }
+  return v;
+}
+async function call(method, p, body) {
+  const res = await fetch(API + p, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (SESS || JOBT) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch((e) => ({ _neterr: e.message }));
+  if (res._neterr) { console.error('vibespace-job: server unreachable (' + res._neterr + ') — if a --wait was interrupted the job is still running; retry the poll'); process.exit(3); }
+  let j = {};
+  try { j = await res.json(); } catch { }
+  if (j.error) { console.error(j.error); process.exit(1); }
+  return j;
+}
+const hum = (ms) => { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; };
+function printJob(j, tailLines) {
+  const run = j.run || {};
+  const dur_ = run.startedAt ? (run.endedAt ? ` ran ${hum(run.endedAt - run.startedAt)}` : ` up ${hum(Date.now() - run.startedAt)}`) : '';
+  console.log(`${j.id} ${j.name} [${j.kind}] state=${j.state}${run.exit !== null && run.exit !== undefined ? ' exit=' + run.exit : ''}${run.cause ? ' cause=' + run.cause : ''}${dur_}${j.nextFireAt ? ' next=' + hum(j.nextFireAt - Date.now()) : ''}${j.progress ? '\nprogress: ' + j.progress : ''}`);
+  if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
+  if (j.answers && j.answers.length) console.log('answers: ' + JSON.stringify(j.answers[j.answers.length - 1]));
+  if (j.logTail) console.log(`log tail:\n${j.logTail.split('\n').map((l) => '  ' + l).join('\n')}`);
+  if (j.state === 'done' || j.state === 'failed') console.log(`next: vibespace-job logs ${j.id} --tail 200 · vibespace-job rm ${j.id}`);
+}
+
+const USAGE = `vibespace-job — background work that OUTLIVES this conversation (services · long tasks · cron)
+create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, survives your compaction)"]
+           [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user]
+           [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
+           [--every 30m | --cron "41 9 * * *" | --at "2026-09-05 06:00"]              ← schedule (spawns CMD)
+         vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high]
+read:    vibespace-job list [--all]        · vibespace-job poll <id|name> [--wait 100] [--tail 40]
+         vibespace-job logs <id> [--tail 200]
+control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
+         vibespace-job access <id> [--view session|group|all] [--control session|group|all]
+in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
+         vibespace-job answers [--wait 100]
+Pick the right tool: turn-scoped waits → background Bash/Monitor · session continuation → /goal ·
+must OUTLIVE the conversation → THIS · harness cron → never (expires) · dated obligations → --at.`;
+
+(async () => {
+  if (!verb) {
+    console.log(USAGE + '\n');
+    const r = await call('GET', '/api/agent/jobs');
+    if (r.jobs && r.jobs.length) { console.log('your visible jobs:'); for (const j of r.jobs) console.log(`  ${j.id} [${j.kind}] ${j.state} — ${j.name}`); }
+    else console.log('no jobs visible to this session yet.');
+    return;
+  }
+  switch (verb) {
+    case 'run': case 'notify-cron': {
+      const isNotify = verb === 'notify-cron';
+      const cmdStr = pos[1];
+      if (!isNotify && !cmdStr) { console.error('usage: vibespace-job run "CMD" --name NAME [flags] — run with no args for full usage'); process.exit(1); }
+      const schedule = flags.every ? { everyMs: dur(flags.every), jitterPct: Number(flags.jitter) || 20 }
+        : flags.cron ? { cron: flags.cron }
+        : flags.at ? { at: flags.at.match(/^\d+$/) ? Number(flags.at) : new Date(flags.at).getTime() } : null;
+      if (flags.at && (!schedule.at || Number.isNaN(schedule.at))) { console.error('cannot parse --at time: ' + flags.at); process.exit(1); }
+      const body = {
+        kind: isNotify ? 'cron' : schedule ? 'cron' : flags['keep-up'] ? 'service' : 'task',
+        name: flags.name, note: flags.note || '',
+        context: flags.context ? { payload: readArg(flags.context) } : null,
+        cwd: flags.cwd, env: [].concat(flags.env || []).length ? undefined : undefined,
+        schedule,
+        access: { view: flags.view || 'group', control: flags.control || 'session' },
+        stopWithOwner: !!flags['stop-with-owner'],
+      };
+      if (isNotify) body.action = { type: 'notify', text: readArg(flags.text || ''), urgency: flags.urgency || 'normal' };
+      else {
+        const task = {
+          cmd: { argv: ['sh', '-c', cmdStr], cwd: flags.cwd || process.cwd() },
+          untilOutput: flags.until || null, timeoutMs: flags.timeout ? dur(flags.timeout) : null,
+          stdinOpen: !!flags['stdin-open'], notifyUser: !!flags['notify-user'],
+          restart: flags.restart || 'on-failure',
+          ports: [].concat(flags.port || []).filter(Boolean).map(Number), publish: !!flags.publish,
+        };
+        if (schedule) body.action = { type: 'spawn-task', task };
+        else Object.assign(body, task);
+      }
+      const r = await call('POST', '/api/agent/jobs', body);
+      const j = r.job;
+      console.log(`started ${j.id} (${j.kind} ${j.name})${r.renamed ? ' — name was taken, auto-suffixed' : ''}`);
+      console.log(`this job OUTLIVES your conversation. Poll it (even from a future session):\n  vibespace-job poll ${j.id}`);
+      if (r.survivalNote) console.log('runtime note: ' + r.survivalNote);
+      break;
+    }
+    case 'list': {
+      const r = await call('GET', '/api/agent/jobs' + (flags.all ? '?all=1' : ''));
+      if (!r.jobs.length) return console.log('no jobs visible to this session.');
+      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + j.context.payload.split('\n')[0].slice(0, 60) : ''}`);
+      break;
+    }
+    case 'poll': case 'answers': {
+      const ref = pos[1] || JOBID;
+      if (!ref) { console.error(`usage: vibespace-job ${verb} <id|name> [--wait 100]`); process.exit(1); }
+      let wait = flags.wait === true ? 100 : Math.min(Number(flags.wait) || 0, 100); // CLI cap 100s (harness Bash times out at 120s)
+      if (Number(flags.wait) > 100) console.error('(--wait capped at 100s — you will still see current state on timeout; completion also arrives as injected context)');
+      const onTerm = () => { console.error('(poll interrupted — the job keeps running; re-run the poll any time)'); process.exit(0); };
+      process.on('SIGTERM', onTerm); process.on('SIGINT', onTerm);
+      const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(ref)}?tail=${Number(flags.tail) || 20}&wait=${wait}${verb === 'answers' ? '&answers=1' : ''}`);
+      printJob(r.job, Number(flags.tail) || 20);
+      break;
+    }
+    case 'logs': {
+      const ref = pos[1] || JOBID;
+      const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(ref)}?tail=${Number(flags.tail) || 200}`);
+      console.log(r.job.logTail || '(no log)');
+      break;
+    }
+    case 'stop': case 'start': {
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1] || JOBID)}/${verb}`, { force: !!flags.force });
+      console.log(verb === 'stop' ? 'stopped (services stay down until an explicit start)' : 'started');
+      break;
+    }
+    case 'rm': {
+      await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/rm`, { stop: !!flags.stop, orphan: !!flags.orphan });
+      console.log('removed');
+      break;
+    }
+    case 'access': {
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/access`, { view: flags.view, control: flags.control });
+      console.log('access updated: view=' + r.access.view + ' control=' + r.access.control);
+      break;
+    }
+    case 'progress': {
+      const text = pos[1] && !JOBID ? pos[2] || pos[1] : pos[JOBID && pos[1] && pos[1].startsWith('jb-') ? 2 : 1];
+      const ref = pos[1] && pos[1].startsWith('jb-') ? pos[1] : JOBID;
+      if (!ref || !text) { console.error('usage: vibespace-job progress [id] "text"'); process.exit(1); }
+      await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/progress`, { text });
+      console.log('progress recorded (shown in the Jobs panel and in polls)');
+      break;
+    }
+    case 'ask': {
+      const ref = pos[1] && pos[1].startsWith('jb-') ? pos[1] : JOBID;
+      if (!ref || !flags.form) { console.error('usage: vibespace-job ask [id] --form @panel.json [--timeout 30m]'); process.exit(1); }
+      let panel;
+      try { panel = JSON.parse(readArg(flags.form)); } catch (e) { console.error('panel JSON parse failed: ' + e.message); process.exit(1); }
+      if (flags.timeout) panel.timeoutS = Math.round(dur(flags.timeout) / 1000);
+      await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/ask`, { panel });
+      console.log('panel posted — the user sees it now; read replies with: vibespace-job answers ' + ref + ' --wait 100');
+      break;
+    }
+    default:
+      console.error(`unknown verb "${verb}" — run vibespace-job with no arguments for usage`);
+      process.exit(1);
+  }
+})().catch((e) => { console.error('vibespace-job failed: ' + e.message); process.exit(1); });

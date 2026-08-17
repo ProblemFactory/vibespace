@@ -211,6 +211,9 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - Drag folder from file explorer to sidebar group header → links folder to group
 - All windows (file explorer, viewers, editors, browser) persist and restore on page refresh
 
+### Background Work (2.342.0 — docs/design-background-work.md is the authoritative design)
+- Agent-registered services/long-tasks/cron that OUTLIVE conversations; `vibespace-job` CLI + ⚙→Background Work window + `job-interact` panels. Key invariants: process identity pid+starttime+bootId (wrapper writes its own stamp first act; every adopt/kill re-verifies); adopt-first boot then desiredUp replay (services survive pod rebuilds by REPLAY — owner-accepted semantic; tasks die with the pod, cause env-restart); single-engine lock (data/jobs.lock, #127-class second server goes read-only); rm refuses live jobs; GC never touches a verifying-alive record; NO automatic agent triggering (owner red line — cron actions are spawn-task/notify only, poll is the interface, injection is passive at turn boundaries with a 600B budget); no existence oracle (invisible id ≡ nonexistent id, names scope-namespaced); user access-locks refuse agent edits; job/probe env credential-stripped + vendor-pattern create-time refusal (§ban-safety); secrets user-UI-only, values literal-redacted from tails; panels are declarative widgets — agent markup never enters our DOM.
+
 ### UI
 - 6 built-in color themes: Dark, Light, Dracula, Nord, Solarized, Monokai — all contrast-audited (terminal ANSI colors + UI chrome `--text-dim`/`--text-secondary`)
 - Theme editor: floating panel to create custom themes — ~50 CSS variables + 16 ANSI colors, live preview, hover-to-highlight CSS var usage, save/load/delete, multi-client sync via WebSocket. ThemeManager: `registerCustomTheme`, `unregisterCustomTheme`, `setLivePreview`, `extractThemeValues`, `applyPendingTheme`. CSS value sanitization (strips `{}`). Constructor defers custom theme fallback until async load.

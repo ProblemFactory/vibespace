@@ -26,6 +26,7 @@ const SESSION_FIELDS = {
   _normEpoch:          { owner: 'stdout', persisted: null,      note: 'normalizer identity epoch — client full-reset discriminator (2.89.x)' },
   _subNormalizers:     { owner: 'stdout', persisted: null,      note: 'per-subagent normalizers map' },
   _historyLoaded:      { owner: 'ws',     persisted: null,      note: 'first-attach full-JSONL rebuild flag (set AFTER success, 2.89.2)' },
+  _jobsEventsSeenTs:   { owner: 'agent-routes', persisted: null, note: 'Background Work event delivery marker (2.342.0) — restart = full redelivery, mirroring group-snap semantics' },
   _startSubagentWatcher: { owner: 'stdout', persisted: null,    note: 'bound helper for restart re-arm of agent watchers' },
 
   // streaming / turn state
