@@ -532,6 +532,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       if (toolFlags.status) segs.push('vibespace-status <state> — keep your board state honest');
       if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
+      if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (poll later, even from a future session)');
       const std = perTurnReminderEnabled() && segs.length
         ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
         : '';
