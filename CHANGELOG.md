@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.343.0
+
+- **CRITICAL latent: port publish dead since the 拆分 (owner report "public URLs not available") — 7th decomposition incident, first PROXY-SWALLOWED-ASSIGNMENT** — src/server/lazy.js's mk() Proxy had a get trap but NO set trap, so mounts-plugins-wiring's `portForwards.plugins = plugins` (decomposition #12, 2.326.0) wrote to the Proxy's dummy target instead of the real PortForwardManager: `publish` threw "public URLs are not available on this instance" on every instance for 17 releases. Fixed with a forwarding set trap (class fix — every extracted `singleton.prop = value` works again) + new `scripts/test-lazy.mjs` gate in npm run ci with the incident as a negative control.
+- **Background Work ⇄ port-forwarding sync** (owner request after registering an HTTP-server service): ① a listener on a registered ACTIVE service's declared port is recognized as that service — the Ports panel names it with a service tag and the anonymous "new port" toast is suppressed (registration-first, discovery-second); ② a service registered with `--publish` now automatically gets a port forward + (when the frp plugin is configured) a public URL on reaching `up` — shown as a clickable ↗ chip on its job card and in polls (`publishedUrl`), re-established on boot adoption, torn down (unpublish + unforward) on stop/park. Publish failures never break the service itself.
+
+
 ## 2.342.2
 
 - **Chicken-and-egg teaching gap (owner catch)**: the `vibespace-job` teaching block only existed in the NO-GROUP baseline tools intro — grouped sessions (nearly all real ones) build their tools section in task-groups.js renderContext, which never mentioned the command, so agents in groups could never learn to create jobs (and with zero jobs the digest is deliberately zero bytes — nothing would ever bootstrap). The grouped intro now carries the same one-trigger-sentence + copy-ready example (`--keep-up`/`--every`/`--cron`/`--at` cheat line, dated-obligations→--at pointer), the per-turn micro-reminder lists vibespace-job, and both honor the agents.toolJobs toggle.

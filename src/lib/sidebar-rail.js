@@ -582,7 +582,7 @@ export function installSidebarRail(Sidebar) {
               const portRow = (p) => {
                 const pr = document.createElement('div');
                 pr.className = 'ports-row' + (p.hidden ? ' ports-row-sys' : '');
-                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''} ${protoChip(p.proto)}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
+                pr.innerHTML = `<span class="ports-row-label">${p.port}${p.service ? ' <span class="ports-svc">' + escHtml(p.service) + '</span>' : ''}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''} ${protoChip(p.proto)}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
                 // orphaned (deleted-cwd) listeners get a Kill instead of Forward
                 if (p.orphan && p.pid && m.id === '__local__') {
                   const kb = document.createElement('button');

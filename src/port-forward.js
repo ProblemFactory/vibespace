@@ -48,7 +48,8 @@ function writeJsonAtomic(file, obj) {
 
 class PortForwardManager {
   /** @param deps { hosts, dataDir, broadcast, log, plugins, serverSetting } */
-  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting }) {
+  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting, getJobs }) {
+    this.getJobs = getJobs || null; // Background Work registry (2.343.0): service⇄ports sync
     this.hosts = hosts;
     this.plugins = plugins || null; // PluginManager — for frp public exposure
     this.serverSetting = serverSetting || (() => undefined);
@@ -153,6 +154,7 @@ class PortForwardManager {
       // local: our own infrastructure (frpc admin, tailscale, VNC, …) must
       // not toast when a plugin starts after the baseline
       if (h.id === LOCAL_ID) fresh = fresh.filter((p) => !LOCAL_IGNORE_PROCS.has(p.proc) && p.port !== 7400);
+      if (h.id === LOCAL_ID) fresh = fresh.filter((p) => !p.service); // registered services never toast as anonymous new ports
       if (fresh.length) {
         this.log(`new port(s) on ${h.name || h.id}: ${fresh.map((p) => p.port + (p.proc ? '(' + p.proc + ')' : '')).join(', ')}`);
         this.broadcast?.({ type: 'machine-ports-new', hostId: h.id, hostName: h.name || h.id, ports: fresh });
@@ -222,7 +224,22 @@ class PortForwardManager {
    *  render. */
   async detect(hostId, { probe = false } = {}) {
     let ports;
-    if (hostId === LOCAL_ID) ports = await this.detectLocal();
+    if (hostId === LOCAL_ID) {
+      ports = await this.detectLocal();
+      // Background Work sync (2.343.0): a listener on a registered ACTIVE
+      // service's declared port is that service — the panel names it and the
+      // new-port toast skips it (registration-first, discovery-second).
+      try {
+        const jm = this.getJobs && this.getJobs();
+        if (jm && jm.ready) {
+          const owned = new Map(); // port → job name
+          for (const j of jm.jobs.values()) {
+            if (j.kind === 'service' && ['up', 'starting', 'awaiting-user'].includes(j.state)) for (const pt of j.ports || []) owned.set(Number(pt), j.name);
+          }
+          for (const row of ports) if (owned.has(row.port)) row.service = owned.get(row.port);
+        }
+      } catch { }
+    }
     else {
       const dm = await this.hosts.deviceBounded(hostId);
       // Linux: `ss -tlnH`; macOS/BSD: `lsof`. Try ss first, fall back to lsof.

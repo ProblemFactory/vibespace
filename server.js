@@ -1414,9 +1414,10 @@ app.post('/api/machine-mounts/:id/remount', async (req, res) => {
 const { PortForwardManager } = require('./src/port-forward');
 const portForwards = new PortForwardManager({
   dataDir: path.join(__dirname, 'data'), hosts, broadcast: bcastAll,
-  serverSetting,
+  serverSetting, getJobs: jobsWiring.getJobs, // Background Work ⇄ ports sync (2.343.0)
   log: (m) => console.log('[port-forward]', m),
 });
+jobsWiring.jm.d.getPorts = () => portForwards; // late singleton — lazy getter, never a Proxy
 setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);
 app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() }));
 app.get('/api/hosts/:id/ports', async (req, res) => {

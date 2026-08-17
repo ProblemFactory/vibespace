@@ -168,6 +168,33 @@ class JobManager {
     job.state = 'up';
     job.proc = { pid: child.pid };
     this._touch(job);
+    if (job.kind === 'service' && job.publish && (job.ports || []).length) this._ensurePublish(job);
+  }
+  /** service⇄ports sync (2.343.0): a published service gets a forward + (when
+   *  the frp plugin is configured) a public URL; teardown on stop/park. All
+   *  best-effort — publish failure never breaks the service itself. */
+  async _ensurePublish(job) {
+    try {
+      const pf = this.d.getPorts && this.d.getPorts();
+      if (!pf) return;
+      const rec = await pf.forward('__local__', job.ports[0], { label: 'service: ' + job.name });
+      job._pfId = rec && rec.id;
+      try {
+        const r = await pf.publish(job._pfId);
+        job.publishedUrl = r && r.publicUrl || null;
+      } catch (e) { this.d.log('[jobs] publish unavailable for', job.name, '—', e.message); job.publishedUrl = null; }
+      this._touch(job);
+    } catch (e) { this.d.log('[jobs] forward failed for', job.name, '—', e.message); }
+  }
+  async _teardownPublish(job) {
+    try {
+      const pf = this.d.getPorts && this.d.getPorts();
+      if (!pf || !job._pfId) return;
+      try { await pf.unpublish(job._pfId); } catch { }
+      try { await pf.unforward(job._pfId); } catch { }
+      job._pfId = null; job.publishedUrl = null;
+      this._touch(job);
+    } catch { }
   }
   _secretsFor(job) {
     if (!job.envFrom || !job.envFrom.length) return {};
@@ -195,7 +222,11 @@ class JobManager {
       try {
         if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
         const stamp = this._readStamp(job);
-        if (this._verifyAlive(stamp)) { this.d.log(`[jobs] adopted ${job.id} (${job.name}) pid=${stamp.pid}`); continue; }
+        if (this._verifyAlive(stamp)) {
+          this.d.log(`[jobs] adopted ${job.id} (${job.name}) pid=${stamp.pid}`);
+          if (job.kind === 'service' && job.publish && (job.ports || []).length) setTimeout(() => this._ensurePublish(job), 8000); // ports manager restores at +5.5s
+          continue;
+        }
         const run = job.runs && job.runs[job.runs.length - 1];
         const exit = this._readExit(job, run);
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
@@ -227,6 +258,7 @@ class JobManager {
       job.supervise = dec.supervise || job.supervise;
       if (dec.park) {
         job.state = 'failed';
+        this._teardownPublish(job);
         this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})` });
         try { this.d.notifyUser({ text: `Service ${job.name} crash-looped and was parked — vibespace-job start ${job.id} to retry`, urgency: 'normal', jobId: job.id }); } catch { }
       } else if (dec.restartInMs) {
@@ -386,6 +418,7 @@ class JobManager {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
+    if (job.kind === 'service') this._teardownPublish(job);
     const hadProc = this._killGroup(job, force ? 'SIGKILL' : 'SIGTERM');
     if (hadProc && !force) { const t = setTimeout(() => this._killGroup(job, 'SIGKILL'), 10_000); t.unref?.(); }
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
@@ -465,7 +498,7 @@ class JobManager {
   snapshot(job, { tail = 0 } = {}) {
     const run = job.runs && job.runs[job.runs.length - 1];
     const out = {
-      id: job.id, kind: job.kind, name: job.name, note: job.note, state: job.state,
+      id: job.id, kind: job.kind, name: job.name, note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
       desiredUp: job.desiredUp, progress: job.progress || null, ports: job.ports, publish: job.publish,
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: job.context || null,
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
