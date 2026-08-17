@@ -61,6 +61,9 @@ class PluginManager {
   }
 
   _rec(id) { return (this._state.plugins[id] = this._state.plugins[id] || {}); }
+  // restored 2.343.1 — a dead-code sweep (dc37220) deleted this while 8 call
+  // sites remained; every plugin-state broadcast (and publish) threw since.
+  _notify() { this.broadcast({ type: 'plugins-updated', plugins: this.list() }); }
 
   // ── registry ──
   defs() {
