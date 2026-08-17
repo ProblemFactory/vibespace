@@ -128,5 +128,33 @@ for (const [edge] of EXCEPTIONS) {
   ok(live, `exception still in use: ${edge} (remove dead allowlist entries)`);
 }
 
+// 8) every RELATIVE require/import must RESOLVE to an existing file (2.341.1,
+//    userW's mount outage — 6th lost-binding incident, first of the
+//    RELATIVE-PATH subclass: extraction #13 carried server.js's
+//    require('./package.json') into src/server/dial-pairing.js where it
+//    resolves to nothing and throws only when a dial op RUNS. Free-variable
+//    checks, boot smokes and the route battery all miss a call-time require
+//    with a bad relative path; this static walk cannot.)
+{
+  const allFiles = ['server.js'];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(REPO, dir))) {
+      const p = dir + '/' + e;
+      if (fs.statSync(path.join(REPO, p)).isDirectory()) walk(p);
+      else if (/\.(js|mjs|cjs)$/.test(e)) allFiles.push(p);
+    }
+  })('src');
+  const broken = [];
+  for (const f of allFiles) {
+    const s = read(f);
+    for (const m of s.matchAll(/(?:require\(|from\s+)['"](\.[^'"]+)['"]/g)) {
+      const base = path.normalize(path.join(path.dirname(f), m[1])).replace(/\\/g, '/');
+      const cands = [base, base + '.js', base + '.json', base + '.mjs', base + '/index.js'];
+      if (!cands.some((c) => fs.existsSync(path.join(REPO, c)))) broken.push(`${f}: ${m[1]}`);
+    }
+  }
+  ok(!broken.length, `every relative require/import resolves (${broken.slice(0, 3).join('; ') || 'all resolve'})`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -80,7 +80,7 @@ async function deviceForDial(deviceId, _retried = false) {
     dm = new DeviceManager({
       dataDir: path.join(rootDir, 'data'),
       bundlePath: path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js'),
-      version: require('./package.json').version,
+      version: require('../../package.json').version,
       transport: { kind: 'stream', hostToken: agentdHostToken('dial-' + deviceId), getStream: () => agentdDials.get(deviceId) || null },
       log: (...a) => console.log('[device-dial]', ...a),
     });
@@ -105,7 +105,7 @@ async function deviceForDial(deviceId, _retried = false) {
   return dm;
 }
 async function ensureAgentdOnHost(hostId) {
-  const version = require('./package.json').version;
+  const version = require('../../package.json').version;
   if (_agentdInstalled.get(hostId) === version) return;
   const bundlePath = path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js');
   await hosts.installAgentd(hostId, bundlePath, version, agentdHostToken(hostId));
