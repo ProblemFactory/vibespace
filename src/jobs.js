@@ -236,6 +236,20 @@ class JobManager {
         else { if (run && !run.endedAt) { run.endedAt = now(); run.cause = 'env-restart'; run.exit = null; } job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); }
       } catch (e) { this.d.log(`[jobs] adopt failed for ${job.id}:`, e.message); }
     }
+    // one-shot collapse of pre-2.343.3 per-fire child records: keep the newest
+    // child per cron, drop older TERMINAL ones (stamp-verified not alive)
+    const byParent = new Map();
+    for (const j of this.jobs.values()) if (j.cronParent) (byParent.get(j.cronParent) || byParent.set(j.cronParent, []).get(j.cronParent)).push(j);
+    for (const [, kids] of byParent) {
+      if (kids.length < 2) continue;
+      kids.sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
+      for (const old of kids.slice(1)) {
+        if (!['done', 'interrupted', 'failed', 'missed'].includes(old.state)) continue;
+        if (this._verifyAlive(this._readStamp(old))) continue;
+        this.jobs.delete(old.id); this._dirty = true;
+        try { fs.rmSync(path.join(this.logsDir, old.id), { recursive: true, force: true }); } catch { }
+      }
+    }
     for (const job of this.jobs.values()) {
       try {
         if (job.kind === 'service' && job.desiredUp && job.state === 'down' && !(job.supervise && job.supervise.parkedAt)) this._spawn(job, 'boot');
@@ -268,7 +282,8 @@ class JobManager {
       } else { job.state = 'down'; this._touch(job); }
     } else {
       job.state = run.cause === 'interrupted' ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
-      this._touch(job, { what: `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)` });
+      const routineCronOk = job.cronParent && job.state === 'done'; // quiet-success: a scheduled run ending fine is a ring entry, not an event
+      this._touch(job, routineCronOk ? null : { what: `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)` });
       if (job.notifyUser) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id }); } catch { } }
     }
   }
@@ -356,14 +371,21 @@ class JobManager {
       try { this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id }); } catch { }
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
-      const child = { ...a.task, id: rid(), kind: 'task', name: `${job.name} run`, owner: job.owner, access: job.access, state: 'starting', runs: [], createdAt: now(), cronParent: job.id };
-      if (job.singleRun !== false) { // maxConcurrent:1 — skip if the previous run is still alive
-        const prev = [...this.jobs.values()].find((x) => x.cronParent === job.id && ['up', 'starting', 'awaiting-user'].includes(x.state));
-        if (prev) { this._event(job, 'cron skipped: previous run still active'); return; }
+      // ONE persistent child per cron (2.343.3, owner report: every fire used
+      // to mint a fresh 14-day task record — a 10min cron flooded the panel
+      // with ~100 cards/day and spammed the injection channel). Each fire is a
+      // RUN in the same child's ring; routine success is SILENT (quiet-success
+      // law) — only failures/awaiting-user surface as events.
+      let child = [...this.jobs.values()].find((x) => x.cronParent === job.id);
+      if (child && job.singleRun !== false && ['up', 'starting', 'awaiting-user'].includes(child.state) && this._verifyAlive(this._readStamp(child))) {
+        return; // maxConcurrent:1 — previous run still alive; silent skip (visible in the cron's nextFireAt drift)
       }
-      this.jobs.set(child.id, child);
+      if (!child) {
+        child = { ...a.task, id: rid(), kind: 'task', name: `${job.name} run`, owner: job.owner, access: job.access, state: 'starting', runs: [], createdAt: now(), cronParent: job.id };
+        this.jobs.set(child.id, child);
+      }
+      delete child._untilCursor; delete child._untilHit; // fresh run, fresh scan
       this._spawn(child, trigger);
-      this._event(job, `cron fired, spawned ${child.id}`);
     }
   }
   async _gc() {

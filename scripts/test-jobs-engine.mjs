@@ -75,6 +75,20 @@ try {
   ok(notifications.some((n) => n.text === 'ping from cron'), 'cron notify action reaches the user channel');
   ok(j3.state === 'done', 'one-shot {at} cron goes done after firing');
 
+  // 7b. cron spawn-task: ONE reused child across fires; routine success silent
+  const r4 = C.create({ kind: 'cron', name: 'tick', schedule: { at: Date.now() + 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'exit 0'] } } }, owner }, caller);
+  const j4 = C.jobs.get(r4.job.id);
+  j4.nextFireAt = Date.now() - 1000; j4.schedule = { everyMs: 3600e3 }; // recurring so it can fire twice
+  await C._cronTick();
+  ok(await until(() => [...C.jobs.values()].some((x) => x.cronParent === j4.id && x.state === 'done'), 15000), 'first cron fire spawns and completes a child');
+  const evCount = C.events.length;
+  j4.nextFireAt = Date.now() - 1000;
+  await C._cronTick();
+  await until(() => { const k = [...C.jobs.values()].find((x) => x.cronParent === j4.id); return k && k.state === 'done' && (k.runs || []).length >= 2; }, 15000);
+  const kids = [...C.jobs.values()].filter((x) => x.cronParent === j4.id);
+  ok(kids.length === 1 && (kids[0].runs || []).length >= 2, 'second fire REUSES the same child (one record, two runs)', `kids=${kids.length} runs=${kids[0] && kids[0].runs.length}`);
+  ok(!C.events.slice(evCount).some((e) => e.jobId === kids[0].id && /done exit=0/.test(e.what || '')), 'routine cron success emits NO event (quiet-success)');
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');
