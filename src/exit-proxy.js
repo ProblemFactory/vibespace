@@ -25,9 +25,8 @@ const net = require('net');
 
 class ExitProxyManager {
   /** @param deps { hosts, broadcast, log } */
-  constructor({ hosts, broadcast, log } = {}) {
+  constructor({ hosts, log } = {}) { // broadcast dep dropped 2.343.2 — its last consumer left with the exits-updated sweep (dc37220); re-add deliberately with a UI consumer
     this.hosts = hosts;
-    this.broadcast = broadcast || (() => {});
     this.log = log || (() => {});
     this._live = new Map(); // hostId → { server, sockets:Set, localPort, deviceSocksPort }
   }

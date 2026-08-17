@@ -7,6 +7,7 @@
 // estimator instance. Extracted VERBATIM; late-created deps (accounts, hosts,
 // usageHistory, recordUsageAttribution) arrive as lazy getters/lambdas —
 // every use is at RUNTIME, after boot completes. ORCH tier.
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
@@ -14,7 +15,7 @@ const { mk } = require('./lazy.js');
 
 function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
   broadcastToSession, serverNotice, serverSetting, getAccounts, getHosts,
-  getUsageHistory, recordUsageAttribution }) {
+  getUsageHistory, recordUsageAttribution, adapterRegistry}) {
   // late-bound singletons: created after this module in boot order, used only
   // at runtime — the Proxy re-resolves per property access, never caches
   const accounts = mk(getAccounts);

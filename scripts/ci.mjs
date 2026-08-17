@@ -27,7 +27,7 @@ const t0 = Date.now();
 const SUITES = [
   'test-discovery-interpret', 'test-remote-discovery-dirty', 'test-remote-shell',
   'test-usage-walk-parity', 'test-ctx-sync', 'test-migrations',
-  'test-job-model', 'test-jobs-engine', 'test-lazy',
+  'test-job-model', 'test-jobs-engine', 'test-lazy', 'test-server-globals',
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
   'test-cli-usage-parse', 'test-agentd-upgrade-loop', 'test-vendor-whitelist', 'test-wrapper-files',

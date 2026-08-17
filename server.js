@@ -434,6 +434,7 @@ const {
   getHosts: () => { try { return hosts; } catch { return null; } },
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
+  adapterRegistry,
 });
 // ── Effective-size computation (min cols/rows across clients + PTY resize + broadcast) ──
 // Only clients that have sent a REAL `resize` (terminal fit) drive the PTY
@@ -804,6 +805,7 @@ const { _srvConsoleRing } = require('./src/server/incident-wiring.js').create({
   getNoConvoRef: () => { try { return noConvoRef; } catch { return null; } },
   readLayouts: (...a) => readLayouts(...a),
   sysinfo,
+  listLayoutHistory: () => { try { return persistenceRouter.listLayoutHistory(); } catch { return []; } },
 });
 app.get('/api/sysinfo', async (req, res) => {
   try {
@@ -1329,7 +1331,7 @@ hosts.onUsageEvents = (hostId, text) => {
       if (!hostId || serverSetting('agentd.autoGraduate') === false) return;
       const h = hosts.get(hostId);
       if (!h || h.transport === 'dial' || h.deviceId || h.autoGraduate === false) return; // already graduated / opted out
-      if (!(agentdDeps.publicUrl?.() || '')) return;                    // nothing to dial back to
+      if (!String(serverSetting('agentd.publicUrl') || '')) return;    // nothing to dial back to (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
       const last = gradTried.get(hostId) || 0;
       if (Date.now() - last < 6 * 60 * 60 * 1000) return;               // one attempt per machine per 6h
       gradTried.set(hostId, Date.now());
@@ -1454,13 +1456,14 @@ app.post('/api/ports/kill-orphan', (req, res) => {
 // On-demand EXIT (task #164): let an agent borrow a machine's network for a
 // single command. Per-machine opt-in (hosts.allowExit, default off).
 const { ExitProxyManager } = require('./src/exit-proxy');
-const exitProxy = new ExitProxyManager({ hosts, broadcast: bcastAll, log: (m) => console.log('[exit]', m) });
+const exitProxy = new ExitProxyManager({ hosts, log: (m) => console.log('[exit]', m) });
 app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
 app.post('/api/hosts/:id/allow-exit', (req, res) => {
   try {
     const on = !!(req.body || {}).on;
     hosts.setAllowExit(req.params.id, on);
     if (!on) exitProxy.onMachineUnpaired(req.params.id); // tearing down the egress when disabled
+    bcastAll({ type: 'hosts-updated' }); // restored 2.343.2 — deleted as collateral of the exits-updated sweep; the toggle UI re-renders from this
     res.json({ success: true, allowExit: on });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

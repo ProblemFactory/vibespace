@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const inc = require('../incident.js'); // the block references `inc.captureLocal` — keep the original binding name
 
-function create({ app, rootDir, getActiveSessions, getHosts, getNoConvoRef, readLayouts, sysinfo }) {
+function create({ app, rootDir, getActiveSessions, getHosts, getNoConvoRef, readLayouts, sysinfo , listLayoutHistory}) {
   const activeSessions = new Proxy({}, { get: (_, k) => { const m = getActiveSessions(); const v = m[k]; return typeof v === 'function' ? v.bind(m) : v; } });
   const hosts = new Proxy({}, { get: (_, k) => { const h = getHosts(); if (!h) return undefined; const v = h[k]; return typeof v === 'function' ? v.bind(h) : v; } });
   const noConvoRef = new Proxy({}, { get: (_, k) => { const r = getNoConvoRef(); if (!r) return undefined; const v = r[k]; return typeof v === 'function' ? v.bind(r) : v; } });
@@ -49,7 +49,7 @@ function _incidentServerState() {
   // responder whether an intact pre-damage state still exists (it makes the
   // difference between "restore in one click" and hand-editing layouts.json).
   try {
-    const lay = persistenceRouter.readLayouts?.() || {};
+    const lay = (readLayouts ? readLayouts() : {}) || {};
     out.layout = {
       desktops: (lay.desktopMeta || []).map((m) => ({ id: m.id, name: m.name })),
       windowsPerDesktop: Object.fromEntries(Object.entries(lay.desktops || {}).map(([dk, v]) => [dk, ((v?.autoSave || {}).windows || []).length])),
@@ -61,7 +61,7 @@ function _incidentServerState() {
         title: String(w.title || '').slice(0, 40),
       }))).slice(0, 300),
     };
-    out.layoutHistory = (persistenceRouter.listLayoutHistory?.() || []).slice(0, 40);
+    out.layoutHistory = ((listLayoutHistory ? listLayoutHistory() : []) || []).slice(0, 40);
   } catch (e) { out.layout = 'failed: ' + e.message; }
   try {
     const dc = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'remote-sessions-cache.json'), 'utf8'));
