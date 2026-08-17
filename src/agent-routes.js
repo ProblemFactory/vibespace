@@ -305,6 +305,18 @@ app.get('/api/agent/task-context', (req, res) => {
       const withPre = withPreamble(s, context ? [context] : []);
       context = withPre.length ? withPre.join('\n\n') : context;
     }
+    // Background jobs digest (2.342.x, design-background-work §6.3b): rides the
+    // SessionStart payload — new sessions AND resumes both fire this route, so
+    // a resumed amnesiac rediscovers its background work here. View-filtered,
+    // 600B budget, yields to everything else under the 9600B cap; zero jobs =
+    // zero bytes (an empty section is never injected).
+    try {
+      const jm = getJobs && getJobs();
+      if (jm && jm.ready) {
+        const dig = jm.digestFor(jobsCaller(s, id), Buffer.byteLength(context || '', 'utf-8'));
+        if (dig) context = context ? context + '\n\n' + dig : dig;
+      }
+    } catch { }
     res.json({ success: true, context });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
@@ -537,15 +549,6 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // first) is always in-context; only the TAIL (oldest activity-log lines) is
     // dropped, and it's recoverable via `vibespace-task show --full`.
     let ctx = outParts.join('\n\n');
-    // Background jobs digest (2.342.0, design-background-work §6.3b): view-
-    // filtered, budget-fitted by the PURE model, yields before everything else.
-    try {
-      const jm = getJobs && getJobs();
-      if (jm && jm.ready) {
-        const dig = jm.digestFor(jobsCaller(s, id), Buffer.byteLength(ctx, 'utf-8'));
-        if (dig) ctx += '\n\n' + dig;
-      }
-    } catch { }
     const INLINE_CAP = 9600; // bytes; margin under the 10240 wrap threshold
     if (Buffer.byteLength(ctx, 'utf-8') > INLINE_CAP) {
       const ptr = `\n\n…[context trimmed to stay inline — run \`vibespace-task${injectGroups.length > 1 ? ' --group <id>' : ''} show --full\` for the rest]`;

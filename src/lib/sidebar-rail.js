@@ -7,6 +7,7 @@
 // Setting `sidebar.activityRail` (default ON) restores the classic tab bar +
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
+import { openJobsWindow } from './jobs-panel.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu } from './utils.js';
 import { track } from './telemetry-client.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
@@ -36,6 +37,7 @@ const RAIL_ICONS = {
   diagnostics: R('<path d="M3 12h4l2-7 4 14 2-7h6"/>'),
   settings: R('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
   system: R('<path d="M12 12l3.5-3.5"/><path d="M5 19a9 9 0 1 1 14 0"/>'),
+  jobs: R('<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M6.5 7h.01M6.5 17h.01"/><path d="M14 6l3 1.5-3 1.5z" fill="currentColor"/>'),
 };
 
 // 13px action icons for the ports rows (emoji glyphs clash with the mono
@@ -50,13 +52,13 @@ const PORT_ICONS = {
   copy: A('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
 };
 
-const PANEL_TABS = ['ports', 'agents', 'plugins', 'system'];
+const PANEL_TABS = ['ports', 'agents', 'plugins', 'jobs', 'system'];
 
 // Sidebar header title per rail item (the tab bar is hidden, so the header is
 // the only label saying which panel is showing).
 const RAIL_TITLES = {
   folders: 'Sessions', tasks: 'Task Groups', mounts: 'Remote',
-  ports: 'Ports', agents: 'Agents', plugins: 'Plugins', system: 'System',
+  ports: 'Ports', agents: 'Agents', plugins: 'Plugins', jobs: 'Background Work', system: 'System',
 };
 
 export function installSidebarRail(Sidebar) {
@@ -103,6 +105,7 @@ export function installSidebarRail(Sidebar) {
         item('ports', tr('Ports'), () => this._railGo('ports')),
         item('agents', tr('Agents'), () => this._railGo('agents')),
         item('plugins', tr('Plugins'), () => this._railGo('plugins')),
+        item('jobs', tr('Background Work'), () => this._railGo('jobs')),
         item('system', tr('System'), () => this._railGo('system')),
       );
       const spacer = document.createElement('div');
@@ -161,6 +164,10 @@ export function installSidebarRail(Sidebar) {
       this.app.ws.onGlobal((msg) => {
         if (!this._railEl) return;
         if (msg.type === 'port-forwards-updated' || msg.type === 'hosts-updated') this._railRefreshBadges();
+        if (msg.type === 'jobs-updated') {
+          this._railRefreshBadges();
+          if (this._activeTab === 'jobs') { this.listEl.querySelector('.rail-panel-jobs')?.remove(); this._renderRailPanel(); }
+        }
         // The renders-once panel guard (2.195.0) means the Ports panel's
         // machine roster no longer heals via incidental digest rebuilds — a
         // pair/unpair while it's open must rebuild it explicitly (its live
@@ -189,6 +196,15 @@ export function installSidebarRail(Sidebar) {
         this._railSetBadge('ports', nf || '');
         const off = (ho?.hosts || []).filter((h) => h.transport === 'dial' && !h.online).length;
         this._railSetBadge('mounts', off ? off + '⏻' : '');
+        const jb = await fetchJson('/api/jobs').catch(() => null);
+        if (jb?.jobs) {
+          const bad = jb.jobs.filter((j) => ['failed', 'missed', 'unverified'].includes(j.state)).length;
+          const ask = jb.jobs.filter((j) => j.state === 'awaiting-user').length;
+          const live = jb.jobs.filter((j) => ['up', 'starting'].includes(j.state)).length;
+          this._railSetBadge('jobs', bad ? bad + '!' : ask ? ask + '?' : live || '');
+          const b = this._railEl.querySelector('.rail-item[data-rail="jobs"]');
+          if (b) { b.classList.toggle('rail-danger', bad > 0); b.classList.toggle('rail-warn', !bad && ask > 0); }
+        }
       } catch { }
     },
 
@@ -245,8 +261,16 @@ export function installSidebarRail(Sidebar) {
       }
       else if (this._activeTab === 'agents') this.app._showAgentsDialog?.({ container: c });
       else if (this._activeTab === 'ports') this._renderPortsPanel(c);
+      else if (this._activeTab === 'jobs') this._renderJobsRailPanel(c);
       else if (this._activeTab === 'system') this._renderSystemPanel(c);
       this._railSync();
+    },
+
+    /** Background Work rail panel: compact live list; the window remains the
+     *  full surface (header button opens it). Renders-once guard + jobs-updated
+     *  rebuild come from _renderRailPanel. All strings textContent (XSS law). */
+    _renderJobsRailPanel(c) {
+      openJobsWindow.renderRail?.(this.app, c);
     },
 
     /** Memory badge on the System rail icon: shown at ≥80% (amber via CSS

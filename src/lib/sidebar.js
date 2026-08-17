@@ -936,7 +936,7 @@ class Sidebar {
     // panel rebuilt with a fresh closure and its Machine selection reset to
     // local mid-use (userN: "login on host → dialog jumps machines"). The
     // panel wipes listEl itself when it genuinely rebuilds (tab change).
-    if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins' || this._activeTab === 'system') { this._renderRailPanel?.(); return; }
+    if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins' || this._activeTab === 'jobs' || this._activeTab === 'system') { this._renderRailPanel?.(); return; }
 
     this.listEl.innerHTML = '';
 
