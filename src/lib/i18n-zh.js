@@ -2657,4 +2657,8 @@ export default {
   "skipped — auto-notify is off ({source})": "已跳过——自动通知关闭（{source}）",
   "suppressed by the rate floor": "被频率下限抑制",
   "tokens": "token",
+  "Message from “{name}”": "来自“{name}”的消息",
+  "Message from another session": "来自其他会话的消息",
+  "published": "已发布",
+  "Managed under Active forwards above": "已在上方“活跃转发”中管理",
 };

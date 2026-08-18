@@ -640,6 +640,16 @@ class MessageManager {
           }
         }
       }
+      else if (raw.origin?.kind === 'peer') {
+        // Cross-session PEER message (2.349.0, owner report "announce了但对话
+        // 框里什么都看不到"): a Background-Work notify / another session's
+        // SendMessage wakes this conversation as a user record with
+        // origin.kind='peer' (+ isMeta), which fell into the invisible-meta
+        // path — the turn appeared to start from nothing. Same provenance law
+        // as task-notification: origin.kind wins, render a distinct card.
+        msg.originKind = 'peer-message';
+        msg.peerFrom = raw.origin.from && raw.origin.from !== 'unknown' ? raw.origin.from : null;
+      }
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
       if (emit) this._emit({ op: 'create', message: msg });
