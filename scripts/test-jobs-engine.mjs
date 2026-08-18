@@ -122,6 +122,21 @@ try {
   ok(pv && pv.enabled === true && pv.mode === 'resume-inject', 'notifyPreview: enabled but unreachable → resume-inject mode');
   ok(C.notifyPreview(jn3).enabled === false, 'notifyPreview: job-level off reported disabled');
 
+  // 7d. 2.344.1 review fixes: missed-{at} is terminal-once; rate floor stashes distinct events
+  const rm1 = C.create({ kind: 'cron', name: 'missed-once', schedule: { at: Date.now() + 3600e3 }, catchUp: 'none', action: { type: 'notify', text: 'x' }, owner }, caller);
+  const jm1 = C.jobs.get(rm1.job.id);
+  jm1.nextFireAt = Date.now() - 300_000; // pretend the server slept past it (>120s catch-up window)
+  await C._cronTick();
+  ok(jm1.state === 'missed' && jm1.desiredUp === false && jm1.nextFireAt === null, 'missed {at} cron parks terminally (no re-notify loop)', `${jm1.state}/${jm1.desiredUp}/${jm1.nextFireAt}`);
+  const evBefore = C.events.length;
+  await C._cronTick();
+  ok(C.events.length === evBefore, 'second tick after missed emits NOTHING');
+  C._notifyRate.set('conv-T', { ts: Date.now(), text: 'other' });
+  C.pendingNotifs.clear();
+  C.d.deliverToConversation = async () => { throw new Error('floored events must not hit the socket'); };
+  C._notifyOwner({ id: 'jb-floor', name: 'floor-test', state: 'failed', kind: 'task', owner: { conversation: { id: 'conv-T' } } }, { what: 'failed exit=1' });
+  ok((C.pendingNotifs.get('conv-T') || []).some((n) => n.jobId === 'jb-floor'), 'rate-floored DISTINCT event is stashed, not dropped');
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');

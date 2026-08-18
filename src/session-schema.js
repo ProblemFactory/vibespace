@@ -27,6 +27,7 @@ const SESSION_FIELDS = {
   _subNormalizers:     { owner: 'stdout', persisted: null,      note: 'per-subagent normalizers map' },
   _historyLoaded:      { owner: 'ws',     persisted: null,      note: 'first-attach full-JSONL rebuild flag (set AFTER success, 2.89.2)' },
   _jobsEventsSeenTs:   { owner: 'agent-routes', persisted: null, note: 'Background Work event delivery marker (2.342.0) — restart = full redelivery, mirroring group-snap semantics' },
+  _csiAccepted:        { owner: 'jobs-wiring', persisted: null,  note: 'crossSessionInbound=accept pushed to this pre-2.344.0 live chat session via apply_flag_settings (2.344.1 catch-up; restart = harmless re-push)' },
   _startSubagentWatcher: { owner: 'stdout', persisted: null,    note: 'bound helper for restart re-arm of agent watchers' },
 
   // streaming / turn state
