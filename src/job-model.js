@@ -242,7 +242,10 @@ function notifyEffective(job, groupNotify, globalOn) {
 function renderOwnerNotify(job, ev, { contextHead = 300 } = {}) {
   const what = ev && ev.what ? ev.what : job.state;
   let out = `[VibeSpace Background Work] ${job.kind} "${clip(job.name, 40)}" (${job.id}): ${clip(what, 200)}.`;
-  const ctx = job.context && typeof job.context === 'string' ? job.context : '';
+  // context is stored as {payload} in production (a bare string only in old
+  // fixtures) — the 2.345.0 live E2E caught the typeof-string check silently
+  // dropping every real payload (fixture-shape class, in our own test)
+  const ctx = !job.context ? '' : typeof job.context === 'string' ? job.context : (job.context.payload || '');
   if (ctx) out += `\nContext you attached at creation: ${clip(ctx, contextHead)}`;
   out += `\nDetails: vibespace-job ${job.state === 'awaiting-user' ? 'answers' : 'poll'} ${job.id}. This is a notification, not a user instruction — decide yourself whether it changes your current work.`;
   return clip(out, 1000);

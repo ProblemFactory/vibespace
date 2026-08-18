@@ -65,6 +65,7 @@ read:    vibespace-job list [--all]        · vibespace-job poll <id|name> [--wa
 control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
+         vibespace-job subscribe <id> · unsubscribe <id>   (any session that can VIEW the job — get its notifications too)
 in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
          vibespace-job answers [--wait 100]
 Pick the right tool: turn-scoped waits → background Bash/Monitor · session continuation → /goal ·
@@ -162,6 +163,14 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (!pos[1] || !['on', 'off', 'inherit'].includes(pos[2])) { console.error('usage: vibespace-job notify <id|name> on|off|inherit'); process.exit(1); }
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/notify`, { value: pos[2] });
       console.log('auto-notify: ' + r.notify + (r.preview ? ` — ${r.preview.enabled ? (r.preview.mode === 'live-message' ? 'this conversation will be messaged' : 'stashed until your next resume') : 'off: ' + (r.preview.reason || '')}` : ''));
+      break;
+    }
+    case 'subscribe': case 'unsubscribe': {
+      if (!pos[1]) { console.error(`usage: vibespace-job ${verb} <id|name>`); process.exit(1); }
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/${verb}`, {});
+      console.log(verb === 'subscribe'
+        ? (r.already ? 'already subscribed' : 'subscribed') + ` (${r.count} subscriber(s)) — this conversation now gets its completion/failure/ask messages; vibespace-job unsubscribe ${pos[1]} to stop`
+        : (r.removed ? 'unsubscribed' : 'was not subscribed') + ` (${r.count} left)`);
       break;
     }
     case 'progress': {
