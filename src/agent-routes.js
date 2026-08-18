@@ -984,6 +984,8 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
       a.jm._touch(job); a.jm._save(); r = { ok: true };
       return res.json({ success: true, access: job.access });
     }
+    else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller);   // canView already proven by findVisible
+    else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
     else if (act === 'notify') {
       // owner-only post-create override (2.344.2 — field report: changing
       // notify used to require rm + recreate)

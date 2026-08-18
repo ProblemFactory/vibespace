@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.345.0
+
+- **Context echo in notifications was silently dead — caught by the live E2E (owner question "你测试回调context了吗"):** the notify text checked `typeof job.context === 'string'` but production stores `{payload}` — every real context brief was dropped from every notification since 2.344.0 (the unit fixture used a bare string: the fixture-shape class struck our own test). Fixed for both shapes, pinned with the production shape + a negative control; the `--context` brief now rides completion/failure messages (clipped to 300cp inside the 1000cp cap).
+- **Job subscriptions (owner request): any session that can VIEW a job can now subscribe to its notifications** — `vibespace-job subscribe <id|name>` / `unsubscribe` (also POST /api/agent/jobs/:ref/subscribe). Subscribers get the same completion/failure/park/ask messages as the owner over the same lanes (live message when their inbox is reachable, stash-to-resume otherwise), deduped per conversation lineage, capped at 10 per job. Subscribing to a CRON covers its per-fire child runs too. A subscription is its own explicit switch: group/global notify defaults and the owner's --notify govern the OWNER lane only — a subscriber leaves by unsubscribing. `lastNotify` keeps narrating the owner lane; snapshots carry `subscribersCount`.
+- Recurring-cron multi-fire callbacks pinned in the gate: a child failing on two consecutive fires notifies each time (engine 36, model 48).
+
+
 ## 2.344.2
 
 - **`vibespace-job notify <id> on|off|inherit`** — change a job's auto-notify override without rm+recreate (field report from the first fleet adopter, which rebuilt four jobs to flip the flag). Owner-only (canEdit); returns a fresh notify preview. User side rides the existing access act (`notify` field). E2E note: the full notify loop was live-verified today — a `sleep 60` task's completion message was delivered to its idle owner conversation via the CLI inbox (lastNotify lane=message) and opened a new turn.

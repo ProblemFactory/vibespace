@@ -147,53 +147,93 @@ class JobManager {
   _notifyOwner(job, ev) {
     try {
       const cid = job.owner && job.owner.conversation && job.owner.conversation.id;
+      // SUBSCRIBERS (2.345.0, owner request): sessions that explicitly opted
+      // in to a visible job's events get the same message. A subscription is
+      // its own explicit switch — group/global defaults and the owner's
+      // --notify override govern the OWNER lane only; a subscriber leaves by
+      // unsubscribing. View access was checked at subscribe time.
+      // a cron CHILD inherits its parent's subscribers too — subscribing to
+      // the visible cron record is the natural action, and the per-fire
+      // events live on the child
+      const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
+      const seenSubs = new Set();
+      for (const sub of [...(job.subscribers || []), ...((parent && parent.subscribers) || [])]) {
+        if (!sub.conversationId || sub.conversationId === cid || seenSubs.has(sub.conversationId)) continue;
+        seenSubs.add(sub.conversationId);
+        this._deliverTo(sub.conversationId, job, ev, { subscriber: true });
+      }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
       const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
       if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._dirty = true; return; }
-      const text = M.renderOwnerNotify(job, ev);
-      // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
-      // between SOCKET posts per conversation, identical text 10min. A floored
-      // DISTINCT event is STASHED, not dropped (2.344.1 review catch — a fail
-      // right after a done must still reach the owner, just via the next
-      // injection instead of a second immediate message); only an identical
-      // repeat is dropped outright.
-      const rate = this._notifyRate.get(cid) || {};
-      if (rate.text === text && rate.ts && now() - rate.ts < 600_000) {
-        job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._dirty = true; return;
-      }
-      if (rate.ts && now() - rate.ts < 30_000) {
-        this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead');
-        this._dirty = true;
-        return;
-      }
-      this._notifyRate.set(cid, { ts: now(), text });
-      if (this._notifyRate.size > 500) { // prune: keep the map bounded
-        const cut = now() - 600_000;
-        for (const [k, v] of this._notifyRate) if (!v.ts || v.ts < cut) this._notifyRate.delete(k);
-        if (this._notifyRate.size > 500) this._notifyRate.clear();
-      }
-      const deliver = this.d.deliverToConversation ? this.d.deliverToConversation(cid, text) : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
-      Promise.resolve(deliver).then((r) => {
-        if (r && r.ok) {
-          job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
-        } else {
-          this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable');
-        }
-        this._dirty = true;
-        try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
-      }).catch((e) => {
-        this._stashNotif(cid, job, ev, e.message); // degrade path logs verbatim inside
-        this._dirty = true;
-      });
+      this._deliverTo(cid, job, ev, {});
     } catch (e) { this.d.log('[jobs] owner notify failed:', e.message); }
   }
-  _stashNotif(cid, job, ev, reason) {
+  /** one delivery attempt to ONE conversation (owner or subscriber): flood
+   *  floor → socket post → stash fallback. Subscriber deliveries never stamp
+   *  the job's lastNotify (that field narrates the OWNER lane). */
+  _deliverTo(cid, job, ev, { subscriber } = {}) {
+    const text = M.renderOwnerNotify(job, ev);
+    // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
+    // between SOCKET posts per conversation, identical text 10min. A floored
+    // DISTINCT event is STASHED, not dropped (2.344.1 review catch); only an
+    // identical repeat is dropped outright.
+    const rate = this._notifyRate.get(cid) || {};
+    if (rate.text === text && rate.ts && now() - rate.ts < 600_000) {
+      if (!subscriber) { job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._dirty = true; }
+      return;
+    }
+    if (rate.ts && now() - rate.ts < 30_000) {
+      this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead', { stampLast: !subscriber });
+      this._dirty = true;
+      return;
+    }
+    this._notifyRate.set(cid, { ts: now(), text });
+    if (this._notifyRate.size > 500) { // prune: keep the map bounded
+      const cut = now() - 600_000;
+      for (const [k, v] of this._notifyRate) if (!v.ts || v.ts < cut) this._notifyRate.delete(k);
+      if (this._notifyRate.size > 500) this._notifyRate.clear();
+    }
+    const deliver = this.d.deliverToConversation ? this.d.deliverToConversation(cid, text) : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
+    Promise.resolve(deliver).then((r) => {
+      if (r && r.ok) {
+        if (!subscriber) job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
+      } else {
+        this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber });
+      }
+      this._dirty = true;
+      try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
+    }).catch((e) => {
+      this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber }); // degrade path logs verbatim inside
+      this._dirty = true;
+    });
+  }
+  _stashNotif(cid, job, ev, reason, { stampLast = true } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
     q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low' });
     if (q.length > 30) q.splice(0, q.length - 30); // per-conversation cap; oldest fall off
     this.pendingNotifs.set(cid, q);
-    job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
-    this.d.log(`[jobs] owner notify → stashed for ${cid} (${reason || 'not reachable'})`);
+    if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
+    this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
+  }
+  /** explicit per-conversation subscription to a VISIBLE job's notifications
+   *  (2.345.0). View access is the route's responsibility; dedupe by
+   *  conversation lineage; cap 10 per job. */
+  subscribe(job, caller) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    if (!caller.conversationId) return { error: 'this session has no conversation id yet — send one message first, then subscribe' };
+    job.subscribers = job.subscribers || [];
+    if (job.subscribers.some((s) => s.conversationId === caller.conversationId)) return { ok: true, already: true, count: job.subscribers.length };
+    if (job.subscribers.length >= 10) return { error: 'subscriber cap (10) reached for this job' };
+    job.subscribers.push({ conversationId: caller.conversationId, sessionId: caller.sessionId || null, ts: now() });
+    this._touch(job); this._save();
+    return { ok: true, count: job.subscribers.length };
+  }
+  unsubscribe(job, caller) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const before = (job.subscribers || []).length;
+    job.subscribers = (job.subscribers || []).filter((s) => s.conversationId !== caller.conversationId);
+    this._touch(job); this._save();
+    return { ok: true, removed: before - job.subscribers.length, count: job.subscribers.length };
   }
   /** honest notify preview for the CREATE response + UI: will the owner
    *  conversation hear back, over which lane, decided by which layer. */
@@ -651,7 +691,7 @@ class JobManager {
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: job.context || null,
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
       access: job.access, createdAt: job.createdAt, cronParent: job.cronParent || null,
-      notify: job.notify || 'inherit', lastNotify: job.lastNotify || null,
+      notify: job.notify || 'inherit', lastNotify: job.lastNotify || null, subscribersCount: (job.subscribers || []).length,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger } : null,
       runsCount: (job.runs || []).length,
       pendingPanel: !!(job.interaction && job.interaction.pending),

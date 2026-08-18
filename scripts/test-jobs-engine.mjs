@@ -137,6 +137,34 @@ try {
   C._notifyOwner({ id: 'jb-floor', name: 'floor-test', state: 'failed', kind: 'task', owner: { conversation: { id: 'conv-T' } } }, { what: 'failed exit=1' });
   ok((C.pendingNotifs.get('conv-T') || []).some((n) => n.jobId === 'jb-floor'), 'rate-floored DISTINCT event is stashed, not dropped');
 
+  // 7e. subscriptions (2.345.0): a second conversation opts into a visible job
+  const cids = [];
+  C._notifyRate.clear(); C.pendingNotifs.clear();
+  C.d.deliverToConversation = async (cid, text) => { cids.push({ cid, hasCtx: text.includes('订阅测试context') }); return { ok: true, lane: 'message' }; };
+  const rs1 = C.create({ kind: 'task', name: 'sub-test', cmd: { argv: ['sh', '-c', 'exit 1'] }, context: { payload: '订阅测试context说明' }, owner }, caller);
+  const js1 = C.jobs.get(rs1.job.id);
+  const subCaller = { conversationId: 'conv-SUB', sessionId: 'sess-SUB', sessionCreatedAt: 2, groups: new Set(['T-g']) };
+  ok(C.subscribe(js1, subCaller).ok && C.subscribe(js1, subCaller).already, 'subscribe is idempotent by conversation lineage');
+  await until(() => js1.state === 'failed' && cids.length >= 2, 15000);
+  ok(cids.some((c) => c.cid === 'conv-T') && cids.some((c) => c.cid === 'conv-SUB'), 'failure notifies OWNER and SUBSCRIBER conversations', JSON.stringify(cids));
+  ok(cids.every((c) => c.hasCtx), 'notification text carries the {payload} context echo (E2E-caught bug pinned)');
+  ok(js1.lastNotify && js1.lastNotify.lane === 'message' && C.snapshot(js1).subscribersCount === 1, 'lastNotify narrates the owner lane; snapshot counts subscribers');
+  ok(C.unsubscribe(js1, subCaller).removed === 1, 'unsubscribe removes the conversation');
+
+  // 7f. recurring cron: repeated distinct failures notify EACH time (multi-fire)
+  const cronNotifs = [];
+  C._notifyRate.clear();
+  C.d.deliverToConversation = async (cid, text) => { cronNotifs.push(text.slice(0, 60)); return { ok: true, lane: 'message' }; };
+  const rc1 = C.create({ kind: 'cron', name: 'flaky', schedule: { at: Date.now() + 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'exit 3'] } } }, owner }, caller);
+  const jc1 = C.jobs.get(rc1.job.id);
+  jc1.schedule = { everyMs: 3600e3 }; jc1.nextFireAt = Date.now() - 1000;
+  await C._cronTick();
+  await until(() => cronNotifs.length >= 1, 15000);
+  C._notifyRate.clear(); // both fires produce byte-identical failure text — clear the dedupe as a 15min-apart fire would be
+  jc1.nextFireAt = Date.now() - 1000;
+  await C._cronTick();
+  ok(await until(() => cronNotifs.length >= 2, 15000), 'a recurring cron child failing on TWO fires notifies twice (multi-fire callbacks work)', `got ${cronNotifs.length}`);
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');
