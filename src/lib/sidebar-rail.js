@@ -358,7 +358,12 @@ export function installSidebarRail(Sidebar) {
         this._railSysCharts = this._railSysCharts || [];
         this._railSysCharts.push(inst);
       };
-      mk('mem', p.map((x) => x.m), col('--blue', '#61afef'), lim, fmtG);
+      // AUTO-SCALE the memory axis to the data, not the machine limit (owner
+      // report: 20G of use on a 122G machine drew as a flat line at the
+      // bottom) — peak ×1.2 headroom, capped at the limit; the "cur / limit"
+      // label above the chart keeps the absolute context.
+      const peakM = Math.max(...pts.map((x) => x.m || 0), 1);
+      mk('mem', p.map((x) => x.m), col('--blue', '#61afef'), Math.min(lim, peakM * 1.2), fmtG);
       const peakC = Math.max(...pts.map((x) => x.c ?? 0), 0.1);
       const cpuMax = d.cpus && d.cpus >= peakC ? Math.min(d.cpus, Math.max(1, Math.ceil(peakC))) : Math.ceil(peakC);
       mk('cpu', p.map((x) => x.c), col('--red', '#e06c75'), cpuMax, (v) => (typeof v === 'number' ? v.toFixed(v < 10 ? 2 : 0) : v));
@@ -393,7 +398,9 @@ export function installSidebarRail(Sidebar) {
       let hostsList = [];
       try { hostsList = (await fetchJson('/api/hosts'))?.hosts || []; } catch {}
       if (!c.isConnected) return;
-      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-procs"></div><div class="sys-hist"></div>';
+      // zone order: bars → history charts → process table LAST (owner
+      // report: the long table pushed the charts out of sight)
+      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div><div class="sys-procs"></div>';
       const hostRow = c.querySelector('.sys-host-row');
       const live = c.querySelector('.sys-live');
       const procsEl = c.querySelector('.sys-procs');
@@ -461,7 +468,7 @@ export function installSidebarRail(Sidebar) {
         if (!c.isConnected) { clearInterval(t); return; }
         if (this._railSysHost) { if (Date.now() - lastRemote < 9500) return; lastRemote = Date.now(); }
         render();
-        this._prcRefresh?.();
+        if (!this._prcPaused) this._prcRefresh?.();
       }, 5000);
       const th = setInterval(() => { if (!c.isConnected) { clearInterval(th); return; } if (!this._railSysHost) renderHist(); }, 60000);
       this._panelDispose = () => { clearInterval(t); clearInterval(th); this._destroyRailSysCharts(); };
@@ -480,7 +487,25 @@ export function installSidebarRail(Sidebar) {
       root.innerHTML = '';
       const head = document.createElement('div');
       head.className = 'usage-section-title prc-head';
-      head.innerHTML = `<span>${escHtml(tr('Processes'))}</span><span class="prc-count"></span>`;
+      head.innerHTML = `<span>${escHtml(tr('Processes'))}</span><span class="prc-head-right"><span class="prc-count"></span></span>`;
+      // auto-refresh pause (owner request: a row you're reading must not be
+      // refreshed out from under you). Paused = the 5s tick skips this table
+      // only; sort/filter/expand keep working on the frozen snapshot, and a
+      // host switch or a kill outcome still refreshes explicitly.
+      this._prcPaused = false;
+      const pauseBtn = document.createElement('button');
+      pauseBtn.className = 'mounts-icon-btn prc-pause';
+      const drawPause = () => {
+        pauseBtn.innerHTML = this._prcPaused
+          ? R('<polygon points="6 4 20 12 6 20" fill="currentColor" stroke="none"/>')
+          : R('<line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/>');
+        pauseBtn.dataset.tip = this._prcPaused ? tr('Auto-refresh paused — click to resume') : tr('Pause auto-refresh');
+        pauseBtn.classList.toggle('on', this._prcPaused);
+        head.querySelector('.prc-count').classList.toggle('prc-count-paused', this._prcPaused);
+      };
+      pauseBtn.onclick = () => { this._prcPaused = !this._prcPaused; drawPause(); if (!this._prcPaused) refresh(false); };
+      head.querySelector('.prc-head-right').prepend(pauseBtn);
+      drawPause();
       const ctl = document.createElement('div');
       ctl.className = 'prc-ctl';
       const search = document.createElement('input');
@@ -519,6 +544,7 @@ export function installSidebarRail(Sidebar) {
         // subtle btop-style CPU fill behind the row (theme-agnostic mix)
         const bg = cv >= 1 ? ` style="background:linear-gradient(90deg,color-mix(in srgb,var(--${hot ? 'red' : 'accent'}) ${hot ? 18 : 12}%,transparent) ${cv}%,transparent ${cv}%)"` : '';
         let h = `<div class="prc-row${exp ? ' expanded' : ''}${stateChar === 'T' ? ' prc-stopped' : ''}" data-pid="${pid}"${bg}>`
+          + `<span class="prc-pid">${pid}</span>`
           + `<span class="prc-name" ${depth ? `style="padding-left:${Math.min(depth, 8) * 10}px"` : ''} title="${escHtml(p.cmd)}"><span class="prc-nm">${escHtml(nameOf(p))}</span>${isSrv ? `<span class="prc-chip">${escHtml(tr('server'))}</span>` : ''}${stateChar === 'T' ? `<span class="prc-chip prc-chip-warn">${escHtml(tr('paused'))}</span>` : ''}${stateChar === 'Z' ? `<span class="prc-chip prc-chip-warn">${escHtml(tr('zombie'))}</span>` : ''}</span>`
           + `<span class="prc-cpu${hot ? ' hot' : ''}">${fmtCpu(p)}</span>`
           + `<span class="prc-mem">${fmtB(p.rss)}</span></div>`;

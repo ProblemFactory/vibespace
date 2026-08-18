@@ -2687,4 +2687,6 @@ export default {
   "zombie": "ゾンビ",
   "No match among the {n} transported rows (of {total} on the machine)": "転送された {n} 行に一致なし（マシン上には {total} プロセス）",
   "Searched the {n} transported rows (of {total} on the machine)": "転送された {n} 行を検索しました（マシン上には {total} プロセス）",
+  "Pause auto-refresh": "自動更新を一時停止",
+  "Auto-refresh paused — click to resume": "自動更新は一時停止中 — クリックで再開",
 };

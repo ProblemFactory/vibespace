@@ -118,6 +118,13 @@ try {
   check('process table has real rows', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5`));
   check('rows carry cpu + mem cells', await evalJs(`!!document.querySelector('.rail-panel-system .prc-row .prc-cpu') && !!document.querySelector('.rail-panel-system .prc-row .prc-mem')`));
   check('sort chips render (CPU/MEM/PID/Name/Tree)', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-sorts .sys-range-chip').length === 5`));
+  check('rows carry a PID column', await evalJs(`(() => { const el = document.querySelector('.rail-panel-system .prc-row .prc-pid'); return !!el && /^\\d+$/.test(el.textContent); })()`));
+  check('charts zone sits BEFORE the process table', await evalJs(`(() => { const p = document.querySelector('.rail-panel-system .sys-procs'); const h = document.querySelector('.rail-panel-system .sys-hist'); return !!p && !!h && (h.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0; })()`));
+  // pause toggle freezes the table (no fetch-driven redraw while on)
+  await evalJs(`document.querySelector('.rail-panel-system .prc-pause').click()`);
+  check('pause toggle arms', await evalJs(`document.querySelector('.rail-panel-system .prc-pause').classList.contains('on') && app.sidebar._prcPaused === true`));
+  await evalJs(`document.querySelector('.rail-panel-system .prc-pause').click()`);
+  check('pause toggle disarms + refresh resumes', await evalJs(`app.sidebar._prcPaused === false`));
   await evalJs(`(() => { const s = document.querySelector('.rail-panel-system .prc-search'); s.value = 'node'; s.dispatchEvent(new Event('input')); })()`);
   await sleep(400);
   // filter matches the FULL cmd (the title attr), not the displayed basename —
