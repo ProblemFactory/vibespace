@@ -313,7 +313,14 @@ app.get('/api/agent/task-context', (req, res) => {
     try {
       const jm = getJobs && getJobs();
       if (jm && jm.ready) {
-        const dig = jm.digestFor(jobsCaller(s, id), Buffer.byteLength(context || '', 'utf-8'));
+        const caller = jobsCaller(s, id);
+        // Offline notification stash FIRST (2.344.0): completions that could
+        // not be delivered while this conversation was closed inject here at
+        // resume, newest guaranteed, then the stash clears (drain-at-render,
+        // same accepted-lost stance as _jobsEventsSeenTs).
+        const missed = jobModel.renderNotifStash(jm.drainNotifs(caller.conversationId));
+        if (missed) context = context ? context + '\n\n' + missed : missed;
+        const dig = jm.digestFor(caller, Buffer.byteLength(context || '', 'utf-8'));
         if (dig) context = context ? context + '\n\n' + dig : dig;
       }
     } catch { }
@@ -492,7 +499,12 @@ app.get('/api/agent/prompt-context', (req, res) => {
     try {
       const jm = getJobs && getJobs();
       if (jm && jm.ready) {
-        const u = jm.updatesFor(jobsCaller(s, id), s._jobsEventsSeenTs || 0);
+        const caller = jobsCaller(s, id);
+        // stashed offline notifications (a resume that skipped SessionStart —
+        // codex — or entries stashed since it): drain here too
+        const missed = jobModel.renderNotifStash(jm.drainNotifs(caller.conversationId));
+        if (missed) parts.push(missed);
+        const u = jm.updatesFor(caller, s._jobsEventsSeenTs || 0);
         if (u.text) parts.push(u.text);
         s._jobsEventsSeenTs = u.lastTs; // marker advances at render (accepted-lost on drop)
       }
@@ -906,7 +918,7 @@ app.post('/api/agent/jobs', (req, res) => {
     singleInstance: b.singleInstance, timeoutMs: b.timeoutMs, untilOutput: b.untilOutput,
     stdinOpen: b.stdinOpen, notifyUser: b.notifyUser, schedule: b.schedule,
     catchUp: b.catchUp, action: b.action, context: b.context, access: b.access,
-    stopWithOwner: b.stopWithOwner,
+    stopWithOwner: b.stopWithOwner, notify: b.notify,
     owner: {
       conversation: a.caller.conversationId ? { id: a.caller.conversationId } : null,
       sessionId: a.sessionId, sessionCreatedAt: a.session.createdAt || 0,
@@ -918,7 +930,12 @@ app.post('/api/agent/jobs', (req, res) => {
   else if (!spec.cmd) return res.status(400).json({ error: 'cmd required' });
   const r = a.jm.create(spec, a.caller);
   if (r.error) return res.status(400).json({ error: r.error });
-  res.json({ success: true, job: r.job, renamed: r.renamed });
+  // Tell the creating agent up front whether ITS conversation will hear back
+  // (owner request 2.344.0): honest three-state — live message / stash-at-
+  // resume / off, with the deciding layer named.
+  let notify = null;
+  try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
+  res.json({ success: true, job: r.job, renamed: r.renamed, notify });
 });
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;

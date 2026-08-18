@@ -118,6 +118,21 @@ async function expandDetail(app, el, j, refresh) {
   lock.onclick = async () => { const r2 = await fetchJson(`/api/jobs/${j.id}/access`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lock: job.access?.lockedBy !== 'user' }) }); if (!r2?.error) { job.access = r2.access; setL(); } };
   acc.appendChild(lock);
   d.appendChild(acc);
+  // owner auto-notify state (2.344.0): which lane told (or will tell) the
+  // owner conversation about this job, and when it last happened
+  {
+    const nr = document.createElement('div'); nr.className = 'jobs-meta';
+    const ln = job.lastNotify;
+    const lastTxt = !ln ? t('nothing sent yet')
+      : ln.lane === 'message' && ln.ok ? t('messaged the owner conversation {ago}', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
+      : ln.lane === 'stash' ? t('queued for the owner conversation’s next resume ({ago})', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
+      : ln.lane === 'off' ? t('skipped — auto-notify is off ({source})', { source: ln.source || 'global' })
+      : ln.lane === 'suppressed' ? t('suppressed by the rate floor')
+      : t('nothing sent yet');
+    const ov = job.notify === 'on' ? ' · ' + t('forced ON for this job') : job.notify === 'off' ? ' · ' + t('forced OFF for this job') : '';
+    nr.textContent = t('Auto-notify') + ': ' + lastTxt + ov;
+    d.appendChild(nr);
+  }
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
     rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})`;

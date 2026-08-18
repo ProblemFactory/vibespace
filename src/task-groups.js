@@ -968,6 +968,10 @@ class TaskGroupManager {
     if (patch.color !== undefined) t.color = this._sanitizeColor(patch.color);
     if (patch.pattern !== undefined) t.pattern = this._sanitizePattern(patch.pattern);
     if (patch.injectContext !== undefined) t.injectContext = !!patch.injectContext;
+    // Background-job owner-notify tri-state (2.344.0): true/false override the
+    // global agents.jobNotify for jobs owned by this group's sessions; null =
+    // inherit. Any group's explicit false wins over another's true (quietest).
+    if (patch.jobNotify !== undefined) t.jobNotify = patch.jobNotify === true ? true : patch.jobNotify === false ? false : null;
     // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
     // client bundle may still send it; a stored dormant t.plan stays untouched.
     if (patch.backlog !== undefined) {

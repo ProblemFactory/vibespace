@@ -358,6 +358,18 @@ const SETTINGS_SCHEMA = {
     description: t('Lets agents register services, long tasks and cron schedules that outlive their conversation (Background Work window). OFF: not taught, endpoints refuse with skip-and-continue guidance; existing jobs keep running and stay visible to you.'),
     category: t('Integration'), liveApply: true,
   },
+  'agents.jobNotify': {
+    type: 'boolean', default: true,
+    label: t('Background jobs: notify the owner conversation'),
+    description: t('When a background job finishes, fails, is parked, or needs input, its owner conversation gets a message through Claude Code’s own cross-session messaging inbox (delivered by the CLI under its inbound rules; an idle session starts a turn, billed like a typed prompt). When the conversation is closed, the notification is stashed and injected the next time it resumes. Per-group override in the Task Group detail window; per-job override at creation (--notify on/off).'),
+    category: t('Integration'), liveApply: true,
+  },
+  'agents.vibespaceChannel': {
+    type: 'boolean', default: false,
+    label: t('VibeSpace channel (experimental)'),
+    description: t('Registers VibeSpace as a Claude Code channel in NEW local claude sessions (research-preview CLI feature, enabled per spawn via the development-channels flag). Job notifications then arrive as structured <channel source="vibespace"> events instead of plain peer messages, and this becomes the bridge for future external chat integrations. Sessions must be recreated to pick up a change. Leave off unless experimenting.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.stopNudgeStaleMinutes': {
     type: 'number', default: 10, min: 0, max: 240, step: 1,
     label: t('Stop nudge: staleness threshold (minutes)'),

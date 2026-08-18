@@ -282,6 +282,33 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       mgrSec.appendChild(hint);
     }
 
+    // ── Background Work: auto-notify visibility (2.344.0, owner request) ──
+    // READ-ONLY effective state for this session's conversation: global
+    // setting > any bound group's tri-state (explicit OFF wins). The toggles
+    // themselves live in Settings → Integration and the Task Group window.
+    {
+      const bwSec = section(t('Background Work'));
+      const globalOn = app.settings?.get('agents.jobNotify') !== false;
+      // same membership set as the Task Groups section above (explicit binds
+      // + folder-derived) — a job's owner snapshot is taken from these
+      const memberIds = new Set([...explicitIds, ...byId.keys()]);
+      const groups = (sidebar._tasks || []).filter(g => !g.archived && memberIds.has(g.id) && (g.jobNotify === true || g.jobNotify === false));
+      const offGroup = groups.find(g => g.jobNotify === false);
+      const onGroup = groups.find(g => g.jobNotify === true);
+      const eff = offGroup ? false : onGroup ? true : globalOn;
+      const src = offGroup ? t('group “{name}”', { name: offGroup.title }) : onGroup ? t('group “{name}”', { name: onGroup.title }) : t('global setting');
+      const rowEl = document.createElement('div');
+      rowEl.className = 'session-detail-row';
+      rowEl.innerHTML = `<span class="session-detail-label">${escHtml(t('Job auto-notify'))}</span><span class="session-detail-value">${escHtml(eff ? t('On') : t('Off'))} · ${escHtml(src)}</span>`;
+      bwSec.appendChild(rowEl);
+      const hint = document.createElement('div');
+      hint.className = 'empty-hint';
+      hint.textContent = eff
+        ? t('Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Toggle globally in Settings → Integration, per group in the group window.')
+        : t('This conversation is NOT notified when its background jobs finish — agents must poll. Toggle globally in Settings → Integration, per group in the group window.');
+      bwSec.appendChild(hint);
+    }
+
     // ── Agent steps (native TODO) ──
     const stepSec = section(t('Agent steps'));
     const stepList = document.createElement('div');

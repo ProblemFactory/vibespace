@@ -89,6 +89,39 @@ try {
   ok(kids.length === 1 && (kids[0].runs || []).length >= 2, 'second fire REUSES the same child (one record, two runs)', `kids=${kids.length} runs=${kids[0] && kids[0].runs.length}`);
   ok(!C.events.slice(evCount).some((e) => e.jobId === kids[0].id && /done exit=0/.test(e.what || '')), 'routine cron success emits NO event (quiet-success)');
 
+  // 7c. owner auto-notify (2.344.0): deliver lane, stash lane, drain, toggles
+  const delivered = [];
+  C.d.notifyGlobal = () => true;
+  C._notifyRate.clear(); // earlier phases posted for conv-T — reset the floor
+  C.pendingNotifs.clear();
+  C.d.deliverToConversation = async (cid, text) => { delivered.push({ cid, text }); return { ok: true, lane: 'message', peerName: 'peer-X' }; };
+  const rn1 = C.create({ kind: 'task', name: 'notif-ok', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
+  const jn1 = C.jobs.get(rn1.job.id);
+  ok(await until(() => jn1.state === 'failed' && jn1.lastNotify && jn1.lastNotify.lane === 'message' && jn1.lastNotify.ok, 15000), 'failed task messages the owner conversation (lastNotify lane=message)', JSON.stringify(jn1.lastNotify));
+  ok(delivered.length === 1 && delivered[0].cid === 'conv-T' && delivered[0].text.includes(jn1.id), 'delivery targeted the owner conversation lineage id and named the job');
+  // stash lane: delivery fails → durable per-conversation queue, drained at injection
+  C.d.deliverToConversation = async () => ({ ok: false, reason: 'no live inbox' });
+  C._notifyRate.clear();
+  const rn2 = C.create({ kind: 'task', name: 'notif-stash', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
+  const jn2 = C.jobs.get(rn2.job.id);
+  ok(await until(() => jn2.lastNotify && jn2.lastNotify.lane === 'stash', 15000), 'unreachable owner → notification stashed (lastNotify lane=stash)', JSON.stringify(jn2.lastNotify));
+  C._save();
+  const persisted = JSON.parse(fs.readFileSync(path.join(dir, 'job-notifications.json'), 'utf-8'));
+  ok(Array.isArray(persisted['conv-T']) && persisted['conv-T'].some((n) => n.jobId === jn2.id), 'stash persists to job-notifications.json keyed by conversation');
+  const drained = C.drainNotifs('conv-T');
+  ok(drained.length >= 1 && C.drainNotifs('conv-T').length === 0, 'drainNotifs returns the queue once and clears it');
+  // toggle: job-level off → no delivery, no stash
+  C.d.deliverToConversation = async () => { throw new Error('must not be called'); };
+  C._notifyRate.clear();
+  const rn3 = C.create({ kind: 'task', name: 'notif-off', notify: 'off', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
+  const jn3 = C.jobs.get(rn3.job.id);
+  ok(await until(() => jn3.state === 'failed', 15000) && (await sleep(300), !jn3.lastNotify || jn3.lastNotify.lane === 'off'), 'notify:off job never posts (lastNotify lane=off)', JSON.stringify(jn3.lastNotify));
+  // preview honesty
+  C.d.peerReachable = () => false;
+  const pv = C.notifyPreview(jn1);
+  ok(pv && pv.enabled === true && pv.mode === 'resume-inject', 'notifyPreview: enabled but unreachable → resume-inject mode');
+  ok(C.notifyPreview(jn3).enabled === false, 'notifyPreview: job-level off reported disabled');
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');

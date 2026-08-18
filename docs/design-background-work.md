@@ -502,3 +502,66 @@ disable source atomically.
    minimal panels into M1 (the QR/code case is the live pain)?
 3. The jobs digest budget (600 B default) — enough, or make it a setting under
    `agents.*`?
+4. Channel research-preview drift: `--channels` syntax/protocol may change —
+   re-verify `vibespace-channel.js` against the channels-reference on CLI
+   upgrades while `agents.vibespaceChannel` users exist.
+
+## 12. Owner auto-notify (2.344.0, owner-approved B-0bf4 — SHIPPED)
+
+The poll-only stance of §6 gains a PUSH lane that keeps the automation red
+line intact: VibeSpace never fabricates user input into a session's stdin —
+delivery rides **Claude Code's own cross-session messaging inbox** (GA, CLI
+≥2.1.224; official doc `docs/en/cross-session-messaging`). Facts the design
+rests on (binary forensics on 2.1.229 + live self-probe, 2026-08-17):
+
+- Every session binds a unix inbox socket, registered in
+  `~/.claude/sessions/<pid>.json` (`messagingSocketPath`, `sessionId`, `name`)
+  with a published per-session auth key file (`<pid>.<sha>.key`, 0600) — the
+  by-design same-OS-user peer auth path (sessions use it on each other).
+- Wire = newline JSON: `{"type":"auth","token":<key>}` then
+  `{"type":"user","message":{"role":"user","content":<text>}}` (the CLI's own
+  embedded injection recipe). Delivery: queued mid-turn, **a new turn when
+  idle, billed like a typed prompt**, CLI-side throttles/dedup/50-cap.
+- Our sessions run bypassPermissions, whose inbound default HOLDS unattested
+  senders → we pre-accept via the documented `--settings
+  {"crossSessionInbound":"accept"}` at spawn (repo/managed settings can still
+  tighten; a hold is never bypassed).
+
+**Mechanics.** `src/peer-messaging.js` (registry scan + two-frame post; gated
+by `scripts/test-peer-messaging.mjs` against a real fake inbox).
+`JobManager._notifyOwner` fires at: task terminal (skipping cron
+quiet-success AND agent-initiated `interrupted`), service park, cron missed,
+panel posted (`ask`), panel answered. Toggle resolution `notifyEffective`:
+job `--notify on|off` > group tri-state (`taskGroup.jobNotify`, any explicit
+OFF wins) > global `agents.jobNotify` (**default ON**, owner call). Engine
+rate floor: ≥30 s per conversation + identical-text 10 min (under the CLI's
+own throttles). Message text (`renderOwnerNotify`, ≤1000 cp) carries job
+id/state, a context-payload head, the poll pointer, and an explicit "not a
+user instruction" marker.
+
+**Offline stash.** No live inbox (session closed / remote / codex) →
+`data/job-notifications.json`, keyed by conversation lineage id, 30/convo cap,
+atomic writes on the engine's own dirty/flush cycle. Drained at the NEXT
+task-context (SessionStart/resume) AND prompt-context injection via
+`renderNotifStash` (≤900 B, endpoints survive, middle elided, floor line) —
+passive turn-boundary injection, never a fabricated turn.
+
+**Agent awareness.** The create response (and `vibespace-job run` output)
+carries `notify: {enabled, source, mode: live-message|resume-inject|off,
+reason}` — the agent knows at creation whether it will hear back or must poll.
+**User visibility.** Session Properties gains a read-only Background Work
+section (effective state + deciding layer); the job detail shows the last
+notify outcome (lane + age + per-job override); toggles live in Settings →
+Integration (global) and the Task Group window (tri-state).
+
+**VibeSpace channel (EXPERIMENTAL, default OFF, `agents.vibespaceChannel`).**
+`data/bin/vibespace-channel.js` is a dependency-free MCP stdio server
+declaring `claude/channel`; new local claude spawns register it via
+`--mcp-config` + `--dangerously-load-development-channels server:vibespace`
+(research preview: custom channels stay on the dev flag; org
+`channelsEnabled` policy still applies). The jobs deliver ladder prefers its
+per-session unix socket (`data/channel-socks/<webuiId>.sock`) when present —
+events arrive as `<channel source="vibespace">` — falling through to the GA
+inbox lane. This is the foundation for external chat-tool bridges (owner
+direction), not the primary notify lane. Cross-machine delivery stays parked
+with the rest of §11-adjacent cross-machine work.

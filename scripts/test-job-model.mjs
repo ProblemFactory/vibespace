@@ -79,5 +79,21 @@ ok(M.validateAnswers(panel, { code: '123456', button: 'submit' }).ok, 'answers m
 ok(!M.validateAnswers(panel, { code: 'abc', button: 'submit' }).ok, 'pattern-violating answer refused');
 ok(!M.validateAnswers(panel, { code: '123456' }).ok, 'missing button refused');
 
+// ── owner auto-notify (2.344.0) ──
+ok(M.notifyEffective({ notify: 'off' }, true, true).on === false && M.notifyEffective({ notify: 'off' }, true, true).source === 'job', 'job override beats group+global');
+ok(M.notifyEffective({}, false, true).on === false && M.notifyEffective({}, false, true).source === 'group', 'group OFF beats global ON');
+ok(M.notifyEffective({}, true, false).on === true, 'group ON beats global OFF');
+ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, null, false).on === false, 'inherit falls to global; default ON');
+const nj = { id: 'jb-abc', kind: 'task', name: '数据迁移-' + 'x'.repeat(80), state: 'done', context: '这是很长的context payload。'.repeat(100) };
+const ntext = M.renderOwnerNotify(nj, { what: 'done exit=0 ok (12m)' });
+ok([...ntext].length <= 1000 && ntext.includes('jb-abc') && ntext.includes('vibespace-job poll jb-abc') && ntext.includes('not a user instruction'), 'owner notify ≤1000cp, carries id + poll pointer + non-instruction marker');
+ok(M.renderOwnerNotify({ id: 'j', kind: 'task', name: 'n', state: 'awaiting-user' }, null).includes('vibespace-job answers j'), 'awaiting-user notify points at answers');
+// stash renderer: budget honored, first + NEWEST survive, floor line, empty=empty
+const stash = Array.from({ length: 40 }, (_, i) => ({ jobId: 'jb-' + i, jobName: '任务名字很长很长' + i, text: 'failed exit=1 error (3m)', ts: 1700000000000 + i * 1000 }));
+const st = M.renderNotifStash(stash);
+ok(B(st) <= 900 && st.includes('jb-0') && st.includes('jb-39') && st.includes('elided'), 'stash render ≤900B, endpoints survive, elision marked');
+ok(M.renderNotifStash([]) === '' && M.renderNotifStash(null) === '', 'empty stash ⇒ zero bytes');
+ok(M.renderNotifStash(stash, { budget: 120 }).includes('40 job notification') || M.renderNotifStash(stash, { budget: 120 }) === '', 'tiny budget falls to floor (or nothing)');
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -298,6 +298,22 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // never reached the server before, so the guard was dead code and
             // the mangling hit REMOTE shells (env rides the exec-env prefix).
             initialCommand: data.initialCommand || undefined,
+            // Background-job owner notify (2.344.0): our sessions run bypass-
+            // permissions, whose inbound default HOLDS an unattested peer
+            // message — pre-accept via the CLI's documented --settings knob so
+            // job notifications actually deliver. Follows the same global
+            // toggle that gates sending; repo/managed settings can tighten.
+            acceptPeerMessages: (() => { try { return serverSetting('agents.jobNotify') !== false; } catch { return true; } })(),
+            // EXPERIMENTAL VibeSpace channel (default OFF; local claude only —
+            // the channel script + socket live on THIS machine)
+            vibespaceChannel: (() => {
+              try {
+                if (serverSetting('agents.vibespaceChannel') !== true || data.host) return null;
+                const sockDir = path.join(__dirname, '..', 'data', 'channel-socks');
+                fs.mkdirSync(sockDir, { recursive: true });
+                return { script: path.join(__dirname, '..', 'data', 'bin', 'vibespace-channel.js'), sock: path.join(sockDir, id + '.sock') };
+              } catch { return null; }
+            })(),
           });
           // For codex resume: inherit forkedFrom chain from old session's JSONL
           if (backend === 'codex' && data.resumeId && sessionSpec.env) {

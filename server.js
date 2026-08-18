@@ -1213,6 +1213,7 @@ const jobsWiring = require('./src/server/jobs-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'),
   broadcastAll: (msg) => { const payload = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(payload); } catch {} } },
   userTodos, log: (...a) => console.log(...a),
+  serverSetting, taskGroups: tasks, activeSessions, // owner auto-notify (2.344.0): toggles + channel-lane session lookup
 });
 setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs });
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));

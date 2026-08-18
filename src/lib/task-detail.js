@@ -342,6 +342,19 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     injCb.onchange = () => patch({ injectContext: injCb.checked });
     injWrap.append(injCb, document.createTextNode(t("Inject this group's context into its sessions")));
     ctxSec.appendChild(injWrap);
+    // Background-job auto-notify tri-state (2.344.0): overrides the global
+    // Settings → Integration toggle for jobs owned by this group's sessions.
+    // An explicit Off here wins over any other group's On (quietest rule).
+    const bnWrap = document.createElement('label');
+    bnWrap.className = 'task-detail-folder-rec task-detail-inject';
+    bnWrap.title = t('When a background job owned by one of this group\'s conversations finishes, fails, or asks for input, message that conversation (Claude Code cross-session messaging; stashed for resume when it is closed). "Inherit" follows the global Integration setting.');
+    const bnLbl = document.createElement('span'); bnLbl.textContent = t('Job auto-notify') + ': ';
+    const bnSel = document.createElement('select'); bnSel.className = 'toolbar-select';
+    for (const [v, l] of [['inherit', t('Inherit (global)')], ['on', t('On')], ['off', t('Off')]]) { const o = document.createElement('option'); o.value = v; o.textContent = l; bnSel.appendChild(o); }
+    bnSel.value = task.jobNotify === true ? 'on' : task.jobNotify === false ? 'off' : 'inherit';
+    bnSel.onchange = () => patch({ jobNotify: bnSel.value === 'on' ? true : bnSel.value === 'off' ? false : null });
+    bnWrap.append(bnLbl, bnSel);
+    ctxSec.appendChild(bnWrap);
 
     // ── Color ──
     const colorSec = section(t('Color'));
