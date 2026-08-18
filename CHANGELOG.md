@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.355.1
+
+- **Process manager: the poll's own `ps` no longer tops the CPU sort at "200%"** (owner report) — ps lists itself, computes %CPU over its own ~10ms lifetime (20ms of CPU across threads = 200%), and gets a fresh pid every poll so the live-delta correction never applied. The shared parser now drops rows carrying our exact probe column string (covers the remote rung's `sh -c` wrapper too; a user's own `ps aux` still shows). Pinned in test-sysinfo-op (28).
+
 ## 2.355.0
 
 - **userW's inc-msy27q2e ("重启后只能 resume 当前桌面"): the 2.331.0 fix was NEVER WIRED.** That commit shipped `scanStoppedInDesktopStates` + its unit test — but the `loadAutoSave` call site was never staged, so the pure function sat dead for 24 releases while its test stayed green, and the exact report came back. The call is now in place (non-active desktops' lazy saved states fold into the same resume-all collector, honest against live/stopped/remote identity, home-desktop placement preserved) AND the suite gained a WIRING PIN: layout.js must *call* the scanner, not just define it. test-resume-all-desktops joined the release gate — it was another manual-only suite.

@@ -68,6 +68,13 @@ ok(pl2.sampled === true && pl2.procs.some((p) => p.pcpuNow != null), 'second cal
 ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client method is capability-gated');
 
 // 5. the shared parser + cap (the ssh fallback rung's interpretation)
+// the probe must never list ITSELF (owner report: a 200% `ps` topped the CPU
+// sort forever — ps computes %CPU over its own ~10ms lifetime and its pid is
+// new every poll, so the live-delta correction never applies)
+const withProbe = sysinfo.parsePsProcs(`me 50 1 200 0.0 6000 R+ 00:00 ps axo ${sysinfo.PS_COLUMNS}\nme 51 1 150 0.0 2000 S+ 00:00 sh -c ps axo ${sysinfo.PS_COLUMNS}\nme 52 1 1.0 0.0 3000 S+ 05:00 ps aux\n`);
+ok(withProbe.length === 1 && withProbe[0].pid === 52, 'own probe rows (incl. sh -c wrapper) are dropped; a user ps aux stays');
+const livePl = await sysinfo.listProcs();
+ok(!livePl.procs.some((p) => p.cmd.includes(sysinfo.PS_COLUMNS)), 'live table carries no self-probe row');
 const parsed = sysinfo.parsePsProcs('root     1     0  0.1  0.2  1234 Ss   10:33 /sbin/init splash\nme   22 1 99.5 1.0 2048 R+ 1-02:03:04 node server.js --flag\n\nbadline\n');
 ok(parsed.length === 2 && parsed[0].pid === 1 && parsed[0].user === 'root' && parsed[0].rss === 1234 * 1024, 'parsePsProcs: fields land (pid/user/rss)');
 ok(parsed[1].pcpu === 99.5 && parsed[1].etime === '1-02:03:04' && parsed[1].cmd === 'node server.js --flag', 'parsePsProcs: cpu/etime/multi-word cmd');
