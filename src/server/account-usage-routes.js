@@ -283,7 +283,11 @@ app.post('/api/accounts/pool/:id/target', (req, res) => {
   try {
     const id = req.params.id;
     const before = accounts.poolCurrent(id);
-    const r = accounts.setPoolTarget(id, String(req.body?.accountId || ''));
+    // USER route → sweep live per-session links on a hot pool (the manual
+    // pick means "everything, now"); the engine's own setPoolTarget calls
+    // never sweep — their per-session moves ARE the projection state.
+    const hot = accounts.get(id)?.hot !== false;
+    const r = accounts.setPoolTarget(id, String(req.body?.accountId || ''), { sweepSessionLinks: hot });
     const affected = [];
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== id) continue;

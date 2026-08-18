@@ -712,6 +712,28 @@ class LayoutManager {
       // Desktop-aware restore: delegate to DesktopManager
       if (this.app.desktopManager) {
         await this.app.desktopManager.loadFromServer(data);
+        // Fold NON-ACTIVE desktops' lazy saved states into the resume-all
+        // collector. THE 2.331.0 WIRING: that commit shipped the pure
+        // scanStoppedInDesktopStates + its unit test but this call site was
+        // never staged — the fix sat dead for 24 releases and the same
+        // report came back (userW, inc-msy27q2e). The scan mirrors
+        // restoreState's aliveness logic; restoreState covers the active
+        // desktop, this covers everything else.
+        try {
+          if (this._bootStoppedSessions) {
+            const [act, all] = await Promise.all([
+              fetch('/api/active').then((r) => r.json()).catch(() => ({})),
+              fetch('/api/sessions').then((r) => r.json()).catch(() => ({})),
+            ]);
+            const activeId = this.app.desktopManager.activeDesktopId;
+            const found = scanStoppedInDesktopStates(data, activeId, act.sessions || [],
+              all.sessions || all || [], (bsid) => this.app.sidebar?.getCustomName?.(bsid));
+            for (const d of found) {
+              const key = (d.opts?.backend || 'claude') + ':' + (d.opts?.backendSessionId || d.sessionId) + ':' + (d.opts?.hostId || '');
+              if (!this._bootStoppedSessions.some((x) => x.key === key)) this._bootStoppedSessions.push({ key, ...d });
+            }
+          }
+        } catch { }
       } else {
         // Fallback: original single-desktop restore
         const toRestore = this._isMobile() ? (data.autoSaveMobile || data.autoSave) : data.autoSave;

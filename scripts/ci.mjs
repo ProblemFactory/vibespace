@@ -10,7 +10,7 @@
 //      face of "打不开" (2.330.x) that static checks only partially model
 //   4. test-restore-smoke — boots the WORKING TREE in an isolated worktree,
 //      creates a real session, SIGKILLs, reboots, reconnects, then fires the
-//      27-route GET battery (the lost-binding class ONLY manifests at boot or
+//      28-route GET battery (the lost-binding class ONLY manifests at boot or
 //      route-run time; 2.330.0/2.330.1/2.333.0/2.335.0 all slipped past every
 //      static gate)
 // Enforced by scripts/git-hooks/pre-push (docs-only pushes skip; emergency
@@ -28,6 +28,7 @@ const SUITES = [
   'test-discovery-interpret', 'test-remote-discovery-dirty', 'test-remote-shell',
   'test-usage-walk-parity', 'test-ctx-sync', 'test-migrations',
   'test-job-model', 'test-jobs-engine', 'test-peer-messaging', 'test-lazy', 'test-server-globals',
+  'test-resume-all-desktops', // pure scan + the WIRING pin (the 2.331.0 dead-fix lesson)
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
   'test-cli-usage-parse', 'test-agentd-upgrade-loop', 'test-vendor-whitelist', 'test-wrapper-files',
@@ -35,6 +36,7 @@ const SUITES = [
   'test-writer-sweep', 'test-agentd-session', 'test-session-brain-dark',
   'test-chat-e2e',      // ONE real haiku turn through the full chat pipeline (oat token slot; SKIPs without ~/.config/vibespace/ci-oat)
   'test-client-boot',   // headless-chrome app boot (the FRONTEND face of 打不开; SKIPs without chrome)
+  'test-sidebar-rail',  // rail panels + process manager CDP battery (was manual-only and went silently stale — the 9-item assert was red for 12 releases; no rebuild: overlays the gate's own build; SKIPs without chrome)
   'test-restore-smoke', // LAST: the end-to-end boot + session-lifecycle + route battery
 ];
 

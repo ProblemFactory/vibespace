@@ -88,6 +88,17 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('sweep unlinks only the dead session', dropped === 1 && am.sessionPoolLinks(P2X).length === 1 && am.poolCurrentFor(P2X, K1) === A);
   am.dropSessionPoolLink(P2X, K1);
   ck('dropSessionPoolLink removes it; fallback returns', am.poolCurrentFor(P2X, K1) === am.poolCurrent(P2X));
+  // ── manual hot-switch sweeps live links (2.355.0, userW's inc-msz495u6:
+  // plan C demoted the manual target change to new-sessions-only — the
+  // default moved while every live session's link stayed on the old member)
+  am.ensureSessionPoolLink(P2X, K1, A);
+  am.ensureSessionPoolLink(P2X, K2, A);
+  const sw = am.setPoolTarget(P2X, B, { sweepSessionLinks: true });
+  ck('manual sweep repoints EVERY live session link', sw.swept === 2 && am.poolCurrentFor(P2X, K1) === B && am.poolCurrentFor(P2X, K2) === B);
+  // the ENGINE path (no option) must keep per-session projections intact
+  am.ensureSessionPoolLink(P2X, K1, A);
+  am.setPoolTarget(P2X, B);
+  ck('engine setPoolTarget never sweeps (projections survive)', am.poolCurrentFor(P2X, K1) === A);
   // remove(pool) clears the links dir but NEVER a member's real dir
   am.ensureSessionPoolLink(P2X, K1, B);
   am.remove(P2X);
