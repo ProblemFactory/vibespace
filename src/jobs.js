@@ -154,13 +154,18 @@ class JobManager {
       // unsubscribing. View access was checked at subscribe time.
       // a cron CHILD inherits its parent's subscribers too — subscribing to
       // the visible cron record is the natural action, and the per-fire
-      // events live on the child
+      // events live on the child. Per-subscriber regex FILTERS (2.347.0)
+      // match against the final notification text — a news watcher's
+      // subscriber can ask for only /SpaceX/ lines; non-matching events are
+      // simply not that subscriber's (no stash either).
       const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
+      const notifText = M.renderOwnerNotify(job, ev);
       const seenSubs = new Set();
       for (const sub of [...(job.subscribers || []), ...((parent && parent.subscribers) || [])]) {
         if (!sub.conversationId || sub.conversationId === cid || seenSubs.has(sub.conversationId)) continue;
         seenSubs.add(sub.conversationId);
-        this._deliverTo(sub.conversationId, job, ev, { subscriber: true });
+        if (!M.filterMatches(sub.filter, notifText)) continue;
+        this._deliverTo(sub.conversationId, job, ev, { subscriber: true, text: notifText });
       }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
       const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
@@ -171,8 +176,8 @@ class JobManager {
   /** one delivery attempt to ONE conversation (owner or subscriber): flood
    *  floor → socket post → stash fallback. Subscriber deliveries never stamp
    *  the job's lastNotify (that field narrates the OWNER lane). */
-  _deliverTo(cid, job, ev, { subscriber } = {}) {
-    const text = M.renderOwnerNotify(job, ev);
+  _deliverTo(cid, job, ev, { subscriber, text: preText } = {}) {
+    const text = preText || M.renderOwnerNotify(job, ev);
     // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
     // between SOCKET posts per conversation, identical text 10min. A floored
     // DISTINCT event is STASHED, not dropped (2.344.1 review catch); only an
@@ -218,15 +223,23 @@ class JobManager {
   /** explicit per-conversation subscription to a VISIBLE job's notifications
    *  (2.345.0). View access is the route's responsibility; dedupe by
    *  conversation lineage; cap 10 per job. */
-  subscribe(job, caller) {
+  subscribe(job, caller, { filter } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     if (!caller.conversationId) return { error: 'this session has no conversation id yet — send one message first, then subscribe' };
+    const vf = M.validateFilter(filter);
+    if (!vf.ok) return { error: vf.error };
     job.subscribers = job.subscribers || [];
-    if (job.subscribers.some((s) => s.conversationId === caller.conversationId)) return { ok: true, already: true, count: job.subscribers.length };
+    const existing = job.subscribers.find((s) => s.conversationId === caller.conversationId);
+    if (existing) { // re-subscribe = update the filter in place (agents tune their own filters)
+      const changed = (existing.filter || null) !== vf.filter;
+      existing.filter = vf.filter;
+      this._touch(job); this._save();
+      return { ok: true, already: !changed, updated: changed, filter: vf.filter, count: job.subscribers.length };
+    }
     if (job.subscribers.length >= 10) return { error: 'subscriber cap (10) reached for this job' };
-    job.subscribers.push({ conversationId: caller.conversationId, sessionId: caller.sessionId || null, ts: now() });
+    job.subscribers.push({ conversationId: caller.conversationId, sessionId: caller.sessionId || null, ts: now(), filter: vf.filter });
     this._touch(job); this._save();
-    return { ok: true, count: job.subscribers.length };
+    return { ok: true, count: job.subscribers.length, filter: vf.filter };
   }
   unsubscribe(job, caller) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
@@ -734,6 +747,12 @@ class JobManager {
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
       access: job.access, createdAt: job.createdAt, cronParent: job.cronParent || null,
       notify: job.notify || 'inherit', lastNotify: job.lastNotify || null, subscribersCount: (job.subscribers || []).length,
+      // full creation parameters (2.347.0, owner ask: agents must be able to
+      // re-inspect what they registered) — env VALUES stay out (names only)
+      cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
+      envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || null,
+      untilOutput: job.untilOutput || null, notifyUser: !!job.notifyUser, notifyOk: !!job.notifyOk,
+      catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger } : null,
       runsCount: (job.runs || []).length,
       pendingPanel: !!(job.interaction && job.interaction.pending),

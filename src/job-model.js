@@ -277,8 +277,25 @@ function renderNotifStash(items, { budget = 900, spillPath = null } = {}) {
   return bytes(floor) <= budget ? floor : '';
 }
 
+// ── subscription filters (2.347.0) ────────────────────────────────────────
+// Same acceptance rules as panel input patterns (≤200 chars, must compile);
+// matching runs case-insensitive over the capped notification text. A filter
+// that errors at match time matches NOTHING (fail-closed: no accidental spam).
+function validateFilter(pattern) {
+  if (pattern === undefined || pattern === null || pattern === '') return { ok: true, filter: null };
+  const p = String(pattern);
+  if (p.length > 200) return { ok: false, error: 'filter regex too long (≤200 chars)' };
+  try { new RegExp(p, 'i'); } catch (e) { return { ok: false, error: `invalid filter regex: ${e.message}` }; }
+  return { ok: true, filter: p };
+}
+function filterMatches(pattern, text) {
+  if (!pattern) return true;
+  try { return new RegExp(pattern, 'i').test(String(text).slice(0, 2000)); } catch { return false; }
+}
+
 module.exports = {
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
+  validateFilter, filterMatches,
   vetSpec, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,

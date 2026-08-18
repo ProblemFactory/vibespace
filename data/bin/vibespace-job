@@ -60,12 +60,14 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
            [--every 30m | --cron "41 9 * * *" | --at "2026-09-05 06:00"]              ← schedule (spawns CMD)
          vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high]
-read:    vibespace-job list [--all]        · vibespace-job poll <id|name> [--wait 100] [--tail 40]
+read:    vibespace-job list [--mine|--subscribed] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
+         vibespace-job show <id>  (FULL params: cmd/schedule/access/notify/subscribers/your subscription)
          vibespace-job logs <id> [--tail 200]
 control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
-         vibespace-job subscribe <id> · unsubscribe <id>   (any session that can VIEW the job — get its notifications too)
+         vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
+           the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it)
 in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
          vibespace-job answers [--wait 100] · vibespace-job announce "what happened" (notify owner+subscribers NOW —
            for watch jobs where exit code ≠ newsworthiness; --notify-ok at create = scheduled successes notify too)
@@ -123,9 +125,23 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       break;
     }
     case 'list': {
-      const r = await call('GET', '/api/agent/jobs' + (flags.all ? '?all=1' : ''));
-      if (!r.jobs.length) return console.log('no jobs visible to this session.');
-      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + j.context.payload.split('\n')[0].slice(0, 60) : ''}`);
+      const q = flags.mine ? '?mine=1' : flags.subscribed ? '?subscribed=1' : flags.all ? '?all=1' : '';
+      const r = await call('GET', '/api/agent/jobs' + q);
+      if (!r.jobs.length) return console.log(flags.mine ? 'no jobs owned by this conversation.' : flags.subscribed ? 'no subscriptions from this conversation.' : 'no jobs visible to this session.');
+      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + j.context.payload.split('\n')[0].slice(0, 60) : ''}`);
+      break;
+    }
+    case 'show': {
+      if (!pos[1]) { console.error('usage: vibespace-job show <id|name>'); process.exit(1); }
+      const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(pos[1])}`);
+      const j = r.job;
+      console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : ''}`);
+      if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
+      if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + new Date(j.nextFireAt).toISOString() : ''}`);
+      console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk}`);
+      console.log(`access: view=${j.access.view} control=${j.access.control}${j.access.lockedBy ? ' (locked by user)' : ''} · notify=${j.notify}${j.lastNotify ? ' last=' + j.lastNotify.lane + (j.lastNotify.ok ? '✓' : '✗') : ''} · subscribers=${j.subscribersCount}${j.mySubscription ? ' (you' + (j.mySubscription.filter ? ', filter=' + j.mySubscription.filter : '') + ')' : ''}`);
+      if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
+      if (j.run) console.log(`last run: ${new Date(j.run.startedAt).toISOString()} exit=${j.run.exit ?? '—'} ${j.run.cause || ''} (${j.runsCount} run(s))`);
       break;
     }
     case 'poll': case 'answers': {
@@ -176,9 +192,9 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     }
     case 'subscribe': case 'unsubscribe': {
       if (!pos[1]) { console.error(`usage: vibespace-job ${verb} <id|name>`); process.exit(1); }
-      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/${verb}`, {});
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/${verb}`, verb === 'subscribe' ? { filter: flags.filter } : {});
       console.log(verb === 'subscribe'
-        ? (r.already ? 'already subscribed' : 'subscribed') + ` (${r.count} subscriber(s)) — this conversation now gets its completion/failure/ask messages; vibespace-job unsubscribe ${pos[1]} to stop`
+        ? (r.updated ? 'subscription filter updated' : r.already ? 'already subscribed' : 'subscribed') + (r.filter ? ` (filter: /${r.filter}/i — only matching messages reach you)` : '') + ` (${r.count} subscriber(s)); vibespace-job unsubscribe ${pos[1]} to stop`
         : (r.removed ? 'unsubscribed' : 'was not subscribed') + ` (${r.count} left)`);
       break;
     }
