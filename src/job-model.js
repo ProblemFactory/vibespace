@@ -157,13 +157,29 @@ function renderJobsDigest(visible, { budget = 600 } = {}) {
 }
 function renderJobsUpdate(events, { budget = 600 } = {}) {
   if (!events.length) return '';
-  const line = (e) => `- ${e.id} ${clip(e.name, 24)}: ${e.what} — vibespace-job ${e.verb || 'poll'} ${e.id}`;
+  // Per-job announce coalescing (2.348.0, owner decision: viewers may see
+  // announces passively IF truncation is fair): a chatty watch job's N
+  // announces collapse to ONE line (×N + latest), so one noisy job can never
+  // crowd lifecycle events out of the budget. Lifecycle lines stay 1:1.
+  const coalesced = [];
+  const annIdx = new Map(); // jobId → index in coalesced
+  for (const e of events) {
+    if (typeof e.what === 'string' && e.what.startsWith('announced:')) {
+      const i = annIdx.get(e.id);
+      if (i !== undefined) { coalesced[i] = { ...e, _annCount: (coalesced[i]._annCount || 1) + 1 }; continue; } // latest wins, count bumps
+      annIdx.set(e.id, coalesced.length);
+    }
+    coalesced.push({ ...e });
+  }
+  const line = (e) => e._annCount > 1
+    ? `- ${e.id} ${clip(e.name, 24)}: announced ×${e._annCount}, latest: ${clip(e.what.slice(10).trim(), 120)} — vibespace-job poll ${e.id}`
+    : `- ${e.id} ${clip(e.name, 24)}: ${e.what} — vibespace-job ${e.verb || 'poll'} ${e.id}`;
   const head = '<vibespace-jobs-update>', tail = '</vibespace-jobs-update>';
-  let body = events.map(line);
+  let body = coalesced.map(line);
   let out = [head, ...body, tail].join('\n');
   while (bytes(out) > budget && body.length > 1) {
     body = body.slice(0, -1);
-    out = [head, ...body, `- …+${events.length - body.length} more — vibespace-job list`, tail].join('\n');
+    out = [head, ...body, `- …+${coalesced.length - body.length} more — vibespace-job list`, tail].join('\n');
   }
   return bytes(out) <= budget ? out : '';
 }
