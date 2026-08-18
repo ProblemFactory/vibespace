@@ -78,7 +78,7 @@ try {
 
   // default ON: rail present, classic tab bar hidden
   check('rail renders by default', await evalJs(`!!document.getElementById('sidebar-rail')`));
-  check('rail has 9 items', await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length === 9`)); // 2.216.0 added the system icon
+  check('rail has 10 items', await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length === 10`)); // 3 content tabs + 5 panels (ports/agents/plugins/jobs/system) + 2 launchers
   check('classic tab bar hidden', await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display === 'none'`));
   check('sidebar content wrapped', await evalJs(`!!document.querySelector('#sidebar .sidebar-main')`));
 
@@ -106,6 +106,24 @@ try {
   check('add-account opens a menu', await evalJs(`!!document.querySelector('.context-menu')`));
   await evalJs(`document.querySelector('.context-menu')?.remove()`);
   check('plugins panel renders', await openPanel('plugins'));
+
+  // System panel: the btop-like process manager (2.354.0) — real rows from
+  // the live /api/sysinfo/procs, search narrows, expand exposes the actions
+  check('system panel renders', await openPanel('system'));
+  await sleep(1500); // first /procs fetch
+  check('process table has real rows', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5`));
+  check('rows carry cpu + mem cells', await evalJs(`!!document.querySelector('.rail-panel-system .prc-row .prc-cpu') && !!document.querySelector('.rail-panel-system .prc-row .prc-mem')`));
+  check('sort chips render (CPU/MEM/PID/Name/Tree)', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-sorts .sys-range-chip').length === 5`));
+  await evalJs(`(() => { const s = document.querySelector('.rail-panel-system .prc-search'); s.value = 'node'; s.dispatchEvent(new Event('input')); })()`);
+  await sleep(400);
+  // filter matches the FULL cmd (the title attr), not the displayed basename —
+  // `sh -c "node …"` rows legitimately show 'sh' while matching 'node'
+  check('search filters the table', await evalJs(`(() => { const rows = [...document.querySelectorAll('.rail-panel-system .prc-row')]; return rows.length > 0 && rows.every((r) => (r.querySelector('.prc-name')?.title || '').toLowerCase().includes('node')); })()`));
+  await evalJs(`document.querySelector('.rail-panel-system .prc-row').click()`);
+  await sleep(200);
+  check('row expands to detail with kill actions', await evalJs(`!!document.querySelector('.rail-panel-system .prc-detail .prc-act[data-sig="TERM"]') || !!document.querySelector('.rail-panel-system .prc-detail .empty-hint')`));
+  await evalJs(`(() => { const s = document.querySelector('.rail-panel-system .prc-search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
+  await sleep(300);
 
   // gs-menu style entry redirects to the rail panel (no modal)
   await evalJs(`app.sidebar._railGo('folders')`);

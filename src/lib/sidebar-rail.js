@@ -8,7 +8,7 @@
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
-import { copyText, escHtml, showToast, fetchJson, showContextMenu } from './utils.js';
+import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog } from './utils.js';
 import { track } from './telemetry-client.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
 // Self-contained registration (idempotent) — the rail must not depend on the
@@ -393,9 +393,10 @@ export function installSidebarRail(Sidebar) {
       let hostsList = [];
       try { hostsList = (await fetchJson('/api/hosts'))?.hosts || []; } catch {}
       if (!c.isConnected) return;
-      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-hist"></div>';
+      c.innerHTML = '<div class="sys-host-row"></div><div class="sys-live"></div><div class="sys-procs"></div><div class="sys-hist"></div>';
       const hostRow = c.querySelector('.sys-host-row');
       const live = c.querySelector('.sys-live');
+      const procsEl = c.querySelector('.sys-procs');
       const hist = c.querySelector('.sys-hist');
       const render = async () => {
         if (!c.isConnected) return;
@@ -426,23 +427,9 @@ export function installSidebarRail(Sidebar) {
           parts.push(`<div class="usage-section-title">${escHtml(tr('Load'))}</div>`);
           parts.push(`<div class="sys-load">${d.load.join(' · ')}${d.cpus ? ` <span class="sys-load-cpus">/ ${d.cpus} CPU</span>` : ''}</div>`);
         }
-        parts.push(`<div class="usage-section-title">${escHtml(tr('Top processes (by memory)'))}</div>`);
-        for (const p of d.procs || []) {
-          const exp = this._railProcExpanded?.has(String(p.pid));
-          parts.push(`<div class="sys-proc${exp ? ' expanded' : ''}" data-pid="${p.pid}" title="${escHtml(tr('Click to expand the full command'))}"><span class="sys-proc-rss">${fmt(p.rss)}</span><span class="sys-proc-cmd">${escHtml(exp ? p.cmd : p.cmd.slice(0, 70))}</span></div>`);
-        }
-        if (!hostId) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Orphaned dev servers show in Ports with a Kill button'))}</div>`);
         live.innerHTML = parts.join('');
-        // click a process row to expand its FULL command (the truncated line
-        // was unreadable and no sidebar width could show a long path; state
-        // keyed by pid so the 5s refresh keeps expansions open)
-        live.querySelectorAll('.sys-proc').forEach((row) => row.addEventListener('click', () => {
-          const pid = row.dataset.pid;
-          this._railProcExpanded = this._railProcExpanded || new Set();
-          if (this._railProcExpanded.has(pid)) this._railProcExpanded.delete(pid); else this._railProcExpanded.add(pid);
-          row.classList.toggle('expanded');
-        }));
       };
+      this._buildProcManager(procsEl, () => this._railSysHost || '');
       const renderHist = () => this._renderRailResourceCharts(hist, this._railSysRange || '24h').catch(() => {});
       const syncHist = () => {
         if (this._railSysHost) {
@@ -459,6 +446,7 @@ export function installSidebarRail(Sidebar) {
           live.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
           syncHist();
           render();
+          this._prcRefresh?.(true); // immediate table swap to the new machine
         };
         hostRow.appendChild(sel);
       } else if (this._railSysHost) this._railSysHost = ''; // hosts removed since last open
@@ -473,9 +461,189 @@ export function installSidebarRail(Sidebar) {
         if (!c.isConnected) { clearInterval(t); return; }
         if (this._railSysHost) { if (Date.now() - lastRemote < 9500) return; lastRemote = Date.now(); }
         render();
+        this._prcRefresh?.();
       }, 5000);
       const th = setInterval(() => { if (!c.isConnected) { clearInterval(th); return; } if (!this._railSysHost) renderHist(); }, 60000);
       this._panelDispose = () => { clearInterval(t); clearInterval(th); this._destroyRailSysCharts(); };
+    },
+
+    // ── Process manager (2.354.0, the btop analogue): full table, live CPU%,
+    // sort / search / tree, per-row signals. Controls build ONCE (an input
+    // inside the 5s-swapped zone would lose focus every tick); only the table
+    // re-renders. Expansions keyed by pid survive refreshes. ──
+    _buildProcManager(root, getHostId) {
+      this._prcSort = this._prcSort || 'cpu';
+      this._prcExpanded = this._prcExpanded || new Set();
+      let query = '';
+      let data = null; // last /api/sysinfo/procs response
+      let showAll = false;
+      root.innerHTML = '';
+      const head = document.createElement('div');
+      head.className = 'usage-section-title prc-head';
+      head.innerHTML = `<span>${escHtml(tr('Processes'))}</span><span class="prc-count"></span>`;
+      const ctl = document.createElement('div');
+      ctl.className = 'prc-ctl';
+      const search = document.createElement('input');
+      search.type = 'text'; search.className = 'prc-search';
+      search.placeholder = tr('Filter by name / user / pid…');
+      const sorts = document.createElement('div');
+      sorts.className = 'sys-range prc-sorts';
+      const SORTS = [['cpu', tr('CPU')], ['mem', tr('MEM')], ['pid', tr('PID')], ['name', tr('Name')], ['tree', tr('Tree')]];
+      const table = document.createElement('div');
+      table.className = 'prc-table';
+      const drawSorts = () => {
+        sorts.innerHTML = SORTS.map(([k, label]) => `<span class="sys-range-chip${this._prcSort === k ? ' on' : ''}" data-sort="${k}">${escHtml(label)}</span>`).join('');
+        sorts.querySelectorAll('[data-sort]').forEach((el) => { el.onclick = () => { this._prcSort = el.dataset.sort; drawSorts(); drawTable(); }; });
+      };
+      const cpuOf = (p) => (p.pcpuNow != null ? p.pcpuNow : p.pcpu) || 0;
+      const nameOf = (p) => {
+        const first = String(p.cmd || '').split(' ')[0];
+        if (first.startsWith('[')) return first; // kernel thread
+        return first.replace(/:$/, '').split('/').pop() || first;
+      };
+      const fmtB = (b) => b >= 1073741824 ? (b / 1073741824).toFixed(1) + 'G' : b >= 1048576 ? Math.round(b / 1048576) + 'M' : Math.round(b / 1024) + 'K';
+      const fmtCpu = (p) => cpuOf(p).toFixed(cpuOf(p) >= 100 ? 0 : 1) + '%';
+      // expansion keys are host-scoped (pid 1234 here and pid 1234 on another
+      // machine are different processes); pid/ppid are Number-coerced before
+      // any innerHTML — rows come from REMOTE machines and a compromised
+      // daemon reply carrying string pids must never reach the DOM raw
+      const expKey = (pid) => getHostId() + ':' + pid;
+      const rowHtml = (p, depth, serverPid) => {
+        const pid = String(Math.floor(Number(p.pid)) || 0);
+        const ppidN = Math.floor(Number(p.ppid)) || 0;
+        const exp = this._prcExpanded.has(expKey(pid));
+        const cv = Math.min(100, cpuOf(p));
+        const hot = cv >= 50;
+        const isSrv = !getHostId() && p.pid === serverPid;
+        const stateChar = String(p.state || '')[0] || '';
+        // subtle btop-style CPU fill behind the row (theme-agnostic mix)
+        const bg = cv >= 1 ? ` style="background:linear-gradient(90deg,color-mix(in srgb,var(--${hot ? 'red' : 'accent'}) ${hot ? 18 : 12}%,transparent) ${cv}%,transparent ${cv}%)"` : '';
+        let h = `<div class="prc-row${exp ? ' expanded' : ''}${stateChar === 'T' ? ' prc-stopped' : ''}" data-pid="${pid}"${bg}>`
+          + `<span class="prc-name" ${depth ? `style="padding-left:${Math.min(depth, 8) * 10}px"` : ''} title="${escHtml(p.cmd)}"><span class="prc-nm">${escHtml(nameOf(p))}</span>${isSrv ? `<span class="prc-chip">${escHtml(tr('server'))}</span>` : ''}${stateChar === 'T' ? `<span class="prc-chip prc-chip-warn">${escHtml(tr('paused'))}</span>` : ''}${stateChar === 'Z' ? `<span class="prc-chip prc-chip-warn">${escHtml(tr('zombie'))}</span>` : ''}</span>`
+          + `<span class="prc-cpu${hot ? ' hot' : ''}">${fmtCpu(p)}</span>`
+          + `<span class="prc-mem">${fmtB(p.rss)}</span></div>`;
+        if (exp) {
+          h += `<div class="prc-detail" data-pid="${pid}">`
+            + `<div class="prc-cmdline">${escHtml(p.cmd)}</div>`
+            + `<div class="prc-meta">pid ${pid} · ppid ${ppidN} · ${escHtml(p.user || '?')} · ${escHtml(p.state || '?')} · ${escHtml(tr('up {t}', { t: p.etime || '?' }))} · mem ${(Number(p.pmem) || 0).toFixed(1)}%</div>`
+            + `<div class="prc-actions">`
+            + (isSrv
+              ? `<span class="empty-hint empty-hint-inline">${escHtml(tr('This is the VibeSpace server — restart it via Update, not a kill'))}</span>`
+              : `<button class="mounts-btn prc-act" data-sig="TERM">${escHtml(tr('Terminate'))}</button>`
+              + `<button class="mounts-btn prc-act prc-danger" data-sig="KILL">${escHtml(tr('Force kill'))}</button>`
+              + (stateChar === 'T'
+                ? `<button class="mounts-btn prc-act" data-sig="CONT">${escHtml(tr('Resume'))}</button>`
+                : `<button class="mounts-btn prc-act" data-sig="STOP">${escHtml(tr('Pause'))}</button>`))
+            + `<button class="mounts-btn prc-act" data-copy="1">${escHtml(tr('Copy cmd'))}</button>`
+            + `</div></div>`;
+        }
+        return h;
+      };
+      const drawTable = () => {
+        if (!data) { table.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('Loading…'))}</div>`; return; }
+        if (data.error) { table.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(data.error)}</div>`; return; }
+        let list = data.procs || [];
+        const q = query.trim().toLowerCase();
+        if (q) list = list.filter((p) => String(p.pid) === q || (p.cmd || '').toLowerCase().includes(q) || (p.user || '').toLowerCase().includes(q));
+        const total = data.total || list.length;
+        head.querySelector('.prc-count').textContent = q ? `${list.length}` : (total > list.length ? tr('{shown} of {total}', { shown: list.length, total }) : `${total}`);
+        const parts = [];
+        const CAP = showAll || q ? Infinity : 120;
+        if (this._prcSort === 'tree') {
+          // partial-forest tree: missing parents (capped table) become roots
+          const byPid = new Map(list.map((p) => [p.pid, p]));
+          const kids = new Map();
+          const roots = [];
+          for (const p of list) {
+            if (p.ppid && byPid.has(p.ppid) && p.ppid !== p.pid) {
+              if (!kids.has(p.ppid)) kids.set(p.ppid, []);
+              kids.get(p.ppid).push(p);
+            } else roots.push(p);
+          }
+          const byCpu = (a, b) => cpuOf(b) - cpuOf(a) || b.rss - a.rss;
+          roots.sort(byCpu);
+          let n = 0;
+          const walk = (p, depth) => {
+            if (n >= CAP) return;
+            n++;
+            parts.push(rowHtml(p, depth, data.serverPid));
+            for (const k of (kids.get(p.pid) || []).sort(byCpu)) walk(k, depth + 1);
+          };
+          for (const r of roots) walk(r, 0);
+        } else {
+          const sorters = {
+            cpu: (a, b) => cpuOf(b) - cpuOf(a) || b.rss - a.rss,
+            mem: (a, b) => b.rss - a.rss,
+            pid: (a, b) => a.pid - b.pid,
+            name: (a, b) => nameOf(a).localeCompare(nameOf(b)) || a.pid - b.pid,
+          };
+          list = [...list].sort(sorters[this._prcSort] || sorters.cpu);
+          for (const p of list.slice(0, CAP === Infinity ? list.length : CAP)) parts.push(rowHtml(p, 0, data.serverPid));
+        }
+        // a truncated table cannot prove absence — say so instead of a
+        // definitive "no match" (review-confirmed false negative)
+        const truncated = (data.total || 0) > (data.procs || []).length;
+        if (!parts.length) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(q ? (truncated ? tr('No match among the {n} transported rows (of {total} on the machine)', { n: (data.procs || []).length, total: data.total }) : tr('No process matches the filter')) : tr('No processes'))}</div>`);
+        else if (q && truncated) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('Searched the {n} transported rows (of {total} on the machine)', { n: (data.procs || []).length, total: data.total }))}</div>`);
+        else if (CAP !== Infinity && (data.procs || []).length > CAP && !q) parts.push(`<button class="ports-sys-expander prc-more">${escHtml(tr('+ show all {n}', { n: list.length }))}</button>`);
+        if (data.sampled === false && (data.procs || []).length) parts.push(`<div class="empty-hint empty-hint-inline">${escHtml(tr('CPU% is a lifetime average on this machine (no live sampling)'))}</div>`);
+        table.innerHTML = parts.join('');
+        table.querySelector('.prc-more')?.addEventListener('click', () => { showAll = true; drawTable(); });
+        table.querySelectorAll('.prc-row').forEach((row) => row.addEventListener('click', () => {
+          const k = expKey(row.dataset.pid);
+          if (this._prcExpanded.has(k)) this._prcExpanded.delete(k); else this._prcExpanded.add(k);
+          drawTable();
+        }));
+        table.querySelectorAll('.prc-detail').forEach((det) => {
+          const p = (data.procs || []).find((x) => String(x.pid) === det.dataset.pid);
+          if (!p) return;
+          det.querySelectorAll('.prc-act').forEach((btn) => btn.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            if (btn.dataset.copy) { copyText(p.cmd); showToast(tr('Copied')); return; }
+            const sig = btn.dataset.sig;
+            if (sig === 'TERM' || sig === 'KILL') {
+              const okGo = await showConfirmDialog({
+                title: sig === 'KILL' ? tr('Force kill process?') : tr('Terminate process?'),
+                message: tr('"{name}" (pid {pid}) will receive SIG{sig}.', { name: nameOf(p), pid: p.pid, sig }),
+                confirmText: sig === 'KILL' ? tr('Force kill') : tr('Terminate'),
+                danger: true,
+              });
+              if (!okGo) return;
+            }
+            const r = await fetchJson('/api/sysinfo/signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: getHostId(), pid: p.pid, sig }) });
+            // fetchJson returns null on network/parse failure — an unguarded
+            // r.gone here crashed the handler silently AND let STOP/CONT show
+            // a false success toast (review-confirmed no-silent-failures hit)
+            if (!r || r.error) { showToast((r && r.error) || tr('Machine unreachable'), { type: 'error' }); return; }
+            if (sig === 'STOP') showToast(tr('Process paused (SIGSTOP)'));
+            else if (sig === 'CONT') showToast(tr('Process resumed'));
+            else if (r.gone) showToast(tr('Process terminated'));
+            else showToast(tr('Signal sent — the process is still running (try Force kill)'), { type: 'error' });
+            refresh(false);
+          }));
+        });
+      };
+      let seq = 0;
+      const refresh = async (loading) => {
+        const my = ++seq;
+        const hostId = getHostId();
+        if (loading) { data = null; drawTable(); }
+        const r = await fetchJson('/api/sysinfo/procs' + (hostId ? `?host=${encodeURIComponent(hostId)}` : ''));
+        if (my !== seq || !root.isConnected) return; // stale response after a switch
+        data = r || { error: tr('Machine unreachable') };
+        // don't yank a text selection out from under a copy-in-progress in
+        // the detail zone — data is fresh, the next tick redraws
+        const sel = document.getSelection();
+        if (!loading && sel && !sel.isCollapsed && table.contains(sel.anchorNode)) return;
+        drawTable();
+      };
+      this._prcRefresh = refresh;
+      let qT = null;
+      search.addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(() => { query = search.value; drawTable(); }, 150); });
+      ctl.append(search, sorts);
+      root.append(head, ctl, table);
+      drawSorts();
+      refresh(true);
     },
 
     // ── Ports panel (the vscode PORTS analogue) ──

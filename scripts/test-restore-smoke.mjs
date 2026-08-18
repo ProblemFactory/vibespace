@@ -68,7 +68,8 @@ const ROUTES = ['/api/version', '/api/home', '/api/agent-hooks', '/api/accounts'
   '/api/session-status', '/api/user-todos', '/api/sysinfo', '/api/vnc/status',
   '/api/bookmarks', '/api/layouts', '/api/plugins', '/api/machine-mounts',
   '/api/mounts', '/api/port-forwards', '/api/exits', '/api/incidents',
-  '/api/session-options', '/api/available-models', '/api/custom-themes'];
+  '/api/session-options', '/api/available-models', '/api/custom-themes',
+  '/api/sysinfo/procs'];
 for (const r of ROUTES) {
   try {
     const resp = await fetch(`http://127.0.0.1:${PORT}${r}`);

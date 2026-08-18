@@ -51,6 +51,42 @@ ok(/dm\.sysinfo\(\)/.test(srv), 'remoteSysinfo tries the device op first');
 const cli = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf-8');
 ok(/daemon lacks sysinfo \(capabilities gate\)/.test(cli), 'client refuses old daemons via the capability gate');
 
+// 4. proc-list op (2.354.0, the process manager): capability + full-table
+// shape + the same-module parity that keeps local and remote in one truth.
+ok(conn.info?.capabilities?.includes?.('proc-list'), 'daemon advertises the proc-list capability');
+const pl = await dm.procList();
+ok(Array.isArray(pl.procs) && pl.procs.length > 5, `proc-list returns a real table (${pl.procs?.length} rows of ${pl.total})`);
+ok(pl.procs.every((p) => Number.isFinite(p.pid) && typeof p.user === 'string' && Number.isFinite(p.rss) && typeof p.cmd === 'string' && typeof p.state === 'string'), 'rows carry pid/user/rss/cmd/state');
+ok(Number.isFinite(pl.total) && pl.total >= pl.procs.length, 'total count >= transported rows');
+const localPl = await sysinfo.listProcs();
+const localKeys = Object.keys(localPl.procs[0] || {}).filter((k) => k !== 'pcpuNow').sort().join(',');
+const opKeys = Object.keys(pl.procs[0] || {}).filter((k) => k !== 'pcpuNow').sort().join(',');
+ok(localKeys === opKeys && localKeys.length > 0, `op row shape === local module row shape (${opKeys})`);
+// second call gives sampleProcCpu its delta baseline → live CPU% appears
+const pl2 = await dm.procList();
+ok(pl2.sampled === true && pl2.procs.some((p) => p.pcpuNow != null), 'second call carries live-sampled CPU% (linux delta)');
+ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client method is capability-gated');
+
+// 5. the shared parser + cap (the ssh fallback rung's interpretation)
+const parsed = sysinfo.parsePsProcs('root     1     0  0.1  0.2  1234 Ss   10:33 /sbin/init splash\nme   22 1 99.5 1.0 2048 R+ 1-02:03:04 node server.js --flag\n\nbadline\n');
+ok(parsed.length === 2 && parsed[0].pid === 1 && parsed[0].user === 'root' && parsed[0].rss === 1234 * 1024, 'parsePsProcs: fields land (pid/user/rss)');
+ok(parsed[1].pcpu === 99.5 && parsed[1].etime === '1-02:03:04' && parsed[1].cmd === 'node server.js --flag', 'parsePsProcs: cpu/etime/multi-word cmd');
+const many = Array.from({ length: 500 }, (_, i) => ({ pid: i + 1, rss: i, pcpu: i === 3 ? 99 : 0 }));
+const capped = sysinfo.capProcs(many, 100);
+ok(capped.length === 100 && capped.some((p) => p.pid === 4), 'capProcs keeps the CPU-hot row even when RSS-cold');
+// review pins (2.354.0): a LIVE-hot process must survive the cap even when
+// its lifetime pcpu is flatlined at 0 — pcpuNow participates in the rank
+const live = Array.from({ length: 500 }, (_, i) => ({ pid: i + 1, rss: i, pcpu: 0, pcpuNow: i === 7 ? 98 : 0 }));
+ok(sysinfo.capProcs(live, 100).some((p) => p.pid === 8), 'capProcs ranks by live pcpuNow, not just the flatlined lifetime average');
+ok(sysinfo.capProcs(many, -5).length > 0 && sysinfo.capProcs(many, 3.7).length >= 20, 'capProcs clamps a hostile max');
+const siSrc = fs.readFileSync(path.join(REPO, 'src/sysinfo.js'), 'utf-8');
+ok(siSrc.indexOf('sampleProcCpu(all)') !== -1 && siSrc.indexOf('sampleProcCpu(all)') < siSrc.indexOf('capProcs(all, max)'), 'listProcs samples the WHOLE table before capping (cap-by-flatlined-pcpu bug)');
+// the signal verdict must probe existence with ps -p, NEVER kill -0: the
+// kill builtin performs the SAME permission check as the signal, so every
+// remote permission-denied kill read as "no such process" (review-confirmed)
+ok(!/else if kill -0/.test(srv), 'signal verdict never uses kill -0 for the EPERM/ESRCH split');
+ok(/ps -p \$\{pid\}/.test(srv), 'signal verdict probes existence via ps -p');
+
 try { await dm.stop?.(); } catch { }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

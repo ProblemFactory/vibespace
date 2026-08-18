@@ -129,6 +129,105 @@ function topProcs(n = 8) {
   });
 }
 
+// ── Full process table (2.354.0, the btop-like process manager) ──
+// ONE implementation for every machine: the server runs it for machine #0,
+// the daemon bundles it and serves the `proc-list` op, and the ssh fallback
+// rung runs the same `ps axo` line remotely with parsePsProcs() interpreting
+// orchestrator-side — the columns and their meaning live HERE only.
+const PS_COLUMNS = 'user=,pid=,ppid=,pcpu=,pmem=,rss=,stat=,etime=,args=';
+
+/** Parse `ps axo ${PS_COLUMNS}` output: 8 whitespace fields + args rest.
+ *  (unix usernames have no whitespace; stat/etime are single tokens) */
+function parsePsProcs(text) {
+  const rows = [];
+  for (const ln of String(text || '').split('\n')) {
+    const t = ln.trim();
+    if (!t) continue;
+    const f = t.split(/\s+/);
+    if (f.length < 9) continue;
+    const pid = parseInt(f[1], 10);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    rows.push({
+      user: f[0], pid, ppid: parseInt(f[2], 10) || 0,
+      pcpu: parseFloat(f[3]) || 0, pmem: parseFloat(f[4]) || 0,
+      rss: (parseInt(f[5], 10) || 0) * 1024, state: f[6], etime: f[7],
+      cmd: f.slice(8).join(' ').slice(0, 400),
+    });
+  }
+  return rows;
+}
+
+/** Transport cap: top-by-RSS ∪ top-by-CPU, so a CPU-sorted client still has
+ *  the hot processes even when the table is truncated. CPU rank uses the
+ *  LIVE sample when present (review-confirmed: ps %CPU is a lifetime average
+ *  that shows 0.0 for a long-lived process that JUST started spinning — for
+ *  a 10-day-old process it takes ~14min of burn to even reach 0.1, so ranking
+ *  by it alone dropped exactly the runaway the panel exists to catch). */
+function capProcs(all, max = 350) {
+  max = Math.max(20, Math.min(2000, Math.floor(Number(max) || 350))); // clamp — a negative/fractional max breaks the slice math
+  if (all.length <= max) return all;
+  const cpu = (p) => Math.max(p.pcpu || 0, p.pcpuNow || 0);
+  const byRss = [...all].sort((a, b) => b.rss - a.rss).slice(0, Math.floor(max * 0.75));
+  const chosen = new Set(byRss.map((p) => p.pid));
+  const byCpu = [...all].sort((a, b) => cpu(b) - cpu(a)).filter((p) => !chosen.has(p.pid)).slice(0, max - byRss.length);
+  return byRss.concat(byCpu);
+}
+
+// Instantaneous CPU% (what btop shows; ps %CPU is a LIFETIME average that
+// flatlines long-running processes): delta of /proc/<pid>/stat utime+stime
+// between successive calls. Keyed pid:starttime so a recycled pid never
+// inherits the old sample (the counter-capture class). /proc reads are
+// kernel-backed and never hang (same justification as memInfo's /sys reads).
+// First call has no baseline → callers fall back to ps %CPU; the 5s panel
+// poll makes every later call a good sample. macOS/BSD: no /proc — ps only.
+const _procCpu = new Map(); // 'pid:starttime' → { ticks, at }
+function sampleProcCpu(rows) {
+  if (process.platform !== 'linux') return false;
+  const now = Date.now();
+  const seen = new Set();
+  let any = false;
+  for (const r of rows) {
+    try {
+      const st = fs.readFileSync('/proc/' + r.pid + '/stat', 'utf8');
+      const close = st.lastIndexOf(')'); // comm may contain spaces/parens
+      if (close < 0) continue;
+      const rest = st.slice(close + 2).split(' ');
+      // fields after comm: [0]=state(3) … utime(14)→[11], stime(15)→[12], starttime(22)→[19]
+      const ticks = (parseInt(rest[11], 10) || 0) + (parseInt(rest[12], 10) || 0);
+      const key = r.pid + ':' + rest[19];
+      seen.add(key);
+      const prev = _procCpu.get(key);
+      _procCpu.set(key, { ticks, at: now });
+      if (prev && now > prev.at) {
+        // % of ONE core (btop convention — multithreaded may exceed 100)
+        r.pcpuNow = Math.max(0, Math.round(((ticks - prev.ticks) / 100) / ((now - prev.at) / 1000) * 1000) / 10);
+        any = true;
+      }
+    } catch { /* exited between ps and the sample */ }
+  }
+  if (_procCpu.size > 2000) for (const k of _procCpu.keys()) if (!seen.has(k)) _procCpu.delete(k);
+  return any;
+}
+
+/** The full table for the System panel's process manager.
+ *  Returns { procs, total, sampled } — `sampled` says pcpuNow is live. */
+function listProcs({ max = 350 } = {}) {
+  return new Promise((resolve) => {
+    execFile('ps', ['axo', PS_COLUMNS], { timeout: 8000, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+      if (err) return resolve({ procs: [], total: 0, sampled: false, error: String(err.message || err).slice(0, 200) });
+      const all = parsePsProcs(out);
+      // sample the WHOLE table BEFORE capping (review-confirmed ordering bug:
+      // capping first meant both cap membership and sampling were chosen by
+      // the flatlined lifetime %CPU, so a newly-hot low-RSS process on a
+      // >max-proc machine never got sampled and never shipped; a full sweep
+      // is ~7ms for ~1000 /proc stat reads)
+      const sampled = sampleProcCpu(all);
+      const procs = capProcs(all, max);
+      resolve({ procs, total: all.length, sampled });
+    });
+  });
+}
+
 function diskInfo(dir) {
   return new Promise((resolve) => {
     execFile('df', ['-kP', dir], { timeout: 8000 }, (err, out) => {
@@ -288,4 +387,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000 } = {}) {
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, memInfo, memInfoAsync, history, persistHistory };
+module.exports = { read, startWatch, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS };

@@ -1147,7 +1147,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list'],
         });
         return;
       }
@@ -1578,6 +1578,20 @@ function serveConnection(sock) {
             // set (the 2.300.0 three-touch rule); an op-less reply times out.
             mux.control({ op: 'sysinfo-result', id: msg.id, ...r });
           } catch (e) { mux.control({ op: 'sysinfo-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
+      if (msg.op === 'proc-list') {
+        // Full process table for the System panel's process manager
+        // (2.354.0) — same shared module as the sysinfo op; successive calls
+        // from the panel poll give sampleProcCpu its delta baseline, so the
+        // CPU% column is live on remote machines exactly like local.
+        (async () => {
+          try {
+            const si = require('./../sysinfo.js');
+            const r = await si.listProcs({ max: Number(msg.max) || 350 });
+            mux.control({ op: 'proc-list-result', id: msg.id, ...r });
+          } catch (e) { mux.control({ op: 'proc-list-result', id: msg.id, error: String(e.message || e) }); }
         })();
         return;
       }

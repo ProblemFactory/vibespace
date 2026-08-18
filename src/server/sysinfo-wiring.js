@@ -62,6 +62,77 @@ async function remoteSysinfo(hostId) {
   if (!r.mem && !r.load && !r.procs.length) throw new Error('probe returned nothing usable');
   return r;
 }
-  return { sysinfo, remoteSysinfo };
+// ── Process manager (2.354.0, btop-like): full table + signal, same ladder ──
+// The table's interpretation lives in ONE place (src/sysinfo.js): locally the
+// server calls listProcs(), a daemon machine runs the same module via the
+// proc-list op, and the ssh fallback rung runs the same `ps axo` line with
+// parsePsProcs() interpreting the output orchestrator-side.
+async function remoteProcs(hostId) {
+  const h = hosts.get(hostId);
+  if (!h) throw new Error('unknown machine');
+  try {
+    const dm = await hosts.deviceBounded(hostId, 6000);
+    const r = await dm.procList();
+    if (r?.procs) return { host: hostId, ...r };
+  } catch { /* fall through to the ssh rung */ }
+  const out = await hosts._hostShell(h, 'ps axo ' + sysinfo.PS_COLUMNS, { timeoutMs: 10000 });
+  const all = sysinfo.parsePsProcs(out);
+  if (!all.length) throw new Error('process listing returned nothing usable');
+  // no CPU sampling on the ssh rung (stateless per call) — ps lifetime % only
+  return { host: hostId, procs: sysinfo.capProcs(all), total: all.length, sampled: false };
+}
+
+// Signal a process — the ONE user-facing kill path for every machine. sig is
+// enum-whitelisted and pid integer-validated BEFORE any shell string is built.
+const PROC_SIGS = new Set(['TERM', 'KILL', 'INT', 'HUP', 'STOP', 'CONT']);
+async function signalProc(hostId, pidRaw, sigRaw) {
+  const sig = String(sigRaw || 'TERM').toUpperCase().replace(/^SIG/, '');
+  const pid = parseInt(pidRaw, 10);
+  if (!PROC_SIGS.has(sig)) throw new Error('unsupported signal');
+  if (!Number.isFinite(pid) || pid <= 1) throw new Error('invalid pid');
+  if (!hostId) {
+    if (pid === process.pid) throw new Error('that is the VibeSpace server itself — restart it via Update / systemctl, not a kill');
+    try { process.kill(pid, 'SIG' + sig); } catch (e) {
+      if (e.code === 'ESRCH') throw new Error('no such process (already gone)');
+      if (e.code === 'EPERM') throw new Error("permission denied (another user's process)");
+      throw e;
+    }
+    if (sig === 'STOP' || sig === 'CONT') return { ok: true };
+    await new Promise((r) => setTimeout(r, 450));
+    let gone = false;
+    try { process.kill(pid, 0); } catch { gone = true; }
+    return { ok: true, gone };
+  }
+  const h = hosts.get(hostId);
+  if (!h) throw new Error('unknown machine');
+  // one verdict script for both remote rungs: signal → settle → report.
+  // EXISTENCE is probed with `ps -p`, NEVER `kill -0` (review-confirmed:
+  // kill(2) with sig 0 performs the SAME permission check as a real signal,
+  // so on a failed kill it fails EPERM exactly like the kill did and every
+  // permission-denied kill would read "no such process" — a false explanation
+  // while the process keeps running; verified against live pid 1).
+  const script = `if kill -${sig} ${pid} 2>/dev/null; then `
+    + (sig === 'STOP' || sig === 'CONT' ? 'echo OK; '
+      : `sleep 0.5; if ps -p ${pid} >/dev/null 2>&1; then echo OK-ALIVE; else echo OK-GONE; fi; `)
+    + `else if ps -p ${pid} >/dev/null 2>&1; then echo EPERM; else echo ESRCH; fi; fi`;
+  let out = '';
+  // rung choice happens at CONNECT time only: once a device link exists, a
+  // runCmd failure must NOT fall through to ssh — the signal may already have
+  // landed and a blind re-send double-signals the process. Honesty over retry.
+  let dm = null;
+  try { dm = await hosts.deviceBounded(hostId, 6000); } catch { }
+  if (dm) {
+    try { out = String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 8000 })).stdout || ''); }
+    catch (e) { throw new Error('device link failed mid-signal (it may or may not have landed) — check the table and retry: ' + e.message); }
+  } else out = String(await hosts._hostShell(h, script, { timeoutMs: 10000 }));
+  if (out.includes('EPERM')) throw new Error("permission denied (another user's process)");
+  if (out.includes('ESRCH')) throw new Error('no such process (already gone)');
+  if (out.includes('OK-GONE')) return { ok: true, gone: true };
+  if (out.includes('OK-ALIVE')) return { ok: true, gone: false };
+  if (out.includes('OK')) return { ok: true };
+  throw new Error('signal verdict unreadable: ' + out.slice(0, 120));
+}
+
+  return { sysinfo, remoteSysinfo, remoteProcs, signalProc };
 }
 module.exports = { create };
