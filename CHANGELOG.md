@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.352.0
+
+- **Docker container names on port scans (owner report: AIDev rows had zero detail):** `ss -p` only names sockets your user owns — on a docker host every published container port (root's docker-proxy) scanned anonymous. The scan now consults docker's own port table (`docker ps --format`, no root needed) and names still-anonymous rows `docker:<container>`. ONE implementation enriches local and remote scans alike (CS twin law); verified live against the reporting host's real container fleet.
+- **Active-forward rows show the service tag** (owner report: the Background-Work service name only appeared on scan rows) — forwards created by a service carry `label: "service: <name>"`; the Active forwards row now renders it as the same chip.
+
+
 ## 2.351.2
 
 - **MID-TURN peer messages were still invisible (owner: "我announce了怎么没收到" — the agent HAD received it):** an idle wake arrives as a user record (2.349.0 card ✓), but a message queued into a BUSY turn is recorded ONLY as an `attachment/queued_command` with a STRING prompt + `origin:{kind:'peer'}` — nothing on the live stream at all, and the existing queued_command handler (2.88.0, built for the user's own mid-turn messages) filtered for array-of-blocks prompts, so every peer delivery fell through. String prompts now render, and `origin.kind='peer'` gets the same peer card (never a "You" bubble of someone else's words). Live-view caveat (upstream shape): a mid-turn peer message appears on window reopen/history rebuild — the CLI emits no live record for it.

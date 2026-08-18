@@ -504,7 +504,11 @@ export function installSidebarRail(Sidebar) {
           const row = document.createElement('div');
           row.className = 'ports-row';
           const label = `${escHtml(nameOf(f.hostId))}${f.targetHost ? '→' + escHtml(f.targetHost) : ''}:${f.remotePort}`;
-          row.innerHTML = `<span class="ports-row-label" title="${label}">${label} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
+          // service tag rides the forward's own label (owner report: it only
+          // showed on scan rows) — forwards created by a Background Work
+          // service carry label "service: <name>"
+          const svcM = /^service:\s*(.+)$/.exec(f.label || '');
+          row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${svcM ? ` <span class="ports-svc">${escHtml(svcM[1])}</span>` : ''} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
           // the proto chip is the override handle
           const chip = row.querySelector('.ports-proto');
           if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
