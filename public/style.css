@@ -3152,11 +3152,31 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .sys-range { float: right; display: inline-flex; gap: 4px; text-transform: none; letter-spacing: 0; }
 .sys-range-chip { cursor: pointer; padding: 0 5px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); font-size: 9px; }
 .sys-range-chip.on { border-color: var(--accent); color: var(--accent); }
-.sys-proc { cursor: pointer; }
-.sys-proc.expanded .sys-proc-cmd { white-space: normal; word-break: break-all; overflow: visible; }
-.sys-proc { display: flex; gap: 6px; align-items: baseline; font-size: 10px; padding: 2px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); min-width: 0; }
-.sys-proc-rss { flex: 0 0 52px; text-align: right; color: var(--text-secondary); font-weight: 600; }
-.sys-proc-cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-family: monospace; }
+/* Process manager (2.354.0, btop-like): controls + table + expandable rows */
+.prc-head { display: flex; justify-content: space-between; align-items: baseline; }
+.prc-count { color: var(--text-dim); font-size: 9px; text-transform: none; letter-spacing: 0; }
+.prc-ctl { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
+.prc-search { width: 100%; box-sizing: border-box; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; padding: 3px 6px; }
+.prc-sorts { float: none; display: flex; flex-wrap: wrap; }
+.prc-table { display: flex; flex-direction: column; }
+.prc-row { display: flex; gap: 6px; align-items: baseline; font-size: 10px; padding: 2px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); min-width: 0; cursor: pointer; border-radius: 2px; }
+.prc-row:hover { outline: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.prc-name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 4px; color: var(--text); font-family: monospace; }
+.prc-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prc-chip { flex: none; }
+.prc-stopped .prc-name { color: var(--text-dim); }
+.prc-cpu { flex: 0 0 40px; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.prc-cpu.hot { color: var(--red, #e55); font-weight: 600; }
+.prc-mem { flex: 0 0 44px; text-align: right; color: var(--text-secondary); font-weight: 600; font-variant-numeric: tabular-nums; }
+.prc-chip { font-size: 8px; border: 1px solid var(--border); border-radius: 999px; padding: 0 4px; color: var(--text-dim); vertical-align: 1px; }
+.prc-chip-warn { color: var(--yellow, #e5c07b); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 50%, transparent); }
+.prc-detail { padding: 4px 2px 6px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); border-left: 2px solid var(--accent); margin-bottom: 2px; }
+.prc-cmdline { font-family: monospace; font-size: 10px; color: var(--text-secondary); word-break: break-all; white-space: normal; max-height: 80px; overflow-y: auto; user-select: text; }
+.prc-meta { font-size: 9px; color: var(--text-dim); margin: 3px 0 4px; }
+.prc-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.prc-act { font-size: 10px; padding: 2px 8px; }
+.prc-danger { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 50%, transparent); }
+.prc-more { width: 100%; }
 .rail-item[data-rail="tasks"] .rail-badge, .rail-item[data-rail="mounts"] .rail-badge { background: var(--yellow, #e5c07b); color: #1a1a1a; }
 .rail-item[data-rail="diagnostics"] .rail-badge { background: var(--red, #e55); color: #fff; }
 body.sidebar-right #sidebar-rail { order: 2; border-right: none; border-left: 1px solid var(--border); }

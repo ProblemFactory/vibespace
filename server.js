@@ -796,7 +796,7 @@ const tasks = new TaskGroupManager({
 // System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
 // the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
 // ── Sysinfo wiring (src/server/sysinfo-wiring.js): remote snapshot ladder ──
-const { sysinfo, remoteSysinfo } = require('./src/server/sysinfo-wiring.js').create({ getHosts: () => hosts });
+const { sysinfo, remoteSysinfo, remoteProcs, signalProc } = require('./src/server/sysinfo-wiring.js').create({ getHosts: () => hosts });
 // ── Incident capture (src/server/incident-wiring.js) ──
 const { _srvConsoleRing } = require('./src/server/incident-wiring.js').create({
   app, rootDir: __dirname,
@@ -813,6 +813,18 @@ app.get('/api/sysinfo', async (req, res) => {
     if (hostId) return res.json(await remoteSysinfo(hostId));
     res.json(await sysinfo.read(path.join(__dirname, 'data')));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Process manager (2.354.0, btop-like): full table + user-initiated signal.
+app.get('/api/sysinfo/procs', async (req, res) => {
+  try {
+    const hostId = String(req.query.host || '');
+    if (hostId) return res.json(await remoteProcs(hostId));
+    res.json({ serverPid: process.pid, ...(await sysinfo.listProcs()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/sysinfo/signal', async (req, res) => {
+  try { res.json(await signalProc(String(req.body?.host || ''), req.body?.pid, req.body?.sig)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Resource HISTORY for the System rail charts (2.223.0): self-sampled CPU/
 // memory rings — 24h at the 45s watch cadence, 7d at 15min. range=1h|24h|7d.

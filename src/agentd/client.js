@@ -241,7 +241,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'proc-list-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -622,6 +622,16 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('sysinfo')) throw new Error('daemon lacks sysinfo (capabilities gate)');
     const r = await this._request({ op: 'sysinfo', timeoutMs: 15000 });
+    if (r.error) throw new Error(r.error);
+    const { id, op, ...rest } = r;
+    return rest;
+  }
+
+  /** Full process table (System panel process manager, 2.354.0). */
+  async procList({ max } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('proc-list')) throw new Error('daemon lacks proc-list (capabilities gate)');
+    const r = await this._request({ op: 'proc-list', max, timeoutMs: 15000 });
     if (r.error) throw new Error(r.error);
     const { id, op, ...rest } = r;
     return rest;
