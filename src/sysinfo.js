@@ -143,6 +143,13 @@ function parsePsProcs(text) {
   for (const ln of String(text || '').split('\n')) {
     const t = ln.trim();
     if (!t) continue;
+    // drop OUR OWN probe (owner report: "永远有个ps在最顶端" at 200%): ps
+    // lists itself, and its %CPU = lifetime-cpu / elapsed — a process alive
+    // for ~10ms that burned ~20ms across threads reads as 200%, and its pid
+    // is new every poll so the live-delta correction never applies. Matching
+    // our exact column string hides only the probe (its `sh -c` wrapper on
+    // the remote rung too), never a user's own `ps aux`.
+    if (t.includes(PS_COLUMNS)) continue;
     const f = t.split(/\s+/);
     if (f.length < 9) continue;
     const pid = parseInt(f[1], 10);
