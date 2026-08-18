@@ -585,7 +585,9 @@ export function installSidebarRail(Sidebar) {
                 // already-forwarded state (owner report: 8390 sat in Active
                 // forwards above while its scan row looked untouched) — show
                 // the state and drop the redundant forward arrow
-                const fwd = fwds.find((f) => f.hostId === m.id && Number(f.port) === Number(p.port));
+                // field is remotePort (verified against the LIVE data/port-forwards.json
+                // — the first f.port guess was the fixture-shape class again)
+                const fwd = fwds.find((f) => f.hostId === m.id && Number(f.remotePort) === Number(p.port));
                 pr.innerHTML = `<span class="ports-row-label">${p.port}${p.service ? ' <span class="ports-svc">' + escHtml(p.service) + '</span>' : ''}${p.proc ? ' <span class="ports-proc">' + escHtml(p.proc) + '</span>' : ''} ${protoChip(p.proto)}${fwd ? ` <span class="ports-svc" title="${escHtml(fwd.publicUrl || tr('Managed under Active forwards above'))}">${escHtml(fwd.publicUrl ? tr('published') : tr('forwarded'))}</span>` : ''}${p.orphan ? ` <span class="ports-orphan" title="${escHtml(tr('This process is listening from a DELETED working directory — a removed worktree left its dev server running'))}">${escHtml(tr('orphan'))}</span>` : ''}</span>`;
                 if (fwd) return pr; // its controls live on the Active forwards row
                 // orphaned (deleted-cwd) listeners get a Kill instead of Forward

@@ -231,8 +231,8 @@
 .chat-system-notification { opacity: 0.7; font-size: 11px; color: var(--text-dim); padding: 2px 0; }
 /* cross-session peer message (2.349.0): visible, attributed, NOT a dim
    notification — the user must see what the agent was woken with */
-.chat-peer-message { border-left: 2px solid var(--accent); background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 8px 12px; margin: 4px 0; }
-.chat-peer-message .chat-peer-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.chat-peer-message { border-left: 2px solid var(--magenta, var(--accent)); background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 8px 12px; margin: 4px 0; }
+.chat-peer-message .chat-peer-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--magenta, var(--accent)); font-weight: 600; margin-bottom: 4px; }
 .chat-peer-message .chat-text { font-size: 13px; }
 .chat-system-notification > summary { cursor: pointer; list-style: none; }
 .chat-system-notification > summary::-webkit-details-marker { display: none; }

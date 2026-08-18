@@ -126,6 +126,23 @@ class UserTodoManager {
     return item;
   }
 
+  /** auto-resolve a job's open inbox items (2.350.0, owner report: "提交过了
+   *  怎么不从inbox里消失" — answering an interaction panel must clear its
+   *  needs-your-input entry). onlyAsk keeps completion/failure notices intact
+   *  unless the whole job is being removed. */
+  resolveByJob(jobId, { onlyAsk = true } = {}) {
+    if (!jobId) return 0;
+    let n = 0;
+    for (const it of this._state.items) {
+      if (it.status !== 'open' || it.jobId !== jobId) continue;
+      if (onlyAsk && !/needs your input/.test(it.text)) continue;
+      it.status = 'done'; it.resolvedAt = Date.now(); it.resolvedBy = 'agent';
+      n++;
+    }
+    if (n) { this._save(); this._notify(); }
+    return n;
+  }
+
   // status: 'done' (handled) | 'dismissed' (not going to) | 'open' (reopen)
   setStatus(id, status, by = 'user') {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);

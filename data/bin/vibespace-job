@@ -60,6 +60,7 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
            [--every 30m | --cron "41 9 * * *" | --at "2026-09-05 06:00"]              ← schedule (spawns CMD)
          vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high]
+docs:    vibespace-job docs   — the FULL manual (notify/subscribe/announce/panels/patterns), read anytime
 read:    vibespace-job list [--mine|--subscribed] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
          vibespace-job show <id>  (FULL params: cmd/schedule/access/notify/subscribers/your subscription)
          vibespace-job logs <id> [--tail 200]
@@ -122,6 +123,11 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         else console.log(`auto-notify: OFF (${r.notify.reason}) — you will NOT be told when it finishes; poll it yourself: vibespace-job poll ${j.id}`);
       }
       if (r.survivalNote) console.log('runtime note: ' + r.survivalNote);
+      break;
+    }
+    case 'docs': {
+      const r = await call('GET', '/api/agent/jobs-docs');
+      console.log(r.text || 'manual unavailable');
       break;
     }
     case 'list': {

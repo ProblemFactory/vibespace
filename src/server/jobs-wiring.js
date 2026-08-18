@@ -21,6 +21,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       try { userTodos.add('jobs', { text, detail: jobId ? `Background job ${jobId}` : '', urgency: urgency || 'normal', by: 'agent', sessionName: jobName || 'background job', jobId }); } catch (e) { log('[jobs] notify failed:', e.message); }
     },
     log,
+    resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { log('[jobs] inbox resolve failed:', e.message); return 0; } },
     // ── owner auto-notify lanes (2.344.0, B-0bf4) ─────────────────────────
     // Global default: agents.jobNotify (ON unless the user turned it off).
     notifyGlobal: () => { try { return serverSetting('agents.jobNotify') !== false; } catch { return true; } },

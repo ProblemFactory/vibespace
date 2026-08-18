@@ -501,6 +501,12 @@ class JobManager {
       const run = job.runs && job.runs[job.runs.length - 1];
       const stamp = this._readStamp(job);
       if (stamp && job.state === 'starting') { job.state = 'up'; this._touch(job); }
+      // a stop that raced the wrapper's first act (no pid stamp yet ⇒ nothing
+      // to kill) is honored HERE once the stamp exists — without this, a stop
+      // in a job's first few hundred ms silently no-opped (2.350.0 gate catch)
+      if (stamp && job._stopRequested && this._verifyAlive(stamp)) {
+        this._killGroup(job, 'SIGKILL');
+      }
       if (stamp && !this._verifyAlive(stamp)) {
         const exit = this._readExit(job, run) || { code: null, endedAt: now() };
         this._finalizeRun(job, run, exit, 'sweep');
@@ -521,6 +527,7 @@ class JobManager {
         job.interaction.pending = null;
         if (job.state === 'awaiting-user') job.state = 'up';
         this._resolveAns(job);
+        try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { } // expired ask is moot — clear its inbox entry too
         this._touch(job, { what: 'interaction panel expired unanswered', verb: 'answers' });
       }
     }
@@ -686,6 +693,7 @@ class JobManager {
     if (alive && stop) this.stop(job, { force: false });
     if (alive && orphan) this.d.log(`[jobs] ${job.id} (${job.name}) ORPHANED by request — live pid abandoned`);
     this.jobs.delete(job.id); this._dirty = true; this._save();
+    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
     try { this.d.broadcast('jobs-updated', { id: job.id, removed: true }); } catch { }
     return { ok: true };
   }
@@ -720,6 +728,7 @@ class JobManager {
       if (run) { try { fs.appendFileSync(path.join(this._ctlDir(job, run.startedAt), 'answers.jsonl'), JSON.stringify(rec) + '\n'); } catch { } }
     }
     this._resolveAns(job);
+    try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id); } catch { } // clear the needs-your-input inbox entry (owner report: it lingered after submit)
     this._touch(job, { what: 'the user answered its panel', verb: 'answers' });
     this._notifyOwner(job, { what: 'the user answered its interaction panel — vibespace-job answers ' + job.id });
     this._save();

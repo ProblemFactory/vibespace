@@ -138,6 +138,9 @@ export function installUserTodos(app) {
     const groups = new Map();
     for (const i of todos.open) (groups.get(i.sessionKey) || groups.set(i.sessionKey, []).get(i.sessionKey)).push(i);
     const gs = [...groups.entries()].sort((a, b) => {
+      // Background Work is its OWN section, always after session groups
+      // (owner report: it read as a weird phantom session mixed in)
+      if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1;
       const w = (items) => Math.max(...items.map((i) => URG_RANK[i.urgency || 'normal'] || 1));
       return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map(i => i.createdAt)) - Math.max(...a[1].map(i => i.createdAt)));
     });
@@ -170,7 +173,11 @@ export function installUserTodos(app) {
         </div>`).join('')}` : '';
     popup.innerHTML = tabsHtml + `
       <div class="usage-section-title">${t('For you')}<span class="ut-head-sub">${todos.open.length ? t('{n} open', { n: todos.open.length }) : t('all clear')}</span></div>
-      ${gs.length ? gs.map(([key, items]) => `
+      ${gs.length ? gs.map(([key, items]) => key === 'jobs' ? `
+        <div class="ut-group ut-group-jobs">
+          <div class="ut-group-head ut-group-head-jobs"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="12" height="8" rx="1.5"/><path d="M5.5 4.5v-1a1 1 0 011-1h3a1 1 0 011 1v1"/></svg>${t('Background Work')}<span class="ut-group-n">${items.length}</span></div>
+          ${items.map(itemHtml).join('')}
+        </div>` : `
         <div class="ut-group">
           <button class="ut-group-head" data-key="${escHtml(key)}" title="${t('Go to this session')}">${escHtml(nameFor(key, items))}<span class="ut-group-n">${items.length}</span><span class="ut-group-go">→</span></button>
           ${items.map(itemHtml).join('')}
