@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.348.1
+
+- **Panel-answer field report (the demo's own feedback loop delivered it): two inbox UX defects fixed.** ① The For you entry for Background Work items displayed "Background Work" as if it were a session name — a phantom session. It now shows the JOB's name ("demo-ui needs your input"). ② Clicking the entry dumped you in the Background Work window to hunt for the card — it now opens the job's Interaction Panel DIRECTLY (todo items carry `jobId`; falls back to the window for items without one, and the panel window degrades to "nothing to answer" when already handled).
+
+
 ## 2.348.0
 
 - **Announce-flood fairness in the passive injection (owner design call):** viewers keep seeing announces passively at their NEXT context injection only (never a wake), but the per-turn update block now coalesces each job's announces into ONE line (`announced ×N, latest: …`) — a chatty watch job can no longer crowd lifecycle events (done/failed/parked) out of the 600B budget. Single announces render plainly; directed message delivery (owner + filtered subscribers) is unchanged.

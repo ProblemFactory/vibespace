@@ -85,7 +85,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null } = {}) {
     text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
     if (!text) throw new Error('text required');
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
@@ -118,6 +118,7 @@ class UserTodoManager {
       urgency: urgency || 'normal',
       status: 'open', by,
       sessionName: sessionName || null, // display fallback frozen at file time
+      jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel
       createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
     };
     this._state.items.push(item);

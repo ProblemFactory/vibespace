@@ -36,8 +36,16 @@ export function installUserTodos(app) {
     return (s && displayName(s)) || items.find((i) => i.sessionName)?.sessionName
       || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
   };
-  const jump = (key) => {
-    if (key === 'jobs') { popup.classList.add('hidden'); app.openJobs?.(); return; } // Background Work notifications live in no session
+  const jump = (key, item) => {
+    if (key === 'jobs') {
+      popup.classList.add('hidden');
+      // straight to the interaction panel when the item names its job (owner
+      // roast 2.348.1: "还得从后台窗口里找" — the window is the fallback, not
+      // the destination); openInteractWindow degrades to a hint when there is
+      // nothing left to answer
+      if (item?.jobId) { app.openJobInteract?.(item.jobId); return; }
+      app.openJobs?.(); return;
+    }
     const s = sessionFor(key);
     if (!s) { showToast(t('Session not found in the list yet — try from the sidebar'), { type: 'error' }); return; }
     popup.classList.add('hidden');
@@ -205,7 +213,7 @@ export function installUserTodos(app) {
       // a real text SELECTION inside the row must not jump-and-close
       if (String(window.getSelection?.() || '')) return;
       const rec = todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id);
-      if (rec) jump(rec.sessionKey);
+      if (rec) jump(rec.sessionKey, rec);
     }
   });
 
@@ -221,7 +229,7 @@ export function installUserTodos(app) {
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
         const el = showToast(`${t('For you')} · ${nameFor(i.sessionKey, [i])}: ${i.text}`);
-        if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey); }
+        if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey, i); }
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
       }
     }
