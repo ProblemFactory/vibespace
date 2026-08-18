@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.346.0
+
+- **Quiet-success becomes the creating agent's choice, not a law (owner decision):** `vibespace-job run ... --notify-ok` opts a scheduled job's SUCCESSFUL runs into events + owner/subscriber notifications (default stays silent — the 18-card-flood lesson holds as a default, no longer as a rule).
+- **`vibespace-job announce "what happened"` — the watch-job verb.** A news-page monitor exits 0 every run; exit codes cannot express "found something". The job process itself (jbt_ token, id implied) — or any session with control access — announces the noteworthy moment: custom text goes to the owner conversation + subscribers over the normal lanes (message / stash), lands in the event ring for injection, rate-floored like everything else. Success/failure vocabulary fully decoupled from process exit.
+- **Truncated notification history now points at a readable file (owner ask):** when a drained stash has >2 entries, the untruncated history is appended to `data/job-notifications-read/<conversationId>.md` and every truncated injection form (elided middle, floor line) carries that absolute path — the agent Reads the file instead of losing the elided middle. 256KB head-trimmed per conversation, age-swept with the 14d GC.
+- Gates: engine 41 (notify-ok success notifies + emits event; announce reaches owner and cron-parent subscribers; spill file content), model 50 (spill-path in elided + floor forms).
+
+
 ## 2.345.0
 
 - **Context echo in notifications was silently dead — caught by the live E2E (owner question "你测试回调context了吗"):** the notify text checked `typeof job.context === 'string'` but production stores `{payload}` — every real context brief was dropped from every notification since 2.344.0 (the unit fixture used a bare string: the fixture-shape class struck our own test). Fixed for both shapes, pinned with the production shape + a negative control; the `--context` brief now rides completion/failure messages (clipped to 300cp inside the 1000cp cap).

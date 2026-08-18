@@ -67,7 +67,8 @@ control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibesp
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
          vibespace-job subscribe <id> · unsubscribe <id>   (any session that can VIEW the job — get its notifications too)
 in-job:  vibespace-job progress "text"     · vibespace-job ask --form @panel.json [--timeout 30m]
-         vibespace-job answers [--wait 100]
+         vibespace-job answers [--wait 100] · vibespace-job announce "what happened" (notify owner+subscribers NOW —
+           for watch jobs where exit code ≠ newsworthiness; --notify-ok at create = scheduled successes notify too)
 Pick the right tool: turn-scoped waits → background Bash/Monitor · session continuation → /goal ·
 must OUTLIVE the conversation → THIS · harness cron → never (expires) · dated obligations → --at.`;
 
@@ -104,7 +105,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
           cmd: { argv: ['sh', '-c', cmdStr], cwd: flags.cwd || process.cwd() },
           untilOutput: flags.until || null, timeoutMs: flags.timeout ? dur(flags.timeout) : null,
           stdinOpen: !!flags['stdin-open'], notifyUser: !!flags['notify-user'],
-          restart: flags.restart || 'on-failure',
+          notifyOk: !!flags['notify-ok'], restart: flags.restart || 'on-failure',
           ports: [].concat(flags.port || []).filter(Boolean).map(Number), publish: !!flags.publish,
         };
         if (schedule) body.action = { type: 'spawn-task', task };
@@ -163,6 +164,14 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (!pos[1] || !['on', 'off', 'inherit'].includes(pos[2])) { console.error('usage: vibespace-job notify <id|name> on|off|inherit'); process.exit(1); }
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/notify`, { value: pos[2] });
       console.log('auto-notify: ' + r.notify + (r.preview ? ` — ${r.preview.enabled ? (r.preview.mode === 'live-message' ? 'this conversation will be messaged' : 'stashed until your next resume') : 'off: ' + (r.preview.reason || '')}` : ''));
+      break;
+    }
+    case 'announce': {
+      const ref = pos[1] && pos[1].startsWith('jb-') ? pos[1] : JOBID;
+      const text = pos[1] && pos[1].startsWith('jb-') ? pos[2] : pos[1];
+      if (!ref || !text) { console.error('usage: vibespace-job announce [id] "what happened" (id implied inside a job)'); process.exit(1); }
+      await call('POST', `/api/agent/jobs/${encodeURIComponent(ref)}/announce`, { text: readArg(text) });
+      console.log('announced — owner and subscribers notified (or queued for their next resume)');
       break;
     }
     case 'subscribe': case 'unsubscribe': {

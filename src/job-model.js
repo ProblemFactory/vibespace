@@ -255,20 +255,25 @@ function renderOwnerNotify(job, ev, { contextHead = 300 } = {}) {
 // resume/next-turn. Oldest first, newest guaranteed: when over budget the
 // MIDDLE is dropped, because the latest event is the actionable one and the
 // first shows where the story started.
-function renderNotifStash(items, { budget = 900 } = {}) {
+function renderNotifStash(items, { budget = 900, spillPath = null } = {}) {
   if (!items || !items.length) return '';
   const line = (n) => `- ${new Date(n.ts).toISOString().slice(5, 16).replace('T', ' ')} ${n.jobId} ${clip(n.jobName, 24)}: ${clip(n.text, 160)}`;
-  const head = '<vibespace-jobs-missed-while-away>', tail = '</vibespace-jobs-missed-while-away>\nThese completed while this conversation was closed. vibespace-job poll <id> for full detail.';
+  const head = '<vibespace-jobs-missed-while-away>';
+  // spillPath (2.346.0, owner ask): when the engine wrote the untruncated
+  // history to a file, every truncated form points at it — the agent Reads
+  // the file instead of losing the elided middle
+  const tail = '</vibespace-jobs-missed-while-away>\nThese completed while this conversation was closed. vibespace-job poll <id> for full detail.'
+    + (spillPath ? ` Full untruncated history: ${spillPath}` : '');
   let keep = items.slice();
   let dropped = 0;
   let out = [head, ...keep.map(line), tail].join('\n');
   while (bytes(out) > budget && keep.length > 2) {
     keep.splice(1, 1); // drop second-oldest; endpoints survive
     dropped++;
-    out = [head, line(keep[0]), `- …${dropped} earlier notification(s) elided — vibespace-job list`, ...keep.slice(1).map(line), tail].join('\n');
+    out = [head, line(keep[0]), `- …${dropped} earlier notification(s) elided${spillPath ? '' : ' — vibespace-job list'}`, ...keep.slice(1).map(line), tail].join('\n');
   }
   if (bytes(out) <= budget) return out;
-  const floor = `<vibespace-jobs-missed-while-away>${items.length} job notification(s) arrived while this conversation was closed — vibespace-job list</vibespace-jobs-missed-while-away>`;
+  const floor = `<vibespace-jobs-missed-while-away>${items.length} job notification(s) arrived while this conversation was closed — ${spillPath ? `full history: ${spillPath}` : 'vibespace-job list'}</vibespace-jobs-missed-while-away>`;
   return bytes(floor) <= budget ? floor : '';
 }
 
