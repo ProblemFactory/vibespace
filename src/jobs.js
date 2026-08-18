@@ -41,20 +41,25 @@ const now = () => Date.now();
 const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 
 class JobManager {
-  /** deps: { dataDir, broadcast(type,payload), notifyUser({text,urgency,jobId}), log } */
+  /** deps: { dataDir, broadcast(type,payload), notifyUser({text,urgency,jobId}), log,
+   *          deliverToConversation?(cid,text)→Promise<{ok,peerName?,reason?}>,   // 2.344.0 peer-message lane
+   *          groupNotifyFor?(job)→true|false|null, notifyGlobal?()→bool }        // toggle resolution */
   constructor(deps) {
     this.d = deps;
     this.file = path.join(deps.dataDir, 'jobs.json');
+    this.notifsFile = path.join(deps.dataDir, 'job-notifications.json');
     this.logsDir = path.join(deps.dataDir, 'job-logs');
     this.lockFile = path.join(deps.dataDir, 'jobs.lock');
     this.jobs = new Map();
     this.readOnly = false;
     this.ready = false;
     this.events = [];            // ring of {ts, jobId, name, what, verb} for injection
+    this.pendingNotifs = new Map(); // conversationId → [{jobId, jobName, text, ts, urgency}] — OFFLINE stash, drained at resume injection
     this.waiters = new Map();    // jobId → [{resolve, timer}] (poll --wait)
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
     this._timers = [];
     this._dirty = false;
+    this._notifyRate = new Map(); // conversationId → {ts, text} — engine-side floor under the CLI's own throttles
   }
 
   // ── lifecycle ───────────────────────────────────────────────────────────
@@ -64,9 +69,10 @@ class JobManager {
       if (!this._takeLock()) {
         this.readOnly = true;
         this.d.log('[jobs] another engine holds the lock — READ-ONLY registry (no adopt/replay/cron)');
-        this._load(); this.ready = true; return;
+        this._load(); this._loadNotifs(); this.ready = true; return;
       }
       this._load();
+      this._loadNotifs();
       this._adoptAndReplay();
       const t1 = setInterval(() => this._sweep().catch((e) => this.d.log('[jobs] sweep failed:', e.message)), 5000);
       const t2 = setInterval(() => this._cronTick().catch((e) => this.d.log('[jobs] cron tick failed:', e.message)), 30_000);
@@ -112,7 +118,89 @@ class JobManager {
     }
   }
   _save() {
-    try { writeJsonAtomic(this.file, [...this.jobs.values()]); this._dirty = false; } catch (e) { this.d.log('[jobs] save failed:', e.message); }
+    try {
+      writeJsonAtomic(this.file, [...this.jobs.values()]);
+      writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs));
+      this._dirty = false;
+    } catch (e) { this.d.log('[jobs] save failed:', e.message); }
+  }
+  _loadNotifs() {
+    try {
+      const obj = JSON.parse(fs.readFileSync(this.notifsFile, 'utf-8'));
+      for (const [cid, list] of Object.entries(obj)) if (Array.isArray(list) && list.length) this.pendingNotifs.set(cid, list);
+    } catch { }
+  }
+
+  // ── owner auto-notify (2.344.0, B-0bf4 — the CLI's own cross-session
+  // messaging inbox is the delivery channel; docs/design-background-work
+  // §Owner notify). VibeSpace never fabricates user input: a live owner
+  // conversation gets a PEER MESSAGE on its inbox socket (the CLI queues it
+  // mid-turn / opens a turn when idle, gated by its own inbound controls); an
+  // absent owner gets a durable STASH entry injected passively at the next
+  // SessionStart/prompt hook. Toggles: job override > group tri-state >
+  // global agents.jobNotify (default ON).
+  _notifyOwner(job, ev) {
+    try {
+      const cid = job.owner && job.owner.conversation && job.owner.conversation.id;
+      if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
+      const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
+      if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._dirty = true; return; }
+      const text = M.renderOwnerNotify(job, ev);
+      // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
+      // between posts per conversation, identical text suppressed for 10min
+      const rate = this._notifyRate.get(cid) || {};
+      if ((rate.ts && now() - rate.ts < 30_000) || (rate.text === text && now() - rate.ts < 600_000)) {
+        job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'rate floor' }; this._dirty = true; return;
+      }
+      this._notifyRate.set(cid, { ts: now(), text });
+      const deliver = this.d.deliverToConversation ? this.d.deliverToConversation(cid, text) : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
+      Promise.resolve(deliver).then((r) => {
+        if (r && r.ok) {
+          job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
+        } else {
+          this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable');
+        }
+        this._dirty = true;
+        try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
+      }).catch((e) => {
+        this._stashNotif(cid, job, ev, e.message); // degrade path logs verbatim inside
+        this._dirty = true;
+      });
+    } catch (e) { this.d.log('[jobs] owner notify failed:', e.message); }
+  }
+  _stashNotif(cid, job, ev, reason) {
+    const q = this.pendingNotifs.get(cid) || [];
+    q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low' });
+    if (q.length > 30) q.splice(0, q.length - 30); // per-conversation cap; oldest fall off
+    this.pendingNotifs.set(cid, q);
+    job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
+    this.d.log(`[jobs] owner notify → stashed for ${cid} (${reason || 'not reachable'})`);
+  }
+  /** honest notify preview for the CREATE response + UI: will the owner
+   *  conversation hear back, over which lane, decided by which layer. */
+  notifyPreview(job) {
+    if (!job) return null;
+    const cid = job.owner && job.owner.conversation && job.owner.conversation.id;
+    if (!cid) return { enabled: false, mode: 'off', reason: 'no conversation lineage recorded for this job (user-created, or the session id was not known yet at creation)' };
+    const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
+    if (!eff.on) return { enabled: false, mode: 'off', source: eff.source, reason: `auto-notify is OFF at the ${eff.source} level` };
+    const reachable = this.d.peerReachable ? this.d.peerReachable(cid) : false;
+    return {
+      enabled: true, source: eff.source,
+      mode: reachable ? 'live-message' : 'resume-inject',
+      detail: reachable
+        ? 'your conversation will receive a message on completion/failure/park/ask (delivery subject to its own inbound settings)'
+        : 'your conversation has no live inbox right now — notifications will be stashed and injected when it next resumes',
+    };
+  }
+  /** drain + clear a conversation's stash (called by the injection routes at render time). */
+  drainNotifs(cid) {
+    if (!cid) return [];
+    const q = this.pendingNotifs.get(cid);
+    if (!q || !q.length) return [];
+    this.pendingNotifs.delete(cid);
+    this._dirty = true;
+    return q;
   }
   _touch(job, ev) {
     this._dirty = true;
@@ -276,6 +364,7 @@ class JobManager {
         this._teardownPublish(job);
         this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})` });
         try { this.d.notifyUser({ text: `Service ${job.name} crash-looped and was parked — vibespace-job start ${job.id} to retry`, urgency: 'normal', jobId: job.id }); } catch { }
+        this._notifyOwner(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit}) — start it again once fixed` });
       } else if (dec.restartInMs) {
         job.state = 'down'; this._touch(job);
         const t = setTimeout(() => { try { if (job.desiredUp && job.state === 'down') this._spawn(job, 'restart-policy'); } catch { } }, dec.restartInMs);
@@ -284,8 +373,13 @@ class JobManager {
     } else {
       job.state = run.cause === 'interrupted' ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
       const routineCronOk = job.cronParent && job.state === 'done'; // quiet-success: a scheduled run ending fine is a ring entry, not an event
-      this._touch(job, routineCronOk ? null : { what: `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)` });
+      const evText = `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
+      this._touch(job, routineCronOk ? null : { what: evText });
       if (job.notifyUser) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id }); } catch { } }
+      // owner auto-notify honors the same quiet-success law: routine scheduled
+      // success never messages anyone; agent-stopped ('interrupted') skips too
+      // — the owner just did it and a message would echo their own action.
+      if (!routineCronOk && job.state !== 'interrupted') this._notifyOwner(job, { what: evText });
     }
   }
 
@@ -353,7 +447,7 @@ class JobManager {
         const missedByMs = now() - job.nextFireAt;
         const isCatchUp = missedByMs > 120_000;
         if (isCatchUp && (job.catchUp || 'once') === 'none') {
-          if (job.schedule.at) { job.state = 'missed'; this._touch(job, { what: 'missed its {at} time while the server was down' }); try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id }); } catch { } continue; }
+          if (job.schedule.at) { job.state = 'missed'; this._touch(job, { what: 'missed its {at} time while the server was down' }); try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id }); } catch { } this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' }); continue; }
         }
         this._fireCron(job, isCatchUp ? 'boot' : 'cron');
         job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now());
@@ -423,6 +517,7 @@ class JobManager {
       health: spec.health || null, ports: spec.ports || [], publish: !!spec.publish,
       singleInstance: spec.singleInstance !== false, timeoutMs: spec.timeoutMs || null,
       untilOutput: spec.untilOutput || null, stdinOpen: !!spec.stdinOpen, notifyUser: !!spec.notifyUser,
+      notify: spec.notify === 'on' || spec.notify === 'off' ? spec.notify : undefined, // owner auto-notify override; undefined = inherit group/global
       schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: spec.action || null,
       context: spec.context || null, interaction: { pending: null, answers: [] },
       owner: spec.owner, access: spec.access || { view: 'group', control: 'session' },
@@ -478,6 +573,7 @@ class JobManager {
     if (job.kind === 'task' && ['up', 'starting'].includes(job.state)) job.state = 'awaiting-user';
     this._touch(job, { what: 'needs your input — open its panel', verb: 'answers' });
     try { this.d.notifyUser({ text: `${job.name} needs your input`, urgency: 'normal', jobId: job.id, kind: 'job-interact' }); } catch { }
+    this._notifyOwner(job, { what: 'posted an interaction panel and is awaiting an answer' });
     this._save();
     return { ok: true, version };
   }
@@ -499,6 +595,7 @@ class JobManager {
     }
     this._resolveAns(job);
     this._touch(job, { what: 'the user answered its panel', verb: 'answers' });
+    this._notifyOwner(job, { what: 'the user answered its interaction panel — vibespace-job answers ' + job.id });
     this._save();
     return { ok: true };
   }
@@ -526,6 +623,7 @@ class JobManager {
       schedule: job.schedule, nextFireAt: job.nextFireAt || null, context: job.context || null,
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
       access: job.access, createdAt: job.createdAt, cronParent: job.cronParent || null,
+      notify: job.notify || 'inherit', lastNotify: job.lastNotify || null,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger } : null,
       runsCount: (job.runs || []).length,
       pendingPanel: !!(job.interaction && job.interaction.pending),

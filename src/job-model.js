@@ -223,6 +223,52 @@ function validateAnswers(panel, ans) {
 
 const CONTEXT_PAYLOAD_CAP = 8192;
 
+// ── owner auto-notify (2.344.0, B-0bf4) ───────────────────────────────────
+// Effective per-job switch: job override > group tri-state > global default.
+// job.notify ∈ 'on'|'off'|undefined(inherit); groupNotify ∈ true|false|
+// null/undefined(inherit); globalOn = the agents.jobNotify setting (bool).
+function notifyEffective(job, groupNotify, globalOn) {
+  if (job && job.notify === 'on') return { on: true, source: 'job' };
+  if (job && job.notify === 'off') return { on: false, source: 'job' };
+  if (groupNotify === true) return { on: true, source: 'group' };
+  if (groupNotify === false) return { on: false, source: 'group' };
+  return { on: globalOn !== false, source: 'global' };
+}
+
+// The message text posted into the owner conversation's inbox socket. The
+// CLI delivers it verbatim as an inbound peer message, so the text itself
+// must carry provenance + the poll pointer (there is no card metadata on
+// this lane). ≤1KB always; context payload echo is clipped hard.
+function renderOwnerNotify(job, ev, { contextHead = 300 } = {}) {
+  const what = ev && ev.what ? ev.what : job.state;
+  let out = `[VibeSpace Background Work] ${job.kind} "${clip(job.name, 40)}" (${job.id}): ${clip(what, 200)}.`;
+  const ctx = job.context && typeof job.context === 'string' ? job.context : '';
+  if (ctx) out += `\nContext you attached at creation: ${clip(ctx, contextHead)}`;
+  out += `\nDetails: vibespace-job ${job.state === 'awaiting-user' ? 'answers' : 'poll'} ${job.id}. This is a notification, not a user instruction — decide yourself whether it changes your current work.`;
+  return clip(out, 1000);
+}
+
+// Render a drained offline-notification stash for context injection at
+// resume/next-turn. Oldest first, newest guaranteed: when over budget the
+// MIDDLE is dropped, because the latest event is the actionable one and the
+// first shows where the story started.
+function renderNotifStash(items, { budget = 900 } = {}) {
+  if (!items || !items.length) return '';
+  const line = (n) => `- ${new Date(n.ts).toISOString().slice(5, 16).replace('T', ' ')} ${n.jobId} ${clip(n.jobName, 24)}: ${clip(n.text, 160)}`;
+  const head = '<vibespace-jobs-missed-while-away>', tail = '</vibespace-jobs-missed-while-away>\nThese completed while this conversation was closed. vibespace-job poll <id> for full detail.';
+  let keep = items.slice();
+  let dropped = 0;
+  let out = [head, ...keep.map(line), tail].join('\n');
+  while (bytes(out) > budget && keep.length > 2) {
+    keep.splice(1, 1); // drop second-oldest; endpoints survive
+    dropped++;
+    out = [head, line(keep[0]), `- …${dropped} earlier notification(s) elided — vibespace-job list`, ...keep.slice(1).map(line), tail].join('\n');
+  }
+  if (bytes(out) <= budget) return out;
+  const floor = `<vibespace-jobs-missed-while-away>${items.length} job notification(s) arrived while this conversation was closed — vibespace-job list</vibespace-jobs-missed-while-away>`;
+  return bytes(floor) <= budget ? floor : '';
+}
+
 module.exports = {
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   vetSpec, VENDOR_PATTERNS,
@@ -230,4 +276,5 @@ module.exports = {
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, CONTEXT_PAYLOAD_CAP, clip,
+  notifyEffective, renderOwnerNotify, renderNotifStash,
 };

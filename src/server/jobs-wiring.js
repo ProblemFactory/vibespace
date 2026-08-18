@@ -6,10 +6,11 @@
 const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
+const peerMsg = require('../peer-messaging.js');
 const fs = require('fs');
 const path = require('path');
 
-function create({ app, dataDir, broadcastAll, userTodos, log }) {
+function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions }) {
   const jm = new JobManager({
     dataDir,
     broadcast: (type, payload) => broadcastAll({ type, ...payload }),
@@ -17,6 +18,55 @@ function create({ app, dataDir, broadcastAll, userTodos, log }) {
       try { userTodos.add('jobs', { text, detail: jobId ? `Background job ${jobId} — open the Background Work window` : '', urgency: urgency || 'normal', by: 'agent', sessionName: 'Background Work' }); } catch (e) { log('[jobs] notify failed:', e.message); }
     },
     log,
+    // ── owner auto-notify lanes (2.344.0, B-0bf4) ─────────────────────────
+    // Global default: agents.jobNotify (ON unless the user turned it off).
+    notifyGlobal: () => { try { return serverSetting('agents.jobNotify') !== false; } catch { return true; } },
+    // Group tri-state over the job's ownership snapshot: any explicit OFF
+    // wins (quietest interpretation of a conflict), else any explicit ON,
+    // else inherit (null → global decides).
+    groupNotifyFor: (job) => {
+      try {
+        const ids = (job.owner && job.owner.groupsSnapshot) || [];
+        let sawOn = false;
+        for (const gid of ids) {
+          const g = taskGroups && taskGroups.get ? (() => { try { return taskGroups.get(gid); } catch { return null; } })() : null;
+          if (!g) continue;
+          if (g.jobNotify === false) return false;
+          if (g.jobNotify === true) sawOn = true;
+        }
+        return sawOn ? true : null;
+      } catch { return null; }
+    },
+    // Deliver via the CLI's own cross-session messaging inbox: find the LIVE
+    // registered peer for the owner conversation's backend session id and
+    // post the message. The CLI applies its own inbound controls/throttles —
+    // we never bypass a hold. Any miss (no registry entry, dead pid, socket
+    // error) reports {ok:false} so the engine stashes for resume injection.
+    peerReachable: (cid) => { try { return !!peerMsg.findPeer(cid); } catch { return false; } },
+    deliverToConversation: async (cid, text) => {
+      try {
+        // lane 0 (EXPERIMENTAL, default OFF): the session's VibeSpace channel
+        // — richer <channel source="vibespace"> framing when the session was
+        // spawned with agents.vibespaceChannel on
+        try {
+          if (serverSetting('agents.vibespaceChannel') === true && activeSessions) {
+            for (const [wid, s] of activeSessions) {
+              if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
+              const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
+              if (!fs.existsSync(sock)) continue;
+              const rc = await peerMsg.postChannelEvent(sock, text, { kind: 'background_job' });
+              if (rc.ok) return { ok: true, lane: 'channel', peerName: s.name || null };
+            }
+          }
+        } catch (e) { log('[jobs] channel lane failed (falling through to peer inbox):', e.message); }
+        // lane 1 (GA): the CLI's cross-session messaging inbox
+        const peer = peerMsg.findPeer(cid);
+        if (!peer) return { ok: false, reason: 'no live inbox for this conversation on this machine' };
+        const r = await peerMsg.postToPeer(peer, text);
+        if (!r.ok) { log(`[jobs] peer post to ${peer.socketPath} failed: ${r.reason}`); return { ok: false, reason: r.reason }; }
+        return { ok: true, lane: 'message', peerName: peer.name || null };
+      } catch (e) { log('[jobs] deliverToConversation threw:', e.message); return { ok: false, reason: e.message }; }
+    },
   });
 
   const USER = { isUser: true, groups: new Set() };

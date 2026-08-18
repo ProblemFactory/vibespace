@@ -56,7 +56,7 @@ function printJob(j, tailLines) {
 
 const USAGE = `vibespace-job — background work that OUTLIVES this conversation (services · long tasks · cron)
 create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, survives your compaction)"]
-           [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user]
+           [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
            [--every 30m | --cron "41 9 * * *" | --at "2026-09-05 06:00"]              ← schedule (spawns CMD)
          vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high]
@@ -94,6 +94,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         schedule,
         access: { view: flags.view || 'group', control: flags.control || 'session' },
         stopWithOwner: !!flags['stop-with-owner'],
+        notify: flags.notify === 'on' || flags.notify === 'off' ? flags.notify : undefined,
       };
       if (isNotify) body.action = { type: 'notify', text: readArg(flags.text || ''), urgency: flags.urgency || 'normal' };
       else {
@@ -111,6 +112,10 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const j = r.job;
       console.log(`started ${j.id} (${j.kind} ${j.name})${r.renamed ? ' — name was taken, auto-suffixed' : ''}`);
       console.log(`this job OUTLIVES your conversation. Poll it (even from a future session):\n  vibespace-job poll ${j.id}`);
+      if (r.notify) {
+        if (r.notify.enabled) console.log(`auto-notify: ON (${r.notify.source}) — ${r.notify.mode === 'live-message' ? 'this conversation will be messaged on completion/failure/ask' : 'no live inbox now; you will be told at your next resume'}. Polling still works anytime.`);
+        else console.log(`auto-notify: OFF (${r.notify.reason}) — you will NOT be told when it finishes; poll it yourself: vibespace-job poll ${j.id}`);
+      }
       if (r.survivalNote) console.log('runtime note: ' + r.survivalNote);
       break;
     }
