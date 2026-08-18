@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.351.2
+
+- **MID-TURN peer messages were still invisible (owner: "我announce了怎么没收到" — the agent HAD received it):** an idle wake arrives as a user record (2.349.0 card ✓), but a message queued into a BUSY turn is recorded ONLY as an `attachment/queued_command` with a STRING prompt + `origin:{kind:'peer'}` — nothing on the live stream at all, and the existing queued_command handler (2.88.0, built for the user's own mid-turn messages) filtered for array-of-blocks prompts, so every peer delivery fell through. String prompts now render, and `origin.kind='peer'` gets the same peer card (never a "You" bubble of someone else's words). Live-view caveat (upstream shape): a mid-turn peer message appears on window reopen/history rebuild — the CLI emits no live record for it.
+
+
 ## 2.351.1
 
 - **Job cards show externally-published URLs (owner report: demo-ui's Ports-panel publish was invisible on its card)** — a service whose declared port was forwarded+published manually (instead of `--publish` at creation) now gets the same ↗ URL chip: the user REST responses enrich the serialized snapshot with the matching local forward's publicUrl (`publishedExternally: true`; job records untouched, ports⇄jobs remains registration-first).
