@@ -17,8 +17,8 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 
-const PORT = 3988, CDP_PORT = 9338;
-const wt = '/tmp/vs-rail-smoke';
+const PORT = 3931 + (process.pid % 20), CDP_PORT = 9311 + (process.pid % 20);
+const wt = `/tmp/vs-rail-smoke-${process.pid}`;
 let failed = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -26,21 +26,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── throwaway server in a worktree ──────────────────────────────────────────
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
-for (const f of ['src', 'public', 'server.js']) {
+// NO rebuild here (2.355.0, gate-admission diet): the overlay copies the
+// repo's ALREADY-BUILT public/ (bundle.js included) — same rule as
+// test-client-boot/test-restore-smoke. The gate's step 1 built it; a
+// standalone run tests whatever `npm run build` last produced.
+for (const f of ['src', 'public', 'server.js', 'package.json']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, [`--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--disable-background-timer-throttling', '--user-data-dir=/tmp/vs-rail-smoke-chrome', 'about:blank'], { stdio: 'ignore' });
+  '--no-sandbox', '--disable-dev-shm-usage', // GH runners: tiny /dev/shm (the client-boot lesson)
+  '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv.kill('SIGKILL'); } catch {}
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  try { fs.rmSync('/tmp/vs-rail-smoke-chrome', { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(`${wt}-chrome`, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
 

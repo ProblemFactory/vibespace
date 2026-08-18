@@ -956,7 +956,7 @@ class AccountManager {
   // concurrent spawn either sees the old target or the new one, never a gap.
   // The target's creds mtime is bumped because the CLI's credential cache is
   // mtime-gated and two accounts could otherwise share an mtimeMs.
-  setPoolTarget(id, subId) {
+  setPoolTarget(id, subId, { sweepSessionLinks = false } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
     const target = this.get(subId);
@@ -965,9 +965,26 @@ class AccountManager {
     // ONE material implementation (src/account-material.js, 2.298.0): the
     // same primitive the daemon's sealed-orders reflex executes — data/subs
     // is device #0's account store, and the mechanical act is device-tier.
-    require('./account-material.js').repointPoolSymlink(this.subDir(id), this.subDir(subId), this.subCredsPath(subId));
+    const mat = require('./account-material.js');
+    mat.repointPoolSymlink(this.subDir(id), this.subDir(subId), this.subCredsPath(subId));
+    // sweepSessionLinks (2.355.0, userW's inc-msz495u6 — "热切换死了"):
+    // plan C (2.315.0) gave every live session its OWN link and
+    // poolCurrentFor prefers it, which silently DEMOTED the manual target
+    // change to new-sessions-only: the default moved while every live
+    // session's link stayed on the old member (verified on the reporting
+    // instance: default → new member, 16 live links → old member). The USER
+    // route passes true when the pool is hot (an explicit pick means "all of
+    // it, now"); the ENGINE never passes it — its per-session moves are the
+    // model-family projections a blanket sweep would clobber.
+    let swept = 0;
+    if (sweepSessionLinks) {
+      for (const { path: lp } of this.sessionPoolLinks(id)) {
+        try { mat.repointPoolSymlink(lp, this.subDir(subId), null); swept++; } catch { }
+      }
+      if (swept) console.log(`[pool] manual target → ${target.name}: repointed ${swept} live session link(s)`);
+    }
     this._notify();
-    return { id, current: subId, name: target.name };
+    return { id, current: subId, name: target.name, swept };
   }
 
   createPool({ name, members } = {}) {

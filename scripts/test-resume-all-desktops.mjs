@@ -49,5 +49,16 @@ ok(scanStoppedInDesktopStates(null, 'd1', [], [], null).length === 0
   && scanStoppedInDesktopStates({ desktopMeta: [] }, 'd1', [], [], null).length === 0,
   'empty/hostile input never throws');
 
+// WIRING PIN (2.355.0, userW's inc-msy27q2e repeat): the 2.331.0 commit
+// shipped this pure function + this very test but the loadAutoSave CALL was
+// never staged — the fix sat dead for 24 releases while its unit test stayed
+// green. A pure function's test proves the LOGIC, this pin proves the WIRING.
+import fs from 'node:fs';
+const laySrc = fs.readFileSync(new URL('../src/lib/layout.js', import.meta.url), 'utf-8');
+const callCount = laySrc.split('scanStoppedInDesktopStates(').length - 1;
+ok(callCount >= 2, `layout.js CALLS the scanner, not just defines it (${callCount} occurrences)`);
+ok(/scanStoppedInDesktopStates\([\s\S]{0,200}_bootStoppedSessions\.push|_bootStoppedSessions\.push[\s\S]{0,600}scanStoppedInDesktopStates\(|scanStoppedInDesktopStates\(data, activeId/.test(laySrc),
+  'the call feeds the resume-all collector');
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
