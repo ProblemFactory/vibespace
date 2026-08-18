@@ -235,6 +235,37 @@ class JobManager {
     this._touch(job); this._save();
     return { ok: true, removed: before - job.subscribers.length, count: job.subscribers.length };
   }
+  /** the JOB PROCESS (or its owner) announces a noteworthy moment — the
+   *  success/failure vocabulary decoupled from exit codes (2.346.0, owner
+   *  point: a news-page watcher exits 0 every run; what matters is whether it
+   *  FOUND something). Explicit call ⇒ event ring + owner/subscriber message,
+   *  rate-floored like any other notification. */
+  announce(job, text) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const t = String(text || '').trim().slice(0, 500);
+    if (!t) return { error: 'text required: vibespace-job announce "what happened"' };
+    this._touch(job, { what: `announced: ${t}`, verb: 'poll' });
+    this._notifyOwner(job, { what: `announced: ${t}` });
+    this._save();
+    return { ok: true };
+  }
+  /** append the FULL drained notification history to a per-conversation file
+   *  so a truncated injection can point the agent at the untruncated record.
+   *  Append-only with a head-trim cap; GC'd by age in _gc. */
+  spillNotifs(cid, items) {
+    try {
+      const dir = path.join(this.d.dataDir, 'job-notifications-read');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, String(cid).replace(/[^\w-]/g, '_') + '.md');
+      const block = `\n## drained ${new Date().toISOString()}\n` + items.map((n) => `- ${new Date(n.ts).toISOString()} ${n.jobId} ${n.jobName}: ${n.text}`).join('\n') + '\n';
+      let prev = '';
+      try { prev = fs.readFileSync(file, 'utf-8'); } catch { }
+      let out = prev + block;
+      if (out.length > 262144) out = out.slice(out.length - 262144); // keep the newest 256KB
+      fs.writeFileSync(file, out);
+      return file;
+    } catch (e) { this.d.log('[jobs] notif spill failed:', e.message); return null; }
+  }
   /** honest notify preview for the CREATE response + UI: will the owner
    *  conversation hear back, over which lane, decided by which layer. */
   notifyPreview(job) {
@@ -431,7 +462,11 @@ class JobManager {
       } else { job.state = 'down'; this._touch(job); }
     } else {
       job.state = run.cause === 'interrupted' ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
-      const routineCronOk = job.cronParent && job.state === 'done'; // quiet-success: a scheduled run ending fine is a ring entry, not an event
+      // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
+      // creating agent opts scheduled successes into events+notify with
+      // --notify-ok (job.notifyOk, inherited by the cron child via the
+      // embedded task spec)
+      const routineCronOk = job.cronParent && job.state === 'done' && !job.notifyOk;
       const evText = `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
       this._touch(job, routineCronOk ? null : { what: evText });
       if (job.notifyUser) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id }); } catch { } }
@@ -554,6 +589,12 @@ class JobManager {
   async _gc() {
     if (this.readOnly) return;
     const cutoff = now() - 14 * 86400e3;
+    try { // spill files: age-swept alongside the records they narrate
+      const dir = path.join(this.d.dataDir, 'job-notifications-read');
+      for (const f of fs.readdirSync(dir)) {
+        try { if (fs.statSync(path.join(dir, f)).mtimeMs < cutoff) fs.unlinkSync(path.join(dir, f)); } catch { }
+      }
+    } catch { }
     for (const [id, job] of this.jobs) {
       const stamp = this._readStamp(job);
       if (this._verifyAlive(stamp)) continue; // NEVER gc live work, regardless of record state
@@ -586,6 +627,7 @@ class JobManager {
       singleInstance: spec.singleInstance !== false, timeoutMs: spec.timeoutMs || null,
       untilOutput: spec.untilOutput || null, stdinOpen: !!spec.stdinOpen, notifyUser: !!spec.notifyUser,
       notify: spec.notify === 'on' || spec.notify === 'off' ? spec.notify : undefined, // owner auto-notify override; undefined = inherit group/global
+      notifyOk: !!spec.notifyOk, // scheduled successes opt INTO events+notify (quiet-success is only the default)
       schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: spec.action || null,
       context: spec.context || null, interaction: { pending: null, answers: [] },
       owner: spec.owner, access: spec.access || { view: 'group', control: 'session' },

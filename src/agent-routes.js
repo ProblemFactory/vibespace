@@ -318,7 +318,11 @@ app.get('/api/agent/task-context', (req, res) => {
         // not be delivered while this conversation was closed inject here at
         // resume, newest guaranteed, then the stash clears (drain-at-render,
         // same accepted-lost stance as _jobsEventsSeenTs).
-        const missed = jobModel.renderNotifStash(jm.drainNotifs(caller.conversationId));
+        const drained = jm.drainNotifs(caller.conversationId);
+        // >2 entries: also spill the untruncated history to a file the agent
+        // can Read — the injected block elides its middle under budget
+        const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
+        const missed = jobModel.renderNotifStash(drained, { spillPath });
         if (missed) context = context ? context + '\n\n' + missed : missed;
         const dig = jm.digestFor(caller, Buffer.byteLength(context || '', 'utf-8'));
         if (dig) context = context ? context + '\n\n' + dig : dig;
@@ -502,7 +506,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
         const caller = jobsCaller(s, id);
         // stashed offline notifications (a resume that skipped SessionStart —
         // codex — or entries stashed since it): drain here too
-        const missed = jobModel.renderNotifStash(jm.drainNotifs(caller.conversationId));
+        const drained = jm.drainNotifs(caller.conversationId);
+        const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
+        const missed = jobModel.renderNotifStash(drained, { spillPath });
         if (missed) parts.push(missed);
         const u = jm.updatesFor(caller, s._jobsEventsSeenTs || 0);
         if (u.text) parts.push(u.text);
@@ -964,9 +970,9 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   const { ref, act } = req.params;
   const job = a.selfJob ? (a.selfJob.id === ref || a.selfJob.name === ref ? a.selfJob : null) : findVisible(a.jm, a.caller, ref);
   if (!job) return res.status(404).json({ error: NOT_VISIBLE(ref) });
-  const selfActs = ['progress', 'ask'];
-  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress or ask' });
-  const needsControl = ['stop', 'start', 'rm'];
+  const selfActs = ['progress', 'ask', 'announce'];
+  if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask, or announce' });
+  const needsControl = ['stop', 'start', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
@@ -986,6 +992,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     }
     else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller);   // canView already proven by findVisible
     else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
+    else if (act === 'announce') r = a.jm.announce(job, req.body?.text); // in-job (jbt_) or any viewer — the watch-job "found something" verb
     else if (act === 'notify') {
       // owner-only post-create override (2.344.2 — field report: changing
       // notify used to require rm + recreate)

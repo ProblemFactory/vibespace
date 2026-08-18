@@ -165,6 +165,26 @@ try {
   await C._cronTick();
   ok(await until(() => cronNotifs.length >= 2, 15000), 'a recurring cron child failing on TWO fires notifies twice (multi-fire callbacks work)', `got ${cronNotifs.length}`);
 
+  // 7g. 2.346.0: notifyOk opts scheduled successes in; announce decouples news from exit codes; spill file
+  const okNotifs = [];
+  C._notifyRate.clear();
+  C.d.deliverToConversation = async (cid, text) => { okNotifs.push({ cid, text }); return { ok: true, lane: 'message' }; };
+  const ro1 = C.create({ kind: 'cron', name: 'verbose-ok', schedule: { at: Date.now() + 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'exit 0'] }, notifyOk: true } }, owner }, caller);
+  const jo1 = C.jobs.get(ro1.job.id);
+  jo1.schedule = { everyMs: 3600e3 }; jo1.nextFireAt = Date.now() - 1000;
+  await C._cronTick();
+  ok(await until(() => okNotifs.some((n) => n.text.includes('done')), 15000), '--notify-ok cron child SUCCESS notifies (quiet-success is default, not law)');
+  const okChild = [...C.jobs.values()].find((x) => x.cronParent === jo1.id);
+  ok(C.events.some((e) => e.jobId === okChild.id && /done/.test(e.what)), 'notify-ok success also emits the event (panel + injection see it)');
+  C._notifyRate.clear(); okNotifs.length = 0;
+  const annSub = { conversationId: 'conv-ANN', sessionId: 's', sessionCreatedAt: 3, groups: new Set(['T-g']) };
+  C.subscribe(jo1, annSub);
+  const ann = C.announce(okChild, '页面出现新条目: Fable 5 发布');
+  ok(ann.ok && await until(() => okNotifs.length >= 2, 15000) && okNotifs.some((n) => n.cid === 'conv-T' && n.text.includes('页面出现新条目')) && okNotifs.some((n) => n.cid === 'conv-ANN'), 'announce reaches owner AND cron-parent subscribers with the custom text', JSON.stringify(okNotifs.map((n) => n.cid)));
+  ok(!C.announce(okChild, '').ok, 'announce refuses empty text');
+  const sp = C.spillNotifs('conv-T', [{ jobId: 'jb-x', jobName: 'n', text: 'done', ts: Date.now() }]);
+  ok(sp && fs.readFileSync(sp, 'utf-8').includes('jb-x'), 'spill file written with the full history');
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');
