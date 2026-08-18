@@ -118,6 +118,11 @@ class JobManager {
     }
   }
   _save() {
+    // a READ-ONLY engine (second server against a live lock) must never flush
+    // its stale in-memory copy over the live engine's store (2.344.1 review
+    // catch: shutdown()'s dirty-flush had no guard, and drainNotifs marks
+    // dirty even in read-only mode)
+    if (this.readOnly) { this._dirty = false; return; }
     try {
       writeJsonAtomic(this.file, [...this.jobs.values()]);
       writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs));
@@ -147,12 +152,26 @@ class JobManager {
       if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._dirty = true; return; }
       const text = M.renderOwnerNotify(job, ev);
       // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
-      // between posts per conversation, identical text suppressed for 10min
+      // between SOCKET posts per conversation, identical text 10min. A floored
+      // DISTINCT event is STASHED, not dropped (2.344.1 review catch — a fail
+      // right after a done must still reach the owner, just via the next
+      // injection instead of a second immediate message); only an identical
+      // repeat is dropped outright.
       const rate = this._notifyRate.get(cid) || {};
-      if ((rate.ts && now() - rate.ts < 30_000) || (rate.text === text && now() - rate.ts < 600_000)) {
-        job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'rate floor' }; this._dirty = true; return;
+      if (rate.text === text && rate.ts && now() - rate.ts < 600_000) {
+        job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._dirty = true; return;
+      }
+      if (rate.ts && now() - rate.ts < 30_000) {
+        this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead');
+        this._dirty = true;
+        return;
       }
       this._notifyRate.set(cid, { ts: now(), text });
+      if (this._notifyRate.size > 500) { // prune: keep the map bounded
+        const cut = now() - 600_000;
+        for (const [k, v] of this._notifyRate) if (!v.ts || v.ts < cut) this._notifyRate.delete(k);
+        if (this._notifyRate.size > 500) this._notifyRate.clear();
+      }
       const deliver = this.d.deliverToConversation ? this.d.deliverToConversation(cid, text) : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
       Promise.resolve(deliver).then((r) => {
         if (r && r.ok) {
@@ -447,7 +466,16 @@ class JobManager {
         const missedByMs = now() - job.nextFireAt;
         const isCatchUp = missedByMs > 120_000;
         if (isCatchUp && (job.catchUp || 'once') === 'none') {
-          if (job.schedule.at) { job.state = 'missed'; this._touch(job, { what: 'missed its {at} time while the server was down' }); try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id }); } catch { } this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' }); continue; }
+          if (job.schedule.at) {
+            // terminal: park the record so the next tick doesn't re-enter this
+            // branch forever (2.344.1 review catch — nextFireAt stayed in the
+            // past, so the owner notify re-fired every dedupe window)
+            job.state = 'missed'; job.desiredUp = false; job.nextFireAt = null;
+            this._touch(job, { what: 'missed its {at} time while the server was down' });
+            try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id }); } catch { }
+            this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' });
+            continue;
+          }
         }
         this._fireCron(job, isCatchUp ? 'boot' : 'cron');
         job.nextFireAt = job.schedule.at ? null : M.nextFire(job.schedule, now());

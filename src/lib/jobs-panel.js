@@ -124,7 +124,7 @@ async function expandDetail(app, el, j, refresh) {
     const nr = document.createElement('div'); nr.className = 'jobs-meta';
     const ln = job.lastNotify;
     const lastTxt = !ln ? t('nothing sent yet')
-      : ln.lane === 'message' && ln.ok ? t('messaged the owner conversation {ago}', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
+      : (ln.lane === 'message' || ln.lane === 'channel') && ln.ok ? t('messaged the owner conversation {ago}', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
       : ln.lane === 'stash' ? t('queued for the owner conversation’s next resume ({ago})', { ago: hum(Date.now() - ln.ts) + ' ' + t('ago') })
       : ln.lane === 'off' ? t('skipped — auto-notify is off ({source})', { source: ln.source || 'global' })
       : ln.lane === 'suppressed' ? t('suppressed by the rate floor')

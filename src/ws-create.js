@@ -303,14 +303,18 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // message — pre-accept via the CLI's documented --settings knob so
             // job notifications actually deliver. Follows the same global
             // toggle that gates sending; repo/managed settings can tighten.
-            acceptPeerMessages: (() => { try { return serverSetting('agents.jobNotify') !== false; } catch { return true; } })(),
+            // LOCAL spawns only (the remote field is data.hostId — a data.host
+            // guard was a dead check, caught by the 2.344.0 review): accept
+            // only where our peer-messaging can actually deliver, and never
+            // ship channel flags to a machine that lacks the script.
+            acceptPeerMessages: (() => { try { return !data.hostId && serverSetting('agents.jobNotify') !== false; } catch { return !data.hostId; } })(),
             // EXPERIMENTAL VibeSpace channel (default OFF; local claude only —
             // the channel script + socket live on THIS machine)
             vibespaceChannel: (() => {
               try {
-                if (serverSetting('agents.vibespaceChannel') !== true || data.host) return null;
+                if (serverSetting('agents.vibespaceChannel') !== true || data.hostId) return null;
                 const sockDir = path.join(__dirname, '..', 'data', 'channel-socks');
-                fs.mkdirSync(sockDir, { recursive: true });
+                fs.mkdirSync(sockDir, { recursive: true, mode: 0o700 });
                 return { script: path.join(__dirname, '..', 'data', 'bin', 'vibespace-channel.js'), sock: path.join(sockDir, id + '.sock') };
               } catch { return null; }
             })(),

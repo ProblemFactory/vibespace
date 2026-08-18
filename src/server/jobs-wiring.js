@@ -141,10 +141,50 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     });
   });
 
+  // Live-session catch-up (2.344.1): sessions spawned BEFORE 2.344.0 lack the
+  // --settings crossSessionInbound accept, and dtach sessions survive updates
+  // for weeks — their bypass-mode inbound would HOLD our notifications in a
+  // dialog nobody watches (dropped after 5min, unrecoverable). Push the same
+  // documented settings key over the chat control channel (apply_flag_settings
+  // — the CLI's generic schema-valid settings merge; one stdin line, zero
+  // inference). Local claude CHAT sessions only; terminal sessions can't take
+  // control JSON (their notifications rely on the stash lane until respawn).
+  let csiSeq = 0;
+  const pushAcceptToLiveSessions = () => {
+    try {
+      if (serverSetting('agents.jobNotify') === false || !activeSessions) return;
+      for (const [, s] of activeSessions) {
+        if (!s.pty || s.mode !== 'chat' || (s.backend || 'claude') !== 'claude' || s.host) continue;
+        if (s._csiAccepted) continue;
+        try {
+          s.pty.write(JSON.stringify({ type: 'control_request', request_id: `vs-csi-${++csiSeq}`, request: { subtype: 'apply_flag_settings', settings: { crossSessionInbound: 'accept' } } }) + '\n');
+          s._csiAccepted = true;
+        } catch (e) { log('[jobs] accept push failed for a session:', e.message); }
+      }
+    } catch (e) { log('[jobs] accept catch-up failed:', e.message); }
+  };
+
+  const sweepChannelSocks = () => {
+    try {
+      const dir = path.join(dataDir, 'channel-socks');
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.sock')) continue;
+        if (activeSessions && activeSessions.has(f.slice(0, -5))) continue;
+        try { fs.unlinkSync(path.join(dir, f)); } catch { }
+      }
+    } catch { }
+  };
+
   return {
     jm,
     getJobs: () => jm,
-    initAfterListen: () => { try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); } },
+    initAfterListen: () => {
+      try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }
+      // two passes: dtach re-attaches trickle in after boot
+      const t1 = setTimeout(pushAcceptToLiveSessions, 5000);
+      const t2 = setTimeout(() => { pushAcceptToLiveSessions(); sweepChannelSocks(); }, 60_000);
+      t1.unref?.(); t2.unref?.();
+    },
     shutdown: () => { try { jm.shutdown(); } catch { } },
   };
 }
