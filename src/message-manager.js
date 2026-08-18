@@ -410,9 +410,16 @@ class MessageManager {
     // loss. Render as a normal user message; dedup against the live-send echo
     // (same text sent via chat-input lands in the buffer too).
     if (a.type === 'queued_command') {
-      const blocks = (Array.isArray(a.prompt) ? a.prompt : [])
-        .filter((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim())
-        .map((b) => ({ type: 'text', text: b.text }));
+      // prompt is an ARRAY of blocks for the user's own mid-turn messages,
+      // but a plain STRING for mid-turn PEER deliveries (2.351.2 forensics:
+      // a queued cross-session message is JSONL-only — attachment/
+      // queued_command with origin:{kind:'peer'} and a string prompt; the
+      // array-only filter made every one of them invisible)
+      const blocks = typeof a.prompt === 'string'
+        ? (a.prompt.trim() ? [{ type: 'text', text: a.prompt }] : [])
+        : (Array.isArray(a.prompt) ? a.prompt : [])
+          .filter((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim())
+          .map((b) => ({ type: 'text', text: b.text }));
       const text = blocks.map((b) => b.text).join('');
       if (!text.trim()) return;
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
@@ -421,7 +428,14 @@ class MessageManager {
       }
       this.turnIndex++;
       const msg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
-      msg.typed = true; // the user's own words — never a notification card
+      if (a.origin?.kind === 'peer') {
+        // same provenance law as the idle-wake user record — render the
+        // peer card, never a "You" bubble of someone else's words
+        msg.originKind = 'peer-message';
+        msg.peerFrom = a.origin.from && a.origin.from !== 'unknown' ? a.origin.from : null;
+      } else {
+        msg.typed = true; // the user's own words — never a notification card
+      }
       if (emit) this._emit({ op: 'create', message: msg });
       return;
     }
