@@ -565,3 +565,17 @@ events arrive as `<channel source="vibespace">` — falling through to the GA
 inbox lane. This is the foundation for external chat-tool bridges (owner
 direction), not the primary notify lane. Cross-machine delivery stays parked
 with the rest of §11-adjacent cross-machine work.
+
+**2.345.0–2.347.0 additions (owner-directed, all shipped same-day):** context
+echo fixed for the production `{payload}` shape (live-E2E catch — the unit
+fixture shared the implementation's wrong assumption); per-conversation
+SUBSCRIPTIONS (`subscribe <id> [--filter regex]` — canView to join, cap 10,
+cron parent covers child runs, per-subscriber case-insensitive filter over the
+notification text, fail-closed, re-subscribe updates own filter, independent
+of the owner-lane toggles); `announce "text"` (jbt_ self-act or canControl —
+newsworthiness decoupled from exit codes; quiet-success demoted from law to
+DEFAULT via `--notify-ok`); truncated stash injections point at an
+untruncated spill file `data/job-notifications-read/<cid>.md` (append,
+256KB head-trim, 14d GC); full self-inspection (`show <id>`,
+`list --mine|--subscribed`, snapshots carry all creation params, env values
+never leave the store); teaching kept in sync across ALL THREE renderers.
