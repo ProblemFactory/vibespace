@@ -968,9 +968,9 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress or ask' });
   const needsControl = ['stop', 'start', 'rm'];
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
-  if (!a.selfJob && act === 'access') {
+  if (!a.selfJob && (act === 'access' || act === 'notify')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
-    if (job.access && job.access.lockedBy === 'user') return res.status(403).json({ error: "the user pinned this job's access — ask in chat instead of changing it" });
+    if (act === 'access' && job.access && job.access.lockedBy === 'user') return res.status(403).json({ error: "the user pinned this job's access — ask in chat instead of changing it" });
   }
   try {
     let r;
@@ -983,6 +983,15 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
       for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
       a.jm._touch(job); a.jm._save(); r = { ok: true };
       return res.json({ success: true, access: job.access });
+    }
+    else if (act === 'notify') {
+      // owner-only post-create override (2.344.2 — field report: changing
+      // notify used to require rm + recreate)
+      const v = req.body?.value;
+      if (!['on', 'off', 'inherit'].includes(v)) return res.status(400).json({ error: 'value must be on|off|inherit' });
+      job.notify = v === 'inherit' ? undefined : v;
+      a.jm._touch(job); a.jm._save();
+      return res.json({ success: true, notify: job.notify || 'inherit', preview: (() => { try { return a.jm.notifyPreview(job); } catch { return null; } })() });
     }
     else return res.status(400).json({ error: `unknown action "${act}"` });
     if (r.error) return res.status(400).json({ error: r.error });

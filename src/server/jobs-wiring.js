@@ -103,8 +103,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       else if (act === 'access') {
         for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
         job.access.lockedBy = req.body?.lock === false ? null : req.body?.lock === true ? 'user' : job.access.lockedBy;
+        if (['on', 'off', 'inherit'].includes(req.body?.notify)) job.notify = req.body.notify === 'inherit' ? undefined : req.body.notify; // per-job auto-notify override (2.344.2)
         jm._touch(job); jm._save();
-        return res.json({ success: true, access: job.access });
+        return res.json({ success: true, access: job.access, notify: job.notify || 'inherit' });
       }
       else return res.status(400).json({ error: `unknown action "${act}"` });
       if (r.error) return res.status(400).json({ error: r.error });
