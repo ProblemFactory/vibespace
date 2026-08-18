@@ -1,0 +1,16 @@
+#!/usr/bin/env node
+// vibespace-docs — full manuals for every VibeSpace agent tool, served by the
+// running server (always version-matched). STATIC tracked; ships with the
+// other agent tools. No topic = the index.
+'use strict';
+const API = process.env.VIBESPACE_API;
+const TOK = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
+if (!API || !TOK) { console.error('vibespace-docs: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
+const topic = (process.argv[2] || 'index').replace(/^vibespace-/, '').replace(/^job$/, 'jobs');
+(async () => {
+  const res = await fetch(`${API}/api/agent/docs/${encodeURIComponent(topic)}`, { headers: { Authorization: 'Bearer ' + TOK } }).catch((e) => ({ _neterr: e.message }));
+  if (res._neterr) { console.error('vibespace-docs: server unreachable (' + res._neterr + ')'); process.exit(3); }
+  let j = {}; try { j = await res.json(); } catch { }
+  if (j.error) { console.error(j.error); process.exit(1); }
+  console.log(j.text || 'manual unavailable');
+})();

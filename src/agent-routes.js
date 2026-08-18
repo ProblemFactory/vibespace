@@ -233,7 +233,7 @@ function sessionToolsIntro(T) {
       'Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get it back later BY POLLING, even from a future session:',
       '  vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"',
       '  vibespace-job poll <id>    (echoes your --context brief with the result — write one that explains everything to your future amnesiac self)',
-      'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Your conversation is auto-messaged when a job finishes/fails/asks (create output says so); inside a job, `vibespace-job announce "found X"` notifies NOW (watch jobs: exit code ≠ newsworthiness); `subscribe <id> [--filter regex]` = get another visible job\'s messages; `list --mine|--subscribed` and `show <id>` re-inspect everything you registered. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. FULL manual anytime: `vibespace-job docs`.');
+      'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Your conversation is auto-messaged when a job finishes/fails/asks (create output says so); inside a job, `vibespace-job announce "found X"` notifies NOW (watch jobs: exit code ≠ newsworthiness); `subscribe <id> [--filter regex]` = get another visible job\'s messages; `list --mine|--subscribed` and `show <id>` re-inspect everything you registered. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. FULL manual anytime: `vibespace-job docs`; every tool: `vibespace-docs [status|ask|task|jobs]`.');
   }
   L.push(
     'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
@@ -551,6 +551,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
       if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
+      segs.push('vibespace-docs [status|ask|task|jobs] — the full manual for any of these tools');
       const std = perTurnReminderEnabled() && segs.length
         ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
         : '';
@@ -914,16 +915,28 @@ function findVisible(jm, caller, ref) {
   const vis = caller ? jobModel.visibleJobs(all, caller) : [];
   return vis.find((j) => j.id === ref) || vis.find((j) => j.name === ref) || null;
 }
-app.get('/api/agent/jobs-docs', (req, res) => {
-  // the FULL Background Work manual, read on demand (owner design: budgeted
-  // teaching carries one pointer line; the doc is served from THIS server's
-  // checkout so it always matches the running version). Works even when the
-  // engine is down — docs must not depend on jm.ready.
-  const hit = agentSession(req, res); if (!hit) return;
-  if (!toolOn('Jobs')) return res.status(403).json({ error: 'the vibespace-job tool is disabled in Settings → Integration' });
-  try { res.json({ success: true, text: require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'agent', 'background-work-manual.md'), 'utf-8') }); }
+// FULL manuals for every agent CLI, read on demand (owner design: budgeted
+// teaching carries one pointer line; docs are served from THIS server's
+// checkout so they always match the running version). Reading docs never
+// depends on subsystem readiness or tool toggles — a manual is harmless.
+const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md' };
+const serveAgentDoc = (req, res, topic) => {
+  // jbt_ (in-job) tokens may read docs too — a watch job's script legitimately
+  // wants the manual; job tokens never pass agentSession, so check them first
+  const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (bearer.startsWith('jbt_')) {
+    const jm = getJobs && getJobs();
+    if (!jm || !jm.jobByToken || !jm.jobByToken(bearer)) return res.status(401).json({ error: 'unknown job token' });
+  } else {
+    const hit = agentSession(req, res); if (!hit) return;
+  }
+  const file = AGENT_DOC_TOPICS[topic];
+  if (!file) return res.status(404).json({ error: `no manual "${topic}" — topics: ${Object.keys(AGENT_DOC_TOPICS).join(' / ')}` });
+  try { res.json({ success: true, text: require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'agent', file), 'utf-8') }); }
   catch (e) { res.status(500).json({ error: 'manual unavailable: ' + e.message }); }
-});
+};
+app.get('/api/agent/docs/:topic', (req, res) => serveAgentDoc(req, res, req.params.topic));
+app.get('/api/agent/jobs-docs', (req, res) => serveAgentDoc(req, res, 'jobs')); // 2.350.0 alias
 app.post('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
