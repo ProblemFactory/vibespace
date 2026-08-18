@@ -233,7 +233,7 @@ function sessionToolsIntro(T) {
       'Background work that must OUTLIVE this conversation (a dev server, a monitor, a batch job, a schedule) — never nohup/systemd/harness-cron. Register it with `vibespace-job` and get it back later BY POLLING, even from a future session:',
       '  vibespace-job run "python3 collect.py" --name collect-x --context "goal: 500 prompts; output: /data/x.jsonl; resume: rerun with --resume"',
       '  vibespace-job poll <id>    (echoes your --context brief with the result — write one that explains everything to your future amnesiac self)',
-      'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. Run `vibespace-job` with no arguments for everything else (stop/logs/ask/answers).');
+      'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Your conversation is auto-messaged when a job finishes/fails/asks (create output says so); inside a job, `vibespace-job announce "found X"` notifies NOW (watch jobs: exit code ≠ newsworthiness); `subscribe <id> [--filter regex]` = get another visible job\'s messages; `list --mine|--subscribed` and `show <id>` re-inspect everything you registered. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. Run `vibespace-job` with no arguments for everything else.');
   }
   L.push(
     'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
@@ -550,7 +550,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       if (toolFlags.status) segs.push('vibespace-status <state> — keep your board state honest');
       if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
-      if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (poll later, even from a future session)');
+      if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce — no args for usage)');
       const std = perTurnReminderEnabled() && segs.length
         ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
         : '';
@@ -945,8 +945,18 @@ app.post('/api/agent/jobs', (req, res) => {
 });
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
-  const list = a.selfJob ? [a.selfJob] : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
-  res.json({ success: true, jobs: list.map((j) => a.jm.snapshot(j)) });
+  let list = a.selfJob ? [a.selfJob] : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
+  // ?mine=1 → owned by this conversation · ?subscribed=1 → this conversation subscribed
+  if (!a.selfJob && req.query.mine) list = list.filter((j) => jobModel.isOwner(j, a.caller));
+  if (!a.selfJob && req.query.subscribed) list = list.filter((j) => (j.subscribers || []).some((s) => s.conversationId === a.caller.conversationId));
+  res.json({
+    success: true,
+    jobs: list.map((j) => ({
+      ...a.jm.snapshot(j),
+      mine: a.selfJob ? true : jobModel.isOwner(j, a.caller),
+      mySubscription: a.selfJob ? null : (j.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
+    })),
+  });
 });
 app.get('/api/agent/jobs/:ref', async (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -963,7 +973,14 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   if (wait && !jobModel.isTerminal(job) && !(req.query.answers && (job.interaction.answers || []).length)) {
     await a.jm.waitFor(req.query.answers ? a.jm.ansWaiters : a.jm.waiters, job.id, wait);
   }
-  res.json({ success: true, job: a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400) }) });
+  res.json({
+    success: true,
+    job: {
+      ...a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400) }),
+      mine: a.selfJob ? true : jobModel.isOwner(job, a.caller),
+      mySubscription: a.selfJob ? null : (job.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
+    },
+  });
 });
 app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
@@ -990,7 +1007,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
       a.jm._touch(job); a.jm._save(); r = { ok: true };
       return res.json({ success: true, access: job.access });
     }
-    else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller);   // canView already proven by findVisible
+    else if (act === 'subscribe') r = a.jm.subscribe(job, a.caller, { filter: req.body?.filter });   // canView already proven by findVisible
     else if (act === 'unsubscribe') r = a.jm.unsubscribe(job, a.caller);
     else if (act === 'announce') r = a.jm.announce(job, req.body?.text); // in-job (jbt_) or any viewer — the watch-job "found something" verb
     else if (act === 'notify') {

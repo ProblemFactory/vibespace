@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.347.0
+
+- **Subscription filters (owner request):** `vibespace-job subscribe <id> --filter "SpaceX|Starship"` — a case-insensitive regex over the notification text; only matching messages reach that subscriber (one agent watches a news feed, another subscribes to just its SpaceX items). Re-subscribing updates your own filter in place; invalid regexes are refused at subscribe time and a filter that errors at match time matches nothing (fail-closed). Panel-pattern acceptance rules (≤200 chars, must compile).
+- **Full self-inspection (owner request):** `vibespace-job show <id>` prints the complete registration — argv/cwd/env names, schedule + next fire, restart/timeout/until/notify-ok, access + lock, notify state + last delivery, subscriber count + YOUR subscription and filter, context brief, last run. `vibespace-job list --mine` (owned by this conversation) / `--subscribed` (your subscriptions), with ★mine / ✓sub markers; agent snapshots now carry the full creation parameters (env values still never leave the store).
+- **All three teaching surfaces updated together** (baseline intro / grouped intro / per-turn reminder — the 2.342.2 twin-set law): agents now learn announce, subscribe --filter, notify-on-completion, and the show/list self-inspection verbs at first contact.
+- Gates: engine 46 (filter store/update/refuse, non-matching skipped, case-insensitive match delivered).
+
+
 ## 2.346.0
 
 - **Quiet-success becomes the creating agent's choice, not a law (owner decision):** `vibespace-job run ... --notify-ok` opts a scheduled job's SUCCESSFUL runs into events + owner/subscriber notifications (default stays silent — the 18-card-flood lesson holds as a default, no longer as a rule).

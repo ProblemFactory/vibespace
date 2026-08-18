@@ -185,6 +185,28 @@ try {
   const sp = C.spillNotifs('conv-T', [{ jobId: 'jb-x', jobName: 'n', text: 'done', ts: Date.now() }]);
   ok(sp && fs.readFileSync(sp, 'utf-8').includes('jb-x'), 'spill file written with the full history');
 
+  // 7h. 2.347.0: subscription regex filters
+  const filtNotifs = [];
+  C._notifyRate.clear();
+  C.d.deliverToConversation = async (cid, text) => { filtNotifs.push(cid); return { ok: true, lane: 'message' }; };
+  const rf1 = C.create({ kind: 'task', name: 'news-src', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller);
+  const jf1 = C.jobs.get(rf1.job.id);
+  const spaceSub = { conversationId: 'conv-SPACEX', sessionId: 's2', sessionCreatedAt: 4, groups: new Set(['T-g']) };
+  const sres = C.subscribe(jf1, spaceSub, { filter: 'SpaceX|Starship' });
+  ok(sres.ok && sres.filter === 'SpaceX|Starship', 'subscribe stores the filter');
+  ok(C.subscribe(jf1, spaceSub, { filter: 'onlyThis' }).updated, 're-subscribe UPDATES the filter in place');
+  C.subscribe(jf1, spaceSub, { filter: 'SpaceX' });
+  ok(!C.subscribe(jf1, spaceSub, { filter: '(' }).ok, 'invalid regex refused');
+  C._notifyRate.clear(); filtNotifs.length = 0;
+  C.announce(jf1, '普通新闻: 今天天气不错');
+  await sleep(400);
+  ok(filtNotifs.includes('conv-T') && !filtNotifs.includes('conv-SPACEX'), 'non-matching announce reaches owner but NOT the filtered subscriber', JSON.stringify(filtNotifs));
+  C._notifyRate.clear(); filtNotifs.length = 0;
+  C.announce(jf1, 'BREAKING: spacex Starship 第七次试飞成功');
+  await sleep(400);
+  ok(filtNotifs.includes('conv-SPACEX'), 'matching announce (case-insensitive) reaches the filtered subscriber', JSON.stringify(filtNotifs));
+  C.stop(jf1, { force: true });
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');
