@@ -90,6 +90,18 @@ try {
   events.length = 0;
   await pf._watchSweep();
   check('unchanged sweep stays silent', !events.some((e) => e.type === 'machine-ports-new'), JSON.stringify(events));
+  // CHURN regression (owner report: the reverse-tunnel port re-toasted as
+  // "new" on every reappearance): a port that DISAPPEARS and comes back is
+  // NOT news — the seen-set accumulates, it never resets to the snapshot
+  const churnAdd = mockDm.runCmd;
+  mockDm.runCmd = async () => ({ code: 0, stdout:
+    'LISTEN 0 511 127.0.0.1:5173 0.0.0.0:* users:(("node",pid=42,fd=20))\n'
+    + 'LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=1,fd=3))\n', stderr: '' });
+  await pf._watchSweep(); // 3000/8080 vanish
+  mockDm.runCmd = churnAdd;
+  events.length = 0;
+  await pf._watchSweep(); // …and reappear
+  check('reappearing port does NOT re-announce (seen-set accumulates)', !events.some((e) => e.type === 'machine-ports-new'), JSON.stringify(events));
   mockDm.runCmd = runCmd0; // the detect tests below drive ssMode themselves
   ssMode = 'ss';
 

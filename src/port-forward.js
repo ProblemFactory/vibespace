@@ -29,6 +29,10 @@ const PORT_SCAN = `command -v ss >/dev/null 2>&1 && { ss -tlnpH 2>/dev/null || s
 // (root's docker-proxy) scans nameless (owner report: AIDev rows had zero
 // detail). docker's own port table recovers the container name without root.
 const DOCKER_PORTS = `command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null || true`;
+// last-resort OWNER labeling: /proc/net/tcp's uid column names who owns a
+// listener even when the process is invisible to us (root services, other
+// users) — "root"/"postgres" is honest detail where a name is impossible
+const UID_PORTS = `cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; echo ---PASSWD---; cat /etc/passwd 2>/dev/null`;
 // local-watch noise: our own infrastructure listeners must not toast
 const LOCAL_IGNORE_PROCS = new Set(['frpc', 'frps', 'tailscaled', 'sshd', 'rclone', 'Xtigervnc', 'Xvfb']);
 // Known NON-web system listeners (vscode-style): still returned by detect(),
@@ -149,12 +153,19 @@ class PortForwardManager {
       let ports;
       try { ports = await this.detect(h.id); } catch { continue; } // offline / no link — keep the old baseline
       const interesting = ports.filter((p) => p.port > 0 && p.port <= 32767);
-      const cur = new Set(interesting.map((p) => p.port));
+      // ACCUMULATE seen ports — never reset to the current snapshot (owner
+      // report: our own reverse-tunnel port churns per session lifecycle, so
+      // replacing the set made the SAME port toast as "new" on every
+      // reappearance). A port is news exactly once per server lifetime.
       const prev = this._seenPorts.get(h.id);
-      this._seenPorts.set(h.id, cur);
-      if (!prev) continue; // baseline sweep — silent
+      const seen = prev || new Set();
+      if (seen.size > 4000) seen.clear(); // bounded; a clear = one silent re-baseline
       const fwd = new Set(this._state.forwards.filter((r) => r.hostId === h.id).map((r) => r.remotePort));
-      let fresh = interesting.filter((p) => !prev.has(p.port) && !fwd.has(p.port) && !p.hidden);
+      // compute novelty BEFORE recording (seen === prev by reference)
+      let fresh = prev ? interesting.filter((p) => !seen.has(p.port) && !fwd.has(p.port) && !p.hidden) : [];
+      for (const p of interesting) seen.add(p.port);
+      this._seenPorts.set(h.id, seen);
+      if (!prev) continue; // baseline sweep — silent
       // local: our own infrastructure (frpc admin, tailscale, VNC, …) must
       // not toast when a plugin starts after the baseline
       if (h.id === LOCAL_ID) fresh = fresh.filter((p) => !LOCAL_IGNORE_PROCS.has(p.proc) && p.port !== 7400);
@@ -277,7 +288,7 @@ class PortForwardManager {
   async _enrichDocker(ports, run) {
     if (!ports.some((p) => !p.proc && !p.hidden)) return;
     let out = '';
-    try { out = await run(DOCKER_PORTS); } catch { return; }
+    try { out = await run(DOCKER_PORTS); } catch { out = ''; } // no docker ≠ no uid rung below
     const map = new Map(); // host port → container name
     for (const line of String(out).split('\n')) {
       const [name, portsStr] = line.split('\t');
@@ -285,6 +296,28 @@ class PortForwardManager {
       for (const m of portsStr.matchAll(/(?:[\d.]+|\[[^\]]*\]):(\d+)->/g)) { const pt = Number(m[1]); if (!map.has(pt)) map.set(pt, name.trim()); }
     }
     if (map.size) for (const p of ports) if (!p.proc && map.has(p.port)) p.proc = 'docker:' + map.get(p.port);
+    // second rung: owner uid → user name for whatever is STILL anonymous
+    if (!ports.some((pt) => !pt.proc && !pt.hidden)) return;
+    let uidOut = '';
+    try { uidOut = await run(UID_PORTS); } catch { return; }
+    const [tcpPart, passwdPart] = String(uidOut).split('---PASSWD---');
+    const uidByPort = new Map();
+    for (const line of String(tcpPart || '').split('\n')) {
+      const cols = line.trim().split(/\s+/);
+      if (cols.length < 8 || cols[3] !== '0A') continue; // 0A = LISTEN
+      const port = parseInt(String(cols[1]).split(':').pop(), 16);
+      if (port && !uidByPort.has(port)) uidByPort.set(port, cols[7]);
+    }
+    const nameByUid = new Map();
+    for (const line of String(passwdPart || '').split('\n')) {
+      const [name, , uid] = line.split(':');
+      if (name && uid !== undefined) nameByUid.set(uid, name);
+    }
+    for (const p of ports) {
+      if (p.proc || !uidByPort.has(p.port)) continue;
+      const uid = uidByPort.get(p.port);
+      p.proc = 'user:' + (nameByUid.get(uid) || uid); // owner, not a process name — the best truth available
+    }
   }
 
   /** Flag known non-web system listeners (UI folds them; watch skips them). */
