@@ -75,10 +75,24 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
 
   const USER = { isUser: true, groups: new Set() };
 
+  // A service published EXTERNALLY (user hit publish on its port in the Ports
+  // panel instead of creating with --publish) still shows the URL on its job
+  // card (owner report 2.351.1: demo-ui's manual publish was invisible here).
+  // Read-only enrichment of the serialized copy — job records are not touched.
+  const enrichPublished = (snap, job) => {
+    if (snap.publishedUrl || !job.ports || !job.ports.length) return snap;
+    try {
+      const fwds = (jm.d.getPorts && jm.d.getPorts().list && jm.d.getPorts().list()) || [];
+      const hit = fwds.find((f) => f.hostId === '__local__' && f.publicUrl && job.ports.some((pt) => Number(pt) === Number(f.remotePort)));
+      if (hit) return { ...snap, publishedUrl: hit.publicUrl, publishedExternally: true };
+    } catch { }
+    return snap;
+  };
+
   // ── user REST (cookie-authed): the panel sees and controls everything ──
   app.get('/api/jobs', (req, res) => {
     if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
-    res.json({ jobs: [...jm.jobs.values()].map((j) => ({ ...jm.snapshot(j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], runs: (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger })) })) });
+    res.json({ jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], runs: (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger })) })) });
   });
   // user-side create (the panel's ＋New — no vsst_ token in the browser)
   app.post('/api/jobs', (req, res) => {
@@ -92,7 +106,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   app.get('/api/jobs/:id', (req, res) => {
     const job = jm.jobs.get(req.params.id);
     if (!job) return res.status(404).json({ error: 'no such job' });
-    res.json({ job: { ...jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 1000) }), access: job.access, interaction: job.interaction, runs: job.runs } });
+    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 1000) }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
   });
   app.post('/api/jobs/:id/:act', (req, res) => {
     const job = jm.jobs.get(req.params.id);

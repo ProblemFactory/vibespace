@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.351.1
+
+- **Job cards show externally-published URLs (owner report: demo-ui's Ports-panel publish was invisible on its card)** — a service whose declared port was forwarded+published manually (instead of `--publish` at creation) now gets the same ↗ URL chip: the user REST responses enrich the serialized snapshot with the matching local forward's publicUrl (`publishedExternally: true`; job records untouched, ports⇄jobs remains registration-first).
+
+
 ## 2.351.0
 
 - **`vibespace-docs [status|ask|task|jobs]` — full manuals for EVERY agent tool + a global index (owner request).** New static CLI (ships to remote hosts with the tool roster); no topic = the index (which tool when, shared rules). Manuals live in docs/agent/*-manual.md, served by the running server (`GET /api/agent/docs/:topic`, vsst_ AND jbt_ accepted — a job's script may read them too; reading docs never depends on tool toggles or engine readiness). Teaching surfaces carry one pointer line each; `vibespace-job docs` remains as an alias.
