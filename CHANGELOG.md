@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.356.0
+
+- **Process manager UX batch (owner reports):** ① a real **PID column** (dim, right-aligned — PID sort existed with no PID visible); ② an **auto-refresh pause toggle** in the Processes header (⏸/▶ — a row you're reading can no longer be refreshed out from under you; sort/filter/expand keep working on the frozen snapshot, a host switch or kill outcome still refreshes, the count label turns amber while paused); ③ **history charts moved above the process table** (the long table pushed them out of sight); ④ the **memory chart auto-scales to the data** (peak ×1.2, capped at the limit) instead of pinning the axis at the machine total — 20G of use on a 122G machine used to draw as a flat line at the bottom; the "cur / limit" label keeps the absolute context. CDP asserts for all four in test-sidebar-rail; screenshot-verified.
+
 ## 2.355.1
 
 - **Process manager: the poll's own `ps` no longer tops the CPU sort at "200%"** (owner report) — ps lists itself, computes %CPU over its own ~10ms lifetime (20ms of CPU across threads = 200%), and gets a fresh pid every poll so the live-delta correction never applied. The shared parser now drops rows carrying our exact probe column string (covers the remote rung's `sh -c` wrapper too; a user's own `ps aux` still shows). Pinned in test-sysinfo-op (28).

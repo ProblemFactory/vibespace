@@ -3153,8 +3153,14 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .sys-range-chip { cursor: pointer; padding: 0 5px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); font-size: 9px; }
 .sys-range-chip.on { border-color: var(--accent); color: var(--accent); }
 /* Process manager (2.354.0, btop-like): controls + table + expandable rows */
-.prc-head { display: flex; justify-content: space-between; align-items: baseline; }
+.prc-head { display: flex; justify-content: space-between; align-items: center; }
+.prc-head-right { display: inline-flex; align-items: center; gap: 6px; }
 .prc-count { color: var(--text-dim); font-size: 9px; text-transform: none; letter-spacing: 0; }
+.prc-count-paused { color: var(--yellow, #e5c07b); }
+.prc-pause { padding: 1px 4px; }
+.prc-pause.on { color: var(--yellow, #e5c07b); }
+.prc-pause svg { width: 13px; height: 13px; vertical-align: -2px; }
+.prc-pid { flex: 0 0 36px; text-align: right; color: var(--text-dim); font-size: 9px; font-variant-numeric: tabular-nums; }
 .prc-ctl { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
 .prc-search { width: 100%; box-sizing: border-box; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px; padding: 3px 6px; }
 .prc-sorts { float: none; display: flex; flex-wrap: wrap; }
