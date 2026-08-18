@@ -482,6 +482,7 @@ export function installSidebarRail(Sidebar) {
     async _renderPortsPanel(c) {
       c.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
       const api = (u, opts) => fetchJson(u, opts);
+      this._portScanCache = this._portScanCache || new Map(); // hostId → last scan results (survives re-renders + panel reopen)
       let hosts = [];
       try { hosts = ((await api('/api/hosts')) || {}).hosts || []; } catch { }
       // publish needs the frp relay — without it the button must SAY so, not no-op
@@ -572,13 +573,12 @@ export function installSidebarRail(Sidebar) {
           scan.disabled = !m.online;
           if (!m.online) scan.dataset.tip = tr('Machine is offline');
           const list = document.createElement('div');
-          scan.onclick = async () => {
-            scan.disabled = true; scan.textContent = tr('Scanning…');
-            try {
-              const r = await api(`/api/hosts/${encodeURIComponent(m.id)}/ports`);
-              if (r?.error) throw new Error(r.error);
+          // scan results are CACHED per machine (owner report: every
+          // broadcast-driven re-render — e.g. the watch announcing a new
+          // port — wiped the freshly scanned list back to blank). A rebuild
+          // replays the cache with fresh forward state; Scan re-probes.
+          const renderList = (all) => {
               list.innerHTML = '';
-              const all = r?.ports || [];
               // vscode-style: known non-web system listeners (sshd, dns, cups…)
               // fold behind an expander instead of burying the dev servers
               const vis = all.filter((p) => !p.hidden).slice(0, 40);
@@ -625,9 +625,18 @@ export function installSidebarRail(Sidebar) {
                 list.appendChild(ex);
               }
               if (!all.length) list.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('No listening ports found'))}</div>`;
+          };
+          scan.onclick = async () => {
+            scan.disabled = true; scan.textContent = tr('Scanning…');
+            try {
+              const r = await api(`/api/hosts/${encodeURIComponent(m.id)}/ports`);
+              if (r?.error) throw new Error(r.error);
+              this._portScanCache.set(m.id, r?.ports || []);
+              renderList(r?.ports || []);
             } catch (e) { list.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(e.message || 'scan failed')}</div>`; }
             scan.disabled = false; scan.textContent = tr('Scan ports');
           };
+          if (this._portScanCache.has(m.id)) renderList(this._portScanCache.get(m.id));
           head.appendChild(scan);
           // manual forward: a bare port (a service on this machine) OR ip:port
           // to reach ANOTHER machine on this machine's LAN (jump host)
@@ -659,6 +668,12 @@ export function installSidebarRail(Sidebar) {
       // handler self-disarms once the panel leaves the DOM
       this.app.ws.onGlobal((msg) => {
         if (!c.isConnected) return;
+        if (msg.type === 'machine-ports-new' && Array.isArray(msg.ports) && this._portScanCache.has(msg.hostId)) {
+          // merge the announced ports into the cached scan so the replayed
+          // list actually SHOWS what the toast talked about
+          const cached = this._portScanCache.get(msg.hostId);
+          for (const p of msg.ports) if (!cached.some((q) => q.port === p.port)) cached.push(p);
+        }
         if (msg.type === 'port-forwards-updated' || msg.type === 'machine-ports-new') render();
       });
     },

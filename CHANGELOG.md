@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.353.0
+
+- **Port scans: owner-uid labeling for the still-anonymous rows (owner report: 3000/5302/5432 had no detail):** `ss -p` + docker's port table still leave root/other-user listeners nameless. A second enrichment rung reads `/proc/net/tcp{,6}`'s uid column + `/etc/passwd` and labels what's left `user:<name>` (`user:root`, `user:postgres`) — the owner is the best truth available when the process is invisible to us. Same ONE implementation for local and remote scans; docker-rung failure no longer skips it.
+- **Scan results survive panel re-renders (owner report: every "new port" toast wiped the list back to blank):** scan results were DOM-only, and any `port-forwards-updated`/`machine-ports-new` broadcast rebuilt the panel. Results now cache per machine (`_portScanCache`) and replay on rebuild with FRESH forward state (forward/publish chips update live); a `machine-ports-new` announcement merges its ports into the cached list, so the panel actually shows what the toast talked about.
+- **The repeating "new port 23179" toast rootfixed:** the watch REPLACED its seen-set with each sweep's snapshot, so a port that disappears and comes back (our own reverse-tunnel port churns per session lifecycle) re-toasted as "new" forever. The seen-set now accumulates — a port is news exactly once; regression-pinned in test-port-forward.mjs (churn scenario).
+- **B-e342 closed as NOT-a-leak (forensics):** the "3 daemons" on the remote host = 1 detached listener (ppid 1, stdin /dev/null) + 2 per-connection `--stdio` bridges whose parents are live `sshd` sessions — by design, they die with their connections. Tonight's churn was each release's version-mismatch self-upgrade, also by design. (The refuted "beginUpgrade LOCK-window leak" hypothesis is archived in the backlog item.)
+
 ## 2.352.0
 
 - **Docker container names on port scans (owner report: AIDev rows had zero detail):** `ss -p` only names sockets your user owns — on a docker host every published container port (root's docker-proxy) scanned anonymous. The scan now consults docker's own port table (`docker ps --format`, no root needed) and names still-anonymous rows `docker:<container>`. ONE implementation enriches local and remote scans alike (CS twin law); verified live against the reporting host's real container fleet.
