@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.351.0
+
+- **`vibespace-docs [status|ask|task|jobs]` — full manuals for EVERY agent tool + a global index (owner request).** New static CLI (ships to remote hosts with the tool roster); no topic = the index (which tool when, shared rules). Manuals live in docs/agent/*-manual.md, served by the running server (`GET /api/agent/docs/:topic`, vsst_ AND jbt_ accepted — a job's script may read them too; reading docs never depends on tool toggles or engine readiness). Teaching surfaces carry one pointer line each; `vibespace-job docs` remains as an alias.
+
+
 ## 2.350.0
 
 - **`vibespace-job docs` — the full Background Work manual, read on demand (owner design call):** budgeted context teaching now carries ONE pointer line; the complete manual (kinds, notify audiences + toggles, announce, subscription filters, panels, web-UI event-flow pattern with the publish/injection caution, permissions, in-job env, negative space) lives in docs/agent/background-work-manual.md and is served by YOUR server (`GET /api/agent/jobs-docs`), so it always matches the running version. All three teaching surfaces point at it.

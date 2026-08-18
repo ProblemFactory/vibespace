@@ -346,7 +346,7 @@ class TaskGroupManager {
     const n = [T.task, T.status, T.ask, T.jobs].filter(Boolean).length;
     if (!n) return [];
     const g = gid || '';
-    const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage)`, '',
+    const out = ['', `### Reporting back — ${n > 1 ? n + ' CLIs' : 'one CLI'} on your PATH (run ${n > 1 ? 'any' : 'it'} with no args for full usage; \`vibespace-docs\` = the full manual for every tool)`, '',
       multi
         ? (T.task
           ? `You belong to MORE THAN ONE Task Group; pass \`--group <id>\` to \`vibespace-task\` (each block below names its id).${(T.status || T.ask) ? ` \`${[T.status && 'vibespace-status', T.ask && 'vibespace-ask'].filter(Boolean).join('`/`')}\` always mean${T.status && T.ask ? '' : 's'} THIS session.` : ''}`
