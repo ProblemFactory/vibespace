@@ -25,6 +25,10 @@ const LOCAL_ID = '__local__'; // machine #0 — this instance itself
 // -p adds process names (own-user processes always visible; drop it if the ss
 // build errors). macOS/BSD: lsof (its first column IS the command name).
 const PORT_SCAN = `command -v ss >/dev/null 2>&1 && { ss -tlnpH 2>/dev/null || ss -tlnH 2>/dev/null; } || lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null`;
+// ss -p only names SOCKETS YOU OWN — on a docker box every container port
+// (root's docker-proxy) scans nameless (owner report: AIDev rows had zero
+// detail). docker's own port table recovers the container name without root.
+const DOCKER_PORTS = `command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null || true`;
 // local-watch noise: our own infrastructure listeners must not toast
 const LOCAL_IGNORE_PROCS = new Set(['frpc', 'frps', 'tailscaled', 'sshd', 'rclone', 'Xtigervnc', 'Xvfb']);
 // Known NON-web system listeners (vscode-style): still returned by detect(),
@@ -239,6 +243,8 @@ class PortForwardManager {
           for (const row of ports) if (owned.has(row.port)) row.service = owned.get(row.port);
         }
       } catch { }
+      const { execFile } = require('child_process');
+      await this._enrichDocker(ports, (cmd) => new Promise((resolve) => execFile('sh', ['-c', cmd], { timeout: 6000, maxBuffer: 1024 * 1024 }, (e, so) => resolve(String(so || '')))));
     }
     else {
       const dm = await this.hosts.deviceBounded(hostId);
@@ -247,6 +253,7 @@ class PortForwardManager {
       let out = '';
       try { out = String((await dm.runCmd('sh', ['-c', PORT_SCAN], { timeoutMs: 8000 })).stdout || ''); } catch (e) { throw new Error('port scan failed: ' + e.message); }
       ports = this._parsePorts(out).map((p) => this._classify(p));
+      await this._enrichDocker(ports, async (cmd) => String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 6000 })).stdout || ''));
     }
     if (probe) {
       // cache serves every row; the probe budget goes to UNCACHED ports only,
@@ -262,6 +269,22 @@ class PortForwardManager {
       await Promise.race([Promise.allSettled(jobs), new Promise((r) => setTimeout(r, 3500))]);
     }
     return ports;
+  }
+
+  /** Name still-anonymous ports from docker's port table (ONE implementation
+   *  for local and remote — `run` executes on the right machine). ss -p can't
+   *  see other users' processes; docker-proxy listeners are root's. */
+  async _enrichDocker(ports, run) {
+    if (!ports.some((p) => !p.proc && !p.hidden)) return;
+    let out = '';
+    try { out = await run(DOCKER_PORTS); } catch { return; }
+    const map = new Map(); // host port → container name
+    for (const line of String(out).split('\n')) {
+      const [name, portsStr] = line.split('\t');
+      if (!name || !portsStr) continue;
+      for (const m of portsStr.matchAll(/(?:[\d.]+|\[[^\]]*\]):(\d+)->/g)) { const pt = Number(m[1]); if (!map.has(pt)) map.set(pt, name.trim()); }
+    }
+    if (map.size) for (const p of ports) if (!p.proc && map.has(p.port)) p.proc = 'docker:' + map.get(p.port);
   }
 
   /** Flag known non-web system listeners (UI folds them; watch skips them). */
