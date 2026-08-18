@@ -207,6 +207,19 @@ try {
   ok(filtNotifs.includes('conv-SPACEX'), 'matching announce (case-insensitive) reaches the filtered subscriber', JSON.stringify(filtNotifs));
   C.stop(jf1, { force: true });
 
+  // 7i. 2.350.0: answering a panel clears its inbox entry; rm clears everything
+  const resolved = [];
+  C.d.resolveJobAsk = (jobId, opts) => { resolved.push({ jobId, opts }); return 1; };
+  const rp1 = C.create({ kind: 'task', name: 'panel-clear', cmd: { argv: ['sh', '-c', 'sleep 30'] }, owner }, caller);
+  const jp1 = C.jobs.get(rp1.job.id);
+  C.ask(jp1, { title: 't', blocks: [{ type: 'md', text: 'x' }, { type: 'buttons', options: [{ id: 's', label: 'ok' }] }] });
+  C.answerPanel(jp1, { button: 's' });
+  ok(resolved.some((r) => r.jobId === jp1.id), 'answerPanel resolves the needs-your-input inbox entry');
+  C.stop(jp1, { force: true });
+  const settled = await until(() => ['interrupted', 'failed'].includes(jp1.state));
+  const rmr = C.rm(jp1, {});
+  ok(resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false), 'rm clears ALL of the job inbox items', `settled=${settled} state=${jp1.state} rm=${JSON.stringify(rmr)} resolved=${JSON.stringify(resolved)}`);
+
   // 8. store hygiene: raw token never persisted
   C._save();
   ok(!fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8').includes('jbt_'), 'raw job tokens are never written to the store');

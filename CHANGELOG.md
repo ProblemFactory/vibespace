@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.350.0
+
+- **`vibespace-job docs` — the full Background Work manual, read on demand (owner design call):** budgeted context teaching now carries ONE pointer line; the complete manual (kinds, notify audiences + toggles, announce, subscription filters, panels, web-UI event-flow pattern with the publish/injection caution, permissions, in-job env, negative space) lives in docs/agent/background-work-manual.md and is served by YOUR server (`GET /api/agent/jobs-docs`), so it always matches the running version. All three teaching surfaces point at it.
+- **Inbox: Background Work is its own section** (owner report: it read as a phantom session mixed into the session groups) — distinct header with an icon, always after session groups, no fake session affordance.
+- **Answering an interaction panel now clears its inbox entry** (owner report: "提交过了怎么不从inbox里消失") — answerPanel/panel-expiry auto-resolve the needs-your-input item; removing a job clears ALL its inbox items.
+- **Real engine edge caught by the new gate pin:** a `stop` racing the wrapper's first act (no pid stamp yet ⇒ kill-by-handle had nothing to kill) silently no-opped — the task kept running with `_stopRequested` never honored. The sweep now delivers the pending kill once the stamp appears.
+- Peer-message card uses a third color (`--magenta`, accent fallback) for its bar — visually distinct from assistant/notification bars (owner request).
+- **Forwarded-chip fix actually fixed:** the 2.349.0 scan-row match read `f.port` but forward records carry `remotePort` — the chip never rendered (fourth fixture-shape instance; now verified against the live data/port-forwards.json).
+
+
 ## 2.349.0
 
 - **Peer messages are now VISIBLE in the chat (owner report: "announce了但对话框里什么都看不到, 都不知道agent收到了什么")** — a cross-session delivery (Background-Work notify, another session's SendMessage) arrives as a user record with `origin.kind='peer'` + isMeta, which fell into the invisible-meta render path: the woken turn appeared to start from nothing. Forensically pinned from this conversation's own JSONL (`origin:{kind:'peer',from,verifiedPeerPid}`), same provenance law as task-notification (2.229.2: origin.kind is authoritative). Peer messages now render as a distinct accent-bordered card — "Message from another session" (sender-named when attributed), harness boilerplate trimmed, core text prominent.
