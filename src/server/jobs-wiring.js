@@ -14,8 +14,11 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   const jm = new JobManager({
     dataDir,
     broadcast: (type, payload) => broadcastAll({ type, ...payload }),
-    notifyUser: ({ text, urgency, jobId }) => {
-      try { userTodos.add('jobs', { text, detail: jobId ? `Background job ${jobId} — open the Background Work window` : '', urgency: urgency || 'normal', by: 'agent', sessionName: 'Background Work' }); } catch (e) { log('[jobs] notify failed:', e.message); }
+    notifyUser: ({ text, urgency, jobId, jobName }) => {
+      // sessionName = the JOB's name (owner roast 2.348.1: 'Background Work'
+      // read like a phantom session); jobId lets the inbox row open the
+      // interaction panel DIRECTLY instead of dumping the user in the window
+      try { userTodos.add('jobs', { text, detail: jobId ? `Background job ${jobId}` : '', urgency: urgency || 'normal', by: 'agent', sessionName: jobName || 'background job', jobId }); } catch (e) { log('[jobs] notify failed:', e.message); }
     },
     log,
     // ── owner auto-notify lanes (2.344.0, B-0bf4) ─────────────────────────
