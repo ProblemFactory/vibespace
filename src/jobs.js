@@ -316,6 +316,9 @@ class JobManager {
     }
   }
   _event(job, what, verb) {
+    // Viewers see events PASSIVELY at their next injection only (owner call
+    // 2.348.0: acceptable because it never wakes anyone and the renderer
+    // coalesces per-job announce floods — see renderJobsUpdate).
     this.events.push({ ts: now(), jobId: job.id, name: job.name, what, verb });
     if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
   }

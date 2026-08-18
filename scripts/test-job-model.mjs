@@ -99,6 +99,16 @@ const st = M.renderNotifStash(stash);
 ok(B(st) <= 900 && st.includes('jb-0') && st.includes('jb-39') && st.includes('elided'), 'stash render ≤900B, endpoints survive, elision marked');
 ok(M.renderNotifStash([]) === '' && M.renderNotifStash(null) === '', 'empty stash ⇒ zero bytes');
 ok(M.renderNotifStash(stash, { budget: 120 }).includes('40 job notification') || M.renderNotifStash(stash, { budget: 120 }) === '', 'tiny budget falls to floor (or nothing)');
+// per-job announce coalescing: a flood from ONE job takes one line; lifecycle lines survive
+const flood = [
+  ...Array.from({ length: 20 }, (_, i) => ({ id: 'jb-noisy', name: 'news-watch', what: `announced: 新闻条目 ${i}`, verb: 'poll' })),
+  { id: 'jb-other', name: 'builder', what: 'failed exit=1 error (2m)' },
+  { id: 'jb-quiet', name: 'q', what: 'announced: 单条', verb: 'poll' },
+];
+const cu = M.renderJobsUpdate(flood);
+ok(cu.includes('announced ×20') && cu.includes('新闻条目 19') && cu.includes('jb-other') && cu.includes('failed'), 'announce flood coalesces to ×N+latest; lifecycle event survives the budget');
+ok(cu.split('\n').filter((l) => l.includes('jb-noisy')).length === 1, 'the noisy job occupies exactly ONE line');
+ok(cu.includes('单条') && !cu.includes('×1'), 'single announce renders plainly (no ×1 noise)');
 const spilled = M.renderNotifStash(stash, { spillPath: '/data/job-notifications-read/conv.md' });
 ok(spilled.includes('/data/job-notifications-read/conv.md'), 'truncated stash points at the untruncated spill file');
 ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-read/conv.md' }).includes('full history: /data'), 'floor form carries the spill path too');

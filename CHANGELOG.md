@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.348.0
+
+- **Announce-flood fairness in the passive injection (owner design call):** viewers keep seeing announces passively at their NEXT context injection only (never a wake), but the per-turn update block now coalesces each job's announces into ONE line (`announced ×N, latest: …`) — a chatty watch job can no longer crowd lifecycle events (done/failed/parked) out of the 600B budget. Single announces render plainly; directed message delivery (owner + filtered subscribers) is unchanged.
+
+
 ## 2.347.0
 
 - **Subscription filters (owner request):** `vibespace-job subscribe <id> --filter "SpaceX|Starship"` — a case-insensitive regex over the notification text; only matching messages reach that subscriber (one agent watches a news feed, another subscribes to just its SpaceX items). Re-subscribing updates your own filter in place; invalid regexes are refused at subscribe time and a filter that errors at match time matches nothing (fail-closed). Panel-pattern acceptance rules (≤200 chars, must compile).
