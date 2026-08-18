@@ -231,6 +231,13 @@ class ChatRenderers {
       || /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
       || /^A session-scoped Stop hook is now active/.test(rawText.trim())
       || /^Stop hook feedback:/.test(rawText.trim())));
+    if (msg.originKind === 'peer-message') {
+      // Cross-session peer message (2.349.0, owner report: an announce woke
+      // the agent but the chat showed NOTHING — "都不知道agent到底收到了什么").
+      // Distinct card: labeled, sender-attributed, core text prominent (the
+      // harness wrapper line + trailing guidance paragraph are trimmed).
+      return this._renderPeerMsg(msg, rawText);
+    }
     if (isNotification) {
       return this._renderNotificationMsg(rawText);
     }
@@ -249,6 +256,21 @@ class ChatRenderers {
       : parts;
 
     this.wrapMsg(el, 'user', t('You'), textHtml);
+    return el;
+  }
+
+  _renderPeerMsg(msg, rawText) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-system chat-peer-message';
+    el._rawMsg = msg;
+    // core = message body without the harness's wrapper line and trailing
+    // conduct paragraph (both are boilerplate around EVERY peer delivery)
+    let core = String(rawText || '');
+    core = core.replace(/^Another Claude session sent a message:\s*\n/, '');
+    const cut = core.indexOf('\nThis came from another Claude session');
+    if (cut > 0) core = core.slice(0, cut);
+    const from = msg.peerFrom ? t('Message from “{name}”', { name: msg.peerFrom }) : t('Message from another session');
+    el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>${escHtml(from)}</div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
     return el;
   }
 

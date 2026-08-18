@@ -2657,4 +2657,8 @@ export default {
   "skipped — auto-notify is off ({source})": "スキップ — 自動通知はオフ（{source}）",
   "suppressed by the rate floor": "レート下限により抑制",
   "tokens": "トークン",
+  "Message from “{name}”": "「{name}」からのメッセージ",
+  "Message from another session": "他のセッションからのメッセージ",
+  "published": "公開中",
+  "Managed under Active forwards above": "上の「アクティブな転送」で管理中",
 };

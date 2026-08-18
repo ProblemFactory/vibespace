@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.349.0
+
+- **Peer messages are now VISIBLE in the chat (owner report: "announce了但对话框里什么都看不到, 都不知道agent收到了什么")** — a cross-session delivery (Background-Work notify, another session's SendMessage) arrives as a user record with `origin.kind='peer'` + isMeta, which fell into the invisible-meta render path: the woken turn appeared to start from nothing. Forensically pinned from this conversation's own JSONL (`origin:{kind:'peer',from,verifiedPeerPid}`), same provenance law as task-notification (2.229.2: origin.kind is authoritative). Peer messages now render as a distinct accent-bordered card — "Message from another session" (sender-named when attributed), harness boilerplate trimmed, core text prominent.
+- **Scan rows now show the already-forwarded state (owner report: 8390 was in Active forwards but its scan row looked untouched)** — a scanned port with an active forward gets a `forwarded`/`published` chip (tooltip carries the public URL) and drops the redundant forward arrow; its controls stay on the Active forwards row above.
+
+
 ## 2.348.1
 
 - **Panel-answer field report (the demo's own feedback loop delivered it): two inbox UX defects fixed.** ① The For you entry for Background Work items displayed "Background Work" as if it were a session name — a phantom session. It now shows the JOB's name ("demo-ui needs your input"). ② Clicking the entry dumped you in the Background Work window to hunt for the card — it now opens the job's Interaction Panel DIRECTLY (todo items carry `jobId`; falls back to the window for items without one, and the panel window degrades to "nothing to answer" when already handled).
