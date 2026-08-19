@@ -2702,4 +2702,10 @@ export default {
   "Make this service public?": "把这个服务设为公开？",
   "Anyone with the link {url} will reach it WITHOUT logging in.": "任何拿到链接 {url} 的人都无需登录即可访问。",
   "Make public": "设为公开",
+  "Rescue transcript…": "抢救对话记录…",
+  "Rescue this conversation?": "抢救这个对话？",
+  "Scans the transcript for oversized broken records (giant image pastes etc.), replaces them with small stubs and keeps a full backup next to the file. Use when resume keeps dying or the history opens blank.": "扫描对话记录中的超大损坏记录（巨型图片粘贴等），原位替换为小型占位并在旁边保留完整备份。用于 resume 反复失败或历史打开空白的情况。",
+  "Rescue": "抢救",
+  "Nothing oversized found — this transcript looks healthy": "未发现超大记录——这份对话记录看起来是健康的",
+  "Rescued: {n} oversized record(s) stubbed, {mb}MB freed — backup kept next to the transcript": "抢救完成：{n} 条超大记录已置换，释放 {mb}MB——完整备份保留在记录文件旁",
 };
