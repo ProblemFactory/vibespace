@@ -42,7 +42,7 @@ FILE="\${@: -1}"
 SIGNAL="/tmp/claude-webui-edit-signal-\$\$"
 PORT="\${CLAUDE_WEBUI_PORT:-${port}}"
 SESS="\${CLAUDE_WEBUI_SESSION_ID}"
-curl -sf -X POST "http://localhost:\${port}/api/editor/open" \\
+curl -sf -X POST "http://localhost:\${PORT}/api/editor/open" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer \${VIBESPACE_SESSION_TOKEN}" \\
   -d "{\\"file\\":\\"\$FILE\\",\\"signal\\":\\"\$SIGNAL\\",\\"sessionId\\":\\"\$SESS\\"}" >/dev/null 2>&1 &

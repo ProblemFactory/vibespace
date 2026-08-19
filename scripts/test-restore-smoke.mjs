@@ -77,6 +77,26 @@ for (const r of ROUTES) {
     else console.log(`  ✓ GET ${r} → ${resp.status}`);
   } catch (e) { ok = false; console.error(`  ✗ GET ${r} threw — ${e.message}`); }
 }
+// ── generated-script sanity (2.359.1, the Ctrl+G outage): the 拆分 copy of
+// the editor-helper template turned bash `\${PORT}` into `\${port}` (empty →
+// curl hit port 80 → the helper waited on its signal file forever) and NO
+// gate covered generated-script CONTENT. Every ${lowercase} bash reference
+// in a generated script must resolve to a definition inside the script.
+{
+  const genFiles = ['data/bin/editor/code'];
+  for (const gf of genFiles) {
+    const p = path.join(wt, gf);
+    try {
+      const body = fs.readFileSync(p, 'utf-8');
+      const refs = [...body.matchAll(/\$\{([a-z_][a-z0-9_]*)(?::-[^}]*)?\}/g)].map((m) => m[1]);
+      const undef = refs.filter((v) => !new RegExp(`^${v}=`, 'm').test(body));
+      if (undef.length) { ok = false; console.error(`  ✗ ${gf} references undefined lowercase bash var(s): ${undef.join(', ')} (the \${PORT}→\${port} class)`); }
+      else console.log(`  ✓ ${gf}: all lowercase bash refs defined`);
+      if (gf.endsWith('editor/code') && !body.includes(':${PORT}/api/editor/open')) { ok = false; console.error(`  ✗ ${gf}: the editor URL does not use \${PORT}`); }
+      else if (gf.endsWith('editor/code')) console.log(`  ✓ ${gf}: editor URL rides \${PORT}`);
+    } catch (e) { ok = false; console.error(`  ✗ generated ${gf} unreadable — ${e.message}`); }
+  }
+}
 const ws2 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((r) => ws2.on('open', r));
 ws2.send(JSON.stringify({ type: 'kill', sessionId: sid }));

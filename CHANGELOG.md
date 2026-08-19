@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.359.1
+
+- **Ctrl+G editor fixed (owner report "不好用了")** — broken since the 2.325.0 拆分, ~35 releases: the extracted copy of the editor-helper template turned bash `${PORT}` into `${port}` (case typo during a "verbatim" move; the pre-拆分 server.js was correct). The generated fake `code` script then curl'd `http://localhost:` (empty port → port 80), the POST never reached `/api/editor/open`, and the helper waited on its signal file forever — Ctrl+G looked frozen. Nothing covered generated-script CONTENT, so it sat for weeks. Fixed + the live instance's generated file healed in place; restore-smoke now asserts every generated script's lowercase bash refs resolve to in-script definitions AND the editor URL rides `${PORT}` (both sides fail on the pre-fix content).
+
 ## 2.359.0
 
 - **Path mounts can be PUBLIC now** (owner request: sharing a mounted resource with others) — a lock toggle on the mount's address row flips `/svc/<name>/` between login-required (default) and public-shareable; going public requires a danger-confirm that names the full URL, and public mounts wear an amber "public" chip. Security model: `/svc` left the global cookie middleware and auth is enforced PER MOUNT inside the proxy (HTTP and WebSocket upgrade alike) — both sides pinned in test-path-mounts (17): private-without-login = 401 (incl. ws), public-without-login = 200. Exposure is always an explicit act — mounting never defaults to public.
