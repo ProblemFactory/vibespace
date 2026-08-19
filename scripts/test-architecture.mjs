@@ -188,5 +188,18 @@ for (const [edge] of EXCEPTIONS) {
   }
 }
 
+// 41. Settings bounds/defaults have ONE home (inc-mt0mozsp): the Manage
+//     Agents instructions tab carried a hardcoded pre-2.210.0 copy of the
+//     stop-nudge bounds ([min 1/2] + `Number(v) || dflt`) that silently
+//     reverted an explicit 0 ("every stop" mode) back to 10/30. UI code must
+//     read SETTINGS_SCHEMA, never re-declare a schema row's numbers inline.
+{
+  const ma = read('src/lib/manage-agents.js');
+  ok(!/stopNudge\w*Minutes'\s*:\s*\[/.test(ma) && ma.includes('SETTINGS_SCHEMA[key]'),
+    'manage-agents reads stop-nudge bounds from SETTINGS_SCHEMA (no hardcoded twin)');
+  ok(!/Number\(inp\.value\)\s*\|\|/.test(ma),
+    'no falsy-default coalescing on number inputs (explicit 0 is a valid value)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

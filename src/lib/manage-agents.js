@@ -1,6 +1,7 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 import { track } from './telemetry-client.js';
 
@@ -1397,8 +1398,8 @@ export function installManageAgents(App, ctx = {}) {
         for (const [key, label, tip] of [
           // t() WITHOUT params keeps the literal {n} — it marks where the
           // number input embeds into the translated sentence.
-          ['agents.stopNudgeStaleMinutes', t('fire after {n} min without a status update'), t('The nudge only fires when the session has not updated its board status for this long.')],
-          ['agents.stopNudgeCooldownMinutes', t('at most once per {n} min per session'), t('After nudging a session once, wait at least this long before nudging it again.')],
+          ['agents.stopNudgeStaleMinutes', t('fire after {n} min without a status update'), t('The nudge only fires when the session has not updated its board status for this long. 0 = always stale (with cooldown 0: fires on every stop).')],
+          ['agents.stopNudgeCooldownMinutes', t('at most once per {n} min per session'), t('After nudging a session once, wait at least this long before nudging it again. 0 = no cooldown.')],
         ]) {
           const line = document.createElement('label');
           line.className = 'agents-cond';
@@ -1406,9 +1407,13 @@ export function installManageAgents(App, ctx = {}) {
           const inp = document.createElement('input');
           inp.type = 'number';
           inp.className = 'settings-input-text agents-cond-num';
-          const schema = { 'agents.stopNudgeStaleMinutes': [1, 240, 10], 'agents.stopNudgeCooldownMinutes': [2, 720, 30] }[key];
-          inp.min = schema[0]; inp.max = schema[1];
-          inp.value = this.settings.get(key) ?? schema[2];
+          // Bounds/default come from the ONE schema (inc-mt0mozsp: this dialog
+          // carried a hardcoded pre-2.210.0 twin [min 1/2] that clamped the
+          // explicit-0 "every stop" mode back up, and `Number(v) || dflt`
+          // erased 0 outright — both fields silently reverted to 10/30).
+          const schema = SETTINGS_SCHEMA[key];
+          inp.min = schema.min; inp.max = schema.max;
+          inp.value = this.settings.get(key) ?? schema.default;
           numInputs.push([key, inp, schema]);
           const [before, after] = label.includes('{n}') ? label.split('{n}') : [label + ' ', ''];
           line.append(document.createTextNode(before), inp, document.createTextNode(after));
@@ -1421,8 +1426,12 @@ export function installManageAgents(App, ctx = {}) {
         save.className = 'agent-btn'; save.textContent = t('Save');
         save.onclick = () => {
           for (const [key, ta] of tas) this.settings.set(key, ta.value.trim());
-          for (const [key, inp, [mn, mx, dft]] of numInputs) {
-            const v = Math.min(mx, Math.max(mn, Number(inp.value) || dft));
+          for (const [key, inp, schema] of numInputs) {
+            // Explicit 0 is a VALID value (every-stop mode) — only an empty or
+            // non-numeric input falls back to the default. Never `|| dflt`.
+            const raw = String(inp.value).trim();
+            const n = Number(raw);
+            const v = raw === '' || !Number.isFinite(n) ? schema.default : Math.min(schema.max, Math.max(schema.min, n));
             inp.value = v;
             this.settings.set(key, v);
           }
