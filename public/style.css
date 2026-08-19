@@ -3469,3 +3469,4 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .jobs-chip-url { color: var(--accent); border-color: var(--accent-dim); cursor: pointer; }
 .jobs-chip-url:hover { background: var(--bg-hover); }
 .ports-svc { font-size: 10px; padding: 0 5px; border: 1px solid var(--accent-dim); border-radius: 8px; color: var(--accent); }
+.ports-svc-pub { color: var(--yellow, #e5c07b); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 50%, transparent); }

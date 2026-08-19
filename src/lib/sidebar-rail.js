@@ -52,6 +52,8 @@ const PORT_ICONS = {
   copy: A('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
   path: A('<path d="M4 6h16M4 12h10M4 18h6"/><path d="M17 15l3 3-3 3"/>'),
   pathOff: A('<path d="M4 6h16M4 12h10M4 18h6"/><path d="M15 15l6 6M21 15l-6 6"/>'),
+  lock: A('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  unlock: A('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.9"/>'),
 };
 
 const PANEL_TABS = ['ports', 'agents', 'plugins', 'jobs', 'system'];
@@ -783,18 +785,35 @@ export function installSidebarRail(Sidebar) {
             sec.appendChild(ur);
           }
           // path mount address row — a NORMAL same-origin link (the login
-          // cookie rides along; no proxy hop needed)
+          // cookie rides along; no proxy hop needed). Lock toggle = per-mount
+          // public/private (2.359.0): public shares WITHOUT login; making
+          // something public is an explicit confirmed act, never a default.
           if (f.pathMount) {
             const ur = document.createElement('div');
             ur.className = 'ports-url-row';
             const a = document.createElement('a');
             const rel = `/svc/${f.pathMount}/`;
             a.href = rel; a.target = '_blank'; a.rel = 'noopener'; a.textContent = rel;
+            if (f.pathPublic) { const pubChip = document.createElement('span'); pubChip.className = 'ports-svc ports-svc-pub'; pubChip.textContent = tr('public'); ur.appendChild(pubChip); }
+            const lock = document.createElement('button');
+            lock.className = 'mounts-icon-btn';
+            lock.innerHTML = f.pathPublic ? PORT_ICONS.unlock : PORT_ICONS.lock;
+            lock.dataset.tip = f.pathPublic ? tr('PUBLIC — anyone with the link, no login. Click to require login') : tr('Login required. Click to make PUBLIC (share with anyone)');
+            lock.onclick = async () => {
+              if (!f.pathPublic) {
+                const { showConfirmDialog } = await import('./utils.js');
+                const okGo = await showConfirmDialog({ title: tr('Make this service public?'), message: tr('Anyone with the link {url} will reach it WITHOUT logging in.', { url: location.origin + rel }), confirmText: tr('Make public'), danger: true });
+                if (!okGo) return;
+              }
+              const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/path`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.pathMount, public: !f.pathPublic }) });
+              if (r?.error) showToast(r.error, { type: 'error' });
+              render();
+            };
             const cp = document.createElement('button');
             cp.className = 'mounts-icon-btn'; cp.dataset.tip = tr('Copy URL');
             cp.innerHTML = PORT_ICONS.copy;
             cp.onclick = () => { copyText(location.origin + rel); showToast(tr('Copied')); };
-            ur.append(a, cp);
+            ur.append(a, lock, cp);
             sec.appendChild(ur);
           }
         }

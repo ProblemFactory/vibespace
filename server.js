@@ -1456,14 +1456,16 @@ app.post('/api/port-forward/:id/publish', async (req, res) => {
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
   try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// main-domain PATH mount (2.358.0): /svc/<name>/ → the forward, behind auth
+// main-domain PATH mount (2.358.0): /svc/<name>/ → the forward. body.public
+// (2.359.0) = shareable WITHOUT login; default private, auth enforced
+// per-mount inside path-mounts (the /svc prefix is middleware-exempt).
 app.post('/api/port-forward/:id/path', (req, res) => {
-  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null)); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null, { public: (req.body || {}).public })); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/port-forward/:id/path', (req, res) => {
   try { res.json(portForwards.setPathMount(String(req.params.id), null)); } catch (e) { res.status(400).json({ error: e.message }); }
 });
-const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards });
+const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards, requestAuthed: (req) => auth.requestAuthed(req) });
 app.use('/svc', pathMounts.handler);
 // protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
 // a published forward is transparently re-published in the new mode
@@ -1802,8 +1804,8 @@ server.on('upgrade', (req, socket, head) => {
     if (!auth.requestAuthed(req)) return deny();
     vncWss.handleUpgrade(req, socket, head, (ws) => bridgeVncSocket(ws));
   } else if (pathname.startsWith('/svc/')) {
-    // path-mounted service WebSockets (2.358.0) — same auth as the app
-    if (!auth.requestAuthed(req)) return deny();
+    // path-mounted service WebSockets — auth is PER MOUNT inside path-mounts
+    // (2.359.0 public mounts; private ones 401 there)
     pathMounts.handleUpgrade(req, socket, head);
   } else if (pathname === '/api/device-dial' || pathname === '/api/agentd-dial') {
     // /api/device-dial is the name new pairing commands render;

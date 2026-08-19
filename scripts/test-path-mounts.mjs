@@ -27,9 +27,13 @@ await new Promise((r) => target.listen(0, '127.0.0.1', r));
 const tPort = target.address().port;
 
 // ── the module under test, against a stub forwards registry ──
-const registry = { app: { pathMount: 'app', localPort: tPort }, dead: { pathMount: 'dead', localPort: null } };
+// authed is flipped by the tests: /svc is EXEMPT from the global cookie
+// middleware, so THESE per-mount checks are the only gate for private mounts
+let authed = true;
+const registry = { app: { pathMount: 'app', localPort: tPort }, dead: { pathMount: 'dead', localPort: null }, pub: { pathMount: 'pub', localPort: tPort, pathPublic: true } };
 const pm = require(REPO + '/src/server/path-mounts.js').create({
   getPortForwards: () => ({ pathMountTarget: (name) => (registry[name] ? { localPort: registry[name].localPort, rec: registry[name] } : null) }),
+  requestAuthed: () => authed,
 });
 const express = require(path.join(REPO, 'node_modules/express'));
 const app = express();
@@ -60,6 +64,20 @@ r = await get('/svc/nope/');
 ok(r.status === 404, 'unknown mount = 404');
 r = await get('/svc/dead/');
 ok(r.status === 502 && /not active/.test((await r.json()).error || ''), 'mounted-but-down forward = honest 502');
+// per-mount auth (2.359.0): the /svc prefix is middleware-exempt, so these
+// checks ARE the security boundary — pin both sides
+authed = false;
+r = await get('/svc/app/');
+ok(r.status === 401, 'PRIVATE mount without a login = 401 (the only gate — /svc is middleware-exempt)');
+r = await get('/svc/pub/');
+ok(r.status === 200 && (await r.json()).path === '/', 'PUBLIC mount serves WITHOUT a login');
+const wsDenied = await new Promise((resolve) => {
+  const sock = net.connect(port, '127.0.0.1', () => sock.write(`GET /svc/app/ws HTTP/1.1\r\nhost: x\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n`));
+  let buf = ''; sock.on('data', (d) => { buf += d; }); sock.on('close', () => resolve(buf)); sock.on('error', () => resolve(buf));
+  setTimeout(() => { sock.destroy(); }, 2000);
+});
+ok(/401/.test(wsDenied), 'PRIVATE mount ws upgrade without a login = 401', wsDenied.slice(0, 40));
+authed = true;
 // ws upgrade splice
 const wsResp = await new Promise((resolve, reject) => {
   const sock = net.connect(port, '127.0.0.1', () => {

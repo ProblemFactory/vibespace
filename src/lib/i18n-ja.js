@@ -2696,4 +2696,10 @@ export default {
   "Mount under this domain": "このドメインのパスにマウント",
   "Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)": "パス名 → /svc/<name>/（アプリは URL プレフィックス対応が必要 — vite base、jupyter base_url、code-server は対応）",
   "Mounted at {url}": "{url} にマウントしました",
+  "public": "公開",
+  "PUBLIC — anyone with the link, no login. Click to require login": "公開 — リンクを知っていれば誰でもログイン不要。クリックでログイン必須に",
+  "Login required. Click to make PUBLIC (share with anyone)": "ログイン必須。クリックで公開に（誰とでも共有可）",
+  "Make this service public?": "このサービスを公開しますか？",
+  "Anyone with the link {url} will reach it WITHOUT logging in.": "リンク {url} を知っている人は誰でもログインなしでアクセスできます。",
+  "Make public": "公開する",
 };
