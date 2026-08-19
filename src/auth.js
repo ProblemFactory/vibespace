@@ -210,6 +210,12 @@ class Auth {
       // with the shared Bearer token — the ROUTE enforces it (404 when the
       // collector is off, 403 on a bad token); no cookie exists on the sender.
       if (p === '/api/telemetry/ingest') return next();
+      // Path-mounted services (2.359.0): auth is PER MOUNT — the handler in
+      // src/server/path-mounts.js enforces requestAuthed for private mounts
+      // and lets `pathPublic` ones through (the shareable-link case). A
+      // blanket cookie gate here would make public mounts impossible; the
+      // per-mount check is pinned by scripts/test-path-mounts.mjs.
+      if (p === '/svc' || p.startsWith('/svc/')) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

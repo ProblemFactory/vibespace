@@ -2696,4 +2696,10 @@ export default {
   "Mount under this domain": "挂到本域名路径下",
   "Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)": "路径名 → /svc/<name>/（应用需支持 URL 前缀——vite base、jupyter base_url、code-server 均可）",
   "Mounted at {url}": "已挂载到 {url}",
+  "public": "公开",
+  "PUBLIC — anyone with the link, no login. Click to require login": "公开——任何拿到链接的人无需登录。点击改为需要登录",
+  "Login required. Click to make PUBLIC (share with anyone)": "需要登录。点击改为公开（可分享给任何人）",
+  "Make this service public?": "把这个服务设为公开？",
+  "Anyone with the link {url} will reach it WITHOUT logging in.": "任何拿到链接 {url} 的人都无需登录即可访问。",
+  "Make public": "设为公开",
 };

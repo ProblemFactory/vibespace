@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.359.0
+
+- **Path mounts can be PUBLIC now** (owner request: sharing a mounted resource with others) — a lock toggle on the mount's address row flips `/svc/<name>/` between login-required (default) and public-shareable; going public requires a danger-confirm that names the full URL, and public mounts wear an amber "public" chip. Security model: `/svc` left the global cookie middleware and auth is enforced PER MOUNT inside the proxy (HTTP and WebSocket upgrade alike) — both sides pinned in test-path-mounts (17): private-without-login = 401 (incl. ws), public-without-login = 200. Exposure is always an explicit act — mounting never defaults to public.
+
 ## 2.358.0
 
 - **Fixed frp subdomains** (owner question — yes, frps routes any name under the wildcard): the publish flow now prompts for an optional subdomain (`https://<你起的名字>.<relay域>`); blank keeps the previous/random one. Persisted, so restarts keep it (same slot the broker already used); a taken name fails loudly at the relay. HTTP backends only — https/tcp services stay IP:port mode as before.

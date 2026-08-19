@@ -208,7 +208,7 @@ class PortForwardManager {
       protoDetected: r.proto || null, protoOverride: r.protoOverride || null,
       // public (frp relay) exposure, if published
       publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
-      publicSub: r.publicSub || null, pathMount: r.pathMount || null,
+      publicSub: r.publicSub || null, pathMount: r.pathMount || null, pathPublic: !!r.pathPublic,
     }));
   }
 
@@ -586,17 +586,21 @@ class PortForwardManager {
    *  local port per request, so mounts survive restarts with zero
    *  re-establishment — and they sit behind VibeSpace auth (a feature the
    *  public frp URL deliberately lacks). name=null unmounts. */
-  setPathMount(id, name) {
+  setPathMount(id, name, { public: pub } = {}) {
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
-    if (name === null || name === undefined || name === '') { rec.pathMount = null; this._persist(); this._emit(); return { pathMount: null }; }
+    if (name === null || name === undefined || name === '') { rec.pathMount = null; rec.pathPublic = false; this._persist(); this._emit(); return { pathMount: null }; }
     name = String(name).toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new Error('path name must be lowercase letters/digits/hyphens');
     const clash = this._state.forwards.find((r) => r.id !== id && r.pathMount === name);
     if (clash) throw new Error(`/svc/${name} is already mounted by ${clash.label || clash.id}`);
     rec.pathMount = name;
+    // public = shareable WITHOUT VibeSpace login (2.359.0, owner request);
+    // DEFAULT stays private — exposure is an explicit act, never a side
+    // effect of mounting. Re-posting the same name with a flag toggles it.
+    if (pub !== undefined) rec.pathPublic = !!pub;
     this._persist(); this._emit();
-    return { pathMount: name, url: `/svc/${name}/` };
+    return { pathMount: name, public: !!rec.pathPublic, url: `/svc/${name}/` };
   }
 
   /** LIVE local target for a path mount — null when unmounted or the tunnel

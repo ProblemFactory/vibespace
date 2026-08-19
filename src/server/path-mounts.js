@@ -17,7 +17,11 @@ const net = require('net');
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
 
-function create({ getPortForwards }) {
+// AUTH MODEL (2.359.0): /svc/* is EXEMPT from the global cookie middleware
+// (auth.js) so that per-mount `pathPublic` can work — which makes the checks
+// HERE the only gate for private mounts. requestAuthed is injected; both the
+// HTTP handler and the ws upgrade enforce it, pinned by test-path-mounts.
+function create({ getPortForwards, requestAuthed = () => true }) {
   /** parse /svc/<name>[/rest] → {name, rest} or null */
   function parse(url) {
     const m = /^\/svc\/([^/?#]+)(\/[^?#]*)?([?#].*)?$/.exec(url || '');
@@ -39,6 +43,7 @@ function create({ getPortForwards }) {
     if (!/^\/svc\/[^/?#]+\//.test(req.originalUrl || req.url)) return res.redirect(302, `/svc/${p.name}/`);
     const t = resolve(p.name);
     if (!t) return res.status(404).json({ error: `no service mounted at /svc/${p.name} — mount one from the Ports panel` });
+    if (!t.rec?.pathPublic && !requestAuthed(req)) return res.status(401).json({ error: 'this service requires a VibeSpace login (the mount is not public)' });
     if (!t.localPort) return res.status(502).json({ error: `/svc/${p.name} is mounted but its forward is not active (machine offline?)` });
     const headers = { ...req.headers };
     delete headers['content-length']; // stream re-chunks
@@ -63,7 +68,9 @@ function create({ getPortForwards }) {
   function handleUpgrade(req, socket, head) {
     const p = parse(req.url);
     const t = p && resolve(p.name);
-    if (!t || !t.localPort) { socket.write('HTTP/1.1 404 Not Found\r\n\r\n'); socket.destroy(); return; }
+    if (!t) { socket.write('HTTP/1.1 404 Not Found\r\n\r\n'); socket.destroy(); return; }
+    if (!t.rec?.pathPublic && !requestAuthed(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+    if (!t.localPort) { socket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n'); socket.destroy(); return; }
     const up = net.connect(t.localPort, '127.0.0.1', () => {
       const lines = [`GET ${p.rest} HTTP/1.1`];
       for (const [k, v] of Object.entries(req.headers)) {
