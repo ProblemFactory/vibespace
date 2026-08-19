@@ -2689,4 +2689,11 @@ export default {
   "Searched the {n} transported rows (of {total} on the machine)": "転送された {n} 行を検索しました（マシン上には {total} プロセス）",
   "Pause auto-refresh": "自動更新を一時停止",
   "Auto-refresh paused — click to resume": "自動更新は一時停止中 — クリックで再開",
+  "Publish to the internet": "インターネットに公開",
+  "Subdomain (optional — blank = keep previous or random)": "サブドメイン（任意 — 空欄 = 前回またはランダム）",
+  "Unmount from /svc/{name}/": "/svc/{name}/ からアンマウント",
+  "Mount under this domain at /svc/<name>/ (login-protected)": "このドメインの /svc/<name>/ にマウント（ログイン保護）",
+  "Mount under this domain": "このドメインのパスにマウント",
+  "Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)": "パス名 → /svc/<name>/（アプリは URL プレフィックス対応が必要 — vite base、jupyter base_url、code-server は対応）",
+  "Mounted at {url}": "{url} にマウントしました",
 };

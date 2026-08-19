@@ -50,6 +50,8 @@ const PORT_ICONS = {
   x: A('<path d="M6 6l12 12M18 6L6 18"/>'),
   fwd: A('<path d="M4 12h14M12 6l6 6-6 6"/>'),
   copy: A('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
+  path: A('<path d="M4 6h16M4 12h10M4 18h6"/><path d="M17 15l3 3-3 3"/>'),
+  pathOff: A('<path d="M4 6h16M4 12h10M4 18h6"/><path d="M15 15l6 6M21 15l-6 6"/>'),
 };
 
 const PANEL_TABS = ['ports', 'agents', 'plugins', 'jobs', 'system'];
@@ -723,14 +725,41 @@ export function installSidebarRail(Sidebar) {
             !frpOk && !f.publicUrl ? FRP_MSG : pubHint,
             async () => {
               if (!frpOk && !f.publicUrl) { showToast(FRP_MSG, { type: 'error' }); return; }
+              let body = '{}';
+              if (!f.publicUrl && f.proto !== 'tcp' && f.proto !== 'https') {
+                // fixed-subdomain choice (2.358.0, owner request): blank keeps
+                // the prior/random one; only HTTP backends ride subdomains
+                const { showInputDialog } = await import('./utils.js');
+                const sub = await showInputDialog({ title: tr('Publish to the internet'), label: tr('Subdomain (optional — blank = keep previous or random)'), value: f.publicSub || '', placeholder: 'myapp' });
+                if (sub === null) return; // cancelled
+                body = JSON.stringify({ sub: sub.trim() });
+              }
               // fetchJson never throws — a 4xx comes back as {error}; surface it
-              const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: f.publicUrl ? 'DELETE' : 'POST' });
+              const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/publish`, { method: f.publicUrl ? 'DELETE' : 'POST', headers: { 'Content-Type': 'application/json' }, body: f.publicUrl ? undefined : body });
               if (r?.error) showToast(r.error, { type: 'error' });
               else if (r?.publicUrl) showToast(tr('Published: {url}', { url: r.publicUrl }));
               render();
             });
           if (!frpOk && !f.publicUrl) pubBtn.classList.add('ports-btn-off');
           acts.append(pubBtn);
+          // main-domain path mount (2.358.0): /svc/<name>/ behind VibeSpace
+          // auth — no relay, no random subdomain, works for remote machines
+          acts.append(btn(f.pathMount ? PORT_ICONS.pathOff : PORT_ICONS.path,
+            f.pathMount ? tr('Unmount from /svc/{name}/', { name: f.pathMount }) : tr('Mount under this domain at /svc/<name>/ (login-protected)'),
+            async () => {
+              if (f.pathMount) {
+                const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/path`, { method: 'DELETE' });
+                if (r?.error) showToast(r.error, { type: 'error' });
+              } else {
+                const { showInputDialog } = await import('./utils.js');
+                const name = await showInputDialog({ title: tr('Mount under this domain'), label: tr('Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)'), value: (svcM?.[1] || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, ''), placeholder: 'myapp' });
+                if (name === null || !name.trim()) return;
+                const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/path`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+                if (r?.error) showToast(r.error, { type: 'error' });
+                else showToast(tr('Mounted at {url}', { url: r.url || `/svc/${name.trim()}/` }));
+              }
+              render();
+            }));
           acts.append(btn(PORT_ICONS.x, tr('Stop forwarding'), async () => {
             const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}`, { method: 'DELETE' });
             if (r?.error) showToast(r.error, { type: 'error' });
@@ -750,6 +779,21 @@ export function installSidebarRail(Sidebar) {
             cp.className = 'mounts-icon-btn'; cp.dataset.tip = tr('Copy URL');
             cp.innerHTML = PORT_ICONS.copy;
             cp.onclick = () => { copyText(f.publicUrl); showToast(tr('Copied')); };
+            ur.append(a, cp);
+            sec.appendChild(ur);
+          }
+          // path mount address row — a NORMAL same-origin link (the login
+          // cookie rides along; no proxy hop needed)
+          if (f.pathMount) {
+            const ur = document.createElement('div');
+            ur.className = 'ports-url-row';
+            const a = document.createElement('a');
+            const rel = `/svc/${f.pathMount}/`;
+            a.href = rel; a.target = '_blank'; a.rel = 'noopener'; a.textContent = rel;
+            const cp = document.createElement('button');
+            cp.className = 'mounts-icon-btn'; cp.dataset.tip = tr('Copy URL');
+            cp.innerHTML = PORT_ICONS.copy;
+            cp.onclick = () => { copyText(location.origin + rel); showToast(tr('Copied')); };
             ur.append(a, cp);
             sec.appendChild(ur);
           }
