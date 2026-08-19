@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.358.0
+
+- **Fixed frp subdomains** (owner question — yes, frps routes any name under the wildcard): the publish flow now prompts for an optional subdomain (`https://<你起的名字>.<relay域>`); blank keeps the previous/random one. Persisted, so restarts keep it (same slot the broker already used); a taken name fails loudly at the relay. HTTP backends only — https/tcp services stay IP:port mode as before.
+- **Main-domain path mounts — `/svc/<name>/`** (owner request: no per-service random subdomains): a new "/" button on each Active forward mounts it under the app's own domain, **behind VibeSpace login** (cookie/Clerk — the thing the public frp URL deliberately isn't). Reverse proxy resolves the forward's live loopback port per request, so mounts survive restarts with zero re-establishment and work for REMOTE machines' services through the tunnel; prefix stripped, `X-Forwarded-Prefix` set, absolute-path redirects rewritten under the mount, WebSockets spliced, honest 404/502. Inherent limit (the dialog says so): apps must tolerate a URL prefix (vite `base`, jupyter `base_url`, code-server natively) — HTML bodies are not rewritten (that's the embedded-browser proxy's job). New gate suite test-path-mounts (14, real http+ws round trips).
+
 ## 2.357.0
 
 - **Background Work is sidebar-native now (owner verdict: the window duplicated the rail panel and every sidebar click spawned one).** The rail panel is THE surface: full job list with toolbar (summary / ＋New / ⟳), cards expand INLINE (detail, access controls, notify state, runs, log tail), registry escapes — and a pending interaction's **answer form renders inline in the card** (amber-bordered block). Expanded cards survive the jobs-updated rebuilds. Every entry point (inbox jump, `Open panel`, openSpec replays, gs-menu) lands on the sidebar panel; the old windows remain only as the mobile / activityRail-off fallback. CDP pins: a sidebar card click expands inline and spawns NO window; openJobInteract lands in the sidebar.

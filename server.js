@@ -1448,13 +1448,23 @@ app.post('/api/hosts/:id/port-forward', async (req, res) => {
 app.delete('/api/port-forward/:id', async (req, res) => {
   try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// public exposure (frp relay) — publish/unpublish a forward
+// public exposure (frp relay) — publish/unpublish a forward; body.sub = a
+// user-chosen FIXED subdomain (2.358.0; blank keeps prior/random)
 app.post('/api/port-forward/:id/publish', async (req, res) => {
-  try { res.json(await portForwards.publish(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub })); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
   try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
+// main-domain PATH mount (2.358.0): /svc/<name>/ → the forward, behind auth
+app.post('/api/port-forward/:id/path', (req, res) => {
+  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete('/api/port-forward/:id/path', (req, res) => {
+  try { res.json(portForwards.setPathMount(String(req.params.id), null)); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards });
+app.use('/svc', pathMounts.handler);
 // protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
 // a published forward is transparently re-published in the new mode
 app.post('/api/port-forward/:id/proto', async (req, res) => {
@@ -1791,6 +1801,10 @@ server.on('upgrade', (req, socket, head) => {
   } else if (pathname === '/api/vnc') {
     if (!auth.requestAuthed(req)) return deny();
     vncWss.handleUpgrade(req, socket, head, (ws) => bridgeVncSocket(ws));
+  } else if (pathname.startsWith('/svc/')) {
+    // path-mounted service WebSockets (2.358.0) — same auth as the app
+    if (!auth.requestAuthed(req)) return deny();
+    pathMounts.handleUpgrade(req, socket, head);
   } else if (pathname === '/api/device-dial' || pathname === '/api/agentd-dial') {
     // /api/device-dial is the name new pairing commands render;
     // /api/agentd-dial stays FOREVER — in-field daemons hold it in dial.json

@@ -2689,4 +2689,11 @@ export default {
   "Searched the {n} transported rows (of {total} on the machine)": "已搜索传输的 {n} 行（机器上共 {total} 个进程）",
   "Pause auto-refresh": "暂停自动刷新",
   "Auto-refresh paused — click to resume": "自动刷新已暂停——点击恢复",
+  "Publish to the internet": "发布到公网",
+  "Subdomain (optional — blank = keep previous or random)": "子域名（可选——留空 = 沿用上次或随机）",
+  "Unmount from /svc/{name}/": "从 /svc/{name}/ 卸载",
+  "Mount under this domain at /svc/<name>/ (login-protected)": "挂到本域名 /svc/<name>/ 路径下（受登录保护）",
+  "Mount under this domain": "挂到本域名路径下",
+  "Path name → /svc/<name>/ (apps must tolerate a URL prefix — vite base, jupyter base_url, code-server do)": "路径名 → /svc/<name>/（应用需支持 URL 前缀——vite base、jupyter base_url、code-server 均可）",
+  "Mounted at {url}": "已挂载到 {url}",
 };

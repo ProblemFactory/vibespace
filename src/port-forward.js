@@ -208,6 +208,7 @@ class PortForwardManager {
       protoDetected: r.proto || null, protoOverride: r.protoOverride || null,
       // public (frp relay) exposure, if published
       publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
+      publicSub: r.publicSub || null, pathMount: r.pathMount || null,
     }));
   }
 
@@ -545,11 +546,18 @@ class PortForwardManager {
     this._emit();
   }
 
-  /** Publish an ACTIVE forward to the public internet via the frp relay. */
-  async publish(id) {
+  /** Publish an ACTIVE forward to the public internet via the frp relay.
+   *  opts.sub = a user-CHOSEN fixed subdomain (2.358.0 — frps routes any
+   *  name under subDomainHost; persisted, so it survives restarts like the
+   *  broker-assigned ones; a taken name fails loudly at the relay). */
+  async publish(id, { sub } = {}) {
     if (!this.plugins) throw new Error('public URLs are not available on this instance');
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
+    if (sub !== undefined && sub !== null && String(sub).length) {
+      if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(String(sub))) throw new Error('subdomain must be lowercase letters/digits/hyphens');
+      rec.publicSub = String(sub);
+    }
     const l = this._live.get(id);
     if (!l?.rec?.localPort) await this._start(rec); // ensure a local port exists
     const localPort = this._live.get(id)?.rec?.localPort;
@@ -571,6 +579,33 @@ class PortForwardManager {
     rec.publicUrl = null; rec.publicName = null; rec.publicPort = null;
     this._published.delete(id);
     this._persist(); this._emit();
+  }
+
+  /** Mount a forward under the MAIN domain at /svc/<name>/ (2.358.0, owner
+   *  request: no per-service random subdomains). The route resolves the LIVE
+   *  local port per request, so mounts survive restarts with zero
+   *  re-establishment — and they sit behind VibeSpace auth (a feature the
+   *  public frp URL deliberately lacks). name=null unmounts. */
+  setPathMount(id, name) {
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (!rec) throw new Error('no such forward');
+    if (name === null || name === undefined || name === '') { rec.pathMount = null; this._persist(); this._emit(); return { pathMount: null }; }
+    name = String(name).toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new Error('path name must be lowercase letters/digits/hyphens');
+    const clash = this._state.forwards.find((r) => r.id !== id && r.pathMount === name);
+    if (clash) throw new Error(`/svc/${name} is already mounted by ${clash.label || clash.id}`);
+    rec.pathMount = name;
+    this._persist(); this._emit();
+    return { pathMount: name, url: `/svc/${name}/` };
+  }
+
+  /** LIVE local target for a path mount — null when unmounted or the tunnel
+   *  is down (the /svc route turns that into an honest 502). */
+  pathMountTarget(name) {
+    const rec = this._state.forwards.find((r) => r.pathMount === name);
+    if (!rec) return null;
+    const localPort = this._live.get(rec.id)?.rec?.localPort;
+    return localPort ? { localPort, rec } : { localPort: null, rec };
   }
 
   /** Re-establish a restored forward's public URL at its CURRENT localPort,
