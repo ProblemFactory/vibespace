@@ -469,7 +469,7 @@ class JobManager {
         job.state = 'failed';
         this._teardownPublish(job);
         this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})` });
-        try { this.d.notifyUser({ text: `Service ${job.name} crash-looped and was parked — vibespace-job start ${job.id} to retry`, urgency: 'normal', jobId: job.id, jobName: job.name }); } catch { }
+        try { this.d.notifyUser({ text: `Service ${job.name} crash-looped and was parked — vibespace-job start ${job.id} to retry`, urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { }
         this._notifyOwner(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit}) — start it again once fixed` });
       } else if (dec.restartInMs) {
         job.state = 'down'; this._touch(job);
@@ -485,7 +485,7 @@ class JobManager {
       const routineCronOk = job.cronParent && job.state === 'done' && !job.notifyOk;
       const evText = `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
       this._touch(job, routineCronOk ? null : { what: evText });
-      if (job.notifyUser) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name }); } catch { } }
+      if (job.notifyUser) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
       // owner auto-notify honors the same quiet-success law: routine scheduled
       // success never messages anyone; agent-stopped ('interrupted') skips too
       // — the owner just did it and a message would echo their own action.
@@ -570,7 +570,7 @@ class JobManager {
             // past, so the owner notify re-fired every dedupe window)
             job.state = 'missed'; job.desiredUp = false; job.nextFireAt = null;
             this._touch(job, { what: 'missed its {at} time while the server was down' });
-            try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id, jobName: job.name }); } catch { }
+            try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { }
             this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' });
             continue;
           }
@@ -589,7 +589,7 @@ class JobManager {
       job._lastNotify = job._lastNotify || {};
       if (job._lastNotify.key === key && now() - job._lastNotify.ts < 6 * 3600e3) { job._lastNotify.count = (job._lastNotify.count || 1) + 1; return; } // dedupe window
       job._lastNotify = { key, ts: now(), count: 1 };
-      try { this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name }); } catch { }
+      try { this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { }
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
       // ONE persistent child per cron (2.343.3, owner report: every fire used
@@ -706,7 +706,7 @@ class JobManager {
     job.interaction.pending = { panel, version, postedAt: now(), timeoutS: panel.timeoutS || 1800 };
     if (job.kind === 'task' && ['up', 'starting'].includes(job.state)) job.state = 'awaiting-user';
     this._touch(job, { what: 'needs your input — open its panel', verb: 'answers' });
-    try { this.d.notifyUser({ text: `${job.name} needs your input`, urgency: 'normal', jobId: job.id, jobName: job.name, kind: 'job-interact' }); } catch { }
+    try { this.d.notifyUser({ text: `${job.name} needs your input`, urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null, kind: 'job-interact' }); } catch { }
     this._notifyOwner(job, { what: 'posted an interaction panel and is awaiting an answer' });
     this._save();
     return { ok: true, version };

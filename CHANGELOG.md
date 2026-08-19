@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.357.0
+
+- **Background Work is sidebar-native now (owner verdict: the window duplicated the rail panel and every sidebar click spawned one).** The rail panel is THE surface: full job list with toolbar (summary / ＋New / ⟳), cards expand INLINE (detail, access controls, notify state, runs, log tail), registry escapes — and a pending interaction's **answer form renders inline in the card** (amber-bordered block). Expanded cards survive the jobs-updated rebuilds. Every entry point (inbox jump, `Open panel`, openSpec replays, gs-menu) lands on the sidebar panel; the old windows remain only as the mobile / activityRail-off fallback. CDP pins: a sidebar card click expands inline and spawns NO window; openJobInteract lands in the sidebar.
+- **Job asks/notifications in the inbox are attributed to the OWNER AGENT SESSION, not the job** (owner verdict: a message hanging off a background-task entity was 反直觉 — you think in terms of the agent you were talking to). Items now carry the owning conversation's canonical key so they group with that session's other asks (named "session · job"), with the job noted in the detail line; clicking still opens the answer surface directly (now in the sidebar). Ownerless/user-created jobs keep the old jobs-bucket attribution.
+
 ## 2.356.0
 
 - **Process manager UX batch (owner reports):** ① a real **PID column** (dim, right-aligned — PID sort existed with no PID visible); ② an **auto-refresh pause toggle** in the Processes header (⏸/▶ — a row you're reading can no longer be refreshed out from under you; sort/filter/expand keep working on the frozen snapshot, a host switch or kill outcome still refreshes, the count label turns amber while paused); ③ **history charts moved above the process table** (the long table pushed them out of sight); ④ the **memory chart auto-scales to the data** (peak ×1.2, capped at the limit) instead of pinning the axis at the machine total — 20G of use on a 122G machine used to draw as a flat line at the bottom; the "cur / limit" label keeps the absolute context. CDP asserts for all four in test-sidebar-rail; screenshot-verified.

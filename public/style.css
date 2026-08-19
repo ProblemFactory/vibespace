@@ -3459,7 +3459,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .jobs-access { display: flex; gap: 8px; align-items: center; margin: 6px 0; color: var(--text-dim); font-size: 11px; flex-wrap: wrap; }
 .jobs-esc-line { color: var(--text-dim); font-family: monospace; font-size: 11px; }
 .jobs-sec-esc { margin-top: 16px; }
-.jobs-rail-bar { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.jobs-rail-bar { padding: 8px 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.jobs-inline-panel { margin: 6px 0; padding: 8px; border: 1px solid color-mix(in srgb, var(--yellow, #e5c07b) 45%, transparent); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 8px; background: color-mix(in srgb, var(--yellow, #e5c07b) 6%, transparent); }
+.jobs-focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .jobs-rail-list { padding: 6px 8px; overflow: auto; }
 .jobs-form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
 .jobs-form-row label { font-size: 11px; color: var(--text-dim); }

@@ -37,15 +37,12 @@ export function installUserTodos(app) {
       || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
   };
   const jump = (key, item) => {
-    if (key === 'jobs') {
-      popup.classList.add('hidden');
-      // straight to the interaction panel when the item names its job (owner
-      // roast 2.348.1: "还得从后台窗口里找" — the window is the fallback, not
-      // the destination); openInteractWindow degrades to a hint when there is
-      // nothing left to answer
-      if (item?.jobId) { app.openJobInteract?.(item.jobId); return; }
-      app.openJobs?.(); return;
-    }
+    // a job-borne item opens its ANSWER surface directly regardless of which
+    // group it sits in (2.357.0: items are attributed to the OWNER session
+    // now, so the key is usually a real session — the actionable thing is
+    // still the job's form, which focusJobsPanel lands on in the sidebar)
+    if (item?.jobId) { popup.classList.add('hidden'); app.openJobInteract?.(item.jobId); return; }
+    if (key === 'jobs') { popup.classList.add('hidden'); app.openJobs?.(); return; }
     const s = sessionFor(key);
     if (!s) { showToast(t('Session not found in the list yet — try from the sidebar'), { type: 'error' }); return; }
     popup.classList.add('hidden');

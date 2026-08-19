@@ -14,11 +14,32 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   const jm = new JobManager({
     dataDir,
     broadcast: (type, payload) => broadcastAll({ type, ...payload }),
-    notifyUser: ({ text, urgency, jobId, jobName }) => {
-      // sessionName = the JOB's name (owner roast 2.348.1: 'Background Work'
-      // read like a phantom session); jobId lets the inbox row open the
-      // interaction panel DIRECTLY instead of dumping the user in the window
-      try { userTodos.add('jobs', { text, detail: jobId ? `Background job ${jobId}` : '', urgency: urgency || 'normal', by: 'agent', sessionName: jobName || 'background job', jobId }); } catch (e) { log('[jobs] notify failed:', e.message); }
+    notifyUser: ({ text, urgency, jobId, jobName, ownerCid }) => {
+      // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
+      // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
+      // user thinks in terms of the agent they were talking to, and 2.348.1's
+      // job-name attribution still read as a phantom). Resolve ownerCid → the
+      // live session so the item groups under that session in the inbox;
+      // jobId still opens the answer surface directly. Dead/absent owner
+      // falls back to the job-name attribution under the 'jobs' key.
+      try {
+        // canonical inbox key = sessionStatusKey's backend:cid form, so the
+        // item lands in the SAME group as the owner conversation's own asks
+        // (works for a live OR stopped owner — discovery still resolves it).
+        // Owner backend isn't recorded on the job; 'claude' matches the key
+        // fn's default (a codex-owned job falls back to the jobs bucket via
+        // nameFor's sessionName). No cid (user-created job) → 'jobs' bucket.
+        const sessKey = ownerCid ? `claude:${ownerCid}` : 'jobs';
+        let sessName = null;
+        if (ownerCid && activeSessions) for (const s of activeSessions.values()) {
+          if ((s.claudeSessionId || s.backendSessionId) === ownerCid) { sessName = s.name || null; break; }
+        }
+        userTodos.add(sessKey, {
+          text, urgency: urgency || 'normal', by: 'agent', jobId,
+          detail: (jobId ? `Background job ${jobId}` : '') + (ownerCid && jobName ? ` · via ${jobName}` : ''),
+          sessionName: ownerCid ? (sessName ? `${sessName} · ${jobName || 'job'}` : (jobName || 'background job')) : (jobName || 'background job'),
+        });
+      } catch (e) { log('[jobs] notify failed:', e.message); }
     },
     log,
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { log('[jobs] inbox resolve failed:', e.message); return 0; } },
