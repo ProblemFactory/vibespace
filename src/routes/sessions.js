@@ -434,6 +434,16 @@ function setup(ctx) {
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 
+  // RESCUE a poisoned transcript (2.360.0): monster records stubbed in place,
+  // full backup, atomic swap — see transcripts.rescue for the contract.
+  router.post('/api/session-rescue', async (req, res) => {
+    try {
+      const { sessionId, cwd, backend } = req.body || {};
+      if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+      res.json(await transcripts.rescue({ sessionId: String(sessionId), cwd: String(cwd || ''), backend: backend || 'claude' }));
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
   router.post('/api/kill-pid', async (req, res) => {
     const { pid, host } = req.body;
     if (!pid || typeof pid !== 'number') return res.status(400).json({ error: 'pid required' });

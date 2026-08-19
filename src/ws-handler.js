@@ -9,6 +9,8 @@ const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { execFile } = require('child_process');
 const { createWsCreateHandler } = require('./ws-create');
 // Remote twin of the LOCAL ambient-oat strip (B-211a AGENT_ENV_DROP): a host
@@ -360,9 +362,30 @@ function registerWsHandler(wss, ctx) {
             // native hooks (SessionStart / UserPromptSubmit → vibespace-hook.mjs),
             // never by rewriting the user's input — modifying the message stream
             // is unstable and bypasses the CLI's mechanisms (user directive).
-            const { stdinPayload, userMsg } = adapter.formatChatInput(data.text, msgId);
+            let stdinPayload, userMsg;
+            try { ({ stdinPayload, userMsg } = adapter.formatChatInput(data.text, msgId)); }
+            catch (e) {
+              // POISON GUARD tripped (2.360.0): a shredded frame must reach
+              // the USER as an error, never the transcript as text
+              try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, error: e.message })); } catch { }
+              break;
+            }
+            // Large frames (image pastes) ride a FILE, not the pty stdin —
+            // multi-MB single lines get shredded by the pty/dtach channel
+            // (the 79928a2b 38MB poisoning; local claude chat only — the
+            // remote wrapper can't see this filesystem).
+            let payloadLine = stdinPayload;
+            if (stdinPayload.length > 64 * 1024 && session.backend !== 'codex' && !session.host && session.socketPath) {
+              try {
+                const fdir = path.join(__dirname, '..', 'data', 'chat-frames');
+                fs.mkdirSync(fdir, { recursive: true });
+                const fp = path.join(fdir, `${data.sessionId}-${Date.now()}.json`);
+                fs.writeFileSync(fp, stdinPayload);
+                payloadLine = JSON.stringify({ type: '_frame_file', path: fp });
+              } catch (e) { console.log(`[${data.sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
+            }
             session._isStreaming = true;
-            session.pty.write(stdinPayload + '\n');
+            session.pty.write(payloadLine + '\n');
             if (userMsg) {
               session.buffer = (session.buffer + JSON.stringify(userMsg) + '\n').slice(-500000);
               if (session._normalizer) session._normalizer.processLive(userMsg);
@@ -373,7 +396,7 @@ function registerWsHandler(wss, ctx) {
             // Both signals checked for compat with old wrappers that don't
             // send _stdin_ack (wrapper only updates on server restart).
             if (session.socketPath) {
-              const inputPayload = stdinPayload;
+              const inputPayload = payloadLine;
               const bufLenBefore = (session.buffer || '').length;
               session._stdinAckReceived = false;
               setTimeout(() => {

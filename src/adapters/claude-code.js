@@ -139,6 +139,14 @@ class ClaudeCodeAdapter extends BackendAdapter {
       stdinPayload = text;
       userMsg = { ...parsed, msgId, timestamp: new Date().toISOString() };
     } else {
+      // POISON GUARD (2.360.0, the 79928a2b 38MB incident): a huge
+      // unparseable blob that LOOKS like a frame is a shredded image paste —
+      // wrapping it as text would poison the transcript (context overflow
+      // kills every later API call AND the tail-window history view). Refuse
+      // loudly; the ws handler surfaces this to the user as an error toast.
+      if (text.length > 512 * 1024 && /^\s*\{"type"\s*:\s*"user"/.test(text)) {
+        throw new Error(`image message corrupted in transit (${Math.round(text.length / 1024)}KB fragment) — refused to protect the conversation; try again or send fewer/smaller images`);
+      }
       stdinPayload = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
       userMsg = { type: 'user', message: { role: 'user', content: text }, msgId, timestamp: new Date().toISOString() };
     }

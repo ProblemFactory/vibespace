@@ -378,6 +378,22 @@ try {
           buffer += line + '\n';
           schedulePersist();
         }
+        // Large-frame FILE BYPASS (2.360.0, the 79928a2b 38MB poisoning): a
+        // multi-MB single line does NOT survive the pty/dtach stdin channel
+        // (mid-line bytes AND the newline get dropped, shredded frames then
+        // glue together and get wrapped as text into the transcript). Big
+        // frames ride the filesystem; stdin carries only this pointer line.
+        if (parsed.type === '_frame_file' && typeof parsed.path === 'string') {
+          try {
+            const body = fs.readFileSync(parsed.path, 'utf8').trim();
+            JSON.parse(body); // must be ONE valid frame — never forward shreds
+            sendChild(body);
+            buffer += body + '\n';
+            schedulePersist();
+          } catch (e) { log('frame-file failed (' + e.message + ') — dropped, NOT wrapped as text'); }
+          try { fs.unlinkSync(parsed.path); } catch {}
+          continue;
+        }
         // Handle goal commands from WebUI
         if (parsed.type === 'set-goal') {
           // Forward to the CLI's NATIVE /goal (dispatched as a command in

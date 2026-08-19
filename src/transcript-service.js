@@ -275,7 +275,56 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return scanJsonlUserTurnsAsync(fp, norm(ref).backend);
   }
 
-  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote };
+  /** RESCUE (2.360.0, owner request after the 79928a2b 38MB poisoning): a
+   *  transcript carrying MONSTER records (oversized single lines — shredded
+   *  image pastes) kills resume (context overflow) AND blanks the history
+   *  view (the tail window lands mid-line). Salvage = every oversized
+   *  record's message content replaced IN PLACE by a short stub — same
+   *  uuid/parent, so the chain, order and record count are untouched.
+   *  Byte-preserved backup first; only rewritten lines are re-validated
+   *  (untouched lines pass through byte-identical); atomic swap. Streamed —
+   *  never blocks the loop on a multi-hundred-MB file. LOCAL only; refuses
+   *  while any process still writes the file (the two-writer law). */
+  async function rescue(ref, { maxLineBytes = 1024 * 1024 } = {}) {
+    const r = norm(ref);
+    if (r.hostId || r.host) throw new Error('rescue is local-only for now — copy the transcript here or run it on that machine');
+    const fp = r.backend === 'codex' ? findCodexSessionJsonlPath(r.sessionId) : findSessionJsonlPath(r.sessionId, r.cwd);
+    if (!fp || isDeviceHandle(fp) || !fs.existsSync(fp)) throw new Error('transcript not found on this machine');
+    try {
+      require('child_process').execFileSync('fuser', [fp], { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+      throw new Error('a process is still writing this transcript — terminate the session first, then rescue');
+    } catch (e) { if (/still writing/.test(e.message)) throw e; /* fuser exits 1 when nobody holds it */ }
+    const sizeBefore = fs.statSync(fp).size;
+    const backup = fp + '.pre-rescue-' + Date.now();
+    fs.copyFileSync(fp, backup);
+    const tmp = fp + '.rescue-tmp';
+    const readline = require('readline');
+    const rl = readline.createInterface({ input: fs.createReadStream(fp), crlfDelay: Infinity });
+    const out = fs.createWriteStream(tmp, { mode: 0o600 });
+    let lines = 0, replaced = 0, skipped = 0;
+    for await (const line of rl) {
+      lines++;
+      if (line.length <= maxLineBytes) { if (!out.write(line + '\n')) await new Promise((res) => out.once('drain', res)); continue; }
+      let stubbed = null;
+      try {
+        const d = JSON.parse(line);
+        if (d && d.message && d.message.content !== undefined) {
+          d.message.content = [{ type: 'text', text: `[rescued ${new Date().toISOString().slice(0, 10)}: an oversized ${Math.round(line.length / 1048576)}MB record was removed from this message — it broke resume and the history view. Full original preserved next to the transcript as ${backup.split('/').pop()}]` }];
+          stubbed = JSON.stringify(d);
+          JSON.parse(stubbed); // the ONLY rewritten bytes — must be valid
+        }
+      } catch { /* unparseable monster — drop below */ }
+      if (stubbed) { replaced++; if (!out.write(stubbed + '\n')) await new Promise((res) => out.once('drain', res)); }
+      else { skipped++; } // oversized AND unparseable/shape-unknown: dropping is safer than keeping poison
+    }
+    await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));
+    if (!replaced && !skipped) { try { fs.unlinkSync(tmp); fs.unlinkSync(backup); } catch { } return { replaced: 0, skipped: 0, lines, sizeBefore, sizeAfter: sizeBefore, backup: null }; }
+    fs.renameSync(tmp, fp);
+    try { fs.chmodSync(fp, 0o600); } catch { }
+    return { replaced, skipped, lines, sizeBefore, sizeAfter: fs.statSync(fp).size, backup };
+  }
+
+  return { view, page, turnmap, searchIndexed, status, taskState, filePath, gapInfo, gapSlab, searchFull, searchFullStream, fullTurnmap, refreshRemote, rescue };
 }
 
 module.exports = { createTranscriptService };

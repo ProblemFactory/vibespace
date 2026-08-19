@@ -831,6 +831,23 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     if ((s.backend || 'claude') === 'claude' || s.backend === 'codex') {
       items.push({ label: tr('Switch billing…'), action: () => app.showBillingSwitcher(s, { x: e.clientX, y: e.clientY }) });
     }
+    // transcript rescue (2.360.0, owner request after the 79928a2b 38MB
+    // poisoning): stubs oversized records in place (full backup) so a
+    // conversation whose resume dies / history blanks comes back
+    if (s.status === 'stopped' && !s.host) {
+      items.push({
+        label: tr('Rescue transcript…'),
+        action: async () => {
+          const { showConfirmDialog, fetchJson: fj, showToast: toast } = await import('./utils.js');
+          const okGo = await showConfirmDialog({ title: tr('Rescue this conversation?'), message: tr('Scans the transcript for oversized broken records (giant image pastes etc.), replaces them with small stubs and keeps a full backup next to the file. Use when resume keeps dying or the history opens blank.'), confirmText: tr('Rescue') });
+          if (!okGo) return;
+          const r = await fj('/api/session-rescue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.sessionId, cwd: s.cwd, backend: s.backend || 'claude' }) });
+          if (r?.error) { toast(r.error, { type: 'error' }); return; }
+          if (!r.replaced && !r.skipped) toast(tr('Nothing oversized found — this transcript looks healthy'));
+          else toast(tr('Rescued: {n} oversized record(s) stubbed, {mb}MB freed — backup kept next to the transcript', { n: r.replaced + r.skipped, mb: Math.round((r.sizeBefore - r.sizeAfter) / 1048576) }), { duration: 9000 });
+        },
+      });
+    }
     items.push({ label: tr('Properties…'), action: () => app.openSessionProps(s) });
     if (s.status !== 'stopped') {
       items.push({

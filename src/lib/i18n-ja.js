@@ -2702,4 +2702,10 @@ export default {
   "Make this service public?": "このサービスを公開しますか？",
   "Anyone with the link {url} will reach it WITHOUT logging in.": "リンク {url} を知っている人は誰でもログインなしでアクセスできます。",
   "Make public": "公開する",
+  "Rescue transcript…": "会話ログを救出…",
+  "Rescue this conversation?": "この会話を救出しますか？",
+  "Scans the transcript for oversized broken records (giant image pastes etc.), replaces them with small stubs and keeps a full backup next to the file. Use when resume keeps dying or the history opens blank.": "ログ内の巨大な破損レコード（巨大画像ペーストなど）をスキャンし、小さなスタブに置換します（完全バックアップをファイルの隣に保持）。resume が失敗し続ける・履歴が空白になる場合に使用。",
+  "Rescue": "救出",
+  "Nothing oversized found — this transcript looks healthy": "巨大レコードは見つかりません — このログは健全です",
+  "Rescued: {n} oversized record(s) stubbed, {mb}MB freed — backup kept next to the transcript": "救出完了：{n} 件の巨大レコードを置換、{mb}MB 解放 — バックアップはログの隣に保持",
 };
