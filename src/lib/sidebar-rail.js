@@ -266,9 +266,10 @@ export function installSidebarRail(Sidebar) {
       this._railSync();
     },
 
-    /** Background Work rail panel: compact live list; the window remains the
-     *  full surface (header button opens it). Renders-once guard + jobs-updated
-     *  rebuild come from _renderRailPanel. All strings textContent (XSS law). */
+    /** Background Work rail panel — THE primary surface since 2.357.0 (the
+     *  window is the mobile/rail-off fallback): full list, inline expand,
+     *  inline interaction forms. Renders-once guard + jobs-updated rebuild
+     *  come from _renderRailPanel. All strings textContent (XSS law). */
     _renderJobsRailPanel(c) {
       openJobsWindow.renderRail?.(this.app, c);
     },

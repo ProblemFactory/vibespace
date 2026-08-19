@@ -16,6 +16,28 @@ const KIND_ICON = {
 };
 const hum = (ms) => { const m = Math.round(Math.abs(ms) / 60000); return m < 1 ? '<1m' : m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; };
 
+// expanded-card state survives the jobs-updated full re-render (2.357.0
+// sidebar unification — the rail panel is THE surface now, so it must not
+// collapse what the user opened every time the engine broadcasts)
+const EXPANDED = new Set();
+
+/** Focus the sidebar-native jobs panel (optionally on one job). Returns false
+ *  when there is no rail (mobile / activityRail off) so callers fall back to
+ *  the window. NOTE _railGo collapses on re-click of the active tab — the
+ *  already-active case rebuilds the panel instead. */
+export function focusJobsPanel(app, jobId) {
+  const sb = app.sidebar;
+  if (!sb?._railEl || !sb.listEl) return false;
+  if (jobId) { sb._jobsFocusId = jobId; EXPANDED.add(jobId); }
+  if (sb._activeTab !== 'jobs') sb._railGo('jobs');
+  else {
+    if (!sb.isOpen) sb.toggle(true);
+    sb.listEl.querySelector('.rail-panel-jobs')?.remove();
+    sb._renderRailPanel();
+  }
+  return true;
+}
+
 function stateLine(j) {
   const run = j.run || {};
   const bits = [j.state];
@@ -27,7 +49,7 @@ function stateLine(j) {
 }
 
 async function jobAction(app, j, act, refresh) {
-  if (act === 'panel') return openInteractWindow(app, j.id);
+  if (act === 'panel') return openInteractWindow(app, j.id); // redirects to the rail panel when it exists
   if (act === 'rm' && !(await showConfirmDialog({ title: t('Remove job'), message: t('Remove {name} and its run history?', { name: j.name }), confirmText: t('Remove'), danger: true }))) return;
   const r = await fetchJson(`/api/jobs/${j.id}/${act}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   if (r?.error) showToast(r.error, { error: true });
@@ -85,9 +107,16 @@ function renderList(app, root, jobs, { compact, refresh }) {
         if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
         if (l2.childNodes.length) el.appendChild(l2);
       }
-      if (compact) el.onclick = () => openJobsWindow(app);
-      else el.onclick = () => el.classList.contains('jobs-open') ? (el.classList.remove('jobs-open'), el.querySelector('.jobs-detail')?.remove()) : expandDetail(app, el, j, refresh);
+      // one interaction everywhere (owner verdict 2.357.0: a click that
+      // spawned a WINDOW from the sidebar was jarring): expand inline, in
+      // the rail panel and the fallback window alike
+      el.dataset.job = j.id;
+      el.onclick = () => {
+        if (el.classList.contains('jobs-open')) { EXPANDED.delete(j.id); el.classList.remove('jobs-open'); el.querySelector('.jobs-detail')?.remove(); }
+        else { EXPANDED.add(j.id); expandDetail(app, el, j, refresh); }
+      };
       root.appendChild(el);
+      if (EXPANDED.has(j.id)) expandDetail(app, el, j, refresh);
     }
   }
 }
@@ -100,6 +129,14 @@ async function expandDetail(app, el, j, refresh) {
   el.appendChild(d);
   const r = await fetchJson(`/api/jobs/${j.id}?tail=60`);
   const job = r?.job; if (!job) return;
+  // pending interaction answers INLINE (2.357.0 — no more hunting for a
+  // separate window); a jobs-updated broadcast rebuilds the panel, so a
+  // one-shot form render here is always fresh
+  if (job.interaction?.pending) {
+    const fw = document.createElement('div'); fw.className = 'jobs-inline-panel';
+    d.appendChild(fw);
+    renderPanelBlocks(app, fw, job.id, job.interaction.pending, { onAnswered: refresh });
+  }
   const meta = document.createElement('div'); meta.className = 'jobs-meta';
   meta.textContent = `${job.id} · ${t('created')} ${new Date(job.createdAt).toLocaleString()} · ${(job.owner?.groups || []).join(', ') || t('no group')}`;
   d.appendChild(meta);
@@ -170,6 +207,10 @@ function openCreateDialog(app, onDone) {
 }
 
 export function openJobsWindow(app, opts = {}) {
+  // sidebar-native since 2.357.0 (owner verdict: the window duplicated the
+  // rail panel) — every entry point lands on the rail panel when it exists;
+  // the window remains only for mobile / activityRail-off
+  if (!opts.forceWindow && focusJobsPanel(app, opts.focusJobId)) return null;
   for (const [, w] of app.wm.windows) if (w.type === 'jobs') { app.wm.focusWindow(w.id); return w; }
   const winInfo = app.wm.createWindow({ title: t('Background Work'), type: 'jobs', syncId: opts.syncId, openSpec: { action: 'openJobs' }, width: 760, height: 540 });
   const shell = document.createElement('div'); shell.className = 'jobs-win';
@@ -209,42 +250,55 @@ export function openJobsWindow(app, opts = {}) {
   return winInfo;
 }
 
-/** compact rail panel renderer (sidebar-rail delegates here) */
+/** THE primary Background Work surface (2.357.0 unification): full list with
+ *  inline expand + inline interaction forms, toolbar (summary / New / ⟳),
+ *  registry escapes. Live updates come from sidebar-rail's jobs-updated
+ *  panel rebuild (renders-once guard) — EXPANDED keeps cards open across it. */
 openJobsWindow.renderRail = (app, c) => {
   const bar = document.createElement('div'); bar.className = 'jobs-rail-bar';
-  const btn = document.createElement('button'); btn.className = 'jobs-btn'; btn.textContent = t('Open window');
-  btn.onclick = () => openJobsWindow(app);
-  bar.appendChild(btn);
+  const summary = document.createElement('span'); summary.className = 'jobs-summary'; summary.style.flex = '1';
+  const btnNew = document.createElement('button'); btnNew.className = 'jobs-btn jobs-btn-ok'; btnNew.textContent = '＋ ' + t('New');
+  const btnRefresh = document.createElement('button'); btnRefresh.className = 'jobs-btn'; btnRefresh.textContent = '⟳';
+  bar.append(summary, btnNew, btnRefresh);
   const root = document.createElement('div'); root.className = 'jobs-rail-list';
   c.append(bar, root);
-  (async () => {
+  const focusId = app.sidebar?._jobsFocusId || null;
+  if (app.sidebar) app.sidebar._jobsFocusId = null;
+  async function render() {
     const r = await fetchJson('/api/jobs');
     if (!c.isConnected) return;
+    root.textContent = '';
+    if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; root.appendChild(e); return; }
     const jobs = r?.jobs || [];
+    const live = jobs.filter((j) => ['up', 'starting'].includes(j.state)).length;
+    const bad = jobs.filter((j) => ['failed', 'missed', 'unverified'].includes(j.state)).length;
+    const ask = jobs.filter((j) => j.state === 'awaiting-user').length;
+    summary.textContent = `${live} ${t('running')}${bad ? ` · ${bad} ${t('failed')}` : ''}${ask ? ` · ${ask} ${t('awaiting you')}` : ''}`;
     if (!jobs.length) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('No background jobs yet — agents register them with vibespace-job'); root.appendChild(e); return; }
-    renderList(app, root, jobs, { compact: true, refresh: () => { c.textContent = ''; openJobsWindow.renderRail(app, c); } });
-  })();
+    renderList(app, root, jobs, { compact: true, refresh: render });
+    const esc = await fetchJson('/api/jobs-escapes');
+    if (!c.isConnected) return;
+    if (esc && (esc.systemd?.length || esc.crontab?.length)) {
+      const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
+      root.appendChild(h);
+      for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) { const e = document.createElement('div'); e.className = 'jobs-esc-line'; e.textContent = line; root.appendChild(e); }
+    }
+    if (focusId) { const el = root.querySelector(`[data-job="${CSS.escape(focusId)}"]`); el?.scrollIntoView({ block: 'center' }); el?.classList.add('jobs-focus'); }
+  }
+  btnNew.onclick = () => openCreateDialog(app, render);
+  btnRefresh.onclick = render;
+  render();
 };
 
-export function openInteractWindow(app, jobId, opts = {}) {
-  const winInfo = app.wm.createWindow({ title: t('Job input'), type: 'job-interact', syncId: opts.syncId, openSpec: { action: 'openJobInteract', jobId }, width: 420, height: 420 });
-  const root = document.createElement('div');
-  root.style.cssText = 'height:100%;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px';
-  winInfo.content.appendChild(root);
-  let version = null;
-  async function render() {
-    const r = await fetchJson(`/api/jobs/${jobId}`);
-    root.textContent = '';
-    const job = r?.job;
-    if (!job) { root.textContent = t('Job not found'); return; }
-    winInfo.setTitle?.(job.name + ' — ' + t('needs your input'));
-    const pending = job.interaction?.pending;
-    if (!pending) { const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = t('Nothing to answer — the job continues.'); root.appendChild(e); return; }
-    version = pending.version;
-    const p = pending.panel;
-    const title = document.createElement('div'); title.style.cssText = 'font-weight:600;font-size:14px'; title.textContent = p.title || job.name; root.appendChild(title);
-    const values = {};
-    for (const b of p.blocks || []) {
+/** Shared interaction-panel form renderer (2.357.0 extraction): one
+ *  implementation behind the inline card detail AND the fallback window.
+ *  `pending` = job.interaction.pending; renders blocks + submits answers. */
+function renderPanelBlocks(app, root, jobId, pending, { onAnswered } = {}) {
+  const version = pending.version;
+  const p = pending.panel;
+  const title = document.createElement('div'); title.style.cssText = 'font-weight:600;font-size:13px'; title.textContent = p.title || ''; if (title.textContent) root.appendChild(title);
+  const values = {};
+  for (const b of p.blocks || []) {
       if (b.type === 'md') { const el = document.createElement('div'); el.className = 'markdown-preview'; el.innerHTML = DOMPurify.sanitize(marked.parse(String(b.text || ''))); root.appendChild(el); }
       else if (b.type === 'image') { const img = document.createElement('img'); img.style.cssText = 'max-width:100%;border-radius:var(--radius-sm)'; img.src = '/api/file/raw?path=' + encodeURIComponent(b.path); root.appendChild(img); }
       else if (b.type === 'progress') { const pr = document.createElement('progress'); pr.max = 100; pr.value = Number(b.value) || 0; pr.style.width = '100%'; root.appendChild(pr); }
@@ -283,13 +337,32 @@ export function openInteractWindow(app, jobId, opts = {}) {
             root.textContent = '';
             const okEl = document.createElement('div'); okEl.className = 'empty-hint'; okEl.textContent = t('Submitted — the job continues.');
             root.appendChild(okEl);
-            setTimeout(() => render(), 2500);
+            onAnswered?.();
           };
           w.appendChild(btn);
         }
         root.appendChild(w);
       }
-    }
+  }
+}
+
+/** Fallback window for hosts without the rail (mobile / activityRail off) —
+ *  the rail panel is the primary surface (2.357.0). */
+export function openInteractWindow(app, jobId, opts = {}) {
+  if (!opts.forceWindow && focusJobsPanel(app, jobId)) return null;
+  const winInfo = app.wm.createWindow({ title: t('Job input'), type: 'job-interact', syncId: opts.syncId, openSpec: { action: 'openJobInteract', jobId }, width: 420, height: 420 });
+  const root = document.createElement('div');
+  root.style.cssText = 'height:100%;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px';
+  winInfo.content.appendChild(root);
+  async function render() {
+    const r = await fetchJson(`/api/jobs/${jobId}`);
+    root.textContent = '';
+    const job = r?.job;
+    if (!job) { root.textContent = t('Job not found'); return; }
+    winInfo.setTitle?.(job.name + ' — ' + t('needs your input'));
+    const pending = job.interaction?.pending;
+    if (!pending) { const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = t('Nothing to answer — the job continues.'); root.appendChild(e); return; }
+    renderPanelBlocks(app, root, jobId, pending, { onAnswered: () => setTimeout(render, 2500) });
   }
   const off = app.ws.onGlobal((msg) => { if (msg.type === 'jobs-updated' && msg.id === jobId) render(); });
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch { } });

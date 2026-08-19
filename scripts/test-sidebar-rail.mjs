@@ -111,6 +111,22 @@ try {
   await evalJs(`document.querySelector('.context-menu')?.remove()`);
   check('plugins panel renders', await openPanel('plugins'));
 
+  // Background Work panel is sidebar-NATIVE (2.357.0, owner verdict): cards
+  // expand INLINE — a sidebar click must never spawn a window, and the
+  // interact entry points land back in the sidebar
+  await evalJs(`fetch('/api/jobs', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind:'task', name:'smoke-job', cmd:{argv:['sh','-c','sleep 5']}, context:{payload:'smoke'}, access:{view:'all', control:'session'}})}).then(r=>r.json())`);
+  check('jobs panel renders', await openPanel('jobs'));
+  await sleep(800);
+  check('jobs toolbar renders (New button, no Open-window button)', await evalJs(`!!document.querySelector('.rail-panel-jobs .jobs-btn-ok') && ![...document.querySelectorAll('.rail-panel-jobs .jobs-btn')].some((b) => /open window/i.test(b.textContent))`));
+  check('smoke job card renders', await evalJs(`!!document.querySelector('.rail-panel-jobs [data-job]')`));
+  const winsBefore = await evalJs('app.wm.windows.size');
+  await evalJs(`document.querySelector('.rail-panel-jobs [data-job]').click()`);
+  await sleep(800);
+  check('card click expands INLINE detail', await evalJs(`!!document.querySelector('.rail-panel-jobs .jobs-detail')`));
+  check('…and spawns NO window', await evalJs('app.wm.windows.size') === winsBefore);
+  check('openJobInteract lands in the sidebar, not a window', await evalJs(`(() => { const before = app.wm.windows.size; const id = document.querySelector('.rail-panel-jobs [data-job]').dataset.job; app.openJobInteract(id); return app.wm.windows.size === before && app.sidebar._activeTab === 'jobs'; })()`));
+  await sleep(600);
+
   // System panel: the btop-like process manager (2.354.0) — real rows from
   // the live /api/sysinfo/procs, search narrows, expand exposes the actions
   check('system panel renders', await openPanel('system'));
