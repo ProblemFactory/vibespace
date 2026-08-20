@@ -75,7 +75,12 @@ if (!args.includes('--permission-prompt-tool')) {
 
 // Write initial metadata
 try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
-const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [] };
+// caps: protocol features THIS wrapper process understands — the server must
+// gate new stdin protocols on them (2.361.1, the c1206711 lost-image incident:
+// a 2.360.0 server sent _frame_file pointers to a pre-2.360.0 wrapper, which
+// forwarded them verbatim to claude = message silently dropped). Wrappers are
+// LONG-LIVED: sessions spawned before an update run old code forever.
+const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true } };
 let metaTimer = null;
 
 function persistMeta() {

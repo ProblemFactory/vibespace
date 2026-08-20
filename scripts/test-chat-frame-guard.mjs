@@ -50,6 +50,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const got = fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n') : [];
   ok(got.length === 1 && got[0] === frame, `frame-file payload reaches the child INTACT as one line (${got[0]?.length || 0} bytes)`);
   ok(!fs.existsSync(fp), 'frame file unlinked after forwarding');
+  // 2.361.1 skew gate: the wrapper ADVERTISES frame-file support in its boot
+  // meta — the server only sends pointer lines to wrappers that do (a
+  // pre-2.360.0 wrapper forwarded pointers verbatim to claude = silent loss;
+  // the c1206711 lost-image incident).
+  try {
+    const m = JSON.parse(fs.readFileSync(meta, 'utf8'));
+    ok(m?.caps?.frameFile === true, 'wrapper boot meta advertises caps.frameFile');
+  } catch (e) { ok(false, 'wrapper boot meta advertises caps.frameFile', e.message); }
   // shredded file must be dropped, never wrapped
   const bad = path.join(dir, 'bad.json');
   fs.writeFileSync(bad, frame.slice(0, 1000) + frame); // concatenated shred
@@ -89,6 +97,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const r2 = await svc.rescue({ sessionId: cid, cwd: '/tmp/x', backend: 'claude' });
   process.env.HOME = HOME0;
   ok(r2.replaced === 0 && r2.backup === null, 'second pass finds nothing (no backup litter)');
+}
+
+// ── 4. server-side capability gate wiring pins (the c1206711 skew incident:
+//      a capability-less wrapper must NEVER be sent a pointer line) ──
+{
+  const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  ok(/session\._wrapperFrameFile === undefined/.test(ws) && /caps\?\.frameFile/.test(ws), 'ws-handler gates the bypass on the wrapper meta caps marker');
+  ok(/if \(session\._wrapperFrameFile\) \{/.test(ws), 'pointer line only sent to capability-advertising wrappers');
+  ok(/1024 \* 1024\)/.test(ws) && ws.includes('it was NOT sent. Terminate + Resume'), 'capability-less wrapper + oversized frame → VISIBLE refusal, never silent loss');
+  const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  ok(sv.includes("'chat-frames'") && sv.includes('48 * 3600 * 1000'), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
