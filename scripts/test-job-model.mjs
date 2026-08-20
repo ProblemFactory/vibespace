@@ -113,5 +113,16 @@ const spilled = M.renderNotifStash(stash, { spillPath: '/data/job-notifications-
 ok(spilled.includes('/data/job-notifications-read/conv.md'), 'truncated stash points at the untruncated spill file');
 ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-read/conv.md' }).includes('full history: /data'), 'floor form carries the spill path too');
 
+// ── CLI --at wiring pins (2.361.3, the 7h-off notify-test incident): the
+//    relative "+2m" form and the resolved-time echo must stay in the CLI —
+//    agents think in UTC, bare datetimes parse server-local.
+{
+  const fs2 = require('fs');
+  const path2 = require('path');
+  const cli = fs2.readFileSync(path2.join(path2.dirname(new URL(import.meta.url).pathname), '..', 'data/bin/vibespace-job'), 'utf-8');
+  ok(cli.includes('const parseAt') && cli.includes("(\\d+)\\s*m"), 'vibespace-job --at supports relative "+2m" forms');
+  ok(cli.includes('next fire:'), 'vibespace-job echoes the resolved fire time on creation');
+  ok(cli.includes('SERVER-LOCAL'), 'usage/help teaches the bare-datetime = server-local trap');
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
