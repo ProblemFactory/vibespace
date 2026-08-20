@@ -2020,7 +2020,17 @@ server.listen(PORT, HOST, () => {
         } catch {}
       }
     } catch {}
-    if (swept) console.log(`  Swept ${swept} orphaned session-buffer/attach-cfg files (>7d untouched)`);
+    // data/chat-frames: the NEW wrapper unlinks after forwarding; a frame sent
+    // to a pre-2.360.0 wrapper is orphaned forever (2.361.1 skew incident) —
+    // age-based like everything else here, 48h is far past any redelivery use.
+    try {
+      const fdir = path.join(__dirname, 'data', 'chat-frames');
+      const fcut = Date.now() - 48 * 3600 * 1000;
+      for (const fn of fs.readdirSync(fdir)) {
+        try { if (fs.statSync(path.join(fdir, fn)).mtimeMs < fcut) { fs.unlinkSync(path.join(fdir, fn)); swept++; } } catch {}
+      }
+    } catch {}
+    if (swept) console.log(`  Swept ${swept} orphaned session-buffer/attach-cfg/chat-frame files (age-based)`);
   }, 30000);
 
   console.log(`  Ready.\n`);

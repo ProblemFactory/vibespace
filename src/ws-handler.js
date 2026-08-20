@@ -376,13 +376,32 @@ function registerWsHandler(wss, ctx) {
             // remote wrapper can't see this filesystem).
             let payloadLine = stdinPayload;
             if (stdinPayload.length > 64 * 1024 && session.backend !== 'codex' && !session.host && session.socketPath) {
-              try {
-                const fdir = path.join(__dirname, '..', 'data', 'chat-frames');
-                fs.mkdirSync(fdir, { recursive: true });
-                const fp = path.join(fdir, `${data.sessionId}-${Date.now()}.json`);
-                fs.writeFileSync(fp, stdinPayload);
-                payloadLine = JSON.stringify({ type: '_frame_file', path: fp });
-              } catch (e) { console.log(`[${data.sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
+              // WRAPPER CAPABILITY GATE (2.361.1, the c1206711 lost-image
+              // incident): the _frame_file pointer is only understood by
+              // wrappers spawned from 2.360.0+ code. Wrappers are LONG-LIVED
+              // (dtach survives updates) — an old wrapper forwards the pointer
+              // verbatim to claude, which drops the unknown type SILENTLY and
+              // the message vanishes (frame file orphaned). Capability = the
+              // caps marker the wrapper writes into its meta at boot; unmarked
+              // wrappers keep the historical raw-stdin path (single-screenshot
+              // sized frames rode it safely for months) and anything past the
+              // shredding-risk range is REFUSED with a visible error instead
+              // of lost (no-silent-failures law).
+              if (session._wrapperFrameFile === undefined) {
+                try { session._wrapperFrameFile = !!(readSessionMeta(session.sockName)?.caps?.frameFile); } catch { session._wrapperFrameFile = false; }
+              }
+              if (session._wrapperFrameFile) {
+                try {
+                  const fdir = path.join(__dirname, '..', 'data', 'chat-frames');
+                  fs.mkdirSync(fdir, { recursive: true });
+                  const fp = path.join(fdir, `${data.sessionId}-${Date.now()}.json`);
+                  fs.writeFileSync(fp, stdinPayload);
+                  payloadLine = JSON.stringify({ type: '_frame_file', path: fp });
+                } catch (e) { console.log(`[${data.sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
+              } else if (stdinPayload.length > 1024 * 1024) {
+                try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, error: 'Message too large for this session’s long-running wrapper (started before the update): it was NOT sent. Terminate + Resume the session, then send it again.' })); } catch { }
+                break;
+              }
             }
             session._isStreaming = true;
             session.pty.write(payloadLine + '\n');
