@@ -26,3 +26,5 @@ server. `vibespace-docs <topic>` prints it.
 - Anything the USER needs must be in your CHAT REPLY too; tool writes are for
   the board/other agents, not a substitute for telling the human.
 - IDs you cannot see behave as nonexistent (uniform not-found, no oracle).
+
+- **vibespace-msg** — message other agent sessions (Task-Group scoped reach; `vibespace-docs msg`).

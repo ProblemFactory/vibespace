@@ -6,11 +6,10 @@
 const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
-const peerMsg = require('../peer-messaging.js');
 const fs = require('fs');
 const path = require('path');
 
-function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions }) {
+function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver }) {
   const jm = new JobManager({
     dataDir,
     broadcast: (type, payload) => broadcastAll({ type, ...payload }),
@@ -67,31 +66,12 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // post the message. The CLI applies its own inbound controls/throttles —
     // we never bypass a hold. Any miss (no registry entry, dead pid, socket
     // error) reports {ok:false} so the engine stashes for resume injection.
-    peerReachable: (cid) => { try { return !!peerMsg.findPeer(cid); } catch { return false; } },
-    deliverToConversation: async (cid, text) => {
-      try {
-        // lane 0 (EXPERIMENTAL, default OFF): the session's VibeSpace channel
-        // — richer <channel source="vibespace"> framing when the session was
-        // spawned with agents.vibespaceChannel on
-        try {
-          if (serverSetting('agents.vibespaceChannel') === true && activeSessions) {
-            for (const [wid, s] of activeSessions) {
-              if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
-              const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
-              if (!fs.existsSync(sock)) continue;
-              const rc = await peerMsg.postChannelEvent(sock, text, { kind: 'background_job' });
-              if (rc.ok) return { ok: true, lane: 'channel', peerName: s.name || null };
-            }
-          }
-        } catch (e) { log('[jobs] channel lane failed (falling through to peer inbox):', e.message); }
-        // lane 1 (GA): the CLI's cross-session messaging inbox
-        const peer = peerMsg.findPeer(cid);
-        if (!peer) return { ok: false, reason: 'no live inbox for this conversation on this machine' };
-        const r = await peerMsg.postToPeer(peer, text);
-        if (!r.ok) { log(`[jobs] peer post to ${peer.socketPath} failed: ${r.reason}`); return { ok: false, reason: r.reason }; }
-        return { ok: true, lane: 'message', peerName: peer.name || null };
-      } catch (e) { log('[jobs] deliverToConversation threw:', e.message); return { ok: false, reason: e.message }; }
-    },
+    peerReachable: (cid) => { try { return deliver.peerReachable(cid); } catch { return false; } },
+    // ONE delivery ladder for every conversation-bound message (2.362.0):
+    // channel-socket → local CLI inbox → owning machine's daemon (peer-post
+    // op) → the caller stashes on a miss. Shared with agent-to-agent
+    // messaging via src/server/conversation-deliver.js.
+    deliverToConversation: (cid, text) => deliver.deliverToConversation(cid, text),
   });
 
   const USER = { isUser: true, groups: new Set() };

@@ -35,6 +35,7 @@ const SESSION_FIELDS = {
   _streamingLabel:     { owner: 'stdout', persisted: null,      note: 'current activity label (thinking/tool/responding)' },
   _interruptTimer:     { owner: 'ws',     persisted: null,      note: 'delayed-SIGINT fallback handle (2s, cancel on protocol success)' },
   _wrapperFrameFile:   { owner: 'ws',     persisted: null,      note: 'wrapper understands _frame_file pointers (meta.caps at wrapper boot; 2.361.1 skew gate — old wrappers silently DROP pointer lines)' },
+  _msgReachability:    { owner: 'agent',  persisted: 'meta',    note: 'per-session external reach override for agent messaging (2.362.0 Channels v1: inherit|visible|messageable, widening only; set via Session Properties)' },
   _stdinAckReceived:   { owner: 'stdout', persisted: null,      note: 'wrapper _stdin_ack seen — broken-pty detector input' },
   _pendingEditor:      { owner: 'ws',     persisted: null,      note: 'Ctrl+G editor open in flight' },
 

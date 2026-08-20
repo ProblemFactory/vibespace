@@ -32,6 +32,7 @@ const SUITES = [
   'test-path-mounts',   // /svc/<name>/ reverse proxy: real http+ws round trips + store rules
   'test-otel-truth',    // per-request billing truth: parser + loopback ingest + bake override + wiring pins
   'test-chat-frame-guard', // 38MB-poisoning trio: poison guard + frame-file bypass (real wrapper) + rescue
+  'test-agent-msg',     // Channels v1: ACL matrix + delivery ladder + wiring pins
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
   'test-cli-usage-parse', 'test-rate-limit-capture', 'test-agentd-upgrade-loop', 'test-vendor-whitelist', 'test-wrapper-files',

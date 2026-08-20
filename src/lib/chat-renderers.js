@@ -6,7 +6,8 @@
 
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { escHtml, copyText, showContextMenu } from './utils.js';
+import { escHtml, copyText, showContextMenu, showToast } from './utils.js';
+import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
 import { agentMemoryPathRes } from './agent-meta.js';
@@ -259,6 +260,25 @@ class ChatRenderers {
     return el;
   }
 
+  // Resolve a peer session NAME to the sidebar's live session record. Names
+  // are mutable and non-unique — a miss is EXPECTED (renamed/killed sender);
+  // log it and tell the user instead of failing silently (owner ask).
+  _resolvePeerSession(name) {
+    if (!name) return null;
+    const all = this.app?.sidebar?._allSessions || [];
+    const hits = all.filter((x) => (x.webuiName || x.name) === name || this.app?.sidebar?.getCustomName?.(x) === name);
+    return hits.length === 1 ? hits[0] : (hits[0] || null);
+  }
+  _jumpToPeer(name) {
+    const s = this._resolvePeerSession(name);
+    if (!s) {
+      track('peer-jump-unresolved', { name: String(name || '').slice(0, 40) });
+      showToast(t('Session “{name}” not found — it may have been renamed or closed', { name }));
+      return;
+    }
+    if (s.webuiId) this.app.attachSession(s.webuiId, s.webuiName || name, s.cwd, { mode: s.webuiMode, backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.sessionId });
+    else showToast(t('Session “{name}” is not open right now', { name }));
+  }
   _renderPeerMsg(msg, rawText) {
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-system chat-peer-message';
@@ -269,8 +289,24 @@ class ChatRenderers {
     core = core.replace(/^Another Claude session sent a message:\s*\n/, '');
     const cut = core.indexOf('\nThis came from another Claude session');
     if (cut > 0) core = core.slice(0, cut);
-    const from = msg.peerFrom ? t('Message from “{name}”', { name: msg.peerFrom }) : t('Message from another session');
-    el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>${escHtml(from)}</div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
+    const nameHtml = msg.peerFrom
+      ? t('Message from “{name}”', { name: `<span class="chat-peer-name" role="link" tabindex="0">${escHtml(msg.peerFrom)}</span>` })
+      : escHtml(t('Message from another session'));
+    el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>${nameHtml}</div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
+    if (msg.peerFrom) {
+      const nameEl = el.querySelector('.chat-peer-name');
+      if (nameEl) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(msg.peerFrom); };
+      el.querySelector('.chat-peer-head').oncontextmenu = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const s = this._resolvePeerSession(msg.peerFrom);
+        showContextMenu(e, [
+          { label: t('Open session'), action: () => this._jumpToPeer(msg.peerFrom) },
+          ...(s ? [{ label: t('Session properties'), action: () => this.app.openSessionProps(s.webuiId || s) }] : []),
+          { label: t('Copy sender name'), action: () => copyText(msg.peerFrom) },
+        ]);
+        if (!s) track('peer-menu-unresolved', { name: String(msg.peerFrom || '').slice(0, 40) });
+      };
+    }
     return el;
   }
 

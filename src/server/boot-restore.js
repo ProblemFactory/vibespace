@@ -295,6 +295,7 @@ function restoreSessions() {
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; // plan C model ladder survives restarts
+    session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
     attachToDtach(id, socketPath, session);
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
@@ -454,6 +455,7 @@ function restoreAgentdPipeSessions() {
       agentdSession: true, keeperSid: id, agentdPipe: true,
       _permissionMode: meta.permissionMode || null, _effort: meta.effort || null,
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
+      _msgReachability: meta.msgReachability || null,
     };
     hosts.device(null).then(async (dm) => {
       let offset = 0;
@@ -569,6 +571,7 @@ async function readoptOrphanKeeperSessions() {
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; // plan C model ladder survives restarts
+    session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
     setupSessionPty(session, id, ptyProc);
     writeSessionMeta(sockName, { ...meta, orphanedAt: undefined, readoptedAt: Date.now(), webuiSessionId: id, mode: 'chat' });
     try { fs.unlinkSync(path.join(META_DIR, f)); } catch { }

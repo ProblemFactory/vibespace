@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver }) {
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -236,6 +236,8 @@ function sessionToolsIntro(T) {
       'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Your conversation is auto-messaged when a job finishes/fails/asks (create output says so); inside a job, `vibespace-job announce "found X"` notifies NOW (watch jobs: exit code ≠ newsworthiness); `subscribe <id> [--filter regex]` = get another visible job\'s messages; `list --mine|--subscribed` and `show <id>` re-inspect everything you registered. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. FULL manual anytime: `vibespace-job docs`; every tool: `vibespace-docs [status|ask|task|jobs]`.');
   }
   L.push(
+    'Other agent sessions may be working alongside you. `vibespace-msg list` shows the ones you can reach (your Task Group by default); `vibespace-msg send <name|id> "text"` delivers into their conversation — an idle receiver pays a billed turn, so message purposefully (what you need + whether you expect a reply). Replies arrive here as peer-message cards. Manual: vibespace-docs msg.');
+  L.push(
     'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
     'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
     '  vibespace-exit list                     machines the user enabled as exits',
@@ -326,6 +328,16 @@ app.get('/api/agent/task-context', (req, res) => {
         if (missed) context = context ? context + '\n\n' + missed : missed;
         const dig = jm.digestFor(caller, Buffer.byteLength(context || '', 'utf-8'));
         if (dig) context = context ? context + '\n\n' + dig : dig;
+      }
+    } catch { }
+    // msg-stash drain — INDEPENDENT of the jobs engine (review-caught: it sat
+    // inside the jm.ready gate, so a jobs init failure silently held promised
+    // messages forever; messaging has its own failure domain)
+    try {
+      if (deliver) {
+        const caller2 = jobsCaller(s, id);
+        const pm = renderMsgStash(deliver.drainStash(caller2.conversationId));
+        if (pm) context = context ? context + '\n\n' + pm : pm;
       }
     } catch { }
     res.json({ success: true, context });
@@ -515,6 +527,14 @@ app.get('/api/agent/prompt-context', (req, res) => {
         s._jobsEventsSeenTs = u.lastTs; // marker advances at render (accepted-lost on drop)
       }
     } catch { }
+    // msg-stash drain — INDEPENDENT of the jobs engine (see task-context note)
+    try {
+      if (deliver) {
+        const caller2 = jobsCaller(s, id);
+        const pm = renderMsgStash(deliver.drainStash(caller2.conversationId));
+        if (pm) parts.push(pm);
+      }
+    } catch { }
     // Oversize belt (2.113.0): full contexts + the mixed-delivery manifest
     // embed the persisted-output rescue line, lone diff blocks don't (each is
     // small) — but several parts can still cross Claude's ~10KB hook persist
@@ -551,7 +571,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
       if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
-      segs.push('vibespace-docs [status|ask|task|jobs] — the full manual for any of these tools');
+      segs.push('vibespace-docs [status|ask|task|jobs|msg] — the full manual for any of these tools');
       const std = perTurnReminderEnabled() && segs.length
         ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
         : '';
@@ -919,7 +939,93 @@ function findVisible(jm, caller, ref) {
 // teaching carries one pointer line; docs are served from THIS server's
 // checkout so they always match the running version). Reading docs never
 // depends on subsystem readiness or tool toggles — a manual is harmless.
-const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md' };
+// ── Agent-to-agent messaging — Communication Channels v1 (2.362.0, owner-
+// designed ACL; docs/agent/msg-manual.md). Endpoints are conversations; the
+// ACL (src/msg-acl.js, PURE) scopes by Task Group: same group = mutual reach,
+// group externalVisibility / per-session msgReachability open a scope up
+// (widening only). Delivery rides the shared ladder (conversation-deliver:
+// local inbox → owning machine's daemon → stash-for-injection). This is a
+// COORDINATION boundary, not a security one (same-OS-user agents could always
+// reach the raw CLI sockets); it exists so groups stay quiet by default.
+const msgAcl = require('./msg-acl.js');
+// stash → injection block (drain-at-render; same accepted-lost stance as the
+// jobs stash). Budgeted: 6 entries × 400 chars — the injection channel has a
+// hard 10KiB wrap upstream.
+function renderMsgStash(entries) {
+  if (!entries || !entries.length) return '';
+  const rows = entries.slice(-6).map((e) => `- [${new Date(e.ts).toISOString().slice(5, 16)}Z] from "${e.fromName || e.source || 'unknown'}": ${String(e.text || '').slice(0, 400)}`);
+  const elided = entries.length > 6 ? `\n(${entries.length - 6} older message(s) elided)` : '';
+  return `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${elided}\n(reply with vibespace-msg send "<name>" "..." if a response is expected)`;
+}
+const _msgRate = new Map(); // senderCid|targetCid → {ts, text}
+function _msgEndpoints(exceptId) {
+  const out = [];
+  for (const [tid, t] of activeSessions) {
+    if (tid === exceptId) continue;
+    const cid = t.claudeSessionId || t.backendSessionId;
+    if (!cid) continue;
+    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, initialGroupId: t._initialGroupId }) || []).map((g) => g.id);
+    out.push({ id: tid, t, cid, groups, reachability: t._msgReachability || null });
+  }
+  return out;
+}
+const _groupExtVis = (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } };
+const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id);
+app.get('/api/agent/msg/peers', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.json({ peers: [] });
+  const [s, id] = hit;
+  const myGroups = _myGroupIds(s, id);
+  const peers = [];
+  for (const ep of _msgEndpoints(id)) {
+    const lv = msgAcl.levelFor(ep, myGroups, _groupExtVis);
+    if (!msgAcl.canSee(lv)) continue;
+    const st = sessionStatus.get(sessionStatusKey(ep.t, ep.id)) || sessionStatus.get(`webui:${ep.id}`) || {};
+    peers.push({
+      name: ep.t.name || null, conversationId: ep.cid, level: lv,
+      groups: ep.groups, state: st.state || null, stateReason: st.reason || null,
+      machine: ep.t.host || null, mode: ep.t.mode || null,
+    });
+  }
+  res.json({ peers });
+});
+app.post('/api/agent/msg/send', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const [s, id] = hit;
+  const to = String(req.body?.to || '').trim();
+  const text = String(req.body?.text || '');
+  if (!to || !text.trim()) return res.status(400).json({ error: 'need {to, text}' });
+  if (Buffer.byteLength(text, 'utf-8') > 16 * 1024) return res.status(400).json({ error: 'message too large (16KB cap) — write a file and send its path instead' });
+  const myCid = s.claudeSessionId || s.backendSessionId || null;
+  const myGroups = _myGroupIds(s, id);
+  // resolve name-or-cid among MESSAGEABLE endpoints only — an unknown or
+  // merely-invisible target gets ONE uniform error (no existence oracle)
+  const matches = _msgEndpoints(id).filter((ep) => ep.cid === to || (ep.t.name && ep.t.name === to));
+  const reachable = matches.filter((ep) => msgAcl.canMessage(msgAcl.levelFor(ep, myGroups, _groupExtVis)));
+  if (!reachable.length) return res.status(404).json({ error: 'no messageable session by that name/id (not found, not visible to you, or visible-only) — vibespace-msg list shows your reach' });
+  if (reachable.length > 1) return res.status(400).json({ error: `ambiguous name — ${reachable.length} sessions match; use the conversation id from vibespace-msg list` });
+  const target = reachable[0];
+  if (target.cid === myCid) return res.status(400).json({ error: 'that is this session' });
+  // flood floor: 30s per pair + identical text 10min (a delivered message
+  // opens a BILLED turn on an idle receiver — never let two agents ping-pong)
+  const rk = (myCid || id) + '|' + target.cid;
+  const rate = _msgRate.get(rk) || {};
+  if (rate.text === text && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
+  if (rate.ts && Date.now() - rate.ts < 30000) return res.status(429).json({ error: 'rate floor: one message per target per 30s' });
+  _msgRate.set(rk, { ts: Date.now(), text });
+  if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
+  const fromName = s.name || 'unnamed session';
+  const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${text}`;
+  const r = deliver ? await deliver.deliverToConversation(target.cid, framed) : { ok: false, reason: 'delivery not wired' };
+  if (r.ok) return res.json({ delivered: true, lane: r.lane, peerName: r.peerName || target.t.name || null, machine: r.hostId || null });
+  deliver?.stashFor(target.cid, { source: 'agent', fromName, text });
+  res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
+});
+
+const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md' };
 const serveAgentDoc = (req, res, topic) => {
   // jbt_ (in-job) tokens may read docs too — a watch job's script legitimately
   // wants the manual; job tokens never pass agentSession, so check them first
