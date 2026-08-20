@@ -46,6 +46,12 @@ Three independent audiences:
 
 **Quiet-success law**: a scheduled run ending fine is silent by default
 (ring entry only). Opt successes into events+notify with `--notify-ok`.
+EXCEPTION (2.361.4): a scheduled BARE `echo`/`printf` command is recognized
+as a reminder-by-instinct and gets per-fire notify ON automatically (a bare
+echo's only purpose is its output — silent success would make it a no-op
+forever; a real agent lost days to that). `notify-cron --text "..."` is
+still the cleaner primitive for pure reminders. Creation output always
+states the per-fire semantics — read it.
 
 ## 4. `announce` — when exit codes can't say what happened
 
