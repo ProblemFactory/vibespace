@@ -170,6 +170,18 @@ async function expandDetail(app, el, j, refresh) {
     nr.textContent = t('Auto-notify') + ': ' + lastTxt + ov;
     d.appendChild(nr);
   }
+  // delivery journal (2.361.5, owner ask): every delivery ATTEMPT with lane +
+  // outcome — the monitoring view for "did my reminder actually reach anyone".
+  if (Array.isArray(job.notifyLog) && job.notifyLog.length) {
+    const dl = document.createElement('div'); dl.className = 'jobs-meta';
+    dl.textContent = t('Delivery log') + ':';
+    d.appendChild(dl);
+    for (const e of job.notifyLog.slice(-6).reverse()) {
+      const row = document.createElement('div'); row.className = 'jobs-run';
+      row.textContent = `${new Date(e.ts).toLocaleTimeString()} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason ? ' — ' + e.reason : ''}`;
+      d.appendChild(row);
+    }
+  }
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
     rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})`;

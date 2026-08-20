@@ -2627,6 +2627,7 @@ export default {
   "Open window": "ウィンドウを開く",
   "No background jobs yet — agents register them with vibespace-job": "バックグラウンドジョブはまだありません — エージェントが vibespace-job で登録します",
   "Auto via the CLI (burn-aware background refresh)": "CLI 経由の自動（消費量に応じたバックグラウンド更新）",
+  "Delivery log": "配信ログ",
   "Auto-notify": "自動通知",
   "Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Toggle globally in Settings → Integration, per group in the group window.": "この会話が所有するバックグラウンドジョブは、完了・失敗・パーク・入力要求時に会話へメッセージを送ります。会話が閉じている間は通知がキューされ、再開時に注入されます。全体設定は 設定 → 連携、グループ別はグループウィンドウで。",
   "Background jobs: notify the owner conversation": "バックグラウンドジョブ：所有会話へ通知",

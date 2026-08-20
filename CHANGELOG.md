@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.361.5
+
+- **notify-cron fires now message the OWNER CONVERSATION, and every job carries a delivery journal** (the 设备运维大师 relay + owner monitoring ask). The notify action delivered to the USER inbox/toast only and logged a passive group event — `_notifyOwner` was never invoked for it, so the agent that scheduled its own reminder (the whole dated-obligation pattern) was never woken; urgency/notify-inherit were innocent. Now a notify fire rides the same owner-delivery stack as every job event (toggles → rate floor → live message → stash fallback) IN ADDITION to the user inbox. New `notifyLog` ring (cap 12) journals every delivery ATTEMPT — lane (user-inbox / message / channel / stash / suppressed / off), outcome, target, reason — serialized to the panel ("Delivery log" under Auto-notify) so delivery is monitorable instead of inferred. test-jobs-engine +2 (50).
+
 ## 2.361.4
 
 - **The run+echo reminder instinct is now supported instead of silently no-op'ing** (owner call, closing the 79928a2b silent-reminder loop). Scheduling a bare `echo`/`printf` is a natural first way to build a reminder, but scheduled successes don't notify by default — that shape was a permanent silent no-op, and the creation response's "auto-notify: ON — messaged on completion/failure" actively read as "each fire will message me". Now: a scheduled pure echo/printf command (no pipes/chains/substitution) defaults per-fire notify ON with a line explaining it (explicit `--notify-ok`/`--notify off` still wins, `notify-cron` remains the cleaner primitive), and EVERY scheduled task creation states the quiet-success semantics explicitly ("SUCCESSFUL fires are SILENT … add --notify-ok"). Manual updated; wiring-pinned in test-job-model (58).

@@ -116,6 +116,20 @@ try {
   const rn3 = C.create({ kind: 'task', name: 'notif-off', notify: 'off', cmd: { argv: ['sh', '-c', 'exit 1'] }, owner }, caller);
   const jn3 = C.jobs.get(rn3.job.id);
   ok(await until(() => jn3.state === 'failed', 15000) && (await sleep(300), !jn3.lastNotify || jn3.lastNotify.lane === 'off'), 'notify:off job never posts (lastNotify lane=off)', JSON.stringify(jn3.lastNotify));
+  // 7d. notify-ACTION crons reach the OWNER CONVERSATION too (2.361.5, the
+  //     设备运维大师 hunt): the notify action used to hit only the user inbox —
+  //     the agent that scheduled its own reminder was never messaged. Also
+  //     pins the per-job delivery journal (owner monitoring ask).
+  const delivered2 = [];
+  C.d.deliverToConversation = async (cid, text) => { delivered2.push({ cid, text }); return { ok: true, lane: 'message', peerName: 'peer-X' }; };
+  C._notifyRate.clear();
+  const rc = C.create({ kind: 'cron', name: 'remind-me', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: '提醒正文XYZ', urgency: 'low' }, owner }, caller);
+  const jc = C.jobs.get(rc.job.id);
+  jc.nextFireAt = Date.now() - 1000;
+  await C._cronTick();
+  ok(delivered2.length === 1 && delivered2[0].cid === 'conv-T' && delivered2[0].text.includes('提醒正文XYZ'), 'notify-cron fire MESSAGES the owner conversation (not just the user inbox)', JSON.stringify(delivered2));
+  ok((jc.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok) && (jc.notifyLog || []).some((e) => e.lane === 'message' && e.ok), 'delivery journal records BOTH lanes (user-inbox + owner message)', JSON.stringify(jc.notifyLog));
+
   // preview honesty
   C.d.peerReachable = () => false;
   const pv = C.notifyPreview(jn1);
