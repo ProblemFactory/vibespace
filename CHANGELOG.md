@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.361.6
+
+- **Cross-session peer message card: sender NAME instead of the raw unix socket path, and the border is back** (owner report). The card labeled itself "Message from "uds:/run/user/…/….sock"" — origin.from is the transport address, while the sender's session NAME rides right next to it (origin.name since recent CLIs, and the wrapper tag's from-name attribute on older records). New precedence: origin.name → from-name attr → a non-socket origin.from → generic label (a socket path is never a user-facing identity). The missing border was a same-specificity cascade fight: `.chat-msg-system`'s display:flex/centering vs `.chat-peer-message`'s card styles — now a two-class selector (`.chat-msg.chat-peer-message`, display:block + full border + magenta left bar) wins deterministically.
+
 ## 2.361.5
 
 - **notify-cron fires now message the OWNER CONVERSATION, and every job carries a delivery journal** (the 设备运维大师 relay + owner monitoring ask). The notify action delivered to the USER inbox/toast only and logged a passive group event — `_notifyOwner` was never invoked for it, so the agent that scheduled its own reminder (the whole dated-obligation pattern) was never woken; urgency/notify-inherit were innocent. Now a notify fire rides the same owner-delivery stack as every job event (toggles → rate floor → live message → stash fallback) IN ADDITION to the user inbox. New `notifyLog` ring (cap 12) journals every delivery ATTEMPT — lane (user-inbox / message / channel / stash / suppressed / off), outcome, target, reason — serialized to the panel ("Delivery log" under Auto-notify) so delivery is monitorable instead of inferred. test-jobs-engine +2 (50).

@@ -27,6 +27,21 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   'api_retry',
 ]);
 
+
+// Cross-session peer display name (2.361.6, owner report: the card showed the
+// raw uds socket path). Precedence: origin.name (the CLI includes the sender's
+// session name since 2.1.23x) → the wrapper tag's from-name attribute (older
+// records) → a non-socket origin.from → null (renderer shows a generic label;
+// a unix socket path is never a user-facing identity).
+function peerDisplayName(origin, text) {
+  if (origin && origin.name) return String(origin.name);
+  const m = /<cross-session-message[^>]*\bfrom-name="([^"]+)"/.exec(String(text || ''));
+  if (m) return m[1];
+  const f = origin && origin.from;
+  if (f && f !== 'unknown' && !String(f).startsWith('uds:')) return String(f);
+  return null;
+}
+
 class MessageManager {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -432,7 +447,7 @@ class MessageManager {
         // same provenance law as the idle-wake user record — render the
         // peer card, never a "You" bubble of someone else's words
         msg.originKind = 'peer-message';
-        msg.peerFrom = a.origin.from && a.origin.from !== 'unknown' ? a.origin.from : null;
+        msg.peerFrom = peerDisplayName(a.origin, text);
       } else {
         msg.typed = true; // the user's own words — never a notification card
       }
@@ -662,7 +677,7 @@ class MessageManager {
         // path — the turn appeared to start from nothing. Same provenance law
         // as task-notification: origin.kind wins, render a distinct card.
         msg.originKind = 'peer-message';
-        msg.peerFrom = raw.origin.from && raw.origin.from !== 'unknown' ? raw.origin.from : null;
+        msg.peerFrom = peerDisplayName(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
       }
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
