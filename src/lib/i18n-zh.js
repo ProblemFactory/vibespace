@@ -1601,6 +1601,8 @@ export default {
   "No metrics yet — they accumulate as the app runs.": "还没有指标数据——随着应用运行会逐渐累积。",
   "metric": "指标",
   "latest": "最新",
+  "Per-request billing truth (local telemetry)": "每请求计费真值（本地遥测）",
+  "New LOCAL claude sessions export the CLI’s own OpenTelemetry api_request events to this VibeSpace instance over loopback (never to any external endpoint). Each event names the organization that ACTUALLY billed the request, so the usage ledger, quota estimates and pool decisions stay correct even while a running session still holds a pre-switch token after a pool account switch. Zero extra Anthropic traffic — the CLI pushes locally. Applies to sessions started after the change.": "新建的本地 claude 会话把 CLI 自带的 OpenTelemetry api_request 事件通过环回地址推给本 VibeSpace 实例（绝不发往任何外部端点）。每条事件都写明实际扣费的组织，因此即使池账号切换后运行中的会话仍持有切换前的 token，用量账本、配额估算和池决策也保持正确。零额外 Anthropic 流量——CLI 只往本机推送。对更改后新建的会话生效。",
   "Central collector token": "中央收集器令牌",
   "Sent as a Bearer Authorization header with forwarded batches when the collector requires a shared token (a VibeSpace collector always does). Leave empty if none is required.": "转发批次时作为 Bearer Authorization 头发送(VibeSpace 收集器必须提供共享令牌)。收集器不需要时留空。",
   "Fleet (central collector)": "机群(中央收集器)",

@@ -493,6 +493,12 @@ const SETTINGS_SCHEMA = {
     description: t('Sent as a Bearer Authorization header with forwarded batches when the collector requires a shared token (a VibeSpace collector always does). Leave empty if none is required.'),
     category: t('Session'), liveApply: true,
   },
+  'usage.otelTruth': {
+    type: 'boolean', default: true,
+    label: t('Per-request billing truth (local telemetry)'),
+    description: t('New LOCAL claude sessions export the CLI’s own OpenTelemetry api_request events to this VibeSpace instance over loopback (never to any external endpoint). Each event names the organization that ACTUALLY billed the request, so the usage ledger, quota estimates and pool decisions stay correct even while a running session still holds a pre-switch token after a pool account switch. Zero extra Anthropic traffic — the CLI pushes locally. Applies to sessions started after the change.'),
+    category: t('Session'), liveApply: true,
+  },
   'accounts.activeUsagePolling': {
     type: 'boolean', default: false, confirmOn: true,
     label: t('⚠ Actively poll subscription usage (automation risk)'),

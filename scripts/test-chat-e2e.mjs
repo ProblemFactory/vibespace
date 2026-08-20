@@ -103,6 +103,23 @@ try {
   check('session bills through the seeded oat account', (s?.accountId || s?.account) === acct.id, JSON.stringify(s?.accountId));
 } catch (e) { check('session bills through the seeded oat account', false, e.message); }
 
+// OTel truth loop (2.361.0): the spawned session got OTEL_* env pointing at
+// the worktree server's /otel receiver — the CLI's api_request event must
+// land in the truth stash (proves env injection + receiver + parser E2E on
+// every push). Exporter flushes every 5s; poll past the settle.
+{
+  const stashFp = path.join(wt, 'data', 'usage-history', 'otel-truth.ndjson');
+  let truthOk = false, tail = '';
+  for (let i = 0; i < 24 && !truthOk; i++) {
+    try {
+      tail = fs.readFileSync(stashFp, 'utf-8').trim();
+      truthOk = tail.split('\n').some((l) => { try { const r = JSON.parse(l); return r.event === 'api_request' && r.rid && r.orgUuid; } catch { return false; } });
+    } catch { }
+    if (!truthOk) await sleep(1000);
+  }
+  check('OTel truth stash captured the real api_request (env→receiver→parser E2E)', truthOk, tail.slice(-200));
+}
+
 // kill + transcript-litter cleanup (the real ~/.claude is shared by design)
 ws.send(JSON.stringify({ type: 'kill', sessionId: sid }));
 await sleep(1500);
@@ -112,5 +129,5 @@ try {
   fs.rmSync(projDir, { recursive: true, force: true });
 } catch { }
 ws.close();
-console.log(failed ? `\n${failed} FAILED` : '\nALL PASS (5)');
+console.log(failed ? `\n${failed} FAILED` : '\nALL PASS (6)');
 process.exit(failed ? 1 : 0);

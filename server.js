@@ -1102,6 +1102,24 @@ const usageHistory = new UsageHistory({
     return { type: a.backend === 'codex' ? 'codex-subscription' : a.type, name: a.name, tail: a.tail };
   },
 });
+// OTel TRUTH receiver (2.361.0, B-345b): local claude sessions push their own
+// api_request telemetry (organization.id + request_id) here — the observed
+// billing org overrides link-intent attribution at ledger bake time and
+// writes corrective attribution records (hot-switch stale-token class).
+// Routes are cookie-exempt (auth.js); the module's loopback+token gate is the
+// only door. Zero vendor calls — the CLI pushes to us.
+const otelIngest = require('./src/server/otel-ingest.js').create({
+  dataDir: path.join(__dirname, 'data'),
+  PORT,
+  getUsageHistory: () => usageHistory,
+  identityGroups: () => usageIdentityGroupsCached(),
+  listAccounts: () => accounts.list().accounts || [],
+  serverSetting,
+});
+app.post('/otel/v1/logs', otelIngest.logs);
+app.post('/otel/v1/metrics', otelIngest.ok);
+app.post('/otel/v1/traces', otelIngest.ok);
+usageHistory.setTruthLookup(otelIngest.truthLookup);
 // Attribution log: dedup'd per (sid,acct) so a resume under a DIFFERENT account
 // is captured with its timestamp (per-request-by-time attribution). Called from
 // writeSessionMeta whenever a session has both a claudeSessionId and account.
@@ -1627,6 +1645,7 @@ const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./s
 registerWsHandler(wss, {
   poolChooser: poolChooserForModel,
   sbNoteServerOp,
+  otelEnv: otelIngest.envFor,
   agentdRemote: { ensureAgentdOnHost, agentdHostToken, agentdDir: AGENTD_DIR, attachBundle: path.join(__dirname, 'data', 'bin', 'vibespace-agentd-attach.js') },
   dialBridge,
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,

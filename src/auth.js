@@ -216,6 +216,11 @@ class Auth {
       // blanket cookie gate here would make public mounts impossible; the
       // per-mount check is pinned by scripts/test-path-mounts.mjs.
       if (p === '/svc' || p.startsWith('/svc/')) return next();
+      // OTel truth ingest (2.361.0): the local claude CLI's OTLP exporter has
+      // no cookie — src/server/otel-ingest.js enforces loopback remoteAddress
+      // + the persisted x-vibespace-otel token as the ONLY gate (pinned by
+      // scripts/test-otel-truth.mjs).
+      if (p.startsWith('/otel/')) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

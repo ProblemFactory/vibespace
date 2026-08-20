@@ -1601,6 +1601,8 @@ export default {
   "No metrics yet — they accumulate as the app runs.": "指標データはまだありません——アプリの稼働に伴い蓄積されます。",
   "metric": "指標",
   "latest": "最新",
+  "Per-request billing truth (local telemetry)": "リクエスト単位の課金トゥルース（ローカルテレメトリ）",
+  "New LOCAL claude sessions export the CLI’s own OpenTelemetry api_request events to this VibeSpace instance over loopback (never to any external endpoint). Each event names the organization that ACTUALLY billed the request, so the usage ledger, quota estimates and pool decisions stay correct even while a running session still holds a pre-switch token after a pool account switch. Zero extra Anthropic traffic — the CLI pushes locally. Applies to sessions started after the change.": "新規のローカル claude セッションは CLI 内蔵の OpenTelemetry api_request イベントをループバック経由でこの VibeSpace インスタンスに送ります（外部エンドポイントには一切送信しません）。各イベントには実際に課金された組織が記録されるため、プールのアカウント切替後に旧トークンを保持したままのセッションがあっても、使用量台帳・クォータ推定・プール判断は正しく保たれます。Anthropic への追加トラフィックはゼロ——CLI はローカルにのみ送信します。変更後に開始したセッションに適用されます。",
   "Central collector token": "中央コレクタートークン",
   "Sent as a Bearer Authorization header with forwarded batches when the collector requires a shared token (a VibeSpace collector always does). Leave empty if none is required.": "転送バッチに Bearer Authorization ヘッダーとして付与されます(VibeSpace コレクターは共有トークン必須)。不要な場合は空欄のままにしてください。",
   "Fleet (central collector)": "フリート(中央コレクター)",
