@@ -43,8 +43,14 @@ function parseRateLimitEvent(msg) {
   // of dropping to 'other', so warnings/rejections anchor the scoped
   // estimator (its -45% burst error traced directly to anchor starvation).
   const scopedM = /^seven_day_(?!overage)(\w+)$/.exec(rawType || '');
+  // seven_day_overage_included IS the weekly lane — it's the accounting the
+  // CLI actually enforces on once extra usage exists (usage vs limit+credits).
+  // Live incident (2026-08-20, the "monthly spend limit" reject): mapping it
+  // to 'other' meant a REJECTED weekly+monthly-cap event was surfaced but
+  // never marked — the 7d cache stayed at 0.53 and the pool kept re-picking a
+  // member that was hard-dead until its reset.
   const kind = rawType === 'five_hour' ? 'fiveHour'
-    : (rawType === 'seven_day' || rawType === 'weekly') ? 'sevenDay'
+    : (rawType === 'seven_day' || rawType === 'weekly' || rawType === 'seven_day_overage_included') ? 'sevenDay'
       : scopedM ? 'scoped'
         : rawType ? 'other' : null;
   let u = info.utilization ?? info.used_percentage;

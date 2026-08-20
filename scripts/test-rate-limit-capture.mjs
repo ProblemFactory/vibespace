@@ -93,5 +93,32 @@ fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ── ⑤ the monthly-spend-cap reject (live incident 2026-08-20): the weekly
+//     overage-included lane IS the enforced weekly bucket — a rejected event
+//     must mark sevenDay dead with the EVENT's resetsAt, and the overage
+//     fields (org_level_disabled_until) must land in the cache. Mapping it to
+//     'other' surfaced-but-never-marked: the pool kept re-picking a member
+//     that was hard-dead until its reset.
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-ovg-'));
+  fs.writeFileSync(path.join(dir, 'sub-m1.json'), JSON.stringify({ fetchedAt: 1000, sevenDay: { utilization: 0.53, status: 'allowed' } }));
+  // shape from the REAL captured buffer record (sess-2-1787194614944)
+  const ev = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1787328000, rateLimitType: 'seven_day_overage_included', overageStatus: 'rejected', overageDisabledReason: 'org_level_disabled_until', isUsingOverage: false } });
+  ok(ev.kind === 'sevenDay' && ev.status === 'rejected', '⑤ overage-included weekly reject parses as sevenDay');
+  const r = captureRateLimitEvent({ cacheDir: dir, key: 'sub-m1', identityIds: ['sub-m1'], ev, now: 1787194614944 });
+  ok(r.ok && r.dead, '⑤ capture reports dead (caller triggers immediate pool eval)');
+  const c = JSON.parse(fs.readFileSync(path.join(dir, 'sub-m1.json'), 'utf-8'));
+  ok(c.sevenDay.utilization === 1 && c.sevenDay.status === 'limited' && c.sevenDay.resetsAt === 1787328000, '⑤ sevenDay marked dead until the EVENT reset (not a 24h guess)', JSON.stringify(c.sevenDay));
+  ok(c.overage && c.overage.disabledReason === 'org_level_disabled_until', '⑤ monthly-spend-cap state (overage fields) lands in the cache');
+  // the warning form carries the enforced-lane utilization — written as sevenDay
+  const evW = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1787677200, rateLimitType: 'seven_day_overage_included', utilization: 0.77, isUsingOverage: false, surpassedThreshold: 0.75 } });
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'rlc-ovg2-'));
+  fs.writeFileSync(path.join(dir2, 'sub-m2.json'), JSON.stringify({ fetchedAt: 1000 }));
+  captureRateLimitEvent({ cacheDir: dir2, key: 'sub-m2', identityIds: ['sub-m2'], ev: evW, now: 2000 });
+  const c2 = JSON.parse(fs.readFileSync(path.join(dir2, 'sub-m2.json'), 'utf-8'));
+  ok(Math.abs(c2.sevenDay.utilization - 0.77) < 1e-9 && c2.sevenDay.status === 'allowed_warning', '⑤ overage-included utilization reading writes as sevenDay (the enforced lane)');
+  fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(dir2, { recursive: true, force: true });
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
