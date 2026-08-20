@@ -169,7 +169,7 @@ class JobManager {
       }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
       const eff = M.notifyEffective(job, this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
-      if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._dirty = true; return; }
+      if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._notifyLogPush(job, { lane: 'off', ok: false, reason: 'auto-notify off (' + eff.source + ')' }); return; }
       this._deliverTo(cid, job, ev, {});
     } catch (e) { this.d.log('[jobs] owner notify failed:', e.message); }
   }
@@ -184,7 +184,7 @@ class JobManager {
     // identical repeat is dropped outright.
     const rate = this._notifyRate.get(cid) || {};
     if (rate.text === text && rate.ts && now() - rate.ts < 600_000) {
-      if (!subscriber) { job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._dirty = true; }
+      if (!subscriber) { job.lastNotify = { ts: now(), lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }; this._notifyLogPush(job, { lane: 'suppressed', ok: false, reason: 'duplicate within 10min' }); }
       return;
     }
     if (rate.ts && now() - rate.ts < 30_000) {
@@ -202,6 +202,7 @@ class JobManager {
     Promise.resolve(deliver).then((r) => {
       if (r && r.ok) {
         if (!subscriber) job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
+        this._notifyLogPush(job, { lane: r.lane || 'message', ok: true, to: r.peerName || null, ...(subscriber ? { sub: true } : {}) });
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber });
       }
@@ -212,12 +213,20 @@ class JobManager {
       this._dirty = true;
     });
   }
+  /** bounded per-job delivery journal (2.361.5, owner ask: "投递细节我好监控")
+   *  — one entry per delivery ATTEMPT outcome, any lane. Rides the registry
+   *  record; the panel renders it under the Auto-notify row. */
+  _notifyLogPush(job, e) {
+    job.notifyLog = [...(job.notifyLog || []), { ts: now(), ...e }].slice(-12);
+    this._dirty = true;
+  }
   _stashNotif(cid, job, ev, reason, { stampLast = true } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
     q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low' });
     if (q.length > 30) q.splice(0, q.length - 30); // per-conversation cap; oldest fall off
     this.pendingNotifs.set(cid, q);
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
+    this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
   }
   /** explicit per-conversation subscription to a VISIBLE job's notifications
@@ -589,7 +598,15 @@ class JobManager {
       job._lastNotify = job._lastNotify || {};
       if (job._lastNotify.key === key && now() - job._lastNotify.ts < 6 * 3600e3) { job._lastNotify.count = (job._lastNotify.count || 1) + 1; return; } // dedupe window
       job._lastNotify = { key, ts: now(), count: 1 };
-      try { this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { }
+      try {
+        this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null });
+        this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
+      } catch { }
+      // THE 设备运维大师 gap (2.361.5): a notify action only reached the USER
+      // inbox — the agent that scheduled its own reminder was never messaged
+      // (an agent-created dated obligation woke nobody). Owner-conversation
+      // delivery rides the same toggles/rate-floor/stash as every job event.
+      this._notifyOwner(job, { what: a.text || job.name });
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
       // ONE persistent child per cron (2.343.3, owner report: every fire used
@@ -759,6 +776,7 @@ class JobManager {
       owner: { createdBy: job.owner?.createdBy, groups: job.owner?.groupsSnapshot || [] },
       access: job.access, createdAt: job.createdAt, cronParent: job.cronParent || null,
       notify: job.notify || 'inherit', lastNotify: job.lastNotify || null, subscribersCount: (job.subscribers || []).length,
+      notifyLog: (job.notifyLog || []).slice(-8),
       // full creation parameters (2.347.0, owner ask: agents must be able to
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,

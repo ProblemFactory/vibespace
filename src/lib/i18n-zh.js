@@ -2627,6 +2627,7 @@ export default {
   "Open window": "打开窗口",
   "No background jobs yet — agents register them with vibespace-job": "还没有后台任务——agent 用 vibespace-job 注册",
   "Auto via the CLI (burn-aware background refresh)": "CLI 自动（燃烧感知的后台刷新）",
+  "Delivery log": "投递日志",
   "Auto-notify": "自动通知",
   "Background jobs owned by this conversation message it when they finish, fail, get parked, or ask for input; while it is closed, notifications queue and inject at resume. Toggle globally in Settings → Integration, per group in the group window.": "本对话名下的后台任务在完成/失败/被停放/请求输入时会给它发消息；对话关闭期间通知排队，resume 时注入。全局开关在 设置 → 集成，按组开关在组窗口。",
   "Background jobs: notify the owner conversation": "后台任务：通知所属对话",
