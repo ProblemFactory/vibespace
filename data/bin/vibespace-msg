@@ -1,0 +1,57 @@
+#!/usr/bin/env node
+// vibespace-msg — agent-to-agent messaging, Communication Channels v1
+// (2.362.0, STATIC tracked). Auth: VIBESPACE_SESSION_TOKEN. Reach is scoped
+// by Task Group ACL server-side: same group = mutual; other groups only when
+// opened (group externalVisibility / per-session override). Delivery: a LIVE
+// target's CLI gets the message now (an IDLE receiver opens a BILLED turn —
+// message like you'd interrupt a colleague, not like logging); an unreachable
+// target gets it injected on its next turn. Full manual: vibespace-docs msg.
+'use strict';
+const API = process.env.VIBESPACE_API;
+const SESS = process.env.VIBESPACE_SESSION_TOKEN;
+if (!API || !SESS) { console.error('vibespace-msg: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
+
+const args = process.argv.slice(2);
+const verb = args[0];
+
+async function call(method, p, body) {
+  const res = await fetch(API + p, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch((e) => ({ _neterr: e.message }));
+  if (res._neterr) { console.error('vibespace-msg: server unreachable (' + res._neterr + ')'); process.exit(3); }
+  let j = {};
+  try { j = await res.json(); } catch { }
+  if (j.error) { console.error(j.error); process.exit(1); }
+  return j;
+}
+
+const USAGE = `vibespace-msg — message other agent sessions (Task-Group scoped)
+  vibespace-msg list                    ← sessions you can see/message (name · id · group · state)
+  vibespace-msg send <name|id> "text"   ← deliver now (idle receiver = a billed turn for THEM) or queue
+Reach: same Task Group = mutual by default; other groups only if opened by the user.
+Keep it purposeful — state what you need and whether you expect a reply.`;
+
+(async () => {
+  if (!verb || verb === 'list') {
+    if (!verb) console.log(USAGE + '\n');
+    const r = await call('GET', '/api/agent/msg/peers');
+    if (!r.peers || !r.peers.length) { console.log('no sessions visible to you right now.'); return; }
+    for (const p of r.peers) {
+      console.log(`${p.level === 'messageable' ? '✉' : '·'} ${p.name || '(unnamed)'} — ${p.conversationId}`);
+      console.log(`    ${p.level}${p.machine ? ' · on ' + p.machine : ''}${p.state ? ' · ' + p.state + (p.stateReason ? ': ' + p.stateReason.slice(0, 60) : '') : ''}`);
+    }
+    console.log('\n"·" = visible only (cannot be messaged). Send: vibespace-msg send <name|id> "..."');
+    return;
+  }
+  if (verb === 'send') {
+    const to = args[1];
+    const text = args[2];
+    if (!to || !text) { console.error('usage: vibespace-msg send <name|id> "text"'); process.exit(1); }
+    const r = await call('POST', '/api/agent/msg/send', { to, text });
+    if (r.delivered) console.log(`delivered (${r.lane}${r.machine ? ' via ' + r.machine : ''}) to "${r.peerName || to}" — if they reply, it arrives as a peer message in this conversation`);
+    else console.log(`not delivered now (${r.reason}) — ${r.note || 'queued for their next turn'}`);
+    return;
+  }
+  console.log(USAGE);
+})();

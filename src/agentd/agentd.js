@@ -1147,7 +1147,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post'],
         });
         return;
       }
@@ -1578,6 +1578,23 @@ function serveConnection(sock) {
             // set (the 2.300.0 three-touch rule); an op-less reply times out.
             mux.control({ op: 'sysinfo-result', id: msg.id, ...r });
           } catch (e) { mux.control({ op: 'sysinfo-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
+      if (msg.op === 'peer-post') {
+        // Cross-machine conversation delivery (2.362.0, B-dfd2): the hub asks
+        // THIS machine to post one message into a conversation whose CLI runs
+        // here — same shared findPeer+postToPeer as the hub's local rung, run
+        // where the inbox socket actually lives. The CLI applies its own
+        // inbound controls; we never bypass a hold.
+        (async () => {
+          try {
+            const pm = require('./../peer-messaging.js');
+            const peer = pm.findPeer(String(msg.cid || ''));
+            if (!peer) { mux.control({ op: 'peer-post-result', id: msg.id, ok: false, reason: 'no live inbox for this conversation on this machine' }); return; }
+            const r = await pm.postToPeer(peer, String(msg.text || ''));
+            mux.control({ op: 'peer-post-result', id: msg.id, ok: !!r.ok, reason: r.reason || null, peerName: peer.name || null });
+          } catch (e) { mux.control({ op: 'peer-post-result', id: msg.id, error: String(e.message || e) }); }
         })();
         return;
       }

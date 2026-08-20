@@ -80,7 +80,13 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - `GET /api/sync/:store` — SyncStore snapshot `{version, data}` for initial page load (stores: `drafts`, `settings`)
 - `GET /proxy/<url>` — full-rewriting web proxy via node-unblocker (HTML/CSS URL rewrite, JS XHR/WS rewrite, header stripping)
 
-#### OTel truth ingest (2.361.0)
+#### Agent messaging — Channels v1 (2.362.0)
+- `GET /api/agent/msg/peers` (vsst_) — ACL-visible sessions: {name, conversationId, level, groups, state, machine}.
+- `POST /api/agent/msg/send` (vsst_) — {to: name|cid, text ≤16KB} → delivered {lane, machine?} | stashed. 30s/pair floor, 10min dup dedupe, uniform not-found.
+- `POST /api/sessions/:id/msg-reachability` (cookie) — {level: inherit|visible|messageable} per-session widening override.
+- agentd op `peer-post` {cid, text} → `peer-post-result` {ok, reason, peerName} (capability 'peer-post').
+
+### OTel truth ingest (2.361.0)
 - `POST /otel/v1/logs` — OTLP JSON from LOCAL claude CLIs (spawn-injected env). Cookie-exempt; the ONLY gate = loopback remoteAddress + per-boot `x-vibespace-otel` header token. api_request events → truth map (rid→acct) + corrective attribution + data/usage-history/otel-truth.ndjson.
 - `POST /otel/v1/metrics`, `POST /otel/v1/traces` — tolerant 200 (not consumed; exporter configured logs-only).
 

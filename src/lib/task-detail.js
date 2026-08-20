@@ -356,6 +356,19 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     bnWrap.append(bnLbl, bnSel);
     ctxSec.appendChild(bnWrap);
 
+    // Channels v1 (2.362.0): how reachable this group's sessions are to agent
+    // sessions OUTSIDE the group (inside the group reach is always mutual)
+    const evWrap = document.createElement('label');
+    evWrap.className = 'task-detail-folder-rec task-detail-inject';
+    evWrap.title = t('Agent-to-agent messaging reach for sessions OUTSIDE this group. Closed (default): outsiders cannot list or message this group\'s sessions. Visible: outsiders can list them. Messageable: outsiders can also send them messages. Inside the group, sessions always see and message each other.');
+    const evLbl = document.createElement('span'); evLbl.textContent = t('External visibility') + ': ';
+    const evSel = document.createElement('select'); evSel.className = 'toolbar-select';
+    for (const [v, l] of [['none', t('Closed (default)')], ['visible', t('Visible')], ['messageable', t('Messageable')]]) { const o = document.createElement('option'); o.value = v; o.textContent = l; evSel.appendChild(o); }
+    evSel.value = task.externalVisibility || 'none';
+    evSel.onchange = () => patch({ externalVisibility: evSel.value === 'none' ? null : evSel.value });
+    evWrap.append(evLbl, evSel);
+    ctxSec.appendChild(evWrap);
+
     // ── Color ──
     const colorSec = section(t('Color'));
     const swatchRow = document.createElement('div');

@@ -1239,13 +1239,37 @@ app.post('/api/user-todos/:id', (req, res) => {
 const { setupAgentRoutes } = require('./src/agent-routes');
 // ── Background Work (2.342.0): jobs engine — constructed here, INITIALIZED
 // only after listen (failure isolated; §5 of docs/design-background-work.md).
+// Shared conversation delivery ladder (2.362.0): jobs notifications AND
+// agent-to-agent messages ride one implementation — local CLI inbox, then the
+// owning machine's daemon (conversation-index names it), then the durable
+// stash drained at that conversation's next context injection.
+const deliver = require('./src/server/conversation-deliver.js').create({
+  dataDir: path.join(__dirname, 'data'),
+  peerMsg: require('./src/peer-messaging.js'),
+  getHosts: () => hosts,
+  getConvIndex: () => hosts && hosts.convIndex,
+  serverSetting, activeSessions,
+  log: (...a) => console.log(...a),
+});
 const jobsWiring = require('./src/server/jobs-wiring.js').create({
-  app, dataDir: path.join(__dirname, 'data'),
+  app, dataDir: path.join(__dirname, 'data'), deliver,
   broadcastAll: (msg) => { const payload = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(payload); } catch {} } },
   userTodos, log: (...a) => console.log(...a),
   serverSetting, taskGroups: tasks, activeSessions, // owner auto-notify (2.344.0): toggles + channel-lane session lookup
 });
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs });
+// Channels v1 (2.362.0): per-session external reach override for agent
+// messaging — user-set (Session Properties), widening only; ACL reads the
+// live field, meta persists it across restarts.
+app.post('/api/sessions/:id/msg-reachability', (req, res) => {
+  const s = activeSessions.get(String(req.params.id));
+  if (!s) return res.status(404).json({ error: 'no such active session' });
+  const lv = String((req.body || {}).level || 'inherit');
+  if (!['inherit', 'visible', 'messageable'].includes(lv)) return res.status(400).json({ error: 'level must be inherit|visible|messageable' });
+  s._msgReachability = lv === 'inherit' ? null : lv;
+  try { writeSessionMeta(s.sockName, { ...readSessionMeta(s.sockName), msgReachability: s._msgReachability }); } catch { }
+  res.json({ ok: true, level: lv });
+});
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver });
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -2048,7 +2072,7 @@ function shutdown() {
   try { userTodos.flush(); } catch {} // debounced user-todo writes
   try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
-  try { jobsWiring.shutdown(); } catch {} // jobs store flush + engine lock release
+  try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release
   process.exit(0);
 }
 process.on('SIGINT', () => {

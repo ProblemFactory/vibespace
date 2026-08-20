@@ -972,6 +972,12 @@ class TaskGroupManager {
     // global agents.jobNotify for jobs owned by this group's sessions; null =
     // inherit. Any group's explicit false wins over another's true (quietest).
     if (patch.jobNotify !== undefined) t.jobNotify = patch.jobNotify === true ? true : patch.jobNotify === false ? false : null;
+    // Communication Channels v1 (2.362.0): how visible this group's sessions
+    // are to sessions OUTSIDE the group — 'none' (default, opaque) |
+    // 'visible' (listable) | 'messageable' (listable + can be messaged).
+    if (patch.externalVisibility !== undefined) {
+      t.externalVisibility = ['visible', 'messageable'].includes(patch.externalVisibility) ? patch.externalVisibility : null;
+    }
     // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
     // client bundle may still send it; a stored dormant t.plan stays untouched.
     if (patch.backlog !== undefined) {
