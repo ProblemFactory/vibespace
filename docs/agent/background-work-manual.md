@@ -10,7 +10,7 @@ poll is the interface; nothing here ever auto-triggers an agent run.
 |---|---|---|
 | **task** | `vibespace-job run "CMD" --name X` | runs once to completion; interruptible; pollable forever (record kept 14d after done) |
 | **service** | add `--keep-up` | kept running: crash backoff, parks after 6 fast crashes, revived by `start`; survives server restarts AND pod rebuilds (boot replay) |
-| **cron** | add `--every 30m` / `--cron "41 9 * * *"` / `--at "2026-09-05 06:00"` | fires `CMD` as a task on schedule (ONE child record, each fire = a run), or `notify-cron` for pure reminders |
+| **cron** | add `--every 30m` / `--cron "41 9 * * *"` / `--at "+5m"` | fires `CMD` as a task on schedule (ONE child record, each fire = a run), or `notify-cron` for pure reminders. **`--at` time forms**: prefer RELATIVE `"+5m"`/`"+1h30m"` (unambiguous) or ISO with `Z`; a bare `"2026-09-05 06:00"` is parsed in the SERVER'S LOCAL timezone — NOT UTC, even though every timestamp you see in your transcript is UTC (a real agent lost 7 hours to this). Creation echoes the resolved fire time — READ IT. |
 
 Every job OUTLIVES your conversation. A future session (even after compaction)
 recovers everything with `poll`/`show` — that is why `--context` exists.

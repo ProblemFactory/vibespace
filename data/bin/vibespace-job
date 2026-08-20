@@ -58,7 +58,7 @@ const USAGE = `vibespace-job — background work that OUTLIVES this conversation
 create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, survives your compaction)"]
            [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
-           [--every 30m | --cron "41 9 * * *" | --at "2026-09-05 06:00"]              ← schedule (spawns CMD)
+           [--every 30m | --cron "41 9 * * *" | --at "+5m"|"2026-09-05 06:00"]        ← schedule (spawns CMD; bare datetime = SERVER-LOCAL tz — prefer relative "+5m"/"+1h30m" or ISO with Z)
          vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high]
 docs:    vibespace-job docs   — the FULL manual (notify/subscribe/announce/panels/patterns), read anytime
 read:    vibespace-job list [--mine|--subscribed] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
@@ -88,10 +88,22 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const isNotify = verb === 'notify-cron';
       const cmdStr = pos[1];
       if (!isNotify && !cmdStr) { console.error('usage: vibespace-job run "CMD" --name NAME [flags] — run with no args for full usage'); process.exit(1); }
+      // --at forms: epoch ms | RELATIVE "+2m"/"+1h30m" (unambiguous — prefer
+      // this) | ISO with Z/offset (exact) | bare datetime = SERVER-LOCAL time.
+      // The 2026-08-20 incident: an agent living in UTC transcript timestamps
+      // wrote a UTC wall time, bare-parse landed it 7h out (PDT) and the agent
+      // chased a "broken notification channel" — hence the relative form and
+      // the resolved-time echo below.
+      const parseAt = (s) => {
+        if (/^\d+$/.test(s)) return Number(s);
+        const rel = /^\+\s*((\d+)\s*h)?\s*((\d+)\s*m)?\s*((\d+)\s*s)?$/.exec(s.replace(/\s+/g, ''));
+        if (rel && (rel[2] || rel[4] || rel[6])) return Date.now() + (Number(rel[2] || 0) * 3600 + Number(rel[4] || 0) * 60 + Number(rel[6] || 0)) * 1000;
+        return new Date(s).getTime();
+      };
       const schedule = flags.every ? { everyMs: dur(flags.every), jitterPct: Number(flags.jitter) || 20 }
         : flags.cron ? { cron: flags.cron }
-        : flags.at ? { at: flags.at.match(/^\d+$/) ? Number(flags.at) : new Date(flags.at).getTime() } : null;
-      if (flags.at && (!schedule.at || Number.isNaN(schedule.at))) { console.error('cannot parse --at time: ' + flags.at); process.exit(1); }
+        : flags.at ? { at: parseAt(flags.at) } : null;
+      if (flags.at && (!schedule.at || Number.isNaN(schedule.at))) { console.error('cannot parse --at time: ' + flags.at + ' (use "+2m" relative, ISO with Z, or "YYYY-MM-DD HH:MM" in SERVER-LOCAL time)'); process.exit(1); }
       const body = {
         kind: isNotify ? 'cron' : schedule ? 'cron' : flags['keep-up'] ? 'service' : 'task',
         name: flags.name, note: flags.note || '',
@@ -117,6 +129,14 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const r = await call('POST', '/api/agent/jobs', body);
       const j = r.job;
       console.log(`started ${j.id} (${j.kind} ${j.name})${r.renamed ? ' — name was taken, auto-suffixed' : ''}`);
+      // RESOLVED-TIME ECHO: always show WHEN it actually fires, absolute UTC +
+      // countdown — a timezone mis-parse (bare datetimes are server-local)
+      // must be visible the second the job is created, not 7 hours later.
+      if (j.nextFireAt) {
+        const inMs = j.nextFireAt - Date.now();
+        const inTxt = inMs < 90000 ? Math.round(inMs / 1000) + 's' : inMs < 5400000 ? Math.round(inMs / 60000) + 'm' : (inMs / 3600000).toFixed(1) + 'h';
+        console.log(`next fire: ${new Date(j.nextFireAt).toISOString()} (in ${inTxt}) — if that is NOT what you meant, rm and recreate with --at "+5m"-style relative time`);
+      }
       console.log(`this job OUTLIVES your conversation. Poll it (even from a future session):\n  vibespace-job poll ${j.id}`);
       if (r.notify) {
         if (r.notify.enabled) console.log(`auto-notify: ON (${r.notify.source}) — ${r.notify.mode === 'live-message' ? 'this conversation will be messaged on completion/failure/ask' : 'no live inbox now; you will be told at your next resume'}. Polling still works anytime.`);

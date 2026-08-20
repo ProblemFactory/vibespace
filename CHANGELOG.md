@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.361.3
+
+- **`vibespace-job --at` timezone trap defused** (79928a2b's "broken cron notification" hunt): an agent living in UTC transcript timestamps scheduled a "+2 minutes" delivery test by writing the UTC wall time as a bare datetime — `new Date("…")` parses bare strings in the SERVER'S LOCAL timezone, landing the test 7 hours out, and the agent (whose actual cron jobs were firing on time all along — its real earlier bug was run+echo's notifyOk=false success-silence, which it had already fixed itself) was about to chase a phantom broken channel. Fix: `--at` now accepts unambiguous RELATIVE forms (`"+2m"`, `"+1h30m"`, `"+90s"`), creation always echoes the resolved fire time (`next fire: <ISO UTC> (in Xm)` — a mis-parse is visible immediately, not hours later), the error/help text teaches that bare datetimes are server-local, and the agent manual documents the trap. Wiring-pinned in test-job-model (56).
+
 ## 2.361.2
 
 - **"Monthly spend limit" rejections now mark the weekly bucket dead** (owner hit it switching a pooled session's creds). The CLI enforces the weekly lane on the OVERAGE-INCLUDED accounting once extra usage exists — its `rate_limit_event` then carries `rateLimitType: seven_day_overage_included`, which the capture mapped to 'other' (surfaced-but-never-marked): a member whose weekly was spent AND whose org monthly spend cap was exhausted (`org_level_disabled_until`) kept showing 7d=0.53 in the cache, so the pool re-picked the hard-dead member (only the banner's short-lived 5h mark kept it out). Now: `seven_day_overage_included` maps to sevenDay — a reject marks the bucket dead until the EVENT's reset (not a 24h guess) and the overage/monthly-cap fields land in the cache; warning-level readings write the enforced-lane utilization. test-rate-limit-capture gained the live-incident cases (30) and joined the release gate (it had never been in `npm run ci`).
