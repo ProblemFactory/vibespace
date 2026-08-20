@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.361.4
+
+- **The run+echo reminder instinct is now supported instead of silently no-op'ing** (owner call, closing the 79928a2b silent-reminder loop). Scheduling a bare `echo`/`printf` is a natural first way to build a reminder, but scheduled successes don't notify by default — that shape was a permanent silent no-op, and the creation response's "auto-notify: ON — messaged on completion/failure" actively read as "each fire will message me". Now: a scheduled pure echo/printf command (no pipes/chains/substitution) defaults per-fire notify ON with a line explaining it (explicit `--notify-ok`/`--notify off` still wins, `notify-cron` remains the cleaner primitive), and EVERY scheduled task creation states the quiet-success semantics explicitly ("SUCCESSFUL fires are SILENT … add --notify-ok"). Manual updated; wiring-pinned in test-job-model (58).
+
 ## 2.361.3
 
 - **`vibespace-job --at` timezone trap defused** (79928a2b's "broken cron notification" hunt): an agent living in UTC transcript timestamps scheduled a "+2 minutes" delivery test by writing the UTC wall time as a bare datetime — `new Date("…")` parses bare strings in the SERVER'S LOCAL timezone, landing the test 7 hours out, and the agent (whose actual cron jobs were firing on time all along — its real earlier bug was run+echo's notifyOk=false success-silence, which it had already fixed itself) was about to chase a phantom broken channel. Fix: `--at` now accepts unambiguous RELATIVE forms (`"+2m"`, `"+1h30m"`, `"+90s"`), creation always echoes the resolved fire time (`next fire: <ISO UTC> (in Xm)` — a mis-parse is visible immediately, not hours later), the error/help text teaches that bare datetimes are server-local, and the agent manual documents the trap. Wiring-pinned in test-job-model (56).

@@ -123,6 +123,11 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   ok(cli.includes('const parseAt') && cli.includes("(\\d+)\\s*m"), 'vibespace-job --at supports relative "+2m" forms');
   ok(cli.includes('next fire:'), 'vibespace-job echoes the resolved fire time on creation');
   ok(cli.includes('SERVER-LOCAL'), 'usage/help teaches the bare-datetime = server-local trap');
+  // 2.361.4: reminder-instinct support — a scheduled bare echo/printf gets
+  // per-fire notify by default, and every scheduled task creation states the
+  // quiet-success semantics (the "auto-notify: ON" line alone misled agents).
+  ok(cli.includes('echoReminder') && cli.includes('(echo|printf)'), 'scheduled bare echo/printf defaults notifyOk (reminder instinct)');
+  ok(cli.includes('SUCCESSFUL fires are SILENT'), 'scheduled-task creation states per-fire semantics');
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

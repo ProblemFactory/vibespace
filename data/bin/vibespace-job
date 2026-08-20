@@ -114,13 +114,23 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         stopWithOwner: !!flags['stop-with-owner'],
         notify: flags.notify === 'on' || flags.notify === 'off' ? flags.notify : undefined,
       };
+      // REMINDER-INSTINCT SUPPORT (2.361.4, owner call): "scheduled run of a
+      // bare echo" is a natural first way to build a reminder — but scheduled
+      // SUCCESSES don't notify by default (notifyOk=false), so that shape was
+      // a silent no-op forever (the 79928a2b never-reminded incident). A pure
+      // echo/printf command has no purpose BEYOND its output ⇒ default
+      // notifyOk=true for that shape (an explicit --notify-ok flag, or
+      // --notify off, still wins).
+      let echoReminder = false;
       if (isNotify) body.action = { type: 'notify', text: readArg(flags.text || ''), urgency: flags.urgency || 'normal' };
       else {
+        echoReminder = !!schedule && flags['notify-ok'] === undefined && flags.notify !== 'off'
+          && /^\s*(echo|printf)\b[^|&;<>`$()]*$/.test(cmdStr);
         const task = {
           cmd: { argv: ['sh', '-c', cmdStr], cwd: flags.cwd || process.cwd() },
           untilOutput: flags.until || null, timeoutMs: flags.timeout ? dur(flags.timeout) : null,
           stdinOpen: !!flags['stdin-open'], notifyUser: !!flags['notify-user'],
-          notifyOk: !!flags['notify-ok'], restart: flags.restart || 'on-failure',
+          notifyOk: !!flags['notify-ok'] || echoReminder, restart: flags.restart || 'on-failure',
           ports: [].concat(flags.port || []).filter(Boolean).map(Number), publish: !!flags.publish,
         };
         if (schedule) body.action = { type: 'spawn-task', task };
@@ -141,6 +151,14 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (r.notify) {
         if (r.notify.enabled) console.log(`auto-notify: ON (${r.notify.source}) — ${r.notify.mode === 'live-message' ? 'this conversation will be messaged on completion/failure/ask' : 'no live inbox now; you will be told at your next resume'}. Polling still works anytime.`);
         else console.log(`auto-notify: OFF (${r.notify.reason}) — you will NOT be told when it finishes; poll it yourself: vibespace-job poll ${j.id}`);
+      }
+      // PER-FIRE semantics honesty for scheduled tasks: "auto-notify: ON"
+      // above means terminal/failure/ask events — an agent building a
+      // reminder reads it as "each fire will message me", which is false
+      // unless notifyOk (the 79928a2b silent-reminder incident). Say it.
+      if (!isNotify && j.kind === 'cron') {
+        if (echoReminder) console.log('reminder-style command detected (bare echo/printf on a schedule): per-fire notify turned ON for you — notify-cron is the cleaner primitive for pure reminders (vibespace-job notify-cron --text "...").');
+        else console.log(`scheduled task: SUCCESSFUL fires are SILENT (failures/asks/parks notify) — add --notify-ok to be messaged on every fire; for pure reminders use notify-cron.`);
       }
       if (r.survivalNote) console.log('runtime note: ' + r.survivalNote);
       break;
