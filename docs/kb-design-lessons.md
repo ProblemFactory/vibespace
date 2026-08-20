@@ -198,6 +198,8 @@ Mobile-specific UI code extracted into dedicated modules to keep desktop and mob
 
 **Approach history**: statusline parse / statusline hook / Keychain unlock / billable haiku probe / self-refreshing the OAuth token were ALL tried and rejected (token self-refresh ROTATES the refresh token out from under the CLI — the macOS forced-relogin incident; billable probe = quota to measure quota). Full list with reasons: docs/history-archive.md. Current: read-only token + on-demand/opt-in only + passive capture (2.60.0).
 
+**§9 addendum (2.361.0): the OTel truth channel is the third passive lane.** Passive statusline capture and rate_limit_event carry quota VALUES; the CLI's OpenTelemetry export (spawn-injected OTEL_* env → loopback `/otel/v1/logs`) carries per-request IDENTITY (organization.id + request_id). All three are CLI→local pushes — zero vendor HTTP from VibeSpace, no new §ban-safety surface. Never point the exporter at anything but 127.0.0.1, and never "poll" telemetry — the CLI's own flush cadence is the only clock.
+
 ### 10. Settings System (Global + Per-Terminal)
 **Global settings** (toolbar ⚙): Theme, font size (A-/A+), font family. Stored in `localStorage` (`termFontSize`, `termFontFamily`). Changes propagate to all terminals without per-terminal overrides.
 

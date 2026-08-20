@@ -27,7 +27,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
-    accounts, scheduleCtxSync, activeSessionsPayload,
+    accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice,
   } = ctx;
   return async function handleCreate(ws, data, attachedSessions) {
@@ -1451,6 +1451,20 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // All ride process-env, never argv. No account → the CLI's env
                 // is left as-is (CODEX_HOME inherited from the server, if any).
                 if (spawnAccount?.localEnv) Object.assign(env, spawnAccount.localEnv);
+                // Per-request billing TRUTH (2.361.0, B-345b): LOCAL claude
+                // sessions export the CLI's own api_request telemetry
+                // (organization.id + request_id) to the loopback OTLP
+                // receiver — the only channel that NAMES the billing org per
+                // request (hot-switch stale tokens make link-intent
+                // attribution wrong). Structurally local-only (remote CLIs
+                // get env via buildRemoteExec, never r6Env) but gated
+                // explicitly anyway; a user-provided OTEL endpoint in the
+                // session spec wins (we never clobber their telemetry).
+                if (!session.host && backend === 'claude' && typeof otelEnv === 'function'
+                    && !(sessionSpec.env && sessionSpec.env.OTEL_EXPORTER_OTLP_ENDPOINT)) {
+                  const oe = otelEnv();
+                  if (oe) Object.assign(env, oe);
+                }
                 return env;
               })();
             if (r6Wanted && hosts?.device) {

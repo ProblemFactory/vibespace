@@ -161,7 +161,7 @@ const WS_CTX_CONTRACT = [
   'NODE_CMD', 'DTACH_CMD', 'ENV_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV',
   'adapterRegistry', 'pty', 'path', 'fs', 'os', 'execFileSync', 'ensureDir', 'hosts',
   'accounts', 'scheduleCtxSync', 'activeSessionsPayload',
-  'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice',
+  'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice', 'otelEnv',
 ];
 
 function registerWsHandler(wss, ctx) {
@@ -176,7 +176,7 @@ function registerWsHandler(wss, ctx) {
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
-    USAGE_STATUSLINE_CMD, userStatuslineCmd,
+    USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all

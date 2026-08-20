@@ -135,6 +135,27 @@ class UsageHistory {
     return ts >= list[0].ts - 10 * 60 * 1000 ? (list[0].pool || null) : null;
   }
 
+  // Public attribution view for one instant (OTel truth ingest compares the
+  // observed org against this before writing a corrective record).
+  attribAt(sid, ts) {
+    const attrib = this._attribMap();
+    const list = attrib[sid];
+    return {
+      acct: this._acctAt(sid, ts, attrib, null),
+      pool: this._poolAt(sid, ts, attrib),
+      // newest entry ts for the sid — corrective truth records bump past it
+      // so a late-flushed observation still dominates the walk going forward
+      lastTs: list && list.length ? list[list.length - 1].ts : 0,
+    };
+  }
+  // OBSERVED-truth override for the bake (2.361.0, B-345b): fn(rid) →
+  // accountId|null (null = machine global login) | undefined (no truth →
+  // fall back to the attribution walk). Wired to otel-ingest.truthLookup —
+  // the CLI's own api_request telemetry names the org that ACTUALLY billed a
+  // request, which the link-intent attribution gets wrong for up to a token
+  // lifetime after a pool hot-switch (the stale-token forensics).
+  setTruthLookup(fn) { this._truthLookup = typeof fn === 'function' ? fn : null; }
+
   _loadJson(f, fallback) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return fallback; } }
   // Pricing schema v2: { version, tiers:{opus,sonnet,haiku,fable,_default}, accounts:{ <id>: {discount} | {tiers:{...}} } }.
   // Subscriptions use the default tiers (the "API-equivalent" reference). API-key
@@ -269,7 +290,12 @@ class UsageHistory {
         cursors: this._cursors,
         onEvent: (ev) => {
           const minfo = meta[ev.sid] || {};
-          const acct = this._acctAt(ev.sid, ev.ts, attrib, minfo.acct);
+          // OBSERVED truth wins over link-intent (2.361.0, B-345b): the OTel
+          // api_request stream names the org that actually billed this rid —
+          // during hot-switch stale-token windows the attribution walk is
+          // wrong for up to a token lifetime. undefined = no truth → walk.
+          const tr = this._truthLookup ? this._truthLookup(ev.rid) : undefined;
+          const acct = tr !== undefined ? tr : this._acctAt(ev.sid, ev.ts, attrib, minfo.acct);
           const pool = this._poolAt(ev.sid, ev.ts, attrib);
           const ainfo = acct ? (this._resolveAccount(acct) || null) : null;
           push({
