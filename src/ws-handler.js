@@ -136,6 +136,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 // on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
 const { REMOTE_PRELUDE, nodeFinder, buildRemoteExec } = require('./remote-shell.js');
 const { sweepWriters } = require('./writer-sweep.js');
+const { wrapperCaps } = require('./server/wrapper-files.js');
 
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
   return new Promise((resolve, reject) => {
@@ -386,15 +387,25 @@ function registerWsHandler(wss, ctx) {
               // (dtach survives updates) — an old wrapper forwards the pointer
               // verbatim to claude, which drops the unknown type SILENTLY and
               // the message vanishes (frame file orphaned). Capability = the
-              // caps marker the wrapper writes into its meta at boot; unmarked
-              // wrappers keep the historical raw-stdin path (single-screenshot
-              // sized frames rode it safely for months) and anything past the
-              // shredding-risk range is REFUSED with a visible error instead
-              // of lost (no-silent-failures law).
-              if (session._wrapperFrameFile === undefined) {
-                try { session._wrapperFrameFile = !!(readSessionMeta(session.sockName)?.caps?.frameFile); } catch { session._wrapperFrameFile = false; }
+              // caps marker the wrapper writes into its SIDECAR at boot
+              // (data/session-buffers/<id>.json, read through the collision-
+              // aware resolver — 2.364.1: the 2.361.1 gate read the SERVER's
+              // data/session-meta record, which never carries caps, so every
+              // wrapper tested "old", every >1MB paste was refused for two
+              // releases and the refusal sent users to Terminate+Resume
+              // sessions that were already new; owner did it three times).
+              // Unmarked wrappers keep the historical raw-stdin path (single-
+              // screenshot sized frames rode it safely for months) and
+              // anything past the shredding-risk range is REFUSED with a
+              // visible, EVIDENCED error instead of lost (no-silent-failures
+              // law). Only a POSITIVE verdict is cached — a wrapper still
+              // booting a huge resume must not be locked out by its first read.
+              let caps = null;
+              if (session._wrapperFrameFile !== true) {
+                caps = wrapperCaps(BUFFERS_DIR, data.sessionId, session.socketPath);
+                if (caps.frameFile) session._wrapperFrameFile = true;
               }
-              if (session._wrapperFrameFile) {
+              if (session._wrapperFrameFile === true) {
                 try {
                   const fdir = path.join(__dirname, '..', 'data', 'chat-frames');
                   fs.mkdirSync(fdir, { recursive: true });
@@ -403,7 +414,13 @@ function registerWsHandler(wss, ctx) {
                   payloadLine = JSON.stringify({ type: '_frame_file', path: fp });
                 } catch (e) { console.log(`[${data.sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
               } else if (stdinPayload.length > 1024 * 1024) {
-                const refusal = 'Message too large for this session’s long-running wrapper (started before the update): it was NOT sent. Terminate + Resume the session, then send it again.';
+                const mb = (stdinPayload.length / 1048576).toFixed(1);
+                const started = caps?.startedAt ? new Date(caps.startedAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown time';
+                const why = caps?.reason === 'no-sidecar'
+                  ? 'its wrapper has not reported its capabilities yet (still starting up?) — wait a moment and send it again'
+                  : `its wrapper (started ${started}) predates the frame-file update — Terminate + Resume the session, then send it again`;
+                const refusal = `Message too large (${mb}MB) for this session: it was NOT sent — ${why}.`;
+                console.log(`[${data.sessionId}] chat-input REFUSED (${mb}MB): wrapper caps ${caps?.reason} (pid ${caps?.pid}, started ${caps?.startedAt})`);
                 try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: refusal, message: refusal })); } catch { }
                 break;
               }
