@@ -71,7 +71,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // channel-socket → local CLI inbox → owning machine's daemon (peer-post
     // op) → the caller stashes on a miss. Shared with agent-to-agent
     // messaging via src/server/conversation-deliver.js.
-    deliverToConversation: (cid, text) => deliver.deliverToConversation(cid, text),
+    deliverToConversation: (cid, text, opts) => deliver.deliverToConversation(cid, text, opts),
   });
 
   const USER = { isUser: true, groups: new Set() };

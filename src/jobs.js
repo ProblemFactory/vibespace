@@ -198,7 +198,9 @@ class JobManager {
       for (const [k, v] of this._notifyRate) if (!v.ts || v.ts < cut) this._notifyRate.delete(k);
       if (this._notifyRate.size > 500) this._notifyRate.clear();
     }
-    const deliver = this.d.deliverToConversation ? this.d.deliverToConversation(cid, text) : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
+    const deliver = this.d.deliverToConversation
+      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + (job.name || job.id) })
+      : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
     Promise.resolve(deliver).then((r) => {
       if (r && r.ok) {
         if (!subscriber) job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };

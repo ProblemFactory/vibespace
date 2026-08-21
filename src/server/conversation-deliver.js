@@ -20,7 +20,7 @@ const path = require('path');
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
 
-function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, log = () => { } }) {
+function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, log = () => { } }) {
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
@@ -64,8 +64,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
 
   /** One delivery attempt down the ladder. Returns {ok, lane, peerName?,
    *  hostId?, reason?} — the caller decides whether a miss stashes (jobs and
-   *  agent-msg both do; a future fire-and-forget source may not). */
-  async function deliverToConversation(cid, text) {
+   *  agent-msg both do; a future fire-and-forget source may not).
+   *  opts.fromName/opts.cardText label the CHAT CARD the server renders on a
+   *  successful post (2.363.0): the CLI records server-posted injections with
+   *  a body-less origin (unregistered poster), so the delivery site is the
+   *  ONLY party that can render the message visibly in the live window. */
+  async function deliverToConversation(cid, text, opts = {}) {
+    const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
     // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
     try {
       if (serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
@@ -74,7 +79,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
           if (!fs.existsSync(sock)) continue;
           const rc = await peerMsg.postChannelEvent(sock, text, { kind: 'peer_message' });
-          if (rc.ok) return { ok: true, lane: 'channel', peerName: s.name || null };
+          if (rc.ok) { cardOk(); return { ok: true, lane: 'channel', peerName: s.name || null }; }
         }
       }
     } catch (e) { log('[deliver] channel lane failed (falling through):', e.message); }
@@ -83,7 +88,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       const peer = peerMsg.findPeer(cid);
       if (peer) {
         const r = await peerMsg.postToPeer(peer, text);
-        if (r.ok) return { ok: true, lane: 'message', peerName: peer.name || null };
+        if (r.ok) { cardOk(); return { ok: true, lane: 'message', peerName: peer.name || null }; }
         log(`[deliver] local peer post to ${peer.socketPath} failed: ${r.reason}`);
         return { ok: false, lane: 'message', reason: r.reason };
       }
@@ -98,7 +103,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // the stash rung honestly instead (the background connect still heals).
         const dm = await (hosts.deviceBounded ? hosts.deviceBounded(hid, 6000) : hosts.device(hid));
         const r = await dm.peerPost({ cid, text });
-        if (r && r.ok) return { ok: true, lane: 'remote-message', peerName: r.peerName || null, hostId: hid };
+        if (r && r.ok) { cardOk(); return { ok: true, lane: 'remote-message', peerName: r.peerName || null, hostId: hid }; }
         return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'remote daemon could not reach the inbox' };
       } catch (e) {
         // capability gate / daemon down — an honest miss, the stash covers it
@@ -113,7 +118,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return !!ownerHostOf(cid); // a remote owner MAY be reachable — optimistic preview, the ladder decides for real
   }
 
-  return { deliverToConversation, peerReachable, stashFor, drainStash, stashCount, flush };
+  return {
+    deliverToConversation, peerReachable, stashFor, drainStash, stashCount, flush,
+    // exposed for the stash-drain sites: a drained message enters the agent's
+    // context invisibly — the drain site emits the same card the live lanes do
+    emitPeerCard: (cid, card) => { try { emitPeerCard?.(cid, card); } catch { } },
+  };
 }
 
 module.exports = { create };

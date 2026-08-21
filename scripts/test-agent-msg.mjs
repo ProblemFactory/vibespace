@@ -52,18 +52,24 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
     device: async (id) => ({ peerPost: async ({ cid, text }) => { calls.remote.push({ id, cid, text }); return remoteResult; } }),
     convIndex: { ownerHost: (cid) => (cid === 'cid-remote' ? 'host-A' : null) },
   };
+  const cards = [];
   const D = require(REPO + '/src/server/conversation-deliver.js').create({
     dataDir: dir, peerMsg: fakePeerMsg, getHosts: () => fakeHosts, getConvIndex: () => fakeHosts.convIndex,
     serverSetting: () => undefined, activeSessions: new Map(),
+    emitPeerCard: (cid, card) => cards.push({ cid, ...card }),
   });
   // local rung
   localPeer = { socketPath: '/tmp/x.sock', name: 'local-sess' };
-  const r1 = await D.deliverToConversation('cid-local', 'hi');
+  const r1 = await D.deliverToConversation('cid-local', 'hi', { fromName: 'sender-A', cardText: 'raw body' });
   ok(r1.ok && r1.lane === 'message' && r1.peerName === 'local-sess' && calls.local.length === 1, 'local rung delivers via this machine registry', JSON.stringify(r1));
+  // 2.363.0: a successful post RENDERS THE CARD at the delivery site — the CLI
+  // records server-posted injections with a body-less origin, so nothing else can
+  ok(cards.length === 1 && cards[0].cid === 'cid-local' && cards[0].fromName === 'sender-A' && cards[0].text === 'raw body', 'ok delivery emits the peer card (fromName + raw cardText)', JSON.stringify(cards));
   // remote rung: no local peer, conversation-index names host-A
   localPeer = null;
   const r2 = await D.deliverToConversation('cid-remote', 'yo');
   ok(r2.ok && r2.lane === 'remote-message' && r2.hostId === 'host-A' && calls.remote.length === 1 && calls.remote[0].cid === 'cid-remote', 'remote rung routes via the owning machine daemon (transparent id)', JSON.stringify(r2));
+  ok(cards.length === 2 && cards[1].cid === 'cid-remote' && cards[1].text === 'yo', 'remote ok delivery emits the card too (cardText defaults to the posted text)');
   // remote daemon miss → honest fail (caller stashes)
   remoteResult = { ok: false, reason: 'no live inbox on this machine' };
   const r3 = await D.deliverToConversation('cid-remote', 'yo2');
@@ -71,6 +77,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   // unknown everywhere
   const r4 = await D.deliverToConversation('cid-nowhere', 'x');
   ok(!r4.ok && /no live inbox/.test(r4.reason), 'unroutable conversation fails with a named reason');
+  ok(cards.length === 2, 'failed deliveries emit NO card (the stash drain renders later instead)');
   // stash round trip + persistence across instances
   D.stashFor('cid-nowhere', { source: 'agent', fromName: 'tester', text: 'queued msg' });
   ok(D.stashCount('cid-nowhere') === 1, 'stash holds the envelope');
@@ -108,6 +115,12 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok(cd.includes('const flush = ') && read('server.js').includes('deliver.flush()'), 'stash flush() wired into the shutdown belt (SIGTERM loses nothing)');
   ok(cd.includes('deviceBounded'), 'remote rung uses the BOUNDED device connect (no 2.7min request hangs)');
   ok(/AGENT_TOOLS[^\]]*vibespace-msg/.test(read('src/hosts.js').replace(/\n/g, ' ')), 'vibespace-msg ships to remote hosts (AGENT_TOOLS)');
+  // 2.363.0 delivery-site card rendering (server-posted = body-less origin at the CLI)
+  ok(sv.includes('emitPeerCard') && sv.includes('injectPeerCard'), 'server wires emitPeerCard → session normalizer injectPeerCard');
+  ok(ar.includes('cardText: text'), 'msg/send passes the RAW body as the card text');
+  ok(ar.split('deliver.emitPeerCard').length >= 5, 'all four stash-drain sites (msg ×2 + jobs ×2) render cards for drained messages');
+  ok(read('src/jobs.js').includes("fromName: 'Background Work · '"), 'jobs owner-notify labels its card');
+  ok(read('src/message-manager.js').includes('injectPeerCard'), 'normalizer exposes injectPeerCard');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

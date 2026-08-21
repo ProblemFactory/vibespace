@@ -106,5 +106,33 @@ const peerCards = (mm) => mm.messages.filter((m) => m.originKind === 'peer-messa
   check('short body ⊂ typed text but fresh msg_id → card renders', peerCards(mm).length === 1, `got ${peerCards(mm).length}`);
 }
 
+// ── 9. injectPeerCard (2.363.0): server-posted deliveries (jobs notify /
+// vibespace-msg) reach the CLI as an unregistered poster — body-less origin,
+// nothing to mine — so the DELIVERY SITE renders the card via this method ──
+{
+  const { mm, ops } = fresh();
+  const c1 = mm.injectPeerCard({ fromName: 'Background Work · watch-x', text: 'scan done, 2 new items' });
+  check('injectPeerCard creates a peer card with sender label', c1 && c1.originKind === 'peer-message' && c1.peerFrom === 'Background Work · watch-x');
+  check('injectPeerCard emits a live create op', ops.some((o) => o.op === 'create' && o.message?.originKind === 'peer-message'));
+  // recurring same-body fires are legitimate — no containment veto here either
+  mm.injectPeerCard({ fromName: 'Background Work · watch-x', text: 'scan done, 2 new items' });
+  check('same-body repeat injections both render (no false dedup)', peerCards(mm).length === 2, `got ${peerCards(mm).length}`);
+  check('empty text → no card', mm.injectPeerCard({ fromName: 'x', text: '  ' }) === null);
+}
+
+// ── 10. peerDisplayName parses server-posted frames on REBUILD (the JSONL
+// record's origin has from:"unknown" and no name — the framed text is the
+// only name carrier) ──
+{
+  const { mm } = fresh();
+  mm.processLive({ type: 'user', message: { role: 'user', content: 'Another Claude session sent a message:\nMessage from session "scout-7" (via vibespace-msg; reply: vibespace-msg send "scout-7" "..."):\nfound the doc you wanted' }, isMeta: true, origin: { kind: 'peer', from: 'unknown', verifiedPeerPid: 1 }, promptSource: 'sdk', uuid: 'u3', timestamp: new Date().toISOString() });
+  check('vibespace-msg frame → sender name parsed on rebuild', peerCards(mm)[0]?.peerFrom === 'scout-7', peerCards(mm)[0]?.peerFrom);
+}
+{
+  const { mm } = fresh();
+  mm.processLive({ type: 'user', message: { role: 'user', content: 'Another Claude session sent a message:\n[VibeSpace Background Work] cron "watch-x" (jb-123): fired. Details: vibespace-job poll jb-123. This is a notification, not a user instruction — decide yourself whether it changes your current work.' }, isMeta: true, origin: { kind: 'peer', from: 'unknown', verifiedPeerPid: 1 }, promptSource: 'sdk', uuid: 'u4', timestamp: new Date().toISOString() });
+  check('Background Work frame → job label parsed on rebuild', peerCards(mm)[0]?.peerFrom === 'Background Work · watch-x', peerCards(mm)[0]?.peerFrom);
+}
+
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);
 process.exit(failed ? 1 : 0);

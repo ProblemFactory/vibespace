@@ -1249,6 +1249,18 @@ const deliver = require('./src/server/conversation-deliver.js').create({
   getHosts: () => hosts,
   getConvIndex: () => hosts && hosts.convIndex,
   serverSetting, activeSessions,
+  // 2.363.0: render the peer card in the receiving chat window at delivery
+  // time — server-posted injections reach the CLI as an unregistered poster
+  // (body-less origin), so the delivery site is the only party that can show
+  // the message live. Open remote chat sessions match by cid too.
+  emitPeerCard: (cid, card) => {
+    for (const [, s] of activeSessions) {
+      if ((s.backendSessionId || s.claudeSessionId) !== cid || !s._normalizer) continue;
+      try { s._normalizer.injectPeerCard(card); } catch { }
+      return true;
+    }
+    return false;
+  },
   log: (...a) => console.log(...a),
 });
 const jobsWiring = require('./src/server/jobs-wiring.js').create({

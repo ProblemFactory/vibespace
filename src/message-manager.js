@@ -37,6 +37,15 @@ function peerDisplayName(origin, text) {
   if (origin && origin.name) return String(origin.name);
   const m = /<cross-session-message[^>]*\bfrom-name="([^"]+)"/.exec(String(text || ''));
   if (m) return m[1];
+  // SERVER-posted deliveries (vibespace-msg / Background Work) reach the CLI
+  // as an unregistered poster: origin has NO name and from:"unknown" — but the
+  // framed text itself names the sender. Parse it so rebuilds match the card
+  // the delivery site rendered live (2.363.0).
+  const s = String(text || '');
+  const vm = /Message from session "([^"]+)" \(via vibespace-msg/.exec(s);
+  if (vm) return vm[1];
+  const bw = /\[VibeSpace Background Work\] \w+ "([^"]+)"/.exec(s);
+  if (bw) return 'Background Work · ' + bw[1];
   const f = origin && origin.from;
   if (f && f !== 'unknown' && !String(f).startsWith('uds:')) return String(f);
   return null;
@@ -75,6 +84,31 @@ class MessageManager {
       if (m.role === 'user' && (m.content || []).map((b) => b.text || '').join('').includes(body)) return true;
     }
     return false;
+  }
+
+  // SERVER-SIDE peer card (2.363.0, owner report "session里也没有消息卡片"):
+  // deliveries POSTED BY THIS SERVER (Background Work notify, vibespace-msg —
+  // the conversation-deliver ladder) reach the CLI as an UNREGISTERED poster,
+  // so the CLI records origin {kind:'peer', from:'unknown'} with NO
+  // name/msg_id/body and the stdout result.origin is body-less — result-mining
+  // has nothing to mine and the live window stays blank. The server IS the
+  // poster: the delivery site knows the sender and text exactly and renders
+  // the card here the moment the post succeeds. In-memory only by design — a
+  // rebuild renders the CLI's own JSONL user record instead (no dup: that
+  // record never crosses stdout, and its body-less result.origin is skipped).
+  // No containment dedup: the delivery site posts once per fire (same-body
+  // repeats are legitimate — the 2.362.2 review lesson).
+  injectPeerCard({ fromName, text }) {
+    const body = String(text || '').trim();
+    if (!body) return null;
+    this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
+    this._currentTs = Date.now();
+    this.turnIndex++;
+    const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
+    msg.originKind = 'peer-message';
+    msg.peerFrom = fromName ? String(fromName) : null;
+    this._emit({ op: 'create', message: msg });
+    return msg;
   }
 
   // R0 (docs/design-three-tier.md): ids derive from CONTENT, not a
