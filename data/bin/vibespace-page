@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+// vibespace-page — publish self-contained HTML (design canvases, mockups,
+// reports) to THIS VibeSpace instance and get a share URL; prepare the
+// design-canvas kit on this machine (2.366.0, STATIC tracked, in AGENT_TOOLS
+// — ships to remote hosts). Auth: VIBESPACE_SESSION_TOKEN (agent session) or
+// VIBESPACE_JOB_TOKEN (Background Work). Full manual: vibespace-docs pages.
+'use strict';
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const API = process.env.VIBESPACE_API;
+const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
+if (!API || !TOKEN) { console.error('vibespace-page: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
+
+const args = process.argv.slice(2);
+const verb = args[0];
+const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? (args[i + 1] ?? '') : undefined; };
+const has = (name) => args.includes(name);
+
+const USAGE = `vibespace-page — host self-contained HTML on this VibeSpace and share it
+  vibespace-page publish <file.html> --title "<what the user would call it>" [--public]
+        ← uploads a snapshot, prints the share URL (private by default: viewers log in;
+          --public = anyone with the link). Same file path again = same URL, new snapshot.
+  vibespace-page kit    ← prepare the design-canvas kit on THIS machine and print its base
+                          directory; then read <dir>/SKILL.md and follow it (authoring .dc.html
+                          artboards → seed-canvas.mjs → vibespace-page publish).
+  vibespace-page list   ← pages published from this session
+Hosted pages run sandboxed (opaque origin): view + export only, no online Save.`;
+
+async function call(method, p, { body, headers } = {}) {
+  const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(headers || {}) }, body }).catch((e) => ({ _neterr: e.message }));
+  if (res._neterr) { console.error('vibespace-page: server unreachable (' + res._neterr + ')'); process.exit(3); }
+  let j = {};
+  try { j = await res.json(); } catch { }
+  if (!res.ok || j.error) { console.error(j.error || `HTTP ${res.status}`); process.exit(1); }
+  return j;
+}
+const isHub = () => /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(API);
+
+(async () => {
+  if (!verb || verb === 'help' || verb === '--help' || verb === '-h') { console.log(USAGE); return; }
+
+  if (verb === 'publish') {
+    const file = args[1];
+    if (!file || file.startsWith('--')) { console.error('usage: vibespace-page publish <file.html> --title "<title>" [--public]'); process.exit(2); }
+    const abs = path.resolve(file);
+    let html;
+    try { html = fs.readFileSync(abs); } catch (e) { console.error(`cannot read ${abs}: ${e.message}`); process.exit(2); }
+    if (!/\.html?$/i.test(abs)) { console.error('only .html files can be published'); process.exit(2); }
+    if (html.length > 25 * 1024 * 1024) { console.error('file too large (>25MB)'); process.exit(2); }
+    const title = flag('--title') ?? flag('--name') ?? path.basename(abs, path.extname(abs));
+    const q = new URLSearchParams({ title, path: abs });
+    if (has('--public')) q.set('public', '1'); // omitted = keep the page's current visibility (the user may have flipped it)
+    const r = await call('POST', '/api/agent/pages/publish?' + q.toString(), { body: html, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+    const p = r.page || {};
+    const url = p.url || p.path;
+    console.log(`published: ${url}`);
+    console.log(p.public ? '(public — anyone with the link can view)' : '(private — viewers must be logged in to this VibeSpace; --public opens it, or the user flips it in the chat status bar)');
+    if (p.replaced) console.log('(replaced the previous snapshot of this file — same URL)');
+    if (url && url.startsWith('/')) console.log('(relative URL: the server does not know its public address — the chat UI links it against the address you opened VibeSpace at; Settings → agentd.publicUrl makes it absolute)');
+    return;
+  }
+
+  if (verb === 'kit') {
+    const info = await call('GET', '/api/agent/design-kit');
+    if (!info.ok) { console.error(`design kit not ready on the VibeSpace server: ${info.error || 'unknown'}`); process.exit(1); }
+    // On the hub machine the server's kit directory is right here.
+    if (isHub() && info.dir && fs.existsSync(path.join(info.dir, 'seed-canvas.mjs')) && fs.existsSync(path.join(info.dir, 'SKILL.md'))) {
+      console.log(`Base directory for this skill: ${info.dir}`);
+      console.log(`(CLI ${info.version}, ${info.source || 'kit'}; read ${path.join(info.dir, 'SKILL.md')} and follow it)`);
+      return;
+    }
+    // Remote host: mirror the kit files from the hub into ~/.vibespace/design-kit/<version>/
+    const dir = path.join(os.homedir(), '.vibespace', 'design-kit', String(info.version || 'unknown'));
+    fs.mkdirSync(dir, { recursive: true });
+    for (const name of ['seed-canvas.mjs', 'payload.template.html', 'SKILL.md']) {
+      const fp = path.join(dir, name);
+      const want = info.files && info.files[name];
+      if (want && fs.existsSync(fp)) {
+        const crypto = require('crypto');
+        if (crypto.createHash('sha256').update(fs.readFileSync(fp)).digest('hex') === want) continue;
+      }
+      const res = await fetch(API + '/api/agent/design-kit/file/' + name, { headers: { Authorization: 'Bearer ' + TOKEN } }).catch((e) => ({ _neterr: e.message }));
+      if (res._neterr || !res.ok) { console.error(`could not fetch ${name} from the VibeSpace server (${res._neterr || res.status})`); process.exit(1); }
+      const buf = Buffer.from(await res.arrayBuffer());
+      fs.writeFileSync(fp + '.tmp', buf); fs.renameSync(fp + '.tmp', fp);
+    }
+    console.log(`Base directory for this skill: ${dir}`);
+    console.log(`(CLI ${info.version}, mirrored from the VibeSpace server; read ${path.join(dir, 'SKILL.md')} and follow it)`);
+    return;
+  }
+
+  if (verb === 'list') {
+    const r = await call('GET', '/api/agent/pages');
+    if (!r.pages || !r.pages.length) { console.log('no pages published from this session yet.'); return; }
+    for (const p of r.pages) console.log(`${p.public ? 'public ' : 'private'}  ${p.url || p.path}  ${p.name}  (${new Date(p.updatedAt).toISOString().slice(0, 16)}Z)`);
+    return;
+  }
+
+  console.error(`unknown verb "${verb}"\n` + USAGE);
+  process.exit(2);
+})().catch((e) => { console.error('vibespace-page: ' + (e && e.message || e)); process.exit(1); });

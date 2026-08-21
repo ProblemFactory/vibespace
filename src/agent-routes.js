@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null }) {
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -237,6 +237,8 @@ function sessionToolsIntro(T) {
   }
   L.push(
     'Other agent sessions may be working alongside you. `vibespace-msg list` shows the ones you can reach (your Task Group by default); `vibespace-msg send <name|id> "text"` delivers into their conversation — an idle receiver pays a billed turn, so message purposefully (what you need + whether you expect a reply). Replies arrive here as peer-message cards. Manual: vibespace-docs msg.');
+  L.push(
+    'Designs, mockups, posters: `vibespace-page kit` prepares the design-canvas kit on this machine and prints its base directory — read that directory\'s SKILL.md and follow it; it ends in `vibespace-page publish <file.html> --title "…"`, which hosts the page on this VibeSpace and prints a share link (private by default, `--public` for anyone with the link). Any self-contained HTML you produce can be shared the same way. Manual: vibespace-docs pages.');
   L.push(
     'When your reply references files you created or discuss (audio, images, reports, code, HTML…), write their ABSOLUTE paths — the chat UI turns absolute paths into clickable links that open in the right viewer (audio plays, images preview, HTML renders). Bare filenames or project-relative paths may not resolve.',
     'If a request needs a DIFFERENT machine\'s network position (a region, an internal/VPN network, a fixed source IP), you can borrow a paired machine\'s network for that ONE command with `vibespace-exit` (default: go direct — only reach for an exit deliberately):',
@@ -585,7 +587,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
       if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
-      segs.push('vibespace-docs [status|ask|task|jobs|msg] — the full manual for any of these tools');
+      segs.push('vibespace-docs [status|ask|task|jobs|msg|pages] — the full manual for any of these tools');
       const std = perTurnReminderEnabled() && segs.length
         ? `Tools on PATH: ${segs.join(' · ')}${mgrClause}. Run any with no args for usage.`
         : '';
@@ -1039,7 +1041,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
   res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
 });
 
-const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md' };
+const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md' };
 const serveAgentDoc = (req, res, topic) => {
   // jbt_ (in-job) tokens may read docs too — a watch job's script legitimately
   // wants the manual; job tokens never pass agentSession, so check them first
@@ -1057,6 +1059,59 @@ const serveAgentDoc = (req, res, topic) => {
 };
 app.get('/api/agent/docs/:topic', (req, res) => serveAgentDoc(req, res, req.params.topic));
 app.get('/api/agent/jobs-docs', (req, res) => serveAgentDoc(req, res, 'jobs')); // 2.350.0 alias
+
+// ── Published pages + design kit (2.366.0): the "publish to VibeSpace" half
+//    of the design-canvas flow — any self-contained HTML qualifies. Auth:
+//    vsst_ (session) or jbt_ (job). Content rides the request body (the
+//    source file may live on a remote host), upsert identity = host:path. ──
+const pageAuth = (req, res) => {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (token.startsWith('jbt_')) {
+    const jm = getJobs && getJobs();
+    const job = jm && jm.ready ? jm.jobByToken(token) : null;
+    if (!job) { res.status(401).json({ error: 'unknown job token' }); return null; }
+    return { sessionId: null, conversationId: (job.owner && job.owner.conversation && job.owner.conversation.id) || null, hostId: job.hostId || null, jobId: job.id }; // the job's OWNER conversation (jobs.js shape) — review-caught
+  }
+  const hit = agentSession(req, res);
+  if (!hit) return null;
+  return { session: hit[0], sessionId: hit[1], conversationId: hit[0].claudeSessionId || null, hostId: hit[0].host || null };
+};
+const express = require('express');
+app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25mb' }), (req, res) => {
+  const a = pageAuth(req, res); if (!a) return;
+  const publishedPages = getPublishedPages(); // lazy: created later in server.js than this wiring (TDZ otherwise — caught by the design-flow E2E)
+  if (!publishedPages) return res.status(503).json({ error: 'published pages not available on this server' });
+  const q = req.query || {};
+  const srcPath = String(q.path || '');
+  const srcKey = `${a.hostId || 'local'}:${srcPath || ('session:' + (a.sessionId || ('job-' + (a.jobId || 'unknown'))))}`;
+  // visibility: only an EXPLICIT public=0|1 changes it — a republish without
+  // the flag keeps what the user set in the popover (review-caught)
+  const makePublic = (q.public === undefined || q.public === '') ? undefined : (q.public === '1' || q.public === 'true');
+  const r = publishedPages.publishContent({ html: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), name: String(q.title || q.name || ''), srcKey, makePublic, sessionId: a.sessionId, conversationId: a.conversationId });
+  if (r.error) return res.status(400).json(r);
+  res.json(r);
+});
+app.get('/api/agent/pages', (req, res) => {
+  const a = pageAuth(req, res); if (!a) return;
+  const publishedPages = getPublishedPages();
+  if (!a.sessionId && !a.conversationId) return res.json({ pages: [] }); // a caller with no scope sees nothing (no all-pages oracle — review-caught)
+  res.json({ pages: publishedPages ? publishedPages.list({ sessionId: a.sessionId || undefined, conversationId: a.conversationId || undefined }) : [] });
+});
+app.get('/api/agent/design-kit', async (req, res) => {
+  const a = pageAuth(req, res); if (!a) return;
+  const designKit = getDesignKit();
+  if (!designKit) return res.json({ ok: false, error: 'design kit not available on this server' });
+  const k = await designKit.ensure();
+  res.json({ ok: !!k.ok, version: k.version || null, source: k.source || null, dir: k.dir || null, files: k.files || {}, error: k.error || null });
+});
+app.get('/api/agent/design-kit/file/:name', (req, res) => {
+  const a = pageAuth(req, res); if (!a) return;
+  const designKit = getDesignKit();
+  const fp = designKit && designKit.fileFor(String(req.params.name));
+  if (!fp) return res.status(404).json({ error: 'no such kit file (or the kit is not ready — vibespace-page kit says why)' });
+  res.type(fp.endsWith('.mjs') ? 'text/javascript' : fp.endsWith('.md') ? 'text/markdown' : 'text/html');
+  res.sendFile(fp);
+});
 app.post('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });

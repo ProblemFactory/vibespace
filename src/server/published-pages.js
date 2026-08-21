@@ -29,19 +29,39 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(file + '.tmp', file);
 }
 
-function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, log = () => { } }) {
+function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, log = () => { }, onPublished = null }) {
   const storeFile = path.join(dataDir, 'published-pages.json');
   const pagesDir = path.join(dataDir, 'published-pages');
   let store = { pages: [] };
   try { store = JSON.parse(fs.readFileSync(storeFile, 'utf-8')) || { pages: [] }; } catch { }
   if (!Array.isArray(store.pages)) store.pages = [];
+  // srcKey (2.366.0): the upsert identity. File publishes are `local:<abs>`;
+  // agent uploads are `<host|local>:<abs path on that machine>` — the same
+  // design re-published from the same working file keeps its URL anywhere.
+  for (const p of store.pages) if (!p.srcKey && p.srcPath) p.srcKey = 'local:' + p.srcPath;
   const save = () => { try { writeJsonAtomic(storeFile, store); } catch (e) { log('[pages] store save failed:', e.message); } };
   const mintId = () => 'pg' + Array.from({ length: 10 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
+  // Absolute share URLs need an origin the server cannot know by itself:
+  // agentd.publicUrl when set, else the origin the user's BROWSER last used
+  // (noted on every management call — the status-bar popover hits one before
+  // any agent publishes). Relative '/p/<id>' is the honest last resort; the
+  // client joins it with location.origin.
   const urlFor = (id) => {
-    const base = String(publicUrl() || '').replace(/\/+$/, '');
+    const base = String(publicUrl() || store.lastBrowserOrigin || '').replace(/\/+$/, '');
     return (base ? base : '') + '/p/' + id;
   };
-  const pub = (p) => ({ id: p.id, name: p.name, srcPath: p.srcPath, public: !!p.public, size: p.size, createdAt: p.createdAt, updatedAt: p.updatedAt, url: urlFor(p.id) });
+  function noteBrowserOrigin(req) {
+    try {
+      const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      // only a plausible host[:port] — never a path, scheme or junk (the value ends up in share links)
+      if (!host || !/^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9][A-Za-z0-9.\-]*)(:\d{1,5})?$/.test(host) || !/^https?$/.test(proto)) return;
+      const origin = `${proto}://${host}`;
+      if (store.lastBrowserOrigin !== origin) { store.lastBrowserOrigin = origin; save(); }
+    } catch { }
+  }
+  const pub = (p) => ({ id: p.id, name: p.name, srcPath: p.srcPath, srcKey: p.srcKey, public: !!p.public, size: p.size, createdAt: p.createdAt, updatedAt: p.updatedAt, url: urlFor(p.id), path: '/p/' + p.id, sessionId: p.sessionId || null, conversationId: p.conversationId || null });
+  const notify = (page, extra) => { try { onPublished && onPublished(page, extra || {}); } catch (e) { log('[pages] onPublished failed:', e.message); } };
 
   /** Copy-in publish; upserts by srcPath so a re-published design keeps its
    *  share URL. Returns the public record or {error}. */
@@ -52,8 +72,10 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     if (!st.isFile()) return { error: 'not a file: ' + abs };
     if (st.size > MAX_BYTES) return { error: `file too large (${Math.round(st.size / 1024 / 1024)}MB > ${MAX_BYTES / 1024 / 1024}MB)` };
     if (!/\.html?$/i.test(abs)) return { error: 'only .html pages can be published' };
-    let rec = store.pages.find((p) => p.srcPath === abs);
-    const draft = rec || { id: mintId(), srcPath: abs, public: false, createdAt: Date.now() };
+    const srcKey = 'local:' + abs;
+    let rec = store.pages.find((p) => p.srcKey === srcKey);
+    const replaced = !!rec; // decided BEFORE the upsert (rec === draft afterwards — review-caught)
+    const draft = rec || { id: mintId(), srcPath: abs, srcKey, public: false, createdAt: Date.now() };
     // snapshot FIRST — a failed copy must not mutate flags/store (a broken
     // republish otherwise flipped a private page public; review-caught)
     try {
@@ -66,7 +88,37 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     rec.size = st.size;
     rec.updatedAt = Date.now();
     save();
-    return { page: pub(rec) };
+    notify(pub(rec), { replaced });
+    return { page: { ...pub(rec), replaced } };
+  }
+
+  /** Content upload publish (agent CLI / remote hosts, 2.366.0): the HTML
+   *  arrives in the request — the source file may live on another machine.
+   *  Upserts by srcKey; attributes the page to the publishing session. */
+  function publishContent({ html, name, srcKey, makePublic, sessionId = null, conversationId = null }) {
+    const buf = Buffer.isBuffer(html) ? html : Buffer.from(String(html || ''), 'utf8');
+    if (!buf.length) return { error: 'empty page body' };
+    if (buf.length > MAX_BYTES) return { error: `page too large (${Math.round(buf.length / 1024 / 1024)}MB > ${MAX_BYTES / 1024 / 1024}MB)` };
+    const key = String(srcKey || '').slice(0, 1024);
+    if (!key) return { error: 'missing srcKey' };
+    let rec = store.pages.find((p) => p.srcKey === key);
+    const replaced = !!rec;
+    const draft = rec || { id: mintId(), srcKey: key, srcPath: key.replace(/^[^:]*:/, ''), public: false, createdAt: Date.now() };
+    try {
+      fs.mkdirSync(pagesDir, { recursive: true });
+      const fp = path.join(pagesDir, draft.id + '.html');
+      fs.writeFileSync(fp + '.tmp', buf); fs.renameSync(fp + '.tmp', fp);
+    } catch (e) { return { error: 'store failed: ' + e.message }; }
+    if (!rec) { rec = draft; store.pages.push(rec); }
+    rec.name = String(name || rec.name || path.basename(rec.srcPath || 'page', path.extname(rec.srcPath || ''))).slice(0, 120);
+    if (makePublic !== undefined) rec.public = !!makePublic;
+    rec.size = buf.length;
+    rec.updatedAt = Date.now();
+    if (sessionId) rec.sessionId = sessionId;
+    if (conversationId) rec.conversationId = conversationId;
+    save();
+    notify(pub(rec), { replaced });
+    return { page: { ...pub(rec), replaced } };
   }
 
   function setFlags(id, { makePublic, name }) {
@@ -76,6 +128,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     if (name !== undefined) rec.name = String(name).slice(0, 120);
     rec.updatedAt = Date.now();
     save();
+    notify(pub(rec), { changed: 'flags' }); // visibility/name changes reach every client (multi-client law)
     return { page: pub(rec) };
   }
 
@@ -83,13 +136,18 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     const i = store.pages.findIndex((p) => p.id === id);
     if (i < 0) return { error: 'no such page' };
     const [rec] = store.pages.splice(i, 1);
+    const snap = { ...pub(rec), removed: true };
     try { fs.unlinkSync(path.join(pagesDir, rec.id + '.html')); } catch { }
     save();
+    notify(snap, { removed: true }); // an unpublished page must leave every client's list
     return { ok: true };
   }
 
-  const list = () => store.pages.map(pub);
-  const bySrcPath = (p) => { const rec = store.pages.find((r) => r.srcPath === path.resolve(String(p || ''))); return rec ? pub(rec) : null; };
+  const list = ({ sessionId, conversationId } = {}) => store.pages
+    .filter((p) => (!sessionId && !conversationId) || (sessionId && p.sessionId === sessionId) || (conversationId && p.conversationId === conversationId))
+    .map(pub);
+  // by LOCAL path = srcKey 'local:<abs>' — a remote host's page for the same absolute path is a different page (review-caught: identical home layouts across hosts)
+  const bySrcPath = (p) => { const key = 'local:' + path.resolve(String(p || '')); const rec = store.pages.find((r) => r.srcKey === key); return rec ? pub(rec) : null; };
 
   /** GET /p/:id — the ONLY render path. Mounted with an auth exemption; the
    *  gate lives HERE (private ⇒ cookie required), same doctrine as /svc. */
@@ -117,15 +175,17 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
    *  the cookie-authed /api/pages management family. */
   function registerRoutes(app) {
     app.get('/p/:id', serve);
-    app.get('/api/pages', (req, res) => res.json({ pages: list() }));
-    app.get('/api/pages/by-path', (req, res) => res.json({ page: bySrcPath(String(req.query.path || '')) }));
+    app.get('/api/pages', (req, res) => { noteBrowserOrigin(req); res.json({ pages: list({ sessionId: req.query.sessionId ? String(req.query.sessionId) : undefined, conversationId: req.query.conversationId ? String(req.query.conversationId) : undefined }) }); });
+    app.get('/api/pages/by-path', (req, res) => { noteBrowserOrigin(req); res.json({ page: bySrcPath(String(req.query.path || '')) }); });
     app.post('/api/pages/publish', (req, res) => {
+      noteBrowserOrigin(req);
       const b = req.body || {};
       const r = publish({ srcPath: b.path, name: b.name, makePublic: b.public });
       if (r.error) return res.status(400).json(r);
       res.json(r);
     });
     app.post('/api/pages/:id', (req, res) => {
+      noteBrowserOrigin(req);
       const b = req.body || {};
       const r = setFlags(String(req.params.id), { makePublic: b.public, name: b.name });
       if (r.error) return res.status(404).json(r);
@@ -138,7 +198,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     });
   }
 
-  return { publish, setFlags, remove, list, bySrcPath, serve, urlFor, registerRoutes };
+  return { publish, publishContent, setFlags, remove, list, bySrcPath, serve, urlFor, registerRoutes, noteBrowserOrigin };
 }
 
 module.exports = { create };

@@ -91,6 +91,9 @@ class ChatView {
       // config (same store as the Resume gear popover) so the next resume
       // starts with the same choice.
       onConfigChange: (patch) => this._persistSessionConfig(patch),
+      // Design chip (2.366.0): a brief → a design request the agent fulfils
+      // with the design kit and publishes to THIS VibeSpace (view-only windows: none)
+      onDesignRequest: readOnly ? null : (brief, opts) => this._sendDesignRequest(brief, opts),
       // Running-workflow chips: click → live detail window; poll needs ids
       onOpenWorkflow: (runId, name) => {
         const ids = this._getSessionIds();
@@ -569,6 +572,11 @@ class ChatView {
       } else if (msg.type === 'streaming-label' && msg.sessionId === sessionId) {
         if (msg.label) this._showTyping(msg.label, msg.kind || null);
         else this._hideTyping();
+      } else if (msg.type === 'page-published' && msg.sessionId === sessionId) {
+        // ONE notify point server-side (dialog + agent publishes): the status
+        // bar's design chip is the live list; the agent's reply carries the link
+        this._statusBar?.notePagePublished?.(msg.page);
+        showToast(t('Page published: {name}', { name: msg.page?.name || '' }));
       } else if (msg.type === 'goal-updated' && msg.sessionId === sessionId) {
         // The server ALWAYS answers a set-goal with this broadcast (status /
         // resume / set / clear alike), so it is the one honest confirmation
@@ -747,6 +755,7 @@ class ChatView {
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);
+    if (this._chatInput) this._loadPages(); // design chip count/list (live windows only)
     // ── Blank-window telemetry (user-reported "session窗口空白" class) ──
     // The server said this session has messages but NOTHING rendered — the exact
     // symptom that's un-debuggable from a bug report alone. Emit names/ids only.
@@ -1885,6 +1894,35 @@ class ChatView {
         if (this.winInfo._notifyChanged) this.winInfo._notifyChanged();
       }
     }
+  }
+
+  /** Pages published from this session → status-bar design chip. */
+  _loadPages() {
+    // by webui session id OR conversation id: a resume mints a new session id
+    // while the pages keep the old one (review-caught: the chip went empty
+    // exactly when the user came back for the link)
+    const ids = this._getSessionIds();
+    const cid = ids?.claudeId || ids?.backendSessionId || '';
+    fetchJson('/api/pages?sessionId=' + encodeURIComponent(this.sessionId) + (cid ? '&conversationId=' + encodeURIComponent(cid) : '')).then((r) => {
+      if (r && Array.isArray(r.pages) && this._statusBar) this._statusBar.setPages(r.pages);
+    });
+  }
+
+  /** The design request (2.366.0): a VISIBLE user message (no hidden
+   *  injection — the transcript shows exactly what the agent was asked)
+   *  that routes the bundled design-canvas flow to this instance: the kit
+   *  comes from `vibespace-page kit`, the publish step is
+   *  `vibespace-page publish`. Agent-facing text: English, not t(). */
+  _sendDesignRequest(brief, { public: pub = false } = {}) {
+    const b = String(brief || '').trim();
+    if (!b || !this._chatInput) return;
+    const msg = `[VibeSpace design request] ${b}
+
+Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
+1. Run \`vibespace-page kit\` — it prints "Base directory for this skill: <dir>".
+2. Read <dir>/SKILL.md and follow it exactly: author the .dc.html artboards (and canvas.json for several), seed with seed-canvas.mjs, run its --check. Work inside a new subdirectory designs/<short-slug>/ of the current working directory (create it) so the working files and the seeded ~2 MB page never land in a repo root. Do not use the Artifact tool, artifact-capabilities or anything pointing at claude.ai.
+3. Publish with \`vibespace-page publish <seeded file> --title "<what I would call it>"${pub ? ' --public' : ''}\` and reply with the share link plus a line on what you drafted and assumed.`;
+    this._chatInput.sendText(msg);
   }
 
   // _showTyping / _hideTyping delegate to ChatInput (normal) or readOnly _streamStatus
