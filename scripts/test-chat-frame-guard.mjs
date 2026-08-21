@@ -7,6 +7,12 @@
 //    unlinks; an invalid/shredded file is DROPPED, never wrapped.
 // 3. RESCUE — transcripts.rescue stubs oversized records in place (chain,
 //    order, count untouched), keeps a byte-preserved backup, atomic swap.
+// 4. CAPABILITY GATE (2.361.1 → fixed 2.364.1): the server decides "does this
+//    wrapper understand pointer lines" from the wrapper's OWN sidecar through
+//    the canonical resolver — behaviorally, against the real wrapper's file,
+//    never a text pin (the 2.361.1 reader pointed at data/session-meta, which
+//    never carries caps; the text pins stayed green while every paste >1MB
+//    was refused for two releases).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,7 +41,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── 2. wrapper frame-file bypass (real chat-wrapper against a cat child) ──
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-framefile-'));
-  const buf = path.join(dir, 'buf.jsonl'), meta = path.join(dir, 'meta.json');
+  const SID = 'sess-9-1700000000000'; // wrapper files follow <BUFFERS_DIR>/<id>.{buf,json}
+  const buf = path.join(dir, SID + '.buf'), meta = path.join(dir, SID + '.json');
   // fake claude: echo stdin lines to a capture file
   const cap = path.join(dir, 'child-got.txt');
   const fake = path.join(dir, 'fake-claude.sh');
@@ -58,6 +65,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const m = JSON.parse(fs.readFileSync(meta, 'utf8'));
     ok(m?.caps?.frameFile === true, 'wrapper boot meta advertises caps.frameFile');
   } catch (e) { ok(false, 'wrapper boot meta advertises caps.frameFile', e.message); }
+  // PARITY (2.364.1): the server's reader must see what the REAL wrapper wrote,
+  // by the file convention the spawn uses — not a fixture of our own making.
+  const { wrapperCaps } = require(REPO + '/src/server/wrapper-files.js');
+  const seen = wrapperCaps(dir, SID, null);
+  ok(seen.frameFile === true && seen.reason === 'ok' && seen.pid === w.pid, `server-side wrapperCaps reads the REAL wrapper's sidecar (${JSON.stringify(seen)})`);
   // shredded file must be dropped, never wrapped
   const bad = path.join(dir, 'bad.json');
   fs.writeFileSync(bad, frame.slice(0, 1000) + frame); // concatenated shred
@@ -99,15 +111,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(r2.replaced === 0 && r2.backup === null, 'second pass finds nothing (no backup litter)');
 }
 
-// ── 4. server-side capability gate wiring pins (the c1206711 skew incident:
-//      a capability-less wrapper must NEVER be sent a pointer line) ──
+// ── 4. server-side capability gate (the c1206711 skew incident: a
+//      capability-less wrapper must NEVER be sent a pointer line; 2.364.1: and a
+//      capable one must never be REFUSED — the reader targets the wrapper's
+//      sidecar, is stateless, and the refusal carries evidence) ──
 {
+  const { wrapperCaps } = require(REPO + '/src/server/wrapper-files.js');
+  const bufs = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-caps-bufs-'));
+  const metaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-caps-meta-'));
+  const id = 'sess-4-1700000000001';
+  // absent sidecar (wrapper still booting a huge resume)
+  let c = wrapperCaps(bufs, id, null);
+  ok(c.frameFile === false && c.reason === 'no-sidecar', 'no sidecar yet → not capable, reason no-sidecar');
+  // pre-2.360.0 wrapper shape: pid/startedAt/mode/tasks/todos, NO caps
+  fs.writeFileSync(path.join(bufs, id + '.json'), JSON.stringify({ pid: 4242, startedAt: 1786704676294, mode: 'chat', tasks: {}, todos: [] }));
+  c = wrapperCaps(bufs, id, null);
+  ok(c.frameFile === false && c.reason === 'no-caps' && c.startedAt === 1786704676294 && c.pid === 4242, 'old wrapper sidecar → not capable, startedAt/pid carried as evidence');
+  // statelessness: the SAME id becomes capable once the sidecar says so
+  fs.writeFileSync(path.join(bufs, id + '.json'), JSON.stringify({ pid: 4243, startedAt: 1787308555500, mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true } }));
+  c = wrapperCaps(bufs, id, null);
+  ok(c.frameFile === true && c.reason === 'ok', 'a later read sees the capable sidecar (no negative verdict is baked into the reader)');
+  // NEGATIVE CONTROL — the exact 2.361.1 bug: a SERVER session-meta record for
+  // the same id (webuiSessionId/claudeSessionId…, never caps) must play no part.
+  fs.writeFileSync(path.join(metaDir, id.replace(/^sess-/, 'cw-') + '.json'), JSON.stringify({ webuiSessionId: id, claudeSessionId: '11111111-1111-1111-1111-111111111111', mode: 'chat' }));
+  c = wrapperCaps(bufs, id, null);
+  ok(c.frameFile === true, 'verdict comes from the wrapper sidecar alone (a caps-less server meta beside it changes nothing)');
+  // wiring pins: the gate calls the sidecar reader, caches only TRUE, refuses with evidence
   const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  ok(/session\._wrapperFrameFile === undefined/.test(ws) && /caps\?\.frameFile/.test(ws), 'ws-handler gates the bypass on the wrapper meta caps marker');
-  ok(/if \(session\._wrapperFrameFile\) \{/.test(ws), 'pointer line only sent to capability-advertising wrappers');
-  ok(/1024 \* 1024\)/.test(ws) && ws.includes('it was NOT sent. Terminate + Resume'), 'capability-less wrapper + oversized frame → VISIBLE refusal, never silent loss');
+  ok(ws.includes('wrapperCaps(BUFFERS_DIR, data.sessionId, session.socketPath)'), 'chat-input gate reads capability through wrapperCaps (sidecar + collision-aware resolver)');
+  ok(!/readSessionMeta\([^)]*\)\?\.caps/.test(ws), 'NEGATIVE: the gate no longer consults data/session-meta for caps (the 2.361.1 wrong-file read)');
+  ok(/session\._wrapperFrameFile !== true\)/.test(ws) && /if \(session\._wrapperFrameFile === true\) \{/.test(ws), 'only a POSITIVE verdict is cached; pointer line only to capability-advertising wrappers');
+  ok(/1024 \* 1024\)/.test(ws) && ws.includes('it was NOT sent') && ws.includes('Terminate + Resume') && ws.includes('wait a moment'), 'oversized + incapable → VISIBLE refusal with the evidenced reason (old wrapper vs still-starting)');
+  ok(ws.includes('chat-input REFUSED'), 'every refusal leaves a server-side journal line (the 2.364.1 forensics gap: nothing in the journal)');
   const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   ok(sv.includes("'chat-frames'") && sv.includes('48 * 3600 * 1000'), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
+  fs.rmSync(bufs, { recursive: true, force: true }); fs.rmSync(metaDir, { recursive: true, force: true });
 }
 
 // ── 5. send-refusal presentation pins (inc-mt2arppw, userW: every refusal

@@ -34,4 +34,23 @@ function resolveWrapperFiles(BUFFERS_DIR, id, sockPath) {
   return expected;
 }
 
-module.exports = { resolveWrapperFiles };
+/** The wrapper's self-reported CAPABILITIES (2.364.1). The caps marker lives
+ *  in the wrapper SIDECAR (<BUFFERS_DIR>/<id>.json — the file chat-wrapper.js
+ *  itself writes at boot), looked up through the same collision-aware
+ *  resolver as every other sidecar read. NEVER read it from data/session-meta:
+ *  that is the SERVER's record and carries no caps — the 2.361.1 gate did
+ *  exactly that, so every wrapper tested "old", every >1MB paste was refused
+ *  for two releases, and the refusal text sent users to Terminate+Resume
+ *  sessions that were already new (owner: three restarts + an update for
+ *  nothing). STATELESS by design — callers must not cache a negative verdict
+ *  (a wrapper resuming a huge transcript may not have written its sidecar yet).
+ *  Returns { frameFile, reason: 'ok'|'no-caps'|'no-sidecar', startedAt, pid }. */
+function wrapperCaps(BUFFERS_DIR, id, sockPath) {
+  const { sidecar } = resolveWrapperFiles(BUFFERS_DIR, id, sockPath);
+  let m;
+  try { m = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch { return { frameFile: false, reason: 'no-sidecar', startedAt: null, pid: null }; }
+  const caps = (m && m.caps && typeof m.caps === 'object') ? m.caps : null;
+  return { frameFile: !!(caps && caps.frameFile), reason: caps ? 'ok' : 'no-caps', startedAt: (m && m.startedAt) || null, pid: (m && m.pid) || null };
+}
+
+module.exports = { resolveWrapperFiles, wrapperCaps };
