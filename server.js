@@ -227,7 +227,12 @@ app.use(express.static(path.join(__dirname, 'public'), { etag: true, lastModifie
 const { MountTokens, registerWebdav } = require('./src/webdav');
 const mountTokens = new MountTokens({ dataDir: path.join(__dirname, 'data') });
 registerWebdav(app, { tokens: mountTokens });
-app.use(express.json({ limit: '50mb' }));
+// Proxied requests must reach unblocker with their body UNREAD — express.json
+// consuming a proxied JSON POST forwarded a body-less request that hung the
+// target on Content-Length (inc-mt2bpw2f: page rendered, every button dead).
+// Skip here rather than mount unblocker earlier: auth must keep covering /proxy/.
+const jsonBody = express.json({ limit: '50mb' });
+app.use((req, res, next) => (req.path.startsWith('/proxy/') ? next() : jsonBody(req, res, next)));
 
 app.get('/xterm.css', (req, res) => {
   res.sendFile(path.join(__dirname, 'node_modules/@xterm/xterm/css/xterm.css'));
