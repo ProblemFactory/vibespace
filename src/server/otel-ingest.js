@@ -57,7 +57,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   // apart — the chat E2E's OTel assertion failed on every GitHub Actions push
   // from 2.361.0 on, and with only a kept-count there was no way to know
   // whether the runner's CLI exported nothing or our parser dropped it.
-  const arrivals = { posts: 0, rejected: 0, records: 0, kept: 0, events: {} };
+  const arrivals = { posts: 0, rejected: 0, records: 0, kept: 0, stashed: 0, noRid: 0, noOrg: 0, events: {} };
 
   // Boot replay: the stash IS the persistence — bake-time overrides must
   // survive restarts or a reboot mid-race re-bakes with link-intent again.
@@ -117,7 +117,13 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     const { records, seen } = parseOtlpLogs(payload);
     let corrections = 0;
     for (const rec of records) {
-      if (!rec.rid || !rec.orgUuid) continue;
+      // A parsed api_request that carries no request id or no organization.id
+      // cannot join the ledger, so it is dropped — but SILENTLY dropping it
+      // made a quiet truth channel undiagnosable (2.367.2: CI's personal-OAT
+      // identity emits api_request WITHOUT organization.id, and the only
+      // symptom was an empty stash).
+      if (!rec.rid) { arrivals.noRid++; continue; }
+      if (!rec.orgUuid) { arrivals.noOrg++; continue; }
       const dup = truth.has(rec.rid);
       const { known, acct } = resolveOrg(rec.orgUuid, rec.email);
       if (!known) {
@@ -131,6 +137,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
         try {
           fs.mkdirSync(path.dirname(file), { recursive: true });
           fs.appendFileSync(file, JSON.stringify({ ...rec, acct: known ? acct : undefined, acctKnown: known }) + '\n');
+          arrivals.stashed++;
         } catch { }
         global.__vsMetric?.('otel-truth-req', 1);
       }
