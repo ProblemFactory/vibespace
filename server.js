@@ -1281,7 +1281,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   try { writeSessionMeta(s.sockName, { ...readSessionMeta(s.sockName), msgReachability: s._msgReachability }); } catch { }
   res.json({ ok: true, level: lv });
 });
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver });
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit }); // lazy getters: both are created further down (TDZ at boot otherwise)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1521,11 +1521,11 @@ app.delete('/api/port-forward/:id/path', (req, res) => {
 });
 const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards, requestAuthed: (req) => auth.requestAuthed(req) });
 app.use('/svc', pathMounts.handler);
-const publishedPages = require('./src/server/published-pages.js').create({ // 2.364.0 "接管artifact": /p/<id> auth-exempt, gated PER PAGE in the module (CSP sandbox load-bearing)
-  dataDir: path.join(__dirname, 'data'), requestAuthed: (req) => auth.requestAuthed(req), log: (...a) => console.log(...a),
-  publicUrl: () => { try { return serverSetting('agentd.publicUrl') || process.env.VIBESPACE_PUBLIC_URL || null; } catch { return process.env.VIBESPACE_PUBLIC_URL || null; } },
+const publishedPages = require('./src/server/published-pages.js').create({ // 2.364.0 接管artifact: /p/<id> auth-exempt, gated PER PAGE in the module (CSP sandbox = the XSS guard); onPublished = the ONE notify point (dialog + agent publishes)
+  dataDir: path.join(__dirname, 'data'), requestAuthed: (req) => auth.requestAuthed(req), log: (...a) => console.log(...a), publicUrl: () => { try { return serverSetting('agentd.publicUrl') || process.env.VIBESPACE_PUBLIC_URL || null; } catch { return process.env.VIBESPACE_PUBLIC_URL || null; } },
+  onPublished: (page) => { const s2 = page.sessionId && activeSessions.get(page.sessionId); if (s2) broadcastToSession(s2, page.sessionId, { type: 'page-published', sessionId: page.sessionId, page }); },
 });
-publishedPages.registerRoutes(app);
+const designKit = require('./src/server/design-kit.js').create({ dataDir: path.join(__dirname, 'data'), claudeCmd: () => CLAUDE_CMD, log: (...a) => console.log(...a) }); designKit.registerRoutes(app); setTimeout(() => designKit.ensure().catch(() => { }), 15000); publishedPages.registerRoutes(app); // 2.366.0: the /design kit from the INSTALLED CLI, adapted to publish here; warmed off the boot path
 // protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
 // a published forward is transparently re-published in the new mode
 app.post('/api/port-forward/:id/proto', async (req, res) => {

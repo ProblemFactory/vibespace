@@ -1,4 +1,4 @@
-import { escHtml, showInputDialog, uiScale, showToast } from './utils.js';
+import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 
@@ -17,8 +17,10 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null }) {
     this._ws = ws;
+    this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
+    this._pages = []; // pages published from this session (server truth via /api/pages + page-published)
     this._sessionId = sessionId;
     this._backend = backend;
     this._onConfigChange = onConfigChange || null;
@@ -267,6 +269,26 @@ export class ChatStatusBar {
     this.render();
   }
 
+  /** Pages published from this session (status-bar design chip + popover). */
+  setPages(pages) { this._pages = Array.isArray(pages) ? pages.slice() : []; this.render(); this._refillDesignList(); }
+  /** page-published broadcast: publish / republish / visibility change /
+   *  removal (page.removed) — the chip AND an open popover list follow. */
+  notePagePublished(page) {
+    if (!page || !page.id) return;
+    const i = this._pages.findIndex((p) => p.id === page.id);
+    if (page.removed) { if (i >= 0) this._pages.splice(i, 1); }
+    else if (i >= 0) this._pages[i] = page; else this._pages.push(page);
+    this.render();
+    this._refillDesignList();
+  }
+  _refillDesignList() {
+    const list = this._designListEl;
+    if (!list || !list.isConnected) return;
+    list.replaceChildren();
+    for (const p of this._pages.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))) list.appendChild(this._designPageRow(p));
+    list.classList.toggle('hidden', !this._pages.length);
+  }
+
   setReviewEnabled(enabled) {
     this._reviewEnabled = !!enabled;
     this.render();
@@ -324,6 +346,15 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     } else {
       parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="${escHtml(t('Set a goal \u2014 the agent keeps working until the condition is met'))}">${UI_ICONS.goal}</span>`);
+    }
+
+    // Design canvas entry (2.366.0): rendered like the goal chip — the
+    // discoverable way to ask for a design drafted by the agent and HOSTED
+    // by this VibeSpace; the count = pages published from this session
+    if (this._onDesignRequest) {
+      const n = this._pages.length;
+      const dTitle = n ? t('{n} page(s) published from this session — click to view or request a design', { n }) : t('Request a design canvas — drafted by the agent, hosted by this VibeSpace, shareable by link');
+      parts.push(`<span class="chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}" title="${escHtml(dTitle)}">${UI_ICONS.design}${n ? ` ${n}` : ''}</span>`);
     }
 
     // Remote reconnect chip — amber, only while the ssh pipe is down
@@ -433,6 +464,101 @@ export class ChatStatusBar {
 
   // ── Private ──
 
+  /** Design popover (2.366.0): kit status · brief · public toggle · Create,
+   *  then the pages published from this session (Open / Copy link / visibility).
+   *  DOM built with textContent — page names are agent-chosen strings. */
+  _renderDesignPopover(dropdown) {
+    dropdown.style.minWidth = '300px';
+    dropdown.style.maxWidth = '440px';
+    const box = document.createElement('div');
+    box.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:4px';
+    const kitLine = document.createElement('div');
+    kitLine.className = 'chat-design-kit';
+    kitLine.textContent = t('Checking the design kit…');
+    const ta = document.createElement('textarea');
+    ta.className = 'chat-design-brief';
+    ta.rows = 3;
+    ta.placeholder = t('What should be designed? (a landing page, a poster, a settings screen…)');
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+    const pubLabel = document.createElement('label');
+    pubLabel.className = 'chat-design-public';
+    const pubCb = document.createElement('input');
+    pubCb.type = 'checkbox';
+    pubLabel.append(pubCb, document.createTextNode(' ' + t('Public link (anyone with the link)')));
+    const go = document.createElement('button');
+    go.className = 'btn-create chat-design-go';
+    go.textContent = t('Create design');
+    go.onclick = () => {
+      const brief = ta.value.trim();
+      if (!brief) { ta.focus(); return; }
+      dropdown.remove();
+      this._onDesignRequest(brief, { public: pubCb.checked });
+    };
+    row.append(pubLabel, go);
+    box.append(kitLine, ta, row);
+    const list = document.createElement('div');
+    list.className = 'chat-design-pages' + (this._pages.length ? '' : ' hidden');
+    this._designListEl = list; // refilled in place on page-published while the popover is open
+    box.appendChild(list);
+    this._refillDesignList();
+    dropdown.appendChild(box);
+    // Kit status: a failed build shows its reason AND a Retry (the server also
+    // retries stale failures on view); Create stays disabled until the kit is
+    // ready so the user never sends a request known to fail.
+    const paintKit = (k) => {
+      if (!kitLine.isConnected) return;
+      kitLine.replaceChildren();
+      if (!k || (k.error && !k.version && k.ok === undefined)) { kitLine.textContent = t('Design kit: status unavailable'); return; }
+      kitLine.append(document.createTextNode(k.ok ? t('Design kit ready (CLI {v})', { v: k.version }) : t('Design kit not ready: {err}', { err: k.error || '?' })));
+      kitLine.classList.toggle('chat-design-kit-bad', !k.ok);
+      go.disabled = !k.ok;
+      go.title = k.ok ? '' : t('The design kit is not ready — fix the reason above or retry');
+      if (!k.ok) {
+        const retry = document.createElement('button');
+        retry.className = 'btn-cancel chat-design-retry';
+        retry.textContent = t('Retry');
+        retry.onclick = () => { retry.disabled = true; kitLine.append(document.createTextNode(' …')); fetchJson('/api/design-kit/status?refresh=1').then(paintKit); };
+        kitLine.append(document.createTextNode(' '), retry);
+      }
+    };
+    go.disabled = true;
+    fetchJson('/api/design-kit/status').then(paintKit);
+    setTimeout(() => ta.focus(), 0);
+  }
+
+  _designPageRow(p) {
+    const row = document.createElement('div');
+    row.className = 'chat-design-page';
+    const abs = (u) => (String(u || '').startsWith('/') ? location.origin + u : u); // relative /p/<id> → this browser's origin
+    const name = document.createElement('span');
+    name.className = 'chat-design-page-name';
+    name.textContent = p.name || p.id;
+    name.title = abs(p.path || p.url);
+    const open = document.createElement('button');
+    open.className = 'btn-cancel';
+    open.textContent = t('Open');
+    open.onclick = () => window.open(abs(p.path || p.url), '_blank', 'noopener');
+    const copy = document.createElement('button');
+    copy.className = 'btn-cancel';
+    copy.textContent = t('Copy link');
+    copy.onclick = () => { copyText(abs(p.path || p.url)); showToast(t('Link copied')); };
+    const vis = document.createElement('button');
+    vis.className = 'btn-cancel';
+    const paint = () => {
+      vis.textContent = p.public ? t('Public') : t('Private');
+      vis.title = p.public ? t('Anyone with the link can view — click to make private') : t('Viewers must be logged in — click to make public');
+    };
+    paint();
+    vis.onclick = async () => {
+      const r = await fetchJson('/api/pages/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ public: !p.public }) });
+      if (!r || r.error) { showToast(t('Update failed: {err}', { err: (r && r.error) || 'network' }), { type: 'error' }); return; }
+      if (r.page) { p.public = !!r.page.public; paint(); this.notePagePublished(r.page); }
+    };
+    row.append(name, open, copy, vis);
+    return row;
+  }
+
   _fmtElapsed(ms) {
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -536,6 +662,16 @@ export class ChatStatusBar {
           dropdown.appendChild(row);
         }
       }
+      return;
+    }
+
+    // Design chip → brief + public toggle + this session's published pages
+    const designEl = e.target.closest('.chat-status-design');
+    if (designEl && this._onDesignRequest) {
+      e.stopPropagation();
+      const dropdown = showDropdown(designEl);
+      if (!dropdown) return;
+      this._renderDesignPopover(dropdown);
       return;
     }
 

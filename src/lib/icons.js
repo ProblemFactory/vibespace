@@ -56,6 +56,7 @@ export const UI_ICONS = {
   tasks:     _s('<path d="M4 4l8 0M4 8l8 0M4 12l8 0"/><circle cx="2" cy="4" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="8" r="0.8" fill="currentColor" stroke="none"/><circle cx="2" cy="12" r="0.8" fill="currentColor" stroke="none"/>'),
   // Goal indicator + status icons (replace 🎯 ▶ ⏸ ⛔ ✓ ⏳ 🪙 emoji)
   goal:      _s('<circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3.5"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/>'),
+  design:    _s('<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.5h11M6.5 6.5v7"/>'),
   clock:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/>'),
   hourglass: _s('<path d="M4 2h8M4 14h8M5.5 2v2.2c0 1.3 2.5 2.5 2.5 3.8s-2.5 2.5-2.5 3.8V14M10.5 2v2.2c0 1.3-2.5 2.5-2.5 3.8s2.5 2.5 2.5 3.8V14"/>'),
   play:      _s('<path d="M5 3.5l7 4.5-7 4.5z"/>', { fill: true }),

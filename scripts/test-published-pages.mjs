@@ -10,11 +10,13 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
+// (sections 8–9 added in 2.366.0: content publish + design-flow wiring)
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const express = require(path.join(REPO, 'node_modules/express'));
 
 let pass = 0, fail = 0;
+const okc = (c, n, e) => ok(n, c, e); // condition-first twin for sections 8–9 (review-caught: the first version passed (cond, name) into ok(name, cond) — every assert was vacuous)
 const ok = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e ? ' — ' + e : ''}`); } };
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages-'));
@@ -88,7 +90,86 @@ pages.publish({ srcPath: srcFile, name: 'again' });
 const pages2 = require(path.join(REPO, 'src/server/published-pages.js')).create({ dataDir: dir, requestAuthed: () => true, publicUrl: () => null });
 ok('a fresh instance reloads the persisted store', pages2.list().length === 1 && pages2.list()[0].name === 'again');
 
-// 8. wiring pins (the unstaged-wiring class)
+// 8. content publish (the agent CLI / remote-host path, 2.366.0): upsert by
+//    srcKey (host:path), session attribution, the ONE notify hook, the
+//    browser-origin heuristic for absolute share URLs, HTTP filter by session
+{
+  const notes = [];
+  const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages3-'));
+  const pg = require(path.join(REPO, 'src/server/published-pages.js')).create({ dataDir: dir3, requestAuthed: () => true, publicUrl: () => null, onPublished: (p, x) => notes.push({ p, x }) });
+  const r1 = pg.publishContent({ html: '<!doctype html><title>c1</title>', name: 'Canvas One', srcKey: 'host-a:/home/u/canvas.html', sessionId: 'sess-1-1', conversationId: 'conv-1' });
+  okc(r1.page && /^pg/.test(r1.page.id) && r1.page.sessionId === 'sess-1-1' && r1.page.replaced === false, 'content publish creates a page attributed to the publishing session', JSON.stringify(r1));
+  okc(r1.page.url === '/p/' + r1.page.id && r1.page.path === '/p/' + r1.page.id, 'no public URL and no browser origin yet → honest relative /p/<id> (client joins its origin)');
+  const r2 = pg.publishContent({ html: '<!doctype html><title>c2</title>', srcKey: 'host-a:/home/u/canvas.html', sessionId: 'sess-1-1' });
+  okc(r2.page.id === r1.page.id && r2.page.replaced === true && r2.page.name === 'Canvas One', 'same srcKey → same id (stable share URL), snapshot replaced, name kept when omitted');
+  okc(fs.readFileSync(path.join(dir3, 'published-pages', r1.page.id + '.html'), 'utf8').includes('c2'), 'the snapshot on disk is the new content');
+  const r3 = pg.publishContent({ html: '<!doctype html><title>other</title>', srcKey: 'host-b:/home/u/canvas.html', sessionId: 'sess-2-2' });
+  okc(r3.page.id !== r1.page.id, 'the same path on ANOTHER host is a different page (host is part of the identity)');
+  okc(pg.list({ sessionId: 'sess-1-1' }).length === 1 && pg.list({ sessionId: 'sess-2-2' }).length === 1 && pg.list().length === 2, 'list filters by sessionId');
+  okc(notes.length === 3 && notes[0].x.replaced === false && notes[1].x.replaced === true && notes[0].p.id === r1.page.id, 'onPublished fires for every publish with the replaced flag (the ONE notify point)');
+  // visibility / rename / unpublish notify too (multi-client law) — review-caught
+  const n0 = notes.length;
+  pg.setFlags(r1.page.id, { makePublic: true });
+  okc(notes.length === n0 + 1 && notes[n0].x.changed === 'flags' && notes[n0].p.public === true, 'setFlags notifies with the new visibility');
+  okc(pg.bySrcPath('/home/u/canvas.html') === null, 'bySrcPath matches LOCAL pages only — a remote host\'s page for the same absolute path is not it (review-caught)');
+  const rl = pg.publish({ srcPath: srcFile, name: 'local twin' });
+  okc(pg.bySrcPath(srcFile)?.id === rl.page.id && rl.page.replaced === false, 'a hub-local file publish is found by path and is NOT a replace on first publish');
+  okc(pg.publish({ srcPath: srcFile }).page.replaced === true, 'second file publish of the same path reports replaced=true (was always false — review-caught)');
+  const n1 = notes.length;
+  pg.remove(r3.page.id);
+  okc(notes.length === n1 + 1 && notes[n1].x.removed === true && notes[n1].p.removed === true && notes[n1].p.id === r3.page.id, 'remove notifies with removed:true so every client drops the row');
+  okc(pg.list().length === 2, 'removed page gone from the store');
+  // hostile Host headers never become share-link origins
+  pg.noteBrowserOrigin({ headers: { host: 'evil.example/phish?x=' }, protocol: 'https' });
+  okc(!pg.list()[0].url.includes('phish'), 'a Host header that is not a plain host[:port] is ignored');
+  okc(!!pg.publishContent({ html: '', srcKey: 'x:y' }).error && !!pg.publishContent({ html: '<p>x</p>', srcKey: '' }).error, 'empty body / missing srcKey refused');
+  okc(!!pg.publishContent({ html: Buffer.alloc(26 * 1024 * 1024, 65), srcKey: 'x:big' }).error, 'oversized body refused');
+  pg.noteBrowserOrigin({ headers: { host: 'vibe.example:3456' }, protocol: 'https' });
+  okc(pg.list()[0].url === 'https://vibe.example:3456/p/' + pg.list()[0].id, 'after a browser management call the share URLs are absolute on that origin');
+  pg.noteBrowserOrigin({ headers: { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'pub.example', host: '10.0.0.1:3456' }, protocol: 'http' });
+  okc(pg.list()[0].url.startsWith('https://pub.example/p/'), 'x-forwarded-* wins over the socket-level host (reverse proxies)');
+  const app3 = express(); app3.use(express.json()); pg.registerRoutes(app3);
+  const srv3 = app3.listen(0); await new Promise((r) => srv3.on('listening', r));
+  const base3 = `http://127.0.0.1:${srv3.address().port}`;
+  let res3 = await fetch(`${base3}/p/${r1.page.id}`);
+  okc(res3.status === 200 && /sandbox/.test(res3.headers.get('content-security-policy') || ''), 'content-published pages serve under the same CSP sandbox');
+  res3 = await fetch(`${base3}/api/pages?sessionId=sess-1-1`);
+  const lst = await res3.json();
+  okc(lst.pages.length === 1 && lst.pages[0].id === r1.page.id, 'GET /api/pages?sessionId= filters (the status-bar chip list)');
+  const lst2 = await (await fetch(`${base3}/api/pages?sessionId=sess-9-9&conversationId=conv-1`)).json();
+  okc(lst2.pages.length === 1 && lst2.pages[0].id === r1.page.id, 'a resumed window (new session id) still finds the page by conversationId (review-caught)');
+  okc(lst.pages[0].url.startsWith('http://127.0.0.1:'), 'a management call from a browser re-teaches the origin (last browser wins)');
+  srv3.close();
+  fs.rmSync(dir3, { recursive: true, force: true });
+}
+
+// 9. design-flow wiring pins (2.366.0)
+{
+  const read2 = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const sv = read2('server.js');
+  okc(sv.includes("onPublished: (page) =>") && sv.includes("type: 'page-published'"), 'server.js: onPublished broadcasts page-published to the publishing session (ONE notify point)');
+  okc(sv.includes('getPublishedPages: () => publishedPages, getDesignKit: () => designKit'), 'server.js hands publishedPages + designKit to the agent routes as LAZY getters (created later in the file — TDZ at boot otherwise; caught by the design-flow E2E)');
+  const ar = read2('src/agent-routes.js');
+  okc(ar.includes("'/api/agent/pages/publish'") && ar.includes("express.raw({ type: () => true, limit: '25mb' })"), 'agent publish route takes the raw HTML body (remote hosts upload content)');
+  okc(ar.includes("token.startsWith('jbt_')") && ar.includes('const pageAuth'), 'agent publish accepts session (vsst_) and job (jbt_) tokens');
+  okc(ar.includes('job.owner && job.owner.conversation && job.owner.conversation.id'), 'job tokens attribute to the job\'s OWNER conversation (the jobs.js field shape — review-caught)');
+  okc(ar.includes("if (!a.sessionId && !a.conversationId) return res.json({ pages: [] })"), 'a scope-less caller lists nothing (no all-pages oracle — review-caught)');
+  okc(ar.includes("(q.public === undefined || q.public === '') ? undefined"), 'republish without an explicit public flag keeps the user\'s visibility choice (review-caught)');
+  const cli = read2('data/bin/vibespace-page');
+  okc(!cli.includes('host: os.hostname()') && cli.includes("if (has('--public')) q.set('public', '1')"), 'CLI sends public only when asked and no host param (the session\'s host is authoritative)');
+  okc(ar.includes("pages: 'pages-manual.md'") && fs.existsSync(path.join(REPO, 'docs/agent/pages-manual.md')), 'vibespace-docs pages manual registered');
+  okc(ar.includes('vibespace-page kit') && ar.includes('vibespace-docs pages'), 'tools intro teaches vibespace-page');
+  const sb = read2('src/lib/chat-status-bar.js');
+  okc(sb.includes('chat-status-design') && sb.includes('_renderDesignPopover') && sb.includes('onDesignRequest'), 'status bar: design chip + popover');
+  okc(sb.includes("fetchJson('/api/design-kit/status')"), 'popover shows the kit status (failures are visible, not silent)');
+  const cv = read2('src/lib/chat-view.js');
+  okc(cv.includes('[VibeSpace design request]') && cv.includes('vibespace-page kit') && cv.includes('vibespace-page publish'), 'chat-view composes a VISIBLE design request routed through vibespace-page');
+  okc(cv.includes("msg.type === 'page-published'") && cv.includes('_loadPages()'), 'chat-view: live page-published + initial list');
+  okc(read2('public/chat.css').includes('.chat-status-design'), 'chip styled');
+  okc(read2('src/lib/i18n-zh.js').includes("'Create design'") && read2('src/lib/i18n-ja.js').includes("'Create design'"), 'dictionaries carry the popover strings');
+}
+
+// 10. wiring pins (the unstaged-wiring class)
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 ok('auth.js exempts /p/ (per-page gate doctrine)', read('src/auth.js').includes("p.startsWith('/p/')"));
 ok('server.js wires create + registerRoutes', read('server.js').includes("published-pages.js').create") && read('server.js').includes('publishedPages.registerRoutes(app)'));
