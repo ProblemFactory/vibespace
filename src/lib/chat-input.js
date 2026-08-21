@@ -391,13 +391,42 @@ export class ChatInput {
 
   // ── Public API ──
 
-  showTyping(label = t('thinking...')) {
+  showTyping(label = t('thinking...'), kind = null) {
     if (!this._streamStatus) return;
     this._pendingLine = false; // a real turn owns the line now (see _clearPending)
     this._streamStatus.innerHTML = `<span class="chat-spinner"></span> ${escHtml(label)}<button class="chat-interrupt-btn" title="${escHtml(t('Interrupt'))}">\u25A0 ${escHtml(t('Stop'))}</button>`;
-    this._streamStatus.querySelector('.chat-interrupt-btn').onclick = () => this._onInterrupt();
+    const btn = this._streamStatus.querySelector('.chat-interrupt-btn');
+    if (kind === 'compacting') {
+      // Two-step Stop while a compaction runs (2.365.0): the CLI's only
+      // "Compaction canceled." path is an abort signal, and a large
+      // conversation compacts for 1–2 minutes — one reflexive click threw the
+      // whole attempt away (the userN incident). Arm, then confirm.
+      btn.title = t('Click again to cancel the running compaction');
+      btn.onclick = () => {
+        if (btn.dataset.armed) { this._onInterrupt(); return; }
+        btn.dataset.armed = '1';
+        btn.classList.add('chat-interrupt-armed');
+        btn.textContent = t('Cancel compaction?');
+        setTimeout(() => {
+          if (!btn.isConnected) return;
+          delete btn.dataset.armed;
+          btn.classList.remove('chat-interrupt-armed');
+          btn.textContent = '\u25A0 ' + t('Stop');
+        }, 4000);
+      };
+    } else {
+      btn.onclick = () => this._onInterrupt();
+    }
     this._streamStatus.classList.remove('hidden');
     this._isStreaming = true;
+  }
+
+  /** Programmatic send through the FULL _send path (draft keep, history ring,
+   *  dead-socket defenses) — for in-chat action buttons such as Compact now. */
+  sendText(text) {
+    if (!this._textarea) return;
+    this._textarea.value = String(text || '');
+    this._send();
   }
 
   hideTyping() {
@@ -620,7 +649,11 @@ export class ChatInput {
 
     // Notify parent to handle scroll/pin
     this._onSend();
-    this.showTyping(t('thinking...'));
+    // A /compact send shows its own label immediately (the server broadcasts
+    // the same kind to other clients) so the minute-long run is never a bare
+    // "thinking…" with an unguarded Stop.
+    if (/^\/compact\b/.test(text)) this.showTyping(t('Compacting context… (a large conversation takes 1–2 minutes — Stop cancels it)'), 'compacting');
+    else this.showTyping(t('thinking...'));
   }
 
   _addImageAttachment(file) {

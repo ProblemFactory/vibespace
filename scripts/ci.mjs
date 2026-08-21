@@ -34,6 +34,7 @@ const SUITES = [
   'test-chat-frame-guard', // 38MB-poisoning trio: poison guard + frame-file bypass (real wrapper) + rescue
   'test-agent-msg',     // Channels v1: ACL matrix + delivery ladder + wiring pins
   'test-proxy-post',    // proxied POST body reaches the target (real unblocker; the json-parser-skips-/proxy/ pin)
+  'test-compaction-ux', // prompt_too_long → guidance card + /compact turn label + two-step Stop (normalizer behavioral + wiring pins)
   'test-published-pages', // instance-hosted shareable HTML: publish/serve/auth-gate/CSP-sandbox/upsert + wiring pins
   'test-peer-msg-card', // peer message visible on the LIVE stream (result.origin mining + 3-site dedup)
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',

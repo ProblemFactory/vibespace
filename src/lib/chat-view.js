@@ -161,6 +161,7 @@ class ChatView {
     // Renderers (extracted rendering methods)
     this._renderers = new ChatRenderers({
       getSessionCtx: () => this._getSessionIds(), // view-only/terminated windows keep host+cwd via openSpec
+      onSendText: (txt) => this._chatInput?.sendText(txt), // in-chat action buttons (Compact now) — null-safe for view-only
       ws: wsManager,
       sessionId,
       app,
@@ -566,7 +567,7 @@ class ChatView {
         this._chatInput?.confirmDelivery?.();
         this._onOp(msg);
       } else if (msg.type === 'streaming-label' && msg.sessionId === sessionId) {
-        if (msg.label) this._showTyping(msg.label);
+        if (msg.label) this._showTyping(msg.label, msg.kind || null);
         else this._hideTyping();
       } else if (msg.type === 'goal-updated' && msg.sessionId === sessionId) {
         // The server ALWAYS answers a set-goal with this broadcast (status /
@@ -743,7 +744,7 @@ class ChatView {
     // sessions — jsonlGapInfo returns null without building an index.)
     if (this._total > 50 && this._canPaginate) this._initGapMinimap();
 
-    if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'));
+    if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);
     // ── Blank-window telemetry (user-reported "session窗口空白" class) ──
@@ -1887,9 +1888,9 @@ class ChatView {
   }
 
   // _showTyping / _hideTyping delegate to ChatInput (normal) or readOnly _streamStatus
-  _showTyping(label = t('thinking...')) {
+  _showTyping(label = t('thinking...'), kind = null) {
     this._typingSince = this._typingSince || Date.now(); // watchdog arm
-    if (this._chatInput) { this._chatInput.showTyping(label); return; }
+    if (this._chatInput) { this._chatInput.showTyping(label, kind); return; }
     // readOnly fallback
     if (!this._streamStatus) return;
     this._streamStatus.innerHTML = `<span class="chat-spinner"></span> ${escHtml(label)}`;
@@ -2370,7 +2371,7 @@ class ChatView {
         return;
       }
       // Sync streaming label from server
-      if (msg.isStreaming) this._showTyping(msg.streamingLabel || t('thinking...'));
+      if (msg.isStreaming) this._showTyping(msg.streamingLabel || t('thinking...'), msg.streamingKind || null);
       else this._hideTyping();
       this._reattachCatchUp();
     };
@@ -2439,7 +2440,7 @@ class ChatView {
     this._newMsgCount = 0;
     this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, {
       chatStatus: msg.chatStatus, taskState: msg.taskState, turnMap: msg.turnMap,
-      pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel,
+      pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel, streamingKind: msg.streamingKind,
       goal: msg.goal, goalElapsed: msg.goalElapsed, goalStatus: msg.goalStatus,
       normEpoch: msg.normEpoch,
     });

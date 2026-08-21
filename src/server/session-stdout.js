@@ -201,7 +201,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
               if (newLabel !== null && session._streamingLabel !== newLabel) {
                 session._streamingLabel = newLabel;
-                broadcastToSession(session, id, { type: 'streaming-label', sessionId: id, label: newLabel });
+                broadcastToSession(session, id, { type: 'streaming-label', sessionId: id, label: newLabel, kind: session._streamingKind || null });
               }
             }
             // Codex plan tool → the session's live TODO summary (board pill)
@@ -582,6 +582,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'compact_boundary')) {
                 session._isStreaming = false;
                 session._fallbackStopFired = false; // one auto-stop per turn (claude.disableModelFallback belt)
+                session._streamingKind = null;
                 newLabel = '';
               } else if (msg.type === 'user' && !msg.parent_tool_use_id && !msg.isSidechain) {
                 // Local-command echoes (e.g. "<local-command-stdout>Set model
@@ -630,7 +631,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               }
               if (newLabel !== null && session._streamingLabel !== newLabel) {
                 session._streamingLabel = newLabel;
-                broadcastToSession(session, id, { type: 'streaming-label', sessionId: id, label: newLabel });
+                broadcastToSession(session, id, { type: 'streaming-label', sessionId: id, label: newLabel, kind: session._streamingKind || null });
               }
             }
 
