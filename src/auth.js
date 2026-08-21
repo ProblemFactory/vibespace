@@ -221,6 +221,11 @@ class Auth {
       // + the persisted x-vibespace-otel token as the ONLY gate (pinned by
       // scripts/test-otel-truth.mjs).
       if (p.startsWith('/otel/')) return next();
+      // Published pages (2.364.0): auth is PER PAGE, same doctrine as /svc —
+      // src/server/published-pages.js gates private pages via requestAuthed
+      // and lets `public` ones through (the shareable-link case). Pinned by
+      // scripts/test-published-pages.mjs.
+      if (p.startsWith('/p/')) return next();
       if (this.requestAuthed(req)) return next();
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');

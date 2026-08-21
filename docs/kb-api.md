@@ -5,6 +5,13 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 ## API Reference
 
 ### REST Endpoints
+
+#### Published pages (2.364.0)
+- `GET /p/:id` — serve a published page. Middleware-exempt; module gates: private ⇒ cookie, public ⇒ open. Response always carries `Content-Security-Policy: sandbox allow-scripts …` (opaque origin — the XSS guard).
+- `GET /api/pages` — list; `GET /api/pages/by-path?path=` — record for a source file (the explorer dialog's state probe).
+- `POST /api/pages/publish` `{path, name?, public?}` — copy-in publish, upserts by source path (stable /p/<id>).
+- `POST /api/pages/:id` `{public?, name?}` — flags; `DELETE /api/pages/:id` — unpublish.
+
 - `GET /api/home` — home directory (+ authEnabled flag)
 - `POST /api/login` / `POST /api/logout` — password auth (rate-limited; sets/revokes HttpOnly cookie token); `GET /login` login page
 - `GET /api/backend-status` — CLI readiness for onboarding: {claude,codex} × {installed, version, loggedIn} (file-existence detection, never spawns CLIs)

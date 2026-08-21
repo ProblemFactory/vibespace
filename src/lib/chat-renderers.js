@@ -270,6 +270,10 @@ class ChatRenderers {
     return hits.length === 1 ? hits[0] : (hits[0] || null);
   }
   _jumpToPeer(name) {
+    // 'Background Work · <job>' senders are JOBS, not sessions (owner report:
+    // the name rendered as a link but clicking failed the session lookup) —
+    // open the Background Work panel instead of a doomed name resolution
+    if (/^Background Work · /.test(String(name || ''))) { this.app.openJobs?.(); return; }
     const s = this._resolvePeerSession(name);
     if (!s) {
       track('peer-jump-unresolved', { name: String(name || '').slice(0, 40) });
@@ -303,6 +307,13 @@ class ChatRenderers {
       if (nameEl) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(msg.peerFrom); };
       el.querySelector('.chat-peer-head').oncontextmenu = (e) => {
         e.preventDefault(); e.stopPropagation();
+        if (/^Background Work · /.test(String(msg.peerFrom || ''))) {
+          showContextMenu(e, [
+            { label: t('Open Background Work'), action: () => this.app.openJobs?.() },
+            { label: t('Copy sender name'), action: () => copyText(msg.peerFrom) },
+          ]);
+          return;
+        }
         const s = this._resolvePeerSession(msg.peerFrom);
         showContextMenu(e, [
           { label: t('Open session'), action: () => this._jumpToPeer(msg.peerFrom) },
