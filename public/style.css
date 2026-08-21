@@ -786,7 +786,7 @@ html, body {
 
 /* ── Toolbar ── */
 #toolbar {
-  /* Height AUTO-FITS content (no dead band — the 2.254.0 rootfix of walter's
+  /* Height AUTO-FITS content (no dead band — the 2.254.0 rootfix of userW's
      "拉高留大空档"): the toolbar is exactly as tall as its content rows need.
      The resize handle drives --toolbar-scale (a zoom), so dragging changes
      content COMPACTNESS (smaller = more desktop), never injects empty space. */
