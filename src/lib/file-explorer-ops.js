@@ -68,6 +68,12 @@ export function installExplorerOps(FileExplorer) {
       items.push({ label: t('Extract Here'), action: () => this._extractArchive(dataset.name, true) });
       items.push({ label: t('Extract to Folder\u2026'), action: () => this._extractArchive(dataset.name, false) });
     }
+    // Published pages (2.364.0 "\u63a5\u7ba1artifact"): self-contained HTML (design
+    // canvases, mockups, reports) hosted at a stable /p/<id> share URL \u2014
+    // local files only (the page store copies from this machine's disk)
+    if (!isDir && !this._host && /\.html?$/i.test(dataset.name)) {
+      items.push({ label: t('Publish page\u2026'), action: () => this._publishPageDialog(fullPath, dataset.name) });
+    }
     items.push({ sep: true });
     items.push({ label: t('Copy'), action: () => this._clipboardSet('copy') });
     items.push({ label: t('Cut'), action: () => this._clipboardSet('cut') });
@@ -517,6 +523,56 @@ export function installExplorerOps(FileExplorer) {
     const r = await fetch(`/api/file?path=${encodeURIComponent(this.currentPath + '/' + name)}${this._hp()}`, { method: 'DELETE' }).catch(() => null);
     if (!r?.ok) showToast(t('Delete failed'), { type: 'error' });
     this.refresh();
+  },
+  // ── Published pages (2.364.0 "接管artifact") ──────────────────────────
+  // One dialog is create + manage: shows current state when the file is
+  // already published (stable URL upsert), lock toggle mirrors the 2.359.0
+  // path-mount semantics (default private = login-only; public = anyone).
+  async _publishPageDialog(fullPath, name) {
+    const existing = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
+    const { body, close } = createModalShell({ title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px' });
+    const esc = (x) => String(x || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    body.innerHTML = `
+      <label style="display:block;margin-bottom:8px">${t('Page name')}<input class="dialog-input" id="pp-name" value="${esc(existing?.name || name.replace(/\.html?$/i, ''))}"></label>
+      <label style="display:flex;align-items:center;gap:6px;margin-bottom:10px"><input type="checkbox" id="pp-public" ${existing?.public ? 'checked' : ''}> ${t('Public — anyone with the link can view (no login)')}</label>
+      ${existing ? `<div class="pp-url" style="font-size:12px;margin-bottom:10px;word-break:break-all;opacity:.8">${esc(absUrl(existing.url))}</div>` : ''}
+      <div class="dialog-footer" style="display:flex;gap:8px;justify-content:flex-end">
+        ${existing ? `<button class="btn-cancel" id="pp-unpub">${t('Unpublish')}</button><button class="btn-cancel" id="pp-copy">${t('Copy link')}</button><button class="btn-cancel" id="pp-open">${t('Open')}</button>` : ''}
+        <button class="btn-create" id="pp-go">${existing ? t('Republish') : t('Publish')}</button>
+      </div>`;
+    // server URLs are relative when no public URL is configured — join with
+    // this browser's origin so Copy link is always shareable (review-caught)
+    const absUrl = (u) => (String(u || '').startsWith('/') ? location.origin + u : u);
+    const openPage = (url) => this.app.openBrowser ? this.app.openBrowser(absUrl(url)) : window.open(absUrl(url), '_blank');
+    if (existing) {
+      body.querySelector('#pp-copy').onclick = () => { copyText(absUrl(existing.url)); showToast(t('Link copied')); };
+      body.querySelector('#pp-open').onclick = () => { openPage(existing.url); close(); };
+      body.querySelector('#pp-unpub').onclick = async () => {
+        const r = await fetch(`/api/pages/${existing.id}`, { method: 'DELETE' }).then((x) => x.json()).catch(() => null);
+        if (r?.ok) { showToast(t('Page unpublished')); close(); }
+        else showToast(t('Unpublish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' });
+      };
+    }
+    body.querySelector('#pp-go').onclick = async () => {
+      const payload = { path: fullPath, name: body.querySelector('#pp-name').value.trim(), public: body.querySelector('#pp-public').checked };
+      let r = await fetch('/api/pages/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()).catch(() => null);
+      // source file gone but the page exists → apply the flags without a re-snapshot
+      if (!r?.page && existing && /file not found/.test(r?.error || '')) {
+        r = await fetch(`/api/pages/${existing.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ public: payload.public, name: payload.name }) }).then((x) => x.json()).catch(() => null);
+      }
+      if (!r?.page) { showToast(t('Publish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' }); return; }
+      close();
+      const { body: b2, close: c2 } = createModalShell({ title: t('Page published'), escapeToClose: true, minWidth: '420px' });
+      b2.innerHTML = `
+        <div style="font-size:12px;word-break:break-all;margin-bottom:6px">${esc(absUrl(r.page.url))}</div>
+        <div style="font-size:11px;opacity:.7;margin-bottom:10px">${r.page.public ? t('Public — anyone with the link can view (no login)') : t('Private — viewers need a VibeSpace login')}</div>
+        <div class="dialog-footer" style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-cancel" id="pp2-copy">${t('Copy link')}</button>
+          <button class="btn-create" id="pp2-open">${t('Open')}</button>
+        </div>`;
+      b2.querySelector('#pp2-copy').onclick = () => { copyText(absUrl(r.page.url)); showToast(t('Link copied')); };
+      b2.querySelector('#pp2-open').onclick = () => { openPage(r.page.url); c2(); };
+    };
   },
   });
 }

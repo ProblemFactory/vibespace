@@ -1114,12 +1114,9 @@ const usageHistory = new UsageHistory({
 // Routes are cookie-exempt (auth.js); the module's loopback+token gate is the
 // only door. Zero vendor calls — the CLI pushes to us.
 const otelIngest = require('./src/server/otel-ingest.js').create({
-  dataDir: path.join(__dirname, 'data'),
-  PORT,
-  getUsageHistory: () => usageHistory,
-  identityGroups: () => usageIdentityGroupsCached(),
+  dataDir: path.join(__dirname, 'data'), PORT, serverSetting,
+  getUsageHistory: () => usageHistory, identityGroups: () => usageIdentityGroupsCached(),
   listAccounts: () => accounts.list().accounts || [],
-  serverSetting,
 });
 app.post('/otel/v1/logs', otelIngest.logs);
 app.post('/otel/v1/metrics', otelIngest.ok);
@@ -1254,10 +1251,8 @@ const deliver = require('./src/server/conversation-deliver.js').create({
   getHosts: () => hosts,
   getConvIndex: () => hosts && hosts.convIndex,
   serverSetting, activeSessions,
-  // 2.363.0: render the peer card in the receiving chat window at delivery
-  // time — server-posted injections reach the CLI as an unregistered poster
-  // (body-less origin), so the delivery site is the only party that can show
-  // the message live. Open remote chat sessions match by cid too.
+  // 2.363.0: render the peer card at delivery time — server-posted injections
+  // are body-less at the CLI, only the delivery site can show them live.
   emitPeerCard: (cid, card) => {
     for (const [, s] of activeSessions) {
       if ((s.backendSessionId || s.claudeSessionId) !== cid || !s._normalizer) continue;
@@ -1526,6 +1521,11 @@ app.delete('/api/port-forward/:id/path', (req, res) => {
 });
 const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards, requestAuthed: (req) => auth.requestAuthed(req) });
 app.use('/svc', pathMounts.handler);
+const publishedPages = require('./src/server/published-pages.js').create({ // 2.364.0 "接管artifact": /p/<id> auth-exempt, gated PER PAGE in the module (CSP sandbox load-bearing)
+  dataDir: path.join(__dirname, 'data'), requestAuthed: (req) => auth.requestAuthed(req), log: (...a) => console.log(...a),
+  publicUrl: () => { try { return serverSetting('agentd.publicUrl') || process.env.VIBESPACE_PUBLIC_URL || null; } catch { return process.env.VIBESPACE_PUBLIC_URL || null; } },
+});
+publishedPages.registerRoutes(app);
 // protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
 // a published forward is transparently re-published in the new mode
 app.post('/api/port-forward/:id/proto', async (req, res) => {
