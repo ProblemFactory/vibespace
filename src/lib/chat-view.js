@@ -607,6 +607,17 @@ class ChatView {
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
+        // SEND refusal ≠ attach failure (inc-mt2arppw, userW: every too-large
+        // paste flipped the LIVE window into the Resume bar — the session was
+        // never broken, and the refusal text rode msg.error which this branch
+        // never read, so the user saw a dead-looking window with no reason).
+        // A coded input rejection renders in-chat and leaves the view alone.
+        if (msg.code === 'input-rejected') {
+          this._hideTyping();
+          this._renderers.appendSystem('✗ ' + (msg.message || msg.error || t('Message rejected.')));
+          try { track('event', 'chat-input-rejected', this._telemDetail(msg.message || msg.error)); } catch {}
+          return;
+        }
         // Attach failed (e.g. stale serverId replayed from a saved layout).
         // If NOTHING is rendered yet and the identity is known, rescue into
         // the view-only pipeline (saved history + Resume bar) — after an OOM
@@ -615,7 +626,7 @@ class ChatView {
         // fleet report). Only when even that can't work, show the bare error.
         this._hideTyping();
         if (!this._tryViewOnlyRescue()) {
-          this._renderers.appendSystem(msg.message || t('Session not found.'));
+          this._renderers.appendSystem(msg.message || msg.error || t('Session not found.'));
           this._setReadOnly();
         }
         try { track('event', 'chat-attach-failed', this._telemDetail(msg.message)); } catch {}

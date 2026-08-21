@@ -110,5 +110,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(sv.includes("'chat-frames'") && sv.includes('48 * 3600 * 1000'), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
 }
 
+// ── 5. send-refusal presentation pins (inc-mt2arppw, userW: every refusal
+//      flipped the LIVE window into the Resume bar with no reason — the
+//      client's error handler read ALL per-session errors as attach failures,
+//      and the refusal text rode msg.error which it never read) ──
+{
+  const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  ok((ws.match(/code: 'input-rejected'/g) || []).length >= 2, 'both chat-input refusal sites carry code:input-rejected');
+  ok(/code: 'input-rejected',[^\n]*message:/.test(ws.replace(/\n\s*/g, ' ')), 'refusals carry the text in the message field the client reads');
+  const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
+  ok(cv.includes("msg.code === 'input-rejected'"), 'chat-view renders coded refusals in-chat (no read-only flip)');
+  ok(cv.indexOf("msg.code === 'input-rejected'") < cv.indexOf('_tryViewOnlyRescue'), 'refusal branch runs BEFORE the attach-failure rescue');
+  const ir = fs.readFileSync(path.join(REPO, 'src/lib/incident-recorder.js'), 'utf8');
+  ok(ir.includes('msg.message || msg.error'), 'incident ring captures error-field texts (the msg:"" forensic gap)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

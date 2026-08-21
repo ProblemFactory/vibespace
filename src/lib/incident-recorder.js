@@ -70,7 +70,7 @@ export function installIncidentRecorder(app) {
       try {
         const e = { t: Date.now(), d: '<', ty: msg?.type, sid: msg?.sessionId };
         // tiny type-specific extracts that are pure diagnostics, never content
-        if (msg?.type === 'error') { e.code = msg.code; e.msg = String(msg.message || '').slice(0, 120); }
+        if (msg?.type === 'error') { e.code = msg.code; e.msg = String(msg.message || msg.error || '').slice(0, 120); }
         if (msg?.type === 'exited') { e.reason = msg.reason; }
         if (msg?.type === 'server-notice') { e.key = msg.key; }
         push(rings.ws, CAP.ws, e);

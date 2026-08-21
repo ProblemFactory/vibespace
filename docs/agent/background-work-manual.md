@@ -144,5 +144,5 @@ patterns; that class got a subscription banned — don't try to work around it).
 - In-session continuation ("keep going until X") → `/goal`
 - Must OUTLIVE the conversation → THIS
 - Harness cron → never (dies with the session); dated obligations → `--at`
-- Reminders for the USER (not a process) → `notify-cron`
+- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's inbox is NOT copied unless you add `--notify-user` — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
 - Simple user forms → Interaction Panels (§5) before building a web page (§6)
