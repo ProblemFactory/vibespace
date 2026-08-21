@@ -33,6 +33,7 @@ const SUITES = [
   'test-otel-truth',    // per-request billing truth: parser + loopback ingest + bake override + wiring pins
   'test-chat-frame-guard', // 38MB-poisoning trio: poison guard + frame-file bypass (real wrapper) + rescue
   'test-agent-msg',     // Channels v1: ACL matrix + delivery ladder + wiring pins
+  'test-proxy-post',    // proxied POST body reaches the target (real unblocker; the json-parser-skips-/proxy/ pin)
   'test-peer-msg-card', // peer message visible on the LIVE stream (result.origin mining + 3-site dedup)
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
