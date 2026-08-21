@@ -1040,9 +1040,23 @@ class ChatRenderers {
     });
   }
 
+  /**
+   * `/p/<id>` — a page published on THIS instance — becomes a real link
+   * against the origin the viewer is actually using (2.366.1). The server
+   * cannot know that address (reverse proxy, tunnel, a different hostname),
+   * so agents are told to write the PATH and the browser resolves it; a
+   * server-side guess produced a link that only resolved on the server
+   * itself (owner: "你怎么知道我用啥地址能访问你？"). Runs BEFORE the file-path
+   * linkifier, which would otherwise claim it as a filesystem path.
+   */
+  linkifyPagePaths(text) {
+    return text.replace(/(?<![="'\w/])(\/p\/pg[a-z0-9]{10})(\/raw)?\b/g, (m, p) =>
+      `<span class="chat-link" data-href="${location.origin}${p}" title="${t('Click to copy, Ctrl+Click to open')}">${p}</span>`);
+  }
+
   /** Combined URL + path linkification on a text segment. */
   linkifySegment(text, esc) {
-    return this.linkifyPathsTagSafe(this.linkifyUrls(text), esc);
+    return this.linkifyPathsTagSafe(this.linkifyPagePaths(this.linkifyUrls(text)), esc);
   }
 
   /**

@@ -501,8 +501,11 @@ export class ChatStatusBar {
     list.className = 'chat-design-pages' + (this._pages.length ? '' : ' hidden');
     this._designListEl = list; // refilled in place on page-published while the popover is open
     box.appendChild(list);
-    this._refillDesignList();
     dropdown.appendChild(box);
+    this._refillDesignList(); // AFTER the append: _refillDesignList bails on a
+    // detached node (that guard exists for broadcasts arriving with no popover
+    // open), so filling first left the chip saying "1" over an empty popover
+    // — owner-caught. Guards must not sit on the path that has to run.
     // Kit status: a failed build shows its reason AND a Retry (the server also
     // retries stale failures on view); Create stays disabled until the kit is
     // ready so the user never sends a request known to fail.

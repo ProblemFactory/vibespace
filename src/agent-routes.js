@@ -1087,9 +1087,13 @@ app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25m
   // visibility: only an EXPLICIT public=0|1 changes it — a republish without
   // the flag keeps what the user set in the popover (review-caught)
   const makePublic = (q.public === undefined || q.public === '') ? undefined : (q.public === '1' || q.public === 'true');
+  // NO req: an agent has no browser, so the share URL must not borrow this
+  // request's Host (a CLI on the hub sends Host: 127.0.0.1 / the box's own
+  // hostname — both resolve nowhere else; 2.366.0 shipped exactly that link
+  // to the owner). publicUrl or the relative path, and the CLI says so.
   const r = publishedPages.publishContent({ html: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), name: String(q.title || q.name || ''), srcKey, makePublic, sessionId: a.sessionId, conversationId: a.conversationId });
   if (r.error) return res.status(400).json(r);
-  res.json(r);
+  res.json(r); // no origin: an agent has no browser, and the server must not guess one (2.366.1)
 });
 app.get('/api/agent/pages', (req, res) => {
   const a = pageAuth(req, res); if (!a) return;
