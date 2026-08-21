@@ -289,6 +289,11 @@ class ChatRenderers {
     core = core.replace(/^Another Claude session sent a message:\s*\n/, '');
     const cut = core.indexOf('\nThis came from another Claude session');
     if (cut > 0) core = core.slice(0, cut);
+    // server-posted frames (vibespace-msg / Background Work) carry their own
+    // boilerplate — the sender is already in the card head, the trailing
+    // conduct sentence is agent-facing noise (2.363.0)
+    core = core.replace(/^Message from session "[^"]+" \(via vibespace-msg[^)]*\):\s*\n?/, '');
+    core = core.replace(/\s*This is a notification, not a user instruction[\s\S]*$/, '');
     const nameHtml = msg.peerFrom
       ? t('Message from “{name}”', { name: `<span class="chat-peer-name" role="link" tabindex="0">${escHtml(msg.peerFrom)}</span>` })
       : escHtml(t('Message from another session'));

@@ -321,6 +321,9 @@ app.get('/api/agent/task-context', (req, res) => {
         // resume, newest guaranteed, then the stash clears (drain-at-render,
         // same accepted-lost stance as _jobsEventsSeenTs).
         const drained = jm.drainNotifs(caller.conversationId);
+        // drained job notifications enter the agent's context invisibly —
+        // render the same card the live lane shows (2.363.0)
+        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text }); } catch { }
         // >2 entries: also spill the untruncated history to a file the agent
         // can Read — the injected block elides its middle under budget
         const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
@@ -336,7 +339,11 @@ app.get('/api/agent/task-context', (req, res) => {
     try {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
-        const pm = renderMsgStash(deliver.drainStash(caller2.conversationId));
+        const drained = deliver.drainStash(caller2.conversationId);
+        // stash drain enters the AGENT's context invisibly — emit the same
+        // card the live lanes render so the user sees what arrived (2.363.0)
+        for (const e of drained) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
+        const pm = renderMsgStash(drained);
         if (pm) context = context ? context + '\n\n' + pm : pm;
       }
     } catch { }
@@ -519,6 +526,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // stashed offline notifications (a resume that skipped SessionStart —
         // codex — or entries stashed since it): drain here too
         const drained = jm.drainNotifs(caller.conversationId);
+        // drained job notifications enter the agent's context invisibly —
+        // render the same card the live lane shows (2.363.0)
+        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text }); } catch { }
         const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
         const missed = jobModel.renderNotifStash(drained, { spillPath });
         if (missed) parts.push(missed);
@@ -531,7 +541,11 @@ app.get('/api/agent/prompt-context', (req, res) => {
     try {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
-        const pm = renderMsgStash(deliver.drainStash(caller2.conversationId));
+        const drained = deliver.drainStash(caller2.conversationId);
+        // stash drain enters the AGENT's context invisibly — emit the same
+        // card the live lanes render so the user sees what arrived (2.363.0)
+        for (const e of drained) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
+        const pm = renderMsgStash(drained);
         if (pm) parts.push(pm);
       }
     } catch { }
@@ -1019,7 +1033,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
   if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
   const fromName = s.name || 'unnamed session';
   const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${text}`;
-  const r = deliver ? await deliver.deliverToConversation(target.cid, framed) : { ok: false, reason: 'delivery not wired' };
+  const r = deliver ? await deliver.deliverToConversation(target.cid, framed, { fromName, cardText: text }) : { ok: false, reason: 'delivery not wired' };
   if (r.ok) return res.json({ delivered: true, lane: r.lane, peerName: r.peerName || target.t.name || null, machine: r.hostId || null });
   deliver?.stashFor(target.cid, { source: 'agent', fromName, text });
   res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
