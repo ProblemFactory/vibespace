@@ -366,8 +366,12 @@ function registerWsHandler(wss, ctx) {
             try { ({ stdinPayload, userMsg } = adapter.formatChatInput(data.text, msgId)); }
             catch (e) {
               // POISON GUARD tripped (2.360.0): a shredded frame must reach
-              // the USER as an error, never the transcript as text
-              try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, error: e.message })); } catch { }
+              // the USER as an error, never the transcript as text.
+              // code marks it a SEND refusal — without it the client's error
+              // handler read EVERY per-session error as an attach failure and
+              // flipped the LIVE window read-only (inc-mt2arppw, userW: "发消息
+              // 就会直接中断"), and the text rode a field the client never read.
+              try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: e.message, message: e.message })); } catch { }
               break;
             }
             // Large frames (image pastes) ride a FILE, not the pty stdin —
@@ -399,7 +403,8 @@ function registerWsHandler(wss, ctx) {
                   payloadLine = JSON.stringify({ type: '_frame_file', path: fp });
                 } catch (e) { console.log(`[${data.sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
               } else if (stdinPayload.length > 1024 * 1024) {
-                try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, error: 'Message too large for this session’s long-running wrapper (started before the update): it was NOT sent. Terminate + Resume the session, then send it again.' })); } catch { }
+                const refusal = 'Message too large for this session’s long-running wrapper (started before the update): it was NOT sent. Terminate + Resume the session, then send it again.';
+                try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: refusal, message: refusal })); } catch { }
                 break;
               }
             }

@@ -600,10 +600,18 @@ class JobManager {
       job._lastNotify = job._lastNotify || {};
       if (job._lastNotify.key === key && now() - job._lastNotify.ts < 6 * 3600e3) { job._lastNotify.count = (job._lastNotify.count || 1) + 1; return; } // dedupe window
       job._lastNotify = { key, ts: now(), count: 1 };
-      try {
-        this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null });
-        this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
-      } catch { }
+      // USER-INBOX copy is OPT-IN (--notify-user; owner decision 2.363.1,
+      // option A): a notify fire's text is usually the AGENT's own reminder
+      // ("scan X, report if new") — unconditionally mirroring it to the
+      // user's inbox spammed agent-facing instructions at the human
+      // (inc-mt27t0bg follow-up report). The agent decides what the user
+      // needs and relays via chat/vibespace-ask.
+      if (job.notifyUser) {
+        try {
+          this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null });
+          this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
+        } catch { }
+      }
       // THE 设备运维大师 gap (2.361.5): a notify action only reached the USER
       // inbox — the agent that scheduled its own reminder was never messaged
       // (an agent-created dated obligation woke nobody). Owner-conversation

@@ -59,7 +59,8 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
            [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
            [--every 30m | --cron "41 9 * * *" | --at "+5m"|"2026-09-05 06:00"]        ← schedule (spawns CMD; bare datetime = SERVER-LOCAL tz — prefer relative "+5m"/"+1h30m" or ISO with Z)
-         vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high]
+         vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high] [--notify-user]
+             (fires wake YOUR conversation; --notify-user ALSO copies the text to the user's inbox — default off, the text is usually your own reminder)
 docs:    vibespace-job docs   — the FULL manual (notify/subscribe/announce/panels/patterns), read anytime
 read:    vibespace-job list [--mine|--subscribed] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
          vibespace-job show <id>  (FULL params: cmd/schedule/access/notify/subscribers/your subscription)

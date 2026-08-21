@@ -72,7 +72,9 @@ try {
   const j3 = C.jobs.get(r3.job.id);
   j3.nextFireAt = Date.now() - 1000;
   await C._cronTick();
-  ok(notifications.some((n) => n.text === 'ping from cron'), 'cron notify action reaches the user channel');
+  // option A (2.363.1, owner decision): the user inbox is OPT-IN — a default
+  // notify fire is the agent's own reminder, not a user notification
+  ok(!notifications.some((n) => n.text === 'ping from cron'), 'default cron notify does NOT copy the user inbox (option A)');
   ok(j3.state === 'done', 'one-shot {at} cron goes done after firing');
 
   // 7b. cron spawn-task: ONE reused child across fires; routine success silent
@@ -128,7 +130,15 @@ try {
   jc.nextFireAt = Date.now() - 1000;
   await C._cronTick();
   ok(delivered2.length === 1 && delivered2[0].cid === 'conv-T' && delivered2[0].text.includes('提醒正文XYZ'), 'notify-cron fire MESSAGES the owner conversation (not just the user inbox)', JSON.stringify(delivered2));
-  ok((jc.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok) && (jc.notifyLog || []).some((e) => e.lane === 'message' && e.ok), 'delivery journal records BOTH lanes (user-inbox + owner message)', JSON.stringify(jc.notifyLog));
+  ok((jc.notifyLog || []).some((e) => e.lane === 'message' && e.ok) && !(jc.notifyLog || []).some((e) => e.lane === 'user-inbox'), 'default journal shows the owner lane ONLY (no user-inbox copy)', JSON.stringify(jc.notifyLog));
+  // --notify-user opts the inbox copy back in (both lanes journaled)
+  C._notifyRate.clear();
+  const rcU = C.create({ kind: 'cron', name: 'remind-user', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: '给用户的提醒ABC', urgency: 'low' }, notifyUser: true, owner }, caller);
+  const jcU = C.jobs.get(rcU.job.id);
+  jcU.nextFireAt = Date.now() - 1000;
+  await C._cronTick();
+  ok(notifications.some((n) => n.text === '给用户的提醒ABC'), '--notify-user notify-cron DOES copy the user inbox');
+  ok((jcU.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok) && (jcU.notifyLog || []).some((e) => e.lane === 'message' && e.ok), 'opt-in journal records BOTH lanes', JSON.stringify(jcU.notifyLog));
 
   // preview honesty
   C.d.peerReachable = () => false;
