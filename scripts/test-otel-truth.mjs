@@ -213,6 +213,7 @@ const PAYLOAD = (recs) => ({
   // it sent" must be distinguishable — the chat E2E's OTel check failed on
   // EVERY GitHub Actions push from 2.361.0 and there was no way to tell which.
   ok(oi.includes('arrivals.posts++') && oi.includes('arrivals.rejected++') && /stats\(\)\s*\{ return \{[^}]*\.\.\.arrivals/.test(oi), 'ingest counts posts/rejects/kept separately from truth rids');
+  ok(oi.includes('arrivals.noRid++') && oi.includes('arrivals.noOrg++') && oi.includes('arrivals.stashed++'), 'and counts WHY a parsed record was dropped (a quiet truth channel was undiagnosable)');
   ok(oi.includes("app.get('/api/otel-stats'"), 'stats are readable over HTTP (the CI gate reads them to classify a miss)');
   ok(/this\._truthLookup \? this\._truthLookup\(ev\.rid\)/.test(read('src/usage-history.js')), 'usage-history scan consults truthLookup at bake time');
 }

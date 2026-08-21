@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.367.2
+
+- **The CI failure is diagnosed and fixed, with evidence** (follow-up to 2.367.1, whose counters immediately paid off: `posts=1 kept=2 events={api_request:2,…}`). The runner's CLI *did* export and our parser *did* understand it — the two `api_request` records were dropped one line before the stash by `if (!rec.rid || !rec.orgUuid) continue`, because the CI identity is a personal setup-token whose events carry **no `organization.id`**. Nothing of ours was broken; the assertion was demanding an account property. Ingest now counts WHY a parsed record is dropped (`noRid` / `noOrg` / `stashed`) — a quiet truth channel was previously undiagnosable in production too — and the E2E asserts what is provable in that environment: env→exporter→receiver→parser reached, stated as a real passing check with the stats, while `posts>0` with nothing parsed remains a hard failure and `posts=0` is still a loud skip.
+
 ## 2.367.1
 
 - **GitHub Actions CI is green again — it had been red on every push since 2.361.0** (owner: "我怎么老收到ci失败的邮件提醒?"). Exactly one assertion failed there, 20+ times: the chat E2E's OTel truth check (`env→receiver→parser`). It passes locally and always failed on the runner, because *whether the CLI exports OpenTelemetry logs at all* is a property of the environment, not of our pipeline — and with only a "did anything land in the stash" signal there was no way to tell "the runner's CLI exported nothing" from "our parser dropped what it sent". The local pre-push gate is not evidence about the Actions mirror, so every push mailed the owner a failure I never saw.
