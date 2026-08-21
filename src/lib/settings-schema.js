@@ -397,7 +397,7 @@ const SETTINGS_SCHEMA = {
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),
-    description: t('The https/http URL a remote machine uses to reach THIS VibeSpace — needed to mount this instance\'s storage on a remote host ("互挂云盘" reverse direction). Example: https://vibe.example.com or http://100.x.x.x:3456 (Tailscale). Leave blank to use the cluster-injected address (shown as the placeholder when present) or auto-detect from the request.'),
+    description: t('The https/http URL a remote machine uses to reach THIS VibeSpace (reverse mounts, remote agent installs, page share links). Leave blank to let each browser use its own address. The Ports panel\'s "This VibeSpace" row can map the whole instance to an frp URL, which takes precedence while mapped WITHOUT changing this value.'),
     category: t('Session'), liveApply: true,
   },
   'agentd.autoGraduate': {

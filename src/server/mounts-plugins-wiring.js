@@ -16,7 +16,7 @@ const { MountTokens } = require('../webdav');
 const { mk } = require('./lazy.js');
 
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
-  auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter,
+  auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
   hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
   ensureAgentdOnHost, getPortForwards }) {
   const portForwards = mk(getPortForwards);
@@ -72,11 +72,12 @@ async function graduateHostToDial(h, { serverUrl, viaRelay } = {}) {
       { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || ''), err: String(se || err?.message || '') }));
   });
     // ── install ──
-    let base = String(serverUrl || '').replace(/\/$/, '') || String(serverSetting('agentd.publicUrl') || '').replace(/\/$/, '') || null; // was agentdDeps.publicUrl?.() — a free identifier since the split (2.343.2 audit)
+    let base = String(serverUrl || '').replace(/\/$/, '') || String(instanceUrl?.url() || '').replace(/\/$/, '') || null; // ONE resolver (2.367.0): frp mapping layered over agentd.publicUrl.() — a free identifier since the split (2.343.2 audit)
     if (!base && viaRelay) {
-      const st = plugins.status('frp');
-      const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub: st?.selfDialSub || '' });
-      if (r?.url) { base = r.url.replace(/\/$/, ''); try { plugins.setSelfDialSub?.(r.subdomain || ''); } catch { } }
+      // ONE publisher of the 'vibespace-instance' proxy (instance-url.js):
+      // two callers writing the same relay proxy name fought over it, and
+      // this one published the whole app with nothing recording it.
+      base = String(await instanceUrl.ensurePublished()).replace(/\/$/, '');
     }
     if (!base) throw new Error('no reachable base URL: set agentd.publicUrl, pass serverUrl, or use viaRelay (frp plugin)');
     // reachability PRECHECK from the HOST (any HTTP status = reachable; 000 = not)
@@ -162,10 +163,8 @@ app.post(['/api/device/dial-pair', '/api/agentd/dial-pair'], async (req, res) =>
     let relayUrl = null;
     if (req.body?.viaRelay) {
       try {
-        const st = plugins.status('frp');
-        const preferSub = st?.selfDialSub || '';
-        const r = await plugins.frpPublish('vibespace-instance', Number(PORT), { preferSub });
-        if (r?.url) { relayUrl = r.url.replace(/\/$/, ''); base = relayUrl; try { plugins.setSelfDialSub?.(r.subdomain || ''); } catch { } }
+        relayUrl = String(await instanceUrl.ensurePublished()).replace(/\/$/, '');
+        base = relayUrl;
       } catch (e) { return res.status(400).json({ error: 'could not publish this instance to the relay: ' + e.message + ' — is the frp plugin installed + started (⚙ → Plugins → Public URLs)?' }); }
     }
     const dialUrl = base ? `${base.replace(/^http/, 'ws')}/api/device-dial?device=${deviceId}` : null;
