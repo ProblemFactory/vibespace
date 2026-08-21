@@ -52,6 +52,12 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   const order = [];             // rid insertion order (cap pruning)
   const lastTruthAcct = new Map(); // sid → last written (truth→walk) pair (dedup)
   let unknownOrgs = new Map();  // orgUuid → count (surfaced, never silently dropped)
+  // Arrival counters (2.367.1): "did the CLI export at all" is a DIFFERENT
+  // question from "did we keep anything", and the CI gate needs to tell them
+  // apart — the chat E2E's OTel assertion failed on every GitHub Actions push
+  // from 2.361.0 on, and with only a kept-count there was no way to know
+  // whether the runner's CLI exported nothing or our parser dropped it.
+  const arrivals = { posts: 0, rejected: 0, records: 0, kept: 0, events: {} };
 
   // Boot replay: the stash IS the persistence — bake-time overrides must
   // survive restarts or a reboot mid-race re-bakes with link-intent again.
@@ -180,9 +186,12 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   return {
     // POST /otel/v1/logs — the api_request events ride the LOGS signal.
     logs(req, res) {
-      if (!gate(req)) return res.status(403).json({ error: 'forbidden' });
+      if (!gate(req)) { arrivals.rejected++; return res.status(403).json({ error: 'forbidden' }); }
+      arrivals.posts++;
       try {
         const out = ingest(req.body || {});
+        arrivals.kept += out.kept || 0;
+        for (const [k, n] of Object.entries(out.seen || {})) arrivals.events[k] = (arrivals.events[k] || 0) + n;
         res.json({ partialSuccess: {} });
         if (out.corrections) console.log(`[otel] ${out.corrections} attribution correction(s) from truth stream`);
       } catch (e) { res.status(400).json({ error: e.message }); }
@@ -211,7 +220,16 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     // rid → accountId|null; undefined = no truth (bake falls back to the
     // attribution walk). Consumed by UsageHistory.scan at bake time.
     truthLookup(rid) { return rid && truth.has(rid) ? truth.get(rid) : undefined; },
-    stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()] }; },
+    stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()], ...arrivals }; },
+    /** All /otel routes + a read-only stats view. The stats endpoint exists so
+     *  a test (or a human) can tell "the CLI exported nothing here" from "we
+     *  dropped what it sent" — the distinction the CI gate needs. */
+    registerRoutes(app) {
+      app.post('/otel/v1/logs', this.logs);
+      app.post('/otel/v1/metrics', this.ok);
+      app.post('/otel/v1/traces', this.ok);
+      app.get('/api/otel-stats', (req, res) => res.json(this.stats()));
+    },
     _ingest: ingest, // test seam
   };
 }
