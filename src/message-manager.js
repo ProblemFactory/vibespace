@@ -51,6 +51,18 @@ function peerDisplayName(origin, text) {
   return null;
 }
 
+// Result-error classes the UI ACTS on (2.365.0). 'prompt-too-long' = the
+// conversation no longer fits the model's context window: every following
+// send fails identically until the conversation is compacted, so the renderer
+// turns it into a guidance card with a Compact-now action instead of a bare
+// "Error: Prompt is too long" line (the userN incident: bare line, then a
+// minute-long /compact that got Stop-clicked into "Compaction canceled.").
+// Phrases = the CLI's own prompt_too_long detector family (2.1.238).
+const PROMPT_TOO_LONG_RE = /prompt is too long|input is too long for requested model|exceeds? (the )?(model'?s )?context (window|limit)|context window (is )?(full|exceeded)/i;
+function classifyResultError(text) {
+  return PROMPT_TOO_LONG_RE.test(String(text || '')) ? 'prompt-too-long' : null;
+}
+
 class MessageManager {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -900,6 +912,8 @@ class MessageManager {
         role: 'system', status: raw.subtype === 'error_during_execution' ? 'interrupted' : 'error',
         content: [{ type: 'system_info', text }],
       });
+      const errorKind = classifyResultError(raw.result);
+      if (errorKind) msg.errorKind = errorKind;
       if (emit) this._emit({ op: 'create', message: msg });
     }
 
@@ -997,4 +1011,4 @@ class MessageManager {
 }
 
 MessageManager._seenUnknownSubtypes = new Set();
-module.exports = { MessageManager };
+module.exports = { MessageManager, classifyResultError };

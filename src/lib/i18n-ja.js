@@ -2735,4 +2735,10 @@ export default {
   'Unpublish failed: {err}': '公開の取り消しに失敗：{err}',
   'Publish failed: {err}': '公開に失敗：{err}',
   'Open Background Work': 'Background Work を開く',
+  'Compacting context… (a large conversation takes 1–2 minutes — Stop cancels it)': 'コンテキストを圧縮中…（大きな会話は 1〜2 分かかります。Stop で取り消されます）',
+  'Click again to cancel the running compaction': 'もう一度クリックすると実行中の圧縮を取り消します',
+  'Cancel compaction?': '圧縮を取り消しますか？',
+  'Compact now': '今すぐ圧縮',
+  'The conversation no longer fits the model’s context window — every new message will fail the same way until it is compacted.': '会話がモデルのコンテキストウィンドウに収まらなくなりました。圧縮するまで新しいメッセージはすべて同じように失敗します。',
+  'Compacting a large conversation takes 1–2 minutes — do not press Stop. If it answers “Conversation too long”, rewind a few messages in terminal mode (Esc Esc) and compact again.': '大きな会話の圧縮には 1〜2 分かかります。Stop を押さないでください。「Conversation too long」と返された場合は、ターミナルモード（Esc Esc）で数件巻き戻してから再度圧縮してください。',
 };

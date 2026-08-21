@@ -150,7 +150,8 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx, onSendText }) {
+    this._onSendText = onSendText || null; // in-chat action buttons send through the live input (null = view-only)
     this.ws = ws;
     this.sessionId = sessionId;
     this.app = app;
@@ -629,6 +630,7 @@ class ChatRenderers {
     }
     // Error / interrupted
     if (msg.status === 'error' || msg.status === 'interrupted') {
+      if (msg.errorKind === 'prompt-too-long') return { el: this.appendContextFullCard(text), sideEffect: null };
       return { el: this.appendSystem(text), sideEffect: null };
     }
     // Other system messages (hook summary, etc.)
@@ -965,6 +967,26 @@ class ChatRenderers {
     el.className = 'chat-msg chat-msg-system';
     el.innerHTML = `<div class="chat-system">${escHtml(text)}</div>`;
     this._messageList.appendChild(el); this.addWrapToggles(el); this.addOpenInEditorBtn(el);
+    return el;
+  }
+
+  /** "Prompt is too long" guidance card (2.365.0): the context window is full
+   *  and EVERY later send fails the same way until the conversation is
+   *  compacted — say so and offer the action. View-only windows (no live
+   *  input) get the explanation without the button. */
+  appendContextFullCard(text) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-system';
+    el.innerHTML = `<div class="chat-system chat-ctx-full">`
+      + `<div class="chat-ctx-full-title">${escHtml(text)}</div>`
+      + `<div class="chat-ctx-full-help">${escHtml(t('The conversation no longer fits the model’s context window — every new message will fail the same way until it is compacted.'))}</div>`
+      + `<div class="chat-ctx-full-actions"><button class="chat-ctx-compact-btn">${escHtml(t('Compact now'))}</button>`
+      + `<span class="chat-ctx-full-hint">${escHtml(t('Compacting a large conversation takes 1–2 minutes — do not press Stop. If it answers “Conversation too long”, rewind a few messages in terminal mode (Esc Esc) and compact again.'))}</span></div>`
+      + `</div>`;
+    const btn = el.querySelector('.chat-ctx-compact-btn');
+    if (this._onSendText) btn.onclick = () => { btn.disabled = true; this._onSendText('/compact'); };
+    else btn.remove();
+    this._messageList.appendChild(el);
     return el;
   }
 

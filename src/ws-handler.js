@@ -426,6 +426,17 @@ function registerWsHandler(wss, ctx) {
               }
             }
             session._isStreaming = true;
+            // /compact turn (2.365.0, the userN "Compaction canceled." case):
+            // a large conversation compacts for 1–2 minutes behind a bare
+            // "thinking…" spinner, and the CLI's ONLY "Compaction canceled."
+            // path is an abort signal — one reflexive Stop click threw the
+            // whole attempt away. Label the turn for every client (the label
+            // resets with the turn like any other) so Stop can be guarded.
+            if (typeof data.text === 'string' && /^\/compact\b/.test(data.text.trim())) {
+              session._streamingLabel = 'Compacting context… (a large conversation takes 1–2 minutes — Stop cancels it)';
+              session._streamingKind = 'compacting';
+              broadcastToSession(session, data.sessionId, { type: 'streaming-label', sessionId: data.sessionId, label: session._streamingLabel, kind: 'compacting' });
+            }
             session.pty.write(payloadLine + '\n');
             if (userMsg) {
               session.buffer = (session.buffer + JSON.stringify(userMsg) + '\n').slice(-500000);
@@ -822,7 +833,7 @@ function registerWsHandler(wss, ctx) {
               chatStatus.modelLocked = !!session._modelLocked;
               chatStatus.lockedModel = session._lockedModel || null;
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
-                messages, totalCount, chatStatus, isStreaming, streamingLabel, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
+                messages, totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
