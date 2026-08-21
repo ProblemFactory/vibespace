@@ -8,7 +8,7 @@
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
-import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog } from './utils.js';
+import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog } from './utils.js';
 import { track } from './telemetry-client.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
 // Self-contained registration (idempotent) — the rail must not depend on the
@@ -678,6 +678,87 @@ export function installSidebarRail(Sidebar) {
     },
 
     // ── Ports panel (the vscode PORTS analogue) ──
+    /** "This VibeSpace" — map the whole instance through the frp relay
+     *  (2.367.0, owner request). Publishing makes that URL the address every
+     *  "this instance's URL" consumer uses (reverse mounts, remote agent
+     *  installs, published-page links); unpublishing falls straight back to
+     *  whatever Settings → agentd.publicUrl said, because publishing never
+     *  writes that setting — it only layers over it. */
+    async _renderInstanceUrlRow(c, api, rerender) {
+      let st = null;
+      try { st = await api('/api/instance-url'); } catch { }
+      if (!st || st.error) return;
+      const sec = document.createElement('div');
+      sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('This VibeSpace'))}</div>`;
+      const row = document.createElement('div');
+      row.className = 'ports-row';
+      const label = document.createElement('span');
+      label.className = 'ports-row-label';
+      label.textContent = st.published ? st.url : tr('Not mapped to a public URL');
+      label.title = st.published ? st.url : '';
+      const acts = document.createElement('span');
+      acts.className = 'ports-row-acts';
+      const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
+      const FRP_MSG = tr('Public URLs need the frp relay — not configured on this instance');
+      if (st.published) {
+        acts.append(btn(PORT_ICONS.open, tr('Open'), () => this.app.openBrowser?.(st.url)));
+        acts.append(btn(PORT_ICONS.copy, tr('Copy'), () => { copyText(st.url); showToast(tr('Copied')); }));
+      }
+      const toggle = btn(st.published ? PORT_ICONS.globeOff : PORT_ICONS.globe,
+        st.published ? tr('Unmap — this instance goes back to its configured address')
+          : !st.frpConfigured ? FRP_MSG
+            : !st.authEnabled ? tr('Turn on a password or SSO first — mapping would expose this instance with no login')
+              : tr('Map this whole VibeSpace to a public URL'),
+        async () => {
+          if (st.published) {
+            const r = await api('/api/instance-url/publish', { method: 'DELETE' });
+            if (r?.error) { showToast(r.error, { type: 'error' }); return; }
+            showToast(tr('Unmapped — back to the configured address'));
+            rerender();
+            return;
+          }
+          if (!st.frpConfigured) { showToast(FRP_MSG, { type: 'error' }); return; }
+          if (!st.authEnabled) { showToast(tr('Turn on a password or SSO first — mapping would expose this instance with no login'), { type: 'error' }); return; }
+          const sub = await showInputDialog({
+            title: tr('Map this VibeSpace to a public URL'),
+            label: st.subDomainHost ? tr('Subdomain (blank = keep/assign one) — <name>.{host}', { host: st.subDomainHost }) : tr('Subdomain (blank = keep/assign one)'),
+            value: st.sub || '', placeholder: 'vibespace', confirmText: tr('Map'),
+          });
+          if (sub === null) return;
+          const r = await api('/api/instance-url/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sub: String(sub || '').trim() || undefined }) });
+          if (r?.error) { showToast(r.error, { type: 'error' }); return; }
+          showToast(tr('Mapped: {url}', { url: r.url }));
+          rerender();
+        });
+      if (!st.published && (!st.frpConfigured || !st.authEnabled)) toggle.classList.add('ports-btn-off');
+      acts.append(toggle);
+      row.append(label, acts);
+      sec.appendChild(row);
+      // say WHICH address is in effect and what falls back — the whole point
+      // of the feature is that the setting survives underneath
+      const note = document.createElement('div');
+      note.className = 'ports-instance-note';
+      if (st.published && st.desired) {
+        note.textContent = st.settingUrl
+          ? tr('Used as this instance\'s address everywhere; the configured {url} is kept and restored when you unmap', { url: st.settingUrl })
+          : tr('Used as this instance\'s address everywhere (reverse mounts, agent installs, page links)');
+      } else if (st.published && st.auto) {
+        note.textContent = tr('Published automatically for a remote agent install — not used as this instance\'s address');
+      } else if (st.settingUrl) {
+        note.textContent = tr('Currently using the configured address: {url}', { url: st.settingUrl });
+      } else {
+        note.textContent = tr('No public address configured — links fall back to the address each browser is using');
+      }
+      sec.appendChild(note);
+      if (st.error) {
+        const err = document.createElement('div');
+        err.className = 'ports-instance-note ports-instance-err';
+        err.textContent = tr('Last attempt failed: {err}', { err: st.error });
+        sec.appendChild(err);
+      }
+      c.appendChild(sec);
+    },
+
     async _renderPortsPanel(c) {
       c.innerHTML = `<div class="empty-hint">${escHtml(tr('Loading…'))}</div>`;
       const api = (u, opts) => fetchJson(u, opts);
@@ -696,6 +777,7 @@ export function installSidebarRail(Sidebar) {
         let fwds = [];
         try { fwds = ((await api('/api/port-forwards')) || {}).forwards || []; } catch { }
         c.innerHTML = '';
+        await this._renderInstanceUrlRow(c, api, render);
         // active forwards
         const sec = document.createElement('div');
         sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active forwards'))}</div>`;

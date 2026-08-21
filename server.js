@@ -1398,7 +1398,7 @@ hosts.onUsageEvents = (hostId, text) => {
       if (!hostId || serverSetting('agentd.autoGraduate') === false) return;
       const h = hosts.get(hostId);
       if (!h || h.transport === 'dial' || h.deviceId || h.autoGraduate === false) return; // already graduated / opted out
-      if (!String(serverSetting('agentd.publicUrl') || '')) return;    // nothing to dial back to (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
+      if (!instanceUrl.url()) return;                                  // nothing to dial back to (was agentdDeps.publicUrl — a ghost binding since the split; auto-graduation silently never fired)
       const last = gradTried.get(hostId) || 0;
       if (Date.now() - last < 6 * 60 * 60 * 1000) return;               // one attempt per machine per 6h
       gradTried.set(hostId, Date.now());
@@ -1447,8 +1447,7 @@ hosts.onUsageEvents = (hostId, text) => {
 const { MachineMounts } = require('./src/machine-mounts');
 const machineMounts = new MachineMounts({
   dataDir: path.join(__dirname, 'data'), hosts, mountTokens,
-  publicUrl: () => { try { return serverSetting('agentd.publicUrl') || process.env.VIBESPACE_PUBLIC_URL || null; } catch { return process.env.VIBESPACE_PUBLIC_URL || null; } },
-  localPort: () => PORT, // the agentd tunnel's target: our own /dav
+  publicUrl: () => instanceUrl.url(), localPort: () => PORT, // the agentd tunnel's target: our own /dav
   rcloneBin: () => mounts.rcloneBin(),
   broadcast: bcastAll,
   log: (m) => console.log('[machine-mounts]', m),
@@ -1488,7 +1487,8 @@ const portForwards = new PortForwardManager({
 });
 jobsWiring.jm.d.getPorts = () => portForwards; // late singleton — lazy getter, never a Proxy
 setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);
-app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() }));
+const instanceUrl = require('./src/server/instance-url.js').create({ dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting, log: (...a) => console.log(...a), authEnabled: () => auth.enabled, broadcast: (m) => bcastAll(m), plugins: { status: (id) => plugins.status(id), frpPublish: (...a) => plugins.frpPublish(...a), frpUnpublish: (...a) => plugins.frpUnpublish(...a), setSelfDialSub: (...a) => plugins.setSelfDialSub?.(...a) } }); // ONE resolver for "this instance's URL" (frp mapping layered OVER agentd.publicUrl, never written into it) + the ONLY publisher of the 'vibespace-instance' proxy; plugins arrives later so its accessors are lazy ⇒ src/server/instance-url.js
+instanceUrl.registerRoutes(app); instanceUrl.restore(); app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() }));
 app.get('/api/hosts/:id/ports', async (req, res) => {
   // the UI path probes protocols (http/https/tcp chip); the watch sweep doesn't
   try { res.json({ ports: await portForwards.detect(req.params.id, { probe: true }) }); } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1522,7 +1522,7 @@ app.delete('/api/port-forward/:id/path', (req, res) => {
 const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards, requestAuthed: (req) => auth.requestAuthed(req) });
 app.use('/svc', pathMounts.handler);
 const publishedPages = require('./src/server/published-pages.js').create({ // 2.364.0 接管artifact: /p/<id> auth-exempt, gated PER PAGE in the module (CSP sandbox = the XSS guard); onPublished = the ONE notify point (dialog + agent publishes)
-  dataDir: path.join(__dirname, 'data'), requestAuthed: (req) => auth.requestAuthed(req), log: (...a) => console.log(...a), publicUrl: () => { try { return serverSetting('agentd.publicUrl') || process.env.VIBESPACE_PUBLIC_URL || null; } catch { return process.env.VIBESPACE_PUBLIC_URL || null; } },
+  dataDir: path.join(__dirname, 'data'), requestAuthed: (req) => auth.requestAuthed(req), log: (...a) => console.log(...a), publicUrl: () => instanceUrl.url(),
   onPublished: (page) => { const s2 = page.sessionId && activeSessions.get(page.sessionId); if (s2) broadcastToSession(s2, page.sessionId, { type: 'page-published', sessionId: page.sessionId, page }); },
 });
 const designKit = require('./src/server/design-kit.js').create({ dataDir: path.join(__dirname, 'data'), claudeCmd: () => CLAUDE_CMD, log: (...a) => console.log(...a) }); designKit.registerRoutes(app); setTimeout(() => designKit.ensure().catch(() => { }), 15000); publishedPages.registerRoutes(app); // 2.366.0: the /design kit from the INSTALLED CLI, adapted to publish here; warmed off the boot path
@@ -1576,7 +1576,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
-  getPortForwards: () => { try { return portForwards; } catch { return null; } },
+  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl,
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
