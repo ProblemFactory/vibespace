@@ -1118,9 +1118,7 @@ const otelIngest = require('./src/server/otel-ingest.js').create({
   getUsageHistory: () => usageHistory, identityGroups: () => usageIdentityGroupsCached(),
   listAccounts: () => accounts.list().accounts || [],
 });
-app.post('/otel/v1/logs', otelIngest.logs);
-app.post('/otel/v1/metrics', otelIngest.ok);
-app.post('/otel/v1/traces', otelIngest.ok);
+otelIngest.registerRoutes(app);
 usageHistory.setTruthLookup(otelIngest.truthLookup);
 // Attribution log: dedup'd per (sid,acct) so a resume under a DIFFERENT account
 // is captured with its timestamp (per-request-by-time attribution). Called from

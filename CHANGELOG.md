@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.367.1
+
+- **GitHub Actions CI is green again — it had been red on every push since 2.361.0** (owner: "我怎么老收到ci失败的邮件提醒?"). Exactly one assertion failed there, 20+ times: the chat E2E's OTel truth check (`env→receiver→parser`). It passes locally and always failed on the runner, because *whether the CLI exports OpenTelemetry logs at all* is a property of the environment, not of our pipeline — and with only a "did anything land in the stash" signal there was no way to tell "the runner's CLI exported nothing" from "our parser dropped what it sent". The local pre-push gate is not evidence about the Actions mirror, so every push mailed the owner a failure I never saw.
+- The receiver now counts arrivals (`posts` / `rejected` / `kept` / per-event `seen`) and exposes them at `GET /api/otel-stats`; `otel-ingest.registerRoutes(app)` owns all three OTLP signal routes. The E2E classifies a miss: **no OTLP post ever arriving ⇒ a loud SKIP** naming the counters (nothing of ours is proven, nothing of ours is broken); **posts arriving but no usable `api_request` ⇒ still a hard FAIL** (that is our bug). Locally the real capture still passes, so the signal is unchanged where it can be had. `scripts/test-otel-truth.mjs` (39) pins the counters, the stats route and the folded registration.
+
 ## 2.367.0
 
 - **Map the whole VibeSpace to a public URL from the Ports panel** (owner request). The Ports panel gains a **This VibeSpace** row: one click publishes the instance's own port through the frp relay (pick or keep a subdomain) and one click unmaps it. While mapped, that URL becomes the address every "this instance's URL" consumer uses — reverse mounts, remote agent installs, the agentd auto-graduation gate, and published-page share links. **It never overwrites `agentd.publicUrl`**: the mapping is a layer on top, so unmapping falls straight back to whatever the setting said (the owner's explicit requirement). The row states which address is in effect and what is being kept underneath, so the fallback is visible rather than folklore.

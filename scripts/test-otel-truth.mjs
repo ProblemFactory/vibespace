@@ -206,7 +206,14 @@ const PAYLOAD = (recs) => ({
   ok(read('src/ws-handler.js').includes("'otelEnv',"), 'ws contract carries otelEnv');
   ok(/p\.startsWith\('\/otel\/'\)/.test(read('src/auth.js')), 'auth middleware exempts /otel/ (module gate is the only door)');
   const sv = read('server.js');
-  ok(sv.includes("app.post('/otel/v1/logs', otelIngest.logs)") && sv.includes('usageHistory.setTruthLookup(otelIngest.truthLookup)') && sv.includes('otelEnv: otelIngest.envFor'), 'server.js wires routes + truthLookup + spawn env');
+  ok(sv.includes('otelIngest.registerRoutes(app)') && sv.includes('usageHistory.setTruthLookup(otelIngest.truthLookup)') && sv.includes('otelEnv: otelIngest.envFor'), 'server.js wires routes + truthLookup + spawn env');
+  const oi = read('src/server/otel-ingest.js');
+  ok(/registerRoutes\(app\)\s*\{[\s\S]*?\/otel\/v1\/logs[\s\S]*?\/otel\/v1\/metrics[\s\S]*?\/otel\/v1\/traces/.test(oi), 'the module registers all three OTLP signals itself');
+  // arrival counters (2.367.1): "the CLI exported nothing" and "we dropped what
+  // it sent" must be distinguishable — the chat E2E's OTel check failed on
+  // EVERY GitHub Actions push from 2.361.0 and there was no way to tell which.
+  ok(oi.includes('arrivals.posts++') && oi.includes('arrivals.rejected++') && /stats\(\)\s*\{ return \{[^}]*\.\.\.arrivals/.test(oi), 'ingest counts posts/rejects/kept separately from truth rids');
+  ok(oi.includes("app.get('/api/otel-stats'"), 'stats are readable over HTTP (the CI gate reads them to classify a miss)');
   ok(/this\._truthLookup \? this\._truthLookup\(ev\.rid\)/.test(read('src/usage-history.js')), 'usage-history scan consults truthLookup at bake time');
 }
 
