@@ -54,10 +54,15 @@ const isHub = () => /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test
     const r = await call('POST', '/api/agent/pages/publish?' + q.toString(), { body: html, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     const p = r.page || {};
     const url = p.url || p.path;
-    console.log(`published: ${url}`);
+    console.log(`published: ${p.path || url}`);
+    if ((p.path || url).startsWith('/')) {
+      console.log('Write that PATH verbatim in your reply — the chat UI turns it into a working link');
+      console.log('against the address the user actually opens VibeSpace at. Do NOT prefix it with a');
+      console.log('hostname or IP: this server cannot know how the user reaches it (reverse proxy,');
+      console.log('tunnel, another hostname), and a guess produces a link that resolves only here.');
+    }
     console.log(p.public ? '(public — anyone with the link can view)' : '(private — viewers must be logged in to this VibeSpace; --public opens it, or the user flips it in the chat status bar)');
     if (p.replaced) console.log('(replaced the previous snapshot of this file — same URL)');
-    if (url && url.startsWith('/')) console.log('(relative URL: the server does not know its public address — the chat UI links it against the address you opened VibeSpace at; Settings → agentd.publicUrl makes it absolute)');
     return;
   }
 
