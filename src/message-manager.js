@@ -57,6 +57,24 @@ class MessageManager {
     this.pendingToolCalls = new Map();   // toolUseId → { msgId, block }
     this.turnIndex = 0;
     this.listeners = [];
+    this._peerMsgIds = new Set(); // cross-session msg_ids already rendered (dedup across the three peer sites)
+  }
+
+  _notePeerMsgId(id) {
+    if (!id) return;
+    this._peerMsgIds.add(id);
+    if (this._peerMsgIds.size > 500) { const first = this._peerMsgIds.values().next().value; this._peerMsgIds.delete(first); }
+  }
+
+  // Does any recent user message already carry this text? (fallback dedup for
+  // peer records without msg_id — the JSONL user record wraps the body in the
+  // harness envelope, so containment, not equality)
+  _recentUserTextIncludes(body) {
+    for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
+      const m = this.messages[i];
+      if (m.role === 'user' && (m.content || []).map((b) => b.text || '').join('').includes(body)) return true;
+    }
+    return false;
   }
 
   // R0 (docs/design-three-tier.md): ids derive from CONTENT, not a
@@ -448,6 +466,7 @@ class MessageManager {
         // peer card, never a "You" bubble of someone else's words
         msg.originKind = 'peer-message';
         msg.peerFrom = peerDisplayName(a.origin, text);
+        this._notePeerMsgId(a.origin.msg_id);
       } else {
         msg.typed = true; // the user's own words — never a notification card
       }
@@ -678,6 +697,7 @@ class MessageManager {
         // as task-notification: origin.kind wins, render a distinct card.
         msg.originKind = 'peer-message';
         msg.peerFrom = peerDisplayName(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
+        this._notePeerMsgId(raw.origin.msg_id);
       }
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
@@ -811,6 +831,29 @@ class MessageManager {
       toRemove.push(toolUseId);
     }
     for (const id of toRemove) this.pendingToolCalls.delete(id);
+
+    // Peer message whose ONLY stdout trace is this result record (inc-mt27t0bg,
+    // userW: an inbox delivery — harness SendMessage / vibespace-msg / job
+    // notify — opens the turn as command_lifecycle + the turn's records; the
+    // user record with the sender's words is written to the JSONL only, so a
+    // LIVE-attached window showed the agent replying to nothing). The terminal
+    // result carries the full envelope in origin — synthesize the peer card
+    // from it. Feeds that DID see the user/attachment record (JSONL rebuilds,
+    // the device stream) marked origin.msg_id, so this rung dedups; the card
+    // lands at turn end live (late but visible), in true order on any rebuild.
+    // msg_id is the AUTHORITATIVE per-message identity when present — the
+    // containment scan is ONLY for msg_id-less legacy records (review-caught:
+    // AND-ing it unconditionally suppressed every repeat fire of a same-body
+    // recurring notify, and any short body contained in recent typed text).
+    const po = raw.origin;
+    if (po && po.kind === 'peer' && typeof po.body === 'string' && po.body.trim()
+      && (po.msg_id ? !this._peerMsgIds.has(po.msg_id) : !this._recentUserTextIncludes(po.body))) {
+      this._notePeerMsgId(po.msg_id);
+      const pm = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: po.body }], turnIndex: this.turnIndex });
+      pm.originKind = 'peer-message';
+      pm.peerFrom = peerDisplayName(po, po.body);
+      if (emit) this._emit({ op: 'create', message: pm });
+    }
     this.turnIndex++;
 
     if (raw.is_error || (raw.subtype && raw.subtype !== 'success')) {
