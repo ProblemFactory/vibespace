@@ -8,7 +8,7 @@
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
-import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog } from './utils.js';
+import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
 import { track } from './telemetry-client.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
 // Self-contained registration (idempotent) — the rail must not depend on the
@@ -875,7 +875,7 @@ export function installSidebarRail(Sidebar) {
             ur.className = 'ports-url-row';
             const a = document.createElement('a');
             const rel = `/svc/${f.pathMount}/`;
-            a.href = rel; a.target = '_blank'; a.rel = 'noopener'; a.textContent = rel;
+            a.href = absUrl(rel); a.target = '_blank'; a.rel = 'noopener'; a.textContent = rel; a.title = absUrl(rel); // shareable address, not this box's hostname
             if (f.pathPublic) { const pubChip = document.createElement('span'); pubChip.className = 'ports-svc ports-svc-pub'; pubChip.textContent = tr('public'); ur.appendChild(pubChip); }
             const lock = document.createElement('button');
             lock.className = 'mounts-icon-btn';
@@ -884,7 +884,7 @@ export function installSidebarRail(Sidebar) {
             lock.onclick = async () => {
               if (!f.pathPublic) {
                 const { showConfirmDialog } = await import('./utils.js');
-                const okGo = await showConfirmDialog({ title: tr('Make this service public?'), message: tr('Anyone with the link {url} will reach it WITHOUT logging in.', { url: location.origin + rel }), confirmText: tr('Make public'), danger: true });
+                const okGo = await showConfirmDialog({ title: tr('Make this service public?'), message: tr('Anyone with the link {url} will reach it WITHOUT logging in.', { url: absUrl(rel) }), confirmText: tr('Make public'), danger: true });
                 if (!okGo) return;
               }
               const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/path`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: f.pathMount, public: !f.pathPublic }) });
@@ -894,7 +894,7 @@ export function installSidebarRail(Sidebar) {
             const cp = document.createElement('button');
             cp.className = 'mounts-icon-btn'; cp.dataset.tip = tr('Copy URL');
             cp.innerHTML = PORT_ICONS.copy;
-            cp.onclick = () => { copyText(location.origin + rel); showToast(tr('Copied')); };
+            cp.onclick = () => { copyText(absUrl(rel)); showToast(tr('Copied')); };
             ur.append(a, lock, cp);
             sec.appendChild(ur);
           }

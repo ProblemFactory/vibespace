@@ -1,4 +1,4 @@
-import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText } from './utils.js';
+import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 
@@ -533,19 +533,19 @@ export class ChatStatusBar {
   _designPageRow(p) {
     const row = document.createElement('div');
     row.className = 'chat-design-page';
-    const abs = (u) => (String(u || '').startsWith('/') ? location.origin + u : u); // relative /p/<id> → this browser's origin
+    const abs = (p) => absUrl(p.url || p.path); // the server's absolute URL wins; else the instance URL, else this browser's origin
     const name = document.createElement('span');
     name.className = 'chat-design-page-name';
     name.textContent = p.name || p.id;
-    name.title = abs(p.path || p.url);
+    name.title = abs(p);
     const open = document.createElement('button');
     open.className = 'btn-cancel';
     open.textContent = t('Open');
-    open.onclick = () => window.open(abs(p.path || p.url), '_blank', 'noopener');
+    open.onclick = () => window.open(abs(p), '_blank', 'noopener');
     const copy = document.createElement('button');
     copy.className = 'btn-cancel';
     copy.textContent = t('Copy link');
-    copy.onclick = () => { copyText(abs(p.path || p.url)); showToast(t('Link copied')); };
+    copy.onclick = () => { copyText(abs(p)); showToast(t('Link copied')); };
     const vis = document.createElement('button');
     vis.className = 'btn-cancel';
     const paint = () => {

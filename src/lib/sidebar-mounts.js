@@ -1,7 +1,7 @@
 // Sidebar "Mounts" tab — rclone S3 mounts + share minting (collaboration P1).
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
-import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip } from './utils.js';
+import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
@@ -1312,7 +1312,7 @@ export function installSidebarMounts(Sidebar) {
       // Double-NAT (B-5c1e): when the server published itself to the relay, the
       // device must fetch the bundle AND dial through the PUBLIC relay URL —
       // location.origin is unreachable from its network.
-      const httpBase = (r.relayUrl || location.origin).replace(/\/$/, '');
+      const httpBase = (r.relayUrl || getInstanceUrl() || location.origin).replace(/\/$/, ''); // a mapped instance is reachable from the device's network; this box's hostname is not (2.367.3 sweep)
       const wsBase = httpBase.replace(/^http/, 'ws');
       const dialUrl = `${wsBase}/api/device-dial?device=${r.deviceId}`;
       // The full installer line: bundle + dial URL + BOTH tokens — the

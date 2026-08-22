@@ -228,7 +228,10 @@ ok('server.js wires create + registerRoutes', read('server.js').includes("publis
 const fe = read('src/lib/file-explorer-ops.js');
 ok('explorer offers Publish page… for local html', /Publish page(…|\\u2026)/.test(fe) && fe.includes('_publishPageDialog'));
 ok('explorer dialog hits the pages API', fe.includes("'/api/pages/publish'") && fe.includes('/api/pages/by-path'));
-ok('dialog joins relative URLs with the browser origin (Copy link always shareable)', fe.includes('location.origin'));
+// 2.367.3: the dialog no longer joins location.origin ITSELF — utils.absUrl
+// does, preferring the instance's mapped public address (test-public-links
+// owns that behaviour; here we only pin that the dialog delegates).
+ok('dialog delegates link building to the shared helper (mapped instance URL, else browser origin)', fe.includes('absUrlShared') && !/location\.origin\s*\+/.test(fe));
 const cr = read('src/lib/chat-renderers.js');
 ok('Background Work sender-click opens the jobs panel (not a session lookup)', cr.includes("^Background Work · ") && cr.includes('openJobs'));
 

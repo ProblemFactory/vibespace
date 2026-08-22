@@ -684,6 +684,23 @@ export function cssVarDefault(name, fallback) {
   return d;
 }
 
+// ── The address to hand to a HUMAN for something hosted on this instance ──
+// The browser's own origin is only right when nothing better is configured.
+// Once the instance is mapped to a public URL (Ports panel → This VibeSpace,
+// or agentd.publicUrl), THAT is the address that works for everyone — the
+// owner mapped an frp URL and every UI surface kept handing out this box's
+// LAN hostname, because each one joined with location.origin (2.367.3).
+// Absolute inputs pass through untouched; the server already resolves them.
+let _instanceUrl = null;
+export function setInstanceUrl(u) { _instanceUrl = (typeof u === 'string' && /^https?:\/\//i.test(u)) ? u.replace(/\/+$/, '') : null; }
+export function getInstanceUrl() { return _instanceUrl; }
+export function absUrl(pathOrUrl) {
+  const s = String(pathOrUrl || '');
+  if (/^https?:\/\//i.test(s)) return s;              // already absolute (server-resolved)
+  if (!s.startsWith('/')) return s;
+  return (_instanceUrl || location.origin.replace(/\/+$/, '')) + s;
+}
+
 export function copyText(text) {
   if (navigator.clipboard?.writeText) {
     return navigator.clipboard.writeText(text).catch(() => _fallbackCopy(text));

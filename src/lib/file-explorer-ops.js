@@ -1,4 +1,4 @@
-import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, attachPopoverClose } from './utils.js';
+import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, attachPopoverClose, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
 
 /**
@@ -542,7 +542,7 @@ export function installExplorerOps(FileExplorer) {
       </div>`;
     // server URLs are relative when no public URL is configured — join with
     // this browser's origin so Copy link is always shareable (review-caught)
-    const absUrl = (u) => (String(u || '').startsWith('/') ? location.origin + u : u);
+    const absUrl = (u) => absUrlShared(u); // instance public URL when mapped, else this browser's origin
     const openPage = (url) => this.app.openBrowser ? this.app.openBrowser(absUrl(url)) : window.open(absUrl(url), '_blank');
     if (existing) {
       body.querySelector('#pp-copy').onclick = () => { copyText(absUrl(existing.url)); showToast(t('Link copied')); };
