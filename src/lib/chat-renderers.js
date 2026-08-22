@@ -6,7 +6,7 @@
 
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { escHtml, copyText, showContextMenu, showToast } from './utils.js';
+import { escHtml, copyText, showContextMenu, showToast, absUrl } from './utils.js';
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
@@ -1051,7 +1051,7 @@ class ChatRenderers {
    */
   linkifyPagePaths(text) {
     return text.replace(/(?<![="'\w/])(\/p\/pg[a-z0-9]{10})(\/raw)?\b/g, (m, p) =>
-      `<span class="chat-link" data-href="${location.origin}${p}" title="${t('Click to copy, Ctrl+Click to open')}">${p}</span>`);
+      `<span class="chat-link" data-href="${absUrl(p)}" title="${t('Click to copy, Ctrl+Click to open')}">${p}</span>`);
   }
 
   /** Combined URL + path linkification on a text segment. */

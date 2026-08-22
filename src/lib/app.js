@@ -12,7 +12,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX, uiScale } from './utils.js';
+import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX, uiScale, setInstanceUrl } from './utils.js';
 import { t, tc, getLangPref, setLang } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installPluginsUI } from './plugins-ui.js';
@@ -300,6 +300,9 @@ class App {
     this._commandMode = new CommandMode(this, this.settings);
 
     // Listen for editor open/close requests (from editor-helper.sh via server HTTP→WebSocket)
+    // the instance's public address can flip while the tab is open (Ports
+    // panel → This VibeSpace): every link helper reads it live, no reload
+    this.ws.onGlobal((msg) => { if (msg.type === 'instance-url') setInstanceUrl(msg.status?.effectiveUrl || null); });
     this.ws.onGlobal((msg) => {
       if (msg.type === 'editor-open' && msg.filePath && msg.signalPath) {
         this._openExternalEditor(msg.filePath, msg.signalPath, msg.sessionId, msg.host);
@@ -318,6 +321,7 @@ class App {
       this._ssoEnabled = !!d.ssoEnabled; // Clerk SSO on → password step/import ignored
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
+      setInstanceUrl(d.instancePublicUrl || null); // the address every "link to something here" helper uses (utils.absUrl)
     }).catch(()=>{});
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
