@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.3
+
+- **The style chip no longer sticks on the pending hourglass for a session that is really running the picked style** (owner: Concise verifiably active, chip still pending). Server truth was correct — a worktree E2E shows a fresh attach reporting `outputStyle:"Concise"` — but `loadHistory` is also called by partial-meta refresh paths (subagent viewer, dead-session view) which carry no `outputStyle`, and the unconditional update reset the live value to empty, making the saved pick look pending again. Style/auto-resume state now updates only when the payload carries those keys; pinned in `test-auto-resume` (53). Same invariant as the config-whitelist strike: a partial payload must never clobber known state.
+
 ## 2.368.2
 
 - UI hygiene (owner: third emoji correction): the pending-style chip uses the SVG hourglass icon instead of an emoji, and the auto-resume conversation notices are plain text. The SVG-only icon rule stands; the sanctioned text-symbol exceptions remain only warning/refresh glyphs.

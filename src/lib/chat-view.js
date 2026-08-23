@@ -754,13 +754,20 @@ class ChatView {
     // sessions — jsonlGapInfo returns null without building an index.)
     if (this._total > 50 && this._canPaginate) this._initGapMinimap();
 
-    this._statusBar?.setAutoResume?.(meta?.autoResume || null);
-    this._statusBar?.setOutputStyle?.(meta?.outputStyle || '');
-    try { // saved pick ≠ live value ⇒ show it as pending on the chip
-      const ids = this._getSessionIds();
-      const cfg = this.app?.sidebar?.getSessionConfig?.({ backend: ids?.backend || 'claude', backendSessionId: ids?.backendSessionId }) || {};
-      this._statusBar?.setOutputStylePending?.(cfg.outputStyle !== undefined ? cfg.outputStyle : undefined);
-    } catch { }
+    // Only update these when the payload CARRIES them: loadHistory is also
+    // called by partial-meta refresh paths (subagent viewer, dead-session
+    // view), and resetting the live style to '' there re-lit the pending
+    // hourglass on a session that was genuinely running the picked style
+    // (owner-caught: Concise active, chip stuck on pending).
+    if (meta && 'autoResume' in meta) this._statusBar?.setAutoResume?.(meta.autoResume || null);
+    if (meta && 'outputStyle' in meta) {
+      this._statusBar?.setOutputStyle?.(meta.outputStyle || '');
+      try { // saved pick ≠ live value ⇒ show it as pending on the chip
+        const ids = this._getSessionIds();
+        const cfg = this.app?.sidebar?.getSessionConfig?.({ backend: ids?.backend || 'claude', backendSessionId: ids?.backendSessionId }) || {};
+        this._statusBar?.setOutputStylePending?.(cfg.outputStyle !== undefined ? cfg.outputStyle : undefined);
+      } catch { }
+    }
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);
