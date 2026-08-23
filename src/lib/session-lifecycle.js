@@ -18,7 +18,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, onCreateResult }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, onCreateResult }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     cwd = stripCwdHostLabel(cwd); // merged-record display cwd ("host: /path") must never reach a spawn
     this._hideWelcome();
@@ -69,7 +69,7 @@ export function installSessionLifecycle(App, ctx = {}) {
 
     const createMsg = {
       type:'create', backend, hostId: hostId||undefined, keeperSid: keeperSid||undefined, mode: sessionMode, cwd: cwd||undefined, sessionName: name||undefined, model: sessionModel||undefined,
-      permissionMode: sessionPermission||undefined, effort: sessionEffort||undefined, extraArgs: sessionExtraArgs||undefined,
+      permissionMode: sessionPermission||undefined, effort: sessionEffort||undefined, outputStyle: outputStyle||undefined, autoResume, extraArgs: sessionExtraArgs||undefined,
       tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,
       sourceKind: sourceKind || undefined, parentThreadId: parentThreadId || undefined,
@@ -675,6 +675,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       model: model !== undefined ? model : savedCfg.model,
       permission: permission !== undefined ? permission : savedCfg.permission,
       effort: effort !== undefined ? effort : savedCfg.effort,
+      outputStyle: savedCfg.outputStyle,   // 2.368.0: spawn-only settings key, so a resume is where a change lands
+      autoResume: savedCfg.autoResume,     // tri-state: undefined = follow the instance default
       accountId: accountId !== undefined ? accountId : savedCfg.account,
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
       lockModel: savedCfg.lockModel,

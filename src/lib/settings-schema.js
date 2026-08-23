@@ -394,6 +394,18 @@ const SETTINGS_SCHEMA = {
     description: t('VS Code-style port discovery: linked machines (paired devices / connected hosts) are checked every ~30s, and a service that STARTS listening (a dev server, a database) shows a toast offering to forward it. Ports above 32767 and ports already forwarded are ignored. Turn off to stop the background checks.'),
     category: t('Session'), liveApply: true,
   },
+  'claude.outputStyle': {
+    type: 'enum', default: '', options: ['', 'Concise', 'Explanatory', 'Learning', 'Proactive'],
+    label: t('Default output style (Claude)'),
+    description: t('The CLI output style new chat sessions start with. "Concise" makes Claude lead with results and skip preamble. Blank = the CLI\'s own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.'),
+    category: t('Session'), liveApply: true,
+  },
+  'claude.autoResumeOnLimit': {
+    type: 'boolean', default: false,
+    label: t('Continue automatically when a usage limit resets'),
+    description: t('DEFAULT for new chat sessions: when the account is out of quota and there is no other account to switch to, wait for the reset and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
+    category: t('Session'), liveApply: true,
+  },
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),

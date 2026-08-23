@@ -33,6 +33,8 @@ const SESSION_FIELDS = {
   // streaming / turn state
   _isStreaming:        { owner: 'stdout', persisted: 'wrapper', note: 'explicit protocol-signal streaming flag (never heuristic)' },
   _streamingLabel:     { owner: 'stdout', persisted: null,      note: 'current activity label (thinking/tool/responding)' },
+  _autoResume:         { owner: 'ws',     persisted: 'session-config', note: 'per-session auto-continue-after-limit preference (undefined = follow claude.autoResumeOnLimit; 2.368.0)' },
+  _outputStyle:        { owner: 'ws',     persisted: 'session-config', note: 'CLI output style commanded at spawn (Concise/Explanatory/…; stream-json has no /output-style, so it is spawn-only; 2.368.0)' },
   _streamingKind:      { owner: 'ws',     persisted: null,      note: 'streaming-label kind (compacting) — drives the client Stop two-step guard; set on a /compact send, reset with the label at turn end (2.365.0)' },
   _interruptTimer:     { owner: 'ws',     persisted: null,      note: 'delayed-SIGINT fallback handle (2s, cancel on protocol success)' },
   _wrapperFrameFile:   { owner: 'ws',     persisted: null,      note: 'wrapper understands _frame_file pointers (meta.caps at wrapper boot; 2.361.1 skew gate — old wrappers silently DROP pointer lines)' },

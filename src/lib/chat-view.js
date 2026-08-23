@@ -572,6 +572,8 @@ class ChatView {
       } else if (msg.type === 'streaming-label' && msg.sessionId === sessionId) {
         if (msg.label) this._showTyping(msg.label, msg.kind || null);
         else this._hideTyping();
+      } else if (msg.type === 'auto-resume' && msg.sessionId === sessionId) {
+        this._statusBar?.setAutoResume?.(msg.status || null);
       } else if (msg.type === 'page-published' && msg.sessionId === sessionId) {
         // ONE notify point server-side (dialog + agent publishes): the status
         // bar's design chip is the live list; the agent's reply carries the link
@@ -752,6 +754,8 @@ class ChatView {
     // sessions — jsonlGapInfo returns null without building an index.)
     if (this._total > 50 && this._canPaginate) this._initGapMinimap();
 
+    this._statusBar?.setAutoResume?.(meta?.autoResume || null);
+    this._statusBar?.setOutputStyle?.(meta?.outputStyle || '');
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);
@@ -2478,7 +2482,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     this._newMsgCount = 0;
     this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, {
       chatStatus: msg.chatStatus, taskState: msg.taskState, turnMap: msg.turnMap,
-      pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel, streamingKind: msg.streamingKind,
+      pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel, streamingKind: msg.streamingKind, autoResume: msg.autoResume, outputStyle: msg.outputStyle,
       goal: msg.goal, goalElapsed: msg.goalElapsed, goalStatus: msg.goalStatus,
       normEpoch: msg.normEpoch,
     });

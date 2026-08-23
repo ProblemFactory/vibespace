@@ -36,7 +36,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
    * This adapter provides the command line arguments and session config.
    */
   buildSessionArgs(options) {
-    const { cwd, model, permissionMode, resumeId, sessionName, effort, extraArgs = [], mode = 'chat', tuiRenderer, disableModelFallback, neutralizeKeyHelper } = options;
+    const { cwd, model, permissionMode, resumeId, sessionName, effort, outputStyle, extraArgs = [], mode = 'chat', tuiRenderer, disableModelFallback, neutralizeKeyHelper } = options;
     const args = [];
 
     if (resumeId) {
@@ -75,6 +75,11 @@ class ClaudeCodeAdapter extends BackendAdapter {
       const sjson = JSON.stringify(settingsObj);
       if (si >= 0) args[si + 1] = sjson; else args.push('--settings', sjson);
     };
+    // Output style (2.368.0): the CLI's built-in styles (Concise / Explanatory
+    // / Learning / Proactive) are a SETTINGS key, and a stream-json session is
+    // never offered `/output-style` (verified against a real init record), so
+    // spawn is the only door — which is why the UI says "next resume".
+    if (outputStyle && outputStyle !== 'default') mergeSettings({ outputStyle });
     if (disableModelFallback) {
       mergeSettings({ switchModelsOnFlag: false });
       env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1';

@@ -30,6 +30,10 @@
 @keyframes chat-remote-pulse { 50% { opacity: 0.55; } }
 .chat-status-goal-empty:hover { opacity: 1; filter: none; }
 .chat-goal-timer { font-variant-numeric: tabular-nums; }
+.chat-status-style { color: var(--text-secondary); }
+.chat-status-autoresume { color: var(--text-secondary); }
+.chat-status-autoresume-armed { color: var(--yellow, #f59e0b); font-weight: 600; }
+.chat-status-dropdown-note { font-size: 10px; color: var(--text-dim); padding: 6px 10px 4px; border-top: 1px solid var(--border); line-height: 1.45; max-width: 260px; }
 /* Design canvas chip + popover (2.366.0) */
 .chat-status-design { color: var(--accent); font-weight: 600; }
 .chat-status-design-empty { opacity: 0.45; filter: grayscale(0.6); }

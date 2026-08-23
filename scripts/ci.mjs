@@ -35,6 +35,7 @@ const SUITES = [
   'test-agent-msg',     // Channels v1: ACL matrix + delivery ladder + wiring pins
   'test-proxy-post',    // proxied POST body reaches the target (real unblocker; the json-parser-skips-/proxy/ pin)
   'test-compaction-ux', // prompt_too_long → guidance card + /compact turn label + two-step Stop (normalizer behavioral + wiring pins)
+  'test-auto-resume', // continue-after-limit-reset (tri-state gate, never-early/twice, restart-survival) + CLI output style at spawn
   'test-public-links', // every "link to something here" surface uses the instance's public address (not the browser origin)
   'test-instance-url', // this instance's own public address: frp mapping layered over agentd.publicUrl (never written), one publisher of the relay proxy
   'test-design-kit', // /design kit from the installed CLI: extraction (cli-dir + binary parity), adaptation all-or-nothing, helper --check, wiring

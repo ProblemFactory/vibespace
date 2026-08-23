@@ -155,7 +155,7 @@ function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024
 // destructure below, this list, and server.js's call site to each other.
 const WS_CTX_CONTRACT = [
   'activeSessions', 'WS_OPEN', 'broadcastActiveSessions', 'broadcastToSession', 'resizeSessionToMin',
-  'setupSessionPty', 'refreshWebuiPids', 'deleteSessionMeta', 'writeSessionMeta', 'readSessionMeta',
+  'setupSessionPty', 'refreshWebuiPids', 'deleteSessionMeta', 'writeSessionMeta', 'readSessionMeta', 'autoResume',
   'readLayouts', 'writeLayouts', 'getSyncStore', 'serverSetting', 'integrationEnabled', 'agentdRemote', 'dialBridge',
   'sessionCounterRef', 'createSessionMessages', 'poolChooser', 'sbNoteServerOp',
   'SOCKETS_DIR', 'BUFFERS_DIR', 'PTY_WRAPPER', 'CHAT_WRAPPER',
@@ -170,7 +170,7 @@ function registerWsHandler(wss, ctx) {
   if (missing.length) throw new Error('[ws-handler] ctx contract violated — missing: ' + missing.join(', '));
   const {
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
-    setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
+    setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
@@ -426,6 +426,7 @@ function registerWsHandler(wss, ctx) {
               }
             }
             session._isStreaming = true;
+            try { autoResume?.noteRecovered?.(data.sessionId, 'user sent a prompt'); } catch { }
             // /compact turn (2.365.0, the userN "Compaction canceled." case):
             // a large conversation compacts for 1–2 minutes behind a bare
             // "thinking…" spinner, and the CLI's ONLY "Compaction canceled."
@@ -467,6 +468,15 @@ function registerWsHandler(wss, ctx) {
               }, 5000);
             }
           }
+          break;
+        }
+
+        // Auto-continue-after-limit: the live per-session toggle (2.368.0). The
+        // wait itself lives server-side (src/server/auto-resume.js) so it
+        // survives a reload, a reconnect and a server restart.
+        case 'auto-resume': {
+          const st = autoResume?.setEnabled?.(data.sessionId, !!data.enabled) || null;
+          try { ws.send(JSON.stringify({ type: 'auto-resume', sessionId: data.sessionId, status: st })); } catch { }
           break;
         }
 
@@ -833,7 +843,7 @@ function registerWsHandler(wss, ctx) {
               chatStatus.modelLocked = !!session._modelLocked;
               chatStatus.lockedModel = session._lockedModel || null;
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
-                messages, totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
+                messages, totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));

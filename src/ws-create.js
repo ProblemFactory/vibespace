@@ -284,6 +284,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             fork: data.fork || false,
             sessionName: data.sessionName,
             effort: data.effort,
+            // client value wins; else the instance default (covers every create
+            // path uniformly — resume, layout restore, billing switch)
+            outputStyle: data.outputStyle || (() => { try { return serverSetting('claude.outputStyle') || ''; } catch { return ''; } })(),
             extraArgs,
             initialPrompt: data.initialPrompt || '',
             mode: sessionMode,
@@ -1500,6 +1503,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once
           activeSessions.set(id, session);
           session._webuiId = id;
+          // 2.368.0: what this session was spawned with / prefers. undefined on
+          // _autoResume means "follow the global default" — the tri-state is
+          // deliberate so a per-session OFF survives the default being ON.
+          if (data.outputStyle) session._outputStyle = data.outputStyle;
+          if (data.autoResume !== undefined && data.autoResume !== null) session._autoResume = !!data.autoResume;
           session._spawnModel = data.model || null; // model ladder's floor (plan C) // per-session pool link key (plan C) — the id the session is registered under
           attachedSessions.add(id);
           console.log(`[session] created ${id} "${session.name || ''}" mode=${sessionMode} backend=${backend}${data.hostId ? ' host=' + data.hostId : ''}${session._accountId ? ' account=' + session._accountId : ''}${data.resumeId ? ' resume=' + data.resumeId : ''}`);

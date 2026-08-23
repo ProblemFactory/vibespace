@@ -13,7 +13,7 @@ const path = require('path');
 
 const { mk } = require('./lazy.js');
 
-function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
+function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, getAutoResume = () => null,
   broadcastToSession, serverNotice, serverSetting, getAccounts, getHosts,
   getUsageHistory, recordUsageAttribution, adapterRegistry}) {
   // late-bound singletons: created after this module in boot order, used only
@@ -396,8 +396,17 @@ function recordRateLimitEvent(session, msg) {
     global.__vsEvent?.('rate-limit-event', `${key}:${ev.kind}:${ev.status}${r.wroteReading ? ':reading' : ''}`);
     // a reading busts the estimator memo via fetchedAt and becomes an anchor
     // at the next sweep; exhaustion acts NOW (banner parity)
-    if (r.dead) maybePoolAutoSwitch(session);
-    else if (r.wroteReading) kickPoolEval();
+    if (r.dead) {
+      maybePoolAutoSwitch(session);                    // another account = seconds, not hours: always preferred
+      // …and if there is nowhere to switch to, wait out the reset (2.368.0).
+      // Arming is cheap and idempotent; the module disarms itself the moment
+      // the session produces work again (a switch that took over, the user's
+      // own prompt), so this never races the pool.
+      try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (Number(ev.resetsAt) || 0) * 1000, ev.kind + ' limit'); } catch { }
+    } else if (r.wroteReading) {
+      try { if (ev.status && ev.status !== 'rejected') getAutoResume()?.noteRecovered?.(session._webuiId, 'fresh non-rejected reading'); } catch { }
+      kickPoolEval();
+    }
   } catch (e) { console.warn('[usage] rate_limit_event capture failed:', e.message); }
 }
 function markLimitBanner(session, text) {

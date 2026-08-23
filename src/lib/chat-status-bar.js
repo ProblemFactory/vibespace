@@ -20,6 +20,8 @@ export class ChatStatusBar {
   constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null }) {
     this._ws = ws;
     this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
+    this._outputStyle = '';        // CLI output style (Concise/…) — spawn-only, so this reflects what the LIVE session was started with
+    this._autoResume = null;       // {enabled, explicit, globalDefault, armed, resetsAt} from the server
     this._pages = []; // pages published from this session (server truth via /api/pages + page-published)
     this._sessionId = sessionId;
     this._backend = backend;
@@ -289,6 +291,10 @@ export class ChatStatusBar {
     list.classList.toggle('hidden', !this._pages.length);
   }
 
+  /** What the live session was SPAWNED with (attach payload) + the pending-wait state. */
+  setOutputStyle(v) { this._outputStyle = v || ''; this.render(); }
+  setAutoResume(st) { this._autoResume = st || null; this.render(); }
+
   setReviewEnabled(enabled) {
     this._reviewEnabled = !!enabled;
     this.render();
@@ -346,6 +352,28 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
     } else {
       parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="${escHtml(t('Set a goal \u2014 the agent keeps working until the condition is met'))}">${UI_ICONS.goal}</span>`);
+    }
+
+    // Output style (2.368.0): the CLI's Concise/Explanatory/… styles are a
+    // SETTINGS key and stream-json never gets /output-style, so this chip is
+    // spawn-scoped — it says so in the tooltip rather than pretending.
+    if (this._backend === 'claude') {
+      const os = this._outputStyle;
+      parts.push(`<span class="chat-status-style chat-status-clickable${os ? '' : ' chat-status-dim'}" title="${escHtml(os
+        ? t('Output style: {v} — set at spawn; a change applies on the next resume', { v: os })
+        : t('Output style: the CLI default — click to pick (applies on the next resume)'))}">${escHtml(os || t('style: default'))}</span>`);
+    }
+
+    // Auto-continue after a usage limit (2.368.0): only ever shown for claude
+    // chat; it turns loud (amber, with the time) once a wait is actually armed.
+    if (this._backend === 'claude' && this._autoResume) {
+      const a = this._autoResume;
+      const when = a.armed && a.resetsAt ? new Date(a.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      const title = a.armed
+        ? t('Usage limit hit — this session will continue by itself at {t}. Click to cancel.', { t: when })
+        : (a.enabled ? t('Auto-continue is ON: if the quota runs out with no account to switch to, this session waits for the reset and continues. Click to turn off.')
+          : t('Auto-continue is OFF: a usage limit leaves this session waiting for you. Click to turn on.'));
+      parts.push(`<span class="chat-status-autoresume chat-status-clickable${a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? '' : ' chat-status-dim')}" title="${escHtml(title)}">${UI_ICONS.hourglass}${a.armed ? ' ' + escHtml(when) : ''}</span>`);
     }
 
     // Design canvas entry (2.366.0): rendered like the goal chip — the
@@ -806,6 +834,47 @@ export class ChatStatusBar {
     }
 
     // Effort click -> dropdown (mid-session reasoning-effort switch)
+    const arEl = e.target.closest('.chat-status-autoresume');
+    if (arEl) {
+      e.stopPropagation();
+      const on = !(this._autoResume && (this._autoResume.armed || this._autoResume.enabled));
+      this._ws.send({ type: 'auto-resume', sessionId: this._sessionId, enabled: on });
+      this._onConfigChange?.({ autoResume: on });   // survives the next resume
+      showToast(on ? t('Auto-continue on: this session will resume itself when the limit resets')
+        : t('Auto-continue off'));
+      return;
+    }
+
+    const styleEl = e.target.closest('.chat-status-style');
+    if (styleEl) {
+      e.stopPropagation();
+      const dropdown = showDropdown(styleEl);
+      if (!dropdown) return;
+      const STYLES = [
+        { v: '', label: t('CLI default') },
+        { v: 'Concise', label: t('Concise — lead with results, skip preamble') },
+        { v: 'Explanatory', label: t('Explanatory — explain choices and patterns') },
+        { v: 'Learning', label: t('Learning — teach while doing') },
+        { v: 'Proactive', label: t('Proactive — act first, minimize interruptions') },
+      ];
+      for (const s of STYLES) {
+        const item = document.createElement('div');
+        item.className = 'chat-status-dropdown-item' + ((s.v || '') === (this._outputStyle || '') ? ' active' : '');
+        item.textContent = s.label;
+        item.onclick = (ev) => {
+          ev.stopPropagation(); dropdown.remove();
+          this._onConfigChange?.({ outputStyle: s.v || null });   // spawn-scoped: the next resume carries it
+          showToast(s.v ? t('Output style “{v}” applies on the next resume', { v: s.v }) : t('Output style cleared — applies on the next resume'));
+        };
+        dropdown.appendChild(item);
+      }
+      const note = document.createElement('div');
+      note.className = 'chat-status-dropdown-note';
+      note.textContent = t('A running session cannot change style — the CLI only reads it at startup.');
+      dropdown.appendChild(note);
+      return;
+    }
+
     const effortEl = e.target.closest('.chat-status-effort');
     if (effortEl) {
       e.stopPropagation();
