@@ -365,12 +365,12 @@ export class ChatStatusBar {
       const os = this._outputStyle;
       const pend = this._outputStylePending;
       const hasPend = pend !== undefined && (pend || '') !== (os || '');
-      const label = hasPend ? (pend || t('CLI default')) + ' ⏳' : (os || t('style: default'));
+      const label = hasPend ? escHtml(pend || t('CLI default')) + ' ' + UI_ICONS.hourglass : escHtml(os || t('style: default'));
       const tip = hasPend
         ? t('Output style “{v}” is saved and applies on the next resume (now running: {cur})', { v: pend || t('CLI default'), cur: os || t('CLI default') })
         : (os ? t('Output style: {v} — set at spawn; a change applies on the next resume', { v: os })
              : t('Output style: the CLI default — click to pick (applies on the next resume)'));
-      parts.push(`<span class="chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}" title="${escHtml(tip)}">${escHtml(label)}</span>`);
+      parts.push(`<span class="chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}" title="${escHtml(tip)}">${label}</span>`);
     }
 
     // Auto-continue after a usage limit (2.368.0): only ever shown for claude

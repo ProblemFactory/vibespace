@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.2
+
+- UI hygiene (owner: third emoji correction): the pending-style chip uses the SVG hourglass icon instead of an emoji, and the auto-resume conversation notices are plain text. The SVG-only icon rule stands; the sanctioned text-symbol exceptions remain only warning/refresh glyphs.
+
 ## 2.368.1
 
 - **The output-style pick actually survives a resume now** (owner picked a style, resumed, chip still said "默认" — within hours of 2.368.0 shipping). Root cause is the FOURTH strike of a bug the code itself documents: `setSessionConfig`'s key whitelist silently dropped both new keys, exactly as it once dropped `account` (2.43.0) and `groupManager` (2.132.0) — its own NOTE says "keep it in sync with EVERY per-session config writer", and I added two writers without doing so. `outputStyle` is whitelisted now, and `autoResume` persists as a real tri-state — the truthy filter would have erased an explicit `false`, whose whole point is beating the global default being ON. `test-auto-resume` (52) now pins the whitelist and the tri-state exception so a fifth strike fails the gate.

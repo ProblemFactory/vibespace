@@ -113,7 +113,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     armed.set(id, rec);
     save();
     log(`[auto-resume] ${id}: armed for ${new Date(resets).toISOString()} (${reason})`);
-    if (notify) { try { notify(id, session, `⏳ 用量已达上限。已安排在 ${new Date(resets).toLocaleString()} 重置后自动继续（状态栏可取消）。`); } catch { } }
+    if (notify) { try { notify(id, session, `用量已达上限。已安排在 ${new Date(resets).toLocaleString()} 重置后自动继续（状态栏可取消）。`); } catch { } }
     emit(id);
     return rec;
   }
@@ -152,7 +152,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); continue; }
       armed.delete(id); save(); fired++;
       log(`[auto-resume] ${id}: usage limit reset — continued automatically`);
-      if (notify) { try { notify(id, session, '▶ 用量上限已重置，已自动继续这个任务。'); } catch { } }
+      if (notify) { try { notify(id, session, '用量上限已重置，已自动继续这个任务。'); } catch { } }
       emit(id);
     }
     return fired;
