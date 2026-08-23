@@ -148,6 +148,17 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const sb = read('src/lib/chat-status-bar.js');
   ok('status bar shows the pending wait with its time', sb.includes('chat-status-autoresume') && sb.includes('will continue by itself at {t}'));
   ok('and the toggle persists per session', /type: 'auto-resume'[\s\S]{0,200}autoResume: on/.test(sb));
+  // 2.368.5 (owner: "几乎没有视觉反馈…和outputstyle的待加载沙漏挨着不好"): the
+  // chip's ON state must be visibly ON (accent class + label, not a one-shade
+  // dim), and its icon must NOT be the hourglass — that means "pending pick"
+  // on the style chip one chip to the left.
+  {
+    const arSpan = sb.slice(sb.indexOf('chat-status-autoresume chat-status-clickable') - 400, sb.indexOf('chat-status-autoresume chat-status-clickable') + 400);
+    ok('auto-continue chip does NOT reuse the style chip\'s hourglass', arSpan.includes('UI_ICONS.autoContinue') && !arSpan.includes('UI_ICONS.hourglass'));
+    ok('ON state is visibly on: accent class + label', sb.includes('chat-status-autoresume-on') && /a\.enabled \? ' ' \+ escHtml\(t\('auto'\)\)/.test(sb));
+    ok('the on-state class is styled (accent, not dim)', /\.chat-status-autoresume-on\s*{\s*color: var\(--accent\)/.test(read('public/chat.css')));
+    ok('the icon exists in the SVG library', read('src/lib/icons.js').includes('autoContinue:'));
+  }
   ok('the default is a documented setting', read('src/lib/settings-schema.js').includes("'claude.autoResumeOnLimit'"));
 }
 

@@ -2790,6 +2790,7 @@ export default {
   'Auto-continue is OFF: a usage limit leaves this session waiting for you. Click to turn on.': '自動続行：オフ。上限に達するとセッションは停止して待機します。クリックでオン。',
   'Auto-continue on: this session will resume itself when the limit resets': '自動続行をオンにしました：上限リセット後に自動で再開します',
   'Auto-continue off': '自動続行をオフにしました',
+  'auto': '自動',
   'Default output style (Claude)': '既定の出力スタイル（Claude）',
   'Continue automatically when a usage limit resets': '利用上限のリセット後に自動で続行',
   'Output style “{v}” is saved and applies on the next resume (now running: {cur})': '出力スタイル「{v}」を保存しました。次回 resume から有効（現在：{cur}）',

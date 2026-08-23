@@ -382,7 +382,13 @@ export class ChatStatusBar {
         ? t('Usage limit hit — this session will continue by itself at {t}. Click to cancel.', { t: when })
         : (a.enabled ? t('Auto-continue is ON: if the quota runs out with no account to switch to, this session waits for the reset and continues. Click to turn off.')
           : t('Auto-continue is OFF: a usage limit leaves this session waiting for you. Click to turn on.'));
-      parts.push(`<span class="chat-status-autoresume chat-status-clickable${a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? '' : ' chat-status-dim')}" title="${escHtml(title)}">${UI_ICONS.hourglass}${a.armed ? ' ' + escHtml(when) : ''}</span>`);
+      // ON must LOOK on (owner: "几乎没有视觉反馈"): accent + a label, not a
+      // one-shade opacity change. Icon is clock+play — the hourglass belongs
+      // to the style chip next door (pending pick) and two adjacent
+      // hourglasses meaning different things read as one broken widget.
+      const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
+      const arLabel = a.armed ? ' ' + escHtml(when) : (a.enabled ? ' ' + escHtml(t('auto')) : '');
+      parts.push(`<span class="chat-status-autoresume chat-status-clickable${arState}" title="${escHtml(title)}">${UI_ICONS.autoContinue}${arLabel}</span>`);
     }
 
     // Design canvas entry (2.366.0): rendered like the goal chip — the

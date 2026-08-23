@@ -59,6 +59,9 @@ export const UI_ICONS = {
   design:    _s('<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.5h11M6.5 6.5v7"/>'),
   clock:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/>'),
   hourglass: _s('<path d="M4 2h8M4 14h8M5.5 2v2.2c0 1.3 2.5 2.5 2.5 3.8s-2.5 2.5-2.5 3.8V14M10.5 2v2.2c0 1.3-2.5 2.5-2.5 3.8s2.5 2.5 2.5 3.8V14"/>'),
+  // clock + play: "continues by itself at the reset" — deliberately NOT the
+  // hourglass, which sits next door on the style chip meaning "pending pick"
+  autoContinue: _s('<circle cx="8" cy="8" r="6.5"/><path d="M6.6 5.5l4 2.5-4 2.5z" fill="currentColor" stroke="none"/>'),
   play:      _s('<path d="M5 3.5l7 4.5-7 4.5z"/>', { fill: true }),
   pause:     _s('<rect x="4.5" y="3" width="2.4" height="10" rx="0.6"/><rect x="9.1" y="3" width="2.4" height="10" rx="0.6"/>', { fill: true }),
   block:     _s('<circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4"/>'),

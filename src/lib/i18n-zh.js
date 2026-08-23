@@ -2790,6 +2790,7 @@ export default {
   'Auto-continue is OFF: a usage limit leaves this session waiting for you. Click to turn on.': '自动继续：关。撞上用量上限时本会话会停下等你。点击开启。',
   'Auto-continue on: this session will resume itself when the limit resets': '已开启自动继续：上限重置后本会话会自己继续',
   'Auto-continue off': '已关闭自动继续',
+  'auto': '自动',
   'Default output style (Claude)': '默认输出风格（Claude）',
   'Continue automatically when a usage limit resets': '用量上限重置后自动继续',
   'Output style “{v}” is saved and applies on the next resume (now running: {cur})': '输出风格「{v}」已保存，下次 resume 生效（当前运行：{cur}）',
