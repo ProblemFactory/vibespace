@@ -182,7 +182,19 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('the chip reports the EFFECTIVE spawn style, default-sourced included', read('src/ws-create.js').includes('data._effOutputStyle') && read('src/ws-create.js').includes('session._outputStyle = data._effOutputStyle'));
   ok('a pick is VISIBLY pending on the chip (a silent drop must never look like this again)', sb.includes('setOutputStylePending') && sb.includes('applies on the next resume (now running'));
   const cv2 = read('src/lib/chat-view.js');
-  ok('partial-meta refreshes do NOT reset the live style (2.368.3: wiping os to \'\' re-lit the hourglass on a running Concise session)', cv2.includes("meta && 'outputStyle' in meta") && cv2.includes("meta && 'autoResume' in meta"));
+  ok('partial-meta refreshes do NOT reset the live style (2.368.3: wiping os to \'\' re-lit the hourglass on a running Concise session)', /_applyLiveMeta\(meta\)\s*{\s*if \(!meta\) return;[\s\S]{0,200}'outputStyle' in meta/.test(cv2) && cv2.includes("'autoResume' in meta"));
+  // ── 2.368.4 (owner-caught on the very resume the feature was built for):
+  // the CREATOR never receives an 'attached' payload — its history loads over
+  // HTTP with NO meta — so the live style must ride the 'created' reply. And
+  // the attach path copied the payload into meta KEY BY KEY, a hand list that
+  // silently lacked outputStyle/autoResume (the whitelist-drift class, fifth
+  // strike): both attach-shaped call sites must pass the payload WHOLESALE.
+  ok("'created' carries the live style + auto-resume state (always, null = default)", /type: 'created'[\s\S]{0,1800}outputStyle: session\._outputStyle \|\| null[\s\S]{0,200}autoResume: autoResume\?\.statusFor\?\.\(id\) \|\| null/.test(read('src/ws-create.js')));
+  const sl2 = read('src/lib/session-lifecycle.js');
+  ok('the created handler APPLIES it (HTTP history load has no meta)', /if \(sessionEffort\) chatView\.applyStatus[\s\S]{0,600}chatView\._applyLiveMeta\?\.\(msg\)/.test(sl2));
+  ok('the attach path passes the payload WHOLESALE, not a hand-copied key list', /chatView\.loadHistory\(msg\.messages, msg\.totalCount, msg\.isStreaming, msg\)/.test(sl2) && !/loadHistory\(msg\.messages, msg\.totalCount, msg\.isStreaming, { chatStatus: msg\.chatStatus, taskState/.test(sl2));
+  ok('…and a zero-message attach still applies live state', /else {\s*\n\s*chatView\._applyLiveMeta\?\.\(msg\);/.test(sl2));
+  ok('_fullViewReset passes the payload wholesale too', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\)/.test(cv2));
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

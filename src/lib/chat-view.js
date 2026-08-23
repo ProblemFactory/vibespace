@@ -754,20 +754,7 @@ class ChatView {
     // sessions — jsonlGapInfo returns null without building an index.)
     if (this._total > 50 && this._canPaginate) this._initGapMinimap();
 
-    // Only update these when the payload CARRIES them: loadHistory is also
-    // called by partial-meta refresh paths (subagent viewer, dead-session
-    // view), and resetting the live style to '' there re-lit the pending
-    // hourglass on a session that was genuinely running the picked style
-    // (owner-caught: Concise active, chip stuck on pending).
-    if (meta && 'autoResume' in meta) this._statusBar?.setAutoResume?.(meta.autoResume || null);
-    if (meta && 'outputStyle' in meta) {
-      this._statusBar?.setOutputStyle?.(meta.outputStyle || '');
-      try { // saved pick ≠ live value ⇒ show it as pending on the chip
-        const ids = this._getSessionIds();
-        const cfg = this.app?.sidebar?.getSessionConfig?.({ backend: ids?.backend || 'claude', backendSessionId: ids?.backendSessionId }) || {};
-        this._statusBar?.setOutputStylePending?.(cfg.outputStyle !== undefined ? cfg.outputStyle : undefined);
-      } catch { }
-    }
+    this._applyLiveMeta(meta);
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);
@@ -792,6 +779,27 @@ class ChatView {
         this._extendTop();
       }
     }, 100);
+  }
+
+  // Live per-session state (output style, auto-resume) from a server payload.
+  // Update ONLY when the payload CARRIES the key: this also runs on partial-
+  // meta refresh paths (subagent viewer, dead-session view), and resetting the
+  // live style to '' there re-lit the pending hourglass on a session that was
+  // genuinely running the picked style (owner-caught, 2.368.3). Callable with
+  // any server message that includes these fields — 'attached' AND 'created'
+  // (the creator never receives an 'attached', which is how a resumed window
+  // showed "default" while the session verifiably ran Concise; 2.368.4).
+  _applyLiveMeta(meta) {
+    if (!meta) return;
+    if ('autoResume' in meta) this._statusBar?.setAutoResume?.(meta.autoResume || null);
+    if ('outputStyle' in meta) {
+      this._statusBar?.setOutputStyle?.(meta.outputStyle || '');
+      try { // saved pick ≠ live value ⇒ show it as pending on the chip
+        const ids = this._getSessionIds();
+        const cfg = this.app?.sidebar?.getSessionConfig?.({ backend: ids?.backend || 'claude', backendSessionId: ids?.backendSessionId }) || {};
+        this._statusBar?.setOutputStylePending?.(cfg.outputStyle !== undefined ? cfg.outputStyle : undefined);
+      } catch { }
+    }
   }
 
   // Fork a new session from a specific assistant message (the chat fork button).
@@ -2492,12 +2500,10 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     this._renderedMsgIds.clear();
     this._messages = [];
     this._newMsgCount = 0;
-    this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, {
-      chatStatus: msg.chatStatus, taskState: msg.taskState, turnMap: msg.turnMap,
-      pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel, streamingKind: msg.streamingKind, autoResume: msg.autoResume, outputStyle: msg.outputStyle,
-      goal: msg.goal, goalElapsed: msg.goalElapsed, goalStatus: msg.goalStatus,
-      normEpoch: msg.normEpoch,
-    });
+    // The attach payload IS the meta — never re-copy it key by key (a hand-
+    // maintained list silently dropped outputStyle/autoResume on the sibling
+    // attach path; the whitelist-drift class, 2.368.4).
+    this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
   }
 
   _clearWaiting() {

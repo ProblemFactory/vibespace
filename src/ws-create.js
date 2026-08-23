@@ -28,7 +28,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
-    USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice,
+    USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
   } = ctx;
   return async function handleCreate(ws, data, attachedSessions) {
     do {
@@ -1712,6 +1712,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               how: session._billingHow || null,
               name: session._accountId ? (() => { try { return accounts?.get?.(session._accountId)?.name || null; } catch { return null; } })() : null,
             },
+            // The CREATOR never gets an 'attached' payload, so the live style /
+            // auto-resume state must ride here or the resumed window shows
+            // "default" forever (2.368.4, owner-caught on the resume it was
+            // built for). Always present (null = CLI default) so the client's
+            // carries-the-key guard fires.
+            outputStyle: session._outputStyle || null,
+            autoResume: autoResume?.statusFor?.(id) || null,
             warning: session._resumeWarning || undefined, // 2.271.0 T1-2: sweep-skipped-under-lag double-write risk
             // A sweep is DESTRUCTIVE by design (it SIGTERMs another claude that
             // held this transcript). Never do that silently — 2.276.0.

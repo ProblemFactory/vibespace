@@ -290,6 +290,12 @@ export function installSessionLifecycle(App, ctx = {}) {
           // the commanded value is the display source — same as the server's
           // attach-time merge)
           if (sessionEffort) chatView.applyStatus({ effort: sessionEffort });
+          // The creator NEVER receives an 'attached' payload, so the live
+          // output style / auto-resume state rides the 'created' reply — the
+          // HTTP history load below carries no meta, and without this a
+          // resumed window said "style: default" while the session verifiably
+          // ran the picked style (2.368.4, owner-caught).
+          chatView._applyLiveMeta?.(msg);
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
             if (shouldKill) this.ws.send({ type: 'kill', sessionId: msg.sessionId });
@@ -536,7 +542,12 @@ export function installSessionLifecycle(App, ctx = {}) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
           this.sessions.set(winInfo.id, chatView);
           if (msg.messages?.length) {
-            chatView.loadHistory(msg.messages, msg.totalCount, msg.isStreaming, { chatStatus: msg.chatStatus, taskState: msg.taskState, turnMap: msg.turnMap, pendingPermissions: msg.pendingPermissions, streamingLabel: msg.streamingLabel, goal: msg.goal, goalElapsed: msg.goalElapsed, goalStatus: msg.goalStatus, normEpoch: msg.normEpoch });
+            // The attach payload IS the meta (2.368.4): this hand-copied key
+            // list silently dropped outputStyle/autoResume/streamingKind — the
+            // whitelist-drift class, fifth strike.
+            chatView.loadHistory(msg.messages, msg.totalCount, msg.isStreaming, msg);
+          } else {
+            chatView._applyLiveMeta?.(msg); // zero messages still has live state
           }
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
