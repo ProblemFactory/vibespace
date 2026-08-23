@@ -2792,4 +2792,5 @@ export default {
   'Auto-continue off': '自動続行をオフにしました',
   'Default output style (Claude)': '既定の出力スタイル（Claude）',
   'Continue automatically when a usage limit resets': '利用上限のリセット後に自動で続行',
+  'Output style “{v}” is saved and applies on the next resume (now running: {cur})': '出力スタイル「{v}」を保存しました。次回 resume から有効（現在：{cur}）',
 };

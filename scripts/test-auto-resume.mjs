@@ -165,11 +165,22 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('there is no --output-style flag to pass (the CLI has none)', !argsOf({ outputStyle: 'Concise' }).includes('--output-style'));
   const wc = read('src/ws-create.js');
   ok('every create path gets the instance default unless the client picked one', wc.includes("data.outputStyle || (() => { try { return serverSetting('claude.outputStyle')"));
-  ok('the session records what it was spawned with', wc.includes('session._outputStyle = data.outputStyle'));
+  ok('the session records what it was spawned with (the EFFECTIVE style)', wc.includes('session._outputStyle = data._effOutputStyle'));
   ok('a resume carries the saved style + auto-resume choice', read('src/lib/session-lifecycle.js').includes('outputStyle: savedCfg.outputStyle') && read('src/lib/session-lifecycle.js').includes('autoResume: savedCfg.autoResume'));
   const sb = read('src/lib/chat-status-bar.js');
   ok('the picker exists and is HONEST that it only applies next resume', sb.includes('chat-status-style') && sb.includes('A running session cannot change style'));
   ok('the default style is a documented setting', read('src/lib/settings-schema.js').includes("'claude.outputStyle'"));
+  // ── STRIKE FOUR (2.368.1, owner-caught within hours): the sidebar's
+  // per-session-config WHITELIST silently dropped both new keys — the exact
+  // bug its own comment documents for 'account' (2.43.0) and 'groupManager'
+  // (2.132.0). Pin the list AND the tri-state exception, because the truthy
+  // filter would erase an explicit autoResume:false (whose whole point is
+  // beating the global default being ON).
+  const st = read('src/lib/sidebar-state.js');
+  ok('config whitelist carries outputStyle (strike-four fix)', /for \(const k of \[[^\]]*'outputStyle'/.test(st));
+  ok('an explicit autoResume:false PERSISTS (tri-state, not truthy-filtered)', st.includes('config?.autoResume === true || config?.autoResume === false'));
+  ok('the chip reports the EFFECTIVE spawn style, default-sourced included', read('src/ws-create.js').includes('data._effOutputStyle') && read('src/ws-create.js').includes('session._outputStyle = data._effOutputStyle'));
+  ok('a pick is VISIBLY pending on the chip (a silent drop must never look like this again)', sb.includes('setOutputStylePending') && sb.includes('applies on the next resume (now running'));
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

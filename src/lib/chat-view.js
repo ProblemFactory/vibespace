@@ -756,6 +756,11 @@ class ChatView {
 
     this._statusBar?.setAutoResume?.(meta?.autoResume || null);
     this._statusBar?.setOutputStyle?.(meta?.outputStyle || '');
+    try { // saved pick ≠ live value ⇒ show it as pending on the chip
+      const ids = this._getSessionIds();
+      const cfg = this.app?.sidebar?.getSessionConfig?.({ backend: ids?.backend || 'claude', backendSessionId: ids?.backendSessionId }) || {};
+      this._statusBar?.setOutputStylePending?.(cfg.outputStyle !== undefined ? cfg.outputStyle : undefined);
+    } catch { }
     if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
     metric('history-render-ms', performance.now() - _t0);

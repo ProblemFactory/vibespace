@@ -443,13 +443,18 @@ export function installSidebarState(SidebarClass) {
     if (!stateKey) return;
     const clean = {};
     // NOTE: this whitelist silently dropped 'account' when it was added in
-    // 2.43.0 (the gear's Account pick never saved) AND 'groupManager' when it
-    // was added in 2.132.0 (the Session Properties toggle never saved — third
-    // strike of the same bug) — keep it in sync with EVERY per-session config
-    // writer (gear popover rows + Session Properties toggles).
-    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock', 'lockModel']) {
+    // 2.43.0 (the gear's Account pick never saved), 'groupManager' in 2.132.0
+    // (the Session Properties toggle never saved), AND 'outputStyle'/'autoResume'
+    // in 2.368.0 (the status-bar style pick vanished on resume — FOURTH strike,
+    // owner-caught within hours) — keep it in sync with EVERY per-session
+    // config writer, and test-auto-resume now pins it.
+    for (const k of ['model', 'effort', 'permission', 'account', 'groupManager', 'modelLock', 'lockModel', 'outputStyle']) {
       if (config?.[k]) clean[k] = config[k];
     }
+    // autoResume is TRI-STATE: an explicit false must persist (its whole point
+    // is that a per-session OFF beats the global default being ON) — the
+    // truthy filter above would erase it.
+    if (config?.autoResume === true || config?.autoResume === false) clean.autoResume = config.autoResume;
     if (Object.keys(clean).length) this._sessionConfigs[stateKey] = clean;
     else delete this._sessionConfigs[stateKey];
     const legacyId = this._getLegacySessionId(sessionOrKey);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.368.1
+
+- **The output-style pick actually survives a resume now** (owner picked a style, resumed, chip still said "默认" — within hours of 2.368.0 shipping). Root cause is the FOURTH strike of a bug the code itself documents: `setSessionConfig`'s key whitelist silently dropped both new keys, exactly as it once dropped `account` (2.43.0) and `groupManager` (2.132.0) — its own NOTE says "keep it in sync with EVERY per-session config writer", and I added two writers without doing so. `outputStyle` is whitelisted now, and `autoResume` persists as a real tri-state — the truthy filter would have erased an explicit `false`, whose whole point is beating the global default being ON. `test-auto-resume` (52) now pins the whitelist and the tri-state exception so a fifth strike fails the gate.
+- Two honesty gaps around the same chip: the session now records the EFFECTIVE spawn style (a default-sourced Concise displayed as "默认" before), and a pick is **visibly pending** on the chip (`Concise ⏳`, tooltip naming both the saved and the currently-running style, shown at pick time and re-derived at attach) — the silent drop was only findable because the chip looked inert; it must never look inert again.
+
 ## 2.368.0
 
 - **Output style (Concise / Explanatory / Learning / Proactive) is pickable per session** (owner asked whether chat mode supports the CLI's new concise mode — it did not). The CLI's styles are a **settings key**, not a flag, and a stream-json session is never offered `/output-style` (verified against a real init record), so VibeSpace sets it at spawn through the ONE `--settings` flag it already uses for `ultracode` / `switchModelsOnFlag`. A chip in the chat status bar picks it, the choice persists as per-session config and rides the next resume, and both the chip and its dropdown say plainly that a running session cannot change style. New setting `claude.outputStyle` is the default for new sessions.

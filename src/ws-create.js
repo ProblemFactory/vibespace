@@ -286,7 +286,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             effort: data.effort,
             // client value wins; else the instance default (covers every create
             // path uniformly — resume, layout restore, billing switch)
-            outputStyle: data.outputStyle || (() => { try { return serverSetting('claude.outputStyle') || ''; } catch { return ''; } })(),
+            outputStyle: (data._effOutputStyle = data.outputStyle || (() => { try { return serverSetting('claude.outputStyle') || ''; } catch { return ''; } })()),
             extraArgs,
             initialPrompt: data.initialPrompt || '',
             mode: sessionMode,
@@ -1506,7 +1506,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // 2.368.0: what this session was spawned with / prefers. undefined on
           // _autoResume means "follow the global default" — the tri-state is
           // deliberate so a per-session OFF survives the default being ON.
-          if (data.outputStyle) session._outputStyle = data.outputStyle;
+          // the EFFECTIVE style (client pick OR the instance default): the chip
+          // must report what the session actually runs with, not just what the
+          // client asked for (a default-sourced Concise showed as "默认")
+          if (data._effOutputStyle) session._outputStyle = data._effOutputStyle;
           if (data.autoResume !== undefined && data.autoResume !== null) session._autoResume = !!data.autoResume;
           session._spawnModel = data.model || null; // model ladder's floor (plan C) // per-session pool link key (plan C) — the id the session is registered under
           attachedSessions.add(id);

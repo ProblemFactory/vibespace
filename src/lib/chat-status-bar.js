@@ -293,6 +293,10 @@ export class ChatStatusBar {
 
   /** What the live session was SPAWNED with (attach payload) + the pending-wait state. */
   setOutputStyle(v) { this._outputStyle = v || ''; this.render(); }
+  /** A pick that has not taken effect yet (spawn-only key): shown on the chip
+   *  so the choice is VISIBLY saved — 2.368.0 dropped it silently and the
+   *  inert chip was the only symptom the owner had. */
+  setOutputStylePending(v) { this._outputStylePending = v === undefined ? undefined : (v || ''); this.render(); }
   setAutoResume(st) { this._autoResume = st || null; this.render(); }
 
   setReviewEnabled(enabled) {
@@ -359,9 +363,14 @@ export class ChatStatusBar {
     // spawn-scoped — it says so in the tooltip rather than pretending.
     if (this._backend === 'claude') {
       const os = this._outputStyle;
-      parts.push(`<span class="chat-status-style chat-status-clickable${os ? '' : ' chat-status-dim'}" title="${escHtml(os
-        ? t('Output style: {v} — set at spawn; a change applies on the next resume', { v: os })
-        : t('Output style: the CLI default — click to pick (applies on the next resume)'))}">${escHtml(os || t('style: default'))}</span>`);
+      const pend = this._outputStylePending;
+      const hasPend = pend !== undefined && (pend || '') !== (os || '');
+      const label = hasPend ? (pend || t('CLI default')) + ' ⏳' : (os || t('style: default'));
+      const tip = hasPend
+        ? t('Output style “{v}” is saved and applies on the next resume (now running: {cur})', { v: pend || t('CLI default'), cur: os || t('CLI default') })
+        : (os ? t('Output style: {v} — set at spawn; a change applies on the next resume', { v: os })
+             : t('Output style: the CLI default — click to pick (applies on the next resume)'));
+      parts.push(`<span class="chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}" title="${escHtml(tip)}">${escHtml(label)}</span>`);
     }
 
     // Auto-continue after a usage limit (2.368.0): only ever shown for claude
@@ -864,6 +873,7 @@ export class ChatStatusBar {
         item.onclick = (ev) => {
           ev.stopPropagation(); dropdown.remove();
           this._onConfigChange?.({ outputStyle: s.v || null });   // spawn-scoped: the next resume carries it
+          this.setOutputStylePending(s.v || '');                  // the chip shows the saved-but-not-yet-live pick
           showToast(s.v ? t('Output style “{v}” applies on the next resume', { v: s.v }) : t('Output style cleared — applies on the next resume'));
         };
         dropdown.appendChild(item);

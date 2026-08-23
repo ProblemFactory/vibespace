@@ -2792,4 +2792,5 @@ export default {
   'Auto-continue off': '已关闭自动继续',
   'Default output style (Claude)': '默认输出风格（Claude）',
   'Continue automatically when a usage limit resets': '用量上限重置后自动继续',
+  'Output style “{v}” is saved and applies on the next resume (now running: {cur})': '输出风格「{v}」已保存，下次 resume 生效（当前运行：{cur}）',
 };
