@@ -822,7 +822,9 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (backend !== 'claude' && backend !== 'codex') return;
     const backendSessionId = live?.backendSessionId || spec.backendSessionId || live?.sessionId || null;
     const isCodex = backend === 'codex';
-    const accts = (this._accounts?.accounts || []).filter(a => ((a.backend || 'claude') === 'codex') === isCodex)
+    // exact-backend match (P4): the old boolean partition ('is codex' vs
+    // 'is not') breaks structurally with a third backend
+    const accts = (this._accounts?.accounts || []).filter(a => (a.backend || 'claude') === backend)
       // same TYPE-then-name order as the Manage-Agents roster (2.268.5) —
       // divergent ordering between the two surfaces reads as a shuffle
       .sort((a, b) => (((a.pooled || a.type === 'pooled') ? 0 : a.type === 'subscription' ? 1 : 2)

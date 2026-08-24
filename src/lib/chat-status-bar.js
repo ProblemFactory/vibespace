@@ -1,6 +1,6 @@
 import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl } from './utils.js';
 import { UI_ICONS } from './icons.js';
-import { getBackendMeta } from './agent-meta.js';
+import { getBackendMeta, backendFeatureCaps } from './agent-meta.js';
 import { t } from './i18n.js';
 
 /**
@@ -366,7 +366,8 @@ export class ChatStatusBar {
     // Output style (2.368.0): the CLI's Concise/Explanatory/… styles are a
     // SETTINGS key and stream-json never gets /output-style, so this chip is
     // spawn-scoped — it says so in the tooltip rather than pretending.
-    if (this._backend === 'claude') {
+    const feats = backendFeatureCaps(this._backend);
+    if (feats.outputStyle) {
       const os = this._outputStyle;
       const pend = this._outputStylePending;
       const hasPend = pend !== undefined && (pend || '') !== (os || '');
@@ -380,7 +381,7 @@ export class ChatStatusBar {
 
     // Auto-continue after a usage limit (2.368.0): only ever shown for claude
     // chat; it turns loud (amber, with the time) once a wait is actually armed.
-    if (this._backend === 'claude' && this._autoResume) {
+    if (feats.autoResume && this._autoResume) {
       const a = this._autoResume;
       const when = a.armed && a.resetsAt ? new Date(a.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
       const title = a.armed
@@ -463,7 +464,7 @@ export class ChatStatusBar {
       }
     }
 
-    if (this._backend === 'codex' && this._allowReview) {
+    if (feats.review && this._allowReview) {
       const reviewClass = this._reviewEnabled ? 'chat-status-clickable' : 'chat-status-dim';
       const reviewTitle = this._reviewEnabled
         ? t('Start Codex review')
@@ -812,7 +813,7 @@ export class ChatStatusBar {
     }
 
     const reviewEl = e.target.closest('.chat-status-review');
-    if (reviewEl && this._backend === 'codex' && this._allowReview && this._reviewEnabled) {
+    if (reviewEl && backendFeatureCaps(this._backend).review && this._allowReview && this._reviewEnabled) {
       e.stopPropagation();
       const dropdown = showDropdown(reviewEl);
       if (!dropdown) return;

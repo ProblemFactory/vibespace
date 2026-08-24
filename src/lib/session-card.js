@@ -1,7 +1,7 @@
 import { agoText, escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
 import { t as tr } from './i18n.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
-import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey } from './agent-meta.js';
+import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
 const _s = (d, fill = false) => `<svg style="width:12px;height:12px;vertical-align:-2px" viewBox="0 0 16 16" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
@@ -795,7 +795,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       items.push({ label: tr('Resume in Terminal'), action: () => resumeWith('terminal') });
     }
     items.push({ label: tr('View History'), action: () => app.viewSession(s.sessionId, s.cwd, customName || s.name, { ...agentOpts }) });
-    if ((s.backend || 'claude') === 'claude' && s.status !== 'external') items.push({ label: tr('Fork…'), action: () => app.forkSession(s) });
+    if (backendFeatureCaps(s.backend || 'claude').fork && s.status !== 'external') items.push({ label: tr('Fork…'), action: () => app.forkSession(s) });
     items.push({ separator: true });
     items.push({ label: state.isStarred(s) ? tr('Unstar') : tr('Star'), action: () => state.toggleStar(s) });
     items.push({ label: state.isArchived(s) ? tr('Unarchive') : tr('Archive'), action: () => state.toggleArchive(s) });

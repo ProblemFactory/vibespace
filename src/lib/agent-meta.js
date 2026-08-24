@@ -20,6 +20,9 @@ export const BACKEND_META = {
     // unreachable — per-backend so a codex/gemini session never lists claude
     // models (Track B, design-backend-parity.md §5).
     fallbackModels: ['fable', 'opus', 'sonnet', 'haiku'],
+    // FEATURE capabilities (P4 client descriptor): chrome gates on THESE, not
+    // on backend ids — a new backend declares its features here once.
+    caps: { fork: true, effort: true, review: false, outputStyle: true, autoResume: true },
   },
   shell: {
     id: 'shell',
@@ -51,8 +54,17 @@ export const BACKEND_META = {
     // path marks the content as memory.
     memoryPathRe: /\/\.codex\/memories\//,
     fallbackModels: ['gpt-5.6-codex', 'gpt-5.6-sol'],
+    // autoResume: true since 2.368.20 — codex exhaustion arms the same module.
+    // fork: the thread-fork RPC exists but is unwired (flips when wired).
+    caps: { fork: false, effort: true, review: true, outputStyle: false, autoResume: true },
   },
 };
+
+/** Feature caps for a backend (all-false for unknown/shell — chrome shows nothing it can't do). */
+const NO_FEATURE_CAPS = Object.freeze({ fork: false, effort: false, review: false, outputStyle: false, autoResume: false });
+export function backendFeatureCaps(backend) {
+  return BACKEND_META[backend]?.caps || NO_FEATURE_CAPS;
+}
 
 /** Every backend's agent-memory path pattern (see BACKEND_META.claude). */
 export function agentMemoryPathRes() {
