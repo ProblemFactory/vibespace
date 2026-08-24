@@ -572,6 +572,9 @@ function handleNotification(method, params) {
       meta.rateLimits = params.rateLimits;
       meta.rateLimitsFetchedAt = Date.now();
       scheduleMeta();
+      // …and RELAY to the server (P2): the sidecar is display-only — the pool
+      // auto-switch / auto-resume engine consumes this stdout event.
+      emitTaskEvent('rate_limits_updated', { rateLimits: params.rateLimits });
     }
     return;
   }
@@ -683,7 +686,17 @@ function handleNotification(method, params) {
     return;
   }
   if (method === 'error') {
-    emitTaskEvent('task_failed', { error: params?.message || params?.error?.message || 'Unknown error' });
+    // The typed enum (codex_error_info: usage_limit_reached / quota_exceeded /
+    // unauthorized / …) used to be DROPPED here — it is the exhaustion signal
+    // the pool auto-switch gates on (P2). Both casings, defensively; the
+    // UsageLimitReachedError family also carries resets_at + a rate_limits
+    // snapshot — forward whatever is present.
+    emitTaskEvent('task_failed', {
+      error: params?.message || params?.error?.message || 'Unknown error',
+      codexErrorInfo: params?.codexErrorInfo ?? params?.codex_error_info ?? params?.error?.codexErrorInfo ?? params?.error?.codex_error_info ?? null,
+      resetsAt: params?.resetsAt ?? params?.resets_at ?? params?.error?.resetsAt ?? params?.error?.resets_at ?? null,
+      rateLimits: params?.rateLimits ?? params?.rate_limits ?? params?.error?.rateLimits ?? null,
+    });
   }
 }
 

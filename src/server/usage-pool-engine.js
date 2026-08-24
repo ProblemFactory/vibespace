@@ -471,6 +471,68 @@ function recordRateLimitEvent(session, msg) {
     }
   } catch (e) { console.warn('[usage] rate_limit_event capture failed:', e.message); }
 }
+// ── Codex quota signals (P2, design-backend-parity.md §2) ──────────────────
+// The wrapper relays account/rateLimits/updated as `rate_limits_updated` and
+// forwards the typed codex_error_info on task_failed. Readings write the SAME
+// per-account cache the pool decisions and the estimator read; exhaustion
+// (rate_limit_reached_type / usage_limit_reached family) acts like a claude
+// rejected rate_limit_event: pool switch first, auto-resume as the fallback.
+const CODEX_EXHAUSTION_RE = /^(usage_limit_reached|quota_exceeded|usage_not_included|workspace_owner_usage_limit_reached|workspace_member_usage_limit_reached|workspace_member_credits_depleted)$/;
+function recordCodexQuotaSignal(session, payload) {
+  try {
+    const { normalizeCodexRateLimit } = require('../usage-routes.js');
+    const writeSnap = (snap) => {
+      if (!snap) return null;
+      let key = session._accountId || '__global_codex__';
+      // a pool wrapper never owns quota — the reading belongs to the CURRENT member
+      try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrentFor(key, session._webuiId) || accounts.poolCurrent(key) || key; } catch { }
+      try {
+        fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+        const f = path.join(USAGE_CACHE_DIR, String(key).replace(/[^\w.-]/g, '_') + '.json');
+        let cur = null; try { cur = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
+        if (!cur || (Number(cur.fetchedAt) || 0) < (Number(snap.fetchedAt) || 0)) {
+          fs.writeFileSync(f + '.tmp', JSON.stringify(snap)); fs.renameSync(f + '.tmp', f);
+        }
+      } catch { }
+      return { key, snap };
+    };
+    if (payload.type === 'rate_limits_updated' && payload.rateLimits) {
+      const w = writeSnap(normalizeCodexRateLimit(payload.rateLimits, Date.now()));
+      if (!w) return;
+      global.__vsEvent?.('codex-rate-limits', `${w.key}${w.snap.rateLimitReachedType ? ':reached-' + w.snap.rateLimitReachedType : ''}`);
+      if (w.snap.rateLimitReachedType) {
+        maybePoolAutoSwitch(session); // another ChatGPT account = seconds, not hours
+        const tripped = w.snap.rateLimitReachedType === 'primary' ? (w.snap.fiveHour || w.snap.sevenDay) : (w.snap.sevenDay || w.snap.fiveHour);
+        try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (Number(tripped?.resetsAt) || 0) * 1000, 'codex limit'); } catch { }
+      } else {
+        try { getAutoResume()?.noteRecovered?.(session._webuiId, 'fresh non-limited codex reading'); } catch { }
+        kickPoolEval();
+      }
+      return;
+    }
+    if (payload.type === 'task_failed') {
+      const info = String(payload.codexErrorInfo || payload.codex_error_info || '');
+      if (!info) return;
+      if (CODEX_EXHAUSTION_RE.test(info)) {
+        // exhaustion may arrive WITHOUT a fresh snapshot — mark the current
+        // member's cache dead with the error's resets_at (or a bounded guess)
+        const nowSec = Math.floor(Date.now() / 1000);
+        const resets = Number(payload.resetsAt || payload.resets_at) || 0;
+        const snap = normalizeCodexRateLimit(payload.rateLimits, Date.now()) || {
+          limitId: 'codex', sevenDay: { utilization: 1, usedPercent: 100, windowMinutes: 10080, resetsAt: resets > nowSec ? resets : nowSec + 24 * 3600, status: 'limited' },
+          fiveHour: null, rateLimitReachedType: 'unknown', fetchedAt: Date.now(),
+        };
+        writeSnap(snap);
+        global.__vsEvent?.('codex-usage-limit', info);
+        maybePoolAutoSwitch(session);
+        try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (resets || nowSec + 24 * 3600) * 1000, 'codex ' + info); } catch { }
+      } else if (info === 'unauthorized') {
+        global.__vsEvent?.('codex-auth-failure', session._accountId || 'global'); // v1: surfaced, not auto-evicted (claude's evict is creds-path-specific)
+      }
+      return;
+    }
+  } catch (e) { console.warn('[codex-quota] signal failed:', e.message); }
+}
 function markLimitBanner(session, text) {
   try {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
@@ -728,6 +790,13 @@ function maybePoolAutoSwitchForPool(poolId) {
     if ((now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
     const currentId = accounts.poolCurrent(poolId);
     if (!currentId) return;
+    // codex pools (P2): COLD-ONLY — hot rests on claude's verified per-request
+    // creds re-read; codex's long-lived app-server has no such proof (a
+    // symlink-swap verification test is the P3 gate). Sealed orders + plan-C
+    // per-session links are claude material paths; the pool-level decide +
+    // cold-restart machinery below is backend-agnostic.
+    const isCodexPool = (a.backend || 'claude') === 'codex';
+    const hot = !!a.hot && !isCodexPool;
     // ESTIMATED bucket view (B-fcff v2): the raw cache goes stale the moment
     // its session pauses — overlay dead-reckoned utilizations (anchor + rate ×
     // ledger cost since) so the decision sees NOW, not the last reading. The
@@ -759,13 +828,15 @@ function maybePoolAutoSwitchForPool(poolId) {
     // OBSERVE the rejection: hosts.device(null) throws while the local daemon
     // is down/upgrading, and an unobserved rejection is a process-level
     // unhandledRejection on every eval tick (the deviceBounded ② rule)
-    pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
+    if (!isCodexPool) pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
     // ── Per-SESSION pass (plan C): sessions with their OWN link decide on a
     // FAMILY-PROJECTED view and re-point only their link — an opus session's
     // spent cap never evicts a fable session, and vice versa. Sessions whose
     // family is unknown project nothing (full view = legacy semantics).
     const members = healthyPoolMembers(poolId); // auth-failed members are not candidates (2.335.0)
     for (const [sid, s2] of activeSessions) {
+      if (isCodexPool) break; // plan-C per-session links are claude material paths
+      if ((s2.backend || 'claude') === 'codex') continue;
       if (s2._accountId !== poolId || s2.host) continue;
       let curFor = null;
       try { curFor = accounts.poolCurrentFor(poolId, sid); } catch { }
@@ -773,7 +844,7 @@ function maybePoolAutoSwitchForPool(poolId) {
       if (!hasOwnLink || !curFor) continue;
       const fam = familyOfModel(sessionModelFor(s2));
       const projected = (id) => projectCacheForFamily(readCache(id), fam);
-      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts() });
+      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts() });
       if (!ds || !ds.to) continue;
       const dwellKey = poolId + ':' + sid;
       const lastS = _poolSwitchAt.get(dwellKey) || 0;
@@ -791,7 +862,7 @@ function maybePoolAutoSwitchForPool(poolId) {
         }
       } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
     }
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: !!a.hot, hot: !!a.hot, pessimism: darkTaintedAccounts(), explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), explain: true });
     if (!d) return;
     if (!d.to) {
       // A pool sitting on a DEAD account with nowhere to go used to be
@@ -849,9 +920,9 @@ function maybePoolAutoSwitchForPool(poolId) {
     const fromPct = d.fromRemaining != null ? Math.round(d.fromRemaining) : null;
     serverNotice(`pool-auto-${poolId}-${now}`, d.reason === 'edf'
       ? `Pool "${a.name}" switched to ${d.toName} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)`
-      : `Pool "${a.name}" auto-switched to ${d.toName} (previous account down to ${fromPct}% remaining)${a.hot ? '' : ' — restarting its conversations'}`);
-    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left, hot=${!!a.hot}, affected=${affected.length})`);
-    if (!a.hot && affected.length) {
+      : `Pool "${a.name}" auto-switched to ${d.toName} (previous account down to ${fromPct}% remaining)${hot ? '' : ' — restarting its conversations'}`);
+    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left, hot=${hot}, affected=${affected.length})`);
+    if (!hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
       const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
       for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
@@ -912,7 +983,7 @@ function maybeStopOnFallback(session, id, from, to) {
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
-    probeUsageViaSession, recordRateLimitEvent, resolveUsageKey,
+    probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,

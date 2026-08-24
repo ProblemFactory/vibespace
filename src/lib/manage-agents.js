@@ -732,6 +732,21 @@ export function installManageAgents(App, ctx = {}) {
     addBtn.title = t('Sign in another ChatGPT account — stored in VibeSpace (not on any one machine), switchable per session');
     addBtn.onclick = () => { done(); this._addCodexSubscription(); };
     head.append(title, addBtn);
+    // codex pool (P2, cold-switch): same pseudo-account model as claude's —
+    // needs ≥1 logged-in ChatGPT subscription to point at
+    if (!selectedHost && codexAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
+      const poolBtn = document.createElement('button'); poolBtn.className = 'agent-btn acct-add'; poolBtn.textContent = '+ ' + t('Add pooled account…');
+      poolBtn.title = t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.');
+      poolBtn.onclick = async () => {
+        done();
+        const name = await showInputDialog({ title: t('Pooled account'), label: t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.'), value: t('Pool'), confirmText: t('Create') });
+        if (name == null) return;
+        try { await fetchJson('/api/accounts/pool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, backend: 'codex' }) }); showToast(t('Pooled account created')); }
+        catch (e) { showToast(e?.message || t('Create failed'), { type: 'error' }); }
+        this._refreshAgents?.();
+      };
+      head.append(poolBtn);
+    }
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
     row.append(head, left);
     body.appendChild(row);

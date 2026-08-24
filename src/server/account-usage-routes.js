@@ -245,7 +245,7 @@ app.delete('/api/accounts/:id', (req, res) => {
 // for why a directory symlink is the only shape that keeps ONE credential copy
 // (and therefore one refresh-token holder) while still swapping per-spawn.
 app.post('/api/accounts/pool', (req, res) => {
-  try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members }) }); }
+  try { res.json({ success: true, ...accounts.createPool({ name: req.body?.name, members: req.body?.members, backend: req.body?.backend === 'codex' ? 'codex' : 'claude' }) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.patch('/api/accounts/pool/:id', (req, res) => {

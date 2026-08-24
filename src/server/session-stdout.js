@@ -26,7 +26,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, recordRateLimitEvent, resolveUsageKey, usageEstimator } = engine;
+    modelsMatch, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey, usageEstimator } = engine;
   const hosts = mk(getHosts);
   const usageHistory = mk(getUsageHistory);
   const telemetry = mk(getTelemetry);
@@ -203,6 +203,12 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 session._streamingLabel = newLabel;
                 broadcastToSession(session, id, { type: 'streaming-label', sessionId: id, label: newLabel, kind: session._streamingKind || null });
               }
+            }
+            // Codex quota signals → pool/auto-resume engine (P2): readings +
+            // typed exhaustion, relayed by the wrapper (older wrappers simply
+            // never emit these — additive, no capability gate needed)
+            if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed')) {
+              try { recordCodexQuotaSignal?.(session, msg.payload); } catch {}
             }
             // Codex plan tool → the session's live TODO summary (board pill)
             if (msg.type === 'event_msg' && msg.payload?.type === 'plan_updated' && Array.isArray(msg.payload.plan)) {

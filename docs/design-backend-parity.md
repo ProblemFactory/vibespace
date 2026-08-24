@@ -102,10 +102,10 @@
 
 | 期 | 内容 | 依赖 |
 |---|---|---|
-| **A（碎 bug，已修 2.368.17）** | enum dropdown 空白 + 设置分组归位 | — |
-| **P0** | codex 配额 normalizer 修复（周用量标成 5h + 耗尽标记全丢） | 无 |
-| **B** | 折叠语义章（全局语义 kinds + codex/claude 映射 + agent-collab 新类）+ exec 命令渲染 + per-backend modelList | 无（可与 P0 并行） |
-| **P1** | codex 配额落盘 + 估计 + 展示补齐 | P0 |
-| **P2** | codex 池冷切 + 自动换号 + auto-resume 接入 | P1 |
+| **A ✅2.368.17** | enum dropdown 空白 + 设置分组归位 | — |
+| **P0 ✅2.368.18** | codex 配额 normalizer 修复 | — |
+| **B ✅2.368.19** | 折叠语义章 + exec 渲染 + per-backend modelList | — |
+| **P1 ✅2.368.18** | codex 配额落盘 + 估计 + 展示补齐 | — |
+| **P2 ✅2.368.20** | codex 池冷切 + 自动换号 + auto-resume 接入(wrapper转发typed耗尽) | — |
 | **P3** | 热切换验证实验（通过则开热切） | P2 |
 | **P4** | 后端注册表化 + 能力描述符 + QuotaSignalSource（B 是首付款） | 第三 agent 前置 |

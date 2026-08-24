@@ -881,16 +881,24 @@ class AccountManager {
   // the user asked for). Never includes another pool.
   poolMembers(id) {
     const a = this.get(id);
-    const all = this._state.accounts.filter((x) => this._acctBackend(x) === 'claude' && this._acctType(x) === 'subscription');
+    const be = this._acctBackend(a) || 'claude';
+    const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
     const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
-    return wanted.filter((x) => this.readSubCreds(x.id).loggedIn).map((x) => ({ id: x.id, name: x.name }));
+    const loggedIn = (x) => be === 'codex' ? !!this.readCodexSubAuth(x.id).loggedIn : this.readSubCreds(x.id).loggedIn;
+    return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name }));
   }
+
+  /** The pool's own symlink path + a member's home dir — per backend (codex
+   *  pool = symlink among the CODEX_HOME dirs; P2, design-backend-parity §2). */
+  _poolLinkDir(a) { return this._acctBackend(a) === 'codex' ? this.codexSubDir(a.id) : this.subDir(a.id); }
+  _poolMemberDir(a, subId) { return this._acctBackend(a) === 'codex' ? this.codexSubDir(subId) : this.subDir(subId); }
 
   // The real account a pool currently resolves to, read from the symlink
   // itself (the link IS the state — no second source of truth to drift).
   poolCurrent(id) {
     try {
-      const t = fs.readlinkSync(this.subDir(id));
+      const a = this.get(id);
+      const t = fs.readlinkSync(this._poolLinkDir(a || { id }));
       const sub = path.basename(t);
       return this.get(sub) ? sub : null;
     } catch { return null; }
@@ -959,14 +967,17 @@ class AccountManager {
   setPoolTarget(id, subId, { sweepSessionLinks = false } = {}) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'pooled') throw new Error('not a pooled account');
+    const be = this._acctBackend(a) || 'claude';
     const target = this.get(subId);
-    if (!target || this._acctType(target) !== 'subscription' || this._acctBackend(target) !== 'claude') throw new Error('not a Claude subscription: ' + subId);
-    if (!this.readSubCreds(subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
+    if (!target || this._acctType(target) !== 'subscription' || this._acctBackend(target) !== be) throw new Error(`not a ${be} subscription: ` + subId);
+    if (be === 'codex' ? !this.readCodexSubAuth(subId).loggedIn : !this.readSubCreds(subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
     // ONE material implementation (src/account-material.js, 2.298.0): the
     // same primitive the daemon's sealed-orders reflex executes — data/subs
     // is device #0's account store, and the mechanical act is device-tier.
+    // codex pools repoint among CODEX_HOME dirs; the creds-mtime bump is a
+    // claude cred-cache detail (null for codex — auth.json needs no bump).
     const mat = require('./account-material.js');
-    mat.repointPoolSymlink(this.subDir(id), this.subDir(subId), this.subCredsPath(subId));
+    mat.repointPoolSymlink(this._poolLinkDir(a), this._poolMemberDir(a, subId), be === 'codex' ? null : this.subCredsPath(subId));
     // sweepSessionLinks (2.355.0, userW's inc-msz495u6 — "热切换死了"):
     // plan C (2.315.0) gave every live session its OWN link and
     // poolCurrentFor prefers it, which silently DEMOTED the manual target
@@ -987,14 +998,18 @@ class AccountManager {
     return { id, current: subId, name: target.name, swept };
   }
 
-  createPool({ name, members } = {}) {
-    if (!this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
+  createPool({ name, members, backend = 'claude' } = {}) {
+    const be = backend === 'codex' ? 'codex' : 'claude';
+    // The darwin exclusion is claude-specific (keychain service name = a hash
+    // of the env string) — codex auth.json is a plain file, pools work anywhere
+    // directory symlinks do.
+    if (be === 'claude' && !this.poolSupported()) throw new Error('pooled accounts need a platform with directory symlinks and no keychain-backed credentials (Linux)');
     const id = 'pool-' + crypto.randomBytes(6).toString('hex');
-    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Pool', type: 'pooled', backend: 'claude', members: Array.isArray(members) && members.length ? members.slice(0, 40) : null, auto: false, hot: false, createdAt: Date.now() };
+    const a = { id, name: String(name || '').trim().slice(0, 60) || 'Pool', type: 'pooled', backend: be, members: Array.isArray(members) && members.length ? members.slice(0, 40) : null, auto: false, hot: false, createdAt: Date.now() };
     this._state.accounts.push(a);
     this._save();
     const first = this.poolMembers(id)[0];
-    if (!first) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); this._save(); throw new Error('no logged-in Claude subscription to pool'); }
+    if (!first) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); this._save(); throw new Error(`no logged-in ${be === 'codex' ? 'ChatGPT' : 'Claude'} subscription to pool`); }
     this.setPoolTarget(id, first.id);
     this._notify();
     return { id, current: first.id };
@@ -1124,6 +1139,22 @@ class AccountManager {
     if (!id) return null;
     const a = this.get(id);
     if (!a) throw new Error('unknown account: ' + id);
+    // codex POOL (P2, cold-switch v1): CODEX_HOME = the pool's symlink among
+    // the member CODEX_HOME dirs — a spawn resolves through it to whichever
+    // member the engine currently targets; switches restart the session
+    // (kill+resume, the existing cold machinery). Self-heal a dangling link
+    // to the first healthy member, exactly like the claude resolve branch.
+    if (this._acctType(a) === 'pooled') {
+      if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
+      let cur = this.poolCurrent(id);
+      if (!cur || !this.readCodexSubAuth(cur).loggedIn) {
+        const first = this.poolMembers(id)[0];
+        if (!first) throw new Error(`pool "${a.name}" has no logged-in ChatGPT member`);
+        this.setPoolTarget(id, first.id);
+        cur = first.id;
+      }
+      return { id: a.id, name: a.name, kind: 'codex-pooled', localEnv: { CODEX_HOME: this.codexSubDir(id) }, secret: null, remoteCreds: null };
+    }
     if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
     const info = this.readCodexSubAuth(id);
     if (!info.loggedIn) throw new Error('codex account not logged in: ' + a.name);
