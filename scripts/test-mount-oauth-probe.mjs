@@ -95,7 +95,14 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   const { MountManager: MM } = require(path.join(REPO, 'src/mounts.js'));
   ok('rclone pin is v1.69.3 (1.65.2 fails migrated consumer OneDrive downloads; 1.69.x fixes it AND stays in the Cloudflare-STS-safe 1.63–1.69 range)', MM.RCLONE_PIN === 'v1.69.3');
   const src = read('src/mounts.js');
-  ok('boot self-heal exists and only touches OUR data/bin install (PATH rclone is the user\'s)', /maybeUpgradePinnedRclone\(\)\s*{[\s\S]{0,400}if \(!fs\.existsSync\(local\)\) return;/.test(src));
+  ok('boot self-heal exists and only touches OUR data/bin install (PATH rclone is the user\'s)', /maybeUpgradePinnedRclone\(\)\s*{[\s\S]{0,200}if \(!fs\.existsSync\(local\)\)/.test(src));
+  // 2.368.9: the binary is untracked from git (a 60MB arch-specific blob in a
+  // public repo, growing history on every pin bump; and a boot self-heal that
+  // writes a TRACKED file is the dirty-tree-blocks-git-pull class). The update
+  // pull therefore DELETES the copy old releases committed — boot must
+  // reinstall when a mount needs rclone and the PATH has none.
+  ok('the binary is gitignored (never tracked again)', /^data\/bin\/rclone$/m.test(read('.gitignore')) && /^data\/bin\/rclone-dl\.zip$/m.test(read('.gitignore')));
+  ok('a missing binary is reinstalled at boot when mounts need it', /needsRclone && !this\.rcloneAvailable\(\)[\s\S]{0,300}installRclone\(\)/.test(src));
   ok('…and restore() wires it', /async restore\(\)\s*{\s*\n\s*this\.maybeUpgradePinnedRclone\(\)/.test(src));
   ok('the read probe classifies the OAuth-death phrasings too', /_probeBackendRead[\s\S]{0,1400}401\|403\|Unauthorized\|unauthenticated\|invalid_grant/.test(src));
 }

@@ -333,7 +333,20 @@ class MountManager {
    *  data/bin); best-effort, never blocks boot, failure keeps the old binary. */
   maybeUpgradePinnedRclone() {
     const local = path.join(this.dataDir, 'bin', 'rclone');
-    if (!fs.existsSync(local)) return; // PATH rclone is the user's — never touch
+    if (!fs.existsSync(local)) {
+      // 2.368.9 untracked the binary from git, so an update PULL deletes the
+      // copy older releases committed — reinstall it when some mount actually
+      // needs rclone and the PATH has none (a user's own PATH rclone is
+      // respected; we never shadow it).
+      const needsRclone = this._state.mounts.some((m) => m.type !== 'gmail' && m.type !== 'cephfs');
+      if (needsRclone && !this.rcloneAvailable()) {
+        console.log(`[mounts] data/bin/rclone missing and no PATH rclone — installing ${MountManager.RCLONE_PIN}`);
+        this.installRclone().then(
+          (r) => console.log(`[mounts] rclone ${r.version} installed`),
+          (e) => console.warn(`[mounts] rclone install failed: ${e.message}`));
+      }
+      return;
+    }
     execFile(local, ['version'], { timeout: 10000 }, (err, out) => {
       const have = String(out || '').match(/rclone (v[\d.]+)/)?.[1] || null;
       if (err || !have || have === MountManager.RCLONE_PIN) return;

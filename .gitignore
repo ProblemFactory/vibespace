@@ -10,6 +10,12 @@ data/bin/code
 data/bin/editor/
 # generated at startup by createStatusHelper() — never track (dirties the tree, blocks git pull)
 data/bin/vibespace-status
+# downloaded by installRclone()/boot self-heal — a 60MB arch-specific binary must
+# never live in git (2.368.9: it did since the one-click-install commit; every pin
+# bump would grow public history by 60MB+, and the boot self-heal writing a tracked
+# file is the dirty-tree-blocks-git-pull class). Boot reinstalls it when missing.
+data/bin/rclone
+data/bin/rclone-dl.zip
 *.nfs*
 .agent-context/
 data/.agent-hooks-optout

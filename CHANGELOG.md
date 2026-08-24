@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.9
+
+- **The rclone binary is no longer tracked in git.** The one-click-install commit put the 57MB binary itself into the public repo, so history grows ~60MB on every pin bump (2.368.8's push added the 63MB v1.69.3 blob before this was caught) — and a boot self-heal writing a *tracked* file is the dirty-tree-blocks-`git pull` class that already bit `vibespace-status` (2.111.26). Untracked + gitignored (`rclone-dl.zip` too); the update pull therefore deletes the copy older releases committed, so the boot self-heal now also *installs* when the binary is missing, some mount needs rclone, and the PATH has none — a user's own PATH rclone is never shadowed. The two blobs already in history stay (removing them is a history-rewrite decision for the owner). `test-mount-oauth-probe` 26→28.
+
 ## 2.368.8
 
 - **The real OneDrive fix: rclone pin v1.65.2 → v1.69.3** — and a diagnosis correction. 2.368.6 blamed a dead refresh token; a parallel session proved otherwise by testing each Graph endpoint separately: token refresh, listings and uploads all worked — only the `/content` download endpoint returned 401 `unauthenticated`. That is Microsoft's migrated consumer OneDrive rejecting the old rclone's download path; A/B against the live account with identical config: 1.65.2 fails every read, 1.69.3 and 1.75.0 download fine. 1.69.3 also stays inside the documented Cloudflare-STS-safe range (1.63–1.69), so the S3 constraint that motivated the old pin still holds. Because nothing ever re-ran the installer, a pin bump alone would never reach existing deployments — `restore()` now self-heals our `data/bin/rclone` copy to the pin at boot (best-effort, never blocks, never touches a user's own PATH rclone).
