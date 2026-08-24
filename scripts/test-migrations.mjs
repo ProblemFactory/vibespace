@@ -39,9 +39,24 @@ try {
       t3: { title: 'C' },
     },
   }));
+  // a pre-2.368.19 collapse-kinds save (no 'agent' — the option didn't exist)
+  fs.writeFileSync(path.join(rootDir, 'data', 'settings.json'), JSON.stringify({
+    'chat.collapseKinds': ['thinking', 'bash', 'read'], 'window.closeBehavior': 'detach',
+  }));
   const notices = [];
   const m = create({ rootDir, serverNotice: (k, txt) => notices.push(k) });
   m.runLocalMigrations();
+  {
+    const st = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'settings.json'), 'utf-8'));
+    ok(st['chat.collapseKinds'].includes('agent'), "pre-'agent' collapse saves gain the new default-on kind once (a saved multiSelect can't tell 'unchecked' from 'predates the option')");
+    ok(st['window.closeBehavior'] === 'detach' && st['chat.collapseKinds'][0] === 'thinking', 'everything else in settings.json untouched');
+    // after the one-shot, an explicit un-tick sticks (ledger, not content-sniffing)
+    st['chat.collapseKinds'] = st['chat.collapseKinds'].filter((k) => k !== 'agent');
+    fs.writeFileSync(path.join(rootDir, 'data', 'settings.json'), JSON.stringify(st));
+    m.runLocalMigrations();
+    const st2 = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'settings.json'), 'utf-8'));
+    ok(!st2['chat.collapseKinds'].includes('agent'), 'a post-migration explicit un-tick is never re-added');
+  }
   const doc = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'task-groups.json'), 'utf-8'));
   ok(!('plan' in doc.tasks.t1) && !('plan' in doc.tasks.t2), 'plan keys stripped from the live store');
   ok(doc.tasks.t1.title === 'A' && doc.tasks.t3.title === 'C', 'everything else untouched');

@@ -1044,7 +1044,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // no-op on devices without the keeper).
             const rcmd = spawnCmd.includes('/') ? path.basename(spawnCmd) : spawnCmd;
             const rargs = [...spawnArgs];
-            if (backend !== 'codex') {
+            // EXPLICIT backend check (P4 hazard fix): `!== 'codex'` appended
+            // claude stream-json flags to ANY future backend's remote spawn —
+            // the gemini-as-claude fallthrough class.
+            if (backend === 'claude') {
               for (const fl of [['--output-format', 'stream-json'], ['--input-format', 'stream-json'], ['--verbose'], ['--permission-prompt-tool', 'stdio']]) {
                 if (!rargs.includes(fl[0])) rargs.push(...fl);
               }

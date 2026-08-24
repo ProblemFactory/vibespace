@@ -42,6 +42,30 @@ function formatToolName(name) {
   return String(name);
 }
 
+// ONE tool-input parser for BOTH call record types (function_call carries
+// `arguments`, custom_tool_call carries `input` — apply_patch arrives as
+// EITHER depending on channel: live buffer = function_call with structured
+// JSON {reason, changes:[{path, kind, diff}]}, rollout = custom_tool_call
+// with the "*** Add/Update/Delete File:" envelope; the first fix only
+// covered the custom branch and live sessions still had no file names).
+function parseToolInput(name, rawInput) {
+  if (name !== 'apply_patch') return safeJsonParse(rawInput, rawInput);
+  const rawStr = typeof rawInput === 'string' ? rawInput : null;
+  const j = rawStr && rawStr.trim().startsWith('{') ? safeJsonParse(rawStr, null)
+    : (rawInput && typeof rawInput === 'object' ? rawInput : null);
+  if (j && Array.isArray(j.changes)) {
+    const files = j.changes.map((c) => c && c.path).filter(Boolean);
+    const word = (t) => t === 'add' ? 'Add' : t === 'delete' ? 'Delete' : 'Update';
+    const patch = j.changes.map((c) => `*** ${word(c?.kind?.type)} File: ${c?.path || '?'}\n${c?.diff || ''}`).join('\n');
+    return { ...j, patch, ...(files.length ? { files, file_path: files[0] } : {}) };
+  }
+  const patch = rawStr ?? JSON.stringify(rawInput ?? '');
+  const files = [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim()).filter(Boolean);
+  const inp = { patch };
+  if (files.length) { inp.files = files; inp.file_path = files[0]; }
+  return inp;
+}
+
 // Semantic collapse-kind (Track B, design-backend-parity.md §5): the chat
 // view's run folding must never know backend tool names — the normalizer owns
 // the semantics. Keys reuse the existing settings vocabulary ('bash' = any
@@ -51,7 +75,13 @@ function collapseKindOf(rawName) {
   if (n === 'exec' || n === 'exec_command' || n === 'shell' || n === 'local_shell' || n === 'write_stdin') return 'bash';
   if (n === 'apply_patch') return 'write';
   if (/^(spawn_agent|wait_agent|send_input|resume_agent|close_agent|list_agents|send_message|interrupt_agent|followup_task)$/.test(n) || n.startsWith('agent')) return 'agent';
-  return null;
+  // deliberately VISIBLE work (plans, images, searches — claude's WebSearch
+  // never folds either)
+  if (n === 'update_plan' || n === 'view_image' || n === 'web_search' || n === 'image_gen' || !n) return null;
+  // everything else = an external/dynamic tool (codex plugins, browser tools,
+  // MCP-class) — same semantic bucket as claude's MCP kind. Unknown names used
+  // to return null and BREAK the surrounding fold (owner: 乱七八糟的卡片).
+  return 'mcp';
 }
 
 function flattenContentText(content) {
@@ -379,6 +409,10 @@ class CodexMessageManager {
     if (type === 'message') return this._processResponseMessage(item, emit);
     if (type === 'function_call') return this._processFunctionCall(item, emit);
     if (type === 'custom_tool_call') return this._processCustomToolCall(item, emit);
+    // dynamic tools (plugins/browser — DynamicToolCallItem in the binary) ride
+    // the same card pipeline; unrouted they rendered nothing or raw
+    if (type === 'dynamic_tool_call') return this._processCustomToolCall(item, emit);
+    if (type === 'dynamic_tool_call_output') return this._processFunctionCallOutput(item, emit);
     if (type === 'function_call_output') return this._processFunctionCallOutput(item, emit);
     // custom_tool_call has ALWAYS been routed but its output twin never was
     // (2.368.15 codex audit: 84 custom_tool_call_output records in one real
@@ -486,7 +520,7 @@ class CodexMessageManager {
 
   _processFunctionCall(item, emit) {
     const toolCallId = item.call_id || item.callId || this._nextId();
-    const parsedInput = safeJsonParse(item.arguments, item.arguments);
+    const parsedInput = parseToolInput(item.name, item.arguments);
     const toolName = formatToolName(item.name || 'tool');
     const msg = this._create({
       role: 'tool',
@@ -505,19 +539,7 @@ class CodexMessageManager {
   _processCustomToolCall(item, emit) {
     const toolCallId = item.call_id || item.callId || this._nextId();
     const rawInput = item.input ?? item.arguments ?? '';
-    // apply_patch input has NO file_path field — the touched files live in the
-    // patch envelope ("*** Add/Update/Delete File: <path>"). Parse them out so
-    // fold summaries can name files (owner: "writes似乎不展示文件名") and the
-    // memory-path classifier works for codex writes too.
-    const parsedInput = item.name === 'apply_patch'
-      ? (() => {
-        const patch = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '');
-        const files = [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim()).filter(Boolean);
-        const inp = { patch };
-        if (files.length) { inp.files = files; inp.file_path = files[0]; }
-        return inp;
-      })()
-      : safeJsonParse(rawInput, rawInput);
+    const parsedInput = parseToolInput(item.name, rawInput);
     const toolName = formatToolName(item.name || 'tool');
     const msg = this._create({
       role: 'tool',

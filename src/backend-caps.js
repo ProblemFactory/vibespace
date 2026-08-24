@@ -17,6 +17,10 @@
 //   'unverified' — no experiment yet; treat as cold.
 // A pool on a backend without hotSwitch 'verified' always cold-restarts
 // (kill → exited → resume), whatever its `hot` flag says.
+// streamProtocol names the live stdout PARSE PIPELINE a chat session needs —
+// session-stdout dispatches on THIS, never on the backend id, so a backend
+// without a registered pipeline refuses at spawn instead of being silently
+// parsed as claude stream-json (the gemini-as-claude fallthrough class).
 const BACKEND_CAPS = {
   claude: {
     pool: true,
@@ -25,6 +29,7 @@ const BACKEND_CAPS = {
     sealedOrders: true,   // device-side offline fallback switch
     resetCredit: false,   // no such product concept
     quotaProbe: 'cli-usage',      // `claude -p /usage` auto-cli rung
+    streamProtocol: 'stream-json',
   },
   codex: {
     pool: true,
@@ -33,10 +38,15 @@ const BACKEND_CAPS = {
     sealedOrders: false,
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
     quotaProbe: 'rpc-rate-limits', // account/rateLimits/read on a live app-server
+    streamProtocol: 'codex-events',
+  },
+  shell: {
+    pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
+    streamProtocol: null, // terminal-only: no chat parse pipeline
   },
 };
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null });
+const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, streamProtocol: null });
 
 function capsOf(backend) {
   return BACKEND_CAPS[backend || 'claude'] || NO_CAPS;

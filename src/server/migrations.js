@@ -16,6 +16,19 @@ function create({ rootDir, serverNotice }) {
 
   const MIGRATIONS = [
     {
+      id: '2026-08-collapse-kinds-agent-default',
+      note: "chat.collapseKinds saved before the 'agent' kind existed (2.368.19) cannot distinguish 'user unchecked it' from 'the option predates the save' — codex collab cards (Agent Wait, send_message…) broke every fold on instances with ANY saved selection (owner report). Add the default-on kind once; unticking it afterwards sticks.",
+      run() {
+        const f = path.join(dataDir, 'settings.json');
+        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; }
+        const v = doc['chat.collapseKinds'];
+        if (!Array.isArray(v) || v.includes('agent')) return;
+        v.push('agent');
+        fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
+        fs.renameSync(f + '.tmp', f);
+      },
+    },
+    {
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {

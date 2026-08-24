@@ -121,6 +121,28 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ]);
   const inp = msgs.find((m) => m.role === 'tool')?.content?.[0]?.input || {};
   ok('patch envelope files are parsed into input.files (+file_path)', Array.isArray(inp.files) && inp.files.join(',') === 'src/app/views.js,docs/report.md' && inp.file_path === 'src/app/views.js', JSON.stringify(inp.files));
+  // the LIVE channel's shape (real buffer record): apply_patch arrives as a
+  // FUNCTION_CALL whose arguments are structured JSON {reason, changes} — the
+  // first fix parsed only the custom_tool_call envelope and live sessions
+  // still showed no file names (owner re-report; fixture-not-from-real-data
+  // twice in one feature).
+  const mm2 = new CodexMessageManager('t7b');
+  const msgs2 = mm2.convertHistory([
+    { type: 'response_item', payload: { type: 'function_call', id: 'f1', call_id: 'kf1', name: 'apply_patch', arguments: JSON.stringify({ reason: '', changes: [{ path: '/home/u/services/app/src/views.js', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-a\n+b' }] }) } },
+  ]);
+  const inp2 = msgs2.find((m) => m.role === 'tool')?.content?.[0]?.input || {};
+  ok('function_call JSON {changes[].path} shape yields files + a synthesized patch text', inp2.files?.[0] === '/home/u/services/app/src/views.js' && /\*\*\* Update File: \/home\/u\/services\/app\/src\/views\.js/.test(inp2.patch || ''), JSON.stringify({ files: inp2.files, head: (inp2.patch || '').slice(0, 40) }));
+  ok("…and the card stamps collapseKind 'write' via the function_call path too", msgs2.find((m) => m.role === 'tool')?.collapseKind === 'write');
+  // unknown external/dynamic tools fold as 'mcp' instead of BREAKING runs
+  const mm3 = new CodexMessageManager('t7c');
+  const msgs3 = mm3.convertHistory([
+    { type: 'response_item', payload: { type: 'function_call', id: 'f2', call_id: 'kf2', name: 'browser_console_read', arguments: '{}' } },
+    { type: 'response_item', payload: { type: 'dynamic_tool_call', id: 'd1', call_id: 'kd1', name: 'some_plugin_tool', input: '{}' } },
+    { type: 'response_item', payload: { type: 'dynamic_tool_call_output', id: 'd2', call_id: 'kd1', output: [{ type: 'input_text', text: 'done' }] } },
+  ]);
+  ok("unknown tool names classify as 'mcp' (external-tool kind) — they used to break every surrounding fold", msgs3.filter((m) => m.role === 'tool').every((m) => m.collapseKind === 'mcp'), JSON.stringify(msgs3.map((m) => m.collapseKind)));
+  ok('dynamic_tool_call/output are routed like custom tools (were unrouted)', msgs3.find((m) => m.toolCallId === 'kd1')?.status === 'complete');
+  ok('the pre-agent-kind settings migration exists in the registry', /2026-08-collapse-kinds-agent-default/.test(require('node:fs').readFileSync(REPO + '/src/server/migrations.js', 'utf8')));
   const cv = require('node:fs').readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
   ok('fold summaries list ALL of a patch\'s files (fileLabelsOf over input.files)', /fileLabelsOf = \(el\)[\s\S]{0,300}Array\.isArray\(inp\.files\)/.test(cv) && /for \(const fl of fileLabelsOf\(el\)\)/.test(cv));
   ok('…and the ✎ write mark keys on the semantic hint too', /el\._rawMsg\?\.collapseKind === 'write' \|\| tn === 'Write'/.test(cv));

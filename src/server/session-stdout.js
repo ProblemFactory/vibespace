@@ -8,6 +8,7 @@
 // never vendor APIs. Late-created deps arrive lazily — all uses are at runtime.
 const { classifyCliDeath } = require('./agent-tool-generators.js');
 const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
+const { capsOf } = require('../backend-caps.js'); // streamProtocol picks the parse pipeline — never the backend id (P4)
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -80,7 +81,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
 
   if (session.mode === 'chat') {
     let lineBuf = '';
-    if (session.backend === 'codex') {
+    // Dispatch by DECLARED protocol (P4): a chat backend without a registered
+    // pipeline must fail loudly here, not be silently parsed as stream-json.
+    const streamProto = capsOf(session.backend).streamProtocol;
+    if (session.mode === 'chat' && !streamProto) {
+      console.error(`[session] backend "${session.backend}" has no streamProtocol in src/backend-caps.js — chat output passes through RAW (register a pipeline)`);
+      global.__vsEvent?.('chat-backend-no-protocol', String(session.backend));
+    }
+    if (streamProto === 'codex-events') {
       const stripAnsi = (value) => String(value || '').replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
       ptyProcess.onData((output) => {
         if (session._reattachAttempts) session._reattachAttempts = 0;
@@ -223,7 +231,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
           }
         }
       });
-    } else {
+    } else if (streamProto === 'stream-json') {
       if (!session.subagentBuffers) session.subagentBuffers = new Map();
       if (!session.subagentEmittedUuids) session.subagentEmittedUuids = new Map(); // toolUseId → Set<uuid>
       if (!session.subagentWatchers) session.subagentWatchers = new Map(); // toolUseId → {watcher, offset}
@@ -807,6 +815,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             broadcastToSession(session, id, { type: 'output', sessionId: id, data: line + '\n' });
           }
         }
+      });
+    } else {
+      // Chat backend with NO registered protocol (reported loudly above):
+      // raw passthrough — visible garbage beats silently mis-parsed claude.
+      ptyProcess.onData((output) => {
+        session.buffer += output;
+        if (session.buffer.length > 1200000) session.buffer = session.buffer.slice(-800000);
+        broadcastToSession(session, id, { type: 'output', sessionId: id, data: output });
       });
     }
   } else {
