@@ -227,7 +227,12 @@ function sweepUsageAnchors() {
             scopedWeekly: (g.cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt })),
           };
           calib = predictCalib(prev, newBuckets, usageEstimator.ratesFor(identityKey), costSince, (g.cache.fetchedAt - prev.fetchedAt) / 1000);
-          if (calib) for (const c of Object.values(calib)) global.__vsMetric?.('usage-est-err-pct', Math.abs(c.err) * 100);
+          // Metric is DELTA-RELATIVE (owner-corrected, 2.368.13): absolute
+          // error rewards refresh cadence, not model quality — emit only for
+          // windows that actually moved, as |predΔ−actΔ|/|actΔ|.
+          if (calib) for (const c of Object.values(calib)) {
+            if (c.rel != null) global.__vsMetric?.('usage-est-rel-err-pct', Math.abs(c.predDu - c.actDu) / Math.abs(c.actDu) * 100);
+          }
         } catch { }
       }
       // pairs recorded while ANY tainted source was dark must not teach rates

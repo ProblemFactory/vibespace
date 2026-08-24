@@ -387,7 +387,19 @@ function predictCalib(prevAnchor, newBuckets, rates, costSince, spanSec = 0) {
     const c = costForKey(key, costSince);
     if (c == null) return;
     const pred = Math.min(1.2, u0 + r.rate * c);
-    out[key] = { pred: Math.round(pred * 10000) / 10000, act, err: Math.round((pred - act) * 10000) / 10000 };
+    // DELTA-RELATIVE is the honest accuracy measure (owner-corrected,
+    // 2.368.13): absolute |pred−act| shrinks with refresh cadence alone —
+    // refresh every minute and any model looks perfect. What the model
+    // actually claims is the MOVEMENT (rate × cost), so record predicted vs
+    // actual Δu and their ratio; rel is null when the window barely moved
+    // (|actΔ| < 2pt ⇒ the ratio is noise division, not signal).
+    const predDu = Math.round((pred - u0) * 10000) / 10000;
+    const actDu = Math.round((act - u0) * 10000) / 10000;
+    out[key] = {
+      pred: Math.round(pred * 10000) / 10000, act, err: Math.round((pred - act) * 10000) / 10000,
+      u0: Math.round(u0 * 10000) / 10000, predDu, actDu,
+      rel: Math.abs(actDu) >= 0.02 ? Math.round((predDu / actDu) * 1000) / 1000 : null,
+    };
   };
   one('fiveHour', prevAnchor.buckets.fiveHour, newBuckets.fiveHour);
   one('sevenDay', prevAnchor.buckets.sevenDay, newBuckets.sevenDay);

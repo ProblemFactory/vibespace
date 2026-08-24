@@ -156,8 +156,17 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   const prev = mkAnchor(T0, { u7: 0.40 });
   const c = est.predictCalib(prev, mkAnchor(T0 + HR, { u7: 0.42 }).buckets, rates, cs(17.3));
   ck('calib: pred 0.41 vs act 0.42 → err −0.01', approx(c.sevenDay.pred, 0.41, 0.001) && approx(c.sevenDay.err, -0.01, 0.001));
+  // DELTA-RELATIVE fields (owner-corrected, 2.368.13): absolute error shrinks
+  // with refresh cadence alone — the model's real claim is the MOVEMENT, so
+  // calib rows must carry predΔ/actΔ and their ratio.
+  ck('calib: predDu/actDu recorded (0.01 vs 0.02) with rel = their ratio', approx(c.sevenDay.predDu, 0.01, 0.001) && approx(c.sevenDay.actDu, 0.02, 0.001) && approx(c.sevenDay.rel, 0.5, 0.01) && approx(c.sevenDay.u0, 0.40, 0.001));
+  const tiny = est.predictCalib(prev, mkAnchor(T0 + HR, { u7: 0.41 }).buckets, rates, cs(17.3));
+  ck('calib: a barely-moved window (|actΔ|<2pt) gets rel:null — a ratio there is noise division, not accuracy', tiny.sevenDay.rel === null && approx(tiny.sevenDay.actDu, 0.01, 0.001));
   const crossed = mkAnchor(T0 + HR, { u7: 0.01, rw: RESET + WK });
   ck('calib: reset-crossed bucket skipped', est.predictCalib(prev, crossed.buckets, rates, cs(17.3)) === null);
+  // the engine metric must be the RELATIVE one, gated on rel
+  const engSrc = fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
+  ck('engine emits usage-est-rel-err-pct only when the window moved (no absolute-error headline metric)', /c\.rel != null[\s\S]{0,120}usage-est-rel-err-pct/.test(engSrc) && !/usage-est-err-pct/.test(engSrc));
 }
 
 // ── costBetweenMulti sums across an identity's account ids ───────────────────
