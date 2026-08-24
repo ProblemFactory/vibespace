@@ -2,8 +2,8 @@
 
 ## 2.368.17
 
-- Settings fixes (owner-caught, both 2.368.0 regressions): the **Default output style dropdown rendered blank** — enum options are  objects by the settings-ui contract and the plain-string list left every row empty; and  /  move from the generic Session group into the **Claude** category where backend-specific settings belong.
-- Unified backend-parity plan updated (docs/design-backend-parity.md §5): the collapse-kinds codex gap (real card names measured:  ×209, collab family — none participate today) gets a **global semantic-kind design** (normalizer stamps collapseKind; per-provider checkbox sets rejected as config sprawl), plus the found-along-the-way gaps: codex tool name is  (not , so even the Bash mapping misses), the status bar model fallback list is claude-hardcoded, codex fork RPC is unwired.
+- Settings fixes (owner-caught, both 2.368.0 regressions): the **Default output style dropdown rendered blank** — enum options are `{value, label}` objects by the settings-ui contract and the plain-string list left every row empty; and `claude.outputStyle` / `claude.autoResumeOnLimit` move from the generic Session group into the **Claude** category where backend-specific settings belong.
+- Unified backend-parity plan updated (docs/design-backend-parity.md §5): the collapse-kinds codex gap (real card names measured: `exec` ×209, collab family — none participate today) gets a **global semantic-kind design** (normalizer stamps collapseKind; per-provider checkbox sets rejected as config sprawl), plus the found-along-the-way gaps: codex tool name is `exec` (not `exec_command`, so even the Bash mapping misses), the status bar model fallback list is claude-hardcoded, codex fork RPC is unwired.
 
 ## 2.368.16
 
