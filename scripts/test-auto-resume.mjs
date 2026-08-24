@@ -126,7 +126,10 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
 {
   const a = mk({ dflt: true });
   a.sessions.set('s1', sess({ dead: true }));   // sendToSession returns false
-  const resets = T0 + 1000;
+  // FRESH now, not module-load T0 (CI flake 2026-08-24: a slow Actions runner
+  // took >1s to reach this section, T0+1000 was already past, armIfEnabled
+  // correctly refused, and both asserts failed — green locally for weeks)
+  const resets = Date.now() + 60000;
   a.ar.armIfEnabled('s1', a.sessions.get('s1'), resets, '5h');
   ok('a failed delivery keeps the wait armed for the next tick', a.ar.tick(resets + GRACE_MS + 1) === 0 && a.ar.statusFor('s1').armed === true);
   a.sessions.get('s1').dead = false;
