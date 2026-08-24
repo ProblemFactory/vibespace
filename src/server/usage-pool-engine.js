@@ -66,7 +66,7 @@ const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 // email > account id, so a sub's history SURVIVES remove + re-add (user
 // requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
 const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('../usage-anchors.js');
-const { UsageEstimator, overlayCache: estOverlayCache, predictCalib } = require('../usage-estimator.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // Which caches map to which identity (org-merge aware) — shared by the sweep
 // and the estimator's per-account resolution. Reads roster + cache files only.
@@ -77,7 +77,10 @@ function usageIdentityGroups() {
   const roster = accounts.list().accounts || [];
   for (const fn of files) {
     try {
-      const accountId = fn === '__global__.json' ? null : fn.slice(0, -5);
+      // '__global_codex__' is a PSEUDO id like '__global__' (the machine's
+      // ChatGPT login) — roster-less by design, never a "deleted account".
+      const accountId = (fn === '__global__.json' || fn === '__global_codex__.json') ? null : fn.slice(0, -5);
+      const isCodexGlobal = fn === '__global_codex__.json';
       const cache = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
       if (!cache?.fetchedAt) continue;
       const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
@@ -90,10 +93,18 @@ function usageIdentityGroups() {
       // crash to exactly this (sub-a453 deleted, cache file from 07-16 still
       // resolving). A file with no roster record contributes NOTHING true.
       if (accountId && !acctRec) continue;
-      if (accountId && acctRec && (acctRec.type === 'pooled' || acctRec.backend === 'codex')) continue; // pools have no quota; codex economics are separate
-      const key = identityKeyFor({ accountId, cache, email: acctRec?.email });
-      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null };
-      g.accountIds.push(accountId || '__global__');
+      if (accountId && acctRec && acctRec.type === 'pooled') continue; // pools have no quota of their own
+      // codex identities join the groups since P1 (design-backend-parity.md §1)
+      // — persisted cxs-*/__global_codex__ snapshots feed the SAME anchors →
+      // estimator stack (their ledger cost is already backend-tagged). Every
+      // codex key carries a 'codex:' prefix: identityKeyFor falls back to
+      // EMAIL, and one person's ChatGPT + Anthropic logins sharing an email
+      // must never merge into one identity (different quotas entirely).
+      const isCodex = isCodexGlobal || acctRec?.backend === 'codex';
+      const key = isCodexGlobal ? 'codex:__global__'
+        : (isCodex ? 'codex:' : '') + identityKeyFor({ accountId, cache, email: acctRec?.email });
+      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: isCodex ? 'codex' : 'claude' };
+      g.accountIds.push(isCodexGlobal ? '__global_codex__' : (accountId || '__global__'));
       // freshest cache is the identity's anchor source (the same real login can
       // surface as BOTH __global__ and a named sub — one quota, two files)
       if (!g.cache || cache.fetchedAt > g.cache.fetchedAt) { g.cache = cache; g.accountId = accountId; }
@@ -123,6 +134,11 @@ const usageEstimator = new UsageEstimator({
     }
     return null;
   },
+  // codex identities learn WITHOUT priors (the built-in default is the
+  // measured claude Max-20x quota sizes — meaningless for ChatGPT plans);
+  // the no-prior fallback needs ≥$1 cost + ≥0.5% observed movement before
+  // it emits a rate, which is the honest cold-start for an unmeasured plan.
+  priorsFor: (identityKey) => String(identityKey || '').startsWith('codex:') ? null : CLAUDE_MAX_PRIOR_FULL_USD,
 });
 app.locals.usageEstimator = usageEstimator;
 // ── OFFLINE-BIAS defense (2.297.0, design §Cross-device aggregation) ──

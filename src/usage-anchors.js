@@ -98,7 +98,12 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, cr: 0, other: 0 }, requests: 0 };
   try {
     for (const ev of usageHistory._events(fromMs, toMs)) {
-      const acct = ev.acct || '__global__';
+      // Same keying as the ledger aggregate: the two CLIs' machine logins are
+      // DIFFERENT identities. The old bare '__global__' default silently
+      // counted codex CLI-login events into the CLAUDE global identity's cost
+      // (and starved '__global_codex__' of its own) — found wiring codex into
+      // the estimator (P1, 2.368.18).
+      const acct = ev.acct || (ev.be === 'codex' ? '__global_codex__' : '__global__');
       if (!want.has(acct)) continue;
       // Remote events RESOLVED to a real account (2.294.0 attribution) COUNT:
       // quota is a per-account global fact, and excluding another machine's

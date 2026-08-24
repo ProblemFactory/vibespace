@@ -1637,7 +1637,7 @@ const { decideCliRefresh } = require('./src/account-pool-auto.js');
       const now = Date.now();
       const list = [];
       for (const a of (accounts.list().accounts || [])) {
-        if (a.type !== 'subscription' || !a.loggedIn || a.pooled) continue;
+        if (a.type !== 'subscription' || !a.loggedIn || a.pooled || (a.backend || 'claude') !== 'claude') continue; // auto-cli spawns `claude -p /usage` — claude accounts only
         let raw = null;
         try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, a.id + '.json'), 'utf-8')); } catch { }
         try {

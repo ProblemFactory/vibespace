@@ -68,6 +68,69 @@ function parseCliUsageText(text, nowMs) {
   return { fiveHour: fiveHour || undefined, sevenDay: sevenDay || undefined, scopedWeekly, fetchedAt: nowMs || Date.now() };
 }
 
+// Module-scope (no closure deps) so tests can import it directly.
+function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
+  if (!raw || typeof raw !== 'object') return null;
+  // Windows are classified by their LENGTH, never by primary/secondary
+  // position (P0 fix, design-backend-parity.md §0): codex 0.149.x switched to
+  // a SINGLE-window shape where `primary` IS the weekly window (10080min,
+  // secondary null) — the old positional mapping labeled weekly usage as the
+  // 5h bucket on every current reading. Field names also differ per channel:
+  // rollout snake_case `window_minutes`, live app-server push
+  // `windowDurationMins` — read all three.
+  const toWindow = (entry, fallbackWindowMinutes) => {
+    if (!entry || typeof entry !== 'object') return null;
+    const usedPercent = Number(entry.used_percent ?? entry.usedPercent);
+    const normalizedPercent = Number.isFinite(usedPercent)
+      ? Math.max(0, Math.min(100, usedPercent))
+      : 0;
+    return {
+      utilization: normalizedPercent / 100,
+      usedPercent: normalizedPercent,
+      windowMinutes: Number(entry.window_minutes ?? entry.windowMinutes ?? entry.windowDurationMins ?? entry.window_duration_mins) || fallbackWindowMinutes || 0,
+      resetsAt: Number(entry.resets_at ?? entry.resetsAt) || 0,
+    };
+  };
+
+  let fiveHour = null, sevenDay = null;
+  const bucketOfPos = {}; // raw position → the bucket it classified into
+  for (const [pos, entry, fallback] of [['primary', raw.primary, 300], ['secondary', raw.secondary, 10080]]) {
+    const w = toWindow(entry, fallback);
+    if (!w) continue;
+    // ≤ 8h = the burst window; anything longer = the weekly lane
+    if (w.windowMinutes && w.windowMinutes <= 480) { if (!fiveHour) { fiveHour = w; bucketOfPos[pos] = w; } }
+    else if (!sevenDay) { sevenDay = w; bucketOfPos[pos] = w; }
+  }
+  if (!fiveHour && !sevenDay) return null;
+
+  // Exhaustion markers used to be DROPPED here — they are the entire signal a
+  // pool auto-switch gates on (rate_limit_reached_type names WHICH raw window
+  // tripped; spend_control/credits are the monthly-cap lane).
+  const reached = raw.rate_limit_reached_type ?? raw.rateLimitReachedType ?? null;
+  const spendControl = raw.spend_control_reached ?? raw.spendControlReached ?? null;
+  const credits = raw.credits && typeof raw.credits === 'object' ? {
+    hasCredits: !!(raw.credits.has_credits ?? raw.credits.hasCredits),
+    unlimited: !!(raw.credits.unlimited),
+    balance: String(raw.credits.balance ?? ''),
+  } : null;
+  if (reached && bucketOfPos[reached]) {
+    const w = bucketOfPos[reached]; // tripped window reads as dead, whatever its %
+    w.utilization = 1; w.usedPercent = 100; w.status = 'limited';
+  }
+
+  return {
+    limitId: raw.limit_id || raw.limitId || 'codex',
+    limitName: raw.limit_name || raw.limitName || '',
+    planType: raw.plan_type || raw.planType || '',
+    fiveHour,
+    sevenDay,
+    rateLimitReachedType: reached,
+    spendControlReached: spendControl,
+    credits,
+    fetchedAt: Number(fetchedAt) || Date.now(),
+  };
+}
+
 function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
@@ -811,36 +874,6 @@ app.post('/api/usage/refresh', async (req, res) => {
   });
 });
 
-function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
-  if (!raw || typeof raw !== 'object') return null;
-  const toWindow = (entry, fallbackWindowMinutes) => {
-    if (!entry || typeof entry !== 'object') return null;
-    const usedPercent = Number(entry.used_percent ?? entry.usedPercent);
-    const normalizedPercent = Number.isFinite(usedPercent)
-      ? Math.max(0, Math.min(100, usedPercent))
-      : 0;
-    return {
-      utilization: normalizedPercent / 100,
-      usedPercent: normalizedPercent,
-      windowMinutes: Number(entry.window_minutes ?? entry.windowMinutes) || fallbackWindowMinutes || 0,
-      resetsAt: Number(entry.resets_at ?? entry.resetsAt) || 0,
-    };
-  };
-
-  const fiveHour = toWindow(raw.primary, 300);
-  const sevenDay = toWindow(raw.secondary, 10080);
-  if (!fiveHour && !sevenDay) return null;
-
-  return {
-    limitId: raw.limit_id || raw.limitId || 'codex',
-    limitName: raw.limit_name || raw.limitName || '',
-    planType: raw.plan_type || raw.planType || '',
-    fiveHour,
-    sevenDay,
-    fetchedAt: Number(fetchedAt) || Date.now(),
-  };
-}
-
 function readCodexWrapperRateLimit(sessionId) {
   if (!sessionId) return null;
   try {
@@ -962,6 +995,17 @@ function summarizeCodexRateLimits() {
     if (!snapshot) return;
     if (!byAccount[key] || (snapshot.fetchedAt || 0) > (byAccount[key].fetchedAt || 0)) byAccount[key] = snapshot;
   };
+  // SEED FROM DISK first (P1, design-backend-parity.md §1): snapshots used to
+  // be re-derived from rollout tails only (24 files / 14 days) — an idle
+  // account's quota silently VANISHED. Persisted files also make codex
+  // identities visible to the anchors sweep / estimator like claude's.
+  try {
+    for (const fn of fs.readdirSync(USAGE_CACHE_DIR)) {
+      const m = /^(cxs-[\w-]+|__global_codex__)\.json$/.exec(fn);
+      if (!m) continue;
+      try { keep(m[1], JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'))); } catch {}
+    }
+  } catch {}
   for (const [id, session] of activeSessions) {
     if (session.backend !== 'codex' || session.mode !== 'chat') continue;
     keep(session._accountId || '__global_codex__', readCodexWrapperRateLimit(id));
@@ -988,6 +1032,19 @@ function summarizeCodexRateLimits() {
     const newest = (a && (!g || (a.fetchedAt || 0) > (g.fetchedAt || 0))) ? a : g;
     if (newest) { byAccount[gid] = newest; byAccount['__global_codex__'] = newest; }
   }
+  // WRITE-THROUGH (P1): freshest-wins persistence, same anti-poison rule as
+  // the claude device read-back — never let an older snapshot overwrite a
+  // newer file (fetchedAt-guarded by `keep` above, which already merged disk).
+  try {
+    fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
+    for (const [key, snap] of Object.entries(byAccount)) {
+      if (!/^(cxs-[\w-]+|__global_codex__)$/.test(key)) continue;
+      const f = path.join(USAGE_CACHE_DIR, key + '.json');
+      let cur = null; try { cur = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch {}
+      if (cur && (Number(cur.fetchedAt) || 0) >= (Number(snap.fetchedAt) || 0)) continue;
+      fs.writeFileSync(f + '.tmp', JSON.stringify(snap)); fs.renameSync(f + '.tmp', f);
+    }
+  } catch {}
   _codexRateLimitCache = { overall, byAccount };
   _codexRateLimitCacheAt = now;
   return _codexRateLimitCache;
@@ -1021,6 +1078,11 @@ app.get('/api/usage', (req, res) => {
         }
         const g = e.estimateFor(null, _rateLimitCache, now);
         if (g) out.__global__ = g;
+        // codex identities estimate too (P1): same estimator, codex-prefixed
+        // identities learned prior-less; keys match `codexAccounts`
+        for (const [key, snap] of Object.entries(codexRl.byAccount || {})) {
+          try { const est = e.estimateFor(key, snap, now); if (est) out[key] = est; } catch {}
+        }
         return out;
       } catch { return {}; }
     })(),
@@ -1050,4 +1112,4 @@ app.get('/api/usage', (req, res) => {
   return { refreshViaCliPanel, getOAuthToken, usagePollingEnabled, refreshRateLimit, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
-module.exports = { setupUsage, parseCliUsageText };
+module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit };

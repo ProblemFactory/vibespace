@@ -545,9 +545,13 @@ function renderGroup(title, rows, state, opts = {}) {
 function renderCache(d) {
   const sec = section(t('Cache efficiency'));
   const T = d.totals;
+  // codex rollouts never report cache-write counts — a codex-only view's
+  // structural 0 segment is fake, drop it (same honesty rule as the tile)
+  const billingKeys = (d.groups?.billing || []).map(r => r.key);
+  const codexOnly = billingKeys.length > 0 && billingKeys.every(k => k === 'chatgpt' || k === 'codex-cli-login');
   const parts = [
     { k: t('Cached reads'), v: T.cacheRead, c: 'var(--green,#3fb950)' },
-    { k: t('Cache writes'), v: T.cacheWrite, c: 'var(--yellow,#e5c07b)' },
+    ...(codexOnly ? [] : [{ k: t('Cache writes'), v: T.cacheWrite, c: 'var(--yellow,#e5c07b)' }]),
     { k: t('Fresh input'), v: T.input, c: 'var(--red,#e55)' },
   ];
   const tot = parts.reduce((s, p) => s + p.v, 0) || 1;

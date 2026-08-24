@@ -216,6 +216,11 @@ export function installUsageMeter(App, ctx = {}) {
       codexLabel = codexSubs.find(a => a.id === cSel)?.name || cSel;
       codexNote = t('Refreshes as this account’s sessions run');
     }
+    // Dead-reckoned overlay for the selected codex identity (P1 — same
+    // estimator, codex-prefixed identities; keys match codexAccounts)
+    let cEstSel = null;
+    if (cSel === 'auto') cEstSel = (codexDefId && cBuckets[codexDefId]) ? estimates[codexDefId] : estimates.__global_codex__;
+    else cEstSel = estimates[cSel] || null;
     const hasSwitch = claudeSubs.length > 0;
     const codexHasSwitch = codexSubs.length > 0;
 
@@ -401,8 +406,10 @@ export function installUsageMeter(App, ctx = {}) {
       const pct7d = Math.round(codex?.sevenDay?.usedPercent || ((codex?.sevenDay?.utilization || 0) * 100));
       const color5h = usageColor(pct5h);
       const color7d = usageColor(pct7d);
-      rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData));
-      if (!cNoData) chipWorst = Math.max(chipWorst, pct5h, pct7d);
+      const cp5 = estDisplayPair(codex?.fiveHour, cEstSel?.fiveHour);
+      const cp7 = estDisplayPair(codex?.sevenDay, cEstSel?.sevenDay);
+      rows.push(renderRow('codex', '5h', pct5h, '7d', pct7d, cNoData, [cp5, cp7]));
+      if (!cNoData) chipWorst = Math.max(chipWorst, cp5.estPct ?? pct5h, cp7.estPct ?? pct7d);
       // Account switcher — same model as Claude's: merged chip when the machine
       // login IS a named account, ★ marks the default; data-be routes the click.
       let cSwitcher = '';
@@ -421,17 +428,19 @@ export function installUsageMeter(App, ctx = {}) {
         ? `<div class="usage-note">${t('No usage captured yet for this account — run a session on it.')}</div>`
         : `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div></div>
+        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct5h}%;background:${color5h}"></div>${estBar(cp5)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
+          ${estStat(cp5)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.fiveHour?.resetsAt)}</span>
         </div>
       </div>
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
-        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div></div>
+        <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${pct7d}%;background:${color7d}"></div>${estBar(cp7)}</div>
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
+          ${estStat(cp7)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
         </div>
