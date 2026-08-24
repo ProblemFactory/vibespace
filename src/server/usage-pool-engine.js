@@ -81,6 +81,15 @@ function usageIdentityGroups() {
       const cache = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, fn), 'utf-8'));
       if (!cache?.fetchedAt) continue;
       const acctRec = accountId ? roster.find((x) => x.id === accountId) : null;
+      // A DELETED account's cache file is a zombie (nothing removes the file
+      // with the record) and it kept poisoning org→account resolution: it
+      // stays in the identity group, OTel's resolveOrg picked the dead id
+      // (first named member) and booked LIVE spend to an account that no
+      // longer exists (atype 'unknown', outside every quota view) — the
+      // 2026-08-24 estimator investigation traced the org-29c4 implied-full
+      // crash to exactly this (sub-a453 deleted, cache file from 07-16 still
+      // resolving). A file with no roster record contributes NOTHING true.
+      if (accountId && !acctRec) continue;
       if (accountId && acctRec && (acctRec.type === 'pooled' || acctRec.backend === 'codex')) continue; // pools have no quota; codex economics are separate
       const key = identityKeyFor({ accountId, cache, email: acctRec?.email });
       const g = groups.get(key) || { accountIds: [], cache: null, accountId: null };

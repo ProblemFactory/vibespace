@@ -139,6 +139,12 @@ fs.rmSync(dir, { recursive: true, force: true });
   const sv = fs2.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   ok(/getOtelIngest: \(\) => \{ try \{ return otelIngest; \}/.test(sv), '⑥ server.js hands the engine a lazy otelIngest (TDZ: created later in the file)');
   ok(/observedOrgFor\(sid\)/.test(fs2.readFileSync(new URL('../src/server/otel-ingest.js', import.meta.url), 'utf8')), '⑥ the ingest exposes the per-session observed org');
+  // ⑦ a DELETED account's zombie cache file must not join identity groups —
+  // it poisoned org→account resolution (OTel booked live spend to the dead
+  // id, atype 'unknown', outside every quota view: the org-29c4 implied-full
+  // crash, 2026-08-24). A cache file with no roster record contributes
+  // nothing true.
+  ok(/if \(accountId && !acctRec\) continue;/.test(eng), '⑦ unregistered (deleted) account cache files are excluded from identity groups');
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
