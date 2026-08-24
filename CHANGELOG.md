@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.11
+
+- **⚙→Update now runs the *latest* update script, not the stranded checkout's copy.** The 2.368.10 rewrite-recovery rung had a chicken-and-egg hole: it rode the very update that was broken, so instances cloned before the history rewrite (the whole existing fleet) still ran their old `update.sh`, failed the ff-only pull, and froze — exactly what the owner's own hosted instance hit. The self-update route now `git fetch`es origin and executes `origin/master:scripts/update.sh` (same trust domain as the code the update is about to pull and run anyway); fetch failure falls back to the checkout's copy. Any future fix to update logic reaches every instance ≥2.368.11 on the next click, with no manual help.
+
 ## 2.368.10
 
 - **History rewrite executed (owner-approved): the two rclone binary blobs are scrubbed from git history** — `git filter-repo` on a fresh mirror, force-pushed with all tags; the tip tree hash is byte-identical (`8182ee45…`), all 1871 commits preserved, fresh-clone size 56MB → **8.3MB**. Because every SHA changed, `git pull --ff-only` can never succeed again on a checkout cloned before the rewrite — **`update.sh` gains a rewrite-recovery rung**: when the pull fails twice and neither side is the other's ancestor (true divergence, not unpushed local work — that still fails loudly), it keeps the old HEAD under a local `pre-realign-<ts>` tag and realigns with `reset --hard`. Instances that update through the script self-heal; anyone updating by hand: `git fetch origin && git reset --hard origin/master`.

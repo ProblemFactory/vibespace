@@ -41,7 +41,16 @@ app.post('/api/self-update', (req, res) => {
     } catch {}
     try { fs.unlinkSync(_updateLogPath); } catch {}
     const fd = fs.openSync(_updateLogPath, 'a');
-    const child = spawn('bash', ['-c', 'bash scripts/update.sh; echo "__UPDATE_EXIT:$?"'], {
+    // Run the LATEST update script, not the checkout's (2.368.11, the history-
+    // rewrite stranding): a fix to update logic rides the very update that is
+    // broken — the old script could never pull it (chicken-and-egg; the miku
+    // fleet froze exactly this way). origin/master's script is the same trust
+    // domain as the code the update is about to pull and run anyway; fetch
+    // failure (offline) falls back to the checkout's copy.
+    const child = spawn('bash', ['-c',
+      'UP=scripts/update.sh; ' +
+      'if git fetch origin master --quiet 2>/dev/null && git show origin/master:scripts/update.sh > data/.update-latest.sh 2>/dev/null && [ -s data/.update-latest.sh ]; then UP=data/.update-latest.sh; fi; ' +
+      'bash "$UP"; echo "__UPDATE_EXIT:$?"'], {
       cwd: rootDir, detached: true, stdio: ['ignore', fd, fd],
       env: { ...process.env, VIBESPACE_SUPERVISED: process.env.VIBESPACE_SUPERVISED || '1' },
     });
