@@ -461,7 +461,11 @@ export function installSidebarMounts(Sidebar) {
         err.title = m.error;
         // Dead Google OAuth token (invalid_grant: revoked/expired) — offer the
         // guided re-authorization right where the failure is visible.
-        if (this._isDriveBacked(m) && /invalid_grant|token expired|couldn.t fetch token/i.test(m.error)) {
+        // "sign-in has expired…re-authorize" = the server's OAuth-death health
+        // message (2.368.6: a dead OneDrive token EIO'd every read while the
+        // mount looked healthy and NO string here matched it — the button is
+        // the fix path, so it must appear for every auth-death phrasing).
+        if (this._isDriveBacked(m) && /invalid_grant|token expired|couldn.t fetch token|unauthenticated|re-authorize/i.test(m.error)) {
           const fix = document.createElement('button');
           fix.className = 'mounts-btn mounts-btn-primary mounts-reauth-btn';
           fix.textContent = tr('Re-authorize {provider}…', { provider: this._oauthProviderNames(m).product });

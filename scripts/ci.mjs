@@ -30,6 +30,7 @@ const SUITES = [
   'test-job-model', 'test-jobs-engine', 'test-peer-messaging', 'test-lazy', 'test-server-globals',
   'test-resume-all-desktops', // pure scan + the WIRING pin (the 2.331.0 dead-fix lesson)
   'test-path-mounts',   // /svc/<name>/ reverse proxy: real http+ws round trips + store rules
+  'test-mount-oauth-probe', // dead OAuth token behind a healthy-looking mount: probe eligibility + slow clock + phrasings + Re-authorize button
   'test-otel-truth',    // per-request billing truth: parser + loopback ingest + bake override + wiring pins
   'test-chat-frame-guard', // 38MB-poisoning trio: poison guard + frame-file bypass (real wrapper) + rescue
   'test-agent-msg',     // Channels v1: ACL matrix + delivery ladder + wiring pins

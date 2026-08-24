@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.6
+
+- **A dead OAuth sign-in no longer hides behind a healthy-looking mount** (owner: every file in the OneDrive mount opens with an IO error — while the mount row showed nothing wrong). The refresh token had died ("unauthenticated: Unauthenticated" on every download); the fuse dir cache kept listings working, so the health sweep's mountpoint `ls` saw a fine mount, `_revocable` said an own-configured backend can't expire (wrong for OAuth), and even the backend probe's denied-regex had no phrasing for rclone's OAuth-death errors — three misses stacked into total silence. OAuth-backed mounts (Drive/OneDrive/Dropbox/…) now get the fresh-process backend probe on a slow clock (10 min; every sweep while an auth error is showing so recovery clears fast), the probe classifies `unauthenticated`/`invalid_grant`/`InvalidAuthenticationToken` as denied, the health message says what to do ("re-authorize"), and the sidebar's **Re-authorize** button appears for it. New gate suite `test-mount-oauth-probe` (15) pins the whole chain.
+
 ## 2.368.5
 
 - **The auto-continue toggle now looks toggled** (owner: "几乎没有视觉反馈，似乎就是变粗了一点？而且自动继续也是个沙漏，和旁边 output style 的待加载沙漏挨着不好"). Two fixes on the same chip: ① ON is a real state — accent color plus an "auto" label — instead of a one-shade opacity difference from OFF; armed stays amber with the reset time. ② New `autoContinue` SVG (clock circle + play triangle) replaces the hourglass, which sits one chip to the left on the style chip meaning "pending pick" — two adjacent hourglasses with different meanings read as one broken widget. Verified against the real CSS in a headless render (all three states distinct); pinned in `test-auto-resume` (62): the chip must not use the hourglass, and the on-state class must exist and be accent-styled.

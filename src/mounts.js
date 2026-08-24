@@ -1562,6 +1562,16 @@ class MountManager {
    *  these get the (heavier) backend re-auth probe — my own S3/Drive don't. */
   _revocable(m) { return m.origin === 'imported' || m.type === 'vibespace' || !!m.expiresAt; }
 
+  /** OAuth-backed mount (Drive/OneDrive/Dropbox/…): its refresh token can die
+   *  out from under a HEALTHY-looking mount (revoked, password change, expiry)
+   *  — the fuse dir cache keeps listings working while every download 401s,
+   *  so the UI showed a fine mount whose every file open was EIO (real
+   *  OneDrive incident: "unauthenticated: Unauthenticated" on every read). */
+  _oauthBacked(m) {
+    return m.type === 'drive' || m.type === 'onedrive' || m.type === 'cloud'
+      || (m.type === 'rclone' && MountManager.OAUTH_BACKENDS.includes(m.rcloneType));
+  }
+
   /** Uncached BACKEND access probe (fresh rclone process re-auths, bypassing
    *  the fuse/dir cache that makes a mountpoint `ls` lie about a revoked
    *  token). Returns 'ok' | 'denied' | 'hung'. */
@@ -1579,7 +1589,11 @@ class MountManager {
           if (!err) return resolve('ok');
           const s = String(stderr || err.message || '');
           if (err.killed || /ETIMEDOUT/.test(s)) return resolve('hung');
-          if (/401|403|Unauthorized|AccessDenied|Access Denied|expired|Forbidden|SignatureDoesNotMatch|InvalidAccessKeyId|no longer valid/i.test(s)) return resolve('denied');
+          // "unauthenticated"/"invalid_grant"/"InvalidAuthenticationToken" are
+          // the OAuth-refresh-token death phrasings (rclone onedrive / Google /
+          // MS Graph) — a real OneDrive incident failed every read with
+          // "unauthenticated: Unauthenticated" and matched NOTHING here.
+          if (/401|403|Unauthorized|unauthenticated|invalid_grant|InvalidAuthenticationToken|AccessDenied|Access Denied|expired|Forbidden|SignatureDoesNotMatch|InvalidAccessKeyId|no longer valid/i.test(s)) return resolve('denied');
           // A NON-auth lsf failure is NOT a revocation — SMB especially fails
           // to enumerate the server root while the mounted share lists fine
           // (real report: a working NAS mount kept flashing "access denied").
@@ -1641,6 +1655,7 @@ class MountManager {
     if (m.type === 'vibespace') return 'connected but every file errors — the share may have been revoked, or the source instance is unreachable';
     if (m.expiresAt && Date.now() > m.expiresAt) return 'connected but access denied — this share credential has expired';
     if (m.origin === 'imported') return 'connected but access denied — the share may have been revoked or its credentials changed';
+    if (this._oauthBacked(m)) return 'connected but the sign-in has expired or been revoked — listings come from cache while every file read fails; re-authorize to fix';
     return 'connected but the folder couldn’t be listed — the server may be busy or temporarily unreachable';
   }
 
@@ -1658,6 +1673,26 @@ class MountManager {
       if (acc === 'denied') return this._accessErrorMsg(m);
       if (acc === 'ok') return null;
       return undefined; // hung/unknown — don't flip the banner either way
+    }
+    if (this._oauthBacked(m)) {
+      // A dead refresh token hides behind a healthy mountpoint (dir cache
+      // lists, downloads 401) — only a fresh backend probe can see it. Token
+      // death is not a seconds-scale event, so probe on a slow clock instead
+      // of hitting the provider every 60s sweep; probe every sweep only while
+      // an auth error is already showing (so recovery clears fast) or the
+      // mountpoint itself just failed.
+      const now = Date.now();
+      const last = (this._oauthProbeAt ??= new Map()).get(m.id) || 0;
+      const showingAuthErr = /re-authorize/i.test(this._errors.get(m.id) || '');
+      if (health === 'error' || showingAuthErr || now - last > 10 * 60000) {
+        this._oauthProbeAt.set(m.id, now);
+        const acc = await this._probeBackendAccess(m);
+        if (acc === 'denied') return this._accessErrorMsg(m);
+        if (acc === 'ok' && showingAuthErr) return null; // recovered — clear it
+        // ok/unknown: not a token death — fall through to generic handling
+      } else if (showingAuthErr) {
+        return undefined; // keep the auth error until a probe proves otherwise
+      }
     }
     if (health === 'error') {
       // User-owned backend (SMB/NAS, SFTP, own S3): a single non-zero ls is
