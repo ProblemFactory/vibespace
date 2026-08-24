@@ -367,6 +367,11 @@ class CodexMessageManager {
     if (type === 'function_call') return this._processFunctionCall(item, emit);
     if (type === 'custom_tool_call') return this._processCustomToolCall(item, emit);
     if (type === 'function_call_output') return this._processFunctionCallOutput(item, emit);
+    // custom_tool_call has ALWAYS been routed but its output twin never was
+    // (2.368.15 codex audit: 84 custom_tool_call_output records in one real
+    // session were dropped wholesale — 52 tool cards stuck "pending" forever,
+    // the codex flavor of the forever-running card).
+    if (type === 'custom_tool_call_output') return this._processFunctionCallOutput(item, emit);
     if (type === 'reasoning') return this._processReasoningItem(item, emit);
   }
 
@@ -566,7 +571,13 @@ class CodexMessageManager {
   _processFunctionCallOutput(item, emit) {
     const toolCallId = item.call_id || item.callId;
     if (!toolCallId) return;
-    const output = typeof item.output === 'string' ? item.output : JSON.stringify(item.output ?? '');
+    // custom_tool_call_output carries output as an ARRAY of {type:'input_text',
+    // text} blocks (real rollout shape) — join the text instead of dumping a
+    // JSON blob into the card.
+    const raw = item.output;
+    const output = typeof raw === 'string' ? raw
+      : Array.isArray(raw) ? raw.map((b) => (b && typeof b === 'object' ? (b.text ?? '') : String(b ?? ''))).join('')
+        : JSON.stringify(raw ?? '');
     const isError = !!item.is_error || !!item.error;
     this._finalizeToolCall(toolCallId, { output, isError }, emit);
   }
@@ -628,7 +639,27 @@ class CodexMessageManager {
         reasoning_output_tokens: total.reasoning_output_tokens ?? total.reasoningOutputTokens ?? 0,
       };
       if (contextWindow) this._status.contextWindow = contextWindow;
-      if (emit && this._status.lastUsage) this._emit({ op: 'meta', subtype: 'usage', data: { ...this._status.lastUsage, totals: this._status.totalUsage || null } });
+      // contextWindow rides the usage meta: the status bar's context% needs
+      // BOTH numbers, and on a live session the window otherwise only arrived
+      // via the attach-time chatStatus — a created-here codex session showed
+      // "123k/?" until re-attach (2.368.15).
+      if (emit && this._status.lastUsage) this._emit({ op: 'meta', subtype: 'usage', data: { ...this._status.lastUsage, contextWindow: this._status.contextWindow || 0, totals: this._status.totalUsage || null } });
+      return;
+    }
+
+    if (type === 'sub_agent_activity') {
+      // Codex sub-agents (2026-08 CLI): a spawned agent THREAD tied to a tool
+      // call. Minimal visibility — announce the spawn as a system line (the
+      // thread id names a real rollout a future viewer can open); 'interacted'
+      // events are churn, and there is no terminal kind to close a chip on,
+      // so no task-lifecycle state is created here (the forever-running class).
+      if ((event.kind || '') === 'started') {
+        const msg = this._create({
+          role: 'system',
+          content: [{ type: 'system_info', text: `Codex sub-agent started: ${event.agent_path || '(agent)'} — thread ${String(event.agent_thread_id || '').slice(0, 13)}…` }],
+        });
+        if (emit) this._emit({ op: 'create', message: msg });
+      }
       return;
     }
 

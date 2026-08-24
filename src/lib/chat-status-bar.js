@@ -130,6 +130,10 @@ export class ChatStatusBar {
     this._statusLastInputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     this._statusLastCacheRead = u.cache_read_input_tokens || 0;
     if (u.totals) this._statusTotalUsage = u.totals; // Codex: cumulative session usage
+    // Codex live sessions learn the window from token_count events — without
+    // this a freshly-created session showed "123k/?" until the next re-attach
+    // (2.368.15, owner: "context length为啥无法获取到").
+    if (u.contextWindow) this._statusContextWindow = u.contextWindow;
     this.render();
   }
 

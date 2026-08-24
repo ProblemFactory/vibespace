@@ -76,6 +76,15 @@ class MessageManager {
     this.messages = [];
     this.messageIndex = new Map();      // id → NormalizedMessage
     this.pendingToolCalls = new Map();   // toolUseId → { msgId, block }
+    // Task lifecycle needs its OWN index (2.368.15, owner: "基本每个对话都有
+    // 已结束的后台任务显示为正在进行"): pendingToolCalls is the permission/
+    // result matcher and the tool_result DELETES its entry — a background
+    // task's result arrives in seconds ("Command running in background…"),
+    // its completion notification arrives minutes later, so every closer
+    // that looked tasks up via pendingToolCalls found nothing and the card
+    // stayed 'running' forever. These maps live for the conversation.
+    this.taskMsgByToolUse = new Map();   // toolUseId → msgId (tasks only)
+    this.taskMsgByTaskId = new Map();    // task_id  → msgId
     this.turnIndex = 0;
     this.listeners = [];
     this._peerMsgIds = new Set(); // cross-session msg_ids already rendered (dedup across the three peer sites)
@@ -453,15 +462,18 @@ class MessageManager {
       }
     }
 
-    // Task lifecycle → edit existing tool message
+    // Task lifecycle → edit existing tool message. Resolution goes through
+    // the task index FIRST — pendingToolCalls only helps for task_started
+    // (the tool_result hasn't arrived yet then) and is EMPTY by the time a
+    // completion lands (see the constructor note).
     if (raw.tool_use_id) {
-      const pending = this.pendingToolCalls.get(raw.tool_use_id);
-      if (!pending) return;
-      const existing = this.messageIndex.get(pending.msgId);
+      const existing = this._taskMsgFor(raw.tool_use_id, raw.task_id);
       if (!existing) return;
 
       if (raw.subtype === 'task_started') {
         existing.taskInfo = { id: raw.task_id, type: raw.task_type, description: raw.description, status: 'running' };
+        this.taskMsgByToolUse.set(raw.tool_use_id, existing.id);
+        if (raw.task_id != null) this.taskMsgByTaskId.set(String(raw.task_id), existing.id);
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
       } else if (raw.subtype === 'task_progress') {
         if (existing.taskInfo) {
@@ -476,6 +488,17 @@ class MessageManager {
         }
       }
     }
+  }
+
+  /** Find the tool message a task-lifecycle signal refers to: task index →
+   *  pendingToolCalls (pre-result window) → task-id fallback. */
+  _taskMsgFor(toolUseId, taskId) {
+    const viaTask = toolUseId && this.taskMsgByToolUse.get(toolUseId);
+    if (viaTask) return this.messageIndex.get(viaTask) || null;
+    const pending = toolUseId && this.pendingToolCalls.get(toolUseId);
+    if (pending) return this.messageIndex.get(pending.msgId) || null;
+    const viaId = taskId != null && this.taskMsgByTaskId.get(String(taskId));
+    return viaId ? (this.messageIndex.get(viaId) || null) : null;
   }
 
   _processAttachment(raw, emit) {
@@ -723,15 +746,17 @@ class MessageManager {
         // <tool-use-id> and <status>; route them into the same taskInfo
         // edit the old path used.
         const tuMatch = contentStr.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
+        const tidMatch = contentStr.match(/<task-id>([\s\S]*?)<\/task-id>/);
         const stMatch = contentStr.match(/<status>([\s\S]*?)<\/status>/);
-        if (tuMatch) {
-          const pendingTask = this.pendingToolCalls.get(tuMatch[1].trim());
-          const taskMsg = pendingTask ? this.messageIndex.get(pendingTask.msgId) : null;
-          if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
-            const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
-            taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
-            if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
-          }
+        // Lookup via the task index — NOT pendingToolCalls, whose entry the
+        // background task's own tool_result deleted minutes before this
+        // notification arrived (2.368.15: the reason every conversation
+        // accumulated forever-'running' cards despite the 2.233.0 closer).
+        const taskMsg = this._taskMsgFor(tuMatch ? tuMatch[1].trim() : null, tidMatch ? tidMatch[1].trim() : null);
+        if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
+          const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
+          taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
+          if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
         }
       }
       else if (raw.origin?.kind === 'peer') {

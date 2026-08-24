@@ -46,6 +46,8 @@ const SUITES = [
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
   'test-cli-usage-parse', 'test-rate-limit-capture', 'test-agentd-upgrade-loop', 'test-vendor-whitelist', 'test-wrapper-files',
   'test-usage-estimator', // dead-reckoning core; was OUTSIDE the gate (silent-stale class) until the 2.368.13 delta-relative calib change touched it
+  'test-task-wakeup-card', // background-task lifecycle closure incl. the real record order (tool_result BEFORE the completion notification); also joined the gate late (same class)
+  'test-codex-history', // codex rollout coverage: custom_tool_call_output routing, sub-agent visibility, live contextWindow, encrypted reasoning
   'test-local-device', 'test-sysinfo-op', 'test-transcript-parity',
   'test-writer-sweep', 'test-agentd-session', 'test-session-brain-dark',
   'test-chat-e2e',      // ONE real haiku turn through the full chat pipeline (oat token slot; SKIPs without ~/.config/vibespace/ci-oat)
