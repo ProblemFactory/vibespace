@@ -75,6 +75,16 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   const src = read('src/mounts.js');
   ok("probe classifies rclone's OAuth-death phrasings as denied (unauthenticated / invalid_grant / InvalidAuthenticationToken)",
     /401\|403\|Unauthorized\|unauthenticated\|invalid_grant\|InvalidAuthenticationToken/.test(src));
+  // 2.368.7 (same incident, second half): an EIO-wedged daemon SURVIVES
+  // `fusermount -uz`, so the re-auth bounce stacked a fresh daemon on top of
+  // the dead-token one and changed nothing (4 leaked daemons found on the
+  // box). unmount() must not resolve until the daemon is GONE, and mount()
+  // must never spawn onto a path a stale daemon still serves.
+  ok('unmount() verifies the daemon died before resolving (kills survivors)',
+    /ensureDaemonGone[\s\S]{0,400}_daemonAlive\(mp\)[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));
+  ok('…and every fuse unmount path goes through it (3 call sites: fusermount3/fusermount/umount -l)', (src.match(/ensureDaemonGone\(/g) || []).length >= 3);
+  ok('mount() kills a stale daemon before spawning (never stack)',
+    /stale daemon still on[\s\S]{0,200}_killMountDaemon\(mp\)/.test(src));
   const sb = read('src/lib/sidebar-mounts.js');
   ok('the client Re-authorize button matches the new health message', /invalid_grant\|token expired\|couldn.t fetch token\|unauthenticated\|re-authorize/.test(sb));
   ok('…and OneDrive rows are eligible for it', /_isDriveBacked\(m\)\s*{[^}]*'onedrive'/.test(sb));

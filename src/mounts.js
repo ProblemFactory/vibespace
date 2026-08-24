@@ -1469,6 +1469,14 @@ class MountManager {
       this._save();
     }
     if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
+    // Belt to unmount()'s suspenders: never STACK a daemon — if a stale one
+    // still serves this mountpoint (survived a lazy detach), kill it first,
+    // or the new spawn either fails or shadows a daemon that keeps failing.
+    if (this._daemonAlive(mp)) {
+      console.warn(`[mounts] stale daemon still on ${mp} at mount time — killing it`);
+      this._killMountDaemon(mp);
+      await new Promise((r) => setTimeout(r, 300));
+    }
     // detached: mounts survive server restarts (adopted on boot)
     const child = spawn(this.rcloneBin(), args, { env, detached: true, stdio: ['ignore', log, log] });
     child.unref();
@@ -1957,11 +1965,29 @@ class MountManager {
       });
     }
     return new Promise((resolve) => {
+      // A lazy detach can leave the DAEMON alive: an EIO-wedged rclone (dead
+      // OAuth token, VFS waiters stuck) survives `fusermount -uz`, and the
+      // next mount() then stacks a fresh daemon on top while the old one
+      // keeps failing every read (real OneDrive incident — the re-auth bounce
+      // looked like it worked and changed nothing; 4 leaked daemons found).
+      // Unmount is NOT done until the daemon is gone: wait briefly for a
+      // clean exit, then kill by exact argv. This must complete BEFORE the
+      // promise resolves — bounce callers mount() right after, and a kill
+      // fired later would murder the fresh daemon instead.
+      const ensureDaemonGone = async (ok) => {
+        for (let i = 0; i < 8 && this._daemonAlive(mp); i++) await new Promise((r) => setTimeout(r, 500));
+        if (this._daemonAlive(mp)) {
+          console.warn(`[mounts] daemon survived lazy unmount of ${mp} — killing it`);
+          this._killMountDaemon(mp);
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        resolve(finish(ok));
+      };
       execFile('fusermount3', ['-uz', mp], (err) => {
-        if (!err) return resolve(finish(true));
+        if (!err) return ensureDaemonGone(true);
         execFile('fusermount', ['-uz', mp], (err2) => {
-          if (!err2) return resolve(finish(true));
-          execFile('umount', ['-l', mp], () => resolve(finish(!this.isMounted(m))));
+          if (!err2) return ensureDaemonGone(true);
+          execFile('umount', ['-l', mp], () => ensureDaemonGone(!this.isMounted(m)));
         });
       });
     });

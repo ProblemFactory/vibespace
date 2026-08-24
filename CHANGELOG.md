@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.7
+
+- **Unmount now actually ends the mount daemon — re-auth can't silently change nothing anymore** (same OneDrive incident, second half: the owner re-authorized, and reads still failed). An EIO-wedged rclone daemon (dead token, stuck VFS waiters) survives the lazy `fusermount -uz`, so the re-auth bounce "unmounted", spawned a fresh daemon **on top of the surviving dead one**, and the kernel kept routing to the old daemon — the fix looked applied and did nothing; four leaked daemons were found on this box, two of them stacked on a path no record even owns anymore. `unmount()` now polls for daemon death and kills survivors by exact argv **before resolving** (bounce callers mount right after — a deferred kill would murder the fresh daemon instead), and `mount()` refuses to stack: any stale daemon still serving the path is killed before the spawn. `test-mount-oauth-probe` (18) pins both.
+
 ## 2.368.6
 
 - **A dead OAuth sign-in no longer hides behind a healthy-looking mount** (owner: every file in the OneDrive mount opens with an IO error — while the mount row showed nothing wrong). The refresh token had died ("unauthenticated: Unauthenticated" on every download); the fuse dir cache kept listings working, so the health sweep's mountpoint `ls` saw a fine mount, `_revocable` said an own-configured backend can't expire (wrong for OAuth), and even the backend probe's denied-regex had no phrasing for rclone's OAuth-death errors — three misses stacked into total silence. OAuth-backed mounts (Drive/OneDrive/Dropbox/…) now get the fresh-process backend probe on a slow clock (10 min; every sweep while an auth error is showing so recovery clears fast), the probe classifies `unauthenticated`/`invalid_grant`/`InvalidAuthenticationToken` as denied, the health message says what to do ("re-authorize"), and the sidebar's **Re-authorize** button appears for it. New gate suite `test-mount-oauth-probe` (15) pins the whole chain.
