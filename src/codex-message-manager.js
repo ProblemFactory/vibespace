@@ -505,8 +505,18 @@ class CodexMessageManager {
   _processCustomToolCall(item, emit) {
     const toolCallId = item.call_id || item.callId || this._nextId();
     const rawInput = item.input ?? item.arguments ?? '';
+    // apply_patch input has NO file_path field — the touched files live in the
+    // patch envelope ("*** Add/Update/Delete File: <path>"). Parse them out so
+    // fold summaries can name files (owner: "writes似乎不展示文件名") and the
+    // memory-path classifier works for codex writes too.
     const parsedInput = item.name === 'apply_patch'
-      ? { patch: typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '') }
+      ? (() => {
+        const patch = typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? '');
+        const files = [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)].map((m) => m[1].trim()).filter(Boolean);
+        const inp = { patch };
+        if (files.length) { inp.files = files; inp.file_path = files[0]; }
+        return inp;
+      })()
       : safeJsonParse(rawInput, rawInput);
     const toolName = formatToolName(item.name || 'tool');
     const msg = this._create({

@@ -2930,13 +2930,17 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         const mk = memberKind(el);
         return mk && kinds.has(mk) ? 'noise' : null;
       };
-      // Collapsed-summary file name: basename, with agent-memory files
+      // Collapsed-summary file names: basename, with agent-memory files
       // distinguished as memory/<name> (user ask: 区分项目文件和memory).
-      const fileLabelOf = (el) => {
-        const fp = el._rawMsg?.content?.[0]?.input?.file_path || '';
-        if (!fp) return null;
-        const base = fp.split('/').pop();
-        return isMemoryPath(fp) ? 'memory/' + base : base;
+      // A codex apply_patch can touch SEVERAL files (input.files, parsed from
+      // the patch envelope by the normalizer) — list them all.
+      const fileLabelsOf = (el) => {
+        const inp = el._rawMsg?.content?.[0]?.input || {};
+        const list = Array.isArray(inp.files) && inp.files.length ? inp.files : (inp.file_path ? [inp.file_path] : []);
+        return list.map((fp) => {
+          const base = String(fp).split('/').pop();
+          return isMemoryPath(fp) ? 'memory/' + base : base;
+        });
       };
       const kids = [...list.children];
       const built = []; // runs constructed this pass (for pinned auto-refold)
@@ -2981,12 +2985,15 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
               const k = memberKind(el);
               if (k !== 'read' && k !== 'write' && k !== 'memory') continue;
               const tn = el._rawMsg?.content?.[0]?.toolName;
-              const isW = tn === 'Write' || tn === 'Edit' || tn === 'Patch';
+              // semantic hint covers codex (Patch stamped 'write'); the name
+              // check remains for claude/pre-hint messages
+              const isW = el._rawMsg?.collapseKind === 'write' || tn === 'Write' || tn === 'Edit' || tn === 'Patch';
               if (isW !== wantWrite) continue;
-              const fl = fileLabelOf(el);
-              if (!fl || seenF.has(fl)) continue;
-              seenF.add(fl);
-              files.push(isW ? '✎ ' + fl : fl);
+              for (const fl of fileLabelsOf(el)) {
+                if (!fl || seenF.has(fl)) continue;
+                seenF.add(fl);
+                files.push(isW ? '✎ ' + fl : fl);
+              }
             }
           }
           if (files.length) {

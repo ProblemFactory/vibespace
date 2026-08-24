@@ -111,5 +111,20 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('per-backend fallback model list lives on BACKEND_META (codex never lists claude models offline)', /fallbackModels: \['gpt-/.test(require('node:fs').readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')) && /getBackendMeta\(backend\)\?\.fallbackModels/.test(require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8')));
 }
 
+// ── apply_patch file names (owner: "codex里的writes和read似乎不展示文件名") —
+// the patch envelope is the only place the touched paths live.
+{
+  const mm = new CodexMessageManager('t7');
+  const patch = '*** Begin Patch\n*** Update File: src/app/views.js\n@@\n-a\n+b\n*** Add File: docs/report.md\n+hello\n*** End Patch';
+  const msgs = mm.convertHistory([
+    { type: 'response_item', payload: { type: 'custom_tool_call', id: 'c1', call_id: 'k1', name: 'apply_patch', input: patch } },
+  ]);
+  const inp = msgs.find((m) => m.role === 'tool')?.content?.[0]?.input || {};
+  ok('patch envelope files are parsed into input.files (+file_path)', Array.isArray(inp.files) && inp.files.join(',') === 'src/app/views.js,docs/report.md' && inp.file_path === 'src/app/views.js', JSON.stringify(inp.files));
+  const cv = require('node:fs').readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
+  ok('fold summaries list ALL of a patch\'s files (fileLabelsOf over input.files)', /fileLabelsOf = \(el\)[\s\S]{0,300}Array\.isArray\(inp\.files\)/.test(cv) && /for \(const fl of fileLabelsOf\(el\)\)/.test(cv));
+  ok('…and the ✎ write mark keys on the semantic hint too', /el\._rawMsg\?\.collapseKind === 'write' \|\| tn === 'Write'/.test(cv));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

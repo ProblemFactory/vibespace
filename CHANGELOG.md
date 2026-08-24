@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.22
+
+- **Codex fold summaries name their files** (owner: "codex里的writes和read似乎不展示文件名" — a "3 Bash · 7 writes" header with no paths). apply_patch input carries no `file_path`; the touched paths only exist in the patch envelope (`*** Add/Update/Delete File: <path>`). The normalizer now parses them into `input.files` (+`file_path`), fold summaries list every file a patch touches (multi-file patches included), the ✎ write mark keys on the semantic kind, and the memory-path classifier now works for codex writes too. Codex reads have no structured path by construction (they go through `exec`), so read names remain a claude-only nicety. `test-codex-history` 21→24.
+
 ## 2.368.21
 
 - **Codex stored reset credits join the limit escape ladder** (owner ask: let the user choose reset vs switching). ChatGPT plans can hold rate-limit reset credits (`account/rateLimitResetCredit/consume`); on a codex limit the order is now ① consume a stored credit when opted in (`codex.limitResetCredit` = Auto — default OFF: it spends a stored credit unattended, same consent class as auto-resume) → ② pool switch → ③ auto-resume wait. A successful reset continues on the same account; `nothingToReset`/`alreadyRedeemed`/cooldown falls through the ladder. The wrapper gains two verbs on the live app-server (`codex-read-limits` = on-demand `account/rateLimits/read` incl. the credits count — codex finally has a ⟳-class proactive read; `codex-reset-credit` = consume), both exposed as ws cases for manual use.
