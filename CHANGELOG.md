@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.368.17
+
+- Settings fixes (owner-caught, both 2.368.0 regressions): the **Default output style dropdown rendered blank** — enum options are  objects by the settings-ui contract and the plain-string list left every row empty; and  /  move from the generic Session group into the **Claude** category where backend-specific settings belong.
+- Unified backend-parity plan updated (docs/design-backend-parity.md §5): the collapse-kinds codex gap (real card names measured:  ×209, collab family — none participate today) gets a **global semantic-kind design** (normalizer stamps collapseKind; per-provider checkbox sets rejected as config sprawl), plus the found-along-the-way gaps: codex tool name is  (not , so even the Bash mapping misses), the status bar model fallback list is claude-hardcoded, codex fork RPC is unwired.
+
 ## 2.368.16
 
 - **Codex garbled-fragment messages fixed — our bug, not codex's** (owner: "很多不是人话的内容" — "断 AA 边"、"缘小"、"通过：8 个路由在"…). Codex collab/sub-agent turns stream **several message items concurrently, interleaved delta-by-delta** (real buffer: two item ids alternating per character); our delta handler finalized *every* open stream whenever a delta with a new key arrived, so each key switch chopped both messages into per-run fragments. Replaying the owner's real buffer: 13 fragmented assistant messages → 6 complete ones, 0 fragments, and the quoted shards reassemble verbatim into "最终审计通过：8 个路由在 1440、1024…". Streams now run concurrently; each closes in place when its own full `response_item:message` arrives (turn end still finalizes everything).

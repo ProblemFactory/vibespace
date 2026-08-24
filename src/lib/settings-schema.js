@@ -395,16 +395,24 @@ const SETTINGS_SCHEMA = {
     category: t('Session'), liveApply: true,
   },
   'claude.outputStyle': {
-    type: 'enum', default: '', options: ['', 'Concise', 'Explanatory', 'Learning', 'Proactive'],
+    // enum options are {value,label} OBJECTS (settings-ui contract) — the
+    // 2.368.0 plain-string list rendered a fully BLANK dropdown (owner-caught)
+    type: 'enum', default: '', options: [
+      { value: '', label: t('CLI default') },
+      { value: 'Concise', label: 'Concise' },
+      { value: 'Explanatory', label: 'Explanatory' },
+      { value: 'Learning', label: 'Learning' },
+      { value: 'Proactive', label: 'Proactive' },
+    ],
     label: t('Default output style (Claude)'),
     description: t('The CLI output style new chat sessions start with. "Concise" makes Claude lead with results and skip preamble. Blank = the CLI\'s own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.'),
-    category: t('Session'), liveApply: true,
+    category: t('Claude'), liveApply: true,
   },
   'claude.autoResumeOnLimit': {
     type: 'boolean', default: false,
     label: t('Continue automatically when a usage limit resets'),
     description: t('DEFAULT for new chat sessions: when the account is out of quota and there is no other account to switch to, wait for the reset and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
-    category: t('Session'), liveApply: true,
+    category: t('Claude'), liveApply: true,
   },
   'agentd.publicUrl': {
     type: 'string', default: '',

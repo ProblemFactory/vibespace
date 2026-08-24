@@ -79,12 +79,33 @@
 
 **跟踪: B-backend-registry（P4，第三 agent 前置）**
 
-## 分期
+## 5. UI/渲染层 gap（2026-08-24 owner 三连报 + 扫描）
+
+### 已修（2.368.17）
+- 设置 enum options 必须是 `{value,label}` 对象——`claude.outputStyle` 的裸字符串列表渲染成全空白下拉（settings-ui 合同）。
+- `claude.outputStyle`/`claude.autoResumeOnLimit` 归位 `Claude` 分组（原误放 `Session`；schema 本有 Claude(6)/Codex(4) 分组）。
+
+### 折叠卡片的 codex gap（owner 报）与设计决定
+现状：`memberKind` (chat-view.js:2883) 按 **claude 精确工具名**分类（Bash/Read/Write/Edit/Patch/Skill/MCP）。codex 真实卡名（实测 owner 会话）：`exec`(209!)、`Patch`(49, 已吃 write 类+diff 渲染)、`Agent`/`Agent Wait`/`send_message`/`list_agents`/`interrupt_agent`/`followup_task`——除 Patch 全部落空 → 不折叠。⚠ 还发现 codex 0.149.x 工具名是 `exec` 而非 `exec_command`，`formatToolName` 的映射也未命中（exec 卡同时错过 Bash 级渲染）。
+
+**设计决定（owner 问：全局还是分 provider？）——全局语义配置，不分 provider。** 理由：用户关切是语义的（"想看 diff、不想看命令噪音"），不是分厂商的；per-provider 复制 checkbox 组=配置蔓延+漂移（whitelist-drift 类）；"claude 折 Bash 但 codex 不折 exec"没有真实用户故事。实现：**normalizer 给每张工具卡盖语义 `collapseKind` 章**（thinking/command/read/write/memory/mcp/agent-collab/skill），折叠分类器只认章（claude 名字映射降级保留）；codex 映射 exec/Terminal→command、Patch→write、collab 家族(Agent/Wait/send_message/list_agents/interrupt/followup)→**新语义类 agent-collab**（claude 的 Task/Agent 卡同归此类=顺手统一）；设置 checkbox 文案改语义措辞（"命令执行"替"Bash 命令"）。这也是 P4 注册表化的首付款——语义归 normalizer 所有。
+
+### 其余扫描所得
+- `exec` 卡缺命令级渲染（同上语义章顺带修）。
+- 状态栏模型下拉的 fallback 列表硬编码 claude 四族（chat-status-bar:1055）——codex 会话降级时会列 claude 模型。→ BACKEND_META 挂 per-backend modelList（P4 能力描述符的一项，可提前）。
+- codex fork 未接（session-card:798 claude-only）——codex 有 thread fork RPC，可接（低优先）。
+- Patch diff 渲染 ✓、todo(plan_updated) ✓、goal ✓、权限卡 ✓——这些已对齐。
+
+**跟踪: B-collapse-semantic（Track B，与 P0 同批可做）**
+
+## 分期（总方案，2026-08-24 修订）
 
 | 期 | 内容 | 依赖 |
 |---|---|---|
-| P0 | normalizer 修复（现行显示 bug） | 无 |
-| P1 | codex 配额落盘 + 估计 + 展示补齐 | P0 |
-| P2 | codex 池冷切 + 自动换号 + auto-resume 接入 | P1 |
-| P3 | 热切换验证实验（通过则开热切） | P2 |
-| P4 | 后端注册表化 + 能力描述符 + QuotaSignalSource | 独立，第三 agent 前置 |
+| **A（碎 bug，已修 2.368.17）** | enum dropdown 空白 + 设置分组归位 | — |
+| **P0** | codex 配额 normalizer 修复（周用量标成 5h + 耗尽标记全丢） | 无 |
+| **B** | 折叠语义章（全局语义 kinds + codex/claude 映射 + agent-collab 新类）+ exec 命令渲染 + per-backend modelList | 无（可与 P0 并行） |
+| **P1** | codex 配额落盘 + 估计 + 展示补齐 | P0 |
+| **P2** | codex 池冷切 + 自动换号 + auto-resume 接入 | P1 |
+| **P3** | 热切换验证实验（通过则开热切） | P2 |
+| **P4** | 后端注册表化 + 能力描述符 + QuotaSignalSource（B 是首付款） | 第三 agent 前置 |
