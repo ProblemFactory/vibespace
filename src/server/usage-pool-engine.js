@@ -66,6 +66,7 @@ const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 // email > account id, so a sub's history SURVIVES remove + re-add (user
 // requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
 const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('../usage-anchors.js');
+const { capsOf } = require('../backend-caps.js'); // per-backend switching capabilities (P4 slice) — replaces backend-id special cases
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // Which caches map to which identity (org-merge aware) — shared by the sweep
@@ -496,13 +497,49 @@ function recordCodexQuotaSignal(session, payload) {
       } catch { }
       return { key, snap };
     };
+    // Escape ladder on codex exhaustion (owner-designed order): ① stored
+    // RESET CREDIT when opted in (codex.limitResetCredit='auto' — spending a
+    // stored reset unattended is the same consent class as auto-resume, so
+    // default off) → ② pool switch → ③ auto-resume wait. One credit attempt
+    // per limit event, 10min re-try floor.
+    const tryResetCredit = (resetsAtSec) => {
+      try {
+        if (serverSetting('codex.limitResetCredit') !== 'auto') return false;
+        if (!session.pty || session.mode !== 'chat') return false;
+        const now = Date.now();
+        if (session._codexResetTriedAt && now - session._codexResetTriedAt < 10 * 60e3) return false;
+        session._codexResetTriedAt = now;
+        session._codexLastResetsAt = Number(resetsAtSec) || 0;
+        session.pty.write(JSON.stringify({ type: 'codex-reset-credit' }) + '\n');
+        serverNotice(`codex-reset-${session._webuiId}-${now}`, `Codex hit a usage limit — trying a stored rate-limit reset credit before switching accounts.`);
+        global.__vsEvent?.('codex-reset-credit-try', session._accountId || 'global');
+        return true;
+      } catch { return false; }
+    };
+    if (payload.type === 'reset_credit_result') {
+      const out = payload.outcome || payload.result?.outcome || null;
+      if (out === 'reset') {
+        serverNotice(`codex-reset-ok-${session._webuiId}-${Date.now()}`, `Codex reset credit consumed — the limit was reset, continuing on the same account.`);
+        try { getAutoResume()?.noteRecovered?.(session._webuiId, 'codex reset credit consumed'); } catch { }
+        kickPoolEval();
+      } else {
+        // credit didn't land (nothingToReset / alreadyRedeemed / cooldown /
+        // error) — fall through to the normal ladder: switch, else wait.
+        global.__vsEvent?.('codex-reset-credit-failed', String(out || payload.error || 'unknown').slice(0, 60));
+        maybePoolAutoSwitch(session);
+        const resets = Number(session._codexLastResetsAt) || 0;
+        try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, resets * 1000, 'codex limit'); } catch { }
+      }
+      return;
+    }
     if (payload.type === 'rate_limits_updated' && payload.rateLimits) {
       const w = writeSnap(normalizeCodexRateLimit(payload.rateLimits, Date.now()));
       if (!w) return;
       global.__vsEvent?.('codex-rate-limits', `${w.key}${w.snap.rateLimitReachedType ? ':reached-' + w.snap.rateLimitReachedType : ''}`);
       if (w.snap.rateLimitReachedType) {
-        maybePoolAutoSwitch(session); // another ChatGPT account = seconds, not hours
         const tripped = w.snap.rateLimitReachedType === 'primary' ? (w.snap.fiveHour || w.snap.sevenDay) : (w.snap.sevenDay || w.snap.fiveHour);
+        if (tryResetCredit(tripped?.resetsAt)) return; // outcome event continues the ladder
+        maybePoolAutoSwitch(session); // another ChatGPT account = seconds, not hours
         try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (Number(tripped?.resetsAt) || 0) * 1000, 'codex limit'); } catch { }
       } else {
         try { getAutoResume()?.noteRecovered?.(session._webuiId, 'fresh non-limited codex reading'); } catch { }
@@ -524,6 +561,7 @@ function recordCodexQuotaSignal(session, payload) {
         };
         writeSnap(snap);
         global.__vsEvent?.('codex-usage-limit', info);
+        if (tryResetCredit(resets)) return; // ① reset credit first when opted in
         maybePoolAutoSwitch(session);
         try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (resets || nowSec + 24 * 3600) * 1000, 'codex ' + info); } catch { }
       } else if (info === 'unauthorized') {
@@ -790,13 +828,15 @@ function maybePoolAutoSwitchForPool(poolId) {
     if ((now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
     const currentId = accounts.poolCurrent(poolId);
     if (!currentId) return;
-    // codex pools (P2): COLD-ONLY — hot rests on claude's verified per-request
-    // creds re-read; codex's long-lived app-server has no such proof (a
-    // symlink-swap verification test is the P3 gate). Sealed orders + plan-C
-    // per-session links are claude material paths; the pool-level decide +
-    // cold-restart machinery below is backend-agnostic.
-    const isCodexPool = (a.backend || 'claude') === 'codex';
-    const hot = !!a.hot && !isCodexPool;
+    // Capability-gated (P4 slice, src/backend-caps.js): hot only where a
+    // live re-read is VERIFIED (codex: experimentally refuted, 2026-08-24 —
+    // CODEX_HOME canonicalized at startup + tokens held in process memory);
+    // sealed orders + plan-C per-session links only where those material
+    // paths exist. The pool-level decide + cold-restart machinery below is
+    // backend-agnostic.
+    const poolCaps = capsOf(a.backend);
+    const isCodexPool = (a.backend || 'claude') === 'codex'; // (naming kept for the gates below)
+    const hot = !!a.hot && poolCaps.hotSwitch === 'verified';
     // ESTIMATED bucket view (B-fcff v2): the raw cache goes stale the moment
     // its session pauses — overlay dead-reckoned utilizations (anchor + rate ×
     // ledger cost since) so the decision sees NOW, not the last reading. The
@@ -828,14 +868,14 @@ function maybePoolAutoSwitchForPool(poolId) {
     // OBSERVE the rejection: hosts.device(null) throws while the local daemon
     // is down/upgrading, and an unobserved rejection is a process-level
     // unhandledRejection on every eval tick (the deviceBounded ② rule)
-    if (!isCodexPool) pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
+    if (poolCaps.sealedOrders) pushSealedOrders(poolId).catch((e) => { if (!_poolOrdersWarned) { _poolOrdersWarned = true; console.warn('[pool] sealed-orders push unavailable:', e.message); } });
     // ── Per-SESSION pass (plan C): sessions with their OWN link decide on a
     // FAMILY-PROJECTED view and re-point only their link — an opus session's
     // spent cap never evicts a fable session, and vice versa. Sessions whose
     // family is unknown project nothing (full view = legacy semantics).
     const members = healthyPoolMembers(poolId); // auth-failed members are not candidates (2.335.0)
     for (const [sid, s2] of activeSessions) {
-      if (isCodexPool) break; // plan-C per-session links are claude material paths
+      if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if ((s2.backend || 'claude') === 'codex') continue;
       if (s2._accountId !== poolId || s2.host) continue;
       let curFor = null;

@@ -207,7 +207,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // Codex quota signals → pool/auto-resume engine (P2): readings +
             // typed exhaustion, relayed by the wrapper (older wrappers simply
             // never emit these — additive, no capability gate needed)
-            if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed')) {
+            if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed' || msg.payload?.type === 'reset_credit_result')) {
               try { recordCodexQuotaSignal?.(session, msg.payload); } catch {}
             }
             // Codex plan tool → the session's live TODO summary (board pill)

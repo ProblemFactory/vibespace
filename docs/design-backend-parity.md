@@ -107,5 +107,5 @@
 | **B ✅2.368.19** | 折叠语义章 + exec 渲染 + per-backend modelList | — |
 | **P1 ✅2.368.18** | codex 配额落盘 + 估计 + 展示补齐 | — |
 | **P2 ✅2.368.20** | codex 池冷切 + 自动换号 + auto-resume 接入(wrapper转发typed耗尽) | — |
-| **P3** | 热切换验证实验（通过则开热切） | P2 |
-| **P4** | 后端注册表化 + 能力描述符 + QuotaSignalSource（B 是首付款） | 第三 agent 前置 |
+| **P3 ✅2.368.21 判定=否** | 实验双重否定: CODEX_HOME启动时canonicalize(链接重指无效)+auth内容换垃圾后turn照常完成(token驻内存)——热切是codex结构上限, 冷切为终态; 顺带交付: reset credit逃生梯(消费→切换→等待)+codex主动读(rateLimits/read) | — |
+| **P4 (切片1 ✅2.368.21)** | src/backend-caps.js能力注册表(hotSwitch verdict/planC/sealedOrders/resetCredit/quotaProbe)已替换引擎的backend-id特判; 剩余=normalizer/wrapper/store注册表化+客户端能力描述符+QuotaSignalSource | 第三 agent 前置 |

@@ -2798,4 +2798,8 @@ export default {
   "Sub-agent orchestration (spawn/wait/messages)": "子代理编排（spawn/wait/消息）",
   "{n} agent ops": "{n} 条代理操作",
   "Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent's own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.": "哪些卡片类型按【语义】折叠进摘要行——同一设置覆盖所有后端（claude 的 Bash 和 codex 的 exec 都算命令执行）。启用的类型作为一个交错组一起折叠（思考→读→改→跑是真实工作模式；按类型分组很少能凑够长度）。记忆 = 对 agent 自身记忆目录的操作——属内务，默认折叠，摘要中显示为 memory/<名>；项目文件写入默认不折叠——diff 通常值得看。纯思考段要两条以上；任何工具卡立即折叠。等待你批准的卡片永不折叠。",
+  "Off — never spend a reset credit automatically": "关——绝不自动消费 reset credit",
+  "Auto — consume one before switching accounts": "自动——切换账号前先消费一个",
+  "Use stored reset credits on a usage limit (Codex)": "撞用量上限时使用存储的 reset credit（Codex）",
+  "ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, \"Auto\" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there.": "ChatGPT 计划可持有限额重置额度（reset credit）。Codex 会话撞上限时，\"自动\"先消费一个存储的额度（上限重置、同账号继续）；失败才回落到切换账号（池），再不行等待重置。默认关闭——它会在你不在场时花掉一个存储额度。",
 };

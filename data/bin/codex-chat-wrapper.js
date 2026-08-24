@@ -903,6 +903,38 @@ async function handleInput(msg) {
     await setPermissionMode(msg.mode);
     return;
   }
+  if (msg.type === 'codex-read-limits') {
+    // Proactive quota read (P3 batch): one JSON-RPC on the EXISTING app-server
+    // child — the official client makes the fetch (§ban-safety: same class as
+    // claude's ⟳ get_usage, human/engine-triggered, never a timer here).
+    // Response carries rate limits AND rateLimitResetCredits.availableCount.
+    try {
+      const r = await request('account/rateLimits/read', {}, 20000);
+      const rl = r?.rateLimits || r?.rate_limits || null;
+      const credits = r?.rateLimitResetCredits || r?.rate_limit_reset_credits || null;
+      if (rl) { meta.rateLimits = rl; meta.rateLimitsFetchedAt = Date.now(); }
+      if (credits) meta.rateLimitResetCredits = credits;
+      scheduleMeta();
+      emitTaskEvent('rate_limits_updated', { rateLimits: rl, resetCredits: credits, onDemand: true });
+    } catch (e) { emitTaskEvent('rate_limits_updated', { error: String(e.message || e), onDemand: true }); }
+    return;
+  }
+  if (msg.type === 'codex-reset-credit') {
+    // Consume a stored rate-limit reset credit (owner ask: let the user choose
+    // reset vs switching accounts). Outcomes seen in the binary enum:
+    // reset | nothingToReset | alreadyRedeemed (+ cooldown_active state).
+    try {
+      const r = await request('account/rateLimitResetCredit/consume', {}, 30000);
+      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null });
+      // refresh limits so every consumer sees the post-reset state
+      try {
+        const r2 = await request('account/rateLimits/read', {}, 20000);
+        const rl2 = r2?.rateLimits || r2?.rate_limits || null;
+        if (rl2) { meta.rateLimits = rl2; meta.rateLimitsFetchedAt = Date.now(); scheduleMeta(); emitTaskEvent('rate_limits_updated', { rateLimits: rl2, resetCredits: r2?.rateLimitResetCredits || null }); }
+      } catch { }
+    } catch (e) { emitTaskEvent('reset_credit_result', { error: String(e.message || e) }); }
+    return;
+  }
   if (msg.type === 'review-start') {
     if (!meta.threadId) throw new Error('No threadId available for review/start');
     const target = msg.target;

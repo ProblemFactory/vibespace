@@ -418,6 +418,15 @@ const SETTINGS_SCHEMA = {
     description: t('DEFAULT for new chat sessions: when the account is out of quota and there is no other account to switch to, wait for the reset and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
     category: t('Claude'), liveApply: true,
   },
+  'codex.limitResetCredit': {
+    type: 'enum', default: 'off', options: [
+      { value: 'off', label: t('Off — never spend a reset credit automatically') },
+      { value: 'auto', label: t('Auto — consume one before switching accounts') },
+    ],
+    label: t('Use stored reset credits on a usage limit (Codex)'),
+    description: t('ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, "Auto" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there.'),
+    category: t('Codex'), liveApply: true,
+  },
   'agentd.publicUrl': {
     type: 'string', default: '',
     label: t('This instance\'s public address (for reverse mounts)'),

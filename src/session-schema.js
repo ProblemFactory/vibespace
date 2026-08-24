@@ -36,6 +36,8 @@ const SESSION_FIELDS = {
   _autoResume:         { owner: 'ws',     persisted: 'session-config', note: 'per-session auto-continue-after-limit preference (undefined = follow claude.autoResumeOnLimit; 2.368.0)' },
   _outputStyle:        { owner: 'ws',     persisted: 'session-config', note: 'CLI output style commanded at spawn (Concise/Explanatory/…; stream-json has no /output-style, so it is spawn-only; 2.368.0)' },
   _streamingKind:      { owner: 'ws',     persisted: null,      note: 'streaming-label kind (compacting) — drives the client Stop two-step guard; set on a /compact send, reset with the label at turn end (2.365.0)' },
+  _codexResetTriedAt:  { owner: 'engine', persisted: null,      note: 'codex reset-credit attempt throttle (one try per limit event, 10min floor; 2.368.21)' },
+  _codexLastResetsAt:  { owner: 'engine', persisted: null,      note: 'resets_at (unix sec) of the codex limit that triggered the reset-credit try — auto-resume arms from it if the credit fails (2.368.21)' },
   _interruptTimer:     { owner: 'ws',     persisted: null,      note: 'delayed-SIGINT fallback handle (2s, cancel on protocol success)' },
   _wrapperFrameFile:   { owner: 'ws',     persisted: null,      note: 'wrapper understands _frame_file pointers (meta.caps at wrapper boot; 2.361.1 skew gate — old wrappers silently DROP pointer lines)' },
   _msgReachability:    { owner: 'agent',  persisted: 'meta',    note: 'per-session external reach override for agent messaging (2.362.0 Channels v1: inherit|visible|messageable, widening only; set via Session Properties)' },
