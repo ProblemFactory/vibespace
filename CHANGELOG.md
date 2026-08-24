@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.368.16
+
+- **Codex garbled-fragment messages fixed — our bug, not codex's** (owner: "很多不是人话的内容" — "断 AA 边"、"缘小"、"通过：8 个路由在"…). Codex collab/sub-agent turns stream **several message items concurrently, interleaved delta-by-delta** (real buffer: two item ids alternating per character); our delta handler finalized *every* open stream whenever a delta with a new key arrived, so each key switch chopped both messages into per-run fragments. Replaying the owner's real buffer: 13 fragmented assistant messages → 6 complete ones, 0 fragments, and the quoted shards reassemble verbatim into "最终审计通过：8 个路由在 1440、1024…". Streams now run concurrently; each closes in place when its own full `response_item:message` arrives (turn end still finalizes everything).
+- **A codex session's account row no longer masquerades as the claude CLI login.** The billing chip and the switcher's global row used the backend-agnostic "CLI login" label AND attached the claude machine login's quota chips — a codex session's account info read as "点开是 claude 的 CLI". Both surfaces now say **ChatGPT login** for codex (matching the New-Session dialog) and the claude quota chips stay off the codex row. `test-codex-history` 7→13.
+
 ## 2.368.15
 
 - **Background tasks no longer show "running" forever after they finished** (owner: "基本每个对话都有已经结束的后台任务依然显示为正在进行"). Root cause: every task-lifecycle closer resolved the task's card via `pendingToolCalls` — the permission/result matcher whose entry the tool_result DELETES. A background command's result arrives in seconds ("Command running in background with ID…"), its completion notification minutes later, so the lookup always came up empty and the 2.233.0 closer never fired (its test passed only because it skipped the tool_result). Task lifecycle now has its own index (`toolUseId→msg` + `task_id→msg`, alive for the whole conversation); already-stuck cards heal on the next attach/reload since the buffer replay runs the fixed code. `test-task-wakeup-card` gains the real record order + a task-id-only case, and joins the CI gate (it wasn't in it — silent-stale class, third find this week).

@@ -57,5 +57,34 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('encrypted reasoning (no summary) yields no message — upstream withholds the text; a blank thinking card would read as a bug', msgs.length === 0, JSON.stringify(msgs));
 }
 
+// ── interleaved concurrent message streams (owner's "不是人话" fragments) ──
+// Real buffer shape: collab/sub-agent turns stream TWO message items delta-by-
+// delta ("…464ab10d" and "…73147228" alternating per character). Finalizing
+// every open stream on each key switch chopped both messages into per-run
+// fragments ("断 AA 边", "缘小", " 1440、1024" — verbatim from the report).
+{
+  const mm = new CodexMessageManager('t5');
+  const D = (id, delta) => ({ type: 'event_msg', payload: { type: 'agent_message_delta', item_id: id, delta } });
+  const seq = [D('A', '推'), D('A', '断'), D('B', '最终'), D('A', ' AA'), D('A', ' 边'), D('B', '审'), D('B', '计'), D('A', '界')];
+  for (const r of seq) mm.processLive(r, false);
+  const asst = mm.messages.filter((m) => m.role === 'assistant');
+  ok('interleaved deltas accumulate into exactly TWO streams, not per-run fragments', asst.length === 2, JSON.stringify(asst.map((m) => m.content[0].text)));
+  ok('…each stream reads as continuous text', asst.some((m) => m.content[0].text === '推断 AA 边界') && asst.some((m) => m.content[0].text === '最终审计'), JSON.stringify(asst.map((m) => m.content[0].text)));
+  // the full response_item still finalizes ITS stream by key
+  mm.processLive({ type: 'response_item', payload: { type: 'message', role: 'assistant', id: 'A', content: [{ type: 'output_text', text: '推断 AA 边界(定稿)' }] } }, false);
+  const a = mm.messages.filter((m) => m.role === 'assistant').find((m) => /定稿/.test(m.content[0].text));
+  ok('the finalizing response_item replaces its OWN stream in place (no duplicate)', a && a.status === 'complete' && mm.messages.filter((m) => m.role === 'assistant').length === 2);
+}
+
+// ── the account surfaces name the ChatGPT login, never the claude CLI's ──
+{
+  const fs2 = require('node:fs');
+  const sl = fs2.readFileSync(REPO + '/src/lib/session-lifecycle.js', 'utf8');
+  ok("billing switcher's global row is backend-aware (ChatGPT login for codex)", /isCodex \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sl));
+  ok('…and the CLAUDE machine quota chips never dress the codex row', /isCodex \? '' : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl));
+  const sb = fs2.readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8');
+  ok('status-bar billing chip is backend-aware too', /this\._backend === 'codex' \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sb));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -687,7 +687,14 @@ class CodexMessageManager {
         existing.status = 'streaming';
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { content: existing.content } });
       } else {
-        this._finalizeStreaming(emit);
+        // Do NOT finalize the other open streams here (2.368.16, owner's
+        // "不是人话" report): codex collab/sub-agent turns interleave the
+        // deltas of SEVERAL message items delta-by-delta (real buffer:
+        // …464ab10d and …73147228 alternating per character), and closing
+        // every open stream on each key switch chopped both messages into
+        // per-run fragments ("断 AA 边", "缘小" …). Streams close per-key when
+        // their full response_item:message arrives, and task_complete/
+        // turn_aborted still finalize everything.
         const msg = this._create({
           role: 'assistant',
           status: 'streaming',

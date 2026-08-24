@@ -1056,7 +1056,12 @@ export function installSessionLifecycle(App, ctx = {}) {
       if (rHostId && v?.usable && v.how === 'host-held') return this._hostAccountUsage?.[`${rHostId}:${a.id}`];
       return this._accountUsage?.[a.id];
     };
-    const cliLabel = rHostId ? t('CLI login') + ' @ ' + rHostName : t('CLI login');
+    // Codex sessions bill the machine's ChatGPT login, not the claude CLI's —
+    // the old backend-agnostic label ("CLI login") plus the CLAUDE global
+    // quota chips below made a codex session's account row read as the claude
+    // CLI login (owner report, 2.368.16).
+    const globalLoginName = isCodex ? t('ChatGPT login') : t('CLI login');
+    const cliLabel = rHostId ? globalLoginName + ' @ ' + rHostName : globalLoginName;
     // apiKeyHelper honesty (2.191.0, CW-H200): when the CLI itself reported
     // apiKeySource=apiKeyHelper, "CLI login" IS the helper's API key — the
     // machine's OAuth login is overridden by the CLI's own precedence, and no
@@ -1067,7 +1072,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // labelHtml contract: every text part escHtml'd inside rowHtml; only the
       // usage spans carry markup (see utils.showContextMenu).
       labelHtml: rowHtml((currentId === null ? '✓ ' : '') + cliLabel, helperActive ? ' · apiKeyHelper (API)' : '',
-        usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
+        // the machine usage caches are the CLAUDE login's quota — attaching
+        // them to a codex row dressed the ChatGPT login in claude percentages
+        isCodex ? '' : usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
