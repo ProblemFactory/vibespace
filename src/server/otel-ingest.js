@@ -21,6 +21,10 @@
 //      badges, anchors) converges within one entry;
 //   ③ raw append-only stash (data/usage-history/otel-truth.ndjson) — models
 //      re-derivable offline forever, same principle as the anchors store.
+//   ④ observedOrgFor(sid) — rate_limit_event capture verifies a reading's
+//      org BEFORE writing it into an account's usage cache (B-b3cd: the
+//      hot-switch stale-token session flapped a sibling account's 7d
+//      odometer 48↔95 with the OLD org's readings).
 // Auth: loopback remoteAddress + persisted token header (x-vibespace-otel,
 // threaded to sessions via OTEL_EXPORTER_OTLP_HEADERS on the PROCESS-ENV
 // channel — never argv). The auth.js cookie middleware exempts /otel/* and
@@ -51,6 +55,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   const truth = new Map();      // rid → accountId|null (null = machine global login)
   const order = [];             // rid insertion order (cap pruning)
   const lastTruthAcct = new Map(); // sid → last written (truth→walk) pair (dedup)
+  const lastSidOrg = new Map();    // sid → {orgUuid, acct, known, ts} — the org this session's requests are OBSERVED to bill (B-b3cd: rate_limit_event org verification)
   let unknownOrgs = new Map();  // orgUuid → count (surfaced, never silently dropped)
   // Arrival counters (2.367.1): "did the CLI export at all" is a DIFFERENT
   // question from "did we keep anything", and the CI gate needs to tell them
@@ -126,6 +131,14 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
       if (!rec.orgUuid) { arrivals.noOrg++; continue; }
       const dup = truth.has(rec.rid);
       const { known, acct } = resolveOrg(rec.orgUuid, rec.email);
+      // Per-session latest observed org — the query rate_limit_event capture
+      // uses to verify a reading's org BEFORE writing it into an account's
+      // usage cache (a hot-switched pool session keeps its old token ≥25min
+      // and its quota events describe the OLD org's buckets).
+      if (rec.sid) {
+        lastSidOrg.set(rec.sid, { orgUuid: rec.orgUuid, acct: known ? acct : null, known, ts: rec.ts || Date.now() });
+        if (lastSidOrg.size > 4096) { const k = lastSidOrg.keys().next().value; lastSidOrg.delete(k); }
+      }
       if (!known) {
         const n = (unknownOrgs.get(rec.orgUuid) || 0) + 1;
         unknownOrgs.set(rec.orgUuid, n);
@@ -227,6 +240,9 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     // rid → accountId|null; undefined = no truth (bake falls back to the
     // attribution walk). Consumed by UsageHistory.scan at bake time.
     truthLookup(rid) { return rid && truth.has(rid) ? truth.get(rid) : undefined; },
+    /** Latest OBSERVED billing org for a claude session (or null): the org-
+     *  verification source for rate_limit_event capture — see ④ in the header. */
+    observedOrgFor(sid) { return (sid && lastSidOrg.get(sid)) || null; },
     stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()], ...arrivals }; },
     /** All /otel routes + a read-only stats view. The stats endpoint exists so
      *  a test (or a human) can tell "the CLI exported nothing here" from "we

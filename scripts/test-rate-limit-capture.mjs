@@ -120,5 +120,26 @@ fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(dir2, { recursive: true, force: true });
 }
 
+// ── ⑥ org verification wiring (B-b3cd, the odometer-flap fix) ──
+// A hot-switched pool session keeps its old token ≥25min: its quota events
+// describe the OLD org and, written under the linked account, flapped a
+// half-empty account's 7d odometer 48↔95 (22 of 65 rate-limit-event anchors
+// in one week jumped >10pt vs a <1h-old panel reading). Magnitude can't gate
+// this — parallel workflows really can burn >10pt/h (owner-confirmed) — so
+// the gate is IDENTITY: the OTel-observed org must match the link, else the
+// reading is re-attributed to the org actually billed.
+{
+  const fs2 = await import('node:fs');
+  const eng = fs2.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
+  ok(/function orgVerifiedKey\(session, key, what\)[\s\S]{0,600}observedOrgFor\?\.\(session\.claudeSessionId\)/.test(eng), '⑥ orgVerifiedKey consults the OTel-observed org');
+  ok(/obs && obs\.acct && Date\.now\(\) - \(obs\.ts \|\| 0\) < 30 \* 60e3/.test(eng), '⑥ …only a FRESH observation with a RESOLVED account re-attributes (unmapped org / no OTel ⇒ link attribution, old behavior)');
+  ok(/orgVerifiedKey\(session, usageCacheKeyFor\(session\), 'rate-limit-event:/.test(eng), '⑥ rate_limit_event capture goes through it');
+  ok(/orgVerifiedKey\(session, usageCacheKeyFor\(session\), 'limit-banner'\)/.test(eng), '⑥ limit-banner marks go through it too (same stale-token physics)');
+  ok(/\(prev\.source \|\| 'unknown'\) === \(g\.cache\.source \|\| 'unknown'\)/.test(eng), '⑥ calib pairs are same-source (cross-source offset is attribution, not prediction error — mirrors extractPairs 2.340.0)');
+  const sv = fs2.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  ok(/getOtelIngest: \(\) => \{ try \{ return otelIngest; \}/.test(sv), '⑥ server.js hands the engine a lazy otelIngest (TDZ: created later in the file)');
+  ok(/observedOrgFor\(sid\)/.test(fs2.readFileSync(new URL('../src/server/otel-ingest.js', import.meta.url), 'utf8')), '⑥ the ingest exposes the per-session observed org');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

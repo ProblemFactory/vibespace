@@ -13,7 +13,7 @@ const path = require('path');
 
 const { mk } = require('./lazy.js');
 
-function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, getAutoResume = () => null,
+function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, getAutoResume = () => null, getOtelIngest = () => null,
   broadcastToSession, serverNotice, serverSetting, getAccounts, getHosts,
   getUsageHistory, recordUsageAttribution, adapterRegistry}) {
   // late-bound singletons: created after this module in boot order, used only
@@ -214,7 +214,12 @@ function sweepUsageAnchors() {
       // calibration: what the CURRENT rates would have predicted for this new
       // reading — recorded into the anchor for offline analysis + Diagnostics
       let calib = null;
-      if (prev && costSince) {
+      // Same-source only (B-b3cd metric hygiene): a cross-source pair carries
+      // the unknown inter-source offset, not prediction error — the exact rule
+      // extractPairs already enforces for LEARNING (2.340.0); without it here
+      // the calib stream's worst rows were all source flips, drowning the real
+      // error signal (48↔95 "errors" that were attribution, not estimation).
+      if (prev && costSince && (prev.source || 'unknown') === (g.cache.source || 'unknown')) {
         try {
           const newBuckets = {
             fiveHour: g.cache.fiveHour ? { u: g.cache.fiveHour.utilization, resetsAt: g.cache.fiveHour.resetsAt } : null,
@@ -386,11 +391,38 @@ function usageCacheKeyFor(session) {
 // Passive quota capture from the CLI's own rate_limit_event records (B-e5c9,
 // 2.289.0) — ONE shared implementation (src/rate-limit-capture.js) for local
 // AND remote chat sessions; the caller resolves key/identity as parameters.
+// ORG VERIFICATION (B-b3cd, the odometer-flap fix): a hot-switched pool
+// session keeps its old token for ≥25min, so its quota signals (rate_limit_
+// event readings, limit banners) describe the OLD org's buckets — written
+// under the newly-linked account they flapped a half-empty account's 7d
+// odometer 48↔95 (34% of this source's anchors jumped >10pt vs a <1h-old
+// panel reading; magnitude alone can't gate this — parallel workflows really
+// can move >10pt/h, owner-confirmed). The OTel truth stream names the org
+// each session's requests actually bill: when it names a DIFFERENT identity
+// than the link, the reading/mark belongs to the observed org's account —
+// re-attribute the cache key. No observation (OTel absent/remote) or an
+// observed-but-unmapped org ⇒ attribute by link, exactly the old behavior.
+function orgVerifiedKey(session, key, what) {
+  try {
+    const obs = getOtelIngest()?.observedOrgFor?.(session.claudeSessionId);
+    if (obs && obs.acct && Date.now() - (obs.ts || 0) < 30 * 60e3) {
+      const members = usageIdentityAccountIds(key) || [];
+      if (!members.includes(obs.acct)) {
+        global.__vsEvent?.('usage-reading-reattributed', `${what}:${key}→${obs.acct}`);
+        return obs.acct;
+      }
+    }
+  } catch { }
+  return key;
+}
 function recordRateLimitEvent(session, msg) {
   try {
     const ev = parseRateLimitEvent(msg);
     if (!ev) return;
-    const key = usageCacheKeyFor(session);
+    // Session-scoped actions below (pool switch, auto-resume) stay on THIS
+    // session regardless of re-attribution: it is genuinely blocked no
+    // matter whose bucket filled.
+    const key = orgVerifiedKey(session, usageCacheKeyFor(session), 'rate-limit-event:' + ev.kind);
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key, identityIds: usageIdentityAccountIds(key), ev });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); return; }
     global.__vsEvent?.('rate-limit-event', `${key}:${ev.kind}:${ev.status}${r.wroteReading ? ':reading' : ''}`);
@@ -413,7 +445,10 @@ function markLimitBanner(session, text) {
   try {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
-    const key = usageCacheKeyFor(session); // host-aware (2.289.0) — a remote host-login banner belongs to the host bucket, not __global__
+    // host-aware (2.289.0) — a remote host-login banner belongs to the host
+    // bucket, not __global__; org-verified (B-b3cd) — a stale-token session's
+    // banner marks the org it is actually ON, not the linked account.
+    const key = orgVerifiedKey(session, usageCacheKeyFor(session), 'limit-banner');
     const nowSec = Math.floor(Date.now() / 1000);
     const bump = (b, fallbackResetSec) => ({
       ...(b || {}),

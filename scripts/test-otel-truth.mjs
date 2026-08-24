@@ -154,6 +154,16 @@ const PAYLOAD = (recs) => ({
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: orgT }, request_id: { stringValue: 'req_stale3' } })]));
   ok(attribCalls.length === afterAgree + 2, 'same (truth→walk) pair repeats → deduped');
   curAcct = 'sub-configured'; curLastTs = 0;
+  // ④ observedOrgFor (B-b3cd): rate_limit_event capture verifies a reading's
+  // org against the session's OBSERVED billing org before writing it into an
+  // account's usage cache — the query must reflect the LATEST observation.
+  const SID = '4ad31ec3-0e5b-40e2-a953-77f121ce7eee'; // REC()'s session.id
+  const obs1 = ingest.observedOrgFor(SID);
+  ok(obs1 && obs1.acct === 'sub-A' && obs1.orgUuid === orgT, 'observedOrgFor: latest observation wins (sid → org + resolved acct)', JSON.stringify(obs1));
+  ok(ingest.observedOrgFor('no-such-sid') === null, 'unknown sid → null (capture falls back to link attribution)');
+  await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'ffffffff-9999-9999-9999-999999999999' }, request_id: { stringValue: 'req_unkobs' } })]));
+  const obs2 = ingest.observedOrgFor(SID);
+  ok(obs2 && obs2.known === false && obs2.acct === null, 'an UNMAPPED org observation reports known:false, acct null — capture must then keep link attribution, never re-attribute to nothing', JSON.stringify(obs2));
   // envFor honesty
   const env = ingest.envFor();
   ok(env.OTEL_EXPORTER_OTLP_ENDPOINT === 'http://127.0.0.1:0/otel' && env.OTEL_LOGS_EXPORTER === 'otlp' && env.OTEL_METRICS_EXPORTER === 'none' && env.CLAUDE_CODE_ENABLE_TELEMETRY === '1', 'envFor: loopback endpoint, logs-only export', JSON.stringify(env));

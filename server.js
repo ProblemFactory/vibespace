@@ -432,7 +432,7 @@ const {
   estOverlayCache, predictCalib,
 } = require('./src/server/usage-pool-engine.js').create({
   app, rootDir: __dirname, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
-  broadcastToSession, getAutoResume: () => { try { return autoResume; } catch { return null; } }, // lazy: created further down (TDZ otherwise)
+  broadcastToSession, getAutoResume: () => { try { return autoResume; } catch { return null; } }, getOtelIngest: () => { try { return otelIngest; } catch { return null; } }, // both lazy: created further down (TDZ otherwise); otelIngest = B-b3cd org verification
   serverNotice: (...a) => serverNotice(...a),
   serverSetting: (...a) => serverSetting(...a),
   getAccounts: () => { try { return accounts; } catch { return null; } },
