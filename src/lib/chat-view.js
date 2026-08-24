@@ -2878,17 +2878,28 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
-      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp']);
-      // per-member classification (also used by flush() for the summary)
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent']);
+      // per-member classification (also used by flush() for the summary).
+      // SEMANTIC HINT FIRST (Track B, design-backend-parity.md §5): the
+      // normalizer stamps `collapseKind` — codex cards (exec, Agent Wait,
+      // send_message…) never matched the claude tool-name map below and so
+      // NOTHING codex folded (owner report). The name map stays as the
+      // fallback for claude + pre-hint histories.
       const memberKind = (el) => {
         const m = el._rawMsg;
         if (el.classList.contains('chat-msg-tool-result')) {
+          const ck = m?.collapseKind;
+          if (ck) {
+            if ((ck === 'read' || ck === 'write') && isMemoryPath(m?.content?.[0]?.input?.file_path || '')) return 'memory';
+            return ck;
+          }
           const tn = m?.content?.[0]?.toolName;
           if (tn === 'Bash') return 'bash';
           // Skill launches (2.227.9, user report "技能卡片无法参与折叠") — a
           // "Launching skill: x" card is pure harness noise, same class as a
           // Bash line; it fell through to null and so BROKE the surrounding run.
           if (tn === 'Skill') return 'skill';
+          if (tn === 'Agent' || tn === 'Task') return 'agent'; // claude sub-agent cards join the collab kind
           if (mcpParts(tn)) return 'mcp'; // any MCP server's tool (2.215.3)
           if (tn === 'Read' || tn === 'Write' || tn === 'Edit' || tn === 'Patch') {
             // agent-memory file ops are their OWN kind (2.213.1, user ask:
@@ -2943,7 +2954,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           const header = document.createElement('div');
           header.className = 'chat-run-header';
           // per-kind counts (only non-zero kinds render)
-          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0, mcp: 0 };
+          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0, mcp: 0, agent: 0, skill: 0 };
           const mcpServers = new Set();
           for (const el of members) {
             const k = memberKind(el);
@@ -2958,6 +2969,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           if (byKind.memory) parts.push(t('{n} memory', { n: byKind.memory }));
           // single-server runs name the server — "8 MCP (chrome-devtools)"
           if (byKind.mcp) parts.push(t('{n} MCP', { n: byKind.mcp }) + (mcpServers.size === 1 ? ` (${[...mcpServers][0]})` : ''));
+          if (byKind.agent) parts.push(t('{n} agent ops', { n: byKind.agent }));
           let label = parts.join(' · ');
           // touched files (user ask: don't lose the paths): writes first with
           // a ✎ mark, then reads; deduped display names, capped at 4 + "+N".

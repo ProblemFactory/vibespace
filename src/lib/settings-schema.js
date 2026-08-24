@@ -296,18 +296,22 @@ const SETTINGS_SCHEMA = {
     category: t('Chat'), liveApply: true,
   },
   'chat.collapseKinds': {
-    type: 'multiSelect', default: ['thinking', 'bash', 'read', 'memory', 'mcp', 'skill'],
+    // SEMANTIC kinds, one global set for every backend (Track B, owner-decided:
+    // per-provider checkbox copies = config sprawl) — each backend's normalizer
+    // maps its own tool names in (claude Bash / codex exec are both 'bash').
+    type: 'multiSelect', default: ['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent'],
     options: [
       { value: 'thinking', label: t('Thinking blocks') },
-      { value: 'bash', label: t('Bash commands') },
+      { value: 'bash', label: t('Command runs (Bash / exec / terminal)') },
       { value: 'read', label: t('File reads') },
       { value: 'write', label: t('File writes (Write/Edit/Patch)') },
       { value: 'memory', label: t('Agent memory files (reads AND writes)') },
       { value: 'mcp', label: t('MCP tool calls (any server)') },
       { value: 'skill', label: t('Skill launches') },
+      { value: 'agent', label: t('Sub-agent orchestration (spawn/wait/messages)') },
     ],
     label: t('Card kinds that collapse'),
-    description: t('Which card kinds fold into the summary line. Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent\'s own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.'),
+    description: t('Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent\'s own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.'),
     category: t('Chat'), liveApply: true,
   },
   'chat.reducedMotionSpin': {

@@ -32,7 +32,7 @@ function oneLine(text = '') {
 function formatToolName(name) {
   if (!name) return 'Tool';
   if (name === 'spawn_agent') return 'Agent';
-  if (name === 'exec_command') return 'Bash';
+  if (name === 'exec_command' || name === 'exec') return 'Bash'; // 0.149.x renamed the tool to bare 'exec'
   if (name === 'apply_patch') return 'Patch';
   if (name === 'write_stdin') return 'Terminal';
   if (name === 'wait_agent') return 'Agent Wait';
@@ -40,6 +40,18 @@ function formatToolName(name) {
   if (name === 'resume_agent') return 'Agent Resume';
   if (name === 'close_agent') return 'Agent Close';
   return String(name);
+}
+
+// Semantic collapse-kind (Track B, design-backend-parity.md §5): the chat
+// view's run folding must never know backend tool names — the normalizer owns
+// the semantics. Keys reuse the existing settings vocabulary ('bash' = any
+// command execution). null = never folds (visible work: plan updates, images).
+function collapseKindOf(rawName) {
+  const n = String(rawName || '').toLowerCase();
+  if (n === 'exec' || n === 'exec_command' || n === 'shell' || n === 'local_shell' || n === 'write_stdin') return 'bash';
+  if (n === 'apply_patch') return 'write';
+  if (/^(spawn_agent|wait_agent|send_input|resume_agent|close_agent|list_agents|send_message|interrupt_agent|followup_task)$/.test(n) || n.startsWith('agent')) return 'agent';
+  return null;
 }
 
 function flattenContentText(content) {
@@ -223,6 +235,7 @@ class CodexMessageManager {
       usage: fields.usage || null,
       taskInfo: fields.taskInfo || null,
       backendMeta: fields.backendMeta || null,
+      collapseKind: fields.collapseKind || null, // semantic run-fold kind (Track B) — the chat view folds by THIS, never by backend tool names
     };
     this.messages.push(msg);
     this.messageIndex.set(msg.id, msg);
@@ -482,6 +495,7 @@ class CodexMessageManager {
       toolCallId,
       toolName,
       toolStatus: null,
+      collapseKind: collapseKindOf(item.name),
     });
     this.pendingToolCalls.set(toolCallId, { msgId: msg.id, rawName: item.name || toolName });
     this.toolCallMessageIds.set(toolCallId, msg.id);
@@ -502,6 +516,7 @@ class CodexMessageManager {
       toolCallId,
       toolName,
       toolStatus: null,
+      collapseKind: collapseKindOf(item.name),
     });
     this.pendingToolCalls.set(toolCallId, { msgId: msg.id, rawName: item.name || toolName });
     this.toolCallMessageIds.set(toolCallId, msg.id);
@@ -530,6 +545,7 @@ class CodexMessageManager {
         toolCallId,
         toolName,
         toolStatus: nextToolStatus,
+        collapseKind: collapseKindOf(pending?.rawName || rawName),
       });
       this.toolCallMessageIds.set(toolCallId, msg.id);
       if (emit) this._emit({ op: 'create', message: msg });

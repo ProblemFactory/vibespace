@@ -1,5 +1,6 @@
 import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
 
 /**
@@ -1052,7 +1053,8 @@ export class ChatStatusBar {
       }).catch(() => {
         if (!dropdown.isConnected) return;
         loading.remove();
-        addModelItems(backend === 'claude' ? ['fable', 'opus', 'sonnet', 'haiku'].map(id => ({ id })) : []);
+        // per-backend offline fallback — a codex session must never list claude models
+        addModelItems((getBackendMeta(backend)?.fallbackModels || []).map(id => ({ id })));
       });
       return;
     }

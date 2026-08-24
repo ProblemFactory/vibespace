@@ -2794,4 +2794,8 @@ export default {
   'Default output style (Claude)': '默认输出风格（Claude）',
   'Continue automatically when a usage limit resets': '用量上限重置后自动继续',
   'Output style “{v}” is saved and applies on the next resume (now running: {cur})': '输出风格「{v}」已保存，下次 resume 生效（当前运行：{cur}）',
+  "Command runs (Bash / exec / terminal)": "命令执行（Bash / exec / 终端）",
+  "Sub-agent orchestration (spawn/wait/messages)": "子代理编排（spawn/wait/消息）",
+  "{n} agent ops": "{n} 条代理操作",
+  "Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent's own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.": "哪些卡片类型按【语义】折叠进摘要行——同一设置覆盖所有后端（claude 的 Bash 和 codex 的 exec 都算命令执行）。启用的类型作为一个交错组一起折叠（思考→读→改→跑是真实工作模式；按类型分组很少能凑够长度）。记忆 = 对 agent 自身记忆目录的操作——属内务，默认折叠，摘要中显示为 memory/<名>；项目文件写入默认不折叠——diff 通常值得看。纯思考段要两条以上；任何工具卡立即折叠。等待你批准的卡片永不折叠。",
 };

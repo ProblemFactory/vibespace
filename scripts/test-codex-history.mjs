@@ -86,5 +86,30 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok('status-bar billing chip is backend-aware too', /this\._backend === 'codex' \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sb));
 }
 
+// ── Track B: semantic collapse kinds (owner: codex的exec卡片/agent wait/send
+// message等没有参与折叠) — the normalizer stamps collapseKind so the chat
+// view's folding never needs backend tool names.
+{
+  const mm = new CodexMessageManager('t6');
+  const msgs = mm.convertHistory([
+    { type: 'response_item', payload: { type: 'custom_tool_call', id: 'c1', call_id: 'k1', name: 'exec', input: '{"command":["bash","-lc","ls"]}' } },
+    { type: 'response_item', payload: { type: 'custom_tool_call_output', id: 'o1', call_id: 'k1', output: [{ type: 'input_text', text: 'ok' }] } },
+    { type: 'response_item', payload: { type: 'function_call', id: 'c2', call_id: 'k2', name: 'wait_agent', arguments: '{}' } },
+    { type: 'response_item', payload: { type: 'function_call', id: 'c3', call_id: 'k3', name: 'send_message', arguments: '{}' } },
+    { type: 'response_item', payload: { type: 'custom_tool_call', id: 'c4', call_id: 'k4', name: 'apply_patch', input: '*** patch' } },
+  ]);
+  const kinds = Object.fromEntries(msgs.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m.collapseKind]));
+  ok("exec stamps 'bash' (the 0.149.x bare name — even formatToolName's exec_command mapping missed it)", kinds.k1 === 'bash', JSON.stringify(kinds));
+  ok("collab family stamps 'agent' (wait_agent / send_message)", kinds.k2 === 'agent' && kinds.k3 === 'agent');
+  ok("apply_patch stamps 'write'", kinds.k4 === 'write');
+  ok("…and exec now also gets the Bash display name", msgs.find((m) => m.toolCallId === 'k1')?.toolName === 'Bash');
+  const cv = require('node:fs').readFileSync(REPO + '/src/lib/chat-view.js', 'utf8');
+  ok('the chat-view classifier consumes the semantic hint FIRST (name map = legacy fallback)', /const ck = m\?\.collapseKind;[\s\S]{0,220}return ck;/.test(cv));
+  ok("claude Agent/Task cards join the 'agent' kind via the fallback map", /tn === 'Agent' \|\| tn === 'Task'\) return 'agent'/.test(cv));
+  const ss = require('node:fs').readFileSync(REPO + '/src/lib/settings-schema.js', 'utf8');
+  ok("the settings checkboxes are SEMANTIC (one global set; 'agent' kind exists and defaults on)", /value: 'agent', label: t\('Sub-agent orchestration/.test(ss) && /'skill', 'agent'\]/.test(ss));
+  ok('per-backend fallback model list lives on BACKEND_META (codex never lists claude models offline)', /fallbackModels: \['gpt-/.test(require('node:fs').readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')) && /getBackendMeta\(backend\)\?\.fallbackModels/.test(require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8')));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

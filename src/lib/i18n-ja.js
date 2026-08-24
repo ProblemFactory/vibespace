@@ -2794,4 +2794,8 @@ export default {
   'Default output style (Claude)': '既定の出力スタイル（Claude）',
   'Continue automatically when a usage limit resets': '利用上限のリセット後に自動で続行',
   'Output style “{v}” is saved and applies on the next resume (now running: {cur})': '出力スタイル「{v}」を保存しました。次回 resume から有効（現在：{cur}）',
+  "Command runs (Bash / exec / terminal)": "コマンド実行（Bash / exec / ターミナル）",
+  "Sub-agent orchestration (spawn/wait/messages)": "サブエージェント編成（spawn/wait/メッセージ）",
+  "{n} agent ops": "{n} 件のエージェント操作",
+  "Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent's own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.": "どのカード種別を【意味】で要約行に折りたたむか——同じ設定が全バックエンドに適用されます（claude の Bash も codex の exec もコマンド実行）。有効な種別はひとつの交互グループとして折りたたまれます（思考→読取→編集→実行が実際の作業パターン）。メモリ = エージェント自身のメモリディレクトリへの操作——既定で折りたたみ、要約に memory/<名前> と表示；プロジェクトファイルの書き込みは既定でオフ——diff は見る価値があります。思考のみの連続は2件以上から；ツールカードは即座に折りたたみ。承認待ちのカードは決して折りたたまれません。",
 };

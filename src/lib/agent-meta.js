@@ -16,6 +16,10 @@ export const BACKEND_META = {
     // (agentMemoryPathRes unions across backends deliberately: the PATH
     // identifies memory content regardless of which session touches it).
     memoryPathRe: /\/\.claude\/(?:projects\/[^/]+\/)?memory\//,
+    // Offline fallback for the model dropdown when /api/available-models is
+    // unreachable — per-backend so a codex/gemini session never lists claude
+    // models (Track B, design-backend-parity.md §5).
+    fallbackModels: ['fable', 'opus', 'sonnet', 'haiku'],
   },
   shell: {
     id: 'shell',
@@ -46,6 +50,7 @@ export const BACKEND_META = {
     // also touch them via dedicated tools or plain file ops — either way the
     // path marks the content as memory.
     memoryPathRe: /\/\.codex\/memories\//,
+    fallbackModels: ['gpt-5.6-codex', 'gpt-5.6-sol'],
   },
 };
 
