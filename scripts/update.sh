@@ -64,7 +64,29 @@ git checkout HEAD -- src/agentd/version.js 2>/dev/null || true
 git ls-files -m data/bin/ 2>/dev/null | xargs -r -n1 git checkout HEAD -- 2>/dev/null || true
 # Last-resort belt: if the tree is STILL dirty enough to block a ff pull, stash
 # the leftover noise away (kept, not dropped) so the pull can proceed.
-git pull --ff-only || { git stash push -u -m "vibespace-update-autostash" >/dev/null 2>&1 || true; git pull --ff-only; }
+if ! git pull --ff-only; then
+  git stash push -u -m "vibespace-update-autostash" >/dev/null 2>&1 || true
+  if ! git pull --ff-only; then
+    # Upstream history REWRITE rung (2026-08-24: the rclone-binary blobs were
+    # scrubbed with filter-repo — every SHA changed, so ff-only can never
+    # succeed again on any instance that cloned before the rewrite). Detect
+    # real divergence (origin is not an ancestor of HEAD AND HEAD is not an
+    # ancestor of origin), keep the old HEAD reachable under a tag so nothing
+    # is ever lost, then realign hard. A rewrite is content-identical at the
+    # tip, so this is a no-op for the working tree. Local UNPUSHED work makes
+    # HEAD strictly ahead (origin IS an ancestor) → that case still fails
+    # loudly instead of nuking anything.
+    BR="$(git rev-parse --abbrev-ref HEAD)"
+    git fetch origin "$BR" || exit 1
+    if git merge-base --is-ancestor "origin/$BR" HEAD 2>/dev/null || git merge-base --is-ancestor HEAD "origin/$BR" 2>/dev/null; then
+      echo "git pull failed and this is not a history rewrite — resolve manually (git status / git log --oneline origin/$BR..HEAD)"
+      exit 1
+    fi
+    echo "== upstream history was rewritten — realigning (old HEAD kept as a local tag)"
+    git tag -f "pre-realign-$(date +%Y%m%d%H%M%S)" HEAD
+    git reset --hard "origin/$BR"
+  fi
+fi
 echo "== npm install"
 npm install --no-audit --no-fund
 echo "== build"

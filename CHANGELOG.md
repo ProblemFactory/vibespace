@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.10
+
+- **History rewrite executed (owner-approved): the two rclone binary blobs are scrubbed from git history** — `git filter-repo` on a fresh mirror, force-pushed with all tags; the tip tree hash is byte-identical (`8182ee45…`), all 1871 commits preserved, fresh-clone size 56MB → **8.3MB**. Because every SHA changed, `git pull --ff-only` can never succeed again on a checkout cloned before the rewrite — **`update.sh` gains a rewrite-recovery rung**: when the pull fails twice and neither side is the other's ancestor (true divergence, not unpushed local work — that still fails loudly), it keeps the old HEAD under a local `pre-realign-<ts>` tag and realigns with `reset --hard`. Instances that update through the script self-heal; anyone updating by hand: `git fetch origin && git reset --hard origin/master`.
+
 ## 2.368.9
 
 - **The rclone binary is no longer tracked in git.** The one-click-install commit put the 57MB binary itself into the public repo, so history grows ~60MB on every pin bump (2.368.8's push added the 63MB v1.69.3 blob before this was caught) — and a boot self-heal writing a *tracked* file is the dirty-tree-blocks-`git pull` class that already bit `vibespace-status` (2.111.26). Untracked + gitignored (`rclone-dl.zip` too); the update pull therefore deletes the copy older releases committed, so the boot self-heal now also *installs* when the binary is missing, some mount needs rclone, and the PATH has none — a user's own PATH rclone is never shadowed. The two blobs already in history stay (removing them is a history-rewrite decision for the owner). `test-mount-oauth-probe` 26→28.
