@@ -219,9 +219,14 @@ class MountManager {
   // ── rclone binary resolution + one-click install ──
   // Non-engineers shouldn't need a terminal: if rclone isn't on PATH we can
   // download the official static binary into data/bin (pinned to a version
-  // we've verified end-to-end — also predates the aws-sdk-go-v2 signing
-  // behavior that breaks V4 auth through Cloudflare-fronted MinIO).
-  static RCLONE_PIN = 'v1.65.2';
+  // we've verified end-to-end — still predates the aws-sdk-go-v2 signing
+  // behavior that breaks V4 auth through Cloudflare-fronted MinIO, i.e. the
+  // documented STS-safe range 1.63–1.69).
+  // v1.65.2 → v1.69.3 (2.368.8, real incident): Microsoft's migrated consumer
+  // OneDrive rejects 1.65.2's download path with "unauthenticated" on EVERY
+  // file read while listings/uploads/token-refresh all work — A/B against the
+  // live account: 1.65.2 fails, 1.69.3 and 1.75.0 both download fine.
+  static RCLONE_PIN = 'v1.69.3';
 
   rcloneBin() {
     const local = path.join(this.dataDir, 'bin', 'rclone');
@@ -318,6 +323,25 @@ class MountManager {
     this._fastBinMemo = undefined;
     if (!this.rcloneAvailable()) throw new Error('installed binary failed to run');
     return { version: ver, path: path.join(binDir, 'rclone') };
+  }
+
+  /** Boot self-heal: a data/bin/rclone WE installed stays at its download
+   *  version forever (nothing re-runs installRclone), so a pin bump alone
+   *  never reaches existing deployments — the OneDrive download breakage
+   *  would have stayed broken on every box that installed 1.65.2. Only OUR
+   *  install target is touched (a user's own rclone lives on PATH, never in
+   *  data/bin); best-effort, never blocks boot, failure keeps the old binary. */
+  maybeUpgradePinnedRclone() {
+    const local = path.join(this.dataDir, 'bin', 'rclone');
+    if (!fs.existsSync(local)) return; // PATH rclone is the user's — never touch
+    execFile(local, ['version'], { timeout: 10000 }, (err, out) => {
+      const have = String(out || '').match(/rclone (v[\d.]+)/)?.[1] || null;
+      if (err || !have || have === MountManager.RCLONE_PIN) return;
+      console.log(`[mounts] pinned rclone ${have} → ${MountManager.RCLONE_PIN} (upgrading data/bin copy)`);
+      this.installRclone().then(
+        (r) => console.log(`[mounts] rclone upgraded to ${r.version}`),
+        (e) => console.warn(`[mounts] rclone upgrade failed (keeping ${have}): ${e.message}`));
+    });
   }
 
   _key() {
@@ -1612,6 +1636,33 @@ class MountManager {
     });
   }
 
+  /** DOWNLOAD probe (2.368.8): the OneDrive incident's failure mode passes
+   *  `lsf` — listings, uploads and token refresh all worked while EVERY file
+   *  download 401'd (old rclone vs Microsoft's migrated consumer drive). So a
+   *  list-only probe says "ok" about a mount whose every read is EIO. Read 1
+   *  byte of the first file at the root; no file there → 'unknown' (skip).
+   *  Returns 'ok' | 'denied' | 'unknown'. */
+  _probeBackendRead(m, timeoutMs = 20000) {
+    let env, remote;
+    try { ({ env, remote } = this._rcloneFor(m)); } catch { return Promise.resolve('ok'); }
+    if (m.v2Auth) env.RCLONE_CONFIG_VS_V2_AUTH = 'true';
+    return new Promise((resolve) => {
+      execFile(this.rcloneBin(), ['lsf', remote, '--files-only', '--max-depth', '1', '--retries', '1', '--low-level-retries', '1'],
+        { env, timeout: timeoutMs }, (err, out) => {
+          const file = String(out || '').split('\n').filter(Boolean)[0];
+          if (err || !file) return resolve('unknown'); // list handled by the access probe; no root file → can't tell
+          const target = remote.endsWith(':') || remote.endsWith('/') ? remote + file : `${remote}/${file}`;
+          execFile(this.rcloneBin(), ['cat', '--count', '1', target, '--retries', '1', '--low-level-retries', '2'],
+            { env, timeout: timeoutMs }, (err2, _o2, stderr2) => {
+              if (!err2) return resolve('ok');
+              const s = String(stderr2 || err2.message || '');
+              if (/401|403|Unauthorized|unauthenticated|invalid_grant|InvalidAuthenticationToken|AccessDenied|Forbidden/i.test(s)) return resolve('denied');
+              return resolve('unknown');
+            });
+        });
+    });
+  }
+
   /** Is an rclone daemon still serving this mountpoint? A SIGKILLed/crashed
    *  daemon leaves a ZOMBIE fuse entry in /proc/mounts ("Transport endpoint
    *  is not connected") — isMounted() lies, so recovery must key off the
@@ -1691,13 +1742,19 @@ class MountManager {
       // mountpoint itself just failed.
       const now = Date.now();
       const last = (this._oauthProbeAt ??= new Map()).get(m.id) || 0;
-      const showingAuthErr = /re-authorize/i.test(this._errors.get(m.id) || '');
+      const showingAuthErr = /re-authorize|downloads are rejected/i.test(this._errors.get(m.id) || '');
       if (health === 'error' || showingAuthErr || now - last > 10 * 60000) {
         this._oauthProbeAt.set(m.id, now);
         const acc = await this._probeBackendAccess(m);
         if (acc === 'denied') return this._accessErrorMsg(m);
-        if (acc === 'ok' && showingAuthErr) return null; // recovered — clear it
-        // ok/unknown: not a token death — fall through to generic handling
+        if (acc === 'ok') {
+          // Listing fine ≠ reads fine (the OneDrive incident passed lsf while
+          // every download 401'd) — verify an actual 1-byte read too.
+          const rd = await this._probeBackendRead(m);
+          if (rd === 'denied') return 'connected but file downloads are rejected while listings work — disconnect and reconnect the mount to pick up the updated rclone; if it persists, check the account';
+          if (showingAuthErr) return null; // recovered — clear it
+        }
+        // unknown: not proof either way — fall through to generic handling
       } else if (showingAuthErr) {
         return undefined; // keep the auth error until a probe proves otherwise
       }
@@ -1995,6 +2052,7 @@ class MountManager {
 
   /** Boot: adopt live mounts, re-mount anything desired-but-dead. */
   async restore() {
+    this.maybeUpgradePinnedRclone(); // async, best-effort — see the pin note
     for (const m of this._state.mounts) {
       if (m.desired !== 'mounted') continue;
       if (m.expiresAt && Date.now() > m.expiresAt) { this._errors.set(m.id, 'credential expired'); continue; }

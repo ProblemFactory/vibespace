@@ -30,17 +30,18 @@ const P = MountManager.prototype;
 }
 
 // ── 2. the incident shape: healthy mountpoint, dead token ──
-const mk = (probeResults) => {
-  const calls = [];
+const mk = (probeResults, readResults = []) => {
+  const calls = [], readCalls = [];
   const self = {
     _revocable: P._revocable,
     _oauthBacked: P._oauthBacked,
     _accessErrorMsg: P._accessErrorMsg,
     _errors: new Map(),
     _probeBackendAccess: async (m) => { calls.push(m.id); return probeResults.shift() ?? 'ok'; },
+    _probeBackendRead: async (m) => { readCalls.push(m.id); return readResults.shift() ?? 'ok'; },
     _probeMountpoint: async () => 'ok',
   };
-  return { self, calls, run: (m, health = 'ok') => P._accessErrorFor.call(self, m, '/mp', health) };
+  return { self, calls, readCalls, run: (m, health = 'ok') => P._accessErrorFor.call(self, m, '/mp', health) };
 };
 const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
 {
@@ -68,6 +69,35 @@ const OD = { id: 'od1', type: 'onedrive', origin: 'rclone-conf' };
   const { calls, run } = mk(['denied']);
   const msg = await run(OD, 'error');
   ok('a failing mountpoint probes immediately regardless of the clock', calls.length === 1 && /re-authorize/i.test(msg || ''));
+}
+
+// ── 2b. the 2.368.8 refinement: listing fine ≠ reads fine ──
+// The REAL incident passed `lsf` — token refresh, listings and uploads all
+// worked while every download 401'd (pinned rclone 1.65.2 vs Microsoft's
+// migrated consumer OneDrive). A list-only probe called this mount healthy.
+{
+  const { self, readCalls, run } = mk(['ok'], ['denied']);
+  const msg = await run(OD, 'ok');
+  ok('lsf-passing mount still gets a 1-byte READ probe', readCalls.length === 1);
+  ok('download-denied while listing works ⇒ its own message (reconnect, NOT re-authorize)', /downloads are rejected/i.test(msg || '') && !/re-authorize/i.test(msg || ''));
+  self._errors.set('od1', msg);
+  const r2 = await run(OD, 'ok'); // read probe now returns 'ok' (default)
+  ok('…and a recovered download clears it', r2 === null);
+}
+{
+  const { readCalls, run } = mk(['ok'], ['ok']);
+  const r = await run(OD, 'ok');
+  ok('downloads fine ⇒ no error', r === null && readCalls.length === 1);
+}
+
+// ── 2c. the pin + self-heal (a pin bump must REACH existing installs) ──
+{
+  const { MountManager: MM } = require(path.join(REPO, 'src/mounts.js'));
+  ok('rclone pin is v1.69.3 (1.65.2 fails migrated consumer OneDrive downloads; 1.69.x fixes it AND stays in the Cloudflare-STS-safe 1.63–1.69 range)', MM.RCLONE_PIN === 'v1.69.3');
+  const src = read('src/mounts.js');
+  ok('boot self-heal exists and only touches OUR data/bin install (PATH rclone is the user\'s)', /maybeUpgradePinnedRclone\(\)\s*{[\s\S]{0,400}if \(!fs\.existsSync\(local\)\) return;/.test(src));
+  ok('…and restore() wires it', /async restore\(\)\s*{\s*\n\s*this\.maybeUpgradePinnedRclone\(\)/.test(src));
+  ok('the read probe classifies the OAuth-death phrasings too', /_probeBackendRead[\s\S]{0,1400}401\|403\|Unauthorized\|unauthenticated\|invalid_grant/.test(src));
 }
 
 // ── 3. phrasing pins across the chain ──
