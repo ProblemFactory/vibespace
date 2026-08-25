@@ -878,7 +878,13 @@ function readCodexWrapperRateLimit(sessionId) {
   if (!sessionId) return null;
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, sessionId + '.json'), 'utf-8'));
-    return normalizeCodexRateLimit(meta?.rateLimits, meta?.rateLimitsFetchedAt || meta?.startedAt || Date.now());
+    const snap = normalizeCodexRateLimit(meta?.rateLimits, meta?.rateLimitsFetchedAt || meta?.startedAt || Date.now());
+    // stored reset-credit count (wrapper reads it once at startup + on ⟳)
+    if (snap && meta?.rateLimitResetCredits) {
+      const rc = meta.rateLimitResetCredits;
+      snap.resetCredits = { availableCount: Number(rc.availableCount ?? rc.available_count ?? rc?.summary?.availableCount) || 0 };
+    }
+    return snap;
   } catch {
     return null;
   }

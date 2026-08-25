@@ -2802,4 +2802,8 @@ export default {
   "Auto — consume one before switching accounts": "自动——切换账号前先消费一个",
   "Use stored reset credits on a usage limit (Codex)": "撞用量上限时使用存储的 reset credit（Codex）",
   "ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, \"Auto\" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there.": "ChatGPT 计划可持有限额重置额度（reset credit）。Codex 会话撞上限时，\"自动\"先消费一个存储的额度（上限重置、同账号继续）；失败才回落到切换账号（池），再不行等待重置。默认关闭——它会在你不在场时花掉一个存储额度。",
+  "Needs a running Codex chat session (the read rides its own app-server)": "需要一个运行中的 Codex 聊天会话（读取经由它自己的 app-server）",
+  "Read current limits + stored reset credits from a running Codex session (its own app-server makes the call)": "从运行中的 Codex 会话读取当前限额和存储的 reset credit（由它自己的 app-server 发起调用）",
+  "Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)": "存储的限额重置额度——撞上限时可消费一个（设置 → Codex，或启用后自动）",
+  "Reset credits": "Reset credit",
 };

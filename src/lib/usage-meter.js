@@ -2,6 +2,7 @@
 import { createBackendIconHtml } from './agent-meta.js';
 import { t, tc } from './i18n.js';
 import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showToast } from './utils.js';
+import { backendFeatureCaps } from './agent-meta.js';
 
 export function installUsageMeter(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -41,6 +42,8 @@ export function installUsageMeter(App, ctx = {}) {
       if (ov) { e.stopPropagation(); popup.classList.add('hidden'); this._showAgentsDialog(); return; }
       const rbtn = e.target.closest('.usage-refresh-btn');
       if (rbtn) { e.stopPropagation(); this._refreshQuotaOnDemand(rbtn); return; }
+      const cxbtn = e.target.closest('.usage-refresh-codex-btn');
+      if (cxbtn) { e.stopPropagation(); this._refreshCodexQuota(cxbtn); return; }
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
@@ -104,6 +107,17 @@ export function installUsageMeter(App, ctx = {}) {
   // never carries. Server enforces ≥60s per account + the 429 backoff.
   // Gated by accounts.onDemandQuotaRefresh (manual/auto/off) + a one-time
   // first-use warning so the user knows an off-CLI call happens.
+  // codex ⟳ (capability 'session-rpc'): one account/rateLimits/read on a LIVE
+  // codex session's own app-server — carries the stored reset-credit count,
+  // which the passive push never does. No live session ⇒ honest toast.
+  _refreshCodexQuota(btn) {
+    const live = (this.sidebar?._allSessions || []).find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live' && s.webuiId && !s.host);
+    if (!live) { showToast(t('Needs a running Codex chat session (the read rides its own app-server)'), { type: 'error' }); return; }
+    try { this.ws.send({ type: 'codex-read-limits', sessionId: live.webuiId }); } catch { }
+    if (btn) { btn.classList.add('spin'); setTimeout(() => btn.classList.remove('spin'), 1500); }
+    setTimeout(() => this.refreshUsage?.(), 2500); // the sidecar/cache updates on the event round-trip
+  },
+
   async _refreshQuotaOnDemand(btn, { silent } = {}) {
     if ((this.settings.get('accounts.onDemandQuotaRefresh') || 'manual') === 'off') return;
     if (!silent) {
@@ -443,10 +457,13 @@ export function installUsageMeter(App, ctx = {}) {
           ${estStat(cp7)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
+          ${codex.resetCredits ? `<span class="usage-stat" title="${escHtml(t('Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)'))}"><span class="usage-stat-label">${escHtml(t('Reset credits'))}</span> ${Number(codex.resetCredits.availableCount) || 0}</span>` : ''}
         </div>
       </div>
       <div class="usage-updated">${t('Updated {ago}', { ago: agoText(codex.fetchedAt) })}</div>`;
-      sections.push(`${renderSectionTitle('codex', escHtml(codexLabel))}${cSwitcher}
+      const cxRefreshBtn = backendFeatureCaps('codex').quotaRefresh === 'session-rpc'
+        ? `<button class="usage-refresh-btn usage-refresh-codex-btn" title="${escHtml(t('Read current limits + stored reset credits from a running Codex session (its own app-server makes the call)'))}"><span class="uref-glyph">⟳</span></button>` : '';
+      sections.push(`${renderSectionTitle('codex', escHtml(codexLabel), cxRefreshBtn)}${cSwitcher}
       ${codexNote ? `<div class="usage-note">${codexNote}</div>` : ''}
       ${cBody}`);
     }

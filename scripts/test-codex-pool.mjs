@@ -73,6 +73,13 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('manual actions exist as ws cases (codex-reset-credit / codex-read-limits), codex-chat-gated', /case 'codex-reset-credit':\s*\n\s*case 'codex-read-limits':/.test(wsrc) && /session\.backend === 'codex'/.test(wsrc));
   const w2 = read('data/bin/codex-chat-wrapper.js');
   ok('the wrapper serves both verbs via the LIVE app-server RPC (rateLimits/read + rateLimitResetCredit/consume)', /account\/rateLimits\/read/.test(w2) && /account\/rateLimitResetCredit\/consume/.test(w2) && /reset_credit_result/.test(w2));
+  // ── reset-credit COUNT in the usage popup (owner: usage里展示剩余reset) ──
+  ok('the wrapper reads limits ONCE at startup (credits only ride rateLimits/read, never the passive push)', /readAccountLimits\(false\); \/\/ surface reset-credit count/.test(w2));
+  ok('the engine keeps resetCredits on the account snapshot', /snap0\.resetCredits = \{ availableCount:/.test(eng));
+  ok('…and the sidecar reader merges meta.rateLimitResetCredits', /snap\.resetCredits = \{ availableCount:/.test(read('src/usage-routes.js')));
+  const um2 = read('src/lib/usage-meter.js');
+  ok('the popup shows the stored reset-credit count', /Reset credits'\)\)\}<\/span> \$\{Number\(codex\.resetCredits\.availableCount\)/.test(um2));
+  ok("…and the codex ⟳ is CAPABILITY-gated (quotaRefresh 'session-rpc'), riding a live session's app-server", /backendFeatureCaps\('codex'\)\.quotaRefresh === 'session-rpc'/.test(um2) && /_refreshCodexQuota\(btn\)/.test(um2) && /codex-read-limits', sessionId: live\.webuiId/.test(um2));
   ok('recordCodexQuotaSignal exists: readings write the member cache, exhaustion switches then arms auto-resume', /function recordCodexQuotaSignal[\s\S]{0,3000}maybePoolAutoSwitch\(session\);[\s\S]{0,400}armIfEnabled/.test(eng));
   ok('…typed exhaustion enum covers the workspace variants', /usage_limit_reached\|quota_exceeded\|usage_not_included\|workspace_owner_usage_limit_reached\|workspace_member_usage_limit_reached\|workspace_member_credits_depleted/.test(eng));
   ok('…a pool-billed reading lands on the CURRENT MEMBER, never the pool wrapper', /a\.type === 'pooled'\) key = accounts\.poolCurrentFor\(key, session\._webuiId\)/.test(eng));

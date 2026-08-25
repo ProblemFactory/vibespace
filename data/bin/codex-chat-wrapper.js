@@ -700,6 +700,24 @@ function handleNotification(method, params) {
   }
 }
 
+// Proactive quota read: one JSON-RPC on the EXISTING app-server child — the
+// official client makes the fetch (§ban-safety: same class as claude's ⟳
+// get_usage; runs once at startup + on explicit request, never a timer).
+// Response carries rate limits AND rateLimitResetCredits.availableCount —
+// the ONLY channel the stored-reset count arrives on (the passive
+// account/rateLimits/updated push has no credits field).
+async function readAccountLimits(onDemand = false) {
+  try {
+    const r = await request('account/rateLimits/read', {}, 20000);
+    const rl = r?.rateLimits || r?.rate_limits || null;
+    const credits = r?.rateLimitResetCredits || r?.rate_limit_reset_credits || null;
+    if (rl) { meta.rateLimits = rl; meta.rateLimitsFetchedAt = Date.now(); }
+    if (credits) meta.rateLimitResetCredits = credits;
+    scheduleMeta();
+    emitTaskEvent('rate_limits_updated', { rateLimits: rl, resetCredits: credits, onDemand });
+  } catch (e) { if (onDemand) emitTaskEvent('rate_limits_updated', { error: String(e.message || e), onDemand: true }); }
+}
+
 async function startThread() {
   const params = {
     cwd: baseCwd,
@@ -904,19 +922,7 @@ async function handleInput(msg) {
     return;
   }
   if (msg.type === 'codex-read-limits') {
-    // Proactive quota read (P3 batch): one JSON-RPC on the EXISTING app-server
-    // child — the official client makes the fetch (§ban-safety: same class as
-    // claude's ⟳ get_usage, human/engine-triggered, never a timer here).
-    // Response carries rate limits AND rateLimitResetCredits.availableCount.
-    try {
-      const r = await request('account/rateLimits/read', {}, 20000);
-      const rl = r?.rateLimits || r?.rate_limits || null;
-      const credits = r?.rateLimitResetCredits || r?.rate_limit_reset_credits || null;
-      if (rl) { meta.rateLimits = rl; meta.rateLimitsFetchedAt = Date.now(); }
-      if (credits) meta.rateLimitResetCredits = credits;
-      scheduleMeta();
-      emitTaskEvent('rate_limits_updated', { rateLimits: rl, resetCredits: credits, onDemand: true });
-    } catch (e) { emitTaskEvent('rate_limits_updated', { error: String(e.message || e), onDemand: true }); }
+    await readAccountLimits(true);
     return;
   }
   if (msg.type === 'codex-reset-credit') {
@@ -1171,6 +1177,7 @@ async function boot() {
   await request('initialize', { clientInfo, capabilities: { experimentalApi: true } }, 30000);
   notify('initialized');
   await startThread();
+  readAccountLimits(false); // surface reset-credit count without user action (fire-and-forget)
   markReady?.();
 }
 

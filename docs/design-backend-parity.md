@@ -29,7 +29,7 @@
 
 ### 信号源（调研核心结论：codex 信号**优于** claude）
 1. **每次响应都推**完整 `rate_limits` 快照（app-server `account/rateLimits/updated`，wrapper 已捕获进 sidecar；rollout `token_count` 同款 at-rest）——连续阈值门控现成。
-2. **类型化耗尽**：快照的 `rate_limit_reached_type`（primary/secondary）+ `error` 事件的 `codex_error_info ∈ {usage_limit_reached, quota_exceeded, usage_not_included, workspace_*}`（带 resets_at）。⚠ wrapper 今天只留 message 把 `codex_error_info` 丢了（codex-chat-wrapper.js:685-686）——需转发。
+2. **类型化耗尽**：快照的 `rate_limit_reached_type`（primary/secondary）+ `error` 事件的 `codex_error_info ∈ {usage_limit_reached, quota_exceeded, usage_not_included, workspace_*}`（带 resets_at）。（wrapper 自 2.368.21 起转发 codexErrorInfo/resetsAt/rateLimits 双 casing。）
 3. **主动读**：JSON-RPC `account/rateLimits/read`（活 wrapper 上免费一调；闲账号用短命 `codex app-server` 子进程）——官方客户端发起 fetch，§ban-safety 同 auto-cli 类但无需 spawn 完整会话。⚠ 本地无真实耗尽样本，首次观测到时要把实际值钉进测试。
 
 ### 复用度（池三层解剖）
@@ -107,5 +107,5 @@
 | **B ✅2.368.19** | 折叠语义章 + exec 渲染 + per-backend modelList | — |
 | **P1 ✅2.368.18** | codex 配额落盘 + 估计 + 展示补齐 | — |
 | **P2 ✅2.368.20** | codex 池冷切 + 自动换号 + auto-resume 接入(wrapper转发typed耗尽) | — |
-| **P3 ✅2.368.21 判定=否** | 实验双重否定: CODEX_HOME启动时canonicalize(链接重指无效)+auth内容换垃圾后turn照常完成(token驻内存)——热切是codex结构上限, 冷切为终态; 顺带交付: reset credit逃生梯(消费→切换→等待)+codex主动读(rateLimits/read) | — |
+| **P3 ✅2.368.21 判定=否** | 实验双重否定: CODEX_HOME启动时canonicalize(链接重指无效)+auth内容换垃圾后turn照常完成(token驻内存)——热切是codex结构上限, 冷切为终态; 顺带交付: reset credit逃生梯(消费→切换→等待)+codex主动读(rateLimits/read); 2.368.25: 剩余reset credit数进usage popup(仅rateLimits/read携带, 被动push没有 ⇒ wrapper启动读一次+⟳走活会话app-server, caps.quotaRefresh='session-rpc'门控) | — |
 | **P4 (切片1-3 ✅2.368.21/23/24)** | ✅backend-caps服务端注册表 ✅normalizers注册表+streamProtocol分发+远程flags炸点拆除 ✅客户端BACKEND_META.caps功能门(fork/effort/review/outputStyle/autoResume)+账号名册精确backend过滤; 剩余=accounts策略对象/QuotaSignalSource深层/session-store与wrapper注册表化 | 第三 agent 前置 |

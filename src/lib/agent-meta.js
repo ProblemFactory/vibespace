@@ -56,7 +56,7 @@ export const BACKEND_META = {
     fallbackModels: ['gpt-5.6-codex', 'gpt-5.6-sol'],
     // autoResume: true since 2.368.20 — codex exhaustion arms the same module.
     // fork: the thread-fork RPC exists but is unwired (flips when wired).
-    caps: { fork: false, effort: true, review: true, outputStyle: false, autoResume: true },
+    caps: { fork: false, effort: true, review: true, outputStyle: false, autoResume: true, quotaRefresh: 'session-rpc' },
   },
 };
 

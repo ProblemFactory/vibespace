@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.368.25
+
+- **Usage popup shows Codex reset credits** (owner: "usage里是不是应该展示一下codex账号剩余reset"). The stored reset-credit count only rides the `account/rateLimits/read` RPC — the passive `account/rateLimits/updated` push never carries it — so the wrapper now reads limits once at startup (fire-and-forget after the thread starts) and both quota paths keep `resetCredits` on the account snapshot (engine event write + sidecar reader merge). The popup's Codex section shows "Reset credits: N" with an explanatory tooltip, plus a ⟳ that asks a LIVE codex session's own app-server to re-read (capability-gated via `caps.quotaRefresh: 'session-rpc'` on BACKEND_META — 注册表, not a backend-id branch; no live session ⇒ honest toast, not a silent no-op). test-codex-pool 28→33.
+
 ## 2.368.24
 
 - **Client feature gates are capability-driven (P4 slice three).** `BACKEND_META` gains a per-backend `caps` descriptor (`fork/effort/review/outputStyle/autoResume`) and the chrome now gates on it instead of backend ids: the output-style chip, the auto-resume chip (which as a side effect now APPEARS for codex sessions — codex exhaustion has armed the same auto-resume module since 2.368.20), the Review chip, and the sidebar Fork menu item. The billing switcher's account roster filters by exact backend equality (the old boolean "is codex / is not" partition broke structurally with a third backend). An unknown backend gets all-false caps — chrome shows nothing it can't deliver. `test-bundle-globals` earned its keep mid-batch: it caught a used-but-never-imported `backendFeatureCaps` before the push (the 2.340.x lost-binding class).

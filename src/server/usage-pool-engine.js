@@ -533,7 +533,14 @@ function recordCodexQuotaSignal(session, payload) {
       return;
     }
     if (payload.type === 'rate_limits_updated' && payload.rateLimits) {
-      const w = writeSnap(normalizeCodexRateLimit(payload.rateLimits, Date.now()));
+      const snap0 = normalizeCodexRateLimit(payload.rateLimits, Date.now());
+      // stored reset-credit count rides ONLY the on-demand rateLimits/read
+      // (owner ask: usage 展示剩余 reset) — keep it on the account snapshot
+      if (snap0 && payload.resetCredits) {
+        const rc = payload.resetCredits;
+        snap0.resetCredits = { availableCount: Number(rc.availableCount ?? rc.available_count ?? rc?.summary?.availableCount) || 0 };
+      }
+      const w = writeSnap(snap0);
       if (!w) return;
       global.__vsEvent?.('codex-rate-limits', `${w.key}${w.snap.rateLimitReachedType ? ':reached-' + w.snap.rateLimitReachedType : ''}`);
       if (w.snap.rateLimitReachedType) {

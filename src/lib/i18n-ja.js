@@ -2802,4 +2802,8 @@ export default {
   "Auto — consume one before switching accounts": "自動——アカウント切替の前に1つ消費",
   "Use stored reset credits on a usage limit (Codex)": "使用上限時に保存済みリセットクレジットを使う（Codex）",
   "ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, \"Auto\" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there.": "ChatGPT プランはレート制限リセットクレジットを保持できます。Codex セッションが上限に達したとき、「自動」はまず保存済みクレジットを1つ消費します（上限がリセットされ同じアカウントで継続）。失敗した場合のみアカウント切替（プール）、その後リセット待ちへフォールバックします。不在時にクレジットを消費するため既定ではオフです。",
+  "Needs a running Codex chat session (the read rides its own app-server)": "実行中の Codex チャットセッションが必要です（読み取りはその app-server 経由）",
+  "Read current limits + stored reset credits from a running Codex session (its own app-server makes the call)": "実行中の Codex セッションから現在の制限と保存済みリセットクレジットを読み取る（その app-server が呼び出します）",
+  "Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)": "保存済みのレート制限リセットクレジット——上限到達時に1つ消費できます（設定 → Codex、または有効時に自動）",
+  "Reset credits": "リセットクレジット",
 };
