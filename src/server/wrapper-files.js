@@ -44,13 +44,13 @@ function resolveWrapperFiles(BUFFERS_DIR, id, sockPath) {
  *  sessions that were already new (owner: three restarts + an update for
  *  nothing). STATELESS by design — callers must not cache a negative verdict
  *  (a wrapper resuming a huge transcript may not have written its sidecar yet).
- *  Returns { frameFile, reason: 'ok'|'no-caps'|'no-sidecar', startedAt, pid }. */
+ *  Returns { frameFile, peerMessage, caps, reason: 'ok'|'no-caps'|'no-sidecar', startedAt, pid }. */
 function wrapperCaps(BUFFERS_DIR, id, sockPath) {
   const { sidecar } = resolveWrapperFiles(BUFFERS_DIR, id, sockPath);
   let m;
-  try { m = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch { return { frameFile: false, reason: 'no-sidecar', startedAt: null, pid: null }; }
+  try { m = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch { return { frameFile: false, peerMessage: false, caps: null, reason: 'no-sidecar', startedAt: null, pid: null }; }
   const caps = (m && m.caps && typeof m.caps === 'object') ? m.caps : null;
-  return { frameFile: !!(caps && caps.frameFile), reason: caps ? 'ok' : 'no-caps', startedAt: (m && m.startedAt) || null, pid: (m && m.pid) || null };
+  return { frameFile: !!(caps && caps.frameFile), peerMessage: !!(caps && caps.peerMessage), caps, reason: caps ? 'ok' : 'no-caps', startedAt: (m && m.startedAt) || null, pid: (m && m.pid) || null };
 }
 
 module.exports = { resolveWrapperFiles, wrapperCaps };

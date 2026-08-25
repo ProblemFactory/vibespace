@@ -107,5 +107,5 @@
 | **B ✅2.368.19** | 折叠语义章 + exec 渲染 + per-backend modelList | — |
 | **P1 ✅2.368.18** | codex 配额落盘 + 估计 + 展示补齐 | — |
 | **P2 ✅2.368.20** | codex 池冷切 + 自动换号 + auto-resume 接入(wrapper转发typed耗尽) | — |
-| **P3 ✅2.368.21 判定=否** | 实验双重否定: CODEX_HOME启动时canonicalize(链接重指无效)+auth内容换垃圾后turn照常完成(token驻内存)——热切是codex结构上限, 冷切为终态; 顺带交付: reset credit逃生梯(消费→切换→等待)+codex主动读(rateLimits/read); 2.368.25: 剩余reset credit数进usage popup(仅rateLimits/read携带, 被动push没有 ⇒ wrapper启动读一次+⟳走活会话app-server, caps.quotaRefresh='session-rpc'门控) | — |
+| **P3 ✅2.368.21 判定=否** | 实验双重否定: CODEX_HOME启动时canonicalize(链接重指无效)+auth内容换垃圾后turn照常完成(token驻内存)——热切是codex结构上限, 冷切为终态; 顺带交付: reset credit逃生梯(消费→切换→等待)+codex主动读(rateLimits/read); 2.368.25: 剩余reset credit数进usage popup(仅rateLimits/read携带, 被动push没有 ⇒ wrapper启动读一次+⟳走活会话app-server, caps.quotaRefresh='session-rpc'门控); 2.368.26: 互聊活投递对齐=caps.peerDelivery注册表('cli-inbox'/'rpc-queue'/'stash-only'), codex经wrapper peer-message verb(idle=turn/start计费turn, busy=thread/queue/add)与claude inbox全对等, 第三backend声明cap+实现contract即接入; 顺带修复recordCodexQuotaSignal死wiring(2.355.0类, engine导出但server.js从未传递) | — |
 | **P4 (切片1-3 ✅2.368.21/23/24)** | ✅backend-caps服务端注册表 ✅normalizers注册表+streamProtocol分发+远程flags炸点拆除 ✅客户端BACKEND_META.caps功能门(fork/effort/review/outputStyle/autoResume)+账号名册精确backend过滤; 剩余=accounts策略对象/QuotaSignalSource深层/session-store与wrapper注册表化 | 第三 agent 前置 |

@@ -24,7 +24,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions, engine,
   checkClaudeGoalStatus, broadcastToSession, broadcastActiveSessions,
   noteModelSeen, recordUsageAttribution, daemonPtyShim, sbSeenFirst, getDeviceMgr,
-  getHosts, getUsageHistory, getTelemetry, getNoConvoRef }) {
+  getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     modelsMatch, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey, usageEstimator } = engine;
@@ -32,6 +32,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   const usageHistory = mk(getUsageHistory);
   const telemetry = mk(getTelemetry);
   const noConvoRef = mk(getNoConvoRef);
+  const deliverRef = mk(getDeliver);
   const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
 // ── PTY setup helper (onData + onExit wiring) ──
 // Live TODO capture — the agent's own TodoWrite (claude) / plan tool (codex)
@@ -217,6 +218,16 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // never emit these — additive, no capability gate needed)
             if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed' || msg.payload?.type === 'reset_credit_result')) {
               try { recordCodexQuotaSignal?.(session, msg.payload); } catch {}
+            }
+            // rpc-queue delivery honesty (peerDelivery registry lane): the
+            // deliver ladder returned ok on the stdin write, so a wrapper-side
+            // failure (queue/add rejected, turn/start error) must RE-STASH the
+            // text for next-turn injection — never silently lose a promised
+            // message. (ok:true needs no action: the wrapper recorded it.)
+            if (msg.type === 'event_msg' && msg.payload?.type === 'peer_message_result' && msg.payload.ok === false && msg.payload.text) {
+              const cid = session.backendSessionId || session.claudeSessionId;
+              console.log(`[deliver] rpc-queue wrapper delivery failed (${msg.payload.reason || 'unknown'}) — re-stashing for ${cid}`);
+              try { if (cid) deliverRef()?.stashFor(cid, { source: 'agent', fromName: null, text: String(msg.payload.text) }); } catch {}
             }
             // Codex plan tool → the session's live TODO summary (board pill)
             if (msg.type === 'event_msg' && msg.payload?.type === 'plan_updated' && Array.isArray(msg.payload.plan)) {

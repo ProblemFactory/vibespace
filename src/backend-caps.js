@@ -21,6 +21,19 @@
 // session-stdout dispatches on THIS, never on the backend id, so a backend
 // without a registered pipeline refuses at spawn instead of being silently
 // parsed as claude stream-json (the gemini-as-claude fallthrough class).
+// peerDelivery names the LIVE lane for agent-to-agent/job messages
+// (conversation-deliver consults this, never the backend id):
+//   'cli-inbox'  — the CLI's own cross-session inbox socket (claude:
+//                  ~/.claude/sessions registry; idle receiver opens a billed
+//                  turn — the CLI's documented behavior, not ours).
+//   'rpc-queue'  — the wrapper OWNS the app-server RPC connection (codex,
+//                  2026-08-25 research): idle ⇒ turn/start (billed turn +
+//                  reply, claude-inbox parity); busy ⇒ thread/queue/add runs
+//                  it after the current turn (upstream-test-pinned semantics).
+//                  Contract for any backend claiming this: its wrapper adverts
+//                  sidecar caps.peerMessage and serves the 'peer-message'
+//                  stdin verb, reporting peer_message_result honestly.
+//   'stash-only' — no live lane; messages queue for next-turn injection.
 const BACKEND_CAPS = {
   claude: {
     pool: true,
@@ -30,6 +43,7 @@ const BACKEND_CAPS = {
     resetCredit: false,   // no such product concept
     quotaProbe: 'cli-usage',      // `claude -p /usage` auto-cli rung
     streamProtocol: 'stream-json',
+    peerDelivery: 'cli-inbox',
   },
   codex: {
     pool: true,
@@ -39,14 +53,16 @@ const BACKEND_CAPS = {
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
     quotaProbe: 'rpc-rate-limits', // account/rateLimits/read on a live app-server
     streamProtocol: 'codex-events',
+    peerDelivery: 'rpc-queue',
   },
   shell: {
     pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
     streamProtocol: null, // terminal-only: no chat parse pipeline
+    peerDelivery: 'stash-only',
   },
 };
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, streamProtocol: null });
+const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, streamProtocol: null, peerDelivery: 'stash-only' });
 
 function capsOf(backend) {
   return BACKEND_CAPS[backend || 'claude'] || NO_CAPS;

@@ -17,6 +17,8 @@
 // connectors later feed the same ladder with their own source tags.
 const fs = require('fs');
 const path = require('path');
+const { capsOf } = require('../backend-caps.js');
+const { wrapperCaps } = require('./wrapper-files.js');
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
 
@@ -49,6 +51,25 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return q;
   }
   function stashCount(cid) { return (stash[cid] || []).length; }
+
+  // rung 1.5 helper: a LIVE local chat session whose backend declares the
+  // 'rpc-queue' peer-delivery lane AND whose wrapper adverts caps.peerMessage
+  // in its own sidecar (capability law: gate on what the process wrote, never
+  // on version guesses; negative verdicts are never cached — this is a fresh
+  // stateless read per attempt).
+  function findRpcPeer(cid) {
+    if (!activeSessions) return null;
+    try {
+      for (const [wid, s] of activeSessions) {
+        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
+        if (s.mode !== 'chat' || !s.pty || s.host) continue;
+        if (capsOf(s.backend).peerDelivery !== 'rpc-queue') continue;
+        if (!wrapperCaps(path.join(dataDir, 'session-buffers'), wid, s.socketPath).peerMessage) continue;
+        return { wid, s };
+      }
+    } catch { }
+    return null;
+  }
 
   // rung 2 helper: which registered machine owns this conversation? null =
   // local/unknown (the local rung already ran by the time this is asked).
@@ -93,6 +114,21 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         return { ok: false, lane: 'message', reason: r.reason };
       }
     } catch (e) { return { ok: false, reason: e.message }; }
+    // rung 1.5: backend-declared RPC lane (REGISTRY-gated: capsOf(backend)
+    // .peerDelivery === 'rpc-queue', never a backend-id branch — a third
+    // backend claims this lane by declaring the cap + serving the contract).
+    // The wrapper owns the app-server connection: idle ⇒ it starts a billed
+    // turn (claude-inbox parity), busy ⇒ thread/queue/add runs it after the
+    // current turn. The WRAPPER records the user message (2.362.2 law: the
+    // party holding the information renders it) — no emitPeerCard here. The
+    // wrapper reports peer_message_result; ok:false re-stashes server-side.
+    const rpc = findRpcPeer(cid);
+    if (rpc) {
+      try {
+        rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text }) + '\n');
+        return { ok: true, lane: 'rpc-queue', peerName: rpc.s.name || null };
+      } catch (e) { log('[deliver] rpc-queue write failed (falling through): ' + e.message); }
+    }
     // rung 2: the owning machine's daemon posts to ITS local registry
     const hid = ownerHostOf(cid);
     if (hid) {
@@ -115,6 +151,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
 
   function peerReachable(cid) {
     try { if (peerMsg.findPeer(cid)) return true; } catch { }
+    if (findRpcPeer(cid)) return true;
     return !!ownerHostOf(cid); // a remote owner MAY be reachable — optimistic preview, the ladder decides for real
   }
 

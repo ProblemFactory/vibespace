@@ -38,4 +38,9 @@ you — a session on another machine is addressed exactly the same way.
 - 16KB cap — for anything bigger, write a file and send the absolute path.
 - If the target is unreachable, the message is QUEUED and injected at their
   next turn ("Messages that arrived while unreachable") — you'll be told.
+- Delivery is backend-aware (you don't pick a lane): Claude sessions ride the
+  CLI's cross-session inbox; Codex sessions ride their own app-server — idle
+  opens a billed turn just like Claude, mid-turn the message queues and runs
+  right after the current turn ends. Backends without a live lane queue for
+  next-turn injection.
 - Replies arrive in YOUR conversation as peer-message cards; nothing to poll.

@@ -191,6 +191,9 @@ const meta = {
   tasks: {},
   pendingRequests: {},
   subagentMetas: [],
+  // Capability advert (the 2.361.1/2.364.1 law: features gate on what THIS
+  // process declares in the file THIS process writes, never on version guesses)
+  caps: { peerMessage: true },
 };
 
 let buffer = '';
@@ -919,6 +922,37 @@ async function handleInput(msg) {
   }
   if (msg.type === 'set-permission-mode') {
     await setPermissionMode(msg.mode);
+    return;
+  }
+  if (msg.type === 'peer-message') {
+    // Live agent-to-agent delivery (peerDelivery 'rpc-queue'): we OWN the
+    // app-server connection, so idle ⇒ turn/start (billed turn + reply —
+    // claude-inbox parity); busy ⇒ thread/queue/add, which the app-server
+    // runs right after the current turn (upstream-test-pinned). The user
+    // message is recorded HERE (item notifications never carry userMessage,
+    // so nothing double-renders). Failure is reported, never swallowed —
+    // the server stashes the text for next-turn injection on ok:false.
+    const text = String(msg.text || '');
+    if (!text.trim()) return;
+    try {
+      if (meta.activeTurnId) {
+        await request('thread/queue/add', {
+          threadId: meta.threadId,
+          input: encodeUserInput(text, []),
+          clientUserMessageId: `peer-${process.pid}-${nextId++}`,
+        }, 30000);
+        record('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+        emitTaskEvent('peer_message_result', { ok: true, mode: 'queued' });
+        log('peer message queued (turn active; runs after the current turn)');
+      } else {
+        await startTurn(text);
+        record('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+        emitTaskEvent('peer_message_result', { ok: true, mode: 'turn' });
+      }
+    } catch (e) {
+      emitTaskEvent('peer_message_result', { ok: false, reason: e.message, text });
+      log('peer-message delivery failed: ' + e.message);
+    }
     return;
   }
   if (msg.type === 'codex-read-limits') {
