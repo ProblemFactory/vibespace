@@ -33,6 +33,26 @@ const TICK_MS = 30000;      // the CLI polls at 30s; match it
 const GRACE_MS = 15000;     // let the reset actually land before asking
 const MAX_WAIT_MS = 26 * 60 * 60 * 1000; // a weekly bucket can be far out; refuse to sit forever
 
+/** Pick what to WAIT FOR when a session hits the wall (PURE — the c1206711
+ *  incident 2026-08-26: the rejection carried the seven-day resetsAt ~100h out
+ *  and the armer refused, while the five-hour reset 8h away — sitting in the
+ *  usage cache the whole time — is what actually freed the sibling session).
+ *  Candidates = the event's own resetsAt + every known future bucket reset;
+ *  nearest future wins. One possibly-wasted continue message at a nearer reset
+ *  beats hours of silence. Returns { ms, label } or null (nothing in range —
+ *  caller must SAY so, not just journal it). All times in ms. */
+function pickArmReset({ eventMs, buckets, now, maxWaitMs = MAX_WAIT_MS }) {
+  const cands = [];
+  if (Number(eventMs) > now) cands.push({ ms: Number(eventMs), label: 'event' });
+  for (const [label, b] of Object.entries(buckets || {})) {
+    const ms = (Number(b && b.resetsAt) || 0) * 1000;
+    if (ms > now) cands.push({ ms, label });
+  }
+  cands.sort((a, b) => a.ms - b.ms);
+  const best = cands.find((c) => c.ms - now <= maxWaitMs);
+  return best || (cands.length ? { ms: cands[0].ms, label: cands[0].label, tooFar: true } : null);
+}
+
 function writeJsonAtomic(file, obj) {
   fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2));
   fs.renameSync(file + '.tmp', file);
@@ -83,6 +103,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       reason: a ? a.reason : null,
     };
   }
+  const _refuseNotified = new Map(); // id → last far-refusal notice ts (1/h floor)
   const emit = (id) => { try { broadcast(id, { type: 'auto-resume', sessionId: id, status: statusFor(id) }); } catch { } };
 
   /** The live toggle (ws). Turning it OFF also cancels a pending wait. */
@@ -104,7 +125,15 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const resets = Number(resetsAtMs) || 0;
     if (!resets || resets <= at) return null;                 // already past / unknown
     if (resets - at > MAX_WAIT_MS) {                          // a week out: say so, do not squat
-      log(`[auto-resume] ${id}: reset is ${(Math.round((resets - at) / 3600000))}h away — not arming`);
+      const hrs = Math.round((resets - at) / 3600000);
+      log(`[auto-resume] ${id}: reset is ${hrs}h away — not arming`);
+      // …but say so IN the session too (the c1206711 lesson: this refusal was
+      // journal-only and the user watched a silently dead session). 1/h floor.
+      const lastN = _refuseNotified.get(id) || 0;
+      if (notify && at - lastN > 3600000) {
+        _refuseNotified.set(id, at);
+        try { notify(id, session, `用量已达上限，最近的重置在 ${new Date(resets).toLocaleString()}（约${hrs}小时后），超过自动等待上限（${Math.round(MAX_WAIT_MS / 3600000)}h），不会自动续跑。可切换账号或届时手动继续。`); } catch { }
+      }
       return null;
     }
     const prev = armed.get(id);
@@ -168,4 +197,4 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   return { armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
 }
 
-module.exports = { create, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };
+module.exports = { create, pickArmReset, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };

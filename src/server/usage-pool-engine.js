@@ -67,6 +67,7 @@ const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 // requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
 const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('../usage-anchors.js');
 const { capsOf } = require('../backend-caps.js'); // per-backend switching capabilities (P4 slice) — replaces backend-id special cases
+const { pickArmReset } = require('./auto-resume.js'); // PURE nearest-reset picker (the c1206711 far-weekly incident)
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // Which caches map to which identity (org-merge aware) — shared by the sweep
@@ -446,6 +447,26 @@ function orgVerifiedKey(session, key, what) {
   } catch { }
   return key;
 }
+// Arm the auto-resume wait for the BEST reset, not just the event's own
+// (c1206711 incident 2026-08-26: a seven-day rejection carried resetsAt ~100h
+// out and the armer refused, while the five-hour reset 8h away — in this very
+// cache — is what actually freed the account). Candidates = event resetsAt +
+// every known future bucket reset for the session's billing identity; the
+// PURE picker (auto-resume.pickArmReset) takes the nearest in range. Shared
+// by the claude and codex exhaustion paths — backend-neutral by construction.
+function armBestReset(session, key, eventResetMs, reasonPrefix) {
+  const ar = getAutoResume();
+  if (!ar?.armIfEnabled) return;
+  let buckets = null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, (key || '__global__') + '.json'), 'utf-8'));
+    buckets = { fiveHour: raw.fiveHour, sevenDay: raw.sevenDay, sevenDayOpus: raw.sevenDayOpus };
+    for (const [sk, sv] of Object.entries(raw.scoped || {})) buckets['scoped:' + sk] = sv;
+  } catch { }
+  const pick = pickArmReset({ eventMs: eventResetMs, buckets, now: Date.now() });
+  if (!pick) return;
+  ar.armIfEnabled(session._webuiId, session, pick.ms, reasonPrefix + (pick.label !== 'event' ? ` (nearest reset: ${pick.label})` : ''));
+}
 function recordRateLimitEvent(session, msg) {
   try {
     const ev = parseRateLimitEvent(msg);
@@ -465,7 +486,7 @@ function recordRateLimitEvent(session, msg) {
       // Arming is cheap and idempotent; the module disarms itself the moment
       // the session produces work again (a switch that took over, the user's
       // own prompt), so this never races the pool.
-      try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (Number(ev.resetsAt) || 0) * 1000, ev.kind + ' limit'); } catch { }
+      try { armBestReset(session, key, (Number(ev.resetsAt) || 0) * 1000, ev.kind + ' limit'); } catch { }
     } else if (r.wroteReading) {
       try { if (ev.status && ev.status !== 'rejected') getAutoResume()?.noteRecovered?.(session._webuiId, 'fresh non-rejected reading'); } catch { }
       kickPoolEval();
@@ -547,7 +568,7 @@ function recordCodexQuotaSignal(session, payload) {
         const tripped = w.snap.rateLimitReachedType === 'primary' ? (w.snap.fiveHour || w.snap.sevenDay) : (w.snap.sevenDay || w.snap.fiveHour);
         if (tryResetCredit(tripped?.resetsAt)) return; // outcome event continues the ladder
         maybePoolAutoSwitch(session); // another ChatGPT account = seconds, not hours
-        try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (Number(tripped?.resetsAt) || 0) * 1000, 'codex limit'); } catch { }
+        try { armBestReset(session, w.key, (Number(tripped?.resetsAt) || 0) * 1000, 'codex limit'); } catch { }
       } else {
         try { getAutoResume()?.noteRecovered?.(session._webuiId, 'fresh non-limited codex reading'); } catch { }
         kickPoolEval();
@@ -566,11 +587,11 @@ function recordCodexQuotaSignal(session, payload) {
           limitId: 'codex', sevenDay: { utilization: 1, usedPercent: 100, windowMinutes: 10080, resetsAt: resets > nowSec ? resets : nowSec + 24 * 3600, status: 'limited' },
           fiveHour: null, rateLimitReachedType: 'unknown', fetchedAt: Date.now(),
         };
-        writeSnap(snap);
+        const w2 = writeSnap(snap);
         global.__vsEvent?.('codex-usage-limit', info);
         if (tryResetCredit(resets)) return; // ① reset credit first when opted in
         maybePoolAutoSwitch(session);
-        try { getAutoResume()?.armIfEnabled?.(session._webuiId, session, (resets || nowSec + 24 * 3600) * 1000, 'codex ' + info); } catch { }
+        try { armBestReset(session, (w2 && w2.key) || '__global_codex__', (resets || nowSec + 24 * 3600) * 1000, 'codex ' + info); } catch { }
       } else if (info === 'unauthorized') {
         global.__vsEvent?.('codex-auth-failure', session._accountId || 'global'); // v1: surfaced, not auto-evicted (claude's evict is creds-path-specific)
       }

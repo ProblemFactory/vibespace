@@ -210,5 +210,34 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('…and a zero-message attach still applies live state', /else {\s*\n\s*chatView\._applyLiveMeta\?\.\(msg\);/.test(sl2));
   ok('_fullViewReset passes the payload wholesale too', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\)/.test(cv2));
 }
+
+// ── §8 nearest-reset arming (c1206711 incident, 2026-08-26): the rejection
+// carried the seven-day resetsAt ~100h out → armIfEnabled refused → NOTHING
+// was left waiting, while the five-hour reset 8h away (sitting in the usage
+// cache) is what actually freed the sibling session. The picker is PURE and
+// tested on the real incident shape; the engine wiring is PINNED at all three
+// arm sites (the 2.355.0 lesson: an unwired pure fix stays dead while its
+// unit tests glow green).
+{
+  const { pickArmReset, MAX_WAIT_MS } = require(path.join(REPO, 'src/server/auto-resume.js'));
+  const now = 1787751372000; // 2026-08-26T13:36Z, mid-incident
+  const H = 3600000;
+  // the real shapes: event = seven_day resetsAt 1788109200 (~99h), cache
+  // fiveHour resetsAt 1787753400 (~34min out at this instant)
+  const r1 = pickArmReset({ eventMs: 1788109200000, buckets: { fiveHour: { resetsAt: 1787753400, utilization: 1 }, sevenDay: { resetsAt: 1788109200, utilization: 1 } }, now });
+  ok('the incident shape now arms for the NEAR fiveHour reset, not the far weekly refusal', r1 && r1.label === 'fiveHour' && r1.ms === 1787753400000 && !r1.tooFar, JSON.stringify(r1));
+  const r2 = pickArmReset({ eventMs: now + 100 * H, buckets: { sevenDay: { resetsAt: (now + 99 * H) / 1000 } }, now });
+  ok('all candidates out of range ⇒ nearest returned WITH tooFar (caller must say so)', r2 && r2.tooFar === true, JSON.stringify(r2));
+  ok('no future candidate at all ⇒ null (nothing to pretend to wait for)', pickArmReset({ eventMs: 0, buckets: { fiveHour: { resetsAt: 1 } }, now }) === null);
+  ok('past bucket resets are ignored, event-only still works', pickArmReset({ eventMs: now + 2 * H, buckets: { fiveHour: { resetsAt: (now - H) / 1000 } }, now })?.label === 'event');
+  ok('MAX_WAIT is the arming ceiling (26h)', MAX_WAIT_MS === 26 * H);
+  const eng2 = read('src/server/usage-pool-engine.js');
+  ok('WIRING: the claude dead branch arms via armBestReset(key), not the raw event', /if \(r\.dead\) \{[\s\S]{0,700}armBestReset\(session, key,/.test(eng2));
+  ok('WIRING: both codex exhaustion sites go through armBestReset too', /armBestReset\(session, w\.key,/.test(eng2) && /armBestReset\(session, \(w2 && w2\.key\) \|\| '__global_codex__',/.test(eng2));
+  ok('armBestReset merges cache buckets (fiveHour/sevenDay/opus/scoped) into the picker', /buckets = \{ fiveHour: raw\.fiveHour, sevenDay: raw\.sevenDay, sevenDayOpus: raw\.sevenDayOpus \}/.test(eng2) && /buckets\['scoped:' \+ sk\] = sv/.test(eng2));
+  const arS = read('src/server/auto-resume.js');
+  ok('a far-reset refusal now SPEAKS in the session (was journal-only — the user watched a silent dead session), 1/h floor', /不会自动续跑/.test(arS) && /_refuseNotified/.test(arS) && /at - lastN > 3600000/.test(arS));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
