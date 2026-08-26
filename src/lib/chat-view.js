@@ -1381,7 +1381,17 @@ class ChatView {
 
   // Keep DOM under ~150 messages by removing from bottom
   _trimBottom(maxRendered = 150) {
-    const els = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
+    // FOLD-DOMINATED WINDOWS (inc-mtajy6wr, "上翻的时候出现大量白屏"): with
+    // semantic collapse folding whole tool/agent runs, 150 rendered messages
+    // can amount to a couple of run headers — SHORTER than the viewport
+    // (sh clamps to ch). Trimming then removes the only VISIBLE content and
+    // every wheel-tick teleports the window 50 messages through fold-space
+    // on a white screen. While the rendered window is shorter than ~2
+    // viewports, let it grow instead (fold members are hidden and cheap);
+    // 600 rendered messages is the absolute DOM bound.
+    const list = this._messageList;
+    if (list && list.scrollHeight < list.clientHeight * 2) maxRendered = 600;
+    const els = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
     if (els.length <= maxRendered) return;
     const toRemove = els.length - maxRendered;
     const removedIds = new Set();
@@ -1401,7 +1411,17 @@ class ChatView {
     // Exclude lazily-loaded gap messages: they aren't part of the server
     // window (_windowStart/_windowEnd accounting), so trimming them would
     // corrupt the offsets and silently delete explicitly-requested history
-    const els = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
+    // FOLD-DOMINATED WINDOWS (inc-mtajy6wr, "上翻的时候出现大量白屏"): with
+    // semantic collapse folding whole tool/agent runs, 150 rendered messages
+    // can amount to a couple of run headers — SHORTER than the viewport
+    // (sh clamps to ch). Trimming then removes the only VISIBLE content and
+    // every wheel-tick teleports the window 50 messages through fold-space
+    // on a white screen. While the rendered window is shorter than ~2
+    // viewports, let it grow instead (fold members are hidden and cheap);
+    // 600 rendered messages is the absolute DOM bound.
+    const list = this._messageList;
+    if (list && list.scrollHeight < list.clientHeight * 2) maxRendered = 600;
+    const els = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
     if (els.length <= maxRendered) return;
     const scrollHeightBefore = this._messageList.scrollHeight;
     const toRemove = els.length - maxRendered;
