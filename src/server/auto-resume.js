@@ -67,7 +67,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.broadcast      (sessionId, msg) => void — per-session UI state
  * @param deps.notify         (sessionId, session, text) => void — a visible line in the chat
  */
-function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, log = () => { } }) {
+function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, log = () => { } }) {
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   try {
@@ -177,6 +177,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       if (!session) { armed.delete(id); save(); continue; }          // gone: nothing to continue
       if (!enabledFor(session)) { noteRecovered(id, 'disabled'); continue; }
       if (session._isStreaming) { continue; }                        // it is already working — try next tick
+      // Give the engine one shot at re-pointing the pool BEFORE spending: the
+      // wait may have been armed for a SIBLING member's reset (the c1206711
+      // owner correction) — the continue must ride the healthy account.
+      try { beforeFire?.(id, session); } catch { }
       const ok = sendToSession(id, session, CONTINUE_PROMPT);
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); continue; }
       armed.delete(id); save(); fired++;
@@ -187,6 +191,26 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     return fired;
   }
 
+  /** A pool switch just landed this session on a HEALTHY account while it sat
+   *  limit-blocked and ARMED. A hot re-point does not move an idle session by
+   *  itself (the c1206711 incident: the pool switched back at 07:09 and the
+   *  un-armed session stayed dead) — deliver the continue NOW instead of
+   *  waiting out a reset that no longer matters. Armed-only: an unarmed
+   *  session was never promised a continue. */
+  function fireNow(id, why) {
+    const a = armed.get(id);
+    if (!a || a.fired) return false;
+    const session = activeSessions.get(id);
+    if (!session || !enabledFor(session) || session._isStreaming) return false;
+    const ok = sendToSession(id, session, CONTINUE_PROMPT);
+    if (!ok) return false;
+    armed.delete(id); save();
+    log(`[auto-resume] ${id}: ${why} — continued immediately`);
+    if (notify) { try { notify(id, session, (why || '账号已可用') + '，已自动继续这个任务。'); } catch { } }
+    emit(id);
+    return true;
+  }
+
   function start() {
     if (timer) return;
     timer = setInterval(() => { try { tick(); } catch (e) { log('[auto-resume] tick failed: ' + e.message); } }, TICK_MS);
@@ -194,7 +218,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   }
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
 
-  return { armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
+  return { armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
 }
 
 module.exports = { create, pickArmReset, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };

@@ -463,6 +463,24 @@ function armBestReset(session, key, eventResetMs, reasonPrefix) {
     buckets = { fiveHour: raw.fiveHour, sevenDay: raw.sevenDay, sevenDayOpus: raw.sevenDayOpus };
     for (const [sk, sv] of Object.entries(raw.scoped || {})) buckets['scoped:' + sk] = sv;
   } catch { }
+  // POOL-AWARE (owner correction on c1206711: the pool moved the session onto
+  // a member whose 7d then died, while the 5h-exhausted SIBLING — whose 7d was
+  // fine — was the account to come back to; its reset lived in ITS cache, not
+  // the current member's). Include every member's future bucket resets; the
+  // fire path re-runs pool eval first (beforeFire), so the continue rides
+  // whichever member is healthy at that moment.
+  try {
+    const pa = accounts.get(session._accountId);
+    if (pa && pa.type === 'pooled') {
+      const rc = poolReadCache(pa.id);
+      for (const m of accounts.poolMembers(pa.id) || []) {
+        const c = rc(m.id);
+        for (const bk of ['fiveHour', 'sevenDay', 'sevenDayOpus']) {
+          if (c && c[bk] && Number(c[bk].resetsAt) > 0) (buckets = buckets || {})[(m.name || m.id) + ':' + bk] = c[bk];
+        }
+      }
+    }
+  } catch { }
   const pick = pickArmReset({ eventMs: eventResetMs, buckets, now: Date.now() });
   if (!pick) return;
   ar.armIfEnabled(session._webuiId, session, pick.ms, reasonPrefix + (pick.label !== 'event' ? ` (nearest reset: ${pick.label})` : ''));
@@ -924,6 +942,11 @@ function maybePoolAutoSwitchForPool(poolId) {
         const toName = accounts.get(ds.to)?.name || ds.to;
         serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${s2.name || sid}" moved to ${toName}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` was at ${Math.round(ds.fromRemaining)}%` : ''})` : ''}${a.hot ? '' : ' — restarting it'}`);
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to} (fam=${fam || '?'}, from ${ds.fromRemaining}%)`);
+        // a hot re-point does not move an idle limit-blocked session by itself
+        // (c1206711: the pool switched back and the session stayed dead) —
+        // an ARMED session gets its continue NOW. Hot only: a cold switch
+        // restarts the conversation through the client instead.
+        if (a.hot) { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
         if (!a.hot) {
           const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected: [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }] });
           for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
@@ -995,6 +1018,10 @@ function maybePoolAutoSwitchForPool(poolId) {
       const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
       for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
     }
+    // default-link sessions on a HOT switch: same c1206711 rule as the
+    // per-session pass — an ARMED (limit-blocked, idle) session must be
+    // nudged, a re-point alone never moves it.
+    if (hot) for (const t of affected) { try { getAutoResume()?.fireNow?.(t.serverId, `账号池已切换到 ${d.toName || d.to}`); } catch { } }
   } catch (e) { console.warn('[pool] auto-switch check failed:', e.message); }
 }
 // Alias-tolerant model compare (server twin of the client's _modelMismatch):

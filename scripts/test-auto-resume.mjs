@@ -239,5 +239,48 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('a far-reset refusal now SPEAKS in the session (was journal-only — the user watched a silent dead session), 1/h floor', /不会自动续跑/.test(arS) && /_refuseNotified/.test(arS) && /at - lastN > 3600000/.test(arS));
 }
 
+
+// ── §9 the OWNER CORRECTION on c1206711 (2026-08-26): the pool had moved the
+// session onto a member whose 7d then died, while the 5h-exhausted SIBLING
+// (7d fine) was the account to come back to. The pool DID switch back at
+// 07:09 — but a hot re-point does not move an idle blocked session, and the
+// arm had been refused. Three mechanisms, functionally + wiring-pinned:
+//   ① armBestReset includes POOL SIBLING members' bucket resets
+//   ② a hot per-session switch fires an ARMED session's continue NOW
+//   ③ the timed fire runs beforeFire (pool eval) before spending
+{
+  const { ar, sent, notes, sessions } = mk({ dflt: true });
+  const s9 = sess();
+  sessions.set('w9', s9);
+  const resets = Date.now() + 60000;
+  ar.armIfEnabled('w9', s9, resets, 'fiveHour limit');
+  ok('fireNow on an ARMED idle session delivers the continue immediately and disarms', ar.fireNow('w9', '账号池已切换') === true && sent.length === 1 && sent[0].text === CONTINUE_PROMPT && ar.statusFor('w9').armed === false);
+  ok('…and says WHY in the session', notes.some((n) => /账号池已切换/.test(n.text)));
+  ok('fireNow on an unarmed session is a no-op (never promised a continue)', ar.fireNow('w9', 'again') === false && sent.length === 1);
+  ar.armIfEnabled('w9', s9, Date.now() + 60000, 'fiveHour limit');
+  s9._isStreaming = true;
+  ok('fireNow never interrupts a working session', ar.fireNow('w9', 'x') === false && ar.statusFor('w9').armed === true);
+  s9._isStreaming = false;
+  // ③ beforeFire ordering on the timed path
+  const order = [];
+  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar9-'));
+  const sess2 = new Map();
+  const ar2 = create({
+    dataDir: d2, activeSessions: sess2,
+    serverSetting: () => true,
+    beforeFire: () => order.push('pool-eval'),
+    sendToSession: () => { order.push('send'); return true; },
+  });
+  const sB = sess(); sess2.set('wB', sB);
+  ar2.armIfEnabled('wB', sB, Date.now() + 1000, 'fiveHour limit');
+  ar2.tick(Date.now() + 1000 + GRACE_MS + 1);
+  ok('the timed fire runs beforeFire (pool eval) BEFORE sending the continue', order.join(',') === 'pool-eval,send', order.join(','));
+  // wiring pins (2.355.0 lesson — every hook must be seen at its call site)
+  const eng9 = read('src/server/usage-pool-engine.js');
+  ok('WIRING: armBestReset merges pool SIBLING members\' buckets (poolReadCache over poolMembers)', /pa\.type === 'pooled'[\s\S]{0,300}poolReadCache\(pa\.id\)[\s\S]{0,300}poolMembers\(pa\.id\)/.test(eng9));
+  ok('WIRING: a HOT per-session switch fireNow()s the armed session (cold restarts via the client instead)', /per-session switch[\s\S]{0,600}if \(a\.hot\) \{ try \{ getAutoResume\(\)\?\.fireNow\?\.\(sid,/.test(eng9));
+  ok('WIRING: server.js passes beforeFire → maybePoolAutoSwitch', /beforeFire: \(id, s\) => \{ try \{ maybePoolAutoSwitch\(s\); \} catch \{ \} \}/.test(read('server.js')));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
