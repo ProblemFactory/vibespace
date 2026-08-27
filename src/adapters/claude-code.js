@@ -383,6 +383,30 @@ class ClaudeCodeAdapter extends BackendAdapter {
   // hits zero — the freshest possible exhaustion signal, zero API calls
   // (auto-firing get_usage was REJECTED as an automated quota-check pattern).
   // Returns {kind:'fiveHour'|'sevenDay'|'scoped', name?} or null.
+  /** The banner's own "resets 12:40pm (America/Los_Angeles)" → epoch ms of
+   *  the NEXT such wall time in that zone (2.368.34 — the armer used to guess
+   *  now+5h while the precise time sat in the text). Returns 0 when absent/
+   *  unparseable; minute precision. */
+  static parseBannerResetMs(text, nowMs = Date.now()) {
+    const m = /resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([\w/_+-]+)\)/i.exec(String(text || ''));
+    if (!m) return 0;
+    let h = parseInt(m[1], 10) % 12;
+    if (/pm/i.test(m[3])) h += 12;
+    const min = parseInt(m[2] || '0', 10);
+    const tz = m[4];
+    try {
+      // tz offset at a given instant (locale-string round-trip; minute precision)
+      const offAt = (at) => new Date(new Date(at).toLocaleString('en-US', { timeZone: tz })).getTime() - new Date(new Date(at).toLocaleString('en-US', { timeZone: 'UTC' })).getTime();
+      for (let d = 0; d <= 1; d++) {
+        const dayAt = nowMs + d * 86400000;
+        const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(dayAt));
+        const cand = Date.parse(`${ymd}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00Z`) - offAt(dayAt);
+        if (cand > nowMs) return cand;
+      }
+    } catch { }
+    return 0;
+  }
+
   static parseLimitBanner(text) {
     // BOTH wordings are live: "You've reached your …" (chat banner) AND
     // "You've hit your session limit · resets 3am" (subagent/workflow failure

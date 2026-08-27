@@ -90,7 +90,7 @@ function writeJsonAtomic(file, obj) {
  * @param deps.broadcast      (sessionId, msg) => void — per-session UI state
  * @param deps.notify         (sessionId, session, text) => void — a visible line in the chat
  */
-function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, log = () => { } }) {
+function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, notifyDelayMs = 90000, log = () => { } }) {
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   try {
@@ -127,6 +127,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     };
   }
   const _refuseNotified = new Map(); // id → last far-refusal notice ts (1/h floor)
+  const _armNotifyTimers = new Map(); // id → pending delayed-announcement timer
+  const _cancelArmNotify = (id) => { const t = _armNotifyTimers.get(id); if (t) { clearTimeout(t); _armNotifyTimers.delete(id); } };
   const emit = (id) => { try { broadcast(id, { type: 'auto-resume', sessionId: id, status: statusFor(id) }); } catch { } };
 
   /** The live toggle (ws). Turning it OFF also cancels a pending wait. */
@@ -165,7 +167,21 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     armed.set(id, rec);
     save();
     log(`[auto-resume] ${id}: armed for ${new Date(resets).toISOString()} (${reason})`);
-    if (notify) { try { notify(id, session, `用量已达上限。已安排在 ${new Date(resets).toLocaleString()} 重置后自动继续（状态栏可取消）。`); } catch { } }
+    // DELAYED announcement (2.368.34): a dead event often races the pool
+    // switch that fixes it — the armed STATE is instant (chip), but the loud
+    // in-chat line waits; a disarm inside the window means it never speaks.
+    _cancelArmNotify(id);
+    if (notify) {
+      const t = setTimeout(() => {
+        _armNotifyTimers.delete(id);
+        const a = armed.get(id);
+        if (!a || a.fired || a.resetsAt !== resets) return;
+        const s2 = activeSessions.get(id);
+        if (s2) { try { notify(id, s2, `用量已达上限。已安排在 ${new Date(resets).toLocaleString()} 重置后自动继续（状态栏可取消）。`); } catch { } }
+      }, Math.max(0, notifyDelayMs));
+      if (t.unref) t.unref();
+      _armNotifyTimers.set(id, t);
+    }
     emit(id);
     return rec;
   }
@@ -178,8 +194,20 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const a = armed.get(id);
     if (!a || a.fired) return;
     armed.delete(id); save();
+    _cancelArmNotify(id);
     log(`[auto-resume] ${id}: disarmed (${why})`);
     emit(id);
+  }
+
+  /** Main-thread output seen. Only SUSTAINED post-arm work proves recovery —
+   *  the wall banner itself arrives as assistant records, and the blocked
+   *  turn's trailing output lands within seconds of the arm (2.368.34: an
+   *  ungated disarm here would kill every real wall's arm instantly). */
+  function noteWorked(id) {
+    const a = armed.get(id);
+    if (!a || a.fired) return;
+    if (Date.now() - a.at < 30000) return;
+    noteRecovered(id, 'session produced work');
   }
   function forget(id) { if (armed.delete(id)) { save(); } }
 
@@ -241,7 +269,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   }
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
 
-  return { armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
+  return { armIfEnabled, noteRecovered, noteWorked, forget, setEnabled, statusFor, enabledFor, fireNow, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
 }
 
 module.exports = { create, pickArmReset, isDeadBucket, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };

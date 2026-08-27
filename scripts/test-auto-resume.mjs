@@ -82,7 +82,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('and sends the CLI\'s own continue wording', a.sent[0].text === CONTINUE_PROMPT && /do not repeat work that is already complete/.test(a.sent[0].text));
   ok('NEVER twice', a.ar.tick(resets + 600000) === 0 && a.sent.length === 1);
   ok('the fire is announced in the conversation (a billed turn must explain itself)', a.notes.some((n) => /自动继续|continue/i.test(n.text)));
-  ok('and the arming was announced too', a.notes.length >= 2);
+  ok('the arming announcement is DELAYED, not immediate (2.368.34 §10 covers the full lifecycle)', a.notes.filter((n) => /已安排/.test(n.text)).length === 0);
 }
 
 // ── 4. recovery disarms (a fire on a recovered session is money for nothing) ──
@@ -242,7 +242,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const eng2 = read('src/server/usage-pool-engine.js');
   ok('WIRING: the claude dead branch arms via armBestReset(key), not the raw event', /if \(r\.dead\) \{[\s\S]{0,700}armBestReset\(session, key,/.test(eng2));
   ok('WIRING: both codex exhaustion sites go through armBestReset too', /armBestReset\(session, w\.key,/.test(eng2) && /armBestReset\(session, \(w2 && w2\.key\) \|\| '__global_codex__',/.test(eng2));
-  ok('WIRING: the LIMIT-BANNER path (re-)arms off the just-marked dead buckets (the premature fire left nothing re-armed)', /armBestReset\(session, key, 0, hit\.kind \+ ' limit banner'\)/.test(eng2));
+  ok('WIRING: the LIMIT-BANNER path (re-)arms off the just-marked dead buckets (the premature fire left nothing re-armed)', /armBestReset\(session, key, bannerResetMs \|\| 0, hit\.kind \+ ' limit banner'\)/.test(eng2));
   ok('armBestReset spans pool member identities and BOTH scoped shapes', /identities\.push\(\{ label: m\.name \|\| m\.id, buckets: mb \}\)/.test(eng2) && /raw\.scopedWeekly/.test(eng2));
   const arS = read('src/server/auto-resume.js');
   ok('a far-reset refusal still SPEAKS in the session (1/h floor)', /不会自动续跑/.test(arS) && /_refuseNotified/.test(arS));
@@ -291,26 +291,47 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
 }
 
 
-// ── §10 FALSE-ARM suppression (owner: "你是不是错误通知了? 这里没被打断任何
-// 对话" — journal: 04:55:50 hot switch succeeded, 04:55:51 the dead event
-// still armed + announced; the healthy account emits no readings so nothing
-// ever disarmed, leaving a wasted continue pending). Two layers:
-//   ① armBestReset skips when the pool ALREADY recovered the session
-//   ② any main-thread assistant record disarms (the most precise recovery
-//      signal — wired engine→session-stdout, 2.355.0 pins)
+// ── §10 FALSE-ARM handling, v2 (2.368.34 — v1's "already recovered" pre-check
+// ATE A REAL WALL: a live CLI holds its OLD token, the org-verified banner
+// marked the OLD member dead while the pool link pointed at a healthy one, so
+// the check read "usable" and refused to arm — 9h dark session). The check is
+// GONE; noise is handled by mechanisms that cannot eat a real wall:
+//   ① the announcement is DELAYED — disarm inside the window ⇒ never speaks
+//   ② noteWorked disarms only on SUSTAINED post-arm output (>30s), so the
+//      wall banner's own trailing records can't kill a fresh arm
 {
-  const { isDeadBucket } = require(path.join(REPO, 'src/server/auto-resume.js'));
-  const now = 1787751372000;
-  ok('isDeadBucket: limited/1.0 future = dead; healthy or past-reset = alive', isDeadBucket({ resetsAt: (now + 3600000) / 1000, utilization: 1 }, now) === true && isDeadBucket({ resetsAt: (now + 3600000) / 1000, utilization: 0.5 }, now) === false && isDeadBucket({ resetsAt: 1, utilization: 1 }, now) === false);
-  const { ar, sent, notes, sessions } = mk({ dflt: true });
-  const sX = sess(); sessions.set('wX', sX);
-  ar.armIfEnabled('wX', sX, Date.now() + 60000, 'fiveHour limit');
-  ar.noteRecovered('wX', 'session produced work');
-  ok('a produced-work disarm drops the wait before it can fire', ar.statusFor('wX').armed === false && sent.length === 0);
+  ok("the unsound pre-check is GONE (link ≠ the org a running CLI is on)", !read('src/server/usage-pool-engine.js').includes('pool already recovered onto a usable member'));
+  // delayed announcement: notifyDelayMs=0 fires on the next macrotask —
+  // a disarm BEFORE it must suppress the notice entirely
+  const d10 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar10-'));
+  const notes10 = [];
+  const sess10 = new Map();
+  const ar10 = create({
+    dataDir: d10, activeSessions: sess10, serverSetting: () => true,
+    sendToSession: () => true, notify: (id, s, text) => notes10.push(text), notifyDelayMs: 30,
+  });
+  const sA = sess(); sess10.set('wA', sA);
+  ar10.armIfEnabled('wA', sA, Date.now() + 60000, 'fiveHour limit');
+  ok('the armed STATE is instant but the announcement is NOT (delayed)', ar10.statusFor('wA').armed === true && notes10.length === 0);
+  ar10.noteRecovered('wA', 'pool switch took over');
+  await new Promise((r) => setTimeout(r, 80));
+  ok('a disarm inside the delay window suppresses the announcement entirely', notes10.length === 0);
+  ar10.armIfEnabled('wA', sA, Date.now() + 60000, 'fiveHour limit');
+  await new Promise((r) => setTimeout(r, 80));
+  ok('a SURVIVING arm announces after the delay', notes10.length === 1 && /自动继续/.test(notes10[0]), JSON.stringify(notes10));
+  // noteWorked age gate
+  ok('noteWorked within 30s of arming is a NO-OP (the wall banner trails its own assistant records)', (ar10.noteWorked('wA'), ar10.statusFor('wA').armed === true));
+  ar10._armed.get('wA').at = Date.now() - 31000;
+  ar10.noteWorked('wA');
+  ok('sustained post-arm output (>30s) disarms', ar10.statusFor('wA').armed === false);
+  // precise banner reset time
+  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const nb = Date.parse('2026-08-27T15:50:00Z');
+  ok("the banner's own reset time is parsed with its timezone (12:40pm LA = 19:40Z)", ClaudeCodeAdapter.parseBannerResetMs("You've hit your session limit · resets 12:40pm (America/Los_Angeles)", nb) === Date.parse('2026-08-27T19:40:00Z'));
+  ok('…rolls to tomorrow when the wall time already passed; absent time → 0', ClaudeCodeAdapter.parseBannerResetMs('resets 3am (America/Los_Angeles)', nb) === Date.parse('2026-08-28T10:00:00Z') && ClaudeCodeAdapter.parseBannerResetMs('no time here', nb) === 0);
   const eng10 = read('src/server/usage-pool-engine.js');
-  ok('WIRING: armBestReset skips when the CURRENT pool member has no dead bucket (shared isDeadBucket predicate, unknown cache never guessed)', /pool already recovered onto a usable member — not arming/.test(eng10) && /!Object\.values\(cb\)\.some\(\(b\) => b && isDeadBucket\(b, Date\.now\(\)\)\)/.test(eng10));
-  ok('WIRING: noteSessionProduced exported by the engine and passed through server.js', /function noteSessionProduced\(session\)/.test(eng10) && /noteSessionProduced, probeUsageViaSession/.test(eng10) && /modelsMatch, noteSessionProduced, recordCodexQuotaSignal/.test(read('server.js')));
-  ok('WIRING: session-stdout disarms on every main-thread assistant record', /noteSessionProduced\?\.\(session\)/.test(read('src/server/session-stdout.js')));
+  ok('WIRING: the banner path feeds the precise time to bump AND armBestReset', /bannerResetMs > Date\.now\(\) \? Math\.floor\(bannerResetMs \/ 1000\)/.test(eng10) && /armBestReset\(session, key, bannerResetMs \|\| 0, hit\.kind/.test(eng10));
+  ok('WIRING: noteSessionProduced routes through the age-gated noteWorked', /getAutoResume\(\)\?\.noteWorked\?\.\(session\._webuiId\)/.test(eng10) && /noteSessionProduced\?\.\(session\)/.test(read('src/server/session-stdout.js')));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

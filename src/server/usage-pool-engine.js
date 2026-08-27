@@ -480,23 +480,13 @@ function armBestReset(session, key, eventResetMs, reasonPrefix) {
       }
     }
   } catch { }
-  // ALREADY RECOVERED (the 04:55:51 false arm: the hot switch landed one
-  // second earlier and the session kept working, but the dead event still
-  // armed + ANNOUNCED — and the healthy account emits no readings, so the
-  // disarm net never fired either): when the session's CURRENT pool member
-  // (post-eval) has no dead bucket, there is nothing to wait for. Unknown
-  // cache ⇒ never guess ⇒ arm as before.
-  try {
-    const pa = accounts.get(session._accountId);
-    if (pa && pa.type === 'pooled') {
-      const curId = accounts.poolCurrentFor(pa.id, session._webuiId);
-      const cb = curId && readBuckets(poolReadCache(pa.id)(curId));
-      if (cb && Object.values(cb).some(Boolean) && !Object.values(cb).some((b) => b && isDeadBucket(b, Date.now()))) {
-        console.log(`[auto-resume] ${session._webuiId}: pool already recovered onto a usable member — not arming`);
-        return;
-      }
-    }
-  } catch { }
+  // NO "already recovered" pre-check (2.368.34, removed after it ate a REAL
+  // wall: a live CLI holds its OLD token — the org-verified banner marked the
+  // OLD member dead while the pool LINK pointed at a healthy one, so the
+  // check read "usable" and refused to arm on a genuinely blocked session,
+  // 9h dark). The link is not the org a running CLI is on; arming is always
+  // safe now — false arms disarm via noteWorked (sustained post-arm output)
+  // and the announcement is DELAYED so a quick recovery never even speaks.
   const pick = pickArmReset({ identities, now: Date.now() });
   if (!pick) return;
   ar.armIfEnabled(session._webuiId, session, pick.ms, reasonPrefix + (pick.label && pick.label !== 'event' ? ` (${pick.label})` : ''));
@@ -505,7 +495,10 @@ function armBestReset(session, key, eventResetMs, reasonPrefix) {
 // wait is stale (the most precise recovery signal there is — readings-based
 // disarm misses accounts that emit no rate_limit_events at all).
 function noteSessionProduced(session) {
-  try { getAutoResume()?.noteRecovered?.(session._webuiId, 'session produced work'); } catch { }
+  // age-gated (noteWorked): the wall banner itself arrives as assistant
+  // records — trailing output of the blocked turn must not kill a fresh arm;
+  // only SUSTAINED post-arm work (>30s later) proves recovery.
+  try { getAutoResume()?.noteWorked?.(session._webuiId); } catch { }
 }
 function recordRateLimitEvent(session, msg) {
   try {
@@ -643,6 +636,7 @@ function markLimitBanner(session, text) {
   try {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
+    const bannerResetMs = ClaudeCodeAdapter.parseBannerResetMs(text); // precise "resets 12:40pm (TZ)" when present
     // host-aware (2.289.0) — a remote host-login banner belongs to the host
     // bucket, not __global__; org-verified (B-b3cd) — a stale-token session's
     // banner marks the org it is actually ON, not the linked account.
@@ -651,9 +645,10 @@ function markLimitBanner(session, text) {
     const bump = (b, fallbackResetSec) => ({
       ...(b || {}),
       utilization: 1, status: 'limited',
-      // keep a known FUTURE reset; else a bounded guess so the marker self-
-      // expires (reset-passed ⇒ full) instead of pinning the account dead
-      resetsAt: (Number(b?.resetsAt) || 0) > nowSec ? b.resetsAt : nowSec + fallbackResetSec,
+      // precise banner time > known FUTURE reset > bounded guess (self-
+      // expires via reset-passed ⇒ full, never pins the account dead)
+      resetsAt: bannerResetMs > Date.now() ? Math.floor(bannerResetMs / 1000)
+        : (Number(b?.resetsAt) || 0) > nowSec ? b.resetsAt : nowSec + fallbackResetSec,
     });
     const applyHit = (cache) => {
       if (hit.kind === 'fiveHour') cache.fiveHour = bump(cache.fiveHour, 5 * 3600);
@@ -701,7 +696,7 @@ function markLimitBanner(session, text) {
     // …and (re-)arm the wait off the just-written dead buckets (the 2:00am
     // premature fire: the banner rejection after a wrong-target fire was the
     // moment to re-arm for the REAL blocker, but this path never armed)
-    try { armBestReset(session, key, 0, hit.kind + ' limit banner'); } catch { }
+    try { armBestReset(session, key, bannerResetMs || 0, hit.kind + ' limit banner'); } catch { }
   } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
 }
 
