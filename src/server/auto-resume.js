@@ -33,20 +33,40 @@ const TICK_MS = 30000;      // the CLI polls at 30s; match it
 const GRACE_MS = 15000;     // let the reset actually land before asking
 const MAX_WAIT_MS = 26 * 60 * 60 * 1000; // a weekly bucket can be far out; refuse to sit forever
 
-/** Pick what to WAIT FOR when a session hits the wall (PURE — the c1206711
- *  incident 2026-08-26: the rejection carried the seven-day resetsAt ~100h out
- *  and the armer refused, while the five-hour reset 8h away — sitting in the
- *  usage cache the whole time — is what actually freed the sibling session).
- *  Candidates = the event's own resetsAt + every known future bucket reset;
- *  nearest future wins. One possibly-wasted continue message at a nearer reset
- *  beats hours of silence. Returns { ms, label } or null (nothing in range —
- *  caller must SAY so, not just journal it). All times in ms. */
-function pickArmReset({ eventMs, buckets, now, maxWaitMs = MAX_WAIT_MS }) {
-  const cands = [];
-  if (Number(eventMs) > now) cands.push({ ms: Number(eventMs), label: 'event' });
-  for (const [label, b] of Object.entries(buckets || {})) {
+/** Pick what to WAIT FOR when a session hits the wall (PURE). Two field
+ *  corrections shaped this contract:
+ *  · c1206711 #1: the rejection may name a FAR bucket while a POOL SIBLING
+ *    frees much sooner — so candidates span identities (self + members).
+ *  · c1206711 #2 (owner: "重置的是7d但没和5h对齐, 5h还在cd就发了恢复消息"):
+ *    within ONE identity the session unblocks only when ALL its dead buckets
+ *    have reset — the wait is the MAX over that identity's dead resets, never
+ *    the min over every known reset (a healthy bucket's nearer reset is not
+ *    a candidate at all; an earlier dead bucket's reset still leaves the
+ *    later one blocking).
+ *  identities: [{ label, eventMs?, buckets: {name: {resetsAt(sec), utilization?,
+ *  status?, usedPercent?}} }] — identity[0] is the session's own; eventMs (ms)
+ *  is the rejection's resetsAt, folded in as one of ITS dead resets.
+ *  Returns { ms, label } (min over identities of max-over-dead), tooFar when
+ *  nothing lands inside maxWaitMs, null when no dead reset is known at all
+ *  (callers must SAY so, not just journal it). */
+function pickArmReset({ identities, now, maxWaitMs = MAX_WAIT_MS }) {
+  const deadResetMs = (b) => {
     const ms = (Number(b && b.resetsAt) || 0) * 1000;
-    if (ms > now) cands.push({ ms, label });
+    if (ms <= now) return 0; // already reset — not blocking
+    const dead = Number(b.utilization) >= 0.999 || b.status === 'limited' || b.status === 'rejected'
+      || Number(b.usedPercent) >= 99.5;
+    return dead ? ms : 0;
+  };
+  const cands = [];
+  for (const ident of identities || []) {
+    let usable = 0, bucketLabel = '';
+    for (const [bl, b] of Object.entries(ident.buckets || {})) {
+      const ms = deadResetMs(b);
+      if (ms > usable) { usable = ms; bucketLabel = bl; }
+    }
+    const evMs = Number(ident.eventMs) || 0;
+    if (evMs > now && evMs > usable) { usable = evMs; bucketLabel = 'event'; }
+    if (usable) cands.push({ ms: usable, label: (ident.label ? ident.label + ':' : '') + bucketLabel });
   }
   cands.sort((a, b) => a.ms - b.ms);
   const best = cands.find((c) => c.ms - now <= maxWaitMs);

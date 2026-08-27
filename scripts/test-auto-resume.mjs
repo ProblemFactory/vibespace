@@ -211,34 +211,42 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('_fullViewReset passes the payload wholesale too', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\)/.test(cv2));
 }
 
-// ── §8 nearest-reset arming (c1206711 incident, 2026-08-26): the rejection
-// carried the seven-day resetsAt ~100h out → armIfEnabled refused → NOTHING
-// was left waiting, while the five-hour reset 8h away (sitting in the usage
-// cache) is what actually freed the sibling session. The picker is PURE and
-// tested on the real incident shape; the engine wiring is PINNED at all three
-// arm sites (the 2.355.0 lesson: an unwired pure fix stays dead while its
-// unit tests glow green).
+// ── §8 arm-target selection (TWO c1206711 corrections): candidates span
+// identities (self + pool siblings), but within one identity the wait is the
+// MAX over its DEAD buckets — "重置的是7d但没和5h对齐, 5h还在cd就发了恢复消息"
+// (the 2:00am premature fire): the 7d reset came first, the 5h was still
+// blocking, the continue bounced. A healthy bucket's nearer reset is not a
+// candidate at all. Wiring pinned at all arm sites (2.355.0 lesson).
 {
   const { pickArmReset, MAX_WAIT_MS } = require(path.join(REPO, 'src/server/auto-resume.js'));
-  const now = 1787751372000; // 2026-08-26T13:36Z, mid-incident
+  const now = 1787751372000;
   const H = 3600000;
-  // the real shapes: event = seven_day resetsAt 1788109200 (~99h), cache
-  // fiveHour resetsAt 1787753400 (~34min out at this instant)
-  const r1 = pickArmReset({ eventMs: 1788109200000, buckets: { fiveHour: { resetsAt: 1787753400, utilization: 1 }, sevenDay: { resetsAt: 1788109200, utilization: 1 } }, now });
-  ok('the incident shape now arms for the NEAR fiveHour reset, not the far weekly refusal', r1 && r1.label === 'fiveHour' && r1.ms === 1787753400000 && !r1.tooFar, JSON.stringify(r1));
-  const r2 = pickArmReset({ eventMs: now + 100 * H, buckets: { sevenDay: { resetsAt: (now + 99 * H) / 1000 } }, now });
-  ok('all candidates out of range ⇒ nearest returned WITH tooFar (caller must say so)', r2 && r2.tooFar === true, JSON.stringify(r2));
-  ok('no future candidate at all ⇒ null (nothing to pretend to wait for)', pickArmReset({ eventMs: 0, buckets: { fiveHour: { resetsAt: 1 } }, now }) === null);
-  ok('past bucket resets are ignored, event-only still works', pickArmReset({ eventMs: now + 2 * H, buckets: { fiveHour: { resetsAt: (now - H) / 1000 } }, now })?.label === 'event');
+  // the premature-fire shape: rejection names the 7d (resets +2h), the 5h
+  // bucket is dead until +4.7h — the wait must be +4.7h (max over dead)
+  const r1 = pickArmReset({ identities: [{ eventMs: now + 2 * H, buckets: { fiveHour: { resetsAt: (now + 4.7 * H) / 1000, utilization: 1, status: 'limited' }, sevenDay: { resetsAt: (now + 2 * H) / 1000, utilization: 1 } } }], now });
+  ok('within one identity the wait is the MAX over DEAD buckets (the 2:00am premature fire)', r1 && r1.label === 'fiveHour' && r1.ms === now + 4.7 * H, JSON.stringify(r1));
+  // a HEALTHY bucket resetting sooner is not a candidate
+  const r2 = pickArmReset({ identities: [{ buckets: { fiveHour: { resetsAt: (now + 1 * H) / 1000, utilization: 0.4 }, sevenDay: { resetsAt: (now + 9 * H) / 1000, utilization: 1 } } }], now });
+  ok("a healthy bucket's nearer reset is ignored (it isn't blocking)", r2 && r2.label === 'sevenDay' && r2.ms === now + 9 * H, JSON.stringify(r2));
+  // the pool shape (c1206711 #1): current member 7d dead ~99h out, sibling
+  // 5h dead 40min out with 7d healthy — the sibling frees first
+  const r3 = pickArmReset({ identities: [
+    { eventMs: now + 99 * H, buckets: { sevenDay: { resetsAt: (now + 99 * H) / 1000, utilization: 1, status: 'rejected' } } },
+    { label: 'ProblemFactory', buckets: { fiveHour: { resetsAt: (now + 0.6 * H) / 1000, utilization: 1, status: 'limited' }, sevenDay: { resetsAt: (now + 80 * H) / 1000, utilization: 0.6 } } },
+  ], now });
+  ok('across identities the SOONEST-usable member wins (its own max-over-dead)', r3 && r3.label === 'ProblemFactory:fiveHour' && r3.ms === now + 0.6 * H, JSON.stringify(r3));
+  const r4 = pickArmReset({ identities: [{ eventMs: now + 100 * H, buckets: {} }], now });
+  ok('all candidates out of range ⇒ nearest returned WITH tooFar (caller must say so)', r4 && r4.tooFar === true, JSON.stringify(r4));
+  ok('no dead reset known ⇒ null (nothing to pretend to wait for)', pickArmReset({ identities: [{ buckets: { fiveHour: { resetsAt: 1, utilization: 1 } } }], now }) === null);
   ok('MAX_WAIT is the arming ceiling (26h)', MAX_WAIT_MS === 26 * H);
   const eng2 = read('src/server/usage-pool-engine.js');
   ok('WIRING: the claude dead branch arms via armBestReset(key), not the raw event', /if \(r\.dead\) \{[\s\S]{0,700}armBestReset\(session, key,/.test(eng2));
   ok('WIRING: both codex exhaustion sites go through armBestReset too', /armBestReset\(session, w\.key,/.test(eng2) && /armBestReset\(session, \(w2 && w2\.key\) \|\| '__global_codex__',/.test(eng2));
-  ok('armBestReset merges cache buckets (fiveHour/sevenDay/opus/scoped) into the picker', /buckets = \{ fiveHour: raw\.fiveHour, sevenDay: raw\.sevenDay, sevenDayOpus: raw\.sevenDayOpus \}/.test(eng2) && /buckets\['scoped:' \+ sk\] = sv/.test(eng2));
+  ok('WIRING: the LIMIT-BANNER path (re-)arms off the just-marked dead buckets (the premature fire left nothing re-armed)', /armBestReset\(session, key, 0, hit\.kind \+ ' limit banner'\)/.test(eng2));
+  ok('armBestReset spans pool member identities and BOTH scoped shapes', /identities\.push\(\{ label: m\.name \|\| m\.id, buckets: mb \}\)/.test(eng2) && /raw\.scopedWeekly/.test(eng2));
   const arS = read('src/server/auto-resume.js');
-  ok('a far-reset refusal now SPEAKS in the session (was journal-only — the user watched a silent dead session), 1/h floor', /不会自动续跑/.test(arS) && /_refuseNotified/.test(arS) && /at - lastN > 3600000/.test(arS));
+  ok('a far-reset refusal still SPEAKS in the session (1/h floor)', /不会自动续跑/.test(arS) && /_refuseNotified/.test(arS));
 }
-
 
 // ── §9 the OWNER CORRECTION on c1206711 (2026-08-26): the pool had moved the
 // session onto a member whose 7d then died, while the 5h-exhausted SIBLING

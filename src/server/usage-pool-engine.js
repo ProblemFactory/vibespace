@@ -447,43 +447,42 @@ function orgVerifiedKey(session, key, what) {
   } catch { }
   return key;
 }
-// Arm the auto-resume wait for the BEST reset, not just the event's own
-// (c1206711 incident 2026-08-26: a seven-day rejection carried resetsAt ~100h
-// out and the armer refused, while the five-hour reset 8h away — in this very
-// cache — is what actually freed the account). Candidates = event resetsAt +
-// every known future bucket reset for the session's billing identity; the
-// PURE picker (auto-resume.pickArmReset) takes the nearest in range. Shared
-// by the claude and codex exhaustion paths — backend-neutral by construction.
+// Arm the auto-resume wait for the RIGHT reset (two owner corrections on
+// c1206711): candidates span identities (self + pool siblings — the freeing
+// reset may live in a SIBLING's cache), but WITHIN an identity the wait is
+// the MAX over its DEAD buckets ("重置的是7d但没和5h对齐" — an earlier dead
+// bucket's reset still leaves the later one blocking; a healthy bucket's
+// nearer reset is no candidate at all). The PURE picker (auto-resume.
+// pickArmReset) takes min-over-identities of max-over-dead; the fire re-runs
+// pool eval first (beforeFire). Shared by the claude and codex exhaustion
+// paths — backend-neutral by construction.
 function armBestReset(session, key, eventResetMs, reasonPrefix) {
   const ar = getAutoResume();
   if (!ar?.armIfEnabled) return;
-  let buckets = null;
-  try {
-    const raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, (key || '__global__') + '.json'), 'utf-8'));
-    buckets = { fiveHour: raw.fiveHour, sevenDay: raw.sevenDay, sevenDayOpus: raw.sevenDayOpus };
-    for (const [sk, sv] of Object.entries(raw.scoped || {})) buckets['scoped:' + sk] = sv;
-  } catch { }
-  // POOL-AWARE (owner correction on c1206711: the pool moved the session onto
-  // a member whose 7d then died, while the 5h-exhausted SIBLING — whose 7d was
-  // fine — was the account to come back to; its reset lived in ITS cache, not
-  // the current member's). Include every member's future bucket resets; the
-  // fire path re-runs pool eval first (beforeFire), so the continue rides
-  // whichever member is healthy at that moment.
+  const readBuckets = (raw) => {
+    if (!raw) return null;
+    const b = { fiveHour: raw.fiveHour, sevenDay: raw.sevenDay, sevenDayOpus: raw.sevenDayOpus };
+    for (const [sk, sv] of Object.entries(raw.scoped || {})) b['scoped:' + sk] = sv;
+    for (const sv of (Array.isArray(raw.scopedWeekly) ? raw.scopedWeekly : [])) { if (sv && sv.name) b['scoped:' + sv.name] = sv; }
+    return b;
+  };
+  const identities = [];
+  let own = null;
+  try { own = readBuckets(JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, (key || '__global__') + '.json'), 'utf-8'))); } catch { }
+  identities.push({ label: '', eventMs: eventResetMs, buckets: own || {} });
   try {
     const pa = accounts.get(session._accountId);
     if (pa && pa.type === 'pooled') {
       const rc = poolReadCache(pa.id);
       for (const m of accounts.poolMembers(pa.id) || []) {
-        const c = rc(m.id);
-        for (const bk of ['fiveHour', 'sevenDay', 'sevenDayOpus']) {
-          if (c && c[bk] && Number(c[bk].resetsAt) > 0) (buckets = buckets || {})[(m.name || m.id) + ':' + bk] = c[bk];
-        }
+        const mb = readBuckets(rc(m.id));
+        if (mb) identities.push({ label: m.name || m.id, buckets: mb });
       }
     }
   } catch { }
-  const pick = pickArmReset({ eventMs: eventResetMs, buckets, now: Date.now() });
+  const pick = pickArmReset({ identities, now: Date.now() });
   if (!pick) return;
-  ar.armIfEnabled(session._webuiId, session, pick.ms, reasonPrefix + (pick.label !== 'event' ? ` (nearest reset: ${pick.label})` : ''));
+  ar.armIfEnabled(session._webuiId, session, pick.ms, reasonPrefix + (pick.label && pick.label !== 'event' ? ` (${pick.label})` : ''));
 }
 function recordRateLimitEvent(session, msg) {
   try {
@@ -676,6 +675,10 @@ function markLimitBanner(session, text) {
     }
     global.__vsEvent?.('usage-limit-banner-marked', `${key}:${hit.kind}`);
     maybePoolAutoSwitch(session); // freshest possible exhaustion signal — act now
+    // …and (re-)arm the wait off the just-written dead buckets (the 2:00am
+    // premature fire: the banner rejection after a wrong-target fire was the
+    // moment to re-arm for the REAL blocker, but this path never armed)
+    try { armBestReset(session, key, 0, hit.kind + ' limit banner'); } catch { }
   } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
 }
 
