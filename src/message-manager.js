@@ -666,6 +666,19 @@ class MessageManager {
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
       }];
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(permResolved ? { permission: existing.permission } : {}) } });
+      // LAUNCH-ACK taskInfo synthesis (2.368.30): works on HISTORY too (the
+      // stream-only task_started never persists), so resumed sessions get
+      // running/completed background cards again; a live task_started that
+      // follows overwrites the same shape harmlessly.
+      if (!existing.taskInfo && !tr.is_error) {
+        const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
+        if (syn) {
+          existing.taskInfo = { ...syn, status: 'running' };
+          this.taskMsgByToolUse.set(toolUseId, existing.id);
+          if (syn.id) this.taskMsgByTaskId.set(String(syn.id), existing.id);
+          if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
+        }
+      }
       // harness TaskCreate: "Task #N created successfully" carries the id
       const subj = this._pendingTaskCreates?.get(toolUseId);
       if (subj && !tr.is_error) {
@@ -756,6 +769,8 @@ class MessageManager {
         if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
           const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
           taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
+          const smMatch = contentStr.match(/<summary>([\s\S]*?)<\/summary>/);
+          if (smMatch) taskMsg.taskInfo.summary = smMatch[1].trim().slice(0, 200);
           if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
         }
       }
@@ -1036,4 +1051,26 @@ class MessageManager {
 }
 
 MessageManager._seenUnknownSubtypes = new Set();
-module.exports = { MessageManager, classifyResultError };
+/** Background-launch ACK → task identity, PURE (2.368.30, owner: "很多
+ *  subagent任务你没识别出来"). task_started/task_progress/task_notification
+ *  are LIVE-STREAM-ONLY subtypes — a 602MB field transcript carries ZERO —
+ *  so anything derived from them dies on the first resume. The launch ack
+ *  itself names the task; both the normalizer and session-store's taskState
+ *  scan derive from IT (one parser, no twin). */
+function parseBackgroundLaunch(toolName, input, resultText) {
+  const txt = String(resultText || '');
+  if (toolName === 'Agent' && /^Async agent launched/.test(txt)) {
+    return { id: txt.match(/agentId:\s*([a-z0-9]+)/)?.[1] || null, type: 'agent', description: String(input?.description || '').slice(0, 120) };
+  }
+  if (toolName === 'Workflow') {
+    const rid = txt.match(/Run ID:\s*(wf_[\w-]+)/)?.[1];
+    if (!rid) return null;
+    const nm = txt.match(/Workflow ["\u201c]([^"\u201d\n]+)["\u201d]/)?.[1] || input?.name || 'workflow';
+    return { id: rid, type: 'workflow', description: String(nm).slice(0, 120) };
+  }
+  const bg = txt.match(/^Command running in background with ID:\s*([\w-]+)/);
+  if (bg) return { id: bg[1], type: 'command', description: String(input?.description || input?.command || '').slice(0, 120) };
+  return null;
+}
+
+module.exports = { MessageManager, classifyResultError, parseBackgroundLaunch };

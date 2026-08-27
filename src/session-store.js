@@ -280,6 +280,8 @@ function claimJsonls(locks, jsonls, tailIdsFor) {
 
 // ── JSONL helpers ──
 
+const { parseBackgroundLaunch } = require('./message-manager.js');
+
 function isSubagentMessage(msg) { return !!(msg.parent_tool_use_id || msg.isSidechain); }
 
 function isDisplayMessage(msg) {
@@ -813,7 +815,35 @@ class SessionMessages {
         if (taskList.size && lastTaskTs >= lastTodoTs) todos.length = 0;
       }
     } catch { /* fall through to the in-window walk */ }
+    // Launch-ack synthesis (2.368.30, shared parser with the normalizer):
+    // the system task_* subtypes below are live-stream-only and never appear
+    // in a persisted transcript — without this, taskState.tasks was EMPTY
+    // after every restart and the status bar showed nothing.
+    const launchUses = new Map(); // tool_use_id → { name, input }
     for (const msg of this._all) {
+      if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+        for (const b of msg.message.content) {
+          if (b?.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Workflow' || b.name === 'Bash')) launchUses.set(b.id, { name: b.name, input: b.input });
+        }
+      }
+      if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
+        for (const b of msg.message.content) {
+          if (b?.type !== 'tool_result' || !launchUses.has(b.tool_use_id) || tasks[b.tool_use_id]) continue;
+          const lu = launchUses.get(b.tool_use_id);
+          const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((c) => c?.text || '').join(' ') : '');
+          const syn = parseBackgroundLaunch(lu.name, lu.input, txt);
+          if (syn) tasks[b.tool_use_id] = { ...syn, status: 'running', _launchTs: Date.parse(msg.timestamp || '') || 0 };
+        }
+      }
+      if (msg.type === 'user' && typeof msg.message?.content === 'string' && msg.message.content.includes('<task-notification>')) {
+        const c = msg.message.content;
+        const tu = c.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/)?.[1]?.trim();
+        if (tu && tasks[tu] && tasks[tu].status === 'running') {
+          tasks[tu].status = (c.match(/<status>([\s\S]*?)<\/status>/)?.[1]?.trim() || 'completed').toLowerCase();
+          const sm = c.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim();
+          if (sm) tasks[tu].summary = sm.slice(0, 200);
+        }
+      }
       if (msg.type === 'system' && msg.tool_use_id) {
         if (msg.subtype === 'task_started') {
           tasks[msg.tool_use_id] = { id: msg.task_id, type: msg.task_type === 'local_agent' ? 'agent' : 'command', description: msg.description || '', status: 'running' };
@@ -857,6 +887,18 @@ class SessionMessages {
         }
       }
     }
+    // A background OS task cannot outlive the CLI process (its /tmp task dir
+    // dies with it) — a synthesized 'running' whose launch predates the
+    // CURRENT wrapper start is a phantom (the field transcript showed 16
+    // forever-'running' watchers from previous wrapper lives). Workflow runs
+    // are in-process too. Keep unknown-timestamp entries (never guess dead).
+    const wStart = Number(this.wrapperMeta()?.startedAt) || 0;
+    if (wStart) {
+      for (const [tuid, tk] of Object.entries(tasks)) {
+        if (tk.status === 'running' && tk._launchTs && tk._launchTs < wStart) delete tasks[tuid];
+      }
+    }
+    for (const tk of Object.values(tasks)) delete tk._launchTs;
     // Prefer the newer task-tool list when TodoWrite wasn't used.
     if (!todos.length && taskList.size) {
       todos.push(...[...taskList.entries()].sort((a, b) => Number(a[0]) - Number(b[0])).map(([, v]) => v));

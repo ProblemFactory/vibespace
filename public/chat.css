@@ -904,3 +904,17 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 /* Long-running tool heartbeat line (2.227.7) — distinct from the agent status
    line: no count, no View Log (a Bash call has no transcript to open). */
 .chat-tool-progress { font-size: 11px; color: var(--text-dim); padding: 2px 0 0 2px; font-style: italic; }
+
+/* Background-task lifecycle chip on Agent/Workflow cards (2.368.30) */
+.chat-task-status-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  line-height: 16px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+.chat-task-status-chip.err { color: var(--red); }

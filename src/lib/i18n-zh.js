@@ -2806,4 +2806,5 @@ export default {
   "Read current limits + stored reset credits from a running Codex session (its own app-server makes the call)": "从运行中的 Codex 会话读取当前限额和存储的 reset credit（由它自己的 app-server 发起调用）",
   "Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)": "存储的限额重置额度——撞上限时可消费一个（设置 → Codex，或启用后自动）",
   "Reset credits": "Reset credit",
+  "{count} workflows": "{count} 个workflow",
 };

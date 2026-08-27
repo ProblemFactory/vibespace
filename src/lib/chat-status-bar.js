@@ -456,11 +456,19 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(tasks.map(t => t.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
     }
 
-    // Running dynamic workflows — one chip each (rare to have >2)
+    // Running dynamic workflows — one chip; MULTIPLE collapse into a count
+    // chip with a dropdown, like the tasks chip (owner: 多个workflow在运行
+    // 也应该像tasks那样收起来).
     if (this._workflows?.size) {
-      for (const wf of this._workflows.values()) {
+      const wfs = [...this._workflows.values()];
+      if (wfs.length === 1) {
+        const wf = wfs[0];
         const prog = wf.probed && wf.agents ? ` ${wf.done}/${wf.agents}` : '';
         parts.push(`<span class="chat-status-wf chat-status-clickable" data-wf-run="${escHtml(wf.runId)}" data-wf-name="${escHtml(wf.name)}" title="${escHtml(t('Workflow running — click for the live view'))}">⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}</span>`);
+      } else {
+        const agents = wfs.reduce((n, w) => n + (w.agents || 0), 0);
+        const done = wfs.reduce((n, w) => n + (w.done || 0), 0);
+        parts.push(`<span class="chat-status-wf chat-status-wf-multi chat-status-clickable" title="${escHtml(wfs.map((w) => w.name).join(', '))}">⛭ ${escHtml(t('{count} workflows', { count: wfs.length }))}${agents ? ` ${done}/${agents}` : ''}</span>`);
       }
     }
 
@@ -624,7 +632,7 @@ export class ChatStatusBar {
 
   _onClick(e) {
     const wfChip = e.target.closest('.chat-status-wf');
-    if (wfChip && this._onOpenWorkflow) {
+    if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
       this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);
       return;
     }
@@ -662,6 +670,22 @@ export class ChatStatusBar {
       return dropdown;
     };
 
+    // Collapsed multi-workflow chip → dropdown, one row per run
+    const wfMulti = e.target.closest('.chat-status-wf-multi');
+    if (wfMulti && this._workflows?.size) {
+      e.stopPropagation();
+      const dropdown = showDropdown(wfMulti);
+      if (!dropdown) return;
+      for (const wf of this._workflows.values()) {
+        const item = document.createElement('div');
+        item.className = 'chat-status-dropdown-item chat-task-detail';
+        const prog = wf.probed && wf.agents ? ` <span class="chat-status-dim">${wf.done}/${wf.agents}</span>` : '';
+        item.innerHTML = `<div class="chat-task-title">⛭ ${escHtml(String(wf.name).slice(0, 48))}${prog}</div>`;
+        item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onOpenWorkflow?.(wf.runId, wf.name); };
+        dropdown.appendChild(item);
+      }
+      return;
+    }
     // Background tasks click -> popup
     const taskEl = e.target.closest('.chat-status-tasks');
     if (taskEl && this._activeTasks?.size) {

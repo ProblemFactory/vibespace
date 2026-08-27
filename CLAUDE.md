@@ -135,7 +135,7 @@ src/
   ws-handler.js        — WebSocket protocol handler (all WS message cases, extracted from server.js)
   sync-store.js        — SyncStore class (versioned state sync with diff broadcast)
   session-store.js — SessionMessages + JSONL parsing + session discovery helpers. ⇒ kb-file-structure.md
-  message-manager.js — MessageManager (Claude stream-json → normalized messages with stable IDs). ⇒ kb-file-structure.md
+  message-manager.js — MessageManager (Claude stream-json → normalized messages with stable IDs; 2.368.30 parseBackgroundLaunch=后台启动ack→taskInfo合成, task_*系统subtype只在活流上存在, 落盘的ack+<task-notification>才是历史可用的生命周期真源, session-store taskState扫描共用同一解析器). ⇒ kb-file-structure.md
   codex-message-manager.js — CodexMessageManager (Codex JSON-RPC → normalized messages)
   codex-session-store.js — Codex session discovery (thread listing, JSONL parsing, forkedFrom chain merge)
   normalizers.js       — createMessageManager(backend, id) factory for backend-agnostic normalization

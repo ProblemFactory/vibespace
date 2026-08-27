@@ -52,6 +52,7 @@ const SUITES = [
   'test-codex-pool',    // codex pooled account cold-switch v1: store/spawn/self-heal + engine gates + wrapper signal relay
   'test-peer-delivery', // peerDelivery registry lane: codex rpc-queue rung (real deliver.create + sidecar) + wiring pins
   'test-chat-trim-guard', // fold-dominated window trim guard (inc-mtajy6wr white-screen) pins
+  'test-task-lifecycle', // background Agent/Workflow/Bash lifecycle from HISTORY (launch acks + persisted notifications)
   'test-local-device', 'test-sysinfo-op', 'test-transcript-parity',
   'test-writer-sweep', 'test-agentd-session', 'test-session-brain-dark',
   'test-chat-e2e',      // ONE real haiku turn through the full chat pipeline (oat token slot; SKIPs without ~/.config/vibespace/ci-oat)

@@ -2806,4 +2806,5 @@ export default {
   "Read current limits + stored reset credits from a running Codex session (its own app-server makes the call)": "実行中の Codex セッションから現在の制限と保存済みリセットクレジットを読み取る（その app-server が呼び出します）",
   "Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)": "保存済みのレート制限リセットクレジット——上限到達時に1つ消費できます（設定 → Codex、または有効時に自動）",
   "Reset credits": "リセットクレジット",
+  "{count} workflows": "{count} 個のワークフロー",
 };

@@ -522,7 +522,13 @@ class ChatRenderers {
     }
     if (block.toolName === 'Agent') {
       const desc = block.input?.description || '';
-      const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+      // Background agents: the tool_result is only the launch ack — the real
+      // outcome lives in taskInfo (synthesized from the ack + closed by the
+      // <task-notification> wakeup, 2.368.30). Show the lifecycle honestly.
+      const ti = msg?.taskInfo;
+      const tiChip = ti?.status === 'running' ? ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`
+        : (ti && ti.status && ti.status !== 'completed' ? ` <span class="chat-task-status-chip err">${escHtml(ti.status)}</span>` : '');
+      const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       const reviewThreadId = msg?.taskInfo?.receiverThreadIds?.[0] || '';
       const agentId = msg?.taskInfo?.id || (resultText.match(/agentId:\s*([a-z0-9]+)/)?.[1]) || '';
       const dataAttrs = reviewThreadId
@@ -535,7 +541,7 @@ class ChatRenderers {
       const viewBtn = dataAttrs
         ? ` <button class="chat-agent-view-btn"${dataAttrs} data-desc="${escHtml(desc)}">${t('View Log')}</button>`
         : '';
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${agentModelChip(block.input?.model)}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent: ${escHtml(desc)}${agentModelChip(block.input?.model)}${tiChip}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     if (block.toolName === 'Workflow') {
       // Dynamic workflow (ultracode). The tool_result is the launch ack, which
@@ -544,11 +550,14 @@ class ChatRenderers {
         || (resultText.match(/Run ID:\s*(wf_[\w-]+)/)?.[1])
         || (resultText.match(/"runId":\s*"(wf_[\w-]+)"/)?.[1]) || '';
       const wfName = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim().substring(0, 120) || '';
+      const tiW = msg?.taskInfo;
+      const wfChipHtml = tiW?.status === 'running' ? ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`
+        : (tiW && tiW.status && tiW.status !== 'completed' ? ` <span class="chat-task-status-chip err">${escHtml(tiW.status)}</span>` : '');
       const viewBtn = runId
         ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
         : '';
-      const firstLineW = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      const firstLineW = (tiW?.summary ? String(tiW.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${wfChipHtml}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
