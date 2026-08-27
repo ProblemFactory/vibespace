@@ -764,7 +764,10 @@ class SessionMessages {
       // the newer TaskCreate/TaskUpdate family only exists in the transcript.
       if (base.todos.length) { this._taskState = base; return base; }
       const scanned = this._scanTaskState();
-      this._taskState = { tasks: Object.keys(base.tasks).length ? base.tasks : scanned.tasks, todos: scanned.todos };
+      // MERGE, never fallback (the two-shape-payload law): the wrapper's map
+      // is live truth for ITS OWN tasks only — one live entry used to hide
+      // the entire history-synthesized set (2.368.31, seen as a 41→1 flap).
+      this._taskState = { tasks: { ...scanned.tasks, ...base.tasks }, todos: scanned.todos };
       return this._taskState;
     }
     this._taskState = this._scanTaskState();
@@ -832,11 +835,20 @@ class SessionMessages {
           const lu = launchUses.get(b.tool_use_id);
           const txt = typeof b.content === 'string' ? b.content : (Array.isArray(b.content) ? b.content.map((c) => c?.text || '').join(' ') : '');
           const syn = parseBackgroundLaunch(lu.name, lu.input, txt);
-          if (syn) tasks[b.tool_use_id] = { ...syn, status: 'running', _launchTs: Date.parse(msg.timestamp || '') || 0 };
+          if (syn) {
+            // supersede an earlier launch of the SAME task id (workflow resume)
+            if (syn.id) for (const tk of Object.values(tasks)) { if (tk.id === syn.id && tk.status === 'running') tk.status = 'completed'; }
+            tasks[b.tool_use_id] = { ...syn, status: 'running', _launchTs: Date.parse(msg.timestamp || '') || 0 };
+          }
         }
       }
-      if (msg.type === 'user' && typeof msg.message?.content === 'string' && msg.message.content.includes('<task-notification>')) {
-        const c = msg.message.content;
+      // the notification rides THREE transports (2.368.31): idle-wake user
+      // record, mid-turn queue-operation records, queued_command attachment
+      const notifC = (msg.type === 'user' && typeof msg.message?.content === 'string') ? msg.message.content
+        : (msg.type === 'queue-operation' && typeof msg.content === 'string') ? msg.content
+        : (msg.type === 'attachment' && typeof msg.attachment?.prompt === 'string') ? msg.attachment.prompt : '';
+      if (notifC.includes('<task-notification>')) {
+        const c = notifC;
         const tu = c.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/)?.[1]?.trim();
         if (tu && tasks[tu] && tasks[tu].status === 'running') {
           tasks[tu].status = (c.match(/<status>([\s\S]*?)<\/status>/)?.[1]?.trim() || 'completed').toLowerCase();

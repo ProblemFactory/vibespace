@@ -334,6 +334,9 @@ class MessageManager {
       case 'assistant': return this._processAssistant(raw, emit);
       case 'result': return this._processResult(raw, emit);
       case 'attachment': return this._processAttachment(raw, emit);
+      case 'queue-operation':
+        if (typeof raw.content === 'string' && raw.content.includes('<task-notification>')) this._closeTaskFromNotification(raw.content, emit);
+        return;
       case 'control_request': return this._processControlRequest(raw, emit);
       case 'control_response': return this._processControlResponse(raw, emit);
       case 'control_cancel_request': return this._processControlCancel(raw, emit);
@@ -490,6 +493,31 @@ class MessageManager {
     }
   }
 
+  /** Close the task a <task-notification> payload names (status + summary).
+   *  ONE closer for every transport the notification rides: the idle-wake
+   *  user record, the mid-turn queued_command attachment, and the
+   *  queue-operation records (2.368.31, owner "又开始出现大量已经完成的任务
+   *  显示成在进行了": a BUSY agent's completions are persisted ONLY as
+   *  queue-operation + attachment records — never as the idle user record
+   *  the 2.233.0 closer read, so most tasks never closed after a rebuild). */
+  _closeTaskFromNotification(contentStr, emit) {
+    const tuMatch = contentStr.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
+    const tidMatch = contentStr.match(/<task-id>([\s\S]*?)<\/task-id>/);
+    const stMatch = contentStr.match(/<status>([\s\S]*?)<\/status>/);
+    // Lookup via the task index — NOT pendingToolCalls, whose entry the
+    // background task's own tool_result deleted minutes before this
+    // notification arrived (2.368.15: the reason every conversation
+    // accumulated forever-'running' cards despite the 2.233.0 closer).
+    const taskMsg = this._taskMsgFor(tuMatch ? tuMatch[1].trim() : null, tidMatch ? tidMatch[1].trim() : null);
+    if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
+      const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
+      taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
+      const smMatch = contentStr.match(/<summary>([\s\S]*?)<\/summary>/);
+      if (smMatch) taskMsg.taskInfo.summary = smMatch[1].trim().slice(0, 200);
+      if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
+    }
+  }
+
   /** Find the tool message a task-lifecycle signal refers to: task index →
    *  pendingToolCalls (pre-result window) → task-id fallback. */
   _taskMsgFor(toolUseId, taskId) {
@@ -524,6 +552,17 @@ class MessageManager {
           .map((b) => ({ type: 'text', text: b.text }));
       const text = blocks.map((b) => b.text).join('');
       if (!text.trim()) return;
+      // Mid-turn task completion (2.368.31): the notification rides THIS
+      // attachment when the agent was busy — close the task and render the
+      // notification card (provenance law: never a "You" bubble of XML).
+      if (/^\s*<task-notification>/.test(text)) {
+        this._closeTaskFromNotification(text, emit);
+        this.turnIndex++;
+        const nmsg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
+        nmsg.originKind = 'task-notification';
+        if (emit) this._emit({ op: 'create', message: nmsg });
+        return;
+      }
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
         const m = this.messages[i];
         if (m.role === 'user' && (m.content || []).map((b) => b.text || '').join('') === text) return;
@@ -673,6 +712,19 @@ class MessageManager {
       if (!existing.taskInfo && !tr.is_error) {
         const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
         if (syn) {
+          // SUPERSEDE (the wf_768b7abd residual): a Workflow resumed via
+          // resumeFromRunId re-launches under the SAME run id — the resume's
+          // completion notification closes the resume card only, so the
+          // original launch stayed 'running' forever. A re-launch of the same
+          // task id supersedes the earlier card.
+          const prevId = syn.id && this.taskMsgByTaskId.get(String(syn.id));
+          if (prevId && prevId !== existing.id) {
+            const prev = this.messageIndex.get(prevId);
+            if (prev?.taskInfo?.status === 'running') {
+              prev.taskInfo.status = 'completed';
+              if (emit) this._emit({ op: 'edit', id: prev.id, fields: { taskInfo: prev.taskInfo } });
+            }
+          }
           existing.taskInfo = { ...syn, status: 'running' };
           this.taskMsgByToolUse.set(toolUseId, existing.id);
           if (syn.id) this.taskMsgByTaskId.set(String(syn.id), existing.id);
@@ -758,21 +810,7 @@ class MessageManager {
         // arrives for them, so tasks only accumulated. The wakeup names its
         // <tool-use-id> and <status>; route them into the same taskInfo
         // edit the old path used.
-        const tuMatch = contentStr.match(/<tool-use-id>([\s\S]*?)<\/tool-use-id>/);
-        const tidMatch = contentStr.match(/<task-id>([\s\S]*?)<\/task-id>/);
-        const stMatch = contentStr.match(/<status>([\s\S]*?)<\/status>/);
-        // Lookup via the task index — NOT pendingToolCalls, whose entry the
-        // background task's own tool_result deleted minutes before this
-        // notification arrived (2.368.15: the reason every conversation
-        // accumulated forever-'running' cards despite the 2.233.0 closer).
-        const taskMsg = this._taskMsgFor(tuMatch ? tuMatch[1].trim() : null, tidMatch ? tidMatch[1].trim() : null);
-        if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
-          const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
-          taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
-          const smMatch = contentStr.match(/<summary>([\s\S]*?)<\/summary>/);
-          if (smMatch) taskMsg.taskInfo.summary = smMatch[1].trim().slice(0, 200);
-          if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
-        }
+        this._closeTaskFromNotification(contentStr, emit);
       }
       else if (raw.origin?.kind === 'peer') {
         // Cross-session PEER message (2.349.0, owner report "announce了但对话

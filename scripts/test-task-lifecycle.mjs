@@ -64,5 +64,48 @@ const sb = read('src/lib/chat-status-bar.js');
 ok('multiple running workflows COLLAPSE into one chip with a dropdown (like tasks)', /chat-status-wf-multi/.test(sb) && /\{count\} workflows/.test(sb) && /wfMulti && this\._workflows\?\.size/.test(sb));
 ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) \{/.test(sb));
 
+
+// ── 2.368.31 (owner: "又开始出现大量已经完成的任务显示成在进行了"): a BUSY
+// agent's completions never become idle user records — the transcript shape
+// is queue-operation(enqueue/remove) + attachment(queued_command), with the
+// notification in `content` / `attachment.prompt` (real shapes, line 174031-
+// 174035 of the field transcript; 17 phantom-running reproduced pre-fix, 1
+// genuinely-running post-fix). One closer over all three transports.
+{
+  const TU3 = 'toolu_01TuKzJyPtagbRZj2BJCAXSE';
+  const NOTIF3 = `<task-notification>\n<task-id>btxb9zfrd</task-id>\n<tool-use-id>${TU3}</tool-use-id>\n<status>completed</status>\n<summary>Background command "Production build in background" completed (exit code 0)</summary>\n</task-notification>`;
+  const mkHist = () => ([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: TU3, name: 'Bash', input: { command: 'npm run build', run_in_background: true, description: 'Production build in background' } }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TU3, content: 'Command running in background with ID: btxb9zfrd. Output is being written to: /tmp/x.output' }] } },
+  ]);
+  // transport 1: queue-operation enqueue (completion while BUSY, delivery pending)
+  const mq = createMessageManager('claude', 't-q');
+  mq.convertHistory([...mkHist(), { type: 'queue-operation', operation: 'enqueue', content: NOTIF3 }]);
+  const tmq = mq.messages.find((m) => m.content?.[0]?.toolCallId === TU3);
+  ok('a queue-operation record CLOSES the task (completion while the agent was busy)', tmq?.taskInfo?.status === 'completed' && /Production build/.test(tmq.taskInfo.summary || ''), JSON.stringify(tmq?.taskInfo));
+  // transport 2: queued_command attachment (the delivered copy)
+  const ma = createMessageManager('claude', 't-a');
+  ma.convertHistory([...mkHist(), { type: 'attachment', attachment: { type: 'queued_command', prompt: NOTIF3 } }]);
+  const tma = ma.messages.find((m) => m.content?.[0]?.toolCallId === TU3);
+  ok('a queued_command attachment closes it too…', tma?.taskInfo?.status === 'completed');
+  const card = ma.messages.find((m) => m.originKind === 'task-notification');
+  ok("…and renders a NOTIFICATION card, never a 'You' bubble of XML (provenance law)", !!card && !card.typed);
+  // supersede: a Workflow resumed under the same run id closes the original card
+  const mw = createMessageManager('claude', 't-w');
+  mw.convertHistory([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_w1', name: 'Workflow', input: { script: 'x' } }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_w1', content: 'Run ID: wf_768b7abd-f61' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_w2', name: 'Workflow', input: { resumeFromRunId: 'wf_768b7abd-f61' } }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_w2', content: 'Run ID: wf_768b7abd-f61' }] } },
+  ]);
+  const w1 = mw.messages.find((m) => m.content?.[0]?.toolCallId === 'toolu_w1');
+  const w2 = mw.messages.find((m) => m.content?.[0]?.toolCallId === 'toolu_w2');
+  ok('a resume under the SAME run id SUPERSEDES the original launch card (the wf_768b7abd residual)', w1?.taskInfo?.status === 'completed' && w2?.taskInfo?.status === 'running', JSON.stringify([w1?.taskInfo?.status, w2?.taskInfo?.status]));
+  // wiring pins
+  const ss3 = read('src/session-store.js');
+  ok('the scan reads all three notification transports', /queue-operation' && typeof msg\.content === 'string'/.test(ss3) && /attachment' && typeof msg\.attachment\?\.prompt === 'string'/.test(ss3));
+  ok('taskState MERGES wrapper live tasks over scanned history — never fallback (one live entry used to hide the whole set)', /tasks: \{ \.\.\.scanned\.tasks, \.\.\.base\.tasks \}/.test(ss3));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
