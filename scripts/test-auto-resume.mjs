@@ -290,5 +290,28 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('WIRING: server.js passes beforeFire → maybePoolAutoSwitch', /beforeFire: \(id, s\) => \{ try \{ maybePoolAutoSwitch\(s\); \} catch \{ \} \}/.test(read('server.js')));
 }
 
+
+// ── §10 FALSE-ARM suppression (owner: "你是不是错误通知了? 这里没被打断任何
+// 对话" — journal: 04:55:50 hot switch succeeded, 04:55:51 the dead event
+// still armed + announced; the healthy account emits no readings so nothing
+// ever disarmed, leaving a wasted continue pending). Two layers:
+//   ① armBestReset skips when the pool ALREADY recovered the session
+//   ② any main-thread assistant record disarms (the most precise recovery
+//      signal — wired engine→session-stdout, 2.355.0 pins)
+{
+  const { isDeadBucket } = require(path.join(REPO, 'src/server/auto-resume.js'));
+  const now = 1787751372000;
+  ok('isDeadBucket: limited/1.0 future = dead; healthy or past-reset = alive', isDeadBucket({ resetsAt: (now + 3600000) / 1000, utilization: 1 }, now) === true && isDeadBucket({ resetsAt: (now + 3600000) / 1000, utilization: 0.5 }, now) === false && isDeadBucket({ resetsAt: 1, utilization: 1 }, now) === false);
+  const { ar, sent, notes, sessions } = mk({ dflt: true });
+  const sX = sess(); sessions.set('wX', sX);
+  ar.armIfEnabled('wX', sX, Date.now() + 60000, 'fiveHour limit');
+  ar.noteRecovered('wX', 'session produced work');
+  ok('a produced-work disarm drops the wait before it can fire', ar.statusFor('wX').armed === false && sent.length === 0);
+  const eng10 = read('src/server/usage-pool-engine.js');
+  ok('WIRING: armBestReset skips when the CURRENT pool member has no dead bucket (shared isDeadBucket predicate, unknown cache never guessed)', /pool already recovered onto a usable member — not arming/.test(eng10) && /!Object\.values\(cb\)\.some\(\(b\) => b && isDeadBucket\(b, Date\.now\(\)\)\)/.test(eng10));
+  ok('WIRING: noteSessionProduced exported by the engine and passed through server.js', /function noteSessionProduced\(session\)/.test(eng10) && /noteSessionProduced, probeUsageViaSession/.test(eng10) && /modelsMatch, noteSessionProduced, recordCodexQuotaSignal/.test(read('server.js')));
+  ok('WIRING: session-stdout disarms on every main-thread assistant record', /noteSessionProduced\?\.\(session\)/.test(read('src/server/session-stdout.js')));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

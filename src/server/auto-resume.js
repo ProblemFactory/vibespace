@@ -49,14 +49,17 @@ const MAX_WAIT_MS = 26 * 60 * 60 * 1000; // a weekly bucket can be far out; refu
  *  Returns { ms, label } (min over identities of max-over-dead), tooFar when
  *  nothing lands inside maxWaitMs, null when no dead reset is known at all
  *  (callers must SAY so, not just journal it). */
+/** Is this bucket BLOCKING right now? (PURE; shared with the engine's
+ *  already-recovered check so the predicate can never fork.) */
+function isDeadBucket(b, nowMs) {
+  const ms = (Number(b && b.resetsAt) || 0) * 1000;
+  if (ms <= nowMs) return false; // already reset — not blocking
+  return Number(b.utilization) >= 0.999 || b.status === 'limited' || b.status === 'rejected'
+    || Number(b.usedPercent) >= 99.5;
+}
+
 function pickArmReset({ identities, now, maxWaitMs = MAX_WAIT_MS }) {
-  const deadResetMs = (b) => {
-    const ms = (Number(b && b.resetsAt) || 0) * 1000;
-    if (ms <= now) return 0; // already reset — not blocking
-    const dead = Number(b.utilization) >= 0.999 || b.status === 'limited' || b.status === 'rejected'
-      || Number(b.usedPercent) >= 99.5;
-    return dead ? ms : 0;
-  };
+  const deadResetMs = (b) => (isDeadBucket(b, now) ? (Number(b.resetsAt) || 0) * 1000 : 0);
   const cands = [];
   for (const ident of identities || []) {
     let usable = 0, bucketLabel = '';
@@ -241,4 +244,4 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   return { armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
 }
 
-module.exports = { create, pickArmReset, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };
+module.exports = { create, pickArmReset, isDeadBucket, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };

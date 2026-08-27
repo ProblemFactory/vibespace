@@ -27,7 +27,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey, usageEstimator } = engine;
+    modelsMatch, noteSessionProduced, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey, usageEstimator } = engine;
   const hosts = mk(getHosts);
   const usageHistory = mk(getUsageHistory);
   const telemetry = mk(getTelemetry);
@@ -478,6 +478,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             sbSeenFirst(session, msg);
             if (msg.type === 'assistant' && !msg.parent_tool_use_id && !msg.isSidechain
                 && msg.message?.model && !String(msg.message.model).startsWith('<')) {
+              // main-thread work ⇒ not limit-blocked ⇒ stale armed waits drop
+              // (readings-based disarm misses accounts that emit no events)
+              try { noteSessionProduced?.(session); } catch { }
               session._servedModel = msg.message.model; session._servedModelAt = Date.now();
               try { noteModelSeen(session._servedModel); } catch { }
               // Latch a target-less lock (locked before any model was known —

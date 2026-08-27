@@ -67,7 +67,7 @@ const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 // requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
 const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('../usage-anchors.js');
 const { capsOf } = require('../backend-caps.js'); // per-backend switching capabilities (P4 slice) — replaces backend-id special cases
-const { pickArmReset } = require('./auto-resume.js'); // PURE nearest-reset picker (the c1206711 far-weekly incident)
+const { pickArmReset, isDeadBucket } = require('./auto-resume.js'); // PURE arm-target picker + the shared dead-bucket predicate
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // Which caches map to which identity (org-merge aware) — shared by the sweep
@@ -480,9 +480,32 @@ function armBestReset(session, key, eventResetMs, reasonPrefix) {
       }
     }
   } catch { }
+  // ALREADY RECOVERED (the 04:55:51 false arm: the hot switch landed one
+  // second earlier and the session kept working, but the dead event still
+  // armed + ANNOUNCED — and the healthy account emits no readings, so the
+  // disarm net never fired either): when the session's CURRENT pool member
+  // (post-eval) has no dead bucket, there is nothing to wait for. Unknown
+  // cache ⇒ never guess ⇒ arm as before.
+  try {
+    const pa = accounts.get(session._accountId);
+    if (pa && pa.type === 'pooled') {
+      const curId = accounts.poolCurrentFor(pa.id, session._webuiId);
+      const cb = curId && readBuckets(poolReadCache(pa.id)(curId));
+      if (cb && Object.values(cb).some(Boolean) && !Object.values(cb).some((b) => b && isDeadBucket(b, Date.now()))) {
+        console.log(`[auto-resume] ${session._webuiId}: pool already recovered onto a usable member — not arming`);
+        return;
+      }
+    }
+  } catch { }
   const pick = pickArmReset({ identities, now: Date.now() });
   if (!pick) return;
   ar.armIfEnabled(session._webuiId, session, pick.ms, reasonPrefix + (pick.label && pick.label !== 'event' ? ` (${pick.label})` : ''));
+}
+// Session produced main-thread work ⇒ it is NOT limit-blocked ⇒ any armed
+// wait is stale (the most precise recovery signal there is — readings-based
+// disarm misses accounts that emit no rate_limit_events at all).
+function noteSessionProduced(session) {
+  try { getAutoResume()?.noteRecovered?.(session._webuiId, 'session produced work'); } catch { }
 }
 function recordRateLimitEvent(session, msg) {
   try {
@@ -1081,7 +1104,7 @@ function maybeStopOnFallback(session, id, from, to) {
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
-    probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
+    noteSessionProduced, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
