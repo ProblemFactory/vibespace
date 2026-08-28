@@ -860,6 +860,15 @@ export class DesktopManager {
     // chat views SUSPEND while desktop-hidden — their geometry is meaningless
     // and the paging machinery must make no decisions off it (inc-mtd1d0ft)
     try { this.app.sessions?.get(win.id)?.setSuspended?.(true); } catch { }
+    // …and their subtree rendering STOPS ENTIRELY (inc-mtd54h45 "切换桌面还是
+    // 会卡顿"): under bare visibility:hidden the browser still styles/lays out
+    // the whole hidden tree every frame AND discards the content-visibility:
+    // auto items' state as "irrelevant" — the switch then re-measures
+    // everything. content-visibility:hidden skips the subtree AND preserves
+    // its cached rendering state (that is its spec'd difference from 'auto'),
+    // so a switch repaints from cache instead of re-measuring 600-message
+    // windows. Chat windows only — terminals carry WebGL canvases.
+    try { if (win.type === 'chat') win.element.style.contentVisibility = 'hidden'; } catch { }
   }
 
   /** Show a previously hidden window */
@@ -867,6 +876,7 @@ export class DesktopManager {
     win._hiddenByDesktop = false;
     win.element.style.visibility = '';
     win.element.style.pointerEvents = '';
+    try { if (win.type === 'chat') win.element.style.contentVisibility = ''; } catch { }
     try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
   }
 

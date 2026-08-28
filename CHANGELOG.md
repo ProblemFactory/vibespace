@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.3
+
+- **Desktop-switch jank, the render-cost leg** (inc-mtd54h45, owner: "切换桌面还是会卡顿" on 2.369.2 — the paging/rebuild storms are fixed, what remains is pure rendering). Under bare `visibility:hidden` the browser still styles/lays out the whole hidden tree every frame AND treats the `content-visibility:auto` message items as irrelevant, discarding their rendering state — so every switch re-measured the shown windows from scratch. Desktop-hidden CHAT windows now get `content-visibility: hidden`, which both skips the hidden subtree entirely (zero per-frame cost while hidden) and **preserves the cached rendering state** (the spec'd difference from `auto`) — a switch repaints from cache instead of re-measuring 600-message windows. Chat windows only (terminals carry WebGL canvases). Pin in test-chat-trim-guard (13→14).
+
 ## 2.369.2
 
 - **Reconnect re-attach freeze fixed** (inc-mtd2pg6x, owner: "刚刚又卡死了" on 2.369.1 — the 5.5s stall co-timed exactly with a `state-resync`, i.e. a ws reconnect). A reconnect re-attaches EVERY session and each attach rebuilt its window's entire DOM — N chat windows × hundreds of messages synchronously, with zero content change (the trace shows three windows' pinned scroll restores mid-stall). `loadHistory` now recognizes an IDENTICAL slab (same normalizer epoch, same total, same head/tail message ids, tail-anchored window, not teleported) and skips the rebuild entirely — meta/status/live state/typing indicator still apply. The 2.369.1 suspend gate handled the desktop-switch paging storm; this closes the reconnect leg of the same "重渲染一切" family. Pins in test-chat-trim-guard (11→13).
