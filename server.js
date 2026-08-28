@@ -425,14 +425,14 @@ const {
   markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
   poolChooserForModel, poolReadCache, probeUsageForAccountKey,
-  noteSessionProduced, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey,
+  noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey,
   sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
   usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
   estOverlayCache, predictCalib,
 } = require('./src/server/usage-pool-engine.js').create({
   app, rootDir: __dirname, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
-  broadcastToSession, getAutoResume: () => { try { return autoResume; } catch { return null; } }, getOtelIngest: () => { try { return otelIngest; } catch { return null; } }, // both lazy: created further down (TDZ otherwise); otelIngest = B-b3cd org verification
+  broadcastToSession, getAutoResume: () => { try { return autoResume; } catch { return null; } }, getOtelIngest: () => { try { return otelIngest; } catch { return null; } }, getQuotaProbe: () => { try { return usage.refreshViaCliPanel; } catch { return null; } }, // both lazy: created further down (TDZ otherwise); otelIngest = B-b3cd org verification
   serverNotice: (...a) => serverNotice(...a),
   serverSetting: (...a) => serverSetting(...a),
   getAccounts: () => { try { return accounts; } catch { return null; } },
@@ -504,7 +504,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
   engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator },
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator },
   checkClaudeGoalStatus,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
@@ -1486,7 +1486,7 @@ const portForwards = new PortForwardManager({
 jobsWiring.jm.d.getPorts = () => portForwards; // late singleton — lazy getter, never a Proxy
 setTimeout(() => { portForwards.restore().catch(() => {}); }, 5500);
 const instanceUrl = require('./src/server/instance-url.js').create({ dataDir: path.join(__dirname, 'data'), port: PORT, serverSetting, log: (...a) => console.log(...a), authEnabled: () => auth.enabled, broadcast: (m) => bcastAll(m), plugins: { status: (id) => plugins.status(id), frpPublish: (...a) => plugins.frpPublish(...a), frpUnpublish: (...a) => plugins.frpUnpublish(...a), setSelfDialSub: (...a) => plugins.setSelfDialSub?.(...a) } }); // ONE resolver for "this instance's URL" (frp mapping layered OVER agentd.publicUrl, never written into it) + the ONLY publisher of the 'vibespace-instance' proxy; plugins arrives later so its accessors are lazy ⇒ src/server/instance-url.js
-const autoResume = require('./src/server/auto-resume.js').create({ dataDir: path.join(__dirname, 'data'), activeSessions, serverSetting, beforeFire: (id, s) => { try { maybePoolAutoSwitch(s); } catch { } }, log: (...a) => console.log(...a), broadcast: (id, m) => { const s = activeSessions.get(id); if (s) broadcastToSession(s, id, m); }, notify: (id, s, text) => { try { s._normalizer?.injectPeerCard?.({ fromName: 'VibeSpace', text }); } catch { } }, sendToSession: (id, s, text) => { try { const ad = adapterRegistry.get(s.backend); if (!ad || !s.pty || s.mode !== 'chat') return false; const { stdinPayload, userMsg } = ad.formatChatInput(text, Date.now() + '-auto'); s._isStreaming = true; s.pty.write(stdinPayload + '\n'); if (userMsg) { s.buffer = (s.buffer + JSON.stringify(userMsg) + '\n').slice(-500000); s._normalizer?.processLive(userMsg); } return true; } catch (e) { console.warn('[auto-resume] send failed:', e.message); return false; } } }); // continue a limited session when its quota resets ⇒ src/server/auto-resume.js
+const autoResume = require('./src/server/auto-resume.js').create({ dataDir: path.join(__dirname, 'data'), activeSessions, serverSetting, beforeFire: (id, s) => { try { return beforeAutoResumeFire(id, s); } catch { return true; } }, log: (...a) => console.log(...a), broadcast: (id, m) => { const s = activeSessions.get(id); if (s) broadcastToSession(s, id, m); }, notify: (id, s, text) => { try { s._normalizer?.injectPeerCard?.({ fromName: 'VibeSpace', text }); } catch { } }, sendToSession: (id, s, text) => { try { const ad = adapterRegistry.get(s.backend); if (!ad || !s.pty || s.mode !== 'chat') return false; const { stdinPayload, userMsg } = ad.formatChatInput(text, Date.now() + '-auto'); s._isStreaming = true; s.pty.write(stdinPayload + '\n'); if (userMsg) { s.buffer = (s.buffer + JSON.stringify(userMsg) + '\n').slice(-500000); s._normalizer?.processLive(userMsg); } return true; } catch (e) { console.warn('[auto-resume] send failed:', e.message); return false; } } }); // continue a limited session when its quota resets ⇒ src/server/auto-resume.js
 autoResume.start();
 instanceUrl.registerRoutes(app); instanceUrl.restore(); Object.defineProperty(app.locals, 'instancePublicUrl', { get: () => { try { return instanceUrl.url(); } catch { return null; } } }); app.get('/api/port-forwards', (req, res) => res.json({ forwards: portForwards.list() }));
 app.get('/api/hosts/:id/ports', async (req, res) => {

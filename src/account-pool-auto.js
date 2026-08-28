@@ -94,7 +94,7 @@ function bucketRems(cache, nowSec) {
   // flatly wrong under the nested model — the truth is usually "every
   // member's <one model>'s weekly cap is spent, the 7-day budget still has
   // 40% left", which points at a completely different user action.
-  const push = (kind, b, label) => { const r = bucketRemaining(b, nowSec); if (r != null) out.push({ kind, remaining: r, label }); };
+  const push = (kind, b, label) => { const r = bucketRemaining(b, nowSec); if (r != null) out.push({ kind, remaining: r, label, resetsAt: Number(b?.resetsAt) || 0 }); };
   push('fiveHour', cache.fiveHour, '5h');
   push('weekly', cache.sevenDay, '7d');
   for (const b of Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : []) push('weekly', b, String(b?.name || 'model cap'));
@@ -291,5 +291,34 @@ function classifyAuthFailure({ status, message, attempt } = {}) {
   return false;
 }
 
+// ── quotaVerdict (2.369.0, owner-designed: "在账户系统里统一管理这个信息
+// 的计算，纯基于剩余用量") — THE one verdict for "is this account usable
+// right now, and if not, when does it unblock". Same THRESH table and the
+// same bucketRems primitives as decidePoolSwitch — one source of truth, no
+// twin. tier 'hot' = the usability line the owner set (5h<10%, weekly<5%);
+// 'hard' = the pool candidate gate's stricter line. blockedUntil = MAX over
+// the dead buckets' FUTURE resets (a session unblocks only when ALL dead
+// buckets reset); 0 when any dead bucket's next reset is unknown — the
+// caller PROBES instead of guessing (the passive cache legitimately loses a
+// window's resetsAt when it rolls over: the next window's reset only exists
+// after a fresh reading).
+function quotaVerdict(cache, nowSec, { tier = 'hot' } = {}) {
+  const brs = bucketRems(cache, nowSec);
+  if (!brs.length) return { usable: null, known: false, blockedUntil: 0, dead: [], reason: 'no usage data' };
+  const line = (b) => THRESH[b.kind][tier];
+  const dead = brs.filter((b) => b.remaining < line(b));
+  if (!dead.length) {
+    return { usable: true, known: true, blockedUntil: 0, dead: [], reason: brs.map((b) => `${b.label} ${Math.round(b.remaining)}%`).join(' · ') };
+  }
+  const futureResets = dead.map((b) => (b.resetsAt > nowSec ? b.resetsAt : 0));
+  const blockedUntil = futureResets.every(Boolean) ? Math.max(...futureResets) * 1000 : 0;
+  return {
+    usable: false, known: true, blockedUntil,
+    dead: dead.map((b) => b.label),
+    reason: dead.map((b) => `${b.label} ${Math.round(b.remaining)}% < ${line(b)}%`).join(' · '),
+  };
+}
+
 module.exports = {
+  quotaVerdict,
   classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch };

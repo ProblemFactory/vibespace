@@ -49,33 +49,6 @@ const MAX_WAIT_MS = 26 * 60 * 60 * 1000; // a weekly bucket can be far out; refu
  *  Returns { ms, label } (min over identities of max-over-dead), tooFar when
  *  nothing lands inside maxWaitMs, null when no dead reset is known at all
  *  (callers must SAY so, not just journal it). */
-/** Is this bucket BLOCKING right now? (PURE; shared with the engine's
- *  already-recovered check so the predicate can never fork.) */
-function isDeadBucket(b, nowMs) {
-  const ms = (Number(b && b.resetsAt) || 0) * 1000;
-  if (ms <= nowMs) return false; // already reset — not blocking
-  return Number(b.utilization) >= 0.999 || b.status === 'limited' || b.status === 'rejected'
-    || Number(b.usedPercent) >= 99.5;
-}
-
-function pickArmReset({ identities, now, maxWaitMs = MAX_WAIT_MS }) {
-  const deadResetMs = (b) => (isDeadBucket(b, now) ? (Number(b.resetsAt) || 0) * 1000 : 0);
-  const cands = [];
-  for (const ident of identities || []) {
-    let usable = 0, bucketLabel = '';
-    for (const [bl, b] of Object.entries(ident.buckets || {})) {
-      const ms = deadResetMs(b);
-      if (ms > usable) { usable = ms; bucketLabel = bl; }
-    }
-    const evMs = Number(ident.eventMs) || 0;
-    if (evMs > now && evMs > usable) { usable = evMs; bucketLabel = 'event'; }
-    if (usable) cands.push({ ms: usable, label: (ident.label ? ident.label + ':' : '') + bucketLabel });
-  }
-  cands.sort((a, b) => a.ms - b.ms);
-  const best = cands.find((c) => c.ms - now <= maxWaitMs);
-  return best || (cands.length ? { ms: cands[0].ms, label: cands[0].label, tooFar: true } : null);
-}
-
 function writeJsonAtomic(file, obj) {
   fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2));
   fs.renameSync(file + '.tmp', file);
@@ -199,16 +172,6 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     emit(id);
   }
 
-  /** Main-thread output seen. Only SUSTAINED post-arm work proves recovery —
-   *  the wall banner itself arrives as assistant records, and the blocked
-   *  turn's trailing output lands within seconds of the arm (2.368.34: an
-   *  ungated disarm here would kill every real wall's arm instantly). */
-  function noteWorked(id) {
-    const a = armed.get(id);
-    if (!a || a.fired) return;
-    if (Date.now() - a.at < 30000) return;
-    noteRecovered(id, 'session produced work');
-  }
   function forget(id) { if (armed.delete(id)) { save(); } }
 
   function due(now) {
@@ -228,16 +191,31 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       if (!session) { armed.delete(id); save(); continue; }          // gone: nothing to continue
       if (!enabledFor(session)) { noteRecovered(id, 'disabled'); continue; }
       if (session._isStreaming) { continue; }                        // it is already working — try next tick
-      // Give the engine one shot at re-pointing the pool BEFORE spending: the
-      // wait may have been armed for a SIBLING member's reset (the c1206711
-      // owner correction) — the continue must ride the healthy account.
-      try { beforeFire?.(id, session); } catch { }
-      const ok = sendToSession(id, session, CONTINUE_PROMPT);
-      if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); continue; }
-      armed.delete(id); save(); fired++;
-      log(`[auto-resume] ${id}: usage limit reset — continued automatically`);
-      if (notify) { try { notify(id, session, '用量上限已重置，已自动继续这个任务。'); } catch { } }
-      emit(id);
+      if (session._arFiring) { continue; }                           // async gate in flight
+      // PRE-FIRE GATE (2.369.0, owner-designed): the engine probes fresh
+      // quota + re-checks the account system's verdict. false = still
+      // blocked (the engine re-armed to the new blockedUntil) — do not
+      // spend. Sync false/true and Promise<boolean> both supported.
+      const deliver = () => {
+        const a2 = armed.get(id);
+        if (!a2 || a2.fired || a2.resetsAt !== a.resetsAt) return;    // re-armed/disarmed while gating
+        const ok = sendToSession(id, session, CONTINUE_PROMPT);
+        if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); return; }
+        armed.delete(id); save(); fired++;
+        _cancelArmNotify(id);
+        log(`[auto-resume] ${id}: usage limit reset — continued automatically`);
+        if (notify) { try { notify(id, session, '用量上限已重置，已自动继续这个任务。'); } catch { } }
+        emit(id);
+      };
+      let gate = true;
+      try { gate = beforeFire ? beforeFire(id, session) : true; } catch { gate = true; }
+      if (gate && typeof gate.then === 'function') {
+        session._arFiring = true;
+        gate.then((g2) => { if (g2 !== false) deliver(); }).catch(() => deliver()).finally(() => { session._arFiring = false; });
+        continue;
+      }
+      if (gate === false) continue;
+      deliver();
     }
     return fired;
   }
@@ -269,7 +247,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   }
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
 
-  return { armIfEnabled, noteRecovered, noteWorked, forget, setEnabled, statusFor, enabledFor, fireNow, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
+  return { armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, tick, start, stop, CONTINUE_PROMPT, _armed: armed };
 }
 
-module.exports = { create, pickArmReset, isDeadBucket, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };
+module.exports = { create, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS };

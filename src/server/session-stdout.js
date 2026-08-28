@@ -27,7 +27,7 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey, usageEstimator } = engine;
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey, usageEstimator } = engine;
   const hosts = mk(getHosts);
   const usageHistory = mk(getUsageHistory);
   const telemetry = mk(getTelemetry);
@@ -218,6 +218,11 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // never emit these — additive, no capability gate needed)
             if (msg.type === 'event_msg' && (msg.payload?.type === 'rate_limits_updated' || msg.payload?.type === 'task_failed' || msg.payload?.type === 'reset_credit_result')) {
               try { recordCodexQuotaSignal?.(session, msg.payload); } catch {}
+            }
+            // codex turn boundary (task_complete; task_failed classifies
+            // inside recordCodexQuotaSignal) — same wall machine as claude
+            if (msg.type === 'event_msg' && msg.payload?.type === 'task_complete') {
+              try { noteTurnEnd?.(session); } catch {}
             }
             // rpc-queue delivery honesty (peerDelivery registry lane): the
             // deliver ladder returned ok on the stdin write, so a wrapper-side
@@ -528,7 +533,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               for (const b of msg.message.content) {
                 if (b?.type === 'text' && typeof b.text === 'string' && /You've (?:reached|hit) your .{0,40} limit/.test(b.text)) {
                   global.__vsEvent?.('cli-usage-limit');
-                  markLimitBanner(session, b.text); // chat-mode passive exhaustion signal (2.260.0)
+                  markLimitBanner(session, b.text); // passive cache mark (2.260.0); the wall SIGNAL rides noteWallSignal inside it (2.369.0)
                 } else if (b?.type === 'fallback') {
                   global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
                   // main thread only — a SUBAGENT's fallback must not interrupt
@@ -689,7 +694,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             // After each turn, tail the JSONL for goal_status (native goal sync).
             // Immediate check + one delayed re-check (the Stop hook may write
             // the attachment slightly after the result reaches stdout).
-            if (msg.type === 'result') maybePoolAutoSwitch(session);
+            // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
+            // runs the per-turn pool eval, arms/disarms — one owner.
+            if (msg.type === 'result') { try { noteTurnEnd?.(session); } catch { } }
             // error results carry ban/credit/oauth text the retry path never
             // sees (the CLI gives up without a final api_retry record)
             if (msg.type === 'result' && msg.is_error) { try { notePoolAuthFailure?.(session, id, { message: String(msg.result || msg.error || '') }); } catch { } }

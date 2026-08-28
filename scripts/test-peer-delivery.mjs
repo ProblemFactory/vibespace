@@ -82,7 +82,7 @@ ok('…reports peer_message_result BOTH ways, echoing the text on failure so the
 // ── wiring pins (the 2.355.0 lesson: a pure fix with an unstaged call site stays dead while unit tests glow green) ──
 const srv = read('server.js');
 ok('server.js DESTRUCTURES recordCodexQuotaSignal from the engine (was exported-but-never-wired: the whole codex quota chain silently dead)', /probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent/.test(srv));
-ok('…and forwards it to session-stdout in the engine object', /modelsMatch, noteSessionProduced, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator \}/.test(srv));
+ok('…and forwards it to session-stdout in the engine object', /modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator \}/.test(srv));
 ok('…and passes getDeliver for the re-stash fallback', /getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \}/.test(srv));
 const ss = read('src/server/session-stdout.js');
 ok('session-stdout re-stashes on peer_message_result ok:false (a promised message is never silently lost)', /peer_message_result' && msg\.payload\.ok === false && msg\.payload\.text/.test(ss) && /stashFor\(cid, \{ source: 'agent', fromName: null, text: String\(msg\.payload\.text\) \}\)/.test(ss));

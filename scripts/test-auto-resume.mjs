@@ -211,127 +211,67 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('_fullViewReset passes the payload wholesale too', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\)/.test(cv2));
 }
 
-// ── §8 arm-target selection (TWO c1206711 corrections): candidates span
-// identities (self + pool siblings), but within one identity the wait is the
-// MAX over its DEAD buckets — "重置的是7d但没和5h对齐, 5h还在cd就发了恢复消息"
-// (the 2:00am premature fire): the 7d reset came first, the 5h was still
-// blocking, the continue bounced. A healthy bucket's nearer reset is not a
-// candidate at all. Wiring pinned at all arm sites (2.355.0 lesson).
+// ── §8-10 THE WALL MACHINE (2.369.0, owner-designed replacement for the
+// .27-.34 patch pile; design record: docs/design-wall-machine.md). The four
+// agreed pillars, each with its incident:
+//   ① the banner is a BOOLEAN signal, never a data source
+//   ② quotaVerdict = the account system's ONE usability answer (5h<10%,
+//      weekly<5%; blockedUntil = max over dead buckets; pool = min over
+//      members) — same THRESH table as the pool engine, no twin
+//   ③ the RESULT record classifies the turn; a normally-completed turn is
+//      sufficient proof the session is not blocked (kills the record-
+//      granular noteWorked/30s-age hacks)
+//   ④ missing reset time → PROBE (/usage panel, 0→30m→1h→2h), never guess
 {
-  const { pickArmReset, MAX_WAIT_MS } = require(path.join(REPO, 'src/server/auto-resume.js'));
-  const now = 1787751372000;
-  const H = 3600000;
-  // the premature-fire shape: rejection names the 7d (resets +2h), the 5h
-  // bucket is dead until +4.7h — the wait must be +4.7h (max over dead)
-  const r1 = pickArmReset({ identities: [{ eventMs: now + 2 * H, buckets: { fiveHour: { resetsAt: (now + 4.7 * H) / 1000, utilization: 1, status: 'limited' }, sevenDay: { resetsAt: (now + 2 * H) / 1000, utilization: 1 } } }], now });
-  ok('within one identity the wait is the MAX over DEAD buckets (the 2:00am premature fire)', r1 && r1.label === 'fiveHour' && r1.ms === now + 4.7 * H, JSON.stringify(r1));
-  // a HEALTHY bucket resetting sooner is not a candidate
-  const r2 = pickArmReset({ identities: [{ buckets: { fiveHour: { resetsAt: (now + 1 * H) / 1000, utilization: 0.4 }, sevenDay: { resetsAt: (now + 9 * H) / 1000, utilization: 1 } } }], now });
-  ok("a healthy bucket's nearer reset is ignored (it isn't blocking)", r2 && r2.label === 'sevenDay' && r2.ms === now + 9 * H, JSON.stringify(r2));
-  // the pool shape (c1206711 #1): current member 7d dead ~99h out, sibling
-  // 5h dead 40min out with 7d healthy — the sibling frees first
-  const r3 = pickArmReset({ identities: [
-    { eventMs: now + 99 * H, buckets: { sevenDay: { resetsAt: (now + 99 * H) / 1000, utilization: 1, status: 'rejected' } } },
-    { label: 'ProblemFactory', buckets: { fiveHour: { resetsAt: (now + 0.6 * H) / 1000, utilization: 1, status: 'limited' }, sevenDay: { resetsAt: (now + 80 * H) / 1000, utilization: 0.6 } } },
-  ], now });
-  ok('across identities the SOONEST-usable member wins (its own max-over-dead)', r3 && r3.label === 'ProblemFactory:fiveHour' && r3.ms === now + 0.6 * H, JSON.stringify(r3));
-  const r4 = pickArmReset({ identities: [{ eventMs: now + 100 * H, buckets: {} }], now });
-  ok('all candidates out of range ⇒ nearest returned WITH tooFar (caller must say so)', r4 && r4.tooFar === true, JSON.stringify(r4));
-  ok('no dead reset known ⇒ null (nothing to pretend to wait for)', pickArmReset({ identities: [{ buckets: { fiveHour: { resetsAt: 1, utilization: 1 } } }], now }) === null);
-  ok('MAX_WAIT is the arming ceiling (26h)', MAX_WAIT_MS === 26 * H);
-  const eng2 = read('src/server/usage-pool-engine.js');
-  ok('WIRING: the claude dead branch arms via armBestReset(key), not the raw event', /if \(r\.dead\) \{[\s\S]{0,700}armBestReset\(session, key,/.test(eng2));
-  ok('WIRING: both codex exhaustion sites go through armBestReset too', /armBestReset\(session, w\.key,/.test(eng2) && /armBestReset\(session, \(w2 && w2\.key\) \|\| '__global_codex__',/.test(eng2));
-  ok('WIRING: the LIMIT-BANNER path (re-)arms off the just-marked dead buckets (the premature fire left nothing re-armed)', /armBestReset\(session, key, bannerResetMs \|\| 0, hit\.kind \+ ' limit banner'\)/.test(eng2));
-  ok('armBestReset spans pool member identities and BOTH scoped shapes', /identities\.push\(\{ label: m\.name \|\| m\.id, buckets: mb \}\)/.test(eng2) && /raw\.scopedWeekly/.test(eng2));
-  const arS = read('src/server/auto-resume.js');
-  ok('a far-reset refusal still SPEAKS in the session (1/h floor)', /不会自动续跑/.test(arS) && /_refuseNotified/.test(arS));
-}
+  const { quotaVerdict } = require(path.join(REPO, 'src/account-pool-auto.js'));
+  const nowS = 1787751372;
+  const H = 3600;
+  // the premature-fire shape (owner: 7d重置没对齐5h): both dead ⇒ MAX
+  const v1 = quotaVerdict({ fiveHour: { utilization: 0.97, resetsAt: nowS + 4.7 * H }, sevenDay: { utilization: 0.99, resetsAt: nowS + 2 * H } }, nowS);
+  ok('quotaVerdict: two dead buckets ⇒ blockedUntil is the MAX (all must reset)', v1.usable === false && v1.blockedUntil === (nowS + 4.7 * H) * 1000, JSON.stringify(v1));
+  const v2 = quotaVerdict({ fiveHour: { utilization: 0.5, resetsAt: nowS + H }, sevenDay: { utilization: 0.99, resetsAt: nowS + 9 * H } }, nowS);
+  ok("a healthy bucket's nearer reset is not a candidate (7d dead ⇒ wait for 7d)", v2.usable === false && v2.blockedUntil === (nowS + 9 * H) * 1000, JSON.stringify(v2));
+  ok("the owner's usability line: 5h<10% / weekly<5% (THRESH hot tier)", quotaVerdict({ fiveHour: { utilization: 0.91, resetsAt: nowS + H } }, nowS).usable === false && quotaVerdict({ fiveHour: { utilization: 0.89, resetsAt: nowS + H } }, nowS).usable === true);
+  const v3 = quotaVerdict({ fiveHour: { utilization: 0.97 } }, nowS);
+  ok('a dead bucket with NO future reset ⇒ blockedUntil 0 (caller PROBES, never guesses)', v3.usable === false && v3.blockedUntil === 0);
+  ok('no usage data ⇒ usable null (unknown, never guessed dead)', quotaVerdict(null, nowS).usable === null);
+  ok('a rolled-over window reads FULL again (reset-passed rule intact)', quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 60 } }, nowS).usable === true);
 
-// ── §9 the OWNER CORRECTION on c1206711 (2026-08-26): the pool had moved the
-// session onto a member whose 7d then died, while the 5h-exhausted SIBLING
-// (7d fine) was the account to come back to. The pool DID switch back at
-// 07:09 — but a hot re-point does not move an idle blocked session, and the
-// arm had been refused. Three mechanisms, functionally + wiring-pinned:
-//   ① armBestReset includes POOL SIBLING members' bucket resets
-//   ② a hot per-session switch fires an ARMED session's continue NOW
-//   ③ the timed fire runs beforeFire (pool eval) before spending
-{
-  const { ar, sent, notes, sessions } = mk({ dflt: true });
-  const s9 = sess();
-  sessions.set('w9', s9);
-  const resets = Date.now() + 60000;
-  ar.armIfEnabled('w9', s9, resets, 'fiveHour limit');
-  ok('fireNow on an ARMED idle session delivers the continue immediately and disarms', ar.fireNow('w9', '账号池已切换') === true && sent.length === 1 && sent[0].text === CONTINUE_PROMPT && ar.statusFor('w9').armed === false);
-  ok('…and says WHY in the session', notes.some((n) => /账号池已切换/.test(n.text)));
-  ok('fireNow on an unarmed session is a no-op (never promised a continue)', ar.fireNow('w9', 'again') === false && sent.length === 1);
-  ar.armIfEnabled('w9', s9, Date.now() + 60000, 'fiveHour limit');
-  s9._isStreaming = true;
-  ok('fireNow never interrupts a working session', ar.fireNow('w9', 'x') === false && ar.statusFor('w9').armed === true);
-  s9._isStreaming = false;
-  // ③ beforeFire ordering on the timed path
-  const order = [];
-  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar9-'));
-  const sess2 = new Map();
-  const ar2 = create({
-    dataDir: d2, activeSessions: sess2,
-    serverSetting: () => true,
-    beforeFire: () => order.push('pool-eval'),
-    sendToSession: () => { order.push('send'); return true; },
+  // engine wiring: the machine owns every transition (2.355.0 wiring law)
+  const eng = read('src/server/usage-pool-engine.js');
+  ok('WIRING: rejected events are SIGNALS, not arms (the turn result classifies)', /if \(r\.dead\) \{[\s\S]{0,600}noteWallSignal\(session, \{ resetsAtMs/.test(eng) && !/armBestReset/.test(eng));
+  ok('WIRING: the banner is a BOOLEAN signal (no field extraction feeds the machine)', /noteWallSignal\(session, \{\}\)/.test(eng) && !/parseBannerResetMs/.test(eng));
+  ok('WIRING: both codex exhaustion sites signal + classify through the same machine', /noteWallSignal\(session, \{ resetsAtMs: \(Number\(tripped\?\.resetsAt\)/.test(eng) && /noteWallSignal\(session, \{ resetsAtMs: resets > nowSec \? resets \* 1000 : 0 \}\); noteTurnEnd\(session\);/.test(eng));
+  ok('WIRING: turn classification = signals with no real work after the last one', /sigs\.length && workAfter <= 1/.test(eng) && /noteRecovered\?\.\(session\._webuiId, 'turn completed normally'\)/.test(eng));
+  ok('WIRING: a walled turn arms from quotaVerdictFor (usable ⇒ near fire; blocked ⇒ blockedUntil; unknown ⇒ probe)', /quotaVerdictFor\(scope, \{ model \}\)/.test(eng) && /scheduleWallProbe\(session, scope, model, 0\)/.test(eng));
+  ok('WIRING: the probe ladder is 0→30m→1h→2h then a LOUD give-up', /WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng) && /giving up \(manual resume needed\)/.test(eng));
+  ok('WIRING: pool verdict = any member usable / min over members blockedUntil', /verdicts\.find\(\(x\) => x\.v\.usable === true\)/.test(eng) && /Math\.min\(\.\.\.untils\)/.test(eng));
+  ok('WIRING: the pre-fire gate probes + re-verdicts and can VETO the spend', /async function beforeAutoResumeFire/.test(eng) && /if \(v\.usable === false\)/.test(eng) && /return false;/.test(eng));
+  const srv8 = read('server.js');
+  ok('WIRING: server.js routes beforeFire → beforeAutoResumeFire and provides the probe', /beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \}/.test(srv8) && /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(srv8));
+  const ss8 = read('src/server/session-stdout.js');
+  ok("WIRING: the claude result record IS the turn boundary; codex task_complete too", /if \(msg\.type === 'result'\) \{ try \{ noteTurnEnd\?\.\(session\); \} catch \{ \} \}/.test(ss8) && /task_complete'\) \{\s*\n\s*try \{ noteTurnEnd\?\.\(session\); \} catch \{\}/.test(ss8));
+
+  // the pre-fire VETO, functionally (async gate through a real create())
+  const dV = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-veto-'));
+  const sentV = [];
+  const sessV = new Map();
+  let gateResult = false;
+  const arV = create({
+    dataDir: dV, activeSessions: sessV, serverSetting: () => true,
+    sendToSession: (id, s2, text) => { sentV.push(text); return true; },
+    beforeFire: async () => gateResult,
   });
-  const sB = sess(); sess2.set('wB', sB);
-  ar2.armIfEnabled('wB', sB, Date.now() + 1000, 'fiveHour limit');
-  ar2.tick(Date.now() + 1000 + GRACE_MS + 1);
-  ok('the timed fire runs beforeFire (pool eval) BEFORE sending the continue', order.join(',') === 'pool-eval,send', order.join(','));
-  // wiring pins (2.355.0 lesson — every hook must be seen at its call site)
-  const eng9 = read('src/server/usage-pool-engine.js');
-  ok('WIRING: armBestReset merges pool SIBLING members\' buckets (poolReadCache over poolMembers)', /pa\.type === 'pooled'[\s\S]{0,300}poolReadCache\(pa\.id\)[\s\S]{0,300}poolMembers\(pa\.id\)/.test(eng9));
-  ok('WIRING: a HOT per-session switch fireNow()s the armed session (cold restarts via the client instead)', /per-session switch[\s\S]{0,600}if \(a\.hot\) \{ try \{ getAutoResume\(\)\?\.fireNow\?\.\(sid,/.test(eng9));
-  ok('WIRING: server.js passes beforeFire → maybePoolAutoSwitch', /beforeFire: \(id, s\) => \{ try \{ maybePoolAutoSwitch\(s\); \} catch \{ \} \}/.test(read('server.js')));
-}
-
-
-// ── §10 FALSE-ARM handling, v2 (2.368.34 — v1's "already recovered" pre-check
-// ATE A REAL WALL: a live CLI holds its OLD token, the org-verified banner
-// marked the OLD member dead while the pool link pointed at a healthy one, so
-// the check read "usable" and refused to arm — 9h dark session). The check is
-// GONE; noise is handled by mechanisms that cannot eat a real wall:
-//   ① the announcement is DELAYED — disarm inside the window ⇒ never speaks
-//   ② noteWorked disarms only on SUSTAINED post-arm output (>30s), so the
-//      wall banner's own trailing records can't kill a fresh arm
-{
-  ok("the unsound pre-check is GONE (link ≠ the org a running CLI is on)", !read('src/server/usage-pool-engine.js').includes('pool already recovered onto a usable member'));
-  // delayed announcement: notifyDelayMs=0 fires on the next macrotask —
-  // a disarm BEFORE it must suppress the notice entirely
-  const d10 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar10-'));
-  const notes10 = [];
-  const sess10 = new Map();
-  const ar10 = create({
-    dataDir: d10, activeSessions: sess10, serverSetting: () => true,
-    sendToSession: () => true, notify: (id, s, text) => notes10.push(text), notifyDelayMs: 30,
-  });
-  const sA = sess(); sess10.set('wA', sA);
-  ar10.armIfEnabled('wA', sA, Date.now() + 60000, 'fiveHour limit');
-  ok('the armed STATE is instant but the announcement is NOT (delayed)', ar10.statusFor('wA').armed === true && notes10.length === 0);
-  ar10.noteRecovered('wA', 'pool switch took over');
-  await new Promise((r) => setTimeout(r, 80));
-  ok('a disarm inside the delay window suppresses the announcement entirely', notes10.length === 0);
-  ar10.armIfEnabled('wA', sA, Date.now() + 60000, 'fiveHour limit');
-  await new Promise((r) => setTimeout(r, 80));
-  ok('a SURVIVING arm announces after the delay', notes10.length === 1 && /自动继续/.test(notes10[0]), JSON.stringify(notes10));
-  // noteWorked age gate
-  ok('noteWorked within 30s of arming is a NO-OP (the wall banner trails its own assistant records)', (ar10.noteWorked('wA'), ar10.statusFor('wA').armed === true));
-  ar10._armed.get('wA').at = Date.now() - 31000;
-  ar10.noteWorked('wA');
-  ok('sustained post-arm output (>30s) disarms', ar10.statusFor('wA').armed === false);
-  // precise banner reset time
-  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
-  const nb = Date.parse('2026-08-27T15:50:00Z');
-  ok("the banner's own reset time is parsed with its timezone (12:40pm LA = 19:40Z)", ClaudeCodeAdapter.parseBannerResetMs("You've hit your session limit · resets 12:40pm (America/Los_Angeles)", nb) === Date.parse('2026-08-27T19:40:00Z'));
-  ok('…rolls to tomorrow when the wall time already passed; absent time → 0', ClaudeCodeAdapter.parseBannerResetMs('resets 3am (America/Los_Angeles)', nb) === Date.parse('2026-08-28T10:00:00Z') && ClaudeCodeAdapter.parseBannerResetMs('no time here', nb) === 0);
-  const eng10 = read('src/server/usage-pool-engine.js');
-  ok('WIRING: the banner path feeds the precise time to bump AND armBestReset', /bannerResetMs > Date\.now\(\) \? Math\.floor\(bannerResetMs \/ 1000\)/.test(eng10) && /armBestReset\(session, key, bannerResetMs \|\| 0, hit\.kind/.test(eng10));
-  ok('WIRING: noteSessionProduced routes through the age-gated noteWorked', /getAutoResume\(\)\?\.noteWorked\?\.\(session\._webuiId\)/.test(eng10) && /noteSessionProduced\?\.\(session\)/.test(read('src/server/session-stdout.js')));
+  const sV = sess(); sessV.set('wV', sV);
+  arV.armIfEnabled('wV', sV, Date.now() + 60000, 'fiveHour limit');
+  arV._armed.get('wV').resetsAt = Date.now() - GRACE_MS - 1000; // backdate → due now
+  arV.tick(Date.now());
+  await new Promise((r) => setTimeout(r, 30));
+  ok('an async beforeFire VETO (false) blocks the spend', sentV.length === 0 && sV._arFiring === false);
+  gateResult = true;
+  arV.tick(Date.now());
+  await new Promise((r) => setTimeout(r, 30));
+  ok('…and a true gate delivers the continue', sentV.length === 1 && sentV[0] === CONTINUE_PROMPT);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
