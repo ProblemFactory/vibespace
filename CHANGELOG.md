@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.2
+
+- **Reconnect re-attach freeze fixed** (inc-mtd2pg6x, owner: "刚刚又卡死了" on 2.369.1 — the 5.5s stall co-timed exactly with a `state-resync`, i.e. a ws reconnect). A reconnect re-attaches EVERY session and each attach rebuilt its window's entire DOM — N chat windows × hundreds of messages synchronously, with zero content change (the trace shows three windows' pinned scroll restores mid-stall). `loadHistory` now recognizes an IDENTICAL slab (same normalizer epoch, same total, same head/tail message ids, tail-anchored window, not teleported) and skips the rebuild entirely — meta/status/live state/typing indicator still apply. The 2.369.1 suspend gate handled the desktop-switch paging storm; this closes the reconnect leg of the same "重渲染一切" family. Pins in test-chat-trim-guard (11→13).
+
 ## 2.369.1
 
 - **Dialog vanishing mid-form fixed** (inc-mtd1c2sd, owner: "我选中个东西结果对话框没了 好难受"): the legacy shared dialog overlay closed on **click** with `target === overlay` — a text-selection drag that starts inside an input (the New-Session cwd field, in the capture) and releases outside fires the click on the common ancestor = the overlay, and the whole dialog vanished with the form contents. It now closes only when the interaction also STARTED on the backdrop (mousedown tracked; `createModalShell` keys on mousedown and was always immune).

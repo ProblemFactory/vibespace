@@ -2,7 +2,11 @@
 
 Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
-### DIALOG EATEN BY SELECT-DRAG + DESKTOP-SWITCH PAGING STORM (2.369.1, inc-mtd1c2sd + inc-mtd1d0ft)
+### RECONNECT RE-ATTACH REBUILD STORM (2.369.2, inc-mtd2pg6x "刚刚又卡死了")
+
+A ws reconnect re-attaches every session; each attach rebuilt the window's whole DOM even when NOTHING changed — N windows × hundreds of messages in one task (5.5s stall co-timed with `state-resync` in the capture). **Invariant: loadHistory must no-op on an IDENTICAL slab** (same normEpoch + total + head/tail message ids + tail-anchored + not teleported) — meta/chatStatus/taskState/live state/typing indicator still apply, the DOM rebuild is skipped (`loadHistory:identical-skip` trace tag). Any future attach-path change must keep the skip reachable (it sits BEFORE the epoch write — writing the epoch first would defeat the comparison). Pins: test-chat-trim-guard.
+
+## DIALOG EATEN BY SELECT-DRAG + DESKTOP-SWITCH PAGING STORM (2.369.1, inc-mtd1c2sd + inc-mtd1d0ft)
 
 ① The legacy shared dialog overlay (app.js `hideDialogs` wiring) closed on CLICK with `target === overlay`. A text-selection drag from inside an input releasing outside fires the click on the common ancestor (= the overlay) → the dialog vanished mid-form ("我选中个东西结果对话框没了"). **Invariant: backdrop dismissal must key on where the interaction STARTED (mousedown), never on the click target alone.** createModalShell already did; any new dialog shell must too.
 

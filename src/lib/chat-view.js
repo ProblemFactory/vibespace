@@ -691,6 +691,35 @@ class ChatView {
   // Load normalized messages from attach response
   loadHistory(messages, totalCount, isStreaming, meta) {
     const _t0 = performance.now();
+    // RECONNECT NO-OP (inc-mtd2pg6x "刚刚又卡死了", 2.369.2): a ws reconnect
+    // re-attaches EVERY session and each attach used to rebuild its window's
+    // whole DOM — N windows × hundreds of messages synchronously = a multi-
+    // second freeze with zero content change (the capture shows the stall
+    // co-timed with state-resync). When the slab is IDENTICAL to what is
+    // already rendered (same epoch, same total, same tail ids, tail-anchored
+    // window, not teleported), apply the meta/status and skip the rebuild.
+    try {
+      const sameEpoch = !meta?.normEpoch || meta.normEpoch === this._normEpoch;
+      const lastCur = this._messages?.[this._messages.length - 1];
+      const lastNew = messages?.[messages.length - 1];
+      if (sameEpoch && !this._teleported && this._messages?.length && messages?.length
+          && this._total === (totalCount || messages.length)
+          && this._windowEnd === this._total
+          && this._windowStart === this._total - messages.length
+          && lastCur && lastNew && lastCur.id === lastNew.id
+          && this._messages[0]?.id === messages[0]?.id) {
+        this._trace('loadHistory:identical-skip', { n: messages.length });
+        if (meta) {
+          if (meta.chatStatus) this.applyStatus(meta.chatStatus);
+          if (meta.taskState) this._applyTaskState(meta.taskState);
+          if (meta.goal != null) { this._onGoalUpdated(meta.goal, meta.goalElapsed); if (meta.goalStatus) this._statusBar.setGoalStatus(meta.goalStatus); }
+          this._applyLiveMeta?.(meta);
+        }
+        if (isStreaming) this._showTyping(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
+        else this._hideTyping?.();
+        return;
+      }
+    } catch { }
     if (meta?.normEpoch) this._normEpoch = meta.normEpoch;
     this._total = totalCount || messages.length;
     this._windowStart = this._total - messages.length;

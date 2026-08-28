@@ -429,6 +429,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- RECONNECT RE-ATTACH REBUILD STORM (2.369.2): ws重连re-attach全部会话, 相同slab必须no-op(epoch/total/首尾id全同⇒跳过DOM重建, meta照常applied)
 - DIALOG EATEN BY SELECT-DRAG + DESKTOP-SWITCH PAGING STORM (2.369.1): backdrop关闭必须以mousedown起点为准(click的target是共同祖先); 桌面隐藏的ChatView必须suspend(几何无意义时分页/pin机器零决策, 恢复走settle窗口)
 - FOLD-DOMINATED TRIM WHITE-SCREEN (2.368.29, inc-mtajy6wr): 语义折叠让150条窗口矮于视口(sh=ch), trim掉的是唯一可见内容+每滚轮瞬移50条; 不变量=窗口矮于2视口必须生长不滑动(两个trim对称, cap升600)
 - CREATOR NEVER GETS 'attached' — live state rides 'created' (2.368.4): resume的创建端历史走HTTP无meta, 只搭attach载荷的per-session状态(风格/auto-resume)永远到不了主流程; 加payload字段⇒枚举窗口诞生的每条路(create/attach/view/restart)逐一验证送达; 载荷进meta必须整体传递, 手抄键列表=第五次whitelist漂移
