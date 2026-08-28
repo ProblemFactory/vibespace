@@ -23,5 +23,16 @@ ok('the incident is named at the guard (future readers find the bundle)', /inc-m
 ok('the trim trace tags survive (the capture channel that caught this)', cv.includes("this._trace('trimBottom'") && cv.includes("_trace('extendTop:done'"));
 ok('the loadHistory fill-viewport auto-load is still height-gated (it terminates once headers accumulate past one viewport)', /this\._windowStart > 0 && this\._messageList\.scrollHeight <= this\._messageList\.clientHeight/.test(cv));
 
+// ── suspend gate (inc-mtd1d0ft "桌面切换卡死30-60s"): a desktop-hidden chat
+// window's geometry is meaningless — the paging machinery must make no
+// decisions off it, and a switch re-measures 4-6 windows at once.
+ok('ChatView.setSuspended exists and arms the structural settle window on resume', /setSuspended\(on\) \{/.test(cv) && /this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
+ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/fill-loop)', (cv.match(/this\._suspended\) return;/g) || []).length >= 4);
+const dm = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
+ok('desktop hide/show wires the suspend flag', (dm.match(/setSuspended\?\.\((true|false)\)/g) || []).length === 2);
+ok('stage un-hide paths resume too (direct _hiddenByDesktop writers)', (fs.readFileSync(path.join(REPO, 'src/lib/stage-manager.js'), 'utf8').match(/setSuspended\?\.\(false\)/g) || []).length === 2);
+const ap = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
+ok('the legacy dialog overlay closes only when the interaction STARTED on it (inc-mtd1c2sd select-drag)', /_downOnOverlay = e\.target === overlay/.test(ap) && /e\.target === overlay && _downOnOverlay/.test(ap));
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

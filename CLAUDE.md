@@ -429,6 +429,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- DIALOG EATEN BY SELECT-DRAG + DESKTOP-SWITCH PAGING STORM (2.369.1): backdrop关闭必须以mousedown起点为准(click的target是共同祖先); 桌面隐藏的ChatView必须suspend(几何无意义时分页/pin机器零决策, 恢复走settle窗口)
 - FOLD-DOMINATED TRIM WHITE-SCREEN (2.368.29, inc-mtajy6wr): 语义折叠让150条窗口矮于视口(sh=ch), trim掉的是唯一可见内容+每滚轮瞬移50条; 不变量=窗口矮于2视口必须生长不滑动(两个trim对称, cap升600)
 - CREATOR NEVER GETS 'attached' — live state rides 'created' (2.368.4): resume的创建端历史走HTTP无meta, 只搭attach载荷的per-session状态(风格/auto-resume)永远到不了主流程; 加payload字段⇒枚举窗口诞生的每条路(create/attach/view/restart)逐一验证送达; 载荷进meta必须整体传递, 手抄键列表=第五次whitelist漂移
 - HOSTED PAGE NEEDED A SECURE CONTEXT (2.366.1, owner '打开后无法加载'): crypto.randomUUID只在secure context存在, 而VibeSpace走明文http+主机名⇒undefined⇒画布每块artboard永远卡'Loading artboard…'; 127.0.0.1是可信源所以我在loopback上的验证全部无效(被owner一句'你用的是你发给我的链接访问的吗'戳破); 控制台两股报错(扩展postMessage 'null'/localStorage SecurityError)都是sandbox opaque origin的真实后果但都不是卡死原因; 修复=serve时compat prelude(randomUUID用getRandomValues补, 存储用内存版, 仅在缺失时装)+/p/<id>改shell(真origin, 无用户内容)框住/p/<id>/raw(仍sandbox); 不变量=托管产物必须在用户实际使用的地址上验证(loopback=secure context, 结论不可迁移), 浏览器测量必须带nonce(三次stale-tab假象带偏两个错误结论), 修复要用同源A/B(无补丁5/5卡, 有补丁0/5)证明

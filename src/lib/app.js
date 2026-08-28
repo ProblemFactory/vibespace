@@ -1411,7 +1411,14 @@ class App {
   _setupDialogs() {
     const overlay = document.getElementById('dialog-overlay');
     overlay.querySelectorAll('.dialog-close, .btn-cancel').forEach(btn => btn.addEventListener('click', () => this.hideDialogs()));
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) this.hideDialogs(); });
+    // Close on backdrop click — but ONLY when the interaction STARTED on the
+    // backdrop (inc-mtd1c2sd "我选中个东西结果对话框没了": a text-selection
+    // drag that begins inside an input and releases outside fires the click
+    // on the common ancestor = the overlay, and the whole dialog vanished
+    // mid-form; createModalShell keys on mousedown and is immune).
+    let _downOnOverlay = false;
+    overlay.addEventListener('mousedown', (e) => { _downOnOverlay = e.target === overlay; });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay && _downOnOverlay) this.hideDialogs(); });
 
     // Global Escape: close the transient chrome layer-by-layer — context menus
     // and popovers first, then the modal dialog. Skipped while focus is inside

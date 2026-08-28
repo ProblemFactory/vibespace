@@ -465,6 +465,7 @@ export class StageManager {
       if ((win.type === 'stage-placeholder' || win._isStagePlaceholder) && win._desktopId !== STAGE_ID) {
         win._desktopId = STAGE_ID;
         win._hiddenByDesktop = false;
+        try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
         if (!this._active) this._hideStage(win);
       }
     }
@@ -605,6 +606,7 @@ export class StageManager {
     win._isStageHero = true;
     win.gridBounds = this.slotBounds();
     this.app.wm._applyGridBounds(win);
+    try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
     win._hiddenByDesktop = false; // stage owns it now — a stale desktop-hidden
     this._showWin(win);           // flag would exclude it from _isStageVisible
   }

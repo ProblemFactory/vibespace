@@ -857,6 +857,9 @@ export class DesktopManager {
     win._hiddenByDesktop = true;
     win.element.style.visibility = 'hidden';
     win.element.style.pointerEvents = 'none';
+    // chat views SUSPEND while desktop-hidden — their geometry is meaningless
+    // and the paging machinery must make no decisions off it (inc-mtd1d0ft)
+    try { this.app.sessions?.get(win.id)?.setSuspended?.(true); } catch { }
   }
 
   /** Show a previously hidden window */
@@ -864,6 +867,7 @@ export class DesktopManager {
     win._hiddenByDesktop = false;
     win.element.style.visibility = '';
     win.element.style.pointerEvents = '';
+    try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
   }
 
   _generateId() {

@@ -288,6 +288,7 @@ class ChatView {
       scrollTick = true;
       requestAnimationFrame(() => {
         scrollTick = false;
+        if (this._suspended) return; // hidden-desktop window: geometry is meaningless, decide nothing
         if (this._programmaticScroll) return; // don't interfere with programmatic scrolls
         const { scrollTop, scrollHeight, clientHeight } = this._messageList;
         // COLLAPSED-GEOMETRY GUARD (inc-mso818ry, first real catch by the
@@ -775,6 +776,7 @@ class ChatView {
     } catch {}
     // Auto-load more if content doesn't fill viewport (no scrollbar to trigger scroll event)
     setTimeout(() => {
+      if (this._suspended) return; // hidden window: sh<=ch is an artifact, not "doesn't fill"
       if (this._windowStart > 0 && this._messageList.scrollHeight <= this._messageList.clientHeight) {
         this._extendTop();
       }
@@ -1076,7 +1078,25 @@ class ChatView {
   }
 
   // Extend the window upward (scroll up)
+  /** Desktop-hidden windows must make NO paging/pin decisions (inc-mtd1d0ft
+   *  "每次从工作桌面切换到个人桌面就会卡死一段时间": on a switch, every shown
+   *  window's content-visibility state re-measures — geometry transits
+   *  through sh≈ch, and the paging machinery of 4-6 chat windows went wild
+   *  simultaneously: fill-loops, extendTop storms, pin restores — 30-60s
+   *  compositor stalls in the field capture). While suspended everything
+   *  no-ops; on resume the structural settle window arms (collapsedGeomSkip
+   *  covers the re-measure) and a pinned view returns to the tail in ONE hop. */
+  setSuspended(on) {
+    if (this._suspended === !!on) return;
+    this._suspended = !!on;
+    if (!on) {
+      this._lastStructuralAt = Date.now();
+      if (this._pinned) requestAnimationFrame(() => { try { if (!this._disposed) this._scrollToBottom(); } catch { } });
+    }
+  }
+
   async _extendTop(count = 50) {
+    if (this._suspended) return; // hidden-desktop window: no paging (inc-mtd1d0ft)
     if (this._loading || this._windowStart <= 0) return;
     this._loading = true;
     const endLoad = this._beginHistoryLoad(t('Loading earlier messages…'));
@@ -1345,6 +1365,7 @@ class ChatView {
 
   // Load messages at the bottom (when scrolling back down after trimming)
   async _extendBottom(count = 50) {
+    if (this._suspended) return; // hidden-desktop window: no paging (inc-mtd1d0ft)
     if (this._loading || this._windowEnd >= this._total) return;
     this._loading = true;
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));

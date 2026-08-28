@@ -2,7 +2,13 @@
 
 Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
-### FOLD-DOMINATED TRIM WHITE-SCREEN (2.368.29, inc-mtajy6wr — owner "上翻的时候出现大量白屏")
+### DIALOG EATEN BY SELECT-DRAG + DESKTOP-SWITCH PAGING STORM (2.369.1, inc-mtd1c2sd + inc-mtd1d0ft)
+
+① The legacy shared dialog overlay (app.js `hideDialogs` wiring) closed on CLICK with `target === overlay`. A text-selection drag from inside an input releasing outside fires the click on the common ancestor (= the overlay) → the dialog vanished mid-form ("我选中个东西结果对话框没了"). **Invariant: backdrop dismissal must key on where the interaction STARTED (mousedown), never on the click target alone.** createModalShell already did; any new dialog shell must too.
+
+② Desktop switches froze 30-60s (compositor stalls in the capture): visibility-flipping 4-6 chat windows re-measures all their content-visibility state; geometry transits through sh≈ch and every window's paging machinery reacted at once (fill-loops, extendTop storms, pin restores). **Invariant: a desktop-hidden ChatView is SUSPENDED — no paging/pin/boundary decisions off meaningless geometry** (`setSuspended`, wired in desktop-manager `_hideWin`/`_showWin` + stage-manager's direct `_hiddenByDesktop` writers; resume arms `_lastStructuralAt` so the existing settle guard covers the re-measure, pinned views re-tail in ONE hop). Any new code path that hides/shows windows wholesale must flow the suspend flag. Pins: scripts/test-chat-trim-guard.mjs (11).
+
+## FOLD-DOMINATED TRIM WHITE-SCREEN (2.368.29, inc-mtajy6wr — owner "上翻的时候出现大量白屏")
 
 Semantic collapse (2.368.22-24) folds whole tool/agent runs; the c1206711-class transcripts (thousands of consecutive tool ops) render a 150-message window as a couple of run headers — SHORTER than the viewport, so scrollHeight clamps to clientHeight (captured 787=787 on every landing). `_trimBottom`'s fixed cap then removed the only VISIBLE content on each upward page and every wheel-tick teleported the window 50 messages deeper (ws 4572→4036 in ~6s) over blank space. The 2.301-2.307 collapsed-geometry guards all fired (`collapsedGeomSkip` on every landing) but they gate SCROLL decisions — the trim runs inside `_extendTop` regardless.
 
