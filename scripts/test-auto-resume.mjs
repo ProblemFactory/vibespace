@@ -274,5 +274,23 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('…and a true gate delivers the continue', sentV.length === 1 && sentV[0] === CONTINUE_PROMPT);
 }
 
+
+// ── FUNCTIONAL export-seam check (2.369.4 — the SIXTH unstaged-wiring strike,
+// and the worst: the entire wall machine sat dead in production for a day
+// because the engine's return list lacked its functions; every grep pin was
+// green because the SOURCE contained them. A seam is verified by CALLING it.)
+{
+  const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
+  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const eng = engMod.create({
+    app, rootDir: os.tmpdir(), USAGE_CACHE_DIR: path.join(os.tmpdir(), 'vs-uc-seam'), activeSessions: new Map(),
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
+    serverSetting() { return undefined; }, getAccounts() { return null; }, getHosts() { return null; },
+    getUsageHistory() { return null; }, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
+  });
+  ok('the engine INSTANCE exports the whole wall machine (functional call-seam check, never a source grep)',
+    ['noteTurnEnd', 'noteWallSignal', 'beforeAutoResumeFire', 'quotaVerdictFor', 'noteSessionProduced'].every((k) => typeof eng[k] === 'function'));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
