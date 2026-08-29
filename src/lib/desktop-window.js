@@ -36,6 +36,15 @@ export function openDesktop(app, { syncId } = {}) {
 
   const container = document.createElement('div');
   container.style.cssText = 'display:flex;flex-direction:column;height:100%;background:#000';
+  // COORDINATE SPACES MUST COINCIDE (inc-mtdrm922, owner-reproduced at DPI
+  // 90%: the remote XFCE menu highlighted one row ABOVE the cursor): under
+  // the body DPI zoom, noVNC mixes viewport px (clientX/getBoundingClientRect)
+  // with layout px (clientWidth) — the remote pointer lands ~zoom× off,
+  // growing with distance from the canvas origin. Counter-zoom the container
+  // so the canvas lives at NET zoom 1: every coordinate space lines up and
+  // the framebuffer maps ~1:1 to device pixels (sharper, too). var()-reactive,
+  // so a live DPI change keeps it correct.
+  container.style.zoom = 'calc(1 / var(--ui-scale, 1))';
 
   const bar = document.createElement('div');
   bar.className = 'desktop-bar';

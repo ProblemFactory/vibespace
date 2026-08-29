@@ -429,6 +429,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- VNC POINTER OFFSET UNDER DPI ZOOM (2.369.5): body zoom下noVNC混用viewport px与layout px, 远端指针偏zoom倍; 不变量=VNC画布必须net zoom 1(容器counter-zoom, var反应式)
 - RECONNECT RE-ATTACH REBUILD STORM (2.369.2): ws重连re-attach全部会话, 相同slab必须no-op(epoch/total/首尾id全同⇒跳过DOM重建, meta照常applied)
 - DIALOG EATEN BY SELECT-DRAG + DESKTOP-SWITCH PAGING STORM (2.369.1): backdrop关闭必须以mousedown起点为准(click的target是共同祖先); 桌面隐藏的ChatView必须suspend(几何无意义时分页/pin机器零决策, 恢复走settle窗口)
 - FOLD-DOMINATED TRIM WHITE-SCREEN (2.368.29, inc-mtajy6wr): 语义折叠让150条窗口矮于视口(sh=ch), trim掉的是唯一可见内容+每滚轮瞬移50条; 不变量=窗口矮于2视口必须生长不滑动(两个trim对称, cap升600)

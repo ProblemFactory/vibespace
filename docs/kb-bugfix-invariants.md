@@ -2,7 +2,11 @@
 
 Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
-### RECONNECT RE-ATTACH REBUILD STORM (2.369.2, inc-mtd2pg6x "刚刚又卡死了")
+### VNC POINTER OFFSET UNDER DPI ZOOM (2.369.5, inc-mtdrm922 — userW + owner repro at DPI 90%)
+
+Right-click on the in-container desktop highlighted the remote menu row ABOVE the cursor. Under the body `zoom: var(--ui-scale)`, noVNC mixes viewport px (clientX/gBCR) with layout px (clientWidth) → remote pointer ≈ actual × zoom, error growing with distance. **Invariant: the VNC canvas must live at NET zoom 1** — desktop-window's container carries `zoom: calc(1 / var(--ui-scale, 1))` (var-reactive, calc-in-zoom Chromium-verified). Any future embedded-canvas surface (xterm is internally consistent today) that mixes coordinate spaces gets the same counter-zoom treatment, never per-event math patches.
+
+## RECONNECT RE-ATTACH REBUILD STORM (2.369.2, inc-mtd2pg6x "刚刚又卡死了")
 
 A ws reconnect re-attaches every session; each attach rebuilt the window's whole DOM even when NOTHING changed — N windows × hundreds of messages in one task (5.5s stall co-timed with `state-resync` in the capture). **Invariant: loadHistory must no-op on an IDENTICAL slab** (same normEpoch + total + head/tail message ids + tail-anchored + not teleported) — meta/chatStatus/taskState/live state/typing indicator still apply, the DOM rebuild is skipped (`loadHistory:identical-skip` trace tag). Any future attach-path change must keep the skip reachable (it sits BEFORE the epoch write — writing the epoch first would defeat the comparison). Pins: test-chat-trim-guard.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.5
+
+- **VNC desktop pointer offset under DPI scaling fixed** (inc-mtdrm922, userW's report, owner-reproduced at DPI 90%: right-click on the in-container desktop and the remote XFCE menu highlights one row ABOVE the cursor). Under the body DPI zoom, noVNC mixes viewport px (`clientX`/`getBoundingClientRect`) with layout px (`clientWidth`) — the remote pointer lands ~zoom× off, growing with distance from the canvas origin. The desktop window's content container now carries `zoom: calc(1 / var(--ui-scale, 1))`: the canvas lives at NET zoom 1, every coordinate space coincides, the framebuffer maps ~1:1 to device pixels (sharper as a bonus), and a live DPI change stays correct (var()-reactive; calc-in-zoom verified in Chromium).
+
 ## 2.369.4
 
 - **The wall machine was DEAD in production — the engine never exported it** (inc-mtd65xm3, owner: the heavy session stuck again with no auto-recovery + one account briefly shown 100% + the pool only switching after a manual refresh). The 2.369.0 wiring edit added `noteTurnEnd`/`noteWallSignal`/`beforeAutoResumeFire`/`quotaVerdictFor` to server.js's destructure but the ENGINE's return-list edit silently missed (the replace matched server.js's field order, not the engine's) — so session-stdout destructured `undefined`, every `noteTurnEnd?.()` no-op'd, `beforeFire` threw-and-defaulted, and not one `[wall]` line ever hit the journal. The sixth unstaged-wiring strike, and self-inflicted: every pin was a SOURCE grep (green — the functions exist in source) instead of a call-seam check. Fixed with `assert count==1` replaces; the suite now **instantiates the engine** with stub deps and asserts each machine function on the returned instance — a seam is verified by calling it, never by grepping for it. (The Personal-100% display flap is a separate estimator-overlay question — folded into B-cd7e with this capture as evidence.)
