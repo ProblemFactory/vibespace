@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.6
+
+- **A confident blocked verdict gets verified too** (inc-mtdsoj5f, userW on 2.369.4: "我有账号还活着，但是它觉得我账号都死了…去 agents 那里刷新一下就认出来了" — his pod's journal shows the wall machine working exactly as coded: `[wall] walled turn → blocked until 2026-08-31` off a stale cache that read an ALIVE member as dead-with-a-far-weekly-reset, so sessions armed a 2.6-day wait while the honest notice said "5h 100%, 7d 5%, Fable 96%"). The probe rung only fired when `blockedUntil` was UNKNOWN — but a cache that lies confidently is exactly as wrong as one that says nothing. BLOCKED entry now also fires ONE throttled verification probe (10min floor per scope) alongside the arm: usable ⇒ the near-fire path takes over within seconds, genuinely blocked ⇒ the arm stands corrected with fresh numbers. Self-heals the manual-⟳-fixes-it class for both userW's lockup and the owner's earlier "100% 其实 0%" flap. test-auto-resume 81→82.
+
 ## 2.369.5
 
 - **VNC desktop pointer offset under DPI scaling fixed** (inc-mtdrm922, userW's report, owner-reproduced at DPI 90%: right-click on the in-container desktop and the remote XFCE menu highlights one row ABOVE the cursor). Under the body DPI zoom, noVNC mixes viewport px (`clientX`/`getBoundingClientRect`) with layout px (`clientWidth`) — the remote pointer lands ~zoom× off, growing with distance from the canvas origin. The desktop window's content container now carries `zoom: calc(1 / var(--ui-scale, 1))`: the canvas lives at NET zoom 1, every coordinate space coincides, the framebuffer maps ~1:1 to device pixels (sharper as a bonus), and a live DPI change stays correct (var()-reactive; calc-in-zoom verified in Chromium).

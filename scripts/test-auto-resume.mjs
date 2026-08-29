@@ -245,6 +245,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('WIRING: turn classification = signals with no real work after the last one', /sigs\.length && workAfter <= 1/.test(eng) && /noteRecovered\?\.\(session\._webuiId, 'turn completed normally'\)/.test(eng));
   ok('WIRING: a walled turn arms from quotaVerdictFor (usable ⇒ near fire; blocked ⇒ blockedUntil; unknown ⇒ probe)', /quotaVerdictFor\(scope, \{ model \}\)/.test(eng) && /scheduleWallProbe\(session, scope, model, 0\)/.test(eng));
   ok('WIRING: the probe ladder is 0→30m→1h→2h then a LOUD give-up', /WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng) && /giving up \(manual resume needed\)/.test(eng));
+  ok('WIRING: a CONFIDENT blocked verdict is VERIFIED too — one throttled probe on BLOCKED entry (a lying cache armed a 2.6-day wait on an alive account, inc-mtdsoj5f)', /_wallVerifyAt\.get\(scope\) \|\| 0\) > 10 \* 60e3/.test(eng) && /_wallVerifyAt\.set\(scope, Date\.now\(\)\);\s*\n\s*scheduleWallProbe\(session, scope, model, 0\)/.test(eng));
   ok('WIRING: pool verdict = any member usable / min over members blockedUntil', /verdicts\.find\(\(x\) => x\.v\.usable === true\)/.test(eng) && /Math\.min\(\.\.\.untils\)/.test(eng));
   ok('WIRING: the pre-fire gate probes + re-verdicts and can VETO the spend', /async function beforeAutoResumeFire/.test(eng) && /if \(v\.usable === false\)/.test(eng) && /return false;/.test(eng));
   const srv8 = read('server.js');

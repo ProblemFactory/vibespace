@@ -532,7 +532,19 @@ function onWalledTurn(session, sigs) {
   }
   const evReset = Math.max(0, ...sigs.map((s2) => s2.resetsAtMs || 0));
   const target = v.blockedUntil || evReset;
-  if (target > Date.now()) { ar.armIfEnabled(id, session, target, v.reason || 'usage limit'); return; }
+  if (target > Date.now()) {
+    ar.armIfEnabled(id, session, target, v.reason || 'usage limit');
+    // VERIFY the cache's word (inc-mtdsoj5f, userW: an ALIVE account read
+    // dead-with-a-far-reset — "blocked until Aug-31" off stale data — until a
+    // MANUAL refresh fixed it; a confident cache can lie exactly like an
+    // absent one). One throttled probe re-verdicts: usable ⇒ the near-fire
+    // path takes over in seconds, still blocked ⇒ the arm stands corrected.
+    if (Date.now() - (_wallVerifyAt.get(scope) || 0) > 10 * 60e3) {
+      _wallVerifyAt.set(scope, Date.now());
+      scheduleWallProbe(session, scope, model, 0);
+    }
+    return;
+  }
   // no reset time ANYWHERE (a rolled-over window's next reset only exists
   // after a fresh reading) → probe the data gap, never guess
   scheduleWallProbe(session, scope, model, 0);
@@ -541,6 +553,7 @@ function onWalledTurn(session, sigs) {
 // Probe ladder (owner-set): immediate, then 30min → 1h → 2h, then give up
 // loudly. Each attempt refreshes the blocking account via the auto-cli
 // /usage panel (official binary makes the fetch — §ban-safety intact).
+const _wallVerifyAt = new Map(); // scope → last blocked-entry verification probe (10min floor)
 const WALL_PROBE_BACKOFF = [0, 1800000, 3600000, 7200000];
 function scheduleWallProbe(session, scope, model, attempt) {
   const id = session._webuiId;
