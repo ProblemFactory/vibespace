@@ -54,12 +54,19 @@ export class MobileNav {
     const wm = this.app.wm;
     const dm = this.app.desktopManager;
     const desktops = dm?.desktops || [];
-    const allWindows = [...wm.windows.values()].filter(w => !w.isMinimized);
 
     // Window list container (rebuilt on desktop switch)
     const winList = document.createElement('div');
 
     const renderContent = () => {
+      // FRESH each render (inc-mtfici94: a stale open-time snapshot showed
+      // nothing after a switch materialized the lazy-replayed windows — the
+      // popup had to be reopened to see them)
+      const allWindows = [...wm.windows.values()].filter(w => !w.isMinimized);
+      // not-yet-materialized windows live only in the desktop's saved state
+      // until its first switchTo — count them or fresh-load desktops read 0
+      const savedCount = (deskId) => ((dm._savedStates?.get(deskId)?.windows) || [])
+        .filter((ws) => ws.openSpec && !wm.windows.has(ws.winId || ws.id)).length;
       // Desktop tabs
       if (desktops.length >= 2) {
         const oldTabs = pop.querySelector('.mobile-desk-tabs');
@@ -71,10 +78,15 @@ export class MobileNav {
           const tab = document.createElement('button');
           const isActive = desk.id === dm.activeDesktopId;
           const deskWindows = allWindows.filter(w => w._desktopId === desk.id);
-          tab.textContent = `${desk.name} (${deskWindows.length})`;
+          tab.textContent = `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
           tab.style.cssText = `flex-shrink:0;padding:10px 14px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;color:${isActive ? 'var(--accent)' : 'var(--text-dim)'};border-bottom:2px solid ${isActive ? 'var(--accent)' : 'transparent'};margin-bottom:-2px`;
           tab.onclick = () => {
-            dm.switchTo(desk.id).then(() => renderContent());
+            dm.switchTo(desk.id).then(() => {
+              renderContent();
+              // lazy-replayed windows materialize on a ~500ms timer inside
+              // switchTo — render once more after they land
+              setTimeout(() => { if (pop.isConnected) renderContent(); }, 700);
+            });
           };
           tabBar.appendChild(tab);
         }

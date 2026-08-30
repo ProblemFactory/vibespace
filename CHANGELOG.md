@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.10
+
+- **Mobile desktop switcher shows real window lists/counts on first open** (inc-mtfici94, owner: "手机上重新加载页面后第一次切换桌面不展示session列表…没切换到过的桌面都展示 0"). Two bugs: ① the window snapshot was captured ONCE when the popup opened, so after a switch materialized a desktop's lazy-replayed windows the list still rendered the stale snapshot (reopening "fixed" it) — it is now computed fresh on every render, plus one more render ~700ms after a switch (lazy replay materializes on a timer); ② desktop tab counts only counted LIVE windows, and un-visited desktops keep their windows in `_savedStates` until the first switch — saved-but-unmaterialized windows now count too.
+
 ## 2.369.9
 
 - **Mobile desktop switches no longer land on an old conversation position** (inc-mtfi6034, owner: "手机上每次切换桌面后默认窗口总会停留在奇怪的过去的对话位置而不是最新的"). The capture shows the mechanism: touch scrolling near the top had paged the window UP (`extendTop` + `trimBottom` removed the tail messages — `windowEnd` fell behind the live total), so the suspend-resume re-tail introduced in 2.369.1 scrolled to the bottom of the RENDERED window, which was 17+ messages behind the conversation. A pinned view now returns to the LIVE tail on resume: behind-the-tail (or teleported) windows take the full `jumpToBottom` (refetches the tail slab); tail-anchored ones keep the cheap scroll. Pin in test-chat-trim-guard (15).
