@@ -58,6 +58,11 @@ ok('authed viewer gets the shell', res.status === 200 && /<iframe[^>]+src="\/p\/
 ok('shell carries NO user content (only the frame)', !shell.includes('v1'));
 ok('shell is NOT sandboxed (real origin — that is the whole point)', !/sandbox/.test(shellCsp), shellCsp);
 ok('shell CSP allows only its own frame', /frame-src 'self'/.test(shellCsp) && /default-src 'none'/.test(shellCsp), shellCsp);
+// geo/storage bridge (B-74de, 2.369.7): the shell carries the nonce'd bridge
+// script — OUR content, not the page's; the sandbox stays untouched
+ok('shell ships the geo/storage bridge under a per-request script nonce', /script-src 'nonce-/.test(shellCsp) && /vibeBridge/.test(shell) && /vp_pg[a-z0-9]{10}_/.test(shell));
+ok('…and the bridge verifies the message SOURCE and namespaces storage keys', /e\.source!==f\.contentWindow/.test(shell) && /localStorage\.setItem\(PFX\+String/.test(shell));
+ok('…nonce differs per request (no static nonce)', await (async () => { const r2 = await fetch(`${base}/p/${id}`); await r2.text(); const nonceOf = (csp) => csp.match(/'nonce-([^']+)'/)?.[1]; const n1 = nonceOf(shellCsp); const n2 = nonceOf(r2.headers.get('content-security-policy') || ''); return !!n1 && !!n2 && n1 !== n2; })());
 ok('iframe sandbox attribute grants scripts but NEVER same-origin', /sandbox="[^"]*allow-scripts/.test(shell) && !/allow-same-origin/.test(shell), shell.slice(0, 400));
 res = await fetch(`${base}/p/${id}/raw`);
 const rawBody = await res.text();

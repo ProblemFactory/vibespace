@@ -226,12 +226,51 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
   function serve(req, res) {
     const rec = gate(req, res);
     if (!rec) return;
-    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'");
+    // GEO/STORAGE BRIDGE (B-74de, 2.369.7 — owner-directed via 生活方式助手's
+    // verified spec, SharedContext/vibespace-pages-geo-bridge-spec.md): the
+    // shell IS the privileged real origin the 2.366.1 split created — it can
+    // hold geolocation + real localStorage and forward them over postMessage
+    // WITHOUT touching the sandbox (the red line below stands: the iframe
+    // never gains allow-same-origin, the raw route's CSP is untouched).
+    // Script is nonce'd; the only interpolations are the ID_RE-validated id
+    // and our own nonce — NO user content enters the shell. Protocol (frozen,
+    // consumer pages already ship it): vibeBridge/vibeGeo/vibeStore; storage
+    // keys namespaced vp_<pageId>_ so pages cannot read each other. Known
+    // accepted trade-off (spec §安全): any published page may surface a
+    // geolocation PROMPT on this origin — the browser still asks the user.
+    const nonce = require('crypto').randomBytes(16).toString('base64');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-src 'self'; style-src 'unsafe-inline'; script-src 'nonce-" + nonce + "'; base-uri 'none'; form-action 'none'");
     res.type('html');
     const title = escapeHtml(rec.name || 'Published page');
+    const bridge = '<script nonce="' + nonce + '">(function(){\n'
+      + "var f=document.querySelector('iframe'),watchId=null,PFX='vp_" + rec.id + "_';\n"
+      + "function send(m){try{f.contentWindow.postMessage(m,'*')}catch(e){}}\n"
+      + "function fix(p){send({vibeGeo:'pos',lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,heading:p.coords.heading,speed:p.coords.speed,ts:p.timestamp})}\n"
+      + "function fail(e){send({vibeGeo:'err',code:(e&&e.code)||0,message:(e&&e.message)||''})}\n"
+      + "addEventListener('message',function(e){\n"
+      + "  if(e.source!==f.contentWindow||!e.data)return;\n"
+      + "  var g=e.data.vibeGeo;\n"
+      + "  if(g==='start'){\n"
+      + "    if(!navigator.geolocation)return fail({code:2,message:'unsupported'});\n"
+      + "    if(watchId!=null)return;\n"
+      + "    navigator.geolocation.getCurrentPosition(fix,fail,{enableHighAccuracy:true,timeout:20000});\n"
+      + "    watchId=navigator.geolocation.watchPosition(fix,fail,{enableHighAccuracy:true,maximumAge:15000,timeout:30000});\n"
+      + "  }else if(g==='stop'){\n"
+      + "    if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null}\n"
+      + "  }\n"
+      + "  var s=e.data.vibeStore;\n"
+      + "  if(s==='set'){try{localStorage.setItem(PFX+String(e.data.k),String(e.data.v))}catch(err){}}\n"
+      + "  else if(s==='del'){try{localStorage.removeItem(PFX+String(e.data.k))}catch(err){}}\n"
+      + "});\n"
+      + "f.addEventListener('load',function(){\n"
+      + "  var data={};\n"
+      + "  try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf(PFX)===0)data[k.slice(PFX.length)]=localStorage.getItem(k)}}catch(e){}\n"
+      + "  send({vibeBridge:'ready',geo:!!navigator.geolocation,store:data});\n"
+      + "});\n"
+      + '})()</scr' + 'ipt>';
     res.send('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + title + '</title>'
       + '<style>html,body{margin:0;height:100%;background:#faf9f5}iframe{border:0;display:block;width:100%;height:100%}</style></head>'
-      + '<body><iframe src="/p/' + rec.id + '/raw" sandbox="allow-scripts allow-popups allow-downloads allow-modals allow-forms allow-popups-to-escape-sandbox" allow="clipboard-write" title="' + title + '"></iframe></body></html>');
+      + '<body><iframe src="/p/' + rec.id + '/raw" sandbox="allow-scripts allow-popups allow-downloads allow-modals allow-forms allow-popups-to-escape-sandbox" allow="clipboard-write" title="' + title + '"></iframe>' + bridge + '</body></html>');
   }
 
   /** GET /p/:id/raw — the published HTML itself: sandbox CSP (opaque origin)
