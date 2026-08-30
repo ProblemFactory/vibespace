@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.9
+
+- **Mobile desktop switches no longer land on an old conversation position** (inc-mtfi6034, owner: "手机上每次切换桌面后默认窗口总会停留在奇怪的过去的对话位置而不是最新的"). The capture shows the mechanism: touch scrolling near the top had paged the window UP (`extendTop` + `trimBottom` removed the tail messages — `windowEnd` fell behind the live total), so the suspend-resume re-tail introduced in 2.369.1 scrolled to the bottom of the RENDERED window, which was 17+ messages behind the conversation. A pinned view now returns to the LIVE tail on resume: behind-the-tail (or teleported) windows take the full `jumpToBottom` (refetches the tail slab); tail-anchored ones keep the cheap scroll. Pin in test-chat-trim-guard (15).
+
 ## 2.369.8
 
 - **One-click session restart + locate, everywhere the owner reached for it** (owner UX feedback: applying a "next resume" style pick meant hunting the sidebar entry among dozens, terminating, watching the entry move, re-finding it, resuming). Four pieces: ① the **style menu** shows a "⟳ Restart now to apply (Terminate + Resume)" row whenever a pick is pending (the menu stays open after picking so the row appears in place); ② new `restartConversationInPlace` — kill → wait for the transcript flush → resume the SAME conversation (the pool cold switch's field-proven machinery); per-session config (style, auto-resume, account) rides the respawn automatically; ③ the **window-title right-click menu** gains common session ops: Restart / Terminate / Resume (dead sessions) / Locate in sidebar / Session properties; ④ the **sidebar card menu** gains Restart for live sessions, and `locateSessionInSidebar` jumps to Folders, expands a collapsed group, scrolls the entry into view and flashes it. Design note: title-bar single-click was left alone (it conflicts with drag/focus) — locating rides the right-click menu instead. zh/ja strings added; pins in test-auto-resume (86).

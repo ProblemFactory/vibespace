@@ -1122,7 +1122,16 @@ class ChatView {
     this._suspended = !!on;
     if (!on) {
       this._lastStructuralAt = Date.now();
-      if (this._pinned) requestAnimationFrame(() => { try { if (!this._disposed) this._scrollToBottom(); } catch { } });
+      // A pinned view returns to the LIVE tail — not just the DOM bottom
+      // (inc-mtfi6034, mobile: touch paging near the top had trimmed the
+      // window's tail, so windowEnd < total and a plain scroll landed on an
+      // old position after every desktop switch). Behind-the-tail windows
+      // take the full jumpToBottom (refetches the tail slab).
+      if (this._pinned) requestAnimationFrame(() => { try {
+        if (this._disposed) return;
+        if (this._teleported || this._windowEnd < this._total) this.jumpToBottom();
+        else this._scrollToBottom();
+      } catch { } });
     }
   }
 

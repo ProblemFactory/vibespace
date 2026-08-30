@@ -27,6 +27,7 @@ ok('the loadHistory fill-viewport auto-load is still height-gated (it terminates
 // window's geometry is meaningless — the paging machinery must make no
 // decisions off it, and a switch re-measures 4-6 windows at once.
 ok('ChatView.setSuspended exists and arms the structural settle window on resume', /setSuspended\(on\) \{/.test(cv) && /this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
+ok('resume returns a pinned view to the LIVE tail — behind-the-tail windows take the full jumpToBottom (inc-mtfi6034 mobile old-position)', /this\._windowEnd < this\._total\) this\.jumpToBottom\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
 ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/fill-loop)', (cv.match(/this\._suspended\) return;/g) || []).length >= 4);
 const dm = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
 ok('desktop hide/show wires the suspend flag', (dm.match(/setSuspended\?\.\((true|false)\)/g) || []).length === 2);
