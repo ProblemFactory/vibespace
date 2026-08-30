@@ -208,6 +208,20 @@ export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onActi
       });
     }
   }
+  if (sess) {
+    // Common SESSION ops on the window chrome (owner UX 2.369.8: restart
+    // after a style pick meant a sidebar hunt; the title menu is right here)
+    menuItems.push({ separator: true });
+    if (sess.status === 'live') {
+      menuItems.push({ label: '\u27F3 ' + t('Restart session'), action: act('restart', () => app.restartConversationInPlace(sess)) });
+      menuItems.push({ label: t('Terminate session'), action: act('terminate', () => app.killSession(sess.webuiId)), style: 'color:var(--red, #e55)' });
+    } else if (sess.sessionId) {
+      menuItems.push({ label: t('Resume session'), action: act('resume', () => app.restartConversationInPlace(sess)) });
+    }
+    menuItems.push({ label: t('Locate in sidebar'), action: act('locate', () => app.locateSessionInSidebar(sess.sessionId)) });
+    menuItems.push({ label: t('Session properties\u2026'), action: act('props', () => app.openSessionProps(sess)) });
+    menuItems.push({ separator: true });
+  }
   const deskItems = (app.desktopManager?.getDesktopMenuItems(id) || [])
     .map(d => ({ ...d, action: act('desktop', d.action) }));
   if (deskItems.length) menuItems.push({ label: '\u27A4 ' + t('Move to Desktop'), children: deskItems });

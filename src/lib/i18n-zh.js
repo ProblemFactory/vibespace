@@ -2807,4 +2807,12 @@ export default {
   "Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)": "存储的限额重置额度——撞上限时可消费一个（设置 → Codex，或启用后自动）",
   "Reset credits": "Reset credit",
   "{count} workflows": "{count} 个workflow",
+  "Restart (Terminate + Resume)": "重启（终止并恢复）",
+  "Resume session": "恢复会话",
+  "Locate in sidebar": "在侧边栏中定位",
+  "Restart now to apply (Terminate + Resume)": "立即重启生效（终止并恢复）",
+  "Restarting the session…": "正在重启会话…",
+  "Nothing to restart — this session has no conversation id yet": "无法重启——该会话还没有对话 id",
+  "Entry not visible — it may be archived or filtered out": "条目不可见——可能已归档或被过滤",
+  "Session properties…": "会话属性…",
 };

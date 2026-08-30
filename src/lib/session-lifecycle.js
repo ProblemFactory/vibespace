@@ -405,6 +405,51 @@ export function installSessionLifecycle(App, ctx = {}) {
     this.ws.send({ type: 'kill', sessionId: webuiId });
   },
 
+  // ONE-CLICK RESTART (owner UX, 2.369.8: applying a "next resume" pick —
+  // output style etc. — used to mean a sidebar hunt + terminate + re-find
+  // the moved entry). Terminate, wait for the transcript flush, resume the
+  // SAME conversation — per-session config rides the respawn automatically.
+  // Same kill→exited→resume machinery the pool cold switch uses.
+  restartConversationInPlace(sessLike = {}) {
+    const all = this.sidebar?._allSessions || [];
+    const live = all.find((x) => (sessLike.webuiId && x.webuiId === sessLike.webuiId)
+      || (sessLike.sessionId && x.sessionId === sessLike.sessionId)
+      || (sessLike.backendSessionId && x.sessionId === sessLike.backendSessionId)) || sessLike;
+    const cid = live.sessionId || live.backendSessionId;
+    if (!cid) { showToast(t('Nothing to restart — this session has no conversation id yet'), { type: 'error' }); return; }
+    const webuiId = live.webuiId || sessLike.webuiId || null;
+    const name = this.sidebar?.getCustomName?.({ backend: live.backend, backendSessionId: cid }) || live.name || '';
+    const mode = live.webuiMode || 'chat';
+    const finish = () => this.resumeSession(cid, live.cwd || '', name, { mode, backend: live.backend || 'claude', backendSessionId: cid, hostId: live.host || undefined, excludeWebuiId: webuiId || undefined });
+    if (!webuiId || live.status === 'stopped') { finish(); return; }  // already dead — just resume
+    showToast(t('Restarting the session…'));
+    let done = false;
+    const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
+    const onExit = (msg) => { if (msg.type === 'exited' && msg.sessionId === webuiId) setTimeout(go, 400); }; // let the CLI flush its transcript
+    this.ws.onGlobal(onExit);
+    this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId: cid });
+    setTimeout(go, 15000); // a lost exited must not strand the restart
+  },
+
+  // Jump the sidebar to a conversation's entry (owner UX: with dozens of
+  // sessions the entry hunt was the pain) — switch to Folders, expand the
+  // containing folder if collapsed, scroll to the card and flash it.
+  locateSessionInSidebar(backendSessionId) {
+    const sb = this.sidebar;
+    if (!sb || !backendSessionId) return;
+    try { sb._railGo?.('folders'); } catch { }
+    try { if (sb._activeTab !== 'folders') { sb._activeTab = 'folders'; sb.render?.(); } } catch { }
+    setTimeout(() => {
+      const card = [...document.querySelectorAll('.session-card')].find((c) => c._sessionId === backendSessionId);
+      if (!card) { showToast(t('Entry not visible — it may be archived or filtered out')); return; }
+      const group = card.closest('.folder-group');
+      if (group?.classList.contains('collapsed')) group.classList.remove('collapsed');
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      card.classList.add('locate-flash');
+      setTimeout(() => card.classList.remove('locate-flash'), 2400);
+    }, 60);
+  },
+
   async killPid(pid, host) {
     // host: an EXTERNAL/tmux session discovered on a REMOTE machine — its pid
     // lives there; the local-only route 400'd silently forever (real report:

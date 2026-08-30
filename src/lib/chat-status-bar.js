@@ -18,7 +18,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null, onRestartSession = null }) {
     this._ws = ws;
     this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
     this._outputStyle = '';        // CLI output style (Concise/…) — spawn-only, so this reflects what the LIVE session was started with
@@ -27,6 +27,7 @@ export class ChatStatusBar {
     this._sessionId = sessionId;
     this._backend = backend;
     this._onConfigChange = onConfigChange || null;
+    this._onRestartSession = onRestartSession || null;
     this._servedModel = null; // actual serving model (per-turn) — fallback detection
     this._allowReview = allowReview;
     this._reviewEnabled = !allowReview;
@@ -904,22 +905,38 @@ export class ChatStatusBar {
         { v: 'Learning', label: t('Learning — teach while doing') },
         { v: 'Proactive', label: t('Proactive — act first, minimize interruptions') },
       ];
-      for (const s of STYLES) {
-        const item = document.createElement('div');
-        item.className = 'chat-status-dropdown-item' + ((s.v || '') === (this._outputStyle || '') ? ' active' : '');
-        item.textContent = s.label;
-        item.onclick = (ev) => {
-          ev.stopPropagation(); dropdown.remove();
-          this._onConfigChange?.({ outputStyle: s.v || null });   // spawn-scoped: the next resume carries it
-          this.setOutputStylePending(s.v || '');                  // the chip shows the saved-but-not-yet-live pick
-          showToast(s.v ? t('Output style “{v}” applies on the next resume', { v: s.v }) : t('Output style cleared — applies on the next resume'));
-        };
-        dropdown.appendChild(item);
-      }
-      const note = document.createElement('div');
-      note.className = 'chat-status-dropdown-note';
-      note.textContent = t('A running session cannot change style — the CLI only reads it at startup.');
-      dropdown.appendChild(note);
+      // rebuildable so a pick can surface the restart row IN PLACE (owner UX
+      // 2.369.8: "切换了style还没重启, 在菜单里给个重启按钮")
+      const renderStyleRows = () => {
+        dropdown.innerHTML = '';
+        const pending = this._outputStylePending;
+        if (this._onRestartSession && pending !== undefined && (pending || '') !== (this._outputStyle || '')) {
+          const go = document.createElement('div');
+          go.className = 'chat-status-dropdown-item chat-status-restart-row';
+          go.textContent = '\u27F3 ' + t('Restart now to apply (Terminate + Resume)');
+          go.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onRestartSession(); };
+          dropdown.appendChild(go);
+        }
+        for (const s of STYLES) {
+          const item = document.createElement('div');
+          item.className = 'chat-status-dropdown-item' + ((s.v || '') === (this._outputStyle || '') ? ' active' : '');
+          item.textContent = s.label;
+          item.onclick = (ev) => {
+            ev.stopPropagation();
+            this._onConfigChange?.({ outputStyle: s.v || null });   // spawn-scoped: the next resume carries it
+            this._outputStylePending = s.v || '';                   // the chip shows the saved-but-not-yet-live pick
+            showToast(s.v ? t('Output style “{v}” applies on the next resume', { v: s.v }) : t('Output style cleared — applies on the next resume'));
+            renderStyleRows();                                      // keep the menu open — the restart row just appeared
+            this.render();
+          };
+          dropdown.appendChild(item);
+        }
+        const note = document.createElement('div');
+        note.className = 'chat-status-dropdown-note';
+        note.textContent = t('A running session cannot change style — the CLI only reads it at startup.');
+        dropdown.appendChild(note);
+      };
+      renderStyleRows();
       return;
     }
 

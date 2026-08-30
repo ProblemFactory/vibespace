@@ -2807,4 +2807,12 @@ export default {
   "Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)": "保存済みのレート制限リセットクレジット——上限到達時に1つ消費できます（設定 → Codex、または有効時に自動）",
   "Reset credits": "リセットクレジット",
   "{count} workflows": "{count} 個のワークフロー",
+  "Restart (Terminate + Resume)": "再起動（終了して再開）",
+  "Resume session": "セッションを再開",
+  "Locate in sidebar": "サイドバーで表示",
+  "Restart now to apply (Terminate + Resume)": "今すぐ再起動して適用（終了して再開）",
+  "Restarting the session…": "セッションを再起動中…",
+  "Nothing to restart — this session has no conversation id yet": "再起動できません——このセッションにはまだ会話 ID がありません",
+  "Entry not visible — it may be archived or filtered out": "項目が見つかりません——アーカイブ済みかフィルタで除外されています",
+  "Session properties…": "セッションのプロパティ…",
 };

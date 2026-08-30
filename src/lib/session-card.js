@@ -786,6 +786,9 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     const items = [];
     if (s.status === 'live' && s.webuiId) {
       items.push({ label: tr('Focus window'), action: () => app.attachSession(s.webuiId, s.webuiName || displayName, s.cwd, { mode: s.webuiMode, ...agentOpts }) });
+      // one-click Terminate+Resume (owner UX 2.369.8 — the entry used to
+      // support only terminate-then-hunt-then-resume)
+      items.push({ label: '\u27F3 ' + tr('Restart (Terminate + Resume)'), action: () => app.restartConversationInPlace(s) });
     } else if (s.status === 'tmux') {
       items.push({ label: tr('View (tmux)'), action: () => app.attachTmuxSession(s.tmuxTarget, displayName, s.cwd) });
     } else if (s.status === 'stopped') {

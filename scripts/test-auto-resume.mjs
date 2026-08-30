@@ -195,6 +195,13 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('an explicit autoResume:false PERSISTS (tri-state, not truthy-filtered)', st.includes('config?.autoResume === true || config?.autoResume === false'));
   ok('the chip reports the EFFECTIVE spawn style, default-sourced included', read('src/ws-create.js').includes('data._effOutputStyle') && read('src/ws-create.js').includes('session._outputStyle = data._effOutputStyle'));
   ok('a pick is VISIBLY pending on the chip (a silent drop must never look like this again)', sb.includes('setOutputStylePending') && sb.includes('applies on the next resume (now running'));
+  // one-click restart (owner UX 2.369.8): the pending pick offers a restart
+  // row in the menu; the machinery is the pool cold switch's kill→exited→resume
+  ok('the style menu offers Restart-now when a pick is pending', sb.includes('Restart now to apply') && sb.includes('_onRestartSession'));
+  const sl9 = read('src/lib/session-lifecycle.js');
+  ok('restartConversationInPlace exists (kill → exited → resume, config rides the respawn)', /restartConversationInPlace\(sessLike = \{\}\)/.test(sl9) && /type: 'kill', sessionId: webuiId, backendSessionId: cid/.test(sl9));
+  ok('…and the session ops ride the window-title menu + the sidebar card menu', /Restart session/.test(read('src/lib/taskbar.js')) && /restartConversationInPlace\(s\)/.test(read('src/lib/session-card.js')));
+  ok('locate-in-sidebar exists (folders panel, expand, scroll, flash)', /locateSessionInSidebar\(backendSessionId\)/.test(sl9) && /locate-flash/.test(sl9));
   const cv2 = read('src/lib/chat-view.js');
   ok('partial-meta refreshes do NOT reset the live style (2.368.3: wiping os to \'\' re-lit the hourglass on a running Concise session)', /_applyLiveMeta\(meta\)\s*{\s*if \(!meta\) return;[\s\S]{0,200}'outputStyle' in meta/.test(cv2) && cv2.includes("'autoResume' in meta"));
   // ── 2.368.4 (owner-caught on the very resume the feature was built for):

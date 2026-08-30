@@ -918,3 +918,6 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   vertical-align: middle;
 }
 .chat-task-status-chip.err { color: var(--red); }
+
+/* Style-menu restart row + sidebar locate flash (2.369.8) */
+.chat-status-restart-row { color: var(--accent); font-weight: 600; }

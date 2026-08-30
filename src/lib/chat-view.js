@@ -91,6 +91,8 @@ class ChatView {
       // config (same store as the Resume gear popover) so the next resume
       // starts with the same choice.
       onConfigChange: (patch) => this._persistSessionConfig(patch),
+      // one-click Terminate+Resume from the style menu (owner UX 2.369.8)
+      onRestartSession: readOnly ? null : () => this.app?.restartConversationInPlace?.({ webuiId: this.sessionId }),
       // Design chip (2.366.0): a brief → a design request the agent fulfils
       // with the design kit and publishes to THIS VibeSpace (view-only windows: none)
       onDesignRequest: readOnly ? null : (brief, opts) => this._sendDesignRequest(brief, opts),
