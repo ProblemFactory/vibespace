@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.11
+
+- **Published pages work offline + get a large-blob storage lane** (owner traveling into no-signal areas; 生活方式助手's request for the trip handbook). ① A **scope-limited service worker** (`/p/sw.js` — its location caps the scope at `/p/`, so it can never intercept the app, `/api` or `/ws`) makes the shell + raw pair open without signal: network-first with a 4s race falling back to cache — online keeps auth enforced and content fresh, weak-signal/offline serves the last good copy (and a timed-out slow response still back-fills the cache when it lands). The shell shows a subtle 6s "✓ offline ready · <cached at>" badge once a cached copy exists. ② **`vibeBlob`** joins the bridge protocol: large values ride IndexedDB (`vibespace-pages`/blobs, keys namespaced `<pageId>:`), fetched ON DEMAND (`{vibeBlob:'get',k}` → `{vibeBlob:'val',k,v}`) instead of replayed wholesale — sized for 10-30MB map-tile caches that localStorage (~5MB strings) cannot hold. Sandbox red line untouched as ever. Deliberate deviation from the proposal, told to the proposer: cache-first was downgraded to network-first-with-fallback so an online logged-out browser can never read a private page out of cache. test-published-pages 78→81.
+
 ## 2.369.10
 
 - **Mobile desktop switcher shows real window lists/counts on first open** (inc-mtfici94, owner: "手机上重新加载页面后第一次切换桌面不展示session列表…没切换到过的桌面都展示 0"). Two bugs: ① the window snapshot was captured ONCE when the popup opened, so after a switch materialized a desktop's lazy-replayed windows the list still rendered the stale snapshot (reopening "fixed" it) — it is now computed fresh on every render, plus one more render ~700ms after a switch (lazy replay materializes on a timer); ② desktop tab counts only counted LIVE windows, and un-visited desktops keep their windows in `_savedStates` until the first switch — saved-but-unmaterialized windows now count too.

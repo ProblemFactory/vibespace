@@ -267,6 +267,29 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
       + "  try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf(PFX)===0)data[k.slice(PFX.length)]=localStorage.getItem(k)}}catch(e){}\n"
       + "  send({vibeBridge:'ready',geo:!!navigator.geolocation,store:data});\n"
       + "});\n"
+      // vibeBlob (2.369.11): LARGE values ride IndexedDB, fetched ON DEMAND
+      // ({vibeBlob:'get',k} → {vibeBlob:'val',k,v}) — never replayed whole
+      // (map tile caches run 10-30MB; localStorage is ~5MB of strings).
+      // Keys are namespaced <pageId>:<k> like vibeStore.
+      + "var idb=null;function db(cb){if(idb)return cb(idb);try{var rq=indexedDB.open('vibespace-pages',1);rq.onupgradeneeded=function(){rq.result.createObjectStore('blobs')};rq.onsuccess=function(){idb=rq.result;cb(idb)};rq.onerror=function(){cb(null)}}catch(e){cb(null)}}\n"
+      + "function blobOp(mode,fn){db(function(d){if(!d)return fn(null);try{fn(d.transaction('blobs',mode).objectStore('blobs'))}catch(e){fn(null)}})}\n"
+      + "var BPFX='" + rec.id + ":';\n"
+      + "addEventListener('message',function(e){\n"
+      + "  if(e.source!==f.contentWindow||!e.data)return;\n"
+      + "  var b=e.data.vibeBlob;if(!b)return;var k=String(e.data.k);\n"
+      + "  if(b==='set'){var v=String(e.data.v);blobOp('readwrite',function(st){if(st)try{st.put(v,BPFX+k)}catch(err){}})}\n"
+      + "  else if(b==='del'){blobOp('readwrite',function(st){if(st)try{st.delete(BPFX+k)}catch(err){}})}\n"
+      + "  else if(b==='get'){blobOp('readonly',function(st){if(!st)return send({vibeBlob:'val',k:k,v:null});var rq=st.get(BPFX+k);rq.onsuccess=function(){send({vibeBlob:'val',k:k,v:rq.result==null?null:rq.result})};rq.onerror=function(){send({vibeBlob:'val',k:k,v:null})}})}\n"
+      + "});\n"
+      // OFFLINE (2.369.11): the scope-limited service worker (/p/ only) lets
+      // the shell + raw pair open with no signal; a subtle 6s badge reports
+      // the cached copy's age once one exists
+      + "if('serviceWorker' in navigator){try{navigator.serviceWorker.register('/p/sw.js').catch(function(){})}catch(e){}}\n"
+      + "if(window.caches){caches.open('vibespace-pages-v1').then(function(c){return c.match(location.pathname)}).then(function(hit){\n"
+      + "  if(!hit)return;var d=hit.headers.get('date');var el=document.createElement('div');\n"
+      + "  el.style.cssText='position:fixed;top:4px;right:6px;z-index:9;font:10px system-ui;color:#8a8a86;background:rgba(250,249,245,.85);padding:1px 6px;border-radius:6px;pointer-events:none';\n"
+      + "  el.textContent='\u2713 offline ready'+(d?' \u00b7 '+new Date(d).toLocaleString():'');document.body.appendChild(el);setTimeout(function(){el.remove()},6000);\n"
+      + "}).catch(function(){})}\n"
       + '})()</scr' + 'ipt>';
     res.send('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + title + '</title>'
       + '<style>html,body{margin:0;height:100%;background:#faf9f5}iframe{border:0;display:block;width:100%;height:100%}</style></head>'
@@ -294,7 +317,48 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
 
   /** All routes in one place — /p/:id (self-gated, middleware-exempt) plus
    *  the cookie-authed /api/pages management family. */
+
+// OFFLINE SERVICE WORKER (2.369.11, owner traveling through no-signal areas —
+// 生活方式助手's request). Served at /p/sw.js so its DEFAULT scope is exactly
+// /p/ — it can never intercept the app, /api or /ws. Strategy: NETWORK-FIRST
+// with a 4s race falling back to cache (safer than cache-first: online keeps
+// auth enforced and content fresh; offline/weak-signal serves the last good
+// copy). Successful page responses are cached; the iframe's /raw navigation
+// is intercepted too (interception happens at the network layer — the
+// sandboxed DOCUMENT is merely not controlled, which is fine: pages are
+// self-contained).
+const PAGES_SW = `'use strict';
+const CACHE = 'vibespace-pages-v1';
+self.addEventListener('install', (e) => { self.skipWaiting(); });
+self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
+self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+  if (e.request.method !== 'GET' || !/^\\/p\\/pg[a-z0-9]{10}(\\/raw)?$/.test(url.pathname)) return;
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    try {
+      const net = fetch(e.request);
+      const timed = await Promise.race([net, new Promise((res) => setTimeout(() => res(null), 4000))]);
+      if (timed && timed.ok) { try { await cache.put(e.request, timed.clone()); } catch (err) {} return timed; }
+      if (timed && !timed.ok) { const hit0 = await cache.match(e.request); return hit0 || timed; }
+      // timeout: fall to cache but keep filling it when the slow response lands
+      net.then((r) => { if (r && r.ok) cache.put(e.request, r.clone()).catch(() => {}); }).catch(() => {});
+      const hit = await cache.match(e.request);
+      if (hit) return hit;
+      return await net;
+    } catch (err) {
+      const hit = await cache.match(e.request);
+      if (hit) return hit;
+      throw err;
+    }
+  })());
+});
+`;
   function registerRoutes(app) {
+    // sw.js FIRST — ':id' is ID_RE-gated so 'sw.js' would 404 through it,
+    // but explicit order keeps intent obvious. No auth: the script is
+    // generic code with zero user content (the pages it serves stay gated).
+    app.get('/p/sw.js', (req, res) => { res.type('application/javascript'); res.setHeader('Cache-Control', 'no-cache'); res.send(PAGES_SW); });
     app.get('/p/:id', serve);
     app.get('/p/:id/raw', serveRaw);
     app.get('/api/pages', (req, res) => (res.json({ pages: list({ sessionId: req.query.sessionId ? String(req.query.sessionId) : undefined, conversationId: req.query.conversationId ? String(req.query.conversationId) : undefined, req }) })));
