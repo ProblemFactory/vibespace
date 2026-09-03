@@ -3477,3 +3477,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 
 /* Locate-in-sidebar flash (2.369.8) */
 .session-card.locate-flash { outline: 2px solid var(--accent); outline-offset: -2px; transition: outline-color 1.8s ease; }
+
+/* Mobile Task-Groups tab icon (owner: "任务组的手机版界面非常丑陋"): the
+   Folders tab's icon carried inline sizing, the Tasks tab's carried only this
+   class with NO rule — an unsized SVG in a flex row scales to its viewBox and
+   swallowed the row (500px icon, title squeezed to 0). Size it like Folders. */
+.mobile-folder-icon { width: 18px; height: 18px; flex-shrink: 0; vertical-align: -3px; }

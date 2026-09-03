@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.13
+
+- **Mobile Task-Groups tab no longer renders 500px icons** (owner: "任务组的手机版界面非常丑陋"). The Folders tab's mobile card icon carried inline sizing; the Task-Groups tab's icon carried only a class (`mobile-folder-icon`) that had NO CSS rule — an unsized SVG in a flex row scales to its viewBox and swallowed the whole row (giant icon, group name squeezed to 0px, one group per screen). One rule sizes it like Folders (18px, no shrink). Verified on a 412px viewport: icon 18×18, row 51px, group name + counts + chevron on one line.
+
 ## 2.369.12
 
 - **Sharing a folder onto a Mac: real errors, `~` mountpoints, and a FUSE-less path** (inc-mtl78uhs, userW: "无法mount vibespace文件夹到mac" — the dialog only ever said "Daemon timed out … daemon exited with error code 1"). Three fixes on the push-mount path: ① `rclone … --daemon` detaches its child's stderr, so the child's REAL failure reason was lost forever; the daemon now logs to the same file the dialog tails (`--log-file`), and every failed rung's message is shown. ② A mountpoint typed as `~/x` or `$HOME/x` now resolves against the MACHINE's home (argv-form mkdir used to create a literal `~` directory and the quoted rclone path never expanded it either), and a trailing slash is dropped (the mount-table liveness probe compares bare paths — a `…/x/` mount would flip to "GONE" forever). ③ macOS gets a mount LADDER: `rclone nfsmount` first (rclone ≥1.66's built-in NFS server + the OS's native NFS client — no kext, no macFUSE approval dance), then FUSE `rclone mount` when macFUSE is present, then native `mount_webdav`; the device rclone pin moves v1.65.2 → v1.69.3 and an owned pre-1.66 install is re-installed (a system rclone is never touched). Pins in test-machine-migrate.
