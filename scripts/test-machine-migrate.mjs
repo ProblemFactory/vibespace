@@ -93,5 +93,19 @@ check('GC revokes reverse-mount tokens with no push record (by kind), leaves sha
 hosts2.remove('host-dial-frps-server');
 check('unpair (record removal) revokes the pairing', hosts2.dialTokenHash('frps-server') === null);
 
+// ── push-mount ladder pins (2.369.12, inc-mtl78uhs userW's Mac: rclone --daemon
+// died in 2s with its real reason lost; '~' in the typed mountpoint was taken
+// literally). Source pins — the device side cannot run here.
+{
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../src/machine-mounts.js', import.meta.url), 'utf8');
+  const pin = (n, c) => { if (!c) { console.error('  ✗ ' + n); process.exitCode = 1; } else console.log('  ✓ ' + n); };
+  pin("a typed '~/…' or '$HOME/…' mountpoint resolves against the MACHINE's home, trailing slash dropped", /replace\(\/\^~\(\?=\\\/\|\$\)\/, home\)/.test(src) && /replace\(\/\(\.\)\\\/\+\$\/, '\$1'\)/.test(src));
+  pin('the rclone daemon child logs to the SAME file the dialog tails (--log-file) — the real failure reason is never lost again', /--daemon --log-file '\$\{logf\}' --log-level NOTICE/.test(src));
+  pin('macOS ladder: nfsmount (FUSE-less, rclone ≥1.66) → FUSE mount when macFUSE present → native mount_webdav; every rung failure is kept', /method: 'rclone-nfs', run: \(\) => runRclone\('nfsmount'\)/.test(src) && /method: 'mount_webdav', run: async/.test(src) && /errs\.join\('\\n'\)/.test(src));
+  pin('device rclone pin ≥1.66 (nfsmount) and an owned pre-1.66 install is re-installed, a system rclone is never touched', /RCLONE_PIN = 'v1\.69\.3'/.test(src) && /rclone !== 'rclone'\) \{[\s\S]{0,400}force: true/.test(src));
+  pin('unmount + liveness treat rclone-nfs like the other umount-family methods', /rec\.method === 'rclone-nfs'/.test(src));
+}
+
 console.log(failed ? `\n${failed} FAILED` : '\nmigration guard passed');
 process.exit(failed ? 1 : 0);

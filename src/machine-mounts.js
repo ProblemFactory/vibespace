@@ -26,7 +26,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { deviceFolderMount } = require('./device-mount');
 
-const RCLONE_PIN = 'v1.65.2';
+const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
 
 class MachineMounts {
   /** @param deps { hosts, mountTokens, publicUrl:()=>string|null, localPort:()=>number|null, rcloneBin:()=>string, broadcast, log } */
@@ -196,12 +196,14 @@ class MachineMounts {
   /** Ensure rclone on the machine: prefer ~/.vibespace/bin/rclone, else the
    *  system one, else fetch the pinned build (unzip → busybox → python3
    *  fallbacks — unzip is absent on bare Debian, real report). */
-  async _ensureRclone(hostId, osKind) {
+  async _ensureRclone(hostId, osKind, { force = false } = {}) {
     const home = await this._remoteHome(hostId);
     const remoteBin = `${home}/.vibespace/bin/rclone`;
-    const has = await this._run(hostId, 'sh', ['-c', `[ -x "${remoteBin}" ] && "${remoteBin}" version >/dev/null 2>&1 && echo yes || echo no`]);
-    if ((has.stdout || '').includes('yes')) return remoteBin;
-    if (await this._hasBin(hostId, 'rclone')) return 'rclone';
+    if (!force) {
+      const has = await this._run(hostId, 'sh', ['-c', `[ -x "${remoteBin}" ] && "${remoteBin}" version >/dev/null 2>&1 && echo yes || echo no`]);
+      if ((has.stdout || '').includes('yes')) return remoteBin;
+      if (await this._hasBin(hostId, 'rclone')) return 'rclone';
+    }
     const arch = (await this._run(hostId, 'uname', ['-m'])).stdout.trim();
     const rcArch = { x86_64: 'amd64', aarch64: 'arm64', arm64: 'arm64' }[arch] || 'amd64';
     const rcOs = osKind === 'macos' ? 'osx' : 'linux';
@@ -305,7 +307,15 @@ class MachineMounts {
     const davUrl = base + '/dav';
     const osKind = await this.detectOS(hostId);
     const home = await this._remoteHome(hostId);
-    const mp = mountpoint || `${home}/vibespace-remote/${path.basename(abs) || 'root'}`;
+    // '~/x' typed into the dialog must mean the MACHINE's home (inc-mtl78uhs,
+    // userW: argv-form mkdir made a literal '~' directory, rclone was quoted
+    // so the shell never expanded it either)
+    // …and a trailing slash must go: the machine's mount table prints the
+    // path bare, so the liveness probe (`mount | grep ' on <mp> '`) would flip
+    // a healthy '…/x/' mount to "GONE" forever
+    const mp = (mountpoint
+      ? String(mountpoint).replace(/^~(?=\/|$)/, home).replace(/^\$HOME(?=\/|$)/, home)
+      : `${home}/vibespace-remote/${path.basename(abs) || 'root'}`).replace(/(.)\/+$/, '$1');
     const id = 'mm-' + require('crypto').randomBytes(4).toString('hex');
     let method;
 
@@ -315,52 +325,68 @@ class MachineMounts {
       if (r.code !== 0) throw new Error('net use failed: ' + (r.stderr || r.stdout).slice(0, 200));
       method = 'net-use';
     } else {
-      // macFUSE must be probed ON the Mac — the old check read the SERVER's
-      // /dev/fuse (always present on Linux pods), so a macFUSE-less Mac was
-      // sent down the rclone path and the mount died (real report: push to
-      // "Mac" → 'rclone mount failed:' with an empty error). rclone mount
-      // needs a FUSE layer on macOS; without macFUSE, native mount_webdav is
-      // the only option.
-      let useNativeMac = false;
-      if (osKind === 'macos') {
-        const fuse = await this._run(hostId, 'sh', ['-c', 'if [ -d /Library/Filesystems/macfuse.fs ] || [ -d /Library/Filesystems/osxfuse.fs ]; then echo yes; else echo no; fi']);
-        useNativeMac = !(fuse.stdout || '').includes('yes');
-      }
-      if (useNativeMac) {
-        // macOS built-in WebDAV (no macFUSE): mount_webdav via a keychain-free URL
-        await this._run(hostId, 'mkdir', ['-p', mp]);
-        const url2 = davUrl.replace('://', `://vibespace:${shareToken}@`);
-        const r = await this._run(hostId, 'mount_webdav', ['-S', url2, mp]);
-        if (r.code !== 0) throw new Error('mount_webdav failed: ' + (r.stderr || r.stdout).slice(0, 200));
-        method = 'mount_webdav';
-      } else {
-        const rclone = await this._ensureRclone(hostId, osKind);
-        await this._run(hostId, 'mkdir', ['-p', mp]);
-        // rclone webdav via env (no config file; bearer token) + detached mount
-        const env = `RCLONE_CONFIG_VSDAV_TYPE=webdav RCLONE_CONFIG_VSDAV_URL='${davUrl}' RCLONE_CONFIG_VSDAV_VENDOR=other RCLONE_CONFIG_VSDAV_BEARER_TOKEN='${shareToken}'`;
-        const roFlag = mode === 'rw' ? '' : '--read-only';
-        // FULL fd redirect (</dev/null >/dev/null 2>>log) is MANDATORY: without
-        // it the --daemon rclone inherits the ssh channel's stdio and the
-        // ControlMaster connection never frees, deadlocking the next
-        // multiplexed ssh (transport hygiene, caught by the reverse-mount e2e).
-        // setsid is LINUX-ONLY (macOS has none — the installer hit the same
-        // trap, 2.152.1): prefix it only where it exists; rclone --daemon
-        // self-detaches either way.
-        const logf = `${home}/.vibespace/host-mount-${id}.log`;
-        // Finder shows the VOLUME name, which defaults to an opaque
-        // 'vsdav{hash}' (real report: 名字不太对) — name it after the folder.
-        const volname = osKind === 'macos' ? `--volname 'VibeSpace ${path.basename(abs).replace(/[^\w .-]/g, '')}'` : '';
-        const cmd = `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) "${rclone}" mount vsdav: '${mp}' --daemon ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;
-        const r = await this._run(hostId, 'sh', ['-c', cmd]);
+      // MOUNT LADDER (2.369.12, inc-mtl78uhs — userW's Mac HAS macFUSE, yet
+      // `rclone mount --daemon` died in 2s with the child's real reason lost:
+      // --daemon detaches the child's stderr, so the dialog only ever showed
+      // "Daemon timed out … exit 1"). Three fixes in one place: ① the daemon
+      // child logs to the SAME file we tail (--log-file) so the dialog shows
+      // the real cause; ② macOS tries `rclone nfsmount` first (rclone ≥1.66:
+      // built-in NFS server + the OS's native NFS client — no kext, no macFUSE
+      // approval dance), then FUSE `rclone mount` when macFUSE is present,
+      // then native mount_webdav; every rung's failure is kept and shown.
+      // Linux keeps the single rclone path.
+      const rclone = await this._ensureRclone(hostId, osKind);
+      await this._run(hostId, 'mkdir', ['-p', mp]);
+      const env = `RCLONE_CONFIG_VSDAV_TYPE=webdav RCLONE_CONFIG_VSDAV_URL='${davUrl}' RCLONE_CONFIG_VSDAV_VENDOR=other RCLONE_CONFIG_VSDAV_BEARER_TOKEN='${shareToken}'`;
+      const roFlag = mode === 'rw' ? '' : '--read-only';
+      // FULL fd redirect (</dev/null >/dev/null 2>>log) is MANDATORY: without
+      // it the --daemon rclone inherits the ssh channel's stdio and the
+      // ControlMaster connection never frees, deadlocking the next
+      // multiplexed ssh (transport hygiene, caught by the reverse-mount e2e).
+      // setsid is LINUX-ONLY (macOS has none — the installer hit the same
+      // trap, 2.152.1): prefix it only where it exists; rclone --daemon
+      // self-detaches either way.
+      const logf = `${home}/.vibespace/host-mount-${id}.log`;
+      // Finder shows the VOLUME name, which defaults to an opaque
+      // 'vsdav{hash}' (real report: 名字不太对) — name it after the folder.
+      const volname = osKind === 'macos' ? `--volname 'VibeSpace ${path.basename(abs).replace(/[^\w .-]/g, '')}'` : '';
+      const rcloneCmd = (sub) => `${env} $(command -v setsid >/dev/null 2>&1 && echo setsid) "${rclone}" ${sub} vsdav: '${mp}' --daemon --log-file '${logf}' --log-level NOTICE ${volname} --vfs-cache-mode ${mode === 'rw' ? 'writes' : 'off'} ${roFlag} --dir-cache-time 10s --timeout 30s --contimeout 10s </dev/null >/dev/null 2>>'${logf}'`;
+      const runRclone = async (sub) => {
+        const r = await this._run(hostId, 'sh', ['-c', rcloneCmd(sub)]);
         if (r.code !== 0) {
-          // stderr went to the remote log (the fd redirect above) — pull its
-          // tail so the dialog shows the REAL reason, not an empty message
-          const tail = await this._run(hostId, 'sh', ['-c', `tail -c 400 '${logf}' 2>/dev/null`]).catch(() => ({ stdout: '' }));
+          // the daemon child now writes to logf too — pull its tail so the
+          // dialog shows the REAL reason, not an empty message
+          const tail = await this._run(hostId, 'sh', ['-c', `tail -c 500 '${logf}' 2>/dev/null`]).catch(() => ({ stdout: '' }));
           const detail = ((r.stderr || r.stdout || '').trim() || (tail.stdout || '').trim() || `no output — see ${logf} on the machine`);
-          throw new Error('rclone mount failed: ' + detail.slice(0, 300));
+          throw new Error(`rclone ${sub} failed: ` + detail.slice(0, 400));
         }
-        method = 'rclone-webdav';
+      };
+      const rungs = [];
+      if (osKind === 'macos') {
+        let nfsOk = (await this._run(hostId, 'sh', ['-c', `"${rclone}" nfsmount --help >/dev/null 2>&1 && echo yes || echo no`])).stdout.includes('yes');
+        if (!nfsOk && rclone !== 'rclone') {
+          // an OWNED pre-1.66 install (the old v1.65.2 pin) — re-install at the
+          // current pin so the FUSE-less rung exists; a system rclone is not ours to touch
+          try { await this._ensureRclone(hostId, osKind, { force: true }); nfsOk = (await this._run(hostId, 'sh', ['-c', `"${rclone}" nfsmount --help >/dev/null 2>&1 && echo yes || echo no`])).stdout.includes('yes'); } catch { }
+        }
+        const fuse = await this._run(hostId, 'sh', ['-c', 'if [ -d /Library/Filesystems/macfuse.fs ] || [ -d /Library/Filesystems/osxfuse.fs ]; then echo yes; else echo no; fi']);
+        if (nfsOk) rungs.push({ method: 'rclone-nfs', run: () => runRclone('nfsmount') });
+        if ((fuse.stdout || '').includes('yes')) rungs.push({ method: 'rclone-webdav', run: () => runRclone('mount') });
+        rungs.push({ method: 'mount_webdav', run: async () => {
+          // macOS built-in WebDAV: keychain-free credentialed URL
+          const url2 = davUrl.replace('://', `://vibespace:${shareToken}@`);
+          const r = await this._run(hostId, 'mount_webdav', ['-S', url2, mp]);
+          if (r.code !== 0) throw new Error('mount_webdav failed: ' + (r.stderr || r.stdout).slice(0, 200));
+        } });
+      } else {
+        rungs.push({ method: 'rclone-webdav', run: () => runRclone('mount') });
       }
+      const errs = [];
+      for (const rung of rungs) {
+        try { await rung.run(); method = rung.method; break; }
+        catch (e) { errs.push(`[${rung.method}] ${String(e.message || e)}`); console.warn(`[machine-mounts] push rung ${rung.method} failed on ${hostId}: ${String(e.message || e).slice(0, 200)}`); }
+      }
+      if (!method) throw new Error(errs.join('\n') || 'no mount method available on this machine');
     }
     const rec = { id, dir: 'push', hostId, folder: abs, mountpoint: mp, mode, os: osKind, method, tokenId: shareTokenId, tunnelPort, mountedAt: Date.now() };
     if (tunnelPort) this._pushTunnelOwned.add(id);
@@ -381,7 +407,7 @@ class MachineMounts {
     // and the record dropped REGARDLESS, so a dead machine can't hold a live
     // credential hostage
     try {
-      if (rec.method === 'rclone-webdav' || rec.method === 'mount_webdav') {
+      if (rec.method === 'rclone-webdav' || rec.method === 'rclone-nfs' || rec.method === 'mount_webdav') {
         await this._run(rec.hostId, 'sh', ['-c', `fusermount -u '${rec.mountpoint}' 2>/dev/null || umount '${rec.mountpoint}' 2>/dev/null || true`]);
       } else if (rec.method === 'net-use') {
         await this._run(rec.hostId, 'cmd', ['/c', `net use ${rec.mountpoint} /delete /y`]);
