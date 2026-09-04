@@ -156,6 +156,38 @@ async function readPayloadAsset(file, nameOffset) {
   } finally { await fh.close(); }
 }
 
+/** CLI ≥2.1.257 packs the skill pieces as ZSTD FRAMES inside the bun binary
+ *  (/$bunfs/root/SKILL-<hash>.md.zst, seed-canvas.mjs-<hash>.txt.zst, and the
+ *  payload — verified 2026-09-04 by a full-frame scan: skill 56KB with its
+ *  frontmatter intact, helper 40KB, payload 2.4MB ending </html>). The old
+ *  template-literal anchors are gone from those builds. Every zstd magic in
+ *  the file is a candidate; non-frames fail to decode in microseconds. One
+ *  scan per CLI version (the kit dir caches the result). Needs Node's zstd
+ *  (≥22.15) — an older Node says so instead of pretending. */
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+async function extractFromZstd(file) {
+  const zlib = require('zlib');
+  if (typeof zlib.zstdDecompressSync !== 'function') throw new Error('this CLI packs the design skill as zstd frames — Node ≥22.15 (zlib zstd) is required to extract it');
+  const d = await fs.promises.readFile(file);
+  const found = { skill: null, helper: null, payload: null };
+  let i = 0;
+  while ((i = d.indexOf(ZSTD_MAGIC, i)) >= 0) {
+    if (!(found.skill && found.helper && found.payload)) {
+      try {
+        const out = zlib.zstdDecompressSync(d.subarray(i, Math.min(d.length, i + 24 * 1024 * 1024)), { maxOutputLength: 24 * 1024 * 1024 });
+        if (out.length > 200) {
+          const head = out.subarray(0, 120).toString('utf8');
+          if (!found.skill && /^---\nname: design\n/.test(head)) found.skill = out.toString('utf8');
+          else if (!found.helper && /^\/\/ Design-canvas seeding helper/.test(head)) found.helper = out;
+          else if (!found.payload && out.length > 500000 && /^<!doctype html/i.test(head) && out.includes('id="appifact-doc"')) found.payload = out;
+        }
+      } catch { }
+    } else break;
+    i += 4;
+  }
+  return found;
+}
+
 /** The payload asset: the one asset-name occurrence followed by the page bytes. */
 async function extractPayload(file) {
   for (const o of await findAll(file, PAYLOAD_ASSET)) {
@@ -370,16 +402,29 @@ function create({ dataDir, claudeCmd, log = () => { } }) {
       const need = [SKILL_ANCHOR];
       if (!helperBuf) need.push(HELPER_ANCHOR);
       const offs = await findOffsets(bin, need);
-      if (!offs.has(SKILL_ANCHOR)) throw new Error('design skill text not found in the CLI binary (layout changed?)');
-      if (!helperBuf) {
-        if (!offs.has(HELPER_ANCHOR)) throw new Error('design helper not found in the CLI binary and not extracted by the CLI yet — run /design once in a terminal-mode session, then retry');
-        const helper = await readTemplateLiteral(bin, offs.get(HELPER_ANCHOR) + 1);
-        payloadBuf = await extractPayload(bin);
-        if (!helper || !payloadBuf || payloadBuf.length < 100000) throw new Error('design helper/payload extraction from the CLI binary came back incomplete');
-        helperBuf = Buffer.from(helper, 'utf8');
-        out.source = 'binary-extracted';
+      let skill = null;
+      if (offs.has(SKILL_ANCHOR)) {
+        // ≤2.1.25x layout: template literals + raw payload asset
+        if (!helperBuf) {
+          if (!offs.has(HELPER_ANCHOR)) throw new Error('design helper not found in the CLI binary and not extracted by the CLI yet — run /design once in a terminal-mode session, then retry');
+          const helper = await readTemplateLiteral(bin, offs.get(HELPER_ANCHOR) + 1);
+          payloadBuf = await extractPayload(bin);
+          if (!helper || !payloadBuf || payloadBuf.length < 100000) throw new Error('design helper/payload extraction from the CLI binary came back incomplete');
+          helperBuf = Buffer.from(helper, 'utf8');
+          out.source = 'binary-extracted';
+        }
+        skill = await readTemplateLiteral(bin, offs.get(SKILL_ANCHOR) + 1);
+      } else {
+        // ≥2.1.257 layout: zstd frames (skill + helper + payload)
+        const z = await extractFromZstd(bin);
+        if (!z.skill) throw new Error('design skill text not found in the CLI binary (neither template-literal nor zstd layout — layout changed again?)');
+        skill = z.skill;
+        if (!helperBuf) {
+          if (!z.helper || !z.payload) throw new Error('design helper/payload zstd frames not found in the CLI binary — run /design once in a terminal-mode session (the CLI extracts them), then retry');
+          helperBuf = z.helper; payloadBuf = z.payload;
+          out.source = 'binary-extracted (zstd)';
+        }
       }
-      const skill = await readTemplateLiteral(bin, offs.get(SKILL_ANCHOR) + 1);
       if (!skill || !/^---\nname: design\n/.test(skill)) throw new Error('design skill text extraction from the CLI binary came back incomplete');
       const adapted = adaptSkill(skill);
       if (adapted.error) throw new Error(adapted.error);
@@ -425,7 +470,7 @@ function create({ dataDir, claudeCmd, log = () => { } }) {
     });
   }
 
-  return { ensure, status, fileFor, registerRoutes, adaptSkill, unescapeTemplate, findCliExtractedKit, _internals: { findOffsets, findAll, readTemplateLiteral, readPayloadAsset, extractPayload, HELPER_ANCHOR } };
+  return { ensure, status, fileFor, registerRoutes, adaptSkill, unescapeTemplate, findCliExtractedKit, _internals: { findOffsets, findAll, readTemplateLiteral, readPayloadAsset, extractPayload, extractFromZstd, HELPER_ANCHOR } };
 }
 
 module.exports = { create, adaptSkill, unescapeTemplate, ownedDir };

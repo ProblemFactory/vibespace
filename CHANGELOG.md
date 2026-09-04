@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.14
+
+- **/design works again on Claude Code ≥2.1.257** (owner hit "设计工具包未就绪: design skill text not found in the CLI binary"; parked as B-6ee8 when the CLI auto-updated). Those builds no longer embed the skill as a JS template literal: the three pieces are ZSTD FRAMES inside the bun binary (`/$bunfs/root/SKILL-<hash>.md.zst`, `seed-canvas.mjs-<hash>.txt.zst`, and the 2.4MB editor payload — verified by a full-frame scan: skill 56KB with its frontmatter intact, helper 40KB, payload ends `</html>`). design-kit gains a zstd rung behind the old anchors: every zstd magic is a candidate, junk fails to decode in microseconds, the three pieces are classified by their heads (frontmatter `name: design` / `// Design-canvas seeding helper` / `<!doctype html` + `id="appifact-doc"`); 176ms on the 220MB binary, cached per CLI version. Older CLIs keep the template-literal path; Node <22.15 (no zlib zstd) says so plainly. The evidence-SKIP in test-design-kit no longer triggers — the suite's full extraction/seed/check legs run again (33).
+
 ## 2.369.13
 
 - **Mobile Task-Groups tab no longer renders 500px icons** (owner: "任务组的手机版界面非常丑陋"). The Folders tab's mobile card icon carried inline sizing; the Task-Groups tab's icon carried only a class (`mobile-folder-icon`) that had NO CSS rule — an unsized SVG in a flex row scales to its viewBox and swallowed the whole row (giant icon, group name squeezed to 0px, one group per screen). One rule sizes it like Folders (18px, no shrink). Verified on a 412px viewport: icon 18×18, row 51px, group name + counts + chevron on one line.
