@@ -64,6 +64,13 @@ router.use((req, res, next) => {
   if (mounts.pathBlocked(p)) {
     return res.status(503).json({ error: 'This storage is connecting or not responding — try again in a moment.' });
   }
+  // A registered storage that is NOT mounted: its mount point is a bare local
+  // directory — anything written there is stranded (and blocks the next
+  // connect). Refuse instead of pretending the folder is the storage.
+  const shadow = mounts.shadowedBy?.(p);
+  if (shadow) {
+    return res.status(503).json({ error: `“${shadow.name}” is not connected — this folder is its mount point; connect the storage before using it.` });
+  }
   next();
 });
 

@@ -18,7 +18,7 @@ const { mk } = require('./lazy.js');
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
   hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
-  ensureAgentdOnHost, getPortForwards }) {
+  ensureAgentdOnHost, getPortForwards, onMountsUpdated }) {
   const portForwards = mk(getPortForwards);
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
@@ -284,8 +284,13 @@ const mounts = new MountManager({
   broadcast: (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+    // Mount state changed ⇒ context folders skipped as shadowed may be back.
+    if (msg?.type === 'mounts-updated') { try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] onMountsUpdated failed:', e.message); } }
   },
 });
+// The task store regenerated TASK.md at boot BEFORE mounts existed (its shadow
+// predicate answered null) — redo it now that isMounted() can answer.
+try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] boot ctx resync failed:', e.message); }
 // Rename guard: bridge-share chroots are filesystem paths under the mount.
 // MUST be OUTSIDE the broadcast callback — it was mis-nested inside, so every
 // broadcast re-ran it, and a broadcast DURING construction (env-import add →

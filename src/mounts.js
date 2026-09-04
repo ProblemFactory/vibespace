@@ -550,14 +550,14 @@ class MountManager {
     try { return fs.readFileSync('/proc/mounts', 'utf-8'); } catch { return ''; }
   }
 
-  isMounted(m) {
+  isMounted(m, live = this._liveMounts()) {
     // gmail "mounts" are sync workers, not filesystems
     if (m.type === 'gmail') return !!this.gmail.status(m.id);
     // /proc/mounts escapes spaces as \040
     const p = this.pathOf(m).replace(/ /g, '\\040');
     // cephfs = native KERNEL mount (fstype 'ceph'), not fuse.rclone
     const fstypeRe = (m.type === 'cephfs') ? /^ceph$/ : /fuse\.rclone/;
-    return this._liveMounts().split('\n').some(l => {
+    return live.split('\n').some(l => {
       const parts = l.split(' ');
       return parts[1] === p && fstypeRe.test(parts[2] || '');
     });
@@ -565,6 +565,25 @@ class MountManager {
 
   pathOf(m) {
     return m.customPath || path.join(this.mountBase, m.name.replace(/[^\w.-]+/g, '_'));
+  }
+
+  /** The registered storage whose mount point contains p but is NOT mounted
+   *  right now, or null. A write landing there goes to the bare local
+   *  directory: invisible once the storage reconnects, and the reconnect
+   *  itself then fails "not empty" (real incident — a generated TASK.md
+   *  recreated a whole folder tree under a disconnected OneDrive). Every
+   *  server-side writer consults this before touching a path. */
+  shadowedBy(p) {
+    if (!p || !this._state?.mounts?.length) return null;
+    const rp = String(p);
+    const live = this._liveMounts();
+    for (const m of this._state.mounts) {
+      if (m.type === 'gmail' || this._kindOf(m) === 'credential') continue;
+      let mp; try { mp = this.pathOf(m); } catch { continue; }
+      if (rp !== mp && !rp.startsWith(mp + '/')) continue;
+      if (!this.isMounted(m, live)) return m;
+    }
+    return null;
   }
 
   // ── Credentials (2.108.0) ──
@@ -1424,7 +1443,7 @@ class MountManager {
       if (m.kind === 'credential') { delete m.kind; this._save(); }
     }
     const mp = this.pathOf(m);
-    try { await this._ensureMountpointDir(mp); }
+    try { await this._ensureMountpointDir(mp, { quarantine: true }); }
     catch (e) { this._errors.set(id, String(e.message || e)); this._notify(); throw e; } // mount()'s finally clears _connecting
     fs.mkdirSync(this._logDir, { recursive: true });
     const { env, remote } = this._rcloneFor(m);
@@ -1922,7 +1941,7 @@ class MountManager {
   async _mountCephfs(id) {
     const m = this._get(id);
     const mp = this.pathOf(m);
-    await this._ensureMountpointDir(mp); // sudo -n fallback covers root-owned parents
+    await this._ensureMountpointDir(mp, { quarantine: true }); // sudo -n fallback covers root-owned parents
     await this._ensureModprobeShim(); // 3.5.0-class images lack kmod — see above
     // `sudo mount -t ceph <mons>:<path> <mp> -o name=<user>,secret=<key>,mds_namespace=<fs>`
     // Root-only, so sudo (the container has passwordless sudo). Secret rides in
@@ -1982,9 +2001,9 @@ class MountManager {
    *  passwordless sudo just work, everything else falls through to the honest
    *  error). Ownership is normalized to the service user so the unprivileged
    *  fuse daemon can use the dir. */
-  async _ensureMountpointDir(mp) {
+  async _ensureMountpointDir(mp, { quarantine = false } = {}) {
     const run = (cmd, args) => new Promise((resolve) =>
-      execFile(cmd, args, { timeout: 8000 }, (err, _o, stderr) => resolve({ ok: !err, stderr: String(stderr || (err && err.message) || '') })));
+      execFile(cmd, args, { timeout: 8000 }, (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || (err && err.message) || '') })));
     const owner = `${typeof process.getuid === 'function' ? process.getuid() : 0}:${typeof process.getgid === 'function' ? process.getgid() : 0}`;
     let made = await run('mkdir', ['-p', mp]);
     if (!made.ok && /permission denied|not permitted/i.test(made.stderr)) {
@@ -2005,6 +2024,27 @@ class MountManager {
       if (su.ok) { global.__vsEvent?.('mount-mkdir-sudo'); w = await run('test', ['-w', mp]); }
     }
     if (!w.ok) throw new Error(`The mount point ${mp} exists but is not writable by VibeSpace — fix ownership: sudo chown ${owner} '${mp}'`);
+    if (!quarantine) return null;
+    // Leftovers under an UNMOUNTED mount point are STRANDED writes: something
+    // wrote into the bare directory while the storage was down. rclone
+    // refuses "not empty" (and --allow-non-empty would only hide them under
+    // the mount), so move the directory aside as a sibling — never delete,
+    // never merge — and tell the user where it went. A dead fuse endpoint
+    // makes `ls` fail/time out ⇒ falls through to the stale-daemon kill.
+    const ls = await run('ls', ['-A', mp]);
+    const names = ls.ok ? ls.stdout.split('\n').filter(Boolean) : [];
+    if (!names.length) return null;
+    const dest = `${mp}.stranded-${new Date().toISOString().replace(/[-:]/g, '').slice(0, 13)}`;
+    let mv = await run('mv', [mp, dest]);
+    if (!mv.ok) mv = await run('sudo', ['-n', 'mv', mp, dest]);
+    if (!mv.ok) throw new Error(`The mount point ${mp} is not empty (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — these were written while the storage was disconnected; move them away, then reconnect`);
+    const re = await run('mkdir', ['-p', mp]);
+    if (!re.ok) throw new Error(`Moved stranded files to ${dest} but could not recreate the mount point ${mp}: ${re.stderr}`);
+    const text = `${mp} held ${names.length} item${names.length === 1 ? '' : 's'} written while the storage was disconnected (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}) — moved to ${dest}. Nothing was deleted; merge them into the storage yourself.`;
+    console.warn(`[mounts] stranded content quarantined: ${text}`);
+    global.__vsEvent?.('mount-stranded-quarantine');
+    this.broadcast({ type: 'server-notice', key: `mount-stranded:${dest}`, text, level: 2 });
+    return dest;
   }
 
   unmount(id, opts = {}) {

@@ -792,7 +792,7 @@ const { TaskGroupManager } = require('./src/task-groups');
 const tasks = new TaskGroupManager({
   dataDir: path.join(__dirname, 'data'),
   readUserState: () => persistenceRouter.readUserState(),
-  getSetting: (k) => serverSetting(k),
+  getSetting: (k) => serverSetting(k), isPathShadowed: (p) => { try { return mounts.shadowedBy(p); } catch { return null; } },
   onChange: (list) => {
     const json = JSON.stringify({ type: 'tasks-updated', tasks: list });
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
@@ -1576,7 +1576,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
-  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl,
+  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(),
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');

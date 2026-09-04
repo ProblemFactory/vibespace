@@ -83,7 +83,12 @@ function sanitizeStrArray(arr, cap = 200) {
 }
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState, getSetting }) {
+  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed }) {
+    // (path) → the disconnected storage whose mount point contains it, or
+    // null. Late singleton (mounts wire up after this store) — the getter
+    // resolves at call time; server.js re-runs syncAllContextMd() once
+    // mounts exist and on every mounts-updated.
+    this._isPathShadowed = isPathShadowed || (() => null);
     // Authoritative store for Task Groups (岗位). Renamed from tasks.json in the
     // 岗位/活儿 refactor; _load migrates the old file once. The internal
     // `_state.tasks` map keeps its key (a wire/data structure — renaming it would
@@ -225,8 +230,30 @@ class TaskGroupManager {
     return lines.join('\n');
   }
 
+  /** Regenerate every context folder's TASK.md (content-compared no-op when
+   *  unchanged; a folder skipped as shadowed retries here once its storage
+   *  is back). */
+  syncAllContextMd() {
+    for (const t of Object.values(this._state.tasks)) this._syncTaskMd(t);
+  }
+
   _syncTaskMd(t) {
     if (!t.contextDir) return;
+    // A context folder living on a storage that is currently DISCONNECTED:
+    // writing would recreate the tree on the bare mount point (stranded,
+    // and the reconnect then fails "not empty" — real OneDrive incident).
+    // Skip; the next syncAllContextMd after the mount comes back writes it.
+    let shadow = null;
+    try { shadow = this._isPathShadowed(t.contextDir); } catch { shadow = null; }
+    if (shadow) {
+      if (!(this._shadowWarned ||= new Set()).has(t.id)) {
+        this._shadowWarned.add(t.id);
+        console.warn(`[tasks] TASK.md for ${t.id} skipped: ${t.contextDir} is on "${shadow.name}" which is not connected`);
+        global.__vsEvent?.('ctx-md-skipped-shadowed');
+      }
+      return;
+    }
+    this._shadowWarned?.delete(t.id);
     try {
       const dir = path.join(t.contextDir, '.vibespace');
       const file = path.join(dir, 'TASK.md');
