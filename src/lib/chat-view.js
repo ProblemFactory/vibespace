@@ -1943,7 +1943,7 @@ class ChatView {
     const name = this.app.sidebar?.getCustomName?.({ backend, backendSessionId }) || this.winInfo?.name || t('Session');
     const winId = this.winInfo?.id;
     const winBounds = winId ? this.app._snapshotWinBounds?.(this.app.wm.windows.get(winId)) : undefined;
-    this.ws.send({ type: 'kill', sessionId: this.sessionId, backendSessionId });
+    this.app.killSession(this.sessionId, backendSessionId);
     setTimeout(() => {
       if (winId) this.app.wm?.closeWindow?.(winId);
       this.app.resumeSession(backendSessionId, cwd, name, {
@@ -2472,7 +2472,11 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       if (this._readOnly || this._disconnected) { this.ws.offGlobal(handler); return; } // resolved / offline (next reconnect restarts the ladder)
       if ((this._lastAttachedAt || 0) >= reattachAt) return; // attached — done (the handler self-removed when it ran)
       const acked = (this._lastAttachAckAt || 0) >= reattachAt;
-      waits++;
+      // A FRESH ack (the server re-acks every 10s while this session waits
+      // in / runs its history rebuild, 2.369.16) is proof of life — keep
+      // waiting instead of counting toward the flip, up to 15 minutes.
+      const freshAck = acked && Date.now() - this._lastAttachAckAt < 30000 && Date.now() - reattachAt < 15 * 60000;
+      if (!freshAck) waits++;
       if (waits < 5) {
         if (!acked) this.ws.send({ type: 'attach', sessionId: this.sessionId });
         setTimeout(checkOrRetry, 25000);

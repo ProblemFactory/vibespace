@@ -298,7 +298,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           chatView._applyLiveMeta?.(msg);
           winInfo.onClose = () => {
             const shouldKill = (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.ws.send({ type: 'kill', sessionId: msg.sessionId });
+            if (shouldKill) this.killSession(msg.sessionId);
             // pending name/fork-title entries otherwise only clear on identity
             // adoption — a window closed before that leaked them forever
             this._pendingForkTitles?.delete(msg.sessionId);
@@ -376,7 +376,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // otherwise honor the global close-behavior (default: detach — user
       // directive, no per-type exceptions; sessions stay re-attachable)
       const shouldKill = ephemeral || (killOnClose && this.settings.get('window.closeBehavior') === 'terminate');
-      if (shouldKill) this.ws.send({ type: 'kill', sessionId });
+      if (shouldKill) this.killSession(sessionId);
       term.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
     };
     winInfo._notifyChanged = () => this.updateTaskbar();
@@ -401,8 +401,27 @@ export function installSessionLifecycle(App, ctx = {}) {
     }
   },
 
-  killSession(webuiId) {
-    this.ws.send({ type: 'kill', sessionId: webuiId });
+  // RELIABLE KILL (2.369.16, userW inc-mtndq0vb "没法 terminate"): a kill
+  // written to a socket the server later terminated (its own stall → missed
+  // pong) was simply lost — the window stayed blank and Terminate did
+  // nothing. Every kill now rides ws.request with resend:true and is
+  // re-sent on each reconnect until the server acknowledges ('killed' to
+  // the requester — ok:false = already gone — or the attached-only 'exited').
+  // Two frames when a conversation id is known (review-caught): the frame
+  // carrying backendSessionId lets the server's 2.179.0 stale-id fallback
+  // find the live session, but that same fallback would make a RESENT copy
+  // kill whatever session later resumed the conversation — so only the plain
+  // {kill, sessionId} rides the resend chase, and the fallback frame is a
+  // one-shot sent first. The server answers 'killed' with the id the client
+  // asked for (requestedId), so a remapped kill still resolves the request.
+  // The 3-minute watchdog DISARMS the request (ws.request's timer alone
+  // leaves the handler live) — nothing chases a kill for the page's lifetime.
+  killSession(webuiId, backendSessionId) {
+    if (!webuiId) return;
+    if (backendSessionId) this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId });
+    const msg = { type: 'kill', sessionId: webuiId };
+    const cancel = this.ws.request(msg, (m) => (m.type === 'killed' || m.type === 'exited') && m.sessionId === webuiId,
+      { resend: true, timeoutMs: 180000, onTimeout: () => cancel() });
   },
 
   // ONE-CLICK RESTART (owner UX, 2.369.8: applying a "next resume" pick —
@@ -427,7 +446,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
     const onExit = (msg) => { if (msg.type === 'exited' && msg.sessionId === webuiId) setTimeout(go, 400); }; // let the CLI flush its transcript
     this.ws.onGlobal(onExit);
-    this.ws.send({ type: 'kill', sessionId: webuiId, backendSessionId: cid });
+    this.killSession(webuiId, cid);
     setTimeout(go, 15000); // a lost exited must not strand the restart
   },
 
@@ -597,7 +616,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
-            if (shouldKill) this.ws.send({ type: 'kill', sessionId: serverId });
+            if (shouldKill) this.killSession(serverId);
             chatView.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome();
           };
           winInfo._notifyChanged = () => this.updateTaskbar();
@@ -923,7 +942,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // backendSessionId lets the server resolve the session even when the
         // webui id went stale across a restart (2.179.0 — a no-op'd kill here
         // followed by the resume double-wrote the same claude id)
-        this.ws.send({ type: 'kill', sessionId: live.webuiId, backendSessionId });
+        this.killSession(live.webuiId, backendSessionId);
         // Wait for the ACTUAL exited event, not a fixed delay (2.240.0,
         // userN's incident timeline: a REMOTE session's teardown took ~9s —
         // the old 900ms fire let resume run while the session still lived,

@@ -333,7 +333,7 @@ export function installManageAgents(App, ctx = {}) {
     const go = () => { if (done) return; done = true; this.ws.offGlobal(onExit); finish(); };
     const onExit = (msg) => { if (msg.type === 'exited' && msg.sessionId === sess.serverId) setTimeout(go, 400); }; // let the CLI flush its transcript
     this.ws.onGlobal(onExit);
-    this.ws.send({ type: 'kill', sessionId: sess.serverId, backendSessionId: sess.backendSessionId });
+    this.killSession(sess.serverId, sess.backendSessionId);
     setTimeout(go, 15000); // a lost exited must not strand the restart
   },
   // Pool MEMBERS dialog (user request): choose which subscriptions the pool

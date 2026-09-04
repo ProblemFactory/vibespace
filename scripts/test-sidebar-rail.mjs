@@ -130,7 +130,13 @@ try {
   // System panel: the btop-like process manager (2.354.0) — real rows from
   // the live /api/sysinfo/procs, search narrows, expand exposes the actions
   check('system panel renders', await openPanel('system'));
-  await sleep(1500); // first /procs fetch
+  // first /procs fetch: POLL, never a fixed sleep — under the gate's parallel
+  // load the first fetch can take several seconds and a 1.5s sleep went red
+  // (2.369.16 gate flake: 6 process-table asserts + a null .click())
+  for (let i = 0; i < 80; i++) {
+    if (await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5 && !!document.querySelector('.rail-panel-system .prc-pause') && !!document.querySelector('.rail-panel-system .sys-hist')`)) break;
+    await sleep(250);
+  }
   check('process table has real rows', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-row').length > 5`));
   check('rows carry cpu + mem cells', await evalJs(`!!document.querySelector('.rail-panel-system .prc-row .prc-cpu') && !!document.querySelector('.rail-panel-system .prc-row .prc-mem')`));
   check('sort chips render (CPU/MEM/PID/Name/Tree)', await evalJs(`document.querySelectorAll('.rail-panel-system .prc-sorts .sys-range-chip').length === 5`));

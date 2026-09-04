@@ -236,6 +236,28 @@ class CodexMessageManager {
     return this.messages;
   }
 
+  /** Time-sliced twin of convertHistory (see MessageManager.convertHistoryAsync). */
+  async convertHistoryAsync(records, { budgetMs = 25, onSlice } = {}) {
+    let sliceStart = Date.now(), done = 0;
+    for (const record of records || []) {
+      // per-record isolation (review-caught: one bad rollout record rejected
+      // the whole rebuild for every attached window)
+      try { this._processRecord(record, false); }
+      catch (e) { console.error('[codex-normalizer] record skipped during history rebuild:', e.message); }
+      done++;
+      if (Date.now() - sliceStart >= budgetMs) {
+        try { onSlice?.(done); } catch { }
+        await new Promise((r) => setImmediate(r));
+        sliceStart = Date.now();
+      }
+    }
+    this._finalizeStreaming(false, { includeReasoning: true });
+    if (this._goalActive && this._goalCondition) {
+      this._goalState = { condition: this._goalCondition, met: false, sentinel: false };
+    }
+    return this.messages;
+  }
+
   processLive(record) {
     this._processRecord(record, true);
   }

@@ -7,6 +7,7 @@
 // ORCH tier: it consumes the machine handle (hosts) and the usage/pool engine,
 // never vendor APIs. Late-created deps arrive lazily — all uses are at runtime.
 const { classifyCliDeath } = require('./agent-tool-generators.js');
+const { feedLive } = require('../normalizers');
 const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 const { capsOf } = require('../backend-caps.js'); // streamProtocol picks the parse pipeline — never the backend id (P4)
 const fs = require('fs');
@@ -241,7 +242,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
                 status: (p.status === 'inProgress' || p.status === 'in_progress') ? 'in_progress' : (p.status === 'completed' ? 'completed' : 'pending'),
               })));
             }
-            if (session._normalizer) session._normalizer.processLive(msg);
+            feedLive(session, msg);
           } catch {
             broadcastToSession(session, id, { type: 'output', sessionId: id, data: line + '\n' });
           }
@@ -830,7 +831,8 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
               continue;
             }
             // Feed into MessageManager (emits normalized msg ops to all clients)
-            if (session._normalizer) session._normalizer.processLive(msg);
+            // — through the rebuild gate, never processLive directly (2.369.16)
+            feedLive(session, msg);
           } catch {
             // Non-JSON line (e.g. dtach noise) — send as raw output
             broadcastToSession(session, id, { type: 'output', sessionId: id, data: line + '\n' });

@@ -4,7 +4,8 @@
  */
 
 const { MessageManager } = require('./message-manager');
-const { createMessageManager } = require('./normalizers');
+const { createMessageManager, feedLive, feedPeerCard, rebuildHistory } = require('./normalizers');
+const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
@@ -208,16 +209,12 @@ function registerWsHandler(wss, ctx) {
   // full TCP keepalive window (~2h), and its stale size keeps shrinking the
   // PTY via resizeSessionToMin. Ping every 30s; a client that misses two
   // consecutive pongs is terminated, which fires 'close' and cleans it up.
-  if (!wss._heartbeatTimer) {
-    wss._heartbeatTimer = setInterval(() => {
-      for (const client of wss.clients) {
-        if (client._isAlive === false) { try { client.terminate(); } catch {} continue; }
-        client._isAlive = false;
-        try { client.ping(); } catch {}
-      }
-    }, 30000);
-    wss._heartbeatTimer.unref?.();
-  }
+  // STALL-AWARE (2.369.16, userW inc-mtndq0vb): a pong that "never came"
+  // while OUR OWN event loop was blocked is not evidence the client died —
+  // the old tick terminated userW's live client right after a 4-minute
+  // history-rebuild stall and dropped every inbound frame queued on that
+  // socket (the second attach, two kills). src/server/ws-heartbeat.js.
+  if (!wss._heartbeatTimer) createWsHeartbeat(wss).start();
 
   wss.on('connection', (ws) => {
     ws._isAlive = true;
@@ -441,7 +438,7 @@ function registerWsHandler(wss, ctx) {
             session.pty.write(payloadLine + '\n');
             if (userMsg) {
               session.buffer = (session.buffer + JSON.stringify(userMsg) + '\n').slice(-500000);
-              if (session._normalizer) session._normalizer.processLive(userMsg);
+              feedLive(session, userMsg);
             }
             // Detect broken pty stdin: the wrapper writes _stdin_ack on
             // stdout immediately when it receives stdin input. If no ack
@@ -528,7 +525,7 @@ function registerWsHandler(wss, ctx) {
               session.pty.write(payload + '\n');
               // Record in buffer so permission state survives refresh/restart
               session.buffer = (session.buffer + payload + '\n').slice(-500000);
-              if (session._normalizer) session._normalizer.processLive(JSON.parse(payload));
+              feedLive(session, JSON.parse(payload));
             }
           }
           break;
@@ -725,7 +722,7 @@ function registerWsHandler(wss, ctx) {
                 } catch {}
               }
               const subMM = new MessageManager(subId);
-              subMM.convertHistory(rawMsgs);
+              await subMM.convertHistoryAsync(rawMsgs);
               // An empty log after a FAILED remote pull is a lie — tell the
               // client so the viewer can show "couldn't load from <host>"
               // with a retry instead of a blank read-only window.
@@ -748,7 +745,7 @@ function registerWsHandler(wss, ctx) {
                   if (!subMM) {
                     subMM = new MessageManager(subId);
                     subMM.onOp((op) => broadcastToSession(sess, sid, { type: 'msg', sessionId: subId, ...op }));
-                    subMM.convertHistory(rawMsgs);
+                    await subMM.convertHistoryAsync(rawMsgs);
                     sess._subNormalizers.set(toolUseId, subMM);
                   }
                   ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total }));
@@ -790,15 +787,31 @@ function registerWsHandler(wss, ctx) {
                 if ((session.backend || 'claude') === 'claude') {
                   try { await warmSessionJsonlAsync(session.claudeSessionId || session.backendSessionId, session.cwd); } catch {}
                 }
-                const opHandlers = [...session._normalizer.listeners]; // carry over ALL subscribers, not just the first
-                session._normalizer = createMessageManager(session.backend || 'claude', data.sessionId);
-                session._normEpoch = Date.now();
-                for (const h of opHandlers) session._normalizer.onOp(h);
-                session._normalizer.convertHistory(sm.raw());
-                // Flag AFTER the rebuild succeeds — set-before-work turned one
-                // throwing record into a permanently truncated session view
-                // (the re-attach saw the flag and never rebuilt again).
-                session._historyLoaded = true;
+                // TIME-SLICED + single-flight (2.369.16, userW inc-mtndq0vb):
+                // the old sync convertHistory blocked the loop for seconds per
+                // multi-MB transcript — after a restart, a reconnect storm of
+                // 19 attaches stalled the server ~4 minutes, the heartbeat
+                // terminated the client mid-stall and its queued kills were
+                // lost with the socket. Live records arriving during the
+                // rebuild queue behind it (feedLive gate) and replay in order;
+                // _historyLoaded is still set only AFTER success (2.89.2).
+                // While it converts (seconds; minutes behind a queue of big
+                // sessions after a restart) keep proving life to the client
+                // with progress acks — its re-attach ladder extends on a fresh
+                // ack instead of flipping read-only at 2 minutes.
+                const progressTimer = setInterval(() => {
+                  const p = session._rebuildProgress;
+                  try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: p ? { done: p.done, total: p.total } : null, queued: !p })); } catch { }
+                }, 10000);
+                try { await rebuildHistory(session, data.sessionId, sm.raw()); }
+                finally { clearInterval(progressTimer); }
+                // A kill / CLI exit can land during the (now non-blocking)
+                // rebuild — never hand the client a live ChatView on a dead
+                // session (review-caught).
+                if (activeSessions.get(data.sessionId) !== session) {
+                  ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, code: 'ended-during-attach', message: `Session ${data.sessionId} ended while its history was loading` }));
+                  break;
+                }
               }
               // Recover goal state from wrapper meta (populated by thread/goal/get on startup)
               if (!session._goal) {
@@ -910,7 +923,7 @@ function registerWsHandler(wss, ctx) {
               buffer: '',
             });
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view');
-            mm.convertHistory(sm.raw());
+            await mm.convertHistoryAsync(sm.raw()); // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once)
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
               messages: mm.tail(50), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true }));
           } else {
@@ -930,6 +943,9 @@ function registerWsHandler(wss, ctx) {
           // leaves the session alive, and the follow-up resume (billing
           // switch) then double-writes the same claude id (userW's duplicate
           // incident). Fall back to resolving by the conversation id.
+          // The requester matches replies on the id IT sent (review-caught:
+          // replying with the remapped id left every stale-id kill unanswered).
+          const requestedKillId = data.sessionId;
           if (!activeSessions.has(data.sessionId) && data.backendSessionId) {
             for (const [eid, es] of activeSessions) {
               if ((es.claudeSessionId || es.backendSessionId) === data.backendSessionId) { data.sessionId = eid; break; }
@@ -937,6 +953,12 @@ function registerWsHandler(wss, ctx) {
           }
           { const ks = activeSessions.get(data.sessionId); if (ks && ks._bridgePort) { try { dialBridge?.close(data.sessionId); } catch { } if (ks._dialDeviceId && ks._dialReversePort) { hosts.device(ks.host).then((dm) => dm.reverseUnforward(ks._dialReversePort)).catch(() => {}); } } }
           const session = activeSessions.get(data.sessionId);
+          // Reply to the REQUESTER either way (2.369.16): 'exited' only
+          // reaches attached clients, so a sidebar Terminate of an unattached
+          // (or already-gone) session had no acknowledgement — and the client
+          // now re-sends an unacknowledged kill across reconnects (a kill
+          // written to a socket the server later terminated was simply lost).
+          if (!session) { try { ws.send(JSON.stringify({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: false, reason: 'not-found' })); } catch {} }
           if (session) {
             console.log(`[session] killed ${data.sessionId} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}`);
             global.__vsEvent?.('session-killed', `${session.mode}/${session.backend || 'claude'}`);
@@ -1057,6 +1079,7 @@ function registerWsHandler(wss, ctx) {
             }
             // 'exited' silently broke terminate-from-sidebar.
             broadcastToSession(session, data.sessionId, { type: 'exited', sessionId: data.sessionId, reason: 'terminated' });
+            try { ws.send(JSON.stringify({ type: 'killed', sessionId: requestedKillId, resolvedId: data.sessionId, ok: true })); } catch {}
             try { if (session._accountId && accounts?.get?.(session._accountId)?.type === 'pooled') accounts.dropSessionPoolLink(session._accountId, data.sessionId); } catch { }
             // R6: a LOCAL daemon pipe session has no dtach socket — kill the
             // daemon-side child explicitly (mirrors the dial branch's shape)

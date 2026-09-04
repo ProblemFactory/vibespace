@@ -116,7 +116,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok(cd.includes('deviceBounded'), 'remote rung uses the BOUNDED device connect (no 2.7min request hangs)');
   ok(/AGENT_TOOLS[^\]]*vibespace-msg/.test(read('src/hosts.js').replace(/\n/g, ' ')), 'vibespace-msg ships to remote hosts (AGENT_TOOLS)');
   // 2.363.0 delivery-site card rendering (server-posted = body-less origin at the CLI)
-  ok(sv.includes('emitPeerCard') && sv.includes('injectPeerCard'), 'server wires emitPeerCard → session normalizer injectPeerCard');
+  ok(sv.includes('emitPeerCard') && /feedPeerCard\(s, card\)/.test(sv), 'server wires emitPeerCard → feedPeerCard gate → session normalizer injectPeerCard (2.369.16: never a direct injectPeerCard — it wrote mid-history during a rebuild)');
   ok(ar.includes('cardText: text'), 'msg/send passes the RAW body as the card text');
   ok(ar.split('deliver.emitPeerCard').length >= 5, 'all four stash-drain sites (msg ×2 + jobs ×2) render cards for drained messages');
   ok(read('src/jobs.js').includes("fromName: 'Background Work · '"), 'jobs owner-notify labels its card');

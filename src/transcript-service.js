@@ -132,12 +132,16 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       try { await warmSessionJsonlAsync(r.sessionId, r.cwd); } catch { }
     }
     const session = liveSession(r);
+    // An attach rebuild in flight: join it instead of converting again
+    // (review-caught: the HTTP side re-entered the exact sync stall the
+    // ws attach path had just shed — a scroll-up during the rebuild window).
+    if (session?._rebuildPromise) { try { await session._rebuildPromise; } catch { } }
     if (session?._normalizer && session._normalizer.total > 0 && session._historyLoaded) {
       return { mm: session._normalizer, session };
     }
     const sm = createSessionMessages(sessionShape(r, session));
     const mm = createMessageManager(r.backend, 'api');
-    mm.convertHistory(sm.raw());
+    await mm.convertHistoryAsync(sm.raw());
     return { mm, session };
   }
 

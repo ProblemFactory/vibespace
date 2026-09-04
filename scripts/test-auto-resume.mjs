@@ -199,7 +199,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   // row in the menu; the machinery is the pool cold switch's kill→exited→resume
   ok('the style menu offers Restart-now when a pick is pending', sb.includes('Restart now to apply') && sb.includes('_onRestartSession'));
   const sl9 = read('src/lib/session-lifecycle.js');
-  ok('restartConversationInPlace exists (kill → exited → resume, config rides the respawn)', /restartConversationInPlace\(sessLike = \{\}\)/.test(sl9) && /type: 'kill', sessionId: webuiId, backendSessionId: cid/.test(sl9));
+  ok('restartConversationInPlace exists (kill → exited → resume, config rides the respawn)', /restartConversationInPlace\(sessLike = \{\}\)/.test(sl9) && /this\.killSession\(webuiId, cid\)/.test(sl9));
   ok('…and the session ops ride the window-title menu + the sidebar card menu', /Restart session/.test(read('src/lib/taskbar.js')) && /restartConversationInPlace\(s\)/.test(read('src/lib/session-card.js')));
   ok('locate-in-sidebar exists (folders panel, expand, scroll, flash)', /locateSessionInSidebar\(backendSessionId\)/.test(sl9) && /locate-flash/.test(sl9));
   const cv2 = read('src/lib/chat-view.js');

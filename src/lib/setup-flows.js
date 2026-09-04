@@ -34,7 +34,7 @@ export function installSetupFlows(App) {
         const cleanup = (killSession) => {
           clearInterval(poll);
           try { term?.dispose(); } catch {}
-          if (sid && killSession) { try { this.ws.send({ type: 'kill', sessionId: sid }); } catch {} }
+          if (sid && killSession) { try { this.killSession(sid); } catch {} }
         };
         const finish = (ok) => {
           if (settled) return; settled = true;
@@ -56,7 +56,7 @@ export function installSetupFlows(App) {
           if (msg.type === 'error' && msg.reqId === reqId) { this.ws.offGlobal(onCreated); statusEl.innerHTML = `<span class="ob-bad">${escHtml(msg.error || t('Failed'))}</span>`; return; }
           if (msg.type !== 'created' || msg.reqId !== reqId) return;
           this.ws.offGlobal(onCreated);
-          if (!body.isConnected) { try { this.ws.send({ type: 'kill', sessionId: msg.sessionId }); } catch {} return; }
+          if (!body.isConnected) { try { this.killSession(msg.sessionId); } catch {} return; }
           sid = msg.sessionId;
           const fakeWin = { id: 'guided-' + reqId, content: termBox, element: termBox, titleSpan: document.createElement('span') };
           term = new TerminalSession(fakeWin, this.ws, sid, this.themeManager, () => {}, {}, this.settings);

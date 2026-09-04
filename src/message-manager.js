@@ -185,6 +185,32 @@ class MessageManager {
   }
 
   /**
+   * TIME-SLICED rebuild (2.369.16, userW inc-mtndq0vb): identical result to
+   * convertHistory, but yields to the event loop every ~budgetMs so the
+   * first attach of a multi-MB transcript no longer blocks the server for
+   * seconds (58 sessions × 10-56MB after a restart = a 4-minute stall that
+   * made the heartbeat terminate the client and drop its queued kills).
+   * Callers MUST hold live records back (session._rebuildQueue) while this
+   * runs and replay them after — a live record interleaved mid-rebuild
+   * would land before the rest of the history.
+   */
+  async convertHistoryAsync(claudeMessages, { budgetMs = 25, onSlice } = {}) {
+    let sliceStart = Date.now(), done = 0;
+    for (const msg of claudeMessages) {
+      try { this._processMessage(msg, false); }
+      catch (e) { console.error('[normalizer] record skipped during history rebuild:', e.message); }
+      done++;
+      if (Date.now() - sliceStart >= budgetMs) {
+        try { onSlice?.(done); } catch { }
+        await new Promise((r) => setImmediate(r));
+        sliceStart = Date.now();
+      }
+    }
+    this._finalizeStreaming(false);
+    return this.messages;
+  }
+
+  /**
    * Process a single live message. Emits create/edit ops via listeners.
    */
   processLive(claudeMsg) {
