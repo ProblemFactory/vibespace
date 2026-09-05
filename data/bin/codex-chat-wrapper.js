@@ -993,8 +993,21 @@ async function handleInput(msg) {
     // message is recorded HERE (item notifications never carry userMessage,
     // so nothing double-renders). Failure is reported, never swallowed —
     // the server stashes the text for next-turn injection on ok:false.
+    // The record carries the out-of-band marker `webui_peer: {name, body}`
+    // (the delivery site's fromName / cardText): the normalizer maps it to a
+    // LABELLED peer card instead of an anonymous "You" bubble — we are the
+    // party holding the sender's identity, so we write it into our own
+    // record (claude parity: its CLI stamps origin.kind='peer'). The marker
+    // is metadata only — the text the model receives is untouched, so this
+    // copy stays byte-identical to codex's rollout copy of the same user
+    // message and the two dedup on rebuild (recordKey + mergeCodexRecords
+    // both strip webui_peer). Absent name ⇒ the normalizer falls back to
+    // parsing the server frame, exactly as a rollout-only rebuild does.
     const text = String(msg.text || '');
     if (!text.trim()) return;
+    const fromName = msg.fromName ? String(msg.fromName) : null;
+    const cardText = typeof msg.cardText === 'string' && msg.cardText.trim() ? msg.cardText : null;
+    const recordPeerMessage = () => record('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text }], webui_peer: { name: fromName, body: cardText } });
     try {
       if (meta.activeTurnId) {
         await request('thread/queue/add', {
@@ -1002,16 +1015,18 @@ async function handleInput(msg) {
           input: encodeUserInput(text, []),
           clientUserMessageId: `peer-${process.pid}-${nextId++}`,
         }, 30000);
-        record('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+        recordPeerMessage();
         emitTaskEvent('peer_message_result', { ok: true, mode: 'queued' });
         log('peer message queued (turn active; runs after the current turn)');
       } else {
         await startTurn(text);
-        record('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+        recordPeerMessage();
         emitTaskEvent('peer_message_result', { ok: true, mode: 'turn' });
       }
     } catch (e) {
-      emitTaskEvent('peer_message_result', { ok: false, reason: e.message, text });
+      // fromName rides the failure echo so the server's re-stash keeps the
+      // label the drain-site card will show
+      emitTaskEvent('peer_message_result', { ok: false, reason: e.message, text, fromName });
       log('peer-message delivery failed: ' + e.message);
     }
     return;

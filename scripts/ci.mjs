@@ -45,7 +45,7 @@ const SUITES = [
   'test-instance-url', // this instance's own public address: frp mapping layered over agentd.publicUrl (never written), one publisher of the relay proxy
   'test-design-kit', // /design kit from the installed CLI: extraction (cli-dir + binary parity), adaptation all-or-nothing, helper --check, wiring
   'test-published-pages', // instance-hosted shareable HTML: publish/serve/auth-gate/CSP-sandbox/upsert + wiring pins
-  'test-peer-msg-card', // peer message visible on the LIVE stream (result.origin mining + 3-site dedup)
+  'test-peer-msg-card', // peer message visible on the LIVE stream (result.origin mining + 3-site dedup) + the codex twin (injectPeerCard, webui_peer marker live/rebuild, marker-blind twin dedup, feedPeerCard no longer false for codex)
   'test-pool-auto', 'test-account-pool', 'test-account-verdicts',
   'test-pool-signed-out', 'test-account-relogin', 'test-auto-cli-refresh',
   'test-cli-usage-parse', 'test-rate-limit-capture', 'test-agentd-upgrade-loop', 'test-vendor-whitelist', 'test-wrapper-files',

@@ -1137,4 +1137,7 @@ function parseBackgroundLaunch(toolName, input, resultText) {
   return null;
 }
 
-module.exports = { MessageManager, classifyResultError, parseBackgroundLaunch };
+// peerDisplayName is shared with the codex normalizer (design-harness-plugins
+// §1 P1): the server frames it parses are backend-neutral text, and a codex
+// rollout copy of a peer message carries ONLY that text.
+module.exports = { MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName };

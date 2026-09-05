@@ -233,7 +233,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
             if (msg.type === 'event_msg' && msg.payload?.type === 'peer_message_result' && msg.payload.ok === false && msg.payload.text) {
               const cid = session.backendSessionId || session.claudeSessionId;
               console.log(`[deliver] rpc-queue wrapper delivery failed (${msg.payload.reason || 'unknown'}) — re-stashing for ${cid}`);
-              try { if (cid) deliverRef()?.stashFor(cid, { source: 'agent', fromName: null, text: String(msg.payload.text) }); } catch {}
+              try { if (cid) deliverRef()?.stashFor(cid, { source: 'agent', fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); } catch {}
             }
             // Codex plan tool → the session's live TODO summary (board pill)
             if (msg.type === 'event_msg' && msg.payload?.type === 'plan_updated' && Array.isArray(msg.payload.plan)) {
