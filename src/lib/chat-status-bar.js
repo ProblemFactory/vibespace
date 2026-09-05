@@ -1026,7 +1026,7 @@ export class ChatStatusBar {
       e.stopPropagation();
       const dropdown = showDropdown(modelEl);
       if (!dropdown) return;
-      const backend = this._backend === 'codex' ? 'codex' : 'claude';
+      const backend = this._backend || 'claude'; // the real id — META/model lists are per backend since P4
       const pick = (model) => {
         this._ws.send({ type: 'set-model', sessionId: this._sessionId, model });
         // changing the model while LOCKED re-targets the lock (A4 sub-item:

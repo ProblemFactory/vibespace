@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.369.23
+- **Harness S7 (first slice) — client id-collapses → META descriptors.** `BACKEND_META.<id>.settingsPrefix` + `settingsPrefixFor(backend)` replace the `backend === 'codex' ? 'codex' : 'claude'` collapses (session defaults in app.js, the per-session config popover in session-card.js, the status-bar model picker) — a third backend read claude's defaults; the account surfaces (session-card account row, the billing switcher) gate on `caps.accounts` instead of an id list; the pool-members dialog filters by the pool's own backend. test-harness-contract 78 pins: no collapse left in src/lib, client settingsPrefix == server descriptor per chat harness.
+
 ## 2.369.22
 - **Harness S6 — context-injection strategy per harness.** `src/harnesses/<id>.js` `inject` is now an object `{ kind: 'hooks'|'wrapper'|'acp', hookFile: {file(), createIfMissing} | null, hookEvents[], sessionStartHonoured }`: agent-tool-generators derives the hook files + events from the registry (claude registers SessionStart/UserPromptSubmit/Stop, codex SessionStart/UserPromptSubmit — codex's app-server has no blockable Stop hook and IGNORES SessionStart output), and agent-routes' four SessionStart seen-gates consult `inject.sessionStartHonoured` instead of `s.backend !== 'codex'` (a harness that ignores SessionStart must not burn its seen-gates; an unknown harness is never treated as claude). Zero behaviour change; test-harness-contract 75 pins the strategy shape + the wiring.
 

@@ -1,7 +1,7 @@
 import { agoText, escHtml, copyText, createPopover, showConfirmDialog, showContextMenu, uiScale } from './utils.js';
 import { t as tr } from './i18n.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
-import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps } from './agent-meta.js';
+import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
 const _s = (d, fill = false) => `<svg style="width:12px;height:12px;vertical-align:-2px" viewBox="0 0 16 16" fill="${fill ? 'currentColor' : 'none'}" stroke="${fill ? 'none' : 'currentColor'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
@@ -599,7 +599,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     // Per-session config (model / effort / permission) — popover
     const backend = s.backend || 'claude';
     const opts = app.getSessionOptions(backend);
-    const prefix = backend === 'codex' ? 'codex' : 'claude';
+    const prefix = settingsPrefixFor(backend);
     const defaults = {
       model: settings?.get(`${prefix}.defaultModel`) ?? '',
       effort: settings?.get(`${prefix}.defaultEffort`) ?? '',
@@ -721,7 +721,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       // switch to an API key here and Resume, the conversation continues on
       // API billing.
       const acctList = (app._accounts?.accounts || []).filter(a => (a.backend || 'claude') === backend);
-      if ((backend === 'claude' || backend === 'codex') && acctList.length) {
+      if (backendFeatureCaps(backend).accounts && acctList.length) {
         pop.appendChild(makeRow(tr('Account'), [
           { value: 'subscription', label: backend === 'codex' ? tr('ChatGPT login') : tr('Subscription (Pro/Max)') },
           // Pooled pseudo-account (either backend): names its CURRENT target —

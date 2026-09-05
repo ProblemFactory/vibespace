@@ -68,6 +68,7 @@ ok(BACKEND_META.codex.fallbackModels[0] === 'gpt-6-astra', 'codex fallback model
 const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
 ok(!/s\.backend !== 'codex'/.test(ar) && (ar.match(/honoursSessionStart\(s\)/g) || []).length === 4, 'agent-routes: the four SessionStart seen-gates consult inject.sessionStartHonoured (no backend-id gate left)');
 const atg = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
+ok(/for \(const ev of ALL_HOOK_EVENTS\)/.test(atg) && /ALL_HOOK_EVENTS = \[\.\.\.new Set\(listHarnesses\(\)/.test(atg) && !/\[\.\.\.HOOK_EVENTS, 'Stop'\]/.test(atg), 'the hook REMOVAL path strips every event any harness registers (union from the registry; the old literal was a lost binding after S6)');
 ok(/HOOK_FILES = Object\.fromEntries\(listHarnesses\(\)/.test(atg) && /HOOK_EVENTS_FOR = \(harness\) => \{ const h = listHarnesses\(\)/.test(atg) && !/harness === 'claude' \? \[/.test(atg), 'agent-tool-generators: hook files + events come from the registry (no per-harness literals)');
 ok(HARNESSES.claude.inject.hookEvents.includes('Stop') && !HARNESSES.codex.inject.hookEvents.includes('Stop') && HARNESSES.codex.inject.sessionStartHonoured === false, 'claude registers Stop, codex does not and ignores SessionStart (zero behaviour change)');
 

@@ -23,6 +23,7 @@ export const BACKEND_META = {
     // FEATURE capabilities (P4 client descriptor): chrome gates on THESE, not
     // on backend ids — a new backend declares its features here once.
     caps: { fork: true, effort: true, review: false, outputStyle: true, autoResume: true, accounts: true },
+    settingsPrefix: 'claude', // settings-schema key family (<prefix>.defaultModel/.defaultEffort/…)
     // Offline seed for the permission-mode dropdown before the first status
     // (the live list comes from the session's chatStatus.permissionModes).
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'],
@@ -65,9 +66,19 @@ export const BACKEND_META = {
     // fork: true since 2.369.21 — thread/fork is wired end to end (wrapper
     // CODEX_WEBUI_FORK → thread/fork; server _forkRequested per caps).
     caps: { fork: true, effort: true, review: true, outputStyle: false, autoResume: true, quotaRefresh: 'session-rpc', accounts: true },
+    settingsPrefix: 'codex',
     permissionModes: ['default', 'read-only', 'safe-yolo', 'yolo'],
   },
 };
+
+/** Settings key family for a backend (S7): `<prefix>.defaultModel` etc. An
+ *  unknown backend reads its OWN id family (never claude's — the old
+ *  `=== 'codex' ? 'codex' : 'claude'` collapse fed a third backend claude's
+ *  defaults). */
+export function settingsPrefixFor(backend) {
+  const b = backend || 'claude';
+  return BACKEND_META[b]?.settingsPrefix ?? b;
+}
 
 /** Feature caps for a backend (all-false for unknown/shell — chrome shows nothing it can't do). */
 const NO_FEATURE_CAPS = Object.freeze({ fork: false, effort: false, review: false, outputStyle: false, autoResume: false });

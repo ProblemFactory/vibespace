@@ -42,7 +42,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
-import { createBackendIconHtml, getSessionKey, pickAgentIdentity } from './agent-meta.js';
+import { createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -1517,7 +1517,7 @@ class App {
   }
 
   _getBackendSessionDefaults(backend) {
-    const prefix = backend === 'codex' ? 'codex' : 'claude';
+    const prefix = settingsPrefixFor(backend);
     const cfg = BACKEND_SESSION_OPTIONS[backend] || BACKEND_SESSION_OPTIONS.claude;
     const legacyEffort = this.settings.get('session.defaultEffort') ?? '';
     let effort = this.settings.get(`${prefix}.defaultEffort`) ?? '';

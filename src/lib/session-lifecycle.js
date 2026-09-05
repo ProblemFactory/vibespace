@@ -1,5 +1,6 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
+import { backendFeatureCaps } from './agent-meta.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
@@ -885,7 +886,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       live = term ? allSess.find(s => s.webuiId === term.sessionId) : null;
     }
     const backend = live?.backend || spec.backend || 'claude';
-    if (backend !== 'claude' && backend !== 'codex') return;
+    if (!backendFeatureCaps(backend).accounts) return; // billing switcher = backends with an account roster (META cap, not an id list)
     const backendSessionId = live?.backendSessionId || spec.backendSessionId || live?.sessionId || null;
     const isCodex = backend === 'codex';
     // exact-backend match (P4): the old boolean partition ('is codex' vs

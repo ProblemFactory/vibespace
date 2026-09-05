@@ -307,6 +307,8 @@ createHookHelper();
 const { list: listHarnesses } = require('../harnesses');
 const HOOK_FILES = Object.fromEntries(listHarnesses().filter((h) => h.inject && h.inject.hookFile).map((h) => [h.id, h.inject.hookFile]));
 const HOOK_EVENTS_FOR = (harness) => { const h = listHarnesses().find((x) => x.id === harness); return h?.inject?.hookEvents ? [...h.inject.hookEvents] : []; };
+// Every event any harness registers — the removal path strips our entry from all of them.
+const ALL_HOOK_EVENTS = [...new Set(listHarnesses().flatMap((h) => h.inject?.hookEvents || []))];
 // Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
 // marker so startup does NOT silently re-register the hooks they removed.
 const HOOK_OPTOUT_FILE = path.join(rootDir, 'data', '.agent-hooks-optout');
@@ -432,7 +434,7 @@ function stripAgentHookEntries() {
     try {
       _patchHookFile(def.file(), false, (root) => {
         let changed = false;
-        for (const ev of [...HOOK_EVENTS, 'Stop']) {
+        for (const ev of ALL_HOOK_EVENTS) {
           if (!Array.isArray(root.hooks[ev])) continue;
           for (const group of root.hooks[ev]) {
             if (!group || !Array.isArray(group.hooks)) continue;
