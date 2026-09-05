@@ -65,14 +65,16 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
 // ── 2.369.33: the 'search' fold kind + weekly reset projection ──
 {
   const ss = read('src/lib/settings-schema.js');
-  ok(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search'\]/.test(ss) && /value: 'search', label: t\('Web searches \/ fetches/.test(ss), "settings: 'search' is a fold kind, ON by default");
+  ok(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image'\]/.test(ss) && /value: 'search', label: t\('Web searches \/ fetches/.test(ss) && /value: 'image', label: t\('Image views/.test(ss), "settings: 'search' and 'image' are fold kinds, ON by default");
   const cv = read('src/lib/chat-view.js');
-  ok(/if \(tn === 'WebSearch' \|\| tn === 'WebFetch'\) return 'search';/.test(cv) && /if \(tn === 'Grep' \|\| tn === 'Glob' \|\| tn === 'LS'\) return 'read';/.test(cv) && /if \(tn === 'ToolSearch'\) return 'mcp';/.test(cv) && /byKind\.search\) parts\.push\(t\('\{n\} searches'/.test(cv) && /'mcp', 'agent', 'search'\]\)/.test(cv), 'chat-view: WebSearch/WebFetch→search, Grep/Glob/LS→read, ToolSearch→mcp; summary counts searches; default set includes search');
+  ok(/if \(tn === 'WebSearch' \|\| tn === 'WebFetch'\) return 'search';/.test(cv) && /if \(tn === 'Grep' \|\| tn === 'Glob' \|\| tn === 'LS'\) return 'read';/.test(cv) && /if \(tn === 'ToolSearch'\) return 'mcp';/.test(cv) && /byKind\.search\) parts\.push\(t\('\{n\} web searches'/.test(cv) && /byKind\.image\) parts\.push\(t\('\{n\} image reads'/.test(cv) && /byKind\.read\) parts\.push\(t\('\{n\} file reads'/.test(cv) && /search: 0, image: 0 \}/.test(cv) && /return 'image'; \/\/ image views fold/.test(cv) && /'mcp', 'agent', 'search', 'image'\]\)/.test(cv), 'chat-view: WebSearch/WebFetch→search, Grep/Glob/LS→read, ToolSearch→mcp; summary counts searches; default set includes search');
   const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
   const cm2 = new CodexMessageManager('c2');
   cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'function_call', call_id: 'ws1', name: 'web_search', arguments: '{"query":"rv solar"}' } });
   const card = cm2.messages.find((m) => m.role === 'tool');
   ok(card && card.collapseKind === 'search', "codex normalizer stamps collapseKind 'search' on web_search cards", card?.collapseKind);
+  cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'function_call', call_id: 'vi1', name: 'view_image', arguments: '{"path":"/tmp/x.png"}' } });
+  ok(cm2.messages.filter((m) => m.role === 'tool').some((m) => m.collapseKind === 'image'), "codex view_image cards fold as 'image'");
   const { collapseKindOf } = require(path.join(REPO, 'src/acp-message-manager.js'));
   ok(collapseKindOf('search') === 'search' && collapseKindOf('read') === 'read', "ACP tool kind 'search' folds as search");
   const { projectReset, WEEK_SEC } = require(path.join(REPO, 'src/harnesses/claude-quota.js'));

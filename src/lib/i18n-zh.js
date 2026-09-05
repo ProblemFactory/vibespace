@@ -2907,4 +2907,8 @@ export default {
   "Web searches / fetches (WebSearch, WebFetch, web_search)": "网页搜索 / 抓取（WebSearch、WebFetch、web_search）",
   "{n} searches": "{n} 次搜索",
   "Estimated: weekly windows repeat every 7 days, projected from the last observed reset": "估算值：周窗口每 7 天重复一次，按上次观测到的重置时间推算",
+  "Image views (Read of an image file / view_image)": "查看图片（读取图片文件 / view_image）",
+  "{n} file reads": "{n} 次读文件",
+  "{n} web searches": "{n} 次网页搜索",
+  "{n} image reads": "{n} 次看图",
 };

@@ -2963,7 +2963,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
-      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search']);
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search', 'image']);
       // per-member classification (also used by flush() for the summary).
       // SEMANTIC HINT FIRST (Track B, design-backend-parity.md §5): the
       // normalizer stamps `collapseKind` — codex cards (exec, Agent Wait,
@@ -2988,6 +2988,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           // web research is its OWN kind (2.369.33, owner report: 42 WebSearch cards
           // in one session, none folded — and each null BROKE the surrounding run)
           if (tn === 'WebSearch' || tn === 'WebFetch') return 'search';
+          if (tn === 'Read' && /\.(png|jpe?g|gif|webp|bmp|svg|ico|tiff?|heic|avif)$/i.test(m?.content?.[0]?.input?.file_path || '')) return 'image'; // image views fold as their own kind (2.369.34)
           if (tn === 'Grep' || tn === 'Glob' || tn === 'LS') return 'read';   // file-system searches = reads
           if (tn === 'ToolSearch') return 'mcp';                              // tool-schema lookup = MCP housekeeping
           if (mcpParts(tn)) return 'mcp'; // any MCP server's tool (2.215.3)
@@ -3048,7 +3049,10 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           const header = document.createElement('div');
           header.className = 'chat-run-header';
           // per-kind counts (only non-zero kinds render)
-          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0, mcp: 0, agent: 0, skill: 0 };
+          // EVERY kind the classifier can return must be initialised here — an
+          // unlisted kind counted `undefined++` = NaN and silently vanished from
+          // the summary (2.369.34, owner: "searches were lumped/missing")
+          const byKind = { thinking: 0, bash: 0, read: 0, write: 0, memory: 0, mcp: 0, agent: 0, skill: 0, search: 0, image: 0 };
           const mcpServers = new Set();
           for (const el of members) {
             const k = memberKind(el);
@@ -3058,8 +3062,9 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           const parts = [];
           if (byKind.thinking) parts.push(t('{n} thinking', { n: byKind.thinking }));
           if (byKind.bash) parts.push(t('{n} Bash', { n: byKind.bash }));
-          if (byKind.read) parts.push(t('{n} reads', { n: byKind.read }));
-          if (byKind.search) parts.push(t('{n} searches', { n: byKind.search }));
+          if (byKind.read) parts.push(t('{n} file reads', { n: byKind.read }));
+          if (byKind.search) parts.push(t('{n} web searches', { n: byKind.search }));
+          if (byKind.image) parts.push(t('{n} image reads', { n: byKind.image }));
           if (byKind.write) parts.push(t('{n} writes', { n: byKind.write }));
           if (byKind.memory) parts.push(t('{n} memory', { n: byKind.memory }));
           // single-server runs name the server — "8 MCP (chrome-devtools)"

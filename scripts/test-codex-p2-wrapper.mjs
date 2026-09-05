@@ -117,7 +117,7 @@ const mm = new CodexMessageManager('p2');
 mm.convertHistory([...bufRecords(), ...events().filter((e) => e.type === 'event_msg')]);
 const tools = mm.messages.filter((m) => m.role === 'tool');
 ok(tools.some((m) => m.toolName && /list_issues/.test(m.toolName) && m.collapseKind === 'mcp' && m.toolStatus === 'ok'), `the MCP call renders as a tool card in the mcp fold kind, completed (${tools.map((m) => m.toolName + ':' + m.collapseKind + ':' + m.toolStatus).join(', ')})`);
-ok(tools.some((m) => (m.collapseKind === null && /view_image|View Image/i.test(m.toolName)) || (m.collapseKind === 'search' && /web_search|Web Search/i.test(m.toolName))), 'view_image stays visible, web search / image view cards never fold (visible work)');
+ok(tools.some((m) => (m.collapseKind === 'image' && /view_image|View Image/i.test(m.toolName)) || (m.collapseKind === 'search' && /web_search|Web Search/i.test(m.toolName))), 'view_image folds as image, web search / image view cards never fold (visible work)');
 const sys = mm.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
 ok(sys.some((t) => /Queued — runs after the current turn/.test(t)), 'the queued notice renders as a system card');
 ok(sys.some((t) => /Compacting context/.test(t)) && sys.some((t) => /Context compacted/.test(t)), 'compaction start + compacted render as system cards');

@@ -2907,4 +2907,8 @@ export default {
   "Web searches / fetches (WebSearch, WebFetch, web_search)": "Web 検索 / 取得（WebSearch、WebFetch、web_search）",
   "{n} searches": "{n} 件の検索",
   "Estimated: weekly windows repeat every 7 days, projected from the last observed reset": "推定値: 週次ウィンドウは 7 日ごとに繰り返すため、最後に観測したリセット時刻から算出",
+  "Image views (Read of an image file / view_image)": "画像の表示（画像ファイルの Read / view_image）",
+  "{n} file reads": "{n} 件のファイル読み取り",
+  "{n} web searches": "{n} 件の Web 検索",
+  "{n} image reads": "{n} 件の画像表示",
 };

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.369.34
+- **Fold summary names every kind, image views fold too** (owner: "5 bash, 3 web searches, 5 file reads, 2 image reads"): the run header's per-kind counter only initialised the kinds it knew — a `search` card counted `undefined++` = NaN and silently vanished from the summary. Every classifier kind is initialised now, the labels read "N Bash · N web searches · N file reads · N image reads · …", and `image` is a new fold kind (default ON): claude `Read` of an image file (png/jpg/gif/webp/svg/…), codex `view_image`. Generated images (image_gen) and plan updates stay visible.
+
 ## 2.369.33
 - **Web searches fold** (owner report: a session with 42 WebSearch cards, none folded): the chat's semantic fold gains a `search` kind (default ON) — claude WebSearch/WebFetch, codex `web_search`/`web_fetch`, ACP tool kind `search`; claude Grep/Glob/LS now count as reads and ToolSearch as MCP housekeeping. Before, every one of those returned null from the classifier, which not only left the card visible but BROKE the surrounding run so neighbouring reads/commands stayed unfolded too. Users who customised "Card kinds that collapse" need to tick the new kind once.
 - **Weekly reset times are projected** (owner ask "记一下 reset 时间之后 estimate"): weekly windows (7-day + model-scoped) reset on a fixed 7-day anchor per account, so when the CLI's /usage panel omits the reset (a bucket at 0%) the last observed weekly reset is carried forward (`projectReset`, marked "≈" with a tooltip). 5-hour windows are not projectable — they start with the first request — so those keep "not started". An account that never showed a weekly reset (PandyMax today) has nothing to project until its first reading.
