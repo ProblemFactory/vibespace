@@ -38,6 +38,7 @@ import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
 import { StageManager, STAGE_ID } from './stage-manager.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
@@ -2476,3 +2477,15 @@ installPluginsUI(App);
 installUsageMeter(App);
 installSessionLifecycle(App);
 installSetupFlows(App);
+
+// ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1): the kinds App itself opens ──
+registerWindowType({
+  type: 'files', label: 'File Explorer',
+  icon: svgIcon16('<path d="M2 3h4l2 2h6v8H2V3z"/>'),
+  action: 'openFileExplorer', replay: (app, spec, { syncId } = {}) => app.openFileExplorer(spec.path, { syncId, host: spec.host }),
+});
+registerWindowType({
+  type: 'editor', label: 'Editor',
+  icon: svgIcon16('<path d="M11.5 1.5l3 3L5 14H2v-3z"/>'),
+  action: 'openEditor', replay: (app, spec, { syncId } = {}) => app.openEditor(spec.path, spec.name, { syncId, host: spec.host }),
+});

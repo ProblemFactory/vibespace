@@ -2,6 +2,7 @@ import { escHtml, copyText, showConfirmDialog, taskGroupColor } from './utils.js
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel } from './agent-meta.js';
 import { t } from './i18n.js';
+import { registerOpenAction } from './window-types.js';
 
 /**
  * Session Properties window — the FULL view of everything VibeSpace knows
@@ -379,3 +380,6 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   winInfo.onClose = () => { app.ws.offGlobal(onMsg); prevClose?.(); };
   return winInfo;
 }
+
+// ── openSpec ACTION REGISTRATION (Plugin Ph1) ── opens a 'task'-kind window (kind owned by task-detail.js)
+registerOpenAction({ action: 'openSessionProps', type: 'task', replay: (app, spec, { syncId } = {}) => app.openSessionProps(spec.sessionKey, { syncId }) });

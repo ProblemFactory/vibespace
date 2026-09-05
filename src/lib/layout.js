@@ -1,10 +1,13 @@
 import { track } from './telemetry-client.js';
 import { cssVarDefault } from './utils.js';
+import { isTransientWindowType } from './window-types.js';
 
 // Window types that legitimately carry no openSpec (never persisted/synced):
 // chat/terminal restore by session identity + get their openSpec async after
-// 'created'; the stage placeholder is a stage-only pseudo-window.
-const TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder']);
+// 'created'; the stage placeholder is a stage-only pseudo-window. Each such
+// kind declares `persist:false` in the window-type registry (Plugin Ph1) and
+// is read here through isTransientWindowType() — the former
+// TRANSIENT_WINDOW_TYPES set, now owned by the modules that own the kinds.
 
 
 // Boot-time scan of NON-ACTIVE desktops' SAVED window states for dead session
@@ -319,7 +322,7 @@ class LayoutManager {
       // failing quietly. chat/terminal are exempt: they restore by session
       // identity (backendSessionId) and get their openSpec asynchronously
       // after the 'created' reply. stage-placeholder is exempt by design.
-      else if (!TRANSIENT_WINDOW_TYPES.has(win.type)) {
+      else if (!isTransientWindowType(win.type)) {
         this._noSpecWarned ||= new Set();
         if (!this._noSpecWarned.has(win.type)) {
           this._noSpecWarned.add(win.type);

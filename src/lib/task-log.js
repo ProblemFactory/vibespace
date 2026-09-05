@@ -1,5 +1,6 @@
 import { escHtml, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { registerOpenAction } from './window-types.js';
 
 /**
  * Task Group log viewer — a full-window browser for the two lists that
@@ -437,3 +438,6 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
 
   return winInfo;
 }
+
+// ── openSpec ACTION REGISTRATION (Plugin Ph1) ── opens a 'task'-kind window (kind owned by task-detail.js)
+registerOpenAction({ action: 'openTaskLog', type: 'task', replay: (app, spec, { syncId } = {}) => app.openTaskLog(spec.taskId, { tab: spec.tab, syncId }) });

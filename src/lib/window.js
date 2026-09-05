@@ -2,7 +2,8 @@ import { attachPopoverClose, escHtml, uiScale } from './utils.js';
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { showWindowContextMenu } from './taskbar.js';
-import { TYPE_ICONS, installTabGroupMixin } from './tab-group.js';
+import { installTabGroupMixin } from './tab-group.js';
+import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 
 class WindowManager {
@@ -78,7 +79,7 @@ class WindowManager {
     const iconWrap = document.createElement('div'); iconWrap.className = 'window-icon-stack';
     const backendIconSlot = document.createElement('span'); backendIconSlot.className = 'window-backend-slot';
     const agentKindSlot = document.createElement('span'); agentKindSlot.className = 'window-agent-kind-slot';
-    const iconSpan = document.createElement('span'); iconSpan.className = 'window-type-icon'; iconSpan.innerHTML = TYPE_ICONS[type] || '';
+    const iconSpan = document.createElement('span'); iconSpan.className = 'window-type-icon'; iconSpan.innerHTML = windowTypeIcon(type);
     iconWrap.append(backendIconSlot, agentKindSlot, iconSpan);
     const titleSpan = document.createElement('span'); titleSpan.className = 'window-title'; titleSpan.textContent = title;
     const controls = document.createElement('div'); controls.className = 'window-controls';
@@ -93,7 +94,7 @@ class WindowManager {
 
     const winInfo = { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, backendIconSlot, agentKindSlot, content, title, type,
       isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false,
-      _typeIcon: TYPE_ICONS[type] || '', _tabChain: null, titleMeta: { ...(titleMeta || {}) },
+      _typeIcon: windowTypeIcon(type), _tabChain: null, titleMeta: { ...(titleMeta || {}) },
       // All document-level listeners for this window register with this signal
       // and are removed together on close (they used to leak per window).
       _listenerCtl: new AbortController() };

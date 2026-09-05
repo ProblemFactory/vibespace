@@ -1,6 +1,7 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from './settings-schema.js';
 import { showConfirmDialog } from './utils.js';
 import { t } from './i18n.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 
 /**
  * SettingsUI — VS Code-style settings page.
@@ -354,3 +355,10 @@ class SettingsUI {
 }
 
 export { SettingsUI };
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── singleton-focus window (see open())
+registerWindowType({
+  type: 'settings', label: 'Settings', singleton: true,
+  icon: svgIcon16('<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M14.5 8h-2M3.5 8h-2M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4M12.6 12.6l-1.4-1.4M4.8 4.8L3.4 3.4"/>'),
+  action: 'openSettings', replay: (app, spec, { syncId } = {}) => app._settingsUI?.open({ syncId }),
+});

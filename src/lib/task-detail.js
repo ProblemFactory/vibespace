@@ -1,6 +1,7 @@
 import { escHtml, showConfirmDialog, showToast, autoTaskColor } from './utils.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { t } from './i18n.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 
 /**
  * Task detail window — the structured editor over data/tasks.json
@@ -517,3 +518,12 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
 
   return winInfo;
 }
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── the 'task' kind is shared with
+// task-log.js (openTaskLog) and session-props.js (openSessionProps), which
+// register their actions onto it via registerOpenAction.
+registerWindowType({
+  type: 'task', label: 'Task Group',
+  icon: svgIcon16('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M5 6h6M5 9h6M5 12h3"/>'),
+  action: 'openTaskDetail', replay: (app, spec, { syncId } = {}) => app.openTaskDetail(spec.taskId, { syncId }),
+});

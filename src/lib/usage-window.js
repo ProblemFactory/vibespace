@@ -7,6 +7,7 @@ import { renderDashboard, PRESETS, destroyCharts, panelPivots } from './usage-da
 import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml } from './agent-meta.js';
+import { registerWindowType } from './window-types.js';
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -652,3 +653,9 @@ function exportCsv(d) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── singleton; no title-bar icon today (unchanged)
+registerWindowType({
+  type: 'usage', label: 'Usage', singleton: true, icon: '',
+  action: 'openUsage', replay: (app, spec, { syncId } = {}) => app.openUsage({ syncId }),
+});

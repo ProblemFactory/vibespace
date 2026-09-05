@@ -6,6 +6,7 @@ import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell } fr
 import { t } from './i18n.js';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { registerWindowType } from './window-types.js';
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
 const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', scheduled: 'idle', down: 'idle', done: 'idle' };
@@ -381,3 +382,13 @@ export function openInteractWindow(app, jobId, opts = {}) {
   render();
   return winInfo;
 }
+
+// ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1) ── no title-bar icon today (unchanged)
+registerWindowType({
+  type: 'jobs', label: 'Background Work', singleton: true, icon: '',
+  action: 'openJobs', replay: (app, spec, { syncId } = {}) => app.openJobs({ syncId }),
+});
+registerWindowType({
+  type: 'job-interact', label: 'Job input', icon: '',
+  action: 'openJobInteract', replay: (app, spec, { syncId } = {}) => app.openJobInteract(spec.jobId, { syncId }),
+});

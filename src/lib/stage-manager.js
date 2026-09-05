@@ -28,6 +28,7 @@
 
 import { getStateSync, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { registerWindowType } from './window-types.js';
 
 export const STAGE_ID = '__stage__';
 
@@ -917,3 +918,10 @@ export class StageManager {
     return null; // fills in later via syncSessionIdentity; workspace records need it (Phase C)
   }
 }
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── stage-only pseudo-window: never
+// enters a desktop record (persist:false), no openSpec action.
+registerWindowType({
+  type: 'stage-placeholder', label: 'Stage', persist: false,
+  icon: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/></svg>',
+});

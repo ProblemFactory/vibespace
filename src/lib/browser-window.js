@@ -1,4 +1,5 @@
 import { escHtml } from './utils.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 
 /**
  * Open an embedded browser window with URL bar, proxy toggle, and error overlay.
@@ -101,3 +102,10 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
   if (startUrl) navigate(startUrl);
   return winInfo;
 }
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ──
+registerWindowType({
+  type: 'browser', label: 'Browser',
+  icon: svgIcon16('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>'),
+  action: 'openBrowser', replay: (app, spec, { syncId } = {}) => app.openBrowser(spec.url, { syncId, proxy: spec.proxy }),
+});

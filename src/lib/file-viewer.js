@@ -7,6 +7,7 @@ import { FILE_ICONS } from './icons.js';
 import { renderAsync as renderDocx } from 'docx-preview';
 import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 
 class FileViewer {
   static async open(app, filePath, fileName, opts = {}) {
@@ -770,3 +771,16 @@ class FileViewer {
 }
 
 export { FileViewer };
+
+// ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1) ──
+// openFile dispatches by file type: 'viewer' | 'editor' (html/md) | 'hex-viewer'
+// (binary or forced) — registered on its home kind.
+registerWindowType({
+  type: 'viewer', label: 'File viewer',
+  icon: svgIcon16('<path d="M4 1h6l4 4v9H4V1z"/><path d="M10 1v4h4"/>'),
+  action: 'openFile', replay: (app, spec, { syncId } = {}) => app.openFile(spec.path, spec.name, { syncId, host: spec.host }),
+});
+registerWindowType({
+  type: 'hex-viewer', label: 'Hex viewer',
+  icon: svgIcon16('<path d="M2 2h12v12H2z"/><path d="M2 6h12M6 2v12"/>'),
+});

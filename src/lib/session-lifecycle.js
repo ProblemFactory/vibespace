@@ -2,6 +2,7 @@
 import { ChatView } from './chat-view.js';
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
+import { registerWindowType, replayOpenSpec as replayOpenSpecViaRegistry, svgIcon16 } from './window-types.js';
 import { TerminalSession } from './terminal.js';
 import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDialog, showContextMenu, showToast, stripCwdHostLabel } from './utils.js';
 
@@ -1390,163 +1391,143 @@ export function installSessionLifecycle(App, ctx = {}) {
     return chatView;
   },
 
-  // Replay a serialized openSpec to recreate a window (for cross-client sync)
+  // Replay a serialized openSpec to recreate a window (cross-client sync,
+  // layout restore, desktop switch, stage). Dispatch lives in the WINDOW-TYPE
+  // REGISTRY (window-types.js, Plugin Ph1): every window kind registers its
+  // replay in the module that owns it; an unknown action is LOUD there
+  // (console.warn + 'openspec-unknown' telemetry) — the switch this replaced
+  // had no default, so a spec nobody could replay vanished silently.
   replayOpenSpec(spec, syncId) {
-    switch (spec.action) {
-      case 'attachSession': {
-        // The saved serverId/name may be STALE — the dtach instance dies and
-        // gets resumed under a new server id while the spec persists in the
-        // autosave (and the name was captured at window creation, before any
-        // rename). Re-resolve against the live session list like restoreState
-        // does; a spec replayed verbatim attaches to a nonexistent session and
-        // leaves a blank window that re-persists the stale spec forever.
-        const backend = spec.backend || 'claude';
-        // A bsid equal to the serverId is POLLUTION from pre-2.105.2 specs
-        // (the webui id was baked in before the CLI reported a real id —
-        // long window on remote spawns): treat it as no bsid, or the
-        // re-resolution below misses on it and opens a bogus view-only
-        // window (real report: remote-host session blank on other clients).
-        const bsid = (spec.backendSessionId && spec.backendSessionId !== spec.serverId)
-          ? spec.backendSessionId : null;
-        const live = this.sidebar?._webuiSessions || [];
-        let serverId = spec.serverId;
-        let name = spec.name;
-        let cwd = spec.cwd;
-        if (bsid && !live.some(s => s.id === serverId)) {
-          const alive = live.find(s => (s.backend || 'claude') === backend
-            && (s.backendSessionId || s.claudeSessionId) === bsid);
-          if (alive) {
-            serverId = alive.id;
-            name = alive.name || name;
-            cwd = alive.cwd || cwd;
-          } else if (live.length && !serverId) {
-            // Session is dead — open read-only history with a Resume bar
-            // instead of a blank window stuck on a failed attach. Only when
-            // there is NO serverId to try: a serverId the local list doesn't
-            // know yet is usually a RACE (layout-sync beat the active-sessions
-            // push for a just-created session) — attach directly and let the
-            // server be authoritative; a genuinely dead session's attach
-            // errors into the read-only path anyway.
-            this.viewSession(bsid, cwd, this.sidebar?.getCustomName(spec.sessionKey || bsid) || name, {
-              syncId, backend, backendSessionId: bsid, hostId: spec.hostId || spec.host || undefined,
-              agentKind: spec.agentKind, agentRole: spec.agentRole,
-              agentNickname: spec.agentNickname, sourceKind: spec.sourceKind,
-              parentThreadId: spec.parentThreadId,
-            });
-            break;
-          }
-        }
-        if (bsid) name = this.sidebar?.getCustomName(spec.sessionKey || bsid) || name;
-        this.attachSession(serverId, name, cwd, {
-          mode: spec.mode,
-          syncId,
-          backend,
-          backendSessionId: bsid,
-          hostId: spec.hostId || spec.host || undefined,
-          agentKind: spec.agentKind,
-          agentRole: spec.agentRole,
-          agentNickname: spec.agentNickname,
-          sourceKind: spec.sourceKind,
-          parentThreadId: spec.parentThreadId,
-        });
-        break;
-      }
-      case 'openFileExplorer':
-        this.openFileExplorer(spec.path, { syncId, host: spec.host });
-        break;
-      case 'openFile':
-        this.openFile(spec.path, spec.name, { syncId, host: spec.host });
-        break;
-      case 'openEditor':
-        this.openEditor(spec.path, spec.name, { syncId, host: spec.host });
-        break;
-      case 'openBrowser':
-        this.openBrowser(spec.url, { syncId, proxy: spec.proxy });
-        break;
-      case 'openDesktop':
-        this.openDesktop({ syncId });
-        break;
-      case 'openTaskDetail':
-        this.openTaskDetail(spec.taskId, { syncId });
-        break;
-      case 'openTaskLog':
-        this.openTaskLog(spec.taskId, { tab: spec.tab, syncId });
-        break;
-      case 'openJobs':
-        this.openJobs({ syncId });
-        break;
-      case 'openJobInteract':
-        this.openJobInteract(spec.jobId, { syncId });
-        break;
-      case 'openUsage':
-        this.openUsage({ syncId });
-        break;
-      case 'openSettings':
-        this._settingsUI?.open({ syncId });
-        break;
-      case 'openSessionProps':
-        this.openSessionProps(spec.sessionKey, { syncId });
-        break;
-      case 'openWorkflowDetail':
-        this.openWorkflowDetail(spec.runId, { syncId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, name: spec.name, host: spec.host });
-        break;
-      case 'attachTmuxSession':
-        this.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd);
-        break;
-      case 'viewSession':
-        this.viewSession(spec.sessionId, spec.cwd, spec.name, {
-          hostId: spec.hostId || spec.host || undefined,
-          syncId,
-          backend: spec.backend || 'claude',
-          backendSessionId: spec.backendSessionId || spec.sessionId,
-          agentKind: spec.agentKind,
-          agentRole: spec.agentRole,
-          agentNickname: spec.agentNickname,
-          sourceKind: spec.sourceKind,
-          parentThreadId: spec.parentThreadId,
-        });
-        break;
-      case 'viewSubagent': {
-        const title = t('Agent: {desc}', { desc: spec.description || t('Subagent') });
-        const winInfo = this.wm.createWindow({
-          title,
-          type: 'chat',
-          syncId,
-          openSpec: spec,
-          titleMeta: this._buildTitleMeta({
-            backend: spec.backend || 'claude',
-            agentKind: spec.agentKind || 'subagent',
-            agentRole: spec.agentRole,
-            agentNickname: spec.agentNickname,
-            sourceKind: spec.sourceKind,
-            parentThreadId: spec.parentThreadId,
-          }),
-        });
-        const view = new ChatView(winInfo, this.ws, spec.virtualId, this, { readOnly: true });
-        this.sessions.set(winInfo.id, view);
-        this.ws.send({
-          type: 'attach',
-          sessionId: spec.virtualId,
-          parentSessionId: spec.parentSessionId,
-          backend: spec.backend || 'claude',
-          backendSessionId: spec.backendSessionId || spec.claudeSessionId,
-          claudeSessionId: spec.claudeSessionId,
-          cwd: spec.cwd,
-          hostId: spec.hostId || spec.host || undefined, // remote workflow agent → transcript on the host (2.191.0)
-        });
-        const handler = (msg) => {
-          if (!this.wm.windows.has(winInfo.id)) { this.ws.offGlobal(handler); return; }
-          if (msg.type === 'error' && msg.sessionId === spec.virtualId) { this.ws.offGlobal(handler); return; }
-          if (msg.type === 'attached' && msg.sessionId === spec.virtualId) {
-            this.ws.offGlobal(handler);
-            if (msg.messages?.length) view.loadHistory(msg.messages, msg.totalCount, msg.isStreaming);
-          }
-        };
-        this.ws.onGlobal(handler);
-        winInfo.onClose = () => { this.ws.offGlobal(handler); view.dispose(); this.sessions.delete(winInfo.id); this._checkWelcome(); };
-        break;
-      }
-    }
+    return replayOpenSpecViaRegistry(this, spec, { syncId });
   },
   });
 }
+
+// ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1): the session window kinds ──
+// chat/terminal restore by SESSION IDENTITY, not by spec (persist:false —
+// layout.js's former TRANSIENT_WINDOW_TYPES): their openSpec arrives async
+// after 'created'. The replay bodies are the former replayOpenSpec switch
+// cases, verbatim (`this` → `app`).
+function replayAttachSession(app, spec, { syncId } = {}) {
+  // The saved serverId/name may be STALE — the dtach instance dies and
+  // gets resumed under a new server id while the spec persists in the
+  // autosave (and the name was captured at window creation, before any
+  // rename). Re-resolve against the live session list like restoreState
+  // does; a spec replayed verbatim attaches to a nonexistent session and
+  // leaves a blank window that re-persists the stale spec forever.
+  const backend = spec.backend || 'claude';
+  // A bsid equal to the serverId is POLLUTION from pre-2.105.2 specs
+  // (the webui id was baked in before the CLI reported a real id —
+  // long window on remote spawns): treat it as no bsid, or the
+  // re-resolution below misses on it and opens a bogus view-only
+  // window (real report: remote-host session blank on other clients).
+  const bsid = (spec.backendSessionId && spec.backendSessionId !== spec.serverId)
+    ? spec.backendSessionId : null;
+  const live = app.sidebar?._webuiSessions || [];
+  let serverId = spec.serverId;
+  let name = spec.name;
+  let cwd = spec.cwd;
+  if (bsid && !live.some(s => s.id === serverId)) {
+    const alive = live.find(s => (s.backend || 'claude') === backend
+      && (s.backendSessionId || s.claudeSessionId) === bsid);
+    if (alive) {
+      serverId = alive.id;
+      name = alive.name || name;
+      cwd = alive.cwd || cwd;
+    } else if (live.length && !serverId) {
+      // Session is dead — open read-only history with a Resume bar
+      // instead of a blank window stuck on a failed attach. Only when
+      // there is NO serverId to try: a serverId the local list doesn't
+      // know yet is usually a RACE (layout-sync beat the active-sessions
+      // push for a just-created session) — attach directly and let the
+      // server be authoritative; a genuinely dead session's attach
+      // errors into the read-only path anyway.
+      return app.viewSession(bsid, cwd, app.sidebar?.getCustomName(spec.sessionKey || bsid) || name, {
+        syncId, backend, backendSessionId: bsid, hostId: spec.hostId || spec.host || undefined,
+        agentKind: spec.agentKind, agentRole: spec.agentRole,
+        agentNickname: spec.agentNickname, sourceKind: spec.sourceKind,
+        parentThreadId: spec.parentThreadId,
+      });
+    }
+  }
+  if (bsid) name = app.sidebar?.getCustomName(spec.sessionKey || bsid) || name;
+  return app.attachSession(serverId, name, cwd, {
+    mode: spec.mode,
+    syncId,
+    backend,
+    backendSessionId: bsid,
+    hostId: spec.hostId || spec.host || undefined,
+    agentKind: spec.agentKind,
+    agentRole: spec.agentRole,
+    agentNickname: spec.agentNickname,
+    sourceKind: spec.sourceKind,
+    parentThreadId: spec.parentThreadId,
+  });
+}
+
+function replayViewSession(app, spec, { syncId } = {}) {
+  return app.viewSession(spec.sessionId, spec.cwd, spec.name, {
+    hostId: spec.hostId || spec.host || undefined,
+    syncId,
+    backend: spec.backend || 'claude',
+    backendSessionId: spec.backendSessionId || spec.sessionId,
+    agentKind: spec.agentKind,
+    agentRole: spec.agentRole,
+    agentNickname: spec.agentNickname,
+    sourceKind: spec.sourceKind,
+    parentThreadId: spec.parentThreadId,
+  });
+}
+
+function replayViewSubagent(app, spec, { syncId } = {}) {
+  const title = t('Agent: {desc}', { desc: spec.description || t('Subagent') });
+  const winInfo = app.wm.createWindow({
+    title,
+    type: 'chat',
+    syncId,
+    openSpec: spec,
+    titleMeta: app._buildTitleMeta({
+      backend: spec.backend || 'claude',
+      agentKind: spec.agentKind || 'subagent',
+      agentRole: spec.agentRole,
+      agentNickname: spec.agentNickname,
+      sourceKind: spec.sourceKind,
+      parentThreadId: spec.parentThreadId,
+    }),
+  });
+  const view = new ChatView(winInfo, app.ws, spec.virtualId, app, { readOnly: true });
+  app.sessions.set(winInfo.id, view);
+  app.ws.send({
+    type: 'attach',
+    sessionId: spec.virtualId,
+    parentSessionId: spec.parentSessionId,
+    backend: spec.backend || 'claude',
+    backendSessionId: spec.backendSessionId || spec.claudeSessionId,
+    claudeSessionId: spec.claudeSessionId,
+    cwd: spec.cwd,
+    hostId: spec.hostId || spec.host || undefined, // remote workflow agent → transcript on the host (2.191.0)
+  });
+  const handler = (msg) => {
+    if (!app.wm.windows.has(winInfo.id)) { app.ws.offGlobal(handler); return; }
+    if (msg.type === 'error' && msg.sessionId === spec.virtualId) { app.ws.offGlobal(handler); return; }
+    if (msg.type === 'attached' && msg.sessionId === spec.virtualId) {
+      app.ws.offGlobal(handler);
+      if (msg.messages?.length) view.loadHistory(msg.messages, msg.totalCount, msg.isStreaming);
+    }
+  };
+  app.ws.onGlobal(handler);
+  winInfo.onClose = () => { app.ws.offGlobal(handler); view.dispose(); app.sessions.delete(winInfo.id); app._checkWelcome(); };
+  return winInfo;
+}
+
+registerWindowType({
+  type: 'terminal', label: 'Terminal', persist: false,
+  icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 7l2 2-2 2M8.5 11h3"/>'),
+  action: 'attachTmuxSession', replay: (app, spec) => app.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd),
+});
+registerWindowType({
+  type: 'chat', label: 'Chat', persist: false,
+  icon: svgIcon16('<path d="M2 3a2 2 0 012-2h8a2 2 0 012 2v6a2 2 0 01-2 2H6l-4 3V3z"/>'),
+  // attachSession opens a chat OR terminal window by spec.mode — registered on its home kind.
+  actions: { attachSession: replayAttachSession, viewSession: replayViewSession, viewSubagent: replayViewSubagent },
+});

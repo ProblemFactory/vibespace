@@ -1,5 +1,6 @@
 import { escHtml, showToast } from './utils.js';
 import { t } from './i18n.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 
 /**
  * Workflow detail window (window type 'workflow') — POST-HOC viewer for a
@@ -227,3 +228,10 @@ export function openWorkflowDetail(app, runId, opts = {}) {
   winInfo.onClose = () => { stopPoll(); app._checkWelcome(); };
   return winInfo;
 }
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ──
+registerWindowType({
+  type: 'workflow', label: 'Workflow',
+  icon: svgIcon16('<circle cx="3" cy="8" r="2"/><circle cx="13" cy="3.5" r="1.8"/><circle cx="13" cy="8" r="1.8"/><circle cx="13" cy="12.5" r="1.8"/><path d="M5 8h2M11.2 3.5H8a1 1 0 00-1 1v6a1 1 0 001 1h3.2M7 8h4"/>'),
+  action: 'openWorkflowDetail', replay: (app, spec, { syncId } = {}) => app.openWorkflowDetail(spec.runId, { syncId, claudeSessionId: spec.claudeSessionId, cwd: spec.cwd, name: spec.name, host: spec.host }),
+});

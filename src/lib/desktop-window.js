@@ -1,5 +1,6 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
+import { registerWindowType, svgIcon16 } from './window-types.js';
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
 // built as a SEPARATE ESM file (public/novnc.js, see the build script) and
@@ -131,3 +132,10 @@ export function openDesktop(app, { syncId } = {}) {
   connect();
   return winInfo;
 }
+
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── singleton per client (see above)
+registerWindowType({
+  type: 'desktop', label: 'Desktop', singleton: true,
+  icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M8 11.5V14M5 14h6"/>'),
+  action: 'openDesktop', replay: (app, spec, { syncId } = {}) => app.openDesktop({ syncId }),
+});
