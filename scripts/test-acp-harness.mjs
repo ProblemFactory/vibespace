@@ -167,7 +167,8 @@ console.log('— wrapper vs mock ACP agent: new session');
     await sleep(1200); // buffer persist debounce
     historyRecords = w.records.filter((r) => r.type === 'acp');
     const bufRecs = fs.readFileSync(w.buf, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    ok('the buffer file mirrors the stdout journal (history survives a server restart)', bufRecs.length === historyRecords.length && bufRecs[0].kind === 'session', { buf: bufRecs.length, out: historyRecords.length });
+    // the mock's available_commands_update can land BEFORE the session/new reply resolves (microtask order) — compare the SEQUENCE, not a fixed first record
+    ok('the buffer file mirrors the stdout journal (history survives a server restart)', bufRecs.length === historyRecords.length && bufRecs.map((r) => r.kind).join() === historyRecords.map((r) => r.kind).join(), { buf: bufRecs.length, out: historyRecords.length });
   } finally { await w.stop(); }
 }
 
@@ -235,7 +236,7 @@ console.log('— normalizer (AcpMessageManager) over the journal');
   const bdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acp-buf-'));
   fs.writeFileSync(path.join(bdir, 's1.json'), JSON.stringify({ mode: 'chat', streaming: true, todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }], model: 'mock/smart' }));
   const sm = new AcpSessionMessages({ buffer: historyRecords.map((r) => JSON.stringify(r)).join('\n') + '\n' }, 's1', { buffersDir: bdir });
-  ok('AcpSessionMessages reads raw/tail/slice from the buffer, chatStatus from the journal, todos + streaming from the sidecar', sm.total === historyRecords.length && sm.tail(2).length === 2 && sm.slice(0, 1)[0].kind === 'session' && sm.chatStatus()?.model === 'mock/smart' && sm.taskState().todos.length === 2 && sm.isStreaming === true, { todos: sm.taskState().todos, streaming: sm.isStreaming });
+  ok('AcpSessionMessages reads raw/tail/slice from the buffer, chatStatus from the journal, todos + streaming from the sidecar', sm.total === historyRecords.length && sm.tail(2).length === 2 && sm.slice(0, 1)[0].type === 'acp' && sm.chatStatus()?.model === 'mock/smart' && sm.taskState().todos.length === 2 && sm.isStreaming === true, { todos: sm.taskState().todos, streaming: sm.isStreaming });
   fs.rmSync(bdir, { recursive: true, force: true });
   const empty = new AcpSessionMessages({ buffer: '' }, 'none', { buffersDir: os.tmpdir() });
   ok('…an empty buffer → null chatStatus, no todos (never throws)', empty.chatStatus() === null && empty.taskState().todos.length === 0);
