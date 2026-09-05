@@ -391,6 +391,7 @@ function updateMetaFromThread(resp) {
     approvalPolicy: meta.approvalPolicy,
     sandbox: meta.sandbox,
     contextWindow: meta.contextWindow || 0,
+    slashCommands: SLASH_COMMANDS, // the wrapper-served commands (chat-input autocomplete)
   });
   scheduleMeta();
 }
@@ -486,6 +487,24 @@ function handleItemStarted(item, itemId) {
     });
     return;
   }
+  // LIVE VISIBILITY (P2): MCP / dynamic / web-search / image-view items were
+  // only known from the rollout merge on re-attach — a live turn showed
+  // minutes of "thinking…" while an MCP call ran. Record them as the
+  // function_call / function_call_output twins the normalizer already
+  // renders (names chosen so collapseKindOf lands in the right fold kind).
+  if (type === 'mcpToolCall') {
+    record('response_item', { type: 'function_call', name: `mcp__${item.server || 'mcp'}__${item.tool || 'tool'}`, arguments: JSON.stringify(item.arguments ?? {}), call_id: itemId });
+    emitTaskEvent('mcp_tool_call_begin', { call_id: itemId, server: item.server || '', tool: item.tool || '' });
+    return;
+  }
+  if (type === 'dynamicToolCall') {
+    record('response_item', { type: 'function_call', name: item.namespace ? `${item.namespace}.${item.tool || 'tool'}` : (item.tool || 'dynamic_tool'), arguments: JSON.stringify(item.arguments ?? {}), call_id: itemId });
+    return;
+  }
+  if (type === 'webSearch') {
+    record('response_item', { type: 'function_call', name: 'web_search', arguments: JSON.stringify({ query: item.query || '', action: item.action || null }), call_id: itemId });
+    return;
+  }
   if (type === 'enteredReviewMode') {
     emitTaskEvent('entered_review_mode', { item_id: itemId });
     return;
@@ -506,6 +525,23 @@ function handleItemCompleted(item, itemId) {
 function _handleItemCompletedInner(item, itemId) {
   const state = itemState.get(itemId) || {};
   const type = state.type || item.type;
+  if (type === 'mcpToolCall' || type === 'dynamicToolCall' || type === 'webSearch') {
+    if (!state.type) handleItemStarted(item, itemId); // completed without a started (rollout merge / short call)
+    const failed = !!item.error || item.status === 'failed' || item.success === false;
+    const out = item.error ? (item.error.message || JSON.stringify(item.error)) : (item.result ?? item.contentItems ?? item.results ?? '');
+    record('response_item', { type: 'function_call_output', call_id: itemId, output: typeof out === 'string' ? out : JSON.stringify(out), is_error: failed });
+    return;
+  }
+  if (type === 'imageView') {
+    record('response_item', { type: 'function_call', name: 'view_image', arguments: JSON.stringify({ path: item.path || '' }), call_id: itemId });
+    record('response_item', { type: 'function_call_output', call_id: itemId, output: `viewed ${item.path || 'image'}`, is_error: false });
+    return;
+  }
+  if (type === 'contextCompaction') {
+    compactionSeen = true;
+    emitTaskEvent('context_compacted', { item_id: itemId, source: 'item' });
+    return;
+  }
   if (type === 'agentMessage') {
     const contentText = asArray(item.content)
       .filter((entry) => entry.type === 'output_text' || entry.type === 'text')
@@ -673,6 +709,7 @@ function handleNotification(method, params) {
   }
   if (method === 'turn/completed') {
     const status = params?.status || params?.turn?.status || 'completed';
+    { const doneId = params?.turn?.id || params?.turnId || currentTurnId; if (doneId) { completedTurns.add(doneId); if (completedTurns.size > 50) completedTurns.delete(completedTurns.values().next().value); } }
     const normalEnd = status === 'completed' || status === 'success' || !status;
     meta.activeTurnId = null;
     meta.streaming = false;
@@ -871,6 +908,39 @@ async function maybeStopNudge() {
   } catch (e) { nudgeTurnActive = false; log('stop nudge skipped: ' + e.message); }
 }
 
+const SLASH_COMMANDS = ['compact', 'review', 'model', 'effort'];
+/** Wrapper-served slash commands (see chat-input). Returns true when consumed. */
+async function applySlashCommand(text) {
+  const m = /^\/(compact|review|model|effort)(?:\s+(.*))?$/s.exec(String(text || '').trim());
+  if (!m) return false;
+  const [, cmd, argRaw] = m;
+  const arg = (argRaw || '').trim();
+  if (!meta.threadId) throw new Error(`No threadId available for /${cmd}`);
+  try {
+    if (cmd === 'compact') {
+      emitTaskEvent('compact_started', { turn_id: meta.activeTurnId || null });
+      await request('thread/compact/start', { threadId: meta.threadId }, 300000);
+      // the contextCompaction item completion emits context_compacted; a
+      // server that answers without an item still gets the marker
+      if (!compactionSeen) emitTaskEvent('context_compacted', { source: 'rpc' });
+      compactionSeen = false;
+    } else if (cmd === 'review') {
+      await handleInput({ type: 'review-start', target: { type: 'uncommittedChanges' } });
+    } else if (cmd === 'model') {
+      await handleInput({ type: 'set-model', model: arg });
+      emitTaskEvent('command_applied', { command: cmd, value: arg || '(default)' });
+    } else if (cmd === 'effort') {
+      await handleInput({ type: 'set-effort', effort: arg });
+      emitTaskEvent('command_applied', { command: cmd, value: arg || '(default)' });
+    }
+  } catch (e) {
+    emitTaskEvent('task_failed', { error: `/${cmd} failed: ${e.message}` });
+    log(`/${cmd} failed: ${e.message}`);
+  }
+  return true;
+}
+let compactionSeen = false;
+
 async function startTurn(text, attachments = []) {
   if (!meta.threadId) throw new Error('No threadId available for turn/start');
   const input = encodeUserInput(text, attachments);
@@ -886,11 +956,18 @@ async function startTurn(text, attachments = []) {
     effort: effort || undefined,
     personality: 'pragmatic',
   }, 120000);
-  currentTurnId = resp?.turn?.id || currentTurnId;
+  const startedId = resp?.turn?.id || currentTurnId;
+  // The turn/completed notification can be processed BEFORE this reply's
+  // promise resolves (same stdout chunk; notifications are handled
+  // synchronously, replies on a microtask) — a turn that already ended must
+  // not be re-marked active, or every later chat-input would queue forever.
+  if (completedTurns.has(startedId)) { completedTurns.delete(startedId); return; }
+  currentTurnId = startedId;
   meta.activeTurnId = currentTurnId;
   meta.streaming = true;
   scheduleMeta();
 }
+const completedTurns = new Set();
 
 async function respondToServerRequest(msg) {
   const requestId = msg.requestId;
@@ -948,6 +1025,7 @@ async function setPermissionMode(mode) {
     approvalPolicy: meta.approvalPolicy,
     sandbox: meta.sandbox,
     contextWindow: meta.contextWindow || 0,
+      slashCommands: SLASH_COMMANDS,
   });
   scheduleMeta();
 }
@@ -968,6 +1046,28 @@ async function handleInput(msg) {
         ...(text ? [{ type: 'input_text', text }] : []),
       ],
     });
+    // SLASH COMMANDS (P2, design-harness-plugins §1): codex's init carries no
+    // command list, so the wrapper serves the ones it can actually honour —
+    // /compact runs a REAL compaction (thread/compact/start, verified on
+    // 0.153.4) instead of a wasted model turn, /review starts a review of the
+    // uncommitted changes, /model + /effort reuse the set-* verbs.
+    if (!attachments.length && await applySlashCommand(text)) return;
+    // SEND WHILE BUSY (P2): a turn is active ⇒ thread/queue/add (runs right
+    // after the current turn — the same lane peer messages use) instead of
+    // turn/start, which codex either STEERS into the running turn or, for
+    // review/compact turns, rejects with ActiveTurnNotSteerable and the text
+    // was lost. The user record above already renders the bubble; the
+    // queued_input event renders a "queued" notice under it.
+    if (meta.threadId && meta.activeTurnId) {
+      await request('thread/queue/add', {
+        threadId: meta.threadId,
+        input: encodeUserInput(text, attachments),
+        clientUserMessageId: msg.msgId || `queued-${process.pid}-${nextId++}`,
+      }, 30000);
+      emitTaskEvent('queued_input', { msg_id: msg.msgId || '', turn_id: meta.activeTurnId });
+      log('chat-input queued (turn active; runs after the current turn)');
+      return;
+    }
     await startTurn(text, attachments);
     return;
   }

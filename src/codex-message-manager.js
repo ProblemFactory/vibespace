@@ -260,6 +260,7 @@ class CodexMessageManager {
       const turnIndex = m.turnIndex ?? 0;
       if (turnIndex === lastTurn) continue;
       const entry = { turnIndex, startIdx: i, ts: m.ts, role: m.role };
+      if (m.isCompact) { entry.isCompact = true; entry.preview = 'Context compacted'; }
       if (m.role === 'user') {
         const raw = (m.content || []).map((b) => b.text || '').join('').trim();
         if (raw) entry.preview = raw.length > 10 ? `${raw.slice(0, 10)}…` : raw;
@@ -428,10 +429,11 @@ class CodexMessageManager {
           initData: {
             model: payload.model || '',
             permissionMode: this._status.permissionMode || '',
-            slashCommands: [],
+            slashCommands: this._status.slashCommands || [],
           },
         }],
       });
+      this._initMsgId = msg.id;
       this._emit({ op: 'create', message: msg });
     }
   }
@@ -460,16 +462,29 @@ class CodexMessageManager {
           initData: {
             model: this._status.model || '',
             permissionMode: this._status.permissionMode || '',
-            slashCommands: [],
+            slashCommands: this._status.slashCommands || [],
           },
         }],
       });
+      this._initMsgId = msg.id;
       this._emit({ op: 'create', message: msg });
     }
   }
 
   _processWrapperMeta(record, emit) {
     const payload = record.payload || {};
+    if (Array.isArray(payload.slashCommands)) {
+      this._status.slashCommands = payload.slashCommands.slice(0, 32).map(String);
+      // The init card may already exist (boot wrapper_meta / session_meta came
+      // first): patch its initData in place so the chat-input autocomplete
+      // learns the commands, and tell live clients.
+      const init = this._initMsgId ? this.messageIndex.get(this._initMsgId) : null;
+      const initData = init?.content?.[0]?.initData;
+      if (initData) {
+        initData.slashCommands = this._status.slashCommands;
+        if (emit) this._emit({ op: 'edit', id: init.id, fields: { content: init.content } });
+      }
+    }
     if (payload.model) this._status.model = payload.model;
     if (payload.permissionMode) this._status.permissionMode = payload.permissionMode;
     if (payload.contextWindow) this._status.contextWindow = payload.contextWindow;
@@ -483,10 +498,11 @@ class CodexMessageManager {
           initData: {
             model: payload.model || '',
             permissionMode: payload.permissionMode || '',
-            slashCommands: [],
+            slashCommands: this._status.slashCommands || [],
           },
         }],
       });
+      this._initMsgId = msg.id;
       this._emit({ op: 'create', message: msg });
     }
   }
@@ -748,6 +764,19 @@ class CodexMessageManager {
       return;
     }
 
+    // P2 notices the wrapper emits around the codex turn loop (2.369.20):
+    // queued input, real compaction, slash commands applied for the next turn.
+    if (type === 'queued_input' || type === 'compact_started' || type === 'context_compacted' || type === 'command_applied') {
+      const text = type === 'queued_input' ? 'Queued — runs after the current turn'
+        : type === 'compact_started' ? 'Compacting context…'
+        : type === 'context_compacted' ? 'Context compacted'
+        : `/${event.command} → ${event.value} (applies to the next turn)`;
+      if (type === 'context_compacted') this.turnIndex++; // a compaction starts a new turn (minimap marker parity with claude's compact summary turn)
+      const msg = this._create({ role: 'system', status: 'complete', content: [{ type: 'system_info', text }], noticeKind: type === 'context_compacted' ? 'compact' : 'notice' });
+      if (type === 'context_compacted') msg.isCompact = true;
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
     if (type === 'task_complete' || type === 'turn_aborted' || type === 'task_failed') {
       this._finalizeStreaming(emit, { includeReasoning: true });
       if (type === 'task_failed') {

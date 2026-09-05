@@ -115,6 +115,9 @@ process.stdin.on('data', (d) => {
       const result = m.method === 'thread/start' ? { thread: { id: 'th-frame-1' } }
         : m.method === 'turn/start' ? { turn: { id: 'turn-' + m.id } } : {};
       process.stdout.write(JSON.stringify({ id: m.id, result }) + '\\n');
+      // end every turn at once: since 2.369.20 a chat-input during an ACTIVE turn is
+      // QUEUED (thread/queue/add) — this stub is about frame delivery, not queueing
+      if (m.method === 'turn/start') process.stdout.write(JSON.stringify({ method: 'turn/completed', params: { turn: { id: result.turn.id }, status: 'completed' } }) + '\\n');
     }
   }
 });
@@ -160,7 +163,11 @@ setInterval(() => {}, 1e3);
     `frame-file payload reaches the app-server INTACT as one turn/start (image ${img?.url?.length || 0} bytes + text)`);
   ok(!fs.existsSync(fp), 'codex frame file unlinked after delivery');
   await sleep(1200); // buffer (1s) + meta (500ms) persist on debounces
-  ok(readMeta()?.activeTurnId === 'turn-' + t[0]?.id, `turn adopted from the stub reply (dispatched through the normal chat-input path): ${readMeta()?.activeTurnId}`);
+  // the stub completes every turn at once (2.369.20 queue-while-busy semantics): the turn
+  // was adopted through the normal chat-input path (turn/start above) and is RELEASED by
+  // turn/completed — activeTurnId must be null, not a stale id (the startTurn-vs-completed
+  // ordering race guarded in the wrapper); live adoption is pinned by test-codex-p2-wrapper
+  ok(readMeta()?.activeTurnId === null && readMeta()?.streaming === false, `turn adopted then released on turn/completed (no stale active turn): ${readMeta()?.activeTurnId}`);
   const bufText = fs.existsSync(buf) ? fs.readFileSync(buf, 'utf8') : '';
   ok(bufText.includes('"webui_msg_id":"m-frame-1"') && bufText.includes('"input_image"'), 'the user message is recorded in the wrapper buffer with its msgId (history survives a restart)');
   ok(failures().length === 0, 'no failure event for the good frame');
