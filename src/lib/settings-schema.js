@@ -810,4 +810,47 @@ const SETTINGS_CATEGORIES = [
   t('Session Card'),
 ];
 
+// ── PLUGIN-CONTRIBUTED SETTINGS (Plugin Ph4, 2.369.30 — docs/plugins.md) ──
+// `contributes.settings[]` of an ENABLED plugin registers here as
+// `plugin.<id>.<key>` under the category "Plugin: <label>". The Settings
+// window, SettingsManager (sparse storage + settings-updated WS sync) and the
+// plugin host API all read SETTINGS_SCHEMA live, so registering is the only
+// step; unregister on disable removes the rows (stored values stay in the
+// sparse store, harmless, and come back when the plugin is re-enabled).
+// REGISTRATION FUNCTIONS ONLY — nothing outside this module mutates the
+// schema object or the category list directly.
+const PLUGIN_SETTING_OWNERS = new Map(); // pluginId → { category, paths[] }
+export function pluginSettingPath(pluginId, key) { return `plugin.${pluginId}.${key}`; }
+export function registerPluginSettings(pluginId, label, items) {
+  unregisterPluginSettings(pluginId);
+  const category = t('Plugin: {name}', { name: label || pluginId });
+  const paths = [];
+  for (const s of Array.isArray(items) ? items : []) {
+    if (!s || typeof s.key !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(s.key)) continue;
+    const path = pluginSettingPath(pluginId, s.key);
+    const entry = { label: String(s.label || s.key), description: String(s.description || ''), category, liveApply: true, plugin: pluginId };
+    if (s.type === 'boolean') Object.assign(entry, { type: 'boolean', default: !!s.default });
+    else if (s.type === 'number') Object.assign(entry, { type: 'number', default: Number.isFinite(Number(s.default)) ? Number(s.default) : 0, min: s.min, max: s.max, step: s.step });
+    else if (s.type === 'select') Object.assign(entry, { type: 'enum', default: String(s.default ?? ''), options: (Array.isArray(s.options) ? s.options : []).map((o) => (typeof o === 'string' ? { value: o, label: o } : { value: String(o?.value ?? ''), label: String(o?.label ?? o?.value ?? '') })) });
+    else Object.assign(entry, { type: 'string', default: String(s.default ?? '') });
+    SETTINGS_SCHEMA[path] = entry;
+    paths.push(path);
+  }
+  if (paths.length && !SETTINGS_CATEGORIES.includes(category)) SETTINGS_CATEGORIES.push(category);
+  PLUGIN_SETTING_OWNERS.set(pluginId, { category, paths });
+  return paths;
+}
+export function unregisterPluginSettings(pluginId) {
+  const own = PLUGIN_SETTING_OWNERS.get(pluginId);
+  if (!own) return false;
+  for (const p of own.paths) delete SETTINGS_SCHEMA[p];
+  PLUGIN_SETTING_OWNERS.delete(pluginId);
+  if (![...PLUGIN_SETTING_OWNERS.values()].some((o) => o.category === own.category)) {
+    const i = SETTINGS_CATEGORIES.indexOf(own.category);
+    if (i >= 0) SETTINGS_CATEGORIES.splice(i, 1);
+  }
+  return true;
+}
+export function listPluginSettings(pluginId) { return [...(PLUGIN_SETTING_OWNERS.get(pluginId)?.paths || [])]; }
+
 export { SETTINGS_SCHEMA, SETTINGS_CATEGORIES };

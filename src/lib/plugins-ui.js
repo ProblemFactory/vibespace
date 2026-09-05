@@ -2,7 +2,7 @@
 // login / status for host-level plugins (first: Tailscale). Modeled on the
 // Manage-Agents visual language; the login flow mirrors guided Drive OAuth
 // (server captures the auth URL, user opens it, we poll status until Running).
-import { createModalShell, fetchJson, showToast, showConfirmDialog, escHtml, copyText } from './utils.js';
+import { createModalShell, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
 import { t } from './i18n.js';
 
 export function installPluginsUI(App) {
@@ -212,7 +212,15 @@ export function installPluginsUI(App) {
       }
       await renderManifestPlugins(body);
     };
-    // ── MANIFEST PLUGINS (Plugin Ph2, 2.369.24): data/plugins/<id>/ folders ──
+    // ── MANIFEST PLUGINS (Plugin Ph2 2.369.24; Ph4 2.369.30 consent / install / update / uninstall) ──
+    const enablePlugin = async (p, { trusted = false } = {}) => {
+      const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: true, trusted }) });
+      if (rr?.consentRequired && !trusted) { const okc = await this._pluginConsentDialog(p, rr.capabilities); if (okc) return enablePlugin(p, { trusted: true }); return; }
+      if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+      showToast(trusted ? t('Plugin enabled (trusted)') : t('Plugin enabled'));
+      this.pluginClient?.refresh?.();
+      render();
+    };
     const renderManifestPlugins = async (parent) => {
       const r = await fetchJson('/api/plugins/manifests');
       const list = r?.plugins || [];
@@ -220,15 +228,18 @@ export function installPluginsUI(App) {
       sec.className = 'plugin-manifests';
       const head = document.createElement('div');
       head.className = 'plugin-head plugin-manifests-head';
-      head.innerHTML = `<b>${escHtml(t('Installed plugins'))}</b> <span class="plugin-cfg-hint">${escHtml(t('a folder under data/plugins/<id>/ with vibespace-plugin.json — see docs/examples/hello-plugin'))}</span>`;
+      head.innerHTML = `<b>${escHtml(t('Installed plugins'))}</b> <span class="plugin-cfg-hint">${escHtml(t('a folder under data/plugins/<id>/ with vibespace-plugin.json — see docs/plugins.md'))}</span>`;
+      const installBtn = document.createElement('button');
+      installBtn.className = 'mounts-btn'; installBtn.textContent = t('Install plugin…');
+      installBtn.onclick = () => this._pluginInstallDialog(() => { this.pluginClient?.refresh?.(); render(); });
       const reload = document.createElement('button');
       reload.className = 'mounts-btn'; reload.textContent = t('Rescan');
-      reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(rr.error, { type: 'error' }); render(); };
-      head.appendChild(reload);
+      reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(rr.error, { type: 'error' }); this.pluginClient?.refresh?.(); render(); };
+      head.append(installBtn, reload);
       sec.appendChild(head);
       if (!list.length) {
         const empty = document.createElement('div');
-        empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Copy docs/examples/hello-plugin to data/plugins/example.hello and Rescan.');
+        empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Use Install plugin… (a folder, a git URL, a .vsp file or a GitHub release) — docs/examples/hello-plugin is the smallest complete one.');
         sec.appendChild(empty);
       }
       for (const p of list) {
@@ -236,33 +247,151 @@ export function installPluginsUI(App) {
         card.className = 'plugin-card plugin-manifest-card';
         const stateTxt = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes'), stopped: t('stopped'), error: t('error') }[p.state] || p.state) : t('enabled');
         const dot = `<span class="plugin-dot ${!p.valid ? 'err' : (p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '')}"></span>`;
+        const tier = p.client === 'module' ? (p.trusted ? t('trusted client module') : t('client module — needs your consent')) : p.client === 'iframe' ? t('sandboxed UI') : '';
+        const badges = [tier, p.server ? t('server process') : '', p.needsConsent && !p.trusted ? t('needs consent') : (p.trusted ? '✓ ' + t('trusted') : '')].filter(Boolean).map((x) => `<span class="plugin-cfg-hint">${escHtml(x)}</span>`).join(' · ');
         const wins = (p.contributes?.windows || []).map((w) => `<button class="mounts-btn plugin-open-win" data-plugin="${escHtml(p.id)}" data-win="${escHtml(w.id)}"${p.enabled ? '' : ' disabled'}>${escHtml(w.title)}</button>`).join(' ');
         const tools = (p.contributes?.agentTools || []).map((tl) => `<code>vibespace-tool-${escHtml(p.id)}-${escHtml(tl.name)}</code>`).join(' ');
+        const contrib = [(p.contributes?.settings || []).length ? t('{n} settings', { n: p.contributes.settings.length }) : '', (p.contributes?.themes || []).length ? t('{n} themes', { n: p.contributes.themes.length }) : ''].filter(Boolean).join(' · ');
+        const clientErr = this.pluginClient?.errors?.get?.(p.id) || null;
         card.innerHTML = `
-          <div class="plugin-head">${dot}<b>${escHtml(p.id)}</b> <span class="plugin-ver">${escHtml(p.version || '')}</span> <span class="plugin-state">${escHtml(stateTxt)}</span></div>
+          <div class="plugin-head">${dot}<b>${escHtml(p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id)}</b> <span class="plugin-ver">${escHtml(p.version || '')}</span> <span class="plugin-state">${escHtml(stateTxt)}</span></div>
+          ${badges ? `<div class="plugin-detail">${badges}</div>` : ''}
           ${p.description ? `<div class="plugin-detail">${escHtml(p.description)}</div>` : ''}
+          ${p.notice ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.notice)}</div>` : ''}
           ${p.errors?.length ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.errors.join(' · '))}</div>` : ''}
           ${p.warnings?.length ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(p.warnings.join(' · '))}</div>` : ''}
           ${p.lastError ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.lastError)}</div>` : ''}
+          ${clientErr ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(t('Client module error: {error}', { error: clientErr }))}</div>` : ''}
           ${tools ? `<div class="plugin-detail">${escHtml(t('Agent tools'))}: ${tools}</div>` : ''}
+          ${contrib ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(contrib)}</div>` : ''}
+          ${p.install ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(t('Installed from {source}: {value}', { source: p.install.source, value: p.install.value || '' }))}</div>` : ''}
           <div class="plugin-detail plugin-manifest-actions">${wins}</div>`;
         const actions = card.querySelector('.plugin-manifest-actions');
         const toggle = document.createElement('button');
-        toggle.className = 'mounts-btn'; toggle.textContent = p.enabled ? t('Disable') : t('Enable'); toggle.disabled = !p.valid;
+        toggle.className = 'mounts-btn'; toggle.disabled = !p.valid;
+        toggle.textContent = p.enabled ? t('Disable') : (p.consentRequired ? t('Enable (trusted)…') : t('Enable'));
         toggle.onclick = async () => {
-          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: !p.enabled }) });
+          if (!p.enabled) { if (p.consentRequired) { const okc = await this._pluginConsentDialog(p); if (!okc) return; return enablePlugin(p, { trusted: true }); } return enablePlugin(p); }
+          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: false }) });
           if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
-          showToast(p.enabled ? t('Plugin disabled') : t('Plugin enabled'));
+          showToast(t('Plugin disabled'));
           this.pluginClient?.refresh?.();
           render();
         };
-        actions.prepend(toggle);
+        const more = document.createElement('button');
+        more.className = 'mounts-btn'; more.textContent = '⋯'; more.title = t('More');
+        more.onclick = (ev) => {
+          const rect = more.getBoundingClientRect();
+          showContextMenu(rect.left, rect.bottom + 2, [
+            { label: t('Show capabilities…'), action: () => this._pluginConsentDialog(p, null, { readOnly: true }) },
+            { label: t('Update'), disabled: !p.install || p.install.source === 'zip', action: async () => {
+              showToast(t('Updating {id}…', { id: p.id }));
+              const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/update`, { method: 'POST' });
+              if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+              showToast(t('Updated {id} to {version}', { id: p.id, version: rr.plugin?.version || '' }));
+              this.pluginClient?.refresh?.(); render();
+            } },
+            { separator: true },
+            { label: t('Uninstall…'), style: 'danger', action: async () => {
+              const okd = await showConfirmDialog({ title: t('Uninstall plugin'), message: t('Uninstall "{name}"? Its folder and data move to data/plugins-trash (nothing is deleted).', { name: p.label || p.id }), confirmText: t('Uninstall'), danger: true });
+              if (!okd) return;
+              const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+              if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+              showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
+              this.pluginClient?.refresh?.(); render();
+            } },
+          ]);
+          ev.stopPropagation();
+        };
+        actions.prepend(toggle, more);
         for (const b of card.querySelectorAll('.plugin-open-win')) b.onclick = () => { this.pluginClient?.open?.(b.dataset.plugin, b.dataset.win); close(); };
         sec.appendChild(card);
       }
       parent.appendChild(sec);
     };
     await render();
+  },
+
+  /** Consent dialog (Plugin Ph4): the plugin's declared capabilities in plain
+   *  words — the SAME items the server computes (capabilitySummary) — with
+   *  "Enable (trusted)". Resolves true when the owner accepts. readOnly = the
+   *  "Show capabilities…" view. `summary` may come from a 409 payload; else fetched. */
+  async _pluginConsentDialog(p, summary = null, { readOnly = false } = {}) {
+    let items = Array.isArray(summary) ? summary : null;
+    let trust = null;
+    if (!items) {
+      const r = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/capabilities`);
+      if (r?.error) { showToast(r.error, { type: 'error' }); return false; }
+      items = r.summary || []; trust = r.trust || null;
+    }
+    return new Promise((resolve) => {
+      let decided = false;
+      const { body, close } = createModalShell({ id: 'plugin-consent-dialog', title: readOnly ? t('Capabilities of {name}', { name: p.label || p.id }) : t('Enable "{name}" (trusted)?', { name: p.label || p.id }), minWidth: '460px', escapeToClose: true, onClose: () => { if (!decided) resolve(false); } });
+      const risky = items.some((it) => it.id === 'client-module' || it.id === 'child-process');
+      body.innerHTML = `
+        <div class="usage-note">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
+        <ul class="plugin-caps-list">${items.map((it) => `<li class="plugin-cap plugin-cap-${escHtml(it.id)}">${escHtml(t(it.text, it.params || {}))}</li>`).join('')}</ul>
+        ${risky && !readOnly ? `<div class="plugin-cfg-warn">${escHtml(t('Trusted code has the same power as VibeSpace itself. There is no undo beyond disabling it.'))}</div>` : ''}
+        ${trust?.trusted ? `<div class="plugin-cfg-hint">${escHtml(t('Trusted since {when}', { when: new Date(trust.trustedAt).toLocaleString() }))}</div>` : ''}
+        <div class="dialog-actions plugin-consent-actions"></div>`;
+      const actions = body.querySelector('.plugin-consent-actions');
+      const cancel = document.createElement('button');
+      cancel.className = 'mounts-btn'; cancel.textContent = readOnly ? t('Close') : t('Cancel');
+      cancel.onclick = () => { decided = true; close(); resolve(false); };
+      actions.appendChild(cancel);
+      if (!readOnly) {
+        const okb = document.createElement('button');
+        okb.className = 'mounts-btn plugin-consent-accept'; okb.textContent = t('Enable (trusted)');
+        okb.onclick = () => { decided = true; close(); resolve(true); };
+        actions.appendChild(okb);
+      }
+    });
+  },
+
+  /** Install dialog (Plugin Ph4): path / git / .vsp upload / GitHub release →
+   *  POST /api/plugins/install. Errors reach the user verbatim (inline + toast). */
+  _pluginInstallDialog(onDone) {
+    const { body, close } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true });
+    const SOURCES = [
+      { value: 'path', label: t('Local folder path'), placeholder: '/path/to/plugin (holds vibespace-plugin.json)' },
+      { value: 'git', label: t('Git repository URL'), placeholder: 'https://github.com/owner/plugin.git#main' },
+      { value: 'github-release', label: t('GitHub release (owner/repo[@tag])'), placeholder: 'owner/repo@v1.2.0' },
+      { value: 'zip', label: t('Upload .vsp package'), placeholder: '' },
+    ];
+    body.innerHTML = `
+      <label class="plugin-install-row"><span>${escHtml(t('Source'))}</span><select class="plugin-install-source">${SOURCES.map((s) => `<option value="${s.value}">${escHtml(s.label)}</option>`).join('')}</select></label>
+      <label class="plugin-install-row plugin-install-value-row"><span>${escHtml(t('Location'))}</span><input type="text" class="plugin-install-value" spellcheck="false"></label>
+      <label class="plugin-install-row plugin-install-file-row hidden"><span>${escHtml(t('File'))}</span><input type="file" class="plugin-install-file" accept=".vsp,.zip"></label>
+      <div class="plugin-cfg-hint">${escHtml(t('The package is validated before it is placed under data/plugins/<id>/. Plugins that ask for capabilities beyond the sandbox are enabled only after you review them.'))}</div>
+      <div class="plugin-detail plugin-cfg-warn plugin-install-error hidden"></div>
+      <div class="dialog-actions"><button class="mounts-btn plugin-install-cancel">${escHtml(t('Cancel'))}</button><button class="mounts-btn plugin-install-go">${escHtml(t('Install'))}</button></div>`;
+    const srcSel = body.querySelector('.plugin-install-source'), val = body.querySelector('.plugin-install-value'), fileRow = body.querySelector('.plugin-install-file-row'), valRow = body.querySelector('.plugin-install-value-row'), fileIn = body.querySelector('.plugin-install-file'), errEl = body.querySelector('.plugin-install-error'), go = body.querySelector('.plugin-install-go');
+    const sync = () => { const s = SOURCES.find((x) => x.value === srcSel.value); val.placeholder = s?.placeholder || ''; fileRow.classList.toggle('hidden', srcSel.value !== 'zip'); valRow.classList.toggle('hidden', srcSel.value === 'zip'); };
+    srcSel.onchange = sync; sync();
+    body.querySelector('.plugin-install-cancel').onclick = () => close();
+    const fail = (msg) => { errEl.textContent = msg; errEl.classList.remove('hidden'); showToast(msg, { type: 'error' }); go.disabled = false; go.textContent = t('Install'); };
+    go.onclick = async () => {
+      errEl.classList.add('hidden'); go.disabled = true; go.textContent = t('Installing…');
+      try {
+        let res;
+        if (srcSel.value === 'zip') {
+          const f = fileIn.files?.[0];
+          if (!f) return fail(t('Choose a .vsp file first'));
+          const fd = new FormData(); fd.append('source', 'zip'); fd.append('value', f.name); fd.append('file', f, f.name);
+          const r = await fetch('/api/plugins/install', { method: 'POST', body: fd });
+          res = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        } else {
+          const v = val.value.trim();
+          if (!v) return fail(t('Enter a location first'));
+          res = await fetchJson('/api/plugins/install', { method: 'POST', body: JSON.stringify({ source: srcSel.value, value: v }) });
+        }
+        if (!res || res.error) return fail(res?.error || t('Install failed'));
+        showToast(t('Installed {id} {version}', { id: res.plugin?.id || '', version: res.plugin?.version || '' }) + (res.replaced ? ' · ' + t('previous copy moved to trash') : ''));
+        for (const w of res.warnings || []) showToast(w, { type: 'warn' });
+        close(); onDone?.();
+      } catch (e) { fail(e.message); }
+    };
+    setTimeout(() => val.focus(), 0);
   },
   });
 }

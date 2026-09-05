@@ -729,9 +729,21 @@ class HostManager {
   // registered in the REMOTE's own CLI configs, and how many keeper session
   // files exist — plus explicit install/refresh + remove.
 
-  /** The agent-tool set shipped to remotes (same list the per-spawn
-   *  distribution in ws-handler uses — keep in sync). */
+  /** The STATIC agent-tool set shipped to remotes. Readers use agentTools()
+   *  (below), which appends the plugin-generated shims — the per-spawn
+   *  distribution in ws-create, agentToolsStatus/installAgentTools here. */
   static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+  /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
+   *  provider returning the `vibespace-tool-<plugin>-<name>` files it
+   *  generates right now, so they ship to ssh hosts and dial devices with the
+   *  core tools (docs/plugins.md). Default = none (no loader = no shims). */
+  static extraAgentTools = () => [];
+  /** THE ship list: static tools + live plugin shims (deduped, static first). */
+  static agentTools() {
+    let extra = [];
+    try { extra = (HostManager.extraAgentTools() || []).filter((n) => typeof n === 'string' && /^vibespace-tool-[a-z0-9.-]+$/.test(n)); } catch { extra = []; }
+    return [...HostManager.AGENT_TOOLS, ...extra.filter((n) => !HostManager.AGENT_TOOLS.includes(n))];
+  }
 
   /** Integration state ON THE HOST in one ssh round trip: per-tool presence +
    *  sha256 (content compare beats mtime — the local hook/status tools are
@@ -741,7 +753,7 @@ class HostManager {
   async agentToolsStatus(id) {
     const h = this.get(id);
     const probe = REMOTE_PRELUDE
-      + `for f in ${HostManager.AGENT_TOOLS.join(' ')}; do `
+      + `for f in ${HostManager.agentTools().join(' ')}; do `
       + 'p="$HOME/.vibespace/bin/$f"; if [ -f "$p" ]; then s=$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p" 2>/dev/null) | cut -d" " -f1 ); echo "T|$f|$s"; else echo "T|$f|"; fi; done; '
       + 'command -v node >/dev/null 2>&1 && echo "NODE|yes" || echo "NODE|no"; '
       + 'grep -q vibespace-hook.mjs "$HOME/.claude/settings.json" 2>/dev/null && echo "HOOK|claude|yes" || echo "HOOK|claude|no"; '
@@ -764,7 +776,7 @@ class HostManager {
    *  no token here, tokens stay strictly per-session). */
   installAgentTools(id, toolDir) {
     const h = this.get(id);
-    const present = HostManager.AGENT_TOOLS.filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
+    const present = HostManager.agentTools().filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });
     if (!present.length) throw new Error('no agent tools found locally');
     const { execFileSync } = require('child_process');
     const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
@@ -972,10 +984,12 @@ class HostManager {
    *  session spawn re-installs everything by design (per-spawn distribution). */
   async uninstallAgentTools(id) {
     const h = this.get(id);
-    const rms = HostManager.AGENT_TOOLS.map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
+    const rms = HostManager.agentTools().map((n) => `"$HOME/.vibespace/bin/${n}"`).join(' ');
+    // plugin shims of plugins disabled/uninstalled since the last ship are not
+    // in the live list any more — the glob sweeps every generated shim
     const cmd = REMOTE_PRELUDE
       + nodeFinder() + 'if [ -n "$VS_NODE" ] && [ -f "$HOME/.vibespace/bin/vibespace-hook-register.mjs" ]; then "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --uninstall 2>/dev/null || true; fi; '
-      + `rm -f ${rms}; echo VS-REMOVED`;
+      + `rm -f ${rms} "$HOME"/.vibespace/bin/vibespace-tool-* 2>/dev/null; echo VS-REMOVED`;
     const out = String(await this._ssh(h, cmd, { timeoutMs: 15000 }));
     if (!out.includes('VS-REMOVED')) throw new Error('unexpected response');
     return { ok: true };

@@ -2,12 +2,15 @@
   "id": "example.hello",
   "version": "1.0.0",
   "engines": { "vibespace": "2.369.24" },
+  "label": "Hello",
   "description": "Hello plugin — the smallest complete VibeSpace plugin: one iframe window, one proxied route, one agent tool. Copy this folder to data/plugins/example.hello and enable it in ⚙ → Plugins (or POST /api/plugins/manifests/example.hello/enabled).",
   "client": "iframe",
   "server": true,
   "contributes": {
     "windows": [{ "id": "hello", "title": "Hello Plugin", "entry": "index.html" }],
     "routes": true,
+    "settings": [{ "key": "greeting", "type": "string", "default": "hello", "label": "Greeting word", "description": "Used by the hello tool (example of a plugin-contributed setting)." }],
+    "themes": [{ "id": "mint", "label": "Hello Mint", "file": "themes/mint.json" }],
     "agentTools": [{ "name": "hello", "description": "Return a greeting from the hello plugin's own process (example of a plugin-contributed agent tool).", "args": { "type": "object", "properties": { "name": { "type": "string", "description": "who to greet" } } } }]
   },
   "capabilities": { "server": { "fs": { "read": [], "write": [] }, "net": [] } }

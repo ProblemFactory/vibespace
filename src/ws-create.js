@@ -688,7 +688,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // (claude's GUI-editor check) but shadowing a real vscode `code`
             // on the host's PATH would hang any `code …` shell command.
             const names = integrationOn
-              ? [...require('./hosts').HostManager.AGENT_TOOLS, 'code']
+              ? [...require('./hosts').HostManager.agentTools(), 'code'] // static tools + plugin shims (Ph4)
               : [
                 ...(sessionMode === 'chat' ? ['vibespace-remote-keeper'] : []),
                 // A remote Add-subscription helper terminal needs this one
@@ -787,7 +787,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               await dm.fsMkdir(bin);
               const toolDir = AGENT_BIN_DIR;
               const names = integrationOn
-                ? require('./hosts').HostManager.AGENT_TOOLS
+                ? require('./hosts').HostManager.agentTools() // static tools + plugin shims (Ph4)
                 : ['vibespace-claude-subscription-login.mjs']; // PR #23: the login helper ships alone when Integration is OFF
               for (const n of names) {
                 try {

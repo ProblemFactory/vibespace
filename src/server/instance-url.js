@@ -79,7 +79,15 @@ function create({ dataDir, plugins, port, serverSetting, authEnabled = () => tru
     };
   }
 
-  const emit = () => { try { broadcast({ type: 'instance-url', status: status() }); } catch { } };
+  // In-process listeners (2.369.30): the plugin loader regenerates its agent-
+  // tool shims when the effective address changes — they bake the URL as the
+  // call-back fallback. Fired on every emit (publish/unpublish/restore/error).
+  const listeners = new Set();
+  const onChange = (fn) => { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); };
+  const emit = () => {
+    try { broadcast({ type: 'instance-url', status: status() }); } catch { }
+    for (const fn of listeners) { try { fn(status()); } catch (e) { log('[instance-url] listener failed: ' + e.message); } }
+  };
 
   /** Publish this VibeSpace's own port through the frp relay. */
   async function doPublish({ sub } = {}) {
@@ -162,7 +170,7 @@ function create({ dataDir, plugins, port, serverSetting, authEnabled = () => tru
     });
   }
 
-  return { url, effective, status, publish, ensurePublished, unpublish, restore, stop, registerRoutes, PROXY_NAME };
+  return { url, effective, status, publish, ensurePublished, unpublish, restore, stop, registerRoutes, onChange, PROXY_NAME };
 }
 
 module.exports = { create, PROXY_NAME };

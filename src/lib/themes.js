@@ -51,6 +51,7 @@ const BUILTIN_THEMES = new Set(Object.keys(THEMES));
 class ThemeManager {
   constructor() {
     this._customStyleEls = {};
+    this._pluginThemeLabels = {};
     this._pendingTheme = localStorage.getItem('theme') || 'dark';
     // Apply only if it's a built-in theme; custom themes need async load first
     if (BUILTIN_THEMES.has(this._pendingTheme)) {
@@ -67,6 +68,11 @@ class ThemeManager {
   applyPendingTheme() {
     if (this._pendingTheme && THEMES[this._pendingTheme]) {
       this.apply(this._pendingTheme);
+    } else if (this._pendingTheme && this._pendingTheme.startsWith('plugin-')) {
+      // A plugin theme registers later (plugin-client, after the manifests
+      // load) — keep waiting; falling back here would OVERWRITE the stored
+      // choice with 'dark' before the plugin ever got a chance to apply it.
+      return;
     } else if (this._pendingTheme && !THEMES[this._pendingTheme]) {
       // Custom theme was deleted or never existed — fall back
       this.apply('dark');
@@ -102,12 +108,42 @@ class ThemeManager {
     if (this.current === key) this.apply('dark');
   }
 
+  // ── PLUGIN THEMES (Plugin Ph4, 2.369.30 — docs/plugins.md): a plugin's
+  // contributes.themes[] register under `plugin-<id>-<themeId>` — a namespace
+  // APART from `custom-` so _applyCustomThemesFromServer's "unregister every
+  // custom-* the server no longer lists" sweep never touches them. Same JSON
+  // shape and the same key/value sanitizer as custom themes (themes reach
+  // every client). Re-registering an ACTIVE key (plugin update) re-applies. ──
+  registerPluginTheme(key, label, cssVars, terminalColors) {
+    if (typeof key !== 'string' || !key.startsWith('plugin-')) throw new Error('plugin theme keys start with "plugin-"');
+    THEMES[key] = { terminal: terminalColors || THEMES.dark.terminal };
+    this._pluginThemeLabels[key] = String(label || key);
+    this._injectStyle(key, 'plugin-theme-' + key.replace(/[^a-zA-Z0-9_-]/g, '-'), cssVars || {});
+    if (this._pendingTheme === key) { this._pendingTheme = null; this.apply(key); }
+    else if (this.current === key) this.apply(key);
+  }
+
+  unregisterPluginTheme(key) {
+    delete THEMES[key];
+    delete this._pluginThemeLabels[key];
+    this._removeStyle(key);
+    if (this.current === key) this.apply('dark');
+  }
+
+  /** [{ key, label }] of every registered plugin theme (theme picker group). */
+  getPluginThemes() {
+    return Object.keys(THEMES).filter((k) => k.startsWith('plugin-')).map((k) => ({ key: k, label: this._pluginThemeLabels[k] || k }));
+  }
+
   _injectCustomCSS(name, cssVars) {
-    const key = 'custom-' + name;
+    this._injectStyle('custom-' + name, 'custom-theme-' + name.replace(/\s+/g, '-'), cssVars);
+  }
+
+  _injectStyle(key, elId, cssVars) {
     let el = this._customStyleEls[key];
     if (!el) {
       el = document.createElement('style');
-      el.id = 'custom-theme-' + name.replace(/\s+/g, '-');
+      el.id = elId;
       document.head.appendChild(el);
       this._customStyleEls[key] = el;
     }
@@ -123,8 +159,9 @@ class ThemeManager {
     el.textContent = `[data-theme="${key}"] {\n${rules}\n}`;
   }
 
-  _removeCustomCSS(name) {
-    const key = 'custom-' + name;
+  _removeCustomCSS(name) { this._removeStyle('custom-' + name); }
+
+  _removeStyle(key) {
     const el = this._customStyleEls[key];
     if (el) { el.remove(); delete this._customStyleEls[key]; }
   }

@@ -2462,6 +2462,12 @@ class App {
       const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '── Custom ──'; sel.appendChild(sep);
       for (const key of customKeys) sel.appendChild(opt(key, key.slice(7)));
     }
+    // plugin-contributed themes (Plugin Ph4) — labelled "<label> (plugin)" by the plugin client
+    const pluginThemes = this.themeManager.getPluginThemes?.() || [];
+    if (pluginThemes.length) {
+      const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '── Plugins ──'; sel.appendChild(sep);
+      for (const th of pluginThemes) sel.appendChild(opt(th.key, th.label));
+    }
   }
 
   _refreshThemeDropdown() {

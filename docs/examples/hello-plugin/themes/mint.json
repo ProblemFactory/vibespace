@@ -1,0 +1,4 @@
+{
+  "css": { "--accent": "#2fbf9f", "--accent-hover": "#5fd6ba", "--bg": "#0f1a17", "--bg-secondary": "#14231f", "--border": "#20362f" },
+  "terminal": { "background": "#0f1a17", "foreground": "#d8f3e8", "cursor": "#5fd6ba" }
+}

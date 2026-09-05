@@ -18,7 +18,7 @@ const { mk } = require('./lazy.js');
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
   hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
-  ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions }) {
+  ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null }) {
   const portForwards = mk(getPortForwards);
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
@@ -277,14 +277,19 @@ app.post('/api/plugins/:id/config', (req, res) => {
   try { res.json(plugins.setConfig(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// PLUGIN LOADER (Ph2, 2.369.24): manifest plugins under data/plugins — iframe
-// assets, forked server processes, agent-tool shims. agentAuth = the vsst_
-// bearer → live session (the tool route is cookie-exempt under /api/agent/).
+// PLUGIN LOADER (Ph2, 2.369.24; Ph4 2.369.30): manifest plugins under
+// data/plugins — iframe assets, trusted client modules, forked server
+// processes under node --permission, agent-tool shims, install sources.
+// agentAuth = the vsst_ bearer → live session (the tool route is cookie-exempt
+// under /api/agent/). instanceUrl = the ONLY source of "this instance's public
+// address" the shims may bake in (instance-url.js); telemetry = install /
+// enable / crash events into the local ledger.
 let hostVersion = null; try { hostVersion = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8')).version; } catch { }
 const { agentEnv } = require('../ws-handler'); // the ONE sanitized-env builder every spawn uses (spawn-hygiene law)
 const pluginLoader = require('./plugin-loader.js').create({
-  rootDir, app, hostVersion, agentEnv, log: console,
+  rootDir, app, hostVersion, agentEnv, log: console, instanceUrl,
   broadcast: (m) => bcastAll(m),
+  telemetry: (ev) => { try { getTelemetry?.()?.record(ev); } catch { } },
   agentAuth: (req) => {
     const tok = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!tok.startsWith('vsst_') || !activeSessions) return null;
@@ -293,6 +298,12 @@ const pluginLoader = require('./plugin-loader.js').create({
   },
 });
 process.on('exit', () => { try { pluginLoader.shutdown(); } catch { } });
+// Plugin tool shims ship to ssh hosts / dial devices with the core agent tools:
+// hosts.js agentTools() = the static list + whatever the loader generates now.
+require('../hosts').HostManager.extraAgentTools = () => pluginLoader.shimNames();
+// The shims bake this instance's public URL as their fallback call-back
+// address — regenerate them whenever the mapping changes (publish/unpublish).
+try { instanceUrl?.onChange?.(() => { try { pluginLoader.syncShims(); } catch (e) { console.warn('[plugins] shim refresh after instance-url change failed:', e.message); } }); } catch { }
 
 const { MountManager } = require('../mounts');
 const mounts = new MountManager({

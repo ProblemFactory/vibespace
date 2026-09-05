@@ -29,7 +29,7 @@ ok(!validateManifest({ ...base, contributes: { windows: [{ id: 'x', title: 'X', 
 ok(!validateManifest({ ...base, server: false }).ok && /needs server: true/.test(validateManifest({ ...base, server: false }).errors.join()), 'agentTools/routes need server: true');
 ok(!validateManifest({ ...base, client: 'none' }).ok, 'iframe windows need client: iframe');
 ok(validateManifest({ ...base, icon: '<svg onload="x()"></svg>' }).manifest.icon === undefined && validateManifest({ ...base, icon: '<svg viewBox="0 0 1 1"/>' }).manifest.icon, 'icons: inline svg only, handlers/scripts rejected (kept as a warning, not a fatal)');
-ok(validateManifest({ ...base, contributes: { ...base.contributes, settings: { a: 1 } } }).warnings.some((w) => /reserved/.test(w)), 'reserved contributions (settings/themes/…) warn, never fail');
+ok(validateManifest({ ...base, contributes: { ...base.contributes, keybindings: [{ a: 1 }] } }).warnings.some((w) => /reserved/.test(w)) && !validateManifest({ ...base, contributes: { ...base.contributes, settings: { a: 1 } } }).ok, 'reserved contributions (keybindings/…) warn, never fail; settings is real since Ph4 (a non-array is an error)');
 ok(compareVersions('2.369.24', '2.369.9') > 0 && compareVersions('2.369.24', '2.370.0') < 0 && compareVersions('1.0.0', '1.0.0') === 0, 'compareVersions is numeric per segment');
 
 // ── ② loader against the shipped example plugin ──

@@ -1577,7 +1577,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, 
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
-  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(), activeSessions,
+  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(), activeSessions, getTelemetry: () => { try { return telemetry; } catch { return null; } },
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
@@ -1675,8 +1675,7 @@ const { decideCliRefresh } = require('./src/account-pool-auto.js');
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
-app.locals.harnessAvailability = harnessAvailability; // S8: /api/home tells the New Session picker which ACP harnesses are installed here
-app.get('/api/available-models', (req, res) => {
+app.locals.harnessAvailability = harnessAvailability; app.get('/api/available-models', (req, res) => { // S8: /api/home reads harnessAvailability (installed ACP harnesses for the picker)
   refreshCodexModels(); // mtime-guarded local read — stays current despite old-CLI cache rewrites
   res.json(AVAILABLE_MODELS);
 });
