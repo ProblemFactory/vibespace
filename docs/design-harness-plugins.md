@@ -150,7 +150,7 @@ src/plugins.js = tailscale/frp 两个硬编码 host 守护进程的管理器（`
 | 期 | 内容 | 依赖 |
 |---|---|---|
 | Ph1 | 核心贡献点注册表化（窗口类型/rail 面板/查看器/命令+菜单 when/状态芯片/键位/ws default）——与 §2 S1/S7 同批，无 loader | — |
-| Ph2 | manifest + loader：声明式 + iframe UI + 独立进程服务端插件 + agentTools shim + 安装/卸载 UI；tailscale/frp 迁入 | Ph1 |
+| Ph2 ✅2.369.24 (最小: manifest/iframe/独立进程/agentTools shim; 待: 受信层/设置主题贡献/安装UI/能力执行) | manifest + loader：声明式 + iframe UI + 独立进程服务端插件 + agentTools shim + 安装/卸载 UI；tailscale/frp 迁入 | Ph1 |
 | Ph3 | harness 插件：ACP/Gemini 作为首个外部 harness 插件（= §2 S8 的交付形态） | S1–S6, Ph2 |
 | Ph4 | 受信客户端模块 + 打包/安装源 + 能力清单 UI | Ph2 |
 

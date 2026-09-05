@@ -1,4 +1,5 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
+import { installPluginClient, PLUGIN_ICON } from './plugin-client.js';
 import { BUILD_VERSION } from './build-version.js';
 import { track } from './telemetry-client.js';
 import { ThemeEditor } from './theme-editor.js';
@@ -328,6 +329,7 @@ class App {
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
     initStateSync(this.ws);
     this.stage.init(); // stage SyncStore — must follow initStateSync (see constructor note)
+    installPluginClient(this); // Plugin Ph2: contributed iframe windows register as window types (needs ws for live updates)
 
     // Restore layout after WebSocket is connected (needs active sessions)
     this.ready = new Promise(resolve => {
@@ -1116,6 +1118,9 @@ class App {
       }).catch(() => {});
       menu.append(upd);
     }
+    // Plugin-contributed windows (Ph2): one row per enabled iframe window
+    const pluginWins = this.pluginClient?.contributedWindows?.() || [];
+    if (pluginWins.length) menu.append(sep(), ...pluginWins.map((w) => item(PLUGIN_ICON, w.title, () => this.pluginClient.open(w.pluginId, w.windowId))));
     menu.append(sep(), item(I.tour, t('Welcome tour'), () => this._showOnboarding(true)));
     if (this._authEnabled) {
       menu.append(item(I.out, t('Sign out'), async () => {

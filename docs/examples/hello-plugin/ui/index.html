@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Hello Plugin</title>
+<style>body{font:13px system-ui,sans-serif;margin:16px;color:#ddd;background:#1b1b1f}button{padding:6px 10px;margin-right:6px}.dim{opacity:.7}</style>
+</head><body>
+<h3>Hello Plugin</h3>
+<p class="dim">This page runs inside a <b>sandboxed iframe</b> (opaque origin). It talks to VibeSpace only through the postMessage bridge and to its own server process through <code>/api/plugins/example.hello/x/…</code>.</p>
+<p>Bridge: <span id="st">connecting…</span></p>
+<p>Clicks this session (kept in host localStorage, namespaced): <b id="n">?</b></p>
+<button id="b1">Click me</button><button id="b2">Toast from the plugin</button><button id="b3">Ask my server (/x/ping)</button>
+<pre id="out" class="dim"></pre>
+<script>
+(function () {
+  const host = window.parent; let n = 0;
+  const send = (m) => host.postMessage(m, '*');
+  const $ = (id) => document.getElementById(id);
+  window.addEventListener('message', (e) => {
+    const d = e.data || {};
+    if (d.vsp === 'init') { $('st').textContent = 'ready (api ' + d.api + ', ' + (d.dark ? 'dark' : 'light') + ' theme)'; send({ vsp: 'storage', op: 'get', k: 'clicks' }); }
+    if (d.vsp === 'storage' && d.k === 'clicks') { n = parseInt(d.v || '0', 10) || 0; $('n').textContent = n; }
+  });
+  $('b1').onclick = () => { n++; $('n').textContent = n; send({ vsp: 'storage', op: 'set', k: 'clicks', v: String(n) }); };
+  $('b2').onclick = () => send({ vsp: 'notify', text: 'Hello from the plugin iframe 👋' });
+  $('b3').onclick = async () => { try { const r = await fetch('/api/plugins/example.hello/x/ping'); $('out').textContent = await r.text(); } catch (e) { $('out').textContent = 'fetch failed: ' + e.message + ' (opaque-origin iframes cannot call the host API directly — route through the bridge or make the plugin server expose what the page needs)'; } };
+  send({ vsp: 'ready' });
+})();
+</script>
+</body></html>

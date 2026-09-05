@@ -1565,7 +1565,7 @@ const { exitAgentSession, remoteFs, sshKey,
 });
 const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages,
+const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN,
@@ -1576,7 +1576,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
-  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(),
+  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(), activeSessions,
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');

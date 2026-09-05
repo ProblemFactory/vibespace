@@ -18,7 +18,7 @@ const { mk } = require('./lazy.js');
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
   hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
-  ensureAgentdOnHost, getPortForwards, onMountsUpdated }) {
+  ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions }) {
   const portForwards = mk(getPortForwards);
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
@@ -277,6 +277,23 @@ app.post('/api/plugins/:id/config', (req, res) => {
   try { res.json(plugins.setConfig(req.params.id, req.body || {})); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// PLUGIN LOADER (Ph2, 2.369.24): manifest plugins under data/plugins — iframe
+// assets, forked server processes, agent-tool shims. agentAuth = the vsst_
+// bearer → live session (the tool route is cookie-exempt under /api/agent/).
+let hostVersion = null; try { hostVersion = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8')).version; } catch { }
+const { agentEnv } = require('../ws-handler'); // the ONE sanitized-env builder every spawn uses (spawn-hygiene law)
+const pluginLoader = require('./plugin-loader.js').create({
+  rootDir, app, hostVersion, agentEnv, log: console,
+  broadcast: (m) => bcastAll(m),
+  agentAuth: (req) => {
+    const tok = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    if (!tok.startsWith('vsst_') || !activeSessions) return null;
+    for (const [id, s] of activeSessions) if (s.agentToken === tok) return { sessionId: id };
+    return null;
+  },
+});
+process.on('exit', () => { try { pluginLoader.shutdown(); } catch { } });
+
 const { MountManager } = require('../mounts');
 const mounts = new MountManager({
   dataDir: path.join(rootDir, 'data'),
@@ -522,6 +539,6 @@ function createSessionMessages(session, sessionId) {
     : new SessionMessages(session, sessionId, { buffersDir: BUFFERS_DIR, permissionModes: PERMISSION_MODES });
 }
 
-  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages };
+  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader };
 }
 module.exports = { create };

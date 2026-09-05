@@ -165,6 +165,7 @@ for (const [file, s] of Object.entries(src)) {
     const close = matchBrace(s, open);
     const body = s.slice(open, close + 1);
     const type = body.match(/\btype:\s*'([a-z-]+)'/)?.[1];
+    if (!type && !/\btype:\s*'/.test(body)) continue; // DYNAMIC registration (plugin-contributed kinds, src/lib/plugin-client.js) — not a core kind
     const actions = [];
     const single = body.match(/\baction:\s*'([A-Za-z]+)'/)?.[1];
     if (single) actions.push(single);

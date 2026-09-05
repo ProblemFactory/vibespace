@@ -102,6 +102,8 @@ Chat mode:
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 
 ```
+src/plugin-manifest.js — PURE plugin manifest validator (Plugin Ph2, 2.369.24): id=<publisher>.<name>=folder, semver, engines.vibespace min, client tier, server flag, contributes windows/agentTools/routes, declared capabilities
+src/server/plugin-loader.js — PLUGIN LOADER (Ph2): data/plugins/<id>/ manifests → sandboxed iframe assets at /plugins/<id>/ (opaque-origin CSP), forked server.js processes (IPC v1: route/tool/shutdown, crash backoff, parked after 5/10min), /api/plugins/<id>/x/* proxy, generated agent-tool shims data/bin/vibespace-tool-<id>-<name> → /api/agent/plugin-tool/ (bearer-validated), data/plugin-registry.json, broadcasts plugins-manifests-updated. Example: docs/examples/hello-plugin
 server.js — BOOTSTRAP + WIRING ONLY (~1910 lines since the 2.325.0 拆分; the arch suite RATCHETS it ≤2100). ⇒ kb-file-structure.md
 src/ws-create.js       — the ws 'create' case family (1633 lines, 拆分P2): new/resume/fork + local/ssh/dial/daemon-pipe spawn + account resolution + breakers + writer sweep + adoption; body wrapped `do{}while(0)` so case-level `break;` semantics survived the move. Deps arrive via the VALIDATED WS_CTX_CONTRACT (ws-handler.js) — missing key = loud boot error; scripts/test-ws-contract.mjs pins contract⇄destructures⇄server.js call site.
 src/session-schema.js  — PURE registry of all ~47 live-session `_fields` (owner module + persistence home + note, 拆分P3); scripts/test-session-schema.mjs fails any unregistered new field write and any dead row. New session state ⇒ add the row FIRST.
@@ -212,6 +214,7 @@ src/
     themes.js          — THEMES constant + ThemeManager class. **extractThemeValues probes inside a data-theme="dark" WRAPPER (B-b2d6, 2.268.9): custom properties inherit and only dark defines every var — a bare probe read live-preview inline overrides (and an applied custom theme's stylesheet values) back as a partially-defined theme's "defaults", and Save froze them into new themes. Never regress to a single-layer probe.**
     ws.js              — WsManager (WebSocket with reconnect)
     window.js          — WindowManager (drag/resize/snap/grid)
+    plugin-client.js   — PLUGIN CLIENT (Ph2): fetches /api/plugins/manifests, registers every enabled iframe plugin's windows as window types (sandboxed iframe + postMessage bridge ready/init/storage/notify/close), ⚙ menu rows
     window-types.js    — WINDOW-TYPE REGISTRY (Plugin Ph1, 2.369.19): registerWindowType({type, icon, replay}) — replayOpenSpec dispatches through it, unknown action = loud warn + telemetry 'openspec-unknown'; TYPE_ICONS is a view; core registers its 14 kinds where they live (scripts/test-window-types.mjs pins the sets)
     tab-group.js       — Tab grouping mixin (chain model, icon drag, tab bar, drag-out)
     terminal.js        — TerminalSession (xterm.js wrapper, per-terminal settings)
