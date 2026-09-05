@@ -21,6 +21,7 @@ module.exports = {
     transcriptDirs: ['~/.codex/sessions'],
     conversationIdField: 'backendSessionId',
   },
+  quota: require('./codex-quota.js'),    // QuotaSignalSource (S4)
   settingsPrefix: 'codex',
   inject: 'wrapper',            // the wrapper injects teaching via thread/inject_items (app-server ignores hook additionalContext)
 };

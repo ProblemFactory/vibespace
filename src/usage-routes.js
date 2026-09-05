@@ -11,125 +11,15 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-
-// ── `claude -p /usage` output parser (2.327.0, user-verified channel) ──
-// The CLI's own /usage panel is the ONLY quota source that carries ALL THREE
-// buckets (5h + 7d + model-scoped weeklies) without a live chat session and
-// without this server touching the vendor API — the CLI makes the fetch as
-// the first party, exactly like the user typing /usage. Text format pinned by
-// scripts/test-cli-usage-parse.mjs against a captured real output; any parse
-// failure returns null and the ladder falls through to the token read.
-const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
-function zonedEpoch(y, mon, d, h, min, tz) {
-  // epoch for wall-clock (y,mon,d,h,min) IN tz: guess as UTC, then correct by
-  // the zone's offset at that instant (second pass absorbs DST boundaries)
-  let t = Date.UTC(y, mon, d, h, min);
-  for (let i = 0; i < 2; i++) {
-    try {
-      const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false })
-        .formatToParts(new Date(t)).map((x) => [x.type, x.value]));
-      const asIf = Date.UTC(+p.year, +p.month - 1, +p.day, p.hour === '24' ? 0 : +p.hour, +p.minute);
-      t += Date.UTC(y, mon, d, h, min) - asIf;
-    } catch { return null; }
-  }
-  return Math.floor(t / 1000);
-}
-function _parseCliResetTime(when, tz, nowMs) {
-  // "Aug 12, 12:20am" / "Aug 13, 2am"
-  const m = /^(\w{3})\w*\s+(\d{1,2}),\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/i.exec(String(when).trim());
-  if (!m || !(m[1].toLowerCase() in MONTHS)) return null;
-  const mon = MONTHS[m[1].toLowerCase()];
-  let h = +m[3] % 12; if (/pm/i.test(m[5])) h += 12;
-  const now = new Date(nowMs || Date.now());
-  let y = now.getUTCFullYear();
-  let t = zonedEpoch(y, mon, +m[2], h, +(m[4] || 0), tz);
-  if (t == null) return null;
-  // resets are always in the future ≤ ~8 days out; a January reset read in
-  // late December belongs to NEXT year
-  if (t * 1000 < (nowMs || Date.now()) - 6 * 3600e3) t = zonedEpoch(y + 1, mon, +m[2], h, +(m[4] || 0), tz);
-  return t;
-}
-function parseCliUsageText(text, nowMs) {
-  const s = String(text || '');
-  const line = (re) => re.exec(s);
-  const bucket = (m) => m && {
-    utilization: Math.min(1, Math.max(0, (+m[1]) / 100)),
-    ...(m[2] && m[3] ? { resetsAt: _parseCliResetTime(m[2], m[3], nowMs) || undefined } : {}),
-  };
-  const fiveHour = bucket(line(/^Current session:\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/m));
-  const sevenDay = bucket(line(/^Current week \(all models\):\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/m));
-  if (!fiveHour && !sevenDay) return null; // API-key mode / format drift — not a subscription usage panel
-  const scopedWeekly = [];
-  for (const m of s.matchAll(/^Current week \(([^)]+)\):\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/gm)) {
-    if (/^all models$/i.test(m[1])) continue;
-    scopedWeekly.push({ name: m[1], utilization: Math.min(1, Math.max(0, (+m[2]) / 100)),
-      ...(m[3] && m[4] ? { resetsAt: _parseCliResetTime(m[3], m[4], nowMs) || undefined } : {}) });
-  }
-  return { fiveHour: fiveHour || undefined, sevenDay: sevenDay || undefined, scopedWeekly, fetchedAt: nowMs || Date.now() };
-}
-
-// Module-scope (no closure deps) so tests can import it directly.
-function normalizeCodexRateLimit(raw, fetchedAt = Date.now()) {
-  if (!raw || typeof raw !== 'object') return null;
-  // Windows are classified by their LENGTH, never by primary/secondary
-  // position (P0 fix, design-backend-parity.md §0): codex 0.149.x switched to
-  // a SINGLE-window shape where `primary` IS the weekly window (10080min,
-  // secondary null) — the old positional mapping labeled weekly usage as the
-  // 5h bucket on every current reading. Field names also differ per channel:
-  // rollout snake_case `window_minutes`, live app-server push
-  // `windowDurationMins` — read all three.
-  const toWindow = (entry, fallbackWindowMinutes) => {
-    if (!entry || typeof entry !== 'object') return null;
-    const usedPercent = Number(entry.used_percent ?? entry.usedPercent);
-    const normalizedPercent = Number.isFinite(usedPercent)
-      ? Math.max(0, Math.min(100, usedPercent))
-      : 0;
-    return {
-      utilization: normalizedPercent / 100,
-      usedPercent: normalizedPercent,
-      windowMinutes: Number(entry.window_minutes ?? entry.windowMinutes ?? entry.windowDurationMins ?? entry.window_duration_mins) || fallbackWindowMinutes || 0,
-      resetsAt: Number(entry.resets_at ?? entry.resetsAt) || 0,
-    };
-  };
-
-  let fiveHour = null, sevenDay = null;
-  const bucketOfPos = {}; // raw position → the bucket it classified into
-  for (const [pos, entry, fallback] of [['primary', raw.primary, 300], ['secondary', raw.secondary, 10080]]) {
-    const w = toWindow(entry, fallback);
-    if (!w) continue;
-    // ≤ 8h = the burst window; anything longer = the weekly lane
-    if (w.windowMinutes && w.windowMinutes <= 480) { if (!fiveHour) { fiveHour = w; bucketOfPos[pos] = w; } }
-    else if (!sevenDay) { sevenDay = w; bucketOfPos[pos] = w; }
-  }
-  if (!fiveHour && !sevenDay) return null;
-
-  // Exhaustion markers used to be DROPPED here — they are the entire signal a
-  // pool auto-switch gates on (rate_limit_reached_type names WHICH raw window
-  // tripped; spend_control/credits are the monthly-cap lane).
-  const reached = raw.rate_limit_reached_type ?? raw.rateLimitReachedType ?? null;
-  const spendControl = raw.spend_control_reached ?? raw.spendControlReached ?? null;
-  const credits = raw.credits && typeof raw.credits === 'object' ? {
-    hasCredits: !!(raw.credits.has_credits ?? raw.credits.hasCredits),
-    unlimited: !!(raw.credits.unlimited),
-    balance: String(raw.credits.balance ?? ''),
-  } : null;
-  if (reached && bucketOfPos[reached]) {
-    const w = bucketOfPos[reached]; // tripped window reads as dead, whatever its %
-    w.utilization = 1; w.usedPercent = 100; w.status = 'limited';
-  }
-
-  return {
-    limitId: raw.limit_id || raw.limitId || 'codex',
-    limitName: raw.limit_name || raw.limitName || '',
-    planType: raw.plan_type || raw.planType || '',
-    fiveHour,
-    sevenDay,
-    rateLimitReachedType: reached,
-    spendControlReached: spendControl,
-    credits,
-    fetchedAt: Number(fetchedAt) || Date.now(),
-  };
-}
+// ── Quota READING parsers live in the harness registry (S4, docs/design-
+// harness-plugins.md §2.4): each harness's QuotaSignalSource.normalize is
+// the ONE normalizer for its reading shapes. The names below are the same
+// functions this file used to define (moved verbatim) — re-exported at the
+// bottom for current callers (tests, the engine) so nothing drifts.
+const harnesses = require('./harnesses');
+const claudeQuota = harnesses.get('claude').quota;
+const parseCliUsageText = claudeQuota.parseCliUsageText;      // `claude -p /usage` panel text
+const normalizeCodexRateLimit = harnesses.get('codex').quota.normalize; // codex rate_limits (rollout / live push / rateLimits/read)
 
 function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, CLAUDE_CMD }) {
 const https = require('https');
@@ -240,78 +130,9 @@ function refreshRateLimit() {
   _fetchOAuthUsage(token);
 }
 
-function _parseUsage(u) {
-  // Frontend expects utilization as a 0–1 fraction and resetsAt as unix
-  // seconds; the endpoint gives a 0–100 percent and an ISO timestamp.
-  const toWin = (w) => (w && typeof w === 'object') ? {
-    utilization: (typeof w.utilization === 'number' ? w.utilization : 0) / 100,
-    status: (typeof w.utilization === 'number' && w.utilization >= 100) ? 'limited' : 'allowed',
-    resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0,
-  } : { utilization: 0, status: 'unknown', resetsAt: 0 };
-  const fiveHour = toWin(u.five_hour);
-  const sevenDay = toWin(u.seven_day);
-  const scopedWeekly = [];
-  const haveScoped = new Set();
-  if (Array.isArray(u.limits)) {
-    for (const lim of u.limits) {
-      if (lim?.kind === 'weekly_scoped' && lim.scope?.model?.display_name) {
-        scopedWeekly.push({
-          name: lim.scope.model.display_name,
-          utilization: (typeof lim.percent === 'number' ? lim.percent : 0) / 100,
-          resetsAt: lim.resets_at ? Math.floor(Date.parse(lim.resets_at) / 1000) || 0 : 0,
-          severity: lim.severity || 'normal',
-        });
-        haveScoped.add(String(lim.scope.model.display_name).toLowerCase());
-      }
-    }
-  }
-  // NAMED scoped buckets too (2.305.0, inc-msof8i22): the REST payload can
-  // carry a model-scoped weekly as a top-level `seven_day_opus`-style field
-  // instead of (or in addition to) a `limits[]` entry. Reading only limits[]
-  // made the OPUS cap invisible to the pool's exhaustion test — it stayed on
-  // an account whose Opus was spent while a member still had headroom. Any
-  // object field with a utilization/percent AND a reset counts; array entries
-  // win on name collision.
-  for (const [k, v] of Object.entries(u)) {
-    if (!/^seven_day_./.test(k) || k === 'seven_day_oauth_apps') continue;
-    if (!v || typeof v !== 'object') continue;
-    const pctRaw = typeof v.utilization === 'number' ? v.utilization
-      : (typeof v.percent === 'number' ? v.percent : null);
-    if (pctRaw == null || !v.resets_at) continue;
-    const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    if (haveScoped.has(name.toLowerCase())) continue;
-    haveScoped.add(name.toLowerCase());
-    const util = pctRaw > 1 ? pctRaw / 100 : pctRaw;
-    scopedWeekly.push({
-      name, utilization: util,
-      resetsAt: v.resets_at ? Math.floor(Date.parse(v.resets_at) / 1000) || Number(v.resets_at) || 0 : 0,
-      severity: util >= 1 ? 'exceeded' : (v.severity || 'normal'),
-    });
-  }
-  // extra_usage → spend (B-87fe; guards mirror claude-swap oauth.py:419-441).
-  // used_credits/monthly_limit are cents; monthly_limit=null means unlimited
-  // (skip the limit, keep spend). All-or-nothing on the three core fields so a
-  // partial payload never renders a half-baked spend line.
-  let spend = null;
-  const eu = u.extra_usage;
-  if (eu && eu.is_enabled) {
-    const uc = eu.used_credits, ml = eu.monthly_limit, ut = eu.utilization;
-    if (uc != null && ut != null) {
-      spend = {
-        used: Number(uc) / 100,
-        limit: ml != null ? Number(ml) / 100 : null, // null = unlimited
-        pct: Number(ut),
-        currency: eu.currency || 'USD',
-        resetsAt: eu.resets_at ? Math.floor(Date.parse(eu.resets_at) / 1000) || 0 : 0,
-      };
-    }
-  }
-  return {
-    fiveHour, sevenDay, scopedWeekly, ...(spend ? { spend } : {}),
-    overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
-    fetchedAt: Date.now(),
-  };
-}
+// GET /api/oauth/usage reply → usage-cache shape: the claude harness's
+// parseOAuthUsage (moved there verbatim in S4; bound under the old name).
+const _parseUsage = claudeQuota.parseOAuthUsage;
 
 // Consume RAW vendor reply bodies the DEVICE op returned (quota-refresh runs
 // the human-gated fetch ON the machine holding the login — design §Quota

@@ -13,6 +13,7 @@ module.exports = {
   wrapper: null,
   Normalizer: null,
   store: null,
+  quota: require('./null-quota.js').NULL_QUOTA, // no quota concept
   settingsPrefix: null,
   inject: null,
 };

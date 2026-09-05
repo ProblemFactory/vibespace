@@ -21,6 +21,7 @@ module.exports = {
     transcriptDirs: ['~/.claude/projects'],
     conversationIdField: 'claudeSessionId',
   },
+  quota: require('./claude-quota.js'),   // QuotaSignalSource (S4): normalize/signalFromStream/probe/classifyAuthFailure
   settingsPrefix: 'claude',
   inject: 'hooks',              // context teaching rides the CLI's own hooks (vibespace-hook.mjs)
 };

@@ -55,6 +55,7 @@ const SUITES = [
   'test-codex-quota',   // codex quota P0+P1: window-by-length normalization (0.149.x single-window), exhaustion markers kept, persistence, estimator inclusion
   'test-codex-pool',    // codex pooled account cold-switch v1: store/spawn/self-heal + engine gates + wrapper signal relay + list() pool shape for every backend + ONE shared pool menu/roster pins (2.369.18)
   'test-peer-delivery', // peerDelivery registry lane: codex rpc-queue rung (real deliver.create + sidecar) + wiring pins
+  'test-quota-source',  // harness S4: per-harness QuotaSignalSource (normalize/signalFromStream/probe/classifyAuthFailure on real shapes) + the caps-routed probe dispatcher (no claude spawn for codex identities) + wiring pins
   'test-chat-trim-guard', // fold-dominated window trim guard (inc-mtajy6wr white-screen) pins
   'test-task-lifecycle', // background Agent/Workflow/Bash lifecycle from HISTORY (launch acks + persisted notifications)
   'test-local-device', 'test-sysinfo-op', 'test-transcript-parity',

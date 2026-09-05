@@ -37,8 +37,15 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, classifyAuthFailure, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
-const { parseRateLimitEvent, captureRateLimitEvent } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line)
+const { decidePoolSwitch, rankPoolMembers, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { captureRateLimitEvent } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
+// ── THE harness registry (S4, docs/design-harness-plugins.md §2.4): each
+// harness declares its QuotaSignalSource = normalize / signalFromStream /
+// probe rung / classifyAuthFailure. The engine asks the registry, never a
+// backend id (the codex-shaped ternaries this replaced spawned `claude -p
+// /usage` for codex identities and classified auth failures in Anthropic
+// wording only).
+const harnesses = require('../harnesses');
 const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // ── member auth-health (2.335.0, owner report: a banned/expired/out-of-credit
@@ -67,6 +74,29 @@ const { ClaudeCodeAdapter } = require('../adapters/claude-code.js');
 // requirement — a re-add mints a fresh sub-<hex> id). Zero API calls.
 const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('../usage-anchors.js');
 const { capsOf } = require('../backend-caps.js'); // per-backend switching capabilities (P4 slice) — replaces backend-id special cases
+// Which QuotaSignalSource speaks for a backend. A FALSY backend is the
+// legacy-record case (accounts._acctBackend / boot-restore's `m.backend ||
+// 'claude'` — records written before the field existed ARE claude; same rule
+// as capsOf); an UNKNOWN id is a loud failure that degrades to the NULL
+// source (no reading, no signal, no probe — never parsed as claude, the
+// gemini-as-claude class the harness design bans).
+const _unknownHarnessWarned = new Set();
+function quotaSourceFor(backend) {
+  const id = backend || 'claude';
+  try { return harnesses.get(id).quota; } catch (e) {
+    if (!_unknownHarnessWarned.has(id)) { _unknownHarnessWarned.add(id); console.warn('[quota] ' + e.message); global.__vsEvent?.('quota-harness-unknown', id); }
+    return harnesses.NULL_QUOTA;
+  }
+}
+// The backend a usage-cache KEY belongs to: named accounts carry it;
+// '__global_codex__' is the codex CLI login; the asking session's own backend
+// decides for identity-less keys ('__global__', host-*); else claude.
+function quotaBackendFor(key, session) {
+  if (key === '__global_codex__') return 'codex';
+  try { const a = key && accounts.get(key); if (a) return a.backend || 'claude'; } catch { }
+  if (session?.backend) return session.backend;
+  return 'claude';
+}
 const { quotaVerdict } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
@@ -550,9 +580,76 @@ function onWalledTurn(session, sigs) {
   scheduleWallProbe(session, scope, model, 0);
 }
 
+// ── CAPS-ROUTED QUOTA PROBE (S4): ONE dispatcher for every "refresh this
+// identity's quota now" need (wall verification, the wall probe ladder, the
+// auto-resume pre-fire gate). The identity's HARNESS names the rung:
+//   'cli-usage'       claude — `claude -p /usage` (usage-routes
+//                     refreshViaCliPanel, the owner-approved auto-cli channel)
+//   'rpc-rate-limits' codex — account/rateLimits/read on a LIVE local codex
+//                     chat session's own app-server (wrapper verb
+//                     codex-read-limits; the reply lands as rate_limits_updated
+//                     and recordCodexQuotaSignal settles the waiter AFTER the
+//                     cache write, so a verdict taken next already sees it)
+//   null              nothing to run (shell / unknown) — the verdict stands
+// Before this every probe spawned `claude -p /usage` whatever the backend: a
+// codex identity burned a pointless claude process and never got a fresh
+// reading (design-harness-plugins.md §1 P2). §ban-safety unchanged — both
+// rungs make the OFFICIAL client do the fetch; nothing here touches a vendor.
+function codexQuotaKeyFor(session) {
+  let key = session._accountId || '__global_codex__';
+  // a pool wrapper never owns quota — the reading belongs to the CURRENT member
+  try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrentFor(key, session._webuiId) || accounts.poolCurrent(key) || key; } catch { }
+  return key;
+}
+function pickCodexProbeSession(target, session) {
+  const live = (s) => !!(s && s.pty && s.backend === 'codex' && s.mode === 'chat' && !s.host);
+  // the asking session itself first: it sits idle-walled on exactly this
+  // identity and its app-server is already up
+  if (live(session)) return session;
+  const ids = new Set(usageIdentityAccountIds(target));
+  for (const [, s] of activeSessions) if (live(s) && ids.has(codexQuotaKeyFor(s))) return s;
+  return null;
+}
+function readCodexLimitsViaSession(session, timeoutMs) {
+  return new Promise((resolve) => {
+    const waiters = (session._codexLimitsWaiters = session._codexLimitsWaiters || []);
+    const entry = {};
+    const drop = () => { const i = waiters.indexOf(entry); if (i >= 0) waiters.splice(i, 1); };
+    entry.timer = setTimeout(() => { drop(); resolve({ ok: false, reason: `no rate_limits_updated within ${timeoutMs}ms` }); }, timeoutMs);
+    if (entry.timer.unref) entry.timer.unref();
+    entry.resolve = (r) => { clearTimeout(entry.timer); drop(); resolve(r); };
+    waiters.push(entry);
+    try { session.pty.write(JSON.stringify({ type: 'codex-read-limits' }) + '\n'); }
+    catch (e) { entry.resolve({ ok: false, reason: 'stdin write failed: ' + e.message }); }
+  });
+}
+function settleCodexLimitsWaiters(session, result) {
+  const waiters = session._codexLimitsWaiters;
+  if (!waiters || !waiters.length) return;
+  for (const w of waiters.splice(0)) { try { w.resolve(result); } catch { } }
+}
+async function probeQuotaForKey(target, { session = null, timeoutMs = 20000 } = {}) {
+  const backend = quotaBackendFor(target, session);
+  const rung = quotaSourceFor(backend).probe;
+  global.__vsEvent?.('quota-probe', `${backend}:${rung || 'none'}`);
+  if (rung === 'cli-usage') {
+    const probe = getQuotaProbe?.();
+    if (!probe) return { ok: false, rung, backend, reason: 'cli-usage probe not wired' };
+    const ok = await Promise.resolve(probe(target)).catch(() => false);
+    return { ok: !!ok, rung, backend, reason: ok ? null : 'cli panel did not answer' };
+  }
+  if (rung === 'rpc-rate-limits') {
+    const s = pickCodexProbeSession(target, session);
+    if (!s) return { ok: false, rung, backend, reason: 'no live local codex chat session on this identity' };
+    const r = await readCodexLimitsViaSession(s, timeoutMs);
+    return { ok: !!r.ok, rung, backend, reason: r.reason || null };
+  }
+  return { ok: false, rung: null, backend, reason: `backend '${backend}' declares no quota probe` };
+}
+
 // Probe ladder (owner-set): immediate, then 30min → 1h → 2h, then give up
-// loudly. Each attempt refreshes the blocking account via the auto-cli
-// /usage panel (official binary makes the fetch — §ban-safety intact).
+// loudly. Each attempt refreshes the blocking account through the caps-routed
+// dispatcher above (official client makes the fetch — §ban-safety intact).
 const _wallVerifyAt = new Map(); // scope → last blocked-entry verification probe (10min floor)
 const WALL_PROBE_BACKOFF = [0, 1800000, 3600000, 7200000];
 function scheduleWallProbe(session, scope, model, attempt) {
@@ -564,10 +661,9 @@ function scheduleWallProbe(session, scope, model, attempt) {
     try {
       if (!activeSessions.has(id)) return;
       if (!getAutoResume()?.enabledFor?.(session)) return;
-      const probe = getQuotaProbe?.();
       const a = accounts.get(scope);
       const target = a && a.type === 'pooled' ? accounts.poolCurrentFor(scope, id) : scope;
-      if (probe && target) await Promise.resolve(probe(target)).catch(() => { });
+      if (target) await probeQuotaForKey(target, { session }).catch(() => { }); // caps-routed: never a claude spawn for a codex identity
       const v = quotaVerdictFor(scope, { model });
       const ar = getAutoResume();
       if (v.usable === true) { ar?.armIfEnabled?.(id, session, Date.now() + 45000, 'account usable again'); return; }
@@ -584,10 +680,9 @@ async function beforeAutoResumeFire(id, session) {
   try {
     const model = sessionModelFor(session);
     const scope = _wallScope(session);
-    const probe = getQuotaProbe?.();
     const a = accounts.get(scope);
     const target = a && a.type === 'pooled' ? accounts.poolCurrentFor(scope, id) : scope;
-    if (probe && target) { try { await Promise.resolve(probe(target)); } catch { } }
+    if (target) { try { await probeQuotaForKey(target, { session }); } catch { } } // caps-routed (S4): the identity's harness picks the rung
     maybePoolAutoSwitch(session);
     const v = quotaVerdictFor(scope, { model });
     if (v.usable === false) {
@@ -600,7 +695,10 @@ async function beforeAutoResumeFire(id, session) {
 }
 function recordRateLimitEvent(session, msg) {
   try {
-    const ev = parseRateLimitEvent(msg);
+    // the session's harness classifies the record (S4 QuotaSignalSource) —
+    // the parse itself is rate-limit-capture's, reached through the registry
+    const sig = quotaSourceFor(session.backend).signalFromStream(msg);
+    const ev = sig && sig.source === 'rate_limit_event' ? sig.ev : null;
     if (!ev) return;
     // Session-scoped actions below (pool switch, auto-resume) stay on THIS
     // session regardless of re-attribution: it is genuinely blocked no
@@ -629,10 +727,12 @@ function recordRateLimitEvent(session, msg) {
 // per-account cache the pool decisions and the estimator read; exhaustion
 // (rate_limit_reached_type / usage_limit_reached family) acts like a claude
 // rejected rate_limit_event: pool switch first, auto-resume as the fallback.
-const CODEX_EXHAUSTION_RE = /^(usage_limit_reached|quota_exceeded|usage_not_included|workspace_owner_usage_limit_reached|workspace_member_usage_limit_reached|workspace_member_credits_depleted)$/;
+// The typed exhaustion enum + the snapshot normalizer live in the codex
+// harness (src/harnesses/codex-quota.js, S4): the harness classifies the
+// record into a signal, the engine runs the ladder on the signal.
 function recordCodexQuotaSignal(session, payload) {
   try {
-    const { normalizeCodexRateLimit } = require('../usage-routes.js');
+    const sig = quotaSourceFor(session.backend).signalFromStream({ type: 'event_msg', payload });
     const writeSnap = (snap) => {
       if (!snap) return null;
       let key = session._accountId || '__global_codex__';
@@ -684,18 +784,17 @@ function recordCodexQuotaSignal(session, payload) {
       return;
     }
     if (payload.type === 'rate_limits_updated' && payload.rateLimits) {
-      const snap0 = normalizeCodexRateLimit(payload.rateLimits, Date.now());
-      // stored reset-credit count rides ONLY the on-demand rateLimits/read
-      // (owner ask: usage 展示剩余 reset) — keep it on the account snapshot
-      if (snap0 && payload.resetCredits) {
-        const rc = payload.resetCredits;
-        snap0.resetCredits = { availableCount: Number(rc.availableCount ?? rc.available_count ?? rc?.summary?.availableCount) || 0 };
-      }
+      // the harness normalized the snapshot (window-by-length, exhaustion
+      // markers, the on-demand resetCredits count) — sig.snapshot is it
+      const snap0 = sig?.snapshot || null;
       const w = writeSnap(snap0);
+      // an rpc-rate-limits probe waiting on this session settles AFTER the
+      // cache write — its next quotaVerdictFor already reads the fresh file
+      settleCodexLimitsWaiters(session, w ? { ok: true } : { ok: false, reason: 'unparseable rateLimits' });
       if (!w) return;
       global.__vsEvent?.('codex-rate-limits', `${w.key}${w.snap.rateLimitReachedType ? ':reached-' + w.snap.rateLimitReachedType : ''}`);
-      if (w.snap.rateLimitReachedType) {
-        const tripped = w.snap.rateLimitReachedType === 'primary' ? (w.snap.fiveHour || w.snap.sevenDay) : (w.snap.sevenDay || w.snap.fiveHour);
+      if (sig.kind === 'exhausted') {
+        const tripped = sig.tripped; // the window rate_limit_reached_type named
         if (tryResetCredit(tripped?.resetsAt)) return; // outcome event continues the ladder
         maybePoolAutoSwitch(session); // another ChatGPT account = seconds, not hours
         try { noteWallSignal(session, { resetsAtMs: (Number(tripped?.resetsAt) || 0) * 1000 }); } catch { }
@@ -705,15 +804,21 @@ function recordCodexQuotaSignal(session, payload) {
       }
       return;
     }
+    if (payload.type === 'rate_limits_updated') {
+      // an on-demand rateLimits/read that FAILED ({error, onDemand}) — settle
+      // any rpc-rate-limits probe waiting on this session, honestly
+      settleCodexLimitsWaiters(session, { ok: false, reason: String(payload.error || 'no rateLimits in reply') });
+      return;
+    }
     if (payload.type === 'task_failed') {
-      const info = String(payload.codexErrorInfo || payload.codex_error_info || '');
-      if (!info) return;
-      if (CODEX_EXHAUSTION_RE.test(info)) {
+      if (!sig) return; // no typed codex_error_info, or one that is neither exhaustion nor auth
+      const info = sig.errorInfo;
+      if (sig.kind === 'exhausted') {
         // exhaustion may arrive WITHOUT a fresh snapshot — mark the current
         // member's cache dead with the error's resets_at (or a bounded guess)
         const nowSec = Math.floor(Date.now() / 1000);
-        const resets = Number(payload.resetsAt || payload.resets_at) || 0;
-        const snap = normalizeCodexRateLimit(payload.rateLimits, Date.now()) || {
+        const resets = sig.resetsAtSec;
+        const snap = sig.snapshot || {
           limitId: 'codex', sevenDay: { utilization: 1, usedPercent: 100, windowMinutes: 10080, resetsAt: resets > nowSec ? resets : nowSec + 24 * 3600, status: 'limited' },
           fiveHour: null, rateLimitReachedType: 'unknown', fetchedAt: Date.now(),
         };
@@ -722,7 +827,7 @@ function recordCodexQuotaSignal(session, payload) {
         if (tryResetCredit(resets)) return; // ① reset credit first when opted in
         maybePoolAutoSwitch(session);
         try { noteWallSignal(session, { resetsAtMs: resets > nowSec ? resets * 1000 : 0 }); noteTurnEnd(session); } catch { }
-      } else if (info === 'unauthorized') {
+      } else if (sig.kind === 'auth-failure') {
         global.__vsEvent?.('codex-auth-failure', session._accountId || 'global'); // v1: surfaced, not auto-evicted (claude's evict is creds-path-specific)
       }
       return;
@@ -925,7 +1030,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
     const poolId = session?._accountId;
     const a = poolId && accounts.get(poolId);
     if (!a || a.type !== 'pooled' || session.host) return;
-    if (!classifyAuthFailure(info)) return;
+    if (!quotaSourceFor(session.backend).classifyAuthFailure(info)) return; // the session's harness knows its vendor's wording (S4)
     const memberId = accounts.poolCurrentFor(poolId, sid);
     if (!memberId) return;
     const now = Date.now();
@@ -1195,6 +1300,7 @@ function maybeStopOnFallback(session, id, from, to) {
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
+    probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
     usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
     writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
