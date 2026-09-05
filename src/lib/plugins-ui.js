@@ -210,6 +210,57 @@ export function installPluginsUI(App) {
         }
         body.appendChild(card);
       }
+      await renderManifestPlugins(body);
+    };
+    // ── MANIFEST PLUGINS (Plugin Ph2, 2.369.24): data/plugins/<id>/ folders ──
+    const renderManifestPlugins = async (parent) => {
+      const r = await fetchJson('/api/plugins/manifests');
+      const list = r?.plugins || [];
+      const sec = document.createElement('div');
+      sec.className = 'plugin-manifests';
+      const head = document.createElement('div');
+      head.className = 'plugin-head plugin-manifests-head';
+      head.innerHTML = `<b>${escHtml(t('Installed plugins'))}</b> <span class="plugin-cfg-hint">${escHtml(t('a folder under data/plugins/<id>/ with vibespace-plugin.json — see docs/examples/hello-plugin'))}</span>`;
+      const reload = document.createElement('button');
+      reload.className = 'mounts-btn'; reload.textContent = t('Rescan');
+      reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(rr.error, { type: 'error' }); render(); };
+      head.appendChild(reload);
+      sec.appendChild(head);
+      if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Copy docs/examples/hello-plugin to data/plugins/example.hello and Rescan.');
+        sec.appendChild(empty);
+      }
+      for (const p of list) {
+        const card = document.createElement('div');
+        card.className = 'plugin-card plugin-manifest-card';
+        const stateTxt = !p.valid ? t('invalid') : !p.enabled ? t('disabled') : p.server ? ({ running: t('running'), starting: t('starting…'), crashed: t('crashed — restarting'), parked: t('parked after repeated crashes'), stopped: t('stopped'), error: t('error') }[p.state] || p.state) : t('enabled');
+        const dot = `<span class="plugin-dot ${!p.valid ? 'err' : (p.enabled ? (p.state === 'running' || !p.server ? 'ok' : 'warn') : '')}"></span>`;
+        const wins = (p.contributes?.windows || []).map((w) => `<button class="mounts-btn plugin-open-win" data-plugin="${escHtml(p.id)}" data-win="${escHtml(w.id)}"${p.enabled ? '' : ' disabled'}>${escHtml(w.title)}</button>`).join(' ');
+        const tools = (p.contributes?.agentTools || []).map((tl) => `<code>vibespace-tool-${escHtml(p.id)}-${escHtml(tl.name)}</code>`).join(' ');
+        card.innerHTML = `
+          <div class="plugin-head">${dot}<b>${escHtml(p.id)}</b> <span class="plugin-ver">${escHtml(p.version || '')}</span> <span class="plugin-state">${escHtml(stateTxt)}</span></div>
+          ${p.description ? `<div class="plugin-detail">${escHtml(p.description)}</div>` : ''}
+          ${p.errors?.length ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.errors.join(' · '))}</div>` : ''}
+          ${p.warnings?.length ? `<div class="plugin-detail plugin-cfg-hint">${escHtml(p.warnings.join(' · '))}</div>` : ''}
+          ${p.lastError ? `<div class="plugin-detail plugin-cfg-warn">${escHtml(p.lastError)}</div>` : ''}
+          ${tools ? `<div class="plugin-detail">${escHtml(t('Agent tools'))}: ${tools}</div>` : ''}
+          <div class="plugin-detail plugin-manifest-actions">${wins}</div>`;
+        const actions = card.querySelector('.plugin-manifest-actions');
+        const toggle = document.createElement('button');
+        toggle.className = 'mounts-btn'; toggle.textContent = p.enabled ? t('Disable') : t('Enable'); toggle.disabled = !p.valid;
+        toggle.onclick = async () => {
+          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: !p.enabled }) });
+          if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
+          showToast(p.enabled ? t('Plugin disabled') : t('Plugin enabled'));
+          this.pluginClient?.refresh?.();
+          render();
+        };
+        actions.prepend(toggle);
+        for (const b of card.querySelectorAll('.plugin-open-win')) b.onclick = () => { this.pluginClient?.open?.(b.dataset.plugin, b.dataset.win); close(); };
+        sec.appendChild(card);
+      }
+      parent.appendChild(sec);
     };
     await render();
   },

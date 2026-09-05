@@ -102,6 +102,10 @@ const wiring = read('src/server/mounts-plugins-wiring.js');
 ok(/require\('\.\/plugin-loader\.js'\)\.create\(/.test(wiring) && /agentAuth: \(req\) =>/.test(wiring) && /s\.agentToken === tok/.test(wiring) && /pluginLoader\.shutdown\(\)/.test(wiring), 'wiring creates the loader with a vsst_-validating agentAuth and shuts plugin processes down with the server');
 ok(/, activeSessions,$/m.test(read('server.js')) && /pluginLoader,$/m.test(read('server.js')) && /const \{ agentEnv \} = require\('\.\.\/ws-handler'\);/.test(wiring), 'server.js passes activeSessions and receives the loader; the wiring takes agentEnv from ws-handler (the ONE sanitized-env builder)');
 ok(/'src\/plugin-manifest\.js'/.test(read('scripts/test-architecture.mjs')), 'the manifest validator is in the PURE tier');
+const pui = read('src/lib/plugins-ui.js');
+ok(/fetchJson\('\/api\/plugins\/manifests'\)/.test(pui) && /\/api\/plugins\/manifests\/\$\{encodeURIComponent\(p\.id\)\}\/enabled/.test(pui) && /manifests\/reload/.test(pui) && /this\.pluginClient\?\.open\?\./.test(pui), 'the Plugins panel lists manifest plugins with enable/disable, rescan and open-window actions');
+ok(/escHtml\(p\.errors\.join/.test(pui) && /escHtml\(p\.id\)/.test(pui), 'manifest fields are escHtml-ed in the panel (ids/errors come from disk, never trusted HTML)');
+for (const dict of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(['Installed plugins', 'Rescan', 'Plugin enabled', 'parked after repeated crashes'].every((k) => read(dict).includes(JSON.stringify(k) + ':')), `${dict} carries the new panel strings`);
 ok(/\/api\/agent\/plugin-tool\//.test(read('src/server/plugin-loader.js')) && /res\.status\(401\)/.test(read('src/server/plugin-loader.js')), 'the tool route lives under the cookie-exempt /api/agent/ prefix and enforces the bearer itself');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
