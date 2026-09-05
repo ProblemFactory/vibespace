@@ -849,6 +849,7 @@ class MessageManager {
         msg.peerFrom = peerDisplayName(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
         this._notePeerMsgId(raw.origin.msg_id);
       }
+      else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
       if (emit) this._emit({ op: 'create', message: msg });

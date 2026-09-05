@@ -205,6 +205,7 @@ const clientInfo = {
 const sessionName = process.env.CODEX_WEBUI_SESSION_NAME || '';
 const resumeId = process.env.CODEX_WEBUI_RESUME_ID || '';
 const model = process.env.CODEX_WEBUI_MODEL || '';
+// meta.modelPinned (2.369.32): set when the spawn carried a model or set-model ran — see updateMetaFromThread
 let effort = process.env.CODEX_WEBUI_EFFORT || ''; // mutable: set-effort updates it mid-session
 const backendPermissionMode = process.env.CODEX_WEBUI_PERMISSION_MODE || 'default';
 const isFork = process.env.CODEX_WEBUI_FORK === '1';
@@ -358,7 +359,10 @@ function updateMetaFromThread(resp) {
   const threadName = resolveThreadName(resp) || resolveThreadName(thread) || meta.threadName || sessionName;
   meta.threadId = threadId;
   meta.threadName = threadName || null;
-  meta.model = resp?.model || thread.model || meta.model;
+  // a model the USER chose (spawn env or set-model) is pinned: the app-server's
+  // thread.model is the thread's START model and must not silently revert a
+  // mid-conversation switch on resume/rename (2.369.32, owner report)
+  meta.model = meta.modelPinned ? (meta.model || resp?.model || thread.model || '') : (resp?.model || thread.model || meta.model);
   meta.modelProvider = resp?.modelProvider || thread.modelProvider || meta.modelProvider;
   meta.cwd = resp?.cwd || thread.cwd || meta.cwd;
   meta.approvalPolicy = typeof resp?.approvalPolicy === 'string' ? resp.approvalPolicy : meta.approvalPolicy;
@@ -403,6 +407,7 @@ function buildTurnContext(turnId) {
     approval_policy: currentPermission.approvalPolicy,
     sandbox_policy: currentPermission.sandboxPolicy,
     model: meta.model || model || '',
+    modelPinned: !!model,
     effort: effort || null,
     summary: 'none',
   };
@@ -1205,6 +1210,7 @@ async function handleInput(msg) {
     // Applied on the NEXT turn/start (model is a per-turn param). turn_context
     // in the rollout JSONL confirms the switch authoritatively.
     meta.model = msg.model || '';
+    meta.modelPinned = !!msg.model;
     scheduleMeta();
     log('Model set for next turn: ' + (msg.model || '(default)'));
     return;

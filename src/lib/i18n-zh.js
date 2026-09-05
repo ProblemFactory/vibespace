@@ -2901,4 +2901,7 @@ export default {
   "Server: network access to {hosts} — declared only; the sandbox does not restrict network access.": "服务端：访问网络 {hosts} — 仅声明；沙箱不限制网络访问。",
   "Adds agent tools every session can call: {names}": "添加每个会话都能调用的 agent 工具：{names}",
   "No special capabilities declared.": "未声明特殊能力。",
+  "not started": "未开始",
+  "No window running yet — a reset time appears after the first request": "尚无运行中的窗口 — 第一次请求后才会出现重置时间",
+  "VibeSpace auto-resume — sent automatically after the usage limit cleared": "VibeSpace 自动续跑 — 用量上限解除后自动发送",
 };

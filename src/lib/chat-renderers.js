@@ -233,6 +233,16 @@ class ChatRenderers {
       || /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
       || /^A session-scoped Stop hook is now active/.test(rawText.trim())
       || /^Stop hook feedback:/.test(rawText.trim())));
+    if (msg.originKind === 'auto-resume') {
+      // VibeSpace's auto-resume continue prompt (server-sent after a usage-limit
+      // wall): a user-role record the CLI needs, but the OWNER never typed it —
+      // label it so the transcript does not read as "I said continue" (2.369.32)
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-user chat-msg-auto-resume';
+      el._rawMsg = msg;
+      el.innerHTML = `<div class="chat-peer-head">${UI_ICONS.refresh || ''} ${escHtml(t('VibeSpace auto-resume — sent automatically after the usage limit cleared'))}</div><div class="chat-msg-content chat-peer-core">${escHtml(rawText)}</div>`;
+      return el;
+    }
     if (msg.originKind === 'peer-message') {
       // Cross-session peer message (2.349.0, owner report: an announce woke
       // the agent but the chat showed NOTHING — "都不知道agent到底收到了什么").

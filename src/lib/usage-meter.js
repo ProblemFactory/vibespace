@@ -40,10 +40,12 @@ export function installUsageMeter(App, ctx = {}) {
       // (2.245.0 — the popup's Remote-hosts section moved there).
       const ov = e.target.closest('.usage-overview-link');
       if (ov) { e.stopPropagation(); popup.classList.add('hidden'); this._showAgentsDialog(); return; }
-      const rbtn = e.target.closest('.usage-refresh-btn');
-      if (rbtn) { e.stopPropagation(); this._refreshQuotaOnDemand(rbtn); return; }
+      // the codex ⟳ shares the .usage-refresh-btn look — dispatch the SPECIFIC
+      // class first (owner report 2.369.32: clicking it refreshed CLAUDE's quota)
       const cxbtn = e.target.closest('.usage-refresh-codex-btn');
       if (cxbtn) { e.stopPropagation(); this._refreshCodexQuota(cxbtn); return; }
+      const rbtn = e.target.closest('.usage-refresh-btn');
+      if (rbtn) { e.stopPropagation(); this._refreshQuotaOnDemand(rbtn); return; }
       const chip = e.target.closest('.usage-acct-chip');
       if (!chip) return;
       e.stopPropagation();
@@ -313,8 +315,11 @@ export function installUsageMeter(App, ctx = {}) {
       const dd = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
       return (dd ? `${dd}d` : '') + ((dd || hh) ? `${hh}h` : '') + `${mm}m`;
     };
-    const fmtReset = (ts) => {
-      if (!ts) return '?';
+    const fmtReset = (ts, util) => {
+      // a bucket at 0% has no running window yet — Anthropic reports no reset
+      // time until the first request lands (owner report 2.369.32: a freshly
+      // reset account showed '?' everywhere)
+      if (!ts) return (util === 0 || util === '0') ? `<span title="${escHtml(t('No window running yet — a reset time appears after the first request'))}">${escHtml(t('not started'))}</span>` : '?';
       const d = new Date(ts * 1000), now = new Date();
       const time = d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
       let when;
@@ -370,7 +375,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
           ${estStat(pSc)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt, sc.utilization)}</span>
           ${scAge}
         </div>
       </div>`);
@@ -392,7 +397,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p5.estPct != null ? p5.darkPct : pct5h })}</span>
           ${estStat(p5)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.fiveHour?.resetsAt)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization)}</span>
         </div>
       </div>
       <div class="usage-session">
@@ -401,7 +406,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
           ${estStat(p7)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization)}</span>
         </div>
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'
@@ -449,7 +454,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct5h })}</span>
           ${estStat(cp5)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.fiveHour?.resetsAt)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.fiveHour?.resetsAt, codex.fiveHour?.utilization)}</span>
         </div>
       </div>
       <div class="usage-session">
@@ -458,7 +463,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pct7d })}</span>
           ${estStat(cp7)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(codex.sevenDay?.resetsAt, codex.sevenDay?.utilization)}</span>
           ${codex.planType ? `<span class="usage-stat"><span class="usage-stat-label">${tc('billing', 'Plan')}</span> ${escHtml(codex.planType)}</span>` : ''}
           ${codex.resetCredits ? `<span class="usage-stat" title="${escHtml(t('Stored rate-limit reset credits — one can be consumed when a limit is hit (Settings → Codex, or automatically when enabled)'))}"><span class="usage-stat-label">${escHtml(t('Reset credits'))}</span> ${Number(codex.resetCredits.availableCount) || 0}</span>` : ''}
         </div>

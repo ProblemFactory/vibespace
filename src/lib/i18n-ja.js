@@ -2901,4 +2901,7 @@ export default {
   "Server: network access to {hosts} — declared only; the sandbox does not restrict network access.": "サーバー: {hosts} へのネットワークアクセス — 宣言のみ。サンドボックスはネットワークを制限しません。",
   "Adds agent tools every session can call: {names}": "すべてのセッションが呼べるエージェントツールを追加: {names}",
   "No special capabilities declared.": "特別な権限の宣言はありません。",
+  "not started": "未開始",
+  "No window running yet — a reset time appears after the first request": "実行中のウィンドウはまだありません — 最初のリクエスト後にリセット時刻が表示されます",
+  "VibeSpace auto-resume — sent automatically after the usage limit cleared": "VibeSpace 自動再開 — 使用量上限が解除された後に自動送信",
 };

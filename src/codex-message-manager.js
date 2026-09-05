@@ -579,6 +579,7 @@ class CodexMessageManager {
       }
       this.turnIndex++;
       const msg = this._create({ role: 'user', content, turnIndex: this.turnIndex });
+      if (item.webui_origin === 'auto-resume') msg.originKind = 'auto-resume'; // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
       if (webuiMsgId) this.userMessageIds.set(String(webuiMsgId), msg.id);
       if (emit) this._emit({ op: 'create', message: msg });
       return;

@@ -55,7 +55,10 @@ class Sidebar {
     this._sortMode = localStorage.getItem('sessionSort') || 'recent';
     this._backendFilter = new Set(JSON.parse(localStorage.getItem('backendFilter') || '[]'));
     this._hostFilter = new Set(JSON.parse(localStorage.getItem('hostFilter') || '[]')); // empty = all; 'local' or host ids
-    this._agentKindFilter = localStorage.getItem('agentKindFilter') || '';
+    // Default = PRIMARY only (owner report 2.369.32: codex sub-agent threads
+    // flooded the list). '' = ALL, chosen explicitly (persisted as 'all').
+    const storedKind = localStorage.getItem('agentKindFilter');
+    this._agentKindFilter = storedKind == null ? 'primary' : (storedKind === 'all' ? '' : storedKind);
     this._collapsedFolders = new Set(JSON.parse(localStorage.getItem('collapsedFolders') || '[]'));
     this._expandedFolders = new Set(JSON.parse(localStorage.getItem('expandedFolders') || '[]'));
     this._expandedCardId = null; // only one card expanded at a time
@@ -563,7 +566,7 @@ class Sidebar {
     allBtn.title = tr('Show all agent types');
     allBtn.onclick = () => {
       this._agentKindFilter = '';
-      localStorage.removeItem('agentKindFilter');
+      localStorage.setItem('agentKindFilter', 'all'); // explicit ALL survives reloads (the default is primary-only)
       this._renderAgentKindQuickTabs();
       this._render();
     };

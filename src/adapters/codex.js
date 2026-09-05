@@ -142,6 +142,25 @@ function _walkJsonlFiles(rootDir) {
   return files;
 }
 
+/** The model a thread LAST ran on = its last turn_context (the wrapper's own
+ *  authoritative record). A resume that carries no explicit model would
+ *  otherwise fall back to the THREAD's start model (app-server thread.model)
+ *  and silently downgrade a conversation the user had switched mid-way
+ *  (owner report 2.369.32: "selected GPT-6, the view says 5.6"). Tail read only. */
+function lastCodexTurnModel(threadId) {
+  const fp = findCodexSessionJsonlPath(threadId);
+  if (!fp) return null;
+  let text;
+  try { text = readJsonlBounded(fp, { tailOnly: true }); } catch { return null; }
+  const lines = String(text || '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i];
+    if (l.indexOf('"turn_context"') < 0) continue;
+    try { const r = JSON.parse(l); if (r.type === 'turn_context' && r.payload?.model) return String(r.payload.model); } catch { }
+  }
+  return null;
+}
+
 /** Locate a thread's rollout: `…-<threadId>.jsonl`, else its `.jsonl.zst`
  *  twin (codex ≥0.153 compression; the plain file wins when both exist), then
  *  the remote-jsonl cache. Returns the REAL path — readers materialize. */
@@ -984,7 +1003,7 @@ class CodexAdapter extends BackendAdapter {
 
 module.exports = {
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, transcriptWorkerCall,
-  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE,
+  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
   findCodexSessionJsonlPath,

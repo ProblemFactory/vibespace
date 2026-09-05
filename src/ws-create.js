@@ -11,7 +11,7 @@ const { MessageManager } = require('./message-manager');
 const { capsOf } = require('./backend-caps');
 const { createMessageManager } = require('./normalizers');
 const { listCodexThreads } = require('./codex-session-store');
-const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
+const { findCodexSessionJsonlPath, lastCodexTurnModel, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
@@ -347,6 +347,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           });
           // For codex resume: inherit forkedFrom chain from old session's JSONL
           if (backend === 'codex' && data.resumeId && sessionSpec.env) {
+            // MODEL CONTINUITY (2.369.32): a resume without an explicit model keeps
+            // the model the thread LAST ran on (last turn_context), never the
+            // app-server's thread.model (= the START model) — a mid-conversation
+            // switch to gpt-6 survived neither restart nor rename before this.
+            if (!sessionSpec.env.CODEX_WEBUI_MODEL) { try { const lm = lastCodexTurnModel(data.resumeId); if (lm) sessionSpec.env.CODEX_WEBUI_MODEL = lm; } catch { } }
             const oldPath = findCodexSessionJsonlPath(data.resumeId);
             const oldChain = oldPath ? (extractCodexThreadMeta(oldPath).forkedFrom || []) : [];
             if (!oldChain.includes(data.resumeId)) oldChain.push(data.resumeId);
