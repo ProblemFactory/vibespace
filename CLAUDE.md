@@ -212,6 +212,7 @@ src/
     themes.js          — THEMES constant + ThemeManager class. **extractThemeValues probes inside a data-theme="dark" WRAPPER (B-b2d6, 2.268.9): custom properties inherit and only dark defines every var — a bare probe read live-preview inline overrides (and an applied custom theme's stylesheet values) back as a partially-defined theme's "defaults", and Save froze them into new themes. Never regress to a single-layer probe.**
     ws.js              — WsManager (WebSocket with reconnect)
     window.js          — WindowManager (drag/resize/snap/grid)
+    window-types.js    — WINDOW-TYPE REGISTRY (Plugin Ph1, 2.369.19): registerWindowType({type, icon, replay}) — replayOpenSpec dispatches through it, unknown action = loud warn + telemetry 'openspec-unknown'; TYPE_ICONS is a view; core registers its 14 kinds where they live (scripts/test-window-types.mjs pins the sets)
     tab-group.js       — Tab grouping mixin (chain model, icon drag, tab bar, drag-out)
     terminal.js        — TerminalSession (xterm.js wrapper, per-terminal settings)
     sidebar.js         — Sidebar shell (filter/sort/merge pipeline, tab switching, ~870 lines)
