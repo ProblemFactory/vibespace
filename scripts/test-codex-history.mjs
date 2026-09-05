@@ -81,7 +81,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   const fs2 = require('node:fs');
   const sl = fs2.readFileSync(REPO + '/src/lib/session-lifecycle.js', 'utf8');
   ok("billing switcher's global row is backend-aware (ChatGPT login for codex)", /isCodex \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sl));
-  ok('…and the CLAUDE machine quota chips never dress the codex row', /isCodex \? '' : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl));
+  // 2.369.21: the codex row shows the CODEX quota (__global_codex__), never the claude machine quota
+  ok('…and the CLAUDE machine quota chips never dress the codex row (it shows the codex quota instead)', /isCodex \? \(rHostId \? '' : usageHint\(this\._codexAccountUsage\?\.__global_codex__, this\._usageEstimates\?\.__global_codex__\)\) : usageHint\(rHostId \? this\._hostOwnUsage/.test(sl));
   const sb = fs2.readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8');
   ok('status-bar billing chip is backend-aware too', /this\._backend === 'codex' \? t\('ChatGPT login'\) : t\('CLI login'\)/.test(sb));
 }
