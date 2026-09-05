@@ -413,9 +413,10 @@ export function installManageAgents(App, ctx = {}) {
     try { list = await fetchJson('/api/accounts'); } catch { showToast(t('Could not load accounts'), { type: 'error' }); return; }
     // Members are the pool's OWN backend's logins (a codex pool switches
     // among ChatGPT accounts — 2.369.18; the dialog was claude-only)
-    const codex = a?.backend === 'codex';
+    const be = a?.backend || 'claude';
+    const codex = be === 'codex';
     const effHot = a?.hotSupported !== false && !!a?.hot;
-    const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === (codex ? 'codex' : 'claude') && !x.pooled);
+    const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === be && !x.pooled);
     const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '420px', escapeToClose: true });
     const explicit = Array.isArray(a?.members) && a.members.length ? a.members : null;
     body.innerHTML = `

@@ -73,7 +73,7 @@ export const BACKEND_META = {
 
 /** Settings key family for a backend (S7): `<prefix>.defaultModel` etc. An
  *  unknown backend reads its OWN id family (never claude's — the old
- *  `=== 'codex' ? 'codex' : 'claude'` collapse fed a third backend claude's
+ *  `=== 'codex' ? … : 'claude'` collapse fed a third backend claude's
  *  defaults). */
 export function settingsPrefixFor(backend) {
   const b = backend || 'claude';

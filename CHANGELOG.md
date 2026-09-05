@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.26
+- **Harness S2 first slice — credential mechanics on the descriptor** (docs/design-harness-plugins.md §2.4): each chat harness now carries `creds` = { subsDirName, authFile, spawnEnvVar, loginLabel, defaultIdField, keychainSensitive, parseAuth(dir) [, parseAuthFile] } (claude: `subs`/`.credentials.json`/`CLAUDE_SECURESTORAGE_CONFIG_DIR`; codex: `codex-subs`/`auth.json`/`CODEX_HOME`, id_token JWT parse). accounts.js reads dirs/auth/labels/default-account fields through `_credsOf/_acctDir/_readAuthFor` — 13 mechanical `backend === 'codex' ? … : …` sites gone (list() pool identity, verdicts, pool link/member dirs, import dir, default-account field, pool-create error label). readSubCreds/readCodexSubAuth/_parseCodexAuthFile stay as thin shims over the descriptor.
+- **Conformance pins that never landed**: the S7 pins (settingsPrefix client⇄server, no `codex ? 'codex' : 'claude'` collapse in src/lib, account surfaces gated on META caps) were in a patch batch that aborted before reaching the suite in 2.369.23 — now in test-harness-contract with the S2 pins (creds descriptor completeness, parseAuth on an empty dir never throws, claude/codex fixture parses, accounts.js source pin). The last collapse (pool members dialog filter) derives the backend from the pool row. test-harness-contract 76→87.
+
 ## 2.369.25
 - **Plugins panel lists manifest plugins** (⚙ → Plugins / the rail's Plugins panel): every folder under `data/plugins/<id>/` with its id/version/description, state (running / starting / crashed–restarting / parked / disabled / invalid — invalid ones show their validator errors, never hidden), Enable/Disable, Rescan, the contributed agent-tool shim names, and an Open button per contributed window. zh/ja strings. test-plugin-loader 47.
 

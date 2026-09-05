@@ -7,6 +7,7 @@
 // mechanical: a third harness that misses a member fails HERE, not in a
 // fleet incident. Unknown ids must fail loudly (never a claude fallback).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -64,6 +65,23 @@ for (const id of harnessIds()) {
 ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META row has a server harness (no client-only backend)');
 ok(chatHarnessIds().join(',') === 'claude,codex', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
 ok(BACKEND_META.codex.fallbackModels[0] === 'gpt-6-astra', 'codex fallback model list leads with gpt-6-astra (0.153.4 catalog default)');
+// S7 pins: client settings-prefix / account-surface collapses are gone
+const libSrc = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')).join('\n');
+ok(!/=== 'codex' \? 'codex' : 'claude'/.test(libSrc) && !/codex \? 'codex' : 'claude'/.test(libSrc), "no `codex ? 'codex' : 'claude'` collapse left in src/lib (a third backend would inherit claude's settings)");
+ok(!/backend !== 'claude' && backend !== 'codex'/.test(libSrc) && !/\(backend === 'claude' \|\| backend === 'codex'\) && acctList/.test(libSrc), 'account surfaces gate on META caps.accounts, not an id list');
+for (const id of chatHarnessIds()) ok(BACKEND_META[id].settingsPrefix === HARNESSES[id].settingsPrefix, `${id}: client settingsPrefix matches the server descriptor (${HARNESSES[id].settingsPrefix})`);
+// S2 pins: credential mechanics live on the descriptor; accounts.js reads them
+for (const id of chatHarnessIds()) {
+  const c = HARNESSES[id].creds;
+  ok(c && typeof c.subsDirName === 'string' && typeof c.authFile === 'string' && typeof c.spawnEnvVar === 'string' && typeof c.loginLabel === 'string' && typeof c.defaultIdField === 'string' && typeof c.keychainSensitive === 'boolean' && typeof c.parseAuth === 'function', `${id}: creds descriptor complete (${c?.subsDirName}, ${c?.spawnEnvVar})`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-creds-'));
+  ok(c.parseAuth(tmp).loggedIn === false, `${id}: parseAuth on an empty dir = not logged in (never throws)`);
+  if (id === 'claude') { fs.writeFileSync(path.join(tmp, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok', subscriptionType: 'max', expiresAt: Date.now() + 3600000 } })); fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@b.c', organizationName: 'Org' } })); const r = c.parseAuth(tmp); ok(r.loggedIn && r.subscriptionType === 'max' && r.email === 'a@b.c' && r.org === 'Org' && r.accessToken === 'tok', 'claude parseAuth reads creds + identity from the dir'); }
+  if (id === 'codex') { const claims = Buffer.from(JSON.stringify({ email: 'x@y.z', 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' } })).toString('base64url'); fs.writeFileSync(path.join(tmp, 'auth.json'), JSON.stringify({ tokens: { access_token: 'a', id_token: `h.${claims}.s` } })); const r = c.parseAuth(tmp); ok(r.loggedIn && r.email === 'x@y.z' && r.plan === 'pro' && r.subscriptionType === 'pro' && r.authMode === 'chatgpt', 'codex parseAuth reads identity from the id_token (subscriptionType mirrors plan)'); }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+ok((acc.match(/this\._readAuthFor\(/g) || []).length >= 4 && (acc.match(/this\._acctDir\(/g) || []).length >= 3 && !/codexSubDir\(a\.id\) : this\.subDir\(a\.id\)/.test(acc) && !/\? this\.readCodexSubAuth\(/.test(acc), 'accounts.js reads dirs/auth/labels/default-field through the descriptor (mechanical codex-or-claude ternaries gone)');
 // S6 wiring pins: injection topology decided by the strategy, never a backend id
 const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
 ok(!/s\.backend !== 'codex'/.test(ar) && (ar.match(/honoursSessionStart\(s\)/g) || []).length === 4, 'agent-routes: the four SessionStart seen-gates consult inject.sessionStartHonoured (no backend-id gate left)');

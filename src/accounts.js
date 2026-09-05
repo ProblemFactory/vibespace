@@ -15,6 +15,7 @@
  * how the CLI's own trust list (customApiKeyResponses) fingerprints keys.
  */
 const fs = require('fs');
+const { get: harnessOf } = require('./harnesses'); // S2: per-harness credential mechanics live on the descriptor (creds)
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
@@ -32,6 +33,7 @@ class AccountManager {
     // projects/sessions/settings stay in ~/.claude, so transcripts + discovery
     // stay shared). Verified vs claude 2.1.205 (Wde() = env ?? sn()). This is
     // how we hold MANY subscription logins at once.
+    this._dataDir = dataDir;
     this._subsDir = path.join(dataDir, 'subs');
     // Per-CODEX-account homes. Codex has NO auth-only relocation env (CODEX_HOME
     // moves the WHOLE config dir), so we isolate auth by giving each account its
@@ -56,6 +58,10 @@ class AccountManager {
       && this._acctType(a) === 'subscription';
   }
   subDir(id) { return path.join(this._subsDir, id); }
+  // ── S2 generic credential helpers (read the harness descriptor, never a backend-id branch) ──
+  _credsOf(be) { return harnessOf(be || 'claude').creds; }
+  _acctDir(be, id) { return path.join(this._dataDir, this._credsOf(be).subsDirName, id); }
+  _readAuthFor(be, id) { return this._credsOf(be).parseAuth(this._acctDir(be, id)); }
   subCredsPath(id) { return path.join(this.subDir(id), '.credentials.json'); }
   codexSubDir(id) { return path.join(this._codexSubsDir, id); }
 
@@ -128,9 +134,9 @@ class AccountManager {
         // verdict (codex: 'impossible' — the client hides the toggle).
         if (type === 'pooled') {
           const cur = this.poolCurrent(a.id);
-          const info = backend === 'codex' ? this.readCodexSubAuth(a.id) : this.readSubCreds(a.id); // resolves through the symlink
+          const info = this._readAuthFor(backend, a.id); // resolves through the symlink
           const curAcct = cur ? this.get(cur) : null;
-          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: (backend === 'codex' ? info.plan : info.subscriptionType) || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported() };
+          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported() };
         }
         if (backend === 'codex') {
           const info = this.readCodexSubAuth(a.id);
@@ -166,31 +172,7 @@ class AccountManager {
   // Read-only parse of a subscription account's creds. NEVER writes/refreshes
   // (rotation would break the account, issue #20). Returns loggedIn + identity
   // + the access token IF currently valid (for the usage poll).
-  readSubCreds(id) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(this.subCredsPath(id), 'utf-8'));
-      const o = raw?.claudeAiOauth;
-      if (!o?.accessToken) return { loggedIn: false };
-      const valid = !o.expiresAt || Date.now() < o.expiresAt - 60000;
-      // Identity (email/org) is NOT in .credentials.json — it's in the dir's
-      // .claude.json (written because LOGIN also set CLAUDE_CONFIG_DIR=dir).
-      let email = o.email || o.emailAddress || null, org = null;
-      if (!email) {
-        try {
-          const cfg = JSON.parse(fs.readFileSync(path.join(this.subDir(id), '.claude.json'), 'utf-8'));
-          email = cfg?.oauthAccount?.emailAddress || null;
-          org = cfg?.oauthAccount?.organizationName || null;
-        } catch { }
-      }
-      return {
-        loggedIn: true,
-        subscriptionType: o.subscriptionType || null,
-        email, org,
-        accessToken: valid ? o.accessToken : null,
-        expiresAt: o.expiresAt || null,
-      };
-    } catch { return { loggedIn: false }; }
-  }
+  readSubCreds(id) { return this._credsOf('claude').parseAuth(this.subDir(id)); } // parser lives on the claude harness descriptor (S2)
 
   _subscriptionLoginStatus(id) {
     try {
@@ -310,23 +292,8 @@ class AccountManager {
 
   // Read-only parse of a codex auth.json (never refreshes). Reports loggedIn +
   // auth mode + identity (email/plan) from the id_token claims.
-  _parseCodexAuthFile(file) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      const mode = raw.auth_mode || (raw.tokens ? 'chatgpt' : (raw.OPENAI_API_KEY ? 'apikey' : null));
-      const hasTok = !!(raw.tokens?.access_token || raw.tokens?.id_token || raw.OPENAI_API_KEY);
-      if (!hasTok) return { loggedIn: false };
-      let email = null, plan = null;
-      if (raw.tokens?.id_token) {
-        const c = this._jwtPayload(raw.tokens.id_token);
-        email = c.email || null;
-        const auth = c['https://api.openai.com/auth'] || {};
-        plan = auth.chatgpt_plan_type || auth.plan_type || null;
-      }
-      return { loggedIn: true, authMode: mode, email, plan };
-    } catch { return { loggedIn: false }; }
-  }
-  readCodexSubAuth(id) { return this._parseCodexAuthFile(path.join(this.codexSubDir(id), 'auth.json')); }
+  _parseCodexAuthFile(file) { return this._credsOf('codex').parseAuthFile(file); } // parser lives on the codex harness descriptor (S2)
+  readCodexSubAuth(id) { return this._credsOf('codex').parseAuth(this.codexSubDir(id)); }
   // The machine's OWN codex login (~/.codex/auth.json) — the codex counterpart
   // of subscriptionStatus(); identity feeds the codex global↔named-account link.
   codexGlobalStatus() { return this._parseCodexAuthFile(path.join(this._codexSharedHome(), 'auth.json')); }
@@ -408,7 +375,7 @@ class AccountManager {
       else if (rec.tail) a.tail = rec.tail;
       if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); }
       if (rec.files && typeof rec.files === 'object' && (isCodex || a.type === 'subscription')) {
-        const dir = isCodex ? this.codexSubDir(a.id) : this.subDir(a.id);
+        const dir = this._acctDir(isCodex ? 'codex' : 'claude', a.id);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         if (isCodex) this._seedCodexDir(dir); // sessions/config.toml symlinks into the shared ~/.codex
         else this._seedConfigDir(dir);
@@ -682,8 +649,7 @@ class AccountManager {
       if (!a) throw new Error('account not found');
       be = this._acctBackend(a);
     }
-    if (be === 'codex') this._state.defaultCodexAccountId = id || null;
-    else this._state.defaultAccountId = id || null;
+    this._state[this._credsOf(be).defaultIdField] = id || null; // per-harness default-account field (S2)
     this._save();
     this._notify();
   }
@@ -748,7 +714,7 @@ class AccountManager {
       // API keys are the sanctioned programmatic path — always shippable
       return { usable: true, how: hostFacts ? 'ship' : 'local-env', reason: null, linked: false, held: false, heldVerified: false };
     }
-    const loggedIn = backend === 'codex' ? !!this.readCodexSubAuth(a.id).loggedIn : !!this.readSubCreds(a.id).loggedIn;
+    const loggedIn = !!this._readAuthFor(backend, a.id).loggedIn;
     // Hosts KNOWN to hold this account's own login (noteHostLogins write-
     // through) minus the host being evaluated: "signed in SOMEWHERE else" is
     // a different situation than "never signed in anywhere" — userN's
@@ -893,14 +859,14 @@ class AccountManager {
     const be = this._acctBackend(a) || 'claude';
     const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
     const wanted = Array.isArray(a?.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
-    const loggedIn = (x) => be === 'codex' ? !!this.readCodexSubAuth(x.id).loggedIn : this.readSubCreds(x.id).loggedIn;
+    const loggedIn = (x) => !!this._readAuthFor(be, x.id).loggedIn;
     return wanted.filter(loggedIn).map((x) => ({ id: x.id, name: x.name }));
   }
 
   /** The pool's own symlink path + a member's home dir — per backend (codex
    *  pool = symlink among the CODEX_HOME dirs; P2, design-backend-parity §2). */
-  _poolLinkDir(a) { return this._acctBackend(a) === 'codex' ? this.codexSubDir(a.id) : this.subDir(a.id); }
-  _poolMemberDir(a, subId) { return this._acctBackend(a) === 'codex' ? this.codexSubDir(subId) : this.subDir(subId); }
+  _poolLinkDir(a) { return this._acctDir(this._acctBackend(a), a.id); }
+  _poolMemberDir(a, subId) { return this._acctDir(this._acctBackend(a), subId); }
 
   // The real account a pool currently resolves to, read from the symlink
   // itself (the link IS the state — no second source of truth to drift).
@@ -979,7 +945,7 @@ class AccountManager {
     const be = this._acctBackend(a) || 'claude';
     const target = this.get(subId);
     if (!target || this._acctType(target) !== 'subscription' || this._acctBackend(target) !== be) throw new Error(`not a ${be} subscription: ` + subId);
-    if (be === 'codex' ? !this.readCodexSubAuth(subId).loggedIn : !this.readSubCreds(subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
+    if (!this._readAuthFor(be, subId).loggedIn) throw new Error('subscription not logged in: ' + target.name);
     // ONE material implementation (src/account-material.js, 2.298.0): the
     // same primitive the daemon's sealed-orders reflex executes — data/subs
     // is device #0's account store, and the mechanical act is device-tier.
@@ -1018,7 +984,7 @@ class AccountManager {
     this._state.accounts.push(a);
     this._save();
     const first = this.poolMembers(id)[0];
-    if (!first) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); this._save(); throw new Error(`no logged-in ${be === 'codex' ? 'ChatGPT' : 'Claude'} subscription to pool`); }
+    if (!first) { this._state.accounts = this._state.accounts.filter((x) => x.id !== id); this._save(); throw new Error(`no logged-in ${this._credsOf(be).loginLabel} subscription to pool`); }
     this.setPoolTarget(id, first.id);
     this._notify();
     return { id, current: first.id };
