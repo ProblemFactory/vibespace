@@ -496,6 +496,14 @@ class ChatRenderers {
   renderToolResult(block, msg) {
     const fp = block.input?.file_path || '';
     let resultText = stripAnsi(block.output || '');
+    // image tool results (Read of a PNG/JPG, 2.369.35): the normalizer keeps only
+    // {mediaType, bytes} — render the FILE from disk (same URL the file viewer
+    // uses), never a base64 blob in the DOM
+    const imagesHtml = Array.isArray(block.images) && block.images.length
+      ? `<div class="chat-tool-images">${block.images.map((im) => (fp && /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(fp))
+        ? `<img class="chat-img chat-tool-img" loading="lazy" src="/api/file/raw?path=${encodeURIComponent(fp)}''" alt="${escHtml(im.mediaType)}">`
+        : `<span class="chat-tool-image-chip">${escHtml(im.mediaType)} · ${Math.max(1, Math.round(im.bytes / 1024))} KB</span>`).join('')}</div>`
+      : '';
     // Parse JSON content arrays (e.g. Agent tool returns [{"type":"text","text":"..."}])
     if (resultText.startsWith('[{')) {
       try {
@@ -571,7 +579,7 @@ class ChatRenderers {
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}</span>${imagesHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
   }
 
   /**

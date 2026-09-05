@@ -87,6 +87,19 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
   ok(/const fmtReset = \(ts, util, est\) => \{/.test(um2) && /return estMark \+ \(left > 45/.test(um2) && /rl\.sevenDay\?\.resetsAtEstimated\)/.test(um2) && /sc\.resetsAtEstimated\)/.test(um2), 'usage popup marks projected resets with ≈ (weekly + scoped weekly cells)');
 }
 
+// ── 2.369.35: binary image results never enter a card (the frozen-page incident) ──
+{
+  const { MessageManager: MM2, splitToolResultContent } = require(path.join(REPO, 'src/message-manager.js'));
+  const m2 = new MM2('img'); const big = 'A'.repeat(800000);
+  m2.processLive({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: '/tmp/shot.png' } }] } });
+  m2.processLive({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: big } }] }] } });
+  const card = m2.messages.find((m) => m.role === 'tool'); const b = card?.content?.[0];
+  ok(b && b.type === 'tool_result' && b.output.length < 200 && /\[image image\/png · 586 KB\]/.test(b.output) && b.images?.[0]?.mediaType === 'image/png' && b.images[0].bytes === 600000 && JSON.stringify(card).length < 2000, `a Read-of-PNG tool result carries {mediaType, bytes} metadata, never the base64 (card ${JSON.stringify(card).length} bytes)`, b?.output?.slice(0, 80));
+  ok(splitToolResultContent([{ type: 'text', text: 'hi' }]).text === '[{"type":"text","text":"hi"}]' && splitToolResultContent('plain').text === 'plain' && splitToolResultContent([{ type: 'text', text: 'a' }, { type: 'image', source: { media_type: 'image/jpeg', data: 'xx' } }]).images.length === 1, 'text/array results keep their exact previous shape; mixed results lift only the images');
+  const cr2 = read('src/lib/chat-renderers.js');
+  ok(/Array\.isArray\(block\.images\) && block\.images\.length/.test(cr2) && /src="\/api\/file\/raw\?path=\$\{encodeURIComponent\(fp\)\}/.test(cr2) && /chat-tool-image-chip/.test(cr2) && /<\/span>\$\{imagesHtml\}/.test(cr2) && /\.chat-tool-images/.test(read('public/chat.css')), 'the tool card renders image results from the FILE (same URL as the file viewer) or a size chip — never a data: URL from the card');
+}
+
 fs.rmSync(home, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -921,3 +921,8 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 
 /* Style-menu restart row + sidebar locate flash (2.369.8) */
 .chat-status-restart-row { color: var(--accent); font-weight: 600; }
+
+/* image tool results (2.369.35): the file, not the bytes */
+.chat-tool-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; }
+.chat-tool-img { max-width: 280px; max-height: 200px; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: zoom-in; }
+.chat-tool-image-chip { font-size: 11px; color: var(--text-dim); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 2px 6px; }

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.369.35
+- **Image tool results froze the page** (owner: two DreamVanLife windows stuck at "opening"/"loading history" while this session opened in 2s): the agent had been `Read`-ing PNG screenshots — the CLI returns each as a base64 block, and the normalizer JSON-stringified it into the card's `output` TEXT (~600 KB per card; 78 cards; a 12 MB attach payload; the transcript grew 0.6→65 MB in 85 minutes). The renderer's escHtml/linkify over base64 froze the browser thread (telemetry: renderer-freeze-s, ws-reply-timeout:attach ×19, ws-heartbeat-terminate ×11 → reconnect storm), and the codex window in the same page could not get its attach ack. Fix: `splitToolResultContent` lifts image blocks out as `{mediaType, bytes}` metadata (the output keeps a one-line `[image image/png · 586 KB]` marker; text/array results keep their exact previous shape), and the tool card renders the FILE from disk via the file viewer's `/api/file/raw` URL (lazy) — or a size chip when there is no path. Binary never enters a normalized message or the DOM again.
+
 ## 2.369.34
 - **Fold summary names every kind, image views fold too** (owner: "5 bash, 3 web searches, 5 file reads, 2 image reads"): the run header's per-kind counter only initialised the kinds it knew — a `search` card counted `undefined++` = NaN and silently vanished from the summary. Every classifier kind is initialised now, the labels read "N Bash · N web searches · N file reads · N image reads · …", and `image` is a new fold kind (default ON): claude `Read` of an image file (png/jpg/gif/webp/svg/…), codex `view_image`. Generated images (image_gen) and plan updates stay visible.
 

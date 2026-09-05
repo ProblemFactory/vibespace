@@ -63,6 +63,27 @@ function classifyResultError(text) {
   return PROMPT_TOO_LONG_RE.test(String(text || '')) ? 'prompt-too-long' : null;
 }
 
+/** tool_result content → { text, images }. Text/other blocks keep the exact
+ *  previous shape (string passthrough; arrays JSON-stringified so the
+ *  renderer's `[{` Agent-result parse still works); image blocks are LIFTED
+ *  OUT as {mediaType, bytes} and replaced by a one-line marker. */
+function splitToolResultContent(content) {
+  if (typeof content === 'string') return { text: content, images: [] };
+  if (!Array.isArray(content)) return { text: JSON.stringify(content || ''), images: [] };
+  const images = [];
+  const rest = [];
+  for (const b of content) {
+    if (b && typeof b === 'object' && b.type === 'image') {
+      const data = b.source?.data || '';
+      const bytes = Math.round(data.length * 3 / 4);
+      images.push({ mediaType: b.source?.media_type || 'image/png', bytes });
+      rest.push({ type: 'text', text: `[image ${b.source?.media_type || 'image/png'} · ${Math.max(1, Math.round(bytes / 1024))} KB]` });
+    } else rest.push(b);
+  }
+  if (!images.length) return { text: JSON.stringify(content), images: [] };
+  return { text: JSON.stringify(rest), images };
+}
+
 class MessageManager {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -706,7 +727,14 @@ class MessageManager {
       const existing = this.messageIndex.get(pending.msgId);
       if (!existing) continue;
 
-      const resultText = typeof tr.content === 'string' ? tr.content : JSON.stringify(tr.content || '');
+      // BINARY NEVER ENTERS A CARD (2.369.35, owner: two windows frozen): a Read
+      // of a PNG returns the image as a base64 block; stringifying it put a
+      // ~600KB blob into `output` TEXT — 78 such cards = a 12MB attach payload and
+      // the renderer (escHtml/linkify over base64) froze the whole page. Images
+      // leave as {mediaType, bytes} metadata; the renderer shows the FILE (the
+      // Read path is on disk) instead of the bytes.
+      const split = splitToolResultContent(tr.content);
+      const resultText = split.text;
       existing.status = tr.is_error ? 'error' : 'complete';
       existing.toolStatus = tr.is_error ? 'error' : 'ok';
       // A tool_result implies the pending permission was answered. The
@@ -729,6 +757,7 @@ class MessageManager {
       existing.content = [{
         type: 'tool_result', toolCallId: toolUseId, toolName: pending.block.name,
         input: pending.block.input, output: resultText, status: tr.is_error ? 'error' : 'ok',
+        ...(split.images.length ? { images: split.images } : {}),
       }];
       if (emit) this._emit({ op: 'edit', id: existing.id, fields: { status: existing.status, toolStatus: existing.toolStatus, content: existing.content, ...(permResolved ? { permission: existing.permission } : {}) } });
       // LAUNCH-ACK taskInfo synthesis (2.368.30): works on HISTORY too (the
@@ -1141,4 +1170,4 @@ function parseBackgroundLaunch(toolName, input, resultText) {
 // peerDisplayName is shared with the codex normalizer (design-harness-plugins
 // §1 P1): the server frames it parses are backend-neutral text, and a codex
 // rollout copy of a peer message carries ONLY that text.
-module.exports = { MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName };
+module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName };
