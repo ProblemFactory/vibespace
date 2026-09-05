@@ -5,6 +5,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { ClaudeCodeAdapter } = require('../adapters/claude-code');
 const { MessageManager } = require('../message-manager');
 const store = require('../session-store');
+const { writerSweepScript } = require('../writer-sweep');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -41,9 +42,21 @@ module.exports = {
   adapterConfig: (cfg) => ({ claudeCmd: cfg.claudeCmd, chatWrapper: cfg.chatWrapper, ptyWrapper: cfg.ptyWrapper, buffersDir: cfg.buffersDir }),
   wrapper: 'data/bin/chat-wrapper.js',
   Normalizer: MessageManager,
+  // STORE (S3): everything "where do this harness's conversations live and
+  // how are they read" — routes/sessions and transcript-service call these,
+  // never a backend ternary. discover = the lock-first sweep (RUNNING
+  // detection: locks + tmux + webui pids; moved verbatim into session-store).
   store: {
-    locateTranscript: store.findSessionJsonlPath,   // (sessionId, cwd) → path|null
+    discover: store.discoverClaudeSessions,        // async ({activeSessions, webuiPids, devSnap}) → session entries
+    locate: (id, cwd) => store.findSessionJsonlPath(id, cwd), // (sessionId, cwd) → path|null
+    locateTranscript: store.findSessionJsonlPath,   // (sessionId, cwd) → path|null (S1 alias)
     warmTranscript: store.warmSessionJsonlAsync,   // worker-side parse cache
+    Reader: store.SessionMessages,
+    createReader: (session, sessionId, opts) => new store.SessionMessages(session, sessionId, opts || {}), // SessionMessages-shaped reader
+    forkChain: () => [],                            // claude forks write a NEW id's JSONL — nothing to merge
+    writerSweep: (rid, shq, opts) => writerSweepScript(rid, shq, { ...(opts || {}), backend: 'claude' }),
+    // remote transcript location (hosts.fetchTranscript): where find(1) looks + the cache name
+    remoteFind: (id) => ({ root: '"$HOME"/.claude/projects', findExpr: `-maxdepth 2 -name ${JSON.stringify(id + '.jsonl')}`, cacheRel: id + '.jsonl', maxBytes: 64 * 1024 * 1024 }),
     transcriptDirs: ['~/.claude/projects'],
     conversationIdField: 'claudeSessionId',
   },

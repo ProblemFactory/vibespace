@@ -61,6 +61,23 @@ function runOp(op, payload = {}) {
       }
       return { result: records };
     }
+    case 'codexThreadMetas': {
+      // S3 discovery hot path: the ~/.codex/sessions walk + per-rollout head
+      // reads (dir-mtime + file-mtime cached) — the facts half of
+      // listCodexThreads, run where the reads happen. Same function as the
+      // inline fallback (codex-session-store requires adapters/codex — lazy
+      // require for the same cycle reason as _codex()).
+      return { result: require('./codex-session-store').collectCodexThreadMetas() };
+    }
+    case 'codexOpenThreads': {
+      // the /proc (or lsof) open-rollout scan → thread ids (uncached here;
+      // the main thread keeps the 10s cache)
+      const { listOpenCodexRolloutPaths, codexThreadIdOf } = require('./discovery-facts');
+      const { CODEX_SESSIONS_DIR } = _codex();
+      const ids = new Set();
+      for (const p of listOpenCodexRolloutPaths({ sessionsDir: CODEX_SESSIONS_DIR })) { const t = codexThreadIdOf(p); if (t) ids.add(t); }
+      return { result: [...ids] };
+    }
     case '__sleep': { // test hook (deadline/restart path)
       const until = Date.now() + (payload.ms || 1000);
       while (Date.now() < until) { /* burn */ }

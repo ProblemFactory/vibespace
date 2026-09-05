@@ -2,9 +2,10 @@
 // Codex harness descriptor (S1).
 const { BACKEND_CAPS } = require('../backend-caps');
 const { CodexAdapter } = require('../adapters/codex');
-const { findCodexSessionJsonlPath } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('../adapters/codex');
 const { CodexMessageManager } = require('../codex-message-manager');
 const codexStore = require('../codex-session-store');
+const { writerSweepScript } = require('../writer-sweep');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -44,9 +45,24 @@ module.exports = {
   adapterConfig: (cfg) => ({ codexCmd: cfg.codexCmd, codexSandboxSupported: cfg.codexSandboxSupported, chatWrapper: cfg.codexChatWrapper, ptyWrapper: cfg.ptyWrapper }),
   wrapper: 'data/bin/codex-chat-wrapper.js',
   Normalizer: CodexMessageManager,
+  // STORE (S3): discover = the worker-side rollout walk + /proc liveness
+  // (external = a codex process holds the rollout open); locate handles
+  // .jsonl and .jsonl.zst; forkChain = the persisted forked_from chain the
+  // wrapper merges on resume.
   store: {
-    locateTranscript: findCodexSessionJsonlPath,   // (threadId) → rollout path|null
-    listThreads: codexStore.listCodexThreads,
+    discover: ({ activeSessions } = {}) => codexStore.listCodexThreadsAsync({ activeSessions }),
+    locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant)
+    locateTranscript: findCodexSessionJsonlPath,   // (threadId) → rollout path|null (S1 alias)
+    listThreads: codexStore.listCodexThreads,      // sync twin (user-action consumers)
+    Reader: codexStore.CodexSessionMessages,
+    createReader: (session, sessionId, opts) => new codexStore.CodexSessionMessages(session, sessionId, opts || {}),
+    forkChain: (id) => { const p = findCodexSessionJsonlPath(id); return p ? (extractCodexThreadMeta(p).forkedFrom || []) : []; },
+    writerSweep: (rid, shq, opts) => writerSweepScript(rid, shq, { ...(opts || {}), backend: 'codex' }),
+    remoteFind: (id) => ({
+      root: '"$HOME"/.codex/sessions',
+      findExpr: `-maxdepth 5 -type f \\( -name ${JSON.stringify('rollout-*' + id + '.jsonl')} -o -name ${JSON.stringify('rollout-*' + id + '.jsonl.zst')} \\)`,
+      cacheRel: path.join('codex', id + '.jsonl'), maxBytes: 64 * 1024 * 1024,
+    }),
     transcriptDirs: ['~/.codex/sessions'],
     conversationIdField: 'backendSessionId',
   },

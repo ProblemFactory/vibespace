@@ -11,14 +11,13 @@ const os = require('os');
 const router = express.Router();
 
 const {
-  SESSIONS_DIR, isPidAlive, cwdToProjectDir, recoverCwdFromProjDir,
-  getTmuxPaneMap, findTmuxTarget, isProcessClaude,
-  getTmuxPaneMapAsync, findTmuxTargetAsync, isProcessClaudeAsync, isLockClaude, execFileP,
-  extractSessionMeta, isSubagentMessage,
-  readJsonlTailIds, claimJsonls,
+  cwdToProjectDir, isProcessClaude, isProcessClaudeAsync, execFileP, isSubagentMessage,
 } = require('../session-store');
 const { createMessageManager } = require('../normalizers');
-const { listCodexThreads } = require('../codex-session-store');
+// S3: discovery iterates the harness registry — each descriptor's
+// store.discover lists its own sessions (claude lock-first sweep in
+// session-store, codex worker-side rollout walk); no backend ternary here.
+const { list: listHarnesses } = require('../harnesses');
 const { findSessionJsonlPath } = require('../session-store');
 const { findCodexSessionJsonlPath, jsonlGapInfo, jsonlGapInfoAsync, readJsonlLineRange, readJsonlLineRangeAsync, scanJsonlUserTurns, scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream } = require('../adapters/codex');
 
@@ -468,7 +467,6 @@ function setup(ctx) {
   let _sessionsCache = null;
   let _sessionsCacheAt = 0;
   let _sweepInFlight = null; // concurrent polls share ONE async sweep (2.242.0)
-  const _childPidCache = new Map(); // childPid -> {pids, at} — see pgrep note below
 
   // The sweep body — ASYNC since 2.242.0. It ran execFileSync end-to-end and a
   // live V8 profile on the busiest fleet pod (22 live sessions, heavy claude
@@ -480,8 +478,6 @@ function setup(ctx) {
   // fine when I come back later" class. Subprocess calls are now async and
   // PARALLEL (wall = slowest single command, loop never blocks).
   const _runSessionsSweep = async () => {
-    const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-
     // B-47e2 (R5's local leg, FLAG-GATED default OFF: agentd.localDiscovery):
     // the FS-scan FACTS (lock files, project-dir listing, tail ids) come from
     // device #0's discovery snapshot — computed in a daemon CHILD process, so
@@ -502,201 +498,33 @@ function setup(ctx) {
         }
       } catch (e) { global.__vsEvent?.('local-disc-snap-failed', String(e.message).slice(0, 80)); }
     }
-    // snapshot jsonls grouped by projDir for the walk below
-    const snapByDir = devSnap ? (() => {
-      const m = new Map();
-      for (const j of devSnap.jsonls) { if (!m.has(j.projDir)) m.set(j.projDir, new Map()); m.get(j.projDir).set(j.file, j); }
-      return m;
-    })() : null;
-
-    // Step 0: Use cached webuiPids (updated on session create/kill/restore)
-
-    // Step 1: Scan lock files + tmux panes -> build map of RUNNING sessions
-    // Build webuiPid -> claudeSessionId map for precise JSONL matching
-    const webuiPidToSessionId = new Map();
-    const needPgrep = []; // [{childPid, claudeSessionId}] — cache misses
-    for (const [id, s] of activeSessions) {
-      if (s.claudeSessionId && s._childPid) {
-        // Map childPid + its direct children (claude forks from node-pty spawn)
-        webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
-        // the wrapper's child pids rarely change, cache them 15s (audit round-2)
-        const hit = _childPidCache.get(s._childPid);
-        if (hit && Date.now() - hit.at < 15000) {
-          for (const p of hit.pids) webuiPidToSessionId.set(p, s.claudeSessionId);
-        } else needPgrep.push({ childPid: s._childPid, claudeSessionId: s.claudeSessionId });
-      }
-    }
-    await Promise.all(needPgrep.map(async ({ childPid, claudeSessionId }) => {
-      const out = await execFileP('pgrep', ['-P', String(childPid)], { timeout: 2000 });
-      const pids = [];
-      for (const line of String(out || '').trim().split('\n')) { const p = parseInt(line.trim()); if (p) pids.push(p); }
-      _childPidCache.set(childPid, { pids, at: Date.now() });
-      if (_childPidCache.size > 512) _childPidCache.delete(_childPidCache.keys().next().value);
-      for (const p of pids) webuiPidToSessionId.set(p, claudeSessionId);
-    }));
-
-    const paneMap = await getTmuxPaneMapAsync();
-    const runningByProjDir = new Map(); // projDirName -> [{lock, tmuxTarget, assigned, claudeSessionId}]
-    if (devSnap || fs.existsSync(SESSIONS_DIR)) {
-      let lockDatas = [];
-      if (devSnap) {
-        // device facts: liveness + pidLooksClaude already applied device-side
-        lockDatas = devSnap.locks;
-      } else for (const f of fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
-        try {
-          const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
-          if (!isPidAlive(data.pid)) continue;
-          lockDatas.push(data);
-        } catch {}
-      }
-      // probe in PARALLEL, assemble in ORIGINAL order (claimJsonls' mtime
-      // fallback + the firstRunning cwd pick depend on stable entry order)
-      const probed = await Promise.all(lockDatas.map(async (data) => {
-        try {
-          if (!devSnap && !(await isLockClaude(data))) return null; // B-2104: procStart file-read, ps only as fallback (device facts arrive pre-verified)
-          return { data, tmuxTarget: await findTmuxTargetAsync(data.pid, paneMap) };
-        } catch { return null; }
-      }));
-      for (const hit of probed) {
-        if (!hit) continue;
-        const projDirName = cwdToProjectDir(hit.data.cwd);
-        const claudeSessionId = webuiPidToSessionId.get(hit.data.pid) || null;
-        if (!runningByProjDir.has(projDirName)) runningByProjDir.set(projDirName, []);
-        runningByProjDir.get(projDirName).push({ lock: hit.data, tmuxTarget: hit.tmuxTarget, assigned: false, claudeSessionId });
-      }
-    }
-
-      // Step 2: Scan JSONL files, match with running locks
-      const sessions = [];
-      const sessionMap = new Map(); // sessionId → index in sessions[] (dedup: running wins over stopped)
-      if (snapByDir || fs.existsSync(projectsDir)) {
-        for (const projDir of (snapByDir ? [...snapByDir.keys()] : fs.readdirSync(projectsDir))) {
-          const projPath = path.join(projectsDir, projDir);
-          const snapFiles = snapByDir?.get(projDir) || null;
-          if (!snapFiles) { try { if (!fs.statSync(projPath).isDirectory()) continue; } catch { continue; } }
-
-          // Pre-fetch stats for sorting + mtime lookup (device facts carry them)
-          const jsonls = snapFiles ? [...snapFiles.keys()]
-            : fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl') && !f.startsWith('agent-'));
-          const statMap = new Map();
-          for (const f of jsonls) {
-            if (snapFiles) { statMap.set(f, snapFiles.get(f)?.mtimeMs || 0); continue; }
-            try { statMap.set(f, fs.statSync(path.join(projPath, f)).mtimeMs); } catch { statMap.set(f, 0); }
-          }
-          // Sort by mtime desc (display recency; claiming no longer relies on it alone)
-          jsonls.sort((a, b) => (statMap.get(b) || 0) - (statMap.get(a) || 0));
-
-          // Check if there are running locks for this project dir
-          const runningEntries = runningByProjDir.get(projDir) || [];
-
-          // Match running locks to JSONLs (claimJsonls in session-store):
-          // 1. exact — webui-tracked claudeSessionId, or the lock file's own
-          //    sessionId equals a JSONL filename (non-resumed sessions)
-          // 2. tail — resumed sessions write their CURRENT id into the
-          //    ORIGINAL-named file; scan the last 64KB for the lock's id
-          // 3. mtime fallback — brand-new session with nothing flushed yet.
-          // With N parallel sessions in ONE cwd, the old "newest unclaimed
-          // JSONL takes the next lock" attributed files arbitrarily (kill one
-          // → the WRONG id showed stopped → resume collided with a live one).
-          const claims = runningEntries.length ? claimJsonls(
-            runningEntries.map(e => ({ sessionId: e.claudeSessionId || e.lock.sessionId || null, exactOnly: !!e.claudeSessionId, entry: e })),
-            jsonls.map(f => ({ id: f.replace(/\.jsonl$/, ''), mtime: statMap.get(f) || 0 })),
-            (j) => {
-              // device facts carry tail ids for the newest 60 files; older
-              // files with a running lock (rare) fall back to a local read —
-              // extractTailIds' null-on-unreadable contract is preserved
-              const sf = snapFiles?.get(j.id + '.jsonl');
-              return sf && 'tailIds' in sf ? sf.tailIds : readJsonlTailIds(path.join(projPath, j.id + '.jsonl'));
-            },
-          ) : new Map();
-
-          for (const f of jsonls) {
-            const sessionId = f.replace('.jsonl', '');
-            const filePath = path.join(projPath, f);
-            const mtime = statMap.get(f) || 0;
-
-            const meta = extractSessionMeta(filePath);
-            const firstRunning = runningEntries.find(e => !e.assigned);
-            const cwd = (firstRunning?.lock.cwd) || meta.cwd || recoverCwdFromProjDir(projDir);
-
-            let status = 'stopped', pid = null, tmuxTarget = null;
-            const match = claims.get(sessionId)?.entry || null;
-            // Also check if any active webui session claims this claudeSessionId (covers race during resume)
-            let isWebuiSession = false;
-            if (match) isWebuiSession = webuiPids.has(match.lock.pid);
-            if (!isWebuiSession) {
-              for (const [, s] of activeSessions) {
-                if (s.claudeSessionId === sessionId) { isWebuiSession = true; break; }
-              }
-            }
-            if (match) {
-              status = isWebuiSession ? 'live'
-                : match.tmuxTarget ? 'tmux' : 'external';
-              pid = match.lock.pid;
-              tmuxTarget = match.tmuxTarget || null;
-              match.assigned = true;
-            }
-
-            const entry = withSessionKey({
-              backend: 'claude',
-              backendSessionId: sessionId,
-              claudeSessionId: sessionId,
-              sessionId,
-              cwd,
-              pid,
-              startedAt: mtime,
-              status,
-              name: meta.name || '',
-              tmuxTarget,
-            });
-
-            // Deduplicate: same JSONL can appear in multiple project dirs
-            if (sessionMap.has(sessionId)) {
-              const existing = sessions[sessionMap.get(sessionId)];
-              // Running status wins over stopped
-              if (existing.status === 'stopped' && status !== 'stopped') {
-                sessions[sessionMap.get(sessionId)] = entry;
-              }
-            } else {
-              sessionMap.set(sessionId, sessions.length);
-              sessions.push(entry);
-            }
-          }
-        }
-      }
-
-      // Step 3: Running locks that didn't match any project dir (brand new, no JSONL yet)
-      for (const [, entries] of runningByProjDir) {
-        for (const entry of entries) {
-          if (!entry.assigned && !sessionMap.has(entry.lock.sessionId)) {
-            sessionMap.set(entry.lock.sessionId, sessions.length);
-            sessions.push(withSessionKey({
-              backend: 'claude',
-              backendSessionId: entry.lock.sessionId,
-              claudeSessionId: entry.lock.sessionId,
-              sessionId: entry.lock.sessionId, cwd: entry.lock.cwd, pid: entry.lock.pid,
-              startedAt: entry.lock.startedAt || Date.now(),
-              status: (webuiPids.has(entry.lock.pid) || [...activeSessions.values()].some(s => s.claudeSessionId === entry.lock.sessionId)) ? 'live'
-                : entry.tmuxTarget ? 'tmux' : 'external', name: '',
-              tmuxTarget: entry.tmuxTarget || null,
-            }));
-          }
-        }
-      }
-
-      const codexSessions = listCodexThreads({ activeSessions });
-      const seenSessionKeys = new Set(sessions.map((s) => `${s.backend || 'claude'}:${s.backendSessionId || s.sessionId}`));
-      for (const entry of codexSessions) {
-        const key = `${entry.backend}:${entry.backendSessionId || entry.sessionId}`;
+    // S3 (docs/design-harness-plugins.md §2.4): every chat harness discovers
+    // its OWN sessions through its descriptor's `store.discover` — claude =
+    // session-store.discoverClaudeSessions (the former inline Steps 1-3,
+    // moved VERBATIM: webui-pid map, lock-first claims, tmux enrichment),
+    // codex = listCodexThreadsAsync (the rollout walk + /proc scan in the
+    // transcript worker — this 5s hot path no longer touches the tree on the
+    // loop). The route only MERGES: the first harness to name a session key
+    // wins (claude before codex, exactly the old order). A harness without a
+    // store (shell) has nothing to discover. Unknown backends cannot appear:
+    // only registered descriptors are iterated.
+    const sessions = [];
+    const seenSessionKeys = new Set();
+    for (const h of listHarnesses()) {
+      if (!h.store || typeof h.store.discover !== 'function') continue;
+      const entries = await h.store.discover({ activeSessions, webuiPids, devSnap });
+      for (const entry of entries) {
+        const key = `${entry.backend || h.id}:${entry.backendSessionId || entry.sessionId}`;
         if (seenSessionKeys.has(key)) continue;
         seenSessionKeys.add(key);
         sessions.push(withSessionKey(entry));
       }
+    }
 
-      sessions.sort((a, b) => b.startedAt - a.startedAt);
-      _sessionsCache = { sessions };
-      _sessionsCacheAt = Date.now();
-      return _sessionsCache;
+    sessions.sort((a, b) => b.startedAt - a.startedAt);
+    _sessionsCache = { sessions };
+    _sessionsCacheAt = Date.now();
+    return _sessionsCache;
   };
 
   router.get('/api/sessions', async (req, res) => {

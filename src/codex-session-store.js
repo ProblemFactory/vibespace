@@ -1,13 +1,13 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const { execFileSync } = require('child_process');
 const {
   CODEX_SESSIONS_DIR,
   extractCodexThreadMeta,
   findCodexSessionJsonlPath,
   parseCodexSessionJsonl,
+  transcriptWorkerCall,
 } = require('./adapters/codex');
+const { listOpenCodexRolloutPaths, codexThreadIdOf, CODEX_ROLLOUT_RE } = require('./discovery-facts');
 
 function getCodexHistorySessionId(session) {
   return session?.backendSessionId || session?.claudeSessionId || null;
@@ -29,82 +29,17 @@ function parseBufferRecords(buffer) {
   return records;
 }
 
-function extractThreadIdFromJsonlPath(filePath) {
-  const match = String(filePath || '').match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
-  return match ? match[1] : null;
-}
-
-function isCodexCommandLine(cmdline = '') {
-  const value = String(cmdline || '');
-  return (
-    /(^|\0|[\/\s])codex(\0|\s|$)/.test(value)
-    || value.includes('/@openai/codex/')
-    || value.includes('/codex-linux-')
-  );
-}
-
-function listOpenCodexThreadIdsFromProc() {
-  const openThreadIds = new Set();
-  let procEntries = [];
-  try {
-    procEntries = fs.readdirSync('/proc', { withFileTypes: true });
-  } catch {
-    return openThreadIds;
+// Codex LIVENESS = a rollout held open by a codex process (no lock files).
+// The fd/lsof scan is ONE implementation in discovery-facts
+// (listOpenCodexRolloutPaths — shared with the daemon snapshot's CO lines and
+// mirrored by the ssh script); this file only turns paths into thread ids.
+function _openThreadIdsUncached() {
+  const ids = new Set();
+  for (const p of listOpenCodexRolloutPaths({ sessionsDir: CODEX_SESSIONS_DIR })) {
+    const tid = codexThreadIdOf(p);
+    if (tid) ids.add(tid);
   }
-
-  for (const entry of procEntries) {
-    if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
-    const pid = entry.name;
-
-    let cmdline = '';
-    try {
-      cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8');
-    } catch {
-      continue;
-    }
-    if (!isCodexCommandLine(cmdline)) continue;
-
-    let fds = [];
-    try {
-      fds = fs.readdirSync(`/proc/${pid}/fd`);
-    } catch {
-      continue;
-    }
-
-    for (const fd of fds) {
-      let target = '';
-      try {
-        target = fs.readlinkSync(`/proc/${pid}/fd/${fd}`);
-      } catch {
-        continue;
-      }
-      if (!target.startsWith(CODEX_SESSIONS_DIR) || !target.endsWith('.jsonl')) continue;
-      const threadId = extractThreadIdFromJsonlPath(target);
-      if (threadId) openThreadIds.add(threadId);
-    }
-  }
-
-  return openThreadIds;
-}
-
-function listOpenCodexThreadIdsFromLsof() {
-  const openThreadIds = new Set();
-  try {
-    const output = execFileSync('lsof', ['-Fn', '+D', CODEX_SESSIONS_DIR], {
-      encoding: 'utf-8',
-      timeout: 4000,
-      maxBuffer: 8 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    for (const line of output.split('\n')) {
-      if (!line.startsWith('n')) continue;
-      const filePath = line.slice(1).trim();
-      if (!filePath.endsWith('.jsonl')) continue;
-      const threadId = extractThreadIdFromJsonlPath(filePath);
-      if (threadId) openThreadIds.add(threadId);
-    }
-  } catch {}
-  return openThreadIds;
+  return ids;
 }
 
 let _openThreadsCache = null; // {ids, at} — the /proc walk (readdir all pids +
@@ -112,13 +47,121 @@ let _openThreadsCache = null; // {ids, at} — the /proc walk (readdir all pids 
 // tolerates 10s staleness easily (audit round-2)
 function listOpenCodexThreadIds() {
   if (_openThreadsCache && Date.now() - _openThreadsCache.at < 10000) return _openThreadsCache.ids;
-  const ids = _listOpenCodexThreadIdsUncached();
+  const ids = _openThreadIdsUncached();
   _openThreadsCache = { ids, at: Date.now() };
   return ids;
 }
-function _listOpenCodexThreadIdsUncached() {
-  if (process.platform === 'linux') return listOpenCodexThreadIdsFromProc();
-  return listOpenCodexThreadIdsFromLsof();
+/** Off-loop twin (S3 hot path): the /proc walk runs in the transcript worker
+ *  (`codexOpenThreads` op); same 10s cache, same result shape. */
+async function listOpenCodexThreadIdsAsync() {
+  if (_openThreadsCache && Date.now() - _openThreadsCache.at < 10000) return _openThreadsCache.ids;
+  const arr = await transcriptWorkerCall('codexOpenThreads', {}, () => [..._openThreadIdsUncached()]);
+  const ids = new Set(Array.isArray(arr) ? arr : []);
+  _openThreadsCache = { ids, at: Date.now() };
+  return ids;
+}
+
+// ── The rollout walk (S3 hot path) ──
+// Every 5s /api/sessions poll used to readdir the whole ~/.codex/sessions
+// tree + head-read every rollout ON THE LOOP (an NFS home stalled the whole
+// instance per poll). Now: (1) the walk keeps a PER-DIRECTORY mtime cache —
+// a directory whose mtime is unchanged (and older than 2s: coarse NFS
+// timestamps) reuses its cached listing, no readdir; (2) extractCodexThreadMeta
+// keeps its per-file mtime cache; (3) the whole thing runs in the transcript
+// worker for the poll (listCodexThreadsAsync) so the main thread only pays
+// for the structured-clone of the small meta array. The sync listCodexThreads
+// (user-action consumers: capture, migration map, spawn baseline) is
+// unchanged in behaviour and shares the same functions.
+const _dirCache = new Map(); // dir -> { mtimeMs, dirs: [names], files: [names] }
+const DIR_CACHE_MAX = 4096;
+const DIR_CACHE_SETTLE_MS = 2000;
+const _dirStats = { hits: 0, misses: 0 };
+function _listDirCached(dir) {
+  let st;
+  try { st = fs.statSync(dir); } catch { return null; }
+  const hit = _dirCache.get(dir);
+  if (hit && hit.mtimeMs === st.mtimeMs && Date.now() - st.mtimeMs > DIR_CACHE_SETTLE_MS) { _dirStats.hits++; return hit; }
+  _dirStats.misses++;
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  const dirs = [], files = [];
+  for (const e of entries) {
+    if (e.isDirectory()) dirs.push(e.name);
+    else if (e.isFile() && CODEX_ROLLOUT_RE.test(e.name)) files.push(e.name);
+  }
+  // plain before compressed so a thread with both lists its .jsonl (2.369 zst)
+  files.sort((a, b) => (a.endsWith('.zst') ? 1 : 0) - (b.endsWith('.zst') ? 1 : 0));
+  const rec = { mtimeMs: st.mtimeMs, dirs, files };
+  _dirCache.set(dir, rec);
+  if (_dirCache.size > DIR_CACHE_MAX) _dirCache.delete(_dirCache.keys().next().value);
+  return rec;
+}
+function dirCacheStats() { return { ..._dirStats, size: _dirCache.size }; }
+
+/** Pass 1: walk the sessions tree, extract every thread's meta (first wins
+ *  per threadId), collect the forkedFrom chains. Pure facts — no session
+ *  state — so the worker can run it and the main thread assembles. */
+function collectCodexThreadMetas() {
+  const seen = new Set();
+  const metas = [];
+  const mergedThreadIds = new Set();
+  const stack = [CODEX_SESSIONS_DIR];
+  while (stack.length) {
+    const current = stack.pop();
+    const rec = _listDirCached(current);
+    if (!rec) continue;
+    for (const d of rec.dirs) stack.push(path.join(current, d));
+    for (const f of rec.files) {
+      const meta = extractCodexThreadMeta(path.join(current, f));
+      if (!meta.threadId || seen.has(meta.threadId)) continue;
+      seen.add(meta.threadId);
+      // Collect forkedFrom from JSONL metadata (persisted across session lifecycle)
+      for (const forkId of meta.forkedFrom || []) mergedThreadIds.add(forkId);
+      metas.push(meta);
+    }
+  }
+  return { metas, mergedThreadIds: [...mergedThreadIds] };
+}
+
+/** Pass 2: metas + live sessions + open rollouts → the session-list entries
+ *  (merged fork sources hidden; live/external/stopped status). */
+function assembleCodexThreads({ metas, mergedThreadIds }, { activeSessions, openThreadIds }) {
+  const sessions = [];
+  const activeByThreadId = new Map();
+  const merged = new Set(mergedThreadIds || []);
+  for (const [id, session] of activeSessions || []) {
+    if (session.backend !== 'codex') continue;
+    const threadId = session.backendSessionId || session.claudeSessionId;
+    if (!threadId) continue;
+    activeByThreadId.set(threadId, { id, session });
+    for (const forkId of session.forkedFrom || []) merged.add(forkId);
+  }
+  for (const meta of metas) {
+    if (merged.has(meta.threadId)) continue;
+    const active = activeByThreadId.get(meta.threadId);
+    const isExternal = !active && openThreadIds.has(meta.threadId);
+    sessions.push({
+      backend: 'codex',
+      backendSessionId: meta.threadId,
+      sessionId: meta.threadId,
+      sessionKey: getSessionKey({ backend: 'codex', backendSessionId: meta.threadId }),
+      cwd: meta.cwd || '',
+      startedAt: meta.updatedAt || Date.now(),
+      status: active ? 'live' : (isExternal ? 'external' : 'stopped'),
+      name: meta.name || meta.agentNickname || meta.agentRole || '',
+      source: meta.source || null,
+      sourceKind: meta.sourceKind || null,
+      agentKind: meta.agentKind || 'primary',
+      agentRole: meta.agentRole || '',
+      agentNickname: meta.agentNickname || '',
+      parentThreadId: meta.parentThreadId || null,
+      webuiId: active?.id || null,
+      webuiName: active?.session?.name || null,
+      webuiMode: active?.session?.mode || null,
+    });
+  }
+  sessions.sort((a, b) => b.startedAt - a.startedAt);
+  return sessions;
 }
 
 function sortRecords(records) {
@@ -310,68 +353,20 @@ class CodexSessionMessages {
   }
 }
 
+/** Sync listing (user-action consumers). Behaviour unchanged. */
 function listCodexThreads({ activeSessions } = {}) {
-  const sessions = [];
-  const seen = new Set();
-  const activeByThreadId = new Map();
-  const mergedThreadIds = new Set();
-  const externallyOpenThreadIds = listOpenCodexThreadIds();
-  for (const [id, session] of activeSessions || []) {
-    if (session.backend !== 'codex') continue;
-    const threadId = session.backendSessionId || session.claudeSessionId;
-    if (!threadId) continue;
-    activeByThreadId.set(threadId, { id, session });
-    for (const forkId of session.forkedFrom || []) mergedThreadIds.add(forkId);
-  }
+  return assembleCodexThreads(collectCodexThreadMetas(), { activeSessions, openThreadIds: listOpenCodexThreadIds() });
+}
 
-  // Pass 1: scan all JONLs, extract metadata + forkedFrom chains
-  const allMetas = [];
-  const stack = [CODEX_SESSIONS_DIR];
-  while (stack.length) {
-    const current = stack.pop();
-    let entries = [];
-    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { continue; }
-    for (const entry of entries) {
-      const fp = path.join(current, entry.name);
-      if (entry.isDirectory()) { stack.push(fp); continue; }
-      if (!entry.isFile() || !fp.endsWith('.jsonl')) continue;
-      const meta = extractCodexThreadMeta(fp);
-      if (!meta.threadId || seen.has(meta.threadId)) continue;
-      seen.add(meta.threadId);
-      // Collect forkedFrom from JSONL metadata (persisted across session lifecycle)
-      for (const forkId of meta.forkedFrom || []) mergedThreadIds.add(forkId);
-      allMetas.push(meta);
-    }
-  }
-
-  // Pass 2: build session list, filtering out merged threads
-  for (const meta of allMetas) {
-    if (mergedThreadIds.has(meta.threadId)) continue;
-    const active = activeByThreadId.get(meta.threadId);
-    const isExternal = !active && externallyOpenThreadIds.has(meta.threadId);
-    sessions.push({
-      backend: 'codex',
-      backendSessionId: meta.threadId,
-      sessionId: meta.threadId,
-      sessionKey: getSessionKey({ backend: 'codex', backendSessionId: meta.threadId }),
-      cwd: meta.cwd || '',
-      startedAt: meta.updatedAt || Date.now(),
-      status: active ? 'live' : (isExternal ? 'external' : 'stopped'),
-      name: meta.name || meta.agentNickname || meta.agentRole || '',
-      source: meta.source || null,
-      sourceKind: meta.sourceKind || null,
-      agentKind: meta.agentKind || 'primary',
-      agentRole: meta.agentRole || '',
-      agentNickname: meta.agentNickname || '',
-      parentThreadId: meta.parentThreadId || null,
-      webuiId: active?.id || null,
-      webuiName: active?.session?.name || null,
-      webuiMode: active?.session?.mode || null,
-    });
-  }
-
-  sessions.sort((a, b) => b.startedAt - a.startedAt);
-  return sessions;
+/** The 5s-poll listing (S3): walk + head reads + the /proc scan run in the
+ *  transcript worker; only the assembly touches the main thread. Worker
+ *  down ⇒ the same functions run inline (identical result, no isolation). */
+async function listCodexThreadsAsync({ activeSessions } = {}) {
+  const [facts, openThreadIds] = await Promise.all([
+    transcriptWorkerCall('codexThreadMetas', {}, collectCodexThreadMetas),
+    listOpenCodexThreadIdsAsync(),
+  ]);
+  return assembleCodexThreads(facts, { activeSessions, openThreadIds });
 }
 
 module.exports = {
@@ -380,6 +375,11 @@ module.exports = {
   findCodexSessionJsonlPath,
   getCodexHistorySessionId,
   listCodexThreads,
+  listCodexThreadsAsync,
+  collectCodexThreadMetas,
+  assembleCodexThreads,
+  listOpenCodexThreadIds,
+  dirCacheStats,
   mergeCodexRecords,
   parseCodexSessionJsonl,
 };

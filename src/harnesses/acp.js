@@ -49,7 +49,8 @@ function acpHarness({ id, label, command, args = ['acp'], env = {}, store = {}, 
     wrapper: 'data/bin/acp-wrapper.js',
     Normalizer: AcpMessageManager,
     store: {
-      locateTranscript: typeof store.locate === 'function' ? store.locate : () => null, // ACP exposes no transcript read API; the wrapper journal is the history
+      locate: typeof store.locate === 'function' ? store.locate : () => null,           // S3 name: (id, cwd) → path|null — ACP exposes no transcript read API; the wrapper journal is the history
+      locateTranscript: typeof store.locate === 'function' ? store.locate : () => null, // S1 alias
       transcriptDirs: Array.isArray(store.transcriptDirs) ? store.transcriptDirs : [],
       conversationIdField: 'backendSessionId',
       SessionMessages: AcpSessionMessages,

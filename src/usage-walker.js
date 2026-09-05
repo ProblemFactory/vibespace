@@ -24,6 +24,7 @@
  * walk): {rid, mid, ts, sid, model, cwd, i, cw5, cw1, cr, o, tier}.
  */
 const fs = require('fs');
+const zlib = require('zlib');
 const os = require('os');
 const path = require('path');
 
@@ -157,17 +158,26 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
   let rollouts = [];
   try { rollouts = fs.readdirSync(codexDir, { recursive: true }); } catch { }
   for (const rel of rollouts) {
-    const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(String(rel));
+    const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(String(rel));
     if (!m) continue;
     const fp = path.join(codexDir, String(rel));
     let st; try { st = fs.statSync(fp); } catch { continue; }
     if (!st.isFile()) continue;
+    const zst = !!m[2];
+    if (zst && !ZSTD_OK) continue; // this runtime cannot read compressed rollouts
     const cur = cursors[fp] || { offset: 0, lastRid: null };
-    if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; }
-    if (st.size === cur.offset) { cursors[fp] = cur; continue; }
+    if (zst) { if (cur.zsize === st.size) { cursors[fp] = cur; continue; } if (!cur.zsize || st.size < cur.zsize) { cur.offset = 0; cur.lastRid = null; } }
+    else { if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } if (st.size === cur.offset) { cursors[fp] = cur; continue; } }
     const sid = m[1].toLowerCase();
     filesTouched++;
-    scanFileWith(fp, cur, st.size, (line) => {
+    const scanRollout = (onLine) => {
+      if (!zst) return scanFileWith(fp, cur, st.size, onLine);
+      let plain; try { plain = zstdPlain(fs.readFileSync(fp)); } catch { return; }
+      if (plain.length < cur.offset) { cur.offset = 0; cur.lastRid = null; }
+      scanBufferWith(plain, cur, onLine);
+      cur.zsize = st.size;
+    };
+    scanRollout((line) => {
       if (line.indexOf('"turn_context"') >= 0) {
         let r; try { r = JSON.parse(line); } catch { return; }
         if (r.type === 'turn_context' && r.payload) {
@@ -205,4 +215,35 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
   return { events: out, cursors, cursorFile, filesTouched };
 }
 
-module.exports = { runUsageWalk, defaultCursorFile };
+// zstd rollouts (codex ≥0.153 may write rollout-*.jsonl.zst; S3). Node ≥22.15
+// has zlib.zstd*; an older runtime skips compressed rollouts (their events are
+// simply absent — never a crash). Every frame is decompressed (zstdDecompressSync
+// stops after the first); output capped so a rollout can never inflate past
+// ZST_MAX_PLAIN. The cursor for a compressed file is {offset: PLAIN bytes
+// consumed, zsize: COMPRESSED size seen} — unchanged compressed size ⇒ skip.
+const ZST_MAX_PLAIN = 256 * 1024 * 1024;
+const ZSTD_OK = typeof zlib.zstdDecompressSync === 'function';
+function zstdPlain(buf) {
+  const parts = []; let at = 0, total = 0;
+  while (at < buf.length) {
+    if (buf.length - at >= 8 && (buf[at] & 0xf0) === 0x50 && buf[at + 1] === 0x2a && buf[at + 2] === 0x4d && buf[at + 3] === 0x18) { at += 8 + buf.readUInt32LE(at + 4); continue; } // skippable frame
+    if (!(buf[at] === 0x28 && buf[at + 1] === 0xb5 && buf[at + 2] === 0x2f && buf[at + 3] === 0xfd)) break;
+    let r; try { r = zlib.zstdDecompressSync(buf.subarray(at), { info: true, maxOutputLength: ZST_MAX_PLAIN - total }); } catch { break; }
+    parts.push(r.buffer); total += r.buffer.length;
+    const consumed = Number(r.engine && r.engine.bytesWritten) || 0;
+    if (consumed <= 0) break;
+    at += consumed;
+  }
+  return parts.length === 1 ? parts[0] : Buffer.concat(parts);
+}
+function scanBufferWith(data, cur, onLine) {
+  let lineStart = cur.offset, idx;
+  while ((idx = data.indexOf(10, lineStart)) !== -1) {
+    const line = data.subarray(lineStart, idx).toString('utf8');
+    lineStart = idx + 1;
+    cur.offset += Buffer.byteLength(line, 'utf8') + 1;
+    onLine(line);
+  }
+}
+
+module.exports = { runUsageWalk, defaultCursorFile, zstdPlain, scanBufferWith, ZSTD_OK };

@@ -930,6 +930,201 @@ class SessionMessages {
 //   entries: [{ sockFile, backend, host, claudeSessionId, createdAt, claudeAlive }]
 //   → { winners: Map(key -> sockFile), retire: Set(sockFile) }
 // Sessions with no claudeSessionId yet are never duplicates (each is distinct).
+// ── THE claude session sweep (S3, docs/design-harness-plugins.md §2.4):
+// moved VERBATIM out of routes/sessions.js so the claude harness descriptor's
+// `store.discover` owns it and the route only iterates harnesses + merges.
+// Steps: webui-pid map (+15s pgrep cache) → lock files + tmux panes → lock-
+// first JSONL claims per project dir → entries; `devSnap` = device #0's
+// discovery snapshot when agentd.localDiscovery is on (facts pre-verified
+// device-side), null ⇒ the local scan. Returns plain entries (the route adds
+// sessionKey/realCwd). ──
+const _childPidCache = new Map(); // childPid -> {pids, at} — see pgrep note below
+async function discoverClaudeSessions({ activeSessions, webuiPids = new Set(), devSnap = null } = {}) {
+  const projectsDir = path.join(os.homedir(), '.claude', 'projects');
+  // snapshot jsonls grouped by projDir for the walk below
+  const snapByDir = devSnap ? (() => {
+    const m = new Map();
+    for (const j of devSnap.jsonls) { if (!m.has(j.projDir)) m.set(j.projDir, new Map()); m.get(j.projDir).set(j.file, j); }
+    return m;
+  })() : null;
+
+  // Step 0: Use cached webuiPids (updated on session create/kill/restore)
+
+  // Step 1: Scan lock files + tmux panes -> build map of RUNNING sessions
+  // Build webuiPid -> claudeSessionId map for precise JSONL matching
+  const webuiPidToSessionId = new Map();
+  const needPgrep = []; // [{childPid, claudeSessionId}] — cache misses
+  for (const [id, s] of activeSessions) {
+    if (s.claudeSessionId && s._childPid) {
+      // Map childPid + its direct children (claude forks from node-pty spawn)
+      webuiPidToSessionId.set(s._childPid, s.claudeSessionId);
+      // the wrapper's child pids rarely change, cache them 15s (audit round-2)
+      const hit = _childPidCache.get(s._childPid);
+      if (hit && Date.now() - hit.at < 15000) {
+        for (const p of hit.pids) webuiPidToSessionId.set(p, s.claudeSessionId);
+      } else needPgrep.push({ childPid: s._childPid, claudeSessionId: s.claudeSessionId });
+    }
+  }
+  await Promise.all(needPgrep.map(async ({ childPid, claudeSessionId }) => {
+    const out = await execFileP('pgrep', ['-P', String(childPid)], { timeout: 2000 });
+    const pids = [];
+    for (const line of String(out || '').trim().split('\n')) { const p = parseInt(line.trim()); if (p) pids.push(p); }
+    _childPidCache.set(childPid, { pids, at: Date.now() });
+    if (_childPidCache.size > 512) _childPidCache.delete(_childPidCache.keys().next().value);
+    for (const p of pids) webuiPidToSessionId.set(p, claudeSessionId);
+  }));
+
+  const paneMap = await getTmuxPaneMapAsync();
+  const runningByProjDir = new Map(); // projDirName -> [{lock, tmuxTarget, assigned, claudeSessionId}]
+  if (devSnap || fs.existsSync(SESSIONS_DIR)) {
+    let lockDatas = [];
+    if (devSnap) {
+      // device facts: liveness + pidLooksClaude already applied device-side
+      lockDatas = devSnap.locks;
+    } else for (const f of fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
+        if (!isPidAlive(data.pid)) continue;
+        lockDatas.push(data);
+      } catch {}
+    }
+    // probe in PARALLEL, assemble in ORIGINAL order (claimJsonls' mtime
+    // fallback + the firstRunning cwd pick depend on stable entry order)
+    const probed = await Promise.all(lockDatas.map(async (data) => {
+      try {
+        if (!devSnap && !(await isLockClaude(data))) return null; // B-2104: procStart file-read, ps only as fallback (device facts arrive pre-verified)
+        return { data, tmuxTarget: await findTmuxTargetAsync(data.pid, paneMap) };
+      } catch { return null; }
+    }));
+    for (const hit of probed) {
+      if (!hit) continue;
+      const projDirName = cwdToProjectDir(hit.data.cwd);
+      const claudeSessionId = webuiPidToSessionId.get(hit.data.pid) || null;
+      if (!runningByProjDir.has(projDirName)) runningByProjDir.set(projDirName, []);
+      runningByProjDir.get(projDirName).push({ lock: hit.data, tmuxTarget: hit.tmuxTarget, assigned: false, claudeSessionId });
+    }
+  }
+
+  // Step 2: Scan JSONL files, match with running locks
+  const sessions = [];
+  const sessionMap = new Map(); // sessionId → index in sessions[] (dedup: running wins over stopped)
+  if (snapByDir || fs.existsSync(projectsDir)) {
+    for (const projDir of (snapByDir ? [...snapByDir.keys()] : fs.readdirSync(projectsDir))) {
+      const projPath = path.join(projectsDir, projDir);
+      const snapFiles = snapByDir?.get(projDir) || null;
+      if (!snapFiles) { try { if (!fs.statSync(projPath).isDirectory()) continue; } catch { continue; } }
+
+      // Pre-fetch stats for sorting + mtime lookup (device facts carry them)
+      const jsonls = snapFiles ? [...snapFiles.keys()]
+        : fs.readdirSync(projPath).filter(f => f.endsWith('.jsonl') && !f.startsWith('agent-'));
+      const statMap = new Map();
+      for (const f of jsonls) {
+        if (snapFiles) { statMap.set(f, snapFiles.get(f)?.mtimeMs || 0); continue; }
+        try { statMap.set(f, fs.statSync(path.join(projPath, f)).mtimeMs); } catch { statMap.set(f, 0); }
+      }
+      // Sort by mtime desc (display recency; claiming no longer relies on it alone)
+      jsonls.sort((a, b) => (statMap.get(b) || 0) - (statMap.get(a) || 0));
+
+      // Check if there are running locks for this project dir
+      const runningEntries = runningByProjDir.get(projDir) || [];
+
+      // Match running locks to JSONLs (claimJsonls in session-store):
+      // 1. exact — webui-tracked claudeSessionId, or the lock file's own
+      //    sessionId equals a JSONL filename (non-resumed sessions)
+      // 2. tail — resumed sessions write their CURRENT id into the
+      //    ORIGINAL-named file; scan the last 64KB for the lock's id
+      // 3. mtime fallback — brand-new session with nothing flushed yet.
+      // With N parallel sessions in ONE cwd, the old "newest unclaimed
+      // JSONL takes the next lock" attributed files arbitrarily (kill one
+      // → the WRONG id showed stopped → resume collided with a live one).
+      const claims = runningEntries.length ? claimJsonls(
+        runningEntries.map(e => ({ sessionId: e.claudeSessionId || e.lock.sessionId || null, exactOnly: !!e.claudeSessionId, entry: e })),
+        jsonls.map(f => ({ id: f.replace(/\.jsonl$/, ''), mtime: statMap.get(f) || 0 })),
+        (j) => {
+          // device facts carry tail ids for the newest 60 files; older
+          // files with a running lock (rare) fall back to a local read —
+          // extractTailIds' null-on-unreadable contract is preserved
+          const sf = snapFiles?.get(j.id + '.jsonl');
+          return sf && 'tailIds' in sf ? sf.tailIds : readJsonlTailIds(path.join(projPath, j.id + '.jsonl'));
+        },
+      ) : new Map();
+
+      for (const f of jsonls) {
+        const sessionId = f.replace('.jsonl', '');
+        const filePath = path.join(projPath, f);
+        const mtime = statMap.get(f) || 0;
+
+        const meta = extractSessionMeta(filePath);
+        const firstRunning = runningEntries.find(e => !e.assigned);
+        const cwd = (firstRunning?.lock.cwd) || meta.cwd || recoverCwdFromProjDir(projDir);
+
+        let status = 'stopped', pid = null, tmuxTarget = null;
+        const match = claims.get(sessionId)?.entry || null;
+        // Also check if any active webui session claims this claudeSessionId (covers race during resume)
+        let isWebuiSession = false;
+        if (match) isWebuiSession = webuiPids.has(match.lock.pid);
+        if (!isWebuiSession) {
+          for (const [, s] of activeSessions) {
+            if (s.claudeSessionId === sessionId) { isWebuiSession = true; break; }
+          }
+        }
+        if (match) {
+          status = isWebuiSession ? 'live'
+            : match.tmuxTarget ? 'tmux' : 'external';
+          pid = match.lock.pid;
+          tmuxTarget = match.tmuxTarget || null;
+          match.assigned = true;
+        }
+
+        const entry = {
+          backend: 'claude',
+          backendSessionId: sessionId,
+          claudeSessionId: sessionId,
+          sessionId,
+          cwd,
+          pid,
+          startedAt: mtime,
+          status,
+          name: meta.name || '',
+          tmuxTarget,
+        };
+
+        // Deduplicate: same JSONL can appear in multiple project dirs
+        if (sessionMap.has(sessionId)) {
+          const existing = sessions[sessionMap.get(sessionId)];
+          // Running status wins over stopped
+          if (existing.status === 'stopped' && status !== 'stopped') {
+            sessions[sessionMap.get(sessionId)] = entry;
+          }
+        } else {
+          sessionMap.set(sessionId, sessions.length);
+          sessions.push(entry);
+        }
+      }
+    }
+  }
+
+  // Step 3: Running locks that didn't match any project dir (brand new, no JSONL yet)
+  for (const [, entries] of runningByProjDir) {
+    for (const entry of entries) {
+      if (!entry.assigned && !sessionMap.has(entry.lock.sessionId)) {
+        sessionMap.set(entry.lock.sessionId, sessions.length);
+        sessions.push({
+          backend: 'claude',
+          backendSessionId: entry.lock.sessionId,
+          claudeSessionId: entry.lock.sessionId,
+          sessionId: entry.lock.sessionId, cwd: entry.lock.cwd, pid: entry.lock.pid,
+          startedAt: entry.lock.startedAt || Date.now(),
+          status: (webuiPids.has(entry.lock.pid) || [...activeSessions.values()].some(s => s.claudeSessionId === entry.lock.sessionId)) ? 'live'
+            : entry.tmuxTarget ? 'tmux' : 'external', name: '',
+          tmuxTarget: entry.tmuxTarget || null,
+        });
+      }
+    }
+  }
+  return sessions;
+}
+
 function dedupWebuiSockets(entries) {
   const best = new Map(); // key -> entry
   for (const e of entries || []) {
@@ -977,4 +1172,5 @@ module.exports = {
   getSubagentMetas,
   getHistorySessionId,
   SessionMessages,
+  discoverClaudeSessions,
 };

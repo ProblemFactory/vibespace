@@ -28,6 +28,7 @@ const {
   findCodexSessionJsonlPath, jsonlGapInfoAsync, readJsonlLineRangeAsync,
   scanJsonlUserTurnsAsync, searchJsonlFull, searchJsonlFullStream,
 } = require('./adapters/codex');
+const { get: harnessOf } = require('./harnesses'); // S3: store.locate per harness
 
 const DEVICE_HANDLE = '\u0000device:'; // opaque to the route; never a real path
 const isDeviceHandle = (fp) => typeof fp === 'string' && fp.startsWith(DEVICE_HANDLE);
@@ -104,8 +105,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
       if (hostRefreshAt.size > 512) hostRefreshAt.delete(hostRefreshAt.keys().next().value);
     }
     try {
-      if (r.backend === 'codex') await hosts.fetchCodexJsonl(r.host, r.sessionId);
-      else await hosts.fetchSessionJsonl(r.host, r.sessionId);
+      await hosts.fetchTranscript(r.host, r.backend || 'claude', r.sessionId); // descriptor store.remoteFind picks the find(1) expression + cache name (S3)
       return null;
     } catch (e) { return e.message; }
   }
@@ -206,11 +206,16 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     return sm.taskState() || {};
   }
 
+  // S3: the harness descriptor's store.locate owns "where does this
+  // conversation live" — no backend ternary here (unknown ids throw in get()).
+  function localTranscriptPath(r) {
+    const h = harnessOf(r.backend || 'claude');
+    if (!h.store || typeof h.store.locate !== 'function') return null;
+    return h.store.locate(r.sessionId, r.cwd) || null;
+  }
   function filePath(ref) {
     const r = norm(ref);
-    return r.backend === 'codex'
-      ? findCodexSessionJsonlPath(r.sessionId)
-      : findSessionJsonlPath(r.sessionId, r.cwd);
+    return localTranscriptPath(r);
   }
 
   /** Huge-file seek family — switched to the device AS ONE UNIT (2.293.0,
@@ -292,7 +297,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   async function rescue(ref, { maxLineBytes = 1024 * 1024 } = {}) {
     const r = norm(ref);
     if (r.hostId || r.host) throw new Error('rescue is local-only for now — copy the transcript here or run it on that machine');
-    const fp = r.backend === 'codex' ? findCodexSessionJsonlPath(r.sessionId) : findSessionJsonlPath(r.sessionId, r.cwd);
+    const fp = localTranscriptPath(r);
     if (!fp || isDeviceHandle(fp) || !fs.existsSync(fp)) throw new Error('transcript not found on this machine');
     try {
       require('child_process').execFileSync('fuser', [fp], { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });

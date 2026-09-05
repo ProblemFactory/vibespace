@@ -1021,16 +1021,7 @@ class HostManager {
   // data/remote-jsonl/<hostId>/, so history load / View History / pagination /
   // search all work unchanged. Invalidation by remote size+mtime (one ssh stat
   // when fresh; stat+cat when stale). Session ids are UUIDs — no collisions.
-  async fetchSessionJsonl(id, sessionId, { maxBytes = 64 * 1024 * 1024 } = {}) {
-    if (!/^[\w-]+$/.test(sessionId)) throw new Error('bad session id');
-    const r = await this._fetchRemoteByFind(id, `-maxdepth 2 -name ${JSON.stringify(sessionId + '.jsonl')}`,
-      path.join(id, sessionId + '.jsonl'), { maxBytes });
-    // conversation-location index (R3 tail): a successful fetch is proof this
-    // host owns the conversation — recorded so host-inference / dead-host
-    // rescue can locate it without scanning the raw cache
-    try { this.convIndex.note(sessionId, id, { src: 'fetch' }); } catch { }
-    return r;
-  }
+  async fetchSessionJsonl(id, sessionId, opts = {}) { return this.fetchTranscript(id, 'claude', sessionId, opts); }
   // Does the host still run a LIVE keeper child for this claude conversation?
   // Returns the keeper sid to ATTACH to (ws create keeperSid path — never a
   // second writer), or null. One read-only probe: scan the persistence-layer
@@ -1097,10 +1088,20 @@ class HostManager {
   // Remote CODEX rollout (B-10ed): view-history/resume-load of a codex thread
   // that ran on the host. Cached under remote-jsonl/<host>/codex/ — the codex
   // finder (findCodexSessionJsonlPath) scans that cache like claude's.
-  async fetchCodexJsonl(id, threadId, { maxBytes = 64 * 1024 * 1024 } = {}) {
-    if (!/^[\w-]+$/.test(threadId)) throw new Error('bad thread id');
-    return this._fetchRemoteByFind(id, `-maxdepth 5 -type f -name ${JSON.stringify('rollout-*' + threadId + '.jsonl')}`,
-      path.join(id, 'codex', threadId + '.jsonl'), { maxBytes, root: '"$HOME"/.codex/sessions' });
+  async fetchCodexJsonl(id, threadId, opts = {}) { return this.fetchTranscript(id, 'codex', threadId, opts); }
+  /** THE remote transcript fetch (S3): the harness descriptor's store.remoteFind
+   *  names where find(1) looks on the host, the predicate (codex: .jsonl OR
+   *  .jsonl.zst — a compressed rollout lands under the .jsonl cache name and
+   *  readers detect it by magic bytes) and the cache name; this method only
+   *  runs the shared fetch-and-cache core. Unknown backends throw in get(). */
+  async fetchTranscript(id, backend, sessionId, { maxBytes = null } = {}) {
+    if (!/^[\w-]+$/.test(String(sessionId || ''))) throw new Error('bad session id');
+    const h = require('./harnesses').get(backend || 'claude');
+    if (!h.store || typeof h.store.remoteFind !== 'function') throw new Error(`${h.id} conversations cannot be fetched from a host (no remote transcript location)`);
+    const rf = h.store.remoteFind(sessionId);
+    const r = await this._fetchRemoteByFind(id, rf.findExpr, path.join(id, rf.cacheRel), { maxBytes: maxBytes || rf.maxBytes || 64 * 1024 * 1024, root: rf.root });
+    if (h.id === 'claude') { try { this.convIndex.note(sessionId, id, { src: 'fetch' }); } catch { } } // conversation-location index (R3 tail)
+    return r;
   }
   // Shared fetch-and-cache core (generalized from fetchSessionJsonl 2.191.0 —
   // findExpr = the find(1) predicate under "$HOME"/.claude/projects; cacheRel
@@ -1460,16 +1461,30 @@ class HostManager {
       # vanish from the sidebar the moment they ended). HC = head cwd.
       if [ -d "$HOME/.codex/sessions" ]; then
         CDX=$({ if [ -n "$GNUFIND" ]; then
-          find "$HOME"/.codex/sessions -type f -name 'rollout-*.jsonl' -printf 'C %T@ %s %p\\n' 2>/dev/null
+          find "$HOME"/.codex/sessions -type f \\( -name 'rollout-*.jsonl' -o -name 'rollout-*.jsonl.zst' \\) -printf 'C %T@ %s %p\\n' 2>/dev/null
         else
-          find "$HOME"/.codex/sessions -type f -name 'rollout-*.jsonl' 2>/dev/null | while read -r f; do
+          find "$HOME"/.codex/sessions -type f \\( -name 'rollout-*.jsonl' -o -name 'rollout-*.jsonl.zst' \\) 2>/dev/null | while read -r f; do
             m=$(stat -f '%m %z' "$f" 2>/dev/null); [ -n "$m" ] && echo "C $m $f"
           done
         fi; } | sort -rn -k2 | head -100)
         [ -n "$CDX" ] && printf '%s\\n' "$CDX"
+        # HC = head cwd; NC = the first user records (2000B each, the codex naming
+        # rule picks the first non-injected one); a .zst rollout is read through
+        # zstd(1) when the host has it, else it lists nameless. CO = rollouts held
+        # OPEN by a codex process = RUNNING threads (no lock files in codex).
         [ -n "$CDX" ] && printf '%s\\n' "$CDX" | head -30 | while read -r c m s f; do
-          printf 'HC %s\\t' "$f"; head -c 32000 "$f" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+          case "$f" in *.zst) HD=$( (command -v zstd >/dev/null 2>&1 && zstd -dc -- "$f" 2>/dev/null) | head -c 200000 );; *) HD=$(head -c 200000 -- "$f" 2>/dev/null);; esac
+          printf 'HC %s\\t' "$f"; printf '%s' "$HD" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+          printf '%s' "$HD" | grep -m3 '"role":"user"' | while IFS= read -r u; do printf 'NC %s\\t' "$f"; printf '%s' "$u" | head -c 2000; printf '\\n'; done
         done
+        if [ -d /proc/self ]; then
+          for p in /proc/[0-9]*; do
+            tr '\\0' ' ' < "$p/cmdline" 2>/dev/null | grep -qE '(^|[/ ])codex( |$)|/@openai/codex/|/codex-linux-' || continue
+            for l in "$p"/fd/*; do t=$(readlink "$l" 2>/dev/null) || continue; case "$t" in "$HOME"/.codex/sessions/*rollout-*.jsonl|"$HOME"/.codex/sessions/*rollout-*.jsonl.zst) echo "CO $t";; esac; done
+          done
+        else
+          lsof -Fcn +D "$HOME"/.codex/sessions 2>/dev/null | awk '/^c/{c=substr($0,2)} /^n/ && c ~ /codex/ && $0 ~ /rollout-.*\\.jsonl(\\.zst)?$/ {print "CO " substr($0,2)}'
+        fi
       fi
     `.trim();
     let out;

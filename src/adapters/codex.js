@@ -9,8 +9,69 @@ const { BackendAdapter } = require('./base');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
+// S3: the codex naming rule + zstd rollout readers live in discovery-facts
+// (the tiny module the daemon bundle and every discovery collector share)
+const { deriveCodexSessionName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
+
+// ── zstd rollouts (codex ≥0.153 may write rollout-*.jsonl.zst; S3) ──
+// The seek family (line index / slab / search / turn scan) needs a SEEKABLE
+// plain file, so a compressed rollout is MATERIALIZED once into a per-user
+// temp cache keyed by (path, mtime, size) and every reader runs unchanged on
+// the plain copy. Detection is by extension OR magic bytes — a remote .zst
+// pulled into data/remote-jsonl/<host>/codex/<tid>.jsonl keeps its bytes.
+// Bounded: the whole decompression is capped (ZST_MAX_PLAIN) — past that the
+// reader fails with a NAMED error instead of a >512MB string.
+const ZST_MAX_PLAIN = 256 * 1024 * 1024;
+const ZST_CACHE_MAX = 24;
+let _zstCacheDir = null;
+function zstCacheDir() {
+  if (_zstCacheDir) return _zstCacheDir;
+  let uid = '';
+  try { uid = String(os.userInfo().uid); } catch { uid = 'u'; }
+  _zstCacheDir = path.join(os.tmpdir(), `vibespace-zst-${uid}`);
+  try { fs.mkdirSync(_zstCacheDir, { recursive: true, mode: 0o700 }); } catch { }
+  return _zstCacheDir;
+}
+function fileIsZst(fp) {
+  if (isZstPath(fp)) return true;
+  let fd;
+  try {
+    fd = fs.openSync(fp, 'r');
+    const b = Buffer.alloc(4);
+    const n = fs.readSync(fd, b, 0, 4, 0);
+    return n === 4 && isZstBuffer(b);
+  } catch { return false; } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch { } } }
+}
+/** Plain-text twin of a (possibly zstd) transcript path. Plain files return
+ *  themselves; zstd files return their materialized copy (decompressed ONCE
+ *  per (mtime,size), cache pruned to ZST_CACHE_MAX entries). Throws coded
+ *  errors: EZSTUNSUPPORTED (old node), EZSTBIG (over the cap). */
+function plainJsonlPath(fp) {
+  if (!fp || !fileIsZst(fp)) return fp;
+  if (!ZSTD_SUPPORTED) throw Object.assign(new Error(`compressed rollout needs node ≥22.15 (zstd): ${path.basename(fp)}`), { code: 'EZSTUNSUPPORTED' });
+  const st = fs.statSync(fp);
+  const key = crypto.createHash('sha1').update(fp).digest('hex').slice(0, 16);
+  const dir = zstCacheDir();
+  const out = path.join(dir, `${key}-${Math.round(st.mtimeMs)}-${st.size}.jsonl`);
+  try { if (fs.statSync(out).isFile()) return out; } catch { }
+  const plain = zstdDecompressFrames(fs.readFileSync(fp), { maxOutputLength: ZST_MAX_PLAIN });
+  const tmp = out + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, plain, { mode: 0o600 });
+  fs.renameSync(tmp, out);
+  // prune: stale copies of THIS file first, then the oldest overall
+  try {
+    const entries = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+    for (const f of entries) if (f.startsWith(key + '-') && f !== path.basename(out)) { try { fs.unlinkSync(path.join(dir, f)); } catch { } }
+    if (entries.length > ZST_CACHE_MAX) {
+      const aged = entries.map((f) => { try { return { f, at: fs.statSync(path.join(dir, f)).mtimeMs }; } catch { return null; } }).filter(Boolean).sort((a, b) => a.at - b.at);
+      for (const e of aged.slice(0, Math.max(0, aged.length - ZST_CACHE_MAX))) { try { fs.unlinkSync(path.join(dir, e.f)); } catch { } }
+    }
+  } catch { }
+  return out;
+}
 
 function pushCodexConfigOverride(args, key, value) {
   if (!Array.isArray(args) || !key || value === undefined || value === null || value === '') return;
@@ -73,7 +134,7 @@ function _walkJsonlFiles(rootDir) {
       const fp = path.join(current, entry.name);
       if (entry.isDirectory()) {
         stack.push(fp);
-      } else if (entry.isFile() && fp.endsWith('.jsonl')) {
+      } else if (entry.isFile() && (fp.endsWith('.jsonl') || fp.endsWith('.jsonl.zst'))) {
         files.push(fp);
       }
     }
@@ -81,11 +142,17 @@ function _walkJsonlFiles(rootDir) {
   return files;
 }
 
+/** Locate a thread's rollout: `…-<threadId>.jsonl`, else its `.jsonl.zst`
+ *  twin (codex ≥0.153 compression; the plain file wins when both exist), then
+ *  the remote-jsonl cache. Returns the REAL path — readers materialize. */
 function findCodexSessionJsonlPath(threadId) {
   if (!threadId) return null;
+  let zst = null;
   for (const fp of _walkJsonlFiles(CODEX_SESSIONS_DIR)) {
     if (fp.endsWith(`${threadId}.jsonl`)) return fp;
+    if (!zst && fp.endsWith(`${threadId}.jsonl.zst`)) zst = fp;
   }
+  if (zst) return zst;
   // Remote-cache scan (B-10ed, mirrors session-store's claude cache scan):
   // hosts.fetchCodexJsonl pulls a host's rollout into
   // data/remote-jsonl/<hostId>/codex/<threadId>.jsonl — finding it here makes
@@ -93,8 +160,10 @@ function findCodexSessionJsonlPath(threadId) {
   try {
     const base = path.join(__dirname, '..', '..', 'data', 'remote-jsonl');
     for (const hostDir of fs.readdirSync(base)) {
-      const p = path.join(base, hostDir, 'codex', `${threadId}.jsonl`);
-      if (fs.existsSync(p)) return p;
+      for (const ext of ['.jsonl', '.jsonl.zst']) {
+        const p = path.join(base, hostDir, 'codex', `${threadId}${ext}`);
+        if (fs.existsSync(p)) return p;
+      }
     }
   } catch { }
   return null;
@@ -109,6 +178,7 @@ function findCodexSessionJsonlPath(threadId) {
 const JSONL_HEAD_BYTES = 2 * 1024 * 1024;
 const JSONL_TAIL_BYTES = 32 * 1024 * 1024;
 function readJsonlBounded(fp, opts = {}) {
+  fp = plainJsonlPath(fp); // zstd rollouts read through their materialized twin (S3)
   const stat = fs.statSync(fp);
   if (stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return fs.readFileSync(fp, 'utf-8');
   const fd = fs.openSync(fp, 'r');
@@ -146,6 +216,7 @@ const _lineIndexCache = new Map(); // fp -> { mtimeMs, size, offsets, totalLines
 const LINE_INDEX_CHUNK = 16 * 1024 * 1024;
 
 function getJsonlLineIndex(fp) {
+  fp = plainJsonlPath(fp);
   const stat = fs.statSync(fp);
   const hit = _lineIndexCache.get(fp);
   if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit;
@@ -214,7 +285,7 @@ function _transcriptPoolGet() {
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'),
         poolSize: 2,
         inlineRun: runOp,
-        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000 },
+        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000 },
       });
     } catch (e) {
       _transcriptPool = false; // construction failed once — stay inline forever
@@ -243,8 +314,17 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
   if (pool) { try { return await pool.call('boundedParsed', { fp, tailOnly, dropSubagent }); } catch {} }
   return null; // caller falls back to its own sync parse
 }
+/** Generic off-loop call (S3: codex discovery ops). Resolves the worker's
+ *  result, or the inline fallback's when the pool is down/unavailable — the
+ *  caller never sees which (same function either way). */
+async function transcriptWorkerCall(op, payload, inlineFn) {
+  const pool = _transcriptPoolGet();
+  if (pool) { try { return await pool.call(op, payload); } catch {} }
+  return inlineFn();
+}
 
 function jsonlGapInfo(fp) {
+  fp = plainJsonlPath(fp);
   const stat = fs.statSync(fp);
   if (stat.size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES) return null;
   const { offsets, totalLines } = getJsonlLineIndex(fp);
@@ -263,6 +343,7 @@ function jsonlGapInfo(fp) {
 // (the universal minimap axis) plus each turn's file line (for seek-jumping).
 const _turnScanCache = new Map(); // fp -> { mtimeMs, size, turns }
 function scanJsonlUserTurns(fp, backend) {
+  fp = plainJsonlPath(fp);
   const stat = fs.statSync(fp);
   const hit = _turnScanCache.get(fp);
   if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.turns;
@@ -383,6 +464,7 @@ function _matchJsonlLine(raw, line, backend, q) {
 function searchJsonlFull(fp, backend, query, maxResults = 500) {
   const q = String(query || '').toLowerCase();
   if (!q) return { matches: [], truncated: false };
+  fp = plainJsonlPath(fp);
   const stat = fs.statSync(fp);
   const fd = fs.openSync(fp, 'r');
   const matches = [];
@@ -419,6 +501,7 @@ async function searchJsonlFullStream(fp, backend, query, onMatch, opts = {}) {
   const signal = opts.signal;
   const q = String(query || '').toLowerCase();
   if (!q) return { total: 0, truncated: false };
+  fp = plainJsonlPath(fp);
   const stat = fs.statSync(fp);
   const fh = await fs.promises.open(fp, 'r');
   let total = 0, truncated = false;
@@ -448,6 +531,7 @@ async function searchJsonlFullStream(fp, backend, query, onMatch, opts = {}) {
 // Read raw records for line range [startLine, endLine) by seeking to the
 // indexed byte offsets — no full-file read, no string-limit risk.
 function readJsonlLineRange(fp, startLine, endLine) {
+  fp = plainJsonlPath(fp);
   const { offsets, totalLines, size } = getJsonlLineIndex(fp);
   const s = Math.max(0, Math.min(startLine, totalLines));
   const e = Math.max(s, Math.min(endLine, totalLines));
@@ -559,53 +643,8 @@ function normalizeCodexSource(source) {
   };
 }
 
-function deriveCodexSessionName(text) {
-  const value = String(text || '').trim();
-  if (!value) return '';
-  const lowerValue = value.toLowerCase();
-  const injectedBlockMarkers = [
-    '# agents.md instructions for ',
-    '<instructions>',
-    '<environment_context>',
-    '<permissions instructions>',
-    '<apps_instructions>',
-    '<skills_instructions>',
-    '<plugins_instructions>',
-    '<recommended_plugins>', // 0.153.x injects an uninstalled-plugins roster as the FIRST user message — it became the session name (2.369.18 e2e)
-    '### available skills',
-    '### available plugins',
-  ];
-  if (injectedBlockMarkers.some((marker) => lowerValue.includes(marker))) return '';
-  const instructionMarkers = new Set([
-    '<INSTRUCTIONS>',
-    '</INSTRUCTIONS>',
-    '<environment_context>',
-    '</environment_context>',
-    '<permissions instructions>',
-    '</permissions instructions>',
-    '<apps_instructions>',
-    '</apps_instructions>',
-    '<skills_instructions>',
-    '</skills_instructions>',
-    '<collaboration_mode>',
-    '</collaboration_mode>',
-  ]);
-  const ignoreLine = (line) => (
-    !line
-    || line.startsWith('# AGENTS.md instructions')
-    || line.startsWith('<system>')
-    || instructionMarkers.has(line)
-    || /^<(environment_context|permissions instructions|apps_instructions|skills_instructions|plugins_instructions|recommended_plugins|collaboration_mode)/.test(line)
-    || /^<\/(environment_context|permissions instructions|apps_instructions|skills_instructions|plugins_instructions|recommended_plugins|collaboration_mode)/.test(line)
-    || /^## (JavaScript REPL|Skills|Plugins)\b/.test(line)
-    || /^<\/?[A-Z_]+>$/.test(line)
-  );
-  const firstLine = value
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => !ignoreLine(line)) || '';
-  return firstLine.slice(0, 120);
-}
+// deriveCodexSessionName: MOVED to discovery-facts.js (S3) — ONE naming rule
+// for the local listing, the daemon snapshot and the ssh script's NC lines.
 
 function deriveCodexReviewName(target, hint) {
   const type = String(target?.type || '').trim();
@@ -683,19 +722,10 @@ function extractCodexThreadMeta(filePath) {
     const stat = cachedStat || fs.statSync(filePath);
     updatedAt = stat.mtimeMs || 0;
     // Head read only — all meta-bearing records are at the start; reading
-    // multi-MB session files whole just to break at record 200 wasted IO
-    let head;
-    if (stat.size > THREAD_META_HEAD_BYTES) {
-      const fd = fs.openSync(filePath, 'r');
-      try {
-        const buf = Buffer.alloc(THREAD_META_HEAD_BYTES);
-        const n = fs.readSync(fd, buf, 0, THREAD_META_HEAD_BYTES, 0);
-        head = buf.toString('utf-8', 0, n);
-        head = head.slice(0, head.lastIndexOf('\n') + 1); // drop the cut-off last line
-      } finally { fs.closeSync(fd); }
-    } else {
-      head = fs.readFileSync(filePath, 'utf-8');
-    }
+    // multi-MB session files whole just to break at record 200 wasted IO.
+    // readHeadText (discovery-facts) handles a zstd rollout with a bounded
+    // COMPRESSED prefix — the daemon snapshot reads heads the same way.
+    const head = readHeadText(filePath, THREAD_META_HEAD_BYTES);
     for (const line of head.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -953,7 +983,8 @@ class CodexAdapter extends BackendAdapter {
 }
 
 module.exports = {
-  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync,
+  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, transcriptWorkerCall,
+  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
   findCodexSessionJsonlPath,

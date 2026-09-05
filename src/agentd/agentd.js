@@ -191,24 +191,27 @@ function computeDiscoverySnapshot() {
         const fp = path.join(d, f);
         let st; try { st = fs.statSync(fp); } catch { continue; }
         if (st.isDirectory()) walk(fp, depth + 1);
-        else if (/^rollout-.*\.jsonl$/.test(f)) codexRollouts.push({ path: fp, size: st.size, mtimeMs: st.mtimeMs });
+        else if (/^rollout-.*\.jsonl(?:\.zst)?$/.test(f)) codexRollouts.push({ path: fp, size: st.size, mtimeMs: st.mtimeMs }); // .zst since codex 0.153 (S3)
       }
     };
     walk(croot, 0);
     codexRollouts.sort((a, b) => b.mtimeMs - a.mtimeMs);
     codexRollouts.length = Math.min(codexRollouts.length, 100);
+    // head facts (S3): cwd + the first user records (name candidates, the codex
+    // naming rule runs orchestrator-side in discovery-facts.interpret) — read
+    // through readHeadText so a .zst rollout yields its plain text
+    const { readHeadText, listOpenCodexRolloutPaths } = require('../discovery-facts');
     for (const r of codexRollouts.slice(0, 30)) {
       try {
-        const fd = fs.openSync(r.path, 'r');
-        try {
-          const b = Buffer.alloc(Math.min(32000, r.size));
-          fs.readSync(fd, b, 0, b.length, 0);
-          r.headCwd = (b.toString('utf-8').match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
-        } finally { fs.closeSync(fd); }
+        const head = readHeadText(r.path, 200000);
+        r.headCwd = (head.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
+        r.userLines = head.split('\n').filter((l) => l.includes('"role":"user"')).slice(0, 3).map((l) => l.slice(0, 2000));
       } catch { }
     }
+    // CO facts: rollouts held open by a codex process on this device = RUNNING threads
+    var codexOpen = []; try { codexOpen = listOpenCodexRolloutPaths({ sessionsDir: croot }); } catch { codexOpen = []; }
   } catch { }
-  return { locks, jsonls: top, codexRollouts };
+  return { locks, jsonls: top, codexRollouts, codexOpen: codexOpen || [] };
 }
 if (process.argv.includes('--discovery-snapshot-child')) {
   try {
@@ -1250,7 +1253,7 @@ function serveConnection(sock) {
               });
             }
             if (!snap) snap = computeDiscoverySnapshot();
-            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts });
+            mux.control({ op: 'discovery-result', id: msg.id, locks: snap.locks, jsonls: snap.jsonls, codexRollouts: snap.codexRollouts, codexOpen: snap.codexOpen || [] });
           } catch (e) { mux.control({ op: 'discovery-result', id: msg.id, error: e.message }); }
         })();
         return;
