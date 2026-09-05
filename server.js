@@ -1599,6 +1599,7 @@ app.get('/api/backend-status', async (req, res) => {
     const l = accounts.list();
     out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
       (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type !== 'subscription' && a.tail))).length;
+    if (out.codex) out.codex.namedLoggedIn = (l.accounts || []).filter((a) => a.backend === 'codex' && a.loggedIn).length; // onboarding readiness per backend (2.369.21)
   } catch {}
   res.json(out);
 });

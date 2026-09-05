@@ -8,6 +8,7 @@
  */
 
 const { MessageManager } = require('./message-manager');
+const { capsOf } = require('./backend-caps');
 const { createMessageManager } = require('./normalizers');
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
@@ -581,7 +582,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // Claude --fork-session mints a NEW session id at startup; this arms
             // the stdout parser to adopt it (so the fork becomes its own session
             // instead of shadowing the parent). One-shot, cleared on adoption.
-            _forkRequested: backend === 'claude' && !!data.fork,
+            _forkRequested: !!data.fork && !!capsOf(backend).fork, // per-harness (codex thread/fork since 2.369.21)
             // resume spawn marker (2.219.0): lets the parser adopt claude's
             // IMPLICIT fork (locked-conversation resume mints a new id)
             _resumeSpawn: backend === 'claude' && !!(data.resume && data.resumeId),

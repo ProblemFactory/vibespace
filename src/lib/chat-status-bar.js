@@ -1,6 +1,6 @@
 import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl } from './utils.js';
 import { UI_ICONS } from './icons.js';
-import { getBackendMeta, backendFeatureCaps } from './agent-meta.js';
+import { BACKEND_META, getBackendMeta, backendFeatureCaps } from './agent-meta.js';
 import { t } from './i18n.js';
 
 /**
@@ -45,7 +45,9 @@ export class ChatStatusBar {
     this._statusCost = 0;
     this._statusContextWindow = 0;
     this._statusPermMode = '';
-    this._permissionModes = null;
+    // seeded per backend (BACKEND_META.permissionModes) so an early click never
+    // offers claude modes on a codex chat; the live list overrides on status
+    this._permissionModes = BACKEND_META[backend]?.permissionModes ? [...BACKEND_META[backend].permissionModes] : null;
     this._activeTasks = null;
     this._goal = null;
     this._goalElapsed = 0;

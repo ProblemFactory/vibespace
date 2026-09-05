@@ -262,7 +262,9 @@ export function installSetupFlows(App) {
             // Named/pooled accounts count as READY (2.267.4, user request:
             // onboarding must not force the machine-wide login — accounts
             // added per-directory or as a pool work without it).
-            const named = key === 'claude' ? (b.namedLoggedIn || 0) : 0;
+            // …for EVERY backend (2.369.21): the 2.267.4 fix was claude-only, so
+            // codex named accounts / pools never satisfied onboarding
+            const named = b.namedLoggedIn || 0;
             const state = !b.installed ? `<span class="ob-bad">${t('not installed')}</span>`
               : b.loggedIn ? `<span class="ob-ok">✓ ${t('ready')}</span>`
               : named > 0 ? `<span class="ob-ok">✓ ${t('{n} named account(s) in use', { n: named })}</span>`
@@ -273,7 +275,7 @@ export function installSetupFlows(App) {
               : b.loggedIn ? '' : `<button class="welcome-btn${named > 0 ? ' welcome-btn-secondary' : ''} ob-login" data-key="${key}" data-kind="login" data-label="${escHtml(label)}" data-cmd="${escHtml(loginCmd)}">${t('Log in')}</button>`;
             // Direct door to named accounts / the account pool — no machine
             // login required (Manage Agents opens above the wizard)
-            const acctBtn = key === 'claude' && b.installed
+            const acctBtn = b.installed
               ? ` <button class="welcome-btn welcome-btn-secondary ob-accounts">${t('Accounts & pool…')}</button>` : '';
             return `<div class="ob-backend"><div><b>${label}</b> ${b.version ? `<span class="ob-ver">${escHtml(b.version)}</span>` : ''}</div><div>${state} ${btn}${acctBtn}</div></div>`;
           };

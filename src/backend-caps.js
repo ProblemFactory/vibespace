@@ -42,6 +42,7 @@ const BACKEND_CAPS = {
     sealedOrders: true,   // device-side offline fallback switch
     resetCredit: false,   // no such product concept
     quotaProbe: 'cli-usage',      // `claude -p /usage` auto-cli rung
+    fork: true,                   // --fork-session (+ --resume-session-at for a mid-conversation fork)
     streamProtocol: 'stream-json',
     peerDelivery: 'cli-inbox',
   },
@@ -52,17 +53,18 @@ const BACKEND_CAPS = {
     sealedOrders: false,
     resetCredit: true,    // account/rateLimitResetCredit/consume (stored resets)
     quotaProbe: 'rpc-rate-limits', // account/rateLimits/read on a live app-server
+    fork: true,                   // thread/fork (whole-thread fork; the wrapper sends it when CODEX_WEBUI_FORK=1)
     streamProtocol: 'codex-events',
     peerDelivery: 'rpc-queue',
   },
   shell: {
-    pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
+    pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
   },
 };
 
-const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, streamProtocol: null, peerDelivery: 'stash-only' });
+const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, streamProtocol: null, peerDelivery: 'stash-only' });
 
 function capsOf(backend) {
   return BACKEND_CAPS[backend || 'claude'] || NO_CAPS;

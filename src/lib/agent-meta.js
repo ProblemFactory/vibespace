@@ -22,7 +22,10 @@ export const BACKEND_META = {
     fallbackModels: ['fable', 'opus', 'sonnet', 'haiku'],
     // FEATURE capabilities (P4 client descriptor): chrome gates on THESE, not
     // on backend ids — a new backend declares its features here once.
-    caps: { fork: true, effort: true, review: false, outputStyle: true, autoResume: true },
+    caps: { fork: true, effort: true, review: false, outputStyle: true, autoResume: true, accounts: true },
+    // Offline seed for the permission-mode dropdown before the first status
+    // (the live list comes from the session's chatStatus.permissionModes).
+    permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'],
   },
   shell: {
     id: 'shell',
@@ -59,7 +62,10 @@ export const BACKEND_META = {
     fallbackModels: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'],
     // autoResume: true since 2.368.20 — codex exhaustion arms the same module.
     // fork: the thread-fork RPC exists but is unwired (flips when wired).
-    caps: { fork: false, effort: true, review: true, outputStyle: false, autoResume: true, quotaRefresh: 'session-rpc' },
+    // fork: true since 2.369.21 — thread/fork is wired end to end (wrapper
+    // CODEX_WEBUI_FORK → thread/fork; server _forkRequested per caps).
+    caps: { fork: true, effort: true, review: true, outputStyle: false, autoResume: true, quotaRefresh: 'session-rpc', accounts: true },
+    permissionModes: ['default', 'read-only', 'safe-yolo', 'yolo'],
   },
 };
 

@@ -1122,6 +1122,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       const v = vOf(a);
       if (rHostId && v?.usable && v.how === 'host-login') return this._hostOwnUsage?.[rHostId];
       if (rHostId && v?.usable && v.how === 'host-held') return this._hostAccountUsage?.[`${rHostId}:${a.id}`];
+      // codex accounts carry their own persisted quota buckets (/api/usage
+      // codexAccounts, 2.368.18) — the switcher rows were blind to them
+      if ((a.backend || 'claude') === 'codex') return this._codexAccountUsage?.[a.id];
       return this._accountUsage?.[a.id];
     };
     // Codex sessions bill the machine's ChatGPT login, not the claude CLI's —
@@ -1142,7 +1145,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       labelHtml: rowHtml((currentId === null ? '✓ ' : '') + cliLabel, helperActive ? ' · apiKeyHelper (API)' : '',
         // the machine usage caches are the CLAUDE login's quota — attaching
         // them to a codex row dressed the ChatGPT login in claude percentages
-        isCodex ? '' : usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
+        isCodex ? (rHostId ? '' : usageHint(this._codexAccountUsage?.__global_codex__, this._usageEstimates?.__global_codex__)) : usageHint(rHostId ? this._hostOwnUsage?.[rHostId] : this._rateLimit, rHostId ? null : this._usageEstimates?.__global__)),
       action: () => { if (currentId !== null) doSwitch('subscription', cliLabel); },
     });
     if (helperActive) {
