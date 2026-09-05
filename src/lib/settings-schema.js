@@ -624,6 +624,7 @@ const SETTINGS_SCHEMA = {
     type: 'enum', default: '', combobox: true,
     options: [
       { value: '', label: t('Default') },
+      { value: 'gpt-6-astra', label: 'gpt-6-astra' },
     ],
     label: t('Default model'),
     description: t('Select a known model or choose "Custom..." to type a specific model ID.'),

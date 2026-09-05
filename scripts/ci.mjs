@@ -32,6 +32,7 @@ const SUITES = [
   'test-path-mounts',   // /svc/<name>/ reverse proxy: real http+ws round trips + store rules
   'test-mount-oauth-probe', // dead OAuth token behind a healthy-looking mount: probe eligibility + slow clock + phrasings + Re-authorize button
   'test-mount-stranded', // stranded writes under a DISCONNECTED mount point: quarantine-never-delete on connect + shadowedBy predicate + TASK.md writer guard + wiring pins
+  'test-harness-contract', // S1 harness registry conformance: every registered harness passes the same descriptor/adapter/normalizer/wrapper/store/client-META assertions; unknown ids throw
   'test-codex-sandbox-net', // codex sandbox keeps loopback open for the vibespace-* tools: real `codex sandbox` A/B (evidence-SKIP without the binary) + wrapper/adapter/probe pins
   'test-attach-rebuild', // first-attach history rebuild is time-sliced + gated (live records replay in order), heartbeat is stall-aware, kills are acknowledged + re-sent until acked
   'test-otel-truth',    // per-request billing truth: parser + loopback ingest + bake override + wiring pins

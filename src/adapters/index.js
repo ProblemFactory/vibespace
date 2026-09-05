@@ -1,27 +1,11 @@
-const { ClaudeCodeAdapter } = require('./claude-code');
-const { CodexAdapter } = require('./codex');
-const { ShellAdapter } = require('./shell');
+// Built from the HARNESS REGISTRY (S1, src/harnesses/index.js): one adapter
+// instance per registered harness, configured by the descriptor's own
+// adapterConfig mapping. Adding a backend = adding a descriptor file.
+const { HARNESSES } = require('../harnesses');
 
 function createAdapterRegistry(config = {}) {
   const adapters = new Map();
-
-  adapters.set('claude', new ClaudeCodeAdapter({
-    claudeCmd: config.claudeCmd,
-    chatWrapper: config.chatWrapper,
-    ptyWrapper: config.ptyWrapper,
-    buffersDir: config.buffersDir,
-  }));
-
-  adapters.set('shell', new ShellAdapter({
-    ptyWrapper: config.ptyWrapper,
-  }));
-
-  adapters.set('codex', new CodexAdapter({
-    codexCmd: config.codexCmd,
-    codexSandboxSupported: config.codexSandboxSupported,
-    chatWrapper: config.codexChatWrapper,
-    ptyWrapper: config.ptyWrapper,
-  }));
+  for (const h of Object.values(HARNESSES)) adapters.set(h.id, new h.Adapter(h.adapterConfig(config)));
 
   return {
     get(name) {

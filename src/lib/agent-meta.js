@@ -53,7 +53,10 @@ export const BACKEND_META = {
     // also touch them via dedicated tools or plain file ops — either way the
     // path marks the content as memory.
     memoryPathRe: /\/\.codex\/memories\//,
-    fallbackModels: ['gpt-5.6-codex', 'gpt-5.6-sol'],
+    // gpt-6-astra first: in the 0.153.4 catalog (default effort medium here);
+    // 0.153.4 makes it the CLI default when config.toml has no `model`, so the
+    // dropdown must be able to name what the CLI would pick anyway.
+    fallbackModels: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'],
     // autoResume: true since 2.368.20 — codex exhaustion arms the same module.
     // fork: the thread-fork RPC exists but is unwired (flips when wired).
     caps: { fork: false, effort: true, review: true, outputStyle: false, autoResume: true, quotaRefresh: 'session-rpc' },

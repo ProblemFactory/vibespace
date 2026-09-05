@@ -1,0 +1,68 @@
+#!/usr/bin/env node
+// HARNESS CONFORMANCE (S1 of docs/design-harness-plugins.md §2, 2.369.18):
+// every registered harness runs the SAME assertions — descriptor shape,
+// adapter interface (base methods + buildSessionArgs), normalizer duck
+// contract, wrapper file + capability advert, store/locator, client META
+// row + settings keys. This is the "twin-sets = 0 is a metric" law made
+// mechanical: a third harness that misses a member fails HERE, not in a
+// fleet incident. Unknown ids must fail loudly (never a claude fallback).
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+
+const { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS } = require(path.join(REPO, 'src/harnesses/index.js'));
+const { BackendAdapter } = require(path.join(REPO, 'src/adapters/base.js'));
+const { createAdapterRegistry } = require(path.join(REPO, 'src/adapters/index.js'));
+const { NORMALIZERS, createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
+const { capsOf, BACKEND_CAPS } = require(path.join(REPO, 'src/backend-caps.js'));
+const { BACKEND_META } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
+
+ok(harnessIds().length >= 3 && ['claude', 'codex', 'shell'].every((id) => HARNESSES[id]), `registry carries the three built-in harnesses (${harnessIds().join(', ')})`);
+let threw = false; try { harnessOf('gemini'); } catch { threw = true; }
+ok(threw, 'an unknown harness id THROWS (never a claude fallback)');
+ok(createMessageManager('claude', 'x') && (() => { try { createMessageManager('gemini', 'x'); return false; } catch { return true; } })(), 'normalizer registry: known id works, unknown id throws');
+
+const BASE_METHODS = ['formatChatInput', 'formatInterrupt', 'formatPermissionResponse', 'formatSetPermissionMode', 'formatSetModel', 'formatSetEffort', 'postInterrupt'];
+const NORM_METHODS = ['onOp', 'processLive', 'convertHistory', 'convertHistoryAsync', 'tail', 'slice', 'turnMap'];
+const registry = createAdapterRegistry({ claudeCmd: 'claude', codexCmd: 'codex', codexSandboxSupported: true, chatWrapper: '/w/chat', codexChatWrapper: '/w/codex', ptyWrapper: '/w/pty', buffersDir: '/b' });
+
+for (const id of harnessIds()) {
+  const h = HARNESSES[id];
+  console.log(`— ${id}`);
+  ok(REQUIRED_DESCRIPTOR_KEYS.every((k) => k in h), `${id}: descriptor declares ${REQUIRED_DESCRIPTOR_KEYS.join('/')}`);
+  ok(h.caps === capsOf(id) && h.caps === BACKEND_CAPS[id], `${id}: caps ARE the backend-caps row (one source)`);
+  const ad = registry.get(id);
+  ok(ad instanceof BackendAdapter && ad instanceof h.Adapter, `${id}: adapter registry instantiates the descriptor's Adapter`);
+  if (h.kind === 'chat') {
+    for (const m of BASE_METHODS) ok(typeof ad[m] === 'function', `${id}: adapter implements ${m}`);
+    ok(typeof ad.buildSessionArgs === 'function', `${id}: adapter implements buildSessionArgs (required by ws-create, undeclared in base.js)`);
+    const spec = ad.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: 'default' });
+    ok(spec && typeof spec.cmd === 'string' && Array.isArray(spec.args) && typeof spec.wrapper === 'string' && spec.mode === 'chat' && spec.env && typeof spec.env === 'object', `${id}: buildSessionArgs({mode:'chat'}) → {cmd,args,wrapper,cwd,mode,env}`);
+    const mm = new h.Normalizer('contract');
+    for (const m of NORM_METHODS) ok(typeof mm[m] === 'function', `${id}: normalizer implements ${m}`);
+    ok(Array.isArray(mm.listeners) && typeof mm.total === 'number' && Array.isArray(mm.messages), `${id}: normalizer exposes listeners/total/messages`);
+    ok(typeof mm.injectPeerCard === 'function', `${id}: normalizer renders peer/notification cards (injectPeerCard)`);
+    ok(NORMALIZERS[id] === h.Normalizer, `${id}: normalizer registry row is the descriptor's Normalizer`);
+    ok(fs.existsSync(path.join(REPO, h.wrapper)), `${id}: wrapper file exists (${h.wrapper})`);
+    const w = fs.readFileSync(path.join(REPO, h.wrapper), 'utf8');
+    ok(/caps\s*[:=]\s*\{/.test(w), `${id}: wrapper adverts a caps object in its sidecar meta`);
+    ok(h.store && typeof h.store.locateTranscript === 'function' && Array.isArray(h.store.transcriptDirs) && typeof h.store.conversationIdField === 'string', `${id}: store declares locateTranscript/transcriptDirs/conversationIdField`);
+    ok(typeof h.settingsPrefix === 'string' && schemaSrc.includes(`'${h.settingsPrefix}.defaultModel'`) && schemaSrc.includes(`'${h.settingsPrefix}.defaultPermissionMode'`), `${id}: settings schema carries ${h.settingsPrefix}.defaultModel/.defaultPermissionMode`);
+    ok(['hooks', 'wrapper', 'acp'].includes(h.inject), `${id}: declares its context-injection strategy (${h.inject})`);
+    ok(typeof h.caps.streamProtocol === 'string', `${id}: caps name a stream protocol (${h.caps.streamProtocol})`);
+  }
+  const meta = BACKEND_META[id];
+  ok(meta && meta.id === id && meta.label && meta.badgeClass, `${id}: client BACKEND_META row exists`);
+  if (h.kind === 'chat') ok(Array.isArray(meta.fallbackModels) && meta.fallbackModels.length > 0 && meta.caps, `${id}: client META carries fallbackModels + feature caps`);
+}
+ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META row has a server harness (no client-only backend)');
+ok(chatHarnessIds().join(',') === 'claude,codex', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
+ok(BACKEND_META.codex.fallbackModels[0] === 'gpt-6-astra', 'codex fallback model list leads with gpt-6-astra (0.153.4 catalog default)');
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);
