@@ -2904,4 +2904,7 @@ export default {
   "not started": "未开始",
   "No window running yet — a reset time appears after the first request": "尚无运行中的窗口 — 第一次请求后才会出现重置时间",
   "VibeSpace auto-resume — sent automatically after the usage limit cleared": "VibeSpace 自动续跑 — 用量上限解除后自动发送",
+  "Web searches / fetches (WebSearch, WebFetch, web_search)": "网页搜索 / 抓取（WebSearch、WebFetch、web_search）",
+  "{n} searches": "{n} 次搜索",
+  "Estimated: weekly windows repeat every 7 days, projected from the last observed reset": "估算值：周窗口每 7 天重复一次，按上次观测到的重置时间推算",
 };

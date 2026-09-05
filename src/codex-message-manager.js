@@ -108,9 +108,9 @@ function collapseKindOf(rawName) {
   if (n === 'exec' || n === 'exec_command' || n === 'shell' || n === 'local_shell' || n === 'write_stdin') return 'bash';
   if (n === 'apply_patch') return 'write';
   if (/^(spawn_agent|wait_agent|send_input|resume_agent|close_agent|list_agents|send_message|interrupt_agent|followup_task)$/.test(n) || n.startsWith('agent')) return 'agent';
-  // deliberately VISIBLE work (plans, images, searches — claude's WebSearch
-  // never folds either)
-  if (n === 'update_plan' || n === 'view_image' || n === 'web_search' || n === 'image_gen' || !n) return null;
+  if (n === 'web_search' || n === 'web_fetch') return 'search'; // web research folds with claude's WebSearch (2.369.33, owner report)
+  // deliberately VISIBLE work (plans, images)
+  if (n === 'update_plan' || n === 'view_image' || n === 'image_gen' || !n) return null;
   // everything else = an external/dynamic tool (codex plugins, browser tools,
   // MCP-class) — same semantic bucket as claude's MCP kind. Unknown names used
   // to return null and BREAK the surrounding fold (owner: 乱七八糟的卡片).

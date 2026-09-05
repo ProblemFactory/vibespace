@@ -60,7 +60,30 @@ ok(/this\._agentKindFilter = storedKind == null \? 'primary' : \(storedKind === 
 const um2 = read('src/lib/usage-meter.js');
 const iCodex = um2.indexOf("e.target.closest('.usage-refresh-codex-btn')"), iGeneric = um2.indexOf("e.target.closest('.usage-refresh-btn')");
 ok(iCodex > 0 && iGeneric > 0 && iCodex < iGeneric, 'usage-meter: the codex ⟳ (both classes) is dispatched BEFORE the generic claude ⟳');
-ok(/const fmtReset = \(ts, util\) => \{/.test(um2) && (um2.match(/fmtReset\([^)]*, [^)]*utilization\)/g) || []).length === 5 && /t\('not started'\)/.test(um2), "usage-meter: every reset cell passes utilization; 0% with no reset time renders 'not started' (tooltip explains)");
+ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtReset\([^)]*utilization[^)]*\)/g) || []).length === 5 && /t\('not started'\)/.test(um2), "usage-meter: every reset cell passes utilization; 0% with no reset time renders 'not started' (tooltip explains)");
+
+// ── 2.369.33: the 'search' fold kind + weekly reset projection ──
+{
+  const ss = read('src/lib/settings-schema.js');
+  ok(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search'\]/.test(ss) && /value: 'search', label: t\('Web searches \/ fetches/.test(ss), "settings: 'search' is a fold kind, ON by default");
+  const cv = read('src/lib/chat-view.js');
+  ok(/if \(tn === 'WebSearch' \|\| tn === 'WebFetch'\) return 'search';/.test(cv) && /if \(tn === 'Grep' \|\| tn === 'Glob' \|\| tn === 'LS'\) return 'read';/.test(cv) && /if \(tn === 'ToolSearch'\) return 'mcp';/.test(cv) && /byKind\.search\) parts\.push\(t\('\{n\} searches'/.test(cv) && /'mcp', 'agent', 'search'\]\)/.test(cv), 'chat-view: WebSearch/WebFetch→search, Grep/Glob/LS→read, ToolSearch→mcp; summary counts searches; default set includes search');
+  const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
+  const cm2 = new CodexMessageManager('c2');
+  cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'function_call', call_id: 'ws1', name: 'web_search', arguments: '{"query":"rv solar"}' } });
+  const card = cm2.messages.find((m) => m.role === 'tool');
+  ok(card && card.collapseKind === 'search', "codex normalizer stamps collapseKind 'search' on web_search cards", card?.collapseKind);
+  const { collapseKindOf } = require(path.join(REPO, 'src/acp-message-manager.js'));
+  ok(collapseKindOf('search') === 'search' && collapseKindOf('read') === 'read', "ACP tool kind 'search' folds as search");
+  const { projectReset, WEEK_SEC } = require(path.join(REPO, 'src/harnesses/claude-quota.js'));
+  const anchor = 1788973200; // an observed weekly reset
+  ok(projectReset(anchor, WEEK_SEC, anchor - 100) === anchor, 'projectReset: a future reset is returned as-is');
+  ok(projectReset(anchor, WEEK_SEC, anchor + 1) === anchor + WEEK_SEC && projectReset(anchor, WEEK_SEC, anchor + 3 * WEEK_SEC + 5) === anchor + 4 * WEEK_SEC, 'projectReset: the first 7-day multiple strictly in the future');
+  ok(projectReset(0, WEEK_SEC, 1) === null && projectReset(anchor, 0, anchor + 1) === null, 'projectReset: no anchor / no period → null');
+  const ur = read('src/usage-routes.js');
+  ok(/merged\.sevenDay = \{ \.\.\.merged\.sevenDay, resetsAt: p, resetsAtEstimated: true \}/.test(ur) && /before \? projectReset\(before\.resetsAt, WEEK_SEC, nowSec\) : null/.test(ur) && !/fiveHour[^\n]*projectReset/.test(ur), 'usage-routes projects sevenDay + scopedWeekly from the previous cache (never the 5-hour bucket)');
+  ok(/const fmtReset = \(ts, util, est\) => \{/.test(um2) && /return estMark \+ \(left > 45/.test(um2) && /rl\.sevenDay\?\.resetsAtEstimated\)/.test(um2) && /sc\.resetsAtEstimated\)/.test(um2), 'usage popup marks projected resets with ≈ (weekly + scoped weekly cells)');
+}
 
 fs.rmSync(home, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

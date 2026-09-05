@@ -2963,7 +2963,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
-      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent']);
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search']);
       // per-member classification (also used by flush() for the summary).
       // SEMANTIC HINT FIRST (Track B, design-backend-parity.md §5): the
       // normalizer stamps `collapseKind` — codex cards (exec, Agent Wait,
@@ -2985,6 +2985,11 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           // Bash line; it fell through to null and so BROKE the surrounding run.
           if (tn === 'Skill') return 'skill';
           if (tn === 'Agent' || tn === 'Task') return 'agent'; // claude sub-agent cards join the collab kind
+          // web research is its OWN kind (2.369.33, owner report: 42 WebSearch cards
+          // in one session, none folded — and each null BROKE the surrounding run)
+          if (tn === 'WebSearch' || tn === 'WebFetch') return 'search';
+          if (tn === 'Grep' || tn === 'Glob' || tn === 'LS') return 'read';   // file-system searches = reads
+          if (tn === 'ToolSearch') return 'mcp';                              // tool-schema lookup = MCP housekeeping
           if (mcpParts(tn)) return 'mcp'; // any MCP server's tool (2.215.3)
           if (tn === 'Read' || tn === 'Write' || tn === 'Edit' || tn === 'Patch') {
             // agent-memory file ops are their OWN kind (2.213.1, user ask:
@@ -3054,6 +3059,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           if (byKind.thinking) parts.push(t('{n} thinking', { n: byKind.thinking }));
           if (byKind.bash) parts.push(t('{n} Bash', { n: byKind.bash }));
           if (byKind.read) parts.push(t('{n} reads', { n: byKind.read }));
+          if (byKind.search) parts.push(t('{n} searches', { n: byKind.search }));
           if (byKind.write) parts.push(t('{n} writes', { n: byKind.write }));
           if (byKind.memory) parts.push(t('{n} memory', { n: byKind.memory }));
           // single-server runs name the server — "8 MCP (chrome-devtools)"

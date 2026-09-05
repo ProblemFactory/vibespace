@@ -60,7 +60,8 @@ function parseAcpBufferRecords(buffer) {
 /** ACP ToolKind → the chat view's semantic fold kinds (chat.collapseKinds vocabulary). */
 function collapseKindOf(kind) {
   switch (String(kind || 'other')) {
-    case 'read': case 'search': return 'read';
+    case 'read': return 'read';
+    case 'search': return 'search';
     case 'edit': case 'delete': case 'move': return 'write';
     case 'execute': return 'bash';
     case 'think': return 'thinking';

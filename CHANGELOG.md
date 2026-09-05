@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.33
+- **Web searches fold** (owner report: a session with 42 WebSearch cards, none folded): the chat's semantic fold gains a `search` kind (default ON) — claude WebSearch/WebFetch, codex `web_search`/`web_fetch`, ACP tool kind `search`; claude Grep/Glob/LS now count as reads and ToolSearch as MCP housekeeping. Before, every one of those returned null from the classifier, which not only left the card visible but BROKE the surrounding run so neighbouring reads/commands stayed unfolded too. Users who customised "Card kinds that collapse" need to tick the new kind once.
+- **Weekly reset times are projected** (owner ask "记一下 reset 时间之后 estimate"): weekly windows (7-day + model-scoped) reset on a fixed 7-day anchor per account, so when the CLI's /usage panel omits the reset (a bucket at 0%) the last observed weekly reset is carried forward (`projectReset`, marked "≈" with a tooltip). 5-hour windows are not projectable — they start with the first request — so those keep "not started". An account that never showed a weekly reset (PandyMax today) has nothing to project until its first reading.
+
 ## 2.369.32
 Owner-reported batch (six reports, 2026-09-05 afternoon):
 - **Codex model continuity** ("I picked GPT-6, the view says 5.6"): a codex resume that carries no explicit model now keeps the model the thread LAST ran on (`lastCodexTurnModel` = the rollout's last turn_context, the wrapper's own authoritative record) instead of the app-server's thread.model (= the START model); the wrapper pins a user-chosen model (spawn env or set-model — `meta.modelPinned`) so a thread/resume or thread/name/set response can never revert it. The reported thread itself ran its first three turns on gpt-5.6-sol (no model was recorded at its 10:34 start) and switched to gpt-6-astra at 12:50 — the facts are in its turn_context records.

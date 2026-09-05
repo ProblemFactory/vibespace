@@ -2904,4 +2904,7 @@ export default {
   "not started": "未開始",
   "No window running yet — a reset time appears after the first request": "実行中のウィンドウはまだありません — 最初のリクエスト後にリセット時刻が表示されます",
   "VibeSpace auto-resume — sent automatically after the usage limit cleared": "VibeSpace 自動再開 — 使用量上限が解除された後に自動送信",
+  "Web searches / fetches (WebSearch, WebFetch, web_search)": "Web 検索 / 取得（WebSearch、WebFetch、web_search）",
+  "{n} searches": "{n} 件の検索",
+  "Estimated: weekly windows repeat every 7 days, projected from the last observed reset": "推定値: 週次ウィンドウは 7 日ごとに繰り返すため、最後に観測したリセット時刻から算出",
 };

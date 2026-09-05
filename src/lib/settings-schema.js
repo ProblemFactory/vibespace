@@ -299,9 +299,10 @@ const SETTINGS_SCHEMA = {
     // SEMANTIC kinds, one global set for every backend (Track B, owner-decided:
     // per-provider checkbox copies = config sprawl) — each backend's normalizer
     // maps its own tool names in (claude Bash / codex exec are both 'bash').
-    type: 'multiSelect', default: ['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent'],
+    type: 'multiSelect', default: ['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search'],
     options: [
       { value: 'thinking', label: t('Thinking blocks') },
+      { value: 'search', label: t('Web searches / fetches (WebSearch, WebFetch, web_search)') },
       { value: 'bash', label: t('Command runs (Bash / exec / terminal)') },
       { value: 'read', label: t('File reads') },
       { value: 'write', label: t('File writes (Write/Edit/Patch)') },

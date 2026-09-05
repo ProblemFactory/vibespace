@@ -315,11 +315,12 @@ export function installUsageMeter(App, ctx = {}) {
       const dd = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
       return (dd ? `${dd}d` : '') + ((dd || hh) ? `${hh}h` : '') + `${mm}m`;
     };
-    const fmtReset = (ts, util) => {
+    const fmtReset = (ts, util, est) => {
       // a bucket at 0% has no running window yet — Anthropic reports no reset
       // time until the first request lands (owner report 2.369.32: a freshly
       // reset account showed '?' everywhere)
       if (!ts) return (util === 0 || util === '0') ? `<span title="${escHtml(t('No window running yet — a reset time appears after the first request'))}">${escHtml(t('not started'))}</span>` : '?';
+      const estMark = est ? `<span title="${escHtml(t('Estimated: weekly windows repeat every 7 days, projected from the last observed reset'))}">≈ </span>` : '';
       const d = new Date(ts * 1000), now = new Date();
       const time = d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
       let when;
@@ -330,7 +331,7 @@ export function installUsageMeter(App, ctx = {}) {
           : d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + time;
       }
       const left = ts - now.getTime() / 1000;
-      return left > 45 ? `${when} · ${t('in {dur}', { dur: fmtDur(left) })}` : when;
+      return estMark + (left > 45 ? `${when} · ${t('in {dur}', { dur: fmtDur(left) })}` : when);
     };
 
     if (rl || hasSwitch || glKnown) {
@@ -375,7 +376,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: pctSc })}</span>
           ${estStat(pSc)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt, sc.utilization)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(sc.resetsAt, sc.utilization, sc.resetsAtEstimated)}</span>
           ${scAge}
         </div>
       </div>`);
@@ -406,7 +407,7 @@ export function installUsageMeter(App, ctx = {}) {
         <div class="usage-session-stats">
           <span class="usage-stat">${t('{pct}% used', { pct: p7.estPct != null ? p7.darkPct : pct7d })}</span>
           ${estStat(p7)}
-          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization)}</span>
+          <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.sevenDay?.resetsAt, rl.sevenDay?.utilization, rl.sevenDay?.resetsAtEstimated)}</span>
         </div>
       </div>${scopedSections.join('')}
       ${this._subSignedOut && showingGlobal ? `<div class="usage-warn">${this._subSignedOutCause === 'console'

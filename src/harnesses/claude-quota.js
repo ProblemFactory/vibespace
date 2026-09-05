@@ -191,7 +191,25 @@ function signalFromStream(record) {
   return null;
 }
 
-module.exports = {
+/** Weekly windows (7-day + model-scoped weekly) reset on a FIXED per-account
+ *  anchor: every reset is exactly 7 days after the previous one. When a
+ *  reading carries no reset time (the CLI's /usage panel omits it while a
+ *  bucket sits at 0%), the next reset is still knowable from the last one we
+ *  observed — deterministic, owner-asked 2.369.33. Returns unix seconds of the
+ *  first prev + k·period strictly in the future, or null. 5-hour windows are
+ *  NOT projectable (they start with the first request), so callers never
+ *  pass those here. */
+function projectReset(prevResetsAt, periodSec, nowSec) {
+  const prev = Number(prevResetsAt) || 0, period = Number(periodSec) || 0;
+  if (!prev || period <= 0) return null;
+  const now = Number(nowSec) || Math.floor(Date.now() / 1000);
+  if (prev > now) return prev;
+  const k = Math.floor((now - prev) / period) + 1;
+  return prev + k * period;
+}
+const WEEK_SEC = 7 * 86400;
+
+module.exports = { projectReset, WEEK_SEC,
   normalize,
   signalFromStream,
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)

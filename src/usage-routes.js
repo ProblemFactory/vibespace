@@ -455,6 +455,25 @@ async function refreshViaCliPanel(key) {
     // preserve org identity + any fields the panel doesn't carry
     let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { }
     const merged = { ...prev, ...u, scopedWeekly: u.scopedWeekly?.length ? u.scopedWeekly : (prev.scopedWeekly || []) };
+    // WEEKLY RESET PROJECTION (2.369.33, owner ask): the panel omits '· resets'
+    // for a bucket at 0%, but weekly windows repeat on a fixed 7-day anchor —
+    // carry the last observed weekly reset forward (projectReset) and mark it
+    // estimated. The 5-hour bucket is NOT projected (its window starts with
+    // the first request; a stale one would be a lie).
+    try {
+      const { projectReset, WEEK_SEC } = require('./harnesses/claude-quota.js');
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (merged.sevenDay && !merged.sevenDay.resetsAt && prev.sevenDay?.resetsAt) { const p = projectReset(prev.sevenDay.resetsAt, WEEK_SEC, nowSec); if (p) merged.sevenDay = { ...merged.sevenDay, resetsAt: p, resetsAtEstimated: true }; }
+      else if (merged.sevenDay?.resetsAt && !u.sevenDay?.resetsAt && prev.sevenDay?.resetsAtEstimated) merged.sevenDay = { ...merged.sevenDay, resetsAtEstimated: true };
+      if (Array.isArray(merged.scopedWeekly) && Array.isArray(prev.scopedWeekly)) {
+        merged.scopedWeekly = merged.scopedWeekly.map((sw) => {
+          if (!sw || sw.resetsAt) return sw;
+          const before = prev.scopedWeekly.find((x) => x && x.name === sw.name && x.resetsAt);
+          const p = before ? projectReset(before.resetsAt, WEEK_SEC, nowSec) : null;
+          return p ? { ...sw, resetsAt: p, resetsAtEstimated: true } : sw;
+        });
+      }
+    } catch { }
     fs.writeFileSync(f + '.tmp', JSON.stringify(merged)); fs.renameSync(f + '.tmp', f);
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
