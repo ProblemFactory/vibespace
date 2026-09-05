@@ -53,7 +53,8 @@ for (const id of harnessIds()) {
     ok(/caps\s*[:=]\s*\{/.test(w), `${id}: wrapper adverts a caps object in its sidecar meta`);
     ok(h.store && typeof h.store.locateTranscript === 'function' && Array.isArray(h.store.transcriptDirs) && typeof h.store.conversationIdField === 'string', `${id}: store declares locateTranscript/transcriptDirs/conversationIdField`);
     ok(typeof h.settingsPrefix === 'string' && schemaSrc.includes(`'${h.settingsPrefix}.defaultModel'`) && schemaSrc.includes(`'${h.settingsPrefix}.defaultPermissionMode'`), `${id}: settings schema carries ${h.settingsPrefix}.defaultModel/.defaultPermissionMode`);
-    ok(['hooks', 'wrapper', 'acp'].includes(h.inject), `${id}: declares its context-injection strategy (${h.inject})`);
+    ok(h.inject && ['hooks', 'wrapper', 'acp'].includes(h.inject.kind) && typeof h.inject.sessionStartHonoured === 'boolean' && Array.isArray(h.inject.hookEvents), `${id}: declares its context-injection strategy (${h.inject?.kind}, sessionStartHonoured=${h.inject?.sessionStartHonoured})`);
+    if (h.inject?.hookFile) ok(typeof h.inject.hookFile.file === 'function' && typeof h.inject.hookFile.file() === 'string' && typeof h.inject.hookFile.createIfMissing === 'boolean', `${id}: hook file declaration is well-formed (${h.inject.hookFile.file()})`);
     ok(typeof h.caps.streamProtocol === 'string', `${id}: caps name a stream protocol (${h.caps.streamProtocol})`);
   }
   const meta = BACKEND_META[id];
@@ -63,6 +64,12 @@ for (const id of harnessIds()) {
 ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META row has a server harness (no client-only backend)');
 ok(chatHarnessIds().join(',') === 'claude,codex', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
 ok(BACKEND_META.codex.fallbackModels[0] === 'gpt-6-astra', 'codex fallback model list leads with gpt-6-astra (0.153.4 catalog default)');
+// S6 wiring pins: injection topology decided by the strategy, never a backend id
+const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+ok(!/s\.backend !== 'codex'/.test(ar) && (ar.match(/honoursSessionStart\(s\)/g) || []).length === 4, 'agent-routes: the four SessionStart seen-gates consult inject.sessionStartHonoured (no backend-id gate left)');
+const atg = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
+ok(/HOOK_FILES = Object\.fromEntries\(listHarnesses\(\)/.test(atg) && /HOOK_EVENTS_FOR = \(harness\) => \{ const h = listHarnesses\(\)/.test(atg) && !/harness === 'claude' \? \[/.test(atg), 'agent-tool-generators: hook files + events come from the registry (no per-harness literals)');
+ok(HARNESSES.claude.inject.hookEvents.includes('Stop') && !HARNESSES.codex.inject.hookEvents.includes('Stop') && HARNESSES.codex.inject.sessionStartHonoured === false, 'claude registers Stop, codex does not and ignores SessionStart (zero behaviour change)');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

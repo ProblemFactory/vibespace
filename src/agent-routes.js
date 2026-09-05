@@ -277,7 +277,7 @@ app.get('/api/agent/task-context', (req, res) => {
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
-      if (context && s.backend !== 'codex') {
+      if (context && honoursSessionStart(s)) {
         s._groupSeenAt = s._groupSeenAt || {};
         s._ctxSig = s._ctxSig || {};
         s._groupSnap = s._groupSnap || {};
@@ -289,7 +289,7 @@ app.get('/api/agent/task-context', (req, res) => {
           s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
         }
       }
-    } else if (s.backend !== 'codex' && !s._toolsIntroSeen) {
+    } else if (honoursSessionStart(s) && !s._toolsIntroSeen) {
       // No INJECTABLE group (none at all, or every belonged group has
       // injectContext off): still teach vibespace-status once — the baseline
       // intro carries no group content, and an agent that never learns the
@@ -301,11 +301,11 @@ app.get('/api/agent/task-context', (req, res) => {
     }
     // Designated Group MANAGER: teach the admin verbs ONCE — whichever route
     // delivers first wins (s._mgrIntroSeen shared with prompt-context).
-    if (s.backend !== 'codex' && !s._mgrIntroSeen && isManagerSession(key)) {
+    if (honoursSessionStart(s) && !s._mgrIntroSeen && isManagerSession(key)) {
       context = context ? context + '\n\n' + MANAGER_INTRO : MANAGER_INTRO;
       s._mgrIntroSeen = true;
     }
-    if (s.backend !== 'codex') { // codex ignores SessionStart output — don't burn the seen-gate
+    if (honoursSessionStart(s)) { // a harness that ignores SessionStart output must not burn the seen-gate
       const withPre = withPreamble(s, context ? [context] : []);
       context = withPre.length ? withPre.join('\n\n') : context;
     }
@@ -945,6 +945,12 @@ function jobAuth(req, res) {
   return { jm, caller: jobsCaller(hit[0], hit[1]), session: hit[0], sessionId: hit[1] };
 }
 const jobModel = require('./job-model.js');
+const { has: hasHarness, get: getHarness } = require('./harnesses');
+/** S6: does this session's harness honour SessionStart hook output? (claude
+ *  yes; codex runs the hook but ignores it — its teaching rides the wrapper's
+ *  prompt-context path, so the seen-gates must not advance here.) Unknown
+ *  harness ⇒ false (never silently treated as claude). */
+const honoursSessionStart = (s) => { const b = s?.backend || 'claude'; return hasHarness(b) && !!getHarness(b).inject?.sessionStartHonoured; };
 const NOT_VISIBLE = (ref) => `no job "${ref}" visible to this session — vibespace-job list`;
 function findVisible(jm, caller, ref) {
   const all = [...jm.jobs.values()];

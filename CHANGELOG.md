@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.369.22
+- **Harness S6 — context-injection strategy per harness.** `src/harnesses/<id>.js` `inject` is now an object `{ kind: 'hooks'|'wrapper'|'acp', hookFile: {file(), createIfMissing} | null, hookEvents[], sessionStartHonoured }`: agent-tool-generators derives the hook files + events from the registry (claude registers SessionStart/UserPromptSubmit/Stop, codex SessionStart/UserPromptSubmit — codex's app-server has no blockable Stop hook and IGNORES SessionStart output), and agent-routes' four SessionStart seen-gates consult `inject.sessionStartHonoured` instead of `s.backend !== 'codex'` (a harness that ignores SessionStart must not burn its seen-gates; an unknown harness is never treated as claude). Zero behaviour change; test-harness-contract 75 pins the strategy shape + the wiring.
+
 ## 2.369.21
 - **Codex P2, client side (docs/design-harness-plugins.md §1).** Onboarding counts named/pooled accounts for EVERY backend (`/api/backend-status` now reports `codex.namedLoggedIn`; the 2.267.4 fix was claude-only, so codex named accounts never satisfied the wizard) and offers the "Accounts & pool…" door for any installed backend; the billing switcher shows codex quota (per-account rows read the persisted codex buckets, the ChatGPT-login row the global codex quota) — users picked a ChatGPT account blind; **whole-thread fork is exposed for codex** (`backend-caps.fork` per harness, `_forkRequested` honours it, client META caps.fork true; a real-wrapper stub test pins that CODEX_WEBUI_FORK=1 sends `thread/fork` for the parent and adopts the child id); the permission-mode dropdown seeds per backend from `BACKEND_META.permissionModes` (an early click on a codex chat no longer offers claude modes). scripts/test-codex-p2-client.mjs (13).
 

@@ -5,6 +5,8 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { ClaudeCodeAdapter } = require('../adapters/claude-code');
 const { MessageManager } = require('../message-manager');
 const store = require('../session-store');
+const os = require('os');
+const path = require('path');
 
 module.exports = {
   id: 'claude',
@@ -23,5 +25,14 @@ module.exports = {
   },
   quota: require('./claude-quota.js'),   // QuotaSignalSource (S4): normalize/signalFromStream/probe/classifyAuthFailure
   settingsPrefix: 'claude',
-  inject: 'hooks',              // context teaching rides the CLI's own hooks (vibespace-hook.mjs)
+  // CONTEXT INJECTION strategy (S6): the CLI's own hooks carry task context
+  // (SessionStart), per-prompt notices (UserPromptSubmit) and the stop-time
+  // bookkeeping nudge (Stop); SessionStart output is honoured, so the
+  // seen-gates in agent-routes advance on delivery.
+  inject: {
+    kind: 'hooks',
+    hookFile: { file: () => path.join(os.homedir(), '.claude', 'settings.json'), createIfMissing: false },
+    hookEvents: ['SessionStart', 'UserPromptSubmit', 'Stop'],
+    sessionStartHonoured: true,
+  },
 };

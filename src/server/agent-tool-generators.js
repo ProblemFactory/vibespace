@@ -298,16 +298,15 @@ createHookHelper();
 // other key/entry (e.g. the task-tracker plugin's hooks) is left untouched.
 // Runs at every startup AND on demand from the Manage Agents dialog, which
 // shows per-harness status so non-engineers can see + repair the integration.
-const HOOK_FILES = {
-  claude: { file: () => path.join(os.homedir(), '.claude', 'settings.json'), createIfMissing: false },
-  codex: { file: () => path.join(os.homedir(), '.codex', 'hooks.json'), createIfMissing: true },
-};
-// Both events are natively supported by Claude Code and Codex; SessionStart
-// delivers task context, UserPromptSubmit delivers pending status notices.
-const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit'];
-// Stop is CLAUDE-ONLY: codex's app-server (JSON-RPC mode) has no blockable
-// Stop hook — its stop-time nudge rides the codex wrapper's turn/completed.
-const HOOK_EVENTS_FOR = (harness) => harness === 'claude' ? [...HOOK_EVENTS, 'Stop'] : HOOK_EVENTS;
+// Per-harness hook file + events come from the HARNESS REGISTRY (S6,
+// src/harnesses/<id>.js inject.hookFile / inject.hookEvents): SessionStart
+// delivers task context, UserPromptSubmit pending status notices, Stop (claude
+// only — codex's app-server has no blockable Stop hook; its nudge rides the
+// wrapper's turn/completed) the bookkeeping nudge. A harness without a hook
+// file (shell, ACP agents) is simply absent here.
+const { list: listHarnesses } = require('../harnesses');
+const HOOK_FILES = Object.fromEntries(listHarnesses().filter((h) => h.inject && h.inject.hookFile).map((h) => [h.id, h.inject.hookFile]));
+const HOOK_EVENTS_FOR = (harness) => { const h = listHarnesses().find((x) => x.id === harness); return h?.inject?.hookEvents ? [...h.inject.hookEvents] : []; };
 // Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
 // marker so startup does NOT silently re-register the hooks they removed.
 const HOOK_OPTOUT_FILE = path.join(rootDir, 'data', '.agent-hooks-optout');
