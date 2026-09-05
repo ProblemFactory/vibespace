@@ -374,10 +374,15 @@ function registerWsHandler(wss, ctx) {
             }
             // Large frames (image pastes) ride a FILE, not the pty stdin —
             // multi-MB single lines get shredded by the pty/dtach channel
-            // (the 79928a2b 38MB poisoning; local claude chat only — the
-            // remote wrapper can't see this filesystem).
+            // (the 79928a2b 38MB poisoning; local chat only — a remote
+            // wrapper can't see this filesystem). The condition is TRANSPORT
+            // + CAPABILITY, never a backend id: until design-harness-plugins
+            // §1 P1 it also excluded the codex backend by id, which left the
+            // shredding class OPEN for codex (its wrapper had no _frame_file
+            // verb and dropped unparseable lines silently) instead of letting
+            // the capability gate below say "old wrapper" honestly.
             let payloadLine = stdinPayload;
-            if (stdinPayload.length > 64 * 1024 && session.backend !== 'codex' && !session.host && session.socketPath) {
+            if (stdinPayload.length > 64 * 1024 && !session.host && session.socketPath) {
               // WRAPPER CAPABILITY GATE (2.361.1, the c1206711 lost-image
               // incident): the _frame_file pointer is only understood by
               // wrappers spawned from 2.360.0+ code. Wrappers are LONG-LIVED
