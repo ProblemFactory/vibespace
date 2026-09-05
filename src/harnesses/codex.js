@@ -55,6 +55,30 @@ module.exports = {
   // (auth.json isolated; sessions/ + config.toml symlink the shared ~/.codex).
   creds: {
     subsDirName: 'codex-subs',                 // data/codex-subs/<id>
+    files: ['auth.json'],                      // the only per-account file (sessions/config.toml are shared symlinks)
+    bumpFile: null,                            // auth.json needs no mtime bump on a pool swap
+    hostFactsKey: 'codex',                     // hosts.js backend-status facts bucket
+    longLivedToken: false,
+    supportsApiKeys: false,                    // codex accounts are always ChatGPT logins (type 'subscription')
+    remoteSymlinks: { sessions: '$HOME/.codex/sessions', 'config.toml': '$HOME/.codex/config.toml' },
+    ensureTargets: ['mkdir -p "$HOME/.codex/sessions"', 'touch "$HOME/.codex/config.toml"'],
+    probe: { file: 'auth.json', marker: 'auth_mode|tokens|OPENAI_API_KEY' },
+    sharedHome() { return process.env.CODEX_HOME || path.join(os.homedir(), '.codex'); },
+    // An isolated CODEX_HOME whose sessions/ + config.toml SYMLINK the shared
+    // home: threads land in one place (unified discovery), model/approval
+    // settings are shared, only auth.json is per-account.
+    seedDir(dir) {
+      const shared = this.sharedHome();
+      try { fs.mkdirSync(path.join(shared, 'sessions'), { recursive: true }); } catch { }
+      try { if (!fs.existsSync(path.join(shared, 'config.toml'))) fs.writeFileSync(path.join(shared, 'config.toml'), ''); } catch { }
+      const link = (name) => {
+        const p = path.join(dir, name);
+        try { fs.rmSync(p, { recursive: true, force: true }); } catch { }
+        try { fs.symlinkSync(path.join(shared, name), p); } catch { }
+      };
+      link('sessions');
+      link('config.toml');
+    },
     authFile: 'auth.json',
     spawnEnvVar: 'CODEX_HOME',
     loginLabel: 'ChatGPT',

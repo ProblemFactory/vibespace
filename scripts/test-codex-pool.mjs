@@ -130,7 +130,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // ── static pins: the ordering fix + ONE pool menu for both rosters ──
   const acc = read('src/accounts.js');
   const listBody = acc.slice(acc.indexOf('  list() {'), acc.indexOf('// ── Subscription accounts'));
-  ok('accounts.list() evaluates the pooled branch BEFORE the codex branch', listBody.indexOf("if (type === 'pooled')") > 0 && listBody.indexOf("if (type === 'pooled')") < listBody.indexOf("if (backend === 'codex')"));
+  ok('accounts.list() evaluates the pooled branch BEFORE the (now harness-neutral, S2) subscription branch', listBody.indexOf("if (type === 'pooled')") > 0 && listBody.indexOf("if (type === 'pooled')") < listBody.indexOf("if (type === 'subscription')") && !/if \(backend === 'codex'\) \{/.test(listBody));
   ok('…the pool row reads identity via the backend\'s own auth reader and carries the registry\'s hotSwitch verdict', /this\._readAuthFor\(backend, a\.id\)/.test(listBody) && /hotSupported: capsOf\(backend\)\.hotSwitch === 'verified'/.test(listBody));
   const ma = read('src/lib/manage-agents.js');
   const count = (s, re) => (s.match(re) || []).length;

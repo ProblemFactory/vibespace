@@ -53,6 +53,22 @@ module.exports = {
   // the login is called, which store field holds the default account.
   creds: {
     subsDirName: 'subs',                       // data/subs/<id>
+    files: ['.credentials.json', '.claude.json'], // what an account dir ships/backs up (export, remote tar)
+    bumpFile: '.credentials.json',             // creds-mtime bump on pool symlink swap (the CLI's cred-cache invalidation)
+    hostFactsKey: 'subscription',              // hosts.js backend-status facts bucket carrying this harness's login email
+    longLivedToken: true,                      // `claude setup-token` oat accounts exist (accounts._oatMeta)
+    supportsApiKeys: true,                     // account records may be API keys (type 'api'); subscription otherwise
+    remoteSymlinks: {}, ensureTargets: [],     // nothing shared on the host — securestorage relocates the secret store only
+    probe: { file: '.credentials.json', marker: 'accessToken' }, // remote poison-heal marker (a wiped {} file must not win newest-wins)
+    // Pre-seed an isolated login dir's .claude.json with the onboarding-complete
+    // flags so `claude auth login` under CLAUDE_CONFIG_DIR=dir skips first-run
+    // onboarding; the identity lands IN the dir — the global ~/.claude.json is
+    // never clobbered.
+    seedDir(dir) {
+      const seed = { hasCompletedOnboarding: true, hasTrustDialogAccepted: true, theme: 'dark' };
+      try { const g = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8')); if (g.theme) seed.theme = g.theme; } catch { }
+      try { fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(seed), { mode: 0o600 }); } catch { }
+    },
     authFile: '.credentials.json',
     spawnEnvVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
     loginLabel: 'Claude',

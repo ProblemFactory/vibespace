@@ -97,7 +97,7 @@ module.exports = {
 | 切片 | 内容 | gate |
 |---|---|---|
 | S1 ✅2.369.18 | HarnessDescriptor + src/harnesses 注册表，把 claude/codex/shell 原样包进去（零行为变化）；删除 cli-env 里的第二份 adapter 配置 | test-harness-contract（3 harness） |
-| S2 ◐2.369.26 (creds descriptor + 13 处三目收口; 剩 loginFlow/shipRemote/keychain 分支) | accounts.js 凭据策略对象（25 处三目收口：credsScheme/readAuth/spawnEnv/loginFlow/shipRemote） | test-account-pool + test-harness-contract S2 pins |
+| S2 ✅2.369.27 (creds descriptor: dirs/auth/files/seed/remote-ship/host-facts/bump/oat; 保留 resolveForSpawn 分派 + claude-only hostSubs) | accounts.js 凭据策略对象（25 处三目收口：credsScheme/readAuth/spawnEnv/loginFlow/shipRemote） | test-account-pool + test-harness-contract S2 pins |
 | S3 | store：discover/locate/parse/writerSweep/forkChain 归描述符；routes/sessions 与 transcript-service 只调描述符；zst 支持 | test-transcript-parity / test-discovery-interpret 扩到每 harness |
 | S4 ✅ | usage/quota：QuotaSignalSource（normalize/signalFromStream/probe/classifyAuthFailure）；getQuotaProbe 按 caps 分发（顺带修 §1 P2 的 auto-resume 探测）。**已交付**：src/harnesses/{index,claude,codex,shell}.js 最小注册表（S1 未落地时先行，`get()` 未知 id 响亮失败）+ claude-quota/codex-quota（claude 与 codex 的 normalizer 原样迁入，usage-routes 只重导出；claude 的 stream 信号=rate_limit_event+banner，codex=rate_limits_updated/task_failed typed enum/reset_credit_result）；engine 的 recordRateLimitEvent/recordCodexQuotaSignal/notePoolAuthFailure 经注册表取信号与分类器；probeQuotaForKey 分发器替换三处 getQuotaProbe 直呼。零行为变化（signal 分类与旧分支逐一等价）。未动：session-stdout 的两条管线仍各自喂 engine（S5），codex auth-failure 仍只上报不驱逐（credsTokenSig 是 claude creds 路径，S2 归属） | test-quota-source（新）+ test-codex-quota / test-codex-pool / test-auto-resume / test-pool-auto / test-vendor-whitelist |
 | S5 | session-stdout 管线 → descriptor.stream.parse；daemon 共用 | test-session-brain-dark 每 harness |

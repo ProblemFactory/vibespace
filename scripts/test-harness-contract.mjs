@@ -81,6 +81,16 @@ for (const id of chatHarnessIds()) {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
+// S2 remainder (2.369.27): ship files / seeders / remote-creds shape / host-facts key / swap bump ride the descriptor too
+for (const id of chatHarnessIds()) {
+  const c = HARNESSES[id].creds;
+  ok(Array.isArray(c.files) && c.files.includes(c.authFile) && typeof c.hostFactsKey === 'string' && typeof c.longLivedToken === 'boolean' && typeof c.supportsApiKeys === 'boolean' && typeof c.seedDir === 'function' && c.probe && typeof c.probe.file === 'string' && typeof c.probe.marker === 'string' && ('bumpFile' in c) && typeof c.remoteSymlinks === 'object' && Array.isArray(c.ensureTargets), `${id}: creds remainder complete (files ${c.files?.join('+')}, hostFactsKey ${c.hostFactsKey}, bumpFile ${c.bumpFile})`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-seed-'));
+  const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(tmp, 'shared'); // keep the codex seeder off the real ~/.codex
+  try { c.seedDir(tmp); ok(fs.readdirSync(tmp).length >= 1, `${id}: seedDir populates a fresh account dir (${fs.readdirSync(tmp).join(',')})`); } finally { if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome; }
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+ok((acc.match(/this\._remoteCreds\(/g) || []).length >= 2 && !/CODEX_SUB_FILES|CLAUDE_SUB_FILES/.test(acc) && !/hostFacts\.codex\?\.email/.test(acc) && !/const isCodex = rec\.backend === 'codex'/.test(acc) && !/_seedCodexDir\(dir\) \{\n    const shared/.test(acc) && !/localEnv: \{ CODEX_HOME:/.test(acc) && !/localEnv: \{ CLAUDE_SECURESTORAGE_CONFIG_DIR:/.test(acc), 'accounts.js export/import/delete/verdict/spawn-env/remote-creds read the descriptor (S2 remainder)');
 ok((acc.match(/this\._readAuthFor\(/g) || []).length >= 4 && (acc.match(/this\._acctDir\(/g) || []).length >= 3 && !/codexSubDir\(a\.id\) : this\.subDir\(a\.id\)/.test(acc) && !/\? this\.readCodexSubAuth\(/.test(acc), 'accounts.js reads dirs/auth/labels/default-field through the descriptor (mechanical codex-or-claude ternaries gone)');
 // S6 wiring pins: injection topology decided by the strategy, never a backend id
 const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');

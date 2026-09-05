@@ -54,7 +54,7 @@ class AccountManager {
   _acctBackend(a) { return a.backend || 'claude'; } // legacy records = Claude
   _localOnlyClaudeSub(a) {
     return this._platform === 'darwin'
-      && this._acctBackend(a) === 'claude'
+      && !!this._credsOf(this._acctBackend(a))?.keychainSensitive
       && this._acctType(a) === 'subscription';
   }
   subDir(id) { return path.join(this._subsDir, id); }
@@ -62,6 +62,20 @@ class AccountManager {
   _credsOf(be) { return harnessOf(be || 'claude').creds; }
   _acctDir(be, id) { return path.join(this._dataDir, this._credsOf(be).subsDirName, id); }
   _readAuthFor(be, id) { return this._credsOf(be).parseAuth(this._acctDir(be, id)); }
+  /** remoteCreds for resolveForSpawn — the ONE shape ws-create ships to a host
+   *  (tar of `files` from srcDir → $HOME/.vibespace/<dirName>, env var pointed
+   *  at it, shared subdirs symlinked, poison-heal probe); every field is the
+   *  harness descriptor's. `shippable` only exists for keychain-sensitive
+   *  harnesses (macOS Keychain-primary dirs must never be copied). */
+  _remoteCreds(be, id, a) {
+    const c = this._credsOf(be);
+    return {
+      srcDir: this._acctDir(be, id), dirName: c.subsDirName + '/' + id, envVar: c.spawnEnvVar,
+      files: c.files.slice(), symlinks: { ...(c.remoteSymlinks || {}) }, ensureTargets: [...(c.ensureTargets || [])],
+      probe: c.probe ? { ...c.probe } : null,
+      ...(c.keychainSensitive ? { shippable: !this._localOnlyClaudeSub(a) } : {}),
+    };
+  }
   subCredsPath(id) { return path.join(this.subDir(id), '.credentials.json'); }
   codexSubDir(id) { return path.join(this._codexSubsDir, id); }
 
@@ -70,11 +84,7 @@ class AccountManager {
   // CLAUDE_CONFIG_DIR=dir) does NOT show the first-run onboarding screen. Setting
   // CLAUDE_CONFIG_DIR isolates the identity (oauthAccount) INTO the dir, so the
   // GLOBAL ~/.claude.json is never clobbered — the whole point.
-  _seedConfigDir(dir) {
-    const seed = { hasCompletedOnboarding: true, hasTrustDialogAccepted: true, theme: 'dark' };
-    try { const g = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude.json'), 'utf-8')); if (g.theme) seed.theme = g.theme; } catch { }
-    try { fs.writeFileSync(path.join(dir, '.claude.json'), JSON.stringify(seed), { mode: 0o600 }); } catch { }
-  }
+  _seedConfigDir(dir) { return this._credsOf('claude').seedDir(dir); } // S2: the seeder lives on the claude descriptor
 
   _load() {
     try {
@@ -138,15 +148,14 @@ class AccountManager {
           const curAcct = cur ? this.get(cur) : null;
           return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported() };
         }
-        if (backend === 'codex') {
-          const info = this.readCodexSubAuth(a.id);
-          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
-        }
         if (type === 'subscription') {
-          const info = this.readSubCreds(a.id);
+          // ONE branch for every harness (S2): the descriptor's parseAuth reads
+          // the account dir; authMode rides only where the reader reports it
+          // (codex), long-lived-token meta only where the harness has one.
           // a.email = manual backfill (setEmail) for dirs whose login never
           // wrote the identity file; the dir's own identity wins when present.
-          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...this._oatMeta(a) };
+          const info = this._readAuthFor(backend, a.id);
+          return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.subscriptionType, ...(info.authMode !== undefined ? { authMode: info.authMode } : {}), ...(this._credsOf(backend).longLivedToken ? this._oatMeta(a) : {}) };
         }
         return { ...base, tail: a.tail };
       }),
@@ -256,19 +265,8 @@ class AccountManager {
 
   // The shared ~/.codex the per-account homes symlink into. Ensure the symlink
   // TARGETS exist (sessions dir + config.toml) so codex reads/writes go there.
-  _codexSharedHome() { return process.env.CODEX_HOME || path.join(os.homedir(), '.codex'); }
-  _seedCodexDir(dir) {
-    const shared = this._codexSharedHome();
-    try { fs.mkdirSync(path.join(shared, 'sessions'), { recursive: true }); } catch { }
-    try { if (!fs.existsSync(path.join(shared, 'config.toml'))) fs.writeFileSync(path.join(shared, 'config.toml'), ''); } catch { }
-    const link = (name) => {
-      const p = path.join(dir, name);
-      try { fs.rmSync(p, { recursive: true, force: true }); } catch { }
-      try { fs.symlinkSync(path.join(shared, name), p); } catch { }
-    };
-    link('sessions');   // threads land in the shared dir → unified discovery
-    link('config.toml'); // model/approval settings shared across accounts
-  }
+  _codexSharedHome() { return this._credsOf('codex').sharedHome(); } // S2: lives on the codex descriptor
+  _seedCodexDir(dir) { return this._credsOf('codex').seedDir(dir); } // S2: the seeder lives on the codex descriptor
 
   createCodexSubscription({ name } = {}) {
     const id = 'cxs-' + crypto.randomBytes(6).toString('hex');
@@ -317,8 +315,6 @@ class AccountManager {
   // subscription creds ride as whitelisted dir files. Import re-encrypts under
   // the TARGET machine's own key and recreates the dirs.
   exportBundle() {
-    const CLAUDE_SUB_FILES = ['.credentials.json', '.claude.json'];
-    const CODEX_SUB_FILES = ['auth.json'];
     const readFiles = (dir, names) => {
       const out = {};
       for (const n of names) {
@@ -337,12 +333,12 @@ class AccountManager {
       // passphrase blob; re-encrypted under the TARGET's key on import) — an
       // oat-ONLY account would otherwise import as a dead record (B-211a)
       if (a.oatEnc) { try { rec.oat = this._dec(a.oatEnc); rec.oatMintedAt = a.oatMintedAt || null; } catch { } }
-      if (backend === 'codex') rec.files = readFiles(this.codexSubDir(a.id), CODEX_SUB_FILES);
-      else if (type === 'subscription') {
+      if (type === 'subscription') {
         // macOS secure storage is Keychain-primary. The local fallback is a
         // same-machine compatibility shadow for launchd and can diverge after
         // refresh-token rotation, so never treat it as a portable backup.
-        rec.files = readFiles(this.subDir(a.id), this._localOnlyClaudeSub(a) ? ['.claude.json'] : CLAUDE_SUB_FILES);
+        const c = this._credsOf(backend);
+        rec.files = readFiles(this._acctDir(backend, a.id), this._localOnlyClaudeSub(a) ? c.files.filter((x) => x !== c.authFile) : c.files);
       }
       return rec;
     });
@@ -368,17 +364,19 @@ class AccountManager {
         createdAt: rec.createdAt || Date.now(),
       };
       if (rec.email) a.email = String(rec.email).slice(0, 120);
-      const isCodex = rec.backend === 'codex';
-      if (isCodex) { a.backend = 'codex'; a.type = 'subscription'; }
-      else if (rec.type === 'subscription') a.type = 'subscription';
+      // backend = any registered harness with credential mechanics (an unknown
+      // id falls back to claude exactly like a legacy record with no backend);
+      // harnesses without API keys only ever hold subscription-type records.
+      const be = (() => { try { return rec.backend && harnessOf(rec.backend).creds ? rec.backend : 'claude'; } catch { return 'claude'; } })();
+      if (be !== 'claude') a.backend = be;
+      if (rec.type === 'subscription' || !this._credsOf(be).supportsApiKeys) a.type = 'subscription';
       if (rec.key && /^sk-ant-/.test(rec.key)) { a.keyEnc = this._enc(String(rec.key)); a.tail = String(rec.key).slice(-8); }
       else if (rec.tail) a.tail = rec.tail;
       if (rec.oat && /^sk-ant-oat\d{2}-/.test(String(rec.oat))) { a.oatEnc = this._enc(String(rec.oat)); a.oatMintedAt = Number(rec.oatMintedAt) || Date.now(); }
-      if (rec.files && typeof rec.files === 'object' && (isCodex || a.type === 'subscription')) {
-        const dir = this._acctDir(isCodex ? 'codex' : 'claude', a.id);
+      if (rec.files && typeof rec.files === 'object' && a.type === 'subscription') {
+        const dir = this._acctDir(be, a.id);
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-        if (isCodex) this._seedCodexDir(dir); // sessions/config.toml symlinks into the shared ~/.codex
-        else this._seedConfigDir(dir);
+        this._credsOf(be).seedDir(dir); // claude: onboarding-complete .claude.json; codex: sessions/config.toml symlinks into the shared ~/.codex
         for (const [n, content] of Object.entries(rec.files)) {
           if (!FILE_OK.test(n) || typeof content !== 'string') continue;
           fs.writeFileSync(path.join(dir, n), content, { mode: 0o600 });
@@ -593,9 +591,8 @@ class AccountManager {
       this._healPoolsAfterRemoval(id);
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
-    if (this._acctBackend(a) === 'codex') { try { fs.rmSync(this.codexSubDir(id), { recursive: true, force: true }); } catch { } }
-    else if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this.subDir(id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
-    else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this.subDir(id), { recursive: true, force: true }); } catch { } }
+    if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
+    else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
     this._save();
     this._notify();
   }
@@ -707,7 +704,7 @@ class AccountManager {
       const ok = !!this.poolCurrent(a.id) && !!this.readSubCreds(a.id).loggedIn;
       return { usable: ok, how: 'local-env', reason: ok ? null : 'pool-no-target', linked: false, held: false, heldVerified: false };
     }
-    const isSub = backend === 'codex' || this._acctType(a) === 'subscription';
+    const isSub = this._acctType(a) === 'subscription' || !this._credsOf(backend).supportsApiKeys;
     const norm = (v) => String(v || '').trim().toLowerCase();
     const acctEmail = norm(a.email || (String(a.name || '').includes('@') ? a.name : ''));
     if (!isSub) {
@@ -728,8 +725,8 @@ class AccountManager {
     // the host login the day it expires). Expired gets its own 'oat-expired'
     // reason below so every surface can say re-mint instead of the §ban-safety
     // ship explanation.
-    const hasOat = backend === 'claude' && !!a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS > Date.now();
-    const oatExpired = backend === 'claude' && !!a.oatEnc && !hasOat;
+    const hasOat = this._credsOf(backend).longLivedToken && !!a.oatEnc && (a.oatMintedAt || 0) + this.OAT_TTL_MS > Date.now();
+    const oatExpired = this._credsOf(backend).longLivedToken && !!a.oatEnc && !hasOat;
     if (!hostFacts) {
       if (loggedIn) return { usable: true, how: 'local-env', reason: null, linked: false, held: false, heldVerified: false };
       // no local login but a long-lived token → spawns via the env token
@@ -737,7 +734,7 @@ class AccountManager {
       if (oatExpired) return { usable: false, how: null, reason: 'oat-expired', linked: false, held: false, heldVerified: false };
       return { usable: false, how: null, reason: noLoginReason(), otherHosts, linked: false, held: false, heldVerified: false };
     }
-    const hostEmail = norm(backend === 'codex' ? hostFacts.codex?.email : hostFacts.subscription?.email);
+    const hostEmail = norm(hostFacts[this._credsOf(backend).hostFactsKey]?.email);
     const linked = !!acctEmail && !!hostEmail && acctEmail === hostEmail;
     const held = backend === 'claude' && (hostFacts.hostSubs || []).includes(a.id);
     if (held) {
@@ -952,7 +949,8 @@ class AccountManager {
     // codex pools repoint among CODEX_HOME dirs; the creds-mtime bump is a
     // claude cred-cache detail (null for codex — auth.json needs no bump).
     const mat = require('./account-material.js');
-    mat.repointPoolSymlink(this._poolLinkDir(a), this._poolMemberDir(a, subId), be === 'codex' ? null : this.subCredsPath(subId));
+    const bump = this._credsOf(be).bumpFile;
+    mat.repointPoolSymlink(this._poolLinkDir(a), this._poolMemberDir(a, subId), bump ? path.join(this._acctDir(be, subId), bump) : null);
     // sweepSessionLinks (2.355.0, userW's inc-msz495u6 — "热切换死了"):
     // plan C (2.315.0) gave every live session its OWN link and
     // poolCurrentFor prefers it, which silently DEMOTED the manual target
@@ -974,7 +972,8 @@ class AccountManager {
   }
 
   createPool({ name, members, backend = 'claude' } = {}) {
-    const be = backend === 'codex' ? 'codex' : 'claude';
+    const be = backend || 'claude';
+    if (!capsOf(be).pool || !this._credsOf(be)) throw new Error('pooling is not supported for backend ' + be); // unknown ids throw in harnessOf
     // The darwin exclusion is claude-specific (keychain service name = a hash
     // of the env string) — codex auth.json is a plain file, pools work anywhere
     // directory symlinks do.
@@ -1058,9 +1057,9 @@ class AccountManager {
         }
         member = member || cur;
         const link = this.ensureSessionPoolLink(id, opts.sessionKey, member);
-        return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: member, sessionLink: true, localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: link }, secret: null };
+        return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: member, sessionLink: true, localEnv: { [this._credsOf('claude').spawnEnvVar]: link }, secret: null };
       }
-      return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: cur, localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: null };
+      return { id: a.id, name: a.name, kind: 'subscription', pooled: true, poolTarget: cur, localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: null };
     }
     if (this._acctType(a) === 'subscription') {
       const info = this.readSubCreds(id);
@@ -1083,22 +1082,14 @@ class AccountManager {
       if (!info.loggedIn) throw new Error('subscription not logged in: ' + a.name);
       return {
         id: a.id, name: a.name, kind: 'subscription', oatExpired: oatExpired || undefined,
-        localEnv: { CLAUDE_SECURESTORAGE_CONFIG_DIR: this.subDir(id) }, secret: oatSecret,
+        localEnv: { [this._credsOf('claude').spawnEnvVar]: this._acctDir('claude', id) }, secret: oatSecret,
         // REMOTE: ship the creds dir to the host so the remote CLI reads THIS
         // account's login (securestorage relocated; config stays ~/.claude).
         // probe: newest-wins keeps a POISONED remote file forever (e.g. a
         // Console /login inside a remote session wipes .credentials.json to {}
         // with a fresh mtime) — a remote primary file MISSING the marker is
         // deleted before extract so the valid local copy always restores it.
-        remoteCreds: {
-          srcDir: this.subDir(id), dirName: 'subs/' + id, envVar: 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
-          files: ['.credentials.json', '.claude.json'], symlinks: {}, ensureTargets: [],
-          probe: { file: '.credentials.json', marker: 'accessToken' },
-          // Keychain + fallback can fork when either copy refreshes (rotating
-          // refresh tokens). It remains usable on this Mac, or on another host
-          // that has its OWN login for the account, but must never be copied.
-          shippable: !this._localOnlyClaudeSub(a),
-        },
+        remoteCreds: this._remoteCreds('claude', id, a), // shippable:false on a Keychain-primary Mac dir (must never be copied)
       };
     }
     const key = this.getKey(id);
@@ -1128,24 +1119,18 @@ class AccountManager {
         this.setPoolTarget(id, first.id);
         cur = first.id;
       }
-      return { id: a.id, name: a.name, kind: 'codex-pooled', localEnv: { CODEX_HOME: this.codexSubDir(id) }, secret: null, remoteCreds: null };
+      return { id: a.id, name: a.name, kind: 'codex-pooled', localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', id) }, secret: null, remoteCreds: null };
     }
     if (this._acctBackend(a) !== 'codex') throw new Error('not a Codex account: ' + a.name);
     const info = this.readCodexSubAuth(id);
     if (!info.loggedIn) throw new Error('codex account not logged in: ' + a.name);
     return {
       id: a.id, name: a.name, kind: 'codex-subscription',
-      localEnv: { CODEX_HOME: this.codexSubDir(id) }, secret: null,
+      localEnv: { [this._credsOf('codex').spawnEnvVar]: this._acctDir('codex', id) }, secret: null,
       // REMOTE: ship auth.json to the host's CODEX_HOME copy; sessions/config
       // symlink the host's own ~/.codex (targets ensured first) so threads +
       // settings stay shared on the host, auth isolated per account.
-      remoteCreds: {
-        srcDir: this.codexSubDir(id), dirName: 'codex-subs/' + id, envVar: 'CODEX_HOME',
-        files: ['auth.json'],
-        symlinks: { sessions: '$HOME/.codex/sessions', 'config.toml': '$HOME/.codex/config.toml' },
-        ensureTargets: ['mkdir -p "$HOME/.codex/sessions"', 'touch "$HOME/.codex/config.toml"'],
-        probe: { file: 'auth.json', marker: 'auth_mode|tokens|OPENAI_API_KEY' },
-      },
+      remoteCreds: this._remoteCreds('codex', id, a),
     };
   }
 

@@ -225,7 +225,9 @@ app.delete('/api/accounts/:id', (req, res) => {
     const rid = req.params.id;
     if (/^(acct|sub|cxs)-[a-f0-9]+$/.test(rid) && hosts) {
       const { execFile } = require('child_process');
-      const rm = `rm -f "$HOME/.vibespace/${rid}.key"; rm -rf "$HOME/.vibespace/subs/${rid}" "$HOME/.vibespace/codex-subs/${rid}"`;
+      // every harness with credential mechanics owns a remote dir family (S2: descriptor subsDirName)
+      const dirs = require('../harnesses').list().filter((h) => h.creds?.subsDirName).map((h) => `"$HOME/.vibespace/${h.creds.subsDirName}/${rid}"`).join(' ');
+      const rm = `rm -f "$HOME/.vibespace/${rid}.key"; rm -rf ${dirs}`;
       for (const h of hosts.list() || []) {
         try { execFile('ssh', [...hosts.sshArgs(h), '--', rm], { timeout: 15000 }, () => {}); } catch { }
       }
