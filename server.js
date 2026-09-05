@@ -1714,11 +1714,14 @@ function sessionAuth(s) {
   // byte-identical to a local one, and the tooltip pointed at the wrong box).
   const hostName = s.host ? (() => { try { return hosts.get(s.host)?.name || s.host; } catch { return s.host; } })() : null;
   const withHost = (o) => (o && hostName ? { ...o, hostName } : o);
+  // POOLED pseudo-account (B-6217; codex pools 2.368.20): ONE shape for both backends — the pool + the real account it currently
+  // bills, so no chip mislabels it (real reports: claude pools rendered as 'API key', codex pools as a plain 'ChatGPT account', no target).
+  const poolAuth = (a) => { let cur = null; try { const c = accounts.poolCurrentFor(a.id, s._webuiId || null); cur = c ? (accounts.get(c)?.name || null) : null; } catch {} return withHost({ source: 'pooled', name: a.name, poolTarget: cur }); }; // plan C: THIS session's link target (claude), else the pool default
   if (be === 'codex') {
-    // Codex billing identity: named ChatGPT account (isolated CODEX_HOME) or
-    // the machine's own ~/.codex login. Feeds the title-bar billing badge.
+    // Codex billing identity: named ChatGPT account (isolated CODEX_HOME), a codex pool, or the machine's own ~/.codex login.
     if (s._accountId) {
       const a = accounts.get(s._accountId);
+      if (a && a.type === 'pooled') return poolAuth(a);
       return withHost({ source: 'codex-subscription', name: a?.name || 'ChatGPT' });
     }
     return withHost({ source: 'codex-cli' });
@@ -1726,13 +1729,7 @@ function sessionAuth(s) {
   if (be !== 'claude') return null; // shell terminals — nothing billed
   if (s._accountId) {
     const a = accounts.get(s._accountId);
-    // A POOLED pseudo-account (B-6217): show it AS a pool + the real account it
-    // currently bills, so the badge/chip never mislabels it as an API key
-    // (real report: pooled sessions rendered as 'API key').
-    if (a && a.type === 'pooled') {
-      let cur = null; try { const c = accounts.poolCurrentFor(a.id, s._webuiId || null); cur = c ? (accounts.get(c)?.name || null) : null; } catch {} // plan C: THIS session's link target, not the pool default
-      return withHost({ source: 'pooled', name: a.name, poolTarget: cur });
-    }
+    if (a && a.type === 'pooled') return poolAuth(a);
     // A named SUBSCRIPTION account bills the subscription (not API) — show its
     // name, no amber key warning.
     if (a && (a.type || 'api') === 'subscription') return withHost({ source: 'subscription', name: a.name });

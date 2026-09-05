@@ -724,7 +724,11 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
       if ((backend === 'claude' || backend === 'codex') && acctList.length) {
         pop.appendChild(makeRow(tr('Account'), [
           { value: 'subscription', label: backend === 'codex' ? tr('ChatGPT login') : tr('Subscription (Pro/Max)') },
-          ...acctList.map(a => ({ value: a.id, label: a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : `${a.name} — API …${a.tail}` })),
+          // Pooled pseudo-account (either backend): names its CURRENT target —
+          // the old else-branch labeled it "— API …undefined" (2.369.18, same
+          // class as the New Session dialog's fix)
+          ...acctList.map(a => ({ value: a.id, label: (a.pooled || a.type === 'pooled') ? a.name + (a.currentName ? ` → ${a.currentName}` : ' · ' + tr('pool'))
+            : a.type === 'subscription' ? `${a.name} (${tr('subscription')})` : `${a.name} — API …${a.tail}` })),
         ], 'account'));
       }
     };

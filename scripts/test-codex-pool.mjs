@@ -91,6 +91,75 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('the pool-create route accepts backend codex', /backend: req\.body\?\.backend === 'codex' \? 'codex' : 'claude'/.test(read('src/server/account-usage-routes.js')));
 }
 
+// ── list() pool shape for EVERY backend + ONE shared pool UI (2.369.18, P1) ──
+{
+  // The codex branch of list() used to run BEFORE the pooled branch, so a
+  // codex pool listed as a bare ChatGPT login — no pooled/current/currentName/
+  // memberOptions/auto/hot — and no client surface could operate it (nor
+  // could the engine's `type==='pooled' && a.auto` tick enumeration see it).
+  // Identity must read THROUGH the symlink with the member's own reader:
+  // give the current member an id_token carrying email + plan (the real
+  // auth.json shape: tokens.id_token JWT with the openai auth claim).
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const cur = am.poolCurrent(pid);
+  const idTok = `${b64u({ alg: 'none', typ: 'JWT' })}.${b64u({ email: 'cxa@example.com', 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus' } })}.sig`;
+  fs.writeFileSync(path.join(am.codexSubDir(cur), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-cur', id_token: idTok } }));
+  const row = am.list().accounts.find((a) => a.id === pid);
+  ok('a codex pool row is POOLED (pooled:true, type pooled, backend codex)', row?.pooled === true && row.type === 'pooled' && row.backend === 'codex', JSON.stringify(row));
+  ok('…carries current + currentName (the member the symlink points at)', row?.current === cur && row.currentName === am.get(cur)?.name, JSON.stringify({ current: row?.current, cur }));
+  ok('…carries memberOptions = poolMembers (logged-in ChatGPT members only)', JSON.stringify((row?.memberOptions || []).map((m) => m.id)) === JSON.stringify(am.poolMembers(pid).map((m) => m.id)) && row?.memberOptions?.length === 1);
+  ok('…carries auto/hot flags (false by default) and members:null (= all)', row?.auto === false && row?.hot === false && row?.members === null);
+  ok("…hotSupported is the registry verdict: codex 'impossible' ⇒ false (the UI hides the toggle)", row?.hotSupported === false);
+  ok('…supported is true for codex (the darwin exclusion is claude-keychain-specific)', row?.supported === true);
+  ok('…identity reads THROUGH the symlink with the codex reader (loggedIn + email + plan of the current member)', row?.loggedIn === true && row?.email === 'cxa@example.com' && row?.subscriptionType === 'plus', JSON.stringify({ loggedIn: row?.loggedIn, email: row?.email, plan: row?.subscriptionType }));
+  // negative control: a plain codex login row keeps its own shape
+  const plain = am.list().accounts.find((a) => a.id === cur);
+  ok('negative control: a plain ChatGPT login row is NOT pooled and keeps authMode', plain && !plain.pooled && plain.type === 'subscription' && plain.authMode === 'chatgpt' && plain.email === 'cxa@example.com');
+  // the engine's tick enumerates auto pools from list() — a codex pool must be visible there
+  am.updatePool(pid, { auto: true });
+  ok("the engine's auto-pool enumeration (list().filter(type==='pooled' && auto)) SEES a codex pool", (am.list().accounts || []).filter((a) => a.type === 'pooled' && a.auto).some((a) => a.id === pid));
+  // claude pool for the hotSupported contrast (linux only — createPool refuses on darwin by design)
+  if (am.poolSupported()) {
+    const { id: cs } = am.createSubscription({ name: 'ClA' });
+    fs.writeFileSync(am.subCredsPath(cs), JSON.stringify({ claudeAiOauth: { accessToken: 'at', subscriptionType: 'max' } }));
+    const cp = am.createPool({ name: 'ClPool' });
+    const crow = am.list().accounts.find((a) => a.id === cp.id);
+    ok("a claude pool row says hotSupported:true ('verified') with the same pool shape", crow?.pooled === true && crow.backend === 'claude' && crow.hotSupported === true && crow.current === cs && crow.loggedIn === true && crow.subscriptionType === 'max', JSON.stringify(crow));
+  } else console.log('  · SKIP claude pool contrast (pools unsupported on ' + process.platform + ')');
+
+  // ── static pins: the ordering fix + ONE pool menu for both rosters ──
+  const acc = read('src/accounts.js');
+  const listBody = acc.slice(acc.indexOf('  list() {'), acc.indexOf('// ── Subscription accounts'));
+  ok('accounts.list() evaluates the pooled branch BEFORE the codex branch', listBody.indexOf("if (type === 'pooled')") > 0 && listBody.indexOf("if (type === 'pooled')") < listBody.indexOf("if (backend === 'codex')"));
+  ok('…the pool row reads identity via the backend\'s own auth reader and carries the registry\'s hotSwitch verdict', /backend === 'codex' \? this\.readCodexSubAuth\(a\.id\) : this\.readSubCreds\(a\.id\)/.test(listBody) && /hotSupported: capsOf\(backend\)\.hotSwitch === 'verified'/.test(listBody));
+  const ma = read('src/lib/manage-agents.js');
+  const count = (s, re) => (s.match(re) || []).length;
+  ok('manage-agents defines ONE pool menu block (_poolMenuItems)', count(ma, /_poolMenuItems\(id, a, refresh\) \{/g) === 1);
+  ok('…spliced into BOTH rosters (claude + codex) — no per-backend copy', count(ma, /items\.splice\(0, 1, \.\.\.this\._poolMenuItems\(id, a, refresh\)\)/g) === 2);
+  ok('…the Switch target / Hot switch labels live ONLY in the shared block', count(ma, /t\('Switch target'\)/g) === 1 && count(ma, /t\('Hot switch \(no restart\)'\)/g) === 1 && count(ma, /t\('Auto-switch when nearly exhausted'\)/g) === 1);
+  ok("…the hot toggle is gated on the server's hotSupported verdict (codex gets a disabled explanatory row, SVG-free text)", /const hotOk = a\.hotSupported !== false;/.test(ma) && /if \(hotOk\) items\.push\(\{ label: \(a\.hot \? '✓ ' : ''\) \+ t\('Hot switch \(no restart\)'\)/.test(ma) && /Hot switch unavailable — every switch restarts the session/.test(ma));
+  ok('…a codex pool cold-restarts even when hot is set (effHot = hotOk && a.hot)', /const effHot = hotOk && !!a\.hot;/.test(ma) && /this\._poolSwitchTarget\(id, m\.id, a\.name, effHot\)/.test(ma));
+  ok('…the members dialog filters members by the POOL\'s backend and uses the same effective-hot rule', /\(x\.backend \|\| 'claude'\) === \(codex \? 'codex' : 'claude'\) && !x\.pooled/.test(ma) && /const effHot = a\?\.hotSupported !== false && !!a\?\.hot;/.test(ma) && /if \(!effHot\) for \(const sess of \(r\.affected \|\| \[\]\)\) this\._poolColdRestart/.test(ma));
+  ok('…ONE create-pool dialog for both rosters (api(), so a refused create is a visible error)', count(ma, /_createPoolDialog\(/g) === 3 && /await api\('\/api\/accounts\/pool', \{ method: 'POST'/.test(ma) && !/fetchJson\('\/api\/accounts\/pool'/.test(ma));
+  ok('…BOTH rosters sort with the shared rosterSort (pool → login → key)', count(ma, /\.sort\(rosterSort\)/g) === 2 && /export const rosterSort/.test(ma));
+  ok('…the codex roster draws the POOL glyph (shared ROSTER_ICONS, SVG) and shows → target + the target\'s usage', /const \{ CROWN, GLOBE, POOL, STAR_F, STAR_O, DOTS \} = ROSTER_ICONS;/.test(ma) && count(ma, /isPool \? POOL : /g) === 2 && /no target — pick a ChatGPT account in ⋯/.test(ma) && /this\._codexAccountUsage\[a\.current\], this\._usageEstimates\?\.\[a\.current\]/.test(ma));
+  ok('…codex pool rows never get the set-email item (identity is the member\'s)', /if \(!a\?\.pooled && a\?\.loggedIn && \(!a\.email \|\| a\.emailDeclared\)\) items\.push/.test(ma));
+  // the three wrong-icon/label surfaces
+  const sv = read('server.js');
+  ok('server.js sessionAuth: a codex pool reports source pooled + poolTarget (the status-bar chip / title badge / session props render it as a pool)', count(sv, /if \(a && a\.type === 'pooled'\) return poolAuth\(a\);/g) === 2 && /const poolAuth = \(a\) =>/.test(sv));
+  ok('chat-status-bar + window.js consume source pooled with the pool glyph + target (unchanged consumers)', /isPooled \? '⣿ ' \+ \(a\.name \|\| t\('Pool'\)\) \+ \(a\.poolTarget/.test(read('src/lib/chat-status-bar.js')) && /const isPooled = auth\.source === 'pooled';/.test(read('src/lib/window.js')));
+  ok('usage-meter: codex account chips exclude pools (a pool is not a quota holder — same rule as claudeSubs)', /a\.backend === 'codex' && a\.type === 'subscription'\)/.test(read('src/lib/usage-meter.js')));
+  ok('session-card ⚙ account list: a pool row names its target (was "— API …undefined")', /\(a\.pooled \|\| a\.type === 'pooled'\) \? a\.name \+ \(a\.currentName \? ` → \$\{a\.currentName\}` : ' · ' \+ tr\('pool'\)\)/.test(read('src/lib/session-card.js')));
+  ok('session-props billing row: pooled / codex-subscription / codex-cli are labeled, never "Unknown"', /a\.source === 'pooled' \? t\('Pooled account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-subscription' \? t\('ChatGPT account — \{name\}'/.test(read('src/lib/session-props.js')) && /a\.source === 'codex-cli' \? t\('ChatGPT login \(the machine’s own\)'\)/.test(read('src/lib/session-props.js')));
+  // i18n: every new human-visible string has zh + ja entries
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const keys = ['no logged-in ChatGPT accounts', 'Hot switch unavailable — every switch restarts the session', 'All ChatGPT accounts', 'Pool set to all ChatGPT accounts (incl. future ones)',
+    'no target — pick a ChatGPT account in ⋯', 'Pooled account — one billing identity auto-switching across your ChatGPT accounts', 'Pooled account — {name}', 'ChatGPT account — {name}', 'ChatGPT login (the machine’s own)',
+    'The pool switches between these ChatGPT accounts. Not-signed-in accounts are skipped until they log in.'];
+  const missing = keys.filter((k) => !zh.includes(`"${k}":`) || !ja.includes(`"${k}":`));
+  ok('zh + ja dictionaries carry every new pool-UI key', missing.length === 0, missing.join(' | '));
+}
+
 fs.rmSync(dataDir, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

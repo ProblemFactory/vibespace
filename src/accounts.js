@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
 
 class AccountManager {
   constructor({ dataDir, onChange, platform = process.platform }) {
@@ -117,15 +118,23 @@ class AccountManager {
         const type = this._acctType(a);
         const backend = this._acctBackend(a);
         const base = { id: a.id, name: a.name, type, backend, source: a.source, originHost: a.originHost || null, note: a.note || null, hostLogins: a.hostLogins || null, createdAt: a.createdAt, localOnly: this._localOnlyClaudeSub(a) };
+        // POOLED FIRST, for every backend (2.369.18): the codex branch used to
+        // run before this one, so a codex pool listed as a bare ChatGPT login
+        // — no `pooled`/`current`/`memberOptions`/`auto` — and every client
+        // surface (roster menu, switcher, New Session) plus the engine's
+        // `type==='pooled' && a.auto` tick enumeration saw a pool with no
+        // pool fields. Identity reads THROUGH the symlink via the member's
+        // own auth reader; hot-switch support is the capability registry's
+        // verdict (codex: 'impossible' — the client hides the toggle).
+        if (type === 'pooled') {
+          const cur = this.poolCurrent(a.id);
+          const info = backend === 'codex' ? this.readCodexSubAuth(a.id) : this.readSubCreds(a.id); // resolves through the symlink
+          const curAcct = cur ? this.get(cur) : null;
+          return { ...base, pooled: true, loggedIn: !!info.loggedIn, email: info.email || null, subscriptionType: (backend === 'codex' ? info.plan : info.subscriptionType) || null, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, hotSupported: capsOf(backend).hotSwitch === 'verified', supported: backend === 'codex' || this.poolSupported() };
+        }
         if (backend === 'codex') {
           const info = this.readCodexSubAuth(a.id);
           return { ...base, loggedIn: info.loggedIn, email: info.email || a.email || null, emailDeclared: !info.email && !!a.email, subscriptionType: info.plan, authMode: info.authMode };
-        }
-        if (type === 'pooled') {
-          const cur = this.poolCurrent(a.id);
-          const info = this.readSubCreds(a.id); // resolves through the symlink
-          const curAcct = cur ? this.get(cur) : null;
-          return { ...base, pooled: true, loggedIn: info.loggedIn, email: info.email || null, subscriptionType: info.subscriptionType, current: cur, currentName: curAcct?.name || null, members: a.members || null, memberOptions: this.poolMembers(a.id), auto: !!a.auto, hot: !!a.hot, supported: this.poolSupported() };
         }
         if (type === 'subscription') {
           const info = this.readSubCreds(a.id);

@@ -146,6 +146,12 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       : a.source === 'api-key' ? t('API key — {name}{tail} · pay per use{est}', { name: a.name || 'key', tail: a.tail ? ' (…' + a.tail + ')' : '', est: a.guessed ? t(' (estimated)') : '' })
       : a.source === 'api-console' ? t('API — Console login · pay per use{est}', { est: a.guessed ? t(' (estimated)') : '' })
       : a.source === 'api-other' ? t('API — {detail} · pay per use', { detail: a.detail || t('other key source') })
+      // pooled (claude or codex) + the two codex shapes fell through to
+      // "Unknown (started before tracking)" — a labeled identity is never
+      // unknown (2.369.18)
+      : a.source === 'pooled' ? t('Pooled account — {name}', { name: a.name || t('Pool') }) + (a.poolTarget ? ' → ' + a.poolTarget : ' · ' + t('no target'))
+      : a.source === 'codex-subscription' ? t('ChatGPT account — {name}', { name: a.name || 'ChatGPT' })
+      : a.source === 'codex-cli' ? t('ChatGPT login (the machine’s own)')
       : t('Unknown (started before tracking)');
     // remote session: the login is the HOST's — name the machine (2.188.0)
     const authLabelHost = a?.hostName ? authLabel + ' · @ ' + a.hostName : authLabel;

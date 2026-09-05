@@ -53,7 +53,7 @@ const SUITES = [
   'test-task-wakeup-card', // background-task lifecycle closure incl. the real record order (tool_result BEFORE the completion notification); also joined the gate late (same class)
   'test-codex-history', // codex rollout coverage: custom_tool_call_output routing, sub-agent visibility, live contextWindow, encrypted reasoning
   'test-codex-quota',   // codex quota P0+P1: window-by-length normalization (0.149.x single-window), exhaustion markers kept, persistence, estimator inclusion
-  'test-codex-pool',    // codex pooled account cold-switch v1: store/spawn/self-heal + engine gates + wrapper signal relay
+  'test-codex-pool',    // codex pooled account cold-switch v1: store/spawn/self-heal + engine gates + wrapper signal relay + list() pool shape for every backend + ONE shared pool menu/roster pins (2.369.18)
   'test-peer-delivery', // peerDelivery registry lane: codex rpc-queue rung (real deliver.create + sidecar) + wiring pins
   'test-chat-trim-guard', // fold-dominated window trim guard (inc-mtajy6wr white-screen) pins
   'test-task-lifecycle', // background Agent/Workflow/Bash lifecycle from HISTORY (launch acks + persisted notifications)

@@ -209,7 +209,10 @@ export function installUsageMeter(App, ctx = {}) {
     // Codex mirrors the Claude selection model: per-account quota buckets from
     // /api/usage codexAccounts (key = cxs id / '__global_codex__'), the machine
     // login linked to a named ChatGPT account by email, 'auto' = default account.
-    const codexSubs = (this._accounts?.accounts || []).filter(a => a.backend === 'codex');
+    // Same exclusion as claudeSubs above: a codex POOL is not a quota holder —
+    // its usage is its current member's (the roster shows that); as a chip
+    // it rendered as an account with "no usage captured yet" (2.369.18).
+    const codexSubs = (this._accounts?.accounts || []).filter(a => a.backend === 'codex' && a.type === 'subscription');
     const cgl = this._usageCodexGlobal || {};
     const cBuckets = this._codexAccountUsage || {};
     const codexDefId = this._accounts?.defaultCodexAccountId;
