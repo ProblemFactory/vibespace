@@ -5,6 +5,27 @@ import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 import { track } from './telemetry-client.js';
 
+// Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
+// key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
+// the codex roster name-sorted "because all codex entries are logins", which
+// stopped being true with codex pools); the billing switcher and the New
+// Session dropdown inline the same comparator — keep them in step.
+const acctTypeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 'subscription' ? 1 : 2);
+export const rosterSort = (a, b) => acctTypeRank(a) - acctTypeRank(b) || String(a.name || '').localeCompare(String(b.name || ''));
+// Roster row icons (SVG only, never emoji) — shared by both rosters so a
+// pooled account draws the SAME overlapping-circles glyph whatever its
+// backend (a pool is NOT a login: the crown/key misread as one, real report).
+const rosterSvg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+export const ROSTER_ICONS = Object.freeze({
+  CROWN: rosterSvg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>'),
+  GLOBE: rosterSvg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>'),
+  KEY: rosterSvg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5),
+  POOL: rosterSvg('<circle cx="5.4" cy="6.2" r="3"/><circle cx="10.6" cy="6.2" r="3"/><circle cx="8" cy="10.6" r="3"/>', 1.3),
+  STAR_F: rosterSvg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>'),
+  STAR_O: rosterSvg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>'),
+  DOTS: rosterSvg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>'),
+});
+
 function remoteClaudeSubscriptionLoginCommand(id) {
   if (!/^sub-[a-f0-9]+$/.test(id)) throw new Error('invalid subscription id');
   const dir = `$HOME/.vibespace/subs/${id}`;
@@ -322,6 +343,52 @@ export function installManageAgents(App, ctx = {}) {
     showToast(t('“{name}” now uses {target}', { name: poolName, target: r.name }) + (restart ? ' — ' + t('restarting {n} conversation(s)…', { n: affected.length }) : ''), { duration: 6000 });
     if (restart) for (const sess of affected) this._poolColdRestart(sess, poolId);
   },
+  // ── Pool ⋯ menu: ONE block for every backend (2.369.18 — the codex roster
+  // had no pool menu at all, and a copy of the claude block would be the
+  // whitelist-drift twin class). Wording rides a.backend; the hot toggle
+  // rides the SERVER's capability verdict (list() → a.hotSupported, from
+  // src/backend-caps.js): a codex pool is cold by structure (the app-server
+  // holds tokens in memory — P3 experiment), so the row SAYS so instead of
+  // offering a switch the engine ignores.
+  _poolMenuItems(id, a, refresh) {
+    const codex = a.backend === 'codex';
+    const members = a.memberOptions || [];
+    const hotOk = a.hotSupported !== false;
+    const effHot = hotOk && !!a.hot;
+    const patchPool = async (body) => {
+      try { await api('/api/accounts/pool/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+      catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); }
+    };
+    const items = [
+      { label: t('Switch target'), children: members.length ? members.map((m) => ({
+        label: (m.id === a.current ? '✓ ' : '') + m.name,
+        disabled: m.id === a.current,
+        action: () => this._poolSwitchTarget(id, m.id, a.name, effHot),
+      })) : [{ label: codex ? t('no logged-in ChatGPT accounts') : t('no logged-in subscriptions'), disabled: true, action: () => {} }] },
+      { label: t('Members…'), action: () => this._poolMembersDialog(id, a, refresh) },
+      { label: (a.auto ? '✓ ' : '') + t('Auto-switch when nearly exhausted'), action: () => patchPool({ auto: !a.auto }) },
+    ];
+    if (hotOk) items.push({ label: (a.hot ? '✓ ' : '') + t('Hot switch (no restart)'), action: () => patchPool({ hot: !a.hot }) });
+    else items.push({ label: t('Hot switch unavailable — every switch restarts the session'), disabled: true, action: () => {}, title: t('The Codex app-server keeps its login in memory, so a re-pointed login never reaches a running session (verified) — switches restart the conversation via resume.') });
+    return items;
+  },
+  // "+ Add pooled account…" — ONE dialog for both rosters, wording per backend.
+  // api() (not fetchJson): a 400 from createPool ("no logged-in … to pool")
+  // used to toast "Pooled account created" and create nothing.
+  async _createPoolDialog(backend, refresh) {
+    const codex = backend === 'codex';
+    const name = await showInputDialog({
+      title: t('Pooled account'),
+      label: codex
+        ? t('One account entry that internally switches between your logged-in ChatGPT accounts. Sessions pick it like any account; you (or auto-switching) choose which real account it currently uses — every switch restarts the session (Codex cannot switch hot).')
+        : t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.'),
+      value: t('Pool'), confirmText: t('Create'),
+    });
+    if (name == null) return;
+    try { await api('/api/accounts/pool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(codex ? { name, backend: 'codex' } : { name }) }); showToast(t('Pooled account created')); }
+    catch (e) { showToast(e?.message || t('Create failed'), { type: 'error' }); }
+    refresh?.();
+  },
   _poolColdRestart(sess, poolId) {
     if (!sess.backendSessionId) return; // nothing to resume by — leave it be
     try { window.__vsOp?.('pool-cold-restart', { pool: poolId, sid: sess.backendSessionId, serverId: sess.serverId, host: sess.host || null }); } catch {}
@@ -344,13 +411,17 @@ export function installManageAgents(App, ctx = {}) {
   async _poolMembersDialog(poolId, a, refresh) {
     let list;
     try { list = await fetchJson('/api/accounts'); } catch { showToast(t('Could not load accounts'), { type: 'error' }); return; }
-    const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && x.backend !== 'codex' && !x.pooled);
+    // Members are the pool's OWN backend's logins (a codex pool switches
+    // among ChatGPT accounts — 2.369.18; the dialog was claude-only)
+    const codex = a?.backend === 'codex';
+    const effHot = a?.hotSupported !== false && !!a?.hot;
+    const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === (codex ? 'codex' : 'claude') && !x.pooled);
     const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '420px', escapeToClose: true });
     const explicit = Array.isArray(a?.members) && a.members.length ? a.members : null;
     body.innerHTML = `
-      <div class="usage-note">${escHtml(t('The pool switches between these subscriptions. Not-signed-in accounts are skipped until they log in.'))}</div>
+      <div class="usage-note">${escHtml(codex ? t('The pool switches between these ChatGPT accounts. Not-signed-in accounts are skipped until they log in.') : t('The pool switches between these subscriptions. Not-signed-in accounts are skipped until they log in.'))}</div>
       <label class="pool-mem-row pool-mem-all"><input type="checkbox" id="pool-mem-all" ${explicit ? '' : 'checked'}>
-        <span><b>${escHtml(t('All subscriptions'))}</b><br><span class="pool-mem-sub">${escHtml(t('including accounts you add in the future'))}</span></span></label>
+        <span><b>${escHtml(codex ? t('All ChatGPT accounts') : t('All subscriptions'))}</b><br><span class="pool-mem-sub">${escHtml(t('including accounts you add in the future'))}</span></span></label>
       <div class="pool-mem-list">${subs.map((x) => `
         <label class="pool-mem-row"><input type="checkbox" class="pool-mem-cb" data-id="${escHtml(x.id)}" ${explicit ? (explicit.includes(x.id) ? 'checked' : '') : 'checked'} ${explicit ? '' : 'disabled'}>
           <span>${escHtml(x.name)}${x.email ? ` <span class="pool-mem-sub">${escHtml(x.email)}</span>` : ''}${x.loggedIn ? '' : ` <span class="pool-mem-sub">· ${escHtml(t('not signed in'))}</span>`}</span></label>`).join('')}
@@ -376,13 +447,14 @@ export function installManageAgents(App, ctx = {}) {
         if (r?.error) { showToast(r.error, { type: 'error' }); return; }
       } catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); return; }
       close(); refresh?.();
-      showToast(members ? t('Pool members updated ({n} selected)', { n: members.length }) : t('Pool set to all subscriptions (incl. future ones)'));
+      showToast(members ? t('Pool members updated ({n} selected)', { n: members.length }) : codex ? t('Pool set to all ChatGPT accounts (incl. future ones)') : t('Pool set to all subscriptions (incl. future ones)'));
       // Narrowing away the current target re-points the pool IMMEDIATELY —
       // same consequences as an explicit target switch (review B1): tell the
-      // user, and cold-restart affected conversations unless the pool is hot.
+      // user, and cold-restart affected conversations unless the pool is hot
+      // (effHot: a codex pool's `hot` flag is inert — always restart).
       if (r?.retargeted) {
-        showToast(t('“{name}” now uses {target}', { name: a?.name || '', target: r.retargeted.name || '?' }) + ((!a?.hot && r.affected?.length) ? ' — ' + t('restarting {n} conversation(s)…', { n: r.affected.length }) : ''), { duration: 6000 });
-        if (!a?.hot) for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
+        showToast(t('“{name}” now uses {target}', { name: a?.name || '', target: r.retargeted.name || '?' }) + ((!effHot && r.affected?.length) ? ' — ' + t('restarting {n} conversation(s)…', { n: r.affected.length }) : ''), { duration: 6000 });
+        if (!effHot) for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
       }
     };
   },
@@ -642,16 +714,11 @@ export function installManageAgents(App, ctx = {}) {
     let accts;
     try { accts = await this.refreshAccounts(); } catch { return; }
     const codexAccts = (accts.accounts || []).filter(a => a.backend === 'codex')
-      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))); // type-order parity with the claude roster (all codex entries are logins)
+      .sort(rosterSort); // type-order parity with the claude roster: pool → ChatGPT login
     // st is already machine-scoped: /api/hosts/<id>/backend-status on a host.
     const gLoggedIn = !!(st?.codex?.loggedIn);
     const hostLabel = selectedHost ? (ctx.hostLabel || t('remote host')) : null;
-    const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-    const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
-    const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
-    const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
-    const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
-    const DOTS = svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>');
+    const { CROWN, GLOBE, POOL, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
     const row = document.createElement('div'); row.className = 'ob-backend acct-section acct-roster';
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
@@ -701,19 +768,32 @@ export function installManageAgents(App, ctx = {}) {
       : ctx.racct?.verdicts ? codexAccts.filter(a => ctx.racct.verdicts[a.id]?.usable) : [];
     const keyLines = rosterCx.map(a => {
       const isDef = accts.defaultCodexAccountId === a.id;
-      const linked = subBlocked && !!cxHostEmail && cxEmailOf(a) === cxHostEmail;
-      const blocked = subBlocked && !linked;
-      let ident = a.loggedIn
+      // Pool row (2.369.18): `→ target · email`, the POOL glyph (never the
+      // crown — the misread the claude roster fixed), usage = the current
+      // TARGET's buckets (that's what the pool bills right now). Pools are
+      // local-only by construction (host views never list them: the verdict
+      // is pool-local-only), so the ship/link hints don't apply.
+      const isPool = !!a.pooled;
+      const linked = !isPool && subBlocked && !!cxHostEmail && cxEmailOf(a) === cxHostEmail;
+      const blocked = !isPool && subBlocked && !linked;
+      let ident = isPool
+        ? (a.current ? escHtml('→ ' + (a.currentName || a.current) + (a.email ? ' · ' + a.email : ''))
+          : `<span class="ob-warn">${t('no target — pick a ChatGPT account in ⋯')}</span>`)
+        : a.loggedIn
         ? escHtml((a.email || '') + (a.subscriptionType ? (a.email ? ' · ' : '') + a.subscriptionType : '')) || t('logged in')
         : `<span class="ob-warn">${t('not logged in')}</span>`;
       const hint = linked
         ? ` <span class="acct-linked-hint" title="${t('Same account as {host}’s current CLI login — sessions on {host} picking it run on the host’s own login directly (nothing is shipped).', { host: escHtml(hostLabel) })}">${t('· = {host}’s own login', { host: escHtml(hostLabel) })}</span>`
         : blocked ? ` <span class="acct-blocked-hint" title="${t('Runs on this machine only. For {host}, log in on the host — or enable Settings → “Ship subscription logins to remote hosts.”', { host: escHtml(hostLabel) })}">${t('· this machine only')}</span>` : '';
+      const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your ChatGPT accounts') : t('ChatGPT account — runs on this machine (or a host you log into)');
+      const usageCell = isPool
+        ? (a.current && this._codexAccountUsage?.[a.current] ? this._acctUsageHtml(this._codexAccountUsage[a.current], this._usageEstimates?.[a.current]) : '')
+        : a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : '';
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}>
-        <span class="acct-type-icon" title="${t('ChatGPT account — runs on this machine (or a host you log into)')}">${CROWN}</span>
+        <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
-        <span class="acct-usage-cell">${a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : ''}</span>
+        <span class="acct-usage-cell">${usageCell}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
@@ -736,15 +816,8 @@ export function installManageAgents(App, ctx = {}) {
     // needs ≥1 logged-in ChatGPT subscription to point at
     if (!selectedHost && codexAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
       const poolBtn = document.createElement('button'); poolBtn.className = 'agent-btn acct-add'; poolBtn.textContent = '+ ' + t('Add pooled account…');
-      poolBtn.title = t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.');
-      poolBtn.onclick = async () => {
-        done();
-        const name = await showInputDialog({ title: t('Pooled account'), label: t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.'), value: t('Pool'), confirmText: t('Create') });
-        if (name == null) return;
-        try { await fetchJson('/api/accounts/pool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, backend: 'codex' }) }); showToast(t('Pooled account created')); }
-        catch (e) { showToast(e?.message || t('Create failed'), { type: 'error' }); }
-        this._refreshAgents?.();
-      };
+      poolBtn.title = t('One account entry that internally switches between your logged-in ChatGPT accounts. Sessions pick it like any account; you (or auto-switching) choose which real account it currently uses — every switch restarts the session (Codex cannot switch hot).');
+      poolBtn.onclick = () => { done(); this._createPoolDialog('codex', () => this._refreshAgents?.()); };
       head.append(poolBtn);
     }
     if (ctx.stale?.()) return; // a newer refresh took over mid-await
@@ -838,7 +911,10 @@ export function installManageAgents(App, ctx = {}) {
           { label: t('Test'), action: doTest },
           { label: t('Rename account'), action: doRename },
         ];
-        if (a?.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
+        // pool: Switch target / Members… / Auto-switch / hot — the SAME block
+        // the Anthropic roster uses (2.369.18)
+        if (a?.pooled && !selectedHost) items.splice(0, 1, ...this._poolMenuItems(id, a, refresh));
+        if (!a?.pooled && a?.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
         showContextMenu(r.left, r.bottom + 4, items);
       }
@@ -1509,9 +1585,7 @@ export function installManageAgents(App, ctx = {}) {
     // (the umbrella identities you actually pick), then subscriptions, then
     // API keys; name-sorted within a type so the list stays predictable as
     // accounts come and go.
-    const typeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 'subscription' ? 1 : 2);
-    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude')
-      .sort((a, b2) => typeRank(a) - typeRank(b2) || String(a.name || '').localeCompare(String(b2.name || '')));
+    const claudeAccts = (accts.accounts || []).filter(x => (x.backend || 'claude') === 'claude').sort(rosterSort);
     // §ban-safety: on a REMOTE host a subscription can't run unless the opt-in
     // is set (its creds would ship to the host's — likely datacenter — IP). Its
     // rows render disabled with guidance; API keys are unaffected.
@@ -1524,17 +1598,10 @@ export function installManageAgents(App, ctx = {}) {
     left.style.flex = '1';
     const sub = acct.subscription || {};
     // SVG icons (no emoji) — crown for a subscription, key for an API key,
-    // star for the default toggle, pencil for rename, ✕ for remove.
-    const svg = (d, sw = 1.4) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-    const CROWN = svg('<path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/>');
-    const GLOBE = svg('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>');
-    const KEY = svg('<circle cx="5" cy="9" r="2.6"/><path d="M7.4 8.2 14 3M11.5 5.2l1.6 1.6M13 3.7l1.6 1.6"/>', 1.5);
-    // Pooled pseudo-account: overlapping circles (a pool of identities) — a
-    // pool is NOT an API key; the KEY icon misread as one (real report).
-    const POOL = svg('<circle cx="5.4" cy="6.2" r="3"/><circle cx="10.6" cy="6.2" r="3"/><circle cx="8" cy="10.6" r="3"/>', 1.3);
-    const STAR_F = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z" fill="currentColor"/>');
-    const STAR_O = svg('<path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .8 4.3L8 11.6 4.1 13.6l.8-4.3-3.1-3 4.3-.6z"/>');
-    const DOTS = svg('<circle cx="3" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="13" cy="8" r="1.3" fill="currentColor" stroke="none"/>');
+    // overlapping circles for a pool (a pool is NOT an API key; the KEY icon
+    // misread as one, real report), star for the default toggle. Shared with
+    // the Codex roster (ROSTER_ICONS at module top).
+    const { CROWN, GLOBE, KEY, POOL, STAR_F, STAR_O, DOTS } = ROSTER_ICONS;
     // Compact per-account usage readout — shared with the Codex roster.
     const usageHtml = (u, est) => this._acctUsageHtml(u, est);
     // Peer row: the SELECTED MACHINE's own global login. It's the default
@@ -1833,14 +1900,7 @@ export function installManageAgents(App, ctx = {}) {
       // Pooled pseudo-account (local only): one switchable identity over the
       // logged-in subscriptions. Needs at least one to point at.
       if (!selectedHost && claudeAccts.some((x) => x.type === 'subscription' && x.loggedIn)) {
-        items.push({ separator: true }, { label: t('Add pooled account…'), action: async () => {
-          done();
-          const name = await showInputDialog({ title: t('Pooled account'), label: t('One account entry that internally switches between your logged-in subscriptions. Sessions pick it like any account; you (or later, auto-switching) choose which real subscription it currently uses.'), value: t('Pool'), confirmText: t('Create') });
-          if (name == null) return;
-          try { await fetchJson('/api/accounts/pool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }); showToast(t('Pooled account created')); }
-          catch (e) { showToast(e?.message || t('Create failed'), { type: 'error' }); }
-          refresh();
-        } });
+        items.push({ separator: true }, { label: t('Add pooled account…'), action: () => { done(); this._createPoolDialog('claude', refresh); } });
       }
       // Machine-wide login lives HERE when it's down but named accounts run
       // the show (2.268.4): the backend row hides its "Log in" then — two
@@ -2052,23 +2112,9 @@ export function installManageAgents(App, ctx = {}) {
           { label: t('Test'), action: doTest },
           { label: t('Rename account'), action: doRename },
         ];
-        if (a?.pooled && !selectedHost) {
-          const members = a.memberOptions || [];
-          items.splice(0, 1, { label: t('Switch target'), children: members.length ? members.map((m) => ({
-            label: (m.id === a.current ? '\u2713 ' : '') + m.name,
-            disabled: m.id === a.current,
-            action: () => this._poolSwitchTarget(id, m.id, a.name, a.hot),
-          })) : [{ label: t('no logged-in subscriptions'), disabled: true, action: () => {} }] });
-          const patchPool = async (body) => {
-            try { await api('/api/accounts/pool/' + encodeURIComponent(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
-            catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); }
-          };
-          items.splice(1, 0,
-            { label: t('Members\u2026'), action: () => this._poolMembersDialog(id, a, refresh) },
-            { label: (a.auto ? '\u2713 ' : '') + t('Auto-switch when nearly exhausted'), action: () => patchPool({ auto: !a.auto }) },
-            { label: (a.hot ? '\u2713 ' : '') + t('Hot switch (no restart)'), action: () => patchPool({ hot: !a.hot }) },
-          );
-        }
+        // pool: Switch target / Members / Auto-switch / Hot - ONE block shared
+        // with the Codex roster (_poolMenuItems, 2.369.18)
+        if (a?.pooled && !selectedHost) items.splice(0, 1, ...this._poolMenuItems(id, a, refresh));
         // Per-account login held ON the host (2.199.0): mint this account's
         // own creds dir on the selected machine via an on-host interactive
         // login (~/.vibespace/subs/<id> — the token is born there and never
