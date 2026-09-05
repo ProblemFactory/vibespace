@@ -106,16 +106,26 @@ function normalizeChatInput(rawText) {
   return { text, attachments };
 }
 
+// LOOPBACK MUST STAY OPEN (2.369.17, P0 of docs/design-harness-plugins.md §1):
+// codex's sandbox network policy defaults to networkAccess:false, which the
+// seccomp filter enforces on 127.0.0.1 too (measured: connect → EPERM,
+// CODEX_SANDBOX_NETWORK_DISABLED=1; AF_UNIX is blocked as well). Every
+// vibespace-* agent tool POSTs to VIBESPACE_API on loopback, so without this
+// flag the agent is taught tools that cannot run and the Stop nudge keeps
+// asking for bookkeeping it cannot do. Filesystem sandboxing is unchanged;
+// only network egress from the sandboxed process is opened, and only when
+// the VibeSpace integration is on (VIBESPACE_API set by the spawner).
+const NET_OPEN = !!process.env.VIBESPACE_API;
 function resolvePermissionMode(mode) {
   switch (mode) {
     case 'read-only':
-      return { approvalPolicy: 'never', sandbox: 'read-only', sandboxPolicy: { type: 'readOnly' } };
+      return { approvalPolicy: 'never', sandbox: 'read-only', sandboxPolicy: { type: 'readOnly', networkAccess: NET_OPEN } };
     case 'safe-yolo':
-      return { approvalPolicy: 'on-failure', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite' } };
+      return { approvalPolicy: 'on-failure', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: NET_OPEN } };
     case 'yolo':
       return { approvalPolicy: 'never', sandbox: 'danger-full-access', sandboxPolicy: { type: 'dangerFullAccess' } };
     default:
-      return { approvalPolicy: 'on-request', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite' } };
+      return { approvalPolicy: 'on-request', sandbox: 'workspace-write', sandboxPolicy: { type: 'workspaceWrite', networkAccess: NET_OPEN } };
   }
 }
 

@@ -8,7 +8,7 @@ const https = require('https');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const { createAdapterRegistry } = require('../adapters');
 
 function create({ rootDir, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
@@ -88,9 +88,22 @@ const CLAUDE_CMD = CLAUDE_CMD_RAW.startsWith('/') ? CLAUDE_CMD_RAW : resolveCmd(
 const CODEX_CMD = CODEX_CMD_RAW.startsWith('/') ? CODEX_CMD_RAW : resolveCmd(CODEX_CMD_RAW);
 const CLAUDE_SUBSCRIPTION_LOGIN_HELPER = path.join(rootDir, 'data', 'bin', 'vibespace-claude-subscription-login.mjs');
 const CODEX_LINUX_SANDBOX_CMD = resolveCmd('codex-linux-sandbox');
-const CODEX_SANDBOX_SUPPORTED = process.platform !== 'linux'
-  || (!!CODEX_LINUX_SANDBOX_CMD && CODEX_LINUX_SANDBOX_CMD !== 'codex-linux-sandbox')
-  || (typeof CODEX_LINUX_SANDBOX_CMD === 'string' && fs.existsSync(CODEX_LINUX_SANDBOX_CMD));
+// FUNCTIONAL probe (2.369.17): the PATH lookup above said "not found" on every
+// npm install (the vendor dir ships only `codex`; the sandbox is the main
+// binary re-exec'd), so TERMINAL codex at 'default' silently ran
+// danger-full-access while CHAT was sandboxed. Assume supported until the
+// async `codex sandbox -- true` answers; a failing probe flips the adapter
+// to the degraded (unsandboxed, notified) path exactly as before.
+const CODEX_SANDBOX_SUPPORTED = true;
+function probeCodexSandbox(registry) {
+  if (process.platform !== 'linux' || !CODEX_CMD) return;
+  execFile(CODEX_CMD, ['sandbox', '--', 'true'], { timeout: 20000, env: { ...process.env, CODEX_HOME: process.env.CODEX_HOME || path.join(os.homedir(), '.codex') } }, (err) => {
+    const ok = !err;
+    const ad = registry.get('codex');
+    if (ad?.config) ad.config.codexSandboxSupported = ok;
+    if (!ok) console.log(`[codex] sandbox probe failed (${err.code || err.message}); default/safe-yolo sessions will run unsandboxed.`);
+  });
+}
 const adapterRegistry = createAdapterRegistry({
   claudeCmd: CLAUDE_CMD,
   codexCmd: CODEX_CMD,
@@ -101,9 +114,7 @@ const adapterRegistry = createAdapterRegistry({
   buffersDir: path.join(rootDir, 'data', 'session-buffers'),
 });
 
-if (!CODEX_SANDBOX_SUPPORTED) {
-  console.log('[codex] codex-linux-sandbox not found; default/safe-yolo sessions will run unsandboxed.');
-}
+probeCodexSandbox(adapterRegistry);
 
 // Parse available permission modes, effort levels, and supported flags from claude --help
 let PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'dontAsk', 'plan'];

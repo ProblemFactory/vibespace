@@ -852,6 +852,10 @@ class CodexAdapter extends BackendAdapter {
     pushCodexConfigOverride(commonArgs, 'model_reasoning_effort', effort);
     if (resolvedPermission.approvalPolicy) commonArgs.push('--ask-for-approval', resolvedPermission.approvalPolicy);
     if (resolvedPermission.sandbox) commonArgs.push('--sandbox', resolvedPermission.sandbox);
+    // Terminal twin of the chat wrapper's networkAccess (2.369.17): the
+    // vibespace-* tools on PATH POST to loopback, which codex's sandbox
+    // blocks by default. Filesystem policy stays workspace-write.
+    if (resolvedPermission.sandbox === 'workspace-write') commonArgs.push('-c', 'sandbox_workspace_write.network_access=true'); // bare TOML boolean — the quoted form is a string
     if (extraArgs.length) commonArgs.push(...extraArgs);
 
     const args = resumeId

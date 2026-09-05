@@ -275,6 +275,7 @@ public/
   bundle.js            — Built output (do not edit)
 CLAUDE.md              — This file
 docs/
+  design-harness-plugins.md — 2026-09-05 调研: Codex支持缺口矩阵(P0-P3) + HarnessDescriptor抽象层/一致性套件/ACP通用第三方harness + VS Code式插件系统(manifest/派生激活/五层隔离/贡献点→现有注册表); 每节带backlog归属
   README.md            — Documentation index
   getting-started.md   — Installation, first run, quick tour
   terminal.md          — Terminal: dtach, multi-device, clipboard, idle detection, fonts
@@ -429,6 +430,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- CODEX SANDBOX CLOSED LOOPBACK → AGENT TOOLS DEAD (2.369.17): codex沙箱网络策略默认关且seccomp连127.0.0.1也禁(AF_UNIX同样)→非yolo的codex会话里vibespace-*工具全EPERM; 修复=wrapper策略带networkAccess:true(VIBESPACE_API存在时)+终端`-c sandbox_workspace_write.network_access=true`(裸布尔)+boot探测改`codex sandbox -- true`功能探测; 不变量=产品依赖的能力要靠运行验证不靠找文件, 同一权限模式在chat/terminal必须解析成同一沙箱
 - ATTACH STORM STALL → HEARTBEAT KILLED THE CLIENT → KILLS LOST (2.369.16, inc-mtndq0vb): 重启后首次attach同步convertHistory整份transcript(58会话1.35GB)→19窗口重连风暴堵循环4分钟→心跳把自己停顿期间没读到的pong当客户端死亡terminate→socket里排队的kill全丢; 修复=convertHistoryAsync分片+rebuildHistory单飞+feedLive唯一活记录入口(重建期间排队按序重放)+心跳迟到>5s不判死+kill向请求方应答killed且客户端request resend到ack; 不变量=ws handler里不做整份transcript的同步工作, 活性判定要剔除自己的停顿窗口
 - STRANDED WRITES UNDER A DISCONNECTED MOUNT POINT (2.369.15): 未挂载的挂载点=裸目录, 生成的TASK.md把树重建在上面→重连"not empty"; 连接时隔离到兄弟目录`<mp>.stranded-<ts>/`(绝不删)+shadowedBy谓词(files.js 503, TASK.md写入器跳过+mounts-updated重试); 不变量=写用户路径先问shadowedBy, `--allow-non-empty`永不
 - VNC POINTER OFFSET UNDER DPI ZOOM (2.369.5): body zoom下noVNC混用viewport px与layout px, 远端指针偏zoom倍; 不变量=VNC画布必须net zoom 1(容器counter-zoom, var反应式)
