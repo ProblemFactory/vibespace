@@ -57,7 +57,11 @@ const g1 = tasks.create({ title: 'alpha', objective: 'obj one', folders: [sessio
 
 // ── defaults: everything taught + served ──
 const cAll = promptCtx();
-check('defaults: full context teaches all three CLIs', cAll.includes('3 CLIs') && cAll.includes('vibespace-status blocked') && cAll.includes('vibespace-ask "the question"') && cAll.includes('progress "one-line summary"'), cAll.slice(0, 300));
+// The CLI count is DYNAMIC (status/ask/task + jobs since 2.342.0 + msg/page
+// when their managers are wired) — pin the shape and the three core tools,
+// never a literal count (this suite rotted on '3 CLIs' for 27 releases).
+const cliCount = (c) => Number((c.match(/— (\d+) CLIs on your PATH/) || [])[1] || (/— one CLI on your PATH/.test(c) ? 1 : 0));
+check('defaults: full context teaches the core CLIs (status/ask/task) with a dynamic count', cliCount(cAll) >= 3 && cAll.includes('vibespace-status blocked') && cAll.includes('vibespace-ask "the question"') && cAll.includes('progress "one-line summary"'), cAll.slice(0, 300));
 const rAll = promptCtx();
 check('defaults: per-turn reminder lists all three', rAll.includes('vibespace-status') && rAll.includes('vibespace-ask') && rAll.includes('vibespace-task'), rAll);
 check('defaults: status write serves', call('POST /api/agent/session-status', { state: 'working' }).code === 200);
@@ -69,7 +73,7 @@ settings['agents.toolAsk'] = false;
 settings['agents.toolTask'] = false;
 freshSession();
 const cS = promptCtx();
-check('ask/task off: context teaches ONLY status', cS.includes('one CLI') && cS.includes('vibespace-status blocked') && !cS.includes('vibespace-ask') && !cS.includes('backlog-add') && !cS.includes('progress "one-line summary"'), cS.slice(0, 400));
+check('ask/task off: context drops ask+task (count shrinks by 2), still teaches status', cliCount(cS) === cliCount(cAll) - 2 && cS.includes('vibespace-status blocked') && !cS.includes('vibespace-ask') && !cS.includes('backlog-add') && !cS.includes('progress "one-line summary"'), `count ${cliCount(cS)} vs ${cliCount(cAll)}\n` + cS.slice(0, 400));
 const rS = promptCtx();
 check('ask/task off: reminder lists only status', rS.includes('vibespace-status') && !rS.includes('vibespace-ask') && !rS.includes('vibespace-task'), rS);
 const askRef = call('POST /api/agent/user-todo', { add: { text: 'q' } });
