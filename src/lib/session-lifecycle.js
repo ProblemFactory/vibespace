@@ -90,12 +90,13 @@ export function installSessionLifecycle(App, ctx = {}) {
     // Request/reply via ws.request (2026-07-03 review structural fix):
     // self-cleanup on window close + the reply watchdog (a create swallowed by
     // a zombie ws left a blank window with ZERO trace anywhere) + reconnect
-    // re-send. Re-send is gated to CLAUDE RESUMES only: if the create DID
-    // reach the old server, its dtach session survives the restart and the
-    // re-sent resume trips the resume-already-live guard (2.179.0), which the
-    // error branch turns into an attach — no double-writer. Fresh creates and
-    // forks mint NEW ids with no such guard, so re-sending them risks a
-    // silent double-spawn; codex resumes fork a thread per resume (same risk).
+    // re-send. Re-send is gated to RESUMES only (claude + codex): if the
+    // create DID reach the old server, its dtach session survives the restart
+    // and the re-sent resume trips the resume-already-live guard (2.179.0;
+    // codex since the P1 codex double-writer fix — the wrapper's thread/resume
+    // REUSES the thread id, it never forked), which the error branch turns
+    // into an attach — no double-writer. Fresh creates and forks mint NEW ids
+    // with no such guard, so re-sending them risks a silent double-spawn.
     this.ws.request(createMsg, (msg) => {
       // Server refused the create (e.g. remote subscription-shipping policy):
       // surface it — without this the window stayed BLANK forever with no
@@ -365,7 +366,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           ? t('Still starting the session on {host} — this can take a minute on a slow machine. Leave the window open.', { host: createHostName })
           : t('Creating the session is taking unusually long — it may still be in progress; reloading the tab abandons it'), { type: 'error' });
       },
-      resend: backend === 'claude' && !!resumeId && !fork,
+      resend: (backend === 'claude' || backend === 'codex') && !!resumeId && !fork,
     });
   },
 

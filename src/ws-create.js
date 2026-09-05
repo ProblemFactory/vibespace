@@ -38,18 +38,36 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
             break;
           }
+          // Writer-sweep options per backend (P1 codex double-writer, see
+          // writer-sweep.js): the codex legs get the webui ids of the LIVE
+          // codex sessions on the TARGET machine as a protect list — a codex
+          // app-server holds every rollout of its thread tree open (sub-agent
+          // threads included, for its whole lifetime), so without it a resume
+          // of a finished sub-agent thread would SIGTERM a healthy live
+          // session's app-server (the 2.284.4 class). Live sessions are the
+          // resume-already-live guard's business; the sweep reaches
+          // external/orphaned writers only.
+          const sweepOpts = (hostId) => backend === 'codex'
+            ? { backend, protectSids: [...activeSessions].filter(([, es]) => (es.backend || 'claude') === 'codex' && (es.host || null) === (hostId || null)).map(([eid]) => eid) }
+            : { backend };
           // Resume guard (2.179.0, userW's duplicate-session incident): a
           // plain claude --resume REUSES the conversation id — spawning it
           // while the original session is still LIVE puts TWO claude
           // processes on ONE JSONL (transcript double-writer class) and
           // duplicates the sidebar card. Refuse and hand the LIVE session
-          // back; the client attaches it instead. Forks mint a new id (skip);
-          // codex resume forks a new thread id by design (not affected).
-          if (backend === 'claude' && data.resume && data.resumeId && !data.fork) {
+          // back; the client attaches it instead. Forks mint a new id (skip).
+          // CODEX TOO (P1): the wrapper's `thread/resume` REUSES the thread
+          // id (only `thread/fork` mints a new one — the old "codex resume
+          // forks a new thread id" exemption was FALSE for the current
+          // wrapper), so a second app-server on one rollout is the same
+          // B-4058 double-writer class; match on backendSessionId (the live
+          // thread id, kept current by session-stdout on every meta record).
+          if ((backend === 'claude' || backend === 'codex') && data.resume && data.resumeId && !data.fork) {
             let existing = null;
             for (const [eid, es] of activeSessions) {
-              if ((es.backend || 'claude') !== 'claude') continue;
-              if ((es.claudeSessionId || es.backendSessionId) !== data.resumeId) continue;
+              if ((es.backend || 'claude') !== backend) continue;
+              const liveId = backend === 'claude' ? (es.claudeSessionId || es.backendSessionId) : es.backendSessionId;
+              if (liveId !== data.resumeId) continue;
               if ((es.host || null) !== (data.hostId || null)) continue;
               existing = [eid, es]; break;
             }
@@ -1114,7 +1132,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // assumption these sweeps were written under).
               if (data.resume && data.resumeId && !data.fork && !dialKeeperSid && /^[\w-]+$/.test(data.resumeId)) {
                 try {
-                  const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync });
+                  const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync, ...sweepOpts(h.id) });
                   if (r.swept.length) session._resumeSwept = { host: h.name, pids: r.swept };
                   hosts.invalidateDiscovery(h.id);
                 } catch (e) {
@@ -1225,7 +1243,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // it subsumes the id-lock grep (a --resumed claude's lock
                 // carries a NEW session id, so grepping the lock for RID missed
                 // it). The pipe-meta + keeper legs clean their own bookkeeping.
-                const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync });
+                // Codex sessions get the codex legs (open rollout / argv).
+                const r = await sweepWriters(hosts, h.id, data.resumeId, { shq, execFileAsync, ...sweepOpts(h.id) });
                 if (r.swept.length) session._resumeSwept = { host: h.name, pids: r.swept };
                 hosts.invalidateDiscovery(h.id);
               } catch (e) {
@@ -1367,15 +1386,19 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // parent's own conversation, and sweeping it SIGTERMs the parent
           // mid-turn (2.284.4, real incident on this very machine — the fork
           // writes a NEW id's JSONL, so there is no double-writer to prevent).
+          // Codex too (P1): `thread/resume` reuses the thread id, and a codex
+          // app-server holds its rollout open for its lifetime — a `codex
+          // resume <id>` TUI in an external terminal is exactly the local
+          // double-writer the claude leg exists for.
           if (data.resume && data.resumeId && !data.fork && !data.hostId && !data.keeperSid
-              && (data.backend || 'claude') === 'claude' && /^[\w-]+$/.test(data.resumeId) && hosts) {
+              && (backend === 'claude' || backend === 'codex') && /^[\w-]+$/.test(data.resumeId) && hosts) {
             try {
               // shq is defined in the remote branches' scope, not here — the
               // undefined ref was swallowed by this catch and the local sweep
               // NEVER ran (caught in a fleet console ring: "sweep skipped:
               // shq is not defined"). Inline the same quoting.
               const shqL = (v) => `'${String(v).replace(/'/g, `'\''`)}'`;
-              const r = await sweepWriters(hosts, null, data.resumeId, { shq: shqL, connectMs: 8000 });
+              const r = await sweepWriters(hosts, null, data.resumeId, { shq: shqL, connectMs: 8000, ...sweepOpts(null) });
               if (r.swept.length) session._resumeSwept = { host: 'this machine', pids: r.swept };
             } catch (e) {
               // Local device daemon down ⇒ legacy behaviour (no sweep), which
