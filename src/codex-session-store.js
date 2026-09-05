@@ -145,8 +145,11 @@ function recordFingerprint(record, turnId) {
     // side: the wrapper's buffer copy carries item_id, the rollout JSONL copy
     // carries id + internal_chat_message_metadata_passthrough instead. Any of
     // them surviving into the fingerprint made buffer/JSONL twins never dedup
-    // (assistant text rendered twice in a row on every attach).
-    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, ...stablePayload } = payload;
+    // (assistant text rendered twice in a row on every attach). webui_peer is
+    // the wrapper's peer-message marker (buffer copy only; codex's rollout
+    // copy of the same user message has just the text) — same twin rule, or
+    // every delivered peer message rendered twice after a restart.
+    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, webui_peer, ...stablePayload } = payload;
     return `${turnId}:response_item:${payload.type}:${key}:${JSON.stringify(stablePayload)}`;
   }
   if (record.type === 'event_msg') {

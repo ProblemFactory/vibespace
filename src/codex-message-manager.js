@@ -11,8 +11,41 @@
  *   - server_request_resolved
  */
 
+const { peerDisplayName } = require('./message-manager');
+
 function safeJsonParse(text, fallback = null) {
   try { return JSON.parse(text); } catch { return fallback; }
+}
+
+// Server-posted peer frames, ANCHORED at the start of a user message's text
+// (agent-routes msg/send + job-model notify are the two frame builders). A
+// codex ROLLOUT copy of a delivered peer message carries nothing but this
+// text — no origin field (claude's CLI stamps origin.kind='peer'; codex's
+// rollout has no such notion) — so a rebuild must recognise the frame alone.
+// Anchored so a user QUOTING a frame mid-text never turns into a peer card.
+const SERVER_PEER_FRAME_RE = /^\s*(?:Message from session "[^"]+" \(via vibespace-msg|\[VibeSpace Background Work\] )/;
+
+// Peer-record detection for a codex user item (design-harness-plugins §1 P1).
+// Two carriers, in precedence:
+//   ① the wrapper's out-of-band marker `webui_peer: {name, body}` — written
+//     by the rpc-queue lane (codex-chat-wrapper 'peer-message' verb) into ITS
+//     OWN buffer record with the delivery site's fromName/cardText: the party
+//     holding the information writes it (the 2.362.2 law). Present on the
+//     BUFFER copy only; recordKey + mergeCodexRecords strip it so the buffer
+//     copy and codex's rollout copy of the same user message still collide.
+//   ② the server frame shape (SERVER_PEER_FRAME_RE) — the ROLLOUT copy, an
+//     OLD wrapper's unmarked record, and whichever twin mergeCodexRecords
+//     kept on a rebuild: label parsed by the shared peerDisplayName (claude
+//     rebuild parity; unknown frame ⇒ generic "another session" label).
+// Typed messages (webui_msg_id — the user's own words, auto-resume's
+// continuation line) are never peer records, whatever their text looks like.
+function peerRecordOf(item, content) {
+  const marker = item.webui_peer && typeof item.webui_peer === 'object' ? item.webui_peer : null;
+  const text = content.map((b) => b.text || '').join('\n');
+  if (!marker && !SERVER_PEER_FRAME_RE.test(text)) return null;
+  const body = marker && typeof marker.body === 'string' && marker.body.trim() ? marker.body : null;
+  const from = marker && marker.name ? String(marker.name) : peerDisplayName(null, text);
+  return { content: body ? [{ type: 'text', text: body }] : content, from };
 }
 
 function toTs(value) {
@@ -174,7 +207,9 @@ class CodexMessageManager {
 
   static recordKey(record) {
     const payload = record?.payload || record || {};
-    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, ...stable } = payload;
+    // webui_peer = the wrapper's peer marker (buffer copy only) — stripped so
+    // the buffer and rollout copies of one peer message mint the SAME id
+    const { item_id, itemId, id, internal_chat_message_metadata_passthrough, webui_peer, ...stable } = payload;
     let str;
     try { str = (record?.type || '') + ':' + JSON.stringify(stable); } catch { str = String(record?.type || ''); }
     let h = 0x811c9dc5;
@@ -185,6 +220,32 @@ class CodexMessageManager {
   onOp(fn) { this.listeners.push(fn); }
   offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
   _emit(op) { for (const fn of this.listeners) fn(op); }
+
+  // SERVER-SIDE peer card — the codex twin of MessageManager.injectPeerCard
+  // (design-harness-plugins §1 P1: its absence made normalizers.feedPeerCard
+  // return false for every codex session, so auto-resume notices, Background
+  // Work stash drains and vibespace-msg cards never rendered in codex chats).
+  // SAME card shape: role user + status complete + originKind 'peer-message'
+  // + peerFrom — the renderer (chat-renderers _renderPeerMsg) is backend-
+  // neutral. Writers: auto-resume notify, the four stash-drain sites, every
+  // non-rpc delivery lane's cardOk. In-memory only by design — never a
+  // record, so a rebuild cannot double it. The rpc-queue lane does NOT use
+  // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
+  // and a second card here would double-render live. Containment-free: the
+  // delivery site posts once per fire (same-body repeats are legitimate).
+  injectPeerCard({ fromName, text }) {
+    const body = String(text || '').trim();
+    if (!body) return null;
+    this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
+    this._currentTs = Date.now();
+    this._currentLine = null; // no source line: the card is not in any transcript
+    this.turnIndex++;
+    const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
+    msg.originKind = 'peer-message';
+    msg.peerFrom = fromName ? String(fromName) : null;
+    this._emit({ op: 'create', message: msg });
+    return msg;
+  }
 
   get total() { return this.messages.length; }
   get(id) { return this.messageIndex.get(id); }
@@ -302,7 +363,11 @@ class CodexMessageManager {
     // which always scanned backwards).
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
-      if (m.role === 'user') break;
+      // A peer card is NOT a turn boundary: a queued peer message
+      // (thread/queue/add while a turn runs) or an injected notice lands
+      // MID-turn, and stopping the scan there left the active turn's open
+      // streams 'streaming' forever at task_complete.
+      if (m.role === 'user' && m.originKind !== 'peer-message') break;
       if (m.status === 'streaming') {
         // Only finalize reasoning if explicitly asked (e.g. turn end)
         if (!includeReasoning && m.content?.[0]?.type === 'thinking') continue;
@@ -470,6 +535,21 @@ class CodexMessageManager {
       }
       if (!content.length) return;
       const webuiMsgId = item.webui_msg_id || item.webuiMsgId || item.client_msg_id || item.clientMsgId || null;
+      // Peer / notification record (rpc-queue lane live, rollout on rebuild)
+      // → the labelled peer card, never an anonymous "You" bubble. NO
+      // _finalizeStreaming here: a queued peer message is recorded while a
+      // turn is still streaming, and closing its open streams fragmented the
+      // active reply (the 2.368.16 class) — the turn's own task_complete
+      // finalizes. Typed records (webuiMsgId) never take this branch.
+      const peer = webuiMsgId ? null : peerRecordOf(item, content);
+      if (peer) {
+        this.turnIndex++;
+        const msg = this._create({ role: 'user', status: 'complete', content: peer.content, turnIndex: this.turnIndex });
+        msg.originKind = 'peer-message';
+        msg.peerFrom = peer.from;
+        if (emit) this._emit({ op: 'create', message: msg });
+        return;
+      }
       this._finalizeStreaming(emit);
       if (webuiMsgId) {
         const existingId = this.userMessageIds.get(String(webuiMsgId));

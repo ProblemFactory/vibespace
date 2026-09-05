@@ -119,13 +119,19 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // backend claims this lane by declaring the cap + serving the contract).
     // The wrapper owns the app-server connection: idle ⇒ it starts a billed
     // turn (claude-inbox parity), busy ⇒ thread/queue/add runs it after the
-    // current turn. The WRAPPER records the user message (2.362.2 law: the
-    // party holding the information renders it) — no emitPeerCard here. The
-    // wrapper reports peer_message_result; ok:false re-stashes server-side.
+    // current turn. The frame carries fromName + cardText (P1, design-
+    // harness-plugins §1): the WRAPPER records the user message with a
+    // `webui_peer` marker built from them and the codex normalizer renders
+    // THAT record as the labelled peer card — live (buffer) and on rebuild
+    // (rollout twin, marker-blind dedup). Deliberately NO cardOk() here,
+    // unlike the other lanes: ① the record already renders, so an in-memory
+    // card on top would double-render live; ② a stdin write succeeding is not
+    // a delivery — the wrapper may still report ok:false, which re-stashes
+    // and re-renders at drain, so a card emitted now would be a phantom.
     const rpc = findRpcPeer(cid);
     if (rpc) {
       try {
-        rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text }) + '\n');
+        rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null }) + '\n');
         return { ok: true, lane: 'rpc-queue', peerName: rpc.s.name || null };
       } catch (e) { log('[deliver] rpc-queue write failed (falling through): ' + e.message); }
     }

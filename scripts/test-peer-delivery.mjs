@@ -46,11 +46,15 @@ const deliver = require(path.join(REPO, 'src/server/conversation-deliver.js')).c
   emitPeerCard: () => { cards++; return true; },
   log: () => { },
 });
-const r = await deliver.deliverToConversation(CID, 'Message from session "A": hello codex');
+const r = await deliver.deliverToConversation(CID, 'Message from session "A": hello codex', { fromName: 'A', cardText: 'hello codex' });
 ok("a live codex session delivers on lane 'rpc-queue'", r.ok === true && r.lane === 'rpc-queue' && r.peerName === 'CxPeer', JSON.stringify(r));
 const frame = frames.length === 1 ? JSON.parse(frames[0]) : null;
 ok("…as ONE 'peer-message' stdin frame carrying the text", !!frame && frame.type === 'peer-message' && /hello codex/.test(frame.text));
-ok('…and NO peer card is emitted (the wrapper records the user message — 2.362.2: the party holding the information renders it)', cards === 0);
+ok('…plus the card label fields (fromName + cardText) the wrapper writes into its webui_peer marker (P1: labelled peer card, not a "You" bubble)', !!frame && frame.fromName === 'A' && frame.cardText === 'hello codex', JSON.stringify(frame));
+ok('…and NO in-memory peer card is emitted (the wrapper record is the ONE carrier — 2.362.2: the party holding the information renders it; a card here double-renders live)', cards === 0);
+frames.length = 0;
+await deliver.deliverToConversation(CID, 'unlabelled');
+ok('…label fields are explicit nulls when the caller passes none (wrapper falls back to frame parsing)', frames.length === 1 && JSON.parse(frames[0]).fromName === null && JSON.parse(frames[0]).cardText === null);
 ok('peerReachable() sees the live rpc peer', deliver.peerReachable(CID) === true);
 
 // negative control 1: sidecar without caps (old wrapper) ⇒ falls to the miss path
@@ -76,8 +80,8 @@ ok('the stash rung is intact (queued + drained once)', deliver.drainStash(CID).l
 const w = read('data/bin/codex-chat-wrapper.js');
 ok('the codex wrapper adverts caps.peerMessage in its sidecar meta', /caps: \{ peerMessage: true \}/.test(w));
 ok("…serves the 'peer-message' verb: busy ⇒ thread/queue/add, idle ⇒ turn/start", /msg\.type === 'peer-message'/.test(w) && /meta\.activeTurnId\) \{\s*\n\s*await request\('thread\/queue\/add'/.test(w) && /await startTurn\(text\);/.test(w));
-ok('…records the peer user message itself (item notifications never carry userMessage)', /thread\/queue\/add[\s\S]{0,400}record\('response_item', \{ type: 'message', role: 'user'/.test(w));
-ok('…reports peer_message_result BOTH ways, echoing the text on failure so the server can re-stash', /peer_message_result', \{ ok: true, mode: 'queued' \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'turn' \}/.test(w) && /peer_message_result', \{ ok: false, reason: e\.message, text \}/.test(w));
+ok('…records the peer user message itself (item notifications never carry userMessage) — with the webui_peer marker, on both the queued and the turn path', /const recordPeerMessage = \(\) => record\('response_item', \{ type: 'message', role: 'user', content: \[\{ type: 'input_text', text \}\], webui_peer: \{ name: fromName, body: cardText \} \}\)/.test(w) && /thread\/queue\/add[\s\S]{0,400}recordPeerMessage\(\);/.test(w) && /await startTurn\(text\);\s*\n\s*recordPeerMessage\(\);/.test(w));
+ok('…reports peer_message_result BOTH ways, echoing text + fromName on failure so the server can re-stash with its label', /peer_message_result', \{ ok: true, mode: 'queued' \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'turn' \}/.test(w) && /peer_message_result', \{ ok: false, reason: e\.message, text, fromName \}/.test(w));
 
 // ── wiring pins (the 2.355.0 lesson: a pure fix with an unstaged call site stays dead while unit tests glow green) ──
 const srv = read('server.js');
@@ -85,7 +89,7 @@ ok('server.js DESTRUCTURES recordCodexQuotaSignal from the engine (was exported-
 ok('…and forwards it to session-stdout in the engine object', /modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator \}/.test(srv));
 ok('…and passes getDeliver for the re-stash fallback', /getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \}/.test(srv));
 const ss = read('src/server/session-stdout.js');
-ok('session-stdout re-stashes on peer_message_result ok:false (a promised message is never silently lost)', /peer_message_result' && msg\.payload\.ok === false && msg\.payload\.text/.test(ss) && /stashFor\(cid, \{ source: 'agent', fromName: null, text: String\(msg\.payload\.text\) \}\)/.test(ss));
+ok('session-stdout re-stashes on peer_message_result ok:false (a promised message is never silently lost), keeping the echoed label', /peer_message_result' && msg\.payload\.ok === false && msg\.payload\.text/.test(ss) && /stashFor\(cid, \{ source: 'agent', fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\) \}\)/.test(ss));
 const wf = read('src/server/wrapper-files.js');
 ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)', /peerMessage: !!\(caps && caps\.peerMessage\)/.test(wf));
 
