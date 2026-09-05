@@ -52,6 +52,53 @@ function safeJsonParse(text, fallback = null) {
   try { return JSON.parse(text); } catch { return fallback; }
 }
 
+// A stdin line the wrapper cannot parse is a LOST USER MESSAGE (the pty/dtach
+// channel shreds multi-hundred-KB single lines — mid-line bytes and the
+// newline drop, the remains glue onto the next send). It used to be a silent
+// `continue`; the user saw nothing and codex never got the text. Log it AND
+// surface a task_failed event (rendered as a system error card by
+// CodexMessageManager, same channel as every other stdin-handler failure).
+// Only a short prefix is quoted: the line may carry base64 image data.
+function rejectStdinLine(line) {
+  const head = line.slice(0, 48).replace(/\s+/g, ' ');
+  log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(head)}) — dropped, NOT sent to codex`);
+  record('event_msg', {
+    type: 'task_failed',
+    error: `Your message did not reach codex: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`,
+  });
+}
+
+// `_frame_file` (mirrors data/bin/chat-wrapper.js): the server writes a big
+// frame (>64KB — image pastes) to data/chat-frames/<id>-<ts>.json and sends
+// only {type:'_frame_file', path} on stdin; the file holds EXACTLY the JSON
+// line the server would otherwise have written on stdin (a 'chat-input'
+// frame from CodexAdapter.formatChatInput today, any stdin verb in principle).
+// Read → unlink (always, even on failure — never leave orphans) → must parse
+// as ONE object → dispatched as if it had arrived on stdin. A nested pointer
+// is refused (no recursion, no arbitrary-file reads). Any failure is LOUD.
+function loadFrameFile(msg) {
+  const fp = typeof msg.path === 'string' ? msg.path : '';
+  let body = null, err = null;
+  try { body = fs.readFileSync(fp, 'utf8').trim(); } catch (e) { err = 'read failed: ' + e.message; }
+  try { if (fp) fs.unlinkSync(fp); } catch {}
+  let payload = null;
+  if (!err) {
+    payload = safeJsonParse(body);
+    if (!payload || typeof payload !== 'object') err = `not ONE valid JSON frame (${body.length} bytes)`;
+    else if (payload.type === '_frame_file') err = 'nested _frame_file pointer refused';
+  }
+  if (err) {
+    log(`frame-file ${path.basename(fp || '(no path)')} ${err} — dropped, NOT sent to codex`);
+    record('event_msg', {
+      type: 'task_failed',
+      error: `Your message did not reach codex: its frame file could not be delivered (${err}) — please send it again.`,
+    });
+    return null;
+  }
+  log(`frame-file ${path.basename(fp)} delivered (${body.length} bytes, type ${payload.type || '?'})`);
+  return payload;
+}
+
 function normalizeNestedAnswers(value) {
   const source = value && typeof value === 'object' ? value : {};
   const answers = {};
@@ -202,8 +249,12 @@ const meta = {
   pendingRequests: {},
   subagentMetas: [],
   // Capability advert (the 2.361.1/2.364.1 law: features gate on what THIS
-  // process declares in the file THIS process writes, never on version guesses)
-  caps: { peerMessage: true },
+  // process declares in the file THIS process writes, never on version guesses).
+  // frameFile: the server may hand >64KB chat frames over as a `_frame_file`
+  // pointer line (design-harness-plugins §1 P1 — the bypass used to exclude
+  // codex BY BACKEND ID, so a multi-image paste rode raw pty stdin and could
+  // be shredded exactly like the 79928a2b claude poisoning, silently).
+  caps: { peerMessage: true, frameFile: true },
 };
 
 let buffer = '';
@@ -1209,8 +1260,21 @@ async function boot() {
       const line = stdinBuf.slice(0, idx).replace(/\r/g, '').trim();
       stdinBuf = stdinBuf.slice(idx + 1);
       if (!line) continue;
-      const msg = safeJsonParse(line);
-      if (!msg) continue;
+      // Immediate stdin ACK on stdout (mirrors chat-wrapper; the server's
+      // codex-events branch consumes it). Without it the broken-pty detector
+      // in ws-handler saw "no ack + no buffer growth within 5s" during a slow
+      // cold start (big thread resume), re-attached dtach and RE-SENT the same
+      // line: a duplicate turn on the raw path, and with the frame-file
+      // bypass a spurious "frame file could not be delivered" error (the
+      // first delivery had already consumed the file). Fires BEFORE parsing:
+      // the ack means "the pipe is alive", not "the line was valid".
+      try { process.stdout.write(JSON.stringify({ type: '_stdin_ack', timestamp: Date.now() }) + '\n'); } catch {}
+      let msg = safeJsonParse(line);
+      if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
+      // Large-frame FILE BYPASS: the payload rides the filesystem, stdin only
+      // carries the pointer. Resolved HERE (not inside handleInput) so the file
+      // is consumed + unlinked immediately, before the ready gate.
+      if (msg.type === '_frame_file') { msg = loadFrameFile(msg); if (!msg) continue; }
       handleInput(msg).catch((err) => {
         log(`stdin handler error: ${err.message}`);
         record('event_msg', { type: 'task_failed', error: err.message });

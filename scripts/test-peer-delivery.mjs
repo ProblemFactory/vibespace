@@ -74,7 +74,7 @@ ok('the stash rung is intact (queued + drained once)', deliver.drainStash(CID).l
 
 // ── wrapper contract pins ──
 const w = read('data/bin/codex-chat-wrapper.js');
-ok('the codex wrapper adverts caps.peerMessage in its sidecar meta', /caps: \{ peerMessage: true \}/.test(w));
+ok('the codex wrapper adverts caps.peerMessage in its sidecar meta', /caps: \{ peerMessage: true(, [a-zA-Z]+: true)* \}/.test(w));
 ok("…serves the 'peer-message' verb: busy ⇒ thread/queue/add, idle ⇒ turn/start", /msg\.type === 'peer-message'/.test(w) && /meta\.activeTurnId\) \{\s*\n\s*await request\('thread\/queue\/add'/.test(w) && /await startTurn\(text\);/.test(w));
 ok('…records the peer user message itself (item notifications never carry userMessage)', /thread\/queue\/add[\s\S]{0,400}record\('response_item', \{ type: 'message', role: 'user'/.test(w));
 ok('…reports peer_message_result BOTH ways, echoing the text on failure so the server can re-stash', /peer_message_result', \{ ok: true, mode: 'queued' \}/.test(w) && /peer_message_result', \{ ok: true, mode: 'turn' \}/.test(w) && /peer_message_result', \{ ok: false, reason: e\.message, text \}/.test(w));
