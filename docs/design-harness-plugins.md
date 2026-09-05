@@ -71,11 +71,27 @@ module.exports = {
 - **scripts/test-harness-contract.mjs**：对每个注册 harness 跑同一组断言（描述符完整性、wrapper 动词集、normalizer 方法集、store/usage 纯函数在 fixture 上的形状、客户端 META 完整性）——"twin-sets=0 是指标不是状态"的通用化。
 - stdout 管线：session-stdout 的两条内联管线改为 `descriptor.stream.parse(line) → 归一化事件`（id 采纳/todos/配额/墙信号/peer 去重各一份消费者），daemon 侧共用同一模块（三层法则）。
 
-### 2.3 ACP 作为通用第三方 harness adapter
-- 依据：ACP v1 稳定（JSON-RPC over stdio，agent 是 client 子进程；session/new|load|prompt|cancel、session/update 流式 tool_call{kind,status}、session/request_permission 选项 {allow_once|allow_always|reject_once|reject_always}、typed config options 取代 modes；v2 草案 2026-07 把 prompt 改成 accepted + state_update，更新改为 id 键 upsert）。原生支持：Gemini CLI `--acp`（stable）、OpenCode `acp`、Copilot CLI `--acp`、Cursor `agent acp`、Kiro；codex-acp 包装 app-server；**claude-agent-acp 基于 Agent SDK → 不采用**。
-- 形态：`src/harnesses/acp/`（一个描述符模板 + per-agent 小配置：可执行/参数/auth 方法/store 位置），`data/bin/acp-wrapper.js`（在 dtach/daemon 下拥有 stdio，把 session/update 记日志到 buffer 文件 + sidecar，实现 WRAPPER CONTRACT 动词），ACP normalizer（tool_call kind → collapseKind；permission 选项 → harness 中立的权限卡）；resume 用 session/load（agent 自己的存储：Gemini `~/.gemini/tmp/<hash>/chats/`（30 天保留）、OpenCode SQLite `~/.local/share/opencode/opencode.db`）；发现/用量 walker 各出一个 shared-tier facts 模块 + parity 套件。
-- 传输匹配 R6：ACP 只有 stdio → 拥有机器上的 agentd 做 ACP client（daemon pipe-session），与 codex app-server daemon socket 方向一致。
-- OpenCode 另值得一个原生 serve-mode adapter（SSE + 持久事件回放 `/api/session/:id/event?after=` + fork/revert/question/pty）——晚于 ACP 通用 adapter。
+### 2.3 通用第三方 harness 协议：ACP v1（2026-09-05 二次调研后定案，owner 拍板）
+三组调研（中文生态+DeepSeek / 开源通用 / 厂商 CLI）结论一致：**ACP v1（stdio JSON-RPC，schema 1.7.0，TS SDK 1.4.0，Zed+JetBrains 治理）是唯一跨厂商覆盖"会话生命周期 + 流式工具调用(kind/status) + 权限往返(allow_once/always/reject) + 配置项(model/mode)"的协议**；ACP 注册表 40 个 agent / 99 个 client。v2 草案（2026-07）更合我们的模型但零实现，按版本协商预留。远程传输仍是 RFD（Streamable HTTP/WS），与 R6 daemon-pipe 一致：拥有机器上的 agentd 做 ACP client。
+
+| harness | 版本 (2026-09-05) | ACP | 备注 / 特殊处理 |
+|---|---|---|---|
+| **OpenCode** (anomalyco) | 1.18.29（本机已装） | 原生 `opencode acp`（load/list/fork） | **首发目标**：models.dev 覆盖 DeepSeek V4/Kimi/Qwen/GLM/MiniMax 含 coding-plan 端点；另有 `opencode serve` HTTP+SSE（S9 原生 adapter）；ChatGPT/Claude OAuth 登录在 OpenCode 内属厂商 ToS 灰区，不作为我们的默认 |
+| Kimi Code CLI (Moonshot) | 0.41.0 | 原生 `kimi acp`，SDK 1.3：ACP 面最全（load/list/resume/fork/close/delete、image、elicitation、set_config_option/set_model） | 需 `kimi login`（会员）；`kimi web` REST+WS |
+| Qwen Code (Alibaba) | 0.23.0 | 原生 `qwen --acp`（SDK 0.14，loadSession，无 fork→spawn 时 `--fork-session`） | Qwen OAuth 免费层 2026-04-15 停；`qwen serve` 含 ACP Streamable-HTTP `/acp` |
+| Qoder CLI / CodeBuddy Code | 1.1.45 / 2.146.0 | 原生 `--acp` | PAT / API key；CodeBuddy 有 `--serve` HTTP |
+| DeepSeek Harness (dsh) | 0.1.2-rc.1（dev preview） | 原生但"automation-only"（无 load/fork/modes/terminal/elicitation） | API key only；会话日志 zstd JSONL；社区 `dsh-acp-enhanced` 补齐 load/list/流式——存在时优先 |
+| Goose / Cline / Kilo / Mistral Vibe | 1.49.0 / … | 原生（Goose 另有 ACP-over-HTTP `goose serve`） | |
+| Copilot CLI / Cursor CLI / Kiro CLI / Devin CLI / Junie CLI | 1.0.83 / rolling / 2.21.0 / 3000.6.14 / 1468.30.0 | 原生 v1 | Copilot 另有 TCP；Cursor/Kiro 无 list/fork |
+| Gemini CLI | 0.58.0 | 原生 `--acp` | **消费者 OAuth 2026-06-18 起拒绝**，仅 API key/企业；继任 Antigravity CLI **无 ACP** → 不再作为首发 |
+| ZCode (Zhipu) | 3.11.2 桌面 | 非原生：`zcode-acp-server` 桥接其 app-server | 或注册表的 `glm-acp-agent` |
+| Codex | 0.153.4 | 非原生：`codex-acp`（ACP 组维护，非 OpenAI） | **保留我们的原生 app-server adapter**（能力更全、无翻译层） |
+| Claude Code | 2.1.257 | 非原生：`claude-agent-acp` = Agent SDK 通道 | **永不**（计量计费，违反 program-use 法则） |
+| Amp / Aider / Crush / Trae / iFlow / MiniMax | — | 社区桥 / 已弃 / 无 | 不做 adapter；模型经 OpenCode |
+
+**形态**：`src/harnesses/acp/`（一个描述符模板 + per-agent 小配置：可执行/参数/auth 方法/store 位置/能力探测）；`data/bin/acp-wrapper.js`（在 dtach/daemon 下拥有 stdio，把 `session/update` 记录进 buffer 文件 + sidecar，实现 WRAPPER CONTRACT 动词：chat-input→session/prompt、interrupt→session/cancel、permission-response→request_permission 回复、set-model/set-mode→set_config_option、peer-message→prompt 前缀、_frame_file、_stdin_ack）；ACP normalizer（tool_call kind → collapseKind；permission 选项 → harness 中立权限卡；agent_thought_chunk → 思考块；plan → todos；available_commands_update → 斜杠命令）；resume 用 `session/load`（无 load 的 agent 走 `session/resume` 或按 store 回放）；adapter 按 initialize 返回的 agentCapabilities 决定 fork/list/load/image 等 caps（能力驱动，不写死）。**gate 用 mock ACP agent**（scripts 内一个最小 ACP v1 agent：initialize/session/new/prompt→tool_call→request_permission→agent_message_chunk→end），真 agent 用手动脚本（OpenCode 装好即跑）。
+
+**跟踪：S8 = B-a140（首发改 OpenCode，mock-agent gate）；S9 = B-03f2。**
 
 ### 2.4 切片（每片一个 gate，可独立发版）
 | 切片 | 内容 | gate |
@@ -140,11 +156,11 @@ src/plugins.js = tailscale/frp 两个硬编码 host 守护进程的管理器（`
 
 **跟踪：Ph1 → B-plugin-registries（新）；Ph2 → B-plugin-loader（新）；Ph3 = B-acp-gemini；Ph4 → B-plugin-trusted（新）。**
 
-## 4. 待 owner 决策
-1. **ACP 作为通用第三方 harness 协议**（Claude 不走、Codex 保留 app-server 原生 adapter）——同意则 S8 以 Gemini CLI 首发。
-2. **插件"受信客户端模块"层是否允许**：不允许则界面自定义止于 iframe 窗口/面板 + 声明式贡献（菜单/芯片/主题/键位）；允许则可做原生观感的深度定制，但等价于运行任意代码。
-3. **优先级**：建议顺序 = P0（已修）→ Codex P1 四项（图片粘贴、peer 卡、池 UI、双写守卫）→ S1+Ph1（注册表化，两边共用）→ S2–S4 → S8。Codex P2 穿插。
-4. **GPT-6 Astra 前置**：升级 codex CLI 到 ≥0.153.1（本机 0.149.1）并确认账号 catalog 出现 gpt-6-astra；VibeSpace 侧要在 codex 会话选项里显式列出 gpt-6-astra 与新 effort 档（B-codex-0153）。
+## 4. owner 决策（2026-09-05 已拍板）
+1. **ACP 作为通用第三方 harness 协议**（Claude 不走、Codex 保留 app-server 原生 adapter）——✅ 同意；二次调研后首发改 OpenCode（§2.3）。
+2. **插件"受信客户端模块"层**——✅ 允许，默认关、安装时展示能力清单。
+3. **优先级**——owner：无优先级，全部推进（并行切片 + 每片 gate）。
+4. **GPT-6 Astra 前置**——✅ 本机已升 0.153.4，model/list 含 gpt-6-astra；真实会话 e2e 通过（scripts/dev/codex-e2e-live.mjs）；0.153 命名注入 `<recommended_plugins>` 已修。
 
 ## 附录 A：原始盘点条目
 完整三镜头条目（含每条的 file:line 证据与修法）与外部调研来源列表保存在调研会话的本机 workflow journal（run id `wf_01ba5210-a8d`，未入库——§1 表已收录全部 P0–P2 条目，P3 条目按 §2 S7 消化）。
