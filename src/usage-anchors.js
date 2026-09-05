@@ -93,8 +93,17 @@ function costBetween(usageHistory, accountId, fromMs, toMs) {
 // account ids — the org-merge case (__global__ + the named sub are the same
 // login) and remove+re-add (fresh sub-<hex> id, same identity). Cost must sum
 // across all of them or the odometer under-reads.
+// INTERVAL MEMO (2.369.36, inc-mtox23xw): learnRates asks for the cost of
+// every historical anchor pair on every recompute (thousands of pairs, several
+// recomputes a minute — one per new anchor) — the pairs never change, only
+// the ledger grows. Key = ids + interval + the count of events at or before
+// `to` (a late backfill INTO the interval changes that count ⇒ recompute).
+const _costMemo = new Map();
+const COST_MEMO_MAX = 20000;
 function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   const want = new Set((accountIds || []).map((a) => a || '__global__'));
+  const memoKey = typeof usageHistory?._evCountUpTo === 'function' ? `${[...want].sort().join(',')}|${fromMs}|${toMs}|${usageHistory._evCountUpTo(toMs || Infinity)}` : null;
+  if (memoKey) { const hit = _costMemo.get(memoKey); if (hit) return { ...hit, byFamily: { ...hit.byFamily }, byClass: { ...hit.byClass } }; }
   const out = { total: 0, byFamily: { fable: 0, opus: 0, sonnet: 0, haiku: 0, other: 0 }, byClass: { cw: 0, cr: 0, other: 0 }, requests: 0 };
   try {
     for (const ev of usageHistory._events(fromMs, toMs)) {
@@ -133,6 +142,7 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   out.total = Math.round(out.total * 10000) / 10000;
   for (const k of Object.keys(out.byFamily)) out.byFamily[k] = Math.round(out.byFamily[k] * 10000) / 10000;
   for (const k of Object.keys(out.byClass)) out.byClass[k] = Math.round(out.byClass[k] * 10000) / 10000;
+  if (memoKey) { if (_costMemo.size >= COST_MEMO_MAX) _costMemo.delete(_costMemo.keys().next().value); _costMemo.set(memoKey, { ...out, byFamily: { ...out.byFamily }, byClass: { ...out.byClass } }); }
   return out;
 }
 

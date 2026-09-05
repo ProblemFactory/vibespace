@@ -805,13 +805,22 @@ class ChatView {
         if (this._total > 0 && domCount === 0) track('event', 'chat-view-blank-persistent', this._telemDetail(`total=${this._total} dom=0`));
       }, 2500);
     } catch {}
-    // Auto-load more if content doesn't fill viewport (no scrollbar to trigger scroll event)
+    // Auto-load more if content doesn't fill viewport (no scrollbar to trigger scroll event).
+    // inc-mtox23xw (2.369.36): 100ms after a re-attach REBUILD the fresh batch's
+    // content-visibility heights are still unresolved, so sh<=ch held for a TALL
+    // window and this fired an ungated _extendTop on a PINNED view — the slab
+    // landed 7s later (stalled server), trimBottom dropped the live tail and the
+    // view unpinned 1500px up ("content jumped after I sent a message"). Decide
+    // only after the settle window, and only for a genuinely SHORT view.
     setTimeout(() => {
-      if (this._suspended) return; // hidden window: sh<=ch is an artifact, not "doesn't fill"
-      if (this._windowStart > 0 && this._messageList.scrollHeight <= this._messageList.clientHeight) {
+      if (this._suspended || this._disposed) return; // hidden window: sh<=ch is an artifact, not "doesn't fill"
+      const list = this._messageList;
+      const rendered = list.querySelectorAll(':scope > .chat-msg').length;
+      if (this._windowStart > 0 && rendered < 30 && list.scrollHeight <= list.clientHeight) {
+        this._trace?.('autoFill', { rendered, sh: list.scrollHeight, ch: list.clientHeight });
         this._extendTop();
       }
-    }, 100);
+    }, 700);
   }
 
   // Live per-session state (output style, auto-resume) from a server payload.

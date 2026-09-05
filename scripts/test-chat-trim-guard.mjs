@@ -21,14 +21,14 @@ ok('trimBottom carries the guard', /_trimBottom\(maxRendered = 150\) \{[\s\S]{0,
 ok('trimTop carries the guard', /_trimTop\(maxRendered = 150\) \{[\s\S]{0,900}maxRendered = 600;/.test(cv));
 ok('the incident is named at the guard (future readers find the bundle)', /inc-mtajy6wr/.test(cv));
 ok('the trim trace tags survive (the capture channel that caught this)', cv.includes("this._trace('trimBottom'") && cv.includes("_trace('extendTop:done'"));
-ok('the loadHistory fill-viewport auto-load is still height-gated (it terminates once headers accumulate past one viewport)', /this\._windowStart > 0 && this\._messageList\.scrollHeight <= this\._messageList\.clientHeight/.test(cv));
+ok('the loadHistory fill-viewport auto-load is still height-gated (it terminates once headers accumulate past one viewport)', /this\._windowStart > 0 && rendered < 30 && list\.scrollHeight <= list\.clientHeight/.test(cv));
 
 // ── suspend gate (inc-mtd1d0ft "桌面切换卡死30-60s"): a desktop-hidden chat
 // window's geometry is meaningless — the paging machinery must make no
 // decisions off it, and a switch re-measures 4-6 windows at once.
 ok('ChatView.setSuspended exists and arms the structural settle window on resume', /setSuspended\(on\) \{/.test(cv) && /this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
 ok('resume returns a pinned view to the LIVE tail — behind-the-tail windows take the full jumpToBottom (inc-mtfi6034 mobile old-position)', /this\._windowEnd < this\._total\) this\.jumpToBottom\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
-ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/fill-loop)', (cv.match(/this\._suspended\) return;/g) || []).length >= 4);
+ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/fill-loop)', (cv.match(/this\._suspended(?: \|\| this\._disposed)?\) return;/g) || []).length >= 4);
 const dm = fs.readFileSync(path.join(REPO, 'src/lib/desktop-manager.js'), 'utf8');
 ok('desktop hide/show wires the suspend flag', (dm.match(/setSuspended\?\.\((true|false)\)/g) || []).length === 2);
 ok("hidden chat windows get content-visibility:hidden (state-preserving render skip — the switch-jank render leg, inc-mtd54h45)", /contentVisibility = 'hidden'/.test(dm) && /win\.type === 'chat'/.test(dm));

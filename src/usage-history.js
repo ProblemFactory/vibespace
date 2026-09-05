@@ -320,7 +320,7 @@ class UsageHistory {
       this._cursors = walk.cursors;
 
       for (const [shard, lines] of Object.entries(shardBuffers)) {
-        if (lines.length) fs.appendFileSync(shard, lines.join('\n') + '\n');
+        if (lines.length) { fs.appendFileSync(shard, lines.join('\n') + '\n'); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       }
       this._writeAtomic(this.cursorsFile, JSON.stringify(this._cursors));
       this._lastScan = Date.now();
@@ -384,7 +384,7 @@ class UsageHistory {
       added++;
     }
     for (const [shard, lines] of Object.entries(shardBuffers)) {
-      if (lines.length) fs.appendFileSync(shard, lines.join('\n') + '\n');
+      if (lines.length) { fs.appendFileSync(shard, lines.join('\n') + '\n'); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
     }
     return { added };
   }
@@ -440,8 +440,14 @@ class UsageHistory {
   // between a shard append and the cursor write). Without this, every Usage
   // window request re-read + re-parsed every shard (~seconds at 100k+ events).
   _loadEvents() {
-    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set(), mids: new Set(), srcWm: new Map() };
+    if (!this._evCache) this._evCache = { consumed: new Map(), events: [], rids: new Set(), mids: new Set(), srcWm: new Map(), checkedAt: 0 };
     const c = this._evCache;
+    // inc-mtox23xw (2.369.36): this ran a readdir + a stat per shard on EVERY
+    // call — and the estimator calls it once per anchor PAIR (thousands per
+    // learn) → ~90 openat/s on the main thread. The ledger only grows through
+    // scan() (which drops the cache), so a 1s re-check throttle loses nothing.
+    if (Date.now() - (c.checkedAt || 0) < 1000) return c.events;
+    c.checkedAt = Date.now();
     let files = [];
     try { files = fs.readdirSync(this.dir).filter(f => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch {}
     for (const fn of files) {
@@ -532,11 +538,33 @@ class UsageHistory {
     return null;
   }
 
+  /** Time-sorted view of the cache (rebuilt lazily when the event count
+   *  changes — shards append in scan order, remote harvests interleave). */
+  _sortedEvents() {
+    const evs = this._loadEvents();
+    const c = this._evCache;
+    if (!c.sorted || c.sortedLen !== evs.length) { c.sorted = evs.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0)); c.sortedLen = evs.length; }
+    return c.sorted;
+  }
+  /** Number of cached events with ts <= t (binary search) — the memo VERSION
+   *  for an interval ending at t: unchanged ⇒ no event can have entered it. */
+  _evCountUpTo(t) {
+    const arr = this._sortedEvents();
+    let lo = 0, hi = arr.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if ((arr[mid].ts || 0) <= t) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
   // Yield UNIQUE events in [from,to] (epoch ms) from the in-memory cache.
+  // O(log n + k) since 2.369.36 (inc-mtox23xw): the estimator walks this once
+  // per anchor pair; a full-ledger scan per pair blocked the loop for 10-59s
+  // (captured by Debugger.pause inside _events ← costBetweenMulti ← learnRates).
   * _events(from, to) {
-    for (const ev of this._loadEvents()) {
-      if (from && ev.ts < from) continue;
-      if (to && ev.ts > to) continue;
+    const arr = this._sortedEvents();
+    let lo = 0;
+    if (from) { let hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if ((arr[mid].ts || 0) < from) lo = mid + 1; else hi = mid; } }
+    for (let i = lo; i < arr.length; i++) {
+      const ev = arr[i];
+      if (to && ev.ts > to) break;
       yield ev;
     }
   }

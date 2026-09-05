@@ -160,6 +160,8 @@ const up = await post('/api/plugins/manifests/example.hello/update', {});
 ok(up.status === 200 && up.body.plugin?.id === 'example.hello' && up.body.previous && (await row('example.hello')).install.updatedAt, 'update re-runs the recorded source (path) and trashes the previous copy');
 ok((await post('/api/plugins/manifests/example.hello/update', {})).status === 200 && (await post('/api/plugins/manifests/nope.nope/update', {})).status === 404, 'update: unknown id → 404');
 const stateFile = path.join(root, 'data', 'plugins-state', 'example.hello', 'counter.json');
+// the update just restarted the plugin process — wait for it (gate flake: POST /x/count raced a 'starting' state)
+ok(await waitFor(async () => (await row('example.hello')).state === 'running'), 'the updated example is running again');
 await j('/api/plugins/example.hello/x/count', { method: 'POST' });
 ok(await waitFor(() => fs.existsSync(stateFile)), 'the example wrote its state file (so uninstall has state to preserve)');
 const un = await j('/api/plugins/manifests/example.hello', { method: 'DELETE' });
