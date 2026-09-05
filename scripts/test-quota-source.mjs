@@ -39,7 +39,7 @@ const usageRoutes = require(path.join(REPO, 'src/usage-routes.js'));
 
 // ── 1. registry contract ──
 {
-  ok('built-in harnesses registered: claude, codex, shell', ['claude', 'codex', 'shell'].every((id) => harnesses.has(id)) && harnesses.ids().length === 3, harnesses.ids());
+  ok('built-in harnesses registered: claude, codex, shell, opencode', ['claude', 'codex', 'shell', 'opencode'].every((id) => harnesses.has(id)) && harnesses.ids().length === 4, harnesses.ids());
   let e1 = null; try { harnesses.get('gemini'); } catch (e) { e1 = e.message; }
   ok('an UNKNOWN harness id fails LOUDLY (never a silent claude fall-through)', /unknown harness 'gemini'/.test(e1 || ''), e1);
   let e2 = null; try { harnesses.get(''); } catch (e) { e2 = e.message; }

@@ -22,7 +22,7 @@ function resolveWrapperFiles(BUFFERS_DIR, id, sockPath) {
       let cmd = '';
       try { cmd = fs.readFileSync(path.join('/proc', pidDir, 'cmdline'), 'utf-8'); } catch { continue; }
       // the dtach MASTER: `dtach -c <sockPath> … chat-wrapper.js <buf> <sidecar> …`
-      if (!cmd.includes(sockPath) || !cmd.includes('dtach\0-c\0') || !cmd.includes('chat-wrapper.js')) continue;
+      if (!cmd.includes(sockPath) || !cmd.includes('dtach\0-c\0') || !/(chat|acp)-wrapper\.js/.test(cmd)) continue; // claude/codex chat wrappers + the ACP wrapper (S8)
       const argv = cmd.split('\0');
       const buf = argv.find((a) => a.endsWith('.buf'));
       if (buf) {

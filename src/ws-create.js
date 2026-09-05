@@ -39,6 +39,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             ws.send(JSON.stringify({ type: 'error', message: `Unknown backend "${backend}".` }));
             break;
           }
+          if (adapter.installed === false) { // ACP harness whose executable is not on this machine (S8): refuse loudly BEFORE any spawn/dtach work
+            ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, message: `${backend} is not installed on this machine (no "${adapter.config?.commandName || backend}" on PATH — install it or set ${String(backend).toUpperCase().replace(/-/g, '_')}_CMD).` }));
+            break;
+          }
           // Writer-sweep options per backend (P1 codex double-writer, see
           // writer-sweep.js): the codex legs get the webui ids of the LIVE
           // codex sessions on the TARGET machine as a protect list — a codex

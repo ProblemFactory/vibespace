@@ -43,7 +43,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
-import { createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor } from './agent-meta.js';
+import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -82,12 +82,29 @@ const BACKEND_SESSION_OPTIONS = {
       { value: 'xhigh', label: t('XHigh') },
     ],
   },
+  // OpenCode over ACP (S8): models come from the agent at session start
+  // (/api/available-models fills them in once one has run); "permission" =
+  // the agent's session mode; no effort ladder (META caps.effort false hides the row).
+  opencode: {
+    models: [{ id: '', label: t('Default') }],
+    permissions: [
+      { value: '', label: t('Default') },
+      { value: 'build', label: t('Build') },
+      { value: 'plan', label: t('Plan') },
+    ],
+    efforts: [{ value: '', label: t('Auto (model default)') }],
+  },
 };
 
 // Fetch available models from server (Claude from bootstrap/v1/models API, Codex from cache)
 fetchJson('/api/available-models').then(data => {
   if (!data) return;
   const toSchemaOptions = (models) => models.map(m => ({ value: m.id, label: m.label || m.id || t('Default') }));
+  for (const be of Object.keys(data)) { // ACP harnesses (S8): the agent's offered models, learned server-side from session/config records
+    if (be === 'claude' || be === 'codex' || !BACKEND_SESSION_OPTIONS[be] || !data[be]?.length) continue;
+    BACKEND_SESSION_OPTIONS[be].models = data[be];
+    if (SETTINGS_SCHEMA[`${be}.defaultModel`]) SETTINGS_SCHEMA[`${be}.defaultModel`].options = toSchemaOptions(data[be]);
+  }
   if (data.claude?.length) {
     BACKEND_SESSION_OPTIONS.claude.models = data.claude;
     SETTINGS_SCHEMA['claude.defaultModel'].options = toSchemaOptions(data.claude);
@@ -324,6 +341,10 @@ class App {
       this._repoDir = d.repoDir || null; // server install dir (⚙ self-update)
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
       setInstanceUrl(d.instancePublicUrl || null); // the address every "link to something here" helper uses (utils.absUrl)
+      for (const h of Array.isArray(d.harnesses) ? d.harnesses : []) { // ACP harnesses (S8): offered only where their CLI is installed
+        const opt = document.querySelector(`#input-backend option[value="${CSS.escape(String(h.id))}"]`);
+        if (opt) opt.hidden = !h.installed;
+      }
     }).catch(()=>{});
 
     // Initialize unified state sync (server-persisted, versioned diff broadcast, reconnect recovery)
@@ -1543,7 +1564,7 @@ class App {
     const isShell = backend === 'shell';
     for (const [id, hide] of [
       ['row-mode', isShell], ['row-model', isShell], ['custom-model-row', isShell],
-      ['row-permission', isShell], ['row-effort', isShell], ['row-extra-args', isShell],
+      ['row-permission', isShell], ['row-effort', isShell || BACKEND_META[backend]?.caps?.effort === false], ['row-extra-args', isShell],
     ]) {
       const el = document.getElementById(id);
       if (el) el.classList.toggle('hidden', hide);

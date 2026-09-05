@@ -96,7 +96,7 @@ const { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
   CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
   EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
-  noteModelSeen, refreshAvailableModels,
+  noteModelSeen, refreshAvailableModels, harnessAvailability, noteHarnessModels,
 } = require('./src/server/cli-env.js').create({
   rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
   getOAuthToken: (...a) => getOAuthToken(...a),
@@ -509,6 +509,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
   noteModelSeen: (...a) => noteModelSeen(...a),
+  noteHarnessModels: (...a) => noteHarnessModels(...a), // ACP harnesses learn their model list from the agent (S8)
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
   daemonPtyShim: (...a) => daemonPtyShim(...a),
   sbSeenFirst: (...a) => sbSeenFirst(...a),
@@ -1674,6 +1675,7 @@ const { decideCliRefresh } = require('./src/account-pool-auto.js');
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;
+app.locals.harnessAvailability = harnessAvailability; // S8: /api/home tells the New Session picker which ACP harnesses are installed here
 app.get('/api/available-models', (req, res) => {
   refreshCodexModels(); // mtime-guarded local read — stays current despite old-CLI cache rewrites
   res.json(AVAILABLE_MODELS);

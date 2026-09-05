@@ -1,0 +1,282 @@
+#!/usr/bin/env node
+// S8 — the GENERIC ACP v1 harness (docs/design-harness-plugins.md §2.3):
+// drives the REAL data/bin/acp-wrapper.js against scripts/dev/mock-acp-agent.mjs
+// (a dependency-free ACP v1 agent) over plain pipes — no pty, no dtach — and
+// asserts the wire (initialize → session/new → prompt → request_permission →
+// cancel → load), the 'acp-events' journal, the sidecar meta, every stdin
+// verb, then the normalizer (AcpMessageManager) + store reader shapes, and
+// the wiring pins (stdout consumer, spawn gate, picker, permission card).
+// Run: node scripts/test-acp-harness.mjs
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+const WRAPPER = path.join(REPO, 'data/bin/acp-wrapper.js');
+const MOCK = path.join(REPO, 'scripts/dev/mock-acp-agent.mjs');
+let pass = 0, fail = 0;
+const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 400) : '')); } };
+const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The suite runs INSIDE a VibeSpace session on the dev box: strip the agent
+// env so the wrapper never calls the real prompt-context/stop-check API.
+const CLEAN_ENV = { ...process.env };
+for (const k of Object.keys(CLEAN_ENV)) if (/^VIBESPACE_|^ACP_WEBUI_|^CLAUDE_CODE_/.test(k)) delete CLEAN_ENV[k];
+
+function startWrapper({ env = {}, dir } = {}) {
+  dir = dir || fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acp-'));
+  const buf = path.join(dir, 's.buf'), meta = path.join(dir, 's.json'), mockLog = path.join(dir, 'mock.log');
+  const child = spawn(process.execPath, [WRAPPER, buf, meta, process.execPath, MOCK], { env: { ...CLEAN_ENV, ACP_WEBUI_CWD: dir, ACP_WEBUI_BACKEND: 'opencode', MOCK_ACP_LOG: mockLog, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const h = { dir, buf, meta, mockLog, child, records: [], acks: 0, stderr: '', sent: 0, exited: null };
+  let lb = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (d) => {
+    lb += d; let i;
+    while ((i = lb.indexOf('\n')) !== -1) {
+      const line = lb.slice(0, i).trim(); lb = lb.slice(i + 1);
+      if (!line) continue;
+      try { const r = JSON.parse(line); if (r.type === '_stdin_ack') h.acks++; else h.records.push(r); } catch { h.records.push({ type: 'raw', line }); }
+    }
+  });
+  child.stderr.setEncoding('utf8'); child.stderr.on('data', (d) => { h.stderr += d; });
+  child.on('exit', (code, sig) => { h.exited = { code, sig }; });
+  h.send = (o) => { h.sent++; child.stdin.write(JSON.stringify(o) + '\n'); };
+  h.find = (kind, pred = () => true) => h.records.find((r) => r.type === 'acp' && r.kind === kind && pred(r));
+  h.findAll = (kind, pred = () => true) => h.records.filter((r) => r.type === 'acp' && r.kind === kind && pred(r));
+  h.updates = (su) => h.records.filter((r) => r.type === 'acp' && r.kind === 'update' && r.update?.sessionUpdate === su);
+  h.waitFor = async (pred, ms = 8000, what = 'condition') => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = pred(); if (v) return v; await sleep(20); } throw new Error(`timeout waiting for ${what} (records: ${h.records.map((r) => r.kind || r.type).join(',')}; stderr: ${h.stderr.slice(-300)})`); };
+  h.mockCalls = () => { try { return fs.readFileSync(mockLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+  h.metaJson = () => { try { return JSON.parse(fs.readFileSync(meta, 'utf8')); } catch { return null; } };
+  h.stop = async () => { try { child.kill('SIGTERM'); } catch {} await sleep(150); };
+  return h;
+}
+
+let firstSessionId = null, historyRecords = null;
+console.log('— wrapper vs mock ACP agent: new session');
+{
+  const w = startWrapper();
+  try {
+    const ses = await w.waitFor(() => w.find('session'), 10000, 'session record');
+    firstSessionId = ses.sessionId;
+    ok('session/new → `session` record with the agent id, how:new, cwd, agent info + capabilities', /^ses_mock_/.test(ses.sessionId) && ses.how === 'new' && ses.cwd === w.dir && ses.agentInfo?.name === 'mock-acp' && ses.capabilities?.loadSession === true && ses.protocolVersion === 1, ses);
+    ok('…carries the agent\'s offered models + current model/mode (config options flattened)', Array.isArray(ses.models) && ses.models.map((m) => m.id).join(',') === 'mock/fast,mock/smart' && ses.model === 'mock/fast' && ses.mode === 'build' && ses.modeValues.join(',') === 'build,plan', ses.models);
+    const init = w.mockCalls().find((c) => c.method === 'initialize');
+    ok('initialize advertises protocolVersion 1 and NO fs/terminal capabilities (we never implement them)', init?.params?.protocolVersion === 1 && init.params.clientCapabilities?.fs?.readTextFile === false && init.params.clientCapabilities?.terminal === false && init.params.clientInfo?.name === 'vibespace', init?.params);
+    await w.waitFor(() => w.updates('available_commands_update').length, 3000, 'available_commands_update');
+    ok('the agent\'s available_commands_update is journaled as an `update` record', w.updates('available_commands_update')[0].update.availableCommands.map((c) => c.name).join(',') === 'review,plan');
+    await sleep(300); // sidecar meta debounce
+    const m = w.metaJson();
+    ok('sidecar meta (the capability gate\'s ONLY source): mode chat, backend, sessionId, caps.frameFile, agent info, commands, model', m?.mode === 'chat' && m.backend === 'opencode' && m.sessionId === ses.sessionId && m.caps?.frameFile === true && m.caps.peerMessage === false && m.acp?.agentInfo?.name === 'mock-acp' && m.availableCommands?.length === 2 && m.model === 'mock/fast' && m.streaming === false, m);
+
+    // ── prompt → permission → completion ──
+    w.send({ type: 'chat-input', text: 'please read the file', msgId: 'u1' });
+    const user = await w.waitFor(() => w.find('user', (r) => r.msgId === 'u1'), 3000, 'user record');
+    ok('chat-input → `user` record (msgId + content blocks) BEFORE the prompt goes out', user.content?.[0]?.text === 'please read the file' && user.peer === null);
+    const ps = await w.waitFor(() => w.find('prompt_start'), 3000, 'prompt_start');
+    ok('prompt_start marks the turn (streaming on)', /^p1-/.test(ps.promptId) && ps.blocks === 1);
+    const perm = await w.waitFor(() => w.find('permission_request'), 5000, 'permission_request');
+    ok('agent → session/request_permission journaled with the tool call + ORDERED options (kinds)', perm.toolCall?.toolCallId === perm.toolCall?.toolCallId && perm.options?.map((o) => o.kind).join(',') === 'allow_once,allow_always,reject_once' && perm.options.map((o) => o.optionId).join(',') === 'once,always,no', perm);
+    ok('…the tool_call update preceded it (kind read, title, rawInput, locations)', w.updates('tool_call').length === 1 && w.updates('tool_call')[0].update.kind === 'read' && w.updates('tool_call')[0].update.rawInput?.path === '/repo/README.md');
+    const promptCall = w.mockCalls().find((c) => c.method === 'session/prompt');
+    ok('session/prompt carries the text block verbatim (no context prefix without VIBESPACE_API)', promptCall?.params?.sessionId === ses.sessionId && promptCall.params.prompt.length === 1 && promptCall.params.prompt[0].text === 'please read the file', promptCall?.params);
+    await sleep(250);
+    const mMid = w.metaJson();
+    ok('sidecar meta mid-turn: streaming true + the pending request recorded', mMid?.streaming === true && mMid.activePromptId === ps.promptId && Object.keys(mMid.pendingRequests || {}).length === 1, mMid);
+    w.send({ type: 'permission-response', requestId: perm.requestId, approved: true, optionId: 'once' });
+    const res = await w.waitFor(() => w.find('permission_resolved'), 3000, 'permission_resolved');
+    ok('permission-response (explicit optionId) → the request is answered with that option', res.outcome === 'selected' && res.optionId === 'once' && res.optionKind === 'allow_once', res);
+    const end = await w.waitFor(() => w.find('prompt_end'), 5000, 'prompt_end');
+    ok('the turn completes: tool_call_update completed (content), plan, agent text, usage_update, prompt_end end_turn', end.stopReason === 'end_turn' && end.error === null && w.updates('tool_call_update').some((u) => u.update.status === 'completed') && w.updates('plan').length === 2 && w.updates('usage_update').length === 1 && w.updates('agent_message_chunk').some((u) => /Done \(once\)/.test(u.update.content?.text || '')), end);
+    ok('every stdin line got its _stdin_ack (the server\'s broken-pty detector)', w.acks === w.sent, { acks: w.acks, sent: w.sent });
+    await sleep(250);
+    ok('sidecar meta after the turn: streaming false, todos from the plan, usage recorded', w.metaJson()?.streaming === false && w.metaJson().todos?.length === 2 && w.metaJson().usage?.used === 1234, w.metaJson());
+
+    // ── deny via approved:false (no optionId) → reject kind ──
+    w.send({ type: 'chat-input', text: 'edit it now', msgId: 'u2' });
+    const perm2 = await w.waitFor(() => w.findAll('permission_request').length === 2 && w.findAll('permission_request')[1], 5000, 'second permission_request');
+    w.send({ type: 'permission-response', requestId: perm2.requestId, approved: false });
+    const end2 = await w.waitFor(() => w.findAll('prompt_end').length === 2 && w.findAll('prompt_end')[1], 5000, 'second prompt_end');
+    const res2 = w.findAll('permission_resolved')[1];
+    ok('permission-response approved:false (no optionId) picks the reject option by kind', res2?.optionId === 'no' && res2.optionKind === 'reject_once', res2);
+    ok('…the agent sees the rejection: tool_call_update failed + its "not doing that" text, end_turn', end2.stopReason === 'end_turn' && w.updates('tool_call_update').some((u) => u.update.status === 'failed') && w.updates('agent_message_chunk').some((u) => /not doing that/.test(u.update.content?.text || '')));
+    ok('an edit tool call arrives with kind edit (renderer maps it to a write-fold card)', w.updates('tool_call')[1]?.update.kind === 'edit');
+
+    // ── interrupt: session/cancel + cancelled stop reason ──
+    w.send({ type: 'chat-input', text: 'slow run it', msgId: 'u3' });
+    await w.waitFor(() => w.findAll('prompt_start').length === 3, 3000, 'third prompt_start');
+    await sleep(100);
+    w.send({ type: 'interrupt' });
+    const end3 = await w.waitFor(() => w.findAll('prompt_end').length === 3 && w.findAll('prompt_end')[2], 8000, 'third prompt_end');
+    ok('interrupt → session/cancel notification; the prompt resolves with stopReason cancelled', end3.stopReason === 'cancelled' && w.mockCalls().some((c) => c.method === 'session/cancel'), end3);
+
+    // ── config verbs ──
+    w.send({ type: 'set-model', model: 'mock/smart' });
+    const cfg = await w.waitFor(() => w.find('config', (r) => r.source === 'set:model'), 3000, 'config set:model');
+    ok('set-model → session/set_config_option on the model category; `config` record carries the new model', cfg.model === 'mock/smart' && w.find('notice', (r) => /Model → mock\/smart/.test(r.text)), cfg);
+    w.send({ type: 'set-model', model: 'bogus/model' });
+    const rej = await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'rejected'), 3000, 'rejected notice');
+    ok('a model the agent rejects → LOUD notice naming the offered models (never a silent no-op)', /rejected by the agent/.test(rej.text) && /mock\/fast/.test(rej.text), rej);
+    w.send({ type: 'set-permission-mode', mode: 'plan' });
+    const cfg2 = await w.waitFor(() => w.find('config', (r) => r.source === 'set:mode'), 3000, 'config set:mode');
+    ok('set-permission-mode → the mode config option; agent echoes current_mode_update', cfg2.mode === 'plan' && w.updates('current_mode_update').some((u) => u.update.modeId === 'plan'), cfg2);
+    w.send({ type: 'set-effort', effort: 'high' });
+    const uns = await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'unsupported' && /effort/.test(r.text)), 3000, 'unsupported notice');
+    ok('set-effort on an agent without a thought_level option → explicit unsupported notice', /reasoning-effort/.test(uns.text));
+    w.send({ type: 'bogus-verb' });
+    await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'unknown-verb'), 3000, 'unknown-verb notice');
+    ok('an unknown stdin verb is refused loudly', true);
+
+    // ── fs request from the agent → refused cleanly ──
+    w.send({ type: 'chat-input', text: 'use fs please', msgId: 'u4' });
+    const end4 = await w.waitFor(() => w.findAll('prompt_end').length === 4 && w.findAll('prompt_end')[3], 5000, 'fourth prompt_end');
+    const creq = w.find('client_request');
+    ok('agent → fs/read_text_file is answered with a JSON-RPC error (unsupported) and journaled; the turn still completes', creq?.method === 'fs/read_text_file' && creq.replied === 'unsupported' && end4.stopReason === 'end_turn' && w.updates('agent_message_chunk').some((u) => /fs refused/.test(u.update.content?.text || '')), creq);
+
+    // ── frame file pointer ──
+    const fp = path.join(w.dir, 'frame.json');
+    fs.writeFileSync(fp, JSON.stringify({ type: 'chat-input', text: 'read via frame', msgId: 'u5' }));
+    w.send({ type: '_frame_file', path: fp });
+    const u5 = await w.waitFor(() => w.find('user', (r) => r.msgId === 'u5'), 3000, 'frame-file user record');
+    ok('_frame_file pointer → the frame is read, unlinked, and handled as chat-input', u5.content[0].text === 'read via frame' && !fs.existsSync(fp));
+    // permission_requests so far: u1, u2 (the slow prompt was cancelled before its request; the fs prompt asks none) → the frame prompt's is the 3rd
+    const perm5 = await w.waitFor(() => w.findAll('permission_request').length === 3 && w.findAll('permission_request')[2], 5000, 'frame prompt permission');
+    w.send({ type: 'permission-response', requestId: perm5.requestId, approved: true, alwaysAllow: true });
+    await w.waitFor(() => w.findAll('prompt_end').length === 5, 5000, 'fifth prompt_end');
+    ok('approved + alwaysAllow (no optionId) prefers the allow_always option', w.findAll('permission_resolved')[2]?.optionId === 'always');
+    fs.writeFileSync(path.join(w.dir, 'bad.json'), '{not json');
+    w.send({ type: '_frame_file', path: path.join(w.dir, 'bad.json') });
+    const lost = await w.waitFor(() => w.find('notice', (r) => r.noticeKind === 'lost-input'), 3000, 'lost-input notice');
+    ok('a corrupt frame file → lost-input notice (the user is told to resend), file unlinked', /did not reach the agent/.test(lost.text) && !fs.existsSync(path.join(w.dir, 'bad.json')));
+    w.child.stdin.write('this is not json\n');
+    await w.waitFor(() => w.findAll('notice', (r) => r.noticeKind === 'lost-input').length === 2, 3000, 'second lost-input');
+    ok('an unparseable stdin line is refused loudly (never silently dropped)', true);
+
+    // ── peer message ──
+    w.send({ type: 'peer-message', text: 'ping from B', fromName: 'B', cardText: 'B says hi' });
+    // the peer prompt runs a full mock turn (with a permission request) before peer_result lands
+    await w.waitFor(() => w.findAll('permission_request').length === 4, 5000, 'peer prompt permission');
+    w.send({ type: 'permission-response', requestId: w.findAll('permission_request')[3].requestId, approved: true });
+    const pr = await w.waitFor(() => w.find('peer_result'), 8000, 'peer_result');
+    await w.waitFor(() => w.findAll('prompt_end').length === 6, 5000, 'sixth prompt_end');
+    const pu = w.find('user', (r) => r.peer);
+    ok('peer-message → a `user` record with the peer envelope + a prompt prefixed "Message from B:" + peer_result ok', pr.ok === true && pu?.peer?.name === 'B' && pu.peer.body === 'B says hi' && w.mockCalls().some((c) => c.method === 'session/prompt' && /^Message from B:\nping from B/.test(c.params.prompt[0]?.text || '')), pr);
+
+    await sleep(1200); // buffer persist debounce
+    historyRecords = w.records.filter((r) => r.type === 'acp');
+    const bufRecs = fs.readFileSync(w.buf, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    ok('the buffer file mirrors the stdout journal (history survives a server restart)', bufRecs.length === historyRecords.length && bufRecs[0].kind === 'session', { buf: bufRecs.length, out: historyRecords.length });
+  } finally { await w.stop(); }
+}
+
+console.log('— resume (session/load replay)');
+{
+  const w = startWrapper({ env: { ACP_WEBUI_RESUME_ID: firstSessionId, ACP_WEBUI_MODEL: 'mock/smart', ACP_WEBUI_MODE: 'plan' } });
+  try {
+    const ses = await w.waitFor(() => w.find('session'), 10000, 'session record');
+    ok('ACP_WEBUI_RESUME_ID + loadSession capability → session/load, how:load, the SAME session id', ses.how === 'load' && ses.sessionId === firstSessionId && w.mockCalls().some((c) => c.method === 'session/load' && c.params.sessionId === firstSessionId), ses);
+    ok('replayed history updates are tagged replay:true (user + agent chunks + an old tool call)', w.updates('user_message_chunk').some((u) => u.replay === true) && w.updates('agent_message_chunk').some((u) => u.replay === true) && w.updates('tool_call').some((u) => u.replay === true));
+    await w.waitFor(() => w.find('config', (r) => r.source === 'set:model') && w.find('config', (r) => r.source === 'set:mode'), 5000, 'initial model/mode applied');
+    ok('initial model + mode from env are applied right after the session is up', w.find('config', (r) => r.source === 'set:model').model === 'mock/smart' && w.find('config', (r) => r.source === 'set:mode').mode === 'plan');
+  } finally { await w.stop(); }
+}
+
+console.log('— boot failure honesty');
+{
+  const w = startWrapper({ env: { ACP_WEBUI_BACKEND: 'opencode' } });
+  // kill the mock from under the wrapper before it answers: the wrapper must
+  // report, not hang. Use a command that exits immediately instead.
+  await w.stop();
+  const w2 = { ...startWrapper({}), };
+  await w2.stop();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acp-'));
+  const child = spawn(process.execPath, [WRAPPER, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, '-e', 'process.exit(3)'], { env: { ...CLEAN_ENV, ACP_WEBUI_CWD: dir }, stdio: ['pipe', 'pipe', 'pipe'] });
+  let out = ''; child.stdout.setEncoding('utf8'); child.stdout.on('data', (d) => { out += d; });
+  const code = await new Promise((r) => child.on('exit', (c) => r(c)));
+  ok('an agent that exits before initialize → LOUD boot-failed/agent-exited notice + non-zero wrapper exit (never a silent hang)', code !== 0 && /agent-exited|boot-failed/.test(out) && /exited before the session was ready|could not start/.test(out), { code, out: out.slice(0, 300) });
+}
+
+console.log('— normalizer (AcpMessageManager) over the journal');
+{
+  const { AcpMessageManager, AcpSessionMessages, collapseKindOf, toolNameOf } = require(path.join(REPO, 'src/acp-message-manager.js'));
+  const mm = new AcpMessageManager('s1');
+  const msgs = mm.convertHistory(historyRecords);
+  const users = msgs.filter((m) => m.role === 'user');
+  ok('user prompts become user messages (msgId-keyed; peer message carries its envelope)', users.length === 6 && users[0].content[0].text === 'please read the file' && users.at(-1).originKind === 'peer-message' && users.at(-1).peerFrom === 'B' && users.at(-1).content[0].text === 'B says hi', users.map((u) => u.content[0]?.text));
+  const texts = msgs.filter((m) => m.role === 'assistant' && m.content[0]?.type === 'text');
+  ok('agent_message_chunks with one messageId MERGE into one assistant text ("Looking at your request.")', texts.some((t) => t.content[0].text === 'Looking at your request.') && texts.every((t) => t.status === 'complete'), texts.map((t) => t.content[0].text));
+  ok('agent_thought_chunk → a thinking block', msgs.some((m) => m.role === 'assistant' && m.content[0]?.type === 'thinking' && /check the file first/.test(m.content[0].text)));
+  const tools = msgs.filter((m) => m.role === 'tool');
+  const readCard = tools.find((t) => t.toolName === 'Read');
+  ok('tool_call kind read → Read card, collapseKind read, completed with the tool output + permission resolved (allowed, option once)', readCard && readCard.collapseKind === 'read' && readCard.status === 'complete' && readCard.content[0].type === 'tool_result' && /hello/.test(readCard.content[0].output) && readCard.permission?.resolved === 'allowed' && readCard.permission.selectedOptionId === 'once' && readCard.permission.options.length === 3 && readCard.backendMeta.acpKind === 'read', readCard);
+  const editCard = tools.find((t) => t.toolName === 'Edit');
+  ok('tool_call kind edit → Edit card (write fold) — denied: error status + denied permission', editCard && editCard.collapseKind === 'write' && editCard.status === 'error' && editCard.permission?.resolved === 'denied' && editCard.permission.selectedOptionId === 'no', editCard);
+  const bashCard = tools.find((t) => t.toolName === 'Bash');
+  ok('tool_call kind execute → Bash card (bash fold) with the command as input; cancelled turn → error status', bashCard && bashCard.collapseKind === 'bash' && bashCard.content[0].input?.command === 'ls -la' && bashCard.status === 'error', bashCard);
+  ok('the cancelled prompt leaves an Interrupted marker; the fs refusal turn has no error card', msgs.some((m) => m.role === 'system' && m.status === 'interrupted') && !msgs.some((m) => m.role === 'system' && m.status === 'error' && /prompt failed/.test(m.content[0]?.text || '')));
+  ok('wrapper notices become system cards (rejected model = error status, unsupported effort, unknown verb)', msgs.filter((m) => m.role === 'system' && m.noticeKind === 'rejected').length === 1 && msgs.some((m) => m.noticeKind === 'unsupported') && msgs.some((m) => m.noticeKind === 'unknown-verb'));
+  const st = mm.status();
+  ok('status(): model/mode follow the config records, slash commands from available_commands_update, context window from usage_update', st.model === 'mock/smart' && st.permissionMode === 'plan' && st.permissionModes.join(',') === 'build,plan' && st.slashCommands.join(',') === 'review,plan' && st.contextWindow === 200000 && st.lastUsage?.input_tokens === 1234 && st.models.length === 2 && st.agentInfo?.name === 'mock-acp', st);
+  ok('taskState() todos come from the last plan', mm.taskState().todos.length === 2 && mm.taskState().todos[0].status === 'completed');
+  ok('turnMap() has one entry per user turn with previews', mm.turnMap().filter((t) => t.role === 'user').length === 6 && mm.turnMap()[0].preview);
+  ok('search() finds tool output', mm.search('hello').length >= 1);
+  ok('history rebuild produces NO init card (a live artefact); ids are content-derived and stable across rebuilds', !msgs.some((m) => m.content[0]?.type === 'system_info' && m.content[0].initData) && new AcpMessageManager('s1').convertHistory(historyRecords).map((m) => m.id).join() === msgs.map((m) => m.id).join());
+  // live path: ops + init card + permission card BEFORE resolution
+  const live = new AcpMessageManager('s2'); const ops = []; live.onOp((o) => ops.push(o));
+  for (const r of historyRecords.slice(0, historyRecords.findIndex((r) => r.kind === 'permission_resolved'))) live.processLive(r);
+  const pendingCard = live.messages.find((m) => m.permission && !m.permission.resolved);
+  ok('live: the init card is created from the session record; the permission card is PENDING with ordered options', ops[0]?.op === 'create' && ops[0].message.content[0].initData?.model === 'mock/fast' && pendingCard && pendingCard.permission.options.map((o) => o.optionId).join(',') === 'once,always,no' && pendingCard.permission.kind === 'approval', ops[0]);
+  live.processLive({ type: 'permission-response', requestId: pendingCard.permission.requestId, approved: true, optionId: 'once' });
+  ok('the ws-handler\'s echoed permission-response frame resolves the pending card (survives a refresh)', pendingCard.permission.resolved === 'allowed' && pendingCard.permission.selectedOptionId === 'once' && ops.at(-1).op === 'edit');
+  ok('collapseKindOf/toolNameOf cover every ACP ToolKind', ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode', 'other'].every((k) => toolNameOf(k)) && collapseKindOf('switch_mode') === null && collapseKindOf('fetch') === 'mcp' && collapseKindOf('think') === 'thinking');
+  // store reader over the buffer
+  const bdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-acp-buf-'));
+  fs.writeFileSync(path.join(bdir, 's1.json'), JSON.stringify({ mode: 'chat', streaming: true, todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }], model: 'mock/smart' }));
+  const sm = new AcpSessionMessages({ buffer: historyRecords.map((r) => JSON.stringify(r)).join('\n') + '\n' }, 's1', { buffersDir: bdir });
+  ok('AcpSessionMessages reads raw/tail/slice from the buffer, chatStatus from the journal, todos + streaming from the sidecar', sm.total === historyRecords.length && sm.tail(2).length === 2 && sm.slice(0, 1)[0].kind === 'session' && sm.chatStatus()?.model === 'mock/smart' && sm.taskState().todos.length === 2 && sm.isStreaming === true, { todos: sm.taskState().todos, streaming: sm.isStreaming });
+  fs.rmSync(bdir, { recursive: true, force: true });
+  const empty = new AcpSessionMessages({ buffer: '' }, 'none', { buffersDir: os.tmpdir() });
+  ok('…an empty buffer → null chatStatus, no todos (never throws)', empty.chatStatus() === null && empty.taskState().todos.length === 0);
+  // registry / adapter
+  const { AcpAdapter } = require(path.join(REPO, 'src/adapters/acp.js'));
+  const { acpHarness } = require(path.join(REPO, 'src/harnesses/acp.js'));
+  const h = acpHarness({ id: 'mockacp', label: 'Mock', command: 'mock-agent', args: ['acp', '--x'] });
+  const ad = new h.Adapter(h.adapterConfig({ acpWrapper: '/w/acp', ptyWrapper: '/w/pty', acpCommands: { mockacp: null } }));
+  ok('acpHarness factory: descriptor id/kind/caps/streamProtocol/creds:null/inject acp; adapter reports installed=false when cli-env found no executable', h.id === 'mockacp' && h.kind === 'chat' && h.caps.streamProtocol === 'acp-events' && h.creds === null && h.inject.kind === 'acp' && ad instanceof AcpAdapter && ad.installed === false);
+  const spec = new h.Adapter(h.adapterConfig({ acpWrapper: '/w/acp', ptyWrapper: '/w/pty', acpCommands: { mockacp: '/usr/bin/mock-agent' } })).buildSessionArgs({ cwd: '/tmp/x', mode: 'chat', model: 'm1', permissionMode: 'plan', resumeId: 'ses_1', extraArgs: ['--v'] });
+  ok('buildSessionArgs(chat): the resolved executable + acp args + extra args under the shared wrapper; facts ride ACP_WEBUI_* env (never argv)', spec.cmd === '/usr/bin/mock-agent' && spec.args.join(' ') === 'acp --x --v' && spec.wrapper === '/w/acp' && spec.env.ACP_WEBUI_MODEL === 'm1' && spec.env.ACP_WEBUI_MODE === 'plan' && spec.env.ACP_WEBUI_RESUME_ID === 'ses_1' && spec.env.ACP_WEBUI_BACKEND === 'mockacp' && spec.cwd === '/tmp/x', spec);
+  let threw = null; try { acpHarness({ id: 'Bad Id', command: 'x' }); } catch (e) { threw = e.message; }
+  ok('acpHarness refuses a non-slug id', /lowercase slug/.test(threw || ''));
+  const fmt = ad.formatPermissionResponse({ requestId: 7, approved: true, optionId: 'always', permissionUpdates: [{ kind: 'allow_always' }] });
+  ok('formatPermissionResponse forwards requestId/approved/optionId/alwaysAllow to the wrapper verb', JSON.parse(fmt).optionId === 'always' && JSON.parse(fmt).alwaysAllow === true && JSON.parse(fmt).type === 'permission-response');
+}
+
+console.log('— wiring pins');
+{
+  const so = read('src/server/session-stdout.js');
+  ok('session-stdout has the acp-events consumer: id adoption from the session record, streaming from prompt_start/prompt_end, todos from plan, feedLive gate', /streamProto === 'acp-events'/.test(so) && /msg\.kind === 'session'/.test(so) && /msg\.kind === 'prompt_end'\) \{\s*\n\s*session\._isStreaming = false/.test(so) && /u\.sessionUpdate === 'plan'/.test(so) && /noteHarnessModels\?\.\(session\.backend, msg\.models\)/.test(so));
+  ok('…and every ACP record reaches the normalizer through feedLive (never processLive)', (so.match(/feedLive\(session, msg\)/g) || []).length >= 3 && !/_normalizer\.processLive/.test(so));
+  const sv = read('server.js');
+  ok('server.js wires noteHarnessModels into the stdout engine and exposes harnessAvailability on app.locals', /noteHarnessModels: \(\.\.\.a\) => noteHarnessModels\(\.\.\.a\)/.test(sv) && /app\.locals\.harnessAvailability = harnessAvailability/.test(sv));
+  const ce = read('src/server/cli-env.js');
+  ok('cli-env resolves each ACP harness executable once (env <ID>_CMD override) and hands acpWrapper/acpCommands to the adapter registry', /ACP_COMMANDS\[h\.id\] = raw\.startsWith\('\/'\) \? raw : \(resolveCmd\(raw\) \|\| null\)/.test(ce) && /acpWrapper: path\.join\(rootDir, 'data', 'bin', 'acp-wrapper\.js'\)/.test(ce) && /acpCommands: ACP_COMMANDS/.test(ce) && /function harnessAvailability\(\)/.test(ce) && /function noteHarnessModels\(backend, models\)/.test(ce));
+  const wc = read('src/ws-create.js');
+  ok('ws-create refuses an uninstalled ACP harness BEFORE any spawn (loud error with the fix)', /if \(adapter\.installed === false\)/.test(wc) && /is not installed on this machine/.test(wc));
+  ok('files.js /api/home carries harness availability for the picker', /harnesses = typeof req\.app\.locals\.harnessAvailability === 'function'/.test(read('src/routes/files.js')));
+  const app = read('src/lib/app.js');
+  ok('app.js: the picker unhides an ACP backend only when installed; opencode session options row (build/plan, no effort ladder); effort row hidden by META caps', /opt\.hidden = !h\.installed/.test(app) && /opencode: \{\n    models: \[\{ id: '', label: t\('Default'\) \}\],/.test(app) && /BACKEND_META\[backend\]\?\.caps\?\.effort === false/.test(app) && /!BACKEND_SESSION_OPTIONS\[be\] \|\| !data\[be\]\?\.length\) continue;/.test(app));
+  ok('index.html lists the opencode option hidden by default', /<option value="opencode" hidden>OpenCode<\/option>/.test(read('public/index.html')));
+  const cr = read('src/lib/chat-renderers.js');
+  ok('chat-renderers renders ORDERED permission options (harness-neutral) and replies with the chosen optionId', /Array\.isArray\(msg\.permission\.options\) && msg\.permission\.options\.length/.test(cr) && /optionId: o\?\.optionId \|\| null/.test(cr) && /data-option-id="\$\{escHtml\(String\(o\.optionId\)\)\}"/.test(cr));
+  ok('backend-caps + harness registry: opencode row (streamProtocol acp-events, pool false, frameFile) registered as a built-in', /opencode: \{\n    pool: false, hotSwitch: 'unverified'[\s\S]{0,200}streamProtocol: 'acp-events'/.test(read('src/backend-caps.js')) && /require\('\.\/opencode'\)/.test(read('src/harnesses/index.js')));
+  ok('mounts-plugins-wiring dispatches SessionMessages through the descriptor for non-claude/codex harnesses', /h\?\.store\?\.SessionMessages\) return new h\.store\.SessionMessages/.test(read('src/server/mounts-plugins-wiring.js')));
+  ok('wrapper-files recognises the ACP wrapper in the dtach master argv (collision resolver)', /\(chat\|acp\)-wrapper\\\.js/.test(read('src/server/wrapper-files.js')));
+  ok('settings schema: opencode.defaultModel/defaultPermissionMode/defaultExtraArgs under an OpenCode category; zh+ja carry the new strings', /'opencode\.defaultModel'/.test(read('src/lib/settings-schema.js')) && /'opencode\.defaultPermissionMode'/.test(read('src/lib/settings-schema.js')) && /"OpenCode":/.test(read('src/lib/i18n-zh.js')) && /"Build":/.test(read('src/lib/i18n-ja.js')));
+  ok('test-architecture places the ACP files in the SHARED tier; ci.mjs runs this suite', /'src\/harnesses\/acp\.js', 'src\/harnesses\/opencode\.js', 'src\/adapters\/acp\.js', 'src\/acp-message-manager\.js'/.test(read('scripts/test-architecture.mjs')) && /'test-acp-harness'/.test(read('scripts/ci.mjs')));
+  ok('the wrapper never touches a vendor API and never puts a secret in argv (program-use billing law)', !/api\.anthropic\.com|api\.openai\.com|Authorization: 'Bearer sk-/.test(read('data/bin/acp-wrapper.js')) && /clientCapabilities: \{ fs: \{ readTextFile: false, writeTextFile: false \}, terminal: false \}/.test(read('data/bin/acp-wrapper.js')));
+}
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

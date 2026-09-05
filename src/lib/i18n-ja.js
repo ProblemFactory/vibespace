@@ -2841,4 +2841,9 @@ export default {
   "Enable": "有効にする",
   "Plugin disabled": "プラグインを無効にしました",
   "Plugin enabled": "プラグインを有効にしました",
+  "OpenCode": "OpenCode",
+  "Build": "ビルド",
+  "A model id the agent offers (provider/model, e.g. opencode/big-pickle) — the list fills from the agent once a session has started; empty keeps the agent default.": "エージェントが提供するモデル id（provider/model、例: opencode/big-pickle）。リストは最初のセッション開始後にエージェントから取得されます。空欄ならエージェントの既定値。",
+  "Default OpenCode session mode for new sessions: build executes tools per its permission rules, plan disallows edits.": "新しい OpenCode セッションの既定モード: build は権限ルールに従ってツールを実行し、plan は編集を禁止します。",
+  "Extra OpenCode CLI args appended when starting an OpenCode session.": "OpenCode セッション起動時に追加する CLI 引数。",
 };

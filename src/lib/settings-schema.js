@@ -663,6 +663,34 @@ const SETTINGS_SCHEMA = {
     category: t('Codex'), liveApply: true,
   },
 
+  // ── OpenCode (ACP v1 harness, S8) ──
+  'opencode.defaultModel': {
+    type: 'enum', default: '', combobox: true,
+    options: [
+      { value: '', label: t('Default') },
+    ],
+    label: t('Default model'),
+    description: t('A model id the agent offers (provider/model, e.g. opencode/big-pickle) — the list fills from the agent once a session has started; empty keeps the agent default.'),
+    category: t('OpenCode'), liveApply: true,
+  },
+  'opencode.defaultPermissionMode': {
+    type: 'enum', default: '',
+    options: [
+      { value: '', label: t('Default') },
+      { value: 'build', label: t('Build') },
+      { value: 'plan', label: t('Plan') },
+    ],
+    label: t('Default permission mode'),
+    description: t('Default OpenCode session mode for new sessions: build executes tools per its permission rules, plan disallows edits.'),
+    category: t('OpenCode'), liveApply: true,
+  },
+  'opencode.defaultExtraArgs': {
+    type: 'text', default: '',
+    label: t('Default extra args'),
+    description: t('Extra OpenCode CLI args appended when starting an OpenCode session.'),
+    category: t('OpenCode'), liveApply: true,
+  },
+
   // ── Sidebar ──
   'sidebar.defaultTab': {
     type: 'enum', default: 'folders',

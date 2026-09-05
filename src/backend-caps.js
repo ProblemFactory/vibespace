@@ -62,6 +62,17 @@ const BACKEND_CAPS = {
     streamProtocol: null, // terminal-only: no chat parse pipeline
     peerDelivery: 'stash-only',
   },
+  // ACP v1 harnesses (S8, design-harness-plugins §2.3): the agent holds its
+  // own login/provider config — no pool, no quota probe, no credential
+  // switching; 'acp-events' is the wrapper journal (data/bin/acp-wrapper.js);
+  // fork/list/load are read from the agent's initialize reply at spawn, never
+  // declared here. peerDelivery stays stash-only until a live lane is proven.
+  opencode: {
+    pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false,
+    streamProtocol: 'acp-events',
+    peerDelivery: 'stash-only',
+    frameFile: true,
+  },
 };
 
 const NO_CAPS = Object.freeze({ pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, streamProtocol: null, peerDelivery: 'stash-only' });

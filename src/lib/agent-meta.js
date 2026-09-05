@@ -69,6 +69,28 @@ export const BACKEND_META = {
     settingsPrefix: 'codex',
     permissionModes: ['default', 'read-only', 'safe-yolo', 'yolo'],
   },
+  // OpenCode over ACP v1 (S8, design-harness-plugins §2.3). No accounts
+  // roster (the agent holds its own provider login), no effort/fork/review
+  // chrome; the model list comes from the AGENT's session config options
+  // (modelsFromAgent) — the offline fallback is deliberately empty because a
+  // guessed model id would be rejected by the agent anyway. "Permission
+  // modes" = the agent's session modes (build/plan on opencode).
+  opencode: {
+    id: 'opencode',
+    label: 'OpenCode',
+    shortLabel: 'OPENCODE',
+    badgeClass: 'badge-backend-opencode',
+    color: 'var(--green)',
+    icon: '>',
+    iconSrc: '/brand/opencode.svg',
+    iconClass: 'backend-icon-opencode',
+    brandColor: '#4ade80',
+    fallbackModels: [],
+    modelsFromAgent: true,
+    caps: { fork: false, effort: false, review: false, outputStyle: false, autoResume: false, accounts: false },
+    settingsPrefix: 'opencode',
+    permissionModes: ['build', 'plan'],
+  },
 };
 
 /** Settings key family for a backend (S7): `<prefix>.defaultModel` etc. An

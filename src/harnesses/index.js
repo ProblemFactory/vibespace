@@ -43,7 +43,9 @@ function validate(h, { full = true } = {}) {
 
 const REGISTRY = new Map();
 const BUILTIN = new Set();
-for (const h of [require('./claude'), require('./codex'), require('./shell')]) {
+// opencode = the first ACP v1 harness (S8): acpHarness({...}) in ./opencode.js —
+// the generic wrapper/adapter/normalizer are shared by every ACP agent.
+for (const h of [require('./claude'), require('./codex'), require('./shell'), require('./opencode')]) {
   REGISTRY.set(validate(h).id, h);
   BUILTIN.add(h.id);
 }

@@ -2841,4 +2841,9 @@ export default {
   "Enable": "启用",
   "Plugin disabled": "插件已禁用",
   "Plugin enabled": "插件已启用",
+  "OpenCode": "OpenCode",
+  "Build": "构建",
+  "A model id the agent offers (provider/model, e.g. opencode/big-pickle) — the list fills from the agent once a session has started; empty keeps the agent default.": "agent 提供的模型 id（provider/model，如 opencode/big-pickle）——列表在第一个会话启动后由 agent 填充；留空则使用 agent 默认值。",
+  "Default OpenCode session mode for new sessions: build executes tools per its permission rules, plan disallows edits.": "新 OpenCode 会话的默认模式：build 按其权限规则执行工具，plan 禁止编辑。",
+  "Extra OpenCode CLI args appended when starting an OpenCode session.": "启动 OpenCode 会话时追加的额外 CLI 参数。",
 };

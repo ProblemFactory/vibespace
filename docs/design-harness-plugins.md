@@ -103,7 +103,7 @@ module.exports = {
 | S5 | session-stdout 管线 → descriptor.stream.parse；daemon 共用 | test-session-brain-dark 每 harness |
 | S6 ✅2.369.22 | 上下文注入策略对象（hooks/wrapper/acp）；agent-tool-generators 的 harness→hook 文件映射进描述符 | test-agent-hooks |
 | S7 ✅2.369.23 (pins 2.369.26) | 客户端：META caps 补齐（effortSource/modelLock/settingsPrefix/accounts/usageBucketType/permissionModes/placeholders/workflows/terminalIdle），消灭 ~165 处 id 比较；test-architecture 断言 src/lib 里零 `=== 'claude'|'codex'` | test-architecture 新断言 + test-client-boot |
-| S8 | ACP harness（Gemini CLI 首发）作为第三 harness 的证明；acp-wrapper + normalizer + store facts | test-acp-harness（真子进程：initialize → prompt → tool_call → permission → cancel） |
+| S8 ✅2.369.29 (generic ACP v1 harness + OpenCode; 剩: stopped会话发现/远程spawn) | ACP harness（Gemini CLI 首发）作为第三 harness 的证明；acp-wrapper + normalizer + store facts | test-acp-harness（真子进程：initialize → prompt → tool_call → permission → cancel） |
 | S9 | OpenCode serve-mode adapter | test-opencode-harness |
 
 **跟踪：S1–S7 → B-6967（已有，改为本表）；S8 → B-acp-gemini（新）；S9 → B-opencode（新）；B-7dbc（第三方模型/多账号全 harness 生效）随 S2/S4 交付。**

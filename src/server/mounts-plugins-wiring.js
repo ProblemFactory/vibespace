@@ -534,6 +534,16 @@ const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
 // Session discovery functions imported from ./src/session-store.js
 // Helper to create SessionMessages with correct context
 function createSessionMessages(session, sessionId) {
+  // Descriptor-declared readers first (S8: every ACP harness ships
+  // store.SessionMessages — the wrapper journal is its whole history);
+  // claude/codex keep their historical classes below unchanged.
+  const be = session?.backend;
+  if (be && be !== 'claude' && be !== 'codex') {
+    try {
+      const h = require('../harnesses').get(be);
+      if (h?.store?.SessionMessages) return new h.store.SessionMessages(session, sessionId, { buffersDir: BUFFERS_DIR });
+    } catch (e) { console.error(`[session-messages] ${e.message}`); }
+  }
   return session?.backend === 'codex'
     ? new CodexSessionMessages(session, sessionId, { buffersDir: BUFFERS_DIR })
     : new SessionMessages(session, sessionId, { buffersDir: BUFFERS_DIR, permissionModes: PERMISSION_MODES });

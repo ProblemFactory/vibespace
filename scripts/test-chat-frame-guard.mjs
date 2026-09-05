@@ -288,7 +288,7 @@ setInterval(() => {}, 1e3);
   ok(/if \(!msg \|\| typeof msg !== 'object'\) \{ rejectStdinLine\(line\); continue; \}/.test(cw) && !/const msg = safeJsonParse\(line\);\n\s*if \(!msg\) continue;/.test(cw), 'NEGATIVE: an unparseable stdin line is no longer a silent continue');
   // the ack has a consumer on BOTH server stdout branches (claude + codex-events)
   const ss = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
-  ok((ss.match(/if \(msg\.type === '_stdin_ack'\) \{ session\._stdinAckReceived = true; continue; \}/g) || []).length === 2, 'session-stdout consumes _stdin_ack on both the claude and the codex-events branch');
+  ok((ss.match(/if \(msg\.type === '_stdin_ack'\) \{ session\._stdinAckReceived = true; continue; \}/g) || []).length === 3, 'session-stdout consumes _stdin_ack on the claude, codex-events and acp-events branches');
   ok(ss.indexOf("streamProto === 'codex-events'") < ss.indexOf("if (msg.type === '_stdin_ack')"), 'the codex-events branch consumer comes first in file order (the wrapper ack is not a dead emit)');
   fs.rmSync(bufs, { recursive: true, force: true }); fs.rmSync(metaDir, { recursive: true, force: true });
 }

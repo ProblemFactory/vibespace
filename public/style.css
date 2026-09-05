@@ -237,6 +237,9 @@ html, body {
 .backend-icon-codex {
   --backend-icon-color: #000000;
 }
+.backend-icon-opencode {
+  --backend-icon-color: #4ade80;
+}
 .backend-icon-generic {
   color: var(--text-dim);
 }
@@ -481,6 +484,7 @@ html, body {
 .badge-stopped { background: rgba(148,163,184,0.15); color: var(--text-dim); }
 .badge-backend-claude { background: color-mix(in srgb, var(--accent, #6366f1) 18%, transparent); color: var(--accent-hover); }
 .badge-backend-codex { background: color-mix(in srgb, var(--blue, #61afef) 18%, transparent); color: var(--blue); }
+.badge-backend-opencode { background: color-mix(in srgb, var(--green, #3fb950) 18%, transparent); color: var(--green); }
 .badge-backend-generic { background: rgba(148,163,184,0.15); color: var(--text-dim); }
 .badge-agent-kind { background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); color: var(--yellow); letter-spacing: 0.35px; padding: 1px 4px; }
 .badge-agent-role { background: color-mix(in srgb, var(--green, #3fb950) 14%, transparent); color: var(--green); letter-spacing: 0.35px; padding: 1px 4px; }

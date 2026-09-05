@@ -30,7 +30,7 @@ ok(createMessageManager('claude', 'x') && (() => { try { createMessageManager('g
 
 const BASE_METHODS = ['formatChatInput', 'formatInterrupt', 'formatPermissionResponse', 'formatSetPermissionMode', 'formatSetModel', 'formatSetEffort', 'postInterrupt'];
 const NORM_METHODS = ['onOp', 'processLive', 'convertHistory', 'convertHistoryAsync', 'tail', 'slice', 'turnMap'];
-const registry = createAdapterRegistry({ claudeCmd: 'claude', codexCmd: 'codex', codexSandboxSupported: true, chatWrapper: '/w/chat', codexChatWrapper: '/w/codex', ptyWrapper: '/w/pty', buffersDir: '/b' });
+const registry = createAdapterRegistry({ claudeCmd: 'claude', codexCmd: 'codex', codexSandboxSupported: true, chatWrapper: '/w/chat', codexChatWrapper: '/w/codex', acpWrapper: '/w/acp', acpCommands: { opencode: '/usr/bin/opencode' }, ptyWrapper: '/w/pty', buffersDir: '/b' });
 
 for (const id of harnessIds()) {
   const h = HARNESSES[id];
@@ -60,10 +60,10 @@ for (const id of harnessIds()) {
   }
   const meta = BACKEND_META[id];
   ok(meta && meta.id === id && meta.label && meta.badgeClass, `${id}: client BACKEND_META row exists`);
-  if (h.kind === 'chat') ok(Array.isArray(meta.fallbackModels) && meta.fallbackModels.length > 0 && meta.caps, `${id}: client META carries fallbackModels + feature caps`);
+  if (h.kind === 'chat') ok(Array.isArray(meta.fallbackModels) && (meta.fallbackModels.length > 0 || meta.modelsFromAgent === true) && meta.caps, `${id}: client META carries fallbackModels (or modelsFromAgent) + feature caps`);
 }
 ok(Object.keys(BACKEND_META).every((id) => HARNESSES[id]), 'every client META row has a server harness (no client-only backend)');
-ok(chatHarnessIds().join(',') === 'claude,codex', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
+ok(chatHarnessIds().join(',') === 'claude,codex,opencode', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
 ok(BACKEND_META.codex.fallbackModels[0] === 'gpt-6-astra', 'codex fallback model list leads with gpt-6-astra (0.153.4 catalog default)');
 // S7 pins: client settings-prefix / account-surface collapses are gone
 const libSrc = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')).join('\n');
@@ -73,6 +73,7 @@ for (const id of chatHarnessIds()) ok(BACKEND_META[id].settingsPrefix === HARNES
 // S2 pins: credential mechanics live on the descriptor; accounts.js reads them
 for (const id of chatHarnessIds()) {
   const c = HARNESSES[id].creds;
+  if (!c) { ok(BACKEND_META[id].caps?.accounts === false && HARNESSES[id].caps.pool === false, `${id}: no credential mechanics ⇒ client META caps.accounts false + no pool (the agent holds its own login)`); continue; }
   ok(c && typeof c.subsDirName === 'string' && typeof c.authFile === 'string' && typeof c.spawnEnvVar === 'string' && typeof c.loginLabel === 'string' && typeof c.defaultIdField === 'string' && typeof c.keychainSensitive === 'boolean' && typeof c.parseAuth === 'function', `${id}: creds descriptor complete (${c?.subsDirName}, ${c?.spawnEnvVar})`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-creds-'));
   ok(c.parseAuth(tmp).loggedIn === false, `${id}: parseAuth on an empty dir = not logged in (never throws)`);
@@ -84,6 +85,7 @@ const acc = fs.readFileSync(path.join(REPO, 'src/accounts.js'), 'utf8');
 // S2 remainder (2.369.27): ship files / seeders / remote-creds shape / host-facts key / swap bump ride the descriptor too
 for (const id of chatHarnessIds()) {
   const c = HARNESSES[id].creds;
+  if (!c) continue;
   ok(Array.isArray(c.files) && c.files.includes(c.authFile) && typeof c.hostFactsKey === 'string' && typeof c.longLivedToken === 'boolean' && typeof c.supportsApiKeys === 'boolean' && typeof c.seedDir === 'function' && c.probe && typeof c.probe.file === 'string' && typeof c.probe.marker === 'string' && ('bumpFile' in c) && typeof c.remoteSymlinks === 'object' && Array.isArray(c.ensureTargets), `${id}: creds remainder complete (files ${c.files?.join('+')}, hostFactsKey ${c.hostFactsKey}, bumpFile ${c.bumpFile})`);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-seed-'));
   const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(tmp, 'shared'); // keep the codex seeder off the real ~/.codex

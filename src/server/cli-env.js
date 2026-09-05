@@ -104,15 +104,31 @@ function probeCodexSandbox(registry) {
     if (!ok) console.log(`[codex] sandbox probe failed (${err.code || err.message}); default/safe-yolo sessions will run unsandboxed.`);
   });
 }
+// ACP harnesses (S8): each descriptor names its executable; resolve it ONCE
+// here (null = not installed → the New Session dialog hides the backend and a
+// create fails loudly). Env override per harness: <ID>_CMD (OPENCODE_CMD).
+const { list: listHarnesses } = require('../harnesses');
+const ACP_COMMANDS = {};
+for (const h of listHarnesses()) {
+  if (!h.acp) continue;
+  const raw = process.env[h.id.toUpperCase().replace(/-/g, '_') + '_CMD'] || h.acp.command;
+  ACP_COMMANDS[h.id] = raw.startsWith('/') ? raw : (resolveCmd(raw) || null);
+}
 const adapterRegistry = createAdapterRegistry({
   claudeCmd: CLAUDE_CMD,
   codexCmd: CODEX_CMD,
   codexSandboxSupported: CODEX_SANDBOX_SUPPORTED,
   chatWrapper: path.join(rootDir, 'data', 'bin', 'chat-wrapper.js'),
   codexChatWrapper: path.join(rootDir, 'data', 'bin', 'codex-chat-wrapper.js'),
+  acpWrapper: path.join(rootDir, 'data', 'bin', 'acp-wrapper.js'),
+  acpCommands: ACP_COMMANDS,
   ptyWrapper: path.join(rootDir, 'data', 'bin', 'pty-wrapper.js'),
   buffersDir: path.join(rootDir, 'data', 'session-buffers'),
 });
+/** Installed-state per harness for the client (New Session backend picker). */
+function harnessAvailability() {
+  return listHarnesses().map((h) => ({ id: h.id, label: h.label, kind: h.kind, installed: h.acp ? !!ACP_COMMANDS[h.id] : true }));
+}
 
 probeCodexSandbox(adapterRegistry);
 
@@ -187,6 +203,16 @@ const AVAILABLE_MODELS = {
   claude: [...CLAUDE_MODEL_ALIASES, ...CLAUDE_KNOWN_MODELS],
   codex: [{ id: '', label: 'Default' }],
 };
+for (const id of Object.keys(ACP_COMMANDS)) AVAILABLE_MODELS[id] = [{ id: '', label: 'Default' }];
+// ACP harnesses learn their model list from the AGENT (session config
+// options at session/new) — the stdout consumer feeds it here so the
+// dropdowns/settings offer what the agent actually serves (union, in-memory).
+function noteHarnessModels(backend, models) {
+  if (!backend || !Array.isArray(models) || !models.length || !(backend in ACP_COMMANDS)) return;
+  const cur = new Map((AVAILABLE_MODELS[backend] || []).filter((m) => m && m.id).map((m) => [m.id, m]));
+  for (const m of models) if (m && m.id) cur.set(String(m.id), { id: String(m.id), label: m.label || String(m.id) });
+  AVAILABLE_MODELS[backend] = [{ id: '', label: 'Default' }, ...cur.values()];
+}
 function refreshAvailableModels() {
   // /v1/models accepts both auth schemes now (OAuth needs Bearer + the oauth
   // beta header — it used to 401, fixed server-side ~2026-06). The old
@@ -244,6 +270,6 @@ function refreshAvailableModels() {
     CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
     CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
     EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
-    noteModelSeen, refreshAvailableModels };
+    noteModelSeen, refreshAvailableModels, ACP_COMMANDS, harnessAvailability, noteHarnessModels };
 }
 module.exports = { create };

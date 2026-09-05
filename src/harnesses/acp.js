@@ -1,0 +1,68 @@
+'use strict';
+// ACP HARNESS DESCRIPTOR FACTORY (S8 of docs/design-harness-plugins.md §2.3).
+// One call = one harness descriptor for any Agent Client Protocol v1 agent:
+//   acpHarness({ id, label, command, args, env, store, brand, terminal })
+// The wrapper (data/bin/acp-wrapper.js), adapter (adapters/acp.js) and
+// normalizer (acp-message-manager.js) are SHARED by every ACP harness; the
+// per-agent facts are the executable, its ACP args, optional env, where its
+// transcripts live (for the store contract) and the brand mark. Capabilities
+// beyond the static caps row (fork/list/load/image…) are read from the
+// agent's `initialize` reply at spawn time by the wrapper — capability-driven,
+// never hardcoded per agent.
+const { BACKEND_CAPS } = require('../backend-caps');
+const { AcpAdapter } = require('../adapters/acp');
+const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
+const { NULL_QUOTA } = require('./null-quota');
+
+const ACP_DEFAULT_CAPS = Object.freeze({
+  pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
+  fork: false, streamProtocol: 'acp-events', peerDelivery: 'stash-only', frameFile: true,
+});
+
+function acpHarness({ id, label, command, args = ['acp'], env = {}, store = {}, brand = null, terminal = {}, caps = null } = {}) {
+  if (typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id)) throw new Error(`acpHarness: id must be a lowercase slug (got ${JSON.stringify(id)})`);
+  if (typeof command !== 'string' || !command) throw new Error(`acpHarness('${id}'): command (the agent executable name) is required`);
+  const capsRow = caps || BACKEND_CAPS[id] || ACP_DEFAULT_CAPS;
+  if (capsRow.streamProtocol !== 'acp-events') throw new Error(`acpHarness('${id}'): caps.streamProtocol must be 'acp-events' (got ${capsRow.streamProtocol})`);
+  return {
+    id,
+    label: label || id,
+    kind: 'chat',
+    caps: capsRow,
+    Adapter: AcpAdapter,
+    // cli-env resolves each ACP harness's executable ONCE (acpCommands[id] =
+    // absolute path or null when not installed) and hands the shared wrapper
+    // paths; everything else is this descriptor's own declaration.
+    adapterConfig: (cfg) => ({
+      harnessId: id,
+      label: label || id,
+      commandName: command,
+      command: (cfg.acpCommands && cfg.acpCommands[id]) || null,
+      acpArgs: args,
+      env,
+      chatWrapper: cfg.acpWrapper,
+      ptyWrapper: cfg.ptyWrapper,
+      terminalArgs: terminal.args || [],
+      terminalResumeFlag: terminal.resumeFlag || null,
+      terminalModelFlag: terminal.modelFlag || null,
+    }),
+    wrapper: 'data/bin/acp-wrapper.js',
+    Normalizer: AcpMessageManager,
+    store: {
+      locateTranscript: typeof store.locate === 'function' ? store.locate : () => null, // ACP exposes no transcript read API; the wrapper journal is the history
+      transcriptDirs: Array.isArray(store.transcriptDirs) ? store.transcriptDirs : [],
+      conversationIdField: 'backendSessionId',
+      SessionMessages: AcpSessionMessages,
+    },
+    quota: NULL_QUOTA,            // no quota concept over ACP (usage_update is context size, not a subscription window)
+    creds: null,                  // the agent holds its own login; VibeSpace never manages ACP credentials
+    settingsPrefix: id,
+    // CONTEXT INJECTION (S6 kind 'acp'): the wrapper prefixes each prompt with
+    // the /api/agent/prompt-context text (no hooks exist in a generic agent;
+    // SessionStart is never honoured because it is never run).
+    inject: { kind: 'acp', hookFile: null, hookEvents: [], sessionStartHonoured: false },
+    acp: { command, args, env, brand: brand || null },
+  };
+}
+
+module.exports = { acpHarness, ACP_DEFAULT_CAPS };

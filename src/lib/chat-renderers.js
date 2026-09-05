@@ -822,6 +822,21 @@ class ChatRenderers {
       const label = msg.permission.resolved === 'denied' ? t('Denied') : t('Allowed');
       const cls = msg.permission.resolved === 'denied' ? 'chat-permission-denied' : 'chat-permission-allowed';
       section.innerHTML = `<details class="chat-diff"><summary class="chat-diff-summary"><span class="chat-permission-resolved ${cls}">${icon} ${label}</span></summary></details>`;
+    } else if (Array.isArray(msg.permission.options) && msg.permission.options.length) {
+      // Harness-neutral ORDERED options (ACP request_permission: the agent
+      // names them; kinds allow_once/allow_always/reject_once/reject_always
+      // pick the button style). The reply carries the chosen optionId.
+      const cls = (k) => /^allow_always/.test(k || '') ? 'chat-perm-always' : /^allow/.test(k || '') ? 'chat-perm-allow' : 'chat-perm-deny';
+      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: escHtml(msg.permission.toolName) })}</span><div class="chat-permission-actions">${msg.permission.options.map((o) => `<button class="chat-perm-btn ${cls(o.kind)}" data-option-id="${escHtml(String(o.optionId))}">${escHtml(o.name || String(o.optionId))}</button>`).join('')}</div></div>`;
+      for (const btn of section.querySelectorAll('.chat-perm-btn')) btn.addEventListener('click', () => {
+        const o = msg.permission.options.find((x) => String(x.optionId) === btn.dataset.optionId) || null;
+        const approved = !!o && /^allow/.test(o.kind || '');
+        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved, optionId: o?.optionId || null, toolInput: msg.permission.input, permissionUpdates: approved && /always/.test(o.kind || '') ? [{ kind: o.kind }] : undefined });
+        msg.permission.resolved = approved ? 'allowed' : 'denied';
+        msg.permission.selectedOptionId = o?.optionId || null;
+        this.renderPermissionOverlay(el, msg);
+        if (approved) this._onPermissionResolve('allowed');
+      });
     } else {
       section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: escHtml(msg.permission.toolName) })}</span><div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${t('Allow')}</button>${msg.permission.suggestions?.length ? `<button class="chat-perm-btn chat-perm-always">${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
       section.querySelector('.chat-perm-allow')?.addEventListener('click', () => {

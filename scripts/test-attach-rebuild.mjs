@@ -172,7 +172,7 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   const directCards = (serverSide.match(/_normalizer\??\.injectPeerCard\??\(/g) || []).length;
   ok(direct === 0, `every live-feed site across server.js + src/server + ws-handler goes through feedLive (direct _normalizer.processLive calls: ${direct})`);
   ok(directCards === 0, `every peer-card writer (Background Work notify, vibespace-msg, auto-resume notice) goes through feedPeerCard (direct injectPeerCard calls: ${directCards})`);
-  ok((wsh.match(/feedLive\(session, /g) || []).length === 2 && (so.match(/feedLive\(session, /g) || []).length === 2, 'the four known live sites (chat-input echo, permission payload, stdout parse ×2) are all gated');
+  ok((wsh.match(/feedLive\(session, /g) || []).length === 2 && (so.match(/feedLive\(session, /g) || []).length === 4, 'the six known live sites (chat-input echo, permission payload, stdout parse ×4: codex / acp non-acp frames / acp records / claude) are all gated');
   ok(/type: 'killed', sessionId: requestedKillId, resolvedId: data\.sessionId, ok: true/.test(wsh) && /type: 'killed', sessionId: requestedKillId, resolvedId: data\.sessionId, ok: false, reason: 'not-found'/.test(wsh), "kill replies 'killed' to the REQUESTER in both outcomes, carrying the id the client ASKED for (the 2.179.0 remap must not orphan the request)");
   ok(/const requestedKillId = data\.sessionId;[\s\S]{0,400}data\.sessionId = eid; break;/.test(wsh), 'the requested id is captured BEFORE the stale-id remap');
   ok(/activeSessions\.get\(data\.sessionId\) !== session\) \{[\s\S]{0,200}code: 'ended-during-attach'/.test(wsh), 'attach re-checks liveness after the rebuild — a session killed meanwhile gets an error, never a live-looking attached');
