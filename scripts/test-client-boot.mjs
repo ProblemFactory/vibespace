@@ -90,14 +90,17 @@ async function bootProbe(cacheBust) {
   pageErrors.length = 0;
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/${cacheBust ? '?cb=' + cacheBust : ''}` });
   let ready = false;
-  for (let i = 0; i < 50; i++) {
+  // budget ~60s: the gate runs this right after a real chat turn on a box that
+  // also hosts live agent sessions — a slow boot is not a broken boot (two
+  // gate-only reds at 24s in 2.369.30/.33 while standalone passed in <10s)
+  for (let i = 0; i < 180; i++) {
     ready = await evaljs(`(async () => { if (!window.app || !window.app.ready) return false; await Promise.race([window.app.ready, new Promise(r => setTimeout(r, 100))]); return !!document.querySelector('.sidebar'); })()`).catch(() => false);
     if (ready) break;
     await sleep(300);
   }
   // the splash fades AFTER app.ready (opacity→0, removed 300ms later) — poll
   let splashGone = false;
-  for (let i = 0; i < 10 && !splashGone; i++) {
+  for (let i = 0; i < 40 && !splashGone; i++) {
     splashGone = await evaljs(`(() => { const s = document.getElementById('loading-screen'); return !s || s.style.opacity === '0'; })()`).catch(() => false);
     if (!splashGone) await sleep(300);
   }
