@@ -571,6 +571,7 @@ function deriveCodexSessionName(text) {
     '<apps_instructions>',
     '<skills_instructions>',
     '<plugins_instructions>',
+    '<recommended_plugins>', // 0.153.x injects an uninstalled-plugins roster as the FIRST user message — it became the session name (2.369.18 e2e)
     '### available skills',
     '### available plugins',
   ];
@@ -594,8 +595,8 @@ function deriveCodexSessionName(text) {
     || line.startsWith('# AGENTS.md instructions')
     || line.startsWith('<system>')
     || instructionMarkers.has(line)
-    || /^<(environment_context|permissions instructions|apps_instructions|skills_instructions|plugins_instructions|collaboration_mode)/.test(line)
-    || /^<\/(environment_context|permissions instructions|apps_instructions|skills_instructions|plugins_instructions|collaboration_mode)/.test(line)
+    || /^<(environment_context|permissions instructions|apps_instructions|skills_instructions|plugins_instructions|recommended_plugins|collaboration_mode)/.test(line)
+    || /^<\/(environment_context|permissions instructions|apps_instructions|skills_instructions|plugins_instructions|recommended_plugins|collaboration_mode)/.test(line)
     || /^## (JavaScript REPL|Skills|Plugins)\b/.test(line)
     || /^<\/?[A-Z_]+>$/.test(line)
   );
