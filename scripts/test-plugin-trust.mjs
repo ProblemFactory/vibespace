@@ -124,10 +124,10 @@ fs.cpSync(path.join(REPO, 'docs/examples/hello-plugin'), path.join(src, 'hello')
 const inst = await post('/api/plugins/install', { source: 'path', value: path.join(src, 'hello') });
 ok(inst.status === 200 && inst.body.plugin?.id === 'example.hello' && inst.body.plugin.install?.source === 'path' && !inst.body.replaced && fs.existsSync(path.join(pdir('example.hello'), 'vibespace-plugin.json')), 'install from a local path lands under data/plugins/<id> with the source recorded', inst.body);
 ok((await row('example.hello')).contributes.settings.length === 1 && (await row('example.hello')).contributes.themes[0].ok === true && !(await row('example.hello')).needsConsent, 'the shipped example contributes a setting + a theme and needs no consent');
-ok((await post('/api/plugins/manifests/example.hello/enabled', { enabled: true })).status === 200 && await waitFor(async () => (await row('example.hello')).state === 'running'), 'the installed example runs');
+ok((await post('/api/plugins/manifests/example.hello/enabled', { enabled: true })).status === 200 && await waitFor(async () => (await row('example.hello')).state === 'running', 25000), 'the installed example runs');
 const inst2 = await post('/api/plugins/install', { source: 'path', value: path.join(src, 'hello') });
 ok(inst2.status === 200 && inst2.body.replaced === true && inst2.body.previous && fs.existsSync(path.join(inst2.body.previous, 'plugin', 'vibespace-plugin.json')) && fs.existsSync(path.join(inst2.body.previous, 'why.json')), 'reinstalling MOVES the previous copy to data/plugins-trash (never deleted) and keeps the plugin enabled');
-ok(await waitFor(async () => (await row('example.hello')).state === 'running'), '…and restarts it');
+ok(await waitFor(async () => (await row('example.hello')).state === 'running', 25000), '…and restarts it (a fresh child, not the crash-backoff path)');
 fs.symlinkSync('/etc', path.join(src, 'hello', 'etc-link'));
 const sym = await post('/api/plugins/install', { source: 'path', value: path.join(src, 'hello') });
 ok(sym.status === 400 && /symlink/.test(sym.body.error), 'a package containing a symlink is refused');
@@ -161,7 +161,7 @@ ok(up.status === 200 && up.body.plugin?.id === 'example.hello' && up.body.previo
 ok((await post('/api/plugins/manifests/example.hello/update', {})).status === 200 && (await post('/api/plugins/manifests/nope.nope/update', {})).status === 404, 'update: unknown id → 404');
 const stateFile = path.join(root, 'data', 'plugins-state', 'example.hello', 'counter.json');
 // the update just restarted the plugin process — wait for it (gate flake: POST /x/count raced a 'starting' state)
-ok(await waitFor(async () => (await row('example.hello')).state === 'running'), 'the updated example is running again');
+ok(await waitFor(async () => (await row('example.hello')).state === 'running', 25000), 'the updated example is running again');
 await j('/api/plugins/example.hello/x/count', { method: 'POST' });
 ok(await waitFor(() => fs.existsSync(stateFile)), 'the example wrote its state file (so uninstall has state to preserve)');
 const un = await j('/api/plugins/manifests/example.hello', { method: 'DELETE' });

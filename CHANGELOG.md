@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.369.37
+- Plugin loader: `stopChild` detaches the exiting process immediately, so the `startChild` that install/update issue right after it spawns a fresh child instead of waiting for the old one's exit handler + crash backoff (CI-caught: the reinstall/update assertions timed out on the runner while passing locally).
+
 ## 2.369.36
 inc-mtox23xw ("content jumped after I sent a message"; the two DreamVanLife windows stuck at open/loading) — two faults, both fixed:
 - **Server event loop blocked 10–59 s by the usage estimator.** Ground truth: `Debugger.pause` through the inspector caught the main thread three times inside `usageHistory._events` ← `costBetweenMulti` ← `extractPairs`/`learnRates` ← `ratesFor`, reached from `/api/usage` and from the pool engine's `sweepUsageAnchors` timer; strace showed ~90 `openat`/s (a readdir + stat per ledger shard per call) and no idle during the "loop gaps"; the CPU profiler's `(idle)` attribution had hidden it. `learnRates` costs EVERY historical anchor pair on every recompute (thousands of pairs, recomputed on every new anchor) and each cost was a full scan of the whole permanent ledger. Fix: the ledger keeps a lazily rebuilt time-sorted view and `_events(from,to)` binary-searches it (O(log n + k)); `_loadEvents` re-checks the shard directory at most once per second (its own appends reset the throttle); `costBetweenMulti` memoizes per interval, keyed by the count of events at or before `to` so a late backfill into an interval still recomputes it. Gate: scripts/test-usage-ledger-perf.mjs (brute-force parity over an unsorted 60k-event ledger, 2000 pair costs cold <1.5 s / warm <60 ms, memo invalidation, readdir throttle).

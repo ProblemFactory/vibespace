@@ -208,12 +208,19 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
     if (rec._restartTimer) { clearTimeout(rec._restartTimer); rec._restartTimer = null; }
     const child = rec.child;
     if (!child) { rec.state = 'stopped'; return; }
+    // DETACH FIRST (2.369.37, CI-caught): while the old process was still
+    // exiting, rec.child stayed set, so the startChild that install()/update()
+    // issue right after this returned early and the plugin only came back
+    // through the OLD child's exit handler + crash-backoff — fast on a laptop,
+    // >10s on the CI runner. The exit handler ignores a child that is no
+    // longer rec.child, so nulling it here is exactly the intentional-stop mark.
+    rec.child = null; rec.state = 'stopped';
     rec._stopping = true;
     try { child.send({ t: 'shutdown' }); } catch { }
     const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { } }, 3000);
     killer.unref?.();
     try { child.kill('SIGTERM'); } catch { }
-    child.once('exit', () => clearTimeout(killer));
+    child.once('exit', () => { clearTimeout(killer); rec._stopping = false; });
   }
   function onChildMessage(rec, m) {
     if (!m || typeof m !== 'object') return;
