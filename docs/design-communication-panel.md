@@ -72,8 +72,8 @@ feature spans four rows, so the mapping is spelled out once:
 | Reach ACL (three-state, requests) | **PURE** | `src/channel-acl.js` (imports `src/msg-acl.js` — PURE may import PURE) | `test-channel-acl` (fast) |
 | Outbound policy + guardrails + outbox state machine | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | Normalized message record + its renderers' data | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
-| Conversation store (index, per-conversation logs, cursors, retention) | **SHARED** (fs+path only) | `src/channel-store.js` | `test-channel-store` (fast) |
-| OAuth loopback consent flow | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
+| Conversation store *primitives* (durable load/append/tail/trim/flush; the **engine** owns the live index, §5.1) | **SHARED** (fs+path only) | `src/channel-store.js` | `test-channel-store` (fast) |
+| OAuth loopback consent flow (**dual-mode**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
 | Adapter interface + registry | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract` (fast, fake adapter) |
 | Lark / Gmail / Agents adapters | **ORCH** | `src/channels/lark.js`, `gmail.js`, `agents.js` | contract suite + `test-channels-lark-shape` (fast, recorded fixtures) |
 | Ingest engine (poll scheduler, backoff, per-tick budget, failure surfacing) | **ORCH** | `src/server/channels-engine.js` (`create(deps)` factory) | `test-channels-engine` (heavy) |
@@ -82,7 +82,7 @@ feature spans four rows, so the mapping is spelled out once:
 | Panel, window, filter editor, approval cards | **CLIENT** | `src/lib/channels-panel.js`, `src/lib/channel-window.js`, `src/lib/channel-filter-editor.js` | `test-channels-e2e` (heavy, headless chrome) |
 | Agent CLI | tracked static | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
-Two placements are load-bearing enough to state as rules:
+Three placements are load-bearing enough to state as rules:
 
 - **An adapter never touches the store, the ACL, the policy or the spend
   guard.** It returns typed records and takes a send request. Everything it can
@@ -93,6 +93,10 @@ Two placements are load-bearing enough to state as rules:
 - **The engine is ORCH and lives in exactly one `create(deps)` factory** under
   `src/server/`, like every subsystem since the 2.325 拆分. `server.js` gains a
   wiring stanza and nothing else.
+- **The engine is also the single owner of the live index** (§5.1). The store
+  module offers durable primitives and deliberately offers nobody a
+  "write the whole index" call, because two adapter poll loops overlap by design
+  and a read-modify-write around an atomic write is not atomic.
 
 ### 2.1 Mechanical registration checklist (each omission costs a round)
 
@@ -123,11 +127,28 @@ and each has an obvious way this feature would break it.
 1. **§ban-safety is untouched.** Nothing here calls Anthropic.
    `scripts/test-vendor-whitelist.mjs` is Anthropic-scoped, so Lark and Gmail
    HTTP does not trip it — which is exactly why this feature ships **its own
-   egress census**: `test-channels-egress` asserts that every outbound request
-   constructed under `src/channels/` targets a host pattern declared in that
-   adapter's record, and that no other file in the tree constructs one. A third
-   vendor host cannot arrive without a decision. Same mechanic, different vendor
-   set.
+   egress census**, `test-channels-egress`. It is written in that suite's own
+   shape — an allowlist with reasons — and *not* as an absolute prohibition:
+
+   > Every outbound request constructed anywhere in the tree targets either a
+   > host pattern **declared by the adapter that constructs it** (files under
+   > `src/channels/`), or an entry in a `(file, host pattern)` **allowlist with
+   > a stated reason**. A dead allowlist entry fails the suite too.
+
+   The absolute form — "and no other file in the tree constructs one" — would be
+   **red on its first commit**. `src/gmail-sync.js` already builds
+   `oauth2.googleapis.com/token`, the `gmail.readonly` scope URL and
+   `gmail.googleapis.com/gmail/v1/users/me`, which is exactly what
+   `src/channels/gmail.js` will declare, and `src/mounts.js` holds the Microsoft
+   Graph bases for OneDrive. A mandatory gate that fails on a legitimate
+   pre-existing surface is a gate the first person to hit it relaxes — and a
+   relaxed gate protects nothing. The allowlist is therefore **seeded at birth**
+   with those two files and their reasons, exactly as `ALLOW` in
+   `test-vendor-whitelist` is seeded with `src/usage-routes.js` and
+   `src/server/cli-env.js`, including that suite's dead-entry check ("still
+   holds its allowlisted call — moved/renamed ⇒ update the allowlist"). What the
+   census still catches is the thing it exists for: a third vendor host arriving
+   without a decision.
 2. **Every wake is money.** A filter that matches 63 messages/day is 63 billed
    turns/day. The only thing that may open an unattended turn is
    `deliverToConversation`, and it already sits behind
@@ -136,12 +157,22 @@ and each has an obvious way this feature would break it.
    identity derivation (§7.4). Its own per-assignment limits are **pacing**; the
    authorizer is the **money bound** — the distinction the seven-producer audit
    exists to preserve.
-3. **Never block the event loop.** Adapters use `fetch()` with timeouts. There
-   is **no shelling out per message**: at the 1.5 GB RSS these servers run at,
-   `child_process.spawn()` costs ~72 ms of event loop per call (measured
-   2026-09-10, the fork-tax incident). A poll loop that shelled out once per chat
-   per tick would block the loop for seconds per minute. In-process HTTP is not
-   an optimization here, it is the requirement.
+3. **Never block the event loop — and know what "async" costs.** The written
+   law is the one in CLAUDE.md: *no sync fs/exec on a hot path; child processes
+   or workers only, with timeouts*. Bounded **async** children are sanctioned
+   here and used everywhere — ssh-per-op in `RemoteFs`, the `ps`/`lsof` rungs in
+   `src/cli-identity.js`, the discovery sweeps. What this feature may not do is
+   spawn one **per item on a polled path**, because `child_process.spawn()`
+   blocks the calling thread for `fork()`'s page-table copy in proportion to the
+   **parent's RSS**: measured with a small harness that spawns a trivial child at
+   controlled parent RSS, 1.8 ms/spawn at 45 MB, 18.8 ms at 543 MB and
+   **72.5 ms at 1.5 GB** (incident `inc-mtunmv3d-pmd6`, 2026-09-10; the evidence
+   file is instance-local and deliberately not in this public repo). These
+   servers sit at 1.5–2 GB, so even an "async" `execFile` costs the loop
+   ~70–130 ms and a `Promise.all` over N of them is N forks in one tick. A poll
+   loop that shelled out once per chat per tick would therefore stall the loop
+   for seconds per minute. Adapters use in-process `fetch()` with timeouts; that
+   is not an optimization here, it is the requirement.
 4. **Secrets ride env/files, never argv; never logged; encrypted at rest.**
    Adapter tokens live in `data/channels/adapters.json` encrypted under an
    instance-local key, and every route that returns an adapter record goes
@@ -264,9 +295,10 @@ data/channels/
   adapters.json                 atomic JSON. id, kind, label, enabled, inclusion scope,
                                 auth {tokenEnc, expiresAt, scopes}, lastPass {at, ok, code},
                                 consecutiveFailures
-  index.json                    atomic JSON. Per conversation: id, adapterId, vendorId, title,
-                                kind (dm|group|thread), participants summary, lastAt, unread,
-                                tracked, anchor, assignment, filterId, policy, reachEntries[],
+  index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
+                                id, adapterId, vendorId, title, kind (dm|group|thread),
+                                participants summary, lastAt, unread, tracked, anchor,
+                                assignment, filterId, policy, pendingTodoId, reachEntries[],
                                 stats {hits7d, msgs7d}
   msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY message log, one ChannelRecord per line
   outbox.json                   atomic JSON. Proposals + their state machine (§9)
@@ -284,24 +316,81 @@ Invariants, each with its reason:
    per open conversation and rebuilt from the log tail on demand. A replayed page
    (which Lark's anchor semantics guarantee at the boundary, and which a Gmail
    history replay also produces) must be a no-op, never a duplicate.
-3. **The cursor advances only after a complete pass,** and it is written at pass
-   end — a crash mid-pass re-reads, it never skips. `complete: false` from an
-   adapter means "do not advance".
-4. **Retention is per conversation and bounded twice**: last N records or M days,
+3. **One writer, one order.** Every mutable per-conversation fact — `unread`,
+   `lastAt`, `anchor`, `assignment`, `stats`, `pendingTodoId`, the agent-group
+   rotation counter — lives in one index, and **two adapter passes overlap by
+   design** (§6.2 runs one loop *per adapter*, single-flight *per adapter*).
+   `writeJsonAtomic` is atomic at the filesystem layer only; the
+   read-modify-write **around** it is not, so two passes that each read a
+   snapshot and later write it back lose whichever advance landed first. That is
+   the round-4 `codex-zst` delta defect verbatim — *先读后写且尺寸取自读之前 = 等
+   第二个调用者来的丢失更新* — and it is worse here, because a clobbered **anchor**
+   advance makes the next pass *skip* messages rather than re-read them, and a
+   clobbered unread count is a silent wrong number on the badge. §5.1 names the
+   owner that makes the shape unavailable.
+4. **The cursor advances only after a complete pass,** inside the *same*
+   serialized update as the batch it describes — a crash mid-pass re-reads, it
+   never skips. `complete: false` from an adapter means "do not advance". The
+   order inside that update is fixed: records land in the (durable, append-only,
+   per-conversation) log **first**, the anchor moves in the index **second**, the
+   coalesced index flush happens **after** — so a crash anywhere leaves at worst
+   a re-read, which invariant 2's dedup absorbs.
+5. **Retention is per conversation and bounded twice**: last N records or M days,
    whichever is smaller, with a **floor of 7 days** because the estimator is
    defined over the last 7 days. Trimming streams to a temp file and renames —
    never in place.
-5. **`tracked` is opt-in.** An adapter can *see* far more than the panel should
+6. **`tracked` is opt-in.** An adapter can *see* far more than the panel should
    list: one authorized Lark user is routinely a member of dozens of chats
    (measured on a real account: about fifty), and a mailbox is unbounded. Nothing is ingested until the user marks a
    conversation tracked (or it matches an inclusion query, for Gmail). This is a
    privacy decision, a cost decision, and the thing that keeps the panel a panel
    instead of a mail client.
-6. **A derived value never becomes a stored fact.** `unread`, `hits7d` and
+7. **A derived value never becomes a stored fact.** `unread`, `hits7d` and
    `msgs7d` are recomputed from the log and the read marker; they are cached in
    the index for render speed and are always re-derivable. The quota-model
    incidents (a stored `state` outliving the reading it described) are why this
    sentence is here.
+
+### 5.1 Who owns the index
+
+`src/server/channels-engine.js` holds the **authoritative index in memory** and
+is its only writer. `src/channel-store.js` (SHARED) provides durable primitives
+— load, append to a conversation log, read a tail, trim, flush the index
+atomically — and deliberately exposes **no** "write the whole index" call to
+anybody else.
+
+```js
+// the ONE mutation door; nothing else may write index state
+await index.update((ix) => { /* mutate live memory */ });   // serialized, never concurrent
+```
+
+- `update(fn)` mutates live memory, is **serialized** (a promise chain with one
+  call in flight, so an overlapping Lark pass and Gmail pass *queue* instead of
+  racing), and marks the index dirty.
+- The flush is **coalesced**, never per mutation: dirty flag + short debounce +
+  periodic sweep + flush on SIGINT/SIGTERM. This is the shape `JobManager`
+  already uses for `data/jobs.json` (in-memory `Map` is authoritative, mutations
+  call `_save()`, a 2 s interval flushes when dirty, `shutdown()` flushes) and
+  `SessionStatusManager` uses for its store (memory and broadcast immediate,
+  disk debounced 500 ms and content-compared).
+- **A snapshot read is not a lock.** Reading the index to compute something and
+  writing the result back *outside* `update()` is precisely the defect this
+  subsection exists to prevent. Nothing needs to: the ACL, the filter and the
+  policy are PURE and take their inputs as arguments, so a pass computes with
+  values it was handed and applies the result inside one `update()`.
+- **Sharding is not a substitute.** `index/<adapterId>.json` would serialize the
+  common case, but the agent-group rotation counter is keyed by **group** and a
+  group spans adapters, and `unreadTotal` (the rail badge) is cross-adapter — so
+  the serialized door is required anyway. One door is simpler than a door plus
+  two exceptions, and this repo's history says the exceptions are what rot.
+- Message logs are per `(adapterId, convId)` and append-only, so they never
+  contend and stay outside the serialized path. That is the whole reason the
+  hot path (arriving messages) does not pay for the door.
+
+`test-channel-store` drives **two concurrent passes** over one index and asserts
+that both cursors advanced and no unread count was lost; the negative control is
+a patched copy doing read-modify-write around `writeJsonAtomic`, which must lose
+one of them.
 
 ---
 
@@ -340,8 +429,11 @@ One loop per adapter, never a loop per conversation. Each tick:
 - **stops entirely** on `auth-expired` and surfaces it — a loop that keeps
   hammering an expired credential is how an integration gets throttled at the
   vendor;
-- never overlaps itself (single-flight per adapter) and never holds the loop: fs
-  writes are async, every request has a timeout.
+- never overlaps **itself** (single-flight per adapter) and never holds the loop:
+  fs writes are async, every request has a timeout. Single-flight per adapter is
+  *not* mutual exclusion between adapters — passes are concurrent by design — so
+  every index mutation goes through the one serialized door in §5.1, and a pass
+  never carries a stale snapshot across an `await`.
 
 The cost is arithmetic this design owes the reader: fifty tracked Lark chats,
 none hot, 5-minute cadence ⇒ ~10 requests/min. One hot assigned chat ⇒ +2/min. A
@@ -460,11 +552,16 @@ assignment = { principal: { kind:'agent'|'group', id },
 - Assigning to a **group** rotates round-robin over that group's live sessions,
   with the rotation state in the index. A rotation that finds no live session
   falls back to stash-for-next-turn — never to "wake them all".
-- **Assignment implies reach.** Assigning conversation C to agent A writes an
-  explicit ACL grant `visible` for (A, C) rather than creating an implicit
-  special case, so "not visible = does not exist" stays literally true and the
-  AgentReach panel shows exactly what is in effect. The grant is removed with the
-  assignment.
+- **Assignment implies reach — as a grant that says who wrote it.** Assigning
+  conversation C to agent A writes an explicit ACL grant `visible` for (A, C)
+  rather than creating an implicit special case, so "not visible = does not
+  exist" stays literally true and the AgentReach panel shows exactly what is in
+  effect. That grant carries `origin: 'assignment'`, and **un-assigning removes
+  only the `origin:'assignment'` row.** Grants are keyed by (principal, scope),
+  so without `origin` a user who had independently granted A `visible` on C in
+  the AgentReach panel would have that grant silently revoked by an unrelated
+  action — a **narrowing** operation smuggled into a model whose stated law
+  (§8) is widening-only.
 
 ### 7.4 The wake, and who pays for it
 
@@ -526,7 +623,9 @@ else).
 level  : 'hidden' < 'requestable' < 'visible'
 grant  : { principal:{kind:'agent'|'group', id},
            scope:{kind:'conversation'|'adapter', id},
-           level }
+           level,
+           origin: 'user'|'assignment'|'request',   // WHO wrote it (§7.3)
+           at, by }
 effective(principalCtx, scope, grants) -> { level, via:'group'|'agent'|'default', grantId }
 ```
 
@@ -545,6 +644,12 @@ effective(principalCtx, scope, grants) -> { level, via:'group'|'agent'|'default'
   the group default — the artboard's behaviour, verbatim.
 - **`hidden` is total.** Not listed, not searchable, not addressable by id; an id
   supplied out of band answers the same uniform error as a nonexistent one.
+- **`origin` is the only reason machinery ever removes a grant.** `effective()`
+  already MAXes over every applicable grant, so several grants on one
+  (principal, scope) compose correctly and the accessor needs no change; what
+  `origin` buys is that un-assigning deletes the assignment's own row and
+  nothing else, that a request approval is distinguishable from a hand-made
+  grant, and that the panel can say *why* a principal can see something.
 - Every grant change appends to `audit.ndjson` with who / when / why.
 
 ---
@@ -584,12 +689,42 @@ decideOutbound({ channelPolicy, guards, proposal, now, tz })
 
 The same record renders in **two places** — inline in the conversation window's
 timeline (where the context is) and in the Outbox window (where the queue is) —
-from one store, so they cannot disagree. Plus a **pointer item** in the existing
-"For you" inbox so the taskbar badge fires: one item per pending proposal,
-naming the target and the agent, **retracted by this producer** (the
-`setStatus(id, 'done', 'system')` path) the moment the proposal leaves
-`awaiting-approval` by any route. An item that outlives its subject is the
-login-expiry incident, and it is why the pointer carries the proposal id.
+from one store, so they cannot disagree.
+
+Plus a **pointer item** in the existing "For you" inbox, so the taskbar badge
+fires. Its shape is dictated by what `UserTodoManager` *is*, not by what would
+be convenient: `add(sessionKey, {text, detail, urgency, by, sessionName, jobId})`
+is a **closed parameter set** with nowhere to carry a proposal id; it dedups on
+`(sessionKey, text)` **across all statuses**, so re-filing a resolved item
+reopens the *same* id (deliberate — it stops an add→resolve loop spamming
+"new item" toasts); and it **throws** past `MAX_OPEN_PER_SESSION` (20). "One
+item per pending proposal" is therefore not expressible: two proposals whose
+pointer wording matches collapse into one item, approving either retracts the
+badge for both, the second proposal has no pointer at all, and a burst throws.
+
+So the pointer is **one item per conversation**:
+
+- `text` is **count-free** — *"Proposals awaiting approval in ‹conversation›"* —
+  which makes dedup-by-text exactly the idempotence wanted. The **count and the
+  newest body live in `detail`**, which `add()` updates in place on a re-file;
+- the id `add()` returns is stored on the **conversation** record
+  (`pendingTodoId`), because retraction needs *conversation → item* and nothing
+  else persists that link. This is the gap the login-expiry fix closed by
+  persisting `items:[{id,text}]` on the producer's own ledger; re-deriving the
+  item by matching text at retraction time would be a second copy of a string
+  that must never drift;
+- it is **retracted by this producer** (`setStatus(id, 'done', 'system')`) the
+  moment the conversation's last proposal leaves `awaiting-approval` by any
+  route, and only for ids this producer wrote. An item that outlives its subject
+  is the login-expiry incident;
+- `add()` throwing on the open cap is **caught, logged, and degraded** to the
+  rail badge and the Outbox window, which are the surfaces of record. A pointer
+  that could not be filed must not take the proposal down with it.
+
+(The alternative — a `proposalId` field on the todo item, dedup keyed on it when
+present, and `todoItemId` stored on the proposal — is a schema change to a store
+several other producers share, and it buys per-proposal badges nobody asked for.
+It is recorded in decision 7 in case the owner wants exactly that.)
 
 The card carries **why** — the alert / conversation / task that caused it — as a
 structured reference the panel can link, not a sentence the agent wrote. Editing
@@ -656,9 +791,16 @@ precisely the state that must never be read as "not sent".
 
 ### 10.1 Registrations (no new chrome primitives)
 
-- **Rail:** one new item `channels` — an entry in `RAIL_ICONS`, `RAIL_TITLES`,
-  `PANEL_TABS` and the rail's item list in `src/lib/sidebar-rail.js`, plus
-  `_railBadge('channels', unreadTotal)`, which already exists.
+- **Rail:** one new item `channels` in `src/lib/sidebar-rail.js` — and the badge
+  is **not** free, because nothing in that file picks up a new id automatically.
+  **Six registrations**: an entry in `RAIL_ICONS`, one in `RAIL_TITLES`, the id
+  in `PANEL_TABS`, the item in the rail's own item list, a
+  `_railSetBadge('channels', unreadTotal)` branch inside `_railRefreshBadges()`
+  (whose sources are a hardcoded ladder of fetches), and `'channels-updated'`
+  added to the explicit message-type list in `_railWireBadges()`. The helper is
+  `_railSetBadge(id, val)`; **there is no `_railBadge`**. Unlike ports / hosts /
+  jobs, which re-fetch, this badge is computed from the broadcast digest the
+  engine already sends, plus one probe at page load.
 - **Window:** `registerWindowType({ type:'channel', icon, label,
   action:'openChannel', replay })` — layout restore, cross-client sync, desktops,
   tab groups and the taskbar then work for free, and `replayOpenSpec` cannot
@@ -757,8 +899,12 @@ and docs.
   URL registered, the scopes granted, and a **published version**. A missing one
   fails the *consent page* rather than the API call — a confusing failure mode
   worth spelling out in the connect wizard's error text.
-- **Redirect URI.** The existing app registers one fixed loopback port; sharing
-  it with the ops tooling invites a collision (decision 4).
+- **Redirect URI.** Lark's console requires the redirect URL to be *registered*,
+  so the loopback port is necessarily **fixed** — unlike Google, which accepts
+  any loopback port and lets `src/gmail-sync.js` bind an ephemeral one. A fixed
+  port is a machine-global name; §12.4 says what the flow does about that.
+  Registering a dedicated URL (decision 4) resolves VibeSpace-vs-ops-tooling and
+  **nothing else**.
 
 ### 12.2 Gmail
 
@@ -794,6 +940,45 @@ second one would be the twin); send = `deliverToConversation`; policy default =
 its "poll" is a no-op because its live messages already arrive through the
 existing lanes.
 
+### 12.4 `src/oauth-loopback.js` is dual-mode, and the fixed mode is a machine-global name
+
+The extracted module has **two** modes, because the two vendors are not the same
+shape. §2 compresses this to one line; the line hides a decision:
+
+| | loopback port | why |
+|---|---|---|
+| Gmail | **ephemeral** — `listen(0, '127.0.0.1')`, the port read back from `server.address()` | Google accepts any loopback port; this is exactly what `src/gmail-sync.js` does today |
+| Lark | **fixed**, and registered in the app console | the platform only redirects to a URL registered ahead of time |
+
+A fixed port is precisely the class of name `scripts/ci.mjs`'s
+`machineGlobalFixtures` and the heavy tier's `/tmp` lock exist to police — this
+machine runs a systemd production service beside many development checkouts.
+Two instances running a Lark consent flow at once means the **loser** gets an
+opaque `EADDRINUSE` from `listen()`, *after* the user has already been sent to a
+consent page, and the port holder receives the other instance's authorization
+code. Decision 4 does not fix this; registration is about a different collision.
+So the module:
+
+- binds the fixed port **only for the duration of one flow**, never holds it
+  between flows, and releases it on completion, cancel and timeout alike;
+- turns `EADDRINUSE` into a **named refusal** — *"another VibeSpace or tool is
+  running a Lark consent flow on port N; finish or cancel it, or use
+  paste-back"* — and falls straight through to the **paste-back path**, which
+  needs no local port at all (the user pastes back the redirect URL their
+  browser could not reach). Remote-browser users already take that path, so it
+  is not a new surface, it is the existing one made reachable earlier;
+- carries the `state` CSRF check over **verbatim** from *both* places
+  `src/gmail-sync.js` performs it — the loopback request handler and
+  `forwardCallback` — and the suite pins both. An extraction that dropped it
+  would turn a fixed, publicly known loopback port into a code-injection target
+  for any local process, and the ephemeral-port original is far more forgiving
+  about exactly this, which is why the risk arrives *with* the extraction rather
+  than being inherited by it.
+
+`test-oauth-loopback` therefore has a leg that **pre-binds the port** and
+asserts the named refusal plus the paste-back fallback, and a leg replaying a
+callback with a wrong `state` against both modes.
+
 ---
 
 ## 13. Secrets, expiry, failure
@@ -819,7 +1004,7 @@ existing lanes.
 
 | Deferred | Why | Landing place |
 |---|---|---|
-| Plugin-contributed adapters | The manifest has no adapter contribution point; the sandbox would need net+fs grants; and the receive path must run beside the store and the spend guard. Third-party adapters are the right *eventual* home | `contributes.channelAdapters` (a reserved contribution key today) over the same `src/channels` interface, so the registry never forks |
+| Plugin-contributed adapters | The manifest has no adapter contribution point; the sandbox would need net+fs grants; and the receive path must run beside the store and the spend guard. Third-party adapters are the right *eventual* home | `contributes.channelAdapters`, over the same `src/channels` interface, so the registry never forks. **The key is not reserved today**: `RESERVED_CONTRIBUTIONS` in `src/plugin-manifest.js` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, and only keys *in that list* produce the "reserved for a later phase — ignored" warning — anything else is silently discarded when `m.contributes` is rebuilt to a fixed shape, so a plugin author following this row would get **no signal at all**. **P0 adds the one word**, plus the expected-set update in `scripts/test-plugin-loader.mjs`. A declared-but-inert slot is the same failure this document argues against for `SPEND_REASONS`; the difference is that here the slot costs one array entry and buys an honest warning |
 | Adapters on a paired device | Credentials and the store live here | The interface already takes a machine handle; v1 passes `local`. `hostId` is a parameter, never a branch |
 | Live event lanes | §6.4 — a cursor kick, gated on an owner decision to enable event subscription | `src/channels/live/<kind>.js`, kicking the engine |
 | HTML mail rendering | XSS surface; plain text is honest and sufficient for triage | The published-pages sandboxed-iframe pattern |
@@ -855,12 +1040,15 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | Suite | Tier | What it pins | Negative control |
 |---|---|---|---|
 | `test-channel-filter` | fast | matcher truth table per rule kind; `any`/`every`; the estimator's window and its `sampled`/`truncated` honesty; the `why` strings | a rule matching everything must report `totalPerDay === matchedPerDay`; a corpus shorter than the window must set `truncated` |
-| `test-channel-acl` | fast | default-hidden; MAX over grants; widening-only; request → exactly one grant; uniform not-found | a group grant must not be narrowed by an individual entry; approving a request must leave the group default byte-identical |
+| `test-channel-acl` | fast | default-hidden; MAX over grants; widening-only; request → exactly one grant; uniform not-found; every grant carries an `origin` | a group grant must not be narrowed by an individual entry; approving a request must leave the group default byte-identical; **a user grant plus an assignment grant on the same (principal, scope), assignment removed ⇒ the user grant is byte-identical** |
 | `test-channel-outbox` | fast | the state machine (every transition and every forbidden one); guardrails stack and can only tighten; fail-closed on unknown policy; `unknown` never auto-retries | a patched copy with the guardrail check removed must go red; a direct-send policy with a link must still review |
 | `test-channel-record` | fast | normalization incl. mention-placeholder resolution; the injection-marker strip | a body containing our own frame markers must come out inert |
-| `test-channel-store` | fast | atomic index; append-only logs; dedup on replayed pages; cursor advances only on a complete pass; retention floor ≥ 7 days | a pass reporting `complete:false` must leave the cursor unchanged |
+| `test-channel-store` | fast | atomic index; append-only logs; dedup on replayed pages; cursor advances only on a complete pass; retention floor ≥ 7 days; **two concurrent passes through `index.update()` both land** (§5.1) | a pass reporting `complete:false` must leave the cursor unchanged; a patched copy doing read-modify-write around `writeJsonAtomic` must **lose** one pass's anchor advance |
 | `test-channel-adapter-contract` | fast | the fake adapter drives every declared capability; an undeclared one throws; typed errors; **the grep census that no call site branches on `kind`** | a synthetic adapter branching on its own kind in a call site must fail the census |
-| `test-channels-egress` | fast | every outbound request under `src/channels/` targets a declared host pattern, and no other file constructs one | a scratch file with an undeclared host must go red |
+| `test-channels-egress` | fast | every constructed outbound request comes either from the adapter declaring its host or from an allowlisted `(file, host)` pair **with a reason** — seeded with `src/gmail-sync.js` and `src/mounts.js` (§3.1) | a scratch file with an undeclared host must go red; a **dead allowlist entry** (file moved or renamed) must go red too |
+| `test-oauth-loopback` | fast | both modes (§12.4): ephemeral bind for Gmail, fixed bind for Lark; `state` rejection on the request handler **and** on paste-back; the port released on completion/cancel/timeout | a **pre-bound** fixed port must produce the named refusal and the paste-back fallback, never an opaque `EADDRINUSE`; a callback with a wrong `state` must be rejected in both modes |
+| `test-channels-lark-shape` | fast | recorded-fixture normalization: `next_page_token` paging *to the anchor*, `@_user_N` placeholder resolution against the record's own `mentions`, typed errors | a fixture whose anchor lies on the **second** page must be paged into, not stopped at page one |
+| `test-plugin-loader` (existing) | fast | `channelAdapters` in `RESERVED_CONTRIBUTIONS` ⇒ the "reserved for a later phase — ignored" warning actually fires (§14) | its expected-set assertion goes red if the word is added without updating the suite — which is the point |
 | `test-channels-agent-cli` | fast | CLI verbs against a stub server; `reply` proposes and never sends; invisible = uniform error | a stub returning a conversation the ACL hid must still produce the uniform error |
 | `test-spend-paths` (existing) | fast | its per-site census must see the new producer, wired, with the declared reason | already carries its own controls |
 | `test-channels-engine` | heavy | real worktree server + fake adapter: burst-day paging, backoff, single-flight, failure surfacing **and retraction**, digest batching, wake authorization and hold release | a pre-fix copy using a fixed-window fetch must lose messages on the burst-day fixture |
@@ -876,7 +1064,36 @@ exercised against recorded fixtures and the fake adapter.
 
 ---
 
-## 17. Phases, rounds, calendar
+## 17. Critique log — the r2 adversarial review
+
+Eight findings were raised against the first draft. Each was checked against the
+tree at `7f13e7c7` before anything was changed. Seven were correct and are fixed
+above; one was half-correct and the half that was wrong is recorded here rather
+than acted on, because a design that quietly accepts a wrong correction is as
+unreliable as one that ignores a right one.
+
+| # | Finding | Verdict | What changed |
+|---|---|---|---|
+| 1 | Two adapter poll loops read-modify-write one `index.json`; overlapping passes clobber each other's cursor advances and unread counts | **Confirmed.** §6.2 mandates a loop per adapter with single-flight declared only *per* adapter, while §5 put every mutable per-conversation fact in one whole-file atomic JSON written "at pass end". `writeJsonAtomic` is atomic at the fs layer; the read-modify-write around it is not. A clobbered *anchor* advance skips messages | New **§5.1** names one in-memory owner in `src/server/channels-engine.js` with a serialized `index.update(fn)` and a coalesced flush (the `JobManager` / `SessionStatusManager` shape); §5 invariants 3–4 rewritten; §6.2 says single-flight-per-adapter is not mutual exclusion; §2 gains a third load-bearing rule; `test-channel-store` gains a two-concurrent-passes leg with a read-modify-write negative control. Sharding was considered and rejected in §5.1 — the rotation counter is keyed by *group*, which spans adapters |
+| 2 | `test-channels-egress` as specified is red on its first commit: `src/gmail-sync.js` and `src/mounts.js` already construct requests to those hosts | **Confirmed.** `src/gmail-sync.js` builds `oauth2.googleapis.com/token`, the `gmail.readonly` scope URL and `gmail.googleapis.com/gmail/v1/users/me`; `src/mounts.js` holds `GRAPH_BASE`. A mandatory gate that fails on a legitimate pre-existing surface gets relaxed by whoever hits it first | §3.1 restates the census as an allowlist keyed by `(file, host pattern)` **with a reason**, seeded with those two files, plus the dead-entry check `test-vendor-whitelist`'s `ALLOW` already uses; §16's row updated with both controls |
+| 3 | Lark's fixed loopback port is a machine-global name; decision 4 only diagnoses the *registration* collision, not two instances on one box | **Confirmed.** Gmail's flow binds `listen(0, '127.0.0.1')`; Lark's must be registered, hence fixed. The loser gets an opaque `EADDRINUSE` *after* the consent page, and the port holder receives the other instance's code | New **§12.4**: the module is explicitly dual-mode; the fixed port is bound only for a flow; `EADDRINUSE` becomes a named refusal falling through to paste-back (which needs no port); the `state` CSRF check is carried over verbatim from **both** places `gmail-sync` performs it and pinned. §12.1 and decision 4 corrected; `test-oauth-loopback` gains a pre-bound-port leg and a wrong-`state` leg, and now has a row in §16 |
+| 4 | The assignment-derived grant collides with a user-made grant on the same `(principal, scope)`; un-assigning silently revokes the user's grant — narrowing, inside a widening-only model | **Confirmed.** The §8 grant shape is keyed by `(principal, scope)` and §7.3 said "the grant is removed with the assignment" | Grants gain `origin: 'user'\|'assignment'\|'request'`; `effective()` still MAXes so the accessor is unchanged; un-assigning deletes only the `origin:'assignment'` row. §7.3 and §8 rewritten; `test-channel-acl` gains the mirror control (user grant byte-identical after the assignment is removed) |
+| 5 | "One pointer item per pending proposal" is not expressible in `UserTodoManager` | **Confirmed, and the direction was wrong too.** `add()` has a closed parameter set; it dedups on `(sessionKey, text)` across all statuses (re-filing a resolved item reopens the same id); it throws past `MAX_OPEN_PER_SESSION = 20`. And retraction needs *proposal → item*, which nothing persisted | §9.2 rewritten to **one pointer per conversation** with count-free `text` (so dedup-by-text is the wanted idempotence), the count in `detail` (which `add()` updates in place), the returned id persisted as `pendingTodoId` on the **conversation**, retraction only for ids this producer wrote, and a stated degrade when the cap throws. The per-proposal alternative and its cost are recorded in decision 7 |
+| 6 | `contributes.channelAdapters` is claimed to be "a reserved contribution key today" and is not — and an unknown key is dropped with no warning | **Confirmed.** `RESERVED_CONTRIBUTIONS` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`; only keys in that list warn, and `m.contributes` is rebuilt to a fixed shape so anything else vanishes silently | §14's row corrected and P0 now adds the word plus the expected-set update in `scripts/test-plugin-loader.mjs`; §16 carries the row |
+| 7 | Fence 3 cites an incident and a measurement that do not exist in this tree, and states the inverse of the repo's actual law | **Half confirmed.** The *law* criticism is right and is fixed: CLAUDE.md's rule is "no **sync** fs/exec; child processes/workers with timeouts only", so bounded async children are sanctioned (ssh-per-op, the `ps`/`lsof` rungs, discovery sweeps) — the draft implied the opposite. The *invented incident* claim is *wrong*: `inc-mtunmv3d-pmd6` (2026-09-10) is real, with 1.8 / 18.8 / **72.5 ms** per spawn measured at 45 MB / 543 MB / 1.5 GB parent RSS. It is absent from the tree because instance-local evidence is required to stay out of this public repo — grepping the public tree is the right check and yields the right *observation*, but "not in the tree" and "invented" are different claims, and this repo's own conventions (CLAUDE.md cites `inc-…` ids with no in-tree evidence file throughout) make the first one expected | §3.3 rewritten to state the written law first, then the fork-tax refinement as a *measured constraint on top of it*, with the incident id, the method, the RSS dependency, and an explicit note that the evidence file is instance-local. §20 gains item 12 saying the constants are not portable |
+| 8 | `_railBadge('channels', unreadTotal)`, "which already exists", does not; the badge needs more wiring than listed | **Confirmed.** The helper is `_railSetBadge(id, val)`; badges are driven by a hardcoded ladder in `_railRefreshBadges()` and an explicit message-type list in `_railWireBadges()`, neither of which picks up a new id | §10.1 corrected: the right helper name and **six** registrations, with the note that this badge can ride the broadcast digest instead of adding a fetch to the ladder |
+
+Two of the eight (1 and 3) were latent *money-and-correctness* defects rather
+than documentation slips, and both share a shape worth naming: **a guarantee
+stated at the wrong layer.** "Atomic write" is a filesystem property being asked
+to stand in for mutual exclusion; "registered redirect URL" is a vendor property
+being asked to stand in for a unique local name. In both cases the fix is to
+name the thing that actually holds the guarantee — one owner, one flow-scoped
+bind — rather than to strengthen the property that never could.
+
+---
+
+## 18. Phases, rounds, calendar
 
 One **round** ≈ 1 h implementer + ~20 min adversarial verify (measured
 2026-09-10 across 32 workflows / 130 agents). Calendar at **2 rounds/day**.
@@ -884,25 +1101,34 @@ Ranges are honest: the low end assumes one-round convergence, the high end
 assumes the module needs the extra rounds that the measured distribution says
 about a third of them do.
 
-### P0 — store, adapter interface, fake adapter, panel skeleton — **6–8 rounds (3–4 days)**
+### P0 — store, index owner, adapter interface, fake adapter, panel skeleton — **7–9 rounds (3.5–4.5 days)**
 
-`src/channel-store.js`, `src/channel-record.js`, `src/channels/index.js` + the
-fake adapter, a `src/server/channels-engine.js` skeleton (scheduler, single
-flight, broadcast), `src/routes/channels.js`, the rail item, the panel list and
-an empty conversation window. Gates: `test-channel-store`,
-`test-channel-adapter-contract`, `test-channel-record`.
+`src/channel-store.js` (durable primitives), `src/channel-record.js`,
+`src/channels/index.js` + the fake adapter, a `src/server/channels-engine.js`
+skeleton (scheduler, single flight, broadcast) carrying **the serialized index
+owner of §5.1 from the first commit**, `src/routes/channels.js`, the six rail
+registrations (§10.1), the panel list and an empty conversation window. Also the
+one-word `channelAdapters` entry in `RESERVED_CONTRIBUTIONS` with its suite
+update (§14). Gates: `test-channel-store` (including the two-concurrent-passes
+leg and its read-modify-write negative control), `test-channel-adapter-contract`,
+`test-channel-record`, `test-plugin-loader`.
 **Exit:** the fake adapter's conversations appear in the panel, open in a window,
-survive a restart, and sync across two clients.
+survive a restart, sync across two clients, and two simultaneous passes both
+advance their cursors.
 
-### P1 — Lark read + Gmail read — **8–10 rounds (4–5 days)**
+### P1 — Lark read + Gmail read — **9–11 rounds (4.5–5.5 days)**
 
-`src/oauth-loopback.js`, `src/channels/lark.js`, `src/channels/gmail.js`, the
-adapter panel (connect / re-auth countdown / tracked pickers / inclusion query),
-failure surfacing + retraction, and the `src/secret-box.js` extraction. Gates:
-`test-channels-lark-shape` (recorded fixtures), `test-channels-egress`,
-`test-channels-engine` (burst-day paging).
+`src/oauth-loopback.js` **dual-mode** (§12.4: ephemeral + fixed, port held only
+for the flow, named `EADDRINUSE` refusal, paste-back fallback, both `state`
+checks carried over verbatim), `src/channels/lark.js`, `src/channels/gmail.js`,
+the adapter panel (connect / re-auth countdown / tracked pickers / inclusion
+query), failure surfacing + retraction, the `src/secret-box.js` extraction, and
+the egress allowlist **seeded** with the two pre-existing files (§3.1). Gates:
+`test-oauth-loopback`, `test-channels-lark-shape` (recorded fixtures),
+`test-channels-egress`, `test-channels-engine` (burst-day paging).
 **Exit:** real conversations from both platforms, tracked opt-in, correct on a
-burst day, honest auth states, zero secrets in any response.
+burst day, honest auth states, zero secrets in any response, and a second
+instance's consent flow refused by name rather than by stack trace.
 *Owner-blocked:* the Lark redirect-URI registration (decision 4).
 
 ### P2 — assign, filter, wake — **7–9 rounds (3.5–4.5 days)**
@@ -915,13 +1141,15 @@ Gates: `test-channel-filter`, `test-spend-paths` (its census sees the producer),
 **Exit:** an assigned filtered conversation wakes an agent, the wake names its
 reason, and the money is bounded and attributed to the right slot.
 
-### P3 — outbox, approval, receipts — **8–10 rounds (4–5 days)**
+### P3 — outbox, approval, receipts — **8–11 rounds (4–5.5 days)**
 
 `src/channel-policy.js`, the outbox store, inline approval cards + the Outbox
-window, "For you" pointer items with retraction, receipts through `noWake`, the
-audit log, `vibespace-channels` + its manual, and the AgentReach panel with
-requests. Gates: `test-channel-outbox`, `test-channel-acl`,
-`test-channels-agent-cli`, `test-channels-e2e`.
+window, the per-conversation "For you" pointer with its persisted
+`pendingTodoId` and retraction (§9.2), receipts through `noWake`, the audit log,
+`vibespace-channels` + its manual, and the AgentReach panel with requests and
+grant `origin` (§8). Gates: `test-channel-outbox`, `test-channel-acl` (including
+the user-grant-survives-un-assignment control), `test-channels-agent-cli`,
+`test-channels-e2e`.
 **Exit:** an agent proposes, the user approves / edits / rejects in either
 surface, a receipt lands without waking anybody, and the audit log is complete.
 Sending is exercised against the fake adapter and the built-in Agents adapter
@@ -944,15 +1172,18 @@ Live-lane cursor kicks (**2–3 rounds**), sandboxed HTML rendering (**2–3**),
 attachment fetch (**2**), plugin-contributed adapters (**4–6**), adapters on a
 paired device (**4–6**).
 
-**Totals:** P0–P4 = **35–45 rounds ≈ 18–23 working days** at 2 rounds/day, plus
-owner-blocked time for the two scope round trips. P0–P2 alone — read-only
-channels with assignment and filtering and no outbound path at all — is **21–27
-rounds ≈ 11–14 days**, and it is a coherent shipping point: the panel is useful,
-no external message can leave the building, and the money is already bounded.
+**Totals:** P0–P4 = **37–48 rounds ≈ 19–24 working days** at 2 rounds/day, plus
+owner-blocked time for the two scope round trips. (The r2 review added 2–3
+rounds: the serialized index owner and its concurrency leg in P0, the dual-mode
+loopback with its pre-bound-port leg in P1, grant `origin` and the pointer
+mechanics in P3.) P0–P2 alone — read-only channels with assignment and filtering
+and no outbound path at all — is **23–29 rounds ≈ 12–15 days**, and it is a
+coherent shipping point: the panel is useful, no external message can leave the
+building, and the money is already bounded.
 
 ---
 
-## 18. Decisions for the owner
+## 19. Decisions for the owner
 
 Each carries a recommendation. None is reversible for free later, which is why
 they are here rather than in the code.
@@ -962,10 +1193,10 @@ they are here rather than in the code.
 | 1 | **Adapters in-tree or plugins?** | in-tree modules / plugin packages | **In-tree for v1.** The OAuth flows, the secret store and the spend guard are all in-tree; an IPC boundary per message buys nothing at this scale. Keep the interface identical so third-party adapters become plugins in P5 without forking the registry |
 | 2 | **Lark send identity** | as the **user** (needs `im:message:send_as_user`, a version publish and re-consent) / as a **bot** (needs the bot added to every chat) / both | **As the user.** It is what the other side expects in an existing human group and it needs no change to anybody else's chats. Bot identity only as a fallback where user-send is refused. Costs one scope round trip in P4 |
 | 3 | **Lark receive lane** | poll-only / poll + WebSocket kick / webhook | **Poll-only in v1; WebSocket kick in P5; never the webhook.** The WS lane needs no public URL, but its cluster-mode delivery makes it unsound as a *content* lane across a fleet — as a cursor kick it is safe. A public inbound endpoint buys nothing over it |
-| 4 | **Lark redirect URI** | reuse the ops tooling's registered loopback port / register a dedicated one for VibeSpace | **Register a dedicated one.** Sharing the port means the two tools collide whenever both run a consent flow, and the console requires the URI to be registered anyway |
+| 4 | **Lark redirect URI** | reuse the ops tooling's registered loopback port / register a dedicated one for VibeSpace | **Register a dedicated one — and treat the port as machine-global regardless.** Registration resolves VibeSpace-vs-ops-tooling; it does **not** resolve two VibeSpace instances on one box (a production service beside a checkout), where the loser gets an opaque `EADDRINUSE` after the user is already at the consent page and the port holder receives its code. §12.4 binds only for the flow, refuses by name, and falls to paste-back. If the console accepts several redirect URLs per app, register ours *alongside* rather than displacing theirs (unverified — §20) |
 | 5 | **Gmail OAuth client** | add `gmail.send` to the existing shared preset / register a client dedicated to channels | **Dedicated client for channels.** Adding a sensitive scope to a shared preset re-consents everything using it, and the verification status (hence the 7-day refresh-token behaviour) becomes one decision for two features. Read-only P1 may start on the existing preset |
 | 6 | **What is tracked by default** | nothing until the user picks / all groups the user is in | **Nothing.** It is the privacy answer, the polling-cost answer, and it keeps the panel from becoming a mail client. The discover list makes opting in one click |
-| 7 | **Approval surface of record** | new outbox store + a pointer item in "For you" / "For you" items only | **New store + pointer.** A proposal has structure (target, body, why, edit, receipts) the todo store cannot hold, and the pointer keeps the existing badge honest — with retraction |
+| 7 | **Approval surface of record** | new outbox store + a pointer item in "For you" / "For you" items only | **New store + one pointer item per CONVERSATION** (§9.2). A proposal has structure (target, body, why, edit, receipts) the todo store cannot hold; and `UserTodoManager` has a closed parameter set, dedups on `(sessionKey, text)` across all statuses and caps at 20 open per session, so *per-proposal* pointers are not expressible without a schema change to a store several producers share. Per-proposal badges are available for the cost of that change (`proposalId` field + dedup keyed on it + `todoItemId` on the proposal) — say so if you want them |
 | 8 | **Do receipts wake the agent?** | never (stash for next turn) / always / per assignment | **Never by default, opt-in per assignment.** An approval lands minutes to hours later; waking for a receipt is a billed turn per approval |
 | 9 | **Default policies + guardrails** | confirm the interaction record's defaults | **Confirm as recorded:** external = review, internal = direct; audit ON, links/attachments force review ON, off-hours OFF until a timezone is configured (then the window is a setting) |
 | 10 | **Spend ceiling shape** | share the existing per-identity caps / a separate channel budget | **Share.** One ceiling per credential slot is the whole point of the authorizer; add a per-assignment daily wake cap as *pacing* only |
@@ -979,7 +1210,7 @@ they are here rather than in the code.
 
 ---
 
-## 19. What I could not verify
+## 20. What I could not verify
 
 Stated plainly, because a design that hides its unknowns is a design that
 discovers them in production:
@@ -1020,3 +1251,24 @@ discovers them in production:
     obvious carrier, but group membership is sessions-over-time, so the rotation
     semantics over a group whose members come and go need one round of thought in
     P2.
+11. **Whether Lark's console accepts more than one registered redirect URL per
+    app.** Decision 4 assumes it does, so VibeSpace's URL can sit *alongside* the
+    ops tooling's rather than displacing it. If it does not, decision 4 becomes
+    "a second app", which is a larger round trip.
+12. **The fork-tax numbers are instance-local.** 1.8 / 18.8 / 72.5 ms at
+    45 MB / 543 MB / 1.5 GB parent RSS were measured on the machines this runs
+    on (`inc-mtunmv3d-pmd6`, 2026-09-10) with a harness that is not in this
+    public repo. The *mechanism* — fork cost scaling with the parent's page
+    tables — is general; the constants are not. Anyone reading §3.3 on different
+    hardware should re-measure before quoting the number.
+13. **`UserTodoManager`'s open cap is per session key** (20). One pointer per
+    conversation makes exhaustion unlikely, but an agent holding proposals in
+    more than twenty conversations at once is untested; §9.2 specifies the
+    degrade (catch, log, rely on the rail badge) rather than assuming it cannot
+    happen.
+14. **That §5.1's serialized door is sufficient** is an argument, not a
+    measurement: it holds because there is exactly one process and one owner. If
+    the engine ever moves to a worker or to a paired device (§14), the door
+    becomes a cross-process problem and the argument has to be re-made — which is
+    why the invariant is written as "one owner", not "we use a mutex".
+
