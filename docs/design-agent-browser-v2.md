@@ -37,6 +37,15 @@ messages at all (§4.7–§4.8, D20–D21). Two new phases (P7, P8) and four new
 totals in §10 are re-derived, and §12 grew from 14 entries to 22 — §1's measurements are
 unchanged except where this round re-measured them on this box.
 
+**Round 4 (2026-09-10)** answers an adversarial critique of round 3: six findings, **all upheld**,
+with the verification evidence in **Appendix C**. One is a rendering defect and the most
+consequential of the set — a blank line terminated §11's table, so this round's whole set of eight
+new decisions, **D14–D21, rendered as a wall of pipe characters** in every renderer. Three more
+replace a borrowed mechanism with the one that actually holds (the badge's colour source, `split`'s
+invariant, and `task-group`'s standing as an origin), one replaces §4.7's universal — which the
+product itself falsifies — with a named exception, and the last makes §10's bounding sentence cite
+a figure its own table publishes. **No decision's recommendation changed.**
+
 ---
 
 ## 0. Thesis
@@ -451,12 +460,32 @@ profile pin uses that ladder verbatim:
 `hasSource` is **always true** here, for the same reason it is for `browserKey`: this knob's source
 is not some harness's transcript, it is **our own registry**, which is readable by construction.
 
-**The Task-Group rung must not change `resumeSpawnPick`'s signature.** That is a PURE function
-serving every knob — model, effort, response-style — and adding a fifth rung to it makes every knob
-carry a concept only the profile needs. The move is the one this repository has already written:
-resolve "Task-Group default vs instance default" into one value **before** calling it, then refine
-`instance` into `task-group` in the shape of `applyOriginHint` — refine only, never upgrade, never
-touch the **value**.
+**`task-group` is a FIFTH value in a frozen four-value vocabulary, so it is a two-site edit and the
+edit has to be named.** `src/resume-continuity.js:56` is
+`const SPAWN_ORIGINS = Object.freeze(['chosen','conversation','instance','harness']);` with the
+comment "The vocabulary BOTH tiers speak (the client labels these strings in
+`src/lib/agent-meta.js`; nothing else may invent one)"; the client mirror `spawnValueOrigin`
+(`agent-meta.js:338`) whitelists exactly those four and falls through to `responseStyleOrigin` for
+anything else — i.e. a fifth string does not throw, it **silently renders a wrong label**. So one of
+two, decided in the same change: **(a)** `'task-group'` joins `SPAWN_ORIGINS` **and**
+`spawnValueOrigin`'s whitelist (plus its zh/ja entries), or **(b)** the pin carries its own origin
+type and does not borrow that vocabulary at all. This design takes **(a)**, because the pin's other
+four rungs are verbatim the same concepts and two vocabularies for one question is how twins are
+born. `test-browser-pin`'s fast leg asserts it: every pin origin the product emits is in
+`SPAWN_ORIGINS` and the client mirror recognises it, with an off-vocabulary string as the negative
+control.
+
+**That rung must not change `resumeSpawnPick`'s signature.** That is a PURE function serving every
+knob — model, effort, response-style — and adding a fifth rung to it makes every knob carry a
+concept only the profile needs. The move is: resolve "Task-Group default vs instance default" into
+one value **before** calling it, then **replace** `instance` with `task-group`. **This is not
+`applyOriginHint`'s downgrade** (round 3 said it was, and that was wrong): that function's own
+contract is verbatim "It may only DOWNGRADE a 'chosen' to a fact the user did not state, never
+upgrade or re-point anything", i.e. chosen → instance/harness, whereas `instance → task-group` is a
+**more specific** claim — the direction it forbids. The reason that does hold is a different one:
+**`instance` and `task-group` both mean *the user did not state this for this session*,** so
+replacing one with the other **adds information without changing the claim**, and it still never
+touches the **value**.
 
 **A fork inherits the pin but not the key.** These are two different things: `browserKey` is
 **identity** (a fork is a new conversation and must not inherit another one's pinned tab, §3.2.1),
@@ -887,6 +916,30 @@ layouts persistence, the multi-client sync. A split is **another rendering mode 
 not a second kind of chain. A chain may perfectly well have five tabs with two of them paired: the
 rest stay in the tab bar, and what clicking one of them does is an owner decision (D19).
 
+**`split` is a REFERENCE into `tabs`, so it owes an invariant — and nothing enforces one today.**
+`pair` holds window ids, and every chain mutation splices `tabs` and touches nothing else:
+`addToTabChain` (`chain.tabs.splice` / `push`), `_detachFromChain`, and the **host-promotion**
+branch that `removeFromTabChain` reaches through `_detachFromChain` (`src/lib/tab-group.js`
+477-497: when `idx === 0 && chain.tabs.length > 1` it promotes `tabs[1]` to host, re-parents every
+guest's `content` into the new host's element, and splices the old host out). The chat window is
+**normally the host** (it existed first, and the browser is merged into *its* chain), so "close the
+chat tab of a three-tab split chain" is a **reachable** path: it removes a `pair` member while the
+chain survives. The lifecycle paragraph below enumerated only two cases — "the browser pane goes
+away" and "the session is terminated" — and the second is true of **termination** but not of
+**closing the window**, while host promotion and "drag the other pane out" were not covered at all.
+
+The invariant: **`split` is validated against `tabs` on every chain mutation.** Any `pair` entry not
+in `tabs` ⇒ `layout` collapses to `'tabs'` and `split` is dropped (never a dangling id, and never a
+guessed substitute — the guessed pane is the very thing "whose browser is that" has to answer); and
+when the **host changes**, even if both `pair` members survive, those two panes must move into the
+new host's element with the rest of the `content` and be re-laid-out — because a split renders
+**inside** the host's element (that is this section's "the DOM is already the right shape", read in
+the other direction). This rule lives in **one** place: a new `_normalizeChain(chain)` called by
+`createTabChain` / `addToTabChain` / `_detachFromChain`. It does **not** exist today
+(`grep -rn '_normalizeChain' src/` returns nothing), which is exactly why the rule has to be
+written down — three call sites each hand-writing the check is the twin drift this repository has
+paid for repeatedly.
+
 **Persistence goes through the one choke point that already exists.** `layout.js` already writes
 `winState.tabChain = { tabs, active }` plus `isTabGuest` into layouts and restores through
 `restoreTabChain(validTabs, active)`; the two new fields ride along, and the write still goes
@@ -934,11 +987,33 @@ stays.** The chain is never dissolved — dissolving it would move the user's **
 they never asked for. So when the browser pane goes away, `layout` returns to `'tabs'` and the
 remaining tabs are unchanged; if only one is left, the existing `_ungroupLast` runs. In the other
 direction, when the **chat** side ends (the session is terminated) nothing moves: a dead session's
-history is still readable, and the browser may still belong to somebody else.
+history is still readable, and the browser may still belong to somebody else. A third case was
+missing and is now answered by the invariant above: **closing the chat window** (as opposed to
+terminating the session) goes through host promotion, so a `pair` member disappears ⇒ `layout`
+collapses to `'tabs'` and the browser window stays in the chain as an ordinary tab; **dragging
+either pane out** converges the same way, through `_detachFromChain` → `_normalizeChain`. Three
+paths, one decision.
 
-**The ownership badge.** The browser tab carries the session's colour and name — the colour is the
-one the session card already uses (`task-color-seq.js`'s sequence), so "this browser belongs to that
-session" holds at a glance. **A profile used by several sessions shows all of its owners**: the
+**The ownership badge.** The browser tab carries the session's colour and name, so "this browser
+belongs to that session" holds at a glance. **The colour is derived per SESSION, and deliberately
+not the one the session card uses today — because the session card has no colour.** The only
+consumers of `seqTaskColor` / `taskGroupColor` are `sidebar-tasks.js`, `task-detail.js` and
+`session-props.js:499`, and every call is keyed on a **task-GROUP** record
+(`seqTaskColor(t.colorSeq, …)` / `taskGroupColor(g)`); `session-card.js` never calls either
+(`grep -n 'seqTaskColor\|taskGroupColor\|colorSeq' src/lib/session-card.js
+src/lib/sidebar-render.js` returns nothing). Borrowing the group colour fails on exactly the two
+shapes the badge exists for: a session bound to **no** task group — the ordinary ad-hoc case — has
+no colour to draw at all, and **two sessions in the same group** get the **same** colour, which is
+precisely the case the badge is there to disambiguate. So what is reused is the pure sequence
+function itself, keyed on the **session's own** counter: the webui id is `sess-<seq>-<ms>`
+(`src/ws-create.js:234`), and `seqTaskColor(k)` on that `<seq>` gives this session its own slot
+(the sequence's property is that every prefix stays far enough apart, so the first N sessions are
+pairwise distinguishable). The task-group colour is untouched and stays beside it as the **group**
+badge — two questions, two colour sources. Honest boundary: `<seq>` survives a **server restart**
+(`boot-restore.js:200` reuses `meta.webuiSessionId`) but a **resume** mints a new webui key, so the
+colour changes there. That is acceptable, because the badge answers "which of the windows on my
+screen right now is which", not a durable cross-resume identity. **A profile used by several
+sessions shows all of its owners**: the
 badge becomes N dots, listed one per line in the title, sourced from §3.3's `leases` ("who is
 attached" is already a recorded fact; this only draws it). That is also this design's
 **visibility** answer to (1.b)'s "one profile driven by several sessions" half.
@@ -956,13 +1031,26 @@ attached" is already a recorded fact; this only draws it). That is also this des
 question is how to put **one** native window inside VibeSpace's browser UI over a **poor network**
 (target: typing still usable at 200 ms RTT / 1 Mbps).
 
-**One conclusion belongs first, because it re-orders the whole table: at 200 ms RTT no remote-pixel
-protocol gives comfortable typing.** Every keystroke echoes at least one RTT, because in this
-deployment the client and the VibeSpace server run on the **same machine** with the user at the
-other end, so **no path here can do local echo** — including the "run the web version" one. What
-differs is not whether it works but **how it degrades**: whether bandwidth follows **one window** or
-**a whole desktop**, and whether the protocol drops quality under high latency instead of queueing.
-The industry's own rule of thumb for remote desktops says the same thing: latency beats bandwidth.
+**One conclusion belongs first, because it re-orders the whole table: at 200 ms RTT every path an
+AGENT can also drive pays one RTT per keystroke.** The page runs on the server's machine in this
+deployment with the user at the other end, so the echo takes a round trip. What differs is not
+whether it works but **how it degrades**: whether bandwidth follows **one window** or **a whole
+desktop**, and whether the protocol drops quality under high latency instead of queueing. The
+industry's own rule of thumb for remote desktops says the same thing: latency beats bandwidth.
+
+**That conclusion has one named exception, and it belongs here rather than under a universal the
+product itself falsifies: VibeSpace already ships a path with genuine local echo.**
+`src/lib/browser-window.js`'s `openBrowser(app, url, { syncId, proxy })` is an embedded browser
+window with a URL bar and a proxy toggle; with the toggle on it fetches through the full-rewriting
+node-unblocker proxy mounted at `/proxy/` (`server.js:636-647`, its auth ordering at `:236`, its
+WebSocket upgrade dispatch at `:1853`). What renders there is **DOM in the user's own browser**, so
+typing echoes locally and owes no round trip at all. It is rejected here for two specific reasons
+rather than by assertion: **(i)** the page runs in the user's browser, so cookies and localStorage
+live client-side and there is **no CDP target** — the agent cannot drive it, and "the agent can
+drive it" is the entire point of §3's profiles; **(ii)** a rewriting proxy does not carry WhatsApp
+Web's service worker or its persistent WebSocket (§12.23 records that I did not measure this half).
+So it stays in the product as the "let a human glance at a web page" tool, not as a candidate for
+this section.
 
 So the real recommendation is an **architectural** one rather than a protocol one: **a path where
 the agent talks to a protocol or a DOM always beats one where it talks to pixels.** For a web chat
@@ -1548,9 +1636,9 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-browser-live` | heavy | P2, P3 | Real browser + real stream + the real bridge: two sessions on one profile drive their own tabs and never each other's (the I2 proof, with a **pre-fix control that reproduces the hijack**), a viewer sees frames through cookie auth only, backpressure holds, takeover refuses agent input and handback restores it. Headless-chrome leg for the window at 375×667 and at a non-1 DPI zoom. |
 | `test-browser-providers` | fast + heavy | **P4** | fast: the provider capability rows and the exact refusal a provider produces for a capability it lacks (a disabled control names its reason), plus the presence and shape of the CloakBrowser egress proof record (§7.2.1) — a provider row with a `blocks:` claim whose caps row is not actually false FAILS, the `local-oracles` discipline. heavy: the real `browser-serve` daemon op against a real daemon **with its capability gate asserted** (an old daemon is never asked — unknown ops hang), and the remote `cdp` provider over `tcpForward`. |
 | `test-browser-housekeeping` | fast | **P5** | The retention/adoption DECISION as a PURE function, printing what it spared and why — the repo's own sweep law: **never demand a removal nothing is allowed to perform** (a grace window for anything that may be in flight, named with its age). Negative controls: nothing is ever proposed for deletion without an explicit human act, and `forget` archives BEFORE it removes. |
-| `test-browser-pin` | fast | **P0, P1** | The pin ladder as a PURE decision: explicit / conversation / Task-Group / instance / none, with the ORIGIN each rung states, and that a fork **copies the pin and mints a new key** (§3.2.5). The mid-session half is a WIRING PIN: the re-pointed symlink (or the rewritten per-session config) is what the next launch resolves, and the suite asserts the running browser is **unaffected** — the honest half. Negative controls: a Task-Group default never beats a session's own choice; binding a group does not rewrite a running session's pin. |
+| `test-browser-pin` | fast | **P0, P1** | The pin ladder as a PURE decision: explicit / conversation / Task-Group / instance / none, with the ORIGIN each rung states, and that a fork **copies the pin and mints a new key** (§3.2.5). The mid-session half is a WIRING PIN: the re-pointed symlink (or the rewritten per-session config) is what the next launch resolves, and the suite asserts the running browser is **unaffected** — the honest half. Plus the vocabulary case: every pin origin the product emits is in `SPAWN_ORIGINS` and the client's `spawnValueOrigin` whitelist recognises it (§3.2.5's two-site edit; the negative control is an off-vocabulary string, which must go red — in production it only renders a wrong label). Negative controls: a Task-Group default never beats a session's own choice; binding a group does not rewrite a running session's pin. |
 | `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the seat arithmetic and its refusal text, the site-hint record carrying WHO claimed it, and `blocked` being a claim the server never manufactures. heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus the not-installed refusal naming the provider. |
-| `test-window-binding` | fast + heavy | **P7** | fast: the chain model with `layout`/`split`/`ratio` — a missing `layout` reads as `'tabs'`, the ratio clamps, and **the multi-client sync key changes when only the layout changes** (§4.6's named trap, with the pre-fix key as its negative control). heavy (headless chrome): bind → two panes in one window, divider drag under a non-1 DPI zoom lands where the pointer is, move/minimise/desktop-switch keep them together, closing the browser pane collapses to tabs **without moving the chat window**, and a mobile viewport renders tabs **without writing its flattening back**. |
+| `test-window-binding` | fast + heavy | **P7** | fast: the chain model with `layout`/`split`/`ratio` — a missing `layout` reads as `'tabs'`, the ratio clamps, and **the multi-client sync key changes when only the layout changes** (§4.6's named trap, with the pre-fix key as its negative control). Three more: **close the host tab of a three-tab split chain ⇒ `layout === 'tabs'` and no dangling id in `split`** (the `_normalizeChain` invariant, with the pre-fix shape that leaves a dangling `pair` as its negative control); **two sessions in one task group produce distinguishable badges**; and **a session bound to no group produces a badge at all** (the two shapes on which borrowing the group colour fails). heavy (headless chrome): bind → two panes in one window, divider drag under a non-1 DPI zoom lands where the pointer is, move/minimise/desktop-switch keep them together, closing the browser pane collapses to tabs **without moving the chat window**, and a mobile viewport renders tabs **without writing its flattening back**. |
 | `test-native-window` | heavy | **P8** | A real Xpra server + a real X client under Xvfb through the real cookie-authed bridge: one window arrives, input reaches it, the stream port is never reachable from a browser, and the backpressure discipline holds. **Skips loudly, with evidence**, when `xpra` or `Xvfb` is absent (measured 2026-09-10 on this box: `Xvfb` present, `xpra` absent). The bandwidth/latency numbers §4.7 needs are produced here, not asserted — the suite RECORDS them under a named budget so a regression is visible. |
 | `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` must be declared AND used in the same change (§4.3.1). |
 | `test-architecture` | build | all | Tier edges: PURE imports nothing, SHARED never reaches up, the daemon bundle carries no orchestrator markers, `server.js` stays inside its size ratchet, and §44 — every settings category renders, so `browser.announceIdleHandback` and the rest reach a section a user can open. |
@@ -1596,8 +1684,10 @@ P2 and P4 depend on a third-party binary's real behaviour rather than on our own
 also why §12 lists three of their assumptions as unverified. Two further honesty notes: 55 % of
 workflow wall time in the last sample had **no agent running** (concurrency cap, session limits,
 serial integration), so "days" here is agent capacity and not elapsed time; and the ranges above
-are per-phase — the joint distribution is not the sum of the extremes, so 46 rounds is a
-pessimistic bound, not a forecast.
+are per-phase — the joint distribution is not the sum of the extremes, so P0–P8's **82 rounds** is
+the sum-of-extremes pessimistic bound, not a forecast, and the figure to plan against is the same
+row's risk-weighted **66**. (Round 3 printed 46 here; that was round 2's P0–P8 number, stranded
+once P7 and P8 were added, and it appears in none of this section's tables.)
 
 **Alternative order, if the owner wants value earliest:** P0 → P2 → P1 → P3. P2 can run against
 upstream's per-session stream *before* the registry exists, because §3.2 already gave every
@@ -1633,7 +1723,6 @@ how little is known about it.
 | **D11** | **Is an announcement into the conversation worth a billed turn, and which of the three moments get one?** (§4.3.1 — the delivery ladder is fully spend-gated, `SPEND_REASONS` is a closed set that fails closed, and an idle handback fires on a **timer**, i.e. exactly CLAUDE.md's "a turn nobody typed".) | (a) none of the three — state changes only, and the agent learns from `browser_paused` / from its next command succeeding; (b) explicit handback only; (c) explicit handback + idle handback, both through the ladder under a new declared reason; (d) all three. | **(b), with (c) available as a setting that defaults OFF.** The explicit handback is a per-occurrence owner action and it is the one moment an *idle* agent cannot learn about any other way — the URL it needs to re-orient rides that turn. The takeover needs nothing (the typed refusal is immediate and free). The idle handback is the one with no owner action at all, so it is zero-spend by default: flip the lease, update the live view, file one "For you" item, and let the agent find out when its next command works. Whatever the answer, the reason is declared in `SPEND_REASONS` and the ladder is the only delivery path — a browser module that posts into a conversation any other way reddens `test-spend-paths`. |
 | **D12** | **Which isolation variant does P0 ship?** (§3.2.2 — the config file's `profile` key applies to every invocation that does not override it, so "no `--profile`" is not the default, it is a decision.) | (A) `SESSION` only; (B) `SESSION` + `NAMESPACE` with the config profile left in force; (C) add a per-session scratch `AGENT_BROWSER_PROFILE`; (D) add `AGENT_BROWSER_CONFIG` pointing at a VibeSpace-written config with no `profile` key. | **(D), falling back to (C), then to (A), each fallback logged with its reason.** D is the only variant that is actually ephemeral, the only one that can carry `--allowed-domains` (§6.3), and the only one with no Chromium user-data-dir contention. **(B) is not an option** — it is what round 1 accidentally specified and it cannot work: N daemons, one user-data-dir. The cost of D is honest and stated: the CLI hard-errors on a missing/invalid `--config`, so the file is verified before the variable is set. |
 | **D13** | **Headed by default, and what is the concurrent-browser ceiling?** (§3.2.3 — measured: 6 processes, 420–667 MB PSS and 2 inotify instances per Chromium, against a 128-per-uid inotify ceiling this box already trips; and the 1 h idle timeout **exempts headed browsers**, while the installed build has no default timeout at all.) | (a) keep `headed: true` for everything and set only the idle timeout; (b) headless by default for agent sessions once the live view exists (P2), headed per profile on request; (c) headless immediately, live view or nothing. | **(b), with the explicit idle timeout from day one.** Until P2 the desktop VNC window is the only way to watch, so headed has to stay reachable; once the live view exists, headless is strictly better for the agent case and it is the variant the idle timeout actually collects. Ceiling: propose **8 concurrent browsers per instance**, refused loudly at the ceiling with the holders named — but the number should be re-set from P0's own k = 1/4/12 measurement rather than from this paragraph. |
-
 | **D14** | **Where does the pin live, and does a Task Group carry a default?** (§3.2.5 — the pin is one command; the question is which surfaces register it and whether a 岗位 may set a default for every session it owns.) | (a) the session-card right-click only; (b) the four surfaces (card menu, Session Properties, the live-view title bar, the New Session dialog); (c) (b) plus a Task-Group default rung. | **(c).** The four surfaces are one command with four `registerMenuItem` registrations, not four implementations, so the cost is the registrations. The Task-Group rung is what makes "this 岗位 always works in the vendor portal" a thing you say once — and it sits BELOW the conversation's own value, so it can never overwrite work a session already did. |
 | **D15** | **Does a fork inherit the profile pin?** (§3.2.5 — `browserKey` deliberately does not.) | (a) inherit the pin (identity still fresh); (b) inherit neither; (c) inherit both. | **(a).** A pin is a preference ("this kind of work uses this login") and a key is an identity. (c) would give a fork another conversation's pinned tab, which is the defect §3.2.1 exists to prevent; (b) makes every fork of a portal session log in again for no reason. |
 | **D16** | **Does a mid-session pin announce itself into the conversation?** (§3.2.5, the same category as D11 — an announcement is a billed turn.) | (a) never — the agent learns from `vibespace-browser status` and from its next launch landing in the new profile; (b) the free path only (a `<system-reminder>` on the user's next message); (c) (b) plus a delivery-ladder turn when the session is idle, behind a setting. | **(c) with the setting default OFF**, which is exactly (b) in practice. A pin is a user action, so the user is right there typing and the `pendingNotice` channel costs nothing. The ladder path exists for the one shape that channel cannot serve — an idle session the owner wants to redirect now — and it is declared, gated and off by default like every other unattended turn. |
@@ -1753,6 +1842,13 @@ Added in round 3, all of them consequences of the owner's four questions:
     forensic literature, both of which describe a build older than today's. §4.8's adapter shape
     follows from that design; if the vendor has changed it, the adapter's shape changes with it,
     and P8 must re-check before writing code.
+23. **That the `/proxy` local-echo path cannot carry WhatsApp Web — reasoning, not measurement.**
+    §4.7's first reason for rejecting `src/lib/browser-window.js` (the page runs in the user's
+    browser, there is no CDP target, the agent cannot drive it) is read off the source and is
+    certain; the second (that node-unblocker's rewriting proxy does not carry its service worker or
+    its persistent WebSocket) I did not run. It does not affect the conclusion — the first reason
+    alone rejects the path — but anyone who later wants `/proxy` as a "let a human look at this
+    site" path must measure it first.
 
 ---
 
@@ -1910,3 +2006,85 @@ holds, and §12.11 states the one claim that is therefore unmeasured), it did no
 three-tier routing in §3.6, and it did not soften any of round 1's own "what I could not verify"
 entries — that list grew from 9 to 14.
 
+
+---
+
+## Appendix C — critique log (round 4)
+
+An adversarial critic read round 3's revision and filed six findings. **All six are upheld**, each
+checked against the source before anything was changed; what follows is the command that was run
+and the answer it gave, because "verified" is a claim about what was run and not a feeling about a
+diff. None was judged wrong, so this round has no rejected entry.
+
+| # | Severity | Finding | Verdict | Where it landed |
+|---|---|---|---|---|
+| 1 | high | The blank line between D13 and D14 terminates §11's GFM table, so **this round's whole set of eight new decisions, D14–D21, renders as a wall of pipes** | **UPHELD** | One line deleted in each doc (`.md:1636` / `.zh.md:1414`) |
+| 2 | medium | The ownership badge reuses "the colour the session card already uses", and the session card has **no** colour: `task-color-seq.js` colours **task groups** | **UPHELD** | §4.6 badge paragraph rewritten as a per-session derivation + two new fast cases in `test-window-binding` |
+| 3 | medium | `split.pair` holds window ids with no rule governing it under chain mutation; host promotion is a reachable path that leaves a dangling id | **UPHELD** | §4.6's new `_normalizeChain` invariant + a third lifecycle case + one new fast case |
+| 4 | medium | §4.7's "no path here can do local echo" is falsified by the product itself: `/proxy` + `src/lib/browser-window.js` is one | **UPHELD** | §4.7's conclusion restated as "every path an **agent can also drive**", with the exception and its two rejection reasons written out + §12.23 |
+| 5 | low | `task-group` is a fifth value in the **frozen** four-value `SPAWN_ORIGINS`, and the `applyOriginHint` rule borrowed to justify it points the opposite way | **UPHELD** | §3.2.5 names the two-site edit + replaces the wrong justification + `test-browser-pin`'s vocabulary assertion |
+| 6 | low | The sentence whose whole job is to bound the estimate cites **46 rounds**, a figure that exists in none of its own tables (round 2 residue) | **UPHELD** | §10 now says 82 (sum of extremes) against 66 (risk-weighted) |
+
+**Verification notes.**
+
+* **Finding 1.** Rendering §11 of both files with the repo's own `marked` yields exactly **one**
+  `<table>` with 14 `<tr>` (header + D1–D13) per file, while D14 and D21 land in `<p>` with literal
+  pipes. Scanning every consecutive pipe-block in both files: 18 blocks each, exactly one per file
+  whose first line has no delimiter row after it — `.md:1637` and `.zh.md:1415`, both immediately
+  preceded by an empty line. After the fix, re-rendering gives one `<table>` with **22** `<tr>`
+  (header + D1–D21) and zero `<p>` in §11 of each file.
+* **Finding 2.** `grep -n 'seqTaskColor\|taskGroupColor\|colorSeq' src/lib/session-card.js
+  src/lib/sidebar-render.js` returns **nothing**; the repo-wide consumers are `sidebar-tasks.js:258/270`,
+  `task-detail.js` and `session-props.js:499`, every one keyed on a task-group record. The critic's
+  proposed replacement source (the `sess-<seq>` counter in the webui id) checks out:
+  `src/ws-create.js:234` is `'sess-' + seq + '-' + Date.now()`. But the sub-claim "stable across
+  resume" is **imprecise** and the doc is narrower for it: `boot-restore.js:200` reuses
+  `meta.webuiSessionId` on a **server restart** only, while a resume through ws-create mints a new
+  key. The doc therefore states "survives a restart, changes on a resume" and says why that is
+  acceptable for a badge.
+* **Finding 3.** The three chain-mutation sites in `src/lib/tab-group.js` were read: `addToTabChain`
+  (splice/push at 176-181), `_detachFromChain` (467) and `removeFromTabChain` (546, which does not
+  touch `tabs` itself and delegates). The host-promotion branch is at 477-497, guarded by exactly
+  `idx === 0 && chain.tabs.length > 1`. `grep -rn '_normalizeChain' src/` returns nothing, so "this
+  rule has no home today" holds. One correction: the critic attributed the host branch to
+  `removeFromTabChain`; it is in `_detachFromChain`, and the doc names the latter — which does not
+  change the finding, only makes "one place" point somewhere real. One thing the critic did not say
+  but the same invariant must answer was added: a split renders **inside the host's element**, so a
+  host change must move and re-lay-out both panes even when both `pair` members survive.
+* **Finding 4.** `src/lib/browser-window.js:8` is
+  `openBrowser(app, url, { syncId, proxy = false })` and `:74` is
+  `iframe.src = proxyMode ? '/proxy/' + u : u`; `server.js:636-647` mounts node-unblocker at
+  `/proxy/`, `:236` makes the body parser skip it, `:1861` dispatches its WebSocket upgrade. And
+  `browser-window.js` appeared **zero** times in the body (only in Appendix A's source list,
+  `.md:1785` / `.zh.md:1538`), with `unblocker` and `/proxy` appearing nowhere at all. The
+  conclusion is restated as the critic proposed — every path an **agent can also drive** pays one
+  RTT — and the ranking is unchanged.
+* **Finding 5.** `src/resume-continuity.js:56`'s `SPAWN_ORIGINS` is an `Object.freeze` of four
+  values whose comment forbids inventing a fifth; `agent-meta.js:338`'s `spawnValueOrigin`
+  whitelists the same four and falls through to `responseStyleOrigin`, so the consequence of a fifth
+  string is a **silently wrong label**, not an error. `applyOriginHint`'s JSDoc is verbatim "It may
+  only DOWNGRADE a 'chosen' to a fact the user did not state, never upgrade or re-point anything",
+  which is indeed the opposite direction from `instance → task-group`. The doc now rests on the
+  justification that does hold (both rungs mean the same thing, so the swap adds information without
+  changing the claim).
+* **Finding 6.** Re-derived from the phase rows: 5+8+6+5+9+4 = 37 (P0–P5), range 29–54; +6 gives
+  43 / 33–63 (P0–P6); +5+7 gives 55 / 42–82 (P0–P8); risk-weighted (P2, P4, P8 at range top) gives
+  44 / 50 / 66 — each matching the published table. `46` occurs nowhere else in §10; it is round 2's
+  P0–P8 figure (Appendix B's "25 / 31 / 46").
+
+**One defect found while verifying, which the critic did not file.** After finding 1, both files
+were rendered whole to look for **any** emphasis that fails to parse (the test: a literal `**`
+surviving into the rendered HTML). The Chinese doc had one, in §5.1:
+``默认**`exec` 一个子 shell**``. Under CommonMark's flanking rules a `**` preceded by a CJK
+character (neither whitespace nor punctuation) and followed by punctuation — here a backtick —
+**cannot open** emphasis, so that line rendered with two literal `**`. The English twin is fine
+because its `**` is preceded by a space. The fix moves 默认 inside the emphasis
+(``**默认 `exec` 一个子 shell**``) with no change of meaning. This is finding 1's class: **in the
+Chinese doc, a `**` butted against a Han character is a defect that never throws and only ever
+renders as literal asterisks**, visible only after rendering. After the sweep, both files render
+with zero unparsed emphasis outside code fences.
+
+**What round 4 deliberately did not do.** It did not launch a browser (§12.1's reason still holds),
+did not change any decision's recommendation, did not move a phase's round count (finding 6 only
+made the bounding sentence cite its own table), and did not soften any "what I could not verify"
+entry — that list grew from 22 to 23.
