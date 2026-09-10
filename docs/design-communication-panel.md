@@ -122,9 +122,9 @@ feature spans four rows, so the mapping is spelled out once:
 | Lark / Gmail / Agents adapters | **ORCH** | `src/channels/lark.js`, `gmail.js`, `agents.js` | contract suite + `test-channels-lark-shape` (fast, recorded fixtures) |
 | Ingest engine (poll scheduler, backoff, per-tick budget, failure surfacing) | **ORCH** | `src/server/channels-engine.js` (`create(deps)` factory) | `test-channels-engine` (heavy) |
 | Push lanes (one per vendor; liveness, ack, exclusivity measurement) | **ORCH** | `src/channels/live/<kind>.js` | `test-channels-push` (heavy) |
-| Local-client store scan (platform facts, TCC grant, read-only snapshot, cursor over rowid) | **SHARED** (bundled by the daemon) + one device op | `src/channels-store-scan.js` + the `channels-scan-store` handler in `src/agentd/agentd.js` | `test-channels-store-scan` (heavy, real daemon) |
+| Local-client store scan (platform facts, TCC grant, **read-only open** + a snapshot taken from that connection, cursor over rowid; the SQLite reader is a **bounded `sqlite3(1)` child** — never a native binding, which the daemon's single `--external` refuses; §12.5) | **SHARED** (bundled by the daemon) + one device op | `src/channels-store-scan.js` + the `channels-scan-store` handler in `src/agentd/agentd.js` | `test-channels-store-scan` (heavy, real daemon) |
 | Routes + broadcasts | **ORCH** | `src/routes/channels.js` | the route battery in `test-restore-smoke`, `test-channels-e2e` |
-| Wiring stanza | **ORCH** | `src/server/channels-wiring.js`, one call from `server.js` | `test-architecture` size ratchet (server.js ≤ 2100 lines) |
+| Wiring stanza | **ORCH** | `src/server/channels-wiring.js`, one call from `server.js` | `test-architecture` size ratchet (server.js ≤ 2100 lines — **at its ceiling today**, §2.1) |
 | Panel, window, filter editor, approval cards | **CLIENT** | `src/lib/channels-panel.js`, `src/lib/channel-window.js`, `src/lib/channel-filter-editor.js` | `test-channels-e2e` (heavy, headless chrome) |
 | Agent CLI | tracked static | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
@@ -176,7 +176,24 @@ do up front than to discover:
 - a new agent CLI goes into `HostManager.AGENT_TOOLS` and `AGENT_DOC_TOPICS`
   with its manual under `docs/agent/`;
 - new user-visible chrome strings go through `t()` with zh + ja dictionary
-  entries (i18n-check runs in the build).
+  entries (i18n-check runs in the build);
+- **that size ratchet is at its ceiling today, so P0's wiring stanza turns
+  `npm run build` red even at one line (r6).** Measured:
+  `scripts/test-architecture.mjs:187-188` asserts
+  `read('server.js').split('\n').length <= 2100`, and at this design's base commit
+  that value is **exactly 2100** (`wc -l` reports 2099 — the off-by-one is the
+  trailing newline, and the suite uses the 2100 form) ⇒ headroom is **ZERO**, not
+  one line. And this build is not optional: `npm run ci` (the mandatory pre-push
+  gate) builds, and `scripts/update.sh:104` — the in-app "Update VibeSpace…" —
+  builds ⇒ P0's **first** commit would block both the release gate and every
+  instance's self-update. Two ways out, pick one and do it **in the same commit**:
+  ① raise the budget **deliberately**, which the suite's own comment at lines
+  183-185 sanctions ("If a legitimate wiring stanza pushes past the budget, raise it
+  deliberately in the same commit that explains why"), or ② extract an existing
+  stanza into `src/server/` first. **Measure before writing the stanza**, do not
+  assume headroom — the comparable stanzas today are 1 line (`sysinfo-wiring`), 9
+  lines (`incident-wiring`) and 14 lines (`mounts-plugins-wiring`), and channels also
+  needs its router mounted. Priced as what it is: ~0.5 rounds, counted in P0.
 
 ---
 
@@ -359,8 +376,17 @@ adapter can send into **this** conversation" are different claims.
                                       // one client is a readable store on one OS and a scraped
                                       // screen on another; only scanState() resolves it (r5)
     scanLatency:    null,             // { store: 15, ui: 300 }  seconds, per SOURCE — an order
-                                      // of magnitude apart; SHOWN on the conversation row
-    history:        'page',           // 'page' | 'since' | 'none'
+                                      // of magnitude apart. This is the DECLARED cadence and it
+                                      // is also the CEILING the fs.watch kick is debounced to,
+                                      // never a label (r6, §6.4); the row draws the OBSERVED age
+    history:        'page',           // 'page'|'since'|'none' — the scalar, for push/poll
+    historyBySource: null,            // { store:'since', ui:'page' } — ONLY when receive==='scan'.
+                                      // r6: `history` is a per-SOURCE fact for exactly the reason
+                                      // `scanSources` is one — ONE adapter reads a store on one OS
+                                      // and scrapes a screen on another, and a DOM scrape cannot
+                                      // honour since-anchor semantics while declaring 'page' would
+                                      // delete the real anchor that is WHY 'store' is preferred.
+                                      // Only scanState() resolves it, and it returns the answer
     listConversations: true,
 
     // ——— axis 2: WHAT MAY BE SENT, AND AS WHOM ——————————————————————
@@ -408,9 +434,13 @@ adapter can send into **this** conversation" are different claims.
   live.start({ onEvent, onState })  ->  { stop() }
 
   // present ONLY when caps.receive === 'scan' — facts about THIS machine, so it is answered
-  // by the agentd op, hostId a PARAMETER and the local box is device #0 (§12.5)
+  // by the agentd op, hostId a PARAMETER and the local box is device #0 (§12.5).
+  // `at` is stamped HERE and READ by scanState() against a 6 h TTL (r6): these are stored
+  // derived facts from a round trip, so they take §5 invariant 7's TTL treatment rather than
+  // an exemption — a frozen answer keeps drawing "15 s" over a lane that fails every pass
   async scanHost(hostId)
-        -> { platform:'darwin'|'win32'|'linux', clientInstalled, storePath, grant, why }
+        -> { platform:'darwin'|'win32'|'linux', clientInstalled, storePath,
+             grant:'granted'|'needed'|'denied'|'unpromptable', why, at }
 }
 ```
 
@@ -428,8 +458,18 @@ offers(caps, convCaps, what)   // what ∈ 'send-as-user'|'send-as-bot'|'fetch-a
       -> { offered: boolean, why: string|null }      // 'unknown' ⇒ offered:false + the reason
 identityWarning(caps)          -> { level:'none'|'warn', text }        // §9.5
 scanState(caps, adapterRecord, hostFacts, now)          // r5 — the same shape as laneState
-      -> { source:'store'|'ui'|null, why, latencySeconds, storePath, grant }
-freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, text }   // lane = laneState()/scanState()'s answer
+      -> { via:          'scan',              // r6: the DISCRIMINATOR. laneState answers `via`,
+                                              //     so the union below is explicit rather than
+                                              //     sniffed off which keys happen to be present
+           source:       'store'|'ui'|null,   // the source actually carrying this conversation NOW
+           history:      'since'|'page'|null, // r6: caps.historyBySource[source], RESOLVED
+           carryContent: false,               // r6: a scan pass is a BATCH, like a poll pass (§6.4)
+           why, latencySeconds, storePath, grant, hostFactsAgeSeconds }
+      // `now` is load-bearing (r6): past HOST_FACTS_TTL (6 h) since hostFacts.at, this answers
+      // source:null / why:'host-facts-stale' — see §5 invariant 7
+freshnessClaim(caps, laneOrScan, convEntry, now)        // r6: widened, see the rule below
+      -> { kind:'live'|'within'|'scanned', seconds, text }
+      // laneOrScan = laneState()'s or scanState()'s answer, discriminated on `via`
 ```
 
 `laneState` is **added by r4**, and what it fixes is structural: "which lane is
@@ -485,7 +525,8 @@ lane-shaped decision goes through `laneState` (or `scanState` on a scan lane),
 none of them reads `caps.receive` or `caps.scanSources`**:
 
 - **The panel** draws every row's freshness chip from
-  `freshnessClaim(laneState(…), convEntry)` — or from `scanState(…)` on a scan lane,
+  `freshnessClaim(caps, laneState(…), convEntry, now)` — or from `scanState(…)` on a
+  scan lane (the union is discriminated on `via`, §4),
   which is where that chip's seconds-vs-minutes number comes from (a **live,
   content-carrying** push =
   "live", poll = "≤ 30 s", scan = "last scanned <t> ago" — **a scan source's
@@ -570,6 +611,48 @@ a **fake adapter** plus every registered real one in shape-only mode):
   conversation row from seconds to minutes without saying so, and that number is the
   whole honesty contract of this class (§12.5); falling back to `'ui'` may only be a
   choice the user made in the connect wizard (`why:'user-chose-ui'`).
+- **On `receive:'scan'`, every value in `historyBySource` must be non-`'none'`, and
+  the table's keys must cover every source named in `scanSources`** (r6). The rule
+  above it (no `history:'none'` on a scan lane) was written against a per-**kind**
+  scalar, and r5 had just finished proving that in this class **one adapter runs both
+  cells**: the same WhatsApp module reads a store on macOS and scrapes a screen on
+  Linux. So no value of that scalar is right — declaring `'since'` asks a Linux
+  deployment to honour since-anchor semantics with a DOM scrape, and declaring
+  `'page'` deletes the "real anchor ⇒ `history:'since'`" that decision 19 and §5
+  invariant 2 give as **the** reason `'store'` is preferred at all. `history`
+  therefore becomes a per-source upper-bound table on a scan adapter, resolved by
+  `scanState()` alongside `source`. Its negative control sits beside the one above: a
+  scan adapter whose `historyBySource` omits a source its `scanSources` declares must
+  go red.
+- **`scan.hostFacts` is the second named exception, and it pays the same price**
+  (r6, §5 invariant 7). Platform, client presence, store path and read grant are the
+  result of a (possibly cross-machine) `channels-scan-store` round trip and are not
+  locally re-derivable — which is precisely the property that earned `convCaps` its
+  named exception. So what it gets is again not an exemption but **a 6 h TTL**, three
+  named refresh triggers (① when the user picks a source in the connect wizard, ② on
+  the first panel render past the TTL, ③ unconditionally before a scan pass that would
+  advance the anchor — the store analogue of "re-resolve at approval time"), and a
+  past-the-TTL degrade to `source:null` / `why:'host-facts-stale'`, rendered by the
+  same not-offered-with-a-reason path as everything else. **`grant` is never trusted
+  across a pass**: a macOS TCC grant is revocable in System Settings at any moment and
+  decision 19(d) records the prompt itself as per-process-instance and temporary, so a
+  stored `granted` is a claim that expires **by construction** — the op's own `EPERM`
+  is the authority, and a `granted` that comes back `EPERM` re-files as `tcc-denied`
+  and clears the stored grant. `grantAskedAt` has its own reader: the "do not
+  re-prompt on this machine more than once per N" rule — a field with no reader is, in
+  this repo, "the fix was never wired".
+- **`freshnessClaim` can reach both of the numbers it states** (r6). It returns
+  `seconds` and has to say "last scanned <t> ago" — an **age** — yet its signature
+  carried no clock and no `caps` (and the poll case's "≤ 30 s" lives in
+  `caps.pollInterval.hot`, with the hot/cold fact that selects between 30 and 300 not
+  passed either). Every sibling resolver in this repo takes `now` (`laneState`,
+  `scanState`, and the convention everywhere else: `quota-model`'s `nowSec`,
+  `decideLagShadow`'s `now`); this one has no reason to be the exception. And since r5
+  its first argument is a union of two **disjoint** shapes (`laneState()`'s answer
+  carries `via`, `scanState()`'s carried only `source`), leaving the callee to
+  discriminate on which keys happen to be present — so `scanState()` now answers
+  `via:'scan'` too and the discriminator is explicit. The signature becomes
+  `freshnessClaim(caps, laneOrScan, convEntry, now)`.
 
 `ChannelRecord` (PURE, `src/channel-record.js`) is the one normalized shape:
 
@@ -602,11 +685,25 @@ data/channels/
                                 consecutiveFailures,
                                 push {enabled, claimedExclusive, state, lastEventAt,
                                       missRate, demotedAt, demotedWhy}    // §6.4
-                                scan {hostId, chosenSource, grant, grantAskedAt,
-                                      hostFacts {platform, clientInstalled, storePath, at}}
+                                scan {hostId, chosenSource, grantAskedAt,
+                                      hostFacts {platform, clientInstalled, storePath,
+                                                 grant, at}}
                                                                           // §12.5: the CHOICE and
                                                                           // the OBSERVATION; only
-                                                                          // scanState() folds them
+                                                                          // scanState() folds them.
+                                                                          // r6: the OBSERVATION half
+                                                                          // is a stored derived fact,
+                                                                          // so invariant 7 gives it a
+                                                                          // 6 h TTL, three refresh
+                                                                          // triggers and a named
+                                                                          // degrade. `grant` moved
+                                                                          // INSIDE hostFacts: it
+                                                                          // expires with them and is
+                                                                          // never trusted across a
+                                                                          // pass (the op's own EPERM
+                                                                          // is the authority).
+                                                                          // `grantAskedAt` is read by
+                                                                          // the don't-re-prompt rule
   index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
                                 id, adapterId, vendorId, title, kind (dm|group|thread),
                                 participants summary, lastAt, unread, tracked, anchor,
@@ -679,7 +776,20 @@ Invariants, each with its reason:
    what it gets is not an exemption but **a TTL (6 h), three refresh triggers, and a
    past-the-TTL degrade to `unknown`** (§4). That is what finally gives the stored
    `at` a reader — before r4 it had none, and in this repo a field with no reader is
-   "the fix was never wired".
+   "the fix was never wired". **`scan.hostFacts` is the second exception, and r6 added
+   it only after reproducing the same defect inside it**: r5 wrote
+   `{platform, clientInstalled, storePath, grant, grantAskedAt, at}` with three fields
+   that had no reader, no TTL, no refresh trigger and no staleness degrade — r4's own
+   sentence, one section away. It owes the price `convCaps` pays, word for word (a 6 h
+   TTL, three named triggers, a past-the-TTL degrade to `source:null` /
+   `why:'host-facts-stale'`; §4), and the harm runs the other way and costs more: a
+   stale `convCaps` **over-offers** one control, while stale `hostFacts` keep
+   `scanState()` answering `source:'store'` and `latencySeconds:15` after the client is
+   uninstalled, after a client update moves the store (item 19(e) concedes the schema
+   moves with versions), or after a Sonoma→Sequoia upgrade that this section itself
+   says **extends** TCC to `~/Library/Group Containers/` — i.e. exactly the "quietly
+   swapping a 15-second lane for a 5-minute one" that §12.5 forbids, except that here
+   there is no 5-minute lane either and every pass is failing.
 
 ### 5.1 Who owns the index
 
@@ -735,7 +845,9 @@ LANE ─┼─ poll  : adapter.history() ─────────┼─► no
                                                                          │
                         ├─► broadcast 'channels-updated'  (once per pass / per coalesced burst)
                         │
-                        └─► COALESCE (60 s window when laneState().carryContent — fence 12)
+                        └─► COALESCE (60 s window when carryContent — fence 12; only a PUSH
+                        │            lane can answer true: a poll pass and a scan pass are
+                        │            already batches, so they need no window — r6)
                               └─► for each ASSIGNED conversation:
                                     channelFilter.matchRecord(filter, record)
                                       └─ hit ─► assignment.route (agent | rotating group)
@@ -829,12 +941,15 @@ against that machine:
   **unencrypted** Core Data SQLite store. The cursor is the pair
   `(rowid, timestamp)`, the anchor is the client's **own** message id (hence
   `history: 'since'`, and §5 invariant 2 gets a real key), a pass is complete when
-  it reaches the maximum rowid recorded at its start, and an fs.watch on the file
-  is an optional change notification. **Never write**: snapshot via the SQLite
-  backup API and read the copy, because this is a WAL database and reading the main
-  file alone silently omits the most recent messages. When macOS TCC refuses the
-  read this lane fails under the name `tcc-denied` — **never as a successful scan
-  that read zero messages**.
+  it reaches the maximum rowid recorded at its start, and the `fs.watch` on the file
+  is a **cursor kick** (debounced to `caps.scanLatency.store`, §6.4), never a
+  per-write scan. **Never write**: open the live store with `SQLITE_OPEN_READONLY`
+  (which reads WAL content and mutates nothing) and take the scratch snapshot with
+  `VACUUM INTO` / the backup API **from that read-only connection** — what silently
+  omits the most recent messages is reading the **`.db` file alone** (it does not
+  contain the WAL), not opening read-only (r6, measured in §12.5). When macOS TCC
+  refuses the read this lane fails under the name `tcc-denied` — **never as a
+  successful scan that read zero messages**.
 - **`'ui'` — read what that client rendered** (driven by an agent-browser profile,
   see `docs/design-agent-browser-v2.md`). This is the only source for **Windows,
   Linux and all of WeChat** (the first two encrypt their store or have no official
@@ -845,12 +960,18 @@ against that machine:
 The two routes are an order of magnitude apart in latency (seconds vs minutes), and
 **both numbers are the number drawn on the conversation row**, because it is the
 one thing a user must know before handing that lane a job — which is also why a
-refused store read does **not** silently degrade to a UI scan. Sending is the same
-act on both routes: typing into that logged-in official client's own composer; the
-protocol-library route carries fence 13's terms risk and is not offered by default.
+refused store read does **not** silently degrade to a UI scan. **Sending does not
+follow the source** (r6): reading a store is read-only evidence, not a send lane, so
+on a machine that resolves to `'store'` with no send lane wired, `convCaps.sendAs` is
+`[]` with `why:'no-send-lane-on-this-host'` — which §4's existing rule renders as
+not-offered-with-a-reason and which stops any proposal being created. The send act
+belongs to `'ui'` alone: an agent-browser typing into that logged-in official
+client's own composer; the protocol-library route carries fence 13's terms risk and
+is not offered by default.
 **The store lives on a machine, so the code that reads it runs on that machine**: a
 `channels-scan-store` agentd op, `hostId` a parameter, the local box device #0. The
-interface for this class exists from P0 (`scan` / `scanSources` / `scanLatency` /
+interface for this class exists from P0 (`scan` / `scanSources` / `historyBySource` /
+`scanLatency` /
 `scanState` / `convCaps` / `tosRisk` are all slots kept for it); the WhatsApp and
 WeChat adapters themselves are P6 behind decision 19.
 
@@ -901,6 +1022,32 @@ the auto-demotion below could not structurally win — see §4.
 - **demoted, or not `live`** — whatever the claim says, `carryContent:false` and
   `pollCadence:'fast'`. That is the whole of the precedence: a claim the product has
   itself withdrawn may no longer decide which lane a single byte takes.
+- **`via:'scan'` — `carryContent:false`, always** (r6). The precedence above
+  enumerates push states and nothing else, while the gate at the funnel reads **the
+  resolved lane** and `laneState()` can answer `via:'scan'` — so the scan lane sat in
+  a cell nobody had filled in. The answer itself is not in doubt: **a scan pass is a
+  BATCH**, word for word like a poll pass, so it neither needs the window nor buys any
+  latency from it (fence 12's own sentence: opening it in kick mode "buys 60 s of
+  latency for nothing"). The cost of leaving it unwritten is not theoretical: §12.5
+  introduces `'store'` together with an **event-driven** trigger (an `fs.watch` on the
+  store file), and WhatsApp's `ChatStorage.sqlite` is written on every incoming
+  message — so in a busy group the watch fires roughly per message ⇒ one scan pass per
+  message ⇒ one filter hit per message ⇒ under `notify:'wake'` the gate reads a
+  `carryContent` that is undefined (falsy) ⇒ no coalescing ⇒ **one wake per message**.
+  That is fence 12's own "30 messages become 30 deliveries", arriving through the lane
+  r5 had just added, on the one gate that did not cover it.
+- **That `fs.watch` is a CURSOR KICK, never a per-write scan** (r6). It wakes the
+  scan *sleep* (the same wording as the `shared` push kick, the same
+  `opencode-events` lesson) and is **debounced to at most one pass per
+  `caps.scanLatency[source]`** — which is what makes that number a real ceiling
+  rather than a label, so the seconds drawn on the conversation row and the rate at
+  which the store is actually read are the same fact. It runs inside the daemon, so it
+  also owes the `opencode-events` round-4 inotify-lifetime rule: one attach point, a
+  stop that is terminal, and never a watch attached to a lane nobody holds. Honest
+  bound: §7.4's 30 s per-conversation ladder floor and the spend authorizer cap the
+  **absolute** spend, so this is not unbounded money — but the wakes and the charges
+  differ per lane, which is what makes §6.1's headline ("the same records, the same
+  wake count, and the same charges") and §16's parity row literally unsatisfiable.
 
 **An assertion must be falsifiable or it is a prayer.** The platform never tells
 us how many other clients are connected, so exclusivity is **asserted, never
@@ -1616,8 +1763,8 @@ writes down or draws. Hence `receive: 'scan'`, plus a second question — scan
 
 | `scanSource` | Reads | Anchor | Latency | Sends |
 |---|---|---|---|---|
-| `'store'` | The local store the client wrote, incrementally with a cursor over rowid/timestamp, optionally with an fs.watch on the file for change notification | The client's **own** message id (the store already has that column) ⇒ `history: 'since'` | Seconds | Falls to `'ui'` — the protocol libraries are refused by fence 13 |
-| `'ui'` | What the client **rendered**, driven by an agent-browser profile (`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + fingerprint seed + proxy, plus a live view VibeSpace owns) | Usually no stable id ⇒ a **declared** synthetic key ⇒ `history: 'page'`, **never `'none'`** | Minutes | agent-browser typing into the client's own composer |
+| `'store'` | The local store the client wrote, incrementally with a cursor over rowid/timestamp; the `fs.watch` on the file is a **cursor kick**, debounced to `caps.scanLatency.store` (§6.4), never a per-write scan | The client's **own** message id (the store already has that column) ⇒ `historyBySource.store = 'since'` | Seconds | **No send lane of its own** (r6): a store is read-only evidence. Sending comes from `'ui'` only; where that lane is not wired, `convCaps.sendAs: []` + `why:'no-send-lane-on-this-host'` — the protocol libraries are refused by fence 13 |
+| `'ui'` | What the client **rendered**, driven by an agent-browser profile (`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + fingerprint seed + proxy, plus a live view VibeSpace owns) | Usually no stable id ⇒ a **declared** synthetic key ⇒ `historyBySource.ui = 'page'`, **never `'none'`** | Minutes | agent-browser typing into the client's own composer |
 
 **r5 (the owner's correction): `'store'` is not a hypothetical cell — on macOS it
 is real.** r4 wrote that "decision 19 excludes `'store'` for **both** platforms",
@@ -1650,25 +1797,46 @@ machine" is a per-**deployment** fact — which is **word for word** why r4 dele
   linux:'ui' }`), a static **upper bound**, in the same direction as
   `convCaps ⊆ caps`: resolution may only narrow, never widen;
 - `caps.scanLatency` — a number **per source** (`{ store: 15, ui: 300 }` seconds),
-  because the two routes are an order of magnitude apart and that number is drawn
-  on the conversation row;
+  because the two routes are an order of magnitude apart; it is both the
+  **declared** cadence and the **ceiling** the `fs.watch` kick is debounced to
+  (§6.4), while the number drawn on the conversation row is the **measured** age
+  (property 1 below);
+- `caps.historyBySource` — **the second field with the same reason** (r6):
+  `{ store:'since', ui:'page' }`. `history` was a per-**kind** scalar, and the
+  paragraph above has just finished arguing that in this class **one adapter runs
+  both cells** — so no value of that scalar is right: `'since'` asks the Linux cell
+  to honour since-anchor semantics with a DOM scrape, and `'page'` deletes the "real
+  anchor ⇒ `history:'since'`" that decision 19 and §5 invariant 2 give as **the**
+  reason `'store'` is preferred at all. Same upper-bound table, same resolver, and
+  §4's contract rule covers both halves ("no value may be `'none'`" and "the keys
+  must cover every source `scanSources` names");
 - the **one** resolver in `src/channel-caps.js`,
   `scanState(caps, adapterRecord, hostFacts, now)`, folding platform, client
-  presence and read grant into one answer — the same shape and the same law as
-  `laneState` (*there may be only one place that folds them into an answer*).
+  presence, read grant and the **age** of those machine facts into one answer — the
+  same shape and the same law as `laneState` (*there may be only one place that
+  folds them into an answer*), and, like it, answering `via`.
 
 ```js
 scanState(caps, adapterRecord, hostFacts, now)
-      -> { source:  'store'|'ui'|null,       // the source actually carrying this conversation NOW
+      -> { via:     'scan',                  // r6: the discriminator, so freshnessClaim's union
+                                             //     with laneState()'s answer is explicit
+           source:  'store'|'ui'|null,       // the source actually carrying this conversation NOW
+           history: 'since'|'page'|null,     // r6: caps.historyBySource[source], RESOLVED
+           carryContent: false,              // r6: a scan pass is a BATCH (§6.4) — always
            why:     'store'|'no-store-on-platform'|'store-encrypted'
-                    |'client-not-installed'|'tcc-denied'|'user-chose-ui'|'no-source',
-           latencySeconds,                   // from caps.scanLatency[source]; drawn on the row
+                    |'client-not-installed'|'tcc-denied'|'user-chose-ui'
+                    |'host-facts-stale'|'no-source',
+           latencySeconds,                   // caps.scanLatency[source] — the DECLARED cadence,
+                                             // and the fs.watch debounce ceiling (§6.4)
            storePath,                        // only when source==='store'; never logged
-           grant:   'granted'|'needed'|'denied'|null }
+           grant:   'granted'|'needed'|'denied'|'unpromptable'|null,
+           hostFactsAgeSeconds }             // r6: now - hostFacts.at; the panel says it out loud
 ```
 
-The precedence is written down the same way: **platform declaration > client
-presence > read grant > `'ui'`**. And it carries one **deliberate** exception,
+The precedence is written down the same way: **facts fresh > platform declaration >
+client presence > read grant > `'ui'`** (r6 puts the freshness rung first: every
+rung below it reads `hostFacts`, so a stale record makes all four of them answer
+about a machine as it was, not as it is). And it carries one **deliberate** exception,
 without which this resolver becomes the thing it exists to prevent:
 
 > **A refused read does not silently degrade to `'ui'`.** `tcc-denied` is a
@@ -1691,11 +1859,24 @@ without which this resolver becomes the thing it exists to prevent:
   `'ui'`. On **Windows** and **Linux** that route does not exist (the store is
   encrypted there; there is no official client at all here), leaving the official
   Web client inside an agent-browser profile, i.e. `scanSource: 'ui'`. **Sending is
-  the same act on both routes**: typing into that logged-in official client's own
-  composer, so identity-wise it really is the user (`identityMarking: 'none'`) —
-  which is also why reading the store does **not** drag sending along with it: a
-  store is read-only evidence, not a send lane. The other route is a protocol
-  library (whatsmeow / Baileys): reverse-engineered **unofficial clients**, and
+  stated per source, because it is not one act (r6 correction)**: r5's sentence
+  "sending is the same act on both routes — typing into that logged-in official
+  client's own composer" is true of `'ui'` (an agent-browser typing into a web page)
+  and **undefined** on macOS, where the official client is a **native Catalyst app**
+  that no browser profile can reach. So: `'ui'` = an agent-browser typing into that
+  Web client's composer, identity really is the user (`identityMarking: 'none'`);
+  macOS `'store'` has **no send lane of its own** (a store is read-only evidence)
+  and exactly two candidates, and **this design does not pick for the owner** (§20,
+  decision 19): (a) the same Web client in a profile — which is a **SECOND
+  linked-device credential**, two logins for one conversation, and must be modelled
+  as its own row beside `auth.state()`/`scanState().grant` — or (b) native macOS UI
+  automation (Accessibility / CGEvent), a mechanism this document had never named
+  and which needs **its own** TCC grant. Until one of them is wired, this class is
+  **read-only** on macOS, and structurally so: `convCaps.sendAs` resolves to `[]`
+  with `why:'no-send-lane-on-this-host'`, which §4's existing rule renders as
+  not-offered-with-a-reason and which stops any proposal being created. The other
+  route is a protocol library (whatsmeow / Baileys): reverse-engineered
+  **unofficial clients**, and
   unofficial clients are explicitly prohibited by WhatsApp's terms; public
   reporting has bans landing on low-volume, reply-only, otherwise legitimate use,
   and the compliant alternative is the official Business Cloud API through a
@@ -1725,13 +1906,67 @@ without which this resolver becomes the thing it exists to prevent:
   (store swapped, read refused, process exit) ⇒ `complete: false`, the anchor does
   **not** move, and the next pass re-reads. Same rule as §5 invariant 4, different
   evidence.
-- **Never write.** Prefer the SQLite **backup API** (or `VACUUM INTO`) to copy the
-  store into a scratch snapshot and read *that*; the fallback is copying the `db` /
-  `-wal` / `-shm` triple. **"Open the live store read-only" is not sufficient**:
-  this is a WAL database, so reading the main file alone **silently omits** the most
-  recent messages, while opening it read-write touches the running client's own
-  state. Never checkpoint, never delete the WAL, never open `mode=rw` — this lane's
-  only observable effect on that client must be one brief shared lock.
+- **Never write — and before r6 the mechanism this bullet PREFERRED was the one
+  that breaks it.** r5 wrote "prefer the backup API or `VACUUM INTO`, because
+  'open the live store read-only' is not sufficient on a WAL database", and both
+  halves are wrong in a way that made them prop each other up: what **silently
+  omits** the most recent messages is reading the **`.db` file alone** (it does not
+  contain the WAL), while opening it **read-only** reads WAL content — and
+  meanwhile the preferred mechanism's source connection can only be the **default**
+  (read-write) open, which is the one open that mutates the store. The rule becomes:
+  **open the live store with `SQLITE_OPEN_READONLY` (`file:…?mode=ro`), then run
+  `VACUUM INTO` / the backup API FROM that read-only connection into a scratch
+  snapshot, and read the snapshot.** Measured on a throwaway fixture (node v24.12.0
+  `node:sqlite`; a producer SIGKILLed leaving an un-checkpointed WAL — `db` 8192 B
+  sha `b383fc2c3cf06e24`, `-wal` 4152 B, `-shm` 32768 B; every arm starts from a
+  byte-identical copy):
+
+  | arm | rows read | `db` | `-wal` | `-shm` |
+  |---|---|---|---|---|
+  | default open, **we are the only connection** | `OLD1,OLD2,`**`NEWEST`** | **rewritten** `ee24f1b1…` | **DELETED** | **DELETED** |
+  | default open, a client connection held open | same three | identical | identical | identical |
+  | `readOnly:true`, only connection | `OLD1,OLD2,`**`NEWEST`** | identical | identical | rewritten |
+  | `readOnly:true`, client connection held open | same three | identical | identical | identical |
+  | `readOnly:true`, `-shm` unwritable | `OLD1,OLD2,`**`NEWEST`** | identical | identical | identical |
+  | `VACUUM INTO` from the read-only connection | snapshot has all three | identical | identical | rewritten |
+  | `backup()` from the read-only connection (async) | snapshot has all three | identical | identical | rewritten |
+  | reading the **`.db` file alone** | `OLD1,OLD2` — **NEWEST missing** | identical | identical | identical |
+
+  The first row is SQLite's documented **last-connection checkpoint-and-delete**,
+  and "our process is the last connection" is the NORMAL case for a scheduled
+  background scan (the owner quit the client / rebooted / is away) — it is also
+  exactly the shape of §16's synthetic fixture. `-shm` is the WAL index, carries no
+  message content, and a read-only open leaves it **untouched** when it cannot be
+  written — so the assertable form of "never write" is **`db` and `-wal`
+  byte-identical**, never the triple (see §16). Never checkpoint, never delete the
+  WAL, never take the **default** (read-write) open — this lane's only observable
+  effect on that client must be one brief shared lock. Copying the `db` / `-wal` /
+  `-shm` triple **stays as the fallback** for when `-shm` cannot be attached, with
+  its cost stated: it is a **torn-read** hazard (the client may checkpoint mid-copy)
+  that the read-only open avoids.
+- **Which SQLite reader — a decision that belongs here (r6).** This lane runs
+  inside the **daemon**, and the daemon ships as a single-file esbuild bundle with
+  exactly ONE `--external`, `node-pty` (package.json `build:agentd`); the installer
+  calls that bundle "zero-dep", sets `NODE_MIN=18`, and installs node-pty
+  separately as explicitly best-effort and non-fatal. Every candidate therefore
+  collides with a constraint this repo has already written down, so the choice is
+  made here rather than left to the implementer: ① **recommended: a bounded child,
+  `sqlite3(1)`, one spawn per pass** — fence 3's sanctioned shape ("once per pass,
+  not per item"), macOS ships `/usr/bin/sqlite3`, and `VACUUM INTO` works from the
+  CLI; ② `node:sqlite` behind a **runtime capability probe** and with a **stated
+  `NODE_MIN` bump**: it does not exist on Node 18/20 (added in 22.5.0), still emits
+  `ExperimentalWarning` on Node 24 (measured), and its **row-reading API is
+  synchronous** (`DatabaseSync`/`StatementSync` — its `backup()` *is* async, so the
+  hazard is the row scan, not the snapshot copy), while CLAUDE.md says this daemon
+  "carries live session pipes — revisit only with daemon-side worker isolation",
+  which is fence 3's own law; ③ **a native binding (`better-sqlite3`) is refused**,
+  with the bundle as the reason: it needs a second `--external` plus a per-platform
+  prebuilt shipped to that Mac — the node-pty story, which is degradable for
+  terminals and **is the feature** here. When no rung is available, the
+  `channels-scan-store` op answers with a **named** refusal `no-sqlite-reader` —
+  never zero messages (fence 8's shape). `test-architecture`'s SHARED rule cannot
+  see any of this (node builtins are allowed); only the daemon bundle would, at
+  build time.
 - **TCC is a named gate.** macOS Sonoma 14 introduced protection for app data
   containers under `~/Library/Application Support/`, and Sequoia 15 **extends** it
   to `~/Library/Group Containers/`; a process that is neither signed with that
@@ -1781,11 +2016,19 @@ with a cursor" is, in this cell, this:
 **Three properties the class shares**, all of which fall straight into machinery
 that already exists:
 
-1. **Latency is a number drawn on the conversation row, and it comes from
-   `scanState`, not from a static declaration.**
-   `freshnessClaim(scanState(…), convEntry)` answers "last scanned <t> ago" for
-   `scan`, and the AssignFilter panel says it before the user hands that lane a
-   job. A lane that scans every five minutes is honest for on-call triage and
+1. **There are TWO numbers on the conversation row, and the row must say which one
+   it is showing (r6 correction).** r5 wrote "latency comes from `scanState`, not
+   from a static declaration", and that is **not true as written**:
+   `scanState().latencySeconds` is defined two lines above it as "from
+   `caps.scanLatency[source]`" — a static per-kind table, merely INDEXED by the
+   resolution. Both numbers are real and both are owed: the **declared cadence** is
+   `caps.scanLatency[source]` (indexed by `scanState`'s resolution; it is also the
+   `fs.watch` debounce ceiling, §6.4), the **observed age** is
+   `convEntry.lane.lastScanAt` against `now`. The row draws the latter, and
+   `freshnessClaim(caps, scanState(…), convEntry, now)` answers "last scanned <t>
+   ago" for `scan` — which it can only compute because it is **handed that clock**
+   (§4's contract rule). The AssignFilter panel says it before the user hands that
+   lane a job. A lane that scans every five minutes is honest for on-call triage and
    dishonest for live customer chat — the product's job is to make that difference
    visible **before** the assignment, not after. This is also exactly why a refused
    read does not auto-degrade: the same adapter draws two different numbers on two
@@ -1799,7 +2042,14 @@ that already exists:
    be logged out while the store is still readable (readable, but no longer
    updating), and the grant can be revoked while the client is still logged in (it
    is updating, but we cannot see it) — folding those into one boolean makes one of
-   them wear the other's wording.
+   them wear the other's wording. **And both facts EXPIRE, while the grant is never
+   trusted across a pass (r6)**: `hostFacts` carries a 6 h TTL and three named
+   refresh triggers (§4 / §5 invariant 7), and a stored `grant:'granted'` is a claim
+   that expires **by construction** — a macOS TCC grant is revocable in System
+   Settings at any moment and decision 19(d) records the prompt itself as
+   per-process-instance and temporary ⇒ the op's own `EPERM` is the authority, and a
+   `granted` that comes back `EPERM` re-files as `tcc-denied` and clears the stored
+   grant.
 3. **It is the first real use case for adapters on a paired device** (§14): the
    adapter has to run on whichever machine the client runs on. The interface
    already takes a machine handle, so that is wiring rather than a rewrite — and
@@ -1808,13 +2058,17 @@ that already exists:
    lane this class has.
 
 **Scheduling and gating:** the interface carries every slot this class needs from
-P0 (`scan` / `scanSources` / `scanLatency` / `scanState` / `convCaps` / `tosRisk`),
+P0 (`scan` / `scanSources` / `historyBySource` / `scanLatency` / `scanState` /
+`convCaps` / `tosRisk`),
 and the fake adapter really runs a scan mode **with both sources**, so the lane is
 inside `test-channels-lane-parity`'s coverage from day one. The WhatsApp and WeChat
 adapters themselves are **P6**: the `'ui'` half is gated on decision 19 and on the
 agent-browser system landing, while the macOS `'store'` half is gated on decision 19
 **alone** — it needs no agent-browser, which makes it the one leg of this class that
-could land on its own today.
+could land on its own today, **and which is exactly why it is READ-ONLY (r6)**: that
+leg's deliverables contain no send path, so it must **say so** — `convCaps.sendAs`
+resolves to `[]` with `why:'no-send-lane-on-this-host'`, rendered by §4's existing
+not-offered-with-a-reason rule.
 
 ---
 
@@ -1854,7 +2108,7 @@ could land on its own today.
 | Plugin-contributed adapters | The manifest has no adapter contribution point; the sandbox would need net+fs grants; and the receive path must run beside the store and the spend guard. Third-party adapters are the right *eventual* home | `contributes.channelAdapters`, over the same `src/channels` interface, so the registry never forks. **The key is not reserved today**: `RESERVED_CONTRIBUTIONS` in `src/plugin-manifest.js` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, and only keys *in that list* produce the "reserved for a later phase — ignored" warning — anything else is silently discarded when `m.contributes` is rebuilt to a fixed shape, so a plugin author following this row would get **no signal at all**. **P0 adds the one word**, plus the expected-set update in `scripts/test-plugin-loader.mjs`. A declared-but-inert slot is the same failure this document argues against for `SPEND_REASONS`; the difference is that here the slot costs one array entry and buys an honest warning |
 | Adapters on a paired device | Credentials and the store live here | The interface already takes a machine handle; v1 passes `local`. `hostId` is a parameter, never a branch. **r5: this row now has its first real consumer** — WhatsApp's macOS store lives on the owner's Mac while VibeSpace runs elsewhere, so the `channels-scan-store` op is written against `hostId` from day one (the local box is device #0) and P6's leg is a parameter change |
 | ~~Live event lanes~~ **promoted to P1** (r3/Q3(a)) | No longer deferred: the owner asked for real-time push and §6.4 re-argues it from the evidence. The one gate left is enabling event subscription in the Lark console | `src/channels/live/<kind>.js`; content or cursor kick decided by `laneState()` (§4) |
-| Local-client adapters (WhatsApp / WeChat) | The interface models them from P0 (`scan` / `scanSources` / `scanLatency` / `scanState` / `tosRisk` / `convCaps`), but the adapters need a logged-in official client, and the `'ui'` half also needs an agent-browser profile and one named decision about terms risk | **P6**, §12.5. The `'ui'` half is gated on decision 19 **and** the agent-browser system; the macOS `'store'` half is gated on decision 19 **alone** — it needs no agent-browser |
+| Local-client adapters (WhatsApp / WeChat) | The interface models them from P0 (`scan` / `scanSources` / `historyBySource` / `scanLatency` / `scanState` / `tosRisk` / `convCaps`), but the adapters need a logged-in official client, and the `'ui'` half also needs an agent-browser profile and one named decision about terms risk | **P6**, §12.5. The `'ui'` half is gated on decision 19 **and** the agent-browser system; the macOS `'store'` half is gated on decision 19 **alone** — it needs no agent-browser |
 | WhatsApp sending via a protocol library | Unofficial clients are prohibited by the platform's terms, and bans land on ordinary use (fence 13) | Forever behind `tosRisk: 'prohibited'`; the compliant route is the official Business Cloud API (bot identity) |
 | HTML mail rendering | XSS surface; plain text is honest and sufficient for triage | The published-pages sandboxed-iframe pattern |
 | Attachment auto-fetch | Bandwidth, storage, and a second authorized request per item | `caps.attachments: 'fetch'` + an explicit user/agent action with size caps |
@@ -1893,9 +2147,9 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channel-outbox` | fast | the state machine (every transition and every forbidden one); guardrails stack and can only tighten; fail-closed on unknown policy; `unknown` never auto-retries | a patched copy with the guardrail check removed must go red; a direct-send policy with a link must still review |
 | `test-channel-record` | fast | normalization incl. mention-placeholder resolution; the injection-marker strip | a body containing our own frame markers must come out inert |
 | `test-channel-store` | fast | atomic index; append-only logs; dedup on replayed pages; cursor advances only on a complete pass; retention floor ≥ 7 days; **two concurrent passes through `index.update()` both land** (§5.1) | a pass reporting `complete:false` must leave the cursor unchanged; a patched copy doing read-modify-write around `writeJsonAtomic` must **lose** one pass's anchor advance |
-| `test-channel-adapter-contract` | fast | the fake adapter drives every declared capability; an undeclared one throws; typed errors; **the grep census that no call site branches on `kind`**; **a `receive:'scan'` adapter may not declare `history:'none'`** (r4, §12.5); **a `scan` adapter must declare `scanSources` and a per-source `scanLatency`** (r5) | a synthetic adapter branching on its own kind in a call site must fail the census; a synthetic adapter declaring `receive:'scan'` + `history:'none'` must go red; a synthetic adapter declaring `receive:'scan'` with no `scanSources` must go red |
-| `test-channel-caps` | fast | both axes of the record; `convCaps` three-valued; **a control exists only when `caps` AND `convCaps` agree**, and `unknown` always renders as not-offered-with-a-reason; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim`'s wording per lane; `identityWarning` speaks for `unknown` exactly as for `marked`. **Two r4 groups**: `laneState`'s precedence — a record with `claimedExclusive:true` **and** `demotedAt` set must answer `carryContent:false`, a lane silent past the heartbeat window must **never** answer `live:true`, and `unknown` is always `carryContent:false`; and `convCaps`'s TTL — an entry past the TTL must render `unknown`. **One r5 group**: `scanState`'s precedence (platform declaration > client presence > read grant > `'ui'`), its answer ⊆ `caps.scanSources[platform]`, and `tcc-denied` resolving to `source:null` and **not** to `'ui'` | a synthetic adapter declaring `sendAs:['user']` that still offers the control on a conversation whose `convCaps.sendAs === []` must go red; an adapter returning a `convCaps` wider than `caps` must go red; `identityMarking:'unknown'` with no warning must go red; **a pre-fix copy reading `caps.pushExclusivity` must answer `carryContent:true` on the demoted fixture**; **a fresh `convCaps` must still offer the control** (the TTL's positive control — a rule that always answers `unknown` is equally a defect); **a resolver answering `'store'` on a machine whose `scanSources.linux === 'ui'` must go red**, and so must **a resolver that still answers `'ui'` on a `darwin` machine with the client present and the grant held** (`scanState`'s positive control — a resolver that always narrows to nothing is the same defect as a rule that always answers `unknown`) |
-| `test-channels-lane-parity` | fast | **one day of traffic driven through push / poll / scan ⇒ the same records, the same wake count, the same charges** (fence 12); the same message arriving once by push and once by poll collapses to one (dedup on the message id); event replays dedup on `event_id`; **r4's scan arm: the same screen scraped twice must be a no-op** (the synthetic anchor, §12.5), and hitting the scroll limit first ⇒ `complete:false` ⇒ the anchor does not move; **r5's store arm: the same store scanned twice must be a no-op** (the client's own message id, `raw.synthetic:false`), a pass interrupted half-way ⇒ `complete:false` ⇒ the anchor does not move, and **one day of traffic driven through `'store'` and through `'ui'` must produce the same `ChannelRecord`s** (parity between the two sources, because decision 19 has one adapter taking different sources on different machines) | a push-lane copy that **bypasses the coalescing window** must wake more on the same burst; a copy that acks **before** durability must lose records at the injected crash point; **a copy that drops the synthetic key must turn every record into a duplicate on the second scan** |
+| `test-channel-adapter-contract` | fast | the fake adapter drives every declared capability; an undeclared one throws; typed errors; **the grep census that no call site branches on `kind`**; **a `receive:'scan'` adapter may not declare `history:'none'`** (r4, §12.5); **a `scan` adapter must declare `scanSources` and a per-source `scanLatency`** (r5); **r6: on `receive:'scan'` the per-source `historyBySource` replaces the scalar — every value non-`'none'`, and its keys must COVER every source `scanSources` names** | a synthetic adapter branching on its own kind in a call site must fail the census; a synthetic adapter declaring `receive:'scan'` + `history:'none'` must go red; a synthetic adapter declaring `receive:'scan'` with no `scanSources` must go red; **a scan adapter whose `historyBySource` omits a source its `scanSources` declares must go red** (r6's mirror control), and **one whose `historyBySource.ui === 'none'` must go red too** |
+| `test-channel-caps` | fast | both axes of the record; `convCaps` three-valued; **a control exists only when `caps` AND `convCaps` agree**, and `unknown` always renders as not-offered-with-a-reason; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim`'s wording per lane; `identityWarning` speaks for `unknown` exactly as for `marked`. **Two r4 groups**: `laneState`'s precedence — a record with `claimedExclusive:true` **and** `demotedAt` set must answer `carryContent:false`, a lane silent past the heartbeat window must **never** answer `live:true`, and `unknown` is always `carryContent:false`; and `convCaps`'s TTL — an entry past the TTL must render `unknown`. **One r5 group**: `scanState`'s precedence (platform declaration > client presence > read grant > `'ui'`), its answer ⊆ `caps.scanSources[platform]`, and `tcc-denied` resolving to `source:null` and **not** to `'ui'`. **One r6 group**: `scanState` resolves `history` from `historyBySource[source]` and always answers `via:'scan'` + `carryContent:false`; `hostFacts` past the 6 h TTL resolves to `source:null` / `why:'host-facts-stale'`; and `freshnessClaim(caps, laneOrScan, convEntry, now)` computes its `seconds` from the clock it is handed | a synthetic adapter declaring `sendAs:['user']` that still offers the control on a conversation whose `convCaps.sendAs === []` must go red; an adapter returning a `convCaps` wider than `caps` must go red; `identityMarking:'unknown'` with no warning must go red; **a pre-fix copy reading `caps.pushExclusivity` must answer `carryContent:true` on the demoted fixture**; **a fresh `convCaps` must still offer the control** (the TTL's positive control — a rule that always answers `unknown` is equally a defect); **a resolver answering `'store'` on a machine whose `scanSources.linux === 'ui'` must go red**, and so must **a resolver that still answers `'ui'` on a `darwin` machine with the client present and the grant held** (`scanState`'s positive control — a resolver that always narrows to nothing is the same defect as a rule that always answers `unknown`); **r6: the SAME `convEntry` at two different `now` values must produce two different `seconds`** (a `freshnessClaim` that ignores its clock cannot be answering "how long ago"), and **a fresh `hostFacts` must still answer `'store'`** — the TTL's positive control, the same shape as `convCaps`'s |
+| `test-channels-lane-parity` | fast | **one day of traffic driven through push / poll / scan ⇒ the same records, the same wake count, the same charges** (fence 12); the same message arriving once by push and once by poll collapses to one (dedup on the message id); event replays dedup on `event_id`; **r4's scan arm: the same screen scraped twice must be a no-op** (the synthetic anchor, §12.5), and hitting the scroll limit first ⇒ `complete:false` ⇒ the anchor does not move; **r5's store arm: the same store scanned twice must be a no-op** (the client's own message id, `raw.synthetic:false`), a pass interrupted half-way ⇒ `complete:false` ⇒ the anchor does not move, and **one day of traffic driven through `'store'` and through `'ui'` must produce the same `ChannelRecord`s** (parity between the two sources, because decision 19 has one adapter taking different sources on different machines). **r6's burst leg**: N messages delivered through an **`fs.watch`-driven store scan** must produce the SAME wake count and the SAME charges as the same burst through poll — the scan lane is a batch (`carryContent:false`, §6.4) and the watch is a debounced cursor kick, never a pass per write | a push-lane copy that **bypasses the coalescing window** must wake more on the same burst; **an UNDEBOUNCED copy of the store lane's watch must wake more on the same burst** (r6's control — this is fence 12's "30 messages become 30 deliveries" arriving through the lane r5 added); a copy that acks **before** durability must lose records at the injected crash point; **a copy that drops the synthetic key must turn every record into a duplicate on the second scan** |
 | `test-channels-identity` | fast | no sender honesty line by default; `identityMarking` drives the approval-card warning and the receipt fields; the audit line carries `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` and **never leaves the instance**; on a `sendAs: []` conversation `reply` returns `send-not-available` and **creates no proposal**; **r4: a proposal approved against a `convCaps` that went stale must re-resolve before the send and refuse with `send-not-available`** | a copy with the honesty line defaulted ON must go red (r2's decision 17 is this leg's negative control); a `marked` channel whose approval card carries no warning must go red; a proposal created on a `sendAs: []` conversation must go red; **a copy that does not re-resolve at approval time must actually send the message** |
 | `test-channels-egress` | fast | every constructed outbound request comes either from the adapter declaring its host or from an allowlisted `(file, host)` pair **with a reason** — seeded with `src/gmail-sync.js` and `src/mounts.js` (§3.1) | a scratch file with an undeclared host must go red; a **dead allowlist entry** (file moved or renamed) must go red too |
 | `test-oauth-loopback` | fast | both modes (§12.4): ephemeral bind for Gmail, fixed bind for Lark; `state` rejection on the request handler **and** on paste-back; the port released on completion/cancel/timeout | a **pre-bound** fixed port must produce the named refusal and the paste-back fallback, never an opaque `EADDRINUSE`; a callback with a wrong `state` must be rejected in both modes |
@@ -1905,7 +2159,7 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-spend-paths` (existing) | fast | its per-site census must see the new producer, wired, with the declared reason | already carries its own controls |
 | `test-channels-engine` | heavy | real worktree server + fake adapter: burst-day paging, backoff, single-flight, failure surfacing **and retraction**, digest batching, wake authorization and hold release | a pre-fix copy using a fixed-window fetch must lose messages on the burst-day fixture |
 | `test-channels-push` | heavy | real worktree server + a **fake push server**: ack after durability (inject a crash between ack and processing — the record must still be there); heartbeat silence ⇒ `state` leaves `live` **and** the poll cadence returns to fast immediately; `stop()` terminal for an arm in flight; a lane claiming `exclusive` while the fixture withholds some events ⇒ `missRate` crosses the threshold ⇒ **auto-demotion to kick with its reason stated**. **Three r4 legs**: after the demotion the lane **actually changes what it carries** (the next event only kicks the cursor and the record arrives by reconciliation poll — asserting that `missRate` crossed is not enough); in kick mode `missRate` **gains no samples at all** (otherwise it is a one-way ratchet); and a demoted lane **never re-promotes itself** even when the fixture stops withholding, while re-asserting exclusivity in the connect wizard clears the counters and re-enters content mode | a lane that **lies about being `active`** (pre-fix copy) must turn the poll fallback off and lose messages; a copy that never demotes must lose messages forever on the withholding fixture; **a pre-fix copy reading the content/kick decision off `caps` must keep carrying content after the demotion**; **a copy counting `missRate` over the adapter's lifetime must still sit above the threshold after a re-assert** |
-| `test-channels-store-scan` | heavy | real daemon (`test-sysinfo-op` is the template) + a **synthetic** WhatsApp-shaped sqlite: a rowid cursor reads to the end exactly once; **the most recent messages are still read** when the store carries an un-checkpointed WAL; a pass interrupted half-way leaves the anchor unmoved; after the scan the source `db`/`-wal`/`-shm` are **byte-identical** and their mtimes unchanged; a refused read ⇒ a named `tcc-denied` rather than zero records; the capability gate — an older daemon that does not advertise this op is **never asked** (an unknown op hangs) | a copy that reads only the main database and ignores the WAL must miss the most recent messages; a copy opening `mode=rw` must fail the "source byte-identical" assertion; a copy that reports `EPERM` as "zero messages" must fail the named-refusal leg |
+| `test-channels-store-scan` | heavy | real daemon (`test-sysinfo-op` is the template) + a **synthetic** WhatsApp-shaped sqlite: a rowid cursor reads to the end exactly once; **the most recent messages are still read** when the store carries an un-checkpointed WAL; a pass interrupted half-way leaves the anchor unmoved; **after the scan the source `db` and `-wal` are byte-identical with unchanged mtimes** (r6 — deliberately NOT the triple: a read-only open rewrites `-shm`, the content-free WAL index, and leaves even that untouched when it is unwritable, so asserting the triple would go red on the correct mechanism); a refused read ⇒ a named `tcc-denied` rather than zero records; **`no-sqlite-reader` is a named refusal when no reader rung is available** (r6); the capability gate — an older daemon that does not advertise this op is **never asked** (an unknown op hangs). **The fixture must include the arm where OUR connection is the ONLY one** (r6 — the normal shape for a scheduled scan) | a copy that reads **the `.db` file alone** must miss the most recent messages; **a copy taking the DEFAULT (read-write) open must fail the byte-identical assertion on the only-connection arm** (r6 — the failing shape is the DEFAULT, not the opt-in `mode=rw` r5 named, and it fails ONLY on that arm: with a client connection held open it passes, which is why the fixture needs both); a copy that reports `EPERM` as "zero messages" must fail the named-refusal leg; **a copy answering zero records when no SQLite reader exists must fail the `no-sqlite-reader` leg** |
 | `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate | the estimate must change when a rule is added, and a review-required channel must not offer "may send" |
 
 Fixture hygiene applies from the first commit, because these are live incidents:
@@ -1969,7 +2223,7 @@ to be recorded as a wrong correction.
 | # | Finding | Verdict | What changed |
 |---|---|---|---|
 | 1 | "Which lane is in use, is it live, may it carry content" lives in `caps.pushExclusivity`, the adapter record's `push {…}` and the per-conversation `lane {…}` with no stated precedence and **no accessor able to read the adapter record** — so r3's auto-demotion cannot structurally win | **Confirmed, and it is three consequences rather than one.** §4 calls `src/channel-caps.js` the **one** place that answers, yet none of its three exports takes the adapter record; §6.4 says only that the first two "together decide it" ⇒ (a) a demoted lane keeps carrying content, (b) the freshness chip draws "live" off a static declaration (exactly the `opencode-events` round-4 lesson it cites), (c) fence 12's coalescing window runs in kick mode too, buying 60 s of latency for nothing | `caps.pushExclusivity` **deleted** (exclusivity is a per-deployment configuration fact and does not belong in a static per-kind declaration; `pushTransport` stays, it genuinely is static); `src/channel-caps.js` gains the **one** resolver `laneState(caps, adapterRecord, convEntry, now)` with the precedence **demotion > liveness > claim** and `unknown ⇒ carryContent:false`; all four consumers (the chip, fence 12's gate, §6.4's cadence, §6.2's scheduler) re-pointed at it and §2 gains a fifth placement rule; `test-channel-caps` and `test-channels-push` each gain legs, the latter asserting that **the demotion actually changes what the lane carries** (r3 only asserted that `missRate` crossed) |
-| 2 | Decision 19 removes the only `scanSource` cell with an ingest contract (`'store'`) and the contract never moves into the survivor: `'ui'` has no anchor, no dedup key and no "complete pass", and §12.5 explicitly permits it to declare `history:'none'` | **Confirmed.** §4's contract makes an undeclared capability **throw**, §5 invariant 4 wants a complete pass and a `complete:false`, and invariant 2 requires `vendorId` — which a DOM scrape is not guaranteed to expose; §16's parity row pinned only push/poll dedup, never a re-scraped screen | §12.5 gains `'ui'`'s three contract lines: the synthetic anchor key `(convId, renderedAt, sha256(author|text))` in `vendorId` with `raw.synthetic:true`, the scroll-bounded complete pass (reached the anchor ⇒ `complete:true`; hit the scroll limit ⇒ `complete:false`, anchor does not move), and the **ban** on `history:'none'` for `receive:'scan'` (enforced by the contract suite); the table cell's `history` narrows to `'page'`; §5 invariant 2 and §6.3 each gain a pointer; `test-channels-lane-parity` gains a scan arm and a drop-the-synthetic-key negative control |
+| 2 | Decision 19 removes the only `scanSource` cell with an ingest contract (`'store'`) and the contract never moves into the survivor: `'ui'` has no anchor, no dedup key and no "complete pass", and §12.5 explicitly permits it to declare `history:'none'` | **Confirmed.** §4's contract makes an undeclared capability **throw**, §5 invariant 4 wants a complete pass and a `complete:false`, and invariant 2 requires `vendorId` — which a DOM scrape is not guaranteed to expose; §16's parity row pinned only push/poll dedup, never a re-scraped screen | §12.5 gains `'ui'`'s three contract lines: the synthetic anchor key `(convId, renderedAt, sha256(author\|text))` in `vendorId` with `raw.synthetic:true`, the scroll-bounded complete pass (reached the anchor ⇒ `complete:true`; hit the scroll limit ⇒ `complete:false`, anchor does not move), and the **ban** on `history:'none'` for `receive:'scan'` (enforced by the contract suite); the table cell's `history` narrows to `'page'`; §5 invariant 2 and §6.3 each gain a pointer; `test-channels-lane-parity` gains a scan arm and a drop-the-synthetic-key negative control |
 | 3 | `push.missRate` is a lifetime ratio with no counting window and the demotion has no exit ⇒ a one-way ratchet: in kick mode push carries no records at all, the ratio tends to 1.0 by construction, and a demoted lane can **never** come back under the threshold | **Confirmed**, and it is exactly the shape the auto-resume `edgeHeld` lesson exists to prevent (*burning the wall would turn one transient disagreement into a permanent refusal*) | §6.4 gains two sentences: count only while `carryContent` is true and only over a rolling window (last N records or 24 h, whichever is larger); the demotion is retracted by **whoever made the claim** (re-assert in the connect wizard ⇒ counters reset, one retry), and **the counters are never the trigger**; decision 18 and §20 item 17 follow; `test-channels-push` gains two legs |
 | 4 | `convCaps` is a stored derived fact carrying an `at` **no rule reads** (no TTL, no refresh trigger, no staleness degrade), contradicting §5 invariant 7 twelve lines below it; a week-old optimistic answer draws a send control and creates the proposal §4 promises never to create | **Confirmed.** `why`'s enum already contains `'left-group'`, so the state is anticipated; and a field with no reader is, in this repo, "the fix was never wired" | §4 and §5 give `convCaps` a **TTL (6 h)** and three refresh triggers (on track, on the first panel render past the TTL, and **unconditionally at approval time immediately before the send**), degrading to `read:'unknown'`/`sendAs:[]`/`why:'stale'` — rendered by `offers()`'s existing rule, so no new vocabulary; §9.2 spells out the approval-time re-resolution and its refusal path; invariant 7 names it as the exception that pays for itself; `test-channel-caps` gains a TTL leg with a positive control and `test-channels-identity` a "stale at approval must refuse" leg |
 | 5 | The zh doc's §20 sources block is missing the blank line before it, so CommonMark lazy continuation folds it into numbered item 19 | **Confirmed** (`cat -A`; en:1806-1808 has the blank line) | One blank line inserted. The same pass re-checked the rest of the pair and everything else held: heading counts, table-row counts, byte-identical code blocks, and identical P0–P4 / P0–P2 round-and-day arithmetic |
@@ -2008,6 +2262,37 @@ ban — and a ban needs no argument, which is why nobody ever re-examines one.
 
 ---
 
+### 17.3 The adversarial review of r5 (r6) — what a round of fixes brought in
+
+r5 took the `'store'` cell back, and **five of this round's eight findings live on
+that addition**: one states its mechanism backwards, one leaves r5's own just-named
+defect in the adjacent field, one gives the new record three fields with no reader,
+one puts the new lane behind the single gate that does not cover it, and one gives
+it a send route it never had. **A round of fixes is new code, and it owes the same
+scrutiny as the code it repaired.**
+
+| # | Finding | Verdict | What changed |
+|---|---|---|---|
+| 1 | The mechanism the `'store'` cell **prefers** (the backup API / `VACUUM INTO`) is the one mechanism that breaks its own "never write", and its reason for rejecting the safe one is **inverted**: "opening the live store read-only is not sufficient, this is a WAL database" conflates a read-only **open** (which reads the WAL) with reading the **`.db` file** (which does not) | **Confirmed, measured on a throwaway fixture** (node v24.12.0 `node:sqlite`, a SIGKILLed producer leaving an un-checkpointed WAL): the DEFAULT open — the only mode a backup/`VACUUM INTO` source connection can use — read `NEWEST` correctly and then, on `close()`, rewrote `db` and **DELETED** both `-wal` and `-shm` (SQLite's documented last-connection checkpoint-and-delete); `readOnly:true` also read `NEWEST` (so r5's stated reason is false) and left `db`/`-wal` byte-identical; only reading the **`.db` file alone** missed `NEWEST`. "We are the last connection" is the NORMAL case for a scheduled scan | §12.5's mechanism is **inverted**: open with `SQLITE_OPEN_READONLY`, run `VACUUM INTO`/backup **from that read-only connection**; the rejected-alternative sentence now says "reading the **`.db` file alone** omits the WAL"; the triple copy is demoted to a **fallback** with its torn-read hazard stated; §6.3's twin follows; §16's assertion narrows from the triple to **`db` and `-wal`** (a read-only open rewrites `-shm`), its negative control moves from `mode=rw` to the **DEFAULT** open, and the fixture gains an only-connection arm |
+| 2 | `caps.history` is still a per-KIND scalar while §12.5's own new table assigns ONE adapter two different values by resolved source (`'store'`⇒`'since'`, `'ui'`⇒`'page'`) — word for word what r5 said about the adjacent field | **Confirmed.** One `kind:'whatsapp'` adapter declares a single `history` while `scanSources` means the same module runs both cells: `'since'` asks a Linux deployment to honour since-anchor semantics with a DOM scrape, `'page'` deletes the "real anchor ⇒ `'since'`" that is the reason `'store'` is preferred; and §16's two-source parity leg, driven by **one** fake adapter, is unimplementable as r5 wrote it | `caps.historyBySource` replaces the scalar on `receive:'scan'` (the scalar stays for `push`/`poll`), `scanState()` resolves `history` alongside `source`, §4's contract rule covers both the non-`'none'` values and the key coverage, §16 gains the mirror control |
+| 3 | The design names server.js's size ratchet as the gate for its own wiring stanza without checking how much budget is left | **Confirmed, measured**: at the base commit `read('server.js').split('\n').length` is **exactly 2100** ⇒ zero headroom, so P0's first commit turns `npm run build` red — the mandatory pre-push gate AND the in-app self-update | §2.1 and P0's exit criteria each gain a line: **measure first**, then either raise the budget deliberately in the same commit (which the suite's own comment sanctions) or extract an existing stanza first; priced at ~0.5 rounds |
+| 4 | r5's new `scan` record reproduces r4's own finding 4 verbatim: `hostFacts.at` / `grant` / `grantAskedAt` are stored derived facts with no reader, no TTL, no refresh trigger and no staleness degrade — while §5 invariant 7 names exactly **one** exception | **Confirmed.** `grantAskedAt` appears exactly once in the whole English doc (in the schema block), and nothing states what `now` is for in `scanState(…, now)` while every sibling resolver's `now` has a stated use; these facts are the result of a possibly-cross-machine round trip and are not locally re-derivable — the property that earned `convCaps` its exception. The harm runs the more expensive way: with `hostFacts` stale, `scanState` keeps answering `'store'` and 15 s after the client is uninstalled, after an update moves the store, or after a Sonoma→Sequoia upgrade extends TCC to Group Containers | `scan.hostFacts` gains a 6 h TTL, three named refresh triggers and a `source:null`/`why:'host-facts-stale'` degrade; `grant` moves INSIDE `hostFacts` and is **never trusted across a pass** (the op's own `EPERM` is the authority; a `granted` that comes back `EPERM` re-files as `tcc-denied` and clears the stored grant); `grantAskedAt` gets its reader (the don't-re-prompt rule); §5 invariant 7 takes a second named exception; §16 gains the TTL leg and its positive control |
+| 5 | `carryContent` is defined only for push, yet the coalescing gate sits on the single funnel all three lanes converge into and `laneState()` can answer `via:'scan'`; meanwhile `'store'` is introduced WITH an event-driven trigger (an `fs.watch` on the store file) that has no debounce and no stated relation to `caps.scanLatency` | **Confirmed.** WhatsApp's `ChatStorage.sqlite` is written on every incoming message ⇒ in a busy group the watch fires roughly per message ⇒ one pass per message ⇒ one filter hit per message ⇒ the gate reads a `carryContent` that is undefined (falsy) ⇒ one wake per message, i.e. fence 12's own "30 messages become 30 deliveries". **Honest bound**: §7.4's 30 s floor and the spend authorizer cap the absolute spend, so this is not unbounded money — but the wakes and charges differ per lane, which makes §6.1's headline and §16's parity row unsatisfiable as written | §6.4's precedence states `via:'scan'` ⇒ `carryContent:false` explicitly (a scan pass is a batch, like a poll pass); the `fs.watch` is defined as a **cursor kick**, debounced to `caps.scanLatency[source]` (which makes that number a real ceiling), and owes the `opencode-events` round-4 inotify-lifetime rule; §6.1's diagram and §16's parity row follow, the latter with a burst leg and an undebounced negative control |
+| 6 | The `'store'` lane needs a SQLite reader inside the daemon and the design names no mechanism — while every candidate collides with a constraint this repo has written down, so P6a's 4–5 rounds does not price it | **Confirmed.** The daemon is a single-file esbuild bundle with exactly one `--external` (`node-pty`), the installer calls it "zero-dep" with `NODE_MIN=18`: `node:sqlite` does not exist on 18/20, still emits ExperimentalWarning on 24 (measured), and its **row-reading API is synchronous** (its `backup()` is async, so the hazard is the row scan) while CLAUDE.md says this daemon carries live session pipes; a native binding needs a second `--external` plus per-platform prebuilts; `sqlite3(1)` as a bounded child is fence 3's sanctioned shape | §2 and §12.5 name the mechanism with its constraint: **the bounded child is recommended**, `node:sqlite` sits behind a runtime probe and a stated `NODE_MIN` bump, the native binding is **explicitly refused** with the bundle reason; `no-sqlite-reader` joins the op's failure vocabulary; §20 gains "which reader exists on a paired Mac's daemon is unmeasured"; P6a is re-priced |
+| 7 | Sending has no named mechanism on the one platform that gets `'store'`. "The same act on both routes" is true for `'ui'` (a browser types into a web page) and undefined on macOS, a native Catalyst app; and P6a's deliverables contain no send path while claiming it "needs no agent-browser" | **Confirmed.** The sentence appears three times (§6.3, §12.5, decision 19) and both docs mirror it; the `'store'` row's Sends cell says "falls to `'ui'`" whose send mechanism is an agent-browser — so P6a as scoped is read-only and never says so | The sentence is split per source in all three places; **P6a is stated READ-ONLY and made structural** (`convCaps.sendAs` resolves to `[]` with `why:'no-send-lane-on-this-host'`, rendered by §4's existing rule, which stops any proposal); macOS's two candidates (a SECOND linked-device credential / native UI automation with its own TCC grant) go to §20 as the **open** question; the `'store'` row's Sends cell is rewritten |
+| 8 | `freshnessClaim(lane, convEntry)` cannot compute either number it states: it returns `seconds` (an **age**) with no clock, and no `caps` (the poll case's "≤ 30 s" lives in `caps.pollInterval.hot`); and r5 widened its first parameter into a union of two **disjoint** shapes with no discriminator | **Confirmed.** Every sibling resolver takes `now` (`laneState`, `scanState`, and this repo's `quota-model` / `decideLagShadow`); `laneState()`'s answer carries `via`, `scanState()`'s carried only `source`, leaving the callee to sniff which keys are present. **Separately**: §12.5 property 1's "latency comes from `scanState`, not a static declaration" is false as written — `latencySeconds` is defined two lines above it as `caps.scanLatency[source]` | The signature becomes `freshnessClaim(caps, laneOrScan, convEntry, now)`; `scanState()` gains `via:'scan'` so the union is explicit; property 1 is restated as **two numbers** (the declared cadence = the static table indexed by the resolution; the observed age = `lastScanAt` against `now`) with the row obliged to say which it shows; §16 gains "the same `convEntry` at two `now` values must give two `seconds`" |
+
+This round's own lesson is a piece of method: **every new field a fix introduces
+must be re-read against the rule that fix has just written down.** In the same
+section r5 correctly argued that a per-deployment fact cannot live in a per-kind
+declaration (finding 2 left the adjacent field doing exactly that), correctly cited
+r4's "a field with no reader is the fix was never wired" (finding 4 gave the new
+record three of them), and correctly described `'store'` as the better lane
+(findings 5 and 7 never asked which gate it lands behind or whether it can send). A
+round of fixes is not exempt because it is a fix.
+
+---
+
 ## 18. Phases, rounds, calendar
 
 One **round** ≈ 1 h implementer + ~20 min adversarial verify (measured
@@ -2039,7 +2324,14 @@ adapter's scan / push modes. r4: +1 round — `laneState` and its precedence,
 `convCaps`'s TTL, and the synthetic anchor key in the fake adapter's scan mode.
 r5: +1 round — the per-platform `scanSources`, the `scanState` resolver and its
 precedence, and a `'store'` source on the fake adapter, so "one day of traffic
-through either source produces the same records" has a leg from day one.)
+through either source produces the same records" has a leg from day one. **r6: +0.5
+rounds** — `historyBySource` plus `scanState`'s new `via`/`history`/`hostFacts` TTL,
+and the wiring stanza's **size ratchet**: that budget is at its ceiling today
+(measured 2100/2100), so P0's **exit criteria** gain one line — **measure
+`server.js` first**, then either raise the budget deliberately in the same commit
+with the reason, or extract an existing stanza into `src/server/` first; either way
+`npm run build` must be green on that commit, because it is both the release gate
+and a step of the in-app self-update (§2.1).)
 
 ### P1 — Lark read + Gmail read + **the push lanes** — **14–16 rounds (7–8 days)**
 
@@ -2130,7 +2422,7 @@ Sandboxed HTML rendering (**2–3 rounds**), attachment fetch (**2**),
 plugin-contributed adapters (**4–6**), adapters on a paired device (**4–6**).
 (r3: live lanes moved up into P1, so they are no longer here.)
 
-### P6 — local-client adapters (WhatsApp / WeChat) — **13–18 rounds (6.5–9 days), not scheduled, two legs gated separately**
+### P6 — local-client adapters (WhatsApp / WeChat) — **14–20 rounds (7–10 days), not scheduled, two legs gated separately**
 
 §12.5. After r5 this phase **splits into two independent legs whose gates differ**
 — which is precisely what recovering `'store'` buys: the class is no longer blocked
@@ -2139,12 +2431,21 @@ as a whole on the agent-browser system.
 **P6a — the macOS `'store'` leg (4–5 rounds), gated on decision 19 alone.** The
 `channels-scan-store` agentd op (daemon handler + a capability in the hello-ack +
 the three-touch rule), the SHARED `src/channels-store-scan.js` (platform facts, a
-SQLite backup-API snapshot, the `(rowid, timestamp)` cursor, mapping `ZWAMESSAGE` /
-`ZWAMEDIAITEM` into `ChannelRecord`s and resolving contacts and media references),
-`scanState()` and the TCC grant row in the connect wizard, plus
+**read-only open plus a scratch snapshot taken from that read-only connection**
+(§12.5, r6 — not the default open), the `(rowid, timestamp)` cursor, mapping
+`ZWAMESSAGE` / `ZWAMEDIAITEM` into `ChannelRecord`s and resolving contacts and media
+references), `scanState()` and the TCC grant row in the connect wizard, plus
 `test-channels-store-scan`. **It needs no agent-browser**, which makes it the one
 leg of this class that could land on its own today; and because it carries a real
-anchor it is also the one leg that does not owe the synthetic key's cost.
+anchor it is also the one leg that does not owe the synthetic key's cost. **It is
+also READ-ONLY (r6)**: this leg contains no send path, so it must say so
+structurally — `convCaps.sendAs` resolves to `[]` with
+`why:'no-send-lane-on-this-host'`; sending on macOS is an **open** question in §20
+and is out of this leg's scope. **r6 re-price: 5–7 rounds** (was 4–5), the addition
+being choosing and wiring the SQLite reader (a bounded `sqlite3(1)` child / a
+probed `node:sqlite` with a `NODE_MIN` bump; the native binding is refused) plus the
+`no-sqlite-reader` named refusal — §12.5 makes the decision, but it still has to be
+implemented against the real daemon bundle and measured.
 
 **P6b — the `'ui'` leg (9–13 rounds), doubly gated.** The agent-browser profile,
 login liveness, cursored UI scanning, sending through the client's own composer,
@@ -2159,7 +2460,9 @@ scroll-bounded complete pass, and deciding on two real clients whether they expo
 stable message id at all. **r5: +4 rounds** — all of P6a, one of which is spent
 **measuring** what this design took from public material: the store path and its
 current schema on a real Mac, whether TCC prompts or denies outright, and how that
-unencrypted store behaves while the owner's own client is updating it.)
+unencrypted store behaves while the owner's own client is updating it. **r5's
+line said "+4 rounds" while P6a was stated as 4–5 and P6 itself moved 9–13 → 13–18,
+i.e. +4–5; r6 fixes that arithmetic slip and re-prices P6a at 5–7 ⇒ P6 = 14–20.**)
 
 **Totals:** P0–P4 = **51–62 rounds ≈ 25.5–31 working days** at 2 rounds/day, plus
 owner-blocked time for the two scope round trips. (The r2 review added 2–3 rounds;
@@ -2168,8 +2471,9 @@ coalescing and lane parity +2 in P2, the identity surface +1 in P3, the identity
 proof +1 in P4; **r4 added 3**: `laneState` and the `convCaps` TTL +1 in P0,
 `missRate`'s window and the demotion's retraction +1 in P1, the approval-time
 re-resolution +1 in P3; **r5 added 1**: `scanState` and the per-platform
-`scanSources` +1 in P0 — r4's and r5's further +1 and +4 in P6 stay outside this
-total, because P6 is unscheduled anyway.) P0–P2 alone — read-only channels with assignment, filtering
+`scanSources` +1 in P0; **r6 added 0.5**: `historyBySource` / the `hostFacts` TTL and
+the already-full size ratchet +0.5 in P0 — r4's, r5's and r6's further +1, +4–5 and
++1–2 in P6 stay outside this total, because P6 is unscheduled anyway.) P0–P2 alone — read-only channels with assignment, filtering
 and **real-time push**, and no outbound path at all — is **34–40 rounds ≈
 17–20 days**, and it is still a coherent shipping point: the panel is useful,
 messages arrive live, no external message can leave the building, and the money is
@@ -2202,7 +2506,7 @@ they are here rather than in the code.
 | 16 | **Does assignment imply visibility?** | yes, written as an explicit grant / no, the user must also grant reach | **Yes, as an explicit grant.** Two steps for one obviously-intended thing is how a permission model gets bypassed; writing it as a real grant keeps the reach panel truthful |
 | 17 | **Sender honesty line — REVERSED by the owner (r3/Q4)** | always append "drafted by \<agent\>" / per-channel toggle **default ON** / per-channel toggle **default OFF** / never | ~~Per-channel toggle, default ON for external~~ ⇒ **default OFF, kept as a per-channel option.** The default is **send as the user with nothing added to the body**, on every channel that allows it. What replaces it is not silence: the `identityMarking` capability states who the other side will see at **the moment of authorization** (approval card / send affordance) and in **the receipt** (§9.5). The reason is that the sentence is owed to **the person pressing approve** and to the drafting agent, not to the recipient — and r2 put it inside the message the recipient reads, which both rewrites the user's own words and happens after the user has already decided. The audit log still records `draftedBy` |
 | 18 | **Who decides a push lane is exclusive?** (new, r3/Q3(a)) | (a) the operator **asserts**, the product **measures** and **auto-demotes** on disagreement / (b) cursor kicks forever (r2) / (c) trust the assertion, never measure | **(a).** The platform never says how many other clients are connected, so exclusivity can only be asserted — but it is **measurable**: `push.missRate`, the fraction of records seen first by the reconciliation poll rather than by push, stays at 0 on a genuinely exclusive lane. Crossing the threshold (default 2 %, ≥ 20 samples) demotes to kick mode and states the reason on the adapter row. (c) is a prayer; (b) turns off the real-time push the owner asked for. The default is `unknown` ⇒ **asserting nothing gives you (b)**. **r4 adds two sentences, and without either the demotion is a one-way ratchet**: the ratio is counted **only while the lane is carrying content, and only over a rolling window** (last N records or last 24 h, whichever is larger) — otherwise every record in kick mode is first-seen-by-poll, the ratio tends to 1.0 by construction, and a demoted lane never comes back; and a demotion is **retracted by whoever made the claim** (re-assert exclusivity in the connect wizard ⇒ counters reset, one retry), never by the counters themselves |
-| 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b); **corrected by the owner in r5**) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store / (d) **(b) plus reading the store on platforms where the client leaves it unencrypted** | **(b) + (d), still explicitly excluding (c).** r3 excluded "read the local store" wholesale by bundling it with the protocol libraries, and **the owner pointed out that this is wrong**: it holds for WeChat (the store is SQLCipher/WCDB-encrypted with the key only in the **running client's process memory**, and this product does not read another process's memory — fence 13) and it does **not** hold for **WhatsApp on macOS** — that official Catalyst client leaves its whole chat history in an **unencrypted** Core Data SQLite store (`~/Library/Group Containers/…/ChatStorage.sqlite`), and reading it is an ordinary, user-authorized, read-only file read: **no secret is defeated, because there is no secret**. So **`'store'` is allowed, and preferred over `'ui'`, on the platforms that have it** — not because it is faster (though it is by an order of magnitude) but because **its anchor is not one we invented**, so §5 invariant 2 gets a real vendor id and the whole cost of `'ui'`'s synthetic key disappears. Three boundaries are fixed: ① **only unencrypted counts** — WhatsApp's Windows stores are encrypted (UWP via SEE with a dbKey derived from a machine identifier the app does not expose; the WebView2 line via DPAPI-NG), and recomputing a key the vendor deliberately withheld is the same act as extracting it from memory, which fence 13 (b) refuses ⇒ Windows takes `'ui'`; ② **Linux has no official desktop client at all** ⇒ web-in-profile `'ui'` only; ③ **WeChat does not change by one word** ⇒ `'ui'` on every platform. The store route is **read-only** (a SQLite backup-API snapshot; never write, never checkpoint), runs as a `channels-scan-store` agentd op (`hostId` a parameter, the local box device #0), and macOS TCC is a **named** gate: a refusal reaches the user as `tcc-denied` with grant steps in the connect wizard and **never** silently degrades to `'ui'` (that would turn the latency number on the conversation row into a lie). Sending is the same act on both sources — typing into that logged-in official client's own composer — so identity really is the user (`identityMarking:'none'`). The interface models the class from P0; P6 therefore **splits into two legs**, the macOS `'store'` leg gated on this decision **alone** (it needs no agent-browser) and the `'ui'` leg still doubly gated |
+| 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b); **corrected by the owner in r5**) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store / (d) **(b) plus reading the store on platforms where the client leaves it unencrypted** | **(b) + (d), still explicitly excluding (c).** r3 excluded "read the local store" wholesale by bundling it with the protocol libraries, and **the owner pointed out that this is wrong**: it holds for WeChat (the store is SQLCipher/WCDB-encrypted with the key only in the **running client's process memory**, and this product does not read another process's memory — fence 13) and it does **not** hold for **WhatsApp on macOS** — that official Catalyst client leaves its whole chat history in an **unencrypted** Core Data SQLite store (`~/Library/Group Containers/…/ChatStorage.sqlite`), and reading it is an ordinary, user-authorized, read-only file read: **no secret is defeated, because there is no secret**. So **`'store'` is allowed, and preferred over `'ui'`, on the platforms that have it** — not because it is faster (though it is by an order of magnitude) but because **its anchor is not one we invented**, so §5 invariant 2 gets a real vendor id and the whole cost of `'ui'`'s synthetic key disappears. Three boundaries are fixed: ① **only unencrypted counts** — WhatsApp's Windows stores are encrypted (UWP via SEE with a dbKey derived from a machine identifier the app does not expose; the WebView2 line via DPAPI-NG), and recomputing a key the vendor deliberately withheld is the same act as extracting it from memory, which fence 13 (b) refuses ⇒ Windows takes `'ui'`; ② **Linux has no official desktop client at all** ⇒ web-in-profile `'ui'` only; ③ **WeChat does not change by one word** ⇒ `'ui'` on every platform. The store route is **read-only** (a **read-only open** plus a snapshot taken from that connection — r6 corrects r5's backup-API-first wording, which named the one mode that mutates; never write, never checkpoint), runs as a `channels-scan-store` agentd op (`hostId` a parameter, the local box device #0), and macOS TCC is a **named** gate: a refusal reaches the user as `tcc-denied` with grant steps in the connect wizard and **never** silently degrades to `'ui'` (that would turn the latency number on the conversation row into a lie). **Sending is stated PER SOURCE (r6 correction), because it is not one act**: `'ui'` = an agent-browser typing into that logged-in official client's own composer, so identity really is the user (`identityMarking:'none'`); macOS `'store'` has **no send lane of its own** — the official client there is a native Catalyst app no browser profile reaches — so P6a is **READ-ONLY** and says so structurally (`convCaps.sendAs: []` with `why:'no-send-lane-on-this-host'`, which §4's rule renders as not-offered-with-a-reason and which creates no proposal). **A fourth thing is therefore open and belongs to you**: whether macOS sending is (i) the same Web client in an agent-browser profile — plainly a **SECOND linked-device credential**, two logins for one conversation, modelled as its own row beside `auth.state()`/`scanState().grant` — or (ii) native macOS UI automation (Accessibility / CGEvent) with **its own** TCC grant, or (iii) neither, leaving the class read-only where `'store'` wins. **Recommendation: (iii) for P6a**, and decide (i) vs (ii) only if the owner asks for outbound on macOS — the read half is the value, and a second credential quietly contradicts "it really is the user". Also (r6): the store route's read is a **read-only SQLite open** with a snapshot taken from that connection (never the default read-write open, which checkpoints and deletes the WAL on close), and the daemon-side SQLite reader is named in §12.5 rather than left to the implementer. The interface models the class from P0; P6 therefore **splits into two legs**, the macOS `'store'` leg gated on this decision **alone** (it needs no agent-browser) and the `'ui'` leg still doubly gated |
 | 20 | **Should Gmail push be on by default?** (new, r3/Q3(c)) | on by default / **available, off by default** / not at all | **Available, off by default.** Pub/Sub's pull subscription means it needs no public inbound endpoint either, and each instance can hold its own subscription, so exclusivity is easier to achieve than on Lark's long connection. But it costs a GCP topic, an IAM grant and a **daily renewal job** (the watch expires silently after 7 days and stops without a sound if one is missed), and what it buys is trading a poll that costs one request per tick when nothing changed for second-level latency. At mail's cadence that is a switch a user should turn on for their own situation, not a default |
 
 ---
@@ -2325,7 +2629,12 @@ discovers them in production:
     published 2026-05 describing the on-disk chat databases on iOS and macOS as
     plaintext; ③ the live store carries a WAL, so reading the main file alone omits
     messages and one must copy `db`/`-wal`/`-shm` or use the backup API — from a
-    public implementation that reads it directly; ④ **Windows is encrypted** (UWP via
+    public implementation that reads it directly. **r6 measured a third option that
+    source does not name**, and it is the one this design now takes: a read-only
+    SQLite *open* reads WAL content and mutates nothing, while the backup API's own
+    source connection is the mode that checkpoints and deletes the WAL on close
+    (§12.5's table). What that public implementation got right is the half r5
+    mis-stated: it is the **file**, not the open, that omits messages; ④ **Windows is encrypted** (UWP via
     SEE with a dbKey derived from a machine identifier, the WebView2 line via
     DPAPI-NG), described by a peer-reviewed paper and a forensics write-up
     respectively; ⑤ **Linux has no official desktop client**. **Not checked**: (a)
@@ -2358,10 +2667,39 @@ discovers them in production:
     whether "one long-lived logged-in official client per profile" is something its
     own model allows. **The macOS `'store'` half does not depend on it**, which is
     exactly why P6 is split into two legs.
+21. **Which SQLite reader is available on a paired Mac's daemon is unmeasured
+    (r6).** §12.5 names the rungs and their constraints — a bounded `sqlite3(1)`
+    child (recommended; macOS is documented to ship `/usr/bin/sqlite3`, and this
+    Linux dev box does **not** have it, which is itself the argument for a runtime
+    probe), `node:sqlite` behind a probe with a stated `NODE_MIN` bump, and a native
+    binding explicitly refused — but nothing has been run on a real paired Mac's
+    installed daemon: not which node version it runs, not whether `sqlite3(1)` is on
+    its PATH, and not the wall time of a `VACUUM INTO` over a multi-hundred-MB store.
+    What **was** measured is the mechanism itself, on this box: the arms in §12.5's
+    table (node v24.12.0 `node:sqlite`, an un-checkpointed WAL fixture) — including
+    that the query API is synchronous while `backup()` is async, which is what
+    decides where fence 3's event-loop rule bites.
+22. **How macOS sends, if it ever does (r6).** P6a is read-only, and decision 19's
+    fourth question — a second linked-device credential in an agent-browser profile
+    vs native UI automation with its own Accessibility TCC grant vs neither — has no
+    measurement behind either candidate: not whether a second linked device is
+    acceptable to the owner, not whether WhatsApp's own limits allow it beside the
+    Mac client, and not whether the Catalyst app's composer is reachable through the
+    Accessibility API at all. Until one is chosen and measured, `convCaps.sendAs` is
+    `[]` on that host with a named reason, which is the honest state rather than a
+    silent gap.
+23. **The `fs.watch` fanout on a real busy store is unmeasured (r6).** §6.4 bounds
+    it structurally (a debounced cursor kick at `caps.scanLatency[source]`), and the
+    premise that `ChatStorage.sqlite` is written per incoming message is taken from
+    public material about the store's shape, not from watching a real one. The
+    debounce makes the wake rate independent of that number, which is exactly why it
+    is a ceiling rather than a hope — but the actual fanout, and the inotify cost of
+    watching that container from the daemon, should be taken in P6a.
 
-**Sources for the vendor facts introduced in r3 and r5** (public documentation,
+**Sources for the vendor facts introduced in r3, r5 and r6** (public documentation,
 fetched 2026-09-10; nothing here was exercised against a real tenant or a real
-client — see items 2, 3, 15–19 above):
+client — see items 2, 3, 15–19 above; the r6 SQLite behaviour below is the one thing
+that **was** measured locally, and §12.5 carries the numbers):
 
 - Lark/Feishu long connection — 50 connections per app, cluster mode without
   broadcast, enterprise-self-built-apps only, no public URL:
@@ -2414,3 +2752,9 @@ client — see items 2, 3, 15–19 above):
 - **(r5)** There is no official WhatsApp desktop client for Linux; the only official
   route is WhatsApp Web:
   <https://wiki.archlinux.org/title/WhatsApp>
+- **(r6)** SQLite's WAL documentation — the WAL file holds committed content that is
+  not yet in the main database, and **the last connection to close a database
+  checkpoints it and deletes the WAL**, which is why the default (read-write) open is
+  the one that mutates the store while a read-only open does not (measured here;
+  §12.5's table):
+  <https://sqlite.org/wal.html>

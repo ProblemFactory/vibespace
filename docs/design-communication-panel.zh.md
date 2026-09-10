@@ -104,9 +104,9 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 | Lark / Gmail / Agents adapter | **ORCH** | `src/channels/lark.js`、`gmail.js`、`agents.js` | 契约套件 + `test-channels-lark-shape`(fast, 录制的 fixture) |
 | 摄入引擎(轮询调度、退避 (backoff)、每 tick 预算、故障出声) | **ORCH** | `src/server/channels-engine.js`(`create(deps)` 工厂) | `test-channels-engine` (heavy) |
 | 推送通道(每个 vendor 一条; 活性、ack、独占度测量) | **ORCH** | `src/channels/live/<kind>.js` | `test-channels-push` (heavy) |
-| 本地客户端库扫描(平台事实、TCC 授权、只读快照、按 rowid 游标读) | **SHARED**(daemon 打包)+ 一个 device op | `src/channels-store-scan.js` + `src/agentd/agentd.js` 的 `channels-scan-store` handler | `test-channels-store-scan` (heavy, 真 daemon) |
+| 本地客户端库扫描(平台事实、TCC 授权、**只读打开**加从那条连接取的快照、按 rowid 游标读; SQLite 读者是一个**有界的 `sqlite3(1)` 子进程** —— 绝不是原生绑定, daemon 那唯一一个 `--external` 拒绝它; §12.5) | **SHARED**(daemon 打包)+ 一个 device op | `src/channels-store-scan.js` + `src/agentd/agentd.js` 的 `channels-scan-store` handler | `test-channels-store-scan` (heavy, 真 daemon) |
 | 路由 + 广播 | **ORCH** | `src/routes/channels.js` | `test-restore-smoke` 里的路由弹幕、`test-channels-e2e` |
-| 接线段落 | **ORCH** | `src/server/channels-wiring.js`, 由 `server.js` 调一次 | `test-architecture` 的尺寸棘轮 ratchet(server.js ≤ 2100 行) |
+| 接线段落 | **ORCH** | `src/server/channels-wiring.js`, 由 `server.js` 调一次 | `test-architecture` 的尺寸棘轮 ratchet(server.js ≤ 2100 行 —— **今天正好顶格**, 见 §2.1) |
 | Panel、窗口、filter 编辑器、审批卡 | **CLIENT** | `src/lib/channels-panel.js`、`src/lib/channel-window.js`、`src/lib/channel-filter-editor.js` | `test-channels-e2e`(heavy, headless chrome) |
 | Agent CLI | 纳入 git 的静态文件 | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
@@ -147,7 +147,20 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 - 任何新的活会话 `_field` **先**是 `src/session-schema.js` 里的一行;
 - 新的 agent CLI 要进 `HostManager.AGENT_TOOLS` 与 `AGENT_DOC_TOPICS`, 手册放在
   `docs/agent/` 下;
-- 新的用户可见 chrome 字符串走 `t()` 并补 zh + ja 词条(i18n-check 在 build 里跑)。
+- 新的用户可见 chrome 字符串走 `t()` 并补 zh + ja 词条(i18n-check 在 build 里跑);
+- **那条尺寸棘轮今天已经顶格, 所以 P0 的接线段落哪怕只有一行也会把 `npm run build` 弄红
+  (r6)。** 实测: `scripts/test-architecture.mjs:187-188` 判的是
+  `read('server.js').split('\n').length <= 2100`, 而在本设计的基线提交上那个值**正好是
+  2100**(`wc -l` 报 2099 —— 差一行是结尾换行, 而套件用的是 2100 那种算法) ⇒ 余量是**零**,
+  不是一行。而这个 build 不是可选的: `npm run ci`(强制 pre-push 门)会 build,
+  `scripts/update.sh:104` 的应用内"Update VibeSpace…"也会 build ⇒ P0 的**第一个** commit
+  就会同时卡住发布门与每台实例的自更新。两条出路, 二选一并在**同一个 commit 里**做完:
+  ① 按套件自己 183-185 行的注释**有意识地抬高预算**并在那个 commit 里解释为什么(它写的就
+  是"If a legitimate wiring stanza pushes past the budget, raise it deliberately in the
+  same commit that explains why"), 或 ② 先把一个既有的 stanza 抽进 `src/server/`。
+  **先量再写**, 不要假设有余量 —— 现有的同类 stanza 分别是 1 行(`sysinfo-wiring`)、9 行
+  (`incident-wiring`)与 14 行(`mounts-plugins-wiring`), 而 channels 还要挂它自己的 router。
+  这件事按它实际的体量计价: 约 0.5 轮, 已计入 P0。
 
 ---
 
@@ -292,8 +305,17 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
                                       // one client is a readable store on one OS and a scraped
                                       // screen on another; only scanState() resolves it (r5)
     scanLatency:    null,             // { store: 15, ui: 300 }  seconds, per SOURCE — an order
-                                      // of magnitude apart; SHOWN on the conversation row
-    history:        'page',           // 'page' | 'since' | 'none'
+                                      // of magnitude apart. This is the DECLARED cadence and it
+                                      // is also the CEILING the fs.watch kick is debounced to,
+                                      // never a label (r6, §6.4); the row draws the OBSERVED age
+    history:        'page',           // 'page'|'since'|'none' — the scalar, for push/poll
+    historyBySource: null,            // { store:'since', ui:'page' } — ONLY when receive==='scan'.
+                                      // r6: `history` is a per-SOURCE fact for exactly the reason
+                                      // `scanSources` is one — ONE adapter reads a store on one OS
+                                      // and scrapes a screen on another, and a DOM scrape cannot
+                                      // honour since-anchor semantics while declaring 'page' would
+                                      // delete the real anchor that is WHY 'store' is preferred.
+                                      // Only scanState() resolves it, and it returns the answer
     listConversations: true,
 
     // ——— axis 2: WHAT MAY BE SENT, AND AS WHOM ——————————————————————
@@ -341,9 +363,13 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
   live.start({ onEvent, onState })  ->  { stop() }
 
   // present ONLY when caps.receive === 'scan' — facts about THIS machine, so it is answered
-  // by the agentd op, hostId a PARAMETER and the local box is device #0 (§12.5)
+  // by the agentd op, hostId a PARAMETER and the local box is device #0 (§12.5).
+  // `at` is stamped HERE and READ by scanState() against a 6 h TTL (r6): these are stored
+  // derived facts from a round trip, so they take §5 invariant 7's TTL treatment rather than
+  // an exemption — a frozen answer keeps drawing "15 s" over a lane that fails every pass
   async scanHost(hostId)
-        -> { platform:'darwin'|'win32'|'linux', clientInstalled, storePath, grant, why }
+        -> { platform:'darwin'|'win32'|'linux', clientInstalled, storePath,
+             grant:'granted'|'needed'|'denied'|'unpromptable', why, at }
 }
 ```
 
@@ -360,8 +386,18 @@ offers(caps, convCaps, what)   // what ∈ 'send-as-user'|'send-as-bot'|'fetch-a
       -> { offered: boolean, why: string|null }      // 'unknown' ⇒ offered:false, why 说明
 identityWarning(caps)          -> { level:'none'|'warn', text }        // §9.5
 scanState(caps, adapterRecord, hostFacts, now)          // r5 —— 与 laneState 同一个形状
-      -> { source:'store'|'ui'|null, why, latencySeconds, storePath, grant }
-freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, text }   // lane = laneState()/scanState() 的返回值
+      -> { via:          'scan',              // r6: 判别字段。laneState 就是用 `via` 回答的,
+                                              //     于是下面这个 union 是显式的, 而不是靠
+                                              //     "碰巧有哪些键"去嗅探出来的
+           source:       'store'|'ui'|null,   // 这条会话此刻实际走的来源
+           history:      'since'|'page'|null, // r6: caps.historyBySource[source], 解析后的值
+           carryContent: false,               // r6: 一次 scan pass 就是一批, 与 poll 同理(§6.4)
+           why, latencySeconds, storePath, grant, hostFactsAgeSeconds }
+      // `now` 是承重的(r6): 距 hostFacts.at 超过 HOST_FACTS_TTL(6 小时)就答
+      // source:null / why:'host-facts-stale' —— 见 §5 不变量 7
+freshnessClaim(caps, laneOrScan, convEntry, now)        // r6: 加宽了, 见下面那条规则
+      -> { kind:'live'|'within'|'scanned', seconds, text }
+      // laneOrScan = laneState() 或 scanState() 的返回值, 按 `via` 判别
 ```
 
 `laneState` 是 **r4 加的**, 而它修的是一个结构性缺陷: "此刻在用哪条通道、它活着吗、它
@@ -405,8 +441,8 @@ freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, tex
 `laneState`(在扫描通道上则是 `scanState`), 没有一个再去读 `caps.receive` 或
 `caps.scanSources`**:
 
-- **Panel** 用 `freshnessClaim(laneState(…), convEntry)` 画每一行的新鲜度芯片 —— 扫描通道
-  上则是用 `scanState(…)`, 那个芯片上"秒还是分钟"的数字就是从这里来的(**活着的、
+- **Panel** 用 `freshnessClaim(caps, laneState(…), convEntry, now)` 画每一行的新鲜度芯片
+  —— 扫描通道上则是用 `scanState(…)`(这个 union 按 `via` 判别, §4), 那个芯片上"秒还是分钟"的数字就是从这里来的(**活着的、
   携带内容的**推送 = "live"、轮询 = "≤ 30 s"、扫描 = "上次扫描在 <t> 之前" —— **一个扫描
   源的延迟就画在会话行上**, 因为那是用户在决定要不要把一件事交给它时唯一需要知道的数
   字)。一条降级了或者不 `live` 的推送通道画的是它**实际**在走的那条道, 绝不是它声明过的
@@ -469,6 +505,38 @@ freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, tex
   (r5)。自动降级会在不说一声的情况下把会话行上那个延迟数字从秒改成分钟, 而那个数字是
   这一类全部的诚实性契约(§12.5); 落回 `'ui'` 只能是用户在连接向导里做的一次选择
   (`why:'user-chose-ui'`)。
+- **`receive:'scan'` 上, `historyBySource` 里的每个值都不许是 `'none'`, 而且这张表的键
+  必须盖住 `scanSources` 里点名的每一个来源**(r6)。上一条规则(`scan` 不许
+  `history:'none'`)以前是写在一个按**种类**的标量上的, 而 r5 自己刚刚证明这一类**一个
+  adapter 会同时跑两格**: 同一个 WhatsApp 模块在 macOS 上读库、在 Linux 上刮界面。于是
+  那个标量无论填什么都是错的 —— 填 `'since'`, Linux 那格就被要求用一次 DOM 刮取去兑现
+  since-anchor 语义; 填 `'page'`, 就把"真 anchor ⇒ `history:'since'`"这件事删掉了, 而
+  那正是决定 19 与 §5 不变量 2 给出的、`'store'` 之所以被优先的**全部**理由。所以
+  `history` 在 scan adapter 上换成按来源的上界表, 由 `scanState()` 连同 `source` 一起
+  解析出来。这条规则的负控与上面那条并排放: 一个 `scanSources` 声明了某个来源、
+  `historyBySource` 里却没有那一格的 scan adapter 必须变红。
+- **`scan.hostFacts` 是第二个具名例外, 它按同样的价钱买单**(r6, §5 不变量 7)。平台、
+  客户端在不在、库路径、读取授权 —— 这些全都是一次(可能还是跨机器的)`channels-scan-store`
+  往返的结果, 本地重新推导不出来, 这正是 `convCaps` 当初拿到具名例外的那条性质。于是它
+  拿到的同样不是豁免而是: **6 小时 TTL**、三个具名刷新触发点(① 用户在连接向导里选来源
+  时 ② TTL 过期后的第一次面板渲染 ③ 每一趟会推进 anchor 的扫描**之前**无条件刷一次 ——
+  这是"审批时重新解析"在库这一侧的对应物), 以及过了 TTL 的降级 `source:null` /
+  `why:'host-facts-stale'`, 由与其它"不提供并说出理由"完全相同的那条路渲染。
+  **`grant` 从来不跨一趟被信任**: macOS 的 TCC 授权在系统设置里随时可以被撤销, 而决定
+  19(d) 记下的那次提示本身就是"按进程实例的、临时的", 所以一个存下来的 `granted` 是一
+  个**按构造会过期**的主张 —— op 自己的 `EPERM` 才是权威, 一次答成 `EPERM` 的
+  `granted` 立刻重新归档成 `tcc-denied` 并把存下来的授权清掉。`grantAskedAt` 有它自己
+  的读者: "同一台机器上不要在 N 之内重复弹提示"这条规则 —— 没有读者的字段在本仓就是
+  "这个修复从来没被接上线"。
+- **`freshnessClaim` 拿得到它要说的那两个数**(r6)。它返回 `seconds` 并且要说出"上次扫描
+  是 <t> 之前" —— 那是一个**年龄** —— 可它的签名里既没有时钟, 也没有 `caps`(而 poll 那
+  一档要渲染的"≤ 30 s"就住在 `caps.pollInterval.hot` 里, 选 30 还是 300 的那个冷热事实
+  同样没传进来)。本仓每一个同辈解析器都收 `now`(`laneState` / `scanState`, 以及
+  `quota-model` 的 `nowSec`、`decideLagShadow` 的 `now`), 这一个没有理由例外。而 r5 之后
+  它的第一个参数还成了两种**不相交**形状的 union(`laneState()` 的答案带 `via`,
+  `scanState()` 的答案只带 `source`), 于是调用方只能靠"碰巧有哪些键"去嗅探 —— 所以
+  `scanState()` 现在也答 `via:'scan'`, 判别写在明面上。签名收为
+  `freshnessClaim(caps, laneOrScan, convEntry, now)`。
 
 `ChannelRecord`(PURE, `src/channel-record.js`)是那唯一一份归一化形状:
 
@@ -500,11 +568,25 @@ data/channels/
                                 consecutiveFailures,
                                 push {enabled, claimedExclusive, state, lastEventAt,
                                       missRate, demotedAt, demotedWhy}    // §6.4
-                                scan {hostId, chosenSource, grant, grantAskedAt,
-                                      hostFacts {platform, clientInstalled, storePath, at}}
+                                scan {hostId, chosenSource, grantAskedAt,
+                                      hostFacts {platform, clientInstalled, storePath,
+                                                 grant, at}}
                                                                           // §12.5: the CHOICE and
                                                                           // the OBSERVATION; only
-                                                                          // scanState() folds them
+                                                                          // scanState() folds them.
+                                                                          // r6: the OBSERVATION half
+                                                                          // is a stored derived fact,
+                                                                          // so invariant 7 gives it a
+                                                                          // 6 h TTL, three refresh
+                                                                          // triggers and a named
+                                                                          // degrade. `grant` moved
+                                                                          // INSIDE hostFacts: it
+                                                                          // expires with them and is
+                                                                          // never trusted across a
+                                                                          // pass (the op's own EPERM
+                                                                          // is the authority).
+                                                                          // `grantAskedAt` is read by
+                                                                          // the don't-re-prompt rule
   index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
                                 id, adapterId, vendorId, title, kind (dm|group|thread),
                                 participants summary, lastAt, unread, tracked, anchor,
@@ -563,7 +645,16 @@ data/channels/
    返的结果, 本地重新推导不出来, 所以它拿到的不是豁免, 而是**一个 TTL(6 小时)、三个刷
    新触发点, 以及一个过期即 `unknown` 的降级**(§4)。存下来的那个 `at` 因此才有了读者 ——
    在 r4 之前它一个读者都没有, 而在这个仓库里, 没有读者的字段就是"这个修复从来没接上
-   线"。
+   线"。**`scan.hostFacts` 是第二个例外, 而 r6 是在它身上重犯了同一条之后才补上的**:
+   r5 给它写了一份 `{platform, clientInstalled, storePath, grant, grantAskedAt, at}`, 三
+   个字段一个读者都没有、没有 TTL、没有刷新触发点、也没有过期降级 —— 一年前 r4 的原话就
+   在同一节里。它欠的价钱与 `convCaps` 逐字相同(6 小时 TTL、三个具名触发点、过期降级成
+   `source:null` / `why:'host-facts-stale'`, 见 §4), 而伤害方向恰好相反且更贵: `convCaps`
+   陈旧会**多提供**一个控件, `hostFacts` 陈旧会让 `scanState()` 在客户端已被卸载、一次
+   客户端更新把库挪走(决定 19(e) 自己承认 schema 会随版本变)、或者一次 Sonoma→Sequoia
+   升级把 TCC **扩展**到 `~/Library/Group Containers/` 之后, 继续答 `source:'store'` 与
+   `latencySeconds:15` —— 也就是 §12.5 明令禁止的那句"悄悄把一条 15 秒的通道换成 5 分钟
+   的"谎话, 只不过这次连那条 5 分钟的通道都没有, 每一趟都在失败。
 
 ### 5.1 索引归谁所有
 
@@ -611,7 +702,9 @@ LANE ─┼─ poll  : adapter.history() ─────────┼─► no
                                                                          │
                         ├─► broadcast 'channels-updated'  (once per pass / per coalesced burst)
                         │
-                        └─► COALESCE (60 s window when laneState().carryContent — fence 12)
+                        └─► COALESCE (60 s window when carryContent — fence 12; only a PUSH
+                        │            lane can answer true: a poll pass and a scan pass are
+                        │            already batches, so they need no window — r6)
                               └─► for each ASSIGNED conversation:
                                     channelFilter.matchRecord(filter, record)
                                       └─ hit ─► assignment.route (agent | rotating group)
@@ -683,10 +776,13 @@ adapter 一律**容忍**它们而不是假设它们不存在: 批量枚举 DM �
 - **`'store'` —— 读那个客户端自己写下的本地库。** 今天只有一个格子成立: **macOS 上的
   WhatsApp**, 它把整份历史留在一个**未加密**的 Core Data SQLite 库里。游标是
   `(rowid, 时间戳)` 一对, anchor 是客户端**自己的**消息 id(所以 `history: 'since'`, 而
-  §5 不变量 2 拿到一把真键), 一趟以"读到开始时记下的那个最大 rowid"为完整, 可选一个对库
-  文件的 fs.watch 做变更通知。**绝不写**: 用 SQLite backup API 复制出一份 scratch 拷贝再
-  读它, 因为那是一个 WAL 库, 只读主文件会静默漏掉最近的消息。读取被 macOS 的 TCC 拒绝
-  时, 这条通道以 `tcc-denied` 的名字失败, **绝不是一次读到零条的成功扫描**。
+  §5 不变量 2 拿到一把真键), 一趟以"读到开始时记下的那个最大 rowid"为完整, 而对库文件的
+  那个 fs.watch 是一次**游标 kick**(去抖到 `caps.scanLatency.store`, §6.4), 绝不是"每次
+  写盘扫一遍"。**绝不写**: 用 `SQLITE_OPEN_READONLY` 打开那个活库(它读得到 WAL 内容,
+  而且什么都不改), 再**从那条只读连接**做一次 `VACUUM INTO` / backup 拿到 scratch 快照 ——
+  会静默漏掉最近消息的是**只读那个 `.db` 文件本身**(它不含 WAL), 不是"只读地打开"
+  (r6, 实测见 §12.5)。读取被 macOS 的 TCC 拒绝时, 这条通道以 `tcc-denied` 的名字失败,
+  **绝不是一次读到零条的成功扫描**。
 - **`'ui'` —— 读那个客户端渲染出来的界面**(由 agent-browser 的 profile 驱动, 见
   `docs/design-agent-browser-v2.md`)。这是 **Windows、Linux 与全部 WeChat** 的唯一来源
   (前两者的库是加密的 / 压根没有官方客户端, WeChat 的密钥在进程内存里 —— 围栏 13)。它
@@ -695,10 +791,15 @@ adapter 一律**容忍**它们而不是假设它们不存在: 批量枚举 DM �
 
 两条路的延迟差一个数量级(秒 vs 分钟), 而**两个数字都是会话行上画出来的那个数字**, 因为
 它是用户在把一件事交给这条通道之前唯一需要知道的量 —— 这也是为什么一次被拒绝的库读取
-**不会**静默降级成界面扫描。发送在两条路上是同一件事: 在那个已登录的官方客户端自己的输入
-框里打字; 走协议库那条路带着围栏 13 的条款风险, 默认不提供。**库在哪台机器上, 读它的代码
+**不会**静默降级成界面扫描。**发送不跟着来源走**(r6): 读一份库是只读的证据, 它不是一条
+发送通道, 所以在一台解析成 `'store'` 而没有接上任何发送通道的机器上,
+`convCaps.sendAs` 就是 `[]`, `why:'no-send-lane-on-this-host'` —— 而 §4 现成的规则会把它
+渲染成"不提供并说出理由"并且**不许**建出任何 proposal。真正的发送动作只有 `'ui'` 那一条:
+agent-browser 在那个已登录的官方客户端自己的输入框里打字; 走协议库那条路带着围栏 13 的
+条款风险, 默认不提供。**库在哪台机器上, 读它的代码
 就在哪台机器上**: 一个 `channels-scan-store` 的 agentd op, `hostId` 是参数, 本机是设备 #0。
-这一类 adapter 的接口从 P0 起就存在(`scan` / `scanSources` / `scanLatency` / `scanState` /
+这一类 adapter 的接口从 P0 起就存在(`scan` / `scanSources` / `historyBySource` /
+`scanLatency` / `scanState` /
 `convCaps` / `tosRisk` 都是为它留的位置), 具体的 WhatsApp 与 WeChat adapter 在 P6 且被决定
 19 门控。
 
@@ -740,6 +841,26 @@ r2 在这里写的是一条绝对规则 —— *"一条活通道只可以让一�
 - **已降级或不 `live`** —— 无论声明是什么, `carryContent:false` 且 `pollCadence:'fast'`。
   这就是"降级 > 活性 > 声明"这条优先级的全部内容: 一个已经被产品自己撤回的主张, 不许
   再决定任何一个字节走哪条道。
+- **`via:'scan'` —— `carryContent:false`, 恒为假**(r6)。上面那条优先级从头到尾只枚举了
+  push 的几个状态, 而合流点上那道合并门读的是**解析出来的那条通道**, `laneState()` 又答
+  得出 `via:'scan'` —— 于是 scan 通道此前落在一个没人回答过的格子里。答案本身没有悬念:
+  **一次 scan pass 就是一批**, 与一次 poll pass 逐字同理, 所以它既不需要那扇窗、也不会
+  从那扇窗里买到任何延迟(围栏 12 自己的话: 在 kick 模式下开那扇窗"白白买 60 秒延迟")。
+  不写下来的代价不是理论: §12.5 把 `'store'` 连同一个**事件驱动**的触发器(对库文件的
+  fs.watch)一起引进来, 而 WhatsApp 的 `ChatStorage.sqlite` 每收一条消息就被写一次 ——
+  于是一个热闹的群里 watch 大约每条消息响一次 ⇒ 每条消息一趟 scan ⇒ 每条消息一次 filter
+  命中 ⇒ 在 `notify:'wake'` 下, 合并门读到的 `carryContent` 是 undefined(假)⇒ 不合并 ⇒
+  **每条消息一次唤醒**。那正是围栏 12 自己那句"30 条消息变成 30 次投递", 从 r5 刚加的这
+  条通道、走那道唯一没盖住它的门进来。
+- **那个 fs.watch 是一次游标 kick, 绝不是"每次写盘扫一遍"**(r6)。它唤醒的是 scan 的那次
+  *睡眠*(与 `shared` 推送 kick 的措辞逐字相同, 同一个 `opencode-events` 教训), 并且被
+  **去抖到最多每 `caps.scanLatency[source]` 一趟** —— 这样那个数字才是一条真的天花板,
+  而不是一个标签; 会话行上画的秒数与库真正被读的频率因此是同一件事。它跑在 daemon 里,
+  所以它同时欠 `opencode-events` 第四轮那条 inotify 生命周期规则: 单一 attach 点、
+  停止即终结、绝不把一个 watch 挂在没人持有的通道上。诚实边界: §7.4 每会话 30 秒的阶梯
+  地板与 spend authorizer 把**绝对花销**兜住了, 所以这不是一笔无界的钱 —— 但每条通道的
+  唤醒次数与扣款笔数会不一样, 而那恰好让 §6.1 的那句总纲("同一批记录、同一个唤醒次数、
+  同一笔扣款")与 §16 的 parity 那一行按字面**不可能成立**。
 
 **声明必须可以被证伪, 否则它就是一句祈祷。** 平台不告诉我们还有几个客户端连着, 所以独占度
 永远是**被断言**、绝不是被推断的 —— 但它是**可测**的: 引擎为每个 adapter 记录
@@ -1306,8 +1427,8 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 
 | `scanSource` | 读什么 | anchor | 延迟 | 发送 |
 |---|---|---|---|---|
-| `'store'` | 客户端自己写下的本地库, 按 rowid / 时间戳带游标增量读, 可选一个对库文件的 fs.watch 做变更通知 | 客户端**自己的**消息 id(库里就有那一列)⇒ `history: 'since'` | 秒级 | 落到 `'ui'` —— 协议库被围栏 13 拒绝 |
-| `'ui'` | 客户端**渲染出来的界面**, 由 agent-browser 的一个 profile 驱动(`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + 指纹种子 + 代理, 外加一个 VibeSpace 自己拥有的实时视图) | 通常没有稳定 id ⇒ 一把**声明出来的**合成键 ⇒ `history: 'page'`, **绝不是 `'none'`** | 分钟级 | agent-browser 在那个客户端自己的输入框里打字 |
+| `'store'` | 客户端自己写下的本地库, 按 rowid / 时间戳带游标增量读; 对库文件的 fs.watch 是一次**游标 kick**, 去抖到 `caps.scanLatency.store`(§6.4), 绝不是"每次写盘扫一遍" | 客户端**自己的**消息 id(库里就有那一列)⇒ `historyBySource.store = 'since'` | 秒级 | **它自己没有发送通道**(r6): 读库是只读证据。发送只能来自 `'ui'`; 那条通道没接上时 `convCaps.sendAs: []` + `why:'no-send-lane-on-this-host'` —— 协议库被围栏 13 拒绝 |
+| `'ui'` | 客户端**渲染出来的界面**, 由 agent-browser 的一个 profile 驱动(`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + 指纹种子 + 代理, 外加一个 VibeSpace 自己拥有的实时视图) | 通常没有稳定 id ⇒ 一把**声明出来的**合成键 ⇒ `historyBySource.ui = 'page'`, **绝不是 `'none'`** | 分钟级 | agent-browser 在那个客户端自己的输入框里打字 |
 
 **r5(owner 的更正): `'store'` 不是一个假想的格子, 它在 macOS 上是真的。** r4 写下的那句
 "决定 19 把 `'store'` 对**两个**平台都排除掉了"对 WeChat 成立、对 WhatsApp **不成立**, 而
@@ -1334,22 +1455,40 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 - `caps.scanSources` —— 一张按平台的表(`{ darwin:'store', win32:'ui', linux:'ui' }`), 静态
   的**上界**声明, 与 `convCaps ⊆ caps` 是同一个方向: 解析只许收窄, 绝不许放宽;
 - `caps.scanLatency` —— 按**来源**给数(`{ store: 15, ui: 300 }` 秒), 因为两条路差一个数量
-  级, 而这个数字是要画在会话行上的;
+  级; 它既是**声明的**节奏, 也是那个 fs.watch kick 被去抖到的**上限**(§6.4), 而画在会话行
+  上的是**实测**年龄(见下面性质 1);
+- `caps.historyBySource` —— **同一条理由的第二个字段**(r6): `{ store:'since', ui:'page' }`。
+  `history` 原本是一个按**种类**的标量, 可上面这段刚刚论证完这一类**一个 adapter 会同时跑
+  两格** —— 于是那个标量无论填什么都是错的: 填 `'since'` 就要求 Linux 那格用一次 DOM 刮取
+  去兑现 since-anchor 语义, 填 `'page'` 就把"真 anchor ⇒ `history:'since'`"删掉, 而那正是
+  决定 19 与 §5 不变量 2 给出的、`'store'` 之所以被优先的**全部**理由。同一个上界表, 同一
+  个解析器, §4 的契约规则同时管住"每个值都不许是 `'none'`"与"键必须盖住 `scanSources` 点
+  名的每一个来源";
 - `src/channel-caps.js` 里**唯一**的解析器
-  `scanState(caps, adapterRecord, hostFacts, now)`, 把平台、客户端在不在、以及读取授权折成
-  一个答案, 与 `laneState` 同一个形状、同一条法则(*折成答案的地方只能有一个*)。
+  `scanState(caps, adapterRecord, hostFacts, now)`, 把平台、客户端在不在、读取授权、以及那
+  份机器事实的**年龄**折成一个答案, 与 `laneState` 同一个形状、同一条法则(*折成答案的地方
+  只能有一个*), 并且和它一样答 `via`。
 
 ```js
 scanState(caps, adapterRecord, hostFacts, now)
-      -> { source:  'store'|'ui'|null,       // 这条会话此刻实际走的来源
+      -> { via:     'scan',                  // r6: 判别字段, 让 freshnessClaim 与 laneState()
+                                             //     的答案组成的 union 是显式的
+           source:  'store'|'ui'|null,       // 这条会话此刻实际走的来源
+           history: 'since'|'page'|null,     // r6: caps.historyBySource[source], 解析后的值
+           carryContent: false,              // r6: 一次 scan pass 就是一批(§6.4), 恒为假
            why:     'store'|'no-store-on-platform'|'store-encrypted'
-                    |'client-not-installed'|'tcc-denied'|'user-chose-ui'|'no-source',
-           latencySeconds,                   // 来自 caps.scanLatency[source], 画在会话行上
+                    |'client-not-installed'|'tcc-denied'|'user-chose-ui'
+                    |'host-facts-stale'|'no-source',
+           latencySeconds,                   // caps.scanLatency[source] —— **声明的**节奏,
+                                             // 也是 fs.watch 的去抖上限(§6.4)
            storePath,                        // 只在 source==='store' 时有; 绝不进日志
-           grant:   'granted'|'needed'|'denied'|null }
+           grant:   'granted'|'needed'|'denied'|'unpromptable'|null,
+           hostFactsAgeSeconds }             // r6: now - hostFacts.at; 面板要把它说出来
 ```
 
-优先级同样写死: **平台声明 > 客户端在场 > 读取授权 > `'ui'`**。而它带一条**刻意的例外**,
+优先级同样写死: **事实新鲜 > 平台声明 > 客户端在场 > 读取授权 > `'ui'`**(r6 把新鲜度放在
+第一级: 它下面每一级读的都是 `hostFacts`, 一份陈旧记录会让那四级全都在回答"这台机器**当时**
+是什么样", 而不是此刻)。而它带一条**刻意的例外**,
 没有这一条这个解析器就会变成它要防的那个东西:
 
 > **被拒绝的读取不会自动降级成 `'ui'`。** `tcc-denied` 是一个**具名**答案(`source: null`),
@@ -1366,9 +1505,18 @@ scanState(caps, adapterRecord, hostFacts, now)
   anchor、秒级延迟、不需要 agent-browser、也不需要一个第二份登录 —— 这条路在有它的时候
   **优先于** `'ui'`。在 **Windows** 与 **Linux** 上没有这条路(前者库是加密的, 后者压根没有
   官方客户端), 剩下的是官方 Web 客户端跑在一个 agent-browser profile 里, 即
-  `scanSource: 'ui'`。**两条路的发送是同一件事**: 在那个已登录的官方客户端自己的输入框里
-  打字, 所以身份上就是用户本人(`identityMarking: 'none'`) —— 这也是为什么"读库"这条路
-  **不**顺手把发送也换掉: 库是只读证据, 不是一条发送通道。另一条路是协议库(whatsmeow /
+  `scanSource: 'ui'`。**发送按来源分开说, 这不是同一件事(r6 更正)**: r5 那句"两条路的发送
+  是同一件事 —— 在那个已登录的官方客户端自己的输入框里打字"对 `'ui'` 成立(agent-browser
+  在一个网页里打字), 对 macOS **无定义** —— 那里的官方客户端是一个**原生 Catalyst 应用**,
+  没有任何浏览器 profile 够得着它。所以: `'ui'` = agent-browser 在那个 Web 客户端的输入框
+  里打字, 身份就是用户本人(`identityMarking: 'none'`); 而 macOS 的 `'store'` **自己没有发
+  送通道**(库是只读证据), 它只有两个候选, 而**本设计不替 owner 选**(见 §20 与决定 19):
+  (a) 把同一个 Web 客户端开在一个 profile 里 —— 那是**第二份 linked-device 凭据**, 一条对
+  话两个登录, 必须与 `auth.state()`/`scanState().grant` 并排建模成它自己的一行, 或者 (b)
+  原生 macOS UI 自动化(Accessibility / CGEvent), 一条本文档此前从没点过名、且需要它**自己
+  那份** TCC 授权的机制。在这两者之一被接上之前, 这一类在 macOS 上是**只读**的, 而且是
+  结构性的只读: `convCaps.sendAs` 解析成 `[]` 且 `why:'no-send-lane-on-this-host'`, §4 现成
+  的规则把它渲染成"不提供并说出理由"并且**不许**建出任何 proposal。另一条路是协议库(whatsmeow /
   Baileys): 它们是逆向出来的**非官方客户端**, 而非官方客户端被 WhatsApp 的条款明确禁止;
   公开报道里封号确实落在过低流量、只回复的正常使用上, 而合规的替代品是走认证服务商的官方
   Business Cloud API(它是 bot 身份, 所以 `identityMarking: 'marked'`)。⇒ 协议库那条路
@@ -1389,11 +1537,55 @@ scanState(caps, adapterRecord, hostFacts, now)
 - **什么叫"完整的一趟"。** 一趟开始时先记下当时的最大 rowid, 读到它为止 ⇒ `complete: true`
   且 anchor 前进; 中途任何失败(库被换、读被拒、进程退出)⇒ `complete: false`, anchor 不
   动, 下一趟重读。与 §5 不变量 4 同一条规则, 只是换了一种证据。
-- **绝不写。** 优先用 SQLite **backup API**(或 `VACUUM INTO`)把库复制成一份 scratch 拷贝
-  再读那份拷贝, 退一步是把 `db` / `-wal` / `-shm` 三个文件一起复制过去。**"以只读方式打开
-  活库"是不够的**: 这是一个 WAL 库, 只读主文件会**静默漏掉**最近的消息, 而以读写方式打开
-  就去动了那个正在跑的客户端自己的状态。绝不 checkpoint, 绝不删 WAL, 绝不以 `mode=rw` 打
+- **绝不写 —— 而"绝不写"的那条机制在 r6 之前是反的。** r5 写的是"优先用 backup API 或
+  `VACUUM INTO`, 而『以只读方式打开活库』不够, 因为这是一个 WAL 库", 两半都错, 且刚好错成
+  互相支撑的样子: 会**静默漏掉**最近消息的是**只读那个 `.db` 文件本身**(它不含 WAL), 而
+  "以只读方式**打开**"读得到 WAL 内容 —— 与此同时, 被推荐的那条路的源连接只能是**默认**
+  (读写)打开, 而那正是唯一会改动那个库的开法。规则改成:
+  **以 `SQLITE_OPEN_READONLY`(`file:…?mode=ro`)打开那个活库, 然后从这条只读连接做
+  `VACUUM INTO` / backup 拿到一份 scratch 快照, 读那份快照。**
+  一次性 fixture 上的实测(node v24.12.0 的 `node:sqlite`; 生产者被 SIGKILL, 留下一个没
+  checkpoint 的 WAL: `db` 8192 B sha `b383fc2c3cf06e24`, `-wal` 4152 B, `-shm` 32768 B;
+  每一臂都从逐字节相同的拷贝开始):
+
+  | 这一臂 | 读到的行 | `db` | `-wal` | `-shm` |
+  |---|---|---|---|---|
+  | 默认打开, **我们是唯一连接** | `OLD1,OLD2,`**`NEWEST`** | **被改写** `ee24f1b1…` | **被删除** | **被删除** |
+  | 默认打开, 客户端还连着 | 同上三行 | 逐字节相同 | 逐字节相同 | 逐字节相同 |
+  | `readOnly:true`, 唯一连接 | `OLD1,OLD2,`**`NEWEST`** | 逐字节相同 | 逐字节相同 | 被重写 |
+  | `readOnly:true`, 客户端还连着 | 同上三行 | 逐字节相同 | 逐字节相同 | 逐字节相同 |
+  | `readOnly:true`, `-shm` 不可写 | `OLD1,OLD2,`**`NEWEST`** | 逐字节相同 | 逐字节相同 | 逐字节相同 |
+  | 从只读连接 `VACUUM INTO` | 快照含全部三行 | 逐字节相同 | 逐字节相同 | 被重写 |
+  | 从只读连接 `backup()`(异步) | 快照含全部三行 | 逐字节相同 | 逐字节相同 | 被重写 |
+  | 只读**那个 `.db` 文件本身** | `OLD1,OLD2` —— **NEWEST 不见了** | 逐字节相同 | 逐字节相同 | 逐字节相同 |
+
+  第一行就是 SQLite 有文档的**最后一个连接 checkpoint 并删除 WAL** 的行为, 而"我们是最后
+  一个连接"对一次**排期的后台扫描**是**常态**(owner 退出了客户端 / 重启过 / 人不在), 也正
+  是 §16 那个合成 fixture 的形状。`-shm` 是 WAL 的索引、不含任何消息内容, 且在它不可写时
+  只读连接**完全不动它** —— 所以"绝不写"的可断言形式是 **`db` 与 `-wal` 逐字节相同**,
+  绝不是三个文件一起(见 §16)。绝不 checkpoint, 绝不删 WAL, 绝不用**默认**(读写)方式打
   开 —— 这条通道对那个客户端的唯一可观测影响必须是一次短暂的共享锁。
+  把 `db` / `-wal` / `-shm` 三件一起复制**保留为兜底**(只在 `-shm` 挂不上时用), 并写明它
+  的代价: 那是一次**撕裂读**的风险(复制到一半客户端可能 checkpoint), 而只读打开恰恰避开
+  了它。
+- **用哪个 SQLite 读者, 是一个要在这里回答的决定(r6)。** 这条通道跑在 **daemon** 里, 而
+  daemon 是一个 esbuild 单文件包, `--external` 恰好只有一个 `node-pty`(package.json 的
+  `build:agentd`), 安装脚本把它称作 "zero-dep" 且 `NODE_MIN=18`, node-pty 是**尽力而为、
+  失败不致命**地单独装的。于是三个候选各自撞上本仓已经写下来的约束, 定案与理由:
+  ① **推荐: 有界子进程 `sqlite3(1)`, 每趟一次 spawn**(围栏 3 认可的形状 —— "每趟一次,
+  不是每条一次"; macOS 自带 `/usr/bin/sqlite3`, 而 `VACUUM INTO` 在 CLI 上就能做) ②
+  `node:sqlite` 放在**运行时能力探测**后面, 并**明说它要求把 `NODE_MIN` 抬上去**: 它在
+  Node 18/20 上根本不存在(22.5.0 才加入), 在 Node 24 上仍然打 `ExperimentalWarning`(实
+  测), 而且**取行的 API 是同步的**(`DatabaseSync`/`StatementSync` —— 它的 `backup()` 确
+  实是异步的, 所以危险的是**扫行**那一段, 不是拷快照那一段), 而 CLAUDE.md 写着这个 daemon
+  "carries live session pipes — revisit only with daemon-side worker isolation", 那正是围栏
+  3 自己的法条 ③ **原生绑定(`better-sqlite3`)明确拒绝**, 理由就是那个包: 它要第二个
+  `--external` 外加一份按平台预编译的产物送到那台 Mac —— 也就是 node-pty 那个故事, 而
+  node-pty 降级了只是终端不能用, 这里降级了就是**这个功能本身**不能用。
+  哪一级都拿不到时, `channels-scan-store` 的失败词表里有一个**具名**答案
+  `no-sqlite-reader` —— 绝不是零条消息(围栏 8 的形状)。`test-architecture` 的 SHARED 规则
+  看不见这件事(node 内建是允许的), 只有 daemon 的打包会在 build 时看见, 所以这个决定写在
+  这里而不是留给实现。
 - **TCC 是一道具名的门。** macOS Sonoma 14 开始保护 `~/Library/Application Support/` 下的
   应用容器, Sequoia 15 把这个保护**扩展到** `~/Library/Group Containers/`; 一个既不是以那
   个客户端的 Team ID 签名、也不是从 Mac App Store 装出来的进程, 要么收到一次(按进程实例、
@@ -1432,29 +1624,43 @@ owner 的 Mac 上, VibeSpace 跑在别处。
 
 **这一类共有的三条性质**, 全都直接掉进已有的机器里:
 
-1. **延迟是画在会话行上的一个数字, 而它来自 `scanState` 不是来自一条静态声明。**
-   `freshnessClaim(scanState(…), convEntry)` 对 `scan` 返回 "上次扫描在 <t> 之前", 而
-   AssignFilter 面板在用户把一件事交给这条通道之前就把它说出来。一个 5 分钟扫描一次的通道
-   在做值班告警这件事上是诚实的, 在做实时客服这件事上是不诚实的 —— 产品负责让人在**指派之
-   前**看见这个差别。这也正是上面那条"被拒绝的读取不自动降级"存在的理由: 同一个 adapter 在
-   两台机器上会画出两个不同的数字, 而那两个数字都必须是真的。
+1. **会话行上有两个不同的数字, 而这一行必须说清自己在显示哪一个(r6 改正)。**
+   r5 写的是"延迟来自 `scanState` 不是来自一条静态声明", 而这句话按字面**不成立**:
+   `scanState().latencySeconds` 就在它上面两行被定义成"来自 `caps.scanLatency[source]`" ——
+   一张按**种类**的静态表, 只不过被那次解析**索引**了一下。两个数字都是真的、也都要说:
+   **声明的节奏** = `caps.scanLatency[source]`(按 `scanState` 的解析取值; 它也是 fs.watch
+   的去抖上限, §6.4), **实测的年龄** = `convEntry.lane.lastScanAt` 对 `now`。会话行画的是
+   后者, 而 `freshnessClaim(caps, scanState(…), convEntry, now)` 对 `scan` 返回 "上次扫描
+   在 <t> 之前" —— **它必须拿到那个时钟**才可能算得出来(§4 的契约规则)。AssignFilter 面板
+   在用户把一件事交给这条通道之前就把它说出来。一个 5 分钟扫描一次的通道在做值班告警这件事
+   上是诚实的, 在做实时客服这件事上是不诚实的 —— 产品负责让人在**指派之前**看见这个差别。
+   这也正是上面那条"被拒绝的读取不自动降级"存在的理由: 同一个 adapter 在两台机器上会画出两
+   个不同的数字, 而那两个数字都必须是真的。
 2. **凭据不是 token, 是一个登录着的客户端 —— 而 `'store'` 那一路是两个事实。**
    `auth.state()` 回答"那个客户端还登录着吗", `needs-reauth` 的动作是"打开实时视图重新扫一
    次码", 不是一次 OAuth 往返。`'store'` 那一路在它之上还多一个**正交**的事实: 我们有没有
    被授权去读那个文件(`scanState().grant`)。两个事实分开存、分开渲染: 客户端登出了库还在
    (读得到, 但它不再更新), 授权被撤了客户端还登录着(它在更新, 但我们看不见)—— 把这两件
-   事合成一个布尔, 就是让其中一种情况顶着另一种的文案。
+   事合成一个布尔, 就是让其中一种情况顶着另一种的文案。**而这两个事实都会过期, 授权还从来
+   不跨一趟被信任(r6)**: `hostFacts` 有 6 小时 TTL 与三个具名刷新触发点(§4/§5 不变量 7),
+   而一个存下来的 `grant:'granted'` 是一个**按构造会过期**的主张 —— macOS 的 TCC 授权在系
+   统设置里随时可以被撤销, 而决定 19(d) 记下的那次提示本身就是"按进程实例的、临时的" ⇒ op
+   自己的 `EPERM` 才是权威, 一次答成 `EPERM` 的 `granted` 立刻重新归档成 `tcc-denied` 并把
+   存下来的授权清掉。
 3. **它天然是配对设备那件事的第一个真实用例**(§14): 客户端跑在哪台机器上, 这个 adapter 就
    得在哪台机器上跑。接口本来就接收一个 machine handle, 所以这件事是接线不是重写 —— 而
    `'store'` 那条路把它从"将来会有用"变成了 P6 的**前提**: 一台配对的 Mac 上的
    `channels-scan-store` op 就是这一类最好的那条通道。
 
 **排期与门控:** 接口从 P0 起就带着这一类需要的每一个位(`scan` / `scanSources` /
+`historyBySource` /
 `scanLatency` / `scanState` / `convCaps` / `tosRisk`), 而且假 adapter 会**两种来源都真的跑
 一遍** scan 模式, 所以这条通道从第一天起就在 `test-channels-lane-parity` 的覆盖里。具体的
 WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 agent-browser 系统落地
 上, 而 macOS 的 `'store'` 那一半**只**门控在决定 19 上 —— 它不需要 agent-browser, 所以它是
-这一类里唯一一条今天就能独立落地的腿。
+这一类里唯一一条今天就能独立落地的腿, **而这恰恰也意味着它是只读的(r6)**: 那条腿的交付物
+里没有任何发送路径, 于是它**必须说出来** —— `convCaps.sendAs` 解析成 `[]` 加
+`why:'no-send-lane-on-this-host'`, 由 §4 现成的规则渲染成"不提供并说出理由"。
 
 ---
 
@@ -1488,7 +1694,7 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 | 插件贡献的 adapter | manifest 没有 adapter 贡献点; 沙箱会需要网络+文件系统授权; 而且接收路径必须跑在 store 与 spend guard 旁边。第三方 adapter 是*最终*的正确归宿 | `contributes.channelAdapters`, 走同一套 `src/channels` 接口, 于是注册表永远不分叉。**这个 key 今天并没有被保留**: `src/plugin-manifest.js` 里的 `RESERVED_CONTRIBUTIONS` 是 `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, 而只有*在那张表里*的 key 才会产生"保留给后续阶段 —— 已忽略"的警告 —— 其余任何东西在 `m.contributes` 被重建成固定形状时就被静默丢弃, 所以一个照着这一行去写的插件作者会**完全收不到任何信号**。**P0 加上那一个词**, 外加 `scripts/test-plugin-loader.mjs` 里期望集合的更新。一个声明了却是惰性的槽位, 与本文针对 `SPEND_REASONS` 所反对的是同一种失败; 区别在于这里那个槽位只值一个数组条目, 却买到一句诚实的警告 |
 | 跑在配对设备上的 adapter | 凭据与 store 都住在这里 | 接口本来就接收一个 machine handle; v1 传 `local`。`hostId` 是一个参数, 绝不是一个分支。**r5: 这一行第一次有了一个真实的消费者** —— macOS 上 WhatsApp 的那份库在 owner 的 Mac 上, 而 VibeSpace 跑在别处, 所以 `channels-scan-store` 这个 op 从第一天起就是按 `hostId` 写的(本机是设备 #0), P6 的那条腿只是换一个参数 |
 | ~~活事件通道~~ **已上移到 P1**(r3/Q3(a)) | 不再推迟: owner 要实时推送, 而 §6.4 按证据重新论证过了。留下的门控只有一个 —— 在 Lark 控制台上启用事件订阅 | `src/channels/live/<kind>.js`, 内容还是游标 kick 由 `laneState()` 判定(§4) |
-| 本地客户端 adapter(WhatsApp / WeChat) | 接口从 P0 起就建模了它(`scan` / `scanSources` / `scanLatency` / `scanState` / `tosRisk` / `convCaps`), 但 adapter 本身要一个登录着的官方客户端, 而 `'ui'` 那一半还要一个 agent-browser profile 与一次关于条款风险的点名决定 | **P6**, §12.5。`'ui'` 那一半门控在决定 19 **与** agent-browser 系统上; macOS 的 `'store'` 那一半**只**门控在决定 19 上 —— 它不需要 agent-browser |
+| 本地客户端 adapter(WhatsApp / WeChat) | 接口从 P0 起就建模了它(`scan` / `scanSources` / `historyBySource` / `scanLatency` / `scanState` / `tosRisk` / `convCaps`), 但 adapter 本身要一个登录着的官方客户端, 而 `'ui'` 那一半还要一个 agent-browser profile 与一次关于条款风险的点名决定 | **P6**, §12.5。`'ui'` 那一半门控在决定 19 **与** agent-browser 系统上; macOS 的 `'store'` 那一半**只**门控在决定 19 上 —— 它不需要 agent-browser |
 | 走协议库的 WhatsApp 发送 | 非官方客户端被平台条款禁止, 封号落在过正常使用上(围栏 13) | 永远在 `tosRisk: 'prohibited'` 后面; 合规路线是官方 Business Cloud API(bot 身份) |
 | HTML 邮件渲染 | XSS 面; 纯文本是诚实的, 而且对分诊来说够用 | published-pages 那套 sandbox iframe 模式 |
 | 附件自动抓取 | 带宽、存储, 以及每条附件多一次被授权的请求 | `caps.attachments: 'fetch'` + 一个显式的用户/agent 动作, 带大小上限 |
@@ -1524,9 +1730,9 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 | `test-channel-outbox` | fast | 状态机(每一次允许的转移与每一次被禁止的转移); 护栏叠加且只能收紧; 未知策略时 fail-closed; `unknown` 绝不自动重试 | 一份去掉护栏检查的补丁副本必须变红; 一条 direct-send 策略碰上带链接的消息仍然必须走 review |
 | `test-channel-record` | fast | 归一化, 含 mention 占位符解析; 注入标记的剥除 | 一段包含我们自己 frame 标记的正文, 出来必须是惰性的 |
 | `test-channel-store` | fast | 原子索引; 只追加的日志; 重放分页时的去重; 游标只在完整 pass 之后前进; 保留地板 ≥ 7 天; **两趟并发 pass 经 `index.update()` 都落地**(§5.1) | 一趟报告 `complete:false` 的 pass 必须让游标保持不变; 一份围绕 `writeJsonAtomic` 做 read-modify-write 的补丁副本必须**丢掉**其中一趟的 anchor 推进 |
-| `test-channel-adapter-contract` | fast | 假 adapter 驱动每一个已声明的能力; 未声明的能力抛异常; 带类型的错误; **那条"没有任何调用点按 `kind` 分支"的 grep 普查**; **`receive:'scan'` 的 adapter 不许声明 `history:'none'`**(r4, §12.5); **`scan` 的 adapter 必须声明 `scanSources` 与按来源的 `scanLatency`**(r5) | 一个在调用点上按自己 kind 分支的合成 adapter 必须让普查失败; 一个声明 `receive:'scan'` + `history:'none'` 的合成 adapter 必须变红; 一个声明 `receive:'scan'` 却不给 `scanSources` 的合成 adapter 必须变红 |
-| `test-channel-caps` | fast | 两个轴的记录; `convCaps` 三值; **只有 `caps` 与 `convCaps` 同时放行那个控件才存在**, 而 `unknown` 永远渲染成"不提供 + 理由"; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim` 三种通道各自的措辞; `identityWarning` 对 `unknown` 与对 `marked` 一样出声。**r4 两组**: `laneState` 的优先级 —— 一条 `claimedExclusive:true` 且带 `demotedAt` 的记录必须答 `carryContent:false`, 一条超过心跳窗口没出过声的通道**永远**不许答 `live:true`, `unknown` 一律 `carryContent:false`; 以及 `convCaps` 的 TTL —— 过了 TTL 的条目必须渲染成 `unknown`。**r5 一组**: `scanState` 的优先级(平台声明 > 客户端在场 > 读取授权 > `'ui'`), 它的答案 ⊆ `caps.scanSources[platform]`, 而 `tcc-denied` 解析成 `source:null` **不是** `'ui'` | 一个声明 `sendAs:['user']` 却在一个 `convCaps.sendAs === []` 的会话上仍然提供发送控件的合成 adapter 必须变红; 一个返回比 `caps` 更宽的 `convCaps` 的 adapter 必须变红; `identityMarking:'unknown'` 却没有警告必须变红; **一份读 `caps.pushExclusivity` 的修前副本必须在"已降级"那条 fixture 上答 `carryContent:true`**; **一条新鲜的 `convCaps` 仍然必须提供那个控件**(TTL 的正控 —— 一条永远答 `unknown` 的规则同样是缺陷); **一个在 `scanSources.linux==='ui'` 的机器上答 `'store'` 的解析器必须变红**, 而**一台 `darwin` + 客户端在场 + 授权已拿到的机器上仍然答 `'ui'` 的解析器同样必须变红**(`scanState` 的正控 —— 一个永远收窄到底的解析器与一条永远答 `unknown` 的规则是同一种缺陷) |
-| `test-channels-lane-parity` | fast | **同一天的流量分别经 push / poll / scan 灌进去 ⇒ 同一批记录、同一个唤醒次数、同一笔扣款**(围栏 12); 同一条消息推送来一次、轮询又来一次要塌成一条(按消息 id 去重); 事件重放按 `event_id` 去重; **r4 的 scan 腿: 同一块屏幕扫两遍必须是 no-op**(合成 anchor, §12.5), 而滚动上限先撞到 ⇒ `complete:false` ⇒ anchor 不动; **r5 的 store 腿: 同一份库扫两遍必须是 no-op**(客户端自己的消息 id, `raw.synthetic:false`), 一趟读到一半被打断 ⇒ `complete:false` ⇒ anchor 不动, 而**同一天的流量经 `'store'` 与经 `'ui'` 灌进去必须得到同一批 `ChannelRecord`**(两条来源之间的 parity, 因为决定 19 让同一个 adapter 在两台机器上走不同的来源) | 一份**绕过合并窗口**的推送通道副本必须在同一个爆发上唤醒得更多; 一份在持久化**之前** ack 的副本必须在注入的崩溃点上丢掉记录; **一份丢掉合成键的副本必须在第二次扫描时把每一条记录都变成重复** |
+| `test-channel-adapter-contract` | fast | 假 adapter 驱动每一个已声明的能力; 未声明的能力抛异常; 带类型的错误; **那条"没有任何调用点按 `kind` 分支"的 grep 普查**; **`receive:'scan'` 的 adapter 不许声明 `history:'none'`**(r4, §12.5); **`scan` 的 adapter 必须声明 `scanSources` 与按来源的 `scanLatency`**(r5); **r6: `receive:'scan'` 上由按来源的 `historyBySource` 取代那个标量 —— 每个值都不许是 `'none'`, 而且它的键必须**盖住** `scanSources` 点名的每一个来源** | 一个在调用点上按自己 kind 分支的合成 adapter 必须让普查失败; 一个声明 `receive:'scan'` + `history:'none'` 的合成 adapter 必须变红; 一个声明 `receive:'scan'` 却不给 `scanSources` 的合成 adapter 必须变红; **一个 `historyBySource` 漏掉它自己 `scanSources` 声明过的某个来源的 scan adapter 必须变红**(r6 的镜像负控), 而**一个 `historyBySource.ui === 'none'` 的同样必须变红** |
+| `test-channel-caps` | fast | 两个轴的记录; `convCaps` 三值; **只有 `caps` 与 `convCaps` 同时放行那个控件才存在**, 而 `unknown` 永远渲染成"不提供 + 理由"; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim` 三种通道各自的措辞; `identityWarning` 对 `unknown` 与对 `marked` 一样出声。**r4 两组**: `laneState` 的优先级 —— 一条 `claimedExclusive:true` 且带 `demotedAt` 的记录必须答 `carryContent:false`, 一条超过心跳窗口没出过声的通道**永远**不许答 `live:true`, `unknown` 一律 `carryContent:false`; 以及 `convCaps` 的 TTL —— 过了 TTL 的条目必须渲染成 `unknown`。**r5 一组**: `scanState` 的优先级(平台声明 > 客户端在场 > 读取授权 > `'ui'`), 它的答案 ⊆ `caps.scanSources[platform]`, 而 `tcc-denied` 解析成 `source:null` **不是** `'ui'`。**r6 一组**: `scanState` 从 `historyBySource[source]` 解析出 `history` 并恒答 `via:'scan'` + `carryContent:false`; `hostFacts` 超过 6 小时 TTL 即解析成 `source:null` / `why:'host-facts-stale'`; 而 `freshnessClaim(caps, laneOrScan, convEntry, now)` 的 `seconds` 是从它被交到手上的那个时钟算出来的 | 一个声明 `sendAs:['user']` 却在一个 `convCaps.sendAs === []` 的会话上仍然提供发送控件的合成 adapter 必须变红; 一个返回比 `caps` 更宽的 `convCaps` 的 adapter 必须变红; `identityMarking:'unknown'` 却没有警告必须变红; **一份读 `caps.pushExclusivity` 的修前副本必须在"已降级"那条 fixture 上答 `carryContent:true`**; **一条新鲜的 `convCaps` 仍然必须提供那个控件**(TTL 的正控 —— 一条永远答 `unknown` 的规则同样是缺陷); **一个在 `scanSources.linux==='ui'` 的机器上答 `'store'` 的解析器必须变红**, 而**一台 `darwin` + 客户端在场 + 授权已拿到的机器上仍然答 `'ui'` 的解析器同样必须变红**(`scanState` 的正控 —— 一个永远收窄到底的解析器与一条永远答 `unknown` 的规则是同一种缺陷); **r6: 同一个 `convEntry` 在两个不同的 `now` 上必须给出两个不同的 `seconds`**(一个不看自己时钟的 `freshnessClaim` 不可能在回答"多久以前"), 而**一份新鲜的 `hostFacts` 仍然必须答 `'store'`** —— TTL 的正控, 与 `convCaps` 那条同形 |
+| `test-channels-lane-parity` | fast | **同一天的流量分别经 push / poll / scan 灌进去 ⇒ 同一批记录、同一个唤醒次数、同一笔扣款**(围栏 12); 同一条消息推送来一次、轮询又来一次要塌成一条(按消息 id 去重); 事件重放按 `event_id` 去重; **r4 的 scan 腿: 同一块屏幕扫两遍必须是 no-op**(合成 anchor, §12.5), 而滚动上限先撞到 ⇒ `complete:false` ⇒ anchor 不动; **r5 的 store 腿: 同一份库扫两遍必须是 no-op**(客户端自己的消息 id, `raw.synthetic:false`), 一趟读到一半被打断 ⇒ `complete:false` ⇒ anchor 不动, 而**同一天的流量经 `'store'` 与经 `'ui'` 灌进去必须得到同一批 `ChannelRecord`**(两条来源之间的 parity, 因为决定 19 让同一个 adapter 在两台机器上走不同的来源)。**r6 的爆发腿**: N 条消息经一条 **`fs.watch` 驱动的库扫描**投进来, 必须与同一批经 poll 投进来产生**同样的唤醒次数与同样的扣款** —— scan 通道是一批(`carryContent:false`, §6.4), 而那个 watch 是一次去抖过的游标 kick, 绝不是每次写盘一趟 | 一份**绕过合并窗口**的推送通道副本必须在同一个爆发上唤醒得更多; **一份把库通道那个 watch 的去抖拿掉的副本必须在同一个爆发上唤醒得更多**(r6 的负控 —— 这正是围栏 12 那句"30 条消息变成 30 次投递", 从 r5 刚加的那条通道进来); 一份在持久化**之前** ack 的副本必须在注入的崩溃点上丢掉记录; **一份丢掉合成键的副本必须在第二次扫描时把每一条记录都变成重复** |
 | `test-channels-identity` | fast | 默认**不追加**发送方诚实行; `identityMarking` 驱动审批卡上的警告与回执里的字段; 审计行带 `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` 且**不出实例**; `sendAs: []` 的会话上 `reply` 返回 `send-not-available` 而**不创建 proposal**; **r4: 一条在 `convCaps` 已经过期之后才被批准的 proposal, 必须在发送之前重新解析并以 `send-not-available` 拒绝** | 一份把诚实行默认打开的副本必须变红(r2 的决定 17 是这条腿的负控); 一个 `marked` 的 channel 上审批卡没有警告必须变红; 一个 `sendAs: []` 的会话上创建出了 proposal 必须变红; **一份不在批准时重新解析的副本必须把那条消息真的发出去** |
 | `test-channels-egress` | fast | 每一个被构造出来的出向请求, 要么来自声明了自己主机的那个 adapter, 要么来自一条**带理由的**白名单 `(file, host)` 对 —— 出生即种下 `src/gmail-sync.js` 与 `src/mounts.js`(§3.1) | 一个带未声明主机的临时文件必须变红; 一条**死掉的白名单条目**(文件被移动或改名)同样必须变红 |
 | `test-oauth-loopback` | fast | 两种模式(§12.4): Gmail 的临时绑定、Lark 的固定绑定; 请求处理器**与**粘回两处的 `state` 拒绝; 完成/取消/超时时端口被释放 | 一个**被预先占住**的固定端口必须产生那次具名拒绝与粘回回落, 绝不是一个不透明的 `EADDRINUSE`; 一次 `state` 错误的回调在两种模式下都必须被拒绝 |
@@ -1536,7 +1742,7 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 | `test-spend-paths`(已有) | fast | 它那条按站点的普查必须看见这个新生产者、已接线、带着已声明的理由 | 它本来就带着自己的负控 |
 | `test-channels-engine` | heavy | 真 worktree 服务器 + 假 adapter: 爆发日翻页、退避、单飞、故障出声**与撤回**、摘要批量、唤醒授权与 hold 释放 | 一份用固定窗口抓取的修前副本, 必须在爆发日 fixture 上丢消息 |
 | `test-channels-push` | heavy | 真 worktree 服务器 + 一个**假推送服务器**: ack 在持久化之后(注入一次 ack 与处理之间的崩溃, 记录必须还在); 心跳沉默 ⇒ `state` 掉出 `live` **且**轮询节奏立刻回到快节奏; `stop()` 对已经在飞的 arm 是终局的; 声明 `exclusive` 但故意扣掉一部分事件 ⇒ `missRate` 越过阈值 ⇒ **自动降级成 kick 并把理由说出来**。**r4 三条**: 降级之后这条通道**真的改了它携带的东西**(下一个事件只 kick 游标, 记录由对账轮询进来 —— 光断言 `missRate` 越线是不够的); kick 模式下 `missRate` **一条样本都不涨**(否则它是单向棘轮); 一条降级了的通道即便 fixture 不再扣事件也**绝不自己回到**内容模式, 而在连接向导里重新声明一次独占则清零计数器并重新进入内容模式 | 一条**谎报 `active`** 的通道(修前副本)必须把轮询回落关掉并丢消息; 一份从不降级的副本必须在扣事件的 fixture 上永远丢消息; **一份把内容/kick 判定读在 `caps` 上的修前副本, 必须在降级之后仍然携带内容**; **一份终身累计 `missRate` 的副本, 必须在重新声明之后仍然停在阈值之上** |
-| `test-channels-store-scan` | heavy | 真 daemon(`test-sysinfo-op` 那个模板)+ 一份**合成的** WhatsApp 形状 sqlite: 按 rowid 的游标只读一次读到底; 库带一个未 checkpoint 的 WAL 时**最近的消息仍然读得到**; 一趟读了一半被打断 ⇒ anchor 不动; 扫完之后源库的 `db`/`-wal`/`-shm` **逐字节未变**且 mtime 未变; 读被拒 ⇒ 具名的 `tcc-denied` 而不是零条; 能力门 —— 不宣告这个 op 的旧 daemon **绝不会被问**(未知 op 会挂) | 一份只读主库、不管 WAL 的副本必须漏掉最近那批消息; 一份以 `mode=rw` 打开的副本必须让"源库逐字节未变"那条断言变红; 一份把 `EPERM` 当成"零条"的副本必须让具名拒绝那条腿变红 |
+| `test-channels-store-scan` | heavy | 真 daemon(`test-sysinfo-op` 那个模板)+ 一份**合成的** WhatsApp 形状 sqlite: 按 rowid 的游标只读一次读到底; 库带一个未 checkpoint 的 WAL 时**最近的消息仍然读得到**; 一趟读了一半被打断 ⇒ anchor 不动; **扫完之后源库的 `db` 与 `-wal` 逐字节未变且 mtime 未变**(r6 —— 刻意**不是**三个文件: 只读打开会重写 `-shm` 这个不含内容的 WAL 索引, 而在它不可写时连它都不动, 所以断言三件套会在**正确**的机制上变红); 读被拒 ⇒ 具名的 `tcc-denied` 而不是零条; **没有任何 SQLite 读者可用时是具名的 `no-sqlite-reader`**(r6); 能力门 —— 不宣告这个 op 的旧 daemon **绝不会被问**(未知 op 会挂)。**fixture 必须包含"我们是唯一连接"那一臂**(r6 —— 一次排期扫描的常态形状) | 一份只读**那个 `.db` 文件本身**的副本必须漏掉最近那批消息; **一份走**默认**(读写)打开的副本必须在"唯一连接"那一臂上让逐字节未变那条断言变红**(r6 —— 会出事的是**默认**形状, 不是 r5 点名的那个可选 `mode=rw`; 而且它**只在那一臂**变红: 客户端还连着时它是通过的, 所以 fixture 两臂都要有); 一份把 `EPERM` 当成"零条"的副本必须让具名拒绝那条腿变红; **一份在没有任何 SQLite 读者时答零条的副本必须让 `no-sqlite-reader` 那条腿变红** |
 | `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计 | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送" |
 
 Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的事故: 不许固定 `/tmp` 路径, 不许
@@ -1587,7 +1793,7 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 | # | 发现 | 判定 | 改了什么 |
 |---|---|---|---|
 | 1 | "此刻在用哪条通道、它活着吗、它可以携带内容吗"同时住在 `caps.pushExclusivity`、adapter 记录的 `push {…}` 与每会话的 `lane {…}` 三处, 没有优先级, 也**没有任何访问器读得到 adapter 记录** —— 于是 r3 新加的自动降级结构上赢不了 | **成立, 而且是三个后果不是一个。** §4 声称 `src/channel-caps.js` 是**唯一**回答处, 但它导出的三个函数没有一个接 adapter 记录; §6.4 只说前两者"一起决定", 没说谁压过谁 ⇒ (a) 被降级的通道继续携带内容, (b) 新鲜度芯片按一条静态声明画 "live"(正是它自己引用的 `opencode-events` 轮 4 教训), (c) 围栏 12 的合并窗口在 kick 模式下照跑, 白买 60 秒延迟 | `caps.pushExclusivity` **删除**(独占度是按部署的配置事实, 不该住在按 adapter 种类的静态声明里; `pushTransport` 留下, 它真的是静态的); `src/channel-caps.js` 新增**唯一**解析器 `laneState(caps, adapterRecord, convEntry, now)`, 优先级**降级 > 活性 > 声明**、`unknown` 一律 `carryContent:false`; 四个消费者(芯片、围栏 12 的门、§6.4 的节奏、§6.2 的调度器)全部改问它, §2 多一条落位规则; `test-channel-caps` 与 `test-channels-push` 各加腿, 后者断言**降级真的改变了这条通道携带的东西**(r3 只断言 `missRate` 越线) |
-| 2 | 决定 19 把唯一有摄入契约的那一格(`scanSource:'store'`)删掉了, 而契约没有搬进活下来的那一格: `'ui'` 没有 anchor、没有去重键、没有"完整的一趟", §12.5 还明确允许它声明 `history:'none'` | **成立。** §4 的契约规定没声明的能力**抛异常**, §5 不变量 4 要"完整的一趟"与 `complete:false`, 不变量 2 又要求 `vendorId` —— 而一次 DOM 抓取不保证有稳定的消息 id; §16 的 parity 行只钉了 push/poll 的去重, 从没钉过"重扫一块屏幕" | §12.5 为 `'ui'` 写出三行契约: 合成 anchor 键 `(convId, renderedAt, sha256(author|text))` 写进 `vendorId` 且 `raw.synthetic:true`、受滚动限制的"完整的一趟"(到了 anchor ⇒ `complete:true`, 先撞滚动上限 ⇒ `complete:false` 即 anchor 不动)、`receive:'scan'` 上**禁止** `history:'none'`(契约套件执法); 表里那一格的 `history` 改成只剩 `'page'`; §5 不变量 2 与 §6.3 各加一句指过来; `test-channels-lane-parity` 加 scan 腿与"丢掉合成键"的负控 |
+| 2 | 决定 19 把唯一有摄入契约的那一格(`scanSource:'store'`)删掉了, 而契约没有搬进活下来的那一格: `'ui'` 没有 anchor、没有去重键、没有"完整的一趟", §12.5 还明确允许它声明 `history:'none'` | **成立。** §4 的契约规定没声明的能力**抛异常**, §5 不变量 4 要"完整的一趟"与 `complete:false`, 不变量 2 又要求 `vendorId` —— 而一次 DOM 抓取不保证有稳定的消息 id; §16 的 parity 行只钉了 push/poll 的去重, 从没钉过"重扫一块屏幕" | §12.5 为 `'ui'` 写出三行契约: 合成 anchor 键 `(convId, renderedAt, sha256(author\|text))` 写进 `vendorId` 且 `raw.synthetic:true`、受滚动限制的"完整的一趟"(到了 anchor ⇒ `complete:true`, 先撞滚动上限 ⇒ `complete:false` 即 anchor 不动)、`receive:'scan'` 上**禁止** `history:'none'`(契约套件执法); 表里那一格的 `history` 改成只剩 `'page'`; §5 不变量 2 与 §6.3 各加一句指过来; `test-channels-lane-parity` 加 scan 腿与"丢掉合成键"的负控 |
 | 3 | `push.missRate` 是一个没有计数窗口的终身比率, 降级又没有出口 ⇒ 单向棘轮: kick 模式下推送根本不携带记录, 比率按构造趋向 1.0, 于是一条降级过的通道**永远**回不到阈值之下 | **成立**, 而且正是 auto-resume `edgeHeld` 那条教训要防的形状(*把那堵墙烧掉就是把一次瞬时的分歧变成一次永久的拒绝*) | §6.4 补两句: 比率只在 `carryContent` 为真时计数、且只在一个滚动窗口(最近 N 条或 24 小时取大)里计数; 降级由**做出声明的那一方**撤回(连接向导里重新声明 ⇒ 清零 + 重试一次), **计数器绝不是触发器**; 决定 18 与 §20 第 17 条同步; `test-channels-push` 加两条腿 |
 | 4 | `convCaps` 是一份带 `at` 却**没有任何读者**的存下来的派生事实(没有 TTL、没有刷新触发点、没有过期降级), 与十二行之下的 §5 不变量 7 直接冲突; 一份一周前的乐观答案会画出发送控件, 并造出 §4 承诺永不创建的那种 proposal | **成立。** `why` 的枚举里本来就有 `'left-group'`, 说明这个状态是被预期到的; 而没有读者的字段在这个仓库里就是"这个修复从来没接上线" | §4 与 §5 给 `convCaps` 一个 **TTL(6 小时)**与三个刷新触发点(track 时、TTL 过后面板第一次渲染、**批准那一刻发送之前无条件**), 过期即 `read:'unknown'`/`sendAs:[]`/`why:'stale'` —— 走 `offers()` 已有的规则渲染, 不需要新词汇; §9.2 写明批准时的重新解析与它的拒绝路径; 不变量 7 把它点名成"付了代价的例外"; `test-channel-caps` 加 TTL 腿(带正控), `test-channels-identity` 加"过期后批准必须拒绝"的腿 |
 | 5 | 中文版 §20 的出处块与第 19 条之间缺一个空行, CommonMark 的 lazy continuation 会把整块出处折进那条 caveat 里 | **成立**(`cat -A` 复核; 英文版 en:1806-1808 有那个空行) | 补上那一个空行。同一次复核里, 这一对文档的其余结构性检查全部通过: 标题数、表格行数、代码块逐字节一致, 以及 P0–P4 / P0–P2 的轮次与天数算术两边一致 |
@@ -1619,6 +1825,32 @@ r4 写下"决定 19 把 `'store'` 对**两个**平台都排除掉了", 并据此
 
 ---
 
+### 17.3 对 r5 的对抗式 review(r6)—— 一轮修复自己带进来的东西
+
+r5 把 `'store'` 那一格拿了回来, 而这一轮的八条里有**五条就长在那次新增上**: 一条把机制说反
+了、一条把 r5 自己刚指认的缺陷留在了隔壁那个字段、一条给新记录配了三个没有读者的字段、一条
+让新通道落在唯一没盖住它的那道门后面、还有一条给了它一条从没有过的发送路。**一轮修复是新代
+码, 它欠的审视与它修好的那份一样多。**
+
+| # | 发现 | 判定 | 改了什么 |
+|---|---|---|---|
+| 1 | `'store'` 那一格**推荐的**读法(backup API / `VACUUM INTO`)正是唯一会破坏它自己那条"绝不写"的机制, 而它拒绝安全那条的理由是**倒过来的**: "以只读方式打开活库不够, 因为这是 WAL 库"把**只读打开**(读得到 WAL)与**只读那个 `.db` 文件**(读不到)混成了一件事 | **成立, 已在一次性 fixture 上实测**(node v24.12.0 `node:sqlite`, SIGKILL 生产者留下未 checkpoint 的 WAL): 默认打开在**我们是唯一连接**时读对了 `NEWEST`, 然后在 `close()` 上把 `db` 改写、把 `-wal` 与 `-shm` **删掉**(SQLite 有文档的最后一个连接 checkpoint-and-delete); `readOnly:true` 同样读到 `NEWEST`(所以 r5 给出的理由是假的)且 `db`/`-wal` 逐字节不变; 而**只读 `.db` 文件本身**才漏掉 `NEWEST`。"我们是最后一个连接"对一次排期扫描是**常态** | §12.5 的机制**反过来**: 以 `SQLITE_OPEN_READONLY` 打开, 从**那条只读连接**做 `VACUUM INTO`/backup; 被拒绝的那句改写成"只读 `.db` 文件**本身**会漏掉 WAL"; 三件套复制降为**兜底**并写明它的撕裂读风险; §6.3 的孪生同改; §16 的断言从"三件套逐字节未变"收窄成 **`db` 与 `-wal`**(只读打开会重写 `-shm`), 负控从 `mode=rw` 改成**默认**打开, 并加一臂"我们是唯一连接" |
+| 2 | `caps.history` 仍然是按**种类**的标量, 而 §12.5 自己那张新表给同一个 adapter 按解析出的来源指派了**两个不同的值**(`'store'`⇒`'since'`, `'ui'`⇒`'page'`) —— 这与 r5 在下一个字段上刚说过的话逐字相同 | **成立。** 一个 `kind:'whatsapp'` 的 adapter 只能声明一个 `history`, 而 `scanSources` 意味着同一个模块两格都跑: 声明 `'since'` 让 Linux 部署被要求用 DOM 刮取兑现 since-anchor 语义, 声明 `'page'` 删掉"真 anchor ⇒ `'since'`"这条 `'store'` 之所以被优先的理由; 而 §16 那条由**一个**假 adapter 驱动的两来源 parity 腿, 按 r5 的写法**不可实现** | `caps.historyBySource` 取代 `receive:'scan'` 上的那个标量(`push`/`poll` 保留标量), `scanState()` 连同 `source` 一起解析出 `history`, §4 的契约规则同时管住"每个值非 `'none'`"与"键要盖住 `scanSources` 的每一个来源", §16 加镜像负控 |
+| 3 | 设计把 server.js 的尺寸棘轮点名为自己接线段落的门, 却没量过那个预算还剩多少 | **成立, 已实测**: 在基线提交上 `read('server.js').split('\n').length` **正好是 2100** ⇒ 余量为零, P0 的第一个 commit 就会让 `npm run build`(强制 pre-push 门 + 应用内自更新)变红 | §2.1 与 P0 的退出条件各加一条: **先量**, 然后要么在同一个 commit 里有意识地抬预算(套件自己的注释就是这么写的), 要么先抽走一个既有 stanza; 按 ~0.5 轮计价 |
+| 4 | r5 新增的 `scan` 记录逐字重犯了 r4 自己的第 4 条: `hostFacts.at` / `grant` / `grantAskedAt` 是存下来的派生事实, 没有读者、没有 TTL、没有刷新触发点、没有陈旧降级 —— 而 §5 不变量 7 只点名过**一个**例外 | **成立。** `grantAskedAt` 在整份英文文档里只出现一次(就在那个 schema 块里), 而 `scanState(…, now)` 里的 `now` 从没被说过是干什么的(它每一个同辈解析器的 `now` 都有明确用途); 这些事实来自一次可能跨机器的往返, 本地推导不出来 —— 正是 `convCaps` 拿到具名例外的那条性质。伤害方向还更贵: 客户端被卸载、更新挪走了库、Sonoma→Sequoia 把 TCC 扩到 Group Containers 之后, `scanState` 会继续答 `'store'` 与 15 秒 | `scan.hostFacts` 拿到 6 小时 TTL + 三个具名刷新触发点 + `source:null`/`why:'host-facts-stale'` 降级; `grant` 移进 `hostFacts` 并且**从不跨一趟被信任**(op 自己的 `EPERM` 是权威, 一次 `EPERM` 就重新归档成 `tcc-denied` 并清掉存下来的授权); `grantAskedAt` 拿到读者("同一台机器上 N 之内不重复弹提示"); §5 不变量 7 收下第二个具名例外; §16 加 TTL 腿与它的正控 |
+| 5 | `carryContent` 只为 push 定义过, 而那道合并门坐在三条通道汇合的**同一个漏斗**上, `laneState()` 又答得出 `via:'scan'`; 与此同时 `'store'` 是**连同一个事件驱动的触发器**(对库文件的 `fs.watch`)一起被引进来的, 既没有去抖也没说它与 `caps.scanLatency` 是什么关系 | **成立。** WhatsApp 的 `ChatStorage.sqlite` 每收一条消息就被写一次 ⇒ 热闹群里 watch 大约每条消息响一次 ⇒ 每条消息一趟扫描 ⇒ 每条消息一次 filter 命中 ⇒ 合并门读到的 `carryContent` 是 undefined(假)⇒ 每条消息一次唤醒, 也就是围栏 12 自己的"30 条消息变成 30 次投递"。**诚实边界**: §7.4 的 30 秒地板与 spend authorizer 把绝对花销兜住了, 所以这不是无界的钱 —— 但每条通道的唤醒次数与扣款笔数不一样, 这让 §6.1 的总纲与 §16 的 parity 行按字面不可能成立 | §6.4 的优先级里显式补上 `via:'scan'` ⇒ `carryContent:false`(scan pass 是一批, 与 poll 同理); 那个 `fs.watch` 被定性成**游标 kick**, 去抖到 `caps.scanLatency[source]`(于是那个数字是真的天花板), 并欠 `opencode-events` 第四轮那条 inotify 生命周期规则; §6.1 的图与 §16 的 parity 行各自跟进, 后者加一条爆发腿与一份没去抖的负控 |
+| 6 | `'store'` 通道需要 daemon 里有一个 SQLite 读者, 而设计一个机制都没点名 —— 可每个候选都撞上本仓已经写下来的约束, 所以这不是细节, P6a 的 4–5 轮也没为它计价 | **成立。** daemon 是单文件 esbuild 包且 `--external` 恰好只有 `node-pty`, 安装脚本称它 "zero-dep" 且 `NODE_MIN=18`: `node:sqlite` 在 18/20 上不存在、在 24 上仍打 ExperimentalWarning(实测)、**取行的 API 是同步的**(它的 `backup()` 是异步的, 所以危险的是扫行那一段)而 CLAUDE.md 说这个 daemon 载着活会话管道; 原生绑定要第二个 `--external` 加按平台预编译; 而 `sqlite3(1)` 子进程是围栏 3 认可的形状 | §2 与 §12.5 点名机制并写明约束: **推荐有界子进程**, `node:sqlite` 放在运行时探测 + 明说的 `NODE_MIN` 抬升之后, 原生绑定按打包理由**明确拒绝**; `no-sqlite-reader` 进 op 的失败词表; §20 加一条"那台 Mac 的 daemon 上有哪个读者是未实测的"; P6a 重新计价 |
+| 7 | 唯一会拿到 `'store'` 的那个平台, **发送没有机制**。"两条来源上是同一件事"对 `'ui'` 成立(浏览器在网页里打字), 对 macOS 无定义 —— 那是一个原生 Catalyst 应用; 而 P6a 的交付物里没有发送路径、并且自称"不需要 agent-browser" | **成立。** 那句话在 §6.3 / §12.5 / 决定 19 出现三次而两份文档都镜像着它; `'store'` 行的"发送"格写的是"落到 `'ui'`", 而 `'ui'` 的发送机制是 agent-browser —— 于是 P6a 按当前范围就是只读的, 却从来没说 | 三处按来源拆开; **P6a 明确只读且是结构性的**(`convCaps.sendAs` 解析成 `[]` + `why:'no-send-lane-on-this-host'`, 由 §4 现成的规则渲染并阻止建出 proposal); macOS 的两个候选(第二份 linked-device 凭据 / 原生 UI 自动化及它自己的 TCC 授权)写进 §20 当作**未决**问题; `'store'` 行的发送格改写 |
+| 8 | `freshnessClaim(lane, convEntry)` 算不出它自己声明的任何一个数: 它返回 `seconds`(一个**年龄**)却不收时钟, 也不收 `caps`(而 poll 那一档要画的 "≤ 30 s" 住在 `caps.pollInterval.hot` 里); 而 r5 又把它的第一个参数拓宽成两种**不相交**形状的 union 且没有判别字段 | **成立。** 每一个同辈解析器都收 `now`(`laneState`/`scanState`, 以及本仓的 `quota-model` 与 `decideLagShadow`); `laneState()` 的答案带 `via`, `scanState()` 的只带 `source` ⇒ 调用方只能靠"碰巧有哪些键"嗅探。**另外**: §12.5 性质 1 那句"延迟来自 `scanState` 不是静态声明"按字面为假 —— `latencySeconds` 就定义在它上面两行、来自 `caps.scanLatency[source]` | 签名收为 `freshnessClaim(caps, laneOrScan, convEntry, now)`; `scanState()` 补 `via:'scan'` 让 union 显式; 性质 1 改写成**两个数字**(声明的节奏 = 被解析索引的静态表; 实测的年龄 = `lastScanAt` 对 `now`)并要求那一行说清自己在显示哪一个; §16 加"同一个 `convEntry` 两个 `now` 必须两个 `seconds`" |
+
+这一轮自己的教训是一句方法学: **一次修复引入的每一个新字段, 都要按它自己刚刚写下的规则再
+审一遍。** r5 在同一节里正确地论证了"按部署的事实不能住在按种类的声明里"(第 2 条却把隔壁字
+段留在那儿)、正确地引用了 r4 的"没有读者的字段就是没接上线"(第 4 条却给新记录配了三个)、
+并且正确地把 `'store'` 说成一条更好的通道(第 5、7 条却没问它落在哪道门后面、也没问它能不能
+发送)。一轮修复不会因为它是修复就免检。
+
+---
+
 ## 18. 阶段、轮次、日历
 
 一**轮**≈ 1 小时实现者 + ~20 分钟对抗式验证(2026-09-10 跨 32 个 workflow / 130 个 agent 实
@@ -1643,7 +1875,11 @@ r4 写下"决定 19 把 `'store'` 对**两个**平台都排除掉了", 并据此
 —— `laneState` 与它的优先级、`convCaps` 的 TTL, 以及假 adapter 的 scan 模式里那把合成
 anchor 键。r5: +1 轮 —— 按平台的 `scanSources`、解析器 `scanState` 与它的优先级, 以及假
 adapter 的 `'store'` 来源, 于是"同一天的流量经两种来源得到同一批记录"这条 parity 从第一天
-起就有腿。)
+起就有腿。**r6: +0.5 轮** —— `historyBySource` 与 `scanState` 补上的 `via`/`history`/
+`hostFacts` TTL, 外加**接线段落的尺寸棘轮**: 那个预算今天正好顶格(实测 2100/2100), 所以
+P0 的**出口条件**多一条 —— **先量 `server.js`**, 然后要么在同一个 commit 里有意识地抬高预
+算并解释为什么, 要么先把一个既有 stanza 抽进 `src/server/`; 无论哪条, `npm run build` 必须
+在那个 commit 上是绿的, 因为它同时是发布门与应用内自更新的一步(§2.1)。)
 
 ### P1 — Lark 读 + Gmail 读 + **推送通道** — **14–16 轮 (7–8 天)**
 
@@ -1709,18 +1945,24 @@ Gate: outbox 套件扩上幂等与 reconcile 两张矩阵; `test-channels-identi
 沙箱化的 HTML 渲染(**2–3 轮**)、附件抓取(**2**)、插件贡献的 adapter(**4–6**)、跑在配
 对设备上的 adapter(**4–6**)。(r3: 活通道那一项已经上移到 P1, 所以它不再在这里。)
 
-### P6 — 本地客户端 adapter(WhatsApp / WeChat)— **13–18 轮 (6.5–9 天), 未排期, 两条腿各自门控**
+### P6 — 本地客户端 adapter(WhatsApp / WeChat)— **14–20 轮 (7–10 天), 未排期, 两条腿各自门控**
 
 §12.5。r5 之后这个阶段**分成两条独立的腿**, 而它们的门控不一样 —— 这正是把 `'store'` 找回
 来买到的东西: 这一类不再整体卡在 agent-browser 上。
 
 **P6a — macOS 的 `'store'` 腿(4–5 轮), 只门控在决定 19 上。** `channels-scan-store` 这个
 agentd op(daemon handler + hello-ack 里的能力位 + 三触规则)、SHARED 的
-`src/channels-store-scan.js`(平台事实、SQLite backup API 快照、按 `(rowid, 时间戳)` 的游
-标、把 `ZWAMESSAGE` / `ZWAMEDIAITEM` 映射成 `ChannelRecord` 并解析联系人与媒体引用)、
-`scanState()` 与连接向导里那条 TCC 授权行, 加上 `test-channels-store-scan`。**它不需要
-agent-browser**, 所以它是这一类里唯一一条今天就能独立落地的腿; 而因为它带一把真 anchor,
-它也是这一类里唯一一条不欠合成键那笔代价的腿。
+`src/channels-store-scan.js`(平台事实、**只读打开 + 从那条只读连接取的 scratch 快照**
+(§12.5, r6 —— 不是默认打开)、按 `(rowid, 时间戳)` 的游标、把 `ZWAMESSAGE` /
+`ZWAMEDIAITEM` 映射成 `ChannelRecord` 并解析联系人与媒体引用)、`scanState()` 与连接向导里
+那条 TCC 授权行, 加上 `test-channels-store-scan`。**它不需要 agent-browser**, 所以它是这一
+类里唯一一条今天就能独立落地的腿; 而因为它带一把真 anchor, 它也是这一类里唯一一条不欠合成
+键那笔代价的腿。**它也是**只读**的(r6)**: 这条腿里没有任何发送路径, 所以它必须结构性地说出
+来 —— `convCaps.sendAs` 解析成 `[]` 加 `why:'no-send-lane-on-this-host'`; macOS 上的发送是
+§20 里一个**未决**的问题, 不在这条腿的范围内。**r6 重新计价: 5–7 轮**(原 4–5), 多出来的是
+选定并接上那个 SQLite 读者(有界 `sqlite3(1)` 子进程 / 探测后的 `node:sqlite` + `NODE_MIN`
+抬升; 原生绑定已被拒), 以及 `no-sqlite-reader` 这条具名拒绝 —— §12.5 把这个决定写下来了,
+但它仍然要在真 daemon 包上实现并被测量。
 
 **P6b — `'ui'` 腿(9–13 轮), 双重门控。** agent-browser profile、登录活性、带游标的界面扫
 描、在客户端自己的输入框里发送, 加上 WhatsApp 与 WeChat 各自的 adapter 与它们的 `tosRisk`
@@ -1732,14 +1974,16 @@ outbox。(r4: +1 轮 —— 把 §12.5 那三行 `'ui'` 摄入契约真的实现
 限制的"完整的一趟", 以及在两个真实客户端上判断它们到底暴不暴露稳定的消息 id。**r5: +4 轮**
 —— 整条 P6a, 其中一轮是先去**实测**这份设计从公开材料里读来的那些东西: 库的路径与它在一台
 真 Mac 上的现行 schema、TCC 到底是弹提示还是直接拒、以及那份未加密的库在被 owner 的客户端
-更新时的行为。)
+更新时的行为。**r5 那一行原来写的是"+4 轮", 而 P6a 是 4–5 轮、P6 自己从 9–13 变成
+13–18 —— 也就是 +4–5; r6 把这个算术错字改掉, 并把 P6a 重新计价成 5–7 轮 ⇒ P6 = 14–20。**)
 
 **总计:** P0–P4 = **51–62 轮 ≈ 25.5–31 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
 owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 的两个轴能力记录 +2、P1 的
 推送通道 +4、P2 的合并与通道对等 +2、P3 的身份面 +1、P4 的身份证明 +1; **r4 又加了 3 轮**:
 P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤回 +1、P3 的批准时重新
-解析 +1; **r5 又加了 1 轮**: P0 的 `scanState` 与按平台的 `scanSources` +1 —— r4 与 r5 另有
-P6 的 +1 与 +4 不计入这个总数, 因为 P6 本来就未排期。)光是 P0–P2 ——
+解析 +1; **r5 又加了 1 轮**: P0 的 `scanState` 与按平台的 `scanSources` +1; **r6 又加了
+0.5 轮**: P0 的 `historyBySource`/`hostFacts` TTL 与那个已经顶格的尺寸棘轮 +0.5 —— r4、r5
+与 r6 另有 P6 的 +1、+4–5 与 +1–2 不计入这个总数, 因为 P6 本来就未排期。)光是 P0–P2 ——
 只读的 channels 加上 assignment、过滤与**实时推送**、完全没有任何出向路径 —— 是
 **34–40 轮 ≈ 17–20 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
 的, 没有任何外部消息能离开这栋楼, 而钱已经被界住了。
@@ -1770,7 +2014,7 @@ P6 的 +1 与 +4 不计入这个总数, 因为 P6 本来就未排期。)光是 P
 | 16 | **Assignment 蕴含可见性吗?** | 是, 写成一条显式授权 / 否, 用户还必须另外授予 reach | **是, 写成一条显式授权。** 一件显然是想要的事却要两步, 正是一个权限模型被绕过的方式; 把它写成一条真的授权, 才能让 reach 面板说真话 |
 | 17 | **发送方诚实行 — 已被 owner 推翻(r3/Q4)** | 总是追加 "drafted by \<agent\>" / 按 channel 开关**默认开** / 按 channel 开关**默认关** / 从不 | ~~按 channel 开关, 外部默认开~~ ⇒ **默认关, 保留为一个按 channel 的选项。** 默认是**以用户本人的身份发送、正文里不加任何东西**, 在每一个允许这么做的 channel 上都是。取代它的不是沉默: `identityMarking` 能力位在**授权那一刻**(审批卡/发送控件)与**回执里**把"对面会看见谁"说出来(§9.5)。理由是这句话欠的是**按下批准键的那个人**与起草它的那个 agent, 不是收件人 —— 而 r2 把它塞进了收件人读的那条消息里, 既改写了用户自己的话, 又发生在用户已经决定之后。审计日志照旧记 `draftedBy` |
 | 18 | **推送通道的独占度由谁说了算?**(r3/Q3(a) 新增) | (a) 运维**声明** + 产品**度量**并在矛盾时**自动降级** / (b) 永远只当游标 kick(r2) / (c) 相信声明, 不度量 | **(a)。** 平台不告诉我们还有几个客户端连着, 所以独占度只能被断言 —— 但它**可测**: `push.missRate` = 先被对账轮询看到而不是先被推送看到的记录比例, 真正独占时长期为 0。连续越过阈值(默认 2 %, ≥20 条样本)就自动降级成 kick 并把理由写在 adapter 行上。(c) 是一句祈祷; (b) 是把 owner 明确要的实时推送关掉。默认值是 `unknown` ⇒ **不做任何声明就得到 (b) 的行为**。**r4 给它补了两句, 少一句它就是个单向棘轮**: 比率**只在通道真的在携带内容时、且只在一个滚动窗口内**计数(最近 N 条或最近 24 小时, 取更大者)—— 否则 kick 模式下每条记录都"先被轮询看到", 比率按构造趋向 1.0, 被降级的通道永远回不来; 而降级**由做出声明的那一方撤回**(在连接向导里重新声明一次独占 ⇒ 计数器清零、重试一次), 绝不由计数器自己撤回 |
-| 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增; **r5 被 owner 更正**) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 从它自己的输入框发送 / (c) 再加上协议库(whatsmeow / Baileys)与"读本地库" / (d) **(b) 加上"在那个客户端把库留成未加密的平台上读那份库"** | **(b) + (d), 仍然明确排除 (c)。** r3 把"读本地库"整个和协议库捆在一起排除了, 而 **owner 指出这是错的**: 那句话对 WeChat 成立(库是 SQLCipher/WCDB 加密的, 密钥只在**运行中客户端的进程内存**里, 而读别人的进程内存本产品不做 —— 围栏 13), 对 **macOS 上的 WhatsApp 不成立** —— 那个官方 Catalyst 客户端把整份聊天历史留在一个**未加密**的 Core Data SQLite 库里(`~/Library/Group Containers/…/ChatStorage.sqlite`), 而读它是一次普通的、被用户授权的、只读的文件读取: **没有任何秘密被击穿, 因为根本没有秘密**。所以 **`'store'` 在有它的平台上是允许的, 而且优先于 `'ui'`** —— 不是因为它更快(虽然确实快一个数量级), 是因为**它有一把不是我们编出来的 anchor**, 于是 §5 不变量 2 拿到真 vendor id 而 `'ui'` 那把合成键的代价整个消失。三条边界写死: ①**只有未加密**才算 —— Windows 上 WhatsApp 的库是加密的(UWP 用 SEE, dbKey 从一个应用外取不到的机器标识派生; WebView2 那一支用 DPAPI-NG), 把一把 vendor 有意扣住的密钥重新算出来与从内存里抠出来是同一件事, 围栏 13 (b) 拒绝它 ⇒ Windows 走 `'ui'`; ②**Linux 压根没有官方桌面客户端** ⇒ 只有 web-in-profile 的 `'ui'`; ③**WeChat 一个字都没变** ⇒ 每个平台都只有 `'ui'`。读库这条路**只读**(SQLite backup API 快照, 绝不写、绝不 checkpoint), 走一个 `channels-scan-store` 的 agentd op(`hostId` 是参数, 本机是设备 #0), 而 macOS 的 TCC 是一道**具名**的门: 被拒时它以 `tcc-denied` 到达用户并在连接向导里给出授权步骤, **绝不**静默降级成 `'ui'`(那会把会话行上那个延迟数字变成谎话)。发送在两条来源上是同一件事 —— 在那个已登录的官方客户端自己的输入框里打字, 所以身份仍然真的是用户本人(`identityMarking:'none'`)。接口从 P0 起就建模这一类; P6 因此**分成两条腿**, macOS 的 `'store'` 腿**只**门控在本决定上(它不需要 agent-browser), `'ui'` 腿仍然双重门控 |
+| 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增; **r5 被 owner 更正**) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 从它自己的输入框发送 / (c) 再加上协议库(whatsmeow / Baileys)与"读本地库" / (d) **(b) 加上"在那个客户端把库留成未加密的平台上读那份库"** | **(b) + (d), 仍然明确排除 (c)。** r3 把"读本地库"整个和协议库捆在一起排除了, 而 **owner 指出这是错的**: 那句话对 WeChat 成立(库是 SQLCipher/WCDB 加密的, 密钥只在**运行中客户端的进程内存**里, 而读别人的进程内存本产品不做 —— 围栏 13), 对 **macOS 上的 WhatsApp 不成立** —— 那个官方 Catalyst 客户端把整份聊天历史留在一个**未加密**的 Core Data SQLite 库里(`~/Library/Group Containers/…/ChatStorage.sqlite`), 而读它是一次普通的、被用户授权的、只读的文件读取: **没有任何秘密被击穿, 因为根本没有秘密**。所以 **`'store'` 在有它的平台上是允许的, 而且优先于 `'ui'`** —— 不是因为它更快(虽然确实快一个数量级), 是因为**它有一把不是我们编出来的 anchor**, 于是 §5 不变量 2 拿到真 vendor id 而 `'ui'` 那把合成键的代价整个消失。三条边界写死: ①**只有未加密**才算 —— Windows 上 WhatsApp 的库是加密的(UWP 用 SEE, dbKey 从一个应用外取不到的机器标识派生; WebView2 那一支用 DPAPI-NG), 把一把 vendor 有意扣住的密钥重新算出来与从内存里抠出来是同一件事, 围栏 13 (b) 拒绝它 ⇒ Windows 走 `'ui'`; ②**Linux 压根没有官方桌面客户端** ⇒ 只有 web-in-profile 的 `'ui'`; ③**WeChat 一个字都没变** ⇒ 每个平台都只有 `'ui'`。读库这条路**只读**(**只读打开**加上从那条连接取的快照 —— r6 更正了 r5"backup API 优先"的措辞, 那恰好点名了唯一会改动库的那种开法; 绝不写、绝不 checkpoint), 走一个 `channels-scan-store` 的 agentd op(`hostId` 是参数, 本机是设备 #0), 而 macOS 的 TCC 是一道**具名**的门: 被拒时它以 `tcc-denied` 到达用户并在连接向导里给出授权步骤, **绝不**静默降级成 `'ui'`(那会把会话行上那个延迟数字变成谎话)。**发送要按来源分开说(r6 更正), 因为它不是同一件事**: `'ui'` = agent-browser 在那个已登录的官方客户端自己的输入框里打字, 身份仍然真的是用户本人(`identityMarking:'none'`); 而 macOS 的 `'store'` **自己没有发送通道** —— 那里的官方客户端是一个原生 Catalyst 应用, 没有任何浏览器 profile 够得着 —— 所以 P6a 是**只读**的, 并且结构性地说出来(`convCaps.sendAs: []` 加 `why:'no-send-lane-on-this-host'`, 由 §4 的规则渲染成"不提供并说出理由"且不建出任何 proposal)。**于是有第四件事是未决的, 而且归你拍板**: macOS 上的发送到底是 (i) 同一个 Web 客户端开在一个 agent-browser profile 里 —— 那明摆着是**第二份 linked-device 凭据**, 一条对话两个登录, 必须建模成它自己的一行, 与 `auth.state()`/`scanState().grant` 并排 —— 还是 (ii) 原生 macOS UI 自动化(Accessibility / CGEvent)加**它自己那份** TCC 授权, 还是 (iii) 两者都不做, 让这一类在 `'store'` 胜出的地方保持只读。**建议: P6a 取 (iii)**, 只有在 owner 真的要 macOS 上的出向时才在 (i) 与 (ii) 之间选 —— 读那一半才是价值所在, 而第二份凭据会悄悄推翻"身份真的就是用户本人"这句话。另外(r6): 读库这条路是一次**只读的 SQLite 打开**并从那条连接取快照(绝不是默认的读写打开 —— 它会在 close 时 checkpoint 并删掉 WAL), 而 daemon 那一侧用哪个 SQLite 读者由 §12.5 点名, 不留给实现者。接口从 P0 起就建模这一类; P6 因此**分成两条腿**, macOS 的 `'store'` 腿**只**门控在本决定上(它不需要 agent-browser), `'ui'` 腿仍然双重门控 |
 | 20 | **Gmail 的推送要不要默认打开?**(r3/Q3(c) 新增) | 默认开 / **可用但默认关** / 不做 | **可用但默认关。** Pub/Sub 的 pull 订阅让它同样不需要公网入站端点, 而且每个实例可以有自己的订阅, 所以它比 Lark 的长连接更容易做到独占。但它要一个 GCP topic、一份 IAM 授权和一个**每日续期任务**(watch 7 天静默过期, 漏一次就无声停掉), 而它换来的东西是: 把一个"什么都没变时每 tick 一个请求"的轮询换成秒级延迟。对邮件这种节奏, 那是一个应该由用户按自己的场景打开的开关, 不是一个默认值 |
 
 ---
@@ -1853,7 +2097,11 @@ P6 的 +1 与 +4 不计入这个总数, 因为 P6 本来就未排期。)光是 P
     IndexedDB, 形状完全不同, 而它在 2024 年就被宣布弃用); ②"未加密、裸 sqlite 读得出"这一
     条有多个独立来源, 其中最新的是 2026-05 的一份公开研究, 它把 iOS 与 macOS 上的本地聊天
     库描述成明文; ③活库带 WAL, 只读主文件会静默漏消息, 因此要复制 `db`/`-wal`/`-shm` 或用
-    backup API —— 这一条来自一份直接读它的公开实现; ④**Windows 是加密的**(UWP 用 SEE +
+    backup API —— 这一条来自一份直接读它的公开实现。**r6 实测出了那份材料没有点名的第三
+    个选项**, 而它正是本设计现在采用的那个: 一次只读的 SQLite **打开**读得到 WAL 内容且
+    什么都不改, 而 backup API 自己那条源连接恰恰是会在 close 时 checkpoint 并删掉 WAL 的
+    那种开法(§12.5 那张表)。那份公开实现说对的, 正是 r5 说反的那一半: 漏消息的是那个
+    **文件**, 不是那次打开; ④**Windows 是加密的**(UWP 用 SEE +
     从机器标识派生的 dbKey, WebView2 那一支用 DPAPI-NG), 有一篇同行评审论文与一篇取证文章
     各自描述过; ⑤**Linux 没有官方桌面客户端**。**没有查证的**: (a) **一个版本号都没有** —
     没有任何一条是在一台真 Mac、一个具体的 WhatsApp 构建上跑过的, 而这正是 P6a 第一轮要做
@@ -1876,9 +2124,31 @@ P6 的 +1 与 +4 不计入这个总数, 因为 P6 本来就未排期。)光是 P
     处引用应该被复核一遍 —— 尤其是"一个 profile 里跑一个长期登录的官方客户端"这件事是不
     是它自己的模型允许的。**macOS 的 `'store'` 那一半不依赖它**, 这也正是 P6 被拆成两条腿
     的原因。
+21. **一台配对 Mac 的 daemon 上到底有哪个 SQLite 读者, 是没实测过的(r6)。** §12.5 点名了
+    那几级与它们各自的约束 —— 有界的 `sqlite3(1)` 子进程(推荐; macOS 有文档说自带
+    `/usr/bin/sqlite3`, 而本机这台 Linux 开发机**没有**它, 这本身就是"要做运行时探测"的
+    理由)、探测之后的 `node:sqlite` 加上明说的 `NODE_MIN` 抬升、以及被明确拒绝的原生绑定
+    —— 但没有任何一条在一台真配对 Mac 的已装 daemon 上跑过: 它跑的是哪个 node 版本、它的
+    PATH 上有没有 `sqlite3(1)`、以及在一份几百 MB 的库上做一次 `VACUUM INTO` 要多久, 都不
+    知道。**实测过的**是机制本身, 在本机: §12.5 那张表里的每一臂(node v24.12.0 的
+    `node:sqlite`, 一份未 checkpoint 的 WAL fixture)—— 包括"取行的 API 是同步的而
+    `backup()` 是异步的"这件事, 而它正是决定围栏 3 那条事件循环规则咬在哪里的东西。
+22. **macOS 万一要发送, 怎么发(r6)。** P6a 是只读的, 而决定 19 的第四个问题 —— 在
+    agent-browser profile 里放第二份 linked-device 凭据 / 带自己那份 Accessibility TCC 授权
+    的原生 UI 自动化 / 两者都不做 —— 两个候选背后都没有任何实测: 第二台 linked device 对
+    owner 是不是可以接受、WhatsApp 自己的上限允不允许它与 Mac 客户端并存、以及那个 Catalyst
+    应用的输入框到底能不能经 Accessibility API 够得着, 全都不知道。在选定并实测之前, 那台
+    机器上的 `convCaps.sendAs` 就是 `[]` 加一个具名理由 —— 这是诚实的状态, 而不是一个沉默
+    的缺口。
+23. **真实繁忙库上 `fs.watch` 的触发密度没实测过(r6)。** §6.4 从结构上把它界住了(一次
+    去抖到 `caps.scanLatency[source]` 的游标 kick), 而"`ChatStorage.sqlite` 每来一条消息就
+    被写一次"这个前提取自关于库形状的公开材料, 不是盯着一个真库看出来的。去抖让唤醒率与那
+    个数字无关, 这也正是它是天花板而不是指望的原因 —— 但真实的触发密度, 以及从 daemon 去
+    watch 那个容器的 inotify 成本, 应该在 P6a 里量一次。
 
-**r3 与 r5 里新引入的 vendor 事实的出处**(公开文档, 2026-09-10 取; 这里没有任何一条在真实
-租户或真实客户端上跑过 —— 见上面第 2、3、15–19 条):
+**r3、r5 与 r6 里新引入的 vendor 事实的出处**(公开文档, 2026-09-10 取; 这里没有任何一条在
+真实租户或真实客户端上跑过 —— 见上面第 2、3、15–19 条; 下面 r6 那条 SQLite 行为是**唯一**
+在本机实测过的, 数字在 §12.5):
 
 - Lark/飞书长连接 —— 每应用 50 条连接、集群模式不广播、只支持企业自建应用、不需要公网
   URL:
@@ -1921,3 +2191,7 @@ P6 的 +1 与 +4 不计入这个总数, 因为 P6 本来就未排期。)光是 P
   <https://developer.apple.com/forums/thread/756701>
 - **(r5)** Linux 上没有官方 WhatsApp 桌面客户端, 官方途径只有 WhatsApp Web:
   <https://wiki.archlinux.org/title/WhatsApp>
+- **(r6)** SQLite 的 WAL 文档 —— WAL 文件里存着已提交但还没进主库的内容, 而**最后一个关
+  闭这个库的连接会 checkpoint 它并删掉 WAL**, 这正是为什么默认(读写)打开是那种会改动库
+  的开法而只读打开不是(本机实测; 数字见 §12.5 那张表):
+  <https://sqlite.org/wal.html>
