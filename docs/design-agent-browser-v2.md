@@ -46,6 +46,28 @@ invariant, and `task-group`'s standing as an origin), one replaces §4.7's unive
 product itself falsifies — with a named exception, and the last makes §10's bounding sentence cite
 a figure its own table publishes. **No decision's recommendation changed.**
 
+**Round 5 (2026-09-10)** answers three owner questions and, as before, folds each one **into** the
+architecture, the phases and the decisions rather than appending it: **Q7 multi-browser,
+multi-agent** — one session may drive **several** browsers at once and one agent may spawn
+sub-agents that each want their own, so "pin a profile" becomes **the default of a SET** rather
+than a singleton, every command is addressed to a **handle**, and "reconcile data across a personal
+and a work profile" becomes a first-class shape (§3.7, D22–D24); **Q8 explicit profile selection** —
+the anti-default-blindness mechanism at three layers: every tool answer names the profile it acted
+on, a change to the attachment set makes the NEXT command a typed `profile_changed` refusal, the
+per-turn micro-reminder carries it to the model, and the chat status bar grows a Browser chip that
+turns amber when what the agent actually used and what the user pinned disagree (§3.8, D25–D26);
+**Q9 local windows as computer-use targets** — whether an agent can drive **any native window** the
+way it drives a browser: a `vibespace-window` family beside the browser one, an honest per-platform
+capability matrix (X11/Xwayland, the three Wayland roads, a nested compositor we run ourselves, a
+paired Mac), an evaluation of AT-SPI2 as the DOM of a native window, the lease/takeover security
+model, and its own phase P9 (§4.9, §5.1.1, §6.6, D27–D30). §2 grows two invariants, §9 three suites,
+§10 re-derives the totals and adds P9 to the risk-weighted column, and §12 grows from 23 entries to
+31. **Every claim about this machine in this round is a read-only measurement taken that day**
+(GNOME Wayland + Xwayland, AT-SPI's nine applications and its traversal speed,
+`org.gnome.Shell.Introspect.GetWindows` answering AccessDenied, `/dev/uinput` at 0600, the portal's
+interface list, 80 of 128 inotify instances already held), and each one is written beside the
+sentence it supports.
+
 ---
 
 ## 0. Thesis
@@ -271,6 +293,8 @@ theirs and tiny. The server's steady-state work is a WebSocket bridge and a JSON
 | I3 | The user can neither see nor intervene | **Whatever the agent is looking at, the user can look at too, through VibeSpace's own auth, and can take the controls with a visible, reversible mode change.** |
 | I4 | (implied) Nothing owns the lifecycle | **Every browser process has a named owner, a bounded lifetime and a visible state; every browser process *VibeSpace starts* additionally has a resource guard.** The split is deliberate and it is the honest half: P0's browsers are started by the agent's own CLI, so the keeper cannot see them. What P0 can give them is the *bound* (an explicit idle timeout, §3.2.3) and the *name* (`vs-<browserKey>`); the guard and the enforced ceiling arrive with the keeper in P1. Between P0 and P1 the default path is bounded but unguarded, and that is stated rather than implied. |
 | I5 | (implied) Widening site access | **Fingerprint evasion is a provider choice per profile, never a global default, and never the first answer** — for any site with an account, a human login through the live view beats it. |
+| I6 | (implied, Q7/Q8) One session may hold several profiles at once | **A command acts on the profile it NAMES, and when more than one is reachable it must name one.** Ambiguity is refused by name with the handles listed, never resolved by a default; and every answer states the profile it just acted on — so "it used the wrong profile" is visible on the next command instead of after the work is done. |
+| I7 | (implied, Q9) A window target IS the user's desktop | **A native window is leased like a tab and observed like a DOM.** Input is injected only while the lease holder is the agent and the user has not taken over; where an accessibility tree can be read, coordinates are never guessed from pixels; and a window we did **not** start is a stricter road (D27). |
 
 ---
 
@@ -556,6 +580,15 @@ beats the conversation's own history. Binding or unbinding a Task Group does **n
 of a session already running — a default is where a new session starts, not a retroactive edit of
 existing ones.
 
+**And that pin is the default of a SET, not a singleton (Q7).** The ladder above answers "which
+profile does an **unaddressed** command land on", and from the first day that answer should have
+been called the **default attachment**: a session holds an attachment **set**
+(`attachments: [{profileId, alias}]`) with exactly one marked default. While the set has one member
+everything written in this section holds verbatim, which is the shape of nearly every session. Once
+it has two or more, §3.7 takes over: a command must name a handle, and `pin` changes only the
+**default**. That is not a reversal of this section — it is writing down the quantifier it has been
+carrying implicitly.
+
 ### 3.3 The profile registry
 
 `data/browser-profiles.json`, written through `writeJsonAtomic` (tmp+rename) and flushed on
@@ -625,6 +658,11 @@ profile and destroyed when the session ends or detaches.
   many other sessions are attached. The underlying browser is stopped only by its keeper.
 * **Input has one holder.** `lease.input` is `agent` or `user`. The live view's takeover flips it
   (§4.3). A session and a *human* share one tab, and the lease says which of them is driving.
+* **A sub-agent's lease is its parent's lease plus a suffix.** A tab a sub-agent takes is recorded
+  under `bk-<parent>.<n>` (§3.7), so the parent session's teardown reaps them **by prefix**: a
+  sub-agent ends silently (it has no `onExit` to give us), and "the parent is gone and a child still
+  holds a tab" is §1.2's 53 orphan directories one layer up. A child lease is an ordinary row in the
+  registry whose `browserKey` carries a suffix — not a second record type.
 
 **What the lease is, stated precisely, because round 1 overstated it.** Round 1 asserted "two
 *sessions* never share a tab at all" as a *property*. It is not one. A profile's CDP endpoint is
@@ -694,12 +732,164 @@ we should inherit rather than re-earn:
 | Agent CLI + manual | `data/bin/vibespace-browser`, `docs/agent/browser-manual.md`, `AGENT_TOOLS` | agent surface | `test-browser-cli` |
 | The pin ladder (§3.2.5) + the backend-switch decision and its version ladder (§7.4) | `src/browser-profiles.js` (PURE half) + `src/server/browser-backend.js` (ORCH: stop / restart / re-open the leases) | **PURE + ORCH** | `test-browser-pin` (fast) + `test-browser-backend` (fast decision, heavy switch) |
 | Split tab groups (§4.6): `layout`/`split` on the chain, the divider, the born-into-a-chain path | `src/lib/tab-group.js`, `src/lib/layout.js` (persist + sync key) | **CLIENT** | `test-window-binding` (headless chrome) |
-| Native-window forwarding (§4.7) + the chat adapters (§4.8) | `src/xpra-serve.js` (SHARED facts) + `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` | **SHARED + ORCH** | `test-native-window` (heavy) |
+| The attachment set, handle resolution, the ambiguity refusal, the audit line (§3.7) + the anti-default-blindness decision (§3.8) | `src/browser-profiles.js` (PURE: `resolveHandle` / `attachmentsFor` / `handleRefusal` / `profileChangeNotice`) | **PURE** | `test-browser-handles` (fast) + `test-profile-blindness` (fast + heavy) |
+| Native-window forwarding (§4.7) + the chat adapters (§4.8) + a window target's facts and actions (§4.9) | `src/xpra-serve.js` (SHARED facts) + `src/window-targets.js` (SHARED: enumeration / a11y snapshot / the input-backend ladder) + `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` + `data/bin/vibespace-window` | **SHARED + ORCH + agent surface** | `test-native-window` (heavy) + `test-window-target` (heavy) |
 
 `hostId` is a parameter, never a branch: `browser-access.js` picks the transport (local keeper /
 `browser-serve` device op / ssh) and nothing downstream asks "is this remote?" again — the same
 shape as `src/server/opencode-access.js`. `server.js` gains **wiring stanzas only**; its size
 ratchet is a build gate.
+
+### 3.7 One session, several browsers — the attachment set, handles and sub-agents
+
+(Owner question Q7.) Up to this point the document has quietly assumed "one session = one browser".
+That assumption holds for the common shape and fails for the thing the owner actually asked for:
+**one session may drive several browsers at once** (a personal profile and a work profile, with the
+task being to reconcile the two), and **one agent may spawn sub-agents that each want a browser**.
+This section writes the quantifier down and answers what "pinning" means in the plural.
+
+**The model: a session holds an attachment set, exactly one of which is the default.** The
+registry's `leases` are already the record of "which session is attached to which profile" (§3.3),
+so nothing new is stored: a session's attachment set **is** its set of leases, and
+`session-meta.browserProfileId` (§3.2.5's pin) is re-read from "this session's profile" to "this
+session's **default** profile". `vibespace-browser use <label|id> [--alias <name>]` adds an
+attachment and gives it a short alias (defaulting to the label's slug), `detach [--profile <handle>]`
+removes one, and `pin` changes only the default. An empty set is §3.2.2's ephemeral browser,
+verbatim.
+
+**Addressing: the handle is an argument of the command, not a property of the shell — because a
+sub-agent's shell is not ours.** That is decided by a measured fact rather than by taste:
+**VibeSpace does not spawn sub-agents.** A claude sub-agent is a sidechain record on the same CLI
+process's stdout (`src/session-store.js:308`'s `isSubagentMessage` reads
+`parent_tool_use_id || isSidechain`, and `src/session-schema.js`'s `_subNormalizers` is a map of
+"one normalizer per sub-agent" — one process, one stdout); a codex sub-agent is a thread its own
+app-server owns. Both environments froze at the moment the parent process was spawned. The only
+things we **can** hand an environment to are the ones we spawn ourselves: the session (§3.2's four
+variables) and a Background Work job (`jobEnv({…})` at `src/jobs.js:375`, which is already how
+`VIBESPACE_JOB_TOKEN` travels). Hence:
+
+| The shape of the command | Where it lands | Set of exactly one | Set of two or more |
+|---|---|---|---|
+| A bare command (`vibespace-browser snapshot`) | the default attachment | runs; the answer names the profile | **named refusal** `profile_required`, listing every handle and which one is the default |
+| `--profile <id\|alias>` | the one named | runs | runs |
+| A shell that exported `VIBESPACE_BROWSER=<alias>` | that shell's default | runs | runs (identical to putting `--profile` on every command) |
+| A sub-agent's bare command | whatever environment it inherited | the parent's browser (**this is the default, and it is right**) | refused, with the reason adding "you are a sub-agent — use `--profile` or ask your parent for a handle" |
+| `--profile <a filesystem path>` | — | **refused**: this CLI's `--profile` takes a registry handle; register a path with `vibespace-browser new` | same |
+
+That last row is load-bearing: `agent-browser`'s own `--profile` takes exactly a name **or a path**
+(§1.4), so an agent that already knows `agent-browser` will naturally hand us a directory — and that
+is precisely how §1.2's 53 unowned directories came to exist. A flag that is spelled the same and
+means something else must be separated **loudly**, and the refusal must carry the command that turns
+a path into a handle.
+
+**A sub-agent's default is its own ephemeral browser, but it has to ask.** The environment cannot
+reach it (previous paragraph), so "every sub-agent automatically gets a fresh browser" is a promise
+we cannot keep: the `AGENT_BROWSER_SESSION` a claude sub-agent's bare command carries **is the
+parent's**. The honest form is therefore a verb: `vibespace-browser new-child` mints a child handle
+`bk-<parent>.<n>` and prints its own env line (the sub-agent exports it in its own tool call, or
+simply passes `--profile` on every command), with the lease recorded under the parent by prefix
+(§3.4) ⇒ **the parent's teardown reaps the child**. A parent may equally write one of its own
+handles into the sub-agent's task description ("use `--profile work`"), in which case the child
+**shares** the parent's tab and `--pin-tab`'s mutual exclusion still holds: one tab, one owner, so
+two sub-agents on one handle queue rather than steal tabs from each other. Which of the two is right
+is a property of the task, so both exist and **the default is the former** (D23): the commonest use
+of a sub-agent is "go look this up", and putting it inside the parent's logged-in identity is the
+larger grant.
+
+**Cross-profile work is a first-class shape, and it lands on two commands.** The owner's example —
+reconciling a personal and a work profile — is, in this model:
+
+```
+vibespace-browser --profile work     snapshot          # the table in the work account
+vibespace-browser --profile personal snapshot          # the table in the personal account
+                                                       ... the model reconciles, then
+vibespace-browser --profile work     fill @e7 "…"
+```
+
+There is no "cross-profile transaction" and there should not be: two browsers are two identities,
+and any API that folded them into one call would be unable to say which side failed on the first
+failure. The registry records **which session touched which profile** (`leases`' `since` plus an
+append-only `data/browser-audit.jsonl`: `{at, sessionId, browserKey, profileId, verb, ok}`) — this
+is an audit, not telemetry: a persistent profile is a live credential, "who used it, when, to do
+what" is a question the user is entitled to ask, and §6.4's retention and archive rules apply
+unchanged (a `fill`'s **content** is never recorded, only the verb).
+
+**The live view: one bound pane plus a switcher strip, not N panes.** §4.6 lets the live-view window
+bind side by side with its session inside one tab group; when a session has N browsers, that **one**
+window grows a switcher strip inside it (one tab per attachment, each carrying §4.6's
+per-session-derived owner badge) rather than opening N panes — for the reason D19 already measured:
+three panes are unusable at the width most people run, and here the third pane would halve it again.
+Each tab on the strip shows its own activity indicator (which one is running a command), and the
+title bar names the profile of **the pane you are looking at** (clicking it opens §3.2.5's picker).
+The drawing for a profile shared by **several sessions** is unchanged: §4.6's badge becomes N dots
+listed one per line in the title, sourced from `leases`. Two questions, two surfaces: the strip
+answers "which browsers does my session have", the badge answers "who else does this browser belong
+to".
+
+**The resource bound bites in the plural, and it is machine-wide.** §1.2 measured 6 processes,
+420–667 MB PSS and **2 inotify instances** per Chromium, while `fs.inotify.max_user_instances` on
+this box is **128**; **measured read-only 2026-09-10: this uid already holds 80, leaving 48** — i.e.
+room for **24 more** browsers machine-wide, and that budget is shared with every other inotify user
+(our daemon, watchers, every esbuild, every test fixture). So §3.2.3's concurrency ceiling is
+**per instance**, and one session's own attachment set **counts against** it: three sessions holding
+three profiles each is nine browsers. The keeper's refusal at the ceiling (§3.5) must therefore name
+**which session's which attachment** hit it and offer to stop that one — not merely "at the
+ceiling", because in the plural model "who is holding them" has a non-trivial answer for the first
+time.
+
+### 3.8 "Which profile am I on?" — anti-default-blindness at three layers
+
+(Owner question Q8.) The pain is concrete: an agent starts on the ephemeral default browser, the
+user pins a real profile mid-task, the agent never notices and keeps working in the ephemeral one;
+or two profiles are available, it silently uses the default, and only much later does anyone
+discover that both needed work. What those two shapes share is **silence**: nothing today tells an
+agent that its profile changed, and it has no reason to ask. Three layers, each covering a different
+stretch:
+
+| Layer | Mechanism | The shape it covers |
+|---|---|---|
+| ① The tool surface (always reaches a RUNNING agent) | Every command's **answer** carries `profile: work (pinned by user 2m ago)`; the snapshot and screenshot headers name it too; when the attachment set changes, the **next** command is refused once with a typed `profile_changed` | A running agent — an environment variable cannot reach it, but its own next call to the CLI certainly can |
+| ② The model surface (once per turn, free) | `pendingNotice` (`src/session-status.js`) appends one `<system-reminder>` line to the user's **next** message: `browser profile changed: <old> → <new>`; the session-start context lists the current attachment set | A **stopped** agent, or a running one that has not called the CLI again yet |
+| ③ The UI (for the user, not the model) | A status-bar Browser chip: the profile the agent **last actually used** vs the **pinned** default; amber when they differ, opening "agent is still on the ephemeral profile — remind it?" with a one-click nudge | The user — and this is the only surface that answers "I pinned it, now what?" |
+
+**①'s mechanism is a refusal, not a notice.** That distinction is the weight of this section: a hint
+stuffed into stdout only **hopes** the model reads it, whereas a `profile_changed` refusal means the
+command **did not run** and the model must re-issue it with the handle spelled out. It is
+**one-time**: after the refusal the new default applies and bare commands run normally again (else a
+mid-session pin would double every remaining command in the session). It fires on a **change of the
+attachment set's fingerprint** (the default moved, one was added, one was removed), remembered per
+session as "this session has been told about this fingerprint", so it speaks exactly once per
+change rather than once per command. That is also why it must be typed
+(`{ok:false, code:'profile_changed', was, now, handles}`) rather than a sentence of English: §5.1
+already set the same rule for `browser_paused` / `tab_gone` — **an agent must be able to read why it
+was refused without guessing**.
+
+**② spends only what is already being spent.** A pin is a **user action**, so the user is sitting
+there typing and the `<system-reminder>` rides their next message — zero billed turns, zero new
+mechanism, verbatim the same rule as D16. Only "the session is **stopped** and the user explicitly
+wants it woken now" goes through §4.3.1's delivery ladder under its own declared reason
+(`'browser-profile-notice'`, added to `SPEND_REASONS` in the same change as `'browser-handback'`),
+behind a setting that defaults **OFF**. The "remind it" button on ③'s chip is **a per-occurrence
+owner action on every click**, so it may take the ladder — but it still passes the same ceiling,
+because it still opens a billed turn (D26).
+
+**③ has to be written into `LIVE_SESSION_FACTS` or it cannot be drawn.** That table at
+`src/lib/sidebar.js:73` is the **one** list of per-session live facts the `active-sessions` payload
+publishes, and `_mergeAndRender()` only repaints when its **digest** changes — this repository has
+paid for that six times (`worktree`, `outputStyle` and `remoteState` all died on that table). So the
+chip needs a row `browserProfile: { digest: (v) => v || '' }`: it is a cheap scalar that changes at
+most a few times per session (a pin, an agent using a different handle), exactly the class that
+table says should **gate** the render, as opposed to `todo`/`auth`, which change several times per
+turn and are deliberately carried-only.
+
+**The "explicit choice" rule, and its refusal.** The owner also asked for something harder: when a
+session has ≥2 attachments and the user's message **mentions** a profile alias, nothing may be
+inferred — the agent must name it. Mechanically that is still ①'s one rule (≥2 ⇒ a handle is
+required), so no second machine is needed; what is needed is that the **manual says so**, plus a
+negative control: with only one attachment the same message produces **no** refusal (otherwise the
+rule would turn the commonest shape into two commands). What is deliberately **not** built is
+"guess the alias out of the user's message" — that is an implicit natural-language resolution, and
+killing implicit resolution is this whole section's purpose.
 
 ---
 
@@ -1175,6 +1365,100 @@ designed with "external sources — Gmail/Lark/Slack — later feed the same lad
   bodies readable, how often must it see the phone. A control that cannot work is disabled with its
   reason instead of failing at use time.
 
+### 4.9 Local windows as computer-use targets
+
+(Owner question Q9.) Can an agent drive **any local native window** the way it drives a browser —
+handing the agent a window as an object with `snapshot` / `screenshot` / `click` / `type`? Yes, but
+**how far it works varies by platform and by toolkit**, and the whole value of this section is
+writing that table down honestly instead of making a promise that is true everywhere.
+
+**The dividing line first, because it is the same one as §4.7: an agent that talks to a protocol or
+a DOM always beats one that talks to pixels.** A browser is easy to drive not because it is a
+browser but because it gives two things at once: a queryable **tree** whose elements have stable
+references (the DOM / the accessibility tree) and a **protocol** for acting on an element (CDP). A
+native window gives only pixels — **unless its toolkit exports an accessibility tree**. So this
+section's answer is: **AT-SPI2 is the DOM of a native window**, and pixels are its fallback, not the
+other way round.
+
+**That is not theory; it is measured read-only on this box, 2026-09-10.** The
+`toolkit-accessibility` switch is `false` and the AT-SPI registry is alive anyway
+(`/usr/libexec/at-spi2-registryd` is running and `Atspi.get_desktop(0)` reports **nine
+applications**: gnome-shell (clutter), mutter-x11-frames (GTK), ibus-extension-gtk3,
+update-notifier, xdg-desktop-portal-gtk, gjs, snapd-desktop-integration and two more). Walking a
+real application's tree yields exactly what a snapshot needs: `role` (frame / panel / label /
+button), `name`, and the `Text` / `Action` / `Component` interfaces — `Component` gives geometry (so
+a node maps to a click point) and `Action` gives the actions the node **declares about itself**
+(literal values measured: `click`, `window.minimize`, `clipboard.copy`). It is fast enough:
+`mutter-x11-frames` 24 nodes in 13 ms and a real application 61 nodes in 10 ms ⇒ **~1,800–6,100
+nodes/second**. `Action.do_action` is therefore an action channel that **goes through no input
+injection at all**: it acts on a node, so Wayland's "no global input injection" rule does not reach
+it — which is the single most important conclusion here.
+
+**What everyone else does (the comparison the owner asked for).** Three sources, all pointing the
+same way. **Anthropic's computer use is pixel-only** — the current toolset
+`computer_toolset_20260801` has 17 member tools (`screenshot`, `zoom`, the click family, `type`,
+`key`, `scroll`, `wait`, …), coordinates are **screenshot pixels** (a caller that scales must map
+them back), and the documentation names no accessibility-tree channel; **the same vendor's browser
+use reads the accessibility tree**. **OpenAI's ChatGPT desktop "Work with Apps" reads app content
+through the macOS Accessibility API** (with a VS Code extension for VS Code), macOS-only — i.e.
+both vendors' **local-application** integrations are accessibility-tree READS rather than pixel
+bots, and Codex desktop's browser panel (§4.1) is the DOM road by construction. Third-party
+implementations agree: cua's Linux driver uses "AT-SPI 2 over D-Bus for the accessibility tree" with
+input over XTEST, while **native Wayland is still preview** (its own
+`CUA_DRIVER_RS_ENABLE_WAYLAND=1` flag, explicitly lacking screen capture and AT-SPI parity); and the
+MIT `agent-sh/computer-use-linux` makes window enumeration a descending ladder (GNOME Shell
+extension → GNOME Introspect → COSMIC → KWin scripting → hyprctl → i3 IPC → generic X11/EWMH) with
+Wayland input preferring the RemoteDesktop portal and falling back to uinput.
+
+**The capability matrix (this box's measurements and documentation, each labelled).**
+
+| What you want to do | X11 / Xwayland (this box today) | Wayland via portal | Wayland via uinput | A nested X we start ourselves (Xvfb+Xpra, §4.7) | A paired Mac (§7.3) |
+|---|---|---|---|---|---|
+| Enumerate windows | **Yes, but it sees only X11 clients** (measured: `xwininfo -root -children` lists 19 Xwayland toplevels — mutter-x11-frames, ibus, one X11 dialog; native Wayland windows are structurally invisible) | GNOME's `org.gnome.Shell.Introspect.GetWindows` **measured AccessDenied here** (the Shell allows only a D-Bus sender allowlist = the XDG portals, or unsafe mode); other compositors each have their own IPC | None (uinput is input only) | **Yes, completely**: our X server holds only the applications we started | CGWindowList / ScreenCaptureKit can enumerate |
+| Capture **one** window's pixels | Yes (XComposite / `ffmpeg -f x11grab`; `xwd` and `import` are both absent here, `ffmpeg` is present) | ScreenCast portal (PipeWire, one interactive grant) | None | Yes, and **per window** is Xpra's whole job | ScreenCaptureKit's `SCContentFilter` can name a single window (`CGWindowListCreateImage` deprecated since macOS 15) |
+| Inject pointer + keyboard | Yes (XTEST; `xdotool` / `wmctrl` present here) — **but only into X11 clients** | RemoteDesktop portal: `NotifyPointerMotion*` / `NotifyKeyboardKeycode`, or `ConnectToEIS` handing off to libei (the interface is present here; `libei.so.1` / `libeis.so.1` 1.3.901 installed) | ydotool + `/dev/uinput` (**unusable here**: measured `crw------- root root`, and the uinput module is not loaded) | Yes (our own X, full XTEST authority) | Requires Accessibility permission (non-sandboxed + signed) |
+| Read the accessibility tree (= this window's DOM) | **Yes, and independent of the display protocol** (AT-SPI is D-Bus; measured here: 9 applications, ~1,800–6,100 nodes/s) | Same (AT-SPI does not go through the compositor) | Same | Same | AXUIElement (same permission) |
+| **Act** through the accessibility tree (no input injection) | `Atspi.Action.do_action` (measured: nodes declare `click` / `window.minimize`) | Same — **Wayland's "no global injection" does not reach this** | Same | Same | AXUIElement's `AXPress` and friends |
+
+**Four conclusions fall straight out of that table:**
+
+1. **The accessibility tree is the only channel that holds in every cell**, so it is the **primary**
+   implementation of `snapshot` and `click`, with pixels filling in where it has no answer (an
+   image, a canvas, a custom-drawn control). That is the same shape as the browser half:
+   `agent-browser snapshot` also returns an accessibility tree with references like `@e3`.
+2. **Input injection is a three-road ladder that degrades per platform, and each road's
+   availability must be probed at runtime rather than inferred from the platform's name** — this box
+   is the counter-example: a Wayland desktop where X11 injection works for Xwayland clients, the
+   portal interface is present, and uinput is unusable.
+3. **Enumerating windows is the most fragile link**, and it happens to be the first step of "hand
+   the agent a window as an object": both roads have a named failure here (X11 cannot see Wayland
+   clients; GNOME's Introspect refuses us). So the first version of window targets **lists only the
+   windows we started ourselves** (D27) — the cell that is complete and needs nobody's permission.
+4. **The "nested X we start ourselves" column is green throughout**, and it is exactly the stack
+   §4.7 already designed for native chat clients (Xvfb + Xpra seamless). So window targets are
+   **not a new layer**: they are §4.7's transport plus a new observation/action surface.
+
+**How it plugs into the live view.** Entirely by reuse: `GET /api/xpra/stream?window=<id>` is the
+same server-side bridge (§4.7), and a window target merely gives that pane a `window-live` form and
+a title naming which window it is. §4.6's binding, §4.3's three modes (Watch / Take over / Hand
+back) and §4.3.1's spend gate apply verbatim — taking over and handing back a window target is the
+same act as for a tab, because they share one `lease.input`.
+
+**The background-service question must be measured before it is designed around.** The VibeSpace
+server runs under `systemd --user`, and the portal's session is interactively granted (`Start`
+"typically result[s] in the portal presenting a dialog letting the user select what to share"),
+while public reports record **portal/D-Bus paths being denied in background/systemd contexts**. So
+"the server holds a RemoteDesktop portal session itself" is the **first thing P9 measures**, not an
+assumption the architecture may rest on; if it does not hold, the Wayland column reduces to
+`persist_mode=2` + `restore_token` (documented: permissions "persist until explicitly revoked", the
+token invalidated after a single use) with one human click, or to column 4 alone.
+
+**Honest boundary (nothing in this section is a number about speed).** `xpra` is not installed here
+(§4.7 already records this), so the end-to-end latency of a window target is entirely unmeasured;
+AT-SPI's speed measures **traversal**, not "one `do_action` to a visible change"; and all nine
+applications were GTK/clutter — **Qt and Electron coverage is measured at zero on this box**
+(Electron typically exports a tree only when it detects an AT client). All of this goes into §12.
+
 ## 5. The agent-facing surface
 
 ### 5.1 `vibespace-browser` (STATIC tracked, in `AGENT_TOOLS`)
@@ -1184,10 +1468,12 @@ Modelled on `data/bin/vibespace-page`: `VIBESPACE_API` + `VIBESPACE_SESSION_TOKE
 
 ```
 vibespace-browser profiles                       # what exists, who owns it, who is attached
-vibespace-browser use <label|id>                 # attach THIS session to a profile;
+vibespace-browser attachments                    # MY set: every handle, which one is the default (§3.7)
+vibespace-browser use <label|id> [--alias <a>]   # attach THIS session to a profile (adds to the set);
                                                  #   prints the env to export, or execs a subshell
 vibespace-browser new <label> [--provider …] [--proxy …] [--fingerprint …]
-vibespace-browser detach                         # drop the lease, close my tab
+vibespace-browser new-child                      # mint a CHILD handle bk-<parent>.<n> for a sub-agent
+vibespace-browser detach [--profile <handle>]    # drop that lease, close my tab
 vibespace-browser watch                          # print the live-view path for the user
 vibespace-browser status                         # my tab, my lease, who holds input,
                                                  #   my profile AND ITS ORIGIN (§3.2.5)
@@ -1196,7 +1482,20 @@ vibespace-browser pin <label|id> | --none        # pin THIS session (or unpin); 
 vibespace-browser backend [<name>]               # which backend, what else exists, propose a switch (§7.4)
 vibespace-browser blocked --url <u> [--why <c>]  # I was blocked here — a CLAIM, never a detection (§7.4)
 vibespace-browser -- <agent-browser args…>       # run agent-browser with this session's flags
+
+  --profile <id|alias>                           # WHICH browser this command acts on (§3.7);
+                                                 #   REQUIRED once this session has >1 attachment,
+                                                 #   never a filesystem path — that is a named refusal
+  env VIBESPACE_BROWSER=<alias>                  # the same choice, pinned for one shell
 ```
+
+**Every answer names the profile it acted on (§3.8's layer ①).** That is not decoration: a
+snapshot's header, a screenshot's metadata and every verb's closing line carry
+`profile: work (bp-3f9a1c02) · pinned by user 2m ago · 2 attachments on this session`. When the
+attachment set's fingerprint changes, the next command gets a typed refusal
+`{ok:false, code:'profile_changed', was, now, handles}` — once, after which the new default applies.
+The reason is in §3.8: a hint stuffed into stdout only hopes the model reads it, while a refusal
+means the command **did not run**.
 
 **`use` does not print a CDP URL.** Round 1 had it print
 
@@ -1225,6 +1524,35 @@ enforcement, the proxy in §6.5.
 every habit it has. The wrapper form (`vibespace-browser -- …`) exists for the verbs that need a
 policy decision (`close`, `close --all`, `connect`, `get cdp-url`) and for the lease check.
 
+#### 5.1.1 `vibespace-window` — the window target beside the browser target (§4.9)
+
+Same family, same auth, same lease; the only difference is that the thing addressed is a window
+rather than a tab:
+
+```
+vibespace-window list                            # window targets I may address (§4.9's column 4 first)
+vibespace-window open <app> [--title <t>]        # start an app under OUR Xvfb+Xpra and return a handle
+vibespace-window attach <handle>                 # take the lease on it (the same lease object as a tab)
+vibespace-window snapshot <handle>               # THE a11y tree: role/name/text/actions/bounds + @refs
+vibespace-window screenshot <handle> [--out p]   # pixels — the FALLBACK, never the primary read
+vibespace-window click <handle> @e7              # act on a NODE (AT-SPI do_action), not on coordinates
+vibespace-window click <handle> --at <x>,<y>     # act on a POINT — refused when no injection backend
+vibespace-window type <handle> "…"               # text into the focused node
+vibespace-window key  <handle> ctrl+s            # a chord
+vibespace-window watch <handle>                  # print the live-view path (the 'window-live' pane)
+vibespace-window detach <handle>                 # drop the lease; the app keeps running
+```
+
+Three rules, each a direct translation of §4.9's matrix: **(i) `@ref` beats coordinates** (the
+references `snapshot` mints come from the accessibility tree, the same habit as `agent-browser
+snapshot`'s `@e3`, so an agent that already knows the browser half learns nothing new); **(ii) a
+verb that cannot work is disabled with its reason rather than failing at use time** (§7.1's
+capability law: with no input-injection backend `click --at` refuses outright and prints what the
+probe found, while `click @e7` still works — which is exactly what the `do_action` road buys);
+**(iii) `list` shows only the windows we started ourselves** by default, the user's own desktop
+windows require D27 to be opened deliberately, and while it is open every such row is marked as
+"your desktop".
+
 ### 5.2 How an agent learns any of this
 
 * **Nothing, by default.** An agent that never reads a word gets isolation from §3.2.
@@ -1244,6 +1572,13 @@ policy decision (`close`, `close --all`, `connect`, `get cdp-url`) and for the l
   is one command (`session.pinBrowser`) registered on four surfaces, not four implementations.
 * The live-view window's title bar: the profile name (click = the picker), the backend chip, and
   the **bind** affordance that snaps it beside its owning chat (§4.6).
+* The chat status bar's **Browser chip** (§3.8's layer ③): the profile the agent **last actually
+  used**, beside the **pinned** default; amber when they differ, opening "agent is still on <old> —
+  remind it?" with a one-click nudge (D26). It needs its own row in `LIVE_SESSION_FACTS` **and a
+  digest**, or it cannot be drawn at all (§3.8).
+* When a session has several attachments, the live-view window carries a **profile switcher strip**
+  inside it (one tab per attachment plus the owner badge) rather than N side-by-side panes (§3.7;
+  the reason is the width D19 already measured).
 * A ⚙ panel (or sidebar section): profiles, owners, last used, disk size, "stop", "forget", "open
   live view". The unregistered directories from §1.2 (53 at round 1, 56 when re-measured — the
   count drifts upward on its own) appear here as adoptable candidates (§8).
@@ -1334,6 +1669,49 @@ between one owner's own sessions matches every other surface here; a cooperative
 isolation between *different* owners is the UI promising something the mechanism cannot keep.
 
 ---
+
+### 6.6 A window target is the user's desktop (§4.9's security model)
+
+Every rule from the browser half holds verbatim (the same `lease.input`, the same §4.3 three modes,
+the same server-side bridge, the same "the stream port never reaches a browser"). What follows is
+what is **only** true of window targets:
+
+* **Two classes of window, two roads, and the UI must keep them apart.** Windows **we started**
+  (`vibespace-window open`, running under our own Xvfb+Xpra) are the default class: their existence,
+  lifetime and pixels are ours, and an agent acting inside one is no more dangerous than an agent
+  acting inside a browser tab. Windows **on the user's own desktop** are the other class, and by
+  default they are **not listed and not addressable** (D27) — because a click there is a click in
+  the user's real session, including the window they are typing in right now. Opening that class is
+  an explicit owner decision, every such row is then marked "this is your desktop", and the live
+  view's title says so too.
+* **Input is injected only while the lease holder is the agent and the user has not taken over.**
+  That is §4.3 verbatim, but it has a second enforcement point here: **the user can touch that
+  window directly with their own keyboard and mouse at any time**, and that does not pass through
+  us. So a window target's "take over" additionally **stops injecting** and says on the pane that
+  you are driving it directly; resuming injection is an explicit act. The cooperative boundary is
+  exactly as honest as §6.5's: what we can guarantee is that **we** do not inject, not that nobody
+  else can.
+* **Both the pixels and the tree are secrets.** A window's accessibility tree contains **body text**
+  (the `Text` interface exists to read text), so a `snapshot` can leak more than a screenshot rather
+  than less. §6.4 applies verbatim: screenshots and recordings default off, have a retention period,
+  and are archived rather than destroyed. **There is no "redaction hook" here, and that has to be
+  written down rather than borrowed**: nothing in this design redacts content anywhere today, so
+  describing window captures as "going through the same redaction" would be a sentence about a
+  mechanism that does not exist. The primitives that do exist are three — recording off by default
+  (D7), "secrets stay out of the model" (§1.5, inherited from upstream), and the per-action
+  transcript thumbnail; real redaction is a separate feature that owes its own evidence.
+* **The portal's consent is the user's, not ours.** If the Wayland road ends up using the
+  RemoteDesktop portal, that grant dialog is clicked by the **user**, and `persist_mode=2` +
+  `restore_token` is what keeps it from being clicked every time (documented: permissions "persist
+  until explicitly revoked", the token invalidated after a single use). That token is a standing
+  grant, so it lives server-side under §6.4's rules — never in `agentEnv`, never in CLI output — and
+  "which session used it, when, to do what" goes into §3.7's audit stream.
+* **`--at <x>,<y>` is the one that needs a reason.** Acting on a node (`@ref`) is auditable: the
+  audit line can record "clicked the button named Minimize". Acting on a coordinate records nothing
+  meaningful, and it is the only path that can touch something we are **not looking at**. So it is
+  refused when no injection backend exists (§5.1.1), it still requires the lease and still requires
+  the target to be in the "we started it" class when it does exist, and the audit line marks it
+  explicitly as `by:'point'`.
 
 ## 7. Providers
 
@@ -1640,7 +2018,10 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the seat arithmetic and its refusal text, the site-hint record carrying WHO claimed it, and `blocked` being a claim the server never manufactures. heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus the not-installed refusal naming the provider. |
 | `test-window-binding` | fast + heavy | **P7** | fast: the chain model with `layout`/`split`/`ratio` — a missing `layout` reads as `'tabs'`, the ratio clamps, and **the multi-client sync key changes when only the layout changes** (§4.6's named trap, with the pre-fix key as its negative control). Three more: **close the host tab of a three-tab split chain ⇒ `layout === 'tabs'` and no dangling id in `split`** (the `_normalizeChain` invariant, with the pre-fix shape that leaves a dangling `pair` as its negative control); **two sessions in one task group produce distinguishable badges**; and **a session bound to no group produces a badge at all** (the two shapes on which borrowing the group colour fails). heavy (headless chrome): bind → two panes in one window, divider drag under a non-1 DPI zoom lands where the pointer is, move/minimise/desktop-switch keep them together, closing the browser pane collapses to tabs **without moving the chat window**, and a mobile viewport renders tabs **without writing its flattening back**. |
 | `test-native-window` | heavy | **P8** | A real Xpra server + a real X client under Xvfb through the real cookie-authed bridge: one window arrives, input reaches it, the stream port is never reachable from a browser, and the backpressure discipline holds. **Skips loudly, with evidence**, when `xpra` or `Xvfb` is absent (measured 2026-09-10 on this box: `Xvfb` present, `xpra` absent). The bandwidth/latency numbers §4.7 needs are produced here, not asserted — the suite RECORDS them under a named budget so a regression is visible. |
-| `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` must be declared AND used in the same change (§4.3.1). |
+| `test-browser-handles` | fast | **P1** | The attachment set as a PURE decision: a set of exactly one resolves a bare command to the default; a set of ≥2 answers a bare command with the named refusal `profile_required` **listing every handle and which is the default** (a refusal without that list FAILS — it is the only diagnostic this agent can get); the refusal for a `--profile` given a **filesystem path**, carrying the command that registers it as a handle; a child handle `bk-<parent>.<n>` reaped by the parent's teardown **by prefix**; one audit line per verb with **content never recorded** (a `fill` logs the verb only). Negative controls: a session with one attachment **never** needs a handle (else the rule turns the commonest shape into two commands); a handle naming a profile this session is not attached to is **refused**, not silently attached. |
+| `test-profile-blindness` | fast + heavy | **P1, P2** | fast: `profile_changed` is **one-time** (one utterance per fingerprint, bare commands run afterwards), it fires on the **attachment set's fingerprint** rather than per command, and it is typed (`{code, was, now, handles}`); plus the wording of the `<system-reminder>` and its zero-spend delivery path (§3.8's layer ②). heavy (headless chrome, 375×667): the chip is neutral when "what the agent used" and "what is pinned" agree and amber with both names when they do not, **and `LIVE_SESSION_FACTS`' digest covers it** — the negative control removes that row and the chip must stop repainting (this repository has paid for that table six times). |
+| `test-window-target` | heavy | **P9** | A real Xvfb + a real Xpra + a real GTK client: `list` shows only the windows we started, `snapshot` mints `@ref`s from the **real AT-SPI tree** (role/name/bounds all asserted present), `click @ref` changes that application's state through `do_action` (verified by the application's **own tree**, not by pixels), `click --at` **refuses with the probe result** when no injection backend exists, and the lease plus §4.3's three modes are the same object a tab uses. Every cell of the capability matrix is a **runtime probe** rather than a platform name, and the suite **prints** what it probed; **skips loudly, with evidence**, when `xpra`, `Xvfb` or AT-SPI is missing (2026-09-10 on this box: `Xvfb` present, `xpra` absent, AT-SPI present and reporting 9 applications). The numbers §4.9 admits it has not measured are produced here under a named budget. |
+| `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` and `'browser-profile-notice'` (§3.8) must each be declared AND used in the same change (§4.3.1). |
 | `test-architecture` | build | all | Tier edges: PURE imports nothing, SHARED never reaches up, the daemon bundle carries no orchestrator markers, `server.js` stays inside its size ratchet, and §44 — every settings category renders, so `browser.announceIdleHandback` and the rest reach a section a user can open. |
 | `test-session-schema` | fast | P1, P3 | Every new `session._field` (`_browserProfileId`, `_browserKey`, `_browserTargetId`, `_browserInput`) has an owner row. |
 | `test-vendor-whitelist` | fast | all | **That this design introduces no new Anthropic call.** Round 1 also claimed this suite is "where a provider phoning home gets caught" — that claim is **deleted**: it is a source census over `src/`, `server.js` and `data/bin/` for Anthropic endpoint strings within ±4 lines of a request primitive. It cannot observe a third-party binary's traffic and CloakBrowser's host is not in its regex. The control for that risk is §7.2.1's measured proof record plus the container's egress allowlist, and the suite that asserts the **container's egress policy** is `test-browser-providers`, not this one. |
@@ -1661,50 +2042,54 @@ spread: 14 of 32 workflows converged in one round, 8 needed 3–6.
 | Phase | Content | Rounds (point) | Range | Days (point) | Ships value on its own? |
 |---|---|---|---|---|---|
 | **P0 — Zero interference** | `AGENT_BROWSER_SESSION` + `_NAMESPACE` + explicit `_IDLE_TIMEOUT_MS` at spawn (local + remote paths), **the §3.2.2 user-data-dir variant with its fallback ladder**, the `browserKey` continuity ladder (§3.2.1), version-floor probe with an honest "your agent-browser is too old for shared profiles" notice, the k = 1/4/12 resource measurement (§1.2, §12.10), one line in the tools intro, `docs/agent/browser-manual.md`, `test-browser-profiles` (env half, asserting the resolved dir), **plus the pin's env indirection (§3.2.5) — the per-session generated config or the re-pointed symlink — so a mid-session pin never needs a restart**. | **5** | 4–7 | 2.5 | **Yes — the whole of (1.b)'s "stop interfering" half.** |
-| **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`. | **8** | 6–12 | 4 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics. |
-| **P2 — Live view** | `/api/browser/stream` bridge (+ backpressure), `browser-live` window type, multi-viewer fan-out, URL/tab/console panes, DPI-correct canvas, `test-browser-live`. | **6** | 5–9 | 3 | **Yes — (1.c) minus the hands.** |
+| **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`, **plus the attachment set and handle addressing (§3.7) + anti-default-blindness layers ① and ② (§3.8) — `attachments`/`new-child`/`--profile`, the two named refusals `profile_required` and `profile_changed`, the audit stream, and the zero-spend `pendingNotice`**, `test-browser-handles`, `test-profile-blindness` (the fast half). | **10** | 8–15 | 5 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics; **and for the first time one session may hold several at once**. |
+| **P2 — Live view** | `/api/browser/stream` bridge (+ backpressure), `browser-live` window type, multi-viewer fan-out, URL/tab/console panes, DPI-correct canvas, **the in-window profile switcher strip for a session with several attachments (§3.7) and the amber status-bar Browser chip (§3.8's layer ③, including its `LIVE_SESSION_FACTS` row and digest)**, `test-browser-live`, `test-profile-blindness` (the heavy half). | **7** | 6–10 | 3.5 | **Yes — (1.c) minus the hands.** |
 | **P3 — Takeover / handback** | Lease input holder, mode switcher, input forwarding, `browser_paused`, **the §4.3.1 spend wiring** (`'browser-handback'` in `SPEND_REASONS`, the ladder call, `browser.announceIdleHandback` default OFF, the `test-spend-paths` census staying green), idle handback, agent cursor, `--confirm-actions` cards. | **5** | 4–7 | 2.5 | Yes — completes (1.c). |
 | **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; `test-browser-providers` + `test-browser-backend`. | **9** | 7–13 | 4.5 | Yes — (1.a), and the fleet story. |
 | **P5 — Recording + housekeeping** | Per-profile screencast opt-in, transcript thumbnails, retention sweep, profiles panel with sizes, orphan adoption (migration step 3), `test-browser-housekeeping`. | **4** | 3–6 | 2 | Yes — the transcript half. |
 | **P6 — Hard mediation** | CDP-mediating proxy: target scoping + input refusal during takeover, per-session CDP URLs. **A stated precondition of `sharing: "instance"`** (§6.2), not merely an option if D6 says the cooperative lease is not enough. | **6** | 4–9 | 3 | Only as enforcement — but `sharing: "instance"` stays refused until it lands. |
-| **P7 — Window binding** | `layout`/`split`/`ratio` on the tab chain, the title-bar bind affordance + the left/right title-bar drop zone, the born-into-a-chain `createWindow` path, the divider (per-drag controller, rAF, one coordinate conversion), the ownership badge from `leases`, the layouts persist + **the sync-key fix**, mobile tabs-only without write-back, `test-window-binding`. | **5** | 4–8 | 2.5 | Yes — an agent-driven browser stops losing its owner. **Needs P2** (there must be a live view to bind); independent of P3–P6. |
+| **P7 — Window binding** | `layout`/`split`/`ratio` on the tab chain, the title-bar bind affordance + the left/right title-bar drop zone, the born-into-a-chain `createWindow` path, the divider (per-drag controller, rAF, one coordinate conversion), the ownership badge from `leases`, the layouts persist + **the sync-key fix**, mobile tabs-only without write-back, **the per-pane owner badge on the switcher strip's tabs (§3.7)**, `test-window-binding`. | **6** | 5–9 | 3 | Yes — an agent-driven browser stops losing its owner. **Needs P2** (there must be a live view to bind); independent of P3–P6. |
 | **P8 — Native client windows** | The Xpra rung (§4.7): a keeper under §3.5's ceiling and runaway guard, `GET /api/xpra/stream` in the `/api/vnc` shape, the client half per D21, the 200 ms / 1 Mbps measurement, and per-app routing (WhatsApp → the web version in a profile; WeChat → the native client, only after the web version is tried). Then the §4.8 adapter for whichever app the owner names, feeding the existing Communication-Channels ladder with its own `source` tag and a declared `'chat-inbound'` spend reason. `test-native-window`. | **7** | 5–11 | 3.5 | Yes — but it is the least verified phase in the document and its range says so. Independent of every other phase except §4.2's bridge shape. |
+| **P9 — Window targets** | §4.9's window targets: `src/window-targets.js` (SHARED: enumeration / the AT-SPI snapshot and `@ref` minting / the **runtime-probed** input-backend ladder), `data/bin/vibespace-window` + its manual (§5.1.1), the `window-live` pane reusing §4.7's bridge, the lease and three modes shared with tabs, and §6.6's two-class boundary plus its audit line. **The first task is to measure three things**: whether the portal is usable at all from a `systemd --user` background context, AT-SPI's coverage on Qt/Electron, and the end-to-end latency from one `do_action` to a visible change. `test-window-target`. | **8** | 6–13 | 4 | Yes — for the first time an agent can operate an application that is not a browser. **Needs P8's transport** (Xvfb+Xpra) and P2's bridge shape; independent of P3–P7. |
 
 **Totals, published as the range rather than the point** (round 1 published only the point
 estimate of a range whose top its own risk paragraph pointed at):
 
-| Scope | Range | Point estimate | **Risk-weighted** (P2, P4 and P8 at the top of their ranges, the rest at the point) |
+| Scope | Range | Point estimate | **Risk-weighted** (P2, P4, P8 and P9 at the top of their ranges, the rest at the point) |
 |---|---|---|---|
-| **P0–P5** | **29–54 rounds ≈ 14.5–27 days** | 37 ≈ 18.5 days | **44 rounds ≈ 22 days** |
-| **P0–P6** | **33–63 rounds ≈ 16.5–31.5 days** | 43 ≈ 21.5 days | **50 rounds ≈ 25 days** |
-| **P0–P8** (everything the owner asked for) | **42–82 rounds ≈ 21–41 days** | 55 ≈ 27.5 days | **66 rounds ≈ 33 days** |
+| **P0–P5** | **32–58 rounds ≈ 16–29 days** | 40 ≈ 20 days | **47 rounds ≈ 23.5 days** |
+| **P0–P6** | **36–67 rounds ≈ 18–33.5 days** | 46 ≈ 23 days | **53 rounds ≈ 26.5 days** |
+| **P0–P8** | **46–87 rounds ≈ 23–43.5 days** | 59 ≈ 29.5 days | **70 rounds ≈ 35 days** |
+| **P0–P9** (everything the owner asked for) | **52–100 rounds ≈ 26–50 days** | 67 ≈ 33.5 days | **83 rounds ≈ 41.5 days** |
 
 The risk-weighted column is the one to plan against, and it is weighted for a stated reason:
 P2 and P4 depend on a third-party binary's real behaviour rather than on our own code, which is
-also why §12 lists three of their assumptions as unverified. Two further honesty notes: 55 % of
-workflow wall time in the last sample had **no agent running** (concurrency cap, session limits,
-serial integration), so "days" here is agent capacity and not elapsed time; and the ranges above
-are per-phase — the joint distribution is not the sum of the extremes, so P0–P8's **82 rounds** is
-the sum-of-extremes pessimistic bound, not a forecast, and the figure to plan against is the same
-row's risk-weighted **66**. (Round 3 printed 46 here; that was round 2's P0–P8 number, stranded
-once P7 and P8 were added, and it appears in none of this section's tables.)
+also why §12 lists three of their assumptions as unverified; P8 and P9 are the same, only more so —
+they depend on a machine's desktop stack (compositor, portals, accessibility bus), and every
+measurement this document has of that layer comes from **one** machine. Two further honesty notes:
+55 % of workflow wall time in the last sample had **no agent running** (concurrency cap, session
+limits, serial integration), so "days" here is agent capacity and not elapsed time; and the ranges
+above are per-phase — the joint distribution is not the sum of the extremes, so P0–P9's **100
+rounds** is the sum-of-extremes pessimistic bound, not a forecast, and the figure to plan against is
+the same row's risk-weighted **83**.
 
 **Alternative order, if the owner wants value earliest:** P0 → P2 → P1 → P3. P2 can run against
 upstream's per-session stream *before* the registry exists, because §3.2 already gave every
-session its own browser. Measured against round 3's point estimates: P2 completes at round 11
-instead of round 19, i.e. **~4 days earlier (3–6 days across P1's own range)** — round 1 said
-"about a week earlier", which is not what its own numbers give, and round 2's "~3 days" was
-correct for round 2's smaller P1. The cost is retro-fitting the profile selector into a window
-that already exists: roughly one extra round, so the ordering is worth about 7 net rounds of
-earlier feedback.
+session its own browser. Measured against this round's point estimates: P2 completes at round 12
+instead of round 22, i.e. **10 rounds ≈ 5 days earlier (4–7.5 days across P1's own 8–15 range)** —
+round 1 said "about a week earlier", which is not what its own numbers give; round 2's "~3 days"
+and round 3's "~4 days" were each correct for the smaller P1 of their day, and P1 grew the
+attachment set and handle addressing this round, so the gap grew with it. The cost is retro-fitting
+the profile selector into a window that already exists: roughly one extra round, so the ordering is
+worth about 9 net rounds of earlier feedback.
 
 **P7 changes that calculus, and the owner should know it.** Window binding (§4.6) is what makes a
 live view legible when the agent is driving, and it needs only P2. So the earliest-value order is
 **P0 → P2 → P7 → P1 → P3**: at the point estimates that reaches "the user watches the agent
-browse, in a window visibly bound to the conversation that owns it" at round 16 — the whole of
-(1.c) plus the binding — while the canonical order reaches only the unbound live view at round 19.
-P8 is deliberately not in that sequence: it answers a different question (§4.7) and its range says
-how little is known about it.
+browse, in a window visibly bound to the conversation that owns it" at round 18 — the whole of
+(1.c) plus the binding — while the canonical order reaches only the unbound live view at round 22.
+P8 and P9 are deliberately not in that sequence: they answer a different question (§4.7, §4.9) and
+their ranges say how little is known about them.
 
 ## 11. DECISIONS FOR THE OWNER
 
@@ -1731,6 +2116,15 @@ how little is known about it.
 | **D19** | **In a split chain with a third tab, what does clicking that tab do?** (§4.6 — a chain may hold five tabs with two of them paired.) | (a) it replaces the non-owner pane; (b) the whole chain flips back to `'tabs'`; (c) a third pane opens. | **(a).** It keeps the binding (the chat pane, the thing the browser is bound TO, stays put) and it is the least surprising: the pane you were not looking at is the one that changes. (c) is refused on measurement grounds — three panes are all unusable below a width most people run, and the ratio model would have to become a tree. (b) silently destroys a layout the user built. |
 | **D20** | **Do we build a WeChat local-store adapter?** (§4.8 — SQLCipher via WCDB, key in process memory; on this box `ptrace_scope` is `1`, so only an ancestor may read it.) | (a) no — picture via Xpra, data via the official Official-Account / Work-WeChat APIs; (b) yes, in core; (c) yes, but only in a plugin, with explicit consent, and only for a client VibeSpace started itself. | **(a), with (c) as the answer if the owner insists.** It is memory-scraping a proprietary client that breaks silently on every update, it crosses the ToS plainly, and the only way to make it technically work is to have VibeSpace start WeChat *so that* it can read its memory — a sentence that argues against itself as a default. If it is built, it is a plugin (D2's line for proprietary things with a legal face), never core. |
 | **D21** | **Xpra's client half: host upstream's HTML5 app, or render it ourselves?** (§4.7 — MPL-2.0 app vs `xpra-html5-client`, Apache-2.0, on npm.) | (a) host the upstream HTML5 client as static assets behind our auth; (b) render with the client library inside a VibeSpace window type; (c) (a) first as a proving slice, then (b). | **(c).** (a) is the fastest way to learn whether the transport is good enough at 200 ms / 1 Mbps, which is the open question — but §4.2's reasons for refusing to embed upstream's dashboard apply here too (a whole app with its own controls inside ours, plus a known iframe `sessionStorage` restriction), so it is a proving slice and not the product. The window this design already specifies (§4.4: DPI-correct canvas, escaped titles, theme vars) is the shape (b) lands in. |
+| **D22** | **When a session has ≥2 attachments, is the handle mandatory?** (§3.7 — "one session, one browser" is an implicit quantifier today.) | (a) mandatory: a bare command gets a named refusal listing every handle; (b) fall through to the default silently; (c) mandatory only for state-changing verbs, reads take the default. | **(a).** (b) is the machine that produces Q8's pain: a silent default resolution is the **only** way "the agent did the whole thing in the wrong profile" happens. (c) sounds gentler and is worse — it lands a `snapshot` and the `click` after it in **different** browsers, a failure shape no reader would ever imagine. The cost is 18 characters per command, and only on the sessions that really do hold several browsers. |
+| **D23** | **What does a sub-agent get by default?** (§3.7 — VibeSpace does not spawn sub-agents, so we cannot hand them an environment.) | (a) its own ephemeral browser, minted as a child handle by `new-child`; (b) inherit the parent's default attachment; (c) nothing until the parent hands it a handle explicitly. | **(a).** The commonest use of a sub-agent is "go look this up", and putting it inside the parent's logged-in identity is the larger grant; the child lease hangs off the parent by prefix so the parent's teardown reaps it (§3.4). **But state honestly that (b) is today's physics**: a claude sub-agent shares its parent's process and environment, so "default (a)" is achieved by the sub-agent **calling the CLI once**, not by environment isolation — a sub-agent that never calls `new-child` is in fact in (b). The manual must say that in its first paragraph. |
+| **D24** | **How do a session's N browsers appear in the live view?** (§3.7.) | (a) one bound pane plus an in-window profile switcher strip (one owner badge per tab); (b) N side-by-side panes; (c) N separate windows. | **(a).** (b) is already refused by the measurement behind D19 — three panes are unusable at the width most people run, and here the third would halve it again. (c) throws away the very thing §4.6 exists for (an agent-driven browser must not lose its owner): three free windows, one user, and nobody knows which belongs to whom. The strip also gives something neither (b) nor (c) does: it **is** the list of "which browsers does my session have", which is Q7's question itself. |
+| **D25** | **After the attachment set changes, is `profile_changed` a one-time refusal or a hint?** (§3.8's layer ①.) | (a) refuse once: the next bare command does not run and must be re-issued with a handle, after which the new default applies; (b) attach a line to the answer and let the command run; (c) hint on every command until the agent acknowledges explicitly. | **(a).** A hint stuffed into stdout only **hopes** the model reads it, and "it did not notice" is the entire reason this feature exists. (c) turns one mid-session pin into double the cost for every remaining command in the session. (a) costs exactly one round trip and buys a **structural** guarantee: the command that would have landed in the old profile did not run. |
+| **D26** | **Does the amber chip's "remind it" spend a billed turn?** (§3.8's layer ③, the same class as D11/D16.) | (a) no — write `pendingNotice` and wait for the user's next message; (b) go through the delivery ladder under its own declared reason, because the click is an owner action; (c) push automatically whenever the session is stopped. | **(b), while (a) is what actually happens when the session is alive.** The chip turns amber exactly when "the agent is running, and on the wrong profile", and there `pendingNotice` suffices (the user is right there). Only a **stopped** session that the user clicks the button for needs a turn to wake it — that is a click with a per-occurrence owner action, exactly the thing CLAUDE.md's category excludes, but it still opens a billed turn, so it still passes the same ladder and the same ceiling under the declared reason `'browser-profile-notice'`. (c) is explicitly refused: that is a timed push with no owner action at all. |
+| **D27** | **Which windows may a window target address?** (§4.9 — measured here: X11 enumeration cannot see Wayland clients, and GNOME's Introspect answers AccessDenied to us.) | (a) only the ones **we started** (applications under Xvfb+Xpra); (b) plus windows on the user's real desktop, behind an explicit switch; (c) neither. | **(a) first, with (b) as an explicit switch carrying its own consent.** Column (a) is green throughout §4.9's matrix, needs nobody's permission, and is the whole of the "an agent works in a native application" use case — the window the user is typing in right now is not in that use case. Every (b) row must be marked "this is your desktop", and its real barrier is not technical but §6.6's: a click there is a click in the user's real session. |
+| **D28** | **Is a window target's PRIMARY observation channel the accessibility tree or pixels?** (§4.9 — measured here: AT-SPI available, 9 applications, ~1,800–6,100 nodes/s.) | (a) tree primary, pixels fallback; (b) pixels primary, tree as a hint; (c) pixels only (which is what Anthropic's computer use is). | **(a).** Not a preference — it is the rule this document has already written twice: talking to a tree beats talking to pixels (§4.7's conclusion, and Codex's own browser panel in §4.1). It also has two properties only (a) has: `Action.do_action` means **acting** needs no input injection either (so Wayland's "no global injection" does not reach it), and an audit line can record "clicked the button named Minimize" instead of "clicked (412, 88)". (c) is the cell we **must** be able to degrade to (custom-drawn controls, canvases, images), so it is the fallback rather than the road. |
+| **D29** | **Which road does input injection take on Wayland?** (§4.9 — the portal's RemoteDesktop interface is present here, `libei`/`libeis` 1.3.901 installed, `/dev/uinput` is 0600 with the module not loaded.) | (a) the RemoteDesktop portal (`ConnectToEIS` preferred), with `persist_mode=2` + `restore_token` remembering the grant; (b) ydotool/uinput, requiring ops to open up `/dev/uinput`; (c) neither — support only X11/Xwayland and our own nested X. | **(a), with (c) as the status quo until it is proven to work.** (b) is explicitly not recommended: it asks for a device node that can synthesise global input to be handed to this uid, a far larger grant than the feature itself, and it bypasses every consent mechanism the compositor has. (a) has a precondition that must be measured first — **our server runs under `systemd --user`**, and public reports record portal/D-Bus being denied in background contexts (§12). So P9's first task is to measure it; if it fails we land on (c), and (c) plus D28's `do_action` still covers a substantial share of actions. |
+| **D30** | **Do we build window targets on a paired Mac?** (§4.9, §7.3 — macOS's two TCC gates.) | (a) no — the fleet story stays browser-only (§7.3 already decided this); (b) yes, through an agentd op using ScreenCaptureKit + AXUIElement. | **(a), with the reason written down rather than left blank.** Neither gate is "show one dialog": Accessibility requires the process to be **non-sandboxed and signed**, and Screen Recording on macOS 26 (Tahoe) is publicly reported to **require an app bundle** — a plain executable does not even appear in System Settings' privacy list, so it can neither be granted nor be granted-to (a computer-use project's public issue from 2026-01 records exactly this shape: windows missing from screenshots while ScreenCaptureKit returns a TCC error even with permission in the database). And VibeSpace's form on a paired machine is precisely a plain executable started by a daemon. So the first step of (b) is not code, it is answering "do we ship a signed app bundle on macOS" — a product decision, not this section's. |
 
 ---
 
@@ -1850,6 +2244,54 @@ Added in round 3, all of them consequences of the owner's four questions:
     alone rejects the path — but anyone who later wants `/proxy` as a "let a human look at this
     site" path must measure it first.
 
+Added in round 5, all of them consequences of this round's own three questions:
+
+24. **Whether `--pin-tab` really lets N tabs in ONE browser be driven concurrently.** In §3.7's
+    multi-attachment model, "one session holding two profiles" is two **browsers** (two processes,
+    two CDP endpoints) and that half has no such question; the question belongs to its mirror —
+    (1.b)'s "one profile driven by several sessions". The changelog says 0.34.0 fixes exactly
+    "parallel sessions sharing one Chrome hijacking each other's tabs", but **whether concurrent
+    commands are serialised by that daemon** I have not measured, and that is the whole of whether
+    "two agents working inside one login at once" is fast. P1 measures it on the real binary.
+25. **Sub-agent environment inheritance: read, not run.** A claude sub-agent is a same-process
+    sidechain (`src/session-store.js:308`, `src/session-schema.js`'s `_subNormalizers`), a codex one
+    is a thread its app-server owns, and a Background Work job goes through `jobEnv({…})` at
+    `src/jobs.js:375` — all three are readings. D23's "default (a)" rests on the first, so P1 must
+    actually spawn a sub-agent, run `vibespace-browser status` inside it, and check that the
+    `AGENT_BROWSER_SESSION` it reports is the parent's.
+26. **The resource envelope of k browsers running at once, in the plural.** §1.2's per-instance
+    numbers were taken on four **idle headless** leaks; this round only re-measured the capacity
+    side (**2026-09-10: 80 of 128 inotify instances already held, 48 free**). There is not one
+    number for the shape "one session, three profiles", and D13's proposed ceiling (8) was proposed
+    under the single-attachment assumption.
+27. **Whether the `profile_changed` refusal actually changes a model's behaviour.** The mechanical
+    half is certain (the command **did not run**), but "so it re-issues with the handle" is a
+    **prediction** about model behaviour. The manual and the refusal text must be written as one
+    actionable sentence, and after P1 someone should read real sessions: did the re-issue that
+    followed a refusal carry a handle?
+28. **Xpra's control-channel command set.** The documentation has both
+    `xpra control [CONNECTIONSTRING] command` (with `help` listing them all) and
+    `xpra list-windows`, but **xpra is not installed on this box**, so what fields that road returns
+    for window enumeration, and whether a window id can be acted on there, is entirely unverified.
+    One of P9's first tasks.
+29. **Whether the portal is usable at all from a `systemd --user` background service.** This box's
+    portal **does** expose RemoteDesktop / ScreenCast / InputCapture (measured), `Start` is
+    documented as "typically" presenting a dialog, and a public computer-use project reports
+    **portal/D-Bus paths being denied in background/systemd contexts**. VibeSpace's server is
+    exactly such a process. If this does not hold, D29 lands on (c) — so it must be measured before
+    it is designed around.
+30. **AT-SPI coverage on Qt and Electron: zero measurements on this box.** All nine applications
+    measured are GTK/clutter/gjs; Electron typically exports a tree only when it detects an AT
+    client, and `toolkit-accessibility` is `false` here (AT-SPI works anyway — which itself shows
+    that switch is not a master switch, but what it means for other toolkits I did not test).
+    §4.9's conclusion that the accessibility tree is the primary channel is **measured** for GTK and
+    **inferred** for Qt/Electron.
+31. **The current shape of macOS's two TCC gates.** Accessibility requiring non-sandboxed + signed,
+    and Screen Recording on Tahoe requiring an app bundle, both come from public documentation and
+    a public issue from 2026-01 — **not from my own measurement on a Mac** (this box is Linux).
+    D30's "no" therefore rests on second-hand evidence; if the owner wants to push (b), the first
+    step is re-checking both on a real Mac.
+
 ---
 
 ## Appendix A — sources
@@ -1858,6 +2300,62 @@ Added in round 3, all of them consequences of the owner's four questions:
   including `session-management.md`, `trust-boundaries.md`, `commands.md`, `proxy-support.md`),
   plus upstream `CHANGELOG.md`, `README.md` and the current `streaming.md` /
   `session-management.md` for 0.33.0–0.37.1. Apache-2.0, `vercel-labs/agent-browser`.
+* **Round-5 sources (2026-09-10), for the owner's three questions:**
+  * **XDG Desktop Portal** — the official `org.freedesktop.portal.RemoteDesktop` documentation: the
+    method set (CreateSession / SelectDevices / Start / **ConnectToEIS** /
+    NotifyPointerMotion(Absolute) / NotifyPointerButton / NotifyKeyboardKeycode /
+    NotifyKeyboardKeysym / NotifyTouch*), the device bitmask (1 KEYBOARD / 2 POINTER /
+    4 TOUCHSCREEN), absolute motion having to name a **PipeWire stream node**, `persist_mode`'s
+    three values and the single-use `restore_token`, and `Start` "typically result[ing] in the
+    portal presenting a dialog letting the user select what to share". Plus whot's write-up on
+    libei's integration into the RemoteDesktop and InputCapture portals.
+  * **Anthropic's computer use tool** — the official documentation: the current toolset
+    `computer_toolset_20260801` (17 member tools including `zoom`), `computer_20251124` as the
+    earlier beta version, **coordinates being screenshot pixels** with the caller mapping any
+    scaling back, and the resolution guidance ("1024x768 or 1280x720 … avoid resolutions above
+    1920x1080"); the documentation names **no** accessibility-tree channel — while the same
+    vendor's browser use reads exactly that.
+  * **OpenAI's ChatGPT desktop "Work with Apps"** — the official help centre: **for most apps it
+    queries content through macOS's Accessibility API**, with a VS Code extension for VS Code;
+    terminals contribute the last 200 lines of open panes and editors the full content of the
+    foremost window's open panes up to a truncation limit; macOS only.
+  * **Third-party Linux computer-use implementations** — cua's "Inside Linux computer-use"
+    (AT-SPI 2 over D-Bus for the accessibility tree, keyboard moved from XSendEvent to **XTEST**,
+    native Wayland still preview and lacking screen capture and AT-SPI parity, GTK3/GTK4/Qt5/Tk
+    each needing their own text-input path) and `agent-sh/computer-use-linux` (MIT: the window
+    enumeration ladder GNOME extension → GNOME Introspect → COSMIC → KWin scripting → hyprctl →
+    i3 IPC → generic X11/EWMH; Wayland input preferring the RemoteDesktop portal and falling back
+    to uinput; and an explicit note that **portal/D-Bus paths are denied in background/systemd
+    contexts**).
+  * **GNOME Shell Introspect** — `org.gnome.Shell.Introspect.GetWindows` returns AccessDenied to
+    callers outside an allowlist of D-Bus senders (primarily the XDG portals), or unless the shell
+    is in unsafe mode.
+  * **macOS** — Apple's documentation: `CGWindowListCreateImage` deprecated since macOS 15,
+    ScreenCaptureKit naming a single window through `SCContentFilter`, and
+    `AXIsProcessTrustedWithOptions` prompting only when passed `kAXTrustedCheckOptionPrompt`; plus
+    a computer-use project's public issue from 2026-01: on macOS 26 (Tahoe) a non-bundled
+    executable does not appear in the Screen Recording privacy list, windows are missing from
+    screenshots, and ScreenCaptureKit returns a TCC error.
+  * **Xpra** — `xpra control [CONNECTIONSTRING] command` (with `help` listing them) and
+    `xpra list-windows` are the documented runtime control surface; seamless mode presents "only
+    the windows and features you choose to forward" to the client.
+  * **This machine, read-only, 2026-09-10:** `XDG_SESSION_TYPE=wayland` with
+    `Xwayland :1 -rootless`; `xwininfo -root -children` listing 19 X11 toplevels only; `gdbus`
+    asking `Introspect.GetWindows` and getting AccessDenied; the portal exposing RemoteDesktop /
+    ScreenCast / InputCapture / Clipboard; `libei.so.1` / `libeis.so.1` 1.3.901 and
+    `/usr/libexec/gnome-remote-desktop-daemon` present; `/dev/uinput` at `crw------- root root`
+    with the uinput module not loaded; `grim` present but failing on GNOME ("compositor doesn't
+    support wlr-screencopy-unstable-v1"); `xdotool` / `wmctrl` / `xprop` / `xwininfo` / `Xvfb` /
+    `ffmpeg` present and `xwd` / `import` / `ydotool` / `xpra` / `weston` / `cage` absent;
+    `toolkit-accessibility` `false` while the AT-SPI registry is alive and reports 9 applications,
+    with traversal measured at 24 nodes / 13 ms and 61 nodes / 10 ms (~1,800–6,100 nodes/s) and
+    nodes declaring actions such as `click` / `window.minimize` / `clipboard.copy`;
+    `fs.inotify.max_user_instances` = 128 with **80** already held by this uid; `~/.agent-browser`
+    still 59 directories / 98 GB and `agent-browser --version` = 0.32.0.
+  * **VibeSpace (round 5):** `src/session-store.js` (`isSubagentMessage`), `src/session-schema.js`
+    (`_subNormalizers`), `src/jobs.js` (`jobEnv`), `src/lib/sidebar.js` (`LIVE_SESSION_FACTS` and
+    its digest half), `src/session-status.js` (`pendingNotice`) and `src/agent-routes.js` (the
+    prompt-context injection site).
 * **CloakBrowser**: `cloakbrowser.dev`, the npm registry metadata for `cloakbrowser`, and the
   `CloakHQ/cloakbrowser` repository. MIT wrapper, proprietary binary.
 * **Codex in-app browser**: OpenAI's own documentation (`developers.openai.com/codex/browser`,
