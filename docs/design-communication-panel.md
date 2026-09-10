@@ -10,6 +10,19 @@
 > 之前的 oauth client; 先根据我们之前讨论得到的那个 design 结果做架构设计, 给我
 > 完整 review 之后再做."
 >
+> **r3 (2026-09-10, two owner instructions — both change direction rather than fix a
+> slip):**
+> **(Q3)** adapters differ on **two axes** and the interface must **model** them rather
+> than paper over them — read-only vs send (per conversation, per identity), and
+> synchronous vs asynchronous receive (push / poll / scan). Lark can push, so **push is a
+> first-class receive mode** with its own liveness and fallback; r2's "poll-only v1, WS as
+> a cursor kick" is re-argued against the owner's explicit wish for real-time push, keeping
+> what is true and changing what was merely conservative (§6.4).
+> **(Q4)** the sending default is **as the user, with no "drafted by \<agent\>" tag**, on
+> every channel that allows it. r2's decision 17 ("sender honesty line default ON for
+> external") is **REVERSED by the owner**; what replaces it is a **warning at the moment of
+> authorization**, driven by the `identityMarking` capability (§9.5).
+>
 > Read first: the interaction record (five artboards — Main / Adapters /
 > AssignFilter / AgentReach / Outbox), CLAUDE.md's three-tier routing table,
 > `docs/design-three-tier.md`, `docs/design-background-work.md` §7 (permissions
@@ -50,14 +63,20 @@ below with the incident that says not to.
 | ⑤ | Agents only **propose**. Policy per channel (external default review, internal default direct). Guardrails stack on top: everything outbound is audited, links/attachments force review, off-hours forces review. Approval cards carry **why**, are editable in place, appear **inline in the timeline** as well as in a central outbox, and produce a **structured receipt** `sent \| rejected \| edited` back to the agent | An outbox store with an explicit state machine, a PURE policy decision, and a receipt lane that must not itself become a billing hazard |
 
 **Decided by this document:** module placement and tier; the store format and
-its invariants; the ingest model (polling as the source of truth, live lanes as
-cursor kicks); how a wake is authorized and charged; how the outbox makes
+its invariants; **the two axes of the capability record** (read-only vs send;
+push / poll / scan) and how it resolves per conversation (§4); the ingest model
+(**push is a first-class receive mode and polling is the completeness
+mechanism** — §6.4); how a wake is authorized and charged, and **how a push
+burst is coalesced before the wake decision**; **sending identity** and where
+"who the recipient will see" gets said (§9.5); how the outbox makes
 double-sending structurally impossible; the client registrations; the agent CLI
 surface; the test gates; the phase plan.
 
 **Deferred, with the seam left open:** plugin-contributed adapters, adapters
 running on a paired device, rich HTML mail rendering, attachment auto-fetch,
-Lark's event-subscription lane. Each has a named landing place (§14, §15).
+**local-client adapters (WhatsApp / WeChat) — modelled in the interface from P0,
+but the adapters themselves are P6 behind an owner decision**. Each has a named
+landing place (§14, §15).
 
 ---
 
@@ -72,17 +91,19 @@ feature spans four rows, so the mapping is spelled out once:
 | Reach ACL (three-state, requests) | **PURE** | `src/channel-acl.js` (imports `src/msg-acl.js` — PURE may import PURE) | `test-channel-acl` (fast) |
 | Outbound policy + guardrails + outbox state machine | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | Normalized message record + its renderers' data | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
+| Capability decisions (both axes, per-conversation resolution, identity warning) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
 | Conversation store *primitives* (durable load/append/tail/trim/flush; the **engine** owns the live index, §5.1) | **SHARED** (fs+path only) | `src/channel-store.js` | `test-channel-store` (fast) |
 | OAuth loopback consent flow (**dual-mode**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
 | Adapter interface + registry | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract` (fast, fake adapter) |
 | Lark / Gmail / Agents adapters | **ORCH** | `src/channels/lark.js`, `gmail.js`, `agents.js` | contract suite + `test-channels-lark-shape` (fast, recorded fixtures) |
 | Ingest engine (poll scheduler, backoff, per-tick budget, failure surfacing) | **ORCH** | `src/server/channels-engine.js` (`create(deps)` factory) | `test-channels-engine` (heavy) |
+| Push lanes (one per vendor; liveness, ack, exclusivity measurement) | **ORCH** | `src/channels/live/<kind>.js` | `test-channels-push` (heavy) |
 | Routes + broadcasts | **ORCH** | `src/routes/channels.js` | the route battery in `test-restore-smoke`, `test-channels-e2e` |
 | Wiring stanza | **ORCH** | `src/server/channels-wiring.js`, one call from `server.js` | `test-architecture` size ratchet (server.js ≤ 2100 lines) |
 | Panel, window, filter editor, approval cards | **CLIENT** | `src/lib/channels-panel.js`, `src/lib/channel-window.js`, `src/lib/channel-filter-editor.js` | `test-channels-e2e` (heavy, headless chrome) |
 | Agent CLI | tracked static | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
-Three placements are load-bearing enough to state as rules:
+Four placements are load-bearing enough to state as rules:
 
 - **An adapter never touches the store, the ACL, the policy or the spend
   guard.** It returns typed records and takes a send request. Everything it can
@@ -97,6 +118,14 @@ Three placements are load-bearing enough to state as rules:
   module offers durable primitives and deliberately offers nobody a
   "write the whole index" call, because two adapter poll loops overlap by design
   and a read-modify-write around an atomic write is not atomic.
+- **Capability has two axes, and it is not one global boolean** (r3/Q3, §4).
+  What an adapter *could ever* do (`caps` — static, declared) and what it can do
+  *on this conversation right now* (`convCaps(convId)` — resolved, three-valued)
+  are different facts: the authorizing user is in the group but the bot is not; a
+  read-only shared mailbox; a group that removed you. Each makes an adapter
+  declaring `sendAs:['user']` unable to send **here**. The rule is: **a control
+  exists only when both agree**, and `unknown` renders as not-offered-with-a-reason,
+  never as allowed.
 
 ### 2.1 Mechanical registration checklist (each omission costs a round)
 
@@ -203,6 +232,42 @@ and each has an obvious way this feature would break it.
 10. **Not visible = does not exist.** No existence oracle: an agent asking about
     a conversation it cannot see gets the same answer as for one that does not
     exist. `vibespace-msg`'s uniform-error rule, applied to channels.
+11. **An ack is a commitment, so ack after durability — never after processing.**
+    (r3/Q3) Lark's event delivery requires the subscriber to answer HTTP 200 within
+    **3 seconds**, and it is **at-least-once**: a missed deadline is retried at
+    15 s / 5 min / 1 h / 6 h, **at most 4 times**, and duplicates can arrive even
+    after a success. Our side of the chain (store append → filter → spend
+    authorize → deliver) can easily exceed 3 s. So the push lane's order is fixed:
+    the record lands in the durable append-only log (§5 invariant 4's order,
+    unchanged), **then** we ack, **then** the filter and the wake run
+    asynchronously. Acking *before* durability quietly downgrades the vendor's
+    at-least-once into our own at-most-once — an invisible lost message.
+    Duplicates are absorbed by §5 invariant 2 keyed on the **message id**, so "the
+    same message once by push and once by poll" collapses to one; event-level
+    replays dedup on the event's own `event_id`.
+12. **Every receive mode takes the identical wake path; arrival time is the only
+    difference.** (r3/Q3) A pushed message and a polled message hit the same
+    filter, ask the same spend authorizer, and are bounded by the same
+    per-assignment pacing cap. But one thing must be put back explicitly:
+    **coalescing was an accidental property of polling** — one pass handed the
+    filter a minute's worth of messages at once, so they were naturally one wake.
+    Push removes that accident, and 30 messages become 30 deliveries. So when
+    `receive === 'push'` and `notify: 'wake'`, the engine applies a coalescing
+    window (default 60 s) **before** the wake decision, so one burst is still one
+    wake. Forget this and the act of "turning on real-time push" multiplies a
+    conversation's bill by thirty.
+13. **Never read another process's memory, and never ship an adapter whose
+    transport is prohibited by the platform's terms without one named
+    acknowledgement.** (r3/Q3(b)) This is load-bearing for the local-client class:
+    WeChat's desktop store is SQLCipher/WCDB-encrypted and the key exists only in
+    the **running client's process memory** — which is where every public tool
+    extracts it from. Reading another process's memory is not the same act as
+    reading a file, and this product does not do it. On the WhatsApp side, the
+    protocol libraries (whatsmeow / Baileys) are reverse-engineered **unofficial
+    clients**, unofficial clients are explicitly prohibited by WhatsApp's terms,
+    and bans have landed on low-volume, reply-only, otherwise legitimate use. Such
+    adapters therefore carry a `tosRisk` capability, are not offered by default,
+    and need an acknowledgement that names the risk (decision 19).
 
 ---
 
@@ -212,21 +277,42 @@ An adapter is built by a factory taking `(record, deps)`. It is **stateless with
 respect to policy** and owns exactly three things: vendor authentication, vendor
 pagination, and vendor message shape.
 
+**It differs from other adapters on two axes, and those axes are modelled rather
+than papered over** (r3/Q3): **read-only vs send** (per conversation, and per
+identity — as the user or as a bot), and **synchronous vs asynchronous receive**
+(push / poll / scan). Both live in `caps`, and the first also has a
+per-conversation resolver `convCaps`, because "this adapter can send" and "this
+adapter can send into **this** conversation" are different claims.
+
 ```js
 // src/channels/<kind>.js  →  module.exports = { kind, caps, create }
 {
   kind: 'lark',                       // registry key; never branched on downstream
 
-  caps: {                             // DECLARED capabilities — the ONE gate
-    listConversations: true,          // can enumerate what the credential can see
-    history: 'page',                  // 'page' | 'since' | 'none'
-    receive: 'poll',                  // 'poll' | 'push'  (push = a cursor KICK only, §6.4)
-    sendAs: ['user'],                 // subset of ['user','bot'] it can actually do
-    threading: 'reply-to',            // 'reply-to' | 'thread-id' | 'none'
-    attachments: 'metadata',          // 'metadata' | 'fetch' | 'none'
-    readReceipts: false,
-    editSent: false,
-    idempotency: 'key',               // 'key' | 'two-phase' | 'none'   (§9.4)
+  caps: {
+    // ——— axis 1: HOW MESSAGES ARRIVE ———————————————————————————————
+    receive:        'push',           // 'push' | 'poll' | 'scan'  — the BEST lane it has
+    pushTransport:  'ws-long-conn',   // 'ws-long-conn' | 'pubsub-pull' | 'webhook' | null
+    pushExclusivity:'unknown',        // 'exclusive' | 'shared' | 'unknown'  (§6.4 — decides
+                                      //  whether push may carry CONTENT or only KICK a cursor)
+    pushAckBudgetMs: 3000,            // vendor's own deadline; we ack after DURABILITY (fence 11)
+    pollInterval:   { hot: 30, cold: 300, floor: 10 },   // seconds; `floor` is the VENDOR's
+    scanSource:     null,             // 'store' | 'ui' | null  — only when receive === 'scan'
+    scanLatency:    null,             // seconds, typical; SHOWN on the conversation row
+    history:        'page',           // 'page' | 'since' | 'none'
+    listConversations: true,
+
+    // ——— axis 2: WHAT MAY BE SENT, AND AS WHOM ——————————————————————
+    sendAs:         [],               // subset of ['user','bot'];  []  =  READ-ONLY adapter
+    identityMarking:'unknown',        // 'none' | 'marked' | 'unknown'  — what the RECIPIENT sees
+    identityMarkingWhere: null,       // 'recipient-ui' | 'raw-headers' | null
+    identityMarkingText: null,        // ONE sentence, shown VERBATIM in the approval card (§9.5)
+    tosRisk:        'none',           // 'none' | 'stated' | 'prohibited'  (fence 13)
+    idempotency:    'key',            // 'key' | 'two-phase' | 'none'   (§9.4)
+    threading:      'reply-to',       // 'reply-to' | 'thread-id' | 'none'
+    editSent:       false,
+    readReceipts:   false,
+    attachments:    'metadata',       // 'metadata' | 'fetch' | 'none'
   },
 
   async auth.state()   -> { state:'connected'|'needs-reauth'|'unknown', expiresAt, scopes, why }
@@ -236,19 +322,57 @@ pagination, and vendor message shape.
   async listConversations({ cursor, limit })
         -> { conversations: [ChannelConversation], cursor, complete }
 
+  // axis 1 resolved for ONE conversation — three-valued, cached in the index with its age
+  async convCaps(convId)
+        -> { read:'yes'|'no'|'unknown',
+             sendAs: [...],                       // SUBSET of caps.sendAs that holds HERE
+             why: 'not-a-member'|'bot-not-in-chat'|'read-only-mailbox'|'left-group'|null,
+             at }
+
   async history(convId, { anchor, limit })
         -> { records: [ChannelRecord], anchor, reachedAnchor, complete }
 
-  async send(convId, { text, replyTo, idemKey })
-        -> { ok, vendorMessageId, at } | { ok:false, code, retryable, detail }
+  async send(convId, { text, replyTo, idemKey, as })         // `as` ∈ convCaps.sendAs
+        -> { ok, vendorMessageId, at, sentAs } | { ok:false, code, retryable, detail }
 
   async reconcile(convId, { idemKey, sentAt })               // §9.4, unknown outcomes only
         -> { landed:true, vendorMessageId } | { landed:false } | { unknown:true }
 
   async fetchAttachment(convId, recordId, attId, { maxBytes })   // caps.attachments==='fetch'
         -> { path, bytes, mime } | { ok:false, code }
+
+  // present ONLY when caps.receive === 'push' — src/channels/live/<kind>.js (§6.4)
+  live.start({ onEvent, onState })  ->  { stop() }
 }
 ```
+
+`src/channel-caps.js` (PURE) is the **one** place that answers "does this control
+exist at all":
+
+```js
+offers(caps, convCaps, what)   // what ∈ 'send-as-user'|'send-as-bot'|'fetch-attachment'|…
+      -> { offered: boolean, why: string|null }      // 'unknown' ⇒ offered:false + the reason
+identityWarning(caps)          -> { level:'none'|'warn', text }        // §9.5
+freshnessClaim(caps, convState)-> { kind:'live'|'within'|'scanned', seconds, text }
+```
+
+Three consumers read the same record, each for its own face:
+
+- **The panel** draws every row's freshness chip from `freshnessClaim` (push =
+  "live", poll = "≤ 30 s", scan = "last scanned <t> ago" — **a scan source's
+  latency is shown on the conversation**, because it is the one number a user
+  needs before handing that lane a job), uses `offers()` to decide whether the
+  send affordance exists on the composer and the approval card at all, and uses
+  `identityWarning` for the warning on the card (§9.5).
+- **The filter / assignment engine** uses `offers()` to make `authority:'send'`
+  **unselectable** (an assignment that can never send is a lie, §7.3), and
+  `freshnessClaim` to state honestly on the AssignFilter panel roughly how long
+  until this agent gets woken.
+- **The spend authorizer** reads none of it — and that is the point. The receive
+  mode does **not** change the money decision: same filter, same reason, same
+  per-credential-slot ceiling. It changes only arrival time, and fence 12's
+  coalescing window absorbs that. The suite turns this sentence into an assertion
+  that can go red (§16's `test-channels-lane-parity`).
 
 Rules the contract suite enforces (`test-channel-adapter-contract`, driven over
 a **fake adapter** plus every registered real one in shape-only mode):
@@ -264,7 +388,17 @@ a **fake adapter** plus every registered real one in shape-only mode):
   failure, because "degrade gracefully" catches are how this repo has repeatedly
   hidden its own bugs;
 - **no call site outside `src/channels/` may branch on `kind`** — a grep-derived
-  census, the same shape as the `backend-caps` one.
+  census, the same shape as the `backend-caps` one;
+- **`convCaps()` is never wider than `caps`**: the `sendAs` it returns must be a
+  subset of `caps.sendAs`, pinned by a synthetic adapter that deliberately
+  oversteps. The direction is load-bearing — the static declaration is an upper
+  bound and the per-conversation resolution may only narrow — so "we have never
+  verified that this platform can send" can never be routed around by one
+  conversation's optimistic answer;
+- **on an adapter with `sendAs: []`, `send()` and `reply` are not "failures", they
+  do not exist**: they return a typed `send-not-available` plus the reason `caps`
+  itself gives, and the outbox **creates no proposal at all**. A proposal that can
+  never be sent asks a user to approve something that is then guaranteed to fail.
 
 `ChannelRecord` (PURE, `src/channel-record.js`) is the one normalized shape:
 
@@ -294,12 +428,17 @@ person in the ops tooling. The record suite pins it.
 data/channels/
   adapters.json                 atomic JSON. id, kind, label, enabled, inclusion scope,
                                 auth {tokenEnc, expiresAt, scopes}, lastPass {at, ok, code},
-                                consecutiveFailures
+                                consecutiveFailures,
+                                push {enabled, claimedExclusive, state, lastEventAt,
+                                      missRate, demotedAt, demotedWhy}    // §6.4
   index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
                                 id, adapterId, vendorId, title, kind (dm|group|thread),
                                 participants summary, lastAt, unread, tracked, anchor,
                                 assignment, filterId, policy, pendingTodoId, reachEntries[],
-                                stats {hits7d, msgs7d}
+                                stats {hits7d, msgs7d},
+                                convCaps {read, sendAs[], why, at}        // §4, cached WITH its age
+                                lane    {via:'push'|'poll'|'scan', lastPushAt, lastPollAt,
+                                         lastScanAt, firstSeenByPoll, firstSeenTotal}  // §6.4
   msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY message log, one ChannelRecord per line
   outbox.json                   atomic JSON. Proposals + their state machine (§9)
   audit.ndjson                  APPEND-ONLY. Every outbound attempt and every ACL change
@@ -399,18 +538,27 @@ one of them.
 ### 6.1 Shape
 
 ```
-adapter.history() ──► normalize (PURE) ──► store.append (dedup, atomic)
-                                             │
-                                             ├─► broadcast 'channels-updated'  (once per pass)
-                                             │
-                                             └─► for each ASSIGNED conversation:
-                                                   channelFilter.matchRecord(filter, record)
-                                                     └─ hit ─► assignment.route (agent | rotating group)
-                                                                └─► wake decision (§7)
-                                                                     ├─ wake   ─► spend authorize
-                                                                     │             └─► deliverToConversation(source:'lark', kind:'notification')
-                                                                     └─ digest ─► stash; one delivery per window
+      ┌─ push  : live.start() ──► onEvent ──┐          ← latency lane   (§6.4)
+LANE ─┼─ poll  : adapter.history() ─────────┼─► normalize (PURE) ─► store.append (dedup, atomic)
+      └─ scan  : local-client store/UI ─────┘                            │   … then ack (fence 11)
+                                                                         │
+                        ├─► broadcast 'channels-updated'  (once per pass / per coalesced burst)
+                        │
+                        └─► COALESCE (60 s window when the lane is push — fence 12)
+                              └─► for each ASSIGNED conversation:
+                                    channelFilter.matchRecord(filter, record)
+                                      └─ hit ─► assignment.route (agent | rotating group)
+                                                 └─► wake decision (§7)
+                                                      ├─ wake   ─► spend authorize
+                                                      │             └─► deliverToConversation(kind:'notification')
+                                                      └─ digest ─► stash; one delivery per window
 ```
+
+**Three lanes converge into one funnel, and nothing after the funnel knows which
+lane a message came from.** That is not a nice sentence, it is what
+`test-channels-lane-parity` asserts: one day of traffic driven through push, poll
+and scan must yield **the same records, the same wake count, and the same
+charges**.
 
 Everything after `store.append` is PURE except the two ORCH calls at the end.
 That is deliberate: the money-relevant decision chain is unit-testable without a
@@ -438,8 +586,11 @@ One loop per adapter, never a loop per conversation. Each tick:
 The cost is arithmetic this design owes the reader: fifty tracked Lark chats,
 none hot, 5-minute cadence ⇒ ~10 requests/min. One hot assigned chat ⇒ +2/min. A
 Gmail account is **one** `history.list` request per tick when nothing has
-changed. That is why polling is the v1 answer (§6.4) rather than a public
-webhook.
+changed. That number matters because **polling does not disappear when push is
+turned on**: it drops to a much slower **reconciliation cadence** (default
+15 min, a setting) and changes job from *latency* to *completeness*. §6.4 says
+why that is not conservatism but a consequence of what the push lane itself
+guarantees.
 
 ### 6.3 Per-adapter ingest
 
@@ -470,32 +621,110 @@ itself routed** — it is a directory and a send lane, explicitly **not** a mirr
 of any transcript. Two renderers over one conversation is how this codebase gets
 twins.
 
-### 6.4 Live lanes: a kick, never a delivery
+**Local clients (WhatsApp / WeChat, `receive: 'scan'`).** A third ingest class,
+and what separates it from the first two is not cadence but **where the evidence
+comes from**: there is no vendor API we may call, only an official client running
+on some machine and whatever it writes down or draws (§12.5). `scanSource:
+'store'` means "read the local store that client wrote"; `scanSource: 'ui'` means
+"read what that client rendered", driven by an agent-browser profile (see
+`docs/design-agent-browser-v2.md`). Both are **periodic scans with a cursor**,
+both may add an optional change notification (an fs.watch on the store file; a
+DOM mutation for the UI), and for both the latency is **the number drawn on the
+conversation row**, because it is the one thing a user must know before handing
+that lane a job. Sending is either through the client's own UI (agent-browser
+typing) or through the protocol — and the latter carries fence 13's terms risk.
+The interface for this class exists from P0 (`scan` / `scanSource` / `convCaps` /
+`tosRisk` are all slots kept for it); the WhatsApp and WeChat adapters themselves
+are P6 behind decision 19.
 
-Lark's platform offers two ways to receive events in real time, and this is the
-one place where a single architectural rule prevents a whole class of bugs:
+### 6.4 Receive lanes: push, poll, scan — and which of them may carry content
 
-> **A live lane may only invalidate a cursor. It may never carry content.**
+r2 wrote an absolute rule here — *"a live lane may only invalidate a cursor, it
+may never carry content"* — and put both Lark lanes in P5. The owner asked
+explicitly for **real-time push**, so this section re-argues it from the
+evidence: the rule's **reason** stays, its **scope** changes.
 
-When an event arrives ("chat X has a new message"), the engine marks X hot and
-kicks the poll — waking the backoff *sleep*, not merely aborting a fetch (the
-`opencode-events` lesson, where a lane that only aborted the fetch took 25 s to
-go live). Dedup, ordering, retention, normalization and the filter all stay on
-one path, which makes the live lane **optional and removable**. That matters
-because of two facts:
+**The rule's original reasons, checked one by one (all confirmed against the
+official documentation):**
 
-- the **WebSocket long-connection** mode needs no public URL, but is limited to
-  enterprise self-built apps, requires each event to be processed within 3 s,
-  caps an app at 50 connections, and pushes in **cluster mode** — if two
-  VibeSpace instances run the same app, each event goes to exactly one of them at
-  random. As a content lane that is a silent message-loss machine across a fleet;
-  as a cursor kick it is harmless, because the other instance polls anyway.
-- the **HTTP webhook** mode needs a public URL, a verification token and an
-  encrypt key. VibeSpace has `instance-url`/frp and could expose one, but
-  exposing an inbound endpoint to gain nothing the WS lane does not already give
-  is a bad trade. **Recommendation: never the webhook.**
+| Fact | Status | What it actually constrains |
+|---|---|---|
+| The long connection **needs no public URL** | confirmed | Its entire advantage over the webhook, and why it fits "never expose an inbound endpoint" |
+| The long connection is **enterprise-self-built-apps only** | confirmed | A precondition, not a risk |
+| **At most 50 connections per app** | confirmed | One per instance; a fleet is nowhere near it |
+| Push is **cluster mode, not broadcast**: with several clients on one app, each event goes to **exactly one of them at random** | confirmed | **This, and only this, was the rule's real reason** — and it only holds when **several instances share one app credential** |
+| The subscriber must answer HTTP 200 within **3 seconds** | confirmed | Decides where the ack goes (fence 11); does not decide whether content may ride the lane |
+| Delivery is **at-least-once**: a missed deadline is retried at 15 s / 5 min / 1 h / 6 h, at most **4 times**, and duplicates arrive even after success | confirmed | **Refutes "push is unreliable, so it can only kick"** — the vendor retries, and §5 invariant 2 absorbs the duplicates |
 
-Both are P5. v1 polls, and the polling path stays the source of truth forever.
+So the rule is replaced by a narrower and more honest one:
+
+> **A push lane may carry content if and only if this credential's push lane is
+> exclusive to this instance.**
+> Exclusivity is a **configuration fact**: **asserted** by the operator,
+> **measured** by the product, and **demoted by the product itself** when the
+> measurement disagrees with the assertion.
+
+`caps.pushExclusivity`, together with `push.claimedExclusive` on the adapter
+record, decides it:
+
+- **`exclusive`** — the user declared in the connect wizard that this app's push
+  lane belongs to this instance. Push **carries content**: the event's message
+  goes normalize → append → ack → coalesce → filter. Polling drops to the 15-minute
+  **reconciliation cadence** — no longer the latency mechanism, still the
+  completeness one.
+- **`shared` / `unknown`** — push is **only a cursor kick**, i.e. r2's rule kept
+  verbatim (wake the backoff *sleep*, not merely abort a fetch — the
+  `opencode-events` lesson, where a lane that only aborted the fetch took 25 s to
+  go live). Polling stays at the fast cadence. The default is `unknown`, so
+  **asserting nothing gives you r2's behaviour**.
+
+**An assertion must be falsifiable or it is a prayer.** The platform never tells
+us how many other clients are connected, so exclusivity is **asserted, never
+inferred** — but it is **measurable**: the engine records
+`firstSeenByPoll / firstSeenTotal` per adapter, the fraction of records seen
+first by the reconciliation poll rather than by push (`push.missRate`). On a
+genuinely exclusive lane that number stays at 0. Crossing a threshold (default
+2 %, with at least 20 samples) **auto-demotes the lane to kick mode**, records
+`demotedAt` / `demotedWhy`, and says so on the adapter row: *"push is not
+exclusive here — fell back to cursor kicks, polling returned to the fast
+cadence"*. That path is this feature's instance of the rule that **a claim must
+be retractable by whoever made it** (the login-expiry lesson): the product states
+something, then measures it, then withdraws it itself.
+
+**Liveness is positive evidence only** (the `opencode-events` round-4 lesson — a
+lane that lies about being `active` is worse than no lane, because it turns the
+fallback **off**): `push.state === 'live'` requires a connected socket **and**
+something received inside the heartbeat window; silence past that window is death
+⇒ the poll cadence returns to fast immediately while the lane reconnects.
+`stop()` is terminal for an arm already **in flight** (the round-6 lesson), and
+the lane is **single-use**.
+
+**Ack after durability, never after processing** (fence 11). This is a direct
+consequence of the 3 s budget rather than a style preference: our chain (append →
+filter → spend authorize → deliver) can exceed 3 s, and acking *before*
+durability quietly downgrades the vendor's at-least-once into our own
+at-most-once.
+
+**The HTTP webhook stays "never".** It needs a public URL, a verification token
+and an encrypt key; VibeSpace has `instance-url`/frp and could expose one, but
+exposing an inbound endpoint to gain nothing the long connection does not already
+give is a bad trade.
+
+**Gmail's push has a different — and better — shape:** `users.watch` + Cloud
+Pub/Sub. Its pain is operational rather than semantic: a topic, an IAM grant, and
+a watch that **expires silently after 7 days** and stops without a sound if one
+renewal is missed (hence a daily renewal job). But **a Pub/Sub subscription can
+be pulled**, so it too needs no public inbound endpoint; and each instance can
+hold **its own subscription**, so Gmail's exclusivity is a fact that can be
+**configured** rather than a random race — the substantive difference from Lark's
+cluster mode. The default stays polling (one request per tick when nothing
+changed), with push as an **optional upgrade whose cost is stated** (decision 20).
+
+**Scheduling:** the Lark long connection's transport, liveness and exclusivity
+measurement land in **P1** (receiving belongs with receiving); the push-burst
+coalescing window and the "same number of wakes on every lane" leg land in **P2**
+(they need the wake path). Gmail's Pub/Sub pull lands in P1 behind a switch that
+is off by default.
 
 ---
 
@@ -545,10 +774,15 @@ assignment = { principal: { kind:'agent'|'group', id },
                createdAt, createdBy: 'user' }
 ```
 
-- `authority: 'send'` is **capped by channel policy**: when the channel requires
-  review the option is not selectable, and the stored value is clamped at read
-  time too — a stored value the current policy forbids must not silently become a
-  permission if the policy is later relaxed.
+- `authority: 'send'` is **capped by two separate things**: (a) **channel
+  policy** — when the channel requires review the option is not selectable, and
+  the stored value is clamped at read time too (a stored value the current policy
+  forbids must not silently become a permission if the policy is later relaxed);
+  and (b) **capability** (r3/Q3) — when `offers(caps, convCaps, 'send-*')` is
+  false the option **is not drawn at all**, with the reason `caps` itself gives
+  beside it. Setting `authority:'send'` on a read-only conversation promises the
+  user something that does not exist on that platform. The order of the two caps
+  does not matter, because both only narrow.
 - Assigning to a **group** rotates round-robin over that group's live sessions,
   with the rotation state in the index. A rotation that finds no live session
   falls back to stash-for-next-turn — never to "wake them all".
@@ -591,6 +825,23 @@ Digest mode is the same ladder used differently: matched records are stashed and
 one batched delivery per window is authorized — reusing the existing
 `renderMsgStash` / `renderNotifStash` block, so a 30-message hour becomes one
 turn instead of thirty.
+
+**Push removes a property that used to be free, so it has to be bought back
+explicitly** (fence 12, r3/Q3). Polling coalesces by accident: one pass hands the
+filter everything that arrived in a minute, so those messages were naturally one
+wake. Push arrives one message at a time, and the same burst becomes 30
+deliveries and 30 billed turns. So when a conversation's lane is push and
+`notify: 'wake'`, the engine applies a coalescing window
+(`channels.pushCoalesceSeconds`, default 60) **before** the wake decision: hits
+inside the window accumulate into one wake, the injected block still lists them
+individually (§7.5's budget is unchanged), and `why` says "N messages in this
+minute". The three layers' jobs do not change by a word — coalescing is
+**pacing**, not the money bound — but without it, "turn on real-time push", a
+purely latency-shaped act, multiplies some conversations' bills by an order of
+magnitude. That is why `test-channels-lane-parity` exists: **one day of traffic,
+three lanes, the same wake count and the same charges**, with a push-lane copy
+that bypasses the coalescing window as its negative control, which must wake
+more.
 
 ### 7.5 What the agent actually receives
 
@@ -728,15 +979,28 @@ It is recorded in decision 7 in case the owner wants exactly that.)
 
 The card carries **why** — the alert / conversation / task that caused it — as a
 structured reference the panel can link, not a sentence the agent wrote. Editing
-in place sets `edited: true` and stores both bodies; the receipt says so.
+in place sets `edited: true` and stores both bodies; the receipt says so. The
+card also carries an **identity row** ("will be sent as ‹user name›") and, when
+`identityMarking` is not `none`, the warning — verbatim from
+`caps.identityMarkingText` (§9.5).
 
 ### 9.3 What the agent gets back
 
 ```
 { proposalId, status: 'sent'|'rejected'|'edited'|'expired'|'failed',
   convId, adapterId, vendorMessageId, at,
-  edited: bool, editedBy: 'user', reason }        // rejection/failure reason, verbatim
+  edited: bool, editedBy: 'user', reason,         // rejection/failure reason, verbatim
+  sentAs: 'user'|'bot'|null,                      // §9.5 — the identity that actually sent it
+  identityMarking: 'none'|'marked'|'unknown',     // what the RECIPIENT saw
+  identityMarkingText: '<one sentence>'|null }    // verbatim; null when marking === 'none'
 ```
+
+Those three new fields are half of r3/Q4: **the agent has to know who the other
+side saw.** An agent drafting what it believes is "a message from this person",
+where the recipient in fact sees an app name, must learn that from the structured
+receipt it gets back — not from an audit log nobody reads. On a conversation with
+`sendAs: []`, `reply` never creates a proposal at all and returns the typed
+`send-not-available` instead (§4).
 
 Delivered through the same ladder with one new option:
 
@@ -783,7 +1047,79 @@ Two mechanisms, chosen per adapter by `caps.idempotency`:
 Every send appends to `audit.ndjson` **before** the request goes out (attempt)
 and again with the outcome — so a crash between the two leaves an attempt with no
 outcome, which is precisely the state `reconcile()` exists to resolve, and
-precisely the state that must never be read as "not sent".
+precisely the state that must never be read as "not sent". The audit line also
+records `{draftedBy, approvedBy, sentAs, identityMarking}` (§9.5) — **that record
+stays inside this instance** and never rides out with the message.
+
+### 9.5 Who the message is sent as, and who that sentence is owed to
+
+**Default: send as the user, with no tag at all.** (Owner ruling, r3/Q4 — this
+**reverses** r2's decision 17, "append `drafted by <agent>`, default ON for
+external channels".) On every channel that allows sending as the user, the
+message goes out looking like the user's own, with nothing of ours in the body.
+The sender honesty line survives, but demoted to a per-channel option that is
+**off by default** (`channels.senderHonestyLine`).
+
+The reason is **whom that sentence is owed to**. r2 read it as a disclosure owed
+to the recipient, and so put the disclosure inside the message somebody else
+reads — which both rewrites the user's own words and happens *after* the user has
+already decided to send. The person who actually needs to know who the other side
+will see is **the one pressing approve**, and **the agent that drafted it**. So:
+
+> **Honesty is owed to the person taking the action, not imposed on the person
+> receiving the message.**
+
+The disclosure therefore moves out of the message into two places: **the moment
+of authorization** (a line on the approval card / send affordance) and **the
+receipt** (§9.3). It is driven by `caps.identityMarking` — a capability row, never
+a per-vendor `if`:
+
+| `identityMarking` | Meaning | On the approval card |
+|---|---|---|
+| `none` | The recipient sees this user; nothing attributable to an app in the UI or in the raw data | One calm line, "will be sent as ‹user name›" |
+| `marked` | This channel **will** attribute the message to an app/bot — `identityMarkingWhere` says whether that is in the **recipient's UI** or only in the **raw headers** | A **warning** showing `identityMarkingText` verbatim, e.g. "this channel will show the message as sent by ‹app name›" |
+| `unknown` | We have **not verified** how this channel attributes it | Treated exactly like `marked`, and says it is unverified — fail closed on honesty |
+
+Four known shapes, each with its evidence (details and sources in §12.1 / §12.2):
+
+- **Lark bot send** (`im:message:send_as_bot`, tenant token): the platform's own
+  `sender.sender_type` is `app` and the message carries the app's name and avatar.
+  ⇒ `marked` / `recipient-ui`.
+- **Lark user-identity send** (`im:message` + `im:message.send_as_user`, user
+  token): the official documentation does carry a permission "以用户身份发送消息"
+  (send as the user), but it **does not state what `sender_type` the recipient
+  sees**, and a community report claims it stays `app` even with a user token.
+  ⇒ `unknown`, until a real send in P4 settles it (§20).
+- **Gmail API send**: the recipient's mail UI shows the user — no app badge, no
+  "via" — but a message sent through the API carries an extra `Received:` header
+  naming `gmailapi.google.com`, which "show original" reveals. ⇒ `marked` /
+  **`raw-headers`**, with the text saying exactly that: *"invisible in the
+  recipient's mail UI; visible in the raw headers (a `Received:` line naming
+  `gmailapi.google.com`)"*. This is the answer to the owner's "verify which are
+  visible": **not indistinguishable — indistinguishable in the UI, distinguishable
+  in the raw data**, and those are different facts to someone deciding whether to
+  send.
+- **WhatsApp via a protocol library**: it looks like the user (`none`), but it
+  carries `tosRisk: 'prohibited'` (fence 13) — and **that** is what has to be said
+  loudly on that lane. Identity honesty and terms risk are orthogonal axes; making
+  one field carry both is the next incident.
+
+**Lark's user-identity send still needs the P4 scope round trip** (decision 2
+unchanged): both `im:message` (获取与发送单聊、群组消息) and
+`im:message.send_as_user` (以用户身份发送消息) must be requested together — note
+that the second one's separator is a **dot, not a colon**; the ops notes' spelling
+`im:message:send_as_user` is wrong, and that error only shows up in the console as
+"no such permission". **Until it lands**, the Lark adapter declares `sendAs: []`
+and the UI says so instead of greying a control out: *"sending needs two more
+permissions on the Lark app, a version publish and one re-consent — Connect ▸
+Request send permission"*, with a link straight to §12.1's checklist. The agent
+side gets the same fact as `send-not-available` with the same reason, so it never
+drafts a proposal that can never be sent.
+
+**The audit log still records the drafting agent** (`draftedBy`), alongside
+`approvedBy` / `sentAs` / `identityMarking`. Dropping the default honesty line
+does **not** drop attribution; it puts attribution back where it belongs — this
+instance's own record, rather than somebody else's inbox.
 
 ---
 
@@ -816,8 +1152,9 @@ precisely the state that must never be read as "not sent".
 
 ### 10.2 Data flow to the client
 
-`GET /api/channels` returns the index digest (adapters + conversations + chips) —
-never message bodies. `GET /api/channels/:id/messages?before=&limit=` returns a
+`GET /api/channels` returns the index digest (adapters + conversations + chips +
+each conversation's resolved `convCaps` and its freshness claim) — never message
+bodies. `GET /api/channels/:id/messages?before=&limit=` returns a
 page. `POST /api/channels/:id/estimate` runs the PURE estimator **server-side**
 over stored history and returns counts (debounced from the filter editor; the
 client never receives the corpus). Mutations: assign, filter, reach, track,
@@ -886,15 +1223,35 @@ and docs.
 
 **Not proven — each is a decision or a round of work:**
 
-- **Sending.** `im:message:send_as_user` is *not* in the granted set and has
-  never been requested; bot-identity sending has never been exercised. Adding a
-  scope is: enable it in the console → publish a version → re-run OAuth. On this
-  app that round trip completed the same day with no approval wait, though
-  whether that generalizes is unknown (the requesting account was the app's
-  creator).
+- **Sending — and the scope name is misspelled.** The official documentation says
+  user-identity sending requires **both** `im:message` (获取与发送单聊、群组消息)
+  and **`im:message.send_as_user`** (以用户身份发送消息) — the second one's
+  separator is a **dot**, where the ops notes and r2 both wrote
+  `im:message:send_as_user`. In the console that error shows up only as "no such
+  permission", which is why it gets its own line. Neither is in the granted set
+  and neither has ever been requested; bot-identity sending has never been
+  exercised. Adding a scope is: enable it in the console → publish a version →
+  re-run OAuth. On this app that round trip completed the same day with no
+  approval wait, though whether that generalizes is unknown (the requesting
+  account was the app's creator).
+- **What the recipient sees is undocumented.** The send response carries
+  `sender.sender_type`, whose values include `app` and `user`, but the
+  documentation **does not say** which one appears when sending with a user token
+  plus `im:message.send_as_user` — and a community report claims it stays `app`.
+  So this adapter declares `identityMarking: 'unknown'`, the UI treats it as
+  `marked` (§9.5), and P4's first task is turning it into `none` or `marked` with
+  one real send.
 - **Events.** Event subscription has never been enabled on this app; neither the
   webhook nor the WebSocket long-connection lane has ever been run against it.
-  That is why v1 polls (§6.4).
+  The documented boundaries are: the long connection **needs no public URL**,
+  is **enterprise-self-built-apps only**, allows **at most 50 connections per
+  app**, pushes in **cluster mode without broadcast** (with several clients, each
+  event reaches exactly one at random), requires an HTTP 200 within **3 seconds**,
+  and delivers **at-least-once** (retries at 15 s / 5 min / 1 h / 6 h, at most 4,
+  duplicates possible even after success). §6.4 re-argues push as a first-class
+  receive mode from exactly those facts. A separate community report claims **Lark
+  International's console does not offer the long connection at all** (webhook
+  only) — not vendor-confirmed, but a precondition for P1, so it is listed in §20.
 - **Authorization prerequisites.** The console needs all three of: the redirect
   URL registered, the scopes granted, and a **published version**. A missing one
   fails the *consent page* rather than the API call — a confusing failure mode
@@ -926,10 +1283,25 @@ tokens encrypted at rest.
   everything that uses that preset (decision 5).
 - **Threading on send:** `threadId` plus `In-Reply-To` / `References` taken from
   the record's `Message-ID`.
-- **Push is not needed.** `users.watch` + Pub/Sub means provisioning a topic, IAM
-  grants and a renewal job — the watch expires in 7 days and stops silently if a
-  renewal is missed. Polling `history.list` is one request per tick when nothing
-  changed. v1 polls; Pub/Sub is not on the roadmap.
+- **On send the recipient sees the user — but the raw headers do not.** A message
+  sent through the Gmail API carries an extra `Received:` header naming
+  `gmailapi.google.com`, which a message sent from the web client does not. The
+  recipient's mail UI shows no difference at all (no badge, no "via"), but "show
+  original" does. Hence `identityMarking: 'marked'` with
+  `identityMarkingWhere: 'raw-headers'` (§9.5) — the answer to the owner's "verify
+  which are visible": **indistinguishable in the UI, distinguishable in the raw
+  data**. `X-Mailer` / `User-Agent` are optional headers neither path is required
+  to add, so they are not the tell.
+- **Push is an optional upgrade whose cost is stated, no longer "not on the
+  roadmap"** (r3/Q3(c) changes r2's wording here). `users.watch` + Cloud Pub/Sub
+  means a topic and an IAM grant, and the watch **expires silently after 7 days**
+  and stops without a sound if one renewal is missed (hence a daily renewal job).
+  But two things make it a better fit than Lark's long connection: a Pub/Sub
+  subscription can be **pulled**, so it needs no public inbound endpoint either;
+  and each instance can hold **its own subscription**, so "is this push lane mine
+  alone" is here a fact that can be **configured** rather than a random race. The
+  default stays polling (one request per tick when nothing changed), with push
+  behind a switch that is off by default (decision 20).
 
 ### 12.3 Agents (built-in)
 
@@ -979,6 +1351,61 @@ So the module:
 asserts the named refusal plus the paste-back fallback, and a leg replaying a
 callback with a wrong `state` against both modes.
 
+### 12.5 Local-client adapters (WhatsApp / WeChat) — an adapter class, not two adapters
+
+r3/Q3(b) asks for this class to be **modelled**. What separates it from Lark and
+Gmail is not cadence but **where the evidence comes from**: there is no vendor API
+we may call, only an official client running on some machine and whatever it
+writes down or draws. Hence `receive: 'scan'`, plus a second question — scan
+**what**:
+
+| `scanSource` | Reads | Sends | Reality |
+|---|---|---|---|
+| `'store'` | The local store the client wrote, incrementally with a cursor, optionally with an fs.watch for change notification | Through a protocol library, or falls back to `'ui'` | Only holds where that store is **readable at all** |
+| `'ui'` | What the client **rendered**, driven by an agent-browser profile (`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + fingerprint seed + proxy, plus a live view VibeSpace owns) | agent-browser typing into the client's own composer | Sees only what is on screen, so history is "as far as it will scroll" — `history: 'none'` or `'page'` |
+
+The two concrete platforms land in **different** cells, and that difference is the
+risk statement the owner asked for:
+
+- **WhatsApp.** The official Web client inside an agent-browser profile is
+  `scanSource: 'ui'`, and sending is typing into its own composer — identity-wise
+  that is the user (`identityMarking: 'none'`), because the thing sending really
+  is that logged-in client. The other route is a protocol library (whatsmeow /
+  Baileys): reverse-engineered **unofficial clients**, and unofficial clients are
+  explicitly prohibited by WhatsApp's terms; public reporting has bans landing on
+  low-volume, reply-only, otherwise legitimate use, and the compliant alternative
+  is the official Business Cloud API through a certified provider (bot identity,
+  hence `identityMarking: 'marked'`). ⇒ the protocol-library route is
+  `tosRisk: 'prohibited'`, not offered by default (fence 13, decision 19).
+- **WeChat.** The desktop store is SQLCipher/WCDB-encrypted and the key exists
+  only in the **running client's process memory** — which is where every public
+  tool extracts it from. **Reading another process's memory is not something this
+  product does** (fence 13), so WeChat's `scanSource: 'store'` route **does not
+  exist**; only `'ui'` remains.
+
+**Three properties the class shares**, all of which fall straight into machinery
+that already exists:
+
+1. **Latency is a number drawn on the conversation row.** `freshnessClaim`
+   answers "last scanned <t> ago" for `scan`, and the AssignFilter panel says it
+   before the user hands that lane a job. A lane that scans every five minutes is
+   honest for on-call triage and dishonest for live customer chat — the product's
+   job is to make that difference visible **before** the assignment, not after.
+2. **The credential is not a token, it is a logged-in client.** So `auth.state()`
+   answers "is the client in that profile still logged in", and `needs-reauth`
+   means "open the live view and scan the code again", not an OAuth round trip.
+3. **It is the first real use case for adapters on a paired device** (§14): the
+   adapter has to run on whichever machine the client runs on. The interface
+   already takes a machine handle, so that is wiring rather than a rewrite — but
+   it is why P6 only makes sense once that work is real.
+
+**Scheduling and gating:** the interface carries every slot this class needs from
+P0 (`scan` / `scanSource` / `scanLatency` / `convCaps` / `tosRisk`), and the fake
+adapter really runs a scan mode, so the lane is inside
+`test-channels-lane-parity`'s coverage from day one. The WhatsApp and WeChat
+adapters themselves are **P6**, gated on decision 19 and on the agent-browser
+system landing.
+
 ---
 
 ## 13. Secrets, expiry, failure
@@ -1006,7 +1433,9 @@ callback with a wrong `state` against both modes.
 |---|---|---|
 | Plugin-contributed adapters | The manifest has no adapter contribution point; the sandbox would need net+fs grants; and the receive path must run beside the store and the spend guard. Third-party adapters are the right *eventual* home | `contributes.channelAdapters`, over the same `src/channels` interface, so the registry never forks. **The key is not reserved today**: `RESERVED_CONTRIBUTIONS` in `src/plugin-manifest.js` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, and only keys *in that list* produce the "reserved for a later phase — ignored" warning — anything else is silently discarded when `m.contributes` is rebuilt to a fixed shape, so a plugin author following this row would get **no signal at all**. **P0 adds the one word**, plus the expected-set update in `scripts/test-plugin-loader.mjs`. A declared-but-inert slot is the same failure this document argues against for `SPEND_REASONS`; the difference is that here the slot costs one array entry and buys an honest warning |
 | Adapters on a paired device | Credentials and the store live here | The interface already takes a machine handle; v1 passes `local`. `hostId` is a parameter, never a branch |
-| Live event lanes | §6.4 — a cursor kick, gated on an owner decision to enable event subscription | `src/channels/live/<kind>.js`, kicking the engine |
+| ~~Live event lanes~~ **promoted to P1** (r3/Q3(a)) | No longer deferred: the owner asked for real-time push and §6.4 re-argues it from the evidence. The one gate left is enabling event subscription in the Lark console | `src/channels/live/<kind>.js`; content or cursor kick decided by `pushExclusivity` |
+| Local-client adapters (WhatsApp / WeChat) | The interface models them from P0 (`scan` / `scanSource` / `tosRisk` / `convCaps`), but the adapters need a logged-in official client, an agent-browser profile, and one named decision about terms risk | **P6**, §12.5; gated on decision 19 and the agent-browser system |
+| WhatsApp sending via a protocol library | Unofficial clients are prohibited by the platform's terms, and bans land on ordinary use (fence 13) | Forever behind `tosRisk: 'prohibited'`; the compliant route is the official Business Cloud API (bot identity) |
 | HTML mail rendering | XSS surface; plain text is honest and sufficient for triage | The published-pages sandboxed-iframe pattern |
 | Attachment auto-fetch | Bandwidth, storage, and a second authorized request per item | `caps.attachments: 'fetch'` + an explicit user/agent action with size caps |
 | Read receipts / typing / reactions | Not in the interaction design | `caps` rows already reserved |
@@ -1045,6 +1474,9 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channel-record` | fast | normalization incl. mention-placeholder resolution; the injection-marker strip | a body containing our own frame markers must come out inert |
 | `test-channel-store` | fast | atomic index; append-only logs; dedup on replayed pages; cursor advances only on a complete pass; retention floor ≥ 7 days; **two concurrent passes through `index.update()` both land** (§5.1) | a pass reporting `complete:false` must leave the cursor unchanged; a patched copy doing read-modify-write around `writeJsonAtomic` must **lose** one pass's anchor advance |
 | `test-channel-adapter-contract` | fast | the fake adapter drives every declared capability; an undeclared one throws; typed errors; **the grep census that no call site branches on `kind`** | a synthetic adapter branching on its own kind in a call site must fail the census |
+| `test-channel-caps` | fast | both axes of the record; `convCaps` three-valued; **a control exists only when `caps` AND `convCaps` agree**, and `unknown` always renders as not-offered-with-a-reason; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim`'s wording per lane; `identityWarning` speaks for `unknown` exactly as for `marked` | a synthetic adapter declaring `sendAs:['user']` that still offers the control on a conversation whose `convCaps.sendAs === []` must go red; an adapter returning a `convCaps` wider than `caps` must go red; `identityMarking:'unknown'` with no warning must go red |
+| `test-channels-lane-parity` | fast | **one day of traffic driven through push / poll / scan ⇒ the same records, the same wake count, the same charges** (fence 12); the same message arriving once by push and once by poll collapses to one (dedup on the message id); event replays dedup on `event_id` | a push-lane copy that **bypasses the coalescing window** must wake more on the same burst; a copy that acks **before** durability must lose records at the injected crash point |
+| `test-channels-identity` | fast | no sender honesty line by default; `identityMarking` drives the approval-card warning and the receipt fields; the audit line carries `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` and **never leaves the instance**; on a `sendAs: []` conversation `reply` returns `send-not-available` and **creates no proposal** | a copy with the honesty line defaulted ON must go red (r2's decision 17 is this leg's negative control); a `marked` channel whose approval card carries no warning must go red; a proposal created on a `sendAs: []` conversation must go red |
 | `test-channels-egress` | fast | every constructed outbound request comes either from the adapter declaring its host or from an allowlisted `(file, host)` pair **with a reason** — seeded with `src/gmail-sync.js` and `src/mounts.js` (§3.1) | a scratch file with an undeclared host must go red; a **dead allowlist entry** (file moved or renamed) must go red too |
 | `test-oauth-loopback` | fast | both modes (§12.4): ephemeral bind for Gmail, fixed bind for Lark; `state` rejection on the request handler **and** on paste-back; the port released on completion/cancel/timeout | a **pre-bound** fixed port must produce the named refusal and the paste-back fallback, never an opaque `EADDRINUSE`; a callback with a wrong `state` must be rejected in both modes |
 | `test-channels-lark-shape` | fast | recorded-fixture normalization: `next_page_token` paging *to the anchor*, `@_user_N` placeholder resolution against the record's own `mentions`, typed errors | a fixture whose anchor lies on the **second** page must be paged into, not stopped at page one |
@@ -1052,6 +1484,7 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channels-agent-cli` | fast | CLI verbs against a stub server; `reply` proposes and never sends; invisible = uniform error | a stub returning a conversation the ACL hid must still produce the uniform error |
 | `test-spend-paths` (existing) | fast | its per-site census must see the new producer, wired, with the declared reason | already carries its own controls |
 | `test-channels-engine` | heavy | real worktree server + fake adapter: burst-day paging, backoff, single-flight, failure surfacing **and retraction**, digest batching, wake authorization and hold release | a pre-fix copy using a fixed-window fetch must lose messages on the burst-day fixture |
+| `test-channels-push` | heavy | real worktree server + a **fake push server**: ack after durability (inject a crash between ack and processing — the record must still be there); heartbeat silence ⇒ `state` leaves `live` **and** the poll cadence returns to fast immediately; `stop()` terminal for an arm in flight; a lane claiming `exclusive` while the fixture withholds some events ⇒ `missRate` crosses the threshold ⇒ **auto-demotion to kick with its reason stated** | a lane that **lies about being `active`** (pre-fix copy) must turn the poll fallback off and lose messages; a copy that never demotes must lose messages forever on the withholding fixture |
 | `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate | the estimate must change when a rule is added, and a review-required channel must not offer "may send" |
 
 Fixture hygiene applies from the first commit, because these are live incidents:
@@ -1091,6 +1524,21 @@ being asked to stand in for a unique local name. In both cases the fix is to
 name the thing that actually holds the guarantee — one owner, one flow-scoped
 bind — rather than to strengthen the property that never could.
 
+**r3 is not a review, it is a change of direction**, so it does not join the table
+above. Each of the owner's two instructions overturned one of this document's own
+conclusions, and the two share a shape worth writing down: **an absolute rule
+written for safety, whose reason only holds under one configuration, is a default
+being enforced as a law.** §6.4's "a live lane may never carry content" was really
+about cluster mode, and cluster mode only bites when **several instances share one
+app credential** — so the right artefact was never the prohibition, it was the
+condition, plus a claim the product can measure and retract by itself. Decision
+17's "append `drafted by <agent>` by default on external channels" put a
+disclosure inside the message **somebody else** reads, when the person who needs
+to know who the other side will see is **the one pressing approve** — so the right
+artefact was never the appended text, it was a warning at the moment of
+authorization. Neither change is "more conservative" or "more aggressive": both
+are **saying the sentence to the party it is owed to**.
+
 ---
 
 ## 18. Phases, rounds, calendar
@@ -1101,85 +1549,130 @@ Ranges are honest: the low end assumes one-round convergence, the high end
 assumes the module needs the extra rounds that the measured distribution says
 about a third of them do.
 
-### P0 — store, index owner, adapter interface, fake adapter, panel skeleton — **7–9 rounds (3.5–4.5 days)**
+### P0 — store, index owner, adapter interface, fake adapter, panel skeleton — **9–11 rounds (4.5–5.5 days)**
 
 `src/channel-store.js` (durable primitives), `src/channel-record.js`,
-`src/channels/index.js` + the fake adapter, a `src/server/channels-engine.js`
-skeleton (scheduler, single flight, broadcast) carrying **the serialized index
-owner of §5.1 from the first commit**, `src/routes/channels.js`, the six rail
-registrations (§10.1), the panel list and an empty conversation window. Also the
-one-word `channelAdapters` entry in `RESERVED_CONTRIBUTIONS` with its suite
-update (§14). Gates: `test-channel-store` (including the two-concurrent-passes
-leg and its read-modify-write negative control), `test-channel-adapter-contract`,
-`test-channel-record`, `test-plugin-loader`.
+**`src/channel-caps.js` (both axes, `convCaps`, `freshnessClaim`,
+`identityWarning`)**, `src/channels/index.js` + the fake adapter (**which really
+runs all three receive modes**), a `src/server/channels-engine.js` skeleton
+(scheduler, single flight, broadcast) carrying **the serialized index owner of
+§5.1 from the first commit**, `src/routes/channels.js`, the six rail
+registrations (§10.1), the panel list (**with freshness chips**) and an empty
+conversation window. Also the one-word `channelAdapters` entry in
+`RESERVED_CONTRIBUTIONS` with its suite update (§14). Gates:
+`test-channel-store` (including the two-concurrent-passes leg and its
+read-modify-write negative control), `test-channel-adapter-contract`,
+`test-channel-caps`, `test-channel-record`, `test-plugin-loader`.
 **Exit:** the fake adapter's conversations appear in the panel, open in a window,
-survive a restart, sync across two clients, and two simultaneous passes both
-advance their cursors.
+survive a restart, sync across two clients, two simultaneous passes both advance
+their cursors, and **a read-only conversation draws no send control at all**.
+(r3: +2 rounds — the two-axis capability record, `convCaps`, and the fake
+adapter's scan / push modes.)
 
-### P1 — Lark read + Gmail read — **9–11 rounds (4.5–5.5 days)**
+### P1 — Lark read + Gmail read + **the push lanes** — **13–15 rounds (6.5–7.5 days)**
 
 `src/oauth-loopback.js` **dual-mode** (§12.4: ephemeral + fixed, port held only
 for the flow, named `EADDRINUSE` refusal, paste-back fallback, both `state`
 checks carried over verbatim), `src/channels/lark.js`, `src/channels/gmail.js`,
 the adapter panel (connect / re-auth countdown / tracked pickers / inclusion
 query), failure surfacing + retraction, the `src/secret-box.js` extraction, and
-the egress allowlist **seeded** with the two pre-existing files (§3.1). Gates:
-`test-oauth-loopback`, `test-channels-lark-shape` (recorded fixtures),
-`test-channels-egress`, `test-channels-engine` (burst-day paging).
+the egress allowlist **seeded** with the two pre-existing files (§3.1). **Plus
+the push half (r3/Q3(a))**: `src/channels/live/lark.js` (the official SDK's long
+connection, ack after durability, heartbeat liveness, `stop()` terminal for an arm
+in flight), the exclusivity **claim + measurement + auto-demotion**
+(`push.missRate`), the adapter row stating the lane's state and its demotion
+reason, and `src/channels/live/gmail.js` (Pub/Sub pull subscription) behind a
+switch that is off by default.
+Gates: `test-oauth-loopback`, `test-channels-lark-shape` (recorded fixtures),
+`test-channels-egress`, `test-channels-engine` (burst-day paging),
+**`test-channels-push`**.
 **Exit:** real conversations from both platforms, tracked opt-in, correct on a
-burst day, honest auth states, zero secrets in any response, and a second
-instance's consent flow refused by name rather than by stack trace.
-*Owner-blocked:* the Lark redirect-URI registration (decision 4).
+burst day, honest auth states, zero secrets in any response, a second instance's
+consent flow refused by name rather than by stack trace, **and a push lane that
+claimed exclusivity without having it demotes itself and says why**.
+*Owner-blocked:* the Lark redirect-URI registration (decision 4) and enabling
+event subscription in the console (decision 3).
+(r3: +4 rounds — push transport, liveness, ack semantics, exclusivity measurement
+and demotion, plus Gmail's Pub/Sub pull.)
 
-### P2 — assign, filter, wake — **7–9 rounds (3.5–4.5 days)**
+### P2 — assign, filter, wake — **9–11 rounds (4.5–5.5 days)**
 
 `src/channel-filter.js`, the assignment model, the estimate route, the filter
 editor with live estimates plus the after-the-fact measurement, the wake path
 with the new `SPEND_REASON`, digest batching, and the per-assignment pacing cap.
+**Plus the push half (r3/Q3)**: the `channels.pushCoalesceSeconds` window
+(fence 12), the per-lane latency claim stated honestly on the AssignFilter panel,
+and the capability cap on `authority:'send'` (§7.3).
 Gates: `test-channel-filter`, `test-spend-paths` (its census sees the producer),
-`test-channels-engine` (wake, digest, hold release).
+`test-channels-engine` (wake, digest, hold release),
+**`test-channels-lane-parity`**.
 **Exit:** an assigned filtered conversation wakes an agent, the wake names its
-reason, and the money is bounded and attributed to the right slot.
+reason, the money is bounded and attributed to the right slot, **and one day of
+traffic produces the same wakes and the same money on all three lanes**.
+(r3: +2 rounds — the coalescing window, the lane-parity leg, the latency claim.)
 
-### P3 — outbox, approval, receipts — **8–11 rounds (4–5.5 days)**
+### P3 — outbox, approval, receipts — **9–12 rounds (4.5–6 days)**
 
 `src/channel-policy.js`, the outbox store, inline approval cards + the Outbox
-window, the per-conversation "For you" pointer with its persisted
-`pendingTodoId` and retraction (§9.2), receipts through `noWake`, the audit log,
-`vibespace-channels` + its manual, and the AgentReach panel with requests and
-grant `origin` (§8). Gates: `test-channel-outbox`, `test-channel-acl` (including
-the user-grant-survives-un-assignment control), `test-channels-agent-cli`,
-`test-channels-e2e`.
+window (**with the identity row and the `identityMarking` warning**, §9.5), the
+per-conversation "For you" pointer with its persisted `pendingTodoId` and
+retraction (§9.2), receipts through `noWake` (**carrying `sentAs` /
+`identityMarking` / `identityMarkingText`**), the audit log (**with `draftedBy` /
+`approvedBy` / `sentAs`, and it never leaves the instance**),
+`vibespace-channels` + its manual (**`reply` returns `send-not-available` and
+creates no proposal on a `sendAs: []` conversation**), and the AgentReach panel
+with requests and grant `origin` (§8).
+Gates: `test-channel-outbox`, `test-channel-acl` (including the
+user-grant-survives-un-assignment control), `test-channels-agent-cli`,
+**`test-channels-identity`**, `test-channels-e2e`.
 **Exit:** an agent proposes, the user approves / edits / rejects in either
-surface, a receipt lands without waking anybody, and the audit log is complete.
-Sending is exercised against the fake adapter and the built-in Agents adapter
-only.
+surface, a receipt lands without waking anybody and says who the other side saw,
+and the audit log is complete. Sending is exercised against the fake adapter and
+the built-in Agents adapter only. (r3: +1 round — the identity row, the receipt
+fields, the audit fields.)
 
-### P4 — real external send — **6–8 rounds (3–4 days) + owner-blocked time**
+### P4 — real external send — **7–9 rounds (3.5–4.5 days) + owner-blocked time**
 
 Lark send (identity per decision 2, `uuid` idempotency), Gmail send (two-phase
 draft, threading headers), `reconcile()` for unknown outcomes, guardrails end to
-end, and the "sent as" honesty line. Gates: the outbox suite extended with the
-idempotency and reconcile matrices; `test-channels-e2e` end-to-end against the
-fake adapter; plus one documented manual shot at a real scratch chat before the
-switch is offered to anyone.
+end, and the sender honesty line as an **off-by-default** switch (§9.5).
+**This phase opens with the identity proof**: one real send settles Lark's
+`identityMarking` from `unknown` into `none` or `marked` (§20 item 3), because
+until then the approval card is saying "unverified".
+Gates: the outbox suite extended with the idempotency and reconcile matrices;
+`test-channels-identity` extended with a real `sentAs` receipt;
+`test-channels-e2e` end-to-end against the fake adapter; plus one documented
+manual shot at a real scratch chat before the switch is offered to anyone.
 **Exit:** an approved proposal reaches the platform exactly once, or says
-honestly that it does not know.
+honestly that it does not know; and what the approval card says about who the
+other side will see is **measured**, not guessed. (r3: +1 round — the identity
+proof leg and the switch.)
 
 ### P5 — optional follow-ons (not scheduled)
 
-Live-lane cursor kicks (**2–3 rounds**), sandboxed HTML rendering (**2–3**),
-attachment fetch (**2**), plugin-contributed adapters (**4–6**), adapters on a
-paired device (**4–6**).
+Sandboxed HTML rendering (**2–3 rounds**), attachment fetch (**2**),
+plugin-contributed adapters (**4–6**), adapters on a paired device (**4–6**).
+(r3: live lanes moved up into P1, so they are no longer here.)
 
-**Totals:** P0–P4 = **37–48 rounds ≈ 19–24 working days** at 2 rounds/day, plus
-owner-blocked time for the two scope round trips. (The r2 review added 2–3
-rounds: the serialized index owner and its concurrency leg in P0, the dual-mode
-loopback with its pre-bound-port leg in P1, grant `origin` and the pointer
-mechanics in P3.) P0–P2 alone — read-only channels with assignment and filtering
-and no outbound path at all — is **23–29 rounds ≈ 12–15 days**, and it is a
-coherent shipping point: the panel is useful, no external message can leave the
-building, and the money is already bounded.
+### P6 — local-client adapters (WhatsApp / WeChat) — **8–12 rounds (4–6 days), not scheduled, doubly gated**
+
+§12.5. The `scanSource: 'ui'` route (agent-browser profile, login liveness,
+cursored UI scanning, sending through the client's own composer), plus the
+WhatsApp and WeChat adapters and their `tosRisk` acknowledgement dialog. **Gated
+on two things**: decision 19 (whether the owner accepts the terms risk and the
+UI-only constraint) and `docs/design-agent-browser-v2.md`'s profile system
+landing. The interface side is in place from P0, so no line of this phase touches
+the store, the filter, the spend path or the outbox.
+
+**Totals:** P0–P4 = **47–58 rounds ≈ 23.5–29 working days** at 2 rounds/day, plus
+owner-blocked time for the two scope round trips. (The r2 review added 2–3 rounds;
+**r3 added 10**: the two-axis capability record +2 in P0, the push lanes +4 in P1,
+coalescing and lane parity +2 in P2, the identity surface +1 in P3, the identity
+proof +1 in P4.) P0–P2 alone — read-only channels with assignment, filtering and
+**real-time push**, and no outbound path at all — is **31–37 rounds ≈
+15.5–18.5 days**, and it is still a coherent shipping point: the panel is useful,
+messages arrive live, no external message can leave the building, and the money is
+already bounded.
 
 ---
 
@@ -1191,8 +1684,8 @@ they are here rather than in the code.
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
 | 1 | **Adapters in-tree or plugins?** | in-tree modules / plugin packages | **In-tree for v1.** The OAuth flows, the secret store and the spend guard are all in-tree; an IPC boundary per message buys nothing at this scale. Keep the interface identical so third-party adapters become plugins in P5 without forking the registry |
-| 2 | **Lark send identity** | as the **user** (needs `im:message:send_as_user`, a version publish and re-consent) / as a **bot** (needs the bot added to every chat) / both | **As the user.** It is what the other side expects in an existing human group and it needs no change to anybody else's chats. Bot identity only as a fallback where user-send is refused. Costs one scope round trip in P4 |
-| 3 | **Lark receive lane** | poll-only / poll + WebSocket kick / webhook | **Poll-only in v1; WebSocket kick in P5; never the webhook.** The WS lane needs no public URL, but its cluster-mode delivery makes it unsound as a *content* lane across a fleet — as a cursor kick it is safe. A public inbound endpoint buys nothing over it |
+| 2 | **Lark send identity** (updated by r3/Q4) | as the **user** (needs `im:message` + **`im:message.send_as_user`** — a dot, not a colon — a version publish and re-consent) / as a **bot** (needs the bot added to every chat) / both | **As the user, and the scope round trip stays in P4.** It is what the other side expects in an existing human group and it needs no change to anybody else's chats. Bot identity only as a fallback where user-send is refused — and bot sending is `identityMarking:'marked'`, so that fallback **must speak on the approval card**. **The new half:** whether user-identity send actually changes the `sender_type` the recipient sees is undocumented and contradicted by a community report, so until one real send in P4 proves it, this adapter declares `identityMarking:'unknown'` and is treated as `marked` (§9.5, §20 item 3). **Until the scope lands the UI says** "sending needs two more permissions on the Lark app, a version publish and one re-consent" rather than showing a greyed control |
+| 3 | **Lark receive lane** (rewritten by r3/Q3(a)) | poll-only / poll + WebSocket **kick** / WebSocket **carrying content** + poll for reconciliation / webhook | **Push is first-class and ships in P1; content vs kick is decided by `pushExclusivity`; never the webhook.** The long connection needs no public URL, is self-built-apps only, allows 50 connections per app, wants a 3 s ack, and is **at-least-once with 4 retries** — so "push is unreliable" is not a reason. The real constraint is **cluster mode**: with several clients on one app credential each event reaches exactly one at random. That is a **configuration** condition, not a law of nature ⇒ carry content when exclusive (polling drops to a 15-minute reconciliation), kick only when shared or unknown (r2's behaviour, and the default). A public inbound endpoint buys nothing over the long connection |
 | 4 | **Lark redirect URI** | reuse the ops tooling's registered loopback port / register a dedicated one for VibeSpace | **Register a dedicated one — and treat the port as machine-global regardless.** Registration resolves VibeSpace-vs-ops-tooling; it does **not** resolve two VibeSpace instances on one box (a production service beside a checkout), where the loser gets an opaque `EADDRINUSE` after the user is already at the consent page and the port holder receives its code. §12.4 binds only for the flow, refuses by name, and falls to paste-back. If the console accepts several redirect URLs per app, register ours *alongside* rather than displacing theirs (unverified — §20) |
 | 5 | **Gmail OAuth client** | add `gmail.send` to the existing shared preset / register a client dedicated to channels | **Dedicated client for channels.** Adding a sensitive scope to a shared preset re-consents everything using it, and the verification status (hence the 7-day refresh-token behaviour) becomes one decision for two features. Read-only P1 may start on the existing preset |
 | 6 | **What is tracked by default** | nothing until the user picks / all groups the user is in | **Nothing.** It is the privacy answer, the polling-cost answer, and it keeps the panel from becoming a mail client. The discover list makes opting in one click |
@@ -1206,7 +1699,10 @@ they are here rather than in the code.
 | 14 | **Retention numbers** | pick them | **90 days or 5,000 records per conversation, whichever is smaller, floor 7 days**; the audit log archived (never deleted) on a dated roll |
 | 15 | **Fleet scope** | local-only v1 / adapters on paired devices | **Local-only v1**, with `hostId` already a parameter so the later move is not a rewrite |
 | 16 | **Does assignment imply visibility?** | yes, written as an explicit grant / no, the user must also grant reach | **Yes, as an explicit grant.** Two steps for one obviously-intended thing is how a permission model gets bypassed; writing it as a real grant keeps the reach panel truthful |
-| 17 | **Sender honesty line** | always append "drafted by \<agent\>" / per-channel toggle / never | **Per-channel toggle, default ON for external.** The audit log records the drafting agent either way |
+| 17 | **Sender honesty line — REVERSED by the owner (r3/Q4)** | always append "drafted by \<agent\>" / per-channel toggle **default ON** / per-channel toggle **default OFF** / never | ~~Per-channel toggle, default ON for external~~ ⇒ **default OFF, kept as a per-channel option.** The default is **send as the user with nothing added to the body**, on every channel that allows it. What replaces it is not silence: the `identityMarking` capability states who the other side will see at **the moment of authorization** (approval card / send affordance) and in **the receipt** (§9.5). The reason is that the sentence is owed to **the person pressing approve** and to the drafting agent, not to the recipient — and r2 put it inside the message the recipient reads, which both rewrites the user's own words and happens after the user has already decided. The audit log still records `draftedBy` |
+| 18 | **Who decides a push lane is exclusive?** (new, r3/Q3(a)) | (a) the operator **asserts**, the product **measures** and **auto-demotes** on disagreement / (b) cursor kicks forever (r2) / (c) trust the assertion, never measure | **(a).** The platform never says how many other clients are connected, so exclusivity can only be asserted — but it is **measurable**: `push.missRate`, the fraction of records seen first by the reconciliation poll rather than by push, stays at 0 on a genuinely exclusive lane. Crossing the threshold (default 2 %, ≥ 20 samples) demotes to kick mode and states the reason on the adapter row. (c) is a prayer; (b) turns off the real-time push the owner asked for. The default is `unknown` ⇒ **asserting nothing gives you (b)** |
+| 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b)) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store | **(b), explicitly excluding (c).** WeChat's local store key exists only in the **running client's process memory**, and reading another process's memory is not something this product does (fence 13); WhatsApp's protocol libraries are unofficial clients explicitly prohibited by the platform's terms, with bans landing on ordinary use. (b) rides the user's own already-logged-in official client, so identity is genuinely the user (`identityMarking:'none'`), and its cost is honest: it sees only what is on screen, latency is in minutes, and that number is **drawn on the conversation row**. The interface models the class from P0; the adapters are P6 |
+| 20 | **Should Gmail push be on by default?** (new, r3/Q3(c)) | on by default / **available, off by default** / not at all | **Available, off by default.** Pub/Sub's pull subscription means it needs no public inbound endpoint either, and each instance can hold its own subscription, so exclusivity is easier to achieve than on Lark's long connection. But it costs a GCP topic, an IAM grant and a **daily renewal job** (the watch expires silently after 7 days and stops without a sound if one is missed), and what it buys is trading a poll that costs one request per tick when nothing changed for second-level latency. At mail's cadence that is a switch a user should turn on for their own situation, not a default |
 
 ---
 
@@ -1215,17 +1711,24 @@ they are here rather than in the code.
 Stated plainly, because a design that hides its unknowns is a design that
 discovers them in production:
 
-1. **Lark send-as-user has never been exercised** on the existing app: the scope
-   is not granted, and whether granting it requires an approval wait is unknown
-   (one prior scope change completed same-day, but the requesting account was the
-   app's creator, so it may not generalize).
-2. **Lark event subscription has never been enabled** on that app. The WS
-   long-connection lane's behaviour on this network — and its cluster-mode
-   semantics across two VibeSpace instances sharing one app — are documented but
-   unmeasured here.
-3. **The send endpoint's documented auth is a tenant token.** Send-as-user via
-   the user scope is described in the platform's own tooling references, but I
-   have not seen it succeed against this app. P4 must begin by proving it.
+1. **Lark send-as-user has never been exercised** on the existing app: neither
+   scope (`im:message` + `im:message.send_as_user`) is granted, and whether
+   granting them requires an approval wait is unknown (one prior scope change
+   completed same-day, but the requesting account was the app's creator, so it may
+   not generalize).
+2. **Lark event subscription has never been enabled** on that app. Every
+   constraint on the WS long connection (50 connections, cluster mode,
+   self-built-apps only, the 3 s ack, at-least-once with 4 retries) is taken from
+   the official documentation and listed in §6.4 — **but not one of them has been
+   run against this tenant on this network.** P1's push half opens with that.
+3. **The send endpoint accepts both token types, but "who the recipient sees" is
+   undocumented.** The documentation explicitly says this endpoint accepts
+   `tenant_access_token` or `user_access_token` and does carry a "send as the user"
+   permission; it does **not** say whether `sender.sender_type` comes back (and
+   renders) as `user` or `app` when the latter is used, and a community report
+   claims it stays `app`. That uncertainty decides §9.5's `identityMarking` for
+   Lark, which is why it is declared `unknown` and treated as `marked`, and why P4
+   must begin by proving it.
 4. **Gmail's handling of a self-issued `Message-ID`** on `messages.send` is
    undocumented in what I could reach, so the design deliberately does **not**
    rely on an `rfc822msgid:` lookup for reconciliation and uses the two-phase
@@ -1271,4 +1774,64 @@ discovers them in production:
     the engine ever moves to a worker or to a paired device (§14), the door
     becomes a cross-process problem and the argument has to be re-made — which is
     why the invariant is written as "one owner", not "we use a mutex".
+15. **Whether Lark International offers the long connection at all.** One
+    community report says the International developer console does **not** expose
+    it and only webhook mode is available — not vendor-confirmed and not
+    reproduced here. It is a precondition for P1's push half: if true, §6.4 on an
+    International tenant collapses to "poll, and never the webhook", and decision
+    3's push half is unreachable there. **P1's first act should be confirming the
+    option exists in the console.**
+16. **Gmail's Pub/Sub pull subscription has not been exercised.** Decision 20
+    rests on "a pull subscription means push needs no public inbound endpoint, and
+    each instance can hold its own subscription" — Pub/Sub's documented shape, but
+    none of it has been run against a real topic, including what the daily renewal
+    job actually looks like when one renewal is missed.
+17. **`push.missRate`'s threshold is uncalibrated.** 2 % over ≥ 20 samples is a
+    starting point derived from "it should sit at 0 on a genuinely exclusive lane",
+    not a measured number. The first week should watch it, and the demotion must be
+    **visible** (adapter row plus a log line) so the calibration comes from data
+    rather than from this paragraph.
+18. **The WhatsApp and WeChat local-client shapes have not been touched at all.**
+    §12.5 is an adapter **class** written from public material: the feasibility of
+    UI scanning, how far history scrolls, how login liveness is judged, and how
+    stable a real client is inside an agent-browser profile are all unmeasured.
+    That is also why it is P6 rather than P5 — it owes a round of investigation,
+    not a round of implementation.
+19. **The cross-reference to `docs/design-agent-browser-v2.md` does not resolve
+    today.** §12.5 and decision 19 depend on that design's profile system
+    (user-data-dir + provider + fingerprint seed + proxy + live view), and at the
+    time of this revision it lives on a separate branch and is not merged into this
+    tree. Both references should be re-checked once it is — in particular whether
+    "one long-lived logged-in official client per profile" is something its own
+    model allows.
 
+**Sources for the vendor facts introduced in r3** (public documentation, fetched
+2026-09-10; nothing here was exercised against a real tenant — see items 2, 3,
+15–18 above):
+
+- Lark/Feishu long connection — 50 connections per app, cluster mode without
+  broadcast, enterprise-self-built-apps only, no public URL:
+  <https://open.larkoffice.com/document/server-side-sdk/python--sdk/handle-events>
+- Lark/Feishu event delivery — 3 s HTTP 200 deadline, at-least-once, retries at
+  15 s / 5 min / 1 h / 6 h up to 4 times, duplicates possible, dedup on
+  `event_id`:
+  <https://open.feishu.cn/document/server-docs/event-subscription-guide/overview>
+- Lark/Feishu send message — accepts `tenant_access_token` or
+  `user_access_token`; `sender.sender_type` ∈ {`app`, `user`}; user-identity
+  sending needs `im:message` **and** `im:message.send_as_user`:
+  <https://open.feishu.cn/document/server-docs/im-v1/message/create>
+- Gmail push — `users.watch` + Cloud Pub/Sub, watch expires after 7 days and must
+  be renewed:
+  <https://developers.google.com/workspace/gmail/api/guides/push>
+- Gmail API sends carry an extra `Received:` header naming `gmailapi.google.com`
+  that web-client sends do not:
+  <https://www.gmass.co/blog/gmail-vs-api-deliverability/>
+- WhatsApp protocol libraries (whatsmeow / Baileys) are unofficial clients
+  prohibited by the platform's terms, with bans reported on ordinary use:
+  <https://github.com/tulir/whatsmeow/issues/810>
+- WeChat desktop stores are SQLCipher/WCDB-encrypted with the key held in the
+  running client's process memory — the class of tool fence 13 refuses to be:
+  <https://github.com/BenDerPan/wechat-db-decrypt>
+- Lark International's console reportedly does not expose the long connection
+  (community report, not vendor-confirmed — §20 item 15):
+  <https://github.com/openclaw/openclaw/issues/51663>
