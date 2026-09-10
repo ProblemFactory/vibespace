@@ -23,6 +23,15 @@
 > external") is **REVERSED by the owner**; what replaces it is a **warning at the moment of
 > authorization**, driven by the `identityMarking` capability (§9.5).
 >
+> **r4 (2026-09-10, the adversarial review of r3 — all five findings correct, §17.1):**
+> one fact stored in three places with no function able to read all of them, so r3's
+> push auto-demotion could not structurally win ⇒ `laneState` becomes the one lane
+> resolver and `caps.pushExclusivity` is deleted (§4, §6.4); `push.missRate` gains a
+> counting window and the demotion gains a retraction, without which it is a one-way
+> ratchet (§6.4); decision 19 deleted the only `scanSource` cell that had an ingest
+> contract, so `scanSource:'ui'` now has its own (§12.5); and `convCaps` gains a TTL
+> and three refresh triggers, one of them **at approval time** (§4, §9.2).
+>
 > Read first: the interaction record (five artboards — Main / Adapters /
 > AssignFilter / AgentReach / Outbox), CLAUDE.md's three-tier routing table,
 > `docs/design-three-tier.md`, `docs/design-background-work.md` §7 (permissions
@@ -91,7 +100,7 @@ feature spans four rows, so the mapping is spelled out once:
 | Reach ACL (three-state, requests) | **PURE** | `src/channel-acl.js` (imports `src/msg-acl.js` — PURE may import PURE) | `test-channel-acl` (fast) |
 | Outbound policy + guardrails + outbox state machine | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | Normalized message record + its renderers' data | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
-| Capability decisions (both axes, per-conversation resolution, identity warning) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
+| Capability decisions (both axes, per-conversation resolution, identity warning, **lane resolution `laneState`**) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
 | Conversation store *primitives* (durable load/append/tail/trim/flush; the **engine** owns the live index, §5.1) | **SHARED** (fs+path only) | `src/channel-store.js` | `test-channel-store` (fast) |
 | OAuth loopback consent flow (**dual-mode**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
 | Adapter interface + registry | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract` (fast, fake adapter) |
@@ -103,7 +112,7 @@ feature spans four rows, so the mapping is spelled out once:
 | Panel, window, filter editor, approval cards | **CLIENT** | `src/lib/channels-panel.js`, `src/lib/channel-window.js`, `src/lib/channel-filter-editor.js` | `test-channels-e2e` (heavy, headless chrome) |
 | Agent CLI | tracked static | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
-Four placements are load-bearing enough to state as rules:
+Five placements are load-bearing enough to state as rules:
 
 - **An adapter never touches the store, the ACL, the policy or the spend
   guard.** It returns typed records and takes a send request. Everything it can
@@ -118,6 +127,13 @@ Four placements are load-bearing enough to state as rules:
   module offers durable primitives and deliberately offers nobody a
   "write the whole index" call, because two adapter poll loops overlap by design
   and a read-modify-write around an atomic write is not atomic.
+- **"Which lane is in use" has exactly one place that answers it** (r4, §4). The claim
+  (`push.claimedExclusive` on the adapter record), the measurement (`push.state` /
+  `push.missRate`) and the observation (the per-conversation `lane`) are three different
+  facts and each stays where it is; but **only `laneState()` folds them into an answer**,
+  with the precedence **demotion > liveness > claim**. The panel's chip, fence 12's
+  coalescing window and the scheduler's cadence all ask it, and none of them reads
+  `caps.receive`.
 - **Capability has two axes, and it is not one global boolean** (r3/Q3, §4).
   What an adapter *could ever* do (`caps` — static, declared) and what it can do
   *on this conversation right now* (`convCaps(convId)` — resolved, three-valued)
@@ -252,10 +268,13 @@ and each has an obvious way this feature would break it.
     **coalescing was an accidental property of polling** — one pass handed the
     filter a minute's worth of messages at once, so they were naturally one wake.
     Push removes that accident, and 30 messages become 30 deliveries. So when
-    `receive === 'push'` and `notify: 'wake'`, the engine applies a coalescing
-    window (default 60 s) **before** the wake decision, so one burst is still one
-    wake. Forget this and the act of "turning on real-time push" multiplies a
-    conversation's bill by thirty.
+    `laneState(…).carryContent` is true and `notify: 'wake'`, the engine applies a
+    coalescing window (default 60 s) **before** the wake decision, so one burst is
+    still one wake. Forget this and the act of "turning on real-time push"
+    multiplies a conversation's bill by thirty. The gate is deliberately **not**
+    `caps.receive === 'push'` (r4): in kick mode the records arrive by poll, and one
+    poll pass has already coalesced them — opening the window there buys 60 s of
+    latency for nothing.
 13. **Never read another process's memory, and never ship an adapter whose
     transport is prohibited by the platform's terms without one named
     acknowledgement.** (r3/Q3(b)) This is load-bearing for the local-client class:
@@ -293,8 +312,9 @@ adapter can send into **this** conversation" are different claims.
     // ——— axis 1: HOW MESSAGES ARRIVE ———————————————————————————————
     receive:        'push',           // 'push' | 'poll' | 'scan'  — the BEST lane it has
     pushTransport:  'ws-long-conn',   // 'ws-long-conn' | 'pubsub-pull' | 'webhook' | null
-    pushExclusivity:'unknown',        // 'exclusive' | 'shared' | 'unknown'  (§6.4 — decides
-                                      //  whether push may carry CONTENT or only KICK a cursor)
+                                      // exclusivity is NOT here: it is a per-DEPLOYMENT
+                                      // configuration fact, so it lives on the adapter RECORD
+                                      // (push.claimedExclusive) and only laneState() resolves it
     pushAckBudgetMs: 3000,            // vendor's own deadline; we ack after DURABILITY (fence 11)
     pollInterval:   { hot: 30, cold: 300, floor: 10 },   // seconds; `floor` is the VENDOR's
     scanSource:     null,             // 'store' | 'ui' | null  — only when receive === 'scan'
@@ -322,11 +342,13 @@ adapter can send into **this** conversation" are different claims.
   async listConversations({ cursor, limit })
         -> { conversations: [ChannelConversation], cursor, complete }
 
-  // axis 1 resolved for ONE conversation — three-valued, cached in the index with its age
+  // axis 1 resolved for ONE conversation — three-valued, cached in the index with its age.
+  // The cache has a TTL (6 h) and three refresh triggers; past the TTL it resolves to
+  // read:'unknown' / sendAs:[] / why:'stale'  —  see below, this is NOT a cache-forever
   async convCaps(convId)
         -> { read:'yes'|'no'|'unknown',
              sendAs: [...],                       // SUBSET of caps.sendAs that holds HERE
-             why: 'not-a-member'|'bot-not-in-chat'|'read-only-mailbox'|'left-group'|null,
+             why: 'not-a-member'|'bot-not-in-chat'|'read-only-mailbox'|'left-group'|'stale'|null,
              at }
 
   async history(convId, { anchor, limit })
@@ -350,20 +372,73 @@ adapter can send into **this** conversation" are different claims.
 exist at all":
 
 ```js
+laneState(caps, adapterRecord, convEntry, now)          // r4 — added for the reason below
+      -> { via:         'push'|'poll'|'scan',   // the lane actually carrying this conversation NOW
+           carryContent: boolean,               // may push carry CONTENT, or only KICK a cursor
+           live:         boolean,               // positive evidence only: a socket AND a beat inside the window
+           pollCadence:  'fast'|'reconcile',
+           why:          'exclusive'|'kick-shared'|'kick-unknown'|'demoted'|'push-dead'|'poll'|'scan' }
 offers(caps, convCaps, what)   // what ∈ 'send-as-user'|'send-as-bot'|'fetch-attachment'|…
       -> { offered: boolean, why: string|null }      // 'unknown' ⇒ offered:false + the reason
 identityWarning(caps)          -> { level:'none'|'warn', text }        // §9.5
-freshnessClaim(caps, convState)-> { kind:'live'|'within'|'scanned', seconds, text }
+freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, text }   // lane = laneState()'s answer
 ```
 
-Three consumers read the same record, each for its own face:
+`laneState` is **added by r4**, and what it fixes is structural: "which lane is
+actually in use, is it live, and may it carry content" — one fact — used to live in
+three places: `caps.pushExclusivity` (static, declared per adapter **kind**),
+`push {claimedExclusive, state, demotedAt}` on the adapter record, and
+`lane {via, lastPushAt}` in the per-conversation index. §6.4 said only that the first
+two "together decide it" and never which wins; worse, this section calls
+`src/channel-caps.js` the **one** place that answers, and not one of the three
+functions it exported took the adapter record — so none of them could **read**
+`push.state` / `push.claimedExclusive` / `push.demotedAt` at all. Three
+consequences, each of them a failure shape this document itself names:
 
-- **The panel** draws every row's freshness chip from `freshnessClaim` (push =
+1. **§6.4's auto-demotion cannot structurally win.** The demotion writes `demotedAt` /
+   `demotedWhy` onto the **record**, while the content-vs-kick decision is attributed to
+   `caps.pushExclusivity` — so a demoted lane keeps carrying content while the adapter
+   row says it has been demoted.
+2. **The freshness chip lies about `live`.** It is drawn off `caps.receive === 'push'`,
+   a static declaration — which is exactly the `opencode-events` round-4 lesson §6.4
+   itself cites: a lane that lies about being `active` is worse than no lane, because it
+   turns the fallback off.
+3. **Fence 12's coalescing window runs in kick mode too.** It is gated on
+   `caps.receive === 'push'` as well, and in kick mode the records arrive by poll, which
+   already coalesces — 60 s of latency bought for nothing.
+
+So `caps.pushExclusivity` is **deleted**: exclusivity is a **per-deployment**
+configuration fact (§6.4 says so itself), and `caps` is by definition the static
+per-**kind** declaration (§2), which is not where a deployment fact belongs.
+`caps.pushTransport` stays — that one genuinely is static. What replaces it is **one
+resolver, one answer**, with the precedence fixed and written down:
+
+> **Demotion > liveness > claim.** Demoted ⇒ `carryContent:false` (only the party that
+> made the claim can retract the demotion, §6.4); not demoted but the lane is not `live`
+> ⇒ `carryContent:false` and `pollCadence:'fast'`; only past both does
+> `push.claimedExclusive` get a say. **`unknown` is always `carryContent:false`** — r2's
+> behaviour is still the default.
+
+"A fact only one producer may state" is a written law in CLAUDE.md (*两个函数回答同一个
+问题就说明其中一个是错的*), and its form here is: the three storage sites may all stay
+(a claim, a measurement and an observation are different facts), but **there may be only
+one place that folds them into an answer.**
+
+Four consumers read the same record, each for its own face — and **every
+lane-shaped decision goes through `laneState`, none of them reads `caps.receive`**:
+
+- **The panel** draws every row's freshness chip from
+  `freshnessClaim(laneState(…), convEntry)` (a **live, content-carrying** push =
   "live", poll = "≤ 30 s", scan = "last scanned <t> ago" — **a scan source's
   latency is shown on the conversation**, because it is the one number a user
-  needs before handing that lane a job), uses `offers()` to decide whether the
-  send affordance exists on the composer and the approval card at all, and uses
-  `identityWarning` for the warning on the card (§9.5).
+  needs before handing that lane a job). A demoted or non-`live` push lane draws
+  the lane it is **actually** on, never the one it declared. It also uses
+  `offers()` to decide whether the send affordance exists on the composer and the
+  approval card at all, and `identityWarning` for the warning on the card (§9.5).
+- **The ingest engine** (§6.2's scheduler) takes this tick's poll cadence from
+  `laneState(…).pollCadence` and decides from `laneState(…).carryContent` whether a
+  push event goes normalize → append or merely kicks the cursor — which is also
+  fence 12's coalescing gate (§6.1, §6.4).
 - **The filter / assignment engine** uses `offers()` to make `authority:'send'`
   **unselectable** (an assignment that can never send is a lie, §7.3), and
   `freshnessClaim` to state honestly on the AssignFilter panel roughly how long
@@ -398,7 +473,28 @@ a **fake adapter** plus every registered real one in shape-only mode):
 - **on an adapter with `sendAs: []`, `send()` and `reply` are not "failures", they
   do not exist**: they return a typed `send-not-available` plus the reason `caps`
   itself gives, and the outbox **creates no proposal at all**. A proposal that can
-  never be sent asks a user to approve something that is then guaranteed to fail.
+  never be sent asks a user to approve something that is then guaranteed to fail;
+- **`convCaps` is a cache with a TTL, not a stored fact** (r4). The TTL defaults to
+  **6 hours** and there are exactly three refresh triggers: ① when the user marks a
+  conversation tracked; ② on the first panel render past the TTL; and ③
+  **unconditionally at approval time, immediately before the send** — the one moment
+  where being wrong costs a real message. An entry past the TTL resolves to
+  `read:'unknown'` / `sendAs: []` / `why:'stale'`, which `offers()`'s existing rule
+  (`unknown` ⇒ not offered, with the reason) already renders, so the degrade needs no
+  new vocabulary. **The reason is §5 invariant 7**: a derived value never becomes a
+  stored fact, and `convCaps` differs from `unread` / `hits7d` in that it is the result
+  of a vendor round trip and is **not locally re-derivable** — so what it owes is not
+  "always recomputable" but a TTL plus an honest degrade. Without this, a week-old
+  cached `sendAs:['user']` for a group the user has since left (`why:'left-group'` is
+  already in the enum, so this state is anticipated) still draws the composer
+  affordance and still lets the assignment be created, producing **exactly** the
+  proposal the previous rule forbids;
+- **an adapter with `receive: 'scan'` may not declare `history: 'none'`** (r4, §12.5).
+  §5 invariant 4 requires a *complete pass* before the anchor advances and
+  `complete:false` to mean "do not advance", and an adapter with no paging call can
+  report neither; and by this section's first rule an undeclared capability **throws**,
+  so §6.3's "stop at the stored anchor" cannot happen on it. A synthetic adapter
+  declaring `receive:'scan'` + `history:'none'` must fail the contract suite.
 
 `ChannelRecord` (PURE, `src/channel-record.js`) is the one normalized shape:
 
@@ -436,7 +532,8 @@ data/channels/
                                 participants summary, lastAt, unread, tracked, anchor,
                                 assignment, filterId, policy, pendingTodoId, reachEntries[],
                                 stats {hits7d, msgs7d},
-                                convCaps {read, sendAs[], why, at}        // §4, cached WITH its age
+                                convCaps {read, sendAs[], why, at}        // §4: cached WITH its age,
+                                                                         //     TTL 6 h, then 'stale'
                                 lane    {via:'push'|'poll'|'scan', lastPushAt, lastPollAt,
                                          lastScanAt, firstSeenByPoll, firstSeenTotal}  // §6.4
   msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY message log, one ChannelRecord per line
@@ -454,7 +551,12 @@ Invariants, each with its reason:
 2. **Dedup by `(adapterId, convId, vendorId)`,** held as a bounded in-memory set
    per open conversation and rebuilt from the log tail on demand. A replayed page
    (which Lark's anchor semantics guarantee at the boundary, and which a Gmail
-   history replay also produces) must be a no-op, never a duplicate.
+   history replay also produces) must be a no-op, never a duplicate. **`vendorId`
+   is required**, and an adapter that scrapes a screen from a client exposing no
+   stable message id must **declare a synthetic key** and mark the synthesis
+   (§12.5's `'ui'` cell) — this invariant needs a key, not a vendor-supplied one;
+   but a key that does **not** say it is synthetic turns every re-scan into a batch
+   of duplicates.
 3. **One writer, one order.** Every mutable per-conversation fact — `unread`,
    `lastAt`, `anchor`, `assignment`, `stats`, `pendingTodoId`, the agent-group
    rotation counter — lives in one index, and **two adapter passes overlap by
@@ -488,7 +590,12 @@ Invariants, each with its reason:
    `msgs7d` are recomputed from the log and the read marker; they are cached in
    the index for render speed and are always re-derivable. The quota-model
    incidents (a stored `state` outliving the reading it described) are why this
-   sentence is here.
+   sentence is here. **`convCaps` is the one named exception, and it pays for it**
+   (r4): it is the result of a vendor round trip and is not locally re-derivable, so
+   what it gets is not an exemption but **a TTL (6 h), three refresh triggers, and a
+   past-the-TTL degrade to `unknown`** (§4). That is what finally gives the stored
+   `at` a reader — before r4 it had none, and in this repo a field with no reader is
+   "the fix was never wired".
 
 ### 5.1 Who owns the index
 
@@ -544,7 +651,7 @@ LANE ─┼─ poll  : adapter.history() ─────────┼─► no
                                                                          │
                         ├─► broadcast 'channels-updated'  (once per pass / per coalesced burst)
                         │
-                        └─► COALESCE (60 s window when the lane is push — fence 12)
+                        └─► COALESCE (60 s window when laneState().carryContent — fence 12)
                               └─► for each ASSIGNED conversation:
                                     channelFilter.matchRecord(filter, record)
                                       └─ hit ─► assignment.route (agent | rotating group)
@@ -571,7 +678,10 @@ One loop per adapter, never a loop per conversation. Each tick:
 - spends a **request budget** (default 20/min/adapter, a setting) on: every *hot*
   conversation (assigned, or open in a client window right now) at the fast
   cadence (30 s), then *tracked-but-cold* ones round-robin at the slow cadence
-  (5 min);
+  (5 min) — but both numbers pass through **`laneState(…).pollCadence`** first (§4):
+  `'reconcile'` drops the whole adapter to the 15-minute reconciliation cadence,
+  `'fast'` is the two numbers above. The scheduler **never reads** the claim,
+  `push.state` or `caps.receive` itself (r4);
 - jitters, and backs off exponentially per adapter on `rate-limited` /
   `transport`, resetting on a clean pass;
 - **stops entirely** on `auth-expired` and surfaces it — a loop that keeps
@@ -590,7 +700,9 @@ changed. That number matters because **polling does not disappear when push is
 turned on**: it drops to a much slower **reconciliation cadence** (default
 15 min, a setting) and changes job from *latency* to *completeness*. §6.4 says
 why that is not conservatism but a consequence of what the push lane itself
-guarantees.
+guarantees — and "which cadence is it right now" is answered in one place by
+`laneState`, so a demoted or dead push lane hands the fast cadence back
+**immediately** without anything else re-deciding it.
 
 ### 6.3 Per-adapter ingest
 
@@ -629,9 +741,11 @@ on some machine and whatever it writes down or draws (§12.5). `scanSource:
 "read what that client rendered", driven by an agent-browser profile (see
 `docs/design-agent-browser-v2.md`). Both are **periodic scans with a cursor**,
 both may add an optional change notification (an fs.watch on the store file; a
-DOM mutation for the UI), and for both the latency is **the number drawn on the
-conversation row**, because it is the one thing a user must know before handing
-that lane a job. Sending is either through the client's own UI (agent-browser
+DOM mutation for the UI) — **and what that cursor is on `'ui'`, and what "a
+complete pass" means for a scroll-bounded read, are spelled out line by line in
+§12.5**, because after decision 19 `'ui'` is the whole of this class as shipped.
+For both the latency is **the number drawn on the conversation row**, because it
+is the one thing a user must know before handing that lane a job. Sending is either through the client's own UI (agent-browser
 typing) or through the protocol — and the latter carries fence 13's terms risk.
 The interface for this class exists from P0 (`scan` / `scanSource` / `convCaps` /
 `tosRisk` are all slots kept for it); the WhatsApp and WeChat adapters themselves
@@ -664,32 +778,60 @@ So the rule is replaced by a narrower and more honest one:
 > **measured** by the product, and **demoted by the product itself** when the
 > measurement disagrees with the assertion.
 
-`caps.pushExclusivity`, together with `push.claimedExclusive` on the adapter
-record, decides it:
+**The claim has exactly one home — `push.claimedExclusive` on the adapter record**
+(`'exclusive'` / `'shared'` / `'unknown'`), because it is a **per-deployment** fact;
+and **the resolution has exactly one place** — §4's
+`laneState(caps, adapterRecord, convEntry, now)`, with the precedence **demotion >
+liveness > claim**. Before r4 it also lived in `caps.pushExclusivity`, which is why
+the auto-demotion below could not structurally win — see §4.
 
 - **`exclusive`** — the user declared in the connect wizard that this app's push
-  lane belongs to this instance. Push **carries content**: the event's message
-  goes normalize → append → ack → coalesce → filter. Polling drops to the 15-minute
-  **reconciliation cadence** — no longer the latency mechanism, still the
-  completeness one.
-- **`shared` / `unknown`** — push is **only a cursor kick**, i.e. r2's rule kept
-  verbatim (wake the backoff *sleep*, not merely abort a fetch — the
-  `opencode-events` lesson, where a lane that only aborted the fetch took 25 s to
+  lane belongs to this instance. Push **carries content** (`carryContent:true`): the
+  event's message goes normalize → append → ack → coalesce → filter. Polling drops to
+  the 15-minute **reconciliation cadence** (`pollCadence:'reconcile'`) — no longer the
+  latency mechanism, still the completeness one.
+- **`shared` / `unknown`** — push is **only a cursor kick** (`carryContent:false`),
+  i.e. r2's rule kept verbatim (wake the backoff *sleep*, not merely abort a fetch —
+  the `opencode-events` lesson, where a lane that only aborted the fetch took 25 s to
   go live). Polling stays at the fast cadence. The default is `unknown`, so
   **asserting nothing gives you r2's behaviour**.
+- **demoted, or not `live`** — whatever the claim says, `carryContent:false` and
+  `pollCadence:'fast'`. That is the whole of the precedence: a claim the product has
+  itself withdrawn may no longer decide which lane a single byte takes.
 
 **An assertion must be falsifiable or it is a prayer.** The platform never tells
 us how many other clients are connected, so exclusivity is **asserted, never
 inferred** — but it is **measurable**: the engine records
 `firstSeenByPoll / firstSeenTotal` per adapter, the fraction of records seen
-first by the reconciliation poll rather than by push (`push.missRate`). On a
-genuinely exclusive lane that number stays at 0. Crossing a threshold (default
-2 %, with at least 20 samples) **auto-demotes the lane to kick mode**, records
-`demotedAt` / `demotedWhy`, and says so on the adapter row: *"push is not
-exclusive here — fell back to cursor kicks, polling returned to the fast
-cadence"*. That path is this feature's instance of the rule that **a claim must
-be retractable by whoever made it** (the login-expiry lesson): the product states
-something, then measures it, then withdraws it itself.
+first by the reconciliation poll rather than by push (`push.missRate`; the
+counters live per conversation on the index's `lane` and are aggregated per adapter
+into that one ratio). On a genuinely exclusive lane that number stays at 0.
+Crossing a threshold (default 2 %, with at least 20 samples) **auto-demotes the
+lane to kick mode**, records `demotedAt` / `demotedWhy`, and says so on the adapter
+row: *"push is not exclusive here — fell back to cursor kicks, polling returned to
+the fast cadence"*. That path is this feature's instance of the rule that **a claim
+must be retractable by whoever made it** (the login-expiry lesson): the product
+states something, then measures it, then withdraws it itself.
+
+That measurement owes two sentences, and without either of them it is a **one-way
+ratchet** (r4):
+
+1. **Count only while the lane is actually carrying content, and only over a rolling
+   window** — the last N records or the last 24 h, whichever is larger. The reason is
+   arithmetic: in kick mode push **carries no records at all**, so every record is
+   first-seen-by-poll and the ratio tends to 1.0 by construction — a lifetime
+   cumulative ratio would pin a demoted lane above the threshold **forever**. Ticks
+   where `laneState(…).carryContent` is false therefore contribute **no samples**, so
+   the metric cannot poison itself.
+2. **A demotion is retractable by whoever made the claim.** This is the auto-resume
+   `edgeHeld` lesson in this feature's shape (*HELD, never SPENT … burning the wall
+   would turn one transient disagreement into a permanent refusal*). The retraction is
+   a **human** act: re-asserting exclusivity in the connect wizard resets the counters
+   and retries the lane once, and the adapter row shows `demotedWhy` beside a
+   "re-assert to retry" affordance. **The counters are never the trigger** — a demoted
+   lane must not climb back on its own even when the fixture stops withholding, because
+   the evidence that would let it recover (push seeing a record first) is exactly what
+   it cannot produce in kick mode.
 
 **Liveness is positive evidence only** (the `opencode-events` round-4 lesson — a
 lane that lies about being `active` is worse than no lane, because it turns the
@@ -983,6 +1125,16 @@ in place sets `edited: true` and stores both bodies; the receipt says so. The
 card also carries an **identity row** ("will be sent as ‹user name›") and, when
 `identityMarking` is not `none`, the warning — verbatim from
 `caps.identityMarkingText` (§9.5).
+
+**Approving re-resolves `convCaps`, immediately before the send, unconditionally**
+(r4 — §4's third refresh trigger). A proposal can sit in `awaiting-approval` for up
+to 24 h (its own TTL), and in that time the conversation may perfectly well have
+removed the user, turned the mailbox read-only, or been dissolved — `why:'left-group'`
+is already in the enum. When the re-resolution answers "cannot send", the approval
+**does not send**: it stops with the typed `send-not-available` plus the reason
+`convCaps` itself gives, the proposal lands in `failed`, and the receipt carries that
+reason verbatim back to the agent. This is the one moment where being wrong costs a
+real message, so it is the one refresh that may not be skipped.
 
 ### 9.3 What the agent gets back
 
@@ -1362,7 +1514,7 @@ writes down or draws. Hence `receive: 'scan'`, plus a second question — scan
 | `scanSource` | Reads | Sends | Reality |
 |---|---|---|---|
 | `'store'` | The local store the client wrote, incrementally with a cursor, optionally with an fs.watch for change notification | Through a protocol library, or falls back to `'ui'` | Only holds where that store is **readable at all** |
-| `'ui'` | What the client **rendered**, driven by an agent-browser profile (`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + fingerprint seed + proxy, plus a live view VibeSpace owns) | agent-browser typing into the client's own composer | Sees only what is on screen, so history is "as far as it will scroll" — `history: 'none'` or `'page'` |
+| `'ui'` | What the client **rendered**, driven by an agent-browser profile (`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + fingerprint seed + proxy, plus a live view VibeSpace owns) | agent-browser typing into the client's own composer | Sees only what is on screen, so history is "as far as it will scroll" — `history: 'page'`, **never `'none'`** (see below) |
 
 The two concrete platforms land in **different** cells, and that difference is the
 risk statement the owner asked for:
@@ -1382,6 +1534,30 @@ risk statement the owner asked for:
   tool extracts it from. **Reading another process's memory is not something this
   product does** (fence 13), so WeChat's `scanSource: 'store'` route **does not
   exist**; only `'ui'` remains.
+
+**The `'ui'` cell owes three lines of ingest contract of its own** (r4). Decision 19
+excludes `'store'` for **both** platforms (WeChat by fence 13's memory rule; WhatsApp
+because refusing the protocol libraries leaves only `'ui'`), so `'ui'` is this class
+**as shipped** — while the cursor in §6.3's "both are periodic scans with a cursor"
+had only ever been described for `'store'`. Without these three lines the cell cannot
+satisfy the store's own invariants:
+
+- **The anchor.** Prefer the client's own message id; when the client exposes no
+  stable id, the adapter must **declare** a synthetic key
+  `(convId, renderedAt, sha256(author|text))` written to `ChannelRecord.vendorId` with
+  `raw.synthetic: true` — so §5 invariant 2 still has a key, and the fact that we
+  made it up is **visible** (it is what decides whether a re-scraped screen collapses
+  to one record). Its cost is stated: two byte-identical messages from the same author
+  inside one render tick collapse into one, which is better than minting duplicates on
+  every scroll — and both directions are pinned by the parity leg below.
+- **What "a complete pass" means** for a scroll-bounded read: scrolled back to the
+  stored anchor ⇒ `complete: true`; hit the scroll limit first (the client will not
+  give any more) ⇒ `complete: false`, i.e. **the anchor does not move** and the next
+  pass re-reads. Same rule as §5 invariant 4, different evidence.
+- **`history: 'none'` is forbidden on `receive: 'scan'`** (§4's contract rules). §5
+  invariant 4 wants a complete pass and a `complete:false`, and an adapter with no
+  paging call can report neither; §4 makes an undeclared capability **throw**, so
+  §6.3's "stop at the stored anchor" cannot happen on it.
 
 **Three properties the class shares**, all of which fall straight into machinery
 that already exists:
@@ -1433,7 +1609,7 @@ system landing.
 |---|---|---|
 | Plugin-contributed adapters | The manifest has no adapter contribution point; the sandbox would need net+fs grants; and the receive path must run beside the store and the spend guard. Third-party adapters are the right *eventual* home | `contributes.channelAdapters`, over the same `src/channels` interface, so the registry never forks. **The key is not reserved today**: `RESERVED_CONTRIBUTIONS` in `src/plugin-manifest.js` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, and only keys *in that list* produce the "reserved for a later phase — ignored" warning — anything else is silently discarded when `m.contributes` is rebuilt to a fixed shape, so a plugin author following this row would get **no signal at all**. **P0 adds the one word**, plus the expected-set update in `scripts/test-plugin-loader.mjs`. A declared-but-inert slot is the same failure this document argues against for `SPEND_REASONS`; the difference is that here the slot costs one array entry and buys an honest warning |
 | Adapters on a paired device | Credentials and the store live here | The interface already takes a machine handle; v1 passes `local`. `hostId` is a parameter, never a branch |
-| ~~Live event lanes~~ **promoted to P1** (r3/Q3(a)) | No longer deferred: the owner asked for real-time push and §6.4 re-argues it from the evidence. The one gate left is enabling event subscription in the Lark console | `src/channels/live/<kind>.js`; content or cursor kick decided by `pushExclusivity` |
+| ~~Live event lanes~~ **promoted to P1** (r3/Q3(a)) | No longer deferred: the owner asked for real-time push and §6.4 re-argues it from the evidence. The one gate left is enabling event subscription in the Lark console | `src/channels/live/<kind>.js`; content or cursor kick decided by `laneState()` (§4) |
 | Local-client adapters (WhatsApp / WeChat) | The interface models them from P0 (`scan` / `scanSource` / `tosRisk` / `convCaps`), but the adapters need a logged-in official client, an agent-browser profile, and one named decision about terms risk | **P6**, §12.5; gated on decision 19 and the agent-browser system |
 | WhatsApp sending via a protocol library | Unofficial clients are prohibited by the platform's terms, and bans land on ordinary use (fence 13) | Forever behind `tosRisk: 'prohibited'`; the compliant route is the official Business Cloud API (bot identity) |
 | HTML mail rendering | XSS surface; plain text is honest and sufficient for triage | The published-pages sandboxed-iframe pattern |
@@ -1473,10 +1649,10 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channel-outbox` | fast | the state machine (every transition and every forbidden one); guardrails stack and can only tighten; fail-closed on unknown policy; `unknown` never auto-retries | a patched copy with the guardrail check removed must go red; a direct-send policy with a link must still review |
 | `test-channel-record` | fast | normalization incl. mention-placeholder resolution; the injection-marker strip | a body containing our own frame markers must come out inert |
 | `test-channel-store` | fast | atomic index; append-only logs; dedup on replayed pages; cursor advances only on a complete pass; retention floor ≥ 7 days; **two concurrent passes through `index.update()` both land** (§5.1) | a pass reporting `complete:false` must leave the cursor unchanged; a patched copy doing read-modify-write around `writeJsonAtomic` must **lose** one pass's anchor advance |
-| `test-channel-adapter-contract` | fast | the fake adapter drives every declared capability; an undeclared one throws; typed errors; **the grep census that no call site branches on `kind`** | a synthetic adapter branching on its own kind in a call site must fail the census |
-| `test-channel-caps` | fast | both axes of the record; `convCaps` three-valued; **a control exists only when `caps` AND `convCaps` agree**, and `unknown` always renders as not-offered-with-a-reason; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim`'s wording per lane; `identityWarning` speaks for `unknown` exactly as for `marked` | a synthetic adapter declaring `sendAs:['user']` that still offers the control on a conversation whose `convCaps.sendAs === []` must go red; an adapter returning a `convCaps` wider than `caps` must go red; `identityMarking:'unknown'` with no warning must go red |
-| `test-channels-lane-parity` | fast | **one day of traffic driven through push / poll / scan ⇒ the same records, the same wake count, the same charges** (fence 12); the same message arriving once by push and once by poll collapses to one (dedup on the message id); event replays dedup on `event_id` | a push-lane copy that **bypasses the coalescing window** must wake more on the same burst; a copy that acks **before** durability must lose records at the injected crash point |
-| `test-channels-identity` | fast | no sender honesty line by default; `identityMarking` drives the approval-card warning and the receipt fields; the audit line carries `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` and **never leaves the instance**; on a `sendAs: []` conversation `reply` returns `send-not-available` and **creates no proposal** | a copy with the honesty line defaulted ON must go red (r2's decision 17 is this leg's negative control); a `marked` channel whose approval card carries no warning must go red; a proposal created on a `sendAs: []` conversation must go red |
+| `test-channel-adapter-contract` | fast | the fake adapter drives every declared capability; an undeclared one throws; typed errors; **the grep census that no call site branches on `kind`**; **a `receive:'scan'` adapter may not declare `history:'none'`** (r4, §12.5) | a synthetic adapter branching on its own kind in a call site must fail the census; a synthetic adapter declaring `receive:'scan'` + `history:'none'` must go red |
+| `test-channel-caps` | fast | both axes of the record; `convCaps` three-valued; **a control exists only when `caps` AND `convCaps` agree**, and `unknown` always renders as not-offered-with-a-reason; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim`'s wording per lane; `identityWarning` speaks for `unknown` exactly as for `marked`. **Two r4 groups**: `laneState`'s precedence — a record with `claimedExclusive:true` **and** `demotedAt` set must answer `carryContent:false`, a lane silent past the heartbeat window must **never** answer `live:true`, and `unknown` is always `carryContent:false`; and `convCaps`'s TTL — an entry past the TTL must render `unknown` | a synthetic adapter declaring `sendAs:['user']` that still offers the control on a conversation whose `convCaps.sendAs === []` must go red; an adapter returning a `convCaps` wider than `caps` must go red; `identityMarking:'unknown'` with no warning must go red; **a pre-fix copy reading `caps.pushExclusivity` must answer `carryContent:true` on the demoted fixture**; **a fresh `convCaps` must still offer the control** (the TTL's positive control — a rule that always answers `unknown` is equally a defect) |
+| `test-channels-lane-parity` | fast | **one day of traffic driven through push / poll / scan ⇒ the same records, the same wake count, the same charges** (fence 12); the same message arriving once by push and once by poll collapses to one (dedup on the message id); event replays dedup on `event_id`; **r4's scan arm: the same screen scraped twice must be a no-op** (the synthetic anchor, §12.5), and hitting the scroll limit first ⇒ `complete:false` ⇒ the anchor does not move | a push-lane copy that **bypasses the coalescing window** must wake more on the same burst; a copy that acks **before** durability must lose records at the injected crash point; **a copy that drops the synthetic key must turn every record into a duplicate on the second scan** |
+| `test-channels-identity` | fast | no sender honesty line by default; `identityMarking` drives the approval-card warning and the receipt fields; the audit line carries `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` and **never leaves the instance**; on a `sendAs: []` conversation `reply` returns `send-not-available` and **creates no proposal**; **r4: a proposal approved against a `convCaps` that went stale must re-resolve before the send and refuse with `send-not-available`** | a copy with the honesty line defaulted ON must go red (r2's decision 17 is this leg's negative control); a `marked` channel whose approval card carries no warning must go red; a proposal created on a `sendAs: []` conversation must go red; **a copy that does not re-resolve at approval time must actually send the message** |
 | `test-channels-egress` | fast | every constructed outbound request comes either from the adapter declaring its host or from an allowlisted `(file, host)` pair **with a reason** — seeded with `src/gmail-sync.js` and `src/mounts.js` (§3.1) | a scratch file with an undeclared host must go red; a **dead allowlist entry** (file moved or renamed) must go red too |
 | `test-oauth-loopback` | fast | both modes (§12.4): ephemeral bind for Gmail, fixed bind for Lark; `state` rejection on the request handler **and** on paste-back; the port released on completion/cancel/timeout | a **pre-bound** fixed port must produce the named refusal and the paste-back fallback, never an opaque `EADDRINUSE`; a callback with a wrong `state` must be rejected in both modes |
 | `test-channels-lark-shape` | fast | recorded-fixture normalization: `next_page_token` paging *to the anchor*, `@_user_N` placeholder resolution against the record's own `mentions`, typed errors | a fixture whose anchor lies on the **second** page must be paged into, not stopped at page one |
@@ -1484,7 +1660,7 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channels-agent-cli` | fast | CLI verbs against a stub server; `reply` proposes and never sends; invisible = uniform error | a stub returning a conversation the ACL hid must still produce the uniform error |
 | `test-spend-paths` (existing) | fast | its per-site census must see the new producer, wired, with the declared reason | already carries its own controls |
 | `test-channels-engine` | heavy | real worktree server + fake adapter: burst-day paging, backoff, single-flight, failure surfacing **and retraction**, digest batching, wake authorization and hold release | a pre-fix copy using a fixed-window fetch must lose messages on the burst-day fixture |
-| `test-channels-push` | heavy | real worktree server + a **fake push server**: ack after durability (inject a crash between ack and processing — the record must still be there); heartbeat silence ⇒ `state` leaves `live` **and** the poll cadence returns to fast immediately; `stop()` terminal for an arm in flight; a lane claiming `exclusive` while the fixture withholds some events ⇒ `missRate` crosses the threshold ⇒ **auto-demotion to kick with its reason stated** | a lane that **lies about being `active`** (pre-fix copy) must turn the poll fallback off and lose messages; a copy that never demotes must lose messages forever on the withholding fixture |
+| `test-channels-push` | heavy | real worktree server + a **fake push server**: ack after durability (inject a crash between ack and processing — the record must still be there); heartbeat silence ⇒ `state` leaves `live` **and** the poll cadence returns to fast immediately; `stop()` terminal for an arm in flight; a lane claiming `exclusive` while the fixture withholds some events ⇒ `missRate` crosses the threshold ⇒ **auto-demotion to kick with its reason stated**. **Three r4 legs**: after the demotion the lane **actually changes what it carries** (the next event only kicks the cursor and the record arrives by reconciliation poll — asserting that `missRate` crossed is not enough); in kick mode `missRate` **gains no samples at all** (otherwise it is a one-way ratchet); and a demoted lane **never re-promotes itself** even when the fixture stops withholding, while re-asserting exclusivity in the connect wizard clears the counters and re-enters content mode | a lane that **lies about being `active`** (pre-fix copy) must turn the poll fallback off and lose messages; a copy that never demotes must lose messages forever on the withholding fixture; **a pre-fix copy reading the content/kick decision off `caps` must keep carrying content after the demotion**; **a copy counting `missRate` over the adapter's lifetime must still sit above the threshold after a re-assert** |
 | `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate | the estimate must change when a rule is added, and a review-required channel must not offer "may send" |
 
 Fixture hygiene applies from the first commit, because these are live incidents:
@@ -1539,6 +1715,30 @@ artefact was never the appended text, it was a warning at the moment of
 authorization. Neither change is "more conservative" or "more aggressive": both
 are **saying the sentence to the party it is owed to**.
 
+### 17.1 The adversarial review of r3 (r4)
+
+Five findings were raised against the r3 revision. Each was checked against the tree
+at `a41bf513` first; **all five were correct** and all five are fixed above — none had
+to be recorded as a wrong correction.
+
+| # | Finding | Verdict | What changed |
+|---|---|---|---|
+| 1 | "Which lane is in use, is it live, may it carry content" lives in `caps.pushExclusivity`, the adapter record's `push {…}` and the per-conversation `lane {…}` with no stated precedence and **no accessor able to read the adapter record** — so r3's auto-demotion cannot structurally win | **Confirmed, and it is three consequences rather than one.** §4 calls `src/channel-caps.js` the **one** place that answers, yet none of its three exports takes the adapter record; §6.4 says only that the first two "together decide it" ⇒ (a) a demoted lane keeps carrying content, (b) the freshness chip draws "live" off a static declaration (exactly the `opencode-events` round-4 lesson it cites), (c) fence 12's coalescing window runs in kick mode too, buying 60 s of latency for nothing | `caps.pushExclusivity` **deleted** (exclusivity is a per-deployment configuration fact and does not belong in a static per-kind declaration; `pushTransport` stays, it genuinely is static); `src/channel-caps.js` gains the **one** resolver `laneState(caps, adapterRecord, convEntry, now)` with the precedence **demotion > liveness > claim** and `unknown ⇒ carryContent:false`; all four consumers (the chip, fence 12's gate, §6.4's cadence, §6.2's scheduler) re-pointed at it and §2 gains a fifth placement rule; `test-channel-caps` and `test-channels-push` each gain legs, the latter asserting that **the demotion actually changes what the lane carries** (r3 only asserted that `missRate` crossed) |
+| 2 | Decision 19 removes the only `scanSource` cell with an ingest contract (`'store'`) and the contract never moves into the survivor: `'ui'` has no anchor, no dedup key and no "complete pass", and §12.5 explicitly permits it to declare `history:'none'` | **Confirmed.** §4's contract makes an undeclared capability **throw**, §5 invariant 4 wants a complete pass and a `complete:false`, and invariant 2 requires `vendorId` — which a DOM scrape is not guaranteed to expose; §16's parity row pinned only push/poll dedup, never a re-scraped screen | §12.5 gains `'ui'`'s three contract lines: the synthetic anchor key `(convId, renderedAt, sha256(author|text))` in `vendorId` with `raw.synthetic:true`, the scroll-bounded complete pass (reached the anchor ⇒ `complete:true`; hit the scroll limit ⇒ `complete:false`, anchor does not move), and the **ban** on `history:'none'` for `receive:'scan'` (enforced by the contract suite); the table cell's `history` narrows to `'page'`; §5 invariant 2 and §6.3 each gain a pointer; `test-channels-lane-parity` gains a scan arm and a drop-the-synthetic-key negative control |
+| 3 | `push.missRate` is a lifetime ratio with no counting window and the demotion has no exit ⇒ a one-way ratchet: in kick mode push carries no records at all, the ratio tends to 1.0 by construction, and a demoted lane can **never** come back under the threshold | **Confirmed**, and it is exactly the shape the auto-resume `edgeHeld` lesson exists to prevent (*burning the wall would turn one transient disagreement into a permanent refusal*) | §6.4 gains two sentences: count only while `carryContent` is true and only over a rolling window (last N records or 24 h, whichever is larger); the demotion is retracted by **whoever made the claim** (re-assert in the connect wizard ⇒ counters reset, one retry), and **the counters are never the trigger**; decision 18 and §20 item 17 follow; `test-channels-push` gains two legs |
+| 4 | `convCaps` is a stored derived fact carrying an `at` **no rule reads** (no TTL, no refresh trigger, no staleness degrade), contradicting §5 invariant 7 twelve lines below it; a week-old optimistic answer draws a send control and creates the proposal §4 promises never to create | **Confirmed.** `why`'s enum already contains `'left-group'`, so the state is anticipated; and a field with no reader is, in this repo, "the fix was never wired" | §4 and §5 give `convCaps` a **TTL (6 h)** and three refresh triggers (on track, on the first panel render past the TTL, and **unconditionally at approval time immediately before the send**), degrading to `read:'unknown'`/`sendAs:[]`/`why:'stale'` — rendered by `offers()`'s existing rule, so no new vocabulary; §9.2 spells out the approval-time re-resolution and its refusal path; invariant 7 names it as the exception that pays for itself; `test-channel-caps` gains a TTL leg with a positive control and `test-channels-identity` a "stale at approval must refuse" leg |
+| 5 | The zh doc's §20 sources block is missing the blank line before it, so CommonMark lazy continuation folds it into numbered item 19 | **Confirmed** (`cat -A`; en:1806-1808 has the blank line) | One blank line inserted. The same pass re-checked the rest of the pair and everything else held: heading counts, table-row counts, byte-identical code blocks, and identical P0–P4 / P0–P2 round-and-day arithmetic |
+
+Four of the five (1–4) share a shape worth writing down beside r2's: **one fact stored
+in three places, with no function allowed to read all of them.** `laneState`'s three
+former homes, `convCaps`'s reader-less `at`, the ingest contract left inside a deleted
+cell, and a ratio that only ever moves one way — each is a missing layer between the
+*claim* and the *answer*. r2's lesson was *a guarantee stated at the wrong layer*; r4's
+is its twin: **an answer spread across several storage sites is not an answer** — there
+may be several sites (a claim, a measurement and an observation really are different
+facts), but there may be exactly **one place that folds them, and it must be able to
+read all of them.**
+
 ---
 
 ## 18. Phases, rounds, calendar
@@ -1549,11 +1749,11 @@ Ranges are honest: the low end assumes one-round convergence, the high end
 assumes the module needs the extra rounds that the measured distribution says
 about a third of them do.
 
-### P0 — store, index owner, adapter interface, fake adapter, panel skeleton — **9–11 rounds (4.5–5.5 days)**
+### P0 — store, index owner, adapter interface, fake adapter, panel skeleton — **10–12 rounds (5–6 days)**
 
 `src/channel-store.js` (durable primitives), `src/channel-record.js`,
-**`src/channel-caps.js` (both axes, `convCaps`, `freshnessClaim`,
-`identityWarning`)**, `src/channels/index.js` + the fake adapter (**which really
+**`src/channel-caps.js` (both axes, `convCaps` and its TTL, `freshnessClaim`,
+`identityWarning`, and the **one** lane resolver `laneState`)**, `src/channels/index.js` + the fake adapter (**which really
 runs all three receive modes**), a `src/server/channels-engine.js` skeleton
 (scheduler, single flight, broadcast) carrying **the serialized index owner of
 §5.1 from the first commit**, `src/routes/channels.js`, the six rail
@@ -1567,9 +1767,10 @@ read-modify-write negative control), `test-channel-adapter-contract`,
 survive a restart, sync across two clients, two simultaneous passes both advance
 their cursors, and **a read-only conversation draws no send control at all**.
 (r3: +2 rounds — the two-axis capability record, `convCaps`, and the fake
-adapter's scan / push modes.)
+adapter's scan / push modes. r4: +1 round — `laneState` and its precedence,
+`convCaps`'s TTL, and the synthetic anchor key in the fake adapter's scan mode.)
 
-### P1 — Lark read + Gmail read + **the push lanes** — **13–15 rounds (6.5–7.5 days)**
+### P1 — Lark read + Gmail read + **the push lanes** — **14–16 rounds (7–8 days)**
 
 `src/oauth-loopback.js` **dual-mode** (§12.4: ephemeral + fixed, port held only
 for the flow, named `EADDRINUSE` refusal, paste-back fallback, both `state`
@@ -1593,7 +1794,10 @@ claimed exclusivity without having it demotes itself and says why**.
 *Owner-blocked:* the Lark redirect-URI registration (decision 4) and enabling
 event subscription in the console (decision 3).
 (r3: +4 rounds — push transport, liveness, ack semantics, exclusivity measurement
-and demotion, plus Gmail's Pub/Sub pull.)
+and demotion, plus Gmail's Pub/Sub pull. r4: +1 round — `missRate`'s rolling window
+and its count-only-while-carrying rule, the "re-assert to retry" affordance on the
+adapter row, and `test-channels-push`'s "the demotion changes what the lane carries"
+leg.)
 
 ### P2 — assign, filter, wake — **9–11 rounds (4.5–5.5 days)**
 
@@ -1611,7 +1815,7 @@ reason, the money is bounded and attributed to the right slot, **and one day of
 traffic produces the same wakes and the same money on all three lanes**.
 (r3: +2 rounds — the coalescing window, the lane-parity leg, the latency claim.)
 
-### P3 — outbox, approval, receipts — **9–12 rounds (4.5–6 days)**
+### P3 — outbox, approval, receipts — **10–13 rounds (5–6.5 days)**
 
 `src/channel-policy.js`, the outbox store, inline approval cards + the Outbox
 window (**with the identity row and the `identityMarking` warning**, §9.5), the
@@ -1629,7 +1833,8 @@ user-grant-survives-un-assignment control), `test-channels-agent-cli`,
 surface, a receipt lands without waking anybody and says who the other side saw,
 and the audit log is complete. Sending is exercised against the fake adapter and
 the built-in Agents adapter only. (r3: +1 round — the identity row, the receipt
-fields, the audit fields.)
+fields, the audit fields. r4: +1 round — the unconditional `convCaps` re-resolution at
+approval time and its refusal path.)
 
 ### P4 — real external send — **7–9 rounds (3.5–4.5 days) + owner-blocked time**
 
@@ -1654,7 +1859,7 @@ Sandboxed HTML rendering (**2–3 rounds**), attachment fetch (**2**),
 plugin-contributed adapters (**4–6**), adapters on a paired device (**4–6**).
 (r3: live lanes moved up into P1, so they are no longer here.)
 
-### P6 — local-client adapters (WhatsApp / WeChat) — **8–12 rounds (4–6 days), not scheduled, doubly gated**
+### P6 — local-client adapters (WhatsApp / WeChat) — **9–13 rounds (4.5–6.5 days), not scheduled, doubly gated**
 
 §12.5. The `scanSource: 'ui'` route (agent-browser profile, login liveness,
 cursored UI scanning, sending through the client's own composer), plus the
@@ -1662,15 +1867,21 @@ WhatsApp and WeChat adapters and their `tosRisk` acknowledgement dialog. **Gated
 on two things**: decision 19 (whether the owner accepts the terms risk and the
 UI-only constraint) and `docs/design-agent-browser-v2.md`'s profile system
 landing. The interface side is in place from P0, so no line of this phase touches
-the store, the filter, the spend path or the outbox.
+the store, the filter, the spend path or the outbox. (r4: +1 round — actually
+implementing §12.5's three ingest-contract lines: the synthetic anchor key, the
+scroll-bounded complete pass, and deciding on two real clients whether they expose a
+stable message id at all.)
 
-**Totals:** P0–P4 = **47–58 rounds ≈ 23.5–29 working days** at 2 rounds/day, plus
+**Totals:** P0–P4 = **50–61 rounds ≈ 25–30.5 working days** at 2 rounds/day, plus
 owner-blocked time for the two scope round trips. (The r2 review added 2–3 rounds;
 **r3 added 10**: the two-axis capability record +2 in P0, the push lanes +4 in P1,
 coalescing and lane parity +2 in P2, the identity surface +1 in P3, the identity
-proof +1 in P4.) P0–P2 alone — read-only channels with assignment, filtering and
-**real-time push**, and no outbound path at all — is **31–37 rounds ≈
-15.5–18.5 days**, and it is still a coherent shipping point: the panel is useful,
+proof +1 in P4; **r4 added 3**: `laneState` and the `convCaps` TTL +1 in P0,
+`missRate`'s window and the demotion's retraction +1 in P1, the approval-time
+re-resolution +1 in P3 — plus one more in P6, which is outside this total because P6
+is unscheduled anyway.) P0–P2 alone — read-only channels with assignment, filtering
+and **real-time push**, and no outbound path at all — is **33–39 rounds ≈
+16.5–19.5 days**, and it is still a coherent shipping point: the panel is useful,
 messages arrive live, no external message can leave the building, and the money is
 already bounded.
 
@@ -1685,7 +1896,7 @@ they are here rather than in the code.
 |---|---|---|---|
 | 1 | **Adapters in-tree or plugins?** | in-tree modules / plugin packages | **In-tree for v1.** The OAuth flows, the secret store and the spend guard are all in-tree; an IPC boundary per message buys nothing at this scale. Keep the interface identical so third-party adapters become plugins in P5 without forking the registry |
 | 2 | **Lark send identity** (updated by r3/Q4) | as the **user** (needs `im:message` + **`im:message.send_as_user`** — a dot, not a colon — a version publish and re-consent) / as a **bot** (needs the bot added to every chat) / both | **As the user, and the scope round trip stays in P4.** It is what the other side expects in an existing human group and it needs no change to anybody else's chats. Bot identity only as a fallback where user-send is refused — and bot sending is `identityMarking:'marked'`, so that fallback **must speak on the approval card**. **The new half:** whether user-identity send actually changes the `sender_type` the recipient sees is undocumented and contradicted by a community report, so until one real send in P4 proves it, this adapter declares `identityMarking:'unknown'` and is treated as `marked` (§9.5, §20 item 3). **Until the scope lands the UI says** "sending needs two more permissions on the Lark app, a version publish and one re-consent" rather than showing a greyed control |
-| 3 | **Lark receive lane** (rewritten by r3/Q3(a)) | poll-only / poll + WebSocket **kick** / WebSocket **carrying content** + poll for reconciliation / webhook | **Push is first-class and ships in P1; content vs kick is decided by `pushExclusivity`; never the webhook.** The long connection needs no public URL, is self-built-apps only, allows 50 connections per app, wants a 3 s ack, and is **at-least-once with 4 retries** — so "push is unreliable" is not a reason. The real constraint is **cluster mode**: with several clients on one app credential each event reaches exactly one at random. That is a **configuration** condition, not a law of nature ⇒ carry content when exclusive (polling drops to a 15-minute reconciliation), kick only when shared or unknown (r2's behaviour, and the default). A public inbound endpoint buys nothing over the long connection |
+| 3 | **Lark receive lane** (rewritten by r3/Q3(a)) | poll-only / poll + WebSocket **kick** / WebSocket **carrying content** + poll for reconciliation / webhook | **Push is first-class and ships in P1; content vs kick is decided in one place by `laneState()` (the claim lives on the adapter record's `push.claimedExclusive`); never the webhook.** The long connection needs no public URL, is self-built-apps only, allows 50 connections per app, wants a 3 s ack, and is **at-least-once with 4 retries** — so "push is unreliable" is not a reason. The real constraint is **cluster mode**: with several clients on one app credential each event reaches exactly one at random. That is a **configuration** condition, not a law of nature ⇒ carry content when exclusive (polling drops to a 15-minute reconciliation), kick only when shared or unknown (r2's behaviour, and the default). A public inbound endpoint buys nothing over the long connection |
 | 4 | **Lark redirect URI** | reuse the ops tooling's registered loopback port / register a dedicated one for VibeSpace | **Register a dedicated one — and treat the port as machine-global regardless.** Registration resolves VibeSpace-vs-ops-tooling; it does **not** resolve two VibeSpace instances on one box (a production service beside a checkout), where the loser gets an opaque `EADDRINUSE` after the user is already at the consent page and the port holder receives its code. §12.4 binds only for the flow, refuses by name, and falls to paste-back. If the console accepts several redirect URLs per app, register ours *alongside* rather than displacing theirs (unverified — §20) |
 | 5 | **Gmail OAuth client** | add `gmail.send` to the existing shared preset / register a client dedicated to channels | **Dedicated client for channels.** Adding a sensitive scope to a shared preset re-consents everything using it, and the verification status (hence the 7-day refresh-token behaviour) becomes one decision for two features. Read-only P1 may start on the existing preset |
 | 6 | **What is tracked by default** | nothing until the user picks / all groups the user is in | **Nothing.** It is the privacy answer, the polling-cost answer, and it keeps the panel from becoming a mail client. The discover list makes opting in one click |
@@ -1700,8 +1911,8 @@ they are here rather than in the code.
 | 15 | **Fleet scope** | local-only v1 / adapters on paired devices | **Local-only v1**, with `hostId` already a parameter so the later move is not a rewrite |
 | 16 | **Does assignment imply visibility?** | yes, written as an explicit grant / no, the user must also grant reach | **Yes, as an explicit grant.** Two steps for one obviously-intended thing is how a permission model gets bypassed; writing it as a real grant keeps the reach panel truthful |
 | 17 | **Sender honesty line — REVERSED by the owner (r3/Q4)** | always append "drafted by \<agent\>" / per-channel toggle **default ON** / per-channel toggle **default OFF** / never | ~~Per-channel toggle, default ON for external~~ ⇒ **default OFF, kept as a per-channel option.** The default is **send as the user with nothing added to the body**, on every channel that allows it. What replaces it is not silence: the `identityMarking` capability states who the other side will see at **the moment of authorization** (approval card / send affordance) and in **the receipt** (§9.5). The reason is that the sentence is owed to **the person pressing approve** and to the drafting agent, not to the recipient — and r2 put it inside the message the recipient reads, which both rewrites the user's own words and happens after the user has already decided. The audit log still records `draftedBy` |
-| 18 | **Who decides a push lane is exclusive?** (new, r3/Q3(a)) | (a) the operator **asserts**, the product **measures** and **auto-demotes** on disagreement / (b) cursor kicks forever (r2) / (c) trust the assertion, never measure | **(a).** The platform never says how many other clients are connected, so exclusivity can only be asserted — but it is **measurable**: `push.missRate`, the fraction of records seen first by the reconciliation poll rather than by push, stays at 0 on a genuinely exclusive lane. Crossing the threshold (default 2 %, ≥ 20 samples) demotes to kick mode and states the reason on the adapter row. (c) is a prayer; (b) turns off the real-time push the owner asked for. The default is `unknown` ⇒ **asserting nothing gives you (b)** |
-| 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b)) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store | **(b), explicitly excluding (c).** WeChat's local store key exists only in the **running client's process memory**, and reading another process's memory is not something this product does (fence 13); WhatsApp's protocol libraries are unofficial clients explicitly prohibited by the platform's terms, with bans landing on ordinary use. (b) rides the user's own already-logged-in official client, so identity is genuinely the user (`identityMarking:'none'`), and its cost is honest: it sees only what is on screen, latency is in minutes, and that number is **drawn on the conversation row**. The interface models the class from P0; the adapters are P6 |
+| 18 | **Who decides a push lane is exclusive?** (new, r3/Q3(a)) | (a) the operator **asserts**, the product **measures** and **auto-demotes** on disagreement / (b) cursor kicks forever (r2) / (c) trust the assertion, never measure | **(a).** The platform never says how many other clients are connected, so exclusivity can only be asserted — but it is **measurable**: `push.missRate`, the fraction of records seen first by the reconciliation poll rather than by push, stays at 0 on a genuinely exclusive lane. Crossing the threshold (default 2 %, ≥ 20 samples) demotes to kick mode and states the reason on the adapter row. (c) is a prayer; (b) turns off the real-time push the owner asked for. The default is `unknown` ⇒ **asserting nothing gives you (b)**. **r4 adds two sentences, and without either the demotion is a one-way ratchet**: the ratio is counted **only while the lane is carrying content, and only over a rolling window** (last N records or last 24 h, whichever is larger) — otherwise every record in kick mode is first-seen-by-poll, the ratio tends to 1.0 by construction, and a demoted lane never comes back; and a demotion is **retracted by whoever made the claim** (re-assert exclusivity in the connect wizard ⇒ counters reset, one retry), never by the counters themselves |
+| 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b)) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store | **(b), explicitly excluding (c).** WeChat's local store key exists only in the **running client's process memory**, and reading another process's memory is not something this product does (fence 13); WhatsApp's protocol libraries are unofficial clients explicitly prohibited by the platform's terms, with bans landing on ordinary use. (b) rides the user's own already-logged-in official client, so identity is genuinely the user (`identityMarking:'none'`), and its cost is honest: it sees only what is on screen, latency is in minutes, and that number is **drawn on the conversation row**. The interface models the class from P0; the adapters are P6. **r4's consequence**: this decision excludes `'store'` for both platforms, so `'ui'` is this class as shipped — and the cell it deleted was the one with an ingest contract, so §12.5 now spells out `'ui'`'s own (the synthetic anchor key, what "a complete pass" means for a scroll-bounded read, and the ban on `history:'none'` for `receive:'scan'`) |
 | 20 | **Should Gmail push be on by default?** (new, r3/Q3(c)) | on by default / **available, off by default** / not at all | **Available, off by default.** Pub/Sub's pull subscription means it needs no public inbound endpoint either, and each instance can hold its own subscription, so exclusivity is easier to achieve than on Lark's long connection. But it costs a GCP topic, an IAM grant and a **daily renewal job** (the watch expires silently after 7 days and stops without a sound if one is missed), and what it buys is trading a poll that costs one request per tick when nothing changed for second-level latency. At mail's cadence that is a switch a user should turn on for their own situation, not a default |
 
 ---
@@ -1786,17 +1997,31 @@ discovers them in production:
     each instance can hold its own subscription" — Pub/Sub's documented shape, but
     none of it has been run against a real topic, including what the daily renewal
     job actually looks like when one renewal is missed.
-17. **`push.missRate`'s threshold is uncalibrated.** 2 % over ≥ 20 samples is a
-    starting point derived from "it should sit at 0 on a genuinely exclusive lane",
-    not a measured number. The first week should watch it, and the demotion must be
-    **visible** (adapter row plus a log line) so the calibration comes from data
-    rather than from this paragraph.
+17. **Neither `push.missRate`'s threshold nor its window is calibrated.** 2 % over
+    ≥ 20 samples is a starting point derived from "it should sit at 0 on a genuinely
+    exclusive lane", not a measured number; and r4's rolling window ("last N records
+    or last 24 h, whichever is larger") is likewise a shape rather than a measured N —
+    too narrow and one quiet night demotes a healthy lane, too wide and a real
+    misconfiguration drags on for days. The first week should watch both numbers, and
+    the demotion must be **visible** (adapter row, a log line, and the "re-assert to
+    retry" affordance) so the calibration comes from data rather than from this
+    paragraph. **What is no longer unknown**: whether the demotion is a one-way
+    ratchet does not depend on the calibration — §6.4's two rules (count only while
+    carrying content; retracted by the claimant) answer that structurally, and
+    `test-channels-push` has a negative control for each.
 18. **The WhatsApp and WeChat local-client shapes have not been touched at all.**
     §12.5 is an adapter **class** written from public material: the feasibility of
     UI scanning, how far history scrolls, how login liveness is judged, and how
     stable a real client is inside an agent-browser profile are all unmeasured.
     That is also why it is P6 rather than P5 — it owes a round of investigation,
-    not a round of implementation.
+    not a round of implementation. **r4 narrows the unknown**: that cell's ingest
+    contract is now written down (the synthetic anchor key, the scroll-bounded
+    complete pass, the ban on `history:'none'` for `receive:'scan'`), so what is left
+    unknown is no longer "does this class satisfy the store's invariants" but
+    **whether these two specific clients expose a stable message id** — if they do it
+    is used directly, if they do not the synthetic key takes over, and that key's cost
+    (two byte-identical messages in one render tick collapse to one) is known and
+    pinned.
 19. **The cross-reference to `docs/design-agent-browser-v2.md` does not resolve
     today.** §12.5 and decision 19 depend on that design's profile system
     (user-data-dir + provider + fingerprint seed + proxy + live view), and at the

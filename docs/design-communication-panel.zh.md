@@ -1,6 +1,6 @@
 # 设计: Communication panel — Channels v2 的架构
 
-> 中文版 — 与英文原稿 docs/design-communication-panel.md 同步于 921f61cb + 本次修订(r3: 接收模式与发送身份)；以英文版为准的只有代码标识符。
+> 中文版 — 与英文原稿 docs/design-communication-panel.md 同步于 921f61cb + 本次修订(r3: 接收模式与发送身份 · r4: 对 r3 的对抗式 review)；以英文版为准的只有代码标识符。
 
 > **状态:** 架构提案, 无代码。**交互**设计已经定了(2026-08-21 的五张 artboard 记录
 > 加上它的交互式画布), 本文不再翻案。本文决定的是: 每一块*住在哪里*、*扩展哪个既有
@@ -20,6 +20,13 @@
 > 标记**, 在每一个允许这么做的 channel 上都是。r2 的决定 17("外部默认开启发送方诚实
 > 行")被 **owner 推翻**; 取而代之的是 `identityMarking` 能力位驱动的**授权时刻的
 > 警告**(§9.5)。
+>
+> **r4(2026-09-10, 对 r3 的对抗式 review —— 五条全部成立, 见 §17.1):** 一个事实被存在三
+> 个地方而没有任何一个函数读得全, 于是 r3 新加的推送自动降级结构上赢不了 ⇒ `laneState`
+> 成为唯一的通道解析器、`caps.pushExclusivity` 删除(§4、§6.4); `push.missRate` 补上计数
+> 窗口与降级的撤回路径, 否则它是一个单向棘轮(§6.4); 决定 19 删掉的恰好是唯一有摄入契约
+> 的那一格, 所以 `scanSource:'ui'` 现在自己有一份(§12.5); `convCaps` 拿到 TTL 与三个刷
+> 新触发点, 其中一个是**批准那一刻**(§4、§9.2)。
 >
 > 先读: 交互记录(五张 artboard — Main / Adapters / AssignFilter / AgentReach /
 > Outbox)、CLAUDE.md 的三层路由表、`docs/design-three-tier.md`、
@@ -78,7 +85,7 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 | Reach ACL(三态、请求) | **PURE** | `src/channel-acl.js`(import `src/msg-acl.js` —— PURE 可以 import PURE) | `test-channel-acl` (fast) |
 | 出向策略 + 护栏 + outbox 状态机 | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | 归一化的消息记录 + 它的渲染器要的数据 | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
-| 能力判定(两个轴、按会话解析、身份警告) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
+| 能力判定(两个轴、按会话解析、身份警告、**通道解析 `laneState`**) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
 | 会话存储的*原语*(持久的 load/append/tail/trim/flush; 活索引归**引擎**所有, §5.1) | **SHARED**(只用 fs+path) | `src/channel-store.js` | `test-channel-store` (fast) |
 | OAuth loopback 授权流(**双模**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
 | Adapter 接口 + 注册表 | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract`(fast, 假 adapter) |
@@ -90,7 +97,7 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 | Panel、窗口、filter 编辑器、审批卡 | **CLIENT** | `src/lib/channels-panel.js`、`src/lib/channel-window.js`、`src/lib/channel-filter-editor.js` | `test-channels-e2e`(heavy, headless chrome) |
 | Agent CLI | 纳入 git 的静态文件 | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
-有四条落位承重到值得写成规则:
+有五条落位承重到值得写成规则:
 
 - **Adapter 绝不碰 store、ACL、policy 或 spend guard。** 它返回带类型的记录, 接收一个
   发送请求。它能做的一切都在 §4 的接口里, 而**它没有声明的能力就是产品不会为它提供的
@@ -101,6 +108,11 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 - **引擎同时是活索引的唯一所有者**(§5.1)。Store 模块提供持久原语, 并且**刻意不向任何
   人提供**"整份写回索引"的调用, 因为两个 adapter 轮询循环按设计就是重叠的, 而围绕一次
   原子写的 read-modify-write 并不是原子的。
+- **"此刻在用哪条通道"只有一个回答处**(r4, §4)。声明(adapter 记录上的
+  `push.claimedExclusive`)、测量(`push.state` / `push.missRate`)与观测(每会话的 `lane`)
+  是三份不同的事实, 各自留在自己的位置; 但**把它们折成一个答案的只有 `laneState()`**, 优
+  先级是**降级 > 活性 > 声明**。面板的芯片、围栏 12 的合并窗口、调度器的节奏, 三个消费者
+  全部问它, 没有一个再去读 `caps.receive`。
 - **能力有两个轴, 而且它不是一个全局布尔**(r3/Q3, §4)。一个 adapter *有可能*做到的事
   (`caps`, 静态、声明的)与它*在这一个会话上此刻*能做的事(`convCaps(convId)`, 解析出来
   的、三值的)是两个不同的事实: 授权用户在群里而 bot 不在、一个只读的共享邮箱、一个把
@@ -206,9 +218,11 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
     受同一个 per-assignment 节奏上限约束。但有一件事必须被显式补回来: **合并
     (coalescing) 曾经是轮询的一个副产品** —— 一趟 pass 把一分钟里的 30 条消息一次性交
     给 filter, 于是它们天然是一次唤醒。推送把这个副产品拿掉了, 30 条消息就是 30 次投
-    递。所以当 `receive === 'push'` 且 `notify: 'wake'` 时, 引擎在做唤醒判定**之前**加
-    一个合并窗口(默认 60 秒), 让一次爆发仍然是一次唤醒。把这条忘掉, 就是"打开实时推
-    送"这个动作本身把某个会话的账单乘以 30。
+    递。所以当 `laneState(…).carryContent` 为真且 `notify: 'wake'` 时, 引擎在做唤醒判定
+    **之前**加一个合并窗口(默认 60 秒), 让一次爆发仍然是一次唤醒。把这条忘掉, 就是"打
+    开实时推送"这个动作本身把某个会话的账单乘以 30。门控**刻意不是** `caps.receive ===
+    'push'`(r4): kick 模式下记录是轮询取回来的, 而轮询一趟本来就已经合并过了 —— 在那里
+    也开这个窗口, 就是白买 60 秒延迟。
 13. **绝不读另一个进程的内存, 也绝不在没有一次点名的确认的前提下发布一个传输方式被平
     台条款禁止的 adapter。**(r3/Q3(b)) 这条对本地客户端那一类 adapter 是承重的: WeChat
     桌面端的本地库是 SQLCipher/WCDB 加密的, 而那把密钥只存在于**正在运行的客户端进程的
@@ -240,8 +254,9 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
     // ——— axis 1: HOW MESSAGES ARRIVE ———————————————————————————————
     receive:        'push',           // 'push' | 'poll' | 'scan'  — the BEST lane it has
     pushTransport:  'ws-long-conn',   // 'ws-long-conn' | 'pubsub-pull' | 'webhook' | null
-    pushExclusivity:'unknown',        // 'exclusive' | 'shared' | 'unknown'  (§6.4 — decides
-                                      //  whether push may carry CONTENT or only KICK a cursor)
+                                      // exclusivity is NOT here: it is a per-DEPLOYMENT
+                                      // configuration fact, so it lives on the adapter RECORD
+                                      // (push.claimedExclusive) and only laneState() resolves it
     pushAckBudgetMs: 3000,            // vendor's own deadline; we ack after DURABILITY (fence 11)
     pollInterval:   { hot: 30, cold: 300, floor: 10 },   // seconds; `floor` is the VENDOR's
     scanSource:     null,             // 'store' | 'ui' | null  — only when receive === 'scan'
@@ -269,11 +284,13 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
   async listConversations({ cursor, limit })
         -> { conversations: [ChannelConversation], cursor, complete }
 
-  // axis 1 resolved for ONE conversation — three-valued, cached in the index with its age
+  // axis 1 resolved for ONE conversation — three-valued, cached in the index with its age.
+  // The cache has a TTL (6 h) and three refresh triggers; past the TTL it resolves to
+  // read:'unknown' / sendAs:[] / why:'stale'  —  see below, this is NOT a cache-forever
   async convCaps(convId)
         -> { read:'yes'|'no'|'unknown',
              sendAs: [...],                       // SUBSET of caps.sendAs that holds HERE
-             why: 'not-a-member'|'bot-not-in-chat'|'read-only-mailbox'|'left-group'|null,
+             why: 'not-a-member'|'bot-not-in-chat'|'read-only-mailbox'|'left-group'|'stale'|null,
              at }
 
   async history(convId, { anchor, limit })
@@ -296,18 +313,61 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 `src/channel-caps.js`(PURE)是**唯一**回答"这个控件到底存不存在"的地方:
 
 ```js
+laneState(caps, adapterRecord, convEntry, now)          // r4 新增 —— 下面说为什么
+      -> { via:         'push'|'poll'|'scan',   // 此刻真正在承载这个会话的通道
+           carryContent: boolean,               // 推送通道现在可以携带内容, 还是只能 kick 一下游标
+           live:         boolean,               // 只认正面证据: socket 连着 **且** 心跳窗口内收到过东西
+           pollCadence:  'fast'|'reconcile',
+           why:          'exclusive'|'kick-shared'|'kick-unknown'|'demoted'|'push-dead'|'poll'|'scan' }
 offers(caps, convCaps, what)   // what ∈ 'send-as-user'|'send-as-bot'|'fetch-attachment'|…
       -> { offered: boolean, why: string|null }      // 'unknown' ⇒ offered:false, why 说明
 identityWarning(caps)          -> { level:'none'|'warn', text }        // §9.5
-freshnessClaim(caps, convState)-> { kind:'live'|'within'|'scanned', seconds, text }
+freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, text }   // lane = laneState() 的返回值
 ```
 
-三个消费者读同一条记录, 各读各的那一面:
+`laneState` 是 **r4 加的**, 而它修的是一个结构性缺陷: "此刻在用哪条通道、它活着吗、它
+可以携带内容吗"这**同一个事实**原本散在三个地方 —— `caps.pushExclusivity`(静态、按 adapter
+**种类**声明)、adapter 记录上的 `push {claimedExclusive, state, demotedAt}`, 以及每会话
+索引里的 `lane {via, lastPushAt}` —— 而 §6.4 只写了前两个"一起决定这件事", 没写谁压过
+谁; 更糟的是, 本节把 `src/channel-caps.js` 称作那个**唯一**的回答处, 而它导出的三个函数
+没有一个接 adapter 记录 —— 也就是说它们**根本读不到** `push.state` /
+`push.claimedExclusive` / `push.demotedAt`。后果有三条, 每一条都是这份文档自己点名过的事故形状:
 
-- **Panel** 用 `freshnessClaim` 画每一行的新鲜度芯片(推送 = "live"、轮询 = "≤ 30 s"、
-  扫描 = "上次扫描在 <t> 之前" —— **一个扫描源的延迟就画在会话行上**, 因为那是用户在
-  决定要不要把一件事交给它时唯一需要知道的数字), 用 `offers()` 决定 composer 与审批卡
-  上的发送控件存不存在, 用 `identityWarning` 决定审批卡上那条警告(§9.5)。
+1. **§6.4 的自动降级结构上赢不了。** 降级把 `demotedAt` / `demotedWhy` 写在**记录**上,
+   而"携带内容还是只做 kick"却被归给 `caps.pushExclusivity` —— 一条已经被降级的通道会
+   继续携带内容, 而 adapter 行同时在说它已经降级了。
+2. **新鲜度芯片会谎报 `live`。** 芯片画在 `caps.receive === 'push'` 上, 而那是一条静态声
+   明; §6.4 自己引用的 `opencode-events` 轮 4 教训恰恰就是"一条谎报 `active` 的通道比没有
+   通道更糟, 因为它把回落关掉了"。
+3. **围栏 12 的合并窗口在 kick 模式下照样跑。** 它也门控在 `caps.receive === 'push'` 上,
+   而 kick 模式里记录本来就是轮询取回来的、本来就已经被合并过了 —— 白买 60 秒延迟。
+
+所以 `caps.pushExclusivity` **删除**: 独占度是一个**按部署**的配置事实(§6.4 自己就是这么
+写的), 而 `caps` 按定义是按 adapter **种类**的静态声明(§2), 一个部署事实不该住在那里。
+`caps.pushTransport` 留着 —— 它是真正静态的。取而代之的是**一个解析器一个答案**, 优先级
+写死并且写下来:
+
+> **降级 > 活性 > 声明。** 已降级 ⇒ `carryContent:false`(只有做出声明的那一方主动撤回
+> 降级才能恢复, §6.4); 没降级但通道不 `live` ⇒ `carryContent:false` 且 `pollCadence:'fast'`;
+> 两关都过了才轮到 `push.claimedExclusive`。**`unknown` 一律 `carryContent:false`** —— r2 的行为
+> 仍然是默认值。
+
+"这个事实只允许一个生产者声明"是 CLAUDE.md 写下来的法则(*两个函数回答同一个问题就说
+明其中一个是错的*), 而它在这里的形态就是: 三个存储位可以各自保留(声明、测量、观测都是
+不同的事实), 但**回答只能有一个**。
+
+四个消费者读同一条记录, 各读各的那一面 —— 而**每一个跟"通道"有关的判定都经过
+`laneState`, 没有一个再去读 `caps.receive`**:
+
+- **Panel** 用 `freshnessClaim(laneState(…), convEntry)` 画每一行的新鲜度芯片(**活着的、
+  携带内容的**推送 = "live"、轮询 = "≤ 30 s"、扫描 = "上次扫描在 <t> 之前" —— **一个扫描
+  源的延迟就画在会话行上**, 因为那是用户在决定要不要把一件事交给它时唯一需要知道的数
+  字)。一条降级了或者不 `live` 的推送通道画的是它**实际**在走的那条道, 绝不是它声明过的
+  那条。它还用 `offers()` 决定 composer 与审批卡上的发送控件存不存在, 用
+  `identityWarning` 决定审批卡上那条警告(§9.5)。
+- **摄入引擎**(§6.2 的调度器)用 `laneState(…).pollCadence` 决定这一 tick 的轮询节奏,
+  用 `laneState(…).carryContent` 决定推送事件是走"归一化 → 追加"还是只 kick 一下游标 ——
+  也就是围栏 12 那个合并窗口的门(§6.1、§6.4)。
 - **Filter / assignment 引擎**用 `offers()` 把 `authority:'send'` 变成**不可选**(一个永
   远发不出去的 assignment 是一句谎话, §7.3), 并用 `freshnessClaim` 在 AssignFilter 面板
   上如实说出"这个 agent 大约多久之后会被叫醒"。
@@ -334,6 +394,22 @@ freshnessClaim(caps, convState)-> { kind:'live'|'within'|'scanned', seconds, tex
 - **`sendAs: []` 的 adapter 上, `send()` 与 `reply` 都不是"失败", 而是"不存在"**: 它们
   返回带类型的 `send-not-available` 加上 `caps` 自己说的理由, 而 outbox **根本不为它创
   建 proposal**。一条永远发不出去的 proposal, 会让用户去批准一件随后必然失败的事。
+- **`convCaps` 是一份带 TTL 的缓存, 不是一份存下来的事实**(r4)。TTL 默认 **6 小时**,
+  刷新触发点恰好三个: ①用户把一个会话标成 tracked 时; ②TTL 过期之后面板的第一次渲染;
+  ③**审批的那一刻、发送之前, 无条件刷一次** —— 那是唯一一个"判断错了要付出一条真消息"
+  的时刻。过了 TTL 的条目解析成 `read:'unknown'` / `sendAs: []` / `why:'stale'`, 而
+  `offers()` 现有的规则(`unknown` ⇒ 不提供 + 说出理由)已经把这个降级渲染好了, 所以它
+  不需要任何新词汇。**理由是 §5 不变量 7**: 一个派生值不许变成一份存下来的事实, 而
+  `convCaps` 与 `unread` / `hits7d` 不同 —— 它是一次 vendor 往返的结果, 本地**重新推导
+  不出来**, 所以它欠的不是"随时可重算", 而是一个 TTL 加一个诚实的降级。少了这一条, 一
+  个星期前缓存下来的 `sendAs:['user']`(而用户此后已经退了那个群 —— `why:'left-group'`
+  本来就在枚举里, 说明这个状态是被预期到的)会照样画出 composer 控件、照样让 assignment
+  被建出来, 于是**恰好造出**上一条禁止的那种 proposal。
+- **`receive: 'scan'` 的 adapter 不许声明 `history: 'none'`**(r4, §12.5)。§5 不变量 4
+  要求"完整的一趟"才允许推进 anchor、`complete:false` 意味着"别推进", 而一个连翻页调用
+  都没有的 adapter 报不出这两件事里的任何一件; 而按本节的第一条规则, 没声明的能力是要
+  **抛异常**的, 于是 §6.3 那句"翻到已存的 anchor 为止"在它身上根本不可能发生。合成
+  adapter 声明 `receive:'scan'` + `history:'none'` 必须让契约套件变红。
 
 `ChannelRecord`(PURE, `src/channel-record.js`)是那唯一一份归一化形状:
 
@@ -370,7 +446,8 @@ data/channels/
                                 participants summary, lastAt, unread, tracked, anchor,
                                 assignment, filterId, policy, pendingTodoId, reachEntries[],
                                 stats {hits7d, msgs7d},
-                                convCaps {read, sendAs[], why, at}        // §4, cached WITH its age
+                                convCaps {read, sendAs[], why, at}        // §4: cached WITH its age,
+                                                                         //     TTL 6 h, then 'stale'
                                 lane    {via:'push'|'poll'|'scan', lastPushAt, lastPollAt,
                                          lastScanAt, firstSeenByPoll, firstSeenTotal}  // §6.4
   msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY message log, one ChannelRecord per line
@@ -386,7 +463,11 @@ data/channels/
    活跃的群变成一个 I/O 问题。而索引 —— 小, 并且每次渲染都要读 —— 保持为原子 JSON。
 2. **按 `(adapterId, convId, vendorId)` 去重**, 以每个打开的会话一份有界的内存集合持有,
    需要时从日志尾部重建。一次被重放的分页(Lark 的 anchor 语义在边界处保证会发生, 而
-   Gmail 的 history 重放也会产生)必须是 no-op, 绝不能变成一条重复。
+   Gmail 的 history 重放也会产生)必须是 no-op, 绝不能变成一条重复。**`vendorId` 是必需
+   的**, 而当一个 adapter 抓的是一块屏幕、客户端又没有暴露一个稳定的消息 id 时, 它必须
+   **声明一把合成键**并把"这是合成的"标出来(§12.5 的 `'ui'` 那一格) —— 这条不变量要的是
+   一把键, 不是一把 vendor 给的键; 但一把**没说自己是合成的**键, 会让每一次重新扫描都变
+   成一批重复。
 3. **一个写者, 一种顺序。** 每一个可变的、按会话记的事实 —— `unread`、`lastAt`、
    `anchor`、`assignment`、`stats`、`pendingTodoId`、agent 组的轮转计数器 —— 都住在一份
    索引里, 而**两趟 adapter pass 按设计就是重叠的**(§6.2 是*每个 adapter* 一个循环、
@@ -412,7 +493,11 @@ data/channels/
 7. **派生值绝不变成存下来的事实。** `unread`、`hits7d` 与 `msgs7d` 都是从日志与已读标记
    重新算出来的; 它们为了渲染速度被缓存在索引里, 并且永远可以重新推导。quota-model 的
    那些事故(一个存下来的 `state` 活得比它所描述的那次读数还久)就是这句话写在这里的
-   原因。
+   原因。**`convCaps` 是被点名的那一个例外, 而它为此付了代价**(r4): 它是一次 vendor 往
+   返的结果, 本地重新推导不出来, 所以它拿到的不是豁免, 而是**一个 TTL(6 小时)、三个刷
+   新触发点, 以及一个过期即 `unknown` 的降级**(§4)。存下来的那个 `at` 因此才有了读者 ——
+   在 r4 之前它一个读者都没有, 而在这个仓库里, 没有读者的字段就是"这个修复从来没接上
+   线"。
 
 ### 5.1 索引归谁所有
 
@@ -460,7 +545,7 @@ LANE ─┼─ poll  : adapter.history() ─────────┼─► no
                                                                          │
                         ├─► broadcast 'channels-updated'  (once per pass / per coalesced burst)
                         │
-                        └─► COALESCE (60 s window when the lane is push — fence 12)
+                        └─► COALESCE (60 s window when laneState().carryContent — fence 12)
                               └─► for each ASSIGNED conversation:
                                     channelFilter.matchRecord(filter, record)
                                       └─ hit ─► assignment.route (agent | rotating group)
@@ -483,7 +568,9 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 
 - 花掉一份**请求预算**(默认 20/min/adapter, 是一个设置)在: 每一个*热*会话(被 assign 了
   的, 或者此刻正开在某个客户端窗口里的)按快节奏(30 s), 然后是*被 tracked 但冷*的那些按
-  慢节奏(5 min)轮转;
+  慢节奏(5 min)轮转 —— 但这两个数字**先经过 `laneState(…).pollCadence`**(§4):
+  `'reconcile'` 时整个 adapter 掉到 15 分钟的对账节奏, `'fast'` 时就是上面这两个数。
+  调度器**从不自己去读**声明、`push.state` 或 `caps.receive`(r4);
 - 加抖动, 并在 `rate-limited` / `transport` 时按 adapter 指数退避, 干净的一趟后复位;
 - 在 `auth-expired` 时**整个停下来**并把它说出去 —— 一个继续猛敲一份过期凭据的循环, 正是
   一个集成在 vendor 那边被限流的方式;
@@ -496,7 +583,9 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 ⇒ ~10 请求/分钟。一个热的、被 assign 的聊天 ⇒ +2/分钟。一个 Gmail 账号在什么都没变时是每
 tick **一个** `history.list` 请求。这个数字之所以重要, 是因为**推送打开之后轮询并不会消
 失**: 它降到一个慢得多的**对账节奏**(默认 15 分钟, 一个设置), 从"延迟机制"变成"完备性机
-制"。§6.4 说清楚为什么那不是保守, 而是这条推送通道自己的语义决定的。
+制"。§6.4 说清楚为什么那不是保守, 而是这条推送通道自己的语义决定的 —— 而"此刻到底是哪一
+种节奏"由 `laneState` 一处回答, 于是一条被降级或者死掉的推送通道会**立刻**把快节奏还回来,
+不需要任何别的地方再判定一次。
 
 ### 6.3 各 adapter 的摄入
 
@@ -525,8 +614,10 @@ adapter 一律**容忍**它们而不是假设它们不存在: 批量枚举 DM �
 户端, 以及它自己写下的东西(§12.5)。`scanSource: 'store'` 是"读那个客户端写的本地库",
 `scanSource: 'ui'` 是"读那个客户端渲染出来的界面"(由 agent-browser 的 profile 驱动, 见
 `docs/design-agent-browser-v2.md`)。两者都是**带游标的周期扫描**, 都可以加一个可选的变
-更通知(store 那一路是对库文件的 fs.watch, ui 那一路是 DOM mutation), 而两者的延迟都是**
-会话行上画出来的那个数字**, 因为它是用户在把一件事交给这条通道之前唯一需要知道的量。发
+更通知(store 那一路是对库文件的 fs.watch, ui 那一路是 DOM mutation) —— **而那个游标在
+`'ui'` 上是什么、"完整的一趟"在一次受滚动限制的读取里是什么, 由 §12.5 逐条写出来**, 因为
+决定 19 之后 `'ui'` 就是这一类发布出去的全部。两者的延迟都是**会话行上画出来的那个数字**,
+因为它是用户在把一件事交给这条通道之前唯一需要知道的量。发
 送要么走客户端自己的界面(agent-browser 打字), 要么走协议 —— 而后者带着围栏 13 那条条款
 风险。这一类 adapter 的接口从 P0 起就存在(`scan` / `scanSource` / `convCaps` / `tosRisk`
 都是为它留的位置), 具体的 WhatsApp 与 WeChat adapter 在 P6 且被决定 19 门控。
@@ -554,24 +645,45 @@ r2 在这里写的是一条绝对规则 —— *"一条活通道只可以让一�
 > 独占度是一个**配置事实**, 由运维**声明**, 由产品**度量**, 并且在度量与声明矛盾时由产品
 > **自己降级**。
 
-`caps.pushExclusivity` 与每个 adapter 记录上的 `push.claimedExclusive` 一起决定这件事:
+**这个声明只有一个家: adapter 记录上的 `push.claimedExclusive`**(`'exclusive'` /
+`'shared'` / `'unknown'`), 因为它是一个**按部署**的事实; 而**解析只有一处**: §4 的
+`laneState(caps, adapterRecord, convEntry, now)`, 优先级是**降级 > 活性 > 声明**。r4 之
+前它同时住在 `caps.pushExclusivity` 里, 于是下面这条自动降级结构上赢不了 —— 详见 §4。
 
 - **`exclusive`** —— 用户在连接向导里明确声明"这个应用的推送通道归这个实例"。推送**携带
-  内容**: 事件里的消息走归一化 → 追加 → ack → 合并 → filter。轮询降到 15 分钟的**对账节
-  奏**, 不再是延迟机制而是完备性机制。
-- **`shared` / `unknown`** —— 推送**只是一次游标 kick**, 也就是 r2 那条规则原样保留(唤醒
-  退避的那次*睡眠*而不只是中止一次 fetch —— `opencode-events` 的教训: 一条只中止 fetch 的
-  通道花了 25 s 才上线)。轮询保持快节奏。默认值是 `unknown`, 所以**不做任何声明就得到 r2
-  的行为**。
+  内容**(`carryContent:true`): 事件里的消息走归一化 → 追加 → ack → 合并 → filter。轮询降
+  到 15 分钟的**对账节奏**(`pollCadence:'reconcile'`), 不再是延迟机制而是完备性机制。
+- **`shared` / `unknown`** —— 推送**只是一次游标 kick**(`carryContent:false`), 也就是 r2
+  那条规则原样保留(唤醒退避的那次*睡眠*而不只是中止一次 fetch —— `opencode-events` 的教
+  训: 一条只中止 fetch 的通道花了 25 s 才上线)。轮询保持快节奏。默认值是 `unknown`, 所以
+  **不做任何声明就得到 r2 的行为**。
+- **已降级或不 `live`** —— 无论声明是什么, `carryContent:false` 且 `pollCadence:'fast'`。
+  这就是"降级 > 活性 > 声明"这条优先级的全部内容: 一个已经被产品自己撤回的主张, 不许
+  再决定任何一个字节走哪条道。
 
 **声明必须可以被证伪, 否则它就是一句祈祷。** 平台不告诉我们还有几个客户端连着, 所以独占度
 永远是**被断言**、绝不是被推断的 —— 但它是**可测**的: 引擎为每个 adapter 记录
 `firstSeenByPoll / firstSeenTotal`, 也就是**先被对账轮询看到、而不是先被推送看到**的记录
-比例(`push.missRate`)。一份真正独占的通道上这个数长期是 0。它连续超过阈值(默认 2 %, 且至
-少 20 条样本)就**自动降级成 kick 模式**, 把 `demotedAt` / `demotedWhy` 写下来, 并在
-adapter 行上说出来: *"推送在这里不是独占的 —— 已回落到游标 kick, 轮询恢复快节奏"*。这条
-路径就是那条"承诺是可以被自己收回的断言"的规则(login-expiry 的教训)在这里的形态: 产品发
-出一个主张, 然后自己去量它, 然后自己撤回它。
+比例(`push.missRate`; 计数器按会话记在索引的 `lane` 上, 按 adapter 聚合成这一个比率)。
+一份真正独占的通道上这个数长期是 0。它连续超过阈值(默认 2 %, 且至少 20 条样本)就**自动降
+级成 kick 模式**, 把 `demotedAt` / `demotedWhy` 写下来, 并在 adapter 行上说出来: *"推送在
+这里不是独占的 —— 已回落到游标 kick, 轮询恢复快节奏"*。这条路径就是那条"承诺是可以被自己
+收回的断言"的规则(login-expiry 的教训)在这里的形态: 产品发出一个主张, 然后自己去量它,
+然后自己撤回它。
+
+这个度量欠两句话, 而少了任何一句它就是一个**单向棘轮**(r4):
+
+1. **只在通道真的在携带内容时计数, 并且只在一个滚动窗口内计数。** 窗口 = 最近 N 条记录或
+   最近 24 小时, 取更大的那个。理由是算术: kick 模式下推送**根本不携带记录**, 于是每一条
+   记录都"先被轮询看到", 比率按构造趋向 1.0 —— 一个终身累计的比率会让被降级的通道**永远**
+   停在阈值之上。所以 `laneState(…).carryContent` 为假的那些 tick **一条样本都不贡献**,
+   指标不可能自己毒死自己。
+2. **降级可以被做出声明的那一方撤回。** 这正是 auto-resume 那条 `edgeHeld` 教训
+   (*HELD, 绝不是 SPENT …… 把那堵墙烧掉就是把一次瞬时的分歧变成一次永久的拒绝*)在这里
+   的形态。撤回的动作是**人的**: 在连接向导里重新声明一次独占, 计数器清零, 通道被重试一
+   次; adapter 行上把 `demotedWhy` 与一个"重新声明以重试"的入口画在一起。**计数器本身绝
+   不是触发器** —— 一条降级了的通道即便 fixture 不再扣事件也不许自己爬回去, 因为让它自己
+   恢复的那个证据(推送先看到)恰恰是它在 kick 模式下产不出来的。
 
 **活性判定只认正证据**(`opencode-events` 轮 4 的教训 —— 一条谎报 `active` 的通道比没有通道
 更糟, 因为它把回落**关掉**了): `push.state === 'live'` 需要 socket 连着**并且**在心跳窗口
@@ -809,6 +921,13 @@ proposal 一条条目"根本表达不出来: 两条指针措辞相同的 proposa
 用, 而不是 agent 写的一句话。就地编辑会置 `edited: true` 并把两份正文都存下来; 回执会这么
 说。卡片还带一条**身份行**("将以 ‹用户名› 发送"), 以及当 `identityMarking` 不是 `none` 时
 的那条警告 —— 逐字来自 `caps.identityMarkingText`(§9.5)。
+
+**批准会重新解析一次 `convCaps`, 就在发送之前, 无条件**(r4, §4 的第三个刷新触发点)。一条
+proposal 可以在 `awaiting-approval` 里躺到 24 小时(它自己的 TTL), 而在这段时间里那个会话
+完全可能已经把用户踢掉、把邮箱改成只读, 或者干脆被解散 —— `why:'left-group'` 本来就在枚举
+里。重新解析回答"不能发"时, 这次批准**不发送**, 而是以带类型的 `send-not-available` 加上
+`convCaps` 自己给的理由停下来, proposal 落到 `failed`, 回执把那个理由逐字带回给 agent。这
+是唯一一个"判断错了要付出一条真消息"的时刻, 所以它是唯一一个不许省的刷新。
 
 ### 9.3 Agent 拿回来什么
 
@@ -1108,7 +1227,7 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 | `scanSource` | 读什么 | 发送 | 现实 |
 |---|---|---|---|
 | `'store'` | 客户端自己写下的本地库, 带游标增量读, 可选一个 fs.watch 做变更通知 | 走协议库, 或者退回 `'ui'` | 只有在那份库**读得出来**时才成立 |
-| `'ui'` | 客户端**渲染出来的界面**, 由 agent-browser 的一个 profile 驱动(`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + 指纹种子 + 代理, 外加一个 VibeSpace 自己拥有的实时视图) | agent-browser 在那个客户端自己的输入框里打字 | 只能看见屏幕上有的东西, 所以历史是"能滚多远就多远", `history: 'none'` 或 `'page'` |
+| `'ui'` | 客户端**渲染出来的界面**, 由 agent-browser 的一个 profile 驱动(`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + 指纹种子 + 代理, 外加一个 VibeSpace 自己拥有的实时视图) | agent-browser 在那个客户端自己的输入框里打字 | 只能看见屏幕上有的东西, 所以历史是"能滚多远就多远" —— `history: 'page'`, **绝不是 `'none'`**(见下) |
 
 两个具体平台落在**不同**的格子里, 而这个区别是 owner 要的那次风险陈述:
 
@@ -1123,6 +1242,25 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
   户端进程的内存里** —— 所有公开工具都是从那里把它抠出来的。**读另一个进程的内存不是这个
   产品会做的事**(围栏 13), 所以 WeChat 的 `scanSource: 'store'` 这条路**不存在**; 剩下的只
   有 `'ui'`。
+
+**`'ui'` 那一格自己欠三行摄入契约**(r4)。决定 19 把 `'store'` 对**两个**平台都排除掉了
+(WeChat 按围栏 13 的内存规则, WhatsApp 因为拒绝协议库之后只剩 `'ui'`), 所以 `'ui'` 就是这
+一类**发布出去的全部**; 而 §6.3 那句"两者都是带游标的周期扫描"里的游标, 此前只对 `'store'`
+描述过。少了这三行, 这一格满足不了 store 自己的不变量:
+
+- **anchor。** 优先用客户端自己暴露的消息 id; 客户端不暴露稳定 id 时, adapter 必须**声明**
+  一把合成键 `(convId, renderedAt, sha256(author|text))` 写进 `ChannelRecord.vendorId`, 并
+  且置 `raw.synthetic: true` —— 于是 §5 不变量 2 仍然有一把键, 而"这把键是我们编的"这件事
+  是**看得见的**(它决定了同一块屏幕重扫时会不会塌成一条)。这把键的代价要说清楚: 同一个人
+  在同一次渲染刻度里发两条一模一样的消息会塌成一条, 而这比每次滚动都造一批重复要好 —— 两
+  个方向都由下面那条 parity 腿钉住。
+- **什么叫"完整的一趟"。** 对一次受滚动限制的读取: 向上滚到了那个存下来的 anchor ⇒
+  `complete: true`; 先撞到滚动上限(客户端不肯再往回给了)⇒ `complete: false`, 也就是
+  **anchor 不动**, 下一趟重读。这与 §5 不变量 4 是同一条规则, 只是换了一种证据。
+- **`history: 'none'` 在 `receive: 'scan'` 上是禁止的**(§4 的契约规则)。§5 不变量 4 要的
+  是"完整的一趟"与 `complete:false`, 而一个连翻页调用都没有的 adapter 两件事都报不出来;
+  §4 又规定没声明的能力**抛异常**, 于是 §6.3 那句"翻到已存的 anchor 为止"在它身上根本不
+  可能发生。
 
 **这一类共有的三条性质**, 全都直接掉进已有的机器里:
 
@@ -1166,7 +1304,7 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 |---|---|---|
 | 插件贡献的 adapter | manifest 没有 adapter 贡献点; 沙箱会需要网络+文件系统授权; 而且接收路径必须跑在 store 与 spend guard 旁边。第三方 adapter 是*最终*的正确归宿 | `contributes.channelAdapters`, 走同一套 `src/channels` 接口, 于是注册表永远不分叉。**这个 key 今天并没有被保留**: `src/plugin-manifest.js` 里的 `RESERVED_CONTRIBUTIONS` 是 `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, 而只有*在那张表里*的 key 才会产生"保留给后续阶段 —— 已忽略"的警告 —— 其余任何东西在 `m.contributes` 被重建成固定形状时就被静默丢弃, 所以一个照着这一行去写的插件作者会**完全收不到任何信号**。**P0 加上那一个词**, 外加 `scripts/test-plugin-loader.mjs` 里期望集合的更新。一个声明了却是惰性的槽位, 与本文针对 `SPEND_REASONS` 所反对的是同一种失败; 区别在于这里那个槽位只值一个数组条目, 却买到一句诚实的警告 |
 | 跑在配对设备上的 adapter | 凭据与 store 都住在这里 | 接口本来就接收一个 machine handle; v1 传 `local`。`hostId` 是一个参数, 绝不是一个分支 |
-| ~~活事件通道~~ **已上移到 P1**(r3/Q3(a)) | 不再推迟: owner 要实时推送, 而 §6.4 按证据重新论证过了。留下的门控只有一个 —— 在 Lark 控制台上启用事件订阅 | `src/channels/live/<kind>.js`, 内容或游标 kick 由 `pushExclusivity` 决定 |
+| ~~活事件通道~~ **已上移到 P1**(r3/Q3(a)) | 不再推迟: owner 要实时推送, 而 §6.4 按证据重新论证过了。留下的门控只有一个 —— 在 Lark 控制台上启用事件订阅 | `src/channels/live/<kind>.js`, 内容还是游标 kick 由 `laneState()` 判定(§4) |
 | 本地客户端 adapter(WhatsApp / WeChat) | 接口从 P0 起就建模了它(`scan` / `scanSource` / `tosRisk` / `convCaps`), 但 adapter 本身要一个登录着的官方客户端、一个 agent-browser profile, 以及一次关于条款风险的点名决定 | **P6**, §12.5; 门控在决定 19 与 agent-browser 系统上 |
 | 走协议库的 WhatsApp 发送 | 非官方客户端被平台条款禁止, 封号落在过正常使用上(围栏 13) | 永远在 `tosRisk: 'prohibited'` 后面; 合规路线是官方 Business Cloud API(bot 身份) |
 | HTML 邮件渲染 | XSS 面; 纯文本是诚实的, 而且对分诊来说够用 | published-pages 那套 sandbox iframe 模式 |
@@ -1203,10 +1341,10 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 | `test-channel-outbox` | fast | 状态机(每一次允许的转移与每一次被禁止的转移); 护栏叠加且只能收紧; 未知策略时 fail-closed; `unknown` 绝不自动重试 | 一份去掉护栏检查的补丁副本必须变红; 一条 direct-send 策略碰上带链接的消息仍然必须走 review |
 | `test-channel-record` | fast | 归一化, 含 mention 占位符解析; 注入标记的剥除 | 一段包含我们自己 frame 标记的正文, 出来必须是惰性的 |
 | `test-channel-store` | fast | 原子索引; 只追加的日志; 重放分页时的去重; 游标只在完整 pass 之后前进; 保留地板 ≥ 7 天; **两趟并发 pass 经 `index.update()` 都落地**(§5.1) | 一趟报告 `complete:false` 的 pass 必须让游标保持不变; 一份围绕 `writeJsonAtomic` 做 read-modify-write 的补丁副本必须**丢掉**其中一趟的 anchor 推进 |
-| `test-channel-adapter-contract` | fast | 假 adapter 驱动每一个已声明的能力; 未声明的能力抛异常; 带类型的错误; **那条"没有任何调用点按 `kind` 分支"的 grep 普查** | 一个在调用点上按自己 kind 分支的合成 adapter 必须让普查失败 |
-| `test-channel-caps` | fast | 两个轴的记录; `convCaps` 三值; **只有 `caps` 与 `convCaps` 同时放行那个控件才存在**, 而 `unknown` 永远渲染成"不提供 + 理由"; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim` 三种通道各自的措辞; `identityWarning` 对 `unknown` 与对 `marked` 一样出声 | 一个声明 `sendAs:['user']` 却在一个 `convCaps.sendAs === []` 的会话上仍然提供发送控件的合成 adapter 必须变红; 一个返回比 `caps` 更宽的 `convCaps` 的 adapter 必须变红; `identityMarking:'unknown'` 却没有警告必须变红 |
-| `test-channels-lane-parity` | fast | **同一天的流量分别经 push / poll / scan 灌进去 ⇒ 同一批记录、同一个唤醒次数、同一笔扣款**(围栏 12); 同一条消息推送来一次、轮询又来一次要塌成一条(按消息 id 去重); 事件重放按 `event_id` 去重 | 一份**绕过合并窗口**的推送通道副本必须在同一个爆发上唤醒得更多; 一份在持久化**之前** ack 的副本必须在注入的崩溃点上丢掉记录 |
-| `test-channels-identity` | fast | 默认**不追加**发送方诚实行; `identityMarking` 驱动审批卡上的警告与回执里的字段; 审计行带 `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` 且**不出实例**; `sendAs: []` 的会话上 `reply` 返回 `send-not-available` 而**不创建 proposal** | 一份把诚实行默认打开的副本必须变红(r2 的决定 17 是这条腿的负控); 一个 `marked` 的 channel 上审批卡没有警告必须变红; 一个 `sendAs: []` 的会话上创建出了 proposal 必须变红 |
+| `test-channel-adapter-contract` | fast | 假 adapter 驱动每一个已声明的能力; 未声明的能力抛异常; 带类型的错误; **那条"没有任何调用点按 `kind` 分支"的 grep 普查**; **`receive:'scan'` 的 adapter 不许声明 `history:'none'`**(r4, §12.5) | 一个在调用点上按自己 kind 分支的合成 adapter 必须让普查失败; 一个声明 `receive:'scan'` + `history:'none'` 的合成 adapter 必须变红 |
+| `test-channel-caps` | fast | 两个轴的记录; `convCaps` 三值; **只有 `caps` 与 `convCaps` 同时放行那个控件才存在**, 而 `unknown` 永远渲染成"不提供 + 理由"; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim` 三种通道各自的措辞; `identityWarning` 对 `unknown` 与对 `marked` 一样出声。**r4 两组**: `laneState` 的优先级 —— 一条 `claimedExclusive:true` 且带 `demotedAt` 的记录必须答 `carryContent:false`, 一条超过心跳窗口没出过声的通道**永远**不许答 `live:true`, `unknown` 一律 `carryContent:false`; 以及 `convCaps` 的 TTL —— 过了 TTL 的条目必须渲染成 `unknown` | 一个声明 `sendAs:['user']` 却在一个 `convCaps.sendAs === []` 的会话上仍然提供发送控件的合成 adapter 必须变红; 一个返回比 `caps` 更宽的 `convCaps` 的 adapter 必须变红; `identityMarking:'unknown'` 却没有警告必须变红; **一份读 `caps.pushExclusivity` 的修前副本必须在"已降级"那条 fixture 上答 `carryContent:true`**; **一条新鲜的 `convCaps` 仍然必须提供那个控件**(TTL 的正控 —— 一条永远答 `unknown` 的规则同样是缺陷) |
+| `test-channels-lane-parity` | fast | **同一天的流量分别经 push / poll / scan 灌进去 ⇒ 同一批记录、同一个唤醒次数、同一笔扣款**(围栏 12); 同一条消息推送来一次、轮询又来一次要塌成一条(按消息 id 去重); 事件重放按 `event_id` 去重; **r4 的 scan 腿: 同一块屏幕扫两遍必须是 no-op**(合成 anchor, §12.5), 而滚动上限先撞到 ⇒ `complete:false` ⇒ anchor 不动 | 一份**绕过合并窗口**的推送通道副本必须在同一个爆发上唤醒得更多; 一份在持久化**之前** ack 的副本必须在注入的崩溃点上丢掉记录; **一份丢掉合成键的副本必须在第二次扫描时把每一条记录都变成重复** |
+| `test-channels-identity` | fast | 默认**不追加**发送方诚实行; `identityMarking` 驱动审批卡上的警告与回执里的字段; 审计行带 `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` 且**不出实例**; `sendAs: []` 的会话上 `reply` 返回 `send-not-available` 而**不创建 proposal**; **r4: 一条在 `convCaps` 已经过期之后才被批准的 proposal, 必须在发送之前重新解析并以 `send-not-available` 拒绝** | 一份把诚实行默认打开的副本必须变红(r2 的决定 17 是这条腿的负控); 一个 `marked` 的 channel 上审批卡没有警告必须变红; 一个 `sendAs: []` 的会话上创建出了 proposal 必须变红; **一份不在批准时重新解析的副本必须把那条消息真的发出去** |
 | `test-channels-egress` | fast | 每一个被构造出来的出向请求, 要么来自声明了自己主机的那个 adapter, 要么来自一条**带理由的**白名单 `(file, host)` 对 —— 出生即种下 `src/gmail-sync.js` 与 `src/mounts.js`(§3.1) | 一个带未声明主机的临时文件必须变红; 一条**死掉的白名单条目**(文件被移动或改名)同样必须变红 |
 | `test-oauth-loopback` | fast | 两种模式(§12.4): Gmail 的临时绑定、Lark 的固定绑定; 请求处理器**与**粘回两处的 `state` 拒绝; 完成/取消/超时时端口被释放 | 一个**被预先占住**的固定端口必须产生那次具名拒绝与粘回回落, 绝不是一个不透明的 `EADDRINUSE`; 一次 `state` 错误的回调在两种模式下都必须被拒绝 |
 | `test-channels-lark-shape` | fast | 录制 fixture 的归一化: `next_page_token` *翻页到 anchor*、`@_user_N` 占位符对着记录自己的 `mentions` 解析、带类型的错误 | 一份 anchor 落在**第二页**上的 fixture 必须被翻进去, 而不是停在第一页 |
@@ -1214,7 +1352,7 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 | `test-channels-agent-cli` | fast | 对着一个 stub 服务器跑 CLI 各个动词; `reply` 只提议、绝不发送; 不可见 = 统一错误 | 一个返回了被 ACL 藏起来的会话的 stub, 仍然必须产生那个统一错误 |
 | `test-spend-paths`(已有) | fast | 它那条按站点的普查必须看见这个新生产者、已接线、带着已声明的理由 | 它本来就带着自己的负控 |
 | `test-channels-engine` | heavy | 真 worktree 服务器 + 假 adapter: 爆发日翻页、退避、单飞、故障出声**与撤回**、摘要批量、唤醒授权与 hold 释放 | 一份用固定窗口抓取的修前副本, 必须在爆发日 fixture 上丢消息 |
-| `test-channels-push` | heavy | 真 worktree 服务器 + 一个**假推送服务器**: ack 在持久化之后(注入一次 ack 与处理之间的崩溃, 记录必须还在); 心跳沉默 ⇒ `state` 掉出 `live` **且**轮询节奏立刻回到快节奏; `stop()` 对已经在飞的 arm 是终局的; 声明 `exclusive` 但故意扣掉一部分事件 ⇒ `missRate` 越过阈值 ⇒ **自动降级成 kick 并把理由说出来** | 一条**谎报 `active`** 的通道(修前副本)必须把轮询回落关掉并丢消息; 一份从不降级的副本必须在扣事件的 fixture 上永远丢消息 |
+| `test-channels-push` | heavy | 真 worktree 服务器 + 一个**假推送服务器**: ack 在持久化之后(注入一次 ack 与处理之间的崩溃, 记录必须还在); 心跳沉默 ⇒ `state` 掉出 `live` **且**轮询节奏立刻回到快节奏; `stop()` 对已经在飞的 arm 是终局的; 声明 `exclusive` 但故意扣掉一部分事件 ⇒ `missRate` 越过阈值 ⇒ **自动降级成 kick 并把理由说出来**。**r4 三条**: 降级之后这条通道**真的改了它携带的东西**(下一个事件只 kick 游标, 记录由对账轮询进来 —— 光断言 `missRate` 越线是不够的); kick 模式下 `missRate` **一条样本都不涨**(否则它是单向棘轮); 一条降级了的通道即便 fixture 不再扣事件也**绝不自己回到**内容模式, 而在连接向导里重新声明一次独占则清零计数器并重新进入内容模式 | 一条**谎报 `active`** 的通道(修前副本)必须把轮询回落关掉并丢消息; 一份从不降级的副本必须在扣事件的 fixture 上永远丢消息; **一份把内容/kick 判定读在 `caps` 上的修前副本, 必须在降级之后仍然携带内容**; **一份终身累计 `missRate` 的副本, 必须在重新声明之后仍然停在阈值之上** |
 | `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计 | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送" |
 
 Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的事故: 不许固定 `/tmp` 路径, 不许
@@ -1257,6 +1395,26 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 "对面会看见谁"的是**正在按批准键的那个人** —— 所以正确的东西不是那条附加文本, 是授权那一
 刻的一条警告。两次都不是"更保守"或"更激进", 都是**把话说给该听的那一方**。
 
+### 17.1 对 r3 的对抗式 review(r4)
+
+针对 r3 修订提出了五条。每一条都先对着 `a41bf513` 那棵树复核过, 五条**全部成立**, 也全部
+在上面改掉了; 没有一条需要被记成"批评错了"。
+
+| # | 发现 | 判定 | 改了什么 |
+|---|---|---|---|
+| 1 | "此刻在用哪条通道、它活着吗、它可以携带内容吗"同时住在 `caps.pushExclusivity`、adapter 记录的 `push {…}` 与每会话的 `lane {…}` 三处, 没有优先级, 也**没有任何访问器读得到 adapter 记录** —— 于是 r3 新加的自动降级结构上赢不了 | **成立, 而且是三个后果不是一个。** §4 声称 `src/channel-caps.js` 是**唯一**回答处, 但它导出的三个函数没有一个接 adapter 记录; §6.4 只说前两者"一起决定", 没说谁压过谁 ⇒ (a) 被降级的通道继续携带内容, (b) 新鲜度芯片按一条静态声明画 "live"(正是它自己引用的 `opencode-events` 轮 4 教训), (c) 围栏 12 的合并窗口在 kick 模式下照跑, 白买 60 秒延迟 | `caps.pushExclusivity` **删除**(独占度是按部署的配置事实, 不该住在按 adapter 种类的静态声明里; `pushTransport` 留下, 它真的是静态的); `src/channel-caps.js` 新增**唯一**解析器 `laneState(caps, adapterRecord, convEntry, now)`, 优先级**降级 > 活性 > 声明**、`unknown` 一律 `carryContent:false`; 四个消费者(芯片、围栏 12 的门、§6.4 的节奏、§6.2 的调度器)全部改问它, §2 多一条落位规则; `test-channel-caps` 与 `test-channels-push` 各加腿, 后者断言**降级真的改变了这条通道携带的东西**(r3 只断言 `missRate` 越线) |
+| 2 | 决定 19 把唯一有摄入契约的那一格(`scanSource:'store'`)删掉了, 而契约没有搬进活下来的那一格: `'ui'` 没有 anchor、没有去重键、没有"完整的一趟", §12.5 还明确允许它声明 `history:'none'` | **成立。** §4 的契约规定没声明的能力**抛异常**, §5 不变量 4 要"完整的一趟"与 `complete:false`, 不变量 2 又要求 `vendorId` —— 而一次 DOM 抓取不保证有稳定的消息 id; §16 的 parity 行只钉了 push/poll 的去重, 从没钉过"重扫一块屏幕" | §12.5 为 `'ui'` 写出三行契约: 合成 anchor 键 `(convId, renderedAt, sha256(author|text))` 写进 `vendorId` 且 `raw.synthetic:true`、受滚动限制的"完整的一趟"(到了 anchor ⇒ `complete:true`, 先撞滚动上限 ⇒ `complete:false` 即 anchor 不动)、`receive:'scan'` 上**禁止** `history:'none'`(契约套件执法); 表里那一格的 `history` 改成只剩 `'page'`; §5 不变量 2 与 §6.3 各加一句指过来; `test-channels-lane-parity` 加 scan 腿与"丢掉合成键"的负控 |
+| 3 | `push.missRate` 是一个没有计数窗口的终身比率, 降级又没有出口 ⇒ 单向棘轮: kick 模式下推送根本不携带记录, 比率按构造趋向 1.0, 于是一条降级过的通道**永远**回不到阈值之下 | **成立**, 而且正是 auto-resume `edgeHeld` 那条教训要防的形状(*把那堵墙烧掉就是把一次瞬时的分歧变成一次永久的拒绝*) | §6.4 补两句: 比率只在 `carryContent` 为真时计数、且只在一个滚动窗口(最近 N 条或 24 小时取大)里计数; 降级由**做出声明的那一方**撤回(连接向导里重新声明 ⇒ 清零 + 重试一次), **计数器绝不是触发器**; 决定 18 与 §20 第 17 条同步; `test-channels-push` 加两条腿 |
+| 4 | `convCaps` 是一份带 `at` 却**没有任何读者**的存下来的派生事实(没有 TTL、没有刷新触发点、没有过期降级), 与十二行之下的 §5 不变量 7 直接冲突; 一份一周前的乐观答案会画出发送控件, 并造出 §4 承诺永不创建的那种 proposal | **成立。** `why` 的枚举里本来就有 `'left-group'`, 说明这个状态是被预期到的; 而没有读者的字段在这个仓库里就是"这个修复从来没接上线" | §4 与 §5 给 `convCaps` 一个 **TTL(6 小时)**与三个刷新触发点(track 时、TTL 过后面板第一次渲染、**批准那一刻发送之前无条件**), 过期即 `read:'unknown'`/`sendAs:[]`/`why:'stale'` —— 走 `offers()` 已有的规则渲染, 不需要新词汇; §9.2 写明批准时的重新解析与它的拒绝路径; 不变量 7 把它点名成"付了代价的例外"; `test-channel-caps` 加 TTL 腿(带正控), `test-channels-identity` 加"过期后批准必须拒绝"的腿 |
+| 5 | 中文版 §20 的出处块与第 19 条之间缺一个空行, CommonMark 的 lazy continuation 会把整块出处折进那条 caveat 里 | **成立**(`cat -A` 复核; 英文版 en:1806-1808 有那个空行) | 补上那一个空行。同一次复核里, 这一对文档的其余结构性检查全部通过: 标题数、表格行数、代码块逐字节一致, 以及 P0–P4 / P0–P2 的轮次与天数算术两边一致 |
+
+这五条里有四条(1–4)共享一个形状, 值得与上面 r2 那两条并排写下来: **一个事实被存在三个地
+方, 而没有一个函数被允许把它们读全。** `laneState` 之前的那三个位置、`convCaps` 那个没有读
+者的 `at`、被删掉的那一格里的摄入契约、以及那个只会往一个方向走的比率 —— 每一个都是"声明"
+与"回答"之间少了一层。r2 的教训是*一个保证被写在了错误的层*; r4 的教训是它的孪生: **一个
+答案分散在多个存储位上, 就等于没有答案** —— 存储位可以有好几个(声明、测量、观测本来就是
+不同的事实), 但**折成答案的地方只能有一个, 而且它得读得到全部三个**。
+
 ---
 
 ## 18. 阶段、轮次、日历
@@ -1265,10 +1423,11 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 测)。日历按**每天 2 轮**算。区间是诚实的: 下限假设一轮就收敛, 上限假设这个模块需要那些额外
 的轮次 —— 而实测分布说大约三分之一的模块确实需要。
 
-### P0 — store、索引所有者、adapter 接口、假 adapter、panel 骨架 — **9–11 轮 (4.5–5.5 天)**
+### P0 — store、索引所有者、adapter 接口、假 adapter、panel 骨架 — **10–12 轮 (5–6 天)**
 
 `src/channel-store.js`(持久原语)、`src/channel-record.js`、**`src/channel-caps.js`(两个
-轴的能力判定 + `convCaps` + `freshnessClaim` + `identityWarning`)**、`src/channels/index.js`
+轴的能力判定 + `convCaps` 与它的 TTL + `freshnessClaim` + `identityWarning` + **唯一的通道
+解析器 `laneState`**)**、`src/channels/index.js`
 + 假 adapter(**它三种接收模式都能真的跑**)、一个 `src/server/channels-engine.js` 骨架(调
 度器、单飞、广播)且**从第一个 commit 起就带着 §5.1 那个序列化的索引所有者**、
 `src/routes/channels.js`、六处 rail 注册(§10.1)、panel 列表(**含新鲜度芯片**)与一个空的
@@ -1278,9 +1437,11 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 `test-plugin-loader`。
 **出口:** 假 adapter 的会话出现在 panel 里、能开成窗口、能活过一次重启、能在两个客户端之间
 同步, 两趟同时的 pass 都推进了各自的游标, 而且**一个只读会话上根本画不出发送控件**。
-(r3: +2 轮 —— 两个轴的能力记录、`convCaps`, 以及假 adapter 的 scan / push 模式。)
+(r3: +2 轮 —— 两个轴的能力记录、`convCaps`, 以及假 adapter 的 scan / push 模式。r4: +1 轮
+—— `laneState` 与它的优先级、`convCaps` 的 TTL, 以及假 adapter 的 scan 模式里那把合成
+anchor 键。)
 
-### P1 — Lark 读 + Gmail 读 + **推送通道** — **13–15 轮 (6.5–7.5 天)**
+### P1 — Lark 读 + Gmail 读 + **推送通道** — **14–16 轮 (7–8 天)**
 
 `src/oauth-loopback.js` **双模**(§12.4: 临时 + 固定、端口只在流程期间持有、具名的
 `EADDRINUSE` 拒绝、粘回回落、两处 `state` 检查逐字带过来)、`src/channels/lark.js`、
@@ -1296,7 +1457,9 @@ Gate: `test-oauth-loopback`、`test-channels-lark-shape`(录制 fixture)、
 何响应里零密钥, 第二个实例的授权流程是被点名拒绝的、不是被一段堆栈拒绝的, **而且一条声明
 了独占却并不独占的推送通道会自己降级并说出理由**。
 *Owner 卡点:* Lark 的 redirect-URI 注册(决定 4)与在控制台里启用事件订阅(决定 3)。
-(r3: +4 轮 —— 推送传输、活性、ack 语义、独占度度量与降级, 加 Gmail 的 Pub/Sub pull。)
+(r3: +4 轮 —— 推送传输、活性、ack 语义、独占度度量与降级, 加 Gmail 的 Pub/Sub pull。r4: +1
+轮 —— `missRate` 的滚动窗口与"只在携带内容时计数"、adapter 行上那个"重新声明以重试"的入口,
+以及 `test-channels-push` 里"降级真的改变了这条通道携带的东西"那条腿。)
 
 ### P2 — assign、filter、唤醒 — **9–11 轮 (4.5–5.5 天)**
 
@@ -1310,7 +1473,7 @@ Gate: `test-channel-filter`、`test-spend-paths`(它的普查看得见这个生�
 被归到了正确的槽上, **而且同一天的流量走三条通道产生同样多的唤醒与同样多的钱**。
 (r3: +2 轮 —— 合并窗口、通道对等腿、延迟声明。)
 
-### P3 — outbox、审批、回执 — **9–12 轮 (4.5–6 天)**
+### P3 — outbox、审批、回执 — **10–13 轮 (5–6.5 天)**
 
 `src/channel-policy.js`、outbox store、内联审批卡 + Outbox 窗口(**含身份行与
 `identityMarking` 警告**, §9.5)、带持久化 `pendingTodoId` 与撤回的按会话 "For you" 指针
@@ -1322,7 +1485,8 @@ Gate: `test-channel-outbox`、`test-channel-acl`(含"取消 assign 后 user 授�
 控)、`test-channels-agent-cli`、**`test-channels-identity`**、`test-channels-e2e`。
 **出口:** 一个 agent 提议, 用户在任一个面上批准 / 编辑 / 拒绝, 一份回执在不叫醒任何人的情
 况下落地, 回执说出了对面看见的是谁, 而且审计日志是完整的。发送只对着假 adapter 与内建的
-Agents adapter 跑。(r3: +1 轮 —— 身份行、回执字段、审计字段。)
+Agents adapter 跑。(r3: +1 轮 —— 身份行、回执字段、审计字段。r4: +1 轮 —— 批准那一刻对
+`convCaps` 的无条件重新解析与它的拒绝路径。)
 
 ### P4 — 真正的外部发送 — **7–9 轮 (3.5–4.5 天) + owner 卡点时间**
 
@@ -1341,19 +1505,23 @@ Gate: outbox 套件扩上幂等与 reconcile 两张矩阵; `test-channels-identi
 沙箱化的 HTML 渲染(**2–3 轮**)、附件抓取(**2**)、插件贡献的 adapter(**4–6**)、跑在配
 对设备上的 adapter(**4–6**)。(r3: 活通道那一项已经上移到 P1, 所以它不再在这里。)
 
-### P6 — 本地客户端 adapter(WhatsApp / WeChat)— **8–12 轮 (4–6 天), 未排期, 双重门控**
+### P6 — 本地客户端 adapter(WhatsApp / WeChat)— **9–13 轮 (4.5–6.5 天), 未排期, 双重门控**
 
 §12.5。`scanSource: 'ui'` 那条路(agent-browser profile、登录活性、带游标的界面扫描、在客户
 端自己的输入框里发送), 加上 WhatsApp 与 WeChat 各自的 adapter 与它们的 `tosRisk` 确认对话
 框。**门控在两件事上**: 决定 19(owner 是否接受条款风险与"只走界面"这条约束), 以及
 `docs/design-agent-browser-v2.md` 那套 profile 系统落地。接口这一侧从 P0 起就已经就位, 所
-以这个阶段里没有一行改动会碰到 store、filter、spend 或 outbox。
+以这个阶段里没有一行改动会碰到 store、filter、spend 或 outbox。(r4: +1 轮 —— 把 §12.5 那三
+行摄入契约真的实现出来: 合成 anchor 键、受滚动限制的"完整的一趟", 以及在两个真实客户端上判
+断它们到底暴不暴露稳定的消息 id。)
 
-**总计:** P0–P4 = **47–58 轮 ≈ 23.5–29 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
+**总计:** P0–P4 = **50–61 轮 ≈ 25–30.5 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
 owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 的两个轴能力记录 +2、P1 的
-推送通道 +4、P2 的合并与通道对等 +2、P3 的身份面 +1、P4 的身份证明 +1。)光是 P0–P2 ——
+推送通道 +4、P2 的合并与通道对等 +2、P3 的身份面 +1、P4 的身份证明 +1; **r4 又加了 3 轮**:
+P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤回 +1、P3 的批准时重新
+解析 +1 —— 另有 P6 的 +1 不计入这个总数, 因为 P6 本来就未排期。)光是 P0–P2 ——
 只读的 channels 加上 assignment、过滤与**实时推送**、完全没有任何出向路径 —— 是
-**31–37 轮 ≈ 15.5–18.5 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
+**33–39 轮 ≈ 16.5–19.5 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
 的, 没有任何外部消息能离开这栋楼, 而钱已经被界住了。
 
 ---
@@ -1366,7 +1534,7 @@ owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 �
 |---|---|---|---|
 | 1 | **Adapter 放在树里还是做成插件?** | 树内模块 / 插件包 | **v1 放树里。** OAuth 流程、密钥存储与 spend guard 全都在树里; 在这个规模上, 为每条消息付一次 IPC 边界什么都买不到。把接口保持一模一样, 于是第三方 adapter 在 P5 变成插件时不用分叉注册表 |
 | 2 | **Lark 的发送身份**(r3/Q4 已更新) | 以**用户**身份(需要 `im:message` + **`im:message.send_as_user`** —— 点不是冒号 —— 一次版本发布与重新授权)/ 以**bot** 身份(需要把 bot 加进每一个聊天)/ 两者都要 | **以用户身份, 那次 scope 往返照旧留在 P4。** 在一个已经存在的人类群里, 那是对面期待的样子, 而且它不需要改动别人的任何聊天。bot 身份只作为 user-send 被拒时的回落 —— 而且 bot 发送是 `identityMarking:'marked'`, 所以那个回落**要在审批卡上出声**。**新增的一半:** 用户身份发送**是否真的**改变收件人看见的 `sender_type`, 官方文档没写、社区有相反报告, 所以在 P4 用一次真实发送证明它之前, 这个 adapter 声明 `identityMarking:'unknown'` 并按 `marked` 对待(§9.5、§20 第 3 条)。**在 scope 落地之前, 界面说的是**"发送需要在 Lark 应用上再加两个权限、发布一个版本, 并重新授权一次", 而不是把一个灰控件摆在那里 |
-| 3 | **Lark 的接收通道**(r3/Q3(a) 已重写) | 只轮询 / 轮询 + WebSocket **kick** / WebSocket **携带内容** + 轮询做对账 / webhook | **推送是一等模式, 从 P1 起就上; 内容还是 kick 由 `pushExclusivity` 决定; 永远不要 webhook。** 长连接不需要公网 URL、只支持企业自建应用、每应用 50 条连接、3 秒 ack、**at-least-once 带 4 次重投** —— 所以"推送不可靠"这个理由不成立。真正的约束是**集群模式**: 多个客户端共用一份应用凭据时每个事件随机只到一个。那是一个**配置**条件, 不是一条自然律 ⇒ 独占时携带内容(轮询降到 15 分钟对账), 共用或未知时只做游标 kick(r2 的行为, 也是默认值)。一个公网入站端点相比长连接什么都买不到 |
+| 3 | **Lark 的接收通道**(r3/Q3(a) 已重写) | 只轮询 / 轮询 + WebSocket **kick** / WebSocket **携带内容** + 轮询做对账 / webhook | **推送是一等模式, 从 P1 起就上; 内容还是 kick 由 `laneState()` 一处判定(声明住在 adapter 记录的 `push.claimedExclusive` 上); 永远不要 webhook。** 长连接不需要公网 URL、只支持企业自建应用、每应用 50 条连接、3 秒 ack、**at-least-once 带 4 次重投** —— 所以"推送不可靠"这个理由不成立。真正的约束是**集群模式**: 多个客户端共用一份应用凭据时每个事件随机只到一个。那是一个**配置**条件, 不是一条自然律 ⇒ 独占时携带内容(轮询降到 15 分钟对账), 共用或未知时只做游标 kick(r2 的行为, 也是默认值)。一个公网入站端点相比长连接什么都买不到 |
 | 4 | **Lark 的 redirect URI** | 复用运维工具已注册的那个 loopback 端口 / 为 VibeSpace 注册一个专用的 | **注册一个专用的 —— 而且无论如何都把那个端口当 machine-global 看待。** 注册解决的是 VibeSpace 与运维工具之间的冲突; 它**解决不了**一台机器上两个 VibeSpace 实例(一个生产服务旁边一个检出), 那时输的那个在用户已经站在授权页上之后拿到一个不透明的 `EADDRINUSE`, 而持有端口的那个收到它的 code。§12.4 只在流程期间绑、按名字拒绝, 并落到粘回。如果控制台一个应用能接受多个回调 URL, 就把我们的*并排*注册进去而不是把他们的顶掉(未验证 —— §20) |
 | 5 | **Gmail 的 OAuth client** | 往现有的共享预设里加 `gmail.send` / 为 channels 注册一个专用 client | **给 channels 一个专用 client。** 往一个共享预设里加一个敏感 scope, 会让用这个预设的一切重新授权一遍, 而认证状态(以及由此而来的 7 天 refresh token 行为)会变成一个决定管两个功能。只读的 P1 可以先在现有预设上起步 |
 | 6 | **默认 track 什么** | 在用户挑之前什么都不 track / 用户所在的全部群 | **什么都不。** 这是隐私的答案, 是轮询成本的答案, 也是让 panel 不变成一个邮件客户端的那件事。发现列表让 opt-in 只需一次点击 |
@@ -1381,8 +1549,8 @@ owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 �
 | 15 | **Fleet 范围** | v1 只本地 / adapter 跑在配对设备上 | **v1 只本地**, 而 `hostId` 一开始就是一个参数, 所以以后要挪不是一次重写 |
 | 16 | **Assignment 蕴含可见性吗?** | 是, 写成一条显式授权 / 否, 用户还必须另外授予 reach | **是, 写成一条显式授权。** 一件显然是想要的事却要两步, 正是一个权限模型被绕过的方式; 把它写成一条真的授权, 才能让 reach 面板说真话 |
 | 17 | **发送方诚实行 — 已被 owner 推翻(r3/Q4)** | 总是追加 "drafted by \<agent\>" / 按 channel 开关**默认开** / 按 channel 开关**默认关** / 从不 | ~~按 channel 开关, 外部默认开~~ ⇒ **默认关, 保留为一个按 channel 的选项。** 默认是**以用户本人的身份发送、正文里不加任何东西**, 在每一个允许这么做的 channel 上都是。取代它的不是沉默: `identityMarking` 能力位在**授权那一刻**(审批卡/发送控件)与**回执里**把"对面会看见谁"说出来(§9.5)。理由是这句话欠的是**按下批准键的那个人**与起草它的那个 agent, 不是收件人 —— 而 r2 把它塞进了收件人读的那条消息里, 既改写了用户自己的话, 又发生在用户已经决定之后。审计日志照旧记 `draftedBy` |
-| 18 | **推送通道的独占度由谁说了算?**(r3/Q3(a) 新增) | (a) 运维**声明** + 产品**度量**并在矛盾时**自动降级** / (b) 永远只当游标 kick(r2) / (c) 相信声明, 不度量 | **(a)。** 平台不告诉我们还有几个客户端连着, 所以独占度只能被断言 —— 但它**可测**: `push.missRate` = 先被对账轮询看到而不是先被推送看到的记录比例, 真正独占时长期为 0。连续越过阈值(默认 2 %, ≥20 条样本)就自动降级成 kick 并把理由写在 adapter 行上。(c) 是一句祈祷; (b) 是把 owner 明确要的实时推送关掉。默认值是 `unknown` ⇒ **不做任何声明就得到 (b) 的行为** |
-| 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 在它自己的输入框里发送 / (c) 也允许协议库(whatsmeow / Baileys)与读本地库 | **(b), 而且明确排除 (c)。** WeChat 的本地库密钥只存在于正在运行的客户端**进程内存**里, 而读别人的进程内存不是这个产品会做的事(围栏 13); WhatsApp 的协议库是被平台条款明确禁止的非官方客户端, 封号落在过正常使用上。(b) 用的是用户自己已经登录的官方客户端, 身份上就是本人(`identityMarking:'none'`), 而代价是诚实的: 只能看见屏幕上有的东西, 延迟是分钟级, 而那个数字**画在会话行上**。接口从 P0 起就建模它, adapter 本身是 P6 |
+| 18 | **推送通道的独占度由谁说了算?**(r3/Q3(a) 新增) | (a) 运维**声明** + 产品**度量**并在矛盾时**自动降级** / (b) 永远只当游标 kick(r2) / (c) 相信声明, 不度量 | **(a)。** 平台不告诉我们还有几个客户端连着, 所以独占度只能被断言 —— 但它**可测**: `push.missRate` = 先被对账轮询看到而不是先被推送看到的记录比例, 真正独占时长期为 0。连续越过阈值(默认 2 %, ≥20 条样本)就自动降级成 kick 并把理由写在 adapter 行上。(c) 是一句祈祷; (b) 是把 owner 明确要的实时推送关掉。默认值是 `unknown` ⇒ **不做任何声明就得到 (b) 的行为**。**r4 给它补了两句, 少一句它就是个单向棘轮**: 比率**只在通道真的在携带内容时、且只在一个滚动窗口内**计数(最近 N 条或最近 24 小时, 取更大者)—— 否则 kick 模式下每条记录都"先被轮询看到", 比率按构造趋向 1.0, 被降级的通道永远回不来; 而降级**由做出声明的那一方撤回**(在连接向导里重新声明一次独占 ⇒ 计数器清零、重试一次), 绝不由计数器自己撤回 |
+| 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 在它自己的输入框里发送 / (c) 也允许协议库(whatsmeow / Baileys)与读本地库 | **(b), 而且明确排除 (c)。** WeChat 的本地库密钥只存在于正在运行的客户端**进程内存**里, 而读别人的进程内存不是这个产品会做的事(围栏 13); WhatsApp 的协议库是被平台条款明确禁止的非官方客户端, 封号落在过正常使用上。(b) 用的是用户自己已经登录的官方客户端, 身份上就是本人(`identityMarking:'none'`), 而代价是诚实的: 只能看见屏幕上有的东西, 延迟是分钟级, 而那个数字**画在会话行上**。接口从 P0 起就建模它, adapter 本身是 P6。**r4 的后果**: 这个决定把 `'store'` 对两个平台都排除掉了, 于是 `'ui'` 就是这一类发布出去的全部 —— 而在此之前有摄入契约的那一格恰恰是被删掉的那一格, 所以 §12.5 现在为 `'ui'` 逐条写出了它自己的契约(合成 anchor 键、"完整的一趟"在一次受滚动限制的读取里是什么, 以及 `receive:'scan'` 上禁止 `history:'none'`) |
 | 20 | **Gmail 的推送要不要默认打开?**(r3/Q3(c) 新增) | 默认开 / **可用但默认关** / 不做 | **可用但默认关。** Pub/Sub 的 pull 订阅让它同样不需要公网入站端点, 而且每个实例可以有自己的订阅, 所以它比 Lark 的长连接更容易做到独占。但它要一个 GCP topic、一份 IAM 授权和一个**每日续期任务**(watch 7 天静默过期, 漏一次就无声停掉), 而它换来的东西是: 把一个"什么都没变时每 tick 一个请求"的轮询换成秒级延迟。对邮件这种节奏, 那是一个应该由用户按自己的场景打开的开关, 不是一个默认值 |
 
 ---
@@ -1440,17 +1608,27 @@ owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 �
 16. **Gmail 的 Pub/Sub pull 订阅没有跑过。** 决定 20 建立在"pull 订阅让推送不需要公网入站
     端点、且每个实例可以有自己的订阅"之上, 那是 Pub/Sub 有文档的形状, 但这套东西一次都没
     有对着一个真的 topic 跑过 —— 包括那个每日续期任务在漏掉一次时到底表现成什么样。
-17. **`push.missRate` 的阈值没有标定。** 2 % / ≥20 条样本是一个从"真正独占时它应该长期为
-    0"推出来的起点, 不是一个测出来的数。第一周应该盯着它, 并且把降级这件事做成**可以被看
-    见**的(adapter 行 + 一行日志), 这样标定它靠的是数据而不是这一段文字。
+17. **`push.missRate` 的阈值与它的窗口都没有标定。** 2 % / ≥20 条样本是一个从"真正独占
+    时它应该长期为 0"推出来的起点, 不是一个测出来的数; r4 加的那个滚动窗口("最近 N 条或
+    最近 24 小时, 取更大者")同样是一个形状而不是一个测出来的 N —— 一个太窄的窗口会在一次
+    安静的夜里让一条健康的通道被降级, 一个太宽的窗口会让一次真的配置错误拖上好几天。第一
+    周应该同时盯这两个数, 并且把降级这件事做成**可以被看见**的(adapter 行 + 一行日志 +
+    那个"重新声明以重试"的入口), 这样标定它靠的是数据而不是这一段文字。**已经不再是未知
+    的那一半**: 降级是不是单向棘轮, 不取决于标定 —— 那是 §6.4 的两条规则(只在携带内容时
+    计数、由声明方撤回)结构上回答掉的, 而 `test-channels-push` 对两者各有一条负控。
 18. **WhatsApp 与 WeChat 的本地客户端形状一次都没有碰过。** §12.5 是按公开材料写的一个
     adapter **类**: 界面扫描的可行性、能滚多远的历史、登录活性的判定方式、以及一个真实客户
     端在一个 agent-browser profile 里的稳定性, 全都没有量过。这也是它是 P6 而不是 P5 的原
-    因 —— 它欠的是一次调研, 不是一次实现。
+    因 —— 它欠的是一次调研, 不是一次实现。**r4 收窄了这里的未知**: 那一格的摄入契约现在是
+    写下来的(合成 anchor 键、受滚动限制的"完整的一趟"、`receive:'scan'` 上禁止
+    `history:'none'`), 所以剩下的未知不再是"这一类满不满足 store 的不变量", 而是**这两个具
+    体客户端到底暴露不暴露一个稳定的消息 id** —— 暴露就直接用它, 不暴露就落到那把合成键,
+    而那把键的代价(同一次渲染刻度里两条一模一样的消息会塌成一条)是已知且已钉住的。
 19. **交叉引用 `docs/design-agent-browser-v2.md` 目前解析不了。** §12.5 与决定 19 依赖那份
     设计的 profile 系统(user-data-dir + provider + 指纹种子 + 代理 + 实时视图), 而在写这份
     修订时它住在另一个分支上, 没有并进这棵树。等它并进来之后, 这两处引用应该被复核一遍
     —— 尤其是"一个 profile 里跑一个长期登录的官方客户端"这件事是不是它自己的模型允许的。
+
 **r3 里新引入的 vendor 事实的出处**(公开文档, 2026-09-10 取; 这里没有任何一条在真实租户
 上跑过 —— 见上面第 2、3、15–18 条):
 
