@@ -55,6 +55,21 @@ Wayland + Xwayland、AT-SPI 的 9 个应用与它的遍历速度、`org.gnome.Sh
 AccessDenied、`/dev/uinput` 的 0600、portal 的接口清单、128 个 inotify instance 里已经被占掉 80 个），
 每一条都写在它支撑的那句话旁边。
 
+**第六轮（2026-09-10）** 回应了对第五轮的对抗式批评：六条 finding，**全部成立**，核实证据在
+**附录 D**。两条 high 各自指出一个**上线当天就是假话**的断言：反默认失明的整套机制住在
+`vibespace-browser` 里，而本设计**自己的默认路径是一条直接的 `agent-browser` 调用**，于是 I6 被改窄成
+"经我们 CLI 的命令"，同时把能结构性收口的那一半真的收了口（非默认附着的目录由服务器铸名、从不打印，
+§3.7、§12.32）；而 §4.9 的能力律只对一个动词执法，可四个动作动词里 `key`（和弦）在无障碍树上**一条
+路都没有**、`click @ref` 只对**自报动作**的节点成立 —— 本轮为此**重新实测**，得到比批评者更强的数字
+（九个应用 503 个节点：`Action` 66 个、`EditableText` 33 个，而 **43 个 `button` 节点里只有 6 个**
+导出 `Action`），于是那张矩阵的动作行拆成四行、§5.1.1 加了一张按动词的能力表、D28 收窄到它实测支持
+的范围。三条 medium 各自杀掉一句"关于不存在的机制的话"：子 agent 那一行与 D23 的自相矛盾、
+"零新机制"（`pendingNotice` 是**一个**槽、一个写死的渲染器、消费一条就 `break`）、以及那一行登不下
+两个值、换成对象又让 digest 变成常量的 `LIVE_SESSION_FACTS`。一条 low 把 AT-SPI 遍历放回
+"never block the event loop"这条法下（有界子进程、每调用超时、节点预算），并点名本轮每个数字所经的
+那个绑定（`libatspi` 的缓存，§12.33）。**没有一条决定的推荐值因此改变** —— 变的是 D23 与 D28 各自被
+收窄到实测支持的范围；§12 从 31 条长到 33 条。
+
 ---
 
 ## 0. 论点
@@ -256,7 +271,7 @@ Agent 从它们自己的 shell 里驱动浏览器，那里的 fork 成本是它�
 | I3 | 用户既看不见也介入不了 | **agent 在看什么，用户就能透过 VibeSpace 自己的鉴权一起看，并且能通过一次可见、可逆的模式切换拿走控制权。** |
 | I4 | （隐含）没有任何东西拥有生命周期 | **每个浏览器进程都有一个具名的 owner、一个有界的生命期和一个可见的状态；每个*由 VibeSpace 启动的*浏览器进程还额外有一道资源守卫。** 这个拆分是刻意的，而且它是诚实的那一半：P0 的浏览器是由 agent 自己的 CLI 启动的，所以 keeper 看不见它们。P0 能给它们的是那个*上界*（一个显式的 idle timeout，§3.2.3）和那个*名字*（`vs-<browserKey>`）；守卫和被强制执行的天花板要等 P1 的 keeper。P0 到 P1 之间，默认路径是有界但无守卫的，而这一点是被写出来的，不是被暗示的。 |
 | I5 | （隐含）扩大站点访问面 | **指纹规避是每个 profile 自己的 provider 选择，绝不是全局默认，也绝不是第一个答案** —— 对任何有账号的站点，通过实时视图做一次人工登录都胜过它。 |
-| I6 | （隐含，Q7/Q8）一个会话可以同时握着好几个 profile | **一条命令作用在它自己点名的那个 profile 上；当可选的不止一个时，它必须点名。** 歧义按名字被拒绝并列出可用的 handle，绝不由一个默认值替它决定；而每一条回答都说出它刚刚作用在哪个 profile 上——所以"用错了 profile"这件事在下一条命令就会被看见，而不是在任务做完之后。 |
+| I6 | （隐含，Q7/Q8）一个会话可以同时握着好几个 profile | **一条经我们 CLI 的命令作用在它自己点名的那个 profile 上；当可选的不止一个时，它必须点名。** 歧义按名字被拒绝并列出可用的 handle，绝不由一个默认值替它决定；而每一条回答都说出它刚刚作用在哪个 profile 上——所以"用错了 profile"这件事在下一条命令就会被看见，而不是在任务做完之后。"经我们 CLI"这几个字是承重的，不是措辞上的谨慎：本设计的默认路径**就是**一条直接的 `agent-browser` 调用（§3.2 的全部是四个环境变量），它够不到我们任何一段代码。§3.7 把这条残留连同它那一半结构性收口一起写出来 —— 一个不能对默认路径成立的不变量，如果不改窄措辞，上线当天就是假的。 |
 | I7 | （隐含，Q9）一个窗口目标就是用户的桌面本身 | **一个原生窗口像标签页一样被租，像 DOM 一样被观察。** 只有租约持有者是 agent、且用户没有接管时才允许注入输入；能读到无障碍树时就绝不靠像素猜坐标；而我们**没有启动**的窗口是另一条更严格的道（D27）。 |
 
 ---
@@ -487,7 +502,10 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
    那一半，永远可用，零成本。
 3. **推给它，而且默认不花钱。** 钉住是一次**用户动作**，也就是说用户此刻就在那儿打字 —— 所以走
    `src/session-status.js` 已经有的 `pendingNotice` 通道：把一句 `<system-reminder>` 挂在用户
-   **下一条**消息上。零计费 turn，零新机制。只有当会话**空闲**且用户明确要求时，才走 §4.3.1 那条
+   **下一条**消息上。零计费 turn —— 但**不是**零新机制：那个槽今天是**一个**固定形状的位置、只有一个
+   写死的渲染器、而注入点消费一条就 `break`，所以本设计的两个生产者（这条 `'browser-pin'` 与 §3.8
+   第②层那条 profile 变更）会互相盖掉，也会盖掉状态覆盖那条。§3.8 第②层写出了那次改动 —— 队列化 +
+   按 `kind` 分派 + 注入点排空 —— 而它是这两处共用的一次改动，不是各做一份。只有当会话**空闲**且用户明确要求时，才走 §4.3.1 那条
    投递梯（新的具名理由 `'browser-pin'`，和它的生产者在同一次改动里加进 `SPEND_REASONS`），
    设置项 `browser.announcePin` 默认 **OFF**。这就是 §4.3.1 那张"三个时刻三个答案"表的同一条规矩，
    套在第四个时刻上。
@@ -632,7 +650,7 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
 | 钉子的阶梯（§3.2.5）+ backend 切换的判定与它的版本阶梯（§7.4） | `src/browser-profiles.js`（PURE 那半）+ `src/server/browser-backend.js`（ORCH：停/重启/按租约重开标签页） | **PURE + ORCH** | `test-browser-pin`（fast）+ `test-browser-backend`（fast 判定，heavy 切换） |
 | 可分栏的标签页组（§4.6）：链上的 `layout`/`split`、分隔条、"生在链里"那条路 | `src/lib/tab-group.js`、`src/lib/layout.js`（持久化 + 同步键） | **CLIENT** | `test-window-binding`（headless chrome） |
 | 附着集合、handle 解析、歧义拒绝、审计行（§3.7）+ 反默认失明的判定（§3.8） | `src/browser-profiles.js`（PURE：`resolveHandle`/`attachmentsFor`/`handleRefusal`/`profileChangeNotice`） | **PURE** | `test-browser-handles`（fast）+ `test-profile-blindness`（fast + heavy） |
-| 原生窗口转发（§4.7）+ 聊天适配器（§4.8）+ 窗口目标的事实与动作（§4.9） | `src/xpra-serve.js`（SHARED 事实）+ `src/window-targets.js`（SHARED：枚举 / a11y 快照 / 输入后端阶梯）+ `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` + `data/bin/vibespace-window` | **SHARED + ORCH + agent 面** | `test-native-window`（heavy）+ `test-window-target`（heavy） |
+| 原生窗口转发（§4.7）+ 聊天适配器（§4.8）+ 窗口目标的事实与动作（§4.9） | `src/xpra-serve.js`（SHARED 事实）+ `src/window-targets.js`（SHARED：枚举 / a11y 快照 / 输入后端阶梯；**那趟 AT-SPI 遍历跑在一个有界的子进程/worker 里，每次调用一个超时、整趟一个节点预算 —— 每节点一次 D-Bus 往返，而一个不应答的应用会挂到 libdbus 默认的 25 秒，绝不许落在服务器或 daemon 的事件循环上，§4.9**）+ `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` + `data/bin/vibespace-window` | **SHARED + ORCH + agent 面** | `test-native-window`（heavy）+ `test-window-target`（heavy） |
 
 `hostId` 是一个参数，绝不是一个分支：`browser-access.js` 挑传输（本地 keeper / `browser-serve`
 设备 op / ssh），而下游没有任何东西再问一次"这是远程的吗"—— 和 `src/server/opencode-access.js`
@@ -666,12 +684,35 @@ normalizer"的 map —— 一个进程，一条 stdout），codex 的子 agent �
 | 裸命令（`vibespace-browser snapshot`） | 默认附着 | 正常执行，回答里点名 profile | **具名拒绝** `profile_required`，列出全部 handle 与哪个是默认 |
 | `--profile <id\|alias>` | 点名的那个 | 正常执行 | 正常执行 |
 | shell 里导出了 `VIBESPACE_BROWSER=<alias>` | 该 shell 的默认 | 正常执行 | 正常执行（等价于每条命令都带 `--profile`） |
-| 子 agent 的裸命令 | 它继承来的那个环境 | 与父亲同一个浏览器（**这是默认，也是对的**） | 同上 —— 拒绝，理由里额外说明"你是一个子 agent，用 `--profile` 或问你的父亲要一个 handle" |
+| 子 agent 的裸命令 | 它继承来的那个环境 | 与父亲同一个浏览器 —— **这是今天的物理事实**，而 D23 恰恰建议在父亲的默认是一个持久登录 profile 时不要依赖它 | 同上 —— 拒绝（`profile_required`，与裸命令同一条）；"你是一个子 agent"那句附言只在服务端此刻**看得见**一个 sidechain 开着时才加，见下 |
 | `--profile <一个路径>` | —— | **拒绝**：本 CLI 的 `--profile` 收的是注册表 handle，路径请用 `vibespace-browser new` 登记 | 同左 |
+| 一条**直接的** `agent-browser` 命令（根本不经过我们的 CLI） | 会话 env 指着的那个 user-data-dir，也就是**默认附着** | 正常执行 | 仍然落在默认附着上 —— **我们拦不住它**，见下 |
 
 最后一行是承重的：`agent-browser` 自己的 `--profile` 收的**就是**一个 name 或 path（§1.4），所以一个
 已经会用 `agent-browser` 的 agent 会很自然地递给我们一个目录 —— 而那正是 §1.2 里那 53 个没人拥有的
 目录的生成方式。同名不同义的旗标必须**大声**分开，并且拒绝里要带上那条能把路径变成 handle 的命令。
+
+**而最后那一行是本节欠的残留，所以它被写出来，不是被绕过。** §3.2 的默认路径**就是**一条直接的
+`agent-browser` 调用 —— P0 的全部是四个环境变量，"没有我们的进程、没有路由、没有守护进程"，而 §5.2
+的第一条写着"一个一个字都不读的 agent 从 §3.2 拿到隔离"。既然如此，一条裸的直接命令不经过我们任何
+一段代码，①层那条 `profile_changed` 拒绝**到不了它**，`profile_required` 也一样。这件事有一半可以
+结构性收口，另一半必须承认：
+
+* **可以收口的那一半：让非默认的附着在没有 handle 时根本够不到。** 会话 env 里那份 config（变体 D）
+  或那个符号链接（变体 C）只命名**默认附着**的 user-data-dir；一个非默认附着的目录由服务器铸名，
+  只交给 `vibespace-browser --profile <h>` 自己 exec 出来的那个子进程，**从不打印**（这就是 §5.1
+  那条"`use` 不打印 CDP url"的规矩，推广到目录上）。于是一条直接命令**够不到浏览器 #2**：`--session`
+  和 `--profile` 确实都是每次调用的旗标（§1.4），但它填不出一个它从没被告知过的值。I6 因此对
+  "默认以外的一切"是**按构造**成立的，而不是靠自觉。
+* **必须承认的那一半：一条裸的直接命令永远落在默认附着上，而我们拒绝不了它。** 这就是①层保证的
+  边界，它的作用域是**经 `vibespace-browser` 发出的命令**，I6 的措辞已经按这条改窄。诚实的对照是
+  §5.1 里关于 CDP url 的那段话，逐字同一个道理：在一台单 uid 的机器上这**不是**一条边界 —— 它去掉的
+  是那个*意外*（一个从没被告知目录名的 agent 解析不出它），不是那个*能力*（同一个 uid 当然可以去
+  `ls` 那个目录）。真正的强制执行仍然只有 §6.5 的那个代理。
+
+`test-browser-handles` 把这两半分别钉住：有两个附着时，一条带着会话自己那份 env 的**直接**
+`agent-browser` 调用解析到默认 profile 的目录、并且**解析不到另一个**；而经我们 CLI 发的同一条裸命令
+拿到 `profile_required`。
 
 **子 agent 的默认是它自己的临时浏览器，但它必须自己开口。** 环境到不了它（上一段），所以"每个子
 agent 自动拿到一个新浏览器"是一句我们兑现不了的话：一个 claude 子 agent 的裸命令带着的
@@ -681,7 +722,20 @@ agent 自动拿到一个新浏览器"是一句我们兑现不了的话：一个 
 也可以反过来把自己集合里的一个 handle 写进子 agent 的任务描述里（"用 `--profile work`"），那时孩子
 **共用**父亲的标签页，`--pin-tab` 的那条互斥仍然成立：一个标签页一个 owner，两个子 agent 拿同一个
 handle 就是排队，而不是互相偷标签页。哪一种是对的由任务决定，所以两条都提供，**默认是前者**（D23）：
-一个子 agent 最常见的用途是"去查一下这个"，而把它放进父亲的登录态里是更大的授权。
+一个子 agent 最常见的用途是"去查一下这个"，而把它放进父亲的登录态里是更大的授权。**所以上面那张表里
+"集合恰好一个"那一格说的是物理事实而不是一句祝福**：一个从不调用 `new-child` 的子 agent 确确实实在
+父亲的浏览器里干活，而在父亲的默认是一个持久登录 profile 时，那正是 D23 论证不该依赖的那件事。
+
+**而"你是一个子 agent"这句附言必须有一个说得出它的机制，否则它就是一句关于不存在的机制的话。** 上一段
+已经证明：CLI 拿到的 env 和 token 与父亲的**逐字节相同**，所以 CLI 自己分不出这次调用是谁发的 ——
+把这句话写进 CLI 的拒绝文案，就是 §6.6 亲手杀掉的那一类（"把窗口捕获说成'走同一条脱敏'会是一句关于
+不存在的机制的话"）。能分的只有服务器：它本来就在解析这条会话的 stdout，`session._subNormalizers` 是
+"每个正在跑的子 agent 一个 normalizer"的 map（`src/server/stdout/claude-stream-json.js:288` 建、
+:1065 在 `task_notification` 之后回收），而一个 claude 父亲在 Task 工具里是**阻塞着的**。于是这句附言
+由**路由**在"此刻这条会话有 sidechain 开着"时加上，并且带着它的竞态：回收有 60 秒宽限，所以"刚跑完的
+子 agent"与"父亲自己"在那个窗口里分不开。附言因此永远只是一句**诊断提示**，绝不是拒绝的**理由** ——
+理由永远是 `profile_required` 那张 handle 列表，它对谁都成立。codex 的子 agent 是它自己 app-server
+拥有的线程，我们的 stdout 上没有对等的信号，所以那一侧根本不加这句。
 
 **跨 profile 的工作是一个一等形状，而它落在两条命令上。** owner 的例子（个人 profile 与工作 profile
 对账）在这个模型里就是：
@@ -725,7 +779,7 @@ profile 换了，而它自己也没有理由去问。三层，各自解决其中
 
 | 层 | 机制 | 它能覆盖的形状 |
 |---|---|---|
-| ① 工具面（总是到得了正在跑的 agent） | 每条命令的**回答**都带 `profile: work (由用户 2 分钟前钉住)`；快照与截图的头部也写它；附着集合一变，**下一条**命令被一条 typed `profile_changed` 拒绝一次 | 一个正在跑的 agent —— 环境变量到不了它，但它自己下一次调用 CLI 一定到得了 |
+| ① 工具面（到得了正在跑的 agent —— 只要那条命令经我们的 CLI） | 每条命令的**回答**都带 `profile: work (由用户 2 分钟前钉住)`；快照与截图的头部也写它；附着集合一变，**下一条**命令被一条 typed `profile_changed` 拒绝一次 | 一个正在跑的 agent —— 环境变量到不了它，但它自己下一次调用 CLI 一定到得了 |
 | ② 模型面（每轮一次，免费） | `pendingNotice`（`src/session-status.js`）在用户**下一条消息**上追加一行 `<system-reminder>`：`浏览器 profile 变了：<旧> → <新>`；会话开始的上下文里列出当前附着集合 | 一个**停着**的 agent，或者一个正在跑但还没再调 CLI 的 agent |
 | ③ 界面（给用户，不给模型） | 状态栏 Browser 芯片：agent **最后实际用过**的 profile vs **钉住的**默认；两者不一致时芯片转琥珀色，点开是"agent 还在临时 profile 上 —— 提醒它？"加一个一键推送 | 用户自己 —— 而这一层才是"我钉了，然后呢"这个问题唯一的答案面 |
 
@@ -737,9 +791,29 @@ profile 换了，而它自己也没有理由去问。三层，各自解决其中
 是 typed（`{ok:false, code:'profile_changed', was, now, handles}`）而不是一句自然语言：§5.1 已经为
 `browser_paused` / `tab_gone` 立了同一条规矩 —— **一个 agent 必须能不靠猜就读懂它为什么被拒**。
 
-**②只花它已经在花的钱。** 一次钉住是**用户的动作**，所以用户就坐在那里打字，那条 `<system-reminder>`
-搭他下一条消息的车 —— 零计费 turn，零新机制，与 D16 逐字同一条规矩。只有"会话是**停着的**、而用户
-明确要求现在就叫醒它"才走 §4.3.1 的投递梯，用它自己那条已声明的理由（`'browser-profile-notice'`，
+**②只花它已经在花的钱，但它不是"零新机制"。** 一次钉住是**用户的动作**，所以用户就坐在那里打字，
+那条 `<system-reminder>` 搭他下一条消息的车 —— 零计费 turn，与 D16 逐字同一条规矩。**钱这一半是免费的；
+载体这一半不是**，而先前的措辞在这里说错了话。今天的 `pendingNotice` 是会话状态记录上的**一个槽**，
+形状固定为 `{agent, user, at}`（`src/session-status.js:110/125/141`），`renderNotice`（:177–188）里
+写死的是"用户改了你设的状态指示器"那一句，而唯一的注入点消费**一条**就 `break`：
+
+```js
+for (const k of [key, `webui:${id}`]) {                 // src/agent-routes.js:563–566
+  const notice = sessionStatus.consumeNotice(k);
+  if (notice) { parts.push(...); break; }
+}
+```
+
+于是一条 browser-profile 通知要么得发明一个渲染器读不懂的第二种形状，要么就**盖掉**一条还没送达的
+状态覆盖通知（并且被下一次 `setByUser` 覆盖回去）—— 一条被静默丢掉的 `<system-reminder>`，出现在一个
+"通知不会被静默丢掉"就是全部意义的功能里。而这不是假想的冲突：本文自己已经要这个槽再背第三个生产者
+（§3.2.5 第 3 条路的 `'browser-pin'`）。所以要说的是这个载体**实际需要**什么：把 `pendingNotice`
+升格成每会话一条 typed 通知的**队列** `{kind, …}`，`renderNotice` 按 `kind` 分派（`'status-override'`
+逐字保留今天的文案），注入点**排空**而不是在第一条上 `break`。这是一次小的机制改动，写成小的机制改动，
+而不是写成"零新机制"；它进 P1 的内容行，`test-profile-blindness` 的 fast 那一半用"一条状态覆盖与一条
+profile 变更同时挂着、两条都要到达下一条 prompt"来钉它，负控是今天那个单槽行为。
+
+只有"会话是**停着的**、而用户明确要求现在就叫醒它"才走 §4.3.1 的投递梯，用它自己那条已声明的理由（`'browser-profile-notice'`，
 与 `'browser-handback'` 同批加进 `SPEND_REASONS`），设置项默认 **OFF**。③里那枚芯片上的"提醒它"按钮
 是**每次点击都是一次 owner 动作**，所以它可以走梯子 —— 但它仍然过同一个上限，因为它仍然开一个计费
 turn（D26）。
@@ -747,9 +821,29 @@ turn（D26）。
 **③要写进 `LIVE_SESSION_FACTS`，否则它画不出来。** `src/lib/sidebar.js:73` 的那张表是
 `active-sessions` 载荷会带哪些每会话活事实的**唯一**清单，而 `_mergeAndRender()` 只在它的 **digest**
 变化时才重画 —— 这个仓库为此付过六次代价（`worktree`/`outputStyle`/`remoteState` 都在这张表上死过）。
-所以这枚芯片要的是一行 `browserProfile: { digest: (v) => v || '' }`：它是一个每会话至多变几次的
-廉价标量（一次钉住、一次 agent 用了别的 handle），正是那张表说的"该 gate 渲染"的那一类，与
-`todo`/`auth` 那种每轮变几次、故意只 carry 不 gate 的对象相反。
+而这枚芯片按定义是**两个**事实并排（agent 最后实际用过的 vs 钉住的），所以先前写的那一行
+`browserProfile: { digest: (v) => v || '' }` 是**错的，而且是两次错**：一个标量登不下两个值（钉住的
+那一半住在 `session-meta.browserProfileId`，而按本文自己的论证，`LIVE_SESSION_FACTS` 是载荷发布这类
+事实的**唯一**清单，于是客户端根本算不出"要不要转琥珀"）；而如果把值改成那个显而易见的对象
+`{active, pinned}`，`liveFactsDigestPart`（`src/lib/sidebar.js:96–103`）做的是 `out += ':' + d(s[k])`
+—— 在 node 里实测：`{active:'a',pinned:'b'}` 与 `{active:'x',pinned:'y'}` 都 digest 成
+`":[object Object]"`，**逐字节相同**，于是这枚芯片在变化时**永不重画**，正好是上一段引用的那一类的
+第七次。所以两半都要显式写出来，二选一：两行标量
+
+```js
+browserProfileActive: { digest: (v) => v || '' },   // agent 最后实际用过的
+browserProfilePinned: { digest: (v) => v || '' },   // 钉住的默认
+```
+
+或者一行、但 digest **把这一对投影成字符串**（``{ digest: (v) => v ? `${v.active}|${v.pinned}` : '' }``）。
+由此立一条通则，因为它比这枚芯片活得久：**一个对象上的 digest 必须投影，绝不能把对象原样返回** ——
+那张表上每一个 `digest: null` 的行都是刻意只 carry 的，而一个**返回对象**的 digest 看起来在 gate、
+实际上是个常量。这也改了它的门禁：`test-profile-blindness` 的 heavy 那一半不能只画两次（"一致时中性、
+不一致时琥珀"是两次全新渲染，在这个 bug 下照样通过），它必须是一次**变异**：先渲染，再只改同一条会话
+的 `active`，断言芯片在没有整表重建的情况下从中性翻成琥珀 —— 负控是把 digest 换成对象上的
+`(v) => v || ''`，它必须变红。除此之外这两行属于那张表说的"该 gate 渲染"的那一类：每会话至多变几次的
+廉价标量（一次钉住、一次 agent 用了别的 handle），与 `todo`/`auth` 那种每轮变几次、故意只 carry 不
+gate 的对象相反。
 
 **"显式选择"这条规矩，以及它的拒绝。** owner 还要一条更硬的：会话有 ≥2 个附着、而用户的消息里
 **提到了**某个 profile 的别名时，什么都不许被推断 —— agent 必须点名。机制上这依然是①的那一条
@@ -1170,7 +1264,31 @@ snapshot 需要的东西：`role`（frame / panel / label / button）、`name`�
 **自己声明的**动作（实测到的字面值：`click`、`window.minimize`、`clipboard.copy`）。速度也够：
 `mutter-x11-frames` 24 个节点 13 ms、一个真应用 61 个节点 10 ms ⇒ **约 1,800–6,100 节点/秒**。
 `Action.do_action` 因此是一条**不经过任何输入注入**的动作通道：它按节点动作，Wayland 那条"不许全局
-注入"的规矩根本管不到它，这也是本节最重要的一个结论。
+注入"的规矩根本管不到它 —— 这是本节最重要的一个结论，但它**是按节点成立的，不是按窗口成立的**，
+而下一段就是那个覆盖率。
+
+**覆盖率必须和那条结论一起量，否则那条结论会被读成一个到处都对的承诺（2026-09-10 只读实测）。** 把
+九个应用各走一遍（每个应用 400 个节点封顶）共 503 个节点，按接口清点：`Component` **494**、`Action`
+**66**、`EditableText` **33**、`Text` 51。换成广度优先、一个统一的 600 节点预算再走一遍（同一台机器、
+同一时刻），是 `Component` 599 / `Action` **52** / `EditableText` 52 / `Text` 52 —— 两个采样都真实，
+而按应用那次是更好的那个，因为统一预算会被单个应用的 panel 子树吃掉。三个数字直接决定三条不同的动词：
+
+* **`click @ref` 只在自报动作的节点上成立。** 66/503（统一预算下 52/600）。更要紧的是按角色拆开：
+  实测 43 个 `button` 节点里**只有 6 个**导出 `Action`，而 `button` 恰恰是一个 agent 最想点的那个角色。
+  其余那些节点唯一的路是该节点的 `Component` 几何 —— 也就是一次坐标点击，也就是注入，也就是这张矩阵
+  的动作行说 Wayland 的规矩"管不到"的那样东西。顺带一提，实测 66 条动作里有 **32 条的名字是空字符串**，
+  所以"按名字挑一个动作"这件事本身也不是处处能做。
+* **`type` 要 `EditableText`。** 33/503（统一预算下 52/600），而这一条上本节引的那份来源自己就写着
+  "GTK3/GTK4/Qt5/Tk 各要各的文本输入路径"，所以它同时还是**按工具包**的。
+* **`key`（和弦）根本没有树这条路。** 实测到的动作名是 `click`、`activate`、`edit`、
+  `expand or contract`、`menu`、`clipboard.*`、`window.*`、`link.*`、`selection.*` —— 全是应用自报的
+  语义动作，里面没有"和弦"这个概念。AT-SPI 唯一的键盘原语是**注册表级**的
+  `Atspi.generate_keyboard_event`（实测存在，与 `generate_mouse_event` 并列），而它就是 XTEST，也就是
+  注入，于是它继承注入那一行的全部限制。（`Action.get_key_binding` 是一个**读**：它告诉你这个节点自报
+  绑了什么键，它不替你按。）
+
+结论不变但收窄了：无障碍树是**观察**的主通道，也是**动作**的首选通道 —— 而"首选"这两个字对四个动词
+是四个不同的答案，所以下面那张矩阵按动词分了四行，§5.1.1 的能力律也按四个动词分别执法。
 
 **别人在这件事上做了什么（owner 要的对比）。** 三个来源，方向一致：**Anthropic 的 computer use 是
 纯像素的** —— 当前工具集 `computer_toolset_20260801` 有 17 个成员工具（`screenshot`、`zoom`、
@@ -1192,13 +1310,19 @@ Codex 桌面版给浏览器的那条通道（§4.1）本身就是 DOM 那条路�
 | 捕获**单个**窗口的像素 | 可以（XComposite / `ffmpeg -f x11grab`；本机 `xwd`/`import` 均未安装，`ffmpeg` 在） | ScreenCast portal（PipeWire，一次交互式授权） | 无 | 可以，且**按窗口**就是 Xpra 的本职 | ScreenCaptureKit `SCContentFilter` 可指定单窗口（`CGWindowListCreateImage` 自 macOS 15 起弃用） |
 | 注入指针 + 键盘 | 可以（XTEST；本机 `xdotool`/`wmctrl` 在），**但只到 X11 客户端** | RemoteDesktop portal：`NotifyPointerMotion*` / `NotifyKeyboardKeycode`，或 `ConnectToEIS` 交给 libei（本机 portal 有这个接口，`libei.so.1`/`libeis.so.1` 1.3.901 在） | ydotool + `/dev/uinput`（**本机不可用**：实测 `crw------- root root`，且 uinput 模块没有加载） | 可以（我们自己的 X，XTEST 全权） | 需要 Accessibility 权限（非沙箱 + 已签名） |
 | 读无障碍树（= 这个窗口的 DOM） | **可以，且与显示协议无关**（AT-SPI 走 D-Bus；本机实测 9 个应用、约 1,800–6,100 节点/秒） | 同左（AT-SPI 不经过合成器） | 同左 | 同左 | AXUIElement（同一条权限） |
-| 经无障碍树**直接动作**（不注入输入） | `Atspi.Action.do_action`（实测节点自报 `click` / `window.minimize`） | 同左 —— **Wayland 的"不许全局注入"管不到这条** | 同左 | 同左 | AXUIElement 的 `AXPress` 等 |
+| **动作**：`click @ref`（一个自报动作的节点） | `Atspi.Action.do_action` —— **但只在节点导出 `Action` 的地方**：九个应用全走一遍实测 **503 个节点里 66 个**，而 **43 个 `button` 节点里只有 6 个** | 同左 —— **Wayland 的"不许全局注入"管不到这条** | 同左 | 同左 | AXUIElement 的 `AXPress` 等 |
+| **动作**：`type` 往一个输入域打字 | `Atspi.EditableText.insert_text` / `set_text_contents`，只在节点导出 `EditableText` 的地方（实测 33/503）；且按本节引的来源，文本输入还**按工具包**各走各的路 | 同左 | 同左 | 同左 | 设 `AXValue` |
+| **动作**：`key` / 一个和弦（`ctrl+s`） | **根本没有树这条路** —— AT-SPI 的动作词表里没有"和弦"这个概念（实测动作名见上），唯一的键盘原语是注册表级的 `Atspi.generate_keyboard_event`，也就是 **XTEST = 注入** | 只剩注入 ⇒ portal（D29，未验证） | 只剩注入 ⇒ uinput（本机不可用） | 可以（我们自己的 X，XTEST 全权） | 投 `CGEvent`（Accessibility 权限） |
+| **动作**：`click --at <x>,<y>`（坐标） | 只剩注入（XTEST），且只到 X11 客户端 | 只剩注入 ⇒ portal（D29，未验证） | 只剩注入 ⇒ uinput（本机不可用） | 可以 | 投 `CGEvent`（Accessibility 权限） |
 
 **四条从这张表里直接掉出来的结论：**
 
-1. **无障碍树是唯一一条在每一格里都成立的通道**，所以它是 `snapshot` 与 `click` 的**主**实现，像素
-   只在它答不出时补位（一张图片、一个 canvas、一个自绘控件）。这与浏览器那半是同一个形状：
-   `agent-browser snapshot` 给的也是无障碍树加 `@e3` 这样的引用。
+1. **无障碍树是唯一一条在每一列里都成立的通道**，所以它是 `snapshot` 的**主**实现、也是 `click` 的
+   首选实现，像素只在它答不出时补位（一张图片、一个 canvas、一个自绘控件）。这与浏览器那半是同一个
+   形状：`agent-browser snapshot` 给的也是无障碍树加 `@e3` 这样的引用。**但"每一列"不等于"每一个
+   节点"**：上面量到的 66/503（按钮 6/43）是这条结论的诚实上界，而 `key` 这个动词在树上一格都没有 ——
+   在一个没有注入后端的列里，一个和弦是**做不到的**，而 §5.1.1 因此让它带着探测结果拒绝，和
+   `click --at` 一模一样。
 2. **输入注入是按平台降级的三条道，而它们的可用性必须在运行时探测、不能从平台名推断**（本机就是
    反例：一台 Wayland 桌面，X11 注入对 Xwayland 客户端可用、portal 接口在、uinput 不可用）。
 3. **枚举窗口是最脆的一环**，而它恰好是"把一个窗口当对象交出去"的第一步：本机两条路各自有名的失败
@@ -1218,6 +1342,26 @@ Codex 桌面版给浏览器的那条通道（§4.1）本身就是 DOM 那条路�
 是 P9 的**第一件事去测**，不是一个可以先写进架构的假设；它若不成立，Wayland 那一列就只剩
 `persist_mode=2` + `restore_token`（文档：权限"持续到被显式撤销"，token 一次性）这条需要用户点一次
 同意的路，或者干脆只做第 4 列。
+
+**这趟遍历跑在一个有界的子进程/worker 里，绝不在服务器或 daemon 的事件循环上。** 本文 §0 引了
+"never block the event loop"这条法，§4.2 也据它否掉了 CDP `Page.startScreencast`（"把一个每帧的
+消费者放进服务器的事件循环"）—— 而 §4.9 自己的数字把同一条法摆在了脸前：一次 snapshot 是**每个节点
+一次 D-Bus 往返**，600 个节点在实测的约 1,800–6,100 节点/秒下就是 0.1–0.33 秒的往返；而一个**停止
+应答自己 a11y 总线的应用**会把每一次调用挂到 D-Bus 超时为止（libdbus 的默认值是 25 秒），那正好是
+写下这条法的那几次事故（FUSE 线程池、`execFileSync` 扫描冻结）的形状。而 `src/window-targets.js` 在
+§3.6 里是 **SHARED**，也就是说 daemon 会 bundle 它，于是那次阻塞会同时落在 daemon 上。所以：遍历走
+`transcript-worker.js` / SafeFs 已经立下的先例 —— 一个有界的子进程或 worker，**每次调用一个超时、
+整趟一个节点预算**，一个在预算内不应答的节点被报成**一棵读不出来的子树**，而不是把整趟遍历拖住。
+
+**还有一个必须点名的决定：node 这一侧用哪个绑定。** 本轮每一个 AT-SPI 数字都是经 `python3` + GObject
+introspection 量的（附录 A 的证据行就是这么写的），而那条路走的是 `libatspi`，它自带 AT-SPI 那套
+**缓存**（[Linux Foundation 的 AT-SPI D-Bus 页面](https://wiki.linuxfoundation.org/accessibility/d-bus)
+把"最常访问的数据随对象一起传、由绑定缓存，并尽可能用异步信号替掉同步方法调用"写成这套协议的设计
+要点）。P9 因此有两条路，而**上面那些速度数字对第二条不成立**：要么在 node 里直接说 AT-SPI 的 D-Bus
+接口（[`dbus-next`](https://github.com/dbusjs/node-dbus-next) 这类通用 D-Bus 客户端，本轮没有找到
+维护中的 node 专用 AT-SPI 绑定 —— 但没找到不等于没有，P9 先查），此时**没有 libatspi 的缓存**，每节点
+的成本要重新量；要么 spawn 一个 GI helper，此时要付 §1.6 已经量过的那笔 fork 税。这是 P9 的输入，
+不是一个可以留白的实现细节，所以它进 §12。
 
 **诚实边界（本节没有任何一个数字是关于"多快"的）。** 本机没有装 `xpra`（§4.7 已记），所以窗口目标
 的端到端延迟一个字都没量；AT-SPI 的速度量的是**遍历**，不是"一次 `do_action` 到界面变化"；而那 9 个
@@ -1283,7 +1427,10 @@ AGENT_BROWSER_CDP=<the profile's cdp url>       # ← removed
 
 `--pin-tab` 由包装形式提供，于是一个已经懂 `agent-browser` 的 agent 保留它所有的习惯。包装形式
 （`vibespace-browser -- …`）的存在是为了那些需要一个策略决定的动词（`close`、`close --all`、
-`connect`、`get cdp-url`）以及租约检查。
+`connect`、`get cdp-url`）以及租约检查。**也就是说 `snapshot`/`fill`/`click` 本来就会以裸
+`agent-browser` 的形式跑，这正是 §3.7 那条残留的由来**：包装是一个子集，所以①层的保证也只覆盖那个
+子集。可以结构性收口的那一半在那里 —— 非默认附着的 user-data-dir 由服务器铸名、只交给我们自己 exec
+出来的子进程、从不打印，与本节这条"`use` 不打印 CDP url"是同一条规矩，同样只去掉*意外*而不制造边界。
 
 #### 5.1.1 `vibespace-window` —— 与浏览器目标并列的窗口目标（§4.9）
 
@@ -1305,10 +1452,19 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
 
 三条规矩，都是 §4.9 那张矩阵直接翻译过来的：**（i）`@ref` 优先于坐标**（`snapshot` 铸的引用来自
 无障碍树，与 `agent-browser snapshot` 的 `@e3` 同一个习惯，于是一个已经会用浏览器那半的 agent 不用
-学第二套东西）；**（ii）做不到的动词带理由禁用而不是在使用时失败**（§7.1 的能力律：没有输入注入
-后端时 `click --at` 直接拒绝并说出探测结果，而 `click @e7` 仍然可用 —— 这正是 `do_action` 那条道的
-价值）；**（iii）`list` 默认只列我们自己起的窗口**，用户桌面上那些要 D27 明确打开，且开着的时候
-每一行都标出它是"你的桌面"。
+学第二套东西）；**（ii）做不到的动词带理由禁用而不是在使用时失败**（§7.1 的能力律）—— 而这条律
+**按动词逐个执法，不是只管 `click --at` 那一个**，因为 §4.9 的矩阵按动词给出四个不同的答案：
+
+| 动词 | 树上那条路要什么 | 没有注入后端的那一列（Wayland，D29 未验证）会怎样 |
+|---|---|---|
+| `click <h> @e7` | 该节点导出 `Action`（实测 66/503，按钮 6/43） | 节点有 `Action` ⇒ 照常可用；节点**没有** ⇒ **带探测结果拒绝**，绝不悄悄降级成一次坐标点击 |
+| `type <h> "…"` | 该节点导出 `EditableText`（实测 33/503，且按工具包） | 有 ⇒ 可用；没有 ⇒ 同上拒绝 |
+| `key <h> ctrl+s` | **没有这条路**（AT-SPI 的动作词表里没有和弦） | **一律拒绝**，理由就是探测结果 —— 这个动词在这一列里做不到 |
+| `click <h> --at <x>,<y>` | **没有这条路**（按定义就是坐标） | **一律拒绝**，理由就是探测结果 |
+
+这里最要紧的一条**是"节点没有 `Action` 时绝不悄悄降级成坐标点击"**：那次降级会把一个被明确拒绝的
+通道（注入）从后门放回来，而且是在 agent 以为自己在用树的时候。**（iii）`list` 默认只列我们自己起的
+窗口**，用户桌面上那些要 D27 明确打开，且开着的时候每一行都标出它是"你的桌面"。
 
 ### 5.2 一个 agent 怎么学到这些
 
@@ -1329,8 +1485,10 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
 * 实时视图窗口的标题栏：profile 名字（点它 = 选择器）、backend chip，以及把它贴到所属聊天
   窗口旁边的**绑定**动作（§4.6）。
 * 聊天状态栏的 **Browser 芯片**（§3.8 第③层）：agent **最后实际用过**的 profile，与**钉住**的默认
-  并排；两者不一致时转琥珀色，点开写"agent 还在 <旧> 上 —— 提醒它？"并给一个一键推送（D26）。它要
-  在 `LIVE_SESSION_FACTS` 里有自己的一行并**参与 digest**，否则它画不出来（§3.8）。
+  并排；两者不一致时转琥珀色，点开写"agent 还在 <旧> 上 —— 提醒它？"并给一个一键推送（D26）。它要在
+  `LIVE_SESSION_FACTS` 里有**两个**标量（`browserProfileActive` 与 `browserProfilePinned`），或者一行
+  但 digest 把这一对**投影**成字符串 —— 一个标量登不下它要比较的两个值，而一个原样返回对象的 digest
+  是个常量，芯片永不重画（§3.8）。
 * 一个会话有多个附着时，实时视图窗口内部是一条 **profile 切换条**（每个附着一枚标签 + owner 徽章），
   而不是 N 个并排的面（§3.7；理由是 D19 已经量过的宽度）。
 * 一个 ⚙ 面板（或侧栏分区）：profile 列表、owner、最后使用时间、磁盘大小、"停止"、"忘记"、
@@ -1696,9 +1854,9 @@ profile，并给出"停掉那一个"**。这个计数是 keeper 的活（它是�
 | `test-browser-backend` | fast + heavy | **P4** | fast：版本阶梯当作一个 PURE 判定跑一张矩阵（目标 ≥ / < / 无记录，注册表与 `Last Version` 矛盾时取**更高**那个）、席位算术与它的拒绝文案、带着**是谁主张**的 site-hint 记录，以及 `blocked` 是一条服务端绝不自己制造的主张。heavy：一次真的切换 —— 停、按租约逐条把标签页开回它的 `lastUrl`、重新 pin、改写 `targetId`，**租约对象从未被销毁**；外加"没装"那条点名 provider 的拒绝。 |
 | `test-window-binding` | fast + heavy | **P7** | fast：带 `layout`/`split`/`ratio` 的链模型 —— 缺失的 `layout` 读作 `'tabs'`、比例被夹住，以及**只有 layout 变化时多客户端同步键也必须变**（§4.6 点名的那个陷阱，以修前的键作它的负控）。另加三条：**在一个三标签页的 split 链里关掉 host 标签页 ⇒ `layout === 'tabs'` 且 `split` 里没有悬空 id**（`_normalizeChain` 那条不变量，负控 = 不调它的修前形状会留下一个悬空 `pair`）；**同一个岗位下的两个会话拿到可分辨的徽章**；**一个没绑任何岗位的会话也画得出徽章**（后两条就是"借岗位色"会失效的那两种形态）。heavy（headless chrome）：绑定 → 一个窗口里两个面、非 1 的 DPI zoom 下分隔条拖动落在指针所在处、移动/最小化/换桌面一起走、关掉浏览器那一面塌回标签页**而聊天窗口不动**，以及移动端视口渲染成标签页**且不把这次拍扁写回去**。 |
 | `test-native-window` | heavy | **P8** | 一个真 Xpra 服务器 + 一个跑在 Xvfb 下的真 X 客户端，经真正 cookie 鉴权的桥接：一个窗口到达、输入送得进去、流端口从浏览器永远够不着、背压纪律守得住。当 `xpra` 或 `Xvfb` 缺席时**带证据大声 SKIP**（2026-09-10 本机实测：`Xvfb` 装了，`xpra` 没装）。§4.7 需要的带宽/延迟数字在这里**产出**而不是断言 —— 套件把它们记在一个具名预算下，于是回归看得见。 |
-| `test-browser-handles` | fast | **P1** | 附着集合当作一个 PURE 判定：集合恰好一个 ⇒ 裸命令解析到默认；集合 ≥2 ⇒ 裸命令得到具名拒绝 `profile_required` 且**拒绝里列出全部 handle 与哪个是默认**（一句不带 handle 列表的拒绝算 FAIL —— 它是这个 agent 唯一能拿到的诊断）；`--profile` 收到一个**文件系统路径**时的拒绝，附带那条能把它登记成 handle 的命令；子 handle `bk-<parent>.<n>` 按前缀被父会话的 teardown 收掉；每个动词一条审计行且**内容永不入账**（`fill` 只记动词）。负控：只有一个附着的会话**永远**不需要 handle（否则这条规矩会把最常见的形状变成两条命令）；一个指向本会话没有 attach 的 profile 的 handle 是**拒绝**，不是自动 attach。 |
-| `test-profile-blindness` | fast + heavy | **P1、P2** | fast：`profile_changed` 是**一次性**的（同一个指纹说一次，之后裸命令照常跑）、它按**附着集合的指纹**触发而不是按命令数、它是 typed 的（`{code, was, now, handles}`）；`pendingNotice` 那条 `<system-reminder>` 的措辞与它零计费的投递路径（§3.8 第②层）。heavy（headless chrome，375×667）：芯片在"agent 用的"与"钉住的"一致时是中性色、不一致时转琥珀并写出两个名字，**且 `LIVE_SESSION_FACTS` 的 digest 覆盖了它**——负控是把那一行从表里拿掉，芯片必须停止重画（这个仓库在这张表上已经付过六次代价）。 |
-| `test-window-target` | heavy | **P9** | 真 Xvfb + 真 Xpra + 一个真 GTK 客户端：`list` 只列我们自己起的窗口、`snapshot` 从**真的 AT-SPI 树**里铸出 `@ref`（断言 role/name/bounds 都在）、`click @ref` 经 `do_action` 改变了那个应用的状态（由该应用自己的树复核，不是由像素）、`click --at` 在没有注入后端时**带探测结果拒绝**、租约与 §4.3 三态与标签页共用同一个对象。能力矩阵的每一格都是一条**运行时探测**而不是一个平台名，套件把探测结果**打印**出来；`xpra`/`Xvfb`/AT-SPI 任一缺席时**带证据大声 SKIP**（2026-09-10 本机：`Xvfb` 在、`xpra` 不在、AT-SPI 在且报 9 个应用）。§4.9 承认没量过的那些数字在这里产出并记在具名预算下。 |
+| `test-browser-handles` | fast | **P1** | 附着集合当作一个 PURE 判定：集合恰好一个 ⇒ 裸命令解析到默认；集合 ≥2 ⇒ 裸命令得到具名拒绝 `profile_required` 且**拒绝里列出全部 handle 与哪个是默认**（一句不带 handle 列表的拒绝算 FAIL —— 它是这个 agent 唯一能拿到的诊断）；`--profile` 收到一个**文件系统路径**时的拒绝，附带那条能把它登记成 handle 的命令；子 handle `bk-<parent>.<n>` 按前缀被父会话的 teardown 收掉；每个动词一条审计行且**内容永不入账**（`fill` 只记动词）。**外加那条直接路径的两半（§3.7）**：两个附着时，一条带着该会话自己那份 env 的**直接** `agent-browser` 调用解析到默认 profile 的 user-data-dir、**且解析不到另一个那个**（非默认附着的目录由服务器铸名、从不打印），而经我们 CLI 的同一条裸命令拿到 `profile_required` —— 前一半是①层的诚实边界，后一半是它的保证，两半都要有断言，否则那条边界只是一句散文。负控：只有一个附着的会话**永远**不需要 handle（否则这条规矩会把最常见的形状变成两条命令）；一个指向本会话没有 attach 的 profile 的 handle 是**拒绝**，不是自动 attach。 |
+| `test-profile-blindness` | fast + heavy | **P1、P2** | fast：`profile_changed` 是**一次性**的（同一个指纹说一次，之后裸命令照常跑）、它按**附着集合的指纹**触发而不是按命令数、它是 typed 的（`{code, was, now, handles}`）；`pendingNotice` 那条 `<system-reminder>` 的措辞与它零计费的投递路径（§3.8 第②层）；**外加那个载体本身**：一条状态覆盖通知与一条 profile 变更通知同时挂着时，**两条都到达下一条 prompt**（负控是今天那个单槽 + 首条即 `break` 的行为，它必须丢掉其中一条）。heavy（headless chrome，375×667）：这一腿是一次**变异**而不是两次全新渲染 —— 先渲染，再只改同一条会话的"agent 最后用过的"那个值，断言芯片在**没有整表重建**的情况下从中性翻成琥珀并写出两个名字；负控是把 digest 换成一个**对着对象**的 `(v) => v \|\| ''`（实测两个不同的对象都 digest 成 `":[object Object]"`），它必须变红。"一致时中性、不一致时琥珀"这两次全新渲染**不是**这条腿，因为在那个 bug 下它们照样通过（这个仓库在这张表上已经付过六次代价）。 |
+| `test-window-target` | heavy | **P9** | 真 Xvfb + 真 Xpra + 一个真 GTK 客户端：`list` 只列我们自己起的窗口、`snapshot` 从**真的 AT-SPI 树**里铸出 `@ref`（断言 role/name/bounds 都在）、`click @ref` 经 `do_action` 改变了那个应用的状态（由该应用自己的树复核，不是由像素）、`click --at` 在没有注入后端时**带探测结果拒绝**、**`key`（和弦）在没有注入后端时同样带探测结果拒绝**（树上没有这条路，所以这个动词在那一列里就是做不到的）、**`click @ref` 打在一个没有导出 `Action` 的节点上时是拒绝而不是悄悄降级成一次坐标点击**（负控：同一个节点在有注入后端时也仍然是拒绝 —— 这条规矩是关于那个节点的，不是关于那一列的）、`snapshot` 顺带**报出它这趟的接口清点**（`Action`/`EditableText` 各占多少节点）好让 §4.9 的 66/503 与 6/43 在别的桌面上可被复核、那趟遍历跑在一个**有界的子进程**里且一个不应答的节点被报成读不出来的子树而不是把整趟拖住、租约与 §4.3 三态与标签页共用同一个对象。能力矩阵的每一格都是一条**运行时探测**而不是一个平台名，套件把探测结果**打印**出来；`xpra`/`Xvfb`/AT-SPI 任一缺席时**带证据大声 SKIP**（2026-09-10 本机：`Xvfb` 在、`xpra` 不在、AT-SPI 在且报 9 个应用）。§4.9 承认没量过的那些数字在这里产出并记在具名预算下。 |
 | `test-spend-paths` | fast | **P3** | 不是一个新套件 —— 是那个既有的普查，而这个功能不能把它弄红。它的 `deliver-ladder` primitive **按站点**匹配 `deliverToConversation(`，所以 `src/server/browser-*.js` 里任何一次公告都需要那道门在其上方作用域内；而它的封闭集断言意味着 `'browser-handback'` 与 `'browser-profile-notice'`（§3.8）都必须在同一次改动里既被声明又被使用（§4.3.1）。 |
 | `test-architecture` | build | 全部 | 层边界：PURE 不 import 任何东西、SHARED 绝不向上够、daemon bundle 不携带 orchestrator 标记、`server.js` 待在它的行数 ratchet 之内，以及 §44 —— 每个设置分类都会被渲染，于是 `browser.announceIdleHandback` 和其余各项都能到达一个用户打得开的分区。 |
 | `test-session-schema` | fast | P1、P3 | 每一个新的 `session._field`（`_browserProfileId`、`_browserKey`、`_browserTargetId`、`_browserInput`）都有一条 owner 行。 |
@@ -1719,7 +1877,7 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
 | 阶段 | 内容 | 轮次（点值） | 区间 | 天（点值） | 自身能否交付价值？ |
 |---|---|---|---|---|---|
 | **P0 — 零干扰** | spawn 时的 `AGENT_BROWSER_SESSION` + `_NAMESPACE` + 显式 `_IDLE_TIMEOUT_MS`（本地 + 远程路径）、**§3.2.2 的 user-data-dir 变体及其回落梯子**、`browserKey` 连续性梯子（§3.2.1）、版本下限探测并给出一条诚实的"你的 agent-browser 对共享 profile 来说太老了"提示、k = 1/4/12 的资源测量（§1.2、§12.10）、工具介绍里的一行、`docs/agent/browser-manual.md`、`test-browser-profiles`（环境那一半，断言解析出来的目录），**外加钉子的环境间接层（§3.2.5）—— 每会话生成的 config 或那条被重指的符号链接 —— 于是中途钉住永远不需要重启**。 | **5** | 4–7 | 2.5 | **能 —— (1.b) 中"停止互相干扰"那整半。** |
-| **P1 — 注册表 + keeper + 租约** | `src/browser-profiles.js`（PURE）、`browser-keeper.js` 含**开机对账和并发天花板**、`data/browser-profiles.json` + 原子写 + 广播、`/api/browser/*`、attach/detach/租约、`vibespace-browser` CLI + `AGENT_TOOLS` + 手册、迁移步骤 1–2、**钉子的阶梯 + 岗位默认 + 四个钉子面 + "收养这个会话的浏览器"（§3.2.5）**、`test-browser-pin`，**外加附着集合与 handle 寻址（§3.7）+ 反默认失明的第①②层（§3.8）—— `attachments`/`new-child`/`--profile`、`profile_required` 与 `profile_changed` 两条具名拒绝、审计流水，以及那条零计费的 `pendingNotice`**、`test-browser-handles`、`test-profile-blindness`（fast 那一半）。 | **10** | 8–15 | 5 | 能 —— 按任务的 profile 并发共存，带 `--pin-tab` 语义；**而且一个会话第一次可以同时握着好几个**。 |
+| **P1 — 注册表 + keeper + 租约** | `src/browser-profiles.js`（PURE）、`browser-keeper.js` 含**开机对账和并发天花板**、`data/browser-profiles.json` + 原子写 + 广播、`/api/browser/*`、attach/detach/租约、`vibespace-browser` CLI + `AGENT_TOOLS` + 手册、迁移步骤 1–2、**钉子的阶梯 + 岗位默认 + 四个钉子面 + "收养这个会话的浏览器"（§3.2.5）**、`test-browser-pin`，**外加附着集合与 handle 寻址（§3.7）+ 反默认失明的第①②层（§3.8）—— `attachments`/`new-child`/`--profile`、`profile_required` 与 `profile_changed` 两条具名拒绝、审计流水，以及那条零计费的 `pendingNotice` —— 含把它**队列化**的那次小改动（typed `{kind,…}`、`renderNotice` 按 `kind` 分派、注入点排空而不是首条即 `break`），因为今天那个单槽会让本设计的两个生产者互相盖掉，也会盖掉状态覆盖那一条**、`test-browser-handles`、`test-profile-blindness`（fast 那一半）。 | **10** | 8–15 | 5 | 能 —— 按任务的 profile 并发共存，带 `--pin-tab` 语义；**而且一个会话第一次可以同时握着好几个**。 |
 | **P2 — 实时视图** | `/api/browser/stream` 桥接（+ 背压）、`browser-live` 窗口类型、多观看者扇出、URL/标签页/console 面板、DPI 正确的画布、**一个会话有多个附着时窗口内部的 profile 切换条（§3.7）与状态栏那枚琥珀色 Browser 芯片（§3.8 第③层，含它在 `LIVE_SESSION_FACTS` 里的那一行与 digest）**、`test-browser-live`、`test-profile-blindness`（heavy 那一半）。 | **7** | 6–10 | 3.5 | **能 —— (1.c) 减去"手"。** |
 | **P3 — 接管 / 交还** | 租约输入持有者、模式切换器、输入转发、`browser_paused`、**§4.3.1 的花钱接线**（`SPEND_REASONS` 里的 `'browser-handback'`、那次投递梯调用、默认 OFF 的 `browser.announceIdleHandback`、让 `test-spend-paths` 普查保持绿）、空闲交还、agent 光标、`--confirm-actions` 卡片。 | **5** | 4–7 | 2.5 | 能 —— 补全 (1.c)。 |
 | **P4 — Provider** | Provider 行 + 能力门控；**先执行并记录 CloakBrowser 的出网前置条件**（§7.2.1），然后在免费档上通过 loopback `cloakserve` 加一份出网白名单可选开启；通过 `tcpForward` 的远程 `cdp` provider；`browser-serve` 设备 op（三触规则）；**活的 backend 切换（§7.4）—— 版本阶梯、带着走的 seed、按租约重开标签页、对话框里的席位、每站点记忆，以及 agent 的 `blocked` 主张**；`test-browser-providers` + `test-browser-backend`。 | **9** | 7–13 | 4.5 | 能 —— (1.a)，以及机队那条故事线。 |
@@ -1727,7 +1885,7 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
 | **P6 — 硬中介** | 做 CDP 中介的代理：target 作用域限定 + 接管期间拒绝输入、每会话的 CDP URL。**这是 `sharing: "instance"` 的一个明确前置条件**（§6.2），而不只是在 D6 判定协作式租约不够时才有的一个选项。 | **6** | 4–9 | 3 | 只作为强制执行 —— 但 `sharing: "instance"` 在它落地之前一直被拒绝。 |
 | **P7 — 窗口绑定** | 标签页链上的 `layout`/`split`/`ratio`、标题栏的绑定动作 + 标题栏左右两半的 drop 区、"生在链里"的 `createWindow` 路径、分隔条（每次拖动一个控制器、rAF、坐标只换算一次）、从 `leases` 来的归属徽章、layouts 持久化 + **同步键的修复**、移动端只用标签页且不写回、**切换条那些标签上的按面 owner 徽章（§3.7）**、`test-window-binding`。 | **6** | 5–9 | 3 | 能 —— 被 agent 驱动的浏览器不再丢失它的 owner。**需要 P2**（得先有实时视图可绑）；与 P3–P6 无关。 |
 | **P8 — 原生客户端窗口** | Xpra 那一级（§4.7）：一个跑在 §3.5 那个上限与 runaway 守卫之下的 keeper、按 `/api/vnc` 形状的 `GET /api/xpra/stream`、按 D21 决定的客户端那一半、200 ms / 1 Mbps 的实测，以及按应用分路（WhatsApp → profile 里的 web 版；微信 → 原生客户端，且只在 web 版试过之后）。然后是 §4.8 里 owner 点名的那个应用的适配器，带自己的 `source` 标签喂既有的 Communication Channels 梯子，并带一个已声明的 `'chat-inbound'` 花钱理由。`test-native-window`。 | **7** | 5–11 | 3.5 | 能 —— 但它是本文档里核实程度最低的一个阶段，而它的区间就是这么说的。除了 §4.2 的桥接形状之外与任何阶段都无关。 |
-| **P9 — 窗口目标** | §4.9 的窗口目标：`src/window-targets.js`（SHARED：枚举 / AT-SPI 快照与 `@ref` 铸造 / 输入后端的**运行时探测**梯子）、`data/bin/vibespace-window` + 手册（§5.1.1）、复用 §4.7 的桥接得到 `window-live` 面、与标签页共用的租约与三态、§6.6 的两类窗口分界与审计行。**第一件事是量三件东西**：portal 在 `systemd --user` 背景上下文里到底可不可用、AT-SPI 在 Qt/Electron 上的覆盖度、以及一次 `do_action` 到界面变化的端到端延迟。`test-window-target`。 | **8** | 6–13 | 4 | 能 —— agent 第一次能操作一个不是浏览器的应用。**需要 P8 的传输**（Xvfb+Xpra）与 P2 的桥接形状；与 P3–P7 无关。 |
+| **P9 — 窗口目标** | §4.9 的窗口目标：`src/window-targets.js`（SHARED：枚举 / AT-SPI 快照与 `@ref` 铸造 / 输入后端的**运行时探测**梯子）、`data/bin/vibespace-window` + 手册（§5.1.1）、复用 §4.7 的桥接得到 `window-live` 面、与标签页共用的租约与三态、§6.6 的两类窗口分界与审计行。**第一件事是量四件东西**：portal 在 `systemd --user` 背景上下文里到底可不可用、AT-SPI 在 Qt/Electron 上的覆盖度、一次 `do_action` 到界面变化的端到端延迟，以及 **node 这一侧用哪个 AT-SPI 绑定、它每节点多少钱**（本轮的数字全是经 `python3` + GI 量的，走的是自带缓存的 `libatspi`；直接在 node 里说 D-Bus 没有那份缓存，而 spawn 一个 GI helper 要付 §1.6 那笔 fork 税 —— 两条都得重新量，§12.33）。**那趟遍历本身跑在一个有界的子进程/worker 里**（每次调用一个超时、整趟一个节点预算），绝不在服务器或 daemon 的事件循环上 —— 每节点一次 D-Bus 往返，而一个不应答的应用会挂到 libdbus 默认的 25 秒。`test-window-target`。 | **8** | 6–13 | 4 | 能 —— agent 第一次能操作一个不是浏览器的应用。**需要 P8 的传输**（Xvfb+Xpra）与 P2 的桥接形状；与 P3–P7 无关。 |
 
 **总量，按区间而不是按点值公布**（第一轮只公布了一个区间的点估计，而它自己的风险段落指的正是那个
 区间的上端）：
@@ -1786,12 +1944,12 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 | **D20** | **我们要不要做一个微信本地库适配器？**（§4.8 —— 经 WCDB 的 SQLCipher，密钥在进程内存里；本机 `ptrace_scope` 是 `1`，也就是只有祖先进程读得到。） | (a) 不做 —— 画面走 Xpra，数据走官方的公众号 / 企业微信 API；(b) 做，进核心；(c) 做，但只在一个**插件**里，带显式同意，且只对由 VibeSpace 自己启动的客户端生效。 | **(a)，而如果 owner 坚持，答案是 (c)。** 它是在扒一个专有客户端的进程内存，每一次客户端更新都可能安静地碎掉；它明确越过 ToS；而唯一能让它在技术上成立的办法，是让 VibeSpace 去**启动**微信**以便**读它的内存 —— 这句话写出来就在反对它自己当默认。真要做，它是插件（D2 给"专有且带法律面的东西"划的那条线），绝不进核心。 |
 | **D21** | **Xpra 的客户端那一半：托管上游的 HTML5 应用，还是自己渲染？**（§4.7 —— MPL-2.0 的应用 vs npm 上 Apache-2.0 的 `xpra-html5-client`。） | (a) 把上游 HTML5 客户端当静态资源托管在我们的鉴权后面；(b) 用那个客户端库在一个 VibeSpace 窗口类型里自己渲染；(c) 先 (a) 作为验证切片，再 (b)。 | **(c)。** (a) 是最快知道"这条传输在 200 ms / 1 Mbps 下够不够用"的办法，而那正是那个未决问题 —— 但 §4.2 拒绝内嵌上游 dashboard 的理由在这里同样适用（一个带自己控制面的整应用装进我们里面，外加一个已知的 iframe `sessionStorage` 限制），所以它是一个验证切片而不是产品。本设计已经规定的那个窗口（§4.4：DPI 正确的画布、被转义的标题、主题变量）就是 (b) 落地的形状。 |
 | **D22** | **一个会话有 ≥2 个附着时，handle 是必填吗？**（§3.7 —— 今天"一个会话一个浏览器"是一个隐含的量词。） | (a) 必填：裸命令得到一条列出全部 handle 的具名拒绝；(b) 悄悄落到默认；(c) 只对会改状态的动词必填，读一律走默认。 | **(a)。** (b) 正是 Q8 那个痛点的机器：一次静默的默认解析，是"agent 在错的 profile 里干完了整件事"的**唯一**成因。(c) 听起来温和，实际更糟 —— 它让 `snapshot` 与它后面那条 `click` 落在**不同**的浏览器上，而那是一个读者根本想象不到的失败形态。代价是每条命令多 18 个字符，且只落在真正握着多个浏览器的那些会话上。 |
-| **D23** | **一个子 agent 默认拿到什么？**（§3.7 —— VibeSpace 不 spawn 子 agent，所以我们给不了它环境。） | (a) 它自己的临时浏览器，经 `new-child` 铸一个子 handle；(b) 直接继承父亲的默认附着；(c) 什么都没有，直到父亲明确递给它一个 handle。 | **(a)。** 一个子 agent 最常见的用途是"去查一下这个"，而把它放进父亲的登录态里是一次更大的授权；子租约按前缀挂在父亲名下，于是父亲的 teardown 收得掉它（§3.4）。**但要如实说清 (b) 是今天的物理事实**：claude 的子 agent 与父亲同进程同环境，所以"默认 (a)"是靠子 agent **调一次 CLI** 实现的，不是靠环境隔离 —— 一个从不调 `new-child` 的子 agent 事实上就在 (b) 里。手册必须把这句话写在最前面。 |
+| **D23** | **一个子 agent 默认拿到什么？**（§3.7 —— VibeSpace 不 spawn 子 agent，所以我们给不了它环境。） | (a) 它自己的临时浏览器，经 `new-child` 铸一个子 handle；(b) 直接继承父亲的默认附着；(c) 什么都没有，直到父亲明确递给它一个 handle。 | **(a)。** 一个子 agent 最常见的用途是"去查一下这个"，而把它放进父亲的登录态里是一次更大的授权；子租约按前缀挂在父亲名下，于是父亲的 teardown 收得掉它（§3.4）。**但要如实说清 (b) 是今天的物理事实**：claude 的子 agent 与父亲同进程同环境，所以"默认 (a)"是靠子 agent **调一次 CLI** 实现的，不是靠环境隔离 —— 一个从不调 `new-child` 的子 agent 事实上就在 (b) 里。手册必须把这句话写在最前面，而 §3.7 那张表里"集合恰好一个"那一格现在**也**这么写 —— 它先前写的是"这是默认，也是对的"，那句话恰好祝福了本决定论证不该依赖的那次授权。还有一条随之而来的残留（§12.25）：一个从不调 `new-child` 的子 agent 在父亲的登录态里干活，而**产品今天既检测不到也阻止不了它** —— 服务端能看见一个 sidechain 正开着（`session._subNormalizers`），那足以在拒绝里加一句诊断附言，但不足以拿它当拒绝的**理由**。 |
 | **D24** | **一个会话的 N 个浏览器怎么在实时视图里呈现？**（§3.7。） | (a) 一个绑定的面 + 窗口内部一条 profile 切换条（每标签一枚 owner 徽章）；(b) N 个并排的面；(c) N 个独立窗口。 | **(a)。** (b) 已经被 D19 量过的那条否掉了 —— 三个面在多数人实际使用的宽度下都不可用，而这里第三个面还要再挤一半。(c) 恰恰丢掉 §4.6 存在的理由（一个被 agent 驱动的浏览器不许丢失它的 owner）：三个自由窗口，一个用户，没人知道哪个属于谁。切换条另有一个 (b)/(c) 给不了的好处：它就是那张"我这个会话有哪些浏览器"的清单，而那正是 Q7 的问题本身。 |
 | **D25** | **附着集合变了之后，那条 `profile_changed` 是"拒绝一次"还是"提示一下"？**（§3.8 第①层。） | (a) 拒绝一次：下一条裸命令不执行，必须带 handle 重发，之后新默认生效；(b) 只在回答里附一行提示，命令照跑；(c) 每条命令都提示直到 agent 显式确认。 | **(a)。** 一条被塞进 stdout 的提示只是**希望**模型读它，而这个功能存在的全部理由就是"它没注意到"。(c) 会把一次中途钉住变成这个会话余下每条命令的两倍开销。(a) 的代价恰好是一次往返，而它买到的是一条**结构性**保证：那条本会落在旧 profile 上的命令，没有执行过。 |
 | **D26** | **那枚琥珀色芯片上的"提醒它"要花一个计费 turn 吗？**（§3.8 第③层，与 D11/D16 同一类。） | (a) 不 —— 只写 `pendingNotice`，等用户下一条消息；(b) 走投递梯，带自己的已声明理由，因为点击是一次 owner 动作；(c) 会话停着时自动推送。 | **(b)，而 (a) 是它在会话**活着**时的实际行为。** 那枚芯片变琥珀色的场景正是"agent 在跑、而且在错的 profile 上"，那时 `pendingNotice` 足够（用户就在那儿）。只有会话**停着**、用户点了那个按钮时才需要一个 turn 去叫醒它 —— 那是一次每次都有 owner 动作的点击，正是 CLAUDE.md 那条类别排除掉的东西，但它仍然开一个计费 turn，所以它仍然过同一条梯子、同一个上限，用 `'browser-profile-notice'` 这个已声明的理由。(c) 明确拒绝：那是一个没有任何 owner 动作的定时推送。 |
 | **D27** | **窗口目标能寻址哪些窗口？**（§4.9 —— 本机实测：X11 枚举看不见 Wayland 客户端，GNOME 的 Introspect 对我们 AccessDenied。） | (a) 只有**我们自己起的**（Xvfb+Xpra 里的应用）；(b) 加上用户真实桌面上的窗口，需要一次明确开启；(c) 都不做。 | **(a) 先发，(b) 作为一个带自己那次同意的明确开关。** (a) 那一列在 §4.9 的矩阵里全绿、不需要向任何人要权限、而且它是"agent 用一个原生应用干活"这个用例的全部 —— 用户桌面上那个正在被他打字的窗口不在这个用例里。(b) 的每一行都要标"这是你的桌面"，而它真正的门槛不是技术，是 §6.6 那条：对它的一次点击就是对用户真实会话的一次点击。 |
-| **D28** | **一个窗口目标的**主**观察通道是无障碍树还是像素？**（§4.9 —— 本机实测 AT-SPI 可用、9 个应用、约 1,800–6,100 节点/秒。） | (a) 无障碍树为主、像素为辅；(b) 像素为主、树为辅；(c) 只给像素（Anthropic 的 computer use 就是这一种）。 | **(a)。** 这不是偏好，是本设计里已经写了两遍的同一条：跟树说话胜过跟像素说话（§4.7 的结论、§4.1 里 Codex 自己的浏览器面）。而它有两个只有 (a) 才有的性质：`Action.do_action` 让**动作**也不必经过输入注入（于是 Wayland 那条"不许全局注入"管不到它），以及审计行能记下"点了名为 Minimize 的按钮"而不是"点了 (412, 88)"。(c) 是我们**必须**能降级到的那一格（自绘控件、canvas、图片），所以它是回退而不是主路。 |
+| **D28** | **一个窗口目标的**主**观察通道是无障碍树还是像素？**（§4.9 —— 本机实测 AT-SPI 可用、9 个应用、约 1,800–6,100 节点/秒。） | (a) 无障碍树为主、像素为辅；(b) 像素为主、树为辅；(c) 只给像素（Anthropic 的 computer use 就是这一种）。 | **(a)。** 这不是偏好，是本设计里已经写了两遍的同一条：跟树说话胜过跟像素说话（§4.7 的结论、§4.1 里 Codex 自己的浏览器面）。而它有两个只有 (a) 才有的性质：`Action.do_action` 让**动作**也不必经过输入注入（于是 Wayland 那条"不许全局注入"管不到它），以及审计行能记下"点了名为 Minimize 的按钮"而不是"点了 (412, 88)"。**但那第一个性质要按它实测的范围来说**：`do_action` 免掉注入的，只是**那些自报了动作的节点**（2026-09-10 实测 503 个节点里 66 个，43 个 `button` 节点里 6 个），而 `type` 另有自己的条件（`EditableText`，33/503），`key`（和弦）在树上**一格路都没有**。所以本决定只管**观察**通道那一句"树为主"，是无条件的；动作那一句按动词分成四个答案，写在 §4.9 的矩阵与 §5.1.1 的能力表里。(c) 是我们**必须**能降级到的那一格（自绘控件、canvas、图片），所以它是回退而不是主路。 |
 | **D29** | **Wayland 上的输入注入走哪条道？**（§4.9 —— portal 的 RemoteDesktop 接口在本机存在，`libei`/`libeis` 1.3.901 在，`/dev/uinput` 是 0600 且模块没加载。） | (a) RemoteDesktop portal（`ConnectToEIS` 优先），`persist_mode=2` + `restore_token` 记住那次同意；(b) ydotool/uinput，要求运维放开 `/dev/uinput`；(c) 不做 —— 只支持 X11/Xwayland 与我们自己的嵌套 X。 | **(a)，而 (c) 是它没跑通之前的现状。** (b) 明确不推荐：它要求把一个能合成全局输入的设备节点交给我们这个 uid，那是一次比这个功能本身大得多的授权，而且它绕过合成器所有的同意机制。(a) 有一个必须先量的前提 —— **我们的服务器跑在 `systemd --user` 下**，而公开报告写着 portal/D-Bus 在后台上下文里会被拒（§12）。所以 P9 的第一件事是去测它；测不通就落 (c)，而 (c) 加上 D28 的 `do_action` 仍然能覆盖相当一部分动作。 |
 | **D30** | **配对的 Mac 上要不要做窗口目标？**（§4.9、§7.3 —— macOS 的两道 TCC 门。） | (a) 不 —— 机队那条线只做浏览器（§7.3 已定）；(b) 做，经 agentd op 走 ScreenCaptureKit + AXUIElement。 | **(a)，并把理由写下来而不是留白。** 两道门都不是"弹一次对话框"那么简单：Accessibility 要求进程**非沙箱且已签名**，而 Screen Recording 在 macOS 26 (Tahoe) 上被公开报告为**要求 app bundle** —— 一个非 bundle 的可执行文件根本不出现在系统设置的隐私列表里，于是它既拿不到授权也没法被授权（一个 computer-use 项目 2026-01 的公开 issue 记录了这个形态：窗口不出现在截图里，而 ScreenCaptureKit 即便数据库里有权限也回 TCC 错误）。而 VibeSpace 在一台配对机器上的存在形态恰恰是一个由 daemon 拉起的可执行文件。所以 (b) 的第一步不是写代码，是回答"我们要不要在 macOS 上分发一个签名的 app bundle"——那是一个产品决定，不是这一节的决定。 |
 
@@ -1899,7 +2057,11 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
     （`src/session-store.js:308`、`src/session-schema.js` 的 `_subNormalizers`），codex 的是它的
     app-server 拥有的线程，Background Work 的 job 走 `src/jobs.js:375` 的 `jobEnv({…})` —— 三条都是
     读出来的。D23 的"默认 (a)"依赖第一条，所以 P1 要真的派生一个子 agent、在里面跑一次
-    `vibespace-browser status`，看它报出来的 `AGENT_BROWSER_SESSION` 是不是父亲的。
+    `vibespace-browser status`，看它报出来的 `AGENT_BROWSER_SESSION` 是不是父亲的。**而无论那次测量
+    结果如何，有一条残留今天就成立**：一个从不调 `new-child` 的子 agent 在父亲的登录态里干活，而产品
+    里没有任何东西检测得到或阻止得了 —— CLI 拿到的 env 与 token 与父亲逐字节相同。服务端能看见一个
+    sidechain 正开着（`session._subNormalizers`），那足以在拒绝里加一句诊断附言（§3.7），但那句附言
+    带着 60 秒回收宽限的竞态，所以它永远不是拒绝的理由。
 26. **k 个浏览器**同时**跑起来的资源包络，在多附着下。** §1.2 的每实例数字是在四个**空闲无头**泄漏
     上量的；本轮只新量了容量那一侧（**2026-09-10：128 个 inotify instance 里已占 80，剩 48**）。
     "一个会话三个 profile"这种形状一个数字都没有，而 D13 的上限提案（8）是在单附着假设下提的。
@@ -1916,11 +2078,34 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 30. **AT-SPI 在 Qt 与 Electron 上的覆盖度，本机零测量。** 实测到的 9 个应用全是 GTK/clutter/gjs；
     Electron 通常只在检测到一个 AT 客户端时才导出树，而 `toolkit-accessibility` 在这台机器上是
     `false`（AT-SPI 仍然可用 —— 这本身就说明那个开关不是"总开关"，但它在别的工具包上意味着什么
-    我没测）。§4.9 关于"无障碍树是主通道"的结论对 GTK 是实测的，对 Qt/Electron 是**推断**。
+    我没测）。§4.9 关于"无障碍树是主通道"的结论对 GTK 是实测的，对 Qt/Electron 是**推断**。**而即使在
+    GTK 上，那条结论的诚实上界也是一个比例，不是一句"可以"**：九个应用各走 400 个节点封顶、共 503 个
+    节点，`Action` 66 个、`EditableText` 33 个，而 43 个 `button` 节点里只有 6 个导出 `Action`；换成
+    统一 600 节点预算的广度优先走法是 `Action` 52/600。这些数字是**这一台桌面在这一刻**的，不是一个
+    关于 GTK 的常数 —— 所以 `test-window-target` 的 `snapshot` 那一腿要把自己这趟的接口清点报出来，
+    好让它在别的桌面上可被复核。
 31. **macOS 那两道 TCC 门的当前形状。** Accessibility 要求非沙箱 + 已签名、Screen Recording 在
     Tahoe 上要求 app bundle —— 两条都来自公开文档与一个 2026-01 的公开 issue，**不是我在一台 Mac
     上量的**（这台是 Linux）。D30 的"不做"因此是基于二手证据的，如果 owner 想推 (b)，第一步是在
     一台真 Mac 上复核这两条。
+
+第六轮新增，两条都是本轮自己那些改动带来的：
+
+32. **"一条直接的 `agent-browser` 命令够不到非默认附着"—— 这是按构造的推理，不是实测。** §3.7 那半
+    收口靠的是：会话 env 里那份 config（变体 D）或那个符号链接（变体 C）只命名默认附着的
+    user-data-dir，而别的目录从不被打印。这依赖 `agent-browser` 自己那条配置优先级**恰好**按 §1.1
+    引的文档运转 —— 而 §12.12 已经把 `AGENT_BROWSER_CONFIG` 的确切语义列为未验证（"instead of the
+    defaults"到底替不替掉项目级那一份、`extensions` 还合不合并，文档写得含混）。所以 P0 在提交变体 D
+    的同时要顺手量这一条：起两个附着，用会话自己那份 env 跑一条直接命令，确认它解析到的目录**恰好**
+    是默认那个。如果配置优先级不是这样，这一半收口就不存在，I6 要再改窄一次 —— 而这也正是它现在被
+    写成"经我们 CLI 的命令"而不是"每一条命令"的原因。
+33. **node 这一侧的 AT-SPI 绑定，以及它每节点的成本。** 本轮每一个 AT-SPI 数字（9 个应用、约
+    1,800–6,100 节点/秒、66/503、6/43）都是经 `python3` + GObject introspection 量的，也就是经
+    `libatspi`，而 AT-SPI 的 D-Bus 设计把**缓存**写成了它自己的要点之一。所以那些速度数字**只对这条
+    路成立**：在 node 里直接说 D-Bus（`dbus-next` 这类通用客户端）拿不到那份缓存，每节点一次往返的
+    真实成本要重新量；spawn 一个 GI helper 则要付 §1.6 已经量过的 fork 税。本轮**没有找到**维护中的
+    node 专用 AT-SPI 绑定，但"没找到"不是"不存在"（这个仓库为这类断言付过代价），所以这条写成 P9 要
+    先查、先量的一个输入，而不是一个已经有答案的问题。
 
 ---
 
@@ -2169,3 +2354,64 @@ diff 的感觉。没有一条被判为错，所以这一轮没有"驳回"条目�
 **第四轮刻意没做的事。** 它没有启动浏览器（§12.1 的理由仍然成立），没有改动任何一条决定的推荐值，
 没有动阶段的轮数（发现 6 只是让那句封顶的话引用自己表里的数字），也没有软化"我没能核实的东西"里的
 任何一条 —— 那份清单从 22 条长到了 23 条。
+
+---
+
+## 附录 D —— 批评日志（第六轮）
+
+一位对抗性批评者读了第五轮的修订，报了六条。**六条全部成立**，每一条都在动任何东西之前先对着源码
+核实过；下面写的是跑了什么命令、它答了什么 —— 因为"已核实"是一句关于**跑过什么**的断言，不是读完
+diff 的感觉。本轮没有被判错的条目。
+
+| # | 严重度 | 发现 | 判定 | 它落在哪 |
+|---|---|---|---|---|
+| 1 | high | 反默认失明的机制整个住在 `vibespace-browser` 里，而本设计**自己的默认路径是一条直接的 `agent-browser` 调用** —— 于是 ≥2 个附着时，一条裸的直接命令静默落到默认上，正是 Q8 点名的那个失败，也正是 I6 明令禁止的 | **成立** | §2 的 I6 改窄、§3.7 新增一行 + 两半（结构性收口 / 必须承认的残留）、§3.8 第①层表头、§5.1、§9 `test-browser-handles`、§12.32 |
+| 2 | high | 能力律只对一个动词（`click --at`）执法，而四个动作动词里有两个在树上**一条路都没有**：`key`（和弦）没有 AT-SPI 原语，`click @ref` 只对**自报动作**的节点成立 —— 实测 600 个节点里 52 个 | **成立**（本轮把测量做得更细，结论更强） | §4.9 的动作行拆成**四行**、新增覆盖率一段、§5.1.1 的能力表、D28 收窄、§9 `test-window-target`、§12.30 |
+| 3 | medium | §3.7 那张表的子 agent 行与 D23 互相矛盾（表说"这是默认，也是对的"，D23 说恰恰不该这样），而它承诺的那句"你是一个子 agent"附言，其判据是本节刚刚证明没人观察得到的东西 | **成立** | §3.7 该行重写 + 新增"这句附言要有说得出它的机制"一段、D23、§12.25 |
+| 4 | medium | "零新机制"是假的：`pendingNotice` 是**一个**固定形状的槽、一个写死的渲染器、注入点消费一条就 `break`，于是两条通知会互相吃掉 | **成立** | §3.8 第②层重写、§3.2.5 第 3 条路、§10 P1 的内容行、§9 `test-profile-blindness`（fast） |
+| 5 | medium | 规定的那一行 `LIVE_SESSION_FACTS` 登不下芯片要比较的两个值；而若把值换成那个显而易见的对象，digest 就是个常量 —— 正是那一段自己援引的那类失败 | **成立** | §3.8 第③层重写（两行标量或投影 digest + 那条通则）、§5.3、§9 `test-profile-blindness`（heavy，改成变异腿） |
+| 6 | low | AT-SPI 遍历被放进一个 **SHARED** 模块（daemon 会 bundle 它）却没有一个字说它跑在进程外、有界；而本轮每一个数字都是经一条本设计从没点名的绑定量的 | **成立** | §4.9 新增两段（有界子进程 / 绑定决定）、§3.6 路由行、§10 P9、§12.33 |
+
+**核实记录。**
+
+* **发现 1。** §3.2 逐字写着"没有我们的进程、没有路由、没有守护进程"，§5.2 第一条逐字写着"一个一个字
+  都不读的 agent 从 §3.2 拿到隔离"，而 §5.1 把包装形式的存在理由限定成一个动词子集
+  （`close`/`close --all`/`connect`/`get cdp-url` 加租约检查）—— 三句话合起来就是"`snapshot`/`fill`/
+  `click` 以裸 `agent-browser` 的形式跑"。§1.4 记着 `--session` 与 `--profile` 都是每次调用的旗标，
+  §3.2.5 第 1 条路记着"已经 spawn 的 shell 的环境是不可变的"。所以①层够不到直接路径，这一条是结构性
+  的。本轮把它拆成两半：可以收口的那一半真的收了口（非默认附着的目录由服务器铸名、从不打印），而剩下
+  的那一半连同 I6 的措辞一起被改窄 —— 一个对默认路径不成立的不变量，不改窄就是上线当天的假话。
+* **发现 2。** 本轮**重新量了一遍**，而且量出了比批评者更强的数字。批评者报的
+  `Component` 599 / `Action` 52 / `EditableText` 52 / `Text` 52（600 节点统一预算）被**逐字复现**。
+  再按应用各走 400 个节点封顶重量一次（九个应用共 503 个节点）：`Component` 494 / `Action` **66** /
+  `EditableText` **33**，而按角色拆开 —— **43 个 `button` 节点里只有 6 个导出 `Action`**，也就是一个
+  agent 最想点的那个角色恰恰是树这条路最常缺席的地方；另外实测 66 条动作里有 **32 条名字是空字符串**。
+  `key` 那一半也复核了：`Atspi.generate_keyboard_event` 与 `generate_mouse_event` 都存在，但它们是
+  **注册表级**的设备事件生成器（在 X11 上就是 XTEST = 注入），而 `Action` 上跟键有关的只有
+  `get_key_binding`，那是一个**读**。`type` 那一半有树这条路：`EditableText.insert_text` /
+  `set_text_contents`（实测方法名），条件是节点导出 `EditableText`。
+* **发现 3。** 表里那句"这是默认，也是对的"与十二行之下的正文、以及 D23 的推荐值三者对不上；而
+  `src/session-store.js:308` 的 `isSubagentMessage` 与 `_subNormalizers` 都确认了同进程 sidechain
+  这件事，也就确认了 CLI 分不出调用者。本轮采纳了批评者提的那个机制而没有只是删掉那句附言：
+  `src/server/stdout/claude-stream-json.js:288` 建 map、`:1065` 在 `task_notification` 之后带 60 秒
+  宽限回收 —— 所以服务端**确实**知道此刻有没有 sidechain 开着，那足以当一句诊断附言，但那 60 秒宽限
+  就是它永远当不了拒绝**理由**的原因。
+* **发现 4。** 三处逐字核实：`src/session-status.js:110/125/141` 的 `pendingNotice` 是一个形状固定为
+  `{agent, user, at}` 的槽，`:177–188` 的 `renderNotice` 写死了状态覆盖那一句，而
+  `src/agent-routes.js:563–566` 的循环消费一条就 `break`。而本文自己已经要这个槽再背第三个生产者
+  （§3.2.5 的 `'browser-pin'`），所以这次冲突在这一份文档内部就已经不是假想的。
+* **发现 5。** 在 node 里实测：`(v) => v || ''` 作用在 `{active:'a',pinned:'b'}` 与
+  `{active:'x',pinned:'y'}` 上，`liveFactsDigestPart`（`src/lib/sidebar.js:96–103` 的
+  `out += ':' + d(s[k])`）两次都得到 `":[object Object]"` —— 逐字节相同。批评者关于门禁的那条同样成立
+  且更要紧：**"一致时中性、不一致时琥珀"是两次全新渲染，在这个 bug 下照样通过**，所以那条腿改成了一次
+  变异（只改一个值，断言芯片翻色且没有整表重建），负控是那个对着对象的 digest。
+* **发现 6。** §0 引了这条法、§4.2 据它否掉了 CDP 截屏，而 §4.9 没有受到同样的对待 —— 尽管它自己的
+  数字（每节点一次 D-Bus 往返、600 节点 0.1–0.33 秒）加上一个不应答的应用（libdbus 默认 25 秒超时）
+  正是写下这条法的那几次事故的形状，而 §3.6 把 `src/window-targets.js` 列为 **SHARED**，于是 daemon
+  也会中招。绑定那一条同样成立：附录 A 自己的证据行写着这些数字是经 `python3` + GI 量的，而那条路
+  走 `libatspi`，它自带 AT-SPI 的缓存 —— 所以那些速度数字**不能**迁移到一个手写的 node D-Bus 客户端上。
+
+**第六轮刻意没做的事。** 它没有启动浏览器（§12.1 的理由仍然成立），没有改动任何一条决定的推荐值
+（D23 与 D28 的**答案**都没变 —— 变的是它们各自被收窄到实测支持的范围），没有动任何一个阶段的轮数
+（发现 2、4、6 都在既有的 P1/P9 内容行里落地），也没有软化"我没能核实的东西"里的任何一条 —— 那份
+清单从 31 条长到了 33 条。

@@ -68,6 +68,27 @@ model, and its own phase P9 (§4.9, §5.1.1, §6.6, D27–D30). §2 grows two in
 interface list, 80 of 128 inotify instances already held), and each one is written beside the
 sentence it supports.
 
+**Round 6 (2026-09-10)** answers an adversarial critique of round 5: six findings, **all upheld**,
+with the verification evidence in **Appendix D**. Two highs each name a claim that would have been
+**false on the day it shipped**: the whole anti-default-blindness mechanism lives in
+`vibespace-browser` while this design's **own default path is a direct `agent-browser` call**, so I6
+is narrowed to "a command through our CLI" and the half that can be closed structurally is actually
+closed (a non-default attachment's directory is minted by the server and never printed — §3.7,
+§12.32); and §4.9's capability law was enforced for one verb although, of the four action verbs,
+`key` (a chord) has **no road on the accessibility tree at all** and `click @ref` works only on
+nodes that **declare an action** — which this round **re-measured**, getting stronger numbers than
+the critic's (503 nodes across nine applications: `Action` on 66, `EditableText` on 33, and **only 6
+of 43 `button` nodes** exposing `Action`), so the matrix's action row splits into four, §5.1.1 gains
+a per-verb capability table, and D28 is narrowed to the scope its measurements support. Three
+mediums each kill a sentence about a mechanism that does not exist: the sub-agent row's
+contradiction with D23; "zero new mechanism" (`pendingNotice` is **one** slot, one hardcoded
+renderer, one consumer that breaks on the first hit); and a `LIVE_SESSION_FACTS` row that cannot
+carry two values and whose digest becomes a constant if made an object. One low puts the AT-SPI walk
+back under the "never block the event loop" law (bounded child, per-call timeout, node budget) and
+names the binding every figure in this round was taken through (`libatspi`'s cache, §12.33). **No
+decision's recommendation changed** — what changed is that D23 and D28 are each narrowed to the
+scope their measurements support; §12 grows from 31 entries to 33.
+
 ---
 
 ## 0. Thesis
@@ -293,7 +314,7 @@ theirs and tiny. The server's steady-state work is a WebSocket bridge and a JSON
 | I3 | The user can neither see nor intervene | **Whatever the agent is looking at, the user can look at too, through VibeSpace's own auth, and can take the controls with a visible, reversible mode change.** |
 | I4 | (implied) Nothing owns the lifecycle | **Every browser process has a named owner, a bounded lifetime and a visible state; every browser process *VibeSpace starts* additionally has a resource guard.** The split is deliberate and it is the honest half: P0's browsers are started by the agent's own CLI, so the keeper cannot see them. What P0 can give them is the *bound* (an explicit idle timeout, §3.2.3) and the *name* (`vs-<browserKey>`); the guard and the enforced ceiling arrive with the keeper in P1. Between P0 and P1 the default path is bounded but unguarded, and that is stated rather than implied. |
 | I5 | (implied) Widening site access | **Fingerprint evasion is a provider choice per profile, never a global default, and never the first answer** — for any site with an account, a human login through the live view beats it. |
-| I6 | (implied, Q7/Q8) One session may hold several profiles at once | **A command acts on the profile it NAMES, and when more than one is reachable it must name one.** Ambiguity is refused by name with the handles listed, never resolved by a default; and every answer states the profile it just acted on — so "it used the wrong profile" is visible on the next command instead of after the work is done. |
+| I6 | (implied, Q7/Q8) One session may hold several profiles at once | **A command THROUGH OUR CLI acts on the profile it NAMES, and when more than one is reachable it must name one.** Ambiguity is refused by name with the handles listed, never resolved by a default; and every answer states the profile it just acted on — so "it used the wrong profile" is visible on the next command instead of after the work is done. "Through our CLI" is load-bearing rather than a hedge: this design's own default path **is** a direct `agent-browser` call (the whole of §3.2 is four environment variables), which reaches none of our code. §3.7 writes that residual down together with the half of it that can be closed structurally — an invariant that cannot hold on the default path is false the day it ships unless its wording is narrowed. |
 | I7 | (implied, Q9) A window target IS the user's desktop | **A native window is leased like a tab and observed like a DOM.** Input is injected only while the lease holder is the agent and the user has not taken over; where an accessibility tree can be read, coordinates are never guessed from pixels; and a window we did **not** start is a stricter road (D27). |
 
 ---
@@ -567,8 +588,12 @@ its honest boundary:
    lease. That is the pull half: always available, free.
 3. **Push it, and by default spend nothing.** A pin is a **user action**, which means the user is
    sitting there typing — so it rides the `pendingNotice` channel `src/session-status.js` already
-   owns: a `<system-reminder>` appended to the user's **next** message. Zero billed turns, zero new
-   mechanism. Only when the session is **idle** and the user explicitly asks does it go through
+   owns: a `<system-reminder>` appended to the user's **next** message. Zero billed turns — but **not**
+   zero new mechanism: that slot is today a **single** fixed-shape field with one hardcoded renderer
+   and an injection site that consumes one and breaks, so this design's two producers (this
+   `'browser-pin'` and §3.8's layer ② profile change) would overwrite each other and the
+   status-override notice besides. §3.8's layer ② writes that change out — a queue, dispatch on
+   `kind`, a draining injection site — and it is **one** change shared by both, not one each. Only when the session is **idle** and the user explicitly asks does it go through
    §4.3.1's delivery ladder (a new declared reason `'browser-pin'`, added to `SPEND_REASONS` in the
    same change as its producer), setting `browser.announcePin`, default **OFF**. This is the same
    rule as §4.3.1's "three moments, three answers" table, applied to a fourth moment.
@@ -733,7 +758,7 @@ we should inherit rather than re-earn:
 | The pin ladder (§3.2.5) + the backend-switch decision and its version ladder (§7.4) | `src/browser-profiles.js` (PURE half) + `src/server/browser-backend.js` (ORCH: stop / restart / re-open the leases) | **PURE + ORCH** | `test-browser-pin` (fast) + `test-browser-backend` (fast decision, heavy switch) |
 | Split tab groups (§4.6): `layout`/`split` on the chain, the divider, the born-into-a-chain path | `src/lib/tab-group.js`, `src/lib/layout.js` (persist + sync key) | **CLIENT** | `test-window-binding` (headless chrome) |
 | The attachment set, handle resolution, the ambiguity refusal, the audit line (§3.7) + the anti-default-blindness decision (§3.8) | `src/browser-profiles.js` (PURE: `resolveHandle` / `attachmentsFor` / `handleRefusal` / `profileChangeNotice`) | **PURE** | `test-browser-handles` (fast) + `test-profile-blindness` (fast + heavy) |
-| Native-window forwarding (§4.7) + the chat adapters (§4.8) + a window target's facts and actions (§4.9) | `src/xpra-serve.js` (SHARED facts) + `src/window-targets.js` (SHARED: enumeration / a11y snapshot / the input-backend ladder) + `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` + `data/bin/vibespace-window` | **SHARED + ORCH + agent surface** | `test-native-window` (heavy) + `test-window-target` (heavy) |
+| Native-window forwarding (§4.7) + the chat adapters (§4.8) + a window target's facts and actions (§4.9) | `src/xpra-serve.js` (SHARED facts) + `src/window-targets.js` (SHARED: enumeration / a11y snapshot / the input-backend ladder; **the AT-SPI walk runs in a bounded child/worker with a per-call timeout and a node budget — one D-Bus round trip per node, and an application that stops answering blocks until libdbus's 25 s default, so it never runs on the server's or the daemon's event loop, §4.9**) + `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` + `data/bin/vibespace-window` | **SHARED + ORCH + agent surface** | `test-native-window` (heavy) + `test-window-target` (heavy) |
 
 `hostId` is a parameter, never a branch: `browser-access.js` picks the transport (local keeper /
 `browser-serve` device op / ssh) and nothing downstream asks "is this remote?" again — the same
@@ -773,14 +798,44 @@ variables) and a Background Work job (`jobEnv({…})` at `src/jobs.js:375`, whic
 | A bare command (`vibespace-browser snapshot`) | the default attachment | runs; the answer names the profile | **named refusal** `profile_required`, listing every handle and which one is the default |
 | `--profile <id\|alias>` | the one named | runs | runs |
 | A shell that exported `VIBESPACE_BROWSER=<alias>` | that shell's default | runs | runs (identical to putting `--profile` on every command) |
-| A sub-agent's bare command | whatever environment it inherited | the parent's browser (**this is the default, and it is right**) | refused, with the reason adding "you are a sub-agent — use `--profile` or ask your parent for a handle" |
+| A sub-agent's bare command | whatever environment it inherited | the parent's browser — **this is today's physics**, and D23 recommends against relying on it when the parent's default is a persistent logged-in profile | refused (`profile_required`, the same one a bare command gets); the "you are a sub-agent" clause is added only when the server can **see** a sidechain open right now — see below |
 | `--profile <a filesystem path>` | — | **refused**: this CLI's `--profile` takes a registry handle; register a path with `vibespace-browser new` | same |
+| A **direct** `agent-browser` command (not through our CLI at all) | the user-data-dir this session's env points at, i.e. **the default attachment** | runs | still the default — **we cannot refuse it**, see below |
 
 That last row is load-bearing: `agent-browser`'s own `--profile` takes exactly a name **or a path**
 (§1.4), so an agent that already knows `agent-browser` will naturally hand us a directory — and that
 is precisely how §1.2's 53 unowned directories came to exist. A flag that is spelled the same and
 means something else must be separated **loudly**, and the refusal must carry the command that turns
 a path into a handle.
+
+**And the last row is the residual this section owes, so it is written down rather than routed
+around.** §3.2's default path **is** a direct `agent-browser` call — the whole of P0 is four
+environment variables, "no process of ours, no route, no daemon", and §5.2's first bullet says "an
+agent that never reads a word gets isolation from §3.2". A bare direct command therefore runs
+through none of our code: layer ①'s `profile_changed` refusal **cannot reach it**, and neither can
+`profile_required`. Half of that can be closed structurally; the other half has to be admitted:
+
+* **The half that closes: make a non-default attachment unreachable without a handle.** The config
+  in the session's env (variant D) or the symlink (variant C) names the user-data-dir of the
+  **default attachment only**; a non-default attachment's directory is minted by the server and
+  handed only to the child process that `vibespace-browser --profile <h>` execs, and is **never
+  printed** (§5.1's "`use` does not print a CDP URL" rule, generalised to directories). A direct
+  command therefore **cannot reach browser #2**: `--session` and `--profile` are indeed
+  per-invocation flags (§1.4), but it cannot fill in a value it was never told. I6 holds **by
+  construction** for everything except the default, rather than by good behaviour.
+* **The half that must be admitted: a bare direct command always lands on the default attachment,
+  and we cannot refuse it.** That is the boundary of layer ①'s guarantee — its scope is **commands
+  issued through `vibespace-browser`**, and I6's wording has been narrowed to match. The honest
+  comparison is §5.1's paragraph about the CDP URL, and it is the same reading verbatim: on a
+  single-uid box this is **not** a boundary. It removes the *accident* (an agent that was never told
+  the directory name cannot resolve it) and not the *capability* (the same uid can of course `ls`
+  it). Enforcement is still only §6.5's proxy.
+
+`test-browser-handles` pins both halves: with two attachments, a **direct** `agent-browser`
+invocation carrying that session's own env resolves to the default profile's user-data-dir **and
+resolves to no other**, while the same bare command through our CLI gets `profile_required`. The
+first half is layer ①'s honest boundary and the second is its guarantee; both need an assertion, or
+the boundary is only prose.
 
 **A sub-agent's default is its own ephemeral browser, but it has to ask.** The environment cannot
 reach it (previous paragraph), so "every sub-agent automatically gets a fresh browser" is a promise
@@ -794,7 +849,26 @@ handles into the sub-agent's task description ("use `--profile work`"), in which
 two sub-agents on one handle queue rather than steal tabs from each other. Which of the two is right
 is a property of the task, so both exist and **the default is the former** (D23): the commonest use
 of a sub-agent is "go look this up", and putting it inside the parent's logged-in identity is the
-larger grant.
+larger grant. **So the exactly-one cell in the table above states physics rather than a blessing**:
+a sub-agent that never calls `new-child` really is working inside the parent's browser, and when the
+parent's default is a persistent logged-in profile that is exactly what D23 argues against relying
+on.
+
+**And "you are a sub-agent" needs a mechanism that can say it, or it is a sentence about a mechanism
+that does not exist.** The previous paragraph already proves the CLI cannot: the env and the token
+it receives are **byte-identical** to the parent's, so it cannot tell whose call this is — putting
+that clause in the CLI's refusal text is the very class §6.6 kills ("describing window captures as
+'going through the same redaction' would be a sentence about a mechanism that does not exist"). The
+only thing that can tell is the SERVER: it already parses this session's stdout, and
+`session._subNormalizers` is the map of "one normalizer per running sub-agent"
+(`src/server/stdout/claude-stream-json.js:288` creates it, `:1065` reaps it after
+`task_notification`), while a claude parent is **blocked** inside the Task tool the whole time. So
+the clause is added by the ROUTE when this session has a sidechain open, and it carries its race:
+reaping has a 60-second grace period, so "a sub-agent that just finished" and "the parent itself"
+are indistinguishable inside that window. The clause is therefore always a **diagnostic aside** and
+never the **reason** for the refusal — the reason is always `profile_required`'s handle list, which
+is true for everybody. A codex sub-agent is a thread its own app-server owns and our stdout carries
+no equivalent signal, so that side gets no clause at all.
 
 **Cross-profile work is a first-class shape, and it lands on two commands.** The owner's example —
 reconciling a personal and a work profile — is, in this model:
@@ -848,7 +922,7 @@ stretch:
 
 | Layer | Mechanism | The shape it covers |
 |---|---|---|
-| ① The tool surface (always reaches a RUNNING agent) | Every command's **answer** carries `profile: work (pinned by user 2m ago)`; the snapshot and screenshot headers name it too; when the attachment set changes, the **next** command is refused once with a typed `profile_changed` | A running agent — an environment variable cannot reach it, but its own next call to the CLI certainly can |
+| ① The tool surface (reaches a RUNNING agent — for commands issued through our CLI) | Every command's **answer** carries `profile: work (pinned by user 2m ago)`; the snapshot and screenshot headers name it too; when the attachment set changes, the **next** command is refused once with a typed `profile_changed` | A running agent — an environment variable cannot reach it, but its own next call to the CLI certainly can |
 | ② The model surface (once per turn, free) | `pendingNotice` (`src/session-status.js`) appends one `<system-reminder>` line to the user's **next** message: `browser profile changed: <old> → <new>`; the session-start context lists the current attachment set | A **stopped** agent, or a running one that has not called the CLI again yet |
 | ③ The UI (for the user, not the model) | A status-bar Browser chip: the profile the agent **last actually used** vs the **pinned** default; amber when they differ, opening "agent is still on the ephemeral profile — remind it?" with a one-click nudge | The user — and this is the only surface that answers "I pinned it, now what?" |
 
@@ -864,10 +938,35 @@ change rather than once per command. That is also why it must be typed
 already set the same rule for `browser_paused` / `tab_gone` — **an agent must be able to read why it
 was refused without guessing**.
 
-**② spends only what is already being spent.** A pin is a **user action**, so the user is sitting
-there typing and the `<system-reminder>` rides their next message — zero billed turns, zero new
-mechanism, verbatim the same rule as D16. Only "the session is **stopped** and the user explicitly
-wants it woken now" goes through §4.3.1's delivery ladder under its own declared reason
+**② spends only what is already being spent, but it is not "zero new mechanism".** A pin is a **user
+action**, so the user is sitting there typing and the `<system-reminder>` rides their next message —
+zero billed turns, verbatim the same rule as D16. **The money half is free; the carrier half is not**,
+and the earlier wording got that wrong. Today's `pendingNotice` is a **single slot** on the
+session-status record with the fixed shape `{agent, user, at}`
+(`src/session-status.js:110/125/141`), `renderNotice` (`:177–188`) is hardcoded to the
+status-override sentence, and the sole injection site consumes **one** and breaks:
+
+```js
+for (const k of [key, `webui:${id}`]) {                 // src/agent-routes.js:563–566
+  const notice = sessionStatus.consumeNotice(k);
+  if (notice) { parts.push(...); break; }
+}
+```
+
+So a browser-profile notice must either invent a second shape the renderer does not have, or
+**overwrite** a pending status-override notice (and be overwritten by the next `setByUser`) — a
+silently dropped `<system-reminder>` in a feature whose entire purpose is that a notice is not
+silently dropped. And the collision is not hypothetical: this document already asks the same slot to
+carry a **third** producer (§3.2.5's path 3, `'browser-pin'`). So say what the carrier actually
+needs: promote `pendingNotice` to a per-session **queue** of typed notices `{kind, …}` with
+`renderNotice` dispatching on `kind` (`'status-override'` keeps today's text verbatim), and change
+the injection site to **drain** rather than `break` at the first. That is a small mechanism change,
+stated as a small mechanism change instead of as "zero new mechanism"; it goes on P1's content line,
+and `test-profile-blindness`'s fast half pins it with a status override and a profile change both
+pending and **both** reaching the next prompt, with today's single-slot behaviour as the negative
+control.
+
+Only "the session is **stopped** and the user explicitly wants it woken now" goes through §4.3.1's delivery ladder under its own declared reason
 (`'browser-profile-notice'`, added to `SPEND_REASONS` in the same change as `'browser-handback'`),
 behind a setting that defaults **OFF**. The "remind it" button on ③'s chip is **a per-occurrence
 owner action on every click**, so it may take the ladder — but it still passes the same ceiling,
@@ -876,11 +975,35 @@ because it still opens a billed turn (D26).
 **③ has to be written into `LIVE_SESSION_FACTS` or it cannot be drawn.** That table at
 `src/lib/sidebar.js:73` is the **one** list of per-session live facts the `active-sessions` payload
 publishes, and `_mergeAndRender()` only repaints when its **digest** changes — this repository has
-paid for that six times (`worktree`, `outputStyle` and `remoteState` all died on that table). So the
-chip needs a row `browserProfile: { digest: (v) => v || '' }`: it is a cheap scalar that changes at
-most a few times per session (a pin, an agent using a different handle), exactly the class that
-table says should **gate** the render, as opposed to `todo`/`auth`, which change several times per
-turn and are deliberately carried-only.
+paid for that six times (`worktree`, `outputStyle` and `remoteState` all died on that table). And this chip is by definition **two** facts side by side (what the agent last actually used vs
+what is pinned), so the row written earlier — `browserProfile: { digest: (v) => v || '' }` — was
+**wrong twice**. One scalar cannot carry two values (the pinned half lives in
+`session-meta.browserProfileId`, and by this document's own argument `LIVE_SESSION_FACTS` is the
+**one** list the payload publishes such facts through, so the client could not compute "should this
+be amber" at all). And if the value is made the obvious object `{active, pinned}`,
+`liveFactsDigestPart` (`src/lib/sidebar.js:96–103`) does `out += ':' + d(s[k])` — verified in node:
+`{active:'a',pinned:'b'}` and `{active:'x',pinned:'y'}` both digest to `":[object Object]"`,
+**byte-identical**, so the chip would **never repaint** on a change: the seventh instance of the
+class the previous paragraph cites. So state both halves explicitly, one of two ways — two scalar
+rows
+
+```js
+browserProfileActive: { digest: (v) => v || '' },   // what the agent last actually used
+browserProfilePinned: { digest: (v) => v || '' },   // the pinned default
+```
+
+or one row whose digest **projects the pair to a string**
+(``{ digest: (v) => v ? `${v.active}|${v.pinned}` : '' }``). From which a rule, because it outlives
+this chip: **a digest over an object must PROJECT, never return the object** — every `digest: null`
+row in that table is deliberately carried-only, while a digest that *returns an object* looks like
+it gates and is in fact a constant. That also changes its gate: `test-profile-blindness`'s heavy half
+cannot be two fresh renders ("neutral when they agree, amber when they do not" passes under this bug),
+it must be a **mutation** — render, then change only `active` on the same session, and assert the
+chip flips neutral→amber without a full rebuild, with `digest: (v) => v || ''` over an object as the
+negative control, which must go red. Otherwise these two rows are exactly the class that table says
+should **gate** the render: cheap scalars that change at most a few times per session (a pin, an
+agent using a different handle), as opposed to `todo`/`auth`, which change several times per turn
+and are deliberately carried-only.
 
 **The "explicit choice" rule, and its refusal.** The owner also asked for something harder: when a
 session has ≥2 attachments and the user's message **mentions** a profile alias, nothing may be
@@ -1392,7 +1515,39 @@ a node maps to a click point) and `Action` gives the actions the node **declares
 `mutter-x11-frames` 24 nodes in 13 ms and a real application 61 nodes in 10 ms ⇒ **~1,800–6,100
 nodes/second**. `Action.do_action` is therefore an action channel that **goes through no input
 injection at all**: it acts on a node, so Wayland's "no global input injection" rule does not reach
-it — which is the single most important conclusion here.
+it — the single most important conclusion here, and one that holds **per node, not per window**. The
+next paragraph is that coverage.
+
+**Coverage has to be measured beside that conclusion, or the conclusion reads as a promise that is
+true everywhere (measured read-only 2026-09-10).** Walking all nine applications, capped at 400
+nodes each — 503 nodes — the interface census is `Component` **494**, `Action` **66**,
+`EditableText` **33**, `Text` 51. Walking breadth-first to a single flat 600-node budget instead
+(same box, same moment) gives `Component` 599, `Action` **52**, `EditableText` 52, `Text` 52 — both
+samples are real, and the per-app one is the better of the two, because a flat budget is eaten by one
+application's panel subtree. Those three numbers decide three different verbs:
+
+* **`click @ref` works only on nodes that declare an action.** 66/503 (52/600 under the flat
+  budget). More to the point, split by role: of **43 `button` nodes measured, only 6** expose
+  `Action` — and `button` is precisely the role an agent most wants to click. For the rest the only
+  road is that node's `Component` geometry, i.e. a coordinate click, i.e. injection, i.e. the thing
+  this matrix's action row says Wayland's rule "does not reach". Incidentally, **32 of the 66
+  actions have the empty string as their name**, so "pick the action by name" is not universally
+  available either.
+* **`type` needs `EditableText`.** 33/503 (52/600 under the flat budget) — and on this one the
+  source cited in this very section records "GTK3/GTK4/Qt5/Tk each needing their own text-input
+  path", so it is **per toolkit** as well.
+* **`key` (a chord) has no tree road at all.** The measured action names are `click`, `activate`,
+  `edit`, `expand or contract`, `menu`, `clipboard.*`, `window.*`, `link.*`, `selection.*` — all
+  application-declared semantic actions, with no concept of a chord among them. AT-SPI's only
+  keyboard primitive is the **registry-level** `Atspi.generate_keyboard_event` (measured present,
+  beside `generate_mouse_event`), and that is XTEST, i.e. injection, so it inherits every limit of
+  the injection row. (`Action.get_key_binding` is a **read**: it tells you what key a node says it is
+  bound to; it does not press it.)
+
+The conclusion survives but narrows: the accessibility tree is the primary channel for
+**observation** and the preferred channel for **action** — and "preferred" has four different
+answers for four verbs, which is why the matrix below splits the action row into four and why
+§5.1.1's capability law is enforced per verb.
 
 **What everyone else does (the comparison the owner asked for).** Three sources, all pointing the
 same way. **Anthropic's computer use is pixel-only** — the current toolset
@@ -1418,14 +1573,21 @@ Wayland input preferring the RemoteDesktop portal and falling back to uinput.
 | Capture **one** window's pixels | Yes (XComposite / `ffmpeg -f x11grab`; `xwd` and `import` are both absent here, `ffmpeg` is present) | ScreenCast portal (PipeWire, one interactive grant) | None | Yes, and **per window** is Xpra's whole job | ScreenCaptureKit's `SCContentFilter` can name a single window (`CGWindowListCreateImage` deprecated since macOS 15) |
 | Inject pointer + keyboard | Yes (XTEST; `xdotool` / `wmctrl` present here) — **but only into X11 clients** | RemoteDesktop portal: `NotifyPointerMotion*` / `NotifyKeyboardKeycode`, or `ConnectToEIS` handing off to libei (the interface is present here; `libei.so.1` / `libeis.so.1` 1.3.901 installed) | ydotool + `/dev/uinput` (**unusable here**: measured `crw------- root root`, and the uinput module is not loaded) | Yes (our own X, full XTEST authority) | Requires Accessibility permission (non-sandboxed + signed) |
 | Read the accessibility tree (= this window's DOM) | **Yes, and independent of the display protocol** (AT-SPI is D-Bus; measured here: 9 applications, ~1,800–6,100 nodes/s) | Same (AT-SPI does not go through the compositor) | Same | Same | AXUIElement (same permission) |
-| **Act** through the accessibility tree (no input injection) | `Atspi.Action.do_action` (measured: nodes declare `click` / `window.minimize`) | Same — **Wayland's "no global injection" does not reach this** | Same | Same | AXUIElement's `AXPress` and friends |
+| **Act**: `click @ref` (a node that declares an action) | `Atspi.Action.do_action` — **but only where the node exposes `Action`**: measured across all nine apps, **66 of 503 nodes**, and **6 of 43 `button` nodes** | Same — **Wayland's "no global injection" does not reach this** | Same | Same | AXUIElement's `AXPress` and friends |
+| **Act**: `type` into a field | `Atspi.EditableText.insert_text` / `set_text_contents`, only where the node exposes `EditableText` (measured 33/503); and per the source cited above, text input is **per toolkit** besides | Same | Same | Same | Set `AXValue` |
+| **Act**: `key` / a chord (`ctrl+s`) | **No tree road at all** — AT-SPI's action vocabulary has no concept of a chord (measured action names above); the only keyboard primitive is the registry-level `Atspi.generate_keyboard_event`, i.e. **XTEST = injection** | Injection only ⇒ the portal (D29, unproven) | Injection only ⇒ uinput (unusable here) | Yes (our own X, full XTEST authority) | Post a `CGEvent` (Accessibility permission) |
+| **Act**: `click --at <x>,<y>` (coordinates) | Injection only (XTEST), and only into X11 clients | Injection only ⇒ the portal (D29, unproven) | Injection only ⇒ uinput (unusable here) | Yes | Post a `CGEvent` (Accessibility permission) |
 
 **Four conclusions fall straight out of that table:**
 
-1. **The accessibility tree is the only channel that holds in every cell**, so it is the **primary**
-   implementation of `snapshot` and `click`, with pixels filling in where it has no answer (an
-   image, a canvas, a custom-drawn control). That is the same shape as the browser half:
-   `agent-browser snapshot` also returns an accessibility tree with references like `@e3`.
+1. **The accessibility tree is the only channel that holds in every column**, so it is the
+   **primary** implementation of `snapshot` and the preferred implementation of `click`, with pixels
+   filling in where it has no answer (an image, a canvas, a custom-drawn control). That is the same
+   shape as the browser half: `agent-browser snapshot` also returns an accessibility tree with
+   references like `@e3`. **But "every column" is not "every node"**: the 66/503 measured above
+   (6/43 for buttons) is that conclusion's honest bound, and the verb `key` has no cell on the tree
+   at all — in a column with no injection backend a chord is simply **not possible**, which is why
+   §5.1.1 makes it refuse with its probe result exactly like `click --at`.
 2. **Input injection is a three-road ladder that degrades per platform, and each road's
    availability must be probed at runtime rather than inferred from the platform's name** — this box
    is the counter-example: a Wayland desktop where X11 injection works for Xwayland clients, the
@@ -1452,6 +1614,33 @@ while public reports record **portal/D-Bus paths being denied in background/syst
 assumption the architecture may rest on; if it does not hold, the Wayland column reduces to
 `persist_mode=2` + `restore_token` (documented: permissions "persist until explicitly revoked", the
 token invalidated after a single use) with one human click, or to column 4 alone.
+
+**This walk runs in a bounded child/worker, never on the server's or the daemon's event loop.** §0
+cites the "never block the event loop" law and §4.2 applies it (the CDP `Page.startScreencast` idea
+is rejected for putting a per-frame consumer "inside the server's event loop") — and §4.9's own
+figures put the same law in front of us: a snapshot is one D-Bus round trip **per node**, so 600
+nodes at the measured ~1,800–6,100 nodes/s is 0.1–0.33 s of round trips, and an application that
+**stops answering its own a11y bus** blocks each call until the D-Bus timeout (libdbus's default is
+25 s) — exactly the shape of the outages this law was written from (the FUSE threadpool, the
+`execFileSync` sweep freeze). And `src/window-targets.js` is **SHARED** in §3.6, i.e. the daemon
+bundles it, so the block would land in the daemon too. So: the walk follows the precedent
+`transcript-worker.js` / SafeFs already set — a bounded child or worker, with **a per-call timeout
+and a whole-walk node budget**, and a node that does not answer inside the budget is reported as an
+**unreadable subtree** rather than stalling the walk.
+
+**One more decision that has to be named: which binding the node side uses.** Every AT-SPI number in
+this round was taken through `python3` + GObject introspection (Appendix A's own evidence line says
+so), and that road goes through `libatspi`, which carries AT-SPI's **caching** ([the Linux Foundation's
+AT-SPI D-Bus page](https://wiki.linuxfoundation.org/accessibility/d-bus) records "data accessed most
+often is transferred with accessible objects and cached by the AT-SPI bindings, with synchronous
+method calls replaced by asynchronous D-Bus signals wherever possible" as a design point of the
+protocol). P9 therefore has two roads, and **the speed figures above do not transfer to the second**:
+either speak AT-SPI's D-Bus interfaces from node directly (a generic D-Bus client such as
+[`dbus-next`](https://github.com/dbusjs/node-dbus-next) — no maintained node-specific AT-SPI binding
+was found this round, but "not found" is not "does not exist", so P9 looks first), in which case
+there is **no libatspi cache** and the per-node cost must be re-measured; or spawn a GI helper, in
+which case the fork tax §1.6 already measures applies. That is an input to P9, not an implementation
+detail that can be left blank, so it goes into §12.
 
 **Honest boundary (nothing in this section is a number about speed).** `xpra` is not installed here
 (§4.7 already records this), so the end-to-end latency of a window target is entirely unmeasured;
@@ -1522,7 +1711,13 @@ enforcement, the proxy in §6.5.
 
 `--pin-tab` is supplied by the wrapper form, so an agent that already knows `agent-browser` keeps
 every habit it has. The wrapper form (`vibespace-browser -- …`) exists for the verbs that need a
-policy decision (`close`, `close --all`, `connect`, `get cdp-url`) and for the lease check.
+policy decision (`close`, `close --all`, `connect`, `get cdp-url`) and for the lease check. **Which
+means `snapshot`/`fill`/`click` are expected to run as plain `agent-browser`, and that is where
+§3.7's residual comes from**: the wrapper is a SUBSET, so layer ①'s guarantee covers exactly that
+subset. The half that can be closed structurally is closed there — a non-default attachment's
+user-data-dir is minted by the server, handed only to the child process we exec, and never printed,
+the same rule as this section's "`use` does not print a CDP URL" and with the same honesty: it
+removes the accident, it does not create a boundary.
 
 #### 5.1.1 `vibespace-window` — the window target beside the browser target (§4.9)
 
@@ -1547,11 +1742,21 @@ Three rules, each a direct translation of §4.9's matrix: **(i) `@ref` beats coo
 references `snapshot` mints come from the accessibility tree, the same habit as `agent-browser
 snapshot`'s `@e3`, so an agent that already knows the browser half learns nothing new); **(ii) a
 verb that cannot work is disabled with its reason rather than failing at use time** (§7.1's
-capability law: with no input-injection backend `click --at` refuses outright and prints what the
-probe found, while `click @e7` still works — which is exactly what the `do_action` road buys);
-**(iii) `list` shows only the windows we started ourselves** by default, the user's own desktop
-windows require D27 to be opened deliberately, and while it is open every such row is marked as
-"your desktop".
+capability law) — and that law is enforced **per verb, not only for `click --at`**, because §4.9's
+matrix gives four different answers for the four action verbs:
+
+| Verb | What the tree road requires | In a column with no injection backend (Wayland, D29 unproven) |
+|---|---|---|
+| `click <h> @e7` | that node exposes `Action` (measured 66/503; 6/43 for buttons) | node has `Action` ⇒ works; node does **not** ⇒ **refuses with the probe result**, never a silent degrade to a coordinate click |
+| `type <h> "…"` | that node exposes `EditableText` (measured 33/503, and per toolkit) | has it ⇒ works; does not ⇒ refuses as above |
+| `key <h> ctrl+s` | **no road exists** (AT-SPI's action vocabulary has no chord) | **always refuses**, with the probe result as the reason — this verb is not possible in that column |
+| `click <h> --at <x>,<y>` | **no road exists** (it is coordinates by definition) | **always refuses**, with the probe result as the reason |
+
+The load-bearing line there is **"never silently degrade to a coordinate click when the node has no
+`Action`"**: that degrade would let an explicitly-refused channel (injection) back in through the
+side door, and at the moment the agent believes it is using the tree. **(iii) `list` shows only the
+windows we started ourselves** by default, the user's own desktop windows require D27 to be opened
+deliberately, and while it is open every such row is marked as "your desktop".
 
 ### 5.2 How an agent learns any of this
 
@@ -1574,8 +1779,10 @@ windows require D27 to be opened deliberately, and while it is open every such r
   the **bind** affordance that snaps it beside its owning chat (§4.6).
 * The chat status bar's **Browser chip** (§3.8's layer ③): the profile the agent **last actually
   used**, beside the **pinned** default; amber when they differ, opening "agent is still on <old> —
-  remind it?" with a one-click nudge (D26). It needs its own row in `LIVE_SESSION_FACTS` **and a
-  digest**, or it cannot be drawn at all (§3.8).
+  remind it?" with a one-click nudge (D26). It needs **two** scalars in `LIVE_SESSION_FACTS`
+  (`browserProfileActive` and `browserProfilePinned`), or one row whose digest **projects** the pair
+  to a string — one scalar cannot carry the two values it compares, and a digest that returns the
+  object is a constant, so the chip never repaints (§3.8).
 * When a session has several attachments, the live-view window carries a **profile switcher strip**
   inside it (one tab per attachment plus the owner badge) rather than N side-by-side panes (§3.7;
   the reason is the width D19 already measured).
@@ -2018,9 +2225,9 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the seat arithmetic and its refusal text, the site-hint record carrying WHO claimed it, and `blocked` being a claim the server never manufactures. heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus the not-installed refusal naming the provider. |
 | `test-window-binding` | fast + heavy | **P7** | fast: the chain model with `layout`/`split`/`ratio` — a missing `layout` reads as `'tabs'`, the ratio clamps, and **the multi-client sync key changes when only the layout changes** (§4.6's named trap, with the pre-fix key as its negative control). Three more: **close the host tab of a three-tab split chain ⇒ `layout === 'tabs'` and no dangling id in `split`** (the `_normalizeChain` invariant, with the pre-fix shape that leaves a dangling `pair` as its negative control); **two sessions in one task group produce distinguishable badges**; and **a session bound to no group produces a badge at all** (the two shapes on which borrowing the group colour fails). heavy (headless chrome): bind → two panes in one window, divider drag under a non-1 DPI zoom lands where the pointer is, move/minimise/desktop-switch keep them together, closing the browser pane collapses to tabs **without moving the chat window**, and a mobile viewport renders tabs **without writing its flattening back**. |
 | `test-native-window` | heavy | **P8** | A real Xpra server + a real X client under Xvfb through the real cookie-authed bridge: one window arrives, input reaches it, the stream port is never reachable from a browser, and the backpressure discipline holds. **Skips loudly, with evidence**, when `xpra` or `Xvfb` is absent (measured 2026-09-10 on this box: `Xvfb` present, `xpra` absent). The bandwidth/latency numbers §4.7 needs are produced here, not asserted — the suite RECORDS them under a named budget so a regression is visible. |
-| `test-browser-handles` | fast | **P1** | The attachment set as a PURE decision: a set of exactly one resolves a bare command to the default; a set of ≥2 answers a bare command with the named refusal `profile_required` **listing every handle and which is the default** (a refusal without that list FAILS — it is the only diagnostic this agent can get); the refusal for a `--profile` given a **filesystem path**, carrying the command that registers it as a handle; a child handle `bk-<parent>.<n>` reaped by the parent's teardown **by prefix**; one audit line per verb with **content never recorded** (a `fill` logs the verb only). Negative controls: a session with one attachment **never** needs a handle (else the rule turns the commonest shape into two commands); a handle naming a profile this session is not attached to is **refused**, not silently attached. |
-| `test-profile-blindness` | fast + heavy | **P1, P2** | fast: `profile_changed` is **one-time** (one utterance per fingerprint, bare commands run afterwards), it fires on the **attachment set's fingerprint** rather than per command, and it is typed (`{code, was, now, handles}`); plus the wording of the `<system-reminder>` and its zero-spend delivery path (§3.8's layer ②). heavy (headless chrome, 375×667): the chip is neutral when "what the agent used" and "what is pinned" agree and amber with both names when they do not, **and `LIVE_SESSION_FACTS`' digest covers it** — the negative control removes that row and the chip must stop repainting (this repository has paid for that table six times). |
-| `test-window-target` | heavy | **P9** | A real Xvfb + a real Xpra + a real GTK client: `list` shows only the windows we started, `snapshot` mints `@ref`s from the **real AT-SPI tree** (role/name/bounds all asserted present), `click @ref` changes that application's state through `do_action` (verified by the application's **own tree**, not by pixels), `click --at` **refuses with the probe result** when no injection backend exists, and the lease plus §4.3's three modes are the same object a tab uses. Every cell of the capability matrix is a **runtime probe** rather than a platform name, and the suite **prints** what it probed; **skips loudly, with evidence**, when `xpra`, `Xvfb` or AT-SPI is missing (2026-09-10 on this box: `Xvfb` present, `xpra` absent, AT-SPI present and reporting 9 applications). The numbers §4.9 admits it has not measured are produced here under a named budget. |
+| `test-browser-handles` | fast | **P1** | The attachment set as a PURE decision: a set of exactly one resolves a bare command to the default; a set of ≥2 answers a bare command with the named refusal `profile_required` **listing every handle and which is the default** (a refusal without that list FAILS — it is the only diagnostic this agent can get); the refusal for a `--profile` given a **filesystem path**, carrying the command that registers it as a handle; a child handle `bk-<parent>.<n>` reaped by the parent's teardown **by prefix**; one audit line per verb with **content never recorded** (a `fill` logs the verb only). **Plus both halves of the direct path (§3.7)**: with two attachments, a **direct** `agent-browser` invocation carrying that session's own env resolves to the default profile's user-data-dir **and resolves to no other** (a non-default attachment's directory is minted by the server and never printed), while the same bare command through our CLI gets `profile_required` — the first is layer ①'s honest boundary and the second is its guarantee, and both need an assertion or the boundary is only prose. Negative controls: a session with one attachment **never** needs a handle (else the rule turns the commonest shape into two commands); a handle naming a profile this session is not attached to is **refused**, not silently attached. |
+| `test-profile-blindness` | fast + heavy | **P1, P2** | fast: `profile_changed` is **one-time** (one utterance per fingerprint, bare commands run afterwards), it fires on the **attachment set's fingerprint** rather than per command, and it is typed (`{code, was, now, handles}`); plus the wording of the `<system-reminder>` and its zero-spend delivery path (§3.8's layer ②); **plus the carrier itself**: a status override and a profile change both pending, and **both reaching the next prompt** (the negative control is today's single slot with its `break` on the first hit, which must drop one). heavy (headless chrome, 375×667): this leg is a **mutation**, not two fresh renders — render, then change only "what the agent last used" on the same session, and assert the chip flips neutral→amber with both names **without a full rebuild**; the negative control is a digest of `(v) => v \|\| ''` over an **object** (verified in node: two different objects both digest to `":[object Object]"`), which must go red. "Neutral when they agree, amber when they do not" as two fresh renders is **not** this leg, because both pass under that bug (this repository has paid for that table six times). |
+| `test-window-target` | heavy | **P9** | A real Xvfb + a real Xpra + a real GTK client: `list` shows only the windows we started, `snapshot` mints `@ref`s from the **real AT-SPI tree** (role/name/bounds all asserted present), `click @ref` changes that application's state through `do_action` (verified by the application's **own tree**, not by pixels), `click --at` **refuses with the probe result** when no injection backend exists, **`key` (a chord) likewise refuses with the probe result** when there is no injection backend (there is no tree road for it, so the verb is simply not possible in that column), **`click @ref` on a node that exposes no `Action` refuses rather than silently degrading to a coordinate click** (negative control: the same node still refuses even when an injection backend IS present — that rule is about the node, not about the column), `snapshot` additionally **reports its own interface census** for the walk it just did (how many nodes carried `Action` / `EditableText`) so §4.9's 66/503 and 6/43 can be re-checked on another desktop, the walk runs in a **bounded child** and a node that does not answer is reported as an unreadable subtree rather than stalling it, and the lease plus §4.3's three modes are the same object a tab uses. Every cell of the capability matrix is a **runtime probe** rather than a platform name, and the suite **prints** what it probed; **skips loudly, with evidence**, when `xpra`, `Xvfb` or AT-SPI is missing (2026-09-10 on this box: `Xvfb` present, `xpra` absent, AT-SPI present and reporting 9 applications). The numbers §4.9 admits it has not measured are produced here under a named budget. |
 | `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` and `'browser-profile-notice'` (§3.8) must each be declared AND used in the same change (§4.3.1). |
 | `test-architecture` | build | all | Tier edges: PURE imports nothing, SHARED never reaches up, the daemon bundle carries no orchestrator markers, `server.js` stays inside its size ratchet, and §44 — every settings category renders, so `browser.announceIdleHandback` and the rest reach a section a user can open. |
 | `test-session-schema` | fast | P1, P3 | Every new `session._field` (`_browserProfileId`, `_browserKey`, `_browserTargetId`, `_browserInput`) has an owner row. |
@@ -2042,7 +2249,7 @@ spread: 14 of 32 workflows converged in one round, 8 needed 3–6.
 | Phase | Content | Rounds (point) | Range | Days (point) | Ships value on its own? |
 |---|---|---|---|---|---|
 | **P0 — Zero interference** | `AGENT_BROWSER_SESSION` + `_NAMESPACE` + explicit `_IDLE_TIMEOUT_MS` at spawn (local + remote paths), **the §3.2.2 user-data-dir variant with its fallback ladder**, the `browserKey` continuity ladder (§3.2.1), version-floor probe with an honest "your agent-browser is too old for shared profiles" notice, the k = 1/4/12 resource measurement (§1.2, §12.10), one line in the tools intro, `docs/agent/browser-manual.md`, `test-browser-profiles` (env half, asserting the resolved dir), **plus the pin's env indirection (§3.2.5) — the per-session generated config or the re-pointed symlink — so a mid-session pin never needs a restart**. | **5** | 4–7 | 2.5 | **Yes — the whole of (1.b)'s "stop interfering" half.** |
-| **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`, **plus the attachment set and handle addressing (§3.7) + anti-default-blindness layers ① and ② (§3.8) — `attachments`/`new-child`/`--profile`, the two named refusals `profile_required` and `profile_changed`, the audit stream, and the zero-spend `pendingNotice`**, `test-browser-handles`, `test-profile-blindness` (the fast half). | **10** | 8–15 | 5 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics; **and for the first time one session may hold several at once**. |
+| **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`, **plus the attachment set and handle addressing (§3.7) + anti-default-blindness layers ① and ② (§3.8) — `attachments`/`new-child`/`--profile`, the two named refusals `profile_required` and `profile_changed`, the audit stream, and the zero-spend `pendingNotice` — including the small change that makes it a **queue** (typed `{kind,…}`, `renderNotice` dispatching on `kind`, a draining injection site instead of `break` on the first), because today's single slot would let this design's two producers overwrite each other and the status-override notice besides**, `test-browser-handles`, `test-profile-blindness` (the fast half). | **10** | 8–15 | 5 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics; **and for the first time one session may hold several at once**. |
 | **P2 — Live view** | `/api/browser/stream` bridge (+ backpressure), `browser-live` window type, multi-viewer fan-out, URL/tab/console panes, DPI-correct canvas, **the in-window profile switcher strip for a session with several attachments (§3.7) and the amber status-bar Browser chip (§3.8's layer ③, including its `LIVE_SESSION_FACTS` row and digest)**, `test-browser-live`, `test-profile-blindness` (the heavy half). | **7** | 6–10 | 3.5 | **Yes — (1.c) minus the hands.** |
 | **P3 — Takeover / handback** | Lease input holder, mode switcher, input forwarding, `browser_paused`, **the §4.3.1 spend wiring** (`'browser-handback'` in `SPEND_REASONS`, the ladder call, `browser.announceIdleHandback` default OFF, the `test-spend-paths` census staying green), idle handback, agent cursor, `--confirm-actions` cards. | **5** | 4–7 | 2.5 | Yes — completes (1.c). |
 | **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; `test-browser-providers` + `test-browser-backend`. | **9** | 7–13 | 4.5 | Yes — (1.a), and the fleet story. |
@@ -2050,7 +2257,7 @@ spread: 14 of 32 workflows converged in one round, 8 needed 3–6.
 | **P6 — Hard mediation** | CDP-mediating proxy: target scoping + input refusal during takeover, per-session CDP URLs. **A stated precondition of `sharing: "instance"`** (§6.2), not merely an option if D6 says the cooperative lease is not enough. | **6** | 4–9 | 3 | Only as enforcement — but `sharing: "instance"` stays refused until it lands. |
 | **P7 — Window binding** | `layout`/`split`/`ratio` on the tab chain, the title-bar bind affordance + the left/right title-bar drop zone, the born-into-a-chain `createWindow` path, the divider (per-drag controller, rAF, one coordinate conversion), the ownership badge from `leases`, the layouts persist + **the sync-key fix**, mobile tabs-only without write-back, **the per-pane owner badge on the switcher strip's tabs (§3.7)**, `test-window-binding`. | **6** | 5–9 | 3 | Yes — an agent-driven browser stops losing its owner. **Needs P2** (there must be a live view to bind); independent of P3–P6. |
 | **P8 — Native client windows** | The Xpra rung (§4.7): a keeper under §3.5's ceiling and runaway guard, `GET /api/xpra/stream` in the `/api/vnc` shape, the client half per D21, the 200 ms / 1 Mbps measurement, and per-app routing (WhatsApp → the web version in a profile; WeChat → the native client, only after the web version is tried). Then the §4.8 adapter for whichever app the owner names, feeding the existing Communication-Channels ladder with its own `source` tag and a declared `'chat-inbound'` spend reason. `test-native-window`. | **7** | 5–11 | 3.5 | Yes — but it is the least verified phase in the document and its range says so. Independent of every other phase except §4.2's bridge shape. |
-| **P9 — Window targets** | §4.9's window targets: `src/window-targets.js` (SHARED: enumeration / the AT-SPI snapshot and `@ref` minting / the **runtime-probed** input-backend ladder), `data/bin/vibespace-window` + its manual (§5.1.1), the `window-live` pane reusing §4.7's bridge, the lease and three modes shared with tabs, and §6.6's two-class boundary plus its audit line. **The first task is to measure three things**: whether the portal is usable at all from a `systemd --user` background context, AT-SPI's coverage on Qt/Electron, and the end-to-end latency from one `do_action` to a visible change. `test-window-target`. | **8** | 6–13 | 4 | Yes — for the first time an agent can operate an application that is not a browser. **Needs P8's transport** (Xvfb+Xpra) and P2's bridge shape; independent of P3–P7. |
+| **P9 — Window targets** | §4.9's window targets: `src/window-targets.js` (SHARED: enumeration / the AT-SPI snapshot and `@ref` minting / the **runtime-probed** input-backend ladder), `data/bin/vibespace-window` + its manual (§5.1.1), the `window-live` pane reusing §4.7's bridge, the lease and three modes shared with tabs, and §6.6's two-class boundary plus its audit line. **The first task is to measure four things**: whether the portal is usable at all from a `systemd --user` background context, AT-SPI's coverage on Qt/Electron, the end-to-end latency from one `do_action` to a visible change, and **which AT-SPI binding the node side uses and what it costs per node** (every figure in this round was taken through `python3` + GI, i.e. through `libatspi` and its cache; a direct node D-Bus client has no such cache and a spawned GI helper pays §1.6's fork tax — both need re-measuring, §12.33). **The walk itself runs in a bounded child/worker** (per-call timeout, whole-walk node budget), never on the server's or the daemon's event loop — one D-Bus round trip per node, and an application that stops answering blocks until libdbus's 25 s default. `test-window-target`. | **8** | 6–13 | 4 | Yes — for the first time an agent can operate an application that is not a browser. **Needs P8's transport** (Xvfb+Xpra) and P2's bridge shape; independent of P3–P7. |
 
 **Totals, published as the range rather than the point** (round 1 published only the point
 estimate of a range whose top its own risk paragraph pointed at):
@@ -2117,12 +2324,12 @@ their ranges say how little is known about them.
 | **D20** | **Do we build a WeChat local-store adapter?** (§4.8 — SQLCipher via WCDB, key in process memory; on this box `ptrace_scope` is `1`, so only an ancestor may read it.) | (a) no — picture via Xpra, data via the official Official-Account / Work-WeChat APIs; (b) yes, in core; (c) yes, but only in a plugin, with explicit consent, and only for a client VibeSpace started itself. | **(a), with (c) as the answer if the owner insists.** It is memory-scraping a proprietary client that breaks silently on every update, it crosses the ToS plainly, and the only way to make it technically work is to have VibeSpace start WeChat *so that* it can read its memory — a sentence that argues against itself as a default. If it is built, it is a plugin (D2's line for proprietary things with a legal face), never core. |
 | **D21** | **Xpra's client half: host upstream's HTML5 app, or render it ourselves?** (§4.7 — MPL-2.0 app vs `xpra-html5-client`, Apache-2.0, on npm.) | (a) host the upstream HTML5 client as static assets behind our auth; (b) render with the client library inside a VibeSpace window type; (c) (a) first as a proving slice, then (b). | **(c).** (a) is the fastest way to learn whether the transport is good enough at 200 ms / 1 Mbps, which is the open question — but §4.2's reasons for refusing to embed upstream's dashboard apply here too (a whole app with its own controls inside ours, plus a known iframe `sessionStorage` restriction), so it is a proving slice and not the product. The window this design already specifies (§4.4: DPI-correct canvas, escaped titles, theme vars) is the shape (b) lands in. |
 | **D22** | **When a session has ≥2 attachments, is the handle mandatory?** (§3.7 — "one session, one browser" is an implicit quantifier today.) | (a) mandatory: a bare command gets a named refusal listing every handle; (b) fall through to the default silently; (c) mandatory only for state-changing verbs, reads take the default. | **(a).** (b) is the machine that produces Q8's pain: a silent default resolution is the **only** way "the agent did the whole thing in the wrong profile" happens. (c) sounds gentler and is worse — it lands a `snapshot` and the `click` after it in **different** browsers, a failure shape no reader would ever imagine. The cost is 18 characters per command, and only on the sessions that really do hold several browsers. |
-| **D23** | **What does a sub-agent get by default?** (§3.7 — VibeSpace does not spawn sub-agents, so we cannot hand them an environment.) | (a) its own ephemeral browser, minted as a child handle by `new-child`; (b) inherit the parent's default attachment; (c) nothing until the parent hands it a handle explicitly. | **(a).** The commonest use of a sub-agent is "go look this up", and putting it inside the parent's logged-in identity is the larger grant; the child lease hangs off the parent by prefix so the parent's teardown reaps it (§3.4). **But state honestly that (b) is today's physics**: a claude sub-agent shares its parent's process and environment, so "default (a)" is achieved by the sub-agent **calling the CLI once**, not by environment isolation — a sub-agent that never calls `new-child` is in fact in (b). The manual must say that in its first paragraph. |
+| **D23** | **What does a sub-agent get by default?** (§3.7 — VibeSpace does not spawn sub-agents, so we cannot hand them an environment.) | (a) its own ephemeral browser, minted as a child handle by `new-child`; (b) inherit the parent's default attachment; (c) nothing until the parent hands it a handle explicitly. | **(a).** The commonest use of a sub-agent is "go look this up", and putting it inside the parent's logged-in identity is the larger grant; the child lease hangs off the parent by prefix so the parent's teardown reaps it (§3.4). **But state honestly that (b) is today's physics**: a claude sub-agent shares its parent's process and environment, so "default (a)" is achieved by the sub-agent **calling the CLI once**, not by environment isolation — a sub-agent that never calls `new-child` is in fact in (b). The manual must say that in its first paragraph, and §3.7's exactly-one cell now says it **too** — it previously read "this is the default, and it is right", which blessed the very grant this decision argues against. One residual follows (§12.25): a sub-agent that never calls `new-child` acts inside the parent's logged-in identity, and **nothing in the product can currently detect or prevent it** — the server can see that a sidechain is open (`session._subNormalizers`), which is enough for a diagnostic aside on the refusal but not enough to be the refusal's **reason**. |
 | **D24** | **How do a session's N browsers appear in the live view?** (§3.7.) | (a) one bound pane plus an in-window profile switcher strip (one owner badge per tab); (b) N side-by-side panes; (c) N separate windows. | **(a).** (b) is already refused by the measurement behind D19 — three panes are unusable at the width most people run, and here the third would halve it again. (c) throws away the very thing §4.6 exists for (an agent-driven browser must not lose its owner): three free windows, one user, and nobody knows which belongs to whom. The strip also gives something neither (b) nor (c) does: it **is** the list of "which browsers does my session have", which is Q7's question itself. |
 | **D25** | **After the attachment set changes, is `profile_changed` a one-time refusal or a hint?** (§3.8's layer ①.) | (a) refuse once: the next bare command does not run and must be re-issued with a handle, after which the new default applies; (b) attach a line to the answer and let the command run; (c) hint on every command until the agent acknowledges explicitly. | **(a).** A hint stuffed into stdout only **hopes** the model reads it, and "it did not notice" is the entire reason this feature exists. (c) turns one mid-session pin into double the cost for every remaining command in the session. (a) costs exactly one round trip and buys a **structural** guarantee: the command that would have landed in the old profile did not run. |
 | **D26** | **Does the amber chip's "remind it" spend a billed turn?** (§3.8's layer ③, the same class as D11/D16.) | (a) no — write `pendingNotice` and wait for the user's next message; (b) go through the delivery ladder under its own declared reason, because the click is an owner action; (c) push automatically whenever the session is stopped. | **(b), while (a) is what actually happens when the session is alive.** The chip turns amber exactly when "the agent is running, and on the wrong profile", and there `pendingNotice` suffices (the user is right there). Only a **stopped** session that the user clicks the button for needs a turn to wake it — that is a click with a per-occurrence owner action, exactly the thing CLAUDE.md's category excludes, but it still opens a billed turn, so it still passes the same ladder and the same ceiling under the declared reason `'browser-profile-notice'`. (c) is explicitly refused: that is a timed push with no owner action at all. |
 | **D27** | **Which windows may a window target address?** (§4.9 — measured here: X11 enumeration cannot see Wayland clients, and GNOME's Introspect answers AccessDenied to us.) | (a) only the ones **we started** (applications under Xvfb+Xpra); (b) plus windows on the user's real desktop, behind an explicit switch; (c) neither. | **(a) first, with (b) as an explicit switch carrying its own consent.** Column (a) is green throughout §4.9's matrix, needs nobody's permission, and is the whole of the "an agent works in a native application" use case — the window the user is typing in right now is not in that use case. Every (b) row must be marked "this is your desktop", and its real barrier is not technical but §6.6's: a click there is a click in the user's real session. |
-| **D28** | **Is a window target's PRIMARY observation channel the accessibility tree or pixels?** (§4.9 — measured here: AT-SPI available, 9 applications, ~1,800–6,100 nodes/s.) | (a) tree primary, pixels fallback; (b) pixels primary, tree as a hint; (c) pixels only (which is what Anthropic's computer use is). | **(a).** Not a preference — it is the rule this document has already written twice: talking to a tree beats talking to pixels (§4.7's conclusion, and Codex's own browser panel in §4.1). It also has two properties only (a) has: `Action.do_action` means **acting** needs no input injection either (so Wayland's "no global injection" does not reach it), and an audit line can record "clicked the button named Minimize" instead of "clicked (412, 88)". (c) is the cell we **must** be able to degrade to (custom-drawn controls, canvases, images), so it is the fallback rather than the road. |
+| **D28** | **Is a window target's PRIMARY observation channel the accessibility tree or pixels?** (§4.9 — measured here: AT-SPI available, 9 applications, ~1,800–6,100 nodes/s.) | (a) tree primary, pixels fallback; (b) pixels primary, tree as a hint; (c) pixels only (which is what Anthropic's computer use is). | **(a).** Not a preference — it is the rule this document has already written twice: talking to a tree beats talking to pixels (§4.7's conclusion, and Codex's own browser panel in §4.1). It also has two properties only (a) has: `Action.do_action` means **acting** needs no input injection either (so Wayland's "no global injection" does not reach it), and an audit line can record "clicked the button named Minimize" instead of "clicked (412, 88)". **But that first property must be stated at its measured scope**: `do_action` removes the need for injection only **for the subset of nodes that declare an action** (measured 2026-09-10: 66 of 503 nodes, and 6 of 43 `button` nodes), while `type` has its own condition (`EditableText`, 33/503) and `key` (a chord) has **no road on the tree at all**. So this decision is unconditional about the **observation** channel ("tree primary"); the action half splits into four answers per verb, written into §4.9's matrix and §5.1.1's capability table. (c) is the cell we **must** be able to degrade to (custom-drawn controls, canvases, images), so it is the fallback rather than the road. |
 | **D29** | **Which road does input injection take on Wayland?** (§4.9 — the portal's RemoteDesktop interface is present here, `libei`/`libeis` 1.3.901 installed, `/dev/uinput` is 0600 with the module not loaded.) | (a) the RemoteDesktop portal (`ConnectToEIS` preferred), with `persist_mode=2` + `restore_token` remembering the grant; (b) ydotool/uinput, requiring ops to open up `/dev/uinput`; (c) neither — support only X11/Xwayland and our own nested X. | **(a), with (c) as the status quo until it is proven to work.** (b) is explicitly not recommended: it asks for a device node that can synthesise global input to be handed to this uid, a far larger grant than the feature itself, and it bypasses every consent mechanism the compositor has. (a) has a precondition that must be measured first — **our server runs under `systemd --user`**, and public reports record portal/D-Bus being denied in background contexts (§12). So P9's first task is to measure it; if it fails we land on (c), and (c) plus D28's `do_action` still covers a substantial share of actions. |
 | **D30** | **Do we build window targets on a paired Mac?** (§4.9, §7.3 — macOS's two TCC gates.) | (a) no — the fleet story stays browser-only (§7.3 already decided this); (b) yes, through an agentd op using ScreenCaptureKit + AXUIElement. | **(a), with the reason written down rather than left blank.** Neither gate is "show one dialog": Accessibility requires the process to be **non-sandboxed and signed**, and Screen Recording on macOS 26 (Tahoe) is publicly reported to **require an app bundle** — a plain executable does not even appear in System Settings' privacy list, so it can neither be granted nor be granted-to (a computer-use project's public issue from 2026-01 records exactly this shape: windows missing from screenshots while ScreenCaptureKit returns a TCC error even with permission in the database). And VibeSpace's form on a paired machine is precisely a plain executable started by a daemon. So the first step of (b) is not code, it is answering "do we ship a signed app bundle on macOS" — a product decision, not this section's. |
 
@@ -2258,7 +2465,12 @@ Added in round 5, all of them consequences of this round's own three questions:
     is a thread its app-server owns, and a Background Work job goes through `jobEnv({…})` at
     `src/jobs.js:375` — all three are readings. D23's "default (a)" rests on the first, so P1 must
     actually spawn a sub-agent, run `vibespace-browser status` inside it, and check that the
-    `AGENT_BROWSER_SESSION` it reports is the parent's.
+    `AGENT_BROWSER_SESSION` it reports is the parent's. **And whatever that measurement says, one
+    residual holds today**: a sub-agent that never calls `new-child` acts inside the parent's
+    logged-in identity, and nothing in the product can detect or prevent it — the env and token the
+    CLI receives are byte-identical to the parent's. The server can see that a sidechain is open
+    (`session._subNormalizers`), which is enough for a diagnostic aside on the refusal (§3.7), but
+    that aside carries the 60-second reap-grace race, so it is never the refusal's reason.
 26. **The resource envelope of k browsers running at once, in the plural.** §1.2's per-instance
     numbers were taken on four **idle headless** leaks; this round only re-measured the capacity
     side (**2026-09-10: 80 of 128 inotify instances already held, 48 free**). There is not one
@@ -2285,12 +2497,43 @@ Added in round 5, all of them consequences of this round's own three questions:
     client, and `toolkit-accessibility` is `false` here (AT-SPI works anyway — which itself shows
     that switch is not a master switch, but what it means for other toolkits I did not test).
     §4.9's conclusion that the accessibility tree is the primary channel is **measured** for GTK and
-    **inferred** for Qt/Electron.
+    **inferred** for Qt/Electron. **And even on GTK, that conclusion's honest bound is a ratio
+    rather than a "yes"**: walking all nine applications at 400 nodes each — 503 nodes — gives
+    `Action` on 66 and `EditableText` on 33, while only **6 of 43 `button` nodes** expose `Action`;
+    a breadth-first walk to a flat 600-node budget gives `Action` 52/600. These are numbers about
+    **this desktop at this moment**, not a constant about GTK — which is why
+    `test-window-target`'s `snapshot` leg reports its own interface census, so it can be re-checked
+    on another desktop.
 31. **The current shape of macOS's two TCC gates.** Accessibility requiring non-sandboxed + signed,
     and Screen Recording on Tahoe requiring an app bundle, both come from public documentation and
     a public issue from 2026-01 — **not from my own measurement on a Mac** (this box is Linux).
     D30's "no" therefore rests on second-hand evidence; if the owner wants to push (b), the first
     step is re-checking both on a real Mac.
+
+Added in round 6, both of them consequences of this round's own changes:
+
+32. **"A direct `agent-browser` command cannot reach a non-default attachment" is reasoning from
+    construction, not a measurement.** §3.7's containment rests on the config in the session's env
+    (variant D) or the symlink (variant C) naming only the default attachment's user-data-dir, with
+    no other directory ever printed. That depends on `agent-browser`'s own configuration precedence
+    behaving **exactly** as the documentation quoted in §1.1 describes — and §12.12 already lists
+    `AGENT_BROWSER_CONFIG`'s exact semantics as unverified (whether "instead of the defaults"
+    replaces the project-level file too, whether `extensions` still merge, is documented
+    ambiguously). So P0 measures this alongside its commitment to variant D: stand up two
+    attachments, run one direct command with the session's own env, and confirm the directory it
+    resolves to is **exactly** the default one. If the precedence is not that, this half of the
+    containment does not exist and I6 needs narrowing a second time — which is also why it is now
+    worded "a command through our CLI" rather than "a command".
+33. **Which AT-SPI binding the node side uses, and what it costs per node.** Every AT-SPI figure in
+    this round (9 applications, ~1,800–6,100 nodes/s, 66/503, 6/43) was taken through `python3` +
+    GObject introspection, i.e. through `libatspi`, and AT-SPI's D-Bus design names **caching** as
+    one of its own design points. So those speed figures hold **for that road only**: speaking
+    D-Bus from node directly (a generic client such as `dbus-next`) gets no such cache and the real
+    per-node round-trip cost must be re-measured, while spawning a GI helper pays the fork tax §1.6
+    already measures. No maintained node-specific AT-SPI binding was found this round, but "not
+    found" is not "does not exist" (this repository has paid for that class of claim), so this is
+    written as an input P9 must look up and measure rather than a question that already has an
+    answer.
 
 ---
 
@@ -2586,3 +2829,79 @@ with zero unparsed emphasis outside code fences.
 did not change any decision's recommendation, did not move a phase's round count (finding 6 only
 made the bounding sentence cite its own table), and did not soften any "what I could not verify"
 entry — that list grew from 22 to 23.
+
+---
+
+## Appendix D — critique log (round 6)
+
+An adversarial critic read round 5's revision and filed six findings. **All six are upheld**, each
+checked against the source before anything was changed; what follows is the command that was run and
+the answer it gave, because "verified" is a claim about what was run and not a feeling about a diff.
+None was judged wrong, so this round has no rejected entry.
+
+| # | Severity | Finding | Verdict | Where it landed |
+|---|---|---|---|---|
+| 1 | high | The anti-default-blindness mechanism lives entirely in `vibespace-browser`, while the design's **own default path is a direct `agent-browser` call** — so with ≥2 attachments a bare direct command silently resolves to the default, which is verbatim the failure Q8 names and the invariant I6 forbids | **UPHELD** | §2's I6 narrowed, §3.7 gains a row + both halves (the structural containment / the admitted residual), §3.8 layer ①'s header, §5.1, §9 `test-browser-handles`, §12.32 |
+| 2 | high | The capability law is enforced for one verb (`click --at`), while two of the four action verbs have **no tree road at all**: `key` (a chord) has no AT-SPI primitive, and `click @ref` works only on nodes that DECLARE an action — measured, 52 of 600 nodes | **UPHELD** (re-measured here, and the finding gets stronger) | §4.9's action row split into **four**, a new coverage paragraph, §5.1.1's capability table, D28 narrowed, §9 `test-window-target`, §12.30 |
+| 3 | medium | §3.7's sub-agent row contradicts D23 (the row blesses what D23 argues against), and it promises a refusal clause conditioned on a fact the section has just proved nothing can observe | **UPHELD** | §3.7's row rewritten + a new paragraph on the mechanism that could say it, D23, §12.25 |
+| 4 | medium | "Zero new mechanism" is false: `pendingNotice` is a **single** typed slot with one hardcoded renderer whose sole consumer stops at the first hit, so two notices eat each other | **UPHELD** | §3.8 layer ② rewritten, §3.2.5 path 3, §10 P1's content line, §9 `test-profile-blindness` (fast) |
+| 5 | medium | The prescribed `LIVE_SESSION_FACTS` row cannot carry the two values the chip compares; and if the value is the obvious object, the digest is a constant — the exact failure that paragraph invokes | **UPHELD** | §3.8 layer ③ rewritten (two scalars or a projecting digest, plus the general rule), §5.3, §9 `test-profile-blindness` (heavy, now a mutation leg) |
+| 6 | low | The AT-SPI walk is placed in a **SHARED** module (which the daemon bundles) with no statement that it runs out-of-process or bounded; and every figure in this round was taken through a binding the design never names | **UPHELD** | §4.9 gains two paragraphs (bounded child / the binding decision), §3.6's routing row, §10 P9, §12.33 |
+
+**Verification notes.**
+
+* **Finding 1.** §3.2 says verbatim "no process of ours, no route, no daemon"; §5.2's first bullet
+  says verbatim "an agent that never reads a word gets isolation from §3.2"; and §5.1 scopes the
+  wrapper form to a subset of verbs (`close` / `close --all` / `connect` / `get cdp-url` plus the
+  lease check) — the three sentences together mean `snapshot`/`fill`/`click` run as plain
+  `agent-browser`. §1.4 records that `--session` and `--profile` are both per-invocation flags, and
+  §3.2.5's path 1 records that "an already-spawned shell's environment is immutable". So layer ①
+  cannot reach the direct path, and the hole is structural. This round splits it: the half that can
+  be closed is closed (a non-default attachment's directory is minted by the server and never
+  printed), and the remainder is admitted together with a narrowed I6 — an invariant that does not
+  hold on the default path is a false sentence on the day it ships.
+* **Finding 2.** Re-measured this round, and the numbers came out **stronger** than the critic's.
+  The critic's `Component` 599 / `Action` 52 / `EditableText` 52 / `Text` 52 over a flat 600-node
+  budget was **reproduced verbatim**. Re-walking per application at 400 nodes each (503 nodes over
+  nine apps) gives `Component` 494 / `Action` **66** / `EditableText` **33** — and split by role,
+  **only 6 of 43 `button` nodes expose `Action`**, i.e. the role an agent most wants to click is
+  where the tree road is most often absent; a further **32 of the 66 actions have the empty string
+  as their name**. The `key` half was checked too: `Atspi.generate_keyboard_event` and
+  `generate_mouse_event` both exist, but they are **registry-level** device-event generators (XTEST
+  on X11, i.e. injection), and the only key-related member of `Action` is `get_key_binding`, which
+  is a **read**. The `type` half does have a tree road: `EditableText.insert_text` /
+  `set_text_contents` (measured method names), conditional on the node exposing `EditableText`.
+* **Finding 3.** The row's "this is the default, and it is right" disagrees with both the paragraph
+  twelve lines below it and D23's recommendation; and `src/session-store.js:308`'s
+  `isSubagentMessage` plus `_subNormalizers` confirm the same-process sidechain, hence that the CLI
+  cannot tell callers apart. Rather than merely deleting the clause, this round adopts the mechanism
+  the critic proposed: `src/server/stdout/claude-stream-json.js:288` creates the map and `:1065`
+  reaps it after `task_notification` with a 60-second grace — so the server **does** know whether a
+  sidechain is open, which is enough for a diagnostic aside, while that same grace period is exactly
+  why it can never be the refusal's **reason**.
+* **Finding 4.** Three readings, all verbatim: `src/session-status.js:110/125/141` make
+  `pendingNotice` one slot of fixed shape `{agent, user, at}`; `:177–188`'s `renderNotice` is
+  hardcoded to the status-override sentence; and `src/agent-routes.js:563–566` loops over two keys,
+  consuming one and breaking. And this document already asks the same slot to carry a third producer
+  (§3.2.5's `'browser-pin'`), so the collision is not hypothetical even within this one document.
+* **Finding 5.** Verified in node: `(v) => v || ''` applied to `{active:'a',pinned:'b'}` and to
+  `{active:'x',pinned:'y'}` yields `":[object Object]"` in both cases through
+  `liveFactsDigestPart`'s `out += ':' + d(s[k])` (`src/lib/sidebar.js:96–103`) — byte-identical. The
+  critic's point about the gate is equally right and matters more: **"neutral when they agree, amber
+  when they do not" are two fresh renders and both pass under the bug**, so that leg becomes a
+  mutation (change one value, assert the chip flips with no full rebuild) with the object digest as
+  its negative control.
+* **Finding 6.** §0 cites the law and §4.2 applies it to reject CDP screencasting, while §4.9 got no
+  such treatment — although its own figures (one D-Bus round trip per node; 0.1–0.33 s for 600
+  nodes) plus an application that stops answering (libdbus's 25 s default timeout) are precisely the
+  shape of the outages the law was written from, and §3.6 lists `src/window-targets.js` as
+  **SHARED**, so the daemon would take the block too. The binding half is equally right: Appendix A's
+  own evidence line records that these figures were taken through `python3` + GI, which goes through
+  `libatspi` and its AT-SPI cache — so they **cannot** be carried over to a hand-rolled node D-Bus
+  client.
+
+**What round 6 deliberately did not do.** It did not launch a browser (§12.1's reason still holds),
+did not change any decision's recommendation (D23's and D28's **answers** are unchanged — what
+changed is that each is narrowed to the scope its measurements support), did not move any phase's
+round count (findings 2, 4 and 6 land inside the existing P1 and P9 content lines), and did not
+soften any "what I could not verify" entry — that list grew from 31 to 33.
