@@ -23,6 +23,20 @@ that cannot work), §4.3.1 is new (an announcement into a conversation is a bill
 design owes it a gate), §3.4 no longer claims the lease is a boundary, and §10 publishes a range
 instead of a point estimate.
 
+**Round 3 (2026-09-10)** answers four owner questions and folds each one into the architecture,
+the phases and the decisions rather than appending them: **Q1 session persistence UX** — how a
+user pins a session to a profile in one action, how that pin survives resume and fork, how a
+Task Group carries a default, and how a mid-session pin reaches a RUNNING agent without a restart
+(§3.2.5, D14–D16); **Q2 the live backend switch** — the mechanics of handing one user-data-dir to
+another binary, the one-way Chromium version ladder, what a changed fingerprint costs, the seat
+gate, and the fact that "this page is blocked" is a CLAIM the agent makes and never a detection we
+manufacture (§7.4, D17); **Q5 window binding** — tab groups gain a side-by-side layout so an
+agent-driven browser cannot lose its owner (§4.6, D18–D19); **Q6 native client windows** — how to
+render ONE native window over a poor link and, separately, whether an agent can read that client's
+messages at all (§4.7–§4.8, D20–D21). Two new phases (P7, P8) and four new suites carry them, the
+totals in §10 are re-derived, and §12 grew from 14 entries to 22 — §1's measurements are
+unchanged except where this round re-measured them on this box.
+
 ---
 
 ## 0. Thesis
@@ -413,6 +427,106 @@ nothing here either.
 cookie jar, and `--allowed-domains` available. An agent that needs to stay logged in must ask for
 a profile, and asking is how VibeSpace learns the profile exists.
 
+#### 3.2.5 The pin — how a session gets a persistent profile, and how that choice survives
+
+(Owner question Q1.) §3.2's default is **ephemeral**, and that is right: most browsing is "open it,
+read it, throw it away". One class of session is not — a session that logs into a vendor portal or
+holds a work account needs the **same** cookie jar every time. This section is about the fewest
+actions in which a user can say so, and about how that sentence survives resume, fork and restart.
+
+**This is a knob, and this repository already has the ladder for knobs.** `resumeSpawnPick` in
+`src/resume-continuity.js` answers exactly this shape: an **explicit** choice beats everything;
+with no explicit choice a **continuation** restores the conversation's own value; a **new** session
+takes the instance default; and the **origin** of the answer is stated rather than inferred. The
+profile pin uses that ladder verbatim:
+
+| Rung | Source of the fact | origin |
+|---|---|---|
+| The user's or agent's explicit choice **for this session** | `session-meta.browserProfileId` | `chosen` |
+| The profile this **conversation** last ran on (resume / restart) | the registry joined through `_sessionKeyMap` | `conversation` |
+| The default profile of this session's **Task Group** | `browserProfileId` in `task-groups.json` | `task-group` |
+| The instance default (setting `browser.defaultProfile`, empty by default) | settings | `instance` |
+| Nothing at all ⇒ ephemeral, §3.2.2's variant D | — | `harness` |
+
+`hasSource` is **always true** here, for the same reason it is for `browserKey`: this knob's source
+is not some harness's transcript, it is **our own registry**, which is readable by construction.
+
+**The Task-Group rung must not change `resumeSpawnPick`'s signature.** That is a PURE function
+serving every knob — model, effort, response-style — and adding a fifth rung to it makes every knob
+carry a concept only the profile needs. The move is the one this repository has already written:
+resolve "Task-Group default vs instance default" into one value **before** calling it, then refine
+`instance` into `task-group` in the shape of `applyOriginHint` — refine only, never upgrade, never
+touch the **value**.
+
+**A fork inherits the pin but not the key.** These are two different things: `browserKey` is
+**identity** (a fork is a new conversation and must not inherit another one's pinned tab, §3.2.1),
+while the profile pin is a **preference** ("this kind of work uses this login"), and the branch that
+forked off wanting it is exactly what a user means. So a fork mints a new `browserKey`, **copies**
+`browserProfileId`, and the log says both sentences.
+
+**UX: the pin has one entry point, and it appears on four surfaces that already exist.** They are
+not four implementations — they are one command (`session.pinBrowser`, registered in
+`contributions.js`'s command table) with four `registerMenuItem` registrations:
+
+* **Sidebar session-card right-click** — the `'session-card'` menu, group `3_admin`, next to
+  `session.switchBilling` (the same class of act: change an identity this session runs under). This
+  is the fast path: right-click → "Browser profile" → the list of existing profiles, with
+  **"New persistent profile from this session's browser…"** and **"Unpinned (ephemeral)"** on top.
+* **Session Properties** — a `Browser` section beside the `Billing` one: the current profile, its
+  **origin** (that column of the table above, spelled out: "your choice for this session" / "this
+  conversation's own value" / "Task-Group default" / "instance default"), the backend chip (§7.4),
+  the number of attached sessions, and the same picker. This is the **explaining** surface; the
+  right-click menu is the **acting** one.
+* **The live-view window's title bar** — the profile name *is* that window's title; clicking it
+  opens the same picker. A user watching the browser work wants to change **that** one.
+* **The New Session dialog** — one picker row, defaulting to the Task Group's default if this
+  session is bound to one. That row sends an **explicit** value, so the server can only read it as
+  `chosen`; the client therefore sends the origin it computed alongside it as `spawnOriginHint`,
+  exactly as it does for model and effort (B-6b6d r3: what the client filled in on the user's behalf
+  must say on the wire that it did).
+
+**"New persistent profile from this session's current browser"** is the first item in that menu, and
+what it does has a name: **adopt**. Under variant C that is a **move** of the `browserKey`-named
+scratch directory under `data/` to `~/.agent-browser/vs-bp-<id>` plus a registry record — the login
+that exists right now is kept in place. Under variant D **there is no directory to adopt** (that is
+the whole point of D), so D's honest form of that item is "create an empty persistent profile and
+**reopen** this browser", and the menu must say so rather than let the user believe the login they
+just completed was saved. This is another instance of §7.1's capability law: a control that cannot
+work is disabled with a reason instead of failing at use time.
+
+**A mid-session pin must reach a RUNNING agent, and must not restart it.** Three paths, each with
+its honest boundary:
+
+1. **The environment variable cannot get there.** An already-spawned shell's environment is
+   immutable. So we do not change it — we change **what it points at**: under variant D
+   `AGENT_BROWSER_CONFIG` names a file, and for a pinned session that file becomes **per session**
+   (named by `browserKey`), so a pin is one `writeJsonAtomic`; under variant C
+   `AGENT_BROWSER_PROFILE` names a **symlink**, and re-pointing a symlink (symlink-to-temp + rename)
+   is exactly what `repointPoolSymlink` in `src/account-material.js` already does — borrowed
+   verbatim, never written a second time. **Its failure mode is inherited verbatim too: re-pointing
+   does nothing to a browser that is already running.** The account-pool lesson is "a re-point takes
+   effect on the CLI's **next** request"; here it is "on the **next browser launch**". So pinning a
+   session that holds a live browser either waits for the keeper to collect that browser when it
+   goes idle, or says plainly "the new profile applies from the next browser" — and which sentence
+   the UI shows depends on whether a lease exists right now, which is a **fact that can be looked
+   up**, not a guess.
+2. **The agent asks.** `vibespace-browser status` prints the current profile, its origin and the
+   lease. That is the pull half: always available, free.
+3. **Push it, and by default spend nothing.** A pin is a **user action**, which means the user is
+   sitting there typing — so it rides the `pendingNotice` channel `src/session-status.js` already
+   owns: a `<system-reminder>` appended to the user's **next** message. Zero billed turns, zero new
+   mechanism. Only when the session is **idle** and the user explicitly asks does it go through
+   §4.3.1's delivery ladder (a new declared reason `'browser-pin'`, added to `SPEND_REASONS` in the
+   same change as its producer), setting `browser.announcePin`, default **OFF**. This is the same
+   rule as §4.3.1's "three moments, three answers" table, applied to a fourth moment.
+
+**The Task-Group default (a 岗位 carrying a default profile for all its sessions)** is one field on
+`task-groups.json` and one picker row in task-detail, beside `contextDir` and `externalVisibility`.
+It is simply the third rung above: it **never** beats a session's own explicit choice, and never
+beats the conversation's own history. Binding or unbinding a Task Group does **not** rewrite the pin
+of a session already running — a default is where a new session starts, not a retroactive edit of
+existing ones.
+
 ### 3.3 The profile registry
 
 `data/browser-profiles.json`, written through `writeJsonAtomic` (tmp+rename) and flushed on
@@ -434,10 +548,14 @@ open client updates live — the multi-client law.
     "owner": { "kind": "task|session|instance", "id": "…" },
     "sharing": "owner",                     // owner | instance (§6.2)
     "record": false,                        // per-profile screencast opt-in
+    "lastChromiumMajor": null,              // §7.4's version ladder — the highest major that has written `dir`
+    "lastBackend": null,                    // which provider wrote it last (forensics beside the major)
     "createdAt": 0, "lastUsedAt": 0, "notes": ""
   }],
   "leases": [{ "profileId": "…", "browserKey": "bk-…", "sessionId": "…", "targetId": "…",
-               "since": 0, "input": "agent", "viewers": 0 }]
+               "since": 0, "input": "agent", "viewers": 0 }],
+  "siteHints": [{ "host": "portal.example", "backend": "cloak",
+                  "by": "agent", "at": 0, "why": "…" }]   // §7.4 — a CLAIM, with who made it
 }
 ```
 
@@ -450,6 +568,11 @@ Three rules about this file:
 
 * **It is a registry, not a copy.** Cookies, storage and fingerprint material stay in the
   browser's own directory. Moving 98 GB is not a migration, it is an outage.
+* **`provider` IS the backend, and §7.4 changes that field.** There is deliberately no second
+  `backend` key: one question, one answer — the rule this document applies to `browserKey` and to
+  the reading slot applies here too. `lastChromiumMajor` is a *different* question ("what has
+  written these bytes") and is the one fact §7.4's version ladder may not take from the directory
+  alone.
 * **`id` is minted, `label` is free text.** The label never reaches a path, an argv, or a
   spawned command — the display-strings-never-reach-a-spawn law (a host-labelled cwd once did,
   which is why the law exists).
@@ -540,6 +663,9 @@ we should inherit rather than re-earn:
 | Keeper, routes, the WS bridge, access layer (`hostId` is a parameter) | `src/server/browser-keeper.js`, `browser-routes.js`, `browser-access.js` | **ORCH** | `test-browser-live` (heavy, real binary) |
 | Live view window, profiles panel | `src/lib/browser-live-window.js` (+ `registerWindowType`) | **CLIENT** | headless-chrome leg |
 | Agent CLI + manual | `data/bin/vibespace-browser`, `docs/agent/browser-manual.md`, `AGENT_TOOLS` | agent surface | `test-browser-cli` |
+| The pin ladder (§3.2.5) + the backend-switch decision and its version ladder (§7.4) | `src/browser-profiles.js` (PURE half) + `src/server/browser-backend.js` (ORCH: stop / restart / re-open the leases) | **PURE + ORCH** | `test-browser-pin` (fast) + `test-browser-backend` (fast decision, heavy switch) |
+| Split tab groups (§4.6): `layout`/`split` on the chain, the divider, the born-into-a-chain path | `src/lib/tab-group.js`, `src/lib/layout.js` (persist + sync key) | **CLIENT** | `test-window-binding` (headless chrome) |
+| Native-window forwarding (§4.7) + the chat adapters (§4.8) | `src/xpra-serve.js` (SHARED facts) + `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` | **SHARED + ORCH** | `test-native-window` (heavy) |
 
 `hostId` is a parameter, never a branch: `browser-access.js` picks the transport (local keeper /
 `browser-serve` device op / ssh) and nothing downstream asks "is this remote?" again — the same
@@ -728,6 +854,239 @@ already holds in memory and write one JPEG per agent action as a transcript thum
 
 ---
 
+### 4.6 Window binding — one group, two panes side by side
+
+(Owner question Q5.) The live view is its own window (D9), and that is right — but a browser window
+an agent is driving **loses its owner** the moment somebody drags it away. The owner's proposal is
+to extend **tab groups** (`src/lib/tab-group.js`) so a group can show two tabs side by side while
+still being **one** group. This section is the data model, the interaction, the lifecycle, and why
+it needs almost no new geometry code.
+
+**Why this is nearly free: the DOM is already the right shape.** The chain model is
+`chain = { tabs: [hostId, ...guestIds], active }`, the host owns the physical `.window` element, and
+**every guest's `content` element is already appended into the host's element**, with the
+`.tab-hidden` class deciding which one is visible (`restoreTabChain` does exactly this, line by
+line). So "two tabs side by side" is, at the DOM level, **not adding `.tab-hidden` to two of them**,
+putting them in a flex row, and drawing a divider between. The window's **external** geometry does
+not change at all.
+
+**Data model: the chain gains two fields; `tabs` and `active` do not change by a byte.**
+
+```jsonc
+chain = {
+  tabs: ['win-1', 'win-2', 'win-3'],   // unchanged: tabs[0] is the host
+  active: 0,                            // unchanged: in split, = the focused pane
+  layout: 'tabs',                       // NEW: 'tabs' | 'split'; a missing field reads as 'tabs'
+  split: { pair: ['win-1','win-2'], ratio: 0.5, dir: 'row' }   // NEW: meaningful only when layout==='split'
+}
+```
+
+`tabs` and `active` keep their meanings because **every existing code path reads them** —
+`switchTab`, `_detachFromChain`, `_renderTabBar`, the focus handover in `removeFromTabChain`, the
+layouts persistence, the multi-client sync. A split is **another rendering mode of the same chain**,
+not a second kind of chain. A chain may perfectly well have five tabs with two of them paired: the
+rest stay in the tab bar, and what clicking one of them does is an owner decision (D19).
+
+**Persistence goes through the one choke point that already exists.** `layout.js` already writes
+`winState.tabChain = { tabs, active }` plus `isTabGuest` into layouts and restores through
+`restoreTabChain(validTabs, active)`; the two new fields ride along, and the write still goes
+through `writeLayouts` — the one choke point every layout write passes through, and where the layout
+rollback points hang. **A missing field is `'tabs'`**, so old records need no migration.
+
+**Multi-client sync has a real trap, and it is named now.** `layout.js` keys remote-vs-local chains
+by `rw.tabChain.tabs.join(',')`. **That key does not carry the layout.** So a remote client flipping
+the same set of tabs from tabs to split reads locally as "this chain has not changed" and nothing
+happens — a silent state fork, exactly the class this repository keeps hitting. The key must become
+`tabs.join(',') + '|' + layout + '|' + (split ? a quantised ratio : '')`, or the comparison must
+compare those two fields explicitly. This one owes an assertion that can go red, not a comment.
+
+**gridBounds needs no change at all.** `_syncChainBounds` copies the host's `gridBounds` to every
+guest; a split chain is still **one** rectangle from the outside, and the ratio only divides it
+inside. So the proportional grid tracking, snap, desktop switching and minimise all keep working —
+which is the whole reason "extend tab groups" beats "invent a new two-window container".
+
+**The divider drag follows this repository's three existing laws:** a **per-drag**
+`AbortController` (never a per-render one — that tears itself down mid-drag), rAF-coalesced
+mousemove, and **one coordinate conversion**: `uiScale`'s body zoom scales rects and `clientX` but
+not `clientWidth`, so the ratio must be computed in one kind of pixel (layout px) — the same law as
+the VNC pointer incident and as §4.4's canvas. The ratio is clamped to `[0.15, 0.85]`, and
+**double-clicking the divider returns it to 0.5**.
+
+**Interaction:**
+
+* **The bind affordance** lives on the live-view window's title bar (a "snap beside <session name>"
+  button). Clicking it merges this window into the chain that holds that session's chat window, sets
+  `layout` to `'split'` and `pair` to those two. The existing drag-icon-onto-icon merge keeps
+  working and produces `'tabs'`; **dropping on the left or right half of the title bar** produces
+  `'split'` (matching the window manager's existing snap feel), and that is the one new drop zone.
+* **Auto-bind**: setting `browser.autoBindLiveView` (default **ON**). When a session's browser
+  starts and its chat window is open, the live view is **born inside that chain** rather than
+  created-then-merged — the latter produces a visible jump plus a layout-autosave churn. This
+  requires `createWindow` to accept "born into this chain", which is the one piece of genuinely new
+  window-manager code in this phase.
+* **Detach at any time**: drag either pane out of the tab bar, or use "unbind" on the title bar, and
+  you are back to two free windows — through the `_detachFromChain` that already exists.
+* **Moves, minimises and desktop switches happen together**, because they are one window. That is
+  precisely the property the owner asked for.
+
+**Lifecycle: when the agent session ends or the browser closes, the pane collapses and the group
+stays.** The chain is never dissolved — dissolving it would move the user's **chat** window, which
+they never asked for. So when the browser pane goes away, `layout` returns to `'tabs'` and the
+remaining tabs are unchanged; if only one is left, the existing `_ungroupLast` runs. In the other
+direction, when the **chat** side ends (the session is terminated) nothing moves: a dead session's
+history is still readable, and the browser may still belong to somebody else.
+
+**The ownership badge.** The browser tab carries the session's colour and name — the colour is the
+one the session card already uses (`task-color-seq.js`'s sequence), so "this browser belongs to that
+session" holds at a glance. **A profile used by several sessions shows all of its owners**: the
+badge becomes N dots, listed one per line in the title, sourced from §3.3's `leases` ("who is
+attached" is already a recorded fact; this only draws it). That is also this design's
+**visibility** answer to (1.b)'s "one profile driven by several sessions" half.
+
+* **Mobile = tabs only.** Split is meaningless at ≤768px, so `mobile-nav.js` renders a split chain
+  as tabs. But one rule has to be written down: **a mobile client never writes its own flattening
+  back to layouts.json** — otherwise somebody glancing at their phone destroys the split on the
+  desktop. This is the same class as the four anti-ping-pong guards in multi-client layout sync, and
+  it is implemented as: on mobile, preserve the remote `layout` / `split` fields verbatim when
+  syncing layouts.
+
+### 4.7 Native client windows — rendering one window, not a whole desktop
+
+(Owner question Q6.) A chat tool like WeChat has a native Linux client; WhatsApp does not. The
+question is how to put **one** native window inside VibeSpace's browser UI over a **poor network**
+(target: typing still usable at 200 ms RTT / 1 Mbps).
+
+**One conclusion belongs first, because it re-orders the whole table: at 200 ms RTT no remote-pixel
+protocol gives comfortable typing.** Every keystroke echoes at least one RTT, because in this
+deployment the client and the VibeSpace server run on the **same machine** with the user at the
+other end, so **no path here can do local echo** — including the "run the web version" one. What
+differs is not whether it works but **how it degrades**: whether bandwidth follows **one window** or
+**a whole desktop**, and whether the protocol drops quality under high latency instead of queueing.
+The industry's own rule of thumb for remote desktops says the same thing: latency beats bandwidth.
+
+So the real recommendation is an **architectural** one rather than a protocol one: **a path where
+the agent talks to a protocol or a DOM always beats one where it talks to pixels.** For a web chat
+tool the agent drives CDP and the picture is only for the human; for a native client the picture
+**is** the only interface for both — which makes native clients structurally worse for agents, not
+merely slower.
+
+| Path | What it is | Rank on a poor link | Verdict |
+|---|---|---|---|
+| **(v) Run its web version inside a profile of this design** | WhatsApp Web *is* a web app; it lives in a fingerprint profile and needs no native client at all | **1 (best)** | **First choice wherever a usable web version exists.** Zero new stack: §3's profiles, §4's live view and §7.4's backends all apply unchanged, and the agent drives CDP rather than pixels |
+| **(iii) Xpra seamless + the HTML5 client** | Per-**window** forwarding of X11 apps, adaptive encodings (webp / jpeg / h264 / vp8 / av1), WebSocket transport, runs headless under Xvfb / Xdummy | **2** | **First choice for a genuinely native client.** Bandwidth follows that **one** window instead of a desktop; MPL-2.0; http digest / scram auth and http origin validation since 6.6; current release 7.0 (2026-08-27) |
+| **(ii) KasmVNC / TigerVNC with adaptive encodings** | Still a whole desktop, but with a WebP / JPEG quality ladder and a video mode | 3 | A fallback. Better than today, but still paying a whole desktop's price for one window |
+| **(i) Today's whole-desktop noVNC** (`src/vnc.js`) | One framebuffer, one input queue | 4 (worst) | Kept as the escape hatch (D10 already decided this), not as the answer to this question |
+| **(iv) The Wayland family** | waypipe / wayvnc / weston-rdp / Broadway | — | **None of them reaches a browser.** waypipe needs a Wayland compositor on the client side and a browser is not one; wayvnc and weston-rdp turn the problem back into VNC / RDP; Broadway serves GTK apps only |
+
+**Xpra's wiring is the same shape as §4.2.** Xpra's HTML5 client connects to its own server over
+WebSocket; we do **not** expose that port to a browser but bridge it server-side, the way `/api/vnc`
+and `/api/browser/stream` already do (`GET /api/xpra/stream?window=<id>`, cookie-authed, the same
+backpressure discipline). This is not an arrangement we invented: `jupyter-xprahtml5-proxy` is
+exactly "wrap Xpra in Jupyter's own auth". The client half has two options — self-host upstream's
+HTML5 client as static assets (MPL-2.0; its own docs describe installing it under another web
+server's path; known issue: inside an iframe it hits a `sessionStorage` access restriction) — or
+render it ourselves with `xpra-html5-client` (npm, Apache-2.0, 2.3.0, a TypeScript client library),
+which fits §4.4's "the window is ours" shape better. **This is an owner decision (D21)**, because it
+is the trade between hosting somebody else's whole frontend and writing our own rendering layer, and
+this repository has a stated bias against the former (§4.2's reasons for refusing to embed
+upstream's dashboard apply verbatim).
+
+**Recommendation per app:**
+
+* **WhatsApp — take (v).** There is no official desktop client on Linux, and WhatsApp Web is a
+  proper web app; multi-device supports up to four linked devices, working independently of the
+  primary phone for **up to 14 days**. Those 14 days are a real operational cost and belong in the
+  UI ("this linked device needs to see the phone before <date>") rather than being discovered when
+  it silently drops.
+* **WeChat — take (iii)**, running the official native Linux client (Tencent, November 2024;
+  deb / rpm / AppImage) under Xpra's seamless mode. The web version (`wx.qq.com` /
+  `web.wechat.com`) is widely reported to refuse login for many accounts, **but that is an
+  account-level policy and I could not verify its current scope** (§12) — so the flow must be "try
+  the web version once with the owner's own account, and only fall back to the native client if it
+  refuses", not "assume a native client is required".
+
+**This path's resource bill is measured with §1.2's ruler.** An Xvfb plus a chat client plus an Xpra
+server is another set of processes, RSS and inotify instances (and this box has already tripped the
+128-per-uid ceiling). So it shares §3.5's ceiling and runaway guard rather than inventing a second
+set — the keeper is already the thing in this design that can count. (Measured read-only on this
+box: `Xvfb` is installed; `xpra` and a WeChat client are **not** — so every number in this section is
+**unmeasured** until P8 actually installs them.)
+
+### 4.8 The data side — reading a local client's own store
+
+Bringing the picture in answers "can a human use it". "**Can an agent read those messages**" is a
+different question, and its answer differs **per app** for verifiable cryptographic reasons, not for
+reasons of taste.
+
+**WhatsApp Web: metadata is readable; bodies are readable only inside the page.** WhatsApp Web keeps
+messages in IndexedDB with the bodies encrypted under AES-CBC; the cleartext part includes contacts,
+groups, and message metadata (senders, recipients, timestamps, chats). The keys are the crux: they
+are stored through the **CryptoKey API** as **non-extractable** keys — an API whose purpose is to
+let JavaScript **use** them without being able to **export** them. The known way to read the bodies
+(a widely cited public write-up) is to **run code inside the page**: monkey-patch
+`crypto.subtle.decrypt` and keep the key once it is called with arguments that decrypt.
+
+The adapter's shape is therefore **decided by that fact**, not chosen by us: **it is an init-script
+injected into this profile that reads the store from inside the page and posts the result out** —
+which happens to be a capability this design already holds (since 0.37 a new tab inherits the
+session's init-scripts **before first navigation**; CDP is already there). Its honest cost belongs
+in writing: this is automating WhatsApp's own web client inside the user's **own** logged-in
+session — no third-party protocol implementation, no new device registration, so it is **not** the
+Baileys risk class; but it is still automation of the web client and still in ToS grey territory.
+
+**Why not a protocol library.** `whatsapp-web.js` is essentially the same class as our path (it also
+drives a real WhatsApp Web), whereas **Baileys implements the protocol from scratch**, i.e.
+registers as a **new linked device**. Public reports agree that this class — "tools that
+reverse-engineer WhatsApp Web (Baileys, WAHA, Evolution API) carry critical ban risk and typically
+last 2–8 weeks before detection" — is the risky one, and Meta's detection surface includes device
+fingerprinting at registration plus behavioural analysis of messaging. So the trade is clear:
+**reading the real client's own DB, inside its own page**, beats **standing up a second protocol
+client**. And if the actual use case is "message customers", the correct answer is the official
+WhatsApp Business API (a different product, a different number, near-zero ban risk under policy),
+not wiring the owner's personal number to automation.
+
+**WeChat: technically possible, and my recommendation is not to build it.** The official Linux
+client's local store is SQLCipher (Tencent's WCDB), the key lives in process memory in a
+recognisable format, and public tools do extract it and decrypt `msg_*.db` on Windows, macOS and
+Linux. Three reasons not to make it part of the product:
+
+1. **It is scraping a proprietary client's process memory.** This class breaks by construction on
+   every client update, and the shape of "breaking" is **quietly reading garbage**.
+2. **A measured boundary on this box: `/proc/sys/kernel/yama/ptrace_scope` is `1`**, i.e. only an
+   **ancestor** may ptrace (reading `/proc/<pid>/mem` also requires `PTRACE_MODE_ATTACH`). A WeChat
+   the user started themselves is unreadable to VibeSpace; to make it readable, **we** would have to
+   start it — and "we start it so that we can read its memory" is a sentence that argues against
+   itself as a default.
+3. **It plainly crosses the ToS**, and in some jurisdictions it is a legal question rather than an
+   engineering one.
+
+So WeChat's recommendation splits: the **picture** goes through §4.7's Xpra (for the human), and the
+**data** goes through official channels (the Official Account / Work WeChat open APIs) if what the
+owner wants is an agent handling business messages. If the owner explicitly wants the local-store
+path, it is a **separate, explicit owner decision (D20)** and it should live in a **plugin** rather
+than in core — which is exactly the line D2 drew for CloakBrowser: proprietary things with a legal
+face go through a consent flow.
+
+**How the adapter plugs in.** VibeSpace already has this interface and it is not new: Communication
+Channels v1 (`src/msg-acl.js` + `src/server/conversation-deliver.js` + `data/bin/vibespace-msg`) was
+designed with "external sources — Gmail/Lark/Slack — later feed the same ladder with their own
+`source` tags; every stash envelope already carries one" written into it. So a chat adapter is
+**not** a new subsystem:
+
+* It is an **async local-client source**: a `create(deps)` factory exposing `start()` / `stop()` /
+  `state()` and an event that produces **envelopes**
+  (`{source: 'whatsapp', threadId, from, text, at, attachments}`); `src/gmail-sync.js` is the shape
+  this repository already has for it (a remote store synced into local facts).
+* Outbound goes through the **same delivery ladder** `deliverToConversation`, and therefore inherits
+  the stash, the peer card and §4.3.1's spend gate for free — an inbound WhatsApp message waking an
+  **idle** session is a billed turn, so it needs a declared reason (`'chat-inbound'`), added to
+  `SPEND_REASONS` in the same change as its producer.
+* Reachability uses `msg-acl.js`'s Task-Group boundary rather than a second one — and inherits its
+  honesty verbatim: that is a **coordination** boundary, not a security one.
+* Every adapter carries a **capability** row (§7.1's law): can it read history, can it send, are
+  bodies readable, how often must it see the phone. A control that cannot work is disabled with its
+  reason instead of failing at use time.
+
 ## 5. The agent-facing surface
 
 ### 5.1 `vibespace-browser` (STATIC tracked, in `AGENT_TOOLS`)
@@ -742,7 +1101,12 @@ vibespace-browser use <label|id>                 # attach THIS session to a prof
 vibespace-browser new <label> [--provider …] [--proxy …] [--fingerprint …]
 vibespace-browser detach                         # drop the lease, close my tab
 vibespace-browser watch                          # print the live-view path for the user
-vibespace-browser status                         # my tab, my lease, who holds input
+vibespace-browser status                         # my tab, my lease, who holds input,
+                                                 #   my profile AND ITS ORIGIN (§3.2.5)
+vibespace-browser pin <label|id> | --none        # pin THIS session (or unpin); a mid-session pin
+                                                 #   applies from the next browser launch (§3.2.5)
+vibespace-browser backend [<name>]               # which backend, what else exists, propose a switch (§7.4)
+vibespace-browser blocked --url <u> [--why <c>]  # I was blocked here — a CLAIM, never a detection (§7.4)
 vibespace-browser -- <agent-browser args…>       # run agent-browser with this session's flags
 ```
 
@@ -788,7 +1152,10 @@ policy decision (`close`, `close --all`, `connect`, `get cdp-url`) and for the l
 ### 5.3 Discovery for the user
 
 * Session card / Session Properties: which profile this session is attached to, viewer count, who
-  holds input.
+  holds input — plus the **pin** and its origin (§3.2.5) and the **backend chip** (§7.4). The pin
+  is one command (`session.pinBrowser`) registered on four surfaces, not four implementations.
+* The live-view window's title bar: the profile name (click = the picker), the backend chip, and
+  the **bind** affordance that snaps it beside its owning chat (§4.6).
 * A ⚙ panel (or sidebar section): profiles, owners, last used, disk size, "stop", "forget", "open
   live view". The unregistered directories from §1.2 (53 at round 1, 56 when re-measured — the
   count drifts upward on its own) appear here as adoptable candidates (§8).
@@ -993,6 +1360,149 @@ Encryption is listed in §12 as unverified.)
 
 ---
 
+### 7.4 Switching a live profile to another backend
+
+(Owner question Q2.) The user or the agent hits a page the default Chromium cannot open and must
+switch backend **immediately**, without losing cookies, localStorage or logins. This section is the
+mechanics, the UX, the agent tool, the cost gate and the failure mode.
+
+**Mechanics: the backend is a property of the profile, not of the browser.** The registry already
+has the `provider` field (§3.3); a switch changes that field and makes the keeper do it again. Three
+verified facts decide what that can achieve:
+
+* **CloakBrowser accepts an explicit persistent directory.** `launch_persistent_context("./my-profile")`
+  in the repository's own documentation is that path, and agent-browser has supported a custom
+  executable path since 0.8.7. So "the same user-data-dir, opened by the other binary" is a
+  supported shape on both sides.
+* **The fingerprint seed is a launch parameter, not something stored in the profile.** Verbatim from
+  the repository docs: `--fingerprint=seed` — "Deterministic identity from the seed. Same seed =
+  same fingerprint across launches. Use this for session persistence (returning visitor)." So the
+  durable half is **`fingerprintSeed` in our registry**, not the directory. §3.3 already carries
+  that field; it now has a job.
+* **Chromium's profile version stamp is one-way.** A user-data-dir written by a **newer** Chromium
+  is refused by an older one ("Your profile can not be used because it is from a newer version of
+  Google Chrome"). And the version gap here is real: CloakBrowser's **free tier ships Chromium 146
+  and Pro ships 151** (repository docs, verbatim, with 58 / 73 patches respectively). So **the
+  upgrade is one-way**: once this directory has been opened by the higher major, there is no going
+  back.
+
+That gives the **version ladder**, which is the core decision of a switch and which must run
+**before** a single byte moves:
+
+| Case | What happens |
+|---|---|
+| The target backend's major is **≥** the major that last wrote this directory | Switch. Record the new major. |
+| The target backend's major is **<** the major that last wrote it | **Refuse**, naming both versions, with two ways out: upgrade that backend, or **clone** the profile (the export half below, stating what it will lose) |
+| The directory has **no** recorded major (adopted, or predating this design) | Read its own `Last Version` read-only; if that cannot be read, treat it as unknown, **refuse the automatic downgrade**, and require one explicit human confirmation |
+
+"Which backend's major last wrote this" is recorded in the **registry** (`lastChromiumMajor` +
+`lastBackend`), for the reason this repository keeps re-learning: **the fact a guard reads must not
+be the fact a bad write produces.** The directory's own `Last Version` is written by the browser and
+is of course the primary evidence; the registry copy is written by us and keeps "this profile has
+been opened by Pro" decidable when the directory cannot be read. When they disagree, take the
+**higher** one — the conservative direction: refusing one legitimate downgrade is cheaper than
+allowing one that destroys a profile.
+
+**The switch sequence, and why the lease survives it:**
+
+1. Record each lease's `lastUrl` (carried in the JSON since 0.34) and its `browserKey`.
+2. **Stop the browser process** (the `--pin-tab` bindings, the CDP endpoint and every `targetId` die
+   with it). This step is not optional: Chromium's process singleton means one user-data-dir can be
+   open by exactly one browser at a time (Chromium's own `user_data_dir.md`, verbatim: "two running
+   Chrome instances cannot share the same user data directory"), so there **is no** live handover.
+3. Start the new backend against the **same directory** with the **same `fingerprintSeed`**.
+4. Walk the lease table: `tab new` to each lease's own `lastUrl`, re-`--pin-tab`, write the new
+   `targetId` back into the lease.
+5. The lease was **never destroyed** — it is looked up by `(profileId, browserKey)` (§3.3) and only
+   `targetId` is re-minted. So no session re-attaches, and the agent's next command lands on its own
+   tab.
+
+To the agent and to the user, the gap in the middle is **a named `browser_restarting` refusal**, not
+a timeout — the same family as `tab_gone` and `browser_paused`.
+
+**A changed fingerprint is a new machine as far as the site is concerned.** This has to be said in
+full in the dialog, because it is the one place a switch **loses** something: the cookie jar crosses
+untouched, but a site that binds a session to a fingerprint (which is precisely what anti-bot
+vendors do) sees a new device and **may require a fresh login**. Therefore:
+
+* a profile's `fingerprintSeed` is **minted once at creation** and carried through every subsequent
+  switch;
+* going from `chromium` (no seed) to `cloak` (a seed) is **by definition** a fingerprint change, and
+  the dialog is worded from that fact ("this profile had no stable fingerprint before; after the
+  switch, sites may ask you to log in again");
+* the reverse (`cloak` → `chromium`) is the same, **and** must additionally pass the version ladder
+  — which is the common path on which a downgrade is refused.
+
+**"Export / import" is the explicitly lossy fallback**, for the cross-machine and cross-provider
+cases (a cloud provider's directory is not ours to open). agent-browser's own `--state` / `--restore`
+is Playwright's `storageState` shape: cookies, localStorage, and an **opt-in** IndexedDB snapshot
+(Playwright's docs, verbatim: "Set to `true` to include IndexedDB in the storage state snapshot"),
+**excluding** sessionStorage. And it has one hard boundary, which is also the key to §4.8: **a
+non-extractable `CryptoKey` cannot be carried by storageState** — that is what "non-extractable"
+means — so an application that stores its local decryption keys as non-extractable CryptoKeys, as
+WhatsApp Web does, **does not bring its login across** an export/import. That is not our defect, it
+is the point of that API; the dialog must name **which sites this path will drop** rather than say a
+vague "you may need to log in again".
+
+**UX:**
+
+* **A backend chip**, in two places: the live-view window's title bar, and the profile's row in the
+  profiles panel. It shows the current backend plus its major (`chromium 14x` / `cloak 146 (free)`)
+  and opens the switcher. A chip rather than a buried menu, because "which browser am I on" is the
+  one thing a user wants to know at the moment they are blocked.
+* **A one-click "Open with CloakBrowser" on the blocked-page state.** Where that state comes from is
+  the agent paragraph below — the point is that this button appears **only when somebody claims to
+  be blocked**, and it says **who** claimed it.
+* **A per-profile default backend** (a registry field), so "this profile is for that kind of work"
+  is said once.
+* **Per-site memory**: "this site needs cloak". Keyed by **exact host**, not by registrable domain —
+  a registrable domain needs a public-suffix list, which is a second source of truth that expires,
+  and the cost of exact hosts is only that two subdomains of one site are recorded twice. This
+  memory stores a **claim**, so it stores **who claimed it, when, and why**
+  (`{host, backend, by: 'agent'|'user', at, why}`), and each row can be deleted from the profiles
+  panel.
+
+**The agent tool:**
+
+```
+vibespace-browser backend                    # which backend I am on, what else exists, what each can do
+vibespace-browser backend <name>             # propose a switch to <name>
+vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>]
+                                             # I was blocked on this page — a CLAIM, not a detection
+```
+
+**`blocked` is reported by the agent, not detected by us, and that sentence belongs in the
+protocol.** We have no reliable way to see "this is an anti-bot block" from a page: what can be had
+deterministically is HTTP 403/429 and the signatures of known challenge pages. So the server
+**never** claims to have detected a block; it records an attributed claim, the UI says "the agent
+says this page is blocked", and the one-click button is the **user's** act. Conversely, when a
+navigation really does return 403/429, `vibespace-browser`'s error carries `hint: 'may-need-cloak'`
+— a **hint**, worded so it cannot be mistaken for a detection (the same family as §4.3.1's "a
+producer we ship must be named": a claim must carry its source).
+
+**A switch is a proposal, and it goes through the owner / lease check.** A profile may have several
+sessions attached (§3.4), and a switch **stops everybody's browser**. So: under `sharing: "owner"`
+only the owner's sessions may switch directly; in every other case (another session holds a lease,
+or somebody holds `input: 'user'`) it is downgraded to a **proposal** — one "For you" item addressed
+to the owner, naming who proposed it, for which URL, and which sessions it would affect. **A profile
+somebody is driving (`input: 'user'`) is never interrupted by an agent's proposal.**
+
+**The cost gate: CloakBrowser is licensed per concurrent session.** The free tier is **one**
+concurrent session (behind a GitHub sign-in); Pro is 5 / 20 / 200 / 2000 (repository docs, verbatim).
+So the switch dialog must show **seats**: used / total / after this switch. Behaviour at the ceiling
+is the same shape as §3.5's browser ceiling — **refuse loudly, name the profiles currently holding
+seats, and offer to stop one**. That count is the keeper's job (it is the first thing in this design
+that can count) and it is **per provider**, not global. The free tier's single concurrent session
+means a second cloak profile must either wait or be paid for — hide that, and the user spends an
+afternoon debugging a browser that appears to fail at random.
+
+**Failure mode: the binary is not installed.** As everywhere else: a **named** refusal
+(`backend_unavailable`, carrying the provider name and what is missing), a row in the profiles panel
+and the switch dialog that is **disabled with its reason written on it**, and an install action in
+Manage Agents (`cloakbrowser` is an npm package, installing it is a user act, and it goes through
+§7.2.1's egress precondition — **measure first, then install**, not the other way round). **Never**
+download the 200 MB binary without the user having asked for it.
+
 ## 8. Migration from the shared default profile
 
 Nothing is deleted, and none of the 98 GB moves.
@@ -1038,6 +1548,10 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-browser-live` | heavy | P2, P3 | Real browser + real stream + the real bridge: two sessions on one profile drive their own tabs and never each other's (the I2 proof, with a **pre-fix control that reproduces the hijack**), a viewer sees frames through cookie auth only, backpressure holds, takeover refuses agent input and handback restores it. Headless-chrome leg for the window at 375×667 and at a non-1 DPI zoom. |
 | `test-browser-providers` | fast + heavy | **P4** | fast: the provider capability rows and the exact refusal a provider produces for a capability it lacks (a disabled control names its reason), plus the presence and shape of the CloakBrowser egress proof record (§7.2.1) — a provider row with a `blocks:` claim whose caps row is not actually false FAILS, the `local-oracles` discipline. heavy: the real `browser-serve` daemon op against a real daemon **with its capability gate asserted** (an old daemon is never asked — unknown ops hang), and the remote `cdp` provider over `tcpForward`. |
 | `test-browser-housekeeping` | fast | **P5** | The retention/adoption DECISION as a PURE function, printing what it spared and why — the repo's own sweep law: **never demand a removal nothing is allowed to perform** (a grace window for anything that may be in flight, named with its age). Negative controls: nothing is ever proposed for deletion without an explicit human act, and `forget` archives BEFORE it removes. |
+| `test-browser-pin` | fast | **P0, P1** | The pin ladder as a PURE decision: explicit / conversation / Task-Group / instance / none, with the ORIGIN each rung states, and that a fork **copies the pin and mints a new key** (§3.2.5). The mid-session half is a WIRING PIN: the re-pointed symlink (or the rewritten per-session config) is what the next launch resolves, and the suite asserts the running browser is **unaffected** — the honest half. Negative controls: a Task-Group default never beats a session's own choice; binding a group does not rewrite a running session's pin. |
+| `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the seat arithmetic and its refusal text, the site-hint record carrying WHO claimed it, and `blocked` being a claim the server never manufactures. heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus the not-installed refusal naming the provider. |
+| `test-window-binding` | fast + heavy | **P7** | fast: the chain model with `layout`/`split`/`ratio` — a missing `layout` reads as `'tabs'`, the ratio clamps, and **the multi-client sync key changes when only the layout changes** (§4.6's named trap, with the pre-fix key as its negative control). heavy (headless chrome): bind → two panes in one window, divider drag under a non-1 DPI zoom lands where the pointer is, move/minimise/desktop-switch keep them together, closing the browser pane collapses to tabs **without moving the chat window**, and a mobile viewport renders tabs **without writing its flattening back**. |
+| `test-native-window` | heavy | **P8** | A real Xpra server + a real X client under Xvfb through the real cookie-authed bridge: one window arrives, input reaches it, the stream port is never reachable from a browser, and the backpressure discipline holds. **Skips loudly, with evidence**, when `xpra` or `Xvfb` is absent (measured 2026-09-10 on this box: `Xvfb` present, `xpra` absent). The bandwidth/latency numbers §4.7 needs are produced here, not asserted — the suite RECORDS them under a named budget so a regression is visible. |
 | `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` must be declared AND used in the same change (§4.3.1). |
 | `test-architecture` | build | all | Tier edges: PURE imports nothing, SHARED never reaches up, the daemon bundle carries no orchestrator markers, `server.js` stays inside its size ratchet, and §44 — every settings category renders, so `browser.announceIdleHandback` and the rest reach a section a user can open. |
 | `test-session-schema` | fast | P1, P3 | Every new `session._field` (`_browserProfileId`, `_browserKey`, `_browserTargetId`, `_browserInput`) has an owner row. |
@@ -1058,21 +1572,24 @@ spread: 14 of 32 workflows converged in one round, 8 needed 3–6.
 
 | Phase | Content | Rounds (point) | Range | Days (point) | Ships value on its own? |
 |---|---|---|---|---|---|
-| **P0 — Zero interference** | `AGENT_BROWSER_SESSION` + `_NAMESPACE` + explicit `_IDLE_TIMEOUT_MS` at spawn (local + remote paths), **the §3.2.2 user-data-dir variant with its fallback ladder**, the `browserKey` continuity ladder (§3.2.1), version-floor probe with an honest "your agent-browser is too old for shared profiles" notice, the k = 1/4/12 resource measurement (§1.2, §12.10), one line in the tools intro, `docs/agent/browser-manual.md`, `test-browser-profiles` (env half, asserting the resolved dir). | **4** | 3–6 | 2 | **Yes — the whole of (1.b)'s "stop interfering" half.** |
-| **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2. | **6** | 5–9 | 3 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics. |
+| **P0 — Zero interference** | `AGENT_BROWSER_SESSION` + `_NAMESPACE` + explicit `_IDLE_TIMEOUT_MS` at spawn (local + remote paths), **the §3.2.2 user-data-dir variant with its fallback ladder**, the `browserKey` continuity ladder (§3.2.1), version-floor probe with an honest "your agent-browser is too old for shared profiles" notice, the k = 1/4/12 resource measurement (§1.2, §12.10), one line in the tools intro, `docs/agent/browser-manual.md`, `test-browser-profiles` (env half, asserting the resolved dir), **plus the pin's env indirection (§3.2.5) — the per-session generated config or the re-pointed symlink — so a mid-session pin never needs a restart**. | **5** | 4–7 | 2.5 | **Yes — the whole of (1.b)'s "stop interfering" half.** |
+| **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`. | **8** | 6–12 | 4 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics. |
 | **P2 — Live view** | `/api/browser/stream` bridge (+ backpressure), `browser-live` window type, multi-viewer fan-out, URL/tab/console panes, DPI-correct canvas, `test-browser-live`. | **6** | 5–9 | 3 | **Yes — (1.c) minus the hands.** |
 | **P3 — Takeover / handback** | Lease input holder, mode switcher, input forwarding, `browser_paused`, **the §4.3.1 spend wiring** (`'browser-handback'` in `SPEND_REASONS`, the ladder call, `browser.announceIdleHandback` default OFF, the `test-spend-paths` census staying green), idle handback, agent cursor, `--confirm-actions` cards. | **5** | 4–7 | 2.5 | Yes — completes (1.c). |
-| **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); `test-browser-providers`. | **6** | 5–9 | 3 | Yes — (1.a), and the fleet story. |
+| **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; `test-browser-providers` + `test-browser-backend`. | **9** | 7–13 | 4.5 | Yes — (1.a), and the fleet story. |
 | **P5 — Recording + housekeeping** | Per-profile screencast opt-in, transcript thumbnails, retention sweep, profiles panel with sizes, orphan adoption (migration step 3), `test-browser-housekeeping`. | **4** | 3–6 | 2 | Yes — the transcript half. |
 | **P6 — Hard mediation** | CDP-mediating proxy: target scoping + input refusal during takeover, per-session CDP URLs. **A stated precondition of `sharing: "instance"`** (§6.2), not merely an option if D6 says the cooperative lease is not enough. | **6** | 4–9 | 3 | Only as enforcement — but `sharing: "instance"` stays refused until it lands. |
+| **P7 — Window binding** | `layout`/`split`/`ratio` on the tab chain, the title-bar bind affordance + the left/right title-bar drop zone, the born-into-a-chain `createWindow` path, the divider (per-drag controller, rAF, one coordinate conversion), the ownership badge from `leases`, the layouts persist + **the sync-key fix**, mobile tabs-only without write-back, `test-window-binding`. | **5** | 4–8 | 2.5 | Yes — an agent-driven browser stops losing its owner. **Needs P2** (there must be a live view to bind); independent of P3–P6. |
+| **P8 — Native client windows** | The Xpra rung (§4.7): a keeper under §3.5's ceiling and runaway guard, `GET /api/xpra/stream` in the `/api/vnc` shape, the client half per D21, the 200 ms / 1 Mbps measurement, and per-app routing (WhatsApp → the web version in a profile; WeChat → the native client, only after the web version is tried). Then the §4.8 adapter for whichever app the owner names, feeding the existing Communication-Channels ladder with its own `source` tag and a declared `'chat-inbound'` spend reason. `test-native-window`. | **7** | 5–11 | 3.5 | Yes — but it is the least verified phase in the document and its range says so. Independent of every other phase except §4.2's bridge shape. |
 
 **Totals, published as the range rather than the point** (round 1 published only the point
 estimate of a range whose top its own risk paragraph pointed at):
 
-| Scope | Range | Point estimate | **Risk-weighted** (P2 and P4 at the top of their ranges, the rest at the point) |
+| Scope | Range | Point estimate | **Risk-weighted** (P2, P4 and P8 at the top of their ranges, the rest at the point) |
 |---|---|---|---|
-| **P0–P5** | **25–46 rounds ≈ 12.5–23 days** | 31 ≈ 15.5 days | **37 rounds ≈ 18.5 days** |
-| **P0–P6** | **29–55 rounds ≈ 14.5–27.5 days** | 37 ≈ 18.5 days | **43 rounds ≈ 21.5 days** |
+| **P0–P5** | **29–54 rounds ≈ 14.5–27 days** | 37 ≈ 18.5 days | **44 rounds ≈ 22 days** |
+| **P0–P6** | **33–63 rounds ≈ 16.5–31.5 days** | 43 ≈ 21.5 days | **50 rounds ≈ 25 days** |
+| **P0–P8** (everything the owner asked for) | **42–82 rounds ≈ 21–41 days** | 55 ≈ 27.5 days | **66 rounds ≈ 33 days** |
 
 The risk-weighted column is the one to plan against, and it is weighted for a stated reason:
 P2 and P4 depend on a third-party binary's real behaviour rather than on our own code, which is
@@ -1084,11 +1601,20 @@ pessimistic bound, not a forecast.
 
 **Alternative order, if the owner wants value earliest:** P0 → P2 → P1 → P3. P2 can run against
 upstream's per-session stream *before* the registry exists, because §3.2 already gave every
-session its own browser. Measured against the point estimates: P2 completes at round 10 instead
-of round 16, i.e. **~3 days earlier (2.5–4.5 days across P1's own range)** — round 1 said "about
-a week earlier", which is not what its own numbers give. The cost is retro-fitting the profile
-selector into a window that already exists: roughly one extra round, so the ordering is worth
-about 5 net rounds of earlier feedback, not a week.
+session its own browser. Measured against round 3's point estimates: P2 completes at round 11
+instead of round 19, i.e. **~4 days earlier (3–6 days across P1's own range)** — round 1 said
+"about a week earlier", which is not what its own numbers give, and round 2's "~3 days" was
+correct for round 2's smaller P1. The cost is retro-fitting the profile selector into a window
+that already exists: roughly one extra round, so the ordering is worth about 7 net rounds of
+earlier feedback.
+
+**P7 changes that calculus, and the owner should know it.** Window binding (§4.6) is what makes a
+live view legible when the agent is driving, and it needs only P2. So the earliest-value order is
+**P0 → P2 → P7 → P1 → P3**: at the point estimates that reaches "the user watches the agent
+browse, in a window visibly bound to the conversation that owns it" at round 16 — the whole of
+(1.c) plus the binding — while the canonical order reaches only the unbound live view at round 19.
+P8 is deliberately not in that sequence: it answers a different question (§4.7) and its range says
+how little is known about it.
 
 ## 11. DECISIONS FOR THE OWNER
 
@@ -1107,6 +1633,15 @@ about 5 net rounds of earlier feedback, not a week.
 | **D11** | **Is an announcement into the conversation worth a billed turn, and which of the three moments get one?** (§4.3.1 — the delivery ladder is fully spend-gated, `SPEND_REASONS` is a closed set that fails closed, and an idle handback fires on a **timer**, i.e. exactly CLAUDE.md's "a turn nobody typed".) | (a) none of the three — state changes only, and the agent learns from `browser_paused` / from its next command succeeding; (b) explicit handback only; (c) explicit handback + idle handback, both through the ladder under a new declared reason; (d) all three. | **(b), with (c) available as a setting that defaults OFF.** The explicit handback is a per-occurrence owner action and it is the one moment an *idle* agent cannot learn about any other way — the URL it needs to re-orient rides that turn. The takeover needs nothing (the typed refusal is immediate and free). The idle handback is the one with no owner action at all, so it is zero-spend by default: flip the lease, update the live view, file one "For you" item, and let the agent find out when its next command works. Whatever the answer, the reason is declared in `SPEND_REASONS` and the ladder is the only delivery path — a browser module that posts into a conversation any other way reddens `test-spend-paths`. |
 | **D12** | **Which isolation variant does P0 ship?** (§3.2.2 — the config file's `profile` key applies to every invocation that does not override it, so "no `--profile`" is not the default, it is a decision.) | (A) `SESSION` only; (B) `SESSION` + `NAMESPACE` with the config profile left in force; (C) add a per-session scratch `AGENT_BROWSER_PROFILE`; (D) add `AGENT_BROWSER_CONFIG` pointing at a VibeSpace-written config with no `profile` key. | **(D), falling back to (C), then to (A), each fallback logged with its reason.** D is the only variant that is actually ephemeral, the only one that can carry `--allowed-domains` (§6.3), and the only one with no Chromium user-data-dir contention. **(B) is not an option** — it is what round 1 accidentally specified and it cannot work: N daemons, one user-data-dir. The cost of D is honest and stated: the CLI hard-errors on a missing/invalid `--config`, so the file is verified before the variable is set. |
 | **D13** | **Headed by default, and what is the concurrent-browser ceiling?** (§3.2.3 — measured: 6 processes, 420–667 MB PSS and 2 inotify instances per Chromium, against a 128-per-uid inotify ceiling this box already trips; and the 1 h idle timeout **exempts headed browsers**, while the installed build has no default timeout at all.) | (a) keep `headed: true` for everything and set only the idle timeout; (b) headless by default for agent sessions once the live view exists (P2), headed per profile on request; (c) headless immediately, live view or nothing. | **(b), with the explicit idle timeout from day one.** Until P2 the desktop VNC window is the only way to watch, so headed has to stay reachable; once the live view exists, headless is strictly better for the agent case and it is the variant the idle timeout actually collects. Ceiling: propose **8 concurrent browsers per instance**, refused loudly at the ceiling with the holders named — but the number should be re-set from P0's own k = 1/4/12 measurement rather than from this paragraph. |
+
+| **D14** | **Where does the pin live, and does a Task Group carry a default?** (§3.2.5 — the pin is one command; the question is which surfaces register it and whether a 岗位 may set a default for every session it owns.) | (a) the session-card right-click only; (b) the four surfaces (card menu, Session Properties, the live-view title bar, the New Session dialog); (c) (b) plus a Task-Group default rung. | **(c).** The four surfaces are one command with four `registerMenuItem` registrations, not four implementations, so the cost is the registrations. The Task-Group rung is what makes "this 岗位 always works in the vendor portal" a thing you say once — and it sits BELOW the conversation's own value, so it can never overwrite work a session already did. |
+| **D15** | **Does a fork inherit the profile pin?** (§3.2.5 — `browserKey` deliberately does not.) | (a) inherit the pin (identity still fresh); (b) inherit neither; (c) inherit both. | **(a).** A pin is a preference ("this kind of work uses this login") and a key is an identity. (c) would give a fork another conversation's pinned tab, which is the defect §3.2.1 exists to prevent; (b) makes every fork of a portal session log in again for no reason. |
+| **D16** | **Does a mid-session pin announce itself into the conversation?** (§3.2.5, the same category as D11 — an announcement is a billed turn.) | (a) never — the agent learns from `vibespace-browser status` and from its next launch landing in the new profile; (b) the free path only (a `<system-reminder>` on the user's next message); (c) (b) plus a delivery-ladder turn when the session is idle, behind a setting. | **(c) with the setting default OFF**, which is exactly (b) in practice. A pin is a user action, so the user is right there typing and the `pendingNotice` channel costs nothing. The ladder path exists for the one shape that channel cannot serve — an idle session the owner wants to redirect now — and it is declared, gated and off by default like every other unattended turn. |
+| **D17** | **Do we ship the live backend switch, and who pays for CloakBrowser's seats?** (§7.4 — free = ONE concurrent session; Pro = 5 / 20 / 200 / 2000.) | (a) no switch — a profile's backend is fixed at creation; (b) switch on the free tier only, with the seat count shown and a loud refusal at the ceiling; (c) (b) plus a paid tier bought up front. | **(b).** The switch is the feature the owner asked for, and the free tier is enough to answer the only question that matters — does this site actually open. The seat count belongs in the dialog rather than in a support conversation later; buy a tier against a measured failure on a named site (D4's rule, unchanged). |
+| **D18** | **Is auto-bind ON by default?** (§4.6 — when a session's browser starts and its chat window is open, the live view is born inside that chain in split.) | (a) ON; (b) OFF, bind is always a click; (c) ON only when the chat window is wide enough. | **(a) ON.** The binding is the answer to "whose browser is that", and a default that has to be discovered does not answer it. It is one setting, reversible per window by dragging a pane out, and the group is never dissolved on its own — so the worst case of being wrong is one drag. (c) is a hidden rule that will look like a bug on the day it does not fire. |
+| **D19** | **In a split chain with a third tab, what does clicking that tab do?** (§4.6 — a chain may hold five tabs with two of them paired.) | (a) it replaces the non-owner pane; (b) the whole chain flips back to `'tabs'`; (c) a third pane opens. | **(a).** It keeps the binding (the chat pane, the thing the browser is bound TO, stays put) and it is the least surprising: the pane you were not looking at is the one that changes. (c) is refused on measurement grounds — three panes are all unusable below a width most people run, and the ratio model would have to become a tree. (b) silently destroys a layout the user built. |
+| **D20** | **Do we build a WeChat local-store adapter?** (§4.8 — SQLCipher via WCDB, key in process memory; on this box `ptrace_scope` is `1`, so only an ancestor may read it.) | (a) no — picture via Xpra, data via the official Official-Account / Work-WeChat APIs; (b) yes, in core; (c) yes, but only in a plugin, with explicit consent, and only for a client VibeSpace started itself. | **(a), with (c) as the answer if the owner insists.** It is memory-scraping a proprietary client that breaks silently on every update, it crosses the ToS plainly, and the only way to make it technically work is to have VibeSpace start WeChat *so that* it can read its memory — a sentence that argues against itself as a default. If it is built, it is a plugin (D2's line for proprietary things with a legal face), never core. |
+| **D21** | **Xpra's client half: host upstream's HTML5 app, or render it ourselves?** (§4.7 — MPL-2.0 app vs `xpra-html5-client`, Apache-2.0, on npm.) | (a) host the upstream HTML5 client as static assets behind our auth; (b) render with the client library inside a VibeSpace window type; (c) (a) first as a proving slice, then (b). | **(c).** (a) is the fastest way to learn whether the transport is good enough at 200 ms / 1 Mbps, which is the open question — but §4.2's reasons for refusing to embed upstream's dashboard apply here too (a whole app with its own controls inside ours, plus a known iframe `sessionStorage` restriction), so it is a proving slice and not the product. The window this design already specifies (§4.4: DPI-correct canvas, escaped titles, theme vars) is the shape (b) lands in. |
 
 ---
 
@@ -1180,6 +1715,45 @@ Added in round 2, all of them consequences of this round's own changes:
     An explicit handback is rare, so it should never bind — but "should never" is a prediction,
     and the honest test is a week of real use with the journal read afterwards.
 
+Added in round 3, all of them consequences of the owner's four questions:
+
+15. **The two Chromium majors the version ladder is about.** CloakBrowser's own repository states
+    free = Chromium 146 and Pro = 151; I did **not** read which Chromium major the installed
+    `agent-browser` bundles, so I cannot say today whether a `chromium → cloak` switch is an
+    upgrade or a downgrade on this machine. That is the ladder's very first question and P4 must
+    answer it by measurement before the switch ships.
+16. **That Chromium actually refuses the older-major open.** The refusal text and the direction are
+    documented and widely reported, but I did not run two majors against one directory — for the
+    same reason as §12.1 and §12.11. The failure mode if I am wrong is *better* than assumed (the
+    ladder refuses a switch that would have worked), which is why the ladder is written to err
+    toward refusal.
+17. **Whether a fingerprint change logs a real site out.** §7.4 says a switch "may require a fresh
+    login" because that is what fingerprint-bound sessions do by construction — but that is a
+    statement about the technique, not a measurement of any site the owner uses. It shares §12.4's
+    gap: **ask the owner for two or three concrete sites**.
+18. **What agent-browser's `--restore` actually carries.** Playwright's `storageState` has an
+    opt-in `indexedDB` flag, documented; whether agent-browser passes it is not something I read.
+    So "export/import is lossy" is certain in the CryptoKey direction (that is what
+    non-extractable means) and *unspecified* for IndexedDB in general. P4 must state the exact
+    loss set in the dialog, which means measuring it first.
+19. **The split-chain change against a real second client.** §4.6's sync-key trap is derived from
+    reading `layout.js`'s `tabs.join(',')` key, not from running two browsers and flipping a chain
+    on one of them. It is named as a trap and gated by a test precisely because it is a reading.
+20. **Every number in §4.7.** Nothing there is measured by me and nothing measured by anyone else
+    was found for the target (200 ms RTT / 1 Mbps): the public comparison of ssh -X / xpra /
+    waypipe I read is explicitly qualitative, and this box has `Xvfb` but no `xpra` and no WeChat
+    client. The per-window-vs-whole-desktop *argument* is sound; the ranking's exact spacing is
+    not evidence. P8 produces those numbers as its first task.
+21. **WeChat's web-version restriction today.** It is widely reported that many accounts cannot
+    sign in to the web client, but it is an account-level policy and I could not confirm its
+    current scope. This is why §4.7's flow is "try the web version once with the owner's own
+    account first" rather than "install a native client".
+22. **Whether WhatsApp Web's key handling still matches the write-up.** The non-extractable
+    `CryptoKey` design and the monkey-patch technique are documented in a public analysis and in
+    forensic literature, both of which describe a build older than today's. §4.8's adapter shape
+    follows from that design; if the vendor has changed it, the adapter's shape changes with it,
+    and P8 must re-check before writing code.
+
 ---
 
 ## Appendix A — sources
@@ -1212,6 +1786,47 @@ Added in round 2, all of them consequences of this round's own changes:
   `src/opencode-serve.js`, `src/port-forward.js`, `src/cli-identity.js`, `src/session-schema.js`,
   `src/lib/settings-schema.js`, `src/ws-create.js`, `data/bin/vibespace-page`, `scripts/ci.mjs`,
   and the machine-hygiene / fork-tax measurements of 2026-09-09..10.
+* **Round-3 sources (2026-09-10), for the owner's four questions:**
+  * **Xpra** — the project's own docs (Seamless mode; Encodings: auto/webp/jpeg/avif/png and
+    VP8/VP9/H.264/HEVC/AV1 with `min-quality`/`min-speed` tuning) and `docs/CHANGELOG.md`
+    (7.0, 2026-08-27; 6.6 added http digest + scram authentication and http origin validation;
+    6.5 added the Wayland backend). `Xpra-org/xpra-html5` (MPL-2.0, installable under another web
+    server's path, with a known iframe `sessionStorage` restriction) and the independent npm
+    package `xpra-html5-client` (Apache-2.0, 2.3.0). `jupyter-xprahtml5-proxy` as the precedent
+    for wrapping Xpra in a host application's own auth.
+  * **KasmVNC** — the project wiki's "Differences From TigerVNC" and its performance pages
+    (TightJPEG / TightWEBP / TightQOI quality ladder, video mode).
+  * **CloakBrowser** — the `CloakHQ/cloakbrowser` repository, for the three facts §7.4 rests on:
+    free = Chromium 146 (58 patches) / Pro = 151 (73 patches); `launch_persistent_context(dir)`;
+    `--fingerprint=seed` as a LAUNCH parameter ("same seed = same fingerprint across launches");
+    the concurrent-session tiers (1 free, then 5 / 20 / 200 / 2000); and `cloakserve`'s
+    per-connection seed query parameters with its own per-seed temporary profile directories.
+  * **Chromium** — `docs/user_data_dir.md` ("two running Chrome instances cannot share the same
+    user data directory"), plus the documented profile-version refusal ("Your profile can not be
+    used because it is from a newer version of Google Chrome").
+  * **Playwright** — `browserContext.storageState()`'s opt-in `indexedDB` option, verbatim.
+  * **agent-browser's own changelog** — custom executable path (0.8.7), Chrome-profile support
+    that COPIES the profile to a temp dir (0.24.1), `--restore` / `--restore-save` (0.31.0), and
+    0.37.1 (2026-09-08) still being the newest release.
+  * **WhatsApp** — the public write-up on backing up data through the multi-device web client
+    (IndexedDB, AES-CBC bodies, non-extractable `CryptoKey`s, the `crypto.subtle.decrypt`
+    monkey-patch) plus the forensic literature on WhatsApp Web's IndexedDB; and the multi-device
+    limits (four linked devices, up to 14 days independent of the primary phone).
+  * **WeChat** — the official native Linux client (Tencent, November 2024; deb / rpm / AppImage)
+    and the public tooling that extracts WCDB/SQLCipher keys from the running client's memory on
+    Windows, macOS and Linux.
+  * **Unofficial WhatsApp libraries** — public reports on the ban risk of protocol-level clients
+    (Baileys / WAHA / Evolution API) versus the official Business API.
+  * **This machine, read-only, 2026-09-10:** `/proc/sys/kernel/yama/ptrace_scope` = `1`;
+    `Xvfb` present at `/usr/bin/Xvfb`; `xpra` and a WeChat client absent.
+  * **VibeSpace (round 3):** `src/lib/tab-group.js` (the chain model, `_syncChainBounds`,
+    `restoreTabChain`, `_detachFromChain`, `_ungroupLast`), `src/lib/layout.js` (the
+    `tabs.join(',')` sync key and the tabChain persistence), `src/lib/contributions.js` +
+    `src/lib/session-card.js` (the `'session-card'` menu and its groups),
+    `src/resume-continuity.js` (`resumeSpawnPick` / `applyOriginHint`), `src/task-groups.js`,
+    `src/session-status.js` (`pendingNotice`), `src/account-material.js`
+    (`repointPoolSymlink`), `src/lib/settings-schema.js` (`SETTINGS_CATEGORIES` — there is no
+    Browser category yet), and `docs/kb-file-structure.md`'s Communication Channels v1 entry.
 
 ---
 

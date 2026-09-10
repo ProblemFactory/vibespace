@@ -1,4 +1,4 @@
-> 中文版 — 与英文原稿 docs/design-agent-browser-v2.md 同步于 96b05c56；以英文版为准的只有代码标识符。
+> 中文版 — 与英文原稿 docs/design-agent-browser-v2.md 同步于 96b05c56 + 本次第三轮修订；以英文版为准的只有代码标识符。
 
 # Agent-browser 系统 v2 — profile、隔离，以及一个由 VibeSpace 自己拥有的实时视图
 
@@ -20,6 +20,17 @@ agent 干活并且能亲手介入 —— 参考 Codex desktop 是怎么做的。
 读者影响最大的改动是：§3.2 长出了一个 user-data-dir 的*决定*（第一轮指定了一个根本无法工作的
 配置），§4.3.1 是新增的（往一个对话里发公告就是一个计费 turn，本设计欠它一道门），§3.4 不再
 声称租约 (lease) 是一条边界，§10 公布的是一个区间而不是一个点估计。
+
+**第三轮（2026-09-10）** 回答 owner 的四个问题，并且是把每一个**折进**架构、阶段与决定里，而不是
+附在后面：**Q1 会话持久化的 UX** —— 用户怎么用一个动作把一个会话钉到一个 profile 上、那个钉子怎么
+活过 resume 与 fork、一个岗位怎么带默认值，以及中途钉住怎么在**不重启**的前提下到达一个**正在跑**的
+agent（§3.2.5，D14–D16）；**Q2 活的 backend 切换** —— 把同一个 user-data-dir 交给另一个二进制的机制、
+单向的 Chromium 版本阶梯、指纹变化的代价、席位这道门，以及"这个页面被挡住了"是 agent 提出的一条
+**主张**、绝不是我们制造出来的一次检测（§7.4，D17）；**Q5 窗口绑定** —— 标签页组长出并排布局，
+于是一个被 agent 驱动的浏览器不会丢失它的 owner（§4.6，D18–D19）；**Q6 原生客户端窗口** ——
+在一条差网络上怎么渲染**一个**原生窗口，以及另一件事：agent 到底读不读得到那个客户端的消息
+（§4.7–§4.8，D20–D21）。两个新阶段（P7、P8）与四个新套件承载它们，§10 的总量重新推导，§12 从 14 条
+长到 22 条 —— §1 的实测数字未变，除了本轮在这台机器上重新测过的那几处。
 
 ---
 
@@ -365,6 +376,88 @@ P0 诚实地讲是"没有**我们的**新进程" —— 但它同时也是"一�
 而且 `--allowed-domains` 可用。一个需要保持登录状态的 agent 必须去要一个 profile，而"去要"正是
 VibeSpace 得知这个 profile 存在的方式。
 
+#### 3.2.5 钉住 (pin)：一个会话怎么拿到一个持久 profile，以及那个选择怎么活下去
+
+（Owner 问题 Q1。）§3.2 的默认值是**易逝的**，这是对的：绝大多数浏览要的就是"打开、读、扔掉"。
+但有一类会话不是 —— 一个要登录供应商后台、要守着一个工作账号的会话，它每次都需要**同一个**
+cookie 罐。这一节说：用户怎么用最少的动作把这件事说出来，以及那句话怎么活过 resume、fork 和重启。
+
+**这是一个旋钮，而这个仓库已经有旋钮的阶梯。** `src/resume-continuity.js` 的 `resumeSpawnPick`
+回答的正是这个形状的问题：**显式**选择压过一切；没有显式选择时，一次**续跑**恢复这个对话自己的
+取值；一个**新建**会话拿实例默认值；而答案的**来源**（origin）是被陈述出来的，不是被推断的。
+profile 的钉子逐字用这一条：
+
+| 梯级 | 事实来源 | origin |
+|---|---|---|
+| 用户或 agent 为**这个会话**做的显式选择 | `session-meta.browserProfileId` | `chosen` |
+| 这个**对话**上一次跑在哪个 profile 上（resume / restart） | 注册表 + `_sessionKeyMap` 的联结 | `conversation` |
+| 这个会话所属**岗位**的默认 profile | `task-groups.json` 的 `browserProfileId` | `task-group` |
+| 实例默认（设置项 `browser.defaultProfile`，默认为空） | 设置 | `instance` |
+| 什么都没有 ⇒ 易逝，§3.2.2 的变体 D | —— | `harness` |
+
+`hasSource` 在这里恒为 **true**，理由和 `browserKey` 一样：这个旋钮的来源不是某个 harness 的转录，
+而是**我们自己的注册表**，它按构造是可读的。
+
+**岗位那一级不许改 `resumeSpawnPick` 的签名。** 那是一个 PURE 函数，服务着 model / effort /
+response-style 每一个旋钮；往里加第五个梯级，就是让每一个旋钮背上一个只有 profile 需要的概念。
+做法是这个仓库已经写过的那一个：先把"岗位默认 vs 实例默认"解析成一个值**再**调它，然后按
+`applyOriginHint` 的形状把 `instance` **细化**成 `task-group` —— 只许细化，绝不上调，绝不改动那个
+**值**。
+
+**fork 拿到钉子，但不拿到 key。** 这是两件事：`browserKey` 是**身份**（一个 fork 是一个新对话，
+它不该继承别人的 pinned 标签页，§3.2.1），而 profile 的钉子是**偏好**（"这类活儿用这个登录"），
+分叉出来的那条继承它才是用户想要的。所以 fork 铸新 `browserKey`、**复制** `browserProfileId`，
+并且日志把这两句都说出来。
+
+**UX：钉子只有一个入口，但它出现在四个已经存在的面上。** 它们不是四份实现，是同一个命令
+（`session.pinBrowser`，注册在 `contributions.js` 的命令表里）在四处的 `registerMenuItem`：
+
+* **侧栏会话卡右键** —— `'session-card'` 菜单，`3_admin` 组，紧挨着 `session.switchBilling`
+  （同一类动作：换一个这个会话跑在上面的身份）。这是最快的那条路：右键 →"浏览器 profile"→
+  已有 profile 的列表，顶上两项是 **"从这个会话当前的浏览器新建持久 profile…"** 和 **"不钉（易逝）"**。
+* **Session Properties** —— 一个"浏览器"段，和 `Billing` 段并列：当前 profile、它的**来源**
+  （上表那一列，逐字："你为本会话的选择" / "这个对话自己的取值" / "岗位默认" / "实例默认"）、
+  backend chip（§7.4）、attach 着的会话数，以及同一个选择器。这是**解释**那一面；右键菜单是
+  **动作**那一面。
+* **实时视图窗口的标题栏** —— profile 名字就是那个窗口的标题；点它开同一个选择器。一个正看着
+  浏览器干活的用户，想改的就是**这一个**。
+* **新建会话对话框** —— 一行选择器，若这个会话绑了岗位就默认取岗位的默认值。这一行发出去的是
+  **显式**值，服务端只会读成 `chosen`，所以客户端要像 model / effort 那样把它自己算出来的 origin
+  作为 `spawnOriginHint` 一并发出（B-6b6d r3 那一条：客户端替用户填的东西，线路上必须说出来它是
+  替他填的）。
+
+**"从这个会话当前的浏览器新建一个持久 profile"** 是那个菜单里的第一项，它做的事有名字：**adopt
+（收养）**。在变体 C 下，这是把 `data/` 下那个按 `browserKey` 命名的 scratch 目录**移动**到
+`~/.agent-browser/vs-bp-<id>` 并写一条注册表记录 —— 当下这个登录状态原地保住。在变体 D 下
+**没有目录可以收养**（那正是 D 的全部意义），所以那一项在 D 下的诚实形态是"新建一个空的持久
+profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让用户以为他刚才那次登录被保下来了。
+这是 §7.1 那条能力律的又一个实例：做不到的控件带着理由禁用，而不是在使用时失败。
+
+**中途钉住必须到达一个正在跑的 agent，而且不许重启。** 三条路，各有各的诚实边界：
+
+1. **环境变量到不了。** 一个已经 spawn 的 shell，它的环境不可变。所以我们不去改它，而去改它
+   **指向的那个东西**：变体 D 下 `AGENT_BROWSER_CONFIG` 指着一个文件，那个文件对被钉住的会话变成
+   **每会话一份**（按 `browserKey` 命名），钉一次就是一次 `writeJsonAtomic`；变体 C 下
+   `AGENT_BROWSER_PROFILE` 指着一个**符号链接**，而重指一个符号链接（symlink-to-temp + rename）
+   正是 `src/account-material.js` 的 `repointPoolSymlink` 已经在做的事 —— 这里逐字借它，不写第二份。
+   **它的失败模式也逐字继承：重指对一个已经跑起来的浏览器无效。** 账号池那边的教训是"re-point 在
+   CLI 的**下一个**请求才生效"；这里是"在**下一次浏览器启动**才生效"。所以钉住一个手上有活浏览器
+   的会话，要么等那个浏览器空下来由 keeper 收掉，要么明说"新 profile 从下一个浏览器开始生效"——
+   UI 说哪一句取决于此刻有没有租约，那是一个**可以查的事实**，不是一个猜测。
+2. **agent 自己问。** `vibespace-browser status` 打印当前 profile、它的 origin 和租约。这是拉的
+   那一半，永远可用，零成本。
+3. **推给它，而且默认不花钱。** 钉住是一次**用户动作**，也就是说用户此刻就在那儿打字 —— 所以走
+   `src/session-status.js` 已经有的 `pendingNotice` 通道：把一句 `<system-reminder>` 挂在用户
+   **下一条**消息上。零计费 turn，零新机制。只有当会话**空闲**且用户明确要求时，才走 §4.3.1 那条
+   投递梯（新的具名理由 `'browser-pin'`，和它的生产者在同一次改动里加进 `SPEND_REASONS`），
+   设置项 `browser.announcePin` 默认 **OFF**。这就是 §4.3.1 那张"三个时刻三个答案"表的同一条规矩，
+   套在第四个时刻上。
+
+**岗位默认（一个岗位可以为它名下所有会话带一个默认 profile）** 是 `task-groups.json` 上的一个
+字段和 task-detail 里的一行选择器，与 `contextDir` / `externalVisibility` 同级。它只是上表的
+第三级：它**从不**压过一个会话自己的显式选择，也从不压过这个对话自己的历史取值。绑定或解绑一个
+岗位**不会**去改已经在跑的会话的钉子 —— 一个默认值是新会话的起点，不是对既有会话的追溯改写。
+
 ### 3.3 profile 注册表
 
 `data/browser-profiles.json`，经 `writeJsonAtomic`（tmp+rename）写入，并且像其它每个 store 一样
@@ -386,10 +479,14 @@ VibeSpace 得知这个 profile 存在的方式。
     "owner": { "kind": "task|session|instance", "id": "…" },
     "sharing": "owner",                     // owner | instance (§6.2)
     "record": false,                        // per-profile screencast opt-in
+    "lastChromiumMajor": null,              // §7.4's version ladder — the highest major that has written `dir`
+    "lastBackend": null,                    // which provider wrote it last (forensics beside the major)
     "createdAt": 0, "lastUsedAt": 0, "notes": ""
   }],
   "leases": [{ "profileId": "…", "browserKey": "bk-…", "sessionId": "…", "targetId": "…",
-               "since": 0, "input": "agent", "viewers": 0 }]
+               "since": 0, "input": "agent", "viewers": 0 }],
+  "siteHints": [{ "host": "portal.example", "backend": "cloak",
+                  "by": "agent", "at": 0, "why": "…" }]   // §7.4 — a CLAIM, with who made it
 }
 ```
 
@@ -401,6 +498,10 @@ VibeSpace 得知这个 profile 存在的方式。
 
 * **它是一份注册表，不是一份副本。** Cookie、storage 和指纹材料都留在浏览器自己的目录里。
   搬 98 GB 不是一次迁移，是一次故障。
+* **`provider` 就是 backend，而 §7.4 改的就是这个字段。** 这里刻意**没有**第二个 `backend` 键：
+  一个问题一个答案 —— 本文档对 `browserKey`、对读数槽讲的同一条规矩在这里同样成立。
+  `lastChromiumMajor` 是**另一个**问题（"是谁写过这些字节"），也正是 §7.4 的版本阶梯不能只从
+  目录里取的那个事实。
 * **`id` 是铸出来的，`label` 是自由文本。** 那个 label 永远不会进到路径、argv 或一个被 spawn 的
   命令里 —— 显示字符串绝不进 spawn 那条律（一个带 host 标签的 cwd 曾经进去过，那就是这条律存在的
   原因）。
@@ -479,6 +580,9 @@ VibeSpace 得知这个 profile 存在的方式。
 | keeper、路由、WS 桥接、访问层（`hostId` 是一个参数） | `src/server/browser-keeper.js`、`browser-routes.js`、`browser-access.js` | **ORCH** | `test-browser-live`（heavy，真二进制） |
 | 实时视图窗口、profile 面板 | `src/lib/browser-live-window.js`（+ `registerWindowType`） | **CLIENT** | headless-chrome 腿 |
 | Agent CLI + 手册 | `data/bin/vibespace-browser`、`docs/agent/browser-manual.md`、`AGENT_TOOLS` | agent 面 | `test-browser-cli` |
+| 钉子的阶梯（§3.2.5）+ backend 切换的判定与它的版本阶梯（§7.4） | `src/browser-profiles.js`（PURE 那半）+ `src/server/browser-backend.js`（ORCH：停/重启/按租约重开标签页） | **PURE + ORCH** | `test-browser-pin`（fast）+ `test-browser-backend`（fast 判定，heavy 切换） |
+| 可分栏的标签页组（§4.6）：链上的 `layout`/`split`、分隔条、"生在链里"那条路 | `src/lib/tab-group.js`、`src/lib/layout.js`（持久化 + 同步键） | **CLIENT** | `test-window-binding`（headless chrome） |
+| 原生窗口转发（§4.7）+ 聊天适配器（§4.8） | `src/xpra-serve.js`（SHARED 事实）+ `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` | **SHARED + ORCH** | `test-native-window`（heavy） |
 
 `hostId` 是一个参数，绝不是一个分支：`browser-access.js` 挑传输（本地 keeper / `browser-serve`
 设备 op / ssh），而下游没有任何东西再问一次"这是远程的吗"—— 和 `src/server/opencode-access.js`
@@ -644,6 +748,196 @@ buffer store 一样有一个按年龄的清扫。
 
 ---
 
+### 4.6 窗口绑定：一个组，两个并排的面
+
+（Owner 问题 Q5。）实时视图是它自己的窗口（D9），这是对的 —— 但一个正被 agent 驱动的浏览器窗口
+一旦被拖走，就**看不出是谁的了**。Owner 的提议是把**标签页组**（`src/lib/tab-group.js`）扩展成
+可以并排显示两个标签页，同时仍然是**一个**组。这一节说数据模型、交互、生命周期，以及它为什么
+几乎不需要新的几何代码。
+
+**为什么这几乎是免费的：DOM 早就是对的形状了。** 链模型是
+`chain = { tabs: [hostId, ...guestIds], active }`，host 拥有那个物理 `.window` 元素，而**每个
+guest 的 `content` 元素已经被 append 进 host 的元素里**，靠 `.tab-hidden` 这个 class 决定谁可见
+（`restoreTabChain` 里逐行就是这么做的）。也就是说，"两个标签页并排"在 DOM 层面只是**不要给其中
+两个加 `.tab-hidden`**，把它们放进一个 flex 行，中间加一条分隔条。窗口的**外部**几何完全不变。
+
+**数据模型：链多两个字段，`tabs` / `active` 一个字节都不动。**
+
+```jsonc
+chain = {
+  tabs: ['win-1', 'win-2', 'win-3'],   // 不变：tabs[0] 是 host
+  active: 0,                            // 不变：split 下 = 拿着焦点的那一面
+  layout: 'tabs',                       // 新增：'tabs' | 'split'；字段缺失一律读作 'tabs'
+  split: { pair: ['win-1','win-2'], ratio: 0.5, dir: 'row' }   // 新增：仅 layout==='split' 时有意义
+}
+```
+
+`tabs` 和 `active` 保持原语义，是因为**每一条既有代码路径都读它们** —— `switchTab`、
+`_detachFromChain`、`_renderTabBar`、`removeFromTabChain` 的焦点交接、layouts 的持久化、
+多客户端同步。split 是同一个链的**另一种渲染模式**，不是第二种链。一个链完全可以有 5 个标签页
+而其中 2 个并排：其余的照旧在标签条里，点它们发生什么是一个 owner 决定（D19）。
+
+**持久化走既有的那一个口子。** `layout.js` 已经把 `winState.tabChain = { tabs, active }` +
+`isTabGuest` 写进 layouts，恢复走 `restoreTabChain(validTabs, active)`；新增的两个字段跟着走，
+写入照旧经 `writeLayouts` —— 那是每一次布局写入的唯一口子，也是布局回滚点挂载的地方。
+**字段缺失即 `'tabs'`**，旧记录不需要迁移。
+
+**多客户端同步有一个真的陷阱，现在就点名。** `layout.js` 用 `rw.tabChain.tabs.join(',')` 当键去
+比对远端和本地的链。**那个键里没有 layout。** 于是一个远端客户端把同一组标签页从 tabs 切成 split，
+本地会认为"这个链没变"而什么都不做 —— 一次静默的状态分叉，正是这个仓库反复吃过的那一类。键必须
+变成 `tabs.join(',') + '|' + layout + '|' + (split ? 量化后的 ratio : '')`，或者在比对时显式比较
+这两个字段。这一条要配一条会红的断言，不是一句注释。
+
+**gridBounds 一个字都不用改。** `_syncChainBounds` 把 host 的 `gridBounds` 拷给每个 guest；
+一个 split 链在外面仍然是**一个**矩形，比例只在它内部分割。所以按比例的网格跟踪、snap、桌面切换、
+最小化全部原样工作 —— 这也正是"扩展标签页组"胜过"发明一种新的双窗口容器"的全部理由。
+
+**分隔条的拖动按这个仓库既有的三条律写：** 每次拖动一个**自己的** `AbortController`（绝不是每次
+渲染一个 —— 那会在拖动中途把自己拆掉），mousemove 走 rAF 合并，以及**坐标换算一次**：`uiScale`
+的 body zoom 会缩放 rect 和 `clientX` 却不缩放 `clientWidth`，所以比例必须在同一种像素里算
+（layout px）—— 这和 VNC 指针那次、以及 §4.4 画布那条是同一条律。比例夹在 `[0.15, 0.85]`，
+**双击分隔条回到 0.5**。
+
+**交互：**
+
+* **绑定动作**在实时视图窗口的标题栏上（一个"贴到 <会话名> 旁边"的按钮）。点它 = 把这个窗口并进
+  那个会话的聊天窗口所在的链，把 `layout` 设成 `'split'`、`pair` 设成这两个。已有的"拖图标到图标上
+  合并"照旧工作并产生 `'tabs'`；**拖到标题栏的左半 / 右半**产生 `'split'`（和窗口管理器已有的 snap
+  手感一致），那是新增的那一个 drop 区。
+* **自动绑定**：设置项 `browser.autoBindLiveView`（默认 **ON**），一个会话的浏览器起来、并且它的
+  聊天窗口开着时，实时视图**直接在那个链里出生**，而不是"先创建再合并"—— 后者会产生一次可见的
+  跳动，外加一次布局自动保存的抖动。这要求 `createWindow` 能接受"生在这个链里"，那是本阶段唯一
+  一处真正的窗口管理器新代码。
+* **随时拆开**：从标签条把任一面拖出去，或者标题栏上的"取消绑定"，回到两个自由窗口 —— 走的是
+  已经存在的 `_detachFromChain`。
+* **移动 / 最小化 / 换桌面一起走**，因为它们本来就是一个窗口。这正是 owner 要的那个性质。
+
+**生命周期：agent 会话结束、或者浏览器关掉，面塌回去，组留着。** 链绝不解散 —— 解散会把用户的
+**聊天**窗口挪走，而那是他没要求过的事。所以浏览器那一面消失时，`layout` 回到 `'tabs'`，剩下的
+标签页照旧；链只剩一个时走已有的 `_ungroupLast`。反过来，**聊天**那一面结束时（会话被 terminate）
+什么都不动：一个死会话的历史仍然可读，而那个浏览器可能还归别人用。
+
+**归属徽章。** 浏览器那个标签页带上会话的颜色和名字 —— 颜色取会话卡已经在用的那一份
+（`task-color-seq.js` 的序列），于是"这个浏览器是那个会话的"在一眼之内成立。**一个被多个会话用着
+的 profile 显示所有 owner**：徽章变成 N 个点，title 里逐条列出，数据源就是 §3.3 的 `leases`
+（"谁 attach 着"已经是一个被记录的事实，这里只是把它画出来）。这也是这条设计给 (1.b) 那半
+"多个会话共用一个 profile"的**可见性**答案。
+
+* **移动端 = 只有标签页。** ≤768px 上 split 没有意义，`mobile-nav.js` 把一个 split 链渲染成标签页。
+  但这里有一条必须写死的规矩：**移动端客户端绝不把它自己的这次拍扁写回 layouts.json** ——
+  否则一个人在手机上看一眼，桌面那边的分栏就没了。这和多客户端布局同步那四道防乒乓守卫同类，
+  实现上就是移动端同步布局时原样保留远端的 `layout` / `split` 字段。
+
+### 4.7 原生客户端窗口：渲染一个窗口，而不是一整个桌面
+
+（Owner 问题 Q6。）像微信这样的聊天工具在 Linux 上有原生客户端，WhatsApp 没有。问题是：在一条
+**差网络**上（目标：200 ms RTT / 1 Mbps 下打字仍然可用），怎么把**一个**原生窗口放进 VibeSpace
+的浏览器界面里。
+
+**先把一个结论放在最前面，因为它重排了整张表：在 200 ms RTT 上，没有任何一种远程像素协议能给出
+舒服的打字体验。** 每一次按键的回显都至少是一个 RTT，因为在我们这个部署里，客户端和 VibeSpace
+服务器跑在**同一台机器**上而用户在另一头，所以**没有任何一条路能做本地回显** —— 包括"跑 web 版"
+那一条。差别不在"能不能"，而在**它怎么劣化**：带宽是随**一个窗口**走还是随**整个桌面**走，
+以及协议在高延迟下会不会自己降质而不是排队。业界对遥控桌面的通行经验也是这一条：延迟压过带宽。
+
+由此，真正的建议是一条**架构**建议而不是一条协议建议：**能让 agent 对着协议或 DOM 说话的路，
+永远优于让它对着像素说话的路。** 一个 web 版聊天工具，agent 走 CDP，画面只给人看；一个原生客户端，
+画面**就是**两边唯一的接口 —— 这让原生客户端对 agent 而言结构性地更差，而不只是慢一点。
+
+| 路 | 是什么 | 差网络下的排名 | 判定 |
+|---|---|---|---|
+| **(v) 跑它的 web 版，装在本设计的一个 profile 里** | WhatsApp Web 就是一个 web 应用，它活在一个指纹 profile 里，不需要任何原生客户端 | **1（最好）** | **首选，只要那个应用有可用的 web 版。** 零新技术栈：§3 的 profile、§4 的实时视图、§7.4 的 backend 全部照旧适用，而 agent 走 CDP 不走像素 |
+| **(iii) Xpra seamless + HTML5 客户端** | 逐**窗口**转发 X11 应用，自适应编码（webp / jpeg / h264 / vp8 / av1），WebSocket 传输，Xvfb / Xdummy 下无头可跑 | **2** | **原生客户端的首选。** 带宽随那**一个**窗口走而不是整个桌面；MPL-2.0；6.6 起有 http digest / scram 认证与 http origin 校验，当前版本 7.0（2026-08-27） |
+| **(ii) KasmVNC / TigerVNC 自适应编码** | 仍然是整个桌面，但有 WebP / JPEG 质量阶梯和 video mode | 3 | 备选。比今天好，但仍然为一个窗口付整个桌面的价 |
+| **(i) 今天的整桌面 noVNC**（`src/vnc.js`） | 一个 framebuffer，一条输入队列 | 4（最差） | 保留为兜底（D10 已经这么决定），不作为这件事的答案 |
+| **(iv) Wayland 那一族** | waypipe / wayvnc / weston-rdp / Broadway | —— | **没有一条通向浏览器。** waypipe 要求客户端那边有一个 Wayland 合成器，而浏览器不是；wayvnc / weston-rdp 是把问题变回 VNC / RDP；Broadway 只服务 GTK 应用 |
+
+**Xpra 的接线，和 §4.2 是同一个形状。** Xpra 的 HTML5 客户端通过 WebSocket 连它自己的服务器；
+我们**不**把那个端口暴露给浏览器，而是照 `/api/vnc` 和 `/api/browser/stream` 的老办法在服务端桥接
+（`GET /api/xpra/stream?window=<id>`，cookie 鉴权，同一套背压纪律）。这不是我们发明的接法：
+`jupyter-xprahtml5-proxy` 做的正是"用 Jupyter 自己的鉴权把 Xpra 包起来"。客户端那一半有两个选择
+—— 把上游的 HTML5 客户端当静态资源自己托管（MPL-2.0，官方文档说明可以装到别的 web server 的路径
+下；已知问题：在 iframe 里它会撞上 `sessionStorage` 的访问限制），或者用 `xpra-html5-client`
+（npm，Apache-2.0，2.3.0，一个 TypeScript 客户端库）自己画 —— 后者更贴合 §4.4 那个"窗口是我们的"
+的形态。**这是一个 owner 决定（D21）**，因为它是"托管别人的整个前端"与"自己写渲染层"之间的取舍，
+而这个仓库对前一种有明确的偏见（§4.2 拒绝内嵌上游 dashboard 的理由逐字适用）。
+
+**每个应用的建议：**
+
+* **WhatsApp —— 走 (v)。** Linux 上没有官方桌面客户端，而 WhatsApp Web 是一个正经 web 应用；
+  多设备模式下最多 4 个链接设备，且在主手机离线时可独立工作**最多 14 天**。那 14 天是一个真实的
+  运维成本，要写进 UI（"这个链接设备需要在 <日期> 前见一次手机"），而不是等它某天静默掉线。
+* **微信 —— 走 (iii)**，用官方 Linux 原生客户端（腾讯 2024 年 11 月发布，deb / rpm / AppImage）
+  跑在 Xpra 的 seamless 模式里。web 版（`wx.qq.com` / `web.wechat.com`）在很多账号上被拒绝登录，
+  **但这是账号级的策略，而我没能核实它今天的确切范围**（§12），所以流程上必须是"先拿 owner 自己
+  的账号试一次 web 版，失败了再上原生客户端"，而不是直接假设需要装一个原生客户端。
+
+**这条路的资源账要和 §1.2 用同一把尺子量。** 一个 Xvfb + 一个聊天客户端 + 一个 Xpra 服务器，是
+又一份进程、RSS 和 inotify instance（那个 128 / uid 的天花板本机已经撞过）。所以它和浏览器共用
+§3.5 的那个上限与 runaway 守卫，而不是自己再发明一套 —— keeper 已经是这个设计里数得清东西的
+那个部件。（本机现状，只读实测：`Xvfb` 装了，`xpra` 和微信客户端都**没有**装 —— 所以这一节的
+每一个数字在 P8 真装起来之前都是**未实测**的。）
+
+### 4.8 数据那一半：读一个本地客户端自己的 store
+
+把画面搬进来解决的是"人能不能用"。"**agent 能不能读到这些消息**"是另一个问题，而它的答案对两个
+应用**不一样**，原因是可核实的加密事实，不是偏好。
+
+**WhatsApp Web：元数据可读，正文只能在页面里读。** WhatsApp Web 把消息存在 IndexedDB 里，正文用
+AES-CBC 加密；明文的那部分包括联系人、群，以及消息的元数据（发件人、收件人、时间戳、会话）。
+关键在密钥：它们是通过 **CryptoKey API** 存的 **non-extractable** 密钥 —— 这个 API 的目的就是让
+JavaScript 能**用**它们而无法**导出**它们。已知的读取正文的做法（一篇被广泛引用的公开写作）是
+**在页面里跑代码**：monkey-patch `crypto.subtle.decrypt`，等它被用能解密的参数调用时把那把 key
+留下来。
+
+于是适配器的形态是被这个事实**决定**的，不是被我们选的：**它是一段注入到这个 profile 里的
+init-script，在页面内部读那个 store 再把结果送出来** —— 而这正好是本设计已经握在手里的能力
+（0.37 起新标签页在**首次导航之前**继承 session 的 init-script；CDP 本来就在）。它的诚实代价要
+写清楚：这是在用户**自己的**登录会话里自动化 WhatsApp 自己的 web 客户端 —— 没有第三方协议实现，
+没有新的设备注册，所以它**不是** Baileys 那一类风险；但它仍然是对 web 客户端的自动化，仍然在
+ToS 的灰区里。
+
+**为什么不用协议库。** `whatsapp-web.js` 本质上和我们这条路同类（它也是驱动一个真的 WhatsApp
+Web），而 **Baileys 是从头实现协议**，也就是注册成一个**新的链接设备**。公开的经验报告一致地说
+这一类"逆向 WhatsApp Web 的工具（Baileys / WAHA / Evolution API）带有严重封号风险，通常 2–8 周
+被检出"，而 Meta 的检测面包括注册时的设备指纹和消息行为分析。所以取舍是清楚的：**读真客户端
+自己的 DB（在它自己的页面里）** 优于 **另起一个协议客户端**。如果用途其实是"给客户发消息"，
+那正确答案是官方 WhatsApp Business API（另一个产品、另一个号码、按政策做几乎零封号风险），
+而不是把 owner 的私人号码接上自动化。
+
+**微信：技术上做得到，建议不做。** 官方 Linux 客户端的本地库是 SQLCipher（腾讯的 WCDB），密钥
+在进程内存里以一个可识别的格式存在，公开工具确实能在 Windows / macOS / Linux 上把它抠出来再解密
+`msg_*.db`。三条理由让我不建议把它做成产品的一部分：
+
+1. **它是在扒一个专有客户端的进程内存。** 这一类东西按构造在每一次客户端更新时都可能碎掉，
+   而"碎掉"的形态是**安静地读到垃圾**。
+2. **本机实测的边界：`/proc/sys/kernel/yama/ptrace_scope` 是 `1`**，也就是只有**祖先**进程可以
+   ptrace（读 `/proc/<pid>/mem` 同样要过 `PTRACE_MODE_ATTACH`）。用户自己启动的微信，VibeSpace
+   读不到；要读得到，就得由**我们**去启动它 —— 而"为了能读它的内存所以由我们来启动它"这句话，
+   写出来就知道它不该是一个默认行为。
+3. **它明确越过 ToS**，并且在某些法域里是一个法律问题，不是一个工程问题。
+
+所以微信的建议是分开的：**画面**走 §4.7 的 Xpra（给人用），**数据**走官方渠道（公众号 / 企业微信
+的开放 API），如果 owner 需要的是让 agent 收发企业消息。若 owner 明确要求本地库那条路，它是一个
+**显式的、单独的 owner 决定（D20）**，并且应该活在一个**插件**里而不是核心里 —— 这正是 D2 给
+CloakBrowser 划的那条线：专有的、带法律面的东西走同意流程。
+
+**适配器怎么接进来。** VibeSpace 已经有这个接口，而且它不是新的：Communication Channels v1
+（`src/msg-acl.js` + `src/server/conversation-deliver.js` + `data/bin/vibespace-msg`）的设计里就
+写着"外部来源（Gmail / Lark / Slack）之后用它们自己的 `source` 标签喂同一条梯子；每一个 stash
+信封本来就带一个"。于是一个聊天适配器**不是**一个新子系统：
+
+* 它是一个**异步本地客户端源**：一个 `create(deps)` 工厂，暴露 `start()` / `stop()` / `state()`
+  和一个产出**信封**的事件（`{source: 'whatsapp', threadId, from, text, at, attachments}`），
+  而 `src/gmail-sync.js` 就是这个仓库里已有的形状（一个远端 store 被同步成本地事实）。
+* 出站走**同一条投递梯** `deliverToConversation`，因此自动继承 stash、peer 卡片，以及 §4.3.1 的
+  花钱门 —— 一条从 WhatsApp 进来的消息把一个**空闲**会话叫醒，就是一个计费 turn，它必须有一个
+  已声明的理由（`'chat-inbound'`），并且和它的生产者在同一次改动里加进 `SPEND_REASONS`。
+* 可达性走 `msg-acl.js` 那套岗位边界，而不是第二套 —— 并且逐字继承它的诚实声明：那是一条
+  **协调**边界，不是安全边界。
+* 每个适配器带一行**能力**（§7.1 的那条律）：能不能读历史、能不能发、正文可不可读、多久要见一次
+  手机。做不到的控件带着理由禁用，而不是在使用时失败。
+
 ## 5. 面向 agent 的那一面
 
 ### 5.1 `vibespace-browser`（STATIC 跟踪，在 `AGENT_TOOLS` 里）
@@ -658,7 +952,12 @@ vibespace-browser use <label|id>                 # attach THIS session to a prof
 vibespace-browser new <label> [--provider …] [--proxy …] [--fingerprint …]
 vibespace-browser detach                         # drop the lease, close my tab
 vibespace-browser watch                          # print the live-view path for the user
-vibespace-browser status                         # my tab, my lease, who holds input
+vibespace-browser status                         # my tab, my lease, who holds input,
+                                                 #   my profile AND ITS ORIGIN (§3.2.5)
+vibespace-browser pin <label|id> | --none        # pin THIS session (or unpin); a mid-session pin
+                                                 #   applies from the next browser launch (§3.2.5)
+vibespace-browser backend [<name>]               # which backend, what else exists, propose a switch (§7.4)
+vibespace-browser blocked --url <u> [--why <c>]  # I was blocked here — a CLAIM, never a detection (§7.4)
 vibespace-browser -- <agent-browser args…>       # run agent-browser with this session's flags
 ```
 
@@ -700,7 +999,11 @@ AGENT_BROWSER_CDP=<the profile's cdp url>       # ← removed
 
 ### 5.3 面向用户的可发现性
 
-* 会话卡片 / Session Properties：这个会话 attach 在哪个 profile 上、观看者计数、谁持有输入。
+* 会话卡片 / Session Properties：这个会话 attach 在哪个 profile 上、观看者计数、谁持有输入 ——
+  外加**钉子**与它的来源（§3.2.5）和 **backend chip**（§7.4）。钉子是**一个**命令
+  （`session.pinBrowser`）注册在四个面上，不是四份实现。
+* 实时视图窗口的标题栏：profile 名字（点它 = 选择器）、backend chip，以及把它贴到所属聊天
+  窗口旁边的**绑定**动作（§4.6）。
 * 一个 ⚙ 面板（或侧栏分区）：profile 列表、owner、最后使用时间、磁盘大小、"停止"、"忘记"、
   "打开实时视图"。§1.2 里那些未注册的目录（第一轮 53 个，重新测量时 56 个 —— 这个计数会自己往上漂）
   在这里作为可收编的候选出现（§8）。
@@ -878,6 +1181,120 @@ AGENT_BROWSER_CDP=<the profile's cdp url>       # ← removed
 
 ---
 
+### 7.4 把一个活着的 profile 切到另一个 backend
+
+（Owner 问题 Q2。）用户或 agent 撞上一个默认 Chromium 打不开的页面，需要**立刻**换一个 backend，
+而且**不丢 cookie / localStorage / 登录**。这一节说机制、UX、agent 工具、花钱的门，和失败形态。
+
+**机制：backend 是 profile 的一个属性，不是浏览器的。** 注册表里 `provider` 那个字段本来就在
+（§3.3）；切换就是改那个字段，然后让 keeper 重来一遍。三个已核实的事实决定了它能做到什么：
+
+* **CloakBrowser 接受一个显式的持久目录。** 仓库文档里的 `launch_persistent_context("./my-profile")`
+  就是这条路；agent-browser 自己从 0.8.7 起也支持自定义可执行文件路径。所以"同一个 user-data-dir，
+  换一个二进制去打开"在两边都是被支持的形态。
+* **指纹 seed 是一个启动参数，不存在 profile 里。** 仓库文档逐字：`--fingerprint=seed` ——
+  "同一个 seed = 跨启动同一个指纹。session 持久化（回头访客）用这个。" 于是耐久的那一半是
+  **我们注册表里的 `fingerprintSeed`**，而不是那个目录。§3.3 本来就有这个字段，现在它有了职责。
+* **Chromium 的 profile 版本戳是单向的。** 一个被**更新**的 Chromium 写过的 user-data-dir，
+  旧版打开会被拒绝（"Your profile can not be used because it is from a newer version of Google
+  Chrome"）。而这里的版本差是真实存在的：CloakBrowser **免费档是 Chromium 146，Pro 档是 151**
+  （仓库文档逐字，补丁数分别是 58 / 73）。所以**升级是单向的**：这个目录一旦被更高的那个大版本
+  打开过，就回不去了。
+
+由此得到**版本阶梯**，它是这次切换的核心判定，而且必须在动任何字节**之前**跑：
+
+| 情形 | 做什么 |
+|---|---|
+| 目标 backend 的大版本 **≥** 这个目录上次被写的大版本 | 直接切，记下新的大版本 |
+| 目标 backend 的大版本 **<** 上次被写的大版本 | **拒绝**，点名两个版本，给两条出路：升级那个 backend，或者**克隆**这个 profile（下面导出那一半，明说会丢什么） |
+| 这个目录**没有**被记过版本（收养来的，或本设计之前就存在的） | 只读地读它自己的 `Last Version`；读不出来就当"未知"，**拒绝自动降级**，要用户显式确认一次 |
+
+"上次被谁的哪个大版本写过"记在**注册表**里（`lastChromiumMajor` + `lastBackend`），理由是这个
+仓库反复学到的那一条：**守卫读的那个事实，不能是坏写会产生的那个事实**。目录里的 `Last Version`
+是浏览器自己写的，它当然是主证据；注册表这一份是我们自己写的，它让"这个 profile 被 Pro 打开过"
+在目录读不出来时仍然可判。两者矛盾时取**更高**的那个 —— 保守方向：拒绝一次合法的降级，比放行
+一次会毁掉 profile 的降级便宜。
+
+**切换的动作序列，以及租约为什么活得下来：**
+
+1. 记下每一份租约的 `lastUrl`（0.34 起 JSON 里就带这个字段）和 `browserKey`。
+2. **停掉浏览器进程**（`--pin-tab` 的绑定、CDP endpoint、`targetId` 全部随进程死掉）。这一步不是
+   可选的：Chromium 的进程单例意味着一个 user-data-dir 同一时刻只能被一个浏览器打开
+   （Chromium 自己的 `user_data_dir.md` 逐字："two running Chrome instances cannot share the same
+   user data directory"），所以**不存在**"活着交接"这回事。
+3. 用新的 backend、**同一个目录**、**同一个 `fingerprintSeed`** 启动。
+4. 按租约表逐条 `tab new` 到它自己的 `lastUrl`、重新 `--pin-tab`、把新的 `targetId` 写回租约。
+5. 租约**从没有被销毁过** —— 它按 `(profileId, browserKey)` 查找（§3.3），只有 `targetId` 被重铸。
+   所以会话不用 re-attach，agent 的下一条命令落在它自己的标签页上。
+
+对 agent 和对用户，中间那一段是**一次 `browser_restarting` 的具名拒绝**，不是一个超时 —— 和
+`tab_gone` / `browser_paused` 同一族。
+
+**指纹变了，站点看到的就是一台新机器。** 这一条要在对话框里说满，因为它是这次切换唯一会**丢**
+东西的地方：cookie 罐原封不动地过去了，但一个把 session 绑在指纹上的站点（反爬厂商做的正是这件事）
+会把你当成新设备，于是**可能要求重新登录**。所以：
+
+* 一个 profile 的 `fingerprintSeed` **创建时铸一次**，之后每次切换都带着它走；
+* 从 `chromium`（没有 seed）切到 `cloak`（有 seed）**按定义**就是一次指纹变化，对话框据此措辞：
+  "这个 profile 之前没有稳定指纹，切过去之后站点可能要求你重新登录一次"；
+* 反过来（`cloak` → `chromium`）同样成立，而且**还要**过版本阶梯 —— 那正是降级被拒绝的常见路径。
+
+**"导出 / 导入"是明说会丢东西的那条备用路**，留给跨机器、跨 provider（云 provider 的目录不在我们
+手里）的情形。agent-browser 自己的 `--state` / `--restore` 走的是 Playwright 的 `storageState`
+形状：cookie、localStorage，以及**可选打开的** IndexedDB 快照（Playwright 文档逐字："Set to `true`
+to include IndexedDB in the storage state snapshot"），**不含** sessionStorage。而且有一条硬边界，
+它同时也是 §4.8 的关键：**一个不可导出的 `CryptoKey` 不可能被 storageState 带走**（那正是"不可
+导出"的定义），所以像 WhatsApp Web 那样把本地解密密钥存成 non-extractable CryptoKey 的应用，
+导出 / 导入之后**登录不会跟过去**。这不是我们的缺陷，是那个 API 的目的；对话框必须点名"这条路会
+丢掉哪些站点"，而不是笼统地说一句"可能需要重新登录"。
+
+**UX：**
+
+* **backend chip**，画在两个地方：实时视图窗口的标题栏，和 profiles 面板里那一行。它显示当前
+  backend + 大版本（`chromium 14x` / `cloak 146 (free)`），点开就是切换器。它是 chip 不是藏起来的
+  菜单，因为"我现在跑在哪个浏览器上"正是用户在被挡住那一刻唯一想知道的事。
+* **被挡住那个状态上的一键"用 CloakBrowser 打开"。** 这个状态从哪来见下面 agent 那一段 ——
+  关键是这个按钮**只在有人主张被挡住时**出现，而且旁边写着**是谁**主张的。
+* **每个 profile 的默认 backend**（注册表字段），于是"这个 profile 就是干这类活的"只说一次。
+* **每站点记忆**："这个站点需要 cloak"。键用**精确 host**，不用可注册域 —— 用可注册域要引入一份
+  public suffix list，那是一个会过期的第二份事实源；精确 host 的代价只是同一个站点的两个子域各记
+  一次。这条记忆存的是一条**主张**，所以它连**谁在什么时候为什么主张的**一起存
+  （`{host, backend, by: 'agent'|'user', at, why}`），并且在 profiles 面板里可以逐条删除。
+
+**agent 工具：**
+
+```
+vibespace-browser backend                    # 我现在跑在哪个 backend 上，可选的有哪些，各自能不能用
+vibespace-browser backend <name>             # 提议切到 <name>
+vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>]
+                                             # 我在这个页面上被挡住了 —— 这是一条主张，不是一次检测
+```
+
+**`blocked` 是 agent 报的，不是我们测的，而且这句话要写进协议里。** 我们没有可靠的办法从一个页面
+看出"这是反爬拦截"：能确定性拿到的只有 HTTP 403/429 和已知挑战页的签名。所以服务端**永不**自己
+声称检测到了拦截；它记录一条带署名的主张，UI 显示"agent 说这个页面被挡住了"，而那个一键按钮是
+**用户**的动作。反过来，当一次导航确实拿到 403/429 时，`vibespace-browser` 的错误里带上
+`hint: 'may-need-cloak'` —— 这是一条**提示**，措辞上必须和一次检测能区分开（和 §4.3.1 那条"我们
+自己发的生产者必须有名字"同族：一条主张必须带上它的来源）。
+
+**切换是一个提议，要过 owner / 租约那一关。** 一个 profile 可能有好几个会话 attach 着（§3.4），
+而切换会**停掉所有人的浏览器**。所以：`sharing: "owner"` 下只有 owner 的会话可以直接切；其余情况
+（有其它会话持着租约、或者有人持着 `input: 'user'`）一律降级成一条**提议** —— 一条写给 owner 的
+"For you" 条目，点名是谁提的、为了哪个 URL、会影响哪几个会话。**正在被人接管（`input:'user'`）的
+profile 永远不会被一个 agent 的提议打断。**
+
+**花钱的门：CloakBrowser 是按并发 session 计费的。** 免费档是**一个**并发 session（需要 GitHub
+登录），Pro 是 5 / 20 / 200 / 2000（仓库文档逐字）。所以切换对话框必须显示**席位**：已用 / 总数 /
+这次切换之后。到顶时的行为和 §3.5 的浏览器上限同一个形状 —— **大声拒绝，点名此刻占着席位的那几个
+profile，并给出"停掉那一个"**。这个计数是 keeper 的活（它是这个设计里第一个数得清东西的部件），
+而且它是**每 provider** 的，不是全局的。免费档那个"一个并发 session"意味着：第二个 cloak profile
+想跑，必然要么等，要么买 —— 把这件事藏起来，用户会对着一个看起来随机失败的浏览器排查半天。
+
+**失败形态：那个二进制没装。** 和别处一样：一条**具名**拒绝（`backend_unavailable`，带 provider
+名和它缺什么），profiles 面板与切换对话框里一行**禁用并写明理由**的控件，外加 Manage Agents 里的
+一个安装动作（`cloakbrowser` 是一个 npm 包，装它是一次用户动作，并且要过 §7.2.1 的出网前置条件
+—— **先测量，再安装**，不是反过来）。**永不**在用户没说要装的时候自动去下那 200 MB。
+
 ## 8. 从共享默认 profile 迁移
 
 什么都不删，那 98 GB 一个字节都不搬。
@@ -917,6 +1334,10 @@ AGENT_BROWSER_CDP=<the profile's cdp url>       # ← removed
 | `test-browser-live` | heavy | P2、P3 | 真浏览器 + 真流 + 真桥接：一个 profile 上的两个会话各自驱动自己的标签页、永远碰不到对方的（I2 的证明，配一个**能复现那次劫持的修前对照**）、一个观看者只靠 cookie 鉴权就看到帧、背压守得住、接管拒绝 agent 输入而交还恢复它。窗口在 375×667 以及一个非 1 的 DPI zoom 下各跑一条 headless-chrome 腿。 |
 | `test-browser-providers` | fast + heavy | **P4** | fast：provider 能力行，以及一个 provider 对它缺失的能力产出的确切拒绝（一个被禁用的控件说出它的理由），外加 CloakBrowser 出网证明记录的存在与形状（§7.2.1）—— 一个带 `blocks:` 主张而其 caps 行并不是 false 的 provider 行会 FAIL，`local-oracles` 那套纪律。heavy：真的 `browser-serve` 守护进程 op 打在一个真守护进程上，**并断言它的能力门**（旧守护进程绝不被问 —— 未知 op 会挂住），以及通过 `tcpForward` 的远程 `cdp` provider。 |
 | `test-browser-housekeeping` | fast | **P5** | 把保留/收编这个**判定**当作一个 PURE 函数来测，并打印它放过了什么以及为什么 —— 本仓库自己的清扫律：**绝不要求一次没有任何东西被允许执行的移除**（对任何可能正在飞的东西给一个宽限窗口，并连同它的年龄一起点名）。负控：在没有一次显式人类动作的情况下，永远不会有任何东西被提议删除；以及 `forget` 在移除**之前**先归档。 |
+| `test-browser-pin` | fast | **P0、P1** | 钉子的阶梯当作一个 PURE 判定来测：显式 / 对话 / 岗位 / 实例 / 无，以及每一级陈述出来的 ORIGIN，还有 fork **复制钉子并铸新 key**（§3.2.5）。中途那一半是一条 WIRING PIN：被重指的符号链接（或被重写的每会话 config）才是下一次启动解析的东西，而套件断言**正在跑的那个浏览器不受影响** —— 那诚实的一半。负控：岗位默认永远压不过会话自己的选择；绑定一个岗位不会改写一个正在跑的会话的钉子。 |
+| `test-browser-backend` | fast + heavy | **P4** | fast：版本阶梯当作一个 PURE 判定跑一张矩阵（目标 ≥ / < / 无记录，注册表与 `Last Version` 矛盾时取**更高**那个）、席位算术与它的拒绝文案、带着**是谁主张**的 site-hint 记录，以及 `blocked` 是一条服务端绝不自己制造的主张。heavy：一次真的切换 —— 停、按租约逐条把标签页开回它的 `lastUrl`、重新 pin、改写 `targetId`，**租约对象从未被销毁**；外加"没装"那条点名 provider 的拒绝。 |
+| `test-window-binding` | fast + heavy | **P7** | fast：带 `layout`/`split`/`ratio` 的链模型 —— 缺失的 `layout` 读作 `'tabs'`、比例被夹住，以及**只有 layout 变化时多客户端同步键也必须变**（§4.6 点名的那个陷阱，以修前的键作它的负控）。heavy（headless chrome）：绑定 → 一个窗口里两个面、非 1 的 DPI zoom 下分隔条拖动落在指针所在处、移动/最小化/换桌面一起走、关掉浏览器那一面塌回标签页**而聊天窗口不动**，以及移动端视口渲染成标签页**且不把这次拍扁写回去**。 |
+| `test-native-window` | heavy | **P8** | 一个真 Xpra 服务器 + 一个跑在 Xvfb 下的真 X 客户端，经真正 cookie 鉴权的桥接：一个窗口到达、输入送得进去、流端口从浏览器永远够不着、背压纪律守得住。当 `xpra` 或 `Xvfb` 缺席时**带证据大声 SKIP**（2026-09-10 本机实测：`Xvfb` 装了，`xpra` 没装）。§4.7 需要的带宽/延迟数字在这里**产出**而不是断言 —— 套件把它们记在一个具名预算下，于是回归看得见。 |
 | `test-spend-paths` | fast | **P3** | 不是一个新套件 —— 是那个既有的普查，而这个功能不能把它弄红。它的 `deliver-ladder` primitive **按站点**匹配 `deliverToConversation(`，所以 `src/server/browser-*.js` 里任何一次公告都需要那道门在其上方作用域内；而它的封闭集断言意味着 `'browser-handback'` 必须在同一次改动里既被声明又被使用（§4.3.1）。 |
 | `test-architecture` | build | 全部 | 层边界：PURE 不 import 任何东西、SHARED 绝不向上够、daemon bundle 不携带 orchestrator 标记、`server.js` 待在它的行数 ratchet 之内，以及 §44 —— 每个设置分类都会被渲染，于是 `browser.announceIdleHandback` 和其余各项都能到达一个用户打得开的分区。 |
 | `test-session-schema` | fast | P1、P3 | 每一个新的 `session._field`（`_browserProfileId`、`_browserKey`、`_browserTargetId`、`_browserInput`）都有一条 owner 行。 |
@@ -936,21 +1357,24 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
 
 | 阶段 | 内容 | 轮次（点值） | 区间 | 天（点值） | 自身能否交付价值？ |
 |---|---|---|---|---|---|
-| **P0 — 零干扰** | spawn 时的 `AGENT_BROWSER_SESSION` + `_NAMESPACE` + 显式 `_IDLE_TIMEOUT_MS`（本地 + 远程路径）、**§3.2.2 的 user-data-dir 变体及其回落梯子**、`browserKey` 连续性梯子（§3.2.1）、版本下限探测并给出一条诚实的"你的 agent-browser 对共享 profile 来说太老了"提示、k = 1/4/12 的资源测量（§1.2、§12.10）、工具介绍里的一行、`docs/agent/browser-manual.md`、`test-browser-profiles`（环境那一半，断言解析出来的目录）。 | **4** | 3–6 | 2 | **能 —— (1.b) 中"停止互相干扰"那整半。** |
-| **P1 — 注册表 + keeper + 租约** | `src/browser-profiles.js`（PURE）、`browser-keeper.js` 含**开机对账和并发天花板**、`data/browser-profiles.json` + 原子写 + 广播、`/api/browser/*`、attach/detach/租约、`vibespace-browser` CLI + `AGENT_TOOLS` + 手册、迁移步骤 1–2。 | **6** | 5–9 | 3 | 能 —— 按任务的 profile 并发共存，带 `--pin-tab` 语义。 |
+| **P0 — 零干扰** | spawn 时的 `AGENT_BROWSER_SESSION` + `_NAMESPACE` + 显式 `_IDLE_TIMEOUT_MS`（本地 + 远程路径）、**§3.2.2 的 user-data-dir 变体及其回落梯子**、`browserKey` 连续性梯子（§3.2.1）、版本下限探测并给出一条诚实的"你的 agent-browser 对共享 profile 来说太老了"提示、k = 1/4/12 的资源测量（§1.2、§12.10）、工具介绍里的一行、`docs/agent/browser-manual.md`、`test-browser-profiles`（环境那一半，断言解析出来的目录），**外加钉子的环境间接层（§3.2.5）—— 每会话生成的 config 或那条被重指的符号链接 —— 于是中途钉住永远不需要重启**。 | **5** | 4–7 | 2.5 | **能 —— (1.b) 中"停止互相干扰"那整半。** |
+| **P1 — 注册表 + keeper + 租约** | `src/browser-profiles.js`（PURE）、`browser-keeper.js` 含**开机对账和并发天花板**、`data/browser-profiles.json` + 原子写 + 广播、`/api/browser/*`、attach/detach/租约、`vibespace-browser` CLI + `AGENT_TOOLS` + 手册、迁移步骤 1–2、**钉子的阶梯 + 岗位默认 + 四个钉子面 + "收养这个会话的浏览器"（§3.2.5）**、`test-browser-pin`。 | **8** | 6–12 | 4 | 能 —— 按任务的 profile 并发共存，带 `--pin-tab` 语义。 |
 | **P2 — 实时视图** | `/api/browser/stream` 桥接（+ 背压）、`browser-live` 窗口类型、多观看者扇出、URL/标签页/console 面板、DPI 正确的画布、`test-browser-live`。 | **6** | 5–9 | 3 | **能 —— (1.c) 减去"手"。** |
 | **P3 — 接管 / 交还** | 租约输入持有者、模式切换器、输入转发、`browser_paused`、**§4.3.1 的花钱接线**（`SPEND_REASONS` 里的 `'browser-handback'`、那次投递梯调用、默认 OFF 的 `browser.announceIdleHandback`、让 `test-spend-paths` 普查保持绿）、空闲交还、agent 光标、`--confirm-actions` 卡片。 | **5** | 4–7 | 2.5 | 能 —— 补全 (1.c)。 |
-| **P4 — Provider** | Provider 行 + 能力门控；**先执行并记录 CloakBrowser 的出网前置条件**（§7.2.1），然后在免费档上通过 loopback `cloakserve` 加一份出网白名单可选开启；通过 `tcpForward` 的远程 `cdp` provider；`browser-serve` 设备 op（三触规则）；`test-browser-providers`。 | **6** | 5–9 | 3 | 能 —— (1.a)，以及机队那条故事线。 |
+| **P4 — Provider** | Provider 行 + 能力门控；**先执行并记录 CloakBrowser 的出网前置条件**（§7.2.1），然后在免费档上通过 loopback `cloakserve` 加一份出网白名单可选开启；通过 `tcpForward` 的远程 `cdp` provider；`browser-serve` 设备 op（三触规则）；**活的 backend 切换（§7.4）—— 版本阶梯、带着走的 seed、按租约重开标签页、对话框里的席位、每站点记忆，以及 agent 的 `blocked` 主张**；`test-browser-providers` + `test-browser-backend`。 | **9** | 7–13 | 4.5 | 能 —— (1.a)，以及机队那条故事线。 |
 | **P5 — 录制 + 家务** | 按 profile 的 screencast 可选开启、转录缩略图、保留期清扫、带大小的 profile 面板、孤儿收编（迁移步骤 3）、`test-browser-housekeeping`。 | **4** | 3–6 | 2 | 能 —— 转录那一半。 |
 | **P6 — 硬中介** | 做 CDP 中介的代理：target 作用域限定 + 接管期间拒绝输入、每会话的 CDP URL。**这是 `sharing: "instance"` 的一个明确前置条件**（§6.2），而不只是在 D6 判定协作式租约不够时才有的一个选项。 | **6** | 4–9 | 3 | 只作为强制执行 —— 但 `sharing: "instance"` 在它落地之前一直被拒绝。 |
+| **P7 — 窗口绑定** | 标签页链上的 `layout`/`split`/`ratio`、标题栏的绑定动作 + 标题栏左右两半的 drop 区、"生在链里"的 `createWindow` 路径、分隔条（每次拖动一个控制器、rAF、坐标只换算一次）、从 `leases` 来的归属徽章、layouts 持久化 + **同步键的修复**、移动端只用标签页且不写回、`test-window-binding`。 | **5** | 4–8 | 2.5 | 能 —— 被 agent 驱动的浏览器不再丢失它的 owner。**需要 P2**（得先有实时视图可绑）；与 P3–P6 无关。 |
+| **P8 — 原生客户端窗口** | Xpra 那一级（§4.7）：一个跑在 §3.5 那个上限与 runaway 守卫之下的 keeper、按 `/api/vnc` 形状的 `GET /api/xpra/stream`、按 D21 决定的客户端那一半、200 ms / 1 Mbps 的实测，以及按应用分路（WhatsApp → profile 里的 web 版；微信 → 原生客户端，且只在 web 版试过之后）。然后是 §4.8 里 owner 点名的那个应用的适配器，带自己的 `source` 标签喂既有的 Communication Channels 梯子，并带一个已声明的 `'chat-inbound'` 花钱理由。`test-native-window`。 | **7** | 5–11 | 3.5 | 能 —— 但它是本文档里核实程度最低的一个阶段，而它的区间就是这么说的。除了 §4.2 的桥接形状之外与任何阶段都无关。 |
 
 **总量，按区间而不是按点值公布**（第一轮只公布了一个区间的点估计，而它自己的风险段落指的正是那个
 区间的上端）：
 
-| 范围 | 区间 | 点估计 | **风险加权**（P2 和 P4 取各自区间上端，其余取点值） |
+| 范围 | 区间 | 点估计 | **风险加权**（P2、P4 和 P8 取各自区间上端，其余取点值） |
 |---|---|---|---|
-| **P0–P5** | **25–46 轮 ≈ 12.5–23 天** | 31 ≈ 15.5 天 | **37 轮 ≈ 18.5 天** |
-| **P0–P6** | **29–55 轮 ≈ 14.5–27.5 天** | 37 ≈ 18.5 天 | **43 轮 ≈ 21.5 天** |
+| **P0–P5** | **29–54 轮 ≈ 14.5–27 天** | 37 ≈ 18.5 天 | **44 轮 ≈ 22 天** |
+| **P0–P6** | **33–63 轮 ≈ 16.5–31.5 天** | 43 ≈ 21.5 天 | **50 轮 ≈ 25 天** |
+| **P0–P8**（owner 要的全部） | **42–82 轮 ≈ 21–41 天** | 55 ≈ 27.5 天 | **66 轮 ≈ 33 天** |
 
 风险加权那一列才是该拿来排期的那个，而它这么加权是有明确理由的：P2 和 P4 依赖的是一个第三方二进制
 的真实行为，而不是我们自己的代码，这也正是 §12 把它们的三条假设列为未核实的原因。另有两条诚实提醒：
@@ -959,10 +1383,16 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
 所以 46 轮是一个悲观上界，不是一个预测。
 
 **另一种排序，如果 owner 想最早拿到价值：** P0 → P2 → P1 → P3。P2 可以在注册表存在*之前*就打在
-上游的每会话流上跑，因为 §3.2 已经给了每个会话它自己的浏览器。按点估计衡量：P2 在第 10 轮完成而不是
-第 16 轮，也就是**早约 3 天（跨 P1 自身区间是 2.5–4.5 天）**—— 第一轮说的是"大约早一周"，而那不是
-它自己的数字给出来的结果。代价是把 profile 选择器回填进一个已经存在的窗口：大致多一轮，所以这个排序
-值大约 5 个净轮次的更早反馈，不是一周。
+上游的每会话流上跑，因为 §3.2 已经给了每个会话它自己的浏览器。按第三轮的点估计衡量：P2 在第 11 轮完成而不是
+第 19 轮，也就是**早约 4 天（跨 P1 自身区间是 3–6 天）**—— 第一轮说的是"大约早一周"，那不是它自己
+的数字给出来的结果，而第二轮那句"约 3 天"对第二轮那个更小的 P1 是对的。代价是把 profile 选择器回填
+进一个已经存在的窗口：大致多一轮，所以这个排序值大约 7 个净轮次的更早反馈。
+
+**P7 会改变这笔账，而 owner 应该知道这一点。** 窗口绑定（§4.6）正是让"agent 在驱动时那个实时视图
+是可读的"成立的那件事，而它只需要 P2。所以"最早拿到价值"的顺序是 **P0 → P2 → P7 → P1 → P3**：
+按点估计，它在第 16 轮就到达"用户看着 agent 浏览，而那个窗口可见地绑在拥有它的那个对话旁边"——
+(1.c) 的全部再加上绑定 —— 而标准顺序到第 19 轮只到达一个没有绑定的实时视图。P8 刻意不在这个序列里：
+它回答的是另一个问题（§4.7），而它的区间说明了我们对它了解得有多少。
 
 ## 11. 需要 OWNER 决定的事项
 
@@ -981,6 +1411,15 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
 | **D11** | **一次进对话的公告值不值一个计费 turn，三个时刻里哪些该有一个？**（§4.3.1 —— 投递梯是完全花钱门控的，`SPEND_REASONS` 是一个 fail-closed 的封闭集合，而一次空闲交还是由**定时器**触发的，也就是 CLAUDE.md 说的"一个没人打字的 turn"。） | (a) 三个都不要 —— 只做状态变更，agent 从 `browser_paused` / 从它下一条命令成功中学到；(b) 只有显式交还；(c) 显式交还 + 空闲交还，两者都在一个新声明的理由下走投递梯；(d) 三个都要。 | **(b)，并把 (c) 作为一个默认 OFF 的设置项提供。** 显式交还是一次逐次 owner 动作，而且它是唯一一个*空闲的* agent 没有别的办法知道的时刻 —— 它重新定位所需要的那个 URL 骑在那个 turn 上。接管什么都不需要（那个有类型的拒绝是即时且免费的）。空闲交还是那个完全没有 owner 动作的，所以它默认零花费：翻转租约、更新实时视图、归档一条"For you"条目，然后让 agent 在它下一条命令能用时自己发现。无论答案是什么，理由都在 `SPEND_REASONS` 里被声明，而投递梯是唯一的投递路径 —— 一个用任何其它方式往对话里发帖的浏览器模块会把 `test-spend-paths` 弄红。 |
 | **D12** | **P0 发布哪一个隔离变体？**（§3.2.2 —— 配置文件的 `profile` key 作用于每一次没有覆盖它的调用，所以"没有 `--profile`"不是默认值，它是一个决定。） | (A) 只有 `SESSION`；(B) `SESSION` + `NAMESPACE` 且配置里的 profile 仍然生效；(C) 再加一个每会话的临时 `AGENT_BROWSER_PROFILE`；(D) 再加一个指向由 VibeSpace 写出的、没有 `profile` key 的配置的 `AGENT_BROWSER_CONFIG`。 | **(D)，回落到 (C)，再回落到 (A)，每一次回落都带理由记日志。** D 是唯一一个真正临时的变体，唯一一个能带 `--allowed-domains` 的（§6.3），也是唯一一个没有 Chromium user-data-dir 争用的。**(B) 不是一个选项** —— 它就是第一轮意外指定的那个，而且它不可能工作：N 个守护进程，一个 user-data-dir。D 的代价是诚实且写明的：CLI 在 `--config` 缺失/无效时硬报错，所以那个文件在变量被设之前先被验证。 |
 | **D13** | **默认 headed 吗，以及并发浏览器的天花板是多少？**（§3.2.3 —— 实测：每个 Chromium 6 个进程、420–667 MB PSS 和 2 个 inotify instance，对着一个这台机器已经踩到过的 128/uid inotify 天花板；而那个 1 小时的 idle timeout **豁免 headed 浏览器**，同时已安装的 build 根本没有默认超时。） | (a) 一切保持 `headed: true` 并只设 idle timeout；(b) 实时视图存在之后（P2）agent 会话默认 headless，headed 按 profile 按需；(c) 立即 headless，要么实时视图要么没得看。 | **(b)，并且从第一天起就有那个显式的 idle timeout。** 在 P2 之前，桌面 VNC 窗口是唯一能看的方式，所以 headed 必须保持可达；实时视图存在之后，对 agent 这个场景 headless 严格更优，而且它才是那个 idle timeout 真正会回收的变体。天花板：提议**每实例 8 个并发浏览器**，在天花板处大声拒绝并点名持有者 —— 但这个数字应该从 P0 自己的 k = 1/4/12 测量里重新定，而不是从这一段里定。 |
+
+| **D14** | **钉子住在哪，以及一个岗位要不要带默认值？**（§3.2.5 —— 钉子是一个命令；要问的是哪些面注册它，以及一个岗位可不可以为它名下的每个会话设一个默认。） | (a) 只在会话卡右键；(b) 四个面（卡片菜单、Session Properties、实时视图标题栏、新建会话对话框）；(c) (b) 再加一级岗位默认。 | **(c)。** 那四个面是**一个**命令的四次 `registerMenuItem` 注册，不是四份实现，所以代价就是那几条注册。岗位那一级正是让"这个岗位一直在供应商后台里干活"变成一句只说一次的话 —— 而它排在这个对话自己的取值**之下**，所以它永远不可能覆盖掉一个会话已经做过的事。 |
+| **D15** | **fork 要不要继承 profile 的钉子？**（§3.2.5 —— `browserKey` 刻意不继承。） | (a) 继承钉子（身份仍然新铸）；(b) 两个都不继承；(c) 两个都继承。 | **(a)。** 钉子是**偏好**（"这类活儿用这个登录"），key 是**身份**。(c) 会把另一个对话的 pinned 标签页交给一个 fork，那正是 §3.2.1 存在要防的缺陷；(b) 则让一个后台会话的每一个 fork 都无缘无故重新登录一次。 |
+| **D16** | **中途钉住要不要往对话里发公告？**（§3.2.5，与 D11 同一类 —— 一次公告就是一个计费 turn。） | (a) 永不 —— agent 从 `vibespace-browser status` 以及"下一次启动落进新 profile"这件事上学到；(b) 只走免费那条（挂在用户下一条消息上的 `<system-reminder>`）；(c) (b) 再加"会话空闲时走投递梯"，由一个设置项门控。 | **(c) 而且设置项默认 OFF**，实际效果就是 (b)。钉住是一次用户动作，也就是说用户此刻正在打字，而 `pendingNotice` 那条通道零成本。投递梯那条路留给那条通道服务不了的唯一形状 —— 一个 owner 现在就想改道的**空闲**会话 —— 而它像其它每一个无人值守 turn 一样：已声明、被门控、默认关。 |
+| **D17** | **我们要不要发这个活的 backend 切换，以及 CloakBrowser 的席位谁来付？**（§7.4 —— 免费档**一个**并发 session；Pro 是 5 / 20 / 200 / 2000。） | (a) 不做切换 —— 一个 profile 的 backend 创建时定死；(b) 只在免费档上切，显示席位数并在到顶时大声拒绝；(c) (b) 再加一个预先买好的付费档。 | **(b)。** 切换就是 owner 要的那个功能，而免费档足以回答唯一重要的那个问题 —— 这个站点到底打不打得开。席位数属于那个对话框，而不属于事后的一次答疑；买档要针对一个**被点名站点**上的**实测**失败（D4 的规矩，未变）。 |
+| **D18** | **自动绑定默认开吗？**（§4.6 —— 一个会话的浏览器起来且它的聊天窗口开着时，实时视图直接以 split 生在那个链里。） | (a) 开；(b) 关，绑定永远是一次点击；(c) 只在聊天窗口够宽时才开。 | **(a) 开。** 绑定就是"那是谁的浏览器"这个问题的答案，而一个要靠人自己发现的默认值回答不了它。它是一个设置项，按窗口可以随时把一面拖出去撤销，而且那个组永远不会自己解散 —— 所以"猜错了"的最坏代价是一次拖动。(c) 是一条藏起来的规则，它不触发的那天看起来就像个 bug。 |
+| **D19** | **一个 split 链里有第三个标签页时，点它会怎样？**（§4.6 —— 一个链可以有五个标签页而其中两个并排。） | (a) 它替换掉非 owner 的那一面；(b) 整个链翻回 `'tabs'`；(c) 开出第三面。 | **(a)。** 它保住绑定（聊天那一面 —— 浏览器**绑到**的那个东西 —— 原地不动），而且最不意外：变的是你原本没在看的那一面。(c) 按实测理由拒绝 —— 在大多数人实际使用的宽度以下，三个面全都不可用，而比例模型将不得不变成一棵树。(b) 会悄悄毁掉用户自己搭起来的布局。 |
+| **D20** | **我们要不要做一个微信本地库适配器？**（§4.8 —— 经 WCDB 的 SQLCipher，密钥在进程内存里；本机 `ptrace_scope` 是 `1`，也就是只有祖先进程读得到。） | (a) 不做 —— 画面走 Xpra，数据走官方的公众号 / 企业微信 API；(b) 做，进核心；(c) 做，但只在一个**插件**里，带显式同意，且只对由 VibeSpace 自己启动的客户端生效。 | **(a)，而如果 owner 坚持，答案是 (c)。** 它是在扒一个专有客户端的进程内存，每一次客户端更新都可能安静地碎掉；它明确越过 ToS；而唯一能让它在技术上成立的办法，是让 VibeSpace 去**启动**微信**以便**读它的内存 —— 这句话写出来就在反对它自己当默认。真要做，它是插件（D2 给"专有且带法律面的东西"划的那条线），绝不进核心。 |
+| **D21** | **Xpra 的客户端那一半：托管上游的 HTML5 应用，还是自己渲染？**（§4.7 —— MPL-2.0 的应用 vs npm 上 Apache-2.0 的 `xpra-html5-client`。） | (a) 把上游 HTML5 客户端当静态资源托管在我们的鉴权后面；(b) 用那个客户端库在一个 VibeSpace 窗口类型里自己渲染；(c) 先 (a) 作为验证切片，再 (b)。 | **(c)。** (a) 是最快知道"这条传输在 200 ms / 1 Mbps 下够不够用"的办法，而那正是那个未决问题 —— 但 §4.2 拒绝内嵌上游 dashboard 的理由在这里同样适用（一个带自己控制面的整应用装进我们里面，外加一个已知的 iframe `sessionStorage` 限制），所以它是一个验证切片而不是产品。本设计已经规定的那个窗口（§4.4：DPI 正确的画布、被转义的标题、主题变量）就是 (b) 落地的形状。 |
 
 ---
 
@@ -1040,6 +1479,36 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
     60/天），和 auto-resume 以及 Background Work 共享。一次显式交还很罕见，所以它本来永远不该顶到 ——
     但"本来永远不该"是一个预测，而诚实的检验是真实用上一周之后去读那份日志。
 
+第三轮新增，全部是 owner 那四个问题的后果：
+
+15. **版本阶梯所关于的那两个 Chromium 大版本。** CloakBrowser 自己的仓库说免费档是 Chromium 146、
+    Pro 是 151；而我**没有**去读已安装的 `agent-browser` 打包的是哪个 Chromium 大版本，所以我今天
+    说不出在这台机器上一次 `chromium → cloak` 的切换到底是升级还是降级。那是那个阶梯的第一个问题，
+    P4 必须在切换上线之前用实测回答它。
+16. **Chromium 真的会拒绝旧版打开这件事。** 拒绝文案与方向是有文档且被广泛报道的，但我没有拿两个
+    大版本去打同一个目录 —— 理由与 §12.1、§12.11 相同。我要是错了，故障形态比假设的**更好**
+    （阶梯拒绝了一次本来能成的切换），这也正是这个阶梯写成"偏向拒绝"的原因。
+17. **指纹变化到底会不会把一个真站点登出。** §7.4 说一次切换"可能要求重新登录"，因为把 session 绑
+    在指纹上的站点按构造就是这样 —— 但那是关于**技术**的陈述，不是对 owner 实际在用的任何站点的
+    测量。它与 §12.4 是同一个缺口：**去问 owner 要两三个具体站点**。
+18. **agent-browser 的 `--restore` 到底带走了什么。** Playwright 的 `storageState` 有一个可选打开的
+    `indexedDB` 标志，是有文档的；而 agent-browser 有没有传它，不是我读过的东西。所以"导出/导入
+    会丢东西"在 CryptoKey 这个方向上是确定的（那正是"不可导出"的含义），而对 IndexedDB 整体
+    **未定**。P4 必须在对话框里说出确切的丢失集合，也就是说得先去测。
+19. **可分栏的链在一个真的第二客户端上的表现。** §4.6 那个同步键陷阱是从读 `layout.js` 的
+    `tabs.join(',')` 键推出来的，不是靠开两个浏览器、在其中一个上翻链得来的。它被点名为陷阱并配一条
+    测试，恰恰是因为它只是一次阅读。
+20. **§4.7 里的每一个数字。** 那里没有一个是我测的，而针对那个目标（200 ms RTT / 1 Mbps）我也没有
+    找到任何别人测过的数字：我读到的那份 ssh -X / xpra / waypipe 的公开比较自己就声明是定性的，
+    而本机有 `Xvfb`、既没有 `xpra` 也没有微信客户端。"逐窗口 vs 整桌面"这个**论证**是成立的；
+    那个排名的确切间距不是证据。P8 的第一件事就是产出这些数字。
+21. **微信 web 版今天的限制范围。** 很多账号登不进 web 客户端是被广泛报道的，但那是账号级策略而我
+    没能确认它当前的范围。这也正是 §4.7 的流程写成"先拿 owner 自己的账号试一次 web 版"而不是
+    "装一个原生客户端"的原因。
+22. **WhatsApp Web 的密钥处理今天是否还和那篇写作一致。** 不可导出 `CryptoKey` 的设计与 monkey-patch
+    的做法在一篇公开分析与取证文献里都有记载，而两者描述的都是比今天更旧的 build。§4.8 的适配器形态
+    是从那个设计推出来的；厂商要是改了它，适配器的形态就跟着改，P8 必须在写代码之前重新核实。
+
 ---
 
 ## 附录 A —— 资料来源
@@ -1070,6 +1539,44 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
   `src/opencode-serve.js`、`src/port-forward.js`、`src/cli-identity.js`、`src/session-schema.js`、
   `src/lib/settings-schema.js`、`src/ws-create.js`、`data/bin/vibespace-page`、`scripts/ci.mjs`，
   以及 2026-09-09..10 的机器卫生 / fork 税测量。
+* **第三轮资料来源（2026-09-10），对应 owner 那四个问题：**
+  * **Xpra** —— 项目自己的文档（Seamless 模式；Encodings：auto/webp/jpeg/avif/png 与
+    VP8/VP9/H.264/HEVC/AV1，并有 `min-quality`/`min-speed` 调节）与 `docs/CHANGELOG.md`
+    （7.0，2026-08-27；6.6 加入 http digest + scram 认证与 http origin 校验；6.5 加入 Wayland
+    后端）。`Xpra-org/xpra-html5`（MPL-2.0，可装在别的 web server 路径下，已知 iframe
+    `sessionStorage` 限制）与独立的 npm 包 `xpra-html5-client`（Apache-2.0，2.3.0）。
+    `jupyter-xprahtml5-proxy` 作为"用宿主应用自己的鉴权包住 Xpra"的先例。
+  * **KasmVNC** —— 项目 wiki 的 "Differences From TigerVNC" 与它的性能页
+    （TightJPEG / TightWEBP / TightQOI 的质量阶梯、video mode）。
+  * **CloakBrowser** —— `CloakHQ/cloakbrowser` 仓库，§7.4 依赖的三个事实都出自这里：
+    免费档 = Chromium 146（58 个补丁）/ Pro = 151（73 个补丁）；`launch_persistent_context(dir)`；
+    `--fingerprint=seed` 是一个**启动**参数（"同一个 seed = 跨启动同一个指纹"）；并发 session 档位
+    （免费 1，然后 5 / 20 / 200 / 2000）；以及 `cloakserve` 的每连接 seed 查询参数与它自己的
+    每 seed 临时 profile 目录。
+  * **Chromium** —— `docs/user_data_dir.md`（"two running Chrome instances cannot share the same
+    user data directory"），以及有文档的 profile 版本拒绝（"Your profile can not be used because
+    it is from a newer version of Google Chrome"）。
+  * **Playwright** —— `browserContext.storageState()` 那个可选打开的 `indexedDB` 选项，逐字。
+  * **agent-browser 自己的 changelog** —— 自定义可执行文件路径（0.8.7）、把 Chrome profile
+    **拷贝**到临时目录的 profile 支持（0.24.1）、`--restore` / `--restore-save`（0.31.0），
+    以及 0.37.1（2026-09-08）仍然是最新发布。
+  * **WhatsApp** —— 那篇讲"经多设备 web 客户端备份数据"的公开写作（IndexedDB、AES-CBC 正文、
+    不可导出的 `CryptoKey`、`crypto.subtle.decrypt` 的 monkey-patch）以及关于 WhatsApp Web
+    IndexedDB 的取证文献；还有多设备限制（4 个链接设备，主手机离线下最多 14 天）。
+  * **微信** —— 官方 Linux 原生客户端（腾讯，2024 年 11 月；deb / rpm / AppImage），以及在
+    Windows / macOS / Linux 上从运行中客户端内存里抠出 WCDB/SQLCipher 密钥的公开工具。
+  * **非官方 WhatsApp 库** —— 关于协议级客户端（Baileys / WAHA / Evolution API）封号风险的公开
+    报告，对照官方 Business API。
+  * **本机，只读，2026-09-10：** `/proc/sys/kernel/yama/ptrace_scope` = `1`；
+    `Xvfb` 在 `/usr/bin/Xvfb`；`xpra` 与微信客户端均未安装。
+  * **VibeSpace（第三轮）：** `src/lib/tab-group.js`（链模型、`_syncChainBounds`、
+    `restoreTabChain`、`_detachFromChain`、`_ungroupLast`）、`src/lib/layout.js`
+    （`tabs.join(',')` 同步键与 tabChain 持久化）、`src/lib/contributions.js` +
+    `src/lib/session-card.js`（`'session-card'` 菜单与它的分组）、`src/resume-continuity.js`
+    （`resumeSpawnPick` / `applyOriginHint`）、`src/task-groups.js`、`src/session-status.js`
+    （`pendingNotice`）、`src/account-material.js`（`repointPoolSymlink`）、
+    `src/lib/settings-schema.js`（`SETTINGS_CATEGORIES` —— 目前**还没有** Browser 分类），
+    以及 `docs/kb-file-structure.md` 的 Communication Channels v1 条目。
 
 ---
 
