@@ -1,6 +1,6 @@
 # 设计: Communication panel — Channels v2 的架构
 
-> 中文版 — 与英文原稿 docs/design-communication-panel.md 同步于 921f61cb + 本次修订(r3: 接收模式与发送身份 · r4: 对 r3 的对抗式 review)；以英文版为准的只有代码标识符。
+> 中文版 — 与英文原稿 docs/design-communication-panel.md 同步于 921f61cb + 本次修订(r3: 接收模式与发送身份 · r4: 对 r3 的对抗式 review · r5: owner 对本地客户端库的更正)；以英文版为准的只有代码标识符。
 
 > **状态:** 架构提案, 无代码。**交互**设计已经定了(2026-08-21 的五张 artboard 记录
 > 加上它的交互式画布), 本文不再翻案。本文决定的是: 每一块*住在哪里*、*扩展哪个既有
@@ -27,6 +27,18 @@
 > 窗口与降级的撤回路径, 否则它是一个单向棘轮(§6.4); 决定 19 删掉的恰好是唯一有摄入契约
 > 的那一格, 所以 `scanSource:'ui'` 现在自己有一份(§12.5); `convCaps` 拿到 TTL 与三个刷
 > 新触发点, 其中一个是**批准那一刻**(§4、§9.2)。
+>
+> **r5(2026-09-10, 一条 owner 更正 —— 它改的是一个结论而不是一个细节):** WhatsApp
+> Desktop 至少在 macOS 上把它本地库的至少一部分留成**未加密**的 —— owner 见过一个直接
+> 读它的实现。于是 r4 那句"决定 19 把 `'store'` 对**两个**平台都排除掉了"对 WeChat 成立
+> (密钥在进程内存里)、对 **macOS 上的 WhatsApp 不成立**(它根本没有加密), 而围栏 13 分
+> 不开这两者, 是因为它从头到尾只说了自己拒绝什么。所以: 围栏 13 拿到一条**明确的边界**
+> 与一条明确的允许(§3.13); `scanSource` 不再是标量, 换成按平台的 `caps.scanSources` 加
+> 唯一的解析器 `scanState()`(§4、§12.5); macOS 拿到一条真的 `scanSource:'store'` 通道,
+> 走一个 `channels-scan-store` 的 agentd op 且 `hostId` 是参数(§12.5、§6.3); 决定 19 从
+> (b) 改成 (b)+(d); P6 拆成两条门控不同的腿(§18、§19、§17.2)。Linux 仍然只有
+> web-in-profile 的界面扫描, Windows 仍然是 `'ui'`(它那份库**确实**是加密的), 而
+> **WeChat 一个字都没变**。
 >
 > 先读: 交互记录(五张 artboard — Main / Adapters / AssignFilter / AgentReach /
 > Outbox)、CLAUDE.md 的三层路由表、`docs/design-three-tier.md`、
@@ -85,13 +97,14 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 | Reach ACL(三态、请求) | **PURE** | `src/channel-acl.js`(import `src/msg-acl.js` —— PURE 可以 import PURE) | `test-channel-acl` (fast) |
 | 出向策略 + 护栏 + outbox 状态机 | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | 归一化的消息记录 + 它的渲染器要的数据 | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
-| 能力判定(两个轴、按会话解析、身份警告、**通道解析 `laneState`**) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
+| 能力判定(两个轴、按会话解析、身份警告、**通道解析 `laneState`**、**扫描来源解析 `scanState`**) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
 | 会话存储的*原语*(持久的 load/append/tail/trim/flush; 活索引归**引擎**所有, §5.1) | **SHARED**(只用 fs+path) | `src/channel-store.js` | `test-channel-store` (fast) |
 | OAuth loopback 授权流(**双模**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
 | Adapter 接口 + 注册表 | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract`(fast, 假 adapter) |
 | Lark / Gmail / Agents adapter | **ORCH** | `src/channels/lark.js`、`gmail.js`、`agents.js` | 契约套件 + `test-channels-lark-shape`(fast, 录制的 fixture) |
 | 摄入引擎(轮询调度、退避 (backoff)、每 tick 预算、故障出声) | **ORCH** | `src/server/channels-engine.js`(`create(deps)` 工厂) | `test-channels-engine` (heavy) |
 | 推送通道(每个 vendor 一条; 活性、ack、独占度测量) | **ORCH** | `src/channels/live/<kind>.js` | `test-channels-push` (heavy) |
+| 本地客户端库扫描(平台事实、TCC 授权、只读快照、按 rowid 游标读) | **SHARED**(daemon 打包)+ 一个 device op | `src/channels-store-scan.js` + `src/agentd/agentd.js` 的 `channels-scan-store` handler | `test-channels-store-scan` (heavy, 真 daemon) |
 | 路由 + 广播 | **ORCH** | `src/routes/channels.js` | `test-restore-smoke` 里的路由弹幕、`test-channels-e2e` |
 | 接线段落 | **ORCH** | `src/server/channels-wiring.js`, 由 `server.js` 调一次 | `test-architecture` 的尺寸棘轮 ratchet(server.js ≤ 2100 行) |
 | Panel、窗口、filter 编辑器、审批卡 | **CLIENT** | `src/lib/channels-panel.js`、`src/lib/channel-window.js`、`src/lib/channel-filter-editor.js` | `test-channels-e2e`(heavy, headless chrome) |
@@ -223,14 +236,29 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
     开实时推送"这个动作本身把某个会话的账单乘以 30。门控**刻意不是** `caps.receive ===
     'push'`(r4): kick 模式下记录是轮询取回来的, 而轮询一趟本来就已经合并过了 —— 在那里
     也开这个窗口, 就是白买 60 秒延迟。
-13. **绝不读另一个进程的内存, 也绝不在没有一次点名的确认的前提下发布一个传输方式被平
-    台条款禁止的 adapter。**(r3/Q3(b)) 这条对本地客户端那一类 adapter 是承重的: WeChat
-    桌面端的本地库是 SQLCipher/WCDB 加密的, 而那把密钥只存在于**正在运行的客户端进程的
-    内存里** —— 每一个公开工具都是从那里把它抠出来的。读别人的进程内存与读一个文件不是
-    同一类行为, 本产品不做。WhatsApp 那一侧的协议库(whatsmeow / Baileys)是逆向出来的非
-    官方客户端, 而非官方客户端被 WhatsApp 的条款明确禁止, 封号确实落在过低流量、只回复
-    的正常使用上。所以这类 adapter 携带一个 `tosRisk` 能力位, 默认不提供, 开启它需要一
-    次点名说出这个风险的确认(决定 19)。
+13. **绝不读另一个进程的内存, 绝不复原一把 vendor 扣住的密钥, 也绝不在没有一次点名的
+    确认的前提下发布一个传输方式被平台条款禁止的 adapter。**(r3/Q3(b); r5 补第二条与那
+    条边界)这条对本地客户端那一类 adapter 是承重的, 而它**必须能对某些东西说"可以"**,
+    否则它就不是一道围栏而是一条禁令。它拒绝三样东西:
+    (a) **另一个进程的内存。** WeChat 桌面端的本地库是 SQLCipher/WCDB 加密的, 而那把密
+    钥只存在于**正在运行的客户端进程的内存里** —— 每一个公开工具都是从那里把它抠出来
+    的。读别人的进程内存与读一个文件不是同一类行为, 本产品不做。
+    (b) **复原一把 vendor 明确扣住的密钥。** Windows 上的 WhatsApp Desktop 把它的
+    SQLite 库加密了: UWP 那一支用 SQLite Encryption Extension(SEE), dbKey 由一个在应用
+    之外**取不到**的机器唯一标识派生, 公开做法是绕开那个 API 把它重新算出来; WebView2
+    那一支的各类密钥用 DPAPI-NG 保护。把一把被有意扣住的密钥重新算出来, 与从内存里抠出
+    它是**同一件事的两种手法**, 所以落在同一条拒绝里。
+    (c) **一个被平台条款禁止的传输方式**, 除非有一次点名说出风险的确认。WhatsApp 那一
+    侧的协议库(whatsmeow / Baileys)是逆向出来的非官方客户端, 而非官方客户端被 WhatsApp
+    的条款明确禁止, 封号确实落在过低流量、只回复的正常使用上。所以这类 adapter 携带一个
+    `tosRisk` 能力位, 默认不提供(决定 19)。
+    **而它不拒绝这一样: 一个客户端自己留在磁盘上、没有加密的文件。** WhatsApp 在 macOS
+    上把整份聊天历史留在一个未加密的 SQLite 库里(§12.5), 读它是一次普通的、只读的文件
+    读取: 没有任何人的秘密被击穿, 因为**根本没有秘密**; 把关的仍然是操作系统自己的权限
+    系统(macOS 的 TCC / 完全磁盘访问), 而被拒绝时它必须以一个**具名**的拒绝到达用户。
+    这条边界的判据一句话: **我们在击穿谁的秘密?** 答案是"没有人"时它是一次文件读取, 答
+    案是"那个客户端的"时 —— 无论那把密钥在内存里还是在一个被藏起来的 API 后面 —— 它是
+    这条围栏拒绝的事。
 
 ---
 
@@ -259,8 +287,12 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
                                       // (push.claimedExclusive) and only laneState() resolves it
     pushAckBudgetMs: 3000,            // vendor's own deadline; we ack after DURABILITY (fence 11)
     pollInterval:   { hot: 30, cold: 300, floor: 10 },   // seconds; `floor` is the VENDOR's
-    scanSource:     null,             // 'store' | 'ui' | null  — only when receive === 'scan'
-    scanLatency:    null,             // seconds, typical; SHOWN on the conversation row
+    scanSources:    null,             // { darwin|win32|linux : 'store'|'ui' }  — only when
+                                      // receive === 'scan'. A per-PLATFORM UPPER BOUND, because
+                                      // one client is a readable store on one OS and a scraped
+                                      // screen on another; only scanState() resolves it (r5)
+    scanLatency:    null,             // { store: 15, ui: 300 }  seconds, per SOURCE — an order
+                                      // of magnitude apart; SHOWN on the conversation row
     history:        'page',           // 'page' | 'since' | 'none'
     listConversations: true,
 
@@ -307,6 +339,11 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 
   // present ONLY when caps.receive === 'push' — src/channels/live/<kind>.js (§6.4)
   live.start({ onEvent, onState })  ->  { stop() }
+
+  // present ONLY when caps.receive === 'scan' — facts about THIS machine, so it is answered
+  // by the agentd op, hostId a PARAMETER and the local box is device #0 (§12.5)
+  async scanHost(hostId)
+        -> { platform:'darwin'|'win32'|'linux', clientInstalled, storePath, grant, why }
 }
 ```
 
@@ -322,7 +359,9 @@ laneState(caps, adapterRecord, convEntry, now)          // r4 新增 —— 下�
 offers(caps, convCaps, what)   // what ∈ 'send-as-user'|'send-as-bot'|'fetch-attachment'|…
       -> { offered: boolean, why: string|null }      // 'unknown' ⇒ offered:false, why 说明
 identityWarning(caps)          -> { level:'none'|'warn', text }        // §9.5
-freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, text }   // lane = laneState() 的返回值
+scanState(caps, adapterRecord, hostFacts, now)          // r5 —— 与 laneState 同一个形状
+      -> { source:'store'|'ui'|null, why, latencySeconds, storePath, grant }
+freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, text }   // lane = laneState()/scanState() 的返回值
 ```
 
 `laneState` 是 **r4 加的**, 而它修的是一个结构性缺陷: "此刻在用哪条通道、它活着吗、它
@@ -356,10 +395,18 @@ freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, tex
 明其中一个是错的*), 而它在这里的形态就是: 三个存储位可以各自保留(声明、测量、观测都是
 不同的事实), 但**回答只能有一个**。
 
-四个消费者读同一条记录, 各读各的那一面 —— 而**每一个跟"通道"有关的判定都经过
-`laneState`, 没有一个再去读 `caps.receive`**:
+**`scanState`(r5)是同一条法则用在另一条通道上。** 一个扫描来源同样是三个事实 —— 按平
+台的静态声明 `caps.scanSources`、对那台机器的观测, 以及用户自己在连接向导里做的选择 ——
+而 §12.5 展示了把它们随手折在一起会发生什么: r4 因为一个词("那份库读不出来")同时代表两
+种完全不同的处境, 就得出了"整整一格被排除掉了"的结论。所以它拿到自己的解析器、自己写死
+的优先级, 以及同一条"没有任何消费者去读那份原始声明"的规则。
 
-- **Panel** 用 `freshnessClaim(laneState(…), convEntry)` 画每一行的新鲜度芯片(**活着的、
+四个消费者读同一条记录, 各读各的那一面 —— 而**每一个跟"通道"有关的判定都经过
+`laneState`(在扫描通道上则是 `scanState`), 没有一个再去读 `caps.receive` 或
+`caps.scanSources`**:
+
+- **Panel** 用 `freshnessClaim(laneState(…), convEntry)` 画每一行的新鲜度芯片 —— 扫描通道
+  上则是用 `scanState(…)`, 那个芯片上"秒还是分钟"的数字就是从这里来的(**活着的、
   携带内容的**推送 = "live"、轮询 = "≤ 30 s"、扫描 = "上次扫描在 <t> 之前" —— **一个扫描
   源的延迟就画在会话行上**, 因为那是用户在决定要不要把一件事交给它时唯一需要知道的数
   字)。一条降级了或者不 `live` 的推送通道画的是它**实际**在走的那条道, 绝不是它声明过的
@@ -410,6 +457,18 @@ freshnessClaim(lane, convEntry)-> { kind:'live'|'within'|'scanned', seconds, tex
   都没有的 adapter 报不出这两件事里的任何一件; 而按本节的第一条规则, 没声明的能力是要
   **抛异常**的, 于是 §6.3 那句"翻到已存的 anchor 为止"在它身上根本不可能发生。合成
   adapter 声明 `receive:'scan'` + `history:'none'` 必须让契约套件变红。
+- **`scanState()` 的答案永远不宽于 `caps.scanSources` 声明的那一格**(r5, §12.5)。它与
+  `convCaps ⊆ caps` 是同一个方向、同一条理由: 静态声明是**上界**, 而"这台机器上有什
+  么"这次解析只许**收窄**(声明 `'store'` 的平台上可以答 `'ui'` 或 `null`, 声明
+  `'ui'` 的平台上**绝不可以**答 `'store'`)—— 否则一句"这个平台我们从来没验证过读得
+  出那份库"就能被一次乐观的运行时探测绕过去。同一条规则的两半各欠一条腿: 一个在
+  `linux` 上答 `'store'` 的合成 adapter 必须变红, 而一个在 `darwin` 上**授权已拿到**时
+  仍然答 `'ui'` 的解析器同样必须变红 —— 一个永远收窄到底的解析器与一个永远说 `unknown`
+  的 `convCaps` 是同一种缺陷。
+- **`scan` 通道上被拒绝的读取解析成 `source:null` 加一个理由, 绝不解析成 `'ui'`**
+  (r5)。自动降级会在不说一声的情况下把会话行上那个延迟数字从秒改成分钟, 而那个数字是
+  这一类全部的诚实性契约(§12.5); 落回 `'ui'` 只能是用户在连接向导里做的一次选择
+  (`why:'user-chose-ui'`)。
 
 `ChannelRecord`(PURE, `src/channel-record.js`)是那唯一一份归一化形状:
 
@@ -441,6 +500,11 @@ data/channels/
                                 consecutiveFailures,
                                 push {enabled, claimedExclusive, state, lastEventAt,
                                       missRate, demotedAt, demotedWhy}    // §6.4
+                                scan {hostId, chosenSource, grant, grantAskedAt,
+                                      hostFacts {platform, clientInstalled, storePath, at}}
+                                                                          // §12.5: the CHOICE and
+                                                                          // the OBSERVATION; only
+                                                                          // scanState() folds them
   index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
                                 id, adapterId, vendorId, title, kind (dm|group|thread),
                                 participants summary, lastAt, unread, tracked, anchor,
@@ -467,7 +531,9 @@ data/channels/
    的**, 而当一个 adapter 抓的是一块屏幕、客户端又没有暴露一个稳定的消息 id 时, 它必须
    **声明一把合成键**并把"这是合成的"标出来(§12.5 的 `'ui'` 那一格) —— 这条不变量要的是
    一把键, 不是一把 vendor 给的键; 但一把**没说自己是合成的**键, 会让每一次重新扫描都变
-   成一批重复。
+   成一批重复。**改成读那个客户端自己的库, 拿到的就是一把真键**(r5): §12.5 的
+   `'store'` 那一格用的是客户端自己的消息 id, `raw.synthetic` 保持 false —— 这正是"有它
+   就优先"的理由, 重读时的塌陷从我们的一次赌博变成一条平台保证。
 3. **一个写者, 一种顺序。** 每一个可变的、按会话记的事实 —— `unread`、`lastAt`、
    `anchor`、`assignment`、`stats`、`pendingTodoId`、agent 组的轮转计数器 —— 都住在一份
    索引里, 而**两趟 adapter pass 按设计就是重叠的**(§6.2 是*每个 adapter* 一个循环、
@@ -610,17 +676,31 @@ adapter 一律**容忍**它们而不是假设它们不存在: 批量枚举 DM �
 孪生 (twin) 的方式。
 
 **本地客户端(WhatsApp / WeChat, `receive: 'scan'`)。** 这是第三类摄入, 而它与前两类的
-区别不是节奏而是**证据来源**: 没有我们能调的 vendor API, 只有一个跑在这台机器上的官方客
-户端, 以及它自己写下的东西(§12.5)。`scanSource: 'store'` 是"读那个客户端写的本地库",
-`scanSource: 'ui'` 是"读那个客户端渲染出来的界面"(由 agent-browser 的 profile 驱动, 见
-`docs/design-agent-browser-v2.md`)。两者都是**带游标的周期扫描**, 都可以加一个可选的变
-更通知(store 那一路是对库文件的 fs.watch, ui 那一路是 DOM mutation) —— **而那个游标在
-`'ui'` 上是什么、"完整的一趟"在一次受滚动限制的读取里是什么, 由 §12.5 逐条写出来**, 因为
-决定 19 之后 `'ui'` 就是这一类发布出去的全部。两者的延迟都是**会话行上画出来的那个数字**,
-因为它是用户在把一件事交给这条通道之前唯一需要知道的量。发
-送要么走客户端自己的界面(agent-browser 打字), 要么走协议 —— 而后者带着围栏 13 那条条款
-风险。这一类 adapter 的接口从 P0 起就存在(`scan` / `scanSource` / `convCaps` / `tosRisk`
-都是为它留的位置), 具体的 WhatsApp 与 WeChat adapter 在 P6 且被决定 19 门控。
+区别不是节奏而是**证据来源**: 没有我们能调的 vendor API, 只有一个跑在某台机器上的官方客
+户端, 以及它自己写下 / 画出来的东西(§12.5)。走哪条来源**不是一个按 adapter 种类的静态
+事实**, 而是 `scanState()` 对着那台机器解析出来的一个答案:
+
+- **`'store'` —— 读那个客户端自己写下的本地库。** 今天只有一个格子成立: **macOS 上的
+  WhatsApp**, 它把整份历史留在一个**未加密**的 Core Data SQLite 库里。游标是
+  `(rowid, 时间戳)` 一对, anchor 是客户端**自己的**消息 id(所以 `history: 'since'`, 而
+  §5 不变量 2 拿到一把真键), 一趟以"读到开始时记下的那个最大 rowid"为完整, 可选一个对库
+  文件的 fs.watch 做变更通知。**绝不写**: 用 SQLite backup API 复制出一份 scratch 拷贝再
+  读它, 因为那是一个 WAL 库, 只读主文件会静默漏掉最近的消息。读取被 macOS 的 TCC 拒绝
+  时, 这条通道以 `tcc-denied` 的名字失败, **绝不是一次读到零条的成功扫描**。
+- **`'ui'` —— 读那个客户端渲染出来的界面**(由 agent-browser 的 profile 驱动, 见
+  `docs/design-agent-browser-v2.md`)。这是 **Windows、Linux 与全部 WeChat** 的唯一来源
+  (前两者的库是加密的 / 压根没有官方客户端, WeChat 的密钥在进程内存里 —— 围栏 13)。它
+  同样是一次带游标的周期扫描, 但游标是一把**声明出来的**合成键, 而"完整的一趟"是受滚动
+  限制的, 两件事都在 §12.5 里逐条写出来。
+
+两条路的延迟差一个数量级(秒 vs 分钟), 而**两个数字都是会话行上画出来的那个数字**, 因为
+它是用户在把一件事交给这条通道之前唯一需要知道的量 —— 这也是为什么一次被拒绝的库读取
+**不会**静默降级成界面扫描。发送在两条路上是同一件事: 在那个已登录的官方客户端自己的输入
+框里打字; 走协议库那条路带着围栏 13 的条款风险, 默认不提供。**库在哪台机器上, 读它的代码
+就在哪台机器上**: 一个 `channels-scan-store` 的 agentd op, `hostId` 是参数, 本机是设备 #0。
+这一类 adapter 的接口从 P0 起就存在(`scan` / `scanSources` / `scanLatency` / `scanState` /
+`convCaps` / `tosRisk` 都是为它留的位置), 具体的 WhatsApp 与 WeChat adapter 在 P6 且被决定
+19 门控。
 
 ### 6.4 接收通道: push / poll / scan —— 以及它们当中谁可以携带内容
 
@@ -1224,29 +1304,116 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 一个我们能调的 vendor API, 只有一个跑在某台机器上的官方客户端, 以及它自己写下来 / 画出来的
 东西。所以 `receive: 'scan'`, 并且它必须再回答一个问题 —— 扫的是**什么**:
 
-| `scanSource` | 读什么 | 发送 | 现实 |
+| `scanSource` | 读什么 | anchor | 延迟 | 发送 |
+|---|---|---|---|---|
+| `'store'` | 客户端自己写下的本地库, 按 rowid / 时间戳带游标增量读, 可选一个对库文件的 fs.watch 做变更通知 | 客户端**自己的**消息 id(库里就有那一列)⇒ `history: 'since'` | 秒级 | 落到 `'ui'` —— 协议库被围栏 13 拒绝 |
+| `'ui'` | 客户端**渲染出来的界面**, 由 agent-browser 的一个 profile 驱动(`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + 指纹种子 + 代理, 外加一个 VibeSpace 自己拥有的实时视图) | 通常没有稳定 id ⇒ 一把**声明出来的**合成键 ⇒ `history: 'page'`, **绝不是 `'none'`** | 分钟级 | agent-browser 在那个客户端自己的输入框里打字 |
+
+**r5(owner 的更正): `'store'` 不是一个假想的格子, 它在 macOS 上是真的。** r4 写下的那句
+"决定 19 把 `'store'` 对**两个**平台都排除掉了"对 WeChat 成立、对 WhatsApp **不成立**, 而
+它之所以读起来像一句话, 是因为它把两件完全不同的事塞进了同一个词: WeChat 的库是**加密的**
+且密钥在**进程内存**里, 而 WhatsApp 在 macOS 上**根本没有加密它**。围栏 13 拒绝的是前者;
+后者是一次普通的、被用户授权的、只读的文件读取。这个区别不是措辞, 它决定这一类到底是"只能
+看屏幕"还是"在跑着官方客户端的那台机器上有一条带真 anchor 的秒级通道"。
+
+#### 平台矩阵(这一类真正的形状)
+
+| 平台 | 官方客户端 | 本地库 | 我们的来源 |
 |---|---|---|---|
-| `'store'` | 客户端自己写下的本地库, 带游标增量读, 可选一个 fs.watch 做变更通知 | 走协议库, 或者退回 `'ui'` | 只有在那份库**读得出来**时才成立 |
-| `'ui'` | 客户端**渲染出来的界面**, 由 agent-browser 的一个 profile 驱动(`docs/design-agent-browser-v2.md`: profile = user-data-dir + provider + 指纹种子 + 代理, 外加一个 VibeSpace 自己拥有的实时视图) | agent-browser 在那个客户端自己的输入框里打字 | 只能看见屏幕上有的东西, 所以历史是"能滚多远就多远" —— `history: 'page'`, **绝不是 `'none'`**(见下) |
+| **macOS** | WhatsApp for Mac —— **Catalyst** 那个(Mac App Store); 老的 Electron 版 2024 年已宣布弃用 | `~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite`(同名变体还有 `.private` 与 `group.net.whatsapp.family`)—— Core Data 存储, **未加密**, 裸 `sqlite3` 就读得出 `ZWAMESSAGE` / `ZWAMEDIAITEM` | **`'store'`**(过 TCC 那道门之后) |
+| **Windows** | WhatsApp Desktop(UWP 与较新的 WebView2 两种架构) | `%LOCALAPPDATA%\Packages\5319275A.WhatsAppDesktop_cv1g1gvanyjgm\LocalState` —— SQLite **加密**: UWP 用 SQLite Encryption Extension(SEE), dbKey 由一个在应用之外取不到的机器唯一标识派生; WebView2 那一支的各类密钥用 DPAPI-NG 保护 | `'ui'` —— 复原一把 vendor 扣住的密钥, 与读进程内存是同一类行为(围栏 13) |
+| **Linux** | **没有官方桌面客户端**; 官方途径只有 WhatsApp Web | 不存在 | `'ui'`(web-in-profile) |
+| **任意** | WeChat 桌面端 | SQLCipher / WCDB **加密**, 密钥只存在于运行中客户端的**进程内存**里 | `'ui'`(围栏 13, 未变) |
 
-两个具体平台落在**不同**的格子里, 而这个区别是 owner 要的那次风险陈述:
+#### 于是 `scanSource` 不是一个按 adapter 种类的静态事实
 
-- **WhatsApp。** 官方 Web 客户端跑在一个 agent-browser profile 里就是 `scanSource: 'ui'`,
-  发送就是在它自己的输入框里打字 —— 身份上就是用户本人(`identityMarking: 'none'`), 因为发
-  消息的**确实**是那个已登录的客户端。另一条路是协议库(whatsmeow / Baileys): 它们是逆向出
-  来的**非官方客户端**, 而非官方客户端被 WhatsApp 的条款明确禁止; 公开报道里封号确实落在过
-  低流量、只回复的正常使用上, 而合规的替代品是走认证服务商的官方 Business Cloud API(它是
-  bot 身份, 所以 `identityMarking: 'marked'`)。⇒ 协议库那条路 `tosRisk: 'prohibited'`,
-  默认不提供(围栏 13、决定 19)。
-- **WeChat。** 桌面端的本地库是 SQLCipher / WCDB 加密的, 而那把密钥只存在于**正在运行的客
-  户端进程的内存里** —— 所有公开工具都是从那里把它抠出来的。**读另一个进程的内存不是这个
-  产品会做的事**(围栏 13), 所以 WeChat 的 `scanSource: 'store'` 这条路**不存在**; 剩下的只
-  有 `'ui'`。
+同一个 WhatsApp adapter 在 macOS 上读库、在 Linux 上刮界面。而 `caps` 按定义是按**种类**的
+静态声明(§2), "这台机器上有什么"是按**部署**的事实 —— 这与 r4 删掉 `caps.pushExclusivity`
+的理由**逐字相同**, 所以处理方式也相同: 标量 `caps.scanSource` **删除**, 换成
 
-**`'ui'` 那一格自己欠三行摄入契约**(r4)。决定 19 把 `'store'` 对**两个**平台都排除掉了
-(WeChat 按围栏 13 的内存规则, WhatsApp 因为拒绝协议库之后只剩 `'ui'`), 所以 `'ui'` 就是这
-一类**发布出去的全部**; 而 §6.3 那句"两者都是带游标的周期扫描"里的游标, 此前只对 `'store'`
-描述过。少了这三行, 这一格满足不了 store 自己的不变量:
+- `caps.scanSources` —— 一张按平台的表(`{ darwin:'store', win32:'ui', linux:'ui' }`), 静态
+  的**上界**声明, 与 `convCaps ⊆ caps` 是同一个方向: 解析只许收窄, 绝不许放宽;
+- `caps.scanLatency` —— 按**来源**给数(`{ store: 15, ui: 300 }` 秒), 因为两条路差一个数量
+  级, 而这个数字是要画在会话行上的;
+- `src/channel-caps.js` 里**唯一**的解析器
+  `scanState(caps, adapterRecord, hostFacts, now)`, 把平台、客户端在不在、以及读取授权折成
+  一个答案, 与 `laneState` 同一个形状、同一条法则(*折成答案的地方只能有一个*)。
+
+```js
+scanState(caps, adapterRecord, hostFacts, now)
+      -> { source:  'store'|'ui'|null,       // 这条会话此刻实际走的来源
+           why:     'store'|'no-store-on-platform'|'store-encrypted'
+                    |'client-not-installed'|'tcc-denied'|'user-chose-ui'|'no-source',
+           latencySeconds,                   // 来自 caps.scanLatency[source], 画在会话行上
+           storePath,                        // 只在 source==='store' 时有; 绝不进日志
+           grant:   'granted'|'needed'|'denied'|null }
+```
+
+优先级同样写死: **平台声明 > 客户端在场 > 读取授权 > `'ui'`**。而它带一条**刻意的例外**,
+没有这一条这个解析器就会变成它要防的那个东西:
+
+> **被拒绝的读取不会自动降级成 `'ui'`。** `tcc-denied` 是一个**具名**答案(`source: null`),
+> 由连接向导渲染并给出授权步骤; 落回 `'ui'` 是用户在向导里做的一次**选择**(`user-chose-ui`),
+> 不是产品替他做的一次静默降级。理由就是下面第 1 条性质: 会话行上那个延迟数字是这一类**全
+> 部**的诚实性契约, 而把一条 15 秒的通道悄悄换成一条 5 分钟的通道, 恰好就是把那个数字变成
+> 谎话。同一条规则的镜像也成立: 客户端根本没装(`client-not-installed`)时答的是 `null` 加
+> 一个理由, 不是一次空扫描 —— 空结果与"我们没在看"逐字节相同, 而那正是围栏 8 的形状。
+
+#### 两个平台各自的风险陈述
+
+- **WhatsApp。** 在 **macOS** 上, 官方 Catalyst 客户端把它的整份聊天历史留在一个**未加密**
+  的 Core Data SQLite 库里, 于是 `scanSource: 'store'` 是一次普通的只读文件读取: 有真
+  anchor、秒级延迟、不需要 agent-browser、也不需要一个第二份登录 —— 这条路在有它的时候
+  **优先于** `'ui'`。在 **Windows** 与 **Linux** 上没有这条路(前者库是加密的, 后者压根没有
+  官方客户端), 剩下的是官方 Web 客户端跑在一个 agent-browser profile 里, 即
+  `scanSource: 'ui'`。**两条路的发送是同一件事**: 在那个已登录的官方客户端自己的输入框里
+  打字, 所以身份上就是用户本人(`identityMarking: 'none'`) —— 这也是为什么"读库"这条路
+  **不**顺手把发送也换掉: 库是只读证据, 不是一条发送通道。另一条路是协议库(whatsmeow /
+  Baileys): 它们是逆向出来的**非官方客户端**, 而非官方客户端被 WhatsApp 的条款明确禁止;
+  公开报道里封号确实落在过低流量、只回复的正常使用上, 而合规的替代品是走认证服务商的官方
+  Business Cloud API(它是 bot 身份, 所以 `identityMarking: 'marked'`)。⇒ 协议库那条路
+  `tosRisk: 'prohibited'`, 默认不提供(围栏 13、决定 19)。
+- **WeChat —— 一个字都没变。** 桌面端的本地库是 SQLCipher / WCDB 加密的, 而那把密钥只存在
+  于**正在运行的客户端进程的内存里** —— 所有公开工具都是从那里把它抠出来的。**读另一个进
+  程的内存不是这个产品会做的事**(围栏 13), 所以 WeChat 的 `'store'` 这条路**不存在**, 在
+  每一个平台上剩下的都只有 `'ui'`。WhatsApp 在 macOS 上多出一条路, **没有**给 WeChat 多出
+  任何东西: 分开这两者的不是平台, 是**那份库有没有被加密**。
+
+#### `'store'` 那一格的摄入契约(r5)
+
+- **anchor 是真的。** 那张消息表同时带 rowid 与客户端自己的消息 id, 所以
+  `ChannelRecord.vendorId` 拿到一个**真的** vendor id, `raw.synthetic` 保持 false —— §5 不
+  变量 2 在这里根本用不上那把合成键。这才是"有 `'store'` 就优先"的真正理由: 不是它更快,
+  是**它有一把不是我们编出来的键**, 于是重扫塌成一条这件事是平台保证的而不是我们赌的。游
+  标是 `(rowid, 时间戳)` 一对: rowid 单调, 时间戳用于库被换掉之后重新对齐。
+- **什么叫"完整的一趟"。** 一趟开始时先记下当时的最大 rowid, 读到它为止 ⇒ `complete: true`
+  且 anchor 前进; 中途任何失败(库被换、读被拒、进程退出)⇒ `complete: false`, anchor 不
+  动, 下一趟重读。与 §5 不变量 4 同一条规则, 只是换了一种证据。
+- **绝不写。** 优先用 SQLite **backup API**(或 `VACUUM INTO`)把库复制成一份 scratch 拷贝
+  再读那份拷贝, 退一步是把 `db` / `-wal` / `-shm` 三个文件一起复制过去。**"以只读方式打开
+  活库"是不够的**: 这是一个 WAL 库, 只读主文件会**静默漏掉**最近的消息, 而以读写方式打开
+  就去动了那个正在跑的客户端自己的状态。绝不 checkpoint, 绝不删 WAL, 绝不以 `mode=rw` 打
+  开 —— 这条通道对那个客户端的唯一可观测影响必须是一次短暂的共享锁。
+- **TCC 是一道具名的门。** macOS Sonoma 14 开始保护 `~/Library/Application Support/` 下的
+  应用容器, Sequoia 15 把这个保护**扩展到** `~/Library/Group Containers/`; 一个既不是以那
+  个客户端的 Team ID 签名、也不是从 Mac App Store 装出来的进程, 要么收到一次(按进程实例、
+  临时的)授权提示, 要么直接被拒。所以这条通道的失败形状是一个 `EPERM`, 而它必须以
+  `tcc-denied` 的名字到达用户并在连接向导里给出授权步骤(§13), **绝不是一次读到零条消息的
+  成功扫描**。
+
+**它跑在哪台机器上: 一个 agentd op, 而 `hostId` 是参数。** 库在哪个客户端跑的那台机器上,
+读它的代码就得在那台机器上跑 —— 这正是 CS 分离律的形状, 而**本机是设备 #0**
+(`hosts.device(falsy)`), 所以这里没有"本地一套、远程一套"这回事: 一个 `channels-scan-store`
+op(daemon 侧的 handler + hello-ack 里的一个能力位 + 三触规则), 一份实现, `hostId` 从 v1 的
+`local` 换到一台配对的 Mac 就只是换一个参数。这也让 §14 里"跑在配对设备上的 adapter"那一行
+第一次拿到一个**真实的消费者**, 而不是一句预留 —— 因为这一类天然就是它: 官方客户端跑在
+owner 的 Mac 上, VibeSpace 跑在别处。
+
+#### `'ui'` 那一格自己的摄入契约(r4, 保留)
+
+`'ui'` 不再是这一类"发布出去的全部"(macOS 上的 WhatsApp 走 `'store'`), 但它仍然是
+**Windows、Linux 与全部 WeChat** 的唯一来源, 所以这三行一个字都不减 —— 而 §6.3 那句"两者都
+是带游标的周期扫描"里的游标, 在这一格里是这样的:
 
 - **anchor。** 优先用客户端自己暴露的消息 id; 客户端不暴露稳定 id 时, adapter 必须**声明**
   一把合成键 `(convId, renderedAt, sha256(author|text))` 写进 `ChannelRecord.vendorId`, 并
@@ -1260,25 +1427,34 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 - **`history: 'none'` 在 `receive: 'scan'` 上是禁止的**(§4 的契约规则)。§5 不变量 4 要的
   是"完整的一趟"与 `complete:false`, 而一个连翻页调用都没有的 adapter 两件事都报不出来;
   §4 又规定没声明的能力**抛异常**, 于是 §6.3 那句"翻到已存的 anchor 为止"在它身上根本不
-  可能发生。
+  可能发生。**这条对两格都成立**: `'store'` 那一格用 `'since'` 满足它, `'ui'` 那一格用
+  `'page'` 满足它, 而 `'none'` 在这条通道上没有合法的填法。
 
 **这一类共有的三条性质**, 全都直接掉进已有的机器里:
 
-1. **延迟是画在会话行上的一个数字。** `freshnessClaim` 对 `scan` 返回 "上次扫描在 <t> 之
-   前", 而 AssignFilter 面板在用户把一件事交给这条通道之前就把它说出来。一个 5 分钟扫描一
-   次的通道在做值班告警这件事上是诚实的, 在做实时客服这件事上是不诚实的 —— 产品负责让人
-   在**指派之前**看见这个差别。
-2. **凭据不是 token, 是一个登录着的客户端。** 所以 `auth.state()` 回答的是"那个 profile
-   里的客户端还登录着吗", 而 `needs-reauth` 的动作是"打开实时视图, 重新扫一次码", 不是一
-   次 OAuth 往返。
+1. **延迟是画在会话行上的一个数字, 而它来自 `scanState` 不是来自一条静态声明。**
+   `freshnessClaim(scanState(…), convEntry)` 对 `scan` 返回 "上次扫描在 <t> 之前", 而
+   AssignFilter 面板在用户把一件事交给这条通道之前就把它说出来。一个 5 分钟扫描一次的通道
+   在做值班告警这件事上是诚实的, 在做实时客服这件事上是不诚实的 —— 产品负责让人在**指派之
+   前**看见这个差别。这也正是上面那条"被拒绝的读取不自动降级"存在的理由: 同一个 adapter 在
+   两台机器上会画出两个不同的数字, 而那两个数字都必须是真的。
+2. **凭据不是 token, 是一个登录着的客户端 —— 而 `'store'` 那一路是两个事实。**
+   `auth.state()` 回答"那个客户端还登录着吗", `needs-reauth` 的动作是"打开实时视图重新扫一
+   次码", 不是一次 OAuth 往返。`'store'` 那一路在它之上还多一个**正交**的事实: 我们有没有
+   被授权去读那个文件(`scanState().grant`)。两个事实分开存、分开渲染: 客户端登出了库还在
+   (读得到, 但它不再更新), 授权被撤了客户端还登录着(它在更新, 但我们看不见)—— 把这两件
+   事合成一个布尔, 就是让其中一种情况顶着另一种的文案。
 3. **它天然是配对设备那件事的第一个真实用例**(§14): 客户端跑在哪台机器上, 这个 adapter 就
-   得在哪台机器上跑。接口本来就接收一个 machine handle, 所以这件事是接线不是重写 —— 但它
-   是 P6 与那件事**同时**成立才有意义的原因。
+   得在哪台机器上跑。接口本来就接收一个 machine handle, 所以这件事是接线不是重写 —— 而
+   `'store'` 那条路把它从"将来会有用"变成了 P6 的**前提**: 一台配对的 Mac 上的
+   `channels-scan-store` op 就是这一类最好的那条通道。
 
-**排期与门控:** 接口从 P0 起就带着这一类需要的每一个位(`scan` / `scanSource` /
-`scanLatency` / `convCaps` / `tosRisk`), 而且假 adapter 会真的跑一遍 scan 模式, 所以这条通
-道从第一天起就在 `test-channels-lane-parity` 的覆盖里。具体的 WhatsApp 与 WeChat adapter 是
-**P6**, 门控在决定 19 与 agent-browser 系统落地这两件事上。
+**排期与门控:** 接口从 P0 起就带着这一类需要的每一个位(`scan` / `scanSources` /
+`scanLatency` / `scanState` / `convCaps` / `tosRisk`), 而且假 adapter 会**两种来源都真的跑
+一遍** scan 模式, 所以这条通道从第一天起就在 `test-channels-lane-parity` 的覆盖里。具体的
+WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 agent-browser 系统落地
+上, 而 macOS 的 `'store'` 那一半**只**门控在决定 19 上 —— 它不需要 agent-browser, 所以它是
+这一类里唯一一条今天就能独立落地的腿。
 
 ---
 
@@ -1292,6 +1468,13 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
   的方式。
 - **Auth 状态是三值的而且诚实:** `connected` / `needs-reauth`(带过期时刻与一个倒计时)/
   在读不出 token 记录时是 `unknown`。绝不乐观。Adapters 那一行渲染的就是这个。
+- **本地客户端那一类有两个正交的凭据事实, 而它们各渲染各的**(r5, §12.5)。`auth.state()`
+  回答的是"那个官方客户端还登录着吗"; `scanState().grant` 回答的是"操作系统让不让我们读
+  它写下的那份库"。**`tcc-denied` 是一个具名的拒绝, 不是一次空扫描**: 连接向导把它渲染
+  成一条带步骤的行(在 macOS 上是"给这个 daemon 授予完全磁盘访问, 然后重试"), adapter
+  那一行变琥珀色, 而这一类的扫描**不会**在这时候偷偷落回界面扫描 —— 落回去是用户在向导
+  里按的一个按钮。理由与围栏 8 是同一条: 一次读到零条消息的成功扫描, 与一次被拒绝的读
+  取, 在下游是逐字节相同的, 而其中一个是谎话。
 - **失败必须到达用户。** 连续 N 趟失败(默认 3)把那一行变琥珀色, 并归档一条点名 adapter 与
   vendor 自己的错误文本的 "For you" 条目; 恢复时**撤回**它。一次 `rate-limited` 退避显示为
   一个倒计时, 不是一个错误。
@@ -1303,9 +1486,9 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 | 推迟的 | 为什么 | 落地处 |
 |---|---|---|
 | 插件贡献的 adapter | manifest 没有 adapter 贡献点; 沙箱会需要网络+文件系统授权; 而且接收路径必须跑在 store 与 spend guard 旁边。第三方 adapter 是*最终*的正确归宿 | `contributes.channelAdapters`, 走同一套 `src/channels` 接口, 于是注册表永远不分叉。**这个 key 今天并没有被保留**: `src/plugin-manifest.js` 里的 `RESERVED_CONTRIBUTIONS` 是 `['keybindings','panels','viewers','commands','menus','statusChips','backends']`, 而只有*在那张表里*的 key 才会产生"保留给后续阶段 —— 已忽略"的警告 —— 其余任何东西在 `m.contributes` 被重建成固定形状时就被静默丢弃, 所以一个照着这一行去写的插件作者会**完全收不到任何信号**。**P0 加上那一个词**, 外加 `scripts/test-plugin-loader.mjs` 里期望集合的更新。一个声明了却是惰性的槽位, 与本文针对 `SPEND_REASONS` 所反对的是同一种失败; 区别在于这里那个槽位只值一个数组条目, 却买到一句诚实的警告 |
-| 跑在配对设备上的 adapter | 凭据与 store 都住在这里 | 接口本来就接收一个 machine handle; v1 传 `local`。`hostId` 是一个参数, 绝不是一个分支 |
+| 跑在配对设备上的 adapter | 凭据与 store 都住在这里 | 接口本来就接收一个 machine handle; v1 传 `local`。`hostId` 是一个参数, 绝不是一个分支。**r5: 这一行第一次有了一个真实的消费者** —— macOS 上 WhatsApp 的那份库在 owner 的 Mac 上, 而 VibeSpace 跑在别处, 所以 `channels-scan-store` 这个 op 从第一天起就是按 `hostId` 写的(本机是设备 #0), P6 的那条腿只是换一个参数 |
 | ~~活事件通道~~ **已上移到 P1**(r3/Q3(a)) | 不再推迟: owner 要实时推送, 而 §6.4 按证据重新论证过了。留下的门控只有一个 —— 在 Lark 控制台上启用事件订阅 | `src/channels/live/<kind>.js`, 内容还是游标 kick 由 `laneState()` 判定(§4) |
-| 本地客户端 adapter(WhatsApp / WeChat) | 接口从 P0 起就建模了它(`scan` / `scanSource` / `tosRisk` / `convCaps`), 但 adapter 本身要一个登录着的官方客户端、一个 agent-browser profile, 以及一次关于条款风险的点名决定 | **P6**, §12.5; 门控在决定 19 与 agent-browser 系统上 |
+| 本地客户端 adapter(WhatsApp / WeChat) | 接口从 P0 起就建模了它(`scan` / `scanSources` / `scanLatency` / `scanState` / `tosRisk` / `convCaps`), 但 adapter 本身要一个登录着的官方客户端, 而 `'ui'` 那一半还要一个 agent-browser profile 与一次关于条款风险的点名决定 | **P6**, §12.5。`'ui'` 那一半门控在决定 19 **与** agent-browser 系统上; macOS 的 `'store'` 那一半**只**门控在决定 19 上 —— 它不需要 agent-browser |
 | 走协议库的 WhatsApp 发送 | 非官方客户端被平台条款禁止, 封号落在过正常使用上(围栏 13) | 永远在 `tosRisk: 'prohibited'` 后面; 合规路线是官方 Business Cloud API(bot 身份) |
 | HTML 邮件渲染 | XSS 面; 纯文本是诚实的, 而且对分诊来说够用 | published-pages 那套 sandbox iframe 模式 |
 | 附件自动抓取 | 带宽、存储, 以及每条附件多一次被授权的请求 | `caps.attachments: 'fetch'` + 一个显式的用户/agent 动作, 带大小上限 |
@@ -1341,9 +1524,9 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 | `test-channel-outbox` | fast | 状态机(每一次允许的转移与每一次被禁止的转移); 护栏叠加且只能收紧; 未知策略时 fail-closed; `unknown` 绝不自动重试 | 一份去掉护栏检查的补丁副本必须变红; 一条 direct-send 策略碰上带链接的消息仍然必须走 review |
 | `test-channel-record` | fast | 归一化, 含 mention 占位符解析; 注入标记的剥除 | 一段包含我们自己 frame 标记的正文, 出来必须是惰性的 |
 | `test-channel-store` | fast | 原子索引; 只追加的日志; 重放分页时的去重; 游标只在完整 pass 之后前进; 保留地板 ≥ 7 天; **两趟并发 pass 经 `index.update()` 都落地**(§5.1) | 一趟报告 `complete:false` 的 pass 必须让游标保持不变; 一份围绕 `writeJsonAtomic` 做 read-modify-write 的补丁副本必须**丢掉**其中一趟的 anchor 推进 |
-| `test-channel-adapter-contract` | fast | 假 adapter 驱动每一个已声明的能力; 未声明的能力抛异常; 带类型的错误; **那条"没有任何调用点按 `kind` 分支"的 grep 普查**; **`receive:'scan'` 的 adapter 不许声明 `history:'none'`**(r4, §12.5) | 一个在调用点上按自己 kind 分支的合成 adapter 必须让普查失败; 一个声明 `receive:'scan'` + `history:'none'` 的合成 adapter 必须变红 |
-| `test-channel-caps` | fast | 两个轴的记录; `convCaps` 三值; **只有 `caps` 与 `convCaps` 同时放行那个控件才存在**, 而 `unknown` 永远渲染成"不提供 + 理由"; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim` 三种通道各自的措辞; `identityWarning` 对 `unknown` 与对 `marked` 一样出声。**r4 两组**: `laneState` 的优先级 —— 一条 `claimedExclusive:true` 且带 `demotedAt` 的记录必须答 `carryContent:false`, 一条超过心跳窗口没出过声的通道**永远**不许答 `live:true`, `unknown` 一律 `carryContent:false`; 以及 `convCaps` 的 TTL —— 过了 TTL 的条目必须渲染成 `unknown` | 一个声明 `sendAs:['user']` 却在一个 `convCaps.sendAs === []` 的会话上仍然提供发送控件的合成 adapter 必须变红; 一个返回比 `caps` 更宽的 `convCaps` 的 adapter 必须变红; `identityMarking:'unknown'` 却没有警告必须变红; **一份读 `caps.pushExclusivity` 的修前副本必须在"已降级"那条 fixture 上答 `carryContent:true`**; **一条新鲜的 `convCaps` 仍然必须提供那个控件**(TTL 的正控 —— 一条永远答 `unknown` 的规则同样是缺陷) |
-| `test-channels-lane-parity` | fast | **同一天的流量分别经 push / poll / scan 灌进去 ⇒ 同一批记录、同一个唤醒次数、同一笔扣款**(围栏 12); 同一条消息推送来一次、轮询又来一次要塌成一条(按消息 id 去重); 事件重放按 `event_id` 去重; **r4 的 scan 腿: 同一块屏幕扫两遍必须是 no-op**(合成 anchor, §12.5), 而滚动上限先撞到 ⇒ `complete:false` ⇒ anchor 不动 | 一份**绕过合并窗口**的推送通道副本必须在同一个爆发上唤醒得更多; 一份在持久化**之前** ack 的副本必须在注入的崩溃点上丢掉记录; **一份丢掉合成键的副本必须在第二次扫描时把每一条记录都变成重复** |
+| `test-channel-adapter-contract` | fast | 假 adapter 驱动每一个已声明的能力; 未声明的能力抛异常; 带类型的错误; **那条"没有任何调用点按 `kind` 分支"的 grep 普查**; **`receive:'scan'` 的 adapter 不许声明 `history:'none'`**(r4, §12.5); **`scan` 的 adapter 必须声明 `scanSources` 与按来源的 `scanLatency`**(r5) | 一个在调用点上按自己 kind 分支的合成 adapter 必须让普查失败; 一个声明 `receive:'scan'` + `history:'none'` 的合成 adapter 必须变红; 一个声明 `receive:'scan'` 却不给 `scanSources` 的合成 adapter 必须变红 |
+| `test-channel-caps` | fast | 两个轴的记录; `convCaps` 三值; **只有 `caps` 与 `convCaps` 同时放行那个控件才存在**, 而 `unknown` 永远渲染成"不提供 + 理由"; `convCaps.sendAs` ⊆ `caps.sendAs`; `freshnessClaim` 三种通道各自的措辞; `identityWarning` 对 `unknown` 与对 `marked` 一样出声。**r4 两组**: `laneState` 的优先级 —— 一条 `claimedExclusive:true` 且带 `demotedAt` 的记录必须答 `carryContent:false`, 一条超过心跳窗口没出过声的通道**永远**不许答 `live:true`, `unknown` 一律 `carryContent:false`; 以及 `convCaps` 的 TTL —— 过了 TTL 的条目必须渲染成 `unknown`。**r5 一组**: `scanState` 的优先级(平台声明 > 客户端在场 > 读取授权 > `'ui'`), 它的答案 ⊆ `caps.scanSources[platform]`, 而 `tcc-denied` 解析成 `source:null` **不是** `'ui'` | 一个声明 `sendAs:['user']` 却在一个 `convCaps.sendAs === []` 的会话上仍然提供发送控件的合成 adapter 必须变红; 一个返回比 `caps` 更宽的 `convCaps` 的 adapter 必须变红; `identityMarking:'unknown'` 却没有警告必须变红; **一份读 `caps.pushExclusivity` 的修前副本必须在"已降级"那条 fixture 上答 `carryContent:true`**; **一条新鲜的 `convCaps` 仍然必须提供那个控件**(TTL 的正控 —— 一条永远答 `unknown` 的规则同样是缺陷); **一个在 `scanSources.linux==='ui'` 的机器上答 `'store'` 的解析器必须变红**, 而**一台 `darwin` + 客户端在场 + 授权已拿到的机器上仍然答 `'ui'` 的解析器同样必须变红**(`scanState` 的正控 —— 一个永远收窄到底的解析器与一条永远答 `unknown` 的规则是同一种缺陷) |
+| `test-channels-lane-parity` | fast | **同一天的流量分别经 push / poll / scan 灌进去 ⇒ 同一批记录、同一个唤醒次数、同一笔扣款**(围栏 12); 同一条消息推送来一次、轮询又来一次要塌成一条(按消息 id 去重); 事件重放按 `event_id` 去重; **r4 的 scan 腿: 同一块屏幕扫两遍必须是 no-op**(合成 anchor, §12.5), 而滚动上限先撞到 ⇒ `complete:false` ⇒ anchor 不动; **r5 的 store 腿: 同一份库扫两遍必须是 no-op**(客户端自己的消息 id, `raw.synthetic:false`), 一趟读到一半被打断 ⇒ `complete:false` ⇒ anchor 不动, 而**同一天的流量经 `'store'` 与经 `'ui'` 灌进去必须得到同一批 `ChannelRecord`**(两条来源之间的 parity, 因为决定 19 让同一个 adapter 在两台机器上走不同的来源) | 一份**绕过合并窗口**的推送通道副本必须在同一个爆发上唤醒得更多; 一份在持久化**之前** ack 的副本必须在注入的崩溃点上丢掉记录; **一份丢掉合成键的副本必须在第二次扫描时把每一条记录都变成重复** |
 | `test-channels-identity` | fast | 默认**不追加**发送方诚实行; `identityMarking` 驱动审批卡上的警告与回执里的字段; 审计行带 `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` 且**不出实例**; `sendAs: []` 的会话上 `reply` 返回 `send-not-available` 而**不创建 proposal**; **r4: 一条在 `convCaps` 已经过期之后才被批准的 proposal, 必须在发送之前重新解析并以 `send-not-available` 拒绝** | 一份把诚实行默认打开的副本必须变红(r2 的决定 17 是这条腿的负控); 一个 `marked` 的 channel 上审批卡没有警告必须变红; 一个 `sendAs: []` 的会话上创建出了 proposal 必须变红; **一份不在批准时重新解析的副本必须把那条消息真的发出去** |
 | `test-channels-egress` | fast | 每一个被构造出来的出向请求, 要么来自声明了自己主机的那个 adapter, 要么来自一条**带理由的**白名单 `(file, host)` 对 —— 出生即种下 `src/gmail-sync.js` 与 `src/mounts.js`(§3.1) | 一个带未声明主机的临时文件必须变红; 一条**死掉的白名单条目**(文件被移动或改名)同样必须变红 |
 | `test-oauth-loopback` | fast | 两种模式(§12.4): Gmail 的临时绑定、Lark 的固定绑定; 请求处理器**与**粘回两处的 `state` 拒绝; 完成/取消/超时时端口被释放 | 一个**被预先占住**的固定端口必须产生那次具名拒绝与粘回回落, 绝不是一个不透明的 `EADDRINUSE`; 一次 `state` 错误的回调在两种模式下都必须被拒绝 |
@@ -1353,6 +1536,7 @@ r3/Q3(b) 要求把这一类**建模**出来。它与 Lark / Gmail 的区别不�
 | `test-spend-paths`(已有) | fast | 它那条按站点的普查必须看见这个新生产者、已接线、带着已声明的理由 | 它本来就带着自己的负控 |
 | `test-channels-engine` | heavy | 真 worktree 服务器 + 假 adapter: 爆发日翻页、退避、单飞、故障出声**与撤回**、摘要批量、唤醒授权与 hold 释放 | 一份用固定窗口抓取的修前副本, 必须在爆发日 fixture 上丢消息 |
 | `test-channels-push` | heavy | 真 worktree 服务器 + 一个**假推送服务器**: ack 在持久化之后(注入一次 ack 与处理之间的崩溃, 记录必须还在); 心跳沉默 ⇒ `state` 掉出 `live` **且**轮询节奏立刻回到快节奏; `stop()` 对已经在飞的 arm 是终局的; 声明 `exclusive` 但故意扣掉一部分事件 ⇒ `missRate` 越过阈值 ⇒ **自动降级成 kick 并把理由说出来**。**r4 三条**: 降级之后这条通道**真的改了它携带的东西**(下一个事件只 kick 游标, 记录由对账轮询进来 —— 光断言 `missRate` 越线是不够的); kick 模式下 `missRate` **一条样本都不涨**(否则它是单向棘轮); 一条降级了的通道即便 fixture 不再扣事件也**绝不自己回到**内容模式, 而在连接向导里重新声明一次独占则清零计数器并重新进入内容模式 | 一条**谎报 `active`** 的通道(修前副本)必须把轮询回落关掉并丢消息; 一份从不降级的副本必须在扣事件的 fixture 上永远丢消息; **一份把内容/kick 判定读在 `caps` 上的修前副本, 必须在降级之后仍然携带内容**; **一份终身累计 `missRate` 的副本, 必须在重新声明之后仍然停在阈值之上** |
+| `test-channels-store-scan` | heavy | 真 daemon(`test-sysinfo-op` 那个模板)+ 一份**合成的** WhatsApp 形状 sqlite: 按 rowid 的游标只读一次读到底; 库带一个未 checkpoint 的 WAL 时**最近的消息仍然读得到**; 一趟读了一半被打断 ⇒ anchor 不动; 扫完之后源库的 `db`/`-wal`/`-shm` **逐字节未变**且 mtime 未变; 读被拒 ⇒ 具名的 `tcc-denied` 而不是零条; 能力门 —— 不宣告这个 op 的旧 daemon **绝不会被问**(未知 op 会挂) | 一份只读主库、不管 WAL 的副本必须漏掉最近那批消息; 一份以 `mode=rw` 打开的副本必须让"源库逐字节未变"那条断言变红; 一份把 `EPERM` 当成"零条"的副本必须让具名拒绝那条腿变红 |
 | `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计 | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送" |
 
 Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的事故: 不许固定 `/tmp` 路径, 不许
@@ -1415,6 +1599,24 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 答案分散在多个存储位上, 就等于没有答案** —— 存储位可以有好几个(声明、测量、观测本来就是
 不同的事实), 但**折成答案的地方只能有一个, 而且它得读得到全部三个**。
 
+### 17.2 owner 的更正(r5)—— 一句合并了两个平台的话
+
+r4 写下"决定 19 把 `'store'` 对**两个**平台都排除掉了", 并据此把整个 §12.5 重写成只剩
+`'ui'` 那一格。**owner 指出这是错的**: 他见过一个直接读 macOS 上 WhatsApp 那份库的实现,
+而那份库根本没有加密。复核之后这条成立, 而它值得与上面 r2、r4 那两条并排记下来, 因为它的
+形状是另一种:
+
+| # | 发现 | 判定 | 改了什么 |
+|---|---|---|---|
+| 1 | "读本地库"这条路被整体排除掉了, 而排除它的理由(密钥在进程内存里 / 协议库违反条款)其实**一条都不适用于 macOS 上的 WhatsApp** —— 那个官方 Catalyst 客户端把整份聊天历史留在一个未加密的 Core Data SQLite 库里 | **成立。** 那句话把两件不同的事塞进了同一个词: WeChat 的库是**加密的**(密钥在内存里 ⇒ 围栏 13), WhatsApp 在 macOS 上**没有加密**(⇒ 一次普通的、被授权的、只读的文件读取)。围栏 13 的措辞让这两者读起来是同一件事, 因为它只说了自己拒绝什么, 从没说过自己**允许**什么 | 围栏 13 重写成三条拒绝(进程内存 / 复原一把 vendor 扣住的密钥 / 被条款禁止的传输)加上一条**明确的允许**, 判据是一句话"**我们在击穿谁的秘密?**"; §12.5 拿回 `'store'` 那一格并给它自己的摄入契约(真 anchor、完整的一趟、绝不写、TCC 是具名的门); 决定 19 从 (b) 改成 (b)+(d); P6 拆成两条门控不同的腿 |
+| 2 | 顺带发现的: `caps.scanSource` 是一个标量, 而同一个 adapter 在 macOS 上读库、在 Linux 上刮界面 | **成立, 而且与 r4 第 1 条是同一个缺陷。** 一个按**部署**的事实住在了按**种类**的静态声明里 —— 这正是 r4 删掉 `caps.pushExclusivity` 的那句话 | 标量删除, 换成按平台的上界表 `caps.scanSources` + 按来源的 `caps.scanLatency` + **唯一**的解析器 `scanState()`, 优先级写死, 并带一条刻意的例外: **被拒绝的读取解析成 `null` 加理由, 绝不静默降级成 `'ui'`** |
+
+这一条与 r2、r4 的形状都不同, 所以它自己是一条教训: **一道只说自己拒绝什么的围栏, 会在下
+一次被人当成"拒绝所有长得像它的东西"。** 围栏 13 的每一个字都是对的, 而它照样把一条合法的
+路一起带走了 —— 因为读者(包括写它的人)手里没有一条能说"这一个可以"的判据。所以现在它带
+着自己的判据, 而且**能对某些东西说"可以"**: 一道说不出 YES 的围栏不是围栏, 是一条禁令, 而
+禁令不需要论证, 也因此永远不会被复核。
+
 ---
 
 ## 18. 阶段、轮次、日历
@@ -1423,12 +1625,12 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 测)。日历按**每天 2 轮**算。区间是诚实的: 下限假设一轮就收敛, 上限假设这个模块需要那些额外
 的轮次 —— 而实测分布说大约三分之一的模块确实需要。
 
-### P0 — store、索引所有者、adapter 接口、假 adapter、panel 骨架 — **10–12 轮 (5–6 天)**
+### P0 — store、索引所有者、adapter 接口、假 adapter、panel 骨架 — **11–13 轮 (5.5–6.5 天)**
 
 `src/channel-store.js`(持久原语)、`src/channel-record.js`、**`src/channel-caps.js`(两个
 轴的能力判定 + `convCaps` 与它的 TTL + `freshnessClaim` + `identityWarning` + **唯一的通道
-解析器 `laneState`**)**、`src/channels/index.js`
-+ 假 adapter(**它三种接收模式都能真的跑**)、一个 `src/server/channels-engine.js` 骨架(调
+解析器 `laneState`** + **唯一的扫描来源解析器 `scanState`**)**、`src/channels/index.js`
++ 假 adapter(**它三种接收模式都能真的跑, 而 scan 模式两种来源都跑**)、一个 `src/server/channels-engine.js` 骨架(调
 度器、单飞、广播)且**从第一个 commit 起就带着 §5.1 那个序列化的索引所有者**、
 `src/routes/channels.js`、六处 rail 注册(§10.1)、panel 列表(**含新鲜度芯片**)与一个空的
 会话窗口。还有 `RESERVED_CONTRIBUTIONS` 里那一个词 `channelAdapters` 加上它的套件更新
@@ -1439,7 +1641,9 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 同步, 两趟同时的 pass 都推进了各自的游标, 而且**一个只读会话上根本画不出发送控件**。
 (r3: +2 轮 —— 两个轴的能力记录、`convCaps`, 以及假 adapter 的 scan / push 模式。r4: +1 轮
 —— `laneState` 与它的优先级、`convCaps` 的 TTL, 以及假 adapter 的 scan 模式里那把合成
-anchor 键。)
+anchor 键。r5: +1 轮 —— 按平台的 `scanSources`、解析器 `scanState` 与它的优先级, 以及假
+adapter 的 `'store'` 来源, 于是"同一天的流量经两种来源得到同一批记录"这条 parity 从第一天
+起就有腿。)
 
 ### P1 — Lark 读 + Gmail 读 + **推送通道** — **14–16 轮 (7–8 天)**
 
@@ -1505,23 +1709,39 @@ Gate: outbox 套件扩上幂等与 reconcile 两张矩阵; `test-channels-identi
 沙箱化的 HTML 渲染(**2–3 轮**)、附件抓取(**2**)、插件贡献的 adapter(**4–6**)、跑在配
 对设备上的 adapter(**4–6**)。(r3: 活通道那一项已经上移到 P1, 所以它不再在这里。)
 
-### P6 — 本地客户端 adapter(WhatsApp / WeChat)— **9–13 轮 (4.5–6.5 天), 未排期, 双重门控**
+### P6 — 本地客户端 adapter(WhatsApp / WeChat)— **13–18 轮 (6.5–9 天), 未排期, 两条腿各自门控**
 
-§12.5。`scanSource: 'ui'` 那条路(agent-browser profile、登录活性、带游标的界面扫描、在客户
-端自己的输入框里发送), 加上 WhatsApp 与 WeChat 各自的 adapter 与它们的 `tosRisk` 确认对话
-框。**门控在两件事上**: 决定 19(owner 是否接受条款风险与"只走界面"这条约束), 以及
-`docs/design-agent-browser-v2.md` 那套 profile 系统落地。接口这一侧从 P0 起就已经就位, 所
-以这个阶段里没有一行改动会碰到 store、filter、spend 或 outbox。(r4: +1 轮 —— 把 §12.5 那三
-行摄入契约真的实现出来: 合成 anchor 键、受滚动限制的"完整的一趟", 以及在两个真实客户端上判
-断它们到底暴不暴露稳定的消息 id。)
+§12.5。r5 之后这个阶段**分成两条独立的腿**, 而它们的门控不一样 —— 这正是把 `'store'` 找回
+来买到的东西: 这一类不再整体卡在 agent-browser 上。
 
-**总计:** P0–P4 = **50–61 轮 ≈ 25–30.5 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
+**P6a — macOS 的 `'store'` 腿(4–5 轮), 只门控在决定 19 上。** `channels-scan-store` 这个
+agentd op(daemon handler + hello-ack 里的能力位 + 三触规则)、SHARED 的
+`src/channels-store-scan.js`(平台事实、SQLite backup API 快照、按 `(rowid, 时间戳)` 的游
+标、把 `ZWAMESSAGE` / `ZWAMEDIAITEM` 映射成 `ChannelRecord` 并解析联系人与媒体引用)、
+`scanState()` 与连接向导里那条 TCC 授权行, 加上 `test-channels-store-scan`。**它不需要
+agent-browser**, 所以它是这一类里唯一一条今天就能独立落地的腿; 而因为它带一把真 anchor,
+它也是这一类里唯一一条不欠合成键那笔代价的腿。
+
+**P6b — `'ui'` 腿(9–13 轮), 双重门控。** agent-browser profile、登录活性、带游标的界面扫
+描、在客户端自己的输入框里发送, 加上 WhatsApp 与 WeChat 各自的 adapter 与它们的 `tosRisk`
+确认对话框。**门控在两件事上**: 决定 19(owner 是否接受条款风险), 以及
+`docs/design-agent-browser-v2.md` 那套 profile 系统落地。
+
+接口这一侧从 P0 起就已经就位, 所以这两条腿里没有一行改动会碰到 store、filter、spend 或
+outbox。(r4: +1 轮 —— 把 §12.5 那三行 `'ui'` 摄入契约真的实现出来: 合成 anchor 键、受滚动
+限制的"完整的一趟", 以及在两个真实客户端上判断它们到底暴不暴露稳定的消息 id。**r5: +4 轮**
+—— 整条 P6a, 其中一轮是先去**实测**这份设计从公开材料里读来的那些东西: 库的路径与它在一台
+真 Mac 上的现行 schema、TCC 到底是弹提示还是直接拒、以及那份未加密的库在被 owner 的客户端
+更新时的行为。)
+
+**总计:** P0–P4 = **51–62 轮 ≈ 25.5–31 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
 owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 的两个轴能力记录 +2、P1 的
 推送通道 +4、P2 的合并与通道对等 +2、P3 的身份面 +1、P4 的身份证明 +1; **r4 又加了 3 轮**:
 P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤回 +1、P3 的批准时重新
-解析 +1 —— 另有 P6 的 +1 不计入这个总数, 因为 P6 本来就未排期。)光是 P0–P2 ——
+解析 +1; **r5 又加了 1 轮**: P0 的 `scanState` 与按平台的 `scanSources` +1 —— r4 与 r5 另有
+P6 的 +1 与 +4 不计入这个总数, 因为 P6 本来就未排期。)光是 P0–P2 ——
 只读的 channels 加上 assignment、过滤与**实时推送**、完全没有任何出向路径 —— 是
-**33–39 轮 ≈ 16.5–19.5 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
+**34–40 轮 ≈ 17–20 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
 的, 没有任何外部消息能离开这栋楼, 而钱已经被界住了。
 
 ---
@@ -1550,7 +1770,7 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
 | 16 | **Assignment 蕴含可见性吗?** | 是, 写成一条显式授权 / 否, 用户还必须另外授予 reach | **是, 写成一条显式授权。** 一件显然是想要的事却要两步, 正是一个权限模型被绕过的方式; 把它写成一条真的授权, 才能让 reach 面板说真话 |
 | 17 | **发送方诚实行 — 已被 owner 推翻(r3/Q4)** | 总是追加 "drafted by \<agent\>" / 按 channel 开关**默认开** / 按 channel 开关**默认关** / 从不 | ~~按 channel 开关, 外部默认开~~ ⇒ **默认关, 保留为一个按 channel 的选项。** 默认是**以用户本人的身份发送、正文里不加任何东西**, 在每一个允许这么做的 channel 上都是。取代它的不是沉默: `identityMarking` 能力位在**授权那一刻**(审批卡/发送控件)与**回执里**把"对面会看见谁"说出来(§9.5)。理由是这句话欠的是**按下批准键的那个人**与起草它的那个 agent, 不是收件人 —— 而 r2 把它塞进了收件人读的那条消息里, 既改写了用户自己的话, 又发生在用户已经决定之后。审计日志照旧记 `draftedBy` |
 | 18 | **推送通道的独占度由谁说了算?**(r3/Q3(a) 新增) | (a) 运维**声明** + 产品**度量**并在矛盾时**自动降级** / (b) 永远只当游标 kick(r2) / (c) 相信声明, 不度量 | **(a)。** 平台不告诉我们还有几个客户端连着, 所以独占度只能被断言 —— 但它**可测**: `push.missRate` = 先被对账轮询看到而不是先被推送看到的记录比例, 真正独占时长期为 0。连续越过阈值(默认 2 %, ≥20 条样本)就自动降级成 kick 并把理由写在 adapter 行上。(c) 是一句祈祷; (b) 是把 owner 明确要的实时推送关掉。默认值是 `unknown` ⇒ **不做任何声明就得到 (b) 的行为**。**r4 给它补了两句, 少一句它就是个单向棘轮**: 比率**只在通道真的在携带内容时、且只在一个滚动窗口内**计数(最近 N 条或最近 24 小时, 取更大者)—— 否则 kick 模式下每条记录都"先被轮询看到", 比率按构造趋向 1.0, 被降级的通道永远回不来; 而降级**由做出声明的那一方撤回**(在连接向导里重新声明一次独占 ⇒ 计数器清零、重试一次), 绝不由计数器自己撤回 |
-| 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 在它自己的输入框里发送 / (c) 也允许协议库(whatsmeow / Baileys)与读本地库 | **(b), 而且明确排除 (c)。** WeChat 的本地库密钥只存在于正在运行的客户端**进程内存**里, 而读别人的进程内存不是这个产品会做的事(围栏 13); WhatsApp 的协议库是被平台条款明确禁止的非官方客户端, 封号落在过正常使用上。(b) 用的是用户自己已经登录的官方客户端, 身份上就是本人(`identityMarking:'none'`), 而代价是诚实的: 只能看见屏幕上有的东西, 延迟是分钟级, 而那个数字**画在会话行上**。接口从 P0 起就建模它, adapter 本身是 P6。**r4 的后果**: 这个决定把 `'store'` 对两个平台都排除掉了, 于是 `'ui'` 就是这一类发布出去的全部 —— 而在此之前有摄入契约的那一格恰恰是被删掉的那一格, 所以 §12.5 现在为 `'ui'` 逐条写出了它自己的契约(合成 anchor 键、"完整的一趟"在一次受滚动限制的读取里是什么, 以及 `receive:'scan'` 上禁止 `history:'none'`) |
+| 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增; **r5 被 owner 更正**) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 从它自己的输入框发送 / (c) 再加上协议库(whatsmeow / Baileys)与"读本地库" / (d) **(b) 加上"在那个客户端把库留成未加密的平台上读那份库"** | **(b) + (d), 仍然明确排除 (c)。** r3 把"读本地库"整个和协议库捆在一起排除了, 而 **owner 指出这是错的**: 那句话对 WeChat 成立(库是 SQLCipher/WCDB 加密的, 密钥只在**运行中客户端的进程内存**里, 而读别人的进程内存本产品不做 —— 围栏 13), 对 **macOS 上的 WhatsApp 不成立** —— 那个官方 Catalyst 客户端把整份聊天历史留在一个**未加密**的 Core Data SQLite 库里(`~/Library/Group Containers/…/ChatStorage.sqlite`), 而读它是一次普通的、被用户授权的、只读的文件读取: **没有任何秘密被击穿, 因为根本没有秘密**。所以 **`'store'` 在有它的平台上是允许的, 而且优先于 `'ui'`** —— 不是因为它更快(虽然确实快一个数量级), 是因为**它有一把不是我们编出来的 anchor**, 于是 §5 不变量 2 拿到真 vendor id 而 `'ui'` 那把合成键的代价整个消失。三条边界写死: ①**只有未加密**才算 —— Windows 上 WhatsApp 的库是加密的(UWP 用 SEE, dbKey 从一个应用外取不到的机器标识派生; WebView2 那一支用 DPAPI-NG), 把一把 vendor 有意扣住的密钥重新算出来与从内存里抠出来是同一件事, 围栏 13 (b) 拒绝它 ⇒ Windows 走 `'ui'`; ②**Linux 压根没有官方桌面客户端** ⇒ 只有 web-in-profile 的 `'ui'`; ③**WeChat 一个字都没变** ⇒ 每个平台都只有 `'ui'`。读库这条路**只读**(SQLite backup API 快照, 绝不写、绝不 checkpoint), 走一个 `channels-scan-store` 的 agentd op(`hostId` 是参数, 本机是设备 #0), 而 macOS 的 TCC 是一道**具名**的门: 被拒时它以 `tcc-denied` 到达用户并在连接向导里给出授权步骤, **绝不**静默降级成 `'ui'`(那会把会话行上那个延迟数字变成谎话)。发送在两条来源上是同一件事 —— 在那个已登录的官方客户端自己的输入框里打字, 所以身份仍然真的是用户本人(`identityMarking:'none'`)。接口从 P0 起就建模这一类; P6 因此**分成两条腿**, macOS 的 `'store'` 腿**只**门控在本决定上(它不需要 agent-browser), `'ui'` 腿仍然双重门控 |
 | 20 | **Gmail 的推送要不要默认打开?**(r3/Q3(c) 新增) | 默认开 / **可用但默认关** / 不做 | **可用但默认关。** Pub/Sub 的 pull 订阅让它同样不需要公网入站端点, 而且每个实例可以有自己的订阅, 所以它比 Lark 的长连接更容易做到独占。但它要一个 GCP topic、一份 IAM 授权和一个**每日续期任务**(watch 7 天静默过期, 漏一次就无声停掉), 而它换来的东西是: 把一个"什么都没变时每 tick 一个请求"的轮询换成秒级延迟。对邮件这种节奏, 那是一个应该由用户按自己的场景打开的开关, 不是一个默认值 |
 
 ---
@@ -1616,21 +1836,49 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
     那个"重新声明以重试"的入口), 这样标定它靠的是数据而不是这一段文字。**已经不再是未知
     的那一半**: 降级是不是单向棘轮, 不取决于标定 —— 那是 §6.4 的两条规则(只在携带内容时
     计数、由声明方撤回)结构上回答掉的, 而 `test-channels-push` 对两者各有一条负控。
-18. **WhatsApp 与 WeChat 的本地客户端形状一次都没有碰过。** §12.5 是按公开材料写的一个
-    adapter **类**: 界面扫描的可行性、能滚多远的历史、登录活性的判定方式、以及一个真实客户
-    端在一个 agent-browser profile 里的稳定性, 全都没有量过。这也是它是 P6 而不是 P5 的原
-    因 —— 它欠的是一次调研, 不是一次实现。**r4 收窄了这里的未知**: 那一格的摄入契约现在是
-    写下来的(合成 anchor 键、受滚动限制的"完整的一趟"、`receive:'scan'` 上禁止
-    `history:'none'`), 所以剩下的未知不再是"这一类满不满足 store 的不变量", 而是**这两个具
-    体客户端到底暴露不暴露一个稳定的消息 id** —— 暴露就直接用它, 不暴露就落到那把合成键,
-    而那把键的代价(同一次渲染刻度里两条一模一样的消息会塌成一条)是已知且已钉住的。
-19. **交叉引用 `docs/design-agent-browser-v2.md` 目前解析不了。** §12.5 与决定 19 依赖那份
-    设计的 profile 系统(user-data-dir + provider + 指纹种子 + 代理 + 实时视图), 而在写这份
-    修订时它住在另一个分支上, 没有并进这棵树。等它并进来之后, 这两处引用应该被复核一遍
-    —— 尤其是"一个 profile 里跑一个长期登录的官方客户端"这件事是不是它自己的模型允许的。
+18. **WhatsApp 与 WeChat 的本地客户端形状, 这棵树上一次都没有跑过。** §12.5 是按公开材料
+    写的一个 adapter **类**: 界面扫描的可行性、能滚多远的历史、登录活性的判定方式、以及一
+    个真实客户端在一个 agent-browser profile 里的稳定性, 全都没有量过。这也是它是 P6 而不
+    是 P5 的原因 —— 它欠的是一次调研, 不是一次实现。**r4 收窄了这里的未知**: `'ui'` 那一
+    格的摄入契约现在是写下来的(合成 anchor 键、受滚动限制的"完整的一趟"、`receive:'scan'`
+    上禁止 `history:'none'`), 所以剩下的未知不再是"这一类满不满足 store 的不变量", 而是
+    **这两个具体客户端到底暴露不暴露一个稳定的消息 id**。
+19. **r5 的 `'store'` 那条路: 什么是查证过的, 什么不是。** owner 报告的那个事实(macOS 上
+    的 WhatsApp Desktop 把它的库留成未加密的, 直接用 sqlite 就读得出)与公开材料**一致**,
+    而这份设计对它做了如下切分 —— **查证过的**: ①路径与文件名在多份独立的公开材料里一致
+    (`~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite`, 另
+    有 `.private` 与 `group.net.whatsapp.family` 两个同名变体), 消息在 `ZWAMESSAGE` /
+    `ZWAMEDIAITEM` 里, 而这是一个 Core Data 存储 = **Catalyst 那个构建**(即 Mac App Store
+    那个; 老的 Electron 版把数据放在 `~/Library/Application Support/WhatsApp` 下的
+    IndexedDB, 形状完全不同, 而它在 2024 年就被宣布弃用); ②"未加密、裸 sqlite 读得出"这一
+    条有多个独立来源, 其中最新的是 2026-05 的一份公开研究, 它把 iOS 与 macOS 上的本地聊天
+    库描述成明文; ③活库带 WAL, 只读主文件会静默漏消息, 因此要复制 `db`/`-wal`/`-shm` 或用
+    backup API —— 这一条来自一份直接读它的公开实现; ④**Windows 是加密的**(UWP 用 SEE +
+    从机器标识派生的 dbKey, WebView2 那一支用 DPAPI-NG), 有一篇同行评审论文与一篇取证文章
+    各自描述过; ⑤**Linux 没有官方桌面客户端**。**没有查证的**: (a) **一个版本号都没有** —
+    没有任何一条是在一台真 Mac、一个具体的 WhatsApp 构建上跑过的, 而这正是 P6a 第一轮要做
+    的事; (b) 这些材料对**文件名**并不完全一致 —— 2026-05 那份研究点名的是
+    `Axolotl.sqlite`(协议会话状态)而那些直接读的工具点名的是 `ChatStorage.sqlite`(Core
+    Data 消息库), 两个文件都存在于同一个容器里, 但"在同一台机器上这两者同时是这个样子"我
+    没有核实过; (c) 关于**那条声明的影响范围**存在公开争议 —— 一家 WhatsApp 观察站反驳说
+    系统沙箱本来就挡住了跨应用读取, 那条反驳针对的是"别的 Meta 应用能读它"这个说法, 与
+    "一个被用户授权、带完全磁盘访问的本机进程能读它"并不矛盾, 但它是一场公开争议, 就应该
+    写在这里; (d) **TCC 的确切行为没有实测** —— Apple 自己的说明是 Sonoma 14 保护
+    `~/Library/Application Support/` 下的容器、Sequoia 15 把它扩展到
+    `~/Library/Group Containers/`, 不满足条件的进程"可能收到授权提示", 而**完全磁盘访问是
+    否足够、还是那个按进程实例的临时提示是唯一的路**, 那份说明**没有明说**; 这直接决定连
+    接向导里那条授权行的措辞, 所以 P6a 必须以实测它开头; (e) 那份库的 **schema 稳定性** —
+    `ZWAMESSAGE` 的列会随客户端版本变, 而这一类没有 vendor 契约可以依靠, 所以 adapter 要
+    把"读不出来的形状"当成一次带类型的失败, 不是当成零条消息。
+20. **交叉引用 `docs/design-agent-browser-v2.md` 目前解析不了。** §12.5 与决定 19 的
+    `'ui'` 那一半依赖那份设计的 profile 系统(user-data-dir + provider + 指纹种子 + 代理 +
+    实时视图), 而在写这份修订时它住在另一个分支上, 没有并进这棵树。等它并进来之后, 这两
+    处引用应该被复核一遍 —— 尤其是"一个 profile 里跑一个长期登录的官方客户端"这件事是不
+    是它自己的模型允许的。**macOS 的 `'store'` 那一半不依赖它**, 这也正是 P6 被拆成两条腿
+    的原因。
 
-**r3 里新引入的 vendor 事实的出处**(公开文档, 2026-09-10 取; 这里没有任何一条在真实租户
-上跑过 —— 见上面第 2、3、15–18 条):
+**r3 与 r5 里新引入的 vendor 事实的出处**(公开文档, 2026-09-10 取; 这里没有任何一条在真实
+租户或真实客户端上跑过 —— 见上面第 2、3、15–19 条):
 
 - Lark/飞书长连接 —— 每应用 50 条连接、集群模式不广播、只支持企业自建应用、不需要公网
   URL:
@@ -1655,3 +1903,21 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
   <https://github.com/BenDerPan/wechat-db-decrypt>
 - 有报告称 Lark 国际版控制台不提供长连接(社区报告, 未经 vendor 确认 —— §20 第 15 条):
   <https://github.com/openclaw/openclaw/issues/51663>
+- **(r5)** macOS / iOS 上 WhatsApp 的本地聊天库是明文的(2026-05 的公开研究报道; 关于影响
+  范围的争议同见此文 —— §20 第 19(c) 条):
+  <https://cybersecuritynews.com/whatsapp-chat-stored-unencrypted-macos-and-ios/>
+- **(r5)** 一份直接读那份库的公开实现 —— 点名
+  `~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite` 与它的
+  两个同名变体, 只读打开, 并说明活库带 WAL 时要连 `-wal`/`-shm` 一起复制:
+  <https://github.com/mmahmad/whatsapp-cli-macos>
+- **(r5)** macOS 的 Mac 版 WhatsApp 是 Catalyst 构建, 而 Electron 版已于 2024 年宣布弃用:
+  <https://9to5mac.com/2024/09/04/whatsapp-discontinue-electron-app-macos/>
+- **(r5)** Windows 上的 WhatsApp Desktop 是加密的 —— UWP 那一支用 SQLite Encryption
+  Extension(SEE), dbKey 由一个在应用之外取不到的机器唯一标识派生:
+  <https://www.sciencedirect.com/science/article/abs/pii/S2666281724001884>
+- **(r5)** macOS 的容器保护 —— Sonoma 14 保护 `~/Library/Application Support/` 下的应用容
+  器, Sequoia 15 把它扩展到 `~/Library/Group Containers/`, 不满足条件的进程会收到一次按进
+  程实例的临时授权提示或被直接拒绝(§20 第 19(d) 条: 完全磁盘访问是否足够没有明说):
+  <https://developer.apple.com/forums/thread/756701>
+- **(r5)** Linux 上没有官方 WhatsApp 桌面客户端, 官方途径只有 WhatsApp Web:
+  <https://wiki.archlinux.org/title/WhatsApp>
