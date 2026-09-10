@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.90 — the "For you" inbox keeps every row in its slot while open (inc-mtw02kbq-kj96: "点击对勾后…位置变化…连续点击时造成误点")
+
+- Every ✓ triggered a `user-todos-updated` broadcast, the popup re-rendered from scratch, the resolved row left its group and the rows below slid up under the pointer — four rapid clicks at one screen position resolved four different items. While the popup is OPEN its layout is now append-only (PURE `src/lib/user-todos-layout.js`): a resolved row stays in its slot, dimmed and struck through with ↺, a fully-resolved group keeps its slot, new items append at the end of their group, and the ordinary sorted order is rebuilt on the next open. The group count shows open rows only; the "Recently resolved" tail no longer lists a row still holding its slot above.
+- test-user-todos-layout (12): the incident replayed (four ✓ in a row, nothing moves), reopen-in-place, arrivals append, close rebuilds, the pre-fix render as the negative control (it slides the next row into the clicked slot), and the panel wiring pinned.
+
 ## 2.369.89 — a chat file path ends at Chinese punctuation (owner screenshot: `…/designs/（浏览器` became the link)
 
 - The path linkifier stopped only at ASCII punctuation, so a fullwidth "（" (and ，。：；！？“”「」【】《》…—) glued onto the link and the click opened nothing. The rule now lives in ONE PURE module, `src/path-linkify.js` (imports nothing; the renderer delegates `pathRe`/`cleanPath` to it): CJK **punctuation** terminates a path, CJK **letters** and fullwidth digits/letters stay linkable (`/home/u/文档/报告.md` still links), ASCII behaviour (`:line:col`, trailing `)`/`.`) unchanged, and `cleanPath` strips CJK trailing punctuation from URLs too.

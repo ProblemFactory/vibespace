@@ -1284,6 +1284,7 @@ html, body {
 .ut-dismiss:hover { color: var(--red, #e55); }
 .ut-resolved-head { font-size: 10px; color: var(--text-dim); margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
 .ut-item-resolved { opacity: 0.55; }
+.ut-item-inplace .ut-text { text-decoration: line-through; } /* a row resolved while the popup is open keeps its slot (inc-mtw02kbq-kj96) */
 .ut-item-resolved:hover { opacity: 0.85; }
 .ut-item-resolved .ut-text { text-decoration: line-through; }
 .ut-sess { color: var(--text-secondary); }

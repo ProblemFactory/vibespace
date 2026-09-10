@@ -5,6 +5,7 @@
 // session to handle them. Items arrive via `vibespace-ask` (agent CLI) and are
 // resolved/dismissed here (or by the agent once the user answers in chat).
 import { t } from './i18n.js';
+import { openLayout, nextLayout, entriesFor } from './user-todos-layout.js'; // PURE: append-only row order while the popup is open (inc-mtw02kbq-kj96)
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { anchorFixedPopup, copyText, createModalShell, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
@@ -17,6 +18,7 @@ export function installUserTodos(app) {
   if (!btn || !popup) return;
   let todos = { open: [], resolved: [] };
   let knownIds = null; // null until the first load — no toast storm at boot
+  let layout = null;   // the popup's row order while OPEN (inc-mtw02kbq-kj96: a ✓ must not slide the next row under the pointer)
   let tab = 'inbox'; // 'inbox' (default) | 'history' — resets to inbox on open
 
   // Match items to sidebar sessions with the sidebar's OWN canonical key
@@ -150,6 +152,14 @@ export function installUserTodos(app) {
     // Detail rides behind a collapsed expander (open items ship up to 2000
     // chars of agent context — inline it would swamp the list).
     const detailHtml = (i) => (i.detail ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(i.detail)}</div></details>` : '');
+    // STABLE ORDER WHILE OPEN (inc-mtw02kbq-kj96): the ✓ broadcast re-renders
+    // this popup; if the resolved row left its group, the rows below slid up
+    // under the pointer and a rapid second click hit the wrong item. While the
+    // popup is visible the layout is append-only (PURE user-todos-layout.js):
+    // a resolved row stays in its slot, dimmed with ↺, until the popup closes.
+    if (popup.classList.contains('hidden')) layout = null;
+    else layout = layout ? nextLayout(layout, todos) : openLayout(gs);
+    const inPlace = new Set(layout ? layout.groups.flatMap((g) => g.ids) : []);
     const itemHtml = (i) => `
       <div class="ut-item" data-id="${escHtml(i.id)}">
         <span class="ut-dot" data-urgency="${escHtml(i.urgency || 'normal')}" title="${escHtml(i.urgency || 'normal')}"></span>
@@ -164,9 +174,18 @@ export function installUserTodos(app) {
           <button class="ut-act ut-dismiss" title="${t('Dismiss (not going to act on this)')}">✕</button>
         </span>
       </div>`;
-    const resolvedHtml = todos.resolved.length ? `
+    const resolvedInPlaceHtml = (i) => `
+      <div class="ut-item ut-item-resolved ut-item-inplace" data-id="${escHtml(i.id)}">
+        <span class="ut-dot" data-urgency=""></span>
+        <div class="ut-body"><div class="ut-text">${escHtml(i.text)}</div>
+        ${detailHtml(i)}
+        <div class="ut-meta">${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy && i.resolvedBy !== 'user' ? ` · ${escHtml(i.resolvedBy)}` : ''}</div></div>
+        <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
+      </div>`;
+    const recent = todos.resolved.filter((i) => !inPlace.has(i.id)); // a row still holding its slot above is not listed twice
+    const resolvedHtml = recent.length ? `
       <div class="ut-resolved-head">${t('Recently resolved')}</div>
-      ${todos.resolved.slice(0, 6).map((i) => `
+      ${recent.slice(0, 6).map((i) => `
         <div class="ut-item ut-item-resolved" data-id="${escHtml(i.id)}">
           <span class="ut-dot" data-urgency=""></span>
           <div class="ut-body"><div class="ut-text">${escHtml(i.text)}</div>
@@ -176,16 +195,21 @@ export function installUserTodos(app) {
         </div>`).join('')}` : '';
     popup.innerHTML = tabsHtml + `
       <div class="usage-section-title">${t('For you')}<span class="ut-head-sub">${todos.open.length ? t('{n} open', { n: todos.open.length }) : t('all clear')}</span></div>
-      ${gs.length ? gs.map(([key, items]) => key === 'jobs' ? `
+      ${(() => {
+        // Rows come from the LAYOUT while open (resolved ones in place), from the sorted groups otherwise.
+        const rows = layout ? entriesFor(layout, todos).map((g) => [g.key, g.entries, g.openCount]) : gs.map(([key, items]) => [key, items.map((item) => ({ item, resolved: false })), items.length]);
+        const rowHtml = (e) => e.resolved ? resolvedInPlaceHtml(e.item) : itemHtml(e.item);
+        return rows.length ? rows.map(([key, entries, openCount]) => key === 'jobs' ? `
         <div class="ut-group ut-group-jobs">
-          <div class="ut-group-head ut-group-head-jobs"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="12" height="8" rx="1.5"/><path d="M5.5 4.5v-1a1 1 0 011-1h3a1 1 0 011 1v1"/></svg>${t('Background Work')}<span class="ut-group-n">${items.length}</span></div>
-          ${items.map(itemHtml).join('')}
+          <div class="ut-group-head ut-group-head-jobs"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.5" width="12" height="8" rx="1.5"/><path d="M5.5 4.5v-1a1 1 0 011-1h3a1 1 0 011 1v1"/></svg>${t('Background Work')}<span class="ut-group-n">${openCount}</span></div>
+          ${entries.map(rowHtml).join('')}
         </div>` : `
         <div class="ut-group">
-          <button class="ut-group-head" data-key="${escHtml(key)}" title="${t('Go to this session')}">${escHtml(nameFor(key, items))}<span class="ut-group-n">${items.length}</span><span class="ut-group-go">→</span></button>
-          ${items.map(itemHtml).join('')}
+          <button class="ut-group-head" data-key="${escHtml(key)}" title="${t('Go to this session')}">${escHtml(nameFor(key, entries.map((e) => e.item)))}<span class="ut-group-n">${openCount}</span><span class="ut-group-go">→</span></button>
+          ${entries.map(rowHtml).join('')}
         </div>`).join('')
-      : `<div class="empty-hint">${t('Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.')}</div>`}
+      : `<div class="empty-hint">${t('Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.')}</div>`;
+      })()}
       ${resolvedHtml}`;
   };
 
