@@ -2972,7 +2972,7 @@ Ranges are honest: the low end assumes one-round convergence, the high end
 assumes the module needs the extra rounds that the measured distribution says
 about a third of them do.
 
-### P0 — store, index owner, adapter interface, fake adapter, panel skeleton, **the integration layer** — **16.5–18.5 rounds (8.25–9.25 days)**
+### P0 — store, index owner, adapter interface, fake adapter, panel skeleton, **the integration layer** — **17–19 rounds (8.5–9.5 days)**
 
 `src/channel-store.js` (durable primitives), `src/channel-record.js`,
 **`src/channel-caps.js` (both axes, `convCaps` and its TTL, `freshnessClaim`,
@@ -3158,7 +3158,7 @@ unencrypted store behaves while the owner's own client is updating it. **r5's
 line said "+4 rounds" while P6a was stated as 4–5 and P6 itself moved 9–13 → 13–18,
 i.e. +4–5; r6 fixes that arithmetic slip and re-prices P6a at 5–7 ⇒ P6 = 14–20.**)
 
-**Totals:** P0–P4 = **56.5–67.5 rounds ≈ 28.25–33.75 working days** at 2 rounds/day, plus
+**Totals:** P0–P4 = **57–68 rounds ≈ 28.5–34 working days** at 2 rounds/day, plus
 owner-blocked time for the two scope round trips. (The r2 review added 2–3 rounds;
 **r3 added 10**: the two-axis capability record +2 in P0, the push lanes +4 in P1,
 coalescing and lane parity +2 in P2, the identity surface +1 in P3, the identity
