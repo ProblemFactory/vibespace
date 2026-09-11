@@ -89,13 +89,49 @@ not enough, the classic `Runtime.enable` leak is largely dead so any patch aimed
 depreciating asset, and **banks run on device fingerprint + behaviour + new-device step-up**, so a
 fingerprint browser may be **worse** than plain Chromium on that class of site. The landing is three
 sibling provider rows in §7.1 (tier 1 CDP / tier 2 fingerprint CDP / tier 3 **pure computer-use on
-the user's own real browser, with no CDP and no automation flags**), a `tier` field on `siteHints`
-that is **never auto-escalated**, and tier 3's own phase P10 (§7.6, D31). §2 gains invariant I8, §3.3
+the user's own real browser, with no CDP and no automation flags**), a `siteHints` `tier` that is
+**legal only while no provider has been chosen** and is **never auto-escalated**, and tier 3's own
+phase P10 (§7.6, D31). §2 gains invariant I8, §3.3
 and §3.6 gain a rule and a row, §9 gains a suite and four key legs, §10's P4 goes from 9 to 10 rounds
 with an explicit **cross-track dependency**, P10 is new and the totals are re-derived, §11 gains
 D31–D33, and §12 grows from 33 items to 39. **Every claim about the installed build in this round is
 a read-only measurement taken that day against `bin/agent-browser-linux-x64` and its README**, and
 every claim about this repository carries a file:line.
+
+**Round 8 (2026-09-11)** answers an adversarial critique of round 7: eight findings, **all upheld**,
+with the verification evidence in **Appendix E**. All three `high`s land on the section round 7
+itself had just written, and all three are the same thing — **a contract that was declared and then
+not honoured**: ① the six registry rows declared a `test` but gave it neither a `test.kind` (the
+shared layer's **closed set**) nor a runner registration, and brought in five third-party hosts
+nobody had declared — while the shared layer's right to say "the store constructs no vendor request"
+**rests on** the consumer having declared its hosts; the six rows now carry kinds, all six runners
+are registered by `src/server/browser-backend.js`, `cloak`'s row drops to `shape-only` (a real
+launch-probe would trigger both the 200 MB download and §7.2.1's egress precondition, and neither
+belongs on a card opened to paste a key), and there is a new **per-row derived** egress declaration
+(`browserless` / `kernel` take their host from **the field the user typed**, so a constant allowlist
+is the wrong shape). ② The seat **total** had exactly one source — one human Test click — while
+D32's recommended configuration guarantees that click **never happens**; the total is now **three
+states** (known-and-fresh / known-but-stale / **unknown**), the tier is read back from **the first
+real launch**, `SEAT_TIER_STALE_MS` mirrors this repository's own `OVERAGE_STALE_MS`, and **an
+unknown total never satisfies the ceiling test**. ③ There are **three** failure modes, not two: a
+fleet-shared free-tier key has one seat and the keeper counts only this instance, so the ceiling
+refusal is **structurally unreachable** in D32's recommended configuration and the user gets an
+unnamed launch failure — verbatim the harm §7.4 warns about three paragraphs earlier; hence
+`backend_seat_taken`, carried as a stated **precondition** of D32's recommendation. Four `medium`s:
+the key has no cross-machine channel today yet sits in the phase that puts a keeper on a paired
+device (`keyScope: 'local-only'` + the new **D34**); `siteHints.tier` contradicted §3.3's "no second
+tier field" (the rule narrows to "`tier` is legal only while `backend === null`", both schema blocks
+change, and the gate asserts that sentence); five of the six `consumers` cells named **themselves**
+(replaced by the two modules that really call `resolveIntegration`); and `local-window` was treated
+as a provider one could "switch" to (new capability cells `keyScope` / `canSwitchTo` / `ownsDir` /
+`leaseKind`, plus §7.6's new rule 3). One `low` corrects why `cloak` uses the env (**two** of the
+three channels miss disk, and by §6.5's own threat model env is the weaker one; the real reason is
+that `cloakserve` is a **separate process**, so the in-process option is unreachable). §7.1 gains a
+capability-cell table, §7.4's seats and failure modes are rewritten, §7.5 gains the Test-contract
+table, the egress declaration and the runner registration, §7.6 goes from four rules to five, §9's
+key legs go from four to eight and `test-browser-backend` gains the three seat states and the source
+fork, §11 gains **D34**, and §12 grows from 39 entries to 41. **P4's round count did not move (still
+10), and the cell says why.**
 
 **Round 6 (2026-09-10)** answers an adversarial critique of round 5: six findings, **all upheld**,
 with the verification evidence in **Appendix D**. Two highs each name a claim that would have been
@@ -673,8 +709,13 @@ open client updates live — the multi-client law.
   }],
   "leases": [{ "profileId": "…", "browserKey": "bk-…", "sessionId": "…", "targetId": "…",
                "since": 0, "input": "agent", "viewers": 0 }],
-  "siteHints": [{ "host": "portal.example", "backend": "cloak",
-                  "by": "agent", "at": 0, "why": "…" }]   // §7.4 — a CLAIM, with who made it
+  "siteHints": [{ "host": "portal.example", "tier": null, "backend": "cloak",
+                  "by": "agent", "at": 0, "why": "…" }]   // §7.4 — a CLAIM, with who made it.
+                                            //   `backend` MAY be null (a tier-only claim, made
+                                            //   before any provider is chosen); `tier` is legal
+                                            //   ONLY then — once `backend` names a provider the
+                                            //   tier is DERIVED from it (§7.6 rule 2) and is
+                                            //   never stored twice.
 }
 ```
 
@@ -691,9 +732,19 @@ Three rules about this file:
   `backend` key: one question, one answer — the rule this document applies to `browserKey` and to
   the reading slot applies here too. `lastChromiumMajor` is a *different* question ("what has
   written these bytes") and is the one fact §7.4's version ladder may not take from the directory
-  alone. **The tier is likewise not a new field**: it is derived from `provider` (§7.6's table),
-  because a provider sits on exactly one tier, and storing it twice is building yourself a twin that
-  will drift.
+  alone. **The tier is likewise not a new field on a profile record**: it is derived from
+  `provider` (§7.1's two tables), because a provider sits on exactly one tier, and storing it twice
+  is building yourself a twin that will drift. **But the `tier` inside `siteHints` is a different
+  thing, and it is not a twin.** A site claim can be true *before any provider has been chosen*
+  ("this site needs tier 3") — §7.6's rule 2 is explicit that a failure produces only a
+  **suggestion**, and all a suggestion can say is "change tier", because *which* provider within
+  tier 2 is a separate question. In that shape `backend` is `null` and `tier` is the **only** thing
+  the claim carries. So the rule is one enforceable sentence: **`tier` is legal only while
+  `backend` is `null`**; the moment `backend` names a provider the tier is derived from it and never
+  stored a second time. §9's `test-browser-tier3` asserts **that sentence**, not "no `tier` field
+  anywhere" — the latter contradicts §7.6, and a gate that contradicts the design it gates is the
+  thing that is wrong. The same distinction governs §7.1's capability-cell table: **the derivation
+  lives in a PURE table, and the persisted record stores not one of those cells.**
 * **A profile references a provider's `id`, never its key.** There is no `apiKey` / `licenseKey` /
   `token` field in this file and there will not be one: keys live in `data/integrations.json`,
   encrypted through secret-box, resolved by `resolveIntegration(provider)` **at the instant the
@@ -1984,6 +2035,36 @@ field the UI reads, so a control that cannot work is disabled with a reason rath
 use time — and the `local-window` row turns "has no CDP" from an awkwardness into a **value** in
 this table, which is exactly why it is a row and not a special case.
 
+**The capability cells those mechanisms actually read.** The table above answers "what is it"; the
+one below answers "what does each mechanism in the registry do with it". They are two tables
+because they are read at different moments: the first is for a human, the second is what §7.4's
+switch, §3.3's directory ownership, P5's sweep, §7.5's key and §3.4's lease have to ask **before**
+they act — and the backend-caps discipline is a row, not an `if` chain.
+
+| Provider | `keyScope` | `canSwitchTo` (§7.4) | `ownsDir` | `leaseKind` (§3.4) |
+|---|---|---|---|---|
+| `chromium` | `none` | `in-place` | yes | `tab` |
+| `cloak` | `local-only` | `in-place` | yes | `tab` |
+| `cdp` (remote) | `none` | `no` — it is somebody else's browser, so "switch to cdp" is really a second profile | no | `tab` |
+| `cloud:<name>` | `local-only` | `export-only` — a vendor's directory is not ours to open (§7.4's export/import paragraph, which already states what it drops) | no | `tab` |
+| `local-window` | `none` | **`no`** | **no** — its state is the user's own Chrome/Firefox profile, not the record's `dir` | **`window-target`** |
+
+Three readings, each of which closes a place that would otherwise fail silently:
+
+* **`keyScope: 'local-only'` is a refusal, not a label.** A provider that needs a key is **refused**
+  on a profile whose `host != null`, and the switcher's row is disabled with its reason
+  (`provider_needs_local_key`). The reasoning, together with D34, is in §7.5: that plaintext key has
+  **no** channel to another machine today, while §6.4 says verbatim that it "lives in the registry
+  server-side".
+* **There is deliberately no `swept` cell.** P5's retention sweep acts on `dir`, so "is it swept"
+  **is** `ownsDir`, and a second field would be exactly the twin §3.3's third rule forbids. P5
+  sweeps precisely the rows with `ownsDir: true` — a sentence that is an assertion in
+  `test-browser-housekeeping`, not a comment.
+* **The three "no"s on the `local-window` row together are §7.6's rule 3**: escalating to tier 3
+  does **not** re-point an existing profile. It has no `dir`, no `fingerprintSeed`, is never a
+  target of §7.4's version ladder, and is never touched by P5's sweep — because every one of those
+  mechanisms acts on **a directory we own**, and this tier has no such directory at all.
+
 ### 7.2 CloakBrowser — what is verified, and the due diligence still owed
 
 Verified from the vendor site, the npm registry and the repository (2026-09):
@@ -2216,31 +2297,82 @@ somebody is driving (`input: 'user'`) is never interrupted by an agent's proposa
 
 **The cost gate: CloakBrowser is licensed per concurrent session.** The free tier is **one**
 concurrent session (behind a GitHub sign-in); Pro is 5 / 20 / 200 / 2000 (repository docs, verbatim).
-So the switch dialog must show **seats**: used / total / after this switch. Behaviour at the ceiling
-is the same shape as §3.5's browser ceiling — **refuse loudly, name the profiles currently holding
-seats, and offer to stop one**. That count is the keeper's job (it is the first thing in this design
-that can count) and it is **per provider**, not global. The free tier's single concurrent session
-means a second cloak profile must either wait or be paid for — hide that, and the user spends an
-afternoon debugging a browser that appears to fail at random. **Those two numbers come from two
-different places, and that has to be written down**: the *total* (the tier) comes from the **Test
-verdict** of §7.5's registry row (`testedAt` + `{tier}` — one human click, bounded, zero timers;
-§ban-safety is about quota polling, and a human-clicked Test is not that), while the *used* count is
-**the keeper's own**, because I found no vendor interface that answers "how many seats is this key
-holding right now" (§12.35). The consequence is honest and must be rendered: if this key is the
-**cluster default** (D32), the keeper can only count **this instance**, while the seats are shared
-across the whole fleet — so that row reads "cluster default (seats shared with other users; N used
-on this instance)", never a fraction pretending to be global.
+So the switch dialog must show **seats**: used / total / after this switch. That count is the
+keeper's job (it is the first thing in this design that can count) and it is **per provider**, not
+global. The free tier's single concurrent session means a second cloak profile must either wait or
+be paid for — hide that, and the user spends an afternoon debugging a browser that appears to fail
+at random.
 
-**Two failure modes, two named refusals.** **(1) The binary is not installed**:
+**Those two numbers come from two different places, and the total has three states rather than
+two.** The *used* count is **the keeper's own**, because I found no vendor interface that answers
+"how many seats is this key holding right now" (§12.35). The *total* (the tier) does **not** come
+from Test: §7.5 gives `cloak`'s row `test.kind: 'shape-only'` (zero network, it validates the
+`cb_…` shape), and the reason is written there — a real probe needs the 200 MB binary **and**
+§7.2.1's recorded egress proof first, and neither of those should be triggered by opening a card to
+paste a key into. The tier therefore comes from **the first real launch**: when the keeper starts
+`cloakserve` it reports its plan, and that is read back and recorded as `{tier, at}` — a by-product
+of a launch **the user already asked for**, not a poll (§ban-safety is about quota polling, and
+there is not even a timer here). So the total has three states, and the third one is the **normal**
+state under a cluster default:
+
+| Total | When | What the dialog shows | At the ceiling |
+|---|---|---|---|
+| known and fresh | this key launched successfully at least once within `SEAT_TIER_STALE_MS` (7 days) | `N used / M total`, **with the age of that reading** ("tier read from a launch 3 h ago") | refuse, worded as below |
+| known but stale | the last successful launch is older than 7 days | degrades to "unknown", while saying what the **last** tier was and when — an expired verdict may be a hint, never a constraint | **does not refuse** |
+| **unknown** | **this key has never launched successfully.** Under a cluster default this is the normal state: D32's recommendation is that the cluster injects the default key, and such a user never opens that card at all | "seat limit unknown — it becomes known the first time this key actually launches a browser", and **never a fabricated number** | **does not refuse** |
+
+**An unknown total can never satisfy the ceiling test.** That is an invariant rather than a wording
+choice: `unknown` is neither `0` nor `∞` and does not take part in the comparison; a ceiling refusal
+is possible **only while the total is known and fresh**. The 7 days is not arbitrary — it is the
+shape this repository already runs (`OVERAGE_STALE_MS = 7 * 24 * 3600 * 1000`,
+`src/spend-authorizer.js:259`: a claim that **refuses** something must carry a date), and it is the
+same shape the shared layer writes for itself ("a `testedAt` does not stay green for ever; a verdict
+never outlives the reading it describes"). It also bites almost never here: the reading is refreshed
+by the very act it constrains (a launch), so only a key that has not launched in a long time can go
+stale — and such a key's *used* count on this instance is 0 anyway.
+
+**Three failure modes, three named refusals.** **(1) The binary is not installed**:
 `backend_unavailable` (carrying the provider name and what is missing). **(2) The key is not
 configured**: `backend_no_key` (carrying the provider name, the registry row id, and the
-**actionable** way out — open that card in Integrations, D33). Neither is a timeout and neither is a
-silent fallback; the reasoning is in D33. As everywhere else: a **named** refusal, a row in the
-profiles panel
-and the switch dialog that is **disabled with its reason written on it**, and an install action in
-Manage Agents (`cloakbrowser` is an npm package, installing it is a user act, and it goes through
-§7.2.1's egress precondition — **measure first, then install**, not the other way round). **Never**
-download the 200 MB binary without the user having asked for it.
+**actionable** way out — open that card in Integrations, D33). **(3) The seat is held by somebody
+else**: `backend_seat_taken`. None is a timeout and none is a silent fallback; the reasoning is in
+D33. As everywhere else: a **named** refusal, a row in the profiles panel and the switch dialog that
+is **disabled with its reason written on it**, and an install action in Manage Agents
+(`cloakbrowser` is an npm package, installing it is a user act, and it goes through §7.2.1's egress
+precondition — **measure first, then install**, not the other way round). **Never** download the
+200 MB binary without the user having asked for it.
+
+**The third one is not a completion — it is the DEFAULT failure mode under a cluster default, and
+neither of the other two covers it.** The reason is structural: D32 recommends the cluster injects
+the **free tier** (one concurrent session), while *used* is the keeper's count and **it can only
+count this instance**. So when another pod holds that single seat, this instance reads "0 used /
+1 total" (more often "0 used / unknown total"), the ceiling test **never fires at all**, the spawn
+goes out, and what the user sees is whatever `cloakserve` prints — precisely the afternoon the
+paragraph above exists to prevent. The keeper therefore classifies a `cloakserve` launch that fails
+**license/concurrency validation** as `backend_seat_taken`, and that refusal must say three things:
+**which provider**, **that this key is the cluster default so its seats are shared fleet-wide** (so
+"stop one of yours" is the wrong advice — this instance may be holding none), and the one-click way
+out `app.openIntegration('cloak')` → "use my own key".
+
+**The wording at the ceiling forks on where the key came from, because the two cases can state
+different facts.** The key is **the user's own** ⇒ every seat is on this instance ⇒ the shape of
+§3.5's browser ceiling: **refuse loudly, name the profiles currently holding seats, and offer to
+stop one**. The key is the **cluster default** ⇒ this instance cannot list those profiles (they are
+in other people's pods) ⇒ the refusal **may not pretend** it can: it says "cluster default (seats
+shared with other users; N used on this instance)" plus the one-click way out, never a fraction
+pretending to be global. **A refusal may only state what its own reason knows** — the same law this
+repository's 2.369.x auto-resume batch wrote down, and here it is what rescues D32's own sentence
+("at the ceiling the advice is: switch to your own key") from pointing at a ceiling that is
+structurally unreachable in the configuration D32 recommends.
+
+**That refusal's wording depends on a fact I have not measured**, and it is written down as §12.40:
+what `cloakserve` actually returns when a free-tier key's one seat is held **on another machine**.
+The public material says only that "concurrent local free sessions are serialized" (§12.35) — a
+statement about **one machine**. So P4's first actions gain one more: take a free-tier key, start it
+on two machines at once, and record the answer verbatim — the classifier keys on that answer, not on
+my guess; until it is measured, `backend_seat_taken`'s criterion can only be "the launch failed and
+the error names licensing/concurrency", and that sentence goes into the code comment waiting to be
+narrowed.
 
 ### 7.5 Where a provider's key comes from
 
@@ -2265,7 +2397,7 @@ module names, not the section number** (§12.34) — this section uses those nam
 
 | Name | What it is | How this track uses it |
 |---|---|---|
-| `src/integration-registry.js` | The **PURE** table, importing nothing: one ROW per integration, `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, test:{kind,describe}, consumers:[…], docs}` | This track contributes the rows in the next table; `consumers` names §7.1's provider rows and §7.4's switcher |
+| `src/integration-registry.js` | The **PURE** table, importing nothing: one ROW per integration, `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, test:{kind,describe}, consumers:[…], docs}` | This track contributes the six rows below; `test.kind` comes from the shared layer's **closed set**, and `consumers` holds **module paths** (that census requires each name to be a file that exists AND to really call `resolveIntegration('<id>')`) |
 | `src/server/integration-store.js` | **ORCH**: `data/integrations.json` written with `writeJsonAtomic`, secret fields encrypted through secret-box; `resolveIntegration(id)` → `{source:'user'\|'cluster'\|'none', values, label, fromEnv, testedAt, lastError}`; `publicView(id)` masks every secret field to `••••` + last 4; `setIntegration(id, patch)` (a field omitted = unchanged, `''` = cleared), `useClusterDefault(id)`, `test(id)`; every write broadcasts `integrations-updated` carrying the **masked** view | the keeper asks `resolveIntegration` **before** it spawns a provider, and never reads env itself |
 | Routes | `GET /api/integrations` (masked list) · `PUT /api/integrations/:id` · `POST /api/integrations/:id/test` · `DELETE /api/integrations/:id` (back to cluster default / none) | §7.4's switcher reads the masked list for the source and the Test verdict; **never the plaintext** |
 | ⚙ → **Integrations** (集成与密钥) | Window type `integrations` (`registerWindowType`, openSpec `{openIntegrations, focus:<id>}`), rendered like the Plugins cards — one card per registry row with a **SOURCE chip** (cluster default / your own / not configured), a "Use cluster default" vs "Use my own key" choice, the declared fields (secrets get **Replace**, never Reveal), a Test button with its last verdict (vendor error text escaped), and a "Where is this used" line; **≤768px renders the same cards single-column** | every consumer deep-links to its own card: `app.openIntegration(id)` |
@@ -2286,19 +2418,104 @@ default-enables the plugin when the cluster injected the env (`_frpEffectiveEnab
 installed 0.32.0 binary's own env names (measured with `strings bin/agent-browser-linux-x64`, plus
 its README's provider tables):
 
-| `id` | Fields (`secret` marked †) | The vendor's own env name (appears **only** in that child) | Cluster may inject | What Test does (one human click, bounded) | Consumers |
-|---|---|---|---|---|---|
-| `cloak` | `licenseKey` † (empty = free tier) | `CLOAKBROWSER_LICENSE_KEY` (`cb_…`; the vendor also accepts a `licenseKey` option and `~/.cloakbrowser/license.key` — we use **only** the env, the one channel of the three that does not hit disk) | `VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY` | start one throwaway `cloakserve` with that key and read back the tier it reports, recording `{tier, at}`; it **cannot** read back "seats in use" (§12.35) | §7.1's `cloak` row, §7.4's switcher, the keeper |
-| `cloud:browserbase` | `apiKey` † | `BROWSERBASE_API_KEY` | `VIBESPACE_INTEGRATION_CLOUD_BROWSERBASE_APIKEY` | one bounded read-only request to the vendor's own sessions endpoint | the `cloud:browserbase` row |
-| `cloud:browserless` | `apiKey` †, `apiUrl`, `stealth` | `BROWSERLESS_API_KEY` / `BROWSERLESS_API_URL` / `BROWSERLESS_STEALTH` | same shape | same | the `cloud:browserless` row |
-| `cloud:kernel` | `apiKey` †, `endpoint`, `stealth` | `KERNEL_API_KEY` / `KERNEL_ENDPOINT` / `KERNEL_STEALTH` | same shape | same | the `cloud:kernel` row |
-| `cloud:browseruse` | `apiKey` † | `BROWSER_USE_API_KEY` | same shape | same | the `cloud:browseruse` row |
-| `cloud:agentcore` | the vendor's own set (unverified) | per upstream's provider table | same shape | same | the `cloud:agentcore` row |
+| `id` | Fields (`secret` marked †) | The vendor's own env name (appears **only** in that child) | Cluster may inject | Consumers (`consumers`) |
+|---|---|---|---|---|
+| `cloak` | `licenseKey` † (empty = free tier) | `CLOAKBROWSER_LICENSE_KEY` (`cb_…`) | `VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY` | `src/server/browser-backend.js`, `src/server/browser-keeper.js` |
+| `cloud:browserbase` | `apiKey` † | `BROWSERBASE_API_KEY` | `VIBESPACE_INTEGRATION_CLOUD_BROWSERBASE_APIKEY` | same two |
+| `cloud:browserless` | `apiKey` †, `apiUrl`, `stealth` | `BROWSERLESS_API_KEY` / `BROWSERLESS_API_URL` / `BROWSERLESS_STEALTH` | same shape | same two |
+| `cloud:kernel` | `apiKey` †, `endpoint`, `stealth` | `KERNEL_API_KEY` / `KERNEL_ENDPOINT` / `KERNEL_STEALTH` | same shape | same two |
+| `cloud:browseruse` | `apiKey` † | `BROWSER_USE_API_KEY` | same shape | same two |
+| `cloud:agentcore` | the vendor's own set (unverified) | per upstream's provider table | same shape | same two |
+
+**The `consumers` column is the same for all six rows, and that is a conclusion rather than
+laziness**: there are exactly two places in this track that call `resolveIntegration(id)` —
+`src/server/browser-backend.js` (the switcher's source chip, and the Test runner registered below)
+and `src/server/browser-keeper.js` (the one resolve before a spawn, which is what §9's leg (ii)
+names). **What this column may never hold is "§7.1's `cloak` row"**: the shared layer's census
+requires every name to **be a file that exists** and to **actually call** `resolveIntegration('<id>')`,
+so a row naming itself satisfies neither, and it cancels the field's stated purpose ("which feature
+reads it"). §7.1's rows and §7.4's switcher are the right answer **in the surrounding prose**, where
+they read correctly; in `consumers` they are false.
 
 Those two `stealth` fields are **values**, not capability promises: they are each vendor's own
 implementation, with no public specification, and zero measurement in this round (§12.38). They are
 in this table because they are something a user or a cluster **can set**, and a settable thing
 belongs in this table.
+
+**Why `cloak`'s licence goes through the env — stated correctly.** The vendor accepts three
+channels: `CLOAKBROWSER_LICENSE_KEY`, an in-process `licenseKey` option, and
+`~/.cloakbrowser/license.key` (§12.35). The first version of this reason said "the one channel of
+the three that does not hit disk" — which is **wrong on its own terms**: the in-process option does
+not hit disk either, and by this document's own threat model (§6.5) the env is the **weaker** of
+those two non-disk channels, because a process under the same uid can read
+`/proc/<pid>/environ`. The real reason holds up: we start `cloakserve` as **a separate process**
+(§7.2's Docker/loopback shape), so the **in-process** option is not reachable from here at all —
+the choice is between env and a file, and env wins because a file would persist the key in cleartext
+**outside** `data/integrations.json`'s secret-box encryption and **outside** the `sensitive` export
+list below, so it would follow neither the key rotation nor the export passphrase gate. §6.5's
+`/proc/<pid>/environ` boundary is therefore **accepted**, not denied: what this section removes is
+the **accident** (a key sitting in every agent's environment), not a boundary it pretends to build.
+
+**Each row's Test is a contract, and its `kind` comes from the shared layer's closed set.** That
+layer makes `test.kind` one of `credential-exchange` / `shape-only` / `reachability` and **derives
+the button's own wording from it**, for a reason: a button that claims to "test the connection" and
+never goes near the network is lying. This track's six contracts:
+
+| `id` | `test.kind` | What the runner actually does (`describe`) | The **one** host it may reach | Button text |
+|---|---|---|---|---|
+| `cloak` | `shape-only` | Zero network: validate the `cb_…` shape. **Starts no process**, downloads no bytes. The tier comes from the first real launch (§7.4) | none | Check format (no network) |
+| `cloud:browserbase` | `credential-exchange` | One bounded read-only request to the vendor's own sessions endpoint with that key; creates no session, runs no page | that row's constant host (§12.41) | Test connection |
+| `cloud:browserless` | `credential-exchange` | same | **the host inside that row's own `apiUrl` field** — which the user typed | Test connection |
+| `cloud:kernel` | `credential-exchange` | same | **the host inside that row's own `endpoint` field** | Test connection |
+| `cloud:browseruse` | `credential-exchange` | same | that row's constant host (§12.41) | Test connection |
+| `cloud:agentcore` | `credential-exchange` | same (the fields themselves are unverified, as the table above already says) | the host derived from that row's own region field (§12.41) | Test connection |
+
+**Why `cloak`'s row is `shape-only` rather than "start one throwaway `cloakserve` and read the
+tier".** That Test has **two preconditions**, and both collide with when this card gets opened: the
+200 MB binary — §7.4 says verbatim **never** download it without the user having asked — and
+§7.2.1's recorded egress proof. A card a user opens merely to **paste a key** should not be the
+trigger for either. So why not ask the shared layer for a fourth kind (`local-launch-probe`)? Because
+that set is closed for a reason: the button's wording is derived from the kind, so a fourth kind is
+a fourth sentence that needs explaining — and the thing it would buy, the tier, is free at **the
+first real launch**, which already sits behind those two preconditions. This section therefore takes
+the honest answer the closed set offers and writes the cost into §7.4's three-state table.
+
+**Who registers the runner.** The shared layer's `test(id)` **constructs no vendor request of its
+own**: it calls the runner the consumer registered at wiring time
+(`registerIntegrationTest(id, fn)`), and "a row that declares a `test` without registering a runner
+is a dead control ⇒ the census goes red". All six of this track's rows are registered by
+`src/server/browser-backend.js` at wiring time — the same module as the first name in `consumers`,
+and that is not a coincidence: **whoever declares the row, whoever registers its runner and whoever
+calls `resolveIntegration(id)` must be one module**, or that census only ever finds three names that
+do not know about each other.
+
+**This track's own third-party egress declaration.** The shared layer's right to say "the store
+constructs no vendor request, and this layer will not become a second file holding N vendor hosts"
+**rests on** the consumer having already declared its hosts; and §9's `test-vendor-whitelist` row
+says verbatim that it is an **Anthropic-only** source census, so it neither sees nor should see these
+rows. This track's declaration is the following three clauses — part of the design, not an
+implementation detail:
+
+1. **CloakBrowser** — it has **no Test entry** in this declaration (`shape-only`, zero network). Its
+   egress surface is §7.2.1's **container egress allowlist**: the pinned download host at install
+   time, then nothing but the sites this profile is actually for. A measurement is a snapshot of one
+   version's behaviour; an allowlist is a property of the deployment, and only the latter survives
+   the vendor shipping a new binary.
+2. **The five `cloud:*` rows** — **exactly one** host each, and where that host comes from is
+   **derived per row** rather than listed as constants: `browserless` and `kernel` take theirs from
+   **the field the user typed** (`apiUrl` / `endpoint`, in the table above), and `agentcore`'s varies
+   by region. So the declaration is written as a **rule**: **a runner may reach only the one host
+   derived from its own row's fields, and nothing else**; a host it cannot derive is a named refusal,
+   never a "let us try the default host". A constant allowlist is the **wrong shape** here, because
+   for two of the rows it cannot express the right answer at all.
+3. **There is no third clause.** Outside those Tests this track's server sends **no** third-party
+   request: a provider's traffic belongs to the browser process itself (`cloak` inside its container,
+   `cloud:*` at the vendor), which is §6.3's and §7.2.1's subject.
+
+§9's `test-browser-providers` therefore gains a leg: **the set of hosts these runners can reach is
+exactly the set the rule above derives**; the negative control is a runner with its host written as
+a constant — it must go red, because a constant is precisely what bypasses "the `apiUrl` the user
+typed", which is the reason the rule exists.
 
 **The key never comes one step closer to an agent, and there is a trap here that has to be named.**
 `agentEnv()` (`src/ws-handler.js:112-121`) is not an **allow** list — it is a **DROP list plus one
@@ -2329,6 +2546,20 @@ construction:
   the same uid (§6.5 already writes that honest boundary down once). What this section removes is
   the **accident** (a key sitting in every agent's environment, one `env` away), not a boundary it
   is pretending to build.
+* **That key has no channel to another machine today, so it does not travel.** The whole rule above
+  lives **inside this process**: nothing between `resolveIntegration`'s answer and the spawn crosses
+  a transport. But a profile whose `host != null` is spawned on an ssh host or a paired device
+  (§7.3, D5's option (b), §10's P4 — **the same phase** as this key half), and pushing the plaintext
+  key down the agentd mux would make §6.4's "provider auth keys live in the registry server-side"
+  false on the spot, with no channel carrying it, no rule governing it and no test driving it. So
+  §7.1's capability cells give `keyScope`: **a `local-only` provider is refused when `host != null`**
+  (`provider_needs_local_key`, the switcher's row disabled with its reason) rather than quietly
+  spawning without a key and failing at the far end. This is a **decision**, not an omission —
+  whether to change it is **D34**: the only decent channel is the daemon's existing
+  **credential-material** path (the sealed-orders shape, `src/account-material.js`), and that owes
+  its own decision row, its own line in §6.4, and a **REMOTE arm** on §9's leg (ii) driven by a real
+  daemon. None of the three exists today, so today's answer is a refusal — and one written into the
+  capability table where the UI can read it.
 
 **Export.** Integration keys join the `sensitive` list of `/api/config/export-info`
 (`src/routes/persistence.js:679-686`, today vsPassword / claudeCreds / codexCreds / hosts / mounts /
@@ -2447,20 +2678,39 @@ would a bank like Mercury detect it; do we also need a pure computer-use version
 | **2** | `cloak` / `cloud:*` (including each vendor's own `*_STEALTH` switch, §7.5) | still CDP — same verbs, same profile model | **another machine**: source-level fingerprint patches, a per-connection seed (§7.2) | CloakBrowser free 1 concurrent / $19 up; cloud providers metered (keys in §7.5) | same order as tier 1, plus one launch and possibly a network hop | content sites and anti-scrape stacks; **for any site with an account, try a human login through the live view first (I5)** |
 | **3** | **`local-window` (new)** | **no CDP, no automation flags**: pixels + the AT-SPI accessibility tree (§4.9), input through §4.9's per-platform injection ladder | **the user's own real browser profile** — an ordinary Chrome/Firefox window; nothing to detect but **behaviour** | free, but it needs a live desktop session plus §4.7's transport | slowest, least precise: one `snapshot` is **one D-Bus round trip per node** (measured 1,800–6,100 nodes/sec, §4.9), `click @ref` holds only on nodes that **self-report an action** (66 of 503 nodes, **6 of 43 `button`s**), and `key` (a chord) has **no path at all** on the tree | banks, and any site doing new-device step-up; **needs the user present** |
 
-Four rules fall straight out of that table:
+Five rules fall straight out of that table:
 
 1. **Tier 3 is not a stronger tier 2 — it is a different trade.** Tier 2 buys "looks like a machine
    nobody automated"; tier 3 buys "**is** that machine" — at the cost of an order of magnitude in
    both precision and speed, and it inherits every empty cell of §4.9's matrix verbatim (on this
    machine: X11 enumeration cannot see Wayland clients, GNOME's `Introspect` answers us
    AccessDenied, `/dev/uinput` is unusable).
-2. **Per-site memory grows a `tier` field, and it is still a claim.** §7.4's `siteHints` goes from
-   `{host, backend, by, at, why}` to `{host, tier, backend, by, at, why}` — `backend` stays,
-   because "which provider within tier 2" is a different question. **Never auto-escalate**: a tier
-   1/2 failure produces a **suggestion**; the actual escalation is a **user act with the notice**
-   required by §3.8's anti-default-blindness rule, because moving to tier 3 means this agent starts
-   operating the user's **real** logged-in state.
-3. **Tier 3's security model is §6.6's, not §6.2's.** A tier-3 target is a real window on the user's
+2. **Per-site memory grows a `tier` field, and it is legal only while `backend` is `null`.** §7.4's
+   `siteHints` goes from `{host, backend, by, at, why}` to `{host, tier, backend, by, at, why}`, and
+   `backend` stays because "which provider within tier 2" is a different question. But the two fields
+   may **not** carry the same fact at the same time: a provider sits on exactly one tier (the table
+   above), so once `backend` names one the tier is derived from it — storing it again is the twin
+   §3.3's third rule forbids. And the reason `tier` needs to exist at all is the second half of this
+   rule: a failure produces only a **suggestion**, and all a suggestion can say is "change tier"
+   ("this site needs tier 3"), at a moment when no provider has been chosen and `backend` is `null`.
+   So the rule is one enforceable sentence: **`tier` is legal only while `backend === null`**, and
+   both §3.3 and §9's `test-browser-tier3` assert that sentence. **Never auto-escalate**: the actual
+   escalation is a **user act with the notice** required by §3.8's anti-default-blindness rule,
+   because moving to tier 3 means this agent starts operating the user's **real** logged-in state.
+3. **Escalating to tier 3 does not re-point an existing profile — it opens a window target.** This
+   has to be said out loud, because §7.4's "the backend is a property of the profile, and a switch
+   changes that field" is **not true** of tier 3, and following it has silent consequences: a tier-3
+   target's state lives in the user's own Chrome/Firefox profile, **not** in the record's `dir`, so
+   "switching" would quietly abandon the cookie jar the profile exists for while pointing P5's
+   retention sweep at a directory that is either ours-and-empty or the user's real browser profile.
+   §7.1's capability cells therefore give `local-window` three "no"s (`canSwitchTo: no`,
+   `ownsDir: no`, `leaseKind: 'window-target'`), and this rule is how to read them: when a
+   `siteHints` tier-3 suggestion is acted on, the user's action opens a §4.9 **window target** — the
+   thing that row actually names — rather than rewriting some profile's `provider`; a tier-3 record
+   carries **no** `dir`, **no** `fingerprintSeed`, is never a target of §7.4's version ladder, and is
+   never touched by P5's sweep. Its lease is §4.9's window-target kind (keyed on the window handle,
+   not on `browserKey`/`targetId`), and §6's owner rules apply verbatim — which is the next rule.
+4. **Tier 3's security model is §6.6's, not §6.2's.** A tier-3 target is a real window on the user's
    desktop with their own login in it. §6's lease and owner rules apply verbatim, plus two that
    belong only to this tier: **the user's take-over always wins** (the instant `lease.input` flips to
    the user, the agent's injection is refused, §4.3), and **it requires D27's option (b)** (the
@@ -2468,7 +2718,7 @@ Four rules fall straight out of that table:
    the first version of window targets lists only the windows **we started**, and the bank use case
    is precisely not in that cell. That is why tier 3 gets its own phase (§10's **P10**) rather than a
    checkbox inside P4.
-4. **The escalation ladder must say why it escalated.** `vibespace-browser blocked`'s **claim**
+5. **The escalation ladder must say why it escalated.** `vibespace-browser blocked`'s **claim**
    (§7.4) now carries a suggested tier, and the UI still says "the agent says this page is blocked
    and suggests tier N", **never** "we detected a block"; the 403/429 `hint` likewise goes from
    `hint:'may-need-cloak'` to `hint:{tier:2|3, why}`, still worded so it cannot be mistaken for a
@@ -2517,15 +2767,15 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-browser-cli` | fast | P0, P1 | The wrapper's verb table, the `close --all` refusal on a shared profile, typed `browser_paused` / `tab_gone` passthrough, behaviour with no token or no API, and that **`use` never prints a CDP URL** (§5.1) — with the round-1 spelling as its negative control. |
 | `test-browser-keeper` | heavy | P1 | Real `agent-browser` ≥ floor: reuse-or-spawn, adopt across a restart, **boot reconciliation** (a persisted lease whose `browserKey` no live session carries is dropped and its target closed BEFORE any `IDLE_TIMEOUT_MS=0` — the half round 1 omitted, with a pre-fix control that leaks a browser), park-with-a-reason on an unverifiable pid, runaway stop, clear-only-your-own-record, ceiling refusal naming the holders. **Skips loudly, with evidence**, when the binary is absent or below the floor. |
 | `test-browser-live` | heavy | P2, P3 | Real browser + real stream + the real bridge: two sessions on one profile drive their own tabs and never each other's (the I2 proof, with a **pre-fix control that reproduces the hijack**), a viewer sees frames through cookie auth only, backpressure holds, takeover refuses agent input and handback restores it. Headless-chrome leg for the window at 375×667 and at a non-1 DPI zoom. |
-| `test-browser-providers` | fast + heavy | **P4** | fast: the provider capability rows and the exact refusal a provider produces for a capability it lacks (a disabled control names its reason), plus the presence and shape of the CloakBrowser egress proof record (§7.2.1) — a provider row with a `blocks:` claim whose caps row is not actually false FAILS, the `local-oracles` discipline. heavy: the real `browser-serve` daemon op against a real daemon **with its capability gate asserted** (an old daemon is never asked — unknown ops hang), and the remote `cdp` provider over `tcpForward`. **Plus the four key legs (§7.5)**: (i) **a consumer never reads env itself** — put a full set of fake provider keys into the server's `process.env`, run the **real** `agentEnv()` (it is exported, `src/ws-handler.js:1657`), and assert not one of them is in the returned object; the negative control is the same set injected under **the vendor's own names** (`BROWSERBASE_API_KEY=…`), which must go red (today it passes them straight through, `:112-121`); (ii) the keeper asks `resolveIntegration(provider)` **exactly once** before a spawn, and the spawned child's environment carries that vendor env name while **its parent's does not**; (iii) the three precedence states (user / cluster / none) yield three different `source` values over one fixture, and `publicView` never emits a plaintext secret (asserted on the **returned object**, not on its rendering); (iv) a **named refusal**: switching to a backend with no key returns `backend_no_key` and **spawns nothing** (negative control: falling back to `chromium`, the thing D33 explicitly rejects). The sweep that goes red on `process.env.VIBESPACE_INTEGRATION` outside the store belongs to the shared layer's `test-integration-registry`; this track's modules are its subjects — which is why §10's P4 carries a cross-track dependency line. |
-| `test-browser-housekeeping` | fast | **P5** | The retention/adoption DECISION as a PURE function, printing what it spared and why — the repo's own sweep law: **never demand a removal nothing is allowed to perform** (a grace window for anything that may be in flight, named with its age). Negative controls: nothing is ever proposed for deletion without an explicit human act, and `forget` archives BEFORE it removes. |
+| `test-browser-providers` | fast + heavy | **P4** | fast: the provider capability rows and the exact refusal a provider produces for a capability it lacks (a disabled control names its reason), plus the presence and shape of the CloakBrowser egress proof record (§7.2.1) — a provider row with a `blocks:` claim whose caps row is not actually false FAILS, the `local-oracles` discipline. heavy: the real `browser-serve` daemon op against a real daemon **with its capability gate asserted** (an old daemon is never asked — unknown ops hang), and the remote `cdp` provider over `tcpForward`. **Plus the four key legs (§7.5)**: (i) **a consumer never reads env itself** — put a full set of fake provider keys into the server's `process.env`, run the **real** `agentEnv()` (it is exported, `src/ws-handler.js:1657`), and assert not one of them is in the returned object; the negative control is the same set injected under **the vendor's own names** (`BROWSERBASE_API_KEY=…`), which must go red (today it passes them straight through, `:112-121`); (ii) the keeper asks `resolveIntegration(provider)` **exactly once** before a spawn, and the spawned child's environment carries that vendor env name while **its parent's does not**; (iii) the three precedence states (user / cluster / none) yield three different `source` values over one fixture, and `publicView` never emits a plaintext secret (asserted on the **returned object**, not on its rendering); (iv) a **named refusal**: switching to a backend with no key returns `backend_no_key` and **spawns nothing** (negative control: falling back to `chromium`, the thing D33 explicitly rejects). **Plus this round's four**: (v) **all six rows register a runner** — run `src/server/browser-backend.js`'s wiring and assert `registerIntegrationTest(id, fn)` was called once for each of the six ids (negative control: a row that declares a `test` and registers nothing must go red — that is exactly the shared layer's "dead control", and this track has to be able to catch it itself); (vi) **the egress declaration is DERIVED** — the set of hosts each runner can reach equals exactly the set §7.5's rule derives, with `browserless` / `kernel` taking theirs from **that row's own field** (drive it twice with two different `apiUrl`s and the host must follow), negative control a runner whose host is written as a constant, which must go red; (vii) **`cloak`'s Test is zero-network** — run its runner and assert **zero** child processes, zero sockets, zero bytes downloaded, while a malformed key produces a named `validate` complaint (negative control: a runner that starts `cloakserve`, which must go red because it bypasses §7.4's two preconditions); (viii) **`keyScope` is a refusal** — a profile with `host != null` switching to `cloak` / `cloud:*` gets `provider_needs_local_key` and **spawns nothing, resolves nothing, and hands no value to any transport** (negative control: the version that lets it through, which must go red; this leg is also where D34 would grow its remote arm if it is ever answered the other way). The sweep that goes red on `process.env.VIBESPACE_INTEGRATION` outside the store belongs to the shared layer's `test-integration-registry`; this track's modules are its subjects — which is why §10's P4 carries a cross-track dependency line. |
+| `test-browser-housekeeping` | fast | **P5** | The retention/adoption DECISION as a PURE function, printing what it spared and why; **the sweep's scope is exactly the provider rows with `ownsDir: true`** (§7.1's capability cells), negative control a `cloud:*` or `local-window` record queued for sweeping, which must go red — that directory is not ours — the repo's own sweep law: **never demand a removal nothing is allowed to perform** (a grace window for anything that may be in flight, named with its age). Negative controls: nothing is ever proposed for deletion without an explicit human act, and `forget` archives BEFORE it removes. |
 | `test-browser-pin` | fast | **P0, P1** | The pin ladder as a PURE decision: explicit / conversation / Task-Group / instance / none, with the ORIGIN each rung states, and that a fork **copies the pin and mints a new key** (§3.2.5). The mid-session half is a WIRING PIN: the re-pointed symlink (or the rewritten per-session config) is what the next launch resolves, and the suite asserts the running browser is **unaffected** — the honest half. Plus the vocabulary case: every pin origin the product emits is in `SPAWN_ORIGINS` and the client's `spawnValueOrigin` whitelist recognises it (§3.2.5's two-site edit; the negative control is an off-vocabulary string, which must go red — in production it only renders a wrong label). Negative controls: a Task-Group default never beats a session's own choice; binding a group does not rewrite a running session's pin. |
-| `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the seat arithmetic and its refusal text, the site-hint record carrying WHO claimed it, and `blocked` being a claim the server never manufactures. heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus the not-installed refusal naming the provider. |
+| `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the site-hint record carrying WHO claimed it (plus §7.6's rule 2: a record that names a `backend` may **not** carry a `tier`, negative control the version that writes both), and `blocked` being a claim the server never manufactures. **Seats are three states, not a number**: known-and-fresh / known-but-stale / **unknown**, each with its own dialog text and ceiling behaviour, and the two load-bearing ones are — **an unknown total never satisfies the ceiling test** (negative controls treat `unknown` as `0` and as `∞`; both must go red) and **a stale verdict degrades to unknown** (push the clock past `SEAT_TIER_STALE_MS` and the same fixture must change its answer; negative control the version that drops the age). Plus a **source fork**: the key is the user's own ⇒ the refusal names the profiles holding seats; the key is the cluster default ⇒ the refusal **may not** list any profile and says "seats shared with other users; N used on this instance" plus the one-click way out (negative control: the version that lists local profiles under a cluster default). heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus a leg for **each of the three** named refusals (`backend_unavailable` for not-installed, `backend_no_key` for no key, and the classification of a licence/concurrency launch failure as `backend_seat_taken` saying "this key is the cluster default" — that last one's input is a **recorded** `cloakserve` failure, and which recording depends on §12.40's measurement, so until it is taken the leg pins the classifier's **shape** rather than the vendor's words). |
 | `test-window-binding` | fast + heavy | **P7** | fast: the chain model with `layout`/`split`/`ratio` — a missing `layout` reads as `'tabs'`, the ratio clamps, and **the multi-client sync key changes when only the layout changes** (§4.6's named trap, with the pre-fix key as its negative control). Three more: **close the host tab of a three-tab split chain ⇒ `layout === 'tabs'` and no dangling id in `split`** (the `_normalizeChain` invariant, with the pre-fix shape that leaves a dangling `pair` as its negative control); **two sessions in one task group produce distinguishable badges**; and **a session bound to no group produces a badge at all** (the two shapes on which borrowing the group colour fails). heavy (headless chrome): bind → two panes in one window, divider drag under a non-1 DPI zoom lands where the pointer is, move/minimise/desktop-switch keep them together, closing the browser pane collapses to tabs **without moving the chat window**, and a mobile viewport renders tabs **without writing its flattening back**. |
 | `test-native-window` | heavy | **P8** | A real Xpra server + a real X client under Xvfb through the real cookie-authed bridge: one window arrives, input reaches it, the stream port is never reachable from a browser, and the backpressure discipline holds. **Skips loudly, with evidence**, when `xpra` or `Xvfb` is absent (measured 2026-09-10 on this box: `Xvfb` present, `xpra` absent). The bandwidth/latency numbers §4.7 needs are produced here, not asserted — the suite RECORDS them under a named budget so a regression is visible. |
 | `test-browser-handles` | fast | **P1** | The attachment set as a PURE decision: a set of exactly one resolves a bare command to the default; a set of ≥2 answers a bare command with the named refusal `profile_required` **listing every handle and which is the default** (a refusal without that list FAILS — it is the only diagnostic this agent can get); the refusal for a `--profile` given a **filesystem path**, carrying the command that registers it as a handle; a child handle `bk-<parent>.<n>` reaped by the parent's teardown **by prefix**; one audit line per verb with **content never recorded** (a `fill` logs the verb only). **Plus both halves of the direct path (§3.7)**: with two attachments, a **direct** `agent-browser` invocation carrying that session's own env resolves to the default profile's user-data-dir **and resolves to no other** (a non-default attachment's directory is minted by the server and never printed), while the same bare command through our CLI gets `profile_required` — the first is layer ①'s honest boundary and the second is its guarantee, and both need an assertion or the boundary is only prose. Negative controls: a session with one attachment **never** needs a handle (else the rule turns the commonest shape into two commands); a handle naming a profile this session is not attached to is **refused**, not silently attached. |
 | `test-profile-blindness` | fast + heavy | **P1, P2** | fast: `profile_changed` is **one-time** (one utterance per fingerprint, bare commands run afterwards), it fires on the **attachment set's fingerprint** rather than per command, and it is typed (`{code, was, now, handles}`); plus the wording of the `<system-reminder>` and its zero-spend delivery path (§3.8's layer ②); **plus the carrier itself**: a status override and a profile change both pending, and **both reaching the next prompt** (the negative control is today's single slot with its `break` on the first hit, which must drop one). heavy (headless chrome, 375×667): this leg is a **mutation**, not two fresh renders — render, then change only "what the agent last used" on the same session, and assert the chip flips neutral→amber with both names **without a full rebuild**; the negative control is a digest of `(v) => v \|\| ''` over an **object** (verified in node: two different objects both digest to `":[object Object]"`), which must go red. "Neutral when they agree, amber when they do not" as two fresh renders is **not** this leg, because both pass under that bug (this repository has paid for that table six times). |
-| `test-browser-tier3` | fast + heavy | **P10** | fast: the ladder as a PURE decision — `tier(provider)` derived from §7.1's table (there is **no** second `tier` field, §3.3), the `siteHints` rule that it **never auto-escalates** (a tier 1/2 failure produces a **suggestion**; the negative control writes it as an automatic switch and must go red), `blocked` claims and the 403/429 `hint` both carrying **who claimed it** and **never** calling themselves a detection, and the exact refusal the `local-window` row produces for every capability it lacks (no CDP, no `--allowed-domains`, no `--pin-tab`). heavy: a real Chrome window on a real X server with **no** `--remote-debugging-port` and **no** CDP — `snapshot` comes from the real AT-SPI tree, one `click @ref` lands on a node that self-reports an action, and one chord **refuses with the probe result** (§4.9: it has no tree road) — asserting throughout that the browser process's argv carries **no** automation flag at all. That last assertion IS the definition of tier 3, which is why it is an assertion rather than a sentence. |
+| `test-browser-tier3` | fast + heavy | **P10** | fast: the ladder as a PURE decision — `tier(provider)` derived from §7.1's two tables (**a profile RECORD carries no `tier` field**, §3.3; and a `siteHints` `tier` is **legal only while `backend === null`** — negative controls write both together, and write a `tier`-only hint that then re-points some profile's `provider`; both must go red), the `siteHints` rule that it **never auto-escalates** (a tier 1/2 failure produces a **suggestion**; the negative control writes it as an automatic switch and must go red), `blocked` claims and the 403/429 `hint` both carrying **who claimed it** and **never** calling themselves a detection, and the exact refusal the `local-window` row produces for every capability it lacks (no CDP, no `--allowed-domains`, no `--pin-tab`). heavy: a real Chrome window on a real X server with **no** `--remote-debugging-port` and **no** CDP — `snapshot` comes from the real AT-SPI tree, one `click @ref` lands on a node that self-reports an action, and one chord **refuses with the probe result** (§4.9: it has no tree road) — asserting throughout that the browser process's argv carries **no** automation flag at all. That last assertion IS the definition of tier 3, which is why it is an assertion rather than a sentence. |
 | `test-window-target` | heavy | **P9** | A real Xvfb + a real Xpra + a real GTK client: `list` shows only the windows we started, `snapshot` mints `@ref`s from the **real AT-SPI tree** (role/name/bounds all asserted present), `click @ref` changes that application's state through `do_action` (verified by the application's **own tree**, not by pixels), `click --at` **refuses with the probe result** when no injection backend exists, **`key` (a chord) likewise refuses with the probe result** when there is no injection backend (there is no tree road for it, so the verb is simply not possible in that column), **`click @ref` on a node that exposes no `Action` refuses rather than silently degrading to a coordinate click** (negative control: the same node still refuses even when an injection backend IS present — that rule is about the node, not about the column), `snapshot` additionally **reports its own interface census** for the walk it just did (how many nodes carried `Action` / `EditableText`) so §4.9's 66/503 and 6/43 can be re-checked on another desktop, the walk runs in a **bounded child** and a node that does not answer is reported as an unreadable subtree rather than stalling it, and the lease plus §4.3's three modes are the same object a tab uses. Every cell of the capability matrix is a **runtime probe** rather than a platform name, and the suite **prints** what it probed; **skips loudly, with evidence**, when `xpra`, `Xvfb` or AT-SPI is missing (2026-09-10 on this box: `Xvfb` present, `xpra` absent, AT-SPI present and reporting 9 applications). The numbers §4.9 admits it has not measured are produced here under a named budget. |
 | `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` and `'browser-profile-notice'` (§3.8) must each be declared AND used in the same change (§4.3.1). |
 | `test-architecture` | build | all | Tier edges: PURE imports nothing, SHARED never reaches up, the daemon bundle carries no orchestrator markers, `server.js` stays inside its size ratchet, and §44 — every settings category renders, so `browser.announceIdleHandback` and the rest reach a section a user can open. |
@@ -2551,7 +2801,7 @@ spread: 14 of 32 workflows converged in one round, 8 needed 3–6.
 | **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`, **plus the attachment set and handle addressing (§3.7) + anti-default-blindness layers ① and ② (§3.8) — `attachments`/`new-child`/`--profile`, the two named refusals `profile_required` and `profile_changed`, the audit stream, and the zero-spend `pendingNotice` — including the small change that makes it a **queue** (typed `{kind,…}`, `renderNotice` dispatching on `kind`, a draining injection site instead of `break` on the first), because today's single slot would let this design's two producers overwrite each other and the status-override notice besides**, `test-browser-handles`, `test-profile-blindness` (the fast half). | **10** | 8–15 | 5 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics; **and for the first time one session may hold several at once**. |
 | **P2 — Live view** | `/api/browser/stream` bridge (+ backpressure), `browser-live` window type, multi-viewer fan-out, URL/tab/console panes, DPI-correct canvas, **the in-window profile switcher strip for a session with several attachments (§3.7) and the amber status-bar Browser chip (§3.8's layer ③, including its `LIVE_SESSION_FACTS` row and digest)**, `test-browser-live`, `test-profile-blindness` (the heavy half). | **7** | 6–10 | 3.5 | **Yes — (1.c) minus the hands.** |
 | **P3 — Takeover / handback** | Lease input holder, mode switcher, input forwarding, `browser_paused`, **the §4.3.1 spend wiring** (`'browser-handback'` in `SPEND_REASONS`, the ladder call, `browser.announceIdleHandback` default OFF, the `test-spend-paths` census staying green), idle handback, agent cursor, `--confirm-actions` cards. | **5** | 4–7 | 2.5 | Yes — completes (1.c). |
-| **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; **plus §7.5's key-consumer half** — this track's own registry rows, one `resolveIntegration(provider)` before the keeper spawns, the switcher's source chip, the `app.openIntegration(id)` deep link, the `backend_no_key` named refusal, and §9's four key legs; `test-browser-providers` + `test-browser-backend`. **Cross-track dependency, stated rather than implied: P4 cannot land before the communication-panel track's P0** — `src/integration-registry.js`, `src/server/integration-store.js` and the extracted `src/secret-box.js` (with mounts migrated behind a parity test) all belong to that track's P0, while this track writes only its own rows and two call sites. The dependency is **one-way**: that track's P0 needs nothing from this one, so the two lines run in parallel and only P4's merge point is gated. Rounds 1–6 sized this cell at **9**; the consumer half of keys (rows + two call sites + one chip + one refusal + four legs) measures **+1**, so the cell is now **10**. | **10** | 8–14 | 5 | Yes — (1.a), and the fleet story. |
+| **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; **plus §7.5's key-consumer half** — this track's own registry rows, one `resolveIntegration(provider)` before the keeper spawns, the switcher's source chip, the `app.openIntegration(id)` deep link, the `backend_no_key` named refusal, and §9's eight key legs; **plus round 8's clauses, which land in this cell and add no rounds** — the six rows' `test.kind` (`cloak` = `shape-only`, the five `cloud:*` = `credential-exchange`), the six runners registered by `src/server/browser-backend.js`, §7.5's **per-row derived** egress declaration, the seat display's **three states** (with `SEAT_TIER_STALE_MS` and "an unknown total never satisfies the ceiling"), the tier read back from **the first real launch**, the third named refusal `backend_seat_taken`, and `keyScope: 'local-only'`'s `provider_needs_local_key` refusal on `host != null`; `test-browser-providers` + `test-browser-backend`. **This cell's first actions gain one zero-code measurement**: §12.40 (what `cloakserve` returns when a free-tier key's seat is held **on another machine**), because `backend_seat_taken`'s criterion keys on that answer. **Cross-track dependency, stated rather than implied: P4 cannot land before the communication-panel track's P0** — `src/integration-registry.js`, `src/server/integration-store.js` and the extracted `src/secret-box.js` (with mounts migrated behind a parity test) all belong to that track's P0, while this track writes only its own rows and two call sites. The dependency is **one-way**: that track's P0 needs nothing from this one, so the two lines run in parallel and only P4's merge point is gated. Rounds 1–6 sized this cell at **9**; the consumer half of keys (rows + two call sites + one chip + one refusal + four legs) measures **+1**, so the cell is now **10**. **Round 8 did not move that number, and the reason is stated rather than assumed**: everything it adds is a clause **inside** things this cell already counts — the registry rows were always going to be written (now with a `kind` and a `describe`), the runners were always going to be registered (one `registerIntegrationTest` line each), the seats were always going to be displayed (now with two more states), the refusals were always written one at a time (now there are three) — and §12.40's measurement is **zero code**. The only genuinely new implementation is the per-row egress rule, a helper inside the runner. So the cell stays at **10**, and what grew is §9: four key legs became eight. | **10** | 8–14 | 5 | Yes — (1.a), and the fleet story. |
 | **P5 — Recording + housekeeping** | Per-profile screencast opt-in, transcript thumbnails, retention sweep, profiles panel with sizes, orphan adoption (migration step 3), `test-browser-housekeeping`. | **4** | 3–6 | 2 | Yes — the transcript half. |
 | **P6 — Hard mediation** | CDP-mediating proxy: target scoping + input refusal during takeover, per-session CDP URLs. **A stated precondition of `sharing: "instance"`** (§6.2), not merely an option if D6 says the cooperative lease is not enough. | **6** | 4–9 | 3 | Only as enforcement — but `sharing: "instance"` stays refused until it lands. |
 | **P7 — Window binding** | `layout`/`split`/`ratio` on the tab chain, the title-bar bind affordance + the left/right title-bar drop zone, the born-into-a-chain `createWindow` path, the divider (per-drag controller, rAF, one coordinate conversion), the ownership badge from `leases`, the layouts persist + **the sync-key fix**, mobile tabs-only without write-back, **the per-pane owner badge on the switcher strip's tabs (§3.7)**, `test-window-binding`. | **6** | 5–9 | 3 | Yes — an agent-driven browser stops losing its owner. **Needs P2** (there must be a live view to bind); independent of P3–P6. |
@@ -2627,7 +2877,7 @@ their ranges say how little is known about them.
 | **D14** | **Where does the pin live, and does a Task Group carry a default?** (§3.2.5 — the pin is one command; the question is which surfaces register it and whether a 岗位 may set a default for every session it owns.) | (a) the session-card right-click only; (b) the four surfaces (card menu, Session Properties, the live-view title bar, the New Session dialog); (c) (b) plus a Task-Group default rung. | **(c).** The four surfaces are one command with four `registerMenuItem` registrations, not four implementations, so the cost is the registrations. The Task-Group rung is what makes "this 岗位 always works in the vendor portal" a thing you say once — and it sits BELOW the conversation's own value, so it can never overwrite work a session already did. |
 | **D15** | **Does a fork inherit the profile pin?** (§3.2.5 — `browserKey` deliberately does not.) | (a) inherit the pin (identity still fresh); (b) inherit neither; (c) inherit both. | **(a).** A pin is a preference ("this kind of work uses this login") and a key is an identity. (c) would give a fork another conversation's pinned tab, which is the defect §3.2.1 exists to prevent; (b) makes every fork of a portal session log in again for no reason. |
 | **D16** | **Does a mid-session pin announce itself into the conversation?** (§3.2.5, the same category as D11 — an announcement is a billed turn.) | (a) never — the agent learns from `vibespace-browser status` and from its next launch landing in the new profile; (b) the free path only (a `<system-reminder>` on the user's next message); (c) (b) plus a delivery-ladder turn when the session is idle, behind a setting. | **(c) with the setting default OFF**, which is exactly (b) in practice. A pin is a user action, so the user is right there typing and the `pendingNotice` channel costs nothing. The ladder path exists for the one shape that channel cannot serve — an idle session the owner wants to redirect now — and it is declared, gated and off by default like every other unattended turn. |
-| **D17** | **Do we ship the live backend switch, and who pays for CloakBrowser's seats?** (§7.4 — free = ONE concurrent session; Pro = 5 / 20 / 200 / 2000.) | (a) no switch — a profile's backend is fixed at creation; (b) switch on the free tier only, with the seat count shown and a loud refusal at the ceiling; (c) (b) plus a paid tier bought up front. | **(b).** The switch is the feature the owner asked for, and the free tier is enough to answer the only question that matters — does this site actually open. The seat count belongs in the dialog rather than in a support conversation later; buy a tier against a measured failure on a named site (D4's rule, unchanged). **Round 7 adds one clause without changing this recommendation**: the two numbers in that seat display come from two different places — the *total* (the tier) from the **Test verdict** of §7.5's registry row, the *used* count from **the keeper's own counting**, because no vendor interface answers "how many seats is this key holding right now" (§12.35). And when the key is the **cluster default** (D32), the keeper can only count this instance, so that row must say so. |
+| **D17** | **Do we ship the live backend switch, and who pays for CloakBrowser's seats?** (§7.4 — free = ONE concurrent session; Pro = 5 / 20 / 200 / 2000.) | (a) no switch — a profile's backend is fixed at creation; (b) switch on the free tier only, with the seat count shown and a loud refusal at the ceiling; (c) (b) plus a paid tier bought up front. | **(b).** The switch is the feature the owner asked for, and the free tier is enough to answer the only question that matters — does this site actually open. The seat count belongs in the dialog rather than in a support conversation later; buy a tier against a measured failure on a named site (D4's rule, unchanged). **Round 7 adds one clause without changing this recommendation**: the *used* count comes from **the keeper's own counting**, because no vendor interface answers "how many seats is this key holding right now" (§12.35). **Round 8 corrects the other number, also without changing the recommendation**: the *total* (the tier) does **not** come from Test — `cloak`'s `test.kind` is `shape-only` (zero network; the reason is in §7.5: a real probe needs the 200 MB binary and §7.2.1's egress proof first, and neither should be triggered by opening a card to paste a key) — so the tier comes from **the first real launch**, and before that it is **unknown**. The seat display is therefore **three states** (known-and-fresh / known-but-stale / unknown), and **an unknown total never satisfies the ceiling test**: that is an invariant rather than a wording choice, because D32's recommended configuration guarantees most fleet users sit in the third state. And when the key is the **cluster default** (D32), the keeper can only count this instance, so that row must say so. |
 | **D18** | **Is auto-bind ON by default?** (§4.6 — when a session's browser starts and its chat window is open, the live view is born inside that chain in split.) | (a) ON; (b) OFF, bind is always a click; (c) ON only when the chat window is wide enough. | **(a) ON.** The binding is the answer to "whose browser is that", and a default that has to be discovered does not answer it. It is one setting, reversible per window by dragging a pane out, and the group is never dissolved on its own — so the worst case of being wrong is one drag. (c) is a hidden rule that will look like a bug on the day it does not fire. |
 | **D19** | **In a split chain with a third tab, what does clicking that tab do?** (§4.6 — a chain may hold five tabs with two of them paired.) | (a) it replaces the non-owner pane; (b) the whole chain flips back to `'tabs'`; (c) a third pane opens. | **(a).** It keeps the binding (the chat pane, the thing the browser is bound TO, stays put) and it is the least surprising: the pane you were not looking at is the one that changes. (c) is refused on measurement grounds — three panes are all unusable below a width most people run, and the ratio model would have to become a tree. (b) silently destroys a layout the user built. |
 | **D20** | **Do we build a WeChat local-store adapter?** (§4.8 — SQLCipher via WCDB, key in process memory; on this box `ptrace_scope` is `1`, so only an ancestor may read it.) | (a) no — picture via Xpra, data via the official Official-Account / Work-WeChat APIs; (b) yes, in core; (c) yes, but only in a plugin, with explicit consent, and only for a client VibeSpace started itself. | **(a), with (c) as the answer if the owner insists.** It is memory-scraping a proprietary client that breaks silently on every update, it crosses the ToS plainly, and the only way to make it technically work is to have VibeSpace start WeChat *so that* it can read its memory — a sentence that argues against itself as a default. If it is built, it is a plugin (D2's line for proprietary things with a legal face), never core. |
@@ -2642,8 +2892,9 @@ their ranges say how little is known about them.
 | **D29** | **Which road does input injection take on Wayland?** (§4.9 — the portal's RemoteDesktop interface is present here, `libei`/`libeis` 1.3.901 installed, `/dev/uinput` is 0600 with the module not loaded.) | (a) the RemoteDesktop portal (`ConnectToEIS` preferred), with `persist_mode=2` + `restore_token` remembering the grant; (b) ydotool/uinput, requiring ops to open up `/dev/uinput`; (c) neither — support only X11/Xwayland and our own nested X. | **(a), with (c) as the status quo until it is proven to work.** (b) is explicitly not recommended: it asks for a device node that can synthesise global input to be handed to this uid, a far larger grant than the feature itself, and it bypasses every consent mechanism the compositor has. (a) has a precondition that must be measured first — **our server runs under `systemd --user`**, and public reports record portal/D-Bus being denied in background contexts (§12). So P9's first task is to measure it; if it fails we land on (c), and (c) plus D28's `do_action` still covers a substantial share of actions. |
 | **D30** | **Do we build window targets on a paired Mac?** (§4.9, §7.3 — macOS's two TCC gates.) | (a) no — the fleet story stays browser-only (§7.3 already decided this); (b) yes, through an agentd op using ScreenCaptureKit + AXUIElement. | **(a), with the reason written down rather than left blank.** Neither gate is "show one dialog": Accessibility requires the process to be **non-sandboxed and signed**, and Screen Recording on macOS 26 (Tahoe) is publicly reported to **require an app bundle** — a plain executable does not even appear in System Settings' privacy list, so it can neither be granted nor be granted-to (a computer-use project's public issue from 2026-01 records exactly this shape: windows missing from screenshots while ScreenCaptureKit returns a TCC error even with permission in the database). And VibeSpace's form on a paired machine is precisely a plain executable started by a daemon. So the first step of (b) is not code, it is answering "do we ship a signed app bundle on macOS" — a product decision, not this section's. |
 | **D31** | **How many tiers of the access ladder do we ship?** (§7.6 — the owner's 2026-09-10 question: is agent-browser CDP, would a bank like Mercury detect it, do we also need a pure computer-use version.) | (a) ship tiers 1+2 only (CDP + fingerprint browser); (b) 1+2+3, with tier 3 after the window-target phase (P10); (c) tier 3 first — banks are the owner's actual case. | **(b).** Tiers 1 and 2 answer "this content site is blocked by an anti-scrape stack", a question CloakBrowser's free tier can answer, and they share **one CDP channel, one set of verbs, one profile model** — the increment is a single row in §7.1, which is exactly why they ship together. Tier 3 is different physics: no CDP, no element references, a different empty cell per platform (§4.9's matrix), and it **requires** §4.9's window targets plus D27's option (b) (the user's real desktop) — so folding it into P4 would double the length of an already least-certain phase. (c) is refused by this one thing: the first step on the bank road is not writing code, it is **measuring which tier 2–3 named sites actually fail on** (§12.36), and that measurement can be made today with no code at all. If they pass on tier 1, P10 drops to the bottom of the list; if they fail even on tier 3 (behavioural biometrics, §7.6), P10 should not be built either. **Measure first, then schedule** — the same rule D4 applies to CloakBrowser. |
-| **D32** | **CloakBrowser's key: one team key from the cluster, or one per user?** (§7.5, and the "where the cluster can supply a default, supply one" half of the owner's 2026-09-11 directive — while this row is licensed **per concurrent session**.) | (a) only the user's own key; (b) the cluster injects a default key and the user may override it; (c) a cluster key with no override. | **(b), but the key the cluster injects is the **free tier**, and the seat display must say it is shared fleet-wide.** (b) is the same shape as Drive presets (`src/mounts.js:2189`) and the frp relay (`src/plugins.js:569`), and it is the half of the owner's directive that asks for a default. But it has a consequence **peculiar to an integration licensed per concurrency** that must be rendered rather than documented: the seats of a shared key are consumed by **every user on that default**, so one of A's browsers makes B's switch fail — while the keeper can only count **this instance** (§12.35: no vendor interface answers "how many seats is this key holding right now"). So the source chip reads "cluster default (seats shared with other users; N used on this instance)", and the advice at the ceiling is **switch to your own key** (one click, §7.5), not "ask the admin to upgrade the team tier". (c) is refused: a per-profile paid capability is not the admin's decision to make for the user, and the override is free — which is also why `useClusterDefault(id)` and `setIntegration(id, …)` are two separate actions. |
+| **D32** | **CloakBrowser's key: one team key from the cluster, or one per user?** (§7.5, and the "where the cluster can supply a default, supply one" half of the owner's 2026-09-11 directive — while this row is licensed **per concurrent session**.) | (a) only the user's own key; (b) the cluster injects a default key and the user may override it; (c) a cluster key with no override. | **(b), but the key the cluster injects is the **free tier**, and the seat display must say it is shared fleet-wide.** (b) is the same shape as Drive presets (`src/mounts.js:2189`) and the frp relay (`src/plugins.js:569`), and it is the half of the owner's directive that asks for a default. But it has a consequence **peculiar to an integration licensed per concurrency** that must be rendered rather than documented: the seats of a shared key are consumed by **every user on that default**, so one of A's browsers makes B's switch fail — while the keeper can only count **this instance** (§12.35: no vendor interface answers "how many seats is this key holding right now"). So the source chip reads "cluster default (seats shared with other users; N used on this instance)", and the advice at the ceiling is **switch to your own key** (one click, §7.5), not "ask the admin to upgrade the team tier". **Round 8 gives this recommendation one explicit precondition, because the previous version's advice pointed at a ceiling that is structurally unreachable in this very configuration**: when somebody else holds the shared key's seat, this instance reads "0 used / unknown total", the ceiling test never fires, and so "at the ceiling" **never happens** under a cluster default — what the user gets is an unnamed launch failure. (b)'s precondition is therefore §7.4's third named refusal `backend_seat_taken` (the keeper classifies a licence/concurrency launch failure, names the provider, says this key is the cluster default with fleet-wide seats, and offers the one click out), **not** a delegation to that local ceiling. It also owes §12.40's measurement. (c) is refused: a per-profile paid capability is not the admin's decision to make for the user, and the override is free — which is also why `useClusterDefault(id)` and `setIntegration(id, …)` are two separate actions. |
 | **D33** | **What happens when you switch to a backend whose key is not configured?** (§7.4 / §7.5.) | (a) refuse loudly and open the Integrations card; (b) fall back to `chromium` silently; (c) fall back to `chromium` with an announcement. | **(a).** This is the same family as §7.4's "the binary is not installed" named refusal (`backend_no_key` beside `backend_unavailable`), and the Integrations card is the **actionable** way out — `app.openIntegration('cloak')`, one click, focused. (b) is refused explicitly: the user pressed "Open with CloakBrowser" precisely because `chromium` could not open it, so a silent fallback shows them the same failure again without telling them why — the textbook shape of this repo's no-silent-failures law. (c) sounds gentler and is worse: it spends a **billed turn** saying something to a user who is sitting in front of the screen (the D11/D16 test), and it still leaves them on the page that will not open. What keeps (a) from stinging is not the refusal but the fact that **the switcher says it before you click** (not configured = a row disabled with its reason plus a source chip, §7.1's capability-row discipline) — so the refusal is the last net, not the first. |
+| **D34** | **May a key-bearing provider ever run on a machine other than this one?** (§7.5, §7.1's `keyScope` cell — D5's option (b) puts a keeper on a paired device, **in P4**, the same phase as this key half.) | (a) **Refuse** — a `keyScope: 'local-only'` provider is a row disabled with its reason (`provider_needs_local_key`) whenever `host != null`; (b) let the key travel through the daemon's existing **credential-material** channel (the sealed-orders shape, `src/account-material.js`). | **(a), and written into the capability table now.** This is not caution, it is **the only answer today's document supports**: §6.4 says verbatim that "provider auth keys live in the registry server-side", which (b) would make false on a remote profile; and §9's leg (ii) ("the spawned child's environment carries that vendor env name while its parent's does not") is an assertion that can only be made **in-process**, with no remote arm today. So landing (b) owes three things, none optional: **this decision row itself**, **a line in §6.4** saying when that key may cross the mux, and **a REMOTE arm on §9's leg (ii)** driven by a **real daemon**. Until all three exist, a vague default would let a plaintext key travel quietly — while (a) costs **nothing** in P4: the remote-browser story (§7.3, D5) already answers "a dedicated profile on that machine, logged in once by a human", which runs `chromium` or `cdp`, and both rows have `keyScope: none`. |
 
 ---
 
@@ -2861,10 +3112,15 @@ Added in round 6, both of them consequences of this round's own changes:
     over three channels — `CLOAKBROWSER_LICENSE_KEY`, a `licenseKey` option, and
     `~/.cloakbrowser/license.key` — and that its format is `cb_…`. I found **no** interface that
     answers "how many seats is this key holding right now". So §7.4's seat display is **ours to
-    count** (the keeper counts this instance), and the Test verdict can only give the **tier** plus
-    one successful launch — which is precisely why D32's "a shared key's seats are fleet-wide and
-    the chip must say so" cannot be solved by a query. The `cloud:*` vendors may differ; also
-    unverified.
+    count** (the keeper counts this instance). **Round 8 corrects this entry's second half**: the
+    previous version said "the Test verdict can only give the tier plus one successful launch" — and
+    round 8 removed that Test, because §7.5 sets `cloak`'s `test.kind` to `shape-only` (zero network:
+    a launch-style probe would need the 200 MB binary and §7.2.1's recorded egress proof first, and
+    neither should be triggered by opening a card to paste a key). **The tier therefore comes from
+    the first real launch** (`cloakserve` reports its plan when the keeper starts it) and is
+    **unknown** before that, which is why §7.4's seat display has three states. This is precisely why
+    D32's "a shared key's seats are fleet-wide and the chip must say so" cannot be solved by a query.
+    The `cloud:*` vendors may differ; also unverified.
 36. **Which tier a named site actually fails on.** This round made no attempt against any real
     site — not tier 1, not tier 2, certainly not tier 3. All of §7.6's table is about **mechanism**,
     not a reading of any one site, and the owner's ask for "2–3 concrete failing sites" is the only
@@ -2891,6 +3147,29 @@ Added in round 6, both of them consequences of this round's own changes:
     change", let alone any measurement of **the user's own machine's** desktop stack (every figure
     in §4.9 comes from this one). So P10's first task is to measure it, not to build it, and P10's
     range (4–12, the widest in this document) is the price of that ignorance.
+40. **What `cloakserve` actually returns when a free-tier key's one seat is held on ANOTHER
+    machine.** The public material says only that "concurrent local free sessions are serialized"
+    (§12.35) — a statement about **one machine**, while in D32's recommended configuration (the
+    cluster injects one free-tier key) the other claimant is **in another pod**. §7.4's third named
+    refusal `backend_seat_taken` keys its **criterion** on that answer: is it a launch failure, a
+    silent serialized wait, does the error carry matchable words. The measurement needs **two
+    machines and one free-tier key, and no code**, so it sits in P4's first actions; until it is
+    taken, the classifier's criterion can only be "the launch failed and the error names
+    licensing/concurrency", that sentence goes into the code comment waiting to be narrowed, and
+    §9's leg pins the classifier's **shape** rather than the vendor's words.
+41. **The exact vendor host behind each of the five `cloud:*` rows.** §7.5's egress declaration is a
+    **rule** ("a runner may reach only the one host derived from its own row's fields"), and that
+    rule can be written and enforced today; but three of the rows need a **constant**
+    (browserbase / browseruse / agentcore by region), and this round did **not** verify those
+    hostnames — doing so means reading those providers' implementations inside the installed binary
+    or each vendor's documentation, and this document's discipline about third-party endpoints is
+    "measure it or write it in this section". Two rows (`browserless` / `kernel`) need **no**
+    constant at all, because their host **is** the `apiUrl` / `endpoint` the user typed — which is
+    also why that declaration is a derivation rule and not a constant allowlist: **a constant table
+    cannot express the right answer for those two rows.** The first implementation step is to read
+    those three constants and put them in the registry rows, and because §9's leg (vi) asserts **set
+    equality** it is sensitive to a wrong constant and explicitly fails on a missing one (a row
+    whose host cannot be derived is a named refusal, never a "let us try the default host").
 
 ---
 
@@ -3312,3 +3591,107 @@ did not change any decision's recommendation (D23's and D28's **answers** are un
 changed is that each is narrowed to the scope its measurements support), did not move any phase's
 round count (findings 2, 4 and 6 land inside the existing P1 and P9 content lines), and did not
 soften any "what I could not verify" entry — that list grew from 31 to 33.
+
+---
+
+## Appendix E — critique log (round 8)
+
+An adversarial critic read round 7's revision and filed eight findings. **All eight are upheld**,
+each checked against the source before anything was changed — "verified" is a claim about what was
+run, not a feeling about a diff. None was judged wrong, so this round has no rejected entry. **All
+three `high`s land on the section round 7 itself had just written (§7.5)**, and that is a reading in
+its own right: a freshly written section that casts itself as "the consumer of a shared layer" is
+most likely to miss exactly **the things that layer requires of its consumers**.
+
+| # | Severity | Finding | Verdict | Where it landed |
+|---|---|---|---|---|
+| 1 | high | §7.5's six rows declare a `test` with **no `kind`** (the shared layer's closed set), **no runner registration**, and bring in five third-party hosts nobody declared | **UPHELD** | §7.5 gains the Test-contract table + the runner registration + the egress declaration; `cloak` drops to `shape-only`; §9 `test-browser-providers` legs (v)(vi)(vii); §12.41 |
+| 2 | high | The seat **total** has one source (a human Test click) which D32's recommended configuration guarantees never happens; no unknown state, no staleness rule | **UPHELD** | §7.4's seats become three states + `SEAT_TIER_STALE_MS`; the tier is read at the first real launch; D17, D32, §12.35 follow; §9 `test-browser-backend` gains the three-state and staleness legs |
+| 3 | high | There are **three** failure modes: when a fleet-shared key's seat is held elsewhere the ceiling refusal is **structurally unreachable**, and the user gets an unnamed launch failure | **UPHELD** | §7.4 gains `backend_seat_taken` + the ceiling wording forked on key source; D32 carries it as a precondition; §12.40; §9 gains a leg |
+| 4 | medium | §7.5's key rule is written for a local keeper while D5's option (b) puts a keeper on a paired device — **in the same P4** | **UPHELD** | §7.1 gains the `keyScope` cell; §7.5 gains a bullet (`provider_needs_local_key`); new **D34**; §9 leg (viii) |
+| 5 | medium | §7.6 adds `tier` to `siteHints` while §3.3 and §9's gate both say "no second tier field" — the gate contradicts the design, and neither schema block was updated | **UPHELD** | §3.3's rule and both schema blocks change; §7.6's rule 2 narrows to "`tier` is legal only while `backend === null`"; `test-browser-tier3` and `test-browser-backend` assert that sentence |
+| 6 | medium | Five of the six `consumers` cells name **the row itself**, so the shared layer's "a live file that really calls `resolveIntegration`" census is vacuous | **UPHELD** | §7.5's table takes the two real module paths + a paragraph on why all six are the same and why "§7.1's row" is right in prose and false in `consumers` |
+| 7 | medium | `local-window` is treated as a provider one can "switch" to, though it has no `dir`, no seed and no CDP — the version ladder, the seed carry and P5's sweep are meaningless or dangerous on it | **UPHELD** | §7.1 gains the capability-cell table (`canSwitchTo` / `ownsDir` / `leaseKind`); §7.6 gains rule 3; `test-browser-housekeeping` gains the sweep-scope assertion |
+| 8 | low | "the one channel of the three that does not hit disk" is wrong on its own terms (two do not), and by §6.5's threat model env is the weaker of the two | **UPHELD** | §7.5 states the real reason (`cloakserve` is a separate process ⇒ the in-process option is unreachable; a file would sit outside secret-box and outside the export passphrase gate) and accepts §6.5's boundary explicitly |
+
+**Verification notes.**
+
+* **Finding 1.** `grep -c 'registerIntegrationTest\|credential-exchange\|shape-only\|reachability'`
+  over both documents returns **0** for each; `grep -cE 'browserbase\.com|browserless\.|api\.kernel|browser-use\.com|bedrock'`
+  likewise **0**. The shared layer (`design-communication-panel-r2` at `696c38f8`, §14.2/§14.3) says
+  verbatim that `test.kind` is a closed set and **derives the button's wording from it**, that "a row
+  that declares a `test` without registering a runner is a dead control ⇒ the census goes red", and
+  that "the store constructs no vendor request … this layer will not become a second file holding N
+  vendor hosts" — where the *reason* for that last sentence is that the consumer has **already**
+  declared its hosts. This track did neither. Separately §9's `test-vendor-whitelist` row states
+  verbatim that it is an **Anthropic-only** source census, so it cannot catch those five hosts. And
+  `cloak`'s Test carried two unstated preconditions (the 200 MB binary, §7.2.1's egress proof) on a
+  card a user opens merely to paste a key.
+* **Finding 2.** §7.4, verbatim: "the *total* (the tier) comes from the **Test verdict** of §7.5's
+  registry row". `grep -n 'testedAt'` finds two occurrences, both beside that sentence — no second
+  source, and no never-tested state. Meanwhile D32's recommendation is (b), the cluster injects the
+  default key, which is precisely the case where a user has **no reason** to open that card. The
+  shared layer's own §14.3 even writes "a `testedAt` does not stay green for ever … a verdict never
+  outlives the reading it describes" — this section cited that layer without citing that rule.
+* **Finding 3.** §7.4 itself says the *used* count is "**the keeper's own**" and that "the keeper can
+  only count **this instance**, while the seats are shared across the whole fleet"; D32 recommends
+  the cluster inject the **free tier** (one concurrent session). Put together: another pod holds the
+  one seat ⇒ this instance reads 0/1 ⇒ the ceiling does not fire ⇒ the spawn proceeds ⇒ the user
+  sees whatever `cloakserve` prints — while three paragraphs earlier §7.4 wrote "hide that, and the
+  user spends an afternoon debugging a browser that appears to fail at random". D32's "at the ceiling
+  the advice is switch to your own key" therefore pointed at a ceiling that is **structurally
+  unreachable** in the configuration D32 itself recommends; and the existing ceiling wording ("name
+  the profiles currently holding seats") **cannot even be composed** in the fleet case, because those
+  profiles are not on this instance.
+* **Finding 4.** §3.3's record: `"host": null, // null = this machine; else a hostId`; D5's answer is
+  "**(b), in P4**"; §10's P4 lists the `browser-serve` device op and "§7.5's key-consumer half" in
+  the **same cell**; and neither §7.1 nor §7.5 restricted `cloak` / `cloud:*` to `host: null`.
+  §7.5's rule is written purely locally ("the vendor's own env name appears only in the environment
+  of the one child **the keeper** spawns"), and §9's leg (ii) asserts "the spawned child's
+  environment carries that vendor env name while **its parent's** does not" — an assertion only
+  makeable **in one process**. So §6.4's "provider auth keys live in the registry server-side" is
+  false for a remote cloak profile. This round picks (a) (refuse) and writes it as a capability cell,
+  because (b)'s three debts are all unpaid today.
+* **Finding 5.** §3.3's third bullet, verbatim: "**The tier is likewise not a new field**: it is
+  derived from `provider` … storing it twice is building yourself a twin that will drift", while
+  `siteHints` is a top-level key of **that same file** (schema at `.md:676` / `.zh.md:577`); §9's
+  `test-browser-tier3` says verbatim "(there is **no** second `tier` field, §3.3)". Both schema
+  blocks also still printed the old shape without `tier`, so the record shown to a reader was not the
+  record §7.6 described. The fix is not to delete §7.6's field: all a **suggestion** can say is
+  "change tier", and at that moment no provider has been chosen, so `backend` is `null` and `tier` is
+  the only thing the claim carries. The rule therefore narrows to "`tier` is legal only while
+  `backend === null`" and the gate asserts **that sentence** — a gate that contradicts the design it
+  gates is the thing that is wrong.
+* **Finding 6.** The six cells read verbatim "§7.1's `cloak` row" / "the `cloud:browserbase` row" …,
+  identical in both languages; only `cloak` additionally named the keeper. The shared layer's §14.2
+  requires "each name is a file that exists AND really calls `resolveIntegration('<id>')`", and its
+  own example is file paths (`consumers: ['src/channels/lark.js', 'src/channels/live/lark.js']`). A
+  name pointing at itself satisfies neither, and it cancels the field's stated purpose. This track
+  has exactly two modules that call `resolveIntegration`, and §3.6's routing table already names
+  both (`src/server/browser-backend.js`, `src/server/browser-keeper.js`).
+* **Finding 7.** §3.3's `provider` now lists `local-window` among its legal values; §7.4 says "the
+  backend is a property of the profile … a switch changes that field", and its machinery is "the
+  version ladder, the seed carried across, the lease-driven tab re-open" — none of which has a
+  subject on a provider §7.1 itself describes as "starts nothing" with "**none**" for CDP. §7.6's
+  rule 2 also makes escalation to tier 3 "a **user act** with the notice", i.e. the switcher offers
+  it. But a tier-3 target's state is in the user's own browser profile, not in the record's `dir`, so
+  `fingerprintSeed`, `lastChromiumMajor` and §10's P5 sweep (all of which act on `dir`) are either
+  meaningless or dangerous. §7.6's rule 3 therefore says escalation does **not** re-point an existing
+  profile, and the capability cells turn those three "no"s into fields the UI reads.
+* **Finding 8.** The cell read verbatim "we use **only** the env, the one channel of the three that
+  does not hit disk". The in-process `licenseKey` option does not hit disk either, so the count is
+  wrong; and this document's own §6.5 says a process under the same uid can read
+  `/proc/<pid>/environ`, a boundary §7.5 itself re-states four bullets later — so the justification
+  both miscounted and, on this document's own threat model, chose the weaker of the two non-disk
+  channels. The real reason is sound and shorter: `cloakserve` runs as a **separate process** (§7.2's
+  Docker/loopback shape), so the in-process option is not reachable from here at all.
+
+**What round 8 deliberately did not do.** It did not launch a browser (§12.1's reason still holds),
+did not change any decision's **recommendation** (D17's and D32's answers are unchanged — what
+changed is that one of D17's two numbers was corrected at its source and D32 gained an explicit
+precondition), did not move any phase's round count (P4 is still 10, **and the cell says why instead
+of leaving it blank**: everything added is a clause inside things that cell already counts, and the
+only genuinely new implementation is one helper inside a runner), and did not soften any "what I
+could not verify" entry — that list grew from 39 to 41, and one of the new entries (§12.40) is
+written into P4's first actions as a **zero-code** measurement, because the criterion of a named
+refusal should not be my guess.

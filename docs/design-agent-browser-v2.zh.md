@@ -72,11 +72,38 @@ env 名注入的集群 key 会出现在每一个 agent 的环境里（`src/ws-ha
 过期的资产、而**银行走的是设备指纹 + 行为 + 新设备升级验证**，于是一个指纹浏览器在那类站点上可能
 比默认 Chromium **更糟**。落地是 §7.1 里三个并列的 provider 行（tier 1 CDP / tier 2 指纹 CDP /
 tier 3 **纯 computer-use、打在用户自己真实浏览器上、没有 CDP 也没有自动化标志**）、`siteHints` 多一
-个 `tier` 且**永不自动升级**、以及 tier 3 自己的阶段 P10（§7.6，D31）。§2 增一条不变量 I8，§3.3 与
+个**只在还没选定 provider 时才合法**的 `tier` 且**永不自动升级**、以及 tier 3 自己的阶段 P10
+（§7.6，D31）。§2 增一条不变量 I8，§3.3 与
 §3.6 各增一条规则/一行，§9 增一个套件与四条 key 腿，§10 的 P4 从 9 轮变成 10 轮并多一条**跨 track
 依赖**、新增 P10 并重新推导总量，§11 增 D31–D33，§12 从 33 条长到 39 条。**本轮关于已装 build 的每
 一条断言都是当天对着 `bin/agent-browser-linux-x64` 与它的 README 只读实测的**，而关于本仓库的每一条
 都带 file:line。
+
+**第八轮（2026-09-11）** 回应了对第七轮的对抗式批评：八条 finding，**全部成立**，核实证据在
+**附录 E**。三条 high 全部落在第七轮自己新写的那一节上，而且三条讲的是同一件事 —— **一条被声明
+出来、却没有人去执行它的合约**：①六个注册表行声明了 `test` 却既没有 `test.kind`（共享层那是一个
+**封闭集**）也没有 runner 注册点，还顺手带进来五个从没被声明过的第三方主机 —— 而共享层敢说"store
+自己不构造任何 vendor 请求"的**前提**正是消费方已经声明过自己的主机；现在六行各有 kind、六个
+runner 全部由 `src/server/browser-backend.js` 注册、`cloak` 那一行退成 `shape-only`（一次真的
+启动式探测会同时触发那 200 MB 下载与 §7.2.1 的出网前置条件，而这两件事不该由"打开卡片贴一把 key"
+触发），并且多出一条**按行推导**的出网声明（`browserless` / `kernel` 的主机**就是用户自己填的
+字段**，所以一张常量白名单在这里是错的形状）。②席位的**总数**只有一个来源 —— 人点一次 Test ——
+而 D32 推荐的配置恰恰保证了那一次点击**永不发生**；现在总数是**三态**（已知且新鲜 / 已知但陈旧 /
+**未知**），档位改由**第一次真正的启动**读回，`SEAT_TIER_STALE_MS` 与本仓的 `OVERAGE_STALE_MS`
+同形，而**一个未知的总数永远不满足上限判定**。③失败形态是**三个**不是两个：一把机队共享的免费档
+key 只有一个席位，而 keeper 只数得到本实例，于是上限拒绝在 D32 的推荐配置下**结构上到不了**，
+用户看到的是一次没有名字的启动失败 —— 正是 §7.4 自己上面那句"把这件事藏起来，用户会排查半天"；
+新增 `backend_seat_taken`，并把它定为 D32 推荐值的一条**明写前置条件**。四条 medium：key 今天没有
+跨机通道却被放在一个 keeper 会跑在配对设备上的阶段里（`keyScope: 'local-only'` + 新的 **D34**）、
+`siteHints.tier` 与 §3.3"不许存第二份 tier"自相矛盾（规则收窄成"`tier` 只在 `backend === null` 时
+合法"，两份 schema 块同改，门禁改成断言这一句）、`consumers` 六行里有五行写的是**它自己**（换成
+真正调用 `resolveIntegration` 的两个模块路径）、`local-window` 被当成一个可以被"切换"过去的
+provider（新增能力格 `keyScope` / `canSwitchTo` / `ownsDir` / `leaseKind`，外加 §7.6 的新规矩 3）。
+一条 low 把 `cloak` 走 env 的理由改对（三条通道里不落盘的有**两条**，而按 §6.5 自己的威胁模型 env
+是弱的那条；真正的理由是 `cloakserve` 是**独立进程**，进程内那个选项根本够不着）。§7.1 增一张能力
+格表，§7.4 的席位与失败形态重写，§7.5 增 Test 合约表、出网声明与 runner 注册点，§7.6 从四条规矩
+变成五条，§9 的 key 腿从四条变成八条并给 `test-browser-backend` 加了席位三态与来源分岔，§11 增
+**D34**，§12 从 39 条长到 41 条。**P4 的轮次没有动（仍然是 10），理由写在那一格里**。
 
 **第六轮（2026-09-10）** 回应了对第五轮的对抗式批评：六条 finding，**全部成立**，核实证据在
 **附录 D**。两条 high 各自指出一个**上线当天就是假话**的断言：反默认失明的整套机制住在
@@ -574,8 +601,13 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
   }],
   "leases": [{ "profileId": "…", "browserKey": "bk-…", "sessionId": "…", "targetId": "…",
                "since": 0, "input": "agent", "viewers": 0 }],
-  "siteHints": [{ "host": "portal.example", "backend": "cloak",
-                  "by": "agent", "at": 0, "why": "…" }]   // §7.4 — a CLAIM, with who made it
+  "siteHints": [{ "host": "portal.example", "tier": null, "backend": "cloak",
+                  "by": "agent", "at": 0, "why": "…" }]   // §7.4 — a CLAIM, with who made it.
+                                            //   `backend` MAY be null (a tier-only claim, made
+                                            //   before any provider is chosen); `tier` is legal
+                                            //   ONLY then — once `backend` names a provider the
+                                            //   tier is DERIVED from it (§7.6 rule 2) and is
+                                            //   never stored twice.
 }
 ```
 
@@ -590,8 +622,16 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
 * **`provider` 就是 backend，而 §7.4 改的就是这个字段。** 这里刻意**没有**第二个 `backend` 键：
   一个问题一个答案 —— 本文档对 `browserKey`、对读数槽讲的同一条规矩在这里同样成立。
   `lastChromiumMajor` 是**另一个**问题（"是谁写过这些字节"），也正是 §7.4 的版本阶梯不能只从
-  目录里取的那个事实。**层（tier）同样不是一个新字段**：它由 `provider` 推导（§7.6 那张表），
-  因为一个 provider 只在一层上，而多存一份就是给自己造一个会漂移的孪生。
+  目录里取的那个事实。**层（tier）同样不是 profile 记录上的一个新字段**：它由 `provider` 推导
+  （§7.1 的两张表），因为一个 provider 只在一层上，而多存一份就是给自己造一个会漂移的孪生。
+  **但 `siteHints` 里的那个 `tier` 是另一件事，而且不是孪生。** 一条站点主张可以在**还没有任何
+  provider 被选中**的时候就成立（"这个站点要 tier 3"），那时 `backend` 是 `null`，而 `tier` 正是
+  这条主张**唯一**携带的内容 —— §7.6 的规矩 2 说得很清楚，一次失败只产生一条**建议**，而一条建议
+  能说的恰恰只有"换一层"，具体换到 tier 2 里的哪个 provider 是另一个问题。所以规则是一句可以执法
+  的话：**`tier` 只有在 `backend` 为 `null` 时才合法**；`backend` 一旦写上，`tier` 就由它推导、
+  绝不再存一份。§9 的 `test-browser-tier3` 按**这一句**断言，而不是按"记录里没有 tier 字段"断言
+  —— 后者与 §7.6 自相矛盾，而一个与被测设计自相矛盾的门禁，红的是门禁自己。这条区分同样适用于
+  §7.1 那张能力格表：**推导住在一张 PURE 表里，落盘的记录一个格子都不存。**
 * **一个 profile 引用一个 provider 的 `id`，永远不引用它的 key。** 这个文件里没有、也不会有
   `apiKey` / `licenseKey` / `token` 这样的字段：key 住在 `data/integrations.json` 里、经
   secret-box 加密、由 `resolveIntegration(provider)` 在 keeper **spawn 的那一刻**解析（§7.5）。
@@ -1653,6 +1693,33 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
 一个不可能工作的控件是带理由地禁用掉，而不是在使用时才失败 —— 而 `local-window` 那一行把"没有 CDP"
 从一个尴尬变成了这张表里的一个**值**，这正是它作为一行而不是一条特例存在的理由。
 
+**那些机制真正会读的能力格。** 上表回答"它是什么"；下表回答"注册表里的每一个机制拿它怎么办"。
+两张表分开是因为它们被读的时刻不同：上表是给人看的，下表是 §7.4 的切换、§3.3 的目录归属、P5 的
+清扫、§7.5 的 key 与 §3.4 的租约在**动手之前**要问的 —— 而 backend-caps 的纪律是一行而不是一条
+`if` 链。
+
+| Provider | `keyScope` | `canSwitchTo`（§7.4） | `ownsDir` | `leaseKind`（§3.4） |
+|---|---|---|---|---|
+| `chromium` | `none` | `in-place` | 是 | `tab` |
+| `cloak` | `local-only` | `in-place` | 是 | `tab` |
+| `cdp`（远程） | `none` | `no` —— 那是别人的浏览器，"切到 cdp"其实是另建一个 profile | 否 | `tab` |
+| `cloud:<name>` | `local-only` | `export-only` —— 供应商的目录不是我们能打开的（§7.4 的导出/导入那一段，它自己就说了会丢什么） | 否 | `tab` |
+| `local-window` | `none` | **`no`** | **否** —— 它的状态是用户自己那个 Chrome/Firefox 的 profile，不是记录上的 `dir` | **`window-target`** |
+
+三条读法，每一条都关掉一个本来会静默出错的地方：
+
+* **`keyScope: 'local-only'` 是一条拒绝，不是一个标签。** 一个要 key 的 provider 在 `host != null`
+  的 profile 上**被拒绝**，切换器那一行带理由禁用（`provider_needs_local_key`）。理由与 D34 一起
+  写在 §7.5：那把明文 key 今天**没有**一条通往另一台机器的通道，而 §6.4 逐字写着它"活在服务端的
+  注册表里"。
+* **这里故意没有 `swept` 这一格。** P5 的保留清扫作用在 `dir` 上，所以"会不会被扫"**就是**
+  `ownsDir`，多一格就是 §3.3 第三条禁止的那种孪生。P5 扫的正好是 `ownsDir: true` 的那些行，这句话
+  是 `test-browser-housekeeping` 的一条断言而不是一句注释。
+* **`local-window` 那一行的三个"否"合起来就是 §7.6 的规矩 3**：升级到 tier 3 **不会**把一个已有
+  profile 重指过去。它没有 `dir`、没有 `fingerprintSeed`、永远不是 §7.4 版本阶梯的对象、也永远不
+  被 P5 的清扫碰到 —— 因为那些机制全都作用在一个**我们拥有的目录**上，而这一层里根本没有这样一个
+  目录。
+
 ### 7.2 CloakBrowser —— 已核实的部分，以及仍然欠着的尽职调查
 
 从供应商网站、npm registry 和仓库核实（2026-09）：
@@ -1843,23 +1910,63 @@ profile 永远不会被一个 agent 的提议打断。**
 
 **花钱的门：CloakBrowser 是按并发 session 计费的。** 免费档是**一个**并发 session（需要 GitHub
 登录），Pro 是 5 / 20 / 200 / 2000（仓库文档逐字）。所以切换对话框必须显示**席位**：已用 / 总数 /
-这次切换之后。到顶时的行为和 §3.5 的浏览器上限同一个形状 —— **大声拒绝，点名此刻占着席位的那几个
-profile，并给出"停掉那一个"**。这个计数是 keeper 的活（它是这个设计里第一个数得清东西的部件），
-而且它是**每 provider** 的，不是全局的。**那两个数字来自两个不同的地方，而这一点必须写出来**：
-*总数*（档位）来自 §7.5 那个注册表行的 **Test 判决**（`testedAt` + `{tier}`，人点一次、有界、
-零定时器 —— §ban-safety 管的是配额轮询，一次人点的 Test 不是），而*已用*是 **keeper 自己数的**，
-因为我没有找到任何一个能回答"这把 key 现在被占了几个席位"的供应商接口（§12.35）。后果是诚实的
-且必须渲染出来：如果这把 key 是**集群默认**（D32），keeper 数得到的只有**本实例**的占用，而席位
-是整个机队共享的 —— 所以那一行写的是"集群默认（席位与其他用户共享，本实例已用 N）"，绝不是一个
-假装全局的分数。免费档那个"一个并发 session"意味着：第二个 cloak profile
-想跑，必然要么等，要么买 —— 把这件事藏起来，用户会对着一个看起来随机失败的浏览器排查半天。
+这次切换之后。这个计数是 keeper 的活（它是这个设计里第一个数得清东西的部件），而且它是
+**每 provider** 的，不是全局的。免费档那个"一个并发 session"意味着：第二个 cloak profile 想跑，
+必然要么等，要么买 —— 把这件事藏起来，用户会对着一个看起来随机失败的浏览器排查半天。
 
-**两个失败形态，两条具名拒绝。** **(1) 那个二进制没装**：`backend_unavailable`（带 provider 名和
+**那两个数字来自两个不同的地方，而总数有三种状态不是两种。** *已用*是 **keeper 自己数的**，因为
+我没有找到任何一个能回答"这把 key 现在被占了几个席位"的供应商接口（§12.35）。*总数*（档位）
+**不来自 Test**：§7.5 把 `cloak` 那一行的 `test.kind` 定成 `shape-only`（零网络，只验 `cb_…` 的
+形状），理由写在那里 —— 一次真的探测要先有那 200 MB 二进制、又要先有 §7.2.1 的出网证据记录，而这
+两件事都不该由"打开一张卡片贴一把 key"触发。档位因此来自**第一次真正的启动**：keeper 起
+`cloakserve` 的时候它自报计划，读回来记成 `{tier, at}` —— 这是一次**用户已经要求发生**的启动的
+副产品，不是一次轮询（§ban-safety 管的是配额轮询，而这里连一个定时器都没有）。于是总数有三种
+状态，而第三种在集群默认下是**常态**：
+
+| 总数 | 什么时候 | 对话框显示什么 | 到顶时 |
+|---|---|---|---|
+| 已知且新鲜 | 这把 key 在 `SEAT_TIER_STALE_MS`（7 天）内成功启动过至少一次 | `已用 N / 总数 M`，并**带上那次读数的年龄**（"档位读自 3 小时前的一次启动"） | 按下面的措辞拒绝 |
+| 已知但陈旧 | 上一次成功启动早于 7 天 | 退化成"未知"，并说出**上一次**读到的档位与它的日期 —— 一个过期的判决可以当线索，不能当约束 | **不拒绝** |
+| **未知** | **这把 key 从没成功启动过**。集群默认下这是常态：D32 的建议正是集群注入默认 key，而那样的用户**根本不会去打开那张卡片** | "席位上限未知 —— 它会在这把 key 第一次真正启动浏览器时变成已知"，**绝不编一个数字** | **不拒绝** |
+
+**一个未知的总数永远不能满足上限判定。** 这条要写成不变量而不是措辞：`未知` 既不是 `0` 也不是
+`∞`，它不参与比较；上限拒绝**只在总数已知且新鲜时**才可能发生。那个 7 天不是随手定的 —— 它是本仓
+已经在用的同一个形状（`OVERAGE_STALE_MS = 7 * 24 * 3600 * 1000`，`src/spend-authorizer.js:259`：
+一个会**拒绝**东西的主张必须有日期），也是共享层自己写下的那条规矩的同一形状（"一个 `testedAt`
+不会永远绿着；一个判决绝不比它描述的那次读数活得更久"）。而它在这里几乎不咬人：这个读数由它约束
+的那个动作（一次启动）自己刷新，所以只有一把"很久没启动过"的 key 会变陈旧 —— 而那样的 key 在本
+实例上的*已用*本来就是 0。
+
+**三个失败形态，三条具名拒绝。** **(1) 那个二进制没装**：`backend_unavailable`（带 provider 名和
 它缺什么）。**(2) 那把 key 没配**：`backend_no_key`（带 provider 名、注册表行 id，以及那条**可执行
-的**出路 —— 打开 Integrations 里那张卡，D33）。两条都不是超时、都不是静默回落，理由见 D33。
-和别处一样：一条**具名**拒绝，profiles 面板与切换对话框里一行**禁用并写明理由**的控件，外加
-Manage Agents 里的一个安装动作（`cloakbrowser` 是一个 npm 包，装它是一次用户动作，并且要过 §7.2.1 的出网前置条件
-—— **先测量，再安装**，不是反过来）。**永不**在用户没说要装的时候自动去下那 200 MB。
+的**出路 —— 打开 Integrations 里那张卡，D33）。**(3) 席位被别人占着**：`backend_seat_taken`。
+两条都不是超时、都不是静默回落，理由见 D33。和别处一样：一条**具名**拒绝，profiles 面板与切换
+对话框里一行**禁用并写明理由**的控件，外加 Manage Agents 里的一个安装动作（`cloakbrowser` 是一个
+npm 包，装它是一次用户动作，并且要过 §7.2.1 的出网前置条件 —— **先测量，再安装**，不是反过来）。
+**永不**在用户没说要装的时候自动去下那 200 MB。
+
+**第三条不是补全，它是集群默认下的默认失败形态，而前两条都盖不住它。** 理由是结构性的：D32 建议
+集群注入的是**免费档**（一个并发 session），而*已用*是 keeper 数的、**只数得到本实例**。于是另一个
+pod 占着那唯一一个席位时，本实例读到的是"已用 0 / 总数 1"（更常见的是"已用 0 / 总数未知"），上限
+判定**根本不会触发**，spawn 照常发出去，用户看到的是 `cloakserve` 自己吐出来的东西 —— 正是上面那
+句话要防的那个下午。所以 keeper 把一次**因授权/并发校验失败**的 `cloakserve` 启动分类成
+`backend_seat_taken`，而那条拒绝必须说三件事：**是哪个 provider**、**这把 key 是集群默认因而席位
+与整个机队共享**（所以"停掉你自己的那一个"是错的建议 —— 本实例可能一个都没开），以及那条一键出路
+`app.openIntegration('cloak')` → "用我自己的 key"。
+
+**到顶时的措辞按 key 的来源分岔，因为两边可说的事实不一样。** key 是**用户自己的** ⇒ 席位都在这台
+实例上 ⇒ 照 §3.5 的浏览器上限那个形状：**大声拒绝、点名此刻占着席位的那几个 profile、给出"停掉那
+一个"**。key 是**集群默认** ⇒ 本实例根本列不出那些 profile（它们在别人的 pod 里）⇒ 那条拒绝
+**不许**假装能列，它说的是"集群默认（席位与其他用户共享，本实例已用 N）"外加那条一键出路，绝不是
+一个假装全局的分数。**一条拒绝只能说出它自己的原因知道的事** —— 这是本仓 2.369.x 那一批自动续跑
+事故写下的同一条法，而这里它恰好把 D32 那句"到顶时的建议是换成你自己的 key"从一个**结构上到不了**
+的上限里救了出来。
+
+**这条拒绝的措辞依赖一个我没有量过的事实**，而它写在 §12.40：一把免费档 key 的那个席位被**另一台
+机器**占着的时候，`cloakserve` 到底返回什么。公开材料只说"并发的本地免费 session 会被串行化"
+（§12.35），那是**同机**的说法。所以 P4 的第一批动作里多一条：拿一把免费档 key 在两台机器上同时
+起，把回答逐字记下来 —— 分类器认的是那个回答，不是我的猜测；在它被测出来之前，`backend_seat_taken`
+的判据只能是"启动失败且错误里带着授权/并发字样"，而这句话本身就要写进代码注释里等着被收窄。
 
 ### 7.5 Provider 密钥来自哪里
 
@@ -1878,7 +1985,7 @@ commit `14785475` 上读到的那一版，现有的那一节是 `## 13. 密钥�
 
 | 名字 | 是什么 | 本 track 怎么用它 |
 |---|---|---|
-| `src/integration-registry.js` | **PURE** 表，不 import 任何东西：一行一个集成 `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, test:{kind,describe}, consumers:[…], docs}` | 本 track 贡献下表那几行；`consumers` 里写的就是 §7.1 的 provider 行与 §7.4 的切换器 |
+| `src/integration-registry.js` | **PURE** 表，不 import 任何东西：一行一个集成 `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, test:{kind,describe}, consumers:[…], docs}` | 本 track 贡献下面那六行；`test.kind` 取自共享层那个**封闭集**，`consumers` 写的是**模块路径**（那条普查要求每个名字既是一个存在的文件、又真的调用 `resolveIntegration('<id>')`） |
 | `src/server/integration-store.js` | **ORCH**：`data/integrations.json` 经 `writeJsonAtomic` 写入、secret 字段经 secret-box 加密；`resolveIntegration(id)` → `{source:'user'\|'cluster'\|'none', values, label, fromEnv, testedAt, lastError}`；`publicView(id)` 把每个 secret 字段遮成 `••••` + 末 4 位；`setIntegration(id, patch)`（缺省字段=不变，`''`=清空）、`useClusterDefault(id)`、`test(id)`；每次写广播 `integrations-updated`（携带**遮蔽后**的视图） | keeper 在 spawn 一个 provider **之前**问 `resolveIntegration`，从不自己读 env |
 | 路由 | `GET /api/integrations`（遮蔽列表）· `PUT /api/integrations/:id` · `POST /api/integrations/:id/test` · `DELETE /api/integrations/:id`（退回集群默认 / 无） | §7.4 的切换器读遮蔽列表拿来源与 Test 判决；**永远不读明文** |
 | ⚙ → **Integrations**（集成与密钥） | 窗口类型 `integrations`（`registerWindowType`，openSpec `{openIntegrations, focus:<id>}`），像 Plugins 卡片那样一行一张卡：**来源芯片**（集群默认 / 你自己的 / 未配置）、"用集群默认"与"用我自己的 key"二选一、声明的字段（secret 只给 **Replace** 不给 Reveal）、Test 按钮与它上一次的判决（含被转义的供应商原文）、一行"这个 key 被谁用"；**≤768px 渲染同一批卡片，单列** | 每个消费方深链到自己那张卡：`app.openIntegration(id)` |
@@ -1896,17 +2003,84 @@ preset > 工具内建"，而 UI 里那一项叫 "Custom (own client id/secret)"�
 **本 track 贡献的注册表行。** 字段名不是我编的 —— 它们是已安装 0.32.0 二进制自己的 env 名
 （`strings bin/agent-browser-linux-x64` 实测，外加它 README 的 provider 表）：
 
-| `id` | 字段（`secret` 标 †） | 供应商自己的 env 名（**只**出现在那个子进程里） | 集群可注入 | Test 做什么（人点一次，有界） | 消费方 |
-|---|---|---|---|---|---|
-| `cloak` | `licenseKey` †（空 = 免费档） | `CLOAKBROWSER_LICENSE_KEY`（`cb_…`；供应商也认 `licenseKey` 选项与 `~/.cloakbrowser/license.key` —— 我们**只**用 env，三条通道里唯一一条不落盘的） | `VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY` | 用这把 key 起一次一次性 `cloakserve`，读回它自报的档位，记 `{tier, at}`；**读不回"已用席位"**（§12.35） | §7.1 的 `cloak` 行、§7.4 的切换器、keeper |
-| `cloud:browserbase` | `apiKey` † | `BROWSERBASE_API_KEY` | `VIBESPACE_INTEGRATION_CLOUD_BROWSERBASE_APIKEY` | 对供应商自己的 sessions 端点发一次有界的只读请求 | `cloud:browserbase` 行 |
-| `cloud:browserless` | `apiKey` †、`apiUrl`、`stealth` | `BROWSERLESS_API_KEY` / `BROWSERLESS_API_URL` / `BROWSERLESS_STEALTH` | 同形 | 同上 | `cloud:browserless` 行 |
-| `cloud:kernel` | `apiKey` †、`endpoint`、`stealth` | `KERNEL_API_KEY` / `KERNEL_ENDPOINT` / `KERNEL_STEALTH` | 同形 | 同上 | `cloud:kernel` 行 |
-| `cloud:browseruse` | `apiKey` † | `BROWSER_USE_API_KEY` | 同形 | 同上 | `cloud:browseruse` 行 |
-| `cloud:agentcore` | 供应商自己的一组（未核实） | 同上游 provider 表 | 同形 | 同上 | `cloud:agentcore` 行 |
+| `id` | 字段（`secret` 标 †） | 供应商自己的 env 名（**只**出现在那个子进程里） | 集群可注入 | 消费方（`consumers`） |
+|---|---|---|---|---|
+| `cloak` | `licenseKey` †（空 = 免费档） | `CLOAKBROWSER_LICENSE_KEY`（`cb_…`） | `VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY` | `src/server/browser-backend.js`、`src/server/browser-keeper.js` |
+| `cloud:browserbase` | `apiKey` † | `BROWSERBASE_API_KEY` | `VIBESPACE_INTEGRATION_CLOUD_BROWSERBASE_APIKEY` | 同上 |
+| `cloud:browserless` | `apiKey` †、`apiUrl`、`stealth` | `BROWSERLESS_API_KEY` / `BROWSERLESS_API_URL` / `BROWSERLESS_STEALTH` | 同形 | 同上 |
+| `cloud:kernel` | `apiKey` †、`endpoint`、`stealth` | `KERNEL_API_KEY` / `KERNEL_ENDPOINT` / `KERNEL_STEALTH` | 同形 | 同上 |
+| `cloud:browseruse` | `apiKey` † | `BROWSER_USE_API_KEY` | 同形 | 同上 |
+| `cloud:agentcore` | 供应商自己的一组（未核实） | 同上游 provider 表 | 同形 | 同上 |
+
+**`consumers` 这一列六行全同，这是个结论不是偷懒**：本 track 里读 `resolveIntegration(id)` 的地方
+只有两个 —— `src/server/browser-backend.js`（切换器的来源芯片，以及下面那个注册进去的 Test runner）
+与 `src/server/browser-keeper.js`（spawn 之前的那一次解析，§9 第 (ii) 条腿点名的就是它）。
+**这一列里绝不能写"§7.1 的 `cloak` 行"这种东西**：共享层那条普查要求每个名字**是一个存在的文件**
+并且**真的调用** `resolveIntegration('<id>')`，一个指向自己的名字既满足不了"存在"，也正好把这个
+字段存在的理由（"这个 key 被谁读"）取消掉。§7.1 的行与 §7.4 的切换器是**这段散文**里的说法，它们
+在散文里是对的，在 `consumers` 里是假的。
 
 那两个 `stealth` 字段是**值**，不是能力承诺：它们是各家自己的实现、没有公开规格、本轮零测量
 （§12.38）。它们出现在这里是因为它们是用户/集群**可以设**的东西，而一个可以设的东西属于这张表。
+
+**`cloak` 的 license 为什么走 env，理由要说对。** 供应商认三条通道：`CLOAKBROWSER_LICENSE_KEY`、
+一个进程内的 `licenseKey` 选项、以及 `~/.cloakbrowser/license.key`（§12.35）。第一版理由写的是
+"三条里唯一一条不落盘的" —— 那是错的，进程内那个选项同样不落盘，而且按本文档 §6.5 自己的威胁模型，
+env 恰恰是两条不落盘通道里**弱**的那条（同一 uid 下的进程读得到 `/proc/<pid>/environ`）。真实的
+理由站得住：我们把 `cloakserve` 起成**一个独立进程**（§7.2 的 Docker/loopback 形状），所以那个
+**进程内**的选项在这里根本够不着 —— 可选的只剩 env 与文件两条，而 env 赢是因为写文件会把这把 key
+以明文留在 `data/integrations.json` 的 secret-box 加密**之外**、也在 §7.5 那份 `sensitive` 导出
+清单**之外**，于是它既不跟着密钥轮换，也不跟着配置导出的口令门走。§6.5 那条
+`/proc/<pid>/environ` 的边界因此是**被接受**的，不是被否认的：本节去掉的是那个**意外**（一把躺在
+每个 agent 环境里的 key），不是在制造一条边界。
+
+**每一行的 Test 是一份合约，而它的 `kind` 来自共享层的封闭集。** 共享层把 `test.kind` 定成
+`credential-exchange` / `shape-only` / `reachability` 三选一，并且**按它推导按钮上的字** —— 一个
+宣称"测试连接"却从没联网的按钮就是在撒谎。本 track 六行的合约：
+
+| `id` | `test.kind` | runner 真的做什么（`describe`） | 它**唯一**可以到达的主机 | 按钮上的字 |
+|---|---|---|---|---|
+| `cloak` | `shape-only` | 零网络：验 `cb_…` 的形状，**不起任何进程**、不下任何字节。档位由第一次真正的启动给出（§7.4） | 无 | 检查格式（不联网） |
+| `cloud:browserbase` | `credential-exchange` | 用这把 key 对供应商自己的 sessions 端点发一次有界的只读请求；不建 session、不跑页面 | 这一行的常量主机（§12.41） | 测试连接 |
+| `cloud:browserless` | `credential-exchange` | 同上 | **这一行自己 `apiUrl` 字段里的那个主机** —— 它是用户填的 | 测试连接 |
+| `cloud:kernel` | `credential-exchange` | 同上 | **这一行自己 `endpoint` 字段里的那个主机** | 测试连接 |
+| `cloud:browseruse` | `credential-exchange` | 同上 | 这一行的常量主机（§12.41） | 测试连接 |
+| `cloud:agentcore` | `credential-exchange` | 同上（字段本身未核实，§7.5 的表已经这么写了） | 由这一行自己的区域字段推出的主机（§12.41） | 测试连接 |
+
+**为什么 `cloak` 那一行是 `shape-only`，而不是"起一个一次性 `cloakserve` 读回档位"。** 那种 Test
+有**两个前置条件**，而它们都与这张卡片被打开的时机冲突：那 200 MB 的二进制 —— §7.4 逐字写着**永不**
+在用户没说要装的时候去下它 —— 以及 §7.2.1 那份出网证据记录。一张用户只是打开来**贴一把 key** 的
+卡片，不该是这两件事的触发器。那本轮为什么不去共享层要一个第四种 kind（比如 `local-launch-probe`）？
+因为那个集合封闭是有理由的：按钮上的字由 kind 推导，多一种 kind 就是多一句需要被解释的按钮文案，
+而它买到的东西 —— 档位 —— 我们在**第一次真正的启动**上免费就能拿到，而那次启动本来就排在那两个
+前置条件后面。所以这里接受封闭集给的诚实答案，并把代价明写进 §7.4 的那张三态表里。
+
+**runner 由谁注册。** 共享层的 `test(id)` **自己不构造任何 vendor 请求**：它调的是消费方在接线时
+注册进来的 runner（`registerIntegrationTest(id, fn)`），而"一行声明了 `test` 却没有注册 runner =
+一个死控件 ⇒ 普查变红"。本 track 的六行**全部**由 `src/server/browser-backend.js` 在接线时注册 ——
+与 `consumers` 列里的第一个名字是同一个模块，这不是巧合：**声明这一行的人、注册它 runner 的人、和
+读 `resolveIntegration(id)` 的人必须是同一个模块**，否则那条普查能查到的只是三个各自为政的名字。
+
+**本 track 自己的第三方出网声明。** 共享层之所以敢说"store 自己不构造任何 vendor 请求、这一层也不会
+变成第二个持有 N 个 vendor 主机的文件"，**前提**正是消费方已经声明过自己的主机；而 §9 的
+`test-vendor-whitelist` 逐字写着它是一次**只针对 Anthropic** 的源码普查，所以它既看不见也不该看见
+这几行。本 track 的声明就是下面这三条，它是设计的一部分而不是实现细节：
+
+1. **CloakBrowser** —— 它在这张声明里**没有 Test 条目**（`shape-only`，零网络）。它的出网面是
+   §7.2.1 那条**容器出网白名单**：安装时是那个被钉住的下载主机，之后只剩这个 profile 真正要去的
+   站点。一份测量是某一个版本行为的快照，一条白名单是部署的性质 —— 后者才是供应商换二进制之后还
+   活着的那个。
+2. **五个 `cloud:*` 行** —— 每一行**恰好一个**主机，而它从哪来是**按行推导**的，不是一张常量表：
+   `browserless` 与 `kernel` 的主机**就是用户自己填的那个字段**（`apiUrl` / `endpoint`，上表里
+   就有），`agentcore` 的主机按区域变。所以声明写成一条**规则**：**一个 runner 只能到达由它自己
+   那一行的字段推导出来的那一个主机，别的一个都不行**；推导不出来就是一次具名拒绝，不是一次"用
+   默认主机试试"。一张常量白名单在这里是**错的形状**，因为它对两行根本表达不出正确的答案。
+3. **没有第三条。** 本 track 的服务端在这些 Test 之外**不发任何**第三方请求：provider 的流量走的是
+   浏览器进程自己（`cloak` 在容器里、`cloud:*` 在供应商那边），那是 §6.3 与 §7.2.1 的题目。
+
+§9 的 `test-browser-providers` 因此多一条腿：**这几个 runner 能到达的主机集合，恰好等于上面这条
+规则推导出来的集合**；负控是一行把主机写成常量的 runner —— 它必须变红，因为常量正好绕过"用户自己
+填的 `apiUrl`"这件事，而那正是这条规则存在的理由。
 
 **那把 key 一步都不能靠近 agent，而这里有一个必须点名的陷阱。** `agentEnv()`
 （`src/ws-handler.js:112-121`）不是一张**允许**清单，它是一张 **DROP 清单加一条前缀规则**：它丢掉
@@ -1930,6 +2104,17 @@ token — an agent could read all of them with one `env`"）。于是这条规�
 * 与 §6.1 那条"流 token 永不到达 agent"完全同形：一个不进 `agentEnv` 的秘密，仍然可以被同一个 uid
   下的进程从**服务器自己的** `/proc/<pid>/environ` 读到（§6.5 已经把这个诚实边界写过一遍）。本节
   去掉的是那个**意外**（一把躺在每个 agent 环境里、`env` 一敲就有的 key），不是在制造一条边界。
+* **那把 key 今天没有一条通往另一台机器的通道，所以它不许上路。** 上面这条规则整条都活在**本进程**
+  里：`resolveIntegration` 的答案与 spawn 之间那段路没有跨过任何传输。而一个 `host != null` 的
+  profile 的 spawn 发生在 ssh 主机或配对设备上（§7.3、D5 的 (b)、§10 的 P4 —— 和 key 这一半是**同一
+  个阶段**），把明文 key 顺着 agentd 的 mux 送过去会让 §6.4 那句"provider 授权 key 活在服务端的
+  注册表里"当场变成假话，而且今天没有承载它的通道、没有规则、也没有一条测试。于是 §7.1 的能力格
+  给出 `keyScope`：**`local-only` 的 provider 在 `host != null` 时被拒绝**
+  （`provider_needs_local_key`，切换器那一行带理由禁用），而不是悄悄地少一把 key 去 spawn 然后在
+  远端失败。这是一个**判定**不是一个遗漏 —— 要不要修它是 **D34**：唯一体面的通道是 daemon 已有的
+  **凭据材料**那条路（sealed orders 的形状，`src/account-material.js`），而它欠自己的决定行、§6.4
+  的一句话、以及 §9 第 (ii) 条腿的一条**远端臂**（由真 daemon 驱动）。三样今天一样都没有，所以今天
+  的答案是拒绝，而且是写在能力表里、UI 读得到的那种拒绝。
 
 **导出。** 集成 key 加入 `/api/config/export-info` 的 `sensitive` 清单
 （`src/routes/persistence.js:679-686`，今天是 vsPassword / claudeCreds / codexCreds / hosts /
@@ -2028,24 +2213,40 @@ key，根本没有重定向** —— 本 track 上表里的每一行都是纯 ke
 | **2** | `cloak` / `cloud:*`（含各家自己的 `*_STEALTH` 开关，§7.5） | 仍然是 CDP —— 同一套动词、同一个 profile 模型 | **另一台机器**：源码级指纹补丁、每连接一个 seed（§7.2） | CloakBrowser 免费 1 并发 / $19 起；云 provider 按量（key 见 §7.5） | 与 tier 1 同量级，加一次启动与可能的网络跳 | 内容站与反爬栈；**对任何有账号的站点，先试通过实时视图人工登录（I5）** |
 | **3** | **`local-window`（新）** | **没有 CDP、没有自动化标志**：像素 + AT-SPI 无障碍树（§4.9），输入走 §4.9 那条按平台的注入阶梯 | **用户自己真实的浏览器 profile** —— 一个普通的 Chrome/Firefox 窗口；除了**行为**之外没有东西可被检测 | 免费，但要一个活着的桌面会话 + §4.7 那条传输 | 最慢、最不精确：一次 `snapshot` 是**每节点一次 D-Bus 往返**（实测 1,800–6,100 节点/秒，§4.9），`click @ref` 只在**自报动作**的节点上成立（503 个节点里 66 个，**43 个 `button` 里只有 6 个**），`key`（和弦）在树上**一条路都没有** | 银行，以及任何做新设备升级验证的站点；**需要用户在场** |
 
-四条从这张表直接掉出来的规矩：
+五条从这张表直接掉出来的规矩：
 
 1. **tier 3 不是 tier 2 的"更强版本"，它是另一种取舍。** tier 2 买的是"看起来像一台没被自动化的
    机器"；tier 3 买的是"**就是**那台机器" —— 代价是精度与速度各降一个数量级，而且它把 §4.9 那张
    矩阵的每一个空格原样继承下来（本机：X11 枚举看不见 Wayland 客户端、GNOME 的 `Introspect` 对
    我们 AccessDenied、`/dev/uinput` 不可用）。
-2. **每站点记忆长出一个 `tier` 字段，而它仍然是一条主张。** §7.4 的 `siteHints` 从
-   `{host, backend, by, at, why}` 变成 `{host, tier, backend, by, at, why}` —— `backend` 留着，
-   因为"tier 2 里选哪个 provider"是另一个问题。**永不自动升级**：一次 tier 1/2 的失败只产生一条
-   **建议**，真正的升级是 §3.8 那条反默认失明规则下的一次**带公告的用户动作**，因为升到 tier 3
-   意味着这个 agent 开始操作用户**真实**的登录态。
-3. **tier 3 的安全模型是 §6.6 的，不是 §6.2 的。** 一个 tier-3 目标就是用户桌面上的一个真窗口，
+2. **每站点记忆长出一个 `tier` 字段，而它只在 `backend` 为 `null` 时合法。** §7.4 的
+   `siteHints` 从 `{host, backend, by, at, why}` 变成 `{host, tier, backend, by, at, why}`，
+   `backend` 留着，因为"tier 2 里选哪个 provider"是另一个问题。但这两个字段**不能同时**携带
+   同一个事实：一个 provider 只在一层上（上表），所以 `backend` 一旦写上，`tier` 就是从它推导出
+   来的 —— 再存一份就是 §3.3 第三条禁止的那种孪生。而 `tier` 之所以仍然需要存在，恰恰是本规矩的
+   下半句：一次失败只产生一条**建议**，而一条建议能说的**只有**"换一层"（"这个站点要 tier 3"），
+   那时根本还没有任何 provider 被选中，`backend` 就是 `null`。于是规则是一句可执法的话：
+   **`tier` 只在 `backend === null` 时合法**，§3.3 与 §9 的 `test-browser-tier3` 都按这一句断言。
+   **永不自动升级**：真正的升级是 §3.8 那条反默认失明规则下的一次**带公告的用户动作**，因为升到
+   tier 3 意味着这个 agent 开始操作用户**真实**的登录态。
+3. **升级到 tier 3 不会把一个已有 profile 重指过去 —— 它开的是一个窗口目标。** 这一条必须明写，
+   因为 §7.4 的"backend 是 profile 的一个属性、切换就是改那个字段"对 tier 3 **不成立**，而按那句
+   话去做的后果是静默的：一个 tier-3 目标的状态住在用户自己那个 Chrome/Firefox 的 profile 里，
+   **不在**记录的 `dir` 里，于是"切换"会把这个 profile 存在的理由（那罐 cookie）悄悄丢在原地，
+   同时把 P5 的保留清扫指向一个要么是我们自己的空目录、要么是用户真实浏览器目录的地方。§7.1 的
+   能力格因此对 `local-window` 给出三个"否"（`canSwitchTo: no`、`ownsDir: 否`、
+   `leaseKind: window-target`），而 §7.6 这条规矩是它们的读法：一条 `siteHints` 的 tier-3 建议
+   命中时，用户的动作打开的是一个 §4.9 的**窗口目标**（那正是那条记录点名的东西），而不是改写某个
+   profile 的 `provider`；一条 tier-3 记录**没有** `dir`、**没有** `fingerprintSeed`、永远不是
+   §7.4 版本阶梯的对象、也永远不被 P5 的清扫碰到。它的租约是 §4.9 的窗口目标那种（按窗口句柄，
+   不是按 `browserKey`/`targetId`），而 §6 的 owner 规则原样适用 —— 那是下一条。
+4. **tier 3 的安全模型是 §6.6 的，不是 §6.2 的。** 一个 tier-3 目标就是用户桌面上的一个真窗口，
    里面是他自己的登录。§6 的租约与 owner 规则原样适用，外加两条只属于这一层的：**用户的接管永远
    赢**（`lease.input` 翻给用户的那一刻 agent 的注入立即被拒，§4.3），以及**它需要 D27 的 (b)**
    （"用户真实桌面上的窗口"那一格，要一次明确开启与它自己的同意）—— 第一版窗口目标只列**我们自己
    起的**窗口，而银行这个用例恰恰不在那一格里。这就是 tier 3 有自己一个阶段（§10 的 **P10**）的
    原因，而不是 P4 里的一个勾选框。
-4. **升级阶梯必须说出它为什么升。** `vibespace-browser blocked` 那条**主张**（§7.4）现在带一个
+5. **升级阶梯必须说出它为什么升。** `vibespace-browser blocked` 那条**主张**（§7.4）现在带一个
    建议的 tier，而 UI 显示的仍然是"agent 说这个页面被挡住了，它建议 tier N"，**永远不是**"我们
    检测到了拦截"；403/429 那条 `hint` 同理，`hint:'may-need-cloak'` 变成 `hint:{tier:2|3, why}`，
    措辞上仍然必须和一次检测区分得开（与 §4.3.1 那条"我们自己发的生产者必须有名字"同族）。
@@ -2087,15 +2288,15 @@ key，根本没有重定向** —— 本 track 上表里的每一行都是纯 ke
 | `test-browser-cli` | fast | P0、P1 | 包装 CLI 的动词表、在共享 profile 上对 `close --all` 的拒绝、有类型的 `browser_paused` / `tab_gone` 透传、没有 token 或没有 API 时的行为，以及 **`use` 永不打印 CDP URL**（§5.1）—— 以第一轮那种写法作为它的负控。 |
 | `test-browser-keeper` | heavy | P1 | 真 `agent-browser` ≥ 版本下限：reuse-or-spawn、跨重启 adopt、**开机对账**（一份没有任何活会话扛着其 `browserKey` 的持久租约，会在任何 `IDLE_TIMEOUT_MS=0` 之前被丢掉、其 target 被关掉 —— 第一轮省略掉的那一半，配一个会泄漏一个浏览器的修前对照）、对一个无法验明的 pid 带理由 park、失控停止、只清你自己的记录、天花板处点名持有者的拒绝。当二进制不存在或低于下限时**带证据大声 SKIP**。 |
 | `test-browser-live` | heavy | P2、P3 | 真浏览器 + 真流 + 真桥接：一个 profile 上的两个会话各自驱动自己的标签页、永远碰不到对方的（I2 的证明，配一个**能复现那次劫持的修前对照**）、一个观看者只靠 cookie 鉴权就看到帧、背压守得住、接管拒绝 agent 输入而交还恢复它。窗口在 375×667 以及一个非 1 的 DPI zoom 下各跑一条 headless-chrome 腿。 |
-| `test-browser-providers` | fast + heavy | **P4** | fast：provider 能力行，以及一个 provider 对它缺失的能力产出的确切拒绝（一个被禁用的控件说出它的理由），外加 CloakBrowser 出网证明记录的存在与形状（§7.2.1）—— 一个带 `blocks:` 主张而其 caps 行并不是 false 的 provider 行会 FAIL，`local-oracles` 那套纪律。heavy：真的 `browser-serve` 守护进程 op 打在一个真守护进程上，**并断言它的能力门**（旧守护进程绝不被问 —— 未知 op 会挂住），以及通过 `tcpForward` 的远程 `cdp` provider。**外加 key 那四条腿（§7.5）**：(i) **一个消费方永远不自己读 env** —— 把一整套假 provider key 放进服务器的 `process.env`，跑**真的** `agentEnv()`（它是导出的，`src/ws-handler.js:1657`），断言返回的对象里一个都没有，负控是**按供应商自己的名字**注入的那一版（`BROWSERBASE_API_KEY=…`），它必须变红（今天它会原样传下去，`:112-121`）；(ii) keeper 在 spawn 前**恰好一次**问 `resolveIntegration(provider)`，而 spawn 出去的那个子进程的环境里有那个供应商的 env 名、**它的父进程环境里没有**；(iii) 优先级三态（用户 / 集群 / 无）在同一个 fixture 上给出三个不同的 `source`，而 `publicView` 从不吐出一个明文 secret（断言的是**返回的对象**，不是它的渲染）；(iv) 一条**具名拒绝**：没配 key 的 backend 切换回 `backend_no_key` 且**不 spawn 任何东西**（负控 = 回落 `chromium`，D33 明确否掉的那个）。那条 `process.env.VIBESPACE_INTEGRATION` 出现在 store 之外就变红的普查由共享层的 `test-integration-registry` 拥有，本 track 的模块只是它的被扫描对象 —— 而本 track 在 §10 的 P4 里为此有一条跨 track 依赖线。 |
-| `test-browser-housekeeping` | fast | **P5** | 把保留/收编这个**判定**当作一个 PURE 函数来测，并打印它放过了什么以及为什么 —— 本仓库自己的清扫律：**绝不要求一次没有任何东西被允许执行的移除**（对任何可能正在飞的东西给一个宽限窗口，并连同它的年龄一起点名）。负控：在没有一次显式人类动作的情况下，永远不会有任何东西被提议删除；以及 `forget` 在移除**之前**先归档。 |
+| `test-browser-providers` | fast + heavy | **P4** | fast：provider 能力行，以及一个 provider 对它缺失的能力产出的确切拒绝（一个被禁用的控件说出它的理由），外加 CloakBrowser 出网证明记录的存在与形状（§7.2.1）—— 一个带 `blocks:` 主张而其 caps 行并不是 false 的 provider 行会 FAIL，`local-oracles` 那套纪律。heavy：真的 `browser-serve` 守护进程 op 打在一个真守护进程上，**并断言它的能力门**（旧守护进程绝不被问 —— 未知 op 会挂住），以及通过 `tcpForward` 的远程 `cdp` provider。**外加 key 那四条腿（§7.5）**：(i) **一个消费方永远不自己读 env** —— 把一整套假 provider key 放进服务器的 `process.env`，跑**真的** `agentEnv()`（它是导出的，`src/ws-handler.js:1657`），断言返回的对象里一个都没有，负控是**按供应商自己的名字**注入的那一版（`BROWSERBASE_API_KEY=…`），它必须变红（今天它会原样传下去，`:112-121`）；(ii) keeper 在 spawn 前**恰好一次**问 `resolveIntegration(provider)`，而 spawn 出去的那个子进程的环境里有那个供应商的 env 名、**它的父进程环境里没有**；(iii) 优先级三态（用户 / 集群 / 无）在同一个 fixture 上给出三个不同的 `source`，而 `publicView` 从不吐出一个明文 secret（断言的是**返回的对象**，不是它的渲染）；(iv) 一条**具名拒绝**：没配 key 的 backend 切换回 `backend_no_key` 且**不 spawn 任何东西**（负控 = 回落 `chromium`，D33 明确否掉的那个）。**再加本轮的四条**：(v) **六行全部注册了 runner** —— 把 `src/server/browser-backend.js` 的接线跑一遍，断言 `registerIntegrationTest(id, fn)` 对这六个 id 各调用过一次（负控 = 一行声明了 `test` 而没注册，它必须变红：那正是共享层普查里"死控件"的形状，而本 track 自己也要能抓到它）；(vi) **出网声明是推导出来的** —— 每个 runner 能到达的主机集合恰好等于 §7.5 那条规则推出来的集合，`browserless` / `kernel` 两行的主机取自**那一行自己字段里**的值（用两个不同的 `apiUrl` 各跑一次，主机必须跟着变），负控 = 一行把主机写成常量的 runner，它必须变红；(vii) **`cloak` 的 Test 零网络** —— 跑它的 runner，断言**零**子进程、零 socket、零字节下载，而它对一个形状错的 key 给出的是一次具名的 `validate` 抱怨（负控 = 一个会起 `cloakserve` 的 runner，它必须变红，因为那会绕过 §7.4 的两个前置条件）；(viii) **`keyScope` 是一条拒绝** —— 一个 `host != null` 的 profile 切到 `cloak` / `cloud:*` 得到 `provider_needs_local_key` 且**不 spawn、不解析、不把任何值交给任何传输**（负控 = 允许它通过的那一版，它必须变红；这条腿也是 D34 将来被翻牌时第一个要长出远端臂的地方）。那条 `process.env.VIBESPACE_INTEGRATION` 出现在 store 之外就变红的普查由共享层的 `test-integration-registry` 拥有，本 track 的模块只是它的被扫描对象 —— 而本 track 在 §10 的 P4 里为此有一条跨 track 依赖线。 |
+| `test-browser-housekeeping` | fast | **P5** | 把保留/收编这个**判定**当作一个 PURE 函数来测，并打印它放过了什么以及为什么；**清扫的范围恰好是 `ownsDir: true` 的那些 provider 行**（§7.1 的能力格），负控是一个 `cloud:*` 或 `local-window` 记录被排进清扫名单的那一版，它必须变红 —— 那个目录不是我们的 —— 本仓库自己的清扫律：**绝不要求一次没有任何东西被允许执行的移除**（对任何可能正在飞的东西给一个宽限窗口，并连同它的年龄一起点名）。负控：在没有一次显式人类动作的情况下，永远不会有任何东西被提议删除；以及 `forget` 在移除**之前**先归档。 |
 | `test-browser-pin` | fast | **P0、P1** | 钉子的阶梯当作一个 PURE 判定来测：显式 / 对话 / 岗位 / 实例 / 无，以及每一级陈述出来的 ORIGIN，还有 fork **复制钉子并铸新 key**（§3.2.5）。中途那一半是一条 WIRING PIN：被重指的符号链接（或被重写的每会话 config）才是下一次启动解析的东西，而套件断言**正在跑的那个浏览器不受影响** —— 那诚实的一半。另加词表那一条：产品发出的每一个 pin origin 都必须在 `SPAWN_ORIGINS` 里、且客户端的 `spawnValueOrigin` 白名单认得它（§3.2.5 的两处改动，负控 = 一个词表外的字符串必须让它变红，因为线上它只会静默显示一个错标签）。负控：岗位默认永远压不过会话自己的选择；绑定一个岗位不会改写一个正在跑的会话的钉子。 |
-| `test-browser-backend` | fast + heavy | **P4** | fast：版本阶梯当作一个 PURE 判定跑一张矩阵（目标 ≥ / < / 无记录，注册表与 `Last Version` 矛盾时取**更高**那个）、席位算术与它的拒绝文案、带着**是谁主张**的 site-hint 记录，以及 `blocked` 是一条服务端绝不自己制造的主张。heavy：一次真的切换 —— 停、按租约逐条把标签页开回它的 `lastUrl`、重新 pin、改写 `targetId`，**租约对象从未被销毁**；外加"没装"那条点名 provider 的拒绝。 |
+| `test-browser-backend` | fast + heavy | **P4** | fast：版本阶梯当作一个 PURE 判定跑一张矩阵（目标 ≥ / < / 无记录，注册表与 `Last Version` 矛盾时取**更高**那个）、带着**是谁主张**的 site-hint 记录（外加 §7.6 规矩 2 的那条：带 `backend` 的记录**不许**携带 `tier`，负控是两个都写上的那一版），以及 `blocked` 是一条服务端绝不自己制造的主张。**席位是三态不是一个数**：已知且新鲜 / 已知但陈旧 / **未知**，三态各自的对话框文案与到顶行为各一条腿，而承重的两条是 —— **一个未知的总数永远不满足上限判定**（负控把 `未知` 当作 `0` 或 `∞`，两种都必须变红），以及**一个陈旧的判决退化成未知**（时钟推过 `SEAT_TIER_STALE_MS` 之后同一个 fixture 必须改口，负控是把年龄丢掉的那一版）。还有一条**来源分岔**：key 是用户自己的 ⇒ 拒绝点名占着席位的 profile；key 是集群默认 ⇒ 拒绝**不许**列出任何 profile，只说"席位与其他用户共享，本实例已用 N"加那条一键出路（负控 = 在集群默认下也去列本地 profile 的那一版）。heavy：一次真的切换 —— 停、按租约逐条把标签页开回它的 `lastUrl`、重新 pin、改写 `targetId`，**租约对象从未被销毁**；外加**三条**具名拒绝各一条腿（"没装" `backend_unavailable`、"没配 key" `backend_no_key`、以及把一次授权/并发校验失败的启动分类成 `backend_seat_taken` 并说出"这把 key 是集群默认" —— 最后这条的输入是一份**录下来的** `cloakserve` 失败输出，而录哪一份取决于 §12.40 那次测量，在它做完之前这条腿钉的是分类器的**形状**而不是供应商的措辞）。 |
 | `test-window-binding` | fast + heavy | **P7** | fast：带 `layout`/`split`/`ratio` 的链模型 —— 缺失的 `layout` 读作 `'tabs'`、比例被夹住，以及**只有 layout 变化时多客户端同步键也必须变**（§4.6 点名的那个陷阱，以修前的键作它的负控）。另加三条：**在一个三标签页的 split 链里关掉 host 标签页 ⇒ `layout === 'tabs'` 且 `split` 里没有悬空 id**（`_normalizeChain` 那条不变量，负控 = 不调它的修前形状会留下一个悬空 `pair`）；**同一个岗位下的两个会话拿到可分辨的徽章**；**一个没绑任何岗位的会话也画得出徽章**（后两条就是"借岗位色"会失效的那两种形态）。heavy（headless chrome）：绑定 → 一个窗口里两个面、非 1 的 DPI zoom 下分隔条拖动落在指针所在处、移动/最小化/换桌面一起走、关掉浏览器那一面塌回标签页**而聊天窗口不动**，以及移动端视口渲染成标签页**且不把这次拍扁写回去**。 |
 | `test-native-window` | heavy | **P8** | 一个真 Xpra 服务器 + 一个跑在 Xvfb 下的真 X 客户端，经真正 cookie 鉴权的桥接：一个窗口到达、输入送得进去、流端口从浏览器永远够不着、背压纪律守得住。当 `xpra` 或 `Xvfb` 缺席时**带证据大声 SKIP**（2026-09-10 本机实测：`Xvfb` 装了，`xpra` 没装）。§4.7 需要的带宽/延迟数字在这里**产出**而不是断言 —— 套件把它们记在一个具名预算下，于是回归看得见。 |
 | `test-browser-handles` | fast | **P1** | 附着集合当作一个 PURE 判定：集合恰好一个 ⇒ 裸命令解析到默认；集合 ≥2 ⇒ 裸命令得到具名拒绝 `profile_required` 且**拒绝里列出全部 handle 与哪个是默认**（一句不带 handle 列表的拒绝算 FAIL —— 它是这个 agent 唯一能拿到的诊断）；`--profile` 收到一个**文件系统路径**时的拒绝，附带那条能把它登记成 handle 的命令；子 handle `bk-<parent>.<n>` 按前缀被父会话的 teardown 收掉；每个动词一条审计行且**内容永不入账**（`fill` 只记动词）。**外加那条直接路径的两半（§3.7）**：两个附着时，一条带着该会话自己那份 env 的**直接** `agent-browser` 调用解析到默认 profile 的 user-data-dir、**且解析不到另一个那个**（非默认附着的目录由服务器铸名、从不打印），而经我们 CLI 的同一条裸命令拿到 `profile_required` —— 前一半是①层的诚实边界，后一半是它的保证，两半都要有断言，否则那条边界只是一句散文。负控：只有一个附着的会话**永远**不需要 handle（否则这条规矩会把最常见的形状变成两条命令）；一个指向本会话没有 attach 的 profile 的 handle 是**拒绝**，不是自动 attach。 |
 | `test-profile-blindness` | fast + heavy | **P1、P2** | fast：`profile_changed` 是**一次性**的（同一个指纹说一次，之后裸命令照常跑）、它按**附着集合的指纹**触发而不是按命令数、它是 typed 的（`{code, was, now, handles}`）；`pendingNotice` 那条 `<system-reminder>` 的措辞与它零计费的投递路径（§3.8 第②层）；**外加那个载体本身**：一条状态覆盖通知与一条 profile 变更通知同时挂着时，**两条都到达下一条 prompt**（负控是今天那个单槽 + 首条即 `break` 的行为，它必须丢掉其中一条）。heavy（headless chrome，375×667）：这一腿是一次**变异**而不是两次全新渲染 —— 先渲染，再只改同一条会话的"agent 最后用过的"那个值，断言芯片在**没有整表重建**的情况下从中性翻成琥珀并写出两个名字；负控是把 digest 换成一个**对着对象**的 `(v) => v \|\| ''`（实测两个不同的对象都 digest 成 `":[object Object]"`），它必须变红。"一致时中性、不一致时琥珀"这两次全新渲染**不是**这条腿，因为在那个 bug 下它们照样通过（这个仓库在这张表上已经付过六次代价）。 |
-| `test-browser-tier3` | fast + heavy | **P10** | fast：阶梯当作一个 PURE 判定 —— `tier(provider)` 从 §7.1 那张表推导（**没有**第二个 `tier` 字段，§3.3）、`siteHints` 那条**永不自动升级**的规则（一次 tier 1/2 失败只产生一条**建议**，负控是把它写成自动切换、它必须变红）、`blocked` 主张与 403/429 的 `hint` 两者都携带**谁主张的**而**永不**自称检测、以及 `local-window` 那一行对它缺的每一项能力（无 CDP、无 `--allowed-domains`、无 `--pin-tab`）给出的确切拒绝。heavy：一个真 Chrome 窗口开在一个真 X 服务器上、**没有** `--remote-debugging-port`、**没有** CDP —— `snapshot` 从真的 AT-SPI 树来、一次 `click @ref` 落在一个自报动作的节点上、一次和弦**带着探测结果被拒绝**（§4.9：树上一条路都没有），全程断言那个浏览器进程的 argv 里**没有任何**自动化标志（这一腿就是 tier 3 的定义，所以它是一条断言而不是一句话）。 |
+| `test-browser-tier3` | fast + heavy | **P10** | fast：阶梯当作一个 PURE 判定 —— `tier(provider)` 从 §7.1 那两张表推导（**profile 记录上没有** `tier` 字段，§3.3；而一条 `siteHints` 的 `tier` **只在 `backend === null` 时合法**，负控是同时写上两者的那一版、以及只写 `tier` 就去改某个 profile 的 `provider` 的那一版，两种都必须变红）、`siteHints` 那条**永不自动升级**的规则（一次 tier 1/2 失败只产生一条**建议**，负控是把它写成自动切换、它必须变红）、`blocked` 主张与 403/429 的 `hint` 两者都携带**谁主张的**而**永不**自称检测、以及 `local-window` 那一行对它缺的每一项能力（无 CDP、无 `--allowed-domains`、无 `--pin-tab`）给出的确切拒绝。heavy：一个真 Chrome 窗口开在一个真 X 服务器上、**没有** `--remote-debugging-port`、**没有** CDP —— `snapshot` 从真的 AT-SPI 树来、一次 `click @ref` 落在一个自报动作的节点上、一次和弦**带着探测结果被拒绝**（§4.9：树上一条路都没有），全程断言那个浏览器进程的 argv 里**没有任何**自动化标志（这一腿就是 tier 3 的定义，所以它是一条断言而不是一句话）。 |
 | `test-window-target` | heavy | **P9** | 真 Xvfb + 真 Xpra + 一个真 GTK 客户端：`list` 只列我们自己起的窗口、`snapshot` 从**真的 AT-SPI 树**里铸出 `@ref`（断言 role/name/bounds 都在）、`click @ref` 经 `do_action` 改变了那个应用的状态（由该应用自己的树复核，不是由像素）、`click --at` 在没有注入后端时**带探测结果拒绝**、**`key`（和弦）在没有注入后端时同样带探测结果拒绝**（树上没有这条路，所以这个动词在那一列里就是做不到的）、**`click @ref` 打在一个没有导出 `Action` 的节点上时是拒绝而不是悄悄降级成一次坐标点击**（负控：同一个节点在有注入后端时也仍然是拒绝 —— 这条规矩是关于那个节点的，不是关于那一列的）、`snapshot` 顺带**报出它这趟的接口清点**（`Action`/`EditableText` 各占多少节点）好让 §4.9 的 66/503 与 6/43 在别的桌面上可被复核、那趟遍历跑在一个**有界的子进程**里且一个不应答的节点被报成读不出来的子树而不是把整趟拖住、租约与 §4.3 三态与标签页共用同一个对象。能力矩阵的每一格都是一条**运行时探测**而不是一个平台名，套件把探测结果**打印**出来；`xpra`/`Xvfb`/AT-SPI 任一缺席时**带证据大声 SKIP**（2026-09-10 本机：`Xvfb` 在、`xpra` 不在、AT-SPI 在且报 9 个应用）。§4.9 承认没量过的那些数字在这里产出并记在具名预算下。 |
 | `test-spend-paths` | fast | **P3** | 不是一个新套件 —— 是那个既有的普查，而这个功能不能把它弄红。它的 `deliver-ladder` primitive **按站点**匹配 `deliverToConversation(`，所以 `src/server/browser-*.js` 里任何一次公告都需要那道门在其上方作用域内；而它的封闭集断言意味着 `'browser-handback'` 与 `'browser-profile-notice'`（§3.8）都必须在同一次改动里既被声明又被使用（§4.3.1）。 |
 | `test-architecture` | build | 全部 | 层边界：PURE 不 import 任何东西、SHARED 绝不向上够、daemon bundle 不携带 orchestrator 标记、`server.js` 待在它的行数 ratchet 之内，以及 §44 —— 每个设置分类都会被渲染，于是 `browser.announceIdleHandback` 和其余各项都能到达一个用户打得开的分区。 |
@@ -2120,7 +2321,7 @@ workflow 中有 14 个一轮收敛，8 个需要 3–6 轮。
 | **P1 — 注册表 + keeper + 租约** | `src/browser-profiles.js`（PURE）、`browser-keeper.js` 含**开机对账和并发天花板**、`data/browser-profiles.json` + 原子写 + 广播、`/api/browser/*`、attach/detach/租约、`vibespace-browser` CLI + `AGENT_TOOLS` + 手册、迁移步骤 1–2、**钉子的阶梯 + 岗位默认 + 四个钉子面 + "收养这个会话的浏览器"（§3.2.5）**、`test-browser-pin`，**外加附着集合与 handle 寻址（§3.7）+ 反默认失明的第①②层（§3.8）—— `attachments`/`new-child`/`--profile`、`profile_required` 与 `profile_changed` 两条具名拒绝、审计流水，以及那条零计费的 `pendingNotice` —— 含把它**队列化**的那次小改动（typed `{kind,…}`、`renderNotice` 按 `kind` 分派、注入点排空而不是首条即 `break`），因为今天那个单槽会让本设计的两个生产者互相盖掉，也会盖掉状态覆盖那一条**、`test-browser-handles`、`test-profile-blindness`（fast 那一半）。 | **10** | 8–15 | 5 | 能 —— 按任务的 profile 并发共存，带 `--pin-tab` 语义；**而且一个会话第一次可以同时握着好几个**。 |
 | **P2 — 实时视图** | `/api/browser/stream` 桥接（+ 背压）、`browser-live` 窗口类型、多观看者扇出、URL/标签页/console 面板、DPI 正确的画布、**一个会话有多个附着时窗口内部的 profile 切换条（§3.7）与状态栏那枚琥珀色 Browser 芯片（§3.8 第③层，含它在 `LIVE_SESSION_FACTS` 里的那一行与 digest）**、`test-browser-live`、`test-profile-blindness`（heavy 那一半）。 | **7** | 6–10 | 3.5 | **能 —— (1.c) 减去"手"。** |
 | **P3 — 接管 / 交还** | 租约输入持有者、模式切换器、输入转发、`browser_paused`、**§4.3.1 的花钱接线**（`SPEND_REASONS` 里的 `'browser-handback'`、那次投递梯调用、默认 OFF 的 `browser.announceIdleHandback`、让 `test-spend-paths` 普查保持绿）、空闲交还、agent 光标、`--confirm-actions` 卡片。 | **5** | 4–7 | 2.5 | 能 —— 补全 (1.c)。 |
-| **P4 — Provider** | Provider 行 + 能力门控；**先执行并记录 CloakBrowser 的出网前置条件**（§7.2.1），然后在免费档上通过 loopback `cloakserve` 加一份出网白名单可选开启；通过 `tcpForward` 的远程 `cdp` provider；`browser-serve` 设备 op（三触规则）；**活的 backend 切换（§7.4）—— 版本阶梯、带着走的 seed、按租约重开标签页、对话框里的席位、每站点记忆，以及 agent 的 `blocked` 主张**；**外加 §7.5 的 key 消费方那一半** —— 本 track 自己的注册表行、keeper 在 spawn 前一次 `resolveIntegration(provider)`、切换器的来源芯片、`app.openIntegration(id)` 深链、`backend_no_key` 那条具名拒绝，以及 §9 里 key 那四条腿；`test-browser-providers` + `test-browser-backend`。**跨 track 依赖（明写，不是暗示）：P4 不能先于 communication panel 那条 track 的 P0 落地** —— `src/integration-registry.js`、`src/server/integration-store.js` 与那个被抽出来的 `src/secret-box.js`（mounts 带 parity 测试迁到它后面）都属于那条 track 的 P0，而本 track 只写自己的行与两个调用点。这条依赖是**单向**的：那条 track 的 P0 不需要本 track 的任何东西，所以两条线可以并行，只有 P4 的合入点被门控。第一轮到第六轮这一格是 **9** 轮；key 那一半的消费方（行 + 两个调用点 + 一枚芯片 + 一条拒绝 + 四条腿）实测是 **+1**，所以这一格现在是 **10**。 | **10** | 8–14 | 5 | 能 —— (1.a)，以及机队那条故事线。 |
+| **P4 — Provider** | Provider 行 + 能力门控；**先执行并记录 CloakBrowser 的出网前置条件**（§7.2.1），然后在免费档上通过 loopback `cloakserve` 加一份出网白名单可选开启；通过 `tcpForward` 的远程 `cdp` provider；`browser-serve` 设备 op（三触规则）；**活的 backend 切换（§7.4）—— 版本阶梯、带着走的 seed、按租约重开标签页、对话框里的席位、每站点记忆，以及 agent 的 `blocked` 主张**；**外加 §7.5 的 key 消费方那一半** —— 本 track 自己的注册表行、keeper 在 spawn 前一次 `resolveIntegration(provider)`、切换器的来源芯片、`app.openIntegration(id)` 深链、`backend_no_key` 那条具名拒绝，以及 §9 里 key 那八条腿；**外加第八轮那几条落在这一格里、不另计轮次的子句** —— 六行的 `test.kind`（`cloak` = `shape-only`，五个 `cloud:*` = `credential-exchange`）、六个 runner 由 `src/server/browser-backend.js` 注册、§7.5 那条**按行推导**的出网声明、席位的**三态**显示（含 `SEAT_TIER_STALE_MS` 与"未知不满足上限判定"）、档位改由**第一次真正的启动**读回、第三条具名拒绝 `backend_seat_taken`、以及 `keyScope: 'local-only'` 在 `host != null` 上的 `provider_needs_local_key` 拒绝；`test-browser-providers` + `test-browser-backend`。**这一格的第一批动作里多一条零代码的测量**：§12.40（一把免费档 key 的席位被**另一台机器**占着时 `cloakserve` 返回什么），因为 `backend_seat_taken` 的判据认的是那个回答。**跨 track 依赖（明写，不是暗示）：P4 不能先于 communication panel 那条 track 的 P0 落地** —— `src/integration-registry.js`、`src/server/integration-store.js` 与那个被抽出来的 `src/secret-box.js`（mounts 带 parity 测试迁到它后面）都属于那条 track 的 P0，而本 track 只写自己的行与两个调用点。这条依赖是**单向**的：那条 track 的 P0 不需要本 track 的任何东西，所以两条线可以并行，只有 P4 的合入点被门控。第一轮到第六轮这一格是 **9** 轮；key 那一半的消费方（行 + 两个调用点 + 一枚芯片 + 一条拒绝 + 四条腿）实测是 **+1**，所以这一格现在是 **10**。**第八轮没有再动这个数字，理由要说出来而不是默认**：它加的全部是**已经被算进这一格的那几个东西内部**的子句 —— 注册表行本来就要写（多写一个 `kind` 与一个 `describe`）、runner 本来就要注册（多一行 `registerIntegrationTest`）、席位本来就要显示（多两个状态）、拒绝本来就是一条一条写的（多一条），而 §12.40 那次测量**零代码**。唯一真正新增的实现是那条按行推导的出网规则，它是 runner 内部的一个 helper。所以这一格仍然是 **10**，多出来的是 §9 里从四条腿变成八条腿。 | **10** | 8–14 | 5 | 能 —— (1.a)，以及机队那条故事线。 |
 | **P5 — 录制 + 家务** | 按 profile 的 screencast 可选开启、转录缩略图、保留期清扫、带大小的 profile 面板、孤儿收编（迁移步骤 3）、`test-browser-housekeeping`。 | **4** | 3–6 | 2 | 能 —— 转录那一半。 |
 | **P6 — 硬中介** | 做 CDP 中介的代理：target 作用域限定 + 接管期间拒绝输入、每会话的 CDP URL。**这是 `sharing: "instance"` 的一个明确前置条件**（§6.2），而不只是在 D6 判定协作式租约不够时才有的一个选项。 | **6** | 4–9 | 3 | 只作为强制执行 —— 但 `sharing: "instance"` 在它落地之前一直被拒绝。 |
 | **P7 — 窗口绑定** | 标签页链上的 `layout`/`split`/`ratio`、标题栏的绑定动作 + 标题栏左右两半的 drop 区、"生在链里"的 `createWindow` 路径、分隔条（每次拖动一个控制器、rAF、坐标只换算一次）、从 `leases` 来的归属徽章、layouts 持久化 + **同步键的修复**、移动端只用标签页且不写回、**切换条那些标签上的按面 owner 徽章（§3.7）**、`test-window-binding`。 | **6** | 5–9 | 3 | 能 —— 被 agent 驱动的浏览器不再丢失它的 owner。**需要 P2**（得先有实时视图可绑）；与 P3–P6 无关。 |
@@ -2186,7 +2387,7 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 | **D14** | **钉子住在哪，以及一个岗位要不要带默认值？**（§3.2.5 —— 钉子是一个命令；要问的是哪些面注册它，以及一个岗位可不可以为它名下的每个会话设一个默认。） | (a) 只在会话卡右键；(b) 四个面（卡片菜单、Session Properties、实时视图标题栏、新建会话对话框）；(c) (b) 再加一级岗位默认。 | **(c)。** 那四个面是**一个**命令的四次 `registerMenuItem` 注册，不是四份实现，所以代价就是那几条注册。岗位那一级正是让"这个岗位一直在供应商后台里干活"变成一句只说一次的话 —— 而它排在这个对话自己的取值**之下**，所以它永远不可能覆盖掉一个会话已经做过的事。 |
 | **D15** | **fork 要不要继承 profile 的钉子？**（§3.2.5 —— `browserKey` 刻意不继承。） | (a) 继承钉子（身份仍然新铸）；(b) 两个都不继承；(c) 两个都继承。 | **(a)。** 钉子是**偏好**（"这类活儿用这个登录"），key 是**身份**。(c) 会把另一个对话的 pinned 标签页交给一个 fork，那正是 §3.2.1 存在要防的缺陷；(b) 则让一个后台会话的每一个 fork 都无缘无故重新登录一次。 |
 | **D16** | **中途钉住要不要往对话里发公告？**（§3.2.5，与 D11 同一类 —— 一次公告就是一个计费 turn。） | (a) 永不 —— agent 从 `vibespace-browser status` 以及"下一次启动落进新 profile"这件事上学到；(b) 只走免费那条（挂在用户下一条消息上的 `<system-reminder>`）；(c) (b) 再加"会话空闲时走投递梯"，由一个设置项门控。 | **(c) 而且设置项默认 OFF**，实际效果就是 (b)。钉住是一次用户动作，也就是说用户此刻正在打字，而 `pendingNotice` 那条通道零成本。投递梯那条路留给那条通道服务不了的唯一形状 —— 一个 owner 现在就想改道的**空闲**会话 —— 而它像其它每一个无人值守 turn 一样：已声明、被门控、默认关。 |
-| **D17** | **我们要不要发这个活的 backend 切换，以及 CloakBrowser 的席位谁来付？**（§7.4 —— 免费档**一个**并发 session；Pro 是 5 / 20 / 200 / 2000。） | (a) 不做切换 —— 一个 profile 的 backend 创建时定死；(b) 只在免费档上切，显示席位数并在到顶时大声拒绝；(c) (b) 再加一个预先买好的付费档。 | **(b)。** 切换就是 owner 要的那个功能，而免费档足以回答唯一重要的那个问题 —— 这个站点到底打不打得开。席位数属于那个对话框，而不属于事后的一次答疑；买档要针对一个**被点名站点**上的**实测**失败（D4 的规矩，未变）。**第七轮补一条，不改本决定的推荐值**：那个席位显示的两个数字来自两个不同的地方 —— *总数*（档位）来自 §7.5 那个注册表行的 **Test 判决**，*已用*是 **keeper 自己数的**，因为没有任何供应商接口能回答“这把 key 现在被占了几个席位”（§12.35）。而当这把 key 是**集群默认**时（D32），keeper 数得到的只有本实例，所以那一行必须说出它只是本实例的数字。 |
+| **D17** | **我们要不要发这个活的 backend 切换，以及 CloakBrowser 的席位谁来付？**（§7.4 —— 免费档**一个**并发 session；Pro 是 5 / 20 / 200 / 2000。） | (a) 不做切换 —— 一个 profile 的 backend 创建时定死；(b) 只在免费档上切，显示席位数并在到顶时大声拒绝；(c) (b) 再加一个预先买好的付费档。 | **(b)。** 切换就是 owner 要的那个功能，而免费档足以回答唯一重要的那个问题 —— 这个站点到底打不打得开。席位数属于那个对话框，而不属于事后的一次答疑；买档要针对一个**被点名站点**上的**实测**失败（D4 的规矩，未变）。**第七轮补一条，不改本决定的推荐值**：那个席位显示的两个数字来自两个不同的地方 —— *已用*是 **keeper 自己数的**，因为没有任何供应商接口能回答“这把 key 现在被占了几个席位”（§12.35）。**第八轮把另一个数字修正了，同样不改推荐值**：*总数*（档位）**不来自 Test** —— `cloak` 那一行的 `test.kind` 是 `shape-only`（零网络，理由在 §7.5：一次真的探测要先有那 200 MB 二进制和 §7.2.1 的出网证据，而这两件事不该由"打开卡片贴 key"触发），所以档位来自**第一次真正的启动**，而在那之前它是**未知**。于是席位显示是**三态**（已知且新鲜 / 已知但陈旧 / 未知），而**一个未知的总数永远不满足上限判定**：这一条不是措辞是不变量，因为 D32 推荐的配置恰恰保证了大多数机队用户停在第三态。而当这把 key 是**集群默认**时（D32），keeper 数得到的只有本实例，所以那一行必须说出它只是本实例的数字。 |
 | **D18** | **自动绑定默认开吗？**（§4.6 —— 一个会话的浏览器起来且它的聊天窗口开着时，实时视图直接以 split 生在那个链里。） | (a) 开；(b) 关，绑定永远是一次点击；(c) 只在聊天窗口够宽时才开。 | **(a) 开。** 绑定就是"那是谁的浏览器"这个问题的答案，而一个要靠人自己发现的默认值回答不了它。它是一个设置项，按窗口可以随时把一面拖出去撤销，而且那个组永远不会自己解散 —— 所以"猜错了"的最坏代价是一次拖动。(c) 是一条藏起来的规则，它不触发的那天看起来就像个 bug。 |
 | **D19** | **一个 split 链里有第三个标签页时，点它会怎样？**（§4.6 —— 一个链可以有五个标签页而其中两个并排。） | (a) 它替换掉非 owner 的那一面；(b) 整个链翻回 `'tabs'`；(c) 开出第三面。 | **(a)。** 它保住绑定（聊天那一面 —— 浏览器**绑到**的那个东西 —— 原地不动），而且最不意外：变的是你原本没在看的那一面。(c) 按实测理由拒绝 —— 在大多数人实际使用的宽度以下，三个面全都不可用，而比例模型将不得不变成一棵树。(b) 会悄悄毁掉用户自己搭起来的布局。 |
 | **D20** | **我们要不要做一个微信本地库适配器？**（§4.8 —— 经 WCDB 的 SQLCipher，密钥在进程内存里；本机 `ptrace_scope` 是 `1`，也就是只有祖先进程读得到。） | (a) 不做 —— 画面走 Xpra，数据走官方的公众号 / 企业微信 API；(b) 做，进核心；(c) 做，但只在一个**插件**里，带显式同意，且只对由 VibeSpace 自己启动的客户端生效。 | **(a)，而如果 owner 坚持，答案是 (c)。** 它是在扒一个专有客户端的进程内存，每一次客户端更新都可能安静地碎掉；它明确越过 ToS；而唯一能让它在技术上成立的办法，是让 VibeSpace 去**启动**微信**以便**读它的内存 —— 这句话写出来就在反对它自己当默认。真要做，它是插件（D2 给"专有且带法律面的东西"划的那条线），绝不进核心。 |
@@ -2201,8 +2402,9 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 | **D29** | **Wayland 上的输入注入走哪条道？**（§4.9 —— portal 的 RemoteDesktop 接口在本机存在，`libei`/`libeis` 1.3.901 在，`/dev/uinput` 是 0600 且模块没加载。） | (a) RemoteDesktop portal（`ConnectToEIS` 优先），`persist_mode=2` + `restore_token` 记住那次同意；(b) ydotool/uinput，要求运维放开 `/dev/uinput`；(c) 不做 —— 只支持 X11/Xwayland 与我们自己的嵌套 X。 | **(a)，而 (c) 是它没跑通之前的现状。** (b) 明确不推荐：它要求把一个能合成全局输入的设备节点交给我们这个 uid，那是一次比这个功能本身大得多的授权，而且它绕过合成器所有的同意机制。(a) 有一个必须先量的前提 —— **我们的服务器跑在 `systemd --user` 下**，而公开报告写着 portal/D-Bus 在后台上下文里会被拒（§12）。所以 P9 的第一件事是去测它；测不通就落 (c)，而 (c) 加上 D28 的 `do_action` 仍然能覆盖相当一部分动作。 |
 | **D30** | **配对的 Mac 上要不要做窗口目标？**（§4.9、§7.3 —— macOS 的两道 TCC 门。） | (a) 不 —— 机队那条线只做浏览器（§7.3 已定）；(b) 做，经 agentd op 走 ScreenCaptureKit + AXUIElement。 | **(a)，并把理由写下来而不是留白。** 两道门都不是"弹一次对话框"那么简单：Accessibility 要求进程**非沙箱且已签名**，而 Screen Recording 在 macOS 26 (Tahoe) 上被公开报告为**要求 app bundle** —— 一个非 bundle 的可执行文件根本不出现在系统设置的隐私列表里，于是它既拿不到授权也没法被授权（一个 computer-use 项目 2026-01 的公开 issue 记录了这个形态：窗口不出现在截图里，而 ScreenCaptureKit 即便数据库里有权限也回 TCC 错误）。而 VibeSpace 在一台配对机器上的存在形态恰恰是一个由 daemon 拉起的可执行文件。所以 (b) 的第一步不是写代码，是回答"我们要不要在 macOS 上分发一个签名的 app bundle"——那是一个产品决定，不是这一节的决定。 |
 | **D31** | **我们发几层访问阶梯？**（§7.6 —— owner 2026-09-10 的问题：agent-browser 是 CDP 吗、Mercury 这类银行会不会检测、是不是还得一个纯 computer-use 版本。） | (a) 只发 tier 1+2（CDP + 指纹浏览器）；(b) 1+2+3，tier 3 排在窗口目标那个阶段之后（P10）；(c) tier 3 优先 —— 银行才是 owner 真正的用例。 | **(b)。** tier 1 与 tier 2 回答的是"内容站被反爬挡住"这个可以被 CloakBrowser 免费档回答的问题，而它们共用**同一条 CDP 通道、同一套动词、同一个 profile 模型** —— 增量就是 §7.1 里的一行，这也正是它们能一起发的理由。tier 3 是另一套物理：没有 CDP、没有元素引用、按平台各有各的空格（§4.9 的矩阵），而它**必须**先有 §4.9 的窗口目标与 D27 的 (b)（用户真实桌面），所以把它塞进 P4 会把一个已经最不确定的阶段再拉长一倍。(c) 被这一条否掉：银行那条路的第一步不是写代码，是**去量 2–3 个被点名的站点到底在哪一层挂掉**（§12.36），而那次测量今天就可以做、一行代码都不用写 —— 如果它们在 tier 1 上就过，P10 的优先级立刻降到最低；如果它们连 tier 3 都过不去（行为生物识别，§7.6），那 P10 也不该建。**先量，再排期**，这与 D4 对 CloakBrowser 的规矩是同一条。 |
-| **D32** | **CloakBrowser 的 key：集群给一把团队 key，还是每人自己配？**（§7.5、owner 2026-09-11 指令里"集群能给默认就给"的那一半 —— 而这一行是按**并发 session** 计费的。） | (a) 只允许用户自己的 key；(b) 集群注入一把默认 key，用户可以覆盖；(c) 集群 key 且不允许覆盖。 | **(b)，但集群注入的那一把是**免费档**，而且席位显示必须写明它是全机队共享的。** (b) 与 Drive presets（`src/mounts.js:2189`）和 frp relay（`src/plugins.js:569`）是同一个形状，也是 owner 指令要的那一半。但它有一个**只属于按并发计费的集成**的后果，必须渲染出来而不是写在文档里：一把共享 key 的席位是**所有沿用同一个默认的用户**一起消耗的，于是 A 的一个浏览器会让 B 的切换失败，而 keeper 数得到的只有**本实例**的占用（§12.35：没有任何供应商接口能回答"这把 key 现在被占了几个席位"）。所以那枚来源芯片写的是"集群默认（席位与其他用户共享，本实例已用 N）"，而到顶时那条建议是**换成你自己的 key**（一次点击，§7.5），不是"让管理员升级团队档"。(c) 被否：一个按 profile 的付费能力不该由管理员替用户决定，而覆盖是免费的 —— 这也正是 `useClusterDefault(id)` 与 `setIntegration(id, …)` 是两个动作的原因。 |
+| **D32** | **CloakBrowser 的 key：集群给一把团队 key，还是每人自己配？**（§7.5、owner 2026-09-11 指令里"集群能给默认就给"的那一半 —— 而这一行是按**并发 session** 计费的。） | (a) 只允许用户自己的 key；(b) 集群注入一把默认 key，用户可以覆盖；(c) 集群 key 且不允许覆盖。 | **(b)，但集群注入的那一把是**免费档**，而且席位显示必须写明它是全机队共享的。** (b) 与 Drive presets（`src/mounts.js:2189`）和 frp relay（`src/plugins.js:569`）是同一个形状，也是 owner 指令要的那一半。但它有一个**只属于按并发计费的集成**的后果，必须渲染出来而不是写在文档里：一把共享 key 的席位是**所有沿用同一个默认的用户**一起消耗的，于是 A 的一个浏览器会让 B 的切换失败，而 keeper 数得到的只有**本实例**的占用（§12.35：没有任何供应商接口能回答"这把 key 现在被占了几个席位"）。所以那枚来源芯片写的是"集群默认（席位与其他用户共享，本实例已用 N）"，而到顶时那条建议是**换成你自己的 key**（一次点击，§7.5），不是"让管理员升级团队档"。**第八轮给本推荐加一条明写的前置条件，因为上一版的那句建议指着一个在本配置下结构上到不了的上限**：共享 key 的席位被别人占着时，本实例读到的是"已用 0 / 总数未知"，上限判定根本不会触发，于是"到顶时"这三个字在集群默认下**永远不会发生** —— 用户看到的是一次没有名字的启动失败。所以 (b) 的前置条件是 §7.4 的第三条具名拒绝 `backend_seat_taken`（keeper 把一次因授权/并发校验失败的启动分类出来，点名这把 key 是集群默认、席位全机队共享、以及那条一键出路），而**不是**把这件事委托给那个本地上限。它还欠 §12.40 那次测量。(c) 被否：一个按 profile 的付费能力不该由管理员替用户决定，而覆盖是免费的 —— 这也正是 `useClusterDefault(id)` 与 `setIntegration(id, …)` 是两个动作的原因。 |
 | **D33** | **切到一个没有配 key 的 backend 时怎么办？**（§7.4 / §7.5。） | (a) 大声拒绝并打开 Integrations 卡片；(b) 静默回落 `chromium`；(c) 回落 `chromium` 并发一条公告。 | **(a)。** 这与 §7.4 那条"那个二进制没装"是同一族的具名拒绝（`backend_unavailable` 旁边多一个 `backend_no_key`），而 Integrations 卡片就是那条**可执行的**出路 —— `app.openIntegration('cloak')`，一次点击，带 focus。(b) 被明确否掉：用户按下"用 CloakBrowser 打开"正是因为 `chromium` 已经打不开了，静默回落等于让他对着同一个失败再看一遍，并且不知道为什么 —— 这是本仓库"no silent failures"那条律的教科书形态。(c) 听起来温和但更糟：它花一个**计费 turn** 去说一句用户就在屏幕前的话（D11/D16 同一族的判据），而且它仍然把他留在打不开的那一页上。真正让 (a) 不刺人的不是拒绝本身，是**切换器在点开之前就说了**（未配置 = 一行禁用并写明理由的控件加一枚来源芯片，§7.1 的能力行纪律）—— 所以那条拒绝是最后一道网，不是第一道。 |
+| **D34** | **一个要 key 的 provider 会不会跑在本机之外的机器上？**（§7.5、§7.1 的 `keyScope` 格 —— D5 的 (b) 把 keeper 放到了配对设备上，而且**就在 P4**，与 key 这一半同一个阶段。） | (a) **拒绝** —— `keyScope: 'local-only'` 的 provider 在 `host != null` 时是一行带理由禁用的控件（`provider_needs_local_key`）；(b) 让那把 key 走 daemon 已有的**凭据材料**通道（sealed orders 的形状，`src/account-material.js`）。 | **(a)，而且现在就写进能力表。** 这不是保守，是**今天的文档只支持这一个答案**：§6.4 逐字写着"provider 授权 key 活在服务端的注册表里"，而 (b) 会让这句话在一个远端 profile 上直接变假；§9 第 (ii) 条腿（"spawn 出去的子进程环境里有那个 env 名、父进程里没有"）是一条**进程内**才做得出的断言，它今天没有远端臂。所以 (b) 要落地就欠三样东西，缺一不可：**这一行决定本身**、**§6.4 的一句话**说明那把 key 什么时候可以跨过 mux、以及 §9 那条腿的一条由**真 daemon** 驱动的远端臂。在三样齐备之前，一个含糊的默认会让明文 key 悄悄上路 —— 而 (a) 的代价在 P4 里是**零**：远程浏览器那条故事线（§7.3、D5）今天的答案本来就是"那台机器上一个自己登录过的 profile"，它跑的是 `chromium` 或 `cdp`，两行的 `keyScope` 都是 `none`。 |
 
 ---
 
@@ -2368,9 +2570,13 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
     （已验证的免费 key 无需确认即可启动，而本地并发的免费 session 会被串行化），license key 的三条
     通道是 `CLOAKBROWSER_LICENSE_KEY` / `licenseKey` 选项 / `~/.cloakbrowser/license.key`，格式是
     `cb_…`。我**没有**找到任何一个能回答"这把 key 现在被占了几个席位"的接口。所以 §7.4 的席位显示
-    是**我们自己数的**（keeper 数本实例），而 Test 的判决只能给出**档位**与一次成功的启动 ——
-    这正是 D32 那条"共享 key 的席位是全机队的、必须写在芯片上"为什么不能靠一次查询解决。`cloud:*`
-    各家可能不同，同样未核实。
+    是**我们自己数的**（keeper 数本实例）。**第八轮更正了这一条的后半句**：上一版写着"Test 的判决
+    只能给出档位与一次成功的启动"，而那次 Test 本身在第八轮被取消了 —— §7.5 把 `cloak` 的
+    `test.kind` 定成 `shape-only`（零网络），因为一次真的启动式探测要先有那 200 MB 二进制和
+    §7.2.1 的出网证据记录，而这两件事不该由"打开卡片贴一把 key"触发。所以**档位来自第一次真正的
+    启动**（keeper 起 `cloakserve` 时它自报计划），在那之前是**未知**，而 §7.4 的席位显示因此是
+    三态。这正是 D32 那条"共享 key 的席位是全机队的、必须写在芯片上"为什么不能靠一次查询解决。
+    `cloud:*` 各家可能不同，同样未核实。
 36. **一个被点名的站点到底在哪一层挂掉。** 本轮没有对任何一个真实站点做过一次尝试 —— 没有 tier 1、
     没有 tier 2、更没有 tier 3。§7.6 的整张表是关于**机制**的，不是关于任何一个站点的读数，而
     owner 那个"给我 2–3 个具体挂掉的站点"的要求是这整条阶梯唯一能被证据推动的输入。**这次测量不
@@ -2391,6 +2597,23 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
     而本文档对"一次 `do_action` 到界面变化"的延迟**一个数字都没有**，对**用户自己那台机器**的桌面
     栈更是零实测（§4.9 每一个数字都来自这一台）。所以 P10 的第一件事是量它，不是写它，而 P10 的
     区间（4–12，本文档最宽的一条）就是这个无知的价格。
+40. **一把免费档 CloakBrowser key 的那个席位被**另一台机器**占着时，`cloakserve` 到底返回什么。**
+    公开材料只说"本地并发的免费 session 会被串行化"（§12.35）—— 那是**同机**的说法，而 D32 推荐的
+    配置（集群注入一把免费档 key）里，抢席位的那一方在**另一个 pod** 上。§7.4 的第三条具名拒绝
+    `backend_seat_taken` 的**判据**就是那个回答：是一次启动失败、还是一次静默的串行化等待、错误
+    里带不带可以匹配的字样。这次测量**需要两台机器和一把免费档 key，不需要写代码**，所以它排在
+    P4 的第一批动作里；在它做完之前，那个分类器的判据只能是"启动失败且错误里带着授权/并发字样"，
+    而这句话本身要写进代码注释里等着被收窄，§9 的那条腿钉的也只是分类器的**形状**。
+41. **五个 `cloud:*` 行各自那一个 vendor 主机的确切名字。** §7.5 的出网声明是一条**规则**（"一个
+    runner 只能到达由它自己那一行的字段推导出来的那一个主机"），而那条规则本身是可以现在就写下来
+    并且可以被门禁执法的；但其中三行需要一个**常量**（browserbase / browseruse / agentcore 按
+    区域），而本轮**没有**去核实它们的确切主机名 —— 那要么读已装二进制里那几个 provider 的实现、
+    要么读各家的文档，而本文档对第三方 endpoint 的纪律是"要么实测要么写进这一节"。两行
+    （`browserless` / `kernel`）**不需要**常量，因为它们的主机就是用户自己填的 `apiUrl` / `endpoint`
+    —— 这也是为什么那条声明写成推导规则而不是一张常量白名单：**一张常量表对这两行根本表达不出正确
+    的答案**。实现时的第一步是把那三个常量读出来填进注册表行，而 §9 的第 (vi) 条腿断言的是**集合
+    相等**，所以它对"常量填错"是敏感的、对"常量还没填"是明确失败的（一行推导不出主机 = 一次具名
+    拒绝，不是一次"用默认主机试试"）。
 
 ---
 
@@ -2741,3 +2964,88 @@ diff 的感觉。本轮没有被判错的条目。
 （D23 与 D28 的**答案**都没变 —— 变的是它们各自被收窄到实测支持的范围），没有动任何一个阶段的轮数
 （发现 2、4、6 都在既有的 P1/P9 内容行里落地），也没有软化"我没能核实的东西"里的任何一条 —— 那份
 清单从 31 条长到了 33 条。
+
+---
+
+## 附录 E —— 批评日志（第八轮）
+
+一位对抗式批评者读了第七轮的修订，提了八条。**八条全部成立**，每一条都是先对着来源核实、再动文档
+—— "核实过"是一句关于跑了什么的断言，不是对着 diff 的感觉。没有一条被判为错，所以本轮没有"被驳回"
+的条目。**三条 high 全部落在第七轮自己新写的那一节（§7.5）上**，这件事本身就是一条读法：一节刚写完
+的、把自己定位成"某个共享层的消费方"的文字，最容易漏掉的恰恰是**那个层要求消费方交出来的东西**。
+
+| # | 严重度 | Finding | 判定 | 落在哪 |
+|---|---|---|---|---|
+| 1 | high | §7.5 那六行声明了 `test` 却**没有 `kind`**（共享层那是封闭集）、**没有 runner 注册点**，还带进来五个从没被声明过的第三方主机 | **成立** | §7.5 增 Test 合约表 + runner 注册点 + 出网声明；`cloak` 退成 `shape-only`；§9 `test-browser-providers` 增第 (v)(vi)(vii) 条腿；§12.41 |
+| 2 | high | 席位**总数**只有一个来源（人点一次 Test），而 D32 推荐的配置保证那次点击**永不发生**；既没有"未知"状态也没有陈旧规则 | **成立** | §7.4 的席位改三态 + `SEAT_TIER_STALE_MS`；档位改由第一次真正的启动读回；D17、D32、§12.35 同改；§9 `test-browser-backend` 增三态与陈旧腿 |
+| 3 | high | 失败形态是**三个**不是两个：机队共享 key 的席位被别人占着时上限拒绝**结构上到不了**，用户看到的是一次没有名字的启动失败 | **成立** | §7.4 增 `backend_seat_taken` + 到顶措辞按 key 来源分岔；D32 把它写成推荐值的前置条件；§12.40；§9 增一条腿 |
+| 4 | medium | §7.5 的 key 规则整条写在"keeper 在本机"的前提上，而 D5 的 (b) 把 keeper 放到配对设备上、**就在同一个 P4** | **成立** | §7.1 增 `keyScope` 格；§7.5 增一条 bullet（`provider_needs_local_key`）；新增 **D34**；§9 增第 (viii) 条腿 |
+| 5 | medium | §7.6 往 `siteHints` 加了 `tier`，而 §3.3 与 §9 的门禁都写着"不许有第二个 tier 字段" —— 门禁与被测设计自相矛盾，两份 schema 块也没改 | **成立** | §3.3 的规则与两份 schema 块同改；§7.6 规矩 2 收窄成"`tier` 只在 `backend === null` 时合法"；`test-browser-tier3` 与 `test-browser-backend` 改成断言这一句 |
+| 6 | medium | `consumers` 六行里有五行写的是**它自己那一行**，共享层那条"名字必须是活的文件且真的调用 `resolveIntegration`"的普查因此落空 | **成立** | §7.5 的表换成两个真实模块路径 + 一段说明为什么六行全同、以及为什么"§7.1 的那一行"在散文里对、在 `consumers` 里假 |
+| 7 | medium | `local-window` 被当作一个可以被"切换"过去的 provider，而它没有 `dir`、没有 seed、没有 CDP —— 版本阶梯、seed 携带、P5 清扫对它要么无意义要么危险 | **成立** | §7.1 增能力格表（`canSwitchTo` / `ownsDir` / `leaseKind`）；§7.6 增规矩 3；`test-browser-housekeeping` 增清扫范围断言 |
+| 8 | low | "三条通道里唯一一条不落盘的"按它自己的说法就是错的（不落盘的有两条），而按 §6.5 自己的威胁模型 env 是弱的那条 | **成立** | §7.5 换成真正的理由（`cloakserve` 是独立进程 ⇒ 进程内那个选项够不着；文件会把 key 留在 secret-box 与导出口令门之外），并明写接受 §6.5 那条边界 |
+
+**核实记录。**
+
+* **发现 1。** 对两份文档各跑一次
+  `grep -c 'registerIntegrationTest\|credential-exchange\|shape-only\|reachability'`，两边都是
+  **0**；`grep -cE 'browserbase\.com|browserless\.|api\.kernel|browser-use\.com|bedrock'` 同样是
+  **0**。而共享层（`design-communication-panel-r2` 的 `696c38f8`，§14.2/§14.3）逐字写着
+  `test.kind` 是一个封闭集并**按它推导按钮上的字**、"一行声明了 `test` 却没有注册 runner = 一个
+  死控件 ⇒ 普查变红"、以及"store 自己不构造任何 vendor 请求……这一层也不会变成第二个持有 N 个
+  vendor 主机的文件"——而后面那句的**理由**就是消费方**已经**声明过自己的主机。两件事本 track 一件
+  都没做。另外 §9 的 `test-vendor-whitelist` 那一行逐字写着它是一次**只针对 Anthropic** 的源码
+  普查，所以它接不住这五个主机。`cloak` 那一行的 Test 还另有两个没被说出口的前置条件（那 200 MB
+  二进制、§7.2.1 的出网证据），而它被画在一张用户只是打开来贴一把 key 的卡片上。
+* **发现 2。** §7.4 逐字："*总数*（档位）来自 §7.5 那个注册表行的 **Test 判决**"；全文
+  `grep -n 'testedAt'` 两处，都在那一句附近，没有第二个来源，也没有"从没测过"这个状态。而 D32 的
+  推荐值是 (b)（集群注入默认 key）—— 那恰恰是**用户完全没有理由去打开那张卡片**的情形。共享层
+  §14.3 自己还写着"一个 `testedAt` 不会永远绿着……一个判决绝不比它描述的那次读数活得更久"，而这
+  一节引用了那个层却没有引用那条规矩。
+* **发现 3。** §7.4 自己写着"*已用*是 **keeper 自己数的**"与"keeper 数得到的只有**本实例**的占用，
+  而席位是整个机队共享的"；D32 的推荐是集群注入**免费档**（一个并发 session）。三句话放在一起就
+  得出："另一个 pod 占着那一个席位 ⇒ 本实例读到 0/1 ⇒ 上限判定不触发 ⇒ spawn 发出去 ⇒ 用户看到
+  `cloakserve` 自己的报错"，而 §7.4 上面三段刚写过"把这件事藏起来，用户会对着一个看起来随机失败的
+  浏览器排查半天"。D32 那句"到顶时的建议是换成你自己的 key"因此指着一个在它自己推荐的配置下
+  **结构上到不了**的上限；而既有的到顶措辞（"点名此刻占着席位的那几个 profile"）在机队情形下
+  **根本组不出来**，因为那些 profile 不在这台实例上。
+* **发现 4。** §3.3 的记录里 `"host": null, // null = this machine; else a hostId`；D5 的答案是
+  "**(b)，在 P4**"；§10 的 P4 那一格把 `browser-serve` 设备 op 与"§7.5 的 key 消费方那一半"写在
+  **同一个单元格**里；而 §7.1 与 §7.5 都没有一句话限制 `cloak` / `cloud:*` 只能 `host: null`。
+  §7.5 的规则全文是本机口吻（"供应商自己的 env 名只在 keeper 为那个 provider spawn 的那一个子进程
+  的环境里出现"），§9 第 (ii) 条腿断言的是"子进程有、**它的父进程**没有"——一条只有在**同一个
+  进程里**才做得出的断言。于是 §6.4 那句"provider 授权 key 活在服务端的注册表里"对一个远端 cloak
+  profile 是假的。本轮选 (a)（拒绝）并把它写成能力格，因为 (b) 欠的三样东西今天一样都没有。
+* **发现 5。** §3.3 第三条逐字："**层（tier）同样不是一个新字段**：它由 `provider` 推导……多存一份
+  就是给自己造一个会漂移的孪生"，而 `siteHints` 是**同一个文件**的顶层键（schema 块在 `.md:676` /
+  `.zh.md:577`）；§9 的 `test-browser-tier3` 逐字"（**没有**第二个 `tier` 字段，§3.3）"。两份 schema
+  块也都还印着不带 `tier` 的旧形状 —— 所以读者看到的记录不是 §7.6 描述的那个记录。修法不是删掉
+  §7.6 的字段：一条**建议**能说的恰恰只有"换一层"，那时还没有 provider 被选中，`backend` 是 `null`，
+  而 `tier` 是这条主张唯一携带的内容。所以规则收窄成"`tier` 只在 `backend === null` 时合法"，门禁
+  改成断言**这一句** —— 一个与被测设计自相矛盾的门禁，红的是门禁自己。
+* **发现 6。** 那六个单元格逐字是"§7.1 的 `cloak` 行"/"`cloud:browserbase` 行"……两种语言完全一致；
+  只有 `cloak` 那一行还额外点了 keeper。共享层 §14.2 的要求是"每个名字既是一个存在的文件，又真的
+  调用 `resolveIntegration('<id>')`"，而它自己的例子就是文件路径
+  （`consumers: ['src/channels/lark.js', 'src/channels/live/lark.js']`）。一个指向自己的名字既满足
+  不了"存在"，也正好取消掉这个字段存在的理由。本 track 里真正调用 `resolveIntegration` 的只有两个
+  模块，而 §3.6 的路由表里它们都已经有名字了（`src/server/browser-backend.js`、
+  `src/server/browser-keeper.js`）。
+* **发现 7。** §3.3 的 `provider` 现在合法值里有 `local-window`；§7.4 写着"backend 是 profile 的
+  一个属性……切换就是改那个字段"，而它的机器是"版本阶梯、带着走的 seed、按租约重开标签页"——对一个
+  §7.1 自己写着"什么都不启动"、"**没有** CDP"的 provider，这三样全都没有对象。§7.6 规矩 2 又说升到
+  tier 3 是"一次带公告的用户动作"，也就是切换器会提供它。而一个 tier-3 目标的状态在用户自己的
+  浏览器 profile 里，不在记录的 `dir` 里，于是 `fingerprintSeed`、`lastChromiumMajor` 与 §10 的 P5
+  清扫（它们都作用在 `dir` 上）要么无意义、要么危险。§7.6 规矩 3 因此明写"升级不会重指一个已有
+  profile"，而能力格把三个"否"写成 UI 读得到的字段。
+* **发现 8。** 那个单元格逐字："我们**只**用 env，三条通道里唯一一条不落盘的"。进程内的 `licenseKey`
+  选项同样不落盘，所以这个计数是错的；而本文档 §6.5 自己写着同一 uid 下的进程读得到
+  `/proc/<pid>/environ`，§7.5 四条 bullet 之后又把同一句话重复了一遍 —— 于是这个理由既数错了数，
+  又按本文档自己的威胁模型选了两条不落盘通道里弱的那条。真实的理由站得住并且更短：`cloakserve` 是
+  一个**独立进程**（§7.2 的 Docker/loopback 形状），进程内那个选项在这里根本够不着。
+
+**第八轮刻意没做的事。** 它没有启动浏览器（§12.1 的理由仍然成立），没有改动任何一条决定的**推荐
+值**（D17 与 D32 的答案都没变 —— 变的是 D17 里那个数字的来源被修正、D32 多了一条明写的前置条件），
+没有动任何一个阶段的轮数（P4 仍然是 10，**理由写在那一格里而不是留白**：本轮加的全是已经被算进那
+一格的那几件事**内部**的子句，唯一真正新增的实现是一个 runner 内部的 helper），也没有软化"我没能
+核实的东西"里的任何一条 —— 那份清单从 39 条长到了 41 条，而且其中一条（§12.40）被明写成 P4 第一批
+动作里的一次**零代码**测量，因为一条具名拒绝的判据不该是我的猜测。
