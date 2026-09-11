@@ -68,6 +68,35 @@ model, and its own phase P9 (§4.9, §5.1.1, §6.6, D27–D30). §2 grows two in
 interface list, 80 of 128 inotify instances already held), and each one is written beside the
 sentence it supports.
 
+**Round 7 (2026-09-11)** answers one owner directive and one queued question, and as before folds
+both **into** the architecture, phases and decisions rather than appending them: **a configuration
+surface for integration keys** — the owner, verbatim: "对于指纹浏览器和 communication panel 这种
+可能需要配置自己的 key 的情况，要考虑怎么提供配置界面，让我们集群里的用户可以自行配置（当然 lark
+这种集群里能提供默认 oauth client 的就提供默认）". This track is a **consumer** of the shared
+**Integrations & keys** layer (the layer itself is defined in the communication-panel document):
+`cloak`'s key and every `cloud:<name>`'s key become rows in `src/integration-registry.js`, stored
+encrypted by `src/server/integration-store.js`, resolved as **the user's own > the cluster default >
+none**, with a source chip on the switcher and, when a key is missing, a named refusal plus an
+actionable `app.openIntegration(id)` way out (§7.5, I8, D32–D33). One finding came out of verifying
+it and is **true today**: `agentEnv()` is a **DROP list plus one prefix rule**, so a cluster key
+injected under **the vendor's own** env name would be in every agent's environment
+(`src/ws-handler.js:112-121`) — which is why the cluster may inject only under
+`VIBESPACE_INTEGRATION_*`. **Q10, the detection ladder** — the owner's 2026-09-10 question ("is
+agent-browser CDP; would a bank like Mercury detect it; do we also need a pure computer-use
+version?"): agent-browser is CDP end to end (measured in the binary), today's only stealth is one
+launch flag the user wrote in their own config, upstream issue #120 is still open admitting that is
+not enough, the classic `Runtime.enable` leak is largely dead so any patch aimed at one leak is a
+depreciating asset, and **banks run on device fingerprint + behaviour + new-device step-up**, so a
+fingerprint browser may be **worse** than plain Chromium on that class of site. The landing is three
+sibling provider rows in §7.1 (tier 1 CDP / tier 2 fingerprint CDP / tier 3 **pure computer-use on
+the user's own real browser, with no CDP and no automation flags**), a `tier` field on `siteHints`
+that is **never auto-escalated**, and tier 3's own phase P10 (§7.6, D31). §2 gains invariant I8, §3.3
+and §3.6 gain a rule and a row, §9 gains a suite and four key legs, §10's P4 goes from 9 to 10 rounds
+with an explicit **cross-track dependency**, P10 is new and the totals are re-derived, §11 gains
+D31–D33, and §12 grows from 33 items to 39. **Every claim about the installed build in this round is
+a read-only measurement taken that day against `bin/agent-browser-linux-x64` and its README**, and
+every claim about this repository carries a file:line.
+
 **Round 6 (2026-09-10)** answers an adversarial critique of round 5: six findings, **all upheld**,
 with the verification evidence in **Appendix D**. Two highs each name a claim that would have been
 **false on the day it shipped**: the whole anti-default-blindness mechanism lives in
@@ -316,6 +345,7 @@ theirs and tiny. The server's steady-state work is a WebSocket bridge and a JSON
 | I5 | (implied) Widening site access | **Fingerprint evasion is a provider choice per profile, never a global default, and never the first answer** — for any site with an account, a human login through the live view beats it. |
 | I6 | (implied, Q7/Q8) One session may hold several profiles at once | **A command THROUGH OUR CLI acts on the profile it NAMES, and when more than one is reachable it must name one.** Ambiguity is refused by name with the handles listed, never resolved by a default; and every answer states the profile it just acted on — so "it used the wrong profile" is visible on the next command instead of after the work is done. "Through our CLI" is load-bearing rather than a hedge: this design's own default path **is** a direct `agent-browser` call (the whole of §3.2 is four environment variables), which reaches none of our code. §3.7 writes that residual down together with the half of it that can be closed structurally — an invariant that cannot hold on the default path is false the day it ships unless its wording is narrowed. |
 | I7 | (implied, Q9) A window target IS the user's desktop | **A native window is leased like a tab and observed like a DOM.** Input is injected only while the lease holder is the agent and the user has not taken over; where an accessibility tree can be read, coordinates are never guessed from pixels; and a window we did **not** start is a stricter road (D27). |
+| I8 | (implied, owner 2026-09-11) Users across the fleet must be able to configure their own keys | **A provider key is owned by the user, defaulted by the cluster, and never comes one step closer to an agent.** Precedence is always "the user's own > the cluster default > none"; a consumer **never reads `process.env` itself**, it asks `resolveIntegration(id)`; the cluster may inject only under `VIBESPACE_INTEGRATION_*`, because that is the prefix `agentEnv()` structurally drops (`src/ws-handler.js:117`), while the vendor's own env name appears only in the **one** provider child that is spawned; and "no key" is a **named refusal plus an actionable way out** (open that card), never a silent fallback. |
 
 ---
 
@@ -627,7 +657,9 @@ open client updates live — the multi-client law.
     "id": "bp-<8 hex>",                     // minted here; never user-supplied
     "label": "Vendor portal",               // human name, shown in UI, never a path component
     "dir": "~/.agent-browser/vs-bp-<id>",   // the user-data-dir; adopted dirs keep their path
-    "provider": "chromium",                 // chromium | cloak | cdp | cloud:<name>
+    "provider": "chromium",                 // chromium | cloak | cdp | cloud:<name> | local-window
+                                            //   THE BACKEND AND THE TIER (§7.4, §7.6). Never a key:
+                                            //   the key lives in the integration store (§7.5).
     "fingerprintSeed": 118293,              // provider-specific; null for plain chromium
     "proxy": null,                          // proxy URL; the SECRET half never leaves the server
     "host": null,                           // null = this machine; else a hostId (ssh host / device)
@@ -659,7 +691,15 @@ Three rules about this file:
   `backend` key: one question, one answer — the rule this document applies to `browserKey` and to
   the reading slot applies here too. `lastChromiumMajor` is a *different* question ("what has
   written these bytes") and is the one fact §7.4's version ladder may not take from the directory
-  alone.
+  alone. **The tier is likewise not a new field**: it is derived from `provider` (§7.6's table),
+  because a provider sits on exactly one tier, and storing it twice is building yourself a twin that
+  will drift.
+* **A profile references a provider's `id`, never its key.** There is no `apiKey` / `licenseKey` /
+  `token` field in this file and there will not be one: keys live in `data/integrations.json`,
+  encrypted through secret-box, resolved by `resolveIntegration(provider)` **at the instant the
+  keeper spawns** (§7.5). Both consequences are deliberate: **rotating one cluster env rotates every
+  profile** (the Drive-presets rule, `src/mounts.js:2211`), and `data/browser-profiles.json` stays a
+  file you can paste whole into an issue.
 * **`id` is minted, `label` is free text.** The label never reaches a path, an argv, or a
   spawned command — the display-strings-never-reach-a-spawn law (a host-labelled cwd once did,
   which is why the law exists).
@@ -756,6 +796,7 @@ we should inherit rather than re-earn:
 | Live view window, profiles panel | `src/lib/browser-live-window.js` (+ `registerWindowType`) | **CLIENT** | headless-chrome leg |
 | Agent CLI + manual | `data/bin/vibespace-browser`, `docs/agent/browser-manual.md`, `AGENT_TOOLS` | agent surface | `test-browser-cli` |
 | The pin ladder (§3.2.5) + the backend-switch decision and its version ladder (§7.4) | `src/browser-profiles.js` (PURE half) + `src/server/browser-backend.js` (ORCH: stop / restart / re-open the leases) | **PURE + ORCH** | `test-browser-pin` (fast) + `test-browser-backend` (fast decision, heavy switch) |
+| Provider keys (§7.5) — **this track is only the CONSUMER**: the registry rows, one `resolveIntegration(provider)` before the keeper spawns, the switcher reading `publicView(id)`, and the `app.openIntegration(id)` deep link | the layer itself is `src/integration-registry.js` (PURE), `src/server/integration-store.js` (ORCH) and `src/secret-box.js` (SHARED), **owned by the communication-panel track**; this track adds only its own rows and two call sites | **PURE + ORCH + CLIENT** (the layer) · this track = the call sites | the layer: `test-integration-registry` (that track's) · this track: the key legs of `test-browser-providers` (§9) |
 | Split tab groups (§4.6): `layout`/`split` on the chain, the divider, the born-into-a-chain path | `src/lib/tab-group.js`, `src/lib/layout.js` (persist + sync key) | **CLIENT** | `test-window-binding` (headless chrome) |
 | The attachment set, handle resolution, the ambiguity refusal, the audit line (§3.7) + the anti-default-blindness decision (§3.8) | `src/browser-profiles.js` (PURE: `resolveHandle` / `attachmentsFor` / `handleRefusal` / `profileChangeNotice`) | **PURE** | `test-browser-handles` (fast) + `test-profile-blindness` (fast + heavy) |
 | Native-window forwarding (§4.7) + the chat adapters (§4.8) + a window target's facts and actions (§4.9) | `src/xpra-serve.js` (SHARED facts) + `src/window-targets.js` (SHARED: enumeration / a11y snapshot / the input-backend ladder; **the AT-SPI walk runs in a bounded child/worker with a per-call timeout and a node budget — one D-Bus round trip per node, and an application that stops answering blocks until libdbus's 25 s default, so it never runs on the server's or the daemon's event loop, §4.9**) + `src/server/xpra-bridge.js` + `src/adapters-chat/<name>.js` + `data/bin/vibespace-window` | **SHARED + ORCH + agent surface** | `test-native-window` (heavy) + `test-window-target` (heavy) |
@@ -1924,20 +1965,24 @@ what is **only** true of window targets:
 
 ### 7.1 The abstraction
 
-A provider answers four questions: **how do I start a browser for this profile**, **what CDP URL
-do I hand out**, **what does it cost**, **what can it not do**. Upstream's `-p <provider>` and its
+A provider answers **six** questions: **how do I start a browser for this profile**, **what CDP URL
+do I hand out**, **what does it cost**, **what can it not do**, **where does its key come from**
+(§7.5), and **which tier of the access ladder is it** (§7.6). Upstream's `-p <provider>` and its
 provider plugins are the template; our registry adds the profile identity.
 
-| Provider | Start | CDP | Fingerprint | Cost | Notes |
-|---|---|---|---|---|---|
-| `chromium` (default) | local `agent-browser` with `--profile <dir>` | keeper reads `get cdp-url` | none beyond `--disable-blink-features=AutomationControlled` | free | today's behaviour, now owned |
-| `cloak` | CloakBrowser binary as `--executable-path`, or its `cloakserve` CDP endpoint | `ws://127.0.0.1:9222` (loopback, §6.1) | 73 claimed source-level C++ patches, per-connection seed | free tier 1 session / $19 5 / $49 20 / $199 200 / $499 2000 (list prices observed 2026-09) | §7.2 |
-| `cdp` (remote) | nothing — the browser is somebody else's | a `hostId` + a remote loopback port, tunnelled | whatever that browser is | free | §7.3 |
-| `cloud:<name>` | upstream's browserbase / browserless / kernel / browseruse / agentcore | the provider's | the provider's | per vendor | API keys are server-side secrets; never in `agentEnv` |
+| Provider | Tier (§7.6) | Start | CDP | Fingerprint | Cost and key (§7.5) | Notes |
+|---|---|---|---|---|---|---|
+| `chromium` (default) | 1 | local `agent-browser` with `--profile <dir>` | keeper reads `get cdp-url` | none beyond `--disable-blink-features=AutomationControlled` | free; needs no key | today's behaviour, now owned |
+| `cloak` | 2 | CloakBrowser binary as `--executable-path`, or its `cloakserve` CDP endpoint | `ws://127.0.0.1:9222` (loopback, §6.1) | 73 claimed source-level C++ patches, per-connection seed | free tier 1 session / $19 5 / $49 20 / $199 200 / $499 2000 (list prices observed 2026-09); key = registry row `cloak` | §7.2 |
+| `cdp` (remote) | 1 | nothing — the browser is somebody else's | a `hostId` + a remote loopback port, tunnelled | whatever that browser is | free; needs no key | §7.3 |
+| `cloud:<name>` | 2 | upstream's browserbase / browserless / kernel / browseruse / agentcore | the provider's | the provider's | per vendor; key = registry row `cloud:<name>`, **a server-side secret, never in `agentEnv`** | §7.5 names every row's fields |
+| `local-window` (new, §7.6) | **3** | starts nothing — it is a real browser window already open on the user's **own** desktop | **none** — observation through the AT-SPI accessibility tree + pixels (§4.9), action through §4.9's injection ladder | whatever the user's machine is | free; needs no key, but needs a live desktop session | §7.6, D31; requires D27's option (b) and §10's P10 |
 
 A provider is a **row, not an `if` chain** — the backend-caps discipline. A capability a provider
-lacks ("cannot be headed", "cannot take `--allowed-domains`") is a field the UI reads, so a
-control that cannot work is disabled with a reason rather than failing at use time.
+lacks ("cannot be headed", "cannot take `--allowed-domains`", "has no CDP", "has no key") is a
+field the UI reads, so a control that cannot work is disabled with a reason rather than failing at
+use time — and the `local-window` row turns "has no CDP" from an awkwardness into a **value** in
+this table, which is exactly why it is a row and not a special case.
 
 ### 7.2 CloakBrowser — what is verified, and the due diligence still owed
 
@@ -2123,6 +2168,13 @@ vague "you may need to log in again".
   profiles panel. It shows the current backend plus its major (`chromium 14x` / `cloak 146 (free)`)
   and opens the switcher. A chip rather than a buried menu, because "which browser am I on" is the
   one thing a user wants to know at the moment they are blocked.
+* **Every row in the switcher carries a SOURCE chip (§7.5).** A backend that needs a key is labelled
+  `cluster default` / `your own key` / `not configured`, taken from `publicView(id)` (the **masked**
+  view — the switcher never reads plaintext). The `not configured` row is **disabled with its reason
+  written on it** — §7.1's capability-row discipline — and its action is
+  `app.openIntegration('cloak')`: one click that lands on that card in ⚙ → Integrations, focused. So
+  "no key" is already said **before** the user clicks, which is what makes D33's named refusal the
+  last net rather than the first.
 * **A one-click "Open with CloakBrowser" on the blocked-page state.** Where that state comes from is
   the agent paragraph below — the point is that this button appears **only when somebody claims to
   be blocked**, and it says **who** claimed it.
@@ -2132,8 +2184,10 @@ vague "you may need to log in again".
   a registrable domain needs a public-suffix list, which is a second source of truth that expires,
   and the cost of exact hosts is only that two subdomains of one site are recorded twice. This
   memory stores a **claim**, so it stores **who claimed it, when, and why**
-  (`{host, backend, by: 'agent'|'user', at, why}`), and each row can be deleted from the profiles
-  panel.
+  (`{host, tier, backend, by: 'agent'|'user', at, why}` — `tier` is the cell §7.6 adds, and
+  `backend` stays because "which provider within tier 2" is a different question), and each row can
+  be deleted from the profiles panel. **Never auto-escalate**: a failure produces only a suggestion
+  (§7.6's rule 2).
 
 **The agent tool:**
 
@@ -2167,14 +2221,258 @@ is the same shape as §3.5's browser ceiling — **refuse loudly, name the profi
 seats, and offer to stop one**. That count is the keeper's job (it is the first thing in this design
 that can count) and it is **per provider**, not global. The free tier's single concurrent session
 means a second cloak profile must either wait or be paid for — hide that, and the user spends an
-afternoon debugging a browser that appears to fail at random.
+afternoon debugging a browser that appears to fail at random. **Those two numbers come from two
+different places, and that has to be written down**: the *total* (the tier) comes from the **Test
+verdict** of §7.5's registry row (`testedAt` + `{tier}` — one human click, bounded, zero timers;
+§ban-safety is about quota polling, and a human-clicked Test is not that), while the *used* count is
+**the keeper's own**, because I found no vendor interface that answers "how many seats is this key
+holding right now" (§12.35). The consequence is honest and must be rendered: if this key is the
+**cluster default** (D32), the keeper can only count **this instance**, while the seats are shared
+across the whole fleet — so that row reads "cluster default (seats shared with other users; N used
+on this instance)", never a fraction pretending to be global.
 
-**Failure mode: the binary is not installed.** As everywhere else: a **named** refusal
-(`backend_unavailable`, carrying the provider name and what is missing), a row in the profiles panel
+**Two failure modes, two named refusals.** **(1) The binary is not installed**:
+`backend_unavailable` (carrying the provider name and what is missing). **(2) The key is not
+configured**: `backend_no_key` (carrying the provider name, the registry row id, and the
+**actionable** way out — open that card in Integrations, D33). Neither is a timeout and neither is a
+silent fallback; the reasoning is in D33. As everywhere else: a **named** refusal, a row in the
+profiles panel
 and the switch dialog that is **disabled with its reason written on it**, and an install action in
 Manage Agents (`cloakbrowser` is an npm package, installing it is a user act, and it goes through
 §7.2.1's egress precondition — **measure first, then install**, not the other way round). **Never**
 download the 200 MB binary without the user having asked for it.
+
+### 7.5 Where a provider's key comes from
+
+(Owner directive, 2026-09-11, verbatim: "对于指纹浏览器和 communication panel 这种可能需要配置
+自己的 key 的情况，要考虑怎么提供配置界面，让我们集群里的用户可以自行配置（当然 lark 这种集群里
+能提供默认 oauth client 的就提供默认）" — *for integrations like the fingerprint browser and the
+communication panel that may need the user's own key, work out how to provide a configuration
+surface so users across our fleet can configure it themselves; where the cluster can supply a
+default OAuth client, as with Lark, supply one.*)
+
+Several rows of §7.1's table need **a key the user owns**: `cloak`'s CloakBrowser license key, and
+every `cloud:<name>`'s vendor API key. This section says where those keys live, how the cluster
+supplies a default, how a user overrides it, and why the key never comes one step closer to an
+agent.
+
+**This is not a mechanism this design owns — this section is a CONSUMER of it.** The shared
+**Integrations & keys** layer is defined in **the keys section of
+`docs/design-communication-panel.zh.md`** (the version I read is commit `14785475` on branch
+`design-communication-panel-r2`, where the existing section is `## 13. 密钥、过期、失败`; that round
+expands it into this shared layer). **The authoritative anchor across the two documents is the
+module names, not the section number** (§12.34) — this section uses those names verbatim:
+
+| Name | What it is | How this track uses it |
+|---|---|---|
+| `src/integration-registry.js` | The **PURE** table, importing nothing: one ROW per integration, `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, test:{kind,describe}, consumers:[…], docs}` | This track contributes the rows in the next table; `consumers` names §7.1's provider rows and §7.4's switcher |
+| `src/server/integration-store.js` | **ORCH**: `data/integrations.json` written with `writeJsonAtomic`, secret fields encrypted through secret-box; `resolveIntegration(id)` → `{source:'user'\|'cluster'\|'none', values, label, fromEnv, testedAt, lastError}`; `publicView(id)` masks every secret field to `••••` + last 4; `setIntegration(id, patch)` (a field omitted = unchanged, `''` = cleared), `useClusterDefault(id)`, `test(id)`; every write broadcasts `integrations-updated` carrying the **masked** view | the keeper asks `resolveIntegration` **before** it spawns a provider, and never reads env itself |
+| Routes | `GET /api/integrations` (masked list) · `PUT /api/integrations/:id` · `POST /api/integrations/:id/test` · `DELETE /api/integrations/:id` (back to cluster default / none) | §7.4's switcher reads the masked list for the source and the Test verdict; **never the plaintext** |
+| ⚙ → **Integrations** (集成与密钥) | Window type `integrations` (`registerWindowType`, openSpec `{openIntegrations, focus:<id>}`), rendered like the Plugins cards — one card per registry row with a **SOURCE chip** (cluster default / your own / not configured), a "Use cluster default" vs "Use my own key" choice, the declared fields (secrets get **Replace**, never Reveal), a Test button with its last verdict (vendor error text escaped), and a "Where is this used" line; **≤768px renders the same cards single-column** | every consumer deep-links to its own card: `app.openIntegration(id)` |
+| Precedence | **the user's own > the cluster default > none**, no exceptions | §7.4's switcher, the keeper, and any future provider row all ask the same answer |
+
+This shape already runs twice in this repo; this section did not invent it.
+`MountManager.drivePresets()` / `_driveClient()` (`src/mounts.js:2189` / `:2211`) read cluster
+presets from `VIBESPACE_GDRIVE_CLIENTS`, **a record stores only the preset KEY** so rotating the env
+rotates every consumer, and the precedence is verbatim "explicit custom client wins; else its chosen
+preset; else the single/first preset; else the tool's built-in", with the UI offering "Custom (own
+client id/secret)" and a `type:'password'` secret field (`src/lib/sidebar-mounts.js:1750-1771`).
+`PluginManager._frpCfg()` (`src/plugins.js:569-580`) lets a **user override** in
+`data/plugins.json` win over the cluster's env defaults, tells the UI the value came from the
+cluster through `fromEnv` (`:686`), exposes only `hasToken` and **never the token** (`:694`), and
+default-enables the plugin when the cluster injected the env (`_frpEffectiveEnabled`, `:584-589`).
+
+**The registry rows this track contributes.** The field names are not invented — they are the
+installed 0.32.0 binary's own env names (measured with `strings bin/agent-browser-linux-x64`, plus
+its README's provider tables):
+
+| `id` | Fields (`secret` marked †) | The vendor's own env name (appears **only** in that child) | Cluster may inject | What Test does (one human click, bounded) | Consumers |
+|---|---|---|---|---|---|
+| `cloak` | `licenseKey` † (empty = free tier) | `CLOAKBROWSER_LICENSE_KEY` (`cb_…`; the vendor also accepts a `licenseKey` option and `~/.cloakbrowser/license.key` — we use **only** the env, the one channel of the three that does not hit disk) | `VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY` | start one throwaway `cloakserve` with that key and read back the tier it reports, recording `{tier, at}`; it **cannot** read back "seats in use" (§12.35) | §7.1's `cloak` row, §7.4's switcher, the keeper |
+| `cloud:browserbase` | `apiKey` † | `BROWSERBASE_API_KEY` | `VIBESPACE_INTEGRATION_CLOUD_BROWSERBASE_APIKEY` | one bounded read-only request to the vendor's own sessions endpoint | the `cloud:browserbase` row |
+| `cloud:browserless` | `apiKey` †, `apiUrl`, `stealth` | `BROWSERLESS_API_KEY` / `BROWSERLESS_API_URL` / `BROWSERLESS_STEALTH` | same shape | same | the `cloud:browserless` row |
+| `cloud:kernel` | `apiKey` †, `endpoint`, `stealth` | `KERNEL_API_KEY` / `KERNEL_ENDPOINT` / `KERNEL_STEALTH` | same shape | same | the `cloud:kernel` row |
+| `cloud:browseruse` | `apiKey` † | `BROWSER_USE_API_KEY` | same shape | same | the `cloud:browseruse` row |
+| `cloud:agentcore` | the vendor's own set (unverified) | per upstream's provider table | same shape | same | the `cloud:agentcore` row |
+
+Those two `stealth` fields are **values**, not capability promises: they are each vendor's own
+implementation, with no public specification, and zero measurement in this round (§12.38). They are
+in this table because they are something a user or a cluster **can set**, and a settable thing
+belongs in this table.
+
+**The key never comes one step closer to an agent, and there is a trap here that has to be named.**
+`agentEnv()` (`src/ws-handler.js:112-121`) is not an **allow** list — it is a **DROP list plus one
+prefix rule**: it drops the six names in `AGENT_ENV_DROP`, every `npm_*`, and every `VIBESPACE_*`
+that is not in `AGENT_ENV_KEEP` (nine names, `:101-105`). **Every other name it passes through
+verbatim.** So if the cluster injected under **the vendor's own name** (`BROWSERBASE_API_KEY=…`),
+that key would be in **every** agent CLI's environment, readable with one `env` — which is exactly
+the shape the comment above that function (`:88-100`) names verbatim ("the helm chart injects
+VIBESPACE_PASSWORD (the login password!), S3/CephFS/Drive/frps credentials and the telemetry token
+— an agent could read all of them with one `env`"). So this rule is not hygiene, it is
+construction:
+
+* **The cluster may inject only under `VIBESPACE_INTEGRATION_<ID>_<FIELD>`**, plus the JSON list
+  `VIBESPACE_INTEGRATIONS=[{id,label,values:{…}}]`. The reason is structural: the `VIBESPACE_`
+  prefix is precisely the class `agentEnv` drops, and these names are **not** in `AGENT_ENV_KEEP` —
+  that nine-name list is an explicit table, so adding a row takes somebody writing one, which makes
+  "forgot to add it" the safe direction.
+* **The vendor's own env name appears only in the environment of the one child the keeper spawns
+  for that provider**, with the value taken from `resolveIntegration` at the instant of the spawn —
+  never a file, never argv, never a log line, never `agentEnv`. This is the same rule as §6.4's
+  "proxy passwords and provider auth keys live in the registry server-side"; this section only gives
+  it an implementation and one concrete way it would be violated.
+* **A consumer never reads `process.env` itself.** The standing sweep (`process.env.VIBESPACE_INTEGRATION`
+  outside the store = red) is owned by the shared layer; this track's modules are its **subjects**,
+  and §9 gains a leg for it.
+* Exactly the same shape as §6.1's "the stream token never reaches an agent": a secret kept out of
+  `agentEnv` can still be read out of **the server's own** `/proc/<pid>/environ` by a process under
+  the same uid (§6.5 already writes that honest boundary down once). What this section removes is
+  the **accident** (a key sitting in every agent's environment, one `env` away), not a boundary it
+  is pretending to build.
+
+**Export.** Integration keys join the `sensitive` list of `/api/config/export-info`
+(`src/routes/persistence.js:679-686`, today vsPassword / claudeCreds / codexCreds / hosts / mounts /
+accounts), so they leave with a config export only when the user **explicitly opts in and supplies a
+passphrase** (`:708-712`, the ≥4-character gate). **They never go in settings.** The settings
+SyncStore broadcasts every value to every client and exports in plain; `SETTINGS_CATEGORIES`
+(`src/lib/settings-schema.js:935-948`, which **is** SettingsUI's render loop, test-architecture §44)
+already has an `Integration` category today, but that category holds **switches**, not **secrets** —
+and a secret in settings is a secret sent to every open tab. So any browser switch this design adds
+(auto-binding, recording, per-site memory) may go in `SETTINGS_CATEGORIES` (and **must**, or it does
+not render), while keys go in the Integrations window without exception.
+
+**At-rest encryption is a P0 precondition, not this track's code.** Today that `aes-256-gcm` pair
+lives in `MountManager._enc` / `_dec` (`src/mounts.js:369-382`; the key file is `data/.mounts-key`,
+`0600`, minted on first use, `src/mounts.js:47` + `:360-367`). The shared layer extracts it into
+`src/secret-box.js` (**SHARED**, **one** primitive) with mounts migrating behind a parity test. This
+track does not implement it — it **depends** on it, which is why §10's P4 carries an explicit
+cross-track dependency line.
+
+**How a cluster admin supplies a default.** A helm `integrations:` block → a Secret → env, the same
+shape that already runs for Drive presets:
+`deploy/helm/vibespace-user/templates/main.yaml:159-170` is verbatim
+`valueFrom: { secretKeyRef: … }`, **never** a plain `value:` (in the same stanza
+`VIBESPACE_GDRIVE_CLIENT_ID` is plain while `…_SECRET` goes through secretKeyRef, because only the
+latter is a secret). The exact values block and the `deploy/README.md` section are owned by the
+shared layer's document; this track only declares the `id`s and field names it needs (the table
+above).
+
+**Fleet redirect URIs — this track does not consume them, but both documents must say the same
+sentence.** A cluster OAuth client registered ONCE has to work for N instances with N public URLs
+(helm injects `VIBESPACE_PUBLIC_URL` per instance, `main.yaml:172-176`). Two routes: **(a) the
+existing loopback + paste-back flow** — the redirect lands in **the browser on the user's own
+machine**, the UI asks them to paste the address bar back, and we forward it to the local listener;
+`src/mounts.js:2172-2183` says verbatim that this shape already runs for Drive ("Remote deployment:
+the redirect to 127.0.0.1 fails in the USER'S browser, but the code is in the address bar — the UI
+asks them to paste that URL back"), and it needs **not one line of change** for a **cluster** app,
+because the instance's public URL is never the redirect target. **(b) a cluster auth relay**
+(`https://auth.<cluster>/cb` with signed state, forwarding to the instance's public URL) — better
+UX, but new infrastructure, a new trusted middleman, and a new availability dependency.
+**Recommendation: (a) for v1, with (b) as a later phase behind an owner decision.** What each vendor
+allows: **Lark requires an exact-match redirect URI** (hence (a) uses one **fixed** registered
+loopback URL, the shared layer's §12.4 decision 4); **Google allows several exact URIs and relaxes
+the port for loopback**; **CloakBrowser is an API key with no redirect at all** — every row in this
+track's table above is a pure key, so this paragraph is **background** for this document rather than
+a dependency, written here only so the next reader does not think it was overlooked.
+
+### 7.6 The three-tier access ladder — CDP, fingerprint browser, pure computer-use (D31)
+
+(The owner's 2026-09-10 question, folded into the architecture only in this round: "agent-browser 是
+CDP 吗，Mercury 这类银行会不会检测……是不是还得一个纯 computer use 版本" — *is agent-browser CDP;
+would a bank like Mercury detect it; do we also need a pure computer-use version?*)
+
+**The facts first, each one naming its source.**
+
+* **agent-browser is CDP end to end.** Not an inference: `strings` on the installed 0.32.0
+  `bin/agent-browser-linux-x64` yields `struct CdpMessage` / `struct CdpReply` / `struct CdpError` /
+  `Target.createTarget` / `Page.navigate` / `Input.dispatchMouseEvent` / `GetFullAXTreeResult`
+  (= `Accessibility.getFullAXTree`), and `--cdp` / `connect` / `get cdp-url` are already in §1.4.
+  The one exception is a **WebDriver** backend in the same binary
+  (`src/native/webdriver/{client,backend,appium,ios}.rs`, error string verbatim "… is not supported
+  on the WebDriver backend") — and it serves iOS / Safari / Appium, not evasion.
+* **The only "stealth" today is one launch flag, and the user put it in their own config.**
+  `--disable-blink-features=AutomationControlled` is in this machine's
+  `~/.agent-browser/config.json` (§1.1, verbatim), and inside the binary it appears only in the
+  **example text** for `--args`
+  (`e.g., --args "--no-sandbox,--disable-blink-features=AutomationControlled"`). Upstream ships no
+  stealth layer.
+* **But upstream does have a first-class interface to hang one on.** The 0.32.0 README documents the
+  plugin capability `launch.mutate`: "Use a launch mutator plugin for **stealth** or local launch
+  customization. The plugin can append Chrome args, extensions, and init scripts before the browser
+  starts"; the example plugin name is verbatim `stealth` / `agent-browser-plugin-stealth`, and it is
+  capability-gated (`agent-browser --confirm-actions plugin:stealth:launch.mutate open …`). The same
+  page also says "agent-browser keeps browser automation, redaction-sensitive output, and policy
+  enforcement in core" — i.e. plugins are **out of process**. **That gives tier 2 a second route
+  that does not swap the binary** (§7.4 is the swap-the-binary route). Whether a published
+  implementation exists is unverified (§12.37).
+* **Upstream itself admits this is not enough.** `vercel-labs/agent-browser` issue **#120**
+  ("Feature Request: Add stealth mode via AGENT_BROWSER_STEALTH environment variable",
+  shkumbinhasani, 2026-01-15, **still open**) says modern bot detection — naming Cloudflare,
+  DataDome, PerimeterX and reCAPTCHA — checks far more than one signal, that launch flags like
+  `--disable-blink-features=AutomationControlled` address "one detection vector", and lists WebGL
+  vendor/renderer fingerprinting, plugin and mime-type enumeration, Chrome runtime properties, and
+  inconsistent browser feature detection.
+* **The classic `Runtime.enable` leak is mostly dead, and that is exactly why a patch is not the
+  answer.** A 2025 Chrome update altered the serialization path the classic check observed, so the
+  getter stopped firing on current versions; and the rebrowser / Patchright generation of patches
+  simply **stops sending** the command — a "patch war" between the two, whose outcome is that this
+  **one** signal is largely inert in 2026. What remains is four layers: **protocol side effects**
+  (anything that behaves differently when a debugger is attached is a viable probe), **injected
+  residue** (observable objects like `$cdc_` and `__playwright__binding__`), **evaluation
+  fingerprints** (code injected through CDP executes differently from code that arrived with the
+  page), and **absence patterns** (a perfectly silent session is itself informative, combined with
+  server-class rendering and datacenter network indicators). In other words: **a patch aimed at one
+  leak is a depreciating asset**, which is precisely why this design does **not** write a stealth
+  layer and makes it a provider row instead (§7.1's capability-row discipline).
+* **Banks take a different road, and that road is unfavourable to a fingerprint browser.** The
+  behavioural-biometrics and device-intelligence industry (one vendor's DeviceIQ launch material,
+  2026-03, names verbatim the detection of device spoofing, emulators, **cloaked browsers**,
+  jailbroken devices and data wiping; the same vendor claims continuous collection of 3,000+
+  anonymized signals including keystroke and mouse activity and AI agent usage; as of 2026 Q1 more
+  than 30 of the world's largest 100 banks and 357 financial institutions in total) means a bank's
+  judgement rests on **device fingerprint + behaviour + new-device step-up**, not on a JS challenge.
+  **The consequence is counter-intuitive**: a fingerprint browser makes you look like **a new
+  device**, and the correct response to a new device, for a bank, is **to require verification** —
+  so **tier 2 may be worse than tier 1 on that class of site**, which is the part the owner's
+  question got right.
+* **Whether a particular bank actually blocks is measurable only per site.** This round made no real
+  attempt against any named site, so the owner's ask for "2–3 concrete failing sites" **stands**, and
+  it is the only half of D31 that evidence can move (§12.36).
+
+**Hence three tiers, and they are three sibling provider rows in §7.1, not an `if` chain:**
+
+| Tier | Provider | Observation / action | What the site sees | Cost | Latency & precision | Where it is used |
+|---|---|---|---|---|---|---|
+| **1** | `chromium` (optionally with a `launch.mutate` plugin) | CDP: DOM + accessibility tree + `Input.*`, acting by element reference | an automated Chrome, undisguised beyond one launch flag | free; 6 processes / 420–667 MB PSS per instance on this machine (§1.2) | fastest, most precise | the default; everything that does not actively block |
+| **2** | `cloak` / `cloud:*` (including each vendor's own `*_STEALTH` switch, §7.5) | still CDP — same verbs, same profile model | **another machine**: source-level fingerprint patches, a per-connection seed (§7.2) | CloakBrowser free 1 concurrent / $19 up; cloud providers metered (keys in §7.5) | same order as tier 1, plus one launch and possibly a network hop | content sites and anti-scrape stacks; **for any site with an account, try a human login through the live view first (I5)** |
+| **3** | **`local-window` (new)** | **no CDP, no automation flags**: pixels + the AT-SPI accessibility tree (§4.9), input through §4.9's per-platform injection ladder | **the user's own real browser profile** — an ordinary Chrome/Firefox window; nothing to detect but **behaviour** | free, but it needs a live desktop session plus §4.7's transport | slowest, least precise: one `snapshot` is **one D-Bus round trip per node** (measured 1,800–6,100 nodes/sec, §4.9), `click @ref` holds only on nodes that **self-report an action** (66 of 503 nodes, **6 of 43 `button`s**), and `key` (a chord) has **no path at all** on the tree | banks, and any site doing new-device step-up; **needs the user present** |
+
+Four rules fall straight out of that table:
+
+1. **Tier 3 is not a stronger tier 2 — it is a different trade.** Tier 2 buys "looks like a machine
+   nobody automated"; tier 3 buys "**is** that machine" — at the cost of an order of magnitude in
+   both precision and speed, and it inherits every empty cell of §4.9's matrix verbatim (on this
+   machine: X11 enumeration cannot see Wayland clients, GNOME's `Introspect` answers us
+   AccessDenied, `/dev/uinput` is unusable).
+2. **Per-site memory grows a `tier` field, and it is still a claim.** §7.4's `siteHints` goes from
+   `{host, backend, by, at, why}` to `{host, tier, backend, by, at, why}` — `backend` stays,
+   because "which provider within tier 2" is a different question. **Never auto-escalate**: a tier
+   1/2 failure produces a **suggestion**; the actual escalation is a **user act with the notice**
+   required by §3.8's anti-default-blindness rule, because moving to tier 3 means this agent starts
+   operating the user's **real** logged-in state.
+3. **Tier 3's security model is §6.6's, not §6.2's.** A tier-3 target is a real window on the user's
+   desktop with their own login in it. §6's lease and owner rules apply verbatim, plus two that
+   belong only to this tier: **the user's take-over always wins** (the instant `lease.input` flips to
+   the user, the agent's injection is refused, §4.3), and **it requires D27's option (b)** (the
+   "windows on the user's real desktop" cell, which needs an explicit opt-in and its own consent) —
+   the first version of window targets lists only the windows **we started**, and the bank use case
+   is precisely not in that cell. That is why tier 3 gets its own phase (§10's **P10**) rather than a
+   checkbox inside P4.
+4. **The escalation ladder must say why it escalated.** `vibespace-browser blocked`'s **claim**
+   (§7.4) now carries a suggested tier, and the UI still says "the agent says this page is blocked
+   and suggests tier N", **never** "we detected a block"; the 403/429 `hint` likewise goes from
+   `hint:'may-need-cloak'` to `hint:{tier:2|3, why}`, still worded so it cannot be mistaken for a
+   detection (the same family as §4.3.1's "a producer we ship must be named").
 
 ## 8. Migration from the shared default profile
 
@@ -2219,7 +2517,7 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-browser-cli` | fast | P0, P1 | The wrapper's verb table, the `close --all` refusal on a shared profile, typed `browser_paused` / `tab_gone` passthrough, behaviour with no token or no API, and that **`use` never prints a CDP URL** (§5.1) — with the round-1 spelling as its negative control. |
 | `test-browser-keeper` | heavy | P1 | Real `agent-browser` ≥ floor: reuse-or-spawn, adopt across a restart, **boot reconciliation** (a persisted lease whose `browserKey` no live session carries is dropped and its target closed BEFORE any `IDLE_TIMEOUT_MS=0` — the half round 1 omitted, with a pre-fix control that leaks a browser), park-with-a-reason on an unverifiable pid, runaway stop, clear-only-your-own-record, ceiling refusal naming the holders. **Skips loudly, with evidence**, when the binary is absent or below the floor. |
 | `test-browser-live` | heavy | P2, P3 | Real browser + real stream + the real bridge: two sessions on one profile drive their own tabs and never each other's (the I2 proof, with a **pre-fix control that reproduces the hijack**), a viewer sees frames through cookie auth only, backpressure holds, takeover refuses agent input and handback restores it. Headless-chrome leg for the window at 375×667 and at a non-1 DPI zoom. |
-| `test-browser-providers` | fast + heavy | **P4** | fast: the provider capability rows and the exact refusal a provider produces for a capability it lacks (a disabled control names its reason), plus the presence and shape of the CloakBrowser egress proof record (§7.2.1) — a provider row with a `blocks:` claim whose caps row is not actually false FAILS, the `local-oracles` discipline. heavy: the real `browser-serve` daemon op against a real daemon **with its capability gate asserted** (an old daemon is never asked — unknown ops hang), and the remote `cdp` provider over `tcpForward`. |
+| `test-browser-providers` | fast + heavy | **P4** | fast: the provider capability rows and the exact refusal a provider produces for a capability it lacks (a disabled control names its reason), plus the presence and shape of the CloakBrowser egress proof record (§7.2.1) — a provider row with a `blocks:` claim whose caps row is not actually false FAILS, the `local-oracles` discipline. heavy: the real `browser-serve` daemon op against a real daemon **with its capability gate asserted** (an old daemon is never asked — unknown ops hang), and the remote `cdp` provider over `tcpForward`. **Plus the four key legs (§7.5)**: (i) **a consumer never reads env itself** — put a full set of fake provider keys into the server's `process.env`, run the **real** `agentEnv()` (it is exported, `src/ws-handler.js:1657`), and assert not one of them is in the returned object; the negative control is the same set injected under **the vendor's own names** (`BROWSERBASE_API_KEY=…`), which must go red (today it passes them straight through, `:112-121`); (ii) the keeper asks `resolveIntegration(provider)` **exactly once** before a spawn, and the spawned child's environment carries that vendor env name while **its parent's does not**; (iii) the three precedence states (user / cluster / none) yield three different `source` values over one fixture, and `publicView` never emits a plaintext secret (asserted on the **returned object**, not on its rendering); (iv) a **named refusal**: switching to a backend with no key returns `backend_no_key` and **spawns nothing** (negative control: falling back to `chromium`, the thing D33 explicitly rejects). The sweep that goes red on `process.env.VIBESPACE_INTEGRATION` outside the store belongs to the shared layer's `test-integration-registry`; this track's modules are its subjects — which is why §10's P4 carries a cross-track dependency line. |
 | `test-browser-housekeeping` | fast | **P5** | The retention/adoption DECISION as a PURE function, printing what it spared and why — the repo's own sweep law: **never demand a removal nothing is allowed to perform** (a grace window for anything that may be in flight, named with its age). Negative controls: nothing is ever proposed for deletion without an explicit human act, and `forget` archives BEFORE it removes. |
 | `test-browser-pin` | fast | **P0, P1** | The pin ladder as a PURE decision: explicit / conversation / Task-Group / instance / none, with the ORIGIN each rung states, and that a fork **copies the pin and mints a new key** (§3.2.5). The mid-session half is a WIRING PIN: the re-pointed symlink (or the rewritten per-session config) is what the next launch resolves, and the suite asserts the running browser is **unaffected** — the honest half. Plus the vocabulary case: every pin origin the product emits is in `SPAWN_ORIGINS` and the client's `spawnValueOrigin` whitelist recognises it (§3.2.5's two-site edit; the negative control is an off-vocabulary string, which must go red — in production it only renders a wrong label). Negative controls: a Task-Group default never beats a session's own choice; binding a group does not rewrite a running session's pin. |
 | `test-browser-backend` | fast + heavy | **P4** | fast: the version ladder as a PURE decision over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ take the HIGHER), the seat arithmetic and its refusal text, the site-hint record carrying WHO claimed it, and `blocked` being a claim the server never manufactures. heavy: a real switch — stop, re-open one tab per lease at its `lastUrl`, re-pin, rewrite `targetId`, **the lease object never destroyed**; plus the not-installed refusal naming the provider. |
@@ -2227,6 +2525,7 @@ sentence and then left P4 and P5 with no suite at all; both now have one.
 | `test-native-window` | heavy | **P8** | A real Xpra server + a real X client under Xvfb through the real cookie-authed bridge: one window arrives, input reaches it, the stream port is never reachable from a browser, and the backpressure discipline holds. **Skips loudly, with evidence**, when `xpra` or `Xvfb` is absent (measured 2026-09-10 on this box: `Xvfb` present, `xpra` absent). The bandwidth/latency numbers §4.7 needs are produced here, not asserted — the suite RECORDS them under a named budget so a regression is visible. |
 | `test-browser-handles` | fast | **P1** | The attachment set as a PURE decision: a set of exactly one resolves a bare command to the default; a set of ≥2 answers a bare command with the named refusal `profile_required` **listing every handle and which is the default** (a refusal without that list FAILS — it is the only diagnostic this agent can get); the refusal for a `--profile` given a **filesystem path**, carrying the command that registers it as a handle; a child handle `bk-<parent>.<n>` reaped by the parent's teardown **by prefix**; one audit line per verb with **content never recorded** (a `fill` logs the verb only). **Plus both halves of the direct path (§3.7)**: with two attachments, a **direct** `agent-browser` invocation carrying that session's own env resolves to the default profile's user-data-dir **and resolves to no other** (a non-default attachment's directory is minted by the server and never printed), while the same bare command through our CLI gets `profile_required` — the first is layer ①'s honest boundary and the second is its guarantee, and both need an assertion or the boundary is only prose. Negative controls: a session with one attachment **never** needs a handle (else the rule turns the commonest shape into two commands); a handle naming a profile this session is not attached to is **refused**, not silently attached. |
 | `test-profile-blindness` | fast + heavy | **P1, P2** | fast: `profile_changed` is **one-time** (one utterance per fingerprint, bare commands run afterwards), it fires on the **attachment set's fingerprint** rather than per command, and it is typed (`{code, was, now, handles}`); plus the wording of the `<system-reminder>` and its zero-spend delivery path (§3.8's layer ②); **plus the carrier itself**: a status override and a profile change both pending, and **both reaching the next prompt** (the negative control is today's single slot with its `break` on the first hit, which must drop one). heavy (headless chrome, 375×667): this leg is a **mutation**, not two fresh renders — render, then change only "what the agent last used" on the same session, and assert the chip flips neutral→amber with both names **without a full rebuild**; the negative control is a digest of `(v) => v \|\| ''` over an **object** (verified in node: two different objects both digest to `":[object Object]"`), which must go red. "Neutral when they agree, amber when they do not" as two fresh renders is **not** this leg, because both pass under that bug (this repository has paid for that table six times). |
+| `test-browser-tier3` | fast + heavy | **P10** | fast: the ladder as a PURE decision — `tier(provider)` derived from §7.1's table (there is **no** second `tier` field, §3.3), the `siteHints` rule that it **never auto-escalates** (a tier 1/2 failure produces a **suggestion**; the negative control writes it as an automatic switch and must go red), `blocked` claims and the 403/429 `hint` both carrying **who claimed it** and **never** calling themselves a detection, and the exact refusal the `local-window` row produces for every capability it lacks (no CDP, no `--allowed-domains`, no `--pin-tab`). heavy: a real Chrome window on a real X server with **no** `--remote-debugging-port` and **no** CDP — `snapshot` comes from the real AT-SPI tree, one `click @ref` lands on a node that self-reports an action, and one chord **refuses with the probe result** (§4.9: it has no tree road) — asserting throughout that the browser process's argv carries **no** automation flag at all. That last assertion IS the definition of tier 3, which is why it is an assertion rather than a sentence. |
 | `test-window-target` | heavy | **P9** | A real Xvfb + a real Xpra + a real GTK client: `list` shows only the windows we started, `snapshot` mints `@ref`s from the **real AT-SPI tree** (role/name/bounds all asserted present), `click @ref` changes that application's state through `do_action` (verified by the application's **own tree**, not by pixels), `click --at` **refuses with the probe result** when no injection backend exists, **`key` (a chord) likewise refuses with the probe result** when there is no injection backend (there is no tree road for it, so the verb is simply not possible in that column), **`click @ref` on a node that exposes no `Action` refuses rather than silently degrading to a coordinate click** (negative control: the same node still refuses even when an injection backend IS present — that rule is about the node, not about the column), `snapshot` additionally **reports its own interface census** for the walk it just did (how many nodes carried `Action` / `EditableText`) so §4.9's 66/503 and 6/43 can be re-checked on another desktop, the walk runs in a **bounded child** and a node that does not answer is reported as an unreadable subtree rather than stalling it, and the lease plus §4.3's three modes are the same object a tab uses. Every cell of the capability matrix is a **runtime probe** rather than a platform name, and the suite **prints** what it probed; **skips loudly, with evidence**, when `xpra`, `Xvfb` or AT-SPI is missing (2026-09-10 on this box: `Xvfb` present, `xpra` absent, AT-SPI present and reporting 9 applications). The numbers §4.9 admits it has not measured are produced here under a named budget. |
 | `test-spend-paths` | fast | **P3** | Not a new suite — the existing census, which this feature must not redden. Its `deliver-ladder` primitive matches `deliverToConversation(` **per site**, so any announcement in `src/server/browser-*.js` needs the gate in scope above it; and its closed-set assertion means `'browser-handback'` and `'browser-profile-notice'` (§3.8) must each be declared AND used in the same change (§4.3.1). |
 | `test-architecture` | build | all | Tier edges: PURE imports nothing, SHARED never reaches up, the daemon bundle carries no orchestrator markers, `server.js` stays inside its size ratchet, and §44 — every settings category renders, so `browser.announceIdleHandback` and the rest reach a section a user can open. |
@@ -2252,33 +2551,43 @@ spread: 14 of 32 workflows converged in one round, 8 needed 3–6.
 | **P1 — Registry + keeper + lease** | `src/browser-profiles.js` (PURE), `browser-keeper.js` incl. **boot reconciliation and the concurrency ceiling**, `data/browser-profiles.json` + atomic writes + broadcast, `/api/browser/*`, attach/detach/lease, `vibespace-browser` CLI + `AGENT_TOOLS` + manual, migration steps 1–2, **the pin ladder + the Task-Group default + the four pin surfaces + "adopt this session's browser" (§3.2.5)**, `test-browser-pin`, **plus the attachment set and handle addressing (§3.7) + anti-default-blindness layers ① and ② (§3.8) — `attachments`/`new-child`/`--profile`, the two named refusals `profile_required` and `profile_changed`, the audit stream, and the zero-spend `pendingNotice` — including the small change that makes it a **queue** (typed `{kind,…}`, `renderNotice` dispatching on `kind`, a draining injection site instead of `break` on the first), because today's single slot would let this design's two producers overwrite each other and the status-override notice besides**, `test-browser-handles`, `test-profile-blindness` (the fast half). | **10** | 8–15 | 5 | Yes — per-task profiles that concurrently coexist, with `--pin-tab` semantics; **and for the first time one session may hold several at once**. |
 | **P2 — Live view** | `/api/browser/stream` bridge (+ backpressure), `browser-live` window type, multi-viewer fan-out, URL/tab/console panes, DPI-correct canvas, **the in-window profile switcher strip for a session with several attachments (§3.7) and the amber status-bar Browser chip (§3.8's layer ③, including its `LIVE_SESSION_FACTS` row and digest)**, `test-browser-live`, `test-profile-blindness` (the heavy half). | **7** | 6–10 | 3.5 | **Yes — (1.c) minus the hands.** |
 | **P3 — Takeover / handback** | Lease input holder, mode switcher, input forwarding, `browser_paused`, **the §4.3.1 spend wiring** (`'browser-handback'` in `SPEND_REASONS`, the ladder call, `browser.announceIdleHandback` default OFF, the `test-spend-paths` census staying green), idle handback, agent cursor, `--confirm-actions` cards. | **5** | 4–7 | 2.5 | Yes — completes (1.c). |
-| **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; `test-browser-providers` + `test-browser-backend`. | **9** | 7–13 | 4.5 | Yes — (1.a), and the fleet story. |
+| **P4 — Providers** | Provider rows + capability gating; **the CloakBrowser egress precondition performed and recorded first** (§7.2.1), then opt-in on the free tier via loopback `cloakserve` with an egress allowlist; remote `cdp` provider over `tcpForward`; the `browser-serve` device op (three-touch rule); **the live backend SWITCH (§7.4) — the version ladder, the seed carried across, the lease-driven tab re-open, seats in the dialog, per-site hints, and the agent's `blocked` CLAIM**; **plus §7.5's key-consumer half** — this track's own registry rows, one `resolveIntegration(provider)` before the keeper spawns, the switcher's source chip, the `app.openIntegration(id)` deep link, the `backend_no_key` named refusal, and §9's four key legs; `test-browser-providers` + `test-browser-backend`. **Cross-track dependency, stated rather than implied: P4 cannot land before the communication-panel track's P0** — `src/integration-registry.js`, `src/server/integration-store.js` and the extracted `src/secret-box.js` (with mounts migrated behind a parity test) all belong to that track's P0, while this track writes only its own rows and two call sites. The dependency is **one-way**: that track's P0 needs nothing from this one, so the two lines run in parallel and only P4's merge point is gated. Rounds 1–6 sized this cell at **9**; the consumer half of keys (rows + two call sites + one chip + one refusal + four legs) measures **+1**, so the cell is now **10**. | **10** | 8–14 | 5 | Yes — (1.a), and the fleet story. |
 | **P5 — Recording + housekeeping** | Per-profile screencast opt-in, transcript thumbnails, retention sweep, profiles panel with sizes, orphan adoption (migration step 3), `test-browser-housekeeping`. | **4** | 3–6 | 2 | Yes — the transcript half. |
 | **P6 — Hard mediation** | CDP-mediating proxy: target scoping + input refusal during takeover, per-session CDP URLs. **A stated precondition of `sharing: "instance"`** (§6.2), not merely an option if D6 says the cooperative lease is not enough. | **6** | 4–9 | 3 | Only as enforcement — but `sharing: "instance"` stays refused until it lands. |
 | **P7 — Window binding** | `layout`/`split`/`ratio` on the tab chain, the title-bar bind affordance + the left/right title-bar drop zone, the born-into-a-chain `createWindow` path, the divider (per-drag controller, rAF, one coordinate conversion), the ownership badge from `leases`, the layouts persist + **the sync-key fix**, mobile tabs-only without write-back, **the per-pane owner badge on the switcher strip's tabs (§3.7)**, `test-window-binding`. | **6** | 5–9 | 3 | Yes — an agent-driven browser stops losing its owner. **Needs P2** (there must be a live view to bind); independent of P3–P6. |
 | **P8 — Native client windows** | The Xpra rung (§4.7): a keeper under §3.5's ceiling and runaway guard, `GET /api/xpra/stream` in the `/api/vnc` shape, the client half per D21, the 200 ms / 1 Mbps measurement, and per-app routing (WhatsApp → the web version in a profile; WeChat → the native client, only after the web version is tried). Then the §4.8 adapter for whichever app the owner names, feeding the existing Communication-Channels ladder with its own `source` tag and a declared `'chat-inbound'` spend reason. `test-native-window`. | **7** | 5–11 | 3.5 | Yes — but it is the least verified phase in the document and its range says so. Independent of every other phase except §4.2's bridge shape. |
-| **P9 — Window targets** | §4.9's window targets: `src/window-targets.js` (SHARED: enumeration / the AT-SPI snapshot and `@ref` minting / the **runtime-probed** input-backend ladder), `data/bin/vibespace-window` + its manual (§5.1.1), the `window-live` pane reusing §4.7's bridge, the lease and three modes shared with tabs, and §6.6's two-class boundary plus its audit line. **The first task is to measure four things**: whether the portal is usable at all from a `systemd --user` background context, AT-SPI's coverage on Qt/Electron, the end-to-end latency from one `do_action` to a visible change, and **which AT-SPI binding the node side uses and what it costs per node** (every figure in this round was taken through `python3` + GI, i.e. through `libatspi` and its cache; a direct node D-Bus client has no such cache and a spawned GI helper pays §1.6's fork tax — both need re-measuring, §12.33). **The walk itself runs in a bounded child/worker** (per-call timeout, whole-walk node budget), never on the server's or the daemon's event loop — one D-Bus round trip per node, and an application that stops answering blocks until libdbus's 25 s default. `test-window-target`. | **8** | 6–13 | 4 | Yes — for the first time an agent can operate an application that is not a browser. **Needs P8's transport** (Xvfb+Xpra) and P2's bridge shape; independent of P3–P7. |
+| **P9 — Window targets** | §4.9's window targets: `src/window-targets.js` (SHARED: enumeration / the AT-SPI snapshot and `@ref` minting / the **runtime-probed** input-backend ladder), `data/bin/vibespace-window` + its manual (§5.1.1), the `window-live` pane reusing §4.7's bridge, the lease and three modes shared with tabs, and §6.6's two-class boundary plus its audit line. **The first task is to measure four things**: whether the portal is usable at all from a `systemd --user` background context, AT-SPI's coverage on Qt/Electron, the end-to-end latency from one `do_action` to a visible change, and **which AT-SPI binding the node side uses and what it costs per node** (every figure in this round was taken through `python3` + GI, i.e. through `libatspi` and its cache; a direct node D-Bus client has no such cache and a spawned GI helper pays §1.6's fork tax — both need re-measuring, §12.33). **The walk itself runs in a bounded child/worker** (per-call timeout, whole-walk node budget), never on the server's or the daemon's event loop — one D-Bus round trip per node, and an application that stops answering blocks until libdbus's 25 s default. **The scope stays D27's option (a)** — only the windows we started; tier 3 (§7.6, the browser on the user's **real** desktop) is **P10**, not this. `test-window-target`. | **8** | 6–13 | 4 | Yes — for the first time an agent can operate an application that is not a browser. **Needs P8's transport** (Xvfb+Xpra) and P2's bridge shape; independent of P3–P7. |
+| **P10 — Tier 3 (window targets on the real desktop)** | §7.6's `local-window` provider row: **D27's option (b)** (windows on the user's real desktop, behind an explicit opt-in and its own consent), columns 1 and 2 of §4.9's matrix re-verified against **the user's own session** (X11's XComposite/x11grab, or Wayland's ScreenCast portal — each with its own named failure on this box), `siteHints.tier` and the never-auto-escalate rule, tier 3's own security surface (§6.6's two-class boundary plus **the user's take-over always wins**), and the exact refusal §7.1's row produces for every capability it lacks. **The first task is to measure §12.36 and §12.39**: which tier 2–3 named sites fail on, and the end-to-end latency from one `do_action` to a visible change — and §12.36's measurement **can be made today, with no code at all**, so it belongs **before** this phase rather than inside it. `test-browser-tier3`. | **6** | 4–12 | 3 | Yes — that class of site (banks) becomes reachable for the first time. But it is the **least verified** phase in this document, and its range says so. **Needs P9** (the observation/action layer); the transport half reuses §4.7's bridge **shape** but **not** its Xvfb+Xpra cell — capturing a user's real desktop goes through the other two columns. |
 
 **Totals, published as the range rather than the point** (round 1 published only the point
 estimate of a range whose top its own risk paragraph pointed at):
 
-| Scope | Range | Point estimate | **Risk-weighted** (P2, P4, P8 and P9 at the top of their ranges, the rest at the point) |
+| Scope | Range | Point estimate | **Risk-weighted** (P2, P4, P8, P9 and P10 at the top of their ranges, the rest at the point) |
 |---|---|---|---|
-| **P0–P5** | **32–58 rounds ≈ 16–29 days** | 40 ≈ 20 days | **47 rounds ≈ 23.5 days** |
-| **P0–P6** | **36–67 rounds ≈ 18–33.5 days** | 46 ≈ 23 days | **53 rounds ≈ 26.5 days** |
-| **P0–P8** | **46–87 rounds ≈ 23–43.5 days** | 59 ≈ 29.5 days | **70 rounds ≈ 35 days** |
-| **P0–P9** (everything the owner asked for) | **52–100 rounds ≈ 26–50 days** | 67 ≈ 33.5 days | **83 rounds ≈ 41.5 days** |
+| **P0–P5** | **33–59 rounds ≈ 16.5–29.5 days** | 41 ≈ 20.5 days | **48 rounds ≈ 24 days** |
+| **P0–P6** | **37–68 rounds ≈ 18.5–34 days** | 47 ≈ 23.5 days | **54 rounds ≈ 27 days** |
+| **P0–P8** | **47–88 rounds ≈ 23.5–44 days** | 60 ≈ 30 days | **71 rounds ≈ 35.5 days** |
+| **P0–P9** | **53–101 rounds ≈ 26.5–50.5 days** | 68 ≈ 34 days | **84 rounds ≈ 42 days** |
+| **P0–P10** (with tier 3 — everything the owner asked for) | **57–113 rounds ≈ 28.5–56.5 days** | 74 ≈ 37 days | **96 rounds ≈ 48 days** |
+
+**Two cells moved this round relative to round 6, and both are in the table above rather than buried
+in prose**: P4 goes from **9** rounds to **10** (§7.5's key-consumer half — the rows, two call
+sites, one chip, one refusal, four legs), and **P10 is new** (§7.6's tier 3, point 6, range 4–12).
+The P0–P9 row therefore moves from 100 to 101, and "everything the owner asked for" is now P0–P10.
 
 The risk-weighted column is the one to plan against, and it is weighted for a stated reason:
 P2 and P4 depend on a third-party binary's real behaviour rather than on our own code, which is
 also why §12 lists three of their assumptions as unverified; P8 and P9 are the same, only more so —
 they depend on a machine's desktop stack (compositor, portals, accessibility bus), and every
-measurement this document has of that layer comes from **one** machine. Two further honesty notes:
+measurement this document has of that layer comes from **one** machine. **P10 is worse than any of
+them, and its range (4–12, the widest here) says so**: what it depends on is not our machine but
+**the user's** — their desktop, their browser, their logged-in state — and this document has
+**zero** measurements of that machine (§12.39). Two further honesty notes:
 55 % of workflow wall time in the last sample had **no agent running** (concurrency cap, session
 limits, serial integration), so "days" here is agent capacity and not elapsed time; and the ranges
-above are per-phase — the joint distribution is not the sum of the extremes, so P0–P9's **100
+above are per-phase — the joint distribution is not the sum of the extremes, so P0–P10's **113
 rounds** is the sum-of-extremes pessimistic bound, not a forecast, and the figure to plan against is
-the same row's risk-weighted **83**.
+the same row's risk-weighted **96** (or **84** if you stop at P0–P9).
 
 **Alternative order, if the owner wants value earliest:** P0 → P2 → P1 → P3. P2 can run against
 upstream's per-session stream *before* the registry exists, because §3.2 already gave every
@@ -2318,7 +2627,7 @@ their ranges say how little is known about them.
 | **D14** | **Where does the pin live, and does a Task Group carry a default?** (§3.2.5 — the pin is one command; the question is which surfaces register it and whether a 岗位 may set a default for every session it owns.) | (a) the session-card right-click only; (b) the four surfaces (card menu, Session Properties, the live-view title bar, the New Session dialog); (c) (b) plus a Task-Group default rung. | **(c).** The four surfaces are one command with four `registerMenuItem` registrations, not four implementations, so the cost is the registrations. The Task-Group rung is what makes "this 岗位 always works in the vendor portal" a thing you say once — and it sits BELOW the conversation's own value, so it can never overwrite work a session already did. |
 | **D15** | **Does a fork inherit the profile pin?** (§3.2.5 — `browserKey` deliberately does not.) | (a) inherit the pin (identity still fresh); (b) inherit neither; (c) inherit both. | **(a).** A pin is a preference ("this kind of work uses this login") and a key is an identity. (c) would give a fork another conversation's pinned tab, which is the defect §3.2.1 exists to prevent; (b) makes every fork of a portal session log in again for no reason. |
 | **D16** | **Does a mid-session pin announce itself into the conversation?** (§3.2.5, the same category as D11 — an announcement is a billed turn.) | (a) never — the agent learns from `vibespace-browser status` and from its next launch landing in the new profile; (b) the free path only (a `<system-reminder>` on the user's next message); (c) (b) plus a delivery-ladder turn when the session is idle, behind a setting. | **(c) with the setting default OFF**, which is exactly (b) in practice. A pin is a user action, so the user is right there typing and the `pendingNotice` channel costs nothing. The ladder path exists for the one shape that channel cannot serve — an idle session the owner wants to redirect now — and it is declared, gated and off by default like every other unattended turn. |
-| **D17** | **Do we ship the live backend switch, and who pays for CloakBrowser's seats?** (§7.4 — free = ONE concurrent session; Pro = 5 / 20 / 200 / 2000.) | (a) no switch — a profile's backend is fixed at creation; (b) switch on the free tier only, with the seat count shown and a loud refusal at the ceiling; (c) (b) plus a paid tier bought up front. | **(b).** The switch is the feature the owner asked for, and the free tier is enough to answer the only question that matters — does this site actually open. The seat count belongs in the dialog rather than in a support conversation later; buy a tier against a measured failure on a named site (D4's rule, unchanged). |
+| **D17** | **Do we ship the live backend switch, and who pays for CloakBrowser's seats?** (§7.4 — free = ONE concurrent session; Pro = 5 / 20 / 200 / 2000.) | (a) no switch — a profile's backend is fixed at creation; (b) switch on the free tier only, with the seat count shown and a loud refusal at the ceiling; (c) (b) plus a paid tier bought up front. | **(b).** The switch is the feature the owner asked for, and the free tier is enough to answer the only question that matters — does this site actually open. The seat count belongs in the dialog rather than in a support conversation later; buy a tier against a measured failure on a named site (D4's rule, unchanged). **Round 7 adds one clause without changing this recommendation**: the two numbers in that seat display come from two different places — the *total* (the tier) from the **Test verdict** of §7.5's registry row, the *used* count from **the keeper's own counting**, because no vendor interface answers "how many seats is this key holding right now" (§12.35). And when the key is the **cluster default** (D32), the keeper can only count this instance, so that row must say so. |
 | **D18** | **Is auto-bind ON by default?** (§4.6 — when a session's browser starts and its chat window is open, the live view is born inside that chain in split.) | (a) ON; (b) OFF, bind is always a click; (c) ON only when the chat window is wide enough. | **(a) ON.** The binding is the answer to "whose browser is that", and a default that has to be discovered does not answer it. It is one setting, reversible per window by dragging a pane out, and the group is never dissolved on its own — so the worst case of being wrong is one drag. (c) is a hidden rule that will look like a bug on the day it does not fire. |
 | **D19** | **In a split chain with a third tab, what does clicking that tab do?** (§4.6 — a chain may hold five tabs with two of them paired.) | (a) it replaces the non-owner pane; (b) the whole chain flips back to `'tabs'`; (c) a third pane opens. | **(a).** It keeps the binding (the chat pane, the thing the browser is bound TO, stays put) and it is the least surprising: the pane you were not looking at is the one that changes. (c) is refused on measurement grounds — three panes are all unusable below a width most people run, and the ratio model would have to become a tree. (b) silently destroys a layout the user built. |
 | **D20** | **Do we build a WeChat local-store adapter?** (§4.8 — SQLCipher via WCDB, key in process memory; on this box `ptrace_scope` is `1`, so only an ancestor may read it.) | (a) no — picture via Xpra, data via the official Official-Account / Work-WeChat APIs; (b) yes, in core; (c) yes, but only in a plugin, with explicit consent, and only for a client VibeSpace started itself. | **(a), with (c) as the answer if the owner insists.** It is memory-scraping a proprietary client that breaks silently on every update, it crosses the ToS plainly, and the only way to make it technically work is to have VibeSpace start WeChat *so that* it can read its memory — a sentence that argues against itself as a default. If it is built, it is a plugin (D2's line for proprietary things with a legal face), never core. |
@@ -2332,6 +2641,9 @@ their ranges say how little is known about them.
 | **D28** | **Is a window target's PRIMARY observation channel the accessibility tree or pixels?** (§4.9 — measured here: AT-SPI available, 9 applications, ~1,800–6,100 nodes/s.) | (a) tree primary, pixels fallback; (b) pixels primary, tree as a hint; (c) pixels only (which is what Anthropic's computer use is). | **(a).** Not a preference — it is the rule this document has already written twice: talking to a tree beats talking to pixels (§4.7's conclusion, and Codex's own browser panel in §4.1). It also has two properties only (a) has: `Action.do_action` means **acting** needs no input injection either (so Wayland's "no global injection" does not reach it), and an audit line can record "clicked the button named Minimize" instead of "clicked (412, 88)". **But that first property must be stated at its measured scope**: `do_action` removes the need for injection only **for the subset of nodes that declare an action** (measured 2026-09-10: 66 of 503 nodes, and 6 of 43 `button` nodes), while `type` has its own condition (`EditableText`, 33/503) and `key` (a chord) has **no road on the tree at all**. So this decision is unconditional about the **observation** channel ("tree primary"); the action half splits into four answers per verb, written into §4.9's matrix and §5.1.1's capability table. (c) is the cell we **must** be able to degrade to (custom-drawn controls, canvases, images), so it is the fallback rather than the road. |
 | **D29** | **Which road does input injection take on Wayland?** (§4.9 — the portal's RemoteDesktop interface is present here, `libei`/`libeis` 1.3.901 installed, `/dev/uinput` is 0600 with the module not loaded.) | (a) the RemoteDesktop portal (`ConnectToEIS` preferred), with `persist_mode=2` + `restore_token` remembering the grant; (b) ydotool/uinput, requiring ops to open up `/dev/uinput`; (c) neither — support only X11/Xwayland and our own nested X. | **(a), with (c) as the status quo until it is proven to work.** (b) is explicitly not recommended: it asks for a device node that can synthesise global input to be handed to this uid, a far larger grant than the feature itself, and it bypasses every consent mechanism the compositor has. (a) has a precondition that must be measured first — **our server runs under `systemd --user`**, and public reports record portal/D-Bus being denied in background contexts (§12). So P9's first task is to measure it; if it fails we land on (c), and (c) plus D28's `do_action` still covers a substantial share of actions. |
 | **D30** | **Do we build window targets on a paired Mac?** (§4.9, §7.3 — macOS's two TCC gates.) | (a) no — the fleet story stays browser-only (§7.3 already decided this); (b) yes, through an agentd op using ScreenCaptureKit + AXUIElement. | **(a), with the reason written down rather than left blank.** Neither gate is "show one dialog": Accessibility requires the process to be **non-sandboxed and signed**, and Screen Recording on macOS 26 (Tahoe) is publicly reported to **require an app bundle** — a plain executable does not even appear in System Settings' privacy list, so it can neither be granted nor be granted-to (a computer-use project's public issue from 2026-01 records exactly this shape: windows missing from screenshots while ScreenCaptureKit returns a TCC error even with permission in the database). And VibeSpace's form on a paired machine is precisely a plain executable started by a daemon. So the first step of (b) is not code, it is answering "do we ship a signed app bundle on macOS" — a product decision, not this section's. |
+| **D31** | **How many tiers of the access ladder do we ship?** (§7.6 — the owner's 2026-09-10 question: is agent-browser CDP, would a bank like Mercury detect it, do we also need a pure computer-use version.) | (a) ship tiers 1+2 only (CDP + fingerprint browser); (b) 1+2+3, with tier 3 after the window-target phase (P10); (c) tier 3 first — banks are the owner's actual case. | **(b).** Tiers 1 and 2 answer "this content site is blocked by an anti-scrape stack", a question CloakBrowser's free tier can answer, and they share **one CDP channel, one set of verbs, one profile model** — the increment is a single row in §7.1, which is exactly why they ship together. Tier 3 is different physics: no CDP, no element references, a different empty cell per platform (§4.9's matrix), and it **requires** §4.9's window targets plus D27's option (b) (the user's real desktop) — so folding it into P4 would double the length of an already least-certain phase. (c) is refused by this one thing: the first step on the bank road is not writing code, it is **measuring which tier 2–3 named sites actually fail on** (§12.36), and that measurement can be made today with no code at all. If they pass on tier 1, P10 drops to the bottom of the list; if they fail even on tier 3 (behavioural biometrics, §7.6), P10 should not be built either. **Measure first, then schedule** — the same rule D4 applies to CloakBrowser. |
+| **D32** | **CloakBrowser's key: one team key from the cluster, or one per user?** (§7.5, and the "where the cluster can supply a default, supply one" half of the owner's 2026-09-11 directive — while this row is licensed **per concurrent session**.) | (a) only the user's own key; (b) the cluster injects a default key and the user may override it; (c) a cluster key with no override. | **(b), but the key the cluster injects is the **free tier**, and the seat display must say it is shared fleet-wide.** (b) is the same shape as Drive presets (`src/mounts.js:2189`) and the frp relay (`src/plugins.js:569`), and it is the half of the owner's directive that asks for a default. But it has a consequence **peculiar to an integration licensed per concurrency** that must be rendered rather than documented: the seats of a shared key are consumed by **every user on that default**, so one of A's browsers makes B's switch fail — while the keeper can only count **this instance** (§12.35: no vendor interface answers "how many seats is this key holding right now"). So the source chip reads "cluster default (seats shared with other users; N used on this instance)", and the advice at the ceiling is **switch to your own key** (one click, §7.5), not "ask the admin to upgrade the team tier". (c) is refused: a per-profile paid capability is not the admin's decision to make for the user, and the override is free — which is also why `useClusterDefault(id)` and `setIntegration(id, …)` are two separate actions. |
+| **D33** | **What happens when you switch to a backend whose key is not configured?** (§7.4 / §7.5.) | (a) refuse loudly and open the Integrations card; (b) fall back to `chromium` silently; (c) fall back to `chromium` with an announcement. | **(a).** This is the same family as §7.4's "the binary is not installed" named refusal (`backend_no_key` beside `backend_unavailable`), and the Integrations card is the **actionable** way out — `app.openIntegration('cloak')`, one click, focused. (b) is refused explicitly: the user pressed "Open with CloakBrowser" precisely because `chromium` could not open it, so a silent fallback shows them the same failure again without telling them why — the textbook shape of this repo's no-silent-failures law. (c) sounds gentler and is worse: it spends a **billed turn** saying something to a user who is sitting in front of the screen (the D11/D16 test), and it still leaves them on the page that will not open. What keeps (a) from stinging is not the refusal but the fact that **the switcher says it before you click** (not configured = a row disabled with its reason plus a source chip, §7.1's capability-row discipline) — so the refusal is the last net, not the first. |
 
 ---
 
@@ -2534,6 +2846,51 @@ Added in round 6, both of them consequences of this round's own changes:
     found" is not "does not exist" (this repository has paid for that class of claim), so this is
     written as an input P9 must look up and measure rather than a question that already has an
     answer.
+34. **The final heading of the shared Integrations & keys section.** This track is its **consumer**,
+    and it is being written in the **same round** as this document. What I read is
+    `docs/design-communication-panel.zh.md` at commit `14785475` on branch
+    `design-communication-panel-r2`, where the existing section is `## 13. 密钥、过期、失败`. So
+    this document cites it by **module name** throughout (`src/integration-registry.js`,
+    `src/server/integration-store.js`, `src/secret-box.js`, `resolveIntegration`, `publicView`,
+    `app.openIntegration`) rather than by section number — **the names are the contract, the title
+    is not**. If the two documents diverge on a name, the divergence is the defect, not a wording
+    difference.
+35. **Whether CloakBrowser exposes a "seats in use" query.** The public material says only that the
+    package does **automatic license-plan detection** (a validated free key launches without user
+    confirmation, and concurrent local free sessions are serialized), that the license key travels
+    over three channels — `CLOAKBROWSER_LICENSE_KEY`, a `licenseKey` option, and
+    `~/.cloakbrowser/license.key` — and that its format is `cb_…`. I found **no** interface that
+    answers "how many seats is this key holding right now". So §7.4's seat display is **ours to
+    count** (the keeper counts this instance), and the Test verdict can only give the **tier** plus
+    one successful launch — which is precisely why D32's "a shared key's seats are fleet-wide and
+    the chip must say so" cannot be solved by a query. The `cloud:*` vendors may differ; also
+    unverified.
+36. **Which tier a named site actually fails on.** This round made no attempt against any real
+    site — not tier 1, not tier 2, certainly not tier 3. All of §7.6's table is about **mechanism**,
+    not a reading of any one site, and the owner's ask for "2–3 concrete failing sites" is the only
+    input evidence can move on this whole ladder. **That measurement needs no code** (run the
+    installed 0.32.0 by hand), so it belongs **before** P10 rather than inside it — D31's
+    recommendation is built on this item.
+37. **Whether `agent-browser-plugin-stealth` is a real published package.** In 0.32.0's README it is
+    an **example**: the `launch.mutate` capability is real, documented and capability-gated
+    (`--confirm-actions plugin:stealth:launch.mutate`), and the protocol request type is spelled
+    out; but I did **not** verify on npm that an implementation by that name exists, and I ran no
+    launch mutator. So §7.6 says "upstream has a first-class interface to hang one on", **not**
+    "there is one available".
+38. **What the cloud providers' `*_STEALTH` switches actually change.** `BROWSERLESS_STEALTH` and
+    `KERNEL_STEALTH` are both in the installed binary's env table and its README (documented
+    defaults `true` and `false` respectively), but behind them is each vendor's own implementation
+    with no public specification, and I did not measure them. §7.5 therefore treats them as
+    **fields** (a value a user or a cluster may set) and not as a capability promise — the mirror
+    image of §7.1's "a capability a provider lacks is a field the UI reads": an **unmeasured**
+    capability does not get into a caps row.
+39. **Tier 3's end-to-end latency and success rate, zero measurements.** §4.9 already records that
+    `xpra` is not installed on this box and that end-to-end latency was never measured; tier 3
+    inherits that whole item and adds weight to it: a bank login is a run of short forms plus a
+    very likely step-up, and this document has **not one number** for "one `do_action` to a visible
+    change", let alone any measurement of **the user's own machine's** desktop stack (every figure
+    in §4.9 comes from this one). So P10's first task is to measure it, not to build it, and P10's
+    range (4–12, the widest in this document) is the price of that ignorance.
 
 ---
 
@@ -2656,6 +3013,56 @@ Added in round 6, both of them consequences of this round's own changes:
     (Baileys / WAHA / Evolution API) versus the official Business API.
   * **This machine, read-only, 2026-09-10:** `/proc/sys/kernel/yama/ptrace_scope` = `1`;
     `Xvfb` present at `/usr/bin/Xvfb`; `xpra` and a WeChat client absent.
+  * **Round 7 sources (2026-09-11), for the owner's integration-key directive and Q10's detection
+    ladder:**
+    * **The installed agent-browser 0.32.0, binary and README, read-only** —
+      `strings bin/agent-browser-linux-x64` yields the CDP surface (`struct CdpMessage` /
+      `CdpReply` / `CdpError`, `Target.createTarget`, `Page.navigate`,
+      `Input.dispatchMouseEvent`, `GetFullAXTreeResult`), the WebDriver backend that serves only
+      iOS/Safari/Appium (`src/native/webdriver/{client,backend,appium,ios}.rs`),
+      `--disable-blink-features=AutomationControlled` appearing **only** in the example text for
+      `--args`, and the cloud providers' env names (`BROWSERBASE_API_KEY`, `BROWSERLESS_API_KEY` /
+      `_API_URL` / `_STEALTH`, `KERNEL_API_KEY` / `_ENDPOINT` / `_STEALTH`, `BROWSER_USE_API_KEY`).
+      Its README gives the plugin capabilities (`credential.read` / `browser.provider` /
+      `launch.mutate` / `command.run`), the example plugin name `agent-browser-plugin-stealth`, the
+      capability gate `--confirm-actions plugin:stealth:launch.mutate`, "agent-browser keeps browser
+      automation, redaction-sensitive output, and policy enforcement in core", and the documented
+      defaults of `BROWSERLESS_STEALTH` / `KERNEL_STEALTH`.
+    * **`vercel-labs/agent-browser` issue #120** — "Feature Request: Add stealth mode via
+      AGENT_BROWSER_STEALTH environment variable" (shkumbinhasani, 2026-01-15, still open): modern
+      bot detection (Cloudflare / DataDome / PerimeterX / reCAPTCHA) checks far more than one
+      signal, launch flags address "one detection vector", and the list of WebGL vendor/renderer,
+      plugin and mime enumeration, Chrome runtime properties, and inconsistent feature detection.
+    * **The state of CDP detection in 2026** — public analysis: a 2025 Chrome update altered the
+      serialization path the classic `Runtime.enable` check observed so the getter stopped firing on
+      current versions, while the rebrowser / Patchright generation of patches simply stops sending
+      the command — that **one** signal is largely inert; what remains is protocol side effects,
+      injected residue (`$cdc_`, `__playwright__binding__`), evaluation fingerprints, and absence
+      patterns (with server-class rendering and datacenter network indicators).
+    * **Bank-side device and behavioural intelligence** — one behavioural-biometrics vendor's
+      2026-03 DeviceIQ launch material (naming the detection of device spoofing, emulators,
+      **cloaked browsers**, jailbroken devices and data wiping; claiming continuous collection of
+      3,000+ anonymized signals including keystroke and mouse activity and AI agent usage; more than
+      30 of the world's largest 100 banks and 357 financial institutions as of 2026 Q1). **Used only
+      to establish that this industry judges on device + behaviour + new-device step-up**, not as a
+      reading of any named bank (§12.36).
+    * **CloakBrowser's license channels** — `CLOAKBROWSER_LICENSE_KEY` / a `licenseKey` option /
+      `~/.cloakbrowser/license.key`, format `cb_…`; 1 concurrent session on free, 5 / 20 / 200 /
+      2000 paid; automatic license-plan detection and serialization of concurrent local free
+      sessions. **No** seats-in-use query (§12.35).
+  * **VibeSpace (round 7):** `src/ws-handler.js` (the DROP-list semantics of `AGENT_ENV_KEEP` /
+    `AGENT_ENV_DROP` / `agentEnv()` and the comment above them naming the secrets helm injects,
+    `:88-121`, exported at `:1657`), `src/mounts.js` (`drivePresets()` `:2189`, `_driveClient()`'s
+    precedence `:2211`, the loopback paste-back flow `:2172-2183`, `_enc`/`_dec` `:369-382` and
+    `.mounts-key` `:47`+`:360-367`), `src/plugins.js` (`_frpCfg()` `:569-580` letting a user override
+    beat the cluster env, `fromEnv` `:686`, exposing only `hasToken` `:694`, default-enabled when the
+    cluster injected `:584-589`), `src/lib/sidebar-mounts.js` ("Custom (own client id/secret)" and
+    the `type:'password'` field, `:1750-1771`), `src/routes/persistence.js` (the `sensitive` list of
+    `/api/config/export-info` `:679-686` and the ≥4-character passphrase gate `:708-712`),
+    `src/lib/settings-schema.js` (`SETTINGS_CATEGORIES` `:935-948` — an `Integration` category
+    already exists, a Browser one still does **not**),
+    `deploy/helm/vibespace-user/templates/main.yaml` (the Drive presets' `secretKeyRef` shape
+    `:159-170`, `VIBESPACE_PUBLIC_URL` `:172-176`).
   * **VibeSpace (round 3):** `src/lib/tab-group.js` (the chain model, `_syncChainBounds`,
     `restoreTabChain`, `_detachFromChain`, `_ungroupLast`), `src/lib/layout.js` (the
     `tabs.join(',')` sync key and the tabChain persistence), `src/lib/contributions.js` +
