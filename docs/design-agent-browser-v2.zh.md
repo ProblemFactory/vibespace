@@ -1979,16 +1979,17 @@ oauth client 的就提供默认）」。）
 为什么一步都不能靠近 agent。
 
 **它不是本设计自己的机制，本节是它的消费方。** 共享的**集成与密钥层 (Integrations & keys)** 定义在
-**`docs/design-communication-panel.zh.md` 的密钥一节**（我在 `design-communication-panel-r2` 分支
-commit `14785475` 上读到的那一版，现有的那一节是 `## 13. 密钥、过期、失败`，本轮在那边被扩写成这个
-共享层）。**两份文档的权威锚点是模块名，不是节号**（§12.34）—— 本节逐字使用这些名字：
+**`docs/design-communication-panel.zh.md` 的集成密钥一节**（本节这一版对的是
+`design-communication-panel-r2` 分支 commit `d02afcbb` 上的第八轮正本，那边的共享层现在是
+`## 14. 集成密钥与配置界面`，而 `## 13. 密钥、过期、失败` 留给 adapter 自己的 token）。
+**两份文档的权威锚点是模块名，不是节号**（§12.34）—— 本节逐字使用这些名字：
 
 | 名字 | 是什么 | 本 track 怎么用它 |
 |---|---|---|
-| `src/integration-registry.js` | **PURE** 表，不 import 任何东西：一行一个集成 `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, test:{kind,describe}, consumers:[…], docs}` | 本 track 贡献下面那六行；`test.kind` 取自共享层那个**封闭集**，`consumers` 写的是**模块路径**（那条普查要求每个名字既是一个存在的文件、又真的调用 `resolveIntegration('<id>')`） |
-| `src/server/integration-store.js` | **ORCH**：`data/integrations.json` 经 `writeJsonAtomic` 写入、secret 字段经 secret-box 加密；`resolveIntegration(id)` → `{source:'user'\|'cluster'\|'none', values, label, fromEnv, testedAt, lastError}`；`publicView(id)` 把每个 secret 字段遮成 `••••` + 末 4 位；`setIntegration(id, patch)`（缺省字段=不变，`''`=清空）、`useClusterDefault(id)`、`test(id)`；每次写广播 `integrations-updated`（携带**遮蔽后**的视图） | keeper 在 spawn 一个 provider **之前**问 `resolveIntegration`，从不自己读 env |
-| 路由 | `GET /api/integrations`（遮蔽列表）· `PUT /api/integrations/:id` · `POST /api/integrations/:id/test` · `DELETE /api/integrations/:id`（退回集群默认 / 无） | §7.4 的切换器读遮蔽列表拿来源与 Test 判决；**永远不读明文** |
-| ⚙ → **Integrations**（集成与密钥） | 窗口类型 `integrations`（`registerWindowType`，openSpec `{openIntegrations, focus:<id>}`），像 Plugins 卡片那样一行一张卡：**来源芯片**（集群默认 / 你自己的 / 未配置）、"用集群默认"与"用我自己的 key"二选一、声明的字段（secret 只给 **Replace** 不给 Reveal）、Test 按钮与它上一次的判决（含被转义的供应商原文）、一行"这个 key 被谁用"；**≤768px 渲染同一批卡片，单列** | 每个消费方深链到自己那张卡：`app.openIntegration(id)` |
+| `src/integration-registry.js` | **PURE** 表，不 import 任何东西：一行一个集成 `{id, label, fields:[{key,label,secret,required,placeholder,help,validate}], clusterEnv, setup:{callbackUrl,callbackNote,prerequisites}（可选）, test:{kind,describe,caveat}, consumers:[…], docs}` | 本 track 贡献下面那六行；`test.kind` 取自共享层那个**封闭集**，`consumers` 写的是**模块路径**（那条普查要求每个名字既是一个存在的文件、又真的调用 `resolveIntegration('<id>')`）。**本 track 这六行一个 `setup` 都不声明**，而这一句要说出来而不是默认：`setup` 装的是"在同意页能成功之前用户必须先在对方控制台里做完的事"（回调 URL、scope、已发布的版本），而 CloakBrowser 与五个 `cloud:*` 都是**纯 key**——没有同意页，也没有任何一个要抄进对方控制台的值。所以共享层那条"一行只要声明了 `setup.prerequisites`，就必须声明 `test.caveat`"**对本 track 的六行不生效**（它约束的是 Lark 那种 OAuth 行）；卡片"永远不只画一个绿勾"那一条仍然照旧适用 |
+| `src/server/integration-store.js` | **ORCH**：`data/integrations.json` 经 `writeJsonAtomic` 写入、secret 字段经 secret-box 加密。**记录里只有两样东西**：`values`（用户自己打进去的）与 `clusterKey`（用户挑中的那个集群预设的 key）——**`source` 是读的时候推导出来的，绝不落盘**（一个落盘的 `source` 会和"集群默认消失了就答 `none`"打架，而一个只挑了预设、没填任何密字段的记录**不是**"用户自己的凭据"）。`resolveIntegration(id)` → `{source:'user'\|'cluster'\|'none', clusterKey, values, label, fromEnv, testedAt, lastOk, lastError, missing:[]}`；`publicView(id)` 把每个 secret 字段遮成 `••••` + 末 4 位；`setIntegration(id, patch)`（缺省字段=不变，`''`=清空）、`clearUserValues(id)`、`useClusterDefault(id)`、`test(id)`；每次写广播 `integrations-updated`（携带**遮蔽后**的视图） | keeper 在 spawn 一个 provider **之前**问 `resolveIntegration`，从不自己读 env |
+| 路由 | `GET /api/integrations`（遮蔽列表，每一行还携带 `setup`、`clusterKey`、`clusterOptions`、`testCaveat`）· `PUT /api/integrations/:id` = `setIntegration`（缺省字段=不变，`''`=清空）；载荷带 `{use:'cluster'}` 时走的是 `useClusterDefault(id)`，**没有集群默认就具名拒绝**；载荷带 `{clusterKey:'<key>'}` 时存的是那个**选择器**（记录里一个值都不落）· `POST /api/integrations/:id/test` · `DELETE /api/integrations/:id` = `clearUserValues(id)`，也就是**"把我的 key 清掉"：永远允许**，丢掉用户覆盖之后**落在优先级落到的地方**（有集群默认就是 `'cluster'`，没有就是 `'none'`）——它**不是** `useClusterDefault`，后者是那颗单选、并且在没有集群默认时拒绝 | §7.4 的切换器读遮蔽列表拿来源与 Test 判决；**永远不读明文** |
+| ⚙ → **Integrations**（集成与密钥） | 窗口类型 `integrations`（`registerWindowType`，openSpec `{openIntegrations, focus:<id>}`），像 Plugins 卡片那样一行一张卡：**来源芯片**（集群默认 / 你自己的 / 未配置）、"用集群默认"（走 `PUT {use:'cluster'}` → `useClusterDefault(id)`，没有集群默认时置灰**并说明原因**）与"用我自己的 key"二选一、声明的字段（secret 只给 **Replace** 不给 Reveal）、Test 按钮与它上一次的判决（含被转义的供应商原文）、一行"这个 key 被谁用"；**≤768px 渲染同一批卡片，单列** | 每个消费方深链到自己那张卡：`app.openIntegration(id)` |
 | 优先级 | **用户自己的 > 集群默认 > 没有**，无例外 | §7.4 的切换器、keeper、以及将来任何一个 provider 行都问同一个答案 |
 
 这个形状在本仓库已经跑着两份，本节没有发明它：`MountManager.drivePresets()` / `_driveClient()`
@@ -2099,8 +2100,13 @@ token — an agent could read all of them with one `env`"）。于是这条规�
   `resolveIntegration` 在 spawn 的那一刻取出 —— 不写文件、不进 argv、不进日志、不进 `agentEnv`。
   这与 §6.4 那条"代理密码和 provider 授权 key 活在服务端的注册表里"是同一条；本节只是给了它一个
   实现，以及一种它会被违反的具体方式。
-* **一个消费方永远不自己读 `process.env`。** 那条常驻普查（`process.env.VIBESPACE_INTEGRATION`
-  出现在 store 之外 = 红）由共享层拥有；本 track 的模块是它的**被扫描对象**，而 §9 为此多一条腿。
+* **一个消费方永远不自己读 `process.env`。** 那条常驻普查由共享层拥有，而它查的是 **env 名字**、
+  不是取值的写法：正则 `/VIBESPACE_INTEGRATIONS?\b|VIBESPACE_INTEGRATION_/` 出现在
+  `src/server/integration-store.js` **之外** = 红，文件集由 `git ls-files` 推导（经
+  `scripts/git-env.mjs` 的净化 git 环境）并由套件**打印出来**，两种绕法各当一条负控 ——
+  方括号形式 `process.env['VIBESPACE_INTEGRATIONS']` 与解构形式
+  `const { VIBESPACE_INTEGRATIONS } = process.env`。本 track 的模块是它的**被扫描对象**，
+  而 §9 为此多一条腿。
 * 与 §6.1 那条"流 token 永不到达 agent"完全同形：一个不进 `agentEnv` 的秘密，仍然可以被同一个 uid
   下的进程从**服务器自己的** `/proc/<pid>/environ` 读到（§6.5 已经把这个诚实边界写过一遍）。本节
   去掉的是那个**意外**（一把躺在每个 agent 环境里、`env` 一敲就有的 key），不是在制造一条边界。
@@ -2288,7 +2294,7 @@ key，根本没有重定向** —— 本 track 上表里的每一行都是纯 ke
 | `test-browser-cli` | fast | P0、P1 | 包装 CLI 的动词表、在共享 profile 上对 `close --all` 的拒绝、有类型的 `browser_paused` / `tab_gone` 透传、没有 token 或没有 API 时的行为，以及 **`use` 永不打印 CDP URL**（§5.1）—— 以第一轮那种写法作为它的负控。 |
 | `test-browser-keeper` | heavy | P1 | 真 `agent-browser` ≥ 版本下限：reuse-or-spawn、跨重启 adopt、**开机对账**（一份没有任何活会话扛着其 `browserKey` 的持久租约，会在任何 `IDLE_TIMEOUT_MS=0` 之前被丢掉、其 target 被关掉 —— 第一轮省略掉的那一半，配一个会泄漏一个浏览器的修前对照）、对一个无法验明的 pid 带理由 park、失控停止、只清你自己的记录、天花板处点名持有者的拒绝。当二进制不存在或低于下限时**带证据大声 SKIP**。 |
 | `test-browser-live` | heavy | P2、P3 | 真浏览器 + 真流 + 真桥接：一个 profile 上的两个会话各自驱动自己的标签页、永远碰不到对方的（I2 的证明，配一个**能复现那次劫持的修前对照**）、一个观看者只靠 cookie 鉴权就看到帧、背压守得住、接管拒绝 agent 输入而交还恢复它。窗口在 375×667 以及一个非 1 的 DPI zoom 下各跑一条 headless-chrome 腿。 |
-| `test-browser-providers` | fast + heavy | **P4** | fast：provider 能力行，以及一个 provider 对它缺失的能力产出的确切拒绝（一个被禁用的控件说出它的理由），外加 CloakBrowser 出网证明记录的存在与形状（§7.2.1）—— 一个带 `blocks:` 主张而其 caps 行并不是 false 的 provider 行会 FAIL，`local-oracles` 那套纪律。heavy：真的 `browser-serve` 守护进程 op 打在一个真守护进程上，**并断言它的能力门**（旧守护进程绝不被问 —— 未知 op 会挂住），以及通过 `tcpForward` 的远程 `cdp` provider。**外加 key 那四条腿（§7.5）**：(i) **一个消费方永远不自己读 env** —— 把一整套假 provider key 放进服务器的 `process.env`，跑**真的** `agentEnv()`（它是导出的，`src/ws-handler.js:1657`），断言返回的对象里一个都没有，负控是**按供应商自己的名字**注入的那一版（`BROWSERBASE_API_KEY=…`），它必须变红（今天它会原样传下去，`:112-121`）；(ii) keeper 在 spawn 前**恰好一次**问 `resolveIntegration(provider)`，而 spawn 出去的那个子进程的环境里有那个供应商的 env 名、**它的父进程环境里没有**；(iii) 优先级三态（用户 / 集群 / 无）在同一个 fixture 上给出三个不同的 `source`，而 `publicView` 从不吐出一个明文 secret（断言的是**返回的对象**，不是它的渲染）；(iv) 一条**具名拒绝**：没配 key 的 backend 切换回 `backend_no_key` 且**不 spawn 任何东西**（负控 = 回落 `chromium`，D33 明确否掉的那个）。**再加本轮的四条**：(v) **六行全部注册了 runner** —— 把 `src/server/browser-backend.js` 的接线跑一遍，断言 `registerIntegrationTest(id, fn)` 对这六个 id 各调用过一次（负控 = 一行声明了 `test` 而没注册，它必须变红：那正是共享层普查里"死控件"的形状，而本 track 自己也要能抓到它）；(vi) **出网声明是推导出来的** —— 每个 runner 能到达的主机集合恰好等于 §7.5 那条规则推出来的集合，`browserless` / `kernel` 两行的主机取自**那一行自己字段里**的值（用两个不同的 `apiUrl` 各跑一次，主机必须跟着变），负控 = 一行把主机写成常量的 runner，它必须变红；(vii) **`cloak` 的 Test 零网络** —— 跑它的 runner，断言**零**子进程、零 socket、零字节下载，而它对一个形状错的 key 给出的是一次具名的 `validate` 抱怨（负控 = 一个会起 `cloakserve` 的 runner，它必须变红，因为那会绕过 §7.4 的两个前置条件）；(viii) **`keyScope` 是一条拒绝** —— 一个 `host != null` 的 profile 切到 `cloak` / `cloud:*` 得到 `provider_needs_local_key` 且**不 spawn、不解析、不把任何值交给任何传输**（负控 = 允许它通过的那一版，它必须变红；这条腿也是 D34 将来被翻牌时第一个要长出远端臂的地方）。那条 `process.env.VIBESPACE_INTEGRATION` 出现在 store 之外就变红的普查由共享层的 `test-integration-registry` 拥有，本 track 的模块只是它的被扫描对象 —— 而本 track 在 §10 的 P4 里为此有一条跨 track 依赖线。 |
+| `test-browser-providers` | fast + heavy | **P4** | fast：provider 能力行，以及一个 provider 对它缺失的能力产出的确切拒绝（一个被禁用的控件说出它的理由），外加 CloakBrowser 出网证明记录的存在与形状（§7.2.1）—— 一个带 `blocks:` 主张而其 caps 行并不是 false 的 provider 行会 FAIL，`local-oracles` 那套纪律。heavy：真的 `browser-serve` 守护进程 op 打在一个真守护进程上，**并断言它的能力门**（旧守护进程绝不被问 —— 未知 op 会挂住），以及通过 `tcpForward` 的远程 `cdp` provider。**外加 key 那四条腿（§7.5）**：(i) **一个消费方永远不自己读 env** —— 把一整套假 provider key 放进服务器的 `process.env`，跑**真的** `agentEnv()`（它是导出的，`src/ws-handler.js:1657`），断言返回的对象里一个都没有，负控是**按供应商自己的名字**注入的那一版（`BROWSERBASE_API_KEY=…`），它必须变红（今天它会原样传下去，`:112-121`）；(ii) keeper 在 spawn 前**恰好一次**问 `resolveIntegration(provider)`，而 spawn 出去的那个子进程的环境里有那个供应商的 env 名、**它的父进程环境里没有**；(iii) 优先级三态（用户 / 集群 / 无）在同一个 fixture 上给出三个不同的 `source`，而 `publicView` 从不吐出一个明文 secret（断言的是**返回的对象**，不是它的渲染）；(iv) 一条**具名拒绝**：没配 key 的 backend 切换回 `backend_no_key` 且**不 spawn 任何东西**（负控 = 回落 `chromium`，D33 明确否掉的那个）。**再加本轮的四条**：(v) **六行全部注册了 runner** —— 把 `src/server/browser-backend.js` 的接线跑一遍，断言 `registerIntegrationTest(id, fn)` 对这六个 id 各调用过一次（负控 = 一行声明了 `test` 而没注册，它必须变红：那正是共享层普查里"死控件"的形状，而本 track 自己也要能抓到它）；(vi) **出网声明是推导出来的** —— 每个 runner 能到达的主机集合恰好等于 §7.5 那条规则推出来的集合，`browserless` / `kernel` 两行的主机取自**那一行自己字段里**的值（用两个不同的 `apiUrl` 各跑一次，主机必须跟着变），负控 = 一行把主机写成常量的 runner，它必须变红；(vii) **`cloak` 的 Test 零网络** —— 跑它的 runner，断言**零**子进程、零 socket、零字节下载，而它对一个形状错的 key 给出的是一次具名的 `validate` 抱怨（负控 = 一个会起 `cloakserve` 的 runner，它必须变红，因为那会绕过 §7.4 的两个前置条件）；(viii) **`keyScope` 是一条拒绝** —— 一个 `host != null` 的 profile 切到 `cloak` / `cloud:*` 得到 `provider_needs_local_key` 且**不 spawn、不解析、不把任何值交给任何传输**（负控 = 允许它通过的那一版，它必须变红；这条腿也是 D34 将来被翻牌时第一个要长出远端臂的地方）。那条**按 env 名字**（`/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/`，文件集由 `git ls-files` 推导并打印出来，两种绕法各当一条负控）出现在 store 之外就变红的普查由共享层的 `test-integration-registry` 拥有，本 track 的模块只是它的被扫描对象 —— 而本 track 在 §10 的 P4 里为此有一条跨 track 依赖线。 |
 | `test-browser-housekeeping` | fast | **P5** | 把保留/收编这个**判定**当作一个 PURE 函数来测，并打印它放过了什么以及为什么；**清扫的范围恰好是 `ownsDir: true` 的那些 provider 行**（§7.1 的能力格），负控是一个 `cloud:*` 或 `local-window` 记录被排进清扫名单的那一版，它必须变红 —— 那个目录不是我们的 —— 本仓库自己的清扫律：**绝不要求一次没有任何东西被允许执行的移除**（对任何可能正在飞的东西给一个宽限窗口，并连同它的年龄一起点名）。负控：在没有一次显式人类动作的情况下，永远不会有任何东西被提议删除；以及 `forget` 在移除**之前**先归档。 |
 | `test-browser-pin` | fast | **P0、P1** | 钉子的阶梯当作一个 PURE 判定来测：显式 / 对话 / 岗位 / 实例 / 无，以及每一级陈述出来的 ORIGIN，还有 fork **复制钉子并铸新 key**（§3.2.5）。中途那一半是一条 WIRING PIN：被重指的符号链接（或被重写的每会话 config）才是下一次启动解析的东西，而套件断言**正在跑的那个浏览器不受影响** —— 那诚实的一半。另加词表那一条：产品发出的每一个 pin origin 都必须在 `SPAWN_ORIGINS` 里、且客户端的 `spawnValueOrigin` 白名单认得它（§3.2.5 的两处改动，负控 = 一个词表外的字符串必须让它变红，因为线上它只会静默显示一个错标签）。负控：岗位默认永远压不过会话自己的选择；绑定一个岗位不会改写一个正在跑的会话的钉子。 |
 | `test-browser-backend` | fast + heavy | **P4** | fast：版本阶梯当作一个 PURE 判定跑一张矩阵（目标 ≥ / < / 无记录，注册表与 `Last Version` 矛盾时取**更高**那个）、带着**是谁主张**的 site-hint 记录（外加 §7.6 规矩 2 的那条：带 `backend` 的记录**不许**携带 `tier`，负控是两个都写上的那一版），以及 `blocked` 是一条服务端绝不自己制造的主张。**席位是三态不是一个数**：已知且新鲜 / 已知但陈旧 / **未知**，三态各自的对话框文案与到顶行为各一条腿，而承重的两条是 —— **一个未知的总数永远不满足上限判定**（负控把 `未知` 当作 `0` 或 `∞`，两种都必须变红），以及**一个陈旧的判决退化成未知**（时钟推过 `SEAT_TIER_STALE_MS` 之后同一个 fixture 必须改口，负控是把年龄丢掉的那一版）。还有一条**来源分岔**：key 是用户自己的 ⇒ 拒绝点名占着席位的 profile；key 是集群默认 ⇒ 拒绝**不许**列出任何 profile，只说"席位与其他用户共享，本实例已用 N"加那条一键出路（负控 = 在集群默认下也去列本地 profile 的那一版）。heavy：一次真的切换 —— 停、按租约逐条把标签页开回它的 `lastUrl`、重新 pin、改写 `targetId`，**租约对象从未被销毁**；外加**三条**具名拒绝各一条腿（"没装" `backend_unavailable`、"没配 key" `backend_no_key`、以及把一次授权/并发校验失败的启动分类成 `backend_seat_taken` 并说出"这把 key 是集群默认" —— 最后这条的输入是一份**录下来的** `cloakserve` 失败输出，而录哪一份取决于 §12.40 那次测量，在它做完之前这条腿钉的是分类器的**形状**而不是供应商的措辞）。 |
@@ -2560,8 +2566,10 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
     node 专用 AT-SPI 绑定，但"没找到"不是"不存在"（这个仓库为这类断言付过代价），所以这条写成 P9 要
     先查、先量的一个输入，而不是一个已经有答案的问题。
 34. **共享集成与密钥层那一节的最终标题。** 本 track 是它的**消费方**，而它与本文档在**同一轮**被
-    写。我读到的是 `design-communication-panel-r2` 分支上 commit `14785475` 的
-    `docs/design-communication-panel.zh.md`，那里现有的一节是 `## 13. 密钥、过期、失败`。所以本
+    写。本节这一版对的是 `design-communication-panel-r2` 分支上 commit `d02afcbb` 的
+    `docs/design-communication-panel.zh.md`，那一节此刻是 `## 14. 集成密钥与配置界面`（第七轮我读的
+    是 commit `14785475`，那时它还只是 `## 13. 密钥、过期、失败`）—— 两份文档都还在各自的分支上，
+    所以这个标题**仍然不是最终的**，节号在下一轮就可能再动一次。所以本
     文档一律按**模块名**引用它（`src/integration-registry.js`、`src/server/integration-store.js`、
     `src/secret-box.js`、`resolveIntegration`、`publicView`、`app.openIntegration`），而不是按
     节号 —— **名字是契约，标题不是**。如果两份文档在某个名字上分叉了，分叉的那个就是缺陷，而不是
@@ -2614,6 +2622,14 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
     的答案**。实现时的第一步是把那三个常量读出来填进注册表行，而 §9 的第 (vi) 条腿断言的是**集合
     相等**，所以它对"常量填错"是敏感的、对"常量还没填"是明确失败的（一行推导不出主机 = 一次具名
     拒绝，不是一次"用默认主机试试"）。
+42. **两份文档的一致性是 grep 核的，不是一个语义工具核的。** 本轮把 §7.5 的合约按
+    `design-communication-panel-r2` 分支 commit `d02afcbb` 上的第八轮正本重新对了一遍
+    （`resolveIntegration` 的返回形状、`source` 绝不落盘、`clearUserValues` 与 `useClusterDefault`
+    的分工、`GET /api/integrations` 载荷里的 `setup` / `clusterKey` / `clusterOptions` /
+    `testCaveat`、以及那条按 **env 名字**的普查），而对法是**逐个标识符 grep**：我能证明的只是那几个
+    名字与那几条形状两边逐字一致，**证明不了两边的散文说的是同一件事**。正本再动一轮，这一节就要
+    再对一次 —— 而唯一会自己变红的东西是共享层自己的 `test-integration-registry`，它扫的是**代码**，
+    不是这两份文档。
 
 ---
 
