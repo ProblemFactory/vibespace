@@ -1,6 +1,6 @@
 # 设计: Communication panel — Channels v2 的架构
 
-> 中文版 — 与英文原稿 docs/design-communication-panel.md 同步于 921f61cb + 本次修订(r3: 接收模式与发送身份 · r4: 对 r3 的对抗式 review · r5: owner 对本地客户端库的更正)；以英文版为准的只有代码标识符。
+> 中文版 — 与英文原稿 docs/design-communication-panel.md 同步于 921f61cb + 本次修订(r3: 接收模式与发送身份 · r4: 对 r3 的对抗式 review · r5: owner 对本地客户端库的更正 · r6: 对 r5 的对抗式 review · r7: 集成密钥与配置界面)；以英文版为准的只有代码标识符。
 
 > **状态:** 架构提案, 无代码。**交互**设计已经定了(2026-08-21 的五张 artboard 记录
 > 加上它的交互式画布), 本文不再翻案。本文决定的是: 每一块*住在哪里*、*扩展哪个既有
@@ -21,7 +21,7 @@
 > 行")被 **owner 推翻**; 取而代之的是 `identityMarking` 能力位驱动的**授权时刻的
 > 警告**(§9.5)。
 >
-> **r4(2026-09-10, 对 r3 的对抗式 review —— 五条全部成立, 见 §17.1):** 一个事实被存在三
+> **r4(2026-09-10, 对 r3 的对抗式 review —— 五条全部成立, 见 §18.1):** 一个事实被存在三
 > 个地方而没有任何一个函数读得全, 于是 r3 新加的推送自动降级结构上赢不了 ⇒ `laneState`
 > 成为唯一的通道解析器、`caps.pushExclusivity` 删除(§4、§6.4); `push.missRate` 补上计数
 > 窗口与降级的撤回路径, 否则它是一个单向棘轮(§6.4); 决定 19 删掉的恰好是唯一有摄入契约
@@ -36,9 +36,23 @@
 > 与一条明确的允许(§3.13); `scanSource` 不再是标量, 换成按平台的 `caps.scanSources` 加
 > 唯一的解析器 `scanState()`(§4、§12.5); macOS 拿到一条真的 `scanSource:'store'` 通道,
 > 走一个 `channels-scan-store` 的 agentd op 且 `hostId` 是参数(§12.5、§6.3); 决定 19 从
-> (b) 改成 (b)+(d); P6 拆成两条门控不同的腿(§18、§19、§17.2)。Linux 仍然只有
+> (b) 改成 (b)+(d); P6 拆成两条门控不同的腿(§19、§20、§18.2)。Linux 仍然只有
 > web-in-profile 的界面扫描, Windows 仍然是 `'ui'`(它那份库**确实**是加密的), 而
 > **WeChat 一个字都没变**。
+>
+> **r7(2026-09-11, 一条 owner 指示 —— 它新增了一整层而不是修一处):** "对于指纹浏览器和
+> communication panel 这种可能需要配置自己的 key 的情况, 要考虑怎么提供配置界面, 让我们集群
+> 里的用户可以自行配置(当然 lark 这种集群里能提供默认 oauth client 的就提供默认)"。于是新增
+> **§14 集成密钥与配置界面** —— 一张 PURE 的 registry 表(`src/integration-registry.js`)、一个
+> store(`src/server/integration-store.js`)、四条路由与一个 `'integrations'` 窗口, 优先级
+> **用户自己的 > 集群默认 > 没有**, 而每一个消费者都问 `resolveIntegration` 绝不自己读
+> `process.env`(§14.6 的常设普查)。它是一个**共享层**: 同一批名字也服务
+> `docs/design-agent-browser-v2.md` 的 `cloak` / `cloud:<name>` 后端。连带改动: §13 的 token
+> 存放只说一次并指向 §14(§14.11 第 8 条把两层的界限写死), `src/secret-box.js` 的抽取**从 P1
+> 提前成 P0 的前置条件**并顺手不继承 `src/mounts.js:360-367` 那个会**铸新密钥覆盖旧密钥**的
+> 裸 catch(§14.7), §12.1 拿到集群 redirect 的完整论证(§14.9: 一个应用服务 N 个实例**结构上
+> 不是问题**, 真正的边界是**租户**), §12.2 把"加 scope 会让谁重新授权"说准并把决定 5 落成
+> "多加一个预设 key", 阶段与轮次重算(§19), 决定 21–25 与未验证第 24–29 条。
 >
 > 先读: 交互记录(五张 artboard — Main / Adapters / AssignFilter / AgentReach /
 > Outbox)、CLAUDE.md 的三层路由表、`docs/design-three-tier.md`、
@@ -83,7 +97,7 @@ outbox 如何让重复发送在结构上不可能; 客户端注册项; agent CLI
 **刻意推迟, 但缝已经留好:** 插件贡献的 adapter、跑在配对设备上的 adapter、富 HTML
 邮件渲染、附件自动抓取、**本地客户端 adapter(WhatsApp / WeChat)—— 接口从 P0 起就把
 它建模出来, 但 adapter 本身在 P6 且被一条 owner 决定门控**。每一项都有点名的落地处
-(§14、§15)。
+(§15、§16)。
 
 ---
 
@@ -98,19 +112,23 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 | 出向策略 + 护栏 + outbox 状态机 | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | 归一化的消息记录 + 它的渲染器要的数据 | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
 | 能力判定(两个轴、按会话解析、身份警告、**通道解析 `laneState`**、**扫描来源解析 `scanState`**) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
+| 集成凭据的那张表(行、字段、集群 env 名、Test 的声明、消费者) | **PURE** | `src/integration-registry.js` | `test-integration-registry` (fast) |
 | 会话存储的*原语*(持久的 load/append/tail/trim/flush; 活索引归**引擎**所有, §5.1) | **SHARED**(只用 fs+path) | `src/channel-store.js` | `test-channel-store` (fast) |
 | OAuth loopback 授权流(**双模**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
+| 落盘加密原语(一个原语, N 个密钥文件; §14.7) | **SHARED**(只用 fs+crypto) | `src/secret-box.js` | `test-secret-box`(fast, 与 mounts 的 parity) |
 | Adapter 接口 + 注册表 | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract`(fast, 假 adapter) |
 | Lark / Gmail / Agents adapter | **ORCH** | `src/channels/lark.js`、`gmail.js`、`agents.js` | 契约套件 + `test-channels-lark-shape`(fast, 录制的 fixture) |
 | 摄入引擎(轮询调度、退避 (backoff)、每 tick 预算、故障出声) | **ORCH** | `src/server/channels-engine.js`(`create(deps)` 工厂) | `test-channels-engine` (heavy) |
 | 推送通道(每个 vendor 一条; 活性、ack、独占度测量) | **ORCH** | `src/channels/live/<kind>.js` | `test-channels-push` (heavy) |
 | 本地客户端库扫描(平台事实、TCC 授权、**只读打开**加从那条连接取的快照、按 rowid 游标读; SQLite 读者是一个**有界的 `sqlite3(1)` 子进程** —— 绝不是原生绑定, daemon 那唯一一个 `--external` 拒绝它; §12.5) | **SHARED**(daemon 打包)+ 一个 device op | `src/channels-store-scan.js` + `src/agentd/agentd.js` 的 `channels-scan-store` handler | `test-channels-store-scan` (heavy, 真 daemon) |
+| 集成凭据的解析、遮蔽、广播 + 它的路由(§14.3、§14.4) | **ORCH** | `src/server/integration-store.js` + `src/routes/integrations.js` | `test-integration-registry`(fast)加那条 grep 普查 |
 | 路由 + 广播 | **ORCH** | `src/routes/channels.js` | `test-restore-smoke` 里的路由弹幕、`test-channels-e2e` |
 | 接线段落 | **ORCH** | `src/server/channels-wiring.js`, 由 `server.js` 调一次 | `test-architecture` 的尺寸棘轮 ratchet(server.js ≤ 2100 行 —— **今天正好顶格**, 见 §2.1) |
 | Panel、窗口、filter 编辑器、审批卡 | **CLIENT** | `src/lib/channels-panel.js`、`src/lib/channel-window.js`、`src/lib/channel-filter-editor.js` | `test-channels-e2e`(heavy, headless chrome) |
+| Integrations 窗口(卡片、来源芯片、Replace、Test、深链; §14.5) | **CLIENT** | `src/lib/integrations-panel.js` | `test-channels-e2e`(heavy, 含 375×667 那一腿) |
 | Agent CLI | 纳入 git 的静态文件 | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
-有五条落位承重到值得写成规则:
+有六条落位承重到值得写成规则:
 
 - **Adapter 绝不碰 store、ACL、policy 或 spend guard。** 它返回带类型的记录, 接收一个
   发送请求。它能做的一切都在 §4 的接口里, 而**它没有声明的能力就是产品不会为它提供的
@@ -132,6 +150,11 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
   你踢出去了的群 —— 三者都让一个声明了 `sendAs:['user']` 的 adapter 在**这一个**会话上
   发不出去。规则是: **只有两者都放行时那个控件才存在**, 而 `unknown` 渲染成"不提供 + 理
   由", 绝不渲染成"允许"。
+- **一把集成密钥只有一个解析者, 而消费者永远不读 `process.env`**(§14.6)。
+  `resolveIntegration(id)` 是唯一的那个回答处, 优先级是**用户自己的 > 集群默认 > 没有**; 集群
+  默认**按 KEY 解析、绝不拷进落盘记录**, 于是集群轮换一次 env 就轮换了每一个实例的每一个消费
+  者 —— 与 `src/mounts.js:2187-2188` 逐字同一条。配一条常设 grep 普查: `VIBESPACE_INTEGRATION*`
+  出现在 store 之外 = 红。
 
 ### 2.1 机械式注册清单(每漏一项就多一轮)
 
@@ -148,6 +171,11 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 - 新的 agent CLI 要进 `HostManager.AGENT_TOOLS` 与 `AGENT_DOC_TOPICS`, 手册放在
   `docs/agent/` 下;
 - 新的用户可见 chrome 字符串走 `t()` 并补 zh + ja 词条(i18n-check 在 build 里跑);
+- 一个新的集成 = `src/integration-registry.js` 里**一行**, 外加它 `consumers` 里点名的那些
+  文件**真的**调用 `resolveIntegration('<id>')` —— 两边都由 `test-integration-registry` 查
+  (§14.2);
+- 任何新的 `VIBESPACE_*` env 名字都要有**恰好一个**解析者, 而集成那一批只许长在
+  `src/server/integration-store.js` 里(§14.6);
 - **那条尺寸棘轮今天已经顶格, 所以 P0 的接线段落哪怕只有一行也会把 `npm run build` 弄红
   (r6)。** 实测: `scripts/test-architecture.mjs:187-188` 判的是
   `read('server.js').split('\n').length <= 2100`, 而在本设计的基线提交上那个值**正好是
@@ -456,7 +484,7 @@ freshnessClaim(caps, laneOrScan, convEntry, now)        // r6: 加宽了, 见下
   上如实说出"这个 agent 大约多久之后会被叫醒"。
 - **Spend authorizer** 什么都不读 —— 而这正是重点。接收模式**不改变**钱的判定: 同一个
   filter、同一个理由、同一个按凭据槽的上限。它改变的只有到达时刻, 而那件事由围栏 12 的
-  合并窗口吸收。套件把这句话变成一条可以变红的断言(§16 的 `test-channels-lane-parity`)。
+  合并窗口吸收。套件把这句话变成一条可以变红的断言(§17 的 `test-channels-lane-parity`)。
 
 契约套件(`test-channel-adapter-contract`, 驱动一个**假 adapter** 外加每一个注册在案的
 真 adapter 以 shape-only 模式跑)执法的规则:
@@ -860,7 +888,7 @@ r2 在这里写的是一条绝对规则 —— *"一条活通道只可以让一�
   停止即终结、绝不把一个 watch 挂在没人持有的通道上。诚实边界: §7.4 每会话 30 秒的阶梯
   地板与 spend authorizer 把**绝对花销**兜住了, 所以这不是一笔无界的钱 —— 但每条通道的
   唤醒次数与扣款笔数会不一样, 而那恰好让 §6.1 的那句总纲("同一批记录、同一个唤醒次数、
-  同一笔扣款")与 §16 的 parity 那一行按字面**不可能成立**。
+  同一笔扣款")与 §17 的 parity 那一行按字面**不可能成立**。
 
 **声明必须可以被证伪, 否则它就是一句祈祷。** 平台不告诉我们还有几个客户端连着, 所以独占度
 永远是**被断言**、绝不是被推断的 —— 但它是**可测**的: 引擎为每个 adapter 记录
@@ -1215,7 +1243,7 @@ wrapper 的 RPC 之间结束 —— 而既有的扣款扣住机制(`peer_message
 - **Lark 用户身份发送**(`im:message` + `im:message.send_as_user`, user token): 官方文档确
   实有"以用户身份发送消息"这条权限, 但**它没有说收件人看见的 `sender_type` 是什么**, 而社
   区有一份相反的报告说即使用 user token 也仍然是 `app`。⇒ `unknown`, 直到 P4 用一次真实发
-  送把它证明为止(§20)。
+  送把它证明为止(§21)。
 - **Gmail API 发送**: 收件人的邮件界面里看见的就是这个用户 —— 没有应用徽标、没有 "via" —— 但
   经 API 发出的邮件会多一条点名 `gmailapi.google.com` 的 `Received:` 头, 而"显示原始邮件"
   是能看见它的。⇒ `marked` / **`raw-headers`**, 文案照实说: *"在收件人的邮件界面里看不出
@@ -1260,6 +1288,13 @@ wrapper 的 RPC 之间结束 —— 而既有的扣款扣住机制(`peer_message
 - **菜单 / 命令:** 在 `src/lib/contributions.js` 里贡献 —— 一个 `channel-row` 菜单
   (assign…、filter…、reach…、标记已读、取消 track)加上齿轮菜单里的 "Connect an adapter…"
   行。
+- **连接向导先问那张卡(§14.5):** adapter 面板上的 "Connect Lark" 在
+  `resolveIntegration('lark')` 答 `none` 时**先**开 Integrations 窗口并聚焦那一行
+  (`app.openIntegration('lark')`), 而不是把用户送进一个会在授权页上失败的 OAuth 流程 ——
+  §12.1 已经点名这个失败形态(缺 scope / 缺已发布版本 / 缺回调 URL 时挂掉的是*授权页*而不是
+  API 调用), 而它在一个用户根本还没配过应用凭据的实例上是**默认**形态。答 `cluster` 时按钮
+  旁边写**"由集群提供"**, 用户一次点击就能连; 答 `user` 时什么都不多说。这不是一条 UI 偏好:
+  连接按钮是这条链上唯一一个用户会点的东西, 而**没有凭据**与**凭据被拒**是两件事, 混成一句话就是又一次"报错文案不是诊断"。
 - **设置:** 一个 `Channels` 分类, **与第一个设置项在同一个 commit 里加进
   `SETTINGS_CATEGORIES`**。那个数组*就是* SettingsUI 的渲染循环; 曾经有十个设置项发布出去
   却根本够不着, 只因为没人加那一行, 而 `test-architecture` §44 现在会为此让 build 变红。
@@ -1345,7 +1380,7 @@ agent 的下一个 turn 到达, 除非用户另有配置; (c) 一个不可见的
   方须在 **3 秒**内 HTTP 200 应答, 而投递是 **at-least-once**(15 s / 5 min / 1 h / 6 h 重
   投, 最多 4 次, 成功也可能重复)。§6.4 按这些事实重新论证了推送作为一等接收模式。另有一份
   社区报告称 **Lark 国际版控制台根本不提供长连接**(只能 webhook)—— 未经 vendor 确认, 但它
-  是 P1 的一个前置条件, 所以列在 §20 里。
+  是 P1 的一个前置条件, 所以列在 §21 里。
 - **授权的前置条件。** 控制台需要三样全齐: 注册好的回调 URL、授予好的 scope, 以及一个**已发
   布的版本**。缺任何一样, 失败的是*授权页*而不是 API 调用 —— 这是一个值得在连接向导的错误
   文案里写清楚的、令人困惑的失败形态。
@@ -1353,6 +1388,11 @@ agent 的下一个 turn 到达, 除非用户另有配置; (c) 一个不可见的
   的** —— 与 Google 不同, Google 接受任何 loopback 端口, `src/gmail-sync.js` 因此可以绑一
   个临时端口。一个固定端口就是一个 machine-global 名字; §12.4 说这个流程为此做了什么。注册
   一个专用 URL(决定 4)解决的是 VibeSpace 与运维工具之间的冲突, **仅此而已**。
+  **两条补充(r7)**: ①官方文档明说"重定向 URL **支持配置多个**", 于是决定 4 那个"并排注册
+  而不是顶掉他们的"不再是一个假设 —— §21 第 11 条因此从"未验证的假设"降级成"文档支持, 但
+  这个应用的控制台上没试过"; ②**一个集群注册一次、服务 N 个实例**这件事不需要任何新东西, 因为
+  redirect_uri 里根本没有实例的地址(它是 loopback = 用户浏览器那台机器), 而**真正**限制集群默认
+  的是**租户**不是 URL —— 完整论证与那张 vendor 事实表在 §14.9, 决定 21 与决定 22 是它的两个卡点。
 
 ### 12.2 Gmail
 
@@ -1365,8 +1405,15 @@ agent 的下一个 turn 到达, 除非用户另有配置; (c) 一个不可见的
 - **线程即会话**(`threadId`), 加一条包含查询, 免得一个邮箱变成四万个会话。
 - **发送**需要 `gmail.send`; 操作 label 则需要 `gmail.modify`。两者都是敏感 scope, 而 refresh
   token 的寿命取决于这个 OAuth client 的认证状态 —— 一个未认证/测试中的 client 的 refresh
-  token **7 天**就过期, 而这正是既有的 Gmail 挂载已经在忍受的痛。把 `gmail.send` 加进一个
-  *共享的预设* client, 会让用这个预设的一切都重新授权一遍(决定 5)。
+  token **7 天**就过期(公开文档: 同意屏幕处于 Testing 且用户类型为 External 时即如此), 而这
+  正是既有的 Gmail 挂载已经在忍受的痛。**把"加 scope"这件事说准(r7)**: 给一个 client 加一个
+  scope**本身不会**作废已经发出去的授权 —— 一个已有的 refresh token 仍然为它当初被授予的那些
+  scope 工作。真正会发生的是两件别的事: ①任何**现在开始请求**这个更宽 scope 的流程会对用户再
+  弹一次同意屏幕(增量授权), ②这个 client 的**认证状态**从此是一个**决定管两个功能**的东西, 而
+  未认证/测试中带来的 7 天 refresh token 会一起过继给只读的挂载。所以决定 5 有了一个更具体的
+  答案: **让集群在 `VIBESPACE_GDRIVE_CLIENTS` 里多加一个 preset key**(比如 `channels`)而不是
+  去拓宽现有那一个 —— 那张清单本来就是"这个实例提供哪些 client", 多一个 key 不需要第二份解析
+  者、也不动任何现有挂载。`gmail` 那一行因此**委托**给 `MountManager.drivePresets()`, 见 §14.2。
 - **发送时的线程串接:** `threadId` 加上取自记录 `Message-ID` 的 `In-Reply-To` / `References`。
 - **发送时收件人看见的是用户本人 —— 但原始头里不是。** 经 Gmail API 发出的邮件会多一条点名
   `gmailapi.google.com` 的 `Received:` 头, 而经网页版发的没有。收件人的邮件界面里看不出任
@@ -1510,7 +1557,7 @@ scanState(caps, adapterRecord, hostFacts, now)
   在一个网页里打字), 对 macOS **无定义** —— 那里的官方客户端是一个**原生 Catalyst 应用**,
   没有任何浏览器 profile 够得着它。所以: `'ui'` = agent-browser 在那个 Web 客户端的输入框
   里打字, 身份就是用户本人(`identityMarking: 'none'`); 而 macOS 的 `'store'` **自己没有发
-  送通道**(库是只读证据), 它只有两个候选, 而**本设计不替 owner 选**(见 §20 与决定 19):
+  送通道**(库是只读证据), 它只有两个候选, 而**本设计不替 owner 选**(见 §21 与决定 19):
   (a) 把同一个 Web 客户端开在一个 profile 里 —— 那是**第二份 linked-device 凭据**, 一条对
   话两个登录, 必须与 `auth.state()`/`scanState().grant` 并排建模成它自己的一行, 或者 (b)
   原生 macOS UI 自动化(Accessibility / CGEvent), 一条本文档此前从没点过名、且需要它**自己
@@ -1561,9 +1608,9 @@ scanState(caps, adapterRecord, hostFacts, now)
 
   第一行就是 SQLite 有文档的**最后一个连接 checkpoint 并删除 WAL** 的行为, 而"我们是最后
   一个连接"对一次**排期的后台扫描**是**常态**(owner 退出了客户端 / 重启过 / 人不在), 也正
-  是 §16 那个合成 fixture 的形状。`-shm` 是 WAL 的索引、不含任何消息内容, 且在它不可写时
+  是 §17 那个合成 fixture 的形状。`-shm` 是 WAL 的索引、不含任何消息内容, 且在它不可写时
   只读连接**完全不动它** —— 所以"绝不写"的可断言形式是 **`db` 与 `-wal` 逐字节相同**,
-  绝不是三个文件一起(见 §16)。绝不 checkpoint, 绝不删 WAL, 绝不用**默认**(读写)方式打
+  绝不是三个文件一起(见 §17)。绝不 checkpoint, 绝不删 WAL, 绝不用**默认**(读写)方式打
   开 —— 这条通道对那个客户端的唯一可观测影响必须是一次短暂的共享锁。
   把 `db` / `-wal` / `-shm` 三件一起复制**保留为兜底**(只在 `-shm` 挂不上时用), 并写明它
   的代价: 那是一次**撕裂读**的风险(复制到一半客户端可能 checkpoint), 而只读打开恰恰避开
@@ -1597,7 +1644,7 @@ scanState(caps, adapterRecord, hostFacts, now)
 读它的代码就得在那台机器上跑 —— 这正是 CS 分离律的形状, 而**本机是设备 #0**
 (`hosts.device(falsy)`), 所以这里没有"本地一套、远程一套"这回事: 一个 `channels-scan-store`
 op(daemon 侧的 handler + hello-ack 里的一个能力位 + 三触规则), 一份实现, `hostId` 从 v1 的
-`local` 换到一台配对的 Mac 就只是换一个参数。这也让 §14 里"跑在配对设备上的 adapter"那一行
+`local` 换到一台配对的 Mac 就只是换一个参数。这也让 §15 里"跑在配对设备上的 adapter"那一行
 第一次拿到一个**真实的消费者**, 而不是一句预留 —— 因为这一类天然就是它: 官方客户端跑在
 owner 的 Mac 上, VibeSpace 跑在别处。
 
@@ -1647,7 +1694,7 @@ owner 的 Mac 上, VibeSpace 跑在别处。
    统设置里随时可以被撤销, 而决定 19(d) 记下的那次提示本身就是"按进程实例的、临时的" ⇒ op
    自己的 `EPERM` 才是权威, 一次答成 `EPERM` 的 `granted` 立刻重新归档成 `tcc-denied` 并把
    存下来的授权清掉。
-3. **它天然是配对设备那件事的第一个真实用例**(§14): 客户端跑在哪台机器上, 这个 adapter 就
+3. **它天然是配对设备那件事的第一个真实用例**(§15): 客户端跑在哪台机器上, 这个 adapter 就
    得在哪台机器上跑。接口本来就接收一个 machine handle, 所以这件事是接线不是重写 —— 而
    `'store'` 那条路把它从"将来会有用"变成了 P6 的**前提**: 一台配对的 Mac 上的
    `channels-scan-store` op 就是这一类最好的那条通道。
@@ -1666,12 +1713,15 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 
 ## 13. 密钥、过期、失败
 
-- Token 在 `data/.channels-key`(0600)之下加密, 绝不记日志, 绝不进 argv, 经由一个
-  `publicView()` 脱敏。这个加密原语已经存在过一次(在 `MountManager` 里); 本设计提议在 P1 把
-  它抽到 `src/secret-box.js`(SHARED), 免得 channels 造出第三份拷贝, 而 mounts 在一条 parity
-  测试背后择机迁移。**如果这次抽取推迟了, 那个孪生就要被点名**写进
-  `kb-file-structure.md` 并拿到一条常设 sweep 条目 —— 一个没被点名的孪生正是这个代码库被咬
-  的方式。
+- **Token 怎么存、怎么加密、怎么脱敏, 只说一次, 说在 §14。** channels 自己的 token 落在
+  `data/channels/` 下, 用 §14.7 的 `src/secret-box.js` 加密(它自己的密钥文件
+  `data/.channels-key`, 0600), 经同一个 `publicView()` 形状脱敏, 绝不记日志、绝不进 argv。
+  那次抽取因为 §14 的存在已经**从 P1 提前成 P0 的前置条件**(§19), 所以 r2 那句"如果抽取推迟
+  了就点名那个孪生"在本轮变成了一条更强的约束: 它不许推迟。
+- **这一层与 §14 那一层是两个东西, 而且必须一直是。** §14 存的是**管理员能给你的**应用/客户端
+  凭据与 API key(集群默认、按 KEY 解析、可被集群轮换); 这里存的是**你自己授权出来的** token
+  (一个用户、一次同意、一条会过期的 refresh token)。两者的生命周期、轮换方式与导出规则全都
+  不一样 —— 把它们混进一个 store, 正是这份设计到处在防的那种孪生(§14.11 第 8 条)。
 - **Auth 状态是三值的而且诚实:** `connected` / `needs-reauth`(带过期时刻与一个倒计时)/
   在读不出 token 记录时是 `unknown`。绝不乐观。Adapters 那一行渲染的就是这个。
 - **本地客户端那一类有两个正交的凭据事实, 而它们各渲染各的**(r5, §12.5)。`auth.state()`
@@ -1687,7 +1737,364 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 
 ---
 
-## 14. v1 刻意不做什么, 以及它们落在哪
+## 14. 集成密钥与配置界面
+
+> **Owner 指示(2026-09-11, 原话):** "对于指纹浏览器和 communication panel 这种可能需要配置
+> 自己的 key 的情况, 要考虑怎么提供配置界面, 让我们集群里的用户可以自行配置(当然 lark 这种
+> 集群里能提供默认 oauth client 的就提供默认)"。
+>
+> 这一节是一个**共享层**, 不是本设计的附属品: 同一批名字也服务
+> `docs/design-agent-browser-v2.md` 的 `cloak` / `cloud:<name>` 后端(那份设计还住在另一个分
+> 支上 —— §21 第 20 条)。**两份文档使用同一批名字, 而名字在这里定义。**
+
+VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这两种形态对同一把 key 有不同的答案:
+集群里**每个用户一个 pod**(helm chart 把这个实例自己的公开地址作为 `VIBESPACE_PUBLIC_URL` 注
+进去 —— `deploy/helm/vibespace-user/templates/main.yaml:172-176`), 以及单用户自托管。有的集成
+需要一把**每个用户自己付费**的 key(CloakBrowser 的席位、云浏览器供应商), 有的可以由集群**注册
+一次**的 OAuth 应用服务(Lark), 而其中一类**今天已经有**集群预设机制(Google Drive / Gmail)。
+
+今天这三类各自为政。再加一个集成, 就是再发明一份 env 解析、一份加密、一份界面。本节把它们收成
+**一张 PURE 的表 + 一个 store + 一个窗口**, 并且把优先级钉成一句话: **用户自己的 > 集群默认 >
+没有**。
+
+### 14.1 这棵树里已经有的三份先例, 以及一个必须避开的地方
+
+这一层不发明机制。它把已经在生产里跑着的三份先例合成一份, 每一条都点名了它抄的是什么:
+
+| 先例 | 在树里的位置 | 这一层照抄的那一条 |
+|---|---|---|
+| Drive / Gmail 的**集群预设** | `src/mounts.js:2189-2206` 的 `drivePresets()`: env `VIBESPACE_GDRIVE_CLIENTS` = JSON `[{key,label,clientId,clientSecret}]`, 旧的一对 `VIBESPACE_GDRIVE_CLIENT_ID`/`_SECRET` = key `'default'`; `_driveClient()` `:2211-2216` 的优先级是**记录上的自定义 client > 选中的预设 > 单个或 `'default'` 预设 > 工具自带**; 界面在 `src/lib/sidebar-mounts.js:1747-1751` 给出预设下拉与 `Custom (own client id/secret)`, 而那个 `type:'password'` 的自定义 secret 字段在 `:1771` | **记录只存预设的 KEY** ⇒ 轮换 env 就轮换了每一个消费者(`:2187-2188` 的注释逐字这么写), 以及那条优先级的形状 |
+| frp 的**集群默认 + 用户覆盖** | `src/plugins.js:569-580` 的 `_frpCfg()`: `data/plugins.json` 里的用户值胜过集群 env, 而 `fromEnv` 把"这是集群给的"作为一个**事实**交给界面; `:694` 的 status 只出 `hasToken` 从不出 token; `:584-588` 集群注了 env 就**默认启用**; `:679-682` 点名**缺的是哪一个字段** | 用户覆盖 > 集群默认; `fromEnv` 是界面必须画出来的事实; **永远只报 `hasToken`**; 以及"点名那个缺口" —— 那三行注释记着 2.227.10 的事故: 用户填了地址与端口、token 空着, 而界面只说"relay not configured", 一个无从下手的死胡同 |
+| 落盘加密 | `src/mounts.js:369-381` 的 `_enc`/`_dec`(aes-256-gcm, `iv.tag.data` 三段 base64), 密钥文件 `data/.mounts-key`(`:47`, 0600) | 同一个原语, 但**抽成 `src/secret-box.js`**(§14.7) —— 并且**刻意不继承** `_key()` `:360-367` 里那个裸 catch |
+
+必须避开的地方只有两个, 而它们都是"看起来顺手"的那种:
+
+| 不要放在这里 | 为什么 |
+|---|---|
+| **设置项** | **密钥绝不进设置, 一条都不行。** 设置走 SyncStore: 每一个值都广播给每一个连着的客户端; 而 `/api/config/export` 的 `take('settings', readSettings)`(`src/routes/persistence.js:697`)把整份设置**明文**写进导出文件 —— 它不在 `sensitive` 那一半里(`:679-686`), 只有那一半才要 passphrase。把一把 key 放进设置, 等于同时做了"广播给每个打开的标签页"和"明文进备份文件"两件事, 而且两件都不会有任何提示 |
+| **插件卡片** | frp 的 relay token 留在插件卡片里**不迁**(§14.6 把它记成一个**被点名的**孪生)。它是一个插件**进程生命周期**的配置, 它的消费者是 keeper, 不是一个会去问 `resolveIntegration()` 的功能。迁它要整体迁(卡片 + `fromEnv` 默认启用那条规则 + keeper 的读取), 那是一次没有人要的改动 |
+
+### 14.2 `src/integration-registry.js` —— 那张 PURE 的表
+
+**PURE, 什么都不 import。** 一个集成 = 一行:
+
+```js
+{
+  id: 'lark',
+  label: 'Lark / 飞书',
+  fields: [
+    { key:'appId',     label:'App ID',     secret:false, required:true,
+      placeholder:'cli_…', help:'开发者后台 → 凭证与基础信息', validate:(v)=>… },
+    { key:'appSecret', label:'App Secret', secret:true,  required:true,
+      help:'同一页; 它只会被写入, 永远不会被读回来' },
+  ],
+  clusterEnv: { json:'VIBESPACE_INTEGRATIONS', prefix:'VIBESPACE_INTEGRATION_LARK_' },
+  test: { kind:'credential-exchange',
+          describe:'用这一对 app id / secret 换一次 token。不读任何会话, 不发任何消息。' },
+  consumers: ['src/channels/lark.js', 'src/channels/live/lark.js'],
+  docs: 'https://open.feishu.cn/…',
+}
+```
+
+规则, 每一条都有一个会变红的断言:
+
+- `validate` 是纯函数, 返回 `{ok:true}` 或 `{ok:false, why}` —— 一次**具名的**抱怨, 绝不是一次
+  静默拒收, 也绝不改写那个值(唯一允许的改写是去掉首尾空白, 而那发生在 store 里并且写在字段的
+  help 上, §14.3)。
+- `clusterEnv` 是一个**联合**: `{json, prefix}`(这一层自己解析)**或** `{via:'drive-presets'}`
+  (这一层去问**已经存在的**那个读者)。**一个 env 名字只允许有一个解析者**, 由普查执法 ——
+  `gmail` 那一行因此是**委托**给 `MountManager.drivePresets()`, 不是复制它。
+- `test.kind` 是一个**封闭集**, 而它决定按钮自己的措辞, 因为"报错文案不是诊断"反过来同样成立
+  —— 一个声称测过连接却从没联网的按钮, 就是在撒谎:
+
+  | `test.kind` | 它真的做了什么 | 按钮上的字 |
+  |---|---|---|
+  | `credential-exchange` | 一次**有界的** vendor 往返, 用这对凭据换一个 token, 只读不写 | 测试连接 |
+  | `shape-only` | **零网络**: 只检查字段形状并把授权 URL 构造出来 | 检查格式(不联网) |
+  | `reachability` | 只探这个 vendor 主机可不可达, 不携带任何凭据 | 测试可达性 |
+
+- `consumers` 必须**是活的**: 普查要求每个名字既是一个存在的文件, 又真的调用
+  `resolveIntegration('<id>')`。一行没有活消费者的 row 就是一张什么都不做的卡片, 而这与
+  `SPEND_REASONS`、与 `contributes.channelAdapters`(§15)是同一条法。
+- **这一层不加任何设置项。** 上界(Test 的超时、每个 id 同时只允许一次在飞)是本模块的常量 ⇒
+  `SETTINGS_CATEGORIES` 的 §44 普查与这一层无关, 而那正是我们要的: 密钥的旁边不该有一个会被
+  广播的旋钮。
+
+本设计自己的三行(浏览器那两行的 id 住在它自己那份文档里):
+
+| id | 字段 | 集群默认 | Test 一下做什么 | 消费者 | 什么时候进表 |
+|---|---|---|---|---|---|
+| `lark` | `appId`(非密) · `appSecret`(密) | **预期有** —— 集群注册一个 Lark 应用并注入。但它只在**同一个租户**里成立, 而这不是一句免责声明, 是一条硬约束(§14.9) | `credential-exchange`: 换一次 `tenant_access_token`(自建应用那个端点, 只要 app id + secret)。不列会话、不发消息 | `src/channels/lark.js`, `src/channels/live/lark.js` | P1 |
+| `gmail` | `clientPreset`(非密, 选项来自 delegate) · `clientId` / `clientSecret`(密, 只在"用我自己的"时出现) | `{via:'drive-presets'}` —— **复用** `VIBESPACE_GDRIVE_CLIENTS`, 不新增第二份解析者 | `shape-only`, 并且**说出来**: 一个 Google OAuth client 的 id/secret 单独换不出任何东西(它没有 client-credentials 那条路), 所以这里能做的只有形状检查加把授权 URL 构造出来 —— 真正的判决在那次 OAuth 往返上 | `src/channels/gmail.js` | P1 |
+| `whatsapp-business` | `phoneNumberId`(非密) · `accessToken`(密) | **没有, 而且不该有**: 这是一条按号码计费的商业 API 凭据, 集群注一把就是集群替所有人付账 | `credential-exchange`(读一次号码的元数据) | —— 今天没有 | **不进 v1。** §14.2 的普查要求 `consumers` 是活的, 而这条路今天只是 §15 里那条"合规替代"的名字; 它**与它的 adapter 在同一个 commit 里进表**。这一行写在这里是为了把字段与"没有集群默认"这两件事先定下来, 不是为了先摆一张空卡片 |
+
+### 14.3 `src/server/integration-store.js` —— 解析、遮蔽、广播
+
+落盘形状(经 `writeJsonAtomic`, 与每一个 `data/*.json` 一样):
+
+```json
+{ "version": 1,
+  "integrations": {
+    "lark": { "source": "user",
+              "values": { "appId": "cli_…", "appSecret": "<secret-box 密文>" },
+              "updatedAt": 1789…, "testedAt": 1789…, "lastOk": true, "lastError": null } } }
+```
+
+- `resolveIntegration(id)` → `{source:'user'|'cluster'|'none', values, label, fromEnv,
+  testedAt, lastOk, lastError, missing:[]}`。三条不变量:
+  - `source:'cluster'` 时 `values` **在读的那一刻**从 env 解析, **绝不**拷进
+    `data/integrations.json`。这就是 mounts 那条"记录只存 KEY"(`src/mounts.js:2187-2188`)的镜
+    像: 集群轮换一次 env, 每个实例的每个消费者同时跟着轮换。把值拷下来, 就是把一把已经被吊销
+    的凭据留在 N 个实例上。
+  - 集群默认**消失**了(管理员撤掉了 env)而用户停在 `'cluster'` 上 ⇒ 答 `source:'none'` 并
+    **点名**是集群默认不在了, 绝不把一个坏掉的 adapter 静静交出去。
+  - 必填字段缺了 ⇒ `missing:['appSecret']`, 照 `src/plugins.js:679-682` 那条注释点名的事故来:
+    **说出是哪一个字段**, 永远不要让用户去猜。
+- `publicView(id)`: 每个 `secret:true` 字段变成 `'••••'`, 并且**只有**在值长度 ≥ 12 时才带上后
+  4 位(短的秘密, 后 4 位就是它的一大半)。非密字段原样出。**这份遮蔽视图就是广播的内容**, 也是
+  `GET` 能拿到的全部。
+- `setIntegration(id, patch)`: **省略一个密字段 = 不动它; `''` = 清掉它。** 这条区分不是风格,
+  它是本仓已经被咬过的那一条 —— 恒发字段的 `null` 是陈述, 只有 `undefined` 才是缺席
+  (2.369.62 的 `effortNext`) —— 所以它写成不变量并配负控。唯一允许的改写是**去掉首尾空白**:
+  粘贴一把 secret 常常带一个尾随换行, 而"因为一个看不见的字符而失败"正是这个界面存在的理由;
+  这条改写写在字段的 help 里, 因为一次不说出口的改写与一次 bug 无法区分。
+- `useClusterDefault(id)`: 丢掉用户覆盖(连同它的密文)回到 `'cluster'`。**没有集群默认时它是一
+  次具名拒绝**, 不是一个静默的空操作。
+- `test(id)`: 跑那一行**声明的**测试并记下 `{testedAt, ok, error}`。三条约束:
+  1. **store 自己不构造任何 vendor 请求。** 它调用的是消费者在接线时注册进来的 runner
+     (`registerIntegrationTest(id, fn)`), 而那个消费者**已经**在 §3.1 的出网白名单里声明过自己
+     的主机 ⇒ `test-channels-egress` 一个字都不用改, 这一层也不会变成第二个"持有 N 个 vendor
+     主机"的文件。
+  2. 每个 id 同时只允许一次在飞, 有界超时, **只由人点**(§14.11)。
+  3. 一行声明了 `test` 却没有注册 runner = 一个死控件 ⇒ 普查变红。
+- 每一次写都广播 `integrations-updated`, 载荷是 `publicView` —— 一个服务端缓存只要客户端也缓
+  存, 那个入口就必须**通知**(2.309.0 的法), 而这条广播能携带的**只可能是**遮蔽视图。
+- **一个 `testedAt` 不会永远绿着。** 卡片显示的是判决**加上它的年龄**; 一个判决绝不比它描述的
+  那次读数活得更久(quota-model r3 那条法的同一形状)。
+
+### 14.4 路由
+
+- `GET /api/integrations` —— 每一行的 `{id, label, fields(只有声明, 没有值), source, fromEnv,
+  set:{<字段>:bool}, masked, missing, testedAt, lastOk, lastError, consumers, docs}`。
+- `PUT /api/integrations/:id` —— `setIntegration`(省略 = 不动, `''` = 清掉)。
+- `POST /api/integrations/:id/test` —— 人点的那一次, 有界。
+- `DELETE /api/integrations/:id` —— 回到集群默认; 没有集群默认就回到 `none`。
+- 全部坐在既有的 cookie 鉴权之后; 而**没有任何一条路由会回读一个密字段的明文** —— `GET` 不行,
+  "给我看一眼"也不行。界面给的是 **Replace 而不是 Reveal**: 一个能被读回来的秘密, 就是一个能被
+  一次 XSS 或一次误开的窗口读回来的秘密。
+
+### 14.5 界面: ⚙ → Integrations(集成与密钥)
+
+- **窗口类型 `'integrations'`, `singleton: true`**, 经 `registerWindowType({type:'integrations',
+  label, icon, action:'openIntegrations', replay:(app,spec,{syncId})=>app.openIntegration(spec.focus,{syncId})})`
+  注册 —— 与 `src/lib/jobs-panel.js:387-394` 逐字同形, 于是布局恢复、跨客户端同步、虚拟桌面、标
+  签组与任务栏全部白给, 而 `replayOpenSpec` 不可能静默丢掉它。`openSpec` 是
+  `{openIntegrations, focus:'<id>'}`; **`focus` 指向一个已经不存在的 id ⇒ 照常打开窗口、不高亮、
+  不抛** —— 一个被删掉的 row 不该让一次布局恢复失败。
+- **⚙ 菜单一行**, 紧挨着 `Plugins…`(`src/lib/gear-menu.js:77` 那一组 `1_admin`), 走
+  `registerMenuItem` 而不是一个新的 chrome 原语。
+- **卡片**按 `src/lib/plugins-ui.js:41-70` 的 `plugin-card` 语言渲染, 每行一张:
+  - 一枚**来源芯片**: `集群默认` / `你自己的` / `未配置`(它读的是 `source` 与 `fromEnv`);
+  - 一对单选: **"用集群默认"** vs **"用我自己的 key"** —— 没有集群默认时前者置灰并说明原因;
+  - 声明出来的字段。密字段显示 `••••1234` 加一个 **Replace** 按钮(点它才出现一个空的
+    `type:'password'` 输入框); 非密字段原样可编辑;
+  - 一个 **Test** 按钮, 按钮上的字来自 `test.kind`(§14.2), 旁边是**上一次判决 + 它的年龄 +
+    vendor 自己的错误原文**(经 `escHtml`);
+  - 一行 **"这把 key 用在哪"**, 由 `consumers` 生成 —— 用户在决定要不要换一把 key 之前, 有权
+    知道会动到什么。
+- **每一个消费者都深链到自己那张卡**: `app.openIntegration(id)`。本设计的连接向导(§10.1)在那
+  一行还没配好时**先**开它; 浏览器后端选择器在用户挑 `cloak` / `cloud:*` 而没有 key 时也开它。
+- **≤768px 同样的卡片, 单列** —— 与 Plugins 面同一条路径, 不是第二套渲染器。
+- **命名冲突要点名**: `SETTINGS_CATEGORIES` 里**已经有**一个 `Integration` 分类
+  (`src/lib/settings-schema.js:941`), 装的是 `agents.*` 那一组"agent 能看见什么"的开关
+  (`:334-362`)—— 与这扇窗口不是同一个问题。所以窗口的中文名是**集成与密钥**, 而那个设置分类
+  **一个字都不改**。
+
+### 14.6 优先级, 以及那条常设 grep 普查
+
+- 优先级: **用户自己的 > 集群默认 > 没有**。用户显式设过的值**不会**被后来注入的集群默认顶掉
+  —— 与 `_frpEffectiveEnabled`(`src/plugins.js:584-588`)同一条: 显式的值胜出, 只有
+  `undefined` 才跟随 env。
+- **消费者永远不自己读 `process.env`。** 它问 `resolveIntegration(id)`。常设 sweep:
+  `process.env.VIBESPACE_INTEGRATION`(含 `VIBESPACE_INTEGRATIONS`)出现在
+  `src/server/integration-store.js` 之外 = 红。
+- 已经点名的例外恰好一个: `src/mounts.js:2189` 的 `drivePresets()` 读 `VIBESPACE_GDRIVE_CLIENTS`
+  —— 它比这一层早、有自己的消费者, 而 `gmail` 那一行是**委托**给它(`{via:'drive-presets'}`)
+  而不是复制它。普查因此还要断言**一个 env 名字只有一个解析者**: 两行 row 声明同一个 env 名,
+  或者一个名字既被一行 row 声明又被一个 delegate 声明, 都变红。
+- **被点名的孪生**: frp 插件的 relay 配置(§14.1)。在它迁过来之前, `kb-file-structure.md` 里给
+  它一行, 说清"这里有两个地方在做同一件事, 以及为什么现在不合" —— 一个没被点名的孪生正是这个
+  代码库被咬的方式。
+
+### 14.7 `src/secret-box.js` 从 P1 提前到 P0, 以及它必须**不**继承的那个缺陷
+
+这一层从第一个 commit 起就要存密文, 所以 §14 的存在把 `src/secret-box.js` 的抽取从 P1 **提前成
+P0 的前置条件**(§19 重新计价了轮次)。
+
+- **一个原语, N 个密钥文件。** `secretBox(keyFile)` 是一个工厂: mounts 继续用它自己的
+  `data/.mounts-key`(`src/mounts.js:47`), 这一层用 `data/.integrations-key`, channels 的 token
+  用 `data/.channels-key`(§13)。理由很钝: 搬一个密钥文件是一条**不可逆的数据丢失路径**, 换来
+  的只是少一个文件; 而一把密钥被轮换或损坏时, 爆炸半径应当止于一个 store。
+- **密文格式逐字节不变**(`iv.tag.data` 三段 base64, aes-256-gcm), 由 parity 测试执法: 用修前
+  那份 `_enc` 的**补丁副本**加密、用 `secret-box` 解密, 再反过来一次。这就是本仓的负控惯用法。
+- **它必须不继承的那个缺陷(读代码读出来的, 不是假设)。** `src/mounts.js:360-367` 的 `_key()`:
+
+  ```js
+  _key() {
+    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }
+    catch {
+      const k = crypto.randomBytes(32);
+      fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 });
+      return k;
+    }
+  }
+  ```
+
+  那个 catch 只对 **ENOENT** 是对的。对其它任何一种读失败(EACCES、EMFILE、EIO、一份被截断或
+  被清空的文件)它会**铸一把新密钥并覆盖掉旧的** —— 此后每一条已存的密文都永远解不开, 而且
+  **一个字都不会说**。今天它被掩盖着, 只因为那个文件是 0600、属于服务进程自己、而且读得很少;
+  fd 耗尽、一次只读挂载、或者一次写到一半的崩溃都够得到它。所以 `secret-box`:
+  **只在 `ENOENT` 上创建**, 其它 errno 一律**带类型抛出**(调用方把它渲染成"读不出密钥", 而
+  不是"没有配置过" —— 这两句话对用户的意思完全相反); **写走 tmp+rename**(原子写那条法的
+  *理由*在这个文件上比在任何一个 `.json` 上都更重: 它是 `data/` 下最不可恢复的那一个);
+  **绝不覆盖一个已经存在的密钥文件**。mounts 在 parity 测试后面迁过来, 于是这个修复对它同样
+  生效 —— 这也是"抽取"之所以值得做的那一半。
+
+### 14.8 集群管理员那一面: helm values → Secret → env
+
+`deploy/helm/vibespace-user/values.yaml` 新增一段(与既有的 `gdrive:` `:158-163` 并列):
+
+```yaml
+# Cluster-provided integration credentials (src/integration-registry.js rows).
+# Each entry is ONE row id; `values` keys are that row's declared field keys.
+# A user's own key always wins — the UI shows which one is in use.
+integrations: []
+#  - id: lark
+#    label: "Lark (cluster app)"
+#    values:
+#      appId: "cli_xxxxxxxx"
+#      appSecret: "xxxxxxxx"
+```
+
+`templates/main.yaml` 的 Secret 里(与 `gdriveClients` `:32-33` 并列):
+
+```yaml
+  {{- if .Values.integrations }}
+  integrations: {{ .Values.integrations | toJson | quote }}
+  {{- end }}
+```
+
+以及容器 env 里(与 `VIBESPACE_GDRIVE_CLIENTS` `:159-164` 并列):
+
+```yaml
+            {{- if .Values.integrations }}
+            # Cluster-provided integration credentials: JSON
+            # [{id,label,values:{…}},…] read by src/server/integration-store.js.
+            # A user's own key in data/integrations.json always wins.
+            - name: VIBESPACE_INTEGRATIONS
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: integrations } }
+            {{- end }}
+```
+
+四条规则跟着这段 YAML 一起写进 `deploy/README.md`:
+
+- **绝不用 `value:`, 一律 `secretKeyRef`** —— 这就是这张 chart 已经在做的事(`gdriveClients`
+  `main.yaml:163-164`、cephfs secret `:152-153`)。一个 `value:` 会把密钥印在
+  `kubectl get deploy -o yaml` 上。
+- **单字段形式** `VIBESPACE_INTEGRATION_<ID>_<FIELD>`(id 与字段名大写, `-` 变 `_`)留给自托管
+  与 docker-compose —— 它不需要 JSON 引号地狱。两种形式同时存在时 **JSON 那份赢**, 并在启动时
+  记一行说明是哪一份生效了。
+- **解析失败绝不抛**: 照 `src/mounts.js:2200` 那一行 ——
+  `console.error('[integrations] VIBESPACE_INTEGRATIONS unparseable:', e.message)` 然后当作没有
+  集群默认。一个打错的 values 块不该让 pod 起不来。
+- **哪些 row 适合做集群默认, 要在 README 里说清**: 一次注册、全体可用的(Lark 的应用凭据、
+  Google 的 OAuth client)适合; **按席位付费的 key 不适合** —— 集群给一把就是集群替所有人付钱,
+  而供应商的并发席位会让用户互相踩(CloakBrowser 的分档就是按并发会话数卖的)。
+
+### 14.9 一个 OAuth client, N 个实例, N 个公开地址
+
+集群把每个实例自己的公开地址注进去(`main.yaml:172-176`), 所以"一个注册过的 OAuth 应用怎么服务
+N 个不同的公开地址"是一个真问题。**但 VibeSpace 的 OAuth 流程从来没有把实例地址放进
+`redirect_uri` 里**: 它用的是 loopback(`src/gmail-sync.js:78` 的 `srv.listen(0, '127.0.0.1')`,
+`:82`/`:99` 的 `redirect_uri: http://127.0.0.1:${st.port}`), 而 loopback 指的是**用户浏览器所在
+的那台机器**, 不是实例。这把问题整个换了个形状:
+
+**(a) 既有的 loopback + 粘回。** 集群注册**一个** redirect URL, 与实例数量**无关** —— 因为那个
+URL 里根本没有实例的地址。在集群部署里用户的浏览器与实例不在同一台机器上, 所以到 127.0.0.1 的
+重定向在用户浏览器里**失败**, 而 code 就在地址栏里 —— 这正是 `src/mounts.js:2175-2182` 那段注释
+写下来的形状, 而产品**已经有**那个面(粘回)。代价是每次连接多一次粘贴。
+
+**(b) 集群鉴权中继。** `https://auth.<cluster>/cb` 注册一次, 用**签名过的 state** 携带目标实例,
+再转发到那个实例的公开地址。UX 更好(零粘贴), 代价是: 一套新基础设施、一把签名密钥、每个实例
+都要信任那个中继的签名, 以及 —— 这一条才是重的 —— **一个能看见授权码的组件**。它必须只转发不
+落盘, 而它一旦被攻破就是全集群的问题, 不是一个用户的问题。
+
+**建议: v1 取 (a), (b) 作为后续阶段, 由决定 21 门控。** 理由不是省事: (a) 走的是**今天已经在生
+产里跑着**的那条路(Gmail 挂载), 而 (b) 要新增一个**持有授权码**的组件, 那是一次需要自己的威胁
+模型的改动。
+
+各 vendor 允许什么(公开文档, 2026-09-11 取):
+
+| vendor | 回调 URL 要注册吗 | 端口 | 一个应用能注册几个 | 对"集群默认"的后果 |
+|---|---|---|---|---|
+| Google(Gmail / Drive) | 要, 而且**逐字节精确匹配**(协议 / 主机 / 端口 / 路径 / 尾斜杠), **没有通配** | loopback 是例外: RFC 8252 §7.3 要求授权服务器"**MUST allow any port to be specified at the time of the request** for loopback IP redirect URIs" —— 而本树正是这么用的(`src/gmail-sync.js:78` 绑 `listen(0)`, 每次一个新端口) | 多个精确 URI | (a) 可行且**已经在生产里跑**; (b) 也可行(把中继那一个 URI 注册进去) |
+| Lark / 飞书 | 要 —— 开发者后台"安全设置"里的重定向 URL 列表, 官方文档: **只有列表里的 URL 能通过开放平台的安全校验** | **端口是 URL 的一部分** ⇒ loopback 必须**固定**, §12.4 因此存在 | **支持配置多个**(官方文档原话: "重定向 URL 支持配置多个") | (a) 可行; (b) 可行。**真正的限制不在 URL 上, 在租户上 —— 见下** |
+| CloakBrowser / 云浏览器供应商 | **不适用**: 那是一把 API key / license key, 根本没有重定向 | —— | —— | 集群可以注入, 但那等于集群**替所有人买席位**(§14.8 最后一条) |
+
+**Lark 的集群默认有一条比 redirect 更硬的边界, 而它直接决定决定 22 的形状。** 长连接
+**只支持企业自建应用**(§12.1, 官方文档), 而**自建应用只能在它自己的租户里用**(官方开发指南:
+自建应用 = 企业内部使用, 与可跨租户分发的应用商店应用相对)。于是:
+
+- 一个集群注册的 Lark **自建**应用只服务**与它同租户**的用户。跨租户的用户**必须**带自己的应用
+  —— 这正是 `lark` 那一行**即使有集群默认也仍然允许用户覆盖**的理由, 而不是一句礼貌。
+- 想用一个应用服务多个租户就得做**应用商店(ISV)应用**, 而那会**丢掉决定 3 赖以成立的那条长连
+  接通道**, 同时把 token 模型从 `tenant_access_token` 换成 `app_access_token` + `tenant_key`。
+  换句话说: **"跨租户的集群默认"与"实时推送"在今天是二选一。**
+- 这台机器上的用户是不是同一个 Lark 租户, 是一件运维事实, 不写在这个公开仓库里 —— 而这一层的
+  设计**不需要**那个答案是"是"。
+
+### 14.10 导出、导入, 与这一层加密到底买到了什么
+
+- 集成密钥加进 `/api/config/export-info` 的 `sensitive` 那一半(`src/routes/persistence.js:679-686`,
+  与 `mounts` / `accounts` 并列)与 `/api/config/export` 的 passphrase 加密块(`:712-741`, 与
+  `getMounts?.()?.exportBundle?.()` `:729-732` 同形)。
+- **只导出 `source:'user'` 的行。** 集群默认不是我们的东西, 而且它会轮换: 把它烤进一个备份文件,
+  就是把一把会过期的集群凭据散布到我们再也管不到的地方。
+- 导入到一个**没有**那个集群预设的实例上时, 一行 `source:'cluster'` 解析成 `none` **并说出缺的
+  是什么**, 绝不静静落到导出方的值上(那会让一个用户以为自己连上了集群的应用, 而其实是把别人
+  的凭据带过来了)。
+- **这一层的加密到底买到了什么, 要说清楚。** `data/integrations.json` 与 `data/.integrations-key`
+  同属一个 uid、并排放着 —— 加密防的是**一份被拷走的文件**(备份、快照、一个错配的挂载), 防不
+  了在这台机器上以同一个用户身份运行的代码, 而 **agent 会话恰恰就是以同一个用户身份运行的, 而
+  且它手里有文件工具**。mounts 今天就是这个性质, 我们不是在引入它。一条真正的边界要么是 OS
+  keychain 要么是另一个 uid, 两者都不在 v1 —— 所以这句话写在这里, 而不是让"已加密"这三个字去
+  暗示一个它买不到的保证。
+
+### 14.11 这一层的硬围栏
+
+1. **密钥绝不进 argv**(spawn 卫生)。顺带一条结构性保证: `agentEnv()`
+   (`src/ws-handler.js:112-121`)丢掉每一个不在 `AGENT_ENV_KEEP`(`:101-105`)里的 `VIBESPACE_*`,
+   所以 `VIBESPACE_INTEGRATIONS` 与 `VIBESPACE_INTEGRATION_*` **按构造**到不了任何 agent 子进程。
+2. **Test 只由人点。** §ban-safety 管的是"拿订阅 token 定时打 Anthropic"; 一次人点的 Lark /
+   CloakBrowser 往返不在那条禁令里, 但**一个定时器在**。sweep: 任何调度器、定时器或摄入循环里
+   出现 `integrations.test(` = 红。这条纪律的先例是 `src/local-oracles.js` —— 人触发、声明清楚、
+   而且被度量过。
+3. **store 不构造 vendor 请求**(§14.3), 于是 §3.1 的出网白名单**一行都不用为这一层加**。
+4. vendor 的错误原文经 `escHtml` 渲染, 绝不进 `innerHTML`(与 §10.3 同一条)。
+5. **广播只带遮蔽视图**, 而且是**那一份**(`publicView`), 不是一份手抄的字段清单 —— 手抄的清单
+   正是这个代码库反复丢字段的那个形状。
+6. **失败必须到达用户**: 一次 Test 失败 = 卡片上的一行 + vendor 自己的话; 一次 `PUT` 失败 = 一个
+   toast。telemetry 里有记录不算汇报。
+7. **`hostId` 是参数。** 这一层解析出来的值属于**实例**; 要跑在配对设备上的 adapter(§15)由
+   **引擎**把解析结果当参数交下去 —— 绝不在设备上再存一份, 也绝不经 argv。
+8. **这一层存的是"管理员能给你的东西"**(应用 / 客户端凭据、API key), **不是"你授权过的东西"**
+   (OAuth refresh token)。用户的 Lark token 仍然住在 channels 自己的 token store(§13)。把两
+   者混进一个 store, 正是这份设计从头到尾在防的那种孪生 —— 它们的生命周期、轮换方式与导出规则
+   全都不一样。
+
+---
+
+## 15. v1 刻意不做什么, 以及它们落在哪
 
 | 推迟的 | 为什么 | 落地处 |
 |---|---|---|
@@ -1702,7 +2109,7 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 
 ---
 
-## 15. 这件事制造的债, 以及怎么把关
+## 16. 这件事制造的债, 以及怎么把关
 
 - **第二套 OAuth loopback 流程**, 除非 `src/oauth-loopback.js` 真的把 Gmail 挂载那一套吸收
   掉。如果没吸收, 那个孪生就在 `kb-file-structure.md` 里被点名, 并配一条常设 sweep 条目。
@@ -1718,7 +2125,7 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 
 ---
 
-## 16. 测试 gate
+## 17. 测试 gate
 
 每个阶段的 gate 与该阶段在同一个 commit 里发布。套件名、层级, 以及那条证明这道 gate 会失败
 的**负控**:
@@ -1736,14 +2143,16 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 | `test-channels-identity` | fast | 默认**不追加**发送方诚实行; `identityMarking` 驱动审批卡上的警告与回执里的字段; 审计行带 `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` 且**不出实例**; `sendAs: []` 的会话上 `reply` 返回 `send-not-available` 而**不创建 proposal**; **r4: 一条在 `convCaps` 已经过期之后才被批准的 proposal, 必须在发送之前重新解析并以 `send-not-available` 拒绝** | 一份把诚实行默认打开的副本必须变红(r2 的决定 17 是这条腿的负控); 一个 `marked` 的 channel 上审批卡没有警告必须变红; 一个 `sendAs: []` 的会话上创建出了 proposal 必须变红; **一份不在批准时重新解析的副本必须把那条消息真的发出去** |
 | `test-channels-egress` | fast | 每一个被构造出来的出向请求, 要么来自声明了自己主机的那个 adapter, 要么来自一条**带理由的**白名单 `(file, host)` 对 —— 出生即种下 `src/gmail-sync.js` 与 `src/mounts.js`(§3.1) | 一个带未声明主机的临时文件必须变红; 一条**死掉的白名单条目**(文件被移动或改名)同样必须变红 |
 | `test-oauth-loopback` | fast | 两种模式(§12.4): Gmail 的临时绑定、Lark 的固定绑定; 请求处理器**与**粘回两处的 `state` 拒绝; 完成/取消/超时时端口被释放 | 一个**被预先占住**的固定端口必须产生那次具名拒绝与粘回回落, 绝不是一个不透明的 `EADDRINUSE`; 一次 `state` 错误的回调在两种模式下都必须被拒绝 |
+| `test-integration-registry` | fast | 每一行的 `fields` / `test` / `consumers`; `publicView` 从不出明文, 而 last 4 只在值长度 ≥ 12 时出现; **省略一个密字段 = 不动, `''` = 清掉**; 优先级 user > cluster > none; 集群默认消失 ⇒ `none` **加一个点名的理由**; 必填字段缺失 ⇒ `missing` 点名字段。**grep 普查(打印它走过的集合)**: `process.env.VIBESPACE_INTEGRATION*` 只许出现在 store 里; **一个 env 名字只有一个解析者**(两行 row 同名、或一行 row 与一个 delegate 同名, 都变红); 每个 `consumers` 名字既是存在的文件又**真的**调用 `resolveIntegration`; 每个声明了 `test` 的行都有注册的 runner; **没有任何调度器 / 定时器 / 摄入循环调 `test(`** | 一行 `consumers` 指向一个存在但**从不调用** `resolveIntegration` 的文件必须变红(仅仅"文件存在"是这条普查最容易退化成的那个形状); 一份把 `''` 当成"不动"的副本必须变红; 一份把集群默认**拷进** `data/integrations.json` 的副本, 必须在"轮换 env"那条腿上变红(它会拿旧值继续服务); 一个在定时器里调 `test(` 的合成生产者必须变红; 一份在 `publicView` **之外**做遮蔽的副本必须让广播那条腿变红 |
+| `test-secret-box` | fast | 与 mounts 的 **parity**(用修前 `_enc` 的补丁副本加密 ⇒ `secret-box` 解得开, 反向亦然, `iv.tag.data` 三段逐字节同形); **只在 `ENOENT` 上创建密钥**, 其它 errno **带类型抛出**; 写走 tmp+rename; **绝不覆盖一个已经存在的密钥文件** | 一份照抄 `src/mounts.js:360-367` 那个裸 catch 的副本, 在一次注入的 `EACCES` 上必须铸出新密钥, 于是"旧密文还解得开"那条断言变红 —— 那就是 §14.7 讲的那个缺陷本身, 当作常驻负控 |
 | `test-channels-lark-shape` | fast | 录制 fixture 的归一化: `next_page_token` *翻页到 anchor*、`@_user_N` 占位符对着记录自己的 `mentions` 解析、带类型的错误 | 一份 anchor 落在**第二页**上的 fixture 必须被翻进去, 而不是停在第一页 |
-| `test-plugin-loader`(已有) | fast | `channelAdapters` 进了 `RESERVED_CONTRIBUTIONS` ⇒ 那句"保留给后续阶段 —— 已忽略"的警告真的会发(§14) | 如果那个词被加进去而没更新套件, 它的期望集合断言就会变红 —— 而这正是重点 |
+| `test-plugin-loader`(已有) | fast | `channelAdapters` 进了 `RESERVED_CONTRIBUTIONS` ⇒ 那句"保留给后续阶段 —— 已忽略"的警告真的会发(§15) | 如果那个词被加进去而没更新套件, 它的期望集合断言就会变红 —— 而这正是重点 |
 | `test-channels-agent-cli` | fast | 对着一个 stub 服务器跑 CLI 各个动词; `reply` 只提议、绝不发送; 不可见 = 统一错误 | 一个返回了被 ACL 藏起来的会话的 stub, 仍然必须产生那个统一错误 |
 | `test-spend-paths`(已有) | fast | 它那条按站点的普查必须看见这个新生产者、已接线、带着已声明的理由 | 它本来就带着自己的负控 |
 | `test-channels-engine` | heavy | 真 worktree 服务器 + 假 adapter: 爆发日翻页、退避、单飞、故障出声**与撤回**、摘要批量、唤醒授权与 hold 释放 | 一份用固定窗口抓取的修前副本, 必须在爆发日 fixture 上丢消息 |
 | `test-channels-push` | heavy | 真 worktree 服务器 + 一个**假推送服务器**: ack 在持久化之后(注入一次 ack 与处理之间的崩溃, 记录必须还在); 心跳沉默 ⇒ `state` 掉出 `live` **且**轮询节奏立刻回到快节奏; `stop()` 对已经在飞的 arm 是终局的; 声明 `exclusive` 但故意扣掉一部分事件 ⇒ `missRate` 越过阈值 ⇒ **自动降级成 kick 并把理由说出来**。**r4 三条**: 降级之后这条通道**真的改了它携带的东西**(下一个事件只 kick 游标, 记录由对账轮询进来 —— 光断言 `missRate` 越线是不够的); kick 模式下 `missRate` **一条样本都不涨**(否则它是单向棘轮); 一条降级了的通道即便 fixture 不再扣事件也**绝不自己回到**内容模式, 而在连接向导里重新声明一次独占则清零计数器并重新进入内容模式 | 一条**谎报 `active`** 的通道(修前副本)必须把轮询回落关掉并丢消息; 一份从不降级的副本必须在扣事件的 fixture 上永远丢消息; **一份把内容/kick 判定读在 `caps` 上的修前副本, 必须在降级之后仍然携带内容**; **一份终身累计 `missRate` 的副本, 必须在重新声明之后仍然停在阈值之上** |
 | `test-channels-store-scan` | heavy | 真 daemon(`test-sysinfo-op` 那个模板)+ 一份**合成的** WhatsApp 形状 sqlite: 按 rowid 的游标只读一次读到底; 库带一个未 checkpoint 的 WAL 时**最近的消息仍然读得到**; 一趟读了一半被打断 ⇒ anchor 不动; **扫完之后源库的 `db` 与 `-wal` 逐字节未变且 mtime 未变**(r6 —— 刻意**不是**三个文件: 只读打开会重写 `-shm` 这个不含内容的 WAL 索引, 而在它不可写时连它都不动, 所以断言三件套会在**正确**的机制上变红); 读被拒 ⇒ 具名的 `tcc-denied` 而不是零条; **没有任何 SQLite 读者可用时是具名的 `no-sqlite-reader`**(r6); 能力门 —— 不宣告这个 op 的旧 daemon **绝不会被问**(未知 op 会挂)。**fixture 必须包含"我们是唯一连接"那一臂**(r6 —— 一次排期扫描的常态形状) | 一份只读**那个 `.db` 文件本身**的副本必须漏掉最近那批消息; **一份走**默认**(读写)打开的副本必须在"唯一连接"那一臂上让逐字节未变那条断言变红**(r6 —— 会出事的是**默认**形状, 不是 r5 点名的那个可选 `mode=rw`; 而且它**只在那一臂**变红: 客户端还连着时它是通过的, 所以 fixture 两臂都要有); 一份把 `EPERM` 当成"零条"的副本必须让具名拒绝那条腿变红; **一份在没有任何 SQLite 读者时答零条的副本必须让 `no-sqlite-reader` 那条腿变红** |
-| `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计 | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送" |
+| `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计。**外加 Integrations 那一腿(§14.5)**: 卡片在 `未配置` / `集群默认` / `你自己的` 三种来源下各渲染一次; 密字段只出 `••••1234` 而**没有任何路径把它读回来**(Replace 之后再 `GET` 仍然只有遮蔽视图); Test 按钮的字跟着 `test.kind` 走; 一次失败的 Test 把 vendor 原文画在卡上且经 `escHtml`; 以及**同一组卡片在 375×667 下单列渲染, 每个控件都够得着** | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送"; **一份把明文回给 `GET` 的副本必须变红**; **一份给 `shape-only` 也写"测试连接"的副本必须变红**(那个按钮从没联网); **375×667 下任何一个控件落在视口之外必须变红** —— 这条腿点名 `showDropdown` 那一类事故: 未缩放的 `offsetWidth` 与缩放过的 rect 不是一回事 |
 
 Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的事故: 不许固定 `/tmp` 路径, 不许
 固定端口(用 `scripts/scratch.mjs`); 任何 spawn 服务器的套件都要**点名它给的那个 HOME**; 每
@@ -1753,7 +2162,7 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 
 ---
 
-## 17. 批评记录 —— r2 对抗式 review
+## 18. 批评记录 —— r2 对抗式 review
 
 针对初稿提出了八条发现。每一条在改动任何东西之前都对着 `7f13e7c7` 那棵树核过。七条是对的、
 已经在上文修掉; 一条对了一半, 而错的那一半记在这里而不是照做, 因为一份悄悄接受了错误更正的
@@ -1762,12 +2171,12 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 | # | 发现 | 判决 | 改了什么 |
 |---|---|---|---|
 | 1 | 两个 adapter 轮询循环对同一份 `index.json` 做 read-modify-write; 重叠的 pass 会互相覆盖对方的游标推进与未读数 | **确认。** §6.2 规定每个 adapter 一个循环、而单飞只按*每个* adapter 声明, 与此同时 §5 把每一个可变的按会话事实都放进一份"在 pass 结束时"整份写的原子 JSON 里。`writeJsonAtomic` 只在 fs 那一层是原子的; 围绕它的 read-modify-write 不是。一次被覆盖掉的 *anchor* 推进会跳过消息 | 新增 **§5.1**, 在 `src/server/channels-engine.js` 里点名一个内存所有者, 配一个序列化的 `index.update(fn)` 与一次合并的 flush(`JobManager` / `SessionStatusManager` 那个形状); §5 的不变量 3–4 重写; §6.2 写明每 adapter 单飞不是互斥; §2 多出第三条承重规则; `test-channel-store` 多一条两趟并发 pass 的腿, 配一份 read-modify-write 的负控。分片在 §5.1 里被考虑过并被否掉 —— 轮转计数器是按*组*键控的, 而组是跨 adapter 的 |
-| 2 | `test-channels-egress` 按原文写出来, 在它第一个 commit 上就是红的: `src/gmail-sync.js` 与 `src/mounts.js` 已经在向那些主机构造请求 | **确认。** `src/gmail-sync.js` 构造 `oauth2.googleapis.com/token`、`gmail.readonly` 的 scope URL 与 `gmail.googleapis.com/gmail/v1/users/me`; `src/mounts.js` 持有 `GRAPH_BASE`。一道在合法的既有面上就会失败的强制 gate, 会被第一个撞上它的人放宽 | §3.1 把这条普查重述成一张按 `(file, host pattern)` 键控、**带理由**的白名单, 出生即种下那两个文件, 外加 `test-vendor-whitelist` 的 `ALLOW` 本来就在用的死条目检查; §16 那一行连同两条负控一起更新 |
-| 3 | Lark 的固定 loopback 端口是一个 machine-global 名字; 决定 4 只诊断了*注册*那种冲突, 没管一台机器上两个实例的情况 | **确认。** Gmail 的流程绑 `listen(0, '127.0.0.1')`; Lark 的必须注册, 因此固定。输的那个在授权页*之后*拿到一个不透明的 `EADDRINUSE`, 而持有端口的那个收到另一个实例的 code | 新增 **§12.4**: 模块显式双模; 固定端口只在一次流程期间绑; `EADDRINUSE` 变成一次落到粘回(它不需要端口)的具名拒绝; `state` CSRF 检查从 `gmail-sync` 执行它的**两个**地方逐字带过来并被钉住。§12.1 与决定 4 已更正; `test-oauth-loopback` 多了一条预占端口的腿与一条 `state` 错误的腿, 并且现在在 §16 里有自己的一行 |
+| 2 | `test-channels-egress` 按原文写出来, 在它第一个 commit 上就是红的: `src/gmail-sync.js` 与 `src/mounts.js` 已经在向那些主机构造请求 | **确认。** `src/gmail-sync.js` 构造 `oauth2.googleapis.com/token`、`gmail.readonly` 的 scope URL 与 `gmail.googleapis.com/gmail/v1/users/me`; `src/mounts.js` 持有 `GRAPH_BASE`。一道在合法的既有面上就会失败的强制 gate, 会被第一个撞上它的人放宽 | §3.1 把这条普查重述成一张按 `(file, host pattern)` 键控、**带理由**的白名单, 出生即种下那两个文件, 外加 `test-vendor-whitelist` 的 `ALLOW` 本来就在用的死条目检查; §17 那一行连同两条负控一起更新 |
+| 3 | Lark 的固定 loopback 端口是一个 machine-global 名字; 决定 4 只诊断了*注册*那种冲突, 没管一台机器上两个实例的情况 | **确认。** Gmail 的流程绑 `listen(0, '127.0.0.1')`; Lark 的必须注册, 因此固定。输的那个在授权页*之后*拿到一个不透明的 `EADDRINUSE`, 而持有端口的那个收到另一个实例的 code | 新增 **§12.4**: 模块显式双模; 固定端口只在一次流程期间绑; `EADDRINUSE` 变成一次落到粘回(它不需要端口)的具名拒绝; `state` CSRF 检查从 `gmail-sync` 执行它的**两个**地方逐字带过来并被钉住。§12.1 与决定 4 已更正; `test-oauth-loopback` 多了一条预占端口的腿与一条 `state` 错误的腿, 并且现在在 §17 里有自己的一行 |
 | 4 | 由 assignment 派生的授权与同一个 `(principal, scope)` 上一条用户手写的授权冲突; 取消 assign 会静默撤销用户的授权 —— 在一个只许放宽的模型里做了收窄 | **确认。** §8 的授权形状是按 `(principal, scope)` 键控的, 而 §7.3 说的是"授权随 assignment 一起被移除" | 授权新增 `origin: 'user'\|'assignment'\|'request'`; `effective()` 仍然取 MAX 所以访问器不变; 取消 assign 只删 `origin:'assignment'` 那一行。§7.3 与 §8 重写; `test-channel-acl` 多一条镜像负控(assignment 被移除后 user 授权逐字节不变) |
 | 5 | "每条待审 proposal 一条指针条目"在 `UserTodoManager` 里根本表达不出来 | **确认, 而且方向也错了。** `add()` 有一个封闭参数集; 它按 `(sessionKey, text)` 跨所有状态去重(重新归档一条已解决的条目会重开同一个 id); 它在超过 `MAX_OPEN_PER_SESSION = 20` 时抛异常。而且撤回需要的是*proposal → 条目*, 而这一层根本没有任何东西持久化过 | §9.2 重写成**每个会话一条指针**, `text` **不带计数**(于是按文本去重恰好就是想要的那种幂等), 计数放在 `detail` 里(`add()` 会就地更新它), 返回的 id 作为 `pendingTodoId` 持久化在**会话**上, 撤回只针对这个生产者写下的 id, 并写明上限抛异常时的降级。按 proposal 的那条替代方案及其代价记在决定 7 里 |
-| 6 | 文中声称 `contributes.channelAdapters` "今天是一个被保留的贡献 key", 而它不是 —— 并且一个未知的 key 是被静默丢弃、没有任何警告的 | **确认。** `RESERVED_CONTRIBUTIONS` 是 `['keybindings','panels','viewers','commands','menus','statusChips','backends']`; 只有在那张表里的 key 才会告警, 而 `m.contributes` 被重建成固定形状, 所以其余任何东西都无声消失 | §14 那一行已更正, 而 P0 现在会加上那个词, 外加 `scripts/test-plugin-loader.mjs` 里期望集合的更新; §16 带上那一行 |
-| 7 | 围栏 3 引用了一个这棵树里不存在的事故与一次不存在的度量, 而且陈述了与本仓库真实的法相反的东西 | **确认了一半。** 关于*法*的批评是对的, 并且已经修掉: CLAUDE.md 的规则是"不许**同步** fs/exec; 只许带超时的子进程/worker", 所以有界的异步子进程是被批准的(ssh-per-op、`ps`/`lsof` 梯级、发现扫描)—— 初稿暗示的正相反。而关于*编造事故*的说法是*错的*: `inc-mtunmv3d-pmd6`(2026-09-10)是真的, 在 45 MB / 543 MB / 1.5 GB 的父进程 RSS 下实测每次 spawn 1.8 / 18.8 / **72.5 ms**。它不在树里, 是因为实例本地的证据被要求留在这个公开仓库之外 —— grep 公开树是正确的检查方式, 也得出了正确的*观察*, 但"不在树里"与"是编的"是两个不同的主张, 而这个仓库自己的惯例(CLAUDE.md 通篇引用 `inc-…` id 却没有在树里的证据文件)让前者是意料之中的 | §3.3 重写成先陈述那条写下来的法, 然后把 fork 税当作*叠在它之上的一条实测约束*, 附上事故 id、方法、对 RSS 的依赖, 以及一句明确的说明: 证据文件是实例本地的。§20 增加第 12 条, 说明这些常数不可移植 |
+| 6 | 文中声称 `contributes.channelAdapters` "今天是一个被保留的贡献 key", 而它不是 —— 并且一个未知的 key 是被静默丢弃、没有任何警告的 | **确认。** `RESERVED_CONTRIBUTIONS` 是 `['keybindings','panels','viewers','commands','menus','statusChips','backends']`; 只有在那张表里的 key 才会告警, 而 `m.contributes` 被重建成固定形状, 所以其余任何东西都无声消失 | §15 那一行已更正, 而 P0 现在会加上那个词, 外加 `scripts/test-plugin-loader.mjs` 里期望集合的更新; §17 带上那一行 |
+| 7 | 围栏 3 引用了一个这棵树里不存在的事故与一次不存在的度量, 而且陈述了与本仓库真实的法相反的东西 | **确认了一半。** 关于*法*的批评是对的, 并且已经修掉: CLAUDE.md 的规则是"不许**同步** fs/exec; 只许带超时的子进程/worker", 所以有界的异步子进程是被批准的(ssh-per-op、`ps`/`lsof` 梯级、发现扫描)—— 初稿暗示的正相反。而关于*编造事故*的说法是*错的*: `inc-mtunmv3d-pmd6`(2026-09-10)是真的, 在 45 MB / 543 MB / 1.5 GB 的父进程 RSS 下实测每次 spawn 1.8 / 18.8 / **72.5 ms**。它不在树里, 是因为实例本地的证据被要求留在这个公开仓库之外 —— grep 公开树是正确的检查方式, 也得出了正确的*观察*, 但"不在树里"与"是编的"是两个不同的主张, 而这个仓库自己的惯例(CLAUDE.md 通篇引用 `inc-…` id 却没有在树里的证据文件)让前者是意料之中的 | §3.3 重写成先陈述那条写下来的法, 然后把 fork 税当作*叠在它之上的一条实测约束*, 附上事故 id、方法、对 RSS 的依赖, 以及一句明确的说明: 证据文件是实例本地的。§21 增加第 12 条, 说明这些常数不可移植 |
 | 8 | `_railBadge('channels', unreadTotal)` 那个"已经存在"的东西并不存在; 那个徽标需要的接线比列出来的多 | **确认。** helper 是 `_railSetBadge(id, val)`; 徽标由 `_railRefreshBadges()` 里一串硬编码的梯子和 `_railWireBadges()` 里一份显式的消息类型列表驱动, 两者都不会自动认出一个新 id | §10.1 已更正: 正确的 helper 名字与**六**处注册, 并注明这个徽标可以搭那份广播摘要的便车, 而不必往那串梯子里再加一次 fetch |
 
 八条里有两条(1 与 3)是潜伏的*钱与正确性*缺陷而不是文档笔误, 而且它们共享一个值得点名的形
@@ -1785,7 +2194,7 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 "对面会看见谁"的是**正在按批准键的那个人** —— 所以正确的东西不是那条附加文本, 是授权那一
 刻的一条警告。两次都不是"更保守"或"更激进", 都是**把话说给该听的那一方**。
 
-### 17.1 对 r3 的对抗式 review(r4)
+### 18.1 对 r3 的对抗式 review(r4)
 
 针对 r3 修订提出了五条。每一条都先对着 `a41bf513` 那棵树复核过, 五条**全部成立**, 也全部
 在上面改掉了; 没有一条需要被记成"批评错了"。
@@ -1793,10 +2202,10 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 | # | 发现 | 判定 | 改了什么 |
 |---|---|---|---|
 | 1 | "此刻在用哪条通道、它活着吗、它可以携带内容吗"同时住在 `caps.pushExclusivity`、adapter 记录的 `push {…}` 与每会话的 `lane {…}` 三处, 没有优先级, 也**没有任何访问器读得到 adapter 记录** —— 于是 r3 新加的自动降级结构上赢不了 | **成立, 而且是三个后果不是一个。** §4 声称 `src/channel-caps.js` 是**唯一**回答处, 但它导出的三个函数没有一个接 adapter 记录; §6.4 只说前两者"一起决定", 没说谁压过谁 ⇒ (a) 被降级的通道继续携带内容, (b) 新鲜度芯片按一条静态声明画 "live"(正是它自己引用的 `opencode-events` 轮 4 教训), (c) 围栏 12 的合并窗口在 kick 模式下照跑, 白买 60 秒延迟 | `caps.pushExclusivity` **删除**(独占度是按部署的配置事实, 不该住在按 adapter 种类的静态声明里; `pushTransport` 留下, 它真的是静态的); `src/channel-caps.js` 新增**唯一**解析器 `laneState(caps, adapterRecord, convEntry, now)`, 优先级**降级 > 活性 > 声明**、`unknown` 一律 `carryContent:false`; 四个消费者(芯片、围栏 12 的门、§6.4 的节奏、§6.2 的调度器)全部改问它, §2 多一条落位规则; `test-channel-caps` 与 `test-channels-push` 各加腿, 后者断言**降级真的改变了这条通道携带的东西**(r3 只断言 `missRate` 越线) |
-| 2 | 决定 19 把唯一有摄入契约的那一格(`scanSource:'store'`)删掉了, 而契约没有搬进活下来的那一格: `'ui'` 没有 anchor、没有去重键、没有"完整的一趟", §12.5 还明确允许它声明 `history:'none'` | **成立。** §4 的契约规定没声明的能力**抛异常**, §5 不变量 4 要"完整的一趟"与 `complete:false`, 不变量 2 又要求 `vendorId` —— 而一次 DOM 抓取不保证有稳定的消息 id; §16 的 parity 行只钉了 push/poll 的去重, 从没钉过"重扫一块屏幕" | §12.5 为 `'ui'` 写出三行契约: 合成 anchor 键 `(convId, renderedAt, sha256(author\|text))` 写进 `vendorId` 且 `raw.synthetic:true`、受滚动限制的"完整的一趟"(到了 anchor ⇒ `complete:true`, 先撞滚动上限 ⇒ `complete:false` 即 anchor 不动)、`receive:'scan'` 上**禁止** `history:'none'`(契约套件执法); 表里那一格的 `history` 改成只剩 `'page'`; §5 不变量 2 与 §6.3 各加一句指过来; `test-channels-lane-parity` 加 scan 腿与"丢掉合成键"的负控 |
-| 3 | `push.missRate` 是一个没有计数窗口的终身比率, 降级又没有出口 ⇒ 单向棘轮: kick 模式下推送根本不携带记录, 比率按构造趋向 1.0, 于是一条降级过的通道**永远**回不到阈值之下 | **成立**, 而且正是 auto-resume `edgeHeld` 那条教训要防的形状(*把那堵墙烧掉就是把一次瞬时的分歧变成一次永久的拒绝*) | §6.4 补两句: 比率只在 `carryContent` 为真时计数、且只在一个滚动窗口(最近 N 条或 24 小时取大)里计数; 降级由**做出声明的那一方**撤回(连接向导里重新声明 ⇒ 清零 + 重试一次), **计数器绝不是触发器**; 决定 18 与 §20 第 17 条同步; `test-channels-push` 加两条腿 |
+| 2 | 决定 19 把唯一有摄入契约的那一格(`scanSource:'store'`)删掉了, 而契约没有搬进活下来的那一格: `'ui'` 没有 anchor、没有去重键、没有"完整的一趟", §12.5 还明确允许它声明 `history:'none'` | **成立。** §4 的契约规定没声明的能力**抛异常**, §5 不变量 4 要"完整的一趟"与 `complete:false`, 不变量 2 又要求 `vendorId` —— 而一次 DOM 抓取不保证有稳定的消息 id; §17 的 parity 行只钉了 push/poll 的去重, 从没钉过"重扫一块屏幕" | §12.5 为 `'ui'` 写出三行契约: 合成 anchor 键 `(convId, renderedAt, sha256(author\|text))` 写进 `vendorId` 且 `raw.synthetic:true`、受滚动限制的"完整的一趟"(到了 anchor ⇒ `complete:true`, 先撞滚动上限 ⇒ `complete:false` 即 anchor 不动)、`receive:'scan'` 上**禁止** `history:'none'`(契约套件执法); 表里那一格的 `history` 改成只剩 `'page'`; §5 不变量 2 与 §6.3 各加一句指过来; `test-channels-lane-parity` 加 scan 腿与"丢掉合成键"的负控 |
+| 3 | `push.missRate` 是一个没有计数窗口的终身比率, 降级又没有出口 ⇒ 单向棘轮: kick 模式下推送根本不携带记录, 比率按构造趋向 1.0, 于是一条降级过的通道**永远**回不到阈值之下 | **成立**, 而且正是 auto-resume `edgeHeld` 那条教训要防的形状(*把那堵墙烧掉就是把一次瞬时的分歧变成一次永久的拒绝*) | §6.4 补两句: 比率只在 `carryContent` 为真时计数、且只在一个滚动窗口(最近 N 条或 24 小时取大)里计数; 降级由**做出声明的那一方**撤回(连接向导里重新声明 ⇒ 清零 + 重试一次), **计数器绝不是触发器**; 决定 18 与 §21 第 17 条同步; `test-channels-push` 加两条腿 |
 | 4 | `convCaps` 是一份带 `at` 却**没有任何读者**的存下来的派生事实(没有 TTL、没有刷新触发点、没有过期降级), 与十二行之下的 §5 不变量 7 直接冲突; 一份一周前的乐观答案会画出发送控件, 并造出 §4 承诺永不创建的那种 proposal | **成立。** `why` 的枚举里本来就有 `'left-group'`, 说明这个状态是被预期到的; 而没有读者的字段在这个仓库里就是"这个修复从来没接上线" | §4 与 §5 给 `convCaps` 一个 **TTL(6 小时)**与三个刷新触发点(track 时、TTL 过后面板第一次渲染、**批准那一刻发送之前无条件**), 过期即 `read:'unknown'`/`sendAs:[]`/`why:'stale'` —— 走 `offers()` 已有的规则渲染, 不需要新词汇; §9.2 写明批准时的重新解析与它的拒绝路径; 不变量 7 把它点名成"付了代价的例外"; `test-channel-caps` 加 TTL 腿(带正控), `test-channels-identity` 加"过期后批准必须拒绝"的腿 |
-| 5 | 中文版 §20 的出处块与第 19 条之间缺一个空行, CommonMark 的 lazy continuation 会把整块出处折进那条 caveat 里 | **成立**(`cat -A` 复核; 英文版 en:1806-1808 有那个空行) | 补上那一个空行。同一次复核里, 这一对文档的其余结构性检查全部通过: 标题数、表格行数、代码块逐字节一致, 以及 P0–P4 / P0–P2 的轮次与天数算术两边一致 |
+| 5 | 中文版 §21 的出处块与第 19 条之间缺一个空行, CommonMark 的 lazy continuation 会把整块出处折进那条 caveat 里 | **成立**(`cat -A` 复核; 英文版 en:1806-1808 有那个空行) | 补上那一个空行。同一次复核里, 这一对文档的其余结构性检查全部通过: 标题数、表格行数、代码块逐字节一致, 以及 P0–P4 / P0–P2 的轮次与天数算术两边一致 |
 
 这五条里有四条(1–4)共享一个形状, 值得与上面 r2 那两条并排写下来: **一个事实被存在三个地
 方, 而没有一个函数被允许把它们读全。** `laneState` 之前的那三个位置、`convCaps` 那个没有读
@@ -1805,7 +2214,7 @@ Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的�
 答案分散在多个存储位上, 就等于没有答案** —— 存储位可以有好几个(声明、测量、观测本来就是
 不同的事实), 但**折成答案的地方只能有一个, 而且它得读得到全部三个**。
 
-### 17.2 owner 的更正(r5)—— 一句合并了两个平台的话
+### 18.2 owner 的更正(r5)—— 一句合并了两个平台的话
 
 r4 写下"决定 19 把 `'store'` 对**两个**平台都排除掉了", 并据此把整个 §12.5 重写成只剩
 `'ui'` 那一格。**owner 指出这是错的**: 他见过一个直接读 macOS 上 WhatsApp 那份库的实现,
@@ -1825,7 +2234,7 @@ r4 写下"决定 19 把 `'store'` 对**两个**平台都排除掉了", 并据此
 
 ---
 
-### 17.3 对 r5 的对抗式 review(r6)—— 一轮修复自己带进来的东西
+### 18.3 对 r5 的对抗式 review(r6)—— 一轮修复自己带进来的东西
 
 r5 把 `'store'` 那一格拿了回来, 而这一轮的八条里有**五条就长在那次新增上**: 一条把机制说反
 了、一条把 r5 自己刚指认的缺陷留在了隔壁那个字段、一条给新记录配了三个没有读者的字段、一条
@@ -1834,14 +2243,14 @@ r5 把 `'store'` 那一格拿了回来, 而这一轮的八条里有**五条就�
 
 | # | 发现 | 判定 | 改了什么 |
 |---|---|---|---|
-| 1 | `'store'` 那一格**推荐的**读法(backup API / `VACUUM INTO`)正是唯一会破坏它自己那条"绝不写"的机制, 而它拒绝安全那条的理由是**倒过来的**: "以只读方式打开活库不够, 因为这是 WAL 库"把**只读打开**(读得到 WAL)与**只读那个 `.db` 文件**(读不到)混成了一件事 | **成立, 已在一次性 fixture 上实测**(node v24.12.0 `node:sqlite`, SIGKILL 生产者留下未 checkpoint 的 WAL): 默认打开在**我们是唯一连接**时读对了 `NEWEST`, 然后在 `close()` 上把 `db` 改写、把 `-wal` 与 `-shm` **删掉**(SQLite 有文档的最后一个连接 checkpoint-and-delete); `readOnly:true` 同样读到 `NEWEST`(所以 r5 给出的理由是假的)且 `db`/`-wal` 逐字节不变; 而**只读 `.db` 文件本身**才漏掉 `NEWEST`。"我们是最后一个连接"对一次排期扫描是**常态** | §12.5 的机制**反过来**: 以 `SQLITE_OPEN_READONLY` 打开, 从**那条只读连接**做 `VACUUM INTO`/backup; 被拒绝的那句改写成"只读 `.db` 文件**本身**会漏掉 WAL"; 三件套复制降为**兜底**并写明它的撕裂读风险; §6.3 的孪生同改; §16 的断言从"三件套逐字节未变"收窄成 **`db` 与 `-wal`**(只读打开会重写 `-shm`), 负控从 `mode=rw` 改成**默认**打开, 并加一臂"我们是唯一连接" |
-| 2 | `caps.history` 仍然是按**种类**的标量, 而 §12.5 自己那张新表给同一个 adapter 按解析出的来源指派了**两个不同的值**(`'store'`⇒`'since'`, `'ui'`⇒`'page'`) —— 这与 r5 在下一个字段上刚说过的话逐字相同 | **成立。** 一个 `kind:'whatsapp'` 的 adapter 只能声明一个 `history`, 而 `scanSources` 意味着同一个模块两格都跑: 声明 `'since'` 让 Linux 部署被要求用 DOM 刮取兑现 since-anchor 语义, 声明 `'page'` 删掉"真 anchor ⇒ `'since'`"这条 `'store'` 之所以被优先的理由; 而 §16 那条由**一个**假 adapter 驱动的两来源 parity 腿, 按 r5 的写法**不可实现** | `caps.historyBySource` 取代 `receive:'scan'` 上的那个标量(`push`/`poll` 保留标量), `scanState()` 连同 `source` 一起解析出 `history`, §4 的契约规则同时管住"每个值非 `'none'`"与"键要盖住 `scanSources` 的每一个来源", §16 加镜像负控 |
+| 1 | `'store'` 那一格**推荐的**读法(backup API / `VACUUM INTO`)正是唯一会破坏它自己那条"绝不写"的机制, 而它拒绝安全那条的理由是**倒过来的**: "以只读方式打开活库不够, 因为这是 WAL 库"把**只读打开**(读得到 WAL)与**只读那个 `.db` 文件**(读不到)混成了一件事 | **成立, 已在一次性 fixture 上实测**(node v24.12.0 `node:sqlite`, SIGKILL 生产者留下未 checkpoint 的 WAL): 默认打开在**我们是唯一连接**时读对了 `NEWEST`, 然后在 `close()` 上把 `db` 改写、把 `-wal` 与 `-shm` **删掉**(SQLite 有文档的最后一个连接 checkpoint-and-delete); `readOnly:true` 同样读到 `NEWEST`(所以 r5 给出的理由是假的)且 `db`/`-wal` 逐字节不变; 而**只读 `.db` 文件本身**才漏掉 `NEWEST`。"我们是最后一个连接"对一次排期扫描是**常态** | §12.5 的机制**反过来**: 以 `SQLITE_OPEN_READONLY` 打开, 从**那条只读连接**做 `VACUUM INTO`/backup; 被拒绝的那句改写成"只读 `.db` 文件**本身**会漏掉 WAL"; 三件套复制降为**兜底**并写明它的撕裂读风险; §6.3 的孪生同改; §17 的断言从"三件套逐字节未变"收窄成 **`db` 与 `-wal`**(只读打开会重写 `-shm`), 负控从 `mode=rw` 改成**默认**打开, 并加一臂"我们是唯一连接" |
+| 2 | `caps.history` 仍然是按**种类**的标量, 而 §12.5 自己那张新表给同一个 adapter 按解析出的来源指派了**两个不同的值**(`'store'`⇒`'since'`, `'ui'`⇒`'page'`) —— 这与 r5 在下一个字段上刚说过的话逐字相同 | **成立。** 一个 `kind:'whatsapp'` 的 adapter 只能声明一个 `history`, 而 `scanSources` 意味着同一个模块两格都跑: 声明 `'since'` 让 Linux 部署被要求用 DOM 刮取兑现 since-anchor 语义, 声明 `'page'` 删掉"真 anchor ⇒ `'since'`"这条 `'store'` 之所以被优先的理由; 而 §17 那条由**一个**假 adapter 驱动的两来源 parity 腿, 按 r5 的写法**不可实现** | `caps.historyBySource` 取代 `receive:'scan'` 上的那个标量(`push`/`poll` 保留标量), `scanState()` 连同 `source` 一起解析出 `history`, §4 的契约规则同时管住"每个值非 `'none'`"与"键要盖住 `scanSources` 的每一个来源", §17 加镜像负控 |
 | 3 | 设计把 server.js 的尺寸棘轮点名为自己接线段落的门, 却没量过那个预算还剩多少 | **成立, 已实测**: 在基线提交上 `read('server.js').split('\n').length` **正好是 2100** ⇒ 余量为零, P0 的第一个 commit 就会让 `npm run build`(强制 pre-push 门 + 应用内自更新)变红 | §2.1 与 P0 的退出条件各加一条: **先量**, 然后要么在同一个 commit 里有意识地抬预算(套件自己的注释就是这么写的), 要么先抽走一个既有 stanza; 按 ~0.5 轮计价 |
-| 4 | r5 新增的 `scan` 记录逐字重犯了 r4 自己的第 4 条: `hostFacts.at` / `grant` / `grantAskedAt` 是存下来的派生事实, 没有读者、没有 TTL、没有刷新触发点、没有陈旧降级 —— 而 §5 不变量 7 只点名过**一个**例外 | **成立。** `grantAskedAt` 在整份英文文档里只出现一次(就在那个 schema 块里), 而 `scanState(…, now)` 里的 `now` 从没被说过是干什么的(它每一个同辈解析器的 `now` 都有明确用途); 这些事实来自一次可能跨机器的往返, 本地推导不出来 —— 正是 `convCaps` 拿到具名例外的那条性质。伤害方向还更贵: 客户端被卸载、更新挪走了库、Sonoma→Sequoia 把 TCC 扩到 Group Containers 之后, `scanState` 会继续答 `'store'` 与 15 秒 | `scan.hostFacts` 拿到 6 小时 TTL + 三个具名刷新触发点 + `source:null`/`why:'host-facts-stale'` 降级; `grant` 移进 `hostFacts` 并且**从不跨一趟被信任**(op 自己的 `EPERM` 是权威, 一次 `EPERM` 就重新归档成 `tcc-denied` 并清掉存下来的授权); `grantAskedAt` 拿到读者("同一台机器上 N 之内不重复弹提示"); §5 不变量 7 收下第二个具名例外; §16 加 TTL 腿与它的正控 |
-| 5 | `carryContent` 只为 push 定义过, 而那道合并门坐在三条通道汇合的**同一个漏斗**上, `laneState()` 又答得出 `via:'scan'`; 与此同时 `'store'` 是**连同一个事件驱动的触发器**(对库文件的 `fs.watch`)一起被引进来的, 既没有去抖也没说它与 `caps.scanLatency` 是什么关系 | **成立。** WhatsApp 的 `ChatStorage.sqlite` 每收一条消息就被写一次 ⇒ 热闹群里 watch 大约每条消息响一次 ⇒ 每条消息一趟扫描 ⇒ 每条消息一次 filter 命中 ⇒ 合并门读到的 `carryContent` 是 undefined(假)⇒ 每条消息一次唤醒, 也就是围栏 12 自己的"30 条消息变成 30 次投递"。**诚实边界**: §7.4 的 30 秒地板与 spend authorizer 把绝对花销兜住了, 所以这不是无界的钱 —— 但每条通道的唤醒次数与扣款笔数不一样, 这让 §6.1 的总纲与 §16 的 parity 行按字面不可能成立 | §6.4 的优先级里显式补上 `via:'scan'` ⇒ `carryContent:false`(scan pass 是一批, 与 poll 同理); 那个 `fs.watch` 被定性成**游标 kick**, 去抖到 `caps.scanLatency[source]`(于是那个数字是真的天花板), 并欠 `opencode-events` 第四轮那条 inotify 生命周期规则; §6.1 的图与 §16 的 parity 行各自跟进, 后者加一条爆发腿与一份没去抖的负控 |
-| 6 | `'store'` 通道需要 daemon 里有一个 SQLite 读者, 而设计一个机制都没点名 —— 可每个候选都撞上本仓已经写下来的约束, 所以这不是细节, P6a 的 4–5 轮也没为它计价 | **成立。** daemon 是单文件 esbuild 包且 `--external` 恰好只有 `node-pty`, 安装脚本称它 "zero-dep" 且 `NODE_MIN=18`: `node:sqlite` 在 18/20 上不存在、在 24 上仍打 ExperimentalWarning(实测)、**取行的 API 是同步的**(它的 `backup()` 是异步的, 所以危险的是扫行那一段)而 CLAUDE.md 说这个 daemon 载着活会话管道; 原生绑定要第二个 `--external` 加按平台预编译; 而 `sqlite3(1)` 子进程是围栏 3 认可的形状 | §2 与 §12.5 点名机制并写明约束: **推荐有界子进程**, `node:sqlite` 放在运行时探测 + 明说的 `NODE_MIN` 抬升之后, 原生绑定按打包理由**明确拒绝**; `no-sqlite-reader` 进 op 的失败词表; §20 加一条"那台 Mac 的 daemon 上有哪个读者是未实测的"; P6a 重新计价 |
-| 7 | 唯一会拿到 `'store'` 的那个平台, **发送没有机制**。"两条来源上是同一件事"对 `'ui'` 成立(浏览器在网页里打字), 对 macOS 无定义 —— 那是一个原生 Catalyst 应用; 而 P6a 的交付物里没有发送路径、并且自称"不需要 agent-browser" | **成立。** 那句话在 §6.3 / §12.5 / 决定 19 出现三次而两份文档都镜像着它; `'store'` 行的"发送"格写的是"落到 `'ui'`", 而 `'ui'` 的发送机制是 agent-browser —— 于是 P6a 按当前范围就是只读的, 却从来没说 | 三处按来源拆开; **P6a 明确只读且是结构性的**(`convCaps.sendAs` 解析成 `[]` + `why:'no-send-lane-on-this-host'`, 由 §4 现成的规则渲染并阻止建出 proposal); macOS 的两个候选(第二份 linked-device 凭据 / 原生 UI 自动化及它自己的 TCC 授权)写进 §20 当作**未决**问题; `'store'` 行的发送格改写 |
-| 8 | `freshnessClaim(lane, convEntry)` 算不出它自己声明的任何一个数: 它返回 `seconds`(一个**年龄**)却不收时钟, 也不收 `caps`(而 poll 那一档要画的 "≤ 30 s" 住在 `caps.pollInterval.hot` 里); 而 r5 又把它的第一个参数拓宽成两种**不相交**形状的 union 且没有判别字段 | **成立。** 每一个同辈解析器都收 `now`(`laneState`/`scanState`, 以及本仓的 `quota-model` 与 `decideLagShadow`); `laneState()` 的答案带 `via`, `scanState()` 的只带 `source` ⇒ 调用方只能靠"碰巧有哪些键"嗅探。**另外**: §12.5 性质 1 那句"延迟来自 `scanState` 不是静态声明"按字面为假 —— `latencySeconds` 就定义在它上面两行、来自 `caps.scanLatency[source]` | 签名收为 `freshnessClaim(caps, laneOrScan, convEntry, now)`; `scanState()` 补 `via:'scan'` 让 union 显式; 性质 1 改写成**两个数字**(声明的节奏 = 被解析索引的静态表; 实测的年龄 = `lastScanAt` 对 `now`)并要求那一行说清自己在显示哪一个; §16 加"同一个 `convEntry` 两个 `now` 必须两个 `seconds`" |
+| 4 | r5 新增的 `scan` 记录逐字重犯了 r4 自己的第 4 条: `hostFacts.at` / `grant` / `grantAskedAt` 是存下来的派生事实, 没有读者、没有 TTL、没有刷新触发点、没有陈旧降级 —— 而 §5 不变量 7 只点名过**一个**例外 | **成立。** `grantAskedAt` 在整份英文文档里只出现一次(就在那个 schema 块里), 而 `scanState(…, now)` 里的 `now` 从没被说过是干什么的(它每一个同辈解析器的 `now` 都有明确用途); 这些事实来自一次可能跨机器的往返, 本地推导不出来 —— 正是 `convCaps` 拿到具名例外的那条性质。伤害方向还更贵: 客户端被卸载、更新挪走了库、Sonoma→Sequoia 把 TCC 扩到 Group Containers 之后, `scanState` 会继续答 `'store'` 与 15 秒 | `scan.hostFacts` 拿到 6 小时 TTL + 三个具名刷新触发点 + `source:null`/`why:'host-facts-stale'` 降级; `grant` 移进 `hostFacts` 并且**从不跨一趟被信任**(op 自己的 `EPERM` 是权威, 一次 `EPERM` 就重新归档成 `tcc-denied` 并清掉存下来的授权); `grantAskedAt` 拿到读者("同一台机器上 N 之内不重复弹提示"); §5 不变量 7 收下第二个具名例外; §17 加 TTL 腿与它的正控 |
+| 5 | `carryContent` 只为 push 定义过, 而那道合并门坐在三条通道汇合的**同一个漏斗**上, `laneState()` 又答得出 `via:'scan'`; 与此同时 `'store'` 是**连同一个事件驱动的触发器**(对库文件的 `fs.watch`)一起被引进来的, 既没有去抖也没说它与 `caps.scanLatency` 是什么关系 | **成立。** WhatsApp 的 `ChatStorage.sqlite` 每收一条消息就被写一次 ⇒ 热闹群里 watch 大约每条消息响一次 ⇒ 每条消息一趟扫描 ⇒ 每条消息一次 filter 命中 ⇒ 合并门读到的 `carryContent` 是 undefined(假)⇒ 每条消息一次唤醒, 也就是围栏 12 自己的"30 条消息变成 30 次投递"。**诚实边界**: §7.4 的 30 秒地板与 spend authorizer 把绝对花销兜住了, 所以这不是无界的钱 —— 但每条通道的唤醒次数与扣款笔数不一样, 这让 §6.1 的总纲与 §17 的 parity 行按字面不可能成立 | §6.4 的优先级里显式补上 `via:'scan'` ⇒ `carryContent:false`(scan pass 是一批, 与 poll 同理); 那个 `fs.watch` 被定性成**游标 kick**, 去抖到 `caps.scanLatency[source]`(于是那个数字是真的天花板), 并欠 `opencode-events` 第四轮那条 inotify 生命周期规则; §6.1 的图与 §17 的 parity 行各自跟进, 后者加一条爆发腿与一份没去抖的负控 |
+| 6 | `'store'` 通道需要 daemon 里有一个 SQLite 读者, 而设计一个机制都没点名 —— 可每个候选都撞上本仓已经写下来的约束, 所以这不是细节, P6a 的 4–5 轮也没为它计价 | **成立。** daemon 是单文件 esbuild 包且 `--external` 恰好只有 `node-pty`, 安装脚本称它 "zero-dep" 且 `NODE_MIN=18`: `node:sqlite` 在 18/20 上不存在、在 24 上仍打 ExperimentalWarning(实测)、**取行的 API 是同步的**(它的 `backup()` 是异步的, 所以危险的是扫行那一段)而 CLAUDE.md 说这个 daemon 载着活会话管道; 原生绑定要第二个 `--external` 加按平台预编译; 而 `sqlite3(1)` 子进程是围栏 3 认可的形状 | §2 与 §12.5 点名机制并写明约束: **推荐有界子进程**, `node:sqlite` 放在运行时探测 + 明说的 `NODE_MIN` 抬升之后, 原生绑定按打包理由**明确拒绝**; `no-sqlite-reader` 进 op 的失败词表; §21 加一条"那台 Mac 的 daemon 上有哪个读者是未实测的"; P6a 重新计价 |
+| 7 | 唯一会拿到 `'store'` 的那个平台, **发送没有机制**。"两条来源上是同一件事"对 `'ui'` 成立(浏览器在网页里打字), 对 macOS 无定义 —— 那是一个原生 Catalyst 应用; 而 P6a 的交付物里没有发送路径、并且自称"不需要 agent-browser" | **成立。** 那句话在 §6.3 / §12.5 / 决定 19 出现三次而两份文档都镜像着它; `'store'` 行的"发送"格写的是"落到 `'ui'`", 而 `'ui'` 的发送机制是 agent-browser —— 于是 P6a 按当前范围就是只读的, 却从来没说 | 三处按来源拆开; **P6a 明确只读且是结构性的**(`convCaps.sendAs` 解析成 `[]` + `why:'no-send-lane-on-this-host'`, 由 §4 现成的规则渲染并阻止建出 proposal); macOS 的两个候选(第二份 linked-device 凭据 / 原生 UI 自动化及它自己的 TCC 授权)写进 §21 当作**未决**问题; `'store'` 行的发送格改写 |
+| 8 | `freshnessClaim(lane, convEntry)` 算不出它自己声明的任何一个数: 它返回 `seconds`(一个**年龄**)却不收时钟, 也不收 `caps`(而 poll 那一档要画的 "≤ 30 s" 住在 `caps.pollInterval.hot` 里); 而 r5 又把它的第一个参数拓宽成两种**不相交**形状的 union 且没有判别字段 | **成立。** 每一个同辈解析器都收 `now`(`laneState`/`scanState`, 以及本仓的 `quota-model` 与 `decideLagShadow`); `laneState()` 的答案带 `via`, `scanState()` 的只带 `source` ⇒ 调用方只能靠"碰巧有哪些键"嗅探。**另外**: §12.5 性质 1 那句"延迟来自 `scanState` 不是静态声明"按字面为假 —— `latencySeconds` 就定义在它上面两行、来自 `caps.scanLatency[source]` | 签名收为 `freshnessClaim(caps, laneOrScan, convEntry, now)`; `scanState()` 补 `via:'scan'` 让 union 显式; 性质 1 改写成**两个数字**(声明的节奏 = 被解析索引的静态表; 实测的年龄 = `lastScanAt` 对 `now`)并要求那一行说清自己在显示哪一个; §17 加"同一个 `convEntry` 两个 `now` 必须两个 `seconds`" |
 
 这一轮自己的教训是一句方法学: **一次修复引入的每一个新字段, 都要按它自己刚刚写下的规则再
 审一遍。** r5 在同一节里正确地论证了"按部署的事实不能住在按种类的声明里"(第 2 条却把隔壁字
@@ -1851,13 +2260,13 @@ r5 把 `'store'` 那一格拿了回来, 而这一轮的八条里有**五条就�
 
 ---
 
-## 18. 阶段、轮次、日历
+## 19. 阶段、轮次、日历
 
 一**轮**≈ 1 小时实现者 + ~20 分钟对抗式验证(2026-09-10 跨 32 个 workflow / 130 个 agent 实
 测)。日历按**每天 2 轮**算。区间是诚实的: 下限假设一轮就收敛, 上限假设这个模块需要那些额外
 的轮次 —— 而实测分布说大约三分之一的模块确实需要。
 
-### P0 — store、索引所有者、adapter 接口、假 adapter、panel 骨架 — **11–13 轮 (5.5–6.5 天)**
+### P0 — store、索引所有者、adapter 接口、假 adapter、panel 骨架、**集成层** — **16.5–18.5 轮 (8.25–9.25 天)**
 
 `src/channel-store.js`(持久原语)、`src/channel-record.js`、**`src/channel-caps.js`(两个
 轴的能力判定 + `convCaps` 与它的 TTL + `freshnessClaim` + `identityWarning` + **唯一的通道
@@ -1866,7 +2275,7 @@ r5 把 `'store'` 那一格拿了回来, 而这一轮的八条里有**五条就�
 度器、单飞、广播)且**从第一个 commit 起就带着 §5.1 那个序列化的索引所有者**、
 `src/routes/channels.js`、六处 rail 注册(§10.1)、panel 列表(**含新鲜度芯片**)与一个空的
 会话窗口。还有 `RESERVED_CONTRIBUTIONS` 里那一个词 `channelAdapters` 加上它的套件更新
-(§14)。Gate: `test-channel-store`(含两趟并发 pass 的腿与它的 read-modify-write 负控)、
+(§15)。Gate: `test-channel-store`(含两趟并发 pass 的腿与它的 read-modify-write 负控)、
 `test-channel-adapter-contract`、`test-channel-caps`、`test-channel-record`、
 `test-plugin-loader`。
 **出口:** 假 adapter 的会话出现在 panel 里、能开成窗口、能活过一次重启、能在两个客户端之间
@@ -1879,14 +2288,22 @@ adapter 的 `'store'` 来源, 于是"同一天的流量经两种来源得到同�
 `hostFacts` TTL, 外加**接线段落的尺寸棘轮**: 那个预算今天正好顶格(实测 2100/2100), 所以
 P0 的**出口条件**多一条 —— **先量 `server.js`**, 然后要么在同一个 commit 里有意识地抬高预
 算并解释为什么, 要么先把一个既有 stanza 抽进 `src/server/`; 无论哪条, `npm run build` 必须
-在那个 commit 上是绿的, 因为它同时是发布门与应用内自更新的一步(§2.1)。)
+在那个 commit 上是绿的, 因为它同时是发布门与应用内自更新的一步(§2.1)。 **r7: +5.5 轮 —— §14 那一层整个落在 P0**, 因为它是本设计自己第一个 adapter 的
+前置条件(没有它, Lark 的 app id/secret 只能进设置, 而 §14.1 说明了为什么那是不行的):
+`src/secret-box.js` **从 P1 提前过来**(+1, 含与 mounts 的 parity 与那个 `ENOENT` 专属的 catch,
+§14.7)、`src/integration-registry.js` + `src/server/integration-store.js` + `src/routes/integrations.js`
+(+1.5)、Integrations 窗口与它的卡片、Replace、深链与 ≤768px 单列(+1.5)、`test-integration-registry`
+与那条常设 grep 普查(+1), 以及 helm 的 `integrations:` 段 + `deploy/README.md`(+0.5)。**出口再加两条**:
+假 adapter 拿到一行自己的 registry row, 于是"用户自己的 > 集群默认 > 没有"这三种来源在 P0 就都
+被走过一遍; 而**注入一个集群默认再把它撤掉**, 那一行必须变成 `none` 并说出理由, 绝不是静静地
+继续用旧值。)
 
 ### P1 — Lark 读 + Gmail 读 + **推送通道** — **14–16 轮 (7–8 天)**
 
 `src/oauth-loopback.js` **双模**(§12.4: 临时 + 固定、端口只在流程期间持有、具名的
 `EADDRINUSE` 拒绝、粘回回落、两处 `state` 检查逐字带过来)、`src/channels/lark.js`、
 `src/channels/gmail.js`、adapter 面板(连接 / 重新授权倒计时 / tracked 选择器 / 包含查询)、
-故障出声 + 撤回、`src/secret-box.js` 抽取, 以及那张**出生即种下**那两个既有文件的出网白名单
+故障出声 + 撤回, 以及那张**出生即种下**那两个既有文件的出网白名单
 (§3.1)。**外加推送这一半(r3/Q3(a))**: `src/channels/live/lark.js`(官方 SDK 的长连接、
 持久化之后才 ack、心跳活性、`stop()` 对在飞的 arm 终局)、独占度的**声明 + 度量 + 自动降
 级**(`push.missRate`)、adapter 行上把通道状态与降级理由说出来, 以及一个默认关闭的开关后面
@@ -1899,7 +2316,11 @@ Gate: `test-oauth-loopback`、`test-channels-lark-shape`(录制 fixture)、
 *Owner 卡点:* Lark 的 redirect-URI 注册(决定 4)与在控制台里启用事件订阅(决定 3)。
 (r3: +4 轮 —— 推送传输、活性、ack 语义、独占度度量与降级, 加 Gmail 的 Pub/Sub pull。r4: +1
 轮 —— `missRate` 的滚动窗口与"只在携带内容时计数"、adapter 行上那个"重新声明以重试"的入口,
-以及 `test-channels-push` 里"降级真的改变了这条通道携带的东西"那条腿。)
+以及 `test-channels-push` 里"降级真的改变了这条通道携带的东西"那条腿。) **r7: 净 ±0** —— `src/secret-box.js`
+的抽取**移出**去了 P0(−1), 换进来的是这一层的两个消费者腿(+1): Lark 与 Gmail 两个 adapter 改从
+`resolveIntegration()` 取凭据(而不是各自读 env)、它们各自的 `registerIntegrationTest` runner, 以及
+连接向导在 `none` / `cluster` / `user` 三种回答下的三条文案路径(§10.1、§14.5)。**出口再加一条**:
+一个只有集群默认、用户什么都没填的实例, 必须能一路连到底。
 
 ### P2 — assign、filter、唤醒 — **9–11 轮 (4.5–5.5 天)**
 
@@ -1933,7 +2354,7 @@ Agents adapter 跑。(r3: +1 轮 —— 身份行、回执字段、审计字段�
 Lark 发送(身份按决定 2, `uuid` 幂等)、Gmail 发送(两阶段草稿、线程串接 header)、给未知结
 果用的 `reconcile()`、端到端的护栏, 以及那个**默认关闭**的发送方诚实行开关(§9.5)。
 **这一阶段的第一件事**是那次身份证明: 用一次真实发送把 Lark 的 `identityMarking` 从
-`unknown` 定成 `none` 或 `marked`(§20 第 3 条), 因为在那之前审批卡说的是"没验证过"。
+`unknown` 定成 `none` 或 `marked`(§21 第 3 条), 因为在那之前审批卡说的是"没验证过"。
 Gate: outbox 套件扩上幂等与 reconcile 两张矩阵; `test-channels-identity` 扩上真实的
 `sentAs` 回执; `test-channels-e2e` 对着假 adapter 端到端; 外加在把这个开关提供给任何人之前,
 对着一个真实的临时聊天有据可查地手打一发。
@@ -1959,7 +2380,7 @@ agentd op(daemon handler + hello-ack 里的能力位 + 三触规则)、SHARED �
 类里唯一一条今天就能独立落地的腿; 而因为它带一把真 anchor, 它也是这一类里唯一一条不欠合成
 键那笔代价的腿。**它也是**只读**的(r6)**: 这条腿里没有任何发送路径, 所以它必须结构性地说出
 来 —— `convCaps.sendAs` 解析成 `[]` 加 `why:'no-send-lane-on-this-host'`; macOS 上的发送是
-§20 里一个**未决**的问题, 不在这条腿的范围内。**r6 重新计价: 5–7 轮**(原 4–5), 多出来的是
+§21 里一个**未决**的问题, 不在这条腿的范围内。**r6 重新计价: 5–7 轮**(原 4–5), 多出来的是
 选定并接上那个 SQLite 读者(有界 `sqlite3(1)` 子进程 / 探测后的 `node:sqlite` + `NODE_MIN`
 抬升; 原生绑定已被拒), 以及 `no-sqlite-reader` 这条具名拒绝 —— §12.5 把这个决定写下来了,
 但它仍然要在真 daemon 包上实现并被测量。
@@ -1977,29 +2398,30 @@ outbox。(r4: +1 轮 —— 把 §12.5 那三行 `'ui'` 摄入契约真的实现
 更新时的行为。**r5 那一行原来写的是"+4 轮", 而 P6a 是 4–5 轮、P6 自己从 9–13 变成
 13–18 —— 也就是 +4–5; r6 把这个算术错字改掉, 并把 P6a 重新计价成 5–7 轮 ⇒ P6 = 14–20。**)
 
-**总计:** P0–P4 = **51–62 轮 ≈ 25.5–31 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
+**总计:** P0–P4 = **56.5–67.5 轮 ≈ 28.25–33.75 个工作日**(按每天 2 轮), 外加那两次 scope 往返的
 owner 卡点时间。(r2 review 加了 2–3 轮; **r3 又加了 10 轮**: P0 的两个轴能力记录 +2、P1 的
 推送通道 +4、P2 的合并与通道对等 +2、P3 的身份面 +1、P4 的身份证明 +1; **r4 又加了 3 轮**:
 P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤回 +1、P3 的批准时重新
 解析 +1; **r5 又加了 1 轮**: P0 的 `scanState` 与按平台的 `scanSources` +1; **r6 又加了
 0.5 轮**: P0 的 `historyBySource`/`hostFacts` TTL 与那个已经顶格的尺寸棘轮 +0.5 —— r4、r5
-与 r6 另有 P6 的 +1、+4–5 与 +1–2 不计入这个总数, 因为 P6 本来就未排期。)光是 P0–P2 ——
-只读的 channels 加上 assignment、过滤与**实时推送**、完全没有任何出向路径 —— 是
-**34–40 轮 ≈ 17–20 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
+与 r6 另有 P6 的 +1、+4–5 与 +1–2 不计入这个总数, 因为 P6 本来就未排期; **r7 又加了 5.5 轮**:
+P0 的整个集成层 +5.5, 而 P1 是净 ±0(secret-box 抽取 −1 挪去 P0, 两条消费者腿 +1)。)光是 P0–P2 ——
+只读的 channels 加上 assignment、过滤与**实时推送**、外加一个**用户自己就能配 key 的界面**、完全
+没有任何出向路径 —— 是 **39.5–45.5 轮 ≈ 19.75–22.75 天**, 而且它仍然是一个自洽的发布点: panel 是有用的、消息是实时到
 的, 没有任何外部消息能离开这栋楼, 而钱已经被界住了。
 
 ---
 
-## 19. 需要 owner 拍板的决定
+## 20. 需要 owner 拍板的决定
 
 每一条都带一个建议。没有一条日后可以免费反悔, 这正是它们出现在这里而不是出现在代码里的原因。
 
 | # | 决定 | 选项 | 建议 |
 |---|---|---|---|
 | 1 | **Adapter 放在树里还是做成插件?** | 树内模块 / 插件包 | **v1 放树里。** OAuth 流程、密钥存储与 spend guard 全都在树里; 在这个规模上, 为每条消息付一次 IPC 边界什么都买不到。把接口保持一模一样, 于是第三方 adapter 在 P5 变成插件时不用分叉注册表 |
-| 2 | **Lark 的发送身份**(r3/Q4 已更新) | 以**用户**身份(需要 `im:message` + **`im:message.send_as_user`** —— 点不是冒号 —— 一次版本发布与重新授权)/ 以**bot** 身份(需要把 bot 加进每一个聊天)/ 两者都要 | **以用户身份, 那次 scope 往返照旧留在 P4。** 在一个已经存在的人类群里, 那是对面期待的样子, 而且它不需要改动别人的任何聊天。bot 身份只作为 user-send 被拒时的回落 —— 而且 bot 发送是 `identityMarking:'marked'`, 所以那个回落**要在审批卡上出声**。**新增的一半:** 用户身份发送**是否真的**改变收件人看见的 `sender_type`, 官方文档没写、社区有相反报告, 所以在 P4 用一次真实发送证明它之前, 这个 adapter 声明 `identityMarking:'unknown'` 并按 `marked` 对待(§9.5、§20 第 3 条)。**在 scope 落地之前, 界面说的是**"发送需要在 Lark 应用上再加两个权限、发布一个版本, 并重新授权一次", 而不是把一个灰控件摆在那里 |
+| 2 | **Lark 的发送身份**(r3/Q4 已更新) | 以**用户**身份(需要 `im:message` + **`im:message.send_as_user`** —— 点不是冒号 —— 一次版本发布与重新授权)/ 以**bot** 身份(需要把 bot 加进每一个聊天)/ 两者都要 | **以用户身份, 那次 scope 往返照旧留在 P4。** 在一个已经存在的人类群里, 那是对面期待的样子, 而且它不需要改动别人的任何聊天。bot 身份只作为 user-send 被拒时的回落 —— 而且 bot 发送是 `identityMarking:'marked'`, 所以那个回落**要在审批卡上出声**。**新增的一半:** 用户身份发送**是否真的**改变收件人看见的 `sender_type`, 官方文档没写、社区有相反报告, 所以在 P4 用一次真实发送证明它之前, 这个 adapter 声明 `identityMarking:'unknown'` 并按 `marked` 对待(§9.5、§21 第 3 条)。**在 scope 落地之前, 界面说的是**"发送需要在 Lark 应用上再加两个权限、发布一个版本, 并重新授权一次", 而不是把一个灰控件摆在那里 |
 | 3 | **Lark 的接收通道**(r3/Q3(a) 已重写) | 只轮询 / 轮询 + WebSocket **kick** / WebSocket **携带内容** + 轮询做对账 / webhook | **推送是一等模式, 从 P1 起就上; 内容还是 kick 由 `laneState()` 一处判定(声明住在 adapter 记录的 `push.claimedExclusive` 上); 永远不要 webhook。** 长连接不需要公网 URL、只支持企业自建应用、每应用 50 条连接、3 秒 ack、**at-least-once 带 4 次重投** —— 所以"推送不可靠"这个理由不成立。真正的约束是**集群模式**: 多个客户端共用一份应用凭据时每个事件随机只到一个。那是一个**配置**条件, 不是一条自然律 ⇒ 独占时携带内容(轮询降到 15 分钟对账), 共用或未知时只做游标 kick(r2 的行为, 也是默认值)。一个公网入站端点相比长连接什么都买不到 |
-| 4 | **Lark 的 redirect URI** | 复用运维工具已注册的那个 loopback 端口 / 为 VibeSpace 注册一个专用的 | **注册一个专用的 —— 而且无论如何都把那个端口当 machine-global 看待。** 注册解决的是 VibeSpace 与运维工具之间的冲突; 它**解决不了**一台机器上两个 VibeSpace 实例(一个生产服务旁边一个检出), 那时输的那个在用户已经站在授权页上之后拿到一个不透明的 `EADDRINUSE`, 而持有端口的那个收到它的 code。§12.4 只在流程期间绑、按名字拒绝, 并落到粘回。如果控制台一个应用能接受多个回调 URL, 就把我们的*并排*注册进去而不是把他们的顶掉(未验证 —— §20) |
+| 4 | **Lark 的 redirect URI** | 复用运维工具已注册的那个 loopback 端口 / 为 VibeSpace 注册一个专用的 | **注册一个专用的 —— 而且无论如何都把那个端口当 machine-global 看待。** 注册解决的是 VibeSpace 与运维工具之间的冲突; 它**解决不了**一台机器上两个 VibeSpace 实例(一个生产服务旁边一个检出), 那时输的那个在用户已经站在授权页上之后拿到一个不透明的 `EADDRINUSE`, 而持有端口的那个收到它的 code。§12.4 只在流程期间绑、按名字拒绝, 并落到粘回。如果控制台一个应用能接受多个回调 URL, 就把我们的*并排*注册进去而不是把他们的顶掉(未验证 —— §21) |
 | 5 | **Gmail 的 OAuth client** | 往现有的共享预设里加 `gmail.send` / 为 channels 注册一个专用 client | **给 channels 一个专用 client。** 往一个共享预设里加一个敏感 scope, 会让用这个预设的一切重新授权一遍, 而认证状态(以及由此而来的 7 天 refresh token 行为)会变成一个决定管两个功能。只读的 P1 可以先在现有预设上起步 |
 | 6 | **默认 track 什么** | 在用户挑之前什么都不 track / 用户所在的全部群 | **什么都不。** 这是隐私的答案, 是轮询成本的答案, 也是让 panel 不变成一个邮件客户端的那件事。发现列表让 opt-in 只需一次点击 |
 | 7 | **审批的记录之面** | 新的 outbox store + "For you" 里一条指针条目 / 只用 "For you" 条目 | **新 store + 每个会话一条指针条目**(§9.2)。一条 proposal 有 todo store 装不下的结构(目标、正文、为什么、编辑、回执); 而且 `UserTodoManager` 有一个封闭参数集、按 `(sessionKey, text)` 跨所有状态去重、每个 session 封顶 20 条开放条目, 所以*按 proposal* 的指针在不对一个好几个生产者共用的 store 做 schema 变更的前提下根本表达不出来。按 proposal 的徽标可以用那次变更的代价换来(`proposalId` 字段 + 按它去重 + proposal 上的 `todoItemId`)—— 想要就说一声 |
@@ -2016,10 +2438,15 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
 | 18 | **推送通道的独占度由谁说了算?**(r3/Q3(a) 新增) | (a) 运维**声明** + 产品**度量**并在矛盾时**自动降级** / (b) 永远只当游标 kick(r2) / (c) 相信声明, 不度量 | **(a)。** 平台不告诉我们还有几个客户端连着, 所以独占度只能被断言 —— 但它**可测**: `push.missRate` = 先被对账轮询看到而不是先被推送看到的记录比例, 真正独占时长期为 0。连续越过阈值(默认 2 %, ≥20 条样本)就自动降级成 kick 并把理由写在 adapter 行上。(c) 是一句祈祷; (b) 是把 owner 明确要的实时推送关掉。默认值是 `unknown` ⇒ **不做任何声明就得到 (b) 的行为**。**r4 给它补了两句, 少一句它就是个单向棘轮**: 比率**只在通道真的在携带内容时、且只在一个滚动窗口内**计数(最近 N 条或最近 24 小时, 取更大者)—— 否则 kick 模式下每条记录都"先被轮询看到", 比率按构造趋向 1.0, 被降级的通道永远回不来; 而降级**由做出声明的那一方撤回**(在连接向导里重新声明一次独占 ⇒ 计数器清零、重试一次), 绝不由计数器自己撤回 |
 | 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增; **r5 被 owner 更正**) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 从它自己的输入框发送 / (c) 再加上协议库(whatsmeow / Baileys)与"读本地库" / (d) **(b) 加上"在那个客户端把库留成未加密的平台上读那份库"** | **(b) + (d), 仍然明确排除 (c)。** r3 把"读本地库"整个和协议库捆在一起排除了, 而 **owner 指出这是错的**: 那句话对 WeChat 成立(库是 SQLCipher/WCDB 加密的, 密钥只在**运行中客户端的进程内存**里, 而读别人的进程内存本产品不做 —— 围栏 13), 对 **macOS 上的 WhatsApp 不成立** —— 那个官方 Catalyst 客户端把整份聊天历史留在一个**未加密**的 Core Data SQLite 库里(`~/Library/Group Containers/…/ChatStorage.sqlite`), 而读它是一次普通的、被用户授权的、只读的文件读取: **没有任何秘密被击穿, 因为根本没有秘密**。所以 **`'store'` 在有它的平台上是允许的, 而且优先于 `'ui'`** —— 不是因为它更快(虽然确实快一个数量级), 是因为**它有一把不是我们编出来的 anchor**, 于是 §5 不变量 2 拿到真 vendor id 而 `'ui'` 那把合成键的代价整个消失。三条边界写死: ①**只有未加密**才算 —— Windows 上 WhatsApp 的库是加密的(UWP 用 SEE, dbKey 从一个应用外取不到的机器标识派生; WebView2 那一支用 DPAPI-NG), 把一把 vendor 有意扣住的密钥重新算出来与从内存里抠出来是同一件事, 围栏 13 (b) 拒绝它 ⇒ Windows 走 `'ui'`; ②**Linux 压根没有官方桌面客户端** ⇒ 只有 web-in-profile 的 `'ui'`; ③**WeChat 一个字都没变** ⇒ 每个平台都只有 `'ui'`。读库这条路**只读**(**只读打开**加上从那条连接取的快照 —— r6 更正了 r5"backup API 优先"的措辞, 那恰好点名了唯一会改动库的那种开法; 绝不写、绝不 checkpoint), 走一个 `channels-scan-store` 的 agentd op(`hostId` 是参数, 本机是设备 #0), 而 macOS 的 TCC 是一道**具名**的门: 被拒时它以 `tcc-denied` 到达用户并在连接向导里给出授权步骤, **绝不**静默降级成 `'ui'`(那会把会话行上那个延迟数字变成谎话)。**发送要按来源分开说(r6 更正), 因为它不是同一件事**: `'ui'` = agent-browser 在那个已登录的官方客户端自己的输入框里打字, 身份仍然真的是用户本人(`identityMarking:'none'`); 而 macOS 的 `'store'` **自己没有发送通道** —— 那里的官方客户端是一个原生 Catalyst 应用, 没有任何浏览器 profile 够得着 —— 所以 P6a 是**只读**的, 并且结构性地说出来(`convCaps.sendAs: []` 加 `why:'no-send-lane-on-this-host'`, 由 §4 的规则渲染成"不提供并说出理由"且不建出任何 proposal)。**于是有第四件事是未决的, 而且归你拍板**: macOS 上的发送到底是 (i) 同一个 Web 客户端开在一个 agent-browser profile 里 —— 那明摆着是**第二份 linked-device 凭据**, 一条对话两个登录, 必须建模成它自己的一行, 与 `auth.state()`/`scanState().grant` 并排 —— 还是 (ii) 原生 macOS UI 自动化(Accessibility / CGEvent)加**它自己那份** TCC 授权, 还是 (iii) 两者都不做, 让这一类在 `'store'` 胜出的地方保持只读。**建议: P6a 取 (iii)**, 只有在 owner 真的要 macOS 上的出向时才在 (i) 与 (ii) 之间选 —— 读那一半才是价值所在, 而第二份凭据会悄悄推翻"身份真的就是用户本人"这句话。另外(r6): 读库这条路是一次**只读的 SQLite 打开**并从那条连接取快照(绝不是默认的读写打开 —— 它会在 close 时 checkpoint 并删掉 WAL), 而 daemon 那一侧用哪个 SQLite 读者由 §12.5 点名, 不留给实现者。接口从 P0 起就建模这一类; P6 因此**分成两条腿**, macOS 的 `'store'` 腿**只**门控在本决定上(它不需要 agent-browser), `'ui'` 腿仍然双重门控 |
 | 20 | **Gmail 的推送要不要默认打开?**(r3/Q3(c) 新增) | 默认开 / **可用但默认关** / 不做 | **可用但默认关。** Pub/Sub 的 pull 订阅让它同样不需要公网入站端点, 而且每个实例可以有自己的订阅, 所以它比 Lark 的长连接更容易做到独占。但它要一个 GCP topic、一份 IAM 授权和一个**每日续期任务**(watch 7 天静默过期, 漏一次就无声停掉), 而它换来的东西是: 把一个"什么都没变时每 tick 一个请求"的轮询换成秒级延迟。对邮件这种节奏, 那是一个应该由用户按自己的场景打开的开关, 不是一个默认值 |
+| 21 | **集群里的 OAuth 回调怎么走(r7, §14.9)** | (a) 既有的 **loopback + 粘回**(集群注册一个 URL, 与实例数量无关, 每次连接多一次粘贴)/ (b) **集群鉴权中继** `https://auth.<cluster>/cb`(签名 state 转发到实例的公开地址, 零粘贴) | **v1 取 (a), (b) 作为后续阶段。** 不是因为省事: (a) 就是今天在生产里跑着的那条路(Gmail 挂载), 而且 redirect_uri 里根本没有实例地址 ⇒ N 个实例 N 个公开地址这件事**结构上不存在**; (b) 要新增一个**能看见授权码**的组件, 它必须只转发不落盘, 被攻破就是全集群的问题 —— 那是一次需要自己的威胁模型与自己的运维承诺的改动, 值得单独排期而不是搭这趟车。选 (b) 就同时决定了: 谁运维它、它的签名密钥怎么轮换、以及实例怎么验证那个签名 |
+| 22 | **集群提供了默认凭据之后, 用户那一侧是"已连接"还是"已填好"?**(r7) | 自动**已连接** / 只是**已填好**, 仍要用户点一次 Connect | **按行的种类分, 而这正是决定的内容**: **OAuth 行(lark / gmail)结构上做不到自动连接** —— 集群给的是**应用凭据**, 而连接还需要**这个用户自己的授权**(一次浏览器往返), 所以它只能是"已填好 + 一键连接", 界面写**"由集群提供"**; **纯 key 行**(CloakBrowser / 云浏览器)确实可以在注入即生效, 而这里有一条现成先例: frp 插件在集群注入 env 时**默认启用**(`src/plugins.js:584-588`)。**建议**: OAuth 行=已填好; 纯 key 行=跟随 frp 的规则默认可用, 但**只有当那把 key 不是按席位计费**时(§14.8 最后一条)—— 一把集群买单的席位被 N 个用户同时用, 是一次运维决定而不是一个默认值 |
+| 23 | **用户自己的 key 能不能带 passphrase 导出?**(r7, §14.10) | 能(进 `sensitive` 那一半)/ 完全不导出 | **能, 但只导出 `source:'user'` 的行。** 它与 `mounts` / `accounts` 是同一类东西(都已经在那一半里), 而搬家的用户会期待自己的 key 跟着走。**集群默认绝不导出**: 它不是我们的东西、会轮换, 而且导进一个没有那个预设的实例时必须解析成 `none` **并说出缺什么**, 绝不静静落到导出方的值上 |
+| 24 | **`secret-box` 一把密钥还是每个 store 一把?**(r7, §14.7) | 一把共享 `data/.secret-box-key` / 每个 store 自己一把 | **每个 store 自己一把**, mounts 的 `data/.mounts-key` 逐字节不动。搬密钥文件是一条**不可逆的数据丢失路径**, 换来的只是少一个文件; 而一把密钥被轮换或损坏时, 爆炸半径应当止于一个 store。共享那条唯一的好处(备份少一个文件)可以用 §14.10 的导出块买到 |
+| 25 | **一行 registry row 可以早于它的消费者上线吗?**(r7, §14.2 的 `whatsapp-business`) | 可以(先摆卡片占位)/ 不可以(与 adapter 同 commit) | **不可以。** 一行没有活消费者的 row 就是一张什么都不做的卡片, 而用户填进去的 key 会被存起来、加密、导出、并出现在"这把 key 用在哪"里 —— 却什么都不用。这与 `SPEND_REASONS` 与 `contributes.channelAdapters` 是同一条法, 由 `test-integration-registry` 的 `consumers` 普查执法。字段与"没有集群默认"这两件事仍然**现在**就定下来(§14.2 的表), 那不要钱 |
 
 ---
 
-## 20. 我没能验证的东西
+## 21. 我没能验证的东西
 
 直白写出来, 因为一份藏起自己未知数的设计, 就是一份会在生产上发现它们的设计:
 
@@ -2062,7 +2489,7 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
     不太可能, 但一个 agent 同时在超过二十个会话里持有 proposal 是没测过的; §9.2 规定了降级
     (catch、记日志、依赖 rail 徽标), 而不是假设它不会发生。
 14. **§5.1 那扇序列化的门是否够用**, 是一个论证, 不是一次度量: 它成立是因为只有一个进程、一
-    个所有者。如果引擎哪天挪进 worker 或者挪到一台配对设备上(§14), 那扇门就变成一个跨进程
+    个所有者。如果引擎哪天挪进 worker 或者挪到一台配对设备上(§15), 那扇门就变成一个跨进程
     问题, 论证必须重做一遍 —— 这正是那条不变量写成"一个所有者"而不是"我们用了一把 mutex"
     的原因。
 15. **Lark 国际版是否根本不提供长连接。** 一份社区报告称国际版开发者控制台里**没有**这个
@@ -2145,10 +2572,39 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
     被写一次"这个前提取自关于库形状的公开材料, 不是盯着一个真库看出来的。去抖让唤醒率与那
     个数字无关, 这也正是它是天花板而不是指望的原因 —— 但真实的触发密度, 以及从 daemon 去
     watch 那个容器的 inotify 成本, 应该在 P6a 里量一次。
+24. **Lark 控制台的回调匹配规则, 没有在这个应用的控制台上读过(r7)。** 官方文档说重定向
+    URL 必须**在列表里**、**支持配置多个**, 而 §14.9 与决定 21 就建立在这两句上; 但"匹配是
+    逐字节精确还是允许前缀"、以及"一个 `http://127.0.0.1:<固定端口>` 的 loopback URL 会不
+    会被接受"都没有实际读过 —— 运维笔记说这个流程跑通过, 所以后者大概率是 yes, 但那是推论
+    不是读数。P1 的第一件事(与 §21 第 15 条的长连接确认同一次)应该把这两条一起看掉。
+25. **一个集群注册的 Lark 应用到底能服务谁, 没有实测(r7)。** 官方开发指南把自建应用定义成
+    企业内部使用, 于是 §14.9 推出"跨租户的用户必须带自己的应用", 而**这台实例的用户是不是
+    同一个租户**是一件运维事实, 不写在这个公开仓库里, 也没有人去核对过。附带那条推论 ——
+    做成应用商店(ISV)应用就会丢掉决定 3 赖以成立的长连接 —— 同样是从两份文档推出来的, 没有
+    在一个真的 ISV 应用上试过。
+26. **给 `VIBESPACE_GDRIVE_CLIENTS` 加一个 `channels` 预设 key 是否可行, 没问过(r7)。**
+    §12.2 的更正把决定 5 落成"多加一个 key 而不是拓宽现有那一个", 它依赖两件事: 集群那边多
+    一个 key 在运维上没问题(未问), 以及 Google 的增量授权行为与文档一致(已有既存 refresh
+    token 仍为它原有的 scope 工作) —— 后者没有在这个 client 上试过, 而**既有那个预设的认证
+    状态**仍然是第 5 条里那个未知。
+27. **`src/secret-box.js` 的抽取从来没有对着一份真的 mounts 存储跑过(r7)。** §14.7 的 parity
+    测试是设计出来的, 不是跑出来的: 密文格式逐字节不变这句话来自读 `src/mounts.js:369-381`,
+    而不是来自拿本实例的 `data/.mounts-key` 与它的记录做一次 decrypt。P0 的第一件事应该是在
+    一份**拷贝**上做这次往返, 因为它的失败形态是"每一个存好的 token 都解不开"。
+28. **把整批集群凭据放进**一个** JSON secret 的轮换粒度, 没有和运维核对过(r7)。**
+    `VIBESPACE_INTEGRATIONS` 是一个 Secret 键, 所以换掉 `lark` 那一行要重写整个键 —— 这与
+    既有的 `gdriveClients`(`main.yaml:163-164`)完全同形, 所以它至少不是新债; 但"一次只轮换
+    一行"在集群的 secret 工具里是什么代价, 没有人量过, 而**逐字段** env 形式
+    (`VIBESPACE_INTEGRATION_<ID>_<FIELD>`)存在的部分理由正是它。
+29. **Integrations 那些卡片在 375×667 下的成本没有度量(r7)。** §17 的 e2e 腿要求每个控件都够
+    得着, 但"一屏能装下几张卡、Replace 展开之后要滚多远"没有量过 —— 而 `showDropdown` 那一
+    类事故(未缩放的 `offsetWidth` 与缩放过的 rect)正是从这个尺寸上来的, 所以这条腿要在 P0
+    真的跑起来, 而不是等到有三行 row 之后。
 
-**r3、r5 与 r6 里新引入的 vendor 事实的出处**(公开文档, 2026-09-10 取; 这里没有任何一条在
-真实租户或真实客户端上跑过 —— 见上面第 2、3、15–19 条; 下面 r6 那条 SQLite 行为是**唯一**
-在本机实测过的, 数字在 §12.5):
+**r3、r5、r6 与 r7 里新引入的 vendor 事实的出处**(公开文档, r3/r5/r6 取于 2026-09-10,
+r7 取于 2026-09-11; 这里没有任何一条在真实租户或真实客户端上跑过 —— 见上面第 2、3、15–19、
+24–26 条; 下面 r6 那条 SQLite 行为是**唯一**在本机实测过的, 数字在 §12.5, 而 r7 的 loopback
+端口那条另有**树内**证据: `src/gmail-sync.js:78`):
 
 - Lark/飞书长连接 —— 每应用 50 条连接、集群模式不广播、只支持企业自建应用、不需要公网
   URL:
@@ -2171,10 +2627,10 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
 - WeChat 桌面端的本地库是 SQLCipher/WCDB 加密的, 密钥存在于运行中客户端的进程内存里 ——
   正是围栏 13 拒绝成为的那一类工具:
   <https://github.com/BenDerPan/wechat-db-decrypt>
-- 有报告称 Lark 国际版控制台不提供长连接(社区报告, 未经 vendor 确认 —— §20 第 15 条):
+- 有报告称 Lark 国际版控制台不提供长连接(社区报告, 未经 vendor 确认 —— §21 第 15 条):
   <https://github.com/openclaw/openclaw/issues/51663>
 - **(r5)** macOS / iOS 上 WhatsApp 的本地聊天库是明文的(2026-05 的公开研究报道; 关于影响
-  范围的争议同见此文 —— §20 第 19(c) 条):
+  范围的争议同见此文 —— §21 第 19(c) 条):
   <https://cybersecuritynews.com/whatsapp-chat-stored-unencrypted-macos-and-ios/>
 - **(r5)** 一份直接读那份库的公开实现 —— 点名
   `~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite` 与它的
@@ -2187,7 +2643,7 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
   <https://www.sciencedirect.com/science/article/abs/pii/S2666281724001884>
 - **(r5)** macOS 的容器保护 —— Sonoma 14 保护 `~/Library/Application Support/` 下的应用容
   器, Sequoia 15 把它扩展到 `~/Library/Group Containers/`, 不满足条件的进程会收到一次按进
-  程实例的临时授权提示或被直接拒绝(§20 第 19(d) 条: 完全磁盘访问是否足够没有明说):
+  程实例的临时授权提示或被直接拒绝(§21 第 19(d) 条: 完全磁盘访问是否足够没有明说):
   <https://developer.apple.com/forums/thread/756701>
 - **(r5)** Linux 上没有官方 WhatsApp 桌面客户端, 官方途径只有 WhatsApp Web:
   <https://wiki.archlinux.org/title/WhatsApp>
@@ -2195,3 +2651,19 @@ P0 的 `laneState` 与 `convCaps` TTL +1、P1 的 `missRate` 窗口与降级撤�
   闭这个库的连接会 checkpoint 它并删掉 WAL**, 这正是为什么默认(读写)打开是那种会改动库
   的开法而只读打开不是(本机实测; 数字见 §12.5 那张表):
   <https://sqlite.org/wal.html>
+- **(r7)** RFC 8252 §7.3 —— 对 loopback IP 的 redirect URI, 授权服务器 "**MUST allow any
+  port to be specified at the time of the request**"(§14.9 那张表里 Google 那一行的依据,
+  而树内证据是 `src/gmail-sync.js:78` 的 `listen(0, '127.0.0.1')`):
+  <https://datatracker.ietf.org/doc/html/rfc8252>
+- **(r7)** Google 的 redirect URI 必须与已注册的那一个**精确匹配**(协议/主机/端口/路径/尾
+  斜杠), 没有通配:
+  <https://developers.google.com/identity/protocols/oauth2/web-server>
+- **(r7)** 同意屏幕处于 **Testing** 且用户类型为 External 的 Google OAuth client, 发出的
+  refresh token **7 天**过期(§12.2 那条既有说法的出处):
+  <https://developers.google.com/identity/protocols/oauth2>
+- **(r7)** Lark/飞书的重定向 URL 必须配置在开发者后台"安全设置"里, **只有列表里的 URL 能
+  通过开放平台的安全校验**, 而**重定向 URL 支持配置多个**(§14.9 与 §21 第 11 条):
+  <https://open.feishu.cn/document/common-capabilities/sso/api/obtain-oauth-code>
+- **(r7)** Lark/飞书**自建应用**是企业内部使用的应用, 与可跨租户分发的应用商店应用相对
+  (§14.9 那条"集群默认只服务同租户"的依据):
+  <https://open.feishu.cn/document/develop-process/self-built-application-development-process>

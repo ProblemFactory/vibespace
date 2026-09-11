@@ -23,7 +23,7 @@
 > external") is **REVERSED by the owner**; what replaces it is a **warning at the moment of
 > authorization**, driven by the `identityMarking` capability (§9.5).
 >
-> **r4 (2026-09-10, the adversarial review of r3 — all five findings correct, §17.1):**
+> **r4 (2026-09-10, the adversarial review of r3 — all five findings correct, §18.1):**
 > one fact stored in three places with no function able to read all of them, so r3's
 > push auto-demotion could not structurally win ⇒ `laneState` becomes the one lane
 > resolver and `caps.pushExclusivity` is deleted (§4, §6.4); `push.missRate` gains a
@@ -43,9 +43,28 @@
 > `caps.scanSources` + the one resolver `scanState()` (§4, §12.5), macOS gets a real
 > `scanSource:'store'` lane through a `channels-scan-store` agentd op with `hostId` a
 > parameter (§12.5, §6.3), decision 19 becomes (b)+(d), and P6 splits into two legs
-> with different gates (§18, §19, §17.2). Linux stays web-in-profile UI scan only,
+> with different gates (§19, §20, §18.2). Linux stays web-in-profile UI scan only,
 > Windows stays `'ui'` (its store *is* encrypted), and **WeChat does not change by one
 > word**.
+>
+> **r7 (2026-09-11, one owner directive — it adds a whole layer rather than fixing a
+> slip):** "对于指纹浏览器和 communication panel 这种可能需要配置自己的 key 的情况, 要考虑
+> 怎么提供配置界面, 让我们集群里的用户可以自行配置(当然 lark 这种集群里能提供默认 oauth
+> client 的就提供默认)". So this revision adds **§14, integration credentials and the
+> configuration UI** — one PURE registry table (`src/integration-registry.js`), one store
+> (`src/server/integration-store.js`), four routes and an `'integrations'` window, with the
+> precedence **the user's own > the cluster default > none**, and every consumer asking
+> `resolveIntegration` rather than reading `process.env` itself (§14.6's standing census).
+> It is a **shared layer**: the same names serve `docs/design-agent-browser-v2.md`'s
+> `cloak` / `cloud:<name>` backends. Knock-on changes: §13 states token storage once and
+> points at §14 (§14.11 fence 8 fixes the boundary between the two layers), the
+> `src/secret-box.js` extraction **moves from P1 to a P0 prerequisite** and along the way
+> stops inheriting the bare catch at `src/mounts.js:360-367` that **mints a new key over
+> the old one** (§14.7), §12.1 gains the full cluster-redirect argument (§14.9: one app
+> serving N instances is **structurally not a problem**; the real boundary is the
+> **tenant**), §12.2 states precisely who re-consents when a scope is added and turns
+> decision 5 into "add another preset key", the phases and rounds are re-derived (§19), and
+> decisions 21–25 plus unverified items 24–29 are new.
 >
 > Read first: the interaction record (five artboards — Main / Adapters /
 > AssignFilter / AgentReach / Outbox), CLAUDE.md's three-tier routing table,
@@ -100,7 +119,7 @@ surface; the test gates; the phase plan.
 running on a paired device, rich HTML mail rendering, attachment auto-fetch,
 **local-client adapters (WhatsApp / WeChat) — modelled in the interface from P0,
 but the adapters themselves are P6 behind an owner decision**. Each has a named
-landing place (§14, §15).
+landing place (§15, §16).
 
 ---
 
@@ -116,19 +135,23 @@ feature spans four rows, so the mapping is spelled out once:
 | Outbound policy + guardrails + outbox state machine | **PURE** | `src/channel-policy.js` | `test-channel-outbox` (fast) |
 | Normalized message record + its renderers' data | **PURE** | `src/channel-record.js` | `test-channel-record` (fast) |
 | Capability decisions (both axes, per-conversation resolution, identity warning, **lane resolution `laneState`**, **scan-source resolution `scanState`**) | **PURE** | `src/channel-caps.js` | `test-channel-caps` (fast) |
+| The integration-credential table (rows, fields, cluster env names, the declared Test, consumers) | **PURE** | `src/integration-registry.js` | `test-integration-registry` (fast) |
 | Conversation store *primitives* (durable load/append/tail/trim/flush; the **engine** owns the live index, §5.1) | **SHARED** (fs+path only) | `src/channel-store.js` | `test-channel-store` (fast) |
 | OAuth loopback consent flow (**dual-mode**, §12.4) | **SHARED** | `src/oauth-loopback.js` | `test-oauth-loopback` (fast) |
+| Encryption-at-rest primitive (one primitive, N key files; §14.7) | **SHARED** (fs+crypto only) | `src/secret-box.js` | `test-secret-box` (fast, parity with mounts) |
 | Adapter interface + registry | **ORCH** | `src/channels/index.js` | `test-channel-adapter-contract` (fast, fake adapter) |
 | Lark / Gmail / Agents adapters | **ORCH** | `src/channels/lark.js`, `gmail.js`, `agents.js` | contract suite + `test-channels-lark-shape` (fast, recorded fixtures) |
 | Ingest engine (poll scheduler, backoff, per-tick budget, failure surfacing) | **ORCH** | `src/server/channels-engine.js` (`create(deps)` factory) | `test-channels-engine` (heavy) |
 | Push lanes (one per vendor; liveness, ack, exclusivity measurement) | **ORCH** | `src/channels/live/<kind>.js` | `test-channels-push` (heavy) |
 | Local-client store scan (platform facts, TCC grant, **read-only open** + a snapshot taken from that connection, cursor over rowid; the SQLite reader is a **bounded `sqlite3(1)` child** — never a native binding, which the daemon's single `--external` refuses; §12.5) | **SHARED** (bundled by the daemon) + one device op | `src/channels-store-scan.js` + the `channels-scan-store` handler in `src/agentd/agentd.js` | `test-channels-store-scan` (heavy, real daemon) |
+| Integration-credential resolve / mask / broadcast + its routes (§14.3, §14.4) | **ORCH** | `src/server/integration-store.js` + `src/routes/integrations.js` | `test-integration-registry` (fast) plus its grep census |
 | Routes + broadcasts | **ORCH** | `src/routes/channels.js` | the route battery in `test-restore-smoke`, `test-channels-e2e` |
 | Wiring stanza | **ORCH** | `src/server/channels-wiring.js`, one call from `server.js` | `test-architecture` size ratchet (server.js ≤ 2100 lines — **at its ceiling today**, §2.1) |
 | Panel, window, filter editor, approval cards | **CLIENT** | `src/lib/channels-panel.js`, `src/lib/channel-window.js`, `src/lib/channel-filter-editor.js` | `test-channels-e2e` (heavy, headless chrome) |
+| The Integrations window (cards, source chip, Replace, Test, deep links; §14.5) | **CLIENT** | `src/lib/integrations-panel.js` | `test-channels-e2e` (heavy, including the 375×667 leg) |
 | Agent CLI | tracked static | `data/bin/vibespace-channels` + `docs/agent/channels-manual.md` | `test-channels-agent-cli` (fast) |
 
-Five placements are load-bearing enough to state as rules:
+Six placements are load-bearing enough to state as rules:
 
 - **An adapter never touches the store, the ACL, the policy or the spend
   guard.** It returns typed records and takes a send request. Everything it can
@@ -158,6 +181,12 @@ Five placements are load-bearing enough to state as rules:
   declaring `sendAs:['user']` unable to send **here**. The rule is: **a control
   exists only when both agree**, and `unknown` renders as not-offered-with-a-reason,
   never as allowed.
+- **One integration key has exactly one resolver, and a consumer never reads `process.env`**
+  (§14.6). `resolveIntegration(id)` is the single place that answers, with the precedence **the
+  user's own > the cluster default > none**; a cluster default is resolved **by KEY and never
+  copied into the stored record**, so one env rotation in the cluster rotates every consumer on
+  every instance — the same rule, word for word, as `src/mounts.js:2187-2188`. Backed by a
+  standing grep census: `VIBESPACE_INTEGRATION*` outside the store = red.
 
 ### 2.1 Mechanical registration checklist (each omission costs a round)
 
@@ -177,6 +206,11 @@ do up front than to discover:
   with its manual under `docs/agent/`;
 - new user-visible chrome strings go through `t()` with zh + ja dictionary
   entries (i18n-check runs in the build);
+- a new integration is **one row** in `src/integration-registry.js`, plus the files its
+  `consumers` names **actually** calling `resolveIntegration('<id>')` — both halves checked
+  by `test-integration-registry` (§14.2);
+- any new `VIBESPACE_*` env name needs **exactly one** parser, and the integration ones may
+  only grow inside `src/server/integration-store.js` (§14.6);
 - **that size ratchet is at its ceiling today, so P0's wiring stanza turns
   `npm run build` red even at one line (r6).** Measured:
   `scripts/test-architecture.mjs:187-188` asserts
@@ -547,7 +581,7 @@ none of them reads `caps.receive` or `caps.scanSources`**:
   mode does **not** change the money decision: same filter, same reason, same
   per-credential-slot ceiling. It changes only arrival time, and fence 12's
   coalescing window absorbs that. The suite turns this sentence into an assertion
-  that can go red (§16's `test-channels-lane-parity`).
+  that can go red (§17's `test-channels-lane-parity`).
 
 Rules the contract suite enforces (`test-channel-adapter-contract`, driven over
 a **fake adapter** plus every registered real one in shape-only mode):
@@ -1047,7 +1081,7 @@ the auto-demotion below could not structurally win — see §4.
   bound: §7.4's 30 s per-conversation ladder floor and the spend authorizer cap the
   **absolute** spend, so this is not unbounded money — but the wakes and the charges
   differ per lane, which is what makes §6.1's headline ("the same records, the same
-  wake count, and the same charges") and §16's parity row literally unsatisfiable.
+  wake count, and the same charges") and §17's parity row literally unsatisfiable.
 
 **An assertion must be falsifiable or it is a prayer.** The platform never tells
 us how many other clients are connected, so exclusivity is **asserted, never
@@ -1491,7 +1525,7 @@ Four known shapes, each with its evidence (details and sources in §12.1 / §12.
   token): the official documentation does carry a permission "以用户身份发送消息"
   (send as the user), but it **does not state what `sender_type` the recipient
   sees**, and a community report claims it stays `app` even with a user token.
-  ⇒ `unknown`, until a real send in P4 settles it (§20).
+  ⇒ `unknown`, until a real send in P4 settles it (§21).
 - **Gmail API send**: the recipient's mail UI shows the user — no app badge, no
   "via" — but a message sent through the API carries an extra `Received:` header
   naming `gmailapi.google.com`, which "show original" reveals. ⇒ `marked` /
@@ -1547,6 +1581,17 @@ instance's own record, rather than somebody else's inbox.
 - **Menus / commands:** contributions in `src/lib/contributions.js` — a
   `channel-row` menu (assign…, filter…, reach…, mark read, untrack) plus gear
   rows for "Connect an adapter…".
+- **The connect wizard asks the Integrations card first (§14.5):** "Connect Lark" on the
+  adapter panel opens the Integrations window focused on that row
+  (`app.openIntegration('lark')`) **before** anything else when `resolveIntegration('lark')`
+  answers `none`, rather than sending the user into an OAuth flow that will fail on the consent
+  page — §12.1 already names that failure mode (a missing scope / published version / redirect
+  URL fails the *consent page*, not the API call), and it is the **default** shape on an instance
+  where the user has never configured app credentials. When it answers `cluster` the button
+  carries **"provided by the cluster"** and one click connects; when it answers `user` it says
+  nothing extra. This is not a UI preference: the connect button is the only thing on this chain
+  a user ever clicks, and **no credential** and **credential refused** are different facts —
+  folding them into one sentence is another round of "the error text is not a diagnosis".
 - **Settings:** a `Channels` category **added to `SETTINGS_CATEGORIES`** in the
   same commit as the first setting. That array *is* SettingsUI's render loop; ten
   settings once shipped unreachable because nobody added the row, and
@@ -1653,7 +1698,7 @@ and docs.
   duplicates possible even after success). §6.4 re-argues push as a first-class
   receive mode from exactly those facts. A separate community report claims **Lark
   International's console does not offer the long connection at all** (webhook
-  only) — not vendor-confirmed, but a precondition for P1, so it is listed in §20.
+  only) — not vendor-confirmed, but a precondition for P1, so it is listed in §21.
 - **Authorization prerequisites.** The console needs all three of: the redirect
   URL registered, the scopes granted, and a **published version**. A missing one
   fails the *consent page* rather than the API call — a confusing failure mode
@@ -1663,7 +1708,14 @@ and docs.
   any loopback port and lets `src/gmail-sync.js` bind an ephemeral one. A fixed
   port is a machine-global name; §12.4 says what the flow does about that.
   Registering a dedicated URL (decision 4) resolves VibeSpace-vs-ops-tooling and
-  **nothing else**.
+  **nothing else**. **Two additions (r7):** ① the official documentation states that the
+  redirect URL list **supports several entries**, so decision 4's "register ours *beside*
+  theirs rather than displacing it" is no longer an assumption — §21 item 11 drops from
+  "unverified assumption" to "documented, but never exercised on this app's console"; ② one
+  cluster registration serving **N instances** needs nothing new, because the redirect_uri
+  contains no instance address at all (it is loopback = the user's browser's machine), and what
+  **actually** bounds a cluster default is the **tenant**, not the URL — the full argument and
+  the vendor fact table are in §14.9, with decisions 21 and 22 as its two owner gates.
 
 ### 12.2 Gmail
 
@@ -1680,9 +1732,19 @@ tokens encrypted at rest.
 - **Send** needs `gmail.send`; label manipulation would need `gmail.modify`. Both
   are sensitive scopes, and the refresh-token lifetime depends on the OAuth
   client's verification status — an unverified/testing client expires refresh
-  tokens after **7 days**, which is the pain the existing Gmail mounts already
-  live with. Adding `gmail.send` to a *shared preset* client re-consents
-  everything that uses that preset (decision 5).
+  tokens after **7 days** (public docs: a consent screen in Testing with user type
+  External does exactly this), which is the pain the existing Gmail mounts already
+  live with. **Stating the "adding a scope" mechanics precisely (r7):** adding a scope to a
+  client does **not** by itself invalidate grants already issued — an existing refresh token
+  keeps working for the scopes it was granted. Two other things happen instead: ① any flow that
+  **now requests** the wider scope shows that user a consent screen again (incremental
+  authorization), and ② the client's **verification status** becomes one decision governing two
+  features, so the unverified/testing 7-day refresh token is inherited by the read-only mounts
+  too. Decision 5 therefore gains a concrete answer: **have the cluster add another preset key**
+  to `VIBESPACE_GDRIVE_CLIENTS` (say `channels`) rather than widening the existing one — that
+  list already means "which clients this instance offers", one more key needs no second parser
+  and touches no existing mount. Which is why the `gmail` row **delegates** to
+  `MountManager.drivePresets()`, §14.2.
 - **Threading on send:** `threadId` plus `In-Reply-To` / `References` taken from
   the record's `Message-ID`.
 - **On send the recipient sees the user — but the raw headers do not.** A message
@@ -1866,7 +1928,7 @@ without which this resolver becomes the thing it exists to prevent:
   that no browser profile can reach. So: `'ui'` = an agent-browser typing into that
   Web client's composer, identity really is the user (`identityMarking: 'none'`);
   macOS `'store'` has **no send lane of its own** (a store is read-only evidence)
-  and exactly two candidates, and **this design does not pick for the owner** (§20,
+  and exactly two candidates, and **this design does not pick for the owner** (§21,
   decision 19): (a) the same Web client in a profile — which is a **SECOND
   linked-device credential**, two logins for one conversation, and must be modelled
   as its own row beside `auth.state()`/`scanState().grant` — or (b) native macOS UI
@@ -1935,10 +1997,10 @@ without which this resolver becomes the thing it exists to prevent:
   The first row is SQLite's documented **last-connection checkpoint-and-delete**,
   and "our process is the last connection" is the NORMAL case for a scheduled
   background scan (the owner quit the client / rebooted / is away) — it is also
-  exactly the shape of §16's synthetic fixture. `-shm` is the WAL index, carries no
+  exactly the shape of §17's synthetic fixture. `-shm` is the WAL index, carries no
   message content, and a read-only open leaves it **untouched** when it cannot be
   written — so the assertable form of "never write" is **`db` and `-wal`
-  byte-identical**, never the triple (see §16). Never checkpoint, never delete the
+  byte-identical**, never the triple (see §17). Never checkpoint, never delete the
   WAL, never take the **default** (read-write) open — this lane's only observable
   effect on that client must be one brief shared lock. Copying the `db` / `-wal` /
   `-shm` triple **stays as the fallback** for when `-shm` cannot be attached, with
@@ -1982,7 +2044,7 @@ that machine — which is exactly the CS separation law's shape, and **the local
 is device #0** (`hosts.device(falsy)`), so there is no "one for local, one for
 remote" here: one `channels-scan-store` op (daemon-side handler + a capability in
 the hello-ack + the three-touch rule), one implementation, and `hostId` moving from
-v1's `local` to a paired Mac is a parameter change. This also gives §14's "adapters
+v1's `local` to a paired Mac is a parameter change. This also gives §15's "adapters
 on a paired device" row its **first real consumer** rather than a reservation —
 because this class *is* that shape: the official client runs on the owner's Mac and
 VibeSpace runs elsewhere.
@@ -2050,7 +2112,7 @@ that already exists:
    per-process-instance and temporary ⇒ the op's own `EPERM` is the authority, and a
    `granted` that comes back `EPERM` re-files as `tcc-denied` and clears the stored
    grant.
-3. **It is the first real use case for adapters on a paired device** (§14): the
+3. **It is the first real use case for adapters on a paired device** (§15): the
    adapter has to run on whichever machine the client runs on. The interface
    already takes a machine handle, so that is wiring rather than a rewrite — and
    the `'store'` route turns that row from "will be useful one day" into a
@@ -2074,13 +2136,18 @@ not-offered-with-a-reason rule.
 
 ## 13. Secrets, expiry, failure
 
-- Tokens encrypted under `data/.channels-key` (0600), never logged, never in
-  argv, redacted through one `publicView()`. The encryption primitive already
-  exists once (in `MountManager`); this design proposes extracting it to
-  `src/secret-box.js` (SHARED) in P1 so channels does not create a third copy,
-  with mounts migrating opportunistically behind a parity test. **If the
-  extraction slips, the twin is NAMED** in `kb-file-structure.md` and gets a
-  standing-sweep entry — an unnamed twin is how this codebase gets bitten.
+- **How tokens are stored, encrypted and redacted is stated once, in §14.** Channels' own
+  tokens live under `data/channels/`, encrypted with §14.7's `src/secret-box.js` (its own key
+  file `data/.channels-key`, 0600), redacted through the same `publicView()` shape, never
+  logged, never in argv. Because §14 exists, that extraction has **moved from P1 to a P0
+  prerequisite** (§19), so r2's "if the extraction slips, the twin is NAMED" becomes a stronger
+  constraint this round: it may not slip.
+- **This layer and §14's layer are two different things, and must stay that way.** §14 stores
+  the app / client credentials and API keys **an admin could hand you** (cluster defaults,
+  resolved by KEY, rotatable by the cluster); this stores the tokens **you authorized yourself**
+  (one user, one consent, one expiring refresh token). Their lifetimes, rotation and export
+  rules all differ — folding them into one store is precisely the twin this design keeps
+  refusing (§14.11, fence 8).
 - **Auth state is three-valued and honest:** `connected` / `needs-reauth` (with
   the expiry instant and a countdown) / `unknown` when the token record cannot be
   read. Never optimistic. The Adapters row renders exactly this.
@@ -2101,7 +2168,403 @@ not-offered-with-a-reason rule.
 
 ---
 
-## 14. What is deliberately not in v1, and where it lands
+## 14. Integration credentials and the configuration UI
+
+> **Owner directive (2026-09-11, verbatim):** "对于指纹浏览器和 communication panel 这种可能需要
+> 配置自己的 key 的情况, 要考虑怎么提供配置界面, 让我们集群里的用户可以自行配置(当然 lark 这种
+> 集群里能提供默认 oauth client 的就提供默认)" — *for things like the fingerprint browser and the
+> communication panel, which may need the user's own key, work out how to offer a configuration UI
+> so users in our cluster can configure it themselves (and where the cluster can supply a default
+> OAuth client, as with Lark, supply one).*
+>
+> This section is a **shared layer**, not an appendix to this design: the same names serve
+> `docs/design-agent-browser-v2.md`'s `cloak` / `cloud:<name>` backends (that design still lives on
+> another branch — §21 item 20). **Both documents use the same names, and the names are defined
+> here.**
+
+VibeSpace runs in **two shapes**, and the whole reason this section exists is that those two shapes
+answer differently about the same key: a **pod per user** in the cluster (the helm chart injects that
+instance's own public address as `VIBESPACE_PUBLIC_URL` —
+`deploy/helm/vibespace-user/templates/main.yaml:172-176`), and single-user self-hosted installs. Some
+integrations need a key **each user pays for** (CloakBrowser seats, cloud browser providers); some can
+be served by one OAuth app the cluster **registers once** (Lark); and one family **already has** a
+cluster-preset mechanism (Google Drive / Gmail).
+
+Today those three are each their own thing. Adding one more integration means inventing one more env
+parser, one more encryption helper, one more UI. This section folds them into **one PURE table, one
+store, one window**, and pins the precedence to a single sentence: **the user's own > the cluster
+default > none**.
+
+### 14.1 The three precedents already in this tree, and the one place to avoid
+
+This layer invents no mechanism. It folds three things already running in production into one, and
+each row names what it copies:
+
+| Precedent | Where it lives | The rule this layer copies |
+|---|---|---|
+| Drive / Gmail **cluster presets** | `src/mounts.js:2189-2206` `drivePresets()`: env `VIBESPACE_GDRIVE_CLIENTS` = JSON `[{key,label,clientId,clientSecret}]`, the legacy pair `VIBESPACE_GDRIVE_CLIENT_ID`/`_SECRET` = key `'default'`; `_driveClient()` `:2211-2216` resolves **custom client on the record > the chosen preset > the single or `'default'` preset > the tool's built-in**; the UI at `src/lib/sidebar-mounts.js:1747-1751` offers the preset dropdown and `Custom (own client id/secret)`, with the `type:'password'` custom-secret field at `:1771` | **A record stores only the preset KEY** ⇒ rotating the env rotates every consumer (`:2187-2188` says exactly that in a comment), plus the shape of that precedence ladder |
+| frp's **cluster default + user override** | `src/plugins.js:569-580` `_frpCfg()`: the user's value in `data/plugins.json` wins over the cluster env, and `fromEnv` hands the UI "this came from the cluster" as a **fact**; `:694` exposes `hasToken`, never the token; `:584-588` makes the plugin **default-enabled** when the cluster injected the env; `:679-682` names **which field is missing** | User override > cluster default; `fromEnv` is a fact the UI must render; **only ever report `hasToken`**; and "name the gap" — those three comment lines record incident 2.227.10, where a user had filled in address and port, left the token empty, and the UI only said "relay not configured": an unactionable dead end |
+| Encryption at rest | `src/mounts.js:369-381` `_enc`/`_dec` (aes-256-gcm, `iv.tag.data` base64 triple), key file `data/.mounts-key` (`:47`, 0600) | The same primitive, but **extracted to `src/secret-box.js`** (§14.7) — and deliberately **not** inheriting the bare catch in `_key()` `:360-367` |
+
+There are exactly two places not to put this, and both are the convenient-looking ones:
+
+| Not here | Why |
+|---|---|
+| **Settings** | **No secret goes in settings, not one.** Settings ride the SyncStore: every value is broadcast to every connected client; and `/api/config/export`'s `take('settings', readSettings)` (`src/routes/persistence.js:697`) writes the whole settings object into the export file **in plaintext** — it is not in the `sensitive` half (`:679-686`), which is the only half that requires a passphrase. Putting a key in settings does both "broadcast to every open tab" and "plaintext into a backup file", and neither of them says so |
+| **A plugin card** | frp's relay token **stays** in its plugin card (§14.6 records it as a **named** twin). It is configuration for a plugin **process lifecycle**, consumed by the keeper, not by a feature that asks `resolveIntegration()`. Moving it means moving all of it (the card, the `fromEnv` default-enabled rule, the keeper's read), which is a change nobody asked for |
+
+### 14.2 `src/integration-registry.js` — the PURE table
+
+**PURE, imports nothing.** One integration = one row:
+
+```js
+{
+  id: 'lark',
+  label: 'Lark / 飞书',
+  fields: [
+    { key:'appId',     label:'App ID',     secret:false, required:true,
+      placeholder:'cli_…', help:'Developer console → credentials', validate:(v)=>… },
+    { key:'appSecret', label:'App Secret', secret:true,  required:true,
+      help:'Same page; it is only ever written, never read back' },
+  ],
+  clusterEnv: { json:'VIBESPACE_INTEGRATIONS', prefix:'VIBESPACE_INTEGRATION_LARK_' },
+  test: { kind:'credential-exchange',
+          describe:'Exchange this app id / secret pair for a token. Reads no conversation, sends no message.' },
+  consumers: ['src/channels/lark.js', 'src/channels/live/lark.js'],
+  docs: 'https://open.feishu.cn/…',
+}
+```
+
+The rules, each with an assertion that goes red:
+
+- `validate` is a pure function returning `{ok:true}` or `{ok:false, why}` — a **named** complaint,
+  never a silent reject, and it never rewrites the value (the one permitted rewrite is trimming outer
+  whitespace, which happens in the store and is written on the field's help, §14.3).
+- `clusterEnv` is a **union**: `{json, prefix}` (this layer parses it) **or** `{via:'drive-presets'}`
+  (this layer asks the **existing** reader). **An env name may have exactly one parser**, enforced by
+  the census — which is why the `gmail` row **delegates** to `MountManager.drivePresets()` rather than
+  copying it.
+- `test.kind` is a **closed set**, and it decides the button's own wording, because "the error text is
+  not a diagnosis" holds in reverse too — a button that claims to have tested a connection it never
+  made is lying:
+
+  | `test.kind` | What it actually does | What the button says |
+  |---|---|---|
+  | `credential-exchange` | One **bounded** vendor round trip exchanging this pair for a token; reads nothing, writes nothing | Test connection |
+  | `shape-only` | **Zero network**: checks field shapes and builds the consent URL | Check format (no network) |
+  | `reachability` | Probes only whether the vendor host answers; carries no credential | Test reachability |
+
+- `consumers` must be **live**: the census requires each name to be a file that exists **and** to
+  actually call `resolveIntegration('<id>')`. A row with no live consumer is a card that does nothing,
+  which is the same law as `SPEND_REASONS` and as `contributes.channelAdapters` (§15).
+- **This layer adds no settings.** Its bounds (the Test timeout, one in flight per id) are constants in
+  this module ⇒ the `SETTINGS_CATEGORIES` §44 census has nothing to do with this layer, which is the
+  point: there should be no broadcast knob sitting next to a secret.
+
+This design's own three rows (the browser's two row ids live in its own document):
+
+| id | Fields | Cluster default | What a Test click does | Consumers | When the row lands |
+|---|---|---|---|---|---|
+| `lark` | `appId` (not secret) · `appSecret` (secret) | **Expected** — the cluster registers a Lark app and injects it. But it only holds **inside one tenant**, and that is not a disclaimer, it is a hard constraint (§14.9) | `credential-exchange`: exchange one `tenant_access_token` (the self-built-app endpoint, which needs only app id + secret). Lists no conversation, sends no message | `src/channels/lark.js`, `src/channels/live/lark.js` | P1 |
+| `gmail` | `clientPreset` (not secret, options from the delegate) · `clientId` / `clientSecret` (secret, only under "use my own") | `{via:'drive-presets'}` — **reuses** `VIBESPACE_GDRIVE_CLIENTS`, adds no second parser | `shape-only`, and **it says so**: a Google OAuth client id/secret pair exchanges for nothing on its own (there is no client-credentials path for it), so all that is possible here is a shape check plus building the consent URL — the real verdict is that OAuth round trip | `src/channels/gmail.js` | P1 |
+| `whatsapp-business` | `phoneNumberId` (not secret) · `accessToken` (secret) | **None, and there should be none**: this is a per-number billed commercial API credential, so a cluster-injected one means the cluster pays everyone's bill | `credential-exchange` (read the number's metadata once) | — none today | **Not in v1.** §14.2's census requires `consumers` to be live, and today this route is only the *name* of the compliant alternative in §15; the row **lands in the same commit as its adapter**. It is written here to fix the fields and the "no cluster default" answer in advance, not to put an empty card on screen |
+
+### 14.3 `src/server/integration-store.js` — resolve, mask, broadcast
+
+On disk (through `writeJsonAtomic`, like every `data/*.json`):
+
+```json
+{ "version": 1,
+  "integrations": {
+    "lark": { "source": "user",
+              "values": { "appId": "cli_…", "appSecret": "<secret-box blob>" },
+              "updatedAt": 1789…, "testedAt": 1789…, "lastOk": true, "lastError": null } } }
+```
+
+- `resolveIntegration(id)` → `{source:'user'|'cluster'|'none', values, label, fromEnv, testedAt,
+  lastOk, lastError, missing:[]}`. Three invariants:
+  - under `source:'cluster'` the `values` are resolved from the env **at read time** and are **never**
+    copied into `data/integrations.json`. This is the mirror of mounts' "a record stores only the KEY"
+    (`src/mounts.js:2187-2188`): the cluster rotates the env once and every consumer on every instance
+    rotates with it. Copying the values down means leaving a revoked credential on N instances.
+  - the cluster default **disappearing** (an admin removed the env) while a user sits on `'cluster'`
+    ⇒ answer `source:'none'` and **name** the missing cluster default; never hand out a broken adapter
+    in silence.
+  - a required field missing ⇒ `missing:['appSecret']`, per the incident named in the comment at
+    `src/plugins.js:679-682`: **say which field**, never make the user guess.
+- `publicView(id)`: every `secret:true` field becomes `'••••'`, and carries the last 4 characters
+  **only** when the value is ≥ 12 characters long (for a short secret, the last 4 are most of it).
+  Non-secret fields pass through. **This masked view is what the broadcast carries**, and it is all a
+  `GET` can ever obtain.
+- `setIntegration(id, patch)`: **omitting a secret field leaves it unchanged; `''` clears it.** That
+  distinction is not style, it is the rule this codebase has already been bitten by — on an
+  always-emitted field `null` is a statement and only `undefined` is absence (2.369.62's `effortNext`)
+  — so it is an invariant with a negative control. The one permitted rewrite is **trimming outer
+  whitespace**: a pasted secret often carries a trailing newline, and "it failed because of a
+  character you cannot see" is precisely what this UI exists to prevent; the rewrite is written on the
+  field's help, because a rewrite nobody states is indistinguishable from a bug.
+- `useClusterDefault(id)`: drop the user override (and its ciphertext) and go back to `'cluster'`.
+  **With no cluster default present it is a named refusal**, not a silent no-op.
+- `test(id)`: run that row's **declared** test and record `{testedAt, ok, error}`. Three constraints:
+  1. **the store constructs no vendor request itself.** It calls the runner the consumer registered at
+     wiring time (`registerIntegrationTest(id, fn)`), and that consumer **already** declared its host
+     in the §3.1 egress whitelist ⇒ `test-channels-egress` needs no new line, and this layer never
+     becomes a second file holding N vendor hosts.
+  2. one in flight per id, bounded timeout, **human-clicked only** (§14.11).
+  3. a row declaring `test` with no registered runner = a dead control ⇒ the census goes red.
+- Every write broadcasts `integrations-updated` carrying the `publicView` — a server cache a client
+  also caches must **notify** at its entry point (the 2.309.0 law), and the only thing that broadcast
+  can carry is the masked view.
+- **A `testedAt` does not stay green forever.** The card shows the verdict **and its age**; a verdict
+  never outlives the reading it describes (the same shape as the quota-model r3 law).
+
+### 14.4 Routes
+
+- `GET /api/integrations` — per row `{id, label, fields (declarations only, no values), source,
+  fromEnv, set:{<field>:bool}, masked, missing, testedAt, lastOk, lastError, consumers, docs}`.
+- `PUT /api/integrations/:id` — `setIntegration` (omitted = unchanged, `''` = cleared).
+- `POST /api/integrations/:id/test` — the human-clicked one, bounded.
+- `DELETE /api/integrations/:id` — back to the cluster default; back to `none` when there is none.
+- All behind the existing cookie auth; and **no route ever reads a secret field back in plaintext** —
+  not `GET`, not "let me peek". The UI offers **Replace, never Reveal**: a secret that can be read back
+  is a secret one XSS or one shoulder-surfed window can read back.
+
+### 14.5 The UI: ⚙ → Integrations (集成与密钥)
+
+- **Window type `'integrations'`, `singleton: true`**, registered with
+  `registerWindowType({type:'integrations', label, icon, action:'openIntegrations',
+  replay:(app,spec,{syncId})=>app.openIntegration(spec.focus,{syncId})})` — byte-for-byte the shape of
+  `src/lib/jobs-panel.js:387-394`, so layout restore, cross-client sync, desktops, tab groups and the
+  taskbar are free and `replayOpenSpec` cannot silently drop it. The openSpec is
+  `{openIntegrations, focus:'<id>'}`; **a `focus` naming an id that no longer exists opens the window,
+  highlights nothing, and does not throw** — a removed row must not fail a layout restore.
+- **One ⚙ menu row**, next to `Plugins…` (the `1_admin` group at `src/lib/gear-menu.js:77`), through
+  `registerMenuItem` rather than a new chrome primitive.
+- **Cards** rendered in the `plugin-card` language of `src/lib/plugins-ui.js:41-70`, one per row:
+  - a **source chip**: `Cluster default` / `Your own` / `Not configured` (it reads `source` and
+    `fromEnv`);
+  - a pair of radios: **"Use the cluster default"** vs **"Use my own key"** — with no cluster default
+    the first is disabled *and says why*;
+  - the declared fields. A secret field shows `••••1234` plus a **Replace** button (which is what
+    reveals an empty `type:'password'` input); non-secret fields are editable in place;
+  - a **Test** button whose label comes from `test.kind` (§14.2), beside **the last verdict, its age,
+    and the vendor's own error text** (through `escHtml`);
+  - one **"Where is this used"** line generated from `consumers` — before deciding to replace a key, a
+    user is entitled to know what it will move.
+- **Every consumer deep-links to its own card**: `app.openIntegration(id)`. This design's connect
+  wizard (§10.1) opens it **first** when the row is unconfigured; the browser backend switcher opens it
+  when the user picks `cloak` / `cloud:*` with no key.
+- **≤768px renders the same cards, single column** — the same path as the Plugins surface, not a second
+  renderer.
+- **Name the collision**: `SETTINGS_CATEGORIES` **already has** an `Integration` category
+  (`src/lib/settings-schema.js:941`) holding the `agents.*` "what the agent can see" switches
+  (`:334-362`) — a different question from this window. So the window's Chinese name is **集成与密钥**
+  (integrations *and keys*), and that settings category **does not change by one word**.
+
+### 14.6 Precedence, and the standing grep census
+
+- Precedence: **the user's own > the cluster default > none.** A value the user set explicitly is
+  **not** overridden by a cluster default injected later — the same rule as `_frpEffectiveEnabled`
+  (`src/plugins.js:584-588`): an explicit value wins, only `undefined` follows the env.
+- **A consumer never reads `process.env` itself.** It asks `resolveIntegration(id)`. Standing sweep:
+  `process.env.VIBESPACE_INTEGRATION` (including `VIBESPACE_INTEGRATIONS`) appearing anywhere outside
+  `src/server/integration-store.js` = red.
+- There is exactly one named exception: `drivePresets()` at `src/mounts.js:2189` reads
+  `VIBESPACE_GDRIVE_CLIENTS` — it predates this layer and has its own consumers, and the `gmail` row
+  **delegates** to it (`{via:'drive-presets'}`) rather than copying it. The census therefore also
+  asserts **one parser per env name**: two rows declaring the same env name, or a name declared by
+  both a row and a delegate, go red.
+- **The named twin**: the frp plugin's relay configuration (§14.1). Until it moves,
+  `kb-file-structure.md` carries a line saying "two places do this one thing, and here is why they are
+  not merged today" — an unnamed twin is how this codebase gets bitten.
+
+### 14.7 `src/secret-box.js` moves from P1 to P0, and the defect it must **not** inherit
+
+This layer stores ciphertext from its first commit, so §14's existence promotes the `src/secret-box.js`
+extraction from P1 to **a P0 prerequisite** (§19 re-prices the rounds).
+
+- **One primitive, N key files.** `secretBox(keyFile)` is a factory: mounts keeps its own
+  `data/.mounts-key` (`src/mounts.js:47`), this layer uses `data/.integrations-key`, and the channels
+  tokens use `data/.channels-key` (§13). The reason is blunt: moving a key file is an **irreversible
+  data-loss path** bought for one fewer file, and when a key is rotated or damaged the blast radius
+  should stop at one store.
+- **The ciphertext format does not change by one byte** (`iv.tag.data` base64 triple, aes-256-gcm),
+  enforced by a parity test: encrypt with a **patched copy** of the pre-extraction `_enc`, decrypt with
+  `secret-box`, then the other way round. That is this repo's negative-control idiom.
+- **The defect it must not inherit (read out of the code, not assumed).** `_key()` at
+  `src/mounts.js:360-367`:
+
+  ```js
+  _key() {
+    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }
+    catch {
+      const k = crypto.randomBytes(32);
+      fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 });
+      return k;
+    }
+  }
+  ```
+
+  That catch is correct only for **ENOENT**. For any other read failure (EACCES, EMFILE, EIO, a
+  truncated or emptied file) it **mints a new key and overwrites the old one** — after which every
+  stored ciphertext is unreadable forever, and **it says nothing at all**. It is masked today only
+  because the file is 0600, owned by the server process, and read rarely; fd exhaustion, a read-only
+  mount, or one half-finished write all reach it. So `secret-box`: **creates only on `ENOENT`**, and on
+  any other errno **throws typed** (the caller renders "the key could not be read", not "never
+  configured" — those two sentences mean opposite things to a user); **writes through tmp+rename** (the
+  *reason* behind the atomic-write law weighs more on this file than on any `.json` — it is the least
+  recoverable file under `data/`); and **never overwrites an existing key file**. mounts migrates behind
+  the parity test, so the fix reaches it too — which is the other half of why extracting is worth doing.
+
+### 14.8 The cluster admin's side: helm values → Secret → env
+
+`deploy/helm/vibespace-user/values.yaml` gains a block (beside the existing `gdrive:` at `:158-163`):
+
+```yaml
+# Cluster-provided integration credentials (src/integration-registry.js rows).
+# Each entry is ONE row id; `values` keys are that row's declared field keys.
+# A user's own key always wins — the UI shows which one is in use.
+integrations: []
+#  - id: lark
+#    label: "Lark (cluster app)"
+#    values:
+#      appId: "cli_xxxxxxxx"
+#      appSecret: "xxxxxxxx"
+```
+
+In the Secret of `templates/main.yaml` (beside `gdriveClients` at `:32-33`):
+
+```yaml
+  {{- if .Values.integrations }}
+  integrations: {{ .Values.integrations | toJson | quote }}
+  {{- end }}
+```
+
+and in the container env (beside `VIBESPACE_GDRIVE_CLIENTS` at `:159-164`):
+
+```yaml
+            {{- if .Values.integrations }}
+            # Cluster-provided integration credentials: JSON
+            # [{id,label,values:{…}},…] read by src/server/integration-store.js.
+            # A user's own key in data/integrations.json always wins.
+            - name: VIBESPACE_INTEGRATIONS
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: integrations } }
+            {{- end }}
+```
+
+Four rules ship into `deploy/README.md` next to that YAML:
+
+- **Never `value:`, always `secretKeyRef`** — which is what this chart already does (`gdriveClients`
+  `main.yaml:163-164`, the cephfs secret `:152-153`). A `value:` prints the key into
+  `kubectl get deploy -o yaml`.
+- **The per-field form** `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (id and field upper-cased, `-` → `_`) is
+  for self-hosted installs and docker-compose, which should not need JSON quoting hell. When both forms
+  are present **the JSON one wins**, and a line at boot says which one took effect.
+- **A parse failure never throws**: the same line as `src/mounts.js:2200` —
+  `console.error('[integrations] VIBESPACE_INTEGRATIONS unparseable:', e.message)` and then behave as
+  if there were no cluster default. A mistyped values block must not stop the pod from starting.
+- **Which rows are suitable as cluster defaults belongs in the README**: register-once-serve-everyone
+  credentials (a Lark app, a Google OAuth client) are; **per-seat keys are not** — a cluster-injected
+  one means the cluster pays everyone's bill, and the provider's concurrency seats make users trip over
+  each other (CloakBrowser's tiers are sold by concurrent sessions).
+
+### 14.9 One OAuth client, N instances, N public URLs
+
+The cluster injects each instance's own public address (`main.yaml:172-176`), so "how does one
+registered OAuth app serve N different public URLs" is a real question. **But VibeSpace's OAuth flow has
+never put the instance's address in the `redirect_uri`**: it uses loopback
+(`src/gmail-sync.js:78` `srv.listen(0, '127.0.0.1')`, `:82`/`:99`
+`redirect_uri: http://127.0.0.1:${st.port}`), and loopback means **the machine the user's browser is on**,
+not the instance. That changes the shape of the problem entirely:
+
+**(a) The existing loopback + paste-back.** The cluster registers **one** redirect URL, **independent of
+the number of instances** — because that URL contains no instance address at all. In a cluster
+deployment the user's browser is not on the same machine as the instance, so the redirect to 127.0.0.1
+**fails** in the user's browser and the code is in the address bar — exactly the shape written down in
+the comment at `src/mounts.js:2175-2182`, and the product **already has** that surface (paste-back). The
+cost is one extra paste per connect.
+
+**(b) A cluster auth relay.** `https://auth.<cluster>/cb` registered once, carrying the target instance
+in a **signed state**, forwarding to that instance's public URL. Better UX (zero pastes); the cost is a
+new piece of infrastructure, a signing key, every instance trusting that relay's signature, and — this
+is the heavy one — **a component that can see authorization codes**. It must forward and never persist,
+and a compromise of it is a whole-cluster problem rather than one user's.
+
+**Recommendation: (a) for v1, (b) as a later phase, gated by decision 21.** Not because it is easier:
+(a) is the path **already running in production** (the Gmail mounts), while (b) introduces a component
+that **holds authorization codes**, which is a change that needs its own threat model.
+
+What each vendor allows (public documentation, retrieved 2026-09-11):
+
+| Vendor | Must the callback URL be registered | Port | URLs per app | Consequence for a cluster default |
+|---|---|---|---|---|
+| Google (Gmail / Drive) | Yes, and matched **byte-for-byte** (scheme / host / port / path / trailing slash), **no wildcards** | Loopback is the exception: RFC 8252 §7.3 requires the authorization server to "**MUST allow any port to be specified at the time of the request** for loopback IP redirect URIs" — which is exactly how this tree uses it (`src/gmail-sync.js:78` binds `listen(0)`, a fresh port each time) | Several exact URIs | (a) works and is **already in production**; (b) works too (register the relay's one URI) |
+| Lark / Feishu | Yes — the redirect-URL list under 安全设置 in the developer console; per the official docs **only URLs in that list pass the open platform's security check** | **The port is part of the URL** ⇒ loopback must be **fixed**, which is why §12.4 exists | **Multiple are supported** (official docs: "重定向 URL 支持配置多个") | (a) works; (b) works. **The real limit is not the URL, it is the tenant — see below** |
+| CloakBrowser / cloud browser providers | **Not applicable**: an API key / license key, no redirect at all | — | — | The cluster *can* inject one, but that means the cluster **buys everyone's seat** (§14.8, last rule) |
+
+**A Lark cluster default has a boundary harder than the redirect URI, and it decides the shape of
+decision 22.** The long connection is **enterprise-self-built-apps only** (§12.1, official docs), and a
+**self-built app can only be used inside its own tenant** (official developer guide: self-built =
+internal to one enterprise, as opposed to App Store apps, which are distributable across tenants). So:
+
+- one cluster-registered Lark **self-built** app serves only users **in its own tenant**. Users in
+  another tenant **must** bring their own app — which is why the `lark` row **still allows a user
+  override even when a cluster default exists**, and that is a structural reason rather than a
+  courtesy.
+- serving several tenants from one app means building an **App Store (ISV) app**, which **forfeits the
+  long connection lane decision 3 is built on** and swaps the token model from `tenant_access_token` to
+  `app_access_token` + `tenant_key`. In other words: **"a cross-tenant cluster default" and "real-time
+  push" are mutually exclusive today.**
+- whether this instance's users share one Lark tenant is an ops fact, not recorded in this public repo
+  — and this layer's design **does not need** that answer to be yes.
+
+### 14.10 Export, import, and what this layer's encryption actually buys
+
+- Integration keys join the `sensitive` half of `/api/config/export-info`
+  (`src/routes/persistence.js:679-686`, beside `mounts` / `accounts`) and the passphrase-encrypted block
+  of `/api/config/export` (`:712-741`, the same shape as `getMounts?.()?.exportBundle?.()` `:729-732`).
+- **Only `source:'user'` rows are exported.** A cluster default is not ours and it rotates: baking it
+  into a backup file scatters an expiring cluster credential somewhere we can no longer reach.
+- Imported onto an instance that has **no** such cluster preset, a `source:'cluster'` row resolves to
+  `none` **and says what is missing** — never silently falling back to the exporter's values (which
+  would let a user believe they are on the cluster's app while actually carrying somebody else's
+  credential).
+- **Say plainly what this layer's encryption buys.** `data/integrations.json` and
+  `data/.integrations-key` sit side by side under one uid — the encryption defends against **a file
+  that was carried off** (a backup, a snapshot, a mis-mounted volume). It does not defend against code
+  running as the same user on this machine, and **an agent session runs as exactly that user, with file
+  tools in hand**. mounts has this property today; we are not introducing it. A real boundary is either
+  an OS keychain or a second uid, and neither is in v1 — so this sentence lives here rather than letting
+  the word "encrypted" imply a guarantee it cannot buy.
+
+### 14.11 This layer's hard fences
+
+1. **A key never rides argv** (spawn hygiene). One structural guarantee comes free: `agentEnv()`
+   (`src/ws-handler.js:112-121`) drops every `VIBESPACE_*` not in `AGENT_ENV_KEEP` (`:101-105`), so
+   `VIBESPACE_INTEGRATIONS` and `VIBESPACE_INTEGRATION_*` reach no agent child **by construction**.
+2. **A Test is human-clicked only.** §ban-safety is about polling Anthropic on a timer with a
+   subscription token; one human-clicked round trip to Lark / CloakBrowser is not under that ban, but
+   **a timer is**. Sweep: `integrations.test(` appearing in any scheduler, timer or ingest loop = red.
+   The precedent for this discipline is `src/local-oracles.js` — human-triggered, declared, measured.
+3. **The store constructs no vendor request** (§14.3), so the §3.1 egress whitelist gains **no line at
+   all** for this layer.
+4. The vendor's error text renders through `escHtml` and never reaches `innerHTML` (the same rule as
+   §10.3).
+5. **The broadcast carries the masked view** — and *that one* (`publicView`), not a hand-written field
+   list; hand-written field lists are exactly the shape this codebase keeps dropping fields through.
+6. **Failure reaches the user**: a failed Test = a line on the card plus the vendor's own words; a
+   failed `PUT` = a toast. Telemetry having it is not reporting it.
+7. **`hostId` is a parameter.** What this layer resolves belongs to the **instance**; an adapter that
+   one day runs on a paired device (§15) is handed the resolved values by the **engine** as a parameter
+   — never stored a second time on the device, never through argv.
+8. **This layer stores what an admin could hand you** (app / client credentials, API keys), **not what
+   you authorized** (OAuth refresh tokens). The user's Lark token still lives in the channels token
+   store (§13). Folding both into one store is exactly the twin this design keeps refusing — their
+   lifetimes, rotation and export rules are all different.
+
+---
+
+## 15. What is deliberately not in v1, and where it lands
 
 | Deferred | Why | Landing place |
 |---|---|---|
@@ -2116,7 +2579,7 @@ not-offered-with-a-reason rule.
 
 ---
 
-## 15. Debt this creates, and how it is gated
+## 16. Debt this creates, and how it is gated
 
 - **A second OAuth loopback flow**, unless `src/oauth-loopback.js` actually
   absorbs the Gmail-mount one. If it does not, the twin is named in
@@ -2135,7 +2598,7 @@ not-offered-with-a-reason rule.
 
 ---
 
-## 16. Test gates
+## 17. Test gates
 
 Every phase ships its gate in the same commit. Suite names, tiers, and the
 **negative control** that proves each gate can fail:
@@ -2153,14 +2616,16 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channels-identity` | fast | no sender honesty line by default; `identityMarking` drives the approval-card warning and the receipt fields; the audit line carries `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` and **never leaves the instance**; on a `sendAs: []` conversation `reply` returns `send-not-available` and **creates no proposal**; **r4: a proposal approved against a `convCaps` that went stale must re-resolve before the send and refuse with `send-not-available`** | a copy with the honesty line defaulted ON must go red (r2's decision 17 is this leg's negative control); a `marked` channel whose approval card carries no warning must go red; a proposal created on a `sendAs: []` conversation must go red; **a copy that does not re-resolve at approval time must actually send the message** |
 | `test-channels-egress` | fast | every constructed outbound request comes either from the adapter declaring its host or from an allowlisted `(file, host)` pair **with a reason** — seeded with `src/gmail-sync.js` and `src/mounts.js` (§3.1) | a scratch file with an undeclared host must go red; a **dead allowlist entry** (file moved or renamed) must go red too |
 | `test-oauth-loopback` | fast | both modes (§12.4): ephemeral bind for Gmail, fixed bind for Lark; `state` rejection on the request handler **and** on paste-back; the port released on completion/cancel/timeout | a **pre-bound** fixed port must produce the named refusal and the paste-back fallback, never an opaque `EADDRINUSE`; a callback with a wrong `state` must be rejected in both modes |
+| `test-integration-registry` | fast | each row's `fields` / `test` / `consumers`; `publicView` never emits plaintext and the last 4 appear only when the value is ≥ 12 chars; **omitting a secret field = unchanged, `''` = cleared**; precedence user > cluster > none; a vanished cluster default ⇒ `none` **with a named reason**; a missing required field ⇒ `missing` naming it. **The grep census (which prints the set it walked)**: `process.env.VIBESPACE_INTEGRATION*` only inside the store; **one parser per env name** (two rows sharing a name, or a row and a delegate sharing one, both go red); every `consumers` name is a file that exists **and** actually calls `resolveIntegration`; every row declaring `test` has a registered runner; **no scheduler / timer / ingest loop calls `test(`** | a row whose `consumers` names a file that exists but **never calls** `resolveIntegration` must go red (mere existence is the shape this census most easily decays into); a copy treating `''` as "unchanged" must go red; a copy that **copies** the cluster default into `data/integrations.json` must go red on the env-rotation leg (it keeps serving the old value); a synthetic producer calling `test(` from a timer must go red; a copy masking **outside** `publicView` must go red on the broadcast leg |
+| `test-secret-box` | fast | **parity** with mounts (encrypt with a patched copy of the pre-extraction `_enc` ⇒ `secret-box` decrypts it, and the other way round, with the `iv.tag.data` triple byte-identical); **creates a key only on `ENOENT`**, throws **typed** on any other errno; writes through tmp+rename; **never overwrites an existing key file** | a copy carrying the bare catch of `src/mounts.js:360-367` must, on one injected `EACCES`, mint a new key and so turn the "old ciphertext still decrypts" assertion red — that defect itself, kept as a standing negative control |
 | `test-channels-lark-shape` | fast | recorded-fixture normalization: `next_page_token` paging *to the anchor*, `@_user_N` placeholder resolution against the record's own `mentions`, typed errors | a fixture whose anchor lies on the **second** page must be paged into, not stopped at page one |
-| `test-plugin-loader` (existing) | fast | `channelAdapters` in `RESERVED_CONTRIBUTIONS` ⇒ the "reserved for a later phase — ignored" warning actually fires (§14) | its expected-set assertion goes red if the word is added without updating the suite — which is the point |
+| `test-plugin-loader` (existing) | fast | `channelAdapters` in `RESERVED_CONTRIBUTIONS` ⇒ the "reserved for a later phase — ignored" warning actually fires (§15) | its expected-set assertion goes red if the word is added without updating the suite — which is the point |
 | `test-channels-agent-cli` | fast | CLI verbs against a stub server; `reply` proposes and never sends; invisible = uniform error | a stub returning a conversation the ACL hid must still produce the uniform error |
 | `test-spend-paths` (existing) | fast | its per-site census must see the new producer, wired, with the declared reason | already carries its own controls |
 | `test-channels-engine` | heavy | real worktree server + fake adapter: burst-day paging, backoff, single-flight, failure surfacing **and retraction**, digest batching, wake authorization and hold release | a pre-fix copy using a fixed-window fetch must lose messages on the burst-day fixture |
 | `test-channels-push` | heavy | real worktree server + a **fake push server**: ack after durability (inject a crash between ack and processing — the record must still be there); heartbeat silence ⇒ `state` leaves `live` **and** the poll cadence returns to fast immediately; `stop()` terminal for an arm in flight; a lane claiming `exclusive` while the fixture withholds some events ⇒ `missRate` crosses the threshold ⇒ **auto-demotion to kick with its reason stated**. **Three r4 legs**: after the demotion the lane **actually changes what it carries** (the next event only kicks the cursor and the record arrives by reconciliation poll — asserting that `missRate` crossed is not enough); in kick mode `missRate` **gains no samples at all** (otherwise it is a one-way ratchet); and a demoted lane **never re-promotes itself** even when the fixture stops withholding, while re-asserting exclusivity in the connect wizard clears the counters and re-enters content mode | a lane that **lies about being `active`** (pre-fix copy) must turn the poll fallback off and lose messages; a copy that never demotes must lose messages forever on the withholding fixture; **a pre-fix copy reading the content/kick decision off `caps` must keep carrying content after the demotion**; **a copy counting `missRate` over the adapter's lifetime must still sit above the threshold after a re-assert** |
 | `test-channels-store-scan` | heavy | real daemon (`test-sysinfo-op` is the template) + a **synthetic** WhatsApp-shaped sqlite: a rowid cursor reads to the end exactly once; **the most recent messages are still read** when the store carries an un-checkpointed WAL; a pass interrupted half-way leaves the anchor unmoved; **after the scan the source `db` and `-wal` are byte-identical with unchanged mtimes** (r6 — deliberately NOT the triple: a read-only open rewrites `-shm`, the content-free WAL index, and leaves even that untouched when it is unwritable, so asserting the triple would go red on the correct mechanism); a refused read ⇒ a named `tcc-denied` rather than zero records; **`no-sqlite-reader` is a named refusal when no reader rung is available** (r6); the capability gate — an older daemon that does not advertise this op is **never asked** (an unknown op hangs). **The fixture must include the arm where OUR connection is the ONLY one** (r6 — the normal shape for a scheduled scan) | a copy that reads **the `.db` file alone** must miss the most recent messages; **a copy taking the DEFAULT (read-write) open must fail the byte-identical assertion on the only-connection arm** (r6 — the failing shape is the DEFAULT, not the opt-in `mode=rw` r5 named, and it fails ONLY on that arm: with a client connection held open it passes, which is why the fixture needs both); a copy that reports `EPERM` as "zero messages" must fail the named-refusal leg; **a copy answering zero records when no SQLite reader exists must fail the `no-sqlite-reader` leg** |
-| `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate | the estimate must change when a rule is added, and a review-required channel must not offer "may send" |
+| `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate. **Plus the Integrations leg (§14.5)**: the cards render once under each of the three sources (`Not configured` / `Cluster default` / `Your own`); a secret field shows only `••••1234` with **no path that reads it back** (a `GET` after Replace still returns the masked view); the Test button's label follows `test.kind`; a failed Test paints the vendor's own text on the card through `escHtml`; and **the same cards render single-column at 375×667 with every control reachable** | the estimate must change when a rule is added, and a review-required channel must not offer "may send"; **a copy returning plaintext from `GET` must go red**; **a copy labelling a `shape-only` row "Test connection" must go red** (that button never went near the network); **any control landing outside the viewport at 375×667 must go red** — this leg names the `showDropdown` class of incident: unzoomed `offsetWidth` and a zoomed rect are not the same thing |
 
 Fixture hygiene applies from the first commit, because these are live incidents:
 no fixed `/tmp` path and no fixed port (use `scripts/scratch.mjs`); any suite
@@ -2172,7 +2637,7 @@ exercised against recorded fixtures and the fake adapter.
 
 ---
 
-## 17. Critique log — the r2 adversarial review
+## 18. Critique log — the r2 adversarial review
 
 Eight findings were raised against the first draft. Each was checked against the
 tree at `7f13e7c7` before anything was changed. Seven were correct and are fixed
@@ -2183,12 +2648,12 @@ unreliable as one that ignores a right one.
 | # | Finding | Verdict | What changed |
 |---|---|---|---|
 | 1 | Two adapter poll loops read-modify-write one `index.json`; overlapping passes clobber each other's cursor advances and unread counts | **Confirmed.** §6.2 mandates a loop per adapter with single-flight declared only *per* adapter, while §5 put every mutable per-conversation fact in one whole-file atomic JSON written "at pass end". `writeJsonAtomic` is atomic at the fs layer; the read-modify-write around it is not. A clobbered *anchor* advance skips messages | New **§5.1** names one in-memory owner in `src/server/channels-engine.js` with a serialized `index.update(fn)` and a coalesced flush (the `JobManager` / `SessionStatusManager` shape); §5 invariants 3–4 rewritten; §6.2 says single-flight-per-adapter is not mutual exclusion; §2 gains a third load-bearing rule; `test-channel-store` gains a two-concurrent-passes leg with a read-modify-write negative control. Sharding was considered and rejected in §5.1 — the rotation counter is keyed by *group*, which spans adapters |
-| 2 | `test-channels-egress` as specified is red on its first commit: `src/gmail-sync.js` and `src/mounts.js` already construct requests to those hosts | **Confirmed.** `src/gmail-sync.js` builds `oauth2.googleapis.com/token`, the `gmail.readonly` scope URL and `gmail.googleapis.com/gmail/v1/users/me`; `src/mounts.js` holds `GRAPH_BASE`. A mandatory gate that fails on a legitimate pre-existing surface gets relaxed by whoever hits it first | §3.1 restates the census as an allowlist keyed by `(file, host pattern)` **with a reason**, seeded with those two files, plus the dead-entry check `test-vendor-whitelist`'s `ALLOW` already uses; §16's row updated with both controls |
-| 3 | Lark's fixed loopback port is a machine-global name; decision 4 only diagnoses the *registration* collision, not two instances on one box | **Confirmed.** Gmail's flow binds `listen(0, '127.0.0.1')`; Lark's must be registered, hence fixed. The loser gets an opaque `EADDRINUSE` *after* the consent page, and the port holder receives the other instance's code | New **§12.4**: the module is explicitly dual-mode; the fixed port is bound only for a flow; `EADDRINUSE` becomes a named refusal falling through to paste-back (which needs no port); the `state` CSRF check is carried over verbatim from **both** places `gmail-sync` performs it and pinned. §12.1 and decision 4 corrected; `test-oauth-loopback` gains a pre-bound-port leg and a wrong-`state` leg, and now has a row in §16 |
+| 2 | `test-channels-egress` as specified is red on its first commit: `src/gmail-sync.js` and `src/mounts.js` already construct requests to those hosts | **Confirmed.** `src/gmail-sync.js` builds `oauth2.googleapis.com/token`, the `gmail.readonly` scope URL and `gmail.googleapis.com/gmail/v1/users/me`; `src/mounts.js` holds `GRAPH_BASE`. A mandatory gate that fails on a legitimate pre-existing surface gets relaxed by whoever hits it first | §3.1 restates the census as an allowlist keyed by `(file, host pattern)` **with a reason**, seeded with those two files, plus the dead-entry check `test-vendor-whitelist`'s `ALLOW` already uses; §17's row updated with both controls |
+| 3 | Lark's fixed loopback port is a machine-global name; decision 4 only diagnoses the *registration* collision, not two instances on one box | **Confirmed.** Gmail's flow binds `listen(0, '127.0.0.1')`; Lark's must be registered, hence fixed. The loser gets an opaque `EADDRINUSE` *after* the consent page, and the port holder receives the other instance's code | New **§12.4**: the module is explicitly dual-mode; the fixed port is bound only for a flow; `EADDRINUSE` becomes a named refusal falling through to paste-back (which needs no port); the `state` CSRF check is carried over verbatim from **both** places `gmail-sync` performs it and pinned. §12.1 and decision 4 corrected; `test-oauth-loopback` gains a pre-bound-port leg and a wrong-`state` leg, and now has a row in §17 |
 | 4 | The assignment-derived grant collides with a user-made grant on the same `(principal, scope)`; un-assigning silently revokes the user's grant — narrowing, inside a widening-only model | **Confirmed.** The §8 grant shape is keyed by `(principal, scope)` and §7.3 said "the grant is removed with the assignment" | Grants gain `origin: 'user'\|'assignment'\|'request'`; `effective()` still MAXes so the accessor is unchanged; un-assigning deletes only the `origin:'assignment'` row. §7.3 and §8 rewritten; `test-channel-acl` gains the mirror control (user grant byte-identical after the assignment is removed) |
 | 5 | "One pointer item per pending proposal" is not expressible in `UserTodoManager` | **Confirmed, and the direction was wrong too.** `add()` has a closed parameter set; it dedups on `(sessionKey, text)` across all statuses (re-filing a resolved item reopens the same id); it throws past `MAX_OPEN_PER_SESSION = 20`. And retraction needs *proposal → item*, which nothing persisted | §9.2 rewritten to **one pointer per conversation** with count-free `text` (so dedup-by-text is the wanted idempotence), the count in `detail` (which `add()` updates in place), the returned id persisted as `pendingTodoId` on the **conversation**, retraction only for ids this producer wrote, and a stated degrade when the cap throws. The per-proposal alternative and its cost are recorded in decision 7 |
-| 6 | `contributes.channelAdapters` is claimed to be "a reserved contribution key today" and is not — and an unknown key is dropped with no warning | **Confirmed.** `RESERVED_CONTRIBUTIONS` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`; only keys in that list warn, and `m.contributes` is rebuilt to a fixed shape so anything else vanishes silently | §14's row corrected and P0 now adds the word plus the expected-set update in `scripts/test-plugin-loader.mjs`; §16 carries the row |
-| 7 | Fence 3 cites an incident and a measurement that do not exist in this tree, and states the inverse of the repo's actual law | **Half confirmed.** The *law* criticism is right and is fixed: CLAUDE.md's rule is "no **sync** fs/exec; child processes/workers with timeouts only", so bounded async children are sanctioned (ssh-per-op, the `ps`/`lsof` rungs, discovery sweeps) — the draft implied the opposite. The *invented incident* claim is *wrong*: `inc-mtunmv3d-pmd6` (2026-09-10) is real, with 1.8 / 18.8 / **72.5 ms** per spawn measured at 45 MB / 543 MB / 1.5 GB parent RSS. It is absent from the tree because instance-local evidence is required to stay out of this public repo — grepping the public tree is the right check and yields the right *observation*, but "not in the tree" and "invented" are different claims, and this repo's own conventions (CLAUDE.md cites `inc-…` ids with no in-tree evidence file throughout) make the first one expected | §3.3 rewritten to state the written law first, then the fork-tax refinement as a *measured constraint on top of it*, with the incident id, the method, the RSS dependency, and an explicit note that the evidence file is instance-local. §20 gains item 12 saying the constants are not portable |
+| 6 | `contributes.channelAdapters` is claimed to be "a reserved contribution key today" and is not — and an unknown key is dropped with no warning | **Confirmed.** `RESERVED_CONTRIBUTIONS` is `['keybindings','panels','viewers','commands','menus','statusChips','backends']`; only keys in that list warn, and `m.contributes` is rebuilt to a fixed shape so anything else vanishes silently | §15's row corrected and P0 now adds the word plus the expected-set update in `scripts/test-plugin-loader.mjs`; §17 carries the row |
+| 7 | Fence 3 cites an incident and a measurement that do not exist in this tree, and states the inverse of the repo's actual law | **Half confirmed.** The *law* criticism is right and is fixed: CLAUDE.md's rule is "no **sync** fs/exec; child processes/workers with timeouts only", so bounded async children are sanctioned (ssh-per-op, the `ps`/`lsof` rungs, discovery sweeps) — the draft implied the opposite. The *invented incident* claim is *wrong*: `inc-mtunmv3d-pmd6` (2026-09-10) is real, with 1.8 / 18.8 / **72.5 ms** per spawn measured at 45 MB / 543 MB / 1.5 GB parent RSS. It is absent from the tree because instance-local evidence is required to stay out of this public repo — grepping the public tree is the right check and yields the right *observation*, but "not in the tree" and "invented" are different claims, and this repo's own conventions (CLAUDE.md cites `inc-…` ids with no in-tree evidence file throughout) make the first one expected | §3.3 rewritten to state the written law first, then the fork-tax refinement as a *measured constraint on top of it*, with the incident id, the method, the RSS dependency, and an explicit note that the evidence file is instance-local. §21 gains item 12 saying the constants are not portable |
 | 8 | `_railBadge('channels', unreadTotal)`, "which already exists", does not; the badge needs more wiring than listed | **Confirmed.** The helper is `_railSetBadge(id, val)`; badges are driven by a hardcoded ladder in `_railRefreshBadges()` and an explicit message-type list in `_railWireBadges()`, neither of which picks up a new id | §10.1 corrected: the right helper name and **six** registrations, with the note that this badge can ride the broadcast digest instead of adding a fetch to the ladder |
 
 Two of the eight (1 and 3) were latent *money-and-correctness* defects rather
@@ -2214,7 +2679,7 @@ artefact was never the appended text, it was a warning at the moment of
 authorization. Neither change is "more conservative" or "more aggressive": both
 are **saying the sentence to the party it is owed to**.
 
-### 17.1 The adversarial review of r3 (r4)
+### 18.1 The adversarial review of r3 (r4)
 
 Five findings were raised against the r3 revision. Each was checked against the tree
 at `a41bf513` first; **all five were correct** and all five are fixed above — none had
@@ -2223,10 +2688,10 @@ to be recorded as a wrong correction.
 | # | Finding | Verdict | What changed |
 |---|---|---|---|
 | 1 | "Which lane is in use, is it live, may it carry content" lives in `caps.pushExclusivity`, the adapter record's `push {…}` and the per-conversation `lane {…}` with no stated precedence and **no accessor able to read the adapter record** — so r3's auto-demotion cannot structurally win | **Confirmed, and it is three consequences rather than one.** §4 calls `src/channel-caps.js` the **one** place that answers, yet none of its three exports takes the adapter record; §6.4 says only that the first two "together decide it" ⇒ (a) a demoted lane keeps carrying content, (b) the freshness chip draws "live" off a static declaration (exactly the `opencode-events` round-4 lesson it cites), (c) fence 12's coalescing window runs in kick mode too, buying 60 s of latency for nothing | `caps.pushExclusivity` **deleted** (exclusivity is a per-deployment configuration fact and does not belong in a static per-kind declaration; `pushTransport` stays, it genuinely is static); `src/channel-caps.js` gains the **one** resolver `laneState(caps, adapterRecord, convEntry, now)` with the precedence **demotion > liveness > claim** and `unknown ⇒ carryContent:false`; all four consumers (the chip, fence 12's gate, §6.4's cadence, §6.2's scheduler) re-pointed at it and §2 gains a fifth placement rule; `test-channel-caps` and `test-channels-push` each gain legs, the latter asserting that **the demotion actually changes what the lane carries** (r3 only asserted that `missRate` crossed) |
-| 2 | Decision 19 removes the only `scanSource` cell with an ingest contract (`'store'`) and the contract never moves into the survivor: `'ui'` has no anchor, no dedup key and no "complete pass", and §12.5 explicitly permits it to declare `history:'none'` | **Confirmed.** §4's contract makes an undeclared capability **throw**, §5 invariant 4 wants a complete pass and a `complete:false`, and invariant 2 requires `vendorId` — which a DOM scrape is not guaranteed to expose; §16's parity row pinned only push/poll dedup, never a re-scraped screen | §12.5 gains `'ui'`'s three contract lines: the synthetic anchor key `(convId, renderedAt, sha256(author\|text))` in `vendorId` with `raw.synthetic:true`, the scroll-bounded complete pass (reached the anchor ⇒ `complete:true`; hit the scroll limit ⇒ `complete:false`, anchor does not move), and the **ban** on `history:'none'` for `receive:'scan'` (enforced by the contract suite); the table cell's `history` narrows to `'page'`; §5 invariant 2 and §6.3 each gain a pointer; `test-channels-lane-parity` gains a scan arm and a drop-the-synthetic-key negative control |
-| 3 | `push.missRate` is a lifetime ratio with no counting window and the demotion has no exit ⇒ a one-way ratchet: in kick mode push carries no records at all, the ratio tends to 1.0 by construction, and a demoted lane can **never** come back under the threshold | **Confirmed**, and it is exactly the shape the auto-resume `edgeHeld` lesson exists to prevent (*burning the wall would turn one transient disagreement into a permanent refusal*) | §6.4 gains two sentences: count only while `carryContent` is true and only over a rolling window (last N records or 24 h, whichever is larger); the demotion is retracted by **whoever made the claim** (re-assert in the connect wizard ⇒ counters reset, one retry), and **the counters are never the trigger**; decision 18 and §20 item 17 follow; `test-channels-push` gains two legs |
+| 2 | Decision 19 removes the only `scanSource` cell with an ingest contract (`'store'`) and the contract never moves into the survivor: `'ui'` has no anchor, no dedup key and no "complete pass", and §12.5 explicitly permits it to declare `history:'none'` | **Confirmed.** §4's contract makes an undeclared capability **throw**, §5 invariant 4 wants a complete pass and a `complete:false`, and invariant 2 requires `vendorId` — which a DOM scrape is not guaranteed to expose; §17's parity row pinned only push/poll dedup, never a re-scraped screen | §12.5 gains `'ui'`'s three contract lines: the synthetic anchor key `(convId, renderedAt, sha256(author\|text))` in `vendorId` with `raw.synthetic:true`, the scroll-bounded complete pass (reached the anchor ⇒ `complete:true`; hit the scroll limit ⇒ `complete:false`, anchor does not move), and the **ban** on `history:'none'` for `receive:'scan'` (enforced by the contract suite); the table cell's `history` narrows to `'page'`; §5 invariant 2 and §6.3 each gain a pointer; `test-channels-lane-parity` gains a scan arm and a drop-the-synthetic-key negative control |
+| 3 | `push.missRate` is a lifetime ratio with no counting window and the demotion has no exit ⇒ a one-way ratchet: in kick mode push carries no records at all, the ratio tends to 1.0 by construction, and a demoted lane can **never** come back under the threshold | **Confirmed**, and it is exactly the shape the auto-resume `edgeHeld` lesson exists to prevent (*burning the wall would turn one transient disagreement into a permanent refusal*) | §6.4 gains two sentences: count only while `carryContent` is true and only over a rolling window (last N records or 24 h, whichever is larger); the demotion is retracted by **whoever made the claim** (re-assert in the connect wizard ⇒ counters reset, one retry), and **the counters are never the trigger**; decision 18 and §21 item 17 follow; `test-channels-push` gains two legs |
 | 4 | `convCaps` is a stored derived fact carrying an `at` **no rule reads** (no TTL, no refresh trigger, no staleness degrade), contradicting §5 invariant 7 twelve lines below it; a week-old optimistic answer draws a send control and creates the proposal §4 promises never to create | **Confirmed.** `why`'s enum already contains `'left-group'`, so the state is anticipated; and a field with no reader is, in this repo, "the fix was never wired" | §4 and §5 give `convCaps` a **TTL (6 h)** and three refresh triggers (on track, on the first panel render past the TTL, and **unconditionally at approval time immediately before the send**), degrading to `read:'unknown'`/`sendAs:[]`/`why:'stale'` — rendered by `offers()`'s existing rule, so no new vocabulary; §9.2 spells out the approval-time re-resolution and its refusal path; invariant 7 names it as the exception that pays for itself; `test-channel-caps` gains a TTL leg with a positive control and `test-channels-identity` a "stale at approval must refuse" leg |
-| 5 | The zh doc's §20 sources block is missing the blank line before it, so CommonMark lazy continuation folds it into numbered item 19 | **Confirmed** (`cat -A`; en:1806-1808 has the blank line) | One blank line inserted. The same pass re-checked the rest of the pair and everything else held: heading counts, table-row counts, byte-identical code blocks, and identical P0–P4 / P0–P2 round-and-day arithmetic |
+| 5 | The zh doc's §21 sources block is missing the blank line before it, so CommonMark lazy continuation folds it into numbered item 19 | **Confirmed** (`cat -A`; en:1806-1808 has the blank line) | One blank line inserted. The same pass re-checked the rest of the pair and everything else held: heading counts, table-row counts, byte-identical code blocks, and identical P0–P4 / P0–P2 round-and-day arithmetic |
 
 Four of the five (1–4) share a shape worth writing down beside r2's: **one fact stored
 in three places, with no function allowed to read all of them.** `laneState`'s three
@@ -2238,7 +2703,7 @@ may be several sites (a claim, a measurement and an observation really are diffe
 facts), but there may be exactly **one place that folds them, and it must be able to
 read all of them.**
 
-### 17.2 The owner's correction (r5) — one sentence that merged two platforms
+### 18.2 The owner's correction (r5) — one sentence that merged two platforms
 
 r4 wrote that "decision 19 excludes `'store'` for **both** platforms" and rewrote all
 of §12.5 around the surviving `'ui'` cell. **The owner pointed out that this is
@@ -2262,7 +2727,7 @@ ban — and a ban needs no argument, which is why nobody ever re-examines one.
 
 ---
 
-### 17.3 The adversarial review of r5 (r6) — what a round of fixes brought in
+### 18.3 The adversarial review of r5 (r6) — what a round of fixes brought in
 
 r5 took the `'store'` cell back, and **five of this round's eight findings live on
 that addition**: one states its mechanism backwards, one leaves r5's own just-named
@@ -2273,14 +2738,14 @@ scrutiny as the code it repaired.**
 
 | # | Finding | Verdict | What changed |
 |---|---|---|---|
-| 1 | The mechanism the `'store'` cell **prefers** (the backup API / `VACUUM INTO`) is the one mechanism that breaks its own "never write", and its reason for rejecting the safe one is **inverted**: "opening the live store read-only is not sufficient, this is a WAL database" conflates a read-only **open** (which reads the WAL) with reading the **`.db` file** (which does not) | **Confirmed, measured on a throwaway fixture** (node v24.12.0 `node:sqlite`, a SIGKILLed producer leaving an un-checkpointed WAL): the DEFAULT open — the only mode a backup/`VACUUM INTO` source connection can use — read `NEWEST` correctly and then, on `close()`, rewrote `db` and **DELETED** both `-wal` and `-shm` (SQLite's documented last-connection checkpoint-and-delete); `readOnly:true` also read `NEWEST` (so r5's stated reason is false) and left `db`/`-wal` byte-identical; only reading the **`.db` file alone** missed `NEWEST`. "We are the last connection" is the NORMAL case for a scheduled scan | §12.5's mechanism is **inverted**: open with `SQLITE_OPEN_READONLY`, run `VACUUM INTO`/backup **from that read-only connection**; the rejected-alternative sentence now says "reading the **`.db` file alone** omits the WAL"; the triple copy is demoted to a **fallback** with its torn-read hazard stated; §6.3's twin follows; §16's assertion narrows from the triple to **`db` and `-wal`** (a read-only open rewrites `-shm`), its negative control moves from `mode=rw` to the **DEFAULT** open, and the fixture gains an only-connection arm |
-| 2 | `caps.history` is still a per-KIND scalar while §12.5's own new table assigns ONE adapter two different values by resolved source (`'store'`⇒`'since'`, `'ui'`⇒`'page'`) — word for word what r5 said about the adjacent field | **Confirmed.** One `kind:'whatsapp'` adapter declares a single `history` while `scanSources` means the same module runs both cells: `'since'` asks a Linux deployment to honour since-anchor semantics with a DOM scrape, `'page'` deletes the "real anchor ⇒ `'since'`" that is the reason `'store'` is preferred; and §16's two-source parity leg, driven by **one** fake adapter, is unimplementable as r5 wrote it | `caps.historyBySource` replaces the scalar on `receive:'scan'` (the scalar stays for `push`/`poll`), `scanState()` resolves `history` alongside `source`, §4's contract rule covers both the non-`'none'` values and the key coverage, §16 gains the mirror control |
+| 1 | The mechanism the `'store'` cell **prefers** (the backup API / `VACUUM INTO`) is the one mechanism that breaks its own "never write", and its reason for rejecting the safe one is **inverted**: "opening the live store read-only is not sufficient, this is a WAL database" conflates a read-only **open** (which reads the WAL) with reading the **`.db` file** (which does not) | **Confirmed, measured on a throwaway fixture** (node v24.12.0 `node:sqlite`, a SIGKILLed producer leaving an un-checkpointed WAL): the DEFAULT open — the only mode a backup/`VACUUM INTO` source connection can use — read `NEWEST` correctly and then, on `close()`, rewrote `db` and **DELETED** both `-wal` and `-shm` (SQLite's documented last-connection checkpoint-and-delete); `readOnly:true` also read `NEWEST` (so r5's stated reason is false) and left `db`/`-wal` byte-identical; only reading the **`.db` file alone** missed `NEWEST`. "We are the last connection" is the NORMAL case for a scheduled scan | §12.5's mechanism is **inverted**: open with `SQLITE_OPEN_READONLY`, run `VACUUM INTO`/backup **from that read-only connection**; the rejected-alternative sentence now says "reading the **`.db` file alone** omits the WAL"; the triple copy is demoted to a **fallback** with its torn-read hazard stated; §6.3's twin follows; §17's assertion narrows from the triple to **`db` and `-wal`** (a read-only open rewrites `-shm`), its negative control moves from `mode=rw` to the **DEFAULT** open, and the fixture gains an only-connection arm |
+| 2 | `caps.history` is still a per-KIND scalar while §12.5's own new table assigns ONE adapter two different values by resolved source (`'store'`⇒`'since'`, `'ui'`⇒`'page'`) — word for word what r5 said about the adjacent field | **Confirmed.** One `kind:'whatsapp'` adapter declares a single `history` while `scanSources` means the same module runs both cells: `'since'` asks a Linux deployment to honour since-anchor semantics with a DOM scrape, `'page'` deletes the "real anchor ⇒ `'since'`" that is the reason `'store'` is preferred; and §17's two-source parity leg, driven by **one** fake adapter, is unimplementable as r5 wrote it | `caps.historyBySource` replaces the scalar on `receive:'scan'` (the scalar stays for `push`/`poll`), `scanState()` resolves `history` alongside `source`, §4's contract rule covers both the non-`'none'` values and the key coverage, §17 gains the mirror control |
 | 3 | The design names server.js's size ratchet as the gate for its own wiring stanza without checking how much budget is left | **Confirmed, measured**: at the base commit `read('server.js').split('\n').length` is **exactly 2100** ⇒ zero headroom, so P0's first commit turns `npm run build` red — the mandatory pre-push gate AND the in-app self-update | §2.1 and P0's exit criteria each gain a line: **measure first**, then either raise the budget deliberately in the same commit (which the suite's own comment sanctions) or extract an existing stanza first; priced at ~0.5 rounds |
-| 4 | r5's new `scan` record reproduces r4's own finding 4 verbatim: `hostFacts.at` / `grant` / `grantAskedAt` are stored derived facts with no reader, no TTL, no refresh trigger and no staleness degrade — while §5 invariant 7 names exactly **one** exception | **Confirmed.** `grantAskedAt` appears exactly once in the whole English doc (in the schema block), and nothing states what `now` is for in `scanState(…, now)` while every sibling resolver's `now` has a stated use; these facts are the result of a possibly-cross-machine round trip and are not locally re-derivable — the property that earned `convCaps` its exception. The harm runs the more expensive way: with `hostFacts` stale, `scanState` keeps answering `'store'` and 15 s after the client is uninstalled, after an update moves the store, or after a Sonoma→Sequoia upgrade extends TCC to Group Containers | `scan.hostFacts` gains a 6 h TTL, three named refresh triggers and a `source:null`/`why:'host-facts-stale'` degrade; `grant` moves INSIDE `hostFacts` and is **never trusted across a pass** (the op's own `EPERM` is the authority; a `granted` that comes back `EPERM` re-files as `tcc-denied` and clears the stored grant); `grantAskedAt` gets its reader (the don't-re-prompt rule); §5 invariant 7 takes a second named exception; §16 gains the TTL leg and its positive control |
-| 5 | `carryContent` is defined only for push, yet the coalescing gate sits on the single funnel all three lanes converge into and `laneState()` can answer `via:'scan'`; meanwhile `'store'` is introduced WITH an event-driven trigger (an `fs.watch` on the store file) that has no debounce and no stated relation to `caps.scanLatency` | **Confirmed.** WhatsApp's `ChatStorage.sqlite` is written on every incoming message ⇒ in a busy group the watch fires roughly per message ⇒ one pass per message ⇒ one filter hit per message ⇒ the gate reads a `carryContent` that is undefined (falsy) ⇒ one wake per message, i.e. fence 12's own "30 messages become 30 deliveries". **Honest bound**: §7.4's 30 s floor and the spend authorizer cap the absolute spend, so this is not unbounded money — but the wakes and charges differ per lane, which makes §6.1's headline and §16's parity row unsatisfiable as written | §6.4's precedence states `via:'scan'` ⇒ `carryContent:false` explicitly (a scan pass is a batch, like a poll pass); the `fs.watch` is defined as a **cursor kick**, debounced to `caps.scanLatency[source]` (which makes that number a real ceiling), and owes the `opencode-events` round-4 inotify-lifetime rule; §6.1's diagram and §16's parity row follow, the latter with a burst leg and an undebounced negative control |
-| 6 | The `'store'` lane needs a SQLite reader inside the daemon and the design names no mechanism — while every candidate collides with a constraint this repo has written down, so P6a's 4–5 rounds does not price it | **Confirmed.** The daemon is a single-file esbuild bundle with exactly one `--external` (`node-pty`), the installer calls it "zero-dep" with `NODE_MIN=18`: `node:sqlite` does not exist on 18/20, still emits ExperimentalWarning on 24 (measured), and its **row-reading API is synchronous** (its `backup()` is async, so the hazard is the row scan) while CLAUDE.md says this daemon carries live session pipes; a native binding needs a second `--external` plus per-platform prebuilts; `sqlite3(1)` as a bounded child is fence 3's sanctioned shape | §2 and §12.5 name the mechanism with its constraint: **the bounded child is recommended**, `node:sqlite` sits behind a runtime probe and a stated `NODE_MIN` bump, the native binding is **explicitly refused** with the bundle reason; `no-sqlite-reader` joins the op's failure vocabulary; §20 gains "which reader exists on a paired Mac's daemon is unmeasured"; P6a is re-priced |
-| 7 | Sending has no named mechanism on the one platform that gets `'store'`. "The same act on both routes" is true for `'ui'` (a browser types into a web page) and undefined on macOS, a native Catalyst app; and P6a's deliverables contain no send path while claiming it "needs no agent-browser" | **Confirmed.** The sentence appears three times (§6.3, §12.5, decision 19) and both docs mirror it; the `'store'` row's Sends cell says "falls to `'ui'`" whose send mechanism is an agent-browser — so P6a as scoped is read-only and never says so | The sentence is split per source in all three places; **P6a is stated READ-ONLY and made structural** (`convCaps.sendAs` resolves to `[]` with `why:'no-send-lane-on-this-host'`, rendered by §4's existing rule, which stops any proposal); macOS's two candidates (a SECOND linked-device credential / native UI automation with its own TCC grant) go to §20 as the **open** question; the `'store'` row's Sends cell is rewritten |
-| 8 | `freshnessClaim(lane, convEntry)` cannot compute either number it states: it returns `seconds` (an **age**) with no clock, and no `caps` (the poll case's "≤ 30 s" lives in `caps.pollInterval.hot`); and r5 widened its first parameter into a union of two **disjoint** shapes with no discriminator | **Confirmed.** Every sibling resolver takes `now` (`laneState`, `scanState`, and this repo's `quota-model` / `decideLagShadow`); `laneState()`'s answer carries `via`, `scanState()`'s carried only `source`, leaving the callee to sniff which keys are present. **Separately**: §12.5 property 1's "latency comes from `scanState`, not a static declaration" is false as written — `latencySeconds` is defined two lines above it as `caps.scanLatency[source]` | The signature becomes `freshnessClaim(caps, laneOrScan, convEntry, now)`; `scanState()` gains `via:'scan'` so the union is explicit; property 1 is restated as **two numbers** (the declared cadence = the static table indexed by the resolution; the observed age = `lastScanAt` against `now`) with the row obliged to say which it shows; §16 gains "the same `convEntry` at two `now` values must give two `seconds`" |
+| 4 | r5's new `scan` record reproduces r4's own finding 4 verbatim: `hostFacts.at` / `grant` / `grantAskedAt` are stored derived facts with no reader, no TTL, no refresh trigger and no staleness degrade — while §5 invariant 7 names exactly **one** exception | **Confirmed.** `grantAskedAt` appears exactly once in the whole English doc (in the schema block), and nothing states what `now` is for in `scanState(…, now)` while every sibling resolver's `now` has a stated use; these facts are the result of a possibly-cross-machine round trip and are not locally re-derivable — the property that earned `convCaps` its exception. The harm runs the more expensive way: with `hostFacts` stale, `scanState` keeps answering `'store'` and 15 s after the client is uninstalled, after an update moves the store, or after a Sonoma→Sequoia upgrade extends TCC to Group Containers | `scan.hostFacts` gains a 6 h TTL, three named refresh triggers and a `source:null`/`why:'host-facts-stale'` degrade; `grant` moves INSIDE `hostFacts` and is **never trusted across a pass** (the op's own `EPERM` is the authority; a `granted` that comes back `EPERM` re-files as `tcc-denied` and clears the stored grant); `grantAskedAt` gets its reader (the don't-re-prompt rule); §5 invariant 7 takes a second named exception; §17 gains the TTL leg and its positive control |
+| 5 | `carryContent` is defined only for push, yet the coalescing gate sits on the single funnel all three lanes converge into and `laneState()` can answer `via:'scan'`; meanwhile `'store'` is introduced WITH an event-driven trigger (an `fs.watch` on the store file) that has no debounce and no stated relation to `caps.scanLatency` | **Confirmed.** WhatsApp's `ChatStorage.sqlite` is written on every incoming message ⇒ in a busy group the watch fires roughly per message ⇒ one pass per message ⇒ one filter hit per message ⇒ the gate reads a `carryContent` that is undefined (falsy) ⇒ one wake per message, i.e. fence 12's own "30 messages become 30 deliveries". **Honest bound**: §7.4's 30 s floor and the spend authorizer cap the absolute spend, so this is not unbounded money — but the wakes and charges differ per lane, which makes §6.1's headline and §17's parity row unsatisfiable as written | §6.4's precedence states `via:'scan'` ⇒ `carryContent:false` explicitly (a scan pass is a batch, like a poll pass); the `fs.watch` is defined as a **cursor kick**, debounced to `caps.scanLatency[source]` (which makes that number a real ceiling), and owes the `opencode-events` round-4 inotify-lifetime rule; §6.1's diagram and §17's parity row follow, the latter with a burst leg and an undebounced negative control |
+| 6 | The `'store'` lane needs a SQLite reader inside the daemon and the design names no mechanism — while every candidate collides with a constraint this repo has written down, so P6a's 4–5 rounds does not price it | **Confirmed.** The daemon is a single-file esbuild bundle with exactly one `--external` (`node-pty`), the installer calls it "zero-dep" with `NODE_MIN=18`: `node:sqlite` does not exist on 18/20, still emits ExperimentalWarning on 24 (measured), and its **row-reading API is synchronous** (its `backup()` is async, so the hazard is the row scan) while CLAUDE.md says this daemon carries live session pipes; a native binding needs a second `--external` plus per-platform prebuilts; `sqlite3(1)` as a bounded child is fence 3's sanctioned shape | §2 and §12.5 name the mechanism with its constraint: **the bounded child is recommended**, `node:sqlite` sits behind a runtime probe and a stated `NODE_MIN` bump, the native binding is **explicitly refused** with the bundle reason; `no-sqlite-reader` joins the op's failure vocabulary; §21 gains "which reader exists on a paired Mac's daemon is unmeasured"; P6a is re-priced |
+| 7 | Sending has no named mechanism on the one platform that gets `'store'`. "The same act on both routes" is true for `'ui'` (a browser types into a web page) and undefined on macOS, a native Catalyst app; and P6a's deliverables contain no send path while claiming it "needs no agent-browser" | **Confirmed.** The sentence appears three times (§6.3, §12.5, decision 19) and both docs mirror it; the `'store'` row's Sends cell says "falls to `'ui'`" whose send mechanism is an agent-browser — so P6a as scoped is read-only and never says so | The sentence is split per source in all three places; **P6a is stated READ-ONLY and made structural** (`convCaps.sendAs` resolves to `[]` with `why:'no-send-lane-on-this-host'`, rendered by §4's existing rule, which stops any proposal); macOS's two candidates (a SECOND linked-device credential / native UI automation with its own TCC grant) go to §21 as the **open** question; the `'store'` row's Sends cell is rewritten |
+| 8 | `freshnessClaim(lane, convEntry)` cannot compute either number it states: it returns `seconds` (an **age**) with no clock, and no `caps` (the poll case's "≤ 30 s" lives in `caps.pollInterval.hot`); and r5 widened its first parameter into a union of two **disjoint** shapes with no discriminator | **Confirmed.** Every sibling resolver takes `now` (`laneState`, `scanState`, and this repo's `quota-model` / `decideLagShadow`); `laneState()`'s answer carries `via`, `scanState()`'s carried only `source`, leaving the callee to sniff which keys are present. **Separately**: §12.5 property 1's "latency comes from `scanState`, not a static declaration" is false as written — `latencySeconds` is defined two lines above it as `caps.scanLatency[source]` | The signature becomes `freshnessClaim(caps, laneOrScan, convEntry, now)`; `scanState()` gains `via:'scan'` so the union is explicit; property 1 is restated as **two numbers** (the declared cadence = the static table indexed by the resolution; the observed age = `lastScanAt` against `now`) with the row obliged to say which it shows; §17 gains "the same `convEntry` at two `now` values must give two `seconds`" |
 
 This round's own lesson is a piece of method: **every new field a fix introduces
 must be re-read against the rule that fix has just written down.** In the same
@@ -2293,7 +2758,7 @@ round of fixes is not exempt because it is a fix.
 
 ---
 
-## 18. Phases, rounds, calendar
+## 19. Phases, rounds, calendar
 
 One **round** ≈ 1 h implementer + ~20 min adversarial verify (measured
 2026-09-10 across 32 workflows / 130 agents). Calendar at **2 rounds/day**.
@@ -2301,7 +2766,7 @@ Ranges are honest: the low end assumes one-round convergence, the high end
 assumes the module needs the extra rounds that the measured distribution says
 about a third of them do.
 
-### P0 — store, index owner, adapter interface, fake adapter, panel skeleton — **11–13 rounds (5.5–6.5 days)**
+### P0 — store, index owner, adapter interface, fake adapter, panel skeleton, **the integration layer** — **16.5–18.5 rounds (8.25–9.25 days)**
 
 `src/channel-store.js` (durable primitives), `src/channel-record.js`,
 **`src/channel-caps.js` (both axes, `convCaps` and its TTL, `freshnessClaim`,
@@ -2312,7 +2777,7 @@ runs all three receive modes, and both sources in scan mode**), a `src/server/ch
 §5.1 from the first commit**, `src/routes/channels.js`, the six rail
 registrations (§10.1), the panel list (**with freshness chips**) and an empty
 conversation window. Also the one-word `channelAdapters` entry in
-`RESERVED_CONTRIBUTIONS` with its suite update (§14). Gates:
+`RESERVED_CONTRIBUTIONS` with its suite update (§15). Gates:
 `test-channel-store` (including the two-concurrent-passes leg and its
 read-modify-write negative control), `test-channel-adapter-contract`,
 `test-channel-caps`, `test-channel-record`, `test-plugin-loader`.
@@ -2331,7 +2796,17 @@ and the wiring stanza's **size ratchet**: that budget is at its ceiling today
 `server.js` first**, then either raise the budget deliberately in the same commit
 with the reason, or extract an existing stanza into `src/server/` first; either way
 `npm run build` must be green on that commit, because it is both the release gate
-and a step of the in-app self-update (§2.1).)
+and a step of the in-app self-update (§2.1).) **r7: +5.5 rounds — the whole of §14's layer lands in P0**, because it is a
+prerequisite for this design's own first adapter (without it, Lark's app id/secret can only go in
+settings, and §14.1 says why that is not allowed): `src/secret-box.js` **moved up from P1** (+1,
+including the mounts parity and the ENOENT-only catch, §14.7), `src/integration-registry.js` +
+`src/server/integration-store.js` + `src/routes/integrations.js` (+1.5), the Integrations window with
+its cards, Replace, deep links and ≤768px single column (+1.5), `test-integration-registry` and its
+standing grep census (+1), and the helm `integrations:` block + `deploy/README.md` (+0.5). **Two more
+exit criteria**: the fake adapter gets a registry row of its own, so all three sources ("the user's
+own > the cluster default > none") are exercised in P0; and **injecting a cluster default and then
+withdrawing it** must turn that row into `none` with a stated reason, never quietly keep serving the
+old value.
 
 ### P1 — Lark read + Gmail read + **the push lanes** — **14–16 rounds (7–8 days)**
 
@@ -2339,7 +2814,7 @@ and a step of the in-app self-update (§2.1).)
 for the flow, named `EADDRINUSE` refusal, paste-back fallback, both `state`
 checks carried over verbatim), `src/channels/lark.js`, `src/channels/gmail.js`,
 the adapter panel (connect / re-auth countdown / tracked pickers / inclusion
-query), failure surfacing + retraction, the `src/secret-box.js` extraction, and
+query), failure surfacing + retraction, and
 the egress allowlist **seeded** with the two pre-existing files (§3.1). **Plus
 the push half (r3/Q3(a))**: `src/channels/live/lark.js` (the official SDK's long
 connection, ack after durability, heartbeat liveness, `stop()` terminal for an arm
@@ -2360,7 +2835,12 @@ event subscription in the console (decision 3).
 and demotion, plus Gmail's Pub/Sub pull. r4: +1 round — `missRate`'s rolling window
 and its count-only-while-carrying rule, the "re-assert to retry" affordance on the
 adapter row, and `test-channels-push`'s "the demotion changes what the lane carries"
-leg.)
+leg.) **r7: net ±0** — the `src/secret-box.js` extraction **moves out** to
+P0 (−1), and what moves in is this layer's two consumer legs (+1): the Lark and Gmail adapters take
+their credentials from `resolveIntegration()` rather than each reading the env, their own
+`registerIntegrationTest` runners, and the connect wizard's three copy paths for `none` / `cluster` /
+`user` (§10.1, §14.5). **One more exit criterion**: an instance with only a cluster default, where the
+user typed nothing, must connect end to end.
 
 ### P2 — assign, filter, wake — **9–11 rounds (4.5–5.5 days)**
 
@@ -2405,7 +2885,7 @@ Lark send (identity per decision 2, `uuid` idempotency), Gmail send (two-phase
 draft, threading headers), `reconcile()` for unknown outcomes, guardrails end to
 end, and the sender honesty line as an **off-by-default** switch (§9.5).
 **This phase opens with the identity proof**: one real send settles Lark's
-`identityMarking` from `unknown` into `none` or `marked` (§20 item 3), because
+`identityMarking` from `unknown` into `none` or `marked` (§21 item 3), because
 until then the approval card is saying "unverified".
 Gates: the outbox suite extended with the idempotency and reconcile matrices;
 `test-channels-identity` extended with a real `sentAs` receipt;
@@ -2440,7 +2920,7 @@ leg of this class that could land on its own today; and because it carries a rea
 anchor it is also the one leg that does not owe the synthetic key's cost. **It is
 also READ-ONLY (r6)**: this leg contains no send path, so it must say so
 structurally — `convCaps.sendAs` resolves to `[]` with
-`why:'no-send-lane-on-this-host'`; sending on macOS is an **open** question in §20
+`why:'no-send-lane-on-this-host'`; sending on macOS is an **open** question in §21
 and is out of this leg's scope. **r6 re-price: 5–7 rounds** (was 4–5), the addition
 being choosing and wiring the SQLite reader (a bounded `sqlite3(1)` child / a
 probed `node:sqlite` with a `NODE_MIN` bump; the native binding is refused) plus the
@@ -2464,7 +2944,7 @@ unencrypted store behaves while the owner's own client is updating it. **r5's
 line said "+4 rounds" while P6a was stated as 4–5 and P6 itself moved 9–13 → 13–18,
 i.e. +4–5; r6 fixes that arithmetic slip and re-prices P6a at 5–7 ⇒ P6 = 14–20.**)
 
-**Totals:** P0–P4 = **51–62 rounds ≈ 25.5–31 working days** at 2 rounds/day, plus
+**Totals:** P0–P4 = **56.5–67.5 rounds ≈ 28.25–33.75 working days** at 2 rounds/day, plus
 owner-blocked time for the two scope round trips. (The r2 review added 2–3 rounds;
 **r3 added 10**: the two-axis capability record +2 in P0, the push lanes +4 in P1,
 coalescing and lane parity +2 in P2, the identity surface +1 in P3, the identity
@@ -2473,15 +2953,17 @@ proof +1 in P4; **r4 added 3**: `laneState` and the `convCaps` TTL +1 in P0,
 re-resolution +1 in P3; **r5 added 1**: `scanState` and the per-platform
 `scanSources` +1 in P0; **r6 added 0.5**: `historyBySource` / the `hostFacts` TTL and
 the already-full size ratchet +0.5 in P0 — r4's, r5's and r6's further +1, +4–5 and
-+1–2 in P6 stay outside this total, because P6 is unscheduled anyway.) P0–P2 alone — read-only channels with assignment, filtering
-and **real-time push**, and no outbound path at all — is **34–40 rounds ≈
-17–20 days**, and it is still a coherent shipping point: the panel is useful,
++1–2 in P6 stay outside this total, because P6 is unscheduled anyway; **r7 added 5.5**: the whole
+integration layer +5.5 in P0, with P1 net ±0 (the secret-box extraction −1 moved to P0, two consumer
+legs +1).) P0–P2 alone — read-only channels with assignment, filtering
+and **real-time push**, plus **a UI where a user can configure their own key**, and no outbound path
+at all — is **39.5–45.5 rounds ≈ 19.75–22.75 days**, and it is still a coherent shipping point: the panel is useful,
 messages arrive live, no external message can leave the building, and the money is
 already bounded.
 
 ---
 
-## 19. Decisions for the owner
+## 20. Decisions for the owner
 
 Each carries a recommendation. None is reversible for free later, which is why
 they are here rather than in the code.
@@ -2489,9 +2971,9 @@ they are here rather than in the code.
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
 | 1 | **Adapters in-tree or plugins?** | in-tree modules / plugin packages | **In-tree for v1.** The OAuth flows, the secret store and the spend guard are all in-tree; an IPC boundary per message buys nothing at this scale. Keep the interface identical so third-party adapters become plugins in P5 without forking the registry |
-| 2 | **Lark send identity** (updated by r3/Q4) | as the **user** (needs `im:message` + **`im:message.send_as_user`** — a dot, not a colon — a version publish and re-consent) / as a **bot** (needs the bot added to every chat) / both | **As the user, and the scope round trip stays in P4.** It is what the other side expects in an existing human group and it needs no change to anybody else's chats. Bot identity only as a fallback where user-send is refused — and bot sending is `identityMarking:'marked'`, so that fallback **must speak on the approval card**. **The new half:** whether user-identity send actually changes the `sender_type` the recipient sees is undocumented and contradicted by a community report, so until one real send in P4 proves it, this adapter declares `identityMarking:'unknown'` and is treated as `marked` (§9.5, §20 item 3). **Until the scope lands the UI says** "sending needs two more permissions on the Lark app, a version publish and one re-consent" rather than showing a greyed control |
+| 2 | **Lark send identity** (updated by r3/Q4) | as the **user** (needs `im:message` + **`im:message.send_as_user`** — a dot, not a colon — a version publish and re-consent) / as a **bot** (needs the bot added to every chat) / both | **As the user, and the scope round trip stays in P4.** It is what the other side expects in an existing human group and it needs no change to anybody else's chats. Bot identity only as a fallback where user-send is refused — and bot sending is `identityMarking:'marked'`, so that fallback **must speak on the approval card**. **The new half:** whether user-identity send actually changes the `sender_type` the recipient sees is undocumented and contradicted by a community report, so until one real send in P4 proves it, this adapter declares `identityMarking:'unknown'` and is treated as `marked` (§9.5, §21 item 3). **Until the scope lands the UI says** "sending needs two more permissions on the Lark app, a version publish and one re-consent" rather than showing a greyed control |
 | 3 | **Lark receive lane** (rewritten by r3/Q3(a)) | poll-only / poll + WebSocket **kick** / WebSocket **carrying content** + poll for reconciliation / webhook | **Push is first-class and ships in P1; content vs kick is decided in one place by `laneState()` (the claim lives on the adapter record's `push.claimedExclusive`); never the webhook.** The long connection needs no public URL, is self-built-apps only, allows 50 connections per app, wants a 3 s ack, and is **at-least-once with 4 retries** — so "push is unreliable" is not a reason. The real constraint is **cluster mode**: with several clients on one app credential each event reaches exactly one at random. That is a **configuration** condition, not a law of nature ⇒ carry content when exclusive (polling drops to a 15-minute reconciliation), kick only when shared or unknown (r2's behaviour, and the default). A public inbound endpoint buys nothing over the long connection |
-| 4 | **Lark redirect URI** | reuse the ops tooling's registered loopback port / register a dedicated one for VibeSpace | **Register a dedicated one — and treat the port as machine-global regardless.** Registration resolves VibeSpace-vs-ops-tooling; it does **not** resolve two VibeSpace instances on one box (a production service beside a checkout), where the loser gets an opaque `EADDRINUSE` after the user is already at the consent page and the port holder receives its code. §12.4 binds only for the flow, refuses by name, and falls to paste-back. If the console accepts several redirect URLs per app, register ours *alongside* rather than displacing theirs (unverified — §20) |
+| 4 | **Lark redirect URI** | reuse the ops tooling's registered loopback port / register a dedicated one for VibeSpace | **Register a dedicated one — and treat the port as machine-global regardless.** Registration resolves VibeSpace-vs-ops-tooling; it does **not** resolve two VibeSpace instances on one box (a production service beside a checkout), where the loser gets an opaque `EADDRINUSE` after the user is already at the consent page and the port holder receives its code. §12.4 binds only for the flow, refuses by name, and falls to paste-back. If the console accepts several redirect URLs per app, register ours *alongside* rather than displacing theirs (unverified — §21) |
 | 5 | **Gmail OAuth client** | add `gmail.send` to the existing shared preset / register a client dedicated to channels | **Dedicated client for channels.** Adding a sensitive scope to a shared preset re-consents everything using it, and the verification status (hence the 7-day refresh-token behaviour) becomes one decision for two features. Read-only P1 may start on the existing preset |
 | 6 | **What is tracked by default** | nothing until the user picks / all groups the user is in | **Nothing.** It is the privacy answer, the polling-cost answer, and it keeps the panel from becoming a mail client. The discover list makes opting in one click |
 | 7 | **Approval surface of record** | new outbox store + a pointer item in "For you" / "For you" items only | **New store + one pointer item per CONVERSATION** (§9.2). A proposal has structure (target, body, why, edit, receipts) the todo store cannot hold; and `UserTodoManager` has a closed parameter set, dedups on `(sessionKey, text)` across all statuses and caps at 20 open per session, so *per-proposal* pointers are not expressible without a schema change to a store several producers share. Per-proposal badges are available for the cost of that change (`proposalId` field + dedup keyed on it + `todoItemId` on the proposal) — say so if you want them |
@@ -2508,10 +2990,15 @@ they are here rather than in the code.
 | 18 | **Who decides a push lane is exclusive?** (new, r3/Q3(a)) | (a) the operator **asserts**, the product **measures** and **auto-demotes** on disagreement / (b) cursor kicks forever (r2) / (c) trust the assertion, never measure | **(a).** The platform never says how many other clients are connected, so exclusivity can only be asserted — but it is **measurable**: `push.missRate`, the fraction of records seen first by the reconciliation poll rather than by push, stays at 0 on a genuinely exclusive lane. Crossing the threshold (default 2 %, ≥ 20 samples) demotes to kick mode and states the reason on the adapter row. (c) is a prayer; (b) turns off the real-time push the owner asked for. The default is `unknown` ⇒ **asserting nothing gives you (b)**. **r4 adds two sentences, and without either the demotion is a one-way ratchet**: the ratio is counted **only while the lane is carrying content, and only over a rolling window** (last N records or last 24 h, whichever is larger) — otherwise every record in kick mode is first-seen-by-poll, the ratio tends to 1.0 by construction, and a demoted lane never comes back; and a demotion is **retracted by whoever made the claim** (re-assert exclusivity in the connect wizard ⇒ counters reset, one retry), never by the counters themselves |
 | 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b); **corrected by the owner in r5**) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store / (d) **(b) plus reading the store on platforms where the client leaves it unencrypted** | **(b) + (d), still explicitly excluding (c).** r3 excluded "read the local store" wholesale by bundling it with the protocol libraries, and **the owner pointed out that this is wrong**: it holds for WeChat (the store is SQLCipher/WCDB-encrypted with the key only in the **running client's process memory**, and this product does not read another process's memory — fence 13) and it does **not** hold for **WhatsApp on macOS** — that official Catalyst client leaves its whole chat history in an **unencrypted** Core Data SQLite store (`~/Library/Group Containers/…/ChatStorage.sqlite`), and reading it is an ordinary, user-authorized, read-only file read: **no secret is defeated, because there is no secret**. So **`'store'` is allowed, and preferred over `'ui'`, on the platforms that have it** — not because it is faster (though it is by an order of magnitude) but because **its anchor is not one we invented**, so §5 invariant 2 gets a real vendor id and the whole cost of `'ui'`'s synthetic key disappears. Three boundaries are fixed: ① **only unencrypted counts** — WhatsApp's Windows stores are encrypted (UWP via SEE with a dbKey derived from a machine identifier the app does not expose; the WebView2 line via DPAPI-NG), and recomputing a key the vendor deliberately withheld is the same act as extracting it from memory, which fence 13 (b) refuses ⇒ Windows takes `'ui'`; ② **Linux has no official desktop client at all** ⇒ web-in-profile `'ui'` only; ③ **WeChat does not change by one word** ⇒ `'ui'` on every platform. The store route is **read-only** (a **read-only open** plus a snapshot taken from that connection — r6 corrects r5's backup-API-first wording, which named the one mode that mutates; never write, never checkpoint), runs as a `channels-scan-store` agentd op (`hostId` a parameter, the local box device #0), and macOS TCC is a **named** gate: a refusal reaches the user as `tcc-denied` with grant steps in the connect wizard and **never** silently degrades to `'ui'` (that would turn the latency number on the conversation row into a lie). **Sending is stated PER SOURCE (r6 correction), because it is not one act**: `'ui'` = an agent-browser typing into that logged-in official client's own composer, so identity really is the user (`identityMarking:'none'`); macOS `'store'` has **no send lane of its own** — the official client there is a native Catalyst app no browser profile reaches — so P6a is **READ-ONLY** and says so structurally (`convCaps.sendAs: []` with `why:'no-send-lane-on-this-host'`, which §4's rule renders as not-offered-with-a-reason and which creates no proposal). **A fourth thing is therefore open and belongs to you**: whether macOS sending is (i) the same Web client in an agent-browser profile — plainly a **SECOND linked-device credential**, two logins for one conversation, modelled as its own row beside `auth.state()`/`scanState().grant` — or (ii) native macOS UI automation (Accessibility / CGEvent) with **its own** TCC grant, or (iii) neither, leaving the class read-only where `'store'` wins. **Recommendation: (iii) for P6a**, and decide (i) vs (ii) only if the owner asks for outbound on macOS — the read half is the value, and a second credential quietly contradicts "it really is the user". Also (r6): the store route's read is a **read-only SQLite open** with a snapshot taken from that connection (never the default read-write open, which checkpoints and deletes the WAL on close), and the daemon-side SQLite reader is named in §12.5 rather than left to the implementer. The interface models the class from P0; P6 therefore **splits into two legs**, the macOS `'store'` leg gated on this decision **alone** (it needs no agent-browser) and the `'ui'` leg still doubly gated |
 | 20 | **Should Gmail push be on by default?** (new, r3/Q3(c)) | on by default / **available, off by default** / not at all | **Available, off by default.** Pub/Sub's pull subscription means it needs no public inbound endpoint either, and each instance can hold its own subscription, so exclusivity is easier to achieve than on Lark's long connection. But it costs a GCP topic, an IAM grant and a **daily renewal job** (the watch expires silently after 7 days and stops without a sound if one is missed), and what it buys is trading a poll that costs one request per tick when nothing changed for second-level latency. At mail's cadence that is a switch a user should turn on for their own situation, not a default |
+| 21 | **How OAuth callbacks work in the cluster (r7, §14.9)** | (a) the existing **loopback + paste-back** (the cluster registers one URL, independent of the number of instances; one extra paste per connect) / (b) a **cluster auth relay** `https://auth.<cluster>/cb` (signed state forwarded to the instance's public URL; zero pastes) | **(a) for v1, (b) as a later phase.** Not because it is easier: (a) is the path running in production today (the Gmail mounts), and the redirect_uri contains no instance address at all ⇒ "N instances with N public URLs" is **structurally not a problem**; (b) adds a component that **can see authorization codes**, which must forward and never persist, and whose compromise is a whole-cluster problem — a change that needs its own threat model and its own operational commitment, worth scheduling on its own rather than riding along. Choosing (b) also decides: who operates it, how its signing key rotates, and how an instance verifies that signature |
+| 22 | **Once the cluster supplies a default credential, is the user CONNECTED or merely PRE-FILLED? (r7)** | Automatically **connected** / **pre-filled**, still one Connect click | **It depends on the kind of row, and that is the decision**: **an OAuth row (lark / gmail) structurally cannot be auto-connected** — what the cluster supplies is an **app credential**, while connecting also needs **this user's own authorization** (one browser round trip), so it can only be "pre-filled + one click", with the UI saying **"provided by the cluster"**; a **key-only row** (CloakBrowser / cloud browsers) genuinely can work the moment it is injected, and there is a precedent for exactly that: the frp plugin is **default-enabled** when the cluster injects its env (`src/plugins.js:584-588`). **Recommendation**: OAuth rows pre-filled; key-only rows follow frp's rule and are available by default — but **only when that key is not billed per seat** (§14.8, last rule). One cluster-funded seat shared by N users is an operational decision, not a default |
+| 23 | **May a user's own key be exported under a passphrase? (r7, §14.10)** | Yes (join the `sensitive` half) / never exported | **Yes, but only `source:'user'` rows.** They are the same class of thing as `mounts` / `accounts` (already in that half), and a user migrating instances expects their own key to travel. **A cluster default is never exported**: it is not ours, it rotates, and imported onto an instance with no such preset it must resolve to `none` **naming what is missing** rather than silently falling back to the exporter's values |
+| 24 | **One `secret-box` key or one per store? (r7, §14.7)** | One shared `data/.secret-box-key` / one per store | **One per store**, with mounts' `data/.mounts-key` untouched byte for byte. Moving a key file is an **irreversible data-loss path** bought for one fewer file, and when a key is rotated or damaged the blast radius should stop at one store. The only upside of sharing (one fewer file in a backup) is bought instead by §14.10's export block |
+| 25 | **May a registry row ship before its consumer exists? (r7, `whatsapp-business` in §14.2)** | Yes (place the card now) / no (same commit as its adapter) | **No.** A row with no live consumer is a card that does nothing, while the key a user types into it is stored, encrypted, exported and listed under "where is this used" — and used by nothing. This is the same law as `SPEND_REASONS` and `contributes.channelAdapters`, enforced by `test-integration-registry`'s `consumers` census. The fields and the "no cluster default" answer are still fixed **now** (the table in §14.2), which costs nothing |
 
 ---
 
-## 20. What I could not verify
+## 21. What I could not verify
 
 Stated plainly, because a design that hides its unknowns is a design that
 discovers them in production:
@@ -2576,7 +3063,7 @@ discovers them in production:
     happen.
 14. **That §5.1's serialized door is sufficient** is an argument, not a
     measurement: it holds because there is exactly one process and one owner. If
-    the engine ever moves to a worker or to a paired device (§14), the door
+    the engine ever moves to a worker or to a paired device (§15), the door
     becomes a cross-process problem and the argument has to be re-made — which is
     why the invariant is written as "one owner", not "we use a mutex".
 15. **Whether Lark International offers the long connection at all.** One
@@ -2695,11 +3182,52 @@ discovers them in production:
     debounce makes the wake rate independent of that number, which is exactly why it
     is a ceiling rather than a hope — but the actual fanout, and the inotify cost of
     watching that container from the daemon, should be taken in P6a.
+24. **Lark's console redirect-matching rule has not been read off this app's console
+    (r7).** The official documentation says the redirect URL must be **in the list**
+    and that the list **supports several entries**, and §14.9 plus decision 21 rest on
+    those two sentences; but whether matching is byte-exact or prefix-tolerant, and
+    whether an `http://127.0.0.1:<fixed port>` loopback URL is accepted at all, were
+    never actually read. The ops notes say the flow worked, so the latter is probably
+    yes — but that is an inference, not a reading. P1's first task (the same trip as
+    §21 item 15's long-connection confirmation) should settle both.
+25. **Who a cluster-registered Lark app can actually serve is untested (r7).** The
+    official developer guide defines a self-built app as internal to one enterprise,
+    from which §14.9 concludes that cross-tenant users must bring their own app — and
+    **whether this instance's users share one tenant** is an ops fact, not recorded in
+    this public repo and not checked by anyone. The corollary — that an App Store (ISV)
+    app forfeits the long connection decision 3 rests on — is likewise derived from two
+    documents and never tried against a real ISV app.
+26. **Whether adding a `channels` preset key to `VIBESPACE_GDRIVE_CLIENTS` is
+    operationally acceptable has not been asked (r7).** §12.2's correction turns
+    decision 5 into "add another key rather than widen the existing one", which depends
+    on two things: the cluster being fine with one more key (not asked), and Google's
+    incremental-authorization behaviour matching the docs (an existing refresh token
+    keeps working for the scopes it was granted) — the latter untried on this client,
+    while **the existing preset's verification status** remains the unknown in item 5.
+27. **The `src/secret-box.js` extraction has never been run against a real mounts store
+    (r7).** §14.7's parity test is designed, not executed: "the ciphertext format does
+    not change by one byte" comes from reading `src/mounts.js:369-381`, not from
+    decrypting this instance's own `data/.mounts-key` and its records. P0's first task
+    should be that round trip on a **copy**, because the failure mode is "every stored
+    token is unreadable".
+28. **The rotation granularity of putting every cluster credential in **one** JSON
+    secret has not been checked with ops (r7).** `VIBESPACE_INTEGRATIONS` is one Secret
+    key, so replacing the `lark` row rewrites the whole key — exactly the shape of the
+    existing `gdriveClients` (`main.yaml:163-164`), so at worst it is not new debt; but
+    what "rotate one row" costs in the cluster's secret tooling is unmeasured, and that
+    is part of why the per-field env form (`VIBESPACE_INTEGRATION_<ID>_<FIELD>`) exists.
+29. **The Integrations cards' cost at 375×667 is unmeasured (r7).** §17's e2e leg
+    requires every control to be reachable, but how many cards fit on one screen and how
+    far a Replace expansion scrolls were never measured — and the `showDropdown` class of
+    incident (unzoomed `offsetWidth` vs a zoomed rect) comes from exactly this size, so
+    that leg must really run in P0 rather than waiting until three rows exist.
 
-**Sources for the vendor facts introduced in r3, r5 and r6** (public documentation,
-fetched 2026-09-10; nothing here was exercised against a real tenant or a real
-client — see items 2, 3, 15–19 above; the r6 SQLite behaviour below is the one thing
-that **was** measured locally, and §12.5 carries the numbers):
+**Sources for the vendor facts introduced in r3, r5, r6 and r7** (public documentation,
+fetched 2026-09-10 for r3/r5/r6 and 2026-09-11 for r7; nothing here was exercised
+against a real tenant or a real client — see items 2, 3, 15–19 and 24–26 above; the r6
+SQLite behaviour below is the one thing that **was** measured locally, and §12.5 carries
+the numbers, while r7's loopback-port fact additionally has **in-tree** evidence at
+`src/gmail-sync.js:78`):
 
 - Lark/Feishu long connection — 50 connections per app, cluster mode without
   broadcast, enterprise-self-built-apps only, no public URL:
@@ -2725,11 +3253,11 @@ that **was** measured locally, and §12.5 carries the numbers):
   running client's process memory — the class of tool fence 13 refuses to be:
   <https://github.com/BenDerPan/wechat-db-decrypt>
 - Lark International's console reportedly does not expose the long connection
-  (community report, not vendor-confirmed — §20 item 15):
+  (community report, not vendor-confirmed — §21 item 15):
   <https://github.com/openclaw/openclaw/issues/51663>
 - **(r5)** WhatsApp's on-disk chat databases on macOS / iOS are plaintext (public
   research reported 2026-05; the dispute about its reach is in the same article —
-  §20 item 19(c)):
+  §21 item 19(c)):
   <https://cybersecuritynews.com/whatsapp-chat-stored-unencrypted-macos-and-ios/>
 - **(r5)** A public implementation that reads that store directly — names
   `~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite`
@@ -2746,7 +3274,7 @@ that **was** measured locally, and §12.5 carries the numbers):
 - **(r5)** macOS container protection — Sonoma 14 protects app data containers under
   `~/Library/Application Support/` and Sequoia 15 extends it to
   `~/Library/Group Containers/`, where a process not meeting the conditions gets a
-  per-process-instance temporary consent prompt or is denied (§20 item 19(d): whether
+  per-process-instance temporary consent prompt or is denied (§21 item 19(d): whether
   Full Disk Access suffices is not stated):
   <https://developer.apple.com/forums/thread/756701>
 - **(r5)** There is no official WhatsApp desktop client for Linux; the only official
@@ -2758,3 +3286,23 @@ that **was** measured locally, and §12.5 carries the numbers):
   the one that mutates the store while a read-only open does not (measured here;
   §12.5's table):
   <https://sqlite.org/wal.html>
+- **(r7)** RFC 8252 §7.3 — for loopback IP redirect URIs the authorization server
+  "**MUST allow any port to be specified at the time of the request**" (the basis for
+  §14.9's Google row; the in-tree evidence is `listen(0, '127.0.0.1')` at
+  `src/gmail-sync.js:78`):
+  <https://datatracker.ietf.org/doc/html/rfc8252>
+- **(r7)** Google's redirect URI must **match a registered one exactly** (scheme, host,
+  port, path, trailing slash), with no wildcards:
+  <https://developers.google.com/identity/protocols/oauth2/web-server>
+- **(r7)** A Google OAuth client whose consent screen is in **Testing** with user type
+  External issues refresh tokens that expire in **7 days** (the source for §12.2's
+  pre-existing claim):
+  <https://developers.google.com/identity/protocols/oauth2>
+- **(r7)** Lark / Feishu redirect URLs must be configured under 安全设置 in the developer
+  console, **only URLs in that list pass the open platform's security check**, and the
+  list **supports several entries** (§14.9 and §21 item 11):
+  <https://open.feishu.cn/document/common-capabilities/sso/api/obtain-oauth-code>
+- **(r7)** A Lark / Feishu **self-built app** is for use inside one enterprise, as
+  opposed to App Store apps which are distributable across tenants (the basis for
+  §14.9's "a cluster default serves only its own tenant"):
+  <https://open.feishu.cn/document/develop-process/self-built-application-development-process>
