@@ -430,6 +430,20 @@ html, body {
 .usage-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 10px; color: var(--text-secondary); margin-top: 6px; }
 .usage-legend-item { display: inline-flex; align-items: center; gap: 4px; }
 .usage-legend-dot { width: 9px; height: 9px; border-radius: 2px; }
+/* ORIGIN (2026-09-10): conversation vs subagent vs workflow-agent spend */
+.usage-stack.usage-stack-thin { height: 5px; border-radius: 3px; margin: 3px 0 0; }
+.usage-bar-fill.origin-main { background: var(--accent); }
+.usage-bar-fill.origin-subagent { background: var(--green, #3fb950); }
+.usage-bar-fill.origin-workflow { background: var(--yellow, #e5c07b); }
+.usage-bar-fill.origin-unknown { background: var(--text-dim); }
+.usage-sess-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+.usage-sess-tbl th { text-align: right; font-weight: 500; font-size: 9px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-dim); padding: 2px 0 4px; }
+.usage-sess-tbl th:first-child { text-align: left; }
+.usage-sess-tbl td { padding: 3px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.usage-sess-name { max-width: 0; width: 45%; padding-right: 8px !important; }
+.usage-sess-proj { display: block; font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-sess-v { text-align: right; padding-left: 8px !important; font-variant-numeric: tabular-nums; color: var(--text-secondary); white-space: nowrap; }
+.usage-sess-total { color: var(--text); font-weight: 500; }
 .usage-hours { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; align-items: end; height: 60px; }
 .usage-hour { background: color-mix(in srgb, var(--accent) calc(var(--f) * 90% + 8%), var(--bg)); border-radius: 2px; height: 100%; position: relative; min-height: 4px; }
 .usage-hour[data-h]::after { content: attr(data-h); position: absolute; bottom: -13px; left: 0; font-size: 8px; color: var(--text-dim); }

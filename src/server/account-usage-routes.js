@@ -161,7 +161,12 @@ app.get('/api/usage-stats', (req, res) => {
     // pivot = comma list of 'dimA:dimB' 2-D crosses (dashboard split-series
     // panels, e.g. pivot=day:account) — validated + capped in aggregate/here
     const pivots = req.query.pivot
-      ? String(req.query.pivot).split(',').map((s) => s.split(':')).filter((p) => p.length === 2).slice(0, 6)
+      // Cap 8 since 2026-09-10: the window asks for two of its own crosses
+      // (session:origin, project:origin) on TOP of whatever the panel
+      // dashboard needs, and the 'accounts' preset already declares two — a
+      // cap of 6 would silently drop a panel's pivot and leave it rendering a
+      // hole while the client re-fetched the same truncated list.
+      ? String(req.query.pivot).split(',').map((s) => s.split(':')).filter((p) => p.length === 2).slice(0, 8)
       : null;
     // host = the DEVICE filter ('local' | a host id) — top-level over the view
     const hostFilter = req.query.host ? String(req.query.host) : null;

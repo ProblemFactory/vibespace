@@ -3,7 +3,7 @@
 // (subscription vs API — never mixed), account, model, project, mode, cache
 // efficiency, hour/weekday activity, top sessions. Opened from ⚙ → Usage.
 import { t } from './i18n.js';
-import { renderDashboard, PRESETS, destroyCharts, panelPivots } from './usage-dashboard.js';
+import { renderDashboard, PRESETS, destroyCharts, panelPivots, ORIGIN_COLS, ORIGIN_ORDER, ORIGIN_META } from './usage-dashboard.js';
 import { showContextMenu } from './utils.js';
 import { escHtml, fetchJson, showToast, copyText } from './utils.js';
 import { createBackendIconHtml } from './agent-meta.js';
@@ -15,6 +15,25 @@ const beIc = (be) => be ? createBackendIconHtml(be, { className: 'usage-be-ic', 
 const bucketBe = (r) => r.key === '__global__' ? 'claude'
   : r.key === '__global_codex__' ? 'codex'
   : (r.be || (r.type === 'codex-subscription' ? 'codex' : 'claude'));
+
+// ORIGIN (2026-09-10) — which KIND of transcript a request came from. The
+// ledger stamps it on every event (src/usage-walker.js) and the backfill
+// migration named the history, so the window can finally separate what a
+// conversation spent ITSELF from what its subagents and workflow agents spent
+// on its behalf. 'unknown' is a real answer (a transcript that is gone, a
+// remote scanner too old to stamp it) and is rendered whenever it has spend —
+// hiding it would quietly shrink the totals these rows are read against. The
+// label/colour table itself is imported from usage-dashboard.js — ONE
+// vocabulary, or the panel legend and this window's column headers drift.
+// The two 2-D crosses this window ALWAYS needs (the session table's columns and
+// the project rows' tooltip) — requested beside whatever the panel dashboard
+// asks for, never instead of it.
+const ORIGIN_PIVOTS = ['session:origin', 'project:origin'];
+const pivotMap = (d, key) => {
+  const out = {};
+  for (const r of (d?.pivots?.[key] || [])) out[r.key] = r.cells || {};
+  return out;
+};
 
 const DAY = 86400000;
 const RANGES = [
@@ -83,7 +102,7 @@ export function openUsageWindow(app, opts = {}) {
     if (state.backend) qs.set('backend', state.backend);
     if (state.account) qs.set('account', state.account);
     if (state.device) qs.set('host', state.device);
-    const pivots = panelPivots(currentPanels());
+    const pivots = [...new Set([...ORIGIN_PIVOTS, ...panelPivots(currentPanels())])];
     if (pivots.length) qs.set('pivot', pivots.join(','));
     // fetchJson CANNOT throw (null on network failure, {error} bodies handed
     // back as data) — the old try/catch was dead code and a failed load fell
@@ -154,6 +173,9 @@ export function openUsageWindow(app, opts = {}) {
       // The pre-2.96 fixed layout, kept as an escape hatch.
       body.appendChild(renderTrend(d, state));
       body.appendChild(sectionGrid([
+        // FIRST in the cost section: who spent it — the conversation itself,
+        // its subagents, or its workflow agents (2026-09-10).
+        renderOrigin(d, state),
         renderBilling(d),
         renderGroup(t('By account'), d.groups.account, state, { badge: true }),
         // Pooled pseudo-accounts (#4): the total that flowed THROUGH each pool.
@@ -162,11 +184,13 @@ export function openUsageWindow(app, opts = {}) {
         ((d.groups.pool || []).length ? renderGroup(t('By pool'), d.groups.pool, state, { badge: true }) : null),
         renderGroup(t('By model'), d.groups.model, state, { beIcon: true }),
         renderCache(d),
-        renderGroup(t('By project'), d.groups.project, state, { path: true }),
+        // The parent project's cwd since 2026-09-10 (an agent's own worktree is
+        // no longer its own project row); the origin split rides the tooltip.
+        renderGroup(t('By project'), d.groups.project, state, { path: true, originSplit: pivotMap(d, 'project:origin') }),
         renderGroup(t('By mode'), d.groups.mode, state, { small: true }),
         renderHours(d),
         renderWeekdays(d),
-        renderGroup(t('Top sessions'), d.groups.session, state, { session: true, limit: 12 }),
+        renderSessions(d, state, { limit: 12 }),
       ].filter(Boolean)));
     } else {
       // Configurable dashboard (2.96.0): panels persist in settings and sync
@@ -538,8 +562,107 @@ function renderGroup(title, rows, state, opts = {}) {
     if (opts.session) label = r.name || r.key.slice(0, 8); // name from session-meta (VibeSpace sessions)
     let badge = opts.badge && r.type ? typeBadge(r.type, r.deleted) : '';
     if (opts.beIcon || opts.badge || opts.session) badge = beIc(r.be || (opts.badge ? bucketBe(r) : null)) + badge;
-    sec.appendChild(barRow(label, r, max, metric, { badge, title: opts.path ? r.key : (opts.session ? r.key : label) }));
+    let title2 = opts.path ? r.key : (opts.session ? r.key : label);
+    // Origin split on hover: a project row is the sum of the conversation's own
+    // requests and everything its agents ran FOR it — the row itself cannot say
+    // which, so the tooltip does.
+    const split = opts.originSplit ? originSplitText(opts.originSplit[r.key], metric) : '';
+    if (split) title2 += '\n' + split;
+    sec.appendChild(barRow(label, r, max, metric, { badge, title: title2 }));
   }
+  return sec;
+}
+
+// ── ORIGIN (2026-09-10) ──
+const originVal = (cell, metric) => cell ? (metric === 'cost' ? cell.cost : cell.totalTokens) : 0;
+const originFmt = (v, metric) => metric === 'cost' ? fmtCost(v) : fmtNum(v);
+/** "Conversation $1.20 · Subagents $3.40 · Workflows $0.10" — only the origins
+ *  this row actually has, so a plain conversation does not grow two zeroes. */
+function originSplitText(cells, metric) {
+  if (!cells) return '';
+  const M = ORIGIN_META();
+  const parts = ORIGIN_ORDER.filter(k => cells[k]).map(k => `${M[k].label} ${originFmt(originVal(cells[k], metric), metric)}`);
+  return parts.length > 1 ? parts.join(' · ') : '';
+}
+/** The stacked share bar for one row's origin cells (session table + By origin). */
+function originStack(cells, metric) {
+  const M = ORIGIN_META();
+  const parts = ORIGIN_ORDER.map(k => ({ k, v: originVal(cells?.[k], metric) })).filter(p => p.v > 0);
+  const tot = parts.reduce((s, p) => s + p.v, 0);
+  const bar = document.createElement('div'); bar.className = 'usage-stack usage-stack-thin';
+  if (!tot) return bar;
+  bar.innerHTML = parts.map(p => `<span class="usage-stack-seg" style="width:${(p.v / tot * 100).toFixed(1)}%;background:${M[p.k].color}" title="${escHtml(M[p.k].label)}: ${escHtml(originFmt(p.v, metric))} (${fmtPct(p.v / tot)})"></span>`).join('');
+  return bar;
+}
+
+// "By origin" — three rows (plus 'unknown' when the ledger holds rows nobody
+// can name, which must never be hidden: it is spend, and the other rows are
+// read as shares of the same total).
+function renderOrigin(d, state) {
+  const sec = section(t('By origin'));
+  const rows = d.groups.origin || [];
+  if (!rows.length) { sec.appendChild(emptyLine()); return sec; }
+  const M = ORIGIN_META();
+  const metric = state.metric;
+  const cells = Object.fromEntries(rows.map(r => [r.key, r]));
+  sec.appendChild(originStack(cells, metric));
+  const max = Math.max(...rows.map(r => metric === 'cost' ? r.cost : r.totalTokens), 1);
+  for (const key of ORIGIN_ORDER) {
+    const r = cells[key];
+    if (!r) continue;
+    const dot = `<span class="usage-legend-dot" style="background:${M[key].color}"></span>`;
+    sec.appendChild(barRow(M[key].label, r, max, metric, { badge: dot, cls: 'origin-' + key }));
+  }
+  const note = document.createElement('div'); note.className = 'usage-note';
+  note.textContent = cells.unknown
+    ? t('Subagent and workflow-agent requests are billed to the conversation that started them. “Unattributed” is history whose transcript is gone — it is counted, just not named.')
+    : t('Subagent and workflow-agent requests are billed to the conversation that started them — this is how that total splits.');
+  sec.appendChild(note);
+  return sec;
+}
+
+// "By session", with a column per origin (the session×origin pivot) and a
+// stacked share bar per row. The panel dashboard has no chart for a 2-D cross
+// with fixed columns, which is why this one is built by hand.
+function renderSessions(d, state, opts = {}) {
+  const sec = section(t('By session'));
+  const rows = (d.groups.session || []).slice(0, opts.limit || 12);
+  if (!rows.length) { sec.appendChild(emptyLine()); return sec; }
+  const piv = pivotMap(d, 'session:origin');
+  const M = ORIGIN_META();
+  const metric = state.metric;
+  const tbl = document.createElement('table'); tbl.className = 'usage-sess-tbl';
+  const head = document.createElement('tr');
+  head.innerHTML = `<th>${escHtml(t('Session'))}</th>`
+    + ORIGIN_COLS.map(k => `<th style="color:${M[k].color}">${escHtml(M[k].label)}</th>`).join('')
+    + `<th>${escHtml(t('Total'))}</th>`;
+  tbl.appendChild(head);
+  for (const r of rows) {
+    const cells = piv[r.key] || {};
+    const tr = document.createElement('tr');
+    const name = r.name || r.key.slice(0, 8); // session-meta name for VibeSpace sessions
+    const proj = r.project ? r.project.split('/').slice(-2).join('/') : '';
+    const td = document.createElement('td'); td.className = 'usage-sess-name';
+    td.innerHTML = `<span class="usage-bar-label" title="${escHtml(r.key + (r.project ? '\n' + r.project : ''))}">${beIc(r.be)}${escHtml(name)}</span>`
+      + (proj ? `<span class="usage-sess-proj" title="${escHtml(r.project)}">${escHtml(proj)}</span>` : '');
+    td.appendChild(originStack(cells, metric));
+    tr.appendChild(td);
+    for (const k of ORIGIN_COLS) {
+      const c = cells[k];
+      const cell = document.createElement('td'); cell.className = 'usage-sess-v';
+      cell.textContent = c ? originFmt(originVal(c, metric), metric) : '—';
+      // Cost AND tokens on every cell: the table shows one metric at a time but
+      // the other one is the question anybody asks next.
+      if (c) cell.title = `${fmtCost(c.cost)} · ${fmtNum(c.totalTokens)} ${t('tokens')} · ${c.requests} ${t('req')}`;
+      tr.appendChild(cell);
+    }
+    const tot = document.createElement('td'); tot.className = 'usage-sess-v usage-sess-total';
+    tot.textContent = originFmt(metric === 'cost' ? r.cost : r.totalTokens, metric);
+    tot.title = `${fmtCost(r.cost)} · ${fmtNum(r.totalTokens)} ${t('tokens')} · ${r.requests} ${t('req')}`;
+    tr.appendChild(tot);
+    tbl.appendChild(tr);
+  }
+  sec.appendChild(tbl);
   return sec;
 }
 

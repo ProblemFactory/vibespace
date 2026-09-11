@@ -21,7 +21,29 @@
  * just re-emits and the server's rid dedup absorbs it).
  *
  * Event fields (keep in lockstep with the scanner + the local UsageHistory
- * walk): {rid, mid, ts, sid, model, cwd, i, cw5, cw1, cr, o, tier}.
+ * walk): {rid, mid, ts, sid, model, cwd, wcwd?, origin, wf?, agent?, i, cw5,
+ * cw1, cr, o, tier}.
+ *
+ * ORIGIN (2026-09-10). A request's usage is mined from three KINDS of file and
+ * until now the event could not say which: a top-level transcript ('main'), a
+ * subagent transcript (<sid>/subagents/agent-*.jsonl) or a workflow agent's
+ * (<sid>/subagents/workflows/<wf>/agent-*.jsonl). All three already attribute
+ * to the PARENT session id — but an agent record carries ITS OWN cwd, and an
+ * agent that runs in a git worktree carries the worktree path, so the ledger's
+ * "By project" cut listed every throwaway worktree as its own project (272 of
+ * this instance's 3,155 agent transcripts, measured 2026-09-10). So:
+ *   · `origin` is stamped on EVERY event (never "missing means main" — the
+ *     backfill migration has to be able to say `unknown` about rows whose
+ *     transcript is gone, and an absent field cannot say that)
+ *   · `wf` = the workflow run id, workflow files only; `agent` = the agent
+ *     file stem, subagent + workflow
+ *   · `cwd` is the PARENT PROJECT's cwd for an agent event, and the
+ *     transcript's own path rides along as `wcwd` — present ONLY when it
+ *     DIFFERS (an equal copy on every row is bytes carrying no information)
+ * Codex rollouts are always 'main': the codex store MERGES a sub-agent
+ * rollout's records into the parent thread's read (src/codex-session-store.js
+ * tags each record with its own file), so there is no second kind of file here
+ * to separate.
  */
 const fs = require('fs');
 const zlib = require('zlib');
@@ -41,6 +63,79 @@ function defaultCursorFile() {
   return process.env.VIBESPACE_USAGE_CURSOR || path.join(os.homedir(), '.vibespace', 'usage-cursor.json');
 }
 
+// ── THE PROJECT'S cwd — which repo an agent transcript worked FOR ──────────
+// An agent record carries the agent's own directory, so the event must be
+// attributed to the parent PROJECT instead. The project DIRECTORY NAME is
+// claude's own grouping and it is the ENCODING of that cwd, so a candidate can
+// be VERIFIED by encoding it forward (the map is deterministic that way only —
+// decoding is ambiguous, kb-design-lessons §5).
+//
+// A conversation's cwd is NOT constant: measured on this instance, 3 of 782
+// top-level transcripts state more than one, and one of them is the biggest
+// spender here — a directory rename left its FIRST record saying
+// `…/claude-code-webui` while its latest records and its project dir both say
+// `…/vibespace`, so "the first cwd" filed $7,828 of one conversation's agent
+// spend under a path that no longer exists, in a SECOND row beside its own
+// main spend. Hence the ladder: a candidate that encodes to the directory name
+// wins; otherwise the conversation's MOST RECENT cwd; a sibling top-level
+// transcript answers when the parent's own file has been rotated away (every
+// transcript in a project dir shares one project by construction). Every read
+// is a bounded window (a transcript can be hundreds of MB) and memoized.
+const CWD_WINDOW_BYTES = 128 * 1024;
+const encodeCwd = (c) => String(c).replace(/[/._]/g, '-');
+function makeProjectCwdReader() {
+  const winMemo = new Map();   // fp|tail → [cwd…]
+  const dirMemo = new Map();   // pdAbs → cwd|null  (the sibling fallback)
+  const sidMemo = new Map();   // pdAbs|sid → cwd|null
+  /** Ordered distinct cwds stated inside one bounded window of a transcript. */
+  function readCwds(fp, tail) {
+    const key = fp + (tail ? '|t' : '|h');
+    if (winMemo.has(key)) return winMemo.get(key);
+    const out = [];
+    let fd = null;
+    try {
+      fd = fs.openSync(fp, 'r');
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(CWD_WINDOW_BYTES, size);
+      const pos = tail ? size - len : 0;
+      const buf = Buffer.alloc(len);
+      const n = fs.readSync(fd, buf, 0, len, pos);
+      const lines = buf.subarray(0, Math.max(0, n)).toString('utf8').split('\n');
+      if (tail && pos > 0) lines.shift(); // a tail window opens mid-line
+      for (const line of lines) {
+        if (line.indexOf('"cwd"') < 0) continue;
+        let r; try { r = JSON.parse(line); } catch { continue; } // a cut line never parses
+        if (r && typeof r.cwd === 'string' && r.cwd && !out.includes(r.cwd)) out.push(r.cwd);
+      }
+    } catch { } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
+    winMemo.set(key, out);
+    return out;
+  }
+  /** @param mains sorted absolute paths of the dir's top-level transcripts */
+  return function projectCwdFor(pdAbs, pdName, sid, mains) {
+    const sk = pdAbs + '|' + sid;
+    if (sidMemo.has(sk)) return sidMemo.get(sk);
+    const match = (list) => list.find((c) => encodeCwd(c) === pdName) || null;
+    const own = path.join(pdAbs, sid + '.jsonl');
+    let out = match(readCwds(own, false));
+    if (!out) {
+      const t = readCwds(own, true);
+      out = match(t) || t[t.length - 1] || null;   // the conversation's most recent cwd
+    }
+    if (!out) out = readCwds(own, false)[0] || null;
+    if (!out) {
+      if (!dirMemo.has(pdAbs)) {
+        let sib = null;
+        for (const m of mains) { const c = readCwds(m, false); sib = match(c) || c[0] || null; if (sib) break; }
+        dirMemo.set(pdAbs, sib);
+      }
+      out = dirMemo.get(pdAbs);
+    }
+    sidMemo.set(sk, out);
+    return out;
+  };
+}
+
 /** Walk ~/.claude/projects incrementally. Returns
  *  {events: [ndjson-line…], cursors, cursorFile} — cursor NOT persisted. */
 function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
@@ -57,7 +152,9 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
   let filesTouched = 0;
   const emit = onEvent ? ((ev) => onEvent(ev)) : ((ev) => out.push(JSON.stringify(ev)));
 
-  function handleLine(line, cur) {
+  const projectCwdFor = makeProjectCwdReader();
+
+  function handleLine(line, cur, info) {
     if (line.indexOf('"usage"') < 0) return;
     let r; try { r = JSON.parse(line); } catch { return; }
     if (r.type !== 'assistant') return;
@@ -68,6 +165,8 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
     if (rid === cur.lastRid) return; // contiguous duplicate of the same request
     cur.lastRid = rid;
     const cc = u.cache_creation || {};
+    const own = r.cwd || null;
+    const par = (info && info.pcwd) || null;  // null for a top-level transcript
     emit({
       rid,
       // message.id join field (2.267.3 rule): live stdout records lack
@@ -76,7 +175,11 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
       ts: Date.parse(r.timestamp) || Date.now(),
       sid: cur.sid,
       model: msg.model || null,
-      cwd: r.cwd || null,
+      cwd: par || own,
+      wcwd: (par && own && own !== par) ? own : undefined, // the agent's OWN dir, only when it differs
+      origin: (info && info.origin) || 'main',
+      wf: (info && info.wf) || undefined,
+      agent: (info && info.agent) || undefined,
       i: u.input_tokens || 0,
       cw5: cc.ephemeral_5m_input_tokens || 0,
       cw1: cc.ephemeral_1h_input_tokens || 0,
@@ -123,24 +226,27 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
     try { entries = fs.readdirSync(pdAbs); } catch { continue; }
     // Top-level transcripts PLUS subagent/workflow agent transcripts (the
     // 2.265.0 walk — workflow agents' usage exists ONLY there); events
-    // attribute to the PARENT session id.
-    const files = []; // {fp, sid}
+    // attribute to the PARENT session id, and carry WHICH kind of file they
+    // came from (`origin`, 2026-09-10).
+    const files = []; // {fp, sid, origin, wf?, agent?}
+    const mains = []; // top-level transcript paths — the project-cwd fallback
     for (const fn of entries) {
-      if (fn.endsWith('.jsonl')) { files.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, '') }); continue; }
+      if (fn.endsWith('.jsonl')) { files.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, ''), origin: 'main' }); mains.push(path.join(pdAbs, fn)); continue; }
       if (!/^[0-9a-f-]{36}$/i.test(fn)) continue; // session dirs only
       const subDir = path.join(pdAbs, fn, 'subagents');
       let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
       for (const sf of subs) {
-        if (sf.endsWith('.jsonl')) { files.push({ fp: path.join(subDir, sf), sid: fn }); continue; }
+        if (sf.endsWith('.jsonl')) { files.push({ fp: path.join(subDir, sf), sid: fn, origin: 'subagent', agent: sf.replace(/\.jsonl$/, '') }); continue; }
         if (sf !== 'workflows') continue;
         let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
         for (const wf of wfs) {
           let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
-          for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) files.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn });
+          for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) files.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn, origin: 'workflow', wf, agent: af.replace(/\.jsonl$/, '') });
         }
       }
     }
-    for (const { fp, sid } of files) {
+    mains.sort(); // the sibling fallback must pick the SAME file in both spellings
+    for (const { fp, sid, origin, wf, agent } of files) {
       if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
       let st; try { st = fs.statSync(fp); } catch { continue; }
       if (!st.isFile()) continue;
@@ -151,7 +257,11 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
       // matching the shipped scanner exactly (parity over cursor bytes too)
       if (st.size === cur.offset) { cursors[fp] = cur; continue; }
       filesTouched++;
-      scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur));
+      // The parent project's cwd is resolved only for the files that need it
+      // (an agent transcript with new bytes) — never for a main transcript,
+      // whose own record already carries the authoritative value.
+      const info = { origin, wf, agent, pcwd: origin === 'main' ? null : projectCwdFor(pdAbs, pd, sid, mains) };
+      scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur, info));
       delete cur.sid;
       cursors[fp] = cur;
     }
@@ -233,6 +343,10 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
         rid, mid, be: 'codex', ts, sid,
         model: cur.model || null,
         cwd: cur.cwd || null,
+        // ALWAYS 'main': a codex sub-agent's rollout is merged into the parent
+        // thread by the store itself (codex-session-store tags each record
+        // with its own file), so a rollout is never a second kind of file here.
+        origin: 'main',
         effort: cur.effort || undefined,
         i: Math.max(0, (last.input_tokens || 0) - cached),
         cw5: 0, cw1: 0,
@@ -278,4 +392,4 @@ function scanBufferWith(data, cur, onLine) {
   }
 }
 
-module.exports = { runUsageWalk, defaultCursorFile, zstdPlain, scanBufferWith, ZSTD_OK };
+module.exports = { runUsageWalk, defaultCursorFile, zstdPlain, scanBufferWith, ZSTD_OK, makeProjectCwdReader, encodeCwd };

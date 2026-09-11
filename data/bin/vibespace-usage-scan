@@ -3,7 +3,12 @@
 // over ssh stdin and run on the host; walks ~/.claude/projects transcripts
 // with per-file BYTE cursors (kept remotely in ~/.vibespace/usage-cursor.json)
 // and emits one NDJSON usage event per API request on stdout:
-//   {rid, ts, sid, model, cwd, i, cw5, cw1, cr, o, tier}
+//   {rid, ts, sid, model, cwd, wcwd?, origin, wf?, agent?, i, cw5, cw1, cr, o, tier}
+// ORIGIN (2026-09-10) — mirror of src/usage-walker.js, see that file's header:
+// every event says WHICH kind of transcript it came from ('main' | 'subagent' |
+// 'workflow'), an agent event's `cwd` is the PARENT PROJECT's cwd (so an agent
+// running in a git worktree no longer looks like its own project) and its own
+// path rides along as `wcwd` only when the two differ.
 // Claude-only v1 (codex rollouts: not yet). Mirrors the local UsageHistory
 // scan semantics: assistant records with message.usage, contiguous
 // requestId dedup, byte offsets (never string lengths — CJK), rotate guard.
@@ -69,7 +74,71 @@ function scanFileWith(fp, cur, size, onLine) {
   } finally { try { fs.closeSync(fd); } catch { } }
 }
 
-function handleLine(line, cur) {
+// ── THE PROJECT'S cwd (MIRROR of src/usage-walker.js — see that file's essay).
+// An agent record carries the agent's own directory, so the event is attributed
+// to the parent PROJECT; the project DIRECTORY NAME is the ENCODING of that
+// cwd, so a candidate is VERIFIED by encoding it forward (the map is
+// deterministic that way only). A conversation's cwd is not constant — a rename
+// left this instance's biggest spender stating `…/claude-code-webui` in its
+// first record and `…/vibespace` in its latest — so: an encode match wins, else
+// the conversation's MOST RECENT cwd, else a sibling transcript's. Bounded
+// windows + memoized.
+// (`encodeCwd` is the cwd→project-dir encoding declared with the fixture-guard
+// mirror above — one forward map, one spelling in this file.)
+const CWD_WINDOW_BYTES = 128 * 1024;
+function makeProjectCwdReader() {
+  const winMemo = new Map();
+  const dirMemo = new Map();
+  const sidMemo = new Map();
+  function readCwds(fp, tail) {
+    const key = fp + (tail ? '|t' : '|h');
+    if (winMemo.has(key)) return winMemo.get(key);
+    const res = [];
+    let fd = null;
+    try {
+      fd = fs.openSync(fp, 'r');
+      const size = fs.fstatSync(fd).size;
+      const len = Math.min(CWD_WINDOW_BYTES, size);
+      const pos = tail ? size - len : 0;
+      const buf = Buffer.alloc(len);
+      const n = fs.readSync(fd, buf, 0, len, pos);
+      const lines = buf.subarray(0, Math.max(0, n)).toString('utf8').split('\n');
+      if (tail && pos > 0) lines.shift(); // a tail window opens mid-line
+      for (const line of lines) {
+        if (line.indexOf('"cwd"') < 0) continue;
+        let r; try { r = JSON.parse(line); } catch { continue; }
+        if (r && typeof r.cwd === 'string' && r.cwd && !res.includes(r.cwd)) res.push(r.cwd);
+      }
+    } catch { } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
+    winMemo.set(key, res);
+    return res;
+  }
+  return function projectCwdFor(pdAbs, pdName, sid, mains) {
+    const sk = pdAbs + '|' + sid;
+    if (sidMemo.has(sk)) return sidMemo.get(sk);
+    const match = (list) => list.find((c) => encodeCwd(c) === pdName) || null;
+    const own = path.join(pdAbs, sid + '.jsonl');
+    let res = match(readCwds(own, false));
+    if (!res) {
+      const t = readCwds(own, true);
+      res = match(t) || t[t.length - 1] || null;   // the conversation's most recent cwd
+    }
+    if (!res) res = readCwds(own, false)[0] || null;
+    if (!res) {
+      if (!dirMemo.has(pdAbs)) {
+        let sib = null;
+        for (const m of mains) { const c = readCwds(m, false); sib = match(c) || c[0] || null; if (sib) break; }
+        dirMemo.set(pdAbs, sib);
+      }
+      res = dirMemo.get(pdAbs);
+    }
+    sidMemo.set(sk, res);
+    return res;
+  };
+}
+const projectCwdFor = makeProjectCwdReader();
+
+function handleLine(line, cur, info) {
   if (line.indexOf('"usage"') < 0) return;
   let r; try { r = JSON.parse(line); } catch { return; }
   if (r.type !== 'assistant') return;
@@ -80,6 +149,8 @@ function handleLine(line, cur) {
   if (rid === cur.lastRid) return; // contiguous duplicate of the same request
   cur.lastRid = rid;
   const cc = u.cache_creation || {};
+  const own = r.cwd || null;
+  const par = (info && info.pcwd) || null;  // null for a top-level transcript
   out.push(JSON.stringify({
     rid,
     // message.id join field (2.267.3 rule — live stdout records lack
@@ -90,7 +161,11 @@ function handleLine(line, cur) {
     ts: Date.parse(r.timestamp) || Date.now(),
     sid: cur.sid,
     model: msg.model || null,
-    cwd: r.cwd || null,
+    cwd: par || own,
+    wcwd: (par && own && own !== par) ? own : undefined, // the agent's OWN dir, only when it differs
+    origin: (info && info.origin) || 'main',
+    wf: (info && info.wf) || undefined,
+    agent: (info && info.agent) || undefined,
     i: u.input_tokens || 0,
     cw5: cc.ephemeral_5m_input_tokens || 0,
     cw1: cc.ephemeral_1h_input_tokens || 0,
@@ -113,23 +188,25 @@ for (const pd of projDirs) {
   // <sid>/subagents/workflows/wf_*/agent-*.jsonl, so a remote machine running
   // workflows under-reported its spend by exactly that amount — the remote
   // twin of the local under-count. Events attribute to the PARENT session id.
-  const files = []; // {fp, sid}
+  const files = []; // {fp, sid, origin, wf?, agent?}
+  const mains = []; // top-level transcript paths — the project-cwd fallback
   for (const fn of entries) {
-    if (fn.endsWith('.jsonl')) { files.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, '') }); continue; }
+    if (fn.endsWith('.jsonl')) { files.push({ fp: path.join(pdAbs, fn), sid: fn.replace(/\.jsonl$/, ''), origin: 'main' }); mains.push(path.join(pdAbs, fn)); continue; }
     if (!/^[0-9a-f-]{36}$/i.test(fn)) continue; // session dirs only
     const subDir = path.join(pdAbs, fn, 'subagents');
     let subs = []; try { subs = fs.readdirSync(subDir); } catch { continue; }
     for (const sf of subs) {
-      if (sf.endsWith('.jsonl')) { files.push({ fp: path.join(subDir, sf), sid: fn }); continue; }
+      if (sf.endsWith('.jsonl')) { files.push({ fp: path.join(subDir, sf), sid: fn, origin: 'subagent', agent: sf.replace(/\.jsonl$/, '') }); continue; }
       if (sf !== 'workflows') continue;
       let wfs = []; try { wfs = fs.readdirSync(path.join(subDir, 'workflows')); } catch { continue; }
       for (const wf of wfs) {
         let afs = []; try { afs = fs.readdirSync(path.join(subDir, 'workflows', wf)); } catch { continue; }
-        for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) files.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn });
+        for (const af of afs) if (af.startsWith('agent-') && af.endsWith('.jsonl')) files.push({ fp: path.join(subDir, 'workflows', wf, af), sid: fn, origin: 'workflow', wf, agent: af.replace(/\.jsonl$/, '') });
       }
     }
   }
-  for (const { fp, sid } of files) {
+  mains.sort(); // the sibling fallback must pick the SAME file in both spellings
+  for (const { fp, sid, origin, wf, agent } of files) {
     if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
     let st; try { st = fs.statSync(fp); } catch { continue; }
     if (!st.isFile()) continue;
@@ -137,7 +214,11 @@ for (const pd of projDirs) {
     if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } // rotated/truncated
     cur.sid = sid;
     if (st.size === cur.offset) { cursors[fp] = cur; continue; }
-    scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur));
+    // The parent project's cwd is resolved only for the files that need it (an
+    // agent transcript with new bytes) — a main transcript's own record already
+    // carries the authoritative value.
+    const info = { origin, wf, agent, pcwd: origin === 'main' ? null : projectCwdFor(pdAbs, pd, sid, mains) };
+    scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur, info));
     delete cur.sid;
     cursors[fp] = cur;
   }
@@ -243,6 +324,9 @@ for (const rel of rollouts) {
       rid, mid, be: 'codex', ts, sid,
       model: cur.model || null,
       cwd: cur.cwd || null,
+      // ALWAYS 'main' (mirror): a codex sub-agent's rollout is merged into the
+      // parent thread by the store itself, so there is no second kind of file.
+      origin: 'main',
       effort: cur.effort || undefined,
       i: Math.max(0, (last.input_tokens || 0) - cached),
       cw5: 0, cw1: 0,
