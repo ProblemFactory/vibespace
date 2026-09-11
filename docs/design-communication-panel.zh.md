@@ -153,8 +153,11 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 - **一把集成密钥只有一个解析者, 而消费者永远不读 `process.env`**(§14.6)。
   `resolveIntegration(id)` 是唯一的那个回答处, 优先级是**用户自己的 > 集群默认 > 没有**; 集群
   默认**按 KEY 解析、绝不拷进落盘记录**, 于是集群轮换一次 env 就轮换了每一个实例的每一个消费
-  者 —— 与 `src/mounts.js:2187-2188` 逐字同一条。配一条常设 grep 普查: `VIBESPACE_INTEGRATION*`
-  出现在 store 之外 = 红。
+  者 —— 与 `src/mounts.js:2187-2188` 逐字同一条; 而 `source` 是**读的时候推导出来的、绝不落盘**,
+  于是一条记录的两个面不可能互相矛盾。委托给那个既有读者的行必须点名它指的是哪一个 key
+  (`prefer`), 因为那个读者自己的兜底在两个预设的列表上答 **null**(`src/mounts.js:2215`)。配一
+  条常设 grep 普查, 它匹配的是 env **名字** —— `/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/`
+  出现在 store 之外 = 红 —— 文件集由 `git ls-files` 推导并由套件打印出来。
 
 ### 2.1 机械式注册清单(每漏一项就多一轮)
 
@@ -174,6 +177,9 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
 - 一个新的集成 = `src/integration-registry.js` 里**一行**, 外加它 `consumers` 里点名的那些
   文件**真的**调用 `resolveIntegration('<id>')` —— 两边都由 `test-integration-registry` 查
   (§14.2);
+- 消费者要跑 OAuth 同意流程的行还要声明 `setup.callbackUrl`(它的**唯一**定义处 ——
+  `src/oauth-loopback.js` import 它), 而只要声明了 `setup.prerequisites` 就必须有
+  `test.caveat`; 缺任何一个普查都变红(§14.2);
 - 任何新的 `VIBESPACE_*` env 名字都要有**恰好一个**解析者, 而集成那一批只许长在
   `src/server/integration-store.js` 里(§14.6);
 - **那条尺寸棘轮今天已经顶格, 所以 P0 的接线段落哪怕只有一行也会把 `npm run build` 弄红
@@ -359,7 +365,10 @@ CLAUDE.md 的路由表是"一个新改动该去哪"的法。这个功能横跨�
     attachments:    'metadata',       // 'metadata' | 'fetch' | 'none'
   },
 
-  async auth.state()   -> { state:'connected'|'needs-reauth'|'unknown', expiresAt, scopes, why }
+  // 它吃 resolveIntegration(id) 作为输入 —— 见 §13 与 §14.3。'needs-credentials' 说的是
+  // "你的授权没问题, 但这个 adapter 底下的应用凭据现在不在了"
+  async auth.state()   -> { state:'connected'|'needs-reauth'|'needs-credentials'|'unknown',
+                            expiresAt, scopes, why }
   async auth.begin()   -> { consentUrl, flowId }             // via src/oauth-loopback.js
   async auth.finish(flowId, code) -> { ok, record }
 
@@ -1292,8 +1301,14 @@ wrapper 的 RPC 之间结束 —— 而既有的扣款扣住机制(`peer_message
   `resolveIntegration('lark')` 答 `none` 时**先**开 Integrations 窗口并聚焦那一行
   (`app.openIntegration('lark')`), 而不是把用户送进一个会在授权页上失败的 OAuth 流程 ——
   §12.1 已经点名这个失败形态(缺 scope / 缺已发布版本 / 缺回调 URL 时挂掉的是*授权页*而不是
-  API 调用), 而它在一个用户根本还没配过应用凭据的实例上是**默认**形态。答 `cluster` 时按钮
-  旁边写**"由集群提供"**, 用户一次点击就能连; 答 `user` 时什么都不多说。这不是一条 UI 偏好:
+  API 调用), 而它在一个用户根本还没配过应用凭据的实例上是**默认**形态 —— §14.9 更进一步:
+  跨租户的用户**必须**自带 Lark 应用, 所以这条路是集群里每一个不在集群自身租户里的用户的默
+  认路径。**而这只有在那张卡真的画出了那三件事的时候才成立**: 卡片把 `setup` 块画在字段
+  **上面**(回调 URL 带复制按钮 + 三条前置), 并且永远不单独画 Test 的绿勾, 而是带上
+  `test.caveat`(§14.2、§14.5)。少了这两样, "先开卡片"只是把同一个会在授权页上失败的流程推
+  迟了两分钟: 用户填完 app id/secret、Test 变绿、`resolveIntegration('lark')` 从此答 `user`,
+  向导再也不开那张卡, 而那个要抄进控制台的回调 URL 在产品里**从头到尾没有出现过**。答
+  `cluster` 时按钮旁边写**"由集群提供"**, 用户一次点击就能连; 答 `user` 时什么都不多说。这不是一条 UI 偏好:
   连接按钮是这条链上唯一一个用户会点的东西, 而**没有凭据**与**凭据被拒**是两件事, 混成一句话就是又一次"报错文案不是诊断"。
 - **设置:** 一个 `Channels` 分类, **与第一个设置项在同一个 commit 里加进
   `SETTINGS_CATEGORIES`**。那个数组*就是* SettingsUI 的渲染循环; 曾经有十个设置项发布出去
@@ -1383,11 +1398,17 @@ agent 的下一个 turn 到达, 除非用户另有配置; (c) 一个不可见的
   是 P1 的一个前置条件, 所以列在 §21 里。
 - **授权的前置条件。** 控制台需要三样全齐: 注册好的回调 URL、授予好的 scope, 以及一个**已发
   布的版本**。缺任何一样, 失败的是*授权页*而不是 API 调用 —— 这是一个值得在连接向导的错误
-  文案里写清楚的、令人困惑的失败形态。
+  文案里写清楚的、令人困惑的失败形态。**r8 给了这三样一个落点**: 它们是 `lark` 那一行的
+  `setup.prerequisites`, 与那条回调 URL 一起画在 Integrations 卡片的字段**上面**(§14.2、
+  §14.5); 而因为 `credential-exchange` 这次 Test 在三样一个都没做的应用上照样成功, 那一行
+  必须声明 `test.caveat`, 判决旁边永远跟着它自己的边界。
 - **Redirect URI。** Lark 的控制台要求回调 URL 必须被*注册*, 所以 loopback 端口必然是**固定
   的** —— 与 Google 不同, Google 接受任何 loopback 端口, `src/gmail-sync.js` 因此可以绑一
-  个临时端口。一个固定端口就是一个 machine-global 名字; §12.4 说这个流程为此做了什么。注册
-  一个专用 URL(决定 4)解决的是 VibeSpace 与运维工具之间的冲突, **仅此而已**。
+  个临时端口。一个固定端口就是一个 machine-global 名字; §12.4 说这个流程为此做了什么。**而
+  那条 URL 的字面量只在一个地方定义**: `lark` 那一行的 `setup.callbackUrl`(§14.2)。
+  Integrations 卡片画的是它, `src/oauth-loopback.js` 的固定模式 import 的也是它 —— 一个必须
+  与对方控制台**逐字节**一致的字符串不能有两份拼写。注册一个专用 URL(决定 4)解决的是
+  VibeSpace 与运维工具之间的冲突, **仅此而已**。
   **两条补充(r7)**: ①官方文档明说"重定向 URL **支持配置多个**", 于是决定 4 那个"并排注册
   而不是顶掉他们的"不再是一个假设 —— §21 第 11 条因此从"未验证的假设"降级成"文档支持, 但
   这个应用的控制台上没试过"; ②**一个集群注册一次、服务 N 个实例**这件事不需要任何新东西, 因为
@@ -1444,7 +1465,7 @@ Channels v1 之上的一层门面: 会话 = agent 会话; reach = `msg-acl`(**�
 | | loopback 端口 | 为什么 |
 |---|---|---|
 | Gmail | **临时端口** —— `listen(0, '127.0.0.1')`, 端口从 `server.address()` 读回来 | Google 接受任何 loopback 端口; 这恰恰就是 `src/gmail-sync.js` 今天在做的事 |
-| Lark | **固定**, 并且在应用控制台里注册过 | 这个平台只会重定向到一个事先注册过的 URL |
+| Lark | **固定**, 并且在应用控制台里注册过 —— 端口与整条 URL 的字面量来自 `lark` 那一行的 `setup.callbackUrl`(§14.2), 本模块 import 它、不自己声明一份, 普查断言这里不出现那个字面量 | 这个平台只会重定向到一个事先注册过的 URL, 而那条 URL 要逐字节一致 ⇒ 它只能有一个定义处, 并且必须被画在用户抄得到的地方(§14.5) |
 
 一个固定端口, 恰恰就是 `scripts/ci.mjs` 的 `machineGlobalFixtures` 与 heavy 档的 `/tmp` 锁存
 在要治的那一类名字 —— 这台机器上跑着一个 systemd 生产服务, 旁边还有许多开发检出。两个实例同
@@ -1722,8 +1743,20 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
   凭据与 API key(集群默认、按 KEY 解析、可被集群轮换); 这里存的是**你自己授权出来的** token
   (一个用户、一次同意、一条会过期的 refresh token)。两者的生命周期、轮换方式与导出规则全都
   不一样 —— 把它们混进一个 store, 正是这份设计到处在防的那种孪生(§14.11 第 8 条)。
-- **Auth 状态是三值的而且诚实:** `connected` / `needs-reauth`(带过期时刻与一个倒计时)/
-  在读不出 token 记录时是 `unknown`。绝不乐观。Adapters 那一行渲染的就是这个。
+- **Auth 状态是四值的而且诚实:** `connected` / `needs-reauth`(带过期时刻与一个倒计时)/
+  **`needs-credentials`** / 在读不出 token 记录时是 `unknown`。绝不乐观。Adapters 那一行渲
+  染的就是这个。
+- **第四个值是 r8 加的, 因为这个答案有两个输入而 r7 只接了一个。** `auth.state()` 原来只读
+  token 记录, 而 §14.3 只在 Integrations 那张卡上处理"集群默认消失了"; 两块面因此可以对同一
+  件事给出相反的答案 —— token 好好的、没过期, 而管理员轮换或撤掉了 `VIBESPACE_INTEGRATIONS`,
+  于是 Adapters 那一行写着 `connected`、Integrations 那张卡写着 `未配置`, 而这个 adapter 在
+  那一刻**已经死了**: Lark 的 `tenant_access_token` 是**每次调用**拿 app id + secret 现换的,
+  Gmail 的 client id/secret 是**每一次 refresh** 都要的。真相要等到本节最后那条"连续 3 趟失
+  败变琥珀"才到, 而它给出的解释只是一个 vendor 4xx。所以 `auth.state()` 现在吃
+  `resolveIntegration(id)` 作为输入, 而 `why` 点名缺的是什么(`集群默认已被撤走` /
+  `缺 appSecret`)。**它不是 `needs-reauth`**(再同意一次修不好它), **也不是 `unknown`**(我们
+  恰恰非常清楚坏在哪), 而这正是这个代码库反复记下的那一类: 一条记录的两个面互相矛盾。而这
+  也是 owner 那条集群指示最容易造出来的形态 —— 管理员轮换或撤走一个集群默认。
 - **本地客户端那一类有两个正交的凭据事实, 而它们各渲染各的**(r5, §12.5)。`auth.state()`
   回答的是"那个官方客户端还登录着吗"; `scanState().grant` 回答的是"操作系统让不让我们读
   它写下的那份库"。**`tcc-denied` 是一个具名的拒绝, 不是一次空扫描**: 连接向导把它渲染
@@ -1771,7 +1804,7 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 
 | 不要放在这里 | 为什么 |
 |---|---|
-| **设置项** | **密钥绝不进设置, 一条都不行。** 设置走 SyncStore: 每一个值都广播给每一个连着的客户端; 而 `/api/config/export` 的 `take('settings', readSettings)`(`src/routes/persistence.js:697`)把整份设置**明文**写进导出文件 —— 它不在 `sensitive` 那一半里(`:679-686`), 只有那一半才要 passphrase。把一把 key 放进设置, 等于同时做了"广播给每个打开的标签页"和"明文进备份文件"两件事, 而且两件都不会有任何提示 |
+| **设置项** | **密钥绝不进设置, 一条都不行。** 设置走 SyncStore: 每一个值都广播给每一个连着的客户端; 而 `/api/config/export` 的 `take('settings', readSettings)`(`src/routes/persistence.js:698`)把整份设置**明文**写进导出文件 —— 它不在 `sensitive` 那一半里(`:679-686`), 只有那一半才要 passphrase。把一把 key 放进设置, 等于同时做了"广播给每个打开的标签页"和"明文进备份文件"两件事, 而且两件都不会有任何提示 |
 | **插件卡片** | frp 的 relay token 留在插件卡片里**不迁**(§14.6 把它记成一个**被点名的**孪生)。它是一个插件**进程生命周期**的配置, 它的消费者是 keeper, 不是一个会去问 `resolveIntegration()` 的功能。迁它要整体迁(卡片 + `fromEnv` 默认启用那条规则 + keeper 的读取), 那是一次没有人要的改动 |
 
 ### 14.2 `src/integration-registry.js` —— 那张 PURE 的表
@@ -1789,8 +1822,19 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
       help:'同一页; 它只会被写入, 永远不会被读回来' },
   ],
   clusterEnv: { json:'VIBESPACE_INTEGRATIONS', prefix:'VIBESPACE_INTEGRATION_LARK_' },
+  // 在同意页能成功之前, 用户必须先在对方控制台里做完的事。卡片把它画在字段**上面**。
+  setup: {
+    callbackUrl: 'http://127.0.0.1:17865/lark/cb',   // 唯一定义处 —— 见下面那条规则
+    callbackNote: '开发者后台 → 安全设置 → 重定向 URL, 必须逐字节一致',
+    prerequisites: [
+      '上面那条重定向 URL 已经登记进列表',
+      '`im:message` 与 `im:message.send_as_user` 已授权',
+      '应用有一个**已发布**的版本',
+    ],
+  },
   test: { kind:'credential-exchange',
-          describe:'用这一对 app id / secret 换一次 token。不读任何会话, 不发任何消息。' },
+          describe:'用这一对 app id / secret 换一次 token。不读任何会话, 不发任何消息。',
+          caveat:'这只证明 app id / secret 这一对是对的。同意页还要求上面那三件事, 缺任何一件都在同意页上失败, 而不在这次调用上失败。' },
   consumers: ['src/channels/lark.js', 'src/channels/live/lark.js'],
   docs: 'https://open.feishu.cn/…',
 }
@@ -1801,9 +1845,34 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 - `validate` 是纯函数, 返回 `{ok:true}` 或 `{ok:false, why}` —— 一次**具名的**抱怨, 绝不是一次
   静默拒收, 也绝不改写那个值(唯一允许的改写是去掉首尾空白, 而那发生在 store 里并且写在字段的
   help 上, §14.3)。
-- `clusterEnv` 是一个**联合**: `{json, prefix}`(这一层自己解析)**或** `{via:'drive-presets'}`
-  (这一层去问**已经存在的**那个读者)。**一个 env 名字只允许有一个解析者**, 由普查执法 ——
-  `gmail` 那一行因此是**委托**给 `MountManager.drivePresets()`, 不是复制它。
+- `setup` 是**在同意页能成功之前, 用户必须先在对方控制台里做完的事**, 卡片把它画在字段
+  **上面**(§14.5)。它存在的理由是一个真实的失败形态, 而这份文档自己已经把它写了两遍却没
+  有给它一个落点: §12.1 点名 Lark 的控制台要齐三件事(重定向 URL 已登记、scope 已授权、有
+  一个**已发布**的版本), 缺任何一件挂掉的是*同意页*而不是 API 调用; §10.1 正是拿这句话当
+  作"向导先开这张卡"的理由。而一张只有 `appId` / `appSecret` 两个输入框的卡片, 恰好把用户
+  唯一需要抄走的那个值(**回调 URL**)**一个字都不显示** —— 于是"先开卡片"把用户送进的仍然
+  是那个会在同意页上失败的流程。
+  **`callbackUrl` 在这里定义, 而且只在这里定义。** `src/oauth-loopback.js` 的固定模式
+  **从这一行 import 它**, 不自己声明一份: registry 是 PURE(什么都不 import), 所以依赖只能
+  是这个方向; 反过来会让一个必须与对方控制台**逐字节**一致的字符串有两份拼写, 而那正是这
+  份设计到处在拒绝的孪生。普查因此断言 `src/oauth-loopback.js` 里**不出现**回调 URL 的字面
+  量。端口号(`17865`)在这里被选定一次, 决定 4 那次控制台注册登记的就是这一条字符串。
+- `clusterEnv` 是一个**联合**: `{json, prefix}`(这一层自己解析)**或**
+  `{via:'drive-presets', prefer, multi}`(这一层去问**已经存在的**那个读者)。**一个 env 名
+  字只允许有一个解析者**, 由普查执法 —— `gmail` 那一行因此是**委托**给
+  `MountManager.drivePresets()`, 不是复制它。
+  **而一行委托必须能说出它指的是哪一个 key。** `drivePresets()` 返回的是一个**列表**
+  (`src/mounts.js:2189-2206`), 并且 §12.2 自己给决定 5 的答案(让集群**再加一个** `channels`
+  预设 key, 而不是把现有那个改宽)产生的恰好就是一个多于一项的列表。这时**不能**回落到
+  `_driveClient()` 的兜底: `src/mounts.js:2215` 的
+  `return presets.length === 1 ? presets[0] : presets.find((c) => c.key === 'default') || null;`
+  在一个 `org1` + `channels` 且没有 `'default'` 的列表上返回 **null** ⇒ §19 里 P1 那条"只有
+  集群默认、用户什么都没填的实例必须能一路连到底"的出口, 在 §12.2 向集群要的那份配置上
+  **结构上就过不了**。解析顺序是 **用户存下来的那个选择 > `prefer` > 唯一的那个预设**, 没有
+  第四级。**刻意不是 `prefer` 压过用户的选择**: 那会让 §14.5 那个下拉变成装饰, 也会违反这
+  一节自己的"用户自己的 > 集群默认"。用户存下来的 key 在集群那边已经不再提供时, **不**悄悄
+  换成 `prefer`(换一个 Google OAuth client 就换了 refresh token 是在哪一次同意下签发的),
+  而是走 §14.3 那条已经存在的规则: 答 `source:'none'` 并点名消失的是哪一个 key。
 - `test.kind` 是一个**封闭集**, 而它决定按钮自己的措辞, 因为"报错文案不是诊断"反过来同样成立
   —— 一个声称测过连接却从没联网的按钮, 就是在撒谎:
 
@@ -1813,6 +1882,12 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
   | `shape-only` | **零网络**: 只检查字段形状并把授权 URL 构造出来 | 检查格式(不联网) |
   | `reachability` | 只探这个 vendor 主机可不可达, 不携带任何凭据 | 测试可达性 |
 
+  **而一次 `test` 还要说出它自己的边界。** `caveat` 是一句与判决**一起**渲染的话(§14.5),
+  因为这块面上的"撒谎"有两个镜像: 一个声称测过连接却从没联网的按钮在撒谎, 而一个**如实**
+  测了凭据对、却被用户读成"我已经配好了"的绿勾同样在撒谎 —— 而 `lark` 恰好是后者,
+  `credential-exchange` 在一个 scope 没授权、版本没发布、回调 URL 没登记的应用上**会成功**。
+  规则因此是可执行的: **一行只要声明了 `setup.prerequisites`, 就必须声明 `test.caveat`**,
+  由普查执法; 而卡片永远不会只画那个勾(§14.5)。
 - `consumers` 必须**是活的**: 普查要求每个名字既是一个存在的文件, 又真的调用
   `resolveIntegration('<id>')`。一行没有活消费者的 row 就是一张什么都不做的卡片, 而这与
   `SPEND_REASONS`、与 `contributes.channelAdapters`(§15)是同一条法。
@@ -1822,11 +1897,11 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 
 本设计自己的三行(浏览器那两行的 id 住在它自己那份文档里):
 
-| id | 字段 | 集群默认 | Test 一下做什么 | 消费者 | 什么时候进表 |
-|---|---|---|---|---|---|
-| `lark` | `appId`(非密) · `appSecret`(密) | **预期有** —— 集群注册一个 Lark 应用并注入。但它只在**同一个租户**里成立, 而这不是一句免责声明, 是一条硬约束(§14.9) | `credential-exchange`: 换一次 `tenant_access_token`(自建应用那个端点, 只要 app id + secret)。不列会话、不发消息 | `src/channels/lark.js`, `src/channels/live/lark.js` | P1 |
-| `gmail` | `clientPreset`(非密, 选项来自 delegate) · `clientId` / `clientSecret`(密, 只在"用我自己的"时出现) | `{via:'drive-presets'}` —— **复用** `VIBESPACE_GDRIVE_CLIENTS`, 不新增第二份解析者 | `shape-only`, 并且**说出来**: 一个 Google OAuth client 的 id/secret 单独换不出任何东西(它没有 client-credentials 那条路), 所以这里能做的只有形状检查加把授权 URL 构造出来 —— 真正的判决在那次 OAuth 往返上 | `src/channels/gmail.js` | P1 |
-| `whatsapp-business` | `phoneNumberId`(非密) · `accessToken`(密) | **没有, 而且不该有**: 这是一条按号码计费的商业 API 凭据, 集群注一把就是集群替所有人付账 | `credential-exchange`(读一次号码的元数据) | —— 今天没有 | **不进 v1。** §14.2 的普查要求 `consumers` 是活的, 而这条路今天只是 §15 里那条"合规替代"的名字; 它**与它的 adapter 在同一个 commit 里进表**。这一行写在这里是为了把字段与"没有集群默认"这两件事先定下来, 不是为了先摆一张空卡片 |
+| id | 字段 | 集群默认 | 卡片必须先画出来的 setup | Test 一下做什么 | 消费者 | 什么时候进表 |
+|---|---|---|---|---|---|---|
+| `lark` | `appId`(非密) · `appSecret`(密) | **预期有** —— 集群注册一个 Lark 应用并注入。但它只在**同一个租户**里成立, 而这不是一句免责声明, 是一条硬约束(§14.9); 跨租户的用户**必须**自带应用, 于是这张卡的 setup 块是他们的**默认**路径而不是边角情形 | **有**: 回调 URL `http://127.0.0.1:17865/lark/cb`(带复制按钮, 唯一定义处见上)+ 三条前置(登记这条 URL、授权两个 scope、发布一个版本) | `credential-exchange`: 换一次 `tenant_access_token`(自建应用那个端点, 只要 app id + secret)。不列会话、不发消息。**必须带 `caveat`**: 这一次往返在三条前置一条都没做的应用上照样成功, 所以判决旁边永远跟着那句边界 | `src/channels/lark.js`, `src/channels/live/lark.js` | P1 |
+| `gmail` | `clientPreset` —— 一个**选择器**(非密, 选项来自 delegate; 它选的是集群的哪一个预设, 不是用户自己的凭据, §14.3)· `clientId` / `clientSecret`(密, 只在"用我自己的"时出现) | `{via:'drive-presets', prefer:'channels', multi:true}` —— **复用** `VIBESPACE_GDRIVE_CLIENTS`, 不新增第二份解析者; `prefer` 点名 §12.2 让集群加的那个 key, `multi` 告诉界面画下拉而不是那对单选 | **无** —— 既有的 mounts 同意流程已经在生产里跑, 而 Google 接受任何 loopback 端口(RFC 8252 §7.3), 所以没有任何一个值需要用户抄进控制台 | `shape-only`, 并且**说出来**: 一个 Google OAuth client 的 id/secret 单独换不出任何东西(它没有 client-credentials 那条路), 所以这里能做的只有形状检查加把授权 URL 构造出来 —— 真正的判决在那次 OAuth 往返上 | `src/channels/gmail.js` | P1 |
+| `whatsapp-business` | `phoneNumberId`(非密) · `accessToken`(密) | **没有, 而且不该有**: 这是一条按号码计费的商业 API 凭据, 集群注一把就是集群替所有人付账 | **无**(这条路没有 OAuth 同意页) | `credential-exchange`(读一次号码的元数据) | —— 今天没有 | **不进 v1。** §14.2 的普查要求 `consumers` 是活的, 而这条路今天只是 §15 里那条"合规替代"的名字; 它**与它的 adapter 在同一个 commit 里进表**。这一行写在这里是为了把字段与"没有集群默认"这两件事先定下来, 不是为了先摆一张空卡片 |
 
 ### 14.3 `src/server/integration-store.js` —— 解析、遮蔽、广播
 
@@ -1835,13 +1910,24 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 ```json
 { "version": 1,
   "integrations": {
-    "lark": { "source": "user",
-              "values": { "appId": "cli_…", "appSecret": "<secret-box 密文>" },
-              "updatedAt": 1789…, "testedAt": 1789…, "lastOk": true, "lastError": null } } }
+    "lark":  { "values": { "appId": "cli_…", "appSecret": "<secret-box 密文>" },
+               "updatedAt": 1789…, "testedAt": 1789…, "lastOk": true, "lastError": null },
+    "gmail": { "clusterKey": "channels",
+               "updatedAt": 1789…, "testedAt": null, "lastOk": null, "lastError": null } } }
 ```
 
-- `resolveIntegration(id)` → `{source:'user'|'cluster'|'none', values, label, fromEnv,
-  testedAt, lastOk, lastError, missing:[]}`。三条不变量:
+**`source` 是推导出来的, 绝不落盘。** 记录里只有两样东西: 用户**自己打进去的**值
+(`values`), 与用户**挑中的那个集群预设的 key**(`clusterKey`)。`source` 由这两样加上此刻
+env 里有没有那个默认在读的时候算出来, 理由有二, 而且两条都是本节自己已经写下的: 其一, §14.3
+下面那条"集群默认消失了就答 `none`"本来就要求它在**读的时候**算 —— 一个落盘的 `source` 会
+和它打架, 而这正是这个代码库里"一条记录两个面互相矛盾"的那一类; 其二, 一个只挑了预设、没填
+任何密字段的记录**不是**"用户自己的凭据", 它只是在集群给的几个里指了一个 —— 把它盖成
+`"source": "user"` 会让来源芯片(§14.5)说出与事实**相反**的那一件事(而那枚芯片存在的全部理
+由就是说出这一件事), 会让 §14.10 的"只导出 `source:'user'`"导出一个指向集群凭据的指针, 也会
+让决定 22 里"OAuth 行 = 已填好 + 一键连接, 界面写'由集群提供'"这句话在 `gmail` 上不成立。
+
+- `resolveIntegration(id)` → `{source:'user'|'cluster'|'none', clusterKey, values, label,
+  fromEnv, testedAt, lastOk, lastError, missing:[]}`。五条不变量:
   - `source:'cluster'` 时 `values` **在读的那一刻**从 env 解析, **绝不**拷进
     `data/integrations.json`。这就是 mounts 那条"记录只存 KEY"(`src/mounts.js:2187-2188`)的镜
     像: 集群轮换一次 env, 每个实例的每个消费者同时跟着轮换。把值拷下来, 就是把一把已经被吊销
@@ -1850,6 +1936,15 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
     **点名**是集群默认不在了, 绝不把一个坏掉的 adapter 静静交出去。
   - 必填字段缺了 ⇒ `missing:['appSecret']`, 照 `src/plugins.js:679-682` 那条注释点名的事故来:
     **说出是哪一个字段**, 永远不要让用户去猜。
+  - **只带一个选择器的记录答 `source:'cluster'`, 不是 `'user'`。** `clusterKey` 一起答出来
+    (`'channels'`), 于是芯片画的是 `集群默认 · <label>`, 而 §14.10 导出的是那个 **key** 而
+    不是任何值。委托那一行的解析顺序写在 §14.2: 用户存下来的选择 > `prefer` > 唯一的预设。
+  - **这个回答是 `auth.state()` 的一个输入**(§13)。一个 adapter 的 token 记录还好好的、
+    没过期, 而它底下的应用凭据被撤走了(管理员删了 env, 或用户清掉了自己的 key), 这时
+    `auth.state()` 必须答 `'needs-credentials'` —— 不是 `'connected'`。Lark 的
+    `tenant_access_token` 是**每次调用**拿 app id + secret 现换的, Gmail 的 client id/secret
+    是**每一次 refresh** 都要的, 所以那一刻这个 adapter 已经死了, 而 §13 那条"连续 3 趟失败
+    才变琥珀"要三趟之后才说话, 说的还只是一个 vendor 4xx。
 - `publicView(id)`: 每个 `secret:true` 字段变成 `'••••'`, 并且**只有**在值长度 ≥ 12 时才带上后
   4 位(短的秘密, 后 4 位就是它的一大半)。非密字段原样出。**这份遮蔽视图就是广播的内容**, 也是
   `GET` 能拿到的全部。
@@ -1858,15 +1953,26 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
   (2.369.62 的 `effortNext`) —— 所以它写成不变量并配负控。唯一允许的改写是**去掉首尾空白**:
   粘贴一把 secret 常常带一个尾随换行, 而"因为一个看不见的字符而失败"正是这个界面存在的理由;
   这条改写写在字段的 help 里, 因为一次不说出口的改写与一次 bug 无法区分。
-- `useClusterDefault(id)`: 丢掉用户覆盖(连同它的密文)回到 `'cluster'`。**没有集群默认时它是一
-  次具名拒绝**, 不是一个静默的空操作。
-- `test(id)`: 跑那一行**声明的**测试并记下 `{testedAt, ok, error}`。三条约束:
+- **两个意图, 两个函数, 因为它们对同一个转移给的是相反的答案。**
+  - `clearUserValues(id)` = "把我的 key 清掉"。**永远允许**, 丢掉用户覆盖连同它的密文, 然后
+    **落在优先级落到的地方**: 有集群默认就是 `'cluster'`, 没有就是 `'none'`。这就是
+    `DELETE /api/integrations/:id` 调的那一个(§14.4)。
+  - `useClusterDefault(id)` = §14.5 里"用集群默认"那颗单选。**没有集群默认时它是一次具名拒
+    绝**, 不是一个静默的空操作 —— 这也正是那颗单选在没有默认时置灰**并说明原因**的同一件事。
+    它走 `PUT /api/integrations/:id` 的 `{use:'cluster'}`。
+  两个结果都由 `test-integration-registry` 钉住。把它们混成一个的代价不是风格问题: 那样
+  "没有集群默认时回到 `none`"与"没有集群默认时具名拒绝"里必有一个**在产品里根本到不了**,
+  而到底是哪一个, 取决于实现者当时读的是这两句话里的哪一句。
+- `test(id)`: 跑那一行**声明的**测试并记下 `{testedAt, ok, error}`, 而卡片渲染这个判决时
+  **总是**带上那一行的 `test.caveat`(§14.2) —— 一个不说自己边界的绿勾, 会被读成"我已经配好
+  了", 而那正是 §10.1 里向导先开这张卡所要避免的那个结局。四条约束:
   1. **store 自己不构造任何 vendor 请求。** 它调用的是消费者在接线时注册进来的 runner
      (`registerIntegrationTest(id, fn)`), 而那个消费者**已经**在 §3.1 的出网白名单里声明过自己
      的主机 ⇒ `test-channels-egress` 一个字都不用改, 这一层也不会变成第二个"持有 N 个 vendor
      主机"的文件。
   2. 每个 id 同时只允许一次在飞, 有界超时, **只由人点**(§14.11)。
   3. 一行声明了 `test` 却没有注册 runner = 一个死控件 ⇒ 普查变红。
+  4. 一行声明了 `setup.prerequisites` 却没有 `test.caveat` ⇒ 普查变红(§14.2)。
 - 每一次写都广播 `integrations-updated`, 载荷是 `publicView` —— 一个服务端缓存只要客户端也缓
   存, 那个入口就必须**通知**(2.309.0 的法), 而这条广播能携带的**只可能是**遮蔽视图。
 - **一个 `testedAt` 不会永远绿着。** 卡片显示的是判决**加上它的年龄**; 一个判决绝不比它描述的
@@ -1874,11 +1980,17 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 
 ### 14.4 路由
 
-- `GET /api/integrations` —— 每一行的 `{id, label, fields(只有声明, 没有值), source, fromEnv,
-  set:{<字段>:bool}, masked, missing, testedAt, lastOk, lastError, consumers, docs}`。
-- `PUT /api/integrations/:id` —— `setIntegration`(省略 = 不动, `''` = 清掉)。
+- `GET /api/integrations` —— 每一行的 `{id, label, fields(只有声明, 没有值), setup(只有声明 ——
+  一张卡画不出一个没被发给它的回调 URL), source, clusterKey, clusterOptions(委托行的那些预设,
+  只有 key 与 label), fromEnv, set:{<字段>:bool}, masked, missing, testedAt, lastOk, lastError,
+  testCaveat, consumers, docs}`。
+- `PUT /api/integrations/:id` —— `setIntegration`(省略 = 不动, `''` = 清掉); 载荷带
+  `{use:'cluster'}` 时走的是 `useClusterDefault`(§14.5 那颗单选), 没有集群默认就**具名拒绝**;
+  载荷带 `{clusterKey:'<key>'}` 时存的是那个**选择器**(委托行的下拉), 记录里一个值都不落。
 - `POST /api/integrations/:id/test` —— 人点的那一次, 有界。
-- `DELETE /api/integrations/:id` —— 回到集群默认; 没有集群默认就回到 `none`。
+- `DELETE /api/integrations/:id` —— **"把我的 key 清掉"**, 调的是 `clearUserValues`(§14.3),
+  **永远允许**, 然后落在优先级落到的地方: 有集群默认就是集群默认, 没有就是 `none`。它
+  **不是** `useClusterDefault` —— 后者是那颗单选, 并且在没有集群默认时拒绝。
 - 全部坐在既有的 cookie 鉴权之后; 而**没有任何一条路由会回读一个密字段的明文** —— `GET` 不行,
   "给我看一眼"也不行。界面给的是 **Replace 而不是 Reveal**: 一个能被读回来的秘密, 就是一个能被
   一次 XSS 或一次误开的窗口读回来的秘密。
@@ -1895,11 +2007,21 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
   `registerMenuItem` 而不是一个新的 chrome 原语。
 - **卡片**按 `src/lib/plugins-ui.js:41-70` 的 `plugin-card` 语言渲染, 每行一张:
   - 一枚**来源芯片**: `集群默认` / `你自己的` / `未配置`(它读的是 `source` 与 `fromEnv`);
-  - 一对单选: **"用集群默认"** vs **"用我自己的 key"** —— 没有集群默认时前者置灰并说明原因;
+    委托行(`multi:true`)上它带着那个 key 的标签: `集群默认 · <label>`, 因为"哪一个集群凭据"
+    与"谁的凭据"是两个问题(§14.3);
+  - **在字段上面**: 那一行的 `setup` 块(如果它有)。`callbackUrl` 画成一行**带复制按钮**的
+    等宽文本加上 `callbackNote`(要抄到对方控制台的哪一页去), 下面是 `prerequisites` 的勾选
+    清单。它排在字段**之前**不是排版偏好: 用户填完两个输入框、按下 Test、看见一个绿勾之后,
+    就不会再往上看了;
+  - 选谁的凭据。普通行是**一对单选**: **"用集群默认"** vs **"用我自己的 key"** —— 没有集群
+    默认时前者置灰并说明原因。委托行(`multi:true`)画的是一个**下拉**: N 个集群预设 + "用我
+    自己的 key" —— 一对单选表达不了 N 个预设, 而这一行指向的那份界面
+    (`src/lib/sidebar-mounts.js:1747-1751`)为同一个理由早就是 N+2 项的下拉了;
   - 声明出来的字段。密字段显示 `••••1234` 加一个 **Replace** 按钮(点它才出现一个空的
     `type:'password'` 输入框); 非密字段原样可编辑;
   - 一个 **Test** 按钮, 按钮上的字来自 `test.kind`(§14.2), 旁边是**上一次判决 + 它的年龄 +
-    vendor 自己的错误原文**(经 `escHtml`);
+    vendor 自己的错误原文**(经 `escHtml`)—— 而只要那一行有 `test.caveat`, 判决**永远**与它
+    一起画, 从不单独画那个勾;
   - 一行 **"这把 key 用在哪"**, 由 `consumers` 生成 —— 用户在决定要不要换一把 key 之前, 有权
     知道会动到什么。
 - **每一个消费者都深链到自己那张卡**: `app.openIntegration(id)`。本设计的连接向导(§10.1)在那
@@ -1915,9 +2037,22 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 - 优先级: **用户自己的 > 集群默认 > 没有**。用户显式设过的值**不会**被后来注入的集群默认顶掉
   —— 与 `_frpEffectiveEnabled`(`src/plugins.js:584-588`)同一条: 显式的值胜出, 只有
   `undefined` 才跟随 env。
-- **消费者永远不自己读 `process.env`。** 它问 `resolveIntegration(id)`。常设 sweep:
-  `process.env.VIBESPACE_INTEGRATION`(含 `VIBESPACE_INTEGRATIONS`)出现在
-  `src/server/integration-store.js` 之外 = 红。
+- **消费者永远不自己读 `process.env`。** 它问 `resolveIntegration(id)`。常设 sweep 查的是
+  **env 名字**, 不是取值的写法: 正则 `/VIBESPACE_INTEGRATIONS?\b|VIBESPACE_INTEGRATION_/`
+  出现在 `src/server/integration-store.js` **之外** = 红。**刻意不查
+  `process.env.VIBESPACE_INTEGRATION`** —— 那是一种拼写, 而 `process.env['VIBESPACE_INTEGRATIONS']`、
+  `const { VIBESPACE_INTEGRATIONS } = process.env`、`const env = process.env; env.VIBESPACE_INTEGRATION_LARK_APPSECRET`
+  三种写法全都普通、全都绕过它。这个代码库为这一条挨过三次: test-architecture §45 r3 的普查
+  匹配被调用者的名字, 于是 `execFileAsync('pgrep'…)` 把一个已退役的形状**从 kill 路径上**走
+  了回来, 修法是改成匹配 argv 里的**工具字面量**; test-writer-sweep §17 r7 的文件集是手写的,
+  实测漏掉 **47** 个真会发信号的文件, 修法是改成 grep 推导**并打印**; test-fixture-isolation
+  r2 的解析器只认作者看过的那一种拼法, 一次别名就藏住了一个 `rm -rf`, 修法是取**不动点**。
+  所以: **普查要推导它声称要普查的那个东西** —— 这里那个东西是 env 的名字。
+- 文件集由 `git ls-files` 推导(经 `scripts/git-env.mjs` 的净化 git 环境 —— 它导出
+  `GIT_REDIRECTORS`(`:22`)与 `gitEnvFrom`(`:36`), 因为这条普查跑在 `npm run build` 里, 而
+  那个 build 跑在一个会导出 `GIT_DIR` / `GIT_INDEX_FILE` 的 pre-push hook 进程里), 并且由套
+  件**打印出来** —— 一个不说自己走过哪些文件的普查, 它的价值等于它恰好走过的那个集合。两种
+  绕法各当一条负控: 一个用方括号形式的临时文件、一个用解构形式的临时文件, 都必须变红。
 - 已经点名的例外恰好一个: `src/mounts.js:2189` 的 `drivePresets()` 读 `VIBESPACE_GDRIVE_CLIENTS`
   —— 它比这一层早、有自己的消费者, 而 `gmail` 那一行是**委托**给它(`{via:'drive-presets'}`)
   而不是复制它。普查因此还要断言**一个 env 名字只有一个解析者**: 两行 row 声明同一个 env 名,
@@ -2058,10 +2193,13 @@ URL 里根本没有实例的地址。在集群部署里用户的浏览器与实�
 - 集成密钥加进 `/api/config/export-info` 的 `sensitive` 那一半(`src/routes/persistence.js:679-686`,
   与 `mounts` / `accounts` 并列)与 `/api/config/export` 的 passphrase 加密块(`:712-741`, 与
   `getMounts?.()?.exportBundle?.()` `:729-732` 同形)。
-- **只导出 `source:'user'` 的行。** 集群默认不是我们的东西, 而且它会轮换: 把它烤进一个备份文件,
-  就是把一把会过期的集群凭据散布到我们再也管不到的地方。
-- 导入到一个**没有**那个集群预设的实例上时, 一行 `source:'cluster'` 解析成 `none` **并说出缺的
-  是什么**, 绝不静静落到导出方的值上(那会让一个用户以为自己连上了集群的应用, 而其实是把别人
+- **只导出 `source:'user'` 的行的值。** 集群默认不是我们的东西, 而且它会轮换: 把它烤进一个
+  备份文件, 就是把一把会过期的集群凭据散布到我们再也管不到的地方。
+- **但 `clusterKey` 这个选择器跟着走, 而它是一个 key 不是一个凭据**(§14.3): 它说的是"我在集
+  群给的几个里挑了 `channels`", 没有任何秘密在里面 —— 与 mounts 的导出携带 `clientPreset` 是
+  同一个理由。导进一个不提供那个 key 的实例时, 它走下面这条既有规则。
+- 导入到一个**没有**那个集群预设的实例上时, 一行 `source:'cluster'`(包括一行只带
+  `clusterKey` 的)解析成 `none` **并说出缺的是什么**(是整个集群默认不在, 还是那个 key 不在), 绝不静静落到导出方的值上(那会让一个用户以为自己连上了集群的应用, 而其实是把别人
   的凭据带过来了)。
 - **这一层的加密到底买到了什么, 要说清楚。** `data/integrations.json` 与 `data/.integrations-key`
   同属一个 uid、并排放着 —— 加密防的是**一份被拷走的文件**(备份、快照、一个错配的挂载), 防不
@@ -2143,7 +2281,7 @@ URL 里根本没有实例的地址。在集群部署里用户的浏览器与实�
 | `test-channels-identity` | fast | 默认**不追加**发送方诚实行; `identityMarking` 驱动审批卡上的警告与回执里的字段; 审计行带 `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` 且**不出实例**; `sendAs: []` 的会话上 `reply` 返回 `send-not-available` 而**不创建 proposal**; **r4: 一条在 `convCaps` 已经过期之后才被批准的 proposal, 必须在发送之前重新解析并以 `send-not-available` 拒绝** | 一份把诚实行默认打开的副本必须变红(r2 的决定 17 是这条腿的负控); 一个 `marked` 的 channel 上审批卡没有警告必须变红; 一个 `sendAs: []` 的会话上创建出了 proposal 必须变红; **一份不在批准时重新解析的副本必须把那条消息真的发出去** |
 | `test-channels-egress` | fast | 每一个被构造出来的出向请求, 要么来自声明了自己主机的那个 adapter, 要么来自一条**带理由的**白名单 `(file, host)` 对 —— 出生即种下 `src/gmail-sync.js` 与 `src/mounts.js`(§3.1) | 一个带未声明主机的临时文件必须变红; 一条**死掉的白名单条目**(文件被移动或改名)同样必须变红 |
 | `test-oauth-loopback` | fast | 两种模式(§12.4): Gmail 的临时绑定、Lark 的固定绑定; 请求处理器**与**粘回两处的 `state` 拒绝; 完成/取消/超时时端口被释放 | 一个**被预先占住**的固定端口必须产生那次具名拒绝与粘回回落, 绝不是一个不透明的 `EADDRINUSE`; 一次 `state` 错误的回调在两种模式下都必须被拒绝 |
-| `test-integration-registry` | fast | 每一行的 `fields` / `test` / `consumers`; `publicView` 从不出明文, 而 last 4 只在值长度 ≥ 12 时出现; **省略一个密字段 = 不动, `''` = 清掉**; 优先级 user > cluster > none; 集群默认消失 ⇒ `none` **加一个点名的理由**; 必填字段缺失 ⇒ `missing` 点名字段。**grep 普查(打印它走过的集合)**: `process.env.VIBESPACE_INTEGRATION*` 只许出现在 store 里; **一个 env 名字只有一个解析者**(两行 row 同名、或一行 row 与一个 delegate 同名, 都变红); 每个 `consumers` 名字既是存在的文件又**真的**调用 `resolveIntegration`; 每个声明了 `test` 的行都有注册的 runner; **没有任何调度器 / 定时器 / 摄入循环调 `test(`** | 一行 `consumers` 指向一个存在但**从不调用** `resolveIntegration` 的文件必须变红(仅仅"文件存在"是这条普查最容易退化成的那个形状); 一份把 `''` 当成"不动"的副本必须变红; 一份把集群默认**拷进** `data/integrations.json` 的副本, 必须在"轮换 env"那条腿上变红(它会拿旧值继续服务); 一个在定时器里调 `test(` 的合成生产者必须变红; 一份在 `publicView` **之外**做遮蔽的副本必须让广播那条腿变红 |
+| `test-integration-registry` | fast | 每一行的 `fields` / `test` / `consumers`; `publicView` 从不出明文, 而 last 4 只在值长度 ≥ 12 时出现; **省略一个密字段 = 不动, `''` = 清掉**; 优先级 user > cluster > none; 集群默认消失 ⇒ `none` **加一个点名的理由**; 必填字段缺失 ⇒ `missing` 点名字段。**grep 普查(文件集由 `git ls-files` 经 `scripts/git-env.mjs` 的净化环境推导, 并由套件**打印**出来)**: 正则 `/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/` —— 查的是 **env 名字**不是取值的写法 —— 只许出现在 store 里; **一个 env 名字只有一个解析者**(两行 row 同名、或一行 row 与一个 delegate 同名, 都变红); 每个 `consumers` 名字既是存在的文件又**真的**调用 `resolveIntegration`; 每个声明了 `test` 的行都有注册的 runner; **一行声明了 `setup.prerequisites` 就必须声明 `test.caveat`**; **一个消费者跑 OAuth 同意流程的行必须声明 `setup.callbackUrl`**, 而 `src/oauth-loopback.js` 里**不出现**那条 URL 的字面量(唯一定义处是那一行); **没有任何调度器 / 定时器 / 摄入循环调 `test(`**。**r8 的委托与来源那一组**: 一个 `{via:'drive-presets', prefer, multi:true}` 的行, 在一个有两个预设(`org1` + `channels`)且**没有** `'default'` 的 env 上必须解析到 `prefer` 指的那个 key; 用户存过选择时那个选择胜过 `prefer`; 一条**只带选择器**的记录必须答 `source:'cluster'` 并带上 `clusterKey`; `DELETE` 在有/没有集群默认时分别落到 `cluster` / `none`, 而 `useClusterDefault` 在没有集群默认时**具名拒绝** | 一行 `consumers` 指向一个存在但**从不调用** `resolveIntegration` 的文件必须变红(仅仅"文件存在"是这条普查最容易退化成的那个形状); 一份把 `''` 当成"不动"的副本必须变红; 一份把集群默认**拷进** `data/integrations.json` 的副本, 必须在"轮换 env"那条腿上变红(它会拿旧值继续服务), **而同一条腿还要求把 env 撤掉时翻的是 Adapters 那一行**(`auth.state()` 答 `needs-credentials`), 不只是 Integrations 那张卡 —— 只翻卡片的副本必须变红; 一个在定时器里调 `test(` 的合成生产者必须变红; 一份在 `publicView` **之外**做遮蔽的副本必须让广播那条腿变红; **两种绕过 env 普查的写法各一个临时文件当负控**(`process.env['VIBESPACE_INTEGRATIONS']` 与 `const { VIBESPACE_INTEGRATIONS } = process.env`), 两个都必须变红; **一份把委托行解析成 `_driveClient()` 那条 `'default'` 兜底的副本**, 必须在两预设 env 上答 null 从而变红; **一条只带选择器却答 `source:'user'` 的记录必须变红**(它会让来源芯片说反话并把指针导出去) |
 | `test-secret-box` | fast | 与 mounts 的 **parity**(用修前 `_enc` 的补丁副本加密 ⇒ `secret-box` 解得开, 反向亦然, `iv.tag.data` 三段逐字节同形); **只在 `ENOENT` 上创建密钥**, 其它 errno **带类型抛出**; 写走 tmp+rename; **绝不覆盖一个已经存在的密钥文件** | 一份照抄 `src/mounts.js:360-367` 那个裸 catch 的副本, 在一次注入的 `EACCES` 上必须铸出新密钥, 于是"旧密文还解得开"那条断言变红 —— 那就是 §14.7 讲的那个缺陷本身, 当作常驻负控 |
 | `test-channels-lark-shape` | fast | 录制 fixture 的归一化: `next_page_token` *翻页到 anchor*、`@_user_N` 占位符对着记录自己的 `mentions` 解析、带类型的错误 | 一份 anchor 落在**第二页**上的 fixture 必须被翻进去, 而不是停在第一页 |
 | `test-plugin-loader`(已有) | fast | `channelAdapters` 进了 `RESERVED_CONTRIBUTIONS` ⇒ 那句"保留给后续阶段 —— 已忽略"的警告真的会发(§15) | 如果那个词被加进去而没更新套件, 它的期望集合断言就会变红 —— 而这正是重点 |
@@ -2152,7 +2290,7 @@ URL 里根本没有实例的地址。在集群部署里用户的浏览器与实�
 | `test-channels-engine` | heavy | 真 worktree 服务器 + 假 adapter: 爆发日翻页、退避、单飞、故障出声**与撤回**、摘要批量、唤醒授权与 hold 释放 | 一份用固定窗口抓取的修前副本, 必须在爆发日 fixture 上丢消息 |
 | `test-channels-push` | heavy | 真 worktree 服务器 + 一个**假推送服务器**: ack 在持久化之后(注入一次 ack 与处理之间的崩溃, 记录必须还在); 心跳沉默 ⇒ `state` 掉出 `live` **且**轮询节奏立刻回到快节奏; `stop()` 对已经在飞的 arm 是终局的; 声明 `exclusive` 但故意扣掉一部分事件 ⇒ `missRate` 越过阈值 ⇒ **自动降级成 kick 并把理由说出来**。**r4 三条**: 降级之后这条通道**真的改了它携带的东西**(下一个事件只 kick 游标, 记录由对账轮询进来 —— 光断言 `missRate` 越线是不够的); kick 模式下 `missRate` **一条样本都不涨**(否则它是单向棘轮); 一条降级了的通道即便 fixture 不再扣事件也**绝不自己回到**内容模式, 而在连接向导里重新声明一次独占则清零计数器并重新进入内容模式 | 一条**谎报 `active`** 的通道(修前副本)必须把轮询回落关掉并丢消息; 一份从不降级的副本必须在扣事件的 fixture 上永远丢消息; **一份把内容/kick 判定读在 `caps` 上的修前副本, 必须在降级之后仍然携带内容**; **一份终身累计 `missRate` 的副本, 必须在重新声明之后仍然停在阈值之上** |
 | `test-channels-store-scan` | heavy | 真 daemon(`test-sysinfo-op` 那个模板)+ 一份**合成的** WhatsApp 形状 sqlite: 按 rowid 的游标只读一次读到底; 库带一个未 checkpoint 的 WAL 时**最近的消息仍然读得到**; 一趟读了一半被打断 ⇒ anchor 不动; **扫完之后源库的 `db` 与 `-wal` 逐字节未变且 mtime 未变**(r6 —— 刻意**不是**三个文件: 只读打开会重写 `-shm` 这个不含内容的 WAL 索引, 而在它不可写时连它都不动, 所以断言三件套会在**正确**的机制上变红); 读被拒 ⇒ 具名的 `tcc-denied` 而不是零条; **没有任何 SQLite 读者可用时是具名的 `no-sqlite-reader`**(r6); 能力门 —— 不宣告这个 op 的旧 daemon **绝不会被问**(未知 op 会挂)。**fixture 必须包含"我们是唯一连接"那一臂**(r6 —— 一次排期扫描的常态形状) | 一份只读**那个 `.db` 文件本身**的副本必须漏掉最近那批消息; **一份走**默认**(读写)打开的副本必须在"唯一连接"那一臂上让逐字节未变那条断言变红**(r6 —— 会出事的是**默认**形状, 不是 r5 点名的那个可选 `mode=rw`; 而且它**只在那一臂**变红: 客户端还连着时它是通过的, 所以 fixture 两臂都要有); 一份把 `EPERM` 当成"零条"的副本必须让具名拒绝那条腿变红; **一份在没有任何 SQLite 读者时答零条的副本必须让 `no-sqlite-reader` 那条腿变红** |
-| `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计。**外加 Integrations 那一腿(§14.5)**: 卡片在 `未配置` / `集群默认` / `你自己的` 三种来源下各渲染一次; 密字段只出 `••••1234` 而**没有任何路径把它读回来**(Replace 之后再 `GET` 仍然只有遮蔽视图); Test 按钮的字跟着 `test.kind` 走; 一次失败的 Test 把 vendor 原文画在卡上且经 `escHtml`; 以及**同一组卡片在 375×667 下单列渲染, 每个控件都够得着** | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送"; **一份把明文回给 `GET` 的副本必须变红**; **一份给 `shape-only` 也写"测试连接"的副本必须变红**(那个按钮从没联网); **375×667 下任何一个控件落在视口之外必须变红** —— 这条腿点名 `showDropdown` 那一类事故: 未缩放的 `offsetWidth` 与缩放过的 rect 不是一回事 |
+| `test-channels-e2e` | heavy | headless chrome: rail 徽标、panel 芯片、会话窗口、内联审批卡 → 发送 → 回执、filter 编辑器的实时估计。**外加 Integrations 那一腿(§14.5)**: 卡片在 `未配置` / `集群默认` / `你自己的` 三种来源下各渲染一次; 密字段只出 `••••1234` 而**没有任何路径把它读回来**(Replace 之后再 `GET` 仍然只有遮蔽视图); Test 按钮的字跟着 `test.kind` 走; 一次失败的 Test 把 vendor 原文画在卡上且经 `escHtml`; **`lark` 那张卡在字段**上面**画出 `setup.callbackUrl` 这条字面量、它可以被复制、而且三条 `prerequisites` 都在**; **一次成功的 Test 旁边带着 `test.caveat`, 从不单独画那个勾**; **委托行(`gmail`)画的是一个预设下拉而不是那对单选, 而芯片读作 `集群默认 · <label>`**; 以及**同一组卡片在 375×667 下单列渲染, 每个控件都够得着** | 加一条规则时那个估计必须变化; 而一个要求 review 的 channel 绝不能提供"可以发送"; **一份把明文回给 `GET` 的副本必须变红**; **一份给 `shape-only` 也写"测试连接"的副本必须变红**(那个按钮从没联网); **一份只画绿勾、不画 `caveat` 的副本必须变红**(这是本轮那条高危发现的镜像面: 一个如实测过凭据对的按钮被读成"我配好了"); **一份不画 `setup` 块的副本必须变红** —— 那条回调 URL 在产品里再没有第二个出处; **375×667 下任何一个控件落在视口之外必须变红** —— 这条腿点名 `showDropdown` 那一类事故: 未缩放的 `offsetWidth` 与缩放过的 rect 不是一回事 |
 
 Fixture 卫生从第一个 commit 起就适用, 因为这些都是活生生的事故: 不许固定 `/tmp` 路径, 不许
 固定端口(用 `scripts/scratch.mjs`); 任何 spawn 服务器的套件都要**点名它给的那个 HOME**; 每
@@ -2258,6 +2396,30 @@ r5 把 `'store'` 那一格拿了回来, 而这一轮的八条里有**五条就�
 并且正确地把 `'store'` 说成一条更好的通道(第 5、7 条却没问它落在哪道门后面、也没问它能不能
 发送)。一轮修复不会因为它是修复就免检。
 
+### 18.4 对 r7 的对抗式 review(r8)—— 加了一整层, 而那一层欠同样的审查
+
+r7 为了回答 owner 那条集群指示而加了 §14 一整层。六条发现全部对着本 worktree 的树核过,
+**六条全部成立**, 都已在上文修掉。它们分成两堆, 而两堆各自是这份文档已经为别人写下的法:
+**两条高危**是"这张卡片能不能真的让一个用户配好"——它画出来的东西不够用, 而它的绿勾比它证
+明的东西说得多; **两条中危**是这个代码库的两条常客——一件事两个面各说各的, 以及一条普查查
+的是拼写而不是它声称要查的那个东西。
+
+| # | 发现 | 判定 | 改了什么 |
+|---|---|---|---|
+| 1 | 那张配置卡**没法让一个用户自己的 Lark 应用真的跑起来**, 而它的 Test 会在一个注定过不了同意页的应用上变绿 —— 恰恰是 §10.1 说这张卡存在就是为了避免的那个结局 | **成立。** §14.9 自己的结论是跨租户用户**必须**自带应用(自建应用是企业内部的), 所以这是集群里每个不在集群自身租户的用户的**默认**路径; §12.1 已经点名控制台要齐三件事而缺一件挂的是*同意页*; 可那张卡只声明了 `appId` / `appSecret` 两个字段, `credential-exchange` 在三件事一件没做的应用上**会成功** ⇒ 用户填完、Test 绿、`resolveIntegration` 从此答 `user`、向导再不开卡, 而那条要抄进控制台的回调 URL(§12.4 把端口固定在 `src/oauth-loopback.js` 里)在产品里**从头到尾没出现过** | 行上新增 `setup:{callbackUrl, callbackNote, prerequisites}`, 卡片画在字段**上面**、URL 带复制按钮(§14.2、§14.5); `test` 新增 `caveat`, 判决**永不单独画**; 普查两条新断言(声明了 `prerequisites` 就必须有 `caveat`; 消费者跑 OAuth 的行必须有 `callbackUrl`)+ 375×667 那条腿要求它画出来且可复制。**而回调 URL 只在这一行定义**, `src/oauth-loopback.js` import 它 —— 一个要与控制台逐字节一致的字符串不能有两份拼写 |
+| 2 | `gmail` 那一行委托给一个凭据**列表**却说不出它指的是哪一个; 而存下用户的选择会把 `source` 翻成 `'user'` | **成立, 两半都成立。** (a) `drivePresets()` 返回列表(`src/mounts.js:2189-2206`), 而 §12.2 自己推荐让集群**再加一个** `channels` key ⇒ `_driveClient()` 的 `src/mounts.js:2215` 在 `org1`+`channels` 且无 `'default'` 时返回 **null** ⇒ §19 里 P1 那条"只有集群默认也要能连到底"的出口**结构上过不了**; (b) 落盘形状把每条记录盖成 `"source":"user"` ⇒ 来源芯片对一把集群凭据说"你自己的"(而它存在的全部理由就是说出这一件事)、§14.10 会把一个指向集群凭据的指针导出去、决定 22 的"界面写'由集群提供'"在 `gmail` 上不成立; 而那对单选也画不出 N 个预设, 它引的那份先例(`src/lib/sidebar-mounts.js:1747-1751`)正为这个理由早就是 N+2 的下拉 | `clusterEnv` 增 `{prefer, multi}`, 解析顺序**用户的选择 > `prefer` > 唯一预设**, 永不回落 `'default'`; **`source` 改成推导、绝不落盘**, 记录只存 `values` 与 `clusterKey`, 只带选择器 ⇒ `source:'cluster'`; §14.5 委托行画下拉、芯片读 `集群默认 · <label>`; §14.10 导出的是那个 **key**; P1 出口改在**两个预设**的 env 上跑; 决定 22 记下这条更正。**一处刻意与建议不同**: 验证者写的是"先 `prefer` 再用户的选择", 本文取**反**—— `prefer` 压过用户明确挑的那一个会让下拉变成装饰, 也会违反本节自己的"用户自己的 > 集群默认" |
+| 3 | 两块面从不同的事实回答"这个 adapter 连着吗", 而它们会互相矛盾: 撤走或轮换一个集群默认, Adapters 那一行还写着 `connected` | **成立。** §14.3 诚实地处理了配置那一半(集群默认消失 ⇒ 答 `none` 并点名), 但没有任何东西把它接到 §13; `resolveIntegration` 在英文档里出现 11 次, **没有一次**是 `auth.state()`。而 Lark 的 `tenant_access_token` 每次调用现换、Gmail 的 client id/secret 每次 refresh 都要 ⇒ 那一刻 adapter 已经死了, 真相要等"连续 3 趟失败变琥珀"才到, 解释还只是一个 vendor 4xx | `auth.state()` 吃 `resolveIntegration(id)` 作为输入并新增第四个值 **`needs-credentials`**, `why` 点名缺什么(§4、§13); 它**不是** `needs-reauth`(再同意修不好)也**不是** `unknown`(我们很清楚坏在哪); §17 那条轮换 env 的腿现在要求翻的是 **Adapters 那一行**, 只翻卡片的副本变红 |
+| 4 | 那条"消费者绝不自己读 `process.env`"的普查查的是一种**拼写**而不是 env 的**名字** | **成立。** `process.env.VIBESPACE_INTEGRATION` 这个字面量漏掉 `process.env['VIBESPACE_INTEGRATIONS']`、`const { VIBESPACE_INTEGRATIONS } = process.env`、`const env = process.env; env.VIBESPACE_INTEGRATION_LARK_APPSECRET` —— 三种都普通。这个代码库为同一条挨过三次: test-architecture §45 r3(匹配被调用者名字 ⇒ 一个别名把退役形状走回 kill 路径, 改成匹配 argv 里的工具字面量)、test-writer-sweep §17 r7(手写文件集漏掉 **47** 个真会发信号的文件, 改成 grep 推导**并打印**)、test-fixture-isolation r2(一次别名藏住一个 `rm -rf`, 改成取不动点) | 普查改成匹配 **env 名字**(`/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/`), 文件集由 `git ls-files` 经 `scripts/git-env.mjs` 的净化环境推导并由套件**打印**; 两种绕法各当一条负控(§14.6、§17) |
+| 5 | `useClusterDefault` 与 `DELETE` 这两句相邻的话, 对同一个转移给的是相反的答案 | **成立。** §14.3 写"没有集群默认时是一次具名拒绝", §14.4 写"没有集群默认就回到 `none`", 而 `DELETE` 是界面到达这个行为的唯一路由 ⇒ 两者必有一个**在产品里到不了**, 是哪一个取决于实现者读的是哪一句 | 拆成两个意图两个函数: `clearUserValues`("把我的 key 清掉", 永远允许, 落在优先级落到的地方)由 `DELETE` 调; `useClusterDefault`(那颗单选, 走 `PUT {use:'cluster'}`)在没有集群默认时具名拒绝 —— 这也正是那颗单选置灰**并说明原因**的同一件事。两个结果都进 `test-integration-registry` |
+| 6 | 22 条代码引用里有一条差一行 | **成立, 已复核。** `src/routes/persistence.js:697` 是 helper 的定义 `const take = (name, fn) => …`, 而 `take('settings', readSettings);` 在 **698**(同一段里的 `:679-686` 与 §14.10 的 `:712-741` / `:729-732` 都是准的) | 两份文档的 §14.1 都改成 `:698` |
+
+这一轮自己的教训, 与 r6 那句是同一句话往前走了一步: **r6 说"一次修复引入的每一个新字段都要
+按它自己刚写下的规则再审一遍", 而 r8 说的是"一个新加的面, 要按它自己声称要防的那个结局去
+审"。** §10.1 写下了这张卡存在的理由(别把用户送进一个会在同意页上失败的流程), 而 §14.2 与
+§14.5 画出来的那张卡**做不到**这件事 —— 不是因为哪一句写错了, 而是因为没有人拿着那句理由再
+走一遍这张卡: 它画了什么、它的绿勾说了什么、用户抄不抄得到那条 URL。一个面的规格要拿它自己
+的验收标准去读, 而不是拿它自己的字段清单去读。
+
 ---
 
 ## 19. 阶段、轮次、日历
@@ -2296,7 +2458,12 @@ P0 的**出口条件**多一条 —— **先量 `server.js`**, 然后要么在�
 与那条常设 grep 普查(+1), 以及 helm 的 `integrations:` 段 + `deploy/README.md`(+0.5)。**出口再加两条**:
 假 adapter 拿到一行自己的 registry row, 于是"用户自己的 > 集群默认 > 没有"这三种来源在 P0 就都
 被走过一遍; 而**注入一个集群默认再把它撤掉**, 那一行必须变成 `none` 并说出理由, 绝不是静静地
-继续用旧值。)
+继续用旧值。 **r8: +0.5 轮** —— `setup` 块与它的复制按钮、`test.caveat` 与"永不单独画那个勾"、
+委托行的 `prefer`/`multi` 解析与那个预设下拉、`source` 改成推导而不落盘, 以及 env 普查从"一种
+拼写"改成"从 `git ls-files` 推导出的文件集 + 匹配 env **名字**"并打印它走过的集合。**出口再加
+两条**: 假 adapter 那一行拿一个 `setup` 块, 而 375×667 那条腿要求那条 URL 画出来且可复制; 注
+入两个预设(`org1` + `channels`, 没有 `'default'`)时, 一条委托行必须解析到 `prefer` 指的那个,
+而用户存过的选择压过它。)
 
 ### P1 — Lark 读 + Gmail 读 + **推送通道** — **14–16 轮 (7–8 天)**
 
@@ -2320,7 +2487,9 @@ Gate: `test-oauth-loopback`、`test-channels-lark-shape`(录制 fixture)、
 的抽取**移出**去了 P0(−1), 换进来的是这一层的两个消费者腿(+1): Lark 与 Gmail 两个 adapter 改从
 `resolveIntegration()` 取凭据(而不是各自读 env)、它们各自的 `registerIntegrationTest` runner, 以及
 连接向导在 `none` / `cluster` / `user` 三种回答下的三条文案路径(§10.1、§14.5)。**出口再加一条**:
-一个只有集群默认、用户什么都没填的实例, 必须能一路连到底。
+一个只有集群默认、用户什么都没填的实例, 必须能一路连到底 —— **而这一条要在一份两个预设的 env
+上跑**(`org1` + `channels`, **没有** `'default'`), 因为那正是 §12.2 给决定 5 的答案让集群配出
+来的形状, 也正是 `_driveClient()` 的兜底会答 null 的那一个(§14.2、r8)。
 
 ### P2 — assign、filter、唤醒 — **9–11 轮 (4.5–5.5 天)**
 
@@ -2439,7 +2608,7 @@ P0 的整个集成层 +5.5, 而 P1 是净 ±0(secret-box 抽取 −1 挪去 P0, 
 | 19 | **本地客户端 adapter(WhatsApp / WeChat)做到哪一步?**(r3/Q3(b) 新增; **r5 被 owner 更正**) | (a) 完全不做 / (b) **只走界面**: 官方客户端跑在一个 agent-browser profile 里, 扫描它渲染出来的东西, 从它自己的输入框发送 / (c) 再加上协议库(whatsmeow / Baileys)与"读本地库" / (d) **(b) 加上"在那个客户端把库留成未加密的平台上读那份库"** | **(b) + (d), 仍然明确排除 (c)。** r3 把"读本地库"整个和协议库捆在一起排除了, 而 **owner 指出这是错的**: 那句话对 WeChat 成立(库是 SQLCipher/WCDB 加密的, 密钥只在**运行中客户端的进程内存**里, 而读别人的进程内存本产品不做 —— 围栏 13), 对 **macOS 上的 WhatsApp 不成立** —— 那个官方 Catalyst 客户端把整份聊天历史留在一个**未加密**的 Core Data SQLite 库里(`~/Library/Group Containers/…/ChatStorage.sqlite`), 而读它是一次普通的、被用户授权的、只读的文件读取: **没有任何秘密被击穿, 因为根本没有秘密**。所以 **`'store'` 在有它的平台上是允许的, 而且优先于 `'ui'`** —— 不是因为它更快(虽然确实快一个数量级), 是因为**它有一把不是我们编出来的 anchor**, 于是 §5 不变量 2 拿到真 vendor id 而 `'ui'` 那把合成键的代价整个消失。三条边界写死: ①**只有未加密**才算 —— Windows 上 WhatsApp 的库是加密的(UWP 用 SEE, dbKey 从一个应用外取不到的机器标识派生; WebView2 那一支用 DPAPI-NG), 把一把 vendor 有意扣住的密钥重新算出来与从内存里抠出来是同一件事, 围栏 13 (b) 拒绝它 ⇒ Windows 走 `'ui'`; ②**Linux 压根没有官方桌面客户端** ⇒ 只有 web-in-profile 的 `'ui'`; ③**WeChat 一个字都没变** ⇒ 每个平台都只有 `'ui'`。读库这条路**只读**(**只读打开**加上从那条连接取的快照 —— r6 更正了 r5"backup API 优先"的措辞, 那恰好点名了唯一会改动库的那种开法; 绝不写、绝不 checkpoint), 走一个 `channels-scan-store` 的 agentd op(`hostId` 是参数, 本机是设备 #0), 而 macOS 的 TCC 是一道**具名**的门: 被拒时它以 `tcc-denied` 到达用户并在连接向导里给出授权步骤, **绝不**静默降级成 `'ui'`(那会把会话行上那个延迟数字变成谎话)。**发送要按来源分开说(r6 更正), 因为它不是同一件事**: `'ui'` = agent-browser 在那个已登录的官方客户端自己的输入框里打字, 身份仍然真的是用户本人(`identityMarking:'none'`); 而 macOS 的 `'store'` **自己没有发送通道** —— 那里的官方客户端是一个原生 Catalyst 应用, 没有任何浏览器 profile 够得着 —— 所以 P6a 是**只读**的, 并且结构性地说出来(`convCaps.sendAs: []` 加 `why:'no-send-lane-on-this-host'`, 由 §4 的规则渲染成"不提供并说出理由"且不建出任何 proposal)。**于是有第四件事是未决的, 而且归你拍板**: macOS 上的发送到底是 (i) 同一个 Web 客户端开在一个 agent-browser profile 里 —— 那明摆着是**第二份 linked-device 凭据**, 一条对话两个登录, 必须建模成它自己的一行, 与 `auth.state()`/`scanState().grant` 并排 —— 还是 (ii) 原生 macOS UI 自动化(Accessibility / CGEvent)加**它自己那份** TCC 授权, 还是 (iii) 两者都不做, 让这一类在 `'store'` 胜出的地方保持只读。**建议: P6a 取 (iii)**, 只有在 owner 真的要 macOS 上的出向时才在 (i) 与 (ii) 之间选 —— 读那一半才是价值所在, 而第二份凭据会悄悄推翻"身份真的就是用户本人"这句话。另外(r6): 读库这条路是一次**只读的 SQLite 打开**并从那条连接取快照(绝不是默认的读写打开 —— 它会在 close 时 checkpoint 并删掉 WAL), 而 daemon 那一侧用哪个 SQLite 读者由 §12.5 点名, 不留给实现者。接口从 P0 起就建模这一类; P6 因此**分成两条腿**, macOS 的 `'store'` 腿**只**门控在本决定上(它不需要 agent-browser), `'ui'` 腿仍然双重门控 |
 | 20 | **Gmail 的推送要不要默认打开?**(r3/Q3(c) 新增) | 默认开 / **可用但默认关** / 不做 | **可用但默认关。** Pub/Sub 的 pull 订阅让它同样不需要公网入站端点, 而且每个实例可以有自己的订阅, 所以它比 Lark 的长连接更容易做到独占。但它要一个 GCP topic、一份 IAM 授权和一个**每日续期任务**(watch 7 天静默过期, 漏一次就无声停掉), 而它换来的东西是: 把一个"什么都没变时每 tick 一个请求"的轮询换成秒级延迟。对邮件这种节奏, 那是一个应该由用户按自己的场景打开的开关, 不是一个默认值 |
 | 21 | **集群里的 OAuth 回调怎么走(r7, §14.9)** | (a) 既有的 **loopback + 粘回**(集群注册一个 URL, 与实例数量无关, 每次连接多一次粘贴)/ (b) **集群鉴权中继** `https://auth.<cluster>/cb`(签名 state 转发到实例的公开地址, 零粘贴) | **v1 取 (a), (b) 作为后续阶段。** 不是因为省事: (a) 就是今天在生产里跑着的那条路(Gmail 挂载), 而且 redirect_uri 里根本没有实例地址 ⇒ N 个实例 N 个公开地址这件事**结构上不存在**; (b) 要新增一个**能看见授权码**的组件, 它必须只转发不落盘, 被攻破就是全集群的问题 —— 那是一次需要自己的威胁模型与自己的运维承诺的改动, 值得单独排期而不是搭这趟车。选 (b) 就同时决定了: 谁运维它、它的签名密钥怎么轮换、以及实例怎么验证那个签名 |
-| 22 | **集群提供了默认凭据之后, 用户那一侧是"已连接"还是"已填好"?**(r7) | 自动**已连接** / 只是**已填好**, 仍要用户点一次 Connect | **按行的种类分, 而这正是决定的内容**: **OAuth 行(lark / gmail)结构上做不到自动连接** —— 集群给的是**应用凭据**, 而连接还需要**这个用户自己的授权**(一次浏览器往返), 所以它只能是"已填好 + 一键连接", 界面写**"由集群提供"**; **纯 key 行**(CloakBrowser / 云浏览器)确实可以在注入即生效, 而这里有一条现成先例: frp 插件在集群注入 env 时**默认启用**(`src/plugins.js:584-588`)。**建议**: OAuth 行=已填好; 纯 key 行=跟随 frp 的规则默认可用, 但**只有当那把 key 不是按席位计费**时(§14.8 最后一条)—— 一把集群买单的席位被 N 个用户同时用, 是一次运维决定而不是一个默认值 |
+| 22 | **集群提供了默认凭据之后, 用户那一侧是"已连接"还是"已填好"?**(r7) | 自动**已连接** / 只是**已填好**, 仍要用户点一次 Connect | **按行的种类分, 而这正是决定的内容**: **OAuth 行(lark / gmail)结构上做不到自动连接** —— 集群给的是**应用凭据**, 而连接还需要**这个用户自己的授权**(一次浏览器往返), 所以它只能是"已填好 + 一键连接", 界面写**"由集群提供"**; **纯 key 行**(CloakBrowser / 云浏览器)确实可以在注入即生效, 而这里有一条现成先例: frp 插件在集群注入 env 时**默认启用**(`src/plugins.js:584-588`)。**建议**: OAuth 行=已填好; 纯 key 行=跟随 frp 的规则默认可用, 但**只有当那把 key 不是按席位计费**时(§14.8 最后一条)—— 一把集群买单的席位被 N 个用户同时用, 是一次运维决定而不是一个默认值。**r8 的更正**: 这句话里的 `gmail` 在 r7 的落盘形状下**并不成立** —— 用户在那个下拉里挑一个集群预设会把记录盖成 `source:'user'`, 于是界面写的是"你自己的"而不是"由集群提供"。§14.3 现在把 `source` 改成**推导**而不落盘, 只带选择器的记录答 `source:'cluster'`(带上 `clusterKey`), 这句建议因此在两种行上都是真的 |
 | 23 | **用户自己的 key 能不能带 passphrase 导出?**(r7, §14.10) | 能(进 `sensitive` 那一半)/ 完全不导出 | **能, 但只导出 `source:'user'` 的行。** 它与 `mounts` / `accounts` 是同一类东西(都已经在那一半里), 而搬家的用户会期待自己的 key 跟着走。**集群默认绝不导出**: 它不是我们的东西、会轮换, 而且导进一个没有那个预设的实例时必须解析成 `none` **并说出缺什么**, 绝不静静落到导出方的值上 |
 | 24 | **`secret-box` 一把密钥还是每个 store 一把?**(r7, §14.7) | 一把共享 `data/.secret-box-key` / 每个 store 自己一把 | **每个 store 自己一把**, mounts 的 `data/.mounts-key` 逐字节不动。搬密钥文件是一条**不可逆的数据丢失路径**, 换来的只是少一个文件; 而一把密钥被轮换或损坏时, 爆炸半径应当止于一个 store。共享那条唯一的好处(备份少一个文件)可以用 §14.10 的导出块买到 |
 | 25 | **一行 registry row 可以早于它的消费者上线吗?**(r7, §14.2 的 `whatsapp-business`) | 可以(先摆卡片占位)/ 不可以(与 adapter 同 commit) | **不可以。** 一行没有活消费者的 row 就是一张什么都不做的卡片, 而用户填进去的 key 会被存起来、加密、导出、并出现在"这把 key 用在哪"里 —— 却什么都不用。这与 `SPEND_REASONS` 与 `contributes.channelAdapters` 是同一条法, 由 `test-integration-registry` 的 `consumers` 普查执法。字段与"没有集群默认"这两件事仍然**现在**就定下来(§14.2 的表), 那不要钱 |
@@ -2600,6 +2769,19 @@ P0 的整个集成层 +5.5, 而 P1 是净 ±0(secret-box 抽取 −1 挪去 P0, 
     得着, 但"一屏能装下几张卡、Replace 展开之后要滚多远"没有量过 —— 而 `showDropdown` 那一
     类事故(未缩放的 `offsetWidth` 与缩放过的 rect)正是从这个尺寸上来的, 所以这条腿要在 P0
     真的跑起来, 而不是等到有三行 row 之后。
+30. **`credential-exchange` 到底会在一个多不健全的 Lark 应用上成功, 没有实测(r8)。**
+    `test.caveat` 这条规则建立在一个推理上: `tenant_access_token` 那个端点的输入只有 app id
+    与 secret, 所以它在一个 scope 没授权、版本没发布、回调 URL 没登记的应用上照样会给出一个
+    token。这是从那个端点**文档化的输入**推出来的, 不是量出来的 —— 而 §21 第 2 条已经说了,
+    这个应用的事件订阅从来没开过, 它的控制台状态也没有人为这件事翻过。**它错了会怎样**: 如果
+    那次交换其实**会**失败, 那么 `caveat` 只是多说了一句真话(没有害处), 而"先开卡片"那条路会
+    更早一点给出正确答案; 所以这个未知的方向是安全的, 但它仍然是一个未知, 不该被读成一次测量。
+    P1 的第一件事本来就要在控制台上把那三件事做一遍, 顺手就能把它量掉。
+31. **回调 URL 里那个端口号(`17865`)是选的, 不是量的(r8)。** §14.2 把它定在一个地方, 而
+    §12.4 的机器全局冲突处置(只在流程期间绑、`EADDRINUSE` 具名拒绝、回落粘回)与它具体取什么
+    值无关。没有查过这台机器或集群镜像上有没有别的东西惯用这个端口 —— 决定 4 那次控制台注册
+    一旦落下, 这个数字就**很难再改**(改它要再走一次控制台), 所以这是一个值得在注册之前花两
+    分钟核一下的数字。
 
 **r3、r5、r6 与 r7 里新引入的 vendor 事实的出处**(公开文档, r3/r5/r6 取于 2026-09-10,
 r7 取于 2026-09-11; 这里没有任何一条在真实租户或真实客户端上跑过 —— 见上面第 2、3、15–19、

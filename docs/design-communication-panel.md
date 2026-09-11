@@ -185,8 +185,12 @@ Six placements are load-bearing enough to state as rules:
   (§14.6). `resolveIntegration(id)` is the single place that answers, with the precedence **the
   user's own > the cluster default > none**; a cluster default is resolved **by KEY and never
   copied into the stored record**, so one env rotation in the cluster rotates every consumer on
-  every instance — the same rule, word for word, as `src/mounts.js:2187-2188`. Backed by a
-  standing grep census: `VIBESPACE_INTEGRATION*` outside the store = red.
+  every instance — the same rule, word for word, as `src/mounts.js:2187-2188`, and `source` is
+  **derived at read time, never stored** so the two faces of one record cannot disagree. A row
+  delegating to that existing reader names the key it means (`prefer`), because that reader's own
+  fallback answers **null** on a two-preset list (`src/mounts.js:2215`). Backed by a standing grep
+  census that matches the env **NAME** — `/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/`
+  outside the store = red — over a file set derived from `git ls-files` and printed by the suite.
 
 ### 2.1 Mechanical registration checklist (each omission costs a round)
 
@@ -209,6 +213,9 @@ do up front than to discover:
 - a new integration is **one row** in `src/integration-registry.js`, plus the files its
   `consumers` names **actually** calling `resolveIntegration('<id>')` — both halves checked
   by `test-integration-registry` (§14.2);
+- a row whose consumer runs an OAuth consent flow also declares `setup.callbackUrl` (its **one**
+  definition site — `src/oauth-loopback.js` imports it) and, whenever it declares
+  `setup.prerequisites`, a `test.caveat`; the census fails a row missing either (§14.2);
 - any new `VIBESPACE_*` env name needs **exactly one** parser, and the integration ones may
   only grow inside `src/server/integration-store.js` (§14.6);
 - **that size ratchet is at its ceiling today, so P0's wiring stanza turns
@@ -436,7 +443,10 @@ adapter can send into **this** conversation" are different claims.
     attachments:    'metadata',       // 'metadata' | 'fetch' | 'none'
   },
 
-  async auth.state()   -> { state:'connected'|'needs-reauth'|'unknown', expiresAt, scopes, why }
+  // takes resolveIntegration(id) as an INPUT — see §13 and §14.3. 'needs-credentials' means
+  // "your authorization is fine, but the app credential underneath this adapter is gone"
+  async auth.state()   -> { state:'connected'|'needs-reauth'|'needs-credentials'|'unknown',
+                            expiresAt, scopes, why }
   async auth.begin()   -> { consentUrl, flowId }             // via src/oauth-loopback.js
   async auth.finish(flowId, code) -> { ok, record }
 
@@ -1587,9 +1597,17 @@ instance's own record, rather than somebody else's inbox.
   answers `none`, rather than sending the user into an OAuth flow that will fail on the consent
   page — §12.1 already names that failure mode (a missing scope / published version / redirect
   URL fails the *consent page*, not the API call), and it is the **default** shape on an instance
-  where the user has never configured app credentials. When it answers `cluster` the button
-  carries **"provided by the cluster"** and one click connects; when it answers `user` it says
-  nothing extra. This is not a UI preference: the connect button is the only thing on this chain
+  where the user has never configured app credentials. §14.9 goes further: a cross-tenant user
+  **must** bring their own Lark app, so this is the default path for every cluster user outside
+  the cluster's own tenant. **And it only holds if the card actually renders those three
+  things**: the card draws the `setup` block **above** the fields (the callback URL with a copy
+  button plus the three prerequisites) and never draws the Test tick alone, always beside
+  `test.caveat` (§14.2, §14.5). Without those two, "open the card first" merely postpones the
+  same consent-page failure by two minutes — the user fills in app id/secret, Test goes green,
+  `resolveIntegration('lark')` answers `user` from then on, the wizard stops opening the card,
+  and the callback URL they had to paste into the console **never appeared in the product at
+  all**. When it answers `cluster` the button carries **"provided by the cluster"** and one
+  click connects; when it answers `user` it says nothing extra. This is not a UI preference: the connect button is the only thing on this chain
   a user ever clicks, and **no credential** and **credential refused** are different facts —
   folding them into one sentence is another round of "the error text is not a diagnosis".
 - **Settings:** a `Channels` category **added to `SETTINGS_CATEGORIES`** in the
@@ -1702,11 +1720,20 @@ and docs.
 - **Authorization prerequisites.** The console needs all three of: the redirect
   URL registered, the scopes granted, and a **published version**. A missing one
   fails the *consent page* rather than the API call — a confusing failure mode
-  worth spelling out in the connect wizard's error text.
+  worth spelling out in the connect wizard's error text. **r8 gives those three a
+  home**: they are the `lark` row's `setup.prerequisites`, rendered with the
+  callback URL **above** the fields on the Integrations card (§14.2, §14.5); and
+  because the `credential-exchange` Test succeeds on an app with none of them
+  done, that row must declare a `test.caveat` so the verdict always carries its
+  own boundary.
 - **Redirect URI.** Lark's console requires the redirect URL to be *registered*,
   so the loopback port is necessarily **fixed** — unlike Google, which accepts
   any loopback port and lets `src/gmail-sync.js` bind an ephemeral one. A fixed
-  port is a machine-global name; §12.4 says what the flow does about that.
+  port is a machine-global name; §12.4 says what the flow does about that. **And
+  that URL's literal is defined in exactly one place**: the `lark` row's
+  `setup.callbackUrl` (§14.2). The Integrations card renders it and
+  `src/oauth-loopback.js`'s fixed mode imports it — a string that must match the
+  vendor's console **byte-for-byte** cannot have two spellings.
   Registering a dedicated URL (decision 4) resolves VibeSpace-vs-ops-tooling and
   **nothing else**. **Two additions (r7):** ① the official documentation states that the
   redirect URL list **supports several entries**, so decision 4's "register ours *beside*
@@ -1784,7 +1811,7 @@ shape. §2 compresses this to one line; the line hides a decision:
 | | loopback port | why |
 |---|---|---|
 | Gmail | **ephemeral** — `listen(0, '127.0.0.1')`, the port read back from `server.address()` | Google accepts any loopback port; this is exactly what `src/gmail-sync.js` does today |
-| Lark | **fixed**, and registered in the app console | the platform only redirects to a URL registered ahead of time |
+| Lark | **fixed**, and registered in the app console — the port and the whole URL literal come from the `lark` row's `setup.callbackUrl` (§14.2); this module imports it rather than declaring its own, and the census asserts the literal does not appear here | the platform only redirects to a URL registered ahead of time, and that URL must match byte-for-byte ⇒ it can have exactly one definition site, and it must be rendered somewhere the user can copy it from (§14.5) |
 
 A fixed port is precisely the class of name `scripts/ci.mjs`'s
 `machineGlobalFixtures` and the heavy tier's `/tmp` lock exist to police — this
@@ -2148,9 +2175,26 @@ not-offered-with-a-reason rule.
   (one user, one consent, one expiring refresh token). Their lifetimes, rotation and export
   rules all differ — folding them into one store is precisely the twin this design keeps
   refusing (§14.11, fence 8).
-- **Auth state is three-valued and honest:** `connected` / `needs-reauth` (with
-  the expiry instant and a countdown) / `unknown` when the token record cannot be
-  read. Never optimistic. The Adapters row renders exactly this.
+- **Auth state is four-valued and honest:** `connected` / `needs-reauth` (with
+  the expiry instant and a countdown) / **`needs-credentials`** / `unknown` when
+  the token record cannot be read. Never optimistic. The Adapters row renders
+  exactly this.
+- **The fourth value is r8's, because this answer has two inputs and r7 wired only
+  one.** `auth.state()` read the token record alone, while §14.3 handled "the cluster
+  default disappeared" only on the Integrations card — so two surfaces could answer
+  the same question in opposite ways: a valid, unexpired token plus an admin who
+  rotated or withdrew `VIBESPACE_INTEGRATIONS` gives an Adapters row reading
+  `connected` beside an Integrations card reading `Not configured`, while the adapter
+  is **already dead** — Lark's `tenant_access_token` is minted from app id + secret on
+  **every call**, and Gmail's client id/secret are required for **every refresh**. The
+  truth arrives only through this section's last bullet (three consecutive failed
+  passes turn the row amber), and it explains itself as a vendor 4xx. So
+  `auth.state()` now takes `resolveIntegration(id)` as an input, with `why` naming what
+  is missing (`cluster default withdrawn` / `missing appSecret`). It is **not**
+  `needs-reauth` (re-consenting cannot fix it) and **not** `unknown` (we know exactly
+  what is wrong) — and it is this codebase's recorded class of two faces of one record
+  contradicting each other. It is also the failure the owner's cluster story most
+  obviously creates: an admin rotating or removing a cluster default.
 - **The local-client class has two orthogonal credential facts, and each renders
   on its own** (r5, §12.5). `auth.state()` answers "is that official client still
   logged in"; `scanState().grant` answers "does the operating system let us read
@@ -2210,7 +2254,7 @@ There are exactly two places not to put this, and both are the convenient-lookin
 
 | Not here | Why |
 |---|---|
-| **Settings** | **No secret goes in settings, not one.** Settings ride the SyncStore: every value is broadcast to every connected client; and `/api/config/export`'s `take('settings', readSettings)` (`src/routes/persistence.js:697`) writes the whole settings object into the export file **in plaintext** — it is not in the `sensitive` half (`:679-686`), which is the only half that requires a passphrase. Putting a key in settings does both "broadcast to every open tab" and "plaintext into a backup file", and neither of them says so |
+| **Settings** | **No secret goes in settings, not one.** Settings ride the SyncStore: every value is broadcast to every connected client; and `/api/config/export`'s `take('settings', readSettings)` (`src/routes/persistence.js:698`) writes the whole settings object into the export file **in plaintext** — it is not in the `sensitive` half (`:679-686`), which is the only half that requires a passphrase. Putting a key in settings does both "broadcast to every open tab" and "plaintext into a backup file", and neither of them says so |
 | **A plugin card** | frp's relay token **stays** in its plugin card (§14.6 records it as a **named** twin). It is configuration for a plugin **process lifecycle**, consumed by the keeper, not by a feature that asks `resolveIntegration()`. Moving it means moving all of it (the card, the `fromEnv` default-enabled rule, the keeper's read), which is a change nobody asked for |
 
 ### 14.2 `src/integration-registry.js` — the PURE table
@@ -2228,8 +2272,20 @@ There are exactly two places not to put this, and both are the convenient-lookin
       help:'Same page; it is only ever written, never read back' },
   ],
   clusterEnv: { json:'VIBESPACE_INTEGRATIONS', prefix:'VIBESPACE_INTEGRATION_LARK_' },
+  // What the user must finish in the vendor's console BEFORE a consent page can
+  // succeed. The card renders this ABOVE the fields.
+  setup: {
+    callbackUrl: 'http://127.0.0.1:17865/lark/cb',   // the ONE definition — see the rule below
+    callbackNote: 'Developer console → 安全设置 → redirect URL, byte-for-byte',
+    prerequisites: [
+      'that redirect URL registered in the list',
+      '`im:message` and `im:message.send_as_user` granted',
+      'the app has a **published** version',
+    ],
+  },
   test: { kind:'credential-exchange',
-          describe:'Exchange this app id / secret pair for a token. Reads no conversation, sends no message.' },
+          describe:'Exchange this app id / secret pair for a token. Reads no conversation, sends no message.',
+          caveat:'This proves the app id / secret pair. The consent page additionally needs the three things above; a missing one fails THERE, not on this call.' },
   consumers: ['src/channels/lark.js', 'src/channels/live/lark.js'],
   docs: 'https://open.feishu.cn/…',
 }
@@ -2240,10 +2296,41 @@ The rules, each with an assertion that goes red:
 - `validate` is a pure function returning `{ok:true}` or `{ok:false, why}` — a **named** complaint,
   never a silent reject, and it never rewrites the value (the one permitted rewrite is trimming outer
   whitespace, which happens in the store and is written on the field's help, §14.3).
-- `clusterEnv` is a **union**: `{json, prefix}` (this layer parses it) **or** `{via:'drive-presets'}`
-  (this layer asks the **existing** reader). **An env name may have exactly one parser**, enforced by
-  the census — which is why the `gmail` row **delegates** to `MountManager.drivePresets()` rather than
-  copying it.
+- `setup` is **what the user must finish in the vendor's console before a consent page can
+  succeed**, and the card renders it **above** the fields (§14.5). It exists for a real failure
+  mode this document already wrote down twice without giving it a home: §12.1 names the three
+  things Lark's console needs (the redirect URL registered, the scopes granted, a **published**
+  version) and says a missing one fails the *consent page* rather than the API call; §10.1 cites
+  that very sentence as the reason the wizard opens this card first. But a card declaring only
+  `appId` / `appSecret` never displays **the one value the user has to copy out** — the
+  **callback URL** — so "open the card first" still sends them into the flow that fails on the
+  consent page.
+  **`callbackUrl` is defined here, and only here.** `src/oauth-loopback.js`'s fixed mode
+  **imports it from this row** rather than declaring its own: the registry is PURE (it imports
+  nothing), so the dependency can only run this way; the other direction gives two spellings to a
+  string that must match the vendor's console **byte-for-byte**, which is the twin this design
+  keeps refusing. The census therefore asserts that the callback URL literal **does not appear** in
+  `src/oauth-loopback.js`. The port (`17865`) is chosen once here, and decision 4's console
+  registration registers exactly this string.
+- `clusterEnv` is a **union**: `{json, prefix}` (this layer parses it) **or**
+  `{via:'drive-presets', prefer, multi}` (this layer asks the **existing** reader). **An env name
+  may have exactly one parser**, enforced by the census — which is why the `gmail` row
+  **delegates** to `MountManager.drivePresets()` rather than copying it.
+  **And a delegating row must be able to say WHICH key it means.** `drivePresets()` returns a
+  **list** (`src/mounts.js:2189-2206`), and §12.2's own answer to decision 5 — have the cluster
+  **add another** `channels` preset key rather than widening the existing one — produces exactly a
+  list with more than one entry. At that point the row must **not** fall back to `_driveClient()`'s
+  ladder: `src/mounts.js:2215` ends
+  `return presets.length === 1 ? presets[0] : presets.find((c) => c.key === 'default') || null;`,
+  which on a list of `org1` + `channels` with no `'default'` answers **null** ⇒ §19's P1 exit
+  criterion ("an instance with only a cluster default, where the user typed nothing, must connect
+  end to end") is **structurally unreachable** on the very configuration §12.2 asks the cluster
+  for. The resolution order is **the user's stored selection > `prefer` > the single preset**, and
+  there is no fourth rung. **Deliberately not `prefer` over the user's selection**: that would make
+  §14.5's dropdown decorative and would contradict this section's own "the user's own > the cluster
+  default". When the user's stored key is no longer offered, it is **not** silently swapped for
+  `prefer` (changing the Google OAuth client changes which consent the refresh token was issued
+  under) — it takes §14.3's existing rule: answer `source:'none'` and name the key that vanished.
 - `test.kind` is a **closed set**, and it decides the button's own wording, because "the error text is
   not a diagnosis" holds in reverse too — a button that claims to have tested a connection it never
   made is lying:
@@ -2254,6 +2341,14 @@ The rules, each with an assertion that goes red:
   | `shape-only` | **Zero network**: checks field shapes and builds the consent URL | Check format (no network) |
   | `reachability` | Probes only whether the vendor host answers; carries no credential | Test reachability |
 
+  **And a `test` must also state its own boundary.** `caveat` is one sentence rendered **together
+  with** the verdict (§14.5), because lying on this surface has two mirror images: a button that
+  claims to have tested a connection it never made is lying, and a green tick that **truthfully**
+  tested a credential pair while the user reads it as "I am configured" is lying too — and `lark`
+  is precisely the second, because `credential-exchange` **succeeds** on an app with no scopes
+  granted, no published version and no registered redirect URL. The rule is therefore enforceable:
+  **a row declaring `setup.prerequisites` must declare `test.caveat`**, checked by the census; and
+  the card never draws the tick alone (§14.5).
 - `consumers` must be **live**: the census requires each name to be a file that exists **and** to
   actually call `resolveIntegration('<id>')`. A row with no live consumer is a card that does nothing,
   which is the same law as `SPEND_REASONS` and as `contributes.channelAdapters` (§15).
@@ -2263,11 +2358,11 @@ The rules, each with an assertion that goes red:
 
 This design's own three rows (the browser's two row ids live in its own document):
 
-| id | Fields | Cluster default | What a Test click does | Consumers | When the row lands |
-|---|---|---|---|---|---|
-| `lark` | `appId` (not secret) · `appSecret` (secret) | **Expected** — the cluster registers a Lark app and injects it. But it only holds **inside one tenant**, and that is not a disclaimer, it is a hard constraint (§14.9) | `credential-exchange`: exchange one `tenant_access_token` (the self-built-app endpoint, which needs only app id + secret). Lists no conversation, sends no message | `src/channels/lark.js`, `src/channels/live/lark.js` | P1 |
-| `gmail` | `clientPreset` (not secret, options from the delegate) · `clientId` / `clientSecret` (secret, only under "use my own") | `{via:'drive-presets'}` — **reuses** `VIBESPACE_GDRIVE_CLIENTS`, adds no second parser | `shape-only`, and **it says so**: a Google OAuth client id/secret pair exchanges for nothing on its own (there is no client-credentials path for it), so all that is possible here is a shape check plus building the consent URL — the real verdict is that OAuth round trip | `src/channels/gmail.js` | P1 |
-| `whatsapp-business` | `phoneNumberId` (not secret) · `accessToken` (secret) | **None, and there should be none**: this is a per-number billed commercial API credential, so a cluster-injected one means the cluster pays everyone's bill | `credential-exchange` (read the number's metadata once) | — none today | **Not in v1.** §14.2's census requires `consumers` to be live, and today this route is only the *name* of the compliant alternative in §15; the row **lands in the same commit as its adapter**. It is written here to fix the fields and the "no cluster default" answer in advance, not to put an empty card on screen |
+| id | Fields | Cluster default | The setup the card must render first | What a Test click does | Consumers | When the row lands |
+|---|---|---|---|---|---|---|
+| `lark` | `appId` (not secret) · `appSecret` (secret) | **Expected** — the cluster registers a Lark app and injects it. But it only holds **inside one tenant**, and that is not a disclaimer, it is a hard constraint (§14.9); a cross-tenant user **must** bring their own app, which makes this card's setup block their **default** path rather than an edge case | **Yes**: the callback URL `http://127.0.0.1:17865/lark/cb` (with a copy button; the one definition site, above) plus the three prerequisites (register that URL, grant both scopes, publish a version) | `credential-exchange`: exchange one `tenant_access_token` (the self-built-app endpoint, which needs only app id + secret). Lists no conversation, sends no message. **Must carry a `caveat`**: this round trip succeeds on an app with none of the three prerequisites done, so the verdict is always rendered beside its own boundary | `src/channels/lark.js`, `src/channels/live/lark.js` | P1 |
+| `gmail` | `clientPreset` — a **selector** (not secret, options from the delegate; it picks WHICH cluster preset, it is not the user's own credential, §14.3) · `clientId` / `clientSecret` (secret, only under "use my own") | `{via:'drive-presets', prefer:'channels', multi:true}` — **reuses** `VIBESPACE_GDRIVE_CLIENTS`, adds no second parser; `prefer` names the key §12.2 asks the cluster to add, `multi` tells the UI to render a dropdown instead of the radio pair | **None** — the existing mounts consent flow already runs in production, and Google accepts any loopback port (RFC 8252 §7.3), so there is no value for the user to copy into a console | `shape-only`, and **it says so**: a Google OAuth client id/secret pair exchanges for nothing on its own (there is no client-credentials path for it), so all that is possible here is a shape check plus building the consent URL — the real verdict is that OAuth round trip | `src/channels/gmail.js` | P1 |
+| `whatsapp-business` | `phoneNumberId` (not secret) · `accessToken` (secret) | **None, and there should be none**: this is a per-number billed commercial API credential, so a cluster-injected one means the cluster pays everyone's bill | **None** (this route has no OAuth consent page) | `credential-exchange` (read the number's metadata once) | — none today | **Not in v1.** §14.2's census requires `consumers` to be live, and today this route is only the *name* of the compliant alternative in §15; the row **lands in the same commit as its adapter**. It is written here to fix the fields and the "no cluster default" answer in advance, not to put an empty card on screen |
 
 ### 14.3 `src/server/integration-store.js` — resolve, mask, broadcast
 
@@ -2276,13 +2371,27 @@ On disk (through `writeJsonAtomic`, like every `data/*.json`):
 ```json
 { "version": 1,
   "integrations": {
-    "lark": { "source": "user",
-              "values": { "appId": "cli_…", "appSecret": "<secret-box blob>" },
-              "updatedAt": 1789…, "testedAt": 1789…, "lastOk": true, "lastError": null } } }
+    "lark":  { "values": { "appId": "cli_…", "appSecret": "<secret-box blob>" },
+               "updatedAt": 1789…, "testedAt": 1789…, "lastOk": true, "lastError": null },
+    "gmail": { "clusterKey": "channels",
+               "updatedAt": 1789…, "testedAt": null, "lastOk": null, "lastError": null } } }
 ```
 
-- `resolveIntegration(id)` → `{source:'user'|'cluster'|'none', values, label, fromEnv, testedAt,
-  lastOk, lastError, missing:[]}`. Three invariants:
+**`source` is DERIVED, never stored.** The record holds exactly two things: what the user
+**typed** (`values`) and which cluster preset the user **picked** (`clusterKey`). `source` is
+computed at read time from those plus whether the env holds a default right now, for two reasons
+this section already states elsewhere. First, §14.3's own "the cluster default disappearing ⇒
+answer `none`" rule *requires* it to be computed at read time — a stored `source` fights it, and
+that is this codebase's "two faces of one record contradicting each other" class. Second, a record
+that holds only a preset selection and no secret field is **not** "the user's own credential"; it
+is a pick among the ones the cluster supplied — stamping it `"source": "user"` makes the source
+chip (§14.5) state the **opposite** of the one fact it exists to state, makes §14.10's "only
+`source:'user'` rows are exported" export a pointer to a cluster credential, and makes decision
+22's "an OAuth row is pre-filled + one click, with the UI saying *provided by the cluster*" false
+for `gmail`.
+
+- `resolveIntegration(id)` → `{source:'user'|'cluster'|'none', clusterKey, values, label, fromEnv,
+  testedAt, lastOk, lastError, missing:[]}`. Five invariants:
   - under `source:'cluster'` the `values` are resolved from the env **at read time** and are **never**
     copied into `data/integrations.json`. This is the mirror of mounts' "a record stores only the KEY"
     (`src/mounts.js:2187-2188`): the cluster rotates the env once and every consumer on every instance
@@ -2292,6 +2401,17 @@ On disk (through `writeJsonAtomic`, like every `data/*.json`):
     in silence.
   - a required field missing ⇒ `missing:['appSecret']`, per the incident named in the comment at
     `src/plugins.js:679-682`: **say which field**, never make the user guess.
+  - **a record holding only a selector answers `source:'cluster'`, not `'user'`.** `clusterKey`
+    comes back with it (`'channels'`), so the chip reads `Cluster default · <label>` and §14.10
+    exports the **key**, never a value. A delegating row's resolution order is in §14.2: the
+    user's stored selection > `prefer` > the single preset.
+  - **this answer is an INPUT to `auth.state()`** (§13). When an adapter's token record is intact
+    and unexpired but the app credential underneath it was withdrawn (an admin removed the env, or
+    the user cleared their own key), `auth.state()` must answer `'needs-credentials'` — not
+    `'connected'`. Lark's `tenant_access_token` is minted from app id + secret on **every call**
+    and Gmail's client id/secret are required for **every refresh**, so the adapter is dead at that
+    instant, while §13's "three consecutive failed passes turns the row amber" speaks three passes
+    later and explains it only as a vendor 4xx.
 - `publicView(id)`: every `secret:true` field becomes `'••••'`, and carries the last 4 characters
   **only** when the value is ≥ 12 characters long (for a short secret, the last 4 are most of it).
   Non-secret fields pass through. **This masked view is what the broadcast carries**, and it is all a
@@ -2303,15 +2423,29 @@ On disk (through `writeJsonAtomic`, like every `data/*.json`):
   whitespace**: a pasted secret often carries a trailing newline, and "it failed because of a
   character you cannot see" is precisely what this UI exists to prevent; the rewrite is written on the
   field's help, because a rewrite nobody states is indistinguishable from a bug.
-- `useClusterDefault(id)`: drop the user override (and its ciphertext) and go back to `'cluster'`.
-  **With no cluster default present it is a named refusal**, not a silent no-op.
-- `test(id)`: run that row's **declared** test and record `{testedAt, ok, error}`. Three constraints:
+- **Two intents, two functions, because they give opposite answers for the same transition.**
+  - `clearUserValues(id)` = "clear my key". **Always allowed**: drop the user override and its
+    ciphertext, then land **wherever precedence lands** — `'cluster'` when there is one, `'none'`
+    when there is not. This is the one `DELETE /api/integrations/:id` calls (§14.4).
+  - `useClusterDefault(id)` = the **"Use the cluster default"** radio in §14.5. **With no cluster
+    default present it is a named refusal**, not a silent no-op — which is the same fact as that
+    radio being disabled *and saying why*. It goes through `PUT /api/integrations/:id` with
+    `{use:'cluster'}`.
+  Both outcomes are pinned by `test-integration-registry`. Folding them into one is not a style
+  question: one of "back to `none` when there is none" and "a named refusal when there is none"
+  would then be **unreachable from the product**, and which one depends on the sentence the
+  implementer happened to read.
+- `test(id)`: run that row's **declared** test and record `{testedAt, ok, error}` — and the card
+  renders that verdict **always** beside the row's `test.caveat` (§14.2), because a tick that does
+  not state its own boundary is read as "I am configured", which is the outcome §10.1 opens this
+  card to avoid. Four constraints:
   1. **the store constructs no vendor request itself.** It calls the runner the consumer registered at
      wiring time (`registerIntegrationTest(id, fn)`), and that consumer **already** declared its host
      in the §3.1 egress whitelist ⇒ `test-channels-egress` needs no new line, and this layer never
      becomes a second file holding N vendor hosts.
   2. one in flight per id, bounded timeout, **human-clicked only** (§14.11).
   3. a row declaring `test` with no registered runner = a dead control ⇒ the census goes red.
+  4. a row declaring `setup.prerequisites` with no `test.caveat` ⇒ the census goes red (§14.2).
 - Every write broadcasts `integrations-updated` carrying the `publicView` — a server cache a client
   also caches must **notify** at its entry point (the 2.309.0 law), and the only thing that broadcast
   can carry is the masked view.
@@ -2320,11 +2454,19 @@ On disk (through `writeJsonAtomic`, like every `data/*.json`):
 
 ### 14.4 Routes
 
-- `GET /api/integrations` — per row `{id, label, fields (declarations only, no values), source,
-  fromEnv, set:{<field>:bool}, masked, missing, testedAt, lastOk, lastError, consumers, docs}`.
-- `PUT /api/integrations/:id` — `setIntegration` (omitted = unchanged, `''` = cleared).
+- `GET /api/integrations` — per row `{id, label, fields (declarations only, no values), setup
+  (declaration only — the card cannot render a callback URL it was not sent), source, clusterKey,
+  clusterOptions (a delegating row's presets, keys and labels only), fromEnv, set:{<field>:bool},
+  masked, missing, testedAt, lastOk, lastError, testCaveat, consumers, docs}`.
+- `PUT /api/integrations/:id` — `setIntegration` (omitted = unchanged, `''` = cleared); a body
+  carrying `{use:'cluster'}` runs `useClusterDefault` (§14.5's radio) and **refuses by name** when
+  there is no cluster default; a body carrying `{clusterKey:'<key>'}` stores the **selector** (a
+  delegating row's dropdown) and writes no value at all.
 - `POST /api/integrations/:id/test` — the human-clicked one, bounded.
-- `DELETE /api/integrations/:id` — back to the cluster default; back to `none` when there is none.
+- `DELETE /api/integrations/:id` — **"clear my key"**, which calls `clearUserValues` (§14.3).
+  **Always allowed**, and it lands wherever precedence lands: the cluster default when there is
+  one, `none` when there is not. It is **not** `useClusterDefault` — that one is the radio, and it
+  refuses when there is no cluster default.
 - All behind the existing cookie auth; and **no route ever reads a secret field back in plaintext** —
   not `GET`, not "let me peek". The UI offers **Replace, never Reveal**: a secret that can be read back
   is a secret one XSS or one shoulder-surfed window can read back.
@@ -2342,13 +2484,24 @@ On disk (through `writeJsonAtomic`, like every `data/*.json`):
   `registerMenuItem` rather than a new chrome primitive.
 - **Cards** rendered in the `plugin-card` language of `src/lib/plugins-ui.js:41-70`, one per row:
   - a **source chip**: `Cluster default` / `Your own` / `Not configured` (it reads `source` and
-    `fromEnv`);
-  - a pair of radios: **"Use the cluster default"** vs **"Use my own key"** — with no cluster default
-    the first is disabled *and says why*;
+    `fromEnv`); on a delegating row (`multi:true`) it carries that key's label —
+    `Cluster default · <label>` — because "which cluster credential" and "whose credential" are two
+    questions (§14.3);
+  - **above the fields**: that row's `setup` block, when it has one. `callbackUrl` renders as one
+    monospace line **with a copy button** plus its `callbackNote` (which console page to paste it
+    into), and under it the `prerequisites` as a checklist. It sits **before** the fields not as a
+    layout preference: once a user has filled two inputs, pressed Test and seen a green tick, they
+    do not scroll back up;
+  - whose credential. An ordinary row gets a **pair of radios**: **"Use the cluster default"** vs
+    **"Use my own key"** — with no cluster default the first is disabled *and says why*. A
+    delegating row (`multi:true`) gets a **dropdown** instead: the N cluster presets plus "Use my
+    own key" — a binary radio pair cannot render N presets, and the very precedent this row cites
+    (`src/lib/sidebar-mounts.js:1747-1751`) has been an N+2 dropdown for exactly that reason;
   - the declared fields. A secret field shows `••••1234` plus a **Replace** button (which is what
     reveals an empty `type:'password'` input); non-secret fields are editable in place;
   - a **Test** button whose label comes from `test.kind` (§14.2), beside **the last verdict, its age,
-    and the vendor's own error text** (through `escHtml`);
+    and the vendor's own error text** (through `escHtml`) — and whenever the row declares a
+    `test.caveat`, the verdict is **always** drawn with it, never the tick alone;
   - one **"Where is this used"** line generated from `consumers` — before deciding to replace a key, a
     user is entitled to know what it will move.
 - **Every consumer deep-links to its own card**: `app.openIntegration(id)`. This design's connect
@@ -2366,9 +2519,26 @@ On disk (through `writeJsonAtomic`, like every `data/*.json`):
 - Precedence: **the user's own > the cluster default > none.** A value the user set explicitly is
   **not** overridden by a cluster default injected later — the same rule as `_frpEffectiveEnabled`
   (`src/plugins.js:584-588`): an explicit value wins, only `undefined` follows the env.
-- **A consumer never reads `process.env` itself.** It asks `resolveIntegration(id)`. Standing sweep:
-  `process.env.VIBESPACE_INTEGRATION` (including `VIBESPACE_INTEGRATIONS`) appearing anywhere outside
-  `src/server/integration-store.js` = red.
+- **A consumer never reads `process.env` itself.** It asks `resolveIntegration(id)`. The standing
+  sweep matches the **env NAME**, not an access expression: the regex
+  `/VIBESPACE_INTEGRATIONS?\b|VIBESPACE_INTEGRATION_/` appearing anywhere **outside**
+  `src/server/integration-store.js` = red. **Deliberately not
+  `process.env.VIBESPACE_INTEGRATION`** — that is one spelling, while
+  `process.env['VIBESPACE_INTEGRATIONS']`, `const { VIBESPACE_INTEGRATIONS } = process.env` and
+  `const env = process.env; env.VIBESPACE_INTEGRATION_LARK_APPSECRET` are all ordinary and all
+  defeat it. This codebase has been bitten by that class three times: test-architecture §45 r3
+  matched callee names, so `execFileAsync('pgrep'…)` walked a retired shape back **onto the kill
+  path**, and the fix was to match the **tool literal** in argv; test-writer-sweep §17 r7 drove a
+  typed file list that missed **47** files which really send signals, and the fix was a
+  grep-derived, **printed** set; test-fixture-isolation r2 resolved only the spellings its author
+  had looked at, so one alias hid an `rm -rf`, and the fix was the **fixpoint**. So: **a census
+  must derive the thing it claims to census** — and here that thing is the env's name.
+- The file set is derived from `git ls-files` (through the sanitized git environment of
+  `scripts/git-env.mjs`, which exports `GIT_REDIRECTORS` `:22` and `gitEnvFrom` `:36` — this census
+  runs inside `npm run build`, and that build runs inside a pre-push hook process that exports
+  `GIT_DIR` / `GIT_INDEX_FILE`), and the suite **prints** it: a census that does not say which files
+  it walked is worth exactly the set it happened to walk. The two evasions are its negative
+  controls: a scratch file using the bracket form and one using a destructure must both go red.
 - There is exactly one named exception: `drivePresets()` at `src/mounts.js:2189` reads
   `VIBESPACE_GDRIVE_CLIENTS` — it predates this layer and has its own consumers, and the `gmail` row
   **delegates** to it (`{via:'drive-presets'}`) rather than copying it. The census therefore also
@@ -2523,10 +2693,16 @@ internal to one enterprise, as opposed to App Store apps, which are distributabl
 - Integration keys join the `sensitive` half of `/api/config/export-info`
   (`src/routes/persistence.js:679-686`, beside `mounts` / `accounts`) and the passphrase-encrypted block
   of `/api/config/export` (`:712-741`, the same shape as `getMounts?.()?.exportBundle?.()` `:729-732`).
-- **Only `source:'user'` rows are exported.** A cluster default is not ours and it rotates: baking it
-  into a backup file scatters an expiring cluster credential somewhere we can no longer reach.
-- Imported onto an instance that has **no** such cluster preset, a `source:'cluster'` row resolves to
-  `none` **and says what is missing** — never silently falling back to the exporter's values (which
+- **Only `source:'user'` rows' values are exported.** A cluster default is not ours and it rotates:
+  baking it into a backup file scatters an expiring cluster credential somewhere we can no longer
+  reach.
+- **But the `clusterKey` selector travels, and it is a key rather than a credential** (§14.3): it
+  says "among the ones the cluster offers I picked `channels`", and there is no secret in it — the
+  same reason the mounts export carries `clientPreset`. Imported onto an instance that does not
+  offer that key, it takes the rule below.
+- Imported onto an instance that has **no** such cluster preset, a `source:'cluster'` row (including
+  one holding only a `clusterKey`) resolves to `none` **and says what is missing** (whether the whole
+  cluster default is absent, or only that key) — never silently falling back to the exporter's values (which
   would let a user believe they are on the cluster's app while actually carrying somebody else's
   credential).
 - **Say plainly what this layer's encryption buys.** `data/integrations.json` and
@@ -2616,7 +2792,7 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channels-identity` | fast | no sender honesty line by default; `identityMarking` drives the approval-card warning and the receipt fields; the audit line carries `draftedBy`/`approvedBy`/`sentAs`/`identityMarking` and **never leaves the instance**; on a `sendAs: []` conversation `reply` returns `send-not-available` and **creates no proposal**; **r4: a proposal approved against a `convCaps` that went stale must re-resolve before the send and refuse with `send-not-available`** | a copy with the honesty line defaulted ON must go red (r2's decision 17 is this leg's negative control); a `marked` channel whose approval card carries no warning must go red; a proposal created on a `sendAs: []` conversation must go red; **a copy that does not re-resolve at approval time must actually send the message** |
 | `test-channels-egress` | fast | every constructed outbound request comes either from the adapter declaring its host or from an allowlisted `(file, host)` pair **with a reason** — seeded with `src/gmail-sync.js` and `src/mounts.js` (§3.1) | a scratch file with an undeclared host must go red; a **dead allowlist entry** (file moved or renamed) must go red too |
 | `test-oauth-loopback` | fast | both modes (§12.4): ephemeral bind for Gmail, fixed bind for Lark; `state` rejection on the request handler **and** on paste-back; the port released on completion/cancel/timeout | a **pre-bound** fixed port must produce the named refusal and the paste-back fallback, never an opaque `EADDRINUSE`; a callback with a wrong `state` must be rejected in both modes |
-| `test-integration-registry` | fast | each row's `fields` / `test` / `consumers`; `publicView` never emits plaintext and the last 4 appear only when the value is ≥ 12 chars; **omitting a secret field = unchanged, `''` = cleared**; precedence user > cluster > none; a vanished cluster default ⇒ `none` **with a named reason**; a missing required field ⇒ `missing` naming it. **The grep census (which prints the set it walked)**: `process.env.VIBESPACE_INTEGRATION*` only inside the store; **one parser per env name** (two rows sharing a name, or a row and a delegate sharing one, both go red); every `consumers` name is a file that exists **and** actually calls `resolveIntegration`; every row declaring `test` has a registered runner; **no scheduler / timer / ingest loop calls `test(`** | a row whose `consumers` names a file that exists but **never calls** `resolveIntegration` must go red (mere existence is the shape this census most easily decays into); a copy treating `''` as "unchanged" must go red; a copy that **copies** the cluster default into `data/integrations.json` must go red on the env-rotation leg (it keeps serving the old value); a synthetic producer calling `test(` from a timer must go red; a copy masking **outside** `publicView` must go red on the broadcast leg |
+| `test-integration-registry` | fast | each row's `fields` / `test` / `consumers`; `publicView` never emits plaintext and the last 4 appear only when the value is ≥ 12 chars; **omitting a secret field = unchanged, `''` = cleared**; precedence user > cluster > none; a vanished cluster default ⇒ `none` **with a named reason**; a missing required field ⇒ `missing` naming it. **The grep census (file set derived from `git ls-files` through `scripts/git-env.mjs`'s sanitized environment, and **printed** by the suite)**: the regex `/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/` — it matches the **env NAME**, not an access expression — only inside the store; **one parser per env name** (two rows sharing a name, or a row and a delegate sharing one, both go red); every `consumers` name is a file that exists **and** actually calls `resolveIntegration`; every row declaring `test` has a registered runner; **a row declaring `setup.prerequisites` must declare `test.caveat`**; **a row whose consumer runs an OAuth consent flow must declare `setup.callbackUrl`**, and that URL's literal **does not appear** in `src/oauth-loopback.js` (the row is its one definition site); **no scheduler / timer / ingest loop calls `test(`**. **r8's delegation-and-source group**: a `{via:'drive-presets', prefer, multi:true}` row must resolve to `prefer`'s key on an env holding two presets (`org1` + `channels`) and **no** `'default'`; a stored user selection beats `prefer`; a record holding **only a selector** must answer `source:'cluster'` carrying its `clusterKey`; `DELETE` lands on `cluster` / `none` respectively, while `useClusterDefault` **refuses by name** when there is no cluster default | a row whose `consumers` names a file that exists but **never calls** `resolveIntegration` must go red (mere existence is the shape this census most easily decays into); a copy treating `''` as "unchanged" must go red; a copy that **copies** the cluster default into `data/integrations.json` must go red on the env-rotation leg (it keeps serving the old value), **and that same leg requires withdrawing the env to flip the ADAPTER row** (`auth.state()` answering `needs-credentials`), not only the Integrations card — a copy flipping the card alone must go red; a synthetic producer calling `test(` from a timer must go red; a copy masking **outside** `publicView` must go red on the broadcast leg; **the two evasions of the env census each get a scratch file** (`process.env['VIBESPACE_INTEGRATIONS']` and `const { VIBESPACE_INTEGRATIONS } = process.env`) and both must go red; **a copy resolving a delegating row through `_driveClient()`'s `'default'` fallback** must answer null on the two-preset env and so go red; **a selector-only record answering `source:'user'` must go red** (it makes the source chip state the opposite and exports the pointer) |
 | `test-secret-box` | fast | **parity** with mounts (encrypt with a patched copy of the pre-extraction `_enc` ⇒ `secret-box` decrypts it, and the other way round, with the `iv.tag.data` triple byte-identical); **creates a key only on `ENOENT`**, throws **typed** on any other errno; writes through tmp+rename; **never overwrites an existing key file** | a copy carrying the bare catch of `src/mounts.js:360-367` must, on one injected `EACCES`, mint a new key and so turn the "old ciphertext still decrypts" assertion red — that defect itself, kept as a standing negative control |
 | `test-channels-lark-shape` | fast | recorded-fixture normalization: `next_page_token` paging *to the anchor*, `@_user_N` placeholder resolution against the record's own `mentions`, typed errors | a fixture whose anchor lies on the **second** page must be paged into, not stopped at page one |
 | `test-plugin-loader` (existing) | fast | `channelAdapters` in `RESERVED_CONTRIBUTIONS` ⇒ the "reserved for a later phase — ignored" warning actually fires (§15) | its expected-set assertion goes red if the word is added without updating the suite — which is the point |
@@ -2625,7 +2801,7 @@ Every phase ships its gate in the same commit. Suite names, tiers, and the
 | `test-channels-engine` | heavy | real worktree server + fake adapter: burst-day paging, backoff, single-flight, failure surfacing **and retraction**, digest batching, wake authorization and hold release | a pre-fix copy using a fixed-window fetch must lose messages on the burst-day fixture |
 | `test-channels-push` | heavy | real worktree server + a **fake push server**: ack after durability (inject a crash between ack and processing — the record must still be there); heartbeat silence ⇒ `state` leaves `live` **and** the poll cadence returns to fast immediately; `stop()` terminal for an arm in flight; a lane claiming `exclusive` while the fixture withholds some events ⇒ `missRate` crosses the threshold ⇒ **auto-demotion to kick with its reason stated**. **Three r4 legs**: after the demotion the lane **actually changes what it carries** (the next event only kicks the cursor and the record arrives by reconciliation poll — asserting that `missRate` crossed is not enough); in kick mode `missRate` **gains no samples at all** (otherwise it is a one-way ratchet); and a demoted lane **never re-promotes itself** even when the fixture stops withholding, while re-asserting exclusivity in the connect wizard clears the counters and re-enters content mode | a lane that **lies about being `active`** (pre-fix copy) must turn the poll fallback off and lose messages; a copy that never demotes must lose messages forever on the withholding fixture; **a pre-fix copy reading the content/kick decision off `caps` must keep carrying content after the demotion**; **a copy counting `missRate` over the adapter's lifetime must still sit above the threshold after a re-assert** |
 | `test-channels-store-scan` | heavy | real daemon (`test-sysinfo-op` is the template) + a **synthetic** WhatsApp-shaped sqlite: a rowid cursor reads to the end exactly once; **the most recent messages are still read** when the store carries an un-checkpointed WAL; a pass interrupted half-way leaves the anchor unmoved; **after the scan the source `db` and `-wal` are byte-identical with unchanged mtimes** (r6 — deliberately NOT the triple: a read-only open rewrites `-shm`, the content-free WAL index, and leaves even that untouched when it is unwritable, so asserting the triple would go red on the correct mechanism); a refused read ⇒ a named `tcc-denied` rather than zero records; **`no-sqlite-reader` is a named refusal when no reader rung is available** (r6); the capability gate — an older daemon that does not advertise this op is **never asked** (an unknown op hangs). **The fixture must include the arm where OUR connection is the ONLY one** (r6 — the normal shape for a scheduled scan) | a copy that reads **the `.db` file alone** must miss the most recent messages; **a copy taking the DEFAULT (read-write) open must fail the byte-identical assertion on the only-connection arm** (r6 — the failing shape is the DEFAULT, not the opt-in `mode=rw` r5 named, and it fails ONLY on that arm: with a client connection held open it passes, which is why the fixture needs both); a copy that reports `EPERM` as "zero messages" must fail the named-refusal leg; **a copy answering zero records when no SQLite reader exists must fail the `no-sqlite-reader` leg** |
-| `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate. **Plus the Integrations leg (§14.5)**: the cards render once under each of the three sources (`Not configured` / `Cluster default` / `Your own`); a secret field shows only `••••1234` with **no path that reads it back** (a `GET` after Replace still returns the masked view); the Test button's label follows `test.kind`; a failed Test paints the vendor's own text on the card through `escHtml`; and **the same cards render single-column at 375×667 with every control reachable** | the estimate must change when a rule is added, and a review-required channel must not offer "may send"; **a copy returning plaintext from `GET` must go red**; **a copy labelling a `shape-only` row "Test connection" must go red** (that button never went near the network); **any control landing outside the viewport at 375×667 must go red** — this leg names the `showDropdown` class of incident: unzoomed `offsetWidth` and a zoomed rect are not the same thing |
+| `test-channels-e2e` | heavy | headless chrome: rail badge, panel chips, conversation window, inline approval card → send → receipt, filter editor live estimate. **Plus the Integrations leg (§14.5)**: the cards render once under each of the three sources (`Not configured` / `Cluster default` / `Your own`); a secret field shows only `••••1234` with **no path that reads it back** (a `GET` after Replace still returns the masked view); the Test button's label follows `test.kind`; a failed Test paints the vendor's own text on the card through `escHtml`; **the `lark` card renders `setup.callbackUrl` as a literal **above** the fields, it can be copied, and all three `prerequisites` are present**; **a successful Test is rendered beside its `test.caveat`, never as the tick alone**; **the delegating row (`gmail`) renders a preset dropdown instead of the radio pair, and its chip reads `Cluster default · <label>`**; and **the same cards render single-column at 375×667 with every control reachable** | the estimate must change when a rule is added, and a review-required channel must not offer "may send"; **a copy returning plaintext from `GET` must go red**; **a copy labelling a `shape-only` row "Test connection" must go red** (that button never went near the network); **a copy drawing the tick without the `caveat` must go red** — this is the mirror of this round's high finding: a button that truthfully tested a credential pair, read as "I am configured"; **a copy that does not render the `setup` block must go red**, because that callback URL has no second home in the product; **any control landing outside the viewport at 375×667 must go red** — this leg names the `showDropdown` class of incident: unzoomed `offsetWidth` and a zoomed rect are not the same thing |
 
 Fixture hygiene applies from the first commit, because these are live incidents:
 no fixed `/tmp` path and no fixed port (use `scripts/scratch.mjs`); any suite
@@ -2756,6 +2932,36 @@ record three of them), and correctly described `'store'` as the better lane
 (findings 5 and 7 never asked which gate it lands behind or whether it can send). A
 round of fixes is not exempt because it is a fix.
 
+### 18.4 The adversarial review of r7 (r8) — a whole layer was added, and it owes the same review
+
+r7 added the whole of §14 to answer the owner's cluster directive. Six findings were
+raised, each checked against the tree in this worktree before anything changed, and
+**all six hold**; all are fixed above. They fall into two piles, and each pile is a law
+this document has already written down for somebody else: **the two high findings** are
+"can this card actually get a user configured" — what it renders is not enough, and its
+green tick claims more than it proved; **the two medium ones** are this codebase's two
+regulars — two faces of one record answering differently, and a census matching a
+spelling rather than the thing it claims to census.
+
+| # | Finding | Verdict | What changed |
+|---|---|---|---|
+| 1 | The configuration card **cannot make a user's own Lark app work**, and its Test goes green on an app that will fail the consent page — the exact outcome §10.1 says the card exists to prevent | **Confirmed.** §14.9's own conclusion is that a cross-tenant user **must** bring their own app (a self-built app is internal to one enterprise), so this is the **default** path for every cluster user outside the cluster's own tenant; §12.1 already names the three console prerequisites and says a missing one fails the *consent page*. But the card declared only `appId` / `appSecret`, and `credential-exchange` **succeeds** on an app with none of the three done ⇒ the user fills it in, Test goes green, `resolveIntegration` answers `user` from then on, the wizard stops opening the card — and the callback URL they must paste into the console (§12.4 fixes the port inside `src/oauth-loopback.js`) **never appears in the product at all** | The row gains `setup:{callbackUrl, callbackNote, prerequisites}`, rendered **above** the fields with a copy button (§14.2, §14.5); `test` gains `caveat` and the verdict is **never drawn alone**; the census gains two asserts (a row with `prerequisites` must declare a `caveat`; a row whose consumer runs OAuth must declare `callbackUrl`) and the 375×667 leg requires it rendered and copyable. **And the callback URL is defined only in that row** — `src/oauth-loopback.js` imports it, because a string that must match a console byte-for-byte cannot have two spellings |
+| 2 | The `gmail` row delegates to a credential **list** but cannot name which entry it means; and storing the user's pick flips `source` to `'user'` | **Confirmed, both halves.** (a) `drivePresets()` returns a list (`src/mounts.js:2189-2206`), and §12.2's own recommendation is that the cluster **add another** `channels` key ⇒ `_driveClient()` at `src/mounts.js:2215` answers **null** on `org1` + `channels` with no `'default'` ⇒ §19's P1 exit criterion is **structurally unreachable**; (b) the on-disk shape stamped every record `"source":"user"` ⇒ the source chip says "Your own" about a cluster credential (the one fact it exists to state), §14.10 exports a pointer to a cluster credential, and decision 22's "the UI saying *provided by the cluster*" is false for `gmail`; the binary radio pair also cannot render N presets, while the precedent it cites (`src/lib/sidebar-mounts.js:1747-1751`) has been an N+2 dropdown for that reason | `clusterEnv` gains `{prefer, multi}` with the order **the user's selection > `prefer` > the single preset** and never `'default'`; **`source` becomes derived, never stored** — the record holds only `values` and `clusterKey`, and a selector-only record answers `source:'cluster'`; §14.5 renders a dropdown on a delegating row with the chip reading `Cluster default · <label>`; §14.10 exports the **key**; P1's exit criterion is driven over a **two-preset** env; decision 22 records the correction. **One deliberate departure**: the reviewer wrote "`prefer` first, then the user's stored selection" — this document takes the **opposite** order, because `prefer` overriding an explicit pick makes the dropdown decorative and contradicts this section's own "the user's own > the cluster default" |
+| 3 | Two surfaces answer "is this adapter connected" from different facts and can contradict each other: withdrawing or rotating a cluster default leaves the Adapters row saying `connected` | **Confirmed.** §14.3 handles the configuration half honestly (the cluster default disappearing ⇒ `none`, named), but nothing joins it to §13; `resolveIntegration` appears 11 times in the English doc and **not once** is it `auth.state()`. Lark's `tenant_access_token` is minted per call and Gmail's client id/secret are needed for every refresh ⇒ the adapter is dead at that instant, while the truth arrives three failed passes later explained as a vendor 4xx | `auth.state()` takes `resolveIntegration(id)` as an input and gains a fourth value **`needs-credentials`**, with `why` naming what is missing (§4, §13); it is **not** `needs-reauth` (re-consenting cannot fix it) and **not** `unknown` (we know exactly what is wrong); §17's env-rotation leg now requires the **Adapters row** to flip, and a copy flipping only the card goes red |
+| 4 | The census enforcing "a consumer never reads `process.env` itself" greps a **spelling** rather than the env **NAME** | **Confirmed.** The literal `process.env.VIBESPACE_INTEGRATION` misses `process.env['VIBESPACE_INTEGRATIONS']`, `const { VIBESPACE_INTEGRATIONS } = process.env` and `const env = process.env; env.VIBESPACE_INTEGRATION_LARK_APPSECRET` — all ordinary. This codebase has been bitten three times by that class: test-architecture §45 r3 (callee names ⇒ one alias walked a retired shape back onto the kill path; fixed by matching the tool literal in argv), test-writer-sweep §17 r7 (a typed file list missed **47** files that really send signals; fixed by a grep-derived, printed set), test-fixture-isolation r2 (one alias hid an `rm -rf`; fixed by taking the fixpoint) | The census matches the **env NAME** (`/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/`) over a file set derived from `git ls-files` through `scripts/git-env.mjs`'s sanitized environment and **printed** by the suite; the two evasions become its negative controls (§14.6, §17) |
+| 5 | `useClusterDefault` and `DELETE`, two adjacent sentences, give opposite answers for the same transition | **Confirmed.** §14.3 says "with no cluster default present it is a named refusal", §14.4 says "back to `none` when there is none", and `DELETE` is the only route reaching this behaviour from the UI ⇒ one of the two is **unreachable from the product**, and which one depends on the sentence the implementer read | Split into two intents and two functions: `clearUserValues` ("clear my key", always allowed, lands wherever precedence lands) is what `DELETE` calls; `useClusterDefault` (the radio, through `PUT {use:'cluster'}`) refuses by name when there is none — which is the same fact as that radio being disabled *and saying why*. Both outcomes are pinned by `test-integration-registry` |
+| 6 | One of the 22 code citations is off by one line | **Confirmed, re-read.** `src/routes/persistence.js:697` is the helper definition `const take = (name, fn) => …`; `take('settings', readSettings);` is at **698** (the neighbouring `:679-686` and §14.10's `:712-741` / `:729-732` are exact) | §14.1 reads `:698` in both documents |
+
+This round's own lesson is r6's, one step further: **r6 said "every new field a fix
+introduces must be re-read against the rule that fix has just written down", and r8
+says "a newly added surface must be re-read against the outcome it claims to
+prevent".** §10.1 wrote down why this card exists (do not send the user into a flow
+that fails on the consent page), and the card §14.2 and §14.5 actually specify
+**cannot do that** — not because any one sentence is wrong, but because nobody walked
+the card again holding that sentence: what it renders, what its green tick says,
+whether the user can copy that URL. A surface's spec must be read against its own
+acceptance criterion, not against its own field list.
+
 ---
 
 ## 19. Phases, rounds, calendar
@@ -2806,7 +3012,13 @@ standing grep census (+1), and the helm `integrations:` block + `deploy/README.m
 exit criteria**: the fake adapter gets a registry row of its own, so all three sources ("the user's
 own > the cluster default > none") are exercised in P0; and **injecting a cluster default and then
 withdrawing it** must turn that row into `none` with a stated reason, never quietly keep serving the
-old value.
+old value. **r8: +0.5 rounds** — the `setup` block and its copy button, `test.caveat` and the
+"never draw the tick alone" rule, the delegating row's `prefer` / `multi` resolution and its preset
+dropdown, `source` becoming derived rather than stored, and the env census moving from one spelling
+to a `git ls-files`-derived file set matched on the env **NAME** and printed. **Two more exit
+criteria**: the fake adapter's row carries a `setup` block, and the 375×667 leg requires that URL
+to be rendered and copyable; and with two presets injected (`org1` + `channels`, no `'default'`) a
+delegating row must resolve to `prefer`'s key, while a stored user selection beats it.
 
 ### P1 — Lark read + Gmail read + **the push lanes** — **14–16 rounds (7–8 days)**
 
@@ -2840,7 +3052,9 @@ P0 (−1), and what moves in is this layer's two consumer legs (+1): the Lark an
 their credentials from `resolveIntegration()` rather than each reading the env, their own
 `registerIntegrationTest` runners, and the connect wizard's three copy paths for `none` / `cluster` /
 `user` (§10.1, §14.5). **One more exit criterion**: an instance with only a cluster default, where the
-user typed nothing, must connect end to end.
+user typed nothing, must connect end to end — **and that criterion is driven over a TWO-preset env**
+(`org1` + `channels`, with **no** `'default'`), because that is the shape §12.2's answer to decision 5
+asks the cluster for, and it is exactly the one `_driveClient()`'s fallback answers null on (§14.2, r8).
 
 ### P2 — assign, filter, wake — **9–11 rounds (4.5–5.5 days)**
 
@@ -2991,7 +3205,7 @@ they are here rather than in the code.
 | 19 | **How far do local-client adapters (WhatsApp / WeChat) go?** (new, r3/Q3(b); **corrected by the owner in r5**) | (a) not at all / (b) **UI only**: the official client inside an agent-browser profile, scan what it renders, send through its own composer / (c) also protocol libraries (whatsmeow / Baileys) and reading the local store / (d) **(b) plus reading the store on platforms where the client leaves it unencrypted** | **(b) + (d), still explicitly excluding (c).** r3 excluded "read the local store" wholesale by bundling it with the protocol libraries, and **the owner pointed out that this is wrong**: it holds for WeChat (the store is SQLCipher/WCDB-encrypted with the key only in the **running client's process memory**, and this product does not read another process's memory — fence 13) and it does **not** hold for **WhatsApp on macOS** — that official Catalyst client leaves its whole chat history in an **unencrypted** Core Data SQLite store (`~/Library/Group Containers/…/ChatStorage.sqlite`), and reading it is an ordinary, user-authorized, read-only file read: **no secret is defeated, because there is no secret**. So **`'store'` is allowed, and preferred over `'ui'`, on the platforms that have it** — not because it is faster (though it is by an order of magnitude) but because **its anchor is not one we invented**, so §5 invariant 2 gets a real vendor id and the whole cost of `'ui'`'s synthetic key disappears. Three boundaries are fixed: ① **only unencrypted counts** — WhatsApp's Windows stores are encrypted (UWP via SEE with a dbKey derived from a machine identifier the app does not expose; the WebView2 line via DPAPI-NG), and recomputing a key the vendor deliberately withheld is the same act as extracting it from memory, which fence 13 (b) refuses ⇒ Windows takes `'ui'`; ② **Linux has no official desktop client at all** ⇒ web-in-profile `'ui'` only; ③ **WeChat does not change by one word** ⇒ `'ui'` on every platform. The store route is **read-only** (a **read-only open** plus a snapshot taken from that connection — r6 corrects r5's backup-API-first wording, which named the one mode that mutates; never write, never checkpoint), runs as a `channels-scan-store` agentd op (`hostId` a parameter, the local box device #0), and macOS TCC is a **named** gate: a refusal reaches the user as `tcc-denied` with grant steps in the connect wizard and **never** silently degrades to `'ui'` (that would turn the latency number on the conversation row into a lie). **Sending is stated PER SOURCE (r6 correction), because it is not one act**: `'ui'` = an agent-browser typing into that logged-in official client's own composer, so identity really is the user (`identityMarking:'none'`); macOS `'store'` has **no send lane of its own** — the official client there is a native Catalyst app no browser profile reaches — so P6a is **READ-ONLY** and says so structurally (`convCaps.sendAs: []` with `why:'no-send-lane-on-this-host'`, which §4's rule renders as not-offered-with-a-reason and which creates no proposal). **A fourth thing is therefore open and belongs to you**: whether macOS sending is (i) the same Web client in an agent-browser profile — plainly a **SECOND linked-device credential**, two logins for one conversation, modelled as its own row beside `auth.state()`/`scanState().grant` — or (ii) native macOS UI automation (Accessibility / CGEvent) with **its own** TCC grant, or (iii) neither, leaving the class read-only where `'store'` wins. **Recommendation: (iii) for P6a**, and decide (i) vs (ii) only if the owner asks for outbound on macOS — the read half is the value, and a second credential quietly contradicts "it really is the user". Also (r6): the store route's read is a **read-only SQLite open** with a snapshot taken from that connection (never the default read-write open, which checkpoints and deletes the WAL on close), and the daemon-side SQLite reader is named in §12.5 rather than left to the implementer. The interface models the class from P0; P6 therefore **splits into two legs**, the macOS `'store'` leg gated on this decision **alone** (it needs no agent-browser) and the `'ui'` leg still doubly gated |
 | 20 | **Should Gmail push be on by default?** (new, r3/Q3(c)) | on by default / **available, off by default** / not at all | **Available, off by default.** Pub/Sub's pull subscription means it needs no public inbound endpoint either, and each instance can hold its own subscription, so exclusivity is easier to achieve than on Lark's long connection. But it costs a GCP topic, an IAM grant and a **daily renewal job** (the watch expires silently after 7 days and stops without a sound if one is missed), and what it buys is trading a poll that costs one request per tick when nothing changed for second-level latency. At mail's cadence that is a switch a user should turn on for their own situation, not a default |
 | 21 | **How OAuth callbacks work in the cluster (r7, §14.9)** | (a) the existing **loopback + paste-back** (the cluster registers one URL, independent of the number of instances; one extra paste per connect) / (b) a **cluster auth relay** `https://auth.<cluster>/cb` (signed state forwarded to the instance's public URL; zero pastes) | **(a) for v1, (b) as a later phase.** Not because it is easier: (a) is the path running in production today (the Gmail mounts), and the redirect_uri contains no instance address at all ⇒ "N instances with N public URLs" is **structurally not a problem**; (b) adds a component that **can see authorization codes**, which must forward and never persist, and whose compromise is a whole-cluster problem — a change that needs its own threat model and its own operational commitment, worth scheduling on its own rather than riding along. Choosing (b) also decides: who operates it, how its signing key rotates, and how an instance verifies that signature |
-| 22 | **Once the cluster supplies a default credential, is the user CONNECTED or merely PRE-FILLED? (r7)** | Automatically **connected** / **pre-filled**, still one Connect click | **It depends on the kind of row, and that is the decision**: **an OAuth row (lark / gmail) structurally cannot be auto-connected** — what the cluster supplies is an **app credential**, while connecting also needs **this user's own authorization** (one browser round trip), so it can only be "pre-filled + one click", with the UI saying **"provided by the cluster"**; a **key-only row** (CloakBrowser / cloud browsers) genuinely can work the moment it is injected, and there is a precedent for exactly that: the frp plugin is **default-enabled** when the cluster injects its env (`src/plugins.js:584-588`). **Recommendation**: OAuth rows pre-filled; key-only rows follow frp's rule and are available by default — but **only when that key is not billed per seat** (§14.8, last rule). One cluster-funded seat shared by N users is an operational decision, not a default |
+| 22 | **Once the cluster supplies a default credential, is the user CONNECTED or merely PRE-FILLED? (r7)** | Automatically **connected** / **pre-filled**, still one Connect click | **It depends on the kind of row, and that is the decision**: **an OAuth row (lark / gmail) structurally cannot be auto-connected** — what the cluster supplies is an **app credential**, while connecting also needs **this user's own authorization** (one browser round trip), so it can only be "pre-filled + one click", with the UI saying **"provided by the cluster"**; a **key-only row** (CloakBrowser / cloud browsers) genuinely can work the moment it is injected, and there is a precedent for exactly that: the frp plugin is **default-enabled** when the cluster injects its env (`src/plugins.js:584-588`). **Recommendation**: OAuth rows pre-filled; key-only rows follow frp's rule and are available by default — but **only when that key is not billed per seat** (§14.8, last rule). One cluster-funded seat shared by N users is an operational decision, not a default. **r8's correction**: this sentence was **not true of `gmail`** under r7's on-disk shape — picking a cluster preset in that dropdown stamped the record `source:'user'`, so the UI said "Your own" rather than "provided by the cluster". §14.3 now makes `source` **derived** rather than stored, and a record holding only a selector answers `source:'cluster'` (carrying its `clusterKey`), so the recommendation holds on both kinds of row |
 | 23 | **May a user's own key be exported under a passphrase? (r7, §14.10)** | Yes (join the `sensitive` half) / never exported | **Yes, but only `source:'user'` rows.** They are the same class of thing as `mounts` / `accounts` (already in that half), and a user migrating instances expects their own key to travel. **A cluster default is never exported**: it is not ours, it rotates, and imported onto an instance with no such preset it must resolve to `none` **naming what is missing** rather than silently falling back to the exporter's values |
 | 24 | **One `secret-box` key or one per store? (r7, §14.7)** | One shared `data/.secret-box-key` / one per store | **One per store**, with mounts' `data/.mounts-key` untouched byte for byte. Moving a key file is an **irreversible data-loss path** bought for one fewer file, and when a key is rotated or damaged the blast radius should stop at one store. The only upside of sharing (one fewer file in a backup) is bought instead by §14.10's export block |
 | 25 | **May a registry row ship before its consumer exists? (r7, `whatsapp-business` in §14.2)** | Yes (place the card now) / no (same commit as its adapter) | **No.** A row with no live consumer is a card that does nothing, while the key a user types into it is stored, encrypted, exported and listed under "where is this used" — and used by nothing. This is the same law as `SPEND_REASONS` and `contributes.channelAdapters`, enforced by `test-integration-registry`'s `consumers` census. The fields and the "no cluster default" answer are still fixed **now** (the table in §14.2), which costs nothing |
@@ -3221,6 +3435,25 @@ discovers them in production:
     far a Replace expansion scrolls were never measured — and the `showDropdown` class of
     incident (unzoomed `offsetWidth` vs a zoomed rect) comes from exactly this size, so
     that leg must really run in P0 rather than waiting until three rows exist.
+30. **How unhealthy a Lark app `credential-exchange` still succeeds on is unmeasured
+    (r8).** The `test.caveat` rule rests on a piece of reasoning: the
+    `tenant_access_token` endpoint's only inputs are the app id and secret, so it still
+    returns a token on an app with no scopes granted, no published version and no
+    registered redirect URL. That is derived from the endpoint's **documented inputs**,
+    not measured — and item 2 above already records that event subscription was never
+    enabled on this app and nobody has read its console state for this question.
+    **Which way it fails**: if that exchange in fact **does** fail, the caveat merely says
+    one true thing more (no harm) and "open the card first" gives the right answer
+    slightly earlier — so the direction of this unknown is safe, but it is still an
+    unknown and must not be read as a measurement. P1's first act already includes doing
+    those three things in the console, which measures it in passing.
+31. **The port in the callback URL (`17865`) is chosen, not measured (r8).** §14.2 fixes
+    it in one place, and §12.4's machine-global handling (bind only for the flow, a named
+    `EADDRINUSE` refusal, the paste-back fallback) is independent of the value. Nothing
+    was checked about whether anything else on this machine or in the cluster image
+    conventionally uses that port — and once decision 4's console registration lands the
+    number is **expensive to change** (it costs another console round trip), so it is
+    worth two minutes of checking before registering.
 
 **Sources for the vendor facts introduced in r3, r5, r6 and r7** (public documentation,
 fetched 2026-09-10 for r3/r5/r6 and 2026-09-11 for r7; nothing here was exercised
