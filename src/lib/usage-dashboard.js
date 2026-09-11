@@ -60,7 +60,30 @@ export const DIMENSIONS = () => ([
   { key: 'hour', label: t('Hour of day'), seq: true },
   { key: 'weekday', label: t('Weekday'), seq: true },
   { key: 'session', label: t('Session') },
+  // 2026-09-10: which KIND of transcript the request came from — the
+  // conversation itself, one of its subagents, or a workflow agent. Usable as
+  // a `splitBy` too (session×origin, day×origin), which is how a panel says
+  // "how much of this did agents spend".
+  { key: 'origin', label: t('Origin') },
 ]);
+
+// ── THE ORIGIN VOCABULARY (2026-09-10), declared ONCE. The ledger's keys are
+// protocol values ('main'|'subagent'|'workflow'|'unknown'); the human labels
+// and the colour each origin is drawn in are needed by the panel dashboard
+// (row labels, split-series legend) AND by the window's own sections, and two
+// copies of a label table is how a legend starts disagreeing with a column
+// header. Lives here beside DIMENSIONS/the weekday names for the same reason.
+// 'unknown' = the ledger holds the row but nobody can name its transcript any
+// more; it is never hidden, because it is spend.
+export const ORIGIN_COLS = ['main', 'subagent', 'workflow'];
+export const ORIGIN_ORDER = [...ORIGIN_COLS, 'unknown'];
+export const ORIGIN_META = () => ({
+  main: { label: t('Conversation'), color: 'var(--accent)' },
+  subagent: { label: t('Subagents'), color: 'var(--green, #3fb950)' },
+  workflow: { label: t('Workflows'), color: 'var(--yellow, #e5c07b)' },
+  unknown: { label: t('Unattributed'), color: 'var(--text-dim)' },
+});
+export const originLabel = (key) => ORIGIN_META()[key]?.label || key;
 
 export const CHARTS = () => ([
   { key: 'stat', label: t('Big number') },
@@ -82,7 +105,11 @@ export const PRESETS = () => ({
       { metrics: ['cost'], dim: 'billing', chart: 'pie', span: 1 },
       { metrics: ['cost', 'requests'], dim: 'account', chart: 'bars', span: 1 },
       { metrics: ['cost'], dim: 'hour', chart: 'bars', span: 1 },
+      { metrics: ['cost'], dim: 'origin', chart: 'pie', span: 1 },
       { metrics: ['cost'], dim: 'project', chart: 'bars', span: 2, topN: 10 },
+      // The agent split per conversation — the same question the classic
+      // view's session table answers, in the panel model's own vocabulary.
+      { metrics: ['cost'], dim: 'session', splitBy: 'origin', chart: 'bars', span: 2, topN: 10 },
     ],
   },
   tokens: {
@@ -182,6 +209,8 @@ function panelRows(data, panel) {
       rows.forEach((r) => { r.key = WD[Number(r.raw.key)] ?? r.key; });
     }
   }
+  // The ledger's origin keys are protocol values — label them like weekdays.
+  if (panel.dim === 'origin') rows.forEach((r) => { r.key = originLabel(r.raw.key); });
   return rows;
 }
 
@@ -408,7 +437,7 @@ function chartSplit(body, data, panel, mlist) {
   for (const r of rows) for (const [k, c] of Object.entries(r.cells)) totalsByS[k] = (totalsByS[k] || 0) + valueOf(c, m.key);
   const sorted = Object.keys(totalsByS).sort((a, b) => totalsByS[b] - totalsByS[a]);
   const kept = sorted.slice(0, 6), rest = sorted.slice(6);
-  const labMap = new Map((data.groups?.[panel.splitBy] || []).map((g) => [g.key, g.name || g.key]));
+  const labMap = new Map((data.groups?.[panel.splitBy] || []).map((g) => [g.key, g.name || (panel.splitBy === 'origin' ? originLabel(g.key) : g.key)]));
   const horizontal = panel.chart === 'bars' && !dimMeta?.seq;
   const canvas = chartHolder(body, rows.length > 20);
   const colors = themeColors(canvas);

@@ -7,10 +7,15 @@
 // that already ran it will not re-run — ship a follow-up instead). Pattern:
 // archive, then strip — never destroy.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { runMigrations } = require('../migration-runner.js');
 
-function create({ rootDir, serverNotice }) {
+// `homeDir` is a PARAMETER, not an ambient fact: a migration that reads the
+// transcript tree (the origin backfill) must be drivable against a scratch
+// home, or its suite reads — and its timing depends on — whatever ~/.claude
+// the developer happens to have (measured: 3.9 GB / 27 s on this instance).
+function create({ rootDir, serverNotice, homeDir = os.homedir() }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -154,6 +159,20 @@ function create({ rootDir, serverNotice }) {
         // number moved and no reading was archived away. A notice about a
         // shape change is noise, and the notices this instance already sends
         // about quota repairs are about DATA that moved.
+      },
+    },
+    {
+      id: '2026-09-usage-origin-backfill',
+      note: "the ledger could not say WHICH kind of transcript a request came from, so the Usage window could not separate a conversation's own spend from its subagents' and its workflows', and — because an agent record carries ITS OWN cwd — every agent that ran in a git worktree was its own row in 'By project' (272 of this instance's 3,155 agent transcripts carry a worktree path, measured 2026-09-10). From this release the walk stamps origin/wf/agent and attributes an agent event to the PARENT project's cwd (keeping its own as wcwd); this names the rows written before that, by walking the transcript tree once and looking up each row's rid. A row whose transcript is gone gets origin 'unknown' rather than a guess. Copies every shard verbatim under data/archive/ before rewriting it.",
+      run() {
+        const { backfillUsageOrigin } = require('../usage-origin-backfill.js');
+        const rep = backfillUsageOrigin({ dataDir, projectsDir: path.join(homeDir, '.claude', 'projects'), id: '2026-09-usage-origin-backfill' });
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran.
+        console.log('[migrate] usage-origin:', JSON.stringify(rep));
+        // Deliberately NO serverNotice: no usage moved between accounts and no
+        // row was archived away — the ledger gained a label. The notices this
+        // instance sends are about DATA that moved.
       },
     },
     {

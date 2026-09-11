@@ -207,6 +207,108 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(JSON.stringify(modLate) === JSON.stringify(scLate), 'module: identical late event (parity across the boundary)');
 }
 
+// ── ORIGIN, BOTH SPELLINGS (2026-09-10) ──────────────────────────────────
+// Every event says WHICH kind of transcript produced it, an agent event is
+// attributed to the PARENT project's cwd, and the agent's own directory rides
+// along as `wcwd` only when it differs (the git-worktree case, which is what
+// made "By project" list a throwaway worktree as its own project). Three file
+// kinds, one fixture, both walkers — a one-sided edit fails HERE.
+{
+  const oHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-org-'));
+  const OSID = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
+  const OREPO = '/home/u/repo';
+  const OTREE = '/home/u/repo/.claude/worktrees/agent-wt';
+  const oProj = path.join(oHome, '.claude', 'projects', OREPO.replace(/[/._]/g, '-'));
+  const orec = (rid, cwd) => JSON.stringify({
+    type: 'assistant', requestId: rid, timestamp: '2026-08-09T08:00:00.000Z', cwd,
+    message: { id: 'msg_' + rid, model: 'claude-fable-5', usage: { input_tokens: 100, output_tokens: 20 } },
+  }) + '\n';
+  write(path.join(oProj, OSID + '.jsonl'), orec('req_o_main', OREPO));
+  write(path.join(oProj, OSID, 'subagents', 'agent-sub1.jsonl'), orec('req_o_sub', OREPO));
+  // the workflow agent ran in a git worktree — the whole reason `wcwd` exists
+  write(path.join(oProj, OSID, 'subagents', 'workflows', 'wf_run9', 'agent-wt.jsonl'), orec('req_o_wf', OTREE));
+  // a SECOND session whose own transcript is gone: the project cwd must still
+  // resolve, from a sibling top-level transcript (every transcript in a project
+  // dir shares one cwd by construction — the dir name IS the encoded cwd)
+  const OSID2 = 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb';
+  write(path.join(oProj, OSID2, 'subagents', 'agent-orphan.jsonl'), orec('req_o_orphan', OTREE));
+
+  const { runUsageWalk: walkOrg } = require(path.join(REPO, 'src/usage-walker.js'));
+  const modOrg = walkOrg({ home: oHome, cursorFile: path.join(dataDir, 'org-mod-cursor.json') }).events.map((l) => JSON.parse(l));
+  const scanOrg = execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
+    encoding: 'utf8', env: { ...process.env, HOME: oHome, CODEX_HOME: path.join(oHome, '.codex'), VIBESPACE_USAGE_CURSOR: path.join(dataDir, 'org-scan-cursor.json') }, timeout: 30000,
+  }).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const byRid = (evs) => Object.fromEntries(evs.map((e) => [e.rid, e]));
+  const mo = byRid(modOrg), so = byRid(scanOrg);
+
+  ok(modOrg.length === 4 && scanOrg.length === 4, `both walkers count all four requests (${modOrg.length}/${scanOrg.length})`);
+  ok(mo.req_o_main?.origin === 'main' && !('wf' in mo.req_o_main) && !('agent' in mo.req_o_main) && !('wcwd' in mo.req_o_main) && mo.req_o_main.cwd === OREPO,
+    'a top-level transcript is origin "main" and carries no agent fields (a main row must not grow four keys for nothing)');
+  ok(mo.req_o_sub?.origin === 'subagent' && mo.req_o_sub.agent === 'agent-sub1' && !('wf' in mo.req_o_sub)
+    && mo.req_o_sub.cwd === OREPO && !('wcwd' in mo.req_o_sub),
+    'a subagent event names its agent file; same cwd as its parent ⇒ NO wcwd (an equal copy is bytes with no information)');
+  ok(mo.req_o_wf?.origin === 'workflow' && mo.req_o_wf.wf === 'wf_run9' && mo.req_o_wf.agent === 'agent-wt'
+    && mo.req_o_wf.cwd === OREPO && mo.req_o_wf.wcwd === OTREE,
+    `a workflow agent in a worktree is attributed to the PARENT project and keeps its own dir as wcwd (${mo.req_o_wf?.cwd} / ${mo.req_o_wf?.wcwd})`);
+  ok(mo.req_o_orphan?.cwd === OREPO && mo.req_o_orphan?.wcwd === OTREE,
+    'the project cwd resolves from a SIBLING transcript when the parent\'s own file is gone (never decoded from the directory name)');
+  ok(JSON.stringify(modOrg) === JSON.stringify(scanOrg),
+    'module and shipped scanner events are BYTE-IDENTICAL over all three file kinds (origin/wf/agent/wcwd included)');
+
+  // A CONVERSATION'S cwd IS NOT CONSTANT. Measured on this instance: 3 of 782
+  // top-level transcripts state more than one, and one of them is the biggest
+  // spender here — a directory rename left its FIRST record saying
+  // `…/claude-code-webui` while its latest records and its project directory
+  // both say `…/vibespace`, so "the first cwd" filed $7,828 of one
+  // conversation's agent spend under a path that no longer exists, in a SECOND
+  // "By project" row beside that same conversation's own main spend. The
+  // project DIRECTORY NAME is the forward ENCODING of the cwd, so a candidate
+  // can be verified; and when nothing matches, the conversation's MOST RECENT
+  // cwd wins. Both spellings, one fixture — a one-sided edit fails here.
+  {
+    const OLD = '/home/u/old-name';
+    const RSID = 'eeeeeeee-ffff-4aaa-8bbb-cccccccccccc';
+    // (a) both cwds inside the head window ⇒ the encode match decides
+    write(path.join(oProj, RSID + '.jsonl'), orec('req_o_ren0', OLD) + orec('req_o_ren1', OREPO));
+    write(path.join(oProj, RSID, 'subagents', 'agent-ren.jsonl'), orec('req_o_ren_sub', OTREE));
+    // (b) the CURRENT cwd only in the TAIL (the head window is 128 KiB, and a
+    //     long conversation's early records are the stale ones)
+    const TSID = 'ffffffff-aaaa-4bbb-8ccc-dddddddddddd';
+    const filler = JSON.stringify({ type: 'user', cwd: OLD, message: { role: 'user', content: 'x'.repeat(400) } }) + '\n';
+    write(path.join(oProj, TSID + '.jsonl'), orec('req_o_tail0', OLD) + filler.repeat(400) + orec('req_o_tail1', OREPO));
+    write(path.join(oProj, TSID, 'subagents', 'agent-tail.jsonl'), orec('req_o_tail_sub', OTREE));
+
+    const modR = byRid(walkOrg({ home: oHome, cursorFile: path.join(dataDir, 'org-mod-cursor2.json') }).events.map((l) => JSON.parse(l)));
+    const scanR = byRid(execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
+      encoding: 'utf8', env: { ...process.env, HOME: oHome, CODEX_HOME: path.join(oHome, '.codex'), VIBESPACE_USAGE_CURSOR: path.join(dataDir, 'org-scan-cursor2.json') }, timeout: 30000,
+    }).split('\n').filter(Boolean).map((l) => JSON.parse(l)));
+
+    ok(modR.req_o_ren_sub?.cwd === OREPO && modR.req_o_ren_sub?.wcwd === OTREE,
+      `a RENAMED conversation's agent follows the cwd that encodes to the project dir, not the first record's (${modR.req_o_ren_sub?.cwd})`);
+    ok(modR.req_o_tail_sub?.cwd === OREPO,
+      `…and the head window holding only the stale path is not the end of the ladder — the TAIL answers (${modR.req_o_tail_sub?.cwd})`);
+    ok(scanR.req_o_ren_sub?.cwd === OREPO && scanR.req_o_tail_sub?.cwd === OREPO,
+      'the shipped scanner resolves both shapes identically (the mirror is behavioural, not textual)');
+    ok(modR.req_o_ren0?.cwd === OLD && modR.req_o_ren1?.cwd === OREPO,
+      'NEGATIVE CONTROL: a MAIN row still carries its own record\'s cwd — only agent rows are re-attributed');
+  }
+  ok(scanOrg.every((e) => typeof e.origin === 'string' && e.origin),
+    'the shipped scanner stamps an origin on EVERY event (a remote host that runs workflows is exactly where the split matters)');
+  ok(so.req_o_wf?.wf === 'wf_run9' && so.req_o_wf?.agent === 'agent-wt' && so.req_o_wf?.wcwd === OTREE,
+    'the shipped scanner carries wf/agent/wcwd too — the 2.265.0/2.271.0 one-sided-port class');
+
+  // …and the LOCAL ledger passes them through the scan enrichment unchanged.
+  const uhOrg = new UsageHistory({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-org-data-')), homeDir: oHome });
+  uhOrg.scan({ force: true });
+  const lo = byRid([...uhOrg._events(0, Date.now() + 1e9)]);
+  ok(lo.req_o_wf?.origin === 'workflow' && lo.req_o_wf.wf === 'wf_run9' && lo.req_o_wf.agent === 'agent-wt'
+    && lo.req_o_wf.cwd === OREPO && lo.req_o_wf.wcwd === OTREE && lo.req_o_main?.origin === 'main',
+    'the LOCAL ledger bakes origin/wf/agent/wcwd (three-walker parity)');
+
+
+  fs.rmSync(oHome, { recursive: true, force: true });
+}
+
 // ── THE FIXTURE GUARD, BOTH SPELLINGS (2026-09-09) ───────────────────────
 // A suite's SYNTHETIC transcript is not usage. The module requires
 // src/fixture-guard.js; the shipped scanner carries an INLINE COPY because a

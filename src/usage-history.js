@@ -76,6 +76,13 @@ class UsageHistory {
     // boot-time consumer re-reads after the repair instead of the repair
     // reaching into a live object.
     this.reloadCursors = () => { this._cursors = this._loadJson(this.cursorsFile, {}); };
+    // …and the same for the EVENTS (2026-09-10). `_loadEvents` keeps a byte
+    // watermark per shard and only reads the appended tail, so a migration
+    // that REWRITES a shard in place (the origin backfill) is invisible to an
+    // already-warm cache — and `_evCache.rids` would keep serving the
+    // pre-migration objects for the life of the process. Boot re-reads after
+    // runLocalMigrations, exactly like reloadCursors.
+    this.reloadEvents = () => { this._evCache = null; };
     this._pricing = this._loadPricing();
     this._scanning = false;
     this._lastScan = 0;
@@ -375,6 +382,15 @@ class UsageHistory {
             mode: minfo.mode || null,
             host: minfo.host || null,
             cwd: ev.cwd,
+            // ORIGIN (2026-09-10): which KIND of transcript this request came
+            // from, straight from the walk — the only place that knows, since
+            // it is a fact about the FILE. cwd is already the parent project's
+            // for an agent event; wcwd names the agent's own dir when it
+            // differs (a git worktree), so "By project" stops listing every
+            // throwaway worktree as a project of its own.
+            wcwd: ev.wcwd,
+            origin: ev.origin || 'main',
+            wf: ev.wf, agent: ev.agent,
             i: ev.i, cw5: ev.cw5, cw1: ev.cw1, cr: ev.cr, o: ev.o,
             tier: ev.tier,
           });
@@ -441,6 +457,14 @@ class UsageHistory {
         mode: null,
         host: hostId,
         cwd: e.cwd || null,
+        // Origin fields ride in from the host-side walker (the shipped scanner
+        // stamps them from 2026-09-10). A scanner too old to know them leaves
+        // the event WITHOUT an origin rather than claiming 'main': a remote
+        // machine that runs workflows is exactly where the agent split matters,
+        // so inventing the answer here would be a lie about the busiest case.
+        wcwd: e.wcwd || undefined,
+        origin: e.origin || undefined,
+        wf: e.wf || undefined, agent: e.agent || undefined,
         i: e.i || 0, cw5: e.cw5 || 0, cw1: e.cw1 || 0, cr: e.cr || 0, o: e.o || 0,
         tier: e.tier || null,
       };
@@ -674,7 +698,13 @@ class UsageHistory {
   // The one flexible query the UI uses. groupBy is an array of dimension keys;
   // returns { totals, series(byDay), groups: { <dim>: [{key,...}] }, accounts }.
   aggregate({ from = null, to = null, backend = null, accounts = null, hostFilter = null, pivots = null } = {}) {
-    const dims = { day: {}, model: {}, account: {}, billing: {}, project: {}, mode: {}, host: {}, hour: {}, weekday: {}, session: {}, pool: {} };
+    // `origin` (2026-09-10) = which KIND of transcript the request came from:
+    // 'main' (the conversation itself), 'subagent', 'workflow', or 'unknown'
+    // for a row nobody can name any more (the backfill migration's honest
+    // answer for a transcript that is gone, and a remote scanner too old to
+    // stamp it). It is a FIRST-CLASS dimension, so `session:origin` is an
+    // ordinary pivot and the Usage window's session table is a pivot read.
+    const dims = { day: {}, model: {}, account: {}, billing: {}, project: {}, mode: {}, host: {}, hour: {}, weekday: {}, session: {}, pool: {}, origin: {} };
     const dimMeta = {}; // dim → key → {name,type,...} extra labels
     // pivots = [[dimA, dimB], …] — 2-D crosses for the dashboard's split-series
     // panels (e.g. day×account = per-account daily token stacks). Cells carry
@@ -714,6 +744,7 @@ class UsageHistory {
         weekday: String(d.getDay()),
         session: ev.sid,
         pool: ev.pool || null, // only events billed THROUGH a pool have this
+        origin: ev.origin || 'unknown', // absent = a row written before 2026-09-10 that the backfill could not name
       };
       for (const dim of Object.keys(dims)) {
         const k = keyOf[dim];
@@ -767,8 +798,12 @@ class UsageHistory {
       if (!dimMeta.session) dimMeta.session = {};
       if (!dimMeta.session[ev.sid]) {
         const sm = this._lastMetaMap ? this._lastMetaMap[ev.sid] : null;
-        dimMeta.session[ev.sid] = { name: sm?.name || null, be: ev.be || 'claude' };
-      }
+        // `project` = the conversation's own cwd, so the session table can say
+        // WHERE a session worked without a second lookup. Agent events already
+        // carry the PARENT project's cwd, so any of a session's events answers
+        // it — but a null one must not win, hence the fill-in below.
+        dimMeta.session[ev.sid] = { name: sm?.name || null, be: ev.be || 'claude', project: ev.cwd || null };
+      } else if (!dimMeta.session[ev.sid].project && ev.cwd) dimMeta.session[ev.sid].project = ev.cwd;
     }
     const groupOut = {};
     // Sequential dims keep AXIS order (day = lexicographic/chronological,
