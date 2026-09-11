@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.91 — the reference prices know Fable 5.1 (cache hits $0.25/MTok, not $1) and Sonnet 5 ($2/$10)
+
+- Owner: "完成同样的任务 opus 真的比 fable 便宜吗?" — the first thing the ledger got wrong: `DEFAULT_PRICING` had ONE `fable` tier with the Fable 5 cache-hit rate ($1/MTok), while Fable 5.1 / Mythos 5.1 price cache hits at 0.025× base input = **$0.25/MTok** (official pricing page, 2026-09). On this instance that overstated seven days of Fable by 38 % (the main session is cache-heavy). Now `fable-5-1` and `sonnet-5` ($2/$10, cache hit $0.20 — the launch price became the standard price) are their own tiers; the matcher already prefers the longest key, so `claude-fable-5` stays on the Fable 5 rate; an existing `data/usage-history/pricing.json` gains the new keys on load without clobbering edited rates, and the pricing token changes so memoised costs recompute.
+- test-pricing-tiers (10). Measured with the corrected table: opus-agent requests here are 78 % cache-read by cost; the same requests on Fable 5.1 (cache hits half the price, output tokens ~58 % fewer per an independent benchmark) would cost ~19 % less per request before any reduction in request count — the answer to the owner's question is "not for cache-heavy agent work; measure it".
+
 ## 2.369.90 — the "For you" inbox keeps every row in its slot while open (inc-mtw02kbq-kj96: "点击对勾后…位置变化…连续点击时造成误点")
 
 - Every ✓ triggered a `user-todos-updated` broadcast, the popup re-rendered from scratch, the resolved row left its group and the rows below slid up under the pointer — four rapid clicks at one screen position resolved four different items. While the popup is OPEN its layout is now append-only (PURE `src/lib/user-todos-layout.js`): a resolved row stays in its slot, dimmed and struck through with ↺, a fully-resolved group keeps its slot, new items append at the end of their group, and the ordinary sorted order is rebuilt on the next open. The group count shows open rows only; the "Recently resolved" tail no longer lists a row still holding its slot above.

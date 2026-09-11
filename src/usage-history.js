@@ -31,8 +31,15 @@ const DEFAULT_PRICING = {
   // Fable 5 — $10/$50 (2× Opus; Mythos-class). NOTE: Fable uses a newer tokenizer
   // (~30% more tokens per unit of English text), so effective $/word is higher.
   fable:  { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 1.0 },
+  // Fable 5.1 / Mythos 5.1 (2026-09): cache HITS are 0.025× base input = $0.25/MTok
+  // (every other model is 0.1×). The matcher prefers the LONGEST key, so
+  // 'claude-fable-5-1' lands here and 'claude-fable-5' stays on `fable`. On this
+  // instance the stale $1 cache-read rate overstated seven days of Fable by 38 %
+  // (the main session is cache-heavy) — the owner asked "is Opus really cheaper".
+  'fable-5-1': { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
   opus:   { input: 5,  output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },  // Opus 4.5–4.8
-  sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6,  cacheRead: 0.3 },  // standard (intro $2/$10 through 2026-08-31)
+  sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6,  cacheRead: 0.3 },  // Sonnet 4.x
+  'sonnet-5': { input: 2, output: 10, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 },  // Sonnet 5: the $2/$10 launch price became the standard price (the 2026-09-01 increase was cancelled)
   haiku:  { input: 1,  output: 5,  cacheWrite5m: 1.25, cacheWrite1h: 2,  cacheRead: 0.1 },
   // OpenAI (codex) — per developers.openai.com pricing as of 2026-07-09 (GPT-5.6
   // GA'd today: Sol $5/$30, Terra $2.50/$15, Luna $1/$6; 5.5 $5/$30; 5.4
