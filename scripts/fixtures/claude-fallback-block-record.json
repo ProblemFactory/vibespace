@@ -1,0 +1,27 @@
+{
+  "type": "assistant",
+  "isSidechain": false,
+  "message": {
+    "model": "claude-opus-4-8",
+    "id": "msg_011CezpseqZku5qPUmjVk1Dr",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "fallback",
+        "from": {
+          "model": "claude-fable-5-1"
+        },
+        "to": {
+          "model": "claude-opus-4-8"
+        }
+      }
+    ],
+    "stop_reason": "tool_use"
+  },
+  "apiBlockIndex": 0,
+  "requestId": "req_011CezpsdD5gbQusAZ6tN3mn",
+  "uuid": "8bab8e29-803d-44d3-b5b1-ece2dc5e27a8",
+  "timestamp": "2026-09-13T04:42:45.234Z",
+  "version": "2.1.263"
+}

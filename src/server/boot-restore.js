@@ -24,6 +24,20 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
   const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
+  // THE CLASSIFIER REROUTE SURVIVES A RESTART (2026-09-13 r3 §7). The stamp
+  // says "the CLI is answering with a model we did not ask for"; it is
+  // announced ONCE and `scope:"session"`, so it can never be re-learned from
+  // the stream — only the file carries it. ONE rule, spread into the THREE
+  // sites that hydrate `_pickedModel` (a census in test-fable-cap-pool-storm
+  // requires every one of them to restore it, so a fourth restore path goes
+  // red instead of silently dropping the fact). A shape with no `to` is not a
+  // stamp: `projectionFamilyFor`/`servedDefinesModel` both key off it, and a
+  // half-object would read as "no reroute" anyway — say so here, once.
+  const restoredFallback = (meta) => {
+    const fb = meta && meta.servedViaFallback;
+    return (fb && typeof fb === 'object' && fb.to)
+      ? { from: fb.from || null, to: fb.to, at: Number(fb.at) || 0 } : null;
+  };
 // ── Personalized-username migration self-heal (2.236.1, userW's real
 // incident): the 3.5.0 image renames the container user vibe→<name> and
 // symlinks /home/vibe → /home/<name>, which covers every recorded ABSOLUTE
@@ -327,7 +341,7 @@ function restoreSessions() {
     }
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
-    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; // plan C model ladder survives restarts
+    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
     attachToDtach(id, socketPath, session);
 
@@ -491,6 +505,7 @@ function restoreAgentdPipeSessions() {
       _outputStyle: meta.outputStyle || null,
       _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null, // owner ruling 9
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
+      _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
       _msgReachability: meta.msgReachability || null,
     };
     hosts.device(null).then(async (dm) => {
@@ -609,7 +624,7 @@ async function readoptOrphanKeeperSessions() {
     session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op }));
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
-    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; // plan C model ladder survives restarts
+    session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
     setupSessionPty(session, id, ptyProc);
     writeSessionMeta(sockName, { ...meta, orphanedAt: undefined, readoptedAt: Date.now(), webuiSessionId: id, mode: 'chat' });

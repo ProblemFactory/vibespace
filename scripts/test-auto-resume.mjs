@@ -398,9 +398,9 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   if (!am.poolSupported()) { console.log('  · SKIP §11 (pooled accounts are unsupported on ' + process.platform + ')'); }
   else {
     const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r', expiresAt: Date.now() + 36e5, subscriptionType: 'max' } }), { mode: 0o600 });
-    const A = am.createSubscription({ name: 'Fish Max' }).id; login(A);
-    const B = am.createSubscription({ name: 'ProblemFactory Max' }).id; login(B);
-    const C = am.createSubscription({ name: 'Personal Max' }).id; login(C);
+    const A = am.createSubscription({ name: 'Member F' }).id; login(A);
+    const B = am.createSubscription({ name: 'Member Q' }).id; login(B);
+    const C = am.createSubscription({ name: 'Member P' }).id; login(C);
     const P = am.createPool({ name: 'Pool' }).id;
     am.setPoolTarget(P, B); // the pool DEFAULT sits on a healthy member — the per-session links are what the incident is about
     am.updatePool(P, { auto: true, hot: true });
@@ -439,13 +439,13 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       eng.noteWallSignal(s1, { resetsAtMs: RESET_5H * 1000, bucket: 'fiveHour', key: C }); // C is not this session's slot (its link is A)
       eng.noteTurnEnd(s1);
       ok('single wall on an account that is NOT this session\'s credential slot: the cache is untouched (the 2.368.34 guard is intact)', readCache(C).fiveHour.utilization === 0.15 && readCache(C).source === 'cli-usage', JSON.stringify(readCache(C)));
-      ok("…the hold is journaled + telemetered ('wall-demote-held'), never silent", journal.some((l) => /\[wall\] w1: single wall on Personal Max \(not this session's credential slot\) — holding the demotion/.test(l)) && events.some(([n]) => n === 'wall-demote-held'), journal.join(' | '));
+      ok("…the hold is journaled + telemetered ('wall-demote-held'), never silent", journal.some((l) => /\[wall\] w1: single wall on Member P \(not this session's credential slot\) — holding the demotion/.test(l)) && events.some(([n]) => n === 'wall-demote-held'), journal.join(' | '));
       // (a2) …and a SECOND wall on it inside 120s still demotes (that rung stands)
       eng.noteWallSignal(s1, { resetsAtMs: RESET_5H * 1000, bucket: 'fiveHour', key: C });
       eng.noteTurnEnd(s1);
       const cC0 = readCache(C);
       ok("two walls in 120s on a non-slot account: demoted with the SIGNAL's resetsAt, source 'wall', fetchedAt now", cC0.fiveHour.utilization === 1 && cC0.fiveHour.status === 'limited' && cC0.fiveHour.resetsAt === RESET_5H && cC0.source === 'wall' && Date.now() - cC0.fetchedAt < 5000, JSON.stringify(cC0));
-      ok("…journaled '(2 walls / 2-walls)' — the rung that authorised it is named", journal.some((l) => /\[wall\] demoted Personal Max 5h until \d{4}-\d\d-\d\dT\S+ \(2 walls \/ 2-walls\)$/.test(l)), journal.filter((l) => /demoted/.test(l)).join(' | '));
+      ok("…journaled '(2 walls / 2-walls)' — the rung that authorised it is named", journal.some((l) => /\[wall\] demoted Member P 5h until \d{4}-\d\d-\d\dT\S+ \(2 walls \/ 2-walls\)$/.test(l)), journal.filter((l) => /demoted/.test(l)).join(' | '));
       ok("…telemetry 'wall-demote' carries the same rung", events.some(([n, d]) => n === 'wall-demote' && /:5h:2-walls$/.test(d)), JSON.stringify(events.filter(([n]) => /wall/.test(n))));
       // (b) THE SESSION'S OWN SLOT is authority by itself — one wall, demoted,
       // and the pool moves the link in the SAME noteTurnEnd (the B-2c9b
@@ -457,11 +457,11 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       const cA = readCache(A);
       ok('a wall on the session\'s OWN validated credential slot is ground truth by itself (no corroboration needed — we know what the symlink points at)', cA.fiveHour.utilization === 1 && cA.fiveHour.status === 'limited' && cA.source === 'wall', JSON.stringify(cA));
       ok('…only the affected bucket (7d untouched)', cA.sevenDay.utilization === 0.3);
-      ok("…journaled '(1 walls / credential slot)'", journal.some((l) => /\[wall\] demoted Fish Max 5h until \S+ \(1 walls \/ credential slot\)$/.test(l)), journal.filter((l) => /demoted Fish/.test(l)).join(' | '));
+      ok("…journaled '(1 walls / credential slot)'", journal.some((l) => /\[wall\] demoted Member F 5h until \S+ \(1 walls \/ credential slot\)$/.test(l)), journal.filter((l) => /demoted Fish/.test(l)).join(' | '));
       ok("…the pool moved the session's link OFF A in the SAME noteTurnEnd (no 1.5-3 minute reading lag)", am.poolCurrentFor(P, 'w1') !== A && [B, C].includes(am.poolCurrentFor(P, 'w1')), am.poolCurrentFor(P, 'w1'));
       ok("…and the hot switch's fireNow delivered the continue in that tick (armed → continued, not a 45s wait)", sent.length === 1 && sent[0][0] === 'w1' && sent[0][1] === CONTINUE_PROMPT && ar.statusFor('w1').armed === false, JSON.stringify({ sent, st: ar.statusFor('w1') }));
-      ok('…the user was told (per-session switch notice)', notices.some((t) => /conversation "w1" moved to (ProblemFactory|Personal) Max/.test(t)), notices.join(' | '));
-      ok('…the walled-turn log names the demoted key — the pool verdict is no longer trusted alone', journal.some((l) => /\[wall\] w1: walled turn \(scope pool-\w+, demoted sub-\w+\) → usable via (ProblemFactory|Personal) Max/.test(l)), journal.filter((l) => /walled turn/.test(l)).join(' | '));
+      ok('…the user was told (per-session switch notice)', notices.some((t) => /conversation "w1" moved to (Member Q|Member P)/.test(t)), notices.join(' | '));
+      ok('…the walled-turn log names the demoted key — the pool verdict is no longer trusted alone', journal.some((l) => /\[wall\] w1: walled turn \(scope pool-\w+, demoted sub-\w+\) → usable via (Member Q|Member P)/.test(l)), journal.filter((l) => /walled turn/.test(l)).join(' | '));
       // (c) OBSERVED-ORG divergence: a session linked to B whose CLI the OTel
       // stream saw on C. Since 2026-09-07 the observation decides NOTHING —
       // not blocking (2.369.66) and not values either: it names the identity
@@ -476,14 +476,14 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       ok('…and it is PINNED for the turn: a mid-turn re-point does not re-key the readings still arriving from the credentials that produced them', (() => { am.ensureSessionPoolLink(P, 'w3', C); const again = eng.readingSlotFor(s3); am.ensureSessionPoolLink(P, 'w3', B); s3._turnReadingSlot = null; return again.key === B && again.slotReason === 'turn-pinned'; })());
       const bm = eng.sessionBillingMember(s3, P);
       ok('sessionBillingMember (BLOCKING): the LINK is the answer, the observation rides along as corroboration, and the slot VALIDATED', bm.id === B && bm.linkedId === B && bm.observedId === C && bm.divergent === true && bm.slotOk === true, JSON.stringify(bm));
-      ok("…logged once: '[pool] session w3 observed on Personal Max while linked to ProblemFactory Max'", journal.filter((l) => l === '[pool] session w3 observed on Personal Max while linked to ProblemFactory Max').length === 1, journal.filter((l) => /observed on/.test(l)).join(' | '));
+      ok("…logged once: '[pool] session w3 observed on Member P while linked to Member Q'", journal.filter((l) => l === '[pool] session w3 observed on Member P while linked to Member Q').length === 1, journal.filter((l) => /observed on/.test(l)).join(' | '));
       eng.sessionBillingMember(s3, P);
       ok('…and not again inside 10 minutes', journal.filter((l) => /session w3 observed on/.test(l)).length === 1);
       ok('resolveUsageKey follows the CREDENTIAL SLOT (live burn + probe matching + every derived cache key attribute to the link) — B-b3cd\'s routing REFUTED', eng.resolveUsageKey(s3) === B && eng.usageCacheKeyFor(s3) === B);
       ok('corroborateReading reports the divergence and returns it, but the key is the caller\'s', (() => { const c = eng.corroborateReading(s3, B, 'probe'); return c && c.agree === false && c.observed === C; })());
       ok('wallKeyFor does NOT (a rejection is a fact about the credential slot) — THE inversion this incident bought', eng.wallKeyFor(s3) === B && eng.fireIdentityFor(s3).key === B, JSON.stringify({ wall: eng.wallKeyFor(s3), fire: eng.fireIdentityFor(s3) }));
       const v = eng.quotaVerdictFor(P, { model: 'claude-fable-5', session: s3 });
-      ok('quotaVerdictFor judges the BILLING member first (on=B, observed=C, divergent) and names the id it would send us to', v.usable === true && v.on === B && v.linked === B && v.observed === C && v.divergent === true && v.viaId === B && v.via === 'ProblemFactory Max' && /observed on Personal Max while linked to ProblemFactory Max/.test(v.reason), JSON.stringify(v));
+      ok('quotaVerdictFor judges the BILLING member first (on=B, observed=C, divergent) and names the id it would send us to', v.usable === true && v.on === B && v.linked === B && v.observed === C && v.divergent === true && v.viaId === B && v.via === 'Member Q' && /observed on Member P while linked to Member Q/.test(v.reason), JSON.stringify(v));
       ok('negative control: without a session the pool verdict has no current-member context', eng.quotaVerdictFor(P, { model: 'claude-fable-5' }).on === undefined);
       // a SINGLE wall on the observed member is still corroborated by the
       // observation (that rung stands) — but it is no longer the session's
@@ -493,10 +493,10 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
       eng.noteTurnEnd(s3);
       const cC = readCache(C);
       ok('single wall on the OBSERVED member still demotes it (observed-org rung); no signal reset ⇒ the cached future reset is kept', cC.fiveHour.utilization === 1 && cC.source === 'wall' && cC.fiveHour.resetsAt === RESET_5H, JSON.stringify(cC));
-      ok("…journaled as '(1 walls / observed-org)'", journal.some((l) => /\[wall\] demoted Personal Max 5h until \S+ \(1 walls \/ observed-org\)$/.test(l)), journal.filter((l) => /demoted Personal/.test(l)).join(' | '));
+      ok("…journaled as '(1 walls / observed-org)'", journal.some((l) => /\[wall\] demoted Member P 5h until \S+ \(1 walls \/ observed-org\)$/.test(l)), journal.filter((l) => /demoted Personal/.test(l)).join(' | '));
       ok('…B (the link, healthy) is NOT touched', readCache(B).fiveHour.utilization === 0.1 && readCache(B).source === 'cli-usage');
       ok('REFUTED AND REMOVED: the per-session pass no longer "switches" a session to the member it is already linked to (740 such re-points in the incident journal, each followed by another billed continue)', !journal.some((l) => /re-point, same target/.test(l)), journal.filter((l) => /per-session switch/.test(l)).join(' | '));
-      ok("…the walled-turn log carries BOTH facts, honestly labelled", journal.some((l) => /\[wall\] w3: walled turn .*\[billing ProblemFactory Max, OTel observed Personal Max\]$/.test(l)), journal.filter((l) => /w3: walled turn/.test(l)).join(' | '));
+      ok("…the walled-turn log carries BOTH facts, honestly labelled", journal.some((l) => /\[wall\] w3: walled turn .*\[billing Member Q, OTel observed Member P\]$/.test(l)), journal.filter((l) => /w3: walled turn/.test(l)).join(' | '));
       // (d) staleness: an observation older than OBSERVED_ORG_RECENT_MS speaks for nothing
       const s4 = mkSess('w4', 'cid-4', B);
       obs.set('cid-4', { orgUuid: 'org-c', acct: C, known: true, ts: Date.now() - eng.OBSERVED_ORG_RECENT_MS - 1000 });
@@ -820,7 +820,22 @@ function mkEdgeWorld({ arModule = null, rotateWall = false, streaming = false, r
   };
   const nowSec = () => Math.floor(Date.now() / 1000);
   // the records, verbatim in shape from data/session-buffers + the anchor stream
-  const WALL = { type: 'task_failed', error: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 13th, 2026 8:36 PM.", codexErrorInfo: 'usageLimitExceeded', resetsAt: null, rateLimits: null };
+  // THE INCIDENT'S SENTENCE, WITH ITS DISTANCE INSTEAD OF ITS DATE. The record
+  // said "try again at Sep 13th, 2026 8:36 PM", which was SIX DAYS out when it
+  // was written — and that is the only property the asserts below read (a reset
+  // past the 26 h ceiling is a WATCH, not a timed continue). Pinned as a
+  // literal it became a time bomb: on 2026-09-13 the stated instant is ~14 h
+  // away, the arm stops being a watch, and two asserts go red on a suite in the
+  // MANDATORY pre-push tier with nothing about the product changed (measured on
+  // master at d2065aa2: the same 2 FAILED). The prose shape — including the
+  // ordinal suffix parseCodexLimitReset has to strip — is reproduced exactly;
+  // only the instant moves with the clock.
+  const ORD = (d) => d + (d % 10 === 1 && d !== 11 ? 'st' : d % 10 === 2 && d !== 12 ? 'nd' : d % 10 === 3 && d !== 13 ? 'rd' : 'th');
+  const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const SIX_DAYS_AT = (() => { const d = new Date(Date.now() + 6 * 86400e3); d.setHours(20, 36, 0, 0); return d; })();
+  const SIX_DAYS_OUT = MON3[SIX_DAYS_AT.getMonth()] + ' ' + ORD(SIX_DAYS_AT.getDate()) + ', ' + SIX_DAYS_AT.getFullYear()
+    + ' ' + (SIX_DAYS_AT.getHours() % 12 || 12) + ':' + String(SIX_DAYS_AT.getMinutes()).padStart(2, '0') + ' ' + (SIX_DAYS_AT.getHours() < 12 ? 'AM' : 'PM');
+  const WALL = { type: 'task_failed', error: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at " + SIX_DAYS_OUT + '.', codexErrorInfo: 'usageLimitExceeded', resetsAt: null, rateLimits: null };
   const spark = () => ({ type: 'rate_limits_updated', rateLimits: { limitId: 'codex_bengalfox', limitName: 'GPT-5.3-Codex-Spark', primary: { usedPercent: 0, windowDurationMins: 300, resetsAt: nowSec() + 3600 }, secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: nowSec() + 600000 }, planType: 'pro', rateLimitReachedType: null } });
   const fresh = () => ({ type: 'rate_limits_updated', rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: nowSec() + 700000 }, secondary: null, planType: 'pro', rateLimitReachedType: null } });
   const stillDead = () => ({ type: 'rate_limits_updated', rateLimits: { limitId: 'codex', limitName: null, primary: { usedPercent: 100, windowDurationMins: 10080, resetsAt: nowSec() + 500000 }, secondary: null, planType: 'pro', rateLimitReachedType: null } });
@@ -839,7 +854,9 @@ function mkEdgeWorld({ arModule = null, rotateWall = false, streaming = false, r
       // so the expectation is built in local time too — a fixed `-07:00` was
       // this box's zone, and the Actions runner (UTC) read the same sentence
       // seven hours earlier (2.369.79: the .78 fast mirror's only red).
-      Math.abs(st.resetsAt - new Date(2026, 8, 13, 20, 36, 23).getTime()) < 61000, new Date(st.resetsAt).toISOString());
+      // …and it is compared against the instant the sentence ABOVE states, not
+      // against the incident's calendar date — see the SIX_DAYS_OUT note.
+      Math.abs(st.resetsAt - SIX_DAYS_AT.getTime()) < 61000, new Date(st.resetsAt).toISOString() + ' vs ' + SIX_DAYS_AT.toISOString());
     ok('…and it recorded WHICH wall it is waiting on', st.lane === 'codex' && st.bucket === 'sevenDay', JSON.stringify(st));
     ok('…and no turn was spent doing it', w.fired.length === 0);
 

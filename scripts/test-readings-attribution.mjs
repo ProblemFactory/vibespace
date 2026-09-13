@@ -10,12 +10,12 @@
 // re-reads .credentials.json on an mtime change — which is exactly what the
 // pool's hot switch does). So after any hot switch a session's readings were
 // filed under the account it was SPAWNED on:
-//   · visible symptom — this instance's Personal Max, whose credentials were
+//   · visible symptom — this instance's Member P, whose credentials were
 //     emptied on 2026-09-03T05:55Z, kept receiving limit-banners and
 //     Fable-bucket readings until 09-07;
 //   · silent symptom — between two logged-in members nothing looks wrong at
-//     all: a Fish-billed session spawned under B-Stack files Fish's numbers
-//     under B-Stack, poisoning both panels, both anchor streams and the rates.
+//     all: a Fish-billed session spawned under Member B files Fish's numbers
+//     under Member B, poisoning both panels, both anchor streams and the rates.
 // A "logged-out members reject readings" guardrail was explicitly REJECTED by
 // the owner as a fix: logged-out members are the symptom, not the mechanism.
 //
@@ -114,9 +114,9 @@ function mkWorld({ hosts = null } = {}) {
   const am = new AccountManager({ dataDir });
   if (!am.poolSupported()) return null;
   const login = (id, opts) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id, opts), { mode: 0o600 });
-  const FISH = am.createSubscription({ name: 'Fish Max' }).id; login(FISH);
-  const LINK = am.createSubscription({ name: 'PandyMax' }).id; login(LINK);
-  const SPARE = am.createSubscription({ name: 'B-Stack Max' }).id; login(SPARE);
+  const FISH = am.createSubscription({ name: 'Member F' }).id; login(FISH);
+  const LINK = am.createSubscription({ name: 'Member Y' }).id; login(LINK);
+  const SPARE = am.createSubscription({ name: 'Member B' }).id; login(SPARE);
   const P = am.createPool({ name: '全部' }).id;
   am.setPoolTarget(P, LINK);
   am.updatePool(P, { auto: false, hot: true }); // auto OFF: this suite drives attribution, not the switcher
@@ -229,7 +229,7 @@ if (!probe) {
   w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
   w.reading(0.55); w.endTurn();
   const lines = cap.done();
-  ok('§2 the divergence is LOGGED, naming both identities', lines.some((l) => /filed on the credential slot B-Stack Max while OTel last observed Fish Max/.test(l)), lines.filter((l) => /credential slot/.test(l)).join(' | ').slice(0, 160));
+  ok('§2 the divergence is LOGGED, naming both identities', lines.some((l) => /filed on the credential slot Member B while OTel last observed Member F/.test(l)), lines.filter((l) => /credential slot/.test(l)).join(' | ').slice(0, 160));
   ok('§2 …and stamped on the reading as a LABEL (corroborated:false), which is a fact about the disagreement, not a routing decision', w.readCache(w.SPARE).corroborated === false, JSON.stringify(w.readCache(w.SPARE).corroborated));
   const c = w.eng.corroborateReading(w.session, w.SPARE, 'probe');
   ok('§2 corroborateReading REPORTS {agree, observed} and returns no key at all', c && c.agree === false && c.observed === w.FISH && c.key === undefined, JSON.stringify(c));
@@ -366,7 +366,7 @@ if (!probe) {
     for (const id of [w5.FISH, w5.SPARE]) fs.writeFileSync(path.join(w5.am.subDir(id), '.credentials.json'), dead(id));
     const n5 = blocked(w5);
     ok('§5b the pool NAMES the login wall end to end (healthyPoolMembers → decidePoolSwitch → poolBlockedNotice), not a spent quota bucket',
-      /Re-login those accounts in Manage Agents/.test(n5) && n5.includes('Fish Max') && n5.includes('B-Stack Max'), n5);
+      /Re-login those accounts in Manage Agents/.test(n5) && n5.includes('Member F') && n5.includes('Member B'), n5);
     ok('§5b …and does NOT prescribe the quota remedy for a wall the user clears in 30 seconds',
       !/until a window resets/.test(n5), n5);
 
@@ -391,7 +391,7 @@ if (!probe) {
     ok('§5b NEG ② …but poolReadLogin folds BOTH readers, so the decision still excludes it',
       w7.eng.poolReadLogin()(w7.FISH).state === 'expired');
     const n7 = blocked(w7);
-    ok('§5b NEG ② …the pool did NOT move onto it, and the notice names it', w7.am.poolCurrent(w7.P) === w7.LINK && n7.includes('Fish Max') && /Re-login/.test(n7), n7);
+    ok('§5b NEG ② …the pool did NOT move onto it, and the notice names it', w7.am.poolCurrent(w7.P) === w7.LINK && n7.includes('Member F') && /Re-login/.test(n7), n7);
 
     // …and the two lists stay two different questions: DECIDE sees the dead
     // members (so it can name them), ACT never does.
@@ -417,7 +417,7 @@ if (!probe) {
   const hist = path.join(dataDir, 'usage-history');
   const smeta = path.join(dataDir, 'session-meta');
   for (const p of [subs, cache, anchors, hist, smeta]) fs.mkdirSync(p, { recursive: true });
-  const DEAD = 'sub-cac86a3ff4d1';   // "Personal Max": credentials emptied 2026-09-03T05:55Z
+  const DEAD = 'sub-000000000001';   // "Member P": credentials emptied 2026-09-03T05:55Z
   const LIVE = 'sub-889f3a3822a7';   // still logged in
   const WIPE_AT = Date.parse('2026-09-03T05:55:23.829Z');
   fs.mkdirSync(path.join(subs, DEAD), { recursive: true });
@@ -1579,9 +1579,9 @@ if (!probe) {
 }
 
 // ── §14 THE INCIDENT, replayed against the REAL engine + REAL pool ──────────
-// Mapping to the production names: LINK plays PandyMax (the member actually
-// being burned), SPARE plays Personal Max (the member the pool moved TO, and
-// the one that was wrongly credited with 93 %), FISH plays Fish Max (where the
+// Mapping to the production names: LINK plays Member Y (the member actually
+// being burned), SPARE plays Member P (the member the pool moved TO, and
+// the one that was wrongly credited with 93 %), FISH plays Member F (where the
 // false second switch went).
 /** A world whose three members have three DIFFERENT weekly windows, each
  *  stamped as that account's own — which on a real instance is written by
@@ -1602,8 +1602,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       w.writeCache(id, c);
       if (stampWindows) w.stampWindow(id, { sevenDay: WIN[id], fiveHour: null, scoped: { fable: WIN[id] } });
     };
-    put(w.LINK, 0.98);   // PandyMax: 2 % left — hard dead, the reason the pool moves
-    put(w.SPARE, 0.11);  // Personal Max: barely used (the owner's "low-usage account")
+    put(w.LINK, 0.98);   // Member Y: 2 % left — hard dead, the reason the pool moves
+    put(w.SPARE, 0.11);  // Member P: barely used (the owner's "low-usage account")
     put(w.FISH, 0.33);
     w.am.updatePool(w.P, { auto: true, hot: true });
     return { ...w, WIN, nowSec };
@@ -1613,8 +1613,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   // ① THE MOVE. Driven through the pool's own material act — the same call the
   //    engine makes and the ONLY writer of the transition ledger.
   // ② THE LAGGING RESPONSE. Delivered through the REAL producer, carrying
-  //    PandyMax's window and PandyMax's 93 % — a response to a request made
-  //    39 s earlier with PandyMax's token.
+  //    Member Y's window and Member Y's 93 % — a response to a request made
+  //    39 s earlier with Member Y's token.
   const play = (w, u) => {
     const cap = quiet();
     w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
@@ -1845,6 +1845,16 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   {
     const w = mk(); const cap = quiet();
     w.eng.recordRateLimitEvent(w.session, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day' } });
+    // THE LANE, NOT THE KEY (2026-09-13): an UNSCOPED weekly rejection on a
+    // claude session no longer marks a bucket the instant it arrives — claude
+    // has no `seven_day_<model>` type, so the event is both the plan lane and a
+    // model cap until the banner or the turn-end evidence rule says which. This
+    // control is about WHICH MEMBER (the pin stands with no window evidence), so
+    // it drives the production sequence: the rejection, then the turn's end,
+    // which in the incident's own journal share a second.
+    ok('§15 CONTROL: …and the unscoped weekly rejection writes NOTHING until its lane is decided',
+      w.readCache(w.LINK).sevenDay.utilization !== 1, JSON.stringify(w.readCache(w.LINK).sevenDay));
+    w.endTurn();
     cap.done();
     ok('§15 CONTROL: a rejection that states no reset is marked on the pin exactly as before (its resetsAt would be a bounded guess, and a guess is not evidence)',
       w.readCache(w.LINK).sevenDay.utilization === 1 && w.readCache(w.LINK).sevenDay.status === 'limited', JSON.stringify(w.readCache(w.LINK).sevenDay));
@@ -2173,7 +2183,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       const w = mkIncidentWorld();
       // nobody's week: the three members are +3/+5/+6 days, and the comparison
       // is by PHASE (mod one week), so a stranger's reset must be phase-distinct
-      // — +40 days is +5 days plus five whole weeks, i.e. B-Stack's own phase.
+      // — +40 days is +5 days plus five whole weeks, i.e. Member B's own phase.
       renderKeyed(TOOL_PATH, w, w.SPARE, { pct: 96, sevenDayReset: w.nowSec + 1 * 86400 });
       ok('§15 …a reading whose window matches NOBODY is refused outright — nothing is written anywhere',
         Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9
@@ -3382,7 +3392,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         ok('§10 the app booted at 375×667', !!ready);
         // Feed the REAL meter a /api/usage payload shaped like this instance's:
         // a wiped member whose newest cached reading POSTDATES the wipe.
-        const WIPED = 'sub-cac86a3ff4d1';
+        const WIPED = 'sub-000000000001';
         const payload = {
           rateLimit: null,
           accounts: { [WIPED]: { name: 'Personal <Max>', email: 'p@example.com', fiveHour: { utilization: 1, resetsAt: 0 }, sevenDay: { utilization: 0.87, resetsAt: 0 }, scopedWeekly: [], fetchedAt: Date.parse('2026-09-07T06:30:53Z'), source: 'limit-banner', corroborated: false } },

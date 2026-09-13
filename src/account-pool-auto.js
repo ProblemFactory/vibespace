@@ -257,10 +257,27 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // (loginBlocked skips the current one BY CONSTRUCTION). A login is not a
   // bucket: it does not heal on a timer and it has a different fix, so it gets
   // its own field and `deadBuckets`/`liveBuckets` stay a pure QUOTA sentence.
+  //
+  // ROUND-2 VERIFIER (2026-09-13 r2, reproduced): a HOT pool's `exhausted` is
+  // the SOFT (hot-raised) bar while these two arrays were split on the HARD
+  // one, so a genuinely blocked pool whose current member sits in the 3-5 %
+  // band named NO bucket at all — `Pool "P": no member can serve it — out of
+  // quota.` — and that band is the whole reason a hot pool exists (提前切).
+  // It breaks the standing law that every blocked outcome must SPEAK with
+  // named buckets, on the one shape the law was written for.
+  //
+  // So there are THREE bands, not two: `dead` (< hard, genuinely unusable),
+  // `low` (>= hard but under the hot bar — usable, and the reason we want to
+  // move), and `live` (real headroom). For a pool that is NOT hot `soft ===
+  // hard`, so `lowBuckets` is empty and `liveBuckets` is exactly what it has
+  // always been — cold decisions are byte-identical BY CONSTRUCTION.
+  const pct = (b) => `${b.label} ${Math.round(b.remaining)}%`;
+  const softLine = (b) => (hot ? THRESH[b.kind].hot : THRESH[b.kind].hard);
   const bucketDetail = (brs) => ({
     ...(readLogin && !loginUsable(login(currentId)) ? { fromLogin: loginWallPhrase(login(currentId)) } : {}),
-    deadBuckets: brs.filter((b) => b.remaining < THRESH[b.kind].hard).map((b) => `${b.label} ${Math.round(b.remaining)}%`),
-    liveBuckets: brs.filter((b) => b.remaining >= THRESH[b.kind].hard).map((b) => `${b.label} ${Math.round(b.remaining)}%`),
+    deadBuckets: brs.filter((b) => b.remaining < THRESH[b.kind].hard).map(pct),
+    lowBuckets: brs.filter((b) => b.remaining >= THRESH[b.kind].hard && b.remaining < softLine(b)).map(pct),
+    liveBuckets: brs.filter((b) => b.remaining >= softLine(b)).map(pct),
   });
   // Login facts, asked at most once per member per decision. `login(id)` is
   // always a real info object so downstream predicates never branch on null.
@@ -357,6 +374,23 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const usingScraps = !ranked.length && hardDead && nearRanked.length > 0;
   const pool = usingScraps ? nearRanked : ranked;
   if (!pool.length) {
+    // A HEALTHY CURRENT MEMBER IS NEVER "NO MEMBER CAN SERVE IT" (2026-09-13).
+    // On a HOT pool the candidate ranking runs PROACTIVELY — before anyone has
+    // asked whether the current member is exhausted — so an empty candidate
+    // list says nothing at all about whether this pool can serve a turn. The
+    // 2026-09-13 storm printed `no member can serve it — out of quota (still
+    // available: 5h 100%, 7d 69%, Fable 45%)` three times about a pool whose
+    // CURRENT member was healthy on every bucket: those "still available"
+    // numbers ARE that member's, and the owner read the notice exactly as it
+    // is written ("有账号有 Fable 额度但总是提示没有了"). The same verdict fed
+    // auto-resume's `noteNoPoolTarget` ("no usable member left").
+    // 'all-rejected' is gated too: those members rejected THIS conversation,
+    // which matters only when the one it is sitting on cannot serve it either.
+    // So the three actionable refusals may only be claimed when the current
+    // member is EXHAUSTED (soft or hard); otherwise this is an ordinary
+    // proactive scan that found nowhere better — `no-better`, which the engine
+    // renders as nothing at all.
+    if (!exhausted) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
     // SPEAK which wall we hit. 'all-logins-expired' is its own reason because
     // it points at a completely different action from 'no-members' (re-login
     // now vs wait for a quota window) — the 2.313.0 named-bucket rule. It may
@@ -451,10 +485,13 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
  *                          which skips the current member by construction)
  *   'all-logins-expired'   the login gate is the ONLY thing that emptied the
  *                          candidate list (round-2 rule)
- *   deadBuckets/liveBuckets  the QUOTA sentence — buckets only, never a login
+ *   deadBuckets/lowBuckets/liveBuckets  the QUOTA sentence — buckets only,
+ *                          never a login. THREE bands (r2): spent, nearly
+ *                          spent (the hot pool's own bar), real headroom.
  */
 function poolBlockedNotice(d, { poolName = '', currentName = 'the current member' } = {}) {
   const dead = (d?.deadBuckets || []).join(', ');
+  const low = (d?.lowBuckets || []).join(', ');
   const live = (d?.liveBuckets || []).join(', ');
   // THE TWO VOLUNTARY-MOVE BARS (D2/D3c). They are not quota walls and they do
   // not heal on a timer: a reserve-floor member has quota the owner asked us
@@ -469,8 +506,24 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   // same rule 'all-logins-expired' earned in round 2: a quota-emptied list
   // stays a quota sentence and the bars are named alongside it.
   const barsOnly = !dead && !!(held || paying);
-  const what = dead ? `spent: ${dead}` : 'out of quota';
-  const rest = live ? ` (still available: ${live})` : '';
+  // NAME EVERY BUCKET THAT IS HOLDING THIS BACK, IN ITS OWN BAND (r2). A hot
+  // pool's refusal can be made entirely of buckets that are NEARLY spent —
+  // nothing under the hard floor at all — and round 1 left that sentence with
+  // no numbers in it whatsoever. `low` is empty on every cold decision, so
+  // this reads exactly as before wherever it read correctly before.
+  const what = dead && low ? `spent: ${dead}; nearly spent: ${low}`
+    : dead ? `spent: ${dead}`
+    : low ? `nearly spent: ${low}`
+    : 'out of quota';
+  // "out of quota (still available: 5h 100%, 7d 69%, Fable 45%)" is a
+  // CONTRADICTION about one member, and it is verbatim what the 2026-09-13
+  // storm printed about a member that was healthy on every bucket. The live
+  // list is only meaningful BESIDE a bucket that is holding us back — that
+  // contrast IS the nested model's point ("spent: Fable 0% (still available:
+  // 5h 100%, 7d 66%)"). With nothing spent and nothing low there is nothing to
+  // contrast it with, so the clause is dropped rather than allowed to argue
+  // with the sentence it decorates.
+  const rest = (dead || low) && live ? ` (still available: ${live})` : '';
   const loginNames = loginBlockedText(d?.loginBlocked);
   const loginWall = d?.reason === 'all-logins-expired'; // the OTHER members
   const curLoginWall = !!d?.fromLogin;                  // the CURRENT member

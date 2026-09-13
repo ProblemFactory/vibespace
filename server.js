@@ -425,7 +425,7 @@ const {
   markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, autoCliReady, lastMemberReadAt, // …+ the new-member wake (2026-09-08)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
-  noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey,
+  noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
   sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
   usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached,
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
@@ -440,6 +440,7 @@ const {
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
   recordUsageAttribution: (...a) => recordUsageAttribution(...a),
   adapterRegistry, readUserState: () => { try { return persistenceRouter.readUserState(); } catch { return {}; } }, getUserTodos: () => { try { return userTodos; } catch { return null; } }, // lazy: the inbox a refused spend is reported in is created further down (TDZ otherwise)
+  getSessionMetaStore: () => { try { return { readSessionMeta, writeSessionMeta }; } catch { return null; } }, // lazy too (session-stdout is built below): the ONE use is persisting the classifier-reroute stamp so a RESTORED conversation still knows the CLI answers with a model we did not ask for (r3)
 });
 // ── Effective-size computation (min cols/rows across clients + PTY resize + broadcast) ──
 // Only clients that have sent a REAL `resize` (terminal fit) drive the PTY
@@ -502,9 +503,9 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
 } = require('./src/server/session-stdout.js').create({
   rootDir: __dirname, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
-  engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
+  engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner, // EVERY name the registered consumers destructure from `engine` must be here — test-fable-cap-pool-storm §10 derives that set from their own `const {…} = engine;` and fails THIS literal (r3: two were missing and every claude chat record became raw output)
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator },
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },
   checkClaudeGoalStatus,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
@@ -1325,7 +1326,7 @@ const { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing,
   _sbMidCore, SB_RING_MAX,
 } = require('./src/server/session-brain.js').create({
   engine: { kickPoolEval, markLimitBanner, maybeStopOnFallback,
-    recordRateLimitEvent, resolveUsageKey, usageEstimator },
+    recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, rerouteAnnouncedBy }, // the device feed shares the parse's ONE served-model/fallback pair + the r4 rule that places the reroute BEFORE the served capture (2026-09-13)
   applyTaskToolUpdate, updateSessionTodos,
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
 });

@@ -206,6 +206,17 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     // live view — never by clearing the field from here, which would be
     // exactly the silent exit the consumer's census forbids.
     try { session._retireCompaction?.(); } catch { }
+    // THE OTHER TURN-LIFECYCLE CLAIM THIS EXIT OWES (2026-09-13 r3 §8). An
+    // unscoped weekly rejection defers its BUCKET MARK to the end of the turn
+    // (the CLI has no `seven_day_<model>` type, so only the banner or the
+    // turn-end evidence rule can name the lane). `settleTurnLane` is reachable
+    // only from `noteTurnEnd`, i.e. from claude's `result` record — and a turn
+    // that ends by the wrapper DYING never produces one, so the wall was
+    // dropped entirely where master's immediate write left a mark. A dropped
+    // wall is the money direction: the member reads healthy to every other
+    // conversation. Same shape as `_retireCompaction` above — the consumer's
+    // own named function, bound at attach, never a reach into engine state.
+    try { session._settleTurnLane?.(); } catch (e) { console.warn('[wall] teardown lane settle failed:', e.message); }
     // Child exit code from the wrapper's final meta (2.207.0 — wrappers keep
     // it instead of unlinking; a crash-looping claude previously left zero
     // process-level evidence).

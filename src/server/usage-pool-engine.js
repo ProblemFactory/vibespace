@@ -23,6 +23,11 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // credit was dead code in production while a harness that DID pass them made
   // the suite green. A gate whose call site depends on a dep the one real
   // caller does not hand over is a gate nobody has.
+  // the session-meta store (src/server/session-stdout.js), LAZY because it is
+  // constructed after this engine in boot order. Its ONE use is persisting the
+  // classifier-reroute stamp so a restored conversation still knows the CLI is
+  // answering with a model we did not ask for (r3 §7).
+  getSessionMetaStore = () => null,
   getUserTodos = () => null}) {
   // late-bound singletons: created after this module in boot order, used only
   // at runtime — the Proxy re-resolves per property access, never caches
@@ -32,6 +37,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
   // session object. readUserState() is cached in persistence, read per notice.
   const convName = (s2, sid) => { let cn = {}; try { cn = (readUserState() || {}).customNames || {}; } catch {} return conversationDisplayName(s2, cn, sid); };
   const hosts = mk(getHosts);
+  const sessionMetaStore = mk(getSessionMetaStore); // PROPERTY-ACCESSED only (a mk() Proxy is truthy but never callable)
   const usageHistory = mk(getUsageHistory);
 // ── Stop-on-model-fallback belt (2.228.0, claude.disableModelFallback) ──
 // The PRIMARY mechanism is the CLI's native switchModelsOnFlag=false
@@ -49,7 +55,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, conversationDisplayName, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, conversationDisplayName, bucketRemaining, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
@@ -362,7 +368,7 @@ function sweepUsageAnchors() {
   // GROUPED BY IDENTITY (2.263.0): recording per cache-file double-anchored
   // org-merged logins (__global__ + named sub interleaved in one identity
   // file, each record's costSince missing the sibling account's spend — real
-  // data bug caught in the ProblemFactory analysis). One identity = one
+  // data bug caught in the Member Q analysis). One identity = one
   // anchor stream; cost sums across ALL its account ids.
   for (const [identityKey, g] of usageIdentityGroups()) {
     try {
@@ -567,14 +573,256 @@ function poolChooserForModel(poolId, { model } = {}) {
     return (d && d.to) || cur;
   } catch (e) { console.warn('[pool] chooser failed (falling back to default target):', e.message); return null; }
 }
-// The session's model identity, per the user's spec: the LAST assistant
-// message's served model vs the last set-model pick — newest wins — else the
-// spawn model. Any unknown → null (no projection).
+// ── THE SESSION'S MODEL FACTS, one implementation for both stdout feeds ─────
+// `noteServedModel` / `noteModelFallback` are granular consumer functions in
+// the sense the session-brain contract means it (like markLimitBanner and
+// recordRateLimitEvent): the PARSE (src/server/stdout/claude-stream-json.js)
+// and the DEVICE feed (claudeSideEffects) both call them, so the fallback rule
+// below cannot exist in one feed and not the other.
+
+// THE REROUTE STAMP SURVIVES A RESTART (2026-09-13 r3, the round-2 verifier,
+// reproduced on the real engine). The stamp was `persisted: null` on the
+// argument that boot-restore's ladder falls back to picked/spawn = the REQUEST
+// model — true of the LADDER, false of everything else. A restored conversation
+// whose reroute was announced BEFORE the restart gets ONE main-thread opus
+// record after boot; that record is newer than the pick and nothing on the
+// session refutes it, so `servedDefinesModel` says yes, `sessionModelFor`
+// answers opus, `projectionFamilyFor` answers 'opus', the pool moves the
+// conversation onto a member whose Fable cap is 100 % spent and
+// `quotaVerdictFor` calls that member usable — the incident verbatim, one
+// restart later. The reroute is announced ONCE and `scope:"session"`, so it can
+// never be re-learned from the stream; only the file can carry it.
+//
+// It is written through the two granular consumers — the ONE implementation the
+// parse and the device feed share — never at their call sites, which is the
+// twin the §1b census bans. `readSessionMeta`/`writeSessionMeta` arrive as a
+// LAZY store (session-stdout is constructed after this engine in boot order),
+// exactly like this file's other late singletons, and the write follows the
+// ws-handler set-model idiom: spread what is on disk, re-list only what changed.
+//
+// A STALE RESTORED STAMP CANNOT SPEND MONEY — AND THAT IS NOT THE SAME AS
+// FREE (r3-r2, the round-3 verifier, measured on the real engine + real pool).
+// It can only make `projectionFamilyFor` answer null (= no projection, every
+// bucket counts) and `servedDefinesModel` answer false (= the REQUEST model
+// wins), so it can never authorise a move ONTO a spent cap. What it CAN do is
+// refuse a move OFF one: with every bucket counting, a candidate is disqualified
+// by a cap OUTSIDE this session's family too, so a current member that is 100 %
+// through its 5-hour window kept its conversation while a free member sat beside
+// it, blocked on an Opus cap the session was not using. That is the conservative
+// direction, r2 strands on the identical fixture (persisting the stamp only makes
+// the state survive a restart instead of being cleared by one), and the first
+// main-thread record served by anything else retires it, on disk too.
+function persistFallbackStamp(session) {
+  try {
+    if (!session || !session.sockName) return;
+    const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
+    if (prev === undefined) return; // the store is not wired (or not up yet) — memory only
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...(prev || {}), servedViaFallback: session._servedViaFallback || null });
+  } catch (e) { console.warn('[model] fallback stamp not persisted:', e.message); }
+}
+
+/** A main-thread assistant record named the model that ANSWERED. */
+function noteServedModel(session, model) {
+  if (!session || !model) return;
+  session._servedModel = model;
+  session._servedModelAt = Date.now();
+  // THE FALLBACK IS OVER THE MOMENT SOMETHING ELSE ANSWERS. The stamp is a
+  // claim about a reroute that is still in force; a main-thread record served
+  // by any other model refutes it, and leaving it standing would suppress a
+  // served model that really is the session's (an in-CLI `/model` away from
+  // the fallback target, a recovered turn).
+  const fb = session._servedViaFallback;
+  if (fb && fb.to && !modelsMatch(model, fb.to)) { session._servedViaFallback = null; persistFallbackStamp(session); }
+}
+
+/** A `fallback` content block / a `model_refusal_fallback` system record said
+ *  the CLI asked for `from` and was answered by `to`. MAIN THREAD ONLY — a
+ *  sidechain's reroute says nothing about what the main thread is requesting. */
+function noteModelFallback(session, from, to) {
+  if (!session || !to) return;
+  // ONE WRITE PER REROUTE, not one per record: the incident announced the same
+  // reroute twice (a `fallback` content block, then a `model_refusal_fallback`
+  // system record), and a meta write is not free (it re-runs the ledger's
+  // account-by-time attribution). Restating a reroute that already stands also
+  // leaves `at` alone on purpose — it dates when THIS reroute began, and a
+  // reroute that has been retired starts a fresh stamp because `prev` is null.
+  const prev = session._servedViaFallback;
+  if (prev && prev.to === to) return;
+  session._servedViaFallback = { from: from || null, to, at: Date.now() };
+  persistFallbackStamp(session);
+}
+
+/** THE REROUTE **THIS RECORD** ANNOUNCES — asked BEFORE anything reads the
+ *  served model (2026-09-13 r4, the round-3 verifier, reproduced on the real
+ *  pipeline before anything changed).
+ *
+ *  The incident's FIRST announcement is a `fallback` CONTENT BLOCK riding the
+ *  assistant message whose own `message.model` IS the substitute — ONE record
+ *  carrying both facts, and the `system/model_refusal_fallback` twin arrives
+ *  51 s later (frozen transcript: 04:42:45.234Z vs 04:43:36.398Z). Both stdout
+ *  consumers read the served model at the TOP of their assistant branch while
+ *  the content-block loop that stamps the reroute sits ~50 lines BELOW it, so
+ *  every reader of `_servedViaFallback` in between was asking a question whose
+ *  answer had not been written yet: `servedDefinesModel` said yes, the
+ *  target-less lock latch adopted `claude-opus-4-8` and WROTE IT TO
+ *  SESSION-META, where it is permanent — and once the reroute later retires
+ *  (any record served by something else), §12's belt has nothing left to refuse
+ *  and the lock rung answers the substitute for the life of the conversation:
+ *  `laneByEvidence` then asks for the OPUS cap, finds none, and files a Fable
+ *  rejection against the PLAN week (the incident's §2 harm, measured end to
+ *  end). The fix is the ORDER — place the fact, then let the readers read it.
+ *
+ *  MAIN THREAD ONLY, inside this function rather than at its two call sites:
+ *  a sidechain's reroute says nothing about what the main thread is requesting,
+ *  and one implementation cannot be got wrong at one of two places.
+ *
+ *  Restating a reroute that already stands is a NO-OP by construction
+ *  (`noteModelFallback` returns early on `prev.to === to` and deliberately
+ *  leaves `at` alone — it dates when THIS reroute began), which is why the
+ *  later content-block stamp and the `model_refusal_fallback` stamp stay
+ *  exactly where they are: they are the belts for the shapes this rung cannot
+ *  see (a `<synthetic>`-model record, a system record with no assistant record
+ *  at all), and they cost nothing when this rung has already spoken. */
+function rerouteAnnouncedBy(msg) {
+  if (!msg || msg.type !== 'assistant' || msg.parent_tool_use_id || msg.isSidechain) return null;
+  const content = msg.message?.content;
+  if (!Array.isArray(content)) return null;
+  for (const b of content) {
+    if (b?.type === 'fallback' && b.to?.model) return { from: b.from?.model || null, to: b.to.model };
+  }
+  return null;
+}
+
+// PLACEMENT FOLLOWS THE REQUEST MODEL, NEVER A FALLBACK-SERVED ONE (the
+// 2026-09-13 pool storm). The session's model identity is the LAST set-model
+// pick vs the model that actually answered — newest wins — else the spawn
+// model; but a served model the CLI's safety classifier substituted for ours
+// is not this session's model at all. In the incident the classifier rerouted
+// `claude-fable-5-1 → claude-opus-4-8` once, announced it once
+// (`scope:"session"`), and then answered 18 more records as opus with no
+// marker whatsoever — while the CLI kept REQUESTING Fable (the next rejection
+// it earned was "You've reached your Fable limit"). Reading the served model
+// made `familyOfModel` say 'opus', `projectCacheForFamily` dropped the Fable
+// bucket that was the binding constraint, and the pool proactively moved the
+// owner's main conversation onto a member whose Fable cap was 100 % spent —
+// and then onto two more.
+//
+// So the ladder is: picked (newest) > spawn > served-IF-NOT-A-FALLBACK.
+//
+// UNKNOWN STAYS null, AND null IS THE CONSERVATIVE ANSWER: it means NO
+// projection, so every bucket of every member counts — a member whose Fable
+// cap is spent is dead for an unknown session too. Guessing a family here
+// would hide exactly the bucket that refuses the turn.
+function servedDefinesModel(s) {
+  if (!s || !s._servedModel) return false;
+  const fb = s._servedViaFallback;
+  if (!fb || !fb.to) return true;
+  return !modelsMatch(s._servedModel, fb.to);
+}
 function sessionModelFor(s) {
-  const served = s._servedModel ? { m: s._servedModel, at: s._servedModelAt || 0 } : null;
+  // THE LOCK IS THE REQUEST MODEL (2026-09-13 r3, the owner's correction —
+  // reproduced on the real engine before anything changed). The incident's own
+  // conversation was LOCKED: its frozen meta reads `modelLocked: true,
+  // lockedModel: "fable[1m]"`, and `maybeRepinLockedModel` re-sends `/model` at
+  // every turn end where the served model drifted — i.e. the server KNEW the
+  // request model the whole time and was actively re-asserting it. Yet "newest
+  // wins" let a fallback-served `claude-opus-4-8` record outrank both the lock
+  // and the pick: one such record after a restart (where the reroute stamp used
+  // to be lost — see `persistFallbackStamp`) answered 'opus', the projection
+  // dropped the Fable cap, and the pool moved the conversation onto a member
+  // whose Fable was 100 % spent while `quotaVerdictFor` called it usable. A
+  // lock is never outranked by a served model, however new.
+  //
+  // It sits ABOVE the pick because the two cannot disagree on the path that
+  // exists: picking a model while locked RE-TARGETS the lock on both sides
+  // (chat-status-bar sends `lockModel` with the pick; ws-handler's set-model
+  // rewrites `_lockedModel`), and the lock is the only one of the two the
+  // server keeps re-asserting to the CLI. And because the lock IS persisted and
+  // restored (boot-restore, meta `modelLocked`/`lockedModel`), a locked
+  // conversation is right immediately after a restart — before any stamp, pick
+  // or served model has been re-learned. That is the incident's shape.
+  //
+  // …AND A LOCK TARGET THAT *IS* THE STANDING REROUTE IS NOT A REQUEST (r3-r2,
+  // the round-3 verifier). Two writers can put the classifier's substitute in
+  // `_lockedModel`: the parse's target-less latch (now gated on
+  // `servedDefinesModel` — this rung is its belt, because a rung that decides
+  // money may not depend on every writer of a field being careful) and
+  // ws-handler's `set-model {lock:true}` with no `lockModel`, which adopts
+  // `_servedModel` because the UI row it serves says "Lock to this model" about
+  // the model on screen. Whatever wrote it, a target that is the model we are
+  // being rerouted TO cannot be the model we are asking FOR.
+  //
+  // Falling through costs nothing and invents nothing: `servedDefinesModel`
+  // refuses that same served model one line below, so the answer is the pick,
+  // else the spawn model — the REQUEST — which is byte-for-byte what r2
+  // answered for this shape (measured, both writers). And whatever the ladder
+  // returns, `projectionFamilyFor` still sees the standing reroute and answers
+  // null for a cross-family one, so every bucket keeps counting.
+  if (s && s._modelLocked && s._lockedModel
+    && !(s._servedViaFallback?.to && modelsMatch(s._lockedModel, s._servedViaFallback.to))) return s._lockedModel;
+  const served = servedDefinesModel(s) ? { m: s._servedModel, at: s._servedModelAt || 0 } : null;
   const picked = s._pickedModel ? { m: s._pickedModel, at: s._pickedModelAt || 0 } : null;
   const newest = served && picked ? (picked.at >= served.at ? picked : served) : (picked || served);
   return (newest && newest.m) || s._spawnModel || null;
+}
+
+// WHICH MODEL-SCOPED CAP CAN REFUSE THIS SESSION'S NEXT TURN — the PROJECTION
+// question, and it is NOT the question `sessionModelFor` answers (2026-09-13
+// r2, the round-1 verifier, reproduced end to end).
+//
+// `projectCacheForFamily(cache, fam)` DROPS every model-scoped cap of another
+// known family, so the family handed to it decides which walls the pool and
+// the verdict are allowed to see. Round 1 fixed `sessionModelFor` to state the
+// REQUEST model and then handed THAT to the projection — which trades the
+// incident's blind spot for its mirror: while a classifier reroute is
+// STANDING, the model that is actually ANSWERING (and being billed — this
+// instance's own anchor for the incident reads `costSince.byFamily
+// {opus: 21.3957, fable: 0}` over 24 requests) has its cap thrown away.
+// Measured on the real engine + real pool: a fable-requesting session rerouted
+// to opus was proactively moved ONTO a member whose Opus cap read 100 % spent
+// (`fam=fable, from 80%`, notice "its fable quota was at 80%"), and
+// `quotaVerdictFor` answered `usable: true` about a member master correctly
+// called `Opus 0% < 5%` — i.e. round 1 authorised the billed continue this
+// whole essay exists to stop.
+//
+// A STANDING REROUTE MAKES THE FAMILY AMBIGUOUS: both the model we ask for and
+// the model we are given can refuse the turn (the incident proves the first —
+// its rejection was "You've reached your Fable limit" — and the ledger proves
+// the second is what gets billed). So the answer is the doctrine round 1 wrote
+// three lines above its own code and did not apply here: UNKNOWN STAYS null,
+// and null means NO projection, so EVERY bucket counts. A reroute to the same
+// family (fable-5 → fable-4) is not ambiguous and keeps its projection; a
+// reroute to a family we cannot name is ambiguous like any other (fail
+// closed). A stamp left standing by an idle session therefore costs
+// CONSERVATISM, never money — the same answer an unknown-model session gets.
+//
+// `sessionModelFor` deliberately keeps answering the REQUEST model everywhere
+// else: the notice text, `_wallScope`, `fireIdentityFor`, the model lock, and
+// `laneByEvidence` — which asks which cap a rejection was ABOUT, and the CLI
+// rejects the REQUEST (measured: the incident's banner named Fable while opus
+// was answering).
+//
+// r3: A LOCK WHOSE SERVED MODEL DISAGREES IS THE SAME AMBIGUITY, evidenced by
+// a different fact. `sessionModelFor` now answers the lock, so without this
+// rung a locked conversation whose stamp we never saw (a meta written by an
+// older build, a reroute announced on a feed that was down, a stamp cleared by
+// hand) would project the LOCK's family alone and drop the cap of the model
+// that is answering and being billed — r2's own mirror defect, one rung lower.
+// Under a lock the server is actively re-pinning, so a served model in another
+// family means the drift is CURRENT, not one turn stale: both caps can refuse
+// the next turn. Deliberately NOT extended to a plain pick — a `set-model`
+// writes `/model` on the same tick, so a served model older than a pick is
+// stale BY CONSTRUCTION and treating that as ambiguity would suppress the
+// projection for one turn after every ordinary model switch.
+function projectionFamilyFor(session, model) {
+  const fam = familyOfModel(model);
+  if (!fam) return null;
+  if (!session) return fam;
+  const fb = session._servedViaFallback;
+  if (fb && fb.to && familyOfModel(fb.to) !== fam) return null;
+  if (session._modelLocked && session._lockedModel && session._servedModel
+    && familyOfModel(session._servedModel) !== fam) return null;
+  return fam;
 }
 
 const _vsuPending = new Map(); // request_id → {resolve, timer}
@@ -840,8 +1088,8 @@ function usageCacheKeyFor(session) {
 // readings under the account it was SPAWNED on for the rest of its life. On
 // this instance that meant a member whose login had been WIPED on 09-02 kept
 // receiving limit-banners and Fable-bucket readings until 09-07, and — the
-// silent half — a Fish-billed session spawned under B-Stack filed Fish's
-// numbers under B-Stack, poisoning both panels, both anchor streams and the
+// silent half — a Fish-billed session spawned under Member B filed Fish's
+// numbers under Member B, poisoning both panels, both anchor streams and the
 // learned rates.
 // What replaces it: readingSlotFor() (the validated credential slot, pinned
 // for the turn). What survives: this — the divergence is LOGGED and
@@ -1236,7 +1484,13 @@ function wallCount(key, now = Date.now()) {
 // model-projected. Pool = any member usable / min over members' blockedUntil.
 function quotaVerdictFor(scope, { model, session = null } = {}) {
   const nowSec = Math.floor(Date.now() / 1000);
-  const fam = familyOfModel(model);
+  // THE PROJECTION FAMILY, not the stated model (2026-09-13 r2): with no
+  // session this is exactly `familyOfModel(model)` — byte-identical for every
+  // session-less caller — and with one it drops the projection while a
+  // classifier reroute is standing, because then two caps can refuse the turn.
+  // This site is the one that authorises money: `onWalledTurn` arms from it,
+  // and `beforeAutoResumeFire` spends on it.
+  const fam = projectionFamilyFor(session, model);
   const read = poolReadCache(null); // generic estimator-overlaid identity reader
   const proj = (c) => { try { return fam ? projectCacheForFamily(c, fam) : c; } catch { return c; } };
   const a = accounts.get(scope);
@@ -1318,9 +1572,164 @@ function noteWallSignal(session, sig = {}) {
   // reading about THIS wall from a reading about a sibling lane: a codex login
   // reports `codex` and `codex_bengalfox` minute by minute on the same account,
   // and the spark lane read 0 % for the whole 32 h the plan lane was spent.
-  sigs.push({ at: Date.now(), resetsAtMs: Number(sig.resetsAtMs) || 0, bucket: sig.bucket || null, scopedName: sig.scopedName || null, key, slot: !!sig.slot, lane: sig.lane || null });
+  // `provisional` (2026-09-13) = this signal names the UNSCOPED weekly lane only
+  // because that is the only lane claude's `rate_limit_event` vocabulary has for a
+  // model cap — the lane is decided later, by the banner or by the evidence rule
+  // (see resolveTurnLane below), and the entry is REWRITTEN in place.
+  sigs.push({ at: Date.now(), resetsAtMs: Number(sig.resetsAtMs) || 0, bucket: sig.bucket || null, scopedName: sig.scopedName || null, key, slot: !!sig.slot, lane: sig.lane || null, provisional: !!sig.provisional });
   session._turnWorkAfterSig = 0;
 }
+// ── A MODEL-CAP REJECTION MARKS THE MODEL'S CAP, NEVER THE PLAN LANE ────────
+// (the 2026-09-13 pool storm; the second half of it.)
+//
+// MEASURED VOCABULARY. claude 2.1.267's `rate_limit_event.rateLimitType` is
+// exactly {five_hour, seven_day, seven_day_overage_included, seven_day_sonnet,
+// seven_day_opus, seven_day_oauth_apps}. There is NO `seven_day_fable`, so a
+// FABLE model-cap rejection is emitted on the UNSCOPED `seven_day` lane and the
+// only thing that names the model is the banner text
+// ("You've reached your Fable limit."). We wrote both: the event marked the
+// PLAN week 100 % spent and the banner marked the Fable cap — one rejection,
+// two demotions, and the plan mark is the false one. Three members' plan lanes
+// were pinned exhausted for 12-60 h and every OPUS conversation linked to them
+// was bounced along with the fable one.
+//
+// THE RULE. A REJECTED, UNSCOPED weekly event on a claude session is
+// PROVISIONAL: nothing is written until the lane is decided.
+//   · the same turn's banner names a MODEL (parseLimitBanner kind 'scoped')
+//     ⇒ the event WAS that model's cap. Its `resetsAt` — which the banner
+//     deliberately never states (owner: never parse text for times) — rides
+//     along onto the scoped bucket, and ONLY that cap is marked.
+//   · the banner says "weekly usage limit" (kind 'sevenDay') ⇒ the plan lane,
+//     confirmed.
+//   · NO banner by turn end ⇒ decide by EVIDENCE: if the slot's own cache
+//     shows the plan week clearly alive AND a scoped cap for the session's
+//     REQUEST-model family at ≥ 99 % used, it is the cap; otherwise the plan
+//     (today's behaviour). Journal which rule decided.
+// A 5-hour banner decides nothing about WHICH WEEKLY lane, so it leaves the
+// deferral pending — the evidence rule gets it at turn end.
+//
+// IT DOES NOT DEPEND ON THE MODEL NAME. A future `seven_day_fable` type parses
+// to kind 'scoped' through rate-limit-capture's existing regex and is never
+// deferred at all; `seven_day_overage_included` is the weekly lane's own
+// accounting (the 2.361.2 monthly-cap incident) and is likewise never deferred
+// — a model cap is not that.
+//
+// THE COST, STATED. The immediate write is what makes the pool act in the same
+// tick, and deferring it means a turn that is KILLED between the rejection and
+// its `result` leaves no bucket mark at all (today it would leave a wrong one).
+// The window is milliseconds — the incident's own rejection and its turn end
+// share a second — and `maybePoolAutoSwitch` still runs on the provisional
+// signal, so the pool moves immediately regardless of the mark.
+const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']);
+// REACHABILITY, STATED HONESTLY (r3). A turn's rejections share ONE key by
+// construction — `rejectionSlotFor` pins the credential slot at the first keyed
+// signal and `noteTurnEnd` clears it — so the only way this cap binds is
+// `wallRecordTarget` RE-FILING a rejection onto another account mid-turn (the
+// window-attribution rule). That path exists and is asserted by the suite, but
+// a turn with five distinct re-filed keys has NOT been measured end to end. The
+// cap is therefore kept (a turn that walls five members is pathological) and
+// its drop is made AUDIBLE rather than removed: a bound we cannot prove is
+// unreachable must not silently discard a wall.
+const LANE_DEFER_MAX = 4;
+/** Is this rejection one whose LANE we cannot yet name? */
+function laneIsProvisional(session, ev) {
+  if (!ev || ev.status !== 'rejected' || ev.kind !== 'sevenDay') return false;
+  if ((session?.backend || 'claude') !== 'claude') return false;
+  return UNSCOPED_WEEKLY_TYPES.has(String(ev.rawType || ''));
+}
+/** Stash one provisional rejection for the rest of this turn. */
+function deferTurnLane(session, { key, resetsAt, rawType }) {
+  const list = (session._turnLaneDefer = session._turnLaneDefer || []);
+  if (list.some((d) => d.key === key)) return;    // the same member's wall, restated
+  // THE CAP DROPS A WALL, SO IT SAYS SO (r3). Past LANE_DEFER_MAX distinct
+  // members in one turn this rejection gets no bucket mark at all — the same
+  // harm the teardown settle fixes, one rung up. A silent bound is a wall
+  // nobody can count: the pool then spends on a member the CLI just refused and
+  // no telemetry says why.
+  if (list.length >= LANE_DEFER_MAX) {
+    console.warn(`[wall] ${session._webuiId}: lane deferral dropped for ${nameOf(key)} — more than ${LANE_DEFER_MAX} members walled in one turn (its bucket mark is lost)`);
+    global.__vsEvent?.('rate-limit-lane-dropped', `${key}:${rawType || 'sevenDay'}`);
+    return;
+  }
+  list.push({ key, resetsAt: Number(resetsAt) || null, rawType: rawType || null, at: Date.now() });
+}
+function pendingLaneDeferrals(session) {
+  return (session && Array.isArray(session._turnLaneDefer)) ? session._turnLaneDefer : [];
+}
+/** THE LANE IS DECIDED. Rewrite this turn's provisional signals, write the
+ *  bucket each deferral was waiting to name, and say which rule decided. */
+function resolveTurnLane(session, verdict, why) {
+  const list = pendingLaneDeferrals(session);
+  if (!list.length) return;
+  session._turnLaneDefer = [];
+  const scoped = verdict && verdict.kind === 'scoped' && verdict.name;
+  const scopedName = scoped ? String(verdict.name).toLowerCase() : null;
+  // the SIGNALS first: demoteWalledAccount folds them at turn end, and a
+  // provisional entry left saying 'sevenDay' is the false demotion itself
+  for (const sig of (session._turnWallSigs || [])) {
+    if (!sig || !sig.provisional) continue;
+    sig.provisional = false;
+    if (scoped) { sig.bucket = 'scoped'; sig.scopedName = scopedName; }
+  }
+  for (const d of list) {
+    const ev = {
+      kind: scoped ? 'scoped' : 'sevenDay', scopedName,
+      status: 'rejected', utilization: null,
+      resetsAt: d.resetsAt || null, overage: {},
+    };
+    try {
+      const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: d.key, identityIds: usageIdentityAccountIds(d.key), ev });
+      if (!r.ok) console.warn(`[wall] lane write failed for ${nameOf(d.key)}: ${r.error || 'unknown'}`);
+    } catch (e) { console.warn('[wall] lane write failed:', e.message); }
+    console.log(`[wall] ${session._webuiId}: unscoped weekly rejection on ${nameOf(d.key)} → ${scoped ? 'the ' + verdict.name + ' model cap' : 'the plan weekly lane'} (${why})`);
+    global.__vsEvent?.('rate-limit-lane', `${d.key}:${scoped ? 'scoped:' + scopedName : 'sevenDay'}`);
+  }
+  maybePoolAutoSwitch(session); // the mark just landed — act on it in this tick
+}
+/** The banner of this same turn names the lane. Called from markLimitBanner. */
+function laneFromBanner(session, hit) {
+  if (!pendingLaneDeferrals(session).length || !hit) return;
+  if (hit.kind === 'scoped') resolveTurnLane(session, { kind: 'scoped', name: hit.name }, `the banner names the ${hit.name} cap`);
+  else if (hit.kind === 'sevenDay') resolveTurnLane(session, { kind: 'sevenDay' }, 'the banner says weekly usage limit');
+  // kind 'fiveHour' states nothing about WHICH weekly lane — stay pending
+}
+/** No banner named the lane. Decide on what the slot's own cache already says
+ *  about the two candidate buckets, for the family this session REQUESTS. */
+function laneByEvidence(session, d) {
+  const fam = familyOfModel(sessionModelFor(session));
+  if (!fam) return { verdict: { kind: 'sevenDay' }, why: 'no banner, and this session states no model — the plan lane is the safe default' };
+  const c = readRawUsageCache(d.key);
+  if (!c) return { verdict: { kind: 'sevenDay' }, why: `no banner and no cached reading for ${nameOf(d.key)}` };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const planLeft = bucketRemaining(c.sevenDay, nowSec);
+  const cap = (Array.isArray(c.scopedWeekly) ? c.scopedWeekly : []).find((b) => familyOfScopedBucket(b?.name) === fam);
+  const capLeft = bucketRemaining(cap, nowSec);
+  const pct = (left) => (left == null ? 'unknown' : Math.round(100 - left) + '%');
+  if (planLeft != null && planLeft > 10 && capLeft != null && capLeft <= 1) {
+    return { verdict: { kind: 'scoped', name: cap.name || fam }, why: `no banner: the plan week reads ${pct(planLeft)} used while this session's ${cap.name || fam} cap reads ${pct(capLeft)}` };
+  }
+  return { verdict: { kind: 'sevenDay' }, why: `no banner: the plan week reads ${pct(planLeft)} used, this session's ${fam} cap ${pct(capLeft)} — not a model cap by evidence` };
+}
+/** The turn is over: any deferral still pending is decided by evidence.
+ *
+ *  TWO CALLERS, AND THE SECOND IS THE ONE THIS DEFERRAL OWES ITS EXISTENCE TO
+ *  (r3 §8, the round-2 verifier). `noteTurnEnd` runs on claude's `result`
+ *  record — but a turn can end without one: the wrapper dies, the pty exits,
+ *  and the rejection that arrived seconds earlier gets NO bucket mark at all,
+ *  where master (the immediate write) left one. A dropped wall makes the member
+ *  look healthy to every OTHER conversation, which is the money direction. The
+ *  stdout consumer binds this on the session (`_settleTurnLane`) and
+ *  session-stdout's teardown calls it, exactly as `_retireCompaction` does for
+ *  the compaction claim: a turn-lifecycle exit this consumer never sees a
+ *  record for still closes the claim through the claim's OWN named function.
+ *  Idempotent by construction — `resolveTurnLane` empties the list first. */
+function settleTurnLane(session) {
+  const list = pendingLaneDeferrals(session);
+  if (!list.length) return;
+  const { verdict, why } = laneByEvidence(session, list[0]); // one turn, one requested model ⇒ one verdict
+  resolveTurnLane(session, verdict, why);
+}
+
 /** Main-thread assistant output — work evidence for turn classification. */
 function noteSessionProduced(session) {
   if (session._turnWallSigs && session._turnWallSigs.length) session._turnWorkAfterSig = (session._turnWorkAfterSig || 0) + 1;
@@ -1330,7 +1739,15 @@ function noteSessionProduced(session) {
 function noteTurnEnd(session) {
   const sigs = session._turnWallSigs || [];
   const workAfter = session._turnWorkAfterSig || 0;
+  // THE LANE DECISION CLOSES WITH THE TURN (2026-09-13). It runs BEFORE the
+  // signal list is swapped out, because resolving rewrites the provisional
+  // entries IN `sigs` — the very array `demoteWalledAccount` folds below — and
+  // a provisional entry left saying 'sevenDay' IS the false plan demotion.
+  // Every turn settles it, walled or not: today's immediate write lands on any
+  // turn that sees a rejection, and this must not silently lose a mark.
+  try { settleTurnLane(session); } catch (e) { console.warn('[wall] lane settle failed:', e.message); }
   session._turnWallSigs = []; session._turnWorkAfterSig = 0;
+  session._turnLaneDefer = null;
   // the READING pin dies with the turn for exactly the reason the rejection
   // pin does: a re-point reaches the running CLI on its next request, so the
   // next turn is the first one it can be true for (readingSlotFor)
@@ -2020,6 +2437,20 @@ function recordRateLimitEvent(session, msg) {
         return;
       }
     }
+    // A REJECTION WHOSE LANE WE CANNOT YET NAME IS NOT WRITTEN YET
+    // (2026-09-13). claude has no `seven_day_<model>` type for a model cap, so
+    // an unscoped weekly rejection is BOTH shapes until this turn's banner or
+    // the turn-end evidence rule says which. The SIGNAL is raised now — the
+    // session is blocked whoever owns the bucket, the turn still classifies as
+    // walled, and the pool still moves in this tick — but the BUCKET mark waits
+    // for the lane. See resolveTurnLane.
+    if (laneIsProvisional(session, ev)) {
+      deferTurnLane(session, { key: writeKey, resetsAt: ev.resetsAt, rawType: ev.rawType });
+      global.__vsEvent?.('rate-limit-lane-deferred', `${writeKey}:${ev.rawType}`);
+      maybePoolAutoSwitch(session);
+      try { noteWallSignal(session, { resetsAtMs: (Number(ev.resetsAt) || 0) * 1000, bucket: ev.kind, scopedName: ev.scopedName, key, slot: !!slot?.slotOk, provisional: true }); } catch { }
+      return;
+    }
     const corr = corroborateReading(session, writeKey, 'rate-limit-event:' + ev.kind);
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, corroborated: corr ? corr.agree : undefined });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); return; }
@@ -2256,6 +2687,11 @@ function markLimitBanner(session, text) {
   try {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
+    // THE BANNER NAMES THE LANE (2026-09-13). It runs FIRST so the deferred
+    // write lands with the EVENT's own `resetsAt` — the banner deliberately
+    // states no time, and `bump` below keeps a known FUTURE reset, so the
+    // precise one survives instead of being replaced by the 24 h guess.
+    try { laneFromBanner(session, hit); } catch (e) { console.warn('[wall] lane-from-banner failed:', e.message); }
 
     // host-aware (2.289.0) — a remote host-login banner belongs to the host
     // bucket, not __global__. The banner is a REJECTION (the CLI refused the
@@ -2985,7 +3421,11 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // The observation still rides along in the log line as corroboration.
       const cm = sessionBillingMember(s2, poolId);
       const curFor = cm.id || linkCur;
-      const fam = familyOfModel(sessionModelFor(s2));
+      // ONE RULE FOR THE PROJECTION QUESTION (2026-09-13 r2) — while a
+      // classifier reroute is standing this is null, so every bucket of every
+      // member counts and the pool cannot move the conversation onto a member
+      // whose cap for the model that is ANSWERING it is spent.
+      const fam = projectionFamilyFor(s2, sessionModelFor(s2));
       const projected = (id) => projectCacheForFamily(readCache(id), fam);
       // never pick a member that just answered THIS session with a limit
       // rejection (verdict-level twin of the same fact)
@@ -2997,6 +3437,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         // the ONLY source for the breaker's "no usable member left" clause —
         // a refusal reason does not imply it, and round 1 said it anyway);
         // the operator's line below stays throttled to once per 10min.
+        // 'no-better' is DELIBERATELY ABSENT (2026-09-13): it means the
+        // proactive scan found no candidate while the member this conversation
+        // is already on is healthy. Feeding that to the breaker's "no usable
+        // member left" clause is the false claim the storm made.
         const noWay = ds && (ds.reason === 'all-rejected' || ds.reason === 'no-members' || ds.reason === 'stuck' || ds.reason === 'all-logins-expired');
         if (noWay) try { getAutoResume()?.noteNoPoolTarget?.(sid, rejected.length, ds.reason); } catch { }
         if (ds && ds.reason === 'all-rejected' && now - (_noTargetLogAt.get(sid) || 0) > 10 * 60e3) {
@@ -3055,6 +3499,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // account while the user finds out by hitting a limit" incident down a
       // different branch. `_sentNotices` is a per-BOOT permanent Set, so the
       // key must carry an hour bucket or a recurrence is never reported again.
+      // …and 'no-better' says nothing here either: the current member is
+      // healthy, so there is no state only the user can fix (2026-09-13).
       if (d.reason === 'stuck' || d.reason === 'no-members' || d.reason === 'no-settleable' || d.reason === 'all-logins-expired') {
         // The sentence itself is PURE (poolBlockedNotice in account-pool-auto):
         // it names WHICH buckets are dead ("every member is out of quota" is
@@ -3172,9 +3618,11 @@ function maybeStopOnFallback(session, id, from, to) {
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
     onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
-    maybeRepinLockedModel, maybeStopOnFallback, modelsMatch,
+    maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
-    noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
+    noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
+    laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
+ quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     observedMemberFor, sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, corroborateReading, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,

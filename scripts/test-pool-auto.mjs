@@ -7,7 +7,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, classifyAuthFailure, conversationDisplayName } = require(path.resolve('src/account-pool-auto.js'));
+const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, classifyAuthFailure, conversationDisplayName } = require(path.resolve('src/account-pool-auto.js'));
 
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
@@ -199,6 +199,50 @@ ck('oscillation control: a HEALTHY sooner-deadline member still gets the proacti
   const burst = { fiveHour: { utilization: 0.99, resetsAt: NOW + 1800 }, sevenDay: { utilization: 0.2, resetsAt: NOW + 3 * D }, scopedWeekly: [] };
   const v5 = decidePoolSwitch({ currentId: 'a', members: [{ id: 'a' }, { id: 'b' }], readCache: (id) => ({ a: burst, b: burst })[id] ?? null, nowSec: NOW, explain: true });
   ck('blocked: a 5h burst block names 5h and shows the healthy 7d', v5.deadBuckets.join() === '5h 1%' && v5.liveBuckets.join() === '7d 80%');
+}
+
+// ── A HEALTHY CURRENT MEMBER IS NEVER "NO MEMBER CAN SERVE IT" ─────────────
+// (2026-09-13, the Fable-cap pool storm.) On a HOT pool the candidate ranking
+// runs PROACTIVELY, i.e. BEFORE anyone asks whether the current member is
+// exhausted — so an empty candidate list says nothing at all about whether the
+// pool can serve a turn. The three actionable refusals ('no-members',
+// 'all-rejected', 'all-logins-expired') all flowed out of that branch, and the
+// engine renders them as an hourly notice AND feeds them to auto-resume's "no
+// usable member left" clause. The owner read the notice exactly as written:
+// "有账号有 Fable 额度但总是提示没有了".
+{
+  const spentFable = (u7) => ({ fiveHour: { utilization: 0, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + 3 * D },
+    scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: NOW + 3 * D }] });
+  const healthy = { fiveHour: { utilization: 0, resetsAt: NOW + 1800 }, sevenDay: { utilization: 0.31, resetsAt: NOW + 3 * D },
+    scopedWeekly: [{ name: 'Fable', utilization: 0.55, resetsAt: NOW + 3 * D }] };
+  const m = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const rc = (id) => ({ a: healthy, b: spentFable(0.5), c: spentFable(0.55) })[id] ?? null;
+  const hot = decidePoolSwitch({ currentId: 'a', members: m, readCache: rc, nowSec: NOW, proactive: true, hot: true, explain: true });
+  ck('healthy current + every other member quota-dead ⇒ no-better, never a wall', hot?.to === null && hot.reason === 'no-better' && hot.noBetter === true);
+  ck('no-better still reports the current member\'s own buckets (for the log, not for a notice)', hot.liveBuckets.some((x) => x.startsWith('Fable ')) && hot.deadBuckets.length === 0);
+  // …and the three refusals are UNCHANGED the moment the current member really
+  // is exhausted — this narrows WHEN they may be claimed, never WHAT they say.
+  const dead = decidePoolSwitch({ currentId: 'b', members: m, readCache: rc, nowSec: NOW, proactive: true, hot: true, explain: true });
+  ck('current member hard-dead on its Fable cap ⇒ it may still escape to the healthy member', dead?.to === 'a');
+  const allDead = (id) => ({ a: spentFable(0.6), b: spentFable(0.5), c: spentFable(0.55) })[id] ?? null;
+  const stuck = decidePoolSwitch({ currentId: 'a', members: m, readCache: allDead, nowSec: NOW, proactive: true, hot: true, explain: true });
+  ck('current member exhausted AND every candidate gated ⇒ \'no-members\', exactly as before', stuck?.to === null && stuck.reason === 'no-members');
+  ck('…and it still names the spent bucket', stuck.deadBuckets.join() === 'Fable 0%');
+  // 'all-rejected' is gated by the same clause: members that rejected THIS
+  // conversation only matter when the one it sits on cannot serve it either.
+  const rej = decidePoolSwitch({ currentId: 'a', members: m, readCache: (id) => ({ a: healthy, b: healthy, c: healthy })[id] ?? null, nowSec: NOW, proactive: true, hot: true, exclude: ['b', 'c'], explain: true });
+  ck('every OTHER member rejected this conversation, but it is on a healthy one ⇒ no-better, not all-rejected', rej?.to === null && rej.reason === 'no-better');
+  const rej2 = decidePoolSwitch({ currentId: 'a', members: m, readCache: (id) => ({ a: spentFable(0.6), b: healthy, c: healthy })[id] ?? null, nowSec: NOW, proactive: true, hot: true, exclude: ['b', 'c'], explain: true });
+  ck('…and once the current member IS exhausted, \'all-rejected\' comes back unchanged', rej2?.to === null && rej2.reason === 'all-rejected');
+  // THE SENTENCE. "out of quota (still available: …)" is a contradiction about
+  // ONE member and it is verbatim what the storm printed; the live list only
+  // means something beside a dead one.
+  const spent = decidePoolSwitch({ currentId: 'a', members: m, readCache: allDead, nowSec: NOW, proactive: true, hot: true, explain: true });
+  ck('notice: a spent bucket still prints its live siblings (the nested model\'s whole point)',
+    / \(still available: /.test(poolBlockedNotice(spent, { poolName: 'P', currentName: 'A' })));
+  const noDead = { ...spent, deadBuckets: [], liveBuckets: ['5h 100%', '7d 69%', 'Fable 45%'] };
+  ck('notice: with NOTHING spent the live list is dropped — never "out of quota (still available: …)"',
+    !/still available/.test(poolBlockedNotice(noDead, { poolName: 'P', currentName: 'A' })) && /out of quota/.test(poolBlockedNotice(noDead, { poolName: 'P', currentName: 'A' })));
 }
 
 // ── classifyAuthFailure (2.335.0: auth-class failures must evict, quota can't see them) ──

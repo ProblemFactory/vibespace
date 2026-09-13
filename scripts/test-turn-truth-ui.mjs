@@ -493,6 +493,7 @@ if (!opened?.ok) { console.error(pageErrors.join('\n')); done(); }
       engine: {
         _vsuPending: new Map(), armWorkflowUsageWatcher: stub, kickPoolEval: stub, markLimitBanner: stub,
         maybeRepinLockedModel: stub, maybeStopOnFallback: stub, notePoolAuthFailure: stub, modelsMatch: () => false,
+        noteServedModel: (s, m) => { s._servedModel = m; s._servedModelAt = Date.now(); }, noteModelFallback: stub, // 2026-09-13
         noteSessionProduced: stub, noteTurnEnd: stub, recordRateLimitEvent: stub, resolveUsageKey: () => '__g__',
         usageEstimator: { noteLive: stub },
       },

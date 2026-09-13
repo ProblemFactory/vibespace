@@ -159,7 +159,24 @@ ok('a notification that could NOT be steered is LOUD about the lane it took inst
 // ── wiring pins (the 2.355.0 lesson: a pure fix with an unstaged call site stays dead while unit tests glow green) ──
 const srv = read('server.js');
 ok('server.js DESTRUCTURES recordCodexQuotaSignal from the engine (was exported-but-never-wired: the whole codex quota chain silently dead)', /probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent/.test(srv));
-ok('…and forwards it to session-stdout in the engine object', /modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator \}/.test(srv));
+// The pin is MEMBERSHIP in the literal, not the literal's exact tail: anchoring
+// on `… usageEstimator }` made this assert a hostage of whichever name happens
+// to be last (2026-09-13 r3 added three and broke it). Slice the balanced
+// `engine: { … }` that session-stdout is constructed with and ask whether the
+// name is in it — the same shape test-fable-cap-pool-storm §10 generalises to
+// every name the registered consumers destructure.
+const stdoutEngineLiteral = (() => {
+  const i = srv.indexOf("require('./src/server/session-stdout.js').create({");
+  const s0 = srv.indexOf('{', srv.indexOf('engine: {', i));
+  let d = 0;
+  for (let j = s0; j < srv.length; j++) {
+    if (srv[j] === '{') d++;
+    else if (srv[j] === '}') { d--; if (!d) return srv.slice(s0 + 1, j); }
+  }
+  return '';
+})();
+ok('…and forwards it to session-stdout in the engine object',
+  /(^|[,{\s])recordCodexQuotaSignal\s*[,}]/.test(stdoutEngineLiteral + '}'), stdoutEngineLiteral.slice(0, 120));
 ok('…and passes getDeliver for the re-stash fallback', /getDeliver: \(\) => \{ try \{ return deliver; \} catch \{ return null; \} \}/.test(srv));
 const ss = read('src/server/stdout/codex-events.js'); // S5: the codex-events consumer module
 ok('stdout/codex-events re-stashes on peer_message_result ok:false (a promised message is never silently lost), keeping the echoed label', /peer_message_result' && msg\.payload\.ok === false && msg\.payload\.text/.test(ss) && /stashFor\?\.\(cid, \{ source: 'agent', fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\) \}\)/.test(ss));

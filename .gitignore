@@ -104,3 +104,12 @@ src/lib/.chat-view.*prefix-*.js
 # — and a dirty tree is what the release gate REFUSES on, so it can never be
 # allowed to become tree state.
 src/.session-store.spawnfix-*.js
+
+# scripts/test-fable-cap-pool-storm.mjs writes PATCHED COPIES of
+# src/account-pool-auto.js and src/server/usage-pool-engine.js BESIDE the real
+# ones (they must be SIBLINGS or their relative requires do not resolve).
+# Unlinked on exit and swept by PID at start, but a SIGKILL can strand one —
+# and a dirty tree is what the release gate REFUSES on, so they can never be
+# allowed to become tree state. The pattern is the FAMILY (no slash ⇒ any
+# directory) because the copies land in two of them.
+vs-fable-mut-*.js

@@ -54,6 +54,25 @@ const activeSessions = new Map();
 const engine = {
   _vsuPending: new Map(), armWorkflowUsageWatcher() { }, kickPoolEval() { }, markLimitBanner() { }, maybePoolAutoSwitch() { },
   maybeRepinLockedModel() { }, maybeStopOnFallback() { }, notePoolAuthFailure() { }, modelsMatch: () => false,
+  noteServedModel(s, m) { s._servedModel = m; s._servedModelAt = Date.now(); }, noteModelFallback() { }, // 2026-09-13: the served model + the fallback stamp are ONE engine consumer, shared by the parse and the device feed
+  settleTurnLane() { }, // r3: the consumer binds it on the session so session-stdout's TEARDOWN can close the per-turn lane decision (a turn that ends by the wrapper dying emits no `result`)
+  // r3-r2: the target-less lock latch asks the engine whether the model that
+  // ANSWERED is this session's model or the classifier's substitute. Modelled
+  // (not a `() => {}`) because a stub answering falsy would silently disable
+  // the latch in every leg below, which is the shape this census exists to stop.
+  servedDefinesModel: (s) => !!s?._servedModel && !(s._servedViaFallback?.to && s._servedViaFallback.to === s._servedModel),
+  // r4: THE REROUTE THIS RECORD ANNOUNCES, asked BEFORE the served capture (the
+  // incident's first announcement is a `fallback` content block on the very
+  // record the substitute answered). Modelled for the same reason as the
+  // predicate above: a `() => {}` stub answers falsy, which would make every leg
+  // below run the r3-r2 shape and prove nothing about the order.
+  rerouteAnnouncedBy: (msg) => {
+    if (!msg || msg.type !== 'assistant' || msg.parent_tool_use_id || msg.isSidechain) return null;
+    const c = msg.message?.content;
+    if (!Array.isArray(c)) return null;
+    for (const b of c) if (b?.type === 'fallback' && b.to?.model) return { from: b.from?.model || null, to: b.to.model };
+    return null;
+  },
   noteSessionProduced(s) { calls.produced.push(s); }, noteTurnEnd(s) { calls.turnEnd.push(s); }, noteWallSignal() { },
   recordRateLimitEvent() { }, recordCodexQuotaSignal(s, p) { calls.codexQuota.push(p); }, resolveUsageKey: () => '__global__',
   usageEstimator: { noteLive() { } },
@@ -67,6 +86,30 @@ const so = require(path.join(REPO, 'src/server/session-stdout.js')).create({
   getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }),
   getDeliver: () => ({ stashFor: (cid, e) => calls.stashed.push([cid, e]) }),
 });
+// THE STUB IS A MODEL OF THE ENGINE, AND A HAND-WRITTEN MODEL DRIFTS
+// (2026-09-13). Every consumer destructures its engine deps by name from a
+// PLAIN object, so a dep this stub does not carry is `undefined` and the FIRST
+// record that reaches that line throws — mid-record, inside the consumer, with
+// the failure surfacing as "the message never rendered" a hundred asserts
+// later. (Measured: adding `noteServedModel` to the claude consumer crashed
+// this suite at its tombstone leg, four sections past the cause.) Derive the
+// required set from the consumers' own destructures instead of trusting the
+// list above to keep up.
+{
+  const need = new Set();
+  for (const f of ['claude-stream-json', 'codex-events', 'acp-events']) {
+    const src = read('src/server/stdout/' + f + '.js');
+    const m = /const \{([^}]*)\} = engine;/.exec(src);
+    if (!m) { ok('engine-dep census: ' + f + ' destructures its engine deps in one statement', false, 'no `const {…} = engine;` found'); continue; }
+    for (const part of m[1].split(',')) {
+      const name = part.split(':')[0].replace(/\/\/.*$/, '').trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) need.add(name);
+    }
+  }
+  const missing = [...need].filter((k) => !(k in engine));
+  ok('engine-dep census: the stub carries every dep the three consumers destructure (' + need.size + ' names)',
+    missing.length === 0, 'missing: ' + missing.join(', '));
+}
 const fakePty = () => { const h = { data: null, exit: null, onData(cb) { h.data = cb; }, onExit(cb) { h.exit = cb; } }; return h; };
 const mkSession = (backend, id, { normalizer = true } = {}) => {
   const s = { mode: 'chat', backend, name: 'n-' + id, cwd: tmp, sockName: 'cw-' + id, buffer: '', createdAt: Date.now(), backendSessionId: null, claudeSessionId: null };

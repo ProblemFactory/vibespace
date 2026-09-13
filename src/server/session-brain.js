@@ -11,7 +11,8 @@ const { mk } = require('./lazy.js');
 
 function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory }) {
   const { kickPoolEval, markLimitBanner, maybeStopOnFallback,
-    recordRateLimitEvent, resolveUsageKey, usageEstimator } = engine;
+    recordRateLimitEvent, resolveUsageKey, usageEstimator,
+    noteServedModel, noteModelFallback, rerouteAnnouncedBy } = engine;
   const usageHistory = mk(getUsageHistory);
 // ── Session-brain step 2: the DARK comparator ───────────────────────────────
 // The daemon streams its own normalizer's ops for its pipe sessions; the
@@ -85,7 +86,17 @@ function sbSeenFirst(session, rec) {
 function claudeSideEffects(session, sid, msg) {
   try {
     if (msg.type === 'assistant' && msg.message?.model && msg.message.model !== '<synthetic>' && !msg.parent_tool_use_id && !msg.isSidechain) {
-      session._servedModel = msg.message.model; session._servedModelAt = Date.now();
+      // THE FACT BEFORE ITS READERS, at BOTH feeds (2026-09-13 r4): the reroute
+      // this record announces is stamped before the served model is read, so
+      // `noteServedModel`'s retirement rule never sees a reroute the SAME record
+      // carries as "something else answered". The parse has the identical two
+      // lines; a one-sided edit is the twin the CS rules ban — and a COMMENT is
+      // not a gate, so test-fable-cap-pool-storm §14f is the DERIVED grep census
+      // over every file that CALLS `noteServedModel(`: deleting these two lines
+      // changes nothing observable in §14e's own leg and only that census sees it.
+      const announced = rerouteAnnouncedBy(msg);
+      if (announced) noteModelFallback(session, announced.from, announced.to);
+      noteServedModel(session, msg.message.model); // the engine's granular consumer — same fallback rule as the parse (2026-09-13)
     }
     if (msg.type === 'assistant' && msg.message?.usage && (msg.requestId || msg.message?.id) && !(session.host && !session._accountId)) {
       try {
@@ -107,11 +118,15 @@ function claudeSideEffects(session, sid, msg) {
           markLimitBanner(session, b.text);
         } else if (b?.type === 'fallback') {
           global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
-          if (!msg.parent_tool_use_id && !msg.isSidechain) maybeStopOnFallback(session, sid, b.from?.model, b.to?.model);
+          if (!msg.parent_tool_use_id && !msg.isSidechain) {
+            noteModelFallback(session, b.from?.model, b.to?.model); // the FACT, then the belt (2026-09-13)
+            maybeStopOnFallback(session, sid, b.from?.model, b.to?.model);
+          }
         }
       }
     }
     if (msg.type === 'system' && msg.subtype === 'model_refusal_fallback') {
+      if (!msg.parent_tool_use_id && !msg.isSidechain) noteModelFallback(session, msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
       maybeStopOnFallback(session, sid, msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
     }
     // todo/task families mirror the parse's exact consumption (lines above):

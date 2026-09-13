@@ -53,7 +53,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator } = engine;
+    modelsMatch, noteSessionProduced, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
+    noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane } = engine;
 
   /**
    * IS THIS DIRECTORY A LINKED GIT WORKTREE? (round-4 verifier — the positive
@@ -359,6 +360,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     // SAME named function rather than reaching in and clearing the field
     // (session-schema row `_retireCompaction`).
     session._retireCompaction = () => retireCompaction(session, id);
+    // …and the SAME exit owes the same debt to the per-turn LANE decision
+    // (r3 §8). An unscoped weekly rejection defers its bucket mark to the end
+    // of the turn; if the wrapper dies before the `result` record, `noteTurnEnd`
+    // never runs and the mark is lost — where master, which wrote it on
+    // arrival, left one. Bound here (the consumer owns the turn lifecycle) and
+    // called from session-stdout's teardown, never by reaching into the
+    // engine's state from there.
+    session._settleTurnLane = () => settleTurnLane?.(session);
 
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
@@ -595,12 +604,65 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             // main-thread work ⇒ not limit-blocked ⇒ stale armed waits drop
             // (readings-based disarm misses accounts that emit no events)
             try { noteSessionProduced?.(session); } catch { }
-            session._servedModel = msg.message.model; session._servedModelAt = Date.now();
+            // THE FACT BEFORE ITS READERS (2026-09-13 r4, the round-3 verifier).
+            // The incident's FIRST announcement is a `fallback` CONTENT BLOCK on
+            // the very record the substitute answered, and the loop that stamps
+            // it is ~90 lines BELOW — so every reader in between (the retirement
+            // rule inside `noteServedModel`, `servedDefinesModel` under the latch)
+            // was asking a question this record had already answered and nobody
+            // had written down. `rerouteAnnouncedBy` is the engine's own rule
+            // (main-thread only, never re-spelled); the later stamps stay where
+            // they are as belts for the shapes this rung cannot see, and cost
+            // nothing — restating a standing reroute is a no-op that does not
+            // even move `at`.
+            const announced = rerouteAnnouncedBy(msg);
+            if (announced) noteModelFallback(session, announced.from, announced.to);
+            // through the engine's granular consumer, which also retires a
+            // standing fallback stamp when something else answers (2026-09-13)
+            noteServedModel(session, msg.message.model);
             try { noteModelSeen(session._servedModel); } catch { }
             // Latch a target-less lock (locked before any model was known —
             // restored sessions, pre-first-reply locks): first main-thread
             // served model becomes the target, else repin no-ops forever.
-            if (session._modelLocked && !session._lockedModel) {
+            //
+            // …BUT NEVER A MODEL THE CLASSIFIER SUBSTITUTED (2026-09-13 r3-r2,
+            // the round-3 verifier — reproduced on the real engine + real pool
+            // + real credential symlinks + THIS consumer before it was
+            // changed). `_lockedModel` stopped being a repin detail the moment
+            // `sessionModelFor` put the LOCK at the top of its ladder: a latch
+            // that adopts the reroute target makes the SUBSTITUTE the session's
+            // stated model, `projectionFamilyFor` answers its family, the Fable
+            // cap that is the binding constraint is dropped, and the pool moves
+            // the conversation onto a member whose Fable is 100 % spent — the
+            // incident verbatim, and a REGRESSION against r2 (same fixture,
+            // same fake pty: r2 keeps the conversation on `personal`; with the
+            // latch ungated it moved to Member F, announced "its opus quota was
+            // at 66%", and `quotaVerdictFor` — the site that authorises an
+            // unattended continue — called that member usable). It also defeats
+            // the r3 stamp, which exists to make a RESTORED session right: the
+            // latch fires on the first record after the restore and writes the
+            // substitute to session-meta, where it is permanent.
+            //
+            // The question is the engine's own (`servedDefinesModel`: is the
+            // model that answered this session's model, or the classifier's
+            // substitute?) and is ASKED here, never re-spelled — it is asked
+            // AFTER `noteServedModel` above on purpose, so a record served by
+            // anything else has already retired the stamp and may latch.
+            // A refused latch leaves the target as it already is (null): the
+            // repin no-ops, which is exactly what it did with the substitute
+            // latched anyway (`modelsMatch(served, locked)` ⇒ no repin), so
+            // nothing is lost but the wrong placement.
+            //
+            // …AND `!announced` IS A SECOND, INDEPENDENT REFUSAL (r4): a record
+            // that ANNOUNCES a reroute is never a record whose served model may
+            // become a lock target, whatever any stamp says. The r4 ordering fix
+            // above already makes `servedDefinesModel` answer correctly for this
+            // record, so today either clause alone refuses it — that is the
+            // point, and each has its own control in the suite. Keeping both is
+            // not decoration: the ordering is a property of THIS function's
+            // statement order (one refactor away), while this clause is a
+            // property of the RECORD.
+            if (session._modelLocked && !session._lockedModel && !announced && servedDefinesModel(session)) {
               session._lockedModel = session._servedModel;
               try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: session._lockedModel }); } catch {}
             }
@@ -647,7 +709,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 global.__vsEvent?.('cli-model-fallback', `${b.from?.model || '?'}->${b.to?.model || '?'}`);
                 // main thread only — a SUBAGENT's fallback must not interrupt
                 // the parent turn (same guard class as the served-model capture)
-                if (!msg.parent_tool_use_id && !msg.isSidechain) maybeStopOnFallback(session, id, b.from?.model, b.to?.model);
+                if (!msg.parent_tool_use_id && !msg.isSidechain) {
+                  // THE FACT FIRST, then the belt: the reroute is what stops
+                  // `sessionModelFor` from reading the substituted model as
+                  // this session's own (2026-09-13 pool storm), and it must be
+                  // recorded whether or not `claude.disableModelFallback` is on.
+                  noteModelFallback(session, b.from?.model, b.to?.model);
+                  maybeStopOnFallback(session, id, b.from?.model, b.to?.model);
+                }
               }
             }
           }
@@ -656,6 +725,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // spawned/flipped after the toggle — this belt covers sessions
           // that predate it (their CLI still has fallback armed).
           if (msg.type === 'system' && msg.subtype === 'model_refusal_fallback') {
+            // MAIN THREAD ONLY for the model FACT (2026-09-13): a sidechain's
+            // reroute says nothing about what the main thread is requesting.
+            // The existing belt keeps its historical reach (it interrupts the
+            // turn, which is a per-session UX decision, not a billing one).
+            if (!msg.parent_tool_use_id && !msg.isSidechain) {
+              noteModelFallback(session, msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
+            }
             maybeStopOnFallback(session, id,
               msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
           }

@@ -130,6 +130,7 @@ export const SUITES = [
   { name: 'test-task-wakeup-card', tier: 'fast' }, // background-task lifecycle closure incl. the real record order (tool_result BEFORE the completion notification); also joined the gate late (same class)
   { name: 'test-agentd-upgrade-loop', tier: 'fast' },
   { name: 'test-pool-auto', tier: 'fast' },
+  { name: 'test-fable-cap-pool-storm', tier: 'fast' }, // the 2026-09-13 storm: placement must follow the REQUEST model (a safety-classifier fallback is announced once and then silent), a model-cap rejection must mark the model's cap and not the plan lane (claude has no `seven_day_fable` type), and a healthy current member is never "no member can serve it" — real engine + real pool + real symlinks + the real stdout consumer, each fix with a patched-copy pre-fix control
   { name: 'test-spend-paths', tier: 'fast' }, // THE SPEND CEILING (design-account-hardening §4.4c/P9 + D2/D3/D6/D8): the grep-derived census of every producer that can start a turn nobody typed, the persisted per-identity budget, overage, the EDF reserve floor and the four fail-closed sites. 0.6s, no ports, no fixed /tmp path
   { name: 'test-rate-limit-capture', tier: 'fast' },
   { name: 'test-quota-model', tier: 'fast' }, // the TYPED limit set (B-9213 three concurrent codex limits) + the ONE usage-cache write path + the empty-window rule (B-8b12) + the writer census and the reader census — the money store's shape gate

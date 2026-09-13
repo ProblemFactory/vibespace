@@ -446,6 +446,7 @@ console.log('— ⑦ the WRITER: the wrapper\'s effort reaches session-meta, so 
   const engine = {
     _vsuPending: new Map(), armWorkflowUsageWatcher() { }, kickPoolEval() { }, markLimitBanner() { }, maybePoolAutoSwitch() { },
     maybeRepinLockedModel() { }, maybeStopOnFallback() { }, notePoolAuthFailure() { }, modelsMatch: () => false,
+    noteServedModel(s, m) { s._servedModel = m; s._servedModelAt = Date.now(); }, noteModelFallback() { }, // 2026-09-13
     noteSessionProduced() { }, noteTurnEnd() { }, noteWallSignal() { }, recordRateLimitEvent() { },
     recordCodexQuotaSignal() { }, resolveUsageKey: () => '__global__', usageEstimator: { noteLive() { } },
   };
