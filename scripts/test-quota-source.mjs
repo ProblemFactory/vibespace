@@ -205,9 +205,9 @@ What's contributing to your limits usage?`;
       cx.signalFromStream({ type: 'task_failed', error: { message: WIRE, codex_error_info: 'usage_limit_exceeded' } })?.kind === 'exhausted');
     // and the prose parser states nothing it cannot read
     ok('codex: a message with no "try again at …" states NO reset (never an invented wait)', cx.parseCodexLimitReset('You have hit your usage limit.') === 0);
-    ok('codex: …nor does a reset already in the past', cx.parseCodexLimitReset('try again at Jan 2nd, 2020 8:36 PM') === 0);
+    ok('codex: …nor does a reset already in the past', cx.parseCodexLimitReset('try again at Jan 2nd, 2020 8:36 PM') === 0); // literal-date-ok: a PAST date the parser must refuse
     ok('codex: …and the printed minute is truncated, so the parse rounds UP (late costs a tick, early costs a turn)',
-      cx.parseCodexLimitReset('try again at Sep 13th, 2026 8:36 PM', Date.parse('2026-09-07T00:00:00Z')) * 1000 === new Date(2026, 8, 13, 20, 37, 0).getTime());
+      cx.parseCodexLimitReset('try again at Sep 13th, 2026 8:36 PM', Date.parse('2026-09-07T00:00:00Z')) * 1000 === new Date(2026, 8, 13, 20, 37, 0).getTime()); // literal-date-ok: the parser is handed its OWN now
   }
 
   // ── THE ENUM'S SHAPE, NOT JUST ITS SPELLING (2026-09-08 re-measurement) ──
@@ -223,7 +223,7 @@ What's contributing to your limits usage?`;
   // oracle: 7 INET connects incl. chatgpt.com:443, so asking it is banned), so
   // BOTH shapes are read.
   {
-    const WIRE2 = "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 13th, 2026 8:36 PM.";
+    const WIRE2 = "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 13th, 2026 8:36 PM."; // literal-date-ok: only the KIND is asserted below, never the instant
     const obj = cx.signalFromStream({ type: 'task_failed', error: WIRE2, codexErrorInfo: { usageLimitExceeded: {} } });
     ok('codex: the EXTERNALLY-TAGGED object form of the exhaustion enum is exhaustion too', obj?.kind === 'exhausted' && obj.errorInfo === 'usageLimitExceeded', JSON.stringify(obj).slice(0, 140));
     const withData = cx.signalFromStream({ type: 'task_failed', error: 'no prose here', codexErrorInfo: { usageLimitExceeded: { resetsAt: 1789356983 } } });

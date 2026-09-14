@@ -1001,6 +1001,39 @@ console.log('\n§6 machine-global fixtures + no-verdict honesty');
   ok(/npm run ci:heavy/.test(bout), '…and names npm run ci:heavy');
   ok(!/wait for the next push/.test(bout), '…and no longer offers the unreachable "wait for the next push\'s background run"');
 }
+// ── §7 NO GATE SUITE PINS A CALENDAR DATE THE PRODUCT COMPARES AGAINST NOW ──
+// Third strike (2026-09-14): test-auto-resume ⑫ (2.369.93), test-quota-source
+// (2.369.94) and test-codex-p2-wrapper (2.369.95) each carried the codex
+// prose "try again at Sep 13th, 2026 8:36 PM" as a LITERAL, and each went red
+// in a gate tier the day that instant passed — the parser answers 0 for a
+// past reset, so the assert saw 1970 with nothing about the product changed.
+// The fixed shape derives the instant from the clock and reproduces the
+// prose; this census fails the next literal at build time instead of on the
+// calendar. Whole-line comments are blanked first (two suites quote the old
+// literal in prose); an inline `//` is NOT stripped because the sentence
+// itself carries `https://`.
+console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
+{
+  const LITERAL = /try again at [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th), \d{4} \d{1,2}:\d{2} (AM|PM)/;
+  // A line may keep a literal ONLY with a declared reason on the same line
+  // (`literal-date-ok: …`): a PAST date the parser must refuse, a parse handed
+  // its OWN `now`, or an assert that never reads the instant. The exemption is
+  // per LINE, never per file, and this census exempts ITSELF by name (its
+  // controls below spell both shapes).
+  const codeOnly = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l) && !/literal-date-ok:/.test(l)).join('\n');
+  const files = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-ci-gate.mjs');
+  const offenders = files.filter((f) => LITERAL.test(codeOnly(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf-8'))));
+  ok(files.length > 100, `${files.length} suites censused (non-vacuous; this file exempts itself)`);
+  ok(offenders.length === 0, `no suite pins the codex prose reset as a literal date${offenders.length ? ' — ' + offenders.join(', ') : ''}`);
+  const derived = files.filter((f) => /try again at " \+ [A-Z_]+/.test(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf-8')));   // `+ WHEN` / `+ SIX_DAYS_OUT`: the instant is a NAME, not a date
+  ok(derived.length >= 3, `POSITIVE CONTROL: the three defused suites derive the instant (${derived.join(', ')})`);
+  const declared = files.filter((f) => /literal-date-ok:/.test(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf-8')));
+  ok(declared.length >= 1, `declared per-line exceptions exist and are named (${declared.join(', ')}) — an exemption is paid for with a reason on the line`);
+  ok(LITERAL.test(codeOnly('const WIRE = "… or try again at Sep 13th, 2026 8:36 PM.";')), 'NEG: a literal in code is flagged');
+  ok(!LITERAL.test(codeOnly('  // said "try again at Sep 13th, 2026 8:36 PM", which was')), 'NEG: the same sentence in a whole-line comment is not');
+  ok(!LITERAL.test(codeOnly('const WIRE = "… https://chatgpt.com/x or try again at " + WHEN + ".";')), 'NEG: the derived shape (with its https:// intact) is not');
+}
+
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

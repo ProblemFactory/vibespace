@@ -83,7 +83,14 @@ try {
 
   // default ON: rail present, classic tab bar hidden
   check('rail renders by default', await evalJs(`!!document.getElementById('sidebar-rail')`));
-  check('rail has 10 items', await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length === 10`)); // 3 content tabs + 5 panels (ports/agents/plugins/jobs/system) + 2 launchers
+  // 3 content tabs + every PANEL_TABS entry + 2 launchers — the panel count is
+  // READ OFF THE SOURCE, not typed: a typed 10 went red in the heavy tier the
+  // day the Channels panel (2.369.94) became the sixth, after 105 green runs.
+  const railSrc = fs.readFileSync(path.join(repo, 'src/lib/sidebar-rail.js'), 'utf-8');
+  const panelTabs = JSON.parse((railSrc.match(/export const PANEL_TABS = (\[[^\]]*\]);/) || [])[1].replace(/'/g, '"'));
+  const wantItems = 3 + panelTabs.length + 2;
+  const gotItems = await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length`);
+  check(`rail has ${wantItems} items (3 content tabs + ${panelTabs.length} panels: ${panelTabs.join('/')} + 2 launchers) — got ${gotItems}`, gotItems === wantItems);
   check('classic tab bar hidden', await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display === 'none'`));
   check('sidebar content wrapped', await evalJs(`!!document.querySelector('#sidebar .sidebar-main')`));
 

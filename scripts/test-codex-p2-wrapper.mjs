@@ -174,7 +174,19 @@ setInterval(() => {
   try { fs.unlinkSync(${JSON.stringify(failTurnFile)}); } catch { return; }
   if (!activeTurn) return;
   const ended = activeTurn; activeTurn = null;
-  send({ method: 'turn/completed', params: { threadId: 'th-p2', turn: { id: ended, status: 'failed', items: [], error: { message: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 13th, 2026 8:36 PM.", codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } } });
+  // THE INCIDENT'S SENTENCE WITH ITS DISTANCE INSTEAD OF ITS DATE (2026-09-14):
+  // pinned as "try again at Sep 13th, 2026 8:36 PM" this was a TIME BOMB and it
+  // went off in the heavy tier the day after that date (the parser answers 0
+  // for a past reset ⇒ the assert at the bottom saw 1970) — the third suite
+  // of the family test-auto-resume ⑫ / test-quota-source already defused. The
+  // prose SHAPE (ordinal suffix included) is reproduced exactly; only the
+  // instant moves with the clock.
+  const ORD = (d) => d + (d % 10 === 1 && d !== 11 ? 'st' : d % 10 === 2 && d !== 12 ? 'nd' : d % 10 === 3 && d !== 13 ? 'rd' : 'th');
+  const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const AT = (() => { const d = new Date(Date.now() + 6 * 86400e3); d.setHours(20, 36, 0, 0); return d; })();
+  const WHEN = MON3[AT.getMonth()] + ' ' + ORD(AT.getDate()) + ', ' + AT.getFullYear() + ' ' + (AT.getHours() % 12 || 12) + ':' + String(AT.getMinutes()).padStart(2, '0') + ' ' + (AT.getHours() < 12 ? 'AM' : 'PM');
+  if (!/^[A-Z][a-z]{2} \\d{1,2}(st|nd|rd|th), \\d{4} \\d{1,2}:\\d{2} (AM|PM)$/.test(WHEN)) throw new Error('fixture no longer looks like the wire: ' + WHEN);
+  send({ method: 'turn/completed', params: { threadId: 'th-p2', turn: { id: ended, status: 'failed', items: [], error: { message: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at " + WHEN + '.', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } } });
 }, 40);
 `;
 // EVERY STUB EXITS WHEN ITS WRAPPER DOES (2026-09-09). A stub is spawned as the
