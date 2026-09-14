@@ -32,7 +32,7 @@ const mk = ({ dflt = false, dir } = {}) => {
   const ar = create({
     dataDir: d, activeSessions: sessions,
     serverSetting: (k) => (k === 'claude.autoResumeOnLimit' ? dflt : undefined),
-    sendToSession: (id, s, text) => { if (s.dead) return false; sent.push({ id, text }); return true; },
+    sendToSession: (id, s, text, carried) => { if (s.dead) return false; sent.push({ id, text, note: carried && carried.note || null }); return true; },
     notify: (id, s, text) => notes.push({ id, text }),
     broadcast: (id, m) => casts.push(m),
   });
@@ -93,7 +93,11 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('fires once the reset has landed and the session is idle', a.ar.tick(resets + GRACE_MS + 1) === 1);
   ok('and sends the CLI\'s own continue wording', a.sent[0].text === CONTINUE_PROMPT && /do not repeat work that is already complete/.test(a.sent[0].text));
   ok('NEVER twice', a.ar.tick(resets + 600000) === 0 && a.sent.length === 1);
-  ok('the fire is announced in the conversation (a billed turn must explain itself)', a.notes.some((n) => /自动继续|continue/i.test(n.text)));
+  // ONE CARD PER CONTINUE (2.369.97): the explanation rides ON the delivered
+  // prompt (`note`), and NO separate "来自 VibeSpace" notice follows it — the
+  // owner saw the pair as two notifications for one event.
+  ok('the fire explains itself ON the continue card (the cause rides the delivered prompt)', typeof a.sent[0].note === 'string' && /自动继续|已恢复|重置|continue/i.test(a.sent[0].note));
+  ok('…and NO second notice card is sent for a delivered continue', !a.notes.some((n) => /自动继续|已恢复可用|continued/i.test(n.text)), JSON.stringify(a.notes.map((n) => n.text)));
   ok('the arming announcement is DELAYED, not immediate (2.368.34 §10 covers the full lifecycle)', a.notes.filter((n) => /已安排/.test(n.text)).length === 0);
 }
 

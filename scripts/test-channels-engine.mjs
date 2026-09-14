@@ -299,9 +299,25 @@ function mkEngine(opts = {}) {
   const before = eng.store.index.snapshot().conversations[key] || {};
   ok(before.unread > 0, 'the conversation starts with unread records', String(before.unread));
 
-  // The fake adapter spreads a day over the WHOLE current UTC day, so
-  // future-dated records are always present — exactly the shape a vendor's
-  // clock skew produces.
+  // The fake adapter spreads its records over TWO spans from the current UTC
+  // day boundary, so a future-dated record is present at ANY time of day —
+  // exactly the shape a vendor's clock skew produces (a one-span spread had
+  // none in the last 2.4 h of the day, and this leg was red then).
+  // STANDING CENSUS (2026-09-14): the guarantee holds at EVERY minute of the
+  // UTC day, not just at the minute this suite happens to run — a one-span
+  // spread was red for the last 2.4 h of each day and green everywhere else.
+  {
+    const day = 86400e3, base = Math.floor(Date.now() / day) * day;
+    let holes = 0, samples = 0;
+    for (let m = 0; m < 1440; m += 5) {
+      const t = base + m * 60e3; samples++;
+      const w = fake.worldFor('fake-poll', { now: t }).get(C).records;
+      if (!w.some((r) => r.at > t)) holes++;
+    }
+    ok(holes === 0, `the fake world holds a future-dated record at every sampled minute of the UTC day (${samples} samples, ${holes} holes)`);
+    const one = (t) => { const c = 9; return Array.from({ length: c }, (_, i) => base + Math.floor((i + 1) * (day / (c + 1)))).some((at) => at > t); };
+    ok(!one(base + 23 * 3600e3), 'POSITIVE CONTROL: the retired one-span spread has NO future record at 23:00Z (the shape that reddened the gate)');
+  }
   const newest = eng.store.readTail(A, C, { limit: 1 })[0] || {};
   ok(Number(newest.at) > Date.now(), 'the newest record is stamped AHEAD of our clock (the shape that made `unread` un-clearable)', `${newest.at} vs ${Date.now()}`);
 

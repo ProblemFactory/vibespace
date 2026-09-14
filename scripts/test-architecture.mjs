@@ -886,6 +886,27 @@ for (const [edge] of EXCEPTIONS) {
   const cats = [...new Set(Object.values(SETTINGS_SCHEMA).map((s) => s.category))];
   ok(all.length > 50 && cats.length > 5 && SETTINGS_CATEGORIES.length > 5,
     `settings census scope is non-vacuous (${all.length} settings in ${cats.length} categories, ${SETTINGS_CATEGORIES.length} listed)`);
+  // 44b. A KEY THE CHROME APPLIER READS MUST BE DECLARED (2026-09-14, userW's
+  // inc-mu1qa5gj-9qe9): `toolbar.showDesktopButton` was read by
+  // applyChromeSettings and by customize mode's hideKey table since 2.111.4
+  // and never declared, so `settings.get` answered undefined ⇒ the Desktop
+  // button hid whenever chrome settings were re-applied after the VNC probe —
+  // latent for 250 releases, triggered on every load by 2.369.96's Apps probe.
+  // The census reads the two consumers' own text: every `s.get('<key>')` in
+  // app.js's applyChromeSettings and every `hideKey: '<key>'` in customize-mode.
+  {
+    const appSrc = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8');
+    const czSrc = fs.readFileSync(path.join(REPO, 'src/lib/customize-mode.js'), 'utf8');
+    const block = (appSrc.match(/const applyChromeSettings = \(\) => \{[\s\S]*?\n    \};/) || [''])[0];
+    const read = [...block.matchAll(/s\.get\('([a-zA-Z.]+)'\)/g)].map((m) => m[1]);
+    const hide = [...czSrc.matchAll(/hideKey:\s*'([a-zA-Z.]+)'/g)].map((m) => m[1]);
+    const want = [...new Set([...read, ...hide])];
+    const missing = want.filter((k) => !SETTINGS_SCHEMA[k]);
+    ok(block.length > 200 && read.length >= 8 && hide.length >= 8, `44b scope is non-vacuous (${read.length} keys read by applyChromeSettings, ${hide.length} customize hideKeys)`);
+    ok(missing.length === 0, `every chrome/customize settings key is DECLARED in the schema${missing.length ? ' — missing: ' + missing.join(', ') : ''}`);
+    ok(want.includes('toolbar.showDesktopButton') && SETTINGS_SCHEMA['toolbar.showDesktopButton']?.default === true, 'the incident\'s own key is read, declared and defaults to shown');
+    ok(['toolbar.showZzzNope'].every((k) => !SETTINGS_SCHEMA[k]), 'NEG: an undeclared key is what this census reports (the schema does not silently accept unknowns)');
+  }
   ok(/for \(const cat of SETTINGS_CATEGORIES\)/.test(ui) && /grouped\[cat\]/.test(ui),
     'SettingsUI still RENDERS by iterating SETTINGS_CATEGORIES (the coupling this census stands for)');
 

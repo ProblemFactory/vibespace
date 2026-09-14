@@ -138,7 +138,7 @@ function mkWorld({ auto = true, hot = true, host = null, withFireNow = true, new
   const ar = createAR({
     dataDir, activeSessions: sessions, serverSetting: () => true, log: () => { },
     notify: (id, s2, text) => notes.push({ id, text }),
-    sendToSession: (id, s2, text) => { fired.push({ id, text }); return true; },
+    sendToSession: (id, s2, text, carried) => { fired.push({ id, text, note: carried && carried.note || null }); return true; },   // 2.369.97: the cause rides the prompt (one card per continue)
     beforeFire: (id, s2) => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return true; } },
     fireIdentity: (id, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } },
   });
@@ -270,7 +270,7 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
       r.wake.fired.length === 2 && w.fired.length === 2 && new Set(w.fired.map((f) => f.id)).size === 2, JSON.stringify(w.fired.map((f) => f.id)));
     ok('…with the CLI\'s own continue prompt (a real send, not a notice)', w.fired.every((f) => f.text === CONTINUE_PROMPT));
     ok('…and they are no longer armed', !w.ar._armed.get(w.A._webuiId) || w.ar._armed.get(w.A._webuiId).fired === true);
-    const card = w.notes.map((n) => n.text).join(' | ');
+    const card = [...w.fired.map((f) => f.note).filter(Boolean), ...w.notes.map((n) => n.text)].join(' | ');   // 2.369.97: a delivered continue carries its cause on the prompt; a separate notice survives only where no prompt reached the conversation
     ok('the card names WHAT UNBLOCKED IT — the account became usable — not a pool switch that never happened',
       /UCI Max 已恢复可用/.test(card) && !/账号池已切换到/.test(card), card.slice(0, 200));
   }
@@ -782,7 +782,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     w.writeCache(w.NEW, w.healthy());    // ⟳ / login: the newcomer can serve now
     return w;
   }
-  const cardsOf = (w) => w.notes.map((n) => n.text).join(' | ');
+  const cardsOf = (w) => [...w.fired.map((f) => f.note).filter(Boolean), ...w.notes.map((n) => n.text)].join(' | ');   // 2.369.97: prompt-carried causes count as the card
 
   // (a) MANUAL pool — the link never moves, so a continue would bill the SPENT member
   {
@@ -902,7 +902,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
       const ar = createAR({
         dataDir, activeSessions: sessions, serverSetting: () => true, log: () => { },
         notify: (id, s2, text) => notes.push({ id, text }),
-        sendToSession: (id, s2, text) => { fired.push({ id, text }); return true; },
+        sendToSession: (id, s2, text, carried) => { fired.push({ id, text, note: carried && carried.note || null }); return true; },   // 2.369.97: the cause rides the prompt (one card per continue)
         beforeFire: (id, s2) => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return true; } },
         fireIdentity: (id, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } },
       });
@@ -929,7 +929,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
         armed: () => !!ar._armed.get(s._webuiId),
         linkOf: () => am.poolCurrentFor(P, s._webuiId),
         coldRestarts: () => wsSent.filter((p2) => /"type":"pool-auto-switched"/.test(String(p2))).length,
-        cards: () => notes.map((n) => n.text).join(' | '),
+        cards: () => [...fired.map((f) => f.note).filter(Boolean), ...notes.map((n) => n.text)].join(' | '),   // 2.369.97: prompt-carried causes count as the card
       };
     }
 

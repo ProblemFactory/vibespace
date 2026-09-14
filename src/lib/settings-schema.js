@@ -19,6 +19,16 @@ const SETTINGS_SCHEMA = {
     description: t('Show the embedded-browser button in the toolbar'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  // 2.369.97 (userW, inc-mu1qa5gj-9qe9 "找不到右上角的desktop了"): this key was
+  // READ by applyChromeSettings and by customize mode since 2.111.4 but never
+  // DECLARED, so `settings.get` answered undefined and the button hid whenever
+  // chrome settings were re-applied after the VNC probe — which 2.369.96's
+  // desktop-apps probe started doing on every page load.
+  'toolbar.showDesktopButton': {
+    type: 'boolean', default: true, label: t('Show Desktop button'),
+    description: t('Show the shared-desktop (VNC) button in the toolbar (hidden anyway when this machine has no VNC server)'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
   'toolbar.showDesktopAppsButton': {
     type: 'boolean', default: true, label: t('Show Apps button'),
     description: t('Show the desktop-application launcher button in the toolbar (hidden anyway when this machine has no display backend)'),

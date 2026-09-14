@@ -88,7 +88,16 @@ function worldFor(kind, { now = Date.now(), days = 1 } = {}) {
       const who = PEOPLE[Math.floor(r() * PEOPLE.length)];
       // Instants are derived from the seed and pinned to a DAY boundary, so a
       // restart reproduces them exactly (the window must come back identical).
-      const at = Math.floor(now / span) * span + Math.floor((i + 1) * (span / (count + 1)));
+      // They are spread over TWO spans from that boundary, never one: the
+      // engine's markRead contract (and its suite) rely on this adapter
+      // ALWAYS holding a future-dated record — a vendor's clock skew, modelled
+      // — and a one-span spread left the last 1/(count+1) of every UTC day
+      // (2.4 h for a 9-record room) with nothing ahead of the clock, so the
+      // mandatory gate went red on any push in that window (2026-09-14
+      // 21:44Z, measured). With two spans the newest instant is at least
+      // span + span/(count+1) past the boundary, i.e. past any `now` inside it.
+      const base = Math.floor(now / span) * span;
+      const at = base + Math.floor((i + 1) * ((2 * span) / (count + 1)));
       records.push({ vendorId: `${c.id}-m${i}`, at, author: who, text: LINES[Math.floor(r() * LINES.length)] });
     }
     records.sort((a, b) => a.at - b.at);

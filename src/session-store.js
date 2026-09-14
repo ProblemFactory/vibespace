@@ -781,7 +781,9 @@ class SessionMessages {
     // the status bar lost its context% on refresh. 2000 covers the spam.
     for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - 2000); i--) {
       const m = msgs[i];
-      if (!lastUsage && m.type === 'assistant' && m.message?.usage) lastUsage = m.message.usage;
+      // a `<synthetic>` rejection record carries all-zero usage (2.369.97): not a reading
+      if (!lastUsage && m.type === 'assistant' && m.message?.usage && m.message.model !== '<synthetic>'
+        && ((m.message.usage.input_tokens || 0) + (m.message.usage.cache_read_input_tokens || 0) + (m.message.usage.cache_creation_input_tokens || 0)) > 0) lastUsage = m.message.usage;
       // result/init records are stream-json stdout-only — they NEVER appear in
       // the JSONL, so for stopped/resumed sessions (no buffer) the assistant
       // record's message.model is the only model source available

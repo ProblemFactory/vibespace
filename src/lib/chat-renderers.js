@@ -348,7 +348,12 @@ class ChatRenderers {
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-user chat-msg-auto-resume';
       el._rawMsg = msg;
-      el.innerHTML = `<div class="chat-peer-head">${UI_ICONS.refresh || ''} ${escHtml(t('VibeSpace auto-resume — sent automatically after the usage limit cleared'))}</div><div class="chat-msg-content chat-peer-core">${escHtml(rawText)}</div>`;
+      // The CAUSE rides on this card (2.369.97): "VibeSpace auto-resume — <why>"
+      // replaces the separate notice card that used to follow every continue.
+      const head = msg.originNote
+        ? `${escHtml(t('VibeSpace auto-resume'))} — ${escHtml(msg.originNote)}`
+        : escHtml(t('VibeSpace auto-resume — sent automatically after the usage limit cleared'));
+      el.innerHTML = `<div class="chat-peer-head">${UI_ICONS.refresh || ''} ${head}</div><div class="chat-msg-content chat-peer-core">${escHtml(rawText)}</div>`;
       return el;
     }
     if (msg.originKind === 'peer-message') {

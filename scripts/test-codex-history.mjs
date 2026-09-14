@@ -49,7 +49,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   mm.processLive({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 16371, cached_input_tokens: 11008, cache_write_input_tokens: 0, output_tokens: 125, reasoning_output_tokens: 104, total_tokens: 16496 }, last_token_usage: { input_tokens: 16371, cached_input_tokens: 11008, cache_write_input_tokens: 0, output_tokens: 125, reasoning_output_tokens: 104, total_tokens: 16496 }, model_context_window: 828400 } } });
   ok('usage meta carries contextWindow (live context% showed "?" until re-attach)', metas.length === 1 && metas[0].contextWindow === 828400, JSON.stringify(metas[0]));
   const sb = require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8');
-  ok('…and the status bar consumes it in updateUsage', /updateUsage\(usageData\)[\s\S]{0,600}u\.contextWindow\) this\._statusContextWindow = u\.contextWindow/.test(sb));
+  ok('…and the status bar consumes it in updateUsage', /updateUsage\(usageData\)[\s\S]{0,1400}u\.contextWindow\) this\._statusContextWindow = u\.contextWindow/.test(sb));
 }
 
 // ── encrypted reasoning: silently absent, never a broken card ──

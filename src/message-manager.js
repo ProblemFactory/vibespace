@@ -186,6 +186,15 @@ function splitToolResultContent(content) {
   return { text: JSON.stringify(rest), images };
 }
 
+/** A `<synthetic>`-model record, or one whose usage counts nothing, describes
+ *  no API request — the CLI's own limit/credit rejection has that shape. */
+function syntheticUsage(raw) {
+  const m = raw?.message; if (!m) return true;
+  if (m.model === '<synthetic>') return true;
+  const u = m.usage || {};
+  return !((u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0));
+}
+
 class MessageManager {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -1121,7 +1130,7 @@ class MessageManager {
         msg.peerFrom = peerDisplayName(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
         this._notePeerMsgId(raw.origin.msg_id);
       }
-      else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
+      else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
       if (emit) this._emit({ op: 'create', message: msg });
@@ -1229,8 +1238,13 @@ class MessageManager {
       }
     }
 
-    // Track usage metadata
-    if (raw.message?.usage && emit) {
+    // Track usage metadata — but a SYNTHETIC record is not a measurement
+    // (2.369.97, owner: "等待续跑的时候状态栏很多东西会消失"): the CLI answers
+    // a usage-limit rejection with an assistant record whose model is
+    // `<synthetic>` and whose usage is all zeros (no API request happened),
+    // and publishing those zeros blanked the context% and cache chips for the
+    // whole wait. Only a record that spent tokens moves the gauge.
+    if (raw.message?.usage && emit && !syntheticUsage(raw)) {
       this._emit({ op: 'meta', subtype: 'usage', data: raw.message.usage });
     }
   }

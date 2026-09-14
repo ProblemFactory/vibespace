@@ -165,6 +165,12 @@ export class ChatStatusBar {
 
   updateUsage(usageData) {
     const u = usageData;
+    // BELT (2.369.97): a reading that counts nothing is not a reading — keep
+    // the last real one rather than blanking the context% chip (the producers
+    // already drop the CLI's `<synthetic>` rejection record; this guards any
+    // other feed). Codex cumulative totals still apply below when present.
+    const total = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    if (!total && !u.totals) return;
     this._statusLastInputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     this._statusLastCacheRead = u.cache_read_input_tokens || 0;
     if (u.totals) this._statusTotalUsage = u.totals; // Codex: cumulative session usage

@@ -57,7 +57,31 @@ cm.processLive({ timestamp: new Date().toISOString(), type: 'response_item', _fr
 ok(cm.messages.find((m) => m.role === 'user')?.originKind === 'auto-resume', 'codex normalizer: webui_origin auto-resume → originKind auto-resume');
 ok(/userMsg\.originKind = 'auto-resume'; if \(userMsg\.payload\) userMsg\.payload\.webui_origin = 'auto-resume';/.test(read('server.js')), 'server.js sendToSession tags the continue record for BOTH harness shapes');
 const cr = read('src/lib/chat-renderers.js');
-ok(/if \(msg\.originKind === 'auto-resume'\) \{[\s\S]{0,600}chat-msg-auto-resume[\s\S]{0,400}VibeSpace auto-resume — sent automatically after the usage limit cleared/.test(cr), 'chat-renderers renders the auto-resume prompt as a labelled VibeSpace card');
+ok(/if \(msg\.originKind === 'auto-resume'\) \{[\s\S]{0,900}chat-msg-auto-resume[\s\S]{0,700}VibeSpace auto-resume — sent automatically after the usage limit cleared/.test(cr), 'chat-renderers renders the auto-resume prompt as a labelled VibeSpace card');
+// ── 2.369.97: the CAUSE rides the card, no second notice; a synthetic rejection is not a usage reading ──
+{
+  const mm2 = new MessageManager('s2'); const ops2 = []; mm2.onOp((o) => ops2.push(o));
+  mm2.processLive({ type: 'user', _fromWebui: true, originKind: 'auto-resume', originNote: '账号 Member W 已恢复可用，已自动继续这个任务。', message: { role: 'user', content: [{ type: 'text', text: 'You can continue now.' }] } });
+  const um2 = mm2.messages.find((m) => m.role === 'user');
+  ok(um2 && um2.originNote === '账号 Member W 已恢复可用，已自动继续这个任务。', 'claude normalizer: the continue record carries its CAUSE (originNote) for the card head');
+  const cm2 = new CodexMessageManager('c2');
+  cm2.processLive({ timestamp: new Date().toISOString(), type: 'response_item', _fromWebui: true, payload: { type: 'message', role: 'user', webui_msg_id: '2-auto', webui_origin: 'auto-resume', webui_origin_note: 'usage limit reset', content: [{ type: 'input_text', text: 'You can continue now.' }] } });
+  ok(cm2.messages.find((m) => m.role === 'user')?.originNote === 'usage limit reset', 'codex normalizer: webui_origin_note → originNote');
+  ok(/msg\.originNote\s*\?[\s\S]{0,200}VibeSpace auto-resume'\)\)\} — \$\{escHtml\(msg\.originNote\)\}/.test(cr), 'chat-renderers puts the cause in the card head, escaped');
+  ok(/carried\.note/.test(read('src/server/auto-resume.js')) && /if \(carried\) \{[^}]*return; \}/.test(read('src/server/auto-resume.js')), 'auto-resume hands the cause to sendToSession and skips the second notice when it was carried');
+  ok(/originNote = note; if \(userMsg\.payload\) userMsg\.payload\.webui_origin_note = note;/.test(read('server.js')), 'server.js sendToSession stamps the note on BOTH harness shapes');
+  ok(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"VibeSpace auto-resume":')), 'zh/ja carry the bare card label');
+  // the synthetic rejection: no usage op; a real record: one
+  const mm3 = new MessageManager('s3'); const ops3 = []; mm3.onOp((o) => ops3.push(o));
+  const zero = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+  mm3.processLive({ type: 'assistant', message: { role: 'assistant', model: '<synthetic>', usage: zero, content: [{ type: 'text', text: "You're out of usage credits." }] } });
+  ok(!ops3.some((o) => o.op === 'meta' && o.subtype === 'usage'), 'a <synthetic> rejection record (all-zero usage) emits NO usage op — it is not a measurement');
+  mm3.processLive({ type: 'assistant', message: { role: 'assistant', model: 'claude-opus-4-8', usage: { input_tokens: 12, output_tokens: 3, cache_creation_input_tokens: 0, cache_read_input_tokens: 90000 }, content: [{ type: 'text', text: 'ok' }] } });
+  ok(ops3.some((o) => o.op === 'meta' && o.subtype === 'usage' && o.data.cache_read_input_tokens === 90000), 'POSITIVE CONTROL: a real record still emits its usage');
+  const csb = read('src/lib/chat-status-bar.js');
+  ok(/updateUsage\(usageData\) \{[\s\S]{0,700}if \(!total && !u\.totals\) return;/.test(csb), 'status bar BELT: an all-zero reading keeps the last real one (the context% chip does not blank while a wall is waited out)');
+  ok(/m\.message\.model !== '<synthetic>'[\s\S]{0,300}lastUsage = m\.message\.usage/.test(read('src/session-store.js')), 'chatStatus (the attach payload) skips the synthetic record too');
+}
 ok(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"VibeSpace auto-resume — sent automatically after the usage limit cleared":') && read(f).includes('"not started":')), 'zh/ja carry the new strings');
 
 // ── sidebar: primary-only default ──

@@ -90,6 +90,15 @@ try {
   const av = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json())`);
   check('server: vnc-display via Xvfb+x11vnc with the fallback reason', av.availability?.backend === 'vnc-display' && av.availability?.fallbackWhy === 'xpra not on PATH', av.availability);
   check('the toolbar Apps button is visible (probe found a backend)', await until(() => p1.evalJs(`getComputedStyle(document.getElementById('btn-desktop-apps')).display !== 'none'`), 8000));
+  // 2.369.97 (userW, inc-mu1qa5gj-9qe9): the Apps probe re-applies the chrome
+  // settings AFTER the VNC probe has answered, and `toolbar.showDesktopButton`
+  // was never declared in the schema — so a machine WITH a VNC server lost its
+  // Desktop button on every page load (reproduced with an Xvnc on PATH, A/B
+  // against 2.369.95). This box has no Xvnc, so the probe outcome is stated
+  // directly: with vnc available, re-applying chrome settings must keep the
+  // button; and the setting must be a declared, default-true schema row.
+  check('the Desktop button survives a chrome-settings re-apply once VNC is available (the .96 regression shape)', await p1.evalJs(`(() => { app._vncAvailable = true; app._applyChromeSettings(); return getComputedStyle(document.getElementById('btn-desktop')).display !== 'none' && app.settings.get('toolbar.showDesktopButton') === true; })()`));
+  check('…and NOT when the user turned it off (the setting is the switch, not the probe)', await p1.evalJs(`(() => { const prev = app.settings.get('toolbar.showDesktopButton'); app.settings.set('toolbar.showDesktopButton', false); app._applyChromeSettings(); const hidden = getComputedStyle(document.getElementById('btn-desktop')).display === 'none'; app.settings.set('toolbar.showDesktopButton', prev); app._applyChromeSettings(); return hidden && getComputedStyle(document.getElementById('btn-desktop')).display !== 'none'; })()`));
   check('⚙ menu carries the "Desktop apps…" row (a contribution, when the backend exists)', await p1.evalJs(`(async () => { const m = await import('/src/lib/contributions.js').catch(() => null); return true; })()`) && await p1.evalJs(`app._desktopAppsAvailable === true`));
 
   // the launch dialog: run a command from its form

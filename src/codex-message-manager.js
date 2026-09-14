@@ -1281,7 +1281,7 @@ class CodexMessageManager {
       }
       this.turnIndex++;
       const msg = this._create({ role: 'user', content, turnIndex: this.turnIndex });
-      if (item.webui_origin === 'auto-resume') msg.originKind = 'auto-resume'; // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
+      if (item.webui_origin === 'auto-resume') { msg.originKind = 'auto-resume'; if (typeof item.webui_origin_note === 'string' && item.webui_origin_note) msg.originNote = item.webui_origin_note; } // VibeSpace's continue prompt after a wall — labelled, not "you typed this" (2.369.32)
       // …and a bubble that does not CLOSE the turn's open streams must not be a
       // turn BOUNDARY for the backward scan either (round 2): skipping the
       // finalize while still stopping the scan left a reply that was open when

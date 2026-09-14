@@ -90,7 +90,7 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
   const ar = (arModule || arMod).create({
     dataDir, activeSessions: sessions, serverSetting: () => true, log: (...a) => console.log(...a), // one journal: the capture below reads both modules' lines
     notify: (id, s2, text) => notes.push(text),
-    sendToSession: (id, s2, text) => { fired.push({ id, text }); return true; },
+    sendToSession: (id, s2, text, carried) => { fired.push({ id, text, note: carried && carried.note || null }); return true; },   // 2.369.97: the cause rides the prompt
     beforeFire: (id, s2) => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return true; } },
     fireIdentity: (id, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } },
   });
@@ -261,7 +261,8 @@ if (!probe) {
   // the tick, ~60s later in production (the arm is back-dated instead of slept)
   const did = await w.tickFire();
   ok('…the TICK is what continues it — one continue, delivered onto the member the pool moved to', did === true && w.fired.length === 1 && w.fired[0].text === CONTINUE_PROMPT, JSON.stringify({ fires: w.fired.length }));
-  ok('…and the card says the POOL SWITCHED, not that the limit reset (round 1 said 用量上限已重置 on exactly this, now the dominant, path)', w.notes.length === 1 && w.notes[0] === '账号池已切换到 B-Stack Max，已自动继续这个任务。', JSON.stringify(w.notes));
+  // 2.369.97 ONE CARD PER CONTINUE: the wording rides the delivered prompt (`note`); no second notice follows
+  ok('…and the card says the POOL SWITCHED, not that the limit reset (round 1 said 用量上限已重置 on exactly this, now the dominant, path)', w.fired.length === 1 && w.fired[0].note === '账号池已切换到 B-Stack Max，已自动继续这个任务。' && w.notes.length === 0, JSON.stringify({ note: w.fired[0] && w.fired[0].note, notes: w.notes }));
   ok('…NEGATIVE CONTROL: the reset wording still exists for an arm anchored on a real reset (the fix is a branch, not a rename)', arMod.continueNoticeFor({ kind: 'timed', armReason: '5h 0% < 10%', label: 'B-Stack Max' }).text === '用量上限已重置，已自动继续这个任务。');
   const rec = w.ar._fires.get(w.SID);
   ok('…the breaker recorded the fire against the member the continue LANDED on', rec && rec.last && rec.last.key === w.SPARE, JSON.stringify(rec && rec.last));
@@ -272,7 +273,7 @@ if (!probe) {
   ok('the rejection of that continue does not start a cycle: no second continue', w.fired.length === 1, JSON.stringify({ fires: w.fired.length }));
   ok('…the member that rejected us is quarantined BY NAME (the one we fired at, not the one we came from)', w.ar.recentFireFailures(w.SID).join(',') === w.SPARE, JSON.stringify(w.ar.recentFireFailures(w.SID).map(w.nameOf)));
   ok('…and the session waits instead of spinning', w.ar.statusFor(w.SID).armed === true, JSON.stringify(w.ar.statusFor(w.SID)));
-  ok('…the whole episode: one continue and one card, versus 130 and ~150', w.fired.length === 1 && w.notes.length === 1, JSON.stringify({ fired: w.fired.length, notes: w.notes }));
+  ok('…the whole episode: one continue and ONE card (the prompt itself; no separate notice), versus 130 and ~150', w.fired.length === 1 && !!w.fired[0].note && w.notes.length === 0, JSON.stringify({ fired: w.fired.length, notes: w.notes }));
   ok('…journaled as the switch it was, not as a reset', lines.some((l) => /pool switched to B-Stack Max — continued automatically/.test(l)) && !lines.some((l) => /usage limit reset — continued automatically/.test(l)), lines.filter((l) => /continued/.test(l)).join(' | '));
 }
 {
@@ -282,7 +283,7 @@ if (!probe) {
   w.eng.noteTurnEnd(w.session);
   await new Promise((r) => setTimeout(r, 40));
   ok('REAL limit banner: same ordering — link moved first, no immediate continue, armed on the near-arm', w.fired.length === 0 && w.linkNow() === w.SPARE && /^switched to a usable account/.test(String(w.ar.statusFor(w.SID).reason)), JSON.stringify({ fires: w.fired.length, link: w.nameOf(w.linkNow()), st: w.ar.statusFor(w.SID) }));
-  ok('…and the tick then continues it exactly once, with the switch wording', (await w.tickFire()) === true && w.fired.length === 1 && w.notes.length === 1 && /账号池已切换到 B-Stack Max/.test(w.notes[0]), JSON.stringify(w.notes));
+  ok('…and the tick then continues it exactly once, with the switch wording', (await w.tickFire()) === true && w.fired.length === 1 && w.notes.length === 0 && /账号池已切换到 B-Stack Max/.test(w.fired[0].note), JSON.stringify({ note: w.fired[0] && w.fired[0].note, notes: w.notes }));
 }
 {
   // (c) ARTIFICIAL CONTROL, kept and labelled: injecting the signal skips the
@@ -318,7 +319,7 @@ if (!probe) {
   await new Promise((r) => setTimeout(r, 60));
   const lines = cap.done();
   ok('a LATER pool switch onto a healthy member continues the armed session IMMEDIATELY (the c1206711 rule, through the real pool seam)', w.fired.length === 1 && w.linkNow() === w.SPARE, JSON.stringify({ fires: w.fired.length, link: w.nameOf(w.linkNow()) }));
-  ok('…journaled as an immediate continue, and announced once, naming the member', lines.some((l) => /continued immediately/.test(l)) && w.notes.filter((t) => /账号池已切换到 B-Stack Max/.test(t)).length === 1, JSON.stringify({ notes: w.notes, j: lines.filter((l) => /continued/.test(l)) }));
+  ok('…journaled as an immediate continue, and explained once ON the prompt, naming the member', lines.some((l) => /continued immediately/.test(l)) && w.fired.filter((f) => /账号池已切换到 B-Stack Max/.test(f.note || '')).length === 1 && w.notes.length === 0, JSON.stringify({ notes: w.notes, fired: w.fired.map((f) => f.note), j: lines.filter((l) => /continued/.test(l)) }));
 }
 
 // ── §3 THE BREAKER'S RULES (unit level, on the real module) ────────────────
@@ -414,16 +415,17 @@ if (!probe) {
 {
   const mk = (name) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-arnote-' + name + '-')); cleanup.push(dir);
-    const sessions = new Map(); const sent = [], notes = [], journal = [];
+    const sessions = new Map(); const sent = [], sentNotes = [], notes = [], journal = [];
     const st = { ident: { key: 'sub-a', name: 'Account A' } };
     const ar = create({
       dataDir: dir, activeSessions: sessions, serverSetting: () => true, log: (...a) => journal.push(a.join(' ')),
-      sendToSession: (id, s, t) => { sent.push(t); return true; }, notify: (id, s, t) => notes.push(t),
+      // 2.369.97: a delivered continue explains itself ON the prompt (`note`); `notes` now holds only the refusal cards
+      sendToSession: (id, s, t, carried) => { sent.push(t); sentNotes.push(carried && carried.note || null); return true; }, notify: (id, s, t) => notes.push(t),
       fireIdentity: () => st.ident,
     });
     const s = { mode: 'chat', backend: 'claude', pty: {}, _isStreaming: false, _autoResume: true };
     sessions.set('s1', s);
-    return { ar, sent, notes, journal, st, arm: (ms = 60000) => ar.armIfEnabled('s1', s, Date.now() + ms, 'usage limit') };
+    return { ar, sent, sentNotes, notes, journal, st, arm: (ms = 60000) => ar.armIfEnabled('s1', s, Date.now() + ms, 'usage limit') };
   };
 
   // (i) a PACING refusal — the pool moved us onto a member nobody has asked yet
@@ -432,13 +434,13 @@ if (!probe) {
     w.arm(); w.ar.fireNow('s1', '账号池已切换到 Account A');
     w.st.ident = { key: 'sub-b', name: 'Account B' };   // the pool re-points onto a HEALTHY member
     w.arm(); const second = w.ar.fireNow('s1', '账号池已切换到 Account B');
-    ok('a fire-pending refusal is JOURNAL-ONLY: Account B never rejected anything, and the promise is intact', second === false && w.journal.some((l) => /refused an immediate continue onto Account B \(fire-pending/.test(l)) && w.notes.length === 1 && w.notes[0] === '账号池已切换到 Account A，已自动继续这个任务。', JSON.stringify({ notes: w.notes, j: w.journal.filter((l) => /refused/.test(l)) }));
+    ok('a fire-pending refusal is JOURNAL-ONLY: Account B never rejected anything, and the promise is intact', second === false && w.journal.some((l) => /refused an immediate continue onto Account B \(fire-pending/.test(l)) && w.notes.length === 0 && w.sentNotes.length === 1 && w.sentNotes[0] === '账号池已切换到 Account A，已自动继续这个任务。', JSON.stringify({ notes: w.notes, j: w.journal.filter((l) => /refused/.test(l)) }));
     ok('…and the session it just told nothing to is STILL ARMED (round 1 told it "已停止反复重试" here)', w.ar.statusFor('s1').armed === true, JSON.stringify(w.ar.statusFor('s1')));
     ok('…the once-per-window budget was NOT spent: the genuine exhaustion line still goes out', (() => {
       w.ar.noteFireOutcome('s1', false, 'limit rejection');           // the CLI answers OUR fire (Account A) with a limit
       w.st.ident = { key: 'sub-a', name: 'Account A' };               // the pool puts us back on the rejector
       w.arm(); w.ar.fireNow('s1', '账号池已切换到 Account A');        // same identity ⇒ the real thing
-      return w.notes.length === 2 && /^账号 Account A 刚刚拒绝了这个会话的自动续跑/.test(w.notes[1]);
+      return w.notes.length === 1 && /^账号 Account A 刚刚拒绝了这个会话的自动续跑/.test(w.notes[0]);   // the continue's own card is not in `notes` since 2.369.97
     })(), JSON.stringify(w.notes));
     ok('…a BACKOFF refusal is journal-only for the same reason (a 60s pacer on a live promise)', (() => {
       const before = w.notes.length;
@@ -457,7 +459,7 @@ if (!probe) {
       w.arm(); w.ar.fireNow('s1', '账号池已切换到 ' + name);
       w.ar.noteFireOutcome('s1', false, 'limit rejection');
     }
-    ok(`${FIRE_MAX_IMMEDIATE} continues went out, each announced once`, w.sent.length === FIRE_MAX_IMMEDIATE && w.notes.length === FIRE_MAX_IMMEDIATE, JSON.stringify(w.notes));
+    ok(`${FIRE_MAX_IMMEDIATE} continues went out, each explained once ON its prompt and never by a second card`, w.sent.length === FIRE_MAX_IMMEDIATE && w.sentNotes.filter(Boolean).length === FIRE_MAX_IMMEDIATE && w.notes.length === 0, JSON.stringify({ sentNotes: w.sentNotes, notes: w.notes }));
     w.st.ident = { key: 'sub-d', name: 'Account D' };
     w.ar._fires.get('s1').lastFireAt = Date.now() - 400000;
     w.arm(); w.ar.fireNow('s1', '账号池已切换到 Account D');
@@ -815,7 +817,7 @@ if (!probe) {
   w.ar.armIfEnabled(w.SID, w.session, Date.now() + 60000, 'usage limit');
   const did = await w.tickFire();
   ok('REAL gate: the pre-fire pool evaluation re-points the link and the continue is keyed to the member it landed on', did === true && w.linkNow() === w.SPARE && w.ar._fires.get(w.SID).last.key === w.SPARE, JSON.stringify({ link: w.nameOf(w.linkNow()), last: w.ar._fires.get(w.SID).last }));
-  ok('…and the card names that member instead of claiming the limit reset', w.notes.length === 1 && w.notes[0] === '账号池已切换到 B-Stack Max，已自动继续这个任务。', JSON.stringify(w.notes));
+  ok('…and the card names that member instead of claiming the limit reset (the cause rides the prompt since 2.369.97; no second card)', w.notes.length === 0 && w.fired.length === 1 && w.fired[0].note === '账号池已切换到 B-Stack Max，已自动继续这个任务。', JSON.stringify({ note: w.fired[0] && w.fired[0].note, notes: w.notes }));
 }
 {
   // NEGATIVE CONTROL for the wording at integration level: nothing moved, the
@@ -823,7 +825,7 @@ if (!probe) {
   const w = mkWorld();
   w.ar.armIfEnabled(w.SID, w.session, Date.now() + 60000, '5h 0% < 10%');
   const did = await w.tickFire();
-  ok('CONTROL: an arm that simply came due on a healthy link says the limit reset (and fires onto the same account)', did === true && w.linkNow() === w.LINK && w.notes.length === 1 && w.notes[0] === '用量上限已重置，已自动继续这个任务。', JSON.stringify({ link: w.nameOf(w.linkNow()), notes: w.notes }));
+  ok('CONTROL: an arm that simply came due on a healthy link says the limit reset (and fires onto the same account)', did === true && w.linkNow() === w.LINK && w.notes.length === 0 && w.fired.length === 1 && w.fired[0].note === '用量上限已重置，已自动继续这个任务。', JSON.stringify({ link: w.nameOf(w.linkNow()), note: w.fired[0] && w.fired[0].note, notes: w.notes }));
 }
 
 // ── §4f WHAT MAY CLEAR THE BREAKER (round 4, the r3 verifier's finding) ────
@@ -1151,7 +1153,7 @@ if (!probe) {
   const ar2src = read('src/server/auto-resume.js');
   ok('WIRING: the refusal notice is chosen by the REASON (the call site passes the check through; round 1 computed `chk` and dropped it)', /breakerNotice\(id, session, label \|\| key, kind, chk\)/.test(ar2src) && /function breakerNotice\(id, session, label, kind, chk\) \{[\s\S]{0,700}refusalNoticeFor\(\{[\s\S]{0,200}reason: chk && chk\.reason/.test(ar2src));
   ok('WIRING: a journal-only refusal spends no notice budget (the return is ABOVE the stamp)', /if \(!n\) return;[\s\S]{0,220}r\.notices\[n\.cls\] = now; save\(\);/.test(ar2src));
-  ok('WIRING: the identity is re-resolved INSIDE deliver (after the gate) and re-checked before spending', /const deliver = \(\) => \{[\s\S]{0,1400}const ident2 = identityFor\(id, session\) \|\| ident;[\s\S]{0,400}const chk2 = canFire\(id, key2, kind, now2\);[\s\S]{0,200}if \(!chk2\.ok\)/.test(ar2src) && /noteFired\(id, key2, kind, Date\.now\(\), origin\)/.test(ar2src) && /announce\(id, session, key2, kind, note\)/.test(ar2src));
+  ok('WIRING: the identity is re-resolved INSIDE deliver (after the gate) and re-checked before spending', /const deliver = \(\) => \{[\s\S]{0,1400}const ident2 = identityFor\(id, session\) \|\| ident;[\s\S]{0,400}const chk2 = canFire\(id, key2, kind, now2\);[\s\S]{0,200}if \(!chk2\.ok\)/.test(ar2src) && /noteFired\(id, key2, kind, Date\.now\(\), origin\)/.test(ar2src) && /announce\(id, session, key2, kind, note, \{ carried: !!carried\.note \}\)/.test(ar2src));
   // 2026-09-08: `cause` joined the inputs — the immediate path has a second
   // caller now (the new-member wake), and `kind:'now'` can no longer stand in
   // for "a pool switch". Pinned here so the card keeps naming what unblocked it.

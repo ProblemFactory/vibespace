@@ -193,7 +193,7 @@ function writeJsonAtomic(file, obj) {
 
 /**
  * @param deps.activeSessions Map<id, session>
- * @param deps.sendToSession  (id, session, text) => boolean — puts a USER message
+ * @param deps.sendToSession  (id, session, text, {note}) => boolean — puts a USER message (`note` = the cause the card shows, 2.369.97)
  *        into the live session exactly as a typed one would (so it lands in the
  *        transcript and the UI); returns false when the session cannot take it.
  * @param deps.serverSetting  (key) => value  — the global default
@@ -825,7 +825,15 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       const verb = verbFor(session);
       if (!verb) { log(`[auto-resume] ${id}: harness '${session.backend || '?'}' declares no resume verb — cannot continue`); giveBack(); armed.delete(id); save(); emit(id); return false; }
       let ok = false;
-      try { ok = !!verb.deliver(session, CONTINUE_PROMPT, { sendChatInput: (s2, text) => sendToSession(id, s2, text) }); }
+      // ONE CARD PER CONTINUE (2.369.97, owner: "为啥每次续跑会同时发两个续跑通知"):
+      // the delivered prompt is ALREADY a labelled card in the conversation
+      // (originKind 'auto-resume'), so the cause rides ON it (`note`) and the
+      // separate "来自 VibeSpace 的消息" notice is not sent for a delivered
+      // continue — two cards for one event read as two notifications. The
+      // notice survives only where no prompt reached the conversation (the
+      // refusal / far-reset sentences, which have no card of their own).
+      const carried = { note: note && note.text ? note.text : null };
+      try { ok = !!verb.deliver(session, CONTINUE_PROMPT, { sendChatInput: (s2, text) => sendToSession(id, s2, text, carried) }); }
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       armed.delete(id);
@@ -840,7 +848,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       log(kind === 'now'
         ? `[auto-resume] ${id}: ${why}${moved ? ` (landed on ${label2 || key2})` : ''} — continued immediately`
         : `[auto-resume] ${id}: ${note.cls === 'switched' ? `pool switched to ${label2 || '?'}` : 'usage limit reset'} — continued automatically`);
-      announce(id, session, key2, kind, note);
+      announce(id, session, key2, kind, note, { carried: !!carried.note });
       emit(id);
       return true;
     };
@@ -935,8 +943,13 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  pool switch creates is now delivered by the TIMED path (the link moves
    *  before the session is armed — measured), so the incident's card class can
    *  arrive through either one. */
-  function announce(id, session, key, kind, note) {
+  function announce(id, session, key, kind, note, { carried = false } = {}) {
     if (!notify || !note) return;
+    // The cause already travelled on the continue card itself (deliver()
+    // hands it to sendToSession as `note`); a second card would be the
+    // "two notifications" the owner saw. The per-window bookkeeping is kept
+    // so a LATER refusal notice about the same target still budgets itself.
+    if (carried) { const r = fireRec(id, Date.now()); r.notified[key || '*'] = Date.now(); save(); return; }
     const now = Date.now();
     if (note.cls === 'switched') {
       const r = fireRec(id, now);
