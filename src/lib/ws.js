@@ -98,7 +98,12 @@ class WsManager {
   }
   on(sid, h) { if (!this.handlers.has(sid)) this.handlers.set(sid, []); this.handlers.get(sid).push(h); }
   off(sid) { this.handlers.delete(sid); }
-  onGlobal(h) { this.globalHandlers.push(h); }
+  // Returns ITS OWN unsubscribe. `off?.()` on the result of a subscribe call
+  // is the idiom every teardown in this tree reaches for, and while this
+  // returned `undefined` that idiom was a silent no-op: a CLOSED window kept
+  // its handler, kept fetching and kept POSTing, holding its whole detached
+  // DOM subtree alive. `offGlobal(h)` stays, and is what this calls.
+  onGlobal(h) { this.globalHandlers.push(h); return () => this.offGlobal(h); }
   offGlobal(h) { const i = this.globalHandlers.indexOf(h); if (i >= 0) this.globalHandlers.splice(i, 1); }
   onStateChange(h) { this._stateListeners.push(h); }
   offStateChange(h) { const i = this._stateListeners.indexOf(h); if (i >= 0) this._stateListeners.splice(i, 1); }

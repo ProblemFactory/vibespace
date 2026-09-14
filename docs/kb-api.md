@@ -162,6 +162,63 @@ Server → Client: `created`, `output`, `msg` (normalized: op=create/edit/meta),
 **Virtual session attach**: `attach` with `sessionId` starting with `sub-` routes to subagent handler. `sub-{parentToolUseId}` returns live-buffered messages from parent session's `subagentBuffers`. `sub-agent-{agentId}` loads completed agent's JSONL from disk. Both respond with standard `attached` payload with normalized messages. Live virtual sessions receive normalized `msg` ops via per-subagent normalizers. `attach` with `viewOnly:true` loads JSONL history without an active session (for stopped session history viewing).
 
 
+## Channels — the communication panel (P0a, docs/design-communication-panel.zh.md)
+
+EVERY route takes `host` and passes it down: `hostId` is a PARAMETER, never a
+branch (decision 15). v1 serves THIS machine only, and that is a NAMED refusal
+(`501 host-not-served`) for anything else — a silent local answer to a
+question about another machine is the failure the rule exists to stop.
+
+- `GET /api/channels[?host=]` — the index DIGEST: adapters (with their
+  resolved lane), conversations (title/kind/participants/lastAt/unread/tracked),
+  each conversation's resolved `convCaps`, its `offers` (read / send-as-user /
+  send-as-bot, each `{offered, why}`), its `identityWarning`
+  `{level, marking, verbatim}` and its `freshness` claim
+  `{kind, state, seconds, why?}` — `state:'off'` with `why`
+  (`untracked` / `adapter-disabled` / the scan resolver's own reason) for a row
+  nothing will ever fetch (r3), rendered "not polling" / "not scanning" — plus
+  `unreadTotal`. Each conversation's `lane` is `{via, why, source}` as the
+  resolver answered it, and on a scan lane `source` is exactly what the ingest
+  was gated on (r3): `source:null` means nothing was ingested. **Never message bodies, and
+  never a composed human SENTENCE**: this payload is broadcast to every client
+  at once while the language is per DEVICE, so the client renders the words
+  from the structure (`channelCaps.freshnessText` / `identityWarningText`).
+  Each adapter's `auth` is `{state: connected|expired|unknown, why, expiresAt}`
+  — a RESOLUTION, never a stub.
+- `GET /api/channels/:adapterId/:convId[?host=]` — one conversation's summary
+  plus its adapter row (what the window's context bar shows). 404 with a reason.
+- `GET /api/channels/:adapterId/:convId/messages?before=&beforeId=&limit=` —
+  ONE page of normalized `ChannelRecord`s, oldest-first by `(at, vendorId)`,
+  strictly before the BOUNDARY RECORD `(before, beforeId)`. `limit` is clamped
+  to 200. **The boundary is a PAIR, not an instant**: `at` is not unique (a
+  Lark burst shares a millisecond, Gmail's `internalDate` is second-derived)
+  and paging on it alone stranded every record of such a group at or after a
+  page boundary. `beforeId` is that record's `vendorId`, which invariant 2
+  makes unique per conversation; omitting it is still terminating but lossy.
+  **The reader seeks as far back as the writer keeps (r3)**: it used to read
+  only the newest 2 MiB, so a page boundary past that answered `[]` for ever
+  while retention kept the records; it now walks earlier windows until the
+  page is full or byte 0 is reached.
+- `POST /api/channels/:adapterId/:convId/read` `{at?}` — mark read; the engine
+  re-derives `unread` from the log rather than trusting a counter, and with no
+  `at` the instant is the NEWEST RECORD's — for future-dated records (with
+  `now()` a future-dated vendor record keeps `unread` above zero for ever) AND
+  for past-stamped ones (r3: the r2 spelling was `max(now(), newest.at)`, so
+  for every real adapter a message stamped before the mark but fetched after
+  it was silently marked read). With no record at all the mark is left where
+  it was. **404 on an id this instance does not hold** — a route may not mint
+  an index row — and a mark that changed nothing broadcasts nothing.
+- `POST /api/channels/:adapterId/:convId/track` `{tracked}` — the opt-in that
+  decides whether anything is ingested at all. Tracking refreshes that
+  conversation's `convCaps` (one of its three named refresh triggers),
+  BROADCASTS the persisted change (r3 — it used to rely on the pass it kicks,
+  which a spent request budget returns from before notifying), and then kicks
+  a pass. 404 on an id nobody has discovered.
+
+WS: `channels-updated` `{changed:[convId], digest}` — ONE broadcast per
+ingest pass (or per mutation), carrying the recomputed RESULT so a client
+repaints without a fetch. Never one per message.
+
 ## Background Work (2.342.0)
 - Agent (vsst_ or jbt_ Bearer): POST /api/agent/jobs (create; vendor-vet + schedule floors), GET /api/agent/jobs (view-filtered list), GET /api/agent/jobs/:ref?wait&tail&answers (poll/long-poll, uniform not-found), POST /api/agent/jobs/:ref/{stop|start|rm|progress|ask|access} (control needs canControl; access needs owner + not user-locked; jbt_ tokens: progress/ask on SELF only).
 - User (cookie): GET /api/jobs (full), GET /api/jobs/:id?tail, POST /api/jobs/:id/{stop|start|rm|answer|access} (access accepts lock:true/false), GET/POST /api/jobs-secrets (names only on GET; UPPER_SNAKE, 0600 store), GET /api/jobs-escapes (read-only systemd/crontab listing).

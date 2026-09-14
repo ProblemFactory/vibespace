@@ -372,7 +372,10 @@ export function openInteractWindow(app, jobId, opts = {}) {
     root.textContent = '';
     const job = r?.job;
     if (!job) { root.textContent = t('Job not found'); return; }
-    winInfo.setTitle?.(job.name + ' — ' + t('needs your input'));
+    // `winInfo.setTitle?.(…)` was a permanent no-op (the literal has no such
+    // member); the MANAGER owns titles — found while fixing the same shape in
+    // channel-window.js (channels r3).
+    app.wm.setTitle(winInfo.id, job.name + ' — ' + t('needs your input'));
     const pending = job.interaction?.pending;
     if (!pending) { const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = t('Nothing to answer — the job continues.'); root.appendChild(e); return; }
     renderPanelBlocks(app, root, jobId, pending, { onAnswered: () => setTimeout(render, 2500) });

@@ -85,7 +85,17 @@ const PURE = new Set(['src/plugin-manifest.js', 'src/account-pool-auto.js', 'src
   // shipped statusline tool. A rule with an import is a rule that cannot be
   // mirrored, and a second spelling of "does this bucket count" is the twin
   // class this file exists to fail.
-  'src/quota-model.js']);
+  'src/quota-model.js',
+  // CHANNELS v2 (docs/design-communication-panel.zh.md §2). Two PURE modules:
+  //   channel-record — the ONE normalized message shape every adapter produces
+  //     (and the frame-marker neutering an external body owes every consumer)
+  //   channel-caps   — the ONE place that answers "does this control exist"
+  //     (`offers`) and "which lane is carrying this row" (`laneState` /
+  //     `scanState`). A declaration is an upper bound and a resolution may
+  //     only narrow; both the panel and the ingest engine ask THESE, never
+  //     `caps.receive`, which is why they must be importable from the browser
+  //     bundle and from a node suite with no server at all.
+  'src/channel-record.js', 'src/channel-caps.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
@@ -117,11 +127,17 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // the serve's SSE stream + an fs.watch on the sqlite store (the only lane
   // that sees another opencode process). Node builtins only; the daemon
   // bundles it with opencode-serve.
-  'src/opencode-events.js']);
+  'src/opencode-events.js',
+  // THE channel store (docs/design-communication-panel.zh.md §5): fs+path only.
+  // It knows how bytes are laid out under data/channels/ and nothing about
+  // adapters, ACLs, policy or money — and it deliberately exposes no
+  // "write the whole index back" call, because the serialized owner in
+  // src/server/channels-engine.js is the index's only writer (§5.1).
+  'src/channel-store.js']);
 const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
 const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
 const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
-  || p.startsWith('src/routes/') || p.startsWith('src/server/') || ['src/mounts.js', 'src/accounts.js', 'src/task-groups.js', 'src/usage-history.js',
+  || p.startsWith('src/routes/') || p.startsWith('src/server/') || p.startsWith('src/channels/') || ['src/mounts.js', 'src/accounts.js', 'src/task-groups.js', 'src/usage-history.js',
     'src/usage-routes.js', 'src/agent-routes.js', 'src/session-status.js', 'src/user-todos.js', 'src/webdav.js', 'src/vnc.js',
     'src/auth.js', 'src/clerk-auth.js', 'src/telemetry.js', 'src/opslog.js', 'src/incident.js', 'src/remote-fs.js',
     'src/machine-mounts.js', 'src/exit-proxy.js', 'src/port-forward.js', 'src/plugins.js', 'src/gmail-sync.js',
@@ -134,6 +150,14 @@ const EXCEPTIONS = new Map([
   ['src/lib/utils.js->src/task-color-seq.js', 'pure module, shared server+browser by design (re-exported)'],
   ['src/lib/sidebar-mounts.js->src/ssh-key-format.js', 'pure module, shared server+browser by design'],
   ['src/lib/usage-meter.js->src/quota-model.js', 'pure module, shared server+browser by design — the quota panels ask the SAME accessor the pool and the write path do (B-9213: an account holds several limits and the panel used to show whichever pushed last)'],
+  // The freshness chip and the identity warning are SENTENCES, and the server
+  // cannot compose them: the digest is broadcast to every client at once
+  // while the language is per DEVICE (localStorage). So the resolver returns
+  // STRUCTURE and the two client surfaces render it with their own `t` —
+  // which is also the only way the build's i18n scan can see those keys at
+  // all (they used to leave the server as DATA and shipped English-only).
+  ['src/lib/channels-panel.js->src/channel-caps.js', 'pure module, shared server+browser by design — the panel composes the freshness sentence in the DEVICE\'s language from the server\'s structured claim'],
+  ['src/lib/channel-window.js->src/channel-caps.js', 'pure module, shared server+browser by design — same rule as the panel, for the context bar and the identity warning'],
 ]);
 
 // 1) PURE modules: zero requires of ANY kind beyond other PURE modules.

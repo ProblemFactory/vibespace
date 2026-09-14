@@ -32,6 +32,27 @@ ok(validateManifest({ ...base, icon: '<svg onload="x()"></svg>' }).manifest.icon
 ok(validateManifest({ ...base, contributes: { ...base.contributes, keybindings: [{ a: 1 }] } }).warnings.some((w) => /reserved/.test(w)) && !validateManifest({ ...base, contributes: { ...base.contributes, settings: { a: 1 } } }).ok, 'reserved contributions (keybindings/…) warn, never fail; settings is real since Ph4 (a non-array is an error)');
 ok(compareVersions('2.369.24', '2.369.9') > 0 && compareVersions('2.369.24', '2.370.0') < 0 && compareVersions('1.0.0', '1.0.0') === 0, 'compareVersions is numeric per segment');
 
+// ── ①b THE RESERVED-CONTRIBUTION SET IS PINNED ──
+// Only keys IN that list warn; anything else is silently discarded when
+// `m.contributes` is rebuilt to a fixed shape, so a plugin author following a
+// design document gets NO SIGNAL AT ALL. The set is module-local, so the pin
+// reads the SOURCE — and the functional half drives the validator, because a
+// word in an array proves nothing about the warning a plugin author sees.
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/plugin-manifest.js'), 'utf-8');
+  const m = src.match(/const RESERVED_CONTRIBUTIONS = \[([^\]]*)\]/);
+  const got = m ? m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean) : [];
+  const want = ['keybindings', 'panels', 'viewers', 'commands', 'menus', 'statusChips', 'backends', 'channelAdapters'];
+  ok(JSON.stringify(got) === JSON.stringify(want), 'RESERVED_CONTRIBUTIONS is exactly the declared set (adding a key without updating this list is the point)', JSON.stringify(got));
+  for (const key of want) {
+    const w = validateManifest({ ...base, contributes: { ...base.contributes, [key]: [{ a: 1 }] } }, { hostVersion: '2.369.24' });
+    ok(w.ok && w.warnings.some((x) => x.includes(`contributes.${key}`) && /reserved/.test(x)), `contributes.${key} warns "reserved for a later phase" and never fails`, JSON.stringify(w.warnings));
+    ok(w.manifest.contributes[key] === undefined, `contributes.${key} is still IGNORED (reserved names a later phase, not a live contribution point)`);
+  }
+  const unknown = validateManifest({ ...base, contributes: { ...base.contributes, notAThing: [{ a: 1 }] } }, { hostVersion: '2.369.24' });
+  ok(unknown.ok && !unknown.warnings.some((x) => /notAThing/.test(x)), 'NEGATIVE CONTROL: an UNRESERVED key is dropped with no warning — which is exactly why `channelAdapters` had to be added to the list');
+}
+
 // ── ② loader against the shipped example plugin ──
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plug-'));
 const pdir = path.join(root, 'data', 'plugins', 'example.hello');

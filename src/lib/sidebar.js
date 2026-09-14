@@ -6,7 +6,7 @@ import { installSidebarState } from './sidebar-state.js';
 import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
 import { installSidebarMounts } from './sidebar-mounts.js';
-import { installSidebarRail } from './sidebar-rail.js';
+import { installSidebarRail, PANEL_TABS } from './sidebar-rail.js';
 import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarTasks } from './sidebar-tasks.js';
 
@@ -1056,7 +1056,10 @@ class Sidebar {
     // panel rebuilt with a fresh closure and its Machine selection reset to
     // local mid-use (userN: "login on host → dialog jumps machines"). The
     // panel wipes listEl itself when it genuinely rebuilds (tab change).
-    if (this._activeTab === 'ports' || this._activeTab === 'agents' || this._activeTab === 'plugins' || this._activeTab === 'jobs' || this._activeTab === 'system') { this._renderRailPanel?.(); return; }
+    // ONE list (sidebar-rail's own PANEL_TABS) — a hand-copied literal here was
+    // a second spelling of the same set, and a rail id added to only one of them
+    // renders nothing at all (the whitelist-drift class).
+    if (PANEL_TABS.includes(this._activeTab)) { this._renderRailPanel?.(); return; }
 
     this.listEl.innerHTML = '';
 

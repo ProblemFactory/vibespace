@@ -1028,3 +1028,534 @@ MEASURED on a COPY of this instance's stores (2026-09-10): 12 shards / **506,107
 **INVARIANTS ADDED (⑳h-⑳i).** **⑳h A NAME THE GATED COMMIT DOES NOT CONTAIN IS AN ABSENCE, NOT A FAILURE.** When the TABLE and the SOURCES come from two different commits — which is every isolated run, i.e. the whole heavy tier and any non-HEAD push — a missing suite is nothing to judge; say so, count it, and put the count in the sentence that reports the result, because "ALL GREEN (97 suites)" for a run of 55 is a claim the record itself contradicts. The corollary is the vacuity guard: the moment "missing = skip" exists, "everything missing = green" is one step away, and a run that judged nothing must claim nothing (⑪) *without* blocking a push it has no evidence against. **⑳i A GATE'S COST IS PER PUSH, NOT PER REF.** A loop over the pushed refs multiplies a budget that was measured once — and here it also multiplies real spend and the SSH idle timeout the tier is sized for. One subject per push, chosen by a stated rule, with the refs it did not cover NAMED; per-ref coverage belongs to the tier that already runs per sha in the background.
 
 **INVARIANTS.** ① A suite is in exactly one tier or in EXCLUDED with a reason — no third state, and `npm run build` says so. ② A heavy row without a `why` is a census failure. ③ The marker names a commit, so the run must have BEEN that commit (isolate) or the tree must have been clean (in place). ④ Anything launched from a git hook gets `gitEnvFrom(process.env)`. ⑤ Both tiers run in the Actions mirror, as two PARALLEL jobs (heavy is not a consequence of fast; `needs: fast` would only delay the slow signal). ⑥ Moving a suite between tiers is a measurement, not an opinion — put the number in the `why`. ⑦ A `--only=` run writes a marker but never a CLEARING one: a partial green is not evidence the tier passed (a partial RED still blocks — a suite really did fail there). ⑧ A check that runs inside `npm run build` may only read what a build reads — several browser suites build a PARTIAL COPY of the tree in a throwaway worktree, so a build-time assert comparing files outside the copied set fails there for reasons unrelated to the code under test (measured: the package.json wiring pin turned test-window-menu into a 300 s timeout, which then read as "test-window-menu is red on master" — it wasn't; the wiring pins moved into test-ci-gate). ⑨ Retry-once never becomes retry-twice, and a retried pass is always NAMED. ⑩ **ONE heavy tier per MACHINE** — the lock lives at literal `/tmp`, not in the checkout and not at `os.tmpdir()` (that one follows TMPDIR, i.e. it names a process environment, not a machine), because the resources the suites claim are machine-wide; a new "run the tier" entry point takes it too. ⑪ **A run that did not happen claims nothing** — no green, no red, a `skipped` note, exit 3, and every surface says "no verdict" rather than staying silent. ⑫ **Refuse at t=0, not at t=16 min**: any decision that determines whether a run can produce a verdict is made and announced BEFORE the work, and the closing line never claims a verdict nobody recorded. ⑬ **Advice in a block message must be reachable** — never point at a door that only opens from the other side. ⑭ **The verdict is about the refs being PUSHED**, never about whichever branch happens to be checked out — the heavy verdict (round 2), the green-marker shortcut (round 4) AND the fast RUN itself (round 5: `--isolate --sha=<tip>` in a scratch worktree when a pushed ref's tip is not HEAD, and a closing line that names its subject) — but the COST is per push, not per ref (round 6, ⑳i): exactly one fast subject per push (HEAD if it is being pushed, else the newest pushed sha), with the commits it did not cover NAMED and left to the heavy tier, which already launches per sha. ⑮ **No FAST-tier suite claims a machine-global name** (a literal port it binds, a fixed `/tmp` path it creates or removes) — transitively, including any slice it launches; `machineGlobalFixtures` asserts it, with the pre-fix shapes as negative controls in `scripts/fixtures/machine-global-shapes/`. ⑯ **A killed run cleans up after itself** — supersession means SIGTERM is a normal exit path, and node's default SIGTERM does not run `finally`. ⑰ **A kill path needs positive identity; a read path does not** — `pidStillRunning` trusts a record that names nothing, `looksLikeHeavyRun` (the supersede gate) asks `/proc` and answers NO when it cannot tell. ⑱ **An interrupted run never stamps a verdict, and a SIGNAL HANDLER IS NOT AN ABORT in a synchronous runner** — heavyGate asks `abandoned()` synchronously between suites (pid file gone / lock taken / a child killed by a signal somebody SENT us — `OUTSIDE_SIGNALS` = SIGTERM/SIGINT/SIGHUP, never a crash signal: see ⑳a), because a handler cannot preempt `spawnSync` and the failure it would otherwise record is one WE caused; and it exits **4**, never 0 (⑳b). ⑲ **A cleanup assert must outlive the tool that cleans up for you** — killing during `git worktree add` measures git's own rollback, not ours; wait until the operation whose cleanup you are testing has completed. ⑳ **A suite that dirties the REPOSITORY shrinks the window rather than trusting cleanup** — `finally`, `process.on('exit')` and signal handlers all fail the same way (a killed process, or one sitting in `spawnSync`), and this class was measured twice in one afternoon: the mutation harness left the pre-push hook mutated, and test-ci-gate stranded its dirty-tree probe, which costs the next push its green marker. test-ci-gate's probe now exists only until the run under test has CAPTURED the dirty tree (it says so on its own stdout, ~200 ms), plus a self-heal at start, plus the handlers. And an ABORTED run says ABORTED — "HEAVY TIER GREEN" beside "NO VERDICT WRITTEN" is still a sentence somebody can quote. ㉒ **Retry-once is for a flaky FIXTURE, never for a failure we caused** — before re-running a failed suite, ask whether this run has been abandoned (a superseded run's suite dies of our own group SIGTERM), because the retry costs a full suite budget, holds the MACHINE LOCK while it runs, and its answer is discarded anyway. ㉑ **A marker KIND has three readers** — `ci.mjs` writes it, `GET /api/ci-heavy` serves it and the Diagnostics report renders it; a kind that reaches only the CLI is a verdict the UI silently DROPS, and its absence reads exactly like "nobody has pushed lately" (⑪ in reverse). test-ci-gate §6 derives the API leg from ci.mjs's own kind list, so a fifth kind has to be served too, and pins the renderer on `skipped` by name — `pid` is not a verdict there (an in-flight run is the RUNNING row), so "render every kind" would be the wrong rule. Round 6 adds the same rule for a marker FIELD that changes what another field MEANS: `absent` (the suites the gated commit did not contain) travels ci.mjs → `ci:status` → `/api/ci-heavy` → the Diagnostics report — FOUR readers, because a green row printing "97 suites" for a run of 55 is the marker-kind lesson one field smaller. The two greps have their pre-fix mutations as controls; the CLI leg is FUNCTIONAL (a real marker through the real `--status`, with an absent-less marker as the control) because that is the reader an operator actually runs.
+
+---
+
+### src/channel-record.js (PURE)
+
+THE ONE normalized message record every channel adapter produces
+(docs/design-communication-panel.zh.md §4). Imports nothing, so the browser
+bundle, the server and a node suite all take the same rules. Three rules, each
+somebody's incident:
+
+1. **`vendorId` IS THE DEDUP KEY** (design §5 invariant 2). A replayed page —
+   which Lark's anchor semantics guarantee at a boundary and a Gmail history
+   replay produces too — must be a no-op. A record with NO vendor id is refused
+   here rather than given one downstream; an adapter that scrapes a SCREEN
+   declares a minted key (`raw.synthetic: true`), because the invariant wants
+   A key, not a vendor-issued one, while an UNDECLARED minted key turns every
+   re-scan into a batch of duplicates.
+2. **`@_user_N` PLACEHOLDERS ARE PER-MESSAGE ORDINALS, NOT IDENTITIES.** They
+   resolve against THAT message's own `mentions` array, and an ordinal with no
+   mention behind it is left VERBATIM — inventing a name for it is the
+   mis-attribution the rule exists to stop (it has already filed a message
+   under the wrong person in an ops tool).
+3. **AN EXTERNAL BODY MAY NOT CARRY OUR OWN FRAME SYNTAX** (fence 5). Every
+   peer-controlled string reaches an agent prompt eventually, so
+   `<system-reminder>` / `<vibespace-*>` / `<task-notification>` /
+   `<persisted-output>` / `<local-command-stdout>` / `<command-name>` /
+   `<command-args>` are NEUTERED (`[system-reminder]`) at NORMALIZATION —
+   the record is the one shape every consumer reads, and a guard applied at one
+   consumer is a guard the next consumer does not get. The sender's WORDS
+   survive verbatim.
+
+   **AND THE RULE RUNS OVER *EVERY* PEER-CONTROLLED FIELD, NOT JUST `text`
+   (r2).** It ran on `text` alone, so `author.name`, `mentions[].name` and
+   `attachments[].name` — all peer-controlled, all part of the same record —
+   came out of `makeRecord` with LIVE frames, which made this entry's own
+   claim false at SOURCE (measured with the module's own `carriesFrame`
+   predicate: text inert, the other three live). The design's §7.5 agent block
+   renders `from <author>`, so the author name is squarely on the path the
+   rule exists for, and `makeConversation` was already doing it for `title`
+   and `participants` — the omission was an oversight, not a decision.
+   `peerText()` is now the ONE door every such field goes through, and
+   ATTRIBUTES are matched too (`<system-reminder x>` walked straight through
+   a pattern that required `<name>` exactly).
+
+   The `vibespace-*` half is a NAMESPACE (a stripper that enumerates misses
+   the fourteenth); the rest is a FIXED LIST, and a list is the tool this
+   class defeats — so `test-channel-record`'s **FRAME CENSUS** derives every
+   hyphenated tag name the tree writes (`git ls-files -- src data/bin
+   server.js`, 266 files, 28 names) and fails on one that is neither neutered
+   nor classified as prose, with a negative control that it really flags an
+   unclassified name. `<channel source="…">` is deliberately NOT listed:
+   `channel` is an ordinary English word with no hyphen, so neutering it would
+   mangle a stranger's code paste — and unlike the names above, we never
+   inject it (the CLI composes it from its own socket).
+
+The key separator is a NUL spelled as `\\u0000`: a raw one would make the whole
+module invisible to grep, `file(1)`, ripgrep and every source census in the
+tree (and fail the build's repo-wide scan). Gate: scripts/test-channel-record.mjs.
+
+### src/channel-caps.js (PURE)
+
+THE ONE place that answers "does this control exist" and "which lane is
+carrying this row right now" (design §4, §6.4, §12.5). Two axes, modelled not
+flattened: how messages arrive (`receive` push|poll|scan + the per-platform
+`scanSources`/`scanLatency`/`historyBySource`) and what may be sent and as
+whom (`sendAs`, narrowed per conversation by `convCaps`).
+
+- **`laneState(caps, adapterRecord, entry, now)`** — the lane ACTUALLY carrying
+  this conversation. Precedence **DEMOTED > LIVE > CLAIM**, and `unknown` (the
+  DEFAULT — declare nothing, get the conservative behaviour) never carries
+  content. Liveness is POSITIVE evidence only (the socket says live AND
+  something was heard inside the heartbeat window). A demoted or dead push lane
+  answers `via:'poll'`, because that is where the records come from and the
+  chip must draw what is true. This exists because the same fact lived in THREE
+  stores (a static declaration, a per-deployment claim, a per-conversation
+  observation) with nothing saying which won — so a demoted lane kept carrying
+  content while the adapter row said it had been demoted, and the freshness
+  chip drew `live` off a static declaration (the `opencode-events` round-4
+  lesson: a lane that lies about being active is worse than no lane, because it
+  turns the fallback OFF).
+- **`scanState(caps, adapterRecord, hostFacts, now)`** — the same law on the
+  other lane. Precedence **FACTS FRESH > PLATFORM DECLARATION > CLIENT PRESENT >
+  READ GRANT > `'ui'`**, freshness first because every level below it reads
+  `hostFacts`. ONE deliberate exception keeps it from becoming what it guards
+  against: **a refused read does NOT fall back to `'ui'`** — `tcc-denied` is a
+  NAMED answer with `source: null`, because silently swapping a 15-second lane
+  for a 5-minute one turns the latency on the row (this class's whole honesty
+  contract) into a lie. It answers `via:'scan'` so the union with `laneState`
+  is explicit rather than sniffed from which keys happen to exist.
+- **`convCapsState`** — `convCaps` is a CACHE, not a stored fact: it is a
+  vendor round trip and cannot be re-derived locally, so it pays for its
+  exemption with a 6 h TTL and an honest degrade to `unknown`/`[]`/`stale`.
+  `scan.hostFacts` takes the same price for the same reason.
+- **`offers(caps, convCaps, what)`** — BOTH halves must allow it, `unknown` is
+  "not offered + a reason" and never "allowed", and the resolution INTERSECTS
+  so it can only ever narrow the declaration.
+- **`identityWarning`** — `unknown` warns exactly as loudly as `marked`; the
+  adapter's own sentence is shown VERBATIM (it is a statement about a vendor's
+  UI, not product chrome, so it is never translated).
+- **`freshnessClaim(caps, laneOrScan, entry, now)`** — takes its clock as an
+  argument like every sibling resolver in this tree, because it answers "how
+  long ago". `t` is injected (the `collab-row`/`permission-rules` pattern), and
+  the default substitutes params exactly as i18n does for a missing
+  translation — a default that dropped them would ship `within {age}` to every
+  node-side caller. Gate: scripts/test-channel-caps.mjs.
+
+**A ROW NOTHING WILL EVER FETCH SAYS SO (r3).** Every discovered
+conversation is UNTRACKED by default (§5 invariant 6 — and untracked is all a
+fresh instance shows until someone clicks) and a disabled adapter's rows are
+refused by the tick and the pass alike, yet `freshnessClaim` fell through to
+the declared poll cadence for both, so a row that would never be fetched said
+"within 5m" on the ONE surface this feature calls its honesty contract. The
+claim now takes `{enabled}` as its fifth argument and reads `entry.tracked`
+STRICTLY (`=== true` — a fixture that forgets the flag models an untracked
+row, because that is what the store mints), answering `state:'off'` with a
+`why` (`adapter-disabled` outranks `untracked`, which outranks the scan
+resolver's own reason); `freshnessText` renders `off` as "not scanning" on the
+scan lane and "not polling" everywhere else (zh + ja entries added). The
+control is a scratch-dir patched copy with the two gates removed, which claims
+"within 5m" on both shapes.
+
+**THE RESOLVERS RETURN STRUCTURE; THE CLIENT COMPOSES THE SENTENCE (r2).**
+`freshnessClaim` used to build the words and the ingest engine called it with
+no translator — so the freshness chip, the string this feature calls its
+honesty contract, shipped ENGLISH-ONLY to a zh/ja UI (nine strings), and the
+build's i18n scan could not see them because they left the server as DATA
+rather than as a `t()` literal. The server structurally CANNOT fix it by
+taking a translator: language is per DEVICE (localStorage) while the digest is
+BROADCAST to every client at once. So `freshnessClaim` answers
+`{kind, state, seconds}` and `freshnessText(claim, {t})` says the words where
+the language is known; `identityWarning` answers `{level, marking, verbatim}`
+(the adapter's OWN sentence is the one string allowed on the wire — it is a
+statement about a vendor's UI and is never translated) and
+`identityWarningText` renders the rest. `state` exists because `kind` alone
+collapses distinct answers ("not scanning" vs "not scanned yet",
+"reconciling" vs "polling") and a renderer that cannot tell them apart is back
+to inventing the difference. The panel and the window import this PURE module
+directly (the `quota-model` / `task-color-seq` pattern, with a reasoned
+test-architecture exception each).
+
+**`authState(record, now)` — 'connected' IS A RESOLUTION, NEVER AN ASSERTION
+(r2).** The digest published `rec.auth?.expiresAt ? 'connected' : 'connected'`
+— a ternary whose two branches are the same string — so an expired or
+never-authenticated adapter was announced to the panel as connected, on the
+one surface that is supposed to say whether a lane can serve. The answer comes
+from the two facts the record already holds, in the order of how much they
+prove: the LAST PASS'S OWN VERDICT (`code === 'auth-expired'` is the vendor
+refusing us — measured, and it outranks a token whose stamped expiry has not
+arrived, because a revoked or rotated credential carries a perfectly future
+one, exactly like a wiped claude login), then the STAMPED EXPIRY, believed
+only once it has PASSED. No credential at all is `'unknown'`, never
+`'connected'`: the P0a fakes authenticate against nothing and saying so is the
+point.
+
+### src/channel-store.js (SHARED)
+
+Persistence primitives for `data/channels/` (design §5): `adapters.json`,
+`index.json`, `msgs/<adapterId>/<convId>.ndjson`, `audit.ndjson`, `archive/`.
+fs+path only.
+
+**§5.1 — THE SERIALIZED INDEX OWNER.** `index.update(fn)` is the ONE mutation
+door: a promise chain, so overlapping Lark and Gmail passes QUEUE rather than
+race, and there is deliberately NO "write the whole index back" export for
+anyone else to reach for. `writeJsonAtomic` is atomic at the FILESYSTEM layer
+only; the read-modify-write AROUND it is not, and two passes are overlapping BY
+DESIGN (single-flight is per ADAPTER). That is verbatim the round-4
+`codex-zst` delta defect — *read-then-write with a size taken before the read
+is a lost update waiting for the second caller* — and it is WORSE here, because
+a clobbered ANCHOR makes the next pass SKIP messages rather than re-read them.
+A snapshot read is NOT a lock: compute from it, apply inside `update()`
+(nothing needs more — the ACL, the filter and the policy are all PURE).
+
+Other invariants: appending is O(1) NDJSON while the index stays atomic JSON;
+dedup by `(adapterId, convId, vendorId)` in a bounded per-conversation set
+rebuilt from the log tail; the cursor advances ONLY after a complete pass and
+the order inside that update is fixed (log first, anchor second, coalesced
+flush last — a crash anywhere costs a re-read, which the dedup absorbs);
+retention is 90 days or 5,000 records whichever is SMALLER with a **7-day
+floor** (the estimator is defined over the last 7 days), streamed to a temp
+file and renamed; a derived value (`unread`, `hits7d`) is cached for render
+speed and always re-derivable. **The audit log rolls by DATE and the day comes
+from the file's OWN last record, never from mtime** (mtime is a fact about the
+filesystem — a backup or an rsync rewrites it), and the shard is APPENDED to,
+never overwritten: a rotation that clobbers its own shard loses the reason it
+exists (the slot-transitions lesson). Gate: scripts/test-channel-store.mjs.
+
+**THE LOG SEALS A PARTIAL LAST LINE BEFORE IT GROWS (r3 — the other half of
+the r2 dedup fix).** An append is not atomic: node's `writeFileSync` loops
+`write(2)` and throws AFTER earlier chunks have landed, and a SIGKILL, an OOM
+kill or a power loss leaves the same bytes — so the three errnos the header
+names (ENOSPC, EIO, EDQUOT) are exactly the documented short-write producers
+and the log can end in HALF A LINE. The r2 fix correctly left the dedup set
+untouched on that throw, so the batch was re-offered — and appended straight
+onto the fragment, which made its FIRST record one unparseable line
+`readTail` skips while the durable set now (correctly) remembered its id:
+every later pass reported it as a duplicate. One message, silently, for ever
+(measured: v1..v5 offered, `v4` unreadable on disk, a later pass
+`duplicates:2`). The r2 suite could not see it because its fixture — a
+DIRECTORY where the log must be — is the one failure that writes ZERO bytes.
+`appendRecords` now preads the last byte (only when the file is non-empty)
+and writes a `\n` first if it is not one; the fragment stays as ONE
+unparseable line the readers already skip, the write LOOPS until every byte
+is out (`fs.writeSync` does not retry a short write), and the return carries
+`healed`.
+
+**A FAILED APPEND DROPS THE CACHED DEDUP SET (r4 — the half of the r2 rule
+that was stated backwards).** r2 said "a failed append leaves no trace at
+all" and deliberately left the set untouched on a throw. But the write that
+threw may have landed a PREFIX of the batch, and those bytes are durable; the
+seal recovers a prefix that stopped MID-record, while a prefix that stopped
+exactly on a record boundary — after a record's `}` (sealed into a valid
+line) or after its `\n` (nothing to seal) — is a complete record the log now
+holds and the LIVE set still calls absent. So the SAME process re-offered the
+batch, appended that record again, and the append-only log served it twice
+for ever: `unread` and paging carried a phantom message and no reader removes
+a line. A restart was already correct (the set is rebuilt from disk and
+`readTail` parses a final line without `\n`), which is what pins the mechanism
+to the stale live set. Measured on the real store with `fs.writeSync` landing
+the prefix then throwing ENOSPC once — the module's own named errno: cut after
+`\n` and cut after `}` both served `v1,v2,v3,v4,v4,v5` with `countSince(0)
+=== 6` for five records; the mid-record cut, the ONLY shape r3's suite drove,
+was fine — which is exactly why r3 could not see it. Reachability is narrow
+(a short write that stops on a line boundary: block-aligned ENOSPC/EIO/EDQUOT
+prefixes make it roughly one in an average line length per event) and the
+outcome is permanent. Now `appendRecords` DELETES the conversation's cached
+set when the write throws and the retry re-derives it from the log, byte-
+identical to the restart; a throw BEFORE the write (`mkdirSync` — a file where
+the adapter directory must be) lands nothing and the set stays, which is r2's
+own shape and the reason the two rules are two: r2 is about what the set may
+CLAIM, r4 about what it must FORGET. Controls, one per layer: reverting r2's
+order alone shows the r4 belt HOLDING on the zero-byte EISDIR throw and
+FAILING on the pre-write shape r4 cannot see; reverting r4 alone serves six
+rows on both boundary cuts and is correct after a restart over the same log;
+only reverting both reproduces r1 (test-channel-store ⑤b/⑤i; the engine
+suite's r1 control reverts both for that reason).
+
+**THE REBUILD REFUSES A LOG IT CANNOT READ (r5 — the r4 class one layer
+over).** `dedupSet` is the ONE reader whose answer writes bytes, and it
+derived the durable set from `readTail`, whose two catches collapsed EVERY
+open/read error — EMFILE, EIO, EACCES, not only the routine ENOENT — into an
+empty read. The empty set was then CACHED, so the next append wrote the whole
+re-offered batch as "fresh", and a replayed boundary record (the shape Lark's
+anchor semantics GUARANTEE at a page boundary) landed twice, permanently: a
+witness that cannot be heard was read as a witness saying "nothing". The
+rebuild runs on every conversation's FIRST append after a boot and after every
+trim that rewrote the log, so the post-restart pass of every tracked
+conversation went through it; EIO is one of the three errnos the module's own
+header designs for and this instance's `data/` lives on a FUSE mount.
+Measured on the real store (a fresh store over five records, `fs.openSync`
+failing ONCE on the log at the rebuild, then the replay `[v5, v6]`): EMFILE,
+EIO and EACCES each answered `{appended:2, duplicates:0}` and served
+`v1..v5,v5,v6` with `countSince(0) === 7` for six records. Now `readTail`
+takes `{ strict }`, and the rebuild asks it strictly: ENOENT is still "no log
+yet" (a brand-new conversation's first append does not throw), anything else
+is THROWN out of `appendRecords` — the pass fails, the anchor stays, the retry
+re-reads, and nothing is cached at the throw — because a re-read costs a page
+while a guess costs a phantom message nobody can remove. Every OTHER reader
+stays lenient on purpose: a render-side `readTail` that shows nothing for one
+tick self-heals, and `countSince` is a DERIVED number re-computed on the next
+pass that is asked inside the index owner's `update()` after the anchor has
+already moved in memory, where a throw would leave a half-applied update.
+Controls: ⑤j drives all three errnos through the real module with the r4
+bytes (both catches swallowing) as its negative control, plus the ENOENT
+positive control and a plain-reader leg; and because r5 refuses BOTH of
+⑤b's fixtures (a directory where the log must be, a file where the adapter
+directory must be) before the set even exists, ⑤b's two arms and the engine
+suite's r1 control now run on bytes with r5 stripped as well — a control
+that a newer layer silently absorbs proves nothing about the layer it names.
+
+**`readTail` SEEKS BACKWARD, ONE 2 MiB WINDOW AT A TIME (r3).** It read the
+LAST `TAIL_BYTES` once and filtered by the boundary, so once the window's
+paging walked past 2 MiB every page came back empty and the window just
+stopped — while `trim()` deliberately keeps 5,000 records / 90 days, so at the
+retention cap the oldest were unreachable BY CONSTRUCTION for any average
+record over ~419 bytes (measured: 3,000 ordinary chat lines, 2.28 MiB, `trim`
+keeps all 3,000, the window reached 2,625 — the r2 paging class one layer
+down). The same reader rebuilds the DEDUP SET, so it also forgot everything
+older than a window and a replayed old page would have been appended twice.
+Now the walk reads earlier windows until `limit` candidates are in hand or
+byte 0 is reached; a window's first line may be the TAIL of a line that began
+earlier, so those bytes are carried as BYTES (a UTF-8 sequence can straddle
+the cut) and joined onto the earlier window before decoding. The window's own
+page (no boundary, 50 records) still costs one window; a caller asking for
+more than a window holds — the dedup rebuild, `countSince` — reads the whole
+log, whose size retention bounds. A record filed more than a window out of
+`at` order is the one shape this cannot see, and the r2 reader could not
+either. A log that cannot be read is still an EMPTY read, as in r2. Control: a
+patched copy with the walk pinned to one window strands 375 of 3,000 and
+forgets `m00000` in its set.
+
+### src/channels/index.js + src/channels/fake.js (ORCH)
+
+The adapter REGISTRY and its CONTRACT. An adapter owns exactly three things —
+vendor auth, vendor paging, and the vendor's message shape — and never touches
+the store, the ACL, the policy or the spend guard. **GATE ON THE CAPABILITY
+ROW, NEVER ON AN ADAPTER ID**, the same discipline `src/backend-caps.js`
+enforces for harnesses, with a grep census asserting no call site outside
+`src/channels/` branches on `kind` (the kinds are DERIVED by requiring each
+adapter module and reading the exports shaped like one, so a P1 adapter joins
+the census with no edit — and the unrelated `kind === 'gmail'` of the Gmail
+MOUNT never collides with it).
+
+Enforced at registration and at call time: a DECLARED capability must be
+implemented and an UNDECLARED one THROWS (`not-supported`) rather than
+half-working; every failure is a TYPED `{code, retryable}` from a CLOSED set
+and a bare throw out of an adapter becomes one; `history()` never returns
+records the caller did not ask for, reports `reachedAnchor` honestly and
+ADVANCES NOTHING; `convCaps()` is never WIDER than `caps`; on `sendAs: []`
+`send()` is not a failure but a typed `send-not-available` and the outbox
+creates no proposal; a `receive:'scan'` adapter must declare `scanSources`,
+per-source `scanLatency` and a `historyBySource` covering every named source
+with no value `'none'`.
+
+The FAKE adapter is the P0 conformance driver and talks to NOTHING — its
+traffic is deterministic from a fixed seed, so the panel, a restart and a
+second client all see the same conversations. Three modules exercise both axes:
+`fake-poll` (sendable), `fake-push` (a real `live.start()` on a timer, and
+READ-ONLY so the no-send-control rule is observable) and `fake-scan` (BOTH
+sources over the same traffic — `'store'` with the client's own ids,
+`'ui'` with keys minted deterministically from the message itself and marked
+`raw.synthetic`, so re-scanning the same screen is a no-op by construction).
+Enabled by `VIBESPACE_CHANNELS_FAKE=1` — registered always, instantiated never
+otherwise. Gate: scripts/test-channel-adapter-contract.mjs.
+
+**THE DEDUP SET REMEMBERS ONLY WHAT IS DURABLE (r2, critical).** That set's
+whole meaning is "the log already holds this", and `rememberVendorId` ran
+inside the SELECTION loop — before `appendFileSync` — so ONE transient write
+failure (ENOSPC, EIO, EDQUOT, or ENAMETOOLONG from a long percent-encoded
+vendor convId) made every record in the batch a PERMANENT duplicate: the next
+pass reported `appended:0, duplicates:N`, the engine read that as a complete
+pass and advanced the anchor PAST messages that were never written. Silent,
+permanent message loss with no crash and no error, and the exact opposite of
+invariant 4's promise. Reproduced end to end on the real engine + real store
+(vendor holds 9, log holds 0, anchor at `…-m8`, unread 0, and pass 3 changes
+nothing). Now: SELECT against the durable set, WRITE, and only THEN remember;
+duplicates WITHIN one batch are held in a local set that dies with the call;
+what a FAILED write may have landed is the r4 paragraph above (the r2 wording
+"a failed append leaves no trace at all" was false and is retired).
+
+**THE PAGING ORDER IS `(at, vendorId)` — A TOTAL ORDER, NOT A TIMESTAMP (r2).**
+`at` is not unique (a Lark burst shares a millisecond, Gmail's `internalDate`
+is second-derived), so paging on it alone with a strict `<` made every record
+of such a group at or after a page boundary PERMANENTLY UNREACHABLE — the
+bytes on disk, no way to scroll back to them (measured: 12 records in groups
+of three, paged exactly as the window pages, `m0,m3,m6,m9` never served).
+`vendorId` is unique per conversation BY INVARIANT 2, so the pair is a genuine
+strict total order; `readTail` takes `before` AND `beforeId`, SORTS by that
+order before slicing (ranking on one order and slicing by another is what made
+the boundary ambiguous), and a caller that cannot name a boundary record still
+gets a terminating — if lossy — page.
+
+**`adapters.json` HAS THE SAME SINGLE OWNER AS THE INDEX (r2).** It was the
+read-modify-write shape invariant 3 exists to eliminate: every caller
+re-parsed the file and wrote its own private array back, so a failing
+adapter's persisted health was wiped by a healthy neighbour's pass landing
+second — measured, five failing passes of an auth-expired adapter persist
+`consecutiveFailures: 5` alone and `0` with a neighbour passing beside them,
+so the amber "{n} failed passes ({code})" row, the ONE honesty signal that
+compensates for a static freshness chip, is exactly what got clobbered (and in
+P1 that file also holds `push.demotedAt` / `push.missRate` / `scan.hostFacts`,
+where a clobbered demotion is §6.4's "a lane that lies about being active
+turns the fallback OFF"). `store.adapters.live()` hands back THE object, read
+once at construction; `store.adapters.update(fn)` is the only way bytes land;
+and there is deliberately no `writeAdapters(obj)` for anyone to hand a private
+copy to, for the same reason there is no `writeIndex`.
+
+**`index.entry(a, c, { create: false })` IS THE LOOKUP FORM (r2).** "Create on
+first touch" is right for the ingest pass — discovery is where a conversation
+is born — and wrong everywhere else.
+
+**A SCAN ADAPTER'S SOURCE IS HANDED DOWN, NEVER RE-DERIVED (r3).**
+`scanState()` in src/channel-caps.js is the ONE resolver of which source is
+carrying a conversation, and the shipped fake kept a `source()` closure that
+fell back to `caps.scanSources[process.platform]` — a SECOND resolver, two
+lines under its own comment saying there was none — which is how the engine
+ingested through a lane the real resolver had just declared unavailable.
+`history(convId, opts)` on a scan adapter now REQUIRES `opts.source` (one the
+adapter's own `historyBySource` names) and the registry wrapper refuses a page
+without it with the typed `not-supported` + `detail.needs:'source'`; a
+non-scan adapter ignores the field (the rule is gated on the capability row).
+The fake reads `opts.source` and nothing else, and the contract suite carries
+a census: no adapter module under src/channels/ reads `scanSources[` /
+`scanSources &&` (a declaration writes `scanSources: {`) or `process.platform`
+outside `scanHost()`, whose job is to REPORT the platform.
+
+### src/server/channels-engine.js + channels-wiring.js + src/routes/channels.js (ORCH)
+
+The ingest engine (`create(deps)`): the per-adapter loop with its single
+flight, the pass that appends to the durable log BEFORE it advances an anchor,
+the ONE broadcast per pass, the digest the panel and every `channels-updated`
+carry, and the store's serialized index owner — of which the engine is the only
+writer. **The lane is ASKED, never read off `caps`**: the tick's cadence is
+`laneState(...).pollCadence` and the scan source is `scanState(...)`, so a
+demoted or dead push lane gets the fast cadence back immediately with nothing
+else in the tree deciding it a second time. Filtering, assignment, the wake
+decision and the outbox are later phases and are absent rather than stubbed.
+The routes take `host` everywhere and refuse another machine BY NAME. The
+wiring is one `create(deps)` factory called once from server.js, whose channel
+flush rides the existing SIGINT/SIGTERM shutdown.
+
+**A ROUTE MAY NOT MINT AN INDEX ROW (r2).** `POST /track` and `POST /read` on
+ANY adapter/conversation id wrote a permanent, invisible row into `index.json`
+— a file read on every render and deep-cloned by `digest()` on every broadcast
+— while the track route's own `404 No such conversation` was UNREACHABLE dead
+code, because `setTracked` set `found = true` unconditionally. `known()` now
+resolves the adapter from the records and the conversation from the index
+snapshot BEFORE anything is mutated, both mutators take the `{create:false}`
+entry, and `POST /read` answers 404 too. A `tracked:true` orphan would resume
+ingesting the day its adapter id was reused.
+
+**`markRead` DOES NOT BROADCAST A NO-OP, AND ITS DEFAULT INSTANT IS THE NEWEST
+RECORD'S (r2).** Both halves are load-bearing, and together they are what
+broke a self-feeding loop between this engine and an open window. (1) "Read"
+means "I have seen everything this conversation holds", and a vendor is free
+to stamp a record ahead of our clock (the fake adapter spreads a day over the
+whole current UTC day, so future-dated records are ALWAYS present; a real
+vendor's clock skew does the same) — with `now()` those stay unread for ever,
+`unread` never reaches 0 and nothing watching it can settle. Taking the newest
+record is also strictly MORE honest in the other direction: a record arriving
+between it and this instant stays unread instead of being silently marked
+read. (2) Every broadcast recomputes the digest (deep-cloning the index),
+re-renders every panel and re-reads every open window's tail, so notifying
+when nothing moved turned ONE open window into ~490 requests a second, for
+ever, with the user touching nothing — rewriting `readAt` ~500 times a second,
+i.e. destroying the mark it was setting. The cache-invalidation law is one
+DIRTY signal, one computation; an unchanged value is not a dirty signal.
+
+**THE DIGEST CARRIES NO HUMAN SENTENCE (r2)** — see src/channel-caps.js: this
+payload is broadcast to every client at once while the language is per DEVICE,
+so a sentence composed here is English for everybody by construction.
+
+**THE INGEST IS GATED ON THE RESOLVER (r3, high).** The r2 engine asked
+`scanState()` for the CHIP and then called `adapter.history()` regardless,
+while `scan.hostFacts` had NO producer anywhere in the product (`scanHost`
+had zero callers; the seed wrote `hostFacts: null` and nothing replaced it), so
+the resolver could only ever answer `host-facts-stale` — and the fake adapter
+re-derived its own source. Measured on the shipped seam: 11 records ingested,
+anchor advanced, unread badged, chip "not scanning" — the honesty contract
+publishing the opposite of what happened. Three things changed, each with
+its own control: (1) `pass()` PRODUCES the facts — `scan.hostFacts` trigger
+③ of the three the design names (§4 / §5 invariant 7): unconditionally before
+a scan pass that would advance the anchor, the store analogue of "re-resolve
+at approval time". ① (the connect wizard) is P1's and ② (the first panel
+render past the TTL) is subsumed, because a render has no side effects — the
+r2 loop lesson — and every scan pass refreshes anyway. The round trip spends
+one request and the facts land on the LIVE row through the serialized door.
+(2) `ingest()` asks `laneOrScan()` BEFORE a byte is fetched and refuses a scan
+lane with no source (`complete:false`, the anchor stays, `why` carried) — a
+refused lane is NOT a failed pass, which is what tells it apart from the
+registry's own refusal. (3) The resolved source is HANDED to `history()` as
+`opts.source`, and the lane label written on the entry is the RESOLVED lane.
+`laneOrScan` now asks `laneState` and follows its `via` (r2 read `caps.receive`
+there AND in the ingest label). The pre-fix control wires three patched copies
+— engine, registry, fake — to each other, and reproduces the r2 numbers.
+
+**"READ" IS THE NEWEST RECORD'S FOR PAST-STAMPED RECORDS TOO (r3).** r2
+spelled the default `Math.max(now(), newest.at)` — right for the fake adapter,
+whose records are always future-dated (and whose suite ASSERTED so), and
+`now()` for every adapter whose records are stamped in the PAST, i.e. every
+real one. There a message stamped before the mark but fetched after it (the
+routine shape: the poll interval is 30-300 s) was SILENTLY MARKED READ and
+never badged, and `changed` was true on every call, so the no-op-broadcast
+rule was structurally inert. The stamp is now the newest record's, or the
+existing mark when there is no record (nothing to have seen). The leg drives a
+real-vendor-shaped adapter with a growing world and a backdated arrival; the
+control is the r2 spelling.
+
+**TRACKING BROADCASTS BEFORE THE PASS IT KICKS (r3).** `setTracked(true)`'s
+only notification was the pass it kicked, and a pass the request budget could
+not afford returned before `notify()` — so the flag was on disk, the route had
+answered `{ok:true}`, and NO client learned, including the one that clicked
+(the panel repaints only on the broadcast). Measured: 26 of 30 tracks silent (the verifier measured 19 — the count follows the budget clock)
+under the 20/min budget with a 30-conversation adapter (the design measures
+~50 for a real account). `setTracked` now notifies on BOTH branches, after the
+convCaps refresh and before the pass; the pass adds its own broadcast when it
+ingests something. The digest also hands `enabled` to `freshnessClaim`, so a
+row on a disabled adapter and an untracked row are published `off`.
+
+Gates: scripts/test-channels-engine.mjs (fast — the r2 + r3 defects above over
+the REAL store, each with a patched-copy PRE-FIX control) +
+scripts/test-channels-e2e.mjs (heavy — the P0 exit conditions end to end, incl.
+the scan lane's chip/log agreement on the real server).
+
+### src/lib/channels-panel.js + src/lib/channel-window.js (CLIENT)
+
+The rail panel (adapters as sections, a freshness chip on every row, the
+`channel-row` menu and the ⚙ row as CONTRIBUTIONS registered by the module
+that owns them — so gear-menu.js stays byte-identical to its pinned legacy row
+list) and the conversation window (a registered window type; plain text through
+textContent on every path; a composer ONLY where `offers()` allows one, and a
+named reason where it does not). The panel repaints from the digest the engine
+broadcasts rather than re-fetching; the window re-reads its own tail when its
+id is named (§10.4).
+
+**MARKING READ IS A USER ACTION, NOT A REPAINT SIDE EFFECT (r2).** The POST
+lived at the end of `render()`, which the broadcast handler calls — so the
+engine's notify re-rendered the window, the render POSTed /read, the POST
+notified, and the cycle ran at ~490 requests a second for ever (measured in
+headless chrome on the shipped fake adapter's own data: 5,482 broadcasts and
+5,479 /read POSTs over ten IDLE seconds with ONE window open). It is now
+issued when the window OPENS and when the user touches it, and only while the
+last drawn summary says there is something unread.
+
+**THE PAGE BOUNDARY IS A RECORD, NOT AN INSTANT (r2)** — the window sends
+`before` AND `beforeId` (the store's `(at, vendorId)` total order).
+
+**THE FRESHNESS SENTENCE IS COMPOSED HERE (r2)** — both files import the PURE
+`src/channel-caps.js` directly and render `freshnessText` / `identityWarningText`
+with their own `t`, because the digest is broadcast to every client while the
+language is per DEVICE.
+
+**THE MANAGER OWNS TITLES (r3).** `winInfo.setTitle?.(c.title || convId)` was
+a PERMANENT no-op — the winInfo literal (src/lib/window.js) has no such member
+and none is ever assigned, `setTitle(id, t)` is a WindowManager method — so
+every channel window's title bar, taskbar entry and tab label read "Channel"
+and two open conversations were indistinguishable. The same
+silent-optional-call shape as the `off?.()` r2 removed; jobs-panel.js had the
+identical call. Both now call `app.wm.setTitle(winInfo.id, …)`, the e2e leg
+reads the title off the window, and test-window-types censuses the idiom
+across src/lib. The panel's section header also says `disabled` for a
+disabled adapter, beside its rows' "not polling" chips.
+
+**THE ws HANDLER IS REMOVED BY NAME (r2).** `ws.onGlobal()` returned undefined,
+so `off?.()` in both teardowns was a silent no-op: a CLOSED channel window kept
+re-rendering, kept fetching and kept POSTing /read over the user's mark (3,689
+POSTs in six seconds from three closed windows, and the mark itself
+overwritten), holding its whole detached DOM subtree alive. `onGlobal` now
+RETURNS its own unsubscribe — that is the load-bearing half, MEASURED:
+reverting it alone reddens the contract pin while reverting the two teardowns
+alone is ALL PASS — and the named-const teardown is a belt that does not depend
+on a return value nobody asserts.

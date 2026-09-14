@@ -1583,28 +1583,12 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, 
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting });
-// Backend readiness for onboarding: is each CLI installed + logged in?
-// Login detection is best-effort file existence — never spawns the CLIs.
-app.get('/api/backend-status', async (req, res) => {
-  // R1 (three-tier): the machine facts come from the SHARED probe module —
-  // the same implementation the device daemon serves as `probe-cli` for
-  // remote machines. This route is device #0's in-process call (CS amendment
-  // #2: shared implementation, no socket transit). Orchestrator-only
-  // composition (env-key overlay, named-account counts) layers on after.
-  let out;
-  try { out = await machineProbes.cliFacts({ claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD }); } catch { out = { claude: {}, codex: {} }; }
-  if (!out.claude.loggedIn && process.env.ANTHROPIC_API_KEY) { out.claude.loggedIn = true; out.claude.loginMethod = 'env-key'; }
-  // Named-account nuance (2.267.1): under full pooling the MACHINE login
-  // legitimately idles to token-less — count usable named identities so the
-  // client can say what's actually true instead of "not logged in".
-  try {
-    const l = accounts.list();
-    out.claude.namedLoggedIn = (l.accounts || []).filter((a) =>
-      (a.backend || 'claude') === 'claude' && (a.loggedIn || (!a.pooled && a.type !== 'subscription' && a.tail))).length;
-    if (out.codex) out.codex.namedLoggedIn = (l.accounts || []).filter((a) => a.backend === 'codex' && a.loggedIn).length; // onboarding readiness per backend (2.369.21)
-  } catch {}
-  res.json(out);
+// ── Channels / communication panel (src/server/channels-wiring.js) ──
+const channelsWiring = require('./src/server/channels-wiring.js').create({
+  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a),
 });
+// Backend readiness for onboarding (src/server/backend-status-route.js)
+require('./src/server/backend-status-route.js').create({ app, machineProbes, accounts, claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD });
 
 app.use(sessionsRouter);
 
@@ -2089,6 +2073,7 @@ function shutdown() {
   try { userTodos.flush(); } catch {} // debounced user-todo writes
   try { telemetry.flush(); } catch {} try { spendGuard.flush(); } catch {} // buffered telemetry records (2.219.0) + the unattended-spend ledger (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
+  try { channelsWiring.shutdown(); } catch {} // channel index + audit flush (atomic persistence law)
   try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release
   process.exit(0);
 }

@@ -3593,3 +3593,46 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .perm-layer-path { padding: 5px 4px; }
   .oracle-body { max-height: 52vh; font-size: 10px; }
 }
+
+/* ── Channels panel + conversation window (docs/design-communication-panel.zh.md
+   §10). Theme vars only — no literal colours; --radius-sm everywhere a row or
+   a chip rounds. The FRESHNESS CHIP carries the colour weight on purpose: it
+   is this feature's honesty contract, not decoration. ── */
+.chan-head { padding: 2px 6px 8px; }
+.chan-summary { font-size: 11px; color: var(--text-dim); }
+.chan-sec { margin-top: 10px; }
+.chan-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin-bottom: 4px; }
+.chan-sec-head b { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-sec-state { flex-shrink: 0; }
+.chan-sec-state.chan-warn { color: var(--yellow, #e5c07b); }
+.chan-empty { color: var(--text-dim); font-size: 11px; padding: 2px 6px 6px; line-height: 1.45; }
+.chan-row { padding: 5px 6px; border-radius: var(--radius-sm); cursor: pointer; }
+.chan-row:hover { background: var(--hover-overlay); }
+.chan-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chan-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.chan-row-sub { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-row:not(.chan-tracked) .chan-row-title { color: var(--text-secondary); }
+.chan-unread { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 0 5px; border-radius: 999px; color: var(--bg); background: var(--accent); }
+.chan-untracked { flex-shrink: 0; font-size: 9px; color: var(--text-dim); }
+.chan-chip { flex-shrink: 0; font-size: 9px; font-weight: 700; letter-spacing: .03em; padding: 0 5px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
+.chan-chip-live { color: var(--green, #3fb950); background: color-mix(in srgb, var(--green, #3fb950) 13%, transparent); }
+.chan-chip-within { color: var(--blue, #61afef); background: color-mix(in srgb, var(--blue, #61afef) 13%, transparent); }
+.chan-chip-scan { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 15%, transparent); }
+
+.chanwin { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.chanwin-bar { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.chanwin-bar b { font-size: 13px; }
+.chanwin-meta { font-size: 10px; color: var(--text-dim); }
+.chanwin-err { font-size: 12px; color: var(--red); }
+.chanwin-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.chanwin-empty { color: var(--text-dim); font-size: 11px; }
+.chanwin-foot { flex-shrink: 0; border-top: 1px solid var(--border); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.chanwin-readonly { font-size: 11px; color: var(--text-dim); }
+.chanwin-composer textarea { width: 100%; box-sizing: border-box; min-height: 48px; resize: none; border-radius: var(--radius-sm); }
+.chanwin-note { font-size: 10px; color: var(--text-dim); line-height: 1.45; margin-top: 4px; }
+.chanwin-warn { font-size: 10px; color: var(--yellow, #e5c07b); line-height: 1.45; }
+.chanmsg-head { display: flex; align-items: baseline; gap: 6px; }
+.chanmsg-head b { font-size: 11px; }
+.chanmsg-at { font-size: 10px; color: var(--text-dim); }
+.chanmsg-syn { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; }
+.chanmsg-body { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -166,6 +166,14 @@ export const SUITES = [
   { name: 'test-search-card-title', tier: 'fast' }, // search cards carry the query in the TITLE (claude WebSearch/WebFetch, codex web_search, ACP search): pure helper + the REAL renderer (esbuild→node) incl. XSS escaping + wiring pins
   { name: 'test-path-linkify', tier: 'fast' }, // where a chat file path ENDS: CJK/fullwidth punctuation terminates it, CJK filenames still link (owner screenshot 2026-09-10); pre-fix negative control + renderer wiring pin
   { name: 'test-user-todos-layout', tier: 'fast' }, // the For-you popup keeps rows in their slots while open (inc-mtw02kbq-kj96: a ✓ slid the next row under the pointer); PURE layout + pre-fix control + wiring pin
+  // CHANNELS v2 / the communication panel (docs/design-communication-panel.zh.md).
+  // All PURE/SHARED logic — no server, no chrome, no vendor call anywhere: the
+  // fake adapter talks to nothing.
+  { name: 'test-channel-record', tier: 'fast' }, // the ONE normalized record: the dedup key, `@_user_N` ordinals, and an external body carrying our own frame markers coming out INERT
+  { name: 'test-channel-caps', tier: 'fast' }, // laneState (DEMOTED > LIVE > CLAIM) + scanState (freshness > platform > client > grant > 'ui') + the convCaps TTL + offers/identityWarning/freshnessClaim, each with its own control
+  { name: 'test-channel-store', tier: 'fast' }, // §5.1's leg: TWO CONCURRENT PASSES each advancing their own cursor, with the read-modify-write shape as the negative control
+  { name: 'test-channels-engine', tier: 'fast' }, // the ingest engine over the REAL store: a transient append failure costs a RE-READ never a skip, a failing adapter's health survives a healthy neighbour's pass, markRead never broadcasts a no-op, and a route may not mint an index row — each with a patched-copy PRE-FIX control
+  { name: 'test-channel-adapter-contract', tier: 'fast' }, // every registered adapter through all three receive modes + both scan sources, plus the grep census that no call site outside src/channels/ branches on `kind`
   { name: 'test-pricing-tiers', tier: 'fast' }, // reference prices per MODEL VERSION (Fable 5.1 cache hits $0.25 vs Fable 5 $1; Sonnet 5 $2/$10), longest-key match, old pricing.json gains keys without clobbering edits
   { name: 'test-attach-rebuild', tier: 'fast' }, // first-attach history rebuild is time-sliced + gated (live records replay in order), heartbeat is stall-aware, kills are acknowledged + re-sent until acked
   { name: 'test-path-mounts', tier: 'fast' }, // /svc/<name>/ reverse proxy: real http+ws round trips + store rules
@@ -327,6 +335,7 @@ export const SUITES = [
   { name: 'test-permission-rules', tier: 'heavy', why: 'cli: the real chat-wrapper stdin verb + local oracles (strace + real CLIs when present) (10s)' },
   { name: 'test-readings-attribution', tier: 'heavy', why: 'chrome: real engine/pool/symlinks + the headless §10 panel legs (3s here with chrome skipped)' },
   { name: 'test-turn-truth-ui', tier: 'heavy', why: 'chrome: a live ChatView in headless chrome + the real stdout consumer (9s)' },
+  { name: 'test-channels-e2e', tier: 'heavy', why: 'server + chrome: a real worktree server, a bundle build, TWO chrome pages and a SIGKILL+reboot (~90s)' }, // the P0 exit conditions end to end: a fake conversation in the panel, opened as a window, surviving a restart, synced between two clients, two passes each advancing their own cursor, and a READ-ONLY conversation with NO send control
   { name: 'test-worktree-userchan-ui', tier: 'heavy', why: 'chrome: headless chrome + the LIVE_SESSION_FACTS drift guard (4s here with chrome skipped)' },
   { name: 'test-restore-liveness', tier: 'heavy', why: 'server + daemon: fault-injected vibespace-device daemons, real dtach fixtures and three worktree-server boots over a self-upgrading daemon (86s)' },
 ];

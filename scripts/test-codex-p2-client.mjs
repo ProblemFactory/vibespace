@@ -69,8 +69,12 @@ const sb = read('src/lib/chat-status-bar.js');
 ok(/BACKEND_META\[backend\]\?\.permissionModes/.test(sb) && /import \{[^}]*\bBACKEND_META\b[^}]*\} from '\.\/agent-meta\.js'/.test(sb), 'the status bar seeds its permission dropdown from META (never claude modes on a codex chat before the first status)');
 const sf = read('src/lib/setup-flows.js');
 ok(/const named = b\.namedLoggedIn \|\| 0;/.test(sf) && !/key === 'claude' \? \(b\.namedLoggedIn/.test(sf) && /const acctBtn = b\.installed\n/.test(sf), 'onboarding counts named accounts and offers the accounts door for every installed backend');
-const sv = read('server.js');
+// The route moved OUT of server.js into src/server/backend-status-route.js
+// (2026-09-13, to pay the size ratchet for the channels wiring stanza). A
+// source pin follows the code it pins — the RULE is unchanged, only its home.
+const sv = read('src/server/backend-status-route.js');
 ok(/out\.codex\.namedLoggedIn = \(l\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.backend === 'codex' && a\.loggedIn\)\.length/.test(sv), '/api/backend-status reports codex.namedLoggedIn');
+ok(/require\('\.\/src\/server\/backend-status-route\.js'\)\.create\(/.test(read('server.js')), '…and server.js still wires that route (a rule with no call site is a rule nobody runs)');
 const sl = read('src/lib/session-lifecycle.js');
 ok(/if \(\(a\.backend \|\| 'claude'\) === 'codex'\) return this\._codexAccountUsage\?\.\[a\.id\];/.test(sl), 'billing switcher: codex account rows read the persisted codex quota buckets');
 ok(/isCodex \? \(rHostId \? '' : usageHint\(this\._codexAccountUsage\?\.__global_codex__/.test(sl), 'billing switcher: the ChatGPT-login row shows the global codex quota');

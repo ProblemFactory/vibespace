@@ -37,6 +37,8 @@ import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
 import { openJobsWindow, openInteractWindow } from './jobs-panel.js';
+import { openChannelWindow } from './channel-window.js';
+import { focusChannelsPanel } from './channels-panel.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
@@ -2058,6 +2060,11 @@ class App {
   openUsage(opts) { return openUsageWindow(this, opts || {}); }
   openJobs(opts) { return openJobsWindow(this, opts || {}); }
   openJobInteract(jobId, opts) { return openInteractWindow(this, jobId, opts || {}); }
+  openChannel(adapterId, convId, opts) { return openChannelWindow(this, adapterId, convId, opts || {}); }
+  /** The Channels PANEL (the rail). Returns false where there is no rail —
+   *  the caller (the ⚙ row) is gated on the same fact, so a dead entry point
+   *  is never offered rather than offered and refused. */
+  openChannels() { return focusChannelsPanel(this); }
 
   // Diagnostics report: renders the local telemetry summary (client errors,
   // boot crashes, feature usage) as a static HTML page in the embedded

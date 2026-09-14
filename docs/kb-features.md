@@ -801,6 +801,132 @@ impossible rather than a review promise.
 ### Background Work (2.342.0 — docs/design-background-work.md is the authoritative design)
 - Agent-registered services/long-tasks/cron that OUTLIVE conversations; `vibespace-job` CLI + ⚙→Background Work window + `job-interact` panels. Key invariants: process identity pid+starttime+bootId (wrapper writes its own stamp first act; every adopt/kill re-verifies); adopt-first boot then desiredUp replay (services survive pod rebuilds by REPLAY — owner-accepted semantic; tasks die with the pod, cause env-restart); single-engine lock (data/jobs.lock, #127-class second server goes read-only); rm refuses live jobs; GC never touches a verifying-alive record; NO automatic agent triggering (owner red line — cron actions are spawn-task/notify only, poll is the interface, injection is passive at turn boundaries with a 600B budget); no existence oracle (invisible id ≡ nonexistent id, names scope-namespaced); user access-locks refuse agent edits; job/probe env credential-stripped + vendor-pattern create-time refusal (§ban-safety); secrets user-UI-only, values literal-redacted from tails; panels are declarative widgets — agent markup never enters our DOM. Cron spawn-task keeps ONE persistent child record — every fire is a run in its ring (×N chip); routine scheduled success is SILENT (ring entry only, no event/notify — 2.343.3, the 18-card flood report); failures/awaiting-user still surface. The boot collapse of pre-2.343.3 per-fire piles leaves in-memory id→survivor tombstones: polling a collapsed id answers "consolidated into <survivor> — vibespace-job poll <survivor>" but ONLY when the caller could see the survivor anyway (2.343.4 — the redirect must not become an existence oracle; an invisible family stays a plain not-found). **Owner auto-notify (2.344.0, B-0bf4)**: job terminal states / service park / cron missed / panel posted+answered MESSAGE the owner conversation through Claude Code's own cross-session messaging inbox (registry ~/.claude/sessions/<pid>.json + published key file; wire = auth frame + user frame; the CLI queues mid-turn, opens a turn when idle, bills like a typed prompt, applies its own inbound controls — never bypassed). Toggles: per-job `--notify on|off` > group tri-state (`jobNotify` in the group window, explicit OFF wins) > global `agents.jobNotify` (default ON); spawns pre-accept via `--settings {"crossSessionInbound":"accept"}` (bypass-mode sessions would otherwise hold unattested senders). Quiet-success cron runs and agent-initiated interrupts never notify; engine rate floor 30s/conversation + 10min identical-text dedupe. Unreachable owner → durable stash `data/job-notifications.json` (conversation-lineage keyed, 30/convo) injected at the next SessionStart/resume AND prompt-context (≤900B, endpoints survive, then cleared). Agent knows at create (`notify: {enabled, source, mode}` in the response + CLI echo); user sees it in Session Properties (Background Work section: effective state + deciding layer) and the job detail (last notify lane + age). EXPERIMENTAL `agents.vibespaceChannel` (default OFF) additionally registers data/bin/vibespace-channel.js as a Claude Code channel on new local claude spawns (--mcp-config + dev flag; research preview) — the deliver ladder prefers its per-session socket, falling through to the inbox lane. 2.344.1 review hardening: local-only gate is data.hostId (data.host was a dead field — fixture-shape class); PRE-2.344.0 live chat sessions get accept pushed via apply_flag_settings at boot (+5s/+60s passes; terminal sessions stash-only until respawn); missed {at} crons park terminally (desiredUp=false — the re-notify-forever loop); rate-floored DISTINCT events stash instead of dropping; read-only engine never flushes its stale snapshot (_save guard); _notifyRate bounded; channel-socks 0700 + boot sweep. Residual (documented, accepted): postToPeer ok = 'posted to the inbox', not 'read' (no delivery ack exists in the protocol; repo/managed settings can still tighten inbound); accept is spawn/push-applied and persists in a session after the global toggle turns off (toggle-off stops SENDING, which is the control that matters). 2.345.0: context echo fixed for the production {payload} shape (was typeof-string dead — live-E2E catch); SUBSCRIPTIONS — vibespace-job subscribe/unsubscribe, canView-gated, per-conversation-deduped, cap 10, cron-parent subscription covers child runs, explicit switch independent of group/global defaults, lastNotify stays owner-lane-only. 2.346.0: quiet-success is a DEFAULT not a law — --notify-ok opts scheduled successes into events+notify; vibespace-job announce \"text\" (jbt_ self or control-holders) = the watch-job verb, custom text through the normal lanes + event ring (exit codes ≠ newsworthiness); drained stashes >2 entries spill untruncated to data/job-notifications-read/<cid>.md and every truncated injection form carries the path (14d GC, 256KB head-trim). 2.347.0: per-subscriber regex filters (--filter, panel-pattern rules, fail-closed, re-subscribe updates own filter); vibespace-job show <id> = full registration self-inspection, list --mine/--subscribed; teaching updated in ALL THREE renderers together (the twin-set law). 2.348.1 inbox UX (live-demo field report): For you rows for jobs show the JOB name (never the phantom 'Background Work' session) and carry jobId — clicking opens the Interaction Panel DIRECTLY (window is the no-jobId fallback). 2.352.0: port scans name docker containers (docker ps port table fills rows ss -p can't see — other-user/root sockets; one enrichment for local+remote); Active-forward rows render the service:<name> label chip. 2.351.1: job cards backfill externally-published URLs (Ports-panel publish on a declared port → same ↗ chip via read-only snapshot enrichment, publishedExternally flag). 2.351.0: vibespace-docs [topic] = full manuals for ALL agent tools + global index (docs/agent/*-manual.md via /api/agent/docs/:topic; new static CLI in AGENT_TOOLS; jbt_ may read too). 2.350.0: vibespace-job docs = full on-demand manual served from the server checkout (docs/agent/background-work-manual.md via /api/agent/jobs-docs; teaching carries one pointer line); inbox gives Background Work its OWN section (after session groups, never a phantom session) and panel answers/expiry/rm auto-resolve its items (userTodos.resolveByJob); scan-row forward match uses remotePort (f.port was the fixture-shape class, 4th instance). 2.351.2: peer deliveries have TWO shapes — idle wake = user record; MID-TURN queue = JSONL-only attachment/queued_command with STRING prompt + origin.kind='peer' (no live-stream record, upstream) — both now render the peer card; mid-turn ones appear on reopen/rebuild only. 2.349.0: peer deliveries render as a distinct chat card (origin.kind='peer' — the isMeta invisible path hid what woke the agent; JSONL-forensic pin, provenance law extended); scanned ports with an active forward show forwarded/published chips and lose the redundant arrow. 2.348.0 announce audience VERDICT (owner): viewers get announces PASSIVELY only (next injection, never a wake) with per-job coalescing in renderJobsUpdate (×N+latest = one line per noisy job, lifecycle events never crowded out); directed messages stay owner+filtered-subscribers. **2026-09-07 — a notification is TYPED, and on codex it STEERS**: every owner/subscriber delivery goes out as `kind:'notification'` (the ladder's frame field), so a busy codex session injects it into the RUNNING turn (`turn/steer`, carrying only itself — the input queue is untouched) instead of adding a turn behind it; the incident was a session holding 20 job notifications as 20 queued submissions = 20 billed turns. See *Sending during a turn: QUEUED vs STEERED* for the full rule and the upstream sources. Unchanged by it: the **30s per-conversation floor** and the stash. They are what turn a burst into a batch — only the first distinct event of a burst is posted and the rest are stashed, and the stash is drained by the injection routes as **ONE rendered block** riding the conversation's next turn (`renderNotifStash`), never handed back to the delivery ladder entry by entry. A steer that is refused (turn ended mid-flight, review/compact turn) falls back to the queue/turn lane and the wrapper's result NAMES the refusal (`steerFailed`), which the server logs — a queued notification is visible, never a silent divergence.
 
+### Communication panel — Channels v2 (P0a, docs/design-communication-panel.zh.md is the authoritative design)
+
+**What P0a ships, and nothing more.** The channels CORE: the store, the
+capability model, the adapter interface with a fake adapter that really runs
+all three receive modes, the ingest engine's skeleton, the routes, the sidebar
+rail panel and an (almost) empty conversation window. **No Lark, no Gmail, no
+assignment, no filter, no wake, no outbox** — those are later phases and are
+deliberately ABSENT rather than stubbed, because a declared-but-inert slot is
+the failure this design argues against.
+
+- **The rail panel** (`channels`, six registrations in `src/lib/sidebar-rail.js`):
+  adapters as sections, their conversations as rows, an unread badge on the
+  rail icon computed from the digest the engine ALREADY broadcasts (one probe
+  at page load; unlike ports/hosts/jobs it never re-fetches).
+- **EVERY ROW CARRIES A FRESHNESS CHIP** — "live" / "within 30s" / "scanned 4m
+  ago". It is not decoration: it is the one number a user needs before handing
+  something to a lane, and it is rendered from the lane ACTUALLY carrying the
+  row (`laneState` / `scanState`), never from what the adapter declared. A
+  demoted or dead push lane draws the poll cadence it is really on. **It is in
+  the reader's own language**: the server sends the CLAIM (`{kind, state,
+  seconds}`) and the client composes the sentence, because the digest is
+  broadcast to every client at once while the language is per DEVICE — a
+  sentence composed server-side is English for everybody by construction, which
+  is how nine of these strings once shipped English-only to a zh/ja UI.
+  **And a row nothing will ever fetch says so (r3)**: an untracked row — the
+  default state of every discovered conversation, i.e. every row a fresh
+  instance shows — and any row of a disabled adapter read "not polling" /
+  "not scanning", never "within 5m" about a fetch that would never happen.
+- **The scan lane's chip and its log agree, in both directions (r3).** A scan
+  pass refreshes the machine facts (`scan.hostFacts`) unconditionally before
+  it ingests — they had no producer at all, so the resolver could only ever
+  answer "not scanning" while records were ingested anyway, the anchor
+  advanced and the badge lit. Now nothing is ingested through a scan lane the
+  resolver gives no source for (client absent, grant refused, facts stale,
+  platform undeclared), the source it chose is the one the adapter reads, and
+  a refused lane is a named answer on the chip, not a failed pass.
+- **TRACKING IS OPT-IN** (design §5 invariant 6). Discovery only ANNOUNCES
+  conversations; nothing is fetched for one until you track it. A privacy
+  decision, a cost decision, and what keeps this a panel rather than a mail
+  client — the row says "not tracked" rather than showing an empty list.
+- **A conversation opens as a WINDOW** (`registerWindowType({type:'channel'})`),
+  singleton per CONVERSATION, restored from its openSpec after a restart and
+  synced to every client. It renders PLAIN TEXT only, through textContent — a
+  vendor body is hostile input and syncs everywhere (rich rendering is a later
+  phase and its home is the published-pages sandbox-iframe pattern).
+- **THE SEND CONTROL EXISTS ONLY IF `offers()` SAYS SO**, and that answer
+  needs BOTH the adapter's static `caps` and this conversation's own
+  `convCaps`. On a read-only conversation there is NO composer element at all
+  and the bar says why. On a sendable one the composer appears and SAYS it is
+  not connected yet — sending goes through the approval outbox, which is a
+  later phase, and a button that silently does nothing is worse than none.
+- **Marking read is something the USER did.** The window marks a conversation
+  read when it OPENS and when you touch it — never as a side effect of a
+  repaint. (A repaint-driven POST and an unconditional broadcast form a loop:
+  the engine notifies, the window re-renders, the render POSTs, the POST
+  notifies. Measured at ~490 requests a second, for ever, with ONE window open
+  and nobody touching anything — and it rewrote the read mark ~500 times a
+  second, destroying the thing it was setting.) "Read" means "I have seen
+  everything this conversation holds", so the instant is the newest record's:
+  a vendor may stamp a record ahead of our clock, and with `now()` those stay
+  unread for ever. **And it really is the newest record's, for records
+  stamped in the past too (r3)** — every real adapter's — so a message
+  stamped before the mark but fetched after it (the routine poll-interval
+  shape) stays unread and badges instead of being silently marked read.
+- **Tracking a conversation reaches every client at once (r3)** — including
+  the one that clicked — even when the adapter's request budget cannot afford
+  the pass it kicks; the flag used to land on disk with no broadcast until the
+  next scheduled pass, up to five minutes later.
+- **A conversation window is titled with the conversation (r3).** Every
+  channel window used to read "Channel" in its title bar, taskbar entry and
+  tab label, so two open conversations were indistinguishable.
+- **Nothing is fetched for a CLOSED window.** Closing a conversation window
+  removes its broadcast listener by name, so it stops fetching, stops POSTing
+  and releases its DOM — the teardown used to be a silent no-op and a closed
+  window kept overwriting the user's unread mark.
+- **A conversation's whole history is reachable.** History pages on a
+  `(at, vendorId)` total order rather than on the timestamp alone: message
+  timestamps are NOT unique (a Lark burst shares a millisecond, Gmail's
+  `internalDate` is second-derived) and paging on `at` with a strict `<` left
+  one record per equal-timestamp group permanently unreachable — on disk, and
+  no way to scroll back to it. **And the reader seeks as far back as the
+  writer keeps (r3)**: it used to read only the newest 2 MiB, so once the
+  window's paging walked past that every page came back empty while retention
+  (5,000 records / 90 days) deliberately kept the rest — 375 of 3,000 ordinary
+  chat lines unreachable at 2.28 MiB. **A log left ending in half a line by an
+  interrupted append** (ENOSPC, a SIGKILL, a power loss) is sealed before the
+  next append, so the re-offered batch never glues its first record onto the
+  fragment; before r3 that record was unreadable on disk and then "already
+  held" by the dedup set — one message lost for ever, silently. **And the
+  mirror shape (r4)**: an interrupted append that stopped exactly on a record
+  boundary left a complete record on disk that the live dedup set still
+  called absent, so the same process re-offered the batch and the log served
+  that message TWICE for ever (a phantom in `unread` and in paging; a restart
+  was already correct). A failed append now drops the cached set and the
+  retry re-derives it from the log — the log is the only witness to what a
+  failed write landed. **And the rebuild refuses a log it cannot read (r5)**:
+  that rebuild used to read EMFILE/EIO/EACCES as an EMPTY log and cache the
+  empty set, so the post-restart first pass of a tracked conversation could
+  write a replayed page twice for ever; now only ENOENT means "no log yet",
+  any other read error fails the pass (the anchor stays, the retry re-reads)
+  and caches nothing.
+- **A failing adapter SAYS SO, and keeps saying it.** After three consecutive
+  failed passes the adapter row goes amber and names the vendor's own code
+  (`auth-expired`, `rate-limited`, …). That row is the honesty signal that
+  compensates for a static freshness chip, and it survives a healthy adapter
+  passing beside it — `adapters.json` has one in-memory owner and one
+  serialized write door, exactly like the index. An adapter's connection state
+  is likewise RESOLVED (`connected` / `expired` / `unknown` + a reason), never
+  asserted: P0a's fakes authenticate against nothing and the panel says so.
+- **A conversation nobody has discovered cannot be tracked or marked read** —
+  those routes answer 404 rather than minting an invisible row in the index.
+- **The fake adapter is registered always and instantiated never**, unless
+  `VIBESPACE_CHANNELS_FAKE=1`. Registering it keeps the contract suite driving
+  real code; creating records for it would put invented conversations in a
+  user's panel. It talks to NOTHING: its traffic is generated deterministically
+  from a fixed seed, so the same conversations come back after a restart and on
+  a second client. Three kinds exercise both capability axes — `fake-poll`
+  (sendable), `fake-push` (a real live lane, and READ-ONLY, which is how the
+  no-send-control rule is observable at all) and `fake-scan` (both sources:
+  `store` with the client's own ids, `ui` with DECLARED synthetic keys).
+- **`contributes.channelAdapters`** is now a RESERVED plugin contribution key:
+  a plugin declaring one gets the honest "reserved for a later phase — ignored"
+  warning instead of silence (third-party adapters are the right eventual home;
+  v1 keeps them in the tree because the receive path must run beside the store
+  and the spend guard).
+
 ### UI
 - 6 built-in color themes: Dark, Light, Dracula, Nord, Solarized, Monokai — all contrast-audited (terminal ANSI colors + UI chrome `--text-dim`/`--text-secondary`)
 - Theme editor: floating panel to create custom themes — ~50 CSS variables + 16 ANSI colors, live preview, hover-to-highlight CSS var usage, save/load/delete, multi-client sync via WebSocket. ThemeManager: `registerCustomTheme`, `unregisterCustomTheme`, `setLivePreview`, `extractThemeValues`, `applyPendingTheme`. CSS value sanitization (strips `{}`). Constructor defers custom theme fallback until async load.

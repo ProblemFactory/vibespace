@@ -59,7 +59,17 @@ const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 const CLIENT_TIERS = ['none', 'iframe', 'module'];
 const CLIENT_TIER_ALIASES = { trusted: 'module' };
 const SETTING_TYPES = ['boolean', 'string', 'number', 'select'];
-const RESERVED_CONTRIBUTIONS = ['keybindings', 'panels', 'viewers', 'commands', 'menus', 'statusChips', 'backends'];
+// Keys a LATER phase will honour. Only keys IN THIS LIST produce the
+// "reserved for a later phase — ignored" warning; anything else is silently
+// discarded when `m.contributes` is rebuilt to a fixed shape, so a plugin
+// author following a design doc would get NO SIGNAL AT ALL.
+// `channelAdapters` (docs/design-communication-panel.zh.md §15) is the newest:
+// third-party channel adapters are the right EVENTUAL home, but the receive
+// path has to run beside the store and the spend guard, so v1 keeps adapters
+// in the tree. The word costs one array entry and buys an honest warning —
+// the same law this project applies to `SPEND_REASONS`: a declared-but-inert
+// slot is worse than an absent one.
+const RESERVED_CONTRIBUTIONS = ['keybindings', 'panels', 'viewers', 'commands', 'menus', 'statusChips', 'backends', 'channelAdapters'];
 const MAX_LIST = 32;
 
 function compareVersions(a, b) {

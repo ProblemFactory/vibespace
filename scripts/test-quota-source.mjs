@@ -171,12 +171,30 @@ What's contributing to your limits usage?`;
   // thread's own was replaced when the owner resumed it. EXCEEDED, not REACHED,
   // so codex auto-resume never armed once.
   {
-    const WIRE = "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 13th, 2026 8:36 PM.";
+    // THE INCIDENT'S SENTENCE, WITH ITS DISTANCE INSTEAD OF ITS DATE — the same
+    // derivation test-auto-resume ⑫ carries, and for the same reason. The
+    // record said "try again at Sep 13th, 2026 8:36 PM", which was SIX DAYS out
+    // when it was written; pinned as a literal it is a TIME BOMB, and it went
+    // off on 2026-09-13 (2 asserts red in the MANDATORY pre-push tier with
+    // nothing about the product changed — measured on this suite's own base
+    // commit, whose every driven module is byte-identical). The prose shape,
+    // including the ordinal suffix `parseCodexLimitReset` has to strip, is
+    // reproduced exactly; only the instant moves with the clock, and the
+    // expectation is built in LOCAL time because the sentence states no zone
+    // and the parser resolves it in the server's (2.369.80).
+    const ORD = (d) => d + (d % 10 === 1 && d !== 11 ? 'st' : d % 10 === 2 && d !== 12 ? 'nd' : d % 10 === 3 && d !== 13 ? 'rd' : 'th');
+    const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const AT = (() => { const d = new Date(Date.now() + 6 * 86400e3); d.setHours(20, 36, 0, 0); return d; })();
+    const WHEN = MON3[AT.getMonth()] + ' ' + ORD(AT.getDate()) + ', ' + AT.getFullYear()
+      + ' ' + (AT.getHours() % 12 || 12) + ':' + String(AT.getMinutes()).padStart(2, '0') + ' ' + (AT.getHours() < 12 ? 'AM' : 'PM');
+    const WIRE = "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at " + WHEN + '.';
+    ok('codex: the fixture reproduces the incident\'s prose SHAPE, ordinal suffix and all (a control that no longer looks like the wire proves nothing)',
+      /try again at [A-Z][a-z]{2} \d{1,2}(st|nd|rd|th), \d{4} \d{1,2}:\d{2} (AM|PM)\.$/.test(WIRE), WIRE.slice(-46));
     for (const info of ['usageLimitExceeded', 'usage_limit_exceeded']) {
       const v = cx.signalFromStream({ type: 'event_msg', payload: { type: 'task_failed', error: WIRE, codexErrorInfo: info, resetsAt: null, rateLimits: null } });
       ok(`codex: ${info} — the spelling the wire really sends — is exhaustion`, v?.kind === 'exhausted', JSON.stringify(v).slice(0, 120));
       ok(`codex: …and its reset comes out of the CLI's own sentence, since the record states none (${info})`,
-        Math.abs(v.resetsAtSec * 1000 - new Date(2026, 8, 13, 20, 36, 23).getTime()) < 61000 /* local zone: the sentence states none and the parser uses the server's (2.369.80) */, v && new Date(v.resetsAtSec * 1000).toISOString());
+        Math.abs(v.resetsAtSec * 1000 - AT.getTime()) < 61000, v && new Date(v.resetsAtSec * 1000).toISOString() + ' vs ' + AT.toISOString());
     }
     // NOT exhaustion, each for a reason a continue would not fix — a closed set
     // that quietly grew would spend turns into walls that do not lift.

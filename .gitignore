@@ -113,3 +113,23 @@ src/.session-store.spawnfix-*.js
 # allowed to become tree state. The pattern is the FAMILY (no slash ⇒ any
 # directory) because the copies land in two of them.
 vs-fable-mut-*.js
+
+# scripts/test-channel-store.mjs writes a PRE-FIX COPY of src/channel-store.js
+# (`.channel-store.prefix-<pid>.js`) BESIDE the real one as its NEGATIVE
+# CONTROL — it must be a SIBLING or that module's relative requires do not
+# resolve. It is unlinked on exit and swept by PID LIVENESS at start (a
+# concurrent run of the same suite in this worktree must keep its own copy),
+# but a SIGKILL can strand one — and a dirty tree is what the release gate
+# REFUSES on, so it can never be allowed to become tree state.
+src/.channel-store.prefix-*.js
+# and scripts/test-channels-engine.mjs writes PATCHED COPIES of BOTH
+# src/channel-store.js and src/server/channels-engine.js beside the real ones,
+# for the same reason and with the same hazard. Each control gets its OWN name
+# (node caches modules by resolved path, so two controls sharing a filename
+# silently drive the first patch twice).
+src/server/.channels-engine.prefix-*.js
+# …and (channels r3) patched copies of the adapter REGISTRY and the FAKE
+# adapter beside them, because the pre-fix scan-lane control needs all three
+# pieces of the r2 shape wired to each other.
+src/channels/.index.prefix-*.js
+src/channels/.fake.prefix-*.js

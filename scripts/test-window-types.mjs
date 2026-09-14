@@ -39,11 +39,15 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 // ── THE PINNED CORE SETS (from the pre-Ph1 source: tab-group.js TYPE_ICONS
 //    keys + every `type:` literal handed to wm.createWindow; the 17 `case`
 //    strings of session-lifecycle's replayOpenSpec switch) ──
-const CORE_TYPES = ['browser', 'chat', 'desktop', 'editor', 'files', 'hex-viewer', 'job-interact', 'jobs',
+// The 15 pre-Ph1 kinds, plus every kind registered since — each named with
+// the feature that owns it, so an UNREGISTERED new kind (which `replayOpenSpec`
+// would drop silently on every other client) is still what this pin catches.
+//   channel — ONE external conversation (docs/design-communication-panel.zh.md §10.1)
+const CORE_TYPES = ['browser', 'channel', 'chat', 'desktop', 'editor', 'files', 'hex-viewer', 'job-interact', 'jobs',
   'settings', 'stage-placeholder', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openDesktop',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder'];
 // kinds whose opener focuses an existing window of the kind instead of opening a second
@@ -177,10 +181,10 @@ for (const [file, s] of Object.entries(src)) {
 const typeRegs = regs.filter((r) => r.fn === 'registerWindowType');
 const regTypes = typeRegs.map((r) => r.type);
 const regActions = regs.flatMap((r) => r.actions);
-ok(same(regTypes, CORE_TYPES), `core registers exactly the 15 pre-Ph1 window kinds (${regTypes.length}: ${regTypes.sort().join(' ')})`,
+ok(same(regTypes, CORE_TYPES), `core registers exactly the declared window kinds (${regTypes.length}: ${regTypes.sort().join(' ')})`,
   'missing: ' + CORE_TYPES.filter((t) => !regTypes.includes(t)).join(',') + ' extra: ' + regTypes.filter((t) => !CORE_TYPES.includes(t)).join(','));
 ok(new Set(regTypes).size === regTypes.length, 'each kind is registered exactly once');
-ok(same(regActions, CORE_ACTIONS), `core registers exactly the 17 former switch cases (${regActions.length})`,
+ok(same(regActions, CORE_ACTIONS), `core registers exactly the declared openSpec actions (${regActions.length})`,
   'missing: ' + CORE_ACTIONS.filter((a) => !regActions.includes(a)).join(',') + ' extra: ' + regActions.filter((a) => !CORE_ACTIONS.includes(a)).join(','));
 ok(new Set(regActions).size === regActions.length, 'each action is registered exactly once');
 ok(regs.every((r) => r.type && regTypes.includes(r.type)), 'every action registration names a registered kind (registerOpenAction type ∈ kinds)');
@@ -238,6 +242,28 @@ ok(/track\('event', 'openspec-unknown', what\)/.test(wtSrc) && /console\.warn\(/
 const wtImports = [...wtSrc.matchAll(/^import\s[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
 ok(same(wtImports, ['./telemetry-client.js']), `window-types.js imports only telemetry-client (DOM-free at import) — got ${wtImports.join(',')}`);
 ok(/'test-window-types'/.test(read('scripts/ci.mjs')), 'ci.mjs SUITES carries this suite');
+
+// ── THE MANAGER OWNS TITLES (channels r3) ──
+// `winInfo` is a plain literal (window.js) with NO `setTitle` member, so
+// `winInfo.setTitle?.(…)` is a PERMANENT no-op — every channel window read
+// "Channel" and two open conversations were indistinguishable; jobs-panel had
+// the identical call. The silent-optional-call shape `off?.()` on `onGlobal`'s
+// undefined return was the r2 instance. A census, comments blanked, so the
+// idiom cannot come back under a new window type.
+{
+  const w = src['window.js'];
+  const literal = /const winInfo = \{[\s\S]*?_listenerCtl: new AbortController\(\) \};/.exec(w)?.[0] || '';
+  ok(literal && !/\bsetTitle\b/.test(literal) && !/winInfo\.setTitle\s*=/.test(w) && /^\s*setTitle\(id, t\) \{/m.test(w),
+    'window.js: the winInfo literal has no setTitle member and none is ever assigned — titles belong to WindowManager.setTitle(id, t)');
+  const NOOP = /\bwinInfo\.setTitle\s*\??\.?\(/;
+  const blank = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const strays = Object.entries(src).filter(([, s]) => NOOP.test(blank(s))).map(([f]) => f);
+  ok(!strays.length, 'no module in src/lib calls the no-op `winInfo.setTitle?.(…)` — a title set that way is never drawn', strays.join(', '));
+  ok(NOOP.test("    winInfo.setTitle?.(c.title || convId);") && NOOP.test("winInfo.setTitle(x)"), 'POSITIVE CONTROL: the census matches the retired spelling (both forms)');
+  ok(!NOOP.test("    app.wm.setTitle(winInfo.id, c.title || convId);"), 'NEGATIVE CONTROL: …and not the manager call that replaced it');
+  ok(/app\.wm\.setTitle\(winInfo\.id, /.test(src['channel-window.js']) && /app\.wm\.setTitle\(winInfo\.id, /.test(src['jobs-panel.js']),
+    'channel-window.js and jobs-panel.js set their titles through the manager');
+}
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed${fail ? `, ${fail} failed` : ''})`);
 // telemetry-client armed a 15s flush timer on the unknown-action event — exit explicitly
