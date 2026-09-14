@@ -19,6 +19,11 @@ const SETTINGS_SCHEMA = {
     description: t('Show the embedded-browser button in the toolbar'),
     category: t('Toolbar & Layout'), liveApply: true,
   },
+  'toolbar.showDesktopAppsButton': {
+    type: 'boolean', default: true, label: t('Show Apps button'),
+    description: t('Show the desktop-application launcher button in the toolbar (hidden anyway when this machine has no display backend)'),
+    category: t('Toolbar & Layout'), liveApply: true,
+  },
   'toolbar.showTerminalButton': {
     type: 'boolean', default: true, label: t('Show Terminal button'),
     description: t('Show the plain-shell terminal button in the toolbar'),
@@ -107,6 +112,11 @@ const SETTINGS_SCHEMA = {
   'desktop.dynamicEnabled': {
     type: 'boolean', default: false, label: t('Dynamic desktop (Stage)'),
     description: t('A special desktop at the left of the strip: sessions materialize into a shared slot together with their own workspace of helper windows. See docs/design-dynamic-desktop.md'),
+    category: t('Window'), liveApply: true,
+  },
+  'desktop.idleTimeoutMin': {
+    type: 'number', default: 30, min: 0, max: 1440, step: 5, label: t('Desktop app idle timeout (minutes)'),
+    description: t('A desktop application window with no input for this long is stopped; 0 = never. "Keep running" in a window exempts that app.'),
     category: t('Window'), liveApply: true,
   },
   'desktop.stageKeepAlive': {

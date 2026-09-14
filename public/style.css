@@ -2069,6 +2069,35 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-status { flex: 1; font-size: 11px; color: var(--text-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* ── Desktop-app windows + the launch dialog (docs/design-desktop-apps §2, P8-1) ── */
+.desktop-app-chip { font-size: 10px; color: var(--text-secondary); padding: 1px 6px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.desktop-app-chip-backend { color: var(--accent); }
+.desktop-app-stop { color: var(--red, #e55); }
+.desktop-launch .dialog-body { min-width: min(760px, 92vw); max-height: 80vh; overflow: auto; }
+.desktop-launch-avail { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+.desktop-launch-avail-bad { color: var(--red, #e55); }
+.desktop-launch-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.desktop-launch-col h4 { margin: 8px 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+.desktop-launch-app { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
+  padding: 6px 8px; margin-bottom: 4px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: inherit; cursor: pointer; font: inherit; }
+.desktop-launch-app:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
+.desktop-launch-app:disabled { opacity: .55; cursor: not-allowed; }
+.desktop-launch-app-label { font-size: 12px; }
+.desktop-launch-app-sub { font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; max-width: 100%; white-space: nowrap; }
+.desktop-launch-run-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; }
+.desktop-launch-run-row .desktop-app-row-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-app-row-state { font-size: 10px; color: var(--text-secondary); }
+.desktop-launch-empty { font-size: 11px; color: var(--text-secondary); padding: 4px 0; }
+.desktop-launch-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-field input { width: 100%; box-sizing: border-box; }
+.desktop-launch-actions { margin: 4px 0 10px; }
+@media (max-width: 768px) {
+  .desktop-launch-cols { grid-template-columns: 1fr; }
+  .desktop-launch .dialog-body { min-width: 0; }
+}
+
 /* ── First-run onboarding wizard (upgrades #welcome) ── */
 #welcome.onboarding .welcome-content { max-width: 520px; }
 .ob-sub { color: var(--text-secondary); margin: -6px 0 18px; font-size: 13px; }

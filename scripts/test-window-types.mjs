@@ -43,9 +43,10 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 // the feature that owns it, so an UNREGISTERED new kind (which `replayOpenSpec`
 // would drop silently on every other client) is still what this pin catches.
 //   channel — ONE external conversation (docs/design-communication-panel.zh.md §10.1)
-const CORE_TYPES = ['browser', 'channel', 'chat', 'desktop', 'editor', 'files', 'hex-viewer', 'job-interact', 'jobs',
+//   desktop-app — one local desktop application on its own display (docs/design-desktop-apps §2, 2026-09-13)
+const CORE_TYPES = ['browser', 'channel', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'job-interact', 'jobs',
   'settings', 'stage-placeholder', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
-const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openDesktop',
+const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
   'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
@@ -194,7 +195,7 @@ ok(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS)
 // ownership: each kind registered in the module that opens it
 const owner = Object.fromEntries(typeRegs.map((r) => [r.type, r.file]));
 const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecycle.js', files: 'app.js', editor: 'app.js',
-  viewer: 'file-viewer.js', 'hex-viewer': 'file-viewer.js', browser: 'browser-window.js', desktop: 'desktop-window.js',
+  viewer: 'file-viewer.js', 'hex-viewer': 'file-viewer.js', browser: 'browser-window.js', desktop: 'desktop-window.js', 'desktop-app': 'desktop-app-window.js',
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
   settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js' };
 ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',

@@ -20,9 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # In-container desktop (noVNC through VibeSpace's own auth — src/vnc.js):
 # TigerVNC bound to localhost + XFCE + Chromium. Started LAZILY by the server
 # on the first desktop window; nothing runs for users who never open one.
+# xpra (bookworm 3.1.3) is the FIRST rung of the desktop-app ladder
+# (docs/design-desktop-apps §3): P8-1 only PROBES it — the package is present
+# so the ladder can see it, nothing is enabled; the rung is wired in P8-2.
+# xterm is the default registry's first row (presence-checked, never assumed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tigervnc-standalone-server dbus-x11 xfce4-session xfwm4 xfce4-panel \
-      xfdesktop4 xfce4-terminal thunar chromium \
+      xfdesktop4 xfce4-terminal thunar chromium xterm \
+      xpra \
       fonts-noto-cjk fonts-noto-color-emoji xdg-utils \
       adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*

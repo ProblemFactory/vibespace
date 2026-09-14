@@ -33,6 +33,8 @@ import { CommandMode } from './command-mode.js';
 import { updateTaskbar as updateTaskbarFn } from './taskbar.js';
 import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
+import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
+import { installDesktopAppLauncher } from './desktop-app-launcher.js';
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
@@ -483,6 +485,7 @@ class App {
     // session (real report — userW onboarded mid-update, "desktop功能直接
     // 被禁用"; F5 was the only cure).
     this._probeVncAvailability();
+    installDesktopAppLauncher(this); // ⚙ row + toolbar Apps button + the launch dialog; probes /api/desktop/apps the same way
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
@@ -525,6 +528,7 @@ class App {
       show('btn-terminal', s.get('toolbar.showTerminalButton'));
       show('btn-browser', s.get('toolbar.showBrowserButton'));
       show('btn-desktop', s.get('toolbar.showDesktopButton') && this._vncAvailable);
+      show('btn-desktop-apps', s.get('toolbar.showDesktopAppsButton') && this._desktopAppsAvailable);
       show('btn-file-explorer', s.get('toolbar.showFileExplorerButton'));
       const vis = s.get('taskbar.visibility') || 'show';
       show('taskbar', vis !== 'hidden');
@@ -561,7 +565,7 @@ class App {
     this._applyChromeSettings = applyChromeSettings;
     applyChromeSettings();
     for (const k of ['toolbar.showLayoutPresets', 'toolbar.showPresetsButton', 'toolbar.showTerminalButton',
-                     'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton',
+                     'toolbar.showBrowserButton', 'toolbar.showFileExplorerButton', 'toolbar.showDesktopAppsButton',
                      'taskbar.visibility', 'taskbar.showDesktopPreviews', 'taskbar.showUserTodos', 'taskbar.showUsage', 'taskbar.showWindowCount',
                      'taskbar.position', 'sidebar.position', 'chrome.zoneAlign']) {
       this.settings.on(k, applyChromeSettings);
@@ -2054,6 +2058,7 @@ class App {
 
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
   openDesktop(opts) { return openDesktopFn(this, opts); }
+  openDesktopApp(id, opts) { return openDesktopAppFn(this, id, opts); }
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
   openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }

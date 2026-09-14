@@ -46,8 +46,18 @@ class VncManager {
   constructor({ dataDir }) {
     this._pidFile = path.join(dataDir, 'vnc.pid');
     this.port = VNC_PORT;
+    this.display = VNC_DISPLAY;
     this._starting = null; // in-flight ensureRunning promise (dedupe)
     this._xvncBin = null;
+    this._running = false;  // last status() answer — the desktop-app keeper's `desktop-singleton` rung reads it
+  }
+
+  /** The shared desktop as the desktop-app keeper sees it (the
+   *  `desktop-singleton` rung of src/desktop-apps.js's ladder): running = the
+   *  last status() answer, refresh = a fresh probe. No auth cookie — our Xvnc
+   *  runs without one (see _startSession). */
+  singletonFacts() {
+    return { running: this._running, display: this.display, port: this.port, authFile: null, refresh: () => this.status() };
   }
 
   _findXvnc() {
@@ -58,6 +68,7 @@ class VncManager {
 
   async status() {
     const running = await portListening(this.port);
+    this._running = running;
     return { available: running || !!this._findXvnc(), running, port: this.port };
   }
 

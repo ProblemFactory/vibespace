@@ -95,7 +95,11 @@ const PURE = new Set(['src/plugin-manifest.js', 'src/account-pool-auto.js', 'src
   //     only narrow; both the panel and the ingest engine ask THESE, never
   //     `caps.receive`, which is why they must be importable from the browser
   //     bundle and from a node suite with no server at all.
-  'src/channel-record.js', 'src/channel-caps.js']);
+  'src/channel-record.js', 'src/channel-caps.js',
+  // DESKTOP APPS (docs/design-desktop-apps §2, 2026-09-13): the ONE constants home every
+  // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
+  // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
+  'src/keeper-limits.js', 'src/desktop-apps.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
@@ -133,7 +137,11 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // adapters, ACLs, policy or money — and it deliberately exposes no
   // "write the whole index back" call, because the serialized owner in
   // src/server/channels-engine.js is the index's only writer (§5.1).
-  'src/channel-store.js']);
+  'src/channel-store.js',
+  // desktop-app machine FACTS (design-desktop-apps §2 row 2): binaries on PATH, -displayfd X
+  // allocation, the Xauthority writer, the RFB banner read-probe, window enumeration (P9 reuses
+  // it), the xpra version probe; hostId is a parameter — node builtins + cli-identity only
+  'src/desktop-display.js']);
 const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
 const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
 const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'

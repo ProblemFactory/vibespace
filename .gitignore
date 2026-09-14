@@ -77,6 +77,12 @@ vs-qm*-mut-*.js
 # relative requires do not resolve). Unlinked on exit and swept at start, but a
 # SIGKILL can strand one — and a dirty tree is what the release gate REFUSES on.
 src/server/vs-aredge-mut-*.js
+# §8 of scripts/test-desktop-app-keeper.mjs writes PATCHED COPIES of
+# src/server/desktop-app-keeper.js beside the real one (they must be SIBLINGS
+# or their relative requires do not resolve) as the negative controls for the
+# r2 findings. Unlinked on exit and swept by PID at start, but a SIGKILL can
+# strand one — and a dirty tree is what the release gate REFUSES on.
+src/server/vs-dak-mut-*.js
 
 # §5c of scripts/test-spend-paths.mjs writes PATCHED COPIES of
 # src/server/conversation-deliver.js beside the real one (SIBLINGS, or their

@@ -1796,46 +1796,28 @@ function broadcastActiveSessions() {
   });
 }
 
-// ── In-container desktop (noVNC through our own cookie auth — src/vnc.js) ──
+// ── Desktop apps + the in-container desktop: ONE keeper, ONE ws bridge, one route family
+// (docs/design-desktop-apps.zh.md §2 — src/server/desktop-app-keeper.js · desktop-stream.js ·
+// src/routes/desktop-apps.js; the singleton desktop src/vnc.js is stream id DESKTOP_SINGLETON_ID
+// on the same bridge, so /api/vnc and /api/desktop/<id>/stream are one relay, not twins) ──
 const { VncManager } = require('./src/vnc');
+const { DESKTOP_SINGLETON_ID } = require('./src/desktop-apps');
 const vnc = new VncManager({ dataDir: path.join(__dirname, 'data') });
-app.get('/api/vnc/status', async (req, res) => {
-  try { res.json(await vnc.status()); } catch (e) { res.status(500).json({ error: e.message }); }
+const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
+  dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), broadcast: (m) => bcastAll(m),
+  serverSetting: (k) => serverSetting(k), getTelemetry: () => { try { return telemetry; } catch { return null; } }, singleton: () => vnc.singletonFacts(),
 });
-app.post('/api/vnc/start', async (req, res) => {
-  try { res.json(await vnc.ensureRunning()); } catch (e) { res.status(500).json({ error: e.message }); }
+const desktopStream = require('./src/server/desktop-stream.js').create({
+  auth, onInput: (id) => desktopKeeper.noteInput(id),
+  resolveTarget: (id) => (id === DESKTOP_SINGLETON_ID ? { kind: 'rfb', port: vnc.port } : desktopKeeper.streamTarget(id)),
 });
-// RFB over WebSocket (websockify semantics: binary frames ↔ raw TCP). The
-// bridge is the ONLY route to the localhost-bound VNC server, and it sits
-// behind the same cookie auth as everything else — single login by design.
-const vncWss = new WebSocketServer({ noServer: true });
+{ const { router, setup } = require('./src/routes/desktop-apps'); setup({ keeper: desktopKeeper, vnc }); app.use(router); }
+desktopKeeper.adoptAll().then(() => desktopKeeper.start()).catch((e) => console.warn('[desktop] boot adoption failed:', e.message));
 const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B dial-in (2.144.0)
-function bridgeVncSocket(ws) {
-  const net = require('net');
-  const sock = net.connect(vnc.port, '127.0.0.1');
-  sock.on('data', (d) => {
-    if (ws.readyState !== 1) return;
-    ws.send(d);
-    // Backpressure: a fast framebuffer + slow client would balloon the WS
-    // buffer — pause the TCP side until the browser drains.
-    if (ws.bufferedAmount > 8 * 1024 * 1024) {
-      sock.pause();
-      const t = setInterval(() => {
-        if (ws.readyState !== 1) { clearInterval(t); return; }
-        if (ws.bufferedAmount < 1024 * 1024) { clearInterval(t); sock.resume(); }
-      }, 50);
-    }
-  });
-  ws.on('message', (m) => { try { sock.write(m); } catch {} });
-  ws.on('close', () => sock.destroy());
-  ws.on('error', () => sock.destroy());
-  sock.on('close', () => { try { ws.close(); } catch {} });
-  sock.on('error', () => { try { ws.close(); } catch {} });
-}
 
 // ── Start Server ──
 // THE single WebSocket upgrade dispatcher: /ws (main app), /proxy/ (unblocker
-// site WebSockets), /api/vnc (desktop bridge). Everything else is destroyed.
+// site WebSockets), /api/vnc + /api/desktop/<id>/stream (the desktop bridge). Everything else is destroyed.
 server.on('upgrade', (req, socket, head) => {
   const pathname = (req.url || '').split('?')[0];
   const deny = () => { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); };
@@ -1845,9 +1827,9 @@ server.on('upgrade', (req, socket, head) => {
   } else if (pathname.startsWith('/proxy/')) {
     if (!auth.requestAuthed(req)) return deny();
     unblocker.onUpgrade(req, socket, head);
-  } else if (pathname === '/api/vnc') {
-    if (!auth.requestAuthed(req)) return deny();
-    vncWss.handleUpgrade(req, socket, head, (ws) => bridgeVncSocket(ws));
+  } else if (desktopStream.upgradeId(pathname)) {
+    // /api/vnc (the singleton desktop) + /api/desktop/<id>/stream: ONE bridge, cookie auth checked inside
+    desktopStream.handleUpgrade(req, socket, head, desktopStream.upgradeId(pathname));
   } else if (pathname.startsWith('/svc/')) {
     // path-mounted service WebSockets — auth is PER MOUNT inside path-mounts
     // (2.359.0 public mounts; private ones 401 there)
@@ -2075,6 +2057,7 @@ function shutdown() {
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
   try { channelsWiring.shutdown(); } catch {} // channel index + audit flush (atomic persistence law)
   try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release
+  try { desktopKeeper.shutdown(); } catch {} // timers only — desktop apps SURVIVE a restart by design (adopted at boot)
   process.exit(0);
 }
 process.on('SIGINT', () => {

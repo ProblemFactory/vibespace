@@ -197,6 +197,39 @@ function procUid(pid, opts) {
   return ps && Number.isFinite(ps.uid) ? ps.uid : null;
 }
 
+/** ONE /proc sample of a pid — `{ starttime, cpuTicks, reapedTicks, rssBytes }`
+ *  — or null when procfs cannot say (no /proc, hidepid, vanished). `starttime`
+ *  is stat field 22 (clock ticks since boot: pid+starttime is the identity
+ *  every keeper adopts by, never a bare pid — pids are recycled), `cpuTicks` =
+ *  utime+stime (fields 14+15) = this process's OWN work, `reapedTicks` =
+ *  cutime+cstime (fields 16+17) = the work of every child it has WAITED for
+ *  (2026-09-14, the desktop keeper's r3: a burner whose work runs in
+ *  short-lived children carried its ticks away with each child, so a set
+ *  sampled over its LIVE pids read 0-1 % while the box ran at 110 %; the
+ *  kernel had already folded that time into the parent's cutime, which
+ *  nobody read). `rssBytes` from status VmRSS. Fields are counted from the
+ *  LAST ')' because comm may hold spaces and parens. The runaway guards of
+ *  opencode-serve and the desktop-app keeper both read this ONE function
+ *  (2026-09-13) — a VALUE read, never an existence probe; which ticks a guard
+ *  SUMS is the consumer's rule (desktop-display.sessionSample: a SET counts
+ *  each unit of work exactly once as own+reaped; opencode-serve samples ONE
+ *  pid and keeps `cpuTicks` — a lone parent's cutime arrives as a lifetime
+ *  lump the moment a long-lived child exits, which is a spike, not a rate). */
+function procSample(pid, { procRoot = PROC_ROOT } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const stat = fs.readFileSync(`${procRoot}/${pid}/stat`, 'utf8');
+    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const cpuTicks = Number(f[11]) + Number(f[12]);
+    const reapedTicks = Number(f[13]) + Number(f[14]);
+    const starttime = Number(f[19]);
+    let rssBytes = 0;
+    try { rssBytes = Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`${procRoot}/${pid}/status`, 'utf8'))?.[1] || 0) * 1024; } catch { rssBytes = 0; }
+    if (!Number.isFinite(cpuTicks) || !Number.isFinite(starttime)) return null;
+    return { starttime, cpuTicks, reapedTicks: Number.isFinite(reapedTicks) ? reapedTicks : 0, rssBytes };
+  } catch { return null; }
+}
+
 /** ── THE PROCESS TREE, READ WITHOUT FORKING (2026-09-09) ──────────────────
  *
  *  "Who is pid N's parent?" and "which pids did N fork?" are the last two
@@ -342,6 +375,64 @@ function readChildPids(pid, opts = {}) {
   return [...(parentIndex({ ...opts, procRoot }).byParent.get(n) || [])];
 }
 
+/** ── THE SESSION TABLE (2026-09-14, the desktop-app keeper's r2) ────────────
+ *
+ *  A process the keeper spawns DETACHED is a session leader (setsid ⇒ sid ==
+ *  pid), and everything it forks inherits that sid unless it setsid()s
+ *  itself. "Which pids are in session S" is therefore the census a keeper
+ *  needs to (a) stop an application TOGETHER WITH the children it forked (a
+ *  `sh -c 'x & sleep'` wrapper's `sleep`, a helper), (b) sample the CPU/RSS
+ *  the whole application burns (a launcher whose work is in a child), and
+ *  (c) verify that a listening socket belongs to the picture server it
+ *  recorded. Read from the SAME /proc walk shape as `parentIndex` — stat
+ *  field 6, counted from the LAST ')' — memoised for PROC_TABLE_TTL_MS, and
+ *  a VALUE read: no /proc ⇒ an EMPTY table = no evidence, never "nothing is
+ *  in that session". There is deliberately NO `ps` rung: X11 desktop apps
+ *  are a /proc-machine feature in v1 (the keeper refuses non-local hosts),
+ *  and a rung no test can reach is prose. */
+function sidFromStat(procRoot, pid) {
+  try {
+    const stat = fs.readFileSync(`${procRoot}/${pid}/stat`, 'utf8');
+    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const v = Number(rest[3]);
+    return Number.isInteger(v) && v >= 0 ? v : null;
+  } catch { return null; }
+}
+/** The session id of one pid (stat field 6), or null (no /proc, no such pid). */
+function readSid(pid, opts = {}) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return sidFromStat(opts.procRoot || PROC_ROOT, n);
+}
+let _sessionIndex = null; // { at, root, bySid: Map<sid, pid[]> }
+function sessionIndex({ procRoot = PROC_ROOT, now = Date.now, fresh = false } = {}) {
+  const t = now();
+  if (!fresh && _sessionIndex && _sessionIndex.root === procRoot && t - _sessionIndex.at < PROC_TABLE_TTL_MS) return _sessionIndex;
+  const bySid = new Map();
+  if (hasProcfs(procRoot, now)) {
+    let ents = [];
+    try { ents = fs.readdirSync(procRoot); } catch { ents = []; }
+    for (const name of ents) {
+      if (!/^\d+$/.test(name)) continue;
+      const sid = sidFromStat(procRoot, name);
+      if (sid == null) continue;
+      if (!bySid.has(sid)) bySid.set(sid, []);
+      bySid.get(sid).push(Number(name));
+    }
+  }
+  _sessionIndex = { at: t, root: procRoot, bySid };
+  return _sessionIndex;
+}
+/** Every live pid whose session id is `sid` (the leader included when it is
+ *  alive). `[]` = no evidence (no /proc) or an empty session. `fresh:true`
+ *  rebuilds the table NOW — a caller judging a pid it spawned since the last
+ *  walk (a listener's owner, a stop's targets) may not read a memo. */
+function sessionMembers(sid, opts = {}) {
+  const n = Number(sid);
+  if (!Number.isInteger(n) || n <= 0) return [];
+  return [...(sessionIndex(opts).bySid.get(n) || [])];
+}
+
 /** One reused buffer for the cmdline scan below — a fresh Buffer per pid over
  *  3,000 pids is the allocation this reader exists to avoid. 64 KiB covers
  *  every real command line; a read that FILLS it re-reads that one pid whole,
@@ -426,7 +517,7 @@ async function pidsMatchingCmdline(needle, opts = {}) {
 
 /** Drop the memoised tables — for a test that wants to measure "one exec per
  *  sweep" twice in a row, and for nothing else in production. */
-function resetProcTables() { _parentIndex = null; _procfsSeen.clear(); }
+function resetProcTables() { _parentIndex = null; _sessionIndex = null; _procfsSeen.clear(); }
 
 /** `readlink /proc/<pid>/exe` with the kernel's ` (deleted)` marker stripped.
  *  '' when there is no /proc, no permission, or no such process. */
@@ -639,7 +730,7 @@ function pidAliveShellFn() {
 }
 
 module.exports = {
-  isCliProcess, cliIdentityShellFns, pidAliveShellFn, procArgv, procExe, readPsIdentity, procCmdline, procUid,
-  hasProcfs, readPpid, readChildPids, pidsMatchingCmdline, resetProcTables,
+  isCliProcess, cliIdentityShellFns, pidAliveShellFn, procArgv, procExe, readPsIdentity, procCmdline, procUid, procSample,
+  hasProcfs, readPpid, readChildPids, readSid, sessionIndex, sessionMembers, pidsMatchingCmdline, resetProcTables,
   PS_IDENTITY_TTL_MS, PROC_TABLE_TTL_MS, PROCFS_RECHECK_MS, INTERPRETERS, MAX_INTERP_FLAGS,
 };

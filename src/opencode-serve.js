@@ -154,11 +154,10 @@ const FORK_PATH = '/session/{sessionID}/fork';
 const NAME_MAX_BYTES = 1 << 20;    // the naming read is the WHOLE v1 message list — refuse a conversation bigger than this (it has a real title anyway)
 const CONFIG_MAX_BYTES = 512 * 1024;  // the v1 /config read (permission rules) — a whole response into this process always carries a cap (2.369.50)
 // ── the RUNAWAY guard (2.369.50, the 2.369.42 incident) ──
-const GUARD_SAMPLE_MS = 60000;                     // /proc sample cadence
-const GUARD_CPU_PCT = 150;                         // sustained CPU% (100% = one core) that counts as hot
-const GUARD_CPU_SUSTAIN_MS = 5 * 60 * 1000;        // …for this long ⇒ runaway
-const GUARD_RSS_BYTES = 2 * 1024 * 1024 * 1024;    // RSS above this ⇒ runaway at once
-const RUNAWAY_COOLDOWN_MS = 60 * 60 * 1000;        // a runaway is respawned at most once an hour
+// The five numbers live in src/keeper-limits.js since 2026-09-13 — the ONE
+// home every keeper (this serve, the desktop-app keeper, the browser keeper)
+// bounds by; the literals that used to sit here were the first copy.
+const { GUARD_SAMPLE_MS, GUARD_CPU_PCT, GUARD_CPU_SUSTAIN_MS, GUARD_RSS_BYTES, RUNAWAY_COOLDOWN_MS } = require('./keeper-limits');
 // ── the RECORDED-SERVE settlement (round 10) ──
 /** A recorded serve that missed the 1.5s budget gets ONE longer probe before
  *  we conclude it is wedged: a busy 1.18.29 answers /global/health in hundreds
@@ -298,14 +297,10 @@ function unsafeWorktreeReason(worktree) {
 /** {cpuTicks, rssBytes} for a pid, or null. procfs only (no mountpoint, no
  *  child process) — safe to read synchronously once a minute. */
 function readProcUsage(pid) {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    const cpuTicks = Number(f[11]) + Number(f[12]); // utime + stime
-    const rssKb = Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] || 0);
-    if (!Number.isFinite(cpuTicks)) return null;
-    return { cpuTicks, rssBytes: rssKb * 1024 };
-  } catch { return null; }
+  // ONE reader (cli-identity.procSample, 2026-09-13): the desktop-app keeper's
+  // guard samples through the same function, so the two guards cannot drift
+  const s = cliIdentity.procSample(pid);
+  return s ? { cpuTicks: s.cpuTicks, rssBytes: s.rssBytes } : null;
 }
 
 /** THE PORTABLE IDENTITY RUNG (round 11; ONE definition since B-eac2 residual
