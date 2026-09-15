@@ -424,7 +424,7 @@ ineligible.
 pool. Quarantine clears on the next self-naming panel read.
 
 **D6 — Unattended spend budget.** Proposal to react to: **12 turns/hour and 60/day per identity,
-200/day per instance**, notice at 80%, owner-typed turns never counted.
+200/day per instance**, notice at 80%, owner-typed turns never counted. **Revised 2026-09-15 (owner, 2.369.98): 30/h · 200/day per identity · 800/day per instance** — the per-slot hour cap is shared by every conversation on the pool target, and 12/h was reached twice in one day by one watcher-heavy session plus a sibling's auto-resumes, stashing every Background Work notification until the owner's next prompt.
 
 **D7 — Implicit pool membership.** This instance's only pool is `members:null` and is the default
 account, so every newly logged-in subscription instantly becomes a target for every live

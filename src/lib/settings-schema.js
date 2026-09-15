@@ -550,19 +550,19 @@ const SETTINGS_SCHEMA = {
   // forced; 21 of them on ONE conversation inside ONE hour), and an auto-resume
   // loop that once fired 130 billed continues into a wall in one night.
   'spend.unattendedPerIdentityHour': {
-    type: 'number', default: 12, min: 0, max: 200, step: 1,
+    type: 'number', default: 30, min: 0, max: 200, step: 1,
     label: t('Unattended turns per account per hour'),
     description: t('The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted. 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the \u201cFor you\u201d inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation\u2019s next turn instead.'),
     category: t('Spending'), liveApply: true,
   },
   'spend.unattendedPerIdentityDay': {
-    type: 'number', default: 60, min: 0, max: 2000, step: 5,
+    type: 'number', default: 200, min: 0, max: 2000, step: 5,
     label: t('Unattended turns per account per day'),
     description: t('The same ceiling over a rolling 24 hours. An account can be busy for an hour without spending its whole day.'),
     category: t('Spending'), liveApply: true,
   },
   'spend.unattendedPerInstanceDay': {
-    type: 'number', default: 200, min: 0, max: 10000, step: 10,
+    type: 'number', default: 800, min: 0, max: 10000, step: 10,
     label: t('Unattended turns for this instance per day'),
     description: t('The ceiling across every account together, over a rolling 24 hours — the bound that still holds when a new subscription is added mid-incident.'),
     category: t('Spending'), liveApply: true,

@@ -52,10 +52,17 @@ const SPEND_REASONS = Object.freeze({
 // D6's proposal, as shipped defaults. They are SETTINGS (see
 // src/lib/settings-schema.js `spend.*`); these are the values a caller that
 // passes nothing gets, and the numbers the suite pins.
+// 2026-09-15 (owner, 2.369.98): 12/h · 60/day · 200/instance-day was too
+// tight — the per-SLOT hour cap is shared by EVERY conversation on that
+// pool target, so one watcher-heavy session plus a sibling's auto-resumes
+// filled it twice in a day and every Background Work notification was
+// stashed until the owner's next prompt (read as "notifications stopped").
+// Raised to 30/h · 200/day · 800/instance-day; the day caps move with the
+// hour cap on purpose (60/day at 30/h is two hours of headroom).
 const BUDGET_DEFAULTS = Object.freeze({
-  perIdentityHour: 12,
-  perIdentityDay: 60,
-  perInstanceDay: 200,
+  perIdentityHour: 30,
+  perIdentityDay: 200,
+  perInstanceDay: 800,
   noticePct: 80,
 });
 const HOUR_MS = 3600 * 1000;

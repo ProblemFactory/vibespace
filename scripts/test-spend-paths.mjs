@@ -115,35 +115,40 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
 {
   const ID = { key: 'sub-a', name: 'A' };
   const L = A.BUDGET_DEFAULTS;
-  ok('§1 D6 defaults are the shipped numbers (12/h · 60/day · 200/day instance · notice at 80%)',
-    L.perIdentityHour === 12 && L.perIdentityDay === 60 && L.perInstanceDay === 200 && L.noticePct === 80, JSON.stringify(L));
+  ok('§1 D6 defaults are the shipped numbers (30/h · 200/day · 800/day instance · notice at 80% — raised from 12/60/200 on 2026-09-15, owner: the per-slot hour cap is shared by every conversation on the slot)',
+    L.perIdentityHour === 30 && L.perIdentityDay === 200 && L.perInstanceDay === 800 && L.noticePct === 80, JSON.stringify(L));
   const lim = A.budgetLimits((k) => ({ 'spend.unattendedPerIdentityHour': 3, 'spend.unattendedPerIdentityDay': 0, 'spend.budgetNoticePct': -4 }[k]));
   ok('§1 a setting overrides its default, an EXPLICIT 0 is a choice, garbage falls back',
-    lim.perIdentityHour === 3 && lim.perIdentityDay === 0 && lim.perInstanceDay === 200 && lim.noticePct === 80, JSON.stringify(lim));
+    lim.perIdentityHour === 3 && lim.perIdentityDay === 0 && lim.perInstanceDay === 800 && lim.noticePct === 80, JSON.stringify(lim));
   // A settings reader that answers `true` to everything (a harness stub, a
   // corrupted store) would set every ceiling to ONE by coercion — a value
   // nobody chose. Only a number is a number.
   const boolLim = A.budgetLimits(() => true);
   ok('§1 a BOOLEAN is never a cap (Number(true) === 1 must not become the ceiling)',
-    boolLim.perIdentityHour === 12 && boolLim.perIdentityDay === 60 && boolLim.perInstanceDay === 200, JSON.stringify(boolLim));
+    boolLim.perIdentityHour === 30 && boolLim.perIdentityDay === 200 && boolLim.perInstanceDay === 800, JSON.stringify(boolLim));
 
+  // The mechanism legs below pin the ARITHMETIC of a cap, so they hand the
+  // authorizer an explicit fixture (the 2026-09-08 numbers) instead of
+  // reading BUDGET_DEFAULTS — the defaults are the owner's knob and moved
+  // once already (2.369.98: 12/60/200 → 30/200/800).
+  const OLD = Object.freeze({ perIdentityHour: 12, perIdentityDay: 60, perInstanceDay: 200, noticePct: 80 });
   let st = A.emptyBudget();
   const now = 1_800_000_000_000;
   ok('§1 an empty ledger authorizes', A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, state: st, now }).ok === true);
   for (let i = 0; i < 12; i++) st = A.noteUnattendedSpend(st, { identity: ID, at: now + i }).state;
-  const capped = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, state: st, now: now + 100 });
+  const capped = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, state: st, now: now + 100, limits: OLD });
   ok('§1 the 13th unattended turn in an hour is refused, by NAME', capped.ok === false && capped.why === 'hour-cap', JSON.stringify(capped.why));
   ok('§1 …and it says WHEN the window frees a slot (the oldest stamp + 1h), never a guess',
     capped.retryAfter === now + A.HOUR_MS, `${capped.retryAfter - now} vs ${A.HOUR_MS}`);
   ok('§1 …an hour later the same ledger authorizes again (rolling window, not a bucket)',
-    A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, state: st, now: now + A.HOUR_MS + 1000 }).ok === true);
+    A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: ID, state: st, now: now + A.HOUR_MS + 1000, limits: OLD }).ok === true);
   ok('§1 a DIFFERENT identity is unaffected by the first one\'s hour (the unit is the credential slot)',
-    A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: 'sub-b', name: 'B' }, state: st, now: now + 100 }).ok === true);
+    A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: 'sub-b', name: 'B' }, state: st, now: now + 100, limits: OLD }).ok === true);
 
   // the instance ceiling: 200 spends spread over 20 identities
   let inst = A.emptyBudget();
   for (let i = 0; i < 200; i++) inst = A.noteUnattendedSpend(inst, { identity: { key: 'sub-' + (i % 20), name: 'x' }, at: now + i }).state;
-  const iv = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: 'sub-fresh', name: 'F' }, state: inst, now: now + 500 });
+  const iv = A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: 'sub-fresh', name: 'F' }, state: inst, now: now + 500, limits: OLD });
   ok('§1 the INSTANCE ceiling holds even for an identity that has spent nothing', iv.ok === false && iv.why === 'instance-cap', JSON.stringify(iv.why));
 
   ok('§1 FAIL CLOSED: an identity we cannot name is refused (a ceiling nobody can be charged against is not a ceiling)',
@@ -164,7 +169,7 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
 
   // the 80% notice
   let n = A.emptyBudget(); let warns = [];
-  for (let i = 0; i < 12; i++) { const r = A.noteUnattendedSpend(n, { identity: ID, at: now + i }); n = r.state; if (r.warn) warns.push(r.warn); }
+  for (let i = 0; i < 12; i++) { const r = A.noteUnattendedSpend(n, { identity: ID, at: now + i, limits: OLD }); n = r.state; if (r.warn) warns.push(r.warn); }
   ok('§1 the 80% notice fires ONCE, at the crossing (10th of 12), naming the axis', warns.length === 1 && warns[0].scope === 'hour' && warns[0].used === 10, JSON.stringify(warns));
   ok('§1 …and its sentence names the account and both numbers', /A has used 10 of its 12 unattended turns this hour \(83%\)/.test(A.noticeText(warns[0])), A.noticeText(warns[0]));
 
@@ -800,8 +805,8 @@ console.log('\n§3d the boot load prunes with the widest retention, not with lim
     let ready = false;
     const settings = {
       'spend.unattendedPerIdentityHour': 200,   // out of the way: the DAY axis is what this measures
-      'spend.unattendedPerIdentityDay': 500,
-      'spend.unattendedPerInstanceDay': 500,
+      'spend.unattendedPerIdentityDay': 1000,   // above the DEFAULT retention (864 since 2.369.98) so the pre-fix prune has something to forget
+      'spend.unattendedPerInstanceDay': 1000,
     };
     fs.writeFileSync(path.join(dir, 'spend-budget.json'),
       JSON.stringify({ v: 1, budget: { v: 1, identities: { 'sub-A': stamps }, instance: stamps, notices: {} }, nudge: {} }));
@@ -813,13 +818,13 @@ console.log('\n§3d the boot load prunes with the widest retention, not with lim
     return g;
   };
   const now = Date.now();
-  // 500 spends spread across the last 20 h — the owner's day cap, exactly met
-  const stamps = Array.from({ length: 500 }, (_, i) => now - Math.round((i + 1) * (20 * 3600 * 1000 / 500)));
+  // 1000 spends spread across the last 20 h — the owner's day cap, exactly met
+  const stamps = Array.from({ length: 1000 }, (_, i) => now - Math.round((i + 1) * (20 * 3600 * 1000 / 1000)));
   {
     const g = mkBoot(guardMod, tmpdir('vs-spend-boot-'), stamps);
     const v = g.authorize({ reason: 'auto-resume', identity: { key: 'sub-A', name: 'A' } });
-    ok('§3d the whole day survives the restart: 500 of 500 counted, so the 501st is REFUSED',
-      v.ok === false && v.why === 'day-cap' && v.counts.day === 500, JSON.stringify({ why: v.why, counts: v.counts }));
+    ok('§3d the whole day survives the restart: 1000 of 1000 counted, so the 1001st is REFUSED',
+      v.ok === false && v.why === 'day-cap' && v.counts.day === 1000, JSON.stringify({ why: v.why, counts: v.counts }));
   }
   {   // NEGATIVE CONTROL: the same world with the pre-fix line restored
     const m = mutantModule('src/server/spend-guard.js', [[
@@ -830,8 +835,8 @@ console.log('\n§3d the boot load prunes with the widest retention, not with lim
     if (!m.err) {
       const g = mkBoot(m.mod, tmpdir('vs-spend-boot-pre-'), stamps);
       const v = g.authorize({ reason: 'auto-resume', identity: { key: 'sub-A', name: 'A' } });
-      ok('§3d NEGATIVE CONTROL: pruning with the DEFAULTS forgets 236 of them and authorizes the 501st',
-        v.ok === true && v.counts.day === A.stampCap(null) && A.stampCap(null) === 264,
+      ok('§3d NEGATIVE CONTROL: pruning with the DEFAULTS forgets 136 of them and authorizes the 1001st (retention 864 = 800 + headroom since 2.369.98)',
+        v.ok === true && v.counts.day === A.stampCap(null) && A.stampCap(null) === 864,
         JSON.stringify({ ok: v.ok, day: v.counts.day, defaultCap: A.stampCap(null) }));
     }
   }

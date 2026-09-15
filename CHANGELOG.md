@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.98 — the unattended-spend defaults are raised to 30/h · 200/day · 800/instance-day (owner, after a real notification stall)
+
+- Owner (c1206711's session, 2026-09-14): "为啥最近几次 background task 没有自动通知而是等我发消息才通知". Not lost — DEFERRED by design: the P4 spend guard's per-slot hourly ceiling (`spend.unattendedPerIdentityHour`, default 12) is shared by EVERY conversation on the same pool target, so one watcher-heavy session plus a sibling session's auto-resumes filled it twice in a day (journal: `[jobs] notify → stashed for <cid> (spend budget: <slot> has spent 12 unattended turns this hour (cap 12))`), and each Background Work notification was stashed until the owner's next prompt. The owner judged 12 too low; the three defaults become **30/h · 200/day per account · 800/day per instance** (`BUDGET_DEFAULTS` + the settings-schema rows + design-account-hardening D6 revised). The day caps move with the hour cap on purpose — 60/day at 30/h was two hours of headroom. Ceilings stay the same money bound they were (per credential slot, across restarts); only the numbers changed. Making a stash VISIBLE and stamping the REASON on each ledger entry are scoped into the Background Work triage batch that follows.
+- CLAUDE.md index line for the ceiling essay records the revision; test-spend-paths §1 pins the new numbers (the old 12/60/200 would now be red).
+
 ## 2.369.97 — one card per auto-resume, the status bar keeps its context% through a usage wall, and the Desktop button is back (userW's inc-mu1qa5gj-9qe9)
 
 - Owner: "为啥每次续跑会同时发两个续跑通知" — a delivered continue left the labelled "VibeSpace 自动续跑" prompt card AND a second "来自 VibeSpace 的消息 … 已自动继续这个任务" notice card. Now the cause rides the prompt itself (`sendToSession(id, s, text, {note})` → `originNote` on the record for claude, `webui_origin_note` for codex → the card head reads "VibeSpace 自动续跑 — 账号 X 已恢复可用…"), and `announce()` sends no second notice for a delivered continue; the refusal and far-reset sentences, which have no card of their own, still go out. test-auto-resume 223 · test-auto-resume-loop 205 · test-owner-batch-2369-32 38.
