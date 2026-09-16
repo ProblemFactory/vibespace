@@ -3339,6 +3339,11 @@ export default {
   "idle stop in {n} min": "{n} 分钟后因空闲停止",
   "not on PATH": "不在 PATH 上",
   "starting": "启动中",
+  "Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard. Click an application below to open it, or use “Advanced” to run any command.": "在 VibeSpace 窗口里打开这台机器上的图形程序，用鼠标和键盘直接操作。点击下面的应用即可打开；要运行任意命令，请展开“高级”。",
+  "Advanced: run any command": "高级：运行任意命令",
+  "No known applications were found on this machine — use “Advanced” below to run any program.": "这台机器上没有找到已知的应用——请在下面的“高级”里输入命令来运行任意程序。",
+  "Launching…": "正在启动…",
+  "{n} running": "{n} 个运行中",
   "{used} of {cap} slots in use": "已用 {used}/{cap} 个槽位",
   "A desktop application window with no input for this long is stopped; 0 = never. \"Keep running\" in a window exempts that app.": "一个桌面应用窗口这么久没有输入就会被停止；0 = 永不。窗口里的“保持运行”可让该应用豁免。",
 };

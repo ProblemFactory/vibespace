@@ -495,6 +495,16 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return refs.some((r) => typeof r === 'string' && r && !r.includes(':'));
   }
 
+  // The keys this normaliser REBUILDS (session-ref migration). Every OTHER
+  // top-level key is carried through VERBATIM (2026-09-14): user-state is the
+  // merge-only home the B-b87b belt promised to per-feature preferences —
+  // `desktopAppRecents` (2.369.96) and `desktopAppAdvancedOpen` PATCH here —
+  // and this function used to return a literal of exactly the session keys,
+  // so every such key was dropped on the very write that carried it (measured
+  // in headless chrome: PATCH {desktopAppAdvancedOpen:true} ⇒ GET never
+  // carried it; the launcher's Recent list never survived a reload).
+  const USER_STATE_MIGRATED_KEYS = new Set(Object.keys(USER_STATE_DEFAULT));
+
   function normalizeUserState(data) {
     const source = data && typeof data === 'object' ? data : {};
     // buildKnownSessionKeyMap walks the entire ~/.codex/sessions tree — only
@@ -506,7 +516,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     for (const [groupName, sessionRefs] of Object.entries(source.sessionGroups && typeof source.sessionGroups === 'object' ? source.sessionGroups : {})) {
       sessionGroups[groupName] = migrateStateArray(sessionRefs, knownSessionKeys);
     }
+    const extras = {};
+    for (const [k, v] of Object.entries(source)) if (!USER_STATE_MIGRATED_KEYS.has(k) && v !== undefined) extras[k] = v;
     return {
+      ...extras,
       stateVersion: 2,
       starredSessions: migrateStateArray(source.starredSessions, knownSessionKeys),
       archivedSessions: migrateStateArray(source.archivedSessions, knownSessionKeys),

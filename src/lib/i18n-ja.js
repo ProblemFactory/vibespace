@@ -3338,6 +3338,11 @@ export default {
   "idle stop in {n} min": "{n} 分後にアイドル停止",
   "not on PATH": "PATH にありません",
   "starting": "起動中",
+  "Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard. Click an application below to open it, or use “Advanced” to run any command.": "このマシンのグラフィカルなプログラムを VibeSpace のウィンドウで開き、マウスとキーボードで操作します。下のアプリをクリックすると開きます。任意のコマンドを実行するには「詳細」を開いてください。",
+  "Advanced: run any command": "詳細: 任意のコマンドを実行",
+  "No known applications were found on this machine — use “Advanced” below to run any program.": "このマシンに既知のアプリが見つかりません — 下の「詳細」から任意のプログラムを実行できます。",
+  "Launching…": "起動しています…",
+  "{n} running": "{n} 件実行中",
   "{used} of {cap} slots in use": "{cap} スロット中 {used} 使用中",
   "A desktop application window with no input for this long is stopped; 0 = never. \"Keep running\" in a window exempts that app.": "デスクトップアプリのウィンドウにこの時間入力がなければ停止します。0 = 停止しない。ウィンドウの「実行を続ける」でそのアプリは除外されます。",
 };

@@ -12,6 +12,7 @@ import { permissionRulesCaps } from './agent-meta.js';
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
 import { overageChip, spendControlChip } from './usage-source.js';
+import { ETA_MIN_MS, bucketEta, bucketMayNameDeadline, bucketResetMs } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14)
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
@@ -637,25 +638,37 @@ export function installManageAgents(App, ctx = {}) {
   // their own donut when present.
   _acctUsageHtml(u, est) {
     if (!u) return '';
+    const now = Date.now();
     const pct = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
-    // Reset countdown (2.268.7, user request — THIS surface, not the popup).
-    // resetsAt is unix SECONDS in the usage cache; tolerate ms just in case.
-    const resetMs = (x) => { const r = x?.resetsAt; if (!Number.isFinite(r) || r <= 0) return null; return r > 1e12 ? r : r * 1000; };
+    // Reset countdown (2.268.7, user request — THIS surface, not the popup;
+    // 2026-09-14: UNDER EVERY DONUT, owner: "把每个进度条的刷新时间都展示出来,
+    // 同时不能让画面太挤" — one compact token per bucket, `bucketEta` in
+    // src/lib/usage-eta.js). resetsAt is unix SECONDS in the usage cache;
+    // tolerate ms just in case. The tooltip keeps the full "resets in …".
+    const resetMs = (x) => bucketResetMs(x);
     const fmtEta = (ms) => {
-      const sec = Math.max(0, Math.round((ms - Date.now()) / 1000));
+      const sec = Math.max(0, Math.round((ms - now) / 1000));
       const dd = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
       return dd ? `${dd}d${hh}h` : hh ? `${hh}h${mm}m` : `${mm}m`;
     };
-    const etaTip = (x) => { const ms = resetMs(x); return ms && ms > Date.now() + 45000 ? ' · ' + t('resets in {dur}', { dur: fmtEta(ms) }) : ''; };
+    const etaTip = (x) => { const ms = resetMs(x); return ms && ms > now + ETA_MIN_MS && bucketMayNameDeadline(x) ? ' · ' + t('resets in {dur}', { dur: fmtEta(ms) }) : ''; };
+    const pressure = (eff) => eff > 95 ? 'var(--red,#e55)' : eff > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
     // With a dead-reckoning estimate (B-fcff v2): DARK arc = confirmed reading,
     // LIGHT arc = estimated delta since; after a window reset (est < reading —
     // the clean discriminator) the reading no longer applies, dark collapses to
     // 0 and the whole arc renders light. Dashed ring marks "estimating".
+    // Each donut is a COLUMN (`.acct-donut-col`): the donut on top, its own
+    // compact reset countdown below (`.acct-donut-eta`, ≈8px), coloured by the
+    // bucket's pressure from 80 % up and text-secondary below that. The label
+    // is rendered ONLY when the bucket may name a deadline — an 'empty'
+    // window's reset slides with the clock (B-8b12) and a missing/passed reset
+    // is not a countdown — and the column keeps its height either way so the
+    // rows stay aligned.
     const donut = (label, x, tipName, estBucket) => {
       const pair = estDisplayPair(x, estBucket);
       const p = pair.estPct != null ? pair.darkPct : pct(x);
       const eff = pair.estPct ?? p;
-      const c = eff > 95 ? 'var(--red,#e55)' : eff > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+      const c = pressure(eff);
       const light = `color-mix(in srgb, ${c} 38%, var(--bg-input))`;
       const bg = pair.estPct != null && pair.estPct > pair.darkPct
         ? `conic-gradient(${c} ${Math.round(p * 3.6)}deg, ${light} ${Math.round(p * 3.6)}deg ${Math.round(pair.estPct * 3.6)}deg, var(--bg-input) ${Math.round(pair.estPct * 3.6)}deg)`
@@ -663,39 +676,35 @@ export function installManageAgents(App, ctx = {}) {
       const tip = (pair.estPct != null
         ? `${escHtml(tipName || label)}: ${p}% · ${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}`
         : `${escHtml(tipName || label)}: ${p}%`) + escHtml(etaTip(x));
-      return `<span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>`;
+      const eta = bucketEta(x, now);
+      const etaHtml = eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '';
+      return `<span class="acct-donut-col"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${etaHtml}</span>`;
     };
     const parts = [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];
     const scEst = (name) => (est?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(name || '').toLowerCase()) || null;
     for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name, scEst(sc.name)));
-    const age = u.fetchedAt ? Math.round((Date.now() - u.fetchedAt) / 60000) : null;
+    const age = u.fetchedAt ? Math.round((now - u.fetchedAt) / 60000) : null;
     // The age span ALWAYS renders (empty when fresh) at a fixed min-width —
     // conditional rendering shifted the right-aligned donut group per row and
     // broke the column alignment across the roster (measured: 28px jump).
+    // Since 2026-09-14 it is ONE line again: the row-level "tightest bucket"
+    // countdown moved under the donut it describes (every donut carries its
+    // own now), and the min-width stays so the donut columns stay aligned.
     const ageLabel = age != null && age > 5 ? (age < 100 ? t('{n}m', { n: age }) : t('{n}h', { n: Math.round(age / 60) })) : '';
     // Narrow-width companion (rail panel, 2.179.1): the donut cluster is
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
-    // ONE pill showing the TIGHTEST bucket (full detail in the tooltip).
+    // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full
+    // detail in the tooltip).
     const buckets = [['5h', u.fiveHour, est?.fiveHour], ['7d', u.sevenDay, est?.sevenDay], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name)])]
-      .map(([label, x, e]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, resetMs(x)]; }).filter(([, p]) => Number.isFinite(p));
-    // Second line of the age cell: reset countdown for the row's most-
-    // constrained bucket (est-aware, same pick as the narrow-width pill),
-    // colored by that bucket's pressure — "when does the tight bucket free
-    // up". Buckets whose reset already passed are effectively fresh; skip.
-    let eta = '', etaTitle = '';
-    const etaCands = buckets.filter(([, , , r]) => r && r > Date.now() + 45000);
-    if (etaCands.length) {
-      const [el2, ep, , er] = etaCands.reduce((a, b) => (b[1] > a[1] ? b : a));
-      const ec = ep > 95 ? 'var(--red,#e55)' : ep > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-      eta = `<span class="acct-reset-eta" style="color:${ec}">${escHtml(fmtEta(er))}</span>`;
-      etaTitle = `${el2} ${t('resets in {dur}', { dur: fmtEta(er) })}`;
-    }
-    let mini = '';
+      .map(([label, x, e]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, x]; }).filter(([, p]) => Number.isFinite(p));
+    let mini = '', etaTitle = '';
     if (buckets.length) {
-      const [wl, wp, wEst] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
-      const wc = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+      const [wl, wp, wEst, wx] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
+      const wc = pressure(wp);
+      const wEta = bucketEta(wx, now);
+      if (wEta) etaTitle = `${wl} ${t('resets in {dur}', { dur: fmtEta(resetMs(wx)) })}`;
       const tip = [buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · '), etaTitle].filter(Boolean).join(' · ');
-      mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%</span>`;
+      mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}</span>`;
     }
     const ageTitle = [age != null ? t('Last refreshed {n} min ago', { n: age }) : '', etaTitle].filter(Boolean).join(' · ');
     // PAID OVERAGE (design §1.4 + D3): this roster is where the owner picks a
@@ -707,7 +716,7 @@ export function installManageAgents(App, ctx = {}) {
     const scc = spendControlChip(spendControlState(u), { t });
     const ovHtml = (ovc ? `<span class="acct-usage-overage" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>` : '')
       + (scc ? `<span class="acct-usage-overage" title="${escHtml(scc.tip)}">${escHtml(scc.label)}</span>` : '');
-    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span>${eta}</span></span>${ovHtml}${mini}`;
+    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span></span></span>${ovHtml}${mini}`;
   },
 
   // ── ⟳ Refresh all (2.245.0): ONE human click fans out a per-target
@@ -1535,8 +1544,12 @@ export function installManageAgents(App, ctx = {}) {
             // read as current.
             const ageMs = hu.fetchedAt ? Date.now() - hu.fetchedAt : 0;
             const ageTxt = ageMs > 5 * 60000 ? ' · ' + agoText(hu.fetchedAt) : '';
+            // …and the tightest bucket's compact reset countdown (2026-09-14,
+            // the same rule the roster donuts carry — bucketEta refuses a
+            // window that may not name a deadline).
+            const wEta = bucketEta(wx, Date.now());
             const tip = bs.map(([l, x]) => `${l} ${pctOf(x)}%`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
-            pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${escHtml(ageTxt)}</span>`;
+            pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
           }
           sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${pill}`;
           det.appendChild(sum);

@@ -460,12 +460,20 @@ html, body {
 .acct-usage-donut { position: relative; width: 22px; height: 22px; border-radius: 50%; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .acct-usage-donut::after { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--bg-dialog); }
 .acct-usage-donut > span { position: relative; z-index: 1; font-size: 7px; font-weight: 600; color: var(--text-secondary); letter-spacing: -0.2px; }
-/* Two-line micro column (2.268.7): data age on top, reset countdown of the
-   row's tightest bucket below. min-width fits the widest countdown (23h59m)
-   so the right-anchored donut columns stay aligned across rows. */
+/* Per-donut reset countdown (2026-09-14, owner: every pie shows when it
+   refreshes without crowding the row): each donut is a COLUMN — the donut on
+   top, ONE compact token under it ("65m" / "15h" / "3d", src/lib/usage-eta.js).
+   The column carries a fixed min-height so a donut whose window may not name
+   a deadline (no label, B-8b12) keeps the row exactly as tall as its
+   neighbours; the row grows by the label's height (≈10px) and nothing else. */
+.acct-donut-col { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; flex: none; min-height: 33px; }
+.acct-donut-eta { font-size: 8px; line-height: 10px; font-weight: 600; font-style: normal; letter-spacing: -0.2px; color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The data-age micro cell (2.268.7). Since 2026-09-14 it is ONE line — the
+   row-level "tightest bucket" countdown moved under the donut it describes —
+   but the min-width stays (it fitted the widest countdown, 23h59m) so the
+   right-anchored donut columns stay aligned across rows. */
 .acct-usage-age { opacity: 0.75; font-style: italic; min-width: 6.5ch; flex: none; font-variant-numeric: tabular-nums; display: inline-flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; line-height: 1.1; }
 .acct-usage-age > span:first-child { opacity: 0.8; }
-.acct-reset-eta { font-style: normal; font-weight: 600; white-space: nowrap; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
 /* provenance/note line under the account identity (2.202.0 — inline tags
    squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row) */
@@ -2074,12 +2082,59 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
   border-radius: var(--radius-sm); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .desktop-app-chip-backend { color: var(--accent); }
 .desktop-app-stop { color: var(--red, #e55); }
-.desktop-launch .dialog-body { min-width: min(760px, 92vw); max-height: 80vh; overflow: auto; }
-.desktop-launch-avail { font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; }
+/* Width belongs on the DIALOG, never on the body (the third instance of the
+   anti-pattern this file documents twice, .ucl-* and .guided-cli-dialog):
+   .dialog is a fixed 440px box with overflow:hidden, so a body min-width of
+   760px overflowed it on every viewport wider than 768px — and because an
+   overflow:hidden box is still a scroll container, focusing the Command
+   input (right column, past the clip) scrolled .dialog itself by
+   inputRight − clientWidth = 308px: the title scrolled off-left, ✕ landed
+   mid-header and the Applications column showed a 64px sliver of its
+   buttons (reproduced 2026-09-14 at 1000×800@2x — the owner's picture;
+   scrollLeft 308, scrollWidth 760 / clientWidth 438; 777px: 263). The
+   .dialog rule at ≤768px (95vw !important, one column) is why nothing
+   reproduced on a phone. Sized like .guided-cli-dialog; the body just fills
+   it. The columns are minmax(0,1fr): three nowrap Recent entries turned a
+   1fr/1fr grid into 126/692 (measured), the latent squeeze. */
+.dialog.desktop-launch { width: min(760px, calc(94vw / var(--ui-scale, 1))); }
+.desktop-launch .dialog-body { max-height: 80vh; overflow: auto; }
+.desktop-launch-intro { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text); }
+.desktop-launch-avail { font-size: 11px; color: var(--text-secondary); }
 .desktop-launch-avail-bad { color: var(--red, #e55); }
-.desktop-launch-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.desktop-launch-col h4 { margin: 8px 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; }
-.desktop-launch-app { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
+.desktop-launch-sec { min-width: 0; }
+.desktop-launch-sec h4, .desktop-launch-col h4 { margin: 2px 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
+.desktop-launch-count { font-weight: 400; font-size: 11px; }
+.desktop-launch-running-sec.is-empty { display: none; } /* no global .hidden in this project */
+/* The catalog: app CARDS in an auto-filling grid, one click launches. An
+   unavailable app stays visible, dimmed, with its reason — never hidden. */
+.desktop-launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.desktop-launch-card { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 1px;
+  align-items: center; text-align: left; min-width: 0; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius); color: inherit; cursor: pointer; font: inherit; }
+.desktop-launch-card-icon { grid-row: 1 / span 2; display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; color: var(--accent); font-size: 18px; }
+.desktop-launch-card-icon svg { width: 18px !important; height: 18px !important; }
+.desktop-launch-card-label { font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-launch-card-sub { font-size: 10px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-launch-card:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
+.desktop-launch-card:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.desktop-launch-card:disabled { cursor: not-allowed; }
+.desktop-launch-card.is-unavailable { opacity: .55; }
+.desktop-launch-card.is-unavailable .desktop-launch-card-icon { color: var(--text-dim); }
+.desktop-launch-card.is-launching { border-color: var(--accent); cursor: progress; opacity: 1; }
+.desktop-launch-card.is-launching .desktop-launch-card-icon svg { animation: usage-refresh-spin 0.9s linear infinite; }
+/* "Advanced: run any command" — a disclosure (a BUTTON with aria-expanded),
+   collapsed by default; its open/closed state persists in user state. */
+.desktop-launch-adv-toggle { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; padding: 6px 8px; background: transparent;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; }
+.desktop-launch-adv-toggle:hover { background: var(--bg-hover); color: var(--text); }
+.desktop-launch-adv-toggle:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.desktop-launch-adv-toggle svg { width: 12px !important; height: 12px !important; flex: none; transition: transform var(--transition); }
+.desktop-launch-adv-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.desktop-launch-adv-body { padding: 8px 0 0; }
+.desktop-launch-adv-body.collapsed { display: none; } /* component-scoped, never a global .hidden */
+.desktop-launch-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.desktop-launch-col { min-width: 0; }
+.desktop-launch-app { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-width: 0; text-align: left;
   padding: 6px 8px; margin-bottom: 4px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
   color: inherit; cursor: pointer; font: inherit; }
 .desktop-launch-app:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--accent); }
@@ -2095,7 +2150,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-actions { margin: 4px 0 10px; }
 @media (max-width: 768px) {
   .desktop-launch-cols { grid-template-columns: 1fr; }
-  .desktop-launch .dialog-body { min-width: 0; }
+  .desktop-launch-grid { grid-template-columns: 1fr; }
 }
 
 /* ── First-run onboarding wizard (upgrades #welcome) ── */

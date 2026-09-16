@@ -24,7 +24,7 @@
 | ORCH | `src/routes/desktop-apps.js` | `GET /api/desktop/apps`（注册表 + 活会话 + 每级可用性与理由）、`POST /api/desktop/apps`（`{appId}` 或 `{exec,args,cwd}`）、`POST /api/desktop/apps/:id/stop`、`GET /api/desktop/apps/:id`；签名带 `host` | 不做业务判定 |
 | CLIENT | `src/lib/vnc-view.js` | **共享画面视图组件**：从 `desktop-window.js` 抽出的 noVNC 装载（`loadRFB`）、DPI 反缩放、resize/scale 策略、焦点与输入转发、断线重连与状态芯片；`desktop-window.js` 与新窗口都用它 | 不知道窗口类型 |
 | CLIENT | `src/lib/desktop-app-window.js` | 窗口类型 `desktop-app`（`registerWindowType`，`openSpec {openDesktopApp:{id}}`，每应用会话一个窗口、可进标签组、布局可恢复、多客户端同看一个显示）；标题 = 转义过的应用标签；状态栏：后端级别 + 理由、CPU/RSS、Stop | 不直接 fetch 进程信息（读广播） |
-| CLIENT | `src/lib/desktop-app-launcher.js` | ⚙ 菜单 "Desktop apps…" 与工具栏项（contributions.js 注册）；启动对话框：注册表列表 / "运行命令"（exec、参数、cwd 自动补全）/ 最近；≤768px 单列；失败必到 toast | 不持有会话状态 |
+| CLIENT | `src/lib/desktop-app-launcher.js` | ⚙ 菜单 "Desktop apps…" 与工具栏项（contributions.js 注册）；启动对话框**以目录为主**（2026-09-14，owner 项 A）：一句白话说明（做什么、点哪里，zh+ja）→ 后端芯片（阶梯原话）→ 运行中（Open/Stop + 槽位数，非空才显示，在目录之上）→ **应用目录**＝卡片网格（标签 + 一行 exec/理由 + icons.js 的 SVG，按注册表 `category` 选图标），一键启动、启动中的卡片转圈并禁用直到记录应答，不在 PATH 的应用**变灰并说明理由，绝不隐藏**，目录为空时白话说明并自动展开命令表单 → "高级：运行任意命令"折叠区（exec、参数、cwd 自动补全 + Launch + 最近；默认折叠，展开状态存 user state `desktopAppAdvancedOpen`，merge-only PATCH）；卡片与折叠区都是 button（aria-expanded）；≤768px 单列；失败必到 toast。**宽度写在 `.dialog.desktop-launch` 上，绝不写在 body 上**（2026-09-14 实测：body 的 min-width 撑破固定 440px 的 `.dialog`，而 overflow:hidden 的盒子仍是滚动容器，聚焦命令输入框把对话框自己横向滚了 308px——标题滚出左边、✕ 落在标题栏中间、应用列只剩 64px 的边条），程序性 focus 一律 `{preventScroll:true}`，两列 `minmax(0,1fr)` | 不持有会话状态 |
 
 规则：**新一级画面后端 = `DISPLAY_BACKENDS` 加一行 + `desktop-display.js` 加它的探测 + `desktop-stream.js` 加它的透传**，其它任何文件不改。`server.js` 只加接线（尺寸棘轮 2100 行——先量，超了就把既有 stanza 抽走）。
 
@@ -63,7 +63,7 @@
 | `test-desktop-apps` | fast | PURE：注册表行校验、`resolveBackend` 阶梯全矩阵（每种缺失组合各一行 + 回落理由文本）、状态机、容量/runaway 判定 |
 | `test-desktop-display` | fast（无二进制即 SKIP 并说明） | 显示号分配不撞、auth cookie、窗口枚举（真 Xvfb + `xterm`/`xlogo`/`xmessage` 之一） |
 | `test-desktop-app-keeper` | heavy | 真 Xvfb + x11vnc（或 Xvnc）：launch → 端口监听 → RFB 握手（`net`）→ 记录落盘 → **SIGKILL keeper 进程并重建 ⇒ 收养** → stop 干净（无孤儿 X/服务器；`/proc` 计数前后相等）；runaway 守卫用一个吃 CPU 的假应用 |
-| `test-desktop-app-window` | heavy | headless chrome：启动对话框 → 窗口出现 → canvas 非全黑 → 第二个客户端同看 → SIGKILL 服务器 + 重启 ⇒ 窗口恢复且仍连得上 → Stop ⇒ 窗口显示 exited |
+| `test-desktop-app-window` | heavy | headless chrome：启动对话框 → 窗口出现 → canvas 非全黑 → 第二个客户端同看 → SIGKILL 服务器 + 重启 ⇒ 窗口恢复且仍连得上 → Stop ⇒ 窗口显示 exited；**2026-09-14 增几何 pin**（用页面自己算的 rect）：1000×800 / 777×800 / 480×640 各一次全新打开——`.dialog` 不横向滚动（scrollLeft 0、scrollWidth ≤ clientWidth）、标题中心可 elementFromPoint 点中、✕ 在对话框右侧 48px 内、第一张卡片的标签在卡片内、展开时两列各 ≥ 38%、三条 nowrap 最近条目不挤压；zh 的说明行；真点一张卡片启动并出现启动中态；折叠区默认关且重载后保持展开 |
 | `test-vnc-view` | fast | 共享视图组件的 DPI 反缩放与坐标（沿用 inc-mtdrm922 的量法）；`desktop-window.js` 改用组件后逐字节同一批断言 |
 
 ## 7. 分片

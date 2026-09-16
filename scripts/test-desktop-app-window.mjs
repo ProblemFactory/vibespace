@@ -10,6 +10,22 @@
 // window says it exited, and no X/x11vnc survives. Also the singleton Desktop
 // window still opens through the shared component and bridge (its /api/vnc
 // start fails LOUDLY here — no Xvnc — through the same status chip).
+//
+// THE LAUNCH DIALOG'S GEOMETRY (2026-09-14, the owner's picture reproduced at
+// 1000×800@2x): a body min-width of 760px inside `.dialog`'s fixed 440px +
+// overflow:hidden clipped the right half, and the UA's focus scroll-into-view
+// on the Command input scrolled `.dialog` itself by 308px — the title
+// off-left, ✕ mid-header, the Applications column a 64px sliver. The suite
+// checked NO geometry, which is why it shipped green. Now every fresh open at
+// 1000×800, 777×800 and 480×640 is MEASURED (computed rects in the page): the
+// dialog does not scroll sideways, the title is hit-testable, ✕ sits in the
+// dialog's right 48px, the first card label lies inside its card, the two
+// Advanced columns each keep ≥ 38 % of the dialog when two are shown — and the
+// LATENT squeeze (three nowrap Recent entries turned 1fr/1fr into 126/692) is
+// seeded and asserted too. Plus the catalog-first redo: the intro line (also
+// in zh), a card click that launches with a visible launching state, the
+// Advanced disclosure closed by default and persisted open across a reload.
+// VS_UI_SHOTS_DIR=<dir> saves 2x PNGs of each measured state there.
 // SKIPs without chrome / Xvfb / x11vnc. Worktree-isolated (own data/, a
 // scratch HOME, VIBESPACE_SKIP_AGENT_HOOKS=1), free ports, per-pid names.
 // Run: node scripts/test-desktop-app-window.mjs
@@ -19,6 +35,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome } from './scratch.mjs';
+import zhDict from '../src/lib/i18n-zh.js';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,6 +47,8 @@ const skipWhy = !CHROME ? 'no chrome/chromium' : !facts.bins.Xvfb ? 'Xvfb not on
 if (skipWhy) { console.log(`SKIP: ${skipWhy}`); process.exit(0); }
 const [appName, appBin] = APP;
 const appArgs = appName === 'xmessage' ? ['-geometry', '500x300+20+20', '-fg', 'black', '-bg', 'white', 'VIBESPACE DESKTOP APP WINDOW'] : appName === 'xterm' ? ['-geometry', '80x24', '-T', 'vs-window'] : [];
+const SHOTS = process.env.VS_UI_SHOTS_DIR ? path.resolve(process.env.VS_UI_SHOTS_DIR) : null;
+if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('deskapp-smoke');
@@ -83,6 +102,44 @@ async function page(t) {
 const openPage = async (p) => { await p.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(1500); await p.evalJs('window.app ? app.ready : Promise.reject(new Error("no app"))'); await until(() => p.evalJs('app.layoutManager && app.layoutManager._restoring === false'), 12000, 250); };
 // the canvas noVNC paints: is it non-black? (sample the pixels)
 const CANVAS_SAMPLE = `(() => { const c = document.querySelector('.window .desktop-app-canvas-probe') || [...document.querySelectorAll('.window canvas')].find((x) => x.width > 50 && x.height > 50); if (!c) return { found: false }; const ctx = c.getContext('2d'); const d = ctx.getImageData(0, 0, c.width, c.height).data; let bright = 0, n = 0; for (let i = 0; i < d.length; i += 64) { n++; if (d[i] + d[i + 1] + d[i + 2] > 60) bright++; } return { found: true, w: c.width, h: c.height, brightFrac: bright / n }; })()`;
+// a TRUSTED click (CDP Input) at an element's centre: the layout autosave only
+// fires after a real pointerdown/keydown (layout.js's anti-echo guard), and a
+// real click is also what the dialog's buttons get from a human
+const trustedClick = async (p, selector) => {
+  const r = await p.evalJs(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView?.({ block: 'nearest' }); const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+  if (!r) throw new Error(`trustedClick: ${selector} not clickable`);
+  await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
+  await p.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+  await p.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+  return r;
+};
+// a FRESH open of the launch dialog: whatever is open goes, the toolbar button
+// is clicked, and the dialog has answered (registry rendered + the disclosure
+// decided + the 0 ms focus fired) before anyone measures it
+const openDialog = async (p) => {
+  await p.evalJs(`(() => { document.getElementById('desktop-launch-dialog')?.remove(); document.getElementById('btn-desktop-apps').click(); return true; })()`);
+  const ok = await until(() => p.evalJs(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-card, #desktop-launch-dialog .desktop-launch-empty')`), 8000, 100);
+  await sleep(400);
+  return !!ok;
+};
+// the geometry of the open dialog, as the page computes it
+const GEOM = `(() => {
+  const ov = document.getElementById('desktop-launch-dialog'); if (!ov) return null; const dlg = ov.querySelector('.dialog');
+  const R = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, r: r.right, b: r.bottom }; };
+  const h3 = dlg.querySelector('.dialog-header h3'), x = dlg.querySelector('.dialog-close');
+  const hr = R(h3); const hit = document.elementFromPoint(hr.x + hr.w / 2, hr.y + hr.h / 2);
+  const card = dlg.querySelector('.desktop-launch-card'); const label = card && card.querySelector('.desktop-launch-card-label');
+  const grid = dlg.querySelector('.desktop-launch-grid'); const body = dlg.querySelector('.dialog-body'); const intro = dlg.querySelector('.desktop-launch-intro');
+  const vis = (el) => el && getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0;
+  const cols = [...dlg.querySelectorAll('.desktop-launch-col')].filter(vis).map(R);
+  const cards = [...dlg.querySelectorAll('.desktop-launch-card')].map((c) => ({ id: c.dataset.appId, disabled: c.disabled, unavailable: c.classList.contains('is-unavailable'), launching: c.classList.contains('is-launching'), svg: !!c.querySelector('.desktop-launch-card-icon svg'), label: c.querySelector('.desktop-launch-card-label')?.textContent, sub: c.querySelector('.desktop-launch-card-sub')?.textContent, visible: vis(c) }));
+  return { vw: innerWidth, vh: innerHeight, dlg: R(dlg), scrollLeft: dlg.scrollLeft, scrollWidth: dlg.scrollWidth, clientWidth: dlg.clientWidth, bodyClientW: body.clientWidth, bodyScrollW: body.scrollWidth, bodyContentW: body.clientWidth - parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight),
+    h3: hr, h3Hit: !!hit && (hit === h3 || h3.contains(hit)), close: R(x), card: card ? R(card) : null, label: label ? R(label) : null, grid: grid ? R(grid) : null, cols, cards,
+    adv: dlg.querySelector('.desktop-launch-adv-toggle')?.getAttribute('aria-expanded') || null, advBodyVisible: vis(dlg.querySelector('.desktop-launch-adv-body')), introVisible: vis(intro), introText: intro ? intro.textContent : '',
+    runningVisible: vis(dlg.querySelector('.desktop-launch-running-sec')), focused: document.activeElement ? (document.activeElement.className || document.activeElement.tagName) : null };
+})()`;
+const shot = async (p, name) => { if (!SHOTS) return; const r = await p.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); };
+const INTRO_KEY = (() => { const m = /desktop-launch-intro">\$\{escHtml\(t\('([^']+)'\)\)\}/.exec(fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8')); return m ? m[1] : null; })();
 
 let p1 = await page(target);
 try {
@@ -101,19 +158,131 @@ try {
   check('…and NOT when the user turned it off (the setting is the switch, not the probe)', await p1.evalJs(`(() => { const prev = app.settings.get('toolbar.showDesktopButton'); app.settings.set('toolbar.showDesktopButton', false); app._applyChromeSettings(); const hidden = getComputedStyle(document.getElementById('btn-desktop')).display === 'none'; app.settings.set('toolbar.showDesktopButton', prev); app._applyChromeSettings(); return hidden && getComputedStyle(document.getElementById('btn-desktop')).display !== 'none'; })()`));
   check('⚙ menu carries the "Desktop apps…" row (a contribution, when the backend exists)', await p1.evalJs(`(async () => { const m = await import('/src/lib/contributions.js').catch(() => null); return true; })()`) && await p1.evalJs(`app._desktopAppsAvailable === true`));
 
-  // the launch dialog: run a command from its form
-  await p1.evalJs(`(async () => { const { runCommand } = window.__vsContrib || {}; document.getElementById('btn-desktop-apps').click(); await new Promise((r) => setTimeout(r, 400)); return !!document.getElementById('desktop-launch-dialog'); })()`);
-  check('the launch dialog opens from the toolbar button', await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`));
+  // ── §G THE LAUNCH DIALOG'S GEOMETRY, measured on a fresh open at three viewports ──
+  console.log('§G the launch dialog does not clip, scroll or squeeze at 1000×800 / 777×800 / 480×640 (fresh open, computed rects)');
+  const VIEWPORTS = [[1000, 800], [777, 800], [480, 640]];
+  const patchState = (patch) => p1.evalJs(`fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(patch))} }).then((r) => r.ok)`);
+  const assertGeom = (tag, g, { twoColumns }) => {
+    check(`${tag}: the dialog fits the viewport (${g.dlg.w.toFixed(0)}px wide in ${g.vw})`, g.dlg.w <= g.vw && g.dlg.x >= -0.5 && g.dlg.r <= g.vw + 0.5, g.dlg);
+    check(`${tag}: .dialog is not scrolled sideways and has nothing to scroll (scrollLeft ${g.scrollLeft}, scrollWidth ${g.scrollWidth} ≤ clientWidth ${g.clientWidth})`, g.scrollLeft === 0 && g.scrollWidth <= g.clientWidth);
+    check(`${tag}: the body has no sideways overflow either (${g.bodyScrollW} ≤ ${g.bodyClientW})`, g.bodyScrollW <= g.bodyClientW + 1);
+    check(`${tag}: the title is hit-testable at its centre (elementFromPoint lands on the h3)`, g.h3Hit, { h3: g.h3, hit: g.h3Hit });
+    check(`${tag}: ✕ sits inside the dialog's right 48px (x ${g.close.x.toFixed(0)}..${g.close.r.toFixed(0)} vs dialog right ${g.dlg.r.toFixed(0)})`, g.close.r <= g.dlg.r + 0.5 && g.close.x >= g.dlg.r - 48);
+    check(`${tag}: the intro line renders`, g.introVisible && g.introText.length > 40);
+    check(`${tag}: the first app card's label lies inside its card`, !!g.card && !!g.label && g.label.x >= g.card.x - 0.5 && g.label.r <= g.card.r + 0.5 && g.label.w > 0, { card: g.card, label: g.label });
+    check(`${tag}: the catalog grid spans the body's content box (${g.grid && g.grid.w.toFixed(0)} of ${g.bodyContentW.toFixed(0)})`, !!g.grid && g.grid.w >= 0.98 * g.bodyContentW);
+    if (twoColumns) check(`${tag}: both Advanced columns keep ≥ 38 % of the dialog (${g.cols.map((c) => (100 * c.w / g.dlg.w).toFixed(0) + '%').join('/')})`, g.cols.length === 2 && g.cols.every((c) => c.w >= 0.38 * g.dlg.w), g.cols);
+    else check(`${tag}: ≤768px — the Advanced form is ONE column, each spanning the body`, g.cols.length === 2 && g.cols.every((c) => c.w >= 0.98 * g.bodyContentW) && Math.abs(g.cols[0].x - g.cols[1].x) < 1, g.cols);
+  };
+  for (const [w, h] of VIEWPORTS) {
+    await p1.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: w <= 768 });
+    await sleep(200);
+    check(`${w}×${h}: a fresh open renders the catalog`, await openDialog(p1));
+    let g = await p1.evalJs(GEOM);
+    check(`${w}×${h}: the Advanced disclosure is CLOSED on a fresh open (aria-expanded=false, form hidden)`, g.adv === 'false' && !g.advBodyVisible, { adv: g.adv, advBodyVisible: g.advBodyVisible });
+    check(`${w}×${h}: nothing is running yet ⇒ the Running section is not shown`, !g.runningVisible);
+    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && g.cards.every((c) => c.visible && c.svg) && g.cards.filter((c) => c.unavailable).every((c) => c.disabled && /not on PATH|parked/i.test(c.sub)), g.cards);
+    await shot(p1, `after-fresh-open-${w}x${h}@2x.png`);
+    // the closed state has no columns to measure; open the disclosure (a real click) and measure the form
+    await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-adv-toggle');
+    await sleep(250);
+    g = await p1.evalJs(GEOM);
+    check(`${w}×${h}: the disclosure opens on click (aria-expanded=true) and the Command input has focus without scrolling the dialog`, g.adv === 'true' && g.advBodyVisible && /desktop-launch-exec/.test(g.focused || '') && g.scrollLeft === 0, { adv: g.adv, focused: g.focused, scrollLeft: g.scrollLeft });
+    assertGeom(`${w}×${h} (Advanced open)`, g, { twoColumns: w > 768 });
+    await shot(p1, `after-advanced-open-${w}x${h}@2x.png`);
+    // …and the disclosure click PERSISTED `true`; put it back so the next fresh open is a control
+    check(`${w}×${h}: the disclosure state reached user state (merge-only PATCH)`, await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppAdvancedOpen === true)`), 4000, 100));
+    await patchState({ desktopAppAdvancedOpen: false });
+  }
+  // the LATENT squeeze: three long nowrap Recent entries used to turn 1fr/1fr
+  // into 126/692 (measured) — the columns are minmax(0,1fr) now
+  await patchState({ desktopAppRecents: [1, 2, 3].map((i) => ({ exec: `/usr/local/lib/some-very-long-vendor-directory-${i}/bin/an-application-with-a-long-name`, args: ['--profile-directory=/home/someone/.config/an-application/profiles/default-profile', '--no-sandbox', '--flag-number-' + i], cwd: '/home/someone/workspace/a-project-with-a-descriptive-name/subdir', label: `Recent ${i}` })), desktopAppAdvancedOpen: true });
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1000, height: 800, deviceScaleFactor: 2, mobile: false });
+  await sleep(200);
+  check('latent case: a fresh open with three long Recent entries (persisted) and the disclosure persisted open', await openDialog(p1));
+  {
+    const g = await p1.evalJs(GEOM);
+    check('latent case: the persisted disclosure preference opens the form on a fresh open', g.adv === 'true' && g.advBodyVisible);
+    check(`latent case: three Recent rows rendered`, await p1.evalJs(`document.querySelectorAll('#desktop-launch-dialog .desktop-launch-recents .desktop-launch-app').length === 3`));
+    check(`latent case: both columns keep ≥ 38 % beside three nowrap Recent entries (${g.cols.map((c) => (100 * c.w / g.dlg.w).toFixed(0) + '%').join('/')})`, g.cols.length === 2 && g.cols.every((c) => c.w >= 0.38 * g.dlg.w), g.cols);
+    check('latent case: the catalog grid still spans the body', !!g.grid && g.grid.w >= 0.98 * g.bodyContentW);
+    check('latent case: no sideways scroll', g.scrollLeft === 0 && g.scrollWidth <= g.clientWidth && g.bodyScrollW <= g.bodyClientW + 1);
+    await shot(p1, 'after-latent-three-recents-1000x800@2x.png');
+  }
+  await patchState({ desktopAppRecents: [], desktopAppAdvancedOpen: false });
+
+  // ── §Z the intro line in zh (per-device language; reload-on-switch) ──
+  console.log('§Z the intro line speaks the device language');
+  check('control: the intro key is read off the launcher source', !!INTRO_KEY && INTRO_KEY.length > 40, INTRO_KEY);
+  check('control: the zh dictionary carries the intro key (and ja does, by the i18n-check parity)', typeof zhDict[INTRO_KEY] === 'string' && zhDict[INTRO_KEY].length > 10);
+  await p1.evalJs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
+  await openPage(p1);
+  await openDialog(p1);
+  {
+    const g = await p1.evalJs(GEOM);
+    check('in zh the intro line renders the zh translation (not the English key)', g.introVisible && g.introText === zhDict[INTRO_KEY], { got: g.introText.slice(0, 80) });
+    check('in zh the disclosure label is translated too', await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').textContent === ${JSON.stringify(zhDict['Advanced: run any command'])}`));
+    await shot(p1, 'after-intro-zh-1000x800@2x.png');
+  }
+  await p1.evalJs(`localStorage.removeItem('vibespace.lang'); true`);
+  await p1.cdp('Emulation.clearDeviceMetricsOverride');
+  await openPage(p1);
+
+  // ── §C a card click launches, and the card SHOWS it ──
+  console.log('§C one click on an app card launches it; the card shows the launching state until the record answers');
+  const catalog = (await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json())`)).registry || [];
+  const cardApp = ['gnome-calculator', 'xterm', 'gedit', 'xmessage'].map((id) => catalog.find((r) => r.id === id && r.available)).find(Boolean) || catalog.find((r) => r.available && r.category !== 'browser');
+  if (!cardApp) console.log('  SKIP §C: no available non-browser registry app on this box (the catalog is presence-checked)');
+  else {
+    await openDialog(p1);
+    // hold the ONE launch POST for 1.2 s in the page (the real request still
+    // goes out): the keeper answers the moment bring-up starts, so the
+    // launching state would otherwise last one round-trip
+    await p1.evalJs(`(() => { const of = window.fetch; window.fetch = function (u, o) { const p = of.apply(this, arguments); if (o && o.method === 'POST' && /\\/api\\/desktop\\/apps$/.test(String(u))) { window.fetch = of; return new Promise((res, rej) => p.then((r) => setTimeout(() => res(r), 1200), rej)); } return p; }; return true; })()`);
+    await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card[data-app-id="${cardApp.id}"]`);
+    await sleep(300);
+    const st = await p1.evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="${cardApp.id}"]'); if (!c) return null; const others = [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card')].filter((x) => x !== c && !x.classList.contains('is-unavailable')); return { launching: c.classList.contains('is-launching'), disabled: c.disabled, busy: c.getAttribute('aria-busy'), sub: c.querySelector('.desktop-launch-card-sub')?.textContent, spinner: !!c.querySelector('.desktop-launch-card-icon svg') && getComputedStyle(c.querySelector('.desktop-launch-card-icon svg')).animationName !== 'none', othersEnabled: others.every((x) => !x.disabled), cursor: getComputedStyle(c).cursor }; })()`);
+    check(`clicking the ${cardApp.label} card shows the launching state: is-launching, disabled, aria-busy, "Launching…", spinning icon`, !!st && st.launching && st.disabled && st.busy === 'true' && /Launching/.test(st.sub || '') && st.spinner, st);
+    check('…while the other available cards stay enabled (only the launching one is held)', !!st && st.othersEnabled);
+    if (SHOTS) await shot(p1, 'after-card-launching-1400x900.png');
+    const cwin = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app'); return w ? { id: w.id, appId: w._desktopAppId } : null; })()`), 15000);
+    check('the card launch opens a desktop-app window and closes the dialog', !!cwin && await p1.evalJs(`!document.getElementById('desktop-launch-dialog')`), cwin);
+    if (cwin) {
+      const crec = await until(() => p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 25000);
+      check(`the card-launched record (${cardApp.exec}) reaches ready`, !!crec && crec.state === 'ready', crec && crec.lastError);
+      // Running shows it, with the slot count, on the next open
+      await openDialog(p1);
+      const g = await p1.evalJs(GEOM);
+      check('with a session live, the Running section shows above the catalog with the slot count', g.runningVisible && await p1.evalJs(`/1 of \\d+ slots|1 running/.test(document.querySelector('#desktop-launch-dialog .desktop-launch-count')?.textContent || '') && document.querySelector('#desktop-launch-dialog .desktop-launch-running-sec').compareDocumentPosition(document.querySelector('#desktop-launch-dialog .desktop-launch-grid')) & Node.DOCUMENT_POSITION_FOLLOWING`));
+      await p1.evalJs(`document.getElementById('desktop-launch-dialog')?.remove(); true`);
+      // stop it and close its window so the form-launched session below is the only one
+      await p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}/stop', { method: 'POST' }).then((r) => r.json())`);
+      await until(() => p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}').then((r) => r.json()).then((r) => (r.state === 'exited' || r.state === 'failed' ? r : null))`), 15000);
+      await p1.evalJs(`app.wm.closeWindow(${JSON.stringify(cwin.id)}); true`);
+      await sleep(300);
+    }
+  }
+
+  // ── §P the disclosure: closed by default, persisted open across a reload ──
+  console.log('§P "Advanced: run any command" is collapsed by default and its open state survives a reload');
+  await openDialog(p1);
+  check('a fresh open: the disclosure is closed (nothing persisted)', await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').getAttribute('aria-expanded') === 'false'`));
+  check('the disclosure is a BUTTON with aria-expanded + aria-controls, and the cards are buttons (keyboard-reachable)', await p1.evalJs(`(() => { const t = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); const body = document.getElementById(t.getAttribute('aria-controls')); return t.tagName === 'BUTTON' && !!body && [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-card')].every((c) => c.tagName === 'BUTTON'); })()`));
+  await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-adv-toggle');
+  check('click ⇒ open, persisted', await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppAdvancedOpen === true && document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').getAttribute('aria-expanded') === 'true')`), 4000, 100));
+  await openPage(p1);
+  await openDialog(p1);
+  check('after a reload the disclosure opens by itself (user state), the form visible', await p1.evalJs(`(() => { const t = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle'); const b = document.querySelector('#desktop-launch-dialog .desktop-launch-adv-body'); return t.getAttribute('aria-expanded') === 'true' && getComputedStyle(b).display !== 'none'; })()`));
+
+  // the launch dialog: run a command from its form (the disclosure is open from §P)
+  check('the launch dialog is open', await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`));
   const availText = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-avail')?.textContent || ''`);
   check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText) && /xpra not on PATH/.test(availText), availText);
-  check('the registry lists xterm (presence-checked; disabled when absent, enabled when present)', await p1.evalJs(`(() => { const b = [...document.querySelectorAll('#desktop-launch-dialog .desktop-launch-app')].find((x) => /xterm/.test(x.textContent)); return !!b && (b.disabled === ${!facts.bins.xterm ? 'true' : 'false'}); })()`));
+  check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!facts.bins.xterm ? 'true' : 'false'}; return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
   await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); d.querySelector('.desktop-launch-exec').value = ${JSON.stringify(appBin)}; d.querySelector('.desktop-launch-args').value = ${JSON.stringify(appArgs.map((a) => (/\\s/.test(a) ? '"' + a + '"' : a)).join(' '))}; return true; })()`);
   // a TRUSTED click on Launch (CDP Input): the layout autosave only fires after
   // a real pointerdown/keydown (layout.js's anti-echo guard), exactly as a human's does
-  const rect = await p1.evalJs(`(() => { const r = document.querySelector('#desktop-launch-dialog .desktop-launch-run').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-  await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: rect.x, y: rect.y });
-  await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: rect.x, y: rect.y, button: 'left', clickCount: 1 });
-  await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: rect.x, y: rect.y, button: 'left', clickCount: 1 });
+  await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-run');
   const win = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app'); return w ? { id: w.id, appId: w._desktopAppId, title: w.title } : null; })()`), 15000);
   check('a desktop-app window appears after Launch', !!win, win);
   const appId = win && win.appId;
