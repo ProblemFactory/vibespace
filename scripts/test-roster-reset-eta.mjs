@@ -15,6 +15,14 @@
 // the owner's 1200×800 and at 375×667 in the mobile modal; the 2.245.2
 // alignment invariant (every cluster's right edge equal ±1px) and the ≤340px
 // pill swap are re-asserted so the new column cannot break them.
+// 2026-09-15 (owner: 写成 2d21h38m 的形式, 一眼扫过去就能知道哪个账号马上要可用了, 把即将
+// 刷新的两个账号 highlight 一下): §1b adds two members — D, the SOONEST reset
+// (5h in 40 min) and E, BLOCKED (7d spent at 100 %, resets in 20 h; its 5h
+// resets in 30 min and must NOT be the answer) — and asserts the one
+// full-precision label per row, that the two soonest rows (D, A) carry
+// .usage-acct-soon, the column alignment of the labels, and the 30 s tick
+// driven with an injected clock (a passed countdown goes blank and drops
+// out of the highlight).
 // VS_UI_SHOTS_DIR=<dir> saves PNGs of both viewports there.
 // NETWORK SAFETY: every fabricated credential is EXPIRED — nothing here can
 // contact a vendor. Worktree-isolated (own data/, a scratch HOME,
@@ -81,8 +89,10 @@ const sec = (ms) => Math.floor(ms / 1000);
 const A = await post('/api/accounts/subscription', { name: 'Member A' });
 const B = await post('/api/accounts/subscription', { name: 'Member B' });
 const C = await post('/api/accounts/subscription', { name: 'Member C' });
-check('three subscriptions minted', !!(A?.id && B?.id && C?.id), { A, B, C });
-for (const s of [A, B, C]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
+const AD = await post('/api/accounts/subscription', { name: 'Member D' });
+const AE = await post('/api/accounts/subscription', { name: 'Member E' });
+check('five subscriptions minted', !!(A?.id && B?.id && C?.id && AD?.id && AE?.id), { A, B, C, AD, AE });
+for (const s of [A, B, C, AD, AE]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
 const cacheDir = path.join(wt, 'data', 'usage-cache');
 fs.mkdirSync(cacheDir, { recursive: true });
 const snap = (o) => ({ overallStatus: 'allowed', fetchedAt: seedAt, source: 'cli-usage', ...o });
@@ -102,6 +112,18 @@ fs.writeFileSync(path.join(cacheDir, B.id + '.json'), JSON.stringify(snap({
 fs.writeFileSync(path.join(cacheDir, C.id + '.json'), JSON.stringify(snap({
   fiveHour: { utilization: 0.3, status: 'allowed', resetsAt: sec(seedAt - 60), state: 'running' },
   sevenDay: { utilization: 0.5, status: 'allowed', state: 'running' },
+  scopedWeekly: [],
+})));
+// D: the SOONEST reset on the roster — 5h in 40 min (20 %), 7d in 30 h (55 %) ⇒ the row label reads ≈ 40m and D is one of the two highlighted rows
+fs.writeFileSync(path.join(cacheDir, AD.id + '.json'), JSON.stringify(snap({
+  fiveHour: { utilization: 0.2, status: 'allowed', resetsAt: sec(seedAt + 40 * M), state: 'running' },
+  sevenDay: { utilization: 0.55, status: 'allowed', resetsAt: sec(seedAt + 30 * H), state: 'running' },
+  scopedWeekly: [],
+})));
+// E: BLOCKED — 7d SPENT (100 %, resets in 20 h) while its 5h (10 %) resets in 30 min: the row label must count to the 7d reset (that is when E is usable), so E is NOT among the two soonest
+fs.writeFileSync(path.join(cacheDir, AE.id + '.json'), JSON.stringify(snap({
+  fiveHour: { utilization: 0.1, status: 'allowed', resetsAt: sec(seedAt + 30 * M), state: 'running' },
+  sevenDay: { utilization: 1, status: 'allowed', resetsAt: sec(seedAt + 20 * H), state: 'running' },
   scopedWeekly: [],
 })));
 // the boot seed reads the directory ONCE; reboot so the files are the server's truth
@@ -136,7 +158,9 @@ const ROWS = (root) => `(() => {
     return {
       id: row.dataset.id, name: row.querySelector('.acct-key-name')?.textContent || '',
       rowH: R(row).height, clusterVisible: vis(cluster), clusterRight: vis(cluster) ? R(cluster).right : null,
-      miniVisible: vis(mini), miniText: mini ? mini.textContent : null,
+      miniVisible: vis(mini), miniText: mini ? mini.textContent : null, miniTitle: mini ? mini.title : null,
+      next: (() => { const n = row.querySelector('.acct-usage-next'); return n ? { present: true, text: n.textContent.trim(), ms: n.dataset.nextMs ? Number(n.dataset.nextMs) : null, blocked: n.dataset.blocked === '1', title: n.title || '', visible: vis(n), minW: getComputedStyle(n).minWidth, right: R(n).right, hasIcon: !!n.querySelector('svg'), font: getComputedStyle(n).fontSize } : null; })(),
+      soon: row.classList.contains('usage-acct-soon'), rowBg: getComputedStyle(row).backgroundColor,
       resetLine: !!row.querySelector('.acct-reset-eta'), ageText: age ? age.textContent : null, ageMinW: age ? getComputedStyle(age).minWidth : null, ageLines: age ? age.children.length : null,
       cols: [...row.querySelectorAll('.acct-donut-col')].map((col) => { const d = col.querySelector('.acct-usage-donut'), e = col.querySelector('.acct-donut-eta'); return { label: d?.querySelector('span')?.textContent, eta: e ? e.textContent : null, etaColor: e ? e.style.color : null, etaFont: e ? getComputedStyle(e).fontSize : null, etaBelow: e ? R(e).top >= R(d).bottom - 0.5 : null, etaCentred: e ? Math.abs((R(e).left + R(e).right) / 2 - (R(d).left + R(d).right) / 2) <= 1.5 : null, colH: R(col).height, colW: R(col).width, tip: d?.title || '' }; }),
     };
@@ -153,13 +177,13 @@ try {
   await evalJs(`(() => { app.sidebar.toggle(true); const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`);
   // widen the panel so the donut cluster (≥340px container) is the mode under test
   await evalJs(`(() => { app.sidebar.el.style.width = '504px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
-  const rows = await until(async () => { const r = await evalJs(ROWS(LOCAL)); return r && byId(r, A.id)?.cols?.length === 3 && byId(r, C.id)?.cols?.length ? r : null; }, 20000, 300);
-  check('the local roster renders the three members with their donut columns', !!rows, rows && rows.map((r) => [r.name, r.cols.length]));
+  const rows = await until(async () => { const r = await evalJs(ROWS(LOCAL)); return r && byId(r, A.id)?.cols?.length === 3 && byId(r, C.id)?.cols?.length && byId(r, AE.id)?.cols?.length ? r : null; }, 20000, 300);
+  check('the local roster renders the five members with their donut columns', !!rows, rows && rows.map((r) => [r.name, r.cols.length]));
   if (!rows) throw new Error('roster did not render');
   const a = byId(rows, A.id), b = byId(rows, B.id), c = byId(rows, C.id);
   // the roster also carries usage-LESS rows (the machine login with no cache, the pool) — the geometry claims are about rows that render a usage cell
   const usageRows = rows.filter((r) => r.cols.length > 0);
-  check('control: exactly the three seeded members render a usage cell', usageRows.length === 3 && [A.id, B.id, C.id].every((id) => byId(usageRows, id)), rows.map((r) => [r.name, r.cols.length]));
+  check('control: exactly the five seeded members render a usage cell', usageRows.length === 5 && [A.id, B.id, C.id, AD.id, AE.id].every((id) => byId(usageRows, id)), rows.map((r) => [r.name, r.cols.length]));
   check(`Member A: the labels under the donuts read ${expectA.join(' / ')} in bucket order (5h, 7d, Fa)`, a.cols.map((x) => x.eta).join(' ') === expectA.join(' ') && a.cols.map((x) => x.label).join(' ') === '5h 7d Fa', a.cols.map((x) => [x.label, x.eta]));
   check('Member A: each label sits BELOW its donut, centred on it', a.cols.every((x) => x.etaBelow === true && x.etaCentred === true), a.cols);
   check('Member A: the label is ≈ 8 px', a.cols.every((x) => /^(8|9)px$/.test(x.etaFont || '')), a.cols.map((x) => x.etaFont));
@@ -178,6 +202,36 @@ try {
   check('donut mode: the narrow-width pill is hidden', rows.every((r) => !r.miniVisible));
   await shot('roster-1200x800@2x.png');
 
+  // ── the per-account countdown + the two-soonest highlight (2026-09-15) ──
+  console.log('§1b one full-precision "next reset" label per account, the two soonest rows highlighted');
+  const d = byId(rows, AD.id), e = byId(rows, AE.id);
+  check('every usage row renders the label cell (empty when nothing counts) so the columns stay aligned', usageRows.every((r) => r.next?.present), usageRows.map((r) => [r.name, r.next]));
+  check(`Member A (free, 5h 42 % / 7d 87 % / Fable 96 %): the label = the EARLIEST reset in full form ("${a.next.text}" ≈ 1h5m), with the hourglass icon`, /^1h[45]m$/.test(a.next.text) && a.next.blocked === false && a.next.hasIcon === true && /next reset in 1h[45]m/.test(a.next.title), a.next);
+  check(`Member D (free): "${d.next.text}" ≈ 40m — minutes only below an hour`, /^(39|40)m$/.test(d.next.text) && d.next.blocked === false, d.next);
+  check(`Member E (7d SPENT at 100 %): the label counts to the 7d reset ("${e.next.text}" ≈ 20h0m), NOT to the sooner 5h — that is when E is usable again`, /^(20h0m|19h5\dm)$/.test(e.next.text) && e.next.blocked === true && /usable again in/.test(e.next.title) && /7d/.test(e.next.title), e.next);
+  check('Members B (empty windows) and C (passed / missing resets) carry NO countdown', b.next.text === '' && b.next.ms == null && c.next.text === '' && c.next.ms == null, [b.next, c.next]);
+  check('the two SOONEST rows (D ≈ 40m, A ≈ 65m) carry .usage-acct-soon; E (20 h), B and C do not', d.soon && a.soon && !e.soon && !b.soon && !c.soon && rows.filter((r) => r.soon).length === 2, rows.map((r) => [r.name, r.soon]));
+  check('a highlighted row\'s tooltip says why; an unhighlighted one\'s does not', /closest to a reset/.test(a.next.title) && /closest to a reset/.test(d.next.title) && !/closest to a reset/.test(e.next.title), [a.next.title, d.next.title, e.next.title]);
+  check('the highlight is a RENDERED background (a highlighted row differs from a plain one)', d.rowBg !== c.rowBg, [d.rowBg, c.rowBg]);
+  const nextRights = usageRows.map((r) => r.next.right);
+  check(`the labels form a straight column: right edges aligned ±1px (spread ${(Math.max(...nextRights) - Math.min(...nextRights)).toFixed(1)}px over ${nextRights.length} rows)`, Math.max(...nextRights) - Math.min(...nextRights) <= 1);
+  check('the label cell keeps a fixed min-width (≥ 30px) and the 9px roster font', usageRows.every((r) => parseFloat(r.next.minW) >= 30 && /^(8|9|10)px$/.test(r.next.font)), usageRows.map((r) => [r.next.minW, r.next.font]));
+  check('the existing per-donut compact tokens are untouched by the new label (A still reads 65m / 15h / 3d under its donuts)', a.cols.map((x) => x.eta).join(' ') === expectA.join(' '), a.cols.map((x) => x.eta));
+  check(`row heights stay equal and ≤ 45 px with the label in (${usageRows.map((r) => r.rowH.toFixed(1)).join(' / ')})`, Math.max(...usageRows.map((r) => r.rowH)) - Math.min(...usageRows.map((r) => r.rowH)) < 0.5 && a.rowH <= 45);
+  check('the 30 s tick is armed on the open surface', await evalJs('!!app._agentsNextTick'));
+  // the tick re-spells from the STAMPED instant — drive it with an injected clock instead of waiting
+  const t35 = await evalJs(`(() => { app._retickNextLabels(document, Date.now() + 35 * 60 * 1000); return ${ROWS(LOCAL)}; })()`);
+  const d35 = byId(t35, AD.id), a35 = byId(t35, A.id), e35 = byId(t35, AE.id);
+  check(`tick +35 min: D ≈ 5m, A ≈ 30m, E ≈ 19h25m; D and A still the two soonest`, /^[4-6]m$/.test(d35.next.text) && /^(29|30)m$/.test(a35.next.text) && /^19h2\dm$/.test(e35.next.text) && d35.soon && a35.soon && !e35.soon, [d35.next.text, a35.next.text, e35.next.text, t35.map((r) => [r.name, r.soon])]);
+  const t50 = await evalJs(`(() => { app._retickNextLabels(document, Date.now() + 50 * 60 * 1000); return ${ROWS(LOCAL)}; })()`);
+  const d50 = byId(t50, AD.id), a50 = byId(t50, A.id), e50 = byId(t50, AE.id);
+  check('tick +50 min: D\'s reset has PASSED — its label goes blank and it leaves the highlight; A (≈ 15m) and E (≈ 19h10m) are now the two soonest', d50.next.text === '' && d50.next.ms == null && !d50.soon && /^1[4-5]m$/.test(a50.next.text) && a50.soon && /^19h(09|1\d)m$|^19h\dm$/.test(e50.next.text) && e50.soon && t50.filter((r) => r.soon).length === 2, [d50.next, a50.next.text, e50.next.text, t50.map((r) => [r.name, r.soon])]);
+  // a passed countdown stays blank until the next REPAINT (the tick only re-spells stamped instants, it never
+  // re-derives one) — so the roster is repainted from its data before the later legs read it
+  await evalJs(`(() => { app._agentsRefreshHook(); return 1; })()`);
+  const back = await until(async () => { const r = await evalJs(ROWS(LOCAL)); const dd = r && byId(r, AD.id); return dd && /^(39|40)m$/.test(dd.next?.text || '') && dd.soon && byId(r, A.id)?.soon && !byId(r, AE.id)?.soon ? r : null; }, 20000, 300);
+  check('a repaint restores D\'s label and the D/A highlight from the data (a passed countdown is blank only until the next render)', !!back, back && back.map((r) => [r.name, r.next?.text, r.soon]));
+
   // ── the ≤340px pill: the tightest bucket's percentage + ITS compact eta ──
   console.log('§2 below 340px the pill shows the tightest bucket and its countdown');
   await evalJs(`(() => { app.sidebar.el.style.width = '384px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
@@ -187,6 +241,9 @@ try {
   check('pill mode: the donut cluster is hidden and the pill shown (the swap is intact)', narrow.every((r) => !r.clusterVisible) && na.miniVisible && nb.miniVisible);
   check(`Member A's pill = the tightest bucket (Fa 96%) + its compact eta ("${na.miniText}")`, /^Fa 96% · 3d$/.test((na.miniText || '').trim()), na.miniText);
   check(`Member B's pill carries no countdown (empty windows): "${nb.miniText}"`, /^(5h|7d) 0%$/.test((nb.miniText || '').trim()), nb.miniText);
+  const nd = byId(narrow, AD.id), ne = byId(narrow, AE.id);
+  check('pill mode: the per-account label is inside the hidden cluster, but the pill\'s tooltip carries it (D: next reset ≈ 40m; E: usable again ≈ 20h)', !nd.next.visible && /next reset in (39|40)m/.test(nd.miniTitle || '') && /usable again in (20h0m|19h5\dm)/.test(ne.miniTitle || ''), [nd.miniTitle, ne.miniTitle]);
+  check('pill mode: the row highlight survives the swap (D and A still marked)', nd.soon && byId(narrow, A.id).soon && !ne.soon, narrow.map((r) => [r.name, r.soon]));
   await evalJs(`(() => { app.sidebar.el.style.width = ''; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
 
   // ── 375×667: the mobile modal ──
@@ -206,7 +263,8 @@ try {
     if (geom.dlgScrollW > geom.dlgClientW) console.log(`  NOTE (pre-existing, master too): the Agents modal body min-width 380px exceeds the ${geom.dlgW.toFixed(0)}px dialog on a ${geom.vw}px phone (dialog scroll ${geom.dlgScrollW}/${geom.dlgClientW}) — outside this change`);
     const musage = mrows.filter((r) => r.cols.length > 0);
     const mode = ma.clusterVisible ? 'donut' : ma.miniVisible ? 'pill' : 'none';
-    check(`the ≤768px roster shows exactly one of the two usage forms per usage row (here: ${mode})`, mode !== 'none' && musage.length === 3 && musage.every((r) => (r.clusterVisible ? 1 : 0) + (r.miniVisible ? 1 : 0) === 1), mrows.map((r) => [r.name, r.clusterVisible, r.miniVisible]));
+    check(`the ≤768px roster shows exactly one of the two usage forms per usage row (here: ${mode})`, mode !== 'none' && musage.length === 5 && musage.every((r) => (r.clusterVisible ? 1 : 0) + (r.miniVisible ? 1 : 0) === 1), mrows.map((r) => [r.name, r.clusterVisible, r.miniVisible]));
+    check('phone: the two soonest rows (D, A) are highlighted here too', byId(mrows, AD.id)?.soon && byId(mrows, A.id)?.soon && mrows.filter((r) => r.soon).length === 2, mrows.map((r) => [r.name, r.soon]));
     if (mode === 'donut') {
       check('phone/donut: Member A carries the same three labels', ma.cols.map((x) => x.eta).join(' ') === expectA.join(' '), ma.cols.map((x) => x.eta));
       check('phone/donut: Member B carries none', mb.cols.every((x) => x.eta === null));

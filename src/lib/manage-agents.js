@@ -12,7 +12,8 @@ import { permissionRulesCaps } from './agent-meta.js';
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
 import { overageChip, spendControlChip } from './usage-source.js';
-import { ETA_MIN_MS, bucketEta, bucketMayNameDeadline, bucketResetMs } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14)
+import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
+import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
@@ -95,6 +96,62 @@ function remoteClaudeSubscriptionLoginCommand(id) {
     command: `mkdir -p "${dir}" && node "$HOME/.vibespace/bin/vibespace-claude-subscription-login.mjs" --config-dir "${dir}" --claude claude --attempt "${attempt}"`,
   };
 }
+
+// ── THE PER-ACCOUNT "next reset" LABEL (2026-09-15, owner: "usage界面还是可以
+// 展示下每个账号最近刷新时间的, 写成 2d21h38m 的形式就行, 跟之前差不多, 这样一眼扫过去
+// 就能知道哪个账号马上要可用了, 顺便可以把即将刷新的两个账号 highlight 一下").
+// `_acctUsageHtml` renders ONE full-precision countdown per row: PURE
+// `accountResetEta` picks the instant (the LATEST reset among the row's SPENT
+// buckets when it is blocked — that is when it becomes usable — else the
+// EARLIEST upcoming reset; "spent" = the pool's own hard bars, THRESH) and
+// `fullEta` spells it (`2d21h38m`). The label carries the instant it counts to
+// (`data-next-ms` — the row's own datum riding its element, never display text
+// read back) so the TWO SOONEST rows of a list can be marked once the list is
+// in the DOM (`markSoonRows` → .usage-acct-soon) and every label can be
+// re-spelled from that instant on a 30 s tick with no refetch
+// (`retickNextLabels`): the roster repaints only on broadcasts and the ⟳ click,
+// so a countdown printed once would sit stale for the life of the panel.
+const SOON_ROWS = 2;
+const nextTipFor = ({ text, label, blocked }) => blocked
+  ? t('usable again in {dur} — {bucket} is spent', { dur: text, bucket: label || '?' })
+  : t('next reset in {dur} ({bucket})', { dur: text, bucket: label || '?' });
+const nextFromEl = (lbl, now) => { const ms = Number(lbl.dataset.nextMs); return { ms, text: fullEta(ms, now), label: lbl.dataset.bucket || '?', blocked: lbl.dataset.blocked === '1' }; };
+// ALWAYS rendered (empty when there is nothing to count) at a fixed min-width,
+// so the right-anchored donut columns stay aligned across rows (the 2.245.2
+// invariant — a conditional cell shifts that row's donuts).
+const nextLabelHtml = (next) => next
+  ? `<span class="acct-usage-next" data-next-ms="${next.ms}" data-bucket="${escHtml(String(next.label || '?'))}"${next.blocked ? ' data-blocked="1"' : ''} title="${escHtml(nextTipFor(next))}">${UI_ICONS.hourglass}<span>${escHtml(next.text)}</span></span>`
+  : '<span class="acct-usage-next"></span>';
+/** Mark the SOON_ROWS rows of `list` whose countdown is smallest (fewer rows
+ *  carrying one ⇒ mark what exists; none ⇒ nothing marked). Re-titles each
+ *  label so the highlighted ones say why. Exported for the smoke. */
+export function markSoonRows(list, now = Date.now()) {
+  if (!list) return;
+  const rows = [...list.querySelectorAll('.acct-key-row')].map((row) => {
+    const lbl = row.querySelector('.acct-usage-next[data-next-ms]');
+    return { row, lbl, next: lbl ? nextFromEl(lbl, now) : null };
+  });
+  const soon = new Set(rows.filter((r) => r.next?.text).sort((a, b) => a.next.ms - b.next.ms).slice(0, SOON_ROWS).map((r) => r.row));
+  for (const { row, lbl, next } of rows) {
+    const isSoon = soon.has(row);
+    row.classList.toggle('usage-acct-soon', isSoon);
+    if (lbl && next?.text) lbl.title = nextTipFor(next) + (isSoon ? ' · ' + t('one of the two accounts closest to a reset') : '');
+  }
+}
+/** Re-spell every countdown under `root` from the instant it was stamped with
+ *  (a passed one goes blank and stops being a highlight candidate), then
+ *  re-mark the soon rows of every list. Exported for the smoke. */
+export function retickNextLabels(root, now = Date.now()) {
+  if (!root) return;
+  for (const lbl of root.querySelectorAll('.acct-usage-next[data-next-ms]')) {
+    const next = nextFromEl(lbl, now);
+    const inner = lbl.querySelector('span');
+    if (!next.text) { lbl.removeAttribute('data-next-ms'); lbl.removeAttribute('title'); if (inner) inner.textContent = ''; continue; }
+    if (inner) inner.textContent = next.text;
+  }
+  for (const list of root.querySelectorAll('.acct-list')) markSoonRows(list, now);
+}
+const NEXT_TICK_MS = 30 * 1000;
 
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -695,15 +752,22 @@ export function installManageAgents(App, ctx = {}) {
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full
     // detail in the tooltip).
-    const buckets = [['5h', u.fiveHour, est?.fiveHour], ['7d', u.sevenDay, est?.sevenDay], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name)])]
-      .map(([label, x, e]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, x]; }).filter(([, p]) => Number.isFinite(p));
+    const buckets = [['5h', u.fiveHour, est?.fiveHour, 'fiveHour'], ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])]
+      .map(([label, x, e, kind]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind]; }).filter(([, p]) => Number.isFinite(p));
+    // THE ROW'S OWN countdown (2026-09-15): one full-precision token per
+    // account — blocked ⇒ when its last spent bucket resets (the pool's hard
+    // bars say what "spent" is), else the earliest reset any bucket names.
+    // Rendered after the age cell (right-anchored ⇒ a straight column down
+    // the roster) and folded into the narrow pill's tooltip.
+    const next = accountResetEta(buckets.map(([label, p, , x, kind]) => ({ bucket: x, pct: p, label, spentPct: 100 - THRESH[kind].hard })), now);
+    const nextTip = next ? nextTipFor(next) : '';
     let mini = '', etaTitle = '';
     if (buckets.length) {
       const [wl, wp, wEst, wx] = buckets.reduce((a, b) => (b[1] > a[1] ? b : a));
       const wc = pressure(wp);
       const wEta = bucketEta(wx, now);
       if (wEta) etaTitle = `${wl} ${t('resets in {dur}', { dur: fmtEta(resetMs(wx)) })}`;
-      const tip = [buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · '), etaTitle].filter(Boolean).join(' · ');
+      const tip = [buckets.map(([l, p, isE]) => `${l} ${isE ? t('est {pct}%', { pct: p }) : p + '%'}`).join(' · '), etaTitle, nextTip].filter(Boolean).join(' · ');
       mini = `<span class="acct-usage-mini${wEst ? ' acct-mini-est' : ''}" style="color:${wc}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}</span>`;
     }
     const ageTitle = [age != null ? t('Last refreshed {n} min ago', { n: age }) : '', etaTitle].filter(Boolean).join(' · ');
@@ -716,8 +780,12 @@ export function installManageAgents(App, ctx = {}) {
     const scc = spendControlChip(spendControlState(u), { t });
     const ovHtml = (ovc ? `<span class="acct-usage-overage" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>` : '')
       + (scc ? `<span class="acct-usage-overage" title="${escHtml(scc.tip)}">${escHtml(scc.label)}</span>` : '');
-    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span></span></span>${ovHtml}${mini}`;
+    return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span></span>${nextLabelHtml(next)}</span>${ovHtml}${mini}`;
   },
+  // Re-spell every per-account countdown under `root` from its stamped instant
+  // and re-mark the soon rows — the 30 s tick's body; the clock is a parameter
+  // so the smoke can drive it forward without waiting.
+  _retickNextLabels(root, now) { retickNextLabels(root || document, now ?? Date.now()); },
 
   // ── ⟳ Refresh all (2.245.0): ONE human click fans out a per-target
   // on-demand quota refresh across every signed-in identity the machine
@@ -813,7 +881,7 @@ export function installManageAgents(App, ctx = {}) {
         else if (tg.body.host) u = this._hostOwnUsage?.[tg.body.host]?.fiveHour ? this._hostOwnUsage[tg.body.host] : null;
         else if (tg.body.account === '__global__') { u = this._rateLimit; est = this._usageEstimates?.__global__; }
         else { u = this._accountUsage?.[tg.body.account]; est = this._usageEstimates?.[tg.body.account]; }
-        if (u) cell.innerHTML = this._acctUsageHtml(u, est);
+        if (u) { cell.innerHTML = this._acctUsageHtml(u, est); markSoonRows(cell.closest('.acct-list')); }
       };
       if (!targets.length) { showToast(t('Nothing to refresh — no signed-in accounts or machines'), { type: 'error' }); return; }
       const jobs = targets.map((tg, i) => (async () => {
@@ -927,6 +995,7 @@ export function installManageAgents(App, ctx = {}) {
       : t('Each Codex session can pick its ChatGPT login (New Session dialog / card ⚙). Held in isolated logins, switchable per session; threads stay shared.');
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
+    markSoonRows(left.querySelector('.acct-list'));
     const head = document.createElement('div'); head.className = 'acct-roster-head';
     const title = document.createElement('b'); title.textContent = t('ChatGPT / OpenAI accounts');
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add ChatGPT account…');
@@ -1693,6 +1762,15 @@ export function installManageAgents(App, ctx = {}) {
       refresh();
       return true;
     };
+    // The countdown labels drift between repaints (broadcast / ⟳ only), so
+    // re-spell them from their stamped instants while the surface is in the
+    // document; the tick tears itself down once it is not (latest surface
+    // wins, like the refresh hook). Zero fetches, zero vendor calls.
+    clearInterval(this._agentsNextTick);
+    this._agentsNextTick = setInterval(() => {
+      if (!body.isConnected) { clearInterval(this._agentsNextTick); this._agentsNextTick = null; return; }
+      this._retickNextLabels(body);
+    }, NEXT_TICK_MS);
     refresh();
   },
 
@@ -1966,6 +2044,7 @@ export function installManageAgents(App, ctx = {}) {
       : t('Each session can pick its account (New Session dialog / card ⚙). Subscriptions bill your Pro/Max plan; API keys bill pay-per-use. The starred account is the default when a session doesn’t pick one.');
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
+    markSoonRows(left.querySelector('.acct-list'));
     // Redesign (2.178.0): the four Add… buttons collapse into ONE menu on the
     // roster header — they wrapped into a vertical CJK pile when narrow and
     // dominated the card even in the modal.

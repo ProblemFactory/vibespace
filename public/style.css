@@ -474,6 +474,17 @@ html, body {
    right-anchored donut columns stay aligned across rows. */
 .acct-usage-age { opacity: 0.75; font-style: italic; min-width: 6.5ch; flex: none; font-variant-numeric: tabular-nums; display: inline-flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 1px; line-height: 1.1; }
 .acct-usage-age > span:first-child { opacity: 0.8; }
+/* THE PER-ACCOUNT "next reset" countdown (2026-09-15, owner: 一眼扫过去就能知道哪个
+   账号马上要可用了): ONE full-precision token per row (`2d21h38m`, src/lib/usage-eta.js
+   fullEta / accountResetEta) after the age cell — right-anchored at a fixed
+   min-width, so it reads as a straight COLUMN down the roster and a row with
+   nothing to count keeps the donut columns aligned. The two soonest rows of a
+   list carry .usage-acct-soon (theme vars only; a var fallback, never a literal). */
+.acct-usage-next { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 9ch; flex: none; font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-secondary); }
+.acct-usage-next svg { opacity: 0.7; flex: none; }
+.acct-key-row.usage-acct-soon { background: color-mix(in srgb, var(--green, var(--accent)) 10%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green, var(--accent)) 75%, transparent); }
+.acct-key-row.usage-acct-soon .acct-usage-next { color: var(--green, var(--accent)); }
+.acct-key-row.usage-acct-soon .acct-usage-next svg { opacity: 1; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
 /* provenance/note line under the account identity (2.202.0 — inline tags
    squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row) */
