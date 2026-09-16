@@ -468,6 +468,10 @@ html, body {
    neighbours; the row grows by the label's height (≈10px) and nothing else. */
 .acct-donut-col { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; flex: none; min-height: 33px; }
 .acct-donut-eta { font-size: 8px; line-height: 10px; font-weight: 600; font-style: normal; letter-spacing: -0.2px; color: var(--text-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* 2026-09-16 (owner: 排版非常歪): the label-less column's EMPTY slot — exactly the
+   label's line height, so the donut above it sits at the same y as its labelled
+   neighbours instead of floating above a blank gap. */
+.acct-donut-eta-slot { height: 10px; flex: none; }
 /* The data-age micro cell (2.268.7). Since 2026-09-14 it is ONE line — the
    row-level "tightest bucket" countdown moved under the donut it describes —
    but the min-width stays (it fitted the widest countdown, 23h59m) so the
@@ -480,7 +484,12 @@ html, body {
    min-width, so it reads as a straight COLUMN down the roster and a row with
    nothing to count keeps the donut columns aligned. The two soonest rows of a
    list carry .usage-acct-soon (theme vars only; a var fallback, never a literal). */
-.acct-usage-next { display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 9ch; flex: none; font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-secondary); }
+/* 2026-09-16 (owner: 排版非常歪): the cell is a FIXED column wide enough for the
+   widest token (`6d23h59m` + the icon) — a min-width let a long token widen its
+   own cell and push that row's donuts LEFT (measured ±15px row to row on a real
+   roster) — and the icon is pinned to the cell's LEFT edge with the number
+   right-aligned, so both form straight columns down the roster. */
+.acct-usage-next { display: inline-flex; align-items: center; justify-content: space-between; gap: 2px; width: 12.5ch; min-width: 12.5ch; flex: none; font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text-secondary); }
 .acct-usage-next svg { opacity: 0.7; flex: none; }
 .acct-key-row.usage-acct-soon { background: color-mix(in srgb, var(--green, var(--accent)) 10%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green, var(--accent)) 75%, transparent); }
 .acct-key-row.usage-acct-soon .acct-usage-next { color: var(--green, var(--accent)); }

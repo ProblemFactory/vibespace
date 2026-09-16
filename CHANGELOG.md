@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.107 — the Manage Agents roster lines up again: every donut at one height, the "next usable" column a fixed width with the icon and the number in straight columns
+
+- Owner (2026-09-16, screenshot: "排版非常歪"): two geometry defects in the account roster. A bucket that may not name a deadline (an empty window, a passed or missing reset) rendered its donut with NO label under it, so that donut floated above a blank gap while its labelled neighbours read as donut + token — the row heights were equal (the min-height belt) but the donuts were not. And the per-account "next usable" cell was a MIN-width, so a long token (`6d14h55m`) widened its own cell and shoved that row's donut cluster and age cell left by up to ~15 px, row to row.
+- Fix: a label-less column renders an empty 10 px slot (`.acct-donut-eta-slot`) so every donut sits at the same y; `.acct-usage-next` is a fixed 12.5ch column (wide enough for `6d23h59m` + the icon) with the hourglass pinned to its left edge and the number right-aligned — both form straight columns down the roster. test-roster-reset-eta gains Member F (7d spent, resets in 6 d 14 h — the widest token) and three geometry pins: donut y spread ≤ 1 px across labelled and label-less rows, the age cell's right edge aligned across all six rows, the hourglass icons' left edges aligned. test-usage-eta 83 unchanged.
+
 ## 2.369.106 — the Communication panel, whole (P0b integrations + P1–P4): shared integration keys, Lark + Gmail read adapters over a loopback OAuth flow, push lanes that demote themselves, assign/filter/wake through spend-guard, an approval outbox, and external send with reconcile
 
 - Owner's design docs/design-communication-panel.zh.md (decisions 1–25 approved 2026-09-13), built whole on one branch (feat-comm-panel-whole, 16 commits + one adversarial verify + one fix pass), squashed here. Every chunk shipped with its own gates; the four verifier findings (a refused wake's stash re-clipped to 400 chars, vendor titles reaching a receipt block un-neutered, a boot-time double delivery, a permanent Gmail pull failure re-armed every minute) are fixed with controls.

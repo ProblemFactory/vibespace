@@ -734,7 +734,11 @@ export function installManageAgents(App, ctx = {}) {
         ? `${escHtml(tipName || label)}: ${p}% · ${escHtml(t('est {pct}%', { pct: pair.estPct }))}${pair.rolled ? ' · ' + escHtml(t('window reset since last reading')) : ''}`
         : `${escHtml(tipName || label)}: ${p}%`) + escHtml(etaTip(x));
       const eta = bucketEta(x, now);
-      const etaHtml = eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '';
+      // 2026-09-16 (owner: 排版非常歪): a label-less column renders an EMPTY SLOT of
+      // the label's height, so every donut sits at the same y whether or not
+      // its bucket names a deadline (the min-height alone kept the ROW height
+      // equal while the donut floated above an empty gap).
+      const etaHtml = eta ? `<span class="acct-donut-eta" style="color:${eff >= 80 ? c : 'var(--text-secondary)'}">${escHtml(eta)}</span>` : '<span class="acct-donut-eta-slot" aria-hidden="true"></span>';
       return `<span class="acct-donut-col"><span class="acct-usage-donut${pair.estPct != null ? ' acct-donut-est' : ''}" title="${tip}" style="background:${bg}"><span>${escHtml(label)}</span></span>${etaHtml}</span>`;
     };
     const parts = [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];

@@ -91,8 +91,9 @@ const B = await post('/api/accounts/subscription', { name: 'Member B' });
 const C = await post('/api/accounts/subscription', { name: 'Member C' });
 const AD = await post('/api/accounts/subscription', { name: 'Member D' });
 const AE = await post('/api/accounts/subscription', { name: 'Member E' });
-check('five subscriptions minted', !!(A?.id && B?.id && C?.id && AD?.id && AE?.id), { A, B, C, AD, AE });
-for (const s of [A, B, C, AD, AE]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
+const AF = await post('/api/accounts/subscription', { name: 'Member F' });
+check('six subscriptions minted', !!(A?.id && B?.id && C?.id && AD?.id && AE?.id && AF?.id), { A, B, C, AD, AE, AF });
+for (const s of [A, B, C, AD, AE, AF]) fs.writeFileSync(path.join(wt, 'data', 'subs', s.id, '.credentials.json'), expiredCreds);
 const cacheDir = path.join(wt, 'data', 'usage-cache');
 fs.mkdirSync(cacheDir, { recursive: true });
 const snap = (o) => ({ overallStatus: 'allowed', fetchedAt: seedAt, source: 'cli-usage', ...o });
@@ -124,6 +125,13 @@ fs.writeFileSync(path.join(cacheDir, AD.id + '.json'), JSON.stringify(snap({
 fs.writeFileSync(path.join(cacheDir, AE.id + '.json'), JSON.stringify(snap({
   fiveHour: { utilization: 0.1, status: 'allowed', resetsAt: sec(seedAt + 30 * M), state: 'running' },
   sevenDay: { utilization: 1, status: 'allowed', resetsAt: sec(seedAt + 20 * H), state: 'running' },
+  scopedWeekly: [],
+})));
+// F: BLOCKED for DAYS — 7d spent (100 %, resets in 6 d 14 h) with a 5h that is fresh (0 %, EMPTY): the row label is the WIDEST shape
+// the roster prints (`6d14h0m` — 2026-09-16, owner: 排版非常歪: a long token used to widen its own cell and shove that row's donuts left)
+fs.writeFileSync(path.join(cacheDir, AF.id + '.json'), JSON.stringify(snap({
+  fiveHour: { utilization: 0, status: 'allowed', resetsAt: sec(seedAt + 5 * H), state: 'empty' },
+  sevenDay: { utilization: 1, status: 'allowed', resetsAt: sec(seedAt + 6 * D + 14 * H), state: 'running' },
   scopedWeekly: [],
 })));
 // the boot seed reads the directory ONCE; reboot so the files are the server's truth
@@ -162,7 +170,8 @@ const ROWS = (root) => `(() => {
       next: (() => { const n = row.querySelector('.acct-usage-next'); return n ? { present: true, text: n.textContent.trim(), ms: n.dataset.nextMs ? Number(n.dataset.nextMs) : null, blocked: n.dataset.blocked === '1', title: n.title || '', visible: vis(n), minW: getComputedStyle(n).minWidth, right: R(n).right, hasIcon: !!n.querySelector('svg'), font: getComputedStyle(n).fontSize } : null; })(),
       soon: row.classList.contains('usage-acct-soon'), rowBg: getComputedStyle(row).backgroundColor,
       resetLine: !!row.querySelector('.acct-reset-eta'), ageText: age ? age.textContent : null, ageMinW: age ? getComputedStyle(age).minWidth : null, ageLines: age ? age.children.length : null,
-      cols: [...row.querySelectorAll('.acct-donut-col')].map((col) => { const d = col.querySelector('.acct-usage-donut'), e = col.querySelector('.acct-donut-eta'); return { label: d?.querySelector('span')?.textContent, eta: e ? e.textContent : null, etaColor: e ? e.style.color : null, etaFont: e ? getComputedStyle(e).fontSize : null, etaBelow: e ? R(e).top >= R(d).bottom - 0.5 : null, etaCentred: e ? Math.abs((R(e).left + R(e).right) / 2 - (R(d).left + R(d).right) / 2) <= 1.5 : null, colH: R(col).height, colW: R(col).width, tip: d?.title || '' }; }),
+      donutTops: [...row.querySelectorAll('.acct-donut-col .acct-usage-donut')].map((d) => R(d).top - R(row).top), ageRight: age ? R(age).right : null, iconLeft: (() => { const i = row.querySelector('.acct-usage-next svg'); return i ? R(i).left : null; })(), nextW: (() => { const n = row.querySelector('.acct-usage-next'); return n ? R(n).width : null; })(),
+      cols: [...row.querySelectorAll('.acct-donut-col')].map((col) => { const d = col.querySelector('.acct-usage-donut'), e = col.querySelector('.acct-donut-eta'), slot = col.querySelector('.acct-donut-eta-slot'); return { label: d?.querySelector('span')?.textContent, eta: e ? e.textContent : null, slotH: slot ? R(slot).height : null, etaColor: e ? e.style.color : null, etaFont: e ? getComputedStyle(e).fontSize : null, etaBelow: e ? R(e).top >= R(d).bottom - 0.5 : null, etaCentred: e ? Math.abs((R(e).left + R(e).right) / 2 - (R(d).left + R(d).right) / 2) <= 1.5 : null, colH: R(col).height, colW: R(col).width, tip: d?.title || '' }; }),
     };
   });
 })()`;
@@ -183,7 +192,7 @@ try {
   const a = byId(rows, A.id), b = byId(rows, B.id), c = byId(rows, C.id);
   // the roster also carries usage-LESS rows (the machine login with no cache, the pool) — the geometry claims are about rows that render a usage cell
   const usageRows = rows.filter((r) => r.cols.length > 0);
-  check('control: exactly the five seeded members render a usage cell', usageRows.length === 5 && [A.id, B.id, C.id, AD.id, AE.id].every((id) => byId(usageRows, id)), rows.map((r) => [r.name, r.cols.length]));
+  check('control: exactly the six seeded members render a usage cell', usageRows.length === 6 && [A.id, B.id, C.id, AD.id, AE.id, AF.id].every((id) => byId(usageRows, id)), rows.map((r) => [r.name, r.cols.length]));
   check(`Member A: the labels under the donuts read ${expectA.join(' / ')} in bucket order (5h, 7d, Fa)`, a.cols.map((x) => x.eta).join(' ') === expectA.join(' ') && a.cols.map((x) => x.label).join(' ') === '5h 7d Fa', a.cols.map((x) => [x.label, x.eta]));
   check('Member A: each label sits BELOW its donut, centred on it', a.cols.every((x) => x.etaBelow === true && x.etaCentred === true), a.cols);
   check('Member A: the label is ≈ 8 px', a.cols.every((x) => /^(8|9)px$/.test(x.etaFont || '')), a.cols.map((x) => x.etaFont));
@@ -200,6 +209,15 @@ try {
   const edges = rows.filter((r) => r.clusterRight != null).map((r) => r.clusterRight);
   check(`2.245.2 invariant kept: every visible cluster's right edge is aligned ±1px (spread ${(Math.max(...edges) - Math.min(...edges)).toFixed(1)}px over ${edges.length} rows)`, edges.length >= 3 && Math.max(...edges) - Math.min(...edges) <= 1);
   check('donut mode: the narrow-width pill is hidden', rows.every((r) => !r.miniVisible));
+  // ── 2026-09-16 (owner: 排版非常歪) — three geometry pins over rows WITH and WITHOUT labels, short and 6-day tokens ──
+  const tops = usageRows.flatMap((r) => r.donutTops);
+  check(`every donut sits at the same y inside its row, labelled or not (spread ${(Math.max(...tops) - Math.min(...tops)).toFixed(1)}px over ${tops.length} donuts) — a label-less column carries a 10px slot`, Math.max(...tops) - Math.min(...tops) <= 1 && usageRows.every((r) => r.cols.every((x) => x.eta != null || x.slotH === 10)), usageRows.map((r) => [r.name, r.donutTops, r.cols.map((x) => x.slotH)]));
+  const f = byId(rows, AF.id);
+  check(`Member F (7d spent, resets in 6 d 14 h): the widest token the roster prints ("${f.next.text}")`, /^6d1[34]h\d+m$/.test(f.next.text) && f.next.blocked === true, f.next);
+  const ageRights = usageRows.map((r) => r.ageRight);
+  check(`the label cell is a FIXED column: the age cell's right edge is aligned ±1px across all six rows, 6-day token included (spread ${(Math.max(...ageRights) - Math.min(...ageRights)).toFixed(1)}px)`, Math.max(...ageRights) - Math.min(...ageRights) <= 1, usageRows.map((r) => [r.name, r.next.text, r.ageRight, r.nextW]));
+  const iconLefts = usageRows.filter((r) => r.iconLeft != null).map((r) => r.iconLeft);
+  check(`the hourglass icons form a straight column (left edges aligned ±1px over ${iconLefts.length} labelled rows)`, iconLefts.length >= 4 && Math.max(...iconLefts) - Math.min(...iconLefts) <= 1, usageRows.map((r) => [r.name, r.iconLeft]));
   await shot('roster-1200x800@2x.png');
 
   // ── the per-account countdown + the two-soonest highlight (2026-09-15) ──
@@ -210,7 +228,7 @@ try {
   check(`Member D (free): "${d.next.text}" ≈ 40m — minutes only below an hour`, /^(39|40)m$/.test(d.next.text) && d.next.blocked === false, d.next);
   check(`Member E (7d SPENT at 100 %): the label counts to the 7d reset ("${e.next.text}" ≈ 20h0m), NOT to the sooner 5h — that is when E is usable again`, /^(20h0m|19h5\dm)$/.test(e.next.text) && e.next.blocked === true && /usable again in/.test(e.next.title) && /7d/.test(e.next.title), e.next);
   check('Members B (empty windows) and C (passed / missing resets) carry NO countdown', b.next.text === '' && b.next.ms == null && c.next.text === '' && c.next.ms == null, [b.next, c.next]);
-  check('the two SOONEST rows (D ≈ 40m, A ≈ 65m) carry .usage-acct-soon; E (20 h), B and C do not', d.soon && a.soon && !e.soon && !b.soon && !c.soon && rows.filter((r) => r.soon).length === 2, rows.map((r) => [r.name, r.soon]));
+  check('the two SOONEST rows (D ≈ 40m, A ≈ 65m) carry .usage-acct-soon; E (20 h), F (6 d), B and C do not', d.soon && a.soon && !e.soon && !byId(rows, AF.id).soon && !b.soon && !c.soon && rows.filter((r) => r.soon).length === 2, rows.map((r) => [r.name, r.soon]));
   check('a highlighted row\'s tooltip says why; an unhighlighted one\'s does not', /closest to a reset/.test(a.next.title) && /closest to a reset/.test(d.next.title) && !/closest to a reset/.test(e.next.title), [a.next.title, d.next.title, e.next.title]);
   check('the highlight is a RENDERED background (a highlighted row differs from a plain one)', d.rowBg !== c.rowBg, [d.rowBg, c.rowBg]);
   const nextRights = usageRows.map((r) => r.next.right);
@@ -263,7 +281,7 @@ try {
     if (geom.dlgScrollW > geom.dlgClientW) console.log(`  NOTE (pre-existing, master too): the Agents modal body min-width 380px exceeds the ${geom.dlgW.toFixed(0)}px dialog on a ${geom.vw}px phone (dialog scroll ${geom.dlgScrollW}/${geom.dlgClientW}) — outside this change`);
     const musage = mrows.filter((r) => r.cols.length > 0);
     const mode = ma.clusterVisible ? 'donut' : ma.miniVisible ? 'pill' : 'none';
-    check(`the ≤768px roster shows exactly one of the two usage forms per usage row (here: ${mode})`, mode !== 'none' && musage.length === 5 && musage.every((r) => (r.clusterVisible ? 1 : 0) + (r.miniVisible ? 1 : 0) === 1), mrows.map((r) => [r.name, r.clusterVisible, r.miniVisible]));
+    check(`the ≤768px roster shows exactly one of the two usage forms per usage row (here: ${mode})`, mode !== 'none' && musage.length === 6 && musage.every((r) => (r.clusterVisible ? 1 : 0) + (r.miniVisible ? 1 : 0) === 1), mrows.map((r) => [r.name, r.clusterVisible, r.miniVisible]));
     check('phone: the two soonest rows (D, A) are highlighted here too', byId(mrows, AD.id)?.soon && byId(mrows, A.id)?.soon && mrows.filter((r) => r.soon).length === 2, mrows.map((r) => [r.name, r.soon]));
     if (mode === 'donut') {
       check('phone/donut: Member A carries the same three labels', ma.cols.map((x) => x.eta).join(' ') === expectA.join(' '), ma.cols.map((x) => x.eta));
