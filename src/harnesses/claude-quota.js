@@ -149,7 +149,15 @@ function parseOAuthUsage(u) {
     const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     if (haveScoped.has(name.toLowerCase())) continue;
     haveScoped.add(name.toLowerCase());
-    const util = pctRaw > 1 ? pctRaw / 100 : pctRaw;
+    // THE UNIT IS THE PRODUCER'S FACT, NEVER A GUESS FROM THE VALUE (2.369.99,
+    // inc-mu3giy8t-7k36): this endpoint reports PERCENT integers — the plan
+    // buckets above and the `limits[]` branch divide by 100 unconditionally —
+    // but this loop used to guess (`> 1 ? /100 : as-is`), so a vendor
+    // `utilization: 1` (ONE percent) became 1.0 = 100 %, the pool called a
+    // brand-new member exhausted and bounced nine conversations off it twice
+    // in three minutes. Measured on this instance's 139 control-source scoped
+    // readings: every value is an exact hundredth, none is 0.01, ten are 1.0.
+    const util = Math.min(1, Math.max(0, pctRaw / 100));
     scopedWeekly.push({
       name, utilization: util,
       resetsAt: v.resets_at ? Math.floor(Date.parse(v.resets_at) / 1000) || Number(v.resets_at) || 0 : 0,
@@ -279,7 +287,11 @@ function toLimitSet(raw, { identity = null, source = null, nowMs = null, familyO
     const pct = Number(sp.pct);
     const win = quotaModel.makeWindow({
       kind: 'monthly', minutes: 0,
-      usedPct: Number.isFinite(pct) ? Math.max(0, Math.min(100, pct <= 1 ? pct * 100 : pct)) : null,
+      // `spend.pct` is PERCENT — parseOAuthUsage stores `extra_usage.utilization`
+      // as the endpoint sends it (the same 0-100 scale as five_hour) — so it is
+      // clamped, never re-guessed (the retired `pct <= 1 ? pct * 100 : pct` read
+      // one percent of overage as a hundred; 2.369.99, same class as above).
+      usedPct: Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : null,
       resetsAt: sp.resetsAt, measuredAt: at,
     });
     const i = set.limits.findIndex((l) => l.limitId === 'overage');

@@ -125,6 +125,27 @@ What's contributing to your limits usage?`;
     && o.scopedWeekly.some((w) => w.name === 'Claude Fable' && near(w.utilization, 0.33)) && o.scopedWeekly.some((w) => w.name === 'Opus' && w.utilization === 1 && w.severity === 'exceeded')
     && o.spend?.used === 12.34 && o.spend.limit === null && o.overallStatus === 'allowed', o);
   ok('the REST parse is the SAME function usage-routes binds as _parseUsage (moved, not copied)', /const _parseUsage = claudeQuota\.parseOAuthUsage;/.test(read('src/usage-routes.js')) && !/function _parseUsage\(/.test(read('src/usage-routes.js')));
+  // (d) THE UNIT IS NOT GUESSED FROM THE VALUE (2.369.99, inc-mu3giy8t-7k36):
+  // a brand-new member's first turn left its Fable cap at exactly ONE percent,
+  // the control-channel read carried `seven_day_fable: { utilization: 1 }`, and
+  // the retired `> 1 ? /100 : as-is` guess stored 1.0 — a spent cap on an
+  // account that had used nothing. The property: every percent integer maps
+  // to exactly n/100, and the incident's own shape is 0.01, not 1.
+  {
+    const named = (n) => cl.normalize({ five_hour: { utilization: 3, resets_at: '2026-08-08T05:00:00.000Z' }, seven_day: { utilization: 0, resets_at: '2026-08-12T00:00:00.000Z' },
+      seven_day_fable: { utilization: n, resets_at: '2026-08-12T00:00:00.000Z' } }).scopedWeekly.find((w) => w.name === 'Fable');
+    const bad = [];
+    for (let n = 0; n <= 100; n++) { const w = named(n); if (!w || !near(w.utilization, n / 100)) bad.push([n, w && w.utilization]); }
+    ok('a named seven_day_<model> field is PERCENT for every integer 0..100 (the incident shape, 1, is 0.01 and normal)', bad.length === 0 && near(named(1).utilization, 0.01) && named(1).severity === 'normal' && named(100).severity === 'exceeded', JSON.stringify(bad.slice(0, 5)));
+    const retired = (pctRaw) => (pctRaw > 1 ? pctRaw / 100 : pctRaw);   // the shipped rule, verbatim, as the control
+    ok('NEGATIVE CONTROL: the retired guess reads ONE percent as a spent cap and every other integer correctly — exactly the boundary this incident sat on',
+      retired(1) === 1 && retired(0) === 0 && retired(2) === 0.02 && retired(100) === 1, JSON.stringify([retired(1), retired(2)]));
+    // the overage twin: `spend.pct` is the endpoint's percent, clamped, never re-scaled
+    const ov = (n) => cl.toLimitSet(cl.normalize({ five_hour: { utilization: 3, resets_at: '2026-08-08T05:00:00.000Z' }, seven_day: { utilization: 0, resets_at: '2026-08-12T00:00:00.000Z' },
+      extra_usage: { is_enabled: true, used_credits: 100, monthly_limit: 10000, utilization: n, currency: 'USD', resets_at: '2026-09-01T00:00:00.000Z' } }), { identity: 'x', nowMs: Date.parse('2026-08-08T00:00:00Z') });
+    const usedPctOf = (set) => { const l = (set?.limits || []).find((x) => x.limitId === 'overage'); return l && l.windows && l.windows[0] ? l.windows[0].usedPct : null; };
+    ok('overage spend at ONE percent stays 1 %, at 45 stays 45, at 0 stays 0 (the same class, second site)', usedPctOf(ov(1)) === 1 && usedPctOf(ov(45)) === 45 && usedPctOf(ov(0)) === 0, JSON.stringify([usedPctOf(ov(1)), usedPctOf(ov(45)), usedPctOf(ov(0))]));
+  }
   ok('unknown shapes → null', cl.normalize(null) === null && cl.normalize({}) === null && cl.normalize({ rate_limits: null }) === null && cl.normalize(42) === null);
 }
 
