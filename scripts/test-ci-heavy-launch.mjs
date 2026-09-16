@@ -176,9 +176,13 @@ try {
     //     LAUNCH so none of the three can pass vacuously:
     //       · an in-flight run for an ANCESTOR of the sha being pushed is
     //         killed — the newer commit subsumes it;
-    //       · a run for a commit that is NOT an ancestor is left alone —
-    //         superseding it would throw away a verdict nobody is replacing,
-    //         so it queues on the machine lock instead;
+    //       · a run for a commit that is NOT an ancestor but IS the tip of a
+    //         live branch is left alone — superseding it would throw away a
+    //         verdict nobody is replacing, so it queues on the machine lock;
+    //       · (2026-09-15) a run for a commit on NO branch — amended or rebased
+    //         away, nothing can push it — is superseded like an ancestor:
+    //         measured on d0e7a8d4's log, 40 of its 74 minutes were spent
+    //         waiting behind exactly such a run;
     //       · a pid that does not READ as a heavy run is never killed, even
     //         for an ancestor. Superseding SIGTERMs a process GROUP, so the
     //         cost of a recycled pid (or of a pid file an older ci.mjs wrote
@@ -209,24 +213,49 @@ try {
     // reach the ancestry test at all, which is exactly the kind of control
     // that passes without testing anything. `commit-tree` mints a real,
     // dangling commit off HEAD~1: it exists, and HEAD does not descend from it.
+    const mintEnv = { ...GIT_ENV, GIT_AUTHOR_NAME: 'gate test', GIT_AUTHOR_EMAIL: 'gate@test.local', GIT_COMMITTER_NAME: 'gate test', GIT_COMMITTER_EMAIL: 'gate@test.local' };
     const minted = spawnSync('git', ['-C', REPO, 'commit-tree', 'HEAD^{tree}', '-p', (p1.stdout || '').trim() || 'HEAD', '-m', 'test-ci-heavy-launch: a commit HEAD does not descend from'],
-      { encoding: 'utf-8', env: { ...GIT_ENV, GIT_AUTHOR_NAME: 'gate test', GIT_AUTHOR_EMAIL: 'gate@test.local', GIT_COMMITTER_NAME: 'gate test', GIT_COMMITTER_EMAIL: 'gate@test.local' } });
-    if (p1.status === 0 && p2.status === 0 && minted.status === 0) {
+      { encoding: 'utf-8', env: mintEnv });
+    // A SECOND dangling commit: this one stays on no branch (the abandoned
+    // shape), while the first is made the tip of a throwaway LOCAL BRANCH so
+    // it reads as live. Per-pid name; deleted below.
+    const minted2 = spawnSync('git', ['-C', REPO, 'commit-tree', 'HEAD^{tree}', '-p', (p1.stdout || '').trim() || 'HEAD', '-m', 'test-ci-heavy-launch: an ABANDONED commit (on no branch)'],
+      { encoding: 'utf-8', env: mintEnv });
+    const liveRef = `refs/heads/vs-ci-launch-live-${process.pid}`;
+    // A THIRD dangling commit, reachable ONLY from a remote-tracking ref that
+    // is not origin/master (2026-09-16, verifier): the shape of a branch that
+    // was pushed and then had its LOCAL branch deleted — routine worktree
+    // cleanup here — whose verdict is still wanted. Per-pid name; deleted below.
+    const minted3 = spawnSync('git', ['-C', REPO, 'commit-tree', 'HEAD^{tree}', '-p', (p1.stdout || '').trim() || 'HEAD', '-m', 'test-ci-heavy-launch: a commit reachable ONLY from a remote-tracking ref'],
+      { encoding: 'utf-8', env: mintEnv });
+    const remoteRef = `refs/remotes/origin/vs-ci-launch-remote-${process.pid}`;
+    if (p1.status === 0 && p2.status === 0 && minted.status === 0 && minted2.status === 0 && minted3.status === 0) {
       const OLD = p1.stdout.trim(), OLD2 = p2.stdout.trim();
       const NOTANC = minted.stdout.trim();
+      const ABANDONED = minted2.stdout.trim();
+      const REMOTE = minted3.stdout.trim();
+      spawnSync('git', ['-C', REPO, 'update-ref', liveRef, NOTANC], { env: GIT_ENV });
+      spawnSync('git', ['-C', REPO, 'update-ref', remoteRef, REMOTE], { env: GIT_ENV });
+      const refsContaining = (s) => (spawnSync('git', ['-C', REPO, 'for-each-ref', '--contains', s, 'refs/heads/', 'refs/remotes/'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '').trim();
+      ok(refsContaining(NOTANC).includes(liveRef) && refsContaining(ABANDONED) === '',
+        `the live control is the tip of a local branch (${liveRef.slice(11)}) and the abandoned control is on NO branch (${ABANDONED.slice(0, 8)}) — the two shapes the launcher must tell apart`);
+      ok(refsContaining(REMOTE).includes(remoteRef) && !refsContaining(REMOTE).includes('refs/heads/') && !/refs\/remotes\/origin\/master/.test(refsContaining(REMOTE)),
+        `the remote-only control is reachable from ${remoteRef.slice(13)} and from no local branch and not origin/master (${REMOTE.slice(0, 8)})`);
       ok(spawnSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', NOTANC, SHA], { env: GIT_ENV }).status !== 0
         && spawnSync('git', ['-C', REPO, 'cat-file', '-e', NOTANC + '^{commit}'], { env: GIT_ENV }).status === 0,
         `the NON-ancestor control is a commit this repo knows but HEAD does not descend from (${NOTANC.slice(0, 8)}) — so it reaches the ancestry test`);
       const vpid = parkedHeavy(OLD);       // a real heavy run for an ancestor ⇒ must die
-      const opid = parkedHeavy(NOTANC);    // a real heavy run, not an ancestor ⇒ must live
+      const opid = parkedHeavy(NOTANC);    // a real heavy run, not an ancestor, a LIVE branch tip ⇒ must live
+      const apid = parkedHeavy(ABANDONED); // a real heavy run for a sha on NO branch ⇒ must die (2026-09-15)
+      const rpid = parkedHeavy(REMOTE);    // a real heavy run for a sha ONLY a remote-tracking ref reaches ⇒ must live (2026-09-16)
       const spid = sleeper();              // NOT a heavy run, but an ancestor ⇒ must live
       // The parked runs must actually BE parked heavy runs before we judge them.
       const reads = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').replace(/\0/g, ' '); } catch { return ''; } };
-      for (let i = 0; i < 100 && !(reads(vpid).includes('ci.mjs') && reads(opid).includes('ci.mjs')); i++) await sleep(50);
-      ok(reads(vpid).includes('--heavy') && reads(opid).includes('--heavy'),
+      for (let i = 0; i < 100 && !(reads(vpid).includes('ci.mjs') && reads(opid).includes('ci.mjs') && reads(apid).includes('ci.mjs') && reads(rpid).includes('ci.mjs')); i++) await sleep(50);
+      ok(reads(vpid).includes('--heavy') && reads(opid).includes('--heavy') && reads(apid).includes('--heavy') && reads(rpid).includes('--heavy'),
         'the supersede fixtures are REAL parked `ci.mjs --heavy` processes (the predicate reads /proc)');
-      ok(!reads(spid).includes('ci.mjs'), '…and the third fixture deliberately is not one');
-      for (const [s, p] of [[OLD, vpid], [NOTANC, opid], [OLD2, spid]]) {
+      ok(!reads(spid).includes('ci.mjs'), '…and the sleeper fixture deliberately is not one');
+      for (const [s, p] of [[OLD, vpid], [NOTANC, opid], [ABANDONED, apid], [REMOTE, rpid], [OLD2, spid]]) {
         fs.writeFileSync(path.join(dir, `${s}.pid`), JSON.stringify({ sha: s, pid: p, startedAt: Date.now() }));
       }
       const sup = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy-launch', SHA, '--markers=' + dir, '--only=' + SLICE, ...lockArgs],
@@ -239,18 +268,27 @@ try {
       ok(dead, `…and the process it named is gone (pid ${vpid})`);
       let oAlive = false; try { process.kill(opid, 0); oAlive = true; } catch { }
       ok(oAlive && fs.existsSync(path.join(dir, `${NOTANC}.pid`)),
-        'NEG: the SAME launch leaves the run for a NON-ancestor alone (pid alive, pid file kept)');
+        'NEG: the SAME launch leaves the run for a NON-ancestor that is a LIVE branch tip alone (pid alive, pid file kept) — two branches may be pushed');
+      let aDead = false;
+      for (let i = 0; i < 100 && !aDead; i++) { try { process.kill(apid, 0); await sleep(50); } catch { aDead = true; } }
+      ok(aDead && !fs.existsSync(path.join(dir, `${ABANDONED}.pid`)) && /on no local branch/.test(serr),
+        `…and SUPERSEDES the run for a sha on NO branch, saying why (pid ${apid} gone, pid file removed) — the 40-minute wait behind an amended-away sha`);
       let sAlive = false; try { process.kill(spid, 0); sAlive = true; } catch { }
       ok(sAlive && /NOT superseding/.test(serr),
         'NEG: …and refuses to kill an ANCESTOR whose pid does not read as a heavy run, out loud (queues instead)');
-      for (const p of [opid, spid, parkHolder]) { try { process.kill(-p, 'SIGKILL'); } catch { try { process.kill(p, 'SIGKILL'); } catch { } } }
-      for (const s of [NOTANC, OLD2]) { try { fs.unlinkSync(path.join(dir, `${s}.pid`)); } catch { } }
+      let rAlive = false; try { process.kill(rpid, 0); rAlive = true; } catch { }
+      ok(rAlive && fs.existsSync(path.join(dir, `${REMOTE}.pid`)),
+        `NEG (2026-09-16): the SAME launch leaves the run for a sha reachable ONLY from a remote-tracking ref alone (pid ${rpid} alive, pid file kept) — pushed, local branch deleted, verdict still wanted`);
+      for (const p of [opid, apid, rpid, spid, parkHolder]) { try { process.kill(-p, 'SIGKILL'); } catch { try { process.kill(p, 'SIGKILL'); } catch { } } }
+      for (const s of [NOTANC, ABANDONED, REMOTE, OLD2]) { try { fs.unlinkSync(path.join(dir, `${s}.pid`)); } catch { } }
+      spawnSync('git', ['-C', REPO, 'update-ref', '-d', liveRef], { env: GIT_ENV });
+      spawnSync('git', ['-C', REPO, 'update-ref', '-d', remoteRef], { env: GIT_ENV });
       // The launch we just made is real; let it finish before the temp dir goes.
       for (let i = 0; i < 300 && fs.existsSync(path.join(dir, `${SHA}.pid`)); i++) await sleep(1000);
     } else {
       // A shallow CI checkout has no HEAD~2, and a runner with no git identity
       // cannot mint the control commit. SKIP loudly rather than pretend.
-      console.log(`  – SKIP supersede legs: need HEAD~1/HEAD~2 and a mintable control commit (rev-parse ${p1.status}/${p2.status}, commit-tree ${minted.status}: ${(minted.stderr || '').trim().slice(0, 80)})`);
+      console.log(`  – SKIP supersede legs: need HEAD~1/HEAD~2 and a mintable control commit (rev-parse ${p1.status}/${p2.status}, commit-tree ${minted.status}/${minted2.status}/${minted3.status}: ${(minted.stderr || '').trim().slice(0, 80)})`);
       try { process.kill(parkHolder, 'SIGKILL'); } catch { }
     }
     try { fs.rmSync(parkDir, { recursive: true, force: true }); } catch { }
@@ -485,9 +523,11 @@ try {
       };
       const crashArm = (ciSource) => {
         const s = stubGateRepo('crash', { ciSource, suites });
+        // ONE lane: the pre-fix control's "RED never runs" is a statement
+        // about ORDER, which only the sequential tier makes.
         const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + s.sha, '--isolate',
           '--only=' + OOM + ',' + RED, '--lock=' + s.lock, '--lock-wait-ms=20000'],
-          { cwd: s.root, encoding: 'utf-8', env: GIT_ENV, timeout: 180000 });
+          { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_CI_LANES: '1' }, timeout: 180000 });
         const out = (r.stdout || '') + (r.stderr || '');
         const red = s.markers().find((f) => f === `${s.sha}.red`);
         return { status: r.status, out, markers: s.markers(), root: s.root,
@@ -710,6 +750,112 @@ try {
     const hAllGone = runHeavy(stubGateRepo('absent-heavy-all', { ciSource: CI_SRC_A, suites: { [H_PRESENT]: PASS_STUB }, commits: 1 }), H_ABSENT);
     ok(!hAllGone.rec && /every suite in this run is absent/.test(hAllGone.out) && /NO VERDICT WRITTEN/.test(hAllGone.out),
       'a heavy run in which EVERY suite was absent writes NO marker and says so (a green for zero suites is the vacuous verdict `--only` already refuses on a typo)');
+  }
+
+  // ── (5) LANES (2026-09-15): the same stub tier over 3 lanes and over 1 —
+  //     the marker records the lane count and every suite's lane, and the
+  //     parallel wall is a fraction of the sequential one.
+  {
+    const heavyNames = SUITES.filter((s) => s.tier === 'heavy' && s.name !== SLICE).map((s) => s.name);
+    const [A1, A2, A3] = heavyNames;
+    const CI_SRC_L = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+    const SLEEPER = "setTimeout(() => console.log('ALL PASS (1)'), 1500);\n";
+    const laneArm = (lanes) => {
+      const s = stubGateRepo('lanes', { ciSource: CI_SRC_L, suites: { [A1]: SLEEPER, [A2]: SLEEPER, [A3]: SLEEPER } });
+      const t = Date.now();
+      const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + s.sha, '--isolate',
+        '--only=' + [A1, A2, A3].join(','), '--lock=' + s.lock, '--lock-wait-ms=20000'],
+        { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_CI_LANES: String(lanes) }, timeout: 180000 });
+      const out = (r.stdout || '') + (r.stderr || '');
+      let rec = null;
+      try { rec = JSON.parse(fs.readFileSync(path.join(s.root, 'data', 'ci-heavy', `${s.sha}.green`), 'utf-8')); } catch { }
+      // the suites' own wall, read off the run's lane summary (the build and
+      // the worktree add are the same in both arms)
+      const suitesMs = (() => { const m = /lanes: \d+ parallel \((\d+)s\)/.exec(out); return m ? Number(m[1]) * 1000 : null; })();
+      try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
+      return { status: r.status, out, rec, ms: Date.now() - t, suitesMs };
+    };
+    const par = laneArm(3), seq = laneArm(1);
+    ok(par.status === 0 && !!par.rec && par.rec.lanes === 3, `three 1.5 s stubs over 3 lanes: GREEN, marker says lanes: 3 (exit ${par.status})`);
+    ok(!!par.rec && new Set((par.rec.timings || []).map((t) => t.lane)).size === 3 && (par.rec.timings || []).length === 3,
+      `…and every suite's timing names its lane (${JSON.stringify((par.rec && par.rec.timings || []).map((t) => t.lane))})`);
+    ok(/\[lane [123]\]/.test(par.out) && /3 parallel lane\(s\)/.test(par.out), 'the log tags each suite line with its lane and announces the lane count');
+    ok(seq.status === 0 && !!seq.rec && seq.rec.lanes === 1 && (seq.rec.timings || []).every((t) => t.lane === '1'), 'CONTROL: VIBESPACE_CI_LANES=1 is the sequential tier (every suite on lane 1)');
+    ok(par.suitesMs !== null && seq.suitesMs !== null && par.suitesMs <= 3000 && seq.suitesMs >= 4000,
+      `the parallel suites' wall is one stub, the sequential one is three (parallel ${par.suitesMs}ms, sequential ${seq.suitesMs}ms)`);
+  }
+
+  // ── (6) THE LANES REAP (2026-09-16, the 2.369.104 integration): master wired
+  //     the scratch-orphan reaper into the SYNC runner only, and the heavy tier
+  //     runs every suite through runSuiteAsync — so a merged tier would have
+  //     reaped nothing between suites (the verifier reproduced 0 calls inside
+  //     laneWorker). A stub suite leaves a detached node behind under a
+  //     scratch dir it then removes (the exact leak shape: 504 device daemons)
+  //     and a second one under a scratch dir that STAYS — the control that the
+  //     lanes' sweep is the evidence-based rule, not "kill what the suite spawned".
+  {
+    const heavyNames = SUITES.filter((s) => s.tier === 'heavy' && s.name !== SLICE).map((s) => s.name);
+    const [R1] = heavyNames;
+    const CI_SRC_R = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+    const pidsFile = path.join(dir, 'orphans.json');
+    const ORPHAN_STUB = `import fs from 'node:fs'; import { spawn } from 'node:child_process';
+const mint = (tag) => fs.mkdtempSync('/tmp/vs-reapstub-' + tag + '-' + process.pid + '-');
+const leave = (d) => { const c = spawn(process.execPath, ['-e', 'setTimeout(()=>{},120000)'], { cwd: d, detached: true, stdio: 'ignore', env: { ...process.env, HOME: d } }); c.unref(); return c.pid; };
+const gone = mint('gone'), kept = mint('kept');
+const out = { gone: leave(gone), kept: leave(kept), keptDir: kept };
+fs.rmSync(gone, { recursive: true, force: true });
+fs.writeFileSync(process.env.VS_TEST_ORPHAN_PIDS, JSON.stringify(out));
+console.log('ALL PASS (1)');
+`;
+    const s = stubGateRepo('reap', { ciSource: CI_SRC_R, suites: { [R1]: ORPHAN_STUB } });
+    const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + s.sha, '--isolate',
+      '--only=' + R1, '--lock=' + s.lock, '--lock-wait-ms=20000'],
+      { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_CI_LANES: '2', VS_TEST_ORPHAN_PIDS: pidsFile }, timeout: 180000 });
+    const out = (r.stdout || '') + (r.stderr || '');
+    let o = null; try { o = JSON.parse(fs.readFileSync(pidsFile, 'utf-8')); } catch { }
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+    ok(r.status === 0 && !!o && o.gone > 0 && o.kept > 0, `the stub tier ran GREEN over the lanes and left two detached processes behind (exit ${r.status})`);
+    ok(!!o && !alive(o.gone), `the orphan whose scratch dir is GONE is dead when the tier ends (pid ${o && o.gone}) — the lanes reaped it`);
+    ok(/\[ci\] reaping 1 scratch orphan process\(es\) from 1 finished scratch dir\(s\): \/tmp\/vs-reapstub-gone-/.test(out), '…and the log says so, naming the dir (the sync runner\'s exact line)');
+    ok(!!o && alive(o.kept), `CONTROL: the detached process whose scratch dir STAYS (young, a possible run in flight) is spared (pid ${o && o.kept})`);
+    if (o) { try { process.kill(o.kept, 'SIGKILL'); } catch { } try { fs.rmSync(o.keptDir, { recursive: true, force: true }); } catch { } }
+    try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
+  }
+
+  // ── (7) THE AFFECTED TIER, END TO END, PUSHED FROM ANOTHER CHECKOUT
+  //     (2026-09-16, verifier): the selection used to be computed from the
+  //     working tree BEFORE the scratch worktree existed. A branch rewires a
+  //     heavy-named suite onto src/b.js (c1) and then changes src/b.js (c2);
+  //     the tier is run for c2 from the BASE checkout, where that suite still
+  //     imports nothing — the old code selected nothing but the always rows.
+  {
+    const heavyNames = SUITES.filter((s) => s.tier === 'heavy' && !s.always && !(s.reads && s.reads.length) && s.name !== SLICE).map((s) => s.name);
+    const [X1, X2] = heavyNames;
+    const CI_SRC_X = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+    const PASS = "console.log('ALL PASS (1)');\n";
+    const s = stubGateRepo('affected', { ciSource: CI_SRC_X, suites: { [X1]: PASS, [X2]: PASS } });
+    const genv = { ...GIT_ENV, ...GIT_ID };
+    const w = (rel, body) => { fs.mkdirSync(path.dirname(path.join(s.root, rel)), { recursive: true }); fs.writeFileSync(path.join(s.root, rel), body); };
+    const commitAll = (msg) => { spawnSync('git', ['-C', s.root, 'add', '-A'], { env: genv }); spawnSync('git', ['-C', s.root, 'commit', '-q', '-m', msg], { env: genv }); return (spawnSync('git', ['-C', s.root, 'rev-parse', 'HEAD'], { encoding: 'utf-8', env: genv }).stdout || '').trim(); };
+    w('src/b.js', 'module.exports = 1;\n');
+    const base = commitAll('base: src/b.js, no suite reads it');
+    spawnSync('git', ['-C', s.root, 'checkout', '-q', '-b', 'feat'], { env: genv });
+    w(`scripts/${X1}.mjs`, "await import('../src/b.js');\n" + PASS);
+    const c1 = commitAll(`c1: ${X1} now reads src/b.js`);
+    w('src/b.js', 'module.exports = 2;\n');
+    const c2 = commitAll('c2: src/b.js changes');
+    spawnSync('git', ['-C', s.root, 'checkout', '-q', '--detach', base], { env: genv }); // the "other checkout": the base, where X1 reads nothing
+    const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy', '--sha=' + c2, '--isolate', '--affected', `--range=${c1}..${c2}`,
+      '--lock=' + s.lock, '--lock-wait-ms=20000'], { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, VIBESPACE_CI_LANES: '2' }, timeout: 180000 });
+    const out = (r.stdout || '') + (r.stderr || '');
+    let rec = null; try { rec = JSON.parse(fs.readFileSync(path.join(s.root, 'data', 'ci-heavy', `${c2}.green`), 'utf-8')); } catch { }
+    ok(r.status === 0 && !!rec && rec.scope === 'affected', `the affected tier for c2, run from the base checkout, is GREEN with scope: affected (exit ${r.status}, ${rec && rec.scope})`);
+    ok(!!rec && (rec.selected || []).includes(X1) && !(rec.selected || []).includes(X2),
+      `…and it selected the suite that reads src/b.js AT c2 and not its sibling — the graph is the gated commit's, not the checkout's (selected: ${rec && (rec.selected || []).join(', ')})`);
+    ok(new RegExp(`· ${X1} ← loads src/b\\.js`).test(out) && out.indexOf('impact scope') > out.indexOf('release gate — HEAVY tier'),
+      'the log says why, and says it after the header (the selection is made after checkout, not up front)');
+    try { spawnSync('git', ['-C', s.root, 'worktree', 'prune'], { env: GIT_ENV }); } catch { }
+    try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
   }
 
   // An unknown commit is refused rather than stamped.

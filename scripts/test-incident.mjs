@@ -137,12 +137,18 @@ if (CHROME) {
     if (!btn || !ta) return { ok: false, btn: !!btn, ta: !!ta };
     ta.value = 'ui e2e note';
     btn.click();
-    for (let i = 0; i < 40; i++) {
+    // A BOUNDED POLL, 30 s (2026-09-16): the capture freezes transcripts and
+    // fingerprints them server-side, and under the heavy tier's parallel lanes
+    // that took longer than the 10 s this leg used to allow — the tier paid a
+    // retry for a render the box's load made late (the 2b49b4a7 class). The
+    // assertion is unchanged; only WHEN the leg looks is bounded differently.
+    for (let i = 0; i < 120; i++) {
       await new Promise((r) => setTimeout(r, 250));
       const idEl = ov?.querySelector('.dialog-body .mono');
       if (idEl && /^inc-/.test(idEl.textContent.trim())) return { ok: true, id: idEl.textContent.trim() };
     }
-    return { ok: false, stuck: document.querySelector('.dialog-body')?.textContent?.slice(0, 120) };
+    // say what the overlay we CLICKED shows, not the first dialog in the document
+    return { ok: false, stuck: ov?.querySelector('.dialog-body')?.textContent?.slice(0, 120) };
   })()`);
   check('dialog renders the Capture button AND click-through yields an inc- id', ui?.ok === true, JSON.stringify(ui));
   if (ui?.ok) {

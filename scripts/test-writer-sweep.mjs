@@ -108,6 +108,38 @@ for (const [name, s] of [['claude', script], ['codex', writerSweepScript('rid-ab
   ok(!perProcessLs.test(s) && !wholeArgvIdentity.test(s), `${name}: no per-process ls fork and no whole-argv substring identity test`);
 }
 
+// ── NARROW THE WALK TO THE PIDS UNDER TEST (2026-09-15, the heavy-tier lane
+// work). This suite drove ~14 WHOLE-BOX /proc fd scans and ~5 whole-box
+// `lsof +D` — one per assertion — and each one walks every fd on the machine:
+// MEASURED here with a heavy tier running (3,860 processes): a /proc scan
+// 28 s, one `lsof +D` 40 s (discovery-facts records 12–24 s idle), i.e. the
+// whole 414 s this suite cost the tier, and §9's own 30 s budget crashed the
+// suite under that load. Every one of those scans was looking for a holder
+// THIS SUITE SPAWNED, so the RUN copy substitutes exactly ONE literal — the
+// single `/proc/[0-9]*` glob the pin above proves, or the `lsof … +D` verb —
+// for the suite's own pids (`lsof -a -p` ANDs the selection), the same
+// one-literal re-root the vs_argv and no-/proc controls already use: the
+// chunking, the awk attribution, the identity ladder, the kill and the
+// terminator are all the shipped text, walked over real /proc entries.
+// Measured: 5 ms per narrowed chunk, 86 ms per narrowed lsof. §6 keeps its ONE
+// whole-box sweep on purpose — it is the positive control that a holder is
+// found among every process on the box, and its wall time is printed.
+const narrowProc = (shell, pids) => {
+  const hits = (shell.match(/\/proc\/\[0-9\]\*/g) || []).length;
+  if (hits !== 1) throw new Error(`narrowProc: expected exactly one /proc glob, found ${hits}`);
+  // a REPLACER FUNCTION: the shell's own `$$` is a String.replace escape
+  // for one `$` in a replacement string (the `$0`/`$&` lesson below, one
+  // character over) — measured: `/proc/$`, the holder never found
+  const list = [...new Set(pids)].map((p) => `/proc/${p}`).join(' ');
+  return shell.replace('/proc/[0-9]*', () => list);
+};
+const narrowLsof = (shell, pids) => {
+  const list = [...new Set(pids)].filter((p) => /^\d+$/.test(String(p))).join(',');
+  const out = shell.replace(/\blsof (-F[a-z]+) \+D/g, (m, fmt) => `lsof -a -p ${list} ${fmt} +D`);
+  if (out === shell) throw new Error('narrowLsof: no `lsof -F… +D` to narrow');
+  return out;
+};
+
 // ── 1b. THE AWK PID ATTRIBUTION (r2, defect 2) — functional, with a negative
 // control. `/proc/self/fd` is appended to EVERY chunk on purpose (`ls -l` only
 // prints the `<dir>:` headers the attribution reads when it has more than one
@@ -125,20 +157,26 @@ if (fs.existsSync('/proc/self')) {
   const target = path.join(adir, 'rid-awk.jsonl');
   fs.writeFileSync(target, '{}\n');
   // $1 = the file (no quoting games); $$ names the only process that really has it.
+  // The walk is NARROWED to the shell's own pid plus a HELPER it forks with
+  // fd 9 CLOSED: `ls` sorts its operands, so the sticky-`p` control needs a
+  // numeric fd dir that sorts AFTER the shell's for the inherited fd under
+  // /proc/self/fd to be mis-attributed to (the whole-box walk had 400 per
+  // chunk; a later pid is a larger number). The helper holds nothing, so the
+  // fixed scan still names exactly one pid.
   const probe = (fns) => {
-    const out = execFileSync('sh', ['-c', `exec 9< "$1"\necho "SHELL:$$"\n${fns}\nvs_fd_scan '/rid-awk[.]jsonl'\n`, 'sh', target],
+    const out = execFileSync('sh', ['-c', `exec 9< "$1"\necho "SHELL:$$"\n( exec 9<&-; exec sleep 30 ) &\nH=$!\n${fns}\nvs_fd_scan '/rid-awk[.]jsonl'\nkill "$H" 2>/dev/null\n`, 'sh', target],
       { encoding: 'utf8', timeout: 120000 });
     const shellPid = /SHELL:(\d+)/.exec(out)?.[1] || '';
     const pids = new Set(out.split('\n').filter((l) => l.includes('\t')).map((l) => l.split('\t')[0]));
     return { shellPid, pids };
   };
-  const fixed = probe(fdScanShellFns());
+  const fixed = probe(narrowProc(fdScanShellFns(), ['$$', '$H']));
   // the OLD awk, restored one line at a time — same scan, sticky `p`
   const stickyFns = fdScanShellFns().replace(
     '$0 ~ "^/.*:$" { p = ""; if ($0 ~ "^/proc/[0-9]+/fd:$") p = substr($0, 7, length($0) - 10); next }',
     '$0 ~ "^/proc/[0-9]+/fd:$" { p = substr($0, 7, length($0) - 10); next }');
   ok(stickyFns !== fdScanShellFns(), 'the sticky-`p` negative control really is the shipped awk with only that line reverted');
-  const buggy = probe(stickyFns);
+  const buggy = probe(narrowProc(stickyFns, ['$$', '$H']));
   ok(fixed.pids.has(fixed.shellPid), 'awk attribution: the shell that really holds the fd IS found (the control is not vacuous — the scan reached it)');
   ok(fixed.pids.size === 1, 'awk attribution: NOBODY ELSE is named — an fd inherited by `ls` under /proc/self/fd is attributed to no pid at all',
     { named: [...fixed.pids], shell: fixed.shellPid });
@@ -746,7 +784,10 @@ if (fs.existsSync('/proc/self')) {
   fs.mkdirSync(day, { recursive: true });
   const rollout = path.join(day, `rollout-2026-09-05T10-00-00-${tid}.jsonl`);
   fs.writeFileSync(rollout, JSON.stringify({ timestamp: '2026-09-05T10:00:00.000Z', type: 'session_meta', payload: { id: tid, cwd: home, originator: 'claude-code-webui', source: 'vscode' } }) + '\n');
-  const runScript = (script) => parseSwept(execFileSync('sh', ['-c', script], { encoding: 'utf8', timeout: 30000, env: { ...process.env, HOME: home } }));
+  const live = new Set([process.pid]);
+  const note = (p) => { live.add(p.pid); return p; };
+  const pidsNow = () => [...live];
+  const runScript = (script) => parseSwept(execFileSync('sh', ['-c', narrowProc(script, pidsNow())], { encoding: 'utf8', timeout: 30000, env: { ...process.env, HOME: home } }));
   const runSweep = (opts = {}) => runScript(writerSweepScript(tid, shq, { backend: 'codex', ...opts }));
   const idle = 'setTimeout(() => {}, 60000)';
   // B-3185: the fixture's EXECUTABLE has to be the codex binary, because that
@@ -762,7 +803,7 @@ if (fs.existsSync('/proc/self')) {
     const fd = fs.openSync(file, 'r');
     const p = spawn(cmd, ['-e', idle, ...argvTail], { stdio: [fd, 'ignore', 'ignore'], env: { ...process.env, ...extraEnv } });
     fs.closeSync(fd);
-    return p;
+    return note(p);
   };
   const exited = (p) => new Promise((res) => { if (p.exitCode !== null || p.signalCode) return res(p.signalCode); p.once('exit', (c, s) => res(s)); });
   const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -779,7 +820,7 @@ if (fs.existsSync('/proc/self')) {
   ok(runSweep({ protectSids: ['sess-other'] }).includes(String(h2.pid)), 'the same holder IS swept once its session is not live (protect mismatch)');
   await exited(h2);
 
-  const h3 = spawn(process.execPath, ['-e', idle, 'codex', 'resume', tid], { stdio: 'ignore' });
+  const h3 = note(spawn(process.execPath, ['-e', idle, 'codex', 'resume', tid], { stdio: 'ignore' }));
   await sleep(300);
   ok(runSweep().includes(String(h3.pid)), 'a `codex resume <threadId>` argv (external TUI) is swept by the argv leg');
   await exited(h3);
@@ -794,7 +835,7 @@ if (fs.existsSync('/proc/self')) {
   const h5 = holder(rollout, {}, process.execPath);
   // The codex twin of the B-3185 report: `tail -f` on a rollout has '/.codex/'
   // in its argv, which is all the old `*codex*` substring guard demanded.
-  const h5b = spawn('tail', ['-f', rollout], { stdio: 'ignore' });
+  const h5b = note(spawn('tail', ['-f', rollout], { stdio: 'ignore' }));
   await sleep(300);
   const sweptRun = runSweep();
   ok(!sweptRun.includes(String(h5.pid)) && alive(h5.pid), 'a NON-codex holder of the rollout is never killed (executable guard)');
@@ -829,7 +870,7 @@ if (fs.existsSync('/proc/self')) {
     catch (e) { return { status: e.status ?? -1, out: String(e.stdout || '') }; }
   };
   const runCo = () => {
-    const r = runCoRaw(coLeg);
+    const r = runCoRaw(narrowProc(coLeg, pidsNow()));
     coStatuses.push(r.status);
     return r.out.split('\n').filter((l) => l.startsWith('CO ')).map((l) => l.slice(3).trim());
   };
@@ -889,14 +930,14 @@ if (fs.existsSync('/proc/self')) {
     'the no-/proc control changed ONLY the /proc probe — the lsof body under test is the shipped text');
   const haveLsof = (() => { try { execFileSync('sh', ['-c', 'command -v lsof'], { stdio: 'ignore' }); return true; } catch { return false; } })();
   if (!haveLsof) console.log('  · lsof absent — the CO leg\'s no-/proc branch legs below are vacuous here');
-  const runCoNoProc = (script) => runCoRaw(script).out.split('\n').filter((l) => l.startsWith('CO ')).map((l) => l.slice(3).trim());
+  const runCoNoProc = (script) => runCoRaw(narrowLsof(script, pidsNow())).out.split('\n').filter((l) => l.startsWith('CO ')).map((l) => l.slice(3).trim());
   // a holder whose NAME merely contains `codex` — the shape comm-substring
   // confuses. A COPY of /bin/sh (not a symlink: node renames its own comm).
   const keeperBin = path.join(home, 'bin', 'codex-keeper');
   fs.copyFileSync(fs.realpathSync('/bin/sh'), keeperBin);
   fs.chmodSync(keeperBin, 0o755);
   const keeperFd = fs.openSync(rollout, 'r');
-  const coKeeper = spawn(keeperBin, ['-c', 'read x'], { stdio: ['pipe', 'ignore', 'ignore', keeperFd] });
+  const coKeeper = note(spawn(keeperBin, ['-c', 'read x'], { stdio: ['pipe', 'ignore', 'ignore', keeperFd] }));
   fs.closeSync(keeperFd);
   await sleep(300);
   ok(!haveLsof || runCoNoProc(noProcCo).includes(rollout),
@@ -921,9 +962,9 @@ if (fs.existsSync('/proc/self')) {
   // discovery script's LAST command, and the `while read` loop now present in
   // the else-branch exits with its last iteration's status — which, in the
   // state just asserted (the only holder is NOT the CLI), is non-zero.
-  ok(!haveLsof || runCoRaw(noProcCo).status === 0,
+  ok(!haveLsof || runCoRaw(narrowLsof(noProcCo, pidsNow())).status === 0,
     'the no-/proc branch EXITS 0 even when its last row names a non-CLI holder (the trailing `:` covers the branch the r3 port gave a `while` loop)',
-    { status: haveLsof ? runCoRaw(noProcCo).status : null });
+    { status: haveLsof ? runCoRaw(narrowLsof(noProcCo, pidsNow())).status : null });
   coKeeper.kill('SIGKILL');
   coMaster.kill('SIGKILL');
   fs.rmSync(home, { recursive: true, force: true });

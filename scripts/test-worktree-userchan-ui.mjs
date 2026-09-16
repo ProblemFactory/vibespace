@@ -23,11 +23,12 @@
 //
 // SKIPs cleanly (exit 0) without chrome. Worktree-isolated like every other
 // boot smoke — the repo's own data/ is PRODUCTION (#127 class).
-import { execSync, spawn } from 'node:child_process';
+import { execSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gitEnvFrom } from './git-env.mjs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import { scratch } from './scratch.mjs';
@@ -317,6 +318,20 @@ console.log('— §17: no literal colours in the new CSS');
   // bundle — test-architecture enforces that), and `npm run build:agentd`
   // rewrites src/agentd/version.js AFTER esbuild, so it is newer than a
   // perfectly fresh bundle every single time.
+  // ONLY THE COMMIT'S OWN SOURCES (2026-09-16, the heavy tier's parallel
+  // lanes): ten suites write gitignored PATCHED COPIES into src/ (the
+  // `src/server/vs-*-mut-*.js` and `src/lib/.chat-view.*prefix-*.js` families)
+  // and under the lanes one of them is routinely on disk while this check
+  // runs — measured on the first 4-lane run: `bundle 09:30:20 < src 09:30:22`,
+  // a retry paid for a file the build never read. The build's inputs are the
+  // TRACKED files, so that is the set asked (`git ls-files`, through the
+  // sanitized git env because a suite runs inside somebody else's git process);
+  // a tree git cannot list (an export) falls back to the directory walk.
+  const tracked = (() => {
+    const r = spawnSync('git', ['-C', repo, 'ls-files', '-z', '--', 'src'], { encoding: 'utf-8', env: gitEnvFrom(process.env) });
+    if (r.status !== 0 || !r.stdout) return null;
+    return r.stdout.split('\0').filter((rel) => rel && /\.(js|css)$/.test(rel) && !rel.startsWith('src/agentd/'));
+  })();
   const newest = (dir) => {
     let t = 0;
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -328,7 +343,9 @@ console.log('— §17: no literal colours in the new CSS');
   };
   const bundle = path.join(repo, 'public/bundle.js');
   const built = fs.existsSync(bundle) ? fs.statSync(bundle).mtimeMs : 0;
-  const src = newest(path.join(repo, 'src'));
+  const src = tracked
+    ? tracked.reduce((t, rel) => { try { return Math.max(t, fs.statSync(path.join(repo, rel)).mtimeMs); } catch { return t; } }, 0)
+    : newest(path.join(repo, 'src'));
   ok('the built bundle is at least as new as src/ — the browser legs below measure public/bundle.js, so a stale one measures the previous build (run `npm run build`)',
     built >= src, `bundle ${built ? new Date(built).toISOString() : 'MISSING'} < src ${new Date(src).toISOString()}`);
 }

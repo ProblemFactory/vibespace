@@ -80,7 +80,17 @@ await evaljs(`(() => { localStorage.setItem('wbRecentHost', 'ghost-host-id'); lo
 await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.sidebar && window.app.sidebar.listEl)').catch(() => false)) break; await sleep(400); }
 await evaljs(`(() => { window.app.sidebar.toggle(true); return 1; })()`);
-await sleep(1500); // roster fetch + heal render pass
+// roster fetch + heal render pass. A FIXED sleep here was a claim about the
+// machine's load: under the heavy tier's parallel lanes (2026-09-15, four
+// headless chromes at once) 1.5 s was not enough for the boot to reach the
+// workbench render, and the suite went red on a heal that had simply not run
+// yet. Poll for the healed state instead, bounded — the assertions below still
+// decide, this loop only decides WHEN to look.
+for (let i = 0; i < 100; i++) {
+  const healed = await evaljs(`(() => { const sb = window.app.sidebar; sb._render(); return Array.isArray(sb._hostsData?.hosts) && sb._wbRecentHost === '' && sb._wbHistoryHost === ''; })()`).catch(() => false);
+  if (healed) break;
+  await sleep(300);
+}
 
 const st = await evaljs(`(() => {
   const sb = window.app.sidebar;

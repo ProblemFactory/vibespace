@@ -1401,6 +1401,7 @@ export default {
   "flaky": "不稳定",
   "no verdict": "无判定",
   "ran without the machine lock": "未持有本机锁即运行",
+  "affected scope: {n} suites selected by that push": "受影响范围：该次推送选中 {n} 个套件",
   "result": "结果",
   "duration": "耗时",
   "{n} suites": "{n} 个套件",

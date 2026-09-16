@@ -80,7 +80,18 @@
 //                                        dirty one is refused up front (exit 2)
 //                                        unless --dirty-ok says "no verdict, run
 //                                        it anyway"
-//   node scripts/ci.mjs --heavy-launch <sha>   detach a heavy run for <sha>
+//   node scripts/ci.mjs --heavy-launch <sha> [--range=<old>..<new>]
+//                                        detach a heavy run for <sha>. With a
+//                                        range it is the AFFECTED tier (only the
+//                                        suites whose inputs the range touches)
+//                                        unless the newest FULL green marker is
+//                                        older than 24 h — then the FULL tier.
+//                                        THE LAUNCHER DECIDES, no cron.
+//   node scripts/ci.mjs --heavy --affected --range=<old>..<new>
+//                                        (alias --heavy-affected) the impact-
+//                                        scoped tier by hand; --range=<sha> alone
+//                                        means "everything <sha> has that no
+//                                        remote-tracking ref has"
 //   node scripts/ci.mjs --check-heavy    exit 1 if a red heavy blocks a push
 //   node scripts/ci.mjs --status         last heavy result per sha
 //   node scripts/ci.mjs --census         the tier census self-test
@@ -90,6 +101,8 @@
 // re-running one suite after a fix; an unknown name is a loud exit 2),
 // --lock=<file> + --lock-wait-ms=<n> (the machine lock — a test drives its own
 // so it never contends with, or waits for, a real heavy run).
+// VIBESPACE_CI_LANES=<n> overrides the heavy tier's parallel lane count (1 = the
+// pre-2026-09-15 strictly sequential tier — what a test that asserts ORDER wants).
 // Exit codes: 0 green · 1 red · 2 refused (dirty tree / bad --only) · 3 the
 // tier did not run (never got the machine lock) · 4 ABORTED (superseded, the
 // lock taken, or terminated from outside — it stopped mid-tier). 0 and 1 are
@@ -237,7 +250,7 @@ export const SUITES = [
   // here rather than in fast even when they are cheap: the fast tier is the
   // CURATED pre-push battery, and an unaudited suite earns a place in it
   // deliberately, with a measurement — never by default.
-  { name: 'test-paging-collapse-guard', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (14ms)' }, // COLLAPSED-GEOMETRY guard, pinned against the REAL incident numbers (inc-mso818ry). The scroll tracer recorded 14 extendTop landings in the affected window: 11…
+  { name: 'test-paging-collapse-guard', tier: 'heavy', reads: ['src/lib/chat-view.js'], why: 'adopted 2026-09-07, was in NO runner (14ms)' }, // COLLAPSED-GEOMETRY guard, pinned against the REAL incident numbers (inc-mso818ry). The scroll tracer recorded 14 extendTop landings in the affected window: 11…
   { name: 'test-get-usage-parse', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (16ms)' }, // B-7edc: get_usage control-request builder + rate_limits→cache parser. Pure pieces — the LIVE ws-correlation is validated separately on a real chat session (the…
   { name: 'test-permission-mode-ack', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (16ms)' }, // Regression test for the tracked set_permission_mode flow (2.195.0). CLI ground truth (verified live on claude 2.1.215, scripts in the 2.195.0 changelog entry)…
   { name: 'test-resume-desktop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (16ms)' }, // Pool cold-restart + resume must keep each conversation on its HOME desktop (a fleet user, inc-mso43urh: a pool target switch cold-restarted sessions across
@@ -249,7 +262,7 @@ export const SUITES = [
   { name: 'test-fallback-policy', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (18ms)' }, // claude.disableModelFallback contract test (2.228.0). Covers the three mechanisms: (1) spawn — buildSessionArgs merges switchModelsOnFlag:false into ONE --settings…
   { name: 'test-model-fallback-notice', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (18ms)' }, // REAL record shape captured from the transcript
   { name: 'test-usage-anchors', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (18ms)' }, // Dead-reckoning data foundation: identity key precedence (survives sub remove+re-add), anchor dedup by fetchedAt, cost-delta pairing.
-  { name: 'test-creds-symlink-swap', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (19ms)' }, // Design guard for pooled hot-swap (B-6217/B-71c3): the session's credential directory is a SYMLINK to the canonical account dir; swapping accounts = re-pointing that…
+  { name: 'test-creds-symlink-swap', tier: 'heavy', reads: ['src/account-material.js'], why: 'adopted 2026-09-07, was in NO runner (19ms)' }, // Design guard for pooled hot-swap (B-6217/B-71c3): the session's credential directory is a SYMLINK to the canonical account dir; swapping accounts = re-pointing that…
   { name: 'test-session-id-race', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (19ms)' }, // Session id / socket-name COUNTER RACE (2026-08-11, proven in production data on a fleet instance: four sessions minted ids sess-21/22/31/34 all carried sockName…
   { name: 'test-message-ids', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (20ms) — server' }, // R0 — content-derived message ids (docs/design-three-tier.md). The old id was `${sessionId}:${counter}` — every parser rebuild renumbered everything, which forces…
   { name: 'test-page-attachments', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (21ms)' }, // Regression test for CLI-injected PDF page images (2.194.0). A Read on a PDF ships the extracted pages into model context as image-only user records: LIVE = one…
@@ -267,14 +280,14 @@ export const SUITES = [
   { name: 'test-transcript-switchover', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (36ms) — server' }, // R3/R5 switchover ladders: the device is PRIMARY, every fallback rung still works, and the live-session overlay is never bypassed.
   { name: 'test-usage-link', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (37ms)' }, // Smoke for the global↔named usage-account link (usage-routes ingestPassiveUsage): org-uuid evidence must beat a stale ~/.claude.json email, and a proven-different
   { name: 'test-context-diff', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (50ms)' }, // Unit tests for TaskGroupManager.snapshotForDiff / renderContextDiff — the diff-based Task Group update injection (2.113.0). Pure store-level tests (no server)…
-  { name: 'test-task-scan', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (53ms)' }, // Task-tool scan regression (2.180.1 — real report: a long-completed task showed as in_progress in Steps forever): (a) COMPACTION re-appends retained records…
+  { name: 'test-task-scan', tier: 'heavy', reads: ['src/session-store.js'], why: 'adopted 2026-09-07, was in NO runner (53ms)' }, // Task-tool scan regression (2.180.1 — real report: a long-completed task showed as in_progress in Steps forever): (a) COMPACTION re-appends retained records…
   { name: 'test-claude-subscription-login', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (70ms) — cli' },
   { name: 'test-layout-history', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (81ms)' }, // Layout rollback points (2.296.0). A layout-destroying bug was previously unrecoverable: sessions survive, but WHERE they lived is gone, and when the damage EMPTIES…
   { name: 'test-discovery-facts', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (98ms) — server' }, // ONE interpretation of discovery facts, any machine (CS separation, 2.278.0). The collectors legitimately differ (local rich sweep / daemon snapshot / ssh script…
   { name: 'test-group-admin', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (99ms)' }, // Route-level smoke for /api/agent/group-admin (2.132.0, issue #21 — manager agent delegation). Fake express + real TaskGroupManager in a temp dir. Asserts the DOUBLE…
   { name: 'test-prompt-context', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (119ms) — cli' }, // Route-level smoke for /api/agent/prompt-context — the diff-update delivery (2.113.0). Drives setupAgentRoutes with a fake express app + a real TaskGroupManager in a…
   { name: 'test-agentd-reexec-argv', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (154ms) — server' }, // Self-upgrade re-exec must PRESERVE the original argv (2.185.2, real owner↔Mac dial outage). The dial transport reads `--dial <url> --dial-token <t>` from…
-  { name: 'test-node-bootstrap', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (226ms) — server' }, // Node-free pairing: the installer's node RESOLUTION + PROVISIONING contract (2.246.0). Hermetic — a local HTTP fixture stands in for nodejs.org/dist, so
+  { name: 'test-node-bootstrap', tier: 'heavy', reads: ['scripts/vibespace-agentd-install.sh'], why: 'adopted 2026-09-07, was in NO runner (226ms) — server' }, // Node-free pairing: the installer's node RESOLUTION + PROVISIONING contract (2.246.0). Hermetic — a local HTTP fixture stands in for nodejs.org/dist, so
   { name: 'test-gmail-sync', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (324ms)' }, // Offline e2e for the Gmail sync engine (2.134.0): a mock Gmail API served on 127.0.0.1 + a patched API base exercises seed sync, filename shape (RFC2047
   { name: 'test-exit-proxy', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (325ms) — server' }, // ExitProxyManager (task #164): opt-in gating, machine resolution, and the SOCKS forward's byte pipe + lifecycle. The daemon SOCKS5 protocol itself is covered by…
   { name: 'test-mux', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (425ms) — server' }, // Unit test for src/agentd/mux.js — framing round-trip, chan-0 JSON control, byte-channel data, and CREDIT flow control (a fat transfer must not starve a
@@ -293,7 +306,7 @@ export const SUITES = [
   { name: 'test-agentd-tunnel', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (3417ms) — server' }, // REVERSE-FORWARD (tunnel) acceptance (2.148.0, "互挂云盘去公网化"): the daemon binds 127.0.0.1:<port> ON THE DEVICE and pushes every accepted connection back over the mux to…
   { name: 'test-remote-lasterror', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (3724ms)' }, // meta.remote.lastError contract (2.228.1, the userL "host reconnecting (9) with no reason" report): when the remote transport child dies, the wrapper must record the…
   { name: 'test-agentd-dial', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (3733ms) — server' }, // Transport B e2e (dial-out, M4-lite): a daemon behind "NAT" dials OUT to the server over websocket (hand-rolled zero-dep client in the bundle); the server speaks the…
-  { name: 'test-incident', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (4056ms) — chrome' }, // Incident-capture contract smoke (2.238.0): POST /api/incident writes a bundle with client rings + server state, append attaches a follow-up, /api/incidents lists…
+  { name: 'test-incident', tier: 'heavy', reads: ['src/incident.js'], why: 'adopted 2026-09-07, was in NO runner (4056ms) — chrome' }, // Incident-capture contract smoke (2.238.0): POST /api/incident writes a bundle with client rings + server state, append attaches a follow-up, /api/incidents lists…
   { name: 'test-workflow-usage-tailer', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (4571ms)' }, // Workflow usage tailer (2.270.0) — the race regression test: the launch ack precedes the run dir's creation by ~17ms in real runs, so the tailer MUST arm on a dir…
   { name: 'test-agentd-remote', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (4624ms) — server' }, // M2 e2e: the agentd protocol over the SSH STDIO BRIDGE + persistent pipe-sessions (docs/design-remote-cs.md M2). The "remote" is localhost over a real `ssh` process…
   { name: 'test-cwd-recreate', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (4897ms) — server' },
@@ -306,7 +319,7 @@ export const SUITES = [
   { name: 'test-auto-resume-loop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7458ms) — cli' }, // THE AUTO-RESUME FIRE LOOP (2026-09-07 incident; owner decision ut-1c6c15a2db ①④). What happened, from the frozen journal (last 6h of the production server):
   { name: 'test-harness-honesty', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (7631ms here; a browser leg\'s cost follows machine load)' }, // the 2026-09-07 survey's four defects: codex personality is the USER's choice (unset ⇒ key absent; thread/settings/update applies it live), one explicit reply shape per ServerRequest method (+ MCP elicitation as a question card, unsupported ⇒ JSON-RPC error not a hang), the ACP unknown-sessionUpdate breadcrumb, and image_gen/sleep shape-equal across all THREE producers (live wrapper / rollout / thread-read) with a headless-chrome leg proving the image really draws
   { name: 'test-sidebar-empty-remote', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7799ms) — chrome' }, // Zero-local-sessions + a configured remote host must still render the workbench with its Recent host switcher (2.186.8, real report: a fresh instance with a remote…
-  { name: 'test-codex-remote-wrapper', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (8128ms) — server' }, // E2E for codex-chat-wrapper's REMOTE MODE (2.139.0, B-0588): a minimal JSON-RPC app-server stub runs under the REAL vibespace-remote-keeper; the wrapper attaches…
+  { name: 'test-codex-remote-wrapper', tier: 'heavy', reads: ['data/bin/codex-chat-wrapper.js'], why: 'adopted 2026-09-07, was in NO runner (8128ms) — server' }, // E2E for codex-chat-wrapper's REMOTE MODE (2.139.0, B-0588): a minimal JSON-RPC app-server stub runs under the REAL vibespace-remote-keeper; the wrapper attaches…
   { name: 'test-agentd-adopt', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (8362ms) — server' }, // Pipe-session ADOPTION across a daemon restart (the 2026-07-17 userL outage): a remote chat child is spawned as `sh -lc '… exec … <cli>'`, so after the execs its…
   { name: 'test-agentd-wired', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (8902ms) — server' }, // M2 WIRED-CHAIN e2e: the full production pipeline with the agentd path ON — chat-wrapper (remote mode) → agentd-attach bridge → standing daemon → persistent pipe…
   { name: 'test-run-collapse-fold', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (9004ms) — chrome' }, // CDP smoke: a Skill card folds, and a newly appended foldable card is folded BEFORE it can paint (no flash) — 2.227.9.
@@ -323,7 +336,7 @@ export const SUITES = [
   { name: 'test-sealed-orders', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (17s) — server' }, // SEALED-ORDERS emergency reflex (design §Pool management) vs a REAL daemon: the device executes a LOCAL pool fallback switch ONLY under the double condition (limit…
   { name: 'test-attach-rescue', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (19s) — chrome' }, // Attach-error view-only rescue smoke (2.217.0 — userL's 12 blank windows): BUG: after the server loses its sessions (OOM kill, pod recreation), every saved layout…
   { name: 'test-ui-scale', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (24s) — chrome' }, // UI scale (DPI) + UI font scale + locked-model-badge restyle smoke (2.257.0). - locked badge: SVG lock in currentColor on the accent pill (no more orange
-  { name: 'test-remote-keeper', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (27s) — server' }, // E2E test for data/bin/vibespace-remote-keeper — the remote-side persistence layer for remote chat sessions (2.124.0). Simulates the local chat-wrapper's
+  { name: 'test-remote-keeper', tier: 'heavy', reads: ['data/bin/vibespace-remote-keeper'], why: 'adopted 2026-09-07, was in NO runner (27s) — server' }, // E2E test for data/bin/vibespace-remote-keeper — the remote-side persistence layer for remote chat sessions (2.124.0). Simulates the local chat-wrapper's
   { name: 'test-codex-p2-wrapper', tier: 'heavy', why: 'slow (28s)' }, // codex P2 wrapper: queue-while-busy, slash commands + real compact, live MCP/web/image/compaction records — real wrapper vs stub app-server
   { name: 'test-opencode-plugin', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (29s here; a browser leg\'s cost follows machine load)' }, // the OpenCode background service is a PLUGIN, default OFF (owner 2026-09-07): fresh instance spawns nothing, enable/replay/disable over HTTP on a real server, env override, and the first-use dialog in headless chrome (asked once, Enable resumes the pending action)
   { name: 'test-acp-harness', tier: 'heavy', why: 'slow, binary (33s)' }, // S8 generic ACP v1 harness: the REAL acp-wrapper against a mock ACP agent (initialize → session/new → prompt → tool_call → request_permission → cancel → load) + normalizer shapes + stdout consumer + wiring pins
@@ -331,7 +344,7 @@ export const SUITES = [
   { name: 'test-writer-sweep', tier: 'heavy', why: 'slow, binary (40s)' }, // ONE writer sweep, any machine (CS separation, 2.276.0). Before this, the sweep existed three times — ssh, dial, and NOT AT ALL for local — so a local resume of a…
   { name: 'test-chat-paging', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (44s) — chrome' }, // Chat virtual-scroll paging stability (2026-07-30 user report: "翻页过程中会 往上跳一大截，往回翻也会意外跳跃"). Drives a REAL view-only ChatView over a synthetic 700-record transcript…
   { name: 'test-collab-live-counter', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (53s here; a browser leg\'s cost follows machine load)' }, // the live sub-agent traffic readout (2026-09-07): the PURE composers (counts/pluralisation/age granularity/live vs frozen) + the normalizer's per-row record timestamps, then headless chrome — a REAL codex rollout opened read-only (frozen totals, nothing ticking, no encrypted blob in the DOM) and a LIVE codex chat session behind a stub app-server (head grows, age ticks, spinner switches and yields, everything freezes at turn end)
-  { name: 'test-client-boot', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (70s here; a browser leg\'s cost follows machine load)' }, // headless-chrome app boot (the FRONTEND face of 打不开; SKIPs without chrome)
+  { name: 'test-client-boot', tier: 'heavy', always: true, why: 'chrome — the fast tier never launches a browser (70s here; a browser leg\'s cost follows machine load)' }, // headless-chrome app boot (the FRONTEND face of 打不开; SKIPs without chrome)
   { name: 'test-jobs-engine', tier: 'heavy', why: 'slow (71s)' }, // Background Work ENGINE gate (real spawns in an isolated tmp dataDir — never the repo's production data/). Pins: spawn→adopt-by-stamp across engine generations…
   { name: 'test-jobs-panel', tier: 'heavy', why: 'chrome + a worktree server seeded with the neutral triage fixture (~60s; SKIPs without chrome)' }, // Background Work TRIAGE panel (design §13) at 1200×800 (rail) AND 375×667 (window): the badge counts only awaiting + unacknowledged failures, a group holding an unacked failure is expanded by default while a done-only group is collapsed, a collapse persists across a reload (user-state jobsPanelFolds), a failed row shows its last line, the summary names the held notifications, the "Archived · N" row fetches only on click
   { name: 'test-desktop-app-keeper', tier: 'heavy', why: 'launches a real X server + x11vnc + an app per leg, SIGKILLs a keeper process and re-adopts, waits out an idle timeout and a CPU-burner runaway (~40s); SKIPs with its reason when Xvfb/x11vnc are absent' }, // docs/design-desktop-apps §6 row 3: launch → port listens → RFB handshake → record on disk → SIGKILL + rebuild ⇒ adopted → stop clean (/proc census equal, no orphan X); the ws bridge (auth 401 / 404 / xpra 501 / bytes + input reports); routes incl. the host refusal
@@ -347,7 +360,7 @@ export const SUITES = [
   { name: 'test-turn-truth-ui', tier: 'heavy', why: 'chrome: a live ChatView in headless chrome + the real stdout consumer (9s)' },
   { name: 'test-channels-e2e', tier: 'heavy', why: 'server + chrome: a real worktree server, a bundle build, TWO chrome pages and a SIGKILL+reboot (~90s)' }, // the P0 exit conditions end to end: a fake conversation in the panel, opened as a window, surviving a restart, synced between two clients, two passes each advancing their own cursor, and a READ-ONLY conversation with NO send control
   { name: 'test-worktree-userchan-ui', tier: 'heavy', why: 'chrome: headless chrome + the LIVE_SESSION_FACTS drift guard (4s here with chrome skipped)' },
-  { name: 'test-restore-liveness', tier: 'heavy', why: 'server + daemon: fault-injected vibespace-device daemons, real dtach fixtures and three worktree-server boots over a self-upgrading daemon (86s)' },
+  { name: 'test-restore-liveness', tier: 'heavy', always: true, why: 'server + daemon: fault-injected vibespace-device daemons, real dtach fixtures and three worktree-server boots over a self-upgrading daemon (86s)' },
 ];
 
 // Suites that are in NEITHER tier, each with the reason it cannot be gated.
@@ -623,6 +636,24 @@ export function reapScratchOrphans({ log = console.log, graceMs = 3000, ...opts 
   for (const o of list) { if (alive(o.pid)) { try { process.kill(o.pid, 'SIGKILL'); } catch { } } }
   return list;
 }
+// THE LANES' TWIN (2026-09-16, the 2.369.104 ↔ lanes integration). The sync
+// reaper above waits its grace inside `Atomics.wait`, which is fine after a
+// spawnSync suite but would freeze the async runner — and with it every other
+// lane's completion — for up to 3 s per call. Same evidence, same kills, the
+// grace awaited on the event loop instead. `scratchOrphans` already spares a
+// sibling lane's suite in flight (its scratch dir exists and its server is a
+// live child of this runner), so the sweep is safe to run mid-tier.
+export async function reapScratchOrphansAsync({ log = console.log, graceMs = 3000, ...opts } = {}) {
+  const list = scratchOrphans(opts);
+  if (!list.length) return list;
+  const roots = [...new Set(list.map((o) => o.root))];
+  log(`[ci] reaping ${list.length} scratch orphan process(es) from ${roots.length} finished scratch dir(s): ${roots.slice(0, 4).join(' ')}${roots.length > 4 ? ' …' : ''}`);
+  for (const o of list) { try { process.kill(o.pid, 'SIGTERM'); } catch { } }
+  const until = Date.now() + graceMs;
+  while (Date.now() < until && list.some((o) => alive(o.pid))) await new Promise((r) => setTimeout(r, 100));
+  for (const o of list) { if (alive(o.pid)) { try { process.kill(o.pid, 'SIGKILL'); } catch { } } }
+  return list;
+}
 
 function runSuite(s, { root = repo, absentIsSkip = false, sha = '' } = {}) {
   if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
@@ -642,6 +673,53 @@ function runSuite(s, { root = repo, absentIsSkip = false, sha = '' } = {}) {
   return { ok: false, ms, killedFromOutside: killedFromOutside(r) };
 }
 
+// The ASYNC twin of runSuite for the lanes: same argv, same budget, same verdict
+// shape ({ok, ms, killedFromOutside}) plus `lines` — the output is BUFFERED and
+// printed when the suite completes, tagged with its lane, so N concurrent
+// suites never interleave. A budget kill is spelled exactly as spawnSync spells
+// it ({signal:'SIGTERM', error:{code:'ETIMEDOUT'}}) so killedFromOutside keeps
+// telling our own kill from a supersede's. Resolves on 'exit' (+ a short grace
+// for buffered output) rather than 'close': a suite that leaks a server holding
+// our pipes would otherwise hold the lane until its budget.
+function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set() } = {}) {
+  return new Promise((resolve) => {
+    if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
+      resolve({ ok: true, ms: 0, absent: true, lines: [`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`] });
+      return;
+    }
+    const t = Date.now();
+    const tag = `[lane ${lane}]`;
+    let child;
+    try {
+      child = spawn(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV });
+    } catch (e) {
+      resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });
+      return;
+    }
+    inflight.add(child);
+    let stdout = '', stderr = '', error = null, done = false;
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    const budget = setTimeout(() => { error = { code: 'ETIMEDOUT' }; try { child.kill('SIGTERM'); } catch { } }, budgetFor(s));
+    child.on('error', (e) => { error = error || e; });
+    const finish = (status, signal) => {
+      if (done) return;
+      done = true;
+      clearTimeout(budget);
+      inflight.delete(child);
+      const ms = Date.now() - t;
+      if (status === 0) { resolve({ ok: true, ms, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
+      const r = { status, signal, error };
+      resolve({ ok: false, ms, killedFromOutside: killedFromOutside(r), lines: [
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag}`,
+        stdout.split('\n').slice(-40).join('\n'),
+        stderr || ''] });
+    };
+    child.on('exit', (status, signal) => { setTimeout(() => finish(status, signal), 250); });
+    child.on('close', (status, signal) => finish(status, signal));
+  });
+}
+
 function runBuild({ cwd = repo, log = console.log } = {}) {
   const t = Date.now();
   const r = spawnSync('npm', ['run', 'build'], { cwd, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000, encoding: 'utf-8', env: GIT_ENV });
@@ -652,6 +730,217 @@ function runBuild({ cwd = repo, log = console.log } = {}) {
   log(r.stderr || '');
   return { ok: false, ms, killedFromOutside: killedFromOutside(r) };
 }
+
+// ── LANES (2026-09-15, owner: "heavy gate太占用时间了吧 不能优化一下") ──────
+// MEASURED on data/ci-heavy/d0e7a8d4.log: 108 suites run STRICTLY SEQUENTIALLY
+// = 2069 s (34.5 min) — writer-sweep 414 s, opencode-s9 226, desktop-resume-
+// paging 225, desktop-app-keeper 104, queue-steer 87, restore-liveness 86,
+// client-boot 72, jobs-engine 71 — on a 32-cpu box that sat mostly idle, after
+// 40 min WAITING on the machine lock for a run nobody could ever push (see
+// heavyLaunch). So the tier now runs over N worker LANES, LONGEST-FIRST from the
+// previous markers' timings (a long tail scheduled last is the whole wall; with
+// no measurement the table's cheap→expensive order is read backwards), and
+// every suite that claims a machine-wide resource — the SERIAL rows below, plus
+// anything machineGlobalFixtures flags — runs in ONE serial lane AFTER the
+// parallel lanes drain, alone on the box, which is the load its budgets were
+// measured under. N = clamp(cpus/8, 2, 4): a lane is a headless chrome + a
+// worktree server + an esbuild, ~8 cpus of burst. Per-suite output is BUFFERED
+// and printed in completion order tagged with its lane, so two suites never
+// interleave a stack trace. The marker records lanes + every suite's timing.
+export const FULL_EVERY_MS = 24 * 60 * 60 * 1000;
+export const SERIAL = [
+  { name: 'test-opencode-s9', why: 'a REAL `opencode serve` with its sqlite store, inotify watches, /proc runaway guard and store-watch lane — measured against a box with ONE serve, and the uid-wide inotify instance limit is what turned it into two 900 s timeouts on 2026-09-14' },
+  // NOT here, measured (2026-09-15): test-writer-sweep (its scans are narrowed
+  // to its own pids, and its ONE whole-box positive control only finds a holder
+  // of ITS transcript), test-desktop-app-keeper and test-desktop-app-window
+  // (X displays come from -displayfd, x11vnc ports from freePort, the /proc
+  // census is keyed by the ids in each suite's OWN store, and the keeper suite
+  // is written for two checkouts running it at once) — all three ran in the
+  // parallel lanes with the rest; the serial lane was 444 s of a ~16 min tier
+  // and moving them is what brought the wall under 15 min.
+];
+export function laneCount({ cpus = os.cpus().length, env = process.env } = {}) {
+  const forced = Number(env.VIBESPACE_CI_LANES);
+  if (Number.isInteger(forced) && forced >= 1) return forced;
+  return Math.max(2, Math.min(4, Math.floor(cpus / 8)));
+}
+// PURE: split the tier into the parallel queue and the serial queue, each
+// longest-first. `timings` = name→ms from the previous markers; a suite with no
+// measurement keeps its TABLE position read backwards (the table is
+// cheap→expensive, so "late in the table" is the next-best guess at "long").
+// `keepOrder` (--only) runs the names exactly as given — the launcher self-test
+// asserts which of two suites ran first.
+export function scheduleLanes(suites, { timings = {}, serial = SERIAL, fixtures = machineGlobalFixtures, sourceOf = () => '', keepOrder = false } = {}) {
+  const serialWhy = new Map(serial.map((s) => [s.name, s.why]));
+  const parallel = [], serialQ = [];
+  suites.forEach((s, idx) => {
+    let why = serialWhy.get(s.name) || '';
+    if (!why) {
+      const f = fixtures(sourceOf(s.name) || '');
+      if (f.ports.length || f.paths.length) why = `claims a machine-global fixture (${[...f.ports, ...f.paths].join(' ')})`;
+    }
+    const row = { ...s, idx, prevMs: typeof timings[s.name] === 'number' ? timings[s.name] : null };
+    if (why) serialQ.push({ ...row, serialWhy: why }); else parallel.push(row);
+  });
+  const longestFirst = (a, b) => ((b.prevMs || 0) - (a.prevMs || 0)) || (b.idx - a.idx);
+  if (!keepOrder) { parallel.sort(longestFirst); serialQ.sort(longestFirst); }
+  return { parallel, serial: serialQ };
+}
+// name→ms from the newest markers that carry timings (newest wins per suite;
+// an affected run only names the suites it ran, so several are read).
+export function previousTimings(dir, depth = 6) {
+  const out = {};
+  for (const m of readMarkers(dir).filter((m) => (m.kind === 'green' || m.kind === 'red') && Array.isArray(m.timings)).slice(0, depth)) {
+    for (const t of m.timings) if (t && t.name && typeof t.ms === 'number' && !(t.name in out)) out[t.name] = t.ms;
+  }
+  return out;
+}
+
+// ── IMPACT SCOPE (2026-09-15) ────────────────────────────────────────────────
+// The push-time tier runs only the suites whose INPUTS the pushed range
+// touches: the suite file plus everything it requires/imports transitively
+// through the real graph (the walk test-architecture makes), plus the
+// repo-relative files it names as fixtures, plus a declared `reads:` list per
+// row where a path is built from segments, plus the product itself for a suite
+// that BOOTS it (server.js / npm run build / a worktree) — and every row that
+// says `always: true` (the restore/boot smokes). A dependency bump is a global
+// input. A range whose files cannot be listed selects EVERYTHING and says why:
+// "could not tell" must never read as "nothing changed" (the hook's round-4
+// rule, one layer down). A FULL run is still owed once per 24 h — the launcher
+// decides which to start (fullTierDue) and `ci:status` says which comes next.
+const GLOBAL_INPUTS = ['package.json', 'package-lock.json'];
+const BOOT_INPUTS = ['server.js', 'src/', 'public/', 'data/bin/'];
+const BOOTS_THE_PRODUCT = /server\.js|npm run build|esbuild|worktree add|bundle\.js|scratchHome\(/;
+// A repo-relative literal, with or without a leading '/' — `REPO + '/src/x.js'`
+// spells the same file (2026-09-16: 9 heavy suites load their module that way
+// and were selected by NOTHING when it changed — test-conversation-index,
+// test-session-brain-dark, test-machine-probes, test-layout-history among them).
+const LITERAL_INPUT = /(['"`])\/?((?:src|data\/bin|docs|public|scripts)\/[A-Za-z0-9._\/-]+|server\.js)\1/g;
+// The concatenated LOADER shapes: require(REPO + '/src/x.js'), import(REPO +
+// '/src/x.js'), require(`${REPO}/src/x.js`) — a load, so the file is WALKED
+// and the selection says "loads", never "names".
+const CONCAT_LOAD = /(?:require|import)\(\s*(?:[A-Za-z_$][\w$]*\s*\+\s*['"]\/((?:src|data\/bin|scripts)\/[A-Za-z0-9._\/-]+|server\.js)['"]|`\$\{[A-Za-z_$][\w$]*\}\/((?:src|data\/bin|scripts)\/[A-Za-z0-9._\/-]+|server\.js)`)\s*\)/g;
+const specsOf = (src) => {
+  const out = new Set();
+  for (const m of src.matchAll(/require\(['"]([^'"]+)['"]\)/g)) out.add(m[1]);
+  // require.resolve('../src/x.js') (test-gmail-sync patches a copy of the
+  // module it resolves) and createRequire(import.meta.url)('../src/x.js')
+  // (test-model-fallback-notice) — both load the file, both were invisible
+  for (const m of src.matchAll(/require\.resolve\(\s*['"]([^'"]+)['"]\s*\)/g)) out.add(m[1]);
+  for (const m of src.matchAll(/createRequire\([^)]*\)\(\s*['"]([^'"]+)['"]\s*\)/g)) out.add(m[1]);
+  for (const m of src.matchAll(/(?:^|\n)\s*import\s[^;]*?from\s+['"]([^'"]+)['"]/g)) out.add(m[1]);
+  for (const m of src.matchAll(/(?:^|\n)\s*export\s[^;]*?from\s+['"]([^'"]+)['"]/g)) out.add(m[1]);
+  for (const m of src.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) out.add(m[1]);
+  for (const m of src.matchAll(/new URL\(\s*['"](\.[^'"]+)['"]\s*,\s*import\.meta\.url/g)) out.add(m[1]);
+  return [...out];
+};
+function resolveLocal(fromRel, spec, root) {
+  if (!spec.startsWith('.')) return null;
+  const base = path.normalize(path.join(path.dirname(fromRel), spec)).replace(/\\/g, '/');
+  for (const cand of [base, base + '.js', base + '.mjs', base + '.cjs', base + '.json', base + '/index.js']) {
+    try { if (fs.statSync(path.join(root, cand)).isFile()) return cand; } catch { }
+  }
+  return null;
+}
+/** The files (exact) and prefixes (directories) a heavy suite's verdict depends on. */
+export function suiteInputs(s, { root = repo } = {}) {
+  const files = new Set(), prefixes = new Set(), seen = new Set();
+  // HOW each input got in (the first reason wins), so a selection can say
+  // "boots the product" instead of "reads src/lib/i18n-ja.js" for a suite that
+  // never opens that file — the reason in the log is what a reader trusts.
+  const via = new Map();
+  const queue = [];
+  const enq = (rel, how) => { if (!via.has(rel)) via.set(rel, how); queue.push(rel); };
+  enq(`scripts/${s.name}.mjs`, 'suite');
+  const readRel = (rel) => { try { return fs.readFileSync(path.join(root, rel), 'utf-8'); } catch { return ''; } };
+  while (queue.length) {
+    const rel = queue.shift();
+    if (seen.has(rel)) continue;
+    seen.add(rel); files.add(rel);
+    const text = readRel(rel);
+    if (!text) continue;
+    for (const spec of specsOf(text)) { const r = resolveLocal(rel, spec, root); if (r) enq(r, 'import'); }
+    if (!rel.startsWith('scripts/')) continue;
+    // a SUITE names its fixtures and `path.join(REPO, 'src/x.js')` modules as
+    // repo-relative literals; a directory literal is a prefix, a file is walked
+    for (const m of text.matchAll(CONCAT_LOAD)) enq(m[1] || m[2], 'import');
+    for (const m of text.matchAll(LITERAL_INPUT)) {
+      const p = m[2];
+      try { const st = fs.statSync(path.join(root, p)); if (st.isDirectory()) { const d = p.replace(/\/?$/, '/'); prefixes.add(d); if (!via.has(d)) via.set(d, 'literal'); } else enq(p, 'literal'); } catch { /* names nothing on disk */ }
+    }
+    if (BOOTS_THE_PRODUCT.test(text)) for (const p of BOOT_INPUTS) { (p.endsWith('/') ? prefixes : files).add(p); if (!via.has(p)) via.set(p, 'boot'); }
+  }
+  for (const r of s.reads || []) { (r.endsWith('/') ? prefixes : files).add(r); if (!via.has(r)) via.set(r, 'reads'); }
+  return { files, prefixes, via };
+}
+/** The sentence a selection prints: how `s` depends on the changed file `hit` (`p` = the directory prefix that matched, if any). */
+const dependsHow = (kind, hit, p) => {
+  if (p) return kind === 'boot' ? `boots the product (${hit} changed under ${p})` : kind === 'reads' ? `declares reads: ${p} (${hit} changed)` : `names ${p} (${hit} changed)`;
+  return kind === 'suite' ? `is the suite file (${hit} changed)` : kind === 'import' ? `loads ${hit} (through its import graph)` : kind === 'boot' ? `boots the product (${hit} changed)` : kind === 'reads' ? `declares reads: ${hit}` : `names ${hit}`;
+};
+/** The files a range changed — `a..b` = `git diff a b`; a lone sha = its whole unpublished range. null = git could not answer. */
+export function changedFiles(range, root = repo) {
+  const m = /^(.+)\.\.(.+)$/.exec(range || '');
+  const args = m ? ['diff', '--name-only', m[1], m[2]] : ['log', '--name-only', '--format=', range, '--not', '--remotes'];
+  const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0) return { files: null, error: ((r.stderr || '').trim().split('\n')[0] || `git exited ${r.status}`) };
+  return { files: [...new Set((r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean))] };
+}
+/** PURE over its inputs: which of `suites` the changed files select, and why each one.
+ *  `root` = the tree whose SUITE SOURCES are read (the gated commit's checkout);
+ *  `gitRoot` = the repository whose objects answer the range (defaults to root). */
+export function affectedSuites({ range, suites, root = repo, gitRoot = root, changed } = {}) {
+  const ch = Array.isArray(changed) ? { files: changed } : changedFiles(range, gitRoot);
+  const why = new Map();
+  const pick = (s, reason) => { if (!why.has(s.name)) why.set(s.name, reason); };
+  if (ch.files === null) for (const s of suites) pick(s, `the changed files could not be listed (${ch.error}) — everything runs`);
+  else {
+    const global = ch.files.filter((f) => GLOBAL_INPUTS.includes(f));
+    for (const s of suites) {
+      if (s.always) { pick(s, 'always: true (a boot/restore smoke runs on every push)'); continue; }
+      if (global.length) { pick(s, `${global[0]} changed (a global input — dependencies)`); continue; }
+      const { files, prefixes, via } = suiteInputs(s, { root });
+      for (const f of ch.files) {
+        if (files.has(f)) { pick(s, dependsHow(via.get(f), f)); break; }
+        const p = [...prefixes].find((pre) => f.startsWith(pre));
+        if (p) { pick(s, dependsHow(via.get(p), f, p)); break; }
+      }
+    }
+  }
+  const selected = suites.filter((s) => why.has(s.name));
+  const head = ch.files === null
+    ? `[ci:heavy] impact scope ${range}: the changed files could not be listed (${ch.error}) — running EVERYTHING (could not tell ≠ nothing changed)`
+    : `[ci:heavy] impact scope ${range}: ${ch.files.length} changed file(s) ⇒ ${selected.length} of ${suites.length} heavy suites${selected.length < suites.length ? ` (${suites.length - selected.length} unaffected: not run, not judged)` : ''}`;
+  const summary = [head, ...selected.map((s) => `    · ${s.name} ← ${why.get(s.name)}`)].join('\n');
+  return { selected, why, changed: ch.files, error: ch.error || null, summary };
+}
+/** Is a FULL heavy run owed? The 24 h safety net behind the affected tier is a
+ *  full (not partial, not affected) green that JUDGED EVERY SUITE IT NAMED
+ *  (`absent` empty — a full run at an old tag that skipped 108 of 110 suites
+ *  judged two; 2026-09-16 verifier) and, when `sha` is given, lies on the SAME
+ *  LINE OF HISTORY as the push (an ancestor or a descendant — markers are per
+ *  checkout, so a green on an unrelated branch says nothing about this one).
+ *  The newest such green must be younger than FULL_EVERY_MS. `sha` is optional
+ *  on purpose: `ci:status` without --head asks only about age and completeness. */
+export function fullTierDue(dir, now = Date.now(), { sha, repoRoot = repo } = {}) {
+  const fulls = readMarkers(dir).filter((m) => m.kind === 'green' && !m.partial && m.scope !== 'affected');
+  if (!fulls.length) return { due: true, why: 'no FULL green heavy run on record', newest: null, ageMs: null };
+  let rejected = null;
+  for (const m of fulls) {
+    const ageMs = now - (m.endedAt || 0);
+    const absent = (m.absent || []).length;
+    if (absent) { rejected = rejected || { due: true, why: `the newest FULL green (${shortSha(m.sha)}) judged ${Math.max(0, (m.suites || 0) - absent)} of ${m.suites || '?'} suites (${absent} absent at that commit) — not a full verdict`, newest: m, ageMs }; continue; }
+    if (sha && m.sha && !sameLineOfHistory(m.sha, sha, repoRoot)) { rejected = rejected || { due: true, why: `the newest FULL green (${shortSha(m.sha)}) is on another line of history (neither an ancestor nor a descendant of ${shortSha(sha)})`, newest: m, ageMs }; continue; }
+    if (ageMs > FULL_EVERY_MS) return { due: true, why: `the newest FULL green (${shortSha(m.sha)}) is ${Math.round(ageMs / 3600000)} h old`, newest: m, ageMs };
+    return { due: false, why: `a FULL green (${shortSha(m.sha)}) is ${Math.round(ageMs / 60000)} min old`, newest: m, ageMs };
+  }
+  return rejected;
+}
+/** Is `a` an ancestor or a descendant of `b` (or the same commit)? A commit the repository does not know is on no line of ours. */
+const sameLineOfHistory = (a, b, root = repo) => {
+  const isAnc = (x, y) => spawnSync('git', ['-C', root, 'merge-base', '--is-ancestor', x, y], { env: GIT_ENV }).status === 0;
+  return isAnc(a, b) || isAnc(b, a);
+};
 
 // ── heavy-run markers (data/ci-heavy/<sha>.{green,red,pid,log}) ───────────
 const markerDir = (dir) => dir || path.join(repo, 'data', 'ci-heavy');
@@ -801,9 +1090,13 @@ export function heavyBlocker({ dir, head, repoRoot = repo } = {}) {
   // commit the rest of the tier never saw. A partial RED still blocks: a suite
   // really did fail on that commit.
   const greens = all.filter((m) => m.kind === 'green' && !m.partial && exists(m.sha));
+  // An AFFECTED green (2026-09-15) is green for ITS push only: it clears a red
+  // only when every suite that failed there was in the set it actually ran. A
+  // red of either scope blocks alike.
+  const coversRed = (g, red) => g.scope !== 'affected' || (red.failed || []).every((f) => Array.isArray(g.selected) && g.selected.includes(f));
   for (const red of reds) {
     if (!isAncestor(red.sha, HEAD)) continue;
-    const cleared = greens.some((g) => g.sha !== red.sha && isAncestor(red.sha, g.sha) && isAncestor(g.sha, HEAD));
+    const cleared = greens.some((g) => g.sha !== red.sha && isAncestor(red.sha, g.sha) && isAncestor(g.sha, HEAD) && coversRed(g, red));
     if (!cleared) return red;
   }
   return null;
@@ -916,19 +1209,34 @@ function writeGreenMarker() {
   } catch (e) { console.log('[ci] green marker not written: ' + e.message); }
 }
 
-function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs, pidFile }) {
+async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs, pidFile, range }) {
   const t0 = Date.now();
   const all = SUITES.filter((s) => s.tier === 'heavy');
   // `--only=a,b` re-runs part of the tier (after a fix, or from the self-test).
   // An unknown name is LOUD: silently running zero suites and stamping a green
   // marker is the worst possible outcome of a typo.
-  const heavy = only ? only.map((n) => {
+  let heavy = only ? only.map((n) => {
     const hit = all.find((s) => s.name === n);
     if (!hit) { console.error(`✗ --only: '${n}' is not a heavy suite`); process.exit(2); }
     return hit;
   }) : all;
   const sha = wantSha || gitOut(['rev-parse', 'HEAD']);
   const d = markerDir(dir);
+  // IMPACT SCOPE (--affected --range): the suites the range touches, printed
+  // with a reason per suite before a build is spent. THE GRAPH IS THE GATED
+  // COMMIT'S, NOT THIS CHECKOUT'S (2026-09-16, verifier): the selection used
+  // to be made here, against the working tree — so a push from another
+  // checkout (a flow the hook explicitly keeps working) or a tree that had
+  // moved on read the wrong import graph. Reproduced on a stub: master checked
+  // out (test-x imports src/a.js), branch feat rewires test-x to src/b.js in
+  // c1 and changes src/b.js in c2 ⇒ affectedSuites(c1..c2) from the checkout
+  // selected NOTHING. So the selection is made INSIDE the try, after the
+  // scratch worktree exists, from the suite sources AT the sha (`root:
+  // runRoot`) while the range is still answered by this repository's objects
+  // (`gitRoot: repo`). A selection that turns out to be the whole tier IS a
+  // full run.
+  let scope = 'full', impact = null;
+  const scoped = !!(range && !only);
   // REFUSE UP FRONT, NOT AT THE END. This decision is made at t=0 and it
   // decides whether the run can produce a verdict at all; announcing it after
   // sixteen minutes — under a closing line that said GREEN — cost a blocked
@@ -945,7 +1253,7 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
     return 2;
   }
   let runRoot = repo, wt = null;
-  console.log(`release gate — HEAVY tier: ${heavy.length} suites for ${shortSha(sha)}${isolate ? ' (isolated worktree)' : ''}`);
+  console.log(`release gate — HEAVY tier${scoped ? '' : `: ${heavy.length} suites`} for ${shortSha(sha)}${isolate ? ' (isolated worktree)' : ''}${scoped ? ` — impact scope ${range}: the suites are selected from the sources AT ${shortSha(sha)}, after checkout` : ''}`);
   if (dirtyAtStart) console.log('[ci:heavy] --dirty-ok: this tree is dirty ⇒ NO VERDICT will be written for ' + shortSha(sha) + ' (said now, not in sixteen minutes)');
 
   // ONE HEAVY TIER PER MACHINE. Wait for our turn before spending a build.
@@ -1005,15 +1313,33 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
     return '';
   };
 
+  // The suites in flight on the lanes: a signal handler (below) and an abort
+  // noticed by any lane SIGTERM them so the run ends now rather than at the
+  // slowest child's budget.
+  const inflight = new Set();
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return; cleaned = true;
+    for (const c of inflight) { try { c.kill('SIGTERM'); } catch { } }
     if (held.ok) held.release();
     try { fs.unlinkSync(pidFile || path.join(d, `${sha}.pid`)); } catch {}
     if (wt) removeScratchWorktree(wt);
   };
+  // A SIGNAL ENDS THE RUN, IT DOES NOT PREEMPT IT (2026-09-15, the lanes made
+  // this reachable: with spawnSync the handler could only ever run after the
+  // whole tier). The suites in flight are SIGTERMed (SIGKILL 10 s later for
+  // one that ignores it), the lanes stop at their next synchronous question,
+  // the closing line says ABORTED / NO VERDICT and `finally` cleans up — the
+  // same exit as a supersede noticed by the pid file. Only a run still alive
+  // 30 s after the signal is forced out (cleanup first).
   for (const sig of OUTSIDE_SIGNALS) {
-    process.on(sig, () => { console.error(`\n[ci:heavy] ${sig} — superseded or cancelled; cleaning up and writing NO verdict for ${shortSha(sha)}`); cleanup(); process.exit(143); });
+    process.on(sig, () => {
+      console.error(`\n[ci:heavy] ${sig} — superseded or cancelled; stopping the suites in flight, NO verdict will be written for ${shortSha(sha)}`);
+      signalled = signalled || `this run was terminated from outside (${sig})`;
+      for (const c of inflight) { try { c.kill('SIGTERM'); } catch { } }
+      setTimeout(() => { for (const c of inflight) { try { c.kill('SIGKILL'); } catch { } } }, 10000).unref();
+      setTimeout(() => { console.error('[ci:heavy] still running 30 s after the signal — forcing exit'); cleanup(); process.exit(143); }, 30000).unref();
+    });
   }
   try {
     if (isolate) {
@@ -1023,21 +1349,53 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
       wt = addScratchWorktree(sha, 'heavy');
       runRoot = wt;
     }
-    const build = noteChildResult(runBuild({ cwd: runRoot }));
+    if (scoped) {
+      // …from the tree that RUNS (see the IMPACT SCOPE note above): the
+      // scratch worktree at the sha, or — without --isolate — this checkout,
+      // which is then the tree the suites execute in (a clean HEAD, or a
+      // --dirty-ok run that earns no verdict anyway).
+      impact = affectedSuites({ range, suites: all, root: runRoot, gitRoot: repo });
+      heavy = impact.selected;
+      if (heavy.length < all.length) scope = 'affected';
+      console.log(`[ci:heavy] ${heavy.length} suites for ${shortSha(sha)}${scope === 'affected' ? ` — AFFECTED scope (${all.length - heavy.length} of ${all.length} unaffected by ${range})` : ` — the selection is the whole tier (a FULL run)`}`);
+      console.log(impact.summary);
+    }
+    // Ask BEFORE the build too: a signal that landed during `git worktree add`
+    // is only noticed here, and a build for a run that is already over is
+    // the round-2 supersede cost one step earlier.
+    let abandonedWhy = abandoned();
+    const build = abandonedWhy ? { ok: false } : noteChildResult(runBuild({ cwd: runRoot }));
     const failed = [], flaky = [], timings = [], absent = [];
+    let laneN = 0, serialNames = [];
     // The build is the first thing a supersede kill lands on, so ask before
     // believing its failure — and before spending the rest of the tier.
-    let abandonedWhy = abandoned();
+    abandonedWhy = abandonedWhy || abandoned();
     // Say it wherever it is first noticed — the abort can be true before the
     // suite loop is ever entered (a supersede that lands during the build),
     // and a run that goes quiet is the thing this whole round is against.
     if (abandonedWhy) console.log(`\n[ci:heavy] stopping: ${abandonedWhy}`);
-    if (!build.ok && !abandonedWhy) failed.push('npm run build');
-    else if (!abandonedWhy) {
-      for (const s of heavy) {
-        abandonedWhy = abandoned();
-        if (abandonedWhy) { console.log(`\n[ci:heavy] stopping: ${abandonedWhy}`); break; }
-        let r = noteChildResult(runSuite(s, { root: runRoot, absentIsSkip: !!isolate, sha }));
+    // ONE lane = one worker pulling from a queue. The abort is still a
+    // synchronous QUESTION asked between suites — at every lane's loop top and
+    // again before a retry — and the first lane to hear "yes" says so ONCE and
+    // SIGTERMs the suites the other lanes still have in flight.
+    let stopSaid = false;
+    const stop = (why) => {
+      if (stopSaid) return;
+      stopSaid = true;
+      console.log(`\n[ci:heavy] stopping: ${why}`);
+      for (const c of inflight) { try { c.kill('SIGTERM'); } catch { } }
+    };
+    const laneWorker = async (queue, lane) => {
+      for (;;) {
+        abandonedWhy = abandonedWhy || abandoned();
+        if (abandonedWhy) { stop(abandonedWhy); break; }
+        const s = queue.shift();
+        if (!s) break;
+        let r = noteChildResult(await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight }));
+        console.log(r.lines.join('\n'));
+        // a suite may not leave a daemon behind (2.369.104) — the lanes sweep
+        // after every suite exactly as the sync runner does, without blocking
+        try { await reapScratchOrphansAsync({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); }
         // Absent at the commit being gated (round 6): not run, not judged, and
         // not counted in `timings` — a marker that named 97 suites when 42 of
         // them do not exist at that sha is a claim nobody made.
@@ -1065,11 +1423,30 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
           // outcomes are in the log and in the marker, so the flakiness is
           // visible instead of being laundered into a green.
           console.log(`  … ${s.name} failed — retrying once before calling it red`);
-          const again = noteChildResult(runSuite(s, { root: runRoot }));
+          const again = noteChildResult(await runSuiteAsync(s, { root: runRoot, lane, inflight }));
+          console.log(again.lines.join('\n'));
           if (again.ok) { flaky.push(s.name); r = again; } else { failed.push(s.name); }
         }
-        timings.push({ name: s.name, ms: r.ms, ok: r.ok });
+        timings.push({ name: s.name, ms: r.ms, ok: r.ok, lane: String(lane) });
       }
+    };
+    if (!build.ok && !abandonedWhy) failed.push('npm run build');
+    else if (!abandonedWhy) {
+      laneN = laneCount();
+      const sourceOf = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
+      const plan = scheduleLanes(heavy, { timings: previousTimings(dir), sourceOf, keepOrder: !!only });
+      serialNames = plan.serial.map((s) => s.name);
+      console.log(`[ci:heavy] ${laneN} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}${plan.serial.length ? ': ' + plan.serial.map((s) => `${s.name} (${s.serialWhy.split(/[—;]/)[0].trim()})`).join(', ') : ''}`);
+      const parallelQ = [...plan.parallel];
+      const tPar = Date.now();
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(laneN, parallelQ.length)) }, (_, i) => laneWorker(parallelQ, i + 1)));
+      const parMs = Date.now() - tPar;
+      if (plan.serial.length && !abandonedWhy) {
+        console.log(`[ci:heavy] parallel lanes drained in ${Math.round(parMs / 1000)}s — serial lane: ${plan.serial.map((s) => s.name).join(', ')}`);
+        await laneWorker([...plan.serial], 'S');
+      }
+      const sum = timings.reduce((a, t) => a + t.ms, 0);
+      if (!abandonedWhy) console.log(`[ci:heavy] lanes: ${laneN} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round((Date.now() - tPar - parMs) / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
@@ -1083,7 +1460,16 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
       absent: absent.length ? absent : undefined,
       partial: only ? only.slice() : undefined,
       unlocked: held.ok ? undefined : true,
-      timings: timings.sort((a, b) => b.ms - a.ms).slice(0, 10),
+      // 2026-09-15: the scope ('full' | 'affected'), what selected it, the lane
+      // count, which suites ran serially, and EVERY suite's timing (the next
+      // run's longest-first schedule reads them; ten were not enough to plan).
+      scope,
+      range: range || undefined,
+      selected: scope === 'affected' ? heavy.map((s) => s.name) : undefined,
+      changed: impact && impact.changed ? impact.changed.length : undefined,
+      lanes: laneN || undefined,
+      serial: serialNames.length ? serialNames : undefined,
+      timings: timings.sort((a, b) => b.ms - a.ms),
     };
     // A marker is a CLAIM about a commit, so it is only written when the run
     // can honestly make it. THREE refusals: a run that was abandoned (killed by
@@ -1122,7 +1508,7 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
       : failed.length
         ? `HEAVY ${noVerdict ? 'TIER' : 'GATE'} RED for ${shortSha(sha)} in ${Math.round(rec.ms / 1000)}s — failed: ${failed.join(', ')}`
         : `HEAVY ${noVerdict ? 'TIER' : 'GATE'} GREEN for ${shortSha(sha)} in ${Math.round(rec.ms / 1000)}s (${heavy.length - absent.length} of ${heavy.length} suites${absent.length ? ` ran; ${absent.length} not present at that commit` : ''})`;
-    console.log('\n' + verdict + (noVerdict ? ` — NO VERDICT WRITTEN (${noVerdict})` : ''));
+    console.log('\n' + verdict + (scope === 'affected' ? ` — AFFECTED scope: ${heavy.length} of ${all.length} heavy suites selected by ${range}; a FULL run is still owed once per 24 h` : '') + (noVerdict ? ` — NO VERDICT WRITTEN (${noVerdict})` : ''));
     if (absent.length) console.log(`[ci:heavy] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     if (flaky.length) console.log(`[ci:heavy] FLAKY (failed, passed on retry — not blocking, but they did fail once): ${flaky.join(', ')}`);
     // AN ABORTED TIER MUST NEVER EXIT 0 (round 4 finding). `failed` is empty
@@ -1147,7 +1533,23 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
 // `git worktree add`. (The project's own detached-job primitive — jobs.js /
 // data/bin/job-wrapper.js — needs a running server and a session token, so it
 // is not reachable from a git hook.)
-function heavyLaunch(sha, { dir, only, lock, lockWaitMs } = {}) {
+// A SHA ON NO BRANCH IS ABANDONED (2026-09-15). MEASURED on d0e7a8d4's log:
+// 4472 s wall, of which 40 min was "waiting up to 40 min for the machine" on a
+// run for d5e3e587 — a commit that had been AMENDED AWAY and could never be
+// pushed, yet was not an ancestor of anything, so the round-2 rule queued
+// behind it for its full budget. A run for a sha that no local branch tip and
+// no REMOTE-TRACKING ref can reach is superseded on the same path as an
+// ancestor (SIGTERM the group, unlink its pid file, no marker); a run for the
+// tip of a LIVE branch nobody replaced still waits — two branches may be
+// pushed. EVERY refs/remotes/ ref counts, not origin/master alone (2026-09-16,
+// verifier): this workflow deletes the LOCAL branch after a push as routine
+// worktree cleanup, and a sha origin/<branch> still carries HAS been pushed —
+// its verdict is wanted. d5e3e587, the 40-minute case, was on NO ref at all.
+const reachableFromABranch = (sha) => {
+  const r = spawnSync('git', ['-C', repo, 'for-each-ref', '--contains', sha, 'refs/heads/', 'refs/remotes/'], { encoding: 'utf-8', env: GIT_ENV });
+  return r.status !== 0 || !!(r.stdout || '').trim(); // a git too old to answer ⇒ treat as live (queue, never kill)
+};
+function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   const d = markerDir(dir);
   try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch { } // the tier starts on a box the last runs did not litter (2.369.104)
   if (!sha || gitOut(['cat-file', '-e', sha + '^{commit}']) === null) { console.error(`[ci:heavy] not launching: ${sha ? 'unknown commit ' + shortSha(sha) : 'no sha given'}`); return 0; }
@@ -1166,7 +1568,9 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs } = {}) {
   if (same) { console.error(`[ci:heavy] already running for ${shortSha(sha)} (pid ${same.pid})`); return 0; }
   const isAncestorOfNew = (old) => spawnSync('git', ['-C', repo, 'merge-base', '--is-ancestor', old, sha], { env: GIT_ENV }).status === 0;
   for (const old of running) {
-    if (!old.sha || old.sha === sha || gitOut(['cat-file', '-e', old.sha + '^{commit}']) === null || !isAncestorOfNew(old.sha)) continue;
+    if (!old.sha || old.sha === sha || gitOut(['cat-file', '-e', old.sha + '^{commit}']) === null) continue;
+    const ancestor = isAncestorOfNew(old.sha);
+    if (!ancestor && reachableFromABranch(old.sha)) continue; // a live branch's tip: its verdict is still wanted — queue behind it
     // Positive identity before a kill (see looksLikeHeavyRun). Without it, this
     // run queues on the machine lock instead — slower, never destructive.
     if (!looksLikeHeavyRun(old.pid)) {
@@ -1177,13 +1581,19 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs } = {}) {
     // negative pid takes the suites down with the runner.
     try { process.kill(-old.pid, 'SIGTERM'); } catch { try { process.kill(old.pid, 'SIGTERM'); } catch {} }
     try { fs.unlinkSync(old.file); } catch {}
-    console.error(`[ci:heavy] superseded the run for ${shortSha(old.sha)} (pid ${old.pid}) — ${shortSha(sha)} descends from it`);
+    console.error(`[ci:heavy] superseded the run for ${shortSha(old.sha)} (pid ${old.pid}) — ${ancestor ? `${shortSha(sha)} descends from it` : 'that sha is on no local branch and on no remote-tracking ref (amended or rebased away — nobody can push it)'}`);
   }
+  // FULL or AFFECTED. The launcher decides, so no external cron is needed: an
+  // affected run needs a range, and a full run is owed when the newest FULL
+  // green is older than FULL_EVERY_MS (or there is none).
+  const due = fullTierDue(dir, Date.now(), { sha });
+  const scope = range && !only && !due.due ? 'affected' : 'full';
   fs.mkdirSync(d, { recursive: true });
   const logPath = path.join(d, `${sha}.log`);
   const pidPath = path.join(d, `${sha}.pid`);
   const fd = fs.openSync(logPath, 'w');
   const args = [HERE, '--heavy', '--sha=' + sha, '--isolate', '--markers=' + d, '--pid-file=' + pidPath];
+  if (scope === 'affected') args.push('--affected', '--range=' + range);
   if (only) args.push('--only=' + only.join(','));
   if (lock) args.push('--lock=' + lock);
   if (lockWaitMs !== undefined) args.push('--lock-wait-ms=' + lockWaitMs);
@@ -1199,7 +1609,7 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs } = {}) {
   // launcher tell "still running" from "that pid number belongs to something
   // else now" (pidStillRunning).
   stamp(child.pid);
-  console.error(`[ci:heavy] launched for ${shortSha(sha)} (pid ${child.pid}) — ${path.relative(repo, logPath)}; \`npm run ci:status\` for the verdict`);
+  console.error(`[ci:heavy] launched the ${scope === 'affected' ? `AFFECTED tier (${range}; ${due.why})` : `FULL tier${range ? ` (${due.why})` : ''}`} for ${shortSha(sha)} (pid ${child.pid}) — ${path.relative(repo, logPath)}; \`npm run ci:status\` for the verdict`);
   return 0;
 }
 
@@ -1255,13 +1665,21 @@ function status({ dir, head: wantHead } = {}) {
     // `absent` is not decoration: it is what makes "97 suites" above true or
     // false, so the CLI carries it exactly like the route and the report do.
     const marks = [m.partial ? `partial: ${m.partial.join(',')}` : '', m.unlocked ? 'ran WITHOUT the machine lock' : '',
+      m.scope === 'affected' ? `AFFECTED scope: ${(m.selected || []).length} suites selected by ${m.range || '?'}` : '',
+      m.lanes ? `${m.lanes} lanes` : '',
       (m.absent || []).length ? `${m.absent.length} not present at that commit` : '',
       (m.flaky || []).length ? `flaky: ${m.flaky.join(',')}` : ''].filter(Boolean).join('  ');
     console.log(`  ${shortSha(m.sha)}  ${label}  ${dur(m.ms || 0).padStart(6)}  ${new Date(m.endedAt || 0).toLocaleString()}  ${detail}${marks ? '  [' + marks + ']' : ''}`);
   }
   if (holder) console.log(`\nmachine lock: held by pid ${holder.pid} for ${shortSha(holder.sha)}${pidStillRunning(holder) ? '' : ' (DEAD — the next run steals it)'}  ${lockPath}`);
-  const blocker = heavyBlocker({ dir, head: wantHead });
+  // An affected green is green for ITS push only; a FULL green is owed once
+  // per 24 h, and the next push's launcher will start one when it is.
   const head = wantHead || gitOut(['rev-parse', 'HEAD']);
+  const due = fullTierDue(dir, Date.now(), { sha: head || undefined });
+  console.log(due.newest
+    ? `\nlast FULL green: ${shortSha(due.newest.sha)} ${new Date(due.newest.endedAt || 0).toLocaleString()} (${dur(due.ageMs || 0)} ago) — the next push launches ${due.due ? `a FULL tier (${due.why})` : 'the AFFECTED tier (a full green is required once per 24 h; this one still counts)'}`
+    : '\nno FULL green heavy run on record — the next push launches a FULL tier');
+  const blocker = heavyBlocker({ dir, head: wantHead });
   console.log(blocker
     ? `\nHEAD ${shortSha(head)}: PUSH BLOCKED by the red run on ${shortSha(blocker.sha)} (${(blocker.failed || []).join(', ')})`
     : `\nHEAD ${shortSha(head)}: not blocked`);
@@ -1299,12 +1717,21 @@ function main(argv) {
   // actual heavy run — scripts/test-ci-heavy-launch.mjs passes both.
   const lock = str('lock') ? path.resolve(str('lock')) : (process.env.VIBESPACE_CI_HEAVY_LOCK || undefined);
   const lockWaitMs = str('lock-wait-ms') !== null ? Number(str('lock-wait-ms')) : undefined;
+  // --range=<old>..<new> (or --range <x>): the impact scope for --heavy
+  // --affected / --heavy-affected, and what --heavy-launch hands its child.
+  const rangeArg = str('range') !== null ? str('range') : (argv.includes('--range') ? (argv[argv.indexOf('--range') + 1] || null) : null);
   if (arg('reap')) { const l = reapScratchOrphans({}); console.log(l.length ? l.map((o) => `${o.pid} ${o.name} ${o.root} — ${o.why}`).join('\n') : 'no scratch orphans'); process.exit(0); }
   if (arg('census')) process.exit(census());
   if (arg('status')) process.exit(status({ dir, head }));
   if (arg('check-heavy')) process.exit(checkHeavy({ dir, head }));
-  if (arg('heavy-launch') !== undefined) process.exit(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs }));
-  if (arg('heavy')) process.exit(heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined }));
+  if (arg('heavy-launch') !== undefined) process.exit(heavyLaunch(str('heavy-launch') || argv[argv.indexOf('--heavy-launch') + 1], { dir, only, lock, lockWaitMs, range: rangeArg || undefined }));
+  if (arg('heavy') || arg('heavy-affected')) {
+    const affected = !!arg('affected') || !!arg('heavy-affected');
+    if (affected && !rangeArg) { console.error('✗ --affected needs --range=<old>..<new> (or --range=<sha> for its whole unpublished range)'); process.exit(2); }
+    heavyGate({ sha: str('sha'), isolate: !!arg('isolate'), dir, only, dirtyOk: !!arg('dirty-ok'), lock, lockWaitMs, pidFile: str('pid-file') || undefined, range: affected ? rangeArg : undefined })
+      .then((code) => process.exit(code), (e) => { console.error('[ci:heavy] crashed: ' + (e && e.stack || e)); process.exit(1); });
+    return;
+  }
   // `--isolate [--sha=<x>]` gates the COMMIT rather than this working tree —
   // the hook uses it when a pushed ref's tip is not HEAD.
   process.exit(fastGate({ sha: str('sha'), isolate: !!arg('isolate') }));

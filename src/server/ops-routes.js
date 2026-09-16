@@ -144,7 +144,13 @@ app.get('/api/ci-heavy', (req, res) => {
       // gate's table can name suites that sha never had (measured: 42 of 97 at
       // master~300). Without it "97 suites" is a number the record itself
       // contradicts, which is the marker-kind lesson one field smaller.
-      const row = { sha: rec.sha || m[1], result: m[2] === 'pid' ? 'running' : m[2], startedAt: rec.startedAt || 0, endedAt: rec.endedAt || 0, ms: rec.ms || 0, suites: rec.suites || 0, absent: Array.isArray(rec.absent) ? rec.absent.length : 0, failed: Array.isArray(rec.failed) ? rec.failed.slice(0, 20) : [], flaky: Array.isArray(rec.flaky) ? rec.flaky.slice(0, 20) : [], pid: rec.pid || 0, reason: typeof rec.reason === 'string' ? rec.reason.slice(0, 200) : '', unlocked: !!rec.unlocked };
+      const row = { sha: rec.sha || m[1], result: m[2] === 'pid' ? 'running' : m[2], startedAt: rec.startedAt || 0, endedAt: rec.endedAt || 0, ms: rec.ms || 0, suites: rec.suites || 0, absent: Array.isArray(rec.absent) ? rec.absent.length : 0, failed: Array.isArray(rec.failed) ? rec.failed.slice(0, 20) : [], flaky: Array.isArray(rec.flaky) ? rec.flaky.slice(0, 20) : [], pid: rec.pid || 0, reason: typeof rec.reason === 'string' ? rec.reason.slice(0, 200) : '', unlocked: !!rec.unlocked,
+        // 2026-09-15: a push-time run is IMPACT-SCOPED (only the suites the
+        // pushed range touches); `scope` says so and `selected` is how many,
+        // so a green row cannot read as the full tier when it was not. A marker
+        // written before the field is a full run. `lanes` = the parallel lane
+        // count the run used (0 = written before lanes existed).
+        scope: rec.scope === 'affected' ? 'affected' : 'full', selected: Array.isArray(rec.selected) ? rec.selected.length : 0, lanes: Number(rec.lanes) || 0 };
       if (m[2] === 'pid') { let live = false; try { process.kill(row.pid, 0); live = true; } catch {} if (live) running.push(row); }
       else runs.push(row);
     }

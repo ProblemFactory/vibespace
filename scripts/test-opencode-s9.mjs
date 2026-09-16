@@ -2665,15 +2665,20 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
           if (!s) return { err: 'session never reached the sidebar' };
           try { app.sidebar.toggle(true); } catch {}
           await sleep(600);
+          // The card is found by the session id it CARRIES (card._sessionId, set by
+          // renderSessionCard) or by its name text, and the bound is 30 s: under the
+          // heavy tier's parallel lanes (2026-09-15) an 8 s text-only wait went red
+          // with cards:1 — the row was in _allSessions, the render pass that draws
+          // it had not run yet on a loaded box. The assertion below still decides.
           let card = null;
-          for (let i = 0; i < 20 && !card; i++) {
+          for (let i = 0; i < 75 && !card; i++) {
             // The card carries the sidebar's OWN name for this conversation — the
             // shared first-user-message rule ("roll me back") once the naming read
             // has landed, OpenCode's title ("browser leg") before it — so match on
             // whatever the sidebar row says, never on one spelling (2.369.102:
             // the title-only match went red the moment naming beat the render).
             const names = [s.name, s.webuiName, 'browser leg', 'roll me back'].filter((x) => typeof x === 'string' && x.trim());
-            card = [...document.querySelectorAll('.session-item-card')].find((c) => names.some((nm) => c.textContent.includes(nm))) || null;
+            card = [...document.querySelectorAll('.session-item-card')].find((c) => c._sessionId === ${JSON.stringify(sess.id)} || names.some((nm) => c.textContent.includes(nm))) || null;
             if (!card) await sleep(400);
           }
           if (!card) return { err: 'no card', cards: document.querySelectorAll('.session-item-card').length, sample: [...document.querySelectorAll('.session-item-card')].slice(0, 3).map((c) => c.textContent.slice(0, 40)) };

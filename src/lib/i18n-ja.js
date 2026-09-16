@@ -1401,6 +1401,7 @@ export default {
   "flaky": "不安定",
   "no verdict": "判定なし",
   "ran without the machine lock": "マシンロックなしで実行",
+  "affected scope: {n} suites selected by that push": "影響範囲: そのプッシュで選ばれた {n} 個のスイート",
   "result": "結果",
   "duration": "所要時間",
   "{n} suites": "{n} 件のスイート",

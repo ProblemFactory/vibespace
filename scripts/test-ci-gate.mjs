@@ -15,7 +15,9 @@
 // rule over real commits · §4 the hook's control flow end-to-end · §5 the git
 // environment the detached child must NOT inherit (with the damage as the
 // negative control) · §6 no FAST-tier suite claims a machine-global fixture,
-// and every "no verdict" path says so up front and at the end (round 2).
+// and every "no verdict" path says so up front and at the end (round 2) · §7 no
+// literal date · §8 lanes / impact scope / full-tier clock (2026-09-15) · §9 the
+// scratch-orphan reaper (2.369.104).
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -208,7 +210,7 @@ if (argv.includes('--check-heavy')) {
   process.exit(0);
 }
 const li = argv.indexOf('--heavy-launch');
-if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1] }); process.exit(0); }
+if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1], range: (argv.find((a) => a.startsWith('--range=')) || '').slice(8) }); process.exit(0); }
 note({ mode: 'fast', isolate: argv.includes('--isolate'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null });
 process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
 `);
@@ -259,6 +261,8 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   ok(r1.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch',
     `the hook checks the heavy verdict FIRST, then runs fast, then launches heavy (got: ${r1.calls.map((c) => c.mode).join(',')})`);
   ok(r1.calls.find((c) => c.mode === 'heavy-launch')?.sha === A, 'the heavy run is launched for the sha being PUSHED');
+  ok(r1.calls.find((c) => c.mode === 'heavy-launch')?.range === A,
+    `…with the range it publishes — a NEW branch with NO remote-tracking ref to anchor on hands the lone sha (its whole unpublished range) (got ${JSON.stringify(r1.calls.find((c) => c.mode === 'heavy-launch')?.range)})`);
 
   // …the background heavy run comes back RED for A.
   writeMarker(path.join(repo, 'data', 'ci-heavy'), A, 'red', ['test-client-boot', 'test-fold-ux']);
@@ -274,6 +278,8 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   const r3 = runHook(B, A);
   ok(r3.status === 0, 'a GREEN heavy run on a newer commit unblocks the push');
   ok(r3.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch', 'and the full flow runs again');
+  ok(r3.calls.find((c) => c.mode === 'heavy-launch')?.range === `${A}..${B}`,
+    `…and an existing ref hands \`<remote>..<local>\` as the impact range (got ${JSON.stringify(r3.calls.find((c) => c.mode === 'heavy-launch')?.range)})`);
 
   // A red fast tier must block AND must not launch anything.
   fs.writeFileSync(path.join(repo, 'FAST_RED'), '1');
@@ -701,6 +707,34 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
         `NEG: with the selection reverted the same push runs the whole fast tier THREE times (got ${n.calls.filter((c) => c.mode === 'fast').length}) — N× the budget and N billed turns`);
     }
   }
+
+  // ── THE NEW-BRANCH RANGE IS RESOLVED BEFORE THE PUSH (2026-09-16, verifier).
+  // The hook handed the child a lone sha, and the child resolved it with
+  // `git log <sha> --not --remotes` AFTER the pack transfer had started — once
+  // refs/remotes/origin/<branch> was updated the range was EMPTY and the
+  // affected tier ran the two always rows for a push full of code. Now the
+  // hook resolves the boundary itself (the merge base with every remote-
+  // tracking ref) and hands `<boundary>..<tip>`, a diff the ref update cannot
+  // change. The race is made deterministic here: the ref is updated by hand
+  // and both spellings are asked afterwards.
+  {
+    const anchorSha = git(repo, ['rev-parse', 'HEAD']);
+    git(repo, ['update-ref', 'refs/remotes/origin/main', anchorSha]);
+    git(repo, ['checkout', '-q', '-b', 'newbranch7']);
+    commit(repo, 'src/n1.js', '//n1\n', 'N1');
+    const N2 = commit(repo, 'src/n2.js', '//n2\n', 'N2');
+    writeMarker(path.join(repo, 'data', 'ci-heavy'), N2, 'green'); // keep the heavy verdict clear for this leg
+    const rNew = runHookRefs(`refs/heads/newbranch7 ${N2} refs/heads/newbranch7 ${ZERO}\n`);
+    const rangeNew = rNew.calls.find((c) => c.mode === 'heavy-launch')?.range;
+    ok(rangeNew === `${anchorSha}..${N2}`,
+      `a NEW branch with a remote-tracking ref to anchor on hands \`<boundary>..<tip>\` — the merge base, resolved BEFORE the push (got ${JSON.stringify(rangeNew)})`);
+    git(repo, ['update-ref', 'refs/remotes/origin/newbranch7', N2]); // what the push does, a moment later
+    const { changedFiles: cf } = await import('./ci.mjs');
+    ok((cf(N2, repo).files || []).length === 0, 'CONTROL (the defect): the lone sha resolved AFTER the push lists NOTHING — the affected tier would have run only the always rows');
+    ok((cf(rangeNew, repo).files || []).sort().join() === 'src/n1.js,src/n2.js', '…the fixed spelling still lists both files after the push');
+    git(repo, ['update-ref', '-d', 'refs/remotes/origin/newbranch7']);
+    git(repo, ['update-ref', '-d', 'refs/remotes/origin/main']);
+  }
 }
 
 // ── §5 THE GIT ENVIRONMENT THE DETACHED CHILD MUST NOT INHERIT ───────────
@@ -1034,19 +1068,193 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
   ok(!LITERAL.test(codeOnly('const WIRE = "… https://chatgpt.com/x or try again at " + WHEN + ".";')), 'NEG: the derived shape (with its https:// intact) is not');
 }
 
-// ── §8 THE SCRATCH-ORPHAN REAPER (2.369.104) — decided over a FAKE proc root ──
+// ── §8 LANES, THE SERIAL TABLE, THE IMPACT SCOPE, THE FULL-TIER CLOCK (2026-09-15) ──
+console.log('\n§8 lanes, the serial table, the impact scope, the full-tier clock');
+{
+  const ci = await import('./ci.mjs');
+  const { SERIAL, laneCount, scheduleLanes, affectedSuites, suiteInputs, changedFiles, fullTierDue, FULL_EVERY_MS } = ci;
+  const heavy = SUITES.filter((s) => s.tier === 'heavy');
+  ok(laneCount({ cpus: 32, env: {} }) === 4 && laneCount({ cpus: 64, env: {} }) === 4 && laneCount({ cpus: 16, env: {} }) === 2 && laneCount({ cpus: 4, env: {} }) === 2,
+    'laneCount = clamp(cpus/8, 2, 4) (32 cpus ⇒ 4, 16 ⇒ 2, a 4-cpu runner ⇒ 2)');
+  ok(laneCount({ cpus: 32, env: { VIBESPACE_CI_LANES: '1' } }) === 1 && laneCount({ cpus: 32, env: { VIBESPACE_CI_LANES: 'x' } }) === 4,
+    'VIBESPACE_CI_LANES overrides it (1 = the sequential tier); a non-number is ignored');
+  ok(SERIAL.length >= 1 && SERIAL.every((s) => heavy.some((h) => h.name === s.name) && (s.why || '').length > 20),
+    `every SERIAL row names a HEAVY suite and says what machine-wide thing it claims (${SERIAL.map((s) => s.name).join(', ')})`);
+  const plan = scheduleLanes(heavy, { timings: { 'test-eml': 50000 }, sourceOf: () => '' });
+  ok(plan.parallel[0].name === 'test-eml', 'the previous marker\'s longest suite is scheduled FIRST');
+  ok(plan.serial.length === SERIAL.length && plan.serial.every((s) => SERIAL.some((r) => r.name === s.name)) && plan.parallel.every((s) => !SERIAL.some((r) => r.name === s.name)),
+    'the SERIAL rows are the serial lane and nothing else is');
+  // the flagged SHAPE comes from the fixture file, not a literal here — §6
+  // scans this suite's own source (a verbatim control made it report itself)
+  const flaggedSrc = fs.readFileSync(path.join(REPO, 'scripts', 'fixtures', 'machine-global-shapes', 'flagged.js.txt'), 'utf-8');
+  const flagged = scheduleLanes([{ name: 'test-x', tier: 'heavy' }], { serial: [], sourceOf: () => flaggedSrc });
+  ok(flagged.serial.length === 1 && /machine-global fixture/.test(flagged.serial[0].serialWhy), 'a suite machineGlobalFixtures flags runs serially, with the reason');
+  ok(scheduleLanes([{ name: 'a' }, { name: 'b' }], { serial: [], timings: { a: 1, b: 100 }, keepOrder: true }).parallel.map((s) => s.name).join() === 'a,b',
+    '--only keeps the order given');
+  ok(scheduleLanes([{ name: 'a' }, { name: 'b' }], { serial: [] }).parallel.map((s) => s.name).join() === 'b,a',
+    'with no measurement the table order is read backwards (cheap→expensive ⇒ the late row first)');
+
+  // IMPACT SCOPE over a stub tree: the graph, a literal, a prefix, reads:,
+  // always:, a global input, and "could not tell".
+  const root = mktmp('impact');
+  const w = (rel, body) => { fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); fs.writeFileSync(path.join(root, rel), body); };
+  w('src/a.js', "const b = require('./b.js');\nmodule.exports = b;\n");
+  w('src/b.js', 'module.exports = 1;\n');
+  w('src/r/q.js', 'module.exports = 2;\n');
+  w('docs/x.md', '# x\n');
+  w('server.js', '// boot\n');
+  w('scripts/test-a.mjs', "import a from '../src/a.js';\nconsole.log(a);\n");
+  w('scripts/test-c.mjs', "import fs from 'node:fs';\nconsole.log(fs.readFileSync('docs/x.md', 'utf8'));\n");
+  w('scripts/test-boot.mjs', "// spawns server.js in a worktree\nconsole.log('server.js');\n");
+  w('scripts/test-d.mjs', "console.log('pure');\n");
+  w('scripts/test-always.mjs', "console.log('smoke');\n");
+  w('scripts/test-r.mjs', "console.log('reads src/r by segments');\n");
+  const S = [{ name: 'test-a' }, { name: 'test-c' }, { name: 'test-boot' }, { name: 'test-d' }, { name: 'test-always', always: true }, { name: 'test-r', reads: ['src/r/'] }];
+  const sel = (changed) => affectedSuites({ suites: S, root, changed, range: 'x..y' }).selected.map((s) => s.name).sort().join(',');
+  ok(sel(['src/b.js']) === 'test-a,test-always,test-boot', `a change two hops down the require graph selects the importer, the boot smoke (src/ is its input) and the always row (${sel(['src/b.js'])})`);
+  ok(sel(['docs/x.md']) === 'test-always,test-c', 'a fixture named as a repo-relative literal selects its reader');
+  const how = affectedSuites({ suites: S, root, changed: ['src/b.js'], range: 'x..y' }).why;
+  ok(/^loads src\/b\.js/.test(how.get('test-a')) && /^boots the product \(src\/b\.js changed under src\/\)/.test(how.get('test-boot')) && /^always/.test(how.get('test-always')),
+    `each selection says HOW the suite depends on the change, never a bare "reads" for a file it never opens (${how.get('test-a')} · ${how.get('test-boot')})`);
+  ok(sel(['src/r/q.js']) === 'test-always,test-boot,test-r', 'a declared reads: prefix selects the suite whose path is built from segments');
+  ok(sel(['README.md']) === 'test-always', 'a file nothing reads selects only the always rows');
+  ok(sel(['package-lock.json']) === S.map((s) => s.name).sort().join(','), 'a dependency bump is a global input: everything runs');
+  const unknown = affectedSuites({ suites: S, root, changed: null, range: 'x..y' });
+  ok(unknown.selected.length === S.length && /could not be listed/.test(unknown.summary), '"could not tell" selects EVERYTHING and says so (never "nothing changed")');
+  // THE LOADER SHAPES THE WALK MISSED (2026-09-16, verifier): `require(REPO +
+  // '/src/x.js')` is how 9 heavy suites load the module they test, and the
+  // literal scan wanted the quote to be followed by `src/` — so a change to
+  // src/conversation-index.js selected 67 suites and NOT test-conversation-index.
+  w('scripts/test-cc.mjs', "const REPO = '.';\nconst { X } = require(REPO + '/src/b.js');\nconsole.log(X);\n");
+  w('scripts/test-ct.mjs', "const REPO = '.';\nconst { X } = require(`${REPO}/src/b.js`);\nconsole.log(X);\n");
+  w('scripts/test-ci.mjs', "const REPO = '.';\nconst m = await import(REPO + '/src/b.js');\nconsole.log(m);\n");
+  w('scripts/test-cr.mjs', "const p = require.resolve('../src/b.js');\nconsole.log(p);\n");
+  w('scripts/test-cq.mjs', "import { createRequire } from 'node:module';\nconst { X } = createRequire(import.meta.url)('../src/b.js');\nconsole.log(X);\n");
+  const L = [{ name: 'test-cc' }, { name: 'test-ct' }, { name: 'test-ci' }, { name: 'test-cr' }, { name: 'test-cq' }, { name: 'test-d' }];
+  const lsel = affectedSuites({ suites: L, root, changed: ['src/b.js'], range: 'x..y' });
+  ok(lsel.selected.map((s) => s.name).sort().join() === 'test-cc,test-ci,test-cq,test-cr,test-ct',
+    `require(REPO + '/src/x'), require(\`\${REPO}/src/x\`), import(REPO + '/src/x'), require.resolve('../src/x') and createRequire(...)('../src/x') all select the suite (${lsel.selected.map((s) => s.name).sort().join()})`);
+  ok(['test-cc', 'test-ct', 'test-ci', 'test-cr', 'test-cq'].every((n) => /^loads src\/b\.js/.test(lsel.why.get(n) || '')), 'each says "loads" (a load, walked), never "names"');
+  // …over the REAL table: the four measured misses, by name, and a census that
+  // every heavy row without always:/reads: has at least one PRODUCT input
+  // (src/, server.js, data/bin/) — a row with none is a suite the affected
+  // tier can never select for a product change, so it would only ever run in
+  // the 24 h full tier. Non-vacuity: the same predicate over a stub row that
+  // reads nothing says so.
+  const realHeavy = SUITES.filter((s) => s.tier === 'heavy');
+  for (const [changedFile, suite] of [['src/conversation-index.js', 'test-conversation-index'], ['src/normalizers.js', 'test-session-brain-dark'], ['src/machine-probes.js', 'test-machine-probes'], ['src/routes/persistence.js', 'test-layout-history']]) {
+    if (!realHeavy.some((s) => s.name === suite)) continue; // the row may leave the tier; the stub legs above pin the shapes
+    const why = affectedSuites({ suites: realHeavy, changed: [changedFile], range: 'x..y' }).why.get(suite);
+    ok(!!why && /^loads /.test(why), `${changedFile} selects ${suite} (${why || 'MISSED — the measured defect'})`);
+  }
+  const isProduct = (p) => p === 'server.js' || p.startsWith('src/') || p.startsWith('data/bin/');
+  const inputless = (s, r) => { const { files, prefixes } = suiteInputs(s, { root: r }); return ![...files, ...prefixes].some(isProduct); };
+  const silent = realHeavy.filter((s) => !s.always && !(s.reads && s.reads.length) && inputless(s, REPO)).map((s) => s.name);
+  ok(silent.length === 0, `every heavy row without always:/reads: has a PRODUCT input the affected tier can match (silent rows: ${silent.join(', ') || 'none'})`);
+  ok(inputless({ name: 'test-d' }, root) && !inputless({ name: 'test-a' }, root), 'CONTROL: the census predicate flags a suite that reads no product file and passes one that does');
+  // changedFiles over real history: a..b is the diff, a lone sha is its unpublished range.
+  const repo = makeRepo('range');
+  const A = commit(repo, 'src/one.js', '1\n', 'A');
+  const B = commit(repo, 'src/two.js', '2\n', 'B');
+  ok((changedFiles(`${A}..${B}`, repo).files || []).join() === 'src/two.js', 'changedFiles(a..b) lists what b changed since a');
+  ok((changedFiles(B, repo).files || []).sort().join() === 'src/one.js,src/two.js', 'changedFiles(<sha>) with no remote-tracking ref lists the whole unpublished range');
+  ok(changedFiles('nope..nope', repo).files === null, 'an unresolvable range answers null (the caller runs everything)');
+  // THE GRAPH IS THE GATED COMMIT'S (2026-09-16, verifier): master checked out
+  // with test-x importing src/a.js; branch feat rewires test-x to src/b.js (c1)
+  // and then changes src/b.js (c2). Read from the CHECKOUT, c1..c2 selects
+  // nothing — the defect; read from a worktree AT c2 (the range still answered
+  // by the repository's objects) it selects test-x.
+  const grepo = makeRepo('graph');
+  commit(grepo, 'src/a.js', 'module.exports = 1;\n', 'a');
+  commit(grepo, 'src/b.js', 'module.exports = 2;\n', 'b');
+  commit(grepo, 'scripts/test-x.mjs', "import a from '../src/a.js';\nconsole.log(a);\n", 'test-x reads a');
+  git(grepo, ['checkout', '-q', '-b', 'feat']);
+  const c1 = commit(grepo, 'scripts/test-x.mjs', "import b from '../src/b.js';\nconsole.log(b);\n", 'c1: test-x now reads b');
+  const c2 = commit(grepo, 'src/b.js', 'module.exports = 3;\n', 'c2: b changes');
+  git(grepo, ['checkout', '-q', 'main']);
+  const TX = [{ name: 'test-x' }];
+  ok(affectedSuites({ range: `${c1}..${c2}`, suites: TX, root: grepo }).selected.length === 0,
+    'CONTROL (the defect): read from the CHECKOUT (main), c1..c2 selects nothing — test-x@main imports src/a.js');
+  const gwt = path.join(mktmp('graph-wt'), 'at-c2');
+  git(grepo, ['worktree', 'add', '-q', '--detach', gwt, c2]);
+  const atSha = affectedSuites({ range: `${c1}..${c2}`, suites: TX, root: gwt, gitRoot: grepo });
+  ok(atSha.selected.map((s) => s.name).join() === 'test-x' && /^loads src\/b\.js/.test(atSha.why.get('test-x') || ''),
+    `read from the tree AT the sha (root = the scratch worktree, gitRoot = the repository) the same range selects test-x (${atSha.why.get('test-x')})`);
+  try { git(grepo, ['worktree', 'remove', '--force', gwt]); } catch { }
+  const ciSrc = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/wt = addScratchWorktree\(sha, 'heavy'\);[\s\S]*?impact = affectedSuites\(\{ range, suites: all, root: runRoot, gitRoot: repo \}\);/.test(ciSrc)
+    && !/impact = affectedSuites\(\{ range, suites: all \}\);/.test(ciSrc),
+    'WIRING: heavyGate selects AFTER the scratch worktree exists, from root: runRoot with gitRoot: repo (never from the checkout up front)');
+
+  // THE FULL-TIER CLOCK + THE BLOCK RULE FOR AN AFFECTED GREEN.
+  const mdir = mktmp('full-clock');
+  const write = (sha, kind, rec) => fs.writeFileSync(path.join(mdir, `${sha}.${kind}`), JSON.stringify({ sha, result: kind, failed: [], ...rec }));
+  ok(fullTierDue(mdir).due === true, 'no marker ⇒ a FULL run is due');
+  write('a'.repeat(40), 'green', { scope: 'affected', selected: ['x'], endedAt: Date.now() });
+  ok(fullTierDue(mdir).due === true, 'an AFFECTED green does not count as the full run');
+  write('b'.repeat(40), 'green', { endedAt: Date.now() - FULL_EVERY_MS - 60000 });
+  ok(fullTierDue(mdir).due === true && /h old/.test(fullTierDue(mdir).why), 'a full green older than 24 h ⇒ due, saying its age');
+  write('c'.repeat(40), 'green', { scope: 'full', endedAt: Date.now() - 60000 });
+  ok(fullTierDue(mdir).due === false, 'a full green younger than 24 h ⇒ not due (the next push runs the affected tier)');
+  // …AND IT MUST HAVE JUDGED EVERY SUITE IT NAMED, ON THIS LINE OF HISTORY
+  // (2026-09-16, verifier): a full run at an old tag in which 108 of 110
+  // suites were absent judged two, and a green on an unrelated branch says
+  // nothing about the push — either used to satisfy the 24 h safety net.
+  const adir = mktmp('full-absent');
+  const aw = (sha, rec) => fs.writeFileSync(path.join(adir, `${sha}.green`), JSON.stringify({ sha, result: 'green', failed: [], scope: 'full', ...rec }));
+  aw('d'.repeat(40), { suites: 110, absent: Array.from({ length: 108 }, (_, i) => `test-${i}`), endedAt: Date.now() - 60000 });
+  ok(fullTierDue(adir).due === true && /judged 2 of 110 suites \(108 absent/.test(fullTierDue(adir).why),
+    `a full green in which 108 of 110 suites were ABSENT is not the safety net, and says how many it judged (${fullTierDue(adir).why})`);
+  aw('e'.repeat(40), { suites: 110, endedAt: Date.now() - 30000 });
+  ok(fullTierDue(adir).due === false, 'CONTROL: a COMPLETE full green beside it counts');
+  const lrepo = makeRepo('full-line');
+  const L1 = commit(lrepo, 'src/l1.js', '1\n', 'L1');
+  const L2 = commit(lrepo, 'src/l2.js', '2\n', 'L2');
+  git(lrepo, ['checkout', '-q', '-b', 'other', L1]);
+  const O = commit(lrepo, 'src/o.js', 'o\n', 'O (another line)');
+  const ldir = mktmp('full-line-markers');
+  const lw = (sha, rec) => fs.writeFileSync(path.join(ldir, `${sha}.green`), JSON.stringify({ sha, result: 'green', failed: [], scope: 'full', suites: 3, endedAt: Date.now() - 60000, ...rec }));
+  lw(O);
+  const otherLine = fullTierDue(ldir, Date.now(), { sha: L2, repoRoot: lrepo });
+  ok(otherLine.due === true && /another line of history/.test(otherLine.why), `a full green on ANOTHER branch is not the safety net for this push (${otherLine.why})`);
+  ok(fullTierDue(ldir).due === false, 'CONTROL: with no sha to relate it to (ci:status without --head), ancestry is not asked');
+  lw(L1, { endedAt: Date.now() - 120000 });
+  ok(fullTierDue(ldir, Date.now(), { sha: L2, repoRoot: lrepo }).due === false, 'an older full green on an ANCESTOR of the push counts (the newest QUALIFYING green is the one that matters)');
+  const ddir = mktmp('full-desc-markers');
+  fs.writeFileSync(path.join(ddir, `${L2}.green`), JSON.stringify({ sha: L2, result: 'green', failed: [], scope: 'full', suites: 3, endedAt: Date.now() - 60000 }));
+  ok(fullTierDue(ddir, Date.now(), { sha: L1, repoRoot: lrepo }).due === false, '…and so does one on a DESCENDANT');
+  ok(fullTierDue(ddir, Date.now(), { sha: 'f'.repeat(40), repoRoot: lrepo }).due === true, 'a push the repository cannot relate to the green (unknown sha) is due a full run');
+  const launcherSrc = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/const due = fullTierDue\(dir, Date\.now\(\), \{ sha \}\);/.test(launcherSrc), 'WIRING: heavyLaunch asks fullTierDue about the sha being pushed');
+  const brepo = makeRepo('affected-block');
+  const R = commit(brepo, 'src/r.js', '//r\n', 'R');
+  const G = commit(brepo, 'src/g.js', '//g\n', 'G');
+  const bdir = mktmp('affected-block-markers');
+  const bw = (sha, kind, rec) => fs.writeFileSync(path.join(bdir, `${sha}.${kind}`), JSON.stringify({ sha, result: kind, failed: [], endedAt: Date.now(), ...rec }));
+  bw(R, 'red', { failed: ['test-x'] });
+  bw(G, 'green', { scope: 'affected', selected: ['test-y'] });
+  ok(heavyBlocker({ dir: bdir, head: G, repoRoot: brepo })?.sha === R, 'an affected green that did NOT run the failing suite does not clear the red');
+  bw(G, 'green', { scope: 'affected', selected: ['test-x', 'test-y'] });
+  ok(heavyBlocker({ dir: bdir, head: G, repoRoot: brepo }) === null, '…an affected green that ran it does');
+  bw(G, 'red', { scope: 'affected', selected: ['test-z'], failed: ['test-z'] });
+  try { fs.unlinkSync(path.join(bdir, `${G}.green`)); } catch {}
+  ok(heavyBlocker({ dir: bdir, head: G, repoRoot: brepo })?.sha === G, 'an affected RED blocks exactly like a full red');
+}
+
+// ── §9 THE SCRATCH-ORPHAN REAPER (2.369.104) — decided over a FAKE proc root ──
 // 2026-09-16: 504 leaked vibespace-device daemons + 552 scratch node processes
 // + 2,137 orphaned dtach clients (86 GB, load 15) — every worktree server a
 // suite boots spawns a DETACHED device daemon the suite's teardown never sees.
 // The rule is evidence-based (a scratch root under /tmp/vs-* AND either the dir
 // is gone or every member is unowned and stale); each branch has a row here.
+console.log('\n§9 the scratch-orphan reaper');
 {
   const root = mktmp('procroot');
-  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cigate8-plain-')); tmpDirs.push(plain);   // a tmp dir WITHOUT the vs- prefix (this suite's own mktmp dirs are scratch-shaped, deliberately)
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cigate9-plain-')); tmpDirs.push(plain);   // a tmp dir WITHOUT the vs- prefix (this suite's own mktmp dirs are scratch-shaped, deliberately)
   // the scratch dirs are minted under literal /tmp with the vs- prefix (per pid — never a shared name)
-  const scratch = (tag) => { const d = fs.mkdtempSync(`/tmp/vs-cigate8-${tag}-${process.pid}-`); tmpDirs.push(d); return d; };
+  const scratch = (tag) => { const d = fs.mkdtempSync(`/tmp/vs-cigate9-${tag}-${process.pid}-`); tmpDirs.push(d); return d; };
   const sLive = scratch('live'), sOld = scratch('old'), sYoung = scratch('young');
-  const sGone = `/tmp/vs-cigate8-gone-${process.pid}-nowhere`;
+  const sGone = `/tmp/vs-cigate9-gone-${process.pid}-nowhere`;
   ok(SCRATCH_ROOT_RE.test(sLive) && SCRATCH_ROOT_RE.test(sGone) && SCRATCH_ROOT_RE.test(root) && !SCRATCH_ROOT_RE.test(plain), 'the scratch-root shape is the one scripts/scratch.mjs mints (this suite\'s own mktmp dirs included; a tmp dir without the prefix is not it)');
   const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000;
   const mk = (pid, { name, argv, ppid, cwd, env = {}, born = NOW }) => {
@@ -1081,8 +1289,11 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
   const asSelf = scratchOrphans({ procRoot: root, now: NOW, self: 310 });
   ok(!asSelf.some((o) => o.pid === 310 || o.pid === 300), 'this process and its ancestors are never candidates (a reaper does not reap itself)');
   const wired = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
-  ok(/const ms = Date\.now\(\) - t;\n\s*try \{ reapScratchOrphans\(\{\}\); \}/.test(wired), 'WIRING: every suite run (both tiers) is followed by a sweep');
-  ok(/function heavyLaunch\(sha, \{ dir, only, lock, lockWaitMs \} = \{\}\) \{\n\s*const d = markerDir\(dir\);\n\s*try \{ reapScratchOrphans\(/.test(wired), 'WIRING: a heavy launch sweeps before it starts');
+  ok(/const ms = Date\.now\(\) - t;\n\s*try \{ reapScratchOrphans\(\{\}\); \}/.test(wired), 'WIRING: every suite run of the SYNC runner (the fast tier) is followed by a sweep');
+  ok(/function heavyLaunch\(sha, \{ dir, only, lock, lockWaitMs, range \} = \{\}\) \{\n\s*const d = markerDir\(dir\);\n\s*try \{ reapScratchOrphans\(/.test(wired), 'WIRING: a heavy launch sweeps before it starts');
+  // …AND THE LANES (2026-09-16): the heavy tier runs every suite through runSuiteAsync from laneWorker, never through runSuite — the sync pin above would stay green while the lanes reaped nothing (the verifier's integration finding)
+  ok(/console\.log\(r\.lines\.join\('\\n'\)\);\n(?:\s*\/\/[^\n]*\n)*\s*try \{ await reapScratchOrphansAsync\(\{\}\); \}/.test(wired), 'WIRING: every LANE sweeps after each suite completes (the async twin — the sync reaper would block the other lanes)');
+  ok(typeof (await import('./ci.mjs')).reapScratchOrphansAsync === 'function', '…and the async twin is exported');
   ok(/if \(arg\('reap'\)\)/.test(wired), 'WIRING: `--reap` runs the sweep by hand');
 }
 

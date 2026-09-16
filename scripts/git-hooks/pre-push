@@ -91,6 +91,7 @@ is_code_path() {
 only_docs=1
 PUSHED_SHAS=()
 PUSHED_REFS=()
+PUSHED_RANGES=()   # what each pushed sha PUBLISHES, for the impact-scoped heavy tier (2026-09-15)
 for line in "${REFS[@]:-}"; do
   [ -z "$line" ] && continue
   local_sha=$(echo "$line" | awk '{print $2}')
@@ -100,8 +101,26 @@ for line in "${REFS[@]:-}"; do
   PUSHED_REFS+=("$(echo "$line" | awk '{print $1}')")
   if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
     range_cmd=(git log --name-only --format= "$local_sha" --not --remotes)   # new branch: the WHOLE unpublished range
+    # A FIXED SPELLING FOR THE DETACHED CHILD (2026-09-16, verifier). The lone
+    # sha means "everything <sha> has that no remote-tracking ref has" — true
+    # HERE, before the push, and false a moment later: the child resolves it
+    # with `git log <sha> --not --remotes` after the pack transfer may already
+    # have updated refs/remotes/origin/<branch>, and then the range is EMPTY
+    # and the affected tier runs the two `always` rows for a push full of
+    # code. Reproduced on a stub (3 trials): changedFiles(tip) = 2 files
+    # before the push, [] after it, every time. So the boundary is resolved
+    # now: the merge base of the tip and every remote-tracking ref (`git
+    # merge-base A B C…` = the base of A and a hypothetical merge of the rest,
+    # i.e. the nearest point where this line meets ANY published ref), spelled
+    # `<boundary>..<sha>` — a diff, immune to the ref update. No remote-tracking
+    # ref at all, or no common ancestor (an orphan branch): the lone sha stays.
+    boundary=""
+    remote_tips="$(git for-each-ref --format='%(objectname)' refs/remotes/ 2>/dev/null | tr '\n' ' ')"
+    if [ -n "$remote_tips" ]; then boundary="$(git merge-base "$local_sha" $remote_tips 2>/dev/null || true)"; fi
+    if [ -n "$boundary" ]; then PUSHED_RANGES+=("$boundary..$local_sha"); else PUSHED_RANGES+=("$local_sha"); fi
   else
     range_cmd=(git diff --name-only "$remote_sha..$local_sha")
+    PUSHED_RANGES+=("$remote_sha..$local_sha")
   fi
   files=$("${range_cmd[@]}" 2>/dev/null); rc=$?
   if [ "$rc" != "0" ]; then
@@ -126,6 +145,21 @@ ref_for_sha() {
     j=$((j + 1))
   done
   echo "a ref"
+}
+
+# The range a sha arrived with — the same two spellings ci.mjs's --range
+# reads: `<remote>..<local>` for an existing ref, `<boundary>..<local>` for a
+# new branch (its merge base with the remote-tracking refs, resolved BEFORE
+# the push — see above), and the lone `<local>` only when nothing anchors it.
+# Empty when the lists do not line up, and an empty range launches the FULL
+# tier (ci.mjs cannot scope what it was not told).
+range_for_sha() {
+  local j=0
+  for s in "${PUSHED_SHAS[@]:-}"; do
+    [ "$s" = "$1" ] && { echo "${PUSHED_RANGES[$j]:-}"; return 0; }
+    j=$((j + 1))
+  done
+  echo ""
 }
 
 # ── HEAVY-TIER VERDICT FIRST (2026-09-07) ─────────────────────────────────
@@ -295,8 +329,15 @@ fi
 # detaching itself (no setsid/nohup dependency) and, crucially, hands the child
 # a SANITIZED git environment: this hook process exports GIT_DIR/GIT_INDEX_FILE
 # and the heavy suites run `git worktree add`.
+#
+# THE LAUNCHER DECIDES WHAT TO RUN (2026-09-15): with the pushed range it runs
+# the AFFECTED tier — only the suites whose inputs the range touches, plus the
+# `always` boot/restore smokes — unless the newest FULL green marker is older
+# than 24 h, in which case the FULL tier. No cron; `npm run ci:status` says
+# which comes next. A red of either scope blocks the next push exactly alike;
+# an affected green clears a red only for the suites it actually ran.
 for sha in "${PUSHED_SHAS[@]:-}"; do
   [ -z "$sha" ] && continue
-  node scripts/ci.mjs --heavy-launch "$sha" >&2 || true
+  node scripts/ci.mjs --heavy-launch "$sha" --range="$(range_for_sha "$sha")" >&2 || true
 done
 exit 0
