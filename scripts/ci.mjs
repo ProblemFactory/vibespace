@@ -84,6 +84,7 @@
 //   node scripts/ci.mjs --check-heavy    exit 1 if a red heavy blocks a push
 //   node scripts/ci.mjs --status         last heavy result per sha
 //   node scripts/ci.mjs --census         the tier census self-test
+//   node scripts/ci.mjs --reap           kill scratch-dir orphans (what every suite run does after itself)
 // Ops flags: --markers=<dir> (where heavy results live), --head=<sha> (which
 // commit the verdict is about), --only=a,b (a subset of the heavy tier, e.g.
 // re-running one suite after a fix; an unknown name is a loud exit 2),
@@ -532,6 +533,97 @@ export const killedFromOutside = (r) => !!(r && r.signal && OUTSIDE_SIGNALS.incl
 // in-place run the table and the tree come from the same checkout, so a
 // missing file means THIS tree disagrees with its own table — a red, and one
 // `--census` already reports as a ghost inside `npm run build`.
+// ── SCRATCH-ORPHAN REAPER (2.369.104) ─────────────────────────────────────────
+// Every worktree server a suite boots spawns a DETACHED local device daemon
+// (vibespace-device — setsid, by design: production's daemon must outlive a
+// server restart) and usually wrapper/child node processes; a suite's teardown
+// kills the server it spawned and nothing else. MEASURED on the dev box,
+// 2026-09-16: 504 vibespace-device processes (34.8 GB RSS, up to 76 h old),
+// 552 node processes under /tmp/vs-* scratch dirs and 2,137 orphaned
+// `dtach -a` bridge clients — 86 GB used, load 15, the owner's display blank.
+// EVIDENCE, NEVER A HEURISTIC: a process is a scratch orphan only when its
+// cwd / HOME / device root lies under a `/tmp/vs-<name>-<random>` scratch dir
+// (the shape scripts/scratch.mjs mints; production is rooted in a checkout)
+// AND either that scratch dir is GONE (the suite cleaned up and left the
+// process behind) or every process rooted there is reparented (no live suite
+// owns any of them) and older than the fixture stale floor. A ci.mjs runner
+// is never a candidate (the isolated heavy tier lives in /tmp/vs-ci-heavy-*
+// for its whole run), and a group with ANY live-parented member is left alone
+// — that is a suite in flight, possibly another lane's.
+export const SCRATCH_ROOT_RE = /^\/tmp\/vs-[A-Za-z0-9._-]+/;
+export const REAP_NAMES = new Set(['node', 'npm', 'claude', 'codex', 'opencode', 'Xvfb', 'Xvnc', 'x11vnc', 'xmessage', 'esbuild', 'dtach']);
+const REAP_STALE_MS = 10 * 60 * 1000; // = src/fixture-guard.js FIXTURE_STALE_MS (a run in flight is never older)
+function procRead(procRoot, pid, f) { try { return fs.readFileSync(path.join(procRoot, String(pid), f)); } catch { return null; } }
+function procInfo(procRoot, pid) {
+  const stat = procRead(procRoot, pid, 'stat'); if (!stat) return null;
+  const s = stat.toString('latin1'); const rp = s.lastIndexOf(')'); if (rp < 0) return null;
+  const ppid = Number(s.slice(rp + 2).split(' ')[1]);
+  const argv = (procRead(procRoot, pid, 'cmdline') || Buffer.alloc(0)).toString('utf8').split('\0').filter((x, i) => i === 0 || x);
+  const a0 = argv[0] ? path.basename(argv[0]) : '';
+  let cwd = ''; try { cwd = fs.readlinkSync(path.join(procRoot, String(pid), 'cwd')); } catch { }
+  const env = {}; const eb = procRead(procRoot, pid, 'environ');
+  if (eb) for (const kv of eb.toString('utf8').split('\0')) { const i = kv.indexOf('='); if (i > 0) env[kv.slice(0, i)] = kv.slice(i + 1); }
+  let bornMs = null; try { bornMs = fs.statSync(path.join(procRoot, String(pid))).mtimeMs; } catch { }
+  return { pid, ppid, a0, argv, cwd, env, bornMs };
+}
+/** The orphans a sweep would reap: [{pid, name, root, why}]. PURE over a proc
+ *  root (a test drives a fake one). `now`/`staleMs`/`exists` are parameters
+ *  for the same reason. */
+export function scratchOrphans({ procRoot = '/proc', now = Date.now(), staleMs = REAP_STALE_MS, exists = (d) => fs.existsSync(d), self = process.pid } = {}) {
+  let pids = [];
+  try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch { return []; }
+  const infos = new Map();
+  for (const pid of pids) { const i = procInfo(procRoot, pid); if (i) infos.set(pid, i); }
+  const systemd = new Set([1, ...[...infos.values()].filter((i) => i.a0 === 'systemd').map((i) => i.pid)]);
+  const skip = new Set(); // this process and its ancestors
+  for (let q = self; q && infos.has(q) && !skip.has(q); q = infos.get(q).ppid) skip.add(q);
+  const rootOf = (i) => {
+    for (const cand of [i.cwd, i.env.HOME, i.env.VIBESPACE_DEVICE_ROOT, i.env.VIBESPACE_AGENTD_ROOT]) {
+      const m = SCRATCH_ROOT_RE.exec(String(cand || '')); if (m) return m[0];
+    }
+    return null;
+  };
+  const groups = new Map();
+  for (const i of infos.values()) {
+    if (skip.has(i.pid)) continue;
+    const named = REAP_NAMES.has(i.a0) || i.a0.startsWith('vibespace-devic') || i.a0.startsWith('chrome');
+    if (!named) continue;
+    if (i.argv.some((a) => /scripts\/ci\.mjs$/.test(a))) continue; // a gate runner, never a candidate
+    const root = rootOf(i); if (!root) continue;
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(i);
+  }
+  const out = [];
+  for (const [root, members] of groups) {
+    const gone = !exists(root);
+    // a member is OWNED when walking its parents (through fellow members) reaches a
+    // live process outside the group — a suite, a runner, this process; reaching
+    // systemd/init or a vanished pid means nobody owns it
+    const orphaned = (i) => { let q = i; const seen = new Set(); while (q && !seen.has(q.pid)) { seen.add(q.pid); if (systemd.has(q.ppid)) return true; const p = infos.get(q.ppid); if (!p) return true; if (!members.includes(p)) return false; q = p; } return true; };
+    const live = members.some((i) => !orphaned(i));
+    const ages = members.map((i) => (i.bornMs == null ? Infinity : now - i.bornMs));
+    const oldEnough = Math.min(...ages) >= staleMs;
+    let why = null;
+    if (gone) why = 'scratch dir gone';
+    else if (!live && oldEnough) why = `orphaned ${Math.round(Math.min(...ages) / 60000)} min (no live suite owns ${root})`;
+    if (!why) continue;
+    for (const i of members) out.push({ pid: i.pid, name: i.a0, root, why });
+  }
+  return out;
+}
+/** SIGTERM, then SIGKILL the survivors after `graceMs`. Returns the list it acted on. */
+export function reapScratchOrphans({ log = console.log, graceMs = 3000, ...opts } = {}) {
+  const list = scratchOrphans(opts);
+  if (!list.length) return list;
+  const roots = [...new Set(list.map((o) => o.root))];
+  log(`[ci] reaping ${list.length} scratch orphan process(es) from ${roots.length} finished scratch dir(s): ${roots.slice(0, 4).join(' ')}${roots.length > 4 ? ' …' : ''}`);
+  for (const o of list) { try { process.kill(o.pid, 'SIGTERM'); } catch { } }
+  const until = Date.now() + graceMs;
+  while (Date.now() < until && list.some((o) => alive(o.pid))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  for (const o of list) { if (alive(o.pid)) { try { process.kill(o.pid, 'SIGKILL'); } catch { } } }
+  return list;
+}
+
 function runSuite(s, { root = repo, absentIsSkip = false, sha = '' } = {}) {
   if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
     console.log(`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`);
@@ -541,6 +633,7 @@ function runSuite(s, { root = repo, absentIsSkip = false, sha = '' } = {}) {
   const r = spawnSync(process.execPath, [path.join(root, 'scripts', s.name + '.mjs')],
     { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], timeout: budgetFor(s), encoding: 'utf-8', env: GIT_ENV });
   const ms = Date.now() - t;
+  try { reapScratchOrphans({}); } catch (e) { console.log(`  · scratch reaper skipped: ${e && e.message}`); } // a suite may not leave a daemon behind (2.369.104)
   const stdout = r.stdout || '';
   if (r.status === 0) { console.log(`  ✓ ${s.name} (${ms}ms) — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`); return { ok: true, ms }; }
   console.log(`\n✗ ${s.name} FAILED (${ms}ms${r.error ? ', ' + r.error.code : ''}${r.signal ? ', ' + r.signal : ''})`);
@@ -1056,6 +1149,7 @@ function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lockWaitMs
 // is not reachable from a git hook.)
 function heavyLaunch(sha, { dir, only, lock, lockWaitMs } = {}) {
   const d = markerDir(dir);
+  try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch { } // the tier starts on a box the last runs did not litter (2.369.104)
   if (!sha || gitOut(['cat-file', '-e', sha + '^{commit}']) === null) { console.error(`[ci:heavy] not launching: ${sha ? 'unknown commit ' + shortSha(sha) : 'no sha given'}`); return 0; }
   // SERIALISE THE TIER, NOT JUST THE SHA (round 2 finding). Refusing only a
   // twin for the SAME sha meant two pushes inside one 16-minute window started
@@ -1205,6 +1299,7 @@ function main(argv) {
   // actual heavy run — scripts/test-ci-heavy-launch.mjs passes both.
   const lock = str('lock') ? path.resolve(str('lock')) : (process.env.VIBESPACE_CI_HEAVY_LOCK || undefined);
   const lockWaitMs = str('lock-wait-ms') !== null ? Number(str('lock-wait-ms')) : undefined;
+  if (arg('reap')) { const l = reapScratchOrphans({}); console.log(l.length ? l.map((o) => `${o.pid} ${o.name} ${o.root} — ${o.why}`).join('\n') : 'no scratch orphans'); process.exit(0); }
   if (arg('census')) process.exit(census());
   if (arg('status')) process.exit(status({ dir, head }));
   if (arg('check-heavy')) process.exit(checkHeavy({ dir, head }));

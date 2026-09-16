@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.104 — the gate reaps the scratch-dir orphans it leaves behind, and the delayed auto-resume arm card says "pool switched" instead of "limit reset"
+
+- **Scratch-orphan reaper** (owner 2026-09-16: the box at 86 GB / load 15, the KVM blank): every worktree server a gate suite boots spawns a DETACHED `vibespace-device` daemon the suite's teardown never sees — 504 of them (34.8 GB), 552 scratch node processes and 2,137 orphaned `dtach -a` clients had accumulated. `scratchOrphans` in scripts/ci.mjs is evidence-based: a known executable rooted (cwd / HOME / device root) under a `/tmp/vs-*` scratch dir, reaped only when that dir is gone or every process rooted there is unowned and older than the 10-min stale floor; never a gate runner, never this process's ancestors, never production. Runs after every suite in both tiers, at every heavy launch, and as `node scripts/ci.mjs --reap`. test-ci-gate §8 drives a fake proc root (173).
+- **Auto-resume arm card** (owner: "明明没到也没被中断你却提示到达上限了"): a hot pool switch arms a +45 s near-nudge and its delayed announcement said `用量已达上限。已安排在 <now+45s> 重置后自动继续` — a reset instant that was no reset. PURE `armNoticeFor` words the arm by its cause: a switch says `账号池已切换到 <member>，约 N 秒后自动继续这个任务`; only an arm anchored on a real reset says 重置. test-auto-resume-loop pins both wordings + the wiring (208).
+
 ## 2.369.103 — Background Work triage: the red badge counts only what nobody has seen, one-shots fold by owner and family, terminal jobs archive on their own clock, held notifications are visible and the ledger says who spent
 
 - Owner (2026-09-14, with a screenshot): one-shot tasks — including every failed one — piled up flat in the Background Work panel and the red badge never went down. Built whole on one branch (design-background-work.md §13, owner-approved defaults 24 h · 7 d · notified = acknowledged), one adversarial pass, one fix pass:

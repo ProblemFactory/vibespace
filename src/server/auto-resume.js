@@ -170,6 +170,22 @@ function continueNoticeFor({ kind, armReason, label, moved = false, cause = null
   return { cls: 'reset', text: '用量上限已重置，已自动继续这个任务。' };
 }
 
+/** The delayed ARM announcement, worded by the arm's CAUSE (2.369.104, owner:
+ *  "明明没到也没被中断你却提示到达上限了"): a hot pool switch arms a +45 s
+ *  near-nudge, and one sentence — "用量已达上限。已安排在 <T> 重置后自动继续" —
+ *  used to call that instant a RESET (03:24:53 about a window that resets at
+ *  07:50). A switch says WHICH member and that the continue follows in
+ *  seconds; only an arm anchored on a real reset states the reset instant.
+ *  PURE: (armReason, resetsAtMs, nowMs) → sentence. */
+function armNoticeFor(armReason, resetsAtMs, nowMs) {
+  const m = /^switched to a usable account \((.+)\)/.exec(String(armReason || ''));
+  if (m) {
+    const secs = Math.max(1, Math.round((Number(resetsAtMs) - Number(nowMs)) / 1000));
+    return `账号池已切换到 ${m[1]}，约 ${secs} 秒后自动继续这个任务（状态栏可取消）。`;
+  }
+  return `用量已达上限。已安排在 ${new Date(resetsAtMs).toLocaleString()} 重置后自动继续（状态栏可取消）。`;
+}
+
 /** Pick what to WAIT FOR when a session hits the wall (PURE). Two field
  *  corrections shaped this contract:
  *  · c1206711 #1: the rejection may name a FAR bucket while a POOL SIBLING
@@ -398,7 +414,11 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const a = armed.get(id);
         if (!a || a.fired || a.resetsAt !== resets) return;
         const s2 = activeSessions.get(id);
-        if (s2) { try { notify(id, s2, `用量已达上限。已安排在 ${new Date(resets).toLocaleString()} 重置后自动继续（状态栏可取消）。`); } catch { } }
+        // The sentence follows the ARM'S CAUSE (2.369.104, owner: "明明没到也没被中断你却
+        // 提示到达上限了"): a hot pool switch arms a 45 s near-nudge, and this line
+        // used to call THAT instant a "reset" — "已安排在 03:24:53 重置后自动继续"
+        // about a window that resets at 07:50. armNoticeFor is PURE and pinned.
+        if (s2) { try { notify(id, s2, armNoticeFor(reason, resets, Date.now())); } catch { } }
       }, Math.max(0, notifyDelayMs));
       if (t.unref) t.unref();
       _armNotifyTimers.set(id, t);
@@ -1023,5 +1043,5 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 module.exports = {
   create, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
-  refusalNoticeFor, continueNoticeFor, // PURE: what the conversation is told, and when
+  refusalNoticeFor, continueNoticeFor, armNoticeFor, // PURE: what the conversation is told, and when
 };

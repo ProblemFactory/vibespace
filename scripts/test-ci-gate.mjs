@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, SCRATCH_ROOT_RE, REAP_NAMES } from './ci.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1032,6 +1032,58 @@ console.log('\n§7 no gate suite pins the codex prose reset as a literal date');
   ok(LITERAL.test(codeOnly('const WIRE = "… or try again at Sep 13th, 2026 8:36 PM.";')), 'NEG: a literal in code is flagged');
   ok(!LITERAL.test(codeOnly('  // said "try again at Sep 13th, 2026 8:36 PM", which was')), 'NEG: the same sentence in a whole-line comment is not');
   ok(!LITERAL.test(codeOnly('const WIRE = "… https://chatgpt.com/x or try again at " + WHEN + ".";')), 'NEG: the derived shape (with its https:// intact) is not');
+}
+
+// ── §8 THE SCRATCH-ORPHAN REAPER (2.369.104) — decided over a FAKE proc root ──
+// 2026-09-16: 504 leaked vibespace-device daemons + 552 scratch node processes
+// + 2,137 orphaned dtach clients (86 GB, load 15) — every worktree server a
+// suite boots spawns a DETACHED device daemon the suite's teardown never sees.
+// The rule is evidence-based (a scratch root under /tmp/vs-* AND either the dir
+// is gone or every member is unowned and stale); each branch has a row here.
+{
+  const root = mktmp('procroot');
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'cigate8-plain-')); tmpDirs.push(plain);   // a tmp dir WITHOUT the vs- prefix (this suite's own mktmp dirs are scratch-shaped, deliberately)
+  // the scratch dirs are minted under literal /tmp with the vs- prefix (per pid — never a shared name)
+  const scratch = (tag) => { const d = fs.mkdtempSync(`/tmp/vs-cigate8-${tag}-${process.pid}-`); tmpDirs.push(d); return d; };
+  const sLive = scratch('live'), sOld = scratch('old'), sYoung = scratch('young');
+  const sGone = `/tmp/vs-cigate8-gone-${process.pid}-nowhere`;
+  ok(SCRATCH_ROOT_RE.test(sLive) && SCRATCH_ROOT_RE.test(sGone) && SCRATCH_ROOT_RE.test(root) && !SCRATCH_ROOT_RE.test(plain), 'the scratch-root shape is the one scripts/scratch.mjs mints (this suite\'s own mktmp dirs included; a tmp dir without the prefix is not it)');
+  const NOW = Date.now(), OLD = NOW - 30 * 60 * 1000;
+  const mk = (pid, { name, argv, ppid, cwd, env = {}, born = NOW }) => {
+    const d = path.join(root, String(pid)); fs.mkdirSync(d);
+    fs.writeFileSync(path.join(d, 'stat'), `${pid} (${name.slice(0, 15)}) S ${ppid} ${pid} ${pid} 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0`);
+    fs.writeFileSync(path.join(d, 'cmdline'), (argv || [name]).join('\0') + '\0');
+    fs.writeFileSync(path.join(d, 'environ'), Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\0') + '\0');
+    fs.symlinkSync(cwd, path.join(d, 'cwd'));
+    fs.utimesSync(d, born / 1000, born / 1000);
+  };
+  mk(1, { name: 'systemd', argv: ['/usr/lib/systemd/systemd', '--user'], ppid: 0, cwd: '/' });
+  mk(100, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: sGone, env: { HOME: sGone, VIBESPACE_AGENTD_ROOT: sGone + '/agentd-root' } });   // dir gone ⇒ reap
+  mk(201, { name: 'node', argv: ['node', '/tmp/x/scripts/ci.mjs', '--heavy'], ppid: 1, cwd: sLive, born: OLD });   // a gate RUNNER in its own isolated worktree: never a candidate
+  mk(200, { name: 'node', argv: ['node', 'server.js'], ppid: 201, cwd: sLive, born: OLD });                       // its suite's server ⇒ owned ⇒ keep
+  mk(202, { name: 'vibespace-device', argv: ['vibespace-device'], ppid: 1, cwd: sLive, env: { HOME: sLive }, born: OLD });   // that server's detached daemon: same root, group has a live member ⇒ keep
+  mk(300, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sOld, born: OLD });                          // dir exists, reparented, 30 min ⇒ reap
+  mk(310, { name: 'node', argv: ['node', 'wrapper.js'], ppid: 300, cwd: sOld, born: OLD });                       // child of an orphan (depth 2) ⇒ reap with it
+  mk(301, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sYoung });                                   // reparented but YOUNG ⇒ may be a run in flight ⇒ keep
+  mk(400, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: REPO, env: { HOME: os.homedir() }, born: OLD });   // PRODUCTION shape: no scratch root ⇒ never a candidate
+  mk(500, { name: 'dtach', argv: ['dtach', '-a', sGone + '/data/sockets/cw-1'], ppid: 1, cwd: '/', env: { HOME: sGone }, born: OLD });   // orphan attach client, root via HOME ⇒ reap
+  mk(600, { name: 'sleep', argv: ['sleep', '3600'], ppid: 1, cwd: sGone, born: OLD });                            // not a name the reaper knows ⇒ keep
+  const list = scratchOrphans({ procRoot: root, now: NOW, self: 999999 });
+  const pids = list.map((o) => o.pid).sort((a, b) => a - b);
+  ok(JSON.stringify(pids) === JSON.stringify([100, 300, 310, 500]), `reaped exactly the gone-dir daemon, the stale orphan tree and the orphan dtach client (got ${JSON.stringify(pids)})`);
+  ok(list.find((o) => o.pid === 100).why === 'scratch dir gone' && /^orphaned 30 min/.test(list.find((o) => o.pid === 300).why), 'each verdict says which rule fired');
+  ok(!pids.includes(200) && !pids.includes(202) && !pids.includes(201), 'a suite in flight (owned by a live runner) keeps its server AND its detached daemon');
+  ok(!pids.includes(301), 'a reparented process younger than the stale floor is a possible run in flight and is spared');
+  ok(!pids.includes(400), 'the production server (cwd in a checkout, HOME the real home) is never a candidate');
+  ok(!pids.includes(600) && !REAP_NAMES.has('sleep'), 'an unlisted executable is never a candidate even under a gone scratch root');
+  const spared = scratchOrphans({ procRoot: root, now: NOW, self: 999999, staleMs: 24 * 3600 * 1000 });
+  ok(!spared.some((o) => o.pid === 300) && spared.some((o) => o.pid === 100), 'the stale floor is a parameter: a wider floor spares the reparented tree, the gone-dir rule still fires');
+  const asSelf = scratchOrphans({ procRoot: root, now: NOW, self: 310 });
+  ok(!asSelf.some((o) => o.pid === 310 || o.pid === 300), 'this process and its ancestors are never candidates (a reaper does not reap itself)');
+  const wired = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf-8');
+  ok(/const ms = Date\.now\(\) - t;\n\s*try \{ reapScratchOrphans\(\{\}\); \}/.test(wired), 'WIRING: every suite run (both tiers) is followed by a sweep');
+  ok(/function heavyLaunch\(sha, \{ dir, only, lock, lockWaitMs \} = \{\}\) \{\n\s*const d = markerDir\(dir\);\n\s*try \{ reapScratchOrphans\(/.test(wired), 'WIRING: a heavy launch sweeps before it starts');
+  ok(/if \(arg\('reap'\)\)/.test(wired), 'WIRING: `--reap` runs the sweep by hand');
 }
 
 } finally {

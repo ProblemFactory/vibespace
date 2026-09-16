@@ -264,6 +264,13 @@ if (!probe) {
   // 2.369.97 ONE CARD PER CONTINUE: the wording rides the delivered prompt (`note`); no second notice follows
   ok('…and the card says the POOL SWITCHED, not that the limit reset (round 1 said 用量上限已重置 on exactly this, now the dominant, path)', w.fired.length === 1 && w.fired[0].note === '账号池已切换到 B-Stack Max，已自动继续这个任务。' && w.notes.length === 0, JSON.stringify({ note: w.fired[0] && w.fired[0].note, notes: w.notes }));
   ok('…NEGATIVE CONTROL: the reset wording still exists for an arm anchored on a real reset (the fix is a branch, not a rename)', arMod.continueNoticeFor({ kind: 'timed', armReason: '5h 0% < 10%', label: 'B-Stack Max' }).text === '用量上限已重置，已自动继续这个任务。');
+  // 2.369.104 (owner: "明明没到也没被中断你却提示到达上限了"): the DELAYED ARM notice
+  // used to say "用量已达上限。已安排在 <now+45s> 重置后自动继续" about a hot pool
+  // switch — a reset instant that was no reset. The arm's own reason decides.
+  const armSwitch = arMod.armNoticeFor(st.reason, st.resetsAt, Date.now() - 1000);
+  ok('…and the delayed ARM notice for a switch names the member and the seconds, never a "reset"', /^账号池已切换到 B-Stack Max，约 \d+ 秒后自动继续这个任务/.test(armSwitch) && !/重置|已达上限/.test(armSwitch), armSwitch);
+  ok('…NEGATIVE CONTROL: an arm anchored on a real reset keeps the reset sentence', /^用量已达上限。已安排在 .+ 重置后自动继续/.test(arMod.armNoticeFor('5h 0% < 10%', Date.now() + 3600000, Date.now())));
+  ok('WIRING: the delayed notice site asks armNoticeFor with the arm\'s own reason', /notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\)\)\)/.test(require('fs').readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8')));
   const rec = w.ar._fires.get(w.SID);
   ok('…the breaker recorded the fire against the member the continue LANDED on', rec && rec.last && rec.last.key === w.SPARE, JSON.stringify(rec && rec.last));
   // the CLI rejects that continue too — through the real producer again
