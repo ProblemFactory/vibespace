@@ -642,63 +642,76 @@ if (!probe) {
     // The SAME rule for the 2026-09-08 half: the auto-loaded index is what gates
     // the NEXT change to this subsystem, so the row must carry the rule the code
     // now runs, and the file index must name the module that holds it.
-    ok('§9b the routing row also states the rule THIS change added (the window outranks the bookkeeping)',
-      /LAG SHADOW/.test(row) && /WINDOW IDENTITY GUARD/.test(row) && /reading-lag\.js/.test(row) && /NO EVIDENCE ⇒ NO REFUSAL/.test(row), row.slice(-320));
+    // 2026-09-15 SIZE LAW (owner: CLAUDE.md is an INDEX, ≤ ~300 chars per
+    // entry, the essay lives in the kb it points to): the auto-loaded row
+    // above keeps the HEAD + the replacement rule; the FULL row — every
+    // round's block, in order, with its terminators — lives verbatim in
+    // docs/kb-design-lessons.md §18 (`### Row: Pool/billing decisions`,
+    // the `**It belongs in…**` cell) and THAT is what the round-by-round
+    // pins and their negative controls below read.
+    const full = (() => {
+      const kb = read('docs/kb-design-lessons.md');
+      const m = kb.match(/^### Row: Pool\/billing decisions\n[\s\S]*?^\*\*It belongs in…\*\* (.*)$/m);
+      return m ? m[1] : '';
+    })();
+    ok('§9b the FULL Pool/billing row lives in kb-design-lessons §18 and is longer than the index head', full.length > row.length && full.length > 10000, String(full.length));
+    ok('§9b the routing full also states the rule THIS change added (the window outranks the bookkeeping)',
+      /LAG SHADOW/.test(full) && /WINDOW IDENTITY GUARD/.test(full) && /reading-lag\.js/.test(full) && /NO EVIDENCE ⇒ NO REFUSAL/.test(full), full.slice(-320));
     ok('§9b …including the two properties a later edit is most likely to drop: the PHASE comparison, and that `ownWindow` is stamped and never read back out of `sevenDay.resetsAt`',
-      /resetsAt mod 604800/.test(row) && /NEVER read back out of `sevenDay\.resetsAt`/.test(row));
+      /resetsAt mod 604800/.test(full) && /NEVER read back out of `sevenDay\.resetsAt`/.test(full));
     ok('§9b …and the file index names the PURE module beside the ledger it works with', /^  reading-lag\.js — PURE \(imports nothing\)/m.test(md));
     // r2: the auto-loaded index gates the NEXT change, so it must carry the two
     // rules round 2 established — WHICH HALF of a window identifies an account,
     // and WHERE the established window may be kept. Both are the kind of thing
     // a later edit "simplifies" back, and each one cost a reproduced incident.
     ok('§9b …and the two rules ROUND 2 established: the weekly half is the only identity evidence (a 5h window names a TIME), and the established window lives in a sidecar no reading producer writes',
-      /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(row) && /FIVE-HOUR window names a TIME/.test(row)
-      && /ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(row) && /\.window-<key>/.test(row)
-      && /NOT a field of the usage-cache snapshot/.test(row), row.slice(-400));
-    ok('§9b NEGATIVE CONTROL: those predicates fail on the row as ROUND 1 left it (they are not matching prose that was already there)',
+      /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(full) && /FIVE-HOUR window names a TIME/.test(full)
+      && /ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(full) && /\.window-<key>/.test(full)
+      && /NOT a field of the usage-cache snapshot/.test(full), full.slice(-400));
+    ok('§9b NEGATIVE CONTROL: those predicates fail on the full as ROUND 1 left it (they are not matching prose that was already there)',
       (() => {
-        const r1 = row.replace(/\*\*THE WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE\*\*[\s\S]*?The statusline carries a byte-identical MIRROR/,
+        const r1 = full.replace(/\*\*THE WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE\*\*[\s\S]*?The statusline carries a byte-identical MIRROR/,
           'A weekly window is an ACCOUNT FINGERPRINT compared by its PHASE (`resetsAt mod 604800`, ±120s) because a roll adds exactly one week. `cache.ownWindow` is STAMPED AT THE WRITE by the one producer whose key and credential dir are the same decision (refreshViaCliPanel) and NEVER read back out of `sevenDay.resetsAt`; every session-attributed writer PRESERVES it. The statusline carries a byte-identical MIRROR');
-        return r1.length < row.length
+        return r1.length < full.length
           && !/WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r1) && !/ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(r1)
-          // …while the ROUND 1 properties this row also pins are still there,
+          // …while the ROUND 1 properties this full also pins are still there,
           // so the control differs in exactly the dimension it names
           && /resetsAt mod 604800/.test(r1) && /NEVER read back out of `sevenDay\.resetsAt`/.test(r1);
       })());
-    ok('§9b NEGATIVE CONTROL: the same predicates fail on the row as it stood before this change (they are not matching prose that was always there)',
+    ok('§9b NEGATIVE CONTROL: the same predicates fail on the full as it stood before this change (they are not matching prose that was always there)',
       // the terminus moves with the chain: every later round appends to the
       // SAME block, so this control strips through whatever the last one ended
       // with (r4: "…AFTER the guard chose the key.**") and must still remove
       // strictly more than nothing, or it has silently stopped applying.
-      (() => { const before = row.replace(/\*\*AND THE READING IS EVIDENCE ABOUT ITSELF[\s\S]*?AFTER the guard chose the key\.\*\* /, ''); return !/LAG SHADOW/.test(before) && !/reading-lag\.js/.test(before) && !/PER BUCKET/.test(before) && before.length < row.length; })());
+      (() => { const before = full.replace(/\*\*AND THE READING IS EVIDENCE ABOUT ITSELF[\s\S]*?AFTER the guard chose the key\.\*\* /, ''); return !/LAG SHADOW/.test(before) && !/reading-lag\.js/.test(before) && !/PER BUCKET/.test(before) && before.length < full.length; })());
     // r3: the two rules THIS round established are exactly the kind a later edit
     // "simplifies" back — one of them is a single line's POSITION, the other is
     // which of two clocks a shipped single file is allowed to believe.
     ok('§9b …and the two rules ROUND 3 established: the clock ranks BELOW the windows (a proxy may not overrule what it stands for, and an unknown age does not expire), and the statusline dates the RE-POINT from the link the pool re-mints — never from its own last observation',
-      /THE CLOCK RANKS BELOW THE WINDOWS/.test(row) && /`repointAgeMs == null` is UNKNOWN/.test(row)
-      && /lstat\(link\)\.mtimeMs`? IS that instant/.test(row) && /systematically OLDER than the re-point/.test(row)
-      && /AND THE STATUSLINE RUNS THE GUARD/.test(row) && /\.window-refused\.ndjson/.test(row), row.slice(-900));
-    ok('§9b NEGATIVE CONTROL: those predicates fail on the row as ROUND 2 left it (they are not matching prose that was already there)',
+      /THE CLOCK RANKS BELOW THE WINDOWS/.test(full) && /`repointAgeMs == null` is UNKNOWN/.test(full)
+      && /lstat\(link\)\.mtimeMs`? IS that instant/.test(full) && /systematically OLDER than the re-point/.test(full)
+      && /AND THE STATUSLINE RUNS THE GUARD/.test(full) && /\.window-refused\.ndjson/.test(full), full.slice(-900));
+    ok('§9b NEGATIVE CONTROL: those predicates fail on the full as ROUND 2 left it (they are not matching prose that was already there)',
       (() => {
-        const r2 = row.replace(/\*\*THE CLOCK RANKS BELOW THE WINDOWS\*\*[\s\S]*?nothing is written anywhere\)\. /, '');
-        return r2.length < row.length
+        const r2 = full.replace(/\*\*THE CLOCK RANKS BELOW THE WINDOWS\*\*[\s\S]*?nothing is written anywhere\)\. /, '');
+        return r2.length < full.length
           && !/THE CLOCK RANKS BELOW THE WINDOWS/.test(r2) && !/AND THE STATUSLINE RUNS THE GUARD/.test(r2)
-          // …while the ROUND 1+2 properties this row also pins are still there
+          // …while the ROUND 1+2 properties this full also pins are still there
           && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r2) && /ESTABLISHED WINDOW LIVES IN A SIDECAR/.test(r2)
           && /resetsAt mod 604800/.test(r2);
       })());
     // r4: the rule most likely to be "simplified" back is the one that reads as
     // an optimisation — deciding a record once instead of once per bucket.
     ok('§9b …and the rule ROUND 4 established: the repair moves PER BUCKET (the {5h,7d} primary half decides where the record goes; every other bucket is archived with its own reason), and "no evidence ⇒ no refusal" governs REFUSING TO WRITE, not MOVING',
-      /THE REPAIR MOVES PER BUCKET, NEVER WHOLESALE/.test(row) && /ONE BUCKET AT A TIME/.test(row)
-      && /the PRIMARY half is `\{5h,7d\}`/.test(row) && /governs REFUSING TO WRITE, not MOVING/.test(row)
-      && /preserve-merges the previous scoped bucket/.test(row), row.slice(-900));
-    ok('§9b NEGATIVE CONTROL: that predicate fails on the row as ROUND 3 left it (it is not matching prose that was already there)',
+      /THE REPAIR MOVES PER BUCKET, NEVER WHOLESALE/.test(full) && /ONE BUCKET AT A TIME/.test(full)
+      && /the PRIMARY half is `\{5h,7d\}`/.test(full) && /governs REFUSING TO WRITE, not MOVING/.test(full)
+      && /preserve-merges the previous scoped bucket/.test(full), full.slice(-900));
+    ok('§9b NEGATIVE CONTROL: that predicate fails on the full as ROUND 3 left it (it is not matching prose that was already there)',
       (() => {
-        const r3 = row.replace(/\*\*AND THE REPAIR MOVES PER BUCKET, NEVER WHOLESALE[\s\S]*?AFTER the guard chose the key\.\*\* /, '');
-        return r3.length < row.length
+        const r3 = full.replace(/\*\*AND THE REPAIR MOVES PER BUCKET, NEVER WHOLESALE[\s\S]*?AFTER the guard chose the key\.\*\* /, '');
+        return r3.length < full.length
           && !/THE REPAIR MOVES PER BUCKET/.test(r3) && !/ONE BUCKET AT A TIME/.test(r3)
-          // …while every earlier round's properties this row pins are still there
+          // …while every earlier round's properties this full pins are still there
           && /THE CLOCK RANKS BELOW THE WINDOWS/.test(r3) && /AND THE STATUSLINE RUNS THE GUARD/.test(r3)
           && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r3);
       })());
@@ -707,33 +720,33 @@ if (!probe) {
     // difference between arming the live guard on an identity and arming it on
     // one of that identity's two files.
     ok('§9b …and the two rules ROUND 5 established: an identity can hold MORE THAN ONE cache file (so the cache half enumerates the files the product accepts, and the `acct:` rung is the only one that may ask the streams), and a bucket\'s fate is decided on the RECORD\'s buckets, not on the dated view of them',
-      /AND AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(row) && /keyed on the FILES the product accepts/.test(row)
-      && /structurally inert on it/.test(row) && /re-poisoned the just-cleaned stream on the next tick/.test(row)
-      && /documented LAST RESORT/.test(row) && /a PSEUDO key never/.test(row)
-      && /A BUCKET'S FATE IS DECIDED ON THE RECORD'S BUCKETS/.test(row) && /counted PARTIAL/.test(row), row.slice(-1200));
-    ok('§9b NEGATIVE CONTROL: those predicates fail on the row as ROUND 4 left it (they are not matching prose that was already there)',
+      /AND AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(full) && /keyed on the FILES the product accepts/.test(full)
+      && /structurally inert on it/.test(full) && /re-poisoned the just-cleaned stream on the next tick/.test(full)
+      && /documented LAST RESORT/.test(full) && /a PSEUDO key never/.test(full)
+      && /A BUCKET'S FATE IS DECIDED ON THE RECORD'S BUCKETS/.test(full) && /counted PARTIAL/.test(full), full.slice(-1200));
+    ok('§9b NEGATIVE CONTROL: those predicates fail on the full as ROUND 4 left it (they are not matching prose that was already there)',
       (() => {
-        const r4 = row.replace(/\*\*AND AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE[\s\S]*?never a drop line\.\*\*/, '');
-        return r4.length < row.length
+        const r4 = full.replace(/\*\*AND AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE[\s\S]*?never a drop line\.\*\*/, '');
+        return r4.length < full.length
           && !/AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(r4) && !/A BUCKET'S FATE IS DECIDED ON THE RECORD'S BUCKETS/.test(r4)
-          // …while every earlier round's properties this row pins are still there
+          // …while every earlier round's properties this full pins are still there
           && /THE REPAIR MOVES PER BUCKET/.test(r4) && /THE CLOCK RANKS BELOW THE WINDOWS/.test(r4)
           && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r4);
       })());
     // r6: the rule most likely to be dropped is the one that reads like an
     // implementation detail of r5 — that the DIRECTORY is not every file.
     ok('§9b …and the rule ROUND 6 established: the `__global__` key has a SECOND snapshot outside the directory (`data/usage-cache.json`), judged by the directory half\'s own answer, archived-then-UNLINKED rather than mirrored, and reported as its own state',
-      /AND THE `__global__` KEY HAS A SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY/.test(row)
-      && /USAGE_CACHE_FILE/.test(row) && /newest-wins merge/.test(row)
-      && /never a second `identityKeyFor` over that payload/.test(row)
-      && /UNLINKED, not mirrored/.test(row) && /globalFile: clean \/ archived \/ unresolvable \/ absent/.test(row)
-      && /STANDING SWEEP derives the persisted-snapshot ROOTS from the source/.test(row), row.slice(-1400));
-    ok('§9b NEGATIVE CONTROL: that predicate fails on the row as ROUND 5 left it (it is not matching prose that was already there)',
+      /AND THE `__global__` KEY HAS A SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY/.test(full)
+      && /USAGE_CACHE_FILE/.test(full) && /newest-wins merge/.test(full)
+      && /never a second `identityKeyFor` over that payload/.test(full)
+      && /UNLINKED, not mirrored/.test(full) && /globalFile: clean \/ archived \/ unresolvable \/ absent/.test(full)
+      && /STANDING SWEEP derives the persisted-snapshot ROOTS from the source/.test(full), full.slice(-1400));
+    ok('§9b NEGATIVE CONTROL: that predicate fails on the full as ROUND 5 left it (it is not matching prose that was already there)',
       (() => {
-        const r5 = row.replace(/ \*\*AND THE `__global__` KEY HAS A SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY[\s\S]*?to judge or seed it with\.\*\*/, '');
-        return r5.length < row.length
+        const r5 = full.replace(/ \*\*AND THE `__global__` KEY HAS A SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY[\s\S]*?to judge or seed it with\.\*\*/, '');
+        return r5.length < full.length
           && !/SECOND SNAPSHOT, OUTSIDE THAT DIRECTORY/.test(r5) && !/globalFile: clean \/ archived/.test(r5)
-          // …while every earlier round's properties this row pins are still there
+          // …while every earlier round's properties this full pins are still there
           && /AN IDENTITY CAN HOLD MORE THAN ONE CACHE FILE/.test(r5) && /THE REPAIR MOVES PER BUCKET/.test(r5)
           && /WEEKLY HALF IS THE ONLY IDENTITY EVIDENCE/.test(r5);
       })());
