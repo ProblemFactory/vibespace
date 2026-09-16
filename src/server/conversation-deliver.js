@@ -64,7 +64,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
 
   function stashFor(cid, envelope) {
     const q = stash[cid] || (stash[cid] = []);
-    q.push({ source: envelope.source || 'agent', fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Date.now() });
+    // a RE-STASHED entry (the drain's budget handed it back) keeps its own ts so the next drain shows it in order
+    q.push({ source: envelope.source || 'agent', fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() });
     if (q.length > STASH_CAP) q.splice(0, q.length - STASH_CAP);
     persistStash();
   }
@@ -216,6 +217,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // Unknown/absent origin = 'peer', the conservative lane (an older caller
     // never silently gains the steer behaviour).
     const kind = opts.kind === 'notification' ? 'notification' : 'peer';
+    // `noWake` (Channels P3, design §9.3): deliver ONLY where it costs
+    // nothing — the rpc rung's predicted-free steer into a turn already
+    // running — and otherwise refuse with `refused:'no-wake'` so the caller
+    // stashes for the next turn. It changes the FALLBACK, not the accounting:
+    // the authorization below is still taken with a hold, because "this
+    // frame joins the running turn" is a prediction the wrapper's own verdict
+    // settles (settleRpcDelivery) — a wrong prediction becomes a real charge
+    // through the same mechanism. claude's cli-inbox is deferred, not free,
+    // so `noWake` never touches rungs 0/1/2.
+    const noWake = opts.noWake === true;
     // THE CEILING (see the header). `spendReason` types the producer for the
     // budget's journal/inbox; jobs pass 'job-notification', agent messaging
     // 'peer-message'. An unknown/absent reason is 'peer-message', the same
@@ -287,7 +298,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
       // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
       try {
-        if (serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
+        if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
           for (const [wid, s] of activeSessions) {
             if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
             const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
@@ -299,7 +310,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       } catch (e) { log('[deliver] channel lane failed (falling through):', e.message); }
       // rung 1: this machine's CLI inbox registry
       try {
-        const peer = peerMsg.findPeer(cid);
+        const peer = noWake ? null : peerMsg.findPeer(cid);
         if (peer) {
           const r = await peerMsg.postToPeer(peer, text);
           if (r.ok) { spent(); cardOk(); return { ok: true, lane: 'message', kind, peerName: peer.name || null }; }
@@ -331,6 +342,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         const steersIntoRunningTurn = kind === 'notification'
           && notificationDelivery(capsOf(rpc.s.backend)) === 'steer'
           && !!rpc.s._isStreaming;
+        // no free lane right now ⇒ noWake refuses here rather than opening a
+        // turn (the frame is not written; the hold goes back in `finally`)
+        if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };
         try {
           rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind }) + '\n');
           // EVERY frame joins the settle queue, charged or not — the wrapper
@@ -345,6 +359,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         } catch (e) { log('[deliver] rpc-queue write failed (falling through): ' + e.message); }
       }
       // rung 2: the owning machine's daemon posts to ITS local registry
+      if (noWake) return { ok: false, reason: 'no free lane for this conversation — a delivery now would open a billed turn', refused: 'no-wake' };
       const hid = ownerHostOf(cid);
       if (hid) {
         try {

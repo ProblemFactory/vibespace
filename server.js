@@ -1281,7 +1281,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   try { writeSessionMeta(s.sockName, { ...readSessionMeta(s.sockName), msgReachability: s._msgReachability }); } catch { }
   res.json({ ok: true, level: lv });
 });
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit }); // lazy getters: both are created further down (TDZ at boot otherwise)
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1583,9 +1583,16 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, 
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting });
+// ── Integrations & keys (src/server/integrations-wiring.js; design §14) — the ONE resolver of the cluster integration env ──
+const integrationsWiring = require('./src/server/integrations-wiring.js').create({
+  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
+});
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
-  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a),
+  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store,
+  userTodos, // P1: a failing adapter files ONE "For you" item after 3 consecutive failed passes and the same engine retracts it on recovery (fence 8)
+  deliver, serverSetting, // P2: THE delivery ladder (fence 2 — the one door to an unattended turn, spendReason 'channel-message', the authorizer inside it) + the coalescing window setting (fence 12)
+  liveSessions: () => { const out = []; for (const [id, s] of activeSessions) { const cid = s.claudeSessionId || s.backendSessionId; if (!cid) continue; let groups = []; try { groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id); } catch { } out.push({ cid, name: s.name || null, groups, webuiId: id }); } return out; }, // P2: the agent sessions an assignment can address (group = task group, round-robin over its live members)
 });
 // Backend readiness for onboarding (src/server/backend-status-route.js)
 require('./src/server/backend-status-route.js').create({ app, machineProbes, accounts, claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD });

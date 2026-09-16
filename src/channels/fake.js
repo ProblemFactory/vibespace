@@ -163,9 +163,28 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     // here that reads `caps.scanSources` or `process.platform` except
     // `scanHost()`, whose whole job is to REPORT the platform.
 
+    // THE §14 CREDENTIAL QUESTION IS ASKED OF THE ONE RESOLVER, never of
+    // process.env: `deps.resolveIntegration('fake')` is the fake row's live
+    // consumer (the registry census requires exactly this call in exactly
+    // this file). With no resolver handed in (the contract suite creates
+    // adapters bare) the fake answers as it always did; with one, a row that
+    // resolves to `none` with a required field missing is `needs-credentials`
+    // — the Adapters row flips, not only the Integrations card (§14.3).
+    const resolveIntegration = typeof deps.resolveIntegration === 'function' ? deps.resolveIntegration : null;
+
     return {
       auth: {
-        async state() { return { state: 'connected', expiresAt: null, scopes: ['fake'], why: null }; },
+        async state() {
+          if (resolveIntegration) {
+            let r = null;
+            try { r = resolveIntegration('fake'); } catch (e) { return { state: 'unknown', expiresAt: null, scopes: [], why: `integration lookup failed: ${(e && e.message) || e}` }; }
+            if (r && r.source === 'none' && Array.isArray(r.missing) && r.missing.length) {
+              return { state: 'needs-credentials', expiresAt: null, scopes: [], why: r.why || 'no-credentials', missing: r.missing.slice(), credentialSource: 'none' };
+            }
+            return { state: 'connected', expiresAt: null, scopes: ['fake'], why: null, credentialSource: r ? r.source : null };
+          }
+          return { state: 'connected', expiresAt: null, scopes: ['fake'], why: null };
+        },
       },
 
       async listConversations() {
@@ -249,10 +268,34 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
 
       // `sendAs: []` adapters get NO send at all — the registry refuses it with
       // the typed `send-not-available` before this is ever reached.
-      send: sendAs.length ? async (convId, { text, idemKey, as }) => ({
-        ok: true, vendorMessageId: `sent-${digest(`${convId}|${idemKey}|${text}`)}`, at: clock(), sentAs: as || sendAs[0],
-      }) : undefined,
-      reconcile: sendAs.length ? async () => ({ unknown: true }) : undefined,
+      //
+      // P4: the outcome is STEERED BY MARKERS IN THE TEXT, so a suite (and the
+      // e2e run, from a real browser) can drive every §9.4 shape through the
+      // real engine without a vendor: `[[fake:throw]]` = the adapter died
+      // mid-send (a bare throw ⇒ `unknown`), `[[fake:lost]]` = the request
+      // left and the answer never came (typed transport + `detail.lost` ⇒
+      // `unknown`), `[[fake:refuse]]` = a typed refusal (⇒ `failed`),
+      // `[[fake:as-bot]]` = the platform sent it as a bot whatever was asked
+      // (the vendor's `sentAs` is the truth the receipt carries). The vendor
+      // id is a function of (conversation, idempotency key, text) — a second
+      // send with the same key is the same message, as the key promises.
+      send: sendAs.length ? async (convId, { text, idemKey, as }) => {
+        const s = String(text == null ? '' : text);
+        if (/\[\[fake:throw\]\]/.test(s)) throw new Error('fake: socket hung up mid-send');
+        if (/\[\[fake:lost\]\]/.test(s)) return { ok: false, code: 'transport', retryable: true, detail: { lost: true, message: 'fake: the request left and the answer never came' } };
+        if (/\[\[fake:refuse\]\]/.test(s)) return { ok: false, code: 'forbidden', retryable: false, detail: { reason: 'fake: the fixture refused the send' } };
+        const sentAs = /\[\[fake:as-bot\]\]/.test(s) ? 'bot' : (as || sendAs[0]);
+        return { ok: true, vendorMessageId: `sent-${digest(`${convId}|${idemKey}|${s}`)}`, at: clock(), sentAs, observed: { senderType: sentAs === 'bot' ? 'app' : 'user' } };
+      } : undefined,
+      // `[[fake:landed]]` / `[[fake:not-landed]]` steer the reconcile answer;
+      // anything else is honestly `unknown` (the default a real vendor gives
+      // when it holds no evidence either way).
+      reconcile: sendAs.length ? async (convId, { idemKey, text } = {}) => {
+        const s = String(text == null ? '' : text);
+        if (/\[\[fake:landed\]\]/.test(s)) return { landed: true, vendorMessageId: `sent-${digest(`${convId}|${idemKey}|${s}`)}`, at: clock(), detail: { how: 'fake-landed' } };
+        if (/\[\[fake:not-landed\]\]/.test(s)) return { landed: false, reason: 'fake: the platform holds no such message', detail: { how: 'fake-not-landed' } };
+        return { unknown: true, reason: 'fake: no evidence either way', detail: { how: 'fake-unknown' } };
+      } : undefined,
     };
   }
 
@@ -264,4 +307,20 @@ const fakePoll = makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: [
 const fakePush = makeFakeAdapter({ kind: 'fake-push', receive: 'push', sendAs: [] });
 const fakeScan = makeFakeAdapter({ kind: 'fake-scan', receive: 'scan', sendAs: ['user'] });
 
-module.exports = { makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'] };
+/**
+ * The fake row's Test RUNNER (design §14.3 constraint 1: the consumer owns
+ * the runner; the store only dispatches). `shape-only`: zero network. It
+ * succeeds or fails on a FIXTURE SWITCH — a key containing "fail" fails —
+ * so a failed Test has a leg on a card that ships in P0, with the vendor's
+ * words (here: ours) reaching the card escaped.
+ */
+async function integrationTest({ resolved } = {}) {
+  const r = resolved || {};
+  if (r.source === 'none') return { ok: false, error: `no key resolved: ${r.why || 'nothing configured'}` };
+  const key = String((r.values && r.values.apiKey) || '');
+  if (key.length < 4) return { ok: false, error: 'the resolved key is shorter than 4 characters' };
+  if (/fail/i.test(key)) return { ok: false, error: `the fixture switch: the resolved key contains "fail" (source: ${r.source})` };
+  return { ok: true, detail: { source: r.source, region: (r.values && r.values.region) || null } };
+}
+
+module.exports = { makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integrationTest, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'] };

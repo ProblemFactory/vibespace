@@ -1273,7 +1273,8 @@ console.log('\n§9 the scratch-orphan reaper');
   mk(300, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sOld, born: OLD });                          // dir exists, reparented, 30 min ⇒ reap
   mk(310, { name: 'node', argv: ['node', 'wrapper.js'], ppid: 300, cwd: sOld, born: OLD });                       // child of an orphan (depth 2) ⇒ reap with it
   mk(301, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: sYoung });                                   // reparented but YOUNG ⇒ may be a run in flight ⇒ keep
-  mk(400, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: REPO, env: { HOME: os.homedir() }, born: OLD });   // PRODUCTION shape: no scratch root ⇒ never a candidate
+  const prodCwd = path.join(os.homedir(), 'workspace', 'vibespace');   // a checkout under the home dir — NOT `REPO`, which is itself a /tmp/vs-* scratch worktree when this suite runs inside one (an integration worktree, the isolated heavy tier)
+  mk(400, { name: 'node', argv: ['node', 'server.js'], ppid: 1, cwd: prodCwd, env: { HOME: os.homedir() }, born: OLD });   // PRODUCTION shape: no scratch root ⇒ never a candidate
   mk(500, { name: 'dtach', argv: ['dtach', '-a', sGone + '/data/sockets/cw-1'], ppid: 1, cwd: '/', env: { HOME: sGone }, born: OLD });   // orphan attach client, root via HOME ⇒ reap
   mk(600, { name: 'sleep', argv: ['sleep', '3600'], ppid: 1, cwd: sGone, born: OLD });                            // not a name the reaper knows ⇒ keep
   const list = scratchOrphans({ procRoot: root, now: NOW, self: 999999 });

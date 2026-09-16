@@ -224,6 +224,10 @@ const os = require('os');
 const path = require('path');
 const net = require('net');
 const { Mux, PROTO_VERSION } = require('./mux.js');
+// PURE (bundled): the ONE spawn-env sanitizer the orchestrator's agentEnv()
+// also is — every daemon child and every daemon re-exec is born from
+// `daemonEnv(process.env)`, never from `process.env` (see spawnEnv below).
+const { daemonEnv } = require('../agent-env.js');
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
 // VIBESPACE_DEVICE_ROOT is the current name; VIBESPACE_AGENTD_ROOT stays
@@ -238,6 +242,17 @@ const ROOT = process.env.VIBESPACE_DEVICE_ROOT || process.env.VIBESPACE_AGENTD_R
 // Prepend the daemon's OWN node dir (guaranteed) + the standard user/tool bins
 // (nvm current, homebrew, ~/.local/bin, /usr/local/bin) to PATH for children.
 // Same class as the systemd 'baked PATH' incident (CLAUDE.md §How to Run).
+//
+// THE BASE IS SANITIZED (2026-09-14, the round-1 verifier's HIGH): `extra` is
+// the server's already-sanitized session env, but it was laid OVER the
+// daemon's RAW `process.env` — and the daemon is born from the server's env
+// and outlives its restarts, so a pipe-session claude's /proc/<pid>/environ
+// carried the full cluster integration secret a PREVIOUS server life had
+// handed the daemon (measured). `daemonEnv` drops every VIBESPACE_* the
+// daemon tier does not itself read (+ npm_*, PORT/NODE_ENV, the ambient
+// oauth token); HOME/USER/LANG/PATH — what a device child really needs from
+// the daemon's own environment — survive, because remote daemons run under
+// launchd/systemd with an env the server never sees.
 function spawnEnv(extra) {
   const home = os.homedir();
   const nodeDir = path.dirname(process.execPath);
@@ -245,7 +260,7 @@ function spawnEnv(extra) {
     nodeDir, path.join(home, '.local', 'bin'),
     '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin',
   ];
-  const merged = { ...process.env, ...(extra || {}) };
+  const merged = { ...daemonEnv(process.env), ...(extra || {}) };
   const cur = String(merged.PATH || process.env.PATH || '');
   const parts = cur.split(':').filter(Boolean);
   for (let i = extras.length - 1; i >= 0; i--) if (!parts.includes(extras[i])) parts.unshift(extras[i]);
@@ -383,7 +398,7 @@ if (process.argv.includes('--stdio')) {
         // daemon not up — spawn it detached from the CURRENT (M2 stdio-bridge)
         // file, then retry connecting to the socket it will create
         const child = cpB.spawn(process.execPath, [__filename], {
-          detached: true, stdio: 'ignore', env: process.env,
+          detached: true, stdio: 'ignore', env: daemonEnv(process.env), // a daemon is born sanitized at every site (src/agent-env.js)
         });
         child.unref();
       }
@@ -568,9 +583,16 @@ function beginUpgrade(mux, { version, size }) {
           const { spawn } = require('child_process');
           try { fs.unlinkSync(LOCK); } catch { }
           try { fs.unlinkSync(SOCK); } catch { }
+          // The re-exec is the one moment a RUNNING daemon's environ can be
+          // cleaned: THIS code hands the next process the SANITIZED env
+          // (src/agent-env.js). Honest count: the re-exec that INSTALLS this
+          // bundle is run by the OLDER daemon's code (raw env), so a daemon
+          // born under an older build is cleaned at the FOLLOWING re-exec or
+          // a restart — while its CHILDREN are protected from the moment this
+          // bundle runs, because spawnEnv() sanitizes its base regardless.
           const child = spawn(process.execPath, reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), {
             detached: true, stdio: 'ignore',
-            env: { ...process.env, VIBESPACE_AGENTD_VERSION: version },
+            env: { ...daemonEnv(process.env), VIBESPACE_AGENTD_VERSION: version },
           });
           child.unref();
           process.exit(0);

@@ -28,6 +28,12 @@
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+// P2: the Assign & filter editor and the one-line summary the bar draws.
+import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
+// P3: the inline approval cards (the SAME renderer the Outbox window uses —
+// one store, two places, §9.2) and the reach/policy dialog.
+import { renderInlineProposals } from './channel-outbox.js';
+import { showReachDialog } from './channel-reach-editor.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern): the
 // server sends STRUCTURE and the sentence is composed HERE, because the
 // digest is broadcast to every client while the language is per DEVICE.
@@ -144,20 +150,62 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (fresh) bits.push(fresh);
     meta.textContent = bits.join(' · ');
     bar.append(title, meta);
+    // P2: the assignment line + the editor's entry point (a tracked row only —
+    // nothing is fetched for an untracked one, so nobody could be woken).
+    if (c.tracked) {
+      const asg = document.createElement('div');
+      asg.className = 'chanwin-assign';
+      const txt = document.createElement('span');
+      txt.textContent = c.assignment ? assignmentSummary(c) : t('Not assigned — nobody is woken by this conversation.');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chan-btn';
+      b.textContent = c.assignment ? t('Assign & filter…') : t('Assign…');
+      b.onclick = () => showAssignFilterDialog(app, c);
+      const rb = document.createElement('button');
+      rb.type = 'button';
+      rb.className = 'chan-btn';
+      rb.textContent = t('Reach & policy…');
+      rb.onclick = () => showReachDialog(app, c);
+      asg.append(txt, b, rb);
+      bar.appendChild(asg);
+    }
 
     // The send half: offered, or NOT offered WITH its reason (never silence).
     const send = c.offers && (c.offers.sendAsUser.offered ? c.offers.sendAsUser : (c.offers.sendAsBot.offered ? c.offers.sendAsBot : null));
     if (send) {
+      // P3: the composer PROPOSES (drafted by you, send authority) — the
+      // channel's policy decides whether it goes out at once or waits in the
+      // approval outbox with the guards' reasons; the card appears above.
       const comp = document.createElement('div');
       comp.className = 'chanwin-composer';
       comp.dataset.channelSend = '1';
       const ta = document.createElement('textarea');
-      ta.placeholder = t('Replies arrive with the approval outbox — this composer is not connected yet.');
-      ta.disabled = true;
+      ta.placeholder = t('Write a reply — it goes through the outbox (sent directly or held for your approval, by this channel\'s policy).');
+      const row = document.createElement('div');
+      row.className = 'chanwin-composer-row';
       const note = document.createElement('div');
       note.className = 'chanwin-note';
-      note.textContent = t('Sending is not available yet: every outgoing message goes through the approval outbox, which is a later phase.');
-      comp.append(ta, note);
+      const pol = c.policy && c.policy.mode === 'direct' ? t('Policy: direct — your reply is sent at once unless a guard (link, attachment, off-hours) sends it to the outbox for approval.') : t('Policy: review — your reply waits in the outbox for your approval.');
+      note.textContent = pol;
+      const sendBtn = document.createElement('button');
+      sendBtn.type = 'button';
+      sendBtn.className = 'chan-btn chan-btn-primary';
+      sendBtn.dataset.channelPropose = '1';
+      sendBtn.textContent = t('Propose');
+      sendBtn.onclick = async () => {
+        const text = ta.value.trim();
+        if (!text) return;
+        sendBtn.disabled = true;
+        const r = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/propose`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+        sendBtn.disabled = false;
+        if (!r || r.error) { showToast((r && r.error) || t('Request failed'), { type: 'error' }); return; }
+        ta.value = '';
+        const st = r.proposal && r.proposal.state;
+        showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: (r.decision && r.decision.reasons || []).join(', ') }) : t('Proposal {state}', { state: st || '?' }));
+      };
+      row.append(note, sendBtn);
+      comp.append(ta, row);
       foot.textContent = '';
       foot.appendChild(comp);
       const warn = c.identityWarning;
@@ -174,7 +222,9 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       const ro = document.createElement('div');
       ro.className = 'chanwin-readonly';
       const why = (c.offers && c.offers.sendAsUser.why) || 'unknown';
-      ro.textContent = t('Read-only here ({why})', { why });
+      // P4: the reason in words (a `send-scope-not-granted` answer says what
+      // unlocks sending — never a greyed control), never a bare code.
+      ro.textContent = t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) });
       foot.appendChild(ro);
     }
     return c;
@@ -221,6 +271,18 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       .catch(() => {}).finally(() => { readInFlight = false; });
   }
 
+  // P3: this conversation's proposals, rendered INLINE from the same store
+  // the Outbox window reads (§9.2). Re-read on `channel-outbox-updated`.
+  const outboxSec = document.createElement('div');
+  outboxSec.className = 'chanwin-outbox-slot';
+  async function renderOutbox() {
+    const r = await fetchJson(`/api/channels/outbox?conv=${encodeURIComponent(`${adapterId}/${convId}`)}`);
+    outboxSec.textContent = '';
+    if (!r || r.error) return;
+    const sec = renderInlineProposals(app, r.proposals || []);
+    if (sec) outboxSec.appendChild(sec);
+  }
+
   async function render({ read = false } = {}) {
     const c = await renderBar();
     if (!c) return;
@@ -233,6 +295,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       e.textContent = c.tracked ? t('No messages yet.') : t('Not tracked — nothing is fetched for this conversation until you track it.');
       list.appendChild(e);
     }
+    list.appendChild(outboxSec);
+    await renderOutbox();
     list.scrollTop = list.scrollHeight;
     if (read && c.tracked && c.unread) markRead();
   }
@@ -263,6 +327,13 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // itself is pinned by test-channels-e2e ⑧, which goes red on that layer
   // alone.
   const onBroadcast = (msg) => {
+    if (msg.type === 'channel-outbox-updated') {
+      // the proposal store changed: re-read ONLY this conversation's cards
+      // (the digest broadcast that follows repaints the bar)
+      if (msg.outbox && Array.isArray(msg.outbox.proposals) && !msg.outbox.proposals.some((p) => p.adapterId === adapterId && p.convId === convId) && !outboxSec.firstChild) return;
+      renderOutbox().catch(() => {});
+      return;
+    }
     if (msg.type !== 'channels-updated') return;
     if (Array.isArray(msg.changed) && msg.changed.length && !msg.changed.includes(convId)) return;
     render().catch(() => {});

@@ -96,6 +96,35 @@ const PURE = new Set(['src/plugin-manifest.js', 'src/account-pool-auto.js', 'src
   //     `caps.receive`, which is why they must be importable from the browser
   //     bundle and from a node suite with no server at all.
   'src/channel-record.js', 'src/channel-caps.js',
+  //   channel-filter — the rule matcher + the honest estimator + the
+  //     assignment model (its two authority caps, the round-robin, the
+  //     pacing verdict) + the §7.5 renderer an agent is handed. Imports only
+  //     channel-record (PURE → PURE) for the frame neutering, so the whole
+  //     money-adjacent decision chain after `store.append` is testable with
+  //     no server (design §6.1), and the editor bundles it for its rule kinds.
+  'src/channel-filter.js',
+  //   channel-policy — the outbox STATE MACHINE (every allowed transition names
+  //     its actor; `unknown` leaves only through reconcile), `decideOutbound`
+  //     (guards stack on the channel policy and only tighten it; fail closed
+  //     on an unknown policy / an unparseable guard; off-hours needs a zone or
+  //     is OFF) and the RECEIPT with its three identity fields (design §9).
+  //     Imports only channel-record (PURE → PURE) for the frame neutering.
+  //   channel-acl — AgentReach (design §8): hidden < requestable < visible,
+  //     MAX over grants, widen-only, one row per (principal, scope, origin),
+  //     the uniform not-found. Imports only msg-acl (PURE → PURE) for the
+  //     ladder shape + the ONE crosswalk the built-in Agents adapter uses.
+  'src/channel-policy.js', 'src/channel-acl.js',
+  // INTEGRATIONS & KEYS (docs/design-communication-panel.zh.md §14.2, P0b): the
+  // ONE table of integration rows — fields, cluster env names, setup blocks
+  // (Lark's callback URL is defined HERE and only here), test declarations,
+  // consumers — plus the PURE precedence rule user > cluster > none and the
+  // masking rule. The browser renders the declarations; the server store is the
+  // only thing that ever sees a value.
+  'src/integration-registry.js',
+  // THE SPAWN-ENV SANITIZER (2026-09-14): one rule for the orchestrator's agentEnv() AND
+  // the daemon's spawnEnv()/its own birth — the daemon is a second holder of the server
+  // env, so the filter has to run in both processes and the daemon bundles it
+  'src/agent-env.js',
   // DESKTOP APPS (docs/design-desktop-apps §2, 2026-09-13): the ONE constants home every
   // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
   // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
@@ -138,6 +167,16 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // "write the whole index back" call, because the serialized owner in
   // src/server/channels-engine.js is the index's only writer (§5.1).
   'src/channel-store.js',
+  // THE at-rest encryption primitive (design §14.7, decision 24): fs + path +
+  // crypto only. One primitive, N key files — mounts' `data/.mounts-key`, the
+  // integrations store's, the channels token store's — and a key is created on
+  // ENOENT only; every other errno is typed.
+  'src/secret-box.js',
+  // THE OAuth consent-flow machine, dual-mode (design §12.4, P1): node http +
+  // crypto + the PURE registry (for the ONE Lark callback definition). It knows
+  // no vendor — adapters hand it a consent-URL builder and an exchange — so it
+  // may never reach up into ORCH.
+  'src/oauth-loopback.js',
   // desktop-app machine FACTS (design-desktop-apps §2 row 2): binaries on PATH, -displayfd X
   // allocation, the Xauthority writer, the RFB banner read-probe, window enumeration (P9 reuses
   // it), the xpra version probe; hostId is a parameter — node builtins + cli-identity only
@@ -166,6 +205,9 @@ const EXCEPTIONS = new Map([
   // all (they used to leave the server as DATA and shipped English-only).
   ['src/lib/channels-panel.js->src/channel-caps.js', 'pure module, shared server+browser by design — the panel composes the freshness sentence in the DEVICE\'s language from the server\'s structured claim'],
   ['src/lib/channel-window.js->src/channel-caps.js', 'pure module, shared server+browser by design — same rule as the panel, for the context bar and the identity warning'],
+  ['src/lib/channel-filter-editor.js->src/channel-filter.js', 'pure module, shared server+browser by design — the editor draws the CLOSED rule set and validates a rule with the same code the route refuses it with, so the two cannot disagree'],
+  ['src/lib/channel-filter-editor.js->src/channel-caps.js', 'pure module, shared server+browser by design — the editor words the per-lane wake latency from the digest\'s structured lane, like the panel\'s chip'],
+  ['src/lib/channel-outbox.js->src/channel-caps.js', 'pure module, shared server+browser by design — the approval card composes the §9.5 identity warning from the digest\'s structure in the device\'s language, exactly as the composer does'],
 ]);
 
 // 1) PURE modules: zero requires of ANY kind beyond other PURE modules.

@@ -294,7 +294,7 @@ for (const { kind, caps } of REGISTERED) {
     ok(RE.test("if (rec.kind === 'fake-poll') doSomethingSpecial();"), 'POSITIVE CONTROL: the census matches a real branch');
     ok(RE.test("  switch (a.kind) { case 'fake-scan': return 1; }"), 'POSITIVE CONTROL: …and a switch case');
     ok(!RE.test(blank("  // if (rec.kind === 'fake-poll') this is prose")), 'POSITIVE CONTROL: …and ignores the same line behind a `//`');
-    ok(!RE.test("if (mount.kind === 'gmail') syncMail();"), 'NEGATIVE CONTROL: an unrelated `kind === \'gmail\'` (the Gmail MOUNT) is NOT a channel-adapter branch — deriving the kinds is what keeps this census from colliding with the rest of the tree');
+    ok(!RE.test("if (mount.kind === 'onedrive') syncDrive();"), 'NEGATIVE CONTROL: an unrelated `kind === \'onedrive\'` (a MOUNT kind; gmail became a channel kind in P1, so the control moved to a kind no adapter owns) is NOT a channel-adapter branch — deriving the kinds is what keeps this census from colliding with the rest of the tree');
     ok(files.includes('src/server/channels-engine.js') && files.includes('src/routes/channels.js') && files.includes('src/server/channels-wiring.js'),
       'the census really covers the engine, the routes and the wiring — the three places most likely to reach for an id', files.join(', '));
   }

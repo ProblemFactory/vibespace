@@ -94,6 +94,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 #### Agent messaging — Channels v1 (2.362.0)
 - `GET /api/agent/msg/peers` (vsst_) — ACL-visible sessions: {name, conversationId, level, groups, state, machine}.
 - `POST /api/agent/msg/send` (vsst_) — {to: name|cid, text ≤16KB} → delivered {lane, machine?} | stashed. 30s/pair floor, 10min dup dedupe, uniform not-found.
+- **Channels P3 (vsst_; every route resolves the caller's principal FIRST, reach is decided before any answer, hidden ≡ nonexistent = 404 `not-found`):** `GET /api/agent/channels/list` → `{conversations:[{key, adapterId, adapter, id, title, level, tracked, unread, canSend, sendWhy, sendAs, identityMarking, policy, assigned, authority, awaiting}]}` (never a body) · `GET /api/agent/channels/read?conv=<adapter>/<id>&limit=&since=` → `{conversation, records}` · `POST /api/agent/channels/reply` `{conv, text, why?, replyTo?, attachments?}` → `{ok, proposal, decision:{mode, reasons}}` — PROPOSES; 409 `send-not-available` (+`why`) on a conversation offering no identity, and NO proposal is created · `GET /api/agent/channels/status[?id=]` → own proposals with receipts (somebody else's id = not-found) · `POST /api/agent/channels/request` `{conv, why}` → `{ok, request}` (only on a `requestable` row; hidden = not-found). Docs topic `channels`.
 - `POST /api/sessions/:id/msg-reachability` (cookie) — {level: inherit|visible|messageable} per-session widening override.
 - agentd op `peer-post` {cid, text} → `peer-post-result` {ok, reason, peerName} (capability 'peer-post').
 - **The wrapper stdin frame carries a TYPED ORIGIN (2026-09-07)**: rung 1.5 of the
@@ -218,9 +219,201 @@ question about another machine is the failure the rule exists to stop.
   which a spent request budget returns from before notifying), and then kicks
   a pass. 404 on an id nobody has discovered.
 
+- **P1a — the adapter's own consent flow and options** (design §10.1, §12.4,
+  §13; every failure answers `{error, code, detail}` with a status BY CODE:
+  `409 needs-credentials` = the row's integration resolves to none — the
+  client opens the Integrations card FIRST; `501 not-supported` = an
+  undeclared capability / a kind with no consent flow; `401 auth-expired`;
+  `502` = a vendor refusal; `404 no-such-adapter`).
+  - `POST /api/channels/adapters/:kind/connect` — begins (or re-begins) the
+    consent flow; creates the adapter record on first connect (its id IS the
+    kind, one record per kind in v1); answers `{adapter, flow}` where `flow` is
+    `{flowId, mode, running, consentUrl, redirectUri, port, listening,
+    refusal, pasteBack:true, startedAt, expiresAt}` — never the flow's `state`.
+    A fixed-mode port already held answers `refusal:{code:'port-busy'}` on
+    the flow and the flow keeps running on paste-back.
+  - `POST /api/channels/adapters/:id/auth/finish` `{url}` — PASTE-BACK: the
+    redirect URL the user's browser landed on; `400 auth-failed` with the
+    reason (a `state` mismatch says "restart the flow"); `501 no-flow` when
+    nothing is running.
+  - `POST /api/channels/adapters/:id/auth/cancel` — `{ok, cancelled}`.
+  - `POST /api/channels/adapters/:id/disconnect` — drops the token (record
+    and conversations stay), cancels a running flow, retracts the failure item.
+  - `PUT /api/channels/adapters/:id` `{enabled?, options?}` — enable/disable
+    and/or the adapter's DECLARED options (an undeclared key or a value
+    outside its `choices` is a `400` naming it; `''` restores the default; a
+    change re-runs discovery).
+  - **P1b:** `PUT /api/channels/adapters/:id` also takes `{push: {enabled?,
+    claimedExclusive?}}` — the push switch (an opt-in lane, Gmail, is OFF
+    until `enabled:true`) and the exclusivity DECLARATION (`exclusive` /
+    `shared` / `unknown`, a closed set — anything else is a `400` naming it;
+    `400 no-push-lane` on an adapter that declares none). Sending
+    `claimedExclusive` is a RE-DECLARATION: it clears a demotion, zeroes the
+    miss counters and retries the lane once. Answers `{ok, push}`.
+- **P2 — assign / filter / estimate** (design §7, §10.2; every failure
+  `{error, code}` with a status BY CODE: `404 not-found` on an id nobody
+  discovered — never a minted row; `400 bad-assignment` / `bad-filter` /
+  `no-such-filter` / `filter-in-use`; `409 authority-capped` when
+  `authority:'send'` is asked for where either cap forbids it, the reason in
+  `error`):
+  - `PUT /api/channels/:adapterId/:convId/assignment` `{assignment, estimateAtSet?}`
+    — `assignment` = `{principal:{kind:'agent'|'group', id, name?}, mode:
+    'all'|'filtered', filterId?, notify:'wake'|'digest', digestMinutes?,
+    authority:'draft'|'send', dailyWakeCap?}` (defaults all / wake / 30 min /
+    draft / 40); `assignment:null` unassigns (removes ONLY the
+    `origin:'assignment'` reach grant). Answers `{ok, assignment}` AS IT READS
+    (`authority` clamped, `authorityClamped`, `authorityWhy`, `authorityStored`).
+  - `PUT /api/channels/:adapterId/:convId/filter` `{filter, estimate?}` —
+    `filter` = `{name?, match:'any'|'every', rules:[{kind, …}]}` over the
+    CLOSED rule set; `filter:null` clears it (refused `filter-in-use` while a
+    filtered assignment names it). Answers `{ok, filter}` with the saved
+    `estimateAtSet`.
+  - `POST /api/channels/:adapterId/:convId/estimate` `{filter}` (`null` = all
+    messages) — runs the PURE estimator SERVER-SIDE over the stored log
+    (≤ 5000 records; the client never sees the corpus). Answers `{ok,
+    estimate:{matched, total, matchedPerDay, totalPerDay, windowDays,
+    sampled, truncated}}`.
+  - The digest (`GET /api/channels` / `channels-updated`) carries per
+    conversation `assignment` (as it reads), `filter`, `stats` `{hits7d,
+    msgs7d, wakes24h, wakes7d, lastWake:{at, n, ok, lane, why, whys, cid},
+    pending, lastRefusal}`, `authorityCaps` `{offersSend, sendWhy,
+    policyRequiresReview}` and `wakeLatency` `{lane:'push'|'poll'|'scan'|
+    'reconcile', seconds, coalesceSeconds, kick?, source?, why?}` — STRUCTURE;
+    the editor says the words.
+  The digest (`GET /api/channels`) now also carries `available` (connectable
+  kinds not yet connected: `{kind, label, integration, credential:{source,
+  why, missing, clusterLabel}, receive, sendAs}`) and per adapter
+  `connectable`, `integration`, `credential`, `flow`, `lastAuthError`,
+  `lastAuthAt`, `failureItem {id, code, at}`, `options`, `optionsSchema` and
+  `auth.user`/`auth.scopes`/`auth.credentialSource` — never a token.
+  **P1b:** each adapter row carries `push` (`null` when it declares no push
+  lane): `{enabled, optIn, transport, claimedExclusive, state, lastStateWhy,
+  lastEventAt, demotedAt, demotedWhy, demoted{missed,total,rate,threshold,at},
+  redeclaredAt, missRate{rate,total,missed,enough,threshold}, contentSince,
+  droppedUntracked}` — the STRUCTURE; the sentence is the client's
+  (`channelCaps.pushLaneText`). Never the raw sample batches.
+
 WS: `channels-updated` `{changed:[convId], digest}` — ONE broadcast per
 ingest pass (or per mutation), carrying the recomputed RESULT so a client
 repaints without a fetch. Never one per message.
+
+**P3 — outbox · policy · reach (design §8, §9):** every answer is typed;
+`answer3` maps `not-found` → 404, `send-not-available` / `bad-state` / `reconcile-not-available` → 409,
+malformed input → 400, `failed` / `unknown` → 502.
+  - `GET /api/channels/outbox[?conv=<adapterId>/<convId>&limit=]` — the
+    proposals (newest first, ≤ 500) + `awaitingTotal` / `unknownTotal`; each
+    proposal is `proposalView`: `{id, adapterId, convId, key, title, text,
+    originalText, replyTo, why, attachments, draftedBy:{kind, id, name},
+    authority, at, updatedAt, state, policy:{mode, reasons, detail}, sendAs,
+    identity:{sentAs, marking, where, text}, identityWarning, ttlAt,
+    awaitingSince, edited, approvedBy, reason, result:{vendorMessageId, at,
+    sentAs, lane}, receipt, receiptDelivery, history, canDecide}`.
+  - `POST /api/channels/:adapterId/:convId/propose` `{text, replyTo?, why?,
+    attachments?}` — the USER's own draft (authority `send`), judged by the
+    same policy + guards → `{ok, proposal, decision}`; 409
+    `send-not-available` creates nothing.
+  - `POST /api/channels/outbox/:id/approve` `{text?}` (a different text =
+    approve edited) — re-resolves `convCaps` first; `{ok:true, proposal}` when
+    sent, else `{ok:false, code:'send-not-available'|'failed'|'unknown',
+    error, proposal}`.
+  - `POST /api/channels/outbox/:id/reject` `{reason?}` → `{ok, proposal}`.
+  - **P4:** `POST /api/channels/outbox/:id/reconcile` — a PERSON asks whether
+    a LOST send landed (the only way out of `unknown`) → `{ok:true, resolved,
+    state, answer:'landed'|'not-landed'|'unknown', reason?, proposal}`
+    (`resolved:false` = still unknown, the ask counted); 409
+    `reconcile-not-available` when the adapter's declared idempotency cannot
+    answer (`none`), 409 `bad-state` on anything but an unknown proposal.
+    `proposalView` gained `honestyLine` (the exact line that will/was
+    appended, else null), `canReconcile` / `reconcileWhy`, `attemptAt`,
+    `wire:{text, honestyLine, at}`, `sendHandle`, `reconcile:{n, lastAt,
+    lastBy, lastAnswer, lastWhy, resolvedAt}`, `result.observed` /
+    `result.honestyLine` / `result.reconciled`; the receipt gained
+    `reconciled` + `honestyLine`.
+  - **P4:** `PUT /api/channels/adapters/:id` also takes `{senderHonestyLine:
+    true|false|null}` (null = follow `channels.senderHonestyLine`) →
+    `{ok, senderHonestyLine:{record, effective}}`; the digest row carries
+    `senderHonestyLine` (null on a read-only adapter) and `identityObserved`.
+  - `PUT /api/channels/:adapterId/:convId/policy` `{mode:'direct'|'review'|null}`
+    (null = the adapter's default) → `{ok, policy:{mode, source, declared}}`.
+  - `PUT /api/channels/:adapterId/:convId/reach` `{principal:{kind:'agent'|
+    'group', id, name?}, level:'visible'|'requestable'|null}` — writes (or with
+    null removes) the USER-origin grant only → `{ok, reach:{entries:[{id,
+    principal, scope, level, origin, at, by}], requests}}`.
+  - `POST /api/channels/reach-requests/:id/approve|deny` → `{ok, request,
+    grant}` (approve = exactly ONE visible grant, origin `request`).
+  - The digest carries per conversation `policy` `{mode, source, declared}`,
+    `reach` `{entries, requests}`, `outbox` `{awaiting, unknown, latestAt}`,
+    the assignment's `receiptWake`, and at the top `awaitingTotal`.
+
+WS: `channel-outbox-updated` `{changed:[proposalId], outbox}` — one
+broadcast per proposal-store change carrying the recomputed outbox view; the
+inline section and the Outbox window repaint from it, never from a poll.
+
+## Integrations & keys (P0b, docs/design-communication-panel.zh.md §14)
+
+All behind the cookie auth. Every body is `publicView(id)` — THE masked view
+(`src/server/integration-store.js`) — and **no route ever returns a secret
+field's plaintext**: not GET, and there is no "reveal". A set secret is
+`masked: {field: '••••' + last 4}` (the tail only when the value is ≥ 12
+chars). Every failure answers `{error, code, detail}` with a real status so
+the client can toast it (`fetchJson` never throws).
+
+- `GET /api/integrations` — `{integrations: [publicView…], storeError}`. Each
+  view: `{id, label, fields (declarations only: key/label/secret/required/
+  placeholder/help), setup {callbackUrl, callbackNote, prerequisites} | null,
+  source: 'user'|'cluster'|'none', why, clusterKey (the preset IN EFFECT),
+  savedClusterKey (the selector the user saved), clusterLabel,
+  clusterAvailable, clusterWhy, clusterOptions [{key,label}] (key + label
+  ONLY — never a preset's secret), delegate {multi, prefer} | null, fromEnv,
+  set {field: bool}, masked {secretField: mask|null}, values {nonSecretField},
+  missing [requiredFieldKeys], hasOwnValues, testedAt, lastOk, lastError,
+  testKind, testDescribe, testCaveat, testButton, consumers, wiredIn, docs,
+  storeError}`. `storeError` is `{code, message}` or null — `store-unreadable`
+  (data/integrations.json exists but cannot be read; every write below is
+  refused with 500 of the same code until it can) outranks the key-file codes
+  (`key-unreadable` / `key-malformed`), and a PER-ROW `values-undecryptable`
+  `{code, message: <the remedy>, fields}` (r3) says THIS row's stored values
+  cannot be opened with the current key file — such a row answers
+  `source:'none'` with `why` naming the fields, is NEVER handed to the
+  cluster default, and reports `hasOwnValues: true` (a fact about the
+  record: Clear my keys is the way out; the list's top-level `storeError`
+  stays about the store / key file); a `cluster` row's `why` is non-null
+  exactly when its saved default was re-keyed to the instance's only one
+  (r2, the non-delegating radio's boolean intent).
+- `GET /api/integrations/:id` — `{integration: publicView}`; 404 on an unknown
+  row.
+- `PUT /api/integrations/:id` — ONE verb, three payload shapes, each routed to
+  ITS function: `{values: {field: value}}` → `setIntegration` (omitted =
+  untouched, `''` = cleared, else trimmed + validated FIRST — 400
+  `invalid-values` with `detail: {field: why}`); `{use: 'cluster'}` →
+  `useClusterDefault` (409 `no-cluster-default` BY NAME when the env offers
+  none); `{clusterKey: 'key'|null}` → `setClusterKey` (the delegating row's
+  dropdown / a multi-default row's picker; stores the SELECTOR only and drops
+  the user's own values; 400 `no-such-preset` listing what IS available).
+  Answers `{ok:true, integration: publicView}`.
+- `POST /api/integrations/:id/test` — the human's click, bounded (15 s), one in
+  flight per id, dispatched to the runner the row's CONSUMER registered; the
+  store constructs no vendor request. Answers `{ok, error, detail, testedAt,
+  caveat, kind, integration}`; a row whose consumer has not landed answers
+  501 `not-wired` naming the phase (`detail.wiredIn`) and records nothing.
+- `DELETE /api/integrations/:id` — "drop my keys": `clearUserValues`, ALWAYS
+  allowed, lands wherever precedence lands (cluster default or none).
+  `{ok:true, integration}`. (r2: "always" is a statement about precedence,
+  not about the file — PUT, POST test and DELETE alike answer 500
+  `store-unreadable` while data/integrations.json cannot be read, because
+  a write may not start from a state that is not the file's.)
+
+WS: `integrations-updated` `{id, why: 'set'|'cluster-key'|'use-cluster'|
+'clear'|'test', integration: publicView}` — ONE broadcast per write, carrying
+the recomputed masked view so every client repaints that one card without a
+fetch; it can carry nothing but the masked view by construction.
+
+Cluster env (read ONLY by `src/server/integration-store.js`; the standing
+census fails the names anywhere else): `VIBESPACE_INTEGRATIONS` = JSON
+`[{id, key?, label?, values: {field: value}}]` (the helm Secret) and
+`VIBESPACE_INTEGRATION_<ID>_<FIELD>` (single-field form; the JSON form wins
+when both name a row). The `gmail` row reads neither: it delegates to
+`VIBESPACE_GDRIVE_CLIENTS` through `MountManager.drivePresets()`.
 
 ## Background Work (2.342.0)
 - Agent (vsst_ or jbt_ Bearer): POST /api/agent/jobs (create; vendor-vet + schedule floors), GET /api/agent/jobs (view-filtered list), GET /api/agent/jobs/:ref?wait&tail&answers (poll/long-poll, uniform not-found), POST /api/agent/jobs/:ref/{stop|start|rm|progress|ask|access} (control needs canControl; access needs owner + not user-locked; jbt_ tokens: progress/ask on SELF only).

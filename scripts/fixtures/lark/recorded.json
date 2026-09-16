@@ -1,0 +1,48 @@
+{
+  "_note": "Recorded Lark Open Platform response SHAPES (im/v1, authen/v1+v2, auth/v3), ids and names replaced with neutral fixtures. Message pages are NEWEST-FIRST as the vendor serves them with sort_type=ByCreateTimeDesc; page 1 continues with `page_token` (the documented field), page 2 with `next_page_token` (the ops-notes spelling) so the adapter's both-spellings rule has a leg. Instants are RELATIVE (`atOffsetMs` from the suite's clock) so no fixture pins a calendar date.",
+  "token": { "code": 0, "access_token": "u-access-0001", "expires_in": 7200, "refresh_token": "ur-refresh-0001", "refresh_token_expires_in": 2592000, "token_type": "Bearer", "scope": "im:message im:chat:readonly contact:user.base:readonly offline_access" },
+  "tokenRefreshed": { "code": 0, "access_token": "u-access-0002", "expires_in": 7200, "refresh_token": "ur-refresh-0002", "refresh_token_expires_in": 2592000, "token_type": "Bearer", "scope": "im:message im:chat:readonly contact:user.base:readonly offline_access" },
+  "tokenInvalidGrant": { "code": 20003, "error": "invalid_grant", "error_description": "The refresh token is expired or has been revoked" },
+  "userInfo": { "code": 0, "msg": "success", "data": { "name": "Member A", "en_name": "Member A", "open_id": "ou_member_a", "union_id": "on_member_a", "user_id": "ua00001", "tenant_key": "tenant-fixture-0001" } },
+  "tenantToken": { "code": 0, "msg": "ok", "tenant_access_token": "t-tenant-0001", "expire": 7199 },
+  "tenantTokenBad": { "code": 10003, "msg": "invalid app_id or app_secret" },
+  "chats": { "code": 0, "msg": "success", "data": { "has_more": false, "page_token": "", "items": [
+    { "chat_id": "oc_ops_room_0001", "avatar": "", "name": "Ops room", "description": "Ada, Brook, Member A", "owner_id": "ou_ada", "owner_id_type": "open_id", "external": false, "tenant_key": "tenant-fixture-0001", "chat_status": "normal", "chat_mode": "group" },
+    { "chat_id": "oc_dm_brook_0002", "avatar": "", "name": "Brook", "description": "", "owner_id": "", "owner_id_type": "open_id", "external": false, "tenant_key": "tenant-fixture-0001", "chat_status": "normal", "chat_mode": "p2p" }
+  ] } },
+  "chatOps": { "code": 0, "msg": "success", "data": { "chat_id": "oc_ops_room_0001", "name": "Ops room", "chat_mode": "group", "chat_type": "private", "user_count": "3" } },
+  "chatGone": { "code": 230002, "msg": "the user is not in the chat" },
+  "membersOps": { "code": 0, "msg": "success", "data": { "items": [
+    { "member_id_type": "open_id", "member_id": "ou_ada", "name": "Ada", "tenant_key": "tenant-fixture-0001" },
+    { "member_id_type": "open_id", "member_id": "ou_brook", "name": "Brook", "tenant_key": "tenant-fixture-0001" },
+    { "member_id_type": "open_id", "member_id": "ou_member_a", "name": "Member A", "tenant_key": "tenant-fixture-0001" }
+  ], "page_token": "", "has_more": false, "member_total": 3 } },
+  "messagesOps": {
+    "page1": { "code": 0, "msg": "success", "data": { "has_more": true, "page_token": "pt-ops-page2", "items": [
+      { "message_id": "om_ops_010", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": -60000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_ada", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"text\":\"@_user_1 please check the staging box, @_user_2 is out today\"}" }, "mentions": [ { "key": "@_user_1", "id": "ou_member_a", "id_type": "open_id", "name": "Member A", "tenant_key": "tenant-fixture-0001" }, { "key": "@_user_2", "id": "ou_brook", "id_type": "open_id", "name": "Brook", "tenant_key": "tenant-fixture-0001" } ], "deleted": false, "updated": false },
+      { "message_id": "om_ops_009", "root_id": "", "parent_id": "om_ops_007", "thread_id": "", "msg_type": "post", "atOffsetMs": -120000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_brook", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"title\":\"Deploy notes\",\"content\":[[{\"tag\":\"text\",\"text\":\"rolled out \"},{\"tag\":\"a\",\"text\":\"build 42\",\"href\":\"https://ci.example/42\"}],[{\"tag\":\"at\",\"user_id\":\"ou_ada\",\"user_name\":\"Ada\"},{\"tag\":\"text\",\"text\":\" ok to close?\"}]]}" }, "mentions": [], "deleted": false, "updated": false },
+      { "message_id": "om_ops_008", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "image", "atOffsetMs": -180000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_brook", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"image_key\":\"img_v2_fixture_0008\"}" }, "mentions": [], "deleted": false, "updated": false },
+      { "message_id": "om_ops_007", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": -240000, "chat_id": "oc_ops_room_0001", "sender": { "id": "cli_bot_fixture", "id_type": "app_id", "sender_type": "app", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"text\":\"the deploy finished, logs look clean\"}" }, "mentions": [], "deleted": false, "updated": false }
+    ] } },
+    "page2": { "code": 0, "msg": "success", "data": { "has_more": true, "next_page_token": "pt-ops-page3", "items": [
+      { "message_id": "om_ops_006", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "file", "atOffsetMs": -300000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_member_a", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"file_key\":\"file_v2_fixture_0006\",\"file_name\":\"runbook.pdf\"}" }, "mentions": [], "deleted": false, "updated": false },
+      { "message_id": "om_ops_005", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": -360000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_ada", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"text\":\"moved the meeting to 3pm\"}" }, "mentions": [], "deleted": false, "updated": false },
+      { "message_id": "om_ops_004", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "sticker", "atOffsetMs": -420000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_brook", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"file_key\":\"sticker_fixture_0004\"}" }, "mentions": [], "deleted": false, "updated": false },
+      { "message_id": "om_ops_003", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": -480000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_ada", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"text\":\"heads up: the nightly job was slow again\"}" }, "mentions": [], "deleted": true, "updated": false }
+    ] } },
+    "page3": { "code": 0, "msg": "success", "data": { "has_more": false, "page_token": "", "items": [
+      { "message_id": "om_ops_002", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": -540000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_brook", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"text\":\"that ticket is ready for review\"}" }, "mentions": [], "deleted": false, "updated": false },
+      { "message_id": "om_ops_001", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": -600000, "chat_id": "oc_ops_room_0001", "sender": { "id": "ou_member_a", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001" }, "body": { "content": "{\"text\":\"thanks — merged\"}" }, "mentions": [], "deleted": false, "updated": false }
+    ] } }
+  },
+  "errors": {
+    "unauthorized": { "status": 401, "body": { "code": 99991663, "msg": "Access token is invalid" } },
+    "rateLimited": { "status": 429, "body": { "code": 99991400, "msg": "request trigger frequency limit" } },
+    "forbidden": { "status": 403, "body": { "code": 99991672, "msg": "No permission" } },
+    "notFound": { "status": 404, "body": { "code": 230001, "msg": "chat not found" } },
+    "vendor": { "status": 200, "body": { "code": 1000001, "msg": "internal error, please retry later" } }
+  },
+  "_noteSend": "P4 (send + reconcile): `im/v1/messages` (receive_id_type=chat_id) and `im/v1/messages/:id/reply` answer the created message. `sender.sender_type` here is the recorded SHAPE only — which value a user-token send really yields is the §21-item-3 measurement P4's real shot must read; nothing in this suite treats it as evidence.",
+  "sendOk": {"code": 0, "msg": "success", "data": {"message_id": "om_sent_0001", "root_id": "", "parent_id": "", "thread_id": "", "msg_type": "text", "atOffsetMs": 1000, "chat_id": "oc_ops_room_0001", "sender": {"id": "ou_member_a", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001"}, "body": {"content": "{\"text\":\"the deploy is done\"}"}, "mentions": [], "deleted": false, "updated": false}},
+  "replyOk": {"code": 0, "msg": "success", "data": {"message_id": "om_sent_0002", "root_id": "om_ops_010", "parent_id": "om_ops_010", "thread_id": "", "msg_type": "text", "atOffsetMs": 2000, "chat_id": "oc_ops_room_0001", "sender": {"id": "ou_member_a", "id_type": "open_id", "sender_type": "user", "tenant_key": "tenant-fixture-0001"}, "body": {"content": "{\"text\":\"ok, on it\"}"}, "mentions": [], "deleted": false, "updated": false}}
+}

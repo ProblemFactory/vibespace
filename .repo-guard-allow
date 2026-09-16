@@ -10,3 +10,18 @@ accessToken: 'expired-test-token'
 BEGIN [A-Z ]*PRIVATE KEY
 sk-ant-oat-EXPIRED
 token: 'NOT-A-PERMISSION-RULE'
+CLUSTERSECRET-fk-
+channels-secret-0000
+cluster-secret-1234
+my-secret-123456
+cluster-fake-key-000000
+prefix-form-key-12345678
+json-form-key-12345678
+my-google-secret-1
+rotated-away-key-000
+rotated-era-key-QRSTUVWXYZ
+fake-key-0123456789
+good-key-12345678
+this-will-fail-key
+back-again-12345678
+cluster-fake-key-1234

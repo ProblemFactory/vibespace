@@ -12,11 +12,19 @@
 const { create: createEngine } = require('./channels-engine.js');
 const channelsRoutes = require('../routes/channels.js');
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [] } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
 
-  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env });
+  // `integrations` is the §14 store handle: adapters ask its
+  // `resolveIntegration(id)` — never `process.env` — and every real row's
+  // Test runner is registered on it by the engine (the consumer owns the
+  // runner). `userTodos` is the "For you" inbox a failing adapter SPEAKS in
+  // and the same producer retracts from (fence 8, P1). `deliver` is THE
+  // delivery ladder (P2, fence 2: the only door to an unattended turn, the
+  // spend authorizer inside it), `serverSetting` reads the coalescing window
+  // and `liveSessions` names the agent sessions an assignment can address.
+  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions });
   channelsRoutes.setup({ getEngine: () => channels });
   app.use(channelsRoutes.router);
   channels.start();

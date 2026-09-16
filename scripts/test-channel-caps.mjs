@@ -270,7 +270,7 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   const src = fsx.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
   const keys = [...new Set([...src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]))];
   const missing = keys.filter((k) => !zh.includes(`"${k}"`) || !ja.includes(`"${k}"`));
-  ok(keys.length >= 9, 'the census found this module\'s human-visible strings', String(keys.length));
+  ok(keys.length >= 20, 'the census found this module\'s human-visible strings (the nine freshness sentences + the push row\'s)', String(keys.length));
   ok(!missing.length, 'every sentence this PURE module composes has a zh AND a ja entry', JSON.stringify(missing));
 }
 
@@ -291,6 +291,52 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(A({ tokenEnc: null, expiresAt: null, scopes: ['fake'] }).state === 'connected',
     'scopes alone count as a credential — "we hold something" is the question, not "which field holds it"');
   ok(A({ expiresAt: NOW - 1 }).why === 'token-expired' && A({}).why === 'never-authenticated', 'every answer NAMES its reason');
+}
+
+// ── ⑧ THE EXCLUSIVITY MEASUREMENT (P1b, §6.4 / decision 18) ──
+// Arithmetic only: the engine decides WHEN a sample is taken (only while push
+// carries content) — this module decides what the samples say.
+{
+  const T = C.PUSH_MISS_THRESHOLD, N = C.PUSH_MISS_MIN_SAMPLES;
+  let s = [];
+  for (let i = 0; i < 10; i++) s = C.pushSamplesAdd(s, { at: NOW + i, n: 1, p: 0 });
+  ok(C.pushMissRate(s, NOW + 10).total === 10 && C.pushMissRate(s, NOW + 10).enough === false, `fewer than ${N} judged records is not enough to say anything`);
+  s = C.pushSamplesAdd(s, { at: NOW + 11, n: 30, p: 1 });
+  const m = C.pushMissRate(s, NOW + 12);
+  ok(m.total === 40 && m.missed === 1 && m.enough && m.rate === 1 / 40 && C.pushDemotionVerdict({ samples: s }, NOW + 12).demote === (1 / 40 > T), 'the rate is missed/judged over the window, and the verdict follows the threshold');
+  s = C.pushSamplesAdd(s, { at: NOW + 13, n: 10, p: 10 });
+  ok(C.pushDemotionVerdict({ samples: s }, NOW + 14).demote === true, 'past the threshold with enough samples ⇒ demote');
+  ok(C.pushDemotionVerdict({ samples: s, demotedAt: NOW }, NOW + 14).demote === false, 'NEVER for a lane already demoted — the counters are not the trigger that clears one either');
+  ok(C.pushSamplesAdd(s, { at: NOW, n: 0, p: 0 }).length === s.length && C.pushSamplesAdd(s, { at: NOW + 20, n: 2, p: 5 }).some((b) => b.n === 2 && b.p === 2), 'an empty batch adds nothing; missed is clamped to judged');
+  // THE ROLLING WINDOW (r4): the last 24 h OR the last PUSH_MISS_MIN_KEEP records, whichever is LARGER
+  let w = [];
+  for (let i = 0; i < 300; i++) w = C.pushSamplesAdd(w, { at: NOW - 3 * 86400e3 + i, n: 1, p: 1 });     // 300 old misses
+  const old = C.pushMissRate(w, NOW);
+  ok(old.total === C.PUSH_MISS_MIN_KEEP && old.rate === 1, `older than 24 h, the window still keeps the last ${C.PUSH_MISS_MIN_KEEP} records (a lane with little traffic is judged on records, not on a clock)`);
+  for (let i = 0; i < 500; i++) w = C.pushSamplesAdd(w, { at: NOW - 3600e3 + i, n: 1, p: 0 });          // 500 fresh hits
+  const fresh = C.pushMissRate(w, NOW);
+  ok(fresh.total === 500 && fresh.missed === 0, 'once 24 h holds more than the floor, the window is the 24 h alone — the 300 old misses fall out (a lifetime ratio would pin a lane above the line for ever)');
+  // pushWindow sorts and ignores junk
+  ok(C.pushWindow([{ at: 'x', n: 1 }, null, { at: NOW, n: 0 }, { at: NOW - 1, n: 2, p: 1 }], NOW).length === 1, 'pushWindow keeps only well-formed batches with records');
+}
+
+// ── ⑨ THE ADAPTER ROW'S PUSH SENTENCE + the opt-in switch (P1b) ──
+{
+  const rec2 = (push, lane) => [push, lane];
+  const live = { via: 'push', live: true, carryContent: true, why: 'exclusive' };
+  const kick = { via: 'push', live: true, carryContent: false, why: 'kick-unknown' };
+  const dead = { via: 'poll', live: false, carryContent: false, why: 'push-dead' };
+  ok(/carrying messages/.test(C.pushLaneText({ state: 'live', claimedExclusive: 'exclusive' }, live)), 'live + exclusive ⇒ "carrying messages"');
+  ok(/exclusivity not declared/.test(C.pushLaneText({ state: 'live', claimedExclusive: 'unknown' }, kick)) && /declared shared/.test(C.pushLaneText({ state: 'live', claimedExclusive: 'shared' }, { ...kick, why: 'kick-shared' })), 'a kick-mode lane names WHY it only kicks');
+  const dem = C.pushLaneText({ state: 'live', demotedAt: NOW, demoted: { missed: 12, total: 40, rate: 0.3 } }, dead);
+  ok(/not exclusive here/.test(dem) && /12 of 40 records, 30%/.test(dem) && /fast cadence/.test(dem), `a demoted lane says the reason WITH its numbers: "${dem}"`);
+  ok(/silent for 2m/.test(C.pushLaneText({ state: 'live', lastEventAt: NOW - 120e3 }, dead, { now: NOW })), 'connected but silent past the window: "silent for <age>"');
+  ok(/unavailable: no SDK/.test(C.pushLaneText({ state: 'unavailable', lastStateWhy: 'no SDK' }, dead)) && /not started/.test(C.pushLaneText({ state: null }, dead)) && /^push off$/.test(C.pushLaneText({ enabled: false }, dead)) && /turn it on/.test(C.pushLaneText({ enabled: false, optIn: true }, dead)), 'unavailable / not started / off / off-but-available each have their own sentence');
+  // the OPT-IN switch through the ONE resolver (decision 20)
+  const optCaps = { ...pushCaps, pushOptIn: true };
+  ok(C.laneState(optCaps, rec({ claimedExclusive: 'exclusive', enabled: undefined }), {}, NOW).via === 'poll' && C.laneState(optCaps, rec({ claimedExclusive: 'exclusive' }), {}, NOW).via === 'push',
+    'an opt-in push lane is the POLL lane until the record says enabled:true; a plain push lane is on unless switched off');
+  ok(C.PUSH_CLAIMS.join() === 'exclusive,shared,unknown', 'the three claims are a closed set');
 }
 
 // ── ⑦ the module is PURE ──

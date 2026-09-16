@@ -162,6 +162,24 @@ gdrive:
   clientId: ""
   clientSecret: ""
 
+# Cluster-provided integration credentials (src/integration-registry.js rows;
+# read ONLY by src/server/integration-store.js). Each entry is ONE row id;
+# `values` keys are that row's declared field keys. Injected as env
+# (VIBESPACE_INTEGRATIONS, from the Secret — never a `value:`), never stored in
+# the instance's data. A user's own key always wins — the UI shows which one is
+# in use. Suitable: register-once, everyone-may-use credentials (a Lark app, a
+# Google OAuth client). NOT suitable: per-seat keys (a CloakBrowser license) —
+# one cluster key there means the cluster pays for every user and users share
+# the vendor's concurrent-session cap. Gmail has no entry here: it REUSES the
+# `gdrive.clients` presets above (name the one channels should default to
+# `channels` when you provide more than one).
+integrations: []
+#  - id: lark
+#    label: "Lark (cluster app)"
+#    values:
+#      appId: "cli_xxxxxxxxxxxxxxxx"
+#      appSecret: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
 # Optional /dev/net/tun for kernel-mode Tailscale (Plugins, 2.140.0).
 # Needs a device plugin serving the tun device (e.g. squat/generic-device-plugin);
 # without it plugins fall back to userspace-networking + SOCKS5 automatically.

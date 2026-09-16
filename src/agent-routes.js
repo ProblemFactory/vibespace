@@ -11,7 +11,51 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null }) {
+// ── stash → injection block (drain-at-render) ─────────────────────────────
+// PER-SOURCE BUDGET (2026-09-16, the P4 verifier's medium): an `agent` entry
+// is ONE ≤400-char line; a `channel` / `channel-receipt` entry is a block its
+// PRODUCER already budgeted and neutered (≤ BLOCK_MAX_BYTES, frame-inert —
+// src/channel-filter.js renderWakeBlock / src/channel-policy.js
+// renderReceiptBlock) and is rendered WHOLE. Re-clipping such a block to 400
+// chars handed the agent the header plus the first matched message and lost
+// the other hits — while the engine had already cleared them from its index
+// as "durably stashed" (design §7.4: a refusal loses nothing). The section is
+// walked NEWEST-first under a byte + entry budget; whatever does not fit is
+// handed back as `rest` and the caller RE-STASHES it (own `ts`) for the next
+// drain — never dropped. The injection channel wraps at 10 KiB upstream and
+// the whole context is capped at INLINE_CAP, hence the section budget.
+const { BLOCK_MAX_BYTES: MSG_STASH_BLOCK_MAX_BYTES } = require('./channel-filter.js');
+const MSG_STASH_LINE_MAX = 400;
+const MSG_STASH_MAX_ENTRIES = 6;
+const MSG_STASH_MAX_BYTES = 6144;
+const MSG_STASH_BLOCK_SOURCES = new Set(['channel', 'channel-receipt']);
+const clipBytes = (text, max) => { const b = Buffer.from(String(text), 'utf-8'); if (b.length <= max) return String(text); let cut = b.subarray(0, max).toString('utf-8'); const nl = cut.lastIndexOf('\n'); if (nl > max * 0.5) cut = cut.slice(0, nl); return cut + '\n(… clipped)'; };
+/** @returns {{text:string, shown:object[], rest:object[]}} — `shown` are the
+ *  entries rendered (emit their cards), `rest` the ones to re-stash. */
+function renderMsgStash(entries) {
+  if (!entries || !entries.length) return { text: '', shown: [], rest: [] };
+  const line = (e) => {
+    const stamp = new Date(Number(e.ts) || Date.now()).toISOString().slice(5, 16) + 'Z';
+    const who = e.fromName || e.source || 'unknown';
+    if (MSG_STASH_BLOCK_SOURCES.has(e.source)) return `- [${stamp}] from "${who}":\n${clipBytes(e.text || '', MSG_STASH_BLOCK_MAX_BYTES)}`;
+    return `- [${stamp}] from "${who}": ${String(e.text || '').slice(0, MSG_STASH_LINE_MAX)}`;
+  };
+  const shown = [], rows = [];
+  let bytes = 0;
+  for (let i = entries.length - 1; i >= 0; i--) {          // newest first; the newest always shows
+    const l = line(entries[i]);
+    const b = Buffer.byteLength(l, 'utf-8') + 1;
+    if (shown.length && (shown.length >= MSG_STASH_MAX_ENTRIES || bytes + b > MSG_STASH_MAX_BYTES)) break;
+    shown.unshift(entries[i]); rows.unshift(l); bytes += b;
+  }
+  const rest = entries.slice(0, entries.length - shown.length);
+  const held = rest.length ? `\n(${rest.length} older message(s) held for your next turn)` : '';
+  const hints = [];
+  if (shown.some((e) => !MSG_STASH_BLOCK_SOURCES.has(e.source))) hints.push('reply to an agent with vibespace-msg send "<name>" "..." if a response is expected');
+  if (shown.some((e) => e.source === 'channel')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
+  return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
+}
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null }) {
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -342,11 +386,13 @@ app.get('/api/agent/task-context', (req, res) => {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
         const drained = deliver.drainStash(caller2.conversationId);
-        // stash drain enters the AGENT's context invisibly — emit the same
-        // card the live lanes render so the user sees what arrived (2.363.0)
-        for (const e of drained) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
         const pm = renderMsgStash(drained);
-        if (pm) context = context ? context + '\n\n' + pm : pm;
+        // stash drain enters the AGENT's context invisibly — emit the same
+        // card the live lanes render so the user sees what arrived (2.363.0);
+        // what did not fit the budget rides the next drain (own ts, in order)
+        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
+        for (const e of pm.rest) deliver.stashFor(caller2.conversationId, e);
+        if (pm.text) context = context ? context + '\n\n' + pm.text : pm.text;
       }
     } catch { }
     res.json({ success: true, context });
@@ -544,11 +590,13 @@ app.get('/api/agent/prompt-context', (req, res) => {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
         const drained = deliver.drainStash(caller2.conversationId);
-        // stash drain enters the AGENT's context invisibly — emit the same
-        // card the live lanes render so the user sees what arrived (2.363.0)
-        for (const e of drained) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
         const pm = renderMsgStash(drained);
-        if (pm) parts.push(pm);
+        // stash drain enters the AGENT's context invisibly — emit the same
+        // card the live lanes render so the user sees what arrived (2.363.0);
+        // what did not fit the budget rides the next drain (own ts, in order)
+        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
+        for (const e of pm.rest) deliver.stashFor(caller2.conversationId, e);
+        if (pm.text) parts.push(pm.text);
       }
     } catch { }
     // Oversize belt (2.113.0): full contexts + the mixed-delivery manifest
@@ -1026,15 +1074,6 @@ function findVisible(jm, caller, ref) { return findVisibleIn([...jm.jobs.values(
 // COORDINATION boundary, not a security one (same-OS-user agents could always
 // reach the raw CLI sockets); it exists so groups stay quiet by default.
 const msgAcl = require('./msg-acl.js');
-// stash → injection block (drain-at-render; same accepted-lost stance as the
-// jobs stash). Budgeted: 6 entries × 400 chars — the injection channel has a
-// hard 10KiB wrap upstream.
-function renderMsgStash(entries) {
-  if (!entries || !entries.length) return '';
-  const rows = entries.slice(-6).map((e) => `- [${new Date(e.ts).toISOString().slice(5, 16)}Z] from "${e.fromName || e.source || 'unknown'}": ${String(e.text || '').slice(0, 400)}`);
-  const elided = entries.length > 6 ? `\n(${entries.length - 6} older message(s) elided)` : '';
-  return `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${elided}\n(reply with vibespace-msg send "<name>" "..." if a response is expected)`;
-}
 const _msgRate = new Map(); // senderCid|targetCid → {ts, text}
 function _msgEndpoints(exceptId) {
   const out = [];
@@ -1103,7 +1142,94 @@ app.post('/api/agent/msg/send', async (req, res) => {
   res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
 });
 
-const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md' };
+// ── vibespace-channels (Communication panel P3, design §11): the agent's
+//    side of the outbox. EVERY route resolves the calling session's principal
+//    FIRST and hands it to the engine, which consults the ACL before it
+//    answers — an agent can never widen its own reach, a hidden conversation
+//    and a nonexistent one are the same uniform error, and `reply` PROPOSES
+//    (the policy decides whether the user approves; it never sends). ──
+/** The calling session as a channel-acl principal. `msgLevelFor` is the
+ *  built-in Agents adapter's reach — msg-acl's answer, the same one
+ *  vibespace-msg gets — crosswalked by the engine (§12.3). */
+function channelPrincipal(s, id) {
+  const cid = s.claudeSessionId || s.backendSessionId || null;
+  const myGroups = _myGroupIds(s, id);
+  const endpoints = _msgEndpoints(id);
+  return {
+    kind: 'agent', id: cid || `webui:${id}`, name: s.name || null, groups: myGroups,
+    msgLevelFor: (targetCid) => {
+      if (!cid || targetCid === cid) return 'none';
+      const ep = endpoints.find((e) => e.cid === targetCid);
+      return ep ? msgAcl.levelFor(ep, myGroups, _groupExtVis) : 'none';
+    },
+  };
+}
+const channelsEngine = () => { try { const c = getChannels(); return c && typeof c.listFor === 'function' ? c : null; } catch { return null; } };
+const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'); return i > 0 ? { adapterId: k.slice(0, i), convId: k.slice(i + 1) } : null; };
+const chanAnswer = (res, r) => {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  const status = code === 'not-found' ? 404 : code === 'send-not-available' ? 409 : code === 'bad-proposal' || code === 'bad-request' ? 400 : 500;
+  return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
+};
+app.get('/api/agent/channels/list', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  chanAnswer(res, eng.listFor(channelPrincipal(s, id)));
+});
+app.get('/api/agent/channels/read', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const key = splitConvKey(req.query.conv);
+  if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>, as vibespace-channels list prints it)', code: 'bad-request' });
+  const since = req.query.since !== undefined && req.query.since !== '' ? Number(req.query.since) : null;
+  chanAnswer(res, eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null }));
+});
+app.post('/api/agent/channels/reply', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const b = req.body || {};
+  const key = splitConvKey(b.conv);
+  if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
+  try { chanAnswer(res, await eng.propose(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/agent/channels/status', (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  chanAnswer(res, eng.statusFor(channelPrincipal(s, id), req.query.id ? String(req.query.id) : null));
+});
+app.post('/api/agent/channels/request', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const b = req.body || {};
+  const key = splitConvKey(b.conv);
+  if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
+  try { chanAnswer(res, await eng.request(channelPrincipal(s, id), key.adapterId, key.convId, b.why)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const AGENT_DOC_TOPICS = { index: 'index-manual.md', jobs: 'background-work-manual.md', task: 'task-manual.md', status: 'status-manual.md', ask: 'ask-manual.md', msg: 'msg-manual.md', pages: 'pages-manual.md', channels: 'channels-manual.md' };
 const serveAgentDoc = (req, res, topic) => {
   // jbt_ (in-job) tokens may read docs too — a watch job's script legitimately
   // wants the manual; job tokens never pass agentSession, so check them first
@@ -1312,4 +1438,4 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
 });
 }
 
-module.exports = { setupAgentRoutes };
+module.exports = { setupAgentRoutes, renderMsgStash, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES };

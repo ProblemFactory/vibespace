@@ -130,6 +130,8 @@ data/bin/vibespace-remote-keeper — REMOTE-side persistence for remote CHAT ses
 
 ### mounts.js
 
+  **AT-REST ENCRYPTION MOVED OUT (P0b, design §14.7):** the inline `_key()`/`_enc()`/`_dec()` are gone; `_enc`/`_dec` delegate to `src/secret-box.js` on the SAME `data/.mounts-key` (decision 24 — the key file does not move), the ciphertext format is byte-identical (parity-pinned both directions by scripts/test-secret-box.mjs, so no stored mount secret is re-encrypted), and the ONE behaviour change is the fix mounts inherits: a key file that exists but cannot be read is now a TYPED error instead of a silently minted replacement key that orphaned every stored ciphertext (the bare `catch` at the former :360-367).
+
   mounts.js            — MountManager (rclone mounts, MULTI-SOURCE: typed records s3/drive/onedrive/gmail/webdav/sftp/vibespace/rclone via _rcloneFor; detached + boot adoption; one-click rclone install (data/bin, pinned 1.65.2); guided Google Drive OAuth (2.226.2: all four OAuth entry points render the auth URL as a copyable row — consent completable from ANY browser, paste-back relay finishes; popup-block reported honestly); rclone.conf import; per-mount S3 share minting mc→STS; NATIVE cephfs type (2.109.1, all-flash deployment storage — kernel `sudo mount -t ceph`, per-user quota, env-provisioned My storage VIBESPACE_CEPHFS_* replaces S3, no CSI; **2.237.2: _mountCephfs ensures a no-op /sbin/modprobe shim before EVERY attempt — mount.ceph hardcodes that path and treats exit-127 as fatal, so a kmod-less image broke every connect even with the ceph module loaded host-side (a container can never modprobe the shared kernel; when kmod existed the call always failed harmlessly). Never remove the shim 'because modprobe exists in the current image'**); flat-connections model — no special my-storage slot, env auto-migrates to a normal mount. **SUBMOUNT model (2.108.0→2.108.2, user-refined twice): ANY top-level storage record can hold submounts — children reference the parent via `parentId` + their own path fields (`remote:path`) and resolve connection through `_connOf()` at use time (addChild allows any non-child parent; no nesting). `kind:'credential'` now means CREDENTIAL-ONLY (root unmountable — bucket-scoped token): UI shows a key ICON in place of the status dot (no text badge, user directive) and NO Connect action; mount() auto-heals kind on a later successful root probe — refreshing the credential's token/keys heals every child (update() bounces mounted children). A credential itself mounts fine when its token can list the remote root (GDrive, account-wide keys); mount() AUTO-DETECTS bucket-scoped tokens (pathless s3-family + root-list probe AccessDenied → convert to credential + guidance) because the fuse mount otherwise "succeeds" and EIOs on every IO (the FishR2 trap — real bucket was `example-prod-data`; S3 names are lowercase). AccessDenied WITH a path fails fast pre-mount with a check-the-bucket-name error (v2Auth probe extension; v2Auth stays undefined so a fixed path re-probes). addChild/convert/remove-guarded; export re-links children by parent NAME. Drive re-auth: startDriveAuthForMount(id) runs the guided OAuth with the mount's own client creds, applyDriveToken() writes back + reconnects children — the invalid_grant recovery path; **applyDriveToken accepts drive AND onedrive AND cloud holders (2.268.8 — it rejected non-Google types, leaving the edit-dialog re-auth button dead for them), and the client re-auth surfaces word themselves per provider (`_oauthProviderNames` in sidebar-mounts.js), never hardcoded "Google Drive". ONEDRIVE REQUIRES RESOLVED drive_id+drive_type IN CONFIG (2.268.8, real report: every fresh native add failed with rclone's cryptic "upgrading from older versions" error — imported rclone.confs worked only because the conf carried both): `_resolveOneDriveDrive` (Graph /me/drive, region-aware GRAPH_BASE) runs as a mount-time backstop when driveId is missing (error recorded into _errors — "token expired" wording surfaces the row re-auth button) + after each re-auth write-back; explicit driveId never overridden. Test: scripts/test-onedrive-resolve.mjs.** Non-env mounts expose ALL connection params in the edit dialog PREFILLED with their real current values, SECRETS INCLUDED (2.108.8, user directive: no more blank "=default" fields — `_showEditMountDialog` fetches the decrypted config via `GET /api/mounts/:id/config`/`config()` and fills every input, keys/tokens/passwords/rclone params too; single-user instance, inputs stay type=text); save is a DIFF — a field is sent only when it changed from the fetched original (unchanged secrets aren't needlessly re-encrypted; server ignores an emptied secret so clearing one is a no-op there), an emptied rclone per-param row removes it. Only my-storage locks connection fields (edit shows name+mountpoint only; `config()` returns `{envLocked:true}` with no secrets). **HUNG-MOUNT DEFENSE (2.108.3, real outage)**: a fuse mount to an unreachable backend (home-LAN SMB host from a datacenter pod) hangs every IO — node's libuv THREADPOOL fills with stuck fs ops and the whole server stops answering while the event loop stays idle (ep_poll; /login 130s → readiness dead → pod out of Service). mount() runs a post-mount child-process `ls` probe (6s guard; error-exit=responsive, only a STUCK child trips) and startHealthWatchdog() sweeps every mounted record (60s + 15s-after-boot, covers boot-ADOPTED mounts that skip mount()) — hang ⇒ lazy unmount + `_killMountDaemon` (exact /proc cmdline argv match — a wedged rclone survives fusermount -uz) + desired=unmounted persisted + row error. Never probe mountpoints with node fs — child processes only. 2.108.4: pathBlocked() circuit breaker — mount() blocks the root for the WHOLE connect window and hang-detection blocks 90s; a files.js router middleware fails every op under a blocked root fast with 503 (an open explorer window otherwise stuffs the pool during the probe window — real follow-up incident); UV_THREADPOOL_SIZE=32 at the top of server.js (before any pool-touching require). **2.109.0 STRUCTURAL FIX: src/safe-fs.js worker_threads pool** — every LOCAL user-path fs op in routes/files.js runs in a worker with its OWN libuv pool + per-op deadline + kill/respawn (path resolution/traversal stay in main; worker executes the resolved absolute path only; ?host= untouched; app.locals.safeFs wired in server.js, inline fallback if the pool fails). Revoked/expired share SURFACING: _probeMountpoint is 3-state (ok/error/hung) + _probeBackendAccess (uncached rclone lsf re-auth, gated to _revocable = imported/vibespace/expiring) catches a 401/403 that a cache-served mountpoint ls hides → row shows "connected but every file errors" (clears on re-grant). 2.108.5 SELF-MOUNT GUARD: a vibespace-bridge record whose bearer token exists in OUR OWN MountTokens store points back at this instance — fuse→HTTP→self deadlocks the threadpool (real incident); refused at add/import/mount via mounts.selfTokenCheck = mountTokens.has(raw) (no lastUsedAt bump)**. **DIRECT CEPHFS SUBTREE SHARING (2.111.7): sharing a folder from a cephfs My-storage mount calls an in-cluster minter (env VIBESPACE_CEPHMINT_URL/_TOKEN) to mint a PATH-SCOPED cephx key (`ceph fs authorize <fs> client.vibespace-share-<rand> <path> <r|rw>`) and emits a `vibespace-cephmount:v1:<b64>` link; import → a normal `cephfs` mount that KERNEL-mounts the subtree directly (full flash bandwidth, no WebDAV relay). Key scoped to exactly the subpath (mds allow r path=…), recorded in `_state.shares` (kind:cephmount), revoke deletes it cluster-side. Env-gated — absent the minter, sharing falls back to the WebDAV bridge; cross-cluster/external always uses the bridge. mintCephShare/parseCephMountLink/revoke path in mounts.js; canCephShare in list(); `_showCephShareDialog` UI. Helm: storage.existingClaim (mount a pre-made PVC — the home-SC migration lever) + cephMint.{url,token}.** **2.110.0 HARDENING (user directive 最稳定+性能最好+自动恢复): every rclone mount runs `--vfs-cache-mode full` with a PERSISTENT per-mount cache dir (data/vfs-cache/<id>, root overridable VIBESPACE_VFS_CACHE_DIR; setting mounts.vfsCacheMaxSizeGB default 10G) — dirty writes survive a daemon crash and resume uploading on remount (verified live: SIGKILL 0.5s post-write → auto-remount → object lands); bounded IO (--timeout 60s --contimeout 15s + retries) so flaky backends error instead of hanging; new flags gated via _rcloneHasFlag (old system rclone falls back to writes mode). AUTO-RECONNECT supervision: desired now ONLY reflects user intent — internal teardowns (hang defense) keep desired=mounted and _healthSweep's dead-mount branch remounts with backoff 1→2→5→10min (_maybeAutoRemount; _noteReconnectBackoff), auth-class errors (denied/revoked/expired/AccessDenied…) excluded from retry so the actionable message survives; unmount(id,{internal:true}) is the internal teardown that doesn't rewrite intent; mount() is wrapped by a _connecting guard (one connect in flight per record). rcloneBin() NFS trap: executing the 57MB binary from a network FS demand-pages it per exec (~22s measured) — _fastBin copies it once to ~/.cache/vibespace keyed by size+mtime (22s→0.03s), detection via /proc/mounts longest-prefix fstype**) **OAuth-death detection (2.368.6, real OneDrive incident): a dead refresh token hides behind a HEALTHY-looking mount — fuse dir cache keeps listings working while every download fails 'unauthenticated: Unauthenticated' (EIO on every file open, zero UI signal). _oauthBacked mounts (drive/onedrive/cloud/rclone-OAuth) now get the fresh-process backend probe on a slow clock (10min; every sweep while an auth error shows or the mountpoint fails), the denied-regex knows the OAuth phrasings (unauthenticated/invalid_grant/InvalidAuthenticationToken), the health message names the fix (re-authorize), and the client button regex matches it. Gated by scripts/test-mount-oauth-probe.mjs (15). Do not narrow _revocable back to 'my own Drive can(not) expire' — it can. SECOND HALF (2.368.7): an EIO-wedged daemon SURVIVES fusermount -uz, so the re-auth bounce stacked a fresh daemon on the dead-token one and changed nothing (4 leaked daemons found); unmount() now polls _daemonAlive and kills survivors BEFORE resolving (bounce callers mount() right after — a later kill would murder the fresh daemon), and mount() kills any stale daemon before spawning. Never resolve an unmount while the daemon lives. TRUE ROOT CAUSE (2.368.8, corrects 2.368.6's dead-token diagnosis): the token was ALIVE — refresh/list/upload all worked, only the /content DOWNLOAD endpoint 401d (Microsoft's migrated consumer OneDrive vs rclone 1.65.2; A/B with identical config: 1.69.3/1.75.0 download fine). Pin bumped to v1.69.3 (stays in the Cloudflare-STS-safe 1.63–1.69 range) + restore() self-heals data/bin/rclone to the pin at boot (nothing else ever re-runs the installer — a pin bump alone reaches no existing install). The sweep also runs _probeBackendRead (1-byte cat of the first root file) because this failure mode PASSES lsf — auth-class failures must be located per-ENDPOINT (refresh/list/upload/download), never collapsed into 'token dead'.** **STRANDED WRITES (2.369.15, real OneDrive "is not empty, use --allow-non-empty" incident): a mount point that is NOT mounted is a bare local directory, and anything written there (the task store's generated TASK.md recreated a whole tree while OneDrive was down) both disappears once the storage reconnects and blocks that reconnect. Never `--allow-non-empty` (it hides the files). `_ensureMountpointDir(mp, {quarantine:true})` on BOTH connect paths (rclone + cephfs; never on the mount-point edit path) moves leftovers aside to a sibling `<mp>.stranded-<ts>/` — never delete, never merge — recreates the mount point empty and broadcasts a level-2 server-notice naming the path and items. `shadowedBy(p)` = the registered storage whose mount point contains p but is not mounted (gmail/credential records excluded; `isMounted(m, live)` accepts a pre-read /proc/mounts): files.js refuses every op under it with 503, task-groups skips its TASK.md and retries on every `mounts-updated` (the wiring tees the broadcast into `onMountsUpdated` + one boot resync after mounts exist — the constructor's boot regen runs before them). New server-side writers into user paths consult `shadowedBy` first. Gated by scripts/test-mount-stranded.mjs (26).**
 
 ### harnesses/ (the harness registry — S1/S4/S6, 2.369.18–22)
@@ -187,7 +189,7 @@ NOT wired, with the reason: the v2 `/api/session/:id/revert/{stage,clear,commit}
 
 ### agentd/
 
-  agentd/               — CS refactor (B-5052) machine agent — ALL milestones' protocol+device side COMPLETE and acceptance-tested (2.140.0–2.146.0; docs/design-remote-cs.md + M0 addendum + milestone record). THREE flags, DEFAULT ON since 2.158.0 (CS graduation — local=device#0; automatic legacy fallback preserved). **ONE MACHINE MODEL since 2.160.0 (B-f3e8, resolves the user's 2026-07-15 insight that row inconsistencies = two underlying concepts): a machine is a host record, transport ∈ {ssh(absent), dial}** — the pairing credential lives ON the dial record (`dialTokenHash`, redacted from list(), migrated ONCE from dial-tokens.json via hosts.migrateDialTokenFile → `.migrated`; LOSSLESS is load-bearing: in-field daemons hold the raw tokens); roster/test/unpair = /api/hosts + POST /api/hosts/:id/test (hosts.test dial branch = mux runCmd probe) + DELETE /api/hosts/:id (server unpairDialDevice: mounts+token-file+live-stream teardown); /api/agentd/devices is GONE; `hosts-updated` broadcasts on pair/unpair/dial-in/out; hosts.dirComplete rides the device link (dial machines get real remote autocomplete); sidebar has ONE _buildHostRow for all transports + a 'This machine' local row (local=device#0 made visible). The flags: `agentd.sessions` (M1: local sessions run in the daemon — dtach attach inside agentd, survives server restarts), `agentd.remoteSessions` (M2: remote chat = persistent pipe session in the remote daemon via the vibespace-agentd-attach bridge, keeper-run-identical contract so chat-wrapper is untouched; auto install/refresh at spawn), `agentd.dataPlane` (M3 switchovers: RemoteFs fs ops / discovery raw-facts synthesized into the ssh-script line format→UNCHANGED parser / transcript INCREMENTAL slab sync (append-only delta via read-range — no more whole-file remote-jsonl pulls) / usage harvest via run-stream; per-path ssh fallback; hosts.device(id) = per-host DeviceManager registry). mux.js = length-prefixed binary mux (chan0 JSON control + credit-flow-controlled byte channels; data() SPLITS at the window — all-or-nothing starved big writes; zero deps, shared by daemon+server = invariant #3). **CONTROL-OVERTAKE INVARIANT (2.187.0, real incident): chan0 control is credit-EXEMPT, so a completion marker (fs-done/stream-exit) OVERTAKES data still queued behind the 256KB window — any "resolve on the done marker" consumer truncates big transfers to exactly INITIAL_WINDOW bytes.** fsReadRange/runStream are COUNT-GATED (resolve when the counted bytes landed; daemon reports `sent`, run-stream exits on 'close' not 'exit', both pace under window pressure via onWritable); the incident: a 45MB remote transcript cached as a 256KB prefix stamped complete → permanently ancient chat history (fetchSessionJsonl now also refuses to stamp meta for bytes not received + caps on FETCHED delta not total size; **2.188.1: cache-valid additionally requires the cached FILE to hold meta.size bytes — a pre-fix stump over a STOPPED transcript passed size/mtime forever since the self-heal only fired on remote-file change**). Any NEW byte-channel consumer must gate on a byte count, never on a control-channel done. Test: scripts/test-agentd-bigread.mjs. agentd.js = daemon (flock singleton, setsid, 0700 unix socket, multi-server, vsht_ hello auth, self-upgrade→versioned dir→re-exec (2.185.2: the re-exec PRESERVES the original argv via reExecArgv — dropping `--dial/--dial-token` re-exec'd a dial device into LISTEN mode and wedged the link behind the singleton, the userW-class 'device goes offline after updates' root cause); pipe-sessions = keeper semantics in-daemon (setsid child + buffer/fifo + offset reattach + sentinel + drain-only-never-respawn); **pipe-child identity is exec-PROOF startTime, never cmdline (2.184.1, real userL outage: chat children spawn as `sh -lc '… exec env … claude'` so cmdline loses argv0 — every daemon upgrade re-exec then misjudged the live claude as a recycled pid, synthesized a crash sentinel (session died, claude orphaned) AND made kill-pipe-session a no-op; adopted children additionally get a liveness watcher because a non-child can't be wait()ed — no watcher meant no exit sentinel ever; test-agentd-adopt.mjs guards both)**; fs-op incl read-range byte-chan slab; discovery snapshot w/ tailIds/headCwd/userLines enrichment + fs.watch dirty push; run-cmd (argv-only bounded); run-stream (unbounded stdout on byte chan); tcp-connect (loopback only = VNC bridge shape); **serve-folder (2.150.0; WEBDAV since 2.151.0, device-folder-mount): a minimal in-daemon read-only WebDAV subset (OPTIONS/PROPFIND Depth 0-1/HEAD/GET+Range; zero deps, mirrors src/webdav.js) bound to 127.0.0.1 that rclone `webdav`-mounts via tcp-connect (src/device-mount.js) — the plain-`http` backend was the 2.150.0 stall: it requests a fixed 128MB range per read then waits ~6s on the keep-alive connection after the clamped 206; webdav requests sane ranges and reads in ~7ms (verified). GOTCHAS: clamp ranged end to size-1 (rclone asks 128M ranges → clamp or truncated EIO); the SERVER-side bridge net.createServer MUST be `{allowHalfOpen:true}` + attach the data listener BEFORE `await tcpForward` (curl/rclone half-close a GET's write side + write-then-read, both lose bytes otherwise); NEVER do sync fs/exec on a device mountpoint from the process hosting the bridge — the blocked event loop can't pump the tunnel, the FUSE read never completes, SELF-DEADLOCK (the acceptance test hung itself this way for a whole debug cycle; a dir `ls` still 'works' off rclone's dir-cache, which hides it; test IO now runs in async children w/ watchdog — production safe by construction: bridge in the server, reads from other processes/safe-fs workers). Still not a MountManager UI type (next step). **SSH-BRIDGE STDIN EPIPE (2.241.1, userN's exit-code-1 crash): the client.js ssh-transport wrapper writes to child.stdin — pipe errors arrive ASYNC as 'error' events on the stdin socket itself (the wrapper's on('error') only covered the child process; the write try/catch only stops sync throws), so a dying ssh child during the heartbeat PING was an UNCAUGHT write EPIPE that killed the whole server 28s after an update restart. stdin/stdout error events are swallowed; 'close' drives mux teardown+reconnect. Any new pipe-wrapped transport must attach error listeners on the PIPE STREAMS, not just the process.** dial-in device consumption = DeviceManager `stream` transport + server deviceForDial(id) wrapping a dialed-in ws stream — **deviceForDial NEVER reuses a stop()ed DeviceManager (2.169.0, real userW outage: hours of phantom-offline against a healthy dialed-in Mac): stop() is terminal (_connectLoop throws 'stopped' forever), so a stopped dm is evicted like a stale stream and a failed connect() never stays cached; any new dm.stop() caller must not leave the object in agentdDialDevices**. Dial chat TERMINATE kills the device-side claude via the daemon's `kill-pipe-session` (client killPipeSession) + rm's the session token over the device link — the ssh-only teardown threw for dial and silently orphaned claude (double-JSONL-writer class). Pairing commands render `/api/device-dial`; `/api/agentd-dial` is a PERMANENT alias (in-field daemons hold it in dial.json); env `VIBESPACE_DEVICE_ROOT` preferred, `VIBESPACE_AGENTD_ROOT` honored forever. **RE-PAIR / IDENTITY ROTATION (2.170.0, the userW-incident class): the daemon re-reads dial.json on EVERY dial attempt and the host-token file on EVERY hello — a re-pair heals a RUNNING daemon within one retry; never cache either at startup (the cached identity dialed a dead pairing forever while the singleton blocked its replacement + launchd respawn-spammed). The installer replaces a running same-root daemon (cmdline-verified kill); macOS singleton verifies the lock pid via `ps` (no /proc — recycled pids read as "already running" forever). Multi-instance = one root/daemon per instance (`~/.vibespace/device@<dialhost>`), re-pair replaces within a root.** **REVERSE forward tcp-listen/tcp-accept/tcp-unlisten (2.148.0, the NAT-traversal tunnel)** — daemon binds 127.0.0.1:<port> ON THE DEVICE, accepts push back over the mux as new byte channels (chan ids from 0x40000000 — never collides with server-allocated 2..N; the tcp-accept control MUST precede channel data), server pipes them into its own loopback port; on link death the listener is DISOWNED not closed (port stays bound → reconnecting server re-owns same-port via connect-loop re-registration → remote mounts heal in place); both tcp paths backpressured (credit-after-drain + mux.onWritable resume); --stdio ssh bridge mode; --dial ws dial-out (Transport B; ws-min.js = hand-rolled RFC6455 client — the `head` bytes-with-the-101 upgrade trap is handled, dropping them ate first frames on fast reconnects)). client.js = DeviceManager (transports local/ssh, openSession/openPipeSession/fs*/runCmd/runStream/tcpForward/reverseForward/discovery). Server: /api/agentd-dial upgrade branch (dial-token gated, verifies hosts.dialTokenHash since 2.160.0) + dial-pair mint (writes the hash onto the dial host record; /api/agentd/devices + /api/device-mounts RETIRED in 2.160.0 — roster/test/unpair = /api/hosts, mounts = /api/machine-mounts, see machine-mounts.js). Pairing dialog has per-OS commands (mac/linux bash; WINDOWS EXPERIMENTAL via /agentd-install.ps1, PS 5.1-compatible + win32 named-pipe SOCK in the daemon; the ps1 now also persists state\dial.json + registers a logon SCHEDULED TASK, so a Windows device survives a reboot). **EVERY URL in those commands must come from `httpBase` (= `r.relayUrl || location.origin`), NEVER location.origin directly (2.246.0 bug): a relay-paired device correctly dialed the relay but was handed origin-based installer/bundle URLs its network cannot reach — it failed before the daemon ever started.** MULTI-INSTANCE pairing: dial-out installs root at ~/.vibespace/agentd@<dialhost> (per-instance daemon/tokens/bundle; installer exports VIBESPACE_AGENTD_ROOT — forget that and the daemon reads the default root's token). INSTALLER GOTCHA (2.152.1, real Mac report): macOS has NO setsid(1) — the installer's unconditional `setsid node …` started NOTHING and printed ✓ anyway (stderr redirected into agentd.out); now setsid-or-nohup + kill-0 verification before claiming success. **NODE-FREE PAIRING (2.246.0): the installers (bash AND ps1) no longer REQUIRE node — resolution order is `--node` override → OUR private `$ROOT/node/bin/node` → PATH → newest nvm → common absolute paths → PROVISION (pinned official tarball from nodejs.org/dist, verified against that release's SHASUMS256.txt, smoke-run, then atomically `mv`d into `$ROOT/node`; `--node-only` = resolve/print/exit, the support probe). Private-BEFORE-PATH is deliberate (a launchd plist pointing at an nvm path dies at the user's next nvm upgrade); nvm-before-common-paths is the `curl|bash`-is-non-login lesson (nvm.sh never sourced ⇒ the #1 false 'no node'). Everything lands INSIDE the root, so `rm -rf $ROOT` uninstalls the runtime too — and because agentd's `spawnEnv()` prepends `path.dirname(process.execPath)`, the `#!/usr/bin/env node` agent tools resolve on a machine that never had node (2.244.4 chicken-and-egg, solved structurally). CONSEQUENCE: a provisioned device is PINNED to that node forever (no OS security updates) until the pin is bumped — documented in docs/device-agent.md § Node runtime. RULE: every later node/npm invocation in the installers uses the resolved absolute `$NODE_BIN`/`$NODE_DIR/npm`, NEVER bare `node` (launchd/systemd get no PATH of ours). set -e footguns in that block: `[ -e x ] && mv` and bare `x=$(cmd|pipe)` under pipefail both exit the script — keep new predicates inside `if`/`|| true`. musl + 32-bit Windows refuse honestly with fix instructions (official builds are glibc/64-bit only). Instance-side fallback mirror `GET /vibespace-node/:version/:file` (server.js, auth-exempt, fixed upstream + strict filename allowlist + disk cache in data/node-cache/) for devices that reach this instance but not nodejs.org. Tests: scripts/test-node-bootstrap.mjs (19 asserts, local HTTP fixture + a bwrap node-free sandbox; covers tamper/unlisted-checksum refusal, re-use, nvm discovery, override).** E2E: scripts/dbg-pair-smoke.mjs (17 asserts, REAL daemon dial + mount chain + UI rows). Build: npm run build:agentd → data/bin/vibespace-agentd.js + vibespace-agentd-attach.js (both gitignored artifacts). Tests (all green, 3 environments incl the devbox real-ssh + fleet test pod): test-mux/-agentd/-agentd-session/-agentd-remote/-agentd-robustness (bidi/jitter/latency/concurrency)/-agentd-wired/-agentd-dial/-agentd-m3m4 (18 scenarios)/-agentd-switchover (real-host legacy-vs-device cross-checks). u-vstest soaks with ALL flags on. **2.369.12 push阶梯(inc-mtl78uhs)**: mountpoint的~/$HOME按机器home展开+去尾斜杠(liveness探针比裸路径); rclone daemon子进程--log-file写入dialog tail的同一日志(真实原因不再被--daemon吞掉); macOS阶梯=rclone nfsmount(≥1.66, 免macFUSE)→FUSE mount(有macFUSE时)→mount_webdav, 每级失败都保留展示; 设备rclone pin v1.69.3, 自有旧安装force重装, 系统rclone不动; method 'rclone-nfs'与umount家族同处理.
+  agentd/               — CS refactor (B-5052) machine agent — ALL milestones' protocol+device side COMPLETE and acceptance-tested (2.140.0–2.146.0; docs/design-remote-cs.md + M0 addendum + milestone record). THREE flags, DEFAULT ON since 2.158.0 (CS graduation — local=device#0; automatic legacy fallback preserved). **ONE MACHINE MODEL since 2.160.0 (B-f3e8, resolves the user's 2026-07-15 insight that row inconsistencies = two underlying concepts): a machine is a host record, transport ∈ {ssh(absent), dial}** — the pairing credential lives ON the dial record (`dialTokenHash`, redacted from list(), migrated ONCE from dial-tokens.json via hosts.migrateDialTokenFile → `.migrated`; LOSSLESS is load-bearing: in-field daemons hold the raw tokens); roster/test/unpair = /api/hosts + POST /api/hosts/:id/test (hosts.test dial branch = mux runCmd probe) + DELETE /api/hosts/:id (server unpairDialDevice: mounts+token-file+live-stream teardown); /api/agentd/devices is GONE; `hosts-updated` broadcasts on pair/unpair/dial-in/out; hosts.dirComplete rides the device link (dial machines get real remote autocomplete); sidebar has ONE _buildHostRow for all transports + a 'This machine' local row (local=device#0 made visible). The flags: `agentd.sessions` (M1: local sessions run in the daemon — dtach attach inside agentd, survives server restarts), `agentd.remoteSessions` (M2: remote chat = persistent pipe session in the remote daemon via the vibespace-agentd-attach bridge, keeper-run-identical contract so chat-wrapper is untouched; auto install/refresh at spawn), `agentd.dataPlane` (M3 switchovers: RemoteFs fs ops / discovery raw-facts synthesized into the ssh-script line format→UNCHANGED parser / transcript INCREMENTAL slab sync (append-only delta via read-range — no more whole-file remote-jsonl pulls) / usage harvest via run-stream; per-path ssh fallback; hosts.device(id) = per-host DeviceManager registry). mux.js = length-prefixed binary mux (chan0 JSON control + credit-flow-controlled byte channels; data() SPLITS at the window — all-or-nothing starved big writes; zero deps, shared by daemon+server = invariant #3). **CONTROL-OVERTAKE INVARIANT (2.187.0, real incident): chan0 control is credit-EXEMPT, so a completion marker (fs-done/stream-exit) OVERTAKES data still queued behind the 256KB window — any "resolve on the done marker" consumer truncates big transfers to exactly INITIAL_WINDOW bytes.** fsReadRange/runStream are COUNT-GATED (resolve when the counted bytes landed; daemon reports `sent`, run-stream exits on 'close' not 'exit', both pace under window pressure via onWritable); the incident: a 45MB remote transcript cached as a 256KB prefix stamped complete → permanently ancient chat history (fetchSessionJsonl now also refuses to stamp meta for bytes not received + caps on FETCHED delta not total size; **2.188.1: cache-valid additionally requires the cached FILE to hold meta.size bytes — a pre-fix stump over a STOPPED transcript passed size/mtime forever since the self-heal only fired on remote-file change**). Any NEW byte-channel consumer must gate on a byte count, never on a control-channel done. Test: scripts/test-agentd-bigread.mjs. agentd.js = daemon (flock singleton, setsid, 0700 unix socket, multi-server, vsht_ hello auth, self-upgrade→versioned dir→re-exec (2.185.2: the re-exec PRESERVES the original argv via reExecArgv — dropping `--dial/--dial-token` re-exec'd a dial device into LISTEN mode and wedged the link behind the singleton, the userW-class 'device goes offline after updates' root cause); pipe-sessions = keeper semantics in-daemon (setsid child + buffer/fifo + offset reattach + sentinel + drain-only-never-respawn); **pipe-child identity is exec-PROOF startTime, never cmdline (2.184.1, real userL outage: chat children spawn as `sh -lc '… exec env … claude'` so cmdline loses argv0 — every daemon upgrade re-exec then misjudged the live claude as a recycled pid, synthesized a crash sentinel (session died, claude orphaned) AND made kill-pipe-session a no-op; adopted children additionally get a liveness watcher because a non-child can't be wait()ed — no watcher meant no exit sentinel ever; test-agentd-adopt.mjs guards both)**; fs-op incl read-range byte-chan slab; discovery snapshot w/ tailIds/headCwd/userLines enrichment + fs.watch dirty push; run-cmd (argv-only bounded); run-stream (unbounded stdout on byte chan); tcp-connect (loopback only = VNC bridge shape); **serve-folder (2.150.0; WEBDAV since 2.151.0, device-folder-mount): a minimal in-daemon read-only WebDAV subset (OPTIONS/PROPFIND Depth 0-1/HEAD/GET+Range; zero deps, mirrors src/webdav.js) bound to 127.0.0.1 that rclone `webdav`-mounts via tcp-connect (src/device-mount.js) — the plain-`http` backend was the 2.150.0 stall: it requests a fixed 128MB range per read then waits ~6s on the keep-alive connection after the clamped 206; webdav requests sane ranges and reads in ~7ms (verified). GOTCHAS: clamp ranged end to size-1 (rclone asks 128M ranges → clamp or truncated EIO); the SERVER-side bridge net.createServer MUST be `{allowHalfOpen:true}` + attach the data listener BEFORE `await tcpForward` (curl/rclone half-close a GET's write side + write-then-read, both lose bytes otherwise); NEVER do sync fs/exec on a device mountpoint from the process hosting the bridge — the blocked event loop can't pump the tunnel, the FUSE read never completes, SELF-DEADLOCK (the acceptance test hung itself this way for a whole debug cycle; a dir `ls` still 'works' off rclone's dir-cache, which hides it; test IO now runs in async children w/ watchdog — production safe by construction: bridge in the server, reads from other processes/safe-fs workers). Still not a MountManager UI type (next step). **SSH-BRIDGE STDIN EPIPE (2.241.1, userN's exit-code-1 crash): the client.js ssh-transport wrapper writes to child.stdin — pipe errors arrive ASYNC as 'error' events on the stdin socket itself (the wrapper's on('error') only covered the child process; the write try/catch only stops sync throws), so a dying ssh child during the heartbeat PING was an UNCAUGHT write EPIPE that killed the whole server 28s after an update restart. stdin/stdout error events are swallowed; 'close' drives mux teardown+reconnect. Any new pipe-wrapped transport must attach error listeners on the PIPE STREAMS, not just the process.** dial-in device consumption = DeviceManager `stream` transport + server deviceForDial(id) wrapping a dialed-in ws stream — **deviceForDial NEVER reuses a stop()ed DeviceManager (2.169.0, real userW outage: hours of phantom-offline against a healthy dialed-in Mac): stop() is terminal (_connectLoop throws 'stopped' forever), so a stopped dm is evicted like a stale stream and a failed connect() never stays cached; any new dm.stop() caller must not leave the object in agentdDialDevices**. Dial chat TERMINATE kills the device-side claude via the daemon's `kill-pipe-session` (client killPipeSession) + rm's the session token over the device link — the ssh-only teardown threw for dial and silently orphaned claude (double-JSONL-writer class). Pairing commands render `/api/device-dial`; `/api/agentd-dial` is a PERMANENT alias (in-field daemons hold it in dial.json); env `VIBESPACE_DEVICE_ROOT` preferred, `VIBESPACE_AGENTD_ROOT` honored forever. **RE-PAIR / IDENTITY ROTATION (2.170.0, the userW-incident class): the daemon re-reads dial.json on EVERY dial attempt and the host-token file on EVERY hello — a re-pair heals a RUNNING daemon within one retry; never cache either at startup (the cached identity dialed a dead pairing forever while the singleton blocked its replacement + launchd respawn-spammed). The installer replaces a running same-root daemon (cmdline-verified kill); macOS singleton verifies the lock pid via `ps` (no /proc — recycled pids read as "already running" forever). Multi-instance = one root/daemon per instance (`~/.vibespace/device@<dialhost>`), re-pair replaces within a root.** **REVERSE forward tcp-listen/tcp-accept/tcp-unlisten (2.148.0, the NAT-traversal tunnel)** — daemon binds 127.0.0.1:<port> ON THE DEVICE, accepts push back over the mux as new byte channels (chan ids from 0x40000000 — never collides with server-allocated 2..N; the tcp-accept control MUST precede channel data), server pipes them into its own loopback port; on link death the listener is DISOWNED not closed (port stays bound → reconnecting server re-owns same-port via connect-loop re-registration → remote mounts heal in place); both tcp paths backpressured (credit-after-drain + mux.onWritable resume); --stdio ssh bridge mode; --dial ws dial-out (Transport B; ws-min.js = hand-rolled RFC6455 client — the `head` bytes-with-the-101 upgrade trap is handled, dropping them ate first frames on fast reconnects)). client.js = DeviceManager (transports local/ssh, openSession/openPipeSession/fs*/runCmd/runStream/tcpForward/reverseForward/discovery). Server: /api/agentd-dial upgrade branch (dial-token gated, verifies hosts.dialTokenHash since 2.160.0) + dial-pair mint (writes the hash onto the dial host record; /api/agentd/devices + /api/device-mounts RETIRED in 2.160.0 — roster/test/unpair = /api/hosts, mounts = /api/machine-mounts, see machine-mounts.js). Pairing dialog has per-OS commands (mac/linux bash; WINDOWS EXPERIMENTAL via /agentd-install.ps1, PS 5.1-compatible + win32 named-pipe SOCK in the daemon; the ps1 now also persists state\dial.json + registers a logon SCHEDULED TASK, so a Windows device survives a reboot). **EVERY URL in those commands must come from `httpBase` (= `r.relayUrl || location.origin`), NEVER location.origin directly (2.246.0 bug): a relay-paired device correctly dialed the relay but was handed origin-based installer/bundle URLs its network cannot reach — it failed before the daemon ever started.** MULTI-INSTANCE pairing: dial-out installs root at ~/.vibespace/agentd@<dialhost> (per-instance daemon/tokens/bundle; installer exports VIBESPACE_AGENTD_ROOT — forget that and the daemon reads the default root's token). INSTALLER GOTCHA (2.152.1, real Mac report): macOS has NO setsid(1) — the installer's unconditional `setsid node …` started NOTHING and printed ✓ anyway (stderr redirected into agentd.out); now setsid-or-nohup + kill-0 verification before claiming success. **NODE-FREE PAIRING (2.246.0): the installers (bash AND ps1) no longer REQUIRE node — resolution order is `--node` override → OUR private `$ROOT/node/bin/node` → PATH → newest nvm → common absolute paths → PROVISION (pinned official tarball from nodejs.org/dist, verified against that release's SHASUMS256.txt, smoke-run, then atomically `mv`d into `$ROOT/node`; `--node-only` = resolve/print/exit, the support probe). Private-BEFORE-PATH is deliberate (a launchd plist pointing at an nvm path dies at the user's next nvm upgrade); nvm-before-common-paths is the `curl|bash`-is-non-login lesson (nvm.sh never sourced ⇒ the #1 false 'no node'). Everything lands INSIDE the root, so `rm -rf $ROOT` uninstalls the runtime too — and because agentd's `spawnEnv()` prepends `path.dirname(process.execPath)`, the `#!/usr/bin/env node` agent tools resolve on a machine that never had node (2.244.4 chicken-and-egg, solved structurally). **AND THE DAEMON IS BORN SANITIZED (2026-09-14, src/agent-env.js): `_spawnLocal`, the `--stdio` bridge's spawn and the upgrade re-exec all hand a new daemon `daemonEnv(process.env)`, and `spawnEnv()` merges every child over that same sanitized base — never raw `process.env` — because the daemon is a SECOND HOLDER of the server env that outlives its restarts, and a real pipe-session claude was measured carrying a cluster integration secret a previous server life had handed the daemon (test-agentd-session's holder leg + test-integration-registry §6(h)).** CONSEQUENCE: a provisioned device is PINNED to that node forever (no OS security updates) until the pin is bumped — documented in docs/device-agent.md § Node runtime. RULE: every later node/npm invocation in the installers uses the resolved absolute `$NODE_BIN`/`$NODE_DIR/npm`, NEVER bare `node` (launchd/systemd get no PATH of ours). set -e footguns in that block: `[ -e x ] && mv` and bare `x=$(cmd|pipe)` under pipefail both exit the script — keep new predicates inside `if`/`|| true`. musl + 32-bit Windows refuse honestly with fix instructions (official builds are glibc/64-bit only). Instance-side fallback mirror `GET /vibespace-node/:version/:file` (server.js, auth-exempt, fixed upstream + strict filename allowlist + disk cache in data/node-cache/) for devices that reach this instance but not nodejs.org. Tests: scripts/test-node-bootstrap.mjs (19 asserts, local HTTP fixture + a bwrap node-free sandbox; covers tamper/unlisted-checksum refusal, re-use, nvm discovery, override).** E2E: scripts/dbg-pair-smoke.mjs (17 asserts, REAL daemon dial + mount chain + UI rows). Build: npm run build:agentd → data/bin/vibespace-agentd.js + vibespace-agentd-attach.js (both gitignored artifacts). Tests (all green, 3 environments incl the devbox real-ssh + fleet test pod): test-mux/-agentd/-agentd-session/-agentd-remote/-agentd-robustness (bidi/jitter/latency/concurrency)/-agentd-wired/-agentd-dial/-agentd-m3m4 (18 scenarios)/-agentd-switchover (real-host legacy-vs-device cross-checks). u-vstest soaks with ALL flags on. **2.369.12 push阶梯(inc-mtl78uhs)**: mountpoint的~/$HOME按机器home展开+去尾斜杠(liveness探针比裸路径); rclone daemon子进程--log-file写入dialog tail的同一日志(真实原因不再被--daemon吞掉); macOS阶梯=rclone nfsmount(≥1.66, 免macFUSE)→FUSE mount(有macFUSE时)→mount_webdav, 每级失败都保留展示; 设备rclone pin v1.69.3, 自有旧安装force重装, 系统rclone不动; method 'rclone-nfs'与umount家族同处理.
 
 ### machine-mounts.js
 
@@ -770,7 +772,7 @@ Instance-hosted shareable HTML. Owner incident: the /design canvas skill publish
 
 ### agent-routes.js
 
-  agent-routes.js      — setupAgentRoutes() (2.93.0 split): every agent-facing endpoint — vibespace-ask/status/task routes, task-context/prompt-context injection (incl. user preamble + per-turn extras), stop-check nudge arbiter. Injection ORDER + SIZE are load-bearing — read the renderContext notes before touching payloads. TEACHING ARCHITECTURE (2.111.22-25, user-driven): the injected tools section is a DISCOVERY layer — per tool one trigger sentence + one fenced COPY-READY complete invocation (status sample carries --reason+--detail+--urgency; progress/ask carry --detail) so the first copied call is already valid; syntax/edge cases live in each CLI's own no-args output; hard rules enforce at point of use (waiting-state reason+detail rejection, success-output reminders). Don't grow the upfront block back into a rules dump (2.68.0 oversize incident is the other guardrail). **GROUP UPDATES DELIVER AS DIFFS (2.113.0, user request):** a mid-session group change no longer re-injects the whole group context — the session keeps a per-group SNAPSHOT of what it last saw (`s._groupSnap`, set at every delivery next to `_groupSeenAt`/`_ctxSig`; in-memory, restart ⇒ full re-delivery like the seen markers) and prompt-context injects a `<vibespace-task-update>` DELTA block (tasks.renderContextDiff: renamed / objective / backlog PARKED-RESOLVED-DROPPED-CLAIMED-UNCLAIMED-reworded-REMOVED one-liners (2.122.0; since 2.123.0 matched by the stable item id — occurrence-indexed text pairing retired — and TARGETED: `sessionKey` filters events to items the session created or claimed, everyone else keeps only the count pointer) / contextDir files updated-new-removed via old-vs-new `_ctxSig` / new activity entries LAST; ~5KB hard cap with tail-first truncation + `show --full` pointers; EMPTY diff = a no-op edit ⇒ nothing injected, markers still advance — the old code re-sent everything for those too; checklist deltas REMOVED with the feature in 2.121.0). No snapshot / setting `agents.contextUpdateDiffs` off ⇒ the old full "was UPDATED" payload. Also: FIRST-TIME groups on one prompt get ONE layered renderMultiContext (the codex first-prompt path) instead of N full payloads each repeating the ~2.3KB tools section — but ONLY when they cover the WHOLE membership (renderMultiContext states absolute membership; a subset call told a 3-group session "belongs to 2" — partial sets render per-group, count-free). REVIEW-HARDENED invariants (10-finding adversarial pass, do not regress; the checklist occurrence-indexed-diff one retired with the feature in 2.121.0): contextDir set/changed/cleared ⇒ diff returns null ⇒ FULL fallback (structural — the file index + folder conventions must be taught, a one-line path left pre-existing files invisible); the TASK.md pointer renders for LOCAL sessions only (remote ctx rsync excludes `.vibespace/`); contextDirSignature escapes `%`/`|` in paths (raw `|` sheared parse entries → wrong-path reports); **N CHANGED GROUPS COLLAPSE INTO ONE COMBINED BLOCK (2.113.1, user directive twice-clarified — 穿插/layered, the 2.68.0 class):** stacked per-group `<vibespace-task-update>` blocks + the ~2KB persisted-preview truncation could hide the very FACT that a 2nd group changed — `renderContextDiffMulti` (fed by `diffChanges`, which returns {lines, bits} where bits = phrase summaries like '3 new activity') renders ONE block whose HEADER line enumerates EVERY changed group + its summary, then per-group `##` sections SMALLEST-FIRST, 6.5KB cap with tail-first truncation (details die, the enumeration never does); ANY multi-block delivery (diff block + full re-deliveries + new-group fulls) is manifest-headed — `<vibespace-delivery-note>` naming EVERY block by group + the persisted-output rescue, diff block first, fulls last; combined parts >8KB with no rescue line get one prepended; markers/snapshot advance at RENDER, so a harness-dropped delivery (hook 3s timeout) stays lost until `show --full`/restart — ACCEPTED, same class as the seen-bump loss window. Tests: scripts/test-context-diff.mjs (store) + scripts/test-prompt-context.mjs (route, fake express)
+  agent-routes.js      — setupAgentRoutes() (2.93.0 split): every agent-facing endpoint — vibespace-ask/status/task routes, task-context/prompt-context injection (incl. user preamble + per-turn extras), stop-check nudge arbiter. Injection ORDER + SIZE are load-bearing — read the renderContext notes before touching payloads. TEACHING ARCHITECTURE (2.111.22-25, user-driven): the injected tools section is a DISCOVERY layer — per tool one trigger sentence + one fenced COPY-READY complete invocation (status sample carries --reason+--detail+--urgency; progress/ask carry --detail) so the first copied call is already valid; syntax/edge cases live in each CLI's own no-args output; hard rules enforce at point of use (waiting-state reason+detail rejection, success-output reminders). Don't grow the upfront block back into a rules dump (2.68.0 oversize incident is the other guardrail). **GROUP UPDATES DELIVER AS DIFFS (2.113.0, user request):** a mid-session group change no longer re-injects the whole group context — the session keeps a per-group SNAPSHOT of what it last saw (`s._groupSnap`, set at every delivery next to `_groupSeenAt`/`_ctxSig`; in-memory, restart ⇒ full re-delivery like the seen markers) and prompt-context injects a `<vibespace-task-update>` DELTA block (tasks.renderContextDiff: renamed / objective / backlog PARKED-RESOLVED-DROPPED-CLAIMED-UNCLAIMED-reworded-REMOVED one-liners (2.122.0; since 2.123.0 matched by the stable item id — occurrence-indexed text pairing retired — and TARGETED: `sessionKey` filters events to items the session created or claimed, everyone else keeps only the count pointer) / contextDir files updated-new-removed via old-vs-new `_ctxSig` / new activity entries LAST; ~5KB hard cap with tail-first truncation + `show --full` pointers; EMPTY diff = a no-op edit ⇒ nothing injected, markers still advance — the old code re-sent everything for those too; checklist deltas REMOVED with the feature in 2.121.0). No snapshot / setting `agents.contextUpdateDiffs` off ⇒ the old full "was UPDATED" payload. Also: FIRST-TIME groups on one prompt get ONE layered renderMultiContext (the codex first-prompt path) instead of N full payloads each repeating the ~2.3KB tools section — but ONLY when they cover the WHOLE membership (renderMultiContext states absolute membership; a subset call told a 3-group session "belongs to 2" — partial sets render per-group, count-free). REVIEW-HARDENED invariants (10-finding adversarial pass, do not regress; the checklist occurrence-indexed-diff one retired with the feature in 2.121.0): contextDir set/changed/cleared ⇒ diff returns null ⇒ FULL fallback (structural — the file index + folder conventions must be taught, a one-line path left pre-existing files invisible); the TASK.md pointer renders for LOCAL sessions only (remote ctx rsync excludes `.vibespace/`); contextDirSignature escapes `%`/`|` in paths (raw `|` sheared parse entries → wrong-path reports); **N CHANGED GROUPS COLLAPSE INTO ONE COMBINED BLOCK (2.113.1, user directive twice-clarified — 穿插/layered, the 2.68.0 class):** stacked per-group `<vibespace-task-update>` blocks + the ~2KB persisted-preview truncation could hide the very FACT that a 2nd group changed — `renderContextDiffMulti` (fed by `diffChanges`, which returns {lines, bits} where bits = phrase summaries like '3 new activity') renders ONE block whose HEADER line enumerates EVERY changed group + its summary, then per-group `##` sections SMALLEST-FIRST, 6.5KB cap with tail-first truncation (details die, the enumeration never does); ANY multi-block delivery (diff block + full re-deliveries + new-group fulls) is manifest-headed — `<vibespace-delivery-note>` naming EVERY block by group + the persisted-output rescue, diff block first, fulls last; combined parts >8KB with no rescue line get one prepended; markers/snapshot advance at RENDER, so a harness-dropped delivery (hook 3s timeout) stays lost until `show --full`/restart — ACCEPTED, same class as the seen-bump loss window. Tests: scripts/test-context-diff.mjs (store) + scripts/test-prompt-context.mjs (route, fake express) **`renderMsgStash` is PER-SOURCE (2026-09-16, the comm-panel P4 verifier): a `channel` / `channel-receipt` stash entry is a producer-budgeted §7.5 block rendered WHOLE (re-clipping it to 400 chars lost every hit after the first while the engine had already cleared them as "durably stashed"); the section is walked newest-first under `MSG_STASH_MAX_BYTES` (6144) / 6 entries and what does not fit is handed back as `rest` and RE-STASHED with its own ts for the next drain — never dropped; cards are emitted for the shown entries only; the hint names vibespace-channels for a channel entry. Exported for the gate: test-channels-engine ⑥ (f′).**
 
 ### usage-routes.js
 
@@ -1236,6 +1238,113 @@ only once it has PASSED. No credential at all is `'unknown'`, never
 `'connected'`: the P0a fakes authenticate against nothing and saying so is the
 point.
 
+**THE EXCLUSIVITY MEASUREMENT + THE ROW'S SENTENCE (P1b, 2026-09-16; design
+§6.4, decision 18).** `pushSamplesAdd` / `pushMissRate` / `pushDemotionVerdict`
+are ARITHMETIC over batches `{at, n, p}` (n judged records, p first seen by
+the poll) inside a ROLLING window — the last 24 h or the last
+`PUSH_MISS_MIN_KEEP` (200) records, whichever is LARGER — demoting past
+`PUSH_MISS_THRESHOLD` (2 %) over `PUSH_MISS_MIN_SAMPLES` (20); the verdict is
+NEVER true for a lane already demoted (the counters clear nothing). WHEN a
+sample is taken is the engine's rule (only while push carries content), not
+this module's. `pushLaneText(push, lane, {t, now})` is the adapter row's
+sentence — state, or the demotion's reason WITH its numbers; the silent-but-
+connected case says "silent for <age>". `caps.pushOptIn` (Gmail) makes
+`laneState` answer the POLL lane until the record says `push.enabled === true`
+(decision 20: available, off by default). Gate: test-channel-caps ⑧/⑨.
+
+### src/channel-filter.js (PURE)
+
+The filter, the assignment model and the block an agent is handed (design
+§7, P2). Imports only `channel-record` (PURE → PURE) for `inertFrames`; the
+editor bundles it like channel-caps, so a rule the editor draws is a rule the
+route accepts. Invariants, one sentence each:
+
+- `RULE_KINDS` is a CLOSED set of eight (`mention`, `keyword`,
+  `sender-in-group`, `from-address`, `subject`, `has-attachment`,
+  `not-contains`, `time-window`); `validateRule`/`validateFilter` refuse by
+  name, and a null or empty filter never hits (a wake is money — fail closed).
+- **`why` is a contract, not prose**: `matchRecord` returns the rule strings
+  that fired (`ruleWhy`), the wake block and the panel show the same string,
+  and `whyText([])` is "matched: all messages".
+- `estimate` is honest about its window: `sampled` = the reader's cap was hit
+  before the window's start, `truncated` = the corpus is younger than the
+  window, in which case the rate is over the span it actually saw
+  (`windowDays`); an empty corpus is no evidence, not "truncated".
+- `authority:'send'` is capped by TWO facts that only narrow (`authorityCap`:
+  channel policy requires review — decision 9's default for every v1 adapter;
+  or `offers()` says no, with caps' own reason), refused by `validateAssignment`
+  with code `authority-capped`, and CLAMPED AT READ TIME by
+  `effectiveAuthority` so a stored value never silently becomes a permission
+  when the policy is later relaxed — the user re-chooses.
+- `pickRoundRobin` stores a WRAPPED cursor and answers `null` with no live
+  member — the caller holds, never "wakes them all".
+- `paceVerdict` (the per-assignment daily wake cap) is PACING, layer one of
+  three (§7.4); only wakes that HAPPENED (`ok !== false`) count, a cap of 0
+  never wakes, and its `why` names the numbers.
+- `renderWakeBlock`/`renderDigestBlock`: ≤ `BLOCK_MAX_RECORDS` (6), ≤
+  `BLOCK_MAX_CHARS` (400) per record, "(N older elided)", the whole block
+  under `BLOCK_MAX_BYTES` (4096 — the hook channel wraps at 10 KiB and this
+  product has lost that fight once), every vendor line QUOTED (`> `) and
+  passed through `inertFrames`, so an outsider cannot forge one of this
+  block's own headings or a `<system-reminder>` in an agent's context; a
+  coalesced burst says "N messages in S s, one wake".
+
+Gate: test-channel-filter (66, fast).
+
+### src/channel-policy.js (PURE)
+
+The outbox policy (design §9, P3). Imports only `channel-record` (PURE → PURE)
+for `inertFrames`; the Outbox card bundles it. Invariants, one sentence each:
+
+- `TRANSITIONS` is the ONE table: every allowed move names its actor
+  (`agent`/`user`/`policy`/`adapter`/`ttl`/`recheck`/`reconcile`) and
+  `canTransition` refuses every other move with the reason; terminal states
+  leave nowhere.
+- `unknown` leaves ONLY through `reconcile` — a send whose outcome was lost
+  is never retried by the machine (§9.4).
+- `decideOutbound`: the channel policy is the base, the guards (links /
+  attachments / off-hours / authority) stack on top and can only TIGHTEN it;
+  an unknown policy value or an unparseable guard config is `review` (fail
+  closed); off-hours with no time zone is OFF, never guessed.
+- `receiptFor` owes the agent nothing while the proposal is `unknown`; a sent
+  receipt carries `sentAs` / `identityMarking` / `identityMarkingText` (null
+  text only when the marking is `none`).
+- `renderReceiptBlock` is a §7.5-shaped, frame-inert block.
+
+- P4 (§9.4/§9.5): `sending → unknown` may also be caused by `boot` (a process
+  that died between the audit ATTEMPT and OUTCOME lines); `honestyLine` is
+  null unless the switch is ON *and* the drafter is an agent (`HONESTY_LINE_DEFAULT`
+  = false), `withHonestyLine` appends it after a blank line; `canReconcile`
+  refuses `idempotency:'none'` (a person's look) and a read-only adapter;
+  `reconcileVerdict` maps landed ⇒ sent / not-landed ⇒ failed / anything else
+  ⇒ stay; the receipt carries `reconciled` + `honestyLine`.
+- **`renderReceiptBlock` neuters EVERY vendor-controlled field (2026-09-16,
+  the P4 verifier): label / title / vendor id / sentAs pass through the same
+  `safeInline` rule as channel-filter (inertFrames FIRST, then single-line,
+  then clip 60 / 120 / 200 / 40) — the receipt path is as frame-inert as the
+  wake path (fence 5); a title carrying `\n<system-reminder>` used to land a
+  live frame on its own line in the drafting agent's context.
+
+Gate: test-channel-outbox (107, fast) + test-channels-identity (55, fast).
+
+### src/channel-acl.js (PURE)
+
+AgentReach (design §8, P3). Imports only `msg-acl` (PURE → PURE) for the
+ladder shape and the ONE crosswalk (`fromMsgLevel`) the built-in Agents
+adapter's rows use. Invariants:
+
+- Everything defaults to `hidden`; there is no "inherit from the platform".
+- `effective` is the MAX over every applicable grant (agent row or group row)
+  — widen only, a member can never be narrowed below its group.
+- A grant's identity is (principal, scope, origin): `applyGrant` replaces only
+  that row, `removeGrant` removes only that row, so un-assign leaves a user
+  grant on the same pair byte-identical.
+- `approveRequest` writes EXACTLY ONE `visible` grant with origin `request`
+  and touches no group default.
+- `notFound()` is the uniform answer for hidden AND nonexistent (no oracle).
+
+Gate: test-channel-acl (38, fast).
+
 ### src/channel-store.js (SHARED)
 
 Persistence primitives for `data/channels/` (design §5): `adapters.json`,
@@ -1372,6 +1481,29 @@ either. A log that cannot be read is still an EMPTY read, as in r2. Control: a
 patched copy with the walk pinned to one window strands 375 of 3,000 and
 forgets `m00000` in its set.
 
+### src/oauth-loopback.js (SHARED)
+
+THE ONE consent-flow machine, DUAL-MODE (design §12.4, P1; node `http` +
+`crypto` + the PURE registry only). `createOAuthLoopback({now, log})` →
+`begin({id, mode, callbackUrl?, buildConsentUrl, exchange, onDone, timeoutMs})`
+/ `status(flowId)` / `forwardCallback(flowId, url)` / `take(flowId)` /
+`cancel(flowId)` / `stopAll()`. It knows no vendor: the caller hands in the
+consent-URL builder and the token exchange; this module owns the listener,
+the `state`, paste-back and the port's lifetime. Invariants, one sentence
+each: `ephemeral` binds `listen(0, '127.0.0.1')` and the redirect_uri is the
+bare origin (gmail-sync's flow, verbatim); `fixed` takes the port AND the
+URL from the `lark` row's `setup.callbackUrl` (`LARK_CALLBACK_URL` is
+IMPORTED — the registry suite asserts the literal never appears here) and
+refuses a request on any other path; the fixed port is bound ONLY for one
+flow and released on completion, cancel and timeout alike; `EADDRINUSE` is a
+NAMED `port-busy` refusal naming the port and the flow keeps RUNNING on the
+paste-back path with the registered redirect_uri (a remote browser takes that
+path anyway); both `state` checks are gmail-sync's lines byte for byte
+(the handler's `400 state mismatch`, paste-back's `state mismatch — restart
+the flow`); one exchange per flow (a replayed callback or a second paste is
+ignored); one running flow per `id` (a second `begin` supersedes). Gate:
+scripts/test-oauth-loopback.mjs (39; every port under test is a FREE one).
+
 ### src/channels/index.js + src/channels/fake.js (ORCH)
 
 The adapter REGISTRY and its CONTRACT. An adapter owns exactly three things —
@@ -1467,6 +1599,140 @@ a census: no adapter module under src/channels/ reads `scanSources[` /
 `scanSources &&` (a declaration writes `scanSources: {`) or `process.platform`
 outside `scanHost()`, whose job is to REPORT the platform.
 
+### src/channels/lark.js + src/channels/gmail.js (ORCH)
+
+THE TWO REAL READ ADAPTERS (design §6.3, §12.1, §12.2, §13, §14.2; P1a). Each
+is a `{kind, caps, create}` module behind the §4 contract plus the facts the
+engine reads by name and never by kind: `label`, `integration` (the registry
+row it consumes), `integrationTest` (the row's Test runner), `OPTIONS` (the
+per-record options the panel edits) and `EGRESS` (every host the file may
+construct a request to — the census's declaration). Invariants, one sentence
+each: the application credential is asked of `deps.resolveIntegration(id)` and
+NEVER of `process.env`, and `auth.state()` takes that answer as an INPUT, so a
+withdrawn cluster default or cleared user key is `needs-credentials` however
+fresh the token record looks; a refresh the vendor refuses (`invalid_grant`, a
+dead grant) is STAMPED on the token record (`invalidGrantAt`) and answered
+`needs-reauth` from then on instead of being retried every pass; the token is
+the ENGINE's (`deps.tokens.read/write/clear`, encrypted at rest by the engine's
+own secret-box), never written by the adapter anywhere else; Lark pages
+`im/v1/messages` NEWEST-FIRST to the stored anchor across several `history()`
+calls of ONE pass (a continuation is recognised by the anchor the previous
+call returned; `FIRST_INGEST_MAX` bounds a fresh chat; both `page_token` and
+`next_page_token` are read; an anchor the vendor no longer serves is read past
+and SAID); Gmail treats a THREAD as the conversation under the include query,
+runs ONE memoised `history.list` per pass (404 = reseed from the profile and
+walk every tracked thread once; a dead thread is skipped and said) and keeps
+the mailbox cursor in memory on purpose (mailbox-wide, only safe to advance
+once every named thread was walked); every vendor body becomes plain text
+through `makeRecord` (channel-record's neutering applies); every failure is a
+typed `ChannelError` from the closed set; Lark's `brand` option is read at
+construction (`rebuild:true`), Gmail's `query` is read LIVE off the record;
+the push lane is P1's second half. P4 SENDING: both declare `sendAs:
+['user']` and `convCaps` NARROWS to `[]` with `why:'send-scope-not-granted'`
+until the HELD token carries the send scope(s) — Lark's dotted pair
+`im:message` + `im:message.send_as_user`, Gmail's `gmail.send` — which the
+consent now requests (one re-consent for an older token; the UI says what
+unlocks it, never a greyed control). Lark: `idempotency:'key'` — ONE request
+with `uuid` = the idempotency key (`uuidFor`: hashed past 50 chars), a reply
+hits the reply endpoint, a transport failure AFTER the request left is
+`detail.lost` (never a refusal), the response's `sender.sender_type` rides back
+as `observed` (the §21-item-3 proof) while `identityMarking` stays `unknown`
+in code until one real send is read; `reconcile()` scans the chat newest-first
+back to the send instant for our own text, re-issues the SAME uuid inside the
+vendor's dedup hour (exactly-once by construction), and answers `landed:false`
+only on a COMPLETE scan past the hour — else `unknown` with the reason. Gmail:
+`idempotency:'two-phase'` — ONE anchor read decides To (Reply-To/From, ours ⇒
+its To) / `Re:` subject / In-Reply-To + References off the anchor's Message-ID
+(never invented), `drafts.create` in the thread is the durable handle handed to
+`onHandle` and awaited BEFORE `drafts.send`; a phase-1 transport failure is a
+refusal (a stray draft is said), a phase-2 one is `detail.lost` with the handle;
+`reconcile()` = the draft still exists ⇒ never sent (discarded, `landed:false`)
+/ gone + our SENT message in the thread ⇒ `landed:true` / else `unknown`, with a
+handle-less `drafts.list` fallback.
+Fixtures: scripts/fixtures/{lark,gmail}/recorded.json (recorded vendor
+shapes; no real credential on this box, so the real-session exit stands in
+as the recorded fixture and says so). Gates: scripts/test-channels-lark-shape.mjs
+(84) + scripts/test-channels-gmail-shape.mjs (90, the cluster-only two-preset
+instance end to end through the REAL store + REAL engine + the REAL ephemeral
+loopback) + scripts/test-channels-egress.mjs (19: the §3.1 census — every host
+literal in a request-constructing server-side file is a claim, an adapter's
+judged by its own `EGRESS` both ways, every other `(file, host)` by an allowlist
+WITH a reason seeded with gmail-sync + mounts, dead entries red, IPv4/loopback
+and RFC 2606 hosts exempt, a host held in a VARIABLE stated as the boundary) +
+test-channel-adapter-contract.
+
+**P1b (2026-09-16): both adapters declare `receive:'push'` and build their
+`live` half in `create()` from the closures they already own** — Lark over
+`createLarkLive` (the SDK long connection; member names awaited at most
+`NAMES_WAIT_MS` on the push path because the record must be durable inside
+the vendor's 3 s ack), Gmail over `createGmailLive` (`pushOptIn: true`, the
+watch + pull loop over its own `api()`/token; `OPTIONS` gained `pushTopic` +
+`pushSubscription` with `relive:true` = a change restarts the LANE, never the
+adapter; `scopesFor()` adds the pubsub scope to the NEXT consent only while
+the switch is on; `callJson` learned a `json` body for `users.watch`). The
+lane normalizes through the SAME `toRecord()` the poll uses (one normalizer,
+two arrivals — invariant 2). `live/lark.js` declares an EMPTY `EGRESS` (the
+SDK owns the connection); `live/gmail.js` declares `pubsub.googleapis.com` +
+the scope host, and the census judges live lanes as adapters.
+
+### src/channels/live/lane.js + live/lark.js + live/gmail.js (ORCH)
+
+THE PUSH LANES (design §6.4, fence 11, decisions 18 + 20; P1b, 2026-09-16).
+`lane.js` is the CORE (imports nothing, knows no vendor): `startLane({connect,
+onEvent, onState, now})` owns exactly four things — liveness is POSITIVE
+evidence (`live` only on a landed handshake or a `heard()`); THE ACK IS THE
+RETURN (a transport acks after the engine's `onEvent()` resolved, and the
+engine resolves it after the record is durable); `stop()` IS TERMINAL FOR AN
+ARM IN FLIGHT (every continuation is keyed on the arm's epoch — a connect
+landing after stop is closed on the spot, `event()` on a stopped lane answers
+`{ok:false, why:'stopped'}` WITHOUT calling the engine so the vendor gets no
+ack and redelivers, nothing is emitted after `stopped`); the lane is
+SINGLE-USE (a re-declaration or an option change arms a fresh one). Reconnects
+back off 1 s → 60 s; a `connect()` throwing `err.permanent` parks the lane as
+`unavailable` with that reason (the row says why). `live/lark.js` = the
+official SDK (`@larksuiteoapi/node-sdk` REQUIRED LAZILY — missing = a named
+`sdk-not-installed` park, never a boot crash; the suite injects a stub) over
+the APP credential from `resolveIntegration('lark')`; the registered
+`im.message.receive_v1` handler maps the v2 payload to the REST item shape
+(`eventToItem`) and RETURNS only after `onEvent()` — a stopped lane's handler
+THROWS so the SDK answers the vendor with an error. Honest boundary: the event
+is the APP's view (chats the bot is in), the poll is the USER's — in a chat
+the bot is not in, push misses everything and the §6.4 measurement demotes
+that deployment by itself; the SDK's server-set ping may exceed
+`PUSH_HEARTBEAT_MS`, so a quiet chat reads `push-dead` between messages and
+polls fast (the safe direction). `live/gmail.js` = `users.watch` (armed
+first, renewed every 24 h — the watch dies silently after 7 days) + a Pub/Sub
+PULL subscription of THIS instance (`options.pushTopic`/`pushSubscription`,
+the user's token must carry the `pubsub` scope — each missing piece is a
+NAMED refusal); a pulled note is a CURSOR KICK carrying the historyId, never
+mail, acknowledged after the engine answered; every pull that answers is
+`heard`. **A PERMANENT failure discovered INSIDE a connection PARKS (2026-09-16,
+the P4 verifier): `handlers.fail(err)` says `unavailable` {why, code} with NO
+reconnect and closes the connection (and `closed` closes the one it ends too —
+a transport that reports its own end still owns timers; the renewal interval
+leaked before); gmail uses it for a 401/403/404 pull (`pubsub-forbidden` /
+`subscription-not-found`), for a REFUSED watch renewal at once and for
+`WATCH_RENEW_MAX_FAILS` (3) transient renewal misses in a row
+(`watch-renew-failed`) — reported through `closed`, a misconfigured
+subscription re-ran users.watch + the pull every ≤60 s forever with the row
+reading "reconnecting"; a 5xx pull still backs off and retries.** Gate:
+scripts/test-channels-push.mjs (70; fast).
+
+### src/channels/agents.js (ORCH)
+
+The built-in Agents adapter (design §12.3, P3), a facade over Channels v1
+behind the §4 contract so the outbox can send to an agent session with the
+same verbs: a conversation is a live session (`deps.liveSessions`), reach is
+answered by msg-acl through channel-acl's crosswalk (the engine asks, this
+module never does), `send` is `deliverToConversation` — THE ladder, spend
+reason `peer-message`, nothing beside it — and a refusal is a typed retryable
+transport failure while a throw is the registry's `vendor-error {threw}` ⇒
+`unknown`; `policyDefault:'direct'` (internal = direct, decision 9); identity
+`marked` / `recipient-ui` in one verbatim sentence; `idempotency:'none'`;
+`history()` is empty by construction (the chat window is the transcript). The
+engine seeds its record (not removable, no consent) whenever `liveSessions`
+was handed in — a bare suite engine has no row.
+
 ### src/server/channels-engine.js + channels-wiring.js + src/routes/channels.js (ORCH)
 
 The ingest engine (`create(deps)`): the per-adapter loop with its single
@@ -1476,8 +1742,8 @@ carry, and the store's serialized index owner — of which the engine is the onl
 writer. **The lane is ASKED, never read off `caps`**: the tick's cadence is
 `laneState(...).pollCadence` and the scan source is `scanState(...)`, so a
 demoted or dead push lane gets the fast cadence back immediately with nothing
-else in the tree deciding it a second time. Filtering, assignment, the wake
-decision and the outbox are later phases and are absent rather than stubbed.
+else in the tree deciding it a second time. Filtering, assignment and the wake
+decision arrived in P2; the outbox, policy and reach in P3 (below).
 The routes take `host` everywhere and refuse another machine BY NAME. The
 wiring is one `create(deps)` factory called once from server.js, whose channel
 flush rides the existing SIGINT/SIGTERM shutdown.
@@ -1561,11 +1827,219 @@ ingests something. The digest also hands `enabled` to `freshnessClaim`, so a
 row on a disabled adapter and an untracked row are published `off`.
 
 Gates: scripts/test-channels-engine.mjs (fast — the r2 + r3 defects above over
-the REAL store, each with a patched-copy PRE-FIX control) +
+the REAL store, each with a patched-copy PRE-FIX control, plus P1a's ⑤ BURST DAY:
+newest-first paging to the anchor over the real loop, 340 + 320 records whole with
+zero duplicates, the anchor advancing only after a complete walk and never on a
+budget-cut one — the boundary, a burst wider than one pass can walk, is stated) +
 scripts/test-channels-e2e.mjs (heavy — the P0 exit conditions end to end, incl.
 the scan lane's chip/log agreement on the real server).
 
+P1a (2026-09-16), the real adapters wired: `REAL_ADAPTERS` (lark, gmail) is
+the ONE list the engine reads for what is connectable and what each row
+declares; the adapter's OWN token is `auth.tokenEnc` on the record, encrypted
+by the engine's secret-box on `data/.channels-key` (a SECOND store from the
+integrations layer's, §13), decrypted only for the adapter that owns it and
+never in `adapterView`; the engine registers each row's Test runner on the
+integrations store (the consumer owns the runner, the store dispatches);
+`connect(kind)` asks the credential facts BEFORE any record exists and refuses
+with a typed `auth-expired {needsCredentials}` — the route answers `409
+needs-credentials` — when the row resolves to none, so a refused connect mints
+NO adapter row (measured on a fresh worktree boot: it used to leave a
+permanent row behind and the PUT/disconnect 404s answered 200 about it); on
+a fresh record the row is persisted only after `auth.begin()` returned, and a
+begin that throws drops the live instance;
+`finishAuth` is paste-back through the adapter's own `auth.finish`;
+`onAuthDone` re-asks auth, kicks a pass on success and SAYS a failure on the
+record (`lastAuthError`); `disconnect` clears the token and retracts any
+failure item; a never-authenticated record is `not-connected` and passes
+nothing, while a dead token fails with the vendor's typed refusal and SPEAKS
+(fence 8: ONE "For you" item after `FAILURES_BEFORE_LOUD`, naming adapter /
+code / vendor words / remedy, retracted by the SAME producer on the first
+passing pass — only its own still-open item); discovery pages the adapter's
+cursor up to `DISCOVERY_PAGES`; `setOptions` refuses undeclared keys and
+values outside `choices` by name and rebuilds the live adapter for a
+`rebuild:true` option. The digest carries `available` (connectable kinds not
+yet connected, with the credential facts for the wizard's three copy paths)
+and each adapter row's `connectable`/`integration`/`credential`/`flow`
+(never the flow's `state` secret)/`lastAuthError`/`failureItem`/`options`/
+`optionsSchema`. Routes: `POST /api/channels/adapters/:kind/connect`,
+`POST …/:id/auth/finish` `{url}`, `POST …/:id/auth/cancel`,
+`POST …/:id/disconnect`, `PUT …/:id` `{enabled?, options?}`. Gates:
+test-channels-lark-shape + test-channels-gmail-shape (the engine verbs over
+the real engine) + test-channels-engine.
+
+**P1b (2026-09-16), the push lanes wired.** `syncPushLanes()` (every tick +
+the mutations that change the answer) arms a lane when `pushWanted` — a push
+adapter with a live half, enabled, its switch on (an opt-in lane needs an
+explicit `true`), a `connected` auth — and stops it when not; every callback
+is keyed on the arm token, so a superseded lane reaches nothing. `onPushEvent`
+IS FENCE 11: the record lands in the durable log FIRST and the function
+RETURNS (= the ack) before the index moves or a client is told; the index
+update + broadcast are coalesced per batch (`PUSH_NOTIFY_DEBOUNCE_MS`, one
+broadcast never one per message); vendor event ids are remembered
+(`PUSH_EVENT_DEDUP_MAX`) so an at-least-once replay is acked and absorbed.
+Content rides only while `laneState().carryContent` and the conversation is
+TRACKED (invariant 6); otherwise the event is a cursor KICK — one kick-origin
+pass per `KICK_MIN_INTERVAL_MS` per adapter, respecting the backoff, a kick
+arriving mid-pass runs after it. THE MEASUREMENT: `ingest()` samples only
+while push carries content, only on an already-anchored conversation (a first
+walk is a backlog), only records stamped after `push.contentSince`; a TIMER
+pass finding a new record is a miss, a KICK pass finding one is push doing
+its job; in kick mode NOTHING is sampled (no ratchet). `checkDemotion` writes
+`demotedAt`/`demotedWhy`/`demoted{missed,total,rate}`, logs one line and
+broadcasts; the connection stays up (demoted, not stopped). `setPush(id,
+{enabled?, claimedExclusive?})` is the ONE way back: a re-declaration zeroes
+the counters, clears the demotion and retries the lane ONCE with a fresh arm;
+`pushView` publishes the public half (never the raw sample batches), `null`
+on an adapter without a push lane. A heartbeat only refreshes `lastEventAt`
+in memory; a state TRANSITION persists and broadcasts (`adapters.update`
+writes bytes every call). Route: `PUT /api/channels/adapters/:id {push}`
+(`400 no-push-lane` / a claim outside the closed set refused by name). Gate:
+test-channels-push (65).
+
+**P2 — assign, filter, wake (design §7; fences 2 + 12).** Invariants, one
+sentence each:
+
+- THE FUNNEL: every lane calls `onFresh(rec, convId, fresh, {lane, origin})`
+  with exactly the records that became durable (`appendRecords` now returns
+  `fresh`), from `ingest()` after the index step and from `onPushEvent`'s
+  content branch (never awaited there — the ack is that function's return);
+  after that nothing knows the lane.
+- The coalescing window (`coalesceSeconds()` = `channels.pushCoalesceSeconds`,
+  default 60, fractional honoured, 0 = wake per message) opens ONLY while
+  `laneState().carryContent` holds and `notify:'wake'` — a poll or scan pass
+  is already a batch — gated on the RESOLVED lane, never `caps.receive`.
+- Hits that must wait are PENDING ON THE INDEX (`en.pending`, bounded to
+  `PENDING_CAP` with `pendingElided`), persisted BEFORE the timer exists, so a
+  restart delivers them (`scheduleBootPending` → one digest per conversation
+  after `BOOT_PENDING_DELAY_MS`); `stop()` only clears timers.
+- A hold is a delay, never a drop: a later direct wake CARRIES the entry's
+  pending hits along and only the NEW hits are re-held on a refusal.
+- `wake()` resolves the target (`liveSessions()`; a group rotates over its
+  live members with the cursor in `ix.rotations`, none ⇒ held with a named
+  reason), asks `paceVerdict` (held, never dropped), renders the block, and
+  calls `deliver.deliverToConversation(cid, text, {kind:'notification',
+  spendReason:'channel-message', fromName, cardText})` — the ladder authorizes,
+  charges the slot it authorized and releases its hold; the engine adds
+  NOTHING beside it (fence 2; test-spend-paths lists the site as an allowed
+  forward with its reason); a refusal is `deliver.stashFor(cid, …)` — the
+  ladder's own durable stash, drained at the agent's next injection.
+- The two derived ledgers (`stats.msgs`/`stats.hits`) are written through a
+  non-fatal `ledger()` — a failed write costs one stale number and is SAID,
+  never the wake that follows.
+- `setAssignment` writes ONE `reachEntries` row `{principal, scope, level:
+  'visible', origin:'assignment'}` and `null` removes ONLY rows with that
+  origin (a user's grant on the same pair is byte-identical after); both are
+  audited. `setFilter` keeps one filter per conversation in `ix.filters`
+  (`f-<adapter>/<conv>`), refuses to clear one a filtered assignment still
+  names (`filter-in-use`). `estimateFilter` reads `ESTIMATE_CAP` (5000)
+  records off the log and passes `capHit` as the estimator's honesty input.
+- The digest carries `assignment` (via `assignmentView`: `authority` clamped
+  by `authorityCapsFor`, `authorityStored`/`authorityClamped`/`authorityWhy`),
+  `filter`, `stats` (`statsView`), `authorityCaps` and `wakeLatency`
+  (`wakeLatencyFor`: push = window + ack budget, poll = `pollInterval.hot`
+  which the tick itself now uses for an adapter with an assigned row, scan =
+  `scanLatency[source]`, reconcile = `RECONCILE_SECONDS`).
+- Decision 9 as shipped: `policyRequiresReview` defaults to true (every v1
+  adapter is external) until P3's policy store writes `entry.policy.mode`.
+
+Routes (src/routes/channels.js): `PUT …/:adapterId/:convId/assignment`
+`{assignment|null, estimateAtSet?}` (404 not-found · 400 bad-assignment /
+no-such-filter · 409 authority-capped), `PUT …/filter` `{filter|null,
+estimate?}` (400 bad-filter / filter-in-use), `POST …/estimate` `{filter}`.
+Wiring: server.js hands `deliver`, `serverSetting` and `liveSessions` (cid +
+name + task-group ids per live session) to channels-wiring. Gate:
+test-channels-engine ⑥ (125) + test-channels-lane-parity (33) +
+test-spend-paths (262).
+
+**P3 — OUTBOX · POLICY · REACH (design §8, §9, §11).** Invariants, one sentence
+each: `propose` refuses with the typed `send-not-available` and creates
+NOTHING when no identity is offered (refreshing `convCaps` once when the
+cached answer is `unknown`/`stale`); a proposal's authority is the user's
+`send` or the assignment's EFFECTIVE (clamped) authority, else `draft`;
+`decideOutbound` runs with the guards read from settings
+(`channels.guardLinksReview` / `guardAttachmentsReview` / `offHoursTz` /
+`offHoursStart` / `offHoursEnd`); `direct` sends at once, `review` lands in
+`awaiting-approval`. `approve` RE-RESOLVES `convCaps` UNCONDITIONALLY before
+the send and a "not offered" answer stops with `send-not-available` + the
+adapter's reason, the proposal `failed`, the receipt carrying that reason.
+`sendNow` writes the audit ATTEMPT line before the request and the OUTCOME
+line after (a crash between them is the state `reconcile` exists for); a
+typed refusal is `failed`, a throw is `unknown` and `unknown` is never retried
+— the USER gets a For-you item instead. The per-conversation "For you" POINTER
+has a count-free text (dedupe-by-text is the idempotence), the count + latest
+body in `detail`, its id persisted as `pendingTodoId` on the conversation row,
+retracted by this producer alone when the last proposal leaves
+`awaiting-approval`, and an inbox throw (the open cap) DEGRADES to the rail
+badge + the Outbox window. The RECEIPT rides the ladder with `noWake` (spend
+reason `channel-receipt`) unless the assignment's `receiptWake` opted in, a
+refusal stashed through the ladder's own stash. Every outbox audit line carries
+`draftedBy` / `approvedBy` / `sentAs` / `identityMarking` and none of it reaches
+the message body. Policy reads own > adapter `policyDefault` > review. Reach:
+`setReach` writes/removes only the USER-origin row; `request` files ONE For-you
+item and `decideRequest` approves into EXACTLY ONE visible grant; the agent
+reads (`listFor` / `readFor` / `statusFor`) resolve reach FIRST and answer the
+uniform not-found. The TTL sweep (24 h) runs from the tick once a minute. The
+store gained `outbox.json` (single-owner door, bounded at `OUTBOX_KEEP` = 500
+terminal proposals) and `auditTail()`.
+
+P4 (§9.4/§9.5) — EXACTLY ONCE OR HONESTLY UNKNOWN: `sendNow` stamps
+`attemptAt` + the WIRE text (`wire`) on the proposal BEFORE the request (what a
+reconcile compares against), hands a two-phase adapter's handle to the store the
+moment `onHandle` fires (`sendHandle`), and reads a transport failure AFTER the
+request left (`detail.lost`) as `unknown` — never `failed`; the OUTCOME audit
+line says `lost`. `reconcile(id)` is the ONLY way out of `unknown`, asked by a
+PERSON (the card's Check outcome / the route), gated by `canReconcile` on the
+adapter's declared idempotency (`none` ⇒ typed `reconcile-not-available`,
+audited as `reconcile-refused`); the adapter is asked with the SAME key, the
+attempt instant, the wire text and the handle; landed ⇒ `sent` by actor
+`reconcile` with the receipt owed now and the unknown-outcome item retracted by
+this producer; not-landed ⇒ `failed`; else still unknown with `reconcile.n`
+counted — nothing is ever re-sent by the engine. `sweepSending()` runs from
+`start()`: a `sending` corpse becomes `unknown` by actor `boot` (`lost-at-boot`).
+THE SENDER HONESTY LINE is OFF by default (`channels.senderHonestyLine`; the
+adapter record's `senderHonestyLine` true/false/null overrides it via
+`setSenderHonesty`, audited) and appended at send time ONLY for an agent-drafted
+proposal — `proposalView.honestyLine` says so BEFORE the approval and the
+recorded fact after. A send's `observed` sender_type is recorded on the adapter
+row as `identityObserved` (the digest carries it) and LOGGED with the flip it
+licenses while the declaration is still `unknown`. Gates: test-channel-outbox
+(107), test-channel-acl (38), test-channels-identity (55),
+test-channels-agent-cli (19), test-channels-e2e (heavy).
+
+**WAKES ON ONE CONVERSATION ARE SERIALIZED (2026-09-16, the P4 verifier):**
+`wake()` and `flushPending()` queue on a per-key promise chain (`serialWake`)
+and only `wakeNow` delivers, so the boot flush (5 s) and the first tick's
+direct wake (5 s) cannot both carry the same held hits (two billed turns);
+a wake clears from `pending` ONLY the record ids it carried (`heldIds`) — the
+old `pending = []` also dropped a hit that went pending DURING the RPC through
+a window's keepPending; a direct wake that carries a window's hits clears that
+window's timer (the window's delivery is this wake). Gate: test-channels-engine
+⑥ (i)/(j), 140.
+
 ### src/lib/channels-panel.js + src/lib/channel-window.js (CLIENT)
+
+P1a (2026-09-16), the adapter's own controls, all on its section and all
+read from the digest (no fetch on repaint): the connect wizard's three copy
+paths by `credential.source` (`none` ⇒ "Set up <label> credentials…" opens the
+Integrations card FIRST — never a consent page that will fail there; `cluster`
+⇒ "Provided by the cluster · <label>" beside the button; `user` ⇒ nothing
+more; the route's own `409 needs-credentials` opens that card too); the flow
+dialog = the consent page as a LINK the user clicks (a window opened after an
+await is popup-blocked), the named `port-busy` refusal in the user's words,
+PASTE-BACK + Cancel, and it follows the adapter's broadcast so a loopback
+completion closes it by itself; the auth line is the four-valued state with
+`reauthEta(expiresAt, now)` beside a connected row that states an expiry and
+a verb chosen by the STATE (Re-authorize / Open Integrations / Connect); the
+last connect failure and a filed "For you" item are SAID on the section; the
+tracked picker is a checkbox per discovered conversation (tracked is opt-in,
+each tick a `/track` POST that is refused loudly and reverted); the options
+editor renders the adapter's DECLARED `optionsSchema` (a select for
+`choices`, `''` restores the default) and PUTs `{options}`; Disconnect is
+confirmed; Enable/Disable PUTs `{enabled}`. Invariants, one sentence each:
+nothing here branches on an adapter's kind; every string that a vendor, a
+peer or the server composed renders through textContent; the "next phase"
+empty text is retired — an instance with no adapter shows the connect rows.
 
 The rail panel (adapters as sections, a freshness chip on every row, the
 `channel-row` menu and the ⚙ row as CONTRIBUTIONS registered by the module
@@ -1631,7 +2105,7 @@ src/channel-record.js — PURE (imports nothing) THE ONE normalized message reco
 
 ### src/channel-caps.js
 
-src/channel-caps.js — PURE (imports nothing) THE ONE place that answers "does this control exist" and "which lane is carrying this row RIGHT NOW" (design §4/§6.4/§12.5). Two axes MODELLED not flattened: how messages arrive (push|poll|scan + the per-PLATFORM `scanSources`/`scanLatency`/`historyBySource`) and what may be sent as whom (`sendAs`, narrowed per conversation by `convCaps`). **`laneState` = DEMOTED > LIVE > CLAIM** and `unknown` (the default) never carries content; liveness needs POSITIVE evidence and a demoted or dead push lane answers `via:'poll'` because that is where the records come from — the fact used to live in three stores with nothing saying which won (the `opencode-events` round-4 lesson: a lane that lies about being active is worse than no lane, because it turns the fallback OFF). **`scanState` = FACTS FRESH > PLATFORM > CLIENT PRESENT > READ GRANT > `'ui'`**, with ONE deliberate exception: a REFUSED read is the NAMED `tcc-denied` with `source:null` and never a silent fall back, because swapping a 15-second lane for a 5-minute one turns the latency on the row — this class's whole honesty contract — into a lie. `convCaps`/`scan.hostFacts` are CACHES (vendor round trips, not re-derivable) and pay for it with a 6h TTL + an honest degrade. `offers` needs BOTH halves and renders `unknown` as "not offered + a reason"; `freshnessClaim` takes its clock as an argument because it answers "how long ago". **r2: THE RESOLVERS RETURN STRUCTURE AND THE CLIENT SAYS THE WORDS** — `freshnessClaim` answers `{kind, state, seconds}` and `freshnessText(claim,{t})` renders it (the engine called the old composing form with no translator, so nine human-visible strings shipped English-only to a zh/ja UI, invisible to the build's i18n scan because they left the server as DATA; and the server structurally cannot take a translator — the digest is broadcast to every client while the language is per DEVICE). `state` exists because `kind` alone collapses "not scanning" with "not scanned yet"; `identityWarning` keeps only the adapter's OWN `verbatim` sentence on the wire. **`authState(record, now)`** is the same discipline for "is this adapter authenticated": the LAST PASS's `auth-expired` outranks a stamped expiry that has not arrived (a revoked credential carries a perfectly future one), a passed expiry is `expired`, and NO credential is `unknown` — never the stub whose two ternary branches were both `'connected'`. **r3: `freshnessClaim(caps, lane, entry, now, {enabled})` answers `state:'off'` + `why` (`untracked` / `adapter-disabled` / the scan resolver's own reason) for a row nothing will ever fetch** — untracked is the DEFAULT state of every discovered row and "within 5m" there was a promise about a fetch that would never happen; `tracked` is read STRICTLY, and `freshnessText` renders `off` as "not polling" / "not scanning" by lane. ⇒ kb-file-structure.md
+src/channel-caps.js — PURE (imports nothing) THE ONE place that answers "does this control exist" and "which lane is carrying this row RIGHT NOW" (design §4/§6.4/§12.5). Two axes MODELLED not flattened: how messages arrive (push|poll|scan + the per-PLATFORM `scanSources`/`scanLatency`/`historyBySource`) and what may be sent as whom (`sendAs`, narrowed per conversation by `convCaps`). **`laneState` = DEMOTED > LIVE > CLAIM** and `unknown` (the default) never carries content; liveness needs POSITIVE evidence and a demoted or dead push lane answers `via:'poll'` because that is where the records come from — the fact used to live in three stores with nothing saying which won (the `opencode-events` round-4 lesson: a lane that lies about being active is worse than no lane, because it turns the fallback OFF). **`scanState` = FACTS FRESH > PLATFORM > CLIENT PRESENT > READ GRANT > `'ui'`**, with ONE deliberate exception: a REFUSED read is the NAMED `tcc-denied` with `source:null` and never a silent fall back, because swapping a 15-second lane for a 5-minute one turns the latency on the row — this class's whole honesty contract — into a lie. `convCaps`/`scan.hostFacts` are CACHES (vendor round trips, not re-derivable) and pay for it with a 6h TTL + an honest degrade. `offers` needs BOTH halves and renders `unknown` as "not offered + a reason"; `freshnessClaim` takes its clock as an argument because it answers "how long ago". **r2: THE RESOLVERS RETURN STRUCTURE AND THE CLIENT SAYS THE WORDS** — `freshnessClaim` answers `{kind, state, seconds}` and `freshnessText(claim,{t})` renders it (the engine called the old composing form with no translator, so nine human-visible strings shipped English-only to a zh/ja UI, invisible to the build's i18n scan because they left the server as DATA; and the server structurally cannot take a translator — the digest is broadcast to every client while the language is per DEVICE). `state` exists because `kind` alone collapses "not scanning" with "not scanned yet"; `identityWarning` keeps only the adapter's OWN `verbatim` sentence on the wire. **`authState(record, now)`** is the same discipline for "is this adapter authenticated": the LAST PASS's `auth-expired` outranks a stamped expiry that has not arrived (a revoked credential carries a perfectly future one), a passed expiry is `expired`, and NO credential is `unknown` — never the stub whose two ternary branches were both `'connected'`. **r3: `freshnessClaim(caps, lane, entry, now, {enabled})` answers `state:'off'` + `why` (`untracked` / `adapter-disabled` / the scan resolver's own reason) for a row nothing will ever fetch** — untracked is the DEFAULT state of every discovered row and "within 5m" there was a promise about a fetch that would never happen; `tracked` is read STRICTLY, and `freshnessText` renders `off` as "not polling" / "not scanning" by lane. **P1b: `pushSamplesAdd`/`pushMissRate`/`pushDemotionVerdict` = the exclusivity MEASUREMENT over a ROLLING window (24 h or the last 200 records, whichever is larger; 2 % over ≥ 20; never true for a lane already demoted), `pushLaneText` = the adapter row's sentence WITH the numbers, `caps.pushOptIn` = the poll lane until `push.enabled === true`.** ⇒ kb-file-structure.md
 
 ### src/quota-model.js
 
@@ -1787,7 +2261,7 @@ channels/index.js + channels/fake.js — ORCH: the adapter REGISTRY and its CONT
 
 ### server/channels-engine.js + server/channels-wiring.js + routes/channels.js
 
-server/channels-engine.js + server/channels-wiring.js + routes/channels.js — ORCH: the per-adapter ingest loop with its single flight, the pass that appends to the durable log BEFORE it advances an anchor, ONE broadcast per pass carrying the recomputed digest, and the store's serialized index owner (the engine is its only writer). The lane is ASKED (`laneState`/`scanState`), never read off `caps`. Routes take `host` everywhere and refuse another machine BY NAME (v1 = this machine). Filter/assign/wake/outbox are LATER PHASES and are absent rather than stubbed. **r2: a route may not MINT an index row** (`known()` resolves both halves before anything is mutated; `POST /track` and `/read` 404 on an id nobody discovered — the track route's own 404 was unreachable dead code), **`markRead` broadcasts only when something CHANGED and its default instant is the NEWEST RECORD's** (an unchanged value is not a dirty signal, and `now()` left a future-dated vendor record unread for ever, which is what an open window re-POSTed on ~490 times a second), **and the digest carries NO composed sentence** (broadcast to every client, language per device). **r3: THE INGEST IS GATED ON THE RESOLVER** — `pass()` produces `scan.hostFacts` UNCONDITIONALLY before every scan pass (trigger ③; the field had no producer at all, so `scanState` could only answer `host-facts-stale` while records were ingested anyway), `ingest()` refuses a scan lane with no source and hands the resolved one to `history()`, and `laneOrScan` follows `laneState`'s `via` rather than reading `caps.receive`; **`markRead`'s stamp is the newest record's for PAST-stamped records too** (r2's `Math.max(now(), …)` was `now()` for every real adapter, silently marking a backdated arrival read and making the no-op rule inert); **`setTracked` broadcasts on both branches** (a pass over budget returned before `notify`, so a persisted flag reached no client); and the digest hands the claim `enabled` so an untracked or disabled row is published `off`. ⇒ kb-file-structure.md
+server/channels-engine.js + server/channels-wiring.js + routes/channels.js — ORCH: the per-adapter ingest loop with its single flight, the pass that appends to the durable log BEFORE it advances an anchor, ONE broadcast per pass carrying the recomputed digest, and the store's serialized index owner (the engine is its only writer). The lane is ASKED (`laneState`/`scanState`), never read off `caps`. Routes take `host` everywhere and refuse another machine BY NAME (v1 = this machine). Filter/assign/wake/outbox are LATER PHASES and are absent rather than stubbed. **r2: a route may not MINT an index row** (`known()` resolves both halves before anything is mutated; `POST /track` and `/read` 404 on an id nobody discovered — the track route's own 404 was unreachable dead code), **`markRead` broadcasts only when something CHANGED and its default instant is the NEWEST RECORD's** (an unchanged value is not a dirty signal, and `now()` left a future-dated vendor record unread for ever, which is what an open window re-POSTed on ~490 times a second), **and the digest carries NO composed sentence** (broadcast to every client, language per device). **r3: THE INGEST IS GATED ON THE RESOLVER** — `pass()` produces `scan.hostFacts` UNCONDITIONALLY before every scan pass (trigger ③; the field had no producer at all, so `scanState` could only answer `host-facts-stale` while records were ingested anyway), `ingest()` refuses a scan lane with no source and hands the resolved one to `history()`, and `laneOrScan` follows `laneState`'s `via` rather than reading `caps.receive`; **`markRead`'s stamp is the newest record's for PAST-stamped records too** (r2's `Math.max(now(), …)` was `now()` for every real adapter, silently marking a backdated arrival read and making the no-op rule inert); **`setTracked` broadcasts on both branches** (a pass over budget returned before `notify`, so a persisted flag reached no client); and the digest hands the claim `enabled` so an untracked or disabled row is published `off`. **P1a (2026-09-16): the REAL adapters register the same way as the fakes and nothing downstream learns their names — `REAL_ADAPTERS` is the ONE list the engine reads for `connectable`/`integration`/`OPTIONS`/`label`; each row's Test runner is registered on the integrations store BY THE ENGINE (the consumer owns it); the adapter's OWN token lives on the record as `auth.tokenEnc` through secret-box on `data/.channels-key` (a second store from the integrations layer's — a user's consent, not an admin's credential) and `adapterView` never carries it; connect/re-authorize/paste-back/cancel/disconnect/enable/options are engine verbs behind the new routes, `connect` refusing with a typed `409 needs-credentials` when the row resolves to none (the wizard opens THAT card first, §10.1); a never-authenticated record passes NOTHING and is `not-connected`, while a DEAD token fails the pass with the vendor's typed refusal and SPEAKS; discovery PAGES the adapter's cursor (`DISCOVERY_PAGES`); a failing adapter files ONE "For you" item after `FAILURES_BEFORE_LOUD` passes naming the adapter, the code, the vendor's words and the remedy, and the SAME producer retracts it on the first passing pass or on disconnect (fence 8, only its own still-open item); `setOptions` refuses an undeclared key or a value outside `choices` by name and REBUILDS the live adapter when the option is one it read at construction (`rebuild:true`).** **P1b: the push lanes — `syncPushLanes` arms/stops off the resolver's answer (every tick + every mutation that changes it), `onPushEvent` IS fence 11 (durable log → return = the ack → coalesced index + ONE broadcast per batch; event ids remembered for the vendor's replays; content only while `carryContent` AND tracked, else a cursor KICK coalesced per `KICK_MIN_INTERVAL_MS`), the measurement is sampled ONLY in content mode (timer pass = a miss, kick pass = push's own; a first walk and pre-`contentSince` records never judged; kick mode adds nothing), `checkDemotion` says why with the numbers and keeps the connection up, `setPush` is the ONE way back (re-declare ⇒ zero + one fresh arm), `pushView` publishes the public half (`null` = no lane).** **P2 (design §7, fences 2 + 12): THE FUNNEL — every lane hands `onFresh` exactly the records that became durable (`appendRecords` returns them), after which nothing knows the lane: the same matcher, the same pacing cap, the same ladder. The ONE lane-dependent step is the coalescing window, opened only while `laneState().carryContent` (a poll/scan pass is already a batch), `channels.pushCoalesceSeconds` default 60; hits that must wait (a digest window, the window, a group with no live member, the pacing cap) are PENDING on the index — persisted, bounded, delivered as one after a restart — and a later direct wake carries them along (a hold is a delay, never a drop). `wake()` goes through the delivery ladder with `spendReason:'channel-message'` and adds NOTHING beside it (the authorizer inside charges the slot it authorized); a refusal is stashed through the ladder's own stash. Assignment IMPLIES REACH as one `origin:'assignment'` grant and unassign removes only that row. Verbs: `setAssignment` / `setFilter` / `estimateFilter` (server-side over the stored log), the digest carries `assignment` (authority CLAMPED with the reason), `filter`, `stats` (hits7d / msgs7d / wakes / lastWake / pending / lastRefusal), `authorityCaps`, `wakeLatency` (the honest per-lane claim: push = window + ack budget, poll = the hot cadence the tick itself uses, scan = the source's latency, reconcile = 15 min).** **P4:** `sendNow` stamps attemptAt + the WIRE text BEFORE the request, persists a two-phase handle the moment it exists, reads `detail.lost` as `unknown`; `reconcile()` (a PERSON, never a timer) is the only way out of unknown; `sweepSending()` at boot ⇒ unknown by actor `boot`; the sender honesty line OFF by default (`channels.senderHonestyLine`, per-adapter `setSenderHonesty`); `identityObserved` on the row. ⇒ kb-file-structure.md
 
 ### turn-state.js
 
@@ -1935,7 +2409,7 @@ sidebar.js — Sidebar shell (filter/sort/merge pipeline, tab switching). **`LIV
 
 ### channels-panel.js + channel-window.js
 
-channels-panel.js + channel-window.js — CLIENT: the Channels rail panel (adapters as sections, **a FRESHNESS CHIP on every row** — the one number a user needs before handing something to a lane, drawn from the lane ACTUALLY carrying it — the `channel-row` menu and the ⚙ row as CONTRIBUTIONS registered by the owning module so gear-menu.js stays byte-identical to its pinned legacy list) and the conversation WINDOW (registered window type, singleton per CONVERSATION, restored from its openSpec; plain text through textContent on every path; a composer ONLY where `offers()` allows one and a NAMED reason where it does not). The panel repaints from the broadcast digest with no fetch; the window re-reads its own tail when its id is named (§10.4). **r2 four rules: marking read is a USER action** (on open and on touch, never as a repaint side effect — the render-driven POST plus an unconditional notify was a self-feeding loop measured at ~490 req/s with ONE window open, which also destroyed the mark it set), **the ws handler is removed BY NAME on close** (`onGlobal` returned undefined so `off?.()` was a silent no-op and a CLOSED window kept fetching, kept POSTing over the user's mark and held its detached DOM; the LOAD-BEARING half is `onGlobal` now returning its own unsubscribe — measured, the named-const teardown alone is a belt), **the page boundary is a RECORD** (`before` + `beforeId`), **and the freshness/identity SENTENCES are composed here** from the server's structure, with the device's own `t`. **r3: the title bar names the conversation through `wm.setTitle`** (`winInfo.setTitle?.(…)` was a permanent no-op — the literal has no such member — so every channel window read "Channel"; jobs-panel had the identical call; test-window-types censuses the idiom), **an untracked row's chip says "not polling" / "not scanning"** (never "within 5m" about a fetch nothing will make), and a disabled adapter's section says `disabled`.
+channels-panel.js + channel-window.js — CLIENT: the Channels rail panel (adapters as sections, **a FRESHNESS CHIP on every row** — the one number a user needs before handing something to a lane, drawn from the lane ACTUALLY carrying it — the `channel-row` menu and the ⚙ row as CONTRIBUTIONS registered by the owning module so gear-menu.js stays byte-identical to its pinned legacy list) and the conversation WINDOW (registered window type, singleton per CONVERSATION, restored from its openSpec; plain text through textContent on every path; a composer ONLY where `offers()` allows one and a NAMED reason where it does not). The panel repaints from the broadcast digest with no fetch; the window re-reads its own tail when its id is named (§10.4). **r2 four rules: marking read is a USER action** (on open and on touch, never as a repaint side effect — the render-driven POST plus an unconditional notify was a self-feeding loop measured at ~490 req/s with ONE window open, which also destroyed the mark it set), **the ws handler is removed BY NAME on close** (`onGlobal` returned undefined so `off?.()` was a silent no-op and a CLOSED window kept fetching, kept POSTing over the user's mark and held its detached DOM; the LOAD-BEARING half is `onGlobal` now returning its own unsubscribe — measured, the named-const teardown alone is a belt), **the page boundary is a RECORD** (`before` + `beforeId`), **and the freshness/identity SENTENCES are composed here** from the server's structure, with the device's own `t`. **r3: the title bar names the conversation through `wm.setTitle`** (`winInfo.setTitle?.(…)` was a permanent no-op — the literal has no such member — so every channel window read "Channel"; jobs-panel had the identical call; test-window-types censuses the idiom), **an untracked row's chip says "not polling" / "not scanning"** (never "within 5m" about a fetch nothing will make), and a disabled adapter's section says `disabled`. **P1a (2026-09-16): the adapter's OWN controls on its section, every fact from the digest and no fetch on repaint — the connect wizard's THREE COPY PATHS (§10.1: `none` opens the Integrations card FIRST and never a consent page; `cluster` says "Provided by the cluster · <label>" beside the button; `user` says nothing more; a `409 needs-credentials` from the route opens that card too), the flow dialog (the consent page as a LINK the user clicks — a window opened after an await is popup-blocked — the named `port-busy` refusal, PASTE-BACK + Cancel, closed by the adapter's own broadcast), the four-valued auth line with its `re-authorize in <eta>` countdown (`reauthEta`, the clock an argument) and a Re-authorize / Open Integrations / Connect verb chosen by the STATE, the spoken last connect failure and the filed "For you" note, the TRACKED PICKER (a checkbox per discovered conversation — tracked is opt-in), the OPTIONS editor over the adapter's DECLARED schema (a select for `choices`), Disconnect (confirmed) and Enable/Disable; strings through textContent, zh+ja shipped.** **P1b: the push line (`pushLaneText`, amber when demoted/unavailable) + "Re-declare exclusive and retry" beside a demotion + the Push… dialog (the exclusivity declaration with each claim's consequence in words; the switch itself on an opt-in lane) — gated on the digest's `push`, never a kind; saving a claim IS a re-declaration so it is sent only when changed or demoted.** **P2 (+ src/lib/channel-filter-editor.js): the "Assign & filter…" row on a TRACKED conversation (panel menu + window bar) opens ONE dialog — who is woken (a live agent session or a task group, round-robin), on what (every message / a filter of the PURE module's CLOSED rule kinds, validated with the same code the route refuses with), how (a wake per batch / one digest per window), with what authority (`send` drawn ONLY when both caps allow it, else the reason; a stored send the policy now forbids says it reads as draft), the per-assignment daily wake cap; a LIVE server-side estimate (debounced, the corpus never reaches the browser) that PRINTS `sampled`/`truncated` and, once assigned, "estimated ~X/day when set; actually Y/day since"; and the HONEST per-lane latency sentence worded from the digest's `wakeLatency`. The row's sub-line = `assignmentSummary` (who / what / how / authority / hits per 7d), amber when the last wake was held or stashed.**
 
 ### agent-meta.js
 
@@ -1964,3 +2438,442 @@ desktop-app-launcher.js — ⚙ "Desktop apps…" row + the toolbar Apps button 
 ### design-account-hardening.md
 
 design-account-hardening.md — 2026-09-08 DESIGN (owner decisions pending, no code yet): the root fix for the 5-incident money batch (auto-resume's 130 billed continues / readings keyed by the spawn org / unseen login deadlines / unretracted warnings / inc-mts8a8mr-ulmm's in-flight-on-the-new-slot cascade). Thesis: we MUTATE the binding between a running CLI and a credential dir, then spend money on INFERENCES about it — 4 rival derivations, and the COST one (`resolveUsageKey`, per RECORD, feeding persisted rates.json) was never pinned at all. Target = ONE durable LEASE (promoting slot-transitions.js, carrying both id namespaces + a credential-MATERIAL fingerprint) read by ONE `identityOf`, moved only at TURN BOUNDARIES (not mint-once+respawn — that costs a full context re-send per switch); ONE usage-cache write choke point with a caps-gated weekly-phase falsifier (`quotaWindowFingerprint`, null for codex — measured 53 clusters, rolling window); ONE spend authorizer in front of all 7 unattended-turn producers; ledger↔OTel AGGREGATE reconciliation kept (the refutation was about routing ONE reading). 12 principles = 12 enforceable invariants, 3 grep-derived build censuses (derivations / cache writers / spend paths), 5 phases each with its gate, and the per-incident test + negative control. §6 = 12 numbered owner decisions.
+**P1b (2026-09-16): the push line + the Push… dialog.** Gated on the digest's
+`push` (the capability ROW's answer), never on a kind: the section draws
+`pushLaneText(a.push, a.lane, {t, now})` (amber when demoted or unavailable),
+a "Re-declare exclusive and retry" verb beside a demotion (a demotion is
+cleared by the party that made the claim, never by the counters), and Push…
+— the exclusivity DECLARATION (unknown / shared / exclusive, each with its
+consequence in words) plus, on an opt-in lane, the switch itself; the claim
+is sent only when it changed or the lane is demoted, because saving a claim
+IS a re-declaration. zh + ja shipped.
+
+**P2 — the Assign & filter editor (`src/lib/channel-filter-editor.js`).**
+One sentence per invariant: the "Assign & filter…" / "Assign to an agent…"
+row exists only on a TRACKED conversation (nothing is fetched for an untracked
+one, so nobody could be woken) — on the panel's `channel-row` menu and as the
+window bar's button; the dialog offers live agent sessions
+(`app.sidebar._webuiSessions`, cid = `backendSessionId || claudeSessionId`)
+and task groups (`app.sidebar._tasks`, round-robin) as principals, and a
+principal no longer live is still listed so the assignment can be edited;
+rule kinds and validation come from the PURE module (the closed set the route
+refuses with); the estimate is asked of the server on every edit (250 ms
+debounce; the corpus never reaches the browser) and PRINTS `sampled` /
+`truncated`, and once assigned "estimated ~X/day when set; actually Y/day
+since" beside it; `send` is drawn ONLY when `authorityCap(conv.authorityCaps)`
+is null, otherwise the reason is drawn, and a stored send the policy now
+forbids says it reads as draft; the latency line is `wakeLatencyText` over
+the digest's structured `wakeLatency` (push with/without coalescing, kick,
+poll, reconcile, scan, no-source); Save writes the filter first (when
+filtered) then the assignment with `estimateAtSet`, Unassign is its own
+button, and nothing re-renders itself — the engine's broadcast repaints the
+panel row (`assignmentSummary`, amber when the last wake was held/stashed)
+and the window bar. Gate: test-channels-e2e (heavy) owes the browser leg.
+
+### src/lib/channel-outbox.js + src/lib/channel-reach-editor.js (CLIENT)
+
+P3 (design §8, §9.2, §9.5, §10.1). `renderProposalCard` is the ONE approval
+card — the inline section a conversation window draws above its composer
+(`renderInlineProposals`) and the singleton Outbox window (`channel-outbox`
+type, `openChannelOutbox`, ⚙ "Outbox…", the panel's Outbox button carrying
+the digest's `awaitingTotal`) both render it from the same store, so they
+cannot disagree. Every card carries the identity row ("Will send as you/the
+bot") and, when `identityMarking` is not `none`, the warning composed from
+the digest's `identityWarning` structure through `chanCaps.identityWarningText`
+(`unknown` as loud as `marked`); the policy's reasons in words; the `why`
+reference; the original text under an edited one; approve / edit (approve
+edited) / reject with a reason; the receipt-delivery line; and for `unknown`
+the sentence that it is never retried. Decisions POST and let
+`channel-outbox-updated` repaint (never waiting for the echo). Every server
+string is textContent. The reach dialog lists every grant WITH its origin
+(only `user` rows removable — an assignment's row leaves with the assignment,
+a request's stays as the approval), grants to a live session or a Task Group
+from the SAME roster the Assign editor uses, approves/denies open requests,
+and sets the policy (review / direct / the adapter's default). The composer
+now PROPOSES (user-drafted, `send` authority) and its note names the policy
+that governs the reply.
+
+P4: the card shows the exact sender line that WILL be appended before the
+approval (and the one that WAS after), the "Checked N× — last answer" line,
+and a Check outcome button only where `canReconcile` (else the reason in
+words); a read-only footer says WHY in words (`sendWhyText`, so
+`send-scope-not-granted` names the re-consent). The panel row carries the
+per-channel Sender line switch (OFF / instance default) and the observed-
+identity line once a real send has been read.
+
+### data/bin/vibespace-channels
+
+data/bin/vibespace-channels — the agent side of the Communication panel (P3, STATIC tracked, in AGENT_TOOLS): list/read/reply/status/request; `reply` PROPOSES and never sends (the policy decides direct vs the user's approval), reach is resolved server-side FIRST, a hidden conversation = the uniform not-found, `send-not-available` creates NO proposal; the receipt rides the next turn (noWake) and says WHO the other side saw. Manual docs/agent/channels-manual.md (`vibespace-docs channels`). ⇒ kb-file-structure.md
+
+### src/agent-env.js (PURE)
+
+THE SPAWN-ENV SANITIZER, one rule for two processes (2026-09-14, the P0b
+round-1 verifier's HIGH). `agentEnv(base, {keep})` drops every `VIBESPACE_*`
+not in the keep set (secrets + server config), every `npm_*` (nested-npm
+hazard) and `AGENT_ENV_DROP` (PORT/HOST/NODE_ENV/NODE_OPTIONS + the ambient
+`CLAUDE_CODE_OAUTH_TOKEN` pair); `daemonEnv(base)` is the same rule with
+`DAEMON_ENV_KEEP` = `AGENT_ENV_KEEP` ∪ the two names the daemon tier itself
+reads (`VIBESPACE_NODE_MODULES`, `VIBESPACE_AGENTD_VERSION`) — DERIVED from
+the daemon tier's own `process.env.VIBESPACE_*` reads and pinned that way by
+test-agentd-session, never typed from memory. Imports nothing, reads no
+process: `src/ws-handler.js` re-exports it as the `agentEnv` every spawn site
+already requires from there (with its `process.env` default), and the daemon
+bundles it. **Why two processes**: the daemon is a SECOND HOLDER of the
+server env — `DeviceManager._spawnLocal` spawned it with `{...process.env}`
+and `agentd.spawnEnv()` laid the server's sanitized session env OVER the
+daemon's raw `process.env`, so every daemon child (a pipe-session claude, an
+`open-session` pty, `run-cmd`) inherited whatever the daemon was born with;
+measured by the verifier on a worktree server with `agentd.localPipeSessions:
+true`: a real `claude` CLI whose /proc/<pid>/environ carried the full 40-char
+cluster integration secret, handed down by a daemon spawned by a PREVIOUS
+server life (the daemon survives restarts by design, so a WITHDRAWN cluster
+default kept flowing into new sessions), plus the drive presets. §14.11.1's
+"by construction cannot reach any agent child" was true of the dtach path
+only. Now a daemon is born sanitized at all THREE birth sites (`_spawnLocal`,
+the `--stdio` bridge's spawn, the upgrade re-exec — the one moment a RUNNING
+daemon's environ can be cleaned; honest count: the re-exec that INSTALLS
+this bundle is run by the OLDER daemon's code with the raw env, so a daemon
+born under an older build is cleaned at the FOLLOWING re-exec or a restart)
+and `spawnEnv()` sanitizes its BASE on every child spawn regardless — so a
+daemon's CHILDREN are protected from the moment this bundle runs, whatever
+the daemon itself still holds; HOME/USER/LANG/PATH from the daemon's own environment
+survive, because remote daemons run under launchd/systemd with an env the
+server never sees. Gates: test-agentd-session (a real daemon born from the
+real `_spawnLocal` under the secret — daemon environ clean, a pty child AND a
+pipe-session child see 0 secret lines with a canary proving the read; a
+daemon spawned BY HAND holding the secret — the previous-life shape — whose
+children still see nothing; the PRE-FIX bundle, `...process.env` as the base,
+handing it straight down as the control that makes the leg red-capable; the
+keep-set derivation; the three wiring pins) + test-integration-registry §6(h)
+(the HOLDERS census: no `env: process.env` / `env: { ...process.env` literal
+in src/agentd/{client,agentd}.js, with both retired spellings as controls) +
+test-architecture (PURE set).
+
+### src/secret-box.js (SHARED)
+
+THE ONE at-rest encryption primitive, N key files (design §14.7, decision 24).
+`secretBox(keyFile)` is a factory: mounts keeps `data/.mounts-key`
+byte-for-byte, the integrations store gets `data/.integrations-key`, the
+channels token store (P1) gets `data/.channels-key`. A key file is a
+per-STORE blast radius — moving one is an irreversible data-loss path, and a
+corrupted or rotated key must never take a second store with it. The
+ciphertext is BYTE-IDENTICAL to mounts' former inline `_enc`/`_dec`
+(aes-256-gcm, `iv.tag.data` as three base64 segments): test-secret-box's
+PARITY leg encrypts with a patched copy of the pre-fix bytes and decrypts with
+the box, and the reverse, so nothing an older build stored needs re-encrypting.
+
+**THE DEFECT IT MUST NOT INHERIT (read off `src/mounts.js:360-367`, not
+assumed):** mounts' `_key()` wrapped `readFileSync` in a BARE catch and minted
+a fresh key on ANY read failure — right for exactly one errno, ENOENT; for
+EACCES, EMFILE, EIO, a truncated or emptied file it OVERWROTE the key and
+every stored ciphertext became undecryptable for ever, silently. Hidden only
+because the file is 0600, owned by the service and rarely read; fd
+exhaustion, a read-only mount or a crash mid-write all reach it. The box
+creates the key ONLY on ENOENT; every other errno is a TYPED `SecretBoxError`
+(`key-unreadable` / `key-malformed` — a 64-hex check, because an emptied file
+is NOT a fresh key / `bad-ciphertext`) that a caller renders as "the key file
+could not be read", the OPPOSITE sentence from "nothing configured"; it writes
+tmp + `link(2)` (EEXIST refuses to clobber, so two minters land on ONE key)
+with a rename-into-absence fallback, 0600, and never overwrites an existing
+key file. The standing negative control is the bare-catch copy itself: on an
+injected EACCES it mints, and the old ciphertext stops decrypting.
+**`describeJsonError(e)` (r2, 2026-09-14)** lives here because it is the same
+discipline one layer up: V8's `SyntaxError.message` quotes the source around
+the error position, so logging `e.message` for a mistyped secret-bearing JSON
+env printed the tail of the secret (six characters of a 40-char cluster key,
+where masking permits four); the helper answers the class + the position
+when V8 states one and never a quoted fragment, and BOTH readers of such an
+env (the integrations store's cluster block and `MountManager.drivePresets`'
+OAuth client presets) log it. Gate: scripts/test-secret-box.mjs (40; ⑦ = the
+retired `e.message` carrying the tail as the control).
+
+### src/integration-registry.js (PURE)
+
+THE table of every integration a user or a cluster may hold a credential for
+(design §14.2; docs/design-agent-browser-v2.md §7.5 contributes rows with the
+same names — the names are defined HERE). PURE, imports nothing, bundled into
+the browser (the client renders the declarations) AND required by the server
+store (the only thing that ever sees a value). A row carries no value, ever:
+`{id, label, fields[{key,label,secret,required,placeholder,help,validate}],
+clusterEnv{json,prefix} | delegate{to:'drive-presets',prefer,multi}, setup
+{callbackUrl,callbackNote,prerequisites} | null, test{kind,describe,caveat},
+consumers[], wiredIn?, docs}`. Rows: `fake` (the test adapter's own row, so
+user > cluster > none is walked end to end in P0 with a real consumer, a real
+setup block and a fixture-switch Test), `lark`, `gmail` (DELEGATING — reuses
+the existing `VIBESPACE_GDRIVE_CLIENTS` presets through `MountManager.
+drivePresets()`, `prefer:'channels'`, `multi:true`, declares NO env of its
+own; decision 5), `cloak`. `LARK_CALLBACK_URL = http://127.0.0.1:17865/lark/cb`
+is defined here and ONLY here (decision 4: a VibeSpace-owned FIXED loopback,
+never a per-instance address; `src/oauth-loopback.js` imports it in P1 and
+the suite fails a second spelling anywhere in code). `test.kind` is a CLOSED
+set that decides the BUTTON'S wording (a "Test connection" that never went
+online is a lie), and a row declaring `setup.prerequisites` MUST declare
+`test.caveat` (the mirror lie: an honest credential check read as "I am
+configured"). `consumers` must be ALIVE — a file that exists AND really calls
+`resolveIntegration('<id>')` — or the row names its `wiredIn` phase (decision
+25: a row with no live consumer is a card that does nothing). PURE rules:
+`validateValues` (undefined = untouched, `''` = cleared, else trimmed +
+validated with a NAMED complaint), `maskValue` (`••••` + last 4 ONLY when the
+value is ≥ 12 chars), `resolvePrecedence(userValues, clusterDefault)` = user >
+cluster > none (a credential set is ONE PAIR, never per-field mixing),
+`pickPreset` = the user's SAVED choice > `prefer` > the ONLY preset, with no
+fourth rung (`_driveClient()`'s `'default'` fallback answers null on a
+two-preset list and is exactly the shape this refuses to inherit) — and ONE
+named opt-in, `rebindSingle` (r2, 2026-09-14): a vanished saved key re-binds
+to the env's ONLY preset and reports `rebound: {from, to}`, because a
+non-delegating row's radio stored `'default'` as a boolean intent, never a
+choice of key; with two or more presets it still answers null, and the
+delegating dropdown never passes it. The table DECLARES a row's env prefix
+and builds no name from it (r3, 2026-09-15: `envFieldName` moved to the
+store, the one resolver — an exported builder was a second resolver the
+env-name census could not see; the callerless `envNamesOf` went with it).
+Nothing here is a setting: the Test
+timeout and the one-in-flight bound are store constants, because a secret's
+neighbours must not be knobs that broadcast. Gate:
+scripts/test-integration-registry.mjs §1–§3 + §4b(iv).
+
+### src/server/integration-store.js + integrations-wiring.js + src/routes/integrations.js (ORCH)
+
+The store (`create(deps)`): `data/integrations.json` via `writeJsonAtomic`
+holding `values` (secret fields through the box on `data/.integrations-key`)
+and `clusterKey` and NOTHING else. **`source` IS DERIVED AT READ TIME, NEVER
+STORED** — a stored source fights "a vanished cluster default answers
+`none`", and a record that only picked a preset is NOT the user's own
+credentials (the chip would say the opposite of the fact, and an export would
+carry a pointer as if it were a value). A cluster default's VALUES are read
+from the env at the moment of the question and never copied to disk (mounts'
+"a mount stores only the preset KEY"), so rotating the Secret rotates every
+consumer; inject-then-withdraw answers `none` WITH THE REASON ("the cluster
+default this row used (X) is no longer provided by this instance's
+environment") — the pre-fix control that copies the value keeps serving it as
+"user" after the rotation. It is THE ONLY READER of `VIBESPACE_INTEGRATIONS`
+(JSON `[{id,key?,label?,values}]`, the helm Secret) and
+`VIBESPACE_INTEGRATION_<ID>_<FIELD>` (single-field form; the JSON form wins,
+said once at boot; an unparseable block is logged and is "no cluster
+default", never a crash); the delegating gmail row resolves through the
+INJECTED `drivePresets` (`MountManager.drivePresets`, the existing reader —
+one env name, one resolver), a user-saved `clusterKey` overriding `prefer`,
+and a saved key the cluster stopped providing answering `none` naming it —
+never a silent swap to `prefer` (a different OAuth client means a refresh
+token issued under a different consent). `publicView(id)` is THE ONE masked
+view every route and every broadcast carries (`set:{field:bool}`, `masked`,
+`missing`, `source`, `why`, `clusterKey`, `clusterOptions` key + label only,
+`testedAt/lastOk/lastError`, `testCaveat`, `consumers`, `storeError`);
+`resolveIntegration(id)` — the consumers' call, never handed to a route — is
+the only thing that leaves with plaintext. **Two intents, two functions**
+(§14.3): `clearUserValues` (DELETE; ALWAYS allowed; lands where precedence
+lands) and `useClusterDefault` (PUT `{use:'cluster'}`; a NAMED refusal when
+there is no cluster default — the same fact that greys the radio); folding
+them makes one of the two outcomes unreachable in the product.
+`setClusterKey` stores the SELECTOR only and drops the user's values (one
+pair, chosen two ways). `test(id)` CONSTRUCTS NO VENDOR REQUEST: it dispatches
+to the runner the row's CONSUMER registered (`registerTest` — the channels
+engine registers the fake's; lark/cloak/gmail answer a named `not-wired`
+refusal and record nothing), one in flight per id, bounded at 15 s, only from
+a human's click (the suite censuses that no scheduler/timer/ingest loop calls
+`integrations.test(`). Every write broadcasts `integrations-updated` with the
+view (the 2.309.0 cache-invalidation law) and fires `onChange`, which the
+channels engine uses to re-ask every live adapter's `auth.state()` — a
+withdrawn application credential flips the ADAPTERS row to
+`needs-credentials`, not only the card. An unreadable or malformed key file
+is a TYPED `storeError` on the view and "stored values could not be
+decrypted (fields)" on the row, never "nothing configured". The wiring is one
+`create(deps)` called once from server.js (the size ratchet: +4 lines,
+2067 → 2071 of 2100), returning the store handle channels-wiring hands its
+engine. The routes: GET list / GET one / PUT (`{values}` | `{use:'cluster'}`
+| `{clusterKey}`, each to ITS function) / POST test / DELETE, behind the
+cookie auth, every failure `{error, code, detail}` with a real status; no
+route calls `resolveIntegration` or reads a resolved `values` (pinned).
+
+**THE NAMED TWIN (design §14.6):** the frp plugin's relay token stays in the
+plugin card (`src/plugins.js` `_frpCfg`: user value > cluster env, `fromEnv`
+as a fact for the UI, `hasToken` never the token). It is a plugin PROCESS
+lifecycle's configuration whose consumer is the keeper, not a feature asking
+`resolveIntegration()`; migrating it means migrating the card + the
+`fromEnv`-enables-by-default rule + the keeper's read together, a change
+nobody asked for. Two places do "user > cluster default" today, on purpose,
+and this line is where that is said.
+
+**r2 (2026-09-14, the round-1 verifier's findings, each reproduced on the
+real module first):** ① **ONLY ENOENT MEANS "FRESH"** — `load()` used to
+`try { parse(read) } catch { parsed = null }`, so an EACCES / EMFILE / EIO /
+half-mounted-volume read of an EXISTING `data/integrations.json` became an
+empty state, was CACHED, and the next unrelated write replaced the file:
+every stored credential (a Lark app secret) silently destroyed — the §14.7
+bare-catch class one file over from the key file this module was built to
+fix (measured: life 1 stores lark; chmod 000; life 2 reads lark as `none` with
+no storeError, stores `fake`, the file holds only `fake`). Now an unreadable
+file is a TYPED `store-unreadable` (500) surfaced as `storeError` on every
+view and `list()`, logged ONCE per transition (the view is polled), and
+NEVER cached — the next call re-reads, so the same instance recovers the
+moment the file is readable; every writer (`setIntegration` / `setClusterKey`
+/ `useClusterDefault` / `clearUserValues` — "nothing to clear" is a claim
+about the FILE — and `test()`, whose verdict must be recorded) REFUSES on it
+through the ONE `assertWritable()`, and the route answers 500 with the code.
+A file that reads but is not a store (not JSON / wrong shape) is ARCHIVED as
+`integrations.json.corrupt-<ts>` and logged by name before anything starts
+fresh (archive-never-destroy); a rename that fails is the unreadable case.
+**THE NAMED TWIN: `src/mounts.js` `_load()`** (`try { this._state =
+JSON.parse(read) } catch { /* fresh */ }` with `_save()` rewriting `{mounts,
+shares}` on the next change) has the identical shape and is NOT fixed here —
+it is a pre-existing store with its own suites, and its fix is a change
+nobody asked for in this round; this line is where that is said. ② **A
+NON-DELEGATING ROW'S RADIO IS A BOOLEAN INTENT**: "Use cluster default" on a
+row without a preset PICKER stored the implicit selector `'default'`, so when
+the admin later gave that same single default an explicit `key` the row
+answered `none`, the radio greyed, `useClusterDefault` refused, DELETE left
+the stale selector and there was no dropdown to pick from — a cluster default
+that exists could not be reached. `clusterDefaultFor` now asks `pickPreset`
+with `rebindSingle: true` at the env-preset site ONLY: a vanished saved key
+re-binds to the env's ONLY preset, `resolveIntegration`/`publicView` report
+the re-bind in `why` (the one time a `cluster` answer carries one, drawn on
+the card), and re-clicking the radio re-saves the live key; with two or more
+presets a vanished key still answers `none` naming it (a picker's question),
+and the delegating dropdown never passes the flag — §14.2's "never a silent
+swap" stays exactly where it was written. ③ **THE LOG ABOUT A MISTYPED ENV
+CARRIES NO BYTES OF IT**: V8's `SyntaxError.message` embeds a source snippet
+around the error position, and `e.message` was logged verbatim — a trailing
+comma printed the last 6 characters of a 40-char cluster secret (masking
+permits 4); both readers of a secret-bearing JSON env (this store and
+`MountManager.drivePresets`, the line §14.8 told P0b to copy) now log
+`secret-box.describeJsonError(e)` = the class + the position when V8 states
+one, never a quoted fragment.
+
+**r3 (2026-09-15, the round-2 verifier's two findings, each reproduced on
+the real module first):** ① **A VALUE THE USER SET OUTRANKS THE CLUSTER EVEN
+WHEN IT CANNOT BE OPENED** — a stored ciphertext the CURRENT key file cannot
+decrypt (a rotated or restored-from-elsewhere `data/.integrations-key`) was
+fed to the precedence rule as an EMPTY set, so the row fell through to the
+cluster rung with no signal anywhere: `source:'cluster'`, `why:null`,
+`hasOwnValues:false` (the Clear button hidden, so the orphaned ciphertext
+could not even be discarded from the UI), Test passing on the CLUSTER's
+credential, zero log lines — for lark the user's own tenant app silently
+replaced by the cluster's; the store's own "could not be decrypted" sentence
+existed but only inside `if (source === 'none')`, and bad-ciphertext was
+deliberately kept out of `keyError`. Now, while a row holds ANY
+undecryptable field the cluster rung is NEVER consulted: the row answers
+`none` with the reason naming the fields (`resolveIntegration` and the
+consumers alike — the fake's `auth.state()` says `needs-credentials`),
+`hasOwnValues` is a fact about the RECORD (it holds values ⇒ "Clear my
+keys" shows; DELETE lands on the cluster default because the USER decided),
+the view carries a per-row typed `storeError {code:'values-undecryptable',
+message: <the remedy>, fields}` (the store-level `store-unreadable` and
+key-file codes outrank it; `list()`'s own `storeError` stays about the
+store), and the transition is logged ONCE per row — re-armed when the row
+decrypts again, so a second rotation is said again. ② **THE ENV NAME IS
+BUILT ONLY IN THE RESOLVER** — the PURE registry exported `envFieldName(rowId,
+fieldKey)`, so `process.env[R.envFieldName('lark','appSecret')]` was a
+second resolver that spelled no name and the env-NAME census walked it green;
+the builder now lives here (exported for the suite's unit assert),
+`envNamesOf` (callerless) is gone, and §6(a′) fails an `envFieldName(` /
+`envNamesOf(` call or a `.clusterEnv.prefix|json` read in any file but
+this one and the suite — with the verifier's built-name probe and a prefix
+concatenation as its controls, and census (a) shown green on the same probe.
+
+Gates: scripts/test-integration-registry.mjs §4–§6 (194; the store through
+the REAL routes on a real port — a 40-char secret absent from every GET body,
+broadcast frame and the on-disk file; the none → user → cluster → none walk;
+**§4b the store file itself**: the unreadable store through the real route
+(500 `store-unreadable`, every writer refused, recovery on the same instance,
+the earlier credential intact) with the bare-catch PRE-FIX copy destroying it
+as the control, the corrupt-file archive over three shapes, the redaction
+matrix over five malformed shapes + the real mounts twin with V8's own
+message as the control, and the single-default re-bind with the two-preset
+and delegating refusals as controls; **the rotated key WITH a cluster
+default present** (r3) through the real route — never `cluster`, the reason,
+`hasOwnValues`, the typed `storeError`, Test refusing on the cluster
+credential, ONE log line over five reads, DELETE landing on the cluster, the
+rotated-era value orphaned again by the restored key and said once — with the
+no-cluster leg kept as the control; the Adapters-row flip over the REAL
+channels engine with a card-only patched copy as control; the env-NAME
+census over the tracked-file list through scripts/git-env.mjs's sanitized
+environment, PRINTED, with the bracket / destructuring / aliased-env forms as
+controls; **§6(a′) the BUILDER census** (r3: `envFieldName(` / `envNamesOf(`
+/ `.clusterEnv.prefix|json` outside the store, the built-name probe and a
+prefix concatenation red, census (a) green on the same probe); **the `.test(`
+census with a DERIVED receiver** (traced handles +
+store accessors + row-id literals, PRINTED — the verifier's `store().test(
+'lark')` accessor-idiom timer was invisible to the four typed spellings) with
+the accessor / handle / destructured-dep shapes red and RegExp validators +
+`hosts.test(req.params.id)` not; the live-consumer census; the callback
+single-definition pin; **§6(h) the holders census** over the daemon tier) +
+scripts/test-integrations-ui.mjs (heavy: two restarts for inject-then-remove,
+a second client, 375×667) + test-restore-smoke's route battery +
+test-secret-box ⑦ (`describeJsonError`'s own leg).
+
+### src/lib/integrations-window.js (CLIENT)
+
+⚙ → Integrations & keys (集成与密钥 — deliberately NOT the existing
+`Integration` settings category, which holds `agents.*` and stays untouched;
+design §14.5). A registered SINGLETON window type (`integrations`, openSpec
+`{openIntegrations, focus}`, replay through `app.openIntegration(spec.focus)`)
+and the ⚙ row as a CONTRIBUTION from this module (gear-menu.js untouched).
+ONE CARD PER REGISTRY ROW in the Plugins card language, and the order inside
+a card is load-bearing: source chip → the SETUP BLOCK ABOVE THE FIELDS
+(callback URL as copyable monospace text + a Copy button that copies EXACTLY
+that string, the callback note, the prerequisites checklist — above, because
+a user who has filled two inputs and seen a green tick does not scroll back
+up) → who serves the row (a radio pair, the cluster one greyed WITH the reason
+when there is none; a DROPDOWN of the cluster's presets + "my own key" on a
+delegating row) → the fields (a set secret = mask + REPLACE opening an EMPTY
+password input; Replace, never Reveal; a missing required field marked by
+name) → Test (wording by `testKind`; the verdict ALWAYS beside `testCaveat`;
+a failure's words on the card) + Clear my keys (confirm dialog) → "used by".
+Every string renders through textContent; no innerHTML on any path (pinned).
+`app.openIntegration(id)` deep-links: scroll + highlight; an id that no longer
+exists opens the window with nothing new highlighted and never throws (a
+removed row must not fail a layout restore). Another client's change repaints
+that ONE card from the `integrations-updated` frame (never a fetch of
+everything); the ws handler is removed BY NAME on close. **Save retires the
+open editor BEFORE asking for the re-render**: the per-card refresh defers
+while an editor is in the DOM (a broadcast must not tear a field out from
+under a user mid-typing), and with the editor still there neither the save's
+refresh nor the broadcast's ever repainted the row — mask and chip stale
+after every Save, measured in headless chrome before the fix. Gates:
+scripts/test-integrations-ui.mjs (heavy) + test-window-types (the
+`integrations` kind, its singleton bit and its owner) + the registry suite's
+no-innerHTML and gear-contribution pins.
+
+### src/channel-filter.js
+
+src/channel-filter.js — PURE (imports only channel-record for the frame neutering; bundled into the editor like channel-caps) THE FILTER + THE ASSIGNMENT MODEL + WHAT AN AGENT IS HANDED (design §7, P2): `RULE_KINDS` a CLOSED set of eight, `matchRecord` → `{hit, why[]}` where **`why` IS A CONTRACT** (the wake and the panel show the same string — a wake that cannot say why cannot be tuned), `estimate` HONEST about its window (`sampled` = the reader's cap, `truncated` = a corpus shorter than the window, rated over the span it saw), `validateAssignment`/`authorityCap`/`effectiveAuthority` = `authority:'send'` capped by TWO facts that only narrow (channel policy requires review; `offers()` says no) and CLAMPED AT READ TIME so a stored value never silently becomes a permission, `pickRoundRobin` (no live member ⇒ null, never "wake them all"), `paceVerdict` (the per-assignment daily cap = PACING; only wakes that happened count), `renderWakeBlock`/`renderDigestBlock` (≤6 records, ≤400 chars, byte-budgeted, every vendor line QUOTED and frame-inert so an outsider cannot forge a heading or a `<system-reminder>` in an agent's context). ⇒ kb-file-structure.md
+
+### src/channel-policy.js
+
+src/channel-policy.js — PURE (imports only channel-record; bundled into the Outbox card) THE OUTBOX POLICY (design §9, P3): the proposal state machine (every transition names its actor; `unknown` leaves only through reconcile — a lost outcome is NEVER auto-retried), `decideOutbound` (guards stack ON the channel policy and only TIGHTEN it; unknown policy / unparseable guard ⇒ review; off-hours is OFF without a zone, never guessed), the §9.3 receipt with sentAs / identityMarking / identityMarkingText. **P4:** `sending→unknown` also by `boot`; `honestyLine`/`withHonestyLine` (OFF by default, agent drafts only); `canReconcile` (`none` cannot be asked) + `reconcileVerdict` (landed ⇒ sent / not-landed ⇒ failed / else stay). ⇒ kb-file-structure.md
+
+### src/channel-acl.js
+
+src/channel-acl.js — PURE (imports only msg-acl) AGENT REACH (design §8, P3): hidden < requestable < visible, everything hidden by default, MAX over grants, widen-only, ONE row per (principal, scope, origin) so unassign removes only its own row, a request approval = exactly one visible grant, the uniform not-found (hidden ≡ nonexistent). ⇒ kb-file-structure.md
+
+### src/integration-registry.js
+
+src/integration-registry.js — PURE (imports nothing; bundled into the browser AND required by the server store) THE table of integration rows (design §14.2, P0b): `{id, label, fields[{key,label,secret,required,placeholder,help,validate}], clusterEnv{json,prefix} | delegate{to:'drive-presets',prefer,multi}, setup{callbackUrl,callbackNote,prerequisites}, test{kind,describe,caveat}, consumers, wiredIn?, docs}` for `fake` (the test adapter's own row — user > cluster > none walked end to end in P0 with a real consumer and a real setup block), `lark`, `gmail` (DELEGATING to the existing `VIBESPACE_GDRIVE_CLIENTS` presets, `prefer:'channels'`, `multi:true`, NO env of its own — decision 5) and `cloak`. A row carries no value, ever. `LARK_CALLBACK_URL` (`http://127.0.0.1:17865/lark/cb`, decision 4: a VibeSpace-owned FIXED loopback) is defined here and ONLY here. `test.kind` is a CLOSED set that decides the button's own wording; `setup.prerequisites` ⇒ `test.caveat` is mandatory; `consumers` must be ALIVE (a file that really calls `resolveIntegration('<id>')`) or the row names its `wiredIn` phase. PURE rules: `validateValues` (undefined = untouched, `''` = cleared, else trimmed + a NAMED complaint), `maskValue` (last 4 only at ≥ 12 chars), `resolvePrecedence` (user > cluster > none, one PAIR never per-field), `pickPreset` (saved choice > `prefer` > the only one; no fourth rung). The table DECLARES a row's env prefix and BUILDS no name from it (r3: `envFieldName` moved to the store — an exported builder was a second resolver the env-name census could not see). Nothing here is a setting. ⇒ kb-file-structure.md
+
+### oauth-loopback.js
+
+oauth-loopback.js — SHARED (http+crypto+the PURE registry) THE ONE consent-flow machine, DUAL-MODE (design §12.4, P1): `ephemeral` (Gmail — `listen(0)`, redirect_uri the bare loopback origin, exactly gmail-sync's flow) / `fixed` (Lark — the registry's `LARK_CALLBACK_URL` IMPORTED never spelled, the port bound ONLY for one flow, `EADDRINUSE` = a NAMED `port-busy` refusal that falls straight through to PASTE-BACK, which needs no port at all); the two gmail-sync `state` checks carried VERBATIM (handler + `forwardCallback`), one exchange per flow, released on completion/cancel/timeout; a vendor's consent URL and token exchange are the CALLER's functions. Gate: test-oauth-loopback (39)
+
+### channels/lark.js
+
+channels/lark.js — ORCH (design §6.3/§12.1/§13, P1a) THE LARK / 飞书 READ adapter behind the §4 contract: a USER token minted by the loopback's FIXED mode (the registry's callback URL, imported never spelled), `im/v1/chats` discovery (paged), `im/v1/messages` per tracked chat NEWEST-FIRST paging TO THE STORED ANCHOR across several `history()` calls of one pass (both `page_token`/`next_page_token` spellings; a fresh chat takes `FIRST_INGEST_MAX`=200 and re-anchors on the newest; an anchor the vendor no longer serves is read PAST and SAID, never an endless incomplete pass), every `msg_type` to plain text, `@_user_N` ordinals, attachments as METADATA. `auth.state()` is four-valued with the credential question FIRST — it takes `resolveIntegration('lark')` as an INPUT (never `process.env`), so a withdrawn app credential is `needs-credentials` however fresh the token, a dead/refused refresh token is `needs-reauth` (`invalidGrantAt` stamped ON the token record so a dead grant is not retried every pass). Typed failures from Lark's own codes (auth/rate/forbidden/not-found/transport). `OPTIONS` = `brand` (feishu|lark, `rebuild:true` — every host follows it). `integrationTest` = the `credential-exchange` runner (one tenant_access_token per brand; the row's caveat rides beside the verdict). `EGRESS` declares its four hosts for test-channels-egress. `caps.sendAs` = [] (P4), **`receive:'push'` since P1b — the `live` half is src/channels/live/lark.js (the official SDK's long connection, built in `create()` from the adapter's own credential resolver + normalizer).** **P4 (send):** `sendAs ['user']`, convCaps NARROWS to [] with `send-scope-not-granted` until BOTH dotted send scopes are held; `uuid` = the proposal id (hashed past 50), a lost answer is `detail.lost`; reconcile scans the chat then re-issues the SAME uuid inside the hour; `identityMarking` stays `unknown` until one real send's sender_type is read (§21 item 3). ⇒ kb-file-structure.md
+
+### channels/gmail.js
+
+channels/gmail.js — ORCH (design §6.3/§12.2/§14.2, P1a) THE GMAIL READ adapter — the DELEGATING row: the OAuth client comes from `resolveIntegration('gmail')` which resolves through the existing `VIBESPACE_GDRIVE_CLIENTS` presets (decision 5: `prefer:'channels'`; on a cluster-only two-preset env `org1`+`channels` with no `'default'` it answers `cluster/channels` and connects END TO END). EPHEMERAL loopback flow (gmail-sync's parameters verbatim, refresh_token required), a CONVERSATION IS A THREAD under the include query (`OPTIONS.query`, default `label:INBOX`, read LIVE off the record), ONE memoised `history.list?startHistoryId&historyTypes=messageAdded` per pass (nothing changed = one request; 404 = RESEED from the profile and walk every tracked thread once; a thread the vendor no longer serves is SKIPPED and said, never a frozen pass), the mailbox cursor IN MEMORY ON PURPOSE (it is mailbox-wide and only provably safe to advance once every named thread was walked — untracked ones never are), `threads.get?format=full` paged oldest-first past the anchor, the MIME tree to plain text (first text/plain, else stripped HTML, else the snippet), `identityMarking:'marked'` at `raw-headers`. `invalid_grant` on refresh is stamped ⇒ `needs-reauth`. `integrationTest` = `shape-only` (ZERO network; a Google client cannot be exchanged for anything alone). `EGRESS` declares its four hosts. **P1b: `receive:'push'` + `pushOptIn:true` — the Pub/Sub pull lane (src/channels/live/gmail.js) is OFF until `push.enabled === true`; `OPTIONS` gained `pushTopic`/`pushSubscription` (`relive:true` = restarts the LANE only); enabling adds the pubsub scope to the NEXT consent.** **P4 (send):** `sendAs ['user']` behind `gmail.send`; `idempotency two-phase` = drafts.create (the handle via `onHandle` BEFORE the send) → drafts.send, threading headers off the anchor's Message-ID; reconcile = draft still exists ⇒ never sent (discarded) / our SENT message in the thread ⇒ landed / else unknown. ⇒ kb-file-structure.md
+
+### channels/live/lane.js + live/lark.js + live/gmail.js
+
+channels/live/lane.js + live/lark.js + live/gmail.js — ORCH (design §6.4 / fence 11 / decisions 18+20, P1b) THE PUSH LANES: `lane.js` = the vendor-free CORE (liveness is POSITIVE evidence; THE ACK IS THE RETURN — a transport acks only after the engine's `onEvent()` resolved, which is after the record is durable; `stop()` is TERMINAL for an arm in flight — a connect landing after it is closed on the spot and `event()` answers `{ok:false, why:'stopped'}` WITHOUT calling the engine so the vendor redelivers; single-use; `err.permanent` ⇒ a named `unavailable` park); `live/lark.js` = the SDK long connection, required LAZILY (missing = `sdk-not-installed`, never a boot crash), the v2 event mapped to the REST item shape and the handler THROWING on a stopped lane (the app's view, not the user's — a chat the bot is not in is what the measurement demotes); `live/gmail.js` = `users.watch` (renewed daily) + a Pub/Sub PULL of THIS instance's subscription, a pulled note = a CURSOR KICK never mail, scope/options refused by name. ⇒ kb-file-structure.md
+
+### channels/agents.js
+
+channels/agents.js — ORCH (design §12.3, P3) THE BUILT-IN AGENTS ADAPTER behind the §4 contract: conversations = live agent sessions, reach = msg-acl through channel-acl's ONE crosswalk, send = THE delivery ladder (spendReason peer-message — an approved outbox message is the user's own), policyDefault direct, identityMarking marked/recipient-ui, idempotency none (a lost result is `unknown`, never retried). Seeded (not removable, no consent) whenever the wiring hands `liveSessions` in. ⇒ kb-file-structure.md
+
+### server/integration-store.js + server/integrations-wiring.js + routes/integrations.js
+
+server/integration-store.js + server/integrations-wiring.js + routes/integrations.js — ORCH (design §14.3/§14.4, P0b): `data/integrations.json` (writeJsonAtomic) holds `values` (secrets through secret-box on `data/.integrations-key`) + `clusterKey` and NOTHING else — **`source` is DERIVED at read time, never stored**, and a cluster default's VALUES are read from the env at the moment of the question and never copied to disk (rotate the Secret ⇒ every consumer follows; inject-then-withdraw ⇒ `none` WITH the reason, never the old value). THE ONLY reader of `VIBESPACE_INTEGRATIONS` (JSON) and `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (single-field; JSON wins, said once; unparseable = "no default", never a crash); the delegating gmail row resolves through the INJECTED `MountManager.drivePresets` with a saved `clusterKey` over `prefer` and a vanished saved key ⇒ `none` naming it. `resolveIntegration(id)` is the consumers' call and the only thing that leaves with plaintext (the channels engine hands it to every adapter and re-asks `auth.state()` on `onChange` — a withdrawn credential flips the ADAPTERS row to `needs-credentials`, not only the card); `publicView(id)` is THE one masked view every route + the `integrations-updated` broadcast carry. `clearUserValues` (DELETE, always) and `useClusterDefault` (PUT `{use:'cluster'}`, a NAMED refusal without a default) are TWO functions; `setClusterKey` stores the selector only; `test(id)` constructs NO vendor request — the CONSUMER registers the runner (the fake's fixture switch; lark/gmail/cloak = named `not-wired`), one in flight, 15 s, human-triggered only (censused). An unreadable key file is a TYPED `storeError`, never "nothing configured". The named twin: frp's relay token stays in its plugin card (§14.6). Routes: GET/GET one/PUT/POST test/DELETE behind the cookie auth; no route returns a secret's plaintext or calls `resolveIntegration` (pinned). Wiring = one `create(deps)` stanza in server.js (+4 lines). **r2 (2026-09-14): ONLY ENOENT MEANS "FRESH" — an unreadable existing store file is a TYPED `store-unreadable` (500) on every view/`list()`, logged once per transition, never cached, refused by every writer through `assertWritable()` (the former bare catch cached an empty state and the next unrelated write destroyed every stored credential); a not-a-store file is ARCHIVED as `integrations.json.corrupt-<ts>` first; the named twin `src/mounts.js _load()` is NOT fixed here. A non-delegating row's vanished saved `'default'` re-binds to the env's ONLY preset (`rebindSingle`, said in `why`); the mistyped-env log goes through `describeJsonError`.** **r3 (2026-09-15): a user secret the CURRENT key file cannot open NEVER falls through to the cluster — while any stored field is undecryptable the row answers `none` with the reason naming the fields (consumers included), `hasOwnValues` is a fact about the RECORD (Clear my keys shows; DELETE lands on the cluster because the user decided), the view carries a per-row `storeError {code:'values-undecryptable', message: <remedy>, fields}` (store-level codes outrank it), logged once per row per transition; and `envFieldName` lives HERE, the one resolver, censused out of every other file.** ⇒ kb-file-structure.md
+
+### channel-outbox.js + channel-reach-editor.js
+
+channel-outbox.js + channel-reach-editor.js — CLIENT (design §8 / §9.2 / §9.5, P3): ONE approval-card renderer for the inline section of a conversation window AND the singleton Outbox window (`channel-outbox` type, ⚙ row, panel button carrying the awaiting count) — identity row + the identityMarking warning (`unknown` as loud as `marked`), the policy's reasons, edit/approve/reject, the receipt-delivery line, `unknown` says it is never retried; the Reach & policy dialog = every grant WITH its origin (only user rows removable), open access requests approve/deny, the policy select. **P4:** the "A sender line will be appended" note BEFORE approval, the "Checked N× — last answer" line, Check outcome only where `canReconcile`; the panel row's Sender line switch + the observed-identity line. ⇒ kb-file-structure.md

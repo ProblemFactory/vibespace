@@ -72,6 +72,44 @@ anonymous instance ids and error names/stacks/metrics only, never content.
 Deployment-specific values (your domain, registry, storage class, issuer,
 allow-listed CIDRs) belong in a private values file, not in this repo.
 
+## Cluster-provided integration credentials (optional)
+
+Some integrations need a credential a user would otherwise have to obtain
+themselves (a Lark app's id/secret, a Google OAuth client). The cluster can
+supply a DEFAULT for those through the `integrations:` values block; each
+user's instance shows which credential is in use in ⚙ → Integrations, and
+**a user's own key always wins** over the cluster default.
+
+| Values key | Rendered as | Read by |
+|---|---|---|
+| `integrations: [{id, label, values: {…}}, …]` | Secret key `integrations` → env `VIBESPACE_INTEGRATIONS` (JSON) | `src/server/integration-store.js` — the ONLY reader |
+| `gdrive.clients` (existing) | env `VIBESPACE_GDRIVE_CLIENTS` | `src/mounts.js` — the Gmail integration row DELEGATES to these presets; it has no key of its own. Name the preset channels should default to `channels` when you provide more than one |
+
+Four rules:
+
+- **Never `value:`, always `secretKeyRef`** — the chart already does this for
+  `gdriveClients` and the cephfs secret. A `value:` prints the credential in
+  `kubectl get deploy -o yaml`.
+- **The single-field form** `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (id and field
+  upper-cased, `-` → `_`, e.g. `VIBESPACE_INTEGRATION_LARK_APPSECRET`) exists
+  for self-hosting / docker-compose, where the JSON form is quoting hell. When
+  both name the same row, **the JSON form wins** and the server says so once
+  at boot.
+- **A mistyped block never takes the pod down**: an unparseable
+  `VIBESPACE_INTEGRATIONS` is logged (`[integrations] … unparseable`) and
+  treated as "no cluster default".
+- **Which rows suit a cluster default**: register-once, everyone-may-use
+  credentials (a Lark app — same tenant only; a Google OAuth client). **Not**
+  per-seat keys (a CloakBrowser license): one cluster key there means the
+  cluster pays for every user, and users share the vendor's concurrent-session
+  cap.
+
+Values are read from the environment at the moment a consumer asks and are
+never copied into the instance's `data/`, so rotating the Secret rotates every
+consumer on every instance; a withdrawn default leaves the row answering
+"not configured" with the reason, never serving a stale value. The rows and
+their field keys are declared in `src/integration-registry.js`.
+
 ## Public URLs / NAT relay (optional)
 
 To expose a machine's port as a shareable public link — or pair two machines

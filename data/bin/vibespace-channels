@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+// vibespace-channels — the agent's side of the Communication panel (P3,
+// docs/design-communication-panel.zh.md §11; STATIC tracked, in AGENT_TOOLS).
+// Auth: VIBESPACE_SESSION_TOKEN. Reach is decided SERVER-SIDE before any
+// answer: a conversation you cannot see is indistinguishable from one that
+// does not exist. `reply` PROPOSES — the channel's policy decides whether the
+// user approves it first; it never sends by itself. The receipt (sent /
+// edited / rejected / expired / failed, and WHO the other side saw) arrives
+// in your next turn unless the user configured a wake. Full manual:
+// vibespace-docs channels.
+'use strict';
+const API = process.env.VIBESPACE_API;
+const SESS = process.env.VIBESPACE_SESSION_TOKEN;
+if (!API || !SESS) { console.error('vibespace-channels: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
+
+const args = process.argv.slice(2);
+const verb = args[0];
+
+async function call(method, p, body) {
+  const res = await fetch(API + p, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch((e) => ({ _neterr: e.message }));
+  if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
+  let j = {};
+  try { j = await res.json(); } catch { }
+  if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
+  return j;
+}
+const flag = (name) => { const i = args.indexOf(name); return i >= 0 && i + 1 < args.length ? args[i + 1] : null; };
+const when = (ms) => (ms ? new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 16) + 'Z' : '');
+
+const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (Communication panel)
+  vibespace-channels list                          ← conversations visible to you (+ send/policy chips)
+  vibespace-channels read <conv> [--limit N] [--since <ms>]
+  vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
+                                                   ← PROPOSES; prints the policy verdict + proposal id
+  vibespace-channels status [<proposalId>]         ← your proposals and their receipts
+  vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
+<conv> is the key list prints: <adapter>/<conversation id>.
+A reply is a PROPOSAL — the user may edit or reject it; the receipt lands in your next turn.
+A conversation you cannot see and one that does not exist give the same answer.`;
+
+function printProposal(p, { full = false } = {}) {
+  const rc = p.receipt;
+  console.log(`${p.id}  ${p.state.toUpperCase()}  → ${p.adapterId}/${p.convId} (${p.title || ''})  ${when(p.updatedAt || p.at)}`);
+  if (p.policy) console.log(`    policy: ${p.policy.mode}${p.policy.reasons && p.policy.reasons.length ? ' (' + p.policy.reasons.join(', ') + ')' : ''}`);
+  if (p.state === 'awaiting-approval') console.log(`    waiting for the user (expires ${when(p.ttlAt)})`);
+  if (p.reason) console.log(`    ${p.reason}`);
+  if (rc) {
+    console.log(`    receipt: ${rc.status}${rc.edited ? ' (edited by the user)' : ''}${rc.sentAs ? ', sent as ' + rc.sentAs : ''}${rc.vendorMessageId ? ', vendor id ' + rc.vendorMessageId : ''}`);
+    if (rc.status === 'sent' || rc.status === 'edited') console.log(`    the recipient sees: ${rc.identityMarking === 'none' ? 'you, with no application marker' : (rc.identityMarkingText || (rc.identityMarking === 'unknown' ? 'NOT VERIFIED for this channel' : 'marked as sent by an application'))}`);
+  }
+  if (full) console.log(`    text: ${p.text}`);
+}
+
+(async () => {
+  if (!verb || verb === 'list') {
+    if (!verb) console.log(USAGE + '\n');
+    const r = await call('GET', '/api/agent/channels/list');
+    const rows = r.conversations || [];
+    if (!rows.length) { console.log('no channel conversations are visible to you right now (ask the user to grant reach, or to assign you one).'); return; }
+    for (const c of rows) {
+      const chips = [c.level === 'requestable' ? 'requestable (not readable yet)' : 'visible', c.canSend ? `reply → ${c.policy === 'direct' ? 'sends directly' : 'user approves'}` : `no reply (${c.sendWhy || 'not offered'})`];
+      if (c.assigned) chips.push(`assigned to you (${c.authority})`);
+      if (c.unread) chips.push(`${c.unread} unread`);
+      if (c.awaiting) chips.push(`${c.awaiting} of your proposals awaiting approval`);
+      console.log(`${c.key}  — ${c.title}  [${c.adapter}]`);
+      console.log(`    ${chips.join(' · ')}`);
+    }
+    console.log('\nread: vibespace-channels read <conv>   propose a reply: vibespace-channels reply <conv> "..."');
+    return;
+  }
+  if (verb === 'read') {
+    const conv = args[1];
+    if (!conv) { console.error('usage: vibespace-channels read <conv> [--limit N] [--since <ms>]'); process.exit(1); }
+    const q = new URLSearchParams({ conv });
+    if (flag('--limit')) q.set('limit', flag('--limit'));
+    if (flag('--since')) q.set('since', flag('--since'));
+    const r = await call('GET', '/api/agent/channels/read?' + q);
+    const recs = r.records || [];
+    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.tracked ? '' : ' (not tracked: nothing is fetched for it)'} · ${recs.length} message(s)`);
+    for (const m of recs) console.log(`[${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, '\n    ')}${m.vendorId ? `  (id ${m.vendorId})` : ''}`);
+    return;
+  }
+  if (verb === 'reply') {
+    const conv = args[1];
+    const text = args[2];
+    if (!conv || !text) { console.error('usage: vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <id>]'); process.exit(1); }
+    const body = { conv, text };
+    if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
+    if (flag('--reply-to')) body.replyTo = flag('--reply-to');
+    const r = await call('POST', '/api/agent/channels/reply', body);
+    const p = r.proposal;
+    if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, sent as ${(p.result && p.result.sentAs) || p.sendAs}`);
+    else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
+    else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
+    return;
+  }
+  if (verb === 'status') {
+    const id = args[1] || null;
+    const r = await call('GET', '/api/agent/channels/status' + (id ? '?id=' + encodeURIComponent(id) : ''));
+    if (id) { printProposal(r.proposal, { full: true }); return; }
+    const list = r.proposals || [];
+    if (!list.length) { console.log('you have no proposals.'); return; }
+    for (const p of list) printProposal(p);
+    return;
+  }
+  if (verb === 'request') {
+    const conv = args[1];
+    const why = args[2];
+    if (!conv || !why) { console.error('usage: vibespace-channels request <conv> "why"'); process.exit(1); }
+    const r = await call('POST', '/api/agent/channels/request', { conv, why });
+    if (r.already && r.level) console.log(`you can already see ${conv} (${r.level}).`);
+    else if (r.already) console.log(`a request of yours is already open for ${conv} (${r.request.id}); the user decides.`);
+    else console.log(`requested — the user sees "${why}" in their For-you inbox and decides; approval grants YOU visibility on this ONE conversation (request ${r.request.id}).`);
+    return;
+  }
+  console.log(USAGE);
+})();

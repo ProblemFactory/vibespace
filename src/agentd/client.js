@@ -15,6 +15,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { Mux, PROTO_VERSION } = require('./mux.js');
+const { daemonEnv } = require('../agent-env.js');
 
 class DeviceManager {
   /**
@@ -116,9 +117,17 @@ class DeviceManager {
   _spawnLocal() {
     const cur = path.join(this._root, 'current', 'agentd.js');
     if (!fs.existsSync(cur)) this.installLocal();
+    // THE DAEMON IS BORN WITH THE SANITIZED ENV (src/agent-env.js, 2026-09-14):
+    // it outlives every server restart by design, and `agentd.spawnEnv()`
+    // merges each child over ITS environ — so a `{...process.env}` here handed
+    // every cluster secret (the integration env family, the drive presets,
+    // the login password…) to every pipe-session claude for as long as the
+    // daemon lived, restarts and withdrawn defaults included. Measured on a
+    // real CLI's /proc/<pid>/environ. `daemonEnv` keeps the two names the
+    // daemon tier itself reads on top of the agent set.
     const child = spawn(process.execPath, [path.join(this._root, 'current', 'agentd.js')], {
       detached: true, stdio: 'ignore',
-      env: { ...process.env, ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
+      env: { ...daemonEnv(process.env), ...(this._nodeModules ? { VIBESPACE_NODE_MODULES: this._nodeModules } : {}) },
     });
     child.unref();
     this._log(`[agentd] spawned local daemon pid=${child.pid}`);

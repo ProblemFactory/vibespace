@@ -139,3 +139,11 @@ src/server/.channels-engine.prefix-*.js
 # pieces of the r2 shape wired to each other.
 src/channels/.index.prefix-*.js
 src/channels/.fake.prefix-*.js
+# scripts/test-secret-box.mjs writes a PATCHED COPY of the PRE-FIX mounts
+# `_key()`/`_enc()`/`_dec()` beside the real module (`src/.mounts-legacy-enc.prefix-<pid>.js`)
+# as its parity + bare-catch negative control, and scripts/test-integration-registry.mjs
+# writes PRE-FIX copies of the store (`src/server/.integration-store.prefix-<pid>-*.js`)
+# for its controls. Unlinked on exit and swept at start by PID liveness, but a
+# SIGKILL can strand one — and a dirty tree is what the release gate REFUSES on.
+src/.mounts-legacy-enc.prefix-*.js
+src/server/.integration-store.prefix-*.js

@@ -1,0 +1,61 @@
+{
+  "_note": "Recorded Gmail API v1 response SHAPES (users.getProfile, threads.list, threads.get format=full/metadata, history.list, the OAuth token endpoint), addresses and ids replaced with neutral fixtures. Instants are RELATIVE (`atOffsetMs` from the suite's clock, rendered into `internalDate` by the suite) so no fixture pins a calendar date. Body parts are base64url as the vendor serves them.",
+  "token": { "access_token": "ya29.fixture-access-0001", "expires_in": 3599, "refresh_token": "1//fixture-refresh-0001", "scope": "https://www.googleapis.com/auth/gmail.readonly", "token_type": "Bearer" },
+  "tokenNoRefresh": { "access_token": "ya29.fixture-access-0002", "expires_in": 3599, "scope": "https://www.googleapis.com/auth/gmail.readonly", "token_type": "Bearer" },
+  "tokenRefreshed": { "access_token": "ya29.fixture-access-0003", "expires_in": 3599, "scope": "https://www.googleapis.com/auth/gmail.readonly", "token_type": "Bearer" },
+  "tokenInvalidGrant": { "error": "invalid_grant", "error_description": "Token has been expired or revoked." },
+  "profile": { "emailAddress": "member.a@example.com", "messagesTotal": 1204, "threadsTotal": 388, "historyId": "500100" },
+  "profileReseeded": { "emailAddress": "member.a@example.com", "messagesTotal": 1210, "threadsTotal": 390, "historyId": "500900" },
+  "threadsPage1": { "threads": [
+    { "id": "thr_ops_0001", "snippet": "the nightly job was slow again, can someone look", "historyId": "500080" },
+    { "id": "thr_invoice_0002", "snippet": "Invoice 4471 attached", "historyId": "500060" }
+  ], "nextPageToken": "pt-threads-2", "resultSizeEstimate": 3 },
+  "threadsPage2": { "threads": [
+    { "id": "thr_newsletter_0003", "snippet": "This week in the project", "historyId": "500020" }
+  ], "resultSizeEstimate": 3 },
+  "threadOpsMeta": { "id": "thr_ops_0001", "historyId": "500080", "messages": [
+    { "id": "msg_ops_a", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "atOffsetMs": -7200000, "payload": { "mimeType": "text/plain", "headers": [ { "name": "Subject", "value": "Nightly job slow again" }, { "name": "From", "value": "Ada <ada@example.com>" }, { "name": "Date", "value": "fixture" } ] } },
+    { "id": "msg_ops_b", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "atOffsetMs": -3600000, "payload": { "mimeType": "text/plain", "headers": [ { "name": "Subject", "value": "Re: Nightly job slow again" }, { "name": "From", "value": "Member A <member.a@example.com>" }, { "name": "Date", "value": "fixture" } ] } }
+  ] },
+  "threadOpsFull": { "id": "thr_ops_0001", "historyId": "500080", "messages": [
+    { "id": "msg_ops_a", "threadId": "thr_ops_0001", "labelIds": ["INBOX", "UNREAD"], "snippet": "the nightly job was slow again", "atOffsetMs": -7200000, "payload": { "mimeType": "multipart/alternative", "headers": [ { "name": "Subject", "value": "Nightly job slow again" }, { "name": "From", "value": "Ada <ada@example.com>" }, { "name": "To", "value": "ops@example.com" }, { "name": "Message-ID", "value": "<a1@example.com>" } ], "body": { "size": 0 }, "parts": [
+      { "partId": "0", "mimeType": "text/plain", "body": { "size": 62, "data": "dGhlIG5pZ2h0bHkgam9iIHdhcyBzbG93IGFnYWluLCBjYW4gc29tZW9uZSBsb29rIGF0IHRoZSBxdWV1ZT8" } },
+      { "partId": "1", "mimeType": "text/html", "body": { "size": 90, "data": "PHA-dGhlIG5pZ2h0bHkgam9iIHdhcyA8Yj5zbG93PC9iPiBhZ2FpbjwvcD4" } }
+    ] } },
+    { "id": "msg_ops_b", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "snippet": "looking now", "atOffsetMs": -3600000, "payload": { "mimeType": "multipart/mixed", "headers": [ { "name": "Subject", "value": "Re: Nightly job slow again" }, { "name": "From", "value": "Member A <member.a@example.com>" }, { "name": "To", "value": "ada@example.com" }, { "name": "Message-ID", "value": "<b2@example.com>" }, { "name": "In-Reply-To", "value": "<a1@example.com>" } ], "body": { "size": 0 }, "parts": [
+      { "partId": "0", "mimeType": "text/plain", "body": { "size": 11, "data": "bG9va2luZyBub3c" } },
+      { "partId": "1", "mimeType": "application/pdf", "filename": "queue-graph.pdf", "body": { "size": 48213, "attachmentId": "ANGjdJ_fixture_att_0001" } }
+    ] } }
+  ] },
+  "threadOpsFullGrown": { "id": "thr_ops_0001", "historyId": "500410", "messages": [
+    { "id": "msg_ops_a", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "snippet": "the nightly job was slow again", "atOffsetMs": -7200000, "payload": { "mimeType": "text/plain", "headers": [ { "name": "Subject", "value": "Nightly job slow again" }, { "name": "From", "value": "Ada <ada@example.com>" } ], "body": { "size": 62, "data": "dGhlIG5pZ2h0bHkgam9iIHdhcyBzbG93IGFnYWluLCBjYW4gc29tZW9uZSBsb29rIGF0IHRoZSBxdWV1ZT8" } } },
+    { "id": "msg_ops_b", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "snippet": "looking now", "atOffsetMs": -3600000, "payload": { "mimeType": "text/plain", "headers": [ { "name": "Subject", "value": "Re: Nightly job slow again" }, { "name": "From", "value": "Member A <member.a@example.com>" } ], "body": { "size": 11, "data": "bG9va2luZyBub3c" } } },
+    { "id": "msg_ops_c", "threadId": "thr_ops_0001", "labelIds": ["INBOX", "UNREAD"], "snippet": "fixed", "atOffsetMs": -600000, "payload": { "mimeType": "text/html", "headers": [ { "name": "Subject", "value": "Re: Nightly job slow again" }, { "name": "From", "value": "brook@example.com" } ], "body": { "size": 40, "data": "PGRpdj5maXhlZCAmYW1wOyBkZXBsb3llZDxicj5Ccm9vazwvZGl2Pg" } } }
+  ] },
+  "threadInvoiceMeta": { "id": "thr_invoice_0002", "historyId": "500060", "messages": [
+    { "id": "msg_inv_a", "threadId": "thr_invoice_0002", "labelIds": ["INBOX"], "atOffsetMs": -86400000, "payload": { "mimeType": "multipart/mixed", "headers": [ { "name": "Subject", "value": "Invoice 4471" }, { "name": "From", "value": "billing@example.com" } ] } }
+  ] },
+  "threadNewsletterMeta": { "id": "thr_newsletter_0003", "historyId": "500020", "messages": [
+    { "id": "msg_news_a", "threadId": "thr_newsletter_0003", "labelIds": ["INBOX", "CATEGORY_UPDATES"], "atOffsetMs": -172800000, "payload": { "mimeType": "text/html", "headers": [ { "name": "Subject", "value": "This week in the project" }, { "name": "From", "value": "\"Project News\" <news@example.com>" } ] } }
+  ] },
+  "historyEmpty": { "historyId": "500100" },
+  "historyOpsGrew": { "history": [
+    { "id": "500300", "messages": [ { "id": "msg_ops_c", "threadId": "thr_ops_0001" } ], "messagesAdded": [ { "message": { "id": "msg_ops_c", "threadId": "thr_ops_0001", "labelIds": ["INBOX", "UNREAD"] } } ] },
+    { "id": "500350", "messages": [ { "id": "msg_other_x", "threadId": "thr_untracked_0009" } ], "messagesAdded": [ { "message": { "id": "msg_other_x", "threadId": "thr_untracked_0009", "labelIds": ["INBOX"] } } ] }
+  ], "historyId": "500410" },
+  "errors": {"draftGone": {"status": 404, "body": {"error": {"code": 404, "message": "Requested entity was not found.", "errors": [{"message": "Requested entity was not found.", "domain": "global", "reason": "notFound"}], "status": "NOT_FOUND"}}}, 
+    "historyGone": { "status": 404, "body": { "error": { "code": 404, "message": "Requested entity was not found.", "errors": [ { "message": "Requested entity was not found.", "domain": "global", "reason": "notFound" } ], "status": "NOT_FOUND" } } },
+    "threadGone": { "status": 404, "body": { "error": { "code": 404, "message": "Requested entity was not found.", "errors": [ { "message": "Requested entity was not found.", "domain": "global", "reason": "notFound" } ], "status": "NOT_FOUND" } } },
+    "unauthorized": { "status": 401, "body": { "error": { "code": 401, "message": "Request had invalid authentication credentials.", "status": "UNAUTHENTICATED" } } },
+    "rateLimited": { "status": 429, "body": { "error": { "code": 429, "message": "User-rate limit exceeded.", "errors": [ { "message": "User-rate limit exceeded.", "domain": "usageLimits", "reason": "userRateLimitExceeded" } ], "status": "RESOURCE_EXHAUSTED" } } },
+    "forbidden": { "status": 403, "body": { "error": { "code": 403, "message": "Insufficient Permission", "errors": [ { "message": "Insufficient Permission", "domain": "global", "reason": "insufficientPermissions" } ], "status": "PERMISSION_DENIED" } } },
+    "backend": { "status": 503, "body": { "error": { "code": 503, "message": "Backend Error", "status": "UNAVAILABLE" } } }
+  },
+  "_noteSend": "P4 (send + reconcile): drafts.create answers the draft (its message id is the DRAFT's), drafts.send answers the SENT message (a new id, labelIds SENT), drafts.get answers the draft while it exists and 404 once consumed, drafts.list is the handle-less fallback. threadOpsMetaHeaders is threadOpsMeta with the To/Message-ID/References headers a reply chains on; threadOpsMetaSent adds our SENT message.",
+  "draftCreated": {"id": "r-draft-0001", "message": {"id": "msg_draft_0001", "threadId": "thr_ops_0001", "labelIds": ["DRAFT"]}},
+  "draftGet": {"id": "r-draft-0001", "message": {"id": "msg_draft_0001", "threadId": "thr_ops_0001", "labelIds": ["DRAFT"]}},
+  "draftSent": {"id": "msg_sent_0001", "threadId": "thr_ops_0001", "labelIds": ["SENT"]},
+  "draftsList": {"drafts": [{"id": "r-draft-0001", "message": {"id": "msg_draft_0001", "threadId": "thr_ops_0001"}}], "resultSizeEstimate": 1},
+  "threadOpsMetaHeaders": {"id": "thr_ops_0001", "historyId": "500080", "messages": [{"id": "msg_ops_a", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "atOffsetMs": -7200000, "payload": {"mimeType": "text/plain", "headers": [{"name": "Subject", "value": "Nightly job slow again"}, {"name": "From", "value": "Ada <ada@example.com>"}, {"name": "Date", "value": "fixture"}, {"name": "To", "value": "member.a@example.com"}, {"name": "Message-ID", "value": "<a1@example.com>"}]}}, {"id": "msg_ops_b", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "atOffsetMs": -3600000, "payload": {"mimeType": "text/plain", "headers": [{"name": "Subject", "value": "Re: Nightly job slow again"}, {"name": "From", "value": "Member A <member.a@example.com>"}, {"name": "Date", "value": "fixture"}, {"name": "To", "value": "ada@example.com"}, {"name": "Message-ID", "value": "<b1@example.com>"}, {"name": "References", "value": "<a1@example.com>"}]}}]},
+  "threadOpsMetaSent": {"id": "thr_ops_0001", "historyId": "500080", "messages": [{"id": "msg_ops_a", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "atOffsetMs": -7200000, "payload": {"mimeType": "text/plain", "headers": [{"name": "Subject", "value": "Nightly job slow again"}, {"name": "From", "value": "Ada <ada@example.com>"}, {"name": "Date", "value": "fixture"}, {"name": "To", "value": "member.a@example.com"}, {"name": "Message-ID", "value": "<a1@example.com>"}]}}, {"id": "msg_ops_b", "threadId": "thr_ops_0001", "labelIds": ["INBOX"], "atOffsetMs": -3600000, "payload": {"mimeType": "text/plain", "headers": [{"name": "Subject", "value": "Re: Nightly job slow again"}, {"name": "From", "value": "Member A <member.a@example.com>"}, {"name": "Date", "value": "fixture"}, {"name": "To", "value": "ada@example.com"}, {"name": "Message-ID", "value": "<b1@example.com>"}, {"name": "References", "value": "<a1@example.com>"}]}}, {"id": "msg_sent_0001", "threadId": "thr_ops_0001", "labelIds": ["SENT"], "atOffsetMs": 60000, "payload": {"mimeType": "text/plain", "headers": [{"name": "Subject", "value": "Re: Nightly job slow again"}, {"name": "From", "value": "Member A <member.a@example.com>"}, {"name": "To", "value": "ada@example.com"}, {"name": "Message-ID", "value": "<s1@mail.example.com>"}]}}]}
+}

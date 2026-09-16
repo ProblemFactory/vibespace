@@ -44,15 +44,17 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 // would drop silently on every other client) is still what this pin catches.
 //   channel — ONE external conversation (docs/design-communication-panel.zh.md §10.1)
 //   desktop-app — one local desktop application on its own display (docs/design-desktop-apps §2, 2026-09-13)
-const CORE_TYPES = ['browser', 'channel', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'job-interact', 'jobs',
+//   integrations — ⚙ → Integrations & keys, one card per registry row (docs/design-communication-panel.zh.md §14.5, P0b)
+//   channel-outbox — THE approval outbox, a singleton (docs/design-communication-panel.zh.md §9.2 / §10.1, P3)
+const CORE_TYPES = ['browser', 'channel', 'channel-outbox', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'integrations', 'job-interact', 'jobs',
   'settings', 'stage-placeholder', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder'];
 // kinds whose opener focuses an existing window of the kind instead of opening a second
-const CORE_SINGLETONS = ['desktop', 'jobs', 'settings', 'usage'];
+const CORE_SINGLETONS = ['channel-outbox', 'desktop', 'integrations', 'jobs', 'settings', 'usage'];
 
 console.log('window-type registry — functional (node, DOM-free)');
 ok(typeof document === 'undefined' && typeof window === 'undefined', 'harness has no DOM (the import below must not need one)');
@@ -190,14 +192,14 @@ ok(same(regActions, CORE_ACTIONS), `core registers exactly the declared openSpec
 ok(new Set(regActions).size === regActions.length, 'each action is registered exactly once');
 ok(regs.every((r) => r.type && regTypes.includes(r.type)), 'every action registration names a registered kind (registerOpenAction type ∈ kinds)');
 ok(same(typeRegs.filter((r) => r.persistFalse).map((r) => r.type), CORE_TRANSIENT), "persist:false set == layout.js's former TRANSIENT_WINDOW_TYPES {chat, terminal, stage-placeholder}");
-ok(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS), 'singleton set == the kinds whose opener focuses an existing window {desktop, jobs, settings, usage}');
+ok(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS), 'singleton set == the kinds whose opener focuses an existing window {desktop, integrations, jobs, settings, usage}');
 
 // ownership: each kind registered in the module that opens it
 const owner = Object.fromEntries(typeRegs.map((r) => [r.type, r.file]));
 const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecycle.js', files: 'app.js', editor: 'app.js',
   viewer: 'file-viewer.js', 'hex-viewer': 'file-viewer.js', browser: 'browser-window.js', desktop: 'desktop-window.js', 'desktop-app': 'desktop-app-window.js',
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
-  settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js' };
+  settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js' };
 ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',
   Object.entries(EXPECTED_OWNER).filter(([t, f]) => owner[t] !== f).map(([t, f]) => `${t}: ${owner[t]} (expected ${f})`).join('; '));
 ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task')

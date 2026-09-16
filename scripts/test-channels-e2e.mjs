@@ -12,6 +12,21 @@
 //   ⑤ two simultaneous passes each advance their own cursor (asserted through
 //      the REAL routes against the REAL store, not a unit fixture)
 //   ⑥ A READ-ONLY CONVERSATION RENDERS NO SEND CONTROL AT ALL
+//   ⑩ P3 (design §9): the composer PROPOSES → the inline approval card (identity
+//      row + the identityMarking warning) and the OTHER client's Outbox window
+//      show the same record → ONE For-you pointer with its id on the row →
+//      Approve sends (fake adapter), client 2 repaints off the broadcast, the
+//      pointer is retracted, the audit holds propose→approve→attempt→outcome
+//      with draftedBy/approvedBy/sentAs/identityMarking; Reject with a reason;
+//      the outbox survives the restart in ③
+//   ⑪ P4 (design §9.4/§9.5): a send whose answer was LOST lands as `unknown`
+//      (never failed, never re-sent) with ONE For-you item and a Check
+//      outcome button; Check outcome from the card settles it to sent, the
+//      item is retracted, reconcile-attempt → reconcile-outcome are audited
+//      beside exactly ONE attempt line; the panel's sender-line switch reads
+//      OFF (instance default), turning a channel's on is audited, and a
+//      user's own draft carries no sender-line note; the reconciled proposal
+//      survives the restart in ③
 //
 // Everything is per-pid (scripts/scratch.mjs) — no machine-global port and no
 // fixed /tmp path — and the server gets a NAMED scratch HOME, because a server
@@ -132,7 +147,7 @@ const OPEN_PANEL = `(async () => {
 })()`;
 const panel = await p1.evaljs(OPEN_PANEL);
 ok(panel.ok, 'the Channels rail panel renders', JSON.stringify(panel));
-ok(panel.sections.length === 3 && panel.sections.includes('fake-poll'), 'the three fake adapters are sections', JSON.stringify(panel.sections));
+ok(panel.sections.length === 4 && ['fake-poll', 'fake-push', 'fake-scan', 'Agents'].every((s) => panel.sections.includes(s)), 'the three fake adapters AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
 ok(panel.rows.length >= 6, `EXIT ①: fake-adapter conversations APPEAR IN THE PANEL (${panel.rows.length} rows)`, JSON.stringify(panel.rows.slice(0, 2)));
 ok(panel.rows.every((r) => r.chip), 'EVERY row carries a FRESHNESS CHIP — the honesty contract of this whole feature', JSON.stringify(panel.rows.map((r) => r.chip)));
 // NOTHING IS TRACKED YET, so nothing is fetched — and the chips SAY so (r3).
@@ -193,7 +208,7 @@ const send = await p1.evaljs(`(async () => {
 })()`);
 ok(send.composer === 1, 'POSITIVE CONTROL: the SENDABLE conversation does draw one (the read-only zero is a decision, not an empty window)', JSON.stringify(send));
 ok(send.msgs > 0, 'a tracked conversation renders its ingested messages', JSON.stringify(send));
-ok(send.note && /outbox/i.test(send.note), 'the composer SAYS it is not connected yet rather than silently doing nothing', send.note);
+ok(send.note && /policy/i.test(send.note) && /outbox/i.test(send.note), 'the composer SAYS which policy governs the reply and that it goes through the outbox (P3) — never a control that silently does nothing', send.note);
 // …and NOW a poll-lane row says how long its evidence may be: the chip moved
 // from "not polling" to "within …" the moment tracking made the fetch real.
 const tracked1 = await p1.evaljs(OPEN_PANEL);
@@ -246,6 +261,263 @@ const synced = await p2.evaljs(`(async () => {
 })()`);
 ok(synced.ok, `EXIT ④(b): a change on ONE client repaints the OTHER from the broadcast (${synced.after}ms), with no refresh`, JSON.stringify(synced));
 
+// ── ⑩ P3: PROPOSE → INLINE CARD → APPROVE → SENT → POINTER RETRACTED (design §9) ──
+// The user drafts from the composer. fake-poll has no conversation policy
+// and no adapter default, so the policy reads `review` (decision 9) and the
+// proposal lands in awaiting-approval. The card renders INLINE in the
+// conversation window on client 1 AND in the Outbox window on client 2 from
+// ONE store; the identity row WARNS (fake-poll declares
+// identityMarking:'unknown' — as loud as `marked`, §9.5); ONE "For you"
+// pointer is filed with its id persisted on the index row; Approve on the
+// inline card sends through the fake adapter; client 2 repaints off
+// `channel-outbox-updated`; the engine retracts the pointer; the audit log
+// holds propose → approve → ATTEMPT → OUTCOME with draftedBy / approvedBy /
+// sentAs / identityMarking on every line. Then the other decision: reject
+// with a reason, and the pointer goes with it.
+const readTodos = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos || { open: [], resolved: [] };
+const readRow = () => JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations['fake-poll/fake-poll-ops'];
+// the index reaches disk on the store's 500 ms debounce (2 s interval); wait for the write, bounded
+const waitRow = async (pred) => { for (let i = 0; i < 24; i++) { const r = readRow(); if (pred(r)) return r; await sleep(250); } return readRow(); };
+const PROPOSE = (text) => `(async () => {
+  const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
+  const ta = w.content.querySelector('.chanwin-composer textarea');
+  const btn = w.content.querySelector('[data-channel-propose]');
+  if (!ta || !btn) return { fail: 'no composer' };
+  ta.value = ${JSON.stringify(text)};
+  btn.click();
+  for (let i = 0; i < 80; i++) {
+    const card = w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval');
+    if (card) return {
+      id: card.dataset.proposal, cls: card.className,
+      identity: card.querySelector('.chan-prop-identity')?.textContent || null,
+      warn: card.querySelector('.chan-prop-idwarn')?.textContent || null,
+      policy: card.querySelector('.chan-prop-policy')?.textContent || null,
+      text: card.querySelector('.chan-prop-text')?.textContent || null,
+      approve: !!card.querySelector('button[data-approve]'),
+      buttons: card.querySelectorAll('.chan-prop-actions > button').length,
+    };
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return { fail: 'no awaiting card', html: w.content.querySelector('.chanwin-outbox')?.textContent?.slice(0, 200) || null };
+})()`;
+{
+  const propose = await p1.evaljs(PROPOSE('Hello from the e2e user'));
+  ok(!propose.fail, 'EXIT P3 ①: a reply from the composer becomes a PROPOSAL and lands in awaiting-approval (fake-poll reads `review`)', JSON.stringify(propose));
+  ok(propose.text === 'Hello from the e2e user', 'the inline card carries the drafted text (textContent, never innerHTML)', JSON.stringify(propose));
+  ok(!!propose.identity && /Will send as/.test(propose.identity), 'the card carries the IDENTITY ROW ("Will send as …")', String(propose.identity));
+  ok(!!propose.warn, "fake-poll declares identityMarking:'unknown' ⇒ the card WARNS (unverified is as loud as marked — §9.5)", String(propose.identity));
+  ok(!!propose.policy && /approval/i.test(propose.policy), "the card says WHY it waits (the policy's reasons in words)", String(propose.policy));
+  ok(propose.approve && propose.buttons === 3, 'an awaiting card offers Approve / Edit… / Reject…', JSON.stringify(propose));
+  const pid = propose.id;
+
+  // the pointer: ONE For-you item per conversation, its id on the index row
+  const todos = await readTodos();
+  const ptr = (todos.open || []).filter((t) => t.sessionKey === 'channels' && /awaiting approval/.test(t.text));
+  ok(ptr.length === 1, 'EXIT P3 ②: exactly ONE open "For you" pointer is filed for the conversation (count-free text)', JSON.stringify((todos.open || []).map((t) => [t.sessionKey, t.text])));
+  const ix1 = await waitRow((r) => !!r.pendingTodoId);
+  ok(ptr.length === 1 && ix1.pendingTodoId === ptr[0].id, "the pointer's id is PERSISTED on the conversation row (`pendingTodoId`) — the retraction link", JSON.stringify({ row: ix1.pendingTodoId, item: ptr[0] && ptr[0].id }));
+
+  // the second client: panel button + row badge + the Outbox window, same proposal, same store
+  const p2ob = await p2.evaljs(`(async () => {
+    const w = window.app.openChannelOutbox();
+    for (let i = 0; i < 80; i++) {
+      const card = w.content.querySelector('.chan-outbox-list .chan-prop');
+      const btn = document.querySelector('.rail-panel-channels [data-outbox-button]');
+      const row = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-ops"] .chan-awaiting');
+      if (card && btn && row) return { id: card.dataset.proposal, cls: card.className, type: w.type, btn: btn.textContent, rowBadge: row.textContent, where: card.querySelector('.chan-prop-where')?.textContent || null };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'no outbox card / button / row badge on client 2', btn: document.querySelector('.rail-panel-channels [data-outbox-button]')?.textContent || null };
+  })()`);
+  ok(!p2ob.fail && p2ob.id === pid && p2ob.type === 'channel-outbox', "EXIT P3 ③: the OTHER client's Outbox window shows the SAME proposal (one store, two places)", JSON.stringify(p2ob));
+  ok(!p2ob.fail && /1/.test(p2ob.btn) && /1/.test(p2ob.rowBadge), "its panel button and the row badge carry the awaiting count (the pointer's degrade surface)", JSON.stringify({ btn: p2ob.btn, row: p2ob.rowBadge }));
+  ok(!!p2ob.where && /Ops room/.test(p2ob.where), 'the Outbox card names its conversation (the inline one does not need to)', String(p2ob.where));
+
+  // approve on the INLINE card (client 1) → sent; client 2 repaints off the broadcast
+  const approved = await p1.evaljs(`(async () => {
+    const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
+    const b = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid}"] button[data-approve]');
+    if (!b) return { fail: 'no approve button' };
+    b.click();
+    for (let i = 0; i < 80; i++) {
+      const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid}"]');
+      if (card && /chan-prop-sent/.test(card.className)) return { cls: card.className, approve: !!card.querySelector('button[data-approve]') };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never sent', cls: w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid}"]')?.className || null };
+  })()`);
+  ok(!approved.fail && !approved.approve, 'EXIT P3 ④: Approve on the inline card SENDS (the fake adapter) and the card repaints as sent with no decision buttons', JSON.stringify(approved));
+  const p2sent = await p2.evaljs(`(async () => {
+    for (let i = 0; i < 80; i++) {
+      const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]');
+      if (card && /chan-prop-sent/.test(card.className)) return { ok: true, after: i * 250 };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { ok: false };
+  })()`);
+  ok(p2sent.ok, `the other client's Outbox window repainted to sent off \`channel-outbox-updated\` (${p2sent.after}ms), no refresh`, JSON.stringify(p2sent));
+
+  // the pointer is RETRACTED by the engine; the row's link is cleared
+  const todos2 = await readTodos();
+  const ptrGone = !(todos2.open || []).some((t) => ptr[0] && t.id === ptr[0].id);
+  const ptrDone = (todos2.resolved || []).find((t) => ptr[0] && t.id === ptr[0].id);
+  const ix2 = await waitRow((r) => !r.pendingTodoId);
+  ok(ptrGone && !!ptrDone && ptrDone.resolvedBy === 'system' && !ix2.pendingTodoId, 'EXIT P3 ⑤: the pointer is RETRACTED (by the engine, as `system`) when the last proposal leaves awaiting-approval, and the row forgets its id', JSON.stringify({ gone: ptrGone, done: ptrDone && [ptrDone.status, ptrDone.resolvedBy], row: ix2.pendingTodoId }));
+
+  // the audit log: attempt BEFORE outcome, the identity fields on every line
+  const audit = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === pid);
+  const ops = audit.map((a) => a.op);
+  ok(ops.indexOf('propose') >= 0 && ops.indexOf('approve') > ops.indexOf('propose') && ops.indexOf('attempt') > ops.indexOf('approve') && ops.indexOf('outcome') > ops.indexOf('attempt'), 'EXIT P3 ⑥: the audit log holds propose → approve → ATTEMPT → OUTCOME in that order', ops.join(' → '));
+  const outcome = audit.find((a) => a.op === 'outcome');
+  ok(!!outcome && outcome.draftedBy && outcome.draftedBy.kind === 'user' && outcome.approvedBy === 'user' && outcome.sentAs === 'user' && outcome.identityMarking === 'unknown', 'every line carries draftedBy / approvedBy / sentAs / identityMarking', JSON.stringify(outcome));
+
+  // REJECT with a reason — the other decision — and the pointer goes with it
+  const second = await p1.evaljs(PROPOSE('Second draft, to be rejected'));
+  ok(!second.fail && second.id !== pid, 'a second proposal lands in awaiting-approval (a new id)', JSON.stringify(second));
+  const ptrB = (await readTodos()).open.filter((t) => t.sessionKey === 'channels' && /awaiting approval/.test(t.text));
+  ok(ptrB.length === 1 && ptr[0] && ptrB[0].id === ptr[0].id, 'the pointer is RE-FILED as the SAME item (dedupe by text = the idempotence we want), not a second one', JSON.stringify({ before: ptr[0] && ptr[0].id, now: ptrB.map((t) => t.id) }));
+  const rejected = await p1.evaljs(`(async () => {
+    const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
+    const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${second.id}"]');
+    const btns = [...card.querySelectorAll('.chan-prop-actions > button')];
+    btns[btns.length - 1].click();                       // Reject…
+    const box = card.querySelector('.chan-prop-rejectbox');
+    if (!box) return { fail: 'no reject box' };
+    box.querySelector('input').value = 'wrong tone for that room';
+    box.querySelector('button').click();
+    for (let i = 0; i < 80; i++) {
+      const c2 = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${second.id}"]');
+      if (c2 && /chan-prop-rejected/.test(c2.className)) return { cls: c2.className, reason: c2.querySelector('.chan-prop-reason')?.textContent || null, approve: !!c2.querySelector('button[data-approve]') };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never rejected' };
+  })()`);
+  ok(!rejected.fail && /wrong tone/.test(rejected.reason || '') && !rejected.approve, 'Reject with a reason repaints the card as rejected, carrying the reason verbatim', JSON.stringify(rejected));
+  const todos3 = await readTodos();
+  const rowC = await waitRow((r) => !r.pendingTodoId);
+  ok(!(todos3.open || []).some((t) => ptrB[0] && t.id === ptrB[0].id) && !rowC.pendingTodoId, 'the pointer is retracted again after the rejection (no awaiting proposal remains)', JSON.stringify({ open: (todos3.open || []).map((t) => t.text), row: rowC.pendingTodoId }));
+  const auditB = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && a.proposalId === second.id).map((a) => a.op);
+  ok(auditB.includes('reject') && !auditB.includes('attempt'), 'a rejected proposal has a reject line and NO attempt line (nothing was sent)', auditB.join(' → '));
+  // client 2's Outbox window is closed again so the restart leg below restores only the channel windows it measures
+  await p2.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel-outbox')) window.app.wm.closeWindow(w.id); return true; })()`);
+}
+
+// ── ⑪ P4: A LOST ANSWER IS UNKNOWN, AND A PERSON SETTLES IT (design §9.4 / §9.5) ──
+// The fake adapter is steered by markers in the text: `[[fake:lost]]` = the
+// request left and the answer never came, `[[fake:landed]]` = the platform
+// holds the message when asked. Approve ⇒ the card repaints as `unknown`
+// (never failed, never re-sent) with the "never retried" sentence, ONE
+// For-you item asks the user to look, the audit OUTCOME line says lost; the
+// card's Check outcome button (drawn only because fake-poll declares an
+// idempotency mechanism) asks the adapter with the SAME key ⇒ sent, the item
+// is retracted by the engine, reconcile-attempt → reconcile-outcome are
+// audited, and the audit holds exactly ONE attempt line. Then the sender
+// honesty switch (decision 17 as overruled): the panel row reads OFF
+// (instance default); turning the channel's switch on is audited and
+// repaints; a USER's own draft still carries no sender-line note.
+const WIN = `[...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops')`;
+const readAudit = (id) => fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.proposalId === id);
+const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox?conv=fake-poll/fake-poll-ops`)).json()).proposals || []).find((p) => p.id === id) || null;
+{
+  const LOST_TEXT = 'Lost on the wire [[fake:lost]] [[fake:landed]]';
+  const third = await p1.evaljs(PROPOSE(LOST_TEXT));
+  ok(!third.fail, 'a third proposal (whose answer the fake adapter will LOSE) lands in awaiting-approval', JSON.stringify(third));
+  const pid3 = third.id;
+  const unknown = await p1.evaljs(`(async () => {
+    const w = ${WIN};
+    const b = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"] button[data-approve]');
+    if (!b) return { fail: 'no approve button' };
+    b.click();
+    for (let i = 0; i < 80; i++) {
+      const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"]');
+      if (card && /chan-prop-unknown/.test(card.className)) return { cls: card.className, reasons: [...card.querySelectorAll('.chan-prop-reason')].map((x) => x.textContent), reconcile: !!card.querySelector('button[data-reconcile]'), approve: !!card.querySelector('button[data-approve]'), honesty: !!card.querySelector('.chan-prop-honesty') };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never unknown', cls: w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"]')?.className || null };
+  })()`);
+  ok(!unknown.fail && !unknown.approve, 'EXIT P4 ①: a send whose answer was LOST repaints the card as UNKNOWN — not failed, no decision buttons', JSON.stringify(unknown));
+  ok(!unknown.fail && unknown.reasons.some((r) => /answer was lost/.test(r)) && unknown.reasons.some((r) => /never retried automatically/i.test(r)), "the card carries the adapter's reason verbatim and the sentence that it is never retried", JSON.stringify(unknown.reasons));
+  ok(!unknown.fail && unknown.reconcile && !unknown.honesty, 'the card offers Check outcome (fake-poll declares an idempotency mechanism) and no sender-line note (the switch is off)', JSON.stringify(unknown));
+  const todosU = await readTodos();
+  const unk = (todosU.open || []).filter((t) => /UNKNOWN outcome/.test(t.text));
+  ok(unk.length === 1, 'EXIT P4 ②: exactly ONE For-you item asks the user to look at the platform', JSON.stringify((todosU.open || []).map((t) => t.text)));
+  const oc = readAudit(pid3).find((a) => a.op === 'outcome');
+  ok(!!oc && oc.lost === true && oc.state === 'unknown', 'the audit OUTCOME line says LOST (state unknown)', JSON.stringify(oc));
+  const v1 = await readView(pid3);
+  ok(!!v1 && v1.state === 'unknown' && v1.canReconcile === true && Number.isFinite(v1.attemptAt) && v1.wire && v1.wire.text === LOST_TEXT && v1.wire.honestyLine === false, 'the API view: unknown, canReconcile, the attempt instant and the WIRE text stamped (what the check compares against)', JSON.stringify(v1 && { state: v1.state, canReconcile: v1.canReconcile, attemptAt: v1.attemptAt, wire: v1.wire }));
+
+  // Check outcome from the card ⇒ sent
+  const settled = await p1.evaljs(`(async () => {
+    const w = ${WIN};
+    const b = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"] button[data-reconcile]');
+    if (!b) return { fail: 'no reconcile button' };
+    b.click();
+    for (let i = 0; i < 80; i++) {
+      const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"]');
+      if (card && /chan-prop-sent/.test(card.className)) return { cls: card.className, line: card.querySelector('.chan-prop-reconcile')?.textContent || null, reconcile: !!card.querySelector('button[data-reconcile]') };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never sent', cls: w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${pid3}"]')?.className || null };
+  })()`);
+  ok(!settled.fail && !settled.reconcile, 'EXIT P4 ③: Check outcome from the card settles it to SENT and the button is gone', JSON.stringify(settled));
+  ok(!settled.fail && /Checked 1/.test(settled.line || '') && /landed/.test(settled.line || ''), 'the card says "Checked 1× — last answer: it landed"', String(settled.line));
+  const todosV = await readTodos();
+  const unkDone = (todosV.resolved || []).find((t) => unk[0] && t.id === unk[0].id);
+  ok(!(todosV.open || []).some((t) => unk[0] && t.id === unk[0].id) && !!unkDone && unkDone.resolvedBy === 'system', 'the unknown-outcome item is RETRACTED by the engine (as `system`)', JSON.stringify({ done: unkDone && [unkDone.status, unkDone.resolvedBy] }));
+  const ops3 = readAudit(pid3).filter((a) => a.kind === 'outbox').map((a) => a.op);
+  ok(JSON.stringify(ops3) === JSON.stringify(['propose', 'approve', 'attempt', 'outcome', 'reconcile-attempt', 'reconcile-outcome']), 'the audit holds propose → approve → attempt → outcome(lost) → reconcile-attempt → reconcile-outcome, and exactly ONE attempt line (nothing was re-sent)', ops3.join(' → '));
+  const rco = readAudit(pid3).find((a) => a.op === 'reconcile-outcome');
+  ok(!!rco && rco.answer === 'landed' && rco.sentAs === 'user' && rco.state === 'sent', 'the reconcile-outcome line says LANDED with the identity fields', JSON.stringify(rco));
+  const v2 = await readView(pid3);
+  ok(!!v2 && v2.state === 'sent' && v2.result && v2.result.reconciled === true && !!v2.result.vendorMessageId && v2.receipt && v2.receipt.reconciled === true && v2.reconcile && v2.reconcile.n === 1 && v2.reconcile.lastAnswer === 'landed', 'the proposal records the vendor id, the receipt says it was established by reconcile, one check counted', JSON.stringify(v2 && { result: v2.result, receipt: v2.receipt, reconcile: v2.reconcile }));
+
+  // THE SENDER HONESTY SWITCH (§9.5): OFF by default, per channel, never on a user's own draft
+  const SW = `(() => {
+    const row = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-ops"]');
+    let sec = row && row.parentElement;
+    while (sec && !sec.querySelector(':scope > .chan-adapter-ctl')) sec = sec.parentElement;
+    return sec ? sec.querySelector(':scope > .chan-adapter-ctl [data-honesty-line]') : null;
+  })()`;
+  const sw0 = await p1.evaljs(`(() => { const b = ${SW}; return b ? { state: b.dataset.honestyLine, label: b.textContent } : { fail: 'no switch' }; })()`);
+  ok(!sw0.fail && sw0.state === 'off' && /instance default/.test(sw0.label), "EXIT P4 ④: the panel row's Sender line switch reads OFF (instance default) — decision 17 as overruled", JSON.stringify(sw0));
+  const sw1 = await p1.evaljs(`(async () => {
+    const b = ${SW}; if (!b) return { fail: 'no switch' };
+    b.click();
+    for (let i = 0; i < 80; i++) {
+      const c = ${SW};
+      if (c && c.dataset.honestyLine === 'on') return { state: c.dataset.honestyLine, label: c.textContent, after: i * 250 };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    const c = ${SW}; return { fail: 'never on', state: c && c.dataset.honestyLine };
+  })()`);
+  ok(!sw1.fail && sw1.state === 'on' && !/instance default/.test(sw1.label), "turning the channel's switch ON repaints the row off `channels-updated` (a per-channel choice, no longer the instance default)", JSON.stringify(sw1));
+  const auditSw = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'policy' && a.op === 'sender-honesty-line');
+  ok(auditSw.some((a) => a.adapterId === 'fake-poll' && a.value === true), 'the switch change is audited', JSON.stringify(auditSw));
+  const fourth = await p1.evaljs(PROPOSE('My own words, no line'));
+  const fourthCard = fourth.fail ? null : await p1.evaljs(`(() => { const w = ${WIN}; const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${fourth.id}"]'); return card ? { honesty: !!card.querySelector('.chan-prop-honesty'), text: card.querySelector('.chan-prop-text')?.textContent || null } : { fail: 'no card' }; })()`);
+  ok(!fourth.fail && fourthCard && !fourthCard.fail && fourthCard.honesty === false && fourthCard.text === 'My own words, no line', "a USER's own draft carries NO sender-line note even with the channel's switch on (nothing to disclose)", JSON.stringify(fourthCard));
+  const v4 = fourth.fail ? null : await readView(fourth.id);
+  ok(!!v4 && v4.honestyLine === null, 'the API view agrees: honestyLine null for a user draft', JSON.stringify(v4 && v4.honestyLine));
+  // back to the instance default, and the pending draft rejected so the restart leg measures what ⑩ left
+  const sw2 = await p1.evaljs(`(async () => {
+    const b = ${SW}; if (!b) return { fail: 'no switch' };
+    const dflt = [...b.parentElement.querySelectorAll('button')].find((x) => x !== b && /instance default/i.test(x.textContent));
+    if (!dflt) return { fail: 'no Use instance default button' };
+    dflt.click();
+    for (let i = 0; i < 80; i++) {
+      const c = ${SW};
+      if (c && c.dataset.honestyLine === 'off' && /instance default/.test(c.textContent)) return { state: c.dataset.honestyLine, label: c.textContent };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    const c = ${SW}; return { fail: 'never back', state: c && c.dataset.honestyLine, label: c && c.textContent };
+  })()`);
+  ok(!sw2.fail && sw2.state === 'off', '"Use instance default" puts the channel back to following the (OFF) instance setting', JSON.stringify(sw2));
+  if (!fourth.fail) {
+    const rj = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox/${encodeURIComponent(fourth.id)}/reject`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'e2e cleanup' }) })).json();
+    ok(rj.ok === true, 'cleanup: the pending user draft is rejected through the route', JSON.stringify(rj));
+  }
+}
+
 // ── ③ survive a restart ──
 {
   // The layout autosave is ANTI-ECHO gated: it only broadcasts state the USER
@@ -284,6 +556,11 @@ ok(synced.ok, `EXIT ④(b): a change on ONE client repaints the OTHER from the b
   const state = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(d=>({tracked:d.conversations.filter(c=>c.tracked).map(c=>c.id).sort(), unreadTotal:d.unreadTotal}))`);
   ok(JSON.stringify(state.tracked) === JSON.stringify(['fake-poll-announce', 'fake-poll-ops', 'fake-push-ops']),
     '…and the tracked set survived too (the index is atomic + flushed on exit)', JSON.stringify(state));
+  const ob = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox`)).json();
+  ok(Array.isArray(ob.proposals) && ob.proposals.some((p) => p.state === 'sent') && ob.proposals.some((p) => p.state === 'rejected'),
+    'EXIT P3 ⑦: the outbox (a sent and a rejected proposal) survived the SIGKILL + reboot — outbox.json is written atomically', JSON.stringify((ob.proposals || []).map((p) => [p.id, p.state])));
+  ok((ob.proposals || []).some((p) => p.state === 'sent' && p.reconcile && p.reconcile.n === 1 && p.reconcile.lastAnswer === 'landed' && p.result && p.result.reconciled === true && Number.isFinite(p.attemptAt) && p.wire && p.wire.text),
+    'EXIT P4 ⑤: the reconciled proposal survived the reboot with its attempt instant, wire text and reconcile record on disk', JSON.stringify((ob.proposals || []).map((p) => [p.id, p.state, p.reconcile && p.reconcile.n])));
 }
 
 // ── ⑦ AN OPEN WINDOW IS NOT A TRAFFIC GENERATOR (r2) ──────────────────────

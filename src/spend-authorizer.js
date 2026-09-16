@@ -47,6 +47,18 @@ const SPEND_REASONS = Object.freeze({
   'job-notification': { turn: true, what: 'a Background Work notification' },
   'peer-message': { turn: true, what: 'a message from another session' },
   'codex-reset-credit': { turn: false, what: 'a stored Codex rate-limit reset credit' },
+  // Channels P2 (design-communication-panel §7.4): an assigned conversation's
+  // matched message waking an agent through the delivery ladder. Declared in
+  // the SAME commit as its producer (src/server/channels-engine.js) — the set
+  // is closed, and a declared-but-unused reason is the slot the next producer
+  // slides into without a decision.
+  'channel-message': { turn: true, what: 'a message from a connected channel' },
+  // Channels P3 (design §9.3, decision 8): the RECEIPT for a proposal an
+  // agent drafted. Delivered `noWake` by default — only into a turn already
+  // running, else stashed — so it opens a turn only when the assignment
+  // opted in (`receiptWake`) or the free-lane prediction failed and the
+  // wrapper's own verdict charged it. Producer: src/server/channels-engine.js.
+  'channel-receipt': { turn: true, what: 'an outbox receipt handed back to the drafting agent' },
 });
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see

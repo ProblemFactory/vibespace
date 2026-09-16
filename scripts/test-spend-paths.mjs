@@ -403,6 +403,17 @@ const ALLOW = [
   // "this file asks the gate SOMEWHERE", which is the very inference r3 removed.
   { file: 'src/agent-routes.js', prim: 'deliver-ladder', why: 'agent messaging FORWARDS to the gated ladder (spendReason peer-message); the ladder authorizes every call, reason or not. The Stop nudge, in this same file, is gated at its own site' },
   { file: 'src/server/conversation-deliver.js', prim: 'deliver-ladder', why: "the ladder's OWN header — the gate is the first thing in its body, which is what makes every rung below it (the cli-inbox and rpc-peer-frame sites) report GATED" },
+  // Channels P2 (design-communication-panel §7.4 / fence 2): the ONLY thing
+  // that may open an unattended turn is the ladder, so the channels engine
+  // FORWARDS to it with its own declared reason and adds nothing beside it —
+  // no second budget, no second ledger, no second identity derivation. Its
+  // per-assignment daily wake cap is PACING; the authorizer is the money bound.
+  // Channels P3 (design §12.3): the built-in Agents adapter's `send` IS the
+  // ladder — an approved outbox message to an agent session is the user's
+  // own message (spendReason 'peer-message'); the adapter adds nothing beside
+  // the ladder's own authorizer and reports its refusal as a typed failure.
+  { file: 'src/channels/agents.js', prim: 'deliver-ladder', why: "the built-in Agents adapter sends through the gated ladder (spendReason 'peer-message' — an approved outbox message is the user's own); a refusal is a typed transport failure the outbox records, never a second attempt" },
+  { file: 'src/server/channels-engine.js', prim: 'deliver-ladder', why: "the channels engine calls the gated ladder with spendReason 'channel-message' and stashes what it refuses (its per-assignment daily wake cap and the push coalescing window are pacing, not money)" },
 ];
 
 /** Blank whole-line comments, preserving every byte offset and line break.

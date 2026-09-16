@@ -85,7 +85,10 @@ const ROUTES = ['/api/version', '/api/home', '/api/agent-hooks', '/api/accounts'
   // instance (the serve being OFF is a fact, not a failure); the ACTING routes
   // legitimately answer 503 when the service is off, so they are not battery
   // material.
-  '/api/opencode/state', '/api/ci-heavy'];
+  '/api/opencode/state', '/api/ci-heavy',
+  // Integrations & keys (design §14.4): the masked list answers on every
+  // instance; a lost export in its wiring would present as the same 500.
+  '/api/integrations'];
 for (const r of ROUTES) {
   try {
     const resp = await fetch(`http://127.0.0.1:${PORT}${r}`);

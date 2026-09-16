@@ -99,27 +99,17 @@ function noteUnknownWsType(telemetry, type) {
 // Everything the agent legitimately needs is set EXPLICITLY after this strip
 // (VIBESPACE_API / _SESSION_TOKEN / _TASK_ID / remote-transport hints), so the
 // allowlist only has to cover vars set elsewhere and passed through.
-const AGENT_ENV_KEEP = new Set([
-  'VIBESPACE_API', 'VIBESPACE_SESSION_TOKEN', 'VIBESPACE_TASK_ID',
-  'VIBESPACE_REMOTE_SID', 'VIBESPACE_REMOTE_RETRY', 'VIBESPACE_KEEPER_DIR',
-  'VIBESPACE_INSTANCE_NAME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT',
-]);
-// CLAUDE_CODE_OAUTH_TOKEN has TOP precedence in the CLI's credential getter
-// (verified 2.1.225) — an ambient copy would silently re-bill every spawn and
-// leak a subscription token into agent child envs. Deliberate oat spawns
-// re-add it via spawnAccount.localEnv AFTER the strip.
-const AGENT_ENV_DROP = new Set(['PORT', 'HOST', 'NODE_ENV', 'NODE_OPTIONS',
-  'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR']);
-function agentEnv(base = process.env) {
-  const out = {};
-  for (const [k, v] of Object.entries(base)) {
-    if (AGENT_ENV_DROP.has(k)) continue;
-    if (k.startsWith('npm_')) continue;                       // nested-npm hazard
-    if (k.startsWith('VIBESPACE_') && !AGENT_ENV_KEEP.has(k)) continue; // secrets + server config
-    out[k] = v;
-  }
-  return out;
-}
+//
+// THE RULE LIVES IN PURE src/agent-env.js (2026-09-14): the daemon is a
+// SECOND HOLDER of the server env — `DeviceManager._spawnLocal` spawned it
+// with `{...process.env}` and `agentd.spawnEnv()` laid the sanitized session
+// env OVER `process.env`, so every daemon child inherited the cluster
+// integration secrets (measured on a real claude CLI's /proc/<pid>/environ).
+// One filter, two processes: this module re-exports it under the name every
+// consumer already requires from here. `agentEnv()` with no argument keeps
+// its `process.env` default — the PURE module never reads the process.
+const { agentEnv: agentEnvPure } = require('./agent-env.js');
+function agentEnv(base = process.env) { return agentEnvPure(base); }
 
 
 function getSessionKey(session = {}) {

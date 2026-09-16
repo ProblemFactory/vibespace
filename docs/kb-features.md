@@ -812,8 +812,8 @@ impossible rather than a review promise.
 capability model, the adapter interface with a fake adapter that really runs
 all three receive modes, the ingest engine's skeleton, the routes, the sidebar
 rail panel and an (almost) empty conversation window. **No Lark, no Gmail, no
-assignment, no filter, no wake, no outbox** — those are later phases and are
-deliberately ABSENT rather than stubbed, because a declared-but-inert slot is
+assignment, no filter, no wake, no outbox** — those were later phases (P1a/P1b/P2/P3
+below) and were deliberately ABSENT rather than stubbed, because a declared-but-inert slot is
 the failure this design argues against.
 
 - **The rail panel** (`channels`, six registrations in `src/lib/sidebar-rail.js`):
@@ -854,9 +854,9 @@ the failure this design argues against.
 - **THE SEND CONTROL EXISTS ONLY IF `offers()` SAYS SO**, and that answer
   needs BOTH the adapter's static `caps` and this conversation's own
   `convCaps`. On a read-only conversation there is NO composer element at all
-  and the bar says why. On a sendable one the composer appears and SAYS it is
-  not connected yet — sending goes through the approval outbox, which is a
-  later phase, and a button that silently does nothing is worse than none.
+  and the bar says why. On a sendable one the composer appears; since P3 it
+  PROPOSES through the outbox and its note names the policy (review / direct)
+  that governs the reply — a button that silently does nothing is worse than none.
 - **Marking read is something the USER did.** The window marks a conversation
   read when it OPENS and when you touch it — never as a side effect of a
   repaint. (A repaint-driven POST and an unconditional broadcast form a loop:
@@ -931,6 +931,413 @@ the failure this design argues against.
   warning instead of silence (third-party adapters are the right eventual home;
   v1 keeps them in the tree because the receive path must run beside the store
   and the spend guard).
+
+### Communication panel — P1a: Lark + Gmail READ adapters, the consent flow, failures spoken (2026-09-16)
+
+- **Two real adapters** register beside the fakes and nothing downstream
+  learns their names: `src/channels/lark.js` (Feishu/Lark, user token, a
+  FIXED loopback callback registered in the app console) and
+  `src/channels/gmail.js` (an EPHEMERAL loopback port; the OAuth client is
+  the cluster's `VIBESPACE_GDRIVE_CLIENTS` preset `channels` or the user's
+  own, decision 5). Both take their application credential from
+  `resolveIntegration()` and never from env.
+- **Connect** (`POST /api/channels/adapters/:kind/connect`) creates the
+  record and starts the vendor consent flow through `src/oauth-loopback.js`;
+  on a machine where the browser cannot reach the loopback (a remote
+  browser, or Lark's fixed port held by another VibeSpace) the user pastes
+  the redirect URL back (`/auth/finish`). A row whose credential resolves
+  to `none` is refused `409 needs-credentials` BEFORE any consent page — the
+  client opens the Integrations card for that row instead (§10.1).
+- **Auth is four-valued and honest**: `connected` / `needs-reauth` (a dead or
+  refused refresh token, with the expiry where the vendor states one — Lark
+  does, Google does not) / `needs-credentials` (the application credential
+  is gone, however fresh the token) / `unknown` (never authenticated).
+- **Ingest**: Lark pages newest-first to the stored anchor (a burst day is
+  several pages and the anchor advances only after a complete pass); Gmail
+  runs one `history.list` per pass and walks only the threads it names,
+  reseeding on a 404 and skipping a dead thread rather than freezing.
+- **Failures reach the user**: after 3 consecutive failed passes the row goes
+  amber AND one "For you" item is filed naming the adapter, the failure code,
+  the vendor's own words and what to do; the same engine retracts it on the
+  first passing pass (or on disconnect). A never-connected record files
+  nothing — it has nothing to pass with.
+- **Options** are per record and DECLARED by the adapter (Gmail's include
+  query `label:INBOX`, Lark's brand); an undeclared key is refused by name.
+- **The panel** (rail → Channels) carries the adapter's own controls on its
+  section: a Connect row per not-yet-connected kind worded by the credential
+  facts (none ⇒ the Integrations card opens first; cluster ⇒ "Provided by the
+  cluster"), a consent-flow dialog with the consent link + paste-back + Cancel,
+  the four-valued auth line with a `re-authorize in <eta>` countdown and a
+  Re-authorize verb, a Track… picker (checkbox per discovered conversation),
+  an Options editor over the declared schema, Disconnect (confirmed) and
+  Enable/Disable; zh + ja shipped.
+- **Egress is censused**: every vendor host a channel adapter constructs a
+  request to is declared in its `EGRESS` list, and `test-channels-egress`
+  fails any other file constructing an outbound request unless it is on the
+  allowlist WITH a reason (seeded at birth with `src/gmail-sync.js` and
+  `src/mounts.js`, §3.1); dead allowlist entries fail too.
+
+### Communication panel — P1b: the push lane (2026-09-16; design §6.4, fence 11, decisions 18 + 20)
+
+- **Both real adapters declare `receive:'push'`**: Lark over the official
+  SDK's long connection (no public URL; the app credential from
+  `resolveIntegration('lark')`; the SDK is required lazily — an instance
+  without it shows "push unavailable: … not installed" and polls), Gmail over
+  `users.watch` + a Cloud Pub/Sub PULL subscription of this instance — OFF by
+  default (decision 20), turned on under Push… and configured through the
+  `pushTopic` / `pushSubscription` options; enabling it adds the `pubsub`
+  scope to the next Re-authorize, which the lane requires by name.
+- **Which lane carries a conversation is `laneState()`'s answer alone**:
+  DEMOTED > LIVE > CLAIM. Liveness is positive evidence (a handshake or a
+  heard frame inside `PUSH_HEARTBEAT_MS`); a silent lane reads "push silent
+  for <age> — polling at the fast cadence until it speaks".
+- **The ack comes AFTER durability (fence 11)**: a pushed record is in the
+  append-only log before the vendor is answered; the index and the ONE
+  broadcast per batch follow; a replayed event id is acked and absorbed; a
+  crash between the persist and the index step loses nothing (the
+  reconciliation poll finds the record already there).
+- **Exclusivity is DECLARED, MEASURED and WITHDRAWN**: the operator declares
+  it in Push… (`unknown` = declare nothing = cursor kicks, the default;
+  `shared` = kicks; `exclusive` = push carries messages and the poll
+  reconciles every 15 min). While push carries content, every record the
+  reconciliation poll sees first is a miss; past 2 % over 20 judged records
+  in a rolling window (24 h or the last 200 records, whichever is larger) the
+  lane demotes itself: the row says "push is not exclusive here — fell back
+  to cursor kicks, polling returned to the fast cadence (12 of 42 records,
+  28.6%, were first seen by the reconciliation poll)", the log says it once,
+  the connection stays up as a kick lane, kick mode adds NO sample, and the
+  lane never climbs back by itself — "Re-declare exclusive and retry" (or
+  saving the claim in Push…) zeroes the counters and retries the lane once.
+- **A stopped lane acks nothing**: switching push off, disabling or
+  disconnecting the adapter, re-declaring, or changing a lane option stops
+  the lane terminally and (when still wanted) arms a fresh one.
+- **A permanent failure inside a connection PARKS the lane** (`unavailable`,
+  named: a 403/404 Pub/Sub pull, a refused watch renewal, three transient
+  renewal misses in a row) — no reconnect loop, the row says why; a transient
+  pull failure backs off and retries (2026-09-16).
+
+### Communication panel — P2: assign, filter, wake (2026-09-16; design §7, fences 2 + 12, decisions 9/10/16)
+
+- **A tracked conversation can be ASSIGNED** (panel row menu / window bar →
+  "Assign & filter…") to a live agent session or to a task group (round-robin
+  over the group's live members; no live member ⇒ the hits wait for its next
+  turn, never "wake them all"). Assignment implies reach: ONE explicit
+  `origin:'assignment'` grant is written and unassign removes only that row.
+- **What wakes them**: every message, or a FILTER of closed rule kinds
+  (mention / keyword / sender is one of / from / subject / has attachment /
+  does not contain / time window; match any or every). The editor shows a
+  LIVE estimate from the server over the stored history — "~4/day would wake
+  (of ~30/day)" — and prints its caveats (`only N days of history are stored`,
+  `only the newest N records were read`); once assigned it shows the
+  after-the-fact measurement beside it ("estimated ~4/day when set; actually
+  6/day since"). The wake the agent receives NAMES the rule that fired
+  (`matched: mention @on-call, keyword "GPU"`), and the panel shows the same
+  string.
+- **How**: a wake per batch, or one digest per window (5 min … 24 h). A poll
+  or scan pass is already a batch (one wake for a day's burst); a push lane
+  delivering one message at a time is COALESCED for
+  `channels.pushCoalesceSeconds` (Settings → Channels, default 60, 0 = wake
+  per message) before the wake decision, so "turn on real-time push" never
+  multiplies a bill by a burst. Measured: one day of traffic through push,
+  poll and scan ⇒ the same 40 records, ONE wake each with the same 12 hits,
+  ONE charge each on the credential slot; with the window off the push lane
+  wakes and charges 12×.
+- **Who pays, and how much**: a wake is a turn nobody typed, so it goes
+  through the ONE delivery ladder with the declared reason `channel-message`
+  — the spend authorizer inside it is the money bound (per credential slot,
+  across restarts), the per-assignment daily wake cap is PACING (a refused
+  batch is HELD and rides the next wake, never dropped), the ladder's own
+  floor is flood control. A wake the ladder refuses (budget, unreachable) is
+  stashed into the agent's next injection — nothing is lost. Held or stashed
+  wakes are said on the row (amber) and in the editor.
+- **Authority** is `draft` by default; `send` is offered ONLY when the
+  channel does not require review (decision 9: external = review, every v1
+  adapter) AND the conversation offers a send lane — otherwise the option is
+  not drawn and the reason is; a stored `send` the policy now forbids reads
+  as draft with the reason (the user re-chooses).
+- **The honest latency line**: "Wakes arrive within ~1m — push carries
+  messages here; hits are coalesced for 60 s so a burst is one wake" /
+  "…within ~30s — this conversation is polled" (the hot cadence an assigned
+  row actually gets) / "…within ~15s — read by a scan of the local client" /
+  "…within ~15m — the poll is on its reconciliation cadence while push is
+  declared exclusive".
+- Leftover hits survive a restart (persisted on the index) and are delivered
+  as one digest shortly after boot — exactly once: wakes on one conversation
+  are serialized and a wake clears only the hits it carried (2026-09-16).
+- A wake the ladder refused reaches the agent WHOLE through the stash drain
+  (every hit, never re-clipped to 400 chars); what does not fit one drain
+  rides the next, never dropped (2026-09-16).
+
+### Communication panel — P3: outbox, approval, receipts (2026-09-16; design §8, §9, §11, §12.3; decisions 7/8/9/11/16/17)
+
+- **A reply is a PROPOSAL.** An agent (`vibespace-channels reply`) or the user
+  (the conversation window's composer) proposes; `src/channel-policy.js`
+  decides `direct` or `review`: the channel's policy (own > the adapter's
+  default > review) is the base and the guards — a link, an attachment,
+  off-hours (only when `channels.offHoursTz` is set), draft-only authority —
+  can only tighten it; an unreadable policy or guard is review (fail closed).
+- **Two surfaces, one store.** The approval card is rendered inline in the
+  conversation window and in the singleton Outbox window (⚙ → Outbox…, the
+  panel's Outbox button with the awaiting count) from the same store; approve
+  (optionally edited — both texts kept, the receipt says `edited`), reject
+  with a reason, or let it expire (24 h). The rail badge counts unread +
+  awaiting.
+- **The identity row is on every card**: "Will send as you/the bot", and when
+  the adapter's `identityMarking` is `marked` or `unknown` a warning with the
+  adapter's verbatim sentence (or that it is unverified). The message body
+  carries NO honesty line by default (decision 17 overruled): the truth is
+  owed to the one approving and the one drafting, never pushed into the
+  recipient's message.
+- **One "For you" pointer per conversation** (count-free text, count in
+  detail, `pendingTodoId` persisted on the row, retracted by the engine when
+  the last proposal leaves awaiting-approval; an inbox throw degrades to the
+  badge + Outbox window).
+- **Approval re-resolves `convCaps` unconditionally** before the send; a
+  conversation that no longer accepts messages refuses with
+  `send-not-available` + the adapter's reason, the proposal fails, the
+  receipt carries the reason verbatim.
+- **Exactly-once.** An audit ATTEMPT line before the request, an OUTCOME line
+  after; a thrown send is `unknown`, never auto-retried — the user is asked
+  to check the platform.
+- **The receipt** (`sent`/`edited`/`rejected`/`expired`/`failed`, with
+  `sentAs` / `identityMarking` / `identityMarkingText`) reaches the drafting
+  agent through the delivery ladder with `noWake` — only into a turn already
+  running, else stashed for its next turn — unless the assignment's
+  "Wake the agent with each outbox receipt" opted in (decision 8). Every
+  vendor-controlled field of the receipt block (title, label, vendor id,
+  sentAs) is frame-inert and single-line — the wake block's rule (2026-09-16).
+- **Audit** (`data/channels/audit.ndjson`): `draftedBy` / `approvedBy` /
+  `sentAs` / `identityMarking` on every outbox line; it never leaves the
+  instance.
+- **AgentReach** (row menu / window bar → "Reach & policy…"): every grant
+  with its origin (you granted / by assignment / you approved a request),
+  user rows removable, grants to a live session or a Task Group, open access
+  requests (`vibespace-channels request`, one For-you item with the reason)
+  approved into exactly one visible grant; everything hidden by default,
+  hidden ≡ nonexistent for an agent.
+- **The built-in Agents adapter** lists live agent sessions as conversations
+  (reach = the msg-acl answer), sends through the delivery ladder as the
+  user's own message (policy default `direct`), and marks its identity
+  `marked` / recipient-ui.
+- **P4 — real external send (§9.4 / §9.5).** Lark and Gmail now send as the
+  USER; until the held token carries the send scope(s) the composer's footer
+  says what unlocks it (reconnect; on Lark also enable the two dotted scopes
+  + publish a version) instead of a greyed control. Lark sends carry the
+  vendor `uuid` = the proposal id; Gmail sends are two-phase (a draft in the
+  thread, then its send, threading headers off the anchor). A send whose
+  answer was LOST is `unknown` — never "failed", never re-sent — and the
+  card offers **Check outcome** (only where the adapter declares an
+  idempotency mechanism): landed ⇒ sent with the receipt, the For-you item
+  retracted; not landed ⇒ failed; else still unknown with the count of
+  checks. A proposal the server died on mid-send is `unknown` at boot. **The
+  sender honesty line is OFF by default** (Settings → Channels, per-channel
+  override on the panel row): when on, an agent-drafted message ends with
+  one line naming the agent — the card says so BEFORE approval, the receipt
+  after; your own drafts never get one. The panel row shows the platform's
+  own attribution of the last real send (the §21-item-3 proof; Lark's
+  declaration stays `unknown` in code until an owner-run real send is read).
+
+### Integrations & keys — the shared credential layer (P0b, docs/design-communication-panel.zh.md §14; consumed by docs/design-agent-browser-v2.md §7.5 too)
+
+**What P0b ships, and nothing more.** ONE window (⚙ → Integrations & keys /
+集成与密钥), ONE PURE table of integration rows, ONE server store that is the
+only thing that ever sees a value, four routes, one broadcast, one at-rest
+cipher primitive shared with mounts, and the helm `integrations:` block. The
+precedence is one sentence, enforced as a pure function: **the user's own >
+the cluster default > none.** No Lark, no Gmail, no CloakBrowser consumer
+lands here — their rows carry their setup blocks and callback URL NOW (that is
+the point of shipping the cards) and say BY NAME which phase wires them
+(`wiredIn`); their Test is a named `not-wired` refusal, never a green tick.
+Config export/import of these keys (design §14.10) is NOT in P0b.
+
+- **The rows** (`src/integration-registry.js`): `fake` (the test adapter's own
+  row, with a real consumer — `src/channels/fake.js` asks
+  `resolveIntegration('fake')` in `auth.state()` — and a real setup block so
+  the callback line, its copy button and the checklist are exercised on a card
+  that ships), `lark` (App ID / App Secret; setup block = the fixed loopback
+  callback `http://127.0.0.1:17865/lark/cb` + three console prerequisites;
+  `credential-exchange` test WITH a caveat), `gmail` (a DELEGATING row: it
+  REUSES the existing Drive/Gmail OAuth-client presets `VIBESPACE_GDRIVE_CLIENTS`
+  through `MountManager.drivePresets()` with `prefer:'channels'`, `multi:true`,
+  and declares NO env of its own — decision 5), `cloak` (a per-seat license key;
+  empty = free tier). The Lark callback URL is defined in exactly ONE place and
+  the suite fails a second spelling anywhere in code.
+- **The card** (one per row, the Plugins card language, single column at every
+  width): a SOURCE CHIP (`Your own` / `Cluster default · <label>` / `Not
+  configured` + WHY), the SETUP BLOCK drawn ABOVE the fields (a user who has
+  filled two inputs and seen a green tick does not scroll back up) with the
+  callback URL as copyable monospace text + a Copy button that copies EXACTLY
+  that string, the callback note (which console page it goes to) and the
+  prerequisites checklist; then who serves the row — a radio pair (`Use cluster
+  default`, greyed WITH the reason when there is none / `Use my own key`) or,
+  on a delegating row, a dropdown of the cluster's presets + "my own key"; then
+  the fields — **a set secret shows `••••` + its last 4 (only when the value is
+  ≥ 12 chars) and a REPLACE button that opens an EMPTY password input. There
+  is no Reveal, anywhere, on any route**; a required field that is missing is
+  marked by name; then Test (its wording follows `test.kind`: "Test connection"
+  / "Check format (no network)" / "Test reachability"), whose verdict is
+  ALWAYS drawn beside the row's `caveat` — a bare green tick on a check that
+  proves less than the reader assumes is the mirror-image lie of a "Test
+  connection" that never went online; a failed Test draws the vendor's own
+  words (textContent, never innerHTML); `Clear my keys` (confirm dialog); and
+  "where this key is used" from `consumers`, or the phase it is wired in.
+  **Save retires the open editor BEFORE it asks for the re-render** — the
+  editor is exactly what the per-card refresh defers on (a broadcast must not
+  tear a field out from under a user mid-typing), and with it still in the
+  DOM neither the save's refresh nor the broadcast's ever repainted the row
+  (measured in headless chrome: mask + chip stale after every Save).
+- **The store** (`src/server/integration-store.js`): `data/integrations.json`
+  holds `values` (secrets through `src/secret-box.js`) and `clusterKey` and
+  NOTHING else — `source` is DERIVED at read time, never stored; a cluster
+  default's VALUES are read from the env at the moment of the question and
+  never copied to disk, so rotating the Secret rotates every consumer, and
+  **injecting a default then withdrawing it leaves the row answering `none`
+  WITH THE REASON** ("the cluster default this row used (X) is no longer
+  provided by this instance's environment"), never quietly serving the old
+  value. Omitted field = untouched, `''` = cleared, everything else trimmed
+  then validated with a NAMED complaint. Two intents, two functions:
+  `clearUserValues` (DELETE, "drop my keys", ALWAYS allowed, lands on cluster
+  or none) and `useClusterDefault` (PUT `{use:'cluster'}`, a NAMED refusal
+  when there is no cluster default — the same fact that greys the radio).
+  A user's own value SURVIVES a later env injection. The store is THE ONLY
+  reader of `VIBESPACE_INTEGRATIONS` (JSON, the helm Secret) and
+  `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (the single-field form for
+  docker-compose; the JSON form wins, said once at boot; an unparseable block
+  is logged and treated as "no cluster default", never a crash).
+- **A withdrawn credential flips the ADAPTERS row, not only the card**: the
+  channels engine hands every adapter the store's `resolveIntegration` (never
+  `process.env`) and re-asks `auth.state()` on the store's change edge, so an
+  adapter whose application credential vanished answers `needs-credentials`
+  on the panel digest however fresh its token record looks.
+- **Test is a human's click, bounded (15 s), one in flight per id, and the
+  store constructs NO vendor request** — it dispatches to the runner the row's
+  CONSUMER registered (the fake's succeeds or fails on a fixture switch: a key
+  containing "fail" fails); a standing census fails any scheduler/timer/ingest
+  loop that calls `integrations.test(`.
+- **Every write broadcasts `integrations-updated`** carrying `publicView(id)`
+  — THE one masked view every route returns (`set:{field:bool}`, `masked`,
+  `missing`, `source`, `why`, `clusterKey`, `clusterOptions` with key + label
+  only, `testedAt`/`lastOk`/`lastError`, `testCaveat`, `consumers`); a second
+  client repaints that one card from the frame, no reload. A 40-char secret
+  written through PUT appears in no GET body, no broadcast frame and no log
+  line (measured, test-integration-registry + test-integrations-ui).
+- **Failures reach the user**: a refused PUT/DELETE is a toast naming the
+  field and the rule; a failed Test is a line on the card; an unreadable
+  secret-key file is SAID on the card ("the key file could not be read" — the
+  opposite sentence from "nothing configured").
+- **Deep link**: `app.openIntegration(id)` scrolls to and highlights that
+  card; an id that no longer exists opens the window with nothing highlighted
+  and never throws (a removed row must not fail a layout restore). The window
+  is a registered SINGLETON type (`integrations`, openSpec
+  `{openIntegrations, focus}`) and the ⚙ row `Integrations…` is a contribution
+  registered by the window module (gear-menu.js untouched).
+- **The cluster side** (`deploy/helm/vibespace-user/values.yaml` →
+  `integrations: [{id,label,values}]` → the Secret's `integrations` key → env
+  `VIBESPACE_INTEGRATIONS`, `secretKeyRef` never `value:`): suitable for
+  register-once, everyone-may-use credentials (a Lark app — same tenant only;
+  a Google OAuth client), NOT for per-seat keys. Gmail has no entry: it reuses
+  `gdrive.clients`. deploy/README.md carries the four rules with placeholders
+  only.
+- **What the encryption buys, said plainly**: `data/integrations.json` and
+  `data/.integrations-key` sit side by side under one uid — it protects a
+  copied FILE (backup, snapshot, a mis-mounted volume), not against code
+  running as the same user on the same machine (an agent session is exactly
+  that). The same property mounts has always had; not introduced here.
+- **`src/secret-box.js`** (design §14.7, decision 24): the ONE at-rest cipher
+  primitive, N key files — mounts keeps `data/.mounts-key` byte-for-byte
+  (parity-pinned both directions against the pre-fix `_enc`/`_dec`), the
+  integrations store gets `data/.integrations-key`. **The key is minted on
+  ENOENT only; every other errno is a TYPED failure and the existing key file
+  is never overwritten** — mounts' former inline `_key()` minted a fresh key
+  over ANY read failure (EACCES, EMFILE, a truncated file) and silently
+  orphaned every stored ciphertext for ever; mounts now goes through the box,
+  so the fix applies to it too.
+- **r2 (2026-09-14, the round-1 verifier — four defects, each reproduced on
+  the real module before the fix):**
+  - **The cluster secrets reached agent children on the daemon path, and a
+    withdrawn default kept flowing across server restarts.** §14.11.1's "by
+    construction cannot reach any agent child" was true of the dtach path
+    only: the local daemon was spawned with the server's RAW env and merged
+    every child over its own environ, so a real pipe-session `claude`'s
+    /proc/<pid>/environ carried the full 40-char cluster secret a PREVIOUS
+    server life had handed the daemon. Now the daemon is BORN sanitized
+    (PURE `src/agent-env.js`, the same rule as `agentEnv()`, plus the two
+    names the daemon tier itself reads) at all three birth sites and every
+    daemon child spawn merges over that sanitized base regardless of what the
+    daemon holds — so children are protected from the moment this bundle
+    runs, while a daemon born under an older build keeps its own environ
+    until the re-exec run by THIS code (the second upgrade, or a restart;
+    the re-exec that installs this bundle is the older code's, raw env).
+    Measured on a real daemon: the daemon's environ, a pty
+    child and a pipe-session child all carry neither the name nor the value,
+    with the pre-fix bundle handing it straight down as the control.
+  - **An unreadable `data/integrations.json` is a TYPED `store-unreadable`
+    error, never an empty state.** The former bare catch read EACCES/EMFILE/
+    EIO as "fresh", cached it, and the next unrelated write replaced the file —
+    every stored credential silently destroyed (measured: store lark, chmod
+    000, restart, store fake ⇒ the file holds only fake). Now the card says
+    "The integrations store could not be read: …", every write (PUT /
+    DELETE / Test) is refused with 500 `store-unreadable` until the file is
+    readable again (and the SAME instance recovers the moment it is — nothing
+    is cached over it); a file that reads but is not a store is ARCHIVED as
+    `integrations.json.corrupt-<ts>` before a fresh one starts.
+  - **A non-delegating row's "Use cluster default" survives the admin naming
+    that single default.** The radio stored the implicit selector `default`;
+    when the JSON block later carried `key: 'tenantA'` for the same single
+    default the row answered `none`, the radio greyed and nothing could reach
+    a default that exists. A vanished saved key now re-binds to the env's
+    ONLY preset and the card says so ("…was re-keyed to tenantA — the only
+    default this instance offers"); with two or more presets the row still
+    answers `none` naming the vanished key (a picker's question), and the
+    delegating dropdown keeps §14.2's refusal untouched.
+  - **The log line about a mistyped `VIBESPACE_INTEGRATIONS` carries no
+    bytes of it** (V8 quotes the source around a JSON error — a trailing
+    comma printed the last 6 characters of the secret); the same redaction
+    applies to mounts' `VIBESPACE_GDRIVE_CLIENTS` reader.
+  - **The no-timer-calls-`test(` census derives its receiver** (traced
+    handles + store accessors + row-id literals, printed) — a scheduler
+    reaching the store through the route's own `store()` accessor idiom was
+    invisible to the four typed spellings.
+  - Ratified as an OPEN question for the integrator, not changed: the
+    `wiredIn` escape lets lark / gmail / cloak ship with `consumers: []`, so a
+    user can store a Lark secret nothing reads yet (Test answers `not-wired`
+    by name); the brief asked for those cards and decision 25 says a row
+    lands with its adapter — one of the two must be amended.
+- **r3 (2026-09-15, the round-2 verifier — two findings, each reproduced on
+  the real module before the fix):**
+  - **A user secret the current key file cannot open never hands the row to
+    the cluster.** A rotated or restored `data/.integrations-key` used to
+    make the card say `Cluster default · <label>` with no reason, hide "Clear
+    my keys", and let Test pass on the CLUSTER's credential — the user's own
+    Lark tenant app silently replaced by the cluster's. Now the chip says
+    `Not configured` with the reason naming the fields ("stored values could
+    not be decrypted (appSecret): the current key file (.integrations-key) is
+    not the one they were written with"), the card carries the remedy line
+    ("The keys stored for this row cannot be decrypted with the current key
+    file — restore the .integrations-key this instance had when the keys were
+    entered, or clear the keys and enter them again"), "Clear my keys" is
+    shown (the row HOLDS values), Test refuses, the Adapters row says
+    `needs-credentials`, and the server logs it once per row per transition.
+    Clearing lands on the cluster default — because the user decided.
+  - **The env name can be spelled or built in exactly one file.** The PURE
+    registry no longer exports `envFieldName`; the store builds the
+    single-field name, and a standing census fails a builder call or a
+    `clusterEnv.prefix` read anywhere else.
+
+Gates: test-secret-box (fast, 40 — ⑦ `describeJsonError` with the retired
+`e.message` as its control), test-integration-registry (fast, 194 — incl.
+the rotated key WITH a cluster default present through the real route and
+the env-name BUILDER census (r3);
+the env-NAME census over the tracked-file list through the sanitized
+environment of scripts/git-env.mjs, PRINTED, with the bracket/destructuring/
+aliased-env forms as its controls; §4b the unreadable / corrupt / redacted /
+re-bound store legs each with a control that fails alone; the DERIVED
+`.test(` receiver census; §6(h) the daemon-holder census),
+test-agentd-session (fast — a real daemon born under the secret, a
+previous-life daemon holding it, the pre-fix bundle as the control),
+test-integrations-ui (heavy, worktree server + chrome 375×667 + a second
+client + two restarts for the inject-then-remove walk), test-window-types,
+test-restore-smoke (the route battery carries `/api/integrations`).
 
 ### UI
 - 6 built-in color themes: Dark, Light, Dracula, Nord, Solarized, Monokai — all contrast-audited (terminal ANSI colors + UI chrome `--text-dim`/`--text-secondary`)

@@ -31,6 +31,12 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFile, execFileSync } = require('child_process');
+// At-rest encryption is THE shared primitive (src/secret-box.js, design
+// §14.7): same aes-256-gcm `iv.tag.data` bytes as the former inline
+// `_enc`/`_dec` (parity-pinned by scripts/test-secret-box.mjs), but the key
+// is created on ENOENT ONLY — the inline `_key()` used to mint a fresh key on
+// ANY read failure and silently orphan every stored ciphertext.
+const { secretBox, describeJsonError } = require('./secret-box');
 
 const SHARE_PREFIX = 'vibespace-share:v1:';
 const CEPHMOUNT_PREFIX = 'vibespace-cephmount:v1:';
@@ -45,6 +51,7 @@ class MountManager {
     this._getSetting = getSetting || (() => undefined);
     this._file = path.join(dataDir, 'mounts.json');
     this._keyFile = path.join(dataDir, '.mounts-key');
+    this._box = secretBox(this._keyFile);   // decision 24: mounts keeps ITS OWN key file, byte-for-byte
     this._logDir = path.join(dataDir, 'mount-logs');
     this.mountBase = process.env.VIBESPACE_MOUNT_BASE || path.join(os.homedir(), 'vibespace-mounts');
     this._state = { mounts: [], shares: [] };
@@ -357,28 +364,13 @@ class MountManager {
     });
   }
 
-  _key() {
-    try { return Buffer.from(fs.readFileSync(this._keyFile, 'utf-8').trim(), 'hex'); }
-    catch {
-      const k = crypto.randomBytes(32);
-      fs.writeFileSync(this._keyFile, k.toString('hex'), { mode: 0o600 });
-      return k;
-    }
-  }
-
-  _enc(text) {
-    const iv = crypto.randomBytes(12);
-    const c = crypto.createCipheriv('aes-256-gcm', this._key(), iv);
-    const data = Buffer.concat([c.update(String(text), 'utf8'), c.final()]);
-    return `${iv.toString('base64')}.${c.getAuthTag().toString('base64')}.${data.toString('base64')}`;
-  }
-
-  _dec(blob) {
-    const [iv, tag, data] = String(blob).split('.').map(s => Buffer.from(s, 'base64'));
-    const d = crypto.createDecipheriv('aes-256-gcm', this._key(), iv);
-    d.setAuthTag(tag);
-    return Buffer.concat([d.update(data), d.final()]).toString('utf8');
-  }
+  // The former inline `_key()`/`_enc()`/`_dec()` live in src/secret-box.js
+  // (design §14.7). The ciphertext format is unchanged; what changed is that a
+  // key file that exists but cannot be read is now a TYPED error instead of a
+  // silently minted replacement key.
+  _key() { return this._box.readKey(); }
+  _enc(text) { return this._box.enc(text); }
+  _dec(blob) { return this._box.dec(blob); }
 
   _load() {
     try { this._state = JSON.parse(fs.readFileSync(this._file, 'utf-8')); } catch { /* fresh */ }
@@ -2197,7 +2189,7 @@ class MountManager {
           }
         }
       }
-    } catch (e) { console.error('[mounts] VIBESPACE_GDRIVE_CLIENTS unparseable:', e.message); }
+    } catch (e) { console.error('[mounts] VIBESPACE_GDRIVE_CLIENTS unparseable:', describeJsonError(e)); } // never `e.message`: V8 quotes the bytes around the error (a client secret's tail)
     if (process.env.VIBESPACE_GDRIVE_CLIENT_ID && process.env.VIBESPACE_GDRIVE_CLIENT_SECRET
         && !out.some((c) => c.key === 'default')) {
       out.push({ key: 'default', label: 'Default', clientId: process.env.VIBESPACE_GDRIVE_CLIENT_ID, clientSecret: process.env.VIBESPACE_GDRIVE_CLIENT_SECRET });

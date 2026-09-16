@@ -596,6 +596,57 @@ const SETTINGS_SCHEMA = {
     description: t('OFF (recommended): while an account reports that it is using PAID OVERAGE, VibeSpace refuses every turn it would have started by itself on that account — a turn nobody asked for is a quota decision when quota is included and a dollar decision when it is not. Turns YOU type always run. Turn this ON only if you want automatic continues to keep going at pay-per-use prices.'),
     category: t('Spending'), liveApply: true,
   },
+  // ── Channels (docs/design-communication-panel.zh.md §7.4 / fence 12, P2) ──
+  'channels.pushCoalesceSeconds': {
+    type: 'number', default: 60, min: 0, max: 600, step: 5,
+    label: t('Coalesce pushed messages before waking an agent (seconds)'),
+    description: t('Polling batches a minute of messages into ONE wake by nature; a push lane delivers them one by one, so a burst of 30 would become 30 billed turns. While a push lane carries messages, matched hits are gathered for this many seconds and delivered as one wake that lists them all. 0 = wake per message. Poll and scan lanes are already batches and never wait.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // ── Channels outbox GUARDS (design §9.1, decision 9, P3): they stack on
+  //    the channel policy and can only TIGHTEN it. Audit is always on and is
+  //    not a setting. Off-hours needs a time zone; without one that guard is
+  //    OFF, never guessed.
+  'channels.guardLinksReview': {
+    type: 'boolean', default: true,
+    label: t('Outbox: a message with a link always needs your approval'),
+    description: t('A proposal whose text carries a link goes to review even on a channel whose policy is "send directly". A guard can only tighten a policy, never relax it.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.guardAttachmentsReview': {
+    type: 'boolean', default: true,
+    label: t('Outbox: a message with an attachment always needs your approval'),
+    description: t('A proposal carrying an attachment goes to review even on a "send directly" channel.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.offHoursTz': {
+    type: 'string', default: '',
+    label: t('Outbox: working-hours time zone (empty = the off-hours guard is off)'),
+    description: t('An IANA zone such as Asia/Shanghai or America/Los_Angeles. Outside working hours every proposal goes to review. Leave empty and nothing is guessed: a wrong zone would silently send everything (or nothing) to review.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.offHoursStart': {
+    type: 'string', default: '09:00',
+    label: t('Outbox: working hours start (HH:MM)'),
+    description: t('Only used when the time zone above is set. Mon–Fri.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.offHoursEnd': {
+    type: 'string', default: '18:00',
+    label: t('Outbox: working hours end (HH:MM)'),
+    description: t('Only used when the time zone above is set.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // ── The sender honesty line (design §9.5, decision 17 as overruled, P4):
+  //    OFF by default. The message goes out as the user's own words; who the
+  //    other side will see is said on the approval card and in the receipt.
+  //    Each adapter row can override this default (Channels panel).
+  'channels.senderHonestyLine': {
+    type: 'boolean', default: false,
+    label: t('Outbox: append a "drafted by <agent>" line to messages an agent drafted'),
+    description: t('OFF (recommended): a message goes out exactly as you approved it. ON: an agent-drafted message ends with one line naming the drafting agent. Your own drafts never get one. Each channel can override this in the Channels panel. Either way the approval card and the receipt say who the recipient will see.'),
+    category: t('Channels'), liveApply: true,
+  },
   'pool.reserveFloorPct': {
     type: 'number', default: 15, min: 0, max: 90, step: 5,
     label: t('Keep this much of each account\u2019s weekly quota in reserve (%)'),
@@ -978,6 +1029,7 @@ const SETTINGS_CATEGORIES = [
   t('Integration'),
   t('Background Work'),
   t('Spending'),
+  t('Channels'),
   t('Claude'),
   t('Codex'),
   t('OpenCode'),

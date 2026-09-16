@@ -76,6 +76,91 @@ const PUSH_HEARTBEAT_MS = 90 * 1000;
  *  list and never up. */
 const SCAN_SOURCE_ORDER = ['store', 'ui'];
 
+/** §6.4's EXCLUSIVITY MEASUREMENT (`push.missRate`). Exclusivity is ASSERTED
+ *  by the operator (`push.claimedExclusive`), MEASURED here and WITHDRAWN by
+ *  the engine: while the lane CARRIES CONTENT, every record first seen by the
+ *  reconciliation POLL rather than by push is a record push missed, and a
+ *  genuinely exclusive lane misses none. Crossing PUSH_MISS_THRESHOLD over at
+ *  least PUSH_MISS_MIN_SAMPLES demotes the lane to kick mode. The window is
+ *  ROLLING — the last PUSH_MISS_MIN_KEEP records or the last 24 h, whichever
+ *  is LARGER (r4): in kick mode push carries nothing, so a lifetime ratio
+ *  tends to 1.0 by construction and would pin a demoted lane above the line
+ *  for ever; and ticks where `laneState().carryContent` is false contribute
+ *  NO samples at all (the engine's rule — this module only does arithmetic).
+ *  A demotion is never retracted by these numbers: only the party that made
+ *  the claim re-declares it (the adapter row's "re-declare to retry"). */
+const PUSH_MISS_THRESHOLD = 0.02;
+const PUSH_MISS_MIN_SAMPLES = 20;
+const PUSH_MISS_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PUSH_MISS_MIN_KEEP = 200;
+/** A memory bound on the batches kept, never a measurement rule. */
+const PUSH_MISS_MAX_BATCHES = 2000;
+/** The three values `push.claimedExclusive` may hold; `unknown` (declare
+ *  nothing) is the conservative default — a cursor kick, never content. */
+const PUSH_CLAIMS = Object.freeze(['exclusive', 'shared', 'unknown']);
+
+/** The batches inside the rolling window at `now`: everything newer than
+ *  24 h, extended BACKWARDS until PUSH_MISS_MIN_KEEP records are covered. */
+function pushWindow(samples, now) {
+  const list = (Array.isArray(samples) ? samples : []).filter((s) => s && num(s.at) !== null && Number(s.n) > 0).slice();
+  list.sort((a, b) => Number(a.at) - Number(b.at));
+  const from = Number(now) - PUSH_MISS_WINDOW_MS;
+  let i = list.length, covered = 0;
+  while (i > 0 && (Number(list[i - 1].at) >= from || covered < PUSH_MISS_MIN_KEEP)) { i--; covered += Number(list[i].n); }
+  return list.slice(i);
+}
+/** Add ONE batch `{at, n, p}` (`n` judgeable records, `p` of them first seen
+ *  by the poll) and trim to the window. Pure: returns a new array. */
+function pushSamplesAdd(samples, { at, n, p } = {}) {
+  const nn = Math.max(0, Math.round(Number(n) || 0));
+  const pp = Math.min(nn, Math.max(0, Math.round(Number(p) || 0)));
+  const list = (Array.isArray(samples) ? samples : []).slice();
+  if (!nn) return list;
+  list.push({ at: Number(at) || 0, n: nn, p: pp });
+  const kept = pushWindow(list, Number(at) || 0);
+  return kept.length > PUSH_MISS_MAX_BATCHES ? kept.slice(kept.length - PUSH_MISS_MAX_BATCHES) : kept;
+}
+/** `{rate, total, missed, enough, batches}` over the window at `now`. */
+function pushMissRate(samples, now) {
+  const w = pushWindow(samples, now);
+  let total = 0, missed = 0;
+  for (const s of w) { total += Number(s.n); missed += Number(s.p); }
+  return { rate: total ? missed / total : 0, total, missed, enough: total >= PUSH_MISS_MIN_SAMPLES, batches: w.length };
+}
+/** Should the engine demote NOW. Never true for a lane already demoted (the
+ *  counters are not the trigger that clears one either). */
+function pushDemotionVerdict(push, now) {
+  const p = push || {};
+  const m = pushMissRate(p.samples, now);
+  return { demote: !p.demotedAt && m.enough && m.rate > PUSH_MISS_THRESHOLD, ...m, threshold: PUSH_MISS_THRESHOLD, minSamples: PUSH_MISS_MIN_SAMPLES };
+}
+
+/** THE ADAPTER ROW'S PUSH SENTENCE — structure in (`adapterView().push` +
+ *  the resolved lane), words out, `t()` injected because the digest is
+ *  broadcast to every client while the language is per device. Says the
+ *  lane's STATE and, when demoted, the REASON with its numbers. */
+function pushLaneText(push, lane, { t = defaultT, now = null } = {}) {
+  const p = push || {};
+  const l = lane || {};
+  const pct = (r) => (Math.round(Number(r) * 1000) / 10).toString();
+  if (p.enabled === false) return p.optIn ? t('push off (available — turn it on under Push…)') : t('push off');
+  if (p.demotedAt) {
+    const d = p.demoted || {};
+    return t('push is not exclusive here — fell back to cursor kicks, polling returned to the fast cadence ({missed} of {total} records, {pct}%, were first seen by the reconciliation poll)', { missed: d.missed || 0, total: d.total || 0, pct: pct(d.rate || 0) });
+  }
+  if (p.state === 'unavailable') return t('push unavailable: {why}', { why: p.lastStateWhy || t('unknown') });
+  if (!p.state) return t('push not started');
+  if (l.via === 'push' && l.live && l.carryContent) return t('push live — carrying messages (declared exclusive); the poll reconciles every 15 min');
+  if (l.via === 'push' && l.live) return p.claimedExclusive === 'shared' ? t('push live — cursor kicks only (declared shared)') : t('push live — cursor kicks only (exclusivity not declared)');
+  // Connected but silent past the heartbeat window: the resolver reads it as
+  // dead (positive evidence only) and polling is back at the fast cadence.
+  if (p.state === 'live' && l.why === 'push-dead') {
+    const age = num(p.lastEventAt) !== null && num(now) !== null ? humanAge(ageS(p.lastEventAt, Number(now))) : '';
+    return age ? t('push silent for {age} — polling at the fast cadence until it speaks', { age }) : t('push silent — polling at the fast cadence until it speaks');
+  }
+  return t('push {state} — polling at the fast cadence', { state: p.state });
+}
+
 /** A number, or `null` for ANYTHING that is not one. `Number(null)` is 0 and
  *  `Number('')` is 0, so a bare `Number.isFinite(Number(v))` turns "we were
  *  never told" into the epoch — which then renders as an age of 56 years and,
@@ -116,7 +201,10 @@ function laneState(caps, adapterRecord, entry, now) {
     // window here would buy 60 s of latency for nothing.
     return { via: 'scan', carryContent: false, live: false, pollCadence: 'fast', why: 'scan' };
   }
-  if (receive !== 'push' || push.enabled === false) {
+  // An OPT-IN push lane (`caps.pushOptIn`, Gmail's Pub/Sub pull — decision 20:
+  // available but off by default) is the poll lane until the record says
+  // `push.enabled === true`; every other push lane is on unless switched off.
+  if (receive !== 'push' || push.enabled === false || (c.pushOptIn && push.enabled !== true)) {
     return { via: 'poll', carryContent: false, live: false, pollCadence: 'fast', why: 'poll' };
   }
 
@@ -227,10 +315,28 @@ function resolved(caps, source, why, hostFacts, now) {
  * the P0a fake adapters authenticate against nothing, and saying so is the
  * point. `now` is a parameter, like every other resolver here.
  */
-function authState(adapterRecord, now, { lastPass = undefined } = {}) {
+function authState(adapterRecord, now, { lastPass = undefined, adapterState = null } = {}) {
   const a = (adapterRecord && adapterRecord.auth) || {};
   const lp = lastPass === undefined ? (adapterRecord && adapterRecord.lastPass) || null : lastPass;
   const expiresAt = num(a.expiresAt);
+  // The adapter's OWN answer, when the engine has one (design §14.3): an
+  // application credential that was withdrawn — the cluster env removed, the
+  // user's keys cleared — makes the adapter `needs-credentials` however fresh
+  // its token record looks, because a Lark tenant token is re-minted from the
+  // app secret on every call and a Google refresh needs the client secret.
+  // It is asked FIRST: nothing below can be true of an adapter that cannot
+  // build a request at all.
+  if (adapterState && adapterState.state === 'needs-credentials') {
+    return { state: 'needs-credentials', why: adapterState.why || 'no-credentials', expiresAt: null, missing: Array.isArray(adapterState.missing) ? adapterState.missing.slice() : [] };
+  }
+  // The adapter's own `needs-reauth` (P1: a refresh token past its lifetime,
+  // or a refresh the vendor answered `invalid_grant`) is a REFUSAL, so it is
+  // honoured like `needs-credentials`; its own `connected` is NOT — a stub can
+  // say that, only the record's evidence can (the r2 rule below).
+  if (adapterState && adapterState.state === 'needs-reauth') {
+    const at = num(adapterState.expiresAt);
+    return { state: 'expired', why: adapterState.why || 'needs-reauth', expiresAt: at === null ? expiresAt : at };
+  }
   if (lp && lp.ok === false && lp.code === 'auth-expired') return { state: 'expired', why: 'last-pass-refused', expiresAt };
   if (expiresAt !== null && expiresAt <= now) return { state: 'expired', why: 'token-expired', expiresAt };
   const hasCredential = !!(a.tokenEnc || expiresAt !== null || (Array.isArray(a.scopes) && a.scopes.length));
@@ -303,6 +409,28 @@ function identityWarning(caps) {
   const mark = ['none', 'marked', 'unknown'].includes(c.identityMarking) ? c.identityMarking : 'unknown';
   if (mark === 'none') return { level: 'none', marking: mark, verbatim: '' };
   return { level: 'warn', marking: mark, verbatim: c.identityMarkingText ? String(c.identityMarkingText) : '' };
+}
+
+/**
+ * WHY SENDING IS NOT OFFERED, in words (P4). The `why` is the adapter's own
+ * reason (§4's enum plus `send-scope-not-granted`, the P4 state where the
+ * platform can send but the held consent lacks the send permission — the
+ * sentence says what unlocks it, never a greyed control). An unknown reason
+ * is shown verbatim rather than hidden.
+ */
+function sendWhyText(why, { t = defaultT } = {}) {
+  switch (String(why || 'unknown')) {
+    case 'send-scope-not-granted': return t('sending needs the send permission on the connected app — reconnect (Connect again) to request it; on Lark that also means enabling im:message + im:message.send_as_user and publishing a version');
+    case 'read-only-adapter': return t('this channel is read-only');
+    case 'read-only-mailbox': return t('this conversation is read-only');
+    case 'not-a-member': return t('you are not a member of this conversation');
+    case 'left-group': return t('you left this conversation');
+    case 'bot-not-in-chat': return t('the bot is not in this chat');
+    case 'not-declared-for-this-identity': return t('this identity cannot send on this channel');
+    case 'stale': return t('the send capability has not been re-checked recently');
+    case 'unknown': return t('the send capability is not known yet');
+    default: return String(why);
+  }
 }
 
 /** The sentence for an `identityWarning`. Rendered where the LANGUAGE is
@@ -422,7 +550,10 @@ function humanAge(s) {
 }
 
 module.exports = {
+  sendWhyText,
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
+  PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
   laneState, scanState, convCapsState, offers, authState,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
+  pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
 };

@@ -41,6 +41,8 @@ import { openUsageWindow } from './usage-window.js';
 import { openJobsWindow, openInteractWindow } from './jobs-panel.js';
 import { openChannelWindow } from './channel-window.js';
 import { focusChannelsPanel } from './channels-panel.js';
+import { openChannelOutbox as openChannelOutboxFn } from './channel-outbox.js';
+import { openIntegrationsWindow } from './integrations-window.js';
 import { openSessionProps as openSessionPropsFn } from './session-props.js';
 import { openWorkflowDetail as openWorkflowDetailFn } from './workflow-detail.js';
 import { DesktopManager } from './desktop-manager.js';
@@ -2066,10 +2068,16 @@ class App {
   openJobs(opts) { return openJobsWindow(this, opts || {}); }
   openJobInteract(jobId, opts) { return openInteractWindow(this, jobId, opts || {}); }
   openChannel(adapterId, convId, opts) { return openChannelWindow(this, adapterId, convId, opts || {}); }
+  /** THE Outbox window (P3, design §9.2) — a singleton kind. */
+  openChannelOutbox(opts) { return openChannelOutboxFn(this, opts || {}); }
   /** The Channels PANEL (the rail). Returns false where there is no rail —
    *  the caller (the ⚙ row) is gated on the same fact, so a dead entry point
    *  is never offered rather than offered and refused. */
   openChannels() { return focusChannelsPanel(this); }
+  /** ⚙ → Integrations (design §14.5). Every consumer deep-links to ITS card:
+   *  `openIntegration('lark')` scrolls to and highlights that row; an id that
+   *  no longer exists opens the window with nothing highlighted, never throws. */
+  openIntegration(id, opts) { return openIntegrationsWindow(this, { focus: id || null, ...(opts || {}) }); }
 
   // Diagnostics report: renders the local telemetry summary (client errors,
   // boot crashes, feature usage) as a static HTML page in the embedded

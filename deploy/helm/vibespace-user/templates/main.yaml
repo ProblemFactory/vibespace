@@ -34,6 +34,9 @@ stringData:
   {{- else if and .Values.gdrive .Values.gdrive.clientId }}
   gdriveClientSecret: {{ .Values.gdrive.clientSecret | quote }}
   {{- end }}
+  {{- if .Values.integrations }}
+  integrations: {{ .Values.integrations | toJson | quote }}
+  {{- end }}
 {{- if not .Values.storage.existingClaim }}
 ---
 apiVersion: v1
@@ -168,6 +171,13 @@ spec:
               value: {{ .Values.gdrive.clientId | quote }}
             - name: VIBESPACE_GDRIVE_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: {{ $name }}, key: gdriveClientSecret } }
+            {{- end }}
+            {{- if .Values.integrations }}
+            # Cluster-provided integration credentials: JSON
+            # [{id,label,values:{…}},…] read by src/server/integration-store.js.
+            # A user's own key in data/integrations.json always wins.
+            - name: VIBESPACE_INTEGRATIONS
+              valueFrom: { secretKeyRef: { name: {{ $name }}, key: integrations } }
             {{- end }}
             # The instance's public address (agentd.publicUrl default): remote
             # machines use it for reverse mounts when no device tunnel exists.

@@ -141,6 +141,9 @@ const TAIL_BYTES = 2 * 1024 * 1024;
  *  debounced, and SIGINT/SIGTERM flush). */
 const FLUSH_DEBOUNCE_MS = 500;
 const FLUSH_INTERVAL_MS = 2000;
+// The outbox keeps at most this many proposals on disk (terminal ones fall
+// off oldest-first at write time; the audit log is the permanent record).
+const OUTBOX_KEEP = 500;
 
 const EMPTY_INDEX = () => ({ v: 1, conversations: {}, updatedAt: 0 });
 
@@ -310,7 +313,7 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
       inBatch.add(r.vendorId);
       fresh.push(r);
     }
-    if (!fresh.length) return { appended: 0, duplicates, lastAt: null, healed: false };
+    if (!fresh.length) return { appended: 0, duplicates, lastAt: null, healed: false, freshAt: [], fresh: [] };
     const fp = logPath(adapterId, convId);
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     let healed;
@@ -324,7 +327,13 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
     for (const r of fresh) rememberVendorId(set, r.vendorId);
     let lastAt = null;
     for (const r of fresh) if (Number.isFinite(r.at) && (lastAt === null || r.at > lastAt)) lastAt = r.at;
-    return { appended: fresh.length, duplicates, lastAt, healed };
+    // `freshAt`: each appended record's instant (P1 push — the exclusivity
+    // measurement judges only records stamped after the lane began carrying
+    // content, so a first ingest's backlog is never a "miss").
+    // `fresh`: the appended records THEMSELVES (P2): the filter runs over
+    // exactly what became durable, on every lane, which is what makes the
+    // wake count a property of the corpus and not of the lane (fence 12).
+    return { appended: fresh.length, duplicates, lastAt, healed, freshAt: fresh.map((r) => (Number.isFinite(r.at) ? r.at : 0)), fresh: fresh.slice() };
   }
 
   /**
@@ -559,6 +568,43 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
     return run;
   }
 
+  // ── the outbox (design §9, P3): proposals + their state machine, THE SAME
+  // SINGLE-OWNER SHAPE (invariant 3). Read once, mutated live inside a
+  // serialized door, written by that door only — atomic JSON, because the
+  // approval card and the Outbox window render from ONE store and must never
+  // disagree (§9.2). Bounded: terminal proposals past OUTBOX_KEEP fall off
+  // oldest-first at write time (the audit log keeps the record for ever).
+  const outboxFile = path.join(dir, 'outbox.json');
+  let ob = readJson(outboxFile, null);
+  if (!ob || typeof ob !== 'object' || !ob.proposals || typeof ob.proposals !== 'object') ob = { v: 1, proposals: {}, seq: 0 };
+  if (!Number.isFinite(ob.seq)) ob.seq = 0;
+  let obChain = Promise.resolve();
+  function outboxPrune() {
+    const all = Object.values(ob.proposals);
+    if (all.length <= OUTBOX_KEEP) return;
+    const done = all.filter((p) => p && ['sent', 'failed', 'rejected', 'expired'].includes(p.state)).sort((a, b) => (a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0));
+    for (const p of done.slice(0, all.length - OUTBOX_KEEP)) delete ob.proposals[p.id];
+  }
+  function outboxUpdate(fn) {
+    const run = obChain.then(() => fn(ob)).then((r) => { outboxPrune(); writeJsonAtomic(outboxFile, ob); return r; });
+    obChain = run.then(() => {}, () => {});
+    return run;
+  }
+  function outboxSnapshot() { return JSON.parse(JSON.stringify(ob)); }
+  /** A new proposal id — a sequence under the owner, so two proposals born
+   *  in the same millisecond cannot share one. */
+  function outboxNextId() { ob.seq = (Number(ob.seq) || 0) + 1; return `p-${now().toString(36)}-${ob.seq.toString(36)}`; }
+
+  /** The audit log's LIVE tail (today's file), newest last, bounded. A
+   *  reader for THIS instance's own record — it never leaves the instance. */
+  function auditTail({ limit = 200 } = {}) {
+    let text = '';
+    try { text = fs.readFileSync(auditFile, 'utf-8'); } catch { return []; }
+    const out = [];
+    for (const line of text.split('\n')) { if (!line) continue; try { out.push(JSON.parse(line)); } catch {} }
+    return out.slice(-Math.max(1, limit));
+  }
+
   interval = setInterval(flush, FLUSH_INTERVAL_MS);
   if (interval.unref) interval.unref();
 
@@ -570,14 +616,15 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
   }
 
   return {
-    dir, indexFile, adaptersFile, auditFile, archiveDir, logPath,
+    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, logPath,
     index: { update, snapshot, entry, flush, isDirty: () => dirty },
     adapters: { update: adaptersUpdate, live: () => ad },
-    appendRecords, readTail, countSince, trim, audit, close,
+    outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
+    appendRecords, readTail, countSince, trim, audit, auditTail, close,
   };
 }
 
 module.exports = {
   createChannelStore, writeJsonAtomic, safeSeg,
-  RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES,
+  RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP,
 };
