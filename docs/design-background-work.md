@@ -579,3 +579,154 @@ untruncated spill file `data/job-notifications-read/<cid>.md` (append,
 256KB head-trim, 14d GC); full self-inspection (`show <id>`,
 `list --mine|--subscribed`, snapshots carry all creation params, env values
 never leave the store); teaching kept in sync across ALL THREE renderers.
+
+## 13. Triage: acknowledgement, folding, archival (2026-09-14, owner-approved; 5b 2026-09-15)
+
+**Measured problem (the owner's instance, 2026-09-14):** 248 `kind:'task'`
+records — 207 done and ALL older than a day (nothing ever archived a
+one-shot), 36 failed (33 from two render sessions of one project, ages 1–7
+days), the rail badge read "36!" for ever, and expanding a failed row showed
+nothing actionable. Owner-approved defaults: **24 h / 7 d /
+notified-counts-as-acknowledged.** Every rule below is PURE where it is a
+decision (`src/job-model.js`, `src/lib/jobs-layout.js`) and ORCH where it
+touches disk (`src/jobs.js`, `src/server/jobs-wiring.js`).
+
+### 13.1 Acknowledgement (PURE `ackState(job, now)` → `{acked, by, at}`)
+
+A **terminal one-shot** is a `task` (a cron's per-fire child included; never
+a service, never a cron parent — they are not one-shots) in state
+`done | failed | interrupted | missed | unverified`. It is acknowledged when:
+
+- (a) **notified** — `job.notifyLog` carries an `ok:true` delivery AT OR
+  AFTER the terminal run's `endedAt` on a lane that reached a conversation
+  or the user (`message` / `channel` / `rpc-queue` — codex's app-server lane,
+  a billed turn/start when idle, a steer or queue/add when busy /
+  `user-inbox` / `remote-message`; test-job-model CENSUSES the ladder's
+  ok:true lanes against `ACK_LANES`, so a lane the ladder grows cannot strand
+  a backend's owners — 2026-09-16). A `stash`, `off` or
+  `suppressed` entry is NOT an acknowledgement — nobody has read it yet. A
+  stash DRAINED later into a resume IS: the engine stamps
+  `job.ack = {by:'notified', at}` at the drain, on every job the drained
+  block named.
+- (b) **agent-read** — an agent of the job's OWNER LINEAGE (the CLI's own
+  view/control predicate in job-model, never a second one) ran
+  `poll` / `show` / `logs` on it after the terminal instant; the route
+  stamps `{by:'agent-read', at}`. A `jbt_` job-token read of ITSELF never
+  acknowledges, nor does a stranger session's read.
+- (c) **user-opened** — the user expanded its row in the panel
+  (`POST /api/jobs/:id/seen` stamps `{by:'user-opened', at}`).
+
+`ack` is persisted on the record (writeJsonAtomic through `_save`) and
+broadcast like every other job change; a NEW run (start/restart) clears it.
+The client READS `job.ack` — the server computes it over the full record
+(the snapshot's journal is truncated) — and never derives acknowledgement.
+
+### 13.2 The badge and the summary (PURE `badgeCounts` in `src/lib/jobs-layout.js`)
+
+`attention = awaiting-user + unacknowledged (failed | missed | unverified)`
+is the red number on the rail badge and in both panel summaries; acknowledged
+failures are a grey "N seen", never red. ONE PURE counter — the panel used
+to compute `bad` twice. The agent digest (`digestFor` / `updatesFor`) is
+unchanged except that archived records are excluded.
+
+### 13.3 Folding (PURE `foldTasks(tasks, {expanded, sessionNames})`)
+
+The Tasks section groups one-shots by OWNER SESSION (label = the sidebar's
+display name when known, else the short id; a task with no owner session is
+its own "created by you" group), then by NAME FAMILY inside a session
+(`familyOf`: a trailing ` run`, `-r<n>`, `-v<n>`, `-<n>` and version-like
+tails are stripped until the name is stable — a pure string rule with a
+table test). A group row is a `<button aria-expanded>` (keyboard-reachable)
+showing label · count · running · failed (unacked red / acked grey) · latest
+age. A group is expanded by DEFAULT when it holds a running job, an
+awaiting-user job or an unacknowledged failure, else collapsed; the user's
+choices persist in user state `jobsPanelFolds` (PATCH merge-only, pruned to
+live groups by `pruneFolds`) and are applied AFTER the defaults. Inside an
+expanded group the rows keep the existing renderer; Services and Cron keep
+their flat rendering.
+
+### 13.4 A failed row says why
+
+The one-shot row for `failed | missed | interrupted` shows the exit code and
+the LAST NON-EMPTY LINE of its log (`run.lastLine`, computed ONCE at
+finalize from the log file, ≤ 200 code points, passed through the existing
+secret literal-redaction), so the expanded content is actionable. The
+detail view is unchanged.
+
+### 13.5 Archival (ORCH `src/jobs.js`)
+
+A sweep at boot and every 5 min ON THE ENGINE'S EXISTING TICK (no second
+timer) moves terminal one-shots out of `data/jobs.json` into
+`data/jobs-archive.json` (append-only, newest 2000; a record keeps
+`runs` / `notifyLog` / `ack` and gains `archivedAt` + `archivedWhy` ∈
+`done | failed-acknowledged | missed-acknowledged | interrupted-acknowledged
+| unverified-acknowledged`):
+
+- `done` → after `jobs.archiveDoneAfterHours` (default 24) since `endedAt`;
+- `failed | missed | interrupted | unverified` → after
+  `jobs.archiveFailedAfterDays` (default 7) since the ACKNOWLEDGEMENT, and
+  **never while unacknowledged**;
+- never a service, never a cron parent, never a job with a live pid or an
+  open interaction, never a cron child whose schedule is still active;
+- `0` = never archive. The per-job logs dir follows the existing retention.
+
+Both numbers are settings rows in the **Background Work** category
+(`SETTINGS_CATEGORIES`, zh+ja). `GET /api/jobs?archived=1` lists the archive
+(same snapshot shape + `archived:true`, `archivedAt`, `archivedWhy`);
+`vibespace-job list --archived` prints it; `poll` / `show` / `logs` of an
+ARCHIVED id read through to the archive (response carries `archived:true`) —
+an agent holding an old id never gets a 404 because of housekeeping. The
+panel shows an "Archived · N" row at the foot of Tasks that fetches the
+archive ONLY when clicked; ✕ on an archived row deletes it for good (record +
+log dir) behind the existing confirm dialog. One `jobs-updated
+{archived:[ids]}` broadcast per sweep, never per record. **The archive copy is
+DURABLE before a record leaves `jobs.json`** (2026-09-16): the sweep writes
+the archive FIRST and releases the records only when that write succeeded — a
+failed write (ENOSPC / EACCES / EROFS) releases nothing, logs the verbatim
+error + telemetry `jobs-archive-write-failed`, and the next sweep retries; a
+record re-archived after a failed store flush REPLACES its older copy, never
+duplicates it; `rm` on an archived id keeps the row when the rewrite fails.
+
+### 13.5b Held notifications are visible, and the ledger says who spent (2026-09-15)
+
+After a real incident (the P4 spend guard's per-slot hourly cap —
+`spend.unattendedPerIdentityHour`, shared by EVERY conversation on that
+credential slot — was reached, the jobs lane STASHED each notification and
+the owner saw nothing until the next prompt drained them, so the product read
+as a broken notifier): ① every stash entry is TYPED (`held.kind` ∈
+`spend-cap | rate-floor | not-reachable | off`, with the slot + ceiling the
+ladder's spend refusal names; an older entry with no `held` reads as
+`not-reachable`), the held digest `{total, byConversation:{cid:{count,
+kinds, reason}}}` rides `GET /api/jobs` and EVERY `jobs-updated` broadcast,
+and the panel summary, the rail badge tooltip and the affected conversation's
+chat status-bar chip say why in the device's own words (`heldText`; the
+server sends structure, the client says the words; the chip clears on
+drain); ② `src/server/spend-guard.js`'s ledger stamps carry the REASON (the
+`SPEND_REASONS` member) beside the timestamp — `{at, reason}`; a bare number
+from an older build loads and counts as producer `unknown`; ③ the guard's
+80 % notice and its refusal inbox item name the window's top producers.
+Defaults are NOT changed here (owner decision pending on 30/h · 200/day ·
+800/instance/day).
+
+### 13.6 Gates
+
+`scripts/test-job-model.mjs` (ackState truth table incl. stash-vs-drained
+and the self-read exclusion; foldTasks table, family rule, default
+expansion, persisted-fold override; the badge helper), `scripts/test-jobs-
+triage.mjs` (fast: the real engine + real user routes over the NEUTRAL
+fixture `scripts/jobs-triage-fixture.mjs` — 200 done > 1 d, 36 failed with
+mixed acknowledgement — with an injected clock: who archives / who stays / an
+unacked failure never at any age / read-through / the cap / a restart / one
+broadcast per sweep / `/seen` / `?archived=1` / the CLI's `--archived`),
+`scripts/test-jobs-panel.mjs` (heavy chrome at 1200×800 and 375×667: the
+badge, default expansion, a persisted collapse across a reload, the failed
+row's last line, the held summary, the Archived row fetching only on click),
+`scripts/test-spend-paths.mjs` (the ledger stamp shape + prune compatibility).
+
+**Invariants.** A notification nobody could have read is not an
+acknowledgement. A job never acknowledges itself. An unacknowledged failure
+is never archived, at any age, on any path. Housekeeping never answers an
+agent's id with a 404. A fold that hides a running or awaiting-user row by
+default is a defect. A persisted fold outliving its group grows user state
+without bound, so folds are pruned to live groups. A sweep broadcasts once.
+A stash entry without a typed reason is a notifier that reads as broken.

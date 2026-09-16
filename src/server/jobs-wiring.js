@@ -9,10 +9,14 @@ const M = require('../job-model.js');
 const fs = require('fs');
 const path = require('path');
 
-function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver }) {
+function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null }) {
   const jm = new JobManager({
     dataDir,
-    broadcast: (type, payload) => broadcastAll({ type, ...payload }),
+    // every jobs-updated carries the HELD digest (5b ①): one dirty signal, one
+    // computation — the rail badge, the panel summary and every chat window's
+    // status-bar chip read it off the same frame (`jm` is bound lazily: the
+    // constructor never broadcasts)
+    broadcast: (type, payload) => broadcastAll({ type, ...payload, held: jm.heldDigest() }),
     notifyUser: ({ text, urgency, jobId, jobName, ownerCid }) => {
       // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
       // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
@@ -40,7 +44,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         });
       } catch (e) { log('[jobs] notify failed:', e.message); }
     },
-    log,
+    log, getTelemetry, // optional: an archive write failure names itself (jobs-archive-write-failed)
     resolveJobAsk: (jobId, opts) => { try { return userTodos.resolveByJob(jobId, opts); } catch (e) { log('[jobs] inbox resolve failed:', e.message); return 0; } },
     // ── owner auto-notify lanes (2.344.0, B-0bf4) ─────────────────────────
     // Global default: agents.jobNotify (ON unless the user turned it off).
@@ -72,9 +76,16 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // op) → the caller stashes on a miss. Shared with agent-to-agent
     // messaging via src/server/conversation-deliver.js.
     deliverToConversation: (cid, text, opts) => deliver.deliverToConversation(cid, text, opts),
+    // TRIAGE ARCHIVE policy (design §13 rule 5): the two settings rows, read
+    // live; an explicit 0 = never archive that class
+    archivePolicy: () => ({ doneAfterHours: serverSetting('jobs.archiveDoneAfterHours'), failedAfterDays: serverSetting('jobs.archiveFailedAfterDays') }),
   });
 
   const USER = { isUser: true, groups: new Set() };
+  const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '' }));
+  // the panel's fold groups one-shots by OWNER SESSION (§13 rule 3): the
+  // conversation lineage id + the webui session id ride the user list only
+  const ownerOf = (j) => ({ conversationId: (j.owner && j.owner.conversation && j.owner.conversation.id) || null, sessionId: (j.owner && j.owner.sessionId) || null });
 
   // A service published EXTERNALLY (user hit publish on its port in the Ports
   // panel instead of creating with --publish) still shows the URL on its job
@@ -93,7 +104,16 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // ── user REST (cookie-authed): the panel sees and controls everything ──
   app.get('/api/jobs', (req, res) => {
     if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
-    res.json({ jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], runs: (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger })) })) });
+    // ?archived=1 = the archive list, SAME snapshot shape + archivedAt/archivedWhy
+    // (triage §13 rule 5) — fetched by the panel only when the user asks
+    if (req.query.archived) {
+      return res.json({ archived: true, jobs: jm.archivedList().map((r) => ({ ...jm.snapshotArchived(r), access: r.access, ownerSession: ownerOf(r), runs: runsOf(r) })) });
+    }
+    res.json({
+      jobs: [...jm.jobs.values()].map((j) => ({ ...enrichPublished(jm.snapshot(j), j), access: j.access, envKeys: Object.keys(j.cmd?.env || {}), envFrom: j.envFrom || [], ownerSession: ownerOf(j), runs: runsOf(j) })),
+      archivedCount: jm.archivedCount(),
+      held: jm.heldDigest(),
+    });
   });
   // user-side create (the panel's ＋New — no vsst_ token in the browser)
   app.post('/api/jobs', (req, res) => {
@@ -106,19 +126,37 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   });
   app.get('/api/jobs/:id', (req, res) => {
     const job = jm.jobs.get(req.params.id);
-    if (!job) return res.status(404).json({ error: 'no such job' });
-    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 1000) }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
+    const tail = Math.min(Number(req.query.tail) || 0, 1000);
+    if (!job) {
+      // READ-THROUGH to the archive (triage §13 rule 5): housekeeping must
+      // never turn an id somebody holds into a 404
+      const rec = jm.archivedById(req.params.id);
+      if (rec) return res.json({ job: { ...jm.snapshotArchived(rec, { tail }), access: rec.access, interaction: rec.interaction, runs: rec.runs } });
+      return res.status(404).json({ error: 'no such job' });
+    }
+    res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
   });
   app.post('/api/jobs/:id/:act', (req, res) => {
     const job = jm.jobs.get(req.params.id);
-    if (!job) return res.status(404).json({ error: 'no such job' });
     const act = req.params.act;
+    if (!job) {
+      // an ARCHIVED record answers exactly two acts: ✕ (gone for good) and
+      // the panel's expand ping (already acknowledged — a no-op that says so)
+      const rec = jm.archivedById(req.params.id);
+      if (!rec) return res.status(404).json({ error: 'no such job' });
+      if (act === 'rm') { const r = jm.rmArchived(rec.id); return r.error ? res.status(400).json({ error: r.error }) : res.json({ success: true, ...r }); }
+      if (act === 'seen') return res.json({ success: true, changed: false, ack: M.ackState(rec), archived: true });
+      return res.status(400).json({ error: `job ${rec.id} is archived — only rm applies` });
+    }
     try {
       let r;
       if (act === 'stop') r = jm.stop(job, { force: !!req.body?.force });
       else if (act === 'start') r = jm.start(job);
       else if (act === 'rm') r = jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
       else if (act === 'answer') r = jm.answerPanel(job, req.body?.answers || {});
+      // the user EXPANDED the row (triage §13 rule 1c): a terminal one-shot is
+      // acknowledged by the person who opened it; anything else is a no-op
+      else if (act === 'seen') { const changed = jm.markAck(job, 'user-opened'); if (changed) jm._save(); return res.json({ success: true, changed, ack: M.ackState(job) }); }
       else if (act === 'access') {
         for (const k of ['view', 'control']) if (req.body?.[k] && ['session', 'group', 'all'].includes(req.body[k])) job.access[k] = req.body[k];
         job.access.lockedBy = req.body?.lock === false ? null : req.body?.lock === true ? 'user' : job.access.lockedBy;

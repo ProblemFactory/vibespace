@@ -44,6 +44,20 @@ Three independent audiences:
    context injection (never a wake); a job's announce flood coalesces to a
    single `×N + latest` line.
 
+**Acknowledgement (2026-09-14 triage)**: a finished one-shot (done / failed /
+missed / interrupted / unverified) counts as ACKNOWLEDGED once somebody could
+have read its outcome — its owner conversation was notified on a lane that
+reaches somebody: the claude inbox, codex's app-server lane, a channel, the
+user's inbox or a remote machine's inbox (a stashed notification is NOT read; the same stash drained
+into a resume IS), an agent of the OWNER LINEAGE ran `poll` / `show` /
+`logs` on it after it ended (that is you, when you check your own job with
+your session token — so checking a failed job clears the user's red badge for
+it; a `jbt_` job-token read of ITSELF never counts, nor does a stranger
+session's read), or the user expanded its row in the panel. The user's badge
+counts only awaiting-user + UNACKNOWLEDGED failures, and an unacknowledged
+failure is never archived — so if you want a failure to stay in the user's
+face, do not poll it; if you have handled it, poll it once.
+
 **Quiet-success law**: a scheduled run ending fine is silent by default
 (ring entry only). Opt successes into events+notify with `--notify-ok`.
 EXCEPTION (2.361.4): a scheduled BARE `echo`/`printf` command is recognized
@@ -109,7 +123,13 @@ batch, read <path>".
 
 ## 7. Self-inspection & control
 
-- `vibespace-job list [--mine|--subscribed]` — ★mine / ✓sub markers
+- `vibespace-job list [--mine|--subscribed|--archived]` — ★mine / ✓sub markers;
+  `--archived` lists the ARCHIVE (finished one-shots leave the live list a day
+  after a success or a week after somebody acknowledged a failure; the record
+  keeps its runs / delivery log / acknowledgement)
+- an ARCHIVED id still answers `poll` / `show` / `logs` (marked `archived`,
+  never a 404 because of housekeeping); `rm <id>` on an archived id deletes
+  the record and its log for good
 - `vibespace-job show <id>` — FULL registration: argv/cwd/env names, schedule
   + next fire, restart/timeout/until, access + lock, notify state + last
   delivery, subscribers + your filter, context, last run

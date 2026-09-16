@@ -309,9 +309,143 @@ function filterMatches(pattern, text) {
   try { return new RegExp(pattern, 'i').test(String(text).slice(0, 2000)); } catch { return false; }
 }
 
+// ── TRIAGE: acknowledgement / archival (2026-09-14, owner-approved;
+//    docs/design-background-work.md §13) ───────────────────────────────────
+// A ONE-SHOT is a `task` record — a cron's per-fire child is one too (it is
+// the record that carries the failure). Services and cron parents are never
+// one-shots: they have no terminal instant to acknowledge.
+const ONE_SHOT_TERMINAL = new Set(['done', 'failed', 'interrupted', 'missed', 'unverified']);
+// the states the badge counts as "needs a human": awaiting-user plus every
+// terminal one-shot state that is NOT a clean completion (interrupted is an
+// owner's own stop — a warning, never red)
+const ATTENTION_FAILED = new Set(['failed', 'missed', 'unverified']);
+const isOneShot = (job) => !!job && (job.kind || 'task') === 'task';
+const isTerminalOneShot = (job) => isOneShot(job) && ONE_SHOT_TERMINAL.has(job.state);
+/** the instant the one-shot's LAST run ended = the terminal instant an
+ *  acknowledgement must postdate. A record with no run (an unverified
+ *  skeleton) reports its createdAt; nothing known ⇒ 0. */
+function terminalAt(job) {
+  const run = job && job.runs && job.runs[job.runs.length - 1];
+  if (run && run.endedAt) return Number(run.endedAt);
+  return Number((job && (job.terminalAt || job.createdAt)) || 0);
+}
+// lanes on which a notification REACHED somebody: a conversation's inbox
+// ('message'), a channel event, the codex wrapper's app-server lane
+// ('rpc-queue' — a billed turn/start when idle, a steer / queue/add when busy;
+// verifier 2026-09-16: it was missing, so every codex-owned failure stayed
+// red for ever and was never archived), the user's own inbox, a remote
+// machine's inbox. 'stash' is a queue nobody has read yet, 'off'/'suppressed'
+// delivered nothing. test-job-model CENSUSES the producers of ok:true journal
+// entries (the delivery ladder's returns + jobs.js's _notifyLogPush literals)
+// against this set — a lane the ladder grows cannot silently strand a backend.
+const ACK_LANES = new Set(['message', 'channel', 'rpc-queue', 'user-inbox', 'remote-message']);
+const ACK_BY = new Set(['notified', 'agent-read', 'user-opened']);
+/** PURE. Has somebody SEEN this terminal one-shot? Acknowledged when (a) the
+ *  engine stamped `job.ack` (a stash drained into a resume, an owner-lineage
+ *  agent read, the user opening the row) at or after the terminal instant, or
+ *  (b) the delivery journal carries an ok:true delivery on a lane that reached
+ *  a conversation or the user at or after it. `now` is accepted for the
+ *  signature the design names; acknowledgement never decays, so it is unused. */
+function ackState(job, now = Date.now()) { // eslint-disable-line no-unused-vars
+  const none = { acked: false, by: null, at: null };
+  if (!isTerminalOneShot(job)) return none;
+  const t = terminalAt(job);
+  const a = job.ack;
+  if (a && ACK_BY.has(a.by) && Number(a.at) >= t) return { acked: true, by: a.by, at: Number(a.at) };
+  for (const e of job.notifyLog || []) {
+    if (e && e.ok === true && ACK_LANES.has(e.lane) && Number(e.ts) >= t) return { acked: true, by: 'notified', at: Number(e.ts) };
+  }
+  return none;
+}
+/** PURE. What the badge counts a record as: 'awaiting' | 'unacked-failure' |
+ *  'acked-failure' | null. A parked SERVICE (state failed) is a failure that
+ *  can never be acknowledged — it needs a start — so it stays unacked/red. */
+function attentionOf(job, now = Date.now()) {
+  if (!job) return null;
+  if (job.state === 'awaiting-user') return 'awaiting';
+  if (!ATTENTION_FAILED.has(job.state)) return null;
+  if (!isOneShot(job)) return 'unacked-failure';
+  return ackState(job, now).acked ? 'acked-failure' : 'unacked-failure';
+}
+/** PURE. May an owner-lineage agent's read of this record count as an
+ *  acknowledgement? A jbt_ job-token read of ITSELF never does (the process
+ *  reporting its own state has not been SEEN by anybody). */
+function agentReadAcks(job, caller, { selfJob = false } = {}) {
+  if (selfJob || !caller) return false;
+  return isTerminalOneShot(job) && isOwner(job, caller);
+}
+/** PURE. Should this record leave data/jobs.json for the archive?
+ *  done ⇒ after doneAfterMs since its terminal instant; failed|missed|
+ *  interrupted|unverified ⇒ after failedAfterMs since ACKNOWLEDGEMENT and
+ *  never while unacknowledged; never a service / cron parent, a live process,
+ *  an open interaction, or a cron child whose schedule is still active (that
+ *  record IS the cron's run ring — archiving it would start a new ring every
+ *  day). 0 = never. Returns {archive, why}; `why` is a closed vocabulary. */
+function archiveVerdict(job, { now = Date.now(), doneAfterMs = 24 * 3600e3, failedAfterMs = 7 * 86400e3, alive = false, cronParentActive = false } = {}) {
+  const keep = (why) => ({ archive: false, why });
+  if (!isOneShot(job)) return keep('not-a-one-shot');
+  if (!ONE_SHOT_TERMINAL.has(job.state)) return keep('not-terminal');
+  if (alive) return keep('live-process');
+  if (job.interaction && job.interaction.pending) return keep('open-interaction');
+  if (job.cronParent && cronParentActive) return keep('cron-schedule-active');
+  const t = terminalAt(job);
+  if (job.state === 'done') {
+    if (!(doneAfterMs > 0)) return keep('archive-done-off');
+    return now - t >= doneAfterMs ? { archive: true, why: 'done' } : keep('done-too-young');
+  }
+  const ack = ackState(job, now);
+  if (!ack.acked) return keep('unacknowledged');
+  if (!(failedAfterMs > 0)) return keep('archive-failed-off');
+  return now - ack.at >= failedAfterMs ? { archive: true, why: `${job.state}-acknowledged` } : keep('acknowledged-too-young');
+}
+/** PURE. The last NON-EMPTY line of a log tail, ≤ `max` code points — the
+ *  one actionable line a failed row can show. Redaction is the caller's. */
+function lastLineOf(text, max = 200) {
+  const lines = String(text || '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].replace(/\r$/, '').trim();
+    if (l) return clip(l, max);
+  }
+  return '';
+}
+// ── HELD NOTIFICATIONS ARE TYPED (2026-09-15, owner: the spend cap stashed
+//    every notification and the product read as a broken notifier) ──────────
+const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'off'];
+/** PURE. Type a stash reason from the ladder's own answer + the engine's text. */
+function heldKind(r, reason) {
+  if (r && r.refused === 'spend') return 'spend-cap';
+  const s = String((r && r.reason) || reason || '');
+  if (/^rate floor/.test(s)) return 'rate-floor';
+  if (/auto-notify off/.test(s)) return 'off';
+  return 'not-reachable';
+}
+/** PURE. The digest every surface renders the held count from — STRUCTURE,
+ *  never a sentence (the language is per device). `pending` = Map|object of
+ *  conversationId → stash entries, each optionally carrying `held`. */
+function heldDigest(pending) {
+  const entries = pending instanceof Map ? [...pending.entries()] : Object.entries(pending || {});
+  const byConversation = {};
+  let total = 0;
+  for (const [cid, list] of entries) {
+    if (!Array.isArray(list) || !list.length) continue;
+    const kinds = {};
+    let newest = null;
+    for (const n of list) {
+      const h = (n && n.held) || { kind: 'not-reachable' };
+      kinds[h.kind] = (kinds[h.kind] || 0) + 1;
+      if (!newest || Number(n.ts) >= Number(newest.ts)) newest = n;
+    }
+    total += list.length;
+    byConversation[cid] = { count: list.length, kinds, reason: (newest && newest.held) || { kind: 'not-reachable' } };
+  }
+  return { total, byConversation };
+}
+
 module.exports = {
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   validateFilter, filterMatches,
+  ONE_SHOT_TERMINAL, ATTENTION_FAILED, ACK_LANES, isOneShot, isTerminalOneShot, terminalAt, ackState, attentionOf, agentReadAcks, archiveVerdict, lastLineOf,
+  HELD_KINDS, heldKind, heldDigest,
   vetSpec, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,

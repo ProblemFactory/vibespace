@@ -231,7 +231,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       let v = null;
       try { v = authorizeSpend({ reason: spendReason, session, identity, cid }); }
       catch (e) { log('[deliver] spend authorizer threw (refusing, the stash keeps the message):', e.message); return { ok: false, reason: 'spend authorizer failed: ' + e.message, refused: 'spend' }; } // FAIL CLOSED (P8)
-      if (v && v.ok === false) return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0 };
+      // a spend refusal is TYPED for the stash (5b ①): the caller's held
+      // entry names the slot and the ceiling it hit, so the panel can say why
+      if (v && v.ok === false) {
+        const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
+        return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null };
+      }
       // CHARGE WHAT YOU AUTHORIZED (r4, reproduced). `identity` is null on the
       // local-session branch, and handing that null to the charge made
       // `spend-guard.note()` run `identityOf(session)` A SECOND TIME, at charge

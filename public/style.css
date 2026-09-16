@@ -3731,3 +3731,22 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-at { font-size: 10px; color: var(--text-dim); }
 .chanmsg-syn { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; }
 .chanmsg-body { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ── Background Work TRIAGE (design §13, 2026-09-14): session heads, fold groups, the failed row's last line, the archive row ── */
+.jobs-sess-head { font-size: 11px; font-weight: 600; color: var(--text-dim); margin: 10px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-group { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; text-align: left; padding: 5px 8px; margin-bottom: 4px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.jobs-group:hover { background: var(--bg-hover); }
+.jobs-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.jobs-group-attn { border-left-color: var(--red); }
+.jobs-group-chev { width: 12px; color: var(--text-dim); flex-shrink: 0; }
+.jobs-group-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-group-count, .jobs-group-age { color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+.jobs-group-chip { font-size: 10px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+.jobs-group-run { color: var(--green); border-color: var(--green); }
+.jobs-group-ask { color: var(--yellow); border-color: var(--yellow); }
+.jobs-group-bad { color: var(--red); border-color: var(--red); }
+.jobs-group-seen { color: var(--text-dim); }
+.jobs-lastline { font-family: monospace; font-size: 10px; color: var(--red); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.jobs-card-archived { opacity: .75; }
+.jobs-archived-toggle { margin-top: 6px; }
+.jobs-summary-held { color: var(--yellow); }

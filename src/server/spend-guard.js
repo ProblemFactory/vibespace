@@ -259,7 +259,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       try { global.__vsEvent?.('spend-charge-unhinted', String(reason || 'unknown')); } catch { }
     }
     const identity = identityFor(session, identityHint);
-    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits() });
+    // the stamp carries its producer (5b ②) so a later reader can say who spent the slot
+    const r = A.noteUnattendedSpend(state, { identity, at: now, limits: limits(), reason });
     state = r.state;
     persist();
     if (r.warn) {

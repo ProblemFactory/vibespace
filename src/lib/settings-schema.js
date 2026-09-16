@@ -393,6 +393,23 @@ const SETTINGS_SCHEMA = {
     description: t('When a background job finishes, fails, is parked, or needs input, its owner conversation gets a message through Claude Code’s own cross-session messaging inbox (delivered by the CLI under its inbound rules; an idle session starts a turn, billed like a typed prompt). When the conversation is closed, the notification is stashed and injected the next time it resumes. Per-group override in the Task Group detail window; per-job override at creation (--notify on/off).'),
     category: t('Integration'), liveApply: true,
   },
+  // ── Background Work TRIAGE (2026-09-14, docs/design-background-work.md §13):
+  // terminal one-shots leave the live list for data/jobs-archive.json. The two
+  // clocks are SETTINGS; an explicit 0 means "never archive that class". An
+  // UNACKNOWLEDGED failure is never archived at any age — the failed clock
+  // starts at the acknowledgement, not at the failure.
+  'jobs.archiveDoneAfterHours': {
+    type: 'number', default: 24, min: 0, max: 720, step: 1,
+    label: t('Archive finished tasks after (hours)'),
+    description: t('A one-shot task that finished successfully leaves the Background Work list for the archive this many hours after it ended (its runs, delivery log and acknowledgement are kept; poll/show of the id still answer). 0 = never archive finished tasks.'),
+    category: t('Background Work'), liveApply: true,
+  },
+  'jobs.archiveFailedAfterDays': {
+    type: 'number', default: 7, min: 0, max: 90, step: 1,
+    label: t('Archive acknowledged failures after (days)'),
+    description: t('A failed, missed, interrupted or unverified one-shot leaves the list this many days after somebody ACKNOWLEDGED it (its owner conversation was notified, an owner agent polled it, or you expanded its row). An unacknowledged failure is never archived. 0 = never archive failures.'),
+    category: t('Background Work'), liveApply: true,
+  },
   'agents.vibespaceChannel': {
     type: 'boolean', default: false,
     label: t('VibeSpace channel (experimental)'),
@@ -959,6 +976,7 @@ const SETTINGS_CATEGORIES = [
   t('Chat'),
   t('Session'),
   t('Integration'),
+  t('Background Work'),
   t('Spending'),
   t('Claude'),
   t('Codex'),

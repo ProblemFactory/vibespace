@@ -8,6 +8,7 @@
 // modal dialogs when off. Mobile keeps its own nav — the rail never renders.
 import { t as tr } from './i18n.js';
 import { openJobsWindow } from './jobs-panel.js';
+import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
 import { track } from './telemetry-client.js';
@@ -219,12 +220,19 @@ export function installSidebarRail(Sidebar) {
         if (ch && !ch.error) this._railSetBadge('channels', ch.unreadTotal || '');
         const jb = await fetchJson('/api/jobs').catch(() => null);
         if (jb?.jobs) {
-          const bad = jb.jobs.filter((j) => ['failed', 'missed', 'unverified'].includes(j.state)).length;
-          const ask = jb.jobs.filter((j) => j.state === 'awaiting-user').length;
-          const live = jb.jobs.filter((j) => ['up', 'starting'].includes(j.state)).length;
-          this._railSetBadge('jobs', bad ? bad + '!' : ask ? ask + '?' : live || '');
+          // TRIAGE (design §13 rule 2): the badge counts awaiting-user +
+          // UNACKNOWLEDGED failures only — one PURE counter shared with the
+          // panel summaries (src/lib/jobs-layout.js); the tooltip names the
+          // held notifications and why they are held (5b)
+          const counts = badgeCounts(jb.jobs);
+          const bt = badgeText(counts);
+          this._railSetBadge('jobs', bt.text);
           const b = this._railEl.querySelector('.rail-item[data-rail="jobs"]');
-          if (b) { b.classList.toggle('rail-danger', bad > 0); b.classList.toggle('rail-warn', !bad && ask > 0); }
+          if (b) {
+            b.classList.toggle('rail-danger', bt.tone === 'danger'); b.classList.toggle('rail-warn', bt.tone === 'warn');
+            const held = jb.held && jb.held.total ? heldText(jb.held, { t: tr }) : '';
+            b.title = held ? `${tr('Background Work')} — ${held}` : tr('Background Work');
+          }
         }
       } catch { }
     },

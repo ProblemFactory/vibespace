@@ -1329,3 +1329,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 /* Live `clock.sleep` countdown (2.369.58) — tabular figures so a ticking
    mm:ss does not jiggle the row every second. */
 .chat-sleep-remaining { font-variant-numeric: tabular-nums; font-family: var(--font-mono, monospace); color: var(--text); }
+
+/* Background Work notifications HELD for this conversation (design §13 5b ①): the head on the bar, the reason in the tooltip */
+.chat-status-held { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.chat-status-held svg { width: 10px; height: 10px; flex-shrink: 0; }

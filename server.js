@@ -1266,7 +1266,7 @@ const deliver = require('./src/server/conversation-deliver.js').create({
 const jobsWiring = require('./src/server/jobs-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), deliver,
   broadcastAll: (msg) => { const payload = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(payload); } catch {} } },
-  userTodos, log: (...a) => console.log(...a),
+  userTodos, log: (...a) => console.log(...a), getTelemetry: () => { try { return telemetry; } catch { return null; } }, // jobs-archive-write-failed rides telemetry
   serverSetting, taskGroups: tasks, activeSessions, // owner auto-notify (2.344.0): toggles + channel-lane session lookup
 });
 // Channels v1 (2.362.0): per-session external reach override for agent

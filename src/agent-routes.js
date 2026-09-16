@@ -1008,11 +1008,11 @@ const { has: hasHarness, get: getHarness } = require('./harnesses');
  *  harness ⇒ false (never silently treated as claude). */
 const honoursSessionStart = (s) => { const b = s?.backend || 'claude'; return hasHarness(b) && !!getHarness(b).inject?.sessionStartHonoured; };
 const NOT_VISIBLE = (ref) => `no job "${ref}" visible to this session — vibespace-job list`;
-function findVisible(jm, caller, ref) {
-  const all = [...jm.jobs.values()];
+function findVisibleIn(all, caller, ref) {
   const vis = caller ? jobModel.visibleJobs(all, caller) : [];
   return vis.find((j) => j.id === ref) || vis.find((j) => j.name === ref) || null;
 }
+function findVisible(jm, caller, ref) { return findVisibleIn([...jm.jobs.values()], caller, ref); }
 // FULL manuals for every agent CLI, read on demand (owner design: budgeted
 // teaching carries one pointer line; docs are served from THIS server's
 // checkout so they always match the running version). Reading docs never
@@ -1209,6 +1209,12 @@ app.post('/api/agent/jobs', (req, res) => {
 });
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
+  // ?archived=1 → the caller's VISIBLE archived one-shots (triage §13 rule 5;
+  // `vibespace-job list --archived`) — same snapshot shape + archived:true
+  if (req.query.archived) {
+    const arch = a.selfJob ? [] : jobModel.visibleJobs(a.jm.archivedList(), a.caller);
+    return res.json({ success: true, archived: true, jobs: arch.map((r) => ({ ...a.jm.snapshotArchived(r), mine: jobModel.isOwner(r, a.caller), mySubscription: null })) });
+  }
   let list = a.selfJob ? [a.selfJob] : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
   // ?mine=1 → owned by this conversation · ?subscribed=1 → this conversation subscribed
   if (!a.selfJob && req.query.mine) list = list.filter((j) => jobModel.isOwner(j, a.caller));
@@ -1231,12 +1237,21 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
     // the survivor anyway (no-existence-oracle: an invisible family stays a plain 404)
     const kept = !a.selfJob && a.jm._collapsed && a.jm._collapsed.get(ref);
     if (kept && findVisible(a.jm, a.caller, kept)) return res.status(404).json({ error: `run record ${ref} was consolidated into ${kept} (cron runs now share one record) — vibespace-job poll ${kept}` });
+    // READ-THROUGH to the archive (triage §13 rule 5): poll/show/logs of an
+    // archived id still answer, the SAME shape, with archived:true — an agent
+    // holding an old id never gets a 404 because of housekeeping
+    const arc = a.selfJob ? null : findVisibleIn(a.jm.archivedList(), a.caller, ref);
+    if (arc) return res.json({ success: true, job: { ...a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400) }), mine: jobModel.isOwner(arc, a.caller), mySubscription: null } });
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }
   const wait = Math.min(Number(req.query.wait) || 0, 600) * 1000;
   if (wait && !jobModel.isTerminal(job) && !(req.query.answers && (job.interaction.answers || []).length)) {
     await a.jm.waitFor(req.query.answers ? a.jm.ansWaiters : a.jm.waiters, job.id, wait);
   }
+  // an OWNER-LINEAGE agent's poll/show/logs of a terminal one-shot is an
+  // acknowledgement (triage §13 rule 1b) — the same permission predicate the
+  // CLI's control verbs use, never a second one; a jbt_ self-read is not
+  if (jobModel.agentReadAcks(job, a.caller, { selfJob: !!a.selfJob })) a.jm.markAck(job, 'agent-read');
   res.json({
     success: true,
     job: {
@@ -1250,7 +1265,14 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   const { ref, act } = req.params;
   const job = a.selfJob ? (a.selfJob.id === ref || a.selfJob.name === ref ? a.selfJob : null) : findVisible(a.jm, a.caller, ref);
-  if (!job) return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  if (!job) {
+    // an ARCHIVED record answers `rm` (control-holders; gone for good) and
+    // nothing else — every other verb names the archive instead of a 404
+    const arc = a.selfJob ? null : findVisibleIn(a.jm.archivedList(), a.caller, ref);
+    if (arc && act === 'rm' && jobModel.canControl(arc, a.caller)) { const r = a.jm.rmArchived(arc.id); return r.error ? res.status(400).json({ error: r.error }) : res.json({ success: true, ...r }); }
+    if (arc) return res.status(400).json({ error: `${arc.id} is archived (${arc.archivedWhy || 'terminal'}) — only rm applies; vibespace-job list --archived` });
+    return res.status(404).json({ error: NOT_VISIBLE(ref) });
+  }
   const selfActs = ['progress', 'ask', 'announce'];
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask, or announce' });
   const needsControl = ['stop', 'start', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that

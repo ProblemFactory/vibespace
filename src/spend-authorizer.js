@@ -143,6 +143,26 @@ function budgetLimits(get = () => undefined) {
 /** PURE. An empty ledger. */
 function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {} }; }
 
+// A LEDGER STAMP CARRIES ITS REASON (2026-09-15, owner: after the spend cap
+// stashed every Background Work notification nobody could say WHICH producer
+// had spent the slot). A stamp is `{at, reason}` — `reason` a SPEND_REASONS
+// member — and the migration is implicit: a bare number written by an older
+// build reads as `{at, reason: null}` everywhere (prune, counts, producers).
+const stampAt = (t) => (typeof t === 'number' ? t : Number(t && t.at) || 0);
+const stampReason = (t) => (t && typeof t === 'object' && t.reason ? String(t.reason) : null);
+/** PURE. How many stamps in `list` each producer wrote ({reason → n}; a
+ *  reason-less legacy stamp counts under 'unknown'). */
+function producerCounts(list) {
+  const out = {};
+  for (const t of Array.isArray(list) ? list : []) { const r = stampReason(t) || 'unknown'; out[r] = (out[r] || 0) + 1; }
+  return out;
+}
+/** PURE. "job-notification ×9, auto-resume ×3" — the top producers, most first. */
+function producersText(counts, { top = 3 } = {}) {
+  const rows = Object.entries(counts || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, top);
+  return rows.map(([r, n]) => `${SPEND_REASONS[r] ? r : r === 'unknown' ? 'older builds (no reason recorded)' : r} ×${n}`).join(', ');
+}
+
 /** PURE. Drop everything older than a day; the hour window is a filter over the
  *  same list. Returns a NEW object (never mutates the caller's state) so a
  *  refused authorization cannot leave a half-pruned ledger behind. */
@@ -150,7 +170,7 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   const s = state && typeof state === 'object' ? state : emptyBudget();
   const cut = now - DAY_MS;
   const cap = stampCap(limits);
-  const keep = (list) => (Array.isArray(list) ? list.filter((t) => Number(t) > cut).slice(-cap) : []);
+  const keep = (list) => (Array.isArray(list) ? list.filter((t) => stampAt(t) > cut).slice(-cap) : []);
   const identities = {};
   for (const [k, v] of Object.entries(s.identities || {})) {
     const l = keep(v);
@@ -166,16 +186,18 @@ function spendCounts(state, identityKey, now = Date.now()) {
   const s = state && typeof state === 'object' ? state : emptyBudget();
   const mine = Array.isArray(s.identities?.[identityKey]) ? s.identities[identityKey] : [];
   const inst = Array.isArray(s.instance) ? s.instance : [];
-  const since = (list, ms) => list.filter((t) => Number(t) > now - ms);
+  const since = (list, ms) => list.filter((t) => stampAt(t) > now - ms);
   const hour = since(mine, HOUR_MS);
   const day = since(mine, DAY_MS);
   const instanceDay = since(inst, DAY_MS);
   return {
     hour: hour.length, day: day.length, instanceDay: instanceDay.length,
     // when the window frees a slot again — the honest retryAfter, not a guess
-    hourOldest: hour.length ? Math.min(...hour) : 0,
-    dayOldest: day.length ? Math.min(...day) : 0,
-    instanceOldest: instanceDay.length ? Math.min(...instanceDay) : 0,
+    hourOldest: hour.length ? Math.min(...hour.map(stampAt)) : 0,
+    dayOldest: day.length ? Math.min(...day.map(stampAt)) : 0,
+    instanceOldest: instanceDay.length ? Math.min(...instanceDay.map(stampAt)) : 0,
+    // WHO spent each window (5b ③): the refusal and the 80 % notice name them
+    producers: { hour: producerCounts(hour), day: producerCounts(day), instanceDay: producerCounts(instanceDay) },
   };
 }
 
@@ -400,7 +422,7 @@ function authorizeUnattendedSpend({
   // bind on both or a concurrent pass walks straight through it.
   const inFlight = pendingCounts(pending, key, now);
   const flight = (n) => (n > 0 ? ` (+${n} in flight)` : '');
-  const no = (why, detail, retryAfter = 0) => ({ ok: false, why, detail, retryAfter, counts, inFlight, limits: L, reason, identity: identity || null });
+  const no = (why, detail, retryAfter = 0, producers = null) => ({ ok: false, why, detail, retryAfter, counts, inFlight, limits: L, reason, identity: identity || null, producers });
   if (!reason || !(reason in SPEND_REASONS)) {
     // An unnamed producer is the one shape the census exists to prevent; if it
     // reaches here at runtime it must not spend.
@@ -441,11 +463,11 @@ function authorizeUnattendedSpend({
   // promising an instant for it would be a guess (0 = "no promise about when",
   // which refusalText prints as nothing at all).
   if (L.perIdentityHour === 0) return no('hour-cap', `unattended turns per identity per hour are set to 0`);
-  if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has spent ${counts.hour}${flight(inFlight.identity)} unattended turns this hour (cap ${L.perIdentityHour})`, counts.hourOldest + HOUR_MS);
+  if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has spent ${counts.hour}${flight(inFlight.identity)} unattended turns this hour (cap ${L.perIdentityHour})`, counts.hourOldest + HOUR_MS, counts.producers.hour);
   if (L.perIdentityDay === 0) return no('day-cap', `unattended turns per identity per day are set to 0`);
-  if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has spent ${counts.day}${flight(inFlight.identity)} unattended turns today (cap ${L.perIdentityDay})`, counts.dayOldest + DAY_MS);
+  if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has spent ${counts.day}${flight(inFlight.identity)} unattended turns today (cap ${L.perIdentityDay})`, counts.dayOldest + DAY_MS, counts.producers.day);
   if (L.perInstanceDay === 0) return no('instance-cap', `unattended turns for this instance are set to 0`);
-  if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has spent ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today (cap ${L.perInstanceDay})`, counts.instanceOldest + DAY_MS);
+  if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has spent ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today (cap ${L.perInstanceDay})`, counts.instanceOldest + DAY_MS, counts.producers.instanceDay);
   return { ok: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
 }
 
@@ -454,14 +476,16 @@ function authorizeUnattendedSpend({
  *  not consume budget). Returns the new state plus, when this spend crossed the
  *  notice threshold on some axis, ONE warn object — the 80% line the owner
  *  asked for, emitted at the crossing and never again inside that window. */
-function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS } = {}) {
+function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET_DEFAULTS, reason = null } = {}) {
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   const s = pruneBudget(state, at, L);
   if (!key) return { state: s, warn: null };
   const cap = stampCap(L);
-  s.identities[key] = [...(s.identities[key] || []), at].slice(-cap);
-  s.instance = [...(s.instance || []), at].slice(-cap);
+  // the stamp names its producer (5b ②) — a SPEND_REASONS member or null
+  const stamp = { at, reason: reason && reason in SPEND_REASONS ? reason : null };
+  s.identities[key] = [...(s.identities[key] || []), stamp].slice(-cap);
+  s.instance = [...(s.instance || []), stamp].slice(-cap);
   const c = spendCounts(s, key, at);
   let warn = null;
   if (L.noticePct > 0) {
@@ -479,7 +503,7 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
       const windowMs = a.scope === 'hour' ? HOUR_MS : DAY_MS;
       if (spokeAt && at - spokeAt < windowMs) continue;
       s.notices[a.noticeKey] = at;
-      warn = { scope: a.scope, pct, used: a.used, limit: a.limit, identity: identity || null };
+      warn = { scope: a.scope, pct, used: a.used, limit: a.limit, identity: identity || null, producers: c.producers[a.scope === 'hour' ? 'hour' : a.scope === 'day' ? 'day' : 'instanceDay'] };
       break; // the tightest axis that crossed is the one worth saying
     }
   }
@@ -494,7 +518,9 @@ function refusalText(v, { sessionName = null } = {}) {
   const what = SPEND_REASONS[v.reason]?.what || v.reason;
   const where = sessionName ? ` in "${sessionName}"` : '';
   const when = v.retryAfter > 0 ? ` Next allowed after ${new Date(v.retryAfter).toLocaleString()}.` : '';
-  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}`;
+  const spentBy = producersText(v.producers);
+  const spent = spentBy ? ` Spent by: ${spentBy}.` : '';
+  return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}`;
 }
 
 /** PURE. The 80% line. */
@@ -503,13 +529,15 @@ function noticeText(warn) {
   const who = warn.identity && (warn.identity.name || warn.identity.key) ? (warn.identity.name || warn.identity.key) : 'this account';
   const scope = warn.scope === 'instance' ? 'this instance' : who;
   const window = warn.scope === 'hour' ? 'this hour' : 'today';
-  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%). VibeSpace will refuse further automatic turns on it when the budget is spent.`;
+  const spentBy = producersText(warn.producers);
+  const spent = spentBy ? ` Top producers ${window}: ${spentBy}.` : '';
+  return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%).${spent} VibeSpace will refuse further automatic turns on it when the budget is spent.`;
 }
 
 module.exports = {
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP,
-  budgetLimits, emptyBudget, pruneBudget, spendCounts,
+  budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageText, spendControlState, spendControlText,
   authorizeUnattendedSpend, noteUnattendedSpend, refusalText, noticeText,

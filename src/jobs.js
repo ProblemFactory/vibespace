@@ -39,6 +39,26 @@ function jobEnv(extra = {}) {
 }
 const now = () => Date.now();
 const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
+// triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
+// runs at boot and every ARCHIVE_SWEEP_MS on the engine's existing 5 s tick
+const ARCHIVE_CAP = 2000;
+const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
+/** the typed held record for a stash entry, from the ladder's own answer */
+function heldOf(r, reason) {
+  const kind = M.heldKind(r, reason);
+  const out = { kind };
+  if (kind === 'spend-cap' && r) {
+    if (r.why) out.why = String(r.why);
+    if (r.identity && (r.identity.name || r.identity.key)) out.identity = String(r.identity.name || r.identity.key);
+    if (Number.isFinite(Number(r.cap))) out.cap = Number(r.cap);
+    if (Number(r.retryAfter) > 0) out.retryAfter = Number(r.retryAfter);
+  }
+  return out;
+}
+// newest first: by the archive instant, then by the terminal instant — one
+// sweep archives many records at ONE archivedAt, and the cap must still keep
+// the newest of them deterministically
+const archiveOrder = (a, b) => ((b.archivedAt || 0) - (a.archivedAt || 0)) || (M.terminalAt(b) - M.terminalAt(a)) || String(b.id).localeCompare(String(a.id));
 
 class JobManager {
   /** deps: { dataDir, broadcast(type,payload), notifyUser({text,urgency,jobId}), log,
@@ -50,6 +70,13 @@ class JobManager {
     this.notifsFile = path.join(deps.dataDir, 'job-notifications.json');
     this.logsDir = path.join(deps.dataDir, 'job-logs');
     this.lockFile = path.join(deps.dataDir, 'jobs.lock');
+    // TRIAGE ARCHIVE (design §13): terminal one-shots leave jobs.json for
+    // this append-only array (newest first, capped at ARCHIVE_CAP). Loaded
+    // LAZILY — the boot sweep and the first read-through both go through
+    // _loadArchive(); nothing else touches the file.
+    this.archiveFile = path.join(deps.dataDir, 'jobs-archive.json');
+    this.archive = null;          // null = not loaded yet
+    this._lastArchiveSweep = 0;   // the 5-min cadence rides the 5 s _sweep tick — no second timer
     this.jobs = new Map();
     this.readOnly = false;
     this.ready = false;
@@ -74,6 +101,9 @@ class JobManager {
       this._load();
       this._loadNotifs();
       this._adoptAndReplay();
+      // boot sweep (triage §13 rule 5): housekeeping happens as soon as the
+      // store is trustworthy again, isolated like every other init step
+      try { this.archiveSweep({ why: 'boot' }); } catch (e) { this.d.log('[jobs] archive sweep at boot failed:', e.message); }
       const t1 = setInterval(() => this._sweep().catch((e) => this.d.log('[jobs] sweep failed:', e.message)), 5000);
       const t2 = setInterval(() => this._cronTick().catch((e) => this.d.log('[jobs] cron tick failed:', e.message)), 30_000);
       const t3 = setInterval(() => this._gc().catch((e) => this.d.log('[jobs] gc failed:', e.message)), 3600_000);
@@ -136,6 +166,128 @@ class JobManager {
     } catch { }
   }
 
+  // ── TRIAGE ARCHIVE (2026-09-14, docs/design-background-work.md §13) ─────
+  _loadArchive() {
+    if (this.archive) return this.archive;
+    try {
+      const arr = JSON.parse(fs.readFileSync(this.archiveFile, 'utf-8'));
+      this.archive = Array.isArray(arr) ? arr.filter((r) => r && typeof r === 'object' && r.id) : [];
+    } catch (e) {
+      if (fs.existsSync(this.archiveFile)) { // corrupt: preserve the bytes, never destroy
+        const bad = this.archiveFile + '.corrupt-' + now();
+        try { fs.renameSync(this.archiveFile, bad); } catch { }
+        this.d.log('[jobs] archive corrupt → preserved at', bad, '—', e.message);
+      }
+      this.archive = [];
+    }
+    this.archive.sort(archiveOrder);
+    return this.archive;
+  }
+  /** THE archive write. Answers {ok:true} (and `next` becomes the in-memory
+   *  archive) or {ok:false, error}. A failure is LOUD (verbatim log +
+   *  telemetry) and changes NOTHING in memory — every caller mutates the
+   *  store only after this answers ok (verifier 2026-09-16: the sweep used to
+   *  release records FIRST, so one swallowed ENOSPC/EACCES/EROFS deleted them
+   *  for good under a log line that said "archived"). */
+  _writeArchive(next) {
+    if (this.readOnly) return { ok: false, error: 'read-only' };
+    const arr = next || this._loadArchive();
+    try { writeJsonAtomic(this.archiveFile, arr); this.archive = arr; return { ok: true }; }
+    catch (e) {
+      this.d.log('[jobs] archive write FAILED (nothing left the store; the next sweep retries):', e.message);
+      try { this.d.getTelemetry?.()?.record?.({ kind: 'error', name: 'jobs-archive-write-failed', detail: e.message }); } catch { /* telemetry is optional */ }
+      return { ok: false, error: e.message };
+    }
+  }
+  /** the settings-fed policy (jobs.archiveDoneAfterHours / jobs.archiveFailedAfterDays;
+   *  an explicit 0 = never; garbage falls back to the defaults 24 h / 7 d) */
+  _archivePolicy() {
+    let p = null;
+    try { p = this.d.archivePolicy ? this.d.archivePolicy() : null; } catch { p = null; }
+    const num = (v, dflt) => (v === 0 || v === '0' ? 0 : Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : dflt);
+    const doneAfterHours = num(p && p.doneAfterHours, 24);
+    const failedAfterDays = num(p && p.failedAfterDays, 7);
+    return { doneAfterHours, failedAfterDays, doneAfterMs: doneAfterHours * 3600e3, failedAfterMs: failedAfterDays * 86400e3 };
+  }
+  /** THE SWEEP (rule 5): moves every terminal one-shot the PURE verdict
+   *  releases out of jobs.json into the archive. SYNCHRONOUS on purpose — the
+   *  boot call and the tick call can never interleave, so there is no
+   *  read-modify-write to lose. ONE archive write, ONE store flush and ONE
+   *  broadcast per sweep, never per record — IN THAT ORDER: the store is
+   *  flushed only after the archive copy is durable. `now` is injectable. */
+  archiveSweep({ now: at = now(), why = 'tick' } = {}) {
+    if (this.readOnly) return { archived: [], skipped: 'read-only' };
+    this._lastArchiveSweep = at;
+    const pol = this._archivePolicy();
+    const moved = [];
+    for (const job of [...this.jobs.values()]) {
+      let v = M.archiveVerdict(job, { now: at, doneAfterMs: pol.doneAfterMs, failedAfterMs: pol.failedAfterMs, alive: false, cronParentActive: this._cronParentActive(job) });
+      if (!v.archive) continue;
+      // the pid stamp is read only for a record the clock already released —
+      // never a per-record /proc read for the whole store every tick
+      if (this._verifyAlive(this._readStamp(job))) continue;
+      const rec = JSON.parse(JSON.stringify(job, (k, val) => (k.startsWith('_') ? undefined : val))); // runtime-only keys never persist
+      rec.archivedAt = at; rec.archivedWhy = v.why;
+      moved.push(rec); // NOT released yet — the archive copy must be durable first
+    }
+    if (!moved.length) return { archived: [] };
+    // THE ORDER IS THE INVARIANT (verifier 2026-09-16): the archive is written
+    // BEFORE a single record leaves the store. The old order — delete, then
+    // write behind a catch that only logged, then flush jobs.json — turned one
+    // ENOSPC/EACCES/EROFS into 200 deleted records under "archived 200". A
+    // store flush that fails AFTER a successful archive write brings the
+    // record back at the next boot, so a re-archived id REPLACES its older
+    // archive copy instead of duplicating it.
+    const movedIds = new Set(moved.map((m) => m.id));
+    const next = [...moved, ...this._loadArchive().filter((r) => !movedIds.has(r.id))];
+    next.sort(archiveOrder);
+    // the cap keeps the NEWEST; a record the cap drops is unreachable from
+    // every surface once the archive that no longer names it is on disk, so
+    // its log dir goes with it (it would leak for ever)
+    const dropped = next.length > ARCHIVE_CAP ? next.splice(ARCHIVE_CAP) : [];
+    const w = this._writeArchive(next);
+    if (!w.ok) {
+      this.d.log(`[jobs] archive sweep (${why}): ${moved.length} record(s) released but NOT archived — the store keeps them (${w.error})`);
+      return { archived: [], failed: 'archive-write', kept: moved.length, error: w.error };
+    }
+    for (const m of moved) { this.jobs.delete(m.id); this.waiters.delete(m.id); this.ansWaiters.delete(m.id); }
+    this._dirty = true; // a failed flush retries on the 2 s timer; a boot re-archive is idempotent (see above)
+    this._save();
+    for (const d of dropped) { try { fs.rmSync(path.join(this.logsDir, d.id), { recursive: true, force: true }); } catch { } }
+    this.d.log(`[jobs] archived ${moved.length} one-shot(s) (${why}; ${moved.map((m) => m.archivedWhy).filter((x, i, a) => a.indexOf(x) === i).join(', ')})${dropped.length ? `, cap dropped ${dropped.length}` : ''}`);
+    try { this.d.broadcast('jobs-updated', { archived: moved.map((m) => m.id) }); } catch { }
+    return { archived: moved.map((m) => m.id), dropped: dropped.length };
+  }
+  /** a cron child whose parent still schedules fires is that cron's run ring */
+  _cronParentActive(job) {
+    if (!job.cronParent) return false;
+    const p = this.jobs.get(job.cronParent);
+    return !!p && p.desiredUp !== false && p.state !== 'missed';
+  }
+  /** the STRUCTURE every surface renders the held-notification count from
+   *  (5b): per conversation, by typed reason — the client says the words */
+  heldDigest() { return M.heldDigest(this.pendingNotifs); }
+  archivedList() { return this._loadArchive(); }
+  archivedCount() { return this._loadArchive().length; }
+  archivedById(id) { return this._loadArchive().find((r) => r.id === id) || null; }
+  /** the SAME snapshot shape as a live record + archivedAt/archivedWhy/archived:true —
+   *  an agent holding an old id must never see a different shape. */
+  snapshotArchived(rec, opts) {
+    return { ...this.snapshot(rec, opts), archived: true, archivedAt: rec.archivedAt || null, archivedWhy: rec.archivedWhy || null };
+  }
+  /** ✕ on an archived row: gone for good (record + its log dir). */
+  rmArchived(id) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    const arch = this._loadArchive();
+    const i = arch.findIndex((r) => r.id === id);
+    if (i < 0) return { error: 'no such archived job' };
+    const w = this._writeArchive(arch.filter((r) => r.id !== id));
+    if (!w.ok) return { error: 'archive write failed: ' + w.error }; // the row stays until its removal is durable
+    try { fs.rmSync(path.join(this.logsDir, id), { recursive: true, force: true }); } catch { }
+    try { this.d.broadcast('jobs-updated', { id, removed: true, archived: true }); } catch { }
+    return { ok: true };
+  }
+
   // ── owner auto-notify (2.344.0, B-0bf4 — the CLI's own cross-session
   // messaging inbox is the delivery channel; docs/design-background-work
   // §Owner notify). VibeSpace never fabricates user input: a live owner
@@ -188,7 +340,7 @@ class JobManager {
       return;
     }
     if (rate.ts && now() - rate.ts < 30_000) {
-      this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead', { stampLast: !subscriber });
+      this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead', { stampLast: !subscriber, held: { kind: 'rate-floor' } });
       this._dirty = true;
       return;
     }
@@ -214,12 +366,12 @@ class JobManager {
         if (!subscriber) job.lastNotify = { ts: now(), lane: r.lane || 'message', ok: true, to: r.peerName || null };
         this._notifyLogPush(job, { lane: r.lane || 'message', ok: true, to: r.peerName || null, ...(subscriber ? { sub: true } : {}) });
       } else {
-        this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber });
+        this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable') });
       }
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
     }).catch((e) => {
-      this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber }); // degrade path logs verbatim inside
+      this._stashNotif(cid, job, ev, e.message, { stampLast: !subscriber, held: { kind: 'not-reachable' } }); // degrade path logs verbatim inside
       this._dirty = true;
     });
   }
@@ -230,9 +382,13 @@ class JobManager {
     job.notifyLog = [...(job.notifyLog || []), { ts: now(), ...e }].slice(-12);
     this._dirty = true;
   }
-  _stashNotif(cid, job, ev, reason, { stampLast = true } = {}) {
+  /** STASH = held, and every held entry says WHY (5b ①): `held` is
+   *  {kind: spend-cap|rate-floor|not-reachable|off, why?, identity?, cap?,
+   *  retryAfter?} — the panel summary, the rail tooltip and the affected
+   *  conversation's status-bar chip render it in the device's own words. */
+  _stashNotif(cid, job, ev, reason, { stampLast = true, held = null } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
-    q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low' });
+    q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
     if (q.length > 30) q.splice(0, q.length - 30); // per-conversation cap; oldest fall off
     this.pendingNotifs.set(cid, q);
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
@@ -322,7 +478,29 @@ class JobManager {
     if (!q || !q.length) return [];
     this.pendingNotifs.delete(cid);
     this._dirty = true;
+    // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
+    // conversation sees it on its next turn. A stash entry older than the
+    // job's CURRENT terminal instant describes an earlier run and acks nothing.
+    for (const n of q) {
+      const job = n && this.jobs.get(n.jobId);
+      if (job && Number(n.ts) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });
+    }
+    try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
     return q;
+  }
+  /** ACKNOWLEDGE a terminal one-shot (triage §13): `by` ∈ notified |
+   *  agent-read | user-opened. The FIRST acknowledgement wins (the instant the
+   *  archive clock starts from); a record that is not a terminal one-shot is
+   *  refused. Persists through the ordinary dirty/flush cycle and broadcasts
+   *  like every other job change. Returns true when the record changed. */
+  markAck(job, by, at = now(), { quiet = false } = {}) {
+    if (!job || !M.isTerminalOneShot(job)) return false;
+    if (!['notified', 'agent-read', 'user-opened'].includes(by)) return false;
+    if (M.ackState(job, at).acked) return false;
+    job.ack = { by, at };
+    this._dirty = true;
+    if (!quiet) { try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { } }
+    return true;
   }
   _touch(job, ev) {
     this._dirty = true;
@@ -366,6 +544,7 @@ class JobManager {
     const ctl = this._ctlDir(job, runTs);
     fs.mkdirSync(ctl, { recursive: true });
     job.state = 'starting';
+    delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     job.runs = job.runs || [];
     job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log') });
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
@@ -497,6 +676,9 @@ class JobManager {
       } else { job.state = 'down'; this._touch(job); }
     } else {
       job.state = run.cause === 'interrupted' ? 'interrupted' : run.cause.startsWith('ok') ? 'done' : 'failed';
+      // the LAST NON-EMPTY log line, computed ONCE here (triage §13 rule 4):
+      // the one actionable fact a failed row can show without a detail fetch
+      run.lastLine = this._lastLogLine(job, run);
       // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
       // creating agent opts scheduled successes into events+notify with
       // --notify-ok (job.notifyOk, inherited by the cron child via the
@@ -515,6 +697,10 @@ class JobManager {
   // ── sweeps ──────────────────────────────────────────────────────────────
   async _sweep() {
     if (this.readOnly) return;
+    // the archive cadence rides THIS tick (rule 5: no second timer)
+    if (now() - this._lastArchiveSweep >= ARCHIVE_SWEEP_MS) {
+      try { this.archiveSweep({ why: 'tick' }); } catch (e) { this.d.log('[jobs] archive sweep failed:', e.message); }
+    }
     for (const job of this.jobs.values()) {
       if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
       const run = job.runs && job.runs[job.runs.length - 1];
@@ -664,6 +850,13 @@ class JobManager {
         }
       }
     }
+    // ARCHIVED records keep their record (the cap bounds it) but their log
+    // dirs follow the SAME 14-day retention as a live record's (triage §13)
+    try {
+      for (const rec of this._loadArchive()) {
+        if (M.terminalAt(rec) < cutoff) { try { fs.rmSync(path.join(this.logsDir, rec.id), { recursive: true, force: true }); } catch { } }
+      }
+    } catch { }
   }
 
   // ── public API (callers pre-authorize via job-model predicates) ─────────
@@ -801,8 +994,11 @@ class JobManager {
       envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || null,
       untilOutput: job.untilOutput || null, notifyUser: !!job.notifyUser, notifyOk: !!job.notifyOk,
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
-      run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger } : null,
+      run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,
       runsCount: (job.runs || []).length,
+      // triage (§13): the server computes the acknowledgement over the FULL
+      // record (the journal above is truncated to 8) — clients read, never derive
+      ack: M.ackState(job),
       pendingPanel: !!(job.interaction && job.interaction.pending),
       answers: (job.interaction && job.interaction.answers || []).slice(-5),
     };
@@ -818,6 +1014,20 @@ class JobManager {
       } catch { out.logTail = ''; }
     }
     return out;
+  }
+  /** the last non-empty line of a run's log (≤200 cp, secret-redacted);
+   *  '' when the log is missing or empty. Reads only the log's last 16 KiB. */
+  _lastLogLine(job, run) {
+    try {
+      const logPath = path.join(this._ctlDir(job, run.startedAt), 'current.log');
+      const st = fs.statSync(logPath);
+      const len = Math.min(st.size, 16384);
+      if (!len) return '';
+      const fd = fs.openSync(logPath, 'r');
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, st.size - len); fs.closeSync(fd);
+      return M.lastLineOf(this._redact(buf.toString('utf-8')), 200);
+    } catch { return ''; }
   }
   _redact(text) { // literal-redact known secret values (§7)
     try {
@@ -847,4 +1057,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS };

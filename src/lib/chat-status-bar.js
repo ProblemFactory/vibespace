@@ -394,6 +394,15 @@ export class ChatStatusBar {
    *  — the second half of "can this session be re-styled live". */
   setResponseStyleLive(v) { this._responseStyleLive = (v === undefined || v === null) ? undefined : !!v; this.render(); }
   setAutoResume(st) { this._autoResume = st || null; this.render(); }
+  /** Background Work notifications HELD for THIS conversation (design §13
+   *  5b ①): the composed sentence (jobs-layout heldText) or '' — the chip
+   *  shows the head, the tooltip the whole reason; it clears on drain. */
+  setJobsHeld(text) {
+    const next = text ? String(text) : '';
+    if (next === (this._jobsHeld || '')) return;
+    this._jobsHeld = next;
+    this.render();
+  }
   /** The harness's authoritative turn state. `null`/undefined = not reported —
    *  keeps the chip off entirely rather than asserting 'idle'. */
   setTurnState(v) {
@@ -498,6 +507,14 @@ export class ChatStatusBar {
       const rows = this._initHealth.map((i) => this._healthLabel(i));
       const tip = t('Reported by the harness at session start — click for the list') + '\n' + rows.join('\n');
       parts.push(`<span class="chat-status-health chat-status-clickable" title="${escHtml(tip)}">${UI_ICONS.alert} ${escHtml(t('{n} not working', { n: this._initHealth.length }))}</span>`);
+    }
+
+    // HELD Background Work notifications (design §13 5b ①): the one-line chip
+    // the incident lacked — the head ("3 notifications held") on the bar, the
+    // reason in the tooltip; it disappears when the stash drains
+    if (this._jobsHeld) {
+      const head = this._jobsHeld.split(' — ')[0];
+      parts.push(`<span class="chat-status-held" title="${escHtml(this._jobsHeld)}">${UI_ICONS.clock} ${escHtml(head)}</span>`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point

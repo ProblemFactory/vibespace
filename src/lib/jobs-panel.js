@@ -7,6 +7,7 @@ import { t } from './i18n.js';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { registerWindowType } from './window-types.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText } from './jobs-layout.js';
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
 const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', scheduled: 'idle', down: 'idle', done: 'idle' };
@@ -21,6 +22,53 @@ const hum = (ms) => { const m = Math.round(Math.abs(ms) / 60000); return m < 1 ?
 // sidebar unification — the rail panel is THE surface now, so it must not
 // collapse what the user opened every time the engine broadcasts)
 const EXPANDED = new Set();
+
+// ── TRIAGE state (design §13, 2026-09-14) ─────────────────────────────────
+// The user's fold choices live in user state (`jobsPanelFolds`, PATCH
+// merge-only like desktopAppRecents), are loaded ONCE per page and kept in
+// step with other clients through the user-state-updated broadcast. The
+// archive list is fetched only when its row is clicked.
+let FOLDS = null;
+let foldsWired = false;
+let ARCHIVE_OPEN = false;
+async function loadFolds(app) {
+  if (!foldsWired) {
+    foldsWired = true;
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.jobsPanelFolds && typeof msg.state.jobsPanelFolds === 'object') FOLDS = { ...msg.state.jobsPanelFolds }; });
+  }
+  if (FOLDS) return FOLDS;
+  const st = await fetchJson('/api/user-state');
+  FOLDS = st && st.jobsPanelFolds && typeof st.jobsPanelFolds === 'object' ? { ...st.jobsPanelFolds } : {};
+  return FOLDS;
+}
+/** persist ONE toggle: the map is pruned to the groups that still exist, so a
+ *  fold can never outlive its group and grow user state without bound */
+function setFold(g, layout) {
+  FOLDS = pruneFolds({ ...(FOLDS || {}), [g.key]: !g.expanded }, layout);
+  fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobsPanelFolds: FOLDS }) }).catch(() => {});
+}
+/** conversation id / webui id → the sidebar's own display name for the session */
+function sessionNameMap(app) {
+  const out = {};
+  const sb = app.sidebar;
+  for (const s of (sb && sb._allSessions) || []) {
+    let custom = null; try { custom = sb.getCustomName ? sb.getCustomName(s) : null; } catch { custom = null; }
+    const cwdFolder = s.cwd ? String(s.cwd).replace(/\/+$/, '').split('/').pop() : '';
+    const name = custom || s.name || s.webuiName || cwdFolder || '';
+    if (!name) continue;
+    if (s.backendSessionId) out[s.backendSessionId] = name;
+    if (s.webuiId) out[s.webuiId] = name;
+  }
+  return out;
+}
+/** the summary line (rule 2): running · N failed · M seen · K awaiting you · H held */
+function summaryText(counts, held) {
+  const parts = [`${counts.running} ${t('running')}`];
+  if (counts.failed) parts.push(`${counts.failed} ${t('failed')}` + (counts.ackedFailed ? ` · ${counts.ackedFailed} ${t('seen')}` : ''));
+  if (counts.awaiting) parts.push(`${counts.awaiting} ${t('awaiting you')}`);
+  if (held && held.total) parts.push(`${held.total} ${t('held')}`);
+  return parts.join(' · ');
+}
 
 /** Focus the sidebar-native jobs panel (optionally on one job). Returns false
  *  when there is no rail (mobile / activityRail off) so callers fall back to
@@ -72,12 +120,15 @@ function actionButtons(app, j, refresh, { compact } = {}) {
   return out;
 }
 
-/** shared list renderer — the window (rich) and the rail panel (compact) */
-function renderList(app, root, jobs, { compact, refresh }) {
+/** shared list renderer — the window (rich) and the rail panel (compact).
+ *  TRIAGE (design §13): the Tasks section folds by owner session → name
+ *  family (renderTaskSection); Services and Cron keep their flat rows. */
+function renderList(app, root, jobs, { compact, refresh, archivedCount = 0 }) {
   const sections = [['service', t('Services'), KIND_ICON.service], ['task', t('Tasks'), KIND_ICON.task], ['cron', t('Cron'), KIND_ICON.cron]];
   for (const [kind, label, icon] of sections) {
     const list = jobs.filter((j) => j.kind === kind);
-    if (compact && !list.length) continue;
+    const hasArchive = kind === 'task' && archivedCount > 0;
+    if (compact && !list.length && !hasArchive) continue;
     const h = document.createElement('div');
     h.className = 'jobs-sec-head';
     h.innerHTML = icon; // static SVG constant, not user data
@@ -87,43 +138,118 @@ function renderList(app, root, jobs, { compact, refresh }) {
     hc.textContent = list.length ? `${up}/${list.length}` : '0';
     h.append(hl, hc);
     root.appendChild(h);
-    if (!list.length) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('none'); root.appendChild(e); continue; }
-    for (const j of list) {
-      const el = document.createElement('div');
-      el.className = 'jobs-card jobs-sev-' + (SEV[j.state] || 'idle');
-      const l1 = document.createElement('div'); l1.className = 'jobs-card-l1';
-      const dot = document.createElement('span'); dot.className = 'jobs-dot'; dot.textContent = GLYPH[j.state] || '·';
-      const name = document.createElement('span'); name.className = 'jobs-name'; name.textContent = j.name;
-      const st = document.createElement('span'); st.className = 'jobs-state'; st.textContent = stateLine(j);
-      const sp = document.createElement('span'); sp.style.flex = '1';
-      l1.append(dot, name, st, sp, ...actionButtons(app, j, refresh, { compact }));
-      el.appendChild(l1);
-      if (!compact || j.progress) {
-        const l2 = document.createElement('div'); l2.className = 'jobs-card-l2';
-        if (j.progress) { const pg = document.createElement('span'); pg.className = 'jobs-chip jobs-chip-prog'; pg.textContent = j.progress; l2.appendChild(pg); }
-        if (j.runsCount > 1) { const rc = document.createElement('span'); rc.className = 'jobs-chip'; rc.textContent = '×' + j.runsCount; l2.appendChild(rc); }
-        for (const p of j.ports || []) { const c = document.createElement('span'); c.className = 'jobs-chip'; c.textContent = ':' + p; l2.appendChild(c); }
-        if (j.publishedUrl) { const u = document.createElement('button'); u.className = 'jobs-chip jobs-chip-url'; u.textContent = '↗ ' + j.publishedUrl.replace(/^https?:\/\//, ''); u.onclick = (ev) => { ev.stopPropagation(); app.openBrowser?.(j.publishedUrl) || window.open(j.publishedUrl); }; l2.appendChild(u); }
-        for (const g of (j.owner?.groups || []).slice(0, 2)) { const c = document.createElement('span'); c.className = 'jobs-chip jobs-chip-grp'; c.textContent = g; l2.appendChild(c); }
-        if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
-        if (l2.childNodes.length) el.appendChild(l2);
-      }
-      // one interaction everywhere (owner verdict 2.357.0: a click that
-      // spawned a WINDOW from the sidebar was jarring): expand inline, in
-      // the rail panel and the fallback window alike
-      el.dataset.job = j.id;
-      el.onclick = () => {
-        if (el.classList.contains('jobs-open')) { EXPANDED.delete(j.id); el.classList.remove('jobs-open'); el.querySelector('.jobs-detail')?.remove(); }
-        else { EXPANDED.add(j.id); expandDetail(app, el, j, refresh); }
-      };
-      root.appendChild(el);
-      if (EXPANDED.has(j.id)) expandDetail(app, el, j, refresh);
-    }
+    if (!list.length && !hasArchive) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('none'); root.appendChild(e); continue; }
+    if (kind === 'task') { renderTaskSection(app, root, list, { compact, refresh, archivedCount }); continue; }
+    for (const j of list) renderCard(app, root, j, { compact, refresh });
   }
 }
 
+/** The Tasks section (rule 3): owner session → name family → rows. A group
+ *  row is a BUTTON (keyboard-reachable, aria-expanded); expanded by default
+ *  when it holds a running job, an awaiting-user job or an UNACKNOWLEDGED
+ *  failure, else collapsed; the user's persisted folds apply AFTER that.
+ *  Inside an expanded group the rows keep today's renderer (renderCard). */
+function renderTaskSection(app, root, list, { compact, refresh, archivedCount }) {
+  const layout = foldTasks(list, { expanded: FOLDS || {}, sessionNames: sessionNameMap(app) });
+  for (const sess of layout.sessions) {
+    const sh = document.createElement('div'); sh.className = 'jobs-sess-head';
+    sh.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.text;
+    if (sess.label.kind === 'short') sh.title = t('session {id} (no longer listed)', { id: sess.label.text });
+    root.appendChild(sh);
+    for (const g of sess.groups) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'jobs-group' + (g.expanded ? ' jobs-group-open' : '') + (g.failedUnacked ? ' jobs-group-attn' : '');
+      btn.setAttribute('aria-expanded', g.expanded ? 'true' : 'false');
+      btn.dataset.group = g.key;
+      const chev = document.createElement('span'); chev.className = 'jobs-group-chev'; chev.textContent = g.expanded ? '▾' : '▸';
+      const fam = document.createElement('span'); fam.className = 'jobs-group-name'; fam.textContent = g.family;
+      const cnt = document.createElement('span'); cnt.className = 'jobs-group-count'; cnt.textContent = `×${g.count}`;
+      btn.append(chev, fam, cnt);
+      const chip = (cls, text) => { const s = document.createElement('span'); s.className = 'jobs-group-chip ' + cls; s.textContent = text; btn.appendChild(s); };
+      if (g.running) chip('jobs-group-run', `${g.running} ${t('running')}`);
+      if (g.awaiting) chip('jobs-group-ask', `${g.awaiting} ${t('awaiting you')}`);
+      if (g.failedUnacked) chip('jobs-group-bad', `${g.failedUnacked} ${t('failed')}`);
+      if (g.failedAcked) chip('jobs-group-seen', `${g.failedAcked} ${t('seen')}`);
+      const sp = document.createElement('span'); sp.style.flex = '1';
+      const age = document.createElement('span'); age.className = 'jobs-group-age'; age.textContent = g.latestAt ? hum(Date.now() - g.latestAt) + ' ' + t('ago') : '';
+      btn.append(sp, age);
+      btn.onclick = () => { setFold(g, layout); refresh?.(); };
+      root.appendChild(btn);
+      if (g.expanded) for (const j of g.jobs) renderCard(app, root, j, { compact, refresh });
+    }
+  }
+  if (archivedCount > 0) renderArchivedRow(app, root, archivedCount, { compact, refresh });
+}
+
+/** "Archived · N" at the foot of Tasks (rule 5): NO fetch until clicked; an
+ *  archived row keeps ✕ only, which deletes it for good behind the usual
+ *  confirm dialog. */
+function renderArchivedRow(app, root, n, { compact, refresh }) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'jobs-group jobs-archived-toggle' + (ARCHIVE_OPEN ? ' jobs-group-open' : '');
+  btn.setAttribute('aria-expanded', ARCHIVE_OPEN ? 'true' : 'false');
+  const chev = document.createElement('span'); chev.className = 'jobs-group-chev'; chev.textContent = ARCHIVE_OPEN ? '▾' : '▸';
+  const lab = document.createElement('span'); lab.className = 'jobs-group-name'; lab.textContent = `${t('Archived')} · ${n}`;
+  btn.append(chev, lab);
+  btn.onclick = () => { ARCHIVE_OPEN = !ARCHIVE_OPEN; refresh?.(); };
+  root.appendChild(btn);
+  if (!ARCHIVE_OPEN) return;
+  const box = document.createElement('div'); box.className = 'jobs-archived-list';
+  root.appendChild(box);
+  fetchJson('/api/jobs?archived=1').then((r) => {
+    if (!box.isConnected) return;
+    if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; return box.appendChild(e); }
+    const rows = r?.jobs || [];
+    for (const j of rows) renderCard(app, box, j, { compact, refresh, archived: true });
+    if (!rows.length) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('none'); box.appendChild(e); }
+  });
+}
+
+/** ONE card — the renderer every row shares. An ARCHIVED row keeps ✕ only. */
+function renderCard(app, root, j, { compact, refresh, archived = false }) {
+  const el = document.createElement('div');
+  el.className = 'jobs-card jobs-sev-' + (SEV[j.state] || 'idle') + (archived ? ' jobs-card-archived' : '');
+  const l1 = document.createElement('div'); l1.className = 'jobs-card-l1';
+  const dot = document.createElement('span'); dot.className = 'jobs-dot'; dot.textContent = GLYPH[j.state] || '·';
+  const name = document.createElement('span'); name.className = 'jobs-name'; name.textContent = j.name;
+  const st = document.createElement('span'); st.className = 'jobs-state'; st.textContent = stateLine(j) + (archived ? ` · ${t('archived')}` : '');
+  const sp = document.createElement('span'); sp.style.flex = '1';
+  l1.append(dot, name, st, sp, ...(archived ? [rmButton(app, j, refresh)] : actionButtons(app, j, refresh, { compact })));
+  el.appendChild(l1);
+  // a FAILED row says why (rule 4): the exit code rides stateLine, the last
+  // non-empty log line is the actionable fact — shown in the compact rail too
+  const lastLine = ['failed', 'missed', 'interrupted'].includes(j.state) && j.run && j.run.lastLine ? j.run.lastLine : '';
+  if (!compact || j.progress || lastLine) {
+    const l2 = document.createElement('div'); l2.className = 'jobs-card-l2';
+    if (lastLine) { const ll = document.createElement('span'); ll.className = 'jobs-lastline'; ll.textContent = lastLine; ll.title = lastLine; l2.appendChild(ll); }
+    if (j.progress) { const pg = document.createElement('span'); pg.className = 'jobs-chip jobs-chip-prog'; pg.textContent = j.progress; l2.appendChild(pg); }
+    if (j.runsCount > 1) { const rc = document.createElement('span'); rc.className = 'jobs-chip'; rc.textContent = '×' + j.runsCount; l2.appendChild(rc); }
+    for (const p of j.ports || []) { const c = document.createElement('span'); c.className = 'jobs-chip'; c.textContent = ':' + p; l2.appendChild(c); }
+    if (j.publishedUrl) { const u = document.createElement('button'); u.className = 'jobs-chip jobs-chip-url'; u.textContent = '↗ ' + j.publishedUrl.replace(/^https?:\/\//, ''); u.onclick = (ev) => { ev.stopPropagation(); app.openBrowser?.(j.publishedUrl) || window.open(j.publishedUrl); }; l2.appendChild(u); }
+    for (const g of (j.owner?.groups || []).slice(0, 2)) { const c = document.createElement('span'); c.className = 'jobs-chip jobs-chip-grp'; c.textContent = g; l2.appendChild(c); }
+    if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
+    if (l2.childNodes.length) el.appendChild(l2);
+  }
+  // one interaction everywhere (owner verdict 2.357.0: a click that
+  // spawned a WINDOW from the sidebar was jarring): expand inline, in
+  // the rail panel and the fallback window alike
+  el.dataset.job = j.id;
+  el.onclick = () => {
+    if (el.classList.contains('jobs-open')) { EXPANDED.delete(j.id); el.classList.remove('jobs-open'); el.querySelector('.jobs-detail')?.remove(); }
+    else { EXPANDED.add(j.id); expandDetail(app, el, j, refresh); }
+  };
+  root.appendChild(el);
+  if (EXPANDED.has(j.id)) expandDetail(app, el, j, refresh);
+}
+function rmButton(app, j, refresh) { const b = document.createElement('button'); b.className = 'jobs-btn'; b.textContent = '✕'; b.onclick = (ev) => { ev.stopPropagation(); jobAction(app, j, 'rm', refresh); }; return b; }
+
 async function expandDetail(app, el, j, refresh) {
   el.classList.add('jobs-open');
+  // the user OPENED the row (triage §13 rule 1c): a terminal one-shot is now
+  // acknowledged; the server's broadcast repaints the badge and the group
+  if (j.kind === 'task' && !j.archived && ['failed', 'missed', 'unverified', 'interrupted', 'done'].includes(j.state)) fetchJson(`/api/jobs/${j.id}/seen`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   const d = document.createElement('div');
   d.className = 'jobs-detail';
   d.onclick = (e) => e.stopPropagation();
@@ -239,15 +365,15 @@ export function openJobsWindow(app, opts = {}) {
   winInfo.content.appendChild(shell);
 
   async function render() {
-    const r = await fetchJson('/api/jobs');
+    const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
     root.textContent = '';
     if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; root.appendChild(e); return; }
     const jobs = r?.jobs || [];
-    const live = jobs.filter((j) => ['up', 'starting'].includes(j.state)).length;
-    const bad = jobs.filter((j) => ['failed', 'missed', 'unverified'].includes(j.state)).length;
-    const ask = jobs.filter((j) => j.state === 'awaiting-user').length;
-    summary.textContent = `${live} ${t('running')}${bad ? ` · ${bad} ${t('failed')}` : ''}${ask ? ` · ${ask} ${t('awaiting you')}` : ''}`;
-    renderList(app, root, jobs, { compact: false, refresh: render });
+    const counts = badgeCounts(jobs);
+    summary.textContent = summaryText(counts, r?.held);
+    summary.title = r?.held && r.held.total ? heldText(r.held, { t }) : '';
+    summary.classList.toggle('jobs-summary-held', !!(r?.held && r.held.total));
+    renderList(app, root, jobs, { compact: false, refresh: render, archivedCount: r?.archivedCount || 0 });
     const esc = await fetchJson('/api/jobs-escapes');
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
@@ -278,17 +404,17 @@ openJobsWindow.renderRail = (app, c) => {
   const focusId = app.sidebar?._jobsFocusId || null;
   if (app.sidebar) app.sidebar._jobsFocusId = null;
   async function render() {
-    const r = await fetchJson('/api/jobs');
+    const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
     if (!c.isConnected) return;
     root.textContent = '';
     if (r?.error) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.style.color = 'var(--red)'; e.textContent = r.error; root.appendChild(e); return; }
     const jobs = r?.jobs || [];
-    const live = jobs.filter((j) => ['up', 'starting'].includes(j.state)).length;
-    const bad = jobs.filter((j) => ['failed', 'missed', 'unverified'].includes(j.state)).length;
-    const ask = jobs.filter((j) => j.state === 'awaiting-user').length;
-    summary.textContent = `${live} ${t('running')}${bad ? ` · ${bad} ${t('failed')}` : ''}${ask ? ` · ${ask} ${t('awaiting you')}` : ''}`;
-    if (!jobs.length) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('No background jobs yet — agents register them with vibespace-job'); root.appendChild(e); return; }
-    renderList(app, root, jobs, { compact: true, refresh: render });
+    const counts = badgeCounts(jobs);
+    summary.textContent = summaryText(counts, r?.held);
+    summary.title = r?.held && r.held.total ? heldText(r.held, { t }) : '';
+    summary.classList.toggle('jobs-summary-held', !!(r?.held && r.held.total));
+    if (!jobs.length && !(r?.archivedCount > 0)) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('No background jobs yet — agents register them with vibespace-job'); root.appendChild(e); return; }
+    renderList(app, root, jobs, { compact: true, refresh: render, archivedCount: r?.archivedCount || 0 });
     const esc = await fetchJson('/api/jobs-escapes');
     if (!c.isConnected) return;
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {

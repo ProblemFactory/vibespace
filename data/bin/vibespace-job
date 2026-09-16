@@ -51,6 +51,7 @@ function printJob(j, tailLines) {
   if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
   if (j.answers && j.answers.length) console.log('answers: ' + JSON.stringify(j.answers[j.answers.length - 1]));
   if (j.logTail) console.log(`log tail:\n${j.logTail.split('\n').map((l) => '  ' + l).join('\n')}`);
+  if (j.archived) console.log(`(archived ${j.archivedAt ? new Date(j.archivedAt).toISOString() : ''} — ${j.archivedWhy || 'terminal'}; the record and its log are kept, rm deletes them for good)`);
   if (j.state === 'done' || j.state === 'failed') console.log(`next: vibespace-job logs ${j.id} --tail 200 · vibespace-job rm ${j.id}`);
 }
 
@@ -62,7 +63,9 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
          vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high] [--notify-user]
              (fires wake YOUR conversation; --notify-user ALSO copies the text to the user's inbox — default off, the text is usually your own reminder)
 docs:    vibespace-job docs   — the FULL manual (notify/subscribe/announce/panels/patterns), read anytime
-read:    vibespace-job list [--mine|--subscribed] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
+read:    vibespace-job list [--mine|--subscribed|--archived] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
+           (finished one-shots are ARCHIVED after a day — done — or a week after somebody acknowledged a failure;
+            poll/show/logs of an archived id still answer, marked archived; list --archived shows them)
          vibespace-job show <id>  (FULL params: cmd/schedule/access/notify/subscribers/your subscription)
          vibespace-job logs <id> [--tail 200]
 control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
@@ -170,17 +173,18 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       break;
     }
     case 'list': {
-      const q = flags.mine ? '?mine=1' : flags.subscribed ? '?subscribed=1' : flags.all ? '?all=1' : '';
+      const q = flags.archived ? '?archived=1' : flags.mine ? '?mine=1' : flags.subscribed ? '?subscribed=1' : flags.all ? '?all=1' : '';
       const r = await call('GET', '/api/agent/jobs' + q);
-      if (!r.jobs.length) return console.log(flags.mine ? 'no jobs owned by this conversation.' : flags.subscribed ? 'no subscriptions from this conversation.' : 'no jobs visible to this session.');
-      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + j.context.payload.split('\n')[0].slice(0, 60) : ''}`);
+      if (!r.jobs.length) return console.log(flags.archived ? 'no archived jobs visible to this session.' : flags.mine ? 'no jobs owned by this conversation.' : flags.subscribed ? 'no subscriptions from this conversation.' : 'no jobs visible to this session.');
+      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.archived ? ' (archived' + (j.archivedAt ? ' ' + new Date(j.archivedAt).toISOString().slice(0, 10) : '') + ')' : ''}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + j.context.payload.split('\n')[0].slice(0, 60) : ''}`);
+      if (flags.archived) console.log('(archived records keep runs/log/ack; poll/show/logs <id> still answer; rm <id> deletes for good)');
       break;
     }
     case 'show': {
       if (!pos[1]) { console.error('usage: vibespace-job show <id|name>'); process.exit(1); }
       const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(pos[1])}`);
       const j = r.job;
-      console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : ''}`);
+      console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
       if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + new Date(j.nextFireAt).toISOString() : ''}`);
       console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk}`);

@@ -18,6 +18,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel } from './chat-run-summary.js';
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
+import { heldText } from './jobs-layout.js';
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -1024,9 +1025,17 @@ class ChatView {
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
         this._onSessionError(msg);
+      } else if (msg.type === 'jobs-updated' && msg.held) {
+        // every jobs-updated carries the held-notification digest (design
+        // §13 5b ①): this conversation's status-bar chip follows it
+        this._applyJobsHeld(msg.held);
       }
     };
     this.ws.onGlobal(this._handler);
+    // seed the held chip once — the digest rides broadcasts, and a window
+    // opened while notifications are already held would otherwise wait for
+    // the next job event to learn about them
+    fetchJson('/api/jobs').then((r) => { if (r && r.held) this._applyJobsHeld(r.held); }).catch(() => {});
 
     // Connection state: freeze on disconnect, re-attach + sync on reconnect
     this._disconnected = false;
@@ -1925,6 +1934,14 @@ class ChatView {
     }
   }
 
+  /** the held-notification chip for THIS conversation: the digest is keyed by
+   *  conversation lineage id (= this session's backend session id); '' clears */
+  _applyJobsHeld(digest) {
+    if (!this._statusBar || !this._statusBar.setJobsHeld) return;
+    let cid = null;
+    try { cid = this._getSessionIds()?.backendSessionId || null; } catch { cid = null; }
+    this._statusBar.setJobsHeld(cid ? heldText(digest, { t, cid }) : '');
+  }
   _getSessionIds() {
     const allSess = this.app.sidebar?._allSessions || [];
     // Remote sessions: every history consumer (initial load, pagination,

@@ -144,6 +144,15 @@ Everything VibeSpace adds *into* your agent sessions lives here — and all of i
 
 > **Removed 2026-09-07: `agents.opencodeServeAutostart`.** The OpenCode background service (`opencode serve` on 127.0.0.1, which makes STOPPED OpenCode conversations list / open / resume / fork) is now the built-in **OpenCode background service** plugin — ⚙ → Plugins — and it is **off by default**. The first time you use OpenCode, VibeSpace offers to turn it on (once; "Not now" is remembered for the whole instance). `VIBESPACE_OPENCODE_SERVE=0/1` still overrides the plugin as an ops switch and the Plugins panel shows it as "forced by the environment". A stored value for the old setting is ignored — no migration.
 
+### Background Work
+
+One-shot tasks that reached a terminal state are triaged (2026-09-14, docs/design-background-work.md §13): a failure counts as **unacknowledged** until its owner conversation was notified, an owner agent polled it, or you expanded its row — the rail badge counts only awaiting-user + unacknowledged failures. Terminal one-shots are then **archived** into `data/jobs-archive.json` (newest 2000 kept; runs, delivery log and acknowledgement travel with the record; `poll`/`show`/`logs` of an archived id still answer, `vibespace-job list --archived` lists them, the panel's "Archived · N" row opens them on demand).
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `jobs.archiveDoneAfterHours` | number | `24` | A successfully finished one-shot leaves the live list this many hours after it ended. `0` = never |
+| `jobs.archiveFailedAfterDays` | number | `7` | A failed / missed / interrupted / unverified one-shot leaves the list this many days after somebody **acknowledged** it; an unacknowledged failure is never archived. `0` = never |
+
 ### Spending
 
 Every turn VibeSpace starts **without you** — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications, messages from another session, a Codex reset credit — passes ONE authorizer with the ceilings below. Turns *you* type are never counted. The counters are per **credential slot** (the account a turn will actually bill, so nine conversations parked on one subscription share one budget) and they are **persisted** in `data/spend-budget.json`: a release restart no longer hands the automatic spenders a fresh hour. A refusal is journalled and filed in the "For you" inbox, and nothing is lost — a notification that cannot be delivered live is injected into that conversation's next turn instead.

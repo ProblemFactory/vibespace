@@ -2163,5 +2163,54 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
     allowed.w.eng.spendGuard.snapshot().chargesUnhinted === 0, String(allowed.w.eng.spendGuard.snapshot().chargesUnhinted));
 }
 
+// ── §10 A LEDGER STAMP CARRIES ITS REASON (2026-09-15, design-background-work
+//    §13 5b ②③): after the spend cap stashed every Background Work notification
+//    nobody could say WHICH producer had spent the slot — the stamps were bare
+//    timestamps. Now a stamp is {at, reason}; a bare-number ledger written by an
+//    older build still loads and counts (implicit migration); the refusal and
+//    the 80 % notice name the top producers of the window.
+{
+  const now = Date.now();
+  const H = 3600 * 1000;
+  // (a) a BARE-NUMBER ledger (an older build's) loads, prunes and counts
+  const legacy = { v: 1, identities: { 'sub-L': [now - 10 * 60e3, now - 20 * 60e3, now - 30 * H] }, instance: [now - 10 * 60e3, now - 20 * 60e3, now - 30 * H], notices: {} };
+  const pr = A.pruneBudget(legacy, now, null);
+  ok('§10 a bare-number ledger prunes by age (the day-old stamp goes, the two live ones stay)', pr.identities['sub-L'].length === 2 && pr.instance.length === 2, JSON.stringify(pr.identities));
+  const lc = A.spendCounts(legacy, 'sub-L', now);
+  ok('§10 …and counts (hour 2, day 2) with an honest oldest instant', lc.hour === 2 && lc.day === 2 && lc.hourOldest === now - 20 * 60e3, JSON.stringify(lc));
+  ok('§10 …its producers read as `unknown` (a legacy stamp names nobody, never a fabricated reason)', lc.producers.hour.unknown === 2 && Object.keys(lc.producers.hour).length === 1, JSON.stringify(lc.producers));
+  // (b) a charge stamps {at, reason}; a mixed ledger counts both shapes together
+  let st = A.noteUnattendedSpend(legacy, { identity: { key: 'sub-L', name: 'L' }, at: now, reason: 'job-notification' }).state;
+  const last = st.identities['sub-L'][st.identities['sub-L'].length - 1];
+  ok('§10 a charge writes {at, reason} beside the timestamp', last && last.at === now && last.reason === 'job-notification', JSON.stringify(last));
+  ok('§10 a mixed (bare + typed) ledger counts every stamp once', A.spendCounts(st, 'sub-L', now).hour === 3 && A.spendCounts(st, 'sub-L', now).producers.hour['job-notification'] === 1, JSON.stringify(A.spendCounts(st, 'sub-L', now)));
+  ok('§10 an undeclared reason is stored as null, never invented', A.noteUnattendedSpend(A.emptyBudget(), { identity: { key: 'x' }, at: now, reason: 'not-a-reason' }).state.identities.x[0].reason === null);
+  // (c) the refusal names the producers that spent the window
+  for (let i = 0; i < 9; i++) st = A.noteUnattendedSpend(st, { identity: { key: 'sub-L', name: 'L' }, at: now - i * 60e3, reason: 'job-notification', limits: { perIdentityHour: 12 } }).state;
+  st = A.noteUnattendedSpend(st, { identity: { key: 'sub-L', name: 'L' }, at: now, reason: 'auto-resume', limits: { perIdentityHour: 12 } }).state;
+  const v = A.authorizeUnattendedSpend({ reason: 'stop-nudge', identity: { key: 'sub-L', name: 'L' }, state: st, limits: { perIdentityHour: 12 }, now });
+  ok('§10 the hour-cap refusal carries the window\'s producers (job-notification ×10, auto-resume ×1, unknown ×2)', v.ok === false && v.why === 'hour-cap' && v.producers['job-notification'] === 10 && v.producers['auto-resume'] === 1 && v.producers.unknown === 2, JSON.stringify(v.producers));
+  const txt = A.refusalText(v);
+  ok('§10 …and the sentence says who spent it, most first', /Spent by: job-notification ×10, unknown/.test(txt) === false && /Spent by: job-notification ×10, older builds \(no reason recorded\) ×2, auto-resume ×1\./.test(txt), txt);
+  // (d) the 80 % notice names them too
+  let w = null, s2 = A.emptyBudget();
+  for (let i = 0; i < 8; i++) { const r = A.noteUnattendedSpend(s2, { identity: { key: 'sub-N', name: 'N' }, at: now - i, reason: i < 6 ? 'job-notification' : 'peer-message', limits: { perIdentityHour: 10, noticePct: 80 } }); s2 = r.state; if (r.warn) w = r.warn; }
+  ok('§10 the 80 % notice carries and prints the top producers of its window', w && w.producers && w.producers['job-notification'] === 6 && /Top producers this hour: job-notification ×6, peer-message ×2\./.test(A.noticeText(w)), w && A.noticeText(w));
+  // (e) the guard passes the reason through to the stamp (wiring pin + a real charge)
+  const gsrc = read('src/server/spend-guard.js');
+  ok('§10 WIRING PIN: spend-guard.note() hands its `reason` to the stamp', /A\.noteUnattendedSpend\(state, \{ identity, at: now, limits: limits\(\), reason \}\)/.test(gsrc));
+  {
+    const dir = tmpdir('vs-spend-reason-');
+    const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, identityOf: () => ({ key: 'sub-G', name: 'G' }), getUserTodos: () => null, log: () => { } });
+    const auth = g.authorize({ reason: 'job-notification', identity: { key: 'sub-G', name: 'G' } });
+    g.note({ reason: 'job-notification', identity: auth.identity, hold: auth.hold });
+    const stamps = g.snapshot().budget.identities['sub-G'] || [];
+    ok('§10 a real guard charge lands as {at, reason:"job-notification"}', stamps.length === 1 && stamps[0].reason === 'job-notification' && Number.isFinite(stamps[0].at), JSON.stringify(stamps));
+    g.flush();
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'spend-budget.json'), 'utf-8'));
+    ok('§10 …and persists in that shape', onDisk.budget.identities['sub-G'][0].reason === 'job-notification');
+  }
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);
