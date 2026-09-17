@@ -118,12 +118,15 @@ fs.writeFileSync(path.join(cacheDir, C.id + '.json'), JSON.stringify(snap({
   overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled_until', asOf: seedAt },
 })));
 // D: the SOONEST reset on the roster — 5h in 40 min (20 %), 7d in 30 h (55 %) ⇒ the row label reads ≈ 40m and D is one of the two highlighted rows
-// …and D's org has USAGE CREDITS enabled — overage present, not in use, no rejected status (B-ad05: the dim "credits" tag)
+// …and D's org has USAGE CREDITS enabled — overage present, not in use, with a vendor status that is
+// not a rejection (B-ad05: the dim "credits" tag). POSITIVE EVIDENCE is required since the final
+// verifier (2.369.110): a status-less `{inUse:false}` is also the shape of a DISABLED org whose record
+// was rewritten by a status-less event, so it is 'unknown' and carries no tag (Member B below).
 fs.writeFileSync(path.join(cacheDir, AD.id + '.json'), JSON.stringify(snap({
   fiveHour: { utilization: 0.2, status: 'allowed', resetsAt: sec(seedAt + 40 * M), state: 'running' },
   sevenDay: { utilization: 0.55, status: 'allowed', resetsAt: sec(seedAt + 30 * H), state: 'running' },
   scopedWeekly: [],
-  overage: { inUse: false, asOf: seedAt },
+  overage: { inUse: false, status: 'allowed', asOf: seedAt },
 })));
 // E: BLOCKED — 7d SPENT (100 %, resets in 20 h) while its 5h (10 %) resets in 30 min: the row label must count to the 7d reset (that is when E is usable), so E is NOT among the two soonest
 fs.writeFileSync(path.join(cacheDir, AE.id + '.json'), JSON.stringify(snap({
@@ -239,10 +242,10 @@ try {
   check('the highlight is a RENDERED background (a highlighted row differs from a plain one)', d.rowBg !== c.rowBg, [d.rowBg, c.rowBg]);
   // ── B-ad05 (2026-09-17): USAGE CREDITS ARE VISIBLE BEFORE THEY ARE SPENT ──
   console.log('§1c the dim "credits" tag on the member whose org bills pay-per-use past 100 %');
-  check('Member D (overage present, not in use, no rejected status): the identity tail carries the dim "· credits" tag with the pay-per-use tooltip', !!d.credits && d.credits.visible && d.credits.text === '· credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
-  check('…it is INLINE on the identity line (same top as the name), adds no extra row line, and is not the in-use chip', d.credits.tailLine === true && d.extraLine === false && d.inUseChip === false, d);
+  check('Member D (overage present, not in use, vendor status not a rejection): the identity tail carries the dim "· credits" tag with the pay-per-use tooltip', !!d.credits && d.credits.visible && d.credits.text === '· credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
+  check('…it is INLINE on the identity line (same top as the name), adds no extra row line, and is not the in-use chip', !!d.credits && d.credits.tailLine === true && d.extraLine === false && d.inUseChip === false, d);
   check('Member C (overage rejected / org_level_disabled) and every other row carry no credits tag', !c.credits && rows.filter((r) => r.credits).length === 1, rows.map((r) => [r.name, !!r.credits]));
-  check('the tag is dim: its colour differs from the name colour (text-secondary, not the name text)', d.credits.color !== d.nameColor, [d.credits.color, d.nameColor]);
+  check('the tag is dim: its colour differs from the name colour (text-secondary, not the name text)', !!d.credits && d.credits.color !== d.nameColor, [d.credits && d.credits.color, d.nameColor]);
   const nextRights = usageRows.map((r) => r.next.right);
   check(`the labels form a straight column: right edges aligned ±1px (spread ${(Math.max(...nextRights) - Math.min(...nextRights)).toFixed(1)}px over ${nextRights.length} rows)`, Math.max(...nextRights) - Math.min(...nextRights) <= 1);
   check('the label cell keeps a fixed min-width (≥ 30px) and the 9px roster font', usageRows.every((r) => parseFloat(r.next.minW) >= 30 && /^(8|9|10)px$/.test(r.next.font)), usageRows.map((r) => [r.next.minW, r.next.font]));

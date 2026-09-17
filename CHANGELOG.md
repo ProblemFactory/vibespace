@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.111 — the roster suite's credits fixture carries the positive vendor evidence the 2.369.110 rule requires
+
+- The heavy tier went red on 2.369.110: test-roster-reset-eta's Member D fixture (`overage: {inUse:false}` with no status) predates the final verifier's rule that `allowed` needs positive evidence — a status-less record is 'unknown' and carries no credits tag — so the chrome leg found no tag and threw. The fixture now carries `status:'allowed'`, the legs no longer throw when the tag is absent, and the status-less shape is documented in the fixture as the no-tag control. No product change.
+
 ## 2.369.110 — the /usage probe can no longer report another account (B-855a), the identity anchor is derived from the API and the polluted stores are repaired at boot, a Fable-cap wall marks one lane (B-ccaa), and usage credits are visible before they are spent (B-ad05)
 
 - Owner (2026-09-17, four reports in one day: "所有账号都是 Fable 要用完了根本无法判断", "fable 又都提示 100 了但还在跑", "会不会是 claude -p 有缓存机制", "确保 config dir 和 working directory 都用新的路径"). MEASURED with the CLI's own `--debug` log: `claude -p /usage` fetches with the token it is handed, and when that fetch fails in-band (a 200 with a fieldless body — it tracks probe pressure) it silently seeds the panel from the config dir's machine-wide `cachedUsageUtilization`, the last account any live session fetched. Every probe ran in the shared `$HOME` config, so the busiest members' panels were another account's 15 of 50, 22 of 47 and 14 of 43 times in a day, and each foreign panel re-stamped the account's window sidecar so its own readings were archived as foreign for ever. The roster's "Fable 100 % everywhere", the 02:30 arm card that waited for the wrong member, and the 15:10 pool switch off a fresh member were all this.
