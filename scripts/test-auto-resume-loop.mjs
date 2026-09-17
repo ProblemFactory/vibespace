@@ -270,7 +270,7 @@ if (!probe) {
   const armSwitch = arMod.armNoticeFor(st.reason, st.resetsAt, Date.now() - 1000);
   ok('…and the delayed ARM notice for a switch names the member and the seconds, never a "reset"', /^账号池已切换到 B-Stack Max，约 \d+ 秒后自动继续这个任务/.test(armSwitch) && !/重置|已达上限/.test(armSwitch), armSwitch);
   ok('…NEGATIVE CONTROL: an arm anchored on a real reset keeps the reset sentence', /^用量已达上限。已安排在 .+ 重置后自动继续/.test(arMod.armNoticeFor('5h 0% < 10%', Date.now() + 3600000, Date.now())));
-  ok('WIRING: the delayed notice site asks armNoticeFor with the arm\'s own reason', /notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\)\)\)/.test(require('fs').readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8')));
+  ok('WIRING: the delayed notice site asks armNoticeFor with the arm\'s own reason AND its cause (B-73fe)', /notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\), a\.cause\)\)/.test(require('fs').readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8')));
   const rec = w.ar._fires.get(w.SID);
   ok('…the breaker recorded the fire against the member the continue LANDED on', rec && rec.last && rec.last.key === w.SPARE, JSON.stringify(rec && rec.last));
   // the CLI rejects that continue too — through the real producer again
@@ -1303,6 +1303,40 @@ if (!probe) {
   ok('…and at most one in-chat card per distinct target, versus ~150 in the incident', w.notes.length <= 3, JSON.stringify(w.notes));
   ok('…while the journal still SAYS why it is waiting (silence is the other failure mode; with both fixes on there is nothing left to refuse, so the demotion + the arm ARE the explanation)', lines.some((l) => /\[wall\] demoted \S+ 5h until \S+ \(1 walls \/ credential slot\)/.test(l)) && lines.some((l) => /armed for .*(5h|blocked|<)/.test(l)), lines.slice(-4).join(' | '));
   ok('…every account in the pool ends up honestly marked, none left reading "healthy" while rejecting', [w.LINK, w.SPARE].every((id) => { const c = w.readCache(id); return c && (c.fiveHour.utilization === 1 || c.source === 'wall'); }) || w.eng.sessionWalledMembers(w.SID).size >= 1, JSON.stringify({ link: w.readCache(w.LINK), spare: w.readCache(w.SPARE) }));
+}
+
+// ── §B-73fe THE ARM NAMES ITS TARGET (owner 2026-09-17 "明明当前hit limit的账号7am就会reset 5h，但你却提示12pm") ──
+// 02:30:43 PDT: the link (PandyMax) hit its 5h (resets 7am) while its Fable
+// sat at 98 % (2 % left < the 5 % floor, resets 9/20); every other member's
+// Fable was spent and Member L's week rolled first (12pm). The wait is the MIN
+// over members of the MAX over each member's dead resets — 12pm — which is
+// right, and the card said only "已安排在 12pm 重置后自动继续". Now the arm
+// carries its CAUSE and the card says whose reset it waits for and why the
+// rejector's own earlier reset is not it. Fish Max plays Member L's part here.
+{
+  const cap = capture();
+  const w = mkWorld({ healthy: false });
+  const RL = Math.floor(Date.now() / 1000) + 9 * 3600;             // the soonest member's Fable week
+  w.writeCache(w.LINK, { fetchedAt: Date.now() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: w.R5 }, sevenDay: { utilization: 0.5, resetsAt: w.R7 }, scopedWeekly: [{ name: 'Fable', utilization: 0.98, resetsAt: w.R7 }] });
+  w.writeCache(w.FISH, { fetchedAt: Date.now() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.05, resetsAt: w.R5 }, sevenDay: { utilization: 0.51, resetsAt: RL }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: RL }] });
+  w.writeCache(w.SPARE, { fetchedAt: Date.now() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.1, resetsAt: w.R5 }, sevenDay: { utilization: 0.5, resetsAt: w.R7 + 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 1, resetsAt: w.R7 + 86400 }] });
+  w.reject({});
+  await new Promise((r) => setTimeout(r, 40));
+  const lines = cap.done();
+  const st = w.ar.statusFor(w.SID);
+  const L = (s) => new Date(s * 1000).toLocaleString();
+  ok('B-73fe: the arm waits for the SOONEST member (Fish Max\'s Fable week), not the rejector\'s own 5h — the wait itself was right', st.armed === true && st.resetsAt === RL * 1000, JSON.stringify(st));
+  ok('…and the arm CARRIES its cause: soonest = Fish Max / Fable @ RL, the same instant as the arm', !!(st.cause && st.cause.scope === 'pool' && st.cause.soonest && st.cause.soonest.id === w.FISH && st.cause.soonest.bucket && st.cause.soonest.bucket.label === 'Fable' && st.cause.soonest.bucket.resetsAt === st.resetsAt), JSON.stringify(st.cause));
+  const rj = st.cause && st.cause.rejector;
+  ok('…rejector = PandyMax with its OWN wall (5h @ R5, from the demotion) and the floor bucket that keeps it dead past it (Fable 2 % < 5 % @ R7)', !!(rj && rj.id === w.LINK && rj.ownWall && rj.ownWall.label === '5h' && rj.ownWall.resetsAt === w.R5 * 1000 && rj.floor && rj.floor.length === 1 && rj.floor[0].label === 'Fable' && rj.floor[0].remaining === 2 && rj.floor[0].line === 5 && rj.floor[0].resetsAt === w.R7 * 1000), JSON.stringify(rj));
+  const text = arMod.armNoticeFor(st.reason, st.resetsAt, Date.now(), st.cause);
+  ok('…the card names both: the rejector\'s own reset AND why it is not the target, then the member whose reset it waits for', text === `PandyMax 的 5h 将在 ${L(w.R5)} 重置，但它的 Fable 仅剩 2%（低于 5% 门槛，视为用尽，${L(w.R7)} 重置）。最早可用的成员是 Fish Max（Fable ${L(RL)} 重置），已安排到时自动继续；任一成员提前可用会立即继续（状态栏可取消）。`, text);
+  ok('…the journal line says via whom', lines.some((l) => /armed for .* via Fish Max\/Fable\)/.test(l)), lines.filter((l) => /armed for/.test(l)).join(' | '));
+  ok('…NEGATIVE CONTROL: a cause-less arm keeps the old sentence byte for byte', arMod.armNoticeFor('5h 0% < 10%', st.resetsAt, Date.now()) === `用量已达上限。已安排在 ${new Date(st.resetsAt).toLocaleString()} 重置后自动继续（状态栏可取消）。`);
+  ok('…rejector === soonest reads as one member\'s own reset (no "but" clause, no second member)', /^Fish Max 的 Fable 将在 .+ 重置后自动继续这个任务（状态栏可取消）。$/.test(arMod.armNoticeFor('x', RL * 1000, Date.now(), { ...st.cause, rejector: { id: w.FISH, name: 'Fish Max', ownWall: { label: 'Fable', resetsAt: RL * 1000 }, floor: [] } })));
+  ok('…an unpooled (single-account) wall names its bucket and keeps the reset sentence', arMod.armNoticeFor('5h 0% < 10%', st.resetsAt, Date.now(), w.eng.armCauseFor({ usable: false, until: { label: '5h', resetsAt: RL } }, null, null, 0)) === `用量已达上限（5h）。已安排在 ${new Date(st.resetsAt).toLocaleString()} 重置后自动继续（状态栏可取消）。`);
+  ok('…armCauseFor is null for a usable verdict and for a blocked pool verdict with no soonest (the arm then inherits or stays cause-less)', w.eng.armCauseFor({ usable: true }, null, null, 0) === null && w.eng.armCauseFor({ usable: false, soonest: null, rejector: null }, null, null, 0) === null);
+  ok('…the chip payload carries the same structure (statusFor().cause === the arm\'s cause)', JSON.stringify(w.ar.statusFor(w.SID).cause) === JSON.stringify(st.cause));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

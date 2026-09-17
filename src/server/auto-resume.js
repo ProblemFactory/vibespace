@@ -177,13 +177,41 @@ function continueNoticeFor({ kind, armReason, label, moved = false, cause = null
  *  07:50). A switch says WHICH member and that the continue follows in
  *  seconds; only an arm anchored on a real reset states the reset instant.
  *  PURE: (armReason, resetsAtMs, nowMs) → sentence. */
-function armNoticeFor(armReason, resetsAtMs, nowMs) {
+function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
   const m = /^switched to a usable account \((.+)\)/.exec(String(armReason || ''));
   if (m) {
     const secs = Math.max(1, Math.round((Number(resetsAtMs) - Number(nowMs)) / 1000));
     return `账号池已切换到 ${m[1]}，约 ${secs} 秒后自动继续这个任务（状态栏可取消）。`;
   }
-  return `用量已达上限。已安排在 ${new Date(resetsAtMs).toLocaleString()} 重置后自动继续（状态栏可取消）。`;
+  // B-73fe (2026-09-17, owner "明明当前hit limit的账号7am就会reset 5h，但你却提示12pm"):
+  // the instant this sentence names is the SOONEST MEMBER's reset, which is
+  // not the rejecting member's own — so the sentence says whose reset it is,
+  // and why the rejector's earlier one does not count (its OTHER dead bucket,
+  // under the floor, keeps it dead past that). Structure comes from the
+  // engine's armCauseFor; a cause-less arm keeps the old sentence verbatim.
+  const c = cause && typeof cause === 'object' ? cause : null;
+  const fmt = (ms) => new Date(ms).toLocaleString();
+  if (c && c.scope === 'pool' && c.soonest && c.soonest.name) {
+    const s = c.soonest, r = c.rejector;
+    const sb = s.bucket && s.bucket.label ? s.bucket : null;
+    if (r && r.name && r.id && r.id === s.id) {
+      const lab = (r.ownWall && r.ownWall.label) || (sb && sb.label) || '';
+      return `${r.name} 的${lab ? ' ' + lab + ' ' : ''}将在 ${fmt(resetsAtMs)} 重置后自动继续这个任务（状态栏可取消）。`;
+    }
+    let head = '用量已达上限。';
+    if (r && r.name && r.ownWall && r.ownWall.label && r.ownWall.resetsAt) {
+      head = `${r.name} 的 ${r.ownWall.label} 将在 ${fmt(r.ownWall.resetsAt)} 重置`;
+      const f = Array.isArray(r.floor) && r.floor.length ? r.floor[0] : null;
+      if (f && f.label) head += `，但它的 ${f.label} 仅剩 ${Math.round(Number(f.remaining) || 0)}%（低于 ${f.line}% 门槛，视为用尽${f.resetsAt ? `，${fmt(f.resetsAt)} 重置` : ''}）`;
+      head += '。';
+    }
+    const target = sb ? `${s.name}（${sb.label} ${fmt(sb.resetsAt || resetsAtMs)} 重置）` : `${s.name}（${fmt(resetsAtMs)} 重置）`;
+    return `${head}最早可用的成员是 ${target}，已安排到时自动继续；任一成员提前可用会立即继续（状态栏可取消）。`;
+  }
+  if (c && c.scope === 'account' && c.until && c.until.label) {
+    return `用量已达上限（${c.until.label}）。已安排在 ${fmt(resetsAtMs)} 重置后自动继续（状态栏可取消）。`;
+  }
+  return `用量已达上限。已安排在 ${fmt(resetsAtMs)} 重置后自动继续（状态栏可取消）。`;
 }
 
 /** Pick what to WAIT FOR when a session hits the wall (PURE). Two field
@@ -325,6 +353,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       watch: !!(a && !a.fired && a.watch),
       lane: a ? (a.lane || null) : null,
       bucket: a ? (a.bucket || null) : null,
+      // B-73fe: the STRUCTURE behind the wait (who resets when, and why the
+      // rejector's own reset is not it) — the client says the words
+      cause: a ? (a.cause || null) : null,
     };
   }
   const _refuseNotified = new Map(); // id → last far-refusal notice ts (1/h floor)
@@ -374,6 +405,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const lane = opts.lane != null ? String(opts.lane) : (inherit ? inherit.lane || null : null);
     const bucket = opts.bucket != null ? String(opts.bucket) : (inherit ? inherit.bucket || null : null);
     const scopedName = opts.scopedName != null ? String(opts.scopedName) : (inherit ? inherit.scopedName || null : null);
+    // THE CAUSE rides the arm the same way (B-73fe): a re-verdict that names a
+    // target replaces it, a caller that says nothing keeps the one in hand.
+    const cause = opts.cause != null ? opts.cause : (inherit ? inherit.cause || null : null);
     if (!resets || resets <= at) return null;                 // already past / unknown
     // A RESET BEYOND THE CEILING IS STILL A WALL. Before 2026-09-08 this
     // returned null and the conversation was on its own — which is exactly
@@ -395,10 +429,11 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       }
     }
     if (inherit && inherit.resetsAt === resets) return inherit; // idempotent
-    const rec = { at, resetsAt: resets, reason: reason || 'usage limit', cid: session.claudeSessionId || null, fired: false, lane, bucket, scopedName, watch };
+    const rec = { at, resetsAt: resets, reason: reason || 'usage limit', cid: session.claudeSessionId || null, fired: false, lane, bucket, scopedName, watch, cause };
     armed.set(id, rec);
     save();
-    log(`[auto-resume] ${id}: ${watch ? 'watching' : 'armed'} for ${new Date(resets).toISOString()} (${reason}${lane ? `, lane ${lane}` : ''}${bucket ? `, bucket ${bucket}` : ''})`);
+    const via = cause && cause.soonest && cause.soonest.name ? `, via ${cause.soonest.name}/${cause.soonest.bucket && cause.soonest.bucket.label ? cause.soonest.bucket.label : '?'}` : '';
+    log(`[auto-resume] ${id}: ${watch ? 'watching' : 'armed'} for ${new Date(resets).toISOString()} (${reason}${lane ? `, lane ${lane}` : ''}${bucket ? `, bucket ${bucket}` : ''}${via})`);
     // DELAYED announcement (2.368.34): a dead event often races the pool
     // switch that fixes it — the armed STATE is instant (chip), but the loud
     // in-chat line waits; a disarm inside the window means it never speaks.
@@ -418,7 +453,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         // 提示到达上限了"): a hot pool switch arms a 45 s near-nudge, and this line
         // used to call THAT instant a "reset" — "已安排在 03:24:53 重置后自动继续"
         // about a window that resets at 07:50. armNoticeFor is PURE and pinned.
-        if (s2) { try { notify(id, s2, armNoticeFor(reason, resets, Date.now())); } catch { } }
+        if (s2) { try { notify(id, s2, armNoticeFor(reason, resets, Date.now(), a.cause)); } catch { } }
       }, Math.max(0, notifyDelayMs));
       if (t.unref) t.unref();
       _armNotifyTimers.set(id, t);

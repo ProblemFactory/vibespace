@@ -273,5 +273,25 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('name: an empty/whitespace custom rename does NOT win (falls through to the session name)', conversationDisplayName({ backend: 'claude', claudeSessionId: 'w', name: 'real' }, { 'claude:w': '   ' }, 'sid') === 'real');
 }
 
+// ── B-73fe (2026-09-17): the verdict NAMES the bucket that sets its wait ─────
+// An identity unblocks when the LAST of its dead buckets resets, so the arm
+// card must be able to say "5h resets at 7am but Fable (2 % < 5 %) keeps it
+// dead until 9/20" — `until` + `deadBuckets` are that structure, reporting
+// only (no threshold reads them).
+{
+  const { quotaVerdict } = require(path.resolve('src/account-pool-auto.js'));
+  const v = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: NOW + H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D }, scopedWeekly: [{ name: 'Fable', utilization: 0.98, resetsAt: NOW + 3 * D }] }, NOW);
+  ck('B-73fe: blocked = MAX over dead resets, and `until` names THAT bucket (Fable), not the nearer 5h', v.usable === false && v.blockedUntil === (NOW + 3 * D) * 1000 && !!v.until && v.until.label === 'Fable' && v.until.resetsAt === NOW + 3 * D);
+  ck('…deadBuckets carry label/kind/remaining/line/resetsAt for every dead bucket, 5h first', v.deadBuckets.length === 2 && v.deadBuckets[0].label === '5h' && v.deadBuckets[0].kind === 'fiveHour' && v.deadBuckets[0].line === 10 && v.deadBuckets[0].remaining === 0 && v.deadBuckets[0].resetsAt === NOW + H && v.deadBuckets[1].label === 'Fable' && v.deadBuckets[1].kind === 'weekly' && v.deadBuckets[1].remaining === 2 && v.deadBuckets[1].line === 5);
+  const u = quotaVerdict({ fiveHour: { utilization: 0.1, resetsAt: NOW + H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
+  ck('…a usable verdict carries the EMPTY shape (readers never branch on presence)', u.usable === true && Array.isArray(u.deadBuckets) && u.deadBuckets.length === 0 && u.until === null);
+  const n = quotaVerdict({}, NOW);
+  ck('…and so does no-data', n.usable === null && Array.isArray(n.deadBuckets) && n.until === null);
+  const p = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: past }, sevenDay: { utilization: 0.99, resetsAt: NOW + D } }, NOW);
+  ck('…a dead bucket whose reset already passed reads full again, so `until` is the 7d and the 5h is not listed', p.dead.length === 1 && p.until.label === '7d' && p.deadBuckets.length === 1);
+  const q = quotaVerdict({ fiveHour: { utilization: 1 }, sevenDay: { utilization: 0.5, resetsAt: NOW + D } }, NOW);
+  ck('…a dead bucket with NO reset ⇒ blockedUntil 0 (probe, never guess) and `until` null', q.usable === false && q.blockedUntil === 0 && q.until === null && q.deadBuckets.length === 1);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

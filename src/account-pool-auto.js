@@ -631,17 +631,27 @@ function classifyAuthFailure({ status, message, attempt } = {}) {
 // after a fresh reading).
 function quotaVerdict(cache, nowSec, { tier = 'hot' } = {}) {
   const brs = bucketRems(cache, nowSec);
-  if (!brs.length) return { usable: null, known: false, blockedUntil: 0, dead: [], reason: 'no usage data' };
+  if (!brs.length) return { usable: null, known: false, blockedUntil: 0, dead: [], deadBuckets: [], until: null, reason: 'no usage data' };
   const line = (b) => THRESH[b.kind][tier];
   const dead = brs.filter((b) => b.remaining < line(b));
   if (!dead.length) {
-    return { usable: true, known: true, blockedUntil: 0, dead: [], reason: brs.map((b) => `${b.label} ${Math.round(b.remaining)}%`).join(' · ') };
+    return { usable: true, known: true, blockedUntil: 0, dead: [], deadBuckets: [], until: null, reason: brs.map((b) => `${b.label} ${Math.round(b.remaining)}%`).join(' · ') };
   }
   const futureResets = dead.map((b) => (b.resetsAt > nowSec ? b.resetsAt : 0));
   const blockedUntil = futureResets.every(Boolean) ? Math.max(...futureResets) * 1000 : 0;
+  // B-73fe (2026-09-17): the verdict SAYS which bucket sets its wait. An
+  // identity unblocks when the LAST of its dead buckets resets (c1206711 #2),
+  // so `until` is that bucket — the one the arm card must name — and
+  // `deadBuckets` are the rest of the story (the 5h that resets at 7am AND
+  // the Fable cap at 2 % that keeps the member dead past it). Reporting only:
+  // no threshold reads these.
+  const deadBuckets = dead.map((b) => ({ label: b.label, kind: b.kind, remaining: Math.round(b.remaining), line: line(b), resetsAt: b.resetsAt > nowSec ? b.resetsAt : 0 }));
+  const last = blockedUntil ? deadBuckets.reduce((m, b) => (b.resetsAt > (m ? m.resetsAt : 0) ? b : m), null) : null;
   return {
     usable: false, known: true, blockedUntil,
     dead: dead.map((b) => b.label),
+    deadBuckets,
+    until: last ? { label: last.label, resetsAt: last.resetsAt } : null,
     reason: dead.map((b) => `${b.label} ${Math.round(b.remaining)}% < ${line(b)}%`).join(' · '),
   };
 }

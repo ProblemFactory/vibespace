@@ -171,7 +171,7 @@ function quotaBackendFor(key, session) {
   if (session?.backend) return session.backend;
   return 'claude';
 }
-const { quotaVerdict } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
+const { quotaVerdict, THRESH: VERDICT_THRESH } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
@@ -1530,14 +1530,60 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
     const ok = verdicts.find((x) => x.v.usable === true);
     if (ok) return { usable: true, known: true, blockedUntil: 0, via: ok.name, viaId: ok.id, reason: `${ok.name} usable (${ok.v.reason})${note}`, ...ctx };
     const untils = verdicts.map((x) => x.v.blockedUntil).filter(Boolean);
+    const blockedUntil = untils.length ? Math.min(...untils) : 0; // soonest-usable member; 0 = some member unknowable → probe
+    // B-73fe (2026-09-17, owner "7am 重置却提示 12pm"): the blocked verdict NAMES
+    // its wait — `soonest` = the member whose blockedUntil IS the min and the
+    // bucket that set it (Member L / Fable @ 12pm), `rejector` = the member that
+    // rejected this session with every dead bucket it holds (PandyMax: 5h @
+    // 7am AND Fable 2 % < 5 % @ 9/20 — the reason its own 7am is not the
+    // target). Reporting only: no decision reads these; the arm card and the
+    // status-bar chip say them. Milliseconds, like blockedUntil.
+    const soon = blockedUntil ? verdicts.find((x) => x.v.blockedUntil === blockedUntil) : null;
+    const rej = verdicts.find((x) => walled.has(x.id)) || null;
     return {
       usable: false, known: true,
-      blockedUntil: untils.length ? Math.min(...untils) : 0, // soonest-usable member; 0 = some member unknowable → probe
+      blockedUntil,
+      soonest: soon ? { id: soon.id, name: soon.name, bucket: soon.v.until ? { label: soon.v.until.label, resetsAt: soon.v.until.resetsAt * 1000 } : null } : null,
+      rejector: rej ? { id: rej.id, name: rej.name, deadBuckets: (rej.v.deadBuckets || []).map((b) => ({ ...b, resetsAt: b.resetsAt ? b.resetsAt * 1000 : 0 })) } : null,
       reason: verdicts.map((x) => `${x.name}: ${x.v.reason}`).join(' | ') + note,
       ...ctx,
     };
   }
   return quotaVerdict(proj(read(scope)), nowSec);
+}
+
+/** PURE (B-73fe). THE CAUSE an arm carries so its card can say what the
+ *  instant it names IS, and why the rejecting member's own earlier reset is
+ *  not the target. From a BLOCKED verdict: a pool verdict yields
+ *  {scope:'pool', floorRule, soonest:{id,name,bucket:{label,resetsAt ms}},
+ *  rejector:{id,name, ownWall:{label,resetsAt ms} = the bucket the rejection
+ *  named (the demotion's buckets, else the signals' bucket + reset), floor:[…]
+ *  = the rejector's OTHER dead buckets — the ones that keep it dead past its
+ *  own wall}}; an unpooled verdict yields {scope:'account', floorRule, until}.
+ *  null when the verdict has no target to name (the arm then inherits or
+ *  stays cause-less and the card keeps its old sentence). Words live in
+ *  auto-resume.js armNoticeFor; this is structure only. */
+function armCauseFor(v, demoted, armWall, evResetMs) {
+  if (!v || v.usable !== false) return null;
+  const floorRule = { fiveHour: VERDICT_THRESH.fiveHour.hot, weekly: VERDICT_THRESH.weekly.hot };
+  if (v.soonest === undefined) {
+    return { scope: 'account', floorRule, until: v.until ? { label: v.until.label, resetsAt: Number(v.until.resetsAt) * 1000 } : null };
+  }
+  if (!v.soonest) return null;
+  let rejector = null;
+  if (v.rejector) {
+    const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+    const dead = Array.isArray(v.rejector.deadBuckets) ? v.rejector.deadBuckets : [];
+    const own = (demoted && Array.isArray(demoted.buckets) ? demoted.buckets : []).filter((b) => b && b.label).sort((a, b) => (b.until || 0) - (a.until || 0))[0] || null;
+    let ownWall = own ? { label: own.label, resetsAt: Number(own.until) || 0 }
+      : armWall && armWall.bucket ? { label: armWall.bucket === 'scoped' ? (armWall.scopedName || 'model cap') : (BUCKET_LABEL[armWall.bucket] || armWall.bucket), resetsAt: Number(evResetMs) || 0 } : null;
+    if (ownWall) {
+      const m = dead.find((b) => same(b.label, ownWall.label));
+      if (m) ownWall = { label: m.label, resetsAt: ownWall.resetsAt || m.resetsAt || 0 };
+    }
+    rejector = { id: v.rejector.id, name: v.rejector.name, ownWall, floor: dead.filter((b) => !(ownWall && same(b.label, ownWall.label))) };
+  }
+  return { scope: 'pool', floorRule, soonest: v.soonest, rejector };
 }
 
 /** The identity whose quota is BLOCKING this session (the verdict's scope):
@@ -2208,7 +2254,7 @@ function onWalledTurn(session, sigs) {
     const evReset = Math.max(0, ...sigs.map((s2) => s2.resetsAtMs || 0));
     const target = v.blockedUntil || evReset;
     if (target > Date.now()) {
-      ar.armIfEnabled(id, session, target, v.reason || 'usage limit', armWall);
+      ar.armIfEnabled(id, session, target, v.reason || 'usage limit', { ...armWall, cause: armCauseFor(v, demoted, armWall, evReset) });
       // VERIFY the cache's word (inc-mtdsoj5f, userW: an ALIVE account read
       // dead-with-a-far-reset — "blocked until Aug-31" off stale data — until a
       // MANUAL refresh fixed it; a confident cache can lie exactly like an
@@ -2320,7 +2366,7 @@ function scheduleWallProbe(session, scope, model, attempt) {
       const v = quotaVerdictFor(scope, { model, session });
       const ar = getAutoResume();
       if (v.usable === true) { ar?.armIfEnabled?.(id, session, Date.now() + 45000, 'account usable again'); return; }
-      if (v.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, v.blockedUntil, v.reason); return; }
+      if (v.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, v.blockedUntil, v.reason, { cause: armCauseFor(v, null, null, 0) }); return; }
       scheduleWallProbe(session, scope, model, attempt + 1);
     } catch (e) { console.warn('[wall] probe failed:', e.message); }
   }, WALL_PROBE_BACKOFF[attempt]);
@@ -2349,7 +2395,7 @@ async function beforeAutoResumeFire(id, session) {
     maybePoolAutoSwitch(session);
     const v = quotaVerdictFor(scope, { model, session });
     if (v.usable === false) {
-      if (v.blockedUntil > Date.now()) getAutoResume()?.armIfEnabled?.(id, session, v.blockedUntil, 're-armed at fire: ' + v.reason);
+      if (v.blockedUntil > Date.now()) getAutoResume()?.armIfEnabled?.(id, session, v.blockedUntil, 're-armed at fire: ' + v.reason, { cause: armCauseFor(v, null, null, 0) });
       else scheduleWallProbe(session, scope, model, 1);
       return false;
     }
@@ -3625,7 +3671,7 @@ function maybeStopOnFallback(session, id, from, to) {
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
-    observedMemberFor, sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, corroborateReading, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
+    observedMemberFor, sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, corroborateReading, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, OBSERVED_ORG_RECENT_MS, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, // the eval gate (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them
     sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,

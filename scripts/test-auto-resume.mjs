@@ -162,6 +162,26 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('a WATCH survives a restart with its wall and its no-timer promise intact', st2.armed === true && st2.watch === true && st2.lane === 'codex' && st2.bucket === 'sevenDay', JSON.stringify(st2));
   ok('…and the fresh window still opens it after the restart', e.ar.noteQuotaReading('s1', { limitId: 'codex', sevenDay: { utilization: 0, resetsAt: Math.floor(Date.now() / 1000) + 700000 } }, 'reading').open === true && e.sent.length === 1);
   fs.rmSync(d2, { recursive: true, force: true });
+  // B-73fe (2026-09-17): the CAUSE (whose reset the wait is, and why the
+  // rejector's own earlier reset is not it) survives a restart like lane and
+  // bucket do — the card after a deploy must still say whose reset it names —
+  // and a re-arm that says nothing about it inherits, one that names a new
+  // target replaces.
+  const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-c-'));
+  const f = mk({ dflt: true, dir: d3 });
+  f.sessions.set('s1', sess());
+  const cause = { scope: 'pool', floorRule: { fiveHour: 10, weekly: 5 }, soonest: { id: 'lu', name: 'Member L', bucket: { label: 'Fable', resetsAt: T0 + 7200000 } }, rejector: { id: 'pandy', name: 'PandyMax', ownWall: { label: '5h', resetsAt: T0 + 3600000 }, floor: [{ label: 'Fable', kind: 'weekly', remaining: 2, line: 5, resetsAt: T0 + 86400000 }] } };
+  f.ar.armIfEnabled('s1', f.sessions.get('s1'), T0 + 7200000, 'Member L: Fable 0% < 5%', { bucket: 'fiveHour', cause });
+  const g = mk({ dflt: true, dir: d3 });
+  g.sessions.set('s1', sess());
+  const st3 = g.ar.statusFor('s1');
+  ok('B-73fe: the arm\'s CAUSE survives a restart', st3.armed === true && !!st3.cause && st3.cause.soonest.name === 'Member L' && st3.cause.rejector.ownWall.label === '5h' && st3.cause.rejector.floor[0].remaining === 2, JSON.stringify(st3.cause));
+  g.ar.armIfEnabled('s1', g.sessions.get('s1'), T0 + 7300000, 're-armed at fire: same wall');
+  const st4 = g.ar.statusFor('s1');
+  ok('…a re-arm that says nothing about the cause INHERITS it, like lane/bucket', st4.resetsAt === T0 + 7300000 && !!st4.cause && st4.cause.soonest.name === 'Member L' && st4.bucket === 'fiveHour', JSON.stringify(st4));
+  g.ar.armIfEnabled('s1', g.sessions.get('s1'), T0 + 7400000, 'x', { cause: { scope: 'pool', floorRule: { fiveHour: 10, weekly: 5 }, soonest: { id: 'b', name: 'B-Stack Max', bucket: { label: '7d', resetsAt: T0 + 7400000 } }, rejector: null } });
+  ok('…and one that names a new target REPLACES it', g.ar.statusFor('s1').cause.soonest.name === 'B-Stack Max');
+  fs.rmSync(d3, { recursive: true, force: true });
 }
 
 // ── 6. delivery failure must not silently drop the wait ──

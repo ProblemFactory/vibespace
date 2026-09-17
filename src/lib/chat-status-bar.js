@@ -574,12 +574,32 @@ export class ChatStatusBar {
       // A WATCH (the reset is past the 26h ceiling) promises no TIME — only
       // that a reading saying the quota is back will continue the session. The
       // chip must not print a clock it cannot keep.
-      const title = a.armed
+      let title = a.armed
         ? (a.watch
           ? t('Usage limit hit — the reset is too far out to wait for, but this session will continue by itself as soon as the quota is back. Click to cancel.')
           : t('Usage limit hit — this session will continue by itself at {t}. Click to cancel.', { t: when }))
         : (a.enabled ? t('Auto-continue is ON: if the quota runs out with no account to switch to, this session waits for the reset and continues. Click to turn off.')
           : t('Auto-continue is OFF: a usage limit leaves this session waiting for you. Click to turn on.'));
+      // B-73fe (2026-09-17, owner "7am 重置却提示 12pm"): a POOL wait says WHOSE
+      // reset the clock is (the soonest member + its bucket) and why the member
+      // that rejected this session is not it (its other bucket under the floor).
+      // The server sends the STRUCTURE (statusFor().cause); the words are ours.
+      const c = a.armed && !a.watch && a.cause && a.cause.scope === 'pool' && a.cause.soonest && a.cause.soonest.name ? a.cause : null;
+      if (c) {
+        const clock = (ms) => new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const s = c.soonest, sb = s.bucket && s.bucket.label ? s.bucket : null, r = c.rejector;
+        const lines = [];
+        if (r && r.name && r.ownWall && r.ownWall.label && r.ownWall.resetsAt && r.id !== s.id) {
+          const f = Array.isArray(r.floor) && r.floor.length ? r.floor[0] : null;
+          lines.push(f && f.label
+            ? t('{m}: {b} resets at {t}, but its {f} has {rem}% left (under the {line}% floor, counted as spent).', { m: r.name, b: r.ownWall.label, t: clock(r.ownWall.resetsAt), f: f.label, rem: Math.round(Number(f.remaining) || 0), line: f.line })
+            : t('{m}: {b} resets at {t}.', { m: r.name, b: r.ownWall.label, t: clock(r.ownWall.resetsAt) }));
+        }
+        lines.push(sb
+          ? t('Earliest usable account: {m} ({b} resets at {t}). This session continues by itself then, or sooner if any account frees up. Click to cancel.', { m: s.name, b: sb.label, t: clock(sb.resetsAt || a.resetsAt) })
+          : t('Earliest usable account: {m} (resets at {t}). This session continues by itself then, or sooner if any account frees up. Click to cancel.', { m: s.name, t: clock(a.resetsAt) }));
+        title = lines.join(' ');
+      }
       // ON must LOOK on (owner: "几乎没有视觉反馈"): accent + a label, not a
       // one-shade opacity change. Icon is clock+play — the hourglass belongs
       // to the style chip next door (pending pick) and two adjacent

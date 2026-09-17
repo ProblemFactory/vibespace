@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.369.108 — the auto-resume arm card says WHOSE reset it waits for, and why the account that rejected you is not it
+
+- Owner (2026-09-17 03:50 PDT): "明明当前hit limit的账号7am就会reset 5h，但你却提示12pm才能等到自动恢复". The wait was computed correctly — a member is usable again only when the LAST of its dead buckets resets, PandyMax's Fable cap sat at 2 % left (under the 5 % floor) so its 7am 5h reset was not a candidate, and the pool's soonest member was Member L whose Fable week rolls at 12pm — but the card said only `已安排在 12pm 重置后自动继续`, naming an instant and nothing about it (and B-Stack's 5h reset hot-switched the conversation 1 h 20 m later anyway).
+- Fix: the verdict carries its structure (`quotaVerdict` → `deadBuckets` + `until`; the pool verdict → `soonest` + `rejector`), the engine folds it into an arm `cause` (`armCauseFor`) that the arm persists and a cause-less re-arm inherits, and the card reads `PandyMax 的 5h 将在 07:00 重置，但它的 Fable 仅剩 2%（低于 5% 门槛，视为用尽，9/20 重置）。最早可用的成员是 Member L（Fable 12:00 重置），已安排到时自动继续；任一成员提前可用会立即继续`. The status-bar chip's tooltip says the same in the device's language (zh/ja); the journal's `armed for` line ends `via <member>/<bucket>`. The floor policy itself is unchanged (the owner's call).
+- Gates: test-auto-resume-loop 218 (+10: the 02:30:43 shape through the real engine and the real producer, the cause-less control, the single-member and unpooled forms, the wiring pin), test-pool-auto 89 (+6), test-auto-resume 226 (+3).
+
 ## 2.369.107 — the Manage Agents roster lines up again: every donut at one height, the "next usable" column a fixed width with the icon and the number in straight columns
 
 - Owner (2026-09-16, screenshot: "排版非常歪"): two geometry defects in the account roster. A bucket that may not name a deadline (an empty window, a passed or missing reset) rendered its donut with NO label under it, so that donut floated above a blank gap while its labelled neighbours read as donut + token — the row heights were equal (the min-height belt) but the donuts were not. And the per-account "next usable" cell was a MIN-width, so a long token (`6d14h55m`) widened its own cell and shoved that row's donut cluster and age cell left by up to ~15 px, row to row.
