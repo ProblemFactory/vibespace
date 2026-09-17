@@ -825,7 +825,19 @@ function projectionFamilyFor(session, model) {
   return fam;
 }
 
-const _vsuPending = new Map(); // request_id → {resolve, timer}
+const _vsuPending = new Map(); // request_id → {resolve, timer, raw} (the consumer fills `raw` with the verbatim reply before resolving)
+// THE RAW PROBE LOG (2.369.109): the control rung's verbatim reply rides beside
+// its parse so probeUsageForAccountKey can record what it wrote and why.
+const probeLog = require('./usage-probe-log.js');
+const _vsuRawOf = new WeakMap(); // parsed object → the raw control_response payload it came from
+function logControlProbe(session, key, parsed, raw, outcome, extra) {
+  try {
+    probeLog.appendProbeLog(path.join(rootDir, 'data'), {
+      rung: 'control', key, name: nameOf(key), sessionId: session ? session._webuiId || null : null,
+      sessionKey: session ? (resolveUsageKey(session) || null) : null, raw: raw == null ? null : raw, parsed: parsed == null ? null : parsed, outcome, ...(extra || {}),
+    });
+  } catch { }
+}
 function resolveUsageKey(session) {
   let acct = session._accountId || null;
   try {
@@ -889,8 +901,12 @@ function probeUsageViaSession(session, timeoutMs = 8000) {
     try {
       if (!session?.pty || session.backend !== 'claude' || session.mode !== 'chat' || session.host) return resolve(null);
       const req = ClaudeCodeAdapter.buildGetUsage();
-      const timer = setTimeout(() => { _vsuPending.delete(req.request_id); resolve(null); }, timeoutMs);
-      _vsuPending.set(req.request_id, { resolve, timer });
+      const pend = { resolve: null, timer: null, raw: null };
+      pend.timer = setTimeout(() => { _vsuPending.delete(req.request_id); logControlProbe(session, resolveUsageKey(session), null, null, 'timeout', { timeoutMs }); resolve(null); }, timeoutMs);
+      // the parse is what callers get; its verbatim reply is reachable through
+      // _vsuRawOf so the ONE log line per probe can carry both (2.369.109)
+      pend.resolve = (parsed) => { if (parsed && typeof parsed === 'object') _vsuRawOf.set(parsed, pend.raw); else logControlProbe(session, resolveUsageKey(session), null, pend.raw, 'unparsed'); resolve(parsed); };
+      _vsuPending.set(req.request_id, pend);
       session.pty.write(JSON.stringify(req) + '\n');
     } catch { resolve(null); }
   });
@@ -924,6 +940,7 @@ function probeUsageForAccountKey(key) {
       if (parsed) {
         const target = guardReadingTarget(key, readingLag.windowOf(parsed), { session: s, what: 'control:get_usage', entry: parsed });
         if (target) writeUsageCacheForKey(target, parsed);
+        logControlProbe(s, key, parsed, _vsuRawOf.get(parsed) || null, target ? 'written' : 'refused-by-window-guard', { target: target || null, window: readingLag.windowOf(parsed) });
       }
       return parsed;
     });

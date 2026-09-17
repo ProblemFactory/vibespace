@@ -258,7 +258,10 @@ if (!fs.existsSync('/proc/self/environ')) {
 execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 for (const pid of extraDaemons) { try { process.kill(pid, 'SIGTERM'); } catch {} }
 try { const pid = Number(fs.readFileSync(path.join(tmp, 'agentd', 'state', 'agentd.pid'), 'utf8')); process.kill(pid, 'SIGTERM'); } catch {}
-fs.rmSync(tmp, { recursive: true, force: true });
+// the daemon just got SIGTERM and may still be writing its state files while
+// the recursive rm walks the tree — ENOTEMPTY blocked a push (2.369.109);
+// rmSync retries on ENOTEMPTY/EBUSY when asked to
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M1 session tests passed');
 process.exit(0);

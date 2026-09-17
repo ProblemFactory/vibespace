@@ -581,6 +581,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               clearTimeout(pend.timer);
               let parsed = null;
               try { parsed = ClaudeCodeAdapter.parseGetUsageResponse(msg.response.response); } catch {}
+              pend.raw = msg.response.response; // the verbatim reply, for the raw probe log (2.369.109)
               pend.resolve(parsed);
             }
           }

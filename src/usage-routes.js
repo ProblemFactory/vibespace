@@ -38,6 +38,7 @@ const quotaModel = require('./quota-model.js');
 // the array and not about the parse. See quota-model's `authoritativeScopesOf`.
 const { authoritativeScopesOf } = quotaModel;
 
+const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
 function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
@@ -464,6 +465,16 @@ async function refreshViaCliPanel(key) {
     acctMeta = (accounts.list().accounts || []).find((x) => x.id === key && x.type === 'subscription');
     if (!acctMeta) return false;
   }
+  // THE RAW LOG (2.369.109, owner): what was sent, what came back verbatim,
+  // what the parser made of it and what the write did — one line per probe in
+  // data/usage-probe-log.ndjson (src/server/usage-probe-log.js), so a foreign
+  // panel can be diffed against its parse and its store without re-probing.
+  // credsDir = the identity this reading WILL be keyed by (see above) — derived
+  // ONCE (test-readings-attribution §7: a second derivation is how the key
+  // and the spawn could ever disagree), used by the spawn and the log alike.
+  const credsDir = isGlobal ? null : accounts.subDir(key);
+  const probeRec = { rung: 'panel', key, name: isGlobal ? '__global__' : (acctMeta.name || key), credsDir, argv: null, machineOrgBefore: probeLog.machineOauthAccount(), machineOrgAfter: null, exitCode: null, ms: null, rawStdout: null, rawStderr: null, parsed: null, outcome: null, why: null };
+  const logProbe = (outcome, extra) => { try { probeLog.appendProbeLog(path.dirname(USAGE_CACHE_DIR), { ...probeRec, outcome, ...(extra || {}) }); } catch { } };
   const cliPanel = await new Promise((resolve) => {
     try {
       const { execFile } = require('child_process');
@@ -471,17 +482,24 @@ async function refreshViaCliPanel(key) {
       delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
       // ONLY the secret store relocates (session-spawn parity): the token IS
       // the identity the panel reports; projects/settings stay shared.
-      // credsDir = the identity this reading WILL be keyed by (see above).
-      const credsDir = isGlobal ? null : accounts.subDir(key);
       if (credsDir) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = credsDir;
       const bin = CLAUDE_CMD || 'claude';
-      execFile(bin, ['-p', '/usage'], { env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      probeRec.argv = [bin, '-p', '/usage'];
+      const t0 = Date.now();
+      execFile(bin, ['-p', '/usage'], { env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        probeRec.ms = Date.now() - t0;
+        probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
+        probeRec.rawStdout = stdout == null ? '' : String(stdout);
+        probeRec.rawStderr = stderr == null ? '' : String(stderr);
+        probeRec.machineOrgAfter = probeLog.machineOauthAccount();
         if (err) return resolve(null);
-        resolve(parseCliUsageText(stdout));
+        let parsed = null; try { parsed = parseCliUsageText(stdout); } catch (e) { probeRec.why = 'parse threw: ' + (e && e.message); }
+        probeRec.parsed = parsed;
+        resolve(parsed);
       });
-    } catch { resolve(null); }
+    } catch (e) { probeRec.why = 'spawn threw: ' + (e && e.message); resolve(null); }
   });
-  if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) return false;
+  if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) { logProbe(probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed'); return false; }
   // THE ROSTER IS ASKED AGAIN AT THE WRITE, NOT ONLY AT THE SPAWN (r3, the
   // auto-merge finding's belt). This function's only roster check happens
   // before a 60-second `execFile`, and a record CAN stop existing inside that
@@ -495,6 +513,7 @@ async function refreshViaCliPanel(key) {
   // response to a panel whose subject vanished.
   if (!isGlobal && !(accounts.list().accounts || []).some((x) => x.id === key)) {
     console.log(`[usage] the /usage panel for ${key} answered after the account was removed — discarding the reading`);
+    logProbe('account-removed');
     return false;
   }
   _onDemandUsageAt[key] = Date.now();
@@ -573,6 +592,10 @@ async function refreshViaCliPanel(key) {
     const wrote = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
       authoritativeScopes: authoritativeScopesOf(cliPanel) });
     if (wrote.ok) Object.assign(merged, wrote.object);
+    try {
+      const { windowOf } = require('./reading-lag.js');
+      logProbe(wrote.ok ? 'written' : 'write-refused', { why: wrote.ok ? null : (wrote.error || wrote.why || (Array.isArray(wrote.errors) ? wrote.errors.join('; ') : null) || 'refused'), window: windowOf(merged) });
+    } catch { logProbe(wrote.ok ? 'written' : 'write-refused'); }
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
     try { ingestPassiveUsage(); } catch { }
@@ -1084,6 +1107,16 @@ function summarizeCodexRateLimits() {
 }
 function summarizeCodexRateLimit() { return summarizeCodexRateLimits().overall; }
 
+// THE RAW PROBE LOG READER (2.369.109, owner): the last N /usage probes with
+// their verbatim reply, parse, write verdict and the machine-wide org context
+// (`?key=<accountId>&rung=panel|control&limit=200`). Read-only; the file is
+// data/usage-probe-log.ndjson (+ .1 after rotation).
+app.get('/api/usage/probe-log', (req, res) => {
+  const limit = Math.max(1, Math.min(2000, parseInt(req.query.limit, 10) || 200));
+  const key = req.query.key ? String(req.query.key) : null;
+  const rung = req.query.rung ? String(req.query.rung) : null;
+  res.json({ records: probeLog.readProbeLog(path.dirname(USAGE_CACHE_DIR), { limit, key, rung }), file: path.join(path.dirname(USAGE_CACHE_DIR), probeLog.FILE) });
+});
 app.get('/api/usage', (req, res) => {
   ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
   const codexRl = summarizeCodexRateLimits();
