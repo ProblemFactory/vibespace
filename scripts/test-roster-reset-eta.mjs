@@ -110,16 +110,20 @@ fs.writeFileSync(path.join(cacheDir, B.id + '.json'), JSON.stringify(snap({
   scopedWeekly: [],
 })));
 // C: a PASSED reset and a MISSING one ⇒ no label either (running, but nothing to count down to)
+// …and an org whose extra usage is DISABLED (the shape every non-credits member carries) ⇒ no credits tag (B-ad05)
 fs.writeFileSync(path.join(cacheDir, C.id + '.json'), JSON.stringify(snap({
   fiveHour: { utilization: 0.3, status: 'allowed', resetsAt: sec(seedAt - 60), state: 'running' },
   sevenDay: { utilization: 0.5, status: 'allowed', state: 'running' },
   scopedWeekly: [],
+  overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled_until', asOf: seedAt },
 })));
 // D: the SOONEST reset on the roster — 5h in 40 min (20 %), 7d in 30 h (55 %) ⇒ the row label reads ≈ 40m and D is one of the two highlighted rows
+// …and D's org has USAGE CREDITS enabled — overage present, not in use, no rejected status (B-ad05: the dim "credits" tag)
 fs.writeFileSync(path.join(cacheDir, AD.id + '.json'), JSON.stringify(snap({
   fiveHour: { utilization: 0.2, status: 'allowed', resetsAt: sec(seedAt + 40 * M), state: 'running' },
   sevenDay: { utilization: 0.55, status: 'allowed', resetsAt: sec(seedAt + 30 * H), state: 'running' },
   scopedWeekly: [],
+  overage: { inUse: false, asOf: seedAt },
 })));
 // E: BLOCKED — 7d SPENT (100 %, resets in 20 h) while its 5h (10 %) resets in 30 min: the row label must count to the 7d reset (that is when E is usable), so E is NOT among the two soonest
 fs.writeFileSync(path.join(cacheDir, AE.id + '.json'), JSON.stringify(snap({
@@ -169,6 +173,8 @@ const ROWS = (root) => `(() => {
       miniVisible: vis(mini), miniText: mini ? mini.textContent : null, miniTitle: mini ? mini.title : null,
       next: (() => { const n = row.querySelector('.acct-usage-next'); return n ? { present: true, text: n.textContent.trim(), ms: n.dataset.nextMs ? Number(n.dataset.nextMs) : null, blocked: n.dataset.blocked === '1', title: n.title || '', visible: vis(n), minW: getComputedStyle(n).minWidth, right: R(n).right, hasIcon: !!n.querySelector('svg'), font: getComputedStyle(n).fontSize } : null; })(),
       soon: row.classList.contains('usage-acct-soon'), rowBg: getComputedStyle(row).backgroundColor,
+      credits: (() => { const c = row.querySelector('.acct-key-tail .acct-usage-credits'); return c ? { text: c.textContent.trim(), title: c.title, visible: vis(c), color: getComputedStyle(c).color, tailLine: Math.abs(R(c).top - R(row.querySelector('.acct-key-name')).top) < 4 } : null; })(),
+      inUseChip: !!row.querySelector('.acct-usage-overage'), extraLine: !!row.querySelector('.acct-key-extra'), nameColor: getComputedStyle(row.querySelector('.acct-key-name')).color,
       resetLine: !!row.querySelector('.acct-reset-eta'), ageText: age ? age.textContent : null, ageMinW: age ? getComputedStyle(age).minWidth : null, ageLines: age ? age.children.length : null,
       donutTops: [...row.querySelectorAll('.acct-donut-col .acct-usage-donut')].map((d) => R(d).top - R(row).top), ageRight: age ? R(age).right : null, iconLeft: (() => { const i = row.querySelector('.acct-usage-next svg'); return i ? R(i).left : null; })(), nextW: (() => { const n = row.querySelector('.acct-usage-next'); return n ? R(n).width : null; })(),
       cols: [...row.querySelectorAll('.acct-donut-col')].map((col) => { const d = col.querySelector('.acct-usage-donut'), e = col.querySelector('.acct-donut-eta'), slot = col.querySelector('.acct-donut-eta-slot'); return { label: d?.querySelector('span')?.textContent, eta: e ? e.textContent : null, slotH: slot ? R(slot).height : null, etaColor: e ? e.style.color : null, etaFont: e ? getComputedStyle(e).fontSize : null, etaBelow: e ? R(e).top >= R(d).bottom - 0.5 : null, etaCentred: e ? Math.abs((R(e).left + R(e).right) / 2 - (R(d).left + R(d).right) / 2) <= 1.5 : null, colH: R(col).height, colW: R(col).width, tip: d?.title || '' }; }),
@@ -231,6 +237,12 @@ try {
   check('the two SOONEST rows (D ≈ 40m, A ≈ 65m) carry .usage-acct-soon; E (20 h), F (6 d), B and C do not', d.soon && a.soon && !e.soon && !byId(rows, AF.id).soon && !b.soon && !c.soon && rows.filter((r) => r.soon).length === 2, rows.map((r) => [r.name, r.soon]));
   check('a highlighted row\'s tooltip says why; an unhighlighted one\'s does not', /closest to a reset/.test(a.next.title) && /closest to a reset/.test(d.next.title) && !/closest to a reset/.test(e.next.title), [a.next.title, d.next.title, e.next.title]);
   check('the highlight is a RENDERED background (a highlighted row differs from a plain one)', d.rowBg !== c.rowBg, [d.rowBg, c.rowBg]);
+  // ── B-ad05 (2026-09-17): USAGE CREDITS ARE VISIBLE BEFORE THEY ARE SPENT ──
+  console.log('§1c the dim "credits" tag on the member whose org bills pay-per-use past 100 %');
+  check('Member D (overage present, not in use, no rejected status): the identity tail carries the dim "· credits" tag with the pay-per-use tooltip', !!d.credits && d.credits.visible && d.credits.text === '· credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
+  check('…it is INLINE on the identity line (same top as the name), adds no extra row line, and is not the in-use chip', d.credits.tailLine === true && d.extraLine === false && d.inUseChip === false, d);
+  check('Member C (overage rejected / org_level_disabled) and every other row carry no credits tag', !c.credits && rows.filter((r) => r.credits).length === 1, rows.map((r) => [r.name, !!r.credits]));
+  check('the tag is dim: its colour differs from the name colour (text-secondary, not the name text)', d.credits.color !== d.nameColor, [d.credits.color, d.nameColor]);
   const nextRights = usageRows.map((r) => r.next.right);
   check(`the labels form a straight column: right edges aligned ±1px (spread ${(Math.max(...nextRights) - Math.min(...nextRights)).toFixed(1)}px over ${nextRights.length} rows)`, Math.max(...nextRights) - Math.min(...nextRights) <= 1);
   check('the label cell keeps a fixed min-width (≥ 30px) and the 9px roster font', usageRows.every((r) => parseFloat(r.next.minW) >= 30 && /^(8|9|10)px$/.test(r.next.font)), usageRows.map((r) => [r.next.minW, r.next.font]));

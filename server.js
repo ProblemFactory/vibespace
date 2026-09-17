@@ -424,6 +424,7 @@ const {
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
   markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, autoCliReady, lastMemberReadAt, // …+ the new-member wake (2026-09-08)
+  apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
   sessionModelFor, sweepUsageAnchors, usageCacheKeyFor,
@@ -1604,7 +1605,7 @@ app.use(sessionsRouter);
 // refreshed every ~5 min. See _fetchOAuthUsage below for the why.
 // ── Usage / Rate Limit ── (extracted to src/usage-routes.js in the 2.92.0 split)
 const { setupUsage } = require('./src/usage-routes');
-const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD });
+const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD });
 
 const { decideCliRefresh } = require('./src/account-pool-auto.js');
 // ── auto-cli quota refresh loop (2.329.0, owner-approved after the ToS
@@ -1984,6 +1985,10 @@ server.listen(PORT, HOST, () => {
   // it may reshape. Failures notice + retry next boot, never block startup.
   try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
   catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
+  // B-855a c2: the STANDING identity repair — every boot, AFTER the one-shot registry (it may have reshaped the stores this reads), idempotent; then the panel memory re-reads the repaired disk
+  try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); }
+  // …and STANDING (final verifier): a weekly window that moved between boots must not wait for the next boot — hourly, idempotent, quiet unless it changed something, the panel memory re-read only then
+  setInterval(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }, 3600e3).unref();
   migrateLegacyHomeProjects();
   restoreSessions();
   // Plan C boot reconciliation: a per-session pool link whose session did not

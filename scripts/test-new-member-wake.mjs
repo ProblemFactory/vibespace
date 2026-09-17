@@ -1148,10 +1148,24 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
       CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: path.join(dataDir, 'session-meta'),
       AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'session-buffers'),
       probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
+      apiDerivedWindow: (k) => (k === id ? apiWinFor : null),
     });
     const files = () => fs.readdirSync(cacheDir).filter((f) => f.includes(id)).sort();
     return { root, am, id, cacheDir, u, files };
   }
+  // Since B-855a c2 the `.window-` sidecar is stamped ONLY by a panel whose
+  // identity was verified — the org the CLI reports, or the weekly PHASE
+  // against the account's API-derived window. This fixture has neither (no
+  // data/subs/<id>/.claude.json, no engine), so the panel would be written
+  // unverified and NO sidecar would exist for the removal leg to refuse. Hand
+  // setupUsage an API-derived window in the panel's own phase (derived from
+  // the SAME text through the product's own parser) so the reading verifies
+  // by api-phase and both writes are in play, exactly as on a live account.
+  const apiWinFor = (() => {
+    const readingLag = require(path.join(REPO, 'src/reading-lag.js'));
+    const w = readingLag.windowOf(usageMod.parseCliUsageText(PANEL));
+    return { sevenDay: w.sevenDay || null, scoped: w.scoped || {}, at: Date.now(), source: 'rate-limit-event' };
+  })();
 
   // POSITIVE CONTROL FIRST: the guard is a refusal, not an off-switch
   {

@@ -155,6 +155,12 @@ export function installUsageMeter(App, ctx = {}) {
     if (btn) btn.classList.add('usage-refresh-spin');
     const r = await fetchJson('/api/usage/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: target }) });
     if (r?.error && !silent) showToast(r.error, { type: 'error' });
+    // B-855a: the answer names the RUNG (own /usage panel vs a live session)
+    // and whether the reading's identity was verified — an unverified one is
+    // still recorded, so say so rather than let the number look proven
+    else if (r?.success && !silent && r.rung && r.identityVerified === false && r.why) {
+      showToast(t('Quota refreshed via {rung} — identity not verified: {why}', { rung: r.rung === 'control' ? t('a live session') : t('this account\u2019s own /usage panel'), why: r.why }), { duration: 9000 });
+    }
     const data = await fetchJson('/api/usage');
     if (data) { this._applyUsage(data); this._renderUsage(); }
   },
@@ -292,7 +298,9 @@ export function installUsageMeter(App, ctx = {}) {
       // overage keeps a utilization under 100% while every token costs, so the
       // donut alone is the most misleading thing on this panel.
       const ovc = overageChip(overageState(snap), { t });
-      if (ovc) parts.push(`<span class="usage-src usage-overage" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>`);
+      // …or the DIM credits chip (B-ad05): extra usage is enabled on this org,
+      // so past 100 % it bills pay-per-use instead of stopping.
+      if (ovc) parts.push(`<span class="usage-src usage-overage${ovc.kind === 'credits' ? ' usage-credits' : ''}" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>`);
       // …and the harness's own "this account is refusing requests" fact, which
       // leaves the donut friendly (nothing marks a window spent for it).
       const scc = spendControlChip(spendControlState(snap), { t });

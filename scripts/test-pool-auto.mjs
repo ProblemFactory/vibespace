@@ -293,5 +293,74 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('…a dead bucket with NO reset ⇒ blockedUntil 0 (probe, never guess) and `until` null', q.usable === false && q.blockedUntil === 0 && q.until === null && q.deadBuckets.length === 1);
 }
 
+// ── B-ad05 (2026-09-17): USAGE CREDITS ARE VISIBLE BEFORE THEY ARE SPENT ────
+// A member whose org has extra usage ENABLED keeps serving past 100 % on
+// pay-per-use billing and nothing in the stream says so until the bill. The
+// pool ranks it BELOW every member with quota left, uses it only as the LAST
+// resort (after the scraps), answers `on-credits` when it is parked on one
+// (never "no member can serve it"), and every notice names it.
+{
+  const { rankPoolMembers, poolCreditsNotice } = require(path.resolve('src/account-pool-auto.js'));
+  const M = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'k', name: 'Kredits' }];
+  const dec = (caches, opts = {}) => decidePoolSwitch({ currentId: 'a', members: M, readCache: (id) => caches[id] ?? null, nowSec: NOW, explain: true, ...opts });
+  const deadA = acct(0.99, 2 * D, { u5: 0.99 });
+  const freeK = acct(0.1, 6 * D);
+  const deadK = acct(1, 6 * D, { u5: 1 });
+  // 1. never a voluntary target — even when EDF would have picked it
+  const c1 = { a: deadA, b: acct(0.5, 5 * D), k: acct(0.1, 3 * D) };
+  const d1 = dec(c1, { creditsIds: ['k'] });
+  ck('credits: not a voluntary target while a quota-bearing member exists (EDF alone would have picked K: sooner deadline, more headroom)', d1.to === 'b' && !d1.toCredits);
+  ck('…control: the SAME decision without creditsIds picks K — the input is what changed it', dec(c1).to === 'k');
+  // 2. a HOT pool never jumps proactively onto one
+  const c2 = { a: acct(0.3, 5 * D), b: null, k: acct(0.1, 2 * D) };
+  const d2 = dec(c2, { proactive: true, hot: true, creditsIds: ['k'] });
+  ck('credits: a HOT pool never jumps proactively onto a credits member (hold, not edf)', d2.to === null && d2.reason === 'hold');
+  ck('…control: without creditsIds the proactive tier does jump to K', dec(c2, { proactive: true, hot: true }).reason === 'edf' && dec(c2, { proactive: true, hot: true }).to === 'k');
+  // 3. the LAST resort: current hard-dead, every other member spent
+  const c3 = { a: deadA, b: acct(0.99, 5 * D), k: freeK };
+  const d3 = dec(c3, { creditsIds: ['k'] });
+  ck('credits: the last resort — current hard-dead and every other member spent ⇒ the credits member, flagged toCredits', d3.to === 'k' && d3.reason === 'exhausted' && d3.toCredits?.id === 'k' && d3.toCredits?.name === 'Kredits' && d3.toCredits?.dead === false);
+  ck('…control: without creditsIds K is picked as an ORDINARY member (no toCredits flag) — the flag is what the input adds', dec(c3).to === 'k' && !dec(c3).toCredits);
+  // 3b. a spent credits member is still the last resort (it serves past its quota) and the gain floor does not apply
+  const d3b = dec({ a: deadA, b: acct(0.99, 5 * D), k: deadK }, { creditsIds: ['k'] });
+  ck('credits: even a SPENT credits member is the last resort (its capacity is not its quota; the anti-flap gain floor does not apply)', d3b.to === 'k' && d3b.toCredits?.dead === true);
+  // 4. the scraps still beat it — quota the owner already paid for
+  const d4 = dec({ a: deadA, b: acct(0.9, 5 * D), k: freeK }, { creditsIds: ['k'], reserveFloorPct: 15 });
+  ck('credits: a reserve-floor scrap (quota already paid for) beats the credits member', d4.to === 'b' && !!d4.toReserve && !d4.toCredits);
+  // 5. parked on credits: the current member IS the credits member and nowhere else to go
+  const parked = (caches, extra = {}) => decidePoolSwitch({ currentId: 'k', members: M, readCache: (id) => caches[id] ?? null, nowSec: NOW, explain: true, creditsIds: ['k'], ...extra });
+  const c5 = { a: deadA, b: acct(0.99, 5 * D), k: deadK };
+  const d5 = parked(c5);
+  ck('credits: a pool PARKED on a spent credits member answers on-credits (it serves, billed) — never no-members', d5.to === null && d5.reason === 'on-credits' && d5.onCredits?.id === 'k' && d5.billing === true);
+  ck('…with the credits member\'s OWN buckets named (spent: 5h 0%, 7d 0%)', d5.deadBuckets.join(', ') === '5h 0%, 7d 0%');
+  ck('…control: without creditsIds the same state is no-members', decidePoolSwitch({ currentId: 'k', members: M, readCache: (id) => c5[id] ?? null, nowSec: NOW, explain: true }).reason === 'no-members');
+  // 6. it leaves the credits member the moment a quota-bearing member can serve
+  const d6 = parked({ a: deadA, b: acct(0.5, 5 * D), k: deadK });
+  ck('credits: the pool leaves the credits member the moment a quota-bearing member can serve', d6.to === 'b' && d6.reason === 'exhausted');
+  // 7. two spent credits members: no hop (a re-point for nothing on every tick)
+  const M2 = [...M, { id: 'k2', name: 'Kredits 2' }];
+  const d7 = decidePoolSwitch({ currentId: 'k', members: M2, readCache: (id) => ({ a: deadA, b: acct(0.99, 5 * D), k: deadK, k2: deadK })[id] ?? null, nowSec: NOW, explain: true, creditsIds: ['k', 'k2'] });
+  ck('credits: two spent credits members never hop between each other — on-credits, stay', d7.to === null && d7.reason === 'on-credits');
+  // 8. …but a credits member that still has quota is a better place to be parked (it is not billing yet)
+  const d8 = decidePoolSwitch({ currentId: 'k', members: M2, readCache: (id) => ({ a: deadA, b: acct(0.99, 5 * D), k: deadK, k2: freeK })[id] ?? null, nowSec: NOW, explain: true, creditsIds: ['k', 'k2'] });
+  ck('credits: from a spent credits member onto one that still has quota (not billing yet) — quota-holding rows first', d8.to === 'k2' && d8.toCredits?.id === 'k2');
+  // 9. the blocked sentence names it (hot pool, soft-exhausted current, nothing settleable, K held back)
+  const d9 = dec({ a: acct(0.5, 5 * D, { u5: 0.92 }), b: acct(0.99, 5 * D), k: freeK }, { hot: true, creditsIds: ['k'] });
+  const n9 = poolBlockedNotice(d9, { poolName: 'P', currentName: 'A' });
+  ck('…and a blocked decision NAMES the held-back credits member', Array.isArray(d9.creditsHeld) && d9.creditsHeld[0].id === 'k' && d9.creditsHeld[0].name === 'Kredits');
+  ck('credits: a soft-exhausted current member does NOT fall onto credits (last resort = hard-dead only) and the blocked sentence names the held-back member', d9.to === null && d9.reason === 'no-members' && /Held back because they bill pay-per-use past their quota \(usage credits\): Kredits — the pool falls back to them only once A is fully spent\./.test(n9), n9);
+  // 10. the parking sentence, both shapes
+  const n10 = poolCreditsNotice(d5, { poolName: 'P', memberName: 'Kredits' });
+  ck('credits: the parking notice names the member, what it bills for, its spent buckets and the three ways out',
+    n10 === 'Pool "P" is running on Kredits\'s usage credits — requests past its quota are billed pay-per-use (Kredits: spent: 5h 0%, 7d 0%); every other member is out of quota. Move conversations off the pool, add a member, or exclude Kredits from the pool in Manage Agents if you would rather it stopped.', n10);
+  const n10b = poolCreditsNotice({ toCredits: { id: 'k', name: 'Kredits' }, toRemaining: 90 }, { poolName: 'P', memberName: 'Kredits' });
+  ck('…and the last-resort switch shape says it was the only member left, with what is known about the target', /\(Kredits: 90% remaining\); it was the only member left\./.test(n10b), n10b);
+  // 11. the ranked snapshot (sealed orders / auth-fail evict) walks credits members LAST
+  const rk = rankPoolMembers({ members: M, readCache: (id) => ({ a: acct(0.5, 5 * D), b: acct(0.5, 4 * D), k: acct(0.1, 2 * D) })[id], nowSec: NOW, creditsIds: ['k'] });
+  ck('credits: rankPoolMembers puts a credits member LAST even with the soonest deadline, marked credits:true', rk.map((r) => r.id).join(',') === 'b,a,k' && rk[2].credits === true);
+  ck('…control: without creditsIds EDF ranks K first', rankPoolMembers({ members: M, readCache: (id) => ({ a: acct(0.5, 5 * D), b: acct(0.5, 4 * D), k: acct(0.1, 2 * D) })[id], nowSec: NOW }).map((r) => r.id).join(',') === 'k,b,a');
+  ck('…and a SPENT credits member is still listed (last) — the hard floor does not gate what serves past its quota', rankPoolMembers({ members: M, readCache: (id) => ({ a: acct(0.5, 5 * D), b: acct(0.5, 4 * D), k: deadK })[id], nowSec: NOW, creditsIds: ['k'] }).map((r) => r.id).join(',') === 'b,a,k');
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

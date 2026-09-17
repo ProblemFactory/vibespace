@@ -39,7 +39,7 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
-function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
+function setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -458,6 +458,110 @@ app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
 // derived twice and compared (a check that cannot fail is not protection —
 // making it structurally impossible is). Every other producer now follows the
 // same rule the hard way (readingSlotFor); this one gets it for free.
+// ── THE PROBE MAY ONLY WRITE THE ACCOUNT IT PROVES (B-855a, 2026-09-17) ──────
+// MEASURED on the installed CLI (2.1.274 binary, the config-path helpers read
+// out of it): the credential store is `${CLAUDE_SECURESTORAGE_CONFIG_DIR ??
+// CLAUDE_CONFIG_DIR ?? ~/.claude}/.credentials.json`, but the ORG CONTEXT —
+// `oauthAccount`, which keys the CLI's usage fetch and rides every API call as
+// `x-organization-uuid` — is read from `${CLAUDE_CONFIG_DIR || $HOME}/.claude.json`.
+// So a spawn that relocated ONLY the secret store took its identity from the
+// MACHINE-WIDE ~/.claude.json, which every session's CLI rewrites: the panel
+// for account X answered with whichever org's CLI wrote that file last
+// (quantified 2026-09-17: 15 of 50 panel reads on the busiest member foreign).
+// The CLI's own --debug log then showed the exact path (owner-debugged, 14:35
+// PDT): `-p /usage` fetches with the handed token and, when that fetch fails
+// IN-BAND (200 + a fieldless body — it tracks probe pressure), SEEDS the panel
+// from the config dir's persisted `cachedUsageUtilization` — the last account
+// any live session fetched — with no marker. An isolated config dir makes that
+// fallback the account's OWN previous fetch; a failed first fetch prints nothing.
+// Two halves, both needed:
+//   (a) ISOLATION — the probe runs under its own CLAUDE_CONFIG_DIR, a scratch
+//       dir UNDER the account's creds dir, re-seeded before every spawn with
+//       ONLY that account's own oauthAccount (+ the onboarding flags the login
+//       seed writes). ~/.claude.json is never read and never written by it.
+//   (b) VERIFICATION BEFORE ANY WRITE — the panel is compared against TWO
+//       witnesses it did not produce: the org the CLI reports (the seeded
+//       value is OUR statement and counts for nothing; only a CHANGE the CLI
+//       made to it, or an org the panel prints, is evidence) and the weekly
+//       PHASE of the account's API-DERIVED window (`apiDerivedWindow`: the
+//       newest slot-verified rate_limit_event, ±120 s like weeklyNear). A
+//       'differ' on either ⇒ nothing is written, the sidecar is not stamped,
+//       the reading is archived naming both identities, and the caller backs
+//       off. No evidence ⇒ written as asked (a guard with no evidence must not
+//       delete data) but NOT marked verified — 'unknown' is never spelled yes.
+const READING_ARCHIVE = path.join(path.dirname(USAGE_CACHE_DIR), 'archive', 'readings-window-mismatch.ndjson');
+const _panelVerdict = {};            // key → the last probe's {at, outcome, identityVerified, why, rung} for the route's answer
+const _panelVerdictSaid = new Map(); // key → the verdict class last journaled (one line per transition)
+const acctNameOf = (id) => { try { return (accounts.list().accounts || []).find((x) => x.id === id)?.name || id; } catch { return id; } };
+/** Re-seed the account's isolated probe config dir: the onboarding flags the
+ *  login seed writes + the account's OWN oauthAccount, nothing else. */
+function seedProbeConfigDir(credsDir, probeConfigDir) {
+  const seed = { hasCompletedOnboarding: true, hasTrustDialogAccepted: true, theme: 'dark' };
+  try {
+    const own = JSON.parse(fs.readFileSync(path.join(credsDir, '.claude.json'), 'utf-8'));
+    if (own && own.oauthAccount && typeof own.oauthAccount === 'object') seed.oauthAccount = own.oauthAccount;
+    if (own && own.theme) seed.theme = own.theme;
+  } catch { }
+  fs.mkdirSync(probeConfigDir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(probeConfigDir, '.claude.json'), JSON.stringify(seed), { mode: 0o600 });
+  // THE WORKING DIRECTORY IS ISOLATED TOO (owner 2026-09-17 "确保 config dir 和
+  // working directory 都用新的路径"): the CLI keys per-project state by cwd
+  // (`projects/<encoded cwd>` under the config dir, the trust record, any
+  // CLAUDE.md / .claude/ it finds there). A shared os.tmpdir() made every
+  // account's probe one "project" on a directory anyone can write into; an
+  // empty dir INSIDE the account's probe config keeps that state per account
+  // and out of reach. Measured 2026-09-17 21:41Z: the real CLI fetches and
+  // prints under it and creates `projects/-…-cwd` in the isolated config dir.
+  fs.mkdirSync(probeCwdOf(probeConfigDir), { recursive: true, mode: 0o700 });
+}
+/** The probe's working directory: an empty dir INSIDE the isolated config dir. */
+function probeCwdOf(probeConfigDir) { return path.join(probeConfigDir, 'cwd'); }
+/** The identity verdict on one parsed panel. `expected` = the account's own
+ *  login identity, `before`/`after` = the isolated config dir's oauthAccount
+ *  around the spawn, `apiWin` = the account's API-derived window. */
+function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, windows, ring = [], ringK = 3, sameIdentity = null }) {
+  const { windowOf, compareWindows, windowFingerprint, weeklyNear } = require('./reading-lag.js');
+  const panelWindow = windowOf(cliPanel);
+  const low = (v) => (v == null ? null : String(v).toLowerCase());
+  // the org the CLI REPORTED: printed in the panel, or rewritten by the CLI in
+  // the isolated dir (a value that merely survived our seed is not evidence)
+  const changed = after && before && (low(after.orgUuid) !== low(before.orgUuid) || low(after.email) !== low(before.email)) ? after : (after && !before ? after : null);
+  const panelIdent = { orgUuid: cliPanel.orgUuid || (changed && changed.orgUuid) || null, email: cliPanel.orgEmail || cliPanel.email || (changed && changed.email) || null };
+  let org = 'unknown';
+  if (expected && expected.orgUuid && panelIdent.orgUuid) org = low(expected.orgUuid) === low(panelIdent.orgUuid) ? 'agree' : 'differ';
+  else if (expected && expected.email && panelIdent.email) org = low(expected.email) === low(panelIdent.email) ? 'agree' : 'differ';
+  const phase = apiWin ? compareWindows(panelWindow, apiWin) : 'unknown';
+  // WHO ELSE the panel's window could belong to: every OTHER account (an
+  // org-merged login's own group excluded) whose established window agrees
+  // with it — names both identities on a refusal, and on an agreement says
+  // the phase is SHARED and therefore not identifying
+  const matched = [];
+  const mine = new Set([key, ...((typeof sameIdentity === 'function' && sameIdentity(key)) || [])]);
+  try { for (const [id, w] of Object.entries(windows || {})) if (!mine.has(id) && compareWindows(panelWindow, w) === 'agree') matched.push(id); } catch { }
+  const refused = org === 'differ' || phase === 'differ';
+  // A SHARED PHASE VERIFIES NOTHING (final verifier): four members on this
+  // instance share one weekly phase, and the production panel prints no org,
+  // so a same-phase foreign panel would have been written AND reported as
+  // verified. The org is identifying; the phase only when nobody else has it.
+  const shared = phase === 'agree' && matched.length > 0;
+  const verified = !refused && (org === 'agree' || (phase === 'agree' && !shared));
+  // THE WINDOW MAY HAVE MOVED (final verifier): a phase refusal where the
+  // account's OWN recent API candidates already share the panel's window is
+  // most likely a genuine move (a plan change) still short of the K-run that
+  // re-anchors it — said so, with the count, instead of a bare "not yours".
+  const ringAgree = phase === 'differ' ? (ring || []).filter((e) => e && weeklyNear(e.resetsAt, panelWindow.sevenDay || Object.values(panelWindow.scoped || {})[0]) === true).length : 0;
+  const movedLikely = ringAgree > 0;
+  const me = acctNameOf(key);
+  const foreign = matched.length ? matched.map(acctNameOf).join(', ') : (panelIdent.orgUuid || panelIdent.email ? `org ${panelIdent.orgUuid || panelIdent.email}` : `an account with weekly window ${windowFingerprint(panelWindow)}`);
+  let why;
+  if (org === 'differ') why = `the /usage panel for ${me} answered for ${foreign} (CLI-reported org ${panelIdent.orgUuid || panelIdent.email}), not ${me}'s own login (org ${expected.orgUuid || expected.email})`;
+  else if (phase === 'differ') why = `the /usage panel for ${me} answered with ${foreign}'s weekly window (${windowFingerprint(panelWindow)}), not ${me}'s own API-derived window (${windowFingerprint(apiWin)} — rate-limit events on a verified slot)`
+    + (movedLikely ? ` — but ${ringAgree} of ${me}'s own last ${ring.length} API readings share the panel's window: ${me}'s weekly window may have MOVED; ${ringK} consecutive agreeing readings re-anchor it automatically (or run the identity repair)` : '');
+  else if (verified) why = org === 'agree' ? `panel org matches ${me}'s own login` : `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)})`;
+  else if (shared) why = `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)}) but that phase is shared with ${matched.map(acctNameOf).join(', ')} — not identifying; the panel names no org`;
+  else why = `no identity evidence to compare for ${me} (no API-derived window yet; the panel names no org)`;
+  return { refused, verified, shared, movedLikely, org, phase, why, expected: expected || null, panel: panelIdent, matched, panelWindow, apiWindow: apiWin || null };
+}
 async function refreshViaCliPanel(key) {
   const isGlobal = key === '__global__';
   let acctMeta = null;
@@ -473,25 +577,43 @@ async function refreshViaCliPanel(key) {
   // ONCE (test-readings-attribution §7: a second derivation is how the key
   // and the spawn could ever disagree), used by the spawn and the log alike.
   const credsDir = isGlobal ? null : accounts.subDir(key);
-  const probeRec = { rung: 'panel', key, name: isGlobal ? '__global__' : (acctMeta.name || key), credsDir, argv: null, machineOrgBefore: probeLog.machineOauthAccount(), machineOrgAfter: null, exitCode: null, ms: null, rawStdout: null, rawStderr: null, parsed: null, outcome: null, why: null };
+  // (a) the isolated org context: a scratch dir UNDER the creds dir (one
+  // derivation — from credsDir, never a second subDir lookup), re-seeded now
+  const probeConfigDir = credsDir ? path.join(credsDir, '.probe-config') : null;
+  const probeCwd = probeConfigDir ? probeCwdOf(probeConfigDir) : os.tmpdir(); // the machine login's own probe (__global__) has no account dir to isolate into
+  const expected = credsDir ? probeLog.machineOauthAccount(credsDir) : probeLog.machineOauthAccount();
+  const probeRec = { rung: 'panel', key, name: isGlobal ? '__global__' : (acctMeta.name || key), credsDir, configDir: probeConfigDir, cwd: probeCwd, argv: null, machineOrgBefore: probeLog.machineOauthAccount(), machineOrgAfter: null, configOrgBefore: null, configOrgAfter: null, exitCode: null, ms: null, rawStdout: null, rawStderr: null, parsed: null, identity: null, identityVerified: null, outcome: null, why: null };
   const logProbe = (outcome, extra) => { try { probeLog.appendProbeLog(path.dirname(USAGE_CACHE_DIR), { ...probeRec, outcome, ...(extra || {}) }); } catch { } };
+  if (probeConfigDir) {
+    try { seedProbeConfigDir(credsDir, probeConfigDir); probeRec.configOrgBefore = probeLog.machineOauthAccount(probeConfigDir); }
+    catch (e) {
+      // a probe that cannot be isolated is not run: it would answer for whichever org wrote ~/.claude.json last
+      probeRec.why = 'could not seed the isolated config dir: ' + (e && e.message);
+      logProbe('spawn-failed');
+      _panelVerdict[key] = { at: Date.now(), outcome: 'spawn-failed', code: 'spawn', identityVerified: false, why: probeRec.why, rung: 'panel' };
+      return false;
+    }
+  }
   const cliPanel = await new Promise((resolve) => {
     try {
       const { execFile } = require('child_process');
       const env = { ...process.env };
       delete env.ANTHROPIC_API_KEY; delete env.CLAUDE_CODE_OAUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR;
-      // ONLY the secret store relocates (session-spawn parity): the token IS
-      // the identity the panel reports; projects/settings stay shared.
+      // the secret store relocates (session-spawn parity) AND the org context
+      // is isolated (B-855a): the token is the identity, and the CLI must read
+      // THIS account's oauthAccount for it — never the machine-wide file
       if (credsDir) env.CLAUDE_SECURESTORAGE_CONFIG_DIR = credsDir;
+      if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;
       const bin = CLAUDE_CMD || 'claude';
       probeRec.argv = [bin, '-p', '/usage'];
       const t0 = Date.now();
-      execFile(bin, ['-p', '/usage'], { env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(bin, ['-p', '/usage'], { env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
         probeRec.ms = Date.now() - t0;
         probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
         probeRec.rawStdout = stdout == null ? '' : String(stdout);
         probeRec.rawStderr = stderr == null ? '' : String(stderr);
         probeRec.machineOrgAfter = probeLog.machineOauthAccount();
+        if (probeConfigDir) probeRec.configOrgAfter = probeLog.machineOauthAccount(probeConfigDir);
         if (err) return resolve(null);
         let parsed = null; try { parsed = parseCliUsageText(stdout); } catch (e) { probeRec.why = 'parse threw: ' + (e && e.message); }
         probeRec.parsed = parsed;
@@ -517,6 +639,33 @@ async function refreshViaCliPanel(key) {
     return false;
   }
   _onDemandUsageAt[key] = Date.now();
+  // (b) IDENTITY VERIFICATION BEFORE ANY WRITE (B-855a). The vendor made the
+  // fetch; whether the answer is THIS account's is decided here, against
+  // witnesses the panel did not write, and a refusal writes nothing at all.
+  let idv = null;
+  try {
+    const wit = (typeof apiDerivedWindow === 'function') ? apiDerivedWindow(key, { witness: true }) : null; // {window, ring, k} — or a bare window from an older dep
+    const apiWin = wit && typeof wit === 'object' && ('window' in wit) ? wit.window : wit;
+    idv = panelIdentityVerdict({ key, cliPanel, expected, before: probeRec.configOrgBefore, after: probeRec.configOrgAfter,
+      apiWin, ring: (wit && Array.isArray(wit.ring)) ? wit.ring : [], ringK: (wit && wit.k) || 3,
+      sameIdentity: (typeof app.locals.usageIdentityAccountIds === 'function') ? app.locals.usageIdentityAccountIds : null,
+      windows: (typeof establishedWindows === 'function') ? establishedWindows() : {} });
+  } catch (e) { console.warn('[usage] panel identity check failed (writing as asked, unverified):', e.message); idv = { refused: false, verified: false, why: 'identity check failed: ' + e.message, panel: null, expected: expected || null, matched: [] }; }
+  probeRec.identity = { org: idv.org || null, phase: idv.phase || null, expected: idv.expected, panel: idv.panel, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };
+  probeRec.identityVerified = idv.verified;
+  if (idv.refused) {
+    const cls = `refused:${idv.org}/${idv.phase}`;
+    if (_panelVerdictSaid.get(key) !== cls) { _panelVerdictSaid.set(key, cls); console.log(`[usage] panel-identity: refusing to write ${acctNameOf(key)} — ${idv.why} — archived`); }
+    global.__vsEvent?.('usage-probe-identity-refused', `${key}:${idv.org}/${idv.phase}`);
+    try {
+      fs.mkdirSync(path.dirname(READING_ARCHIVE), { recursive: true });
+      fs.appendFileSync(READING_ARCHIVE, JSON.stringify({ at: Date.now(), store: 'usage-cache', key, sid: null, what: 'panel-identity', reason: idv.why, matched: idv.matched, ownWindow: idv.apiWindow || null, identity: { expected: idv.expected, panel: idv.panel, org: idv.org, phase: idv.phase }, entry: cliPanel }) + '\n');
+    } catch { }
+    logProbe('write-refused', { why: idv.why, window: idv.panelWindow });
+    _panelVerdict[key] = { at: Date.now(), outcome: 'write-refused', code: 'identity', identityVerified: false, why: idv.why, rung: 'panel' };
+    return false;
+  }
+  if (_panelVerdictSaid.get(key) !== 'ok') { _panelVerdictSaid.set(key, 'ok'); if (_panelVerdictSaid.size > 256) _panelVerdictSaid.delete(_panelVerdictSaid.keys().next().value); }
   const u = { ...cliPanel, source: 'on-demand', scopedFetchedAt: Date.now() };
   try {
     fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
@@ -564,11 +713,24 @@ async function refreshViaCliPanel(key) {
     // field there survives only while every one of them remembers to carry it.
     // One legitimate statusline render deleted every established window on the
     // instance and replayed the incident. See windowSidecarName.
+    //
+    // …AND ONLY BY A PANEL THAT PROVED WHOSE IT IS (B-855a c2, 2026-09-17).
+    // The panel is the very producer B-855a showed can answer for another
+    // account, and the sidecar is the identity anchor every other producer is
+    // judged against — so an UNVERIFIED panel (no org evidence, no API-derived
+    // window yet) may write its numbers (a guard with no evidence must not
+    // delete data) but may not (re)define WHO the account is. A verified one
+    // stamps `verifiedAt` + `verifiedBy` beside `source:'on-demand'`; the
+    // API-derived stamp (`source:'api'`) comes from the engine and the standing
+    // repair, and when the two disagree the panel was refused above already.
     try {
       const { windowOf, windowSidecarName } = require('./reading-lag.js');
       const w = windowOf(merged);
-      if (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length) {
-        usageWrite.writeSidecar(USAGE_CACHE_DIR, windowSidecarName(key), { ...w, at: Date.now(), source: 'on-demand' });
+      if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {
+        usageWrite.writeSidecar(USAGE_CACHE_DIR, windowSidecarName(key), { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : 'api-phase' });
+        probeRec.sidecar = 'stamped';
+      } else if (w.sevenDay) {
+        probeRec.sidecar = 'not-stamped (identity unverified)';
       }
     } catch { }
     delete merged.limits; // the canonical half is the write path's to compute, never inherited from `prev`
@@ -596,12 +758,15 @@ async function refreshViaCliPanel(key) {
       const { windowOf } = require('./reading-lag.js');
       logProbe(wrote.ok ? 'written' : 'write-refused', { why: wrote.ok ? null : (wrote.error || wrote.why || (Array.isArray(wrote.errors) ? wrote.errors.join('; ') : null) || 'refused'), window: windowOf(merged) });
     } catch { logProbe(wrote.ok ? 'written' : 'write-refused'); }
+    _panelVerdict[key] = { at: Date.now(), outcome: wrote.ok ? 'written' : 'write-refused', code: wrote.ok ? null : 'write', identityVerified: !!(wrote.ok && idv && idv.verified), why: wrote.ok ? (idv ? idv.why : null) : (wrote.why || wrote.error || 'refused'), rung: 'panel' };
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
     try { ingestPassiveUsage(); } catch { }
   } catch { }
   return true;
 }
+/** The last panel probe's verdict for a key — what the ⟳ route answers with. */
+function panelVerdictFor(key) { return _panelVerdict[key] || null; }
 
 // A HUMAN ⟳ THAT REVEALS A USABLE MEMBER MUST RE-DRIVE THE POOL (2026-09-08,
 // the new-member incident). This route used to write the reading and answer
@@ -784,13 +949,20 @@ app.post('/api/usage/refresh', async (req, res) => {
   // client (same as the user typing /usage there). Still human-gated (this
   // route IS the ⟳ click) + the same 60s throttle above. Falls through to the
   // bare read-only call when no session answers.
+  // The answer says WHICH RUNG answered and whether the identity was verified
+  // (B-855a ③): `{rung, identityVerified, why, skipped}` — a session the
+  // engine would not vouch for (OTel-divergent / inside a re-point's lag
+  // shadow) is skipped and listed, and the ⟳ falls to the isolated panel.
+  let skipped = [];
   if (probeUsageForAccountKey) {
     try {
-      const viaSession = await probeUsageForAccountKey(key);
-      if (viaSession) {
+      const viaSession = await probeUsageForAccountKey(key, { detailed: true });
+      const parsedVia = viaSession && typeof viaSession === 'object' && ('parsed' in viaSession) ? viaSession.parsed : viaSession;
+      if (viaSession && Array.isArray(viaSession.skipped)) skipped = viaSession.skipped;
+      if (parsedVia) {
         _onDemandUsageAt[key] = Date.now();
         wakePool(key, 'manual refresh (session)');
-        return res.json({ success: true, via: 'session' });
+        return res.json({ success: true, via: 'session', rung: 'control', identityVerified: !!viaSession.identityVerified, why: viaSession.why || null, sessionId: viaSession.sessionId || null, skipped });
       }
     } catch { /* fall through to the bare call */ }
   }
@@ -808,8 +980,17 @@ app.post('/api/usage/refresh', async (req, res) => {
   // the ⟳ click) + the same 60s throttle; any failure falls through to the
   // token ladder below. Ambient key/oat env is stripped so the CLI reads the
   // subscription login, not an inherited API key.
+  const t0 = Date.now();
   const cliOk = await refreshViaCliPanel(key);
-  if (cliOk) { wakePool(key, 'manual refresh (cli-panel)'); return res.json({ success: true, via: 'cli-panel' }); }
+  const pv = panelVerdictFor(key);
+  if (cliOk) { wakePool(key, 'manual refresh (cli-panel)'); return res.json({ success: true, via: 'cli-panel', rung: 'panel', identityVerified: !!(pv && pv.identityVerified), why: (pv && pv.why) || null, skipped }); }
+  // AN IDENTITY REFUSAL ENDS THE LADDER (B-855a): the vendor already answered
+  // once, for somebody else — a second vendor request on the token ladder
+  // would be the pattern §ban-safety exists to stop, and it could not verify
+  // its own identity either. The user is told, with both identities named.
+  if (pv && pv.at >= t0 && pv.code === 'identity') {
+    return res.json({ error: `not recorded — ${pv.why}`, rung: 'panel', identityVerified: false, why: pv.why, skipped });
+  }
   // A record REMOVED while its panel was being read (the r3 belt refuses to
   // write for it) must not fall through to the token ladder: that costs one
   // real vendor request on a SIBLING's token and can re-create the phantom
@@ -1117,6 +1298,22 @@ app.get('/api/usage/probe-log', (req, res) => {
   const rung = req.query.rung ? String(req.query.rung) : null;
   res.json({ records: probeLog.readProbeLog(path.dirname(USAGE_CACHE_DIR), { limit, key, rung }), file: path.join(path.dirname(USAGE_CACHE_DIR), probeLog.FILE) });
 });
+// THE STANDING IDENTITY REPAIR, BY HAND (B-855a c2). Human-triggered like ⟳
+// (a cookie-authenticated POST; an agent's vsst_/jbt_ Bearer is refused — an
+// agent must never re-anchor the identities its own bill is read from). Runs
+// the same repair boot runs, then reloads the in-memory panel from disk and
+// answers the report so the caller can see every sidecar/cache verdict.
+app.post('/api/usage/repair-identity', (req, res) => {
+  const auth = String(req.headers.authorization || '');
+  if (/^Bearer\s+(vsst_|jbt_)/i.test(auth)) return res.status(403).json({ error: 'human-triggered only', code: 'agent-forbidden' });
+  if (typeof repairIdentityAnchors !== 'function') return res.status(503).json({ error: 'identity repair unavailable', code: 'no-engine' });
+  const rep = repairIdentityAnchors('manual');
+  if (rep && rep.error) return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' });
+  try { reloadRateLimitCache(); } catch { }
+  try { for (const k of Object.keys(_onDemandUsageAt)) delete _onDemandUsageAt[k]; } catch { }
+  res.json({ success: true, counts: rep.counts, ms: rep.ms, identities: (rep.identities || []).map((r) => ({ key: r.key, name: r.name, apiPhase: r.apiPhase, n: r.n, of: r.of, sidecar: r.sidecar, sidecarWas: r.sidecarWas, cache: r.cache, readmitted: r.readmitted })) });
+});
+
 app.get('/api/usage', (req, res) => {
   ingestPassiveUsage(); // pick up whatever active sessions' statuslines just wrote
   const codexRl = summarizeCodexRateLimits();
@@ -1198,7 +1395,7 @@ app.get('/api/usage', (req, res) => {
 });
 
 
-  return { refreshViaCliPanel, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
+  return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
 module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit };

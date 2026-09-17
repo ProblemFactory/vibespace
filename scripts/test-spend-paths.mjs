@@ -893,11 +893,11 @@ function mkWorld({ settings = {} } = {}) {
   writeCache(M1, healthy()); writeCache(M2, healthy());
 
   const sessions = new Map();
-  const notices = [], notes = [], fired = [], inbox = [];
+  const notices = [], noticeKeys = [], notes = [], fired = [], inbox = [];
   const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
   const eng = engMod.create({
     app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
-    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t),
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => { notices.push(t); noticeKeys.push(k); },
     serverSetting: (k) => settings[k], getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
     recordUsageAttribution() { }, adapterRegistry: { get() { return null; } },
     getAutoResume: () => ar, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
@@ -921,7 +921,7 @@ function mkWorld({ settings = {} } = {}) {
     sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, M1); return s;
   };
   return {
-    root, dataDir, am, eng, ar, sessions, P, M1, M2, notices, notes, fired, inbox, writeCache, healthy, cacheDir,
+    root, dataDir, am, eng, ar, sessions, P, M1, M2, notices, noticeKeys, notes, fired, inbox, writeCache, healthy, cacheDir,
     mkSession,
     // An arm needs a reset in the FUTURE (armIfEnabled refuses a past one), and
     // the tick is driven with an explicit `now` past reset + GRACE_MS instead
@@ -1812,11 +1812,122 @@ console.log('\n§7 paid overage: refused for unattended spend, visible where the
   ok('§7 PANEL: Manage Agents — where the owner picks a switch target — renders it too (design §1.4: provenance reached one panel of four)',
     /overageChip\(overageState\(u\)/.test(ma) && /acct-usage-overage/.test(ma));
   const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
-  ok('§7 the chip says nothing when overage is off/unknown, and says the money when it is on',
-    chip.overageChip(A.overageState({ overage: { inUse: false } })) === null
+  ok('§7 the chip says nothing when overage is DISABLED or unknown, and says the money when it is on (an ENABLED-but-idle org gets the dim credits chip — §7c)',
+    chip.overageChip(A.overageState({ overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled_until' } })) === null
+    && chip.overageChip(A.overageState({})) === null
     && /paid overage in use — \$4\.25 \/ \$20\.00/.test(chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() }, spend: { used: 4.25, limit: 20 } })).label));
-  ok('§7 …and it says NOTHING about a record that stopped being refreshed (the chip tip promises a refusal that no longer happens)',
-    chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } })) === null);
+  ok('§7 …and it never claims "in use" about a record that stopped being refreshed (that chip tip promises a refusal that no longer happens) — only the dim credits chip, whose tip promises none',
+    chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } }))?.kind === 'credits'
+    && !/refused/.test(chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } })).tip));
+}
+
+// ── §7c USAGE CREDITS (B-ad05): visible before they are spent, NOT a spend verdict ──
+// This instance idled every conversation on the one member whose org has extra
+// usage ENABLED (`overage = {inUse:false}` with no status — every other member
+// carries status:'rejected') for 14 h while its 5h/Fable read 100 %: served by
+// credits, billed pay-per-use, chip hidden because `inUse` never turned true.
+console.log('\n§7c usage credits: a dim chip before the bill, a last-resort rank, a 6 h parking notice — and no change to any spend verdict');
+{
+  const now = Date.now();
+  const ID = { key: 'sub-cr', name: 'Alpha' };
+  const allowed = { overage: { inUse: false, status: 'allowed', asOf: now } };
+  const disabled = { overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled_until', asOf: now } };
+  // the WIPED shape (final verifier): `inUse:false` with NO status — the vendor
+  // omits `overageStatus` on a third of events and the pre-fix merge wiped
+  // stored ones, so this is also an overage-DISABLED org's record after a
+  // status-less event. It is 'unknown', never 'allowed'.
+  const wiped = { overage: { inUse: false, asOf: now } };
+  ok('§7c overageState.mode distinguishes allowed / disabled / inUse / unknown — and \'allowed\' needs POSITIVE evidence (a non-rejected status, or a dated inUse:true that ended or went stale); inUse:false with no status is unknown',
+    A.overageState(allowed).mode === 'allowed' && A.overageState(disabled).mode === 'disabled'
+    && A.overageState({ overage: { inUse: true, asOf: now } }, { now }).mode === 'inUse' && A.overageState({}).mode === 'unknown' && A.overageState(null).mode === 'unknown'
+    && A.overageState(wiped, { now }).mode === 'unknown'
+    && A.overageState({ overage: { inUse: false, status: 'allowed_warning', asOf: now } }, { now }).mode === 'allowed'
+    && A.overageState({ overage: { inUse: true, asOf: now - 3600e3, resetsAt: Math.floor(now / 1000) - 60 } }, { now }).mode === 'allowed'
+    && A.overageState({ overage: { inUse: true } }, { now }).mode === 'unknown', JSON.stringify({ wiped: A.overageState(wiped, { now }).mode }));
+  ok('§7c overageAllowed is that one question, and it is NOT date-bounded (an org-level configuration, not a claim about the present) — and false for the wiped shape',
+    A.overageAllowed(allowed) === true && A.overageAllowed(disabled) === false && A.overageAllowed({ overage: { inUse: false, status: 'allowed', asOf: now - A.OVERAGE_STALE_MS * 4 } }, { now }) === true && A.overageAllowed(wiped, { now }) === false);
+  const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
+  const cr = chip.overageChip(A.overageState(allowed));
+  ok('§7c the chip: a DIM "credits" chip for an allowed org (kind credits), today\'s chip for inUse, nothing for disabled / unknown',
+    cr?.kind === 'credits' && cr.dim === true && cr.label === 'credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(cr.tip)
+    && chip.overageChip(A.overageState({ overage: { inUse: true, asOf: now } }, { now }))?.kind === 'inUse'
+    && chip.overageChip(A.overageState(disabled)) === null && chip.overageChip(A.overageState({})) === null, JSON.stringify(cr));
+  // SPEND-GUARD UNCHANGED (pinned): a credits-allowed member changes no verdict
+  const base = { reason: 'auto-resume', identity: ID, state: A.emptyBudget(), now };
+  const withCredits = A.authorizeUnattendedSpend({ ...base, overage: A.overageState(allowed, { now }) });
+  const withNone = A.authorizeUnattendedSpend({ ...base, overage: null });
+  ok('§7c PURE: the authorizer answers IDENTICALLY with a credits-allowed record and with none (it refuses only once overage is IN USE)',
+    withCredits.ok === true && withNone.ok === true && withCredits.why === withNone.why
+    && A.authorizeUnattendedSpend({ ...base, overage: A.overageState({ overage: { inUse: true, asOf: now } }, { now }) }).why === 'overage-in-use');
+  const w = mkWorld({ settings: {} });
+  const s = w.mkSession('sess-cr-1');
+  w.writeCache(w.M1, w.healthy({ overage: { inUse: false, status: 'allowed', asOf: now } }));
+  w.arm(s); await w.fireDue();
+  ok('§7c WORLD: the auto-continue FIRES on a credits-allowed member, and the inbox says nothing about it', w.fired.length === 1 && !w.inbox.some((i) => /overage|credits/i.test(i.text)), JSON.stringify(w.inbox.map((i) => i.text)));
+  ok('§7c the engine\'s ALWAYS-ON credits reader names that member and no other',
+    w.eng.creditsMemberIds([{ id: w.M1 }, { id: w.M2 }])?.has(w.M1) === true && !w.eng.creditsMemberIds([{ id: w.M1 }, { id: w.M2 }]).has(w.M2));
+  // THE PARKING NOTICE through the real engine: the pool sits on the credits
+  // member, every other member is spent — one notice per (pool, member) per 6 h
+  const w2 = mkWorld({ settings: {} });
+  const dead = (extra = {}) => w2.healthy({ fiveHour: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, sevenDay: { utilization: 1, resetsAt: Math.floor(Date.now() / 1000) + 3 * 86400 }, ...extra });
+  w2.writeCache(w2.M1, dead({ overage: { inUse: false, status: 'allowed', asOf: now } }));
+  w2.writeCache(w2.M2, dead());
+  w2.eng.maybePoolAutoSwitchForPool(w2.P, { force: true });
+  w2.eng.maybePoolAutoSwitchForPool(w2.P, { force: true });
+  const creditKeys = w2.noticeKeys.filter((k) => /^pool-credits-/.test(k));
+  ok('§7c ENGINE: a pool parked on a spent credits member posts the parking notice — one KEY per (pool, member, 6 h bucket), so the server\'s per-key dedup makes it once per 6 h',
+    creditKeys.length === 2 && creditKeys[0] === creditKeys[1] && creditKeys[0] === `pool-credits-${w2.P}-${w2.M1}-${Math.floor(Date.now() / (6 * 3600e3))}`, JSON.stringify(w2.noticeKeys));
+  ok('§7c …the sentence names the member and the bill, and the pool is NOT reported as stuck',
+    w2.notices.some((t) => /^Pool "pool" is running on Alpha's usage credits — requests past its quota are billed pay-per-use \(Alpha: spent: 5h 0%, 7d 0%\); every other member is out of quota\./.test(t))
+    && !w2.noticeKeys.some((k) => /^pool-blocked-/.test(k)) && w2.am.poolCurrent(w2.P) === w2.M1, JSON.stringify(w2.notices));
+  // …and the LAST-RESORT switch: current spent (no credits), the other member has credits
+  const w3 = mkWorld({ settings: {} });
+  w3.writeCache(w3.M1, dead());
+  w3.writeCache(w3.M2, w3.healthy({ overage: { inUse: false, status: 'allowed', asOf: now } }));
+  w3.eng.maybePoolAutoSwitchForPool(w3.P, { force: true });
+  ok('§7c ENGINE: the last-resort switch lands on the credits member, says so in the switch notice and posts the parking notice',
+    w3.am.poolCurrent(w3.P) === w3.M2 && w3.notices.some((t) => /auto-switched to Beta .*the last resort: Beta bills pay-per-use past its quota \(usage credits\)/.test(t))
+    && w3.noticeKeys.some((k) => k === `pool-credits-${w3.P}-${w3.M2}-${Math.floor(Date.now() / (6 * 3600e3))}`), JSON.stringify(w3.notices));
+  // the panels render the chip from the same PURE rule
+  const ma2 = read('src/lib/manage-agents.js'), um2 = read('src/lib/usage-meter.js');
+  ok('§7c PANEL: the roster renders the credits chip as a dim tag (acct-usage-credits) and the popup beside the provenance line (usage-credits)',
+    /acct-usage-credits/.test(ma2) && /usage-credits/.test(um2));
+  // THE ORG FACTS SURVIVE THE IDENTITY REPAIR (final verifier, the fail-closed
+  // census): repairSidecarsByApiPhase rebuilds a cache whose 7d contradicts the
+  // account's API phase — and used to rebuild it WITHOUT `overage`/`spend`, so
+  // the authorizer's only overage refusal read 'unknown' and every unattended
+  // turn on an overage-billing account was ALLOWED until the next event.
+  {
+    const repair = require(path.join(REPO, 'src/reading-repair.js'));
+    const rl = require(path.join(REPO, 'src/reading-lag.js'));
+    const dd = path.join(tmpdir('vs-spend-orgfacts-'), 'data');
+    for (const p of ['usage-anchors', 'usage-cache', 'archive']) fs.mkdirSync(path.join(dd, p), { recursive: true });
+    const K = 'sub-kkkkkkkkkkkk', nowSec = Math.floor(now / 1000), H = 3600;
+    const WA = nowSec + 3 * 86400, WF = nowSec + 6 * 86400 + 16 * H;
+    const OV = { inUse: true, status: 'allowed', asOf: now - 3600e3, resetsAt: nowSec + 20 * 86400 }, SP = { used: 12.5, limit: 50, pct: 25 };
+    const rec = (ts, u, resetsAt, source) => ({ ts, fetchedAt: ts, source, accountId: K, identityKey: 'org_kkkk', buckets: { fiveHour: { u: 0.2, resetsAt: nowSec + H }, sevenDay: { u, resetsAt }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null });
+    fs.writeFileSync(path.join(dd, 'usage-anchors', 'anchors-org_kkkk.ndjson'), Array.from({ length: 5 }, (_, i) => rec(now - (30 - i * 5) * H * 1000, 0.2 + i * 0.02, WA, i ? 'rate-limit-event' : 'on-demand')).map((r) => JSON.stringify(r)).join('\n') + '\n');
+    fs.writeFileSync(path.join(dd, 'usage-cache', rl.windowSidecarName(K)), JSON.stringify({ sevenDay: WF, fiveHour: null, scoped: {}, at: now - 2 * H * 1000, source: 'on-demand' }));
+    const mk = (extra) => JSON.stringify({ fetchedAt: now - H * 1000, source: 'on-demand', sevenDay: { utilization: 0.5, resetsAt: WF }, orgUuid: 'kkkk', overage: OV, spend: SP, ...extra });
+    fs.writeFileSync(path.join(dd, 'usage-cache', K + '.json'), mk({}));
+    const accts = [{ id: K, name: 'Member K', type: 'subscription', backend: 'claude' }];
+    const r1 = repair.repairSidecarsByApiPhase({ dataDir: dd, accounts: accts, id: 'T-orgfacts' });
+    const c1 = JSON.parse(fs.readFileSync(path.join(dd, 'usage-cache', K + '.json'), 'utf8'));
+    const st1 = A.overageState(c1, { now });
+    const gate = (c) => A.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: K, name: 'Member K' }, state: A.emptyBudget(), now, overage: A.overageState(c, { now }) });
+    ok('§7c REPAIR (replaced): the rebuilt cache carries overage (inUse, status, resetsAt, asOf) and spend verbatim, overageState still reads in-use, and the authorizer still REFUSES overage-in-use',
+      r1.counts.replaced === 1 && c1.sevenDay && rl.weeklyNear(c1.sevenDay.resetsAt, WA) === true && c1.overage && c1.overage.inUse === true && c1.overage.status === 'allowed' && c1.overage.resetsAt === OV.resetsAt && c1.overage.asOf === OV.asOf && c1.spend && c1.spend.used === 12.5 && c1.spend.limit === 50
+      && st1.inUse === 'yes' && st1.mode === 'inUse' && gate(c1).ok === false && gate(c1).why === 'overage-in-use', JSON.stringify({ counts: r1.counts, ov: c1.overage, sp: c1.spend, st: st1.inUse, gate: gate(c1) }));
+    // …and the EMPTIED branch (no anchor agrees wholly): a scoped foreign bucket on every anchor
+    const dd2 = path.join(tmpdir('vs-spend-orgfacts2-'), 'data');
+    for (const p of ['usage-anchors', 'usage-cache', 'archive']) fs.mkdirSync(path.join(dd2, p), { recursive: true });
+    fs.writeFileSync(path.join(dd2, 'usage-anchors', 'anchors-org_kkkk.ndjson'), Array.from({ length: 5 }, (_, i) => ({ ...rec(now - (30 - i * 5) * H * 1000, 0.2 + i * 0.02, WA, i ? 'rate-limit-event' : 'on-demand'), buckets: { fiveHour: { u: 0.2, resetsAt: nowSec + H }, sevenDay: { u: 0.2 + i * 0.02, resetsAt: WA }, scopedWeekly: [{ name: 'Fable', u: 0.98, resetsAt: WF, asOf: now }] } })).map((r) => JSON.stringify(r)).join('\n') + '\n');
+    fs.writeFileSync(path.join(dd2, 'usage-cache', K + '.json'), mk({ scopedWeekly: [{ name: 'Fable', utilization: 0.98, resetsAt: WF }] }));
+    const r2 = repair.repairSidecarsByApiPhase({ dataDir: dd2, accounts: accts, id: 'T-orgfacts2' });
+    const c2 = JSON.parse(fs.readFileSync(path.join(dd2, 'usage-cache', K + '.json'), 'utf8'));
+    ok('§7c REPAIR (emptied): the identity-only remnant STILL carries overage + spend, and the authorizer still refuses — an emptied reading is not an emptied bill',
+      r2.counts.emptied === 1 && !c2.sevenDay && c2.overage && c2.overage.inUse === true && c2.overage.status === 'allowed' && c2.spend && c2.spend.used === 12.5 && gate(c2).why === 'overage-in-use', JSON.stringify({ counts: r2.counts, ov: c2.overage, gate: gate(c2) }));
+  }
 }
 
 

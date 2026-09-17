@@ -55,7 +55,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, conversationDisplayName, bucketRemaining, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
@@ -334,6 +334,7 @@ async function pushSealedOrders(poolId) {
     // meantime would be an unreachable fallback. Members near/past their
     // login deadline never enter the snapshot.
     readLogin: poolReadLogin(),
+    creditsIds: creditsMemberIds(members), // usage-credits members walk LAST (B-ad05)
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
   const orders = { poolId, linkPath: accounts.subDir(poolId), ranked, currentId: accounts.poolCurrent(poolId) || null,
     // Plan C: per-session links are additional MATCH+ACT targets — the daemon
@@ -555,6 +556,27 @@ function overageMemberIds(members) {
     return out.size ? out : null;
   } catch { return null; }
 }
+// USAGE CREDITS (B-ad05, ALWAYS on — it is a ranking, not a bar): members
+// whose org has extra usage ENABLED and not in use (`overageState().mode ===
+// 'allowed'`). Past 100 % such a member keeps serving on pay-per-use billing
+// and nothing in the stream says so — this instance idled every conversation
+// on one for 14 h while its 5h/Fable read 100 %, and the owner learned from
+// the bill. The PURE decision ranks them below every member with quota left
+// and uses one only as the last resort; the parking notice below says when.
+function creditsMemberIds(members) {
+  try {
+    const out = new Set();
+    for (const m of members || []) if (overageState(readRawUsageCache(m.id)).mode === 'allowed') out.add(m.id);
+    return out.size ? out : null;
+  } catch { return null; }
+}
+// ONE notice per (pool, member) per 6 h while a pool runs on usage credits —
+// the same key discipline as every other pool notice (`_sentNotices` is a
+// per-boot Set, so the key carries the 6 h bucket or a recurrence is never
+// reported again).
+function noteCreditsParking(poolId, memberId, sentence, now) {
+  serverNotice(`pool-credits-${poolId}-${memberId}-${Math.floor(now / (6 * 3600e3))}`, sentence, { level: 'warn' });
+}
 function poolChooserForModel(poolId, { model } = {}) {
   try {
     const a = accounts.get(poolId);
@@ -569,7 +591,7 @@ function poolChooserForModel(poolId, { model } = {}) {
     // if it doesn't, the switch verdict IS the placement.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem) });
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
     return (d && d.to) || cur;
   } catch (e) { console.warn('[pool] chooser failed (falling back to default target):', e.message); return null; }
 }
@@ -928,24 +950,50 @@ function usageIdentityAccountIds(key) {
 // billing that very account — the popup had remapped the linked account to
 // '__global__', which no session matches when pool sessions bill the DIR key;
 // the shared quota makes any same-identity session's answer authoritative).
-function probeUsageForAccountKey(key) {
+// A SESSION WHOSE CREDENTIALS WE CANNOT VOUCH FOR IS NOT ASKED (B-855a ③,
+// 2026-09-17): under a pool switch the CLI may still hold the PREVIOUS
+// member's token (the same sessions log "observed on X while linked to Y"),
+// so its `get_usage` is the wrong account's panel. Two witnesses veto the
+// rung and the ⟳ falls to the isolated panel probe: the OTel corroboration
+// disagreeing with the slot (`corroborateReading`), and a re-point inside the
+// lag shadow that no reading has yet ended (`inLagShadow`). Neither decides
+// where a number LANDS (guard ② still does) — they decide whom we ASK.
+// `opts.detailed` answers `{parsed, sessionId, target, identityVerified, why,
+// skipped}` for the route; the bare call keeps its parsed|null shape.
+function probeUsageForAccountKey(key, opts = {}) {
   const ids = new Set(usageIdentityAccountIds(key));
+  const skipped = [];
+  const detail = (parsed, extra) => (opts && opts.detailed) ? { parsed: parsed || null, rung: 'control', skipped, ...(extra || {}) } : (parsed || null);
   for (const [, s] of activeSessions) {
     if (s.backend !== 'claude' || s.mode !== 'chat' || s.host || !s.pty) continue;
     if (!ids.has(resolveUsageKey(s))) continue;
+    const corr = corroborateReading(s, key, 'control:get_usage');
+    if (corr && corr.agree === false) { skipped.push({ sessionId: s._webuiId || null, why: `observed on ${nameOf(corr.observed)} while linked to ${nameOf(key)}` }); continue; }
+    const sh = inLagShadow(s);
+    if (sh) { skipped.push({ sessionId: s._webuiId || null, why: `re-pointed ${nameOf(sh.from)} → ${nameOf(sh.to)} ${Math.round(sh.ageMs / 1000)}s ago and no reading has ended the lag shadow yet` }); continue; }
     return probeUsageViaSession(s).then((parsed) => {
       // the ANSWER comes from a live session's CLI, so it is the credentials
       // that session holds that produced it — the ⟳ target is only who we
       // ASKED about (guard ② decides who it is written for)
       if (parsed) {
-        const target = guardReadingTarget(key, readingLag.windowOf(parsed), { session: s, what: 'control:get_usage', entry: parsed });
+        const win = readingLag.windowOf(parsed);
+        const target = guardReadingTarget(key, win, { session: s, what: 'control:get_usage', entry: parsed });
         if (target) writeUsageCacheForKey(target, parsed);
-        logControlProbe(s, key, parsed, _vsuRawOf.get(parsed) || null, target ? 'written' : 'refused-by-window-guard', { target: target || null, window: readingLag.windowOf(parsed) });
+        logControlProbe(s, key, parsed, _vsuRawOf.get(parsed) || null, target ? 'written' : 'refused-by-window-guard', { target: target || null, window: win });
+        // verified = the answer's weekly window agrees with the account's own
+        // established window; 'unknown' is honest, never spelled as yes
+        const own = establishedWindows()[key] || null;
+        const cmp = own ? readingLag.compareWindows(win, own) : 'unknown';
+        const identityVerified = target === key && cmp === 'agree';
+        const why = target !== key ? (target ? `window says these numbers are ${nameOf(target)}'s — written there` : 'window matches no known account — archived')
+          : cmp === 'agree' ? `answered by session ${s._webuiId || '?'}; weekly window matches ${nameOf(key)}'s established window`
+          : `answered by session ${s._webuiId || '?'}; no established window to compare against`;
+        return detail(parsed, { sessionId: s._webuiId || null, target: target || null, identityVerified, why });
       }
-      return parsed;
+      return detail(null, { sessionId: s._webuiId || null, target: null, identityVerified: false, why: 'the session did not answer' });
     });
   }
-  return Promise.resolve(null);
+  return Promise.resolve(detail(null, { sessionId: null, target: null, identityVerified: false, why: skipped.length ? 'every live session was skipped' : 'no live session bills this account' }));
 }
 app.locals.usageIdentityAccountIds = usageIdentityAccountIds;
 
@@ -992,6 +1040,154 @@ function establishedWindows() {
   }
   _ownWin = out; _ownWinAt = now;
   return out;
+}
+// ── THE API-DERIVED WINDOW of an account (B-855a, 2026-09-17) ───────────────
+// The established window above is what the account's /usage PANEL last said —
+// and B-855a is precisely the panel answering for ANOTHER account (the CLI took
+// its org context from the machine-wide ~/.claude.json, which every session's
+// CLI rewrites). A panel therefore cannot be its own identity proof: the panel
+// probe now runs under an isolated CLAUDE_CONFIG_DIR (usage-routes.js) AND is
+// checked against a witness the panel never wrote — the weekly window the
+// account's OWN API responses state. A `rate_limit_event` that arrived on a
+// slot-VALIDATED link (`slotOk`: the link resolved to this member's creds dir
+// at the moment of the reading) and that names a weekly reset is that witness.
+// Written here, read by `refreshViaCliPanel` before it may write (via the
+// `apiDerivedWindow` dep), nothing else. Sidecar `.apiwin-<key>` beside the
+// cache, no `.json` (every scanner ignores it, like `.window-`/`.slot-`).
+// Merged per bucket: a seven_day event updates `sevenDay`, a scoped one its
+// name under `scoped`, and the roll (exactly one week) is a phase no-op.
+// A PHASE IS THE ACCOUNT'S ONLY AFTER K READINGS AGREE (final verifier,
+// 2026-09-17). ONE slot-verified reading is not a witness: a response in flight
+// across a re-point is `slotOk` by construction (the lag shadow exists for
+// exactly that reading), and when the shadow has no window evidence to judge
+// it by — a FRESH member has none — it lands on the new member carrying the
+// OLD member's weekly window. Written into `.apiwin-<new>` on the spot, that
+// one reading then refused every reading the new member itself produced, its
+// own panel with them, and the standing repair counted the poisoned witness as
+// evidence: B-855a ② re-created through a different producer, on the account
+// the owner had just paid for. So the sidecar keeps a small RING of candidate
+// readings, and the witness (`sevenDay` / `scoped`) is (re)written only when
+// the newest API_WITNESS_K entries agree on one phase — each candidate having
+// passed `apiWitnessEligibility` first (slot validated, not shadowed, no
+// re-point of this conversation inside the shadow horizon, the turn pin not
+// older than the last re-point, OTel not disagreeing). The SAME run rule moves
+// an established window that genuinely changed (a plan change): K consecutive
+// readings the guard archived or re-filed in ONE new phase re-anchor
+// `.apiwin-` AND `.window-` there, the old sidecar archived with a reason —
+// the self-heal the panel (which may only write once verified) cannot provide.
+const API_WITNESS_K = 3;      // consecutive agreeing candidates before a phase is the account's
+const API_WITNESS_RING = 8;   // candidates the sidecar remembers (≥ K + a few foreign ones to break a run)
+function readApiWitnessFile(key) {
+  try {
+    const w = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)), 'utf-8'));
+    return w && typeof w === 'object' ? w : null;
+  } catch { return null; }
+}
+/** The account's API-derived window (the ESTABLISHED witness) or null.
+ *  `{witness:true}` answers `{window, ring, k}` — the ring of candidates too,
+ *  for a caller that wants to say "the window may have moved" before the run
+ *  is complete (the ⟳ answer). */
+function apiDerivedWindow(key, { witness = false } = {}) {
+  const w = readApiWitnessFile(key);
+  const ring = Array.isArray(w && w.ring) ? w.ring.filter((e) => e && Number(e.resetsAt) > 0) : [];
+  let out = null;
+  if (w) {
+    const v = { sevenDay: Number(w.sevenDay) > 0 ? Number(w.sevenDay) : null, fiveHour: null, scoped: {}, at: w.at || null, sessionId: w.sessionId || null, source: w.source || null };
+    for (const [n, r] of Object.entries(w.scoped || {})) if (Number(r) > 0) v.scoped[String(n).toLowerCase()] = Number(r);
+    if (v.sevenDay || Object.keys(v.scoped).length) out = v;
+  }
+  return witness ? { window: out, ring, k: API_WITNESS_K } : out;
+}
+/** Feed ONE eligible weekly candidate into the account's witness ring.
+ *  `outcome` = what the guard did with the reading (write / archived /
+ *  refiled). Returns `{run, k, established, moved}`, or null when the reading
+ *  is not weekly or the sidecar could not be written. */
+function noteApiDerivedWindow(key, ev, session, { outcome = 'write' } = {}) {
+  try {
+    if (!key || !ev || !(Number(ev.resetsAt) > 0)) return null;
+    if (ev.kind !== 'sevenDay' && !(ev.kind === 'scoped' && ev.scopedName)) return null; // a 5h window names a TIME, never an account (reading-lag r2)
+    const raw = readApiWitnessFile(key) || {};
+    const ring = (Array.isArray(raw.ring) ? raw.ring.filter((e) => e && Number(e.resetsAt) > 0) : []).slice(-(API_WITNESS_RING - 1));
+    const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome };
+    ring.push(entry);
+    let run = 0;
+    for (let i = ring.length - 1; i >= 0 && readingLag.weeklyNear(ring[i].resetsAt, entry.resetsAt) === true; i--) run++;
+    const next = { sevenDay: Number(raw.sevenDay) > 0 ? Number(raw.sevenDay) : null, scoped: { ...(raw.scoped || {}) }, at: raw.at || null, sessionId: raw.sessionId || null, source: raw.source || null, n: raw.n, ring, ringAt: entry.at };
+    const res = { run, k: API_WITNESS_K, established: false, moved: false };
+    if (run >= API_WITNESS_K) {
+      const agreeing = ring.slice(ring.length - run);
+      // the anchor this run is judged against: the guard's `.window-` first, else the witness itself
+      let anchor = null;
+      try { anchor = establishedWindows()[key] || null; } catch { }
+      const phaseRefOf = (w) => (w ? (Number(w.sevenDay) > 0 ? Number(w.sevenDay) : (Number(Object.values(w.scoped || {})[0]) || null)) : null);
+      const ref = phaseRefOf(anchor) || phaseRefOf(next);
+      const moved = ref ? readingLag.weeklyNear(ref, entry.resetsAt) === false : false;
+      const w = moved ? { sevenDay: null, scoped: {} } : { sevenDay: next.sevenDay, scoped: { ...next.scoped } };
+      for (const e of agreeing) { if (e.kind === 'sevenDay') w.sevenDay = e.resetsAt; else if (e.name) w.scoped[e.name] = e.resetsAt; }
+      next.sevenDay = w.sevenDay; next.scoped = w.scoped; next.at = entry.at; next.sessionId = entry.sid; next.source = 'rate-limit-events'; next.n = run;
+      res.established = true; res.moved = moved;
+      // …AND THE GUARD'S ANCHOR: stamped when ABSENT, re-stamped when the run
+      // CONTRADICTS it (the window moved) — never touched by a run that agrees
+      if (!anchor || moved) {
+        const stamp = { sevenDay: w.sevenDay, fiveHour: null, scoped: { ...w.scoped }, at: entry.at, source: 'api', verifiedAt: entry.at, verifiedBy: 'rate-limit-events', n: run, sessionId: entry.sid };
+        if (moved) {
+          const was = readingLag.windowFingerprint(anchor || { sevenDay: Number(raw.sevenDay) || null, fiveHour: null, scoped: raw.scoped || {} });
+          const isNow = readingLag.windowFingerprint(stamp);
+          console.log(`[usage] window moved: ${nameOf(key)}'s weekly window is now ${isNow} (was ${was}) — ${run} consecutive slot-verified readings the guard had ${agreeing.map((e) => e.outcome).join('/')}; sidecars re-anchored, the old one archived`);
+          global.__vsEvent?.('usage-window-moved', `${key}:${readingLag.weeklyPhase(ref)}→${readingLag.weeklyPhase(entry.resetsAt)}`);
+          try {
+            const f = path.join(rootDir, 'data', 'archive', 'readings-foreign-usage-cache.ndjson');
+            fs.mkdirSync(path.dirname(f), { recursive: true });
+            fs.appendFileSync(f, JSON.stringify({ migration: 'window-moved', at: entry.at, store: 'window-sidecar', key, action: 'moved', reason: `${nameOf(key)}'s weekly window moved from ${was} to ${isNow}: ${run} consecutive slot-verified rate-limit readings agreed on the new phase (guard outcomes ${agreeing.map((e) => e.outcome).join('/')})`, entry: anchor || null, apiwin: { sevenDay: Number(raw.sevenDay) || null, scoped: raw.scoped || {} } }) + '\n');
+          } catch { }
+        }
+        usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.windowSidecarName(key), stamp);
+        _ownWin = null; _ownWinAt = 0;
+      }
+    }
+    const ok = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
+    return ok ? res : null;
+  } catch { return null; }
+}
+/** May THIS reading be a candidate for the slot's witness ring? Every leg is
+ *  a way a slot-verified reading was, or could be, somebody else's. */
+function apiWitnessEligibility(session, slot, key, corr = null) {
+  try {
+    if (!slot || !slot.slotOk) return { ok: false, why: 'slot not validated' };
+    if (slot.shadowed) return { ok: false, why: 'inside a re-point lag shadow' };
+    const now = Date.now();
+    const row = recentRepointRow(session, now);
+    if (row) return { ok: false, why: `re-pointed ${nameOf(row.from)} → ${nameOf(row.to)} ${Math.round((now - row.at) / 1000)}s ago` };
+    const pin = session && session._turnReadingSlot;
+    if (pin && pin.at && lastRepointRow(session, { at: now, minAt: pin.at })) return { ok: false, why: 'the turn pin predates a re-point' };
+    if (corr && corr.agree === false) return { ok: false, why: `OTel observed ${nameOf(corr.observed)} while the slot says ${nameOf(key)}` };
+    return { ok: true, why: 'slot-verified' };
+  } catch (e) { return { ok: false, why: 'eligibility check failed: ' + (e && e.message) }; }
+}
+// ── THE STANDING IDENTITY REPAIR (B-855a c2, 2026-09-17) ────────────────────
+// Runs at boot (after the one-shot migrations, server.js) and on the human-
+// triggered POST /api/usage/repair-identity: every roster account's API phase
+// is derived from its slot-verified rate-limit readings and the sidecars /
+// cache snapshots are made to agree with it (src/reading-repair.js
+// repairSidecarsByApiPhase). Idempotent, archive-never-destroy, one journal
+// line with the counts, and the established-window memo is dropped so the
+// guard reads the repaired sidecars at once.
+function repairIdentityAnchors(why = 'boot') {
+  try {
+    const { repairSidecarsByApiPhase } = require('../reading-repair.js');
+    const list = (accounts.list && accounts.list().accounts) || [];
+    const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why });
+    _ownWin = null; _ownWinAt = 0;
+    const c = rep.counts || {};
+    const changed = !!(c.restamped || c.replaced || c.emptied || c.stripped || c.readmitted || c.stamped);
+    // the STANDING run (hourly, final verifier: a moved window must not wait
+    // for the next boot) speaks only when it changed something — a journal
+    // line per hour saying "nothing" is the log
+    if (why !== 'hourly' || changed) console.log(`[usage] identity repair (${why}): ${JSON.stringify(c)} in ${rep.ms} ms`);
+    if (changed) global.__vsEvent?.('usage-identity-repaired', `${why}:${c.restamped}/${c.replaced}/${c.readmitted}`);
+    rep.changed = changed;
+    return rep;
+  } catch (e) { console.warn('[usage] identity repair failed:', e.message); return { error: e.message, counts: null, identities: [] }; }
 }
 /** The identity GROUP a cache key belongs to, as ONE representative — an
  *  org-merged login spans '__global__' + the named sub and must never read as
@@ -1391,7 +1587,18 @@ function readingSlotFor(session, at = Date.now(), opts = {}) {
  *  twin of the statusline's `.slot-<id>` sidecar — the last window fingerprint
  *  we saw under a given key, which is the only evidence left when two members
  *  share a weekly phase or neither window is known. */
-function lagShadowFor(session, freshKey, readingWindow, readingFingerprint, at) {
+/** The re-point that could still explain a reading of this conversation at
+ *  `at` — the ledger row inside the shadow horizon that decides for THIS
+ *  session, or null. Shared by the lag shadow (which then reads the windows)
+ *  and by the ⟳ route's eligibility test (which only needs to know a shadow is
+ *  open). */
+function recentRepointRow(session, at = Date.now()) { return lastRepointRow(session, { at, minAt: at - readingLag.SHADOW_MS }); }
+/** The newest re-point of THIS conversation at or before `at` and not older
+ *  than `minAt`, or null. The witness eligibility test asks it with `minAt` =
+ *  the turn pin's birth (a pin older than a re-point files a turn's readings
+ *  on the member the CLI has already left — correct for the cache, never a
+ *  witness). */
+function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHADOW_MS } = {}) {
   try {
     const poolId = session?._accountId || null;
     if (!poolId || accounts.get(poolId)?.type !== 'pooled') return null;
@@ -1403,18 +1610,37 @@ function lagShadowFor(session, freshKey, readingWindow, readingFingerprint, at) 
     // session's pool-wide move explain a reading it had nothing to do with.
     const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
     // BOUNDED SCAN: rows are ascending, so walking back and stopping at the
-    // shadow horizon is O(the last 10 minutes), not O(the whole 20k ledger) on
-    // every reading — and a row older than the horizon could not shadow anyway.
+    // horizon (the shadow's 10 minutes, or the turn pin's age) is O(that
+    // span), not O(the whole 20k ledger) on every reading — and a row older
+    // than the horizon could not shadow anyway.
     const rows = slotTransitions.all();
     let row = null;
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i];
       if (r.at > at) continue;
-      if (at - r.at > readingLag.SHADOW_MS) break;
+      if (r.at < minAt) break;
       if (poolId && r.poolId && r.poolId !== poolId) continue;
       if (hasOwnLink ? (sid && r.sessionId === sid) : !r.sessionId) { row = r; break; }
     }
     if (!row || !row.from || row.from === row.to) return null;
+    return row;
+  } catch { return null; }
+}
+/** Is this session still inside a re-point's lag shadow — a link move within
+ *  the horizon that no reading has yet ended? `{from, to, at, ageMs}` or null.
+ *  A positive answer means the CLI may still be answering with the PREVIOUS
+ *  member's token, so it is not asked for a panel (B-855a ③). */
+function inLagShadow(session, at = Date.now()) {
+  const row = recentRepointRow(session, at);
+  if (!row) return null;
+  if (session && session._readingShadowEndedAt === row.at) return null;
+  return { from: row.from, to: row.to, at: row.at, ageMs: at - row.at };
+}
+function lagShadowFor(session, freshKey, readingWindow, readingFingerprint, at) {
+  try {
+    const sid = session?._webuiId || null;
+    const row = recentRepointRow(session, at);
+    if (!row) return null;
     const windows = establishedWindows();
     const last = session._lastReadingFp && session._lastReadingFp.key === row.from ? session._lastReadingFp.fp : null;
     const d = readingLag.decideLagShadow({
@@ -1673,9 +1899,21 @@ function noteWallSignal(session, sig = {}) {
 //
 // IT DOES NOT DEPEND ON THE MODEL NAME. A future `seven_day_fable` type parses
 // to kind 'scoped' through rate-limit-capture's existing regex and is never
-// deferred at all; `seven_day_overage_included` is the weekly lane's own
-// accounting (the 2.361.2 monthly-cap incident) and is likewise never deferred
-// — a model cap is not that.
+// deferred at all.
+//
+// `seven_day_overage_included` IS AN UNSCOPED WEEKLY REJECTION TOO (B-ccaa,
+// 2026-09-16 11:18:20 on this instance, reproduced from the telemetry shard:
+// `rate-limit-event <member>:sevenDay:rejected:reading` with NO
+// `rate-limit-lane-deferred`, then `usage-limit-banner-marked …:scoped`, then
+// TWO `wall-demote` lines — 7d AND fable — in the same second). The type names
+// the vendor's overage-INCLUDED accounting of the weekly window, and 2.361.2
+// mapped it to the plan lane on arrival; but it names no MODEL either, and the
+// only record that does is the same turn's banner. Written the instant it
+// arrived it marked the plan lane while the banner marked the Fable cap: one
+// wall, two lanes, the storm's ② over again through the one type the rule had
+// excused. So it is deferred like `seven_day` — with no banner the evidence
+// rule still lands it on the plan lane by turn end (the 2.361.2 behaviour,
+// one turn later), and a banner naming a model folds it into that cap.
 //
 // THE COST, STATED. The immediate write is what makes the pool act in the same
 // tick, and deferring it means a turn that is KILLED between the rejection and
@@ -1683,7 +1921,7 @@ function noteWallSignal(session, sig = {}) {
 // The window is milliseconds — the incident's own rejection and its turn end
 // share a second — and `maybePoolAutoSwitch` still runs on the provisional
 // signal, so the pool moves immediately regardless of the mark.
-const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']);
+const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly', 'seven_day_overage_included']);
 // REACHABILITY, STATED HONESTLY (r3). A turn's rejections share ONE key by
 // construction — `rejectionSlotFor` pins the credential slot at the first keyed
 // signal and `noteTurnEnd` clears it — so the only way this cap binds is
@@ -1789,6 +2027,11 @@ function laneByEvidence(session, d) {
 function settleTurnLane(session) {
   const list = pendingLaneDeferrals(session);
   if (!list.length) return;
+  // THE BANNER OF THIS TURN OUTRANKS THE EVIDENCE, WHATEVER ORDER THE RECORDS
+  // CAME IN (B-ccaa): `laneFromBanner` fires when the banner arrives, but a
+  // banner that arrived BEFORE the rejection found nothing pending — its lane
+  // is remembered on the session (`_turnBannerLane`) and consulted here first.
+  if (session._turnBannerLane) { laneFromBanner(session, session._turnBannerLane); if (!pendingLaneDeferrals(session).length) return; }
   const { verdict, why } = laneByEvidence(session, list[0]); // one turn, one requested model ⇒ one verdict
   resolveTurnLane(session, verdict, why);
 }
@@ -1810,7 +2053,7 @@ function noteTurnEnd(session) {
   // turn that sees a rejection, and this must not silently lose a mark.
   try { settleTurnLane(session); } catch (e) { console.warn('[wall] lane settle failed:', e.message); }
   session._turnWallSigs = []; session._turnWorkAfterSig = 0;
-  session._turnLaneDefer = null;
+  session._turnLaneDefer = null; session._turnBannerLane = null;
   // the READING pin dies with the turn for exactly the reason the rejection
   // pin does: a re-point reaches the running CLI on its next request, so the
   // next turn is the first one it can be true for (readingSlotFor)
@@ -2465,11 +2708,25 @@ function recordRateLimitEvent(session, msg) {
     const fp = win ? `${readingLag.windowFingerprint(win)}|k:${ev.kind}|u:${ev.utilization ?? '-'}` : null;
     const slot = ev.status === 'rejected' ? rejectionSlotFor(session) : readingSlotFor(session, Date.now(), { window: win, fingerprint: fp });
     let key = (slot && slot.key) || usageCacheKeyFor(session);
+    let refiled = false; // the guard moved this reading off the slot's key — then the slot is not the witness for it
+    // THE WITNESS ELIGIBILITY of this reading is judged BEFORE the guard, on
+    // the slot it arrived on, with the corroboration the write below reuses:
+    // a reading the guard archives or re-files still feeds the SLOT's ring
+    // (that is how a genuinely moved window re-anchors itself), and one that
+    // fails a leg feeds nothing (final verifier: one lagging reading on a
+    // fresh member poisoned its witness for good)
+    const slotKey = key;
+    let corr = win ? corroborateReading(session, key, 'rate-limit-event:' + ev.kind) : null;
+    const witness = win ? apiWitnessEligibility(session, slot, key, corr) : null;
     if (win) {
-      const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot } });
-      if (!target) return;                       // archived with a reason — never written where it provably does not belong
+      const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot, witness } });
+      if (!target) {                             // archived with a reason — never written where it provably does not belong
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, ev, session, { outcome: 'archived' });
+        return;
+      }
       if (target !== key) {
-        key = target;
+        key = target; refiled = true;
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, ev, session, { outcome: 'refiled' });
         // the window is better evidence than the pin that produced the wrong
         // answer, so the REST of the turn follows it too (the 06:10:46Z shape:
         // a pin held from before three re-points filed one member's fresh
@@ -2512,12 +2769,20 @@ function recordRateLimitEvent(session, msg) {
       global.__vsEvent?.('rate-limit-lane-deferred', `${writeKey}:${ev.rawType}`);
       maybePoolAutoSwitch(session);
       try { noteWallSignal(session, { resetsAtMs: (Number(ev.resetsAt) || 0) * 1000, bucket: ev.kind, scopedName: ev.scopedName, key, slot: !!slot?.slotOk, provisional: true }); } catch { }
+      // the banner of this turn may already have named the lane (B-ccaa) —
+      // AFTER the provisional signal is on the list, so the resolve rewrites it
+      if (session._turnBannerLane) { try { laneFromBanner(session, session._turnBannerLane); } catch (e) { console.warn('[wall] lane-from-banner failed:', e.message); } }
       return;
     }
-    const corr = corroborateReading(session, writeKey, 'rate-limit-event:' + ev.kind);
+    if (!corr || writeKey !== slotKey) corr = corroborateReading(session, writeKey, 'rate-limit-event:' + ev.kind); // a rejection, or a re-filed reading: corroborate the key actually written
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, corroborated: corr ? corr.agree : undefined });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); return; }
     global.__vsEvent?.('rate-limit-event', `${writeKey}:${ev.kind}:${ev.status}${r.wroteReading ? ':reading' : ''}`);
+    // THE API-DERIVED WINDOW (B-855a): a reading the account's OWN API stated,
+    // filed on a slot-VALIDATED link, not re-filed by the guard and eligible
+    // as a witness, is ONE candidate for the ring the panel probe is checked
+    // against — K agreeing candidates make it the witness.
+    if (r.wroteReading && ev.status !== 'rejected' && win && !refiled && witness && witness.ok) noteApiDerivedWindow(writeKey, ev, session, { outcome: 'write' });
     // a reading busts the estimator memo via fetchedAt and becomes an anchor
     // at the next sweep; exhaustion acts NOW (banner parity)
     if (r.dead) {
@@ -2750,6 +3015,10 @@ function markLimitBanner(session, text) {
   try {
     const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
+    // …and it is REMEMBERED for the rest of the turn (B-ccaa): a rejection
+    // that arrives AFTER this banner must still be decided by it, not by the
+    // evidence rule. A 5-hour banner names no weekly lane and is not kept.
+    if (hit.kind === 'scoped' || hit.kind === 'sevenDay') { try { session._turnBannerLane = { kind: hit.kind, name: hit.name || null, at: Date.now() }; } catch { } }
     // THE BANNER NAMES THE LANE (2026-09-13). It runs FIRST so the deferred
     // write lands with the EVENT's own `resetsAt` — the banner deliberately
     // states no time, and `bump` below keeps a known FUTURE reset, so the
@@ -3370,7 +3639,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin() });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
@@ -3468,6 +3737,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // decidePoolSwitch so its refusal can name it and prescribe the re-login.
     const members = switchCandidates(poolId);
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
+    const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
     for (const [sid, s2] of activeSessions) {
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if ((s2.backend || 'claude') === 'codex') continue;
@@ -3493,8 +3763,12 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // never pick a member that just answered THIS session with a limit
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
-      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), explain: true });
+      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, explain: true });
       if (!ds || !ds.to) {
+        // PARKED ON CREDITS (B-ad05): this conversation's member serves past
+        // its quota on pay-per-use billing — say so once per 6 h per (pool,
+        // member); it is deliberately NOT in `noWay` (the member serves).
+        if (ds && ds.reason === 'on-credits') noteCreditsParking(poolId, curFor, poolCreditsNotice(ds, { poolName: a.name, memberName: nameOf(curFor) }), now);
         // "there is nowhere for this conversation to go" is the state only the
         // USER can fix. The FACT is handed to auto-resume every time (it is
         // the ONLY source for the breaker's "no usable member left" clause —
@@ -3534,7 +3808,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         // read as "it recovered", and it dies again shortly after.
         const sScraps = ds.toLoginNear
           ? ` — but ${toName}'s own login ${typeof ds.toLoginNear.msLeft === 'number' && ds.toLoginNear.msLeft > 0 ? `expires in ${loginAgeText(ds.toLoginNear.msLeft)}` : 'expires imminently'}; re-login it in Manage Agents now`
+          : ds.toCredits
+          ? ` — the last resort: ${toName} bills pay-per-use past its quota (usage credits)`
           : '';
+        if (ds.toCredits) noteCreditsParking(poolId, ds.to, poolCreditsNotice({ toCredits: ds.toCredits, toRemaining: ds.toRemaining }, { poolName: a.name, memberName: toName }), now);
         if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${cm.divergent ? ` (it was still running on ${nameOf(curFor)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` was at ${Math.round(ds.fromRemaining)}%` : ''})` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor}${cm.divergent ? ` (observed; linked ${linkCur})` : ''} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%)`);
         // a hot re-point does not move an idle limit-blocked session by itself
@@ -3548,9 +3825,12 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         }
       } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
     }
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, explain: true });
     if (!d) return;
     if (!d.to) {
+      // PARKED ON CREDITS (B-ad05): not "stuck" — the current member serves,
+      // billed pay-per-use past its quota. ONE notice per (pool, member) per 6 h.
+      if (d.reason === 'on-credits') { noteCreditsParking(poolId, currentId, poolCreditsNotice(d, { poolName: a.name, memberName: nameOf(currentId) }), now); return; }
       // A pool sitting on a DEAD account with nowhere to go used to be
       // completely silent — the user found out by hitting a limit mid-turn
       // (real incident 2026-08-11). Say it, once per hour per pool: this is
@@ -3609,7 +3889,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // and dies again with no explanation.
     const scraps = d.toLoginNear
       ? ` — but ${d.toName}'s own login ${typeof d.toLoginNear.msLeft === 'number' && d.toLoginNear.msLeft > 0 ? `expires in ${loginAgeText(d.toLoginNear.msLeft)}` : 'expires imminently'}; re-login it in Manage Agents now`
+      : d.toCredits
+      ? ` — the last resort: ${d.toName} bills pay-per-use past its quota (usage credits)`
       : '';
+    if (d.toCredits) noteCreditsParking(poolId, d.to, poolCreditsNotice({ toCredits: d.toCredits, toRemaining: d.toRemaining }, { poolName: a.name, memberName: d.toName || d.to }), now);
     serverNotice(`pool-auto-${poolId}-${now}`, d.reason === 'edf'
       ? `Pool "${a.name}" switched to ${d.toName} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)`
       : d.reason === 'login-expired'
@@ -3687,7 +3970,9 @@ function maybeStopOnFallback(session, id, from, to) {
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
-    overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
+    overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
+    apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test
+    repairIdentityAnchors, // B-855a c2: the STANDING identity repair (boot + POST /api/usage/repair-identity)
     observedMemberFor, sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, corroborateReading, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
     _wallRing, _sessionWalls, OBSERVED_ORG_RECENT_MS, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, // the eval gate (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them

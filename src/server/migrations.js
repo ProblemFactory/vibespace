@@ -133,6 +133,27 @@ function create({ rootDir, serverNotice, homeDir = os.homedir() }) {
       },
     },
     {
+      id: '2026-09-repair-sidecars-by-api-phase',
+      note: "B-855a c2: the /usage panel probe took its org context from the machine-wide ~/.claude.json, so for weeks a member's panel could be ANOTHER member's — and that foreign panel re-stamped the member's established-window sidecar, after which the live guard archived the member's OWN readings as foreign for ever ('refusing to write X a reading from another window'); the roster showed somebody else's usage and the pool called the healthiest Fable member 'Fable 2 % < 5 %'. The witness a panel cannot fake is the weekly window the member's own slot-verified rate_limit_events state. Derives each roster account's API phase from those (anchors whose 7d MOVED on a rate-limit-event + the slot-verified readings the guard archived), re-stamps a contradicting sidecar (source 'api'), archives + rebuilds a contradicting cache from the newest wholly-agreeing anchor (or empties it with a reason), and writes the last 24 h of archived own readings back through the ONE write path. Measured on a copy of this instance 2026-09-17: 10 identities with evidence, 3 sidecars re-stamped, 7 confirmed, 3 caches replaced, 128 readings re-admitted, idempotent, 90 ms. The SAME repair also runs at every boot and on POST /api/usage/repair-identity — this row only makes the ledger say it ran once on the upgrade boot.",
+      run() {
+        const { repairSidecarsByApiPhase } = require('../reading-repair.js');
+        let accounts = null;
+        try { accounts = (JSON.parse(fs.readFileSync(path.join(dataDir, 'accounts.json'), 'utf-8'))?.accounts || []).filter((a) => a && a.id); } catch { }
+        if (!accounts) return; // no roster yet = nothing to anchor
+        const rep = repairSidecarsByApiPhase({ dataDir, accounts, id: '2026-09-repair-sidecars-by-api-phase' });
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran.
+        console.log('[migrate] sidecars-by-api-phase:', JSON.stringify({ counts: rep.counts, ms: rep.ms, identities: rep.identities.map((r) => ({ key: r.key, apiPhase: r.apiPhase, n: r.n, of: r.of, sidecar: r.sidecar, cache: r.cache, readmitted: r.readmitted })) }));
+        const c = rep.counts || {};
+        const touched = (c.restamped || 0) + (c.replaced || 0) + (c.emptied || 0) + (c.stripped || 0);
+        if (touched) {
+          try {
+            serverNotice?.('readings-identity-repaired', `Quota bookkeeping repaired: ${c.restamped} account window(s) and ${(c.replaced || 0) + (c.emptied || 0)} usage snapshot(s) that had been taken from another account's /usage panel were re-anchored to each account's own API-reported window, and ${c.readmitted} of the account's own readings were written back (archived copies in data/archive/). Panels and the pool re-derive from the cleaned data.`, { level: 'info' });
+          } catch { }
+        }
+      },
+    },
+    {
       id: '2026-09-purge-test-fixture-ledger',
       note: "two suites wrote SYNTHETIC claude transcripts into the developer's real ~/.claude/projects (the worktree server they spawn inherited HOME and can only discover what lives under its own home), and the production instance's usage walk ingested their hand-written `usage` blocks: 79,533 permanent ledger rows on this instance claiming 982,140 tokens of a model nobody ever ran (measured 2026-09-09 14:39 UTC on a copy of its stores; 79,778 rows removed in all, 222 dead cursors, 1,575 anchors re-measured), attributed to the machine login and counted into the costSince of its anchor pairs. Archives every fixture row (synthetic sid family, or a throwaway fixture cwd) to data/archive/, drops the dead cursors, voids the anchor costSince values that measured an interval containing one, and drops the learned rates so the estimator re-learns. From this release the walk and discovery refuse the convention outright (src/fixture-guard.js), so this is a one-shot clean-up of history, not a guard.",
       run() {

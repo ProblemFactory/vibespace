@@ -298,8 +298,23 @@ function decideReadingTarget({ key, readingWindow, windows = {}, groupOf = null,
 }
 // <<< reading-lag mirror
 
+/** THE API-DERIVED WINDOW (B-855a, 2026-09-17) — the SECOND identity witness
+ *  beside the established window. `windowSidecarName` is the account's own
+ *  window as its /usage PANEL last stated it; but the panel is exactly the
+ *  producer whose identity B-855a showed can be somebody else's, so a panel
+ *  cannot be its own proof. The witness that CAN prove a panel is the window
+ *  the account's own API responses state — a `rate_limit_event` filed on a
+ *  slot-VALIDATED link (`slotOk`) names the weekly reset its numbers are
+ *  counted in, and that phase is the account fingerprint `compareWindows`
+ *  already trusts. The engine writes it beside the cache (`.apiwin-<key>`, no
+ *  `.json` — every scanner keeps ignoring it, like `.window-`/`.slot-`), the
+ *  panel refresh compares against it BEFORE it may write, and nothing else
+ *  reads it. Outside the mirror block: the shipped statusline has no use for
+ *  it and stays byte-identical. */
+function apiWindowSidecarName(key) { return '.apiwin-' + String(key).replace(/[^\w.-]/g, '_'); }
+
 module.exports = {
   WEEK_SEC, JITTER_SEC, SHADOW_MS,
-  weeklyPhase, weeklyNear, windowOf, windowFingerprint, windowSidecarName, compareWindows,
+  weeklyPhase, weeklyNear, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, compareWindows,
   decideLagShadow, decideReadingTarget,
 };

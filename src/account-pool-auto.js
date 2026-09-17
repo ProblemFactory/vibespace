@@ -203,8 +203,13 @@ function edfCompare(a, b) {
  *  usable members in EDF order — the device executes a LOCAL fallback switch
  *  down this list only when it both sees a hard limit banner AND cannot
  *  reach the orchestrator. */
-function rankPoolMembers({ members, readCache, nowSec, readLogin = null }) {
+function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null }) {
   const out = [];
+  // USAGE CREDITS (B-ad05): a member whose org bills pay-per-use past 100 %
+  // ranks after EVERY member with quota left — the daemon's reflex walks this
+  // list top-down, so it may only reach a credits member with nothing else.
+  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
+  const last = [];
   for (const m of members) {
     // A ranked snapshot is a list of FUTURE switch targets (the live evict
     // path picks ranked[0]; the daemon's sealed-orders reflex walks it while
@@ -214,11 +219,16 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null }) {
     const c = readCache(m.id);
     const r = accountRemaining(c, nowSec);
     const br = bucketRems(c, nowSec);
+    const row = { id: m.id, name: m.name, eff: r.known ? r.remaining : UNKNOWN_REMAINING_PCT, deadline: weeklyDeadline(c, nowSec), loginPenalty: readLogin ? loginRank(readLogin(m.id)) : 0 };
+    // a credits member serves past its quota, so the hard floor does not gate
+    // it — it is simply the last resort
+    if (credits && credits.has(m.id)) { last.push({ ...row, credits: true }); continue; }
     if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) continue;
-    out.push({ id: m.id, name: m.name, eff: r.known ? r.remaining : UNKNOWN_REMAINING_PCT, deadline: weeklyDeadline(c, nowSec), loginPenalty: readLogin ? loginRank(readLogin(m.id)) : 0 });
+    out.push(row);
   }
   out.sort(edfCompare);
-  return out;
+  last.sort(edfCompare);
+  return out.concat(last);
 }
 
 // readLogin = (accountId) => loginState info (src/login-expiry.js) or null.
@@ -239,7 +249,18 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null }) {
 // Both are rules about VOLUNTARY moves only: a hard-dead current member may
 // still escape onto them (liveness beats efficiency — the 2026-08-11 lesson),
 // and the verdict SAYS which bar it landed on.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, explain = false }) {
+// creditsIds = members whose org has USAGE CREDITS enabled (B-ad05, always on —
+// `overageState(cache).mode === 'allowed'`): past 100 % such a member keeps
+// serving on pay-per-use billing instead of stopping, and nothing in the
+// stream says so until the bill. It ranks BELOW every member with quota left:
+// never a voluntary target while any quota-bearing member exists, a LAST
+// RESORT only when the current member is hard-dead and the alternative would
+// be 'no-members' (below even the scraps — a dying login or a reserve-floor
+// member still spends quota the owner already paid for). A pool PARKED on
+// one (current member is a credits member with nowhere else to go) answers
+// `on-credits` instead of 'no-members' so the engine can say it is billing,
+// not that it is stuck. Omit it and every decision is byte-identical.
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, explain = false }) {
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
   // `explain` keeps the historical contract (null = no switch) for every
   // existing caller and test, while letting the engine ask WHY nothing
@@ -325,8 +346,12 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const loginBlocked = []; // [{id, name, state, msLeft}] — named, never a silently short list
   const reserveBlocked = []; // [{id, name, remaining}] — held back by the reserve floor (D2)
   const overageBlocked = []; // [{id, name}] — billing paid overage (D3c)
+  const creditsHeld = [];    // [{id, name}] — usage credits enabled: pay-per-use past 100 % (B-ad05)
+  const creditsRanked = [];  // the same members as rows — the LAST resort, after the scraps
   const floor = Number(reserveFloorPct) > 0 ? Number(reserveFloorPct) : 0;
   const overage = overageIds && (typeof overageIds.has === 'function' ? overageIds : new Set(overageIds));
+  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
+  const curCredits = !!(credits && credits.has(currentId));
   for (const m of members) {
     if (m.id === currentId) continue;
     if (excluded && excluded.has(m.id)) { excludedN++; continue; } // just rejected this session — not a candidate
@@ -343,6 +368,15 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     const r = dockRem(m.id, accountRemaining(c, nowSec));
     const br = dock(m.id, bucketRems(c, nowSec));
     const eff = r.known ? r.remaining : UNKNOWN_REMAINING_PCT;
+    // USAGE CREDITS (B-ad05): the hard floor does not gate this member — it
+    // serves past its quota, billed — so it is kept OUT of every ranking and
+    // held as the last resort, quota-holding rows first (a credits member
+    // that still has quota is not billing yet).
+    if (credits && credits.has(m.id)) {
+      creditsHeld.push({ id: m.id, name: m.name });
+      creditsRanked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk: false, remaining: r.known ? r.remaining : null, weeklyRemaining: weeklyRemaining(br), deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), barredWhy: 'credits', dead: r.known && br.some(dead) });
+      continue;
+    }
     if (r.known && br.some(dead)) { quotaBlockedN++; continue; } // gated: some bucket below its hard floor — can't serve
     // settleOk: every bucket clears its kind's HOT threshold + margin — a
     // voluntary move must land somewhere that won't itself soft-exhaust
@@ -362,9 +396,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const barDetail = () => ({
     ...(reserveBlocked.length ? { reserveBlocked, reserveFloorPct: floor } : {}),
     ...(overageBlocked.length ? { overageBlocked } : {}),
+    ...(creditsHeld.length ? { creditsHeld } : {}),
   });
   ranked.sort(edfCompare);
   nearRanked.sort(edfCompare);
+  creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || edfCompare(x, y));
   // ESCAPE SCRAPS (round-2 verifier, reproduced: current hard-dead on 5h, the
   // only quota-healthy member 20 min from its login deadline ⇒ round 1 refused
   // to move AT ALL, a strict availability regression vs the shipped code). The
@@ -372,7 +408,12 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // conversation to a member that is ALREADY dead. Only when the current
   // target is hard-dead and nothing else is left.
   const usingScraps = !ranked.length && hardDead && nearRanked.length > 0;
-  const pool = usingScraps ? nearRanked : ranked;
+  // THE LAST RESORT (B-ad05): only a hard-dead current member, only with no
+  // quota-bearing candidate AND no scrap left — and never a hop between two
+  // credits members that are both spent (that would be a re-point for nothing
+  // on every tick: the current one already serves on credits).
+  const usingCredits = !ranked.length && !nearRanked.length && hardDead && creditsRanked.length > 0 && !(curCredits && creditsRanked[0].dead);
+  const pool = usingScraps ? nearRanked : usingCredits ? creditsRanked : ranked;
   if (!pool.length) {
     // A HEALTHY CURRENT MEMBER IS NEVER "NO MEMBER CAN SERVE IT" (2026-09-13).
     // On a HOT pool the candidate ranking runs PROACTIVELY — before anyone has
@@ -398,8 +439,13 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // list: round 1 let ONE login-blocked member outrank any number of
     // quota-dead ones and then sent the user to re-login accounts whose
     // logins were fine (round-2 verifier).
-    const why = excludedN ? 'all-rejected' : (loginBlocked.length && !quotaBlockedN) ? 'all-logins-expired' : 'no-members';
-    return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+    let why = excludedN ? 'all-rejected' : (loginBlocked.length && !quotaBlockedN) ? 'all-logins-expired' : 'no-members';
+    // PARKED ON CREDITS (B-ad05): the current member is a credits member, so
+    // "no member can serve it" is false — it serves, billed pay-per-use. Say
+    // THAT (the engine notices it once per 6 h per (pool, member)) and never
+    // feed auto-resume's "no usable member left" clause with it.
+    if (why === 'no-members' && curCredits) why = 'on-credits';
+    return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...bucketDetail(curBr) });
   }
 
   // What we are moving ONTO, when the only thing left was a dying login — the
@@ -409,6 +455,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // fixes: a dying login needs a re-login, a reserve-floor member needs the
   // floor raised or quota to reset, an overage member is costing real money.
   const scrapsInfo = (pick) => {
+    if (usingCredits) return { toCredits: { id: pick.id, name: pick.name, dead: !!pick.dead } };
     if (!usingScraps) return {};
     if (pick.barredWhy === 'overage') return { toOverage: { id: pick.id, name: pick.name } };
     if (pick.barredWhy === 'reserve-floor') return { toReserve: { id: pick.id, name: pick.name, remaining: pick.weeklyRemaining ?? null } };
@@ -441,7 +488,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // null when that member has no cache at all — `null + 3` is 3, so the
       // old expression would have silently blocked every escape from an
       // unread member). A dead login always leaves.
-      if (!curLoginDead && best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+      // …and a credits member's capacity is not its quota (it serves past
+      // 100 %), so the gain floor does not apply to the last resort either.
+      if (!curLoginDead && !usingCredits && best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
       // `reason` says why we LEFT (it gates the dwell-belt exemption and the
       // notice); `toLoginNear` says what we could get. Collapsing the two into
       // one string would have made a login-expired escape onto a scrap lose
@@ -502,6 +551,10 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   const heldNote = held ? ` Held back by the ${d.reserveFloorPct}% reserve floor: ${held}.` : '';
   const paying = (d?.overageBlocked || []).map((m) => m.name || m.id).join(', ');
   const payNote = paying ? ` Skipped because they are billing paid overage: ${paying}.` : '';
+  // USAGE CREDITS (B-ad05): held back while the current member still has
+  // quota — it is the last resort, and it bills pay-per-use once used.
+  const creditsNames = (d?.creditsHeld || []).map((m) => m.name || m.id).join(', ');
+  const creditsNote = creditsNames ? ` Held back because they bill pay-per-use past their quota (usage credits): ${creditsNames} — the pool falls back to them only once ${currentName} is fully spent.` : '';
   // A bar is only the WHOLE story when nothing else emptied the list — the
   // same rule 'all-logins-expired' earned in round 2: a quota-emptied list
   // stays a quota sentence and the bars are named alongside it.
@@ -558,7 +611,31 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
     : barsOnly
     ? ' Adjust them in Settings → Spending, or add a member.'
     : ' Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.';
-  return `Pool "${poolName}": ${why}.${alt}${also}${heldNote}${payNote}${fix}`;
+  return `Pool "${poolName}": ${why}.${alt}${also}${heldNote}${payNote}${creditsNote}${fix}`;
+}
+
+/**
+ * poolCreditsNotice(d, {poolName, memberName}) — THE sentence the engine says
+ * ONCE per (pool, member) per 6 h while a pool runs on a member's USAGE
+ * CREDITS (B-ad05). PURE, like poolBlockedNotice, so the suite pins the
+ * string. Two shapes feed it: `d.reason === 'on-credits'` (the pool is parked
+ * there — `d`'s buckets are the credits member's own, from bucketDetail) and
+ * `d.toCredits` (a last-resort switch just landed there — `d.toRemaining` is
+ * all the decision knows about the target). The owner learned about this
+ * billing from the bill; the sentence names the member, what it is billing
+ * for, and the three ways out.
+ */
+function poolCreditsNotice(d, { poolName = '', memberName = 'the current member' } = {}) {
+  const dead = (d?.deadBuckets || []).join(', ');
+  const low = (d?.lowBuckets || []).join(', ');
+  const live = (d?.liveBuckets || []).join(', ');
+  const state = dead && low ? `spent: ${dead}; nearly spent: ${low}`
+    : dead ? `spent: ${dead}`
+    : low ? `nearly spent: ${low}`
+    : d?.toRemaining != null ? `${Math.round(d.toRemaining)}% remaining` : '';
+  const rest = (dead || low) && live ? ` (still available: ${live})` : '';
+  const why = d?.toCredits ? 'it was the only member left' : 'every other member is out of quota';
+  return `Pool "${poolName}" is running on ${memberName}'s usage credits — requests past its quota are billed pay-per-use${state ? ` (${memberName}: ${state}${rest})` : ''}; ${why}. Move conversations off the pool, add a member, or exclude ${memberName} from the pool in Manage Agents if you would rather it stopped.`;
 }
 
 
@@ -683,4 +760,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName,
-  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice };
+  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

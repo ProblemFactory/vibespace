@@ -495,6 +495,9 @@ html, body {
 .acct-key-row.usage-acct-soon .acct-usage-next { color: var(--green, var(--accent)); }
 .acct-key-row.usage-acct-soon .acct-usage-next svg { opacity: 1; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
+/* usage credits (B-ad05): a DIM tag — the org bills pay-per-use past 100 %; nothing is being spent yet */
+.acct-linked-hint.acct-usage-credits { color: var(--text-secondary); opacity: 0.8; }
+.usage-src.usage-credits { opacity: 0.7; }
 /* provenance/note line under the account identity (2.202.0 — inline tags
    squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row) */
 .acct-key-extra { flex-basis: 100%; font-size: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2285,6 +2288,8 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
    item collapsed to min-content and wrapped one word per line in the rail).
    Full message stays on the title tooltip. */
 .acct-refresh-err { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; margin-top: 2px; }
+/* B-855a: a refreshed row whose reading's identity could not be verified says so (full reason on the tooltip) */
+.acct-refresh-note { font-size: 10px; opacity: 0.7; margin-left: 4px; white-space: nowrap; }
 
 /* ── Customize mode (Firefox-style chrome edit mode) ── */
 .cz-overlay {

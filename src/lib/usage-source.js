@@ -99,14 +99,30 @@ export function stampText(ts, { locale = undefined } = {}) {
 // Returns null when there is nothing to say ('no' AND 'unknown' — ignorance is
 // not a claim), so a caller can `if (chip)`.
 export function overageChip(state, { t = (s) => s } = {}) {
-  if (!state || state.inUse !== 'yes') return null;
-  const money = state.spend
-    ? ` — $${state.spend.used.toFixed(2)}${state.spend.limit ? ` / $${state.spend.limit.toFixed(2)}` : ''}`
-    : '';
-  return {
-    label: t('paid overage in use') + money,
-    tip: t('Automatic turns are refused on this account while it bills paid overage (Settings → Spending).'),
-  };
+  if (!state) return null;
+  if (state.inUse === 'yes') {
+    const money = state.spend
+      ? ` — $${state.spend.used.toFixed(2)}${state.spend.limit ? ` / $${state.spend.limit.toFixed(2)}` : ''}`
+      : '';
+    return {
+      kind: 'inUse',
+      label: t('paid overage in use') + money,
+      tip: t('Automatic turns are refused on this account while it bills paid overage (Settings → Spending).'),
+    };
+  }
+  // USAGE CREDITS, VISIBLE BEFORE THEY ARE SPENT (B-ad05): an org whose extra
+  // usage is enabled keeps serving past 100 % on pay-per-use billing — and the
+  // owner learned that from the bill, because the chip above waits for
+  // `inUse`. A DIM chip (kind 'credits') says it while the donuts are still
+  // friendly; the pool ranks such a member below every member with quota left.
+  if (state.mode === 'allowed') {
+    return {
+      kind: 'credits', dim: true,
+      label: t('credits'),
+      tip: t('Extra usage is enabled on this org: requests past 100 % are billed pay-per-use. The pool moves conversations onto it only when no member has quota left.'),
+    };
+  }
+  return null;
 }
 
 // ── SPEND CONTROL (the §1.4 row's THIRD field, r4) ──────────────────────────

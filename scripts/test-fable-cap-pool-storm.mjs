@@ -495,17 +495,27 @@ function playWall(w, { banner = FABLE_BANNER, rawType = 'seven_day', member = 'w
       w5.readCache(w5.id.wmax).sevenDay.utilization === 1 && r5.lines.some((l) => /this session states no model/.test(l)),
       r5.lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 200));
 
-    // ⑥ `seven_day_overage_included` is the weekly lane's OWN accounting
-    //    (2.361.2) and is deliberately never deferred.
+    // ⑥ `seven_day_overage_included` is the weekly lane's overage-INCLUDED
+    //    accounting (2.361.2) — and it names no MODEL either, so since B-ccaa
+    //    (2026-09-16 11:18:20: written on arrival beside a Fable banner ⇒ 7d
+    //    AND fable demoted in one second) it is DEFERRED like `seven_day`. With
+    //    no banner the evidence rule still lands it on the plan lane by turn
+    //    end: the 2.361.2 behaviour, one turn later.
     const w6 = mkWorld({ sameDeadline: true });
     w6.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-fable-5-1[1m]' });
+    w6.writeCache(w6.id.wmax, { ...w6.readCache(w6.id.wmax), scopedWeekly: [{ name: 'Fable', utilization: 0.6, resetsAt: w6.resets.wmax }] }); // a cap the evidence rule cannot pick
     const s6 = w6.sessions.get('sess-6');
     const cap6 = quiet();
     w6.eng.recordRateLimitEvent(s6, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day_overage_included', resetsAt: w6.resets.wmax, resets_at: w6.resets.wmax } });
-    cap6.done();
-    ok('§2b CONTROL: `seven_day_overage_included` still marks the weekly lane on arrival (the 2.361.2 monthly-cap incident)',
-      w6.readCache(w6.id.wmax).sevenDay.utilization === 1 && w6.eng.pendingLaneDeferrals(s6).length === 0,
-      JSON.stringify(w6.readCache(w6.id.wmax).sevenDay));
+    const pend6 = w6.eng.pendingLaneDeferrals(s6).length;
+    const before6 = w6.readCache(w6.id.wmax).sevenDay.utilization;
+    w6.eng.noteTurnEnd(s6);
+    const l6 = cap6.done();
+    ok('§2b CONTROL: `seven_day_overage_included` is DEFERRED on arrival like any unscoped weekly rejection (B-ccaa) — nothing written until the lane is known',
+      pend6 === 1 && Math.abs(before6 - 0.65) < 1e-9, JSON.stringify({ pend6, before6 }));
+    ok('§2b CONTROL: …and with no banner it still marks the weekly lane by turn end (the 2.361.2 monthly-cap behaviour, one turn later), by the evidence rule',
+      w6.readCache(w6.id.wmax).sevenDay.utilization === 1 && l6.some((l) => /unscoped weekly rejection on .* → the plan weekly lane \(no banner/.test(l)),
+      JSON.stringify(w6.readCache(w6.id.wmax).sevenDay) + ' | ' + l6.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 200));
 
     // ⑦ a CODEX session is never deferred — the deferral is a fact about
     //    claude's own type vocabulary, and codex's producer is a different one.
@@ -2514,6 +2524,98 @@ const R4_BELT_PATCH = [
     && blankComments('// zz\nab').endsWith('\nab'));
   ok('§14f …and a `://` is NOT a comment (a URL in code must not blank the rest of its line)',
     blankComments('const u = "http://x"; noteServedModel(s, m);').includes('noteServedModel(s, m);'));
+}
+
+// ── §15 ONE WALL, ONE LANE — B-ccaa (2026-09-16 11:18:20, reproduced from the telemetry shard) ──
+// The production record: `rate-limit-event <member>:sevenDay:rejected:reading`
+// (an immediate write — NO `rate-limit-lane-deferred`), then
+// `usage-limit-banner-marked <member>:scoped`, then TWO `wall-demote` lines
+// (7d, then fable) 2 ms apart, all '1 walls / credential slot'. The only
+// kind-sevenDay rejection `laneIsProvisional` declined on a claude session was
+// `seven_day_overage_included` — excused from the 2026-09-13 rule as "the weekly
+// lane's own accounting". It names no model either; the banner does. Both legs
+// below drive the REAL stdout consumer over a fake pty, and each has a PRE-FIX
+// control: a patched copy of the engine with exactly the changed line reverted.
+{
+  const w = mkWorld({ sameDeadline: true });
+  if (!w) { ok('§15 SKIP — pools unsupported on this platform', true); }
+  else {
+    // ① the incident's own shape: an overage-included weekly rejection + the Fable banner + result
+    w.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-fable-5-1[1m]' });
+    w.mkSession('sess-7', 'wmax', { _spawnModel: 'claude-opus-4-8' });
+    const { lines, reset } = playWall(w, { rawType: 'seven_day_overage_included' });
+    const c = w.readCache(w.id.wmax);
+    const fable = (c.scopedWeekly || []).find((b) => /fable/i.test(b.name || ''));
+    const demotions = lines.filter((l) => /\[wall\] demoted/.test(l));
+    ok('§15 ① a `seven_day_overage_included` rejection beside a Fable banner marks the FABLE cap only — the plan week still reads what the panel said',
+      Math.abs(c.sevenDay.utilization - 0.65) < 1e-9 && c.sevenDay.status !== 'limited' && !!fable && fable.utilization === 1 && fable.resetsAt === reset, JSON.stringify({ sevenDay: c.sevenDay, fable }));
+    ok('§15 ① …ONE demotion (the 11:18:20 pair was two)', demotions.length === 1 && /fable/.test(demotions[0]), demotions.join(' | ').slice(0, 220));
+    ok('§15 ① …the journal says the banner decided, and the OPUS conversation on the same member is not bounced',
+      lines.some((l) => /unscoped weekly rejection on .* → the Fable model cap \(the banner names/.test(l)) && w.linkOf('sess-7') === 'wmax', w.linkOf('sess-7'));
+    // PRE-FIX CONTROL: the type excused from the deferral ⇒ written on arrival ⇒ two lanes for one wall
+    const mut = mutate('src/server/usage-pool-engine.js', 'ccaa-type', [[
+      "const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly', 'seven_day_overage_included']);",
+      "const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']); // PRE-FIX (B-ccaa): overage-included excused from the deferral",
+    ]]);
+    ok('§15 ① PRE-FIX CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
+    if (mut.hit) {
+      const w2 = mkWorld({ sameDeadline: true, engineModule: mut.mod });
+      w2.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-fable-5-1[1m]' });
+      w2.mkSession('sess-7', 'wmax', { _spawnModel: 'claude-opus-4-8' });
+      const r2 = playWall(w2, { rawType: 'seven_day_overage_included' });
+      const d2 = r2.lines.filter((l) => /\[wall\] demoted/.test(l));
+      ok('§15 ① PRE-FIX CONTROL: without it the plan week is marked spent AND the Fable cap — two demotions for one wall (the 11:18:20 shape)',
+        w2.readCache(w2.id.wmax).sevenDay.utilization === 1 && d2.length === 2 && /7d/.test(d2[0]) && /fable/.test(d2[1]), d2.join(' | ').slice(0, 220));
+      ok('§15 ① PRE-FIX CONTROL: …and the OPUS conversation is bounced off a member whose plan week is fine', w2.linkOf('sess-7') !== 'wmax', w2.linkOf('sess-7'));
+    }
+
+    // ② ORDER MUST NOT MATTER: the banner BEFORE the rejection, on a session
+    //    that states NO model (nothing spawned, nothing served yet — the first
+    //    turn of a fresh conversation). MEASURED while writing this leg: with a
+    //    model stated, the banner's own cache mark (Fable → 100 %) is the very
+    //    evidence the turn-end rule reads, so the lane lands on Fable with or
+    //    without the memo; with none, the evidence rule's answer is "the plan
+    //    lane is the safe default" — and the banner had already marked Fable.
+    const playBannerFirst = (ww) => {
+      const { so } = mkStdout(ww);
+      const s = ww.sessions.get('sess-6');
+      s._normalizer = createMessageManager('claude', 'sess-6');
+      const pty = mkPty();
+      so.setupSessionPty(s, 'sess-6', pty);
+      const RESET = ww.resets.wmax;
+      const cap = quiet();
+      pty.data(JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: FABLE_BANNER }] } }) + '\n');
+      pty.data(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day', resetsAt: RESET, resets_at: RESET, overageStatus: 'rejected', isUsingOverage: false } }) + '\n');
+      pty.data(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'cid-sess-6' }) + '\n');
+      return { lines: cap.done(), reset: RESET };
+    };
+    const w3 = mkWorld({ sameDeadline: true });
+    w3.mkSession('sess-6', 'wmax');
+    const r3 = playBannerFirst(w3);
+    const c3 = w3.readCache(w3.id.wmax);
+    const d3 = r3.lines.filter((l) => /\[wall\] demoted/.test(l));
+    ok('§15 ② a banner that arrived BEFORE the rejection still decides its lane (the memo): Fable marked, plan untouched, one demotion',
+      Math.abs(c3.sevenDay.utilization - 0.65) < 1e-9 && (c3.scopedWeekly || []).some((b) => /fable/i.test(b.name) && b.utilization === 1) && d3.length === 1 && /fable/.test(d3[0]),
+      JSON.stringify({ sevenDay: c3.sevenDay, d3 }));
+    ok('§15 ② …and the memo dies with the turn', w3.sessions.get('sess-6')._turnBannerLane === null);
+    const mut3 = mutate('src/server/usage-pool-engine.js', 'ccaa-memo', [
+      ["      if (session._turnBannerLane) { try { laneFromBanner(session, session._turnBannerLane); } catch (e) { console.warn('[wall] lane-from-banner failed:', e.message); } }\n", "      // PRE-FIX (B-ccaa): a banner that came first is forgotten\n"],
+      ["  if (session._turnBannerLane) { laneFromBanner(session, session._turnBannerLane); if (!pendingLaneDeferrals(session).length) return; }\n", "  // PRE-FIX (B-ccaa): the settle never consults the banner memo\n"],
+    ]);
+    ok('§15 ② PRE-FIX CONTROL: the patch hit both memo consults', mut3.hit === true, mut3.why || '');
+    if (mut3.hit) {
+      const w4 = mkWorld({ sameDeadline: true, engineModule: mut3.mod });
+      w4.mkSession('sess-6', 'wmax');
+      const r4 = playBannerFirst(w4);
+      const d4 = r4.lines.filter((l) => /\[wall\] demoted/.test(l));
+      ok('§15 ② PRE-FIX CONTROL: without the memo the evidence rule lands the deferral on the PLAN lane ("states no model") while the banner already marked Fable — two lanes for one wall',
+        w4.readCache(w4.id.wmax).sevenDay.utilization === 1 && d4.length === 2 && r4.lines.some((l) => /this session states no model/.test(l)), d4.join(' | ').slice(0, 220) + ' | ' + r4.lines.filter((l) => /unscoped weekly rejection/.test(l)).join(' | ').slice(0, 200));
+    }
+    // ③ the schema names the memo (test-session-schema fails an unregistered field; this pins the WHY)
+    ok('§15 ③ the banner memo is a registered session field, owned by the engine and cleared with the turn pins',
+      /_turnBannerLane:\s*\{ owner: 'engine', persisted: null/.test(fs.readFileSync(path.join(REPO, 'src/session-schema.js'), 'utf8'))
+      && /session\._turnLaneDefer = null; session\._turnBannerLane = null;/.test(fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8')));
+  }
 }
 
 console.log(fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')');

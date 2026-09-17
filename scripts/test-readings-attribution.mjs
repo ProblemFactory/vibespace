@@ -35,6 +35,11 @@
 //   §6 the MIGRATION on a fixture shaped like this instance's caches:
 //      re-attributes / archives with a reason, idempotent, restart-safe.
 //   §7 the session-less producer (auto-cli panel) is keyed by the config dir
+//   §19 THE PROBE MAY ONLY WRITE THE ACCOUNT IT PROVES (B-855a): the isolated CLAUDE_CONFIG_DIR, the identity gate
+//       against the API-derived window, the ⟳ route's skip of an unvouched session, the PRE-FIX control;
+//       ⑦ (c2) the sidecar is stamped only by a VERIFIED panel, the API stamps it first, the repair route
+//   §20 THE IDENTITY ANCHOR IS DERIVED FROM THE API (B-855a c2): the standing repair on a fixture shaped like
+//       this instance's stores — a sidecar re-stamped, a cache replaced, own readings re-admitted, controls, idempotent
 //      its spawn was given — already true, now pinned.
 //   §8 UI honesty: the pure panel rules + the wiring.
 //   §9 source pins: no caller may key on the observation again.
@@ -3910,6 +3915,488 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
   ok('§18c NEGATIVE CONTROL: with no strength (round 1 = every kind decisive) the 5h cases archive instead',
     round1({ ledgerKey: null }).action === 'archive' && round1({ ledgerKey: 'A', ledgerIsSessionScoped: true }).action === 'archive',
     'the strength split is what changes these two, and only these two');
+}
+
+// ── §19 THE PROBE MAY ONLY WRITE THE ACCOUNT IT PROVES (B-855a, 2026-09-17) ─
+// MEASURED on the installed CLI (the 2.1.274 binary's config-path helpers): the
+// credential store follows CLAUDE_SECURESTORAGE_CONFIG_DIR, but the ORG CONTEXT
+// — `oauthAccount`, which keys the CLI's usage fetch — is read from
+// `${CLAUDE_CONFIG_DIR || $HOME}/.claude.json`, the machine-wide file every
+// session's CLI rewrites. The fake `claude` below implements exactly that rule
+// and answers the panel of whichever org it finds there, so half (a) — the
+// isolated CLAUDE_CONFIG_DIR — is proven by ONE binary answering its own
+// account for the fixed spawn and another org's for the PRE-FIX spawn over the
+// same HOME. Half (b) — verification before any write — is driven with the
+// fake forced to answer a foreign panel (a replaced login), against the
+// API-derived window the REAL rate_limit_event producer wrote. The pair is the
+// real 2026-09-17 shape with dates relative to now (never pinned): the account's
+// own API events say Fable 5 % in a window 3 d 16 h later than the foreign
+// panel's 7d 50 % / Fable 98 % window.
+{
+  const usageMod = require(path.join(REPO, 'src/usage-routes.js'));
+  const probeLogMod = require(path.join(REPO, 'src/server/usage-probe-log.js'));
+  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const when = (sec) => { const d = new Date(sec * 1000); const h = d.getUTCHours(); return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}, ${h % 12 || 12}${h < 12 ? 'am' : 'pm'} (UTC)`; };
+  const H = 3600;
+  const base = Math.floor(Date.now() / 1000 / H) * H;   // whole hours: the panel prints hour resolution
+  const FOREIGN_WIN = base + 8 * H;                       // the foreign panel's weekly window (near, in the future)
+  const OWN_WIN = FOREIGN_WIN + 3 * 86400 + 16 * H;       // the account's own window, 3 d 16 h later (the real pair's spacing)
+  const panelOwn = `Current session: 3% used · resets ${when(base + 5 * H)}\nCurrent week (all models): 12% used · resets ${when(OWN_WIN)}\nCurrent week (Fable): 5% used · resets ${when(OWN_WIN)}\n`;
+  const panelForeign = `Current session: 99% used · resets ${when(base + 5 * H)}\nCurrent week (all models): 50% used · resets ${when(FOREIGN_WIN)}\nCurrent week (Fable): 98% used · resets ${when(FOREIGN_WIN)}\n`;
+  const SPARE_WIN = Math.floor(Date.now() / 1000) + 5 * 86400;
+
+  const mkProbeWorld = () => {
+    const w = mkWorld();
+    const root = w.root;
+    fs.writeFileSync(path.join(root, 'panel-own.txt'), panelOwn);
+    fs.writeFileSync(path.join(root, 'panel-foreign.txt'), panelForeign);
+    fs.writeFileSync(path.join(root, 'mode'), 'by-config');
+    // the account's OWN identity, as its login wrote it into its dir
+    fs.writeFileSync(path.join(w.am.subDir(w.LINK), '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, oauthAccount: { organizationUuid: 'org-own', emailAddress: 'userA@example.com', organizationName: 'Org A' } }));
+    // the MACHINE-WIDE file — another org's CLI wrote it last (the B-855a input)
+    const home = path.join(root, 'home'); fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { organizationUuid: 'org-foreign', emailAddress: 'userF@example.com', organizationName: 'Org F' } }));
+    // the other members' established windows, stamped BEFORE any read (the
+    // engine memoises established windows for 5 s)
+    w.stampWindow(w.FISH, { sevenDay: FOREIGN_WIN, fiveHour: null, scoped: { fable: FOREIGN_WIN } });
+    w.stampWindow(w.SPARE, { sevenDay: SPARE_WIN, fiveHour: null, scoped: {} });
+    const bin = path.join(root, 'fake-claude');
+    fs.writeFileSync(bin, `#!/bin/sh
+# the CLI's own rule (2.1.274): org context from \${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json
+cfg="\${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+org=$(sed -n 's/.*"organizationUuid":"\\([^"]*\\)".*/\\1/p' "$cfg" 2>/dev/null | head -1)
+echo "cfg=$cfg org=$org secure=\${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} cwd=$PWD" >> "${root}/spawns.log"
+mode=$(cat "${root}/mode")
+case "$mode" in panel:*) cat "${root}/\${mode#panel:}"; exit 0 ;; esac
+if [ "$mode" = "force-foreign" ]; then org=org-foreign; fi
+case "$org" in
+  org-own) cat "${root}/panel-own.txt" ;;
+  org-foreign) cat "${root}/panel-foreign.txt" ;;
+  *) echo "Not logged in" >&2; exit 1 ;;
+esac
+`, { mode: 0o755 });
+    const mkUsage = (opts = {}) => {
+      const handlers = {};
+      const app = { get() { }, post(p, fn) { handlers[p] = fn; }, put() { }, delete() { }, use() { }, locals: {} };
+      const u = (opts.mod || usageMod).setupUsage({
+        app, accounts: w.am, hosts: null, usageHistory: null, activeSessions: w.sessions,
+        serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+        USAGE_CACHE_FILE: path.join(w.dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: w.cacheDir,
+        CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: path.join(w.dataDir, 'session-meta'),
+        AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(w.dataDir, 'session-buffers'),
+        apiDerivedWindow: w.eng.apiDerivedWindow, establishedWindows: w.eng.establishedWindows,
+        repairIdentityAnchors: (why) => w.eng.repairIdentityAnchors(why),
+        probeUsageForAccountKey: opts.probe === false ? async () => false : (k, o) => w.eng.probeUsageForAccountKey(k, o),
+        onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
+      });
+      const call = (body) => new Promise((resolve) => { const res = { _s: 200, status(c) { this._s = c; return this; }, json(o) { resolve({ status: this._s, ...o }); } }; handlers['/api/usage/refresh']({ body }, res); });
+      const callRoute = (p, req) => new Promise((resolve) => { const res = { _s: 200, status(c) { this._s = c; return this; }, json(o) { resolve({ status: this._s, ...o }); } }; handlers[p]({ headers: {}, body: {}, ...req }, res); });
+      return { u, call, callRoute };
+    };
+    const withHome = async (fn) => { const prev = process.env.HOME; process.env.HOME = home; try { return await fn(); } finally { process.env.HOME = prev; } };
+    const spawns = () => { try { return fs.readFileSync(path.join(root, 'spawns.log'), 'utf8').trim().split('\n'); } catch { return []; } };
+    const probeRows = () => probeLogMod.readProbeLog(w.dataDir, { rung: 'panel' });
+    const archive = () => { const f = path.join(w.dataDir, 'archive', 'readings-window-mismatch.ndjson'); try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const apiWin = (id = w.LINK) => { try { return JSON.parse(fs.readFileSync(path.join(w.cacheDir, readingLag.apiWindowSidecarName(id)), 'utf8')); } catch { return null; } };
+    const foreignArchive = () => { const f = path.join(w.dataDir, 'archive', 'readings-foreign-usage-cache.ndjson'); try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const setPanel = (text) => { fs.writeFileSync(path.join(root, 'panel-x.txt'), text); fs.writeFileSync(path.join(root, 'mode'), 'panel:panel-x.txt'); }; // the fake answers THIS panel whatever org it finds
+    return { ...w, root, home, bin, mkUsage, withHome, spawns, probeRows, archive, foreignArchive, apiWin, setPanel, setMode: (m) => fs.writeFileSync(path.join(root, 'mode'), m) };
+  };
+  const events = []; const prevEv = global.__vsEvent;
+  global.__vsEvent = (n, d) => { events.push(n + ':' + d); try { prevEv && prevEv(n, d); } catch { } };
+
+  // ⓪ the mechanism pins: the fixed spawn isolates the org context, derived from the ONE creds dir
+  {
+    const ur = read('src/usage-routes.js');
+    const body = ur.slice(ur.indexOf('async function refreshViaCliPanel'), ur.indexOf("app.post('/api/usage/refresh'"));
+    ok('§19 ⓪ the panel spawn sets CLAUDE_CONFIG_DIR to the account\'s isolated probe dir, derived from the ONE creds dir (never a second subDir lookup)',
+      /const probeConfigDir = credsDir \? path\.join\(credsDir, '\.probe-config'\) : null;/.test(body) && /if \(probeConfigDir\) env\.CLAUDE_CONFIG_DIR = probeConfigDir;/.test(body) && (body.match(/accounts\.subDir\(/g) || []).length === 1);
+    ok('§19 ⓪ …the measurement that justifies it is recorded beside the code (the CLI version and which file each env var moves)', /2\.1\.274/.test(ur) && /CLAUDE_CONFIG_DIR \|\| \$HOME/.test(ur));
+    ok('§19 ⓪ …and the identity gate runs BEFORE the write and returns false on a refusal', body.indexOf('if (idv.refused) {') > 0 && body.indexOf('if (idv.refused) {') < body.indexOf('usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged') && /if \(idv\.refused\) \{[\s\S]{0,1600}?return false;/.test(body));
+  }
+
+  const w = mkProbeWorld();
+  try {
+    // ① the account's own API events establish its API-DERIVED window through the REAL producer — after K agreeing candidates, never after one
+    w.obs.set(w.CID, { orgUuid: 'org-own', acct: w.LINK, known: true, ts: Date.now() });
+    const cap0 = quiet(); w.reading(0.05, { resetsAt: OWN_WIN }); cap0.done();
+    const aw1 = w.apiWin();
+    ok('§19 ① ONE slot-verified rate_limit_event is a CANDIDATE, not a witness (final verifier: one lagging reading poisoned a fresh member for good): the ring holds it (.apiwin-<key>, never .json), no window is established, no `.window-` sidecar is stamped',
+      aw1 && Array.isArray(aw1.ring) && aw1.ring.length === 1 && aw1.ring[0].resetsAt === OWN_WIN && aw1.ring[0].outcome === 'write' && aw1.ring[0].sid === w.SID && aw1.sevenDay === null && w.eng.apiDerivedWindow(w.LINK) === null && w.readWindow(w.LINK) === null
+      && !fs.readdirSync(w.cacheDir).some((f) => f.startsWith('.apiwin-') && f.endsWith('.json')), JSON.stringify({ aw1, win: w.readWindow(w.LINK) }));
+    const cap0a = quiet(); w.reading(0.06, { resetsAt: OWN_WIN }); w.reading(0.07, { resetsAt: OWN_WIN }); cap0a.done();
+    const aw = w.apiWin();
+    ok('§19 ① …the THIRD agreeing candidate (K = 3) establishes the API-derived window (source rate-limit-events, n 3) and stamps the ABSENT `.window-` sidecar from the API',
+      aw && aw.sevenDay === OWN_WIN && aw.source === 'rate-limit-events' && aw.n === 3 && aw.sessionId === w.SID && aw.ring.length === 3 && w.eng.apiDerivedWindow(w.LINK)?.sevenDay === OWN_WIN
+      && w.readWindow(w.LINK)?.sevenDay === OWN_WIN && w.readWindow(w.LINK)?.source === 'api' && w.readWindow(w.LINK)?.verifiedBy === 'rate-limit-events', JSON.stringify({ aw, win: w.readWindow(w.LINK) }));
+    const cap0b = quiet();
+    w.eng.recordRateLimitEvent(w.session, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.5, resets_at: base + 5 * H, resetsAt: base + 5 * H } });
+    cap0b.done();
+    ok('§19 ① …a five_hour event does not touch it (a 5h window names a time, never an account) and the engine reads it back without a fiveHour half',
+      (() => { const r = w.eng.apiDerivedWindow(w.LINK); return r && r.sevenDay === OWN_WIN && r.fiveHour === null && w.apiWin().sevenDay === OWN_WIN; })(), JSON.stringify(w.eng.apiDerivedWindow(w.LINK)));
+
+    // ② the FIXED refresher: own panel ⇒ written + sidecar stamped + a `written` probe record, over a HOME whose ~/.claude.json names ANOTHER org
+    const { u } = w.mkUsage({ probe: false });
+    const cap1 = quiet(); const r1 = await w.withHome(() => u.refreshViaCliPanel(w.LINK)); cap1.done();
+    const sp1 = w.spawns();
+    ok('§19 ② the fixed spawn hands the CLI an isolated config dir UNDER the creds dir, seeded with the account\'s OWN org (the fake read org-own there while ~/.claude.json said org-foreign)',
+      r1 === true && sp1.length === 1 && sp1[0] === `cfg=${path.join(w.am.subDir(w.LINK), '.probe-config', '.claude.json')} org=org-own secure=${w.am.subDir(w.LINK)} cwd=${path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')}`, JSON.stringify(sp1));
+    ok('§19 ② …and the WORKING DIRECTORY is the empty dir inside that isolated config (owner: config dir AND cwd on the new path — the CLI keys per-project state by cwd), created by the seed, never os.tmpdir()',
+      fs.existsSync(path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')) && fs.readdirSync(path.join(w.am.subDir(w.LINK), '.probe-config', 'cwd')).length === 0 && /cwd: probeCwd, timeout: 60000/.test(fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8')) && !/cwd: os\.tmpdir\(\), timeout: 60000/.test(fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf8')));
+    ok('§19 ② …~/.claude.json is never read for identity and never written', JSON.parse(fs.readFileSync(path.join(w.home, '.claude.json'), 'utf8')).oauthAccount.organizationUuid === 'org-foreign' && !/\/home\/\.claude\.json/.test(sp1[0]));
+    const c1 = w.readCache(w.LINK);
+    ok('§19 ② …the panel is WRITTEN: 7d 12 %, Fable 5 %, in the account\'s own window', c1 && Math.abs(c1.sevenDay.utilization - 0.12) < 1e-9 && c1.sevenDay.resetsAt === OWN_WIN && (c1.scopedWeekly || []).some((s) => /fable/i.test(s.name) && Math.abs(s.utilization - 0.05) < 1e-9), JSON.stringify(c1 && { s: c1.sevenDay, sw: c1.scopedWeekly }));
+    ok('§19 ② …the established-window sidecar is stamped with it', w.readWindow(w.LINK)?.sevenDay === OWN_WIN, JSON.stringify(w.readWindow(w.LINK)));
+    const p1 = w.probeRows().pop();
+    ok('§19 ② …and the probe log says `written`, identity VERIFIED by the weekly phase against the API-derived window, with the isolated dir and both org contexts recorded',
+      p1 && p1.outcome === 'written' && p1.identityVerified === true && p1.identity && p1.identity.phase === 'agree' && p1.configDir === path.join(w.am.subDir(w.LINK), '.probe-config') && p1.configOrgBefore && p1.configOrgBefore.orgUuid === 'org-own' && p1.machineOrgBefore && p1.machineOrgBefore.orgUuid === 'org-foreign' && p1.why === null,
+      JSON.stringify(p1 && { outcome: p1.outcome, iv: p1.identityVerified, id: p1.identity, cfg: p1.configDir, before: p1.configOrgBefore, mach: p1.machineOrgBefore, why: p1.why }));
+
+    // ③ a FOREIGN panel (a replaced login answering for another org) ⇒ refused: nothing written, sidecar untouched, archived naming both, probe log write-refused
+    w.setMode('force-foreign');
+    const cap2 = quiet(); const r2 = await w.withHome(() => u.refreshViaCliPanel(w.LINK)); const lines2 = cap2.done();
+    const c2 = w.readCache(w.LINK);
+    ok('§19 ③ a foreign panel returns false and writes NOTHING (the cache still holds the account\'s own 12 % / 5 %)', r2 === false && c2 && Math.abs(c2.sevenDay.utilization - 0.12) < 1e-9 && c2.sevenDay.resetsAt === OWN_WIN && !(c2.scopedWeekly || []).some((s) => Math.abs(s.utilization - 0.98) < 1e-9), JSON.stringify(c2 && c2.sevenDay));
+    ok('§19 ③ …the established-window sidecar is NOT re-stamped with the foreign window (the B-855a ② re-stamp)', w.readWindow(w.LINK)?.sevenDay === OWN_WIN, JSON.stringify(w.readWindow(w.LINK)));
+    const ar = w.archive().filter((x) => x.what === 'panel-identity');
+    ok('§19 ③ …the reading is ARCHIVED as `panel-identity`, naming BOTH identities (the account asked for and the member whose window it carries) with the API-derived window it contradicted',
+      ar.length === 1 && ar[0].key === w.LINK && /Member Y/.test(ar[0].reason) && /Member F/.test(ar[0].reason) && ar[0].matched.includes(w.FISH) && ar[0].ownWindow && ar[0].ownWindow.sevenDay === OWN_WIN && ar[0].entry && Math.abs(ar[0].entry.sevenDay.utilization - 0.5) < 1e-9, JSON.stringify(ar[0] && ar[0].reason));
+    const p2 = w.probeRows().pop();
+    ok('§19 ③ …the probe log records `write-refused` with `why` naming both identities and the verdict (phase differ)',
+      p2 && p2.outcome === 'write-refused' && /Member Y/.test(p2.why) && /Member F/.test(p2.why) && p2.identity && p2.identity.phase === 'differ' && p2.identityVerified === false, JSON.stringify(p2 && { o: p2.outcome, why: p2.why, id: p2.identity }));
+    ok('§19 ③ …telemetry `usage-probe-identity-refused` fired and the journal spoke once, naming both', events.some((e) => e.startsWith('usage-probe-identity-refused:' + w.LINK)) && lines2.filter((l) => /panel-identity: refusing to write Member Y/.test(l) && /Member F/.test(l)).length === 1, events.filter((e) => /identity/.test(e)).join(' | ') + ' || ' + lines2.filter((l) => /\[usage\]/.test(l)).join(' | '));
+    const cap3 = quiet(); const r3 = await w.withHome(() => u.refreshViaCliPanel(w.LINK)); const lines3 = cap3.done();
+    ok('§19 ③ …a repeat of the same verdict is archived and logged again but not re-journaled (one line per (key, verdict) transition)', r3 === false && w.archive().filter((x) => x.what === 'panel-identity').length === 2 && w.probeRows().filter((p) => p.outcome === 'write-refused').length === 2 && !lines3.some((l) => /panel-identity: refusing/.test(l)));
+
+    // ⑤ the ⟳ route: a session the engine cannot vouch for is SKIPPED, and the answer names the rung + verification
+    w.setMode('by-config');
+    w.obs.set(w.CID, { orgUuid: 'org-fish', acct: w.FISH, known: true, ts: Date.now() });   // observed on Member F while linked to Member Y
+    const capD = quiet(); const d1 = await w.eng.probeUsageForAccountKey(w.LINK, { detailed: true }); capD.done();
+    ok('§19 ⑤ control rung: an OTel-DIVERGENT session is not asked — skipped with the reason, nothing parsed', d1 && d1.parsed === null && d1.rung === 'control' && d1.skipped.length === 1 && d1.skipped[0].sessionId === w.SID && /observed on Member F while linked to Member Y/.test(d1.skipped[0].why), JSON.stringify(d1));
+    const capD2 = quiet(); const bare = await w.eng.probeUsageForAccountKey(w.LINK); capD2.done();
+    ok('§19 ⑤ …and the bare call keeps its parsed|null shape for every other caller', bare === null);
+    const { call } = w.mkUsage();
+    const capR = quiet(); const a1 = await w.withHome(() => call({ account: w.LINK })); capR.done();
+    ok('§19 ⑤ the ⟳ route answer names the rung that answered (panel — the control rung skipped), that the identity was verified, and lists the skipped session with why',
+      a1.success === true && a1.via === 'cli-panel' && a1.rung === 'panel' && a1.identityVerified === true && /API-derived window/.test(a1.why) && a1.skipped.length === 1 && /observed on Member F/.test(a1.skipped[0].why), JSON.stringify(a1));
+    // inside a re-point's LAG SHADOW: the link just moved and no reading has ended the shadow
+    w.obs.set(w.CID, { orgUuid: 'org-b', acct: w.SPARE, known: true, ts: Date.now() });
+    w.am.ensureSessionPoolLink(w.P, w.SID, w.SPARE, { why: 'per-session-switch' });
+    const capS = quiet(); const d2 = await w.eng.probeUsageForAccountKey(w.SPARE, { detailed: true }); capS.done();
+    ok('§19 ⑤ control rung: a session inside a re-point\'s lag shadow (Member Y → Member B seconds ago, no reading yet) is not asked either', d2 && d2.parsed === null && d2.skipped.length === 1 && /re-pointed Member Y → Member B \d+s ago/.test(d2.skipped[0].why), JSON.stringify(d2));
+    // the shadow ENDS when a reading demonstrably arrives on the new credentials — then the session is asked and answers
+    w.endTurn();   // the turn pin from ① would otherwise answer before the shadow is consulted (a pin outlives a re-point until the turn ends)
+    const capE = quiet(); w.reading(0.2, { resetsAt: SPARE_WIN }); capE.done();
+    const nowS = Math.floor(Date.now() / 1000);
+    const payload = { rate_limits: { five_hour: { utilization: 0.31, resets_at: nowS + 3600 }, seven_day: { utilization: 0.2, resets_at: SPARE_WIN } } };
+    w.session.pty = { write(line) { let req = null; try { req = JSON.parse(line); } catch { } const pend = req && w.eng._vsuPending.get(req.request_id); if (!pend) return; w.eng._vsuPending.delete(req.request_id); clearTimeout(pend.timer); pend.raw = payload; pend.resolve(ClaudeCodeAdapter.parseGetUsageResponse(payload)); } };
+    const capF = quiet(); const d3 = await w.eng.probeUsageForAccountKey(w.SPARE, { detailed: true }); capF.done();
+    ok('§19 ⑤ …once a reading has ENDED the shadow the session is asked, answers, and the detailed verdict says verified (its window matches Member B\'s established window)',
+      d3 && d3.parsed && d3.skipped.length === 0 && d3.sessionId === w.SID && d3.target === w.SPARE && d3.identityVerified === true && /matches Member B/.test(d3.why), JSON.stringify(d3 && { t: d3.target, iv: d3.identityVerified, why: d3.why, sk: d3.skipped }));
+
+    // ⑥ the ⟳ route on an identity refusal answers the refusal and does NOT fall to the token ladder
+    w.login(w.LINK, { wiped: true });   // safety net: were the ladder reached, there is no token to spend on a vendor call
+    w.setMode('force-foreign');
+    const { call: call2 } = w.mkUsage({ probe: false });
+    const capG = quiet(); const a2 = await w.withHome(() => call2({ account: w.LINK })); capG.done();
+    ok('§19 ⑥ the ⟳ route on an identity refusal answers the refusal (rung panel, identityVerified false, both identities named) instead of spending a second vendor call on the token ladder',
+      a2.success !== true && /not recorded — the \/usage panel for Member Y answered with Member F/.test(a2.error || '') && a2.rung === 'panel' && a2.identityVerified === false, JSON.stringify(a2));
+  } finally { global.__vsEvent = prevEv; }
+
+  // ⑦ THE SIDECAR IS STAMPED ONLY BY A PANEL THAT PROVED WHOSE IT IS (c2 (a)),
+  //    the API stamps it first when nothing else has, and the repair route
+  {
+    const w7 = mkProbeWorld();
+    const { u: u7, callRoute } = w7.mkUsage({ probe: false });
+    // no API-derived window yet, the panel prints no org, the CLI rewrote nothing ⇒ written, UNVERIFIED, sidecar NOT stamped
+    const capA = quiet(); const rA = await w7.withHome(() => u7.refreshViaCliPanel(w7.LINK)); capA.done();
+    const pA = w7.probeRows().pop();
+    ok('§19 ⑦ an UNVERIFIED panel (no org evidence, no API-derived window yet) is WRITTEN but does not stamp the established window — it may not define who the account is',
+      rA === true && w7.readCache(w7.LINK) && Math.abs(w7.readCache(w7.LINK).sevenDay.utilization - 0.12) < 1e-9 && w7.readWindow(w7.LINK) === null && pA && pA.outcome === 'written' && pA.identityVerified === false && /not-stamped/.test(pA.sidecar || ''),
+      JSON.stringify({ rA, win: w7.readWindow(w7.LINK), p: pA && { o: pA.outcome, iv: pA.identityVerified, sc: pA.sidecar } }));
+    // the account's own slot-verified API readings arrive ⇒ after K = 3 agreeing candidates the ENGINE stamps the absent sidecar from the API (one is a candidate, never a verdict)
+    w7.obs.set(w7.CID, { orgUuid: 'org-own', acct: w7.LINK, known: true, ts: Date.now() });
+    const capB = quiet(); w7.reading(0.05, { resetsAt: OWN_WIN }); w7.reading(0.06, { resetsAt: OWN_WIN }); capB.done();
+    ok('§19 ⑦ …two slot-verified rate_limit_events are candidates only: no witness, no sidecar (K = 3)', w7.readWindow(w7.LINK) === null && w7.eng.apiDerivedWindow(w7.LINK) === null && w7.apiWin()?.ring.length === 2, JSON.stringify(w7.apiWin()));
+    const capB2 = quiet(); w7.reading(0.07, { resetsAt: OWN_WIN }); capB2.done();
+    const winB = w7.readWindow(w7.LINK);
+    ok('§19 ⑦ …the THIRD agreeing slot-verified rate_limit_event stamps the ABSENT sidecar from the API (source api, verifiedAt, n 3) — the guard is armed without any panel',
+      winB && winB.sevenDay === OWN_WIN && winB.source === 'api' && winB.verifiedAt > 0 && winB.verifiedBy === 'rate-limit-events' && winB.n === 3, JSON.stringify(winB));
+    // the same own panel is now VERIFIED by the API phase ⇒ it may (re)stamp, and says by what
+    const capC = quiet(); const rC = await w7.withHome(() => u7.refreshViaCliPanel(w7.LINK)); capC.done();
+    const winC = w7.readWindow(w7.LINK); const pC = w7.probeRows().pop();
+    ok('§19 ⑦ …a panel verified against the API-derived window stamps it as on-demand WITH verifiedAt + verifiedBy api-phase',
+      rC === true && winC && winC.sevenDay === OWN_WIN && winC.source === 'on-demand' && winC.verifiedAt > 0 && winC.verifiedBy === 'api-phase' && pC && pC.identityVerified === true && pC.sidecar === 'stamped',
+      JSON.stringify({ winC, p: pC && { iv: pC.identityVerified, sc: pC.sidecar } }));
+    // the human-triggered repair route: an agent token is refused, a human gets the report
+    const capD = quiet();
+    const a403 = await callRoute('/api/usage/repair-identity', { headers: { authorization: 'Bearer vsst_abc' } });
+    const aOk = await callRoute('/api/usage/repair-identity', {});
+    capD.done();
+    ok('§19 ⑦ POST /api/usage/repair-identity refuses an agent Bearer (403 agent-forbidden) and answers a human with the repair report (counts + per-account verdicts)',
+      a403.status === 403 && a403.code === 'agent-forbidden' && aOk.status === 200 && aOk.success === true && !!aOk.counts && Array.isArray(aOk.identities) && aOk.identities.some((r) => r.key === w7.LINK),
+      JSON.stringify({ a403, aOk: aOk && { s: aOk.status, c: aOk.counts, n: aOk.identities && aOk.identities.length } }));
+  }
+
+  // ⑧ A LAGGING READING ACROSS A RE-POINT ONTO A FRESH MEMBER IS NOT A WITNESS
+  //    (final verifier, reproduced on the base: Member Y established at WY, the
+  //    session re-pointed Y → N (N fresh: no sidecars), the in-flight seven_day
+  //    response — Y's window, slotOk by construction, 'no-evidence' shadow —
+  //    wrote `.apiwin-N` AND `.window-N` with Y's window; from then on N's own
+  //    readings were archived and its own panel refused, for good)
+  {
+    const w8 = mkProbeWorld();
+    const N = w8.am.createSubscription({ name: 'Member N' }).id; w8.login(N);
+    fs.writeFileSync(path.join(w8.am.subDir(N), '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, oauthAccount: { organizationUuid: 'org-n', emailAddress: 'userN@example.com', organizationName: 'Org N' } }));
+    const N_WIN = OWN_WIN + 2 * 86400 + 7 * H;   // N's own weekly window — nobody else's phase
+    w8.obs.set(w8.CID, { orgUuid: 'org-own', acct: w8.LINK, known: true, ts: Date.now() });
+    const c8a = quiet(); for (const u of [0.28, 0.29, 0.30]) w8.reading(u, { resetsAt: OWN_WIN }); w8.endTurn(); c8a.done();
+    ok('§19 ⑧ setup: Member Y is established on its own phase (witness + sidecar), Member N is fresh (neither)', w8.apiWin()?.sevenDay === OWN_WIN && w8.readWindow(w8.LINK)?.sevenDay === OWN_WIN && w8.apiWin(N) === null && w8.readWindow(N) === null);
+    // the re-point Y → N, then the response already in flight: Y's window, Y's numbers, one request later than the link
+    w8.obs.set(w8.CID, { orgUuid: 'org-n', acct: N, known: true, ts: Date.now() });
+    w8.am.ensureSessionPoolLink(w8.P, w8.SID, N, { why: 'per-session-switch' });
+    const c8b = quiet(); w8.reading(0.31, { resetsAt: OWN_WIN }); const l8b = c8b.done();
+    ok('§19 ⑧ one lagging weekly reading after a re-point onto a FRESH member writes NO witness and NO established window for it (a response in flight is slotOk by construction — the base stamped both with the previous member\'s window)',
+      w8.apiWin(N) === null && w8.readWindow(N) === null, JSON.stringify({ apiwin: w8.apiWin(N), win: w8.readWindow(N), lines: l8b.filter((l) => /\[usage\]/.test(l)) }));
+    // eleven minutes later (the ledger row backdated — this world's own store; the engine re-reads on mtime), N's OWN readings arrive on the same slot
+    const ledger = fs.readdirSync(w8.dataDir).filter((f) => /^slot-transitions/.test(f)).map((f) => path.join(w8.dataDir, f))[0];
+    fs.writeFileSync(ledger, fs.readFileSync(ledger, 'utf8').split('\n').filter(Boolean).map((l) => { const r = JSON.parse(l); if (r.to === N) r.at -= 11 * 60e3; return JSON.stringify(r); }).join('\n') + '\n');
+    w8.eng.slotTransitions._cache = null;
+    w8.endTurn();
+    const c8c = quiet(); for (const u of [0.10, 0.11, 0.12]) w8.reading(u, { resetsAt: N_WIN }); c8c.done();
+    ok('§19 ⑧ …after the shadow horizon N\'s own three readings establish N\'s witness and stamp N\'s established window on N\'s OWN phase, and N\'s cache holds N\'s numbers — the lagging reading poisoned nothing',
+      w8.apiWin(N)?.sevenDay === N_WIN && w8.readWindow(N)?.sevenDay === N_WIN && w8.readWindow(N)?.source === 'api' && w8.readCache(N)?.sevenDay?.resetsAt === N_WIN && Math.abs(w8.readCache(N).sevenDay.utilization - 0.12) < 1e-9,
+      JSON.stringify({ apiwin: w8.apiWin(N), win: w8.readWindow(N), c: w8.readCache(N)?.sevenDay }));
+    w8.setPanel(`Current session: 3% used · resets ${when(base + 5 * H)}\nCurrent week (all models): 12% used · resets ${when(N_WIN)}\n`);
+    const { u: u8 } = w8.mkUsage({ probe: false });
+    const c8d = quiet(); const r8 = await w8.withHome(() => u8.refreshViaCliPanel(N)); c8d.done();
+    const p8 = w8.probeRows().pop();
+    ok('§19 ⑧ …and N\'s OWN panel is accepted: written, identity VERIFIED by the phase against N\'s witness (the base refused it against the poisoned witness)',
+      r8 === true && p8 && p8.outcome === 'written' && p8.identityVerified === true && p8.identity && p8.identity.phase === 'agree' && Math.abs(w8.readCache(N).sevenDay.utilization - 0.12) < 1e-9,
+      JSON.stringify(p8 && { o: p8.outcome, iv: p8.identityVerified, id: p8.identity }));
+    ok('§19 ⑧ CONTROL: Member Y\'s own witness and sidecar were untouched by the re-point and by N\'s readings', w8.apiWin()?.sevenDay === OWN_WIN && w8.readWindow(w8.LINK)?.sevenDay === OWN_WIN);
+  }
+
+  // ⑨ A WINDOW THAT GENUINELY MOVED RE-ANCHORS ITSELF (final verifier: since the
+  //    panel may only stamp once verified, the base's only self-heal for a moved
+  //    window was gone — the account's own readings were archived by the guard
+  //    and its own panel refused against the stale witness, until a boot repair)
+  {
+    const w9 = mkProbeWorld();
+    w9.obs.set(w9.CID, { orgUuid: 'org-own', acct: w9.LINK, known: true, ts: Date.now() });
+    const c9a = quiet(); for (const u of [0.20, 0.21, 0.22]) w9.reading(u, { resetsAt: OWN_WIN }); c9a.done();
+    const MOVED_WIN = OWN_WIN + 86400 + 3 * H;   // a plan change: the window now resets 1 d 3 h later — nobody else's phase
+    const c9b = quiet(); w9.reading(0.05, { resetsAt: MOVED_WIN }); w9.reading(0.06, { resetsAt: MOVED_WIN }); const l9b = c9b.done();
+    ok('§19 ⑨ the first two readings in a NEW phase are archived by the guard (the sidecar still says the old window, the cache keeps the old numbers) and counted as candidates',
+      w9.readWindow(w9.LINK)?.sevenDay === OWN_WIN && w9.apiWin().sevenDay === OWN_WIN && w9.apiWin().ring.filter((e) => e.outcome === 'archived').length === 2 && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.22) < 1e-9
+      && l9b.some((l) => /refusing to write Member Y a reading from another window/.test(l)), JSON.stringify({ win: w9.readWindow(w9.LINK), ring: w9.apiWin().ring.map((e) => e.outcome) }));
+    // the ⟳ in between: the panel (in the new window) is still refused against the witness, but the refusal names the likely cause with the count
+    w9.setPanel(`Current session: 3% used · resets ${when(base + 5 * H)}\nCurrent week (all models): 7% used · resets ${when(MOVED_WIN)}\n`);
+    const { u: u9 } = w9.mkUsage({ probe: false });
+    const c9c = quiet(); const r9 = await w9.withHome(() => u9.refreshViaCliPanel(w9.LINK)); c9c.done();
+    const p9 = w9.probeRows().pop();
+    ok('§19 ⑨ …a panel in the new window is still refused (two candidates are not a verdict) but the refusal says the window may have MOVED, with the count',
+      r9 === false && p9 && p9.outcome === 'write-refused' && p9.identity && p9.identity.movedLikely === true && /2 of Member Y's own last 5 API readings share the panel's window: Member Y's weekly window may have MOVED; 3 consecutive agreeing readings re-anchor it/.test(p9.why),
+      JSON.stringify(p9 && { o: p9.outcome, why: p9.why }));
+    const ev9 = []; const prev9 = global.__vsEvent; global.__vsEvent = (n, d) => { ev9.push(n + ':' + d); try { prev9 && prev9(n, d); } catch { } };
+    const c9d = quiet(); try { w9.reading(0.07, { resetsAt: MOVED_WIN }); } finally { global.__vsEvent = prev9; } const l9d = c9d.done();
+    const events = ev9;
+    const mv = w9.foreignArchive().filter((x) => x.store === 'window-sidecar' && x.action === 'moved' && x.key === w9.LINK);
+    ok('§19 ⑨ …the THIRD consecutive reading in the new phase MOVES both sidecars there (journal "window moved", the old sidecar archived with a reason naming both), telemetry usage-window-moved',
+      w9.readWindow(w9.LINK)?.sevenDay === MOVED_WIN && w9.readWindow(w9.LINK)?.source === 'api' && w9.readWindow(w9.LINK)?.verifiedBy === 'rate-limit-events' && w9.apiWin().sevenDay === MOVED_WIN
+      && l9d.some((l) => /window moved: Member Y's weekly window is now/.test(l) && /3 consecutive slot-verified readings/.test(l)) && mv.length === 1 && mv[0].entry && mv[0].entry.sevenDay === OWN_WIN && /archived\/archived\/archived/.test(mv[0].reason)
+      && events.some((e) => e.startsWith('usage-window-moved:' + w9.LINK)), JSON.stringify({ win: w9.readWindow(w9.LINK), lines: l9d, mv: mv.map((x) => x.reason) }));
+    const c9e = quiet(); w9.reading(0.08, { resetsAt: MOVED_WIN }); c9e.done();
+    const c9f = quiet(); const r9b = await w9.withHome(() => u9.refreshViaCliPanel(w9.LINK)); c9f.done();
+    const p9b = w9.probeRows().pop();
+    ok('§19 ⑨ …from then on the account\'s own readings are WRITTEN (7d 8 % in the new window) and its own panel is verified and written (7 %) — the self-heal the panel alone could no longer provide',
+      r9b === true && p9b && p9b.outcome === 'written' && p9b.identityVerified === true && w9.readCache(w9.LINK).sevenDay.resetsAt === MOVED_WIN && Math.abs(w9.readCache(w9.LINK).sevenDay.utilization - 0.07) < 1e-9,
+      JSON.stringify({ p: p9b && { o: p9b.outcome, iv: p9b.identityVerified, why: p9b.why }, c: w9.readCache(w9.LINK).sevenDay }));
+    ok('§19 ⑨ …and the standing repair runs HOURLY too (server.js), quiet unless it changed something', /setInterval\(\(\) => \{ try \{ const rep = repairIdentityAnchors\('hourly'\)/.test(read('server.js')) && /if \(why !== 'hourly' \|\| changed\)/.test(read('src/server/usage-pool-engine.js')));
+  }
+
+  // ⑩ A SHARED PHASE VERIFIES NOTHING (final verifier: four members on this
+  //    instance share one weekly phase and the production panel prints no org,
+  //    so a same-phase FOREIGN panel would have been written AND reported as
+  //    verified, and stamped the sidecar as `verifiedBy:'api-phase'`)
+  {
+    const w10 = mkProbeWorld();
+    w10.stampWindow(w10.FISH, { sevenDay: OWN_WIN, fiveHour: null, scoped: { fable: OWN_WIN } }); // Member F shares Member Y's weekly phase
+    w10.obs.set(w10.CID, { orgUuid: 'org-own', acct: w10.LINK, known: true, ts: Date.now() });
+    const c10a = quiet(); for (const u of [0.20, 0.21, 0.22]) w10.reading(u, { resetsAt: OWN_WIN }); c10a.done();
+    const { u: u10 } = w10.mkUsage({ probe: false });
+    const c10b = quiet(); const r10 = await w10.withHome(() => u10.refreshViaCliPanel(w10.LINK)); c10b.done();
+    const p10 = w10.probeRows().pop(), v10 = u10.panelVerdictFor(w10.LINK);
+    ok('§19 ⑩ a panel whose weekly phase is SHARED with another member is written (no evidence to refuse) but NOT verified — the phase is not identifying — the verdict names who shares it, and the sidecar keeps its API stamp (never re-stamped by an unverified panel)',
+      r10 === true && p10 && p10.outcome === 'written' && p10.identityVerified === false && p10.identity && p10.identity.shared === true && p10.identity.matched.includes(w10.FISH) && /not-stamped/.test(p10.sidecar || '')
+      && v10 && v10.identityVerified === false && /shared with Member F — not identifying/.test(v10.why) && w10.readWindow(w10.LINK)?.verifiedBy === 'rate-limit-events' && w10.readWindow(w10.LINK)?.source === 'api',
+      JSON.stringify({ p: p10 && { o: p10.outcome, iv: p10.identityVerified, id: p10.identity, sc: p10.sidecar }, v: v10, win: w10.readWindow(w10.LINK) }));
+    // CONTROL: the same panel, the same readings, nobody sharing the phase ⇒ verified and stamped
+    const w11 = mkProbeWorld();
+    w11.obs.set(w11.CID, { orgUuid: 'org-own', acct: w11.LINK, known: true, ts: Date.now() });
+    const c11a = quiet(); for (const u of [0.20, 0.21, 0.22]) w11.reading(u, { resetsAt: OWN_WIN }); c11a.done();
+    const { u: u11 } = w11.mkUsage({ probe: false });
+    const c11b = quiet(); const r11 = await w11.withHome(() => u11.refreshViaCliPanel(w11.LINK)); c11b.done();
+    const p11 = w11.probeRows().pop();
+    ok('§19 ⑩ CONTROL: the same panel with nobody sharing the phase IS verified (api-phase) and re-stamps the sidecar', r11 === true && p11 && p11.identityVerified === true && p11.identity.shared === false && p11.sidecar === 'stamped' && w11.readWindow(w11.LINK)?.verifiedBy === 'api-phase', JSON.stringify(p11 && { iv: p11.identityVerified, sc: p11.sidecar, id: p11.identity }));
+  }
+
+  // ④ PRE-FIX CONTROL: the same fake binary, the same HOME, the shipped refresher with the two halves removed ⇒ it reads ~/.claude.json's org and writes BOTH (the incident, end to end)
+  {
+    const w2 = mkProbeWorld();
+    const src = read('src/usage-routes.js');
+    const ISO = "      if (probeConfigDir) env.CLAUDE_CONFIG_DIR = probeConfigDir;\n";
+    const GATE = "  if (idv.refused) {";
+    const STAMP = "      if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {";
+    const CWD = "{ env, cwd: probeCwd, timeout: 60000, maxBuffer: 1024 * 1024 }"; // the isolated working directory (owner 2026-09-17) — the pre-fix copy spawns in the shared tmpdir
+    ok('§19 ④ CONTROL setup: the isolation line, the gate, the c2 stamp gate and the cwd are each a single occurrence in the shipped source (the patch below must hit them)', src.split(ISO).length === 2 && src.split(GATE).length === 2 && src.split(STAMP).length === 2 && src.split(CWD).length === 2);
+    const preFixDir = path.join(w2.root, 'prefix'); fs.mkdirSync(preFixDir, { recursive: true });
+    const preFixPath = path.join(preFixDir, 'usage-routes.js');
+    fs.writeFileSync(preFixPath, src.replace(ISO, '').replace(CWD, '{ env, cwd: os.tmpdir(), timeout: 60000, maxBuffer: 1024 * 1024 }').replace(GATE, '  if (false && idv.refused) {').replace(STAMP, '      if (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length) { // PRE-FIX (c2): any panel stamps the sidecar').replace(/require\('\.\//g, `require('${path.join(REPO, 'src')}/`));
+    const preFix = require(preFixPath);
+    w2.obs.set(w2.CID, { orgUuid: 'org-own', acct: w2.LINK, known: true, ts: Date.now() });
+    const capA = quiet(); w2.reading(0.05, { resetsAt: OWN_WIN }); w2.reading(0.06, { resetsAt: OWN_WIN }); w2.reading(0.07, { resetsAt: OWN_WIN }); capA.done(); // K = 3 candidates: the witness + the API-stamped sidecar exist before the pre-fix probe pollutes them
+    const { u: u2 } = w2.mkUsage({ probe: false, mod: preFix });
+    const capB = quiet(); const rr = await w2.withHome(() => u2.refreshViaCliPanel(w2.LINK)); capB.done();
+    const spB = w2.spawns(); const cB = w2.readCache(w2.LINK);
+    ok('§19 ④ CONTROL: without the isolation the SAME binary reads ~/.claude.json and answers the OTHER org (the fake logged the machine-wide file and org-foreign)', spB.length === 1 && spB[0] === `cfg=${path.join(w2.home, '.claude.json')} org=org-foreign secure=${w2.am.subDir(w2.LINK)} cwd=${fs.realpathSync(os.tmpdir())}`, JSON.stringify(spB));
+    ok('§19 ④ CONTROL: …and without the gate it WRITES the foreign numbers on the account (7d 50 %, Fable 98 %) — the panel the owner saw at 02:23', rr === true && cB && Math.abs(cB.sevenDay.utilization - 0.5) < 1e-9 && cB.sevenDay.resetsAt === FOREIGN_WIN && (cB.scopedWeekly || []).some((s) => /fable/i.test(s.name) && Math.abs(s.utilization - 0.98) < 1e-9), JSON.stringify(cB && cB.sevenDay));
+    ok('§19 ④ CONTROL: …and RE-STAMPS the established-window sidecar with the foreign window (B-855a ②: every later own reading would be archived as foreign)', w2.readWindow(w2.LINK)?.sevenDay === FOREIGN_WIN, JSON.stringify(w2.readWindow(w2.LINK)));
+    // control for the control: the FIXED refresher over the polluted store, same HOME and binary, heals it
+    const { u: u3 } = w2.mkUsage({ probe: false });
+    const capC = quiet(); const rh = await w2.withHome(() => u3.refreshViaCliPanel(w2.LINK)); capC.done();
+    const cH = w2.readCache(w2.LINK);
+    ok('§19 ④ …CONTROL for the control: the fixed refresher over the SAME polluted store, HOME and binary writes the account\'s OWN panel back and re-stamps its own window (self-heal)', rh === true && cH && Math.abs(cH.sevenDay.utilization - 0.12) < 1e-9 && cH.sevenDay.resetsAt === OWN_WIN && w2.readWindow(w2.LINK)?.sevenDay === OWN_WIN && w2.spawns().length === 2 && /org=org-own/.test(w2.spawns()[1]), JSON.stringify({ c: cH && cH.sevenDay, w: w2.readWindow(w2.LINK), sp: w2.spawns() }));
+  }
+}
+
+// ── §20 THE IDENTITY ANCHOR IS DERIVED FROM THE API — the standing repair (B-855a c2) ──
+// A fixture shaped like this instance's stores on 2026-09-17, dates relative
+// to now (never pinned): Member A's own panel, four API readings whose 7d
+// MOVED, then another member's panel written on A (the 02:23 shape) — which
+// re-stamped A's sidecar, after which A's own readings were archived by the
+// guard — and a 5h-only event that re-anchored the carried-forward foreign 7d.
+{
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-apiphase-')); cleanup.push(d);
+  const dataDir = path.join(d, 'data');
+  const anchors = path.join(dataDir, 'usage-anchors'), cache = path.join(dataDir, 'usage-cache'), archive = path.join(dataDir, 'archive');
+  for (const p of [anchors, cache, archive]) fs.mkdirSync(p, { recursive: true });
+  const A = 'sub-aaaaaaaaaaaa', B = 'sub-bbbbbbbbbbbb', C = 'sub-cccccccccccc', F = 'sub-ffffffffffff', THIN = 'sub-tttttttttttt';
+  const accounts = [[A, 'Member A'], [B, 'Member B'], [C, 'Member C'], [F, 'Member F'], [THIN, 'Member T']].map(([id, name]) => ({ id, name, type: 'subscription', backend: 'claude' }));
+  const H = 3600, nowMs = Date.now(), nowSec = Math.floor(nowMs / 1000);
+  const WA = nowSec + 3 * 86400, WF = nowSec + 6 * 86400 + 16 * H, WB = nowSec + 86400 + 5 * H, WC = nowSec + 2 * 86400 + 9 * H, WT = nowSec + 4 * 86400 + 2 * H;
+  const at = (h) => nowMs - Math.round(h * H * 1000);
+  const rec = (acct, ident, ts, u, resetsAt, source, fable = null) => ({ ts, fetchedAt: ts, source, accountId: acct, identityKey: ident,
+    buckets: { fiveHour: { u: 0.2, resetsAt: nowSec + H }, sevenDay: { u, resetsAt }, scopedWeekly: fable ? [{ name: 'Fable', u: fable.u, resetsAt: fable.resetsAt, asOf: ts }] : [] },
+    prevFetchedAt: null, elapsedSec: null, costSince: null });
+  const stream = (ident, rows) => fs.writeFileSync(path.join(anchors, `anchors-${ident}.ndjson`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  stream('org_aaaa', [
+    rec(A, 'org_aaaa', at(40), 0.10, WA, 'on-demand', { u: 0.05, resetsAt: WA }),
+    rec(A, 'org_aaaa', at(36), 0.12, WA, 'rate-limit-event', { u: 0.05, resetsAt: WA }),
+    rec(A, 'org_aaaa', at(30), 0.14, WA, 'rate-limit-event', { u: 0.05, resetsAt: WA }),
+    rec(A, 'org_aaaa', at(24), 0.16, WA, 'rate-limit-event', { u: 0.05, resetsAt: WA }),
+    rec(A, 'org_aaaa', at(18), 0.18, WA, 'rate-limit-event', { u: 0.05, resetsAt: WA }),
+    rec(A, 'org_aaaa', at(12), 0.50, WF, 'on-demand', { u: 0.98, resetsAt: WF }),          // ← the 02:23 panel: Member F's numbers, written on A
+    rec(A, 'org_aaaa', at(10), 0.50, WF, 'rate-limit-event', { u: 0.98, resetsAt: WF }),   // ← a 5h-only event re-anchored the carried-forward foreign 7d — NOT evidence
+  ]);
+  const mkOwn = (id, ident, W, n, fable) => stream(ident, Array.from({ length: n + 1 }, (_, i) => rec(id, ident, at(20 - i * 3), 0.2 + i * 0.02, W, i ? 'rate-limit-event' : 'on-demand', { u: fable, resetsAt: W })));
+  mkOwn(B, 'org_bbbb', WB, 4, 0.4); mkOwn(C, 'org_cccc', WC, 4, 0.3); mkOwn(F, 'org_ffff', WF, 3, 0.98); mkOwn(THIN, 'org_tttt', WT, 2, 0.1);
+  // the guard's archive: A's OWN readings refused against the polluted sidecar (+ one with an unvalidated slot, one rejection, one scoped)
+  const mm = (key, h, ev, slotOk = true) => JSON.stringify({ at: at(h), store: 'usage-cache', key, sid: 'sess-x', what: 'rate-limit-event:' + ev.kind, reason: 'window mismatch', matched: [], ownWindow: { sevenDay: WF, fiveHour: null, scoped: { fable: WF }, at: at(12), source: 'on-demand' }, entry: { ev, slot: { key, slotOk, slotReason: null, at: at(h) } } });
+  fs.writeFileSync(path.join(archive, 'readings-window-mismatch.ndjson'), [
+    mm(A, 6, { kind: 'sevenDay', rawType: 'seven_day', scopedName: null, status: 'allowed', utilization: 0.22, resetsAt: WA, overage: {} }),
+    mm(A, 5, { kind: 'sevenDay', rawType: 'seven_day', scopedName: null, status: 'rejected', utilization: null, resetsAt: WA, overage: {} }),         // a rejection is not a reading
+    mm(A, 4, { kind: 'sevenDay', rawType: 'seven_day', scopedName: null, status: 'allowed', utilization: 0.24, resetsAt: WA, overage: {} }),
+    mm(A, 3, { kind: 'sevenDay', rawType: 'seven_day', scopedName: null, status: 'allowed', utilization: 0.90, resetsAt: WA, overage: {} }, false), // an unvalidated slot is neither evidence nor re-admitted
+    mm(A, 2, { kind: 'sevenDay', rawType: 'seven_day', scopedName: null, status: 'allowed', utilization: 0.26, resetsAt: WA, overage: {} }),
+    mm(A, 1, { kind: 'scoped', rawType: 'seven_day_fable', scopedName: 'fable', status: 'allowed', utilization: 0.07, resetsAt: WA, overage: {} }),  // a scoped own reading: re-admitted on the same-phase rule
+  ].join('\n') + '\n');
+  const sidecar = (id, w) => fs.writeFileSync(path.join(cache, readingLag.windowSidecarName(id)), JSON.stringify(w));
+  sidecar(A, { sevenDay: WF, fiveHour: null, scoped: { fable: WF }, at: at(12), source: 'on-demand' });            // polluted by the foreign panel
+  sidecar(B, { sevenDay: WB, fiveHour: null, scoped: { fable: WB }, at: at(1), source: 'api', verifiedAt: at(1) }); // already API-anchored: the negative control
+  sidecar(C, { sevenDay: WC, fiveHour: null, scoped: { fable: WC }, at: at(1), source: 'on-demand' });             // agrees, but only a panel's word
+  sidecar(F, { sevenDay: WF, fiveHour: null, scoped: { fable: WF }, at: at(1), source: 'api', verifiedAt: at(1) });
+  sidecar(THIN, { sevenDay: WF, fiveHour: null, scoped: {}, at: at(1), source: 'on-demand' });                     // wrong, but the evidence is too thin to say so
+  const cacheOf = (u7, W, fable, extra) => JSON.stringify({ fetchedAt: at(1), source: 'rate-limit-event', fiveHour: { utilization: 0.2, resetsAt: nowSec + H }, sevenDay: { utilization: u7, resetsAt: W }, scopedWeekly: [{ name: 'Fable', utilization: fable, resetsAt: W }], ...extra });
+  // …A's cache also carries the ORG-LEVEL billing facts (final verifier): overage in use + a spend line — facts about the org, not readings
+  const OV_A = { inUse: true, status: 'allowed', asOf: nowMs - 3600e3, resetsAt: nowSec + 20 * 86400 }, SP_A = { used: 12.5, limit: 50, pct: 25 };
+  fs.writeFileSync(path.join(cache, A + '.json'), JSON.stringify({ fetchedAt: at(10), source: 'rate-limit-event', fiveHour: { utilization: 0.2, resetsAt: nowSec + H }, sevenDay: { utilization: 0.5, resetsAt: WF }, scopedWeekly: [{ name: 'Fable', utilization: 0.98, resetsAt: WF }], orgUuid: 'aaaa', orgEmail: 'userA@example.com', overage: OV_A, spend: SP_A }));
+  fs.writeFileSync(path.join(cache, B + '.json'), cacheOf(0.3, WB, 0.4, { orgUuid: 'bbbb' }));
+  fs.writeFileSync(path.join(cache, C + '.json'), cacheOf(0.3, WC, 0.3, { orgUuid: 'cccc' }));
+  fs.writeFileSync(path.join(cache, F + '.json'), cacheOf(0.5, WF, 0.98, { orgUuid: 'ffff' }));
+  fs.writeFileSync(path.join(cache, THIN + '.json'), cacheOf(0.5, WF, 0.1, { orgUuid: 'tttt' }));
+  const bytes = (fn) => fs.readFileSync(path.join(cache, fn), 'utf8');
+  const before = { B: bytes(B + '.json'), Bw: bytes(readingLag.windowSidecarName(B)), C: bytes(C + '.json'), F: bytes(F + '.json'), Fw: bytes(readingLag.windowSidecarName(F)), T: bytes(THIN + '.json'), Tw: bytes(readingLag.windowSidecarName(THIN)) };
+  const pa = readingLag.weeklyPhase(WA), pf = readingLag.weeklyPhase(WF);
+
+  const rep = repair.repairSidecarsByApiPhase({ dataDir, accounts, id: 'T' });
+  const row = (k) => rep.identities.find((r) => r.key === k);
+  ok('§20 Member A\'s API phase is established from the readings the API STATED (four 7d moves + three slot-verified archived readings), never from the carried-forward foreign 7d, the rejection or the unvalidated slot',
+    row(A) && row(A).apiPhase === pa && row(A).n === 7 && row(A).of === 7 && row(A).sources.changed === 4 && row(A).sources.archived === 3, JSON.stringify(row(A)));
+  const winA = JSON.parse(bytes(readingLag.windowSidecarName(A)));
+  ok('§20 …its sidecar — which carried Member F\'s phase — is RE-STAMPED to the API phase, source api, verifiedAt, every scoped bucket on the 7d phase',
+    row(A).sidecar === 'restamped' && row(A).sidecarWas === pf && winA.sevenDay === WA && winA.source === 'api' && winA.verifiedAt > 0 && winA.scoped.fable === WA && winA.n === 7, JSON.stringify(winA));
+  const apiwinA = JSON.parse(bytes(readingLag.apiWindowSidecarName(A)));
+  ok('§20 …and c1\'s live witness is written beside it, so the panel gate is armed from this boot', row(A).apiwin === 'stamped' && apiwinA.sevenDay === WA && apiwinA.source === 'repair');
+  const cA = JSON.parse(bytes(A + '.json'));
+  const fabA = (cA.scopedWeekly || []).find((s) => /fable/i.test(s.name));
+  ok('§20 …its cache — the foreign panel\'s 7d 50 % / Fable 98 % — is REPLACED: rebuilt from the newest wholly-agreeing anchor, then the archived own readings re-admitted in time order, ending on the newest (7d 26 %, Fable 7 %, its OWN window)',
+    row(A).cache === 'replaced' && row(A).readmitted === 4 && Math.abs(cA.sevenDay.utilization - 0.26) < 1e-9 && cA.sevenDay.resetsAt === WA && fabA && Math.abs(fabA.utilization - 0.07) < 1e-9 && fabA.resetsAt === WA && cA.fetchedAt === at(1) && cA.orgUuid === 'aaaa',
+    JSON.stringify({ row: row(A), sevenDay: cA.sevenDay, fabA, fetchedAt: cA.fetchedAt - at(1) }));
+  ok('§20 …never the foreign 98 %: no bucket of the rebuilt cache is in Member F\'s phase', !(cA.scopedWeekly || []).some((s) => readingLag.weeklyNear(s.resetsAt, WF) === true) && readingLag.weeklyNear(cA.sevenDay.resetsAt, WF) === false);
+  {
+    const SA = require(path.join(REPO, 'src/spend-authorizer.js'));
+    const ov = SA.overageState(cA, { now: nowMs });
+    const gate = SA.authorizeUnattendedSpend({ reason: 'auto-resume', identity: { key: A, name: 'Member A' }, state: SA.emptyBudget(), now: nowMs, overage: ov });
+    ok('§20 ORG FACTS SURVIVE THE REBUILD (final verifier): the replaced cache still carries `overage` (inUse, status, resetsAt, asOf) and `spend`, overageState reads in-use, and the spend authorizer still REFUSES an unattended turn on it — dropping them flipped every such turn from refuse to allow',
+      cA.overage && cA.overage.inUse === true && cA.overage.status === 'allowed' && cA.overage.resetsAt === OV_A.resetsAt && cA.overage.asOf === OV_A.asOf && cA.spend && cA.spend.used === 12.5 && cA.spend.limit === 50
+      && ov.inUse === 'yes' && ov.mode === 'inUse' && gate.ok === false && gate.why === 'overage-in-use', JSON.stringify({ ov: cA.overage, sp: cA.spend, st: ov.inUse, gate }));
+  }
+  ok('§20 the witness is NOT evidence for the repair that judges it (final verifier): apiPhaseFor tallies anchors and archived readings only, and a live-path row marked not-a-witness is skipped',
+    (() => { const r = repair.apiPhaseFor({ key: A, anchorRows: [], mismatchRows: [{ key: A, at: nowMs - 1000, what: 'rate-limit-event:sevenDay', entry: { ev: { kind: 'sevenDay', status: 'allowed', resetsAt: WA }, slot: { slotOk: true }, witness: { ok: false, why: 're-pointed' } } }], apiwin: { sevenDay: WF, at: nowMs } }); return r.top === null && r.total === 0 && r.sources.skipped === 1 && r.sources.live === undefined; })());
+  const arch = fs.readFileSync(path.join(archive, 'readings-foreign-usage-cache.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((x) => x.migration === 'T');
+  const byAct = (st, a) => arch.filter((x) => x.store === st && x.action === a);
+  ok('§20 ARCHIVE-NEVER-DESTROY: the old sidecar and the foreign snapshot are archived with a reason naming BOTH phases, and the re-admission is recorded',
+    byAct('window-sidecar', 'restamped').length === 1 && byAct('window-sidecar', 'restamped')[0].key === A && new RegExp(`phase ${pf}`).test(byAct('window-sidecar', 'restamped')[0].reason) && new RegExp(`phase ${pa}`).test(byAct('window-sidecar', 'restamped')[0].reason)
+    && byAct('usage-cache', 'replaced').length === 1 && byAct('usage-cache', 'replaced')[0].entry.sevenDay.utilization === 0.5 && /Member A/.test(byAct('usage-cache', 'replaced')[0].reason)
+    && byAct('usage-cache', 'readmitted').length === 1 && byAct('usage-cache', 'readmitted')[0].count === 4,
+    JSON.stringify(arch.map((x) => [x.store, x.action, x.key])));
+  ok('§20 NEGATIVE CONTROL: an account already anchored to its API phase is UNTOUCHED — cache and sidecar byte-identical (kept)',
+    row(B).sidecar === 'kept' && row(B).cache === 'kept' && bytes(B + '.json') === before.B && bytes(readingLag.windowSidecarName(B)) === before.Bw);
+  const winC = JSON.parse(bytes(readingLag.windowSidecarName(C)));
+  ok('§20 an agreeing sidecar that only a panel vouched for is CONFIRMED by the API (source api now, same phase), its cache untouched',
+    row(C).sidecar === 'confirmed' && winC.sevenDay === WC && winC.source === 'api' && winC.verifiedAt > 0 && bytes(C + '.json') === before.C);
+  ok('§20 the member whose panel polluted A keeps its OWN 98 % — same numbers, its own phase: kept, byte-identical',
+    row(F).sidecar === 'kept' && row(F).cache === 'kept' && bytes(F + '.json') === before.F && bytes(readingLag.windowSidecarName(F)) === before.Fw);
+  ok('§20 THIN EVIDENCE ESTABLISHES NOTHING: two moves are a coincidence — a sidecar that IS wrong is left alone and said (no-evidence), nothing written',
+    row(THIN).sidecar === 'no-evidence' && row(THIN).apiPhase === null && bytes(THIN + '.json') === before.T && bytes(readingLag.windowSidecarName(THIN)) === before.Tw && !fs.existsSync(path.join(cache, readingLag.apiWindowSidecarName(THIN))), JSON.stringify(row(THIN)));
+  ok('§20 the report counts every verdict', rep.counts.evidence === 4 && rep.counts.noEvidence === 1 && rep.counts.restamped === 1 && rep.counts.confirmed === 1 && rep.counts.kept === 2 && rep.counts.replaced === 1 && rep.counts.readmitted === 4 && rep.counts.emptied === 0, JSON.stringify(rep.counts));
+  const afterA = bytes(A + '.json'), afterAw = bytes(readingLag.windowSidecarName(A));
+  const rep2 = repair.repairSidecarsByApiPhase({ dataDir, accounts, id: 'T' });
+  ok('§20 IDEMPOTENT: a second run keeps everything (nothing re-stamped, replaced or re-admitted; the re-admitted readings are not newer than the file) — bytes identical',
+    rep2.counts.restamped === 0 && rep2.counts.confirmed === 0 && rep2.counts.replaced === 0 && rep2.counts.readmitted === 0 && rep2.counts.kept === 4 && bytes(A + '.json') === afterA && bytes(readingLag.windowSidecarName(A)) === afterAw, JSON.stringify(rep2.counts));
+  // no agreeing anchor at all ⇒ EMPTY with a reason, never a guess
+  {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-apiphase2-')); cleanup.push(d2);
+    const dd = path.join(d2, 'data');
+    for (const p of ['usage-anchors', 'usage-cache', 'archive']) fs.mkdirSync(path.join(dd, p), { recursive: true });
+    const rows = Array.from({ length: 4 }, (_, i) => rec(A, 'org_aaaa', at(20 - i * 3), 0.2 + i * 0.02, WA, i ? 'rate-limit-event' : 'on-demand', { u: 0.98, resetsAt: WF })); // every anchor carries a foreign Fable
+    fs.writeFileSync(path.join(dd, 'usage-anchors', 'anchors-org_aaaa.ndjson'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    fs.writeFileSync(path.join(dd, 'usage-cache', A + '.json'), JSON.stringify({ fetchedAt: at(1), source: 'on-demand', sevenDay: { utilization: 0.5, resetsAt: WF }, scopedWeekly: [{ name: 'Fable', utilization: 0.98, resetsAt: WF }], orgUuid: 'aaaa', overage: OV_A, spend: SP_A }));
+    const r = repair.repairSidecarsByApiPhase({ dataDir: dd, accounts: accounts.slice(0, 1), id: 'T2' });
+    const c = JSON.parse(fs.readFileSync(path.join(dd, 'usage-cache', A + '.json'), 'utf8'));
+    ok('§20 with NO anchor agreeing wholly (each carries a foreign Fable) the cache is EMPTIED with a reason — identity kept, no bucket, no fetchedAt — never rebuilt from a record that contradicts the account',
+      r.counts.emptied === 1 && r.counts.replaced === 0 && c.orgUuid === 'aaaa' && !c.sevenDay && !c.scopedWeekly && !c.fetchedAt && /no anchor of Member A agrees/.test(c.emptiedReason), JSON.stringify(c));
+    ok('§20 …and the EMPTIED remnant still carries the org facts (overage + spend) — an emptied reading is not an emptied bill', c.overage && c.overage.inUse === true && c.overage.status === 'allowed' && c.spend && c.spend.used === 12.5, JSON.stringify({ ov: c.overage, sp: c.spend }));
+  }
+  // the wiring pins: registered once, run at every boot after the one-shots, exported, routed
+  ok('§20 the migration is registered append-only with a dated id and says out loud what it did',
+    /id: '2026-09-repair-sidecars-by-api-phase'/.test(read('src/server/migrations.js')) && /\[migrate\] sidecars-by-api-phase:/.test(read('src/server/migrations.js')));
+  ok('§20 …and the SAME repair runs at every boot, after the one-shot registry (server.js), through the engine\'s one entry point',
+    (() => { const sv = read('server.js'); const i = sv.indexOf("repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.();"); return i > 0 && i > sv.indexOf('.runLocalMigrations();'); })() && /repairIdentityAnchors, \/\/ B-855a c2/.test(read('src/server/usage-pool-engine.js')) && /repairSidecarsByApiPhase\(\{ dataDir: path\.join\(rootDir, 'data'\), accounts: list, id: 'identity-repair:' \+ why \}\)/.test(read('src/server/usage-pool-engine.js')));
+  ok('§20 …the human-triggered route exists and hands the engine\'s entry point to setupUsage',
+    /app\.post\('\/api\/usage\/repair-identity'/.test(read('src/usage-routes.js')) && /repairIdentityAnchors\('manual'\)/.test(read('src/usage-routes.js')) && /establishedWindows, repairIdentityAnchors, probeUsageForAccountKey/.test(read('server.js')));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

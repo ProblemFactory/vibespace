@@ -141,7 +141,7 @@ fs.rmSync(dir, { recursive: true, force: true });
   // credentials produced it), so the pin allows the extra arguments while still
   // requiring the two resolvers and the same rejected/allowed split.
   ok(/const slot = ev\.status === 'rejected' \? rejectionSlotFor\(session\) : readingSlotFor\(session[^;]*\);/.test(eng), '⑥ rate_limit_event: rejection AND reading both resolve a credential slot (turn-pinned twins)');
-  ok(/const target = guardReadingTarget\(key, win, \{ session/.test(eng) && /if \(!target\) return;/.test(eng), '⑥ …and a READING is checked against the target\'s own established window before it is written (guardReadingTarget — the VALUE half)');
+  ok(/const target = guardReadingTarget\(key, win, \{ session/.test(eng) && /if \(!target\) \{[\s\S]{0,400}?\n\s*return;\n\s*\}/.test(eng), '⑥ …and a READING is checked against the target\'s own established window before it is written (guardReadingTarget — the VALUE half; an archived one feeds only the slot\'s witness ring, then returns)');
   // 2026-09-09 r2: a REJECTION is judged too, by its own rule. It cannot go
   // through `guardReadingTarget` (that one judges by the weekly window a
   // reading carries, and a rejection deliberately hands it no `win` at all) —
@@ -188,6 +188,24 @@ fs.rmSync(dir, { recursive: true, force: true });
   ok(rd2.ok && rd('sub-W').source === 'rate-limit-event', "⑧ the default label stays 'rate-limit-event' for real events");
   ok(/source: 'wall'/.test(fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8')), '⑧ WIRING: the engine\'s demotion passes source wall through captureRateLimitEvent (no second writer)');
   try { fs.rmSync(dir8, { recursive: true, force: true }); } catch { }
+}
+
+// ── B-ad05: a partial overage payload keeps the fields it does not restate ──
+// `{...stored, ...{status: undefined}}` wiped a 'rejected' to undefined, and a
+// record with no status + inUse:false is the shape that reads as usage
+// credits ALLOWED — so a disabled org could flip to "allowed" on the next
+// event that happened to omit its status.
+{
+  const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rle9-'));
+  const full = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', used_percentage: 10, overageStatus: 'rejected', overageDisabledReason: 'org_level_disabled_until', isUsingOverage: false } });
+  captureRateLimitEvent({ cacheDir: dir9, key: 'sub-Z', identityIds: ['sub-Z'], ev: full, now: 1000 });
+  const partial = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', used_percentage: 12, isUsingOverage: false } });
+  ok(partial.overage.status === undefined && partial.overage.inUse === false, 'B-ad05 control: the partial event states inUse only');
+  captureRateLimitEvent({ cacheDir: dir9, key: 'sub-Z', identityIds: ['sub-Z'], ev: partial, now: 2000 });
+  const c9 = JSON.parse(fs.readFileSync(path.join(dir9, 'sub-Z.json'), 'utf8'));
+  ok(c9.overage.status === 'rejected' && c9.overage.disabledReason === 'org_level_disabled_until' && c9.overage.inUse === false && c9.overage.asOf === 2000,
+    'B-ad05: a partial overage payload keeps the stored status/disabledReason (an absent field is not "allowed") and re-dates the record', JSON.stringify(c9.overage));
+  try { fs.rmSync(dir9, { recursive: true, force: true }); } catch { }
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

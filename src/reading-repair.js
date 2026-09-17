@@ -142,6 +142,17 @@ function backfillFromJournal(text, transitions) {
 // live in the object every reading producer rewrites. It has its own sidecar —
 // see windowSidecarName in src/reading-lag.js.
 const IDENTITY_FIELDS = ['orgUuid', 'orgName', 'orgEmail', 'email', 'name'];
+// ORG-LEVEL BILLING FACTS (final verifier, 2026-09-17): `overage` (the org's
+// extra-usage status — whether money is being spent NOW, whether the org
+// allows it) and `spend` are facts about the ORG, not readings keyed by a
+// window, and they are what the spend authorizer's ONLY overage refusal and
+// the pool's credits ranking read. A rebuild or an emptying that dropped them
+// flipped every unattended turn on an overage-billing account from REFUSE to
+// ALLOW until the next event restated it, and turned a usage-credits member
+// back into an ordinary candidate on the very boot that shipped the ranking.
+// Carried through every rebuild and every emptied remnant like the identity.
+const ORG_FIELDS = ['overage', 'spend'];
+function _carryOrgFacts(from, to) { for (const k of ORG_FIELDS) if (from && from[k] !== undefined) to[k] = from[k]; return to; }
 /** Rebuild a cache snapshot from a surviving anchor (a REAL past reading of
  *  this account, correctly dated) — identity fields are carried over because
  *  they are facts about WHO the account is, not readings.
@@ -156,6 +167,7 @@ const IDENTITY_FIELDS = ['orgUuid', 'orgName', 'orgEmail', 'email', 'name'];
 function _cacheFromAnchor(anchor, prev, window = null) {
   const out = {};
   for (const k of IDENTITY_FIELDS) if (prev && prev[k] !== undefined) out[k] = prev[k];
+  _carryOrgFacts(prev, out); // the org's billing facts are not readings — they survive the rebuild
   const b = anchor.buckets || {};
   const own = (name) => (window && window.scoped ? window.scoped[String(name || '').toLowerCase()] : null);
   const agrees = (resetsAt, phase) => !window || phase == null || !(Number(resetsAt) > 0) || weeklyNear(resetsAt, phase) !== false;
@@ -500,7 +512,7 @@ function findJournal(dataDir) {
 // phase, which would make every genuinely re-filable entry ambiguous.
 const MIN_OWN_READINGS = 5;   // fewer than this is a coincidence, not a window
 const OWN_DOMINANCE = 0.9;    // a stream whose own panel readings disagree with themselves establishes nothing
-const { weeklyNear, weeklyPhase, windowOf, windowFingerprint, windowSidecarName, decideReadingTarget } = require('./reading-lag.js');
+const { weeklyNear, weeklyPhase, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, decideReadingTarget } = require('./reading-lag.js');
 // The identity a usage-cache FILE belongs to, and the slug its anchor stream is
 // named with — both taken from the producer rather than re-spelled here (r5).
 const { identityKeyFor, anchorSlug } = require('./usage-anchors.js');
@@ -969,6 +981,7 @@ function repairCachesByWindow({ cacheDir, archiveDir, windows, accounts = null, 
       else {
         next = {};
         for (const f of IDENTITY_FIELDS) if (cur[f] !== undefined) next[f] = cur[f];
+        _carryOrgFacts(cur, next);
         next.repairedBy = id;
       }
     } else {
@@ -1136,4 +1149,223 @@ function repairByWindow({ dataDir, roster = null, accounts = null, id = 'reading
   return report;
 }
 
-module.exports = { repairReadings, deathMarkers, isForeign, backfillFromJournal, findJournal, repairUsageCaches, repairAnchors, repairAttribution, sessionKeysFor, _sessionKeyMap, repairByWindow, establishedWindows, identityCacheKeys, repairAnchorsByWindow, repairCachesByWindow, repairGlobalFile, _cacheFromAnchor, _recordAgreesWholly, _primaryDrops, MIN_OWN_READINGS, OWN_DOMINANCE };
+
+// ── ④ THE IDENTITY ANCHOR IS DERIVED FROM THE API (B-855a c2, 2026-09-17) ────
+// The established window (`.window-<key>`) is what the account's /usage PANEL
+// last stated — and B-855a showed that panel can be ANOTHER account's: the
+// probe took its org context from the machine-wide ~/.claude.json, which every
+// session's CLI rewrites. A foreign panel re-stamped the sidecar, and from then
+// on the account's OWN readings were refused by the live guard ("refusing to
+// write X a reading from another window — archived") with nothing that could
+// ever put it right (B-855a ②: the roster showed somebody else's usage, the
+// pool called the healthiest Fable member "Fable 2 % < 5 %"). The witness a
+// panel cannot fake is the weekly window the account's OWN API responses
+// state: a `rate_limit_event` filed on a slot-VALIDATED link. This STANDING
+// repair (boot, POST /api/usage/repair-identity, and the one-shot migration
+// row so the ledger says it ran) derives each roster account's API PHASE from
+// that evidence and makes the stores agree with it. The API phase WINS: a
+// sidecar it contradicts is re-stamped (`source:'api'`, `verifiedAt`), a cache
+// snapshot it contradicts is archived and rebuilt from the newest anchor that
+// agrees wholly, and the own readings the polluted sidecar refused are written
+// back through the ONE write path.
+//
+// EVIDENCE, and why each source is one (measured on this instance 2026-09-17):
+//   (a) an anchor written by the `rate-limit-event` producer whose 7-day bucket
+//       MOVED against the previous anchor of the same account. An anchor is a
+//       snapshot of the whole cache file and a five-hour-only event re-anchors
+//       whatever 7d the file already held — on the member the owner felt, 6 of
+//       its 12 `rate-limit-event` anchors of the day carried the foreign
+//       panel's 7d forward. Requiring the 7d to have moved keeps only values
+//       the API itself stated: every member then shows ONE phase at ≥ 95 %.
+//   (b) a reading the live guard ARCHIVED to readings-window-mismatch.ndjson
+//       with a validated slot (`entry.slot.slotOk`) — exactly the own readings
+//       a polluted sidecar refused (128 on that member), each naming the
+//       window the API counted it in.
+//   (c) the live `.apiwin-<key>` witness c1 writes, when present.
+// A phase needs ≥ API_PHASE_MIN_ROWS rows and ≥ API_PHASE_DOMINANCE of the
+// histogram (the ±120 s wobble merged by _tallyPhase); thinner or more split
+// evidence establishes nothing and the account is left alone, said.
+//
+// SCOPED BUCKETS ARE JUDGED ON THE 7d PHASE. The API states no `seven_day_fable`
+// (the storm essay's measured vocabulary), so the model cap has no API witness
+// of its own; but every identity's own Fable phase IS its own 7d phase (r4,
+// 7 of 7 clusters on this instance), so a scoped bucket agrees iff its reset is
+// in the 7d phase. The stamped sidecar spells that rule out per bucket name.
+const API_PHASE_MIN_ROWS = 3;
+const API_PHASE_DOMINANCE = 0.6;
+const API_PHASE_HORIZON_MS = 14 * 86400e3;   // two weekly cycles: a plan change moves the phase and older evidence must lose
+const READMIT_HORIZON_MS = 24 * 3600e3;      // the readings worth writing back — a day is the pool's whole decision horizon
+function _dominantAt(hist, minRows, dominance) {
+  const total = [...hist.values()].reduce((a, b) => a + b.n, 0);
+  if (!total) return null;
+  const [phase, top] = [...hist.entries()].sort((a, b) => b[1].n - a[1].n)[0];
+  if (top.n < minRows || top.n / total < dominance) return null;
+  return { phase, resetsAt: top.resetsAt, n: top.n, total };
+}
+function _readNdjson(f) {
+  const out = [];
+  let txt = ''; try { txt = fs.readFileSync(f, 'utf-8'); } catch { return out; }
+  for (const l of txt.split('\n')) { if (!l) continue; try { out.push(JSON.parse(l)); } catch { } }
+  return out;
+}
+/** The API phase of ONE account from the three evidence sources, or `top: null`. */
+function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, minRows = API_PHASE_MIN_ROWS, dominance = API_PHASE_DOMINANCE }) {
+  const hist = new Map();
+  // `.apiwin-` is NOT a source (final verifier): it is the witness this repair
+  // is judging, and counting it let one poisoned live entry vote for itself.
+  const sources = { changed: 0, archived: 0, skipped: 0 };
+  const mine = (anchorRows || []).filter((r) => r && (r.accountId || '__global__') === key).sort((a, b) => (a.fetchedAt || 0) - (b.fetchedAt || 0));
+  let prev = null;
+  for (const r of mine) {
+    const sd = r.buckets && r.buckets.sevenDay;
+    if (r.source === 'rate-limit-event' && sd && Number(sd.resetsAt) > 0 && prev && now - (r.fetchedAt || 0) <= horizonMs) {
+      const ps = prev.buckets && prev.buckets.sevenDay;
+      if (!ps || ps.u !== sd.u || ps.resetsAt !== sd.resetsAt) { _tallyPhase(hist, Number(sd.resetsAt), r.fetchedAt); sources.changed++; }
+    }
+    prev = r;
+  }
+  for (const x of (mismatchRows || [])) {
+    if (!x || x.key !== key || !/^rate-limit-event:sevenDay/.test(String(x.what || ''))) continue;
+    if (now - (x.at || 0) > horizonMs) continue;
+    const ev = x.entry && x.entry.ev, sl = x.entry && x.entry.slot, wt = x.entry && x.entry.witness;
+    if (!ev || ev.status === 'rejected' || !(Number(ev.resetsAt) > 0) || !sl || !sl.slotOk) continue;
+    // a row the live path judged NOT a witness (inside a re-point shadow, a
+    // pin older than a re-point, OTel disagreeing) is not evidence here either;
+    // a row written before the field existed is judged on `slotOk` as before
+    if (wt && wt.ok === false) { sources.skipped++; continue; }
+    _tallyPhase(hist, Number(ev.resetsAt), x.at); sources.archived++;
+  }
+  void apiwin;
+  const total = [...hist.values()].reduce((a, b) => a + b.n, 0);
+  return { top: _dominantAt(hist, minRows, dominance), sources, total };
+}
+
+/** THE standing identity repair. Same contract as the other two: archive,
+ *  never destroy; every archived row carries a reason; idempotent; atomic. */
+function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id = 'sidecars-by-api-phase', now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, readmitMs = READMIT_HORIZON_MS } = {}) {
+  const t0 = Date.now();
+  const cacheDir = path.join(dataDir, 'usage-cache');
+  const archiveDir = path.join(dataDir, 'archive');
+  const anchorRows = _readAnchorFiles(path.join(dataDir, 'usage-anchors')).flatMap((f) => f.rows);
+  const mismatchRows = _readNdjson(path.join(archiveDir, 'readings-window-mismatch.ndjson'));
+  const { captureRateLimitEvent } = require('./rate-limit-capture.js');
+  // WHO: the current roster's claude subscriptions — a pool holds no quota of
+  // its own, a codex login has a different producer, a removed account cannot
+  // receive a reading (the same three rules the by-window repair applies).
+  const rec = (k) => (accounts || []).find((a) => a && a.id === k) || null;
+  let ids = roster;
+  if (!ids && accounts) ids = accounts.filter((a) => a && a.id && a.type === 'subscription' && (a.backend || 'claude') === 'claude').map((a) => a.id);
+  ids = (ids || []).filter((k) => { const a = rec(k); return !a || (a.type === 'subscription' && (a.backend || 'claude') === 'claude'); });
+  const nameOf = (k) => (rec(k) && rec(k).name) || k;
+  const report = { id, at: now, ms: 0, identities: [], counts: { evidence: 0, noEvidence: 0, stamped: 0, restamped: 0, confirmed: 0, kept: 0, replaced: 0, emptied: 0, stripped: 0, readmitted: 0 } };
+  const archived = [];
+  for (const key of ids) {
+    const apiwinPath = path.join(cacheDir, apiWindowSidecarName(key));
+    const apiwin = _readJson(apiwinPath);
+    const ev = apiPhaseFor({ key, anchorRows, mismatchRows, apiwin, now, horizonMs });
+    const row = { key, name: nameOf(key), apiPhase: null, resetsAt: null, n: 0, of: ev.total, sources: ev.sources, sidecar: 'no-evidence', sidecarWas: null, apiwin: 'kept', cache: 'kept', readmitted: 0 };
+    report.identities.push(row);
+    if (!ev.top) { report.counts.noEvidence++; continue; }
+    report.counts.evidence++;
+    const api = ev.top.resetsAt;
+    row.apiPhase = ev.top.phase; row.resetsAt = api; row.n = ev.top.n;
+    const cacheFile = _usageWrite.cacheFileFor(cacheDir, key);
+    const cur = _readJson(cacheFile);
+    const sidecarPath = path.join(cacheDir, windowSidecarName(key));
+    const sc = _readJson(sidecarPath);
+    // every scoped bucket this account is known to hold is judged on the 7d phase
+    const names = new Set();
+    for (const n of Object.keys((sc && sc.scoped) || {})) names.add(String(n).toLowerCase());
+    for (const s of (cur && Array.isArray(cur.scopedWeekly) ? cur.scopedWeekly : [])) if (s && s.name) names.add(String(s.name).toLowerCase());
+    const judge = (extra = []) => { const scoped = {}; for (const n of [...names, ...extra]) if (n) scoped[String(n).toLowerCase()] = api; return { sevenDay: api, fiveHour: null, scoped }; };
+    const apiWindow = judge();
+    // ① THE SIDECAR — the identity anchor the live guard trusts
+    row.sidecarWas = sc && Number(sc.sevenDay) > 0 ? weeklyPhase(sc.sevenDay) : null;
+    const stamp = { ...apiWindow, at: now, source: 'api', verifiedAt: now, verifiedBy: 'rate-limit-events', scopedRule: 'same-phase-as-7d', n: ev.top.n, of: ev.total, seededBy: id };
+    if (!sc || !(Number(sc.sevenDay) > 0)) { _writeAtomic(sidecarPath, JSON.stringify(stamp)); row.sidecar = 'stamped'; report.counts.stamped++; }
+    else if (weeklyNear(sc.sevenDay, api) === false) {
+      archived.push({ migration: id, at: now, store: 'window-sidecar', key, action: 'restamped',
+        reason: `the established-window sidecar of ${nameOf(key)} carried weekly phase ${weeklyPhase(sc.sevenDay)} (${windowFingerprint(sc)}, source ${sc.source || 'unknown'}) — not this account's API-derived phase ${ev.top.phase} (${windowFingerprint(apiWindow)}; ${ev.top.n} of ${ev.total} slot-verified rate-limit readings); the /usage panel that stamped it answered for another account`,
+        entry: sc });
+      _writeAtomic(sidecarPath, JSON.stringify(stamp)); row.sidecar = 'restamped'; report.counts.restamped++;
+    } else if (sc.source !== 'api' || !sc.verifiedAt) { _writeAtomic(sidecarPath, JSON.stringify(stamp)); row.sidecar = 'confirmed'; report.counts.confirmed++; }
+    else { row.sidecar = 'kept'; report.counts.kept++; }
+    // …and c1's live witness, so the panel gate is armed from this boot on
+    if (!apiwin || !(Number(apiwin.sevenDay) > 0) || weeklyNear(apiwin.sevenDay, api) === false) {
+      // the live ring of candidates is carried (it is evidence the engine keeps, not a verdict)
+      _writeAtomic(apiwinPath, JSON.stringify({ sevenDay: api, scoped: {}, at: now, sessionId: null, source: 'repair', n: ev.top.n, of: ev.total, ring: Array.isArray(apiwin && apiwin.ring) ? apiwin.ring : [] }));
+      row.apiwin = apiwin ? 'restamped' : 'stamped';
+    }
+    // ② THE CACHE SNAPSHOT — what the roster row and the pool read
+    if (!cur) { row.cache = 'absent'; continue; }
+    const snap = windowOf(cur);
+    let next = null;
+    if (snap.sevenDay && weeklyNear(snap.sevenDay, api) === false) {
+      // the whole snapshot is another account's (the 02:23 panel) — rebuild
+      // from the newest anchor of THIS account that agrees wholly with the API
+      // window; the r4 preserve source is ONLY a scoped bucket PROVEN its own
+      // (dated and in phase) — an undated bucket riding a provably-foreign
+      // record is not carried
+      let best = null;
+      for (const r of anchorRows) {
+        if (!r || (r.accountId || '__global__') !== key) continue;
+        const rn = (Array.isArray(r.buckets && r.buckets.scopedWeekly) ? r.buckets.scopedWeekly : []).map((s) => s && s.name).filter(Boolean);
+        if (!_recordAgreesWholly(r, judge(rn))) continue;
+        if (!best || (r.fetchedAt || 0) > (best.fetchedAt || 0)) best = r;
+      }
+      const prevOwn = {};
+      for (const f of IDENTITY_FIELDS) if (cur[f] !== undefined) prevOwn[f] = cur[f];
+      _carryOrgFacts(cur, prevOwn);
+      prevOwn.scopedWeekly = (Array.isArray(cur.scopedWeekly) ? cur.scopedWeekly : []).filter((s) => s && s.name && Number(s.resetsAt) > 0 && weeklyNear(s.resetsAt, api) === true);
+      if (prevOwn.scopedWeekly.length && typeof cur.scopedFetchedAt === 'number') prevOwn.scopedFetchedAt = cur.scopedFetchedAt;
+      if (best) { next = _cacheFromAnchor(best, prevOwn, judge((best.buckets.scopedWeekly || []).map((s) => s && s.name).filter(Boolean))); row.cache = 'replaced'; report.counts.replaced++; }
+      else {
+        next = {};
+        for (const f of IDENTITY_FIELDS) if (cur[f] !== undefined) next[f] = cur[f];
+        _carryOrgFacts(cur, next);
+        next.emptiedReason = `no anchor of ${nameOf(key)} agrees with its API-derived window ${windowFingerprint(apiWindow)} — nothing here claims to be a reading until the account produces one`;
+        row.cache = 'emptied'; report.counts.emptied++;
+      }
+      next.repairedBy = id;
+      archived.push({ migration: id, at: now, store: 'usage-cache', key, action: row.cache,
+        reason: `snapshot weekly window ${windowFingerprint(snap)} (phase ${weeklyPhase(snap.sevenDay)}) contradicts ${nameOf(key)}'s API-derived window ${windowFingerprint(apiWindow)} (phase ${ev.top.phase}; ${ev.top.n} of ${ev.total} slot-verified rate-limit readings) — the /usage panel that wrote it answered for another account`,
+        entry: cur });
+    } else {
+      // the 7d agrees (or is absent) but a model-scoped bucket is in another phase: strip only that
+      const bad = (Array.isArray(cur.scopedWeekly) ? cur.scopedWeekly : []).filter((s) => s && Number(s.resetsAt) > 0 && weeklyNear(s.resetsAt, api) === false);
+      if (bad.length) {
+        archived.push({ migration: id, at: now, store: 'usage-cache', key, action: 'scoped-stripped',
+          reason: `model-scoped bucket(s) ${bad.map((s) => `${s.name}@${weeklyPhase(s.resetsAt)}`).join(', ')} are not ${nameOf(key)}'s (API-derived phase ${ev.top.phase}) — the pool reads scopedWeekly for accountRemaining/weeklyDeadline/bucketRems`,
+          entry: cur });
+        next = { ...cur, scopedWeekly: cur.scopedWeekly.filter((s) => !bad.includes(s)) };
+        if (!next.scopedWeekly.length) delete next.scopedFetchedAt;
+        next.repairedBy = id; row.cache = 'stripped'; report.counts.stripped += bad.length;
+      }
+    }
+    if (next) { delete next.ownWindow; _writeCacheAtomic(cacheDir, key, next); }
+    // ③ RE-ADMIT the own readings the polluted sidecar refused — only those
+    // newer than what the file now holds, in time order, through the SAME
+    // producer that would have written them (idempotent: the file's fetchedAt
+    // ends on the newest one, so a second run finds nothing newer)
+    const floor = Number((_readJson(cacheFile) || {}).fetchedAt) || 0;
+    const cands = mismatchRows.filter((x) => x && x.key === key && /^rate-limit-event:/.test(String(x.what || '')) && now - (x.at || 0) <= readmitMs && (x.at || 0) > floor)
+      .filter((x) => {
+        const e = x.entry && x.entry.ev, sl = x.entry && x.entry.slot;
+        if (!e || !sl || !sl.slotOk || e.status === 'rejected' || !(Number(e.resetsAt) > 0)) return false;
+        if (e.kind === 'sevenDay' || (e.kind === 'scoped' && e.scopedName)) return weeklyNear(e.resetsAt, api) === true;
+        return false;
+      })
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    for (const x of cands) {
+      const r = captureRateLimitEvent({ cacheDir, key, identityIds: [key], ev: x.entry.ev, now: x.at, source: 'rate-limit-event', familyOf: _familyOf });
+      if (r && r.ok && r.wroteReading) { row.readmitted++; report.counts.readmitted++; }
+    }
+    if (row.readmitted) archived.push({ migration: id, at: now, store: 'usage-cache', key, action: 'readmitted', count: row.readmitted, newest: cands[cands.length - 1].at,
+      reason: `${row.readmitted} slot-verified rate-limit reading(s) of the last ${Math.round(readmitMs / 3600e3)} h, archived by the guard against a sidecar that was not this account's, written back — their window is ${nameOf(key)}'s API-derived window ${windowFingerprint(apiWindow)}` });
+  }
+  _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived);
+  report.ms = Date.now() - t0;
+  return report;
+}
+
+module.exports = { repairReadings, deathMarkers, isForeign, backfillFromJournal, findJournal, repairUsageCaches, repairAnchors, repairAttribution, sessionKeysFor, _sessionKeyMap, repairByWindow, establishedWindows, identityCacheKeys, repairAnchorsByWindow, repairCachesByWindow, repairGlobalFile, _cacheFromAnchor, _recordAgreesWholly, _primaryDrops, MIN_OWN_READINGS, OWN_DOMINANCE, repairSidecarsByApiPhase, apiPhaseFor, API_PHASE_MIN_ROWS, API_PHASE_DOMINANCE, API_PHASE_HORIZON_MS, READMIT_HORIZON_MS, ORG_FIELDS };

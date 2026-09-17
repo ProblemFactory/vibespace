@@ -532,6 +532,46 @@ export function installManageAgents(App, ctx = {}) {
     else items.push({ label: t('Hot switch unavailable — every switch restarts the session'), disabled: true, action: () => {}, title: t('The Codex app-server keeps its login in memory, so a re-pointed login never reaches a running session (verified) — switches restart the conversation via resume.') });
     return items;
   },
+  // ── 'Exclude from pool “X”' (B-ad05): ONE click on the MEMBER's own ⋯ menu,
+  // one item per pool that lists it — the owner had to find the pool's
+  // Members… dialog to drop the credits member. An IMPLICIT pool (members:null
+  // = every subscription, incl. future ones) becomes an EXPLICIT list minus
+  // this one, and the toast says so (subscriptions added later no longer join
+  // it). Same refusals and same re-target handling as the Members… dialog.
+  _excludeFromPoolItems(a, allAccts, refresh) {
+    if (!a || a.type !== 'subscription' || a.pooled) return [];
+    const be = a.backend || 'claude';
+    const subs = (allAccts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === be && !x.pooled);
+    const pools = (allAccts || []).filter((p) => p.pooled && (p.backend || 'claude') === be
+      && (Array.isArray(p.members) && p.members.length ? p.members.includes(a.id) : true));
+    return pools.map((p) => ({
+      label: t('Exclude from pool “{pool}”', { pool: p.name }),
+      title: t('Removes “{name}” from the pool’s member list; conversations that picked it directly keep running on it.', { name: a.name }),
+      action: async () => {
+        const explicit = Array.isArray(p.members) && p.members.length > 0;
+        const members = (explicit ? p.members : subs.map((x) => x.id)).filter((id) => id !== a.id);
+        if (!members.length) { showToast(t('“{name}” is the pool’s only member — add another subscription first, or remove the pool.', { name: a.name }), { type: 'error', duration: 8000 }); return; }
+        if (!members.some((mid) => subs.find((x) => x.id === mid)?.loggedIn)) {
+          showToast(t('None of the selected members is signed in — the pool would keep billing its current (non-member) target. Sign one in first.'), { type: 'error', duration: 8000 }); return;
+        }
+        let r;
+        try {
+          r = await fetchJson('/api/accounts/pool/' + encodeURIComponent(p.id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members }) });
+          if (r?.error) { showToast(r.error, { type: 'error' }); return; }
+        } catch (e) { showToast(e?.message || t('Update failed'), { type: 'error' }); return; }
+        refresh?.();
+        showToast(t('Excluded “{name}” from pool “{pool}”', { name: a.name, pool: p.name })
+          + (explicit ? '' : ' — ' + t('the pool now lists its members explicitly (subscriptions added later no longer join it automatically)')), { duration: 7000 });
+        // narrowing away the current target re-points the pool IMMEDIATELY —
+        // the same consequences as the Members… dialog's save (review B1)
+        if (r?.retargeted) {
+          const effHot = p.hotSupported !== false && !!p.hot;
+          showToast(t('“{name}” now uses {target}', { name: p.name, target: r.retargeted.name || '?' }) + ((!effHot && r.affected?.length) ? ' — ' + t('restarting {n} conversation(s)…', { n: r.affected.length }) : ''), { duration: 6000 });
+          if (!effHot) for (const sess of (r.affected || [])) this._poolColdRestart(sess, p.id);
+        }
+      },
+    }));
+  },
   // "+ Add pooled account…" — ONE dialog for both rosters, wording per backend.
   // api() (not fetchJson): a 400 from createPool ("no logged-in … to pool")
   // used to toast "Pooled account created" and create nothing.
@@ -782,7 +822,11 @@ export function installManageAgents(App, ctx = {}) {
     // …and the harness's own refusal fact (§1.4's third field): nothing marks a
     // window spent for it, so this row's donuts stay the friendliest ones here.
     const scc = spendControlChip(spendControlState(u), { t });
-    const ovHtml = (ovc ? `<span class="acct-usage-overage" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>` : '')
+    // The DIM credits chip (B-ad05, kind 'credits') is NOT rendered here: a
+    // chip beside the donut cluster shifts that row's right edge (the 2.245.2
+    // alignment invariant test-roster-reset-eta measures), so it rides the
+    // row's identity tail instead — see creditsTag in the roster row.
+    const ovHtml = (ovc && ovc.kind !== 'credits' ? `<span class="acct-usage-overage" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>` : '')
       + (scc ? `<span class="acct-usage-overage" title="${escHtml(scc.tip)}">${escHtml(scc.label)}</span>` : '');
     return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span></span>${nextLabelHtml(next)}</span>${ovHtml}${mini}`;
   },
@@ -865,6 +909,7 @@ export function installManageAgents(App, ctx = {}) {
           return;
         }
         row.querySelector('.acct-refresh-err')?.remove();
+        row.querySelector('.acct-refresh-note')?.remove();
         const msg = msgOf();
         if (msg) {
           const err = document.createElement('span');
@@ -886,6 +931,22 @@ export function installManageAgents(App, ctx = {}) {
         else if (tg.body.account === '__global__') { u = this._rateLimit; est = this._usageEstimates?.__global__; }
         else { u = this._accountUsage?.[tg.body.account]; est = this._usageEstimates?.[tg.body.account]; }
         if (u) { cell.innerHTML = this._acctUsageHtml(u, est); markSoonRows(cell.closest('.acct-list')); }
+        // B-855a: which RUNG answered (the account's own isolated /usage panel
+        // or a live session's CLI) and whether the identity was VERIFIED —
+        // on the cell's tooltip always, as an inline note when it was not
+        if (r?.rung) {
+          const rungLabel = r.rung === 'control' ? t('a live session') : t('this account\u2019s own /usage panel');
+          const verified = r.identityVerified === true;
+          const head = verified ? t('Refreshed via {rung} · identity verified', { rung: rungLabel }) : t('Refreshed via {rung} · identity not verified', { rung: rungLabel });
+          cell.title = head + (r.why ? '\n' + r.why : '');
+          if (!verified) {
+            const note = document.createElement('span');
+            note.className = 'acct-refresh-note';
+            note.textContent = t('identity not verified');
+            note.title = head + (r.why ? '\n' + r.why : '');
+            (row.querySelector('.acct-key-main') || row).appendChild(note);
+          }
+        }
       };
       if (!targets.length) { showToast(t('Nothing to refresh — no signed-in accounts or machines'), { type: 'error' }); return; }
       const jobs = targets.map((tg, i) => (async () => {
@@ -1109,6 +1170,7 @@ export function installManageAgents(App, ctx = {}) {
         // the Anthropic roster uses (2.369.18)
         if (a?.pooled && !selectedHost) items.splice(0, 1, ...this._poolMenuItems(id, a, refresh));
         if (!a?.pooled && a?.loggedIn && (!a.email || a.emailDeclared)) items.push({ label: a.email ? t('edit email') : t('set email…'), action: doEmail });
+        if (!selectedHost) items.push(...this._excludeFromPoolItems(a, codexAccts, refresh)); // one click off a pool (B-ad05)
         items.push(...this._rulesAndChecksItems('codex', { accountId: id, accountName: a?.name || '', selectedHost }));
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
         showContextMenu(r.left, r.bottom + 4, items);
@@ -2009,6 +2071,29 @@ export function installManageAgents(App, ctx = {}) {
       // visible BEFORE a turn dies on it. Pools show their members' worst.
       const loginTag = (isSub || a.pooled) ? loginExpiryChipHtml(a, { local: !selectedHost }) : '';
       const isPool = !!a.pooled;
+      // ONE usage snapshot per row (the cell below and the credits tag read the
+      // same one). Usage source follows the VERDICT's how (2.245.0): a linked
+      // account runs on the host's own login (its quota IS the host quota); a
+      // host-held one has its own snapshot ('<host>:<id>', ⟳ Refresh all);
+      // ship/local read the local passive cache. A POOL row shows its current
+      // TARGET's usage (that's what the pool bills right now), dead-reckoned
+      // like any other row.
+      const rowSnap = (() => {
+        if (isPool) { const tid = a.current; const u = tid ? this._accountUsage?.[tid] : null; return u ? { u, est: this._usageEstimates?.[tid] } : null; }
+        if (!isSub) return null;
+        let u = null, estKey = null;
+        if (selectedHost && v?.how === 'host-login') u = this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null;
+        else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
+        else if (a.loggedIn || a.oat) { u = this._accountUsage?.[a.id]; estKey = a.id; }
+        return u ? { u, est: estKey ? this._usageEstimates?.[estKey] : null } : null;
+      })();
+      // USAGE CREDITS, VISIBLE BEFORE THEY ARE SPENT (B-ad05): the org bills
+      // pay-per-use past 100 % — a DIM tag on the identity line (inline, so it
+      // neither adds a row line nor shifts the donut cluster); the in-use chip
+      // stays in the usage cell as before. Same PURE rule as the popup.
+      const creditsChip = rowSnap ? overageChip(overageState(rowSnap.u), { t }) : null;
+      const creditsTag = creditsChip && creditsChip.kind === 'credits'
+        ? ` <span class="acct-linked-hint acct-usage-credits" title="${escHtml(creditsChip.tip)}">· ${escHtml(creditsChip.label)}</span>` : '';
       const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your subscriptions')
         : isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
@@ -2016,26 +2101,8 @@ export function installManageAgents(App, ctx = {}) {
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
-        <span class="acct-usage-cell">${(() => {
-          // Usage source follows the VERDICT's how (2.245.0): a linked account
-          // runs on the host's own login (its quota IS the host quota); a
-          // host-held one has its own snapshot ('<host>:<id>', ⟳ Refresh all);
-          // ship/local read the local passive cache. A POOL row shows its
-          // current TARGET's usage (that's what the pool bills right now),
-          // dead-reckoned like any other row.
-          if (isPool) {
-            const tid = a.current;
-            const u = tid ? this._accountUsage?.[tid] : null;
-            return u ? usageHtml(u, this._usageEstimates?.[tid]) : '';
-          }
-          if (!isSub) return '';
-          let u = null, estKey = null;
-          if (selectedHost && v?.how === 'host-login') u = this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null;
-          else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
-          else if (a.loggedIn || a.oat) { u = this._accountUsage?.[a.id]; estKey = a.id; }
-          return u ? usageHtml(u, estKey ? this._usageEstimates?.[estKey] : null) : '';
-        })()}</span>
+        <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}${creditsTag}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
+        <span class="acct-usage-cell">${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
@@ -2392,6 +2459,7 @@ export function installManageAgents(App, ctx = {}) {
             if (act != null) { copyText(r2.key); showToast(t('Copied')); }
           } catch { showToast(t('Could not read the key'), { type: 'error' }); }
         } });
+        if (!selectedHost) items.push(...this._excludeFromPoolItems(a, claudeAccts, refresh)); // one click off a pool (B-ad05)
         items.push(...this._rulesAndChecksItems('claude', { accountId: id, accountName: a?.name || '', selectedHost }));
         items.push({ separator: true }, { label: t('Remove account'), action: doDelete });
         showContextMenu(r.left, r.bottom + 4, items);

@@ -327,7 +327,7 @@ const OVERAGE_STALE_MS = 7 * 24 * 3600 * 1000;
 function overageState(cache, { now = Date.now(), staleMs = OVERAGE_STALE_MS } = {}) {
   const o = cache && typeof cache === 'object' ? cache.overage : null;
   if (!o || typeof o !== 'object') {
-    return { inUse: 'unknown', stated: 'unknown', evidence: 'none', ageMs: null, status: null, resetsAt: null, disabledReason: null, asOf: 0, spend: null };
+    return { inUse: 'unknown', stated: 'unknown', evidence: 'none', ageMs: null, mode: 'unknown', status: null, resetsAt: null, disabledReason: null, asOf: 0, spend: null };
   }
   const raw = o.inUse;
   const stated = raw === true ? 'yes' : raw === false ? 'no' : 'unknown';
@@ -344,11 +344,53 @@ function overageState(cache, { now = Date.now(), staleMs = OVERAGE_STALE_MS } = 
     else if (ageMs > staleMs) evidence = 'stale';
   } else evidence = stated === 'no' ? 'stated-off' : 'none';
   const inUse = stated === 'yes' && evidence !== 'fresh' ? 'unknown' : stated;
+  // THE THIRD STATE (B-ad05, 2026-09-17): an org whose extra usage is ENABLED
+  // but not (yet) in use. Measured on this instance: one member's record was
+  // `{inUse:false}` with no status while every other member carried
+  // `status:'rejected', disabledReason:'org_level_disabled…'` — and the pool
+  // idled every conversation on that one member for 14 h while its 5h/Fable
+  // read 100 %, served by credits and billed pay-per-use, with the chip hidden
+  // because `inUse` never turned true. `mode` names what the record says
+  // about the ORG, beside `inUse` (what it says about the present spend):
+  //   'inUse'    — the dated, fresh claim that money is being spent now
+  //   'disabled' — the vendor says overage is rejected / disabled for this org
+  //   'allowed'  — overage is present and NOT disabled: past 100 % this org
+  //                bills pay-per-use instead of stopping
+  //   'unknown'  — no record, or a record that states nothing either way
+  // An org-level configuration is not a claim about the present, so 'allowed'
+  // is NOT date-bounded (like `inUse:'no'`): it changes no spend verdict —
+  // only the pool's ranking and a dim chip read it.
+  const disabled = o.status === 'rejected' || !!o.disabledReason;
+  // 'allowed' NEEDS POSITIVE EVIDENCE (final verifier, 2026-09-17): the vendor
+  // omits `overageStatus` on a large share of events (39 of 125 in 72 h on
+  // this instance) and the pre-fix merge wiped stored statuses, so "inUse:false
+  // with no status" is ALSO the shape of an overage-DISABLED org whose record
+  // was rewritten by a status-less event — ranking it last and announcing
+  // "billing pay-per-use" would be a false sentence. Evidence = a status the
+  // vendor stated that is not a rejection, or money seen flowing recently
+  // (`inUse:true` whose period has ended, still inside the staleness bound).
+  // No status at all is 'unknown' — ignorance is not a claim (P6).
+  // …or a DATED claim that money once flowed (`inUse:true` whose period has
+  // ended or whose record went stale — an org that billed overage is an org
+  // that allows it; only an UNDATED claim proves nothing).
+  const statusAllows = o.status != null && String(o.status) !== '' && o.status !== 'rejected';
+  const usedBefore = stated === 'yes' && evidence !== 'undated';
+  const mode = inUse === 'yes' ? 'inUse' : disabled ? 'disabled' : (statusAllows || usedBefore) ? 'allowed' : 'unknown';
   return {
-    inUse, stated, evidence, ageMs,
+    inUse, stated, evidence, ageMs, mode,
     status: o.status ?? null, resetsAt,
     disabledReason: o.disabledReason ?? null, asOf, spend,
   };
+}
+
+/** PURE. Does this org have usage credits ENABLED and not in use — i.e. will
+ *  it keep serving past 100 % on pay-per-use billing instead of stopping?
+ *  The pool's ranking asks this (a credits-allowed member ranks below every
+ *  member with quota left and is a last-resort target only); the spend guard
+ *  does NOT (an unattended turn on it is refused only once overage is IN USE,
+ *  which is `inUse:'yes'`, unchanged). */
+function overageAllowed(cache, opts = undefined) {
+  return overageState(cache, opts).mode === 'allowed';
 }
 
 /** PURE. The one sentence every surface says about an overage-billing account
@@ -551,6 +593,6 @@ module.exports = {
   LOAD_RETENTION, RESERVE_TTL_MS, RESERVE_CAP,
   budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
-  overageState, overageText, spendControlState, spendControlText,
+  overageState, overageAllowed, overageText, spendControlState, spendControlText,
   authorizeUnattendedSpend, noteUnattendedSpend, refusalText, noticeText,
 };

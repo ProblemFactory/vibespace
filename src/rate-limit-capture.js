@@ -141,7 +141,15 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
       if ((Number(ev.resetsAt) || 0) > 0) { if (b.resetsAt !== ev.resetsAt) b = restated(b); b.resetsAt = ev.resetsAt; }
     }
     cache[ev.kind] = b;
-    if (ev.overage && Object.values(ev.overage).some((v) => v !== undefined)) cache.overage = { ...(cache.overage || {}), ...ev.overage, asOf: now };
+    if (ev.overage && Object.values(ev.overage).some((v) => v !== undefined)) {
+      // Merge only what this event STATES — an absent field is not a claim.
+      // A spread of `{status: undefined}` used to wipe a stored 'rejected' to
+      // undefined, and "no status + inUse:false" is exactly the shape that
+      // reads as usage credits ALLOWED (B-ad05, `overageState().mode`).
+      const o = { ...(cache.overage || {}) };
+      for (const [k, v] of Object.entries(ev.overage)) if (v !== undefined) o[k] = v;
+      cache.overage = { ...o, asOf: now };
+    }
     return cache;
   };
   // THE ONE WRITE PATH (src/usage-cache-write.js): this module still decides
