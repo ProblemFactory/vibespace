@@ -524,8 +524,8 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
 
   // the VERDICT the wall machine arms auto-resume from
   const vA = POOL.quotaVerdict(A, nowSec);
-  ok(vA.usable === false && vA.blockedUntil === 1789356983 * 1000,
-    `⑫ the verdict blocks until the PLAN window resets — auto-resume can never arm on a sliding reset (${JSON.stringify({ u: vA.usable, b: vA.blockedUntil })})`);
+  ok(vA.usable === false && vA.blockedUntil === (1789356983 + 60) * 1000 && vA.until && vA.until.resetsAt === 1789356983,
+    `⑫ the verdict blocks until the PLAN window resets (+ the one-minute landing grace, 2.369.117; \`until\` names the stated instant) — auto-resume can never arm on a sliding reset (${JSON.stringify({ u: vA.usable, b: vA.blockedUntil, until: vA.until })})`);
 
   // NEGATIVE CONTROL: strip the state stamps (the pre-fix world) and the same
   // caches hand the pool a nearer, fabricated deadline.
@@ -1157,7 +1157,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
       identity: 'rolled', fetchedAt: T0, source: 'codex-rate-limits',
       limits: [
         QM.makeLimit({ limitId: 'codex', scope: 'plan', fetchedAt: T0, windows: [{ kind: '5h', minutes: 300, usedPct: 50, resetsAt: nowC + 3000, measuredAt: T0 }] }),
-        QM.makeLimit({ limitId: 'codex_spark', name: 'Spark', scope: 'model', model: 'Spark', fetchedAt: T0, windows: [{ kind: '5h', minutes: 300, usedPct: 90, resetsAt: nowC - 60, measuredAt: T0 - 7200000 }] }),
+        QM.makeLimit({ limitId: 'codex_spark', name: 'Spark', scope: 'model', model: 'Spark', fetchedAt: T0, windows: [{ kind: '5h', minutes: 300, usedPct: 90, resetsAt: nowC - 120, measuredAt: T0 - 7200000 }] }),
       ],
     }));
     // The view is asked with the SAME clock as the accessor: "which window
@@ -1239,7 +1239,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
       ],
     });
     // The model window reads 90 % spent, but its reset PASSED ⇒ it is full.
-    const rolled = mk(50, nowD + 3000, 90, nowD - 60);
+    const rolled = mk(50, nowD + 3000, 90, nowD - 120);   // passed two minutes ago: LANDED (a stated reset counts only a minute after it, 2.369.117)
     const accD = QM.remaining(rolled, { nowSec: nowD });
     const poolD = POOL.accountRemaining(QM.toLegacyView(rolled, { nowSec: nowD }), nowD);
     ok(accD.remaining === 50 && poolD.remaining === 50,
@@ -1251,7 +1251,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // THE PLAN WINS EVERY TIE — this is ⑭'s invariant, and after ⑯c it depends
     // on the plan window being SEEDED rather than on iteration order. Every
     // window of a set read long after it was measured ties at 100.
-    const stale = mk(50, nowD - 600, 90, nowD - 60);
+    const stale = mk(50, nowD - 600, 90, nowD - 120);
     const vStale = QM.toLegacyView(stale, { nowSec: nowD });
     ok(vStale.fiveHour && vStale.fiveHour.utilization === 0.5,
       `⑯d when every 5h window has rolled over they TIE at 100 %, and the plan's is the one emitted (${JSON.stringify(vStale.fiveHour)})`);
