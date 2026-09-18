@@ -97,5 +97,31 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
     ok(d.includes("'Compact now'") && d.includes("'Cancel compaction?'") && d.includes('Click again to cancel the running compaction'), `${path.basename(f)} carries the new keys`);
   }
 }
+// ── 3. A COMPACTION RESOLVES THE CARDS BEFORE IT (inc-mu6btbfr-uaxg, owner:
+// "我compact之后还提示compact now，容易误会"): the live compact_end/success frame
+// only rewrote the hint while the button and the red title stayed, and a
+// rebuild / page-in rendered the card on the fallback guidance again. Pure
+// rule (which cards) + the renderer/view wiring that applies it on both
+// carriers (the live frame, the CLI's summary user record).
+{
+  const { ctxFullCardsToResolve, isCompactSummaryText } = await import(path.join(REPO, 'src/lib/chat-renderers.js'));
+  const T0 = Date.parse('2026-09-18T02:00:00Z');
+  const cards = [{ ts: T0 }, { ts: T0 + 60000, resolved: true }, { ts: T0 + 120000 }, { ts: null }, { ts: String(T0 + 300000) }];
+  ok(JSON.stringify(ctxFullCardsToResolve(cards)) === '[0,2,3,4]', 'no bound (the live compact_end/success frame): every unresolved card on screen, incl. a ts-less legacy element', JSON.stringify(ctxFullCardsToResolve(cards)));
+  ok(JSON.stringify(ctxFullCardsToResolve(cards, { upToTs: T0 + 200000 })) === '[0,2]', 'time-bounded (a summary record at +200s): only the cards whose record precedes it — the later card is about the context being full AGAIN and keeps its button', JSON.stringify(ctxFullCardsToResolve(cards, { upToTs: T0 + 200000 })));
+  ok(JSON.stringify(ctxFullCardsToResolve(cards, { upToTs: new Date(T0 + 200000).toISOString() })) === '[0,2]', 'the bound accepts an ISO string (the message ts shape)');
+  ok(JSON.stringify(ctxFullCardsToResolve(cards, { upToTs: T0 + 200000 })).indexOf('3') < 0, 'a ts-less card is NOT resolved by a bounded summary (its time is unknown — a guess either way)');
+  ok(ctxFullCardsToResolve([], { upToTs: T0 }).length === 0 && ctxFullCardsToResolve(null).length === 0, 'empty / null input → nothing');
+  ok(isCompactSummaryText('This session is being continued from a previous conversation that ran out of context. The summary…') && isCompactSummaryText('  This session is being continued from a previous conversation'), 'the summary predicate matches the CLI\'s first sentence (the same one turn preview keys on)');
+  ok(!isCompactSummaryText('Please continue from where you left off') && !isCompactSummaryText(''), 'ordinary prompts are not summaries (negative control)');
+  const cr = read('src/lib/chat-renderers.js'), cv = read('src/lib/chat-view.js'), css = read('public/chat.css');
+  ok(/if \(stage && stage\.event === 'compact_end' && stage\.result === 'success'\) this\.resolveContextFullCards\(\);/.test(cr), 'renderer: the live compact_end WITH the CLI\'s own success resolves every card on screen ("ended" is not "succeeded")');
+  ok(/for \(const el of this\._messageList\?\.querySelectorAll\?\.\('\.chat-ctx-full-hint'\) \|\| \[\]\) el\.textContent = hint;/.test(cr), 'renderer: the stage rewrite still reaches every card — a resolved card keeps reporting the CLI\'s outcome line (round-4 preserved, test-turn-truth-ui)');
+  ok(/resolveContextFullCards\(\{ upToTs = null, hint = null \} = \{\}\) \{/.test(cr) && /ctxFullCardsToResolve\(facts, \{ upToTs \}\)/.test(cr) && /c\.querySelector\('\.chat-ctx-compact-btn'\)\?\.remove\(\);/.test(cr), 'renderer: resolution goes through the PURE rule and removes the button');
+  ok(/isCompactSummaryText\(\(msg\.content \|\| \[\]\)\.map\(\(b\) => b\.text \|\| ''\)\.join\(''\)\)\) \{\s*\n\s*this\._renderers\.resolveContextFullCards\(\{ upToTs: msg\.ts, hint: t\('Compacted — the conversation fits the context window again\.'\) \}\);/.test(cv), 'view: the summary user record resolves the cards before it with the plain-words outcome — in _applyElementMarks, the ONE hook every element-creation path runs (rebuild, page-in, gap)');
+  ok(css.includes('.chat-ctx-full-resolved') && !/#[0-9a-fA-F]{3,6}\b/.test(css.slice(css.indexOf('.chat-ctx-full-resolved'), css.indexOf('.chat-ctx-full-resolved') + 400)), 'resolved style present, theme vars only');
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(read(f).includes("'Compacted — the conversation fits the context window again.'"), `${path.basename(f)} carries the outcome line`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

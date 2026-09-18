@@ -4,7 +4,7 @@ import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
-import { ChatRenderers, toolDisplayName, formatSleepRemaining } from './chat-renderers.js';
+import { ChatRenderers, toolDisplayName, formatSleepRemaining, isCompactSummaryText } from './chat-renderers.js';
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
@@ -174,6 +174,11 @@ class ChatView {
     // window in history.
     this._resumeSettleUntil = 0;
     this._pinnedAtSuspend = false;
+    // EVERY HIDER THAT IS HOLDING THIS VIEW OFF-SCREEN (inc-mu6bfv1t-4drq): the
+    // desktop model was the only one that suspended; mobile inactive windows,
+    // grouped-tab guests and minimized windows are display:none and never did.
+    // `_suspended` is derived from this set — see setHidden / src/lib/view-visibility.js.
+    this._hiddenReasons = new Set();
     // When the resume happened, and when the reader last POSITIONED the view
     // on purpose through a path that is not one of the message list's own
     // input listeners (minimap, search reveal, floating run bar, jump). The
@@ -2132,7 +2137,22 @@ class ChatView {
    *  the WINDOW; _notePositioning (wheel, touchmove, navigation keys, the
    *  scroll that follows a pointerdown = a scrollbar drag) and _noteUserNav
    *  are the only acts that drop the snapshot and the series. */
-  setSuspended(on) {
+  setSuspended(on) { this.setHidden('desktop', on); }
+
+  /** ONE hider says whether it is holding this view off-screen. The view is
+   *  suspended while ANY reason holds and resumes (settle window + pinned
+   *  re-tail, below) only when the LAST one clears — so a window that is both
+   *  on a hidden desktop and a hidden mobile tab does not resume when just one
+   *  of them lets go (inc-mu6bfv1t-4drq: mobile / tab / minimized are
+   *  display:none, which also zeroes scrollTop, and none of them suspended). */
+  setHidden(reason, on) {
+    const r = String(reason || 'desktop');
+    const set = this._hiddenReasons || (this._hiddenReasons = new Set());
+    if (on) set.add(r); else set.delete(r);
+    this._applySuspend(set.size > 0);
+  }
+
+  _applySuspend(on) {
     if (this._suspended === !!on) return;
     this._suspended = !!on;
     if (on) this._updateRunBar(0); // hidden window: no run bar (recomputed on resume)
@@ -3407,6 +3427,14 @@ class ChatView {
     if (!el) return;
     // ① retraction (§2.10) — the message model carries it (live op + rebuild)
     if (msg?.rewound) this._markRewoundEl(el, msg.rewound);
+    // ①b a COMPACTION SUMMARY retires every "Prompt is too long" card that
+    //    precedes it (inc-mu6btbfr-uaxg, owner: "compact 之后还提示 compact now"):
+    //    the guidance card is a record of the past the moment the CLI has
+    //    compacted, and a rebuild / page-in that renders the summary must say so
+    //    exactly like the live compact_end frame does (renderer-owned rule).
+    if (msg?.role === 'user' && this._renderers?.resolveContextFullCards && isCompactSummaryText((msg.content || []).map((b) => b.text || '').join(''))) {
+      this._renderers.resolveContextFullCards({ upToTs: msg.ts, hint: t('Compacted — the conversation fits the context window again.') });
+    }
     // ② the tool the harness says is EXECUTING (§2.5, set_in_progress_tool_use_ids).
     //    `_inFlightTools` is the resolved set, and for a long-running tool the
     //    next delta may never come — re-deriving is the only way the dot

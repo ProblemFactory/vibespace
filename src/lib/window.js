@@ -5,6 +5,7 @@ import { showWindowContextMenu } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
+import { HIDE_REASONS, hiddenReasons } from './view-visibility.js'; // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 
 class WindowManager {
   constructor(workspace) {
@@ -858,7 +859,7 @@ class WindowManager {
         if (intensity === 'subtle') host.element.classList.add('highlight-subtle');
         else if (intensity === 'strong') host.element.classList.add('highlight-strong');
       }
-      this.activeWindowId = id; this._notify();
+      this.activeWindowId = id; this.syncHiddenViews(); this._notify();
       return;
     }
     this.windows.forEach(w => w.element.classList.remove('window-active', 'highlight-subtle', 'highlight-strong'));
@@ -867,13 +868,47 @@ class WindowManager {
     const intensity = this._settings?.get('window.activeHighlightIntensity') ?? 'normal';
     if (intensity === 'subtle') win.element.classList.add('highlight-subtle');
     else if (intensity === 'strong') win.element.classList.add('highlight-strong');
-    this.activeWindowId = id; this._notify();
+    this.activeWindowId = id; this.syncHiddenViews(); this._notify();
     if (bounce && (this._settings?.get('window.enableBounceOnFocus') ?? false)) {
       win.element.classList.remove('window-bounce');
       requestAnimationFrame(() => win.element.classList.add('window-bounce'));
       setTimeout(() => win.element.classList.remove('window-bounce'), 300);
     }
   }
+  /** TELL EVERY CHAT VIEW WHICH HIDERS HOLD ITS WINDOW OFF-SCREEN (inc-mu6bfv1t-4drq,
+   *  owner: "每次手机上切对话都会滚到对话历史里"). The desktop model suspends a hidden
+   *  view (visibility:hidden, desktop-manager); the three display:none hiders
+   *  this manager owns — the mobile inactive window, a grouped guest's hidden
+   *  tab, a minimized window — never did, and display:none also ZEROES the
+   *  scroller's scrollTop: the view then read "scrolled to the top, no input",
+   *  unpinned, paged history in and trimmed the live tail (captured 3/3
+   *  windows). ONE derivation (src/lib/view-visibility.js) over the classes
+   *  this manager writes, called at every site that changes them (focus, tab
+   *  switch, minimize/restore, a view registering, the breakpoint flipping);
+   *  the view keeps a reason SET so the desktop hider and these compose. */
+  syncHiddenViews() {
+    const app = this._app; if (!app?.sessions) return;
+    if (!this._hideMq && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      try {
+        this._hideMq = window.matchMedia('(max-width: 768px)');
+        this._hideMq.addEventListener?.('change', () => this.syncHiddenViews());
+      } catch { this._hideMq = null; }
+    }
+    const mobile = !!this._hideMq?.matches;
+    for (const w of this.windows.values()) {
+      const sess = app.sessions.get(w.id);
+      if (!sess || typeof sess.setHidden !== 'function') continue;
+      const top = (w._tabChain && this.windows.get(w._tabChain.tabs[0])) || w; // a guest is displayed through its host
+      const reasons = hiddenReasons({
+        mobile,
+        active: !!top.element?.classList?.contains('window-active'),
+        tabHidden: !!w.content?.classList?.contains('tab-hidden'),
+        minimized: !!top.isMinimized,
+      });
+      for (const r of HIDE_REASONS) { try { sess.setHidden(r, reasons[r]); } catch { } }
+    }
+  }
+
   // Move mode: window attaches to cursor, click to place (for recovering off-screen windows)
   startMoveMode(id) {
     const win = this.windows.get(id); if (!win) return;
@@ -968,7 +1003,7 @@ class WindowManager {
       win = this.windows.get(win._tabChain.tabs[0]);
       if (!win) return;
     }
-    win.element.style.display='none'; win.isMinimized=true; this._notify(); this._scheduleOverlapUpdate();
+    win.element.style.display='none'; win.isMinimized=true; this.syncHiddenViews(); this._notify(); this._scheduleOverlapUpdate();
   }
   restore(id) {
     let win = this.windows.get(id); if (!win) return;

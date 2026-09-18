@@ -28,8 +28,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
-const { MessageManager } = require('../../message-manager');
-const { cwdToProjectDir } = require('../../session-store');
+const { MessageManager, peerDisplayName } = require('../../message-manager');
+const { cwdToProjectDir, findSessionJsonlPath } = require('../../session-store');
+const { feedPeerCard } = require('../../normalizers'); // the rebuild-gated peer-card writer (same gate as feedLive)
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
@@ -313,6 +314,61 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     // this handle (the wrapper meta's task map carries their ids); the
     // 10-min inactivity sweep bounds any stale entry it re-creates
     session._startSubagentWatcher = startSubagentWatcher;
+
+    /** THE EARLY CARRIER OF A HARNESS-DELIVERED PEER MESSAGE (inc-mu6bfv1t-4drq,
+     *  owner: "运维大师开始处理了但是 chatview 没展示这条消息存在"). When another
+     *  session's SendMessage wakes this one, stdout never carries the user
+     *  record with the sender's words (2.362.2 forensics) and the card was
+     *  mined from the terminal `result.origin` — at turn END. A 4-minute turn
+     *  therefore ran with the agent visibly answering nothing. But the CLI DOES
+     *  say something at turn START: `command_lifecycle {state:'started',
+     *  command_uuid}` — and that uuid IS the JSONL uuid of the user record the
+     *  CLI wrote ~13 ms after enqueue (measured on 2.1.274: command_uuid
+     *  38fa716a… = the JSONL user record 38fa716a… carrying origin.kind='peer').
+     *  So the record is looked up by uuid in the session's own transcript tail
+     *  (bounded: ≤512 KB, async, a few retries for the write racing the frame)
+     *  and, when it is a peer record with a body, the card is injected NOW
+     *  through the same rebuild-gated writer the delivery ladder uses; msg_id
+     *  makes the result rung and a device-fed copy dedup against it. A typed
+     *  prompt (no origin), a task-notification, or a server-posted body-less
+     *  origin is not this carrier's business — the lookup stops at the record.
+     *  Local sessions only: a remote host's transcript is not on this disk. */
+    const peerCmdSeen = new Set();
+    const PEER_CMD_RETRY_MS = [0, 150, 600, 2000];
+    const peerCommandCard = (cmdUuid) => {
+      if (peerCmdSeen.has(cmdUuid)) return;
+      peerCmdSeen.add(cmdUuid);
+      if (peerCmdSeen.size > 200) peerCmdSeen.delete(peerCmdSeen.values().next().value);
+      let attempt = 0;
+      const schedule = () => { if (attempt >= PEER_CMD_RETRY_MS.length) return; setTimeout(tryOnce, PEER_CMD_RETRY_MS[attempt++]); };
+      const tryOnce = () => {
+        if (!activeSessions.has(id) || !session.claudeSessionId) return;
+        let fp = null;
+        try { fp = findSessionJsonlPath(session.claudeSessionId, session.cwd); } catch { fp = null; }
+        if (!fp) return schedule();
+        (async () => {
+          const st = await fs.promises.stat(fp);
+          const start = Math.max(0, st.size - 512 * 1024);
+          const fh = await fs.promises.open(fp, 'r');
+          let txt;
+          try { const buf = Buffer.alloc(st.size - start); await fh.read(buf, 0, buf.length, start); txt = buf.toString('utf8'); } finally { await fh.close(); }
+          const needle = '"uuid":"' + cmdUuid + '"';
+          let rec = null;
+          for (const line of txt.split('\n')) {
+            if (!line.includes(needle)) continue;
+            try { const r = JSON.parse(line); if (r && r.uuid === cmdUuid) { rec = r; break; } } catch { }
+          }
+          if (!rec) return schedule();                       // not written yet — the write races the frame
+          if (rec.type !== 'user') return;
+          const o = rec.origin;
+          if (!o || o.kind !== 'peer' || typeof o.body !== 'string' || !o.body.trim()) return;
+          const c = rec.message?.content;
+          const text = typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => b?.text || '').join('\n') : '');
+          feedPeerCard(session, { fromName: peerDisplayName(o, text), text: o.body, msgId: o.msg_id || null });
+        })().catch(() => schedule());
+      };
+      schedule();
+    };
 
     /** RETIRE AN IN-FLIGHT COMPACTION (§2.11, round 6). `_streamingKind ===
      *  'compacting'` is a claim about RIGHT NOW, and the client mirrors it as a
@@ -1103,6 +1159,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // the attachment slightly after the result reaches stdout).
           // TURN BOUNDARY (2.369.0 wall machine): classifies walled/normal,
           // runs the per-turn pool eval, arms/disarms — one owner.
+          if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
           if (msg.type === 'result') { try { noteTurnEnd?.(session); } catch { } }
           // error results carry ban/credit/oauth text the retry path never
           // sees (the CLI gives up without a final api_retry record)

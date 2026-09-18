@@ -168,6 +168,7 @@ export const SUITES = [
   { name: 'test-peer-delivery', tier: 'fast' }, // peerDelivery registry lane: codex rpc-queue rung (real deliver.create + sidecar) + wiring pins
   { name: 'test-cli-usage-parse', tier: 'fast' },
   { name: 'test-account-relogin', tier: 'fast' },
+  { name: 'test-peer-command-card', tier: 'fast' }, // inc-mu6bfv1t-4drq: a harness-delivered peer message renders at turn START (command_lifecycle uuid → the JSONL record, real consumer + real normalizer, msg_id dedup against the result rung)
   { name: 'test-peer-msg-card', tier: 'fast' }, // peer message visible on the LIVE stream (result.origin mining + 3-site dedup) + the codex twin (injectPeerCard, webui_peer marker live/rebuild, marker-blind twin dedup, feedPeerCard no longer false for codex)
   { name: 'test-stdout-registry', tier: 'fast' }, // S5 stdout consumer registry: descriptor caps.streamProtocol → ONE consumer (src/server/stdout/); unknown protocol = loud console.error + telemetry + RAW passthrough (never stream-json); each consumer on a fake pty feeds representative records to its REAL normalizer + id adoption / streaming flag / _stdin_ack / todos / engine calls; wiring pins
   { name: 'test-account-pool', tier: 'fast' },
@@ -246,6 +247,7 @@ export const SUITES = [
   { name: 'test-discovery-interpret', tier: 'fast' },
   { name: 'test-discovery-spawn', tier: 'fast' }, // ZERO spawns per session in the local sweep (userW's 11-17s loop block after every create/kill): the /proc process-tree reads + their no-/proc rungs, the census over 50 locks + 50 live sessions, and master's own session-store as the negative control (101 spawns)
   { name: 'test-restore-smoke', tier: 'fast' }, // the end-to-end boot + session-lifecycle + 29-route GET battery (the lost-export class only shows at boot or route-run time). 8.9s measured: the most expensive thing the fast tier is willing to pay for
+  { name: 'test-hidden-view-suspend', tier: 'fast' }, // inc-mu6bfv1t-4drq: mobile / tab / minimized hiders suspend the ChatView like the desktop one (reason set + WindowManager.syncHiddenViews + wiring pins)
   { name: 'test-chat-trim-guard', tier: 'fast' }, // fold-dominated window trim guard (inc-mtajy6wr white-screen) pins
   { name: 'test-chat-e2e', tier: 'fast' }, // ONE real haiku turn through the full chat pipeline (oat token slot; SKIPs without ~/.config/vibespace/ci-oat)
   // LAST ON PURPOSE (2026-09-09): the standing sweep for test-fixture litter in

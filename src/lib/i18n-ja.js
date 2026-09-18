@@ -2784,6 +2784,7 @@ export default {
   'Stopping…': '停止中…',
   'Stopping the current turn…': '現在のターンを停止しています…',
   'Compact now': '今すぐ圧縮',
+  'Compacted — the conversation fits the context window again.': '圧縮済み — 会話は再びコンテキストウィンドウに収まります。',
   'The conversation no longer fits the model’s context window — every new message will fail the same way until it is compacted.': '会話がモデルのコンテキストウィンドウに収まらなくなりました。圧縮するまで新しいメッセージはすべて同じように失敗します。',
   'Compacting a large conversation takes 1–2 minutes — do not press Stop. If it answers “Conversation too long”, rewind a few messages in terminal mode (Esc Esc) and compact again.': '大きな会話の圧縮には 1〜2 分かかります。Stop を押さないでください。「Conversation too long」と返された場合は、ターミナルモード（Esc Esc）で数件巻き戻してから再度圧縮してください。',
   '{n} page(s) published from this session — click to view or request a design': 'このセッションから {n} ページを公開済み — クリックして表示またはデザインを依頼',

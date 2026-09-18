@@ -376,7 +376,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         if (taskId) this.sidebar?._registerPendingTaskBind?.(msg.sessionId, taskId);
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
-          this.sessions.set(winInfo.id, chatView);
+          this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
           // Commanded-at-spawn effort (the CLI never reports effort back, so
           // the commanded value is the display source — same as the server's
           // attach-time merge). On a RESUME the client deliberately commands
@@ -700,7 +700,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         pending.remove();
         if (msg.mode === 'chat' || isChat) {
           const chatView = new ChatView(winInfo, this.ws, serverId, this);
-          this.sessions.set(winInfo.id, chatView);
+          this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
           if (msg.messages?.length) {
             // The attach payload IS the meta (2.368.4): this hand-copied key
             // list silently dropped outputStyle/autoResume/streamingKind — the
@@ -1468,7 +1468,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   _viewIntoWindow(winInfo, { backend = 'claude', backendSessionId, cwd, name, hostId, subagentView = false } = {}) {
     const viewId = backend === 'claude' ? `view-${backendSessionId}` : `view-${backend}-${backendSessionId}`;
     const chatView = new ChatView(winInfo, this.ws, viewId, this, { readOnly: true, subagentView });
-    this.sessions.set(winInfo.id, chatView);
+    this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
     const hostName = this._hostLabel(hostId);
     // For a REMOTE session the server first pulls the transcript over ssh
     // (seconds, up to the 15s ssh budget) — the pane used to be BLANK for all
@@ -1640,7 +1640,7 @@ function replayViewSubagent(app, spec, { syncId } = {}) {
     }),
   });
   const view = new ChatView(winInfo, app.ws, spec.virtualId, app, { readOnly: true });
-  app.sessions.set(winInfo.id, view);
+  app.sessions.set(winInfo.id, view); app.wm.syncHiddenViews?.(); // (inc-mu6bfv1t-4drq)
   app.ws.send({
     type: 'attach',
     sessionId: spec.virtualId,

@@ -251,9 +251,15 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text }) {
+  injectPeerCard({ fromName, text, msgId = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
+    // A harness-delivered message carries the CLI's msg_id (the turn-start
+    // lookup, inc-mu6bfv1t-4drq): note it so the result-rung mining and a
+    // device-fed JSONL copy of the same record dedup against THIS card, and
+    // never render twice when the feed already did.
+    if (msgId && this._peerMsgIds.has(msgId)) return null;
+    this._notePeerMsgId(msgId);
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
     this._currentTs = Date.now();
     this.turnIndex++;
@@ -851,6 +857,7 @@ class MessageManager {
         const m = this.messages[i];
         if (m.role === 'user' && (m.content || []).map((b) => b.text || '').join('') === text) return;
       }
+      if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
       this.turnIndex++;
       const msg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
       if (a.origin?.kind === 'peer') {
@@ -1090,6 +1097,10 @@ class MessageManager {
         return;
       }
 
+      // A peer record whose msg_id is already on screen (the turn-start card,
+      // inc-mu6bfv1t-4drq; or the device stream filling a gap the parse already
+      // rendered) is the SAME message — never a second card.
+      if (raw.origin?.kind === 'peer' && raw.origin.msg_id && this._peerMsgIds.has(raw.origin.msg_id)) return;
       this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });

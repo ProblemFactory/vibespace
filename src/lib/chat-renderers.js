@@ -125,6 +125,36 @@ const agentModelChip = (model) => (model ? `<span class="chat-agent-model">${esc
 // a tiff/heic Read returns image blocks the browser cannot draw.
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i;
 export function isImagePath(fp) { return !!fp && IMAGE_EXT_RE.test(String(fp)); }
+
+// ── COMPACTION RESOLVES THE "PROMPT IS TOO LONG" CARDS BEFORE IT ─────────────
+// (inc-mu6btbfr-uaxg, owner: "我compact之后还提示compact now，容易误会"). The
+// guidance card offers `Compact now`, and after the compaction SUCCEEDED the
+// live frame only rewrote the sentence under the button while the button (and
+// the red title) stayed; a rebuild / page-in rendered the card on the fallback
+// guidance again, button and all. Two carriers say a compaction happened, so
+// two callers resolve: the live `compact_end result:'success'` frame (every
+// card on screen is older than it) and the CLI's own summary user record —
+// the one turn preview already recognises by its first sentence — which on a
+// rebuild or a page-in resolves the cards whose record precedes it in TIME
+// (a card that came AFTER a compaction is about the context being full again
+// and must keep its button — the rule is pure so that edge is tested).
+const COMPACT_SUMMARY_PREFIX = 'This session is being continued from a previous conversation';
+export function isCompactSummaryText(text) { return String(text || '').trimStart().startsWith(COMPACT_SUMMARY_PREFIX); }
+/** PURE: which cards to resolve. `cards` = [{ts, resolved}] in DOM order; a
+ *  card with no ts (a legacy element) resolves only when NO bound is given
+ *  (the live frame) — time-bounding a card whose time is unknown would guess. */
+export function ctxFullCardsToResolve(cards, { upToTs = null } = {}) {
+  const toMs = (v) => (v == null || v === '' ? NaN : typeof v === 'number' ? v : (Number(v) || Date.parse(v)));
+  const bound = toMs(upToTs);
+  const out = [];
+  (cards || []).forEach((c, i) => {
+    if (!c || c.resolved) return;
+    if (Number.isNaN(bound)) { out.push(i); return; }          // no bound: everything on screen
+    const ts = toMs(c.ts);
+    if (!Number.isNaN(ts) && ts <= bound) out.push(i);          // strictly the past of the summary
+  });
+  return out;
+}
 export function imageRawUrl(fp, host) {
   return `/api/file/raw?path=${encodeURIComponent(fp)}${host ? `&host=${encodeURIComponent(host)}` : ''}`;
 }
@@ -1453,6 +1483,33 @@ class ChatRenderers {
     this._compactStage = stage || null;
     const hint = this.compactHintText();
     for (const el of this._messageList?.querySelectorAll?.('.chat-ctx-full-hint') || []) el.textContent = hint;
+    // A SUCCESSFUL end retires every card on screen — they are all older than
+    // this compaction (inc-mu6btbfr-uaxg): the button goes, the card dims, and
+    // the hint keeps saying what the stage says ("Compaction finished." — the
+    // round-4 outcome line; a later stage still rewrites it, a card that
+    // watched two compactions reports the last). "Ended" without the CLI's own
+    // success is not that: nothing was compacted, the button still applies.
+    if (stage && stage.event === 'compact_end' && stage.result === 'success') this.resolveContextFullCards();
+  }
+
+  /** Retire the "Prompt is too long" cards a compaction has answered: the
+   *  button goes (the action no longer applies) and the card dims. `upToTs` =
+   *  the compaction summary's record time (rebuild / page-in) and then the
+   *  hint slot states the outcome in plain words (no stage record ever reached
+   *  this view); no bound = the live compact_end frame, whose stage line the
+   *  setCompactStage rewrite already wrote. Rule: ctxFullCardsToResolve. */
+  resolveContextFullCards({ upToTs = null, hint = null } = {}) {
+    const cards = [...(this._messageList?.querySelectorAll?.('.chat-ctx-full') || [])];
+    const facts = cards.map((c) => ({ ts: c.closest?.('.chat-msg')?.dataset?.ts ?? null, resolved: c.classList.contains('chat-ctx-full-resolved') }));
+    let n = 0;
+    for (const i of ctxFullCardsToResolve(facts, { upToTs })) {
+      const c = cards[i];
+      c.classList.add('chat-ctx-full-resolved');
+      c.querySelector('.chat-ctx-compact-btn')?.remove();
+      if (hint) { const h = c.querySelector('.chat-ctx-full-hint'); if (h) h.textContent = hint; }
+      n++;
+    }
+    return n;
   }
 
   /** THE guidance sentence: what the card says when there is no compaction to

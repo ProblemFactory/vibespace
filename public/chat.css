@@ -723,6 +723,10 @@
 }
 .chat-ctx-compact-btn:hover { filter: brightness(1.1); }
 .chat-ctx-compact-btn:disabled { opacity: .5; cursor: default; }
+/* a card a later compaction answered (inc-mu6btbfr-uaxg): no action, muted title, the outcome in the hint slot */
+.chat-ctx-full-resolved { opacity: .72; }
+.chat-ctx-full-resolved .chat-ctx-full-title { color: var(--text-secondary); text-decoration: line-through; text-decoration-color: var(--border); }
+.chat-ctx-full-resolved .chat-ctx-full-help { display: none; }
 .chat-shortcut-hint {
   font-size: 9px; color: var(--text-dim); text-align: center; white-space: nowrap;
 }

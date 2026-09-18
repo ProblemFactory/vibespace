@@ -129,7 +129,7 @@ ok('the sentinel IntersectionObserver goes through _loadEarlierGap as an AUTOMAT
 ok('an explicit RETRY click bypasses the gate (auto: false — a click is intent)', /_loadEarlierGap\(markerEl, btn, \{ auto: false \}\)/.test(sk));
 ok('the scroll/wheel-driven _maybeSeekEarlier is an automatic caller too', /_maybeSeekEarlier\(\) \{[\s\S]{0,700}_loadEarlierGap\(s, null\);\s*\/\/ AUTOMATIC/.test(sk));
 ok('setSuspended(false) arms the resume settle window — WITH the re-tail timer\'s slack, so nothing can decide in the gap between the window expiring and the re-tail running',
-  /setSuspended\(on\) \{[\s\S]{0,900}this\._resumeAt = Date\.now\(\);\s*this\._resumeSettleUntil = this\._resumeAt \+ RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS;/.test(cv)
+  /_applySuspend\(on\) \{[\s\S]{0,900}this\._resumeAt = Date\.now\(\);\s*this\._resumeSettleUntil = this\._resumeAt \+ RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS;/.test(cv) // 2.369.112: the body lives in _applySuspend (setSuspended = the desktop reason of the hidden set, test-hidden-view-suspend)
   && /const RESUME_RETAIL_SLACK_MS = 40;/.test(cv));
 ok('…and the pinned re-tail is a BOUNDED SERIES, not a one-shot cliff (round-2: an input-less displacement at resume+1400ms still stranded the window 3/3 — +1240/+1280 only survived on _forceScrollToBottom\'s 10-frame chain)',
   /const RESUME_RETAIL_AT_MS = \[RESUME_SETTLE_MS \+ RESUME_RETAIL_SLACK_MS, 2000\];/.test(cv)

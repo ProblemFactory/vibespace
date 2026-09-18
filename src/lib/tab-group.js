@@ -296,6 +296,7 @@ const tabGroupMethods = {
     const tabs = hostWin.titleBar.querySelectorAll('.tab-item');
     tabs.forEach((t, i) => t.classList.toggle('active', i === index));
     this.activeWindowId = chain.tabs[index];
+    this.syncHiddenViews?.(); // the guest's content just flipped display (inc-mu6bfv1t-4drq)
     requestAnimationFrame(() => { if (newWin && newWin.onResize) newWin.onResize(); });
     this._notify();
   },
