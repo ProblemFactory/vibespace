@@ -124,14 +124,18 @@ const nextLabelHtml = (next) => next
   : '<span class="acct-usage-next"></span>';
 /** Mark the SOON_ROWS rows of `list` whose countdown is smallest (fewer rows
  *  carrying one ⇒ mark what exists; none ⇒ nothing marked). Re-titles each
- *  label so the highlighted ones say why. Exported for the smoke. */
+ *  label so the highlighted ones say why. A POOL row is never a candidate
+ *  (2026-09-18, owner: "你会把池账号也算作即将刷新的账号然后 highlight"): its
+ *  countdown is its current TARGET's, so counting it spends one of the two
+ *  slots on a member that is already listed — the pool keeps its label, the
+ *  member row is the one that lights up. Exported for the smoke. */
 export function markSoonRows(list, now = Date.now()) {
   if (!list) return;
   const rows = [...list.querySelectorAll('.acct-key-row')].map((row) => {
     const lbl = row.querySelector('.acct-usage-next[data-next-ms]');
-    return { row, lbl, next: lbl ? nextFromEl(lbl, now) : null };
+    return { row, lbl, next: lbl ? nextFromEl(lbl, now) : null, pooled: row.dataset?.pooled === '1' };
   });
-  const soon = new Set(rows.filter((r) => r.next?.text).sort((a, b) => a.next.ms - b.next.ms).slice(0, SOON_ROWS).map((r) => r.row));
+  const soon = new Set(rows.filter((r) => r.next?.text && !r.pooled).sort((a, b) => a.next.ms - b.next.ms).slice(0, SOON_ROWS).map((r) => r.row));
   for (const { row, lbl, next } of rows) {
     const isSoon = soon.has(row);
     row.classList.toggle('usage-acct-soon', isSoon);
@@ -1044,7 +1048,7 @@ export function installManageAgents(App, ctx = {}) {
         ? (a.current && this._codexAccountUsage?.[a.current] ? this._acctUsageHtml(this._codexAccountUsage[a.current], this._usageEstimates?.[a.current]) : '')
         : a.loggedIn ? usageHtml(this._codexAccountUsage?.[a.id]) : '';
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
-      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}>
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
         <span class="acct-usage-cell">${usageCell}</span>
@@ -2099,7 +2103,7 @@ export function installManageAgents(App, ctx = {}) {
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
       // email/Remove live in the menu (four inline buttons crushed every row,
       // modal AND panel; real screenshot report). Star stays direct: most-used.
-      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}>
+      return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}${creditsTag}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
         <span class="acct-usage-cell">${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
