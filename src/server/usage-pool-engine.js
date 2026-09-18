@@ -1160,9 +1160,35 @@ function apiWitnessEligibility(session, slot, key, corr = null) {
     if (row) return { ok: false, why: `re-pointed ${nameOf(row.from)} → ${nameOf(row.to)} ${Math.round((now - row.at) / 1000)}s ago` };
     const pin = session && session._turnReadingSlot;
     if (pin && pin.at && lastRepointRow(session, { at: now, minAt: pin.at })) return { ok: false, why: 'the turn pin predates a re-point' };
-    if (corr && corr.agree === false) return { ok: false, why: `OTel observed ${nameOf(corr.observed)} while the slot says ${nameOf(key)}` };
-    return { ok: true, why: 'slot-verified' };
+    // THE OTel LEG IS SPAWN-TIME IDENTITY (inc-mu6djxxt-8166): the CLI reports
+    // the org it cached at spawn for the life of the process, so for a
+    // conversation the pool has HOT-SWITCHED since spawn a disagreement is the
+    // switch itself, not evidence about this reading — vetoing on it kept a
+    // member that only ever hosted switched sessions from ever filling its ring
+    // (no witness ⇒ its polluted legacy anchor could never heal, every true
+    // reading archived). A never-switched session's OTel IS its identity, and
+    // a disagreement there still vetoes; the shadow / re-point / pin legs above
+    // keep covering the in-flight reading of a fresh switch.
+    if (corr && corr.agree === false && !switchedSinceSpawn(session, now)) return { ok: false, why: `OTel observed ${nameOf(corr.observed)} while the slot says ${nameOf(key)}` };
+    return { ok: true, why: corr && corr.agree === false ? 'slot-verified (OTel disagreement is the spawn-time identity of a hot-switched session)' : 'slot-verified' };
   } catch (e) { return { ok: false, why: 'eligibility check failed: ' + (e && e.message) }; }
+}
+/** Has the pool re-pointed THIS conversation at any time since its CLI was
+ *  spawned? Memoised per session for a minute (the ledger scan back to the
+ *  spawn is bounded by the session's age, and a reading storm asks this ~20×
+ *  a turn). A session outside a pool, or one with no spawn time, is never
+ *  "switched". */
+const _switchedSince = new WeakMap();
+function switchedSinceSpawn(session, now = Date.now()) {
+  try {
+    if (!session || typeof session !== 'object') return false;
+    const memo = _switchedSince.get(session);
+    if (memo && now - memo.at < 60e3) return memo.val;
+    const born = Number(session.createdAt) || 0;
+    const val = born > 0 ? !!lastRepointRow(session, { at: now, minAt: born }) : false;
+    _switchedSince.set(session, { at: now, val });
+    return val;
+  } catch { return false; }
 }
 // ── THE STANDING IDENTITY REPAIR (B-855a c2, 2026-09-17) ────────────────────
 // Runs at boot (after the one-shot migrations, server.js) and on the human-

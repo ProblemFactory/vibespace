@@ -313,8 +313,39 @@ function decideReadingTarget({ key, readingWindow, windows = {}, groupOf = null,
  *  it and stays byte-identical. */
 function apiWindowSidecarName(key) { return '.apiwin-' + String(key).replace(/[^\w.-]/g, '_'); }
 
+/** MAY THE ISOLATED PANEL (RE)ANCHOR THE ACCOUNT'S WINDOW? (inc-mu6djxxt-8166,
+ *  2026-09-18, owner: "5h限额刷新不出来了"). The anchor every reading is judged
+ *  against was, for one member, a stamp the PRE-c1 panel left at 00:53Z — the
+ *  producer B-855a proved answers for other accounts — naming a weekly reset
+ *  the vendor never gave this member. Its API witness ring never filled (every
+ *  session it hosted had been hot-switched, so the spawn-time OTel identity
+ *  vetoed every candidate), the standing repair saw "no evidence" and kept the
+ *  stamp, the isolated panel was "unverified" (nothing to compare against) and
+ *  so never re-stamped — and every live reading of the member's TRUE window
+ *  was archived as foreign. A dead end by construction: no producer was
+ *  allowed to correct the one stamp that was wrong.
+ *  Under an isolated CLAUDE_CONFIG_DIR the panel can no longer answer for
+ *  another account (measured, 2.369.110) — the creds dir IS the account. So
+ *  when there is NO API-derived witness to disagree with, the isolated panel
+ *  outranks a LEGACY anchor (a stamp with no `verifiedBy`): absent ⇒ stamp,
+ *  legacy-and-differs ⇒ re-anchor (the old one archived with a reason),
+ *  legacy-and-agrees ⇒ upgrade the mark. A verified anchor (an API run or an
+ *  org/phase-verified panel) is never touched here, and an API witness always
+ *  governs (the panel's own identity verdict already refused a differ). */
+function isolatedPanelAnchorVerdict({ anchor = null, panelWindow = null, apiWindow = null, jitterSec = JITTER_SEC } = {}) {
+  const win = panelWindow && panelWindow.scoped ? panelWindow : windowOf(panelWindow);
+  if (!win || (!win.sevenDay && !Object.keys(win.scoped || {}).length)) return { action: 'keep', reason: 'the panel states no weekly window' };
+  if (apiWindow) return { action: 'keep', reason: 'an API-derived witness governs this account' };
+  if (!anchor) return { action: 'stamp', reason: 'no established window yet — the isolated panel establishes it' };
+  if (anchor.verifiedBy) return { action: 'keep', reason: `the anchor is verified (${anchor.verifiedBy}) — only an API run may move it` };
+  const cmp = compareWindows(win, anchor, { jitterSec });
+  if (cmp === 'differ') return { action: 'reanchor', reason: `legacy anchor ${windowFingerprint(anchor)} (unverified, stamped ${anchor.source || '?'}) contradicts the isolated panel's ${windowFingerprint(win)} — re-anchored from the panel` };
+  if (cmp === 'agree') return { action: 'upgrade', reason: 'legacy anchor agrees with the isolated panel — marked verified' };
+  return { action: 'keep', reason: 'no weekly phase to compare' };
+}
+
 module.exports = {
   WEEK_SEC, JITTER_SEC, SHADOW_MS,
   weeklyPhase, weeklyNear, windowOf, windowFingerprint, windowSidecarName, apiWindowSidecarName, compareWindows,
-  decideLagShadow, decideReadingTarget,
+  decideLagShadow, decideReadingTarget, isolatedPanelAnchorVerdict,
 };

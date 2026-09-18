@@ -729,8 +729,33 @@ async function refreshViaCliPanel(key) {
       if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {
         usageWrite.writeSidecar(USAGE_CACHE_DIR, windowSidecarName(key), { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : 'api-phase' });
         probeRec.sidecar = 'stamped';
-      } else if (w.sevenDay) {
-        probeRec.sidecar = 'not-stamped (identity unverified)';
+      } else if (w.sevenDay || Object.keys(w.scoped).length) {
+        // …UNLESS THE ONLY ANCHOR IS A LEGACY STAMP (inc-mu6djxxt-8166): with no
+        // API-derived witness at all, a stamp the pre-c1 panel left (no
+        // `verifiedBy`) is the weakest evidence on the instance — the isolated
+        // panel (the creds dir IS the account under CLAUDE_CONFIG_DIR isolation)
+        // establishes, re-anchors or upgrades it; a verified anchor and an API
+        // witness are never touched here (PURE: reading-lag isolatedPanelAnchorVerdict).
+        let anchor = null;
+        try { anchor = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, windowSidecarName(key)), 'utf-8')); } catch { anchor = null; }
+        const { isolatedPanelAnchorVerdict, windowFingerprint } = require('./reading-lag.js');
+        const v = (idv && !idv.refused) ? isolatedPanelAnchorVerdict({ anchor, panelWindow: w, apiWindow: idv.apiWindow || null }) : { action: 'keep', reason: 'refused' };
+        if (v.action === 'stamp' || v.action === 'reanchor' || v.action === 'upgrade') {
+          const stamp = { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: 'isolated-panel', provisional: true };
+          if (v.action === 'reanchor') {
+            console.log(`[usage] window re-anchored: ${acctNameOf(key)}'s weekly window is ${windowFingerprint(w)} per its isolated /usage panel — the legacy anchor ${windowFingerprint(anchor)} (stamped ${anchor && anchor.at ? new Date(anchor.at).toISOString() : '?'} by the pre-isolation panel, never verified) is archived; readings of the true window were being refused as foreign`);
+            global.__vsEvent?.('usage-window-reanchored', `${key}:legacy→isolated-panel`);
+            try {
+              const f = path.join(path.dirname(USAGE_CACHE_DIR), 'archive', 'readings-foreign-usage-cache.ndjson');
+              fs.mkdirSync(path.dirname(f), { recursive: true });
+              fs.appendFileSync(f, JSON.stringify({ migration: 'legacy-anchor-reanchored', at: Date.now(), store: 'window-sidecar', key, action: 'reanchored', reason: v.reason, was: anchor, now: stamp }) + '\n');
+            } catch { }
+          }
+          usageWrite.writeSidecar(USAGE_CACHE_DIR, windowSidecarName(key), stamp);
+          probeRec.sidecar = `${v.action} (${v.reason})`;
+        } else {
+          probeRec.sidecar = `not-stamped (identity unverified; ${v.reason})`;
+        }
       }
     } catch { }
     delete merged.limits; // the canonical half is the write path's to compute, never inherited from `prev`
@@ -959,11 +984,19 @@ app.post('/api/usage/refresh', async (req, res) => {
       const viaSession = await probeUsageForAccountKey(key, { detailed: true });
       const parsedVia = viaSession && typeof viaSession === 'object' && ('parsed' in viaSession) ? viaSession.parsed : viaSession;
       if (viaSession && Array.isArray(viaSession.skipped)) skipped = viaSession.skipped;
-      if (parsedVia) {
+      // AN ANSWER THE GUARD ARCHIVED IS NOT A REFRESH (inc-mu6djxxt-8166, owner:
+      // "5h限额刷新不出来了"): the session answered, the window guard refused to
+      // write it (target null), and this route used to say `success` and stop —
+      // nothing on screen changed. A refused rung is a SKIPPED rung: listed with
+      // its reason, and the ⟳ falls to the isolated panel exactly as it does for
+      // a session the engine would not ask.
+      const viaWritten = parsedVia && !(viaSession && typeof viaSession === 'object' && 'target' in viaSession && !viaSession.target);
+      if (viaWritten) {
         _onDemandUsageAt[key] = Date.now();
         wakePool(key, 'manual refresh (session)');
         return res.json({ success: true, via: 'session', rung: 'control', identityVerified: !!viaSession.identityVerified, why: viaSession.why || null, sessionId: viaSession.sessionId || null, skipped });
       }
+      if (parsedVia) skipped.push({ sessionId: (viaSession && viaSession.sessionId) || null, why: `answered, but the window guard archived the reading (${(viaSession && viaSession.why) || 'window mismatch'}) — falling to the isolated panel` });
     } catch { /* fall through to the bare call */ }
   }
   const isGlobal = key === '__global__';
