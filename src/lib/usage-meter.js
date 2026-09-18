@@ -190,6 +190,10 @@ export function installUsageMeter(App, ctx = {}) {
   },
 
   _renderUsage() {
+    // the roster rows (rail Agents panel / Manage Agents dialog) repaint from
+    // the same fresh maps — they used to sit on their open-time numbers
+    // (2026-09-18, manage-agents.js _repaintRosterUsage)
+    try { this._repaintRosterUsage?.(); } catch { }
     const usageEl = document.getElementById('taskbar-usage');
     const popup = document.getElementById('usage-popup');
     // Which Claude account the pies show: by default ('auto') they follow the

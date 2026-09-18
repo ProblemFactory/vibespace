@@ -265,6 +265,30 @@ try {
   const back = await until(async () => { const r = await evalJs(ROWS(LOCAL)); const dd = r && byId(r, AD.id); return dd && /^(39|40)m$/.test(dd.next?.text || '') && dd.soon && byId(r, A.id)?.soon && !byId(r, AE.id)?.soon ? r : null; }, 20000, 300);
   check('a repaint restores D\'s label and the D/A highlight from the data (a passed countdown is blank only until the next render)', !!back, back && back.map((r) => [r.name, r.next?.text, r.soon]));
 
+  // ── §1d LIVE UPDATE (2026-09-18, owner: "agents 侧边栏的内容不会实时更新，得重新打开一次才能看到最新的"):
+  // the roster used to paint its usage cells once at render; the usage meter's 8 s poll now repaints
+  // them in place (manage-agents.js _repaintRosterUsage). Proof on the RENDERED roster: A's 5h moves
+  // on disk (the shape of a statusline / rate-limit write; /api/usage re-reads the directory per call)
+  // and the open panel shows it without a reopen or a ⟳.
+  console.log('§1d the open roster repaints from the usage poll — no reopen, no ⟳');
+  {
+    const before = byId(await evalJs(ROWS(LOCAL)), A.id);
+    const aFile = path.join(cacheDir, A.id + '.json');
+    const cur = JSON.parse(fs.readFileSync(aFile, 'utf8'));
+    cur.fiveHour = { ...cur.fiveHour, utilization: 0.77 }; cur.fetchedAt = Date.now();
+    fs.writeFileSync(aFile, JSON.stringify(cur));
+    const live = await until(async () => { const r = await evalJs(ROWS(LOCAL)); const aa = r && byId(r, A.id); return aa && /: 77%/.test(aa.cols?.[0]?.tip || '') ? r : null; }, 25000, 500);
+    check(`A's 5h donut moved 42 → 77 % on the OPEN roster within the poll interval (before: "${String(before?.cols?.[0]?.tip || '').slice(0, 24)}")`, !!live, live ? byId(live, A.id).cols.map((x) => x.tip) : 'no repaint within 25 s');
+    if (live) {
+      const aa = byId(live, A.id);
+      check('…the repaint kept the row\'s shape: three donut columns, the cluster\'s right edge (±1px) and the label cell', aa.cols.length === 3 && Math.abs(aa.clusterRight - before.clusterRight) <= 1 && !!aa.next?.present, [aa.cols.length, aa.clusterRight, before.clusterRight]);
+    }
+    // restore A for the later legs and wait for the roster to show it again
+    cur.fiveHour.utilization = 0.42; cur.fetchedAt = Date.now(); fs.writeFileSync(aFile, JSON.stringify(cur));
+    const restored = await until(async () => { const r = await evalJs(ROWS(LOCAL)); const aa = r && byId(r, A.id); return aa && /: 42%/.test(aa.cols?.[0]?.tip || '') ? r : null; }, 25000, 500);
+    check('…and moves back when the disk does (the poll is the source, not a one-shot)', !!restored);
+  }
+
   // ── the ≤340px pill: the tightest bucket's percentage + ITS compact eta ──
   console.log('§2 below 340px the pill shows the tightest bucket and its countdown');
   await evalJs(`(() => { app.sidebar.el.style.width = '384px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);

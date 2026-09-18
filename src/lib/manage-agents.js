@@ -157,8 +157,52 @@ export function retickNextLabels(root, now = Date.now()) {
 }
 const NEXT_TICK_MS = 30 * 1000;
 
+/** WHICH SNAPSHOT A ROSTER USAGE CELL SHOWS, resolved from the stamp the render
+ *  left on it (PURE, exported for the gate). `maps` = the usage meter's tables:
+ *  {accounts, hostOwn, hostAccounts, codex, rateLimit, estimates}. Returns
+ *  {u, est} or null when the maps cannot answer — a cell whose source has no
+ *  snapshot right now keeps its last paint (the poll never blanks a row). */
+export function rosterUsageSnapshot(stamp, maps) {
+  const src = stamp && stamp.usageSrc, key = stamp && stamp.usageKey;
+  if (!src) return null;
+  const m = maps || {};
+  let u = null, est = null;
+  if (src === 'accounts') { u = m.accounts?.[key] || null; est = m.estimates?.[key] || null; }
+  else if (src === 'global') { u = m.rateLimit || null; est = m.estimates?.__global__ || null; }
+  else if (src === 'host-own') { const h = m.hostOwn?.[key]; u = h && h.fiveHour ? h : null; }
+  else if (src === 'host-account') { u = m.hostAccounts?.[key] || null; }
+  else if (src === 'codex') { u = m.codex?.[key] || null; est = m.estimates?.[key] || null; }
+  return u ? { u, est } : null;
+}
+
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
+  /** REPAINT EVERY MOUNTED ROSTER USAGE CELL FROM THE CURRENT MAPS (2026-09-18,
+   *  owner: "agents 侧边栏的内容不会实时更新，有时候我开着来看用量信息，结果一直不更新得重新
+   *  打开一次"). The rail's Agents panel and the Manage Agents dialog paint their
+   *  rows ONCE at render and again only on a ⟳ click, while the usage meter's
+   *  8 s poll refreshed the taskbar pies and the popup — the roster sat on
+   *  its open-time numbers for as long as it stayed open. Called from
+   *  `_renderUsage` (every poll and every popup refresh): each cell resolves
+   *  its own snapshot from the stamp the render left on it, the html is
+   *  replaced only when it changed (no churn, tooltips and inline errors on
+   *  the row survive), and the two-soonest highlight is re-derived per list.
+   *  Returns the number of cells repainted. */
+  _repaintRosterUsage() {
+    let cells;
+    try { cells = (typeof document !== 'undefined' && document.querySelectorAll) ? document.querySelectorAll('.acct-usage-cell[data-usage-src]') : []; } catch { return 0; }
+    if (!cells || !cells.length) return 0;
+    const maps = { accounts: this._accountUsage, hostOwn: this._hostOwnUsage, hostAccounts: this._hostAccountUsage, codex: this._codexAccountUsage, rateLimit: this._rateLimit, estimates: this._usageEstimates };
+    let n = 0; const lists = new Set();
+    for (const cell of cells) {
+      const snap = rosterUsageSnapshot(cell.dataset, maps);
+      if (!snap) continue;
+      const html = this._acctUsageHtml(snap.u, snap.est);
+      if (cell.innerHTML !== html) { cell.innerHTML = html; n++; const list = cell.closest && cell.closest('.acct-list'); if (list) lists.add(list); }
+    }
+    for (const list of lists) markSoonRows(list);
+    return n;
+  },
   /**
    * THE READ-ONLY "rules & checks" MENU BLOCK (owner rulings 10 + 6), shared
    * by both account rosters so the two never drift.
@@ -1005,7 +1049,7 @@ export function installManageAgents(App, ctx = {}) {
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
-      <span class="acct-usage-cell">${!selectedHost && gLoggedIn ? usageHtml(this._codexAccountUsage?.['__global_codex__']) : ''}</span>
+      <span class="acct-usage-cell"${!selectedHost && gLoggedIn ? ' data-usage-src="codex" data-usage-key="__global_codex__"' : ''}>${!selectedHost && gLoggedIn ? usageHtml(this._codexAccountUsage?.['__global_codex__']) : ''}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
@@ -1051,7 +1095,7 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span>
-        <span class="acct-usage-cell">${usageCell}</span>
+        <span class="acct-usage-cell"${isPool ? (a.current ? ` data-usage-src="codex" data-usage-key="${escHtml(a.current)}"` : '') : (a.loggedIn ? ` data-usage-src="codex" data-usage-key="${escHtml(a.id)}"` : '')}>${usageCell}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
@@ -1967,7 +2011,7 @@ export function installManageAgents(App, ctx = {}) {
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span>
-      <span class="acct-usage-cell">${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit, this._usageEstimates?.__global__)
+      <span class="acct-usage-cell"${!selectedHost && sub.loggedIn ? ' data-usage-src="global" data-usage-key="__global__"' : (selectedHost ? ` data-usage-src="host-own" data-usage-key="${escHtml(selectedHost)}"` : '')}>${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit, this._usageEstimates?.__global__)
         : (selectedHost && this._hostOwnUsage?.[selectedHost]?.fiveHour ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
@@ -2091,6 +2135,15 @@ export function installManageAgents(App, ctx = {}) {
         else if (a.loggedIn || a.oat) { u = this._accountUsage?.[a.id]; estKey = a.id; }
         return u ? { u, est: estKey ? this._usageEstimates?.[estKey] : null } : null;
       })();
+      // WHERE THIS CELL'S NUMBERS COME FROM, stamped on the cell so the 8 s usage
+      // poll can repaint it in place (2026-09-18, owner: "agents 侧边栏的内容不会
+      // 实时更新") — the same decision the snapshot above made, as data.
+      const usageStamp = isPool ? (a.current ? { src: 'accounts', key: a.current } : null)
+        : !isSub ? null
+        : (selectedHost && v?.how === 'host-login') ? { src: 'host-own', key: selectedHost }
+        : (selectedHost && v?.how === 'host-held') ? { src: 'host-account', key: selectedHost + ':' + a.id }
+        : (a.loggedIn || a.oat) ? { src: 'accounts', key: a.id } : null;
+      const usageStampAttrs = usageStamp ? ` data-usage-src="${usageStamp.src}" data-usage-key="${escHtml(usageStamp.key)}"` : '';
       // USAGE CREDITS, VISIBLE BEFORE THEY ARE SPENT (B-ad05): the org bills
       // pay-per-use past 100 % — a DIM tag on the identity line (inline, so it
       // neither adds a row line nor shifts the donut cluster); the in-use chip
@@ -2106,7 +2159,7 @@ export function installManageAgents(App, ctx = {}) {
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
         <span class="acct-key-main"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}${creditsTag}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
-        <span class="acct-usage-cell">${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
+        <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
           <button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>
