@@ -11,8 +11,10 @@
 // and the ⟳ route answered `success` for a reading it had just archived.
 // Three fixes, each pinned here on the real modules:
 //   ① reading-lag isolatedPanelAnchorVerdict (PURE) + usage-routes: with no API
-//      witness, the isolated panel establishes / re-anchors / upgrades a LEGACY
-//      anchor, archives the old one, never touches a verified one
+//      witness, the isolated panel re-anchors / upgrades a LEGACY anchor (a stamp
+//      with no verifiedBy), archives the old one, never touches a verified one —
+//      and never ESTABLISHES an absent one (the c2 rule: an unverified panel may
+//      not define who an account is; the API witness does)
 //   ② the ⟳ route: a control reading the guard archived is a SKIPPED rung —
 //      the route falls to the isolated panel instead of saying success
 //   ③ apiWitnessEligibility: OTel disagreement vetoes only a session the pool
@@ -39,7 +41,7 @@ console.log('§1 isolatedPanelAnchorVerdict');
   const panel = { sevenDay: T, fiveHour: T - 14400, scoped: { fable: T } };
   const v = RL.isolatedPanelAnchorVerdict({ anchor: LEGACY, panelWindow: panel, apiWindow: null });
   ok('THE INCIDENT: a legacy anchor (no verifiedBy) that contradicts the isolated panel, no API witness ⇒ reanchor, reason names both windows', v.action === 'reanchor' && /legacy anchor 7d:1789920000/.test(v.reason) && /1789930800/.test(v.reason), JSON.stringify(v));
-  ok('no anchor at all ⇒ stamp (the isolated panel establishes it)', RL.isolatedPanelAnchorVerdict({ anchor: null, panelWindow: panel }).action === 'stamp');
+  ok('no anchor at all ⇒ KEEP — an unverified panel never defines who an account is; the API witness establishes a fresh member (the c2 rule, test-readings-attribution §19 ⑦)', RL.isolatedPanelAnchorVerdict({ anchor: null, panelWindow: panel }).action === 'keep');
   ok('a legacy anchor that AGREES ⇒ upgrade (marked verified, nothing moves)', RL.isolatedPanelAnchorVerdict({ anchor: { ...LEGACY, sevenDay: T, scoped: { fable: T } }, panelWindow: panel }).action === 'upgrade');
   ok('NEGATIVE CONTROL: a VERIFIED anchor (an API run) that contradicts the panel is KEPT — only an API run may move it', RL.isolatedPanelAnchorVerdict({ anchor: { ...LEGACY, source: 'api', verifiedBy: 'rate-limit-events' }, panelWindow: panel }).action === 'keep');
   ok('NEGATIVE CONTROL: a phase-verified panel stamp is kept too', RL.isolatedPanelAnchorVerdict({ anchor: { ...LEGACY, verifiedBy: 'api-phase' }, panelWindow: panel }).action === 'keep');
@@ -99,7 +101,7 @@ const LEGACY_STAMP = (sec) => ({ sevenDay: sec, fiveHour: null, scoped: { fable:
   const w = mkWorld();
   const okp = await w.u.refreshViaCliPanel(w.id);
   const sc = w.sidecar(), rec = w.log().pop();
-  ok('no anchor at all: the isolated panel ESTABLISHES it (stamp)', okp && sc && sc.verifiedBy === 'isolated-panel' && /^stamp \(/.test(rec.sidecar || ''), JSON.stringify({ sc, s: rec && rec.sidecar }));
+  ok('no anchor at all: the isolated panel does NOT establish one (written, unverified, sidecar absent — the c2 rule kept)', okp && sc === null && /^not-stamped \(identity unverified/.test(rec.sidecar || ''), JSON.stringify({ sc, s: rec && rec.sidecar }));
   ok('…and nothing is archived (there was nothing to replace)', w.archive().length === 0);
 }
 {

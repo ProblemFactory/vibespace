@@ -327,16 +327,24 @@ function apiWindowSidecarName(key) { return '.apiwin-' + String(key).replace(/[^
  *  Under an isolated CLAUDE_CONFIG_DIR the panel can no longer answer for
  *  another account (measured, 2.369.110) — the creds dir IS the account. So
  *  when there is NO API-derived witness to disagree with, the isolated panel
- *  outranks a LEGACY anchor (a stamp with no `verifiedBy`): absent ⇒ stamp,
- *  legacy-and-differs ⇒ re-anchor (the old one archived with a reason),
- *  legacy-and-agrees ⇒ upgrade the mark. A verified anchor (an API run or an
- *  org/phase-verified panel) is never touched here, and an API witness always
- *  governs (the panel's own identity verdict already refused a differ). */
+ *  outranks a LEGACY anchor (a stamp with no `verifiedBy`): legacy-and-differs
+ *  ⇒ re-anchor (the old one archived with a reason), legacy-and-agrees ⇒
+ *  upgrade the mark. An ABSENT anchor stays absent (the API witness establishes
+ *  a fresh member — an unverified panel never defines who an account is), a
+ *  verified anchor (an API run or an org/phase-verified panel) is never touched
+ *  here, and an API witness always governs (the panel's own identity verdict
+ *  already refused a differ). */
 function isolatedPanelAnchorVerdict({ anchor = null, panelWindow = null, apiWindow = null, jitterSec = JITTER_SEC } = {}) {
   const win = panelWindow && panelWindow.scoped ? panelWindow : windowOf(panelWindow);
   if (!win || (!win.sevenDay && !Object.keys(win.scoped || {}).length)) return { action: 'keep', reason: 'the panel states no weekly window' };
   if (apiWindow) return { action: 'keep', reason: 'an API-derived witness governs this account' };
-  if (!anchor) return { action: 'stamp', reason: 'no established window yet — the isolated panel establishes it' };
+  // AN ABSENT ANCHOR IS NOT THIS PANEL'S TO WRITE (the c2 verifier's rule, pinned by
+  // test-readings-attribution §19 ⑦; 2.369.116 corrected 2.369.114): an unverified
+  // panel may write its numbers but may not define WHO the account is — the API
+  // witness (K agreeing slot-verified readings) establishes a fresh member. Only a
+  // LEGACY stamp — an identity already defined, by the pre-isolation panel that
+  // B-855a proved lies — is corrected here.
+  if (!anchor) return { action: 'keep', reason: 'no established window yet — the API witness (K agreeing readings) establishes it, never an unverified panel' };
   if (anchor.verifiedBy) return { action: 'keep', reason: `the anchor is verified (${anchor.verifiedBy}) — only an API run may move it` };
   const cmp = compareWindows(win, anchor, { jitterSec });
   if (cmp === 'differ') return { action: 'reanchor', reason: `legacy anchor ${windowFingerprint(anchor)} (unverified, stamped ${anchor.source || '?'}) contradicts the isolated panel's ${windowFingerprint(win)} — re-anchored from the panel` };
