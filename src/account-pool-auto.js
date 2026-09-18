@@ -62,6 +62,19 @@ const THRESH = {
 // known deadline (unknown data / reset just passed) rank AFTER every member
 // with a real deadline — EDF needs a deadline to promise anything.
 const UNKNOWN_REMAINING_PCT = 50;
+// A STATED RESET LANDS A MINUTE LATE (2026-09-18, owner: "每次恢复的时候似乎有时候会
+// 抢跑，稍微等一分钟再发自动恢复可能更稳妥"). The instants this module reads come
+// from the vendor's own readings and from the CLI's /usage panel, whose text
+// names minutes ("resets 7:29pm") — so a stated reset can be up to ~60 s EARLY,
+// and the vendor's clock may lag the stated instant on top. Journal, 09:59:15Z:
+// the pool moved seven conversations onto a member 45 s before its stated 5h
+// reset, fired the continue at once, and the vendor rejected it. A bucket whose
+// stated reset has passed therefore counts as fresh only RESET_GRACE_SEC later,
+// and every wait this module publishes (`blockedUntil`) ends that long after
+// the stated instant — the reported `resetsAt` stays the stated one, so the arm
+// card can still say when the reset IS and that the continue follows a minute
+// after it.
+const RESET_GRACE_SEC = 60;
 // Proactive (hot) switches require the candidate's deadline to be sooner by a
 // real margin — absorbs the ±1s scoped-vs-7d rounding and cache skew.
 const PROACTIVE_MARGIN_SEC = 3600;
@@ -90,7 +103,7 @@ function bucketRemaining(b, nowSec) {
   // lift another bucket's 5 %.
   if (!bucketStatesSpend(b)) return null;
   const reset = Number(b.resetsAt) || 0;
-  if (reset && reset < nowSec) return 100;
+  if (reset && reset + RESET_GRACE_SEC < nowSec) return 100;   // landed — and given its minute to actually land
   const u = Number(b.utilization);
   if (!Number.isFinite(u)) return null;
   return Math.max(0, Math.min(100, Math.round((1 - u) * 10000) / 100)); // 2-decimal: (1-0.9)*100 is 9.999999999999998
@@ -714,7 +727,9 @@ function quotaVerdict(cache, nowSec, { tier = 'hot' } = {}) {
   if (!dead.length) {
     return { usable: true, known: true, blockedUntil: 0, dead: [], deadBuckets: [], until: null, reason: brs.map((b) => `${b.label} ${Math.round(b.remaining)}%`).join(' · ') };
   }
-  const futureResets = dead.map((b) => (b.resetsAt > nowSec ? b.resetsAt : 0));
+  // the wait ends RESET_GRACE_SEC after the LAST stated reset (a stated reset
+  // that passed less than a minute ago still counts, it has not landed yet)
+  const futureResets = dead.map((b) => (b.resetsAt + RESET_GRACE_SEC > nowSec ? b.resetsAt + RESET_GRACE_SEC : 0));
   const blockedUntil = futureResets.every(Boolean) ? Math.max(...futureResets) * 1000 : 0;
   // B-73fe (2026-09-17): the verdict SAYS which bucket sets its wait. An
   // identity unblocks when the LAST of its dead buckets resets (c1206711 #2),
@@ -722,7 +737,7 @@ function quotaVerdict(cache, nowSec, { tier = 'hot' } = {}) {
   // `deadBuckets` are the rest of the story (the 5h that resets at 7am AND
   // the Fable cap at 2 % that keeps the member dead past it). Reporting only:
   // no threshold reads these.
-  const deadBuckets = dead.map((b) => ({ label: b.label, kind: b.kind, remaining: Math.round(b.remaining), line: line(b), resetsAt: b.resetsAt > nowSec ? b.resetsAt : 0 }));
+  const deadBuckets = dead.map((b) => ({ label: b.label, kind: b.kind, remaining: Math.round(b.remaining), line: line(b), resetsAt: b.resetsAt + RESET_GRACE_SEC > nowSec ? b.resetsAt : 0 })); // the STATED instant (the card names it); the grace lives in blockedUntil
   const last = blockedUntil ? deadBuckets.reduce((m, b) => (b.resetsAt > (m ? m.resetsAt : 0) ? b : m), null) : null;
   return {
     usable: false, known: true, blockedUntil,
@@ -760,4 +775,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName,
-  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

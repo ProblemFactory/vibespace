@@ -18,6 +18,18 @@ const fut = NOW + H, past = NOW - H;
 // ── primitives (unchanged v2 semantics) ──────────────────────────────────────
 ck('bucket: 90% used → 10 remaining', bucketRemaining({ utilization: 0.9, resetsAt: fut }, NOW) === 10);
 ck('bucket: reset PASSED → full again (stale reading is meaningless)', bucketRemaining({ utilization: 0.98, resetsAt: past }, NOW) === 100);
+// ── THE STATED RESET LANDS A MINUTE LATE (2026-09-18, owner: "稍微等一分钟再发自动恢复") ──
+{
+  const { RESET_GRACE_SEC, quotaVerdict } = require(path.resolve('src/account-pool-auto.js'));
+  ck('reset grace is one minute', RESET_GRACE_SEC === 60);
+  ck('a stated reset that passed 30 s ago has NOT landed: the bucket keeps its stale (dead) remaining', bucketRemaining({ utilization: 0.98, resetsAt: NOW - 30 }, NOW) === 2);
+  ck('…exactly at the grace edge it is still dead (strict)', bucketRemaining({ utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC }, NOW) === 2);
+  ck('…one second past the grace it is full again', bucketRemaining({ utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC - 1 }, NOW) === 100);
+  ck('a stated reset 40 s in the FUTURE is dead, as before (the 09:59:15Z shape: the pool moved 45 s early)', bucketRemaining({ utilization: 1, resetsAt: NOW + 40 }, NOW) === 0);
+  const g = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: NOW - 30 }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
+  ck('verdict: a 5h whose stated reset passed 30 s ago is still blocked, until the STATED instant + the grace', g.usable === false && g.blockedUntil === (NOW - 30 + RESET_GRACE_SEC) * 1000 && g.deadBuckets.length === 1, JSON.stringify(g));
+  ck('…and the card is told the STATED instant, not the fire instant', g.until && g.until.resetsAt === NOW - 30 && g.deadBuckets[0].resetsAt === NOW - 30, JSON.stringify(g.until));
+}
 ck('bucket: garbage → null', bucketRemaining({ utilization: 'x' }, NOW) === null);
 ck('account: min across 5h/7d/scoped (gate incl. 5h)', accountRemaining({ fiveHour: { utilization: 0.5, resetsAt: fut }, sevenDay: { utilization: 0.2, resetsAt: fut }, scopedWeekly: [{ name: 'Fable', utilization: 0.97, resetsAt: fut }] }, NOW).remaining === 3);
 ck('account: no data → unknown', accountRemaining({}, NOW).known === false);
@@ -281,7 +293,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
 {
   const { quotaVerdict } = require(path.resolve('src/account-pool-auto.js'));
   const v = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: NOW + H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D }, scopedWeekly: [{ name: 'Fable', utilization: 0.98, resetsAt: NOW + 3 * D }] }, NOW);
-  ck('B-73fe: blocked = MAX over dead resets, and `until` names THAT bucket (Fable), not the nearer 5h', v.usable === false && v.blockedUntil === (NOW + 3 * D) * 1000 && !!v.until && v.until.label === 'Fable' && v.until.resetsAt === NOW + 3 * D);
+  ck('B-73fe: blocked = MAX over dead resets (+ the one-minute landing grace), and `until` names THAT bucket (Fable) at its STATED instant, not the nearer 5h', v.usable === false && v.blockedUntil === (NOW + 3 * D + 60) * 1000 && !!v.until && v.until.label === 'Fable' && v.until.resetsAt === NOW + 3 * D);
   ck('…deadBuckets carry label/kind/remaining/line/resetsAt for every dead bucket, 5h first', v.deadBuckets.length === 2 && v.deadBuckets[0].label === '5h' && v.deadBuckets[0].kind === 'fiveHour' && v.deadBuckets[0].line === 10 && v.deadBuckets[0].remaining === 0 && v.deadBuckets[0].resetsAt === NOW + H && v.deadBuckets[1].label === 'Fable' && v.deadBuckets[1].kind === 'weekly' && v.deadBuckets[1].remaining === 2 && v.deadBuckets[1].line === 5);
   const u = quotaVerdict({ fiveHour: { utilization: 0.1, resetsAt: NOW + H }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
   ck('…a usable verdict carries the EMPTY shape (readers never branch on presence)', u.usable === true && Array.isArray(u.deadBuckets) && u.deadBuckets.length === 0 && u.until === null);

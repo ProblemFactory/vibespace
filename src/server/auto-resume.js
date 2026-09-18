@@ -196,7 +196,11 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
     const sb = s.bucket && s.bucket.label ? s.bucket : null;
     if (r && r.name && r.id && r.id === s.id) {
       const lab = (r.ownWall && r.ownWall.label) || (sb && sb.label) || '';
-      return `${r.name} 的${lab ? ' ' + lab + ' ' : ''}将在 ${fmt(resetsAtMs)} 重置后自动继续这个任务（状态栏可取消）。`;
+      // the STATED reset is named; the continue itself follows about a minute
+      // later (RESET_GRACE_SEC in the pool verdict — the vendor lands a stated
+      // reset late, owner 2026-09-18: "稍微等一分钟再发自动恢复")
+      const stated = sb && sb.resetsAt ? Number(sb.resetsAt) : resetsAtMs;   // the cause carries ms
+      return `${r.name} 的${lab ? ' ' + lab + ' ' : ''}将在 ${fmt(stated)} 重置，重置约 1 分钟后自动继续这个任务（状态栏可取消）。`;
     }
     let head = '用量已达上限。';
     if (r && r.name && r.ownWall && r.ownWall.label && r.ownWall.resetsAt) {
@@ -206,10 +210,11 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
       head += '。';
     }
     const target = sb ? `${s.name}（${sb.label} ${fmt(sb.resetsAt || resetsAtMs)} 重置）` : `${s.name}（${fmt(resetsAtMs)} 重置）`;
-    return `${head}最早可用的成员是 ${target}，已安排到时自动继续；任一成员提前可用会立即继续（状态栏可取消）。`;
+    return `${head}最早可用的成员是 ${target}，已安排在重置约 1 分钟后自动继续；任一成员提前可用会立即继续（状态栏可取消）。`;
   }
   if (c && c.scope === 'account' && c.until && c.until.label) {
-    return `用量已达上限（${c.until.label}）。已安排在 ${fmt(resetsAtMs)} 重置后自动继续（状态栏可取消）。`;
+    const stated = c.until.resetsAt ? Number(c.until.resetsAt) : resetsAtMs;   // the cause carries ms
+    return `用量已达上限（${c.until.label}）。已安排在 ${fmt(stated)} 重置约 1 分钟后自动继续（状态栏可取消）。`;
   }
   return `用量已达上限。已安排在 ${fmt(resetsAtMs)} 重置后自动继续（状态栏可取消）。`;
 }

@@ -335,14 +335,15 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const H = 3600;
   // the premature-fire shape (owner: 7d重置没对齐5h): both dead ⇒ MAX
   const v1 = quotaVerdict({ fiveHour: { utilization: 0.97, resetsAt: nowS + 4.7 * H }, sevenDay: { utilization: 0.99, resetsAt: nowS + 2 * H } }, nowS);
-  ok('quotaVerdict: two dead buckets ⇒ blockedUntil is the MAX (all must reset)', v1.usable === false && v1.blockedUntil === (nowS + 4.7 * H) * 1000, JSON.stringify(v1));
+  ok('quotaVerdict: two dead buckets ⇒ blockedUntil is the MAX (all must reset) + the one-minute landing grace (2026-09-18)', v1.usable === false && v1.blockedUntil === (nowS + 4.7 * H + 60) * 1000 && v1.until.resetsAt === nowS + 4.7 * H, JSON.stringify(v1));
   const v2 = quotaVerdict({ fiveHour: { utilization: 0.5, resetsAt: nowS + H }, sevenDay: { utilization: 0.99, resetsAt: nowS + 9 * H } }, nowS);
-  ok("a healthy bucket's nearer reset is not a candidate (7d dead ⇒ wait for 7d)", v2.usable === false && v2.blockedUntil === (nowS + 9 * H) * 1000, JSON.stringify(v2));
+  ok("a healthy bucket's nearer reset is not a candidate (7d dead ⇒ wait for 7d)", v2.usable === false && v2.blockedUntil === (nowS + 9 * H + 60) * 1000, JSON.stringify(v2));
   ok("the owner's usability line: 5h<10% / weekly<5% (THRESH hot tier)", quotaVerdict({ fiveHour: { utilization: 0.91, resetsAt: nowS + H } }, nowS).usable === false && quotaVerdict({ fiveHour: { utilization: 0.89, resetsAt: nowS + H } }, nowS).usable === true);
   const v3 = quotaVerdict({ fiveHour: { utilization: 0.97 } }, nowS);
   ok('a dead bucket with NO future reset ⇒ blockedUntil 0 (caller PROBES, never guesses)', v3.usable === false && v3.blockedUntil === 0);
   ok('no usage data ⇒ usable null (unknown, never guessed dead)', quotaVerdict(null, nowS).usable === null);
-  ok('a rolled-over window reads FULL again (reset-passed rule intact)', quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 60 } }, nowS).usable === true);
+  ok('a rolled-over window reads FULL again once its stated reset is a minute behind (reset-passed rule intact, with the landing grace)', quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 61 } }, nowS).usable === true);
+  ok('…but 30 s after the stated instant it is STILL blocked — the vendor lands a stated reset late (owner 2026-09-18: 稍微等一分钟)', quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 30 } }, nowS).usable === false && quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 30 } }, nowS).blockedUntil === (nowS + 30) * 1000);
 
   // engine wiring: the machine owns every transition (2.355.0 wiring law)
   const eng = read('src/server/usage-pool-engine.js');
@@ -880,7 +881,10 @@ function mkEdgeWorld({ arModule = null, rotateWall = false, streaming = false, r
       // seven hours earlier (2.369.79: the .78 fast mirror's only red).
       // …and it is compared against the instant the sentence ABOVE states, not
       // against the incident's calendar date — see the SIX_DAYS_OUT note.
-      Math.abs(st.resetsAt - SIX_DAYS_AT.getTime()) < 61000, new Date(st.resetsAt).toISOString() + ' vs ' + SIX_DAYS_AT.toISOString());
+      // 2026-09-18: the arm sits ONE landing minute after the instant the verdict
+      // publishes (RESET_GRACE_SEC, account-pool-auto.js) — a prose reset is
+      // minute-precise on top, so the arm lands 60–120 s after the stated minute
+      (() => { const d = st.resetsAt - SIX_DAYS_AT.getTime(); return d >= 60000 && d < 121000; })(), new Date(st.resetsAt).toISOString() + ' vs ' + SIX_DAYS_AT.toISOString());
     ok('…and it recorded WHICH wall it is waiting on', st.lane === 'codex' && st.bucket === 'sevenDay', JSON.stringify(st));
     ok('…and no turn was spent doing it', w.fired.length === 0);
 
