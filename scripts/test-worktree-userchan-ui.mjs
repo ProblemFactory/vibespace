@@ -125,8 +125,8 @@ console.log('— _swapMessageEl bookkeeping');
     JSON.stringify({ ds: bad.dataset, stranded: n.v._elements.get('m1') === n.oldEl }));
   // …and the shipped source really does route all three swap sites through it.
   const cvSrc = fs.readFileSync(path.join(repo, 'src/lib/chat-view.js'), 'utf8');
-  ok('…and no swap site hand-rolls the bookkeeping any more (3 call sites, one helper)',
-    (cvSrc.match(/this\._swapMessageEl\(/g) || []).length === 3 && !/if \(next\) el\.replaceWith\(next\);/.test(cvSrc));
+  ok('…and no swap site hand-rolls the bookkeeping any more (4 call sites, one helper — the 4th since 2.369.118: a live Workflow card re-rendered on its taskInfo edit)',
+    (cvSrc.match(/this\._swapMessageEl\(/g) || []).length === 4 && !/if \(next\) el\.replaceWith\(next\);/.test(cvSrc));
 }
 
 // ── 1b-bis. NODE leg: a RELOADED history re-attaches its SendUserFile links ──

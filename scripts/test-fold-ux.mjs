@@ -101,7 +101,7 @@ check('the sticky (user-opened) mark rides EVERY element swap — ONE helper, an
   (cv.match(/if \(this\._runStickyOpen\?\.has\(oldEl\)\) this\._runStickyOpen\.add\(newEl\);/g) || []).length === 1
   && (cv.match(/if \(this\._runExpanded\?\.has\(oldEl\)\) this\._runExpanded\.add\(newEl\);/g) || []).length === 1
   && /_swapMessageEl\(oldEl, newEl, id\) \{/.test(cv)
-  && (cv.match(/this\._swapMessageEl\(/g) || []).length === 3
+  && (cv.match(/this\._swapMessageEl\(/g) || []).length === 4 // 2.369.118 added the 4th site: a live Workflow card's taskInfo edit re-renders through the ONE helper
   && (cv.match(/\.replaceWith\(/g) || []).length === 1);
 check('the pinned auto-refold still folds every non-last run EXCEPT one the user opened deliberately (_runStickyOpen, keyed by member like _runExpanded)',
   /this\._runStickyOpen = new WeakSet\(\);/.test(cv) && /for \(const r of built\.slice\(0, -1\)\) \{/.test(cv)
