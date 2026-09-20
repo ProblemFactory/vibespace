@@ -57,7 +57,7 @@ try {
   await cdp('Page.enable');
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await sleep(1500);
-  await evalJs('window.app ? app.ready : Promise.reject(new Error("no app"))');
+  await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */);
   await sleep(600);
 
   // create 2 more desktops (→ 3), then re-render the switcher
