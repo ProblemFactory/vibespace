@@ -42,7 +42,11 @@ class WsManager {
       // probe once per close and bounce to the login page instead of retrying
       // forever against a 401.
       fetch('/api/home').then(r => { if (r.status === 401) location.href = '/login'; }).catch(() => {});
-      setTimeout(() => this.connect(), 2000);
+      // 2 s + 0–1 s JITTER (2.369.119, the peer-system lesson): every open tab
+      // reconnecting on the same fixed timer hits the server in lockstep after
+      // an outage — 19 windows re-attaching in the same second was the
+      // inc-mtndq0vb storm. Jitter decorrelates the clients; nothing else changes.
+      setTimeout(() => this.connect(), 2000 + Math.floor(Math.random() * 1000));
     };
     this.ws.onerror = () => {};
   }

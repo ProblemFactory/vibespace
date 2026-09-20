@@ -929,6 +929,24 @@ class ChatRenderers {
    */
   renderSystemMsg(msg) {
     const text = msg.content?.[0]?.text || '';
+    // UNKNOWN RECORD (2.369.119): the harness sent a record VibeSpace does not
+    // understand yet — say so in the chat (the owner's ask: a new upstream
+    // feature or a fixed upstream bug used to be invisible), sample folded.
+    // Every field is harness-authored ⇒ escaped.
+    if (msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-unknown-record';
+      const what = (b.kind === 'system' ? 'system/' : '') + escHtml(b.name);
+      const head = t('⚠ {harness} sent a record VibeSpace does not understand yet: {name} — the CLI may have gained a feature or changed its protocol.', { harness: escHtml(b.harness || 'The harness'), name: what });
+      el.innerHTML = `<span class="chat-system-text">${head}</span>`;
+      if (b.sample) {
+        const det = document.createElement('details');
+        det.innerHTML = `<summary>${escHtml(t('sample'))}</summary><pre class="chat-pre">${escHtml(b.sample)}</pre>`;
+        el.appendChild(det);
+      }
+      return { el, sideEffect: null };
+    }
     // Model auto-fallback notice: the server bakes an English sentence (it
     // can't know the per-device language), so localize it here from the
     // structured from/to that ride the block.

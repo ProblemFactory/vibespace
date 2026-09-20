@@ -124,6 +124,9 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     let bits;
     if (wf.live) {
       bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} done', { n: wf.doneCount || 0 }), t('running…')];
+      // the stream tree carries the run's own usage while it is live (2.369.119)
+      if (wf.liveTree && wf.totalTokens) bits.push(t('{n} tokens', { n: fmtTokens(wf.totalTokens) }));
+      if (wf.liveTree && wf.totalToolCalls) bits.push(t('{n} tool calls', { n: wf.totalToolCalls }));
       if (wf.resumed) bits.push(t('resumed after an interruption'));
     } else {
       bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} tokens', { n: fmtTokens(wf.totalTokens) }), t('{n} tool calls', { n: wf.totalToolCalls || 0 })];
@@ -135,7 +138,12 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     if (wf.live) {
       const note = document.createElement('div');
       note.className = 'workflow-live-note';
-      note.textContent = t('Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.');
+      // 2.369.119: with the harness's own progress tree (the same one the chat
+      // card renders) phases, labels and states are live; without it (a window
+      // opened after the launching session is gone) only the disk skeleton is.
+      note.textContent = wf.liveTree
+        ? t('Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.')
+        : t('Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.');
       root.appendChild(note);
     }
 
@@ -159,12 +167,13 @@ export function openWorkflowDetail(app, runId, opts = {}) {
         row.innerHTML =
           `<span class="workflow-agent-state" style="--chip-color:${sm.color}" title="${escHtml(sm.label)}"></span>` +
           `<span class="workflow-agent-label">${escHtml(ag.label || '(agent)')}</span>` +
+          (ag.lastToolName && (ag.state === 'progress' || ag.state === 'queued') ? `<span class="workflow-agent-tool" title="${escHtml(ag.lastToolSummary || ag.lastToolName)}">${escHtml(ag.lastToolName)}</span>` : '') +
           (model ? `<span class="workflow-agent-model">${escHtml(model)}</span>` : '');
         const btn = document.createElement('button');
         btn.className = 'workflow-agent-view-btn';
         btn.textContent = t('View Log');
-        btn.disabled = !ag.agentId;
-        btn.title = ag.agentId ? 'Open this agent’s transcript' : 'No transcript on disk';
+        btn.disabled = !ag.agentId || ag.onDisk === false; // a tree-named agent whose transcript file has not appeared yet
+        btn.title = !ag.agentId ? 'No transcript on disk' : (ag.onDisk === false ? t('No transcript on disk yet') : 'Open this agent’s transcript');
         btn.onclick = () => openAgentLog(ag.agentId, ag.label);
         row.appendChild(btn);
         sec.appendChild(row);

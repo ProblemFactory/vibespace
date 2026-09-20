@@ -354,6 +354,7 @@ class CodexMessageManager {
   // not a lock — see _adoptThreadId for the precedence and the two real-data
   // refutations behind it.
   constructor(sessionId, { threadId } = {}) {
+    this._unknownCards = new Set(); // kind:name of every unknown-record card this session already shows (2.369.119)
     this.sessionId = sessionId;
     this.seq = 0; // rebuild belt only (R0 — ids are content-derived)
     this._rkCounts = new Map();
@@ -682,7 +683,7 @@ class CodexMessageManager {
       return;
     }
     if (SKIPPED_RECORD_TYPES.has(record.type)) return;
-    this._noteUnknown('record', record.type);
+    this._noteUnknown('record', record.type, record, emit);
   }
 
   // 0.153 per-response ledger record {thread_id, turn_id, response_id:'resp_…',
@@ -787,11 +788,23 @@ class CodexMessageManager {
 
   // Once-per-process breadcrumb for an upstream type this normalizer does not
   // know (mirrors MessageManager's cli-unknown-system-subtype). Name-only.
-  _noteUnknown(kind, type) {
+  _noteUnknown(kind, type, raw = null, emit = false) {
     const key = `${kind}:${type || '(untyped)'}`;
-    if (CodexMessageManager._seenUnknownRecords.has(key)) return;
-    CodexMessageManager._seenUnknownRecords.add(key);
-    try { global.__vsEvent?.('codex-unknown-record:' + String(type || '(untyped)').slice(0, 48), kind); } catch {}
+    if (!CodexMessageManager._seenUnknownRecords.has(key)) {
+      CodexMessageManager._seenUnknownRecords.add(key);
+      try { global.__vsEvent?.('codex-unknown-record:' + String(type || '(untyped)').slice(0, 48), kind); } catch {}
+    }
+    // 2.369.119: a top-level record this normalizer does not know becomes ONE
+    // dim card per name per session on the live path (the claude twin's
+    // _noteUnknownRecord) — the owner wants to SEE that the harness changed.
+    if (!emit || !raw || !this._unknownCards) return;
+    if (this._unknownCards.has(key)) return;
+    this._unknownCards.add(key);
+    const msg = this._create({
+      role: 'system', status: 'complete', noticeKind: 'unknown-record',
+      content: [{ type: 'unknown_record', kind, name: String(type || '(untyped)').slice(0, 80), harness: 'Codex', sample: require('./message-manager.js').unknownSample(raw) }],
+    });
+    this._emit({ op: 'create', msg });
   }
 
   // The ledger thread id of a record = the FILE it came from (the walker keys a

@@ -2942,6 +2942,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .workflow-agent-state { width: 6px; height: 6px; border-radius: 50%; background: var(--chip-color, var(--text-dim)); flex-shrink: 0; }
 .workflow-agent-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 .workflow-agent-model { font-size: 9px; color: var(--text-dim); flex-shrink: 0; }
+.workflow-agent-tool { font-size: 9px; color: var(--text-dim); font-family: var(--font-mono, monospace); flex-shrink: 0; padding: 0 4px; border-radius: var(--radius-sm); background: var(--bg-secondary); } /* 2.369.119: the live last tool */
 .workflow-agent-view-btn { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: none; color: var(--text-secondary); cursor: pointer; flex-shrink: 0; }
 .workflow-agent-view-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .workflow-agent-view-btn:disabled { opacity: 0.4; cursor: default; }

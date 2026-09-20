@@ -217,6 +217,7 @@ class MessageManager {
     // stayed 'running' forever. These maps live for the conversation.
     this.taskMsgByToolUse = new Map();   // toolUseId → msgId (tasks only)
     this.taskMsgByTaskId = new Map();    // task_id  → msgId
+    this._unknownCards = new Set();      // kind:name of every unknown-record card this session already shows (2.369.119)
     this.turnIndex = 0;
     this.listeners = [];
     this._peerMsgIds = new Set(); // cross-session msg_ids already rendered (dedup across the three peer sites)
@@ -489,6 +490,26 @@ class MessageManager {
     }
   }
 
+  // UNKNOWN RECORDS BECOME A CARD (2.369.119, owner: "你对于未知的 event 似乎是直接过滤掉…
+  // 提醒我 harness 可能加了新功能"): a top-level type or a system subtype this
+  // normalizer does not handle — and that is not DECLARED ignored below — used
+  // to vanish with a once-per-process telemetry breadcrumb nobody reads in the
+  // chat. rate_limit_event / tool_progress / model_refusal_fallback were each
+  // an invisible gap for weeks. Now: ONE dim card per (kind:name) per session
+  // on the LIVE path only (a history rebuild must not re-alert on every
+  // attach), carrying a bounded, string-clipped sample of the record.
+  _noteUnknownRecord(kind, name, raw, emit) {
+    if (!emit || !name) return;
+    const key = `${kind}:${name}`;
+    if (this._unknownCards.has(key)) return;
+    this._unknownCards.add(key);
+    const msg = this._create({
+      role: 'system', status: 'complete', noticeKind: 'unknown-record',
+      content: [{ type: 'unknown_record', kind, name: String(name).slice(0, 80), harness: this.harnessLabel || 'Claude Code', sample: unknownSample(raw) }],
+    });
+    this._emit({ op: 'create', msg });
+  }
+
   _processMessage(raw, emit) {
     // Extract timestamp from raw message for _create
     this._currentTs = raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now();
@@ -510,6 +531,9 @@ class MessageManager {
       // A previously-yielded message was RETRACTED upstream (§2.10). We render
       // AND persist the stream, so without this the orphan lived forever.
       case 'tombstone': return this._processTombstone(raw, emit);
+      default:
+        if (!KNOWN_IGNORED_RECORD_TYPES.has(raw.type)) this._noteUnknownRecord('type', raw.type, raw, emit);
+        return;
     }
   }
 
@@ -741,6 +765,7 @@ class MessageManager {
         MessageManager._seenUnknownSubtypes.add(raw.subtype);
         try { global.__vsEvent?.('cli-unknown-system-subtype', String(raw.subtype).slice(0, 60)); } catch {}
       }
+      if (!KNOWN_IGNORED_SYSTEM_SUBTYPES.has(raw.subtype)) this._noteUnknownRecord('system', raw.subtype, raw, emit); // 2.369.119: a card, not a breadcrumb
     }
 
     // Task lifecycle → edit existing tool message. Resolution goes through
@@ -820,6 +845,15 @@ class MessageManager {
 
   /** Find the tool message a task-lifecycle signal refers to: task index →
    *  pendingToolCalls (pre-result window) → task-id fallback. */
+  /** The live taskInfo of a background task/workflow by its task id (a Workflow's runId) —
+   *  what /api/workflow merges over the disk skeleton so the View Workflow window says
+   *  what the chat card says (2.369.119). null when this normalizer holds no such task. */
+  taskInfoById(taskId) {
+    const msgId = taskId != null && this.taskMsgByTaskId.get(String(taskId));
+    const m = msgId ? this.messageIndex.get(msgId) : null;
+    return m && m.taskInfo ? m.taskInfo : null;
+  }
+
   _taskMsgFor(toolUseId, taskId) {
     const viaTask = toolUseId && this.taskMsgByToolUse.get(toolUseId);
     if (viaTask) return this.messageIndex.get(viaTask) || null;
@@ -1473,4 +1507,32 @@ function normalizeWorkflowProgress(list) {
   return { phases, agents };
 }
 
-module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress };
+/** A bounded, string-clipped JSON sample of an unknown record for its card (≤ 700 chars). */
+function unknownSample(raw) {
+  try {
+    const s = JSON.stringify(raw, (k, v) => (typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v));
+    return typeof s === 'string' ? s.slice(0, 700) : '';
+  } catch { return ''; }
+}
+
+// Top-level record types the normalizer DELIBERATELY ignores (2.369.119): the
+// SERVER consumer owns the live ones (src/server/stdout/claude-stream-json.js
+// handles them before/beside feedLive), the transcript bookkeeping ones carry
+// no conversation (2026-09-20 census of 30 transcripts + every live buffer).
+// Anything NOT here and not in _processMessage's switch is an unknown-record
+// card — adding a type here is a DECISION that it deserves no card.
+const KNOWN_IGNORED_RECORD_TYPES = new Set([
+  // live stream, consumed by the server consumer
+  'tool_progress', 'set_in_progress_tool_use_ids', 'rate_limit_event', 'compact_progress', 'command_lifecycle', 'stream_event', 'keep_alive',
+  '_stdin_ack', '_remote_state',
+  // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
+  'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'pr-link', 'atis-latch',
+  'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
+]);
+// System subtypes that trip the breadcrumb but are NOT worth a card: seen in the
+// 2026-09-20 census and judged bookkeeping. (thinking_tokens = a per-turn count
+// the CLI pushes ~30× a turn; the others are lists the CLI keeps for its own
+// panels.) A subtype the census has never seen stays a card.
+const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set(['thinking_tokens', 'background_tasks_changed', 'task_updated', 'hook_started', 'compact_boundary', 'success']);
+
+module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownSample };

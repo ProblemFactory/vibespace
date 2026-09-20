@@ -17,6 +17,7 @@ const {
 // LOCAL branch asks it exactly like the remote branch's shell twin does.
 const { isCliProcess } = require('../cli-identity');
 const { createMessageManager } = require('../normalizers');
+const { mergeLiveWorkflow } = require('../workflow-live'); // 2.369.119: the card's stream tree laid over the disk skeleton
 // S3: discovery iterates the harness registry — each descriptor's
 // store.discover lists its own sessions (claude lock-first sweep in
 // session-store, codex worker-side rollout walk); no backend ternary here.
@@ -406,6 +407,25 @@ function setup(ctx) {
       phases: [{ index: 0, title: 'Agents (live — phase names, labels & tokens appear when the run finishes)', agents }],
     };
   }
+  // ONE live view for the card AND the window (2.369.119, owner: "怎么这个内外实现还不一样？"):
+  // the normalizer of the session that launched the run holds the harness's own
+  // task_progress tree (phases/labels/states/last tool) on taskInfo.workflow —
+  // lay it over the disk skeleton by agentId (src/workflow-live.js). Local and
+  // remote sessions alike: the stream is parsed HERE, so the tree lives here.
+  function liveTreeFor(runId) {
+    try {
+      for (const [, s] of activeSessions) {
+        const n = s && s._normalizer;
+        const ti = n && typeof n.taskInfoById === 'function' ? n.taskInfoById(runId) : null;
+        if (ti && ti.workflow) return ti;
+      }
+    } catch { /* a normalizer mid-teardown */ }
+    return null;
+  }
+  function withLiveTree(view, runId) {
+    const ti = liveTreeFor(runId);
+    return ti ? mergeLiveWorkflow(view, ti.workflow, ti.usage || null) : view;
+  }
   function readLiveWorkflow(runDir, runId) {
     const attempts = journalAttempts(runDir);
     let agentFiles = []; try { agentFiles = fs.readdirSync(runDir); } catch {}
@@ -433,7 +453,7 @@ function setup(ctx) {
         const liveParts = { runId, attempts, agentFiles: st.agentFiles, scriptName: st.scriptName };
         if (st.snapText) {
           const liveS = Math.max(st.journalMtime || 0, st.agentMtime || 0);
-          if (st.snapMtime && liveS > st.snapMtime + 15) return res.json({ ...liveWorkflowFromParts(liveParts), resumed: true });
+          if (st.snapMtime && liveS > st.snapMtime + 15) return res.json({ ...withLiveTree(liveWorkflowFromParts(liveParts), runId), resumed: true });
           try {
             const out = normalizeWorkflowSnapshot(JSON.parse(st.snapText), runId);
             for (const ph of out.phases || []) for (const ag of ph.agents || []) {
@@ -442,7 +462,7 @@ function setup(ctx) {
             return res.json(out);
           } catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
         }
-        return res.json(liveWorkflowFromParts(liveParts));
+        return res.json(withLiveTree(liveWorkflowFromParts(liveParts), runId));
       } catch (err) { return res.status(502).json({ error: 'remote workflow fetch failed: ' + err.message }); }
     }
     // Terminal snapshot wins (it's complete). Prefer it even if the run dir
@@ -468,7 +488,7 @@ function setup(ctx) {
               if (/^agent-[\w-]+\.jsonl$/.test(f)) liveMs = Math.max(liveMs, fs.statSync(path.join(runDir, f)).mtimeMs);
             }
           } catch {}
-          if (liveMs > snapMs + 15000) return res.json({ ...readLiveWorkflow(runDir, runId), resumed: true });
+          if (liveMs > snapMs + 15000) return res.json({ ...withLiveTree(readLiveWorkflow(runDir, runId), runId), resumed: true });
         }
       } catch {}
       try {
@@ -488,7 +508,7 @@ function setup(ctx) {
       catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
     }
     // No snapshot yet — surface a LIVE view if the run is still going.
-    if (runDir) return res.json(readLiveWorkflow(runDir, runId));
+    if (runDir) return res.json(withLiveTree(readLiveWorkflow(runDir, runId), runId));
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 

@@ -3,6 +3,10 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "⚠ {harness} sent a record VibeSpace does not understand yet: {name} — the CLI may have gained a feature or changed its protocol.": "⚠ {harness} から VibeSpace がまだ理解できないレコードが届きました：{name} — CLI に新機能が加わったかプロトコルが変わった可能性があります。",
+  "sample": "サンプル",
+  "Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.": "ライブ表示 — フェーズ・ラベル・状態はこの実行自身の進捗レコード（チャットカードと同じもの）から取得。トークン合計は実行終了後に確定します。",
+  "No transcript on disk yet": "まだディスク上にトランスクリプトがありません",
   "Keep Claude Code conversations for (days)": "Claude Code の会話を保持する日数",
   "Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code's own setting alone.": "Claude Code は起動のたびに、この日数より古い会話トランスクリプトを削除します（本来の既定値は 30 日）。VibeSpace は起動時と変更のたびにこの値を ~/.claude/settings.json（cleanupPeriodDays）へ書き込み、リモートホストにはエージェントツールのインストール時に書き込みます。0 = Claude Code 自身の設定をそのままにする。",
   "Notices": "お知らせ",

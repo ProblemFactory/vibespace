@@ -1351,3 +1351,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-wf-tool { color: var(--text-dim); font-family: var(--font-mono, monospace); font-size: 10px; }
 .chat-wf-foot { display: flex; gap: 8px; align-items: baseline; margin-top: 2px; color: var(--text-dim); font-size: 10px; }
 @keyframes chat-wf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* UNKNOWN RECORD (2.369.119): the harness sent a record VibeSpace does not know — dim, folded sample */
+.chat-unknown-record { flex-direction: column; align-items: center; gap: 2px; color: var(--yellow, #e5c07b); opacity: 0.85; }
+.chat-unknown-record .chat-pre { max-height: 160px; overflow: auto; font-size: 10px; color: var(--text-dim); }

@@ -3,6 +3,10 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "⚠ {harness} sent a record VibeSpace does not understand yet: {name} — the CLI may have gained a feature or changed its protocol.": "⚠ {harness} 发来了 VibeSpace 还不认识的记录：{name} —— CLI 可能新增了功能或改了协议。",
+  "sample": "样本",
+  "Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.": "实时视图——阶段、标签和状态来自这次运行自己的进度记录（与聊天卡片显示的是同一份）；token 总量在运行结束后才是最终值。",
+  "No transcript on disk yet": "磁盘上还没有它的对话记录",
   "Keep Claude Code conversations for (days)": "Claude Code 对话保留天数",
   "Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code's own setting alone.": "Claude Code 每次启动都会删除超过这个天数的对话记录（它自己的默认值是 30 天）。VibeSpace 在启动时和每次修改时把这个值写进 ~/.claude/settings.json（cleanupPeriodDays），安装远程主机的 agent 工具时也一并写入。0 = 不动 Claude Code 自己的设置。",
   "Notices": "通知",

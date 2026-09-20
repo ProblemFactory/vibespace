@@ -4,6 +4,11 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const UNINSTALL = process.argv.includes('--uninstall');
+// Transcript retention (2.369.118): VIBESPACE_CLAUDE_KEEP_DAYS from the installing
+// server = the user's "keep conversations for N days" setting. Claude Code's own
+// default sweeps transcripts after 30 days; written beside the hook entry in
+// ~/.claude/settings.json (never on --uninstall, never when unset/invalid).
+const KEEP_DAYS = Math.floor(Number(process.env.VIBESPACE_CLAUDE_KEEP_DAYS || 0));
 // ABSOLUTE interpreter (2.244.2, userN's Novita: hook error '/bin/sh: 1:
 // node: not found'): hooks run as claude children via /bin/sh with claude's
 // PATH — hosts with nvm-style node installs (and claude as a native binary)
@@ -39,6 +44,7 @@ for (const { f, create, EVENTS } of files) {
         if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
         else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
       }
+      if (KEEP_DAYS >= 1 && f.endsWith('settings.json') && root.cleanupPeriodDays !== KEEP_DAYS) { root.cleanupPeriodDays = KEEP_DAYS; changed = true; }
     }
     if (changed) { const tmp = f + '.tmp'; writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n'); renameSync(tmp, f); }
   } catch { }
