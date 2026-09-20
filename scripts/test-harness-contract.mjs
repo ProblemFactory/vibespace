@@ -464,8 +464,9 @@ const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')
     && /if \('worktree' in meta\) \{[\s\S]{0,80}this\._latchWorktreePick\(\);/.test(viewSrc)
     && /worktreeLatchWrite\(\{ saved: cfg\.worktree, live: this\._worktree \}\) === true/.test(viewSrc),
     'WIRING: BOTH chat-view entry points run the one latch, and both bodies are drivable prototype methods (the worktree-path branch used to write a field nobody read)');
-  // The swap bookkeeping (round-2 verifier, MAJOR): three sites, one helper.
-  ok((viewSrc.match(/this\._swapMessageEl\(/g) || []).length === 3
+  // The swap bookkeeping (round-2 verifier, MAJOR): four sites, one helper (the
+  // 4th since 2.369.118: a live Workflow card re-rendered on its taskInfo edit).
+  ok((viewSrc.match(/this\._swapMessageEl\(/g) || []).length === 4
     && /_swapMessageEl\(oldEl, newEl, id\) \{/.test(viewSrc)
     && !/if \(next\) el\.replaceWith\(next\);/.test(viewSrc),
     'WIRING: every in-place message re-render goes through _swapMessageEl (the tool-card swap was a bare replaceWith)');
