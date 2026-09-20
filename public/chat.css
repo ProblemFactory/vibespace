@@ -1352,6 +1352,12 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-wf-foot { display: flex; gap: 8px; align-items: baseline; margin-top: 2px; color: var(--text-dim); font-size: 10px; }
 @keyframes chat-wf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
-/* UNKNOWN RECORD (2.369.119): the harness sent a record VibeSpace does not know — dim, folded sample */
-.chat-unknown-record { flex-direction: column; align-items: center; gap: 2px; color: var(--yellow, #e5c07b); opacity: 0.85; }
-.chat-unknown-record .chat-pre { max-height: 160px; overflow: auto; font-size: 10px; color: var(--text-dim); }
+/* UNKNOWN EVENT (2.369.120): the fall-back card for a harness record VibeSpace does not recognize — red-bordered, the whole record folded */
+.chat-unknown-event { display: block; margin: 4px 0; padding: 6px 10px; border: 1px solid var(--red, #e55); border-radius: var(--radius); background: color-mix(in srgb, var(--red, #e55) 8%, transparent); font-size: 11px; color: var(--text-secondary); }
+.chat-unknown-event-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.chat-unknown-event-title { color: var(--red, #e55); font-weight: 600; }
+.chat-unknown-event-name { font-family: var(--font-mono, monospace); color: var(--text); }
+.chat-unknown-event-hint { color: var(--text-dim); margin-top: 2px; }
+.chat-unknown-event details { margin-top: 4px; }
+.chat-unknown-event summary { cursor: pointer; color: var(--text-dim); }
+.chat-unknown-event .chat-pre { max-height: 320px; overflow: auto; font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; }

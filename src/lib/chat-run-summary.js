@@ -11,7 +11,7 @@
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
 // from the label (2.369.34); countKinds() now zero-fills from this list and
 // the test asserts SUMMARY_ORDER covers it.
-export const RUN_KINDS = ['thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'skill'];
+export const RUN_KINDS = ['thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'skill', 'unknown'];
 
 // Counts the CALLER supplies that are not card kinds — they are never
 // produced by messageKind() and never zero-filled, so an unset one simply
@@ -40,6 +40,7 @@ const SUMMARY_ORDER = [
   ['agent', '{n} agent ops'],
   ['report', '{n} sub-agent reports'],
   ['skill', null],
+  ['unknown', '{n} unknown events'], // 2.369.120: the fall-back card (a record VibeSpace does not know); ships UNCHECKED — visible until the user folds it
 ];
 
 // MCP tool ids (mcp__<server>__<tool>) split into their parts — the raw
@@ -105,6 +106,7 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
   }
   if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
       && m.content.every((b) => b.type === 'thinking')) return 'thinking';
+  if (m?.noticeKind === 'unknown-record') return 'unknown'; // 2.369.120: the fall-back card has its own toggle
   return null;
 }
 

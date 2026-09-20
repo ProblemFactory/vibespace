@@ -3,6 +3,11 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Unknown event": "不明なイベント",
+  "A record VibeSpace does not recognize — the harness may have gained a feature or changed its protocol.": "VibeSpace が認識できないレコード — ハーネスに新機能が加わったかプロトコルが変わった可能性があります。",
+  "Full record": "レコード全体",
+  "Unknown events (harness records VibeSpace does not recognize)": "不明なイベント（VibeSpace が認識できないハーネスのレコード）",
+  "{n} unknown events": "不明なイベント {n} 件",
   "⚠ {harness} sent a record VibeSpace does not understand yet: {name} — the CLI may have gained a feature or changed its protocol.": "⚠ {harness} から VibeSpace がまだ理解できないレコードが届きました：{name} — CLI に新機能が加わったかプロトコルが変わった可能性があります。",
   "sample": "サンプル",
   "Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.": "ライブ表示 — フェーズ・ラベル・状態はこの実行自身の進捗レコード（チャットカードと同じもの）から取得。トークン合計は実行終了後に確定します。",

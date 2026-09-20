@@ -3,6 +3,11 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Unknown event": "未知事件",
+  "A record VibeSpace does not recognize — the harness may have gained a feature or changed its protocol.": "VibeSpace 不认识的记录——harness 可能新增了功能或改了协议。",
+  "Full record": "完整记录",
+  "Unknown events (harness records VibeSpace does not recognize)": "未知事件（VibeSpace 不认识的 harness 记录）",
+  "{n} unknown events": "{n} 个未知事件",
   "⚠ {harness} sent a record VibeSpace does not understand yet: {name} — the CLI may have gained a feature or changed its protocol.": "⚠ {harness} 发来了 VibeSpace 还不认识的记录：{name} —— CLI 可能新增了功能或改了协议。",
   "sample": "样本",
   "Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.": "实时视图——阶段、标签和状态来自这次运行自己的进度记录（与聊天卡片显示的是同一份）；token 总量在运行结束后才是最终值。",

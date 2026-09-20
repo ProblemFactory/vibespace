@@ -929,20 +929,21 @@ class ChatRenderers {
    */
   renderSystemMsg(msg) {
     const text = msg.content?.[0]?.text || '';
-    // UNKNOWN RECORD (2.369.119): the harness sent a record VibeSpace does not
-    // understand yet — say so in the chat (the owner's ask: a new upstream
-    // feature or a fixed upstream bug used to be invisible), sample folded.
-    // Every field is harness-authored ⇒ escaped.
+    // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
+    // record VibeSpace does not recognize sits in the flow like any other
+    // card, red-bordered so it is noticed, the WHOLE record behind its
+    // expander. Every field is harness-authored ⇒ escaped. Folds under the
+    // 'unknown' kind of chat.collapseKinds (off by default).
     if (msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') {
       const b = msg.content[0];
       const el = document.createElement('div');
-      el.className = 'chat-msg chat-msg-system chat-system-notification chat-unknown-record';
+      el.className = 'chat-msg chat-msg-system chat-unknown-event';
       const what = (b.kind === 'system' ? 'system/' : '') + escHtml(b.name);
-      const head = t('⚠ {harness} sent a record VibeSpace does not understand yet: {name} — the CLI may have gained a feature or changed its protocol.', { harness: escHtml(b.harness || 'The harness'), name: what });
-      el.innerHTML = `<span class="chat-system-text">${head}</span>`;
-      if (b.sample) {
+      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(t('Unknown event'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')} · ${what}</span></div>`
+        + `<div class="chat-unknown-event-hint">${escHtml(t('A record VibeSpace does not recognize — the harness may have gained a feature or changed its protocol.'))}</div>`;
+      if (b.record) {
         const det = document.createElement('details');
-        det.innerHTML = `<summary>${escHtml(t('sample'))}</summary><pre class="chat-pre">${escHtml(b.sample)}</pre>`;
+        det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.record)}</pre>`;
         el.appendChild(det);
       }
       return { el, sideEffect: null };
