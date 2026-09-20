@@ -362,6 +362,7 @@ public/
 CLAUDE.md              — This file
 docs/
   design-account-hardening.md — 2026-09-08 DESIGN (owner decisions pending, no code yet): the root fix for the 5-incident money batch (auto-resume's 130 billed continues / readings keyed by the spawn org / unseen login deadlines / unretracted warnings / inc-mts8a8mr-ulmm's in-flight-on-the-new-slot cascade). … ⇒ kb-file-structure.md
+  design-harness-settings.zh.md — 2026-09-20 设计稿(未开工, 等 owner D1-D4): harness 级全局设置的专用区 = descriptor 声明的 PURE 表(src/harness-settings.js) + schema 派生分区 + harnessSetting 访问器(字面 harness id 归零) + 一个 base64 plan env 走既有 helper/run-cmd(不新增 daemon op) + 行下"写到哪里了"回执; 值留 data/settings.json 零迁移; 否决独立存储+迁移
   design-harness-plugins.md — 2026-09-05 调研: Codex支持缺口矩阵(P0-P3) + HarnessDescriptor抽象层/一致性套件/ACP通用第三方harness + VS Code式插件系统(manifest/派生激活/五层隔离/贡献点→现有注册表); 每节带backlog归属
   README.md            — Documentation index
   getting-started.md   — Installation, first run, quick tour

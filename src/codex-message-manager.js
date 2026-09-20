@@ -2308,7 +2308,7 @@ class CodexMessageManager {
     // and it says so here instead of hanging behind an unanswerable card.
     if (type === 'client_request_unsupported') {
       const method = String(event.method || '(unnamed)');
-      this._noteUnknown('server_request', 'unsupported:' + method, payload, emit);
+      this._noteUnknown('server_request', 'unsupported:' + method, event, emit);
       const msg = this._create({
         role: 'system',
         status: 'error',
