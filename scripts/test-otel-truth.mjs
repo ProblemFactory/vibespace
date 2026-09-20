@@ -23,8 +23,15 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 // Sanitized copy of the REAL captured api_request record (2.1.235): key names,
 // nesting and value encodings verbatim; uuids/email replaced.
 const ORG = '9a1b2c3d-1111-2222-3333-444455556666';
+// THE FIXTURE'S INSTANT IS RELATIVE TO NOW (2026-09-20): the boot replay keeps only
+// records inside KEEP_MS (30 days) — a literal 2026-08-20 stamp turned the 'stash
+// survives restarts' leg red the day it aged past the horizon (the clock-dependent
+// fixture class). One hour ago, spelled both ways the record carries it.
+const T_MS = Date.now() - 3600e3;
+const T_ISO = new Date(T_MS).toISOString();
+const T_NANO = String(T_MS) + '000000';
 const REC = (over = {}) => ({
-  timeUnixNano: '1787188836189000000',
+  timeUnixNano: T_NANO,
   body: { stringValue: 'claude_code.api_request' },
   attributes: Object.entries({
     'user.id': { stringValue: 'deadbeef'.repeat(8) },
@@ -33,7 +40,7 @@ const REC = (over = {}) => ({
     'user.email': { stringValue: 'User@Example.com' },
     'user.account_uuid': { stringValue: 'e4319840-4a35-4bf0-bb48-97d1a42096cc' },
     'event.name': { stringValue: 'api_request' },
-    'event.timestamp': { stringValue: '2026-08-20T01:20:36.189Z' },
+    'event.timestamp': { stringValue: T_ISO },
     'event.sequence': { intValue: 14 },
     model: { stringValue: 'claude-haiku-4-5-20251001' },
     input_tokens: { intValue: 10 },
@@ -61,7 +68,7 @@ const PAYLOAD = (recs) => ({
   const r = records[0];
   ok(r.rid === 'req_011TESTTRUTH000000000001' && r.orgUuid === ORG, 'rid + orgUuid extracted (org lowercased)', JSON.stringify(r));
   ok(r.i === 10 && r.o === 69 && r.cr === 18118 && r.cw === 8545, 'all four token classes (string intValue tolerated)', JSON.stringify(r));
-  ok(Math.abs(r.costUsd - 0.0192568) < 1e-9 && r.ts === Date.parse('2026-08-20T01:20:36.189Z'), 'cost + ISO timestamp');
+  ok(Math.abs(r.costUsd - 0.0192568) < 1e-9 && r.ts === T_MS, 'cost + ISO timestamp');
   ok(r.email === 'user@example.com' && r.sid === '4ad31ec3-0e5b-40e2-a953-77f121ce7eee' && r.cliVersion === '2.1.235', 'email lowercased, sid + resource version merged');
   ok(seen.api_request === 1 && seen.user_prompt === 1, 'unknown/filtered event names COUNTED, never silently dropped');
 }
@@ -152,7 +159,7 @@ const PAYLOAD = (recs) => ({
   ok(afterAgree === before2, 'agreement phase writes nothing');
   const disagreedBefore = ingest.stats().disagreed;
   curAcct = 'sub-B'; // pool hot-switch: the link (and the credentials) are B now
-  curLastTs = Date.parse('2026-08-20T01:20:36.189Z') + 60000;
+  curLastTs = T_MS + 60000;
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: orgT }, request_id: { stringValue: 'req_stale1' } })]));
   ok(attribCalls.length === afterAgree, 'the headline scenario writes NOTHING — the walk (credential link) keeps the attribution');
   ok(ingest.stats().disagreed === disagreedBefore + 1, '…and the divergence is COUNTED (visible, investigable, never authoritative)');
