@@ -44,6 +44,34 @@ export function nextLayout(layout, todos) {
   return { groups };
 }
 
+/** 2.369.118 (owner: spend notices are DISTRACTING beside real asks): a row is a
+ *  NOTICE when its item SAYS so (`kind: 'notice'`, a producer's declaration —
+ *  spend-guard, `vibespace-ask --notice`; never inferred from the text). Notices
+ *  leave their session group for the popup's own Notices section and never
+ *  count in the red badge — a grey count says "n things you may want to know". */
+export function isNotice(item) { return !!item && item.kind === 'notice'; }
+
+/** Split rendered rows ([key, entries, openCount]) into the action groups (their
+ *  openCount recomputed over action rows only) and a flat notice list that keeps
+ *  each entry's group key (for the source name). Order is preserved on both sides. */
+export function splitNotices(rows) {
+  const action = [], notices = [];
+  for (const [key, entries] of rows || []) {
+    const act = (entries || []).filter((e) => !isNotice(e.item));
+    const not = (entries || []).filter((e) => isNotice(e.item));
+    if (act.length) action.push([key, act, act.filter((e) => !e.resolved).length]);
+    for (const e of not) notices.push({ key, ...e });
+  }
+  return { action, notices };
+}
+
+/** The badge's numbers: `action` = the open items that need the user (the red/
+ *  yellow/accent segments), `notices` = the grey count. */
+export function badgeCounts(open) {
+  const action = (open || []).filter((i) => !isNotice(i));
+  return { action, notices: (open || []).length - action.length };
+}
+
 /** Rows to render, in layout order, each marked resolved when it left `open`. */
 export function entriesFor(layout, todos) {
   const open = new Map((todos.open || []).map((i) => [i.id, i]));

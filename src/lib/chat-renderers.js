@@ -910,11 +910,12 @@ class ChatRenderers {
       const tiW = msg?.taskInfo;
       const wfChipHtml = tiW?.status === 'running' ? ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`
         : (tiW && tiW.status && tiW.status !== 'completed' ? ` <span class="chat-task-status-chip err">${escHtml(tiW.status)}</span>` : '');
+      const wfLiveHtml = this.workflowLiveHtml(tiW); // 2.369.118: phases + agent chips while the run is live
       const viewBtn = runId
         ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
         : '';
       const firstLineW = (tiW?.summary ? String(tiW.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${wfChipHtml}${viewBtn}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${wfChipHtml}${viewBtn}</span>${wfLiveHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
@@ -1040,6 +1041,34 @@ class ChatRenderers {
       return { el, sideEffect: null };
     }
     return null;
+  }
+
+  // LIVE WORKFLOW DETAIL (2.369.118): the phases with their agents as chips —
+  // label · state dot · last tool — from the CLI's own task_progress tree that
+  // message-manager keeps field-wise on taskInfo.workflow. Live sessions only
+  // (the transcript never carries task_progress); the post-hoc View Workflow
+  // window stays the history surface. Every string is agent-authored ⇒ escaped.
+  workflowLiveHtml(ti) {
+    const wf = ti?.workflow;
+    if (!wf || !Array.isArray(wf.agents) || !wf.agents.length) return '';
+    const byPhase = new Map();
+    for (const a of wf.agents) { const k = Number.isFinite(a.phaseIndex) ? a.phaseIndex : -1; (byPhase.get(k) || byPhase.set(k, []).get(k)).push(a); }
+    const phaseTitle = (k) => (wf.phases || []).find((p) => p.index === k)?.title || byPhase.get(k)?.find((a) => a.phaseTitle)?.phaseTitle || '';
+    const keys = [...byPhase.keys()].sort((a, b) => a - b);
+    const chip = (a) => {
+      const st = String(a.state || 'queued');
+      const tip = [a.label, st, a.lastToolSummary || a.lastToolName, a.model, a.attempt > 1 ? `attempt ${a.attempt}` : ''].filter(Boolean).join(' · ');
+      const tool = a.lastToolName && st !== 'done' && st !== 'error' ? `<span class="chat-wf-tool">${escHtml(a.lastToolName)}</span>` : '';
+      return `<span class="chat-wf-agent" data-state="${escHtml(st)}" title="${escHtml(tip)}"><i class="chat-wf-dot"></i>${escHtml(a.label || a.agentId || '?')}${tool}</span>`;
+    };
+    const u = ti.usage;
+    const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
+    const usage = u && (u.totalTokens || u.toolUses)
+      ? `<div class="chat-wf-usage">${u.totalTokens ? escHtml(fmtTok(u.totalTokens)) + ' ' + t('tokens') : ''}${u.toolUses ? ' · ' + t('{n} tool uses', { n: u.toolUses }) : ''}${u.durationMs ? ' · ' + t('{n} min', { n: Math.max(1, Math.round(u.durationMs / 60000)) }) : ''}</div>`
+      : '';
+    const done = wf.agents.filter((a) => a.state === 'done').length, err = wf.agents.filter((a) => a.state === 'error').length, run = wf.agents.filter((a) => a.state === 'running').length;
+    const tally = `<span class="chat-wf-tally">${done}/${wf.agents.length}${err ? ` · ${err} ${t('failed')}` : ''}${run ? ` · ${run} ${t('running')}` : ''}</span>`;
+    return `<div class="chat-wf-live">${keys.map((k) => `<div class="chat-wf-phase"><span class="chat-wf-phase-title">${escHtml(phaseTitle(k) || t('Agents'))}</span>${byPhase.get(k).map(chip).join('')}</div>`).join('')}<div class="chat-wf-foot">${tally}${usage}</div></div>`;
   }
 
   renderPermissionOverlay(el, msg) {

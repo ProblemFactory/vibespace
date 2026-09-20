@@ -35,6 +35,7 @@ const MAX_CIDS = 12;
 const META_COPY_MAX = 64 * 1024;      // per session-meta / wrapper-meta file
 const BUF_TAIL = 256 * 1024;          // per session buffer tail
 const TRANSCRIPT_TAIL = 512 * 1024;   // per local transcript tail
+const TERMINAL_TAIL = 64 * 1024;      // per terminal-mode session: the last raw PTY bytes (2.369.118)
 
 function sh(cmd, args, timeoutMs = 8000) {
   return new Promise((resolve) => {
@@ -73,6 +74,20 @@ function sha256Head(fp, bytes = 0) {
   } catch (e) { return 'err:' + (e.code || e.message); }
 }
 
+/** The LAST `cap` bytes of a file (a terminal buffer's recent screen). */
+function copyTail(src, dest, cap) {
+  try {
+    const st = fs.statSync(src);
+    const n = Math.min(st.size, cap);
+    const fd = fs.openSync(src, 'r');
+    try {
+      const buf = Buffer.alloc(n);
+      fs.readSync(fd, buf, 0, n, st.size - n);
+      fs.writeFileSync(dest, buf);
+      return { bytes: n, truncatedFrom: st.size > cap ? st.size : null };
+    } finally { fs.closeSync(fd); }
+  } catch (e) { return { error: e.code || e.message }; }
+}
 function copyCapped(src, dest, cap) {
   try {
     const st = fs.statSync(src);
@@ -88,7 +103,7 @@ function copyCapped(src, dest, cap) {
 }
 
 /** LOCAL scene — everything a kill/respawn/restart would erase. */
-async function captureLocal(dir, { dataDir, cids }) {
+async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
   const frozen = path.join(dir, 'frozen');
   fs.mkdirSync(frozen, { recursive: true });
   const out = { at: new Date().toISOString(), host: os.hostname(), uptimeS: Math.round(os.uptime()) };
@@ -127,6 +142,17 @@ async function captureLocal(dir, { dataDir, cids }) {
     }
     for (const f of names.slice(0, 400)) out.buffers[f] = statOf(path.join(bufDir, f));
   } catch (e) { out.buffers = { error: e.message }; }
+  // TERMINAL TAILS (2.369.118): userW's login-terminal report froze the wrapper
+  // sidecar only — the raw PTY bytes that showed WHAT the terminal had rendered
+  // were swept with the session before anyone looked. The last TERMINAL_TAIL
+  // bytes of every terminal-mode session the reporter had open or that was live.
+  out.terminalTails = {};
+  try {
+    fs.mkdirSync(path.join(frozen, 'buffers'), { recursive: true });
+    for (const id of [...new Set((terminalIds || []).filter((x) => typeof x === 'string' && /^[\w.-]+$/.test(x) && !x.includes('..')))].slice(0, 20)) {
+      out.terminalTails[id] = copyTail(path.join(bufDir, id), path.join(frozen, 'buffers', `${id}.tail`), TERMINAL_TAIL);
+    }
+  } catch (e) { out.terminalTails = { error: e.message }; }
 
   // claude's OWN lock files — deleted the moment a CLI exits, so a user's
   // kill destroys the proof of what was running

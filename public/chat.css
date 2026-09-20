@@ -1337,3 +1337,17 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 /* Background Work notifications HELD for this conversation (design §13 5b ①): the head on the bar, the reason in the tooltip */
 .chat-status-held { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .chat-status-held svg { width: 10px; height: 10px; flex-shrink: 0; }
+
+/* LIVE WORKFLOW DETAIL (2.369.118): phases + agent chips on a running Workflow card */
+.chat-wf-live { margin: 4px 0 2px 22px; font-size: 11px; color: var(--text-secondary); }
+.chat-wf-phase { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 2px 0; }
+.chat-wf-phase-title { color: var(--text-dim); margin-right: 4px; text-transform: uppercase; letter-spacing: .03em; font-size: 10px; }
+.chat-wf-agent { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border-radius: var(--radius-sm); background: var(--bg-secondary); line-height: 16px; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-wf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex: 0 0 auto; }
+.chat-wf-agent[data-state="running"] .chat-wf-dot { background: var(--accent); animation: chat-wf-pulse 1.4s ease infinite; }
+.chat-wf-agent[data-state="done"] .chat-wf-dot { background: var(--green, #7c9); }
+.chat-wf-agent[data-state="error"] .chat-wf-dot { background: var(--red, #e55); }
+.chat-wf-agent[data-state="error"] { color: var(--red, #e55); }
+.chat-wf-tool { color: var(--text-dim); font-family: var(--font-mono, monospace); font-size: 10px; }
+.chat-wf-foot { display: flex; gap: 8px; align-items: baseline; margin-top: 2px; color: var(--text-dim); font-size: 10px; }
+@keyframes chat-wf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }

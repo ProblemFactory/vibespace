@@ -975,8 +975,10 @@ class App {
   _refitAllTerminals() {
     for (const [, session] of this.sessions) {
       if (session.overrides && session.terminal) { // TerminalSession (ChatView has no .overrides)
-        try { session.terminal.clearTextureAtlas(); } catch {}
-        try { session.fit(); } catch {}
+        // rescale() = font size × the NEW UI scale (the container is counter-
+        // zoomed, 2.369.118) + atlas clear + fit — a bare fit() would keep the
+        // old glyph size and the terminal would shrink/grow by the scale delta.
+        try { session.rescale(); } catch { try { session.fit(); } catch {} }
       }
     }
   }
@@ -1054,10 +1056,9 @@ class App {
           // ChatView
           session._applyFontSize(this._fontSize);
         } else if (session.overrides && !session.overrides.fontSize) {
-          // TerminalSession
-          session.terminal.options.fontSize = this._fontSize;
-          try { session.terminal.clearTextureAtlas(); } catch {}
-          session.fit();
+          // TerminalSession — through applyOverride so the size passes _xtermPx
+          // (visual px × UI scale; a raw options.fontSize write is 1/scale too small)
+          session.applyOverride('fontSize', null);
         }
       }
     };

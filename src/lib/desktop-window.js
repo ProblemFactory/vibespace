@@ -14,8 +14,13 @@ import { createVncView, streamUrl } from './vnc-view.js';
  * resize/scale policy, clipboard, status chip — is the SHARED component
  * src/lib/vnc-view.js, used by every `desktop-app` window too; this file only
  * decides WHAT to show (the singleton) and gates the connect on POST
- * /api/vnc/start. Behaviour is byte-for-byte the pre-extraction window
- * (scripts/test-vnc-view.mjs pins it against the retired file).
+ * /api/vnc/start. Behaviour is the pre-extraction window's (scripts/
+ * test-vnc-view.mjs pins it against the retired file) with ONE deliberate
+ * change since 2.369.118: the singleton walks the same bounded reconnect
+ * ladder as the app windows (userW's report: the Desktop sat on
+ * "Disconnected" after a silent drop until somebody clicked — every retry
+ * re-runs the start gate, so a VNC server that died is respawned; the
+ * Reconnect button remains for the ladder's end).
  *
  * Singleton per client (one framebuffer, N windows would fight over input).
  */
@@ -32,6 +37,7 @@ export function openDesktop(app, { syncId } = {}) {
 
   const view = createVncView(winInfo.content, {
     url: streamUrl('/api/vnc'),
+    autoReconnect: true,
     // start (or adopt) the server first; a failure's own text wins over the generic label
     before: async () => {
       let st = null;

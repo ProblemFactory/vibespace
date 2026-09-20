@@ -249,6 +249,11 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 const UNINSTALL = process.argv.includes('--uninstall');
+// Transcript retention (2.369.118): VIBESPACE_CLAUDE_KEEP_DAYS from the installing
+// server = the user's "keep conversations for N days" setting. Claude Code's own
+// default sweeps transcripts after 30 days; written beside the hook entry in
+// ~/.claude/settings.json (never on --uninstall, never when unset/invalid).
+const KEEP_DAYS = Math.floor(Number(process.env.VIBESPACE_CLAUDE_KEEP_DAYS || 0));
 // ABSOLUTE interpreter (2.244.2, userN's Novita: hook error '/bin/sh: 1:
 // node: not found'): hooks run as claude children via /bin/sh with claude's
 // PATH — hosts with nvm-style node installs (and claude as a native binary)
@@ -284,6 +289,7 @@ for (const { f, create, EVENTS } of files) {
         if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
         else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
       }
+      if (KEEP_DAYS >= 1 && f.endsWith('settings.json') && root.cleanupPeriodDays !== KEEP_DAYS) { root.cleanupPeriodDays = KEEP_DAYS; changed = true; }
     }
     if (changed) { const tmp = f + '.tmp'; writeFileSync(tmp, JSON.stringify(root, null, 2) + '\\n'); renameSync(tmp, f); }
   } catch { }
@@ -357,6 +363,24 @@ function _patchHookFile(file, createIfMissing, mutate) {
     return true;
   }
   throw new Error(`${file} kept changing under concurrent writes — gave up`);
+}
+// TRANSCRIPT RETENTION (2.369.118, owner: "claude code 默认会删除旧对话…默认值配成 100 年"):
+// Claude Code sweeps ~/.claude/projects transcripts older than `cleanupPeriodDays`
+// (its own default: 30) at every start — a conversation nobody opened for a month
+// is GONE, and VibeSpace's whole history view is those files. The setting
+// claude.transcriptRetentionDays (default 36500 ≈ 100 years) is written into the
+// user's settings.json here at boot + on change through the same CAS writer as
+// the hook entry; 0/blank = leave the CLI's own value alone. Remote hosts get it
+// through the register helper's VIBESPACE_CLAUDE_KEEP_DAYS at (re)install.
+function ensureClaudeRetention(days, { file = null } = {}) {
+  const n = Math.floor(Number(days));
+  if (!(n >= 1)) return { applied: false, reason: 'off' };
+  const target = file || (HOOK_FILES.claude && typeof HOOK_FILES.claude.file === 'function' ? HOOK_FILES.claude.file() : null);
+  if (!target) return { applied: false, reason: 'no claude settings file known' };
+  try {
+    const changed = _patchHookFile(target, false, (root) => { if (root.cleanupPeriodDays === n) return false; root.cleanupPeriodDays = n; return true; });
+    return { applied: true, changed, days: n, file: target };
+  } catch (e) { return { applied: false, reason: e.message, days: n, file: target }; }
 }
 function agentHooksStatus() {
   const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
@@ -457,7 +481,7 @@ function removeAgentHooks() {
   return {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
     createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
-    ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
+    ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ensureClaudeRetention,
     agentHooksStatus,
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };

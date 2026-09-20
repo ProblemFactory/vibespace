@@ -48,6 +48,7 @@ const { DESKTOP_SINGLETON_ID } = require('../desktop-apps');
 
 const STREAM_RE = /^\/api\/desktop\/([A-Za-z0-9._-]{1,80})\/stream$/;
 const INPUT_REPORT_MS = 2000;
+const PING_MS = 20000;            // ws keepalive cadence on a bridge (2.369.118); silent for 2 rounds = terminated + named
 const WS_HIGH_WATER = 8 * 1024 * 1024;
 const WS_LOW_WATER = 1024 * 1024;
 
@@ -153,7 +154,7 @@ function streamPath(id) { return id === DESKTOP_SINGLETON_ID ? '/api/vnc' : `/ap
  *   onInput       — (id) => void  (throttled here)
  *   log
  */
-function create({ auth, resolveTarget, onInput = () => { }, log = console, now = Date.now } = {}) {
+function create({ auth, resolveTarget, onInput = () => { }, log = console, now = Date.now, pingMs = PING_MS } = {}) {
   if (!auth || typeof auth.requestAuthed !== 'function') throw new Error('desktop-stream: auth.requestAuthed is required');
   if (typeof resolveTarget !== 'function') throw new Error('desktop-stream: resolveTarget is required');
   const wss = new WebSocketServer({ noServer: true });
@@ -170,9 +171,35 @@ function create({ auth, resolveTarget, onInput = () => { }, log = console, now =
   function bridgeRfb(ws, id, port) {
     stats.opened++;
     const sock = net.connect(port, '127.0.0.1');
-    let lastInputReport = 0;
+    const openedAt = now();
+    let lastInputReport = 0, down = 0, up = 0, closedBy = null, logged = false;
+    // KEEPALIVE + A NAMED CLOSE (2.369.118, userW's "Desktop disconnected" with
+    // nothing in any log): an RFB stream over a static screen carries NO bytes
+    // for minutes, and a proxy on the way drops a silent WebSocket without
+    // telling either end — the old bridge had no ping and logged neither the
+    // open nor the close, so the incident bundle held zero evidence. Ping every
+    // pingMs (the browser answers on its own); a peer silent for two rounds is
+    // terminated and NAMED; every close logs who closed, after how long, and
+    // how many bytes went each way.
+    let alive = true;
+    const pinger = setInterval(() => {
+      if (ws.readyState !== 1) { clearInterval(pinger); return; }
+      if (!alive) { closedBy = closedBy || `no pong for ${2 * pingMs} ms`; clearInterval(pinger); try { ws.terminate(); } catch { /* gone */ } return; }
+      alive = false;
+      try { ws.ping(); } catch { /* closing */ }
+    }, pingMs);
+    ws.on('pong', () => { alive = true; });
+    const finish = (why) => {
+      if (logged) return;
+      logged = true;
+      clearInterval(pinger);
+      const dur = Math.round((now() - openedAt) / 1000);
+      log.log?.(`[desktop-stream] ${id}: closed (${closedBy || why}) after ${dur}s, ${down} B to the browser, ${up} B to the server`);
+    };
+    log.log?.(`[desktop-stream] ${id}: bridge opened → 127.0.0.1:${port}`);
     sock.on('data', (d) => {
       if (ws.readyState !== 1) return;
+      down += d.length;
       ws.send(d);
       // Backpressure: a fast framebuffer + slow client would balloon the WS
       // buffer — pause the TCP side until the browser drains.
@@ -186,15 +213,16 @@ function create({ auth, resolveTarget, onInput = () => { }, log = console, now =
     });
     const sieve = rfbInputSieve();
     ws.on('message', (m) => {
+      up += (m && m.length) || 0;
       try { sock.write(m); } catch { /* socket closing */ }
       if (!sieve.feed(m)) return; // a FramebufferUpdateRequest / SetEncodings / the handshake is not a human
       const t = now();
       if (t - lastInputReport >= INPUT_REPORT_MS) { lastInputReport = t; try { onInput(id); } catch { /* keeper is optional here */ } }
     });
-    ws.on('close', () => sock.destroy());
-    ws.on('error', () => sock.destroy());
-    sock.on('close', () => { try { ws.close(); } catch { /* already closed */ } });
-    sock.on('error', () => { try { ws.close(); } catch { /* already closed */ } });
+    ws.on('close', (code, reason) => { finish(`the browser closed, code ${code}${reason && reason.length ? ' ' + String(reason).slice(0, 60) : ''}`); sock.destroy(); });
+    ws.on('error', (e) => { closedBy = closedBy || `browser socket error ${(e && e.code) || ''}`.trim(); sock.destroy(); });
+    sock.on('close', () => { closedBy = closedBy || 'the VNC server closed its socket'; try { ws.close(); } catch { /* already closed */ } finish('server side'); });
+    sock.on('error', (e) => { closedBy = closedBy || `VNC server socket error ${(e && e.code) || ''}`.trim(); try { ws.close(); } catch { /* already closed */ } });
   }
 
   /** The upgrade handler for BOTH paths. `id` = upgradeId(pathname). */
@@ -215,4 +243,4 @@ function create({ auth, resolveTarget, onInput = () => { }, log = console, now =
   return { handleUpgrade, upgradeId, streamPath, stats: () => ({ ...stats }), wss };
 }
 
-module.exports = { create, upgradeId, streamPath, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER };
+module.exports = { create, upgradeId, streamPath, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER, PING_MS };

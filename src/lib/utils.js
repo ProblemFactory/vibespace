@@ -839,6 +839,13 @@ let _stateSync = null;
 export const UI_SCALE_MIN = 60, UI_SCALE_MAX = 200, UI_FONT_MIN = 75, UI_FONT_MAX = 175; // widened per user request (was 80-130 / 85-140)
 let _uiScaleVal = 1;
 export function uiScale() { return _uiScaleVal; } // drag-delta compensation factor (viewport px → layout px = /uiScale())
+/** inc-mtdrm922's counter-zoom rule: a container that must sit at NET zoom 1 under
+ *  the body's DPI zoom (`zoom: calc(1 / var(--ui-scale, 1))`, var-reactive). The VNC
+ *  canvas and — since 2.369.118 — every xterm container use it: both map the mouse
+ *  by `clientX - rect.left` (ZOOMED px) over a cell/pixel size measured in LAYOUT
+ *  px, so under body zoom a click landed scale× too far down (userW: a terminal
+ *  selection took the wrong lines). The ONE definition; vnc-view.js re-exports it. */
+export const COUNTER_ZOOM = 'calc(1 / var(--ui-scale, 1))';
 
 // Dead-reckoning display pair (B-fcff v2): how a bucket's LAST READING (dark,
 // confirmed) and its ESTIMATED current value (light/dashed) should render

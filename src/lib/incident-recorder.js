@@ -13,7 +13,7 @@
 // at them). The user-supplied note is the only free text.
 import { t } from './i18n.js';
 import { BUILD_VERSION } from './build-version.js';
-import { showToast, fetchJson, copyText, createModalShell, escHtml } from './utils.js';
+import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
 
@@ -112,6 +112,9 @@ export function installIncidentRecorder(app) {
   // ── full client-state snapshot at capture time ──
   const snapshot = () => {
     const out = { t: Date.now(), sinceLoadMs: Date.now() - t0, ua: navigator.userAgent, viewport: `${innerWidth}x${innerHeight}`, lang: document.documentElement.lang || '', gpu: window.__vsGpu || null };
+    // 2.369.118 (userW's terminal-selection report had no way to tell whether a UI
+    // scale was on): the per-device DPI zoom + the browser's own pixel ratio.
+    try { out.uiScale = uiScale(); out.dpr = window.devicePixelRatio; out.bodyZoom = document.body.style.zoom || ''; } catch { }
     try { out.compStalls = window.__vsCompStalls ? window.__vsCompStalls() : null; } catch { }
     try { out.heapMB = Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576); } catch {}
     try {

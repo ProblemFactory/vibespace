@@ -10,7 +10,7 @@
 // behaviour BYTE FOR BYTE against this component (labels, transitions, the
 // counter-zoom rule) with the retired file as the control.
 import { t } from './i18n.js';
-import { showToast } from './utils.js';
+import { showToast, COUNTER_ZOOM } from './utils.js';
 
 // noVNC uses top-level await, which can't live inside our IIFE bundle — it's
 // built as a SEPARATE ESM file (public/novnc.js, see the build script) and
@@ -33,7 +33,7 @@ export async function loadRFB() {
  *  lives at NET zoom 1: every coordinate space lines up and the framebuffer
  *  maps ~1:1 to device pixels (sharper, too). var()-reactive, so a live DPI
  *  change keeps it correct. Exported so the suite pins the exact rule. */
-export const COUNTER_ZOOM = 'calc(1 / var(--ui-scale, 1))';
+export { COUNTER_ZOOM }; // the ONE definition is utils.js (shared with every xterm container since 2.369.118)
 
 /** The bounded auto-reconnect ladder (ms) a caller may opt into. */
 export const RECONNECT_LADDER = [1000, 2000, 4000, 8000, 15000];

@@ -5,7 +5,7 @@
 // session to handle them. Items arrive via `vibespace-ask` (agent CLI) and are
 // resolved/dismissed here (or by the agent once the user answers in chat).
 import { t } from './i18n.js';
-import { openLayout, nextLayout, entriesFor } from './user-todos-layout.js'; // PURE: append-only row order while the popup is open (inc-mtw02kbq-kj96)
+import { openLayout, nextLayout, entriesFor, splitNotices, badgeCounts } from './user-todos-layout.js'; // PURE: append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118)
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { anchorFixedPopup, copyText, createModalShell, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
@@ -101,25 +101,30 @@ export function installUserTodos(app) {
   };
 
   const renderBtn = () => {
-    const n = todos.open.length;
-    const worst = todos.open.reduce((w, i) => Math.max(w, URG_RANK[i.urgency || 'normal'] || 1), 0);
+    // NOTICES (2.369.118, owner: spend notices are DISTRACTING beside real asks):
+    // only ACTION items colour the badge; notices are a grey count of their own.
+    const { action, notices } = badgeCounts(todos.open);
+    const n = action.length;
+    const worst = action.reduce((w, i) => Math.max(w, URG_RANK[i.urgency || 'normal'] || 1), 0);
     btn.classList.toggle('ut-has-items', n > 0);
+    btn.classList.toggle('ut-has-notices', notices > 0);
     btn.dataset.urgency = n ? (Object.keys(URG_RANK).find((k) => URG_RANK[k] === worst) || 'normal') : '';
     // SEGMENTED badge (owner request): one pill per urgency tier so the
     // high-priority count is readable at a glance — urgent (red) · high
     // (yellow) · rest (accent). Zero tiers don't render; one tier looks
     // exactly like the old single badge.
-    const cu = todos.open.filter((i) => i.urgency === 'urgent').length;
-    const ch = todos.open.filter((i) => i.urgency === 'high').length;
+    const cu = action.filter((i) => i.urgency === 'urgent').length;
+    const ch = action.filter((i) => i.urgency === 'high').length;
     const cn = n - cu - ch;
     const segs = [cu ? `<span class="ut-count ut-seg-urgent">${cu}</span>` : '',
                   ch ? `<span class="ut-count ut-seg-high">${ch}</span>` : '',
-                  cn ? `<span class="ut-count ut-seg-norm">${cn}</span>` : ''].join('');
+                  cn ? `<span class="ut-count ut-seg-norm">${cn}</span>` : '',
+                  notices ? `<span class="ut-count ut-seg-notice" title="${t('{n} notices (for your information)', { n: notices })}">${notices}</span>` : ''].join('');
     btn.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/></svg>${segs}`;
-    btn.title = n
+    btn.title = (n
       ? [cu ? t('{n} urgent', { n: cu }) : '', ch ? t('{n} high', { n: ch }) : '', cn ? t('{n} normal', { n: cn }) : '']
           .filter(Boolean).join(' · ') + ' — ' + t('waiting on you')
-      : t('Nothing waiting on you');
+      : t('Nothing waiting on you')) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');
   };
 
   const renderPanel = () => {
@@ -160,13 +165,13 @@ export function installUserTodos(app) {
     if (popup.classList.contains('hidden')) layout = null;
     else layout = layout ? nextLayout(layout, todos) : openLayout(gs);
     const inPlace = new Set(layout ? layout.groups.flatMap((g) => g.ids) : []);
-    const itemHtml = (i) => `
-      <div class="ut-item" data-id="${escHtml(i.id)}">
-        <span class="ut-dot" data-urgency="${escHtml(i.urgency || 'normal')}" title="${escHtml(i.urgency || 'normal')}"></span>
+    const itemHtml = (i, notice = false) => `
+      <div class="ut-item${notice ? ' ut-item-notice' : ''}" data-id="${escHtml(i.id)}">
+        <span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>
         <div class="ut-body">
           <div class="ut-text">${escHtml(i.text)}</div>
           ${detailHtml(i)}
-          <div class="ut-meta">${agoText(i.createdAt)}</div>
+          <div class="ut-meta">${notice ? `<span class="ut-sess">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ` : ''}${agoText(i.createdAt)}</div>
         </div>
         <span class="ut-actions">
           <button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button>
@@ -193,11 +198,19 @@ export function installUserTodos(app) {
           <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : (i.resolvedBy === 'system' ? ' · ' + t('automatically') : '')} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
           <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
         </div>`).join('')}` : '';
+    // Rows come from the LAYOUT while open (resolved ones in place), from the sorted groups otherwise.
+    const allRows = layout ? entriesFor(layout, todos).map((g) => [g.key, g.entries, g.openCount]) : gs.map(([key, items]) => [key, items.map((item) => ({ item, resolved: false })), items.length]);
+    // NOTICES (2.369.118): for-your-information rows leave their group for a
+    // section of their own under the asks — same append-only slots while open.
+    const { action: rows, notices } = splitNotices(allRows);
+    const openActions = badgeCounts(todos.open).action.length;
+    const openNotices = notices.filter((e) => !e.resolved).length;
+    const noticesHtml = notices.length ? `
+      <div class="ut-notice-head">${t('Notices')}<span class="ut-head-sub">${t('{n} for your information', { n: openNotices })}</span></div>
+      ${notices.map((e) => e.resolved ? resolvedInPlaceHtml(e.item) : itemHtml(e.item, true)).join('')}` : '';
     popup.innerHTML = tabsHtml + `
-      <div class="usage-section-title">${t('For you')}<span class="ut-head-sub">${todos.open.length ? t('{n} open', { n: todos.open.length }) : t('all clear')}</span></div>
+      <div class="usage-section-title">${t('For you')}<span class="ut-head-sub">${openActions ? t('{n} open', { n: openActions }) : t('all clear')}</span></div>
       ${(() => {
-        // Rows come from the LAYOUT while open (resolved ones in place), from the sorted groups otherwise.
-        const rows = layout ? entriesFor(layout, todos).map((g) => [g.key, g.entries, g.openCount]) : gs.map(([key, items]) => [key, items.map((item) => ({ item, resolved: false })), items.length]);
         const rowHtml = (e) => e.resolved ? resolvedInPlaceHtml(e.item) : itemHtml(e.item);
         return rows.length ? rows.map(([key, entries, openCount]) => key === 'jobs' ? `
         <div class="ut-group ut-group-jobs">
@@ -210,6 +223,7 @@ export function installUserTodos(app) {
         </div>`).join('')
       : `<div class="empty-hint">${t('Nothing needs you right now. Agents file items here with vibespace-ask when they need a decision or input.')}</div>`;
       })()}
+      ${noticesHtml}
       ${resolvedHtml}`;
   };
 

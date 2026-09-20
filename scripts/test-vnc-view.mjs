@@ -84,12 +84,17 @@ console.log('§1 the ONE surface (grep census over src/lib)');
   const shapes = { novncImport: /import\(new URL\('\/novnc\.js'/, counterZoom: /calc\(1 \/ var\(--ui-scale/, newRfb: /new RFB\(/, scaleViewport: /\.scaleViewport\s*=/, resizeSession: /\.resizeSession\s*=/ };
   const where = {};
   for (const f of files) { const s = read(`src/lib/${f}`); for (const [k, re] of Object.entries(shapes)) if (re.test(s)) (where[k] ||= []).push(f); }
-  for (const k of Object.keys(shapes)) ok(same(where[k], ['vnc-view.js']), `${k} lives ONLY in vnc-view.js (${(where[k] || []).join(', ') || 'nowhere'})`);
+  // 2.369.118: the counter-zoom LITERAL moved to utils.js (COUNTER_ZOOM — the ONE
+  // definition, shared with every xterm container); vnc-view.js re-exports the
+  // name and no file spells the calc() twice.
+  const home = { counterZoom: ['utils.js'] };
+  for (const k of Object.keys(shapes)) ok(same(where[k], home[k] || ['vnc-view.js']), `${k} lives ONLY in ${(home[k] || ['vnc-view.js']).join('+')} (${(where[k] || []).join(', ') || 'nowhere'})`);
+  ok(/export \{ COUNTER_ZOOM \}/.test(read('src/lib/vnc-view.js')) && /container\.style\.zoom = COUNTER_ZOOM/.test(read('src/lib/terminal.js')) && /import \{[^}]*COUNTER_ZOOM[^}]*\} from '\.\/utils\.js'/.test(read('src/lib/terminal.js')), 'vnc-view.js re-exports COUNTER_ZOOM from utils.js and terminal.js counter-zooms its container with the same name (net zoom 1 for xterm mouse mapping, 2.369.118)');
   ok(V.COUNTER_ZOOM === 'calc(1 / var(--ui-scale, 1))', "COUNTER_ZOOM is inc-mtdrm922's rule verbatim: 'calc(1 / var(--ui-scale, 1))' (var-reactive, NET zoom 1)");
   const dw = read('src/lib/desktop-window.js'), daw = read('src/lib/desktop-app-window.js');
   ok(/import \{ createVncView, streamUrl \} from '\.\/vnc-view\.js'/.test(dw) && /createVncView\(winInfo\.content/.test(dw), 'desktop-window.js mounts through createVncView (no inline noVNC)');
   ok(/import \{ createVncView, streamUrl \} from '\.\/vnc-view\.js'/.test(daw) && /createVncView\(winInfo\.content/.test(daw), 'desktop-app-window.js mounts through createVncView too — one component, two window types');
-  ok(!/autoReconnect/.test(dw) && /autoReconnect: true/.test(daw), 'the singleton keeps its Reconnect-button-only behaviour (no autoReconnect); the app window opts into the ladder');
+  ok(/autoReconnect: true/.test(dw) && /autoReconnect: true/.test(daw), 'BOTH windows walk the bounded reconnect ladder (2.369.118: the singleton too — userW\'s Desktop sat on "Disconnected" until a click; the Reconnect button stays for the ladder\'s end)');
   ok(/streamUrl\('\/api\/vnc'\)/.test(dw) && /streamUrl\(`\/api\/desktop\/\$\{encodeURIComponent\(id\)\}\/stream`\)/.test(daw), 'both windows speak to the ONE bridge (/api/vnc and /api/desktop/<id>/stream)');
 }
 

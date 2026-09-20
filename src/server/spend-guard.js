@@ -178,7 +178,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
-    try { userTodos.add(INBOX_KEY, { text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending' }); return true; }
+    // kind 'notice' (2.369.118): a spend ceiling is FOR THE USER'S INFORMATION —
+    // it sits in the popup's own Notices section and never in the red badge
+    try { userTodos.add(INBOX_KEY, { text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice' }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 

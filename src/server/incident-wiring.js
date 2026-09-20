@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const inc = require('../incident.js'); // the block references `inc.captureLocal` — keep the original binding name
 
-function create({ app, rootDir, getActiveSessions, getHosts, getNoConvoRef, readLayouts, sysinfo , listLayoutHistory}) {
+function create({ app, rootDir, getActiveSessions, getHosts, getNoConvoRef, readLayouts, sysinfo , listLayoutHistory, getDesktop = null }) {
   const activeSessions = new Proxy({}, { get: (_, k) => { const m = getActiveSessions(); const v = m[k]; return typeof v === 'function' ? v.bind(m) : v; } });
   const hosts = new Proxy({}, { get: (_, k) => { const h = getHosts(); if (!h) return undefined; const v = h[k]; return typeof v === 'function' ? v.bind(h) : v; } });
   const noConvoRef = new Proxy({}, { get: (_, k) => { const r = getNoConvoRef(); if (!r) return undefined; const v = r[k]; return typeof v === 'function' ? v.bind(r) : v; } });
@@ -63,6 +63,18 @@ function _incidentServerState() {
     };
     out.layoutHistory = ((listLayoutHistory ? listLayoutHistory() : []) || []).slice(0, 40);
   } catch (e) { out.layout = 'failed: ' + e.message; }
+  // DESKTOP (2.369.118, userW's "Desktop disconnected" bundle carried nothing about
+  // the picture server or the bridge): the singleton's last known state, every
+  // desktop-app session and the stream bridge's counters.
+  try {
+    const d = getDesktop ? getDesktop() : null;
+    if (d) {
+      out.desktop = {};
+      try { const f = d.vnc.singletonFacts(); out.desktop.singleton = { running: f.running, display: f.display, port: f.port }; } catch (e) { out.desktop.singleton = 'failed: ' + e.message; }
+      try { out.desktop.apps = d.keeper.listApps().slice(0, 40); } catch (e) { out.desktop.apps = 'failed: ' + e.message; }
+      try { out.desktop.streams = d.stream.stats(); } catch (e) { out.desktop.streams = 'failed: ' + e.message; }
+    } else out.desktop = null;
+  } catch (e) { out.desktop = 'failed: ' + e.message; }
   try {
     const dc = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'remote-sessions-cache.json'), 'utf8'));
     out.discoveryCache = Object.fromEntries(Object.entries(dc.hosts || dc || {}).map(([hid, v]) => {
@@ -76,14 +88,18 @@ function _incidentServerState() {
 // FREEZE needs to target: live sessions, the client's visible session list,
 // and any id currently blocked by the resume breaker (the disappeared class).
 function _incidentTargets(clientSnapshot) {
-  const cids = new Set(), hostIds = new Set();
+  const cids = new Set(), hostIds = new Set(), terminalIds = new Set();
   try {
-    for (const [, s] of activeSessions) {
+    for (const [id, s] of activeSessions) {
       if (s.claudeSessionId) cids.add(s.claudeSessionId);
       if (s.backendSessionId) cids.add(s.backendSessionId);
       if (s.host) hostIds.add(s.host);
+      if (s.mode === 'terminal' && !s.host) terminalIds.add(String(id)); // raw PTY tail (2.369.118)
     }
   } catch {}
+  // the client's own terminal windows: ids are file names under data/session-buffers, so only the session-id shape is ever a target
+  const idOk = (x) => typeof x === 'string' && /^[\w.-]+$/.test(x) && !x.includes('..');
+  try { for (const w of (clientSnapshot?.windows || [])) if (w?.type === 'terminal' && idOk(w?.spec?.backendSessionId) && !w.spec.hostId) terminalIds.add(w.spec.backendSessionId); } catch {}
   try {
     for (const s of (clientSnapshot?.sessions || []).slice(0, 60)) {
       if (s?.id) cids.add(s.id);
@@ -91,7 +107,7 @@ function _incidentTargets(clientSnapshot) {
     }
   } catch {}
   try { for (const cid of noConvoRef.map.keys()) cids.add(cid); } catch {}
-  return { cids: [...cids].filter(Boolean), hostIds: [...hostIds].filter(Boolean) };
+  return { cids: [...cids].filter(Boolean), hostIds: [...hostIds].filter(Boolean), terminalIds: [...terminalIds].filter(Boolean) };
 }
 app.post('/api/incident', (req, res) => {
   try {
@@ -114,7 +130,7 @@ app.post('/api/incident', (req, res) => {
     (async () => {
       try {
         const inc = require('../incident.js');
-        const local = await inc.captureLocal(dir, { dataDir: path.join(rootDir, 'data'), cids: targets.cids });
+        const local = await inc.captureLocal(dir, { dataDir: path.join(rootDir, 'data'), cids: targets.cids, terminalIds: targets.terminalIds });
         fs.writeFileSync(path.join(dir, 'env.json'), JSON.stringify({ targets, local }, null, 1));
         if (hosts && targets.hostIds.length) {
           const remote = await inc.captureRemote({ hosts, hostIds: targets.hostIds, cids: targets.cids });

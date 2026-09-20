@@ -66,6 +66,23 @@ const tr = env.local.transcripts?.[CID];
 check('transcript fingerprinted (sha256 + size) for the referenced conversation', Array.isArray(tr) && tr.length > 0 && /^[0-9a-f]{64}$/.test(tr[0].sha256 || ''), JSON.stringify(tr));
 check('transcript tail frozen to disk', fs.readdirSync(path.join(dir2, 'frozen', 'transcripts')).some((f) => f.startsWith(CID)));
 check('targets include the referenced host', (env.targets?.hostIds || []).includes('host-test'));
+// TERMINAL TAILS + DESKTOP SCENE (2.369.118, userW's two reports arrived with the
+// wrapper sidecar only and nothing about the picture server): the last 64 KB of a
+// terminal-mode session's raw PTY buffer the reporter had open is frozen; the
+// server section carries the desktop singleton / apps / bridge counters.
+const bufDir = path.join(wt, 'data', 'session-buffers');
+fs.mkdirSync(bufDir, { recursive: true });
+fs.writeFileSync(path.join(bufDir, 'sess-77-term'), Buffer.concat([Buffer.alloc(100 * 1024, 0x41), Buffer.from('\\x1b[2J LOGIN URL https://example.invalid/oauth?code=abc TAIL-MARK')]));
+const rT = await post('/api/incident', { note: 'terminal tail', rings: {}, snapshot: { windows: [{ id: 'w1', type: 'terminal', spec: { action: 'attachSession', backendSessionId: 'sess-77-term', hostId: null } }, { id: 'w2', type: 'terminal', spec: { backendSessionId: '../../etc/passwd' } }] } });
+const dirT = path.join(wt, 'data', 'incidents', rT.id);
+for (let i = 0; i < 60 && !fs.existsSync(path.join(dirT, 'env.json')); i++) await sleep(500);
+const envT = JSON.parse(fs.readFileSync(path.join(dirT, 'env.json'), 'utf8'));
+const tailFile = path.join(dirT, 'frozen', 'buffers', 'sess-77-term.tail');
+check('the reporter\'s open terminal is a freeze target', (envT.targets?.terminalIds || []).includes('sess-77-term'), envT.targets);
+check('its raw buffer TAIL is frozen (last 64 KB, truncatedFrom recorded)', fs.existsSync(tailFile) && fs.statSync(tailFile).size === 64 * 1024 && fs.readFileSync(tailFile, 'latin1').endsWith('TAIL-MARK') && envT.local.terminalTails?.['sess-77-term']?.bytes === 64 * 1024 && envT.local.terminalTails['sess-77-term'].truncatedFrom > 64 * 1024, envT.local.terminalTails);
+check('a traversal-shaped session id is never a target', !(envT.targets?.terminalIds || []).some((x) => x.includes('..')) && !fs.existsSync(path.join(dirT, 'frozen', 'buffers', 'passwd.tail')));
+const bundleT = JSON.parse(fs.readFileSync(path.join(dirT, 'bundle.json'), 'utf8'));
+check('the server section carries the desktop scene (singleton + apps + bridge stats)', bundleT.server.desktop && typeof bundleT.server.desktop === 'object' && 'singleton' in bundleT.server.desktop && Array.isArray(bundleT.server.desktop.apps) && typeof bundleT.server.desktop.streams === 'object', bundleT.server.desktop);
 // the meta a later kill would clobber: prove the frozen copy is independent
 fs.writeFileSync(path.join(metaDir, 'cw-99-test.json'), JSON.stringify({ sessionId: null, name: 'CLOBBERED' }));
 check('frozen copy survives the original being clobbered',

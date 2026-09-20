@@ -107,5 +107,41 @@ ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) 
   ok('taskState MERGES wrapper live tasks over scanned history — never fallback (one live entry used to hide the whole set)', /tasks: \{ \.\.\.scanned\.tasks, \.\.\.base\.tasks \}/.test(ss3));
 }
 
+
+// ── LIVE WORKFLOW DETAIL (2.369.118): the task_progress tree survives heartbeats, field-wise ──
+{
+  const { normalizeWorkflowProgress } = require(path.join(REPO, "src/message-manager.js"));
+  const TREE = [
+    { type: "workflow_phase", index: 0, title: "Scan" }, { type: "workflow_phase", index: 1, title: "Repair" },
+    { type: "workflow_agent", index: 0, label: "scan:a", phaseIndex: 0, phaseTitle: "Scan", agentId: "aaa111", model: "claude-fable-5-1", state: "done", startedAt: 1789635311282, attempt: 1, lastToolName: "Grep", lastToolSummary: "grep -n foo", promptPreview: "SECRET PROMPT TEXT ".repeat(40) },
+    { type: "workflow_agent", index: 1, label: "repair:<b>x</b>", phaseIndex: 1, phaseTitle: "Repair", agentId: "bbb222", model: "claude-fable-5-1", state: "running", attempt: 2, lastToolName: "Bash", lastToolSummary: "npm test" },
+  ];
+  const wf = normalizeWorkflowProgress(TREE);
+  ok("normalizeWorkflowProgress: phases + agents, prompt preview DROPPED, fields bounded", wf && wf.phases.length === 2 && wf.agents.length === 2 && !("promptPreview" in wf.agents[0]) && wf.agents[1].state === "running" && wf.agents[1].attempt === 2 && wf.agents[0].lastToolSummary === "grep -n foo", JSON.stringify(wf));
+  ok("a heartbeat payload (no tree / empty / not an array) normalizes to null so the caller keeps its tree", normalizeWorkflowProgress(undefined) === null && normalizeWorkflowProgress([]) === null && normalizeWorkflowProgress("x") === null && normalizeWorkflowProgress([{ type: "other" }]) === null);
+  const big = normalizeWorkflowProgress(Array.from({ length: 260 }, (_, i) => ({ type: "workflow_agent", index: i, label: "L".repeat(500), state: "queued" })));
+  ok("agents are capped at 200 and labels at 80 chars", big.agents.length === 200 && big.agents[0].label.length === 80);
+  const mm3 = createMessageManager("claude", "test-wf-live");
+  mm3.convertHistory([
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_wf_live", name: "Workflow", input: { script: "export const meta = {}" } }] } },
+    { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_wf_live", content: "Workflow \"audit\" started.\nRun ID: wf_live1" }] } },
+  ]);
+  const edits = [];
+  mm3.onChange = (e) => edits.push(e);
+  const liveMsg = mm3.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_live");
+  mm3.processLive({ type: "system", subtype: "task_started", task_id: "wf_live1", tool_use_id: "toolu_wf_live", task_type: "local_workflow", description: "audit" });
+  mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", usage: { total_tokens: 1105301, tool_uses: 262, duration_ms: 2122694 }, last_tool_name: "Bash", workflow_progress: TREE });
+  ok("a task_progress with the tree lands on taskInfo.workflow + usage", liveMsg?.taskInfo?.workflow?.agents?.length === 2 && liveMsg.taskInfo.usage.totalTokens === 1105301 && liveMsg.taskInfo.usage.toolUses === 262 && liveMsg.taskInfo.lastTool === "Bash", JSON.stringify(liveMsg?.taskInfo));
+  mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", usage: { total_tokens: 1200000, tool_uses: 270, duration_ms: 2200000 } });
+  ok("a HEARTBEAT without the tree keeps the tree and refreshes usage (field-wise latest value)", liveMsg.taskInfo.workflow.agents.length === 2 && liveMsg.taskInfo.usage.totalTokens === 1200000, JSON.stringify(liveMsg.taskInfo));
+  mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", workflow_progress: [TREE[0], TREE[1], { ...TREE[2] }, { ...TREE[3], state: "done" }] });
+  ok("a later tree REPLACES the held one (running → done)", liveMsg.taskInfo.workflow.agents[1].state === "done");
+  // renderer + wiring pins
+  const cr = read("src/lib/chat-renderers.js"), cv = read("src/lib/chat-view.js"), css = read("public/chat.css");
+  ok("chat-renderers renders phases + agent chips (label · state dot · last tool) from taskInfo.workflow, every string escaped", /workflowLiveHtml\(ti\)/.test(cr) && /class=\"chat-wf-agent\" data-state=\"\$\{escHtml\(st\)\}\"/.test(cr) && /\$\{escHtml\(a\.label \|\| a\.agentId \|\| \x27\?\x27\)\}/.test(cr) && /\$\{wfLiveHtml\}<details/.test(cr));
+  ok("chat-view re-renders a WORKFLOW tool card on its taskInfo edit through _swapMessageEl (agent cards excluded — their live line is drawn elsewhere)", /fields\.taskInfo\.type === \x27workflow\x27 && msg\.role === \x27tool\x27[\s\S]{0,400}_swapMessageEl\(oldEl, newEl, id\)/.test(cv));
+  ok("chat.css styles the chips with theme vars (dot by state)", /\.chat-wf-agent\[data-state="running"\] \.chat-wf-dot \{ background: var\(--accent\)/.test(css) && /\.chat-wf-agent\[data-state="error"\] \.chat-wf-dot \{ background: var\(--red/.test(css));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

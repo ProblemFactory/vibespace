@@ -541,7 +541,7 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
 const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
-  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
+  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ensureClaudeRetention,
   agentHooksStatus, HOOK_OPTOUT_FILE,
 } = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT });
 // Generic operator-visible notice channel (2.226.0, user directive "不要静默
@@ -761,6 +761,7 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     const was = (prev || {})['agents.vibespaceIntegration'] !== false;
     const now = (next || {})['agents.vibespaceIntegration'] !== false;
     if (was !== now) syncHookRegistration();
+    if ((prev || {})['claude.transcriptRetentionDays'] !== (next || {})['claude.transcriptRetentionDays']) syncClaudeRetention(); // 2.369.118
     // claude.disableModelFallback flips LIVE sessions too ("动态对对话进行调整"):
     // apply_flag_settings merges switchModelsOnFlag into the CLI's inline
     // flag-settings layer, effective from the next turn. Local and remote
@@ -783,6 +784,10 @@ app.use(persistenceRouter);
 // the Integration master switch is readable) — a toggle flipped just before a
 // restart, or an imported config bundle carrying it, converges here.
 syncHookRegistration();
+// TRANSCRIPT RETENTION (2.369.118): claude.transcriptRetentionDays (default 36500 ≈ 100 y) → cleanupPeriodDays in ~/.claude/settings.json at boot + on change (the CLI's own 30-day sweep deletes the conversations this product keeps); remote hosts get it through the install helper (hosts.js)
+function claudeKeepDays() { const v = serverSetting('claude.transcriptRetentionDays'); return v === undefined || v === null || v === '' ? 36500 : Number(v); }
+function syncClaudeRetention() { try { const r = ensureClaudeRetention(claudeKeepDays()); if (r.applied && r.changed) console.log(`[claude-retention] cleanupPeriodDays=${r.days} written to ${r.file} (the CLI's own default sweeps transcripts after 30 days)`); else if (!r.applied && r.reason !== 'off') console.warn('[claude-retention] not applied: ' + r.reason); } catch (e) { console.warn('[claude-retention] failed:', e.message); } }
+if (!process.env.VIBESPACE_SKIP_AGENT_HOOKS) syncClaudeRetention();
 // Health probe: catches MID-RUN poisoning (the 2.225.1 incident class) that
 // boot-time registration can't — self-heals + notifies. 60s in, then 6h.
 setTimeout(checkAgentHookHealth, 60000).unref();
@@ -815,6 +820,7 @@ const { _srvConsoleRing } = require('./src/server/incident-wiring.js').create({
   readLayouts: (...a) => readLayouts(...a),
   sysinfo,
   listLayoutHistory: () => { try { return persistenceRouter.listLayoutHistory(); } catch { return []; } },
+  getDesktop: () => ({ vnc, keeper: desktopKeeper, stream: desktopStream }), // 2.369.118: the desktop scene (late-bound — created further down)
 });
 app.get('/api/sysinfo', async (req, res) => {
   try {
@@ -1301,6 +1307,7 @@ app.post('/api/agent-hooks/uninstall', (req, res) => {
 // ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
+hosts.claudeKeepDays = claudeKeepDays; // 2.369.118: the retention days ride the remote install (VIBESPACE_CLAUDE_KEEP_DAYS)
 const bcastAll = (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); };
 // B-f3e8 one-time migration: dial-tokens.json (deviceId → sha256) folds into
 // the dial host records (dialTokenHash) — see hosts.migrateDialTokenFile.

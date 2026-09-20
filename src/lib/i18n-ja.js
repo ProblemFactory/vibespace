@@ -3,6 +3,13 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Keep Claude Code conversations for (days)": "Claude Code の会話を保持する日数",
+  "Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code's own setting alone.": "Claude Code は起動のたびに、この日数より古い会話トランスクリプトを削除します（本来の既定値は 30 日）。VibeSpace は起動時と変更のたびにこの値を ~/.claude/settings.json（cleanupPeriodDays）へ書き込み、リモートホストにはエージェントツールのインストール時に書き込みます。0 = Claude Code 自身の設定をそのままにする。",
+  "Notices": "お知らせ",
+  "notice": "お知らせ",
+  "{n} for your information": "{n} 件（参考情報）",
+  "{n} notices (for your information)": "お知らせ {n} 件（参考情報）",
+  "{n} tool uses": "ツール呼び出し {n} 回",
   "A question in this conversation was answered.": "この会話の質問に回答がありました。",
   "A question in this conversation was dismissed.": "この会話の質問は却下されました。",
   "Open terminal in this session": "このセッションでターミナルを開く",

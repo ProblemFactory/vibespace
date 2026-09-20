@@ -23,6 +23,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
+const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
 const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
@@ -85,10 +86,15 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null } = {}) {
     text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
     if (!text) throw new Error('text required');
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
+    // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
+    // 'action' = the user must do something (default, every older item);
+    // 'notice' = for their information only — its own section in the popup,
+    // never in the red badge. A PRODUCER declares it; nothing infers it.
+    if (kind != null && !KINDS.includes(kind)) throw new Error(`kind must be one of ${KINDS.join('/')}`);
     detail = typeof detail === 'string' && detail.trim() ? detail.trim().slice(0, 2000) : null;
     // Idempotent BY TEXT across ALL statuses: re-filing an open question
     // refreshes it; re-filing a RESOLVED/DISMISSED one REOPENS the same item
@@ -108,6 +114,7 @@ class UserTodoManager {
       }
       if (detail && detail !== existing.detail) { existing.detail = detail; changed = true; }
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
+      if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (changed) { this._save(); this._notify(); }
       return { ...existing, existing: true };
     }
@@ -116,6 +123,7 @@ class UserTodoManager {
       id: 'ut-' + crypto.randomBytes(5).toString('hex'),
       sessionKey, text, detail,
       urgency: urgency || 'normal',
+      kind: kind || 'action',
       status: 'open', by,
       sessionName: sessionName || null, // display fallback frozen at file time
       jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel

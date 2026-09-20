@@ -3176,6 +3176,14 @@ class ChatView {
     // Task info update — delegate to status bar
     if (fields.taskInfo) {
       this._statusBar.updateTask(fields.taskInfo, msg.toolCallId, msg.content);
+      // LIVE WORKFLOW CARD (2.369.118): the phases/agent chips live IN the card,
+      // so a Workflow's taskInfo edit re-renders its tool card through the ONE
+      // swap point. Agent cards are excluded on purpose — their live status line
+      // is drawn by _onSubagentMessage and a re-render would wipe it.
+      if (fields.taskInfo.type === 'workflow' && msg.role === 'tool') {
+        const oldEl = this._elements.get(id);
+        if (oldEl) { try { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(oldEl, newEl, id); } catch { /* the status bar already has it */ } }
+      }
       // TERMINAL state also freezes the AGENT CARD's live status line
       // (2.233.1, real report "已经回复完了还写着回应中"): the line is only
       // ever redrawn by _onSubagentMessage, so after the last subagent

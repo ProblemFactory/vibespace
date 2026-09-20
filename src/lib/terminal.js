@@ -4,7 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { THEMES } from './themes.js';
-import { attachPopoverClose, showToast, uiScale } from './utils.js';
+import { attachPopoverClose, showToast, uiScale, COUNTER_ZOOM } from './utils.js';
 import { t } from './i18n.js';
 
 // Web fonts loaded via Google Fonts (always available)
@@ -75,6 +75,14 @@ class TerminalSession {
     this._settings = settings;
 
     const container = document.createElement('div'); container.className = 'terminal-container';
+    // NET ZOOM 1 (2.369.118, userW: "the login terminal copies the wrong lines"):
+    // xterm maps the mouse by `clientX - rect.left` (ZOOMED px under the body's
+    // DPI zoom) over a cell size it measured in LAYOUT px, so a drag at row 20
+    // selected row 20×scale — the exact class of inc-mtdrm922 (VNC pointer).
+    // Counter-zoom the container; the font size below is scaled back up so
+    // nothing visible changes (see _xtermPx). Measured on the standalone
+    // harness: zoom 1.25 → row 25 before, row 20 after.
+    container.style.zoom = COUNTER_ZOOM;
     winInfo.content.appendChild(container);
 
     const effectiveTheme = this.overrides.theme ? (THEMES[this.overrides.theme]?.terminal || themeManager.getTerminalTheme()) : themeManager.getTerminalTheme();
@@ -96,7 +104,7 @@ class TerminalSession {
 
     this.terminal = new Terminal({
       cursorBlink: false, cursorStyle: 'bar', cursorInactiveStyle: 'none',
-      fontSize: effectiveFontSize, fontFamily: effectiveFont,
+      fontSize: this._xtermPx(effectiveFontSize), fontFamily: effectiveFont,
       lineHeight: 1.15, scrollback: 10000, allowProposedApi: true,
       theme: effectiveTheme,
       minimumContrastRatio: mcr,
@@ -611,6 +619,17 @@ class TerminalSession {
   }
 
   _getGlobalFontSize() { return parseInt(localStorage.getItem('termFontSize')) || 14; }
+  // The xterm font size is the VISUAL px × the UI scale: the container sits at
+  // net zoom 1 (COUNTER_ZOOM in the constructor) so the glyphs must carry the
+  // DPI zoom themselves. EVERY writer of `terminal.options.fontSize` goes
+  // through here — a raw assignment would shrink the terminal by 1/scale.
+  _xtermPx(visualPx) { const s = uiScale() || 1; return Math.round((visualPx || 14) * s * 100) / 100; }
+  /** Re-derive the font size after the UI scale changed (app.js _refitAllTerminals). */
+  rescale() {
+    this.terminal.options.fontSize = this._xtermPx(this.overrides.fontSize || this._getGlobalFontSize());
+    try { this.terminal.clearTextureAtlas(); } catch {}
+    this.fit();
+  }
   _getGlobalFontFamily() { return localStorage.getItem('termFontFamily') || getAvailableFonts()[0]?.value || 'monospace'; }
 
   _addSettingsButton(winInfo) {
@@ -696,7 +715,7 @@ class TerminalSession {
       this.terminal.options.theme = t;
       this._syncContainerBg();
     } else if (key === 'fontSize') {
-      this.terminal.options.fontSize = value || this._getGlobalFontSize();
+      this.terminal.options.fontSize = this._xtermPx(value || this._getGlobalFontSize());
       try { this.terminal.clearTextureAtlas(); } catch {}
       this.fit();
     } else if (key === 'fontFamily') {

@@ -68,7 +68,7 @@ app.post('/api/agent/user-todo', (req, res) => {
     if (list) return res.json({ success: true, sessionKey: key, items: userTodos.forSession([key, `webui:${id}`]) });
     if (resolve) return res.json({ success: true, item: userTodos.resolveByAgent(key, resolve) });
     if (add && add.text) {
-      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', sessionName: s.name || null });
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', sessionName: s.name || null, kind: add.kind || null }); // kind: 'notice' = FYI only (vibespace-ask --notice), validated by the store
       return res.json({ success: true, item });
     }
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"}' });

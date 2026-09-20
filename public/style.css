@@ -1276,6 +1276,11 @@ html, body {
 .ut-count.ut-seg-urgent { background: var(--red, #e55); color: #fff; }
 .ut-count.ut-seg-high { background: var(--yellow, #e5c07b); color: #000; }
 .ut-count.ut-seg-norm { background: var(--accent); color: var(--accent-fg, #fff); }
+/* 2.369.118: the grey NOTICE count — for-your-information items never colour the badge */
+.ut-count.ut-seg-notice { background: var(--bg-secondary); color: var(--text-dim); border: 1px solid var(--border); }
+.ut-notice-head { font-size: 10px; color: var(--text-dim); margin: 10px 0 2px; text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: baseline; gap: 6px; }
+.ut-item-notice .ut-text { color: var(--text-secondary); }
+.ut-item-notice .ut-dot { background: var(--text-dim); }
 .taskbar-user-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
 @keyframes ut-blink { 50% { background: color-mix(in srgb, var(--accent) 35%, transparent); color: var(--text); } }
 .ut-popup { min-width: 320px; max-width: 400px; max-height: 480px; }

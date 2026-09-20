@@ -818,7 +818,9 @@ class HostManager {
         // POSIX node finder (2.244.4): nvm.sh sourcing only works in bash — a
         // dash login shell leaves `node` unresolvable (userN's Novita)
         + nodeFinder()
-        + '[ -n "$VS_NODE" ] && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED'],
+        // VIBESPACE_CLAUDE_KEEP_DAYS (2.369.118): the transcript-retention setting rides
+        // the register helper so the remote CLI's 30-day sweep is lifted there too
+        + `[ -n "$VS_NODE" ] && VIBESPACE_CLAUDE_KEEP_DAYS=${Math.max(0, Math.floor(Number((typeof this.claudeKeepDays === 'function' ? this.claudeKeepDays() : 0) || 0)))} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED`],
         { timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));

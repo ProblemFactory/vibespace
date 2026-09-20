@@ -780,6 +780,17 @@ const SETTINGS_SCHEMA = {
   // design-harness-features §2.12/§1.3). Every one of these is DEFAULT OFF and
   // maps to ONE flag dumped from `claude --help` (2.1.257); the adapter
   // validates the value before it becomes an argv token. ──
+  'claude.transcriptRetentionDays': {
+    // 2.369.118 (owner: "claude code 默认会删除旧对话…默认值配成 100 年"): the CLI sweeps
+    // transcripts older than cleanupPeriodDays (its default 30) at every start.
+    // The server writes this into ~/.claude/settings.json at boot + on change
+    // (agent-tool-generators ensureClaudeRetention) and hands it to remote hosts
+    // at (re)install (VIBESPACE_CLAUDE_KEEP_DAYS → the hook-register helper).
+    type: 'number', default: 36500, min: 0, max: 36500, step: 30,
+    label: t('Keep Claude Code conversations for (days)'),
+    description: t('Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code\'s own setting alone.'),
+    category: t('Claude'), liveApply: true,
+  },
   'claude.brief': {
     type: 'boolean', default: false,
     label: t('Let the agent send you messages and files (--brief)'),

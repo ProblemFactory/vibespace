@@ -760,6 +760,16 @@ class MessageManager {
         if (existing.taskInfo) {
           if (raw.description) existing.taskInfo.description = raw.description;
           if (raw.last_tool_name) existing.taskInfo.lastTool = raw.last_tool_name;
+          // LIVE DETAIL (2.369.118): the record also carries `usage` and — for a
+          // Workflow — the `workflow_progress` tree (phases + agents with label /
+          // state / lastToolName). The tree is INTERMITTENT (heartbeats omit it),
+          // so it is latest-value FIELD-WISE: a payload without it keeps the tree
+          // already held. Live stream only — the transcript never carries
+          // task_progress, so the chips are a live-session affordance and the
+          // post-hoc View Workflow window stays the history surface.
+          if (raw.usage && typeof raw.usage === 'object') existing.taskInfo.usage = { totalTokens: raw.usage.total_tokens ?? null, toolUses: raw.usage.tool_uses ?? null, durationMs: raw.usage.duration_ms ?? null };
+          const wf = normalizeWorkflowProgress(raw.workflow_progress);
+          if (wf) existing.taskInfo.workflow = wf;
           if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
         }
       } else if (raw.subtype === 'task_notification') {
@@ -1438,4 +1448,29 @@ function parseBackgroundLaunch(toolName, input, resultText) {
 // peerDisplayName is shared with the codex normalizer (design-harness-plugins
 // §1 P1): the server frames it parses are backend-neutral text, and a codex
 // rollout copy of a peer message carries ONLY that text.
-module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName, initFrameFacts, commandNames };
+/** PURE: the CLI's `workflow_progress` list (task_progress records of a Workflow run —
+ *  `{type:'workflow_phase', index, title}` and `{type:'workflow_agent', index, label,
+ *  phaseIndex, phaseTitle, agentId, model, state, lastToolName, lastToolSummary,
+ *  attempt, startedAt, promptPreview}`) → `{phases:[{index,title}], agents:[…]}` with
+ *  every string bounded (agent-authored text) and the prompt preview dropped (the
+ *  card never shows it). null when the payload carries no tree (heartbeat) — the
+ *  caller keeps what it already has. */
+function normalizeWorkflowProgress(list) {
+  if (!Array.isArray(list) || !list.length) return null;
+  const s = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
+  const i = (v) => (Number.isFinite(v) ? v : null);
+  const phases = [], agents = [];
+  for (const e of list) {
+    if (!e || typeof e !== 'object') continue;
+    if (e.type === 'workflow_phase') phases.push({ index: i(e.index), title: s(e.title, 80) });
+    else if (e.type === 'workflow_agent') {
+      if (agents.length >= 200) continue;
+      agents.push({ index: i(e.index), label: s(e.label, 80), phaseIndex: i(e.phaseIndex), phaseTitle: s(e.phaseTitle, 80), agentId: s(e.agentId, 32), model: s(e.model, 40), state: s(e.state, 24), lastToolName: s(e.lastToolName, 40), lastToolSummary: s(e.lastToolSummary, 120), attempt: i(e.attempt), startedAt: i(e.startedAt) });
+    }
+  }
+  if (!phases.length && !agents.length) return null;
+  phases.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  return { phases, agents };
+}
+
+module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress };
