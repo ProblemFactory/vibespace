@@ -999,7 +999,7 @@ class CodexMessageManager {
     if (type === 'local_shell_call') return this._processCustomToolCall({ ...item, name: 'local_shell', input: item.action ?? {} }, emit);
     if (type === 'image_generation_call') return this._processImageGenEvent({ call_id: item.call_id || item.id || this._nextId(), prompt: item.prompt || item.revised_prompt || '', path: item.saved_path || item.savedPath || '', status: item.status || '' }, emit);
     if (SKIPPED_RESPONSE_ITEM_TYPES.has(type)) return;
-    this._noteUnknown('response_item', type);
+    this._noteUnknown('response_item', type, item, emit);
   }
 
   // ── B-7473: sub-agent ↔ root chatter ──
@@ -1825,7 +1825,7 @@ class CodexMessageManager {
         this._processSleepEvent({ call_id: it.id || this._nextId(), duration_ms: it.durationMs }, emit);
         return;
       }
-      this._noteUnknown('event_msg', 'item_completed:Extension:' + (it.kind || '(unkinded)'));
+      this._noteUnknown('event_msg', 'item_completed:Extension:' + (it.kind || '(unkinded)'), event, emit);
       return;
     }
     if (type === 'ImageView') {
@@ -1851,10 +1851,10 @@ class CodexMessageManager {
         this._processSubAgentActivity({ event_id: it.id, agent_thread_id: it.agent_thread_id || it.agentThreadId, agent_path: it.agent_path || it.agentPath, kind, detail: it.detail }, emit);
         return;
       }
-      this._noteUnknown('event_msg', 'item_completed:SubAgentActivity:' + (kind || '(unkinded)'));
+      this._noteUnknown('event_msg', 'item_completed:SubAgentActivity:' + (kind || '(unkinded)'), event, emit);
       return;
     }
-    this._noteUnknown('event_msg', 'item_completed:' + (type || '(untyped)'));
+    this._noteUnknown('event_msg', 'item_completed:' + (type || '(untyped)'), event, emit);
   }
 
   // Codex sub-agents: the lifecycle of a spawned agent THREAD
@@ -2308,7 +2308,7 @@ class CodexMessageManager {
     // and it says so here instead of hanging behind an unanswerable card.
     if (type === 'client_request_unsupported') {
       const method = String(event.method || '(unnamed)');
-      this._noteUnknown('server_request', 'unsupported:' + method);
+      this._noteUnknown('server_request', 'unsupported:' + method, payload, emit);
       const msg = this._create({
         role: 'system',
         status: 'error',
@@ -2342,7 +2342,7 @@ class CodexMessageManager {
     }
 
     if (SKIPPED_EVENT_TYPES.has(type)) return;
-    this._noteUnknown('event_msg', type);
+    this._noteUnknown('event_msg', type, event, emit);
   }
 
   _processServerRequest(payload, emit) {

@@ -163,7 +163,11 @@ console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-age
   global.__vsEvent = prevEv;
   const roles = mm.messages.map((m) => m.role);
   ok(!mm.messages.some((m) => m.role === 'system' && m.status !== 'complete'), 'no error card for any of the known/unknown 0.153 records', roles);
-  ok(mm.messages.filter((m) => m.role === 'system').length === 1, 'known skips (world_state / token_usage_record / inter_agent_communication_metadata / item_completed) render NOTHING (only the init card exists)', roles);
+  // 2.369.120: an UNKNOWN record is the fall-back "Unknown event" card (owner: 未知事件作为兜底) — the four
+  // unknowns above (brand_new_item ×2, brand_new_event, brand_new_record) each render one; the KNOWN skips still render nothing.
+  const sys = mm.messages.filter((m) => m.role === 'system');
+  ok(sys.length === 5 && sys.filter((m) => m.noticeKind === 'unknown-record').length === 4, 'known skips (world_state / token_usage_record / inter_agent_communication_metadata / item_completed) render NOTHING; the four truly unknown records render as Unknown event cards (init + 4)', roles);
+  ok(sys.filter((m) => m.noticeKind === 'unknown-record').every((m) => m.content[0].harness === 'Codex' && typeof m.content[0].record === 'string' && m.content[0].record.length > 2), 'each Unknown event card names the harness and carries the whole record');
   // B-7473: the sub-agent traffic is COLLAB ROWS now (an ENCRYPTED inbound
   // message has no body to show), and consecutive rows coalesce into one
   // message — 'started' + 'interacted' + the encrypted FINAL_ANSWER +
