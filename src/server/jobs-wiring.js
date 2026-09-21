@@ -136,6 +136,22 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     }
     res.json({ job: { ...enrichPublished(jm.snapshot(job, { tail }), job), access: job.access, interaction: job.interaction, runs: job.runs } });
   });
+  // BATCH ACKNOWLEDGE (2.369.121, owner: 批量已读): the panel's "Mark all seen"
+  // sends every ackable id once; each terminal one-shot not yet seen is
+  // acknowledged as user-opened (the same rule as the per-row ping), then ONE
+  // save and ONE broadcast so every open panel + the badge repaint once.
+  app.post('/api/jobs/seen', (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 500) : [];
+    if (!ids.length) return res.status(400).json({ error: 'ids required' });
+    const acked = [];
+    for (const id of ids) {
+      const job = jm.jobs.get(id);
+      if (!job) continue;
+      if (jm.markAck(job, 'user-opened', undefined, { quiet: true })) acked.push(id);
+    }
+    if (acked.length) { jm._save(); try { jm.d.broadcast('jobs-updated', { acked }); } catch { } }
+    res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked });
+  });
   app.post('/api/jobs/:id/:act', (req, res) => {
     const job = jm.jobs.get(req.params.id);
     const act = req.params.act;

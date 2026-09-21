@@ -3,6 +3,9 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Mark all seen": "全部标为已看",
+  "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "把这里所有已结束、你还没看过的任务标为已看——红色计数会降下来，不会删除任何东西",
+  "Could not mark them seen": "无法标为已看",
   "Unknown event": "未知事件",
   "A record VibeSpace does not recognize — the harness may have gained a feature or changed its protocol.": "VibeSpace 不认识的记录——harness 可能新增了功能或改了协议。",
   "Full record": "完整记录",

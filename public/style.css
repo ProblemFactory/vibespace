@@ -3843,7 +3843,12 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-body { font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ── Background Work TRIAGE (design §13, 2026-09-14): session heads, fold groups, the failed row's last line, the archive row ── */
-.jobs-sess-head { font-size: 11px; font-weight: 600; color: var(--text-dim); margin: 10px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs-sess-head { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; text-align: left; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-dim); margin: 10px 0 4px; padding: 3px 4px; border: none; background: transparent; cursor: pointer; border-radius: var(--radius-sm); } /* 2.369.121: a fold button (chevron · name · ×n · chips · Mark all seen · age) */
+.jobs-sess-head:hover { background: var(--bg-hover, var(--bg-panel)); }
+.jobs-sess-head.jobs-sess-attn .jobs-sess-name { color: var(--text); }
+.jobs-sess-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.jobs-seen-all { font-weight: 500; white-space: nowrap; }
+.jobs-seen-slot:empty { display: none; }
 .jobs-group { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; text-align: left; padding: 5px 8px; margin-bottom: 4px; border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .jobs-group:hover { background: var(--bg-hover); }
 .jobs-group:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

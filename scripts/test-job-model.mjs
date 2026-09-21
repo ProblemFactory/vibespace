@@ -290,5 +290,33 @@ ok(M.renderNotifStash(stash, { budget: 250, spillPath: '/data/job-notifications-
   for (const lane of ['stash', 'off', 'suppressed']) ok(M.ACK_LANES && !M.ACK_LANES.has(lane) && !M.ackState(failed(lane, true), T0 + D).acked, `'${lane}' never acknowledges, even on an ok:true entry`);
 }
 
+
+// ── SESSION FOLDS + BATCH SEEN (2.369.121, owner: 后台工作按会话折叠和批量已读) ──
+{
+  const L = await import(new URL('../src/lib/jobs-layout.js', import.meta.url));
+  const own = (cid) => ({ ownerSession: { conversationId: cid } });
+  const j = (id, state, extra = {}) => ({ id, kind: 'task', name: id.replace(/-\d+$/, ''), state, ...own('conv-A'), ...extra });
+  const jobs = [
+    j('fail-1', 'failed'), j('fail-2', 'failed', { ack: { acked: true, by: 'user-opened', at: 1 } }), j('done-1', 'done'), j('run-1', 'up'), j('ask-1', 'awaiting-user'),
+    j('missed-1', 'missed', { archived: true }), { ...j('svc-1', 'failed'), kind: 'service' },
+    { id: 'b-done', kind: 'task', name: 'b', state: 'done', ...own('conv-B') },
+  ];
+  ok(L.ackableIds(jobs).join() === 'fail-1,done-1,b-done', 'ackableIds = terminal one-shots not yet seen; acked / running / awaiting / archived / service excluded');
+  const lay = L.foldTasks(jobs.filter((x) => !x.archived), {}); // the panel never hands archived rows to the layout
+  const A = lay.sessions.find((s) => s.key === 's:conv-A'), B = lay.sessions.find((s) => s.key === 's:conv-B');
+  ok(A && A.expanded === true && A.defaultExpanded === true && A.count === 6 && A.running === 1 && A.awaiting === 1 && A.failedUnacked === 2 && A.ackable.join() === 'fail-1,done-1', 'a session carries count/running/awaiting/failedUnacked and its ackable ids; expanded by default', A && { c: A.count, r: A.running, a: A.awaiting, f: A.failedUnacked, ack: A.ackable });
+  ok(B && B.ackable.join() === 'b-done' && B.failedUnacked === 0, 'ackable ids are per session');
+  const folded = L.foldTasks(jobs.filter((x) => !x.archived), { expanded: { 's:conv-A': false } });
+  ok(folded.sessions.find((s) => s.key === 's:conv-A').expanded === false && folded.sessions.find((s) => s.key === 's:conv-B').expanded === true, 'a persisted session fold applies by the session key; other sessions untouched');
+  const pruned = L.pruneFolds({ 's:conv-A': false, 's:conv-GONE': false, 's:conv-A|fail': true, 'zzz|old': false }, lay);
+  ok(JSON.stringify(pruned) === JSON.stringify({ 's:conv-A': false, 's:conv-A|fail': true }), 'pruneFolds keeps live session keys and live group keys, drops the rest', pruned);
+  // wiring pins (the 2.355.0 lesson)
+  const panel = fs.readFileSync(new URL('../src/lib/jobs-panel.js', import.meta.url), 'utf8');
+  ok(/import \{[^}]*ackableIds[^}]*\} from '\.\/jobs-layout\.js'/.test(panel) && /className = 'jobs-sess-head'/.test(panel) && /sh\.setAttribute\('aria-expanded'/.test(panel) && /setFold\(sess, layout\)/.test(panel) && /if \(!sess\.expanded\) continue;/.test(panel), 'the panel: the session header is a fold button (aria-expanded, setFold by the session key) and folded sessions render no groups');
+  ok(/fetchJson\('\/api\/jobs\/seen', \{ method: 'POST'/.test(panel) && /seenAllButton\(sess\.ackable, refresh/.test(panel) && /seenAllButton\(ackableIds\(jobs\), render\)/.test(panel), 'the panel: "Mark all seen" per session header AND window-wide, ONE batch request each');
+  const wiring = fs.readFileSync(new URL('../src/server/jobs-wiring.js', import.meta.url), 'utf8');
+  ok(/app\.post\('\/api\/jobs\/seen'/.test(wiring) && /jm\.markAck\(job, 'user-opened', undefined, \{ quiet: true \}\)/.test(wiring) && /jm\._save\(\); try \{ jm\.d\.broadcast\('jobs-updated', \{ acked \}\)/.test(wiring) && wiring.indexOf("app.post('/api/jobs/seen'") < wiring.indexOf("app.post('/api/jobs/:id/:act'"), 'the server: POST /api/jobs/seen acknowledges each id quietly, then ONE save + ONE broadcast; registered before the per-job act route');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

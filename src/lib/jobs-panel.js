@@ -7,7 +7,7 @@ import { t } from './i18n.js';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { registerWindowType } from './window-types.js';
-import { badgeCounts, foldTasks, pruneFolds, heldText } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds } from './jobs-layout.js';
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
 const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', scheduled: 'idle', down: 'idle', done: 'idle' };
@@ -41,8 +41,29 @@ async function loadFolds(app) {
   FOLDS = st && st.jobsPanelFolds && typeof st.jobsPanelFolds === 'object' ? { ...st.jobsPanelFolds } : {};
   return FOLDS;
 }
-/** persist ONE toggle: the map is pruned to the groups that still exist, so a
- *  fold can never outlive its group and grow user state without bound */
+/** BATCH "Mark all seen" (2.369.121, owner: 批量已读): ONE request for every
+ *  ackable id (a terminal one-shot not yet seen); the server acknowledges them
+ *  all with one save + one broadcast, so the badge and every open panel repaint
+ *  once. Never sent for an empty list. */
+function seenAllButton(ids, refresh, { compact = false } = {}) {
+  if (!ids || !ids.length) return null;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'jobs-btn jobs-seen-all';
+  b.textContent = compact ? `✓ ${ids.length}` : `✓ ${t('Mark all seen')} (${ids.length})`;
+  b.title = t('Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted');
+  b.onclick = async (ev) => {
+    ev.stopPropagation();
+    b.disabled = true;
+    const r = await fetchJson('/api/jobs/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+    if (!r || r.error) showToast(t('Could not mark them seen') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
+    refresh?.();
+  };
+  return b;
+}
+/** persist ONE toggle (a family group OR a whole session — both carry key +
+ *  expanded): the map is pruned to the keys that still exist, so a fold can
+ *  never outlive its group/session and grow user state without bound */
 function setFold(g, layout) {
   FOLDS = pruneFolds({ ...(FOLDS || {}), [g.key]: !g.expanded }, layout);
   fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobsPanelFolds: FOLDS }) }).catch(() => {});
@@ -152,10 +173,31 @@ function renderList(app, root, jobs, { compact, refresh, archivedCount = 0 }) {
 function renderTaskSection(app, root, list, { compact, refresh, archivedCount }) {
   const layout = foldTasks(list, { expanded: FOLDS || {}, sessionNames: sessionNameMap(app) });
   for (const sess of layout.sessions) {
-    const sh = document.createElement('div'); sh.className = 'jobs-sess-head';
-    sh.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.text;
+    // SESSION HEADER = a fold button (2.369.121, owner: 按会话折叠 + 批量已读):
+    // chevron · name · ×count · attention chips · "Mark all seen" · age.
+    const sh = document.createElement('button');
+    sh.type = 'button';
+    sh.className = 'jobs-sess-head' + (sess.expanded ? ' jobs-sess-open' : '') + (sess.failedUnacked ? ' jobs-sess-attn' : '');
+    sh.setAttribute('aria-expanded', sess.expanded ? 'true' : 'false');
+    sh.dataset.session = sess.key;
+    const schev = document.createElement('span'); schev.className = 'jobs-group-chev'; schev.textContent = sess.expanded ? '▾' : '▸';
+    const sname = document.createElement('span'); sname.className = 'jobs-sess-name'; sname.textContent = sess.label.kind === 'manual' ? t('created by you') : sess.label.text;
     if (sess.label.kind === 'short') sh.title = t('session {id} (no longer listed)', { id: sess.label.text });
+    const scnt = document.createElement('span'); scnt.className = 'jobs-group-count'; scnt.textContent = `×${sess.count}`;
+    sh.append(schev, sname, scnt);
+    const schip = (cls, text) => { const s = document.createElement('span'); s.className = 'jobs-group-chip ' + cls; s.textContent = text; sh.appendChild(s); };
+    if (sess.running) schip('jobs-group-run', `${sess.running} ${t('running')}`);
+    if (sess.awaiting) schip('jobs-group-ask', `${sess.awaiting} ${t('awaiting you')}`);
+    if (sess.failedUnacked) schip('jobs-group-bad', `${sess.failedUnacked} ${t('failed')}`);
+    const ssp = document.createElement('span'); ssp.style.flex = '1';
+    sh.appendChild(ssp);
+    const seenBtn = seenAllButton(sess.ackable, refresh, { compact });
+    if (seenBtn) sh.appendChild(seenBtn);
+    const sage = document.createElement('span'); sage.className = 'jobs-group-age'; sage.textContent = sess.latestAt ? hum(Date.now() - sess.latestAt) + ' ' + t('ago') : '';
+    sh.appendChild(sage);
+    sh.onclick = () => { setFold(sess, layout); refresh?.(); };
     root.appendChild(sh);
+    if (!sess.expanded) continue;
     for (const g of sess.groups) {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -359,7 +401,8 @@ export function openJobsWindow(app, opts = {}) {
   const btnNew = document.createElement('button'); btnNew.className = 'jobs-btn jobs-btn-ok'; btnNew.textContent = '＋ ' + t('New');
   btnNew.onclick = () => openCreateDialog(app, () => render());
   const btnRefresh = document.createElement('button'); btnRefresh.className = 'jobs-btn'; btnRefresh.textContent = '⟳';
-  bar.append(summary, sp, btnNew, btnRefresh);
+  const seenSlot = document.createElement('span'); seenSlot.className = 'jobs-seen-slot'; // the window-wide "Mark all seen" (2.369.121), filled per render
+  bar.append(summary, sp, seenSlot, btnNew, btnRefresh);
   const root = document.createElement('div'); root.className = 'jobs-body';
   shell.append(bar, root);
   winInfo.content.appendChild(shell);
@@ -373,6 +416,9 @@ export function openJobsWindow(app, opts = {}) {
     summary.textContent = summaryText(counts, r?.held);
     summary.title = r?.held && r.held.total ? heldText(r.held, { t }) : '';
     summary.classList.toggle('jobs-summary-held', !!(r?.held && r.held.total));
+    seenSlot.textContent = '';
+    const seenAll = seenAllButton(ackableIds(jobs), render);
+    if (seenAll) seenSlot.appendChild(seenAll);
     renderList(app, root, jobs, { compact: false, refresh: render, archivedCount: r?.archivedCount || 0 });
     const esc = await fetchJson('/api/jobs-escapes');
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {

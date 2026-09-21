@@ -3,6 +3,9 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Mark all seen": "すべて既読にする",
+  "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "ここにある、まだ見ていない終了済みジョブをすべて既読にします — 赤い件数が減るだけで、何も削除されません",
+  "Could not mark them seen": "既読にできませんでした",
   "Unknown event": "不明なイベント",
   "A record VibeSpace does not recognize — the harness may have gained a feature or changed its protocol.": "VibeSpace が認識できないレコード — ハーネスに新機能が加わったかプロトコルが変わった可能性があります。",
   "Full record": "レコード全体",

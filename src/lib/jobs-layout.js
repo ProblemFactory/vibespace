@@ -29,6 +29,17 @@ export function attentionOf(j) {
   return j.ack && j.ack.acked ? 'acked-failure' : 'unacked-failure';
 }
 
+/** The states a ✓ / "Mark all seen" can acknowledge (the same predicate the panel's
+ *  row-expand ping used since design §13 rule 1c): a terminal ONE-SHOT the user
+ *  has not seen. A service, a running job, an archived record or an already
+ *  acknowledged one is never in the batch (2.369.121, owner: 批量已读). */
+export const ACKABLE_STATES = Object.freeze(['failed', 'missed', 'unverified', 'interrupted', 'done']);
+export function isAckable(j) {
+  return !!j && (j.kind || 'task') === 'task' && !j.archived && ACKABLE_STATES.includes(j.state) && !(j.ack && j.ack.acked);
+}
+/** The ids a batch acknowledgement would change — nothing else is sent. */
+export function ackableIds(jobs) { return (jobs || []).filter(isAckable).map((j) => j.id); }
+
 /** THE counter (rule 2): attention = awaiting-user + UNACKNOWLEDGED failures
  *  (red); acknowledged failures are a grey count; running is the calm number. */
 export function badgeCounts(jobs) {
@@ -93,17 +104,18 @@ export function foldTasks(tasks, { expanded = {}, sessionNames = {} } = {}) {
     if (!sess) {
       const named = (cid && sessionNames[cid]) || (sid && sessionNames[sid]) || null;
       const label = named ? { kind: 'name', text: String(named) } : cid || sid ? { kind: 'short', text: shortId(cid || sid) } : { kind: 'manual', text: 'manual' };
-      sess = { key: sessionKey, label, groups: new Map(), latestAt: 0 };
+      sess = { key: sessionKey, label, groups: new Map(), latestAt: 0, count: 0, running: 0, awaiting: 0, failedUnacked: 0, ackable: [] };
       sessions.set(sessionKey, sess);
     }
     const family = familyOf(j.name);
     const gkey = sessionKey + '|' + family;
     let g = sess.groups.get(gkey);
     if (!g) { g = { key: gkey, sessionKey, family, jobs: [], count: 0, running: 0, awaiting: 0, failedUnacked: 0, failedAcked: 0, latestAt: 0 }; sess.groups.set(gkey, g); }
-    g.jobs.push(j); g.count++;
-    if (RUNNING.has(j.state)) g.running++;
+    g.jobs.push(j); g.count++; sess.count++;
+    if (RUNNING.has(j.state)) { g.running++; sess.running++; }
     const a = attentionOf(j);
-    if (a === 'awaiting') g.awaiting++; else if (a === 'unacked-failure') g.failedUnacked++; else if (a === 'acked-failure') g.failedAcked++;
+    if (a === 'awaiting') { g.awaiting++; sess.awaiting++; } else if (a === 'unacked-failure') { g.failedUnacked++; sess.failedUnacked++; } else if (a === 'acked-failure') g.failedAcked++;
+    if (isAckable(j)) sess.ackable.push(j.id); // the session header's "Mark all seen" batch (2.369.121)
     const at = latestAt(j);
     if (at > g.latestAt) g.latestAt = at;
     if (at > sess.latestAt) sess.latestAt = at;
@@ -117,7 +129,11 @@ export function foldTasks(tasks, { expanded = {}, sessionNames = {} } = {}) {
       g.expanded = Object.prototype.hasOwnProperty.call(expanded || {}, g.key) ? !!expanded[g.key] : g.defaultExpanded;
       flat.push(g);
     }
-    out.push({ key: sess.key, label: sess.label, groups, latestAt: sess.latestAt });
+    // SESSION FOLD (2.369.121, owner: 按会话折叠): a whole session's rows fold
+    // behind its header; expanded by default (today's look), the user's
+    // persisted choice keyed by the session key applies after.
+    const expandedSess = Object.prototype.hasOwnProperty.call(expanded || {}, sess.key) ? !!expanded[sess.key] : true;
+    out.push({ key: sess.key, label: sess.label, groups, latestAt: sess.latestAt, count: sess.count, running: sess.running, awaiting: sess.awaiting, failedUnacked: sess.failedUnacked, ackable: sess.ackable, expanded: expandedSess, defaultExpanded: true });
   }
   return { sessions: out, groups: flat };
 }
@@ -126,7 +142,7 @@ export function foldTasks(tasks, { expanded = {}, sessionNames = {} } = {}) {
  *  the current layout still holds (a stale key would grow user state without
  *  bound). Returns a NEW object. */
 export function pruneFolds(folds, layout) {
-  const live = new Set((layout && layout.groups || []).map((g) => g.key));
+  const live = new Set([...(layout && layout.groups || []).map((g) => g.key), ...(layout && layout.sessions || []).map((s) => s.key)]); // group keys AND session keys (2.369.121)
   const out = {};
   for (const [k, v] of Object.entries(folds || {})) if (live.has(k)) out[k] = !!v;
   return out;
