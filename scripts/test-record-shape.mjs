@@ -194,6 +194,26 @@ console.log('§2 synthetic drift — one card per shape per session, merged on r
   global.__vsEvent = prevEv;
 }
 
+// §2b OURS BY PREFIX (2.369.126 r2): the wrappers mint webui_* keys faster than any list —
+// `webui_msg_id` on every codex user record was flagged as drift and pushed a red card into
+// every queued send (test-queue-steer, heavy tier). The census below is grep-derived over the
+// tree's writers, so the next key cannot regress either.
+console.log('§2b every webui_* key the tree writes is OURS by prefix — never drift');
+{
+  const { execSync } = await import('node:child_process');
+  const written = [...new Set(execSync("/usr/bin/grep -rhoE 'webui_[a-z_]+' data/bin server.js src --include='*.js' 2>/dev/null || true", { cwd: REPO, encoding: 'utf8', shell: '/bin/sh' }).split('\n').map((x) => x.trim()).filter(Boolean))].sort();
+  ok(`census scope is non-vacuous (${written.length} webui_* keys written by the tree: ${written.join(' ')})`, written.length >= 8, written);
+  const notOurs = written.filter((k) => !R.isOurs(k));
+  ok(`every written webui_* key is OURS${notOurs.length ? ' — NOT: ' + notOurs.join(', ') : ''}`, notOurs.length === 0, notOurs);
+  const payload = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'one' }] };
+  for (const k of written) payload[k] = 'x';
+  const codexRec = { timestamp: '2026-09-21T00:00:00.000Z', type: 'response_item', payload };
+  ok('a codex user record carrying EVERY written webui_* key judges as no drift', R.unknownFields('codex', 'rollout', codexRec) === null, R.unknownFields('codex', 'rollout', codexRec));
+  const claudeRec = { type: 'user', uuid: 'u1', session_id: 's1', webui_msg_id: 'm1', webui_origin_note: 'n', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } };
+  ok('a claude stream user record carrying webui_* keys judges as no drift', R.unknownFields('claude', 'stream', claudeRec) === null, R.unknownFields('claude', 'stream', claudeRec));
+  { const nc = R.unknownFields('codex', 'rollout', { timestamp: '2026-09-21T00:00:00.000Z', type: 'response_item', payload: { ...payload, webui_future_key: 1, zzz_new_vendor_field: 1 } }); ok('NEGATIVE CONTROL: a vendor field beside a future webui_* key is still flagged, and the webui_* key is not', !!nc && nc.fields.join(',') === 'zzz_new_vendor_field', nc); }
+}
+
 console.log('§3 enum drift — an undeclared enum value is a card, and the handler still runs');
 {
   const mm = createMessageManager('claude', 'test-shape-enum');

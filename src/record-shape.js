@@ -51,7 +51,11 @@ const ENVELOPES = Object.freeze({
 const OURS = asSet(['webui_peer', 'webui_queue_id', 'webui_after_commit', 'webui_origin', 'webui_origin_note', 'modelPinned', 'wrapper', 'permissionMode', 'session_name', 'agent_role', 'item_id', 'thread_id', 'turn_id', '_fromWebui', 'promptSource', 'originKind', 'originNote', 'read_via', 'vibespace_fixture_note']);
 // …and by CONVENTION every `_`-prefixed key is a VibeSpace-own private marker (`_fromWebui`, the
 // reader's `__line` / `__threadId`, a fixture's `_note`) — no harness writes one on a record.
-const isOurs = (k) => OURS.has(k) || k.charCodeAt(0) === 95 /* '_' */;
+// Every `webui_*` key is OURS by PREFIX, not by list: the wrappers mint new ones
+// (2.369.126 r2 — `webui_msg_id` on a codex user record was flagged as drift and
+// pushed a red card into every queued send; test-queue-steer caught it in the
+// heavy tier). The list keeps the non-prefixed names.
+const isOurs = (k) => OURS.has(k) || k.startsWith('webui_') || k.charCodeAt(0) === 95 /* '_' */;
 
 // ── claude: nested specs (the declared depth) ────────────────────────────────────────────────────
 const RATE_LIMIT_INFO = sh(['status', 'resetsAt', 'rateLimitType', 'utilization', 'unifiedWindows', 'overageStatus', 'overageResetsAt', 'overageDisabledReason', 'isUsingOverage', 'surpassedThreshold', 'unifiedRateLimitFallbackPercentage'], {
