@@ -105,6 +105,8 @@ const SESSION_FIELDS = {
 
   // remote / transport
   _remoteState:        { owner: 'stdout', persisted: 'wrapper', note: 'remote keeper link state (reconnecting chip)' },
+  _vcs:                { owner: 'brain',  persisted: 'meta',    note: "design-unknown-records (2026-09-21): the LAST claude `vcs_state_changed` fact {kind, branch, cwd, at} — session-brain noteVcsState writes it from either feed; rides active-sessions as `vcs` (the card's git chip) + the `session-vcs` push (explorer refresh); persisted so the chip survives a restart" },
+  _prLinks:            { owner: 'brain',  persisted: 'meta',    note: "design-unknown-records (2026-09-21): the published changes this session announced (`code_change_published` → [{url, identifier, repo, action, provider, at}], ≤20, keyed by url) — session-brain notePublishedChange; rides active-sessions as `prLinks` (the card's PR chips); the url is UNVERIFIED by the CLI's own words — shown, never fetched" },
   _remotePort:         { owner: 'ws',     persisted: null,      note: 'reverse-tunnel port for VIBESPACE_API' },
   _agentdSession:      { owner: 'ws',     persisted: 'meta',    note: 'daemon pipe-session marker (R6/M2)' },
   _agentdCfgFile:      { owner: 'ws',     persisted: null,      note: 'attach-cli cfg file path (cleanup)' },

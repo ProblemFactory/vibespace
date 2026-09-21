@@ -87,6 +87,20 @@ class SessionStatusManager {
 
   history(key) { return this._state.history?.[key] || []; }
 
+  /** A NON-STATUS timeline event (design-unknown-records, 2026-09-21): today the claude
+   *  `vcs_state_changed` fact ({event:'vcs', kind, branch, at}). Appended to the same
+   *  per-session history the Session Properties timeline reads, never a status write
+   *  (the effective status is untouched, no pendingNotice, no broadcast — the
+   *  active-sessions push that carries the fact re-renders the panel). */
+  noteEvent(key, entry) {
+    if (!key || !entry || typeof entry !== 'object' || typeof entry.event !== 'string') return;
+    if (!this._state.history || typeof this._state.history !== 'object') this._state.history = {};
+    const arr = this._state.history[key] || (this._state.history[key] = []);
+    arr.push({ ...entry, setBy: 'agent', at: Number.isFinite(entry.at) ? entry.at : Date.now() });
+    if (arr.length > 50) arr.splice(0, arr.length - 50);
+    this._save();
+  }
+
   _validate({ state, urgency, reason, detail }) {
     if (state != null && !STATES.includes(state)) throw new Error(`state must be one of ${STATES.join('/')}`);
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);

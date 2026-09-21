@@ -85,7 +85,17 @@ const so = require(path.join(REPO, 'src/server/session-stdout.js')).create({
   sbSeenFirst: (s, msg) => { calls.sbSeen.push(msg.type); return true; }, getDeviceMgr: () => null, getHosts: () => null,
   getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }),
   getDeliver: () => ({ stashFor: (cid, e) => calls.stashed.push([cid, e]) }),
+  getBrain: () => brainStub, // design-unknown-records: the four record→side-effect consumers (property-accessed lazy ref)
 });
+// The brain STUB records which consumer the parse asked for, per record — the
+// real functions are driven in the parity section below.
+const brainCalls = [];
+const brainStub = {
+  noteHarnessNotification: (s, id, m) => brainCalls.push(['notification', id, m.key, m.priority]),
+  noteApiErrorAuth: (s, id, m) => brainCalls.push(['api_error', id, m.error?.status]),
+  noteVcsState: (s, id, m) => brainCalls.push(['vcs', id, m.kind, m.branch]),
+  notePublishedChange: (s, id, m) => brainCalls.push(['published', id, m.url]),
+};
 // THE STUB IS A MODEL OF THE ENGINE, AND A HAND-WRITTEN MODEL DRIFTS
 // (2026-09-13). Every consumer destructures its engine deps by name from a
 // PLAIN object, so a dep this stub does not carry is `undefined` and the FIRST
@@ -1784,7 +1794,7 @@ console.log('— wiring pins');
   // `permissionRulesRef` joined the deps on 2026-09-07 (owner ruling 10): the
   // codex/acp consumers route a `permission_rules` answer back to the pending
   // READ — a lazy ref like the others, never a new inline consumer.
-  ok('session-stdout requires the registry and builds it ONCE in create() with the orchestrator deps', /require\('\.\/stdout\/index\.js'\)/.test(ss) && (ss.match(/createStdoutRegistry\(/g) || []).length === 1 && /createStdoutRegistry\(\{ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,\s*\n\s*checkClaudeGoalStatus, noteModelSeen, noteHarnessModels, sbSeenFirst, hosts, usageHistory, deliverRef, pagesRef, permissionRulesRef \}\)/.test(ss));
+  ok('session-stdout requires the registry and builds it ONCE in create() with the orchestrator deps', /require\('\.\/stdout\/index\.js'\)/.test(ss) && (ss.match(/createStdoutRegistry\(/g) || []).length === 1 && /createStdoutRegistry\(\{ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,\s*\n\s*checkClaudeGoalStatus, noteModelSeen, noteHarnessModels, sbSeenFirst, hosts, usageHistory, deliverRef, pagesRef, permissionRulesRef, brainRef \}\)/.test(ss));
   ok('…hands its own closures (feedLive, broadcasts, meta store, todo helpers) as ONE helpers object', /const stdoutHelpers = \{ feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,\s*\n\s*updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos \};/.test(ss));
   ok('…setupSessionPty resolves caps.streamProtocol → registry → attach (no protocol branch left in session-stdout)', /const consumer = streamProto \? stdoutConsumers\.get\(streamProto\) : null;/.test(ss) && /consumer\.attach\(session, id, ptyProcess, stdoutHelpers\);/.test(ss) && !/streamProto === '/.test(ss) && !/feedLive\(session, /.test(ss) && !/_stdin_ack/.test(ss));
   ok('…the no-protocol text is unchanged and the no-consumer case is its own loud line + event', /has no streamProtocol in src\/backend-caps\.js — chat output passes through RAW \(register a pipeline\)/.test(ss) && /registers no consumer for it — chat output passes through RAW \(register one\)/.test(ss) && /'chat-protocol-no-consumer'/.test(ss));
@@ -1795,7 +1805,7 @@ console.log('— wiring pins');
     const src = read(`src/server/stdout/${m}.js`);
     ok(`${m}.js: create(deps) → { protocol: '${proto}', attach(session, id, ptyProcess, helpers) }, feeds the normalizer only through feedLive`, new RegExp(`^const protocol = '${proto}';$`, 'm').test(src) && /function attach\(session, id, ptyProcess, \{ feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta/.test(src) && /return \{ protocol, attach \};/.test(src) && /feedLive\(session, msg\)/.test(src) && !/_normalizer\.processLive/.test(src));
   }
-  ok('the claude consumer keeps the session-brain wiring EXACTLY (sbSeenFirst registration precedes the served-model latch; sbSeenFirst arrives via deps)', /sbSeenFirst\(session, msg\);\s*\n\s*if \(msg\.type === 'assistant' && !msg\.parent_tool_use_id && !msg\.isSidechain\s*\n\s*&& msg\.message\?\.model/.test(read('src/server/stdout/claude-stream-json.js')) && /checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef \}\)/.test(read('src/server/stdout/claude-stream-json.js')));
+  ok('the claude consumer keeps the session-brain wiring EXACTLY (sbSeenFirst registration precedes the served-model latch; sbSeenFirst arrives via deps)', /sbSeenFirst\(session, msg\);\s*\n\s*if \(msg\.type === 'assistant' && !msg\.parent_tool_use_id && !msg\.isSidechain\s*\n\s*&& msg\.message\?\.model/.test(read('src/server/stdout/claude-stream-json.js')) && /checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef, brainRef = null \}\)/.test(read('src/server/stdout/claude-stream-json.js')));
   ok('test-harness-contract pins descriptor↔consumer coverage; ci.mjs runs this suite; test-session-schema + test-attach-rebuild scan src/server/stdout/', /hasConsumer\(h\.caps\.streamProtocol\)/.test(read('scripts/test-harness-contract.mjs')) && /'test-stdout-registry'/.test(read('scripts/ci.mjs')) && /src\/server\/stdout/.test(read('scripts/test-session-schema.mjs')) && /src\/server\/stdout/.test(read('scripts/test-attach-rebuild.mjs')));
   // B3 turn truth (§2.5/§2.10/§2.11) — the seams a green unit test cannot see
   {
@@ -1870,5 +1880,70 @@ console.log('— wiring pins');
 console.error = origErr;
 global.__vsEvent = prevEvent;
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
+
+// ── design-unknown-records (2026-09-21): the four chrome/attention consumers, BOTH feeds ──
+console.log('— unknown-records: notification / api_error / vcs / code_change reach the SAME four session-brain consumers from the parse AND the device feed');
+{
+  const s = mkSession('claude', 'w-ur-1'); const p = fakePty();
+  so.setupSessionPty(s, 'w-ur-1', p);
+  brainCalls.length = 0;
+  p.data(J({ type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate', session_id: 'sid-ur', uuid: 'u-n1' }));
+  p.data(J({ type: 'system', subtype: 'api_error', error: { status: 401, message: 'OAuth token has expired' }, retry_in_ms: 0, retry_attempt: 1, max_retries: 10, session_id: 'sid-ur', uuid: 'u-e1' }));
+  p.data(J({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'fix/x', cwd: tmp, session_id: 'sid-ur', uuid: 'u-v1' }));
+  p.data(J({ type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'pushed', session_id: 'sid-ur', uuid: 'u-c1' }));
+  ok('the PARSE hands each of the four records to its brain consumer (one call each, the record\'s own fields)', JSON.stringify(brainCalls) === JSON.stringify([['notification', 'w-ur-1', 'stop-hook-error', 'immediate'], ['api_error', 'w-ur-1', 401], ['vcs', 'w-ur-1', 'push', 'fix/x'], ['published', 'w-ur-1', 'https://example.invalid/o/r/pull/7']]), JSON.stringify(brainCalls));
+  ok('…and every one of them ALSO reached the real normalizer (the card path is the normalizer\'s; the side effect is the brain\'s)', ['notification', 'api_error', 'vcs_state_changed', 'code_change_published'].every((st) => s._fed.some((m) => m.type === 'system' && m.subtype === st)));
+  ok('…the notification is a card, the vcs/api_error records are NOT (declared card-less), the code change is ONE card', s._normalizer.messages.filter((m) => m.noticeKind === 'harness-notification').length === 1 && s._normalizer.messages.filter((m) => m.noticeKind === 'code-change-published').length === 1 && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'));
+  // THE REAL consumers, driven through claudeSideEffects (the device feed) with stub deps
+  const notices = [], pushes = [], metaWrites = [], events = [], authFails = [];
+  let active = 0;
+  const brain = require(path.join(REPO, 'src/server/session-brain.js')).create({
+    engine: { ...engine, notePoolAuthFailure: (sess, sid, info) => authFails.push([sid, info.status]) },
+    applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => null,
+    getServerNotice: () => (key, text, opts) => notices.push([key, text, opts?.level]),
+    broadcastAll: (m) => pushes.push(m), broadcastActiveSessions: () => { active++; },
+    getSessionMetaStore: () => ({ readSessionMeta: () => ({ existing: 1 }), writeSessionMeta: (sock, m) => metaWrites.push([sock, m]) }),
+    getSessionStatus: () => ({ noteEvent: (k, e) => events.push([k, e]) }), sessionStatusKey: (sess, sid) => 'webui:' + sid,
+  });
+  const d = { name: 'dev-sess', sockName: 'cw-dev', _normalizer: { turnIndex: 3 } };
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate' });
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate' });
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'memory-saved', text: 'Saved 2 memories', priority: 'low' });
+  ok('DEVICE FEED: an immediate notification → ONE server-notice toast (level 2), keyed by session + key + turn (the repeat in the same turn dedupes at serverNotice by key; low priority never toasts)', notices.length === 2 && notices[0][0] === 'hn:w-dev:stop-hook-error:3' && notices[1][0] === notices[0][0] && /dev-sess: Stop hook error/.test(notices[0][1]) && notices[0][2] === 2, JSON.stringify(notices));
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'fast-mode-overage-rejected', text: 'Fast mode is off', priority: 'high' });
+  ok('…a high one toasts at level 1', notices.length === 3 && notices[2][2] === 1);
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 529, message: 'Overloaded' }, retry_in_ms: 5 });
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'OAuth token has expired' }, retry_in_ms: 0 });
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 403, message: 'forbidden' }, retry_in_ms: 0 });
+  ok('api_error: 401/403 → notePoolAuthFailure (the live api_retry twin\'s side effect), 529 never', JSON.stringify(authFails) === JSON.stringify([['w-dev', 401], ['w-dev', 403]]), JSON.stringify(authFails));
+  // THE REAL CLASSIFIER, not a stub (r3 2026-09-21): what the consumer FORWARDS is what the engine's
+  // classifyAuthFailure judges — a lone first-attempt 401 is a refresh race and is REFUSED there, so the
+  // fixture's own 401 row (retry_attempt 1) never reaches the pool; attempt ≥ 2 and every 403 do.
+  const classify = require(path.join(REPO, 'src/harnesses/index.js')).get('claude').quota.classifyAuthFailure;
+  const verdicts = [];
+  const brainReal = require(path.join(REPO, 'src/server/session-brain.js')).create({
+    engine: { ...engine, notePoolAuthFailure: (sess, sid, info) => verdicts.push([info.status, info.attempt ?? null, classify(info)]) },
+    applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => null,
+  });
+  brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'OAuth token has expired' }, retry_in_ms: 0, retry_attempt: 1, max_retries: 10 });
+  brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'HTTP 401' }, retry_in_ms: 0, retry_attempt: 1, max_retries: 10 });
+  brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'HTTP 401' }, retry_in_ms: 0, retry_attempt: 2, max_retries: 10 });
+  brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 403, message: 'forbidden' }, retry_in_ms: 0, retry_attempt: 1, max_retries: 10 });
+  brainReal.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'HTTP 401' }, retryAttempt: 2 });
+  ok('the REAL claude classifier over what the consumer forwards: 401 attempt 1 with an expiry message → true (the wording qualifies), a bare 401 attempt 1 → REFUSED (refresh race), 401 attempt 2 → true, 403 attempt 1 → true, the transcript-spelled retryAttempt rides through too', JSON.stringify(verdicts) === JSON.stringify([[401, 1, true], [401, 1, false], [401, 2, true], [403, 1, true], [401, 2, true]]), JSON.stringify(verdicts));
+  const fixtureRows = fs.readFileSync(path.join(REPO, 'scripts/fixtures/unknown-records/claude-transcript.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.type === 'system' && r.subtype === 'api_error');
+  ok('the fixture\'s own api_error rows exist and are TRANSCRIPT rows (never on stdout — the census of 35 live buffers saw zero); the consumer is forward-compat for the stream twin, the transcript path is NOT consumed (a days-old 401 must not evict today\'s member)', fixtureRows.length >= 1 && fixtureRows.every((r) => 'parentUuid' in r || 'retryAttempt' in r) && !/api_error/.test(fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8')) && !/noteApiErrorAuth/.test(fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')), fixtureRows.map((r) => [r.error?.status, r.retryAttempt]));
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'fix/x', cwd: '/w/proj' });
+  ok('vcs_state_changed → session._vcs {kind,branch,cwd,at}, persisted to session-meta (merged over the existing meta), a session-vcs push to EVERY client naming session + cwd, an active-sessions broadcast, a timeline event', d._vcs?.kind === 'push' && d._vcs.branch === 'fix/x' && d._vcs.cwd === '/w/proj' && Number.isFinite(d._vcs.at) && metaWrites.some(([sock, m]) => sock === 'cw-dev' && m.existing === 1 && m.vcs?.kind === 'push') && pushes.some((m) => m.type === 'session-vcs' && m.sessionId === 'w-dev' && m.kind === 'push' && m.cwd === '/w/proj' && m.branch === 'fix/x') && active >= 1 && events.some(([k, e]) => k === 'webui:w-dev' && e.event === 'vcs' && e.kind === 'push' && e.branch === 'fix/x'), JSON.stringify({ vcs: d._vcs, pushes, events }));
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'vcs_state_changed', kind: 'commit', cwd: '/w/proj' });
+  ok('…a later commit without a branch replaces the fact (branch null — the CLI omitted it)', d._vcs.kind === 'commit' && d._vcs.branch === null);
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'pushed' });
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'https://example.invalid/o/r/pull/7', repo: 'o/r', identifier: '7', action: 'merged' });
+  brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'code_change_published', provider: 'github', url: 'javascript:alert(1)', repo: 'o/r', identifier: '8', action: 'pushed' });
+  ok('code_change_published → session._prLinks keyed by url (the second record for the same url UPDATES action to merged; a non-http url is refused), persisted', d._prLinks?.length === 1 && d._prLinks[0].url === 'https://example.invalid/o/r/pull/7' && d._prLinks[0].action === 'merged' && d._prLinks[0].identifier === '7' && metaWrites.some(([, m]) => Array.isArray(m.prLinks) && m.prLinks[0].action === 'merged'), JSON.stringify(d._prLinks));
+  ok('the parse and the device feed call the SAME four named functions (source pin: claudeSideEffects names each; the parse calls each through brainRef)', ['noteHarnessNotification', 'noteApiErrorAuth', 'noteVcsState', 'notePublishedChange'].every((fn) => new RegExp("subtype === '[a-z_]+'\\) " + fn + "\\(session, sid, msg\\);").test(read('src/server/session-brain.js')) && new RegExp('brainRef\\?\\.' + fn + '\\?\\.\\(session, id, msg\\)').test(read('src/server/stdout/claude-stream-json.js'))));
+  activeSessions.delete('w-ur-1');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

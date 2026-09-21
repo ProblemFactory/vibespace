@@ -1662,6 +1662,7 @@ class ChatView {
     // has never reported one" — the chip stays off rather than claiming idle.
     if ('turnState' in meta) this._statusBar?.setTurnState?.(meta.turnState || null);
     if ('inProgressTools' in meta) this._onToolsInProgress(meta.inProgressTools || []);
+    if ('backgroundTasks' in meta && Array.isArray(meta.backgroundTasks)) this._statusBar?.setBackgroundTasks?.(meta.backgroundTasks); // the harness's level set (design-unknown-records); absent/null = never published, the card-derived set stands
     if ('autoResume' in meta) this._statusBar?.setAutoResume?.(meta.autoResume || null);
     // WHERE this spawn's model/effort came from (B-6b6d) — the resume ladder's
     // verdict, so the effort tooltip can say "carried over from this
@@ -1850,6 +1851,14 @@ class ChatView {
     // a bare 'xhigh' here and conclude their pick was dropped (2.369.62).
     if (meta.effort) add(t('Effort'), effortDisplay(this._backendId(), meta.effort, { model: meta.model }));
     add(t('Stop reason'), meta.stopReason);
+    // THE TURN this message closed (claude turn_duration, design-unknown-records
+    // 2026-09-21): "Turn: 3m18s · 66 messages [· budget n/limit]".
+    if (meta.turn && (meta.turn.durationMs != null || meta.turn.messageCount != null)) {
+      const tt = meta.turn;
+      const dur = (ms) => (ms == null ? null : ms >= 60000 ? `${Math.floor(ms / 60000)}m${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}s` : `${Math.round(ms / 1000)}s`);
+      const parts = [dur(tt.durationMs), tt.messageCount != null ? t('{n} messages', { n: tt.messageCount }) : null, tt.budgetLimit != null ? t('budget {used}/{limit}', { used: fmt(tt.budgetTokens ?? 0), limit: fmt(tt.budgetLimit) }) : null].filter(Boolean);
+      add(t('Turn'), parts.join(' · '));
+    }
     // Codex has no vendor request id: its requestId is the LEDGER's synthetic
     // key (cx:<thread>:<cumulative total>, the join every scanned rollout has)
     // and its msgId is the vendor RESPONSE id — the normalizer marks both kinds
@@ -3385,6 +3394,10 @@ class ChatView {
       if (this._chatInput) this._chatInput.setSlashCommands(op.data?.commands || [], { terminal: op.data?.terminal || null });
       return;
     }
+    // THE FULL LIVE SET of background tasks (claude background_tasks_changed —
+    // a level signal, design-unknown-records 2026-09-21): the status bar
+    // reconciles its running set + shows the count.
+    if (op.subtype === 'background-tasks') { this._statusBar?.setBackgroundTasks?.(op.data?.tasks || []); return; }
     if (op.subtype === 'usage') {
       this._statusBar.updateUsage(op.data);
     } else if (op.subtype === 'todos') {
@@ -4123,7 +4136,8 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     else this._subagentDone = new Set([toolCallId]);
     const countEl = statusEl.querySelector('.chat-agent-live-count');
     const n = this._subagentCounts?.get(toolCallId);
-    const label = status === 'completed' ? t('finished') : String(status);
+    // `finished` = the level-set's soft close (outcome not reported) — the same neutral word, never an error
+    const label = status === 'completed' || status === 'finished' ? t('finished') : String(status);
     if (countEl) countEl.textContent = `${n ? t('{n} messages', { n }) : ''}${n ? ' \u2022 ' : ''}${label}`;
     statusEl.classList.add('chat-agent-status-done');
   }

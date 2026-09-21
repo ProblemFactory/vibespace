@@ -217,8 +217,15 @@ export class ChatStatusBar {
       const prev = this._activeTasks.get(toolCallId);
       if (prev) {
         if (!this._doneTasks) this._doneTasks = [];
-        this._doneTasks.unshift({ ...prev, status: taskInfo.status, finishedAt: Date.now() });
+        this._doneTasks.unshift({ ...prev, status: taskInfo.status, closedBy: taskInfo.closedBy || null, finishedAt: Date.now(), toolCallId });
         if (this._doneTasks.length > 12) this._doneTasks.length = 12;
+      } else {
+        // A LATER VERDICT on a row already in the tail (2026-09-21): the harness
+        // drops a task from its level set ~2 records BEFORE the outcome record,
+        // so the tail first holds the soft `finished` (closedBy level) and the
+        // real completed/failed lands afterwards — patch the row in place.
+        const row = this._doneTasks?.find((r) => r.toolCallId === toolCallId);
+        if (row) { row.status = taskInfo.status; row.closedBy = taskInfo.closedBy || null; }
       }
       this._activeTasks.delete(toolCallId);
     } else {
@@ -277,6 +284,21 @@ export class ChatStatusBar {
       if (taskInfo?.status === 'running') next.set(toolCallId, { ...taskInfo });
     }
     this._activeTasks = next.size ? next : null;
+    this.render();
+  }
+
+  /** The harness's LEVEL signal (claude `background_tasks_changed` = the FULL
+   *  live set, design-unknown-records 2026-09-21): drives the chip's count and
+   *  the popup's "reported by the harness" rows. It closes NOTHING here — the
+   *  reconcile (a BACKGROUNDED task the set no longer names → the soft
+   *  `finished`, closedBy level) has ONE owner, the normalizer, whose taskInfo
+   *  edit reaches `updateTask` like every other outcome; a client-side twin
+   *  closed FOREGROUND rows too (the set never names a plain Bash — r3 2026-09-21).
+   *  null = the harness never published one (the chip then counts the
+   *  card-derived set as before). */
+  setBackgroundTasks(list) {
+    if (!Array.isArray(list)) { this._bgTasks = null; this.render(); return; }
+    this._bgTasks = list.filter((t) => t && typeof t === 'object' && t.id != null).map((t) => ({ id: String(t.id), type: t.type || null, description: String(t.description || '') }));
     this.render();
   }
 
@@ -668,8 +690,14 @@ export class ChatStatusBar {
     const permTitle = this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode');
     parts.push(`<span class="chat-status-perm chat-status-clickable" title="${escHtml(permTitle)}">${UI_ICONS.lock} ${escHtml(permLabel)}</span>`);
 
-    // Background tasks
-    if (this._activeTasks?.size > 0) {
+    // Background tasks. The harness's LEVEL signal (setBackgroundTasks), when
+    // published, is the count's truth — "N background tasks" — with the
+    // card-derived running set as the pre-2026-09-21 fallback.
+    if (this._bgTasks?.length) {
+      const count = this._bgTasks.length;
+      const label = count === 1 ? (this._bgTasks[0].description || t('1 background task')) : t('{count} background tasks', { count });
+      parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(this._bgTasks.map((r) => r.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
+    } else if (this._activeTasks?.size > 0) {
       const count = this._activeTasks.size;
       const tasks = [...this._activeTasks.values()];
       const label = count === 1 ? tasks[0].description : t('{count} tasks', { count });
@@ -972,10 +1000,21 @@ export class ChatStatusBar {
     }
     // Background tasks click -> popup
     const taskEl = e.target.closest('.chat-status-tasks');
-    if (taskEl && this._activeTasks?.size) {
+    if (taskEl && (this._activeTasks?.size || this._bgTasks?.length)) {
       e.stopPropagation();
       const dropdown = showDropdown(taskEl);
       if (!dropdown) return;
+      // the harness's own level set first — rows the cards never learned about
+      // (a task launched by a sub-agent, a task whose launch ack was lost)
+      const known = new Set([...(this._activeTasks?.values() || [])].map((t) => String(t.id)));
+      for (const r of (this._bgTasks || [])) {
+        if (known.has(r.id)) continue;
+        const item = document.createElement('div');
+        item.className = 'chat-status-dropdown-item chat-task-detail';
+        item.innerHTML = `<div class="chat-task-title">${r.type === 'local_agent' ? UI_ICONS.robot : UI_ICONS.tasks} ${escHtml(r.description || r.id)}</div><div class="chat-status-dim">${escHtml(t('reported by the harness'))}</div>`;
+        dropdown.appendChild(item);
+      }
+      if (!this._activeTasks?.size) return;
       for (const [toolUseId, task] of this._activeTasks) {
         const item = document.createElement('div');
         item.className = 'chat-status-dropdown-item chat-task-detail';
@@ -1019,8 +1058,11 @@ export class ChatStatusBar {
           const row = document.createElement('div');
           row.className = 'chat-status-dropdown-item chat-task-detail chat-task-done';
           const ok = dt.status === 'completed';
-          row.innerHTML = `<div class="chat-task-title">${ok ? '<span class="tdone-ok">✓</span>' : '<span class="tdone-bad">✗</span>'} ${escHtml(dt.description || '')}</div>`;
-          row.title = ok ? t('completed') : escHtml(String(dt.status));
+          // `finished` = the level-set's soft close: the harness dropped the task
+          // from its live set and no outcome record has landed (yet) — neither ✓ nor ✗
+          const soft = dt.status === 'finished';
+          row.innerHTML = `<div class="chat-task-title">${ok ? '<span class="tdone-ok">✓</span>' : (soft ? '<span class="tdone-soft">○</span>' : '<span class="tdone-bad">✗</span>')} ${escHtml(dt.description || '')}</div>`;
+          row.title = ok ? t('completed') : (soft ? t('finished (outcome not reported)') : escHtml(String(dt.status)));
           dropdown.appendChild(row);
         }
       }

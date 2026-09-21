@@ -9,11 +9,83 @@ const path = require('path');
 
 const { mk } = require('./lazy.js');
 
-function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory }) {
+function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHistory,
+  // design-unknown-records (2026-09-21) — the chrome-signal consumers' deps, ALL lazy/optional so the
+  // dark-parity harness (which passes none of them) and older callers keep working:
+  getServerNotice = () => null, broadcastAll = null, broadcastActiveSessions = null,
+  getSessionMetaStore = () => null, getSessionStatus = () => null, sessionStatusKey = null }) {
   const { kickPoolEval, markLimitBanner, maybeStopOnFallback,
     recordRateLimitEvent, resolveUsageKey, usageEstimator,
-    noteServedModel, noteModelFallback, rerouteAnnouncedBy } = engine;
+    noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure } = engine;
   const usageHistory = mk(getUsageHistory);
+  const metaStore = mk(getSessionMetaStore);
+  const sessionStatus = mk(getSessionStatus);
+  const persistMeta = (session, patch) => {
+    try { if (session.sockName && metaStore?.writeSessionMeta) metaStore.writeSessionMeta(session.sockName, { ...(metaStore.readSessionMeta?.(session.sockName) || {}), ...patch }); } catch { }
+  };
+// ── design-unknown-records (2026-09-21): the four record→side-effect consumers ──
+// ONE implementation each, called from the parse (claude-stream-json.js) AND from
+// claudeSideEffects (the device feed) — the CLAUDE.md "live session stdout
+// consumers" row. Every one is idempotent per record (the seen-gate is belt).
+//
+// THE REPL'S NOTIFICATION QUEUE → a toast. The normalizer draws the card; a
+// priority of `immediate`/`high` ALSO reaches the user wherever they are,
+// through the existing server-notice channel (serverNotice is key-deduped per
+// boot, so the key carries the session, the notification key and the turn —
+// the same key later in the same turn is the queue re-asserting, not news).
+function noteHarnessNotification(session, sid, msg) {
+  if (!(msg.priority === 'immediate' || msg.priority === 'high') || typeof msg.text !== 'string' || !msg.text.trim()) return;
+  const sn = getServerNotice();
+  if (typeof sn !== 'function') return;
+  const key = `hn:${sid || session.sockName || '?'}:${String(msg.key || msg.text).slice(0, 60)}:${session._normalizer?.turnIndex ?? 0}`;
+  sn(key, `${session.name ? session.name + ': ' : ''}${msg.text.slice(0, 300)}`, { level: msg.priority === 'immediate' ? 2 : 1 });
+}
+// `system`/`api_error` with 401/403 on the LIVE feed → the same pool auth-failure
+// side effect as the api_retry twin. HONESTY (r3 2026-09-21): the binary declares
+// api_error on its stream union, but the 2026-09-20 census of 35 live buffers saw
+// it ONLY in transcripts (the stream carries api_retry) — so on every instance
+// where that holds this consumer is FORWARD-COMPAT and never fires. The transcript
+// rows are deliberately NOT fed here: a resume/attach preflight replaying a
+// days-old 401 would evict TODAY's member (the mark keys on the session's current
+// slot, not the one that failed), and the live twin fires on the first request
+// of any resume if the login is still dead — stale evidence buys nothing. The
+// engine's own classifier still gates what is forwarded (a lone 401 needs
+// attempt ≥ 2 — a refresh race is not a dead login; 403 always counts): test-
+// stdout-registry drives the REAL classifier over what this forwards.
+function noteApiErrorAuth(session, sid, msg) {
+  const st = Number(msg.error?.status ?? msg.error_status);
+  if (st !== 401 && st !== 403) return;
+  try { notePoolAuthFailure?.(session, sid, { status: st, message: String(msg.error?.message || msg.error?.formatted || ''), attempt: msg.retry_attempt ?? msg.retryAttempt }); } catch { }
+}
+// VCS STATE (`system`/`vcs_state_changed` {kind, cwd, branch?}; the binary:
+// "new kinds may be added — treat unknown like known") → a session FACT: the
+// card's git chip, the explorer refresh for that cwd, the Session Properties
+// timeline row. Card-less. Persisted so a restart keeps the chip.
+function noteVcsState(session, sid, msg) {
+  if (typeof msg.kind !== 'string' || !msg.kind) return;
+  const fact = { kind: msg.kind.slice(0, 24), branch: typeof msg.branch === 'string' ? msg.branch.slice(0, 200) : null, cwd: typeof msg.cwd === 'string' ? msg.cwd.slice(0, 1000) : null, at: Date.now() };
+  session._vcs = fact;
+  persistMeta(session, { vcs: fact });
+  // EVERY client, not the session's attached ones: the explorer that must re-list may be the only window a client has open
+  try { broadcastAll?.({ type: 'session-vcs', sessionId: sid, host: session.host || null, ...fact }); } catch { }
+  try { broadcastActiveSessions?.(); } catch { }
+  try { if (typeof sessionStatusKey === 'function' && sessionStatus?.noteEvent) sessionStatus.noteEvent(sessionStatusKey(session, sid), { event: 'vcs', kind: fact.kind, branch: fact.branch, at: fact.at }); } catch { }
+}
+// A PUBLISHED CHANGE (`system`/`code_change_published` {provider, url, repo,
+// identifier, action, branch?}) → session meta `prLinks[]` (the card chip). The
+// normalizer draws the one small card. The url is UNVERIFIED by the binary's
+// own words — it is stored and shown, never fetched.
+function notePublishedChange(session, sid, msg) {
+  const url = typeof msg.url === 'string' && /^https?:\/\//i.test(msg.url) ? msg.url.slice(0, 500) : null;
+  if (!url) return;
+  const list = Array.isArray(session._prLinks) ? session._prLinks.slice() : [];
+  const row = { url, identifier: msg.identifier != null ? String(msg.identifier).slice(0, 40) : null, repo: typeof msg.repo === 'string' ? msg.repo.slice(0, 200) : null, action: typeof msg.action === 'string' ? msg.action.slice(0, 32) : null, provider: typeof msg.provider === 'string' ? msg.provider.slice(0, 32) : null, at: Date.now() };
+  const i = list.findIndex((r) => r.url === url);
+  if (i >= 0) list[i] = { ...list[i], ...row }; else list.push(row);
+  session._prLinks = list.slice(-20);
+  persistMeta(session, { prLinks: session._prLinks });
+  try { broadcastActiveSessions?.(); } catch { }
+}
 // ── Session-brain step 2: the DARK comparator ───────────────────────────────
 // The daemon streams its own normalizer's ops for its pipe sessions; the
 // server compares mids against ITS parse of the same relayed stdout and does
@@ -129,6 +201,12 @@ function claudeSideEffects(session, sid, msg) {
       if (!msg.parent_tool_use_id && !msg.isSidechain) noteModelFallback(session, msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
       maybeStopOnFallback(session, sid, msg.originalModel || msg.original_model, msg.fallbackModel || msg.fallback_model);
     }
+    // design-unknown-records (2026-09-21): the four chrome/attention consumers — the
+    // parse calls the SAME four functions (test-stdout-registry pins both feeds)
+    if (msg.type === 'system' && msg.subtype === 'notification') noteHarnessNotification(session, sid, msg);
+    if (msg.type === 'system' && msg.subtype === 'api_error') noteApiErrorAuth(session, sid, msg);
+    if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') noteVcsState(session, sid, msg);
+    if (msg.type === 'system' && msg.subtype === 'code_change_published') notePublishedChange(session, sid, msg);
     // todo/task families mirror the parse's exact consumption (lines above):
     // TodoWrite carries the whole list; TaskUpdate patches by id; TaskCreate's
     // id only exists in the tool RESULT, which the parse stashes — the device
@@ -145,6 +223,6 @@ function claudeSideEffects(session, sid, msg) {
     }
   } catch (e) { console.warn('[session-brain] device side-effects failed:', e.message); }
 }
-  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX };
+  return { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing, _sbMidCore, SB_RING_MAX, noteHarnessNotification, noteApiErrorAuth, noteVcsState, notePublishedChange };
 }
 module.exports = { create };

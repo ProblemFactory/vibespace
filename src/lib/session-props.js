@@ -1,3 +1,4 @@
+import { UI_ICONS } from './icons.js';
 import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor } from './utils.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps } from './agent-meta.js';
@@ -127,6 +128,17 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         li.className = 'session-history-item';
         const when = new Date(h.at);
         const tm = (when.toDateString() === today ? '' : (when.getMonth() + 1) + '/' + when.getDate() + ' ') + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // A NON-STATUS event row (design-unknown-records): the git fact the
+        // agent reported — "push · fix/x" — drawn in the same timeline.
+        if (h.event === 'vcs') {
+          li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
+            + `<span class="session-history-dot" style="--h-color:var(--text-dim)"></span>`
+            + `<span class="session-history-state">${UI_ICONS.forkBranch || ''} ${escHtml(t('git {kind}', { kind: String(h.kind || '') }))}</span>`
+            + (h.branch ? `<span class="session-history-reason" title="${escHtml(h.branch)}">${escHtml(h.branch)}</span>` : '')
+            + `<span class="session-history-by">${escHtml(t('agent'))}</span>`;
+          histList.appendChild(li);
+          continue;
+        }
         const m = h.state ? (SESSION_STATE_META[h.state] || { label: h.state, color: 'var(--text-dim)' }) : null;
         li.innerHTML = `<span class="session-history-time">${escHtml(tm)}</span>`
           + `<span class="session-history-dot" style="--h-color:${m ? m.color : 'var(--text-dim)'}"></span>`

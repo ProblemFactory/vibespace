@@ -1197,6 +1197,7 @@ function registerWsHandler(wss, ctx) {
                 // instead of wearing a third state nobody reported.
                 turnState: session._turnStateSeen ? (session._turnState || null) : null,
                 inProgressTools: session._inProgressTools ? [...session._inProgressTools] : [],
+                backgroundTasks: session._normalizer?.backgroundTasks?.() || null, // the harness's last published level set (design-unknown-records) — null = never published
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));

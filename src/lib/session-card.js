@@ -364,6 +364,35 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     rchip.dataset.tip = tr('The machine this session runs on is unreachable — the connection retries automatically; messages you send are queued and delivered when it returns.');
     stateChip.after(rchip);
   }
+  // GIT CHIP (design-unknown-records, 2026-09-21): the last `vcs_state_changed`
+  // fact the CLI announced — "push · fix/x" — a session FACT, never a card in
+  // the flow. SVG icon (the icon law); every string is harness-authored ⇒ escaped.
+  if (s.vcs && typeof s.vcs === 'object' && s.vcs.kind) {
+    const gchip = document.createElement('span');
+    gchip.className = 'sess-state-chip sess-state-derived sess-vcs-chip';
+    gchip.style.setProperty('--chip-color', 'var(--text-dim)');
+    const label = s.vcs.branch ? `${s.vcs.kind} · ${s.vcs.branch}` : s.vcs.kind;
+    gchip.innerHTML = `<span class="chip-icon">${UI_ICONS.forkBranch || ''}</span><span class="chip-text">${escHtml(label)}</span>`;
+    gchip.dataset.tip = tr('Last git event the agent reported: {kind}{branch}{when}', { kind: s.vcs.kind, branch: s.vcs.branch ? ' on ' + s.vcs.branch : '', when: s.vcs.at ? ' · ' + new Date(s.vcs.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '' });
+    stateChip?.after(gchip);
+  }
+  // PR CHIPS: every change this session published ("PR #608") — an ESCAPED link
+  // the user may click; never auto-opened, never fetched (the CLI itself calls
+  // the url unverified). The transcript's pr-link row and the live record are
+  // the same fact, keyed by url.
+  if (Array.isArray(s.prLinks) && s.prLinks.length) {
+    for (const pr of s.prLinks.slice(-3)) {
+      if (!pr || typeof pr.url !== 'string' || !/^https?:\/\//i.test(pr.url)) continue;
+      const a = document.createElement('a');
+      a.className = 'sess-state-chip sess-state-derived sess-pr-chip';
+      a.href = pr.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.style.setProperty('--chip-color', 'var(--accent)');
+      a.innerHTML = `<span class="chip-icon">${UI_ICONS.pullRequest || ''}</span><span class="chip-text">${escHtml(pr.identifier ? '#' + pr.identifier : tr('change'))}${pr.action ? ' · ' + escHtml(pr.action) : ''}</span>`;
+      a.dataset.tip = `${pr.repo ? pr.repo + ' ' : ''}${pr.url}`;
+      a.onclick = (e) => e.stopPropagation(); // a link, not a card select
+      stateChip?.after(a);
+    }
+  }
   // LAST-KNOWN discovery chip: the server serves a previous scan tagged
   // {stale, staleAt} when the machine is unreachable, and the sidebar rendered
   // it identically to fresh discovery — an hours-old 'external' card implies a

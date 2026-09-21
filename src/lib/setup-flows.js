@@ -494,6 +494,18 @@ export function installSetupFlows(App) {
       return `<table><tr><td class="dim">${esc(t('metric'))}</td><td class="n dim">n</td><td class="n dim">p50</td><td class="n dim">p95</td><td class="n dim">max</td><td class="n dim">${esc(t('latest'))}</td></tr>${names.map(row).join('')}</table>`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
+    ${(() => {
+      // HARNESS DRIFT (design-unknown-records §3): unknown record types and
+      // known types that grew a field, one row per (breadcrumb, detail) with
+      // first/last seen and the VibeSpace versions that reported it — the CLI
+      // build rides the detail (`· cli 2.1.274`). Absent when nothing drifted.
+      const rows = Array.isArray(d.drift) ? d.drift : [];
+      if (!rows.length) return '';
+      const tr = rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.detail || '')}</td><td class="n">${r.count}</td><td class="dim">${new Date(r.firstTs).toLocaleString()}</td><td class="dim">${new Date(r.lastTs).toLocaleString()}</td><td class="dim">${esc((r.versions || []).join(', '))}</td></tr>`).join('');
+      return `<h2>${esc(t('Harness drift'))}</h2>
+      <p class="dim">${esc(t('Records a harness emitted that VibeSpace does not recognize, and known records carrying fields it does not declare. Each row is one breadcrumb; the CLI build that started it rides the detail.'))}</p>
+      <table><tr><td class="dim">${esc(t('breadcrumb'))}</td><td class="dim">${esc(t('detail'))}</td><td class="n dim">n</td><td class="dim">${esc(t('first seen'))}</td><td class="dim">${esc(t('last seen'))}</td><td class="dim">${esc(t('versions'))}</td></tr>${tr}</table>`;
+    })()}
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>
     <h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>
     ${(() => {

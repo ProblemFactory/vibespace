@@ -522,6 +522,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
   getNoConvoRef: () => { try { return noConvoRef; } catch { return null; } }, getDeliver: () => { try { return deliver; } catch { return null; } }, getPages: () => { try { return publishedPages; } catch { return null; } }, getPermissionRules: () => { try { return permissionRules; } catch { return null; } }, // lazy getters; getPages = SendUserFile hands the user a private link (published-pages is created further down)
+  getBrain: () => { try { return sessionBrain; } catch { return null; } }, // design-unknown-records: the four record→side-effect consumers the parse shares with the device feed (session-brain is created further down)
 });
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
@@ -1332,14 +1333,20 @@ hosts.dialOnline = (deviceId) => agentdDials.has(deviceId);
 // the device-side cursor (two-phase). A throw leaves the batch unacked → the
 // daemon re-emits → rid dedup absorbs the replay.
 // ── Session-brain core (src/server/session-brain.js, decomposition #8) ──
-const { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing,
-  _sbMidCore, SB_RING_MAX,
-} = require('./src/server/session-brain.js').create({
+const sessionBrain = require('./src/server/session-brain.js').create({
   engine: { kickPoolEval, markLimitBanner, maybeStopOnFallback,
-    recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, rerouteAnnouncedBy }, // the device feed shares the parse's ONE served-model/fallback pair + the r4 rule that places the reroute BEFORE the served capture (2026-09-13)
+    recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure }, // the device feed shares the parse's ONE served-model/fallback pair + the r4 rule that places the reroute BEFORE the served capture (2026-09-13); notePoolAuthFailure = the api_error 401/403 twin (design-unknown-records; forward-compat — the record is observed only in transcripts, which are NOT fed)
   applyTaskToolUpdate, updateSessionTodos,
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
+  // design-unknown-records (2026-09-21): the chrome-signal consumers' deps (notification toast,
+  // vcs fact + timeline, published-change meta) — one implementation for both feeds
+  getServerNotice: () => serverNotice, broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
+  broadcastAll: (msg) => { const json = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(json); } catch {} } }, // session-vcs must reach an explorer-only client, not just the session's attached ones
+  getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }), getSessionStatus: () => { try { return sessionStatus; } catch { return null; } }, sessionStatusKey,
 });
+const { sbNoteServerOp, sbCompare, sbSeenFirst, claudeSideEffects, _sbRing,
+  _sbMidCore, SB_RING_MAX,
+} = sessionBrain;
 hosts.onSessionEvents = (hostId, m) => {
   try {
     if (!m?.sid) return;
@@ -1799,6 +1806,7 @@ function activeSessionsPayload() {
       todo: s._todos || null, // {done, total, current} — the agent's own TodoWrite/plan
       auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)
       // outputStyle = the EFFECTIVE style (2.369.58; null = the agent's own config decides); worktree/worktreePath = the per-session git worktree (owner ruling 9) — the card badge + the path the CLI ITSELF announced in its init frame
+      vcs: s._vcs || null, prLinks: Array.isArray(s._prLinks) && s._prLinks.length ? s._prLinks : null, // design-unknown-records: the last VCS fact (git chip) + the published changes (PR chips)
       mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
     });
   }

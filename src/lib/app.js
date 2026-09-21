@@ -279,6 +279,20 @@ class App {
         setTimeout(() => location.reload(), 900);
         return;
       }
+      if (msg.type === 'session-vcs' && msg.cwd) {
+        // A push/commit/merge/rebase the agent reported (design-unknown-records,
+        // 2026-09-21): every open File Explorer whose current directory is that
+        // cwd or under it re-lists — a rebase or merge changes the tree it shows.
+        // The card's git chip rides active-sessions; nothing is auto-opened.
+        const root = String(msg.cwd).replace(/\/+$/, '');
+        for (const [, win] of this.wm.windows) {
+          const ex = win._explorer;
+          if (!ex || !ex.currentPath || ex._disposed) continue;
+          if ((ex._host || null) !== (msg.host || null)) continue;
+          const cur = String(ex.currentPath).replace(/\/+$/, '');
+          if (cur === root || cur.startsWith(root + '/')) { try { ex.navigate(ex.currentPath); } catch {} }
+        }
+      }
       if (msg.type === 'server-notice' && msg.text) {
         // Probe-reported condition (2.226.0): server-side silent failures now
         // surface as toasts (+ notification history) instead of dying in the

@@ -104,6 +104,16 @@ const toolCardIcon = (name) => (name === 'Agent' ? UI_ICONS.robot : SHELL_TOOL_N
 // Model chip on Agent cards — shows the DECLARED model (tool input) at render;
 // _onSubagentMessage upgrades it to the model actually observed serving.
 const agentModelChip = (model) => (model ? `<span class="chat-agent-model">${escHtml(model)}</span>` : '');
+// THE task-lifecycle chip on an Agent / Workflow card: running ⟳; `completed` = no chip (the ✓
+// summary says it); `finished` = the level-set's SOFT close (the harness dropped the task from
+// its live set, no outcome record yet — 2026-09-21) drawn neutral, never as an error; any other
+// terminal value (failed / stopped / killed) is the red error chip naming it.
+const taskStatusChipHtml = (ti) => {
+  if (!ti || !ti.status || ti.status === 'completed') return '';
+  if (ti.status === 'running') return ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`;
+  if (ti.status === 'finished') return ` <span class="chat-task-status-chip soft" title="${escHtml(t('finished (outcome not reported)'))}">${t('finished')}</span>`;
+  return ` <span class="chat-task-status-chip err">${escHtml(ti.status)}</span>`;
+};
 
 // ── Image media cards (2.369.48, owner: "view image 能不能也多媒体化") ──
 // Every image a tool looked at renders as ONE media block: an expandable
@@ -883,8 +893,7 @@ class ChatRenderers {
       // outcome lives in taskInfo (synthesized from the ack + closed by the
       // <task-notification> wakeup, 2.368.30). Show the lifecycle honestly.
       const ti = msg?.taskInfo;
-      const tiChip = ti?.status === 'running' ? ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`
-        : (ti && ti.status && ti.status !== 'completed' ? ` <span class="chat-task-status-chip err">${escHtml(ti.status)}</span>` : '');
+      const tiChip = taskStatusChipHtml(ti);
       const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       const reviewThreadId = msg?.taskInfo?.receiverThreadIds?.[0] || '';
       const agentId = msg?.taskInfo?.id || (resultText.match(/agentId:\s*([a-z0-9]+)/)?.[1]) || '';
@@ -908,8 +917,7 @@ class ChatRenderers {
         || (resultText.match(/"runId":\s*"(wf_[\w-]+)"/)?.[1]) || '';
       const wfName = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim().substring(0, 120) || '';
       const tiW = msg?.taskInfo;
-      const wfChipHtml = tiW?.status === 'running' ? ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`
-        : (tiW && tiW.status && tiW.status !== 'completed' ? ` <span class="chat-task-status-chip err">${escHtml(tiW.status)}</span>` : '');
+      const wfChipHtml = taskStatusChipHtml(tiW);
       const wfLiveHtml = this.workflowLiveHtml(tiW); // 2.369.118: phases + agent chips while the run is live
       const viewBtn = runId
         ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
@@ -946,6 +954,67 @@ class ChatRenderers {
         det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.record)}</pre>`;
         el.appendChild(det);
       }
+      return { el, sideEffect: null };
+    }
+    // NEW FIELDS ON A KNOWN RECORD — the schema-drift card (design-unknown-records
+    // §3, 2026-09-21): a record VibeSpace handles, carrying fields the harness
+    // never declared. Red border like the unknown-event card (something changed
+    // upstream) with the DIM head variant (handling is unchanged), the shape +
+    // the field list in the head, enum drift as its own line, the redacted
+    // sample behind the expander. Everything is harness-authored ⇒ escaped.
+    // Folds under the same 'unknown' kind.
+    if (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields') {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-unknown-event chat-unknown-fields';
+      const fields = Array.isArray(b.fields) ? b.fields : [];
+      const plus = fields.length ? ` +{${fields.map((f) => escHtml(String(f))).join(', ')}}` : '';
+      el.innerHTML = `<div class="chat-unknown-event-head"><span class="chat-unknown-event-title">⚠ ${escHtml(t('New fields on a known record'))}</span><span class="chat-unknown-event-name">${escHtml(b.harness || '')} · ${escHtml(b.shape || '')}${plus}</span></div>`
+        + (Array.isArray(b.enumDrift) ? b.enumDrift.map((e) => `<div class="chat-unknown-event-hint">${escHtml(t('Undeclared value: {field} = {value}', { field: String(e?.field || ''), value: String(e?.value || '') }))}</div>`).join('') : '')
+        + `<div class="chat-unknown-event-hint">${escHtml(t('A record VibeSpace knows, carrying fields it does not declare — the harness may have extended this event. Handling is unchanged.'))}</div>`;
+      if (b.sample) {
+        const det = document.createElement('details');
+        det.innerHTML = `<summary>${escHtml(t('Full record'))}</summary><pre class="chat-pre">${escHtml(b.sample)}</pre>`;
+        el.appendChild(det);
+      }
+      return { el, sideEffect: null };
+    }
+    // THE REPL'S OWN NOTIFICATION (claude system/notification, design-unknown-
+    // records 2026-09-21): a dim notice, priority-coloured (immediate = red,
+    // high = yellow), the CLI's text verbatim (escaped). stop-hook-error points
+    // at the Stop-hook summary card that carries the details.
+    if (msg.noticeKind === 'harness-notification' && msg.content?.[0]?.type === 'harness_notification') {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      const pri = ['low', 'medium', 'high', 'immediate'].includes(b.priority) ? b.priority : 'medium';
+      el.className = `chat-msg chat-msg-system chat-system-notification chat-harness-notice chat-harness-notice-${pri}`;
+      const hint = b.key === 'stop-hook-error' ? ` <span class="chat-status-dim">${escHtml(t('(details in the Stop hook summary card)'))}</span>` : '';
+      el.innerHTML = `<span class="chat-system-text" title="${escHtml(b.key ? t('Harness notification · {key} · {priority}', { key: b.key, priority: pri }) : t('Harness notification · {priority}', { priority: pri }))}">${pri === 'immediate' || pri === 'high' ? UI_ICONS.alert : UI_ICONS.info || ''} ${escHtml(b.text || '')}${hint}</span>`;
+      return { el, sideEffect: null };
+    }
+    // RECAP (claude system/away_summary, history-only): "what happened while
+    // you were away" — model text, so markdown through the ONE sanitizing
+    // renderer (renderMarkdown = marked + DOMPurify), never raw.
+    if (msg.noticeKind === 'away-summary' && typeof msg.content?.[0]?.text === 'string') {
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-away-summary';
+      el.innerHTML = `<div class="chat-away-summary-head">${UI_ICONS.clock} ${escHtml(t('Recap — while you were away'))}</div><div class="chat-text chat-away-summary-body">${this.renderMarkdown(msg.content[0].text)}</div>`;
+      return { el, sideEffect: null };
+    }
+    // A PUBLISHED CHANGE (claude system/code_change_published + the transcript's
+    // pr-link row): ONE small card — "PR #608 pushed" — the url an ESCAPED link
+    // the user may click, never auto-opened ("URL unverified — do not route
+    // authenticated calls to it", the binary's own words).
+    if (msg.noticeKind === 'code-change-published' && msg.content?.[0]?.type === 'code_change') {
+      const b = msg.content[0];
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification chat-code-change';
+      const head = b.identifier ? (b.provider === 'github' || !b.provider ? t('PR #{id}', { id: b.identifier }) : t('Change #{id}', { id: b.identifier })) : t('Code change');
+      const action = b.action ? ` ${escHtml(b.action)}` : '';
+      const repo = b.repo ? ` <span class="chat-status-dim">${escHtml(b.repo)}</span>` : '';
+      const branch = b.branch ? ` <span class="chat-status-dim">· ${escHtml(b.branch)}</span>` : '';
+      const link = b.url && /^https?:\/\//i.test(b.url) ? `<a class="chat-code-change-link" href="${escHtml(b.url)}" target="_blank" rel="noopener noreferrer">${escHtml(b.url)}</a>` : '';
+      el.innerHTML = `<span class="chat-system-text">${UI_ICONS.pullRequest || ''} <b>${escHtml(head)}</b>${action}${repo}${branch}</span>${link ? `<div class="chat-code-change-url">${link}</div>` : ''}`;
       return { el, sideEffect: null };
     }
     // Model auto-fallback notice: the server bakes an English sentence (it

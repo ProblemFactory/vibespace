@@ -177,6 +177,12 @@ class Telemetry {
     const byName = {}; const byDay = {}; const byVersion = {};
     const errors = [];
     const metricVals = {}; // name → number[] (kind:'metric')
+    // HARNESS DRIFT (design-unknown-records §3): the schema-drift breadcrumb +
+    // the two unknown-record breadcrumbs, grouped by name+detail with first/
+    // last seen and the versions that reported them — the Diagnostics report's
+    // "Harness drift" block, so a new CLI build's additions are read off one
+    // table instead of fished out of byName.
+    const drift = new Map(); // `${name}|${detail}` → {name, detail, count, firstTs, lastTs, versions:Set}
     let total = 0;
     let files = [];
     try { files = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort().slice(-3); } catch {}
@@ -198,6 +204,14 @@ class Telemetry {
         }
         if (r.kind === 'metric' && Number.isFinite(r.value)) {
           (metricVals[r.name] = metricVals[r.name] || []).push(r.value);
+        }
+        if (r.kind === 'event' && typeof r.name === 'string' && /^(harness-shape-drift$|cli-unknown-|codex-unknown-record:)/.test(r.name)) {
+          const detail = typeof r.detail === 'string' ? r.detail.slice(0, 200) : (r.detail == null ? '' : JSON.stringify(r.detail).slice(0, 200));
+          const k = r.name + '|' + detail;
+          const g = drift.get(k) || { name: r.name, detail, count: 0, firstTs: r.ts, lastTs: r.ts, versions: new Set() };
+          g.count++; g.firstTs = Math.min(g.firstTs, r.ts); g.lastTs = Math.max(g.lastTs, r.ts);
+          if (r.version) g.versions.add(r.version);
+          drift.set(k, g);
         }
       }
     }
@@ -228,6 +242,7 @@ class Telemetry {
       byName: Object.fromEntries(Object.entries(byName).sort((a, b) => b[1] - a[1])),
       byDay, byVersion, metrics,
       errors: [...grouped.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 50),
+      drift: [...drift.values()].sort((a, b) => b.lastTs - a.lastTs).slice(0, 100).map((g) => ({ ...g, versions: [...g.versions].sort() })),
       instance: this._instanceId(),
     };
   }

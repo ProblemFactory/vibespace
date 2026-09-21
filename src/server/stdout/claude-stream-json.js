@@ -51,7 +51,7 @@ const USER_FILE_EXT_TYPES = new Map(Object.entries({
 const protocol = 'stream-json';
 
 function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,
-  checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef }) {
+  checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef, brainRef = null }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     modelsMatch, noteSessionProduced, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
@@ -1164,6 +1164,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // error results carry ban/credit/oauth text the retry path never
           // sees (the CLI gives up without a final api_retry record)
           if (msg.type === 'result' && msg.is_error) { try { notePoolAuthFailure?.(session, id, { message: String(msg.result || msg.error || '') }); } catch { } }
+          // design-unknown-records (2026-09-21): the four chrome/attention consumers
+          // live in session-brain (ONE implementation, fed by this parse AND the
+          // device stream through claudeSideEffects). brainRef is the lazy proxy —
+          // PROPERTY-accessed, never called (the 2026-09-07 mk() lesson).
+          if (msg.type === 'system' && msg.subtype === 'notification') { try { brainRef?.noteHarnessNotification?.(session, id, msg); } catch (e) { console.warn('[claude] notification consumer failed:', e.message); } }
+          if (msg.type === 'system' && msg.subtype === 'api_error') { try { brainRef?.noteApiErrorAuth?.(session, id, msg); } catch (e) { console.warn('[claude] api_error consumer failed:', e.message); } } // forward-compat: declared on the stream union, observed only in transcripts (the live twin is api_retry above)
+          if (msg.type === 'system' && msg.subtype === 'vcs_state_changed') { try { brainRef?.noteVcsState?.(session, id, msg); } catch (e) { console.warn('[claude] vcs consumer failed:', e.message); } }
+          if (msg.type === 'system' && msg.subtype === 'code_change_published') { try { brainRef?.notePublishedChange?.(session, id, msg); } catch (e) { console.warn('[claude] code-change consumer failed:', e.message); } }
           // Event-driven remote ledger harvest (owner question "为什么15分钟
           // 不实时"): a remote session's turn just ENDED — its usage now
           // exists in the remote transcript, so harvest promptly (60s/host

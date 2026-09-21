@@ -14,6 +14,7 @@
  */
 
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
+const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 
 // System subtypes _processSystem actually renders/consumes — anything else
 // trips the unhandled-subtype breadcrumb (2.227.5). Keep in sync when adding
@@ -48,6 +49,14 @@ const HANDLED_SYSTEM_SUBTYPES = new Set([
   // Fire-and-forget full command-list push (2.1.257). Card-less by design:
   // it re-points the composer's completion list, it is not an event.
   'commands_changed',
+  // design-unknown-records (2026-09-21), the census's top-5 routed:
+  'notification',            // the REPL's own user-facing queue → a priority-coloured notice card (keyed dedupe per turn); immediate/high also toast via the server consumer
+  'local_command',           // history-only: the TUI user's slash command → the existing <command-name> bubble
+  'away_summary',            // history-only: "what happened while you were away" → the dim Recap card (markdown)
+  'turn_duration',           // history + stream: merged into the turn's last message meta (popup row "Turn: 3m18s · 66 messages")
+  'background_tasks_changed', // a LEVEL signal (the full live set): reconciles the task cards + the status-bar chip meta op
+  'task_updated',            // {task_id, patch:{status}} → applied to the task card (closes a failed task without waiting for task_notification)
+  'code_change_published',   // ONE small "PR #608 pushed" card (escaped link) — the same fact as the transcript's pr-link row
 ]);
 
 // ── THE claude INIT FRAME (2.1.257 `system`/`init`) ─────────────────────────
@@ -194,6 +203,13 @@ function syntheticUsage(raw) {
   const u = m.usage || {};
   return !((u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0));
 }
+
+// The declared TERMINAL values of task_notification.status (the binary's enum,
+// mirrored by record-shape's enums.status): the outcome record names one of
+// these; anything else closes as completed (the pre-2026-09-21 rule). Defined
+// BELOW the three list constants: test-stdout-registry pins those by slicing
+// the source up to the first `])`.
+const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'stopped', 'killed']);
 
 class MessageManager {
   // Injected by the server once the settings SyncStore exists (the normalizer
@@ -501,6 +517,7 @@ class MessageManager {
   // The chat's run-fold owns its noise (kind 'unknown', off by default).
   _noteUnknownRecord(kind, name, raw, emit) {
     if (!name) return;
+    this._unknownCarded = raw; // the whole record is on its card — never ALSO judged for field drift
     const msg = this._create({
       role: 'system', status: 'complete', noticeKind: 'unknown-record',
       content: [{ type: 'unknown_record', kind, name: String(name).slice(0, 80), harness: this.harnessLabel || 'Claude Code', record: unknownRecordJson(raw) }],
@@ -514,6 +531,57 @@ class MessageManager {
     this._currentLine = Number.isFinite(raw.__line) ? raw.__line : null; // source file line (gap loads only)
     this._currentUuid = raw.uuid || null; // JSONL record uuid — needed for fork-from-here (--resume-session-at)
     this._currentRk = MessageManager.recordKey(raw);
+    this._routeMessage(raw, emit);
+    // AFTER routing (design-unknown-records §3): a KNOWN record carrying fields
+    // it does not declare is recorded and flagged — the handler already ran.
+    this._noteShapeDrift(raw, emit);
+  }
+
+  // SCHEMA DRIFT ON A KNOWN RECORD (owner ruling (b), 2026-09-21): the fall-back
+  // card catches an unknown TYPE; this catches a known type that GREW. ONE card
+  // per shape per session — a second occurrence with new fields MERGES into that
+  // card (an edit op), never a new card; a repeat with nothing new is silent.
+  // Telemetry `harness-shape-drift` once per process per shape, the CLI version
+  // in the detail so Diagnostics can say which build started it. The sample
+  // rides through the redactor (values under token/secret/key/… keys masked).
+  _noteShapeDrift(raw, emit) {
+    if (this._unknownCarded === raw) { this._unknownCarded = null; return; } // the fall-back card owns it
+    let drift = null;
+    try { drift = shapeUnknownFields('claude', shapeCarrierOf('claude', raw), raw); } catch { return; }
+    if (!drift) return;
+    const cards = this._shapeDrift || (this._shapeDrift = new Map());
+    const entry = cards.get(drift.shape);
+    const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
+    const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
+    if (entry && !newFields.length && !newEnums.length) return;
+    const seen = this.constructor._seenShapeDrift;
+    if (seen && !seen.has(drift.shape)) {
+      seen.add(drift.shape);
+      const ver = this._harnessVersion?.() || null;
+      try { global.__vsEvent?.('harness-shape-drift', `${drift.shape} +{${drift.fields.join(',')}}${drift.enumDrift.length ? ' enum:' + drift.enumDrift.map((e) => e.field + '=' + e.value).join(',') : ''}${ver ? ' · cli ' + ver : ''}`.slice(0, 300)); } catch {}
+    }
+    if (!entry) {
+      const msg = this._create({
+        role: 'system', status: 'complete', noticeKind: 'unknown-fields',
+        content: [{ type: 'unknown_fields', harness: 'Claude Code', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [...newFields], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
+      });
+      cards.set(drift.shape, { msgId: msg.id, fields: new Set(newFields), enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
+    const msg = this.messageIndex.get(entry.msgId);
+    if (!msg) return;
+    const b = msg.content[0];
+    for (const f of newFields) { entry.fields.add(f); b.fields.push(f); }
+    for (const e of newEnums) { entry.enums.add(e.field + '=' + e.value); b.enumDrift.push(e); }
+    b.sample = unknownFieldsSample(raw); // the latest occurrence is the freshest evidence
+    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
+  }
+
+  /** The harness build that wrote this stream, for the drift breadcrumb (claude: the init frame's version). */
+  _harnessVersion() { return this._initFrame?.version || null; }
+
+  _routeMessage(raw, emit) {
     switch (raw.type) {
       case 'system': return this._processSystem(raw, emit);
       case 'user': return this._processUser(raw, emit);
@@ -529,6 +597,9 @@ class MessageManager {
       // A previously-yielded message was RETRACTED upstream (§2.10). We render
       // AND persist the stream, so without this the orphan lived forever.
       case 'tombstone': return this._processTombstone(raw, emit);
+      // the transcript's persisted PR pointer {prNumber, prUrl, prRepository} =
+      // the same fact as system/code_change_published (design-unknown-records)
+      case 'pr-link': return this._processCodeChange({ provider: null, url: raw.prUrl, repo: raw.prRepository, identifier: raw.prNumber != null ? String(raw.prNumber) : null, action: null }, emit);
       default:
         if (!KNOWN_IGNORED_RECORD_TYPES.has(raw.type)) this._noteUnknownRecord('type', raw.type, raw, emit);
         return;
@@ -752,6 +823,120 @@ class MessageManager {
       if (emit) this._emit({ op: 'create', message: msg });
     }
 
+    // ── design-unknown-records (2026-09-21): the census's routed subtypes ──
+    // THE REPL'S OWN NOTIFICATION QUEUE (`system`/`notification`, binary: "Loop-
+    // side text notification. Mirrors the interactive REPL notification queue
+    // (key/priority/timeout)"): 43 red cards in one day's live buffers were the
+    // CLI telling the user something (stop-hook-error, fast-mode-overage-
+    // rejected, model-deny). A dim, priority-coloured notice card, keyed
+    // dedupe per `key` within a turn (the queue re-asserts). immediate/high
+    // ALSO reach the user as a toast — the SERVER consumer does that
+    // (session-brain noteHarnessNotification), one implementation for both feeds.
+    if (raw.subtype === 'notification' && typeof raw.text === 'string' && raw.text.trim()) {
+      const key = typeof raw.key === 'string' && raw.key ? raw.key.slice(0, 80) : null;
+      const seen = this._notifKeys || (this._notifKeys = new Map());
+      if (key && seen.get(key) === this.turnIndex) return;
+      if (key) seen.set(key, this.turnIndex);
+      const priority = ['low', 'medium', 'high', 'immediate'].includes(raw.priority) ? raw.priority : 'medium';
+      const msg = this._create({
+        role: 'system', status: 'complete', noticeKind: 'harness-notification',
+        content: [{ type: 'harness_notification', key, text: raw.text.slice(0, 2000), priority, color: typeof raw.color === 'string' ? raw.color.slice(0, 24) : null }],
+      });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
+    // THE TUI USER'S SLASH COMMAND (`system`/`local_command`, history-only; not
+    // in the SDK union — the REPL's own persisted row `<command-name>/x</command-
+    // name>…`): rendered through the existing command bubble (renderUserMsg's
+    // notification path strips the tags). Not a model turn: turnIndex untouched.
+    if (raw.subtype === 'local_command' && typeof raw.content === 'string' && raw.content.trim()) {
+      const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: raw.content.slice(0, 4000) }], turnIndex: this.turnIndex });
+      msg.synthetic = true; // never a "You" bubble — the classifier's forced-notification flag
+      msg.originKind = 'local-command';
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
+    // "WHAT HAPPENED WHILE YOU WERE AWAY" (`system`/`away_summary`, history-only):
+    // model text → the dim Recap card, markdown through DOMPurify on the client.
+    if (raw.subtype === 'away_summary' && typeof raw.content === 'string' && raw.content.trim()) {
+      const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'away-summary', content: [{ type: 'text', text: raw.content.slice(0, 8000) }] });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
+    // TURN DURATION (`system`/`turn_duration`): the REPL's "Done in Ns" line.
+    // Card-less — it rides the turn's last message as meta (the message-meta
+    // popup's "Turn:" row). Both carriers: stream snake_case, transcript camel.
+    // A success `result` creates no message of its own, so "the preceding
+    // result message" is the last message of the turn just ended.
+    if (raw.subtype === 'turn_duration') {
+      const n = (a, b) => (Number.isFinite(a) ? a : (Number.isFinite(b) ? b : null));
+      const turn = {
+        durationMs: n(raw.duration_ms, raw.durationMs), messageCount: n(raw.message_count, raw.messageCount),
+        budgetTokens: n(raw.budget_tokens, raw.budgetTokens), budgetLimit: n(raw.budget_limit, raw.budgetLimit), budgetNudges: n(raw.budget_nudges, raw.budgetNudges),
+        pendingAgents: n(raw.pending_background_agent_count, raw.pendingBackgroundAgentCount), pendingWorkflows: n(raw.pending_workflow_count, raw.pendingWorkflowCount),
+      };
+      if (turn.durationMs == null && turn.messageCount == null) return;
+      for (let i = this.messages.length - 1; i >= 0; i--) {
+        const m = this.messages[i];
+        if (m.role === 'user' && !m.synthetic) break; // the turn began here: nothing of ours precedes it
+        if (m.role === 'assistant' || m.role === 'tool' || (m.role === 'system' && m.status !== 'complete')) {
+          m.meta = { ...(m.meta || {}), turn };
+          if (emit) this._emit({ op: 'edit', id: m.id, fields: { meta: m.meta } });
+          break;
+        }
+      }
+      return;
+    }
+    // THE FULL LIVE SET OF BACKGROUND TASKS (`system`/`background_tasks_changed`,
+    // binary: "The full set of live background tasks, emitted whenever
+    // membership changes"). A LEVEL signal over BACKGROUND tasks only: a
+    // BACKGROUNDED task card still running whose id is NOT in the set is
+    // finished even if its notification was lost (the 2.368.15 forever-running
+    // class), and the status bar gets the count. Two rules the r3 verifier
+    // reproduced on the production buffers (2026-09-21): ① task_started fires for
+    // FOREGROUND calls too (86 of 107 were local_bash is_backgrounded:false) and
+    // the set never names them — closing those read a running Bash card as
+    // done; ② the CLI drops membership ~2 records BEFORE the outcome record
+    // (task_updated{failed} / task_notification), so this close is a SOFT one —
+    // `finished` with `closedBy:'level'` (outcome not reported) — that the real
+    // outcome may still overwrite; a hard `completed` here pre-empted every
+    // observed task_updated{failed}.
+    if (raw.subtype === 'background_tasks_changed' && Array.isArray(raw.tasks)) {
+      const set = raw.tasks.filter((t) => t && typeof t === 'object' && t.task_id != null)
+        .map((t) => ({ id: String(t.task_id).slice(0, 64), type: typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null, description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' }))
+        .slice(0, 100);
+      this._bgTasks = set;
+      const live = new Set(set.map((t) => t.id));
+      for (const [tid, msgId] of this.taskMsgByTaskId) {
+        if (live.has(String(tid))) continue;
+        const m = this.messageIndex.get(msgId);
+        if (m?.taskInfo && m.taskInfo.status === 'running' && m.taskInfo.backgrounded === true) {
+          m.taskInfo.status = 'finished';
+          m.taskInfo.closedBy = 'level';
+          if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+        }
+      }
+      if (emit) this._emit({ op: 'meta', subtype: 'background-tasks', data: { tasks: set } });
+      return;
+    }
+    // A TASK PATCH (`system`/`task_updated` {task_id, patch:{status, end_time}}):
+    // closes a failed/stopped task the moment the CLI says so, without waiting
+    // for a task_notification that may never come. It OVERRIDES a level close
+    // (`closedBy:'level'` is a guess; this is the harness's own verdict).
+    if (raw.subtype === 'task_updated' && raw.task_id != null && raw.patch && typeof raw.patch === 'object') {
+      const st = typeof raw.patch.status === 'string' ? raw.patch.status.slice(0, 24) : null;
+      const m = this._taskMsgFor(null, raw.task_id);
+      if (m?.taskInfo && st && st !== 'running' && st !== 'pending' && (m.taskInfo.status === 'running' || m.taskInfo.closedBy === 'level')) {
+        m.taskInfo.status = st;
+        m.taskInfo.closedBy = 'task_updated';
+        if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+      }
+      return;
+    }
+    // A CODE CHANGE WENT OUT FOR REVIEW (`system`/`code_change_published`,
+    // binary: "URL unverified — do not route authenticated calls to it").
+    if (raw.subtype === 'code_change_published') { this._processCodeChange(raw, emit); return; }
+
     // BREADCRUMB for CLI evolution (2.227.5, the model_refusal_fallback
     // lesson): an unhandled system subtype is DROPPED here — that is how a
     // new upstream record type becomes an invisible product gap (39 silent
@@ -775,7 +960,12 @@ class MessageManager {
       if (!existing) return;
 
       if (raw.subtype === 'task_started') {
-        existing.taskInfo = { id: raw.task_id, type: raw.task_type, description: raw.description, status: 'running' };
+        // `backgrounded` = the CLI's own is_backgrounded flag (a FOREGROUND call —
+        // is_backgrounded:false, e.g. a plain Bash — gets task_started too but is
+        // never a member of background_tasks_changed, so only a backgrounded
+        // task may be closed by that level set; the launch-ack synthesis below
+        // sets it as well, because the ack text itself says "in background")
+        existing.taskInfo = { id: raw.task_id, type: raw.task_type, description: raw.description, status: 'running', backgrounded: raw.is_backgrounded === true };
         this.taskMsgByToolUse.set(raw.tool_use_id, existing.id);
         if (raw.task_id != null) this.taskMsgByTaskId.set(String(raw.task_id), existing.id);
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
@@ -797,12 +987,55 @@ class MessageManager {
         }
       } else if (raw.subtype === 'task_notification') {
         if (existing.taskInfo) {
-          existing.taskInfo.status = 'completed';
+          // the record's own status when it is a declared terminal value (failed /
+          // stopped / killed); anything else closes as completed, as before. This
+          // is the real outcome — it overwrites a level-set guess (`finished`).
+          const st = typeof raw.status === 'string' && TERMINAL_TASK_STATUS.has(raw.status) ? raw.status : 'completed';
+          existing.taskInfo.status = st;
+          existing.taskInfo.closedBy = 'notification';
           if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
         }
       }
     }
   }
+
+  /** ONE small card per published change ("PR #608 pushed"), the link ESCAPED
+   *  by the renderer and never auto-opened. Unified across both carriers: the
+   *  live `code_change_published` record and the transcript's `pr-link` row
+   *  name the same fact, so the SAME url in one session is ONE card — a later
+   *  record with a new action (merged / closed) edits it in place. The server
+   *  consumer owns the session meta (`prLinks[]` → the card chip). */
+  _processCodeChange(raw, emit) {
+    const url = typeof raw.url === 'string' && /^https?:\/\//i.test(raw.url) ? raw.url.slice(0, 500) : null;
+    const identifier = raw.identifier != null && String(raw.identifier).trim() ? String(raw.identifier).slice(0, 40) : null;
+    if (!url && !identifier) return;
+    const block = {
+      type: 'code_change', provider: typeof raw.provider === 'string' ? raw.provider.slice(0, 32) : null, url, repo: typeof raw.repo === 'string' ? raw.repo.slice(0, 200) : null,
+      identifier, action: typeof raw.action === 'string' ? raw.action.slice(0, 32) : null, branch: typeof raw.branch === 'string' ? raw.branch.slice(0, 200) : null,
+    };
+    // dedupe key: the url, else repo#identifier (provider#identifier as a last resort); a row with
+    // neither url nor repo is never deduped — '#42' from two unknown repos is two facts, not one
+    const key = url || (block.repo || block.provider ? (block.repo || block.provider) + '#' + identifier : null);
+    const cards = this._codeChangeCards || (this._codeChangeCards = new Map());
+    const prev = key ? cards.get(key) : null;
+    if (prev) {
+      const m = this.messageIndex.get(prev);
+      if (m) {
+        const b = m.content[0];
+        let changed = false;
+        for (const k of ['action', 'branch', 'provider', 'repo', 'identifier', 'url']) if (block[k] && block[k] !== b[k]) { b[k] = block[k]; changed = true; }
+        if (changed && emit) this._emit({ op: 'edit', id: m.id, fields: { content: m.content } });
+      }
+      return;
+    }
+    const msg = this._create({ role: 'system', status: 'complete', noticeKind: 'code-change-published', content: [block] });
+    if (key) cards.set(key, msg.id);
+    if (emit) this._emit({ op: 'create', message: msg });
+  }
+
+  /** The harness's LAST published set of live background tasks (the level signal) — what the
+   *  attach payload hands a window that opens mid-run. null = never published. */
+  backgroundTasks() { return Array.isArray(this._bgTasks) ? this._bgTasks : null; }
 
   /** THE command-list op — one shape for the init frame and for every
    *  mid-session push, mirrored by the ACP normalizer's
@@ -832,9 +1065,11 @@ class MessageManager {
     // notification arrived (2.368.15: the reason every conversation
     // accumulated forever-'running' cards despite the 2.233.0 closer).
     const taskMsg = this._taskMsgFor(tuMatch ? tuMatch[1].trim() : null, tidMatch ? tidMatch[1].trim() : null);
-    if (taskMsg?.taskInfo && taskMsg.taskInfo.status === 'running') {
+    // a level-set close (`finished`, closedBy 'level') is a guess the real outcome overwrites
+    if (taskMsg?.taskInfo && (taskMsg.taskInfo.status === 'running' || taskMsg.taskInfo.closedBy === 'level')) {
       const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
       taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
+      taskMsg.taskInfo.closedBy = 'notification';
       const smMatch = contentStr.match(/<summary>([\s\S]*?)<\/summary>/);
       if (smMatch) taskMsg.taskInfo.summary = smMatch[1].trim().slice(0, 200);
       if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
@@ -1081,7 +1316,7 @@ class MessageManager {
               if (emit) this._emit({ op: 'edit', id: prev.id, fields: { taskInfo: prev.taskInfo } });
             }
           }
-          existing.taskInfo = { ...syn, status: 'running' };
+          existing.taskInfo = { ...syn, status: 'running', backgrounded: true }; // the ack text says "in background" — a member of the level set
           this.taskMsgByToolUse.set(toolUseId, existing.id);
           if (syn.id) this.taskMsgByTaskId.set(String(syn.id), existing.id);
           if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
@@ -1095,6 +1330,7 @@ class MessageManager {
         // on the disk skeleton. Register the ack's id too, and remember it on the
         // card as runId (the short id stays `id` — the CLI's own key).
         const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
+        if (syn && existing.taskInfo.backgrounded !== true) { existing.taskInfo.backgrounded = true; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); } // the ack says background even when task_started lacked the flag (older CLI)
         if (syn && syn.id && String(syn.id) !== String(existing.taskInfo.id)) {
           this.taskMsgByTaskId.set(String(syn.id), existing.id);
           if (!existing.taskInfo.runId) {
@@ -1471,6 +1707,7 @@ class MessageManager {
 }
 
 MessageManager._seenUnknownSubtypes = new Set();
+MessageManager._seenShapeDrift = new Set(); // telemetry `harness-shape-drift` once per process per shape (§3)
 /** Background-launch ACK → task identity, PURE (2.368.30, owner: "很多
  *  subagent任务你没识别出来"). task_started/task_progress/task_notification
  *  are LIVE-STREAM-ONLY subtypes — a 602MB field transcript carries ZERO —
@@ -1541,13 +1778,19 @@ const KNOWN_IGNORED_RECORD_TYPES = new Set([
   'tool_progress', 'set_in_progress_tool_use_ids', 'rate_limit_event', 'compact_progress', 'command_lifecycle', 'stream_event', 'keep_alive',
   '_stdin_ack', '_remote_state',
   // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
-  'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'pr-link', 'atis-latch',
+  'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published)
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
 ]);
 // System subtypes that trip the breadcrumb but are NOT worth a card: seen in the
 // 2026-09-20 census and judged bookkeeping. (thinking_tokens = a per-turn count
 // the CLI pushes ~30× a turn; the others are lists the CLI keeps for its own
 // panels.) A subtype the census has never seen stays a card.
-const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set(['thinking_tokens', 'background_tasks_changed', 'task_updated', 'hook_started', 'compact_boundary', 'success']);
+const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
+  'thinking_tokens', 'hook_started', 'compact_boundary', 'success',
+  // design-unknown-records (2026-09-21) — decisions, each with its reason:
+  'api_error',              // history-only twin of the live api_retry (which already drives the "API retrying (n/10)" spinner label); 529/429/503 retries deserve no card. The transcript rows are NOT consumed for side effects (a days-old 401 must not evict today's pool member; the live api_retry twin fires on the first request of any resume) — session-brain's noteApiErrorAuth is a FORWARD-COMPAT consumer for the stream twin the binary declares and no census has observed
+  'microcompact_boundary',  // legacy 2.1.2xx micro-compaction marker (not in the 2.1.274 SDK union); the REPL renders nothing for it
+  'vcs_state_changed',      // card-less BY DESIGN: the server consumer owns it (session-vcs broadcast → the session card's git chip, the explorer refresh, the Session Properties timeline); a card per push/commit would be noise in the flow
+]);
 
 module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

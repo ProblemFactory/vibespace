@@ -1324,6 +1324,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   vertical-align: middle;
 }
 .chat-task-status-chip.err { color: var(--red); }
+.chat-task-status-chip.soft { color: var(--text-dim); } /* the level-set's soft close (outcome not reported) */
 
 /* Style-menu restart row + sidebar locate flash (2.369.8) */
 .chat-status-restart-row { color: var(--accent); font-weight: 600; }
@@ -1370,3 +1371,17 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-unknown-event details { margin-top: 4px; }
 .chat-unknown-event summary { cursor: pointer; color: var(--text-dim); }
 .chat-unknown-event .chat-pre { max-height: 320px; overflow: auto; font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; word-break: break-all; }
+/* design-unknown-records (2026-09-21): the routed notices */
+.chat-harness-notice { border-left: 2px solid var(--text-dim); padding-left: 8px; }
+.chat-harness-notice-high { border-left-color: var(--yellow); color: var(--yellow); opacity: 0.9; }
+.chat-harness-notice-immediate { border-left-color: var(--red); color: var(--red); opacity: 1; }
+.chat-harness-notice .chat-system-text svg { vertical-align: -2px; }
+.chat-away-summary { display: block; padding: 4px 8px; border-left: 2px solid var(--text-dim); }
+.chat-away-summary-head { font-weight: 600; margin-bottom: 2px; }
+.chat-away-summary-body { font-size: 12px; opacity: 0.95; }
+.chat-code-change { display: block; padding: 4px 8px; border-left: 2px solid var(--accent); }
+.chat-code-change-url { margin-top: 2px; font-size: 11px; word-break: break-all; }
+.chat-code-change-link { color: var(--accent); text-decoration: underline; }
+.sess-pr-chip { text-decoration: none; }
+/* the schema-drift card (§3): same red border — something changed upstream — with the DIM head, because handling is unchanged */
+.chat-unknown-fields .chat-unknown-event-title { color: var(--text-dim); font-weight: 500; }

@@ -59,7 +59,8 @@ ok('session-store taskState scan uses the SAME parser (no twin)', /require\('\.\
 ok('phantom cut: a synthesized running task launched BEFORE the current wrapper start is dropped (an OS task cannot outlive the CLI process)', /tk\.status === 'running' && tk\._launchTs && tk\._launchTs < wStart\) delete tasks\[tuid\]/.test(ss));
 ok('…and closes from persisted <task-notification> records with summary', /<task-notification>/.test(ss) && /tasks\[tu\]\.summary = sm\.slice\(0, 200\)/.test(ss));
 const cr = read('src/lib/chat-renderers.js');
-ok('Agent + Workflow cards show the lifecycle chip and prefer the completion summary', (cr.match(/chat-task-status-chip/g) || []).length >= 4 && /ti\?\.summary/.test(cr) && /tiW\?\.summary/.test(cr));
+// the chip is ONE helper since 2026-09-21 (taskStatusChipHtml: running ⟳ / soft `finished` / err), called by BOTH cards
+ok('Agent + Workflow cards show the lifecycle chip (the ONE taskStatusChipHtml helper, two call sites) and prefer the completion summary', /const taskStatusChipHtml = \(ti\) =>/.test(cr) && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && (cr.match(/chat-task-status-chip/g) || []).length >= 3 && /ti\?\.summary/.test(cr) && /tiW\?\.summary/.test(cr));
 const sb = read('src/lib/chat-status-bar.js');
 ok('multiple running workflows COLLAPSE into one chip with a dropdown (like tasks)', /chat-status-wf-multi/.test(sb) && /\{count\} workflows/.test(sb) && /wfMulti && this\._workflows\?\.size/.test(sb));
 ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) \{/.test(sb));

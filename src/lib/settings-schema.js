@@ -338,7 +338,7 @@ const SETTINGS_SCHEMA = {
       // NOT in the default set (2.369.120, owner): an Unknown event — a harness
       // record VibeSpace does not recognize — is the fall-back card and must
       // stay visible until the user decides it is noise.
-      { value: 'unknown', label: t('Unknown events (harness records VibeSpace does not recognize)') },
+      { value: 'unknown', label: t('Unknown events / new fields on known records (harness records VibeSpace does not recognize)') },
     ],
     label: t('Card kinds that collapse'),
     description: t('Which card kinds fold into the summary line, by MEANING — the same setting covers every backend (claude Bash and codex exec are both command runs). Enabled kinds collapse TOGETHER as one interleaved group (think → read → edit → run is the real work pattern; per-kind groups rarely get long enough to fold). Memory = operations on the agent\'s own memory directory — housekeeping, folded by default and listed as memory/<name> in the summary; project-file writes are off by default — diffs are usually worth seeing. A run of only thinking needs two or more; any tool card folds immediately. Cards waiting for your approval never fold.'),

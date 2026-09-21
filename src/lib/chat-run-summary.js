@@ -40,7 +40,7 @@ const SUMMARY_ORDER = [
   ['agent', '{n} agent ops'],
   ['report', '{n} sub-agent reports'],
   ['skill', null],
-  ['unknown', '{n} unknown events'], // 2.369.120: the fall-back card (a record VibeSpace does not know); ships UNCHECKED — visible until the user folds it
+  ['unknown', '{n} unknown events / new fields'], // 2.369.120: the fall-back card (a record VibeSpace does not know) + the §3 schema-drift card (a known record that grew); ships UNCHECKED — visible until the user folds it
 ];
 
 // MCP tool ids (mcp__<server>__<tool>) split into their parts — the raw
@@ -106,7 +106,7 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
   }
   if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
       && m.content.every((b) => b.type === 'thinking')) return 'thinking';
-  if (m?.noticeKind === 'unknown-record') return 'unknown'; // 2.369.120: the fall-back card has its own toggle
+  if (m?.noticeKind === 'unknown-record' || m?.noticeKind === 'unknown-fields') return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it
   return null;
 }
 

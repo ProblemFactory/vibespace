@@ -84,6 +84,10 @@ const LIVE_SESSION_FACTS = Object.freeze({
   modelOrigin: { digest: null }, effortOrigin: { digest: null },
   worktree: { digest: (v) => (v ? '1' : '0') },       // owner ruling 9 badge
   worktreePath: { digest: (v) => v || '' },           // …and the path its tooltip names
+  // design-unknown-records (2026-09-21): the last VCS fact (git chip) and the
+  // published changes (PR chips) — both drawn on the card, so both GATE.
+  vcs: { digest: (v) => (v ? `${v.kind}:${v.branch || ''}:${v.at || ''}` : '') },
+  prLinks: { digest: (v) => (Array.isArray(v) ? v.map((r) => r.url + '@' + (r.action || '')).join('|') : '') },
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */

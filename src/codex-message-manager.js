@@ -11,6 +11,7 @@
  *   - server_request_resolved
  */
 
+const { unknownFields: shapeUnknownFields, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 const { peerDisplayName } = require('./message-manager');
 // web-search cards: the ONE results renderer + the twin-dedup key (PURE, shared with the client's title chip)
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
@@ -244,6 +245,7 @@ const SKIPPED_RECORD_TYPES = new Set([
   // work: it names the vendor response id for the token_count that follows
   'inter_agent_communication_metadata', // {trigger_turn} marker preceding an agent_message item
   'compacted',                          // the compaction summary line; event_msg context_compacted renders the notice
+  '_stdin_ack',                         // the WRAPPER's own stdin ack, consumed by the server (session._stdinAckReceived) — it leaked into the codex reader once (2.369.75 census); claude's list has had it since 2.369.119
 ]);
 const SKIPPED_RESPONSE_ITEM_TYPES = new Set([
   'additional_tools', 'configuration_update', 'compaction', 'context_compaction', 'other',
@@ -644,6 +646,53 @@ class CodexMessageManager {
   _processRecord(record, emit) {
     this._currentRk = CodexMessageManager.recordKey(record);
     if (!record || typeof record !== 'object') return;
+    this._routeRecord(record, emit);
+    // AFTER routing (design-unknown-records §3): the rollout line + its payload
+    // judged as one shape; an event_msg line is judged at the ENVELOPE level here
+    // (kind 'envelope' — the carrier's own keys) while its payload and an item are
+    // judged by their own hooks in _processEvent / _processItemCompleted (the
+    // depth rule: the carrier line and the payload are each judged exactly once).
+    this._noteShapeDrift(record, record.type === 'event_msg' ? 'envelope' : 'record', emit);
+  }
+
+  // SCHEMA DRIFT ON A KNOWN RECORD — the codex twin of MessageManager's hook (same
+  // card, same merge-into-one-card rule, same telemetry name). `kind` picks the
+  // level: 'record' (session_meta / turn_context / response_item…), 'event' (an
+  // event_msg payload), 'item' (an item_completed item).
+  _noteShapeDrift(raw, kind, emit) {
+    if (this._unknownCarded === raw) { this._unknownCarded = null; return; } // the fall-back card owns it
+    let drift = null;
+    try { drift = shapeUnknownFields('codex', 'rollout', raw, { kind }); } catch { return; }
+    if (!drift) return;
+    const cards = this._shapeDrift || (this._shapeDrift = new Map());
+    const entry = cards.get(drift.shape);
+    const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
+    const newEnums = drift.enumDrift.filter((e) => !entry || !entry.enums.has(e.field + '=' + e.value));
+    if (entry && !newFields.length && !newEnums.length) return;
+    if (!CodexMessageManager._seenShapeDrift.has(drift.shape)) {
+      CodexMessageManager._seenShapeDrift.add(drift.shape);
+      const ver = this._status?.cliVersion || null;
+      try { global.__vsEvent?.('harness-shape-drift', `${drift.shape} +{${drift.fields.join(',')}}${drift.enumDrift.length ? ' enum:' + drift.enumDrift.map((e) => e.field + '=' + e.value).join(',') : ''}${ver ? ' · cli ' + ver : ''}`.slice(0, 300)); } catch {}
+    }
+    if (!entry) {
+      const msg = this._create({
+        role: 'system', status: 'complete', noticeKind: 'unknown-fields',
+        content: [{ type: 'unknown_fields', harness: 'Codex', shape: drift.shape.replace(/^[a-z]+:[a-z]+:/, ''), fields: [...newFields], enumDrift: [...newEnums], sample: unknownFieldsSample(raw) }],
+      });
+      cards.set(drift.shape, { msgId: msg.id, fields: new Set(newFields), enums: new Set(newEnums.map((e) => e.field + '=' + e.value)) });
+      if (emit) this._emit({ op: 'create', message: msg });
+      return;
+    }
+    const msg = this.messageIndex.get(entry.msgId);
+    if (!msg) return;
+    const b = msg.content[0];
+    for (const f of newFields) { entry.fields.add(f); b.fields.push(f); }
+    for (const e of newEnums) { entry.enums.add(e.field + '=' + e.value); b.enumDrift.push(e); }
+    b.sample = unknownFieldsSample(raw);
+    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } });
+  }
+
+  _routeRecord(record, emit) {
     const exactTs = recordTs(record.timestamp);
     this._currentTs = exactTs != null ? exactTs : Date.now();
     this._currentTsKind = exactTs != null ? 'record' : 'arrival';
@@ -789,6 +838,7 @@ class CodexMessageManager {
   // know (mirrors MessageManager's cli-unknown-system-subtype). Name-only.
   _noteUnknown(kind, type, raw = null, emit = false) {
     const key = `${kind}:${type || '(untyped)'}`;
+    if (raw) this._unknownCarded = raw; // the whole record is on its card — never ALSO judged for field drift
     if (!CodexMessageManager._seenUnknownRecords.has(key)) {
       CodexMessageManager._seenUnknownRecords.add(key);
       try { global.__vsEvent?.('codex-unknown-record:' + String(type || '(untyped)').slice(0, 48), kind); } catch {}
@@ -1799,6 +1849,12 @@ class CodexMessageManager {
   _processItemCompleted(event, emit) {
     const it = event.item && typeof event.item === 'object' && !Array.isArray(event.item) ? event.item : null;
     if (!it) return;
+    this._routeItemCompleted(event, it, emit);
+    if (this._unknownCarded === event) return; // an unknown item type/kind is the fall-back card by name — the whole event is on it (the event hook clears the mark)
+    this._noteShapeDrift(it, 'item', emit); // AFTER routing (§3): the item judged as item/<type>
+  }
+
+  _routeItemCompleted(event, it, emit) {
     const type = String(it.type || '');
     if (ITEM_COMPLETED_SKIPPED_TYPES.has(type)) return; // rendered from the record named in the census above
     if (type === 'Extension') {
@@ -1826,6 +1882,28 @@ class CodexMessageManager {
         return;
       }
       this._noteUnknown('event_msg', 'item_completed:Extension:' + (it.kind || '(unkinded)'), event, emit);
+      return;
+    }
+    // AN MCP TOOL CALL (0.153.4 `ThreadItem::McpToolCall`, 12 fields in 0.154.0):
+    // the ONLY carrier — verified in the census: no function_call /
+    // mcp_tool_call_* twin in the rollout (the live mcp_tool_call_begin/end
+    // events are skipped as lifecycle noise and carry no result). Routed to the
+    // SAME card as claude's mcp__server__tool pair: toolName `mcp__<server>__
+    // <tool>` (the renderer's mcpParts draws "tool (server)"), fold kind 'mcp'
+    // (collapseKindOf's external-tool bucket), the call and its result on ONE
+    // card keyed by the item id (_absorbTwinCall dedups a live twin if one ever
+    // appears). Every MCP-using codex thread used to show a red card per call.
+    if (type === 'McpToolCall') {
+      const id = it.id || this._nextId();
+      const server = typeof it.server === 'string' ? it.server : 'mcp';
+      const tool = typeof it.tool === 'string' ? it.tool : 'tool';
+      const args = it.arguments && typeof it.arguments === 'object' ? it.arguments : (typeof it.arguments === 'string' ? safeJsonParse(it.arguments, { input: it.arguments }) : {});
+      this._processFunctionCall({ call_id: id, name: `mcp__${server}__${tool}`, arguments: JSON.stringify(args) }, emit);
+      const res = it.result && typeof it.result === 'object' ? it.result : null;
+      const parts = Array.isArray(res?.content) ? res.content.map((b) => (b && typeof b === 'object' ? (typeof b.text === 'string' ? b.text : (b.type ? `[${b.type}]` : '')) : String(b ?? ''))).filter(Boolean) : [];
+      const output = parts.length ? parts.join('\n') : (res ? JSON.stringify(res.structuredContent ?? res).slice(0, 20000) : (typeof it.result === 'string' ? it.result : ''));
+      const isError = !!res?.isError || it.status === 'failed' || it.status === 'error';
+      this._finalizeToolCall(id, { output, isError, rawName: `mcp__${server}__${tool}` }, emit);
       return;
     }
     if (type === 'ImageView') {
@@ -2060,6 +2138,12 @@ class CodexMessageManager {
   _processEvent(event, emit) {
     const type = event.type;
     if (!type) return;
+    this._routeEvent(event, emit);
+    this._noteShapeDrift(event, 'event', emit); // AFTER routing (§3)
+  }
+
+  _routeEvent(event, emit) {
+    const type = event.type;
     if (type === 'web_search_begin' || type === 'web_search_end') return this._processWebSearchEvent(event, emit);
     // the ≤0.130 engine's own image-view record (the only trace when the
     // function_call pair is absent) — routed, not skipped, since 2.369.48
@@ -2444,6 +2528,7 @@ class CodexMessageManager {
 }
 
 CodexMessageManager._seenUnknownRecords = new Set();
+CodexMessageManager._seenShapeDrift = new Set(); // telemetry `harness-shape-drift` once per process per shape (§3)
 CodexMessageManager.SKIPPED_RECORD_TYPES = SKIPPED_RECORD_TYPES;
 CodexMessageManager.SKIPPED_RESPONSE_ITEM_TYPES = SKIPPED_RESPONSE_ITEM_TYPES;
 CodexMessageManager.SKIPPED_EVENT_TYPES = SKIPPED_EVENT_TYPES;
