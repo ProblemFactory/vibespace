@@ -355,6 +355,13 @@ const SCENARIO = `(async () => {
     // reader, i.e. a chain with all 10 frames still ahead of it.
     if (armChain) view._scrollToBottom();
     let traces = [];
+    // 2.369.130 r2 (the Actions mirror on 2.369.129): the chain's effect is SAMPLED, not read
+    // off the settled snapshot — _extendTop now grows by height (several passes per gesture,
+    // each with its own anchored restore) and a trim past three viewports can drop the tail,
+    // so "dragged back to the live tail" is a moment, not an end state. minFromBottom = the
+    // closest the reader came to the tail from the first wheel on.
+    let minFromBottom = Infinity;
+    const sampler = setInterval(() => { const fb = snap().fromBottom; if (fb < minFromBottom) minFromBottom = fb; }, 40);
     for (let i = 0; i < 6; i++) {
       list.scrollTop = 0;
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
@@ -364,7 +371,8 @@ const SCENARIO = `(async () => {
     }
     const now = snap();
     await sleep(1500);                     // …and it must STILL be there once every rung has fired
-    return { pre, now, settled: snap(), traces };
+    clearInterval(sampler);
+    return { pre, now, settled: snap(), traces, minFromBottom };
   };
   const resumeWheel = { ...await wheelLeg(1400) };
   //    …and the same gesture with the chain armed by hand — the mechanism
@@ -564,9 +572,12 @@ if (good?.ok) {
   // POSITION, not the pin flag (same reading as the drag control): with the
   // cancel neutered the chain drags the reader back to the live tail whether
   // or not the mute lets the pin re-engage on the way.
-  check('…and its control proves the leg touches the path: with _cancelForcedScroll neutered the SAME wheel-up is dragged back to the live tail',
-    good.chainWheelControl.settled.fromBottom <= 8,
+  check('…and its control proves the leg touches the path: with _cancelForcedScroll neutered the SAME wheel-up IS dragged to the live tail at some moment of the chain (sampled — the grow loop may move the reader again afterwards)',
+    good.chainWheelControl.minFromBottom <= 8,
     JSON.stringify(good.chainWheelControl).slice(0, 600));
+  check('…while with the cancel in place the reader is NEVER brought to the tail, not even for a frame (sampled from the first wheel on)',
+    good.chainWheel.minFromBottom > 8,
+    JSON.stringify(good.chainWheel).slice(0, 600));
 }
 
 // ── 4b. ROUND 3, THE MAJOR — TRUSTED INPUT. Everything above dispatches

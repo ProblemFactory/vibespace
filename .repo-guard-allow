@@ -25,3 +25,7 @@ good-key-12345678
 this-will-fail-key
 back-again-12345678
 cluster-fake-key-1234
+# scripts/dbg-comm-surfaces.mjs fixtures (2.369.130): synthetic credentials for the screenshot driver, not real
+cluster-lark-secret-000000
+expired-access-token
+fail-switch-0000
