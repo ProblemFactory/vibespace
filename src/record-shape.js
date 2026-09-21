@@ -466,4 +466,9 @@ function declaredFields(shapeKey) {
   return s ? new Set([...s.known, ...s.ignored.keys()]) : null;
 }
 
-module.exports = { SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, declaredFields, isSecretKey, keySegments };
+// The claude build every STREAM shape below was dumped from. test-record-shape's binary oracle is STRICT
+// against this exact build and on any developer box; on the Actions mirror (which installs whatever
+// npm serves today) a NEWER build's drift is printed and skipped, never a red gate nobody reads.
+const SCHEMA_CLI_VERSION = '2.1.274';
+
+module.exports = { SCHEMA_CLI_VERSION, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, declaredFields, isSecretKey, keySegments };
