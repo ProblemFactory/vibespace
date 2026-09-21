@@ -3652,7 +3652,12 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 
 /* Ephemeral CLI install warning row (Manage Agents, 2.229.0) */
 .ob-cli-ephemeral { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; flex-wrap: wrap; }
-.ob-cli-ephemeral .usage-warn { flex: 1 1 auto; min-width: 0; }
+.ob-cli-ephemeral { min-width: 0; }
+@media (max-width: 768px) { .agents-dialog-body .ob-backend { flex-wrap: wrap; } } /* the phone modal's status row wraps like the rail panel's (3560): the warning row gets the full width instead of a 131 px column beside the buttons */
+/* the warning quotes the install PATH — one unbreakable token (the Actions runner's is 80+ chars) made the row's
+   min-content 357 px inside a 352 px phone section (the last mirror red since 2.369.75, named by the roster suite's
+   rightmost-element diagnostic); a path may break anywhere */
+.ob-cli-ephemeral .usage-warn { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 
 /* Task-group color: Auto swatch + custom picker (2.230.0) */
 .task-detail-swatch.auto { color: #fff; font-size: 10px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }

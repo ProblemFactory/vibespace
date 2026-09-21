@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.128 — the last standing mirror red since 2.369.75: the ephemeral-install warning quoted an unbreakable install path
+
+- The Agents modal's "⚠ Installed in a system location (<path>) …" row (shown when the local claude is not a user-local install — every Actions runner, any npm-global container) quotes the install PATH as one unbreakable token; on a 375 px phone the row's min-content (357 px, an 80+ char `/opt/hostedtoolcache/…/cli.js`) pushed the roster section sideways by 20 px. Named by the roster suite's rightmost-element diagnostic on the mirror (r2), reproduced here by injecting the product's own row shape. FIX = `.ob-cli-ephemeral .usage-warn { overflow-wrap: anywhere }` (a path may break anywhere) + the phone modal's backend status row wraps like the rail panel's, so the warning takes the full width instead of a 131 px column beside the buttons.
+- **Gate**: test-roster-reset-eta's phone section injects the runner's row shape under both fonts and asserts no sideways overflow, with a NEGATIVE CONTROL (the wrap rule removed → the overflow returns) so the CSS is provably load-bearing.
+
 ## 2.369.127 — the CLI's "Stop hook error" notice is hidden by default: a Stop-hook BLOCK is not an error (owner 2026-09-21)
 
 - **Owner: "这个 stop hook error 本质上是预期行为，每次都这样渲染好丑。加个选项可以隐藏".** The CLI's notification queue calls EVERY Stop-hook block an error: each time VibeSpace's bookkeeping nudge blocks a stop, the live stream carries `system/notification {key: stop-hook-error, text: "Stop hook error occurred · ctrl+o to see", priority: immediate}` (never the transcript). Since 2.369.120 that record painted the red Unknown-event fall-back card at every stop; 2.369.126 would have made it a red immediate notice PLUS a toast. The nudge itself is already visible as the "Stop hook feedback" card and the Stop-hook summary card, so the notice adds nothing.
