@@ -66,3 +66,15 @@ jobs:
       - run: node scripts/ci.mjs --heavy --dirty-ok
         env:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
+      # A chrome suite that goes red HERE and green locally (2.369.125's
+      # test-gear-menu Esc legs) leaves its screenshots in /tmp/vs-*-shots-*
+      # on a runner nobody can log into; ship them as an artifact so the
+      # failure can be read instead of guessed at.
+      - name: Upload chrome-suite screenshots (failure only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-suite-shots-${{ github.sha }}
+          path: /tmp/vs-*-shots-*/
+          if-no-files-found: ignore
+          retention-days: 7

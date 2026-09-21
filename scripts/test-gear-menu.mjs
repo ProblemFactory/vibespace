@@ -195,16 +195,30 @@ try {
   await sleep(150);
   check('Enter runs the row action (stubbed _openDiagnostics once) and closes the popover', await evalJs(`window.__diag === 1 && !document.querySelector('${POP}')`));
 
-  // Esc layers
+  // Esc layers. The pointer is PARKED off the menu first: the hover legs left
+  // the real mouse over the Communication head, and a stationary pointer over
+  // a re-rendered head can re-arm hover intent on a slower machine (the
+  // Actions mirror failed exactly these two legs on 2.369.125 while the local
+  // heavy tier passed them) — the leg is about KEYS, so no pointer may sit on
+  // a head. Every assert also prints the live state so a mirror red explains
+  // itself (what is open, where focus is, whether the popover survived).
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 500, y: 450 });
+  await sleep(250);
+  const escState = () => evalJs(`(() => { const a = document.activeElement; return JSON.stringify({ pop: !!document.querySelector('${POP}'), open: [...document.querySelectorAll('${POP} .gs-flyout.open, ${POP} .gs-sub.open')].map((s) => s.parentElement?.classList?.contains('gs-menu-item') ? s.parentElement.dataset.id : (s.previousElementSibling?.dataset?.id || '?')), active: a ? (a.tagName + (a.dataset?.id ? '#' + a.dataset.id : '') + '.' + (a.className || '').toString().split(' ')[0]) : null, body: a === document.body, floats: document.querySelectorAll('[data-popover]').length }); })()`);
   await openGear();
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
   for (let i = 0; i < 4; i++) await key('ArrowDown');
   await key('ArrowLeft');
-  check('(setup) System flyout open by keyboard', await evalJs(isOpen('system')));
+  check(`(setup) System flyout open by keyboard (${await escState()})`, await evalJs(isOpen('system')));
+  await shot('esc-0-before.png');
   await key('Escape');
-  check('Esc closes ONLY the flyout — the popover stays and focus returns to the System head', await evalJs(`!!document.querySelector('${POP}')`) && !(await evalJs(isOpen('system'))) && await evalJs(`document.activeElement?.dataset?.id === 'system'`));
+  const esc1 = await escState();
+  await shot('esc-1-after-first.png');
+  check(`Esc closes ONLY the flyout — the popover stays and focus returns to the System head (${esc1})`, await evalJs(`!!document.querySelector('${POP}')`) && !(await evalJs(isOpen('system'))) && await evalJs(`document.activeElement?.dataset?.id === 'system'`), esc1);
   await key('Escape');
-  check('the next Esc closes the popover (app.js\'s global [data-popover] handler)', !(await evalJs(`!!document.querySelector('${POP}')`)));
+  const esc2 = await escState();
+  await shot('esc-2-after-second.png');
+  check(`the next Esc closes the popover (app.js\'s global [data-popover] handler) (${esc2})`, !(await evalJs(`!!document.querySelector('${POP}')`)), esc2);
 
   // outside mousedown
   await openGear();
