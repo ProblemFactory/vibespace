@@ -189,6 +189,11 @@ class App {
     const applyHookVis = () => document.body.classList.toggle('hide-hook-cards', this.settings.get('chat.showHookCards') === false);
     applyHookVis();
     this.settings.on('chat.showHookCards', applyHookVis);
+    // The CLI's "Stop hook error occurred" notice (every Stop-hook block, incl.
+    // VibeSpace's own nudge) — hidden by default, one body class like the hook cards.
+    const applyStopNoticeVis = () => document.body.classList.toggle('hide-stop-hook-notice', this.settings.get('chat.showStopHookErrorNotice') !== true);
+    applyStopNoticeVis();
+    this.settings.on('chat.showStopHookErrorNotice', applyStopNoticeVis);
     setTimeout(applyHookVis, 2000); // re-apply once the async settings load lands
     // Empty-thinking visibility (chat.hideEmptyThinking, default ON): same
     // pure-CSS body-class toggle. Flipping it changes run-collapse adjacency

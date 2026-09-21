@@ -5173,6 +5173,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       // (chat.collapseKinds: thinking/bash/read/write).
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
+      const stopNoticeHidden = document.body.classList.contains('hide-stop-hook-notice');
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
       const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search', 'image']);
       // per-member classification (also used by flush() for the summary) —
@@ -5184,6 +5185,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // display:none'd cards are invisible glue — 'skip' (never break a run)
         if (hideEmptyThink && el.classList.contains('chat-empty-thinking')) return 'skip';
         if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';
+        if (stopNoticeHidden && el.classList.contains('chat-stop-hook-notice')) return 'skip';
         const m = el._rawMsg;
         if (!m) return null;
         // A card waiting for the user's Allow/Deny (or an AskUserQuestion

@@ -1912,6 +1912,14 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   ok('DEVICE FEED: an immediate notification → ONE server-notice toast (level 2), keyed by session + key + turn (the repeat in the same turn dedupes at serverNotice by key; low priority never toasts)', notices.length === 2 && notices[0][0] === 'hn:w-dev:stop-hook-error:3' && notices[1][0] === notices[0][0] && /dev-sess: Stop hook error/.test(notices[0][1]) && notices[0][2] === 2, JSON.stringify(notices));
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'notification', key: 'fast-mode-overage-rejected', text: 'Fast mode is off', priority: 'high' });
   ok('…a high one toasts at level 1', notices.length === 3 && notices[2][2] === 1);
+  // OUR OWN NUDGE (2.369.127): the CLI calls every Stop-hook block an "error"; when VibeSpace's bookkeeping nudge
+  // just blocked this stop (_lastStopNudge stamped by the arbiter), the stop-hook-error notice is expected — no toast.
+  const nudged = { name: 'nudged', sockName: 'cw-nudged', _normalizer: { turnIndex: 1 }, _lastStopNudge: Date.now() };
+  brain.claudeSideEffects(nudged, 'w-nudged', { type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate' });
+  ok('a stop-hook-error notice that follows OUR OWN nudge (_lastStopNudge < 2 min) does NOT toast', notices.length === 3);
+  const stale = { name: 'stale', sockName: 'cw-stale', _normalizer: { turnIndex: 1 }, _lastStopNudge: Date.now() - 10 * 60 * 1000 };
+  brain.claudeSideEffects(stale, 'w-stale', { type: 'system', subtype: 'notification', key: 'stop-hook-error', text: 'Stop hook error occurred', priority: 'immediate' });
+  ok('CONTROL: the same notice with no recent nudge behind it (another hook failing) still toasts at level 2', notices.length === 4 && notices[3][2] === 2);
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 529, message: 'Overloaded' }, retry_in_ms: 5 });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 401, message: 'OAuth token has expired' }, retry_in_ms: 0 });
   brain.claudeSideEffects(d, 'w-dev', { type: 'system', subtype: 'api_error', error: { status: 403, message: 'forbidden' }, retry_in_ms: 0 });

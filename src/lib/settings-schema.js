@@ -292,6 +292,19 @@ const SETTINGS_SCHEMA = {
     description: t('Hook events (context injections, plugin hooks, stop nudges) render as collapsible ✓/✗ cards. Turn off to hide them all — applies to open chats instantly.'),
     category: t('Chat'), liveApply: true,
   },
+  // The CLI's own notification queue calls EVERY Stop-hook block an "error"
+  // (`system/notification` key stop-hook-error, priority immediate, live stream
+  // only) — so VibeSpace's bookkeeping nudge, an expected block, painted a red
+  // card at every stop (2.369.120–.125 as the Unknown-event fall-back card,
+  // .126 as an immediate notice + toast; owner 2026-09-21: "本质上是预期行为,
+  // 每次都这样渲染好丑"). The nudge itself stays visible as the "Stop hook
+  // feedback" card and the Stop-hook summary card; this notice adds nothing.
+  'chat.showStopHookErrorNotice': {
+    type: 'boolean', default: false,
+    label: t("Show the CLI's 'Stop hook error' notice"),
+    description: t("The CLI posts a 'Stop hook error occurred' notice whenever a Stop hook blocks — including VibeSpace's own bookkeeping nudge, which is expected, not an error. Off hides that notice (the 'Stop hook feedback' and hook summary cards stay); on shows it as a red immediate notice. Applies to open chats instantly."),
+    category: t('Chat'), liveApply: true,
+  },
   'chat.hideEmptyHooks': {
     type: 'boolean', default: true,
     label: t('Hide hooks with no output'),

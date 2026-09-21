@@ -988,6 +988,9 @@ class ChatRenderers {
       const el = document.createElement('div');
       const pri = ['low', 'medium', 'high', 'immediate'].includes(b.priority) ? b.priority : 'medium';
       el.className = `chat-msg chat-msg-system chat-system-notification chat-harness-notice chat-harness-notice-${pri}`;
+      // stop-hook-error = the CLI's word for ANY Stop-hook block, VibeSpace's own nudge included: a hook card
+      // (chat.showHookCards hides it with the rest) and the stop-hook notice (chat.showStopHookErrorNotice, off by default)
+      if (b.key === 'stop-hook-error') el.classList.add('chat-msg-hook', 'chat-stop-hook-notice');
       const hint = b.key === 'stop-hook-error' ? ` <span class="chat-status-dim">${escHtml(t('(details in the Stop hook summary card)'))}</span>` : '';
       el.innerHTML = `<span class="chat-system-text" title="${escHtml(b.key ? t('Harness notification · {key} · {priority}', { key: b.key, priority: pri }) : t('Harness notification · {priority}', { priority: pri }))}">${pri === 'immediate' || pri === 'high' ? UI_ICONS.alert : UI_ICONS.info || ''} ${escHtml(b.text || '')}${hint}</span>`;
       return { el, sideEffect: null };

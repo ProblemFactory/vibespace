@@ -35,6 +35,10 @@ function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHisto
 // the same key later in the same turn is the queue re-asserting, not news).
 function noteHarnessNotification(session, sid, msg) {
   if (!(msg.priority === 'immediate' || msg.priority === 'high') || typeof msg.text !== 'string' || !msg.text.trim()) return;
+  // stop-hook-error is the CLI's word for ANY Stop-hook block: when VibeSpace's own bookkeeping nudge just
+  // blocked this stop (the nudge stamps _lastStopNudge), the notice is ours and expected — no toast. A stop-hook
+  // error with no nudge behind it (another hook failing) still toasts.
+  if (msg.key === 'stop-hook-error' && Date.now() - (Number(session._lastStopNudge) || 0) < 120000) return;
   const sn = getServerNotice();
   if (typeof sn !== 'function') return;
   const key = `hn:${sid || session.sockName || '?'}:${String(msg.key || msg.text).slice(0, 60)}:${session._normalizer?.turnIndex ?? 0}`;

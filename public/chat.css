@@ -1184,6 +1184,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* chat.showHookCards=false — hides every hook card instantly (class on body) */
 body.hide-hook-cards .chat-msg-hook { display: none; }
+body.hide-stop-hook-notice .chat-stop-hook-notice { display: none; } /* the CLI's 'Stop hook error occurred' notice — off by default (chat.showStopHookErrorNotice) */
 
 /* chat.hideEmptyThinking (default ON) — thinking cards with no text
    (redacted/zero-length) render a useless "Thinking" stub; hidden instantly
