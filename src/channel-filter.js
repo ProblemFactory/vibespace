@@ -83,30 +83,39 @@ function hhmm(v) {
   return h * 60 + mm;
 }
 
+const MAX_RULES = 50;
+
+/** A refusal: the English `error` is the ROUTE'S CONTRACT (the agent CLI
+ *  prints it verbatim, test-channel-filter pins its words); the `code` (+
+ *  `kind` / `max`) is the same fact as STRUCTURE, which the editor words in
+ *  the device's language through `filterProblemText` (a3 i18n — the
+ *  validator's sentence used to reach a zh/ja screen on every "Add rule"). */
+const refuse = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
+
 /**
  * Validate ONE rule. Returns `{ok:true, rule}` (normalized) or `{ok:false,
- * error}` naming the field — refused at the editor and at the route, never
- * discovered at match time.
+ * code, error, kind?}` naming the field — refused at the editor and at the
+ * route, never discovered at match time.
  */
 function validateRule(rule) {
   const r = rule && typeof rule === 'object' ? rule : null;
-  if (!r) return { ok: false, error: 'a rule must be an object' };
-  if (!RULE_KINDS.includes(r.kind)) return { ok: false, error: `rule kind must be one of ${RULE_KINDS.join('|')} (got ${JSON.stringify(r.kind)})` };
+  if (!r) return refuse('not-an-object', 'a rule must be an object');
+  if (!RULE_KINDS.includes(r.kind)) return refuse('bad-kind', `rule kind must be one of ${RULE_KINDS.join('|')} (got ${JSON.stringify(r.kind)})`, { kind: r.kind });
   const out = { kind: r.kind };
   switch (r.kind) {
     case 'mention': {
       const v = str(r.value).trim().replace(/^@/, '');
-      if (!v) return { ok: false, error: 'mention: value (a name or id, with or without @) is required' };
+      if (!v) return refuse('value-required', 'mention: value (a name or id, with or without @) is required', { kind: r.kind });
       out.value = v.slice(0, 200); break;
     }
     case 'keyword': case 'not-contains': case 'from-address': case 'subject': {
       const v = str(r.value).trim();
-      if (!v) return { ok: false, error: `${r.kind}: value is required` };
+      if (!v) return refuse('value-required', `${r.kind}: value is required`, { kind: r.kind });
       out.value = v.slice(0, 500); break;
     }
     case 'sender-in-group': {
       const members = (Array.isArray(r.members) ? r.members : str(r.value).split(',')).map((x) => str(x).trim()).filter(Boolean);
-      if (!members.length) return { ok: false, error: 'sender-in-group: members (ids or names) are required' };
+      if (!members.length) return refuse('members-required', 'sender-in-group: members (ids or names) are required', { kind: r.kind });
       out.members = members.slice(0, 200).map((m) => m.slice(0, 200));
       out.label = str(r.label).trim().slice(0, 100) || null;
       break;
@@ -114,13 +123,13 @@ function validateRule(rule) {
     case 'has-attachment': break;
     case 'time-window': {
       const from = hhmm(r.from), to = hhmm(r.to);
-      if (from === null || to === null) return { ok: false, error: 'time-window: from and to must be HH:MM' };
+      if (from === null || to === null) return refuse('time-format', 'time-window: from and to must be HH:MM', { kind: r.kind });
       const off = r.tzOffsetMinutes === undefined || r.tzOffsetMinutes === null || r.tzOffsetMinutes === '' ? 0 : Number(r.tzOffsetMinutes);
-      if (!Number.isFinite(off) || Math.abs(off) > 14 * 60) return { ok: false, error: 'time-window: tzOffsetMinutes must be a number within ±840' };
+      if (!Number.isFinite(off) || Math.abs(off) > 14 * 60) return refuse('tz-range', 'time-window: tzOffsetMinutes must be a number within ±840', { kind: r.kind });
       out.from = str(r.from).trim(); out.to = str(r.to).trim(); out.tzOffsetMinutes = off;
       break;
     }
-    default: return { ok: false, error: `unhandled rule kind ${r.kind}` };
+    default: return refuse('bad-kind', `unhandled rule kind ${r.kind}`, { kind: r.kind });
   }
   return { ok: true, rule: out };
 }
@@ -128,11 +137,11 @@ function validateRule(rule) {
 /** Validate a whole filter `{name?, match, rules[]}`. */
 function validateFilter(filter) {
   const f = filter && typeof filter === 'object' ? filter : null;
-  if (!f) return { ok: false, error: 'a filter must be an object' };
+  if (!f) return refuse('not-an-object', 'a filter must be an object');
   const match = f.match === undefined ? 'any' : f.match;
-  if (!MATCH_MODES.includes(match)) return { ok: false, error: `match must be ${MATCH_MODES.join('|')}` };
-  if (!Array.isArray(f.rules) || !f.rules.length) return { ok: false, error: 'a filter needs at least one rule' };
-  if (f.rules.length > 50) return { ok: false, error: 'a filter may hold at most 50 rules' };
+  if (!MATCH_MODES.includes(match)) return refuse('bad-match', `match must be ${MATCH_MODES.join('|')}`);
+  if (!Array.isArray(f.rules) || !f.rules.length) return refuse('no-rules', 'a filter needs at least one rule');
+  if (f.rules.length > MAX_RULES) return refuse('too-many-rules', `a filter may hold at most ${MAX_RULES} rules`, { max: MAX_RULES });
   const rules = [];
   for (const r of f.rules) {
     const v = validateRule(r);
@@ -140,6 +149,25 @@ function validateFilter(filter) {
     rules.push(v.rule);
   }
   return { ok: true, filter: { name: str(f.name).trim().slice(0, 100) || null, match, rules } };
+}
+
+/** A validateRule / validateFilter refusal in WORDS, with the device's `t`
+ *  (the a3 rule: the sentence stays the route's contract, the code is what a
+ *  screen says). `ruleLabel(kind)` is the editor's own label for a kind, so
+ *  the sentence names the rule the way the row does; a code the table does
+ *  not know falls back to the contract sentence rather than hiding it. */
+function filterProblemText(v, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s)), ruleLabel = (k) => String(k) } = {}) {
+  if (!v || v.ok) return '';
+  const kind = v.kind ? ruleLabel(v.kind) : '';
+  switch (String(v.code || '')) {
+    case 'value-required': return t('the rule "{kind}" needs a value', { kind });
+    case 'members-required': return t('the rule "{kind}" needs at least one member (ids or names)', { kind });
+    case 'time-format': return t('the time window needs both times as HH:MM');
+    case 'tz-range': return t('the time-zone offset must be within ±840 minutes');
+    case 'no-rules': return t('add at least one rule');
+    case 'too-many-rules': return t('a filter may hold at most {n} rules', { n: v.max || MAX_RULES });
+    default: return String(v.error || v.code || '');
+  }
 }
 
 /** The `why` string ONE rule produces — the contract the wake and the panel share. */
@@ -306,9 +334,23 @@ function validateAssignment(input, caps = {}) {
  *  checked first only because its sentence is the more actionable one; both
  *  caps only narrow, so the order cannot change the answer. */
 function authorityCap({ offersSend = false, sendWhy = null, policyRequiresReview = true } = {}) {
-  if (policyRequiresReview) return 'this channel requires review before anything is sent';
-  if (!offersSend) return `sending is not offered on this conversation (${sendWhy || 'unknown'})`;
+  const c = authorityCapCode({ offersSend, sendWhy, policyRequiresReview });
+  return c ? authorityCapText(c) : null;
+}
+/** The same cap as STRUCTURE (a3 i18n): `{code:'policy-review'}` or
+ *  `{code:'send-not-offered', sendWhy}` — the client words it with its own
+ *  `t` (+ channel-caps' `sendWhyText` for the reason); the route's `error`
+ *  and the stored `authorityWhy` keep the English sentence as the contract. */
+function authorityCapCode({ offersSend = false, sendWhy = null, policyRequiresReview = true } = {}) {
+  if (policyRequiresReview) return { code: 'policy-review', sendWhy: null };
+  if (!offersSend) return { code: 'send-not-offered', sendWhy: sendWhy || 'unknown' };
   return null;
+}
+function authorityCapText(cap, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s)), sendWhyText = (w) => String(w || 'unknown') } = {}) {
+  if (!cap) return '';
+  if (cap.code === 'policy-review') return t('this channel requires review before anything is sent');
+  if (cap.code === 'send-not-offered') return t('sending is not offered on this conversation ({why})', { why: sendWhyText(cap.sendWhy || 'unknown', { t }) });
+  return String(cap.code || '');
 }
 
 /**
@@ -321,8 +363,8 @@ function effectiveAuthority(assignment, caps = {}) {
   const a = assignment && typeof assignment === 'object' ? assignment : null;
   if (!a) return { authority: 'draft', clamped: false, why: null };
   if (a.authority !== 'send') return { authority: 'draft', clamped: false, why: null };
-  const cap = authorityCap(caps);
-  if (cap) return { authority: 'draft', clamped: true, why: cap };
+  const cap = authorityCapCode(caps);
+  if (cap) return { authority: 'draft', clamped: true, why: authorityCapText(cap), whyCap: cap };
   return { authority: 'send', clamped: false, why: null };
 }
 
@@ -446,7 +488,7 @@ module.exports = {
   RULE_KINDS, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
-  validateRule, validateFilter, ruleWhy, matchRecord, estimate,
-  validateAssignment, authorityCap, effectiveAuthority, pickRoundRobin, paceVerdict, pruneLedger, countSince,
+  validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, matchRecord, estimate,
+  validateAssignment, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
 };

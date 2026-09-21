@@ -104,6 +104,15 @@ const KEY_FILE = '.channels-key';
 /** The "For you" inbox key a failing adapter files under (fence 8). One key
  *  for the layer, like login-expiry-watch's `accounts`. */
 const INBOX_KEY = 'channels';
+/** A DECLARED human-visible string this engine files into the "For you"
+ *  inbox as STRUCTURE (`i18n: {text, detail[], source}` = `{key, params}`),
+ *  which the CLIENT words with its own t() — the server sends structure, the
+ *  client says the words (a3 i18n). The marker is the identity; the i18n
+ *  extractor censuses `i18nKey(…)` like `t(…)`, so every key has zh+ja rows.
+ *  The English `text`/`detail` beside it stay: the store's dedupe key and the
+ *  agent CLI's contract (test-channel-outbox / -acl pin their words). */
+const i18nKey = (s) => s;
+const INBOX_SOURCE = { key: i18nKey('Channels') };
 const RESOLVED_BY = 'system';
 
 /** §6.2's per-adapter request budget. A SETTING in the design; a named
@@ -219,11 +228,13 @@ function create(deps = {}) {
   /** The credential FACTS the panel's connect wizard needs (§10.1's three
    *  copy paths: none / cluster / user) — never the values. */
   function credentialFacts(integrationId) {
-    if (!integrationId || !resolveIntegration) return { source: 'unknown', why: 'no integration store', missing: [], clusterLabel: null };
+    // `why` is the store's English contract sentence; `whyCode` + `whyParams`
+    // are the same fact as STRUCTURE — the client words them (a3 i18n).
+    if (!integrationId || !resolveIntegration) return { source: 'unknown', why: 'no integration store', whyCode: 'no-store', whyParams: null, missing: [], clusterLabel: null };
     try {
       const r = resolveIntegration(integrationId);
-      return { source: r.source, why: r.why || null, missing: Array.isArray(r.missing) ? r.missing.slice() : [], clusterLabel: r.clusterLabel || null };
-    } catch (e) { return { source: 'unknown', why: `integration lookup failed: ${(e && e.message) || e}`, missing: [], clusterLabel: null }; }
+      return { source: r.source, why: r.why || null, whyCode: r.whyCode || null, whyParams: r.whyParams || null, missing: Array.isArray(r.missing) ? r.missing.slice() : [], clusterLabel: r.clusterLabel || null };
+    } catch (e) { return { source: 'unknown', why: `integration lookup failed: ${(e && e.message) || e}`, whyCode: 'lookup-failed', whyParams: null, missing: [], clusterLabel: null }; }
   }
 
   const live = new Map();     // adapterId -> { adapter, record, passing, failures, nextAt, budget }
@@ -591,7 +602,7 @@ function create(deps = {}) {
       const lane = laneOrScan(rec, en);
       const cc = caps.convCapsState(en.convCaps, t);
       return {
-        key: en.key, id: en.id, adapterId: en.adapterId, title: en.title, kind: en.kind,
+        key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: en.title, kind: en.kind,
         participants: en.participants, lastAt: en.lastAt, unread: en.unread || 0, tracked: !!en.tracked,
         convCaps: cc,
         offers: {
@@ -649,8 +660,10 @@ function create(deps = {}) {
     // the token record says (§14.3).
     const auth = caps.authState(rec, t, { adapterState: st });
     return {
-      id: rec.id, kind: rec.kind, label: rec.label, enabled: rec.enabled !== false,
-      auth: { ...auth, user: (st && st.user) || (rec.auth && rec.auth.user) || null, scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null },
+      id: rec.id, kind: rec.kind, label: rec.label, enabled: rec.enabled !== false, builtin: !!rec.builtin,
+      // The built-in row's login IS this instance (`self`), never a named
+      // user — the seed's `user: 'you'` was an English word on the wire (a3 i18n).
+      auth: { ...auth, self: !!rec.builtin, user: rec.builtin ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null },
       lastPass: rec.lastPass || null, consecutiveFailures: rec.consecutiveFailures || 0,
       lane: { via: lane.via, why: lane.why, live: !!lane.live, carryContent: !!lane.carryContent },
       sendAs: c.sendAs, receive: c.receive, identityMarking: c.identityMarking,
@@ -1050,6 +1063,8 @@ function create(deps = {}) {
         detail: `Adapter: ${rec.label || rec.id} (${rec.kind})\nFailure: ${code}\nVendor said: ${vendorWords}\n\nWhat to do: ${remedyFor(rec, code)}\n\nThis item is retracted automatically by the channels engine when a pass succeeds again.`,
         urgency: code === 'auth-expired' ? 'high' : 'normal',
         by: 'agent', sessionName: 'Channels',
+        // the headline as structure; the detail keeps the vendor's verbatim and the remedy
+        i18n: { text: { key: i18nKey('Channel {label}: {n} consecutive failed passes ({code})'), params: { label: rec.label || rec.id, n: FAILURES_BEFORE_LOUD, code } }, source: INBOX_SOURCE },
       });
       if (item && item.id) await store.adapters.update(() => { rec.failureItem = { id: item.id, text, code, at: now() }; });
     } catch (e) { log.warn(`[channels] ${rec.id}: could not file the failure in the inbox: ${(e && e.message) || e}`); }
@@ -1329,7 +1344,7 @@ function create(deps = {}) {
     const a = en && en.assignment;
     if (!a) return null;
     const eff = F.effectiveAuthority(a, authorityCapsFor(rec, en, t));
-    return { ...a, authority: eff.authority, authorityStored: a.authority, authorityClamped: eff.clamped, authorityWhy: eff.why };
+    return { ...a, authority: eff.authority, authorityStored: a.authority, authorityClamped: eff.clamped, authorityWhy: eff.why, authorityWhyCap: eff.whyCap || null };
   }
   function statsView(en, t) {
     const s = (en && en.stats) || {};
@@ -1699,10 +1714,13 @@ function create(deps = {}) {
     // whether a lost outcome can be reconciled by the machine at all.
     const pending = p.state === 'proposed' || p.state === 'awaiting-approval' || p.state === 'sending';
     const honestyLine = pending ? P.honestyLine({ draftedBy: p.draftedBy, enabled: honestyLineFor(rec) }) : (p.result && p.result.honestyLine ? P.honestyLine({ draftedBy: p.draftedBy, enabled: true }) : null);
-    const can = p.state === 'unknown' ? (c ? P.canReconcile(c) : { ok: false, why: 'the adapter no longer exists' }) : null;
+    const can = p.state === 'unknown' ? (c ? P.canReconcile(c) : { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' }) : null;
     return {
       ...p, adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
-      honestyLine, canReconcile: !!(can && can.ok), reconcileWhy: can && !can.ok ? can.why : null,
+      honestyLine, canReconcile: !!(can && can.ok), reconcileWhy: can && !can.ok ? can.why : null, reconcileWhyCode: can && !can.ok ? (can.code || null) : null,
+      // THE OUTCOME AS STRUCTURE (a3 i18n): `p.reason` stays the English
+      // contract string agents read; the card words `outcome` in its language.
+      outcome: P.outcomeOf(p),
     };
   }
   function outboxView({ key = null, limit = OUTBOX_LIST_CAP } = {}) {
@@ -1852,7 +1870,7 @@ function create(deps = {}) {
   }
 
   async function reject(id, { reason = null, by = 'user' } = {}) {
-    const tr = await transition(id, 'rejected', by, (p) => { p.reason = reason ? String(reason).slice(0, 500) : 'rejected by the user'; p.approvedBy = null; });
+    const tr = await transition(id, 'rejected', by, (p) => { p.reason = reason ? String(reason).slice(0, 500) : P.REJECTED_DEFAULT_REASON; p.approvedBy = null; });
     if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why };
     const p = store.outbox.snapshot().proposals[id];
     auditOutbox(p, 'reject', { reason: p.reason });
@@ -1931,10 +1949,19 @@ function create(deps = {}) {
   async function speakUnknown(p) {
     if (!userTodos || typeof userTodos.add !== 'function') return;
     try {
+      const title = String(p.title || p.convId).slice(0, 120);
       const item = userTodos.add(INBOX_KEY, {
-        text: `Outbox: a send to ${String(p.title || p.convId).slice(0, 120)} has an UNKNOWN outcome`,
+        text: `Outbox: a send to ${title} has an UNKNOWN outcome`,
         detail: `Proposal ${p.id} (${p.adapterId}): the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else's room is worse than asking. Check the conversation on the platform; the Outbox window shows the proposal.\n\n${p.reason || ''}`,
         urgency: 'high', by: 'agent', sessionName: 'Channels',
+        i18n: {
+          text: { key: i18nKey('Outbox: a send to {title} has an UNKNOWN outcome'), params: { title } },
+          detail: [
+            { key: i18nKey('Proposal {id} ({adapter}): the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else\'s room is worse than asking.'), params: { id: p.id, adapter: p.adapterId } },
+            { key: i18nKey('Check the conversation on the platform; the Outbox window shows the proposal.') },
+          ],
+          source: INBOX_SOURCE,
+        },
       });
       if (item && item.id) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = item.id; });
     } catch (e) { log.warn(`[channels] outbox ${p.id}: could not file the unknown-outcome item: ${(e && e.message) || e}`); }
@@ -2107,10 +2134,23 @@ function create(deps = {}) {
       const title = String(en.title || en.id).slice(0, 120);
       const text = `Proposals awaiting approval in ${title}`;
       const latest = awaiting[0];
-      const who = latest.draftedBy && latest.draftedBy.kind === 'agent' ? (latest.draftedBy.name || latest.draftedBy.id) : 'you';
-      const detail = `${awaiting.length} proposal${awaiting.length === 1 ? '' : 's'} awaiting your approval in ${rec ? (rec.label || rec.id) : en.adapterId} · ${title}.\nLatest (${who}): "${String(latest.text).slice(0, 300)}"\n\nOpen the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.`;
+      const agentName = latest.draftedBy && latest.draftedBy.kind === 'agent' ? (latest.draftedBy.name || latest.draftedBy.id) : null;
+      const who = agentName || 'you';
+      const adapterLabel = rec ? (rec.label || rec.id) : en.adapterId;
+      const latestText = String(latest.text).slice(0, 300);
+      const detail = `${awaiting.length} proposal${awaiting.length === 1 ? '' : 's'} awaiting your approval in ${adapterLabel} · ${title}.\nLatest (${who}): "${latestText}"\n\nOpen the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.`;
+      // the same sentences as STRUCTURE — the client words them (a3 i18n)
+      const i18n = {
+        text: { key: i18nKey('Proposals awaiting approval in {title}'), params: { title } },
+        detail: [
+          { key: i18nKey('{n} proposal(s) awaiting your approval in {adapter} · {title}.'), params: { n: awaiting.length, adapter: adapterLabel, title } },
+          agentName ? { key: i18nKey('Latest ({who}): "{text}"'), params: { who: agentName, text: latestText } } : { key: i18nKey('Latest (your own draft): "{text}"'), params: { text: latestText } },
+          { key: i18nKey('Open the Outbox (rail → Channels → Outbox) or the conversation window to approve, edit or reject. This item is retracted by the channels engine when the last proposal leaves awaiting-approval.') },
+        ],
+        source: INBOX_SOURCE,
+      };
       try {
-        const item = userTodos.add(INBOX_KEY, { text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels' });
+        const item = userTodos.add(INBOX_KEY, { text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n });
         if (item && item.id) await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = item.id; });
       } catch (e) {
         // DEGRADE, never fail the proposal: the rail badge and the Outbox
@@ -2184,7 +2224,21 @@ function create(deps = {}) {
     const req = { id: `rq-${t.toString(36)}-${Math.random().toString(36).slice(2, 8)}`, principal: { kind: 'agent', id: ctx.id, name: ctx.name || null }, scope: { kind: 'conversation', id: en.key }, why: reason, at: t, status: 'open', todoId: null, decidedAt: null };
     if (userTodos && typeof userTodos.add === 'function') {
       try {
-        const item = userTodos.add(INBOX_KEY, { text: `${ctx.name || ctx.id} requests access to ${String(en.title || en.id).slice(0, 120)}`, detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${en.title || en.id}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`, urgency: 'normal', by: 'agent', sessionName: 'Channels' });
+        const title = String(en.title || en.id).slice(0, 120);
+        const item = userTodos.add(INBOX_KEY, {
+          text: `${ctx.name || ctx.id} requests access to ${title}`,
+          detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${en.title || en.id}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
+          urgency: 'normal', by: 'agent', sessionName: 'Channels',
+          i18n: {
+            text: { key: i18nKey('{agent} requests access to {title}'), params: { agent: ctx.name || ctx.id, title } },
+            detail: [
+              { key: i18nKey('Agent session {name} ({id}) asks to see {adapter} · {title}.'), params: { name: ctx.name || '', id: ctx.id, adapter: rec.label || rec.id, title: en.title || en.id } },
+              { key: i18nKey('Reason: {reason}'), params: { reason: String(reason) } },
+              { key: i18nKey('Approve or deny from the conversation\'s Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.') },
+            ],
+            source: INBOX_SOURCE,
+          },
+        });
         if (item && item.id) req.todoId = item.id;
       } catch (e) { log.warn(`[channels] ${en.key}: could not file the reach request: ${(e && e.message) || e}`); }
     }

@@ -84,7 +84,8 @@ class WindowManager {
     iconWrap.append(backendIconSlot, agentKindSlot, iconSpan);
     const titleSpan = document.createElement('span'); titleSpan.className = 'window-title'; titleSpan.textContent = title;
     const controls = document.createElement('div'); controls.className = 'window-controls';
-    controls.innerHTML = '<button class="win-btn win-overlap-btn no-overlap" title="Overlapping windows">□</button><button class="win-btn win-minimize" title="Minimize">─</button><button class="win-btn win-maximize" title="Maximize">□</button><button class="win-btn win-close" title="Close">✕</button>';
+    // the four titlebar tooltips are human-visible chrome (a3 i18n: they were the last untranslated words on every window)
+    controls.innerHTML = `<button class="win-btn win-overlap-btn no-overlap" title="${escHtml(t('Overlapping windows'))}">□</button><button class="win-btn win-minimize" title="${escHtml(t('Minimize'))}">─</button><button class="win-btn win-maximize" title="${escHtml(t('Maximize'))}">□</button><button class="win-btn win-close" title="${escHtml(t('Close'))}">✕</button>`;
     titleBar.append(iconWrap, titleSpan, controls);
 
     const content = document.createElement('div'); content.className = 'window-content';
@@ -1365,11 +1366,11 @@ class WindowManager {
       if (hasOverlap) {
         btn.classList.remove('no-overlap');
         btn.textContent = '\u29C9'; // ⧉ stacked windows
-        btn.title = 'Show overlapping windows';
+        btn.title = t('Show overlapping windows');
       } else {
         btn.classList.add('no-overlap');
         btn.textContent = '\u25A1'; // □ single window
-        btn.title = 'No overlapping windows';
+        btn.title = t('No overlapping windows');
       }
     }
   }

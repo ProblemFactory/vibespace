@@ -88,16 +88,20 @@ const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const EGRESS = Object.freeze(['oauth2.googleapis.com', 'accounts.google.com', 'gmail.googleapis.com', 'www.googleapis.com']);
 
 /** Per-record OPTIONS the engine stores and the panel edits (§6.3). */
+/** A declared `label` / `help` is a KEY the client renders with `t()` (a3
+ *  i18n): scripts/i18n-extract.mjs collects i18nKey(…) literals, the
+ *  dictionaries carry zh + ja. The marker is the identity. */
+const i18nKey = (s) => s;
 const OPTIONS = Object.freeze([
-  { key: 'query', label: 'Include query', default: 'label:INBOX', placeholder: 'label:INBOX', maxLength: 500,
-    help: 'A Gmail search query; only threads matching it become conversations. Everything else never appears here.' },
+  { key: 'query', label: i18nKey('Include query'), default: 'label:INBOX', placeholder: 'label:INBOX', maxLength: 500,
+    help: i18nKey('A Gmail search query; only threads matching it become conversations. Everything else never appears here.') },
   // THE PUSH LANE'S TWO RESOURCE NAMES (decision 20). `relive:true`: a change
   // restarts the LANE (single-use), never the adapter — the mailbox cursor is
   // untouched.
-  { key: 'pushTopic', label: 'Pub/Sub topic (push)', default: '', placeholder: 'projects/<project>/topics/<topic>', maxLength: 300, relive: true,
-    help: 'The Cloud Pub/Sub topic Gmail publishes mailbox changes to (users.watch). Grant gmail-api-push@system.gserviceaccount.com the Publisher role on it. Only read when push is enabled.' },
-  { key: 'pushSubscription', label: 'Pub/Sub subscription (push)', default: '', placeholder: 'projects/<project>/subscriptions/<name>', maxLength: 300, relive: true,
-    help: 'THIS instance\'s own pull subscription of that topic — one per instance is what makes push exclusive here. Only read when push is enabled.' },
+  { key: 'pushTopic', label: i18nKey('Pub/Sub topic (push)'), default: '', placeholder: 'projects/<project>/topics/<topic>', maxLength: 300, relive: true,
+    help: i18nKey('The Cloud Pub/Sub topic Gmail publishes mailbox changes to (users.watch). Grant gmail-api-push@system.gserviceaccount.com the Publisher role on it. Only read when push is enabled.') },
+  { key: 'pushSubscription', label: i18nKey('Pub/Sub subscription (push)'), default: '', placeholder: 'projects/<project>/subscriptions/<name>', maxLength: 300, relive: true,
+    help: i18nKey('THIS instance\'s own pull subscription of that topic — one per instance is what makes push exclusive here. Only read when push is enabled.') },
 ]);
 
 const REQUEST_TIMEOUT_MS = 20000;

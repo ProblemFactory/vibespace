@@ -106,5 +106,20 @@ export const UI_ICONS = {
   globe:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>'),
   monitor:   _s('<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/>'),
   info:      _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 7v4.5M8 4.8v.2"/>'),
+  // Communication panel (docs/design-communication-panel-ui.md §4.7, a4
+  // 2026-09-18): the channel KINDS (chat / mail / the built-in robot), the
+  // chrome glyphs the panel + window + wizard use. Stroke on the 16-grid,
+  // 1.5px, currentColor — sized by the wrapper's font-size (13px heads,
+  // 9–11px inside pills and notes). SVG only, never a text symbol (§17).
+  chat:      _s('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>'),
+  mail:      FILE_ICONS.mail,
+  more:      _s('<circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/>'),
+  chevronRight: _s('<path d="M6 3.5L10.5 8 6 12.5"/>'),
+  outbox:    _s('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>'),
+  filter:    _s('<path d="M2.5 3h11l-4.5 5.5V13l-2-1V8.5z"/>'),
+  reach:     _s('<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
+  connect:   _s('<path d="M6.5 9.5l3-3M9 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M7 11.5l-1 1A2.5 2.5 0 012.5 9l1-1"/>'),
+  plus:      _s('<path d="M8 3v10M3 8h10"/>'),
+  external:  _s('<path d="M7 3H4a1 1 0 00-1 1v8a1 1 0 001 1h8a1 1 0 001-1V9"/><path d="M9.5 2.5H13.5V6.5M13.5 2.5L7.5 8.5"/>'),
   forkBranch: _s('<path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/>', { fill: true }),
 };

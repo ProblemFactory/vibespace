@@ -22,6 +22,31 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+/** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
+ *  clamped, or null; a shape that is not that throws by name. Params are
+ *  strings/numbers only (they are interpolated into a sentence, never HTML). */
+function normalizeI18n(x) {
+  if (x == null) return null;
+  if (typeof x !== 'object' || Array.isArray(x)) throw new Error('i18n must be an object');
+  const line = (l, what) => {
+    if (!l || typeof l !== 'object' || typeof l.key !== 'string' || !l.key.trim()) throw new Error(`i18n.${what} needs a key`);
+    const out = { key: l.key.slice(0, 400) };
+    if (l.params != null) {
+      if (typeof l.params !== 'object' || Array.isArray(l.params)) throw new Error(`i18n.${what}.params must be an object`);
+      out.params = {};
+      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; }
+    }
+    return out;
+  };
+  const out = { text: line(x.text, 'text') };
+  if (x.detail != null) {
+    if (!Array.isArray(x.detail)) throw new Error('i18n.detail must be an array of lines');
+    out.detail = x.detail.slice(0, 12).map((l, i) => line(l, `detail[${i}]`));
+  }
+  if (x.source != null) out.source = { key: line(x.source, 'source').key };
+  return out;
+}
+
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -86,9 +111,16 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null } = {}) {
     text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
     if (!text) throw new Error('text required');
+    // WORDS AS STRUCTURE (a3 i18n, 2026-09-21): a server-side producer may
+    // file, beside its English `text`/`detail` (the dedupe key and the agent
+    // CLI's contract, unchanged), the same sentences as `{key, params}` the
+    // CLIENT words with its own t() — `text`, `detail` LINES and the `source`
+    // name — so a zh/ja inbox does not read "Channels: Proposals awaiting
+    // approval in …". Validated here; a malformed shape is refused by name.
+    i18n = normalizeI18n(i18n);
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
     // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // 'action' = the user must do something (default, every older item);
@@ -115,6 +147,7 @@ class UserTodoManager {
       if (detail && detail !== existing.detail) { existing.detail = detail; changed = true; }
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
+      if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
       if (changed) { this._save(); this._notify(); }
       return { ...existing, existing: true };
     }
@@ -127,6 +160,7 @@ class UserTodoManager {
       status: 'open', by,
       sessionName: sessionName || null, // display fallback frozen at file time
       jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel
+      i18n, // the words as structure, or null (an agent's own item is its own words)
       createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
     };
     this._state.items.push(item);

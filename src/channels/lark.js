@@ -77,9 +77,13 @@ const EGRESS = Object.freeze(['open.feishu.cn', 'accounts.feishu.cn', 'open.lark
  *  the app was created in decides every host this adapter talks to, so a
  *  change REBUILDS the adapter (`rebuild:true` — the engine drops the live
  *  instance; a walk restart is safe, the store owns every cursor). */
+/** A declared `label` / `help` is a KEY the client renders with `t()` (a3
+ *  i18n): scripts/i18n-extract.mjs collects i18nKey(…) literals, the
+ *  dictionaries carry zh + ja. The marker is the identity. */
+const i18nKey = (s) => s;
 const OPTIONS = Object.freeze([
-  { key: 'brand', label: 'Brand', default: 'feishu', choices: BRANDS, rebuild: true,
-    help: 'feishu = 飞书 (open.feishu.cn), lark = Lark international (open.larksuite.com) — the console the app was created in.' },
+  { key: 'brand', label: i18nKey('Brand'), default: 'feishu', choices: BRANDS, rebuild: true,
+    help: i18nKey('feishu = 飞书 (open.feishu.cn), lark = Lark international (open.larksuite.com) — the console the app was created in.') },
 ]);
 
 /** THE SEND SCOPE PAIR (§12.1, decision 2): `im:message` AND

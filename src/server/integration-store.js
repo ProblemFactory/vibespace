@@ -228,7 +228,7 @@ function create(deps = {}) {
       const r = rec(row.id);
       const presets = (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || '') } }));
       const pick = R.pickPreset(presets, { savedKey: r && r.clusterKey, prefer: row.delegate.prefer });
-      return { def: pick.preset, why: pick.why, options: presets.map((p) => ({ key: p.key, label: p.label })) };
+      return { def: pick.preset, why: pick.why, whyCode: pick.whyCode || null, whyParams: pick.whyParams || null, options: presets.map((p) => ({ key: p.key, label: p.label })) };
     }
     const json = envJsonEntries().filter((e) => e.id === row.id);
     const fromPrefix = envPrefixValues(row);
@@ -258,10 +258,10 @@ function create(deps = {}) {
       const why = r && r.clusterKey
         ? `the cluster default this row used (${r.clusterKey}) is no longer provided by this instance's environment`
         : 'the cluster provides no default for this integration';
-      return { def: null, why, options };
+      return { def: null, why, whyCode: r && r.clusterKey ? 'preset-gone' : 'no-preset', whyParams: r && r.clusterKey ? { key: r.clusterKey } : null, options };
     }
     const pick = R.pickPreset(presets, { savedKey: r && r.clusterKey, prefer: null, rebindSingle: true });
-    return { def: pick.preset, why: pick.why, options, rebound: pick.rebound || null };
+    return { def: pick.preset, why: pick.why, whyCode: pick.whyCode || null, whyParams: pick.whyParams || null, options, rebound: pick.rebound || null };
   }
 
   // ── resolution: THE ONE ANSWER every consumer asks ───────────────────────
@@ -289,19 +289,22 @@ function create(deps = {}) {
     // consulted — feeding the decrypted remainder (`{}`) to the precedence
     // rule handed the row to the cluster with no signal anywhere.
     const res = undecryptable.length
-      ? { source: 'none', values: {}, clusterKey: null, label: null, why: undecryptableWhy(undecryptable) }
-      : R.resolvePrecedence(own, cluster.def, { clusterWhy: cluster.why });
-    let why = res.why;
+      ? { source: 'none', values: {}, clusterKey: null, label: null, why: undecryptableWhy(undecryptable), whyCode: 'undecryptable', whyParams: { fields: undecryptable.slice() } }
+      : R.resolvePrecedence(own, cluster.def, { clusterWhy: cluster.why, clusterWhyCode: cluster.whyCode, clusterWhyParams: cluster.whyParams });
+    let why = res.why, whyCode = res.whyCode || null, whyParams = res.whyParams || null;
     // An unreadable store means the user's OWN values are UNKNOWN, not absent:
     // the cluster may still serve the row, but `none` must say the real reason.
-    if (res.source === 'none' && loadError) why = loadError.message;
+    if (res.source === 'none' && loadError) { why = loadError.message; whyCode = 'store-unreadable'; whyParams = null; }
     // A re-bound single default names the re-bind (it is the only time a
     // `cluster` answer carries a `why`) so the card and the journal can say it.
-    if (res.source === 'cluster' && cluster.rebound) why = `the cluster default this row used (${cluster.rebound.from}) was re-keyed to ${cluster.rebound.to} — the only default this instance offers`;
+    if (res.source === 'cluster' && cluster.rebound) { why = `the cluster default this row used (${cluster.rebound.from}) was re-keyed to ${cluster.rebound.to} — the only default this instance offers`; whyCode = 'rebound'; whyParams = { from: cluster.rebound.from, to: cluster.rebound.to }; }
     const missing = R.missingFields(row, res.values);
     return {
       id: row.id, label: row.label,
       source: res.source, values: res.values,
+      // `why` is the English contract sentence; `whyCode` + `whyParams` are the
+      // same fact as STRUCTURE (the client words it, a3 i18n)
+      whyCode, whyParams,
       clusterKey: res.source === 'cluster' ? res.clusterKey : null,      // the preset IN EFFECT
       savedClusterKey: (r && r.clusterKey) || null,                       // the selector the user saved
       clusterLabel: res.source === 'cluster' ? res.label : null,
@@ -329,8 +332,8 @@ function create(deps = {}) {
       id: row.id, label: row.label,
       fields: R.fieldDecls(row),
       setup: row.setup ? { callbackUrl: row.setup.callbackUrl || null, callbackNote: row.setup.callbackNote || null, prerequisites: (row.setup.prerequisites || []).slice() } : null,
-      source: res.source, why: res.why, clusterKey: res.clusterKey, savedClusterKey: res.savedClusterKey, clusterLabel: res.clusterLabel,
-      clusterAvailable: !!cluster.def, clusterWhy: cluster.def ? null : cluster.why,
+      source: res.source, why: res.why, whyCode: res.whyCode || null, whyParams: res.whyParams || null, clusterKey: res.clusterKey, savedClusterKey: res.savedClusterKey, clusterLabel: res.clusterLabel,
+      clusterAvailable: !!cluster.def, clusterWhy: cluster.def ? null : cluster.why, clusterWhyCode: cluster.def ? null : (cluster.whyCode || null), clusterWhyParams: cluster.def ? null : (cluster.whyParams || null),
       clusterOptions: cluster.options,           // key + label ONLY
       delegate: row.delegate ? { multi: !!row.delegate.multi, prefer: row.delegate.prefer || null } : null,
       fromEnv: res.fromEnv, set, masked, values, missing: res.missing,
@@ -341,7 +344,7 @@ function create(deps = {}) {
       testedAt: res.testedAt, lastOk: res.lastOk, lastError: res.lastError,
       testKind: row.test.kind, testDescribe: row.test.describe || null, testCaveat: row.test.caveat || null,
       testButton: R.TEST_BUTTON_LABEL[row.test.kind],
-      consumers: row.consumers.slice(), wiredIn: row.wiredIn || null, docs: row.docs || null,
+      consumers: row.consumers.slice(), usedBy: row.usedBy || null, wiredIn: row.wiredIn || null, docs: row.docs || null,
       // the store-level failures outrank; else THIS row's own typed one (the card says the remedy)
       storeError: storeErrorView() || (undecryptable.length ? { code: 'values-undecryptable', message: UNDECRYPTABLE_REMEDY, fields: undecryptable.slice() } : null),
     };

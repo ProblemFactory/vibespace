@@ -1,7 +1,18 @@
 // THE CHANNEL CONVERSATION WINDOW (docs/design-communication-panel.zh.md
-// §10.1, §10.3). A registered WINDOW TYPE, so layout restore, cross-client
-// sync, virtual desktops, tab groups and the taskbar all work for free and
-// `replayOpenSpec` cannot silently drop it (the registry has a loud default).
+// §10.1, §10.3; the a4 UI design docs/design-communication-panel-ui.md §4.2).
+// A registered WINDOW TYPE, so layout restore, cross-client sync, virtual
+// desktops, tab groups and the taskbar all work for free and `replayOpenSpec`
+// cannot silently drop it (the registry has a loud default).
+//
+// THE BAR IS THREE TIERS WITH A RHYTHM (a1 W2): title 13/600 + ONE ⋯ button
+// (the `channel-row` contribution menu — Assign & filter… / Reach & policy… /
+// Track / Mark read — with the same ctx the panel's row menu uses), the meta
+// line 11 dim (adapter label · participants · freshness), and the assignment
+// as an accent-tint CHIP that opens the editor. No verbs at title weight.
+//
+// THE LIST reads like a chat, not a form (a1 W4): a day separator when the
+// day changes, consecutive lines by the same author within 5 minutes grouped
+// under one head, an agent's name in the accent text tone.
 //
 // TWO RULES GOVERN WHAT IT DRAWS:
 //
@@ -18,22 +29,24 @@
 //    the reason", never as "allowed". On a read-only conversation there is NO
 //    composer element at all: a disabled control the user can see but not use
 //    invites the question "why?", and the honest answer belongs in the
-//    context bar beside the conversation it is about.
+//    footer beside the conversation it is about.
 //
-// P0a NOTE, said out loud rather than implied: the composer that appears on a
-// SENDABLE conversation is inert, and it says so. Sending is the outbox's
-// phase (propose → policy → approve → send → receipt) and shipping a button
-// that silently does nothing would be exactly the declared-but-inert slot this
-// design argues against.
-import { fetchJson, showToast } from './utils.js';
-import { t } from './i18n.js';
+// The composer PROPOSES (P3): the channel's policy decides whether the reply
+// goes out at once or waits in the approval outbox; the card appears above.
+// The identity warning lives ON THE CARD (once, only when it warns), never as
+// a standing line under the composer (a1 W1).
+import { fetchJson, showToast, showContextMenu } from './utils.js';
+import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { menuItems } from './contributions.js';
+import { icon, el, btn } from './channel-chrome.js';
 // P2: the Assign & filter editor and the one-line summary the bar draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the inline approval cards (the SAME renderer the Outbox window uses —
-// one store, two places, §9.2) and the reach/policy dialog.
-import { renderInlineProposals } from './channel-outbox.js';
-import { showReachDialog } from './channel-reach-editor.js';
+// one store, two places, §9.2).
+import { renderInlineProposals, reasonLabel } from './channel-outbox.js';
+// a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
+import { routeErrorText } from './channel-words.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern): the
 // server sends STRUCTURE and the sentence is composed HERE, because the
 // digest is broadcast to every client while the language is per DEVICE.
@@ -42,40 +55,57 @@ import * as chanCaps from '../channel-caps.js';
 const ICON = svgIcon16('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>');
 
 const PAGE = 50;
+/** Consecutive lines by the same author within this window share one head. */
+const GROUP_MS = 5 * 60e3;
 
 const stamp = (ms) => {
   const d = new Date(Number(ms) || 0);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
+/** The local calendar day of an instant — the separator's key. */
+const dayKey = (ms) => {
+  const d = new Date(Number(ms) || 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+/** The separator's words: today / yesterday / the date in the DEVICE's language
+ *  (`deviceLocale()` — the app's language choice, never the browser's: a zh/ja
+ *  device on an en browser drew "Sep 22" between zh messages; the census caught it). */
+function dayLabel(ms, now = Date.now()) {
+  const k = dayKey(ms);
+  if (k === dayKey(now)) return t('Today');
+  if (k === dayKey(now - 86400e3)) return t('Yesterday');
+  try { return new Date(Number(ms) || 0).toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' }); } catch { return k; }
+}
+const authorKey = (rec) => (rec.author && (rec.author.id || rec.author.name)) || '';
 
-/** ONE row. EVERYTHING is textContent — see rule 1. */
-function renderRecord(rec) {
-  const el = document.createElement('div');
-  el.className = 'chanmsg';
-  el.dataset.at = String(rec.at || 0);
-  const head = document.createElement('div');
-  head.className = 'chanmsg-head';
-  const who = document.createElement('b');
-  who.textContent = (rec.author && rec.author.name) || (rec.author && rec.author.id) || t('unknown');
-  const when = document.createElement('span');
-  when.className = 'chanmsg-at';
-  when.textContent = stamp(rec.at);
-  head.append(who, when);
-  if (rec.raw && rec.raw.synthetic) {
-    // A scraped source mints its own key. Saying so on the row is the same
-    // honesty the freshness chip owes: the reader should know which evidence
-    // this line came from.
-    const s = document.createElement('span');
-    s.className = 'chanmsg-syn';
-    s.textContent = t('scanned');
-    s.title = t('This message has no vendor id — the adapter minted a stable key from its content.');
-    head.appendChild(s);
+/** ONE row. EVERYTHING is textContent — see rule 1. `cont` = a continuation
+ *  of the previous author's run (no head, tighter). */
+function renderRecord(rec, { cont = false } = {}) {
+  const row = el('div', 'chanmsg' + (cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : ''));
+  row.dataset.at = String(rec.at || 0);
+  row.dataset.author = authorKey(rec);
+  if (!cont) {
+    const head = el('div', 'chanmsg-head');
+    const who = el('b', '', (rec.author && rec.author.name) || (rec.author && rec.author.id) || t('unknown'));
+    const when = el('span', 'chanmsg-at', stamp(rec.at));
+    head.append(who, when);
+    if (rec.raw && rec.raw.synthetic) {
+      // A scraped source mints its own key. Saying so on the row is the same
+      // honesty the freshness chip owes: the reader should know which evidence
+      // this line came from.
+      const s = el('span', 'chanmsg-syn', t('scanned'));
+      s.title = t('This message has no vendor id — the adapter minted a stable key from its content.');
+      head.appendChild(s);
+    }
+    row.appendChild(head);
   }
-  const body = document.createElement('div');
-  body.className = 'chanmsg-body';
-  body.textContent = rec.text || '';
-  el.append(head, body);
-  return el;
+  row.appendChild(el('div', 'chanmsg-body', rec.text || ''));
+  return row;
+}
+function daySeparator(ms) {
+  const d = el('div', 'chanmsg-day', dayLabel(ms));
+  d.dataset.day = dayKey(ms);
+  return d;
 }
 
 /**
@@ -100,16 +130,12 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     width: 520, height: 560,
   });
 
-  const root = document.createElement('div');
-  root.className = 'chanwin';
+  const root = el('div', 'chanwin');
   winInfo.content.appendChild(root);
 
-  const bar = document.createElement('div');
-  bar.className = 'chanwin-bar';
-  const list = document.createElement('div');
-  list.className = 'chanwin-list';
-  const foot = document.createElement('div');
-  foot.className = 'chanwin-foot';
+  const bar = el('div', 'chanwin-bar');
+  const list = el('div', 'chanwin-list');
+  const foot = el('div', 'chanwin-foot');
   root.append(bar, list, foot);
 
   // THE PAGE BOUNDARY IS A RECORD, NOT AN INSTANT (r2). `at` is not unique —
@@ -125,10 +151,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const r = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}`);
     bar.textContent = '';
     if (!r || r.error) {
-      const e = document.createElement('div');
-      e.className = 'chanwin-err';
-      e.textContent = (r && r.error) || t('This conversation is not available.');
-      bar.appendChild(e);
+      bar.appendChild(el('div', 'chanwin-err', (r && r.error) || t('This conversation is not available.')));
       lastConv = null;
       return null;
     }
@@ -140,35 +163,39 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // "Channel" and two open conversations were indistinguishable — the same
     // silent-optional-call shape as the `off?.()` r2 removed.
     app.wm.setTitle(winInfo.id, c.title || convId);
-    const title = document.createElement('b');
-    title.textContent = c.title || convId;
-    const meta = document.createElement('span');
-    meta.className = 'chanwin-meta';
-    const bits = [c.adapterId];
+    const titleRow = el('div', 'chanwin-title-row');
+    titleRow.appendChild(el('b', '', c.title || convId));
+    // the ONE control at title height: the row menu (the panel's contribution
+    // menu, same ctx) — Assign & filter… / Reach & policy… / Track / Mark read
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'icon-btn';
+    more.title = t('More actions');
+    more.appendChild(icon('more', 13));
+    more.onclick = (ev) => { ev.stopPropagation(); const rr = more.getBoundingClientRect(); showContextMenu(rr.left, rr.bottom + 2, menuItems('channel-row', { app, conv: c, inWindow: true })); };
+    titleRow.appendChild(more);
+    bar.appendChild(titleRow);
+    const bits = [c.adapterLabel || c.adapterId];   // the adapter's LABEL, never its id (a3 i18n)
     if (c.participants) bits.push(c.participants);
     const fresh = chanCaps.freshnessText(c.freshness, { t });
     if (fresh) bits.push(fresh);
-    meta.textContent = bits.join(' · ');
-    bar.append(title, meta);
-    // P2: the assignment line + the editor's entry point (a tracked row only —
-    // nothing is fetched for an untracked one, so nobody could be woken).
+    const meta = el('div', 'chanwin-meta', bits.join(' · '));
+    meta.title = t('How fresh this row is — the lane actually carrying it, not the one the adapter declares.');
+    bar.appendChild(meta);
+    // P2: the assignment as a CHIP (a tracked row only — nothing is fetched
+    // for an untracked one, so nobody could be woken); it opens the editor.
     if (c.tracked) {
-      const asg = document.createElement('div');
-      asg.className = 'chanwin-assign';
-      const txt = document.createElement('span');
-      txt.textContent = c.assignment ? assignmentSummary(c) : t('Not assigned — nobody is woken by this conversation.');
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chan-btn';
-      b.textContent = c.assignment ? t('Assign & filter…') : t('Assign…');
-      b.onclick = () => showAssignFilterDialog(app, c);
-      const rb = document.createElement('button');
-      rb.type = 'button';
-      rb.className = 'chan-btn';
-      rb.textContent = t('Reach & policy…');
-      rb.onclick = () => showReachDialog(app, c);
-      asg.append(txt, b, rb);
-      bar.appendChild(asg);
+      const held = !!(c.stats && c.stats.lastWake && c.stats.lastWake.ok === false);
+      const chipEl = document.createElement('button');
+      chipEl.type = 'button';
+      chipEl.className = 'chan-assign-chip' + (c.assignment ? (held ? ' chan-warn' : '') : ' chan-assign-none');
+      chipEl.dataset.channelAssign = '1';
+      chipEl.appendChild(icon(c.assignment ? 'filter' : 'plus', 10));
+      // unassigned: the chip is the VERB (short); the fact rides its tooltip
+      chipEl.appendChild(el('span', '', c.assignment ? assignmentSummary(c) + (held ? ' · ' + t('last wake held') : '') : t('Assign to an agent…')));
+      chipEl.title = held ? t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(c.stats.lastWake.refused, { t }) || c.stats.lastWake.why || '' }) : (c.assignment ? t('Assign & filter…') : t('Not assigned — nobody is woken by this conversation.'));
+      chipEl.onclick = () => showAssignFilterDialog(app, c);
+      bar.appendChild(chipEl);
     }
 
     // The send half: offered, or NOT offered WITH its reason (never silence).
@@ -177,57 +204,67 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // P3: the composer PROPOSES (drafted by you, send authority) — the
       // channel's policy decides whether it goes out at once or waits in the
       // approval outbox with the guards' reasons; the card appears above.
-      const comp = document.createElement('div');
-      comp.className = 'chanwin-composer';
+      const comp = el('div', 'chanwin-composer');
       comp.dataset.channelSend = '1';
       const ta = document.createElement('textarea');
-      ta.placeholder = t('Write a reply — it goes through the outbox (sent directly or held for your approval, by this channel\'s policy).');
-      const row = document.createElement('div');
-      row.className = 'chanwin-composer-row';
-      const note = document.createElement('div');
-      note.className = 'chanwin-note';
+      ta.placeholder = t('Write a reply…');
+      ta.rows = 2;
+      const row = el('div', 'chanwin-composer-row');
       const pol = c.policy && c.policy.mode === 'direct' ? t('Policy: direct — your reply is sent at once unless a guard (link, attachment, off-hours) sends it to the outbox for approval.') : t('Policy: review — your reply waits in the outbox for your approval.');
-      note.textContent = pol;
-      const sendBtn = document.createElement('button');
-      sendBtn.type = 'button';
-      sendBtn.className = 'chan-btn chan-btn-primary';
+      const note = el('div', 'chanwin-note', pol);
+      const sendBtn = btn(t('Propose'), null, 'mounts-btn-primary');
       sendBtn.dataset.channelPropose = '1';
-      sendBtn.textContent = t('Propose');
       sendBtn.onclick = async () => {
         const text = ta.value.trim();
         if (!text) return;
         sendBtn.disabled = true;
-        const r = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/propose`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/propose`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
         sendBtn.disabled = false;
-        if (!r || r.error) { showToast((r && r.error) || t('Request failed'), { type: 'error' }); return; }
+        if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
-        const st = r.proposal && r.proposal.state;
-        showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: (r.decision && r.decision.reasons || []).join(', ') }) : t('Proposal {state}', { state: st || '?' }));
+        const st = r2.proposal && r2.proposal.state;
+        // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
+        showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: ((r2.decision && r2.decision.reasons) || []).map(reasonLabel).join('; ') }) : t('Proposal {state}', { state: st || '?' }));
       };
+      ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); } });
       row.append(note, sendBtn);
       comp.append(ta, row);
       foot.textContent = '';
       foot.appendChild(comp);
-      const warn = c.identityWarning;
-      const warnText = chanCaps.identityWarningText(warn, { t });
-      if (warnText) {
-        const w = document.createElement('div');
-        w.className = 'chanwin-warn';
-        w.textContent = warnText;
-        foot.appendChild(w);
-      }
     } else {
       // NO composer element at all — the P0 exit condition.
       foot.textContent = '';
-      const ro = document.createElement('div');
-      ro.className = 'chanwin-readonly';
-      const why = (c.offers && c.offers.sendAsUser.why) || 'unknown';
-      // P4: the reason in words (a `send-scope-not-granted` answer says what
-      // unlocks sending — never a greyed control), never a bare code.
-      ro.textContent = t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) });
+      const ro = el('div', 'chanwin-readonly');
+      if (!c.tracked) {
+        // An UNTRACKED conversation is not "capability unknown" — nothing was
+        // fetched, so nothing could be known (§10 invariant 6; a1 §2.2 W3):
+        // the honest footer names the fact and carries the verb.
+        ro.appendChild(el('span', '', t('Not tracked — messages are fetched once you track it.')));
+        const tb = btn(t('Track this conversation'), null);
+        tb.onclick = async () => {
+          tb.disabled = true;
+          const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/track`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tracked: true }) });
+          if (!r2 || r2.error) { tb.disabled = false; showToast(routeErrorText(r2), { type: 'error' }); }
+        };
+        ro.appendChild(tb);
+      } else {
+        const why = (c.offers && c.offers.sendAsUser.why) || 'unknown';
+        // P4: the reason in words (a `send-scope-not-granted` answer says what
+        // unlocks sending — never a greyed control), never a bare code.
+        ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
+      }
       foot.appendChild(ro);
     }
     return c;
+  }
+
+  /** Drop a day separator that repeats the one before it (a prepended page
+   *  can end on the day the existing list began). */
+  function dedupeDays() {
+    let prev = null;
+    for (const node of [...list.querySelectorAll('.chanmsg-day')]) {
+      if (prev && prev.dataset.day === node.dataset.day) node.remove(); else prev = node;
+    }
   }
 
   async function loadPage({ prepend = false } = {}) {
@@ -247,8 +284,15 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     oldest = Number(head.at) || 0;
     oldestId = head.vendorId || null;
     const frag = document.createDocumentFragment();
-    for (const rec of recs) frag.appendChild(renderRecord(rec));
-    if (prepend) list.insertBefore(frag, list.firstChild); else list.appendChild(frag);
+    let prev = null;
+    for (const rec of recs) {
+      if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
+      const cont = !!prev && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS && !(rec.raw && rec.raw.synthetic);
+      frag.appendChild(renderRecord(rec, { cont }));
+      prev = rec;
+    }
+    if (prepend) list.insertBefore(frag, list.firstChild); else list.insertBefore(frag, outboxSec.isConnected ? outboxSec : null);
+    dedupeDays();
     return recs.length;
   }
 
@@ -273,8 +317,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
 
   // P3: this conversation's proposals, rendered INLINE from the same store
   // the Outbox window reads (§9.2). Re-read on `channel-outbox-updated`.
-  const outboxSec = document.createElement('div');
-  outboxSec.className = 'chanwin-outbox-slot';
+  const outboxSec = el('div', 'chanwin-outbox-slot');
   async function renderOutbox() {
     const r = await fetchJson(`/api/channels/outbox?conv=${encodeURIComponent(`${adapterId}/${convId}`)}`);
     outboxSec.textContent = '';
@@ -289,12 +332,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     list.textContent = '';
     oldest = null; oldestId = null;
     const n = await loadPage({});
-    if (!n) {
-      const e = document.createElement('div');
-      e.className = 'chanwin-empty';
-      e.textContent = c.tracked ? t('No messages yet.') : t('Not tracked — nothing is fetched for this conversation until you track it.');
-      list.appendChild(e);
-    }
+    if (!n) list.appendChild(el('div', 'chanwin-empty', c.tracked ? t('No messages yet.') : t('Not tracked — nothing is fetched for this conversation until you track it.')));
     list.appendChild(outboxSec);
     await renderOutbox();
     list.scrollTop = list.scrollHeight;
@@ -353,7 +391,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
 }
 
 registerWindowType({
-  type: 'channel', label: 'Channel', icon: ICON,
+  type: 'channel', label: t('Channel'), icon: ICON,
   action: 'openChannel',
   replay: (app, spec, { syncId } = {}) => app.openChannel(spec.adapterId, spec.convId, { syncId }),
 });

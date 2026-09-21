@@ -33,6 +33,14 @@ export function resolveLang() {
 
 const _dict = DICTS[resolveLang()] || null;
 
+/** The DEVICE's Intl locale tag (`undefined` = the browser's own, for en /
+ *  auto-en). Every date a surface prints goes through this, never a bare
+ *  `toLocaleString()`: a zh/ja device on an en browser drew "Sep 22" between
+ *  zh messages (the comm-panel census caught it) and the same bug sat in the
+ *  channel state-dot tooltip. ONE table, exported, so no module keeps a twin. */
+const LOCALE_TAG = { zh: 'zh-CN', ja: 'ja-JP' };
+export function deviceLocale() { return LOCALE_TAG[resolveLang()]; }
+
 export function t(str, params) {
   let s = (_dict && _dict[str]) || str;
   if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));

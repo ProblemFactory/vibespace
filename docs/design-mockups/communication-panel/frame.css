@@ -1,0 +1,20 @@
+/* MOCK FRAME ONLY — nothing in this file is product CSS. It places the real
+   chrome (rail strip + sidebar + two windows) the way the app does at 1200×800
+   and switches the 375×667 single-surface views. The proposed component CSS
+   lives in direction-a/b/c.css under the product's own class names. */
+html, body { height: 100%; overflow: hidden; }
+body { display: flex; }
+#sidebar.rail-on { position: fixed; left: 0; top: 0; bottom: 0; width: 260px; transform: none; }
+#workspace { position: absolute; left: 260px; top: 0; right: 0; bottom: 0; }
+.window { position: absolute; }
+.window-title { user-select: none; }
+.mock-ws-note { position: absolute; right: 12px; bottom: 10px; font-size: 10px; color: var(--text-dim); }
+
+/* the three single-surface phone views: one surface fills 375×667 */
+body[data-view="panel"] #workspace { display: none; }
+body[data-view="panel"] #sidebar.rail-on { width: 100vw; }
+body[data-view="panel"] #sidebar-rail { display: none; }
+body[data-view="window"] #sidebar, body[data-view="outbox"] #sidebar { display: none; }
+body[data-view="window"] #workspace, body[data-view="outbox"] #workspace { left: 0; }
+body[data-view="window"] .window, body[data-view="outbox"] .window { left: 0 !important; top: 0 !important; width: 100vw !important; height: 100vh !important; border-radius: 0; border: none; box-shadow: none; }
+body[data-view="window"] .window[data-win="outbox"], body[data-view="outbox"] .window[data-win="conv"] { display: none !important; }

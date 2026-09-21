@@ -46,6 +46,17 @@ console.log('① validation refuses by name');
   ok(!F.validateFilter({ rules: [] }).ok, 'a filter needs at least one rule');
   ok(!F.validateFilter({ match: 'some', rules: [{ kind: 'has-attachment' }] }).ok, 'match outside any|every is refused');
   ok(F.validateFilter({ rules: [{ kind: 'has-attachment' }] }).filter.match === 'any', 'match defaults to any');
+  // THE REFUSAL IS STRUCTURE BESIDE ITS SENTENCE (a3 i18n, verifier r4): the
+  // English `error` stays the route's contract; `code` (+ `kind`) is what a
+  // zh/ja editor words — "Add rule" used to print `keyword: value is required`.
+  const kw = F.validateRule({ kind: 'keyword', value: '' });
+  ok(kw.code === 'value-required' && kw.kind === 'keyword' && /value is required/.test(kw.error), 'a refused rule carries a CODE and the rule kind beside its contract sentence', JSON.stringify(kw));
+  ok(F.validateFilter({ rules: [] }).code === 'no-rules' && F.validateRule({ kind: 'time-window', from: '9', to: 'x' }).code === 'time-format' && F.validateRule({ kind: 'sender-in-group', members: [] }).code === 'members-required' && F.validateFilter({ match: 'some', rules: [{ kind: 'has-attachment' }] }).code === 'bad-match' && F.validateRule({ kind: 'regex' }).code === 'bad-kind', 'every refusal has its own code (no-rules / time-format / members-required / bad-match / bad-kind)');
+  ok(F.validateFilter({ rules: Array.from({ length: F.MAX_RULES + 1 }, () => ({ kind: 'has-attachment' })) }).code === 'too-many-rules', 'the rule cap refuses with too-many-rules');
+  const seen = [];
+  const tt = (str, p) => { seen.push(str); return (p ? String(str).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(str)); };
+  ok(F.filterProblemText(kw, { t: tt, ruleLabel: (k) => (k === 'keyword' ? 'contains keyword' : k) }) === 'the rule "contains keyword" needs a value' && seen.length === 1, 'filterProblemText words the code through the caller\'s t() and names the rule the way the editor labels it', JSON.stringify(seen));
+  ok(F.filterProblemText(F.validateFilter({ rules: [] }), { t: tt }) === 'add at least one rule' && F.filterProblemText({ ok: true }) === '' && F.filterProblemText({ ok: false, code: 'bad-match', error: 'match must be any|every' }, { t: tt }) === 'match must be any|every', 'no-rules is worded; an accepted filter has no problem; a code the table does not know falls back to the contract sentence (never hidden)');
   ok(F.RULE_KINDS.length === 8 && F.RULE_KINDS.every((k) => F.validateRule(k === 'time-window' ? { kind: k, from: '00:00', to: '01:00' } : k === 'sender-in-group' ? { kind: k, members: ['x'] } : k === 'has-attachment' ? { kind: k } : { kind: k, value: 'x' }).ok), 'every declared kind validates with its own minimal shape (' + F.RULE_KINDS.join(', ') + ')');
 }
 

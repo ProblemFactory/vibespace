@@ -236,7 +236,11 @@ export function installSidebarRail(Sidebar) {
         // signal, one computation (the cache-invalidation law).
         if (msg.type === 'channels-updated') {
           if (msg.digest) this._railSetBadge('channels', ((msg.digest.unreadTotal || 0) + (msg.digest.awaitingTotal || 0)) || '');   // P3: unread + proposals awaiting approval (the pointer's degrade surface)
-          if (this._activeTab === 'channels') { this.listEl.querySelector('.rail-panel-channels')?.remove(); this._renderRailPanel(); }
+          // The open Channels panel is NOT torn down here: its own broadcast
+          // handler redraws in place from this very digest (a1 D12 — the
+          // remove + re-render + refetch emptied the list for the fetch's
+          // duration, so the scroller clamped to 0 on every pass and
+          // /api/channels was asked once per broadcast; test-channels-e2e ⑬).
         }
         if (msg.type === 'jobs-updated') {
           this._railRefreshBadges();

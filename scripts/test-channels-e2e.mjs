@@ -137,6 +137,7 @@ const OPEN_PANEL = `(async () => {
         title: r.querySelector('.chan-row-title').textContent,
         chip: r.querySelector('.chan-chip') ? r.querySelector('.chan-chip').textContent : null,
         tracked: r.classList.contains('chan-tracked'),
+        untracked: r.querySelector('.chan-untracked') ? r.querySelector('.chan-untracked').textContent : null,
         unread: r.querySelector('.chan-unread') ? r.querySelector('.chan-unread').textContent : null,
       })),
       sections: [...document.querySelectorAll('.rail-panel-channels .chan-sec-head b')].map((b) => b.textContent),
@@ -149,13 +150,17 @@ const panel = await p1.evaljs(OPEN_PANEL);
 ok(panel.ok, 'the Channels rail panel renders', JSON.stringify(panel));
 ok(panel.sections.length === 4 && ['fake-poll', 'fake-push', 'fake-scan', 'Agents'].every((s) => panel.sections.includes(s)), 'the three fake adapters AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
 ok(panel.rows.length >= 6, `EXIT ①: fake-adapter conversations APPEAR IN THE PANEL (${panel.rows.length} rows)`, JSON.stringify(panel.rows.slice(0, 2)));
-ok(panel.rows.every((r) => r.chip), 'EVERY row carries a FRESHNESS CHIP — the honesty contract of this whole feature', JSON.stringify(panel.rows.map((r) => r.chip)));
-// NOTHING IS TRACKED YET, so nothing is fetched — and the chips SAY so (r3).
-// They used to read "within 5m" here: a promise about a fetch that would never
-// happen, on every row a fresh instance shows.
+// NOTHING IS TRACKED YET, so nothing is fetched — and the rows SAY so: an
+// untracked row carries NO freshness pill (design §4.3 — there is no evidence
+// to claim; r3's "not polling" pill was the one that truncated to "…polling"
+// in ja at the default rail, verifier r4), its line-2 text is the claim.
 ok(panel.rows.every((r) => !r.tracked), 'FIXTURE: on a fresh instance no row is tracked (untracked is the default state of every discovered conversation)');
-ok(panel.rows.every((r) => /^(not polling|not scanning)$/.test(r.chip)) && panel.rows.some((r) => r.chip === 'not polling') && panel.rows.some((r) => r.chip === 'not scanning'),
-  'an UNTRACKED row\'s chip says "not polling" / "not scanning" — never "within 5m" about a fetch nothing will make', JSON.stringify(panel.rows.map((r) => [r.conv, r.chip])));
+ok(panel.rows.every((r) => !r.chip && r.untracked === 'not tracked'), 'an UNTRACKED row carries NO freshness pill — its "not tracked" text is the claim; a pill would promise a fetch nothing will make', JSON.stringify(panel.rows.map((r) => [r.conv, r.chip, r.untracked])));
+{
+  const wire = await (await fetch(`http://127.0.0.1:${PORT}/api/channels`)).json();
+  const off = (wire.conversations || []).filter((c) => !c.tracked).map((c) => c.freshness && c.freshness.state);
+  ok(off.length >= 6 && off.every((x) => x === 'off'), 'the WIRE still carries the untracked claim as structure (`freshness.state === "off"`) — the panel chooses not to draw it', JSON.stringify(off));
+}
 
 // ── ② the conversation opens as a WINDOW ──
 const OPEN_WIN = (adapter, conv) => `(async () => {
@@ -214,7 +219,7 @@ ok(send.note && /policy/i.test(send.note) && /outbox/i.test(send.note), 'the com
 const tracked1 = await p1.evaljs(OPEN_PANEL);
 const opsRow = tracked1.ok && tracked1.rows.find((r) => r.conv === 'fake-poll/fake-poll-ops');
 ok(opsRow && opsRow.tracked && /^within /.test(opsRow.chip), 'a TRACKED poll-lane row says how long its evidence may be ("within …", never a bare "Updated N min ago")', JSON.stringify(opsRow));
-ok(tracked1.rows.filter((r) => !r.tracked).every((r) => /^(not polling|not scanning)$/.test(r.chip)), '…while the still-untracked rows still say nothing is fetched', JSON.stringify(tracked1.rows.map((r) => [r.conv, r.tracked, r.chip])));
+ok(tracked1.rows.filter((r) => !r.tracked).every((r) => r.chip === null && r.untracked === 'not tracked'), '…while the still-untracked rows carry no pill and say "not tracked" (nothing is fetched)', JSON.stringify(tracked1.rows.map((r) => [r.conv, r.tracked, r.chip, r.untracked])));
 
 // ── ⑤ two simultaneous passes each advance their own cursor (real routes) ──
 {
@@ -379,8 +384,7 @@ const PROPOSE = (text) => `(async () => {
   const rejected = await p1.evaljs(`(async () => {
     const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
     const card = w.content.querySelector('.chanwin-outbox .chan-prop[data-proposal="${second.id}"]');
-    const btns = [...card.querySelectorAll('.chan-prop-actions > button')];
-    btns[btns.length - 1].click();                       // Reject…
+    card.querySelector('button[data-reject]').click();   // Reject… (a4: reject · edit · approve, by data attribute never by position)
     const box = card.querySelector('.chan-prop-rejectbox');
     if (!box) return { fail: 'no reject box' };
     box.querySelector('input').value = 'wrong tone for that room';
@@ -471,24 +475,33 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const v2 = await readView(pid3);
   ok(!!v2 && v2.state === 'sent' && v2.result && v2.result.reconciled === true && !!v2.result.vendorMessageId && v2.receipt && v2.receipt.reconciled === true && v2.reconcile && v2.reconcile.n === 1 && v2.reconcile.lastAnswer === 'landed', 'the proposal records the vendor id, the receipt says it was established by reconcile, one check counted', JSON.stringify(v2 && { result: v2.result, receipt: v2.receipt, reconcile: v2.reconcile }));
 
-  // THE SENDER HONESTY SWITCH (§9.5): OFF by default, per channel, never on a user's own draft
-  const SW = `(() => {
+  // THE SENDER HONESTY SWITCH (§9.5): OFF by default, per channel, never on a user's own draft.
+  // a4 (docs/design-communication-panel-ui.md §4.2): the switch is a CHECKABLE ROW of the
+  // section's ⋯ menu (the `channel-adapter` contribution menu), read and clicked THROUGH the
+  // menu — the section spreads no verbs above its rows any more.
+  const SW_MENU = `(() => {
+    for (const m of document.querySelectorAll('.context-menu')) m.remove();
     const row = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-ops"]');
     let sec = row && row.parentElement;
-    while (sec && !sec.querySelector(':scope > .chan-adapter-ctl')) sec = sec.parentElement;
-    return sec ? sec.querySelector(':scope > .chan-adapter-ctl [data-honesty-line]') : null;
+    while (sec && !sec.classList.contains('chan-sec')) sec = sec.parentElement;
+    const more = sec && sec.querySelector(':scope > .chan-sec-head .chan-sec-more');
+    if (!more) return null;
+    more.click();
+    const chk = document.querySelector('.context-menu .chan-menu-check[data-honesty-line]');
+    return chk ? { chk, item: chk.closest('.context-menu-item'), menu: chk.closest('.context-menu') } : null;
   })()`;
-  const sw0 = await p1.evaljs(`(() => { const b = ${SW}; return b ? { state: b.dataset.honestyLine, label: b.textContent } : { fail: 'no switch' }; })()`);
-  ok(!sw0.fail && sw0.state === 'off' && /instance default/.test(sw0.label), "EXIT P4 ④: the panel row's Sender line switch reads OFF (instance default) — decision 17 as overruled", JSON.stringify(sw0));
+  const SW_READ = `(() => { const m = ${SW_MENU}; if (!m) return null; const out = { state: m.chk.dataset.honestyLine, label: m.item.textContent.trim() }; m.menu.remove(); return out; })()`;
+  const SW_CLICK = (which) => `(() => { const m = ${SW_MENU}; if (!m) return false; const target = ${which === 'switch' ? 'm.item' : "[...m.menu.querySelectorAll('.context-menu-item')].find((x) => x !== m.item && /instance default/i.test(x.textContent))"}; if (!target) { m.menu.remove(); return false; } target.click(); for (const x of document.querySelectorAll('.context-menu')) x.remove(); return true; })()`;
+  const sw0 = (await p1.evaljs(SW_READ)) || { fail: 'no switch' };
+  ok(!sw0.fail && sw0.state === 'off' && /instance default/.test(sw0.label), "EXIT P4 ④: the section menu's Sender line row reads OFF (instance default) — decision 17 as overruled", JSON.stringify(sw0));
   const sw1 = await p1.evaljs(`(async () => {
-    const b = ${SW}; if (!b) return { fail: 'no switch' };
-    b.click();
+    if (!${SW_CLICK('switch')}) return { fail: 'no switch' };
     for (let i = 0; i < 80; i++) {
-      const c = ${SW};
-      if (c && c.dataset.honestyLine === 'on') return { state: c.dataset.honestyLine, label: c.textContent, after: i * 250 };
+      const c = ${SW_READ};
+      if (c && c.state === 'on') return { state: c.state, label: c.label, after: i * 250 };
       await new Promise((r) => setTimeout(r, 250));
     }
-    const c = ${SW}; return { fail: 'never on', state: c && c.dataset.honestyLine };
+    const c = ${SW_READ}; return { fail: 'never on', state: c && c.state };
   })()`);
   ok(!sw1.fail && sw1.state === 'on' && !/instance default/.test(sw1.label), "turning the channel's switch ON repaints the row off `channels-updated` (a per-channel choice, no longer the instance default)", JSON.stringify(sw1));
   const auditSw = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'policy' && a.op === 'sender-honesty-line');
@@ -500,16 +513,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   ok(!!v4 && v4.honestyLine === null, 'the API view agrees: honestyLine null for a user draft', JSON.stringify(v4 && v4.honestyLine));
   // back to the instance default, and the pending draft rejected so the restart leg measures what ⑩ left
   const sw2 = await p1.evaljs(`(async () => {
-    const b = ${SW}; if (!b) return { fail: 'no switch' };
-    const dflt = [...b.parentElement.querySelectorAll('button')].find((x) => x !== b && /instance default/i.test(x.textContent));
-    if (!dflt) return { fail: 'no Use instance default button' };
-    dflt.click();
+    if (!${SW_CLICK('default')}) return { fail: 'no Use instance default row' };
     for (let i = 0; i < 80; i++) {
-      const c = ${SW};
-      if (c && c.dataset.honestyLine === 'off' && /instance default/.test(c.textContent)) return { state: c.dataset.honestyLine, label: c.textContent };
+      const c = ${SW_READ};
+      if (c && c.state === 'off' && /instance default/.test(c.label)) return { state: c.state, label: c.label };
       await new Promise((r) => setTimeout(r, 250));
     }
-    const c = ${SW}; return { fail: 'never back', state: c && c.dataset.honestyLine, label: c && c.textContent };
+    const c = ${SW_READ}; return { fail: 'never back', state: c && c.state, label: c && c.label };
   })()`);
   ok(!sw2.fail && sw2.state === 'off', '"Use instance default" puts the channel back to following the (OFF) instance setting', JSON.stringify(sw2));
   if (!fourth.fail) {
@@ -668,16 +678,247 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const sb = window.app.sidebar;
     sb._railGo('channels');
     for (let i = 0; i < 80; i++) {
-      const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
+      const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row.chan-tracked')];
       if (rows.length) return rows.map((r) => r.querySelector('.chan-chip') ? r.querySelector('.chan-chip').textContent : null);
       await new Promise((r) => setTimeout(r, 250));
     }
     return null;
   })()`);
-  ok(Array.isArray(chips) && chips.length && chips.every(Boolean), 'every row still carries a chip in zh', JSON.stringify(chips));
+  ok(Array.isArray(chips) && chips.length && chips.every(Boolean), 'every TRACKED row still carries a chip in zh', JSON.stringify(chips));
   ok(chips.some((x) => /[一-鿿]/.test(x)),
     'THE CHIP IS TRANSLATED — the honesty contract of this whole feature now speaks the reader\'s language', JSON.stringify(chips));
   await p1.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
+}
+
+// ── ⑫ THE a4 DESIGN INVARIANTS (docs/design-communication-panel-ui.md §4; owner
+//    "界面很乱，没有层次") — measured on the rendered chrome, not on class names ──
+// (a) rows sit on ONE grid: every freshness pill's right edge and every line-2
+//     badge's right edge align within 1px across the panel; (b) nothing scrolls
+//     sideways at 375px — the panel, a conversation window and the Outbox; (c)
+//     every glyph on these surfaces is an SVG (no text symbol, no emoji);
+//     (d) one chip colour per meaning — the five card states resolve to distinct
+//     colours, `unknown` is not `failed`'s red, and a freshness AGE is the
+//     neutral pill while `live` alone is green.
+{
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels'); return 1; })()`);
+  await sleep(500);
+  const grid = await p1.evaljs(`(async () => {
+    for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
+    const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
+    const trackedRows = rows.filter((r) => r.classList.contains('chan-tracked')).length;
+    const R = (el) => el.getBoundingClientRect();
+    const visible = (el) => el && R(el).width > 0;
+    const pills = rows.map((r) => r.querySelector('.chan-row-line .chan-chip')).filter(visible).map((e) => Math.round(R(e).right));
+    // the VISIBLE needs-you badge of each row (the narrow-rail container query swaps the pair for one pill)
+    const badges = rows.map((r) => [...r.querySelectorAll('.chan-row-sub .chan-unread, .chan-row-sub .chan-awaiting, .chan-row-sub .chan-untracked, .chan-row-sub .chan-row-needs')].filter(visible).pop()).filter(Boolean).map((e) => Math.round(R(e).right));
+    const titles = rows.map((r) => Math.round(R(r.querySelector('.chan-row-title')).left));
+    const lineOne = rows.map((r) => { const l = r.querySelector('.chan-row-line'); return [r.classList.contains('chan-tracked'), [...l.querySelectorAll('.chan-chip, .chan-unread, .chan-awaiting, .chan-untracked')].length]; });
+    const spread = (xs) => xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
+    return { rows: rows.length, trackedRows, pills, badges, titles, lineOne, pillSpread: spread(pills), badgeSpread: spread(badges), titleSpread: spread(titles) };
+  })()`);
+  ok(grid.rows >= 4 && grid.trackedRows >= 2 && grid.pills.length === grid.trackedRows && grid.pillSpread <= 1, `(a) every TRACKED row's freshness pill sits on the same right edge (±1px over ${grid.trackedRows} of ${grid.rows} rows: spread ${grid.pillSpread})`, JSON.stringify(grid));
+  ok(grid.badgeSpread <= 1 && grid.titleSpread <= 1, `(a) the line-2 badges share a right edge and the titles a left edge (spreads ${grid.badgeSpread} / ${grid.titleSpread})`, JSON.stringify(grid));
+  ok(grid.lineOne.every(([tracked, n]) => n === (tracked ? 1 : 0)), '(a) line 1 carries exactly ONE pill on a tracked row and NONE on an untracked one — the freshness claim; unread / awaiting / untracked live on line 2', JSON.stringify(grid.lineOne));
+  // the badge PAIR is the default; the ONE-pill collapse belongs to the narrow rail only. The rows
+  // are inline-size containers themselves, so an unnamed @container query used to resolve against
+  // the 166px row and collapse the pair at the 260px default (round 3) — pinned at both widths.
+  const KINDS = `(() => { const R = (el) => el.getBoundingClientRect(); const vis = (el) => !!el && R(el).width > 0; const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')]; return { width: R(document.querySelector('.rail-panel-channels')).width, unread: rows.filter((r) => vis(r.querySelector('.chan-unread'))).length, needs: rows.filter((r) => vis(r.querySelector('.chan-row-needs'))).length, chips: rows.filter((r) => vis(r.querySelector('.chan-row-line .chan-chip'))).length, label: vis(document.querySelector('.rail-panel-channels .chan-outbox-label')), count: vis(document.querySelector('.rail-panel-channels .chan-sec-count')), name: vis(document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-name')), headTitle: (document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-head') || {}).title || '' }; })()`;
+  const k260 = await p1.evaljs(KINDS);
+  ok(k260.unread > 0 && k260.needs === 0 && k260.count && k260.name && k260.chips > 0, `(a) at the default rail (${Math.round(k260.width)}px of panel) the unread count and the awaiting pill are SEPARATE badges, the section name, count and the freshness pills show`, JSON.stringify(k260));
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(200); sb._applySidebarLayoutWidth(200); return 1; })()`);
+  await sleep(400);
+  const k200 = await p1.evaljs(KINDS);
+  ok(k200.width < k260.width && k200.needs > 0 && k200.unread === 0 && !k200.label, `(a) at the 200px rail (${Math.round(k200.width)}px of panel) the pair collapses to ONE needs-you pill and the Outbox label hides`, JSON.stringify(k200));
+  // verifier r4: a "5…" freshness claim is worse than none, and a three-letter name stub says nothing —
+  // under the narrow container the pill hides (its sentence rides the title's tooltip), the head keeps
+  // the kind glyph + dot + COUNT and drops the name (the label rides the head's tooltip)
+  ok(k200.chips === 0 && !k200.name && k200.count && k200.headTitle.length > 0, `(a) at the 200px rail the freshness pills and the section names hide, the section count stays and the head carries its label as a tooltip ("${k200.headTitle}")`, JSON.stringify(k200));
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(260); sb._applySidebarLayoutWidth(260); return 1; })()`);
+  await sleep(400);
+
+  // (c) SVG-only glyphs, measured as text: no leaf text node on these surfaces is a bare symbol
+  await p1.evaljs(`(() => { window.app.openChannel('fake-poll', 'fake-poll-ops'); window.app.openChannelOutbox(); return 1; })()`);
+  await sleep(1500);
+  const glyphs = await p1.evaljs(`(() => {
+    const roots = [document.querySelector('.rail-panel-channels'), ...[...window.app.wm.windows.values()].filter((w) => w.type === 'channel' || w.type === 'channel-outbox').map((w) => w.content)].filter(Boolean);
+    const SYM = /^[\\u2190-\\u21FF\\u2500-\\u27BF\\u2B00-\\u2BFF\\u3000-\\u303F\\uFE0F\\u{1F000}-\\u{1FAFF}·•▸▾⋯✕✎⚠✓✗]+$/u;
+    const bad = []; let ic = 0, icSvg = 0;
+    for (const root of roots) {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let n; while ((n = walker.nextNode())) { const s = n.nodeValue.trim(); if (s && SYM.test(s)) bad.push(s + ' @ ' + (n.parentElement.className || n.parentElement.tagName)); }
+      for (const el of root.querySelectorAll('.chan-ic')) { ic++; if (el.querySelector('svg')) icSvg++; }
+    }
+    return { roots: roots.length, bad, ic, icSvg };
+  })()`);
+  ok(glyphs.roots >= 3 && glyphs.bad.length === 0, '(c) no text-symbol glyph on the panel, a conversation window or the Outbox — every glyph is an SVG (§17)', JSON.stringify(glyphs));
+  ok(glyphs.ic > 0 && glyphs.ic === glyphs.icSvg, `(c) every icon slot holds an <svg> (${glyphs.icSvg}/${glyphs.ic})`, JSON.stringify(glyphs));
+
+  // (d) one colour per meaning, read off the REAL stylesheet: the five state pills are
+  //     rendered as probes inside the Outbox list (the e2e store holds only some states),
+  //     the rendered cards are checked against the same answers, then the probes go
+  const colours = await p1.evaljs(`(() => {
+    const ob = [...window.app.wm.windows.values()].find((w) => w.type === 'channel-outbox');
+    const all = ob.content.querySelector('.chan-seg [data-view="all"]'); if (all) all.click();
+    const c = (el) => el && getComputedStyle(el).color;
+    const list = ob.content.querySelector('.chan-outbox-list');
+    const st = {};
+    for (const k of ['awaiting-approval', 'sent', 'failed', 'unknown', 'rejected']) { const p = document.createElement('span'); p.className = 'chan-prop-state chan-prop-state-' + k; p.textContent = k; list.appendChild(p); st[k] = c(p); p.remove(); }
+    const rendered = {}; for (const el of ob.content.querySelectorAll('.chan-prop-state')) { const k = [...el.classList].find((x) => x.startsWith('chan-prop-state-')).slice('chan-prop-state-'.length); rendered[k] = c(el); }
+    st.renderedAgree = Object.entries(rendered).every(([k, v]) => !(k in st) || st[k] === v);
+    const panel = document.querySelector('.rail-panel-channels');
+    const chips = [...panel.querySelectorAll('.chan-row-line .chan-chip')].map((el) => ({ live: el.classList.contains('chan-chip-live'), off: el.classList.contains('chan-chip-off'), color: c(el) }));
+    return { states: st, chips };
+  })()`);
+  const stc = colours.states;
+  const distinct = new Set(['awaiting-approval', 'sent', 'failed', 'unknown', 'rejected'].map((k) => stc[k]).filter(Boolean)).size;
+  ok(stc['awaiting-approval'] && stc.sent && stc.failed && stc.unknown && stc.rejected && distinct === 5 && stc.renderedAgree === true, '(d) the five card states render in FIVE distinct colours (one colour per meaning), and the rendered cards agree', JSON.stringify(stc));
+  ok(stc.unknown !== stc.failed && stc.rejected !== stc.failed, "(d) `unknown` (not a failure, §9.4) and `rejected` never wear `failed`'s red", JSON.stringify(stc));
+  const ages = colours.chips.filter((x) => !x.live && !x.off).map((x) => x.color), lives = colours.chips.filter((x) => x.live).map((x) => x.color);
+  ok(new Set(ages).size <= 1 && (!lives.length || (new Set(lives).size === 1 && !ages.includes(lives[0]))), '(d) every freshness AGE is the one neutral pill; `live` alone is a different (green) colour', JSON.stringify(colours.chips));
+
+  // (b) 375px: nothing scrolls sideways on the three surfaces
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 1, mobile: false });
+  await sleep(600);
+  const narrow = await p1.evaljs(`(() => {
+    const out = {};
+    const probe = (name, el) => { if (!el) { out[name] = null; return; } out[name] = { sw: el.scrollWidth, cw: el.clientWidth, over: el.scrollWidth > el.clientWidth + 1 }; };
+    probe('panel', document.querySelector('.rail-panel-channels'));
+    for (const w of window.app.wm.windows.values()) if (w.type === 'channel') probe('window', w.content.querySelector('.chanwin')); else if (w.type === 'channel-outbox') probe('outbox', w.content.querySelector('.chanwin'));
+    const wide = [];
+    for (const w of window.app.wm.windows.values()) if (w.type === 'channel' || w.type === 'channel-outbox') for (const el of w.content.querySelectorAll('.chan-prop, .chanwin-bar, .chanwin-foot, .chan-prop-actions')) { const r = el.getBoundingClientRect(); if (r.right > innerWidth + 1) wide.push(el.className + ' right=' + Math.round(r.right)); }
+    return { ...out, wide, vw: innerWidth };
+  })()`);
+  ok(narrow.vw === 375 && narrow.panel && !narrow.panel.over && narrow.window && !narrow.window.over && narrow.outbox && !narrow.outbox.over, '(b) at 375px the panel, a conversation window and the Outbox have NO sideways overflow', JSON.stringify(narrow));
+  ok(narrow.wide.length === 0, '(b) no card, bar, foot or action row reaches past the 375px viewport', JSON.stringify(narrow.wide));
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel' || x.type === 'channel-outbox')) window.app.wm.closeWindow(w.id); return 1; })()`);
+}
+
+// ── ⑬ THE PANEL REPAINTS IN PLACE (a1 D12, verifier r4): a `channels-updated`
+//    broadcast neither tears the panel down nor refetches — the scroller's
+//    scrollTop and a fold the user made survive N broadcasts ──
+{
+  // a short viewport so the rail's list actually scrolls
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 420, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+  const armed = await p1.evaljs(`(async () => {
+    const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
+    for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
+    const m = { panelRemoved: 0, panelAdded: 0, fetches: 0, broadcasts: 0, samples: [] };
+    window.__d12 = m;
+    const mo = new MutationObserver((muts) => { for (const x of muts) { for (const n of x.removedNodes) if (n.nodeType === 1 && n.classList.contains('rail-panel-channels')) m.panelRemoved++; for (const n of x.addedNodes) if (n.nodeType === 1 && n.classList.contains('rail-panel-channels')) m.panelAdded++; } });
+    mo.observe(sb.listEl, { childList: true, subtree: true });
+    const of = window.fetch; window.fetch = function (u, ...r) { if (/^\\/api\\/channels(\\?|$)/.test(String(u))) m.fetches++; return of.call(this, u, ...r); };
+    m.unpatch = () => { mo.disconnect(); window.fetch = of; };
+    window.app.ws.onGlobal((msg) => { if (msg.type === 'channels-updated') { m.broadcasts++; setTimeout(() => m.samples.push(sb.listEl.scrollTop), 300); } });
+    const head = document.querySelector('.rail-panel-channels .chan-sec:not(.chan-connect) .chan-sec-head'); if (head) head.click();   // a fold the user made
+    const sc = sb.listEl; sc.scrollTop = 60; m.scrollSet = sc.scrollTop; m.scrollable = sc.scrollHeight - sc.clientHeight;
+    return { scrollSet: m.scrollSet, scrollable: m.scrollable, folded: document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed').length };
+  })()`);
+  ok(armed.scrollSet >= 30 && armed.folded === 1, `FIXTURE: the list scrolls (${armed.scrollSet}px of ${armed.scrollable}) and one section is folded`, JSON.stringify(armed));
+  const act = async (method, p, body) => (await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })).status;
+  await act('POST', '/api/channels/fake-poll/fake-poll-announce/track', { tracked: true }); await sleep(900);
+  await act('POST', '/api/channels/fake-poll/fake-poll-ops/read', {}); await sleep(900);
+  await act('PUT', '/api/channels/adapters/fake-scan', { enabled: false }); await sleep(900);
+  await act('PUT', '/api/channels/adapters/fake-scan', { enabled: true }); await sleep(900);
+  await act('POST', '/api/channels/fake-poll/fake-poll-announce/track', { tracked: false }); await sleep(1500);
+  const m = await p1.evaljs(`(() => { const m = window.__d12; m.unpatch(); const sb = window.app.sidebar; return { panelRemoved: m.panelRemoved, panelAdded: m.panelAdded, fetches: m.fetches, broadcasts: m.broadcasts, samples: m.samples, scrollNow: sb.listEl.scrollTop, scrollSet: m.scrollSet, foldedAfter: document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed').length, rows: document.querySelectorAll('.rail-panel-channels .chan-row').length }; })()`);
+  ok(m.broadcasts >= 4, `FIXTURE: the five route actions reached the page as broadcasts (${m.broadcasts})`, JSON.stringify(m));
+  ok(m.panelRemoved === 0 && m.panelAdded === 0, `D12: across ${m.broadcasts} broadcasts the panel is NEVER torn down and rebuilt (removed ${m.panelRemoved}, added ${m.panelAdded} — it was 7/7 for 7)`, JSON.stringify(m));
+  ok(m.fetches === 0, `D12: ZERO /api/channels fetches across ${m.broadcasts} broadcasts — the digest on the broadcast is the computation (it was one per broadcast)`, JSON.stringify(m));
+  ok(Math.abs(m.scrollNow - m.scrollSet) <= 1 && m.samples.length >= 4 && m.samples.every((x) => Math.abs(x - m.scrollSet) <= 1), `D12: the scroller stays at ${m.scrollSet}px through every repaint (samples ${JSON.stringify(m.samples)}; it used to clamp to 0)`, JSON.stringify(m));
+  ok(m.foldedAfter === 1 && m.rows >= 4, 'D12: a section the user folded stays folded and the rows are still there', JSON.stringify(m));
+  await p1.evaljs(`(() => { const h = document.querySelector('.rail-panel-channels .chan-sec.chan-collapsed .chan-sec-head'); if (h) h.click(); return 1; })()`);
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(400);
+}
+
+// ── ⑭ THE WARNING LINE'S GLYPH SITS BESIDE ITS SENTENCE (verifier r4): the
+//    `> span` flex rule once matched the icon's span too, so the alert glyph
+//    became a 124px box and the sentence started ~110px to its right, or the
+//    glyph sat alone on its own line. Measured on the fake sections' own
+//    needs-credentials line (this boot provides no cluster credential) at three
+//    rail widths ──
+{
+  const NOTES = `(() => { const R = (el) => el.getBoundingClientRect(); return [...document.querySelectorAll('.rail-panel-channels .chan-sec-note.chan-warn')].map((n) => { const ic = n.querySelector('.chan-ic'); const s = n.querySelector('span:not(.chan-ic)'); if (!ic || !s) return { missing: true }; const a = R(ic), b = R(s); return { gap: Math.round(b.left - a.right), icW: Math.round(a.width), sameLine: Math.abs(a.top - b.top) < 12, text: s.textContent.slice(0, 40) }; }); })()`;
+  for (const w of [260, 340, 500]) {
+    await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
+    await sleep(400);
+    const notes = await p1.evaljs(NOTES);
+    ok(notes.length >= 1 && notes.every((n) => !n.missing && n.gap >= 0 && n.gap <= 8 && n.icW <= 16 && n.sameLine), `at a ${w}px rail every warning line's glyph is a ≤16px slot whose right edge is within 8px of its sentence, on the same line (${notes.length} lines)`, JSON.stringify(notes));
+  }
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(260); sb._applySidebarLayoutWidth(260); return 1; })()`);
+  await sleep(300);
+}
+
+// ── ⑮ A TASK GROUP IS NAMED BY ITS TITLE, NEVER ITS ID (a1 A5; verifier r4:
+//    the fix was unpinned) — the Assign & filter "Wake" select and the Reach
+//    dialog's roster + a granted row ──
+{
+  const J = { 'Content-Type': 'application/json' };
+  // ⑨ left the page in zh (the language switch takes effect on load) — this leg matches the ⋯ menu's English words
+  await p1.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
+  ok(await p1.load(), 'page 1 reloaded in en for the menu words');
+  const mk = await (await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: J, body: JSON.stringify({ title: 'Ops triage' }) })).json();
+  const gid = mk.task && mk.task.id;
+  ok(!!gid && /^T-/.test(gid) && gid !== 'Ops triage', 'FIXTURE: a Task Group whose generated `T-…` id differs from its title', JSON.stringify(mk));
+  const nameOnly = await (await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: J, body: JSON.stringify({ name: 'Only a name' }) })).json();
+  ok(!!nameOnly.error && /title/.test(nameOnly.error), 'NEGATIVE CONTROL: the store has no `name` — a name-only group is REFUSED by name, so `name` can never be what a row is named by', JSON.stringify(nameOnly));
+  const seen = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const g = (window.app.sidebar._tasks || []).find((x) => x.id === ${JSON.stringify(gid)}); if (g) return { title: g.title, hasName: 'name' in g, old: g.name || g.id }; await new Promise((r) => setTimeout(r, 250)); } return null; })()`);
+  ok(!!seen && seen.title === 'Ops triage' && !seen.hasName && seen.old === gid, 'CONTROL: the client\'s task row carries `title` and no `name`, so the pre-a3 formula (`name || id`) names it by its id — the defect this leg pins', JSON.stringify(seen));
+  const assign = await p1.evaljs(`(async () => {
+    const w = window.app.openChannel('fake-poll', 'fake-poll-ops');
+    for (let i = 0; i < 40; i++) { if (w.content.querySelector('[data-channel-assign]')) break; await new Promise((r) => setTimeout(r, 250)); }
+    w.content.querySelector('[data-channel-assign]').click();
+    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-assign-dialog select')) break; await new Promise((r) => setTimeout(r, 250)); }
+    const sel = document.querySelector('#chan-assign-dialog select');
+    const opts = sel ? [...sel.options].map((o) => o.textContent) : [];
+    for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
+    return opts;
+  })()`);
+  ok(assign.some((o) => /Ops triage/.test(o)) && !assign.some((o) => o.includes(gid)), 'PIN: the Assign & filter "Wake" select names the group by its TITLE and never shows its id', JSON.stringify(assign));
+  // a grant that carries only {kind, id} (an assignment's shape) must be named from the roster
+  const granted = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: 'visible' }) })).json();
+  ok(!!granted && !granted.error, 'FIXTURE: the group is granted reach with a name-less principal', JSON.stringify(granted));
+  await sleep(600);
+  const reach = await p1.evaljs(`(async () => {
+    const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
+    const b = w.content.querySelector('.chanwin-title-row .icon-btn'); if (!b) return { fail: 'no ⋯' }; b.click();
+    await new Promise((r) => setTimeout(r, 200));
+    const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => /^Reach & policy/.test(x.textContent.trim())); if (!it) return { fail: 'no Reach item: ' + [...document.querySelectorAll('.context-menu .context-menu-item')].map((x) => x.textContent.trim()).join('|') };
+    it.click();
+    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-reach-dialog .chan-reach-row')) break; await new Promise((r) => setTimeout(r, 250)); }
+    const rows = [...document.querySelectorAll('#chan-reach-dialog .chan-reach-row .chan-reach-who')].map((x) => x.textContent);
+    const roster = [...document.querySelectorAll('#chan-reach-dialog .chan-reach-add select option')].map((o) => o.textContent);
+    for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
+    return { rows, roster };
+  })()`);
+  ok(!reach.fail && reach.rows.some((x) => /Ops triage/.test(x)) && !reach.rows.some((x) => x.includes(gid)), 'PIN: the Reach dialog names the granted group by its TITLE (resolved from the roster — the grant carried no name) and never its id', JSON.stringify(reach));
+  ok(!reach.fail && reach.roster.some((x) => /Ops triage/.test(x)) && !reach.roster.some((x) => x.includes(gid)), 'PIN: the Reach roster select names the group by its TITLE and never its id', JSON.stringify(reach));
+  await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: null }) });
+  await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); return 1; })()`);
+}
+
+// ── ⑯ THE FRESHNESS PILL FITS (verifier r4): at the 260px default rail, in
+//    en, zh AND ja, no pill is truncated (the ellipsis once ate ja's negation —
+//    ポーリングしていま… read as "polling" when the truth was "not polling"),
+//    and no untracked row carries one ──
+{
+  const PILLS = `(async () => {
+    const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
+    for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
+    const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
+    return { width: document.querySelector('.rail-panel-channels').getBoundingClientRect().width, rows: rows.map((r) => { const c = r.querySelector('.chan-row-line .chan-chip'); return { tracked: r.classList.contains('chan-tracked'), chip: c ? c.textContent : null, fits: c ? c.scrollWidth <= c.clientWidth : null, w: c ? c.getBoundingClientRect().width : 0 }; }) };
+  })()`;
+  for (const lang of ['zh', 'ja', 'en']) {
+    await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
+    ok(await p1.load(), `page 1 reloaded in ${lang}`);
+    const r = await p1.evaljs(PILLS);
+    const tracked = r.rows.filter((x) => x.tracked), untracked = r.rows.filter((x) => !x.tracked);
+    ok(tracked.length >= 2 && tracked.every((x) => x.chip && x.fits === true), `${lang}: at the ${Math.round(r.width)}px panel every tracked row's pill is drawn whole (no ellipsis)`, JSON.stringify(r.rows));
+    ok(untracked.length >= 1 && untracked.every((x) => x.chip === null), `${lang}: no untracked row carries a freshness pill`, JSON.stringify(untracked));
+  }
 }
 
 // ── the routes' host parameter is a PARAMETER with a named refusal ──

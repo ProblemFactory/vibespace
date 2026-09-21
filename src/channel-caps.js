@@ -327,7 +327,11 @@ function authState(adapterRecord, now, { lastPass = undefined, adapterState = nu
   // It is asked FIRST: nothing below can be true of an adapter that cannot
   // build a request at all.
   if (adapterState && adapterState.state === 'needs-credentials') {
-    return { state: 'needs-credentials', why: adapterState.why || 'no-credentials', expiresAt: null, missing: Array.isArray(adapterState.missing) ? adapterState.missing.slice() : [] };
+    // `why` is the store's English sentence (the contract); `whyCode` +
+    // `whyParams` are the same fact as STRUCTURE for the client to word —
+    // an adapter that resolves its own credential (the fake fixtures) has no
+    // `credential` facts on its digest row, so this is the only path (a3 i18n).
+    return { state: 'needs-credentials', why: adapterState.why || 'no-credentials', whyCode: adapterState.whyCode || null, whyParams: adapterState.whyParams || null, expiresAt: null, missing: Array.isArray(adapterState.missing) ? adapterState.missing.slice() : [] };
   }
   // The adapter's own `needs-reauth` (P1: a refresh token past its lifetime,
   // or a refresh the vendor answered `invalid_grant`) is a REFUSAL, so it is
@@ -538,6 +542,105 @@ function freshnessText(claim, { t = defaultT } = {}) {
   }
 }
 
+/**
+ * THE CODE VOCABULARY, IN WORDS (a3 i18n, 2026-09-18). The digest carries
+ * CODES — `auth.why`, `lane.why`, `lastPass.code`, a wake's delivery `lane`,
+ * a scan `source`, a held wake's `refused` — and the panel used to print them
+ * raw (`needs re-authorization (token-expired)`, `SCAN · NO-STORE-ON-PLATFORM`).
+ * Each composer below is the ONE place a code becomes a sentence, called by
+ * the client with its own `t` (the freshnessText rule); a code the table does
+ * not know is shown verbatim rather than hidden — a new code is a new row.
+ */
+function authWhyText(why, { t = defaultT } = {}) {
+  switch (String(why || '')) {
+    case 'token-expired': return t('the login expired');
+    case 'refresh-token-expired': return t('the refresh token expired');
+    case 'refresh-refused': return t('the vendor refused to refresh the login');
+    case 'no-refresh-token': return t('no refresh token was granted');
+    case 'last-pass-refused': return t('the last pass was refused as expired');
+    case 'needs-reauth': return t('the vendor asks for a new consent');
+    case 'never-authenticated': return t('never connected');
+    case 'no-credentials': return t('no application credential');
+    case '': return '';
+    default: return String(why);
+  }
+}
+/** `lane.why` (laneState / scanState) — why THIS lane is the one carrying the row. */
+function laneWhyText(why, { t = defaultT } = {}) {
+  switch (String(why || '')) {
+    case 'scan': return t('scan');
+    case 'poll': return t('poll');
+    case 'demoted': return t('push demoted — polling');
+    case 'push-dead': return t('push silent — polling');
+    case 'exclusive': return t('push, exclusive');
+    case 'kick-shared': return t('push nudges the cursor (shared)');
+    case 'kick-unknown': return t('push nudges the cursor');
+    case 'store': return t('local store');
+    case 'user-chose-ui': return t('the client UI (chosen)');
+    case 'no-store-on-platform': return t('no local store on this platform');
+    case 'store-encrypted': return t('the local store is encrypted');
+    case 'client-not-installed': return t('the client is not installed');
+    case 'host-facts-stale': return t('host facts are stale');
+    case 'tcc-denied': return t('access to the store was denied');
+    case 'no-source': return t('no source');
+    case '': return '';
+    default: return String(why);
+  }
+}
+/** A CHANNEL_ERROR_CODES entry (the registry's closed set) in words. */
+function errorCodeText(code, { t = defaultT } = {}) {
+  switch (String(code || '')) {
+    case 'auth-expired': return t('login expired');
+    case 'rate-limited': return t('rate limited');
+    case 'not-found': return t('not found');
+    case 'forbidden': return t('forbidden');
+    case 'transport': return t('transport failure');
+    case 'vendor-error': return t('vendor error');
+    case 'too-large': return t('too large');
+    case 'send-not-available': return t('sending not available');
+    case 'not-supported': return t('not supported');
+    case 'lost-at-boot': return t('lost at restart');
+    case 'failed': return t('failed');
+    case '': return '';
+    default: return String(code);
+  }
+}
+/** A delivery LANE (the conversation delivery ladder's answer) in words. */
+function deliveryLaneText(lane, { t = defaultT } = {}) {
+  switch (String(lane || '')) {
+    case 'message': return t('a message into the session');
+    case 'channel': return t('the channel socket');
+    case 'rpc-queue': return t('the queue of the running turn');
+    case 'user-inbox': return t('your inbox');
+    case 'remote-message': return t('a message on the owning machine');
+    case 'stash': return t('the next-turn stash');
+    case 'none': return t('nowhere');
+    case '': return '';
+    default: return String(lane);
+  }
+}
+/** A scan SOURCE (`store` | `ui`) in words. */
+function scanSourceText(source, { t = defaultT } = {}) {
+  switch (String(source || '')) {
+    case 'store': return t('the local store');
+    case 'ui': return t('the client UI');
+    case '': return '';
+    default: return String(source);
+  }
+}
+/** Why a wake was HELD (the engine's `refused` code beside its sentence). */
+function wakeRefusalText(refused, { t = defaultT } = {}) {
+  switch (String(refused || '')) {
+    case 'no-live-session': return t('no live session in the group — kept for its next turn');
+    case 'pacing': return t('the daily wake cap is reached — kept for later');
+    case 'unwired': return t('no delivery ladder is wired');
+    case 'error': return t('the delivery ladder threw');
+    case 'spend': return t('the spend budget refused it');
+    case '': return '';
+    default: return String(refused);
+  }
+}
+
 /** Seconds to a short human string. Deliberately tiny and local: this module
  *  imports nothing, and the panel renders whatever it is handed. */
 function humanAge(s) {
@@ -555,5 +658,6 @@ module.exports = {
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
   laneState, scanState, convCapsState, offers, authState,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
+  authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
 };

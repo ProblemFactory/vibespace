@@ -103,7 +103,18 @@ const V = {
   },
 };
 
-const TRIM_NOTE = 'Leading and trailing whitespace is trimmed before saving.';
+/**
+ * A DECLARED HUMAN-VISIBLE STRING IS A KEY (a3 i18n, 2026-09-18). Every
+ * label / help / note / prerequisite / caveat below is DATA the client
+ * renders — so the client renders `t(key)`, the dictionaries carry zh + ja
+ * for each, and `scripts/i18n-extract.mjs` collects i18nKey(…) literals
+ * beside t(…) so the census sees them. The marker is the identity: this
+ * module stays PURE and the server store keeps reading the English.
+ */
+const i18nKey = (s) => s;
+
+/** Said ONCE per card (never appended to every field's help). */
+const TRIM_NOTE = i18nKey('Leading and trailing whitespace is trimmed before saving.');
 
 const ROWS = Object.freeze([
   // ── THE FAKE ADAPTER'S OWN ROW (design §19 r7/r8 exit conditions) ─────────
@@ -115,13 +126,13 @@ const ROWS = Object.freeze([
   // the word `fail` fails. It talks to nothing.
   {
     id: 'fake',
-    label: 'Fake channel (test adapter)',
+    label: i18nKey('Fake channel (test adapter)'),
     fields: [
-      { key: 'apiKey', label: 'API key', secret: true, required: true, placeholder: 'fake_…',
-        help: `Any value of at least 4 characters; the fake adapter talks to nothing. A key containing "fail" makes Test fail (the fixture switch). ${TRIM_NOTE}`,
+      { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true, placeholder: 'fake_…',
+        help: i18nKey('Any value of at least 4 characters; the fake adapter talks to nothing. A key containing "fail" makes Test fail (the fixture switch).'),
         validate: V.minLen(4) },
-      { key: 'region', label: 'Region', secret: false, required: false, placeholder: 'local',
-        help: `Optional; echoed back unchanged. ${TRIM_NOTE}`, validate: V.noSpaces },
+      { key: 'region', label: i18nKey('Region'), secret: false, required: false, placeholder: 'local',
+        help: i18nKey('Optional; echoed back unchanged.'), validate: V.noSpaces },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_FAKE_' },
     setup: {
@@ -130,18 +141,19 @@ const ROWS = Object.freeze([
       // callback line, copy button, checklist — is exercised on a card that
       // ships in P0, not first on a card that ships with P1.
       callbackUrl: 'http://127.0.0.1:17865/fake/cb',
-      callbackNote: 'There is no console for the fake adapter. This line exists so the setup block is exercised end to end.',
+      callbackNote: i18nKey('The test channel has no console; nothing needs to be registered anywhere.'),
       prerequisites: [
-        'A key of at least 4 characters is saved below, or the cluster provides one',
-        'The key does not contain the word "fail" (that is the Test fixture switch)',
+        i18nKey('A key of at least 4 characters is saved below, or the cluster provides one'),
+        i18nKey('The key does not contain the word "fail" (that is the Test fixture switch)'),
       ],
     },
     test: {
       kind: 'shape-only',
-      describe: 'Checks the resolved key\'s shape and the fixture switch. Zero network: the fake adapter has no vendor.',
-      caveat: 'This proves nothing about any vendor — the fake adapter has none. It shows that the value you saved is the value the adapter resolves.',
+      describe: i18nKey('Checks the resolved key\'s shape and the fixture switch. Zero network: the fake adapter has no vendor.'),
+      caveat: i18nKey('This proves nothing about any vendor — the fake adapter has none. It shows that the value you saved is the value the adapter resolves.'),
     },
     consumers: ['src/channels/fake.js'],
+    usedBy: i18nKey('Used by the test channel'),
     docs: 'docs/design-communication-panel.zh.md',
   },
 
@@ -150,27 +162,28 @@ const ROWS = Object.freeze([
     id: 'lark',
     label: 'Lark / 飞书',
     fields: [
-      { key: 'appId', label: 'App ID', secret: false, required: true, placeholder: 'cli_…',
-        help: `Developer Console → Credentials & Basic Info. ${TRIM_NOTE}`, validate: V.larkAppId },
-      { key: 'appSecret', label: 'App Secret', secret: true, required: true,
-        help: `Same page. It is only ever written here, never read back. ${TRIM_NOTE}`, validate: V.minLen(8) },
+      { key: 'appId', label: i18nKey('App ID'), secret: false, required: true, placeholder: 'cli_…',
+        help: i18nKey('Developer Console → Credentials & Basic Info.'), validate: V.larkAppId },
+      { key: 'appSecret', label: i18nKey('App Secret'), secret: true, required: true,
+        help: i18nKey('Same page. It is only ever written here, never read back.'), validate: V.minLen(8) },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_LARK_' },
     setup: {
       callbackUrl: LARK_CALLBACK_URL,
-      callbackNote: 'Developer Console → Security Settings → Redirect URLs. It must match byte for byte.',
+      callbackNote: i18nKey('Developer Console → Security Settings → Redirect URLs. It must match byte for byte.'),
       prerequisites: [
-        'The redirect URL above is registered in that list',
-        'The scopes im:message and im:message.send_as_user are granted',
-        'The app has a PUBLISHED version',
+        i18nKey('The redirect URL above is registered in that list'),
+        i18nKey('The scopes im:message and im:message.send_as_user are granted'),
+        i18nKey('The app has a PUBLISHED version'),
       ],
     },
     test: {
       kind: 'credential-exchange',
-      describe: 'Exchanges this app id / secret pair for a tenant token once. Reads no conversation, sends no message.',
-      caveat: 'This only proves the app id / secret pair is right. The consent page also needs the three items above — missing any of them fails on the consent page, not on this call.',
+      describe: i18nKey('Exchanges this app id / secret pair for a tenant token once. Reads no conversation, sends no message.'),
+      caveat: i18nKey('This only proves the app id / secret pair is right. The consent page also needs the three items above — missing any of them fails on the consent page, not on this call.'),
     },
     consumers: ['src/channels/lark.js'],
+    usedBy: i18nKey('Used by the Lark / 飞书 channel'),
     docs: 'https://open.feishu.cn/document/',
   },
 
@@ -185,19 +198,20 @@ const ROWS = Object.freeze([
     id: 'gmail',
     label: 'Gmail',
     fields: [
-      { key: 'clientId', label: 'OAuth client ID', secret: false, required: true, placeholder: '…apps.googleusercontent.com',
-        help: `Only when using your own client. ${TRIM_NOTE}`, validate: V.googleClientId },
-      { key: 'clientSecret', label: 'OAuth client secret', secret: true, required: true,
-        help: `Only when using your own client. ${TRIM_NOTE}`, validate: V.minLen(8) },
+      { key: 'clientId', label: i18nKey('OAuth client ID'), secret: false, required: true, placeholder: '…apps.googleusercontent.com',
+        help: i18nKey('Only when using your own client.'), validate: V.googleClientId },
+      { key: 'clientSecret', label: i18nKey('OAuth client secret'), secret: true, required: true,
+        help: i18nKey('Only when using your own client.'), validate: V.minLen(8) },
     ],
     delegate: { to: 'drive-presets', prefer: 'channels', multi: true },
     setup: null,
     test: {
       kind: 'shape-only',
-      describe: 'Checks the client id / secret shape and builds the authorization URL. A Google OAuth client cannot be exchanged for anything on its own (no client-credentials grant), so the real verdict is the OAuth round trip.',
-      caveat: 'Shape only. Whether the consent succeeds, and how long the refresh token lives, depends on the client\'s verification status.',
+      describe: i18nKey('Checks the client id / secret shape and builds the authorization URL. A Google OAuth client cannot be exchanged for anything on its own (no client-credentials grant), so the real verdict is the OAuth round trip.'),
+      caveat: i18nKey('Shape only. Whether the consent succeeds, and how long the refresh token lives, depends on the client\'s verification status.'),
     },
     consumers: ['src/channels/gmail.js'],
+    usedBy: i18nKey('Used by the Gmail channel'),
     docs: 'docs/design-communication-panel.zh.md',
   },
 
@@ -206,18 +220,21 @@ const ROWS = Object.freeze([
     id: 'cloak',
     label: 'CloakBrowser',
     fields: [
-      { key: 'licenseKey', label: 'License key', secret: true, required: false, placeholder: 'cb_… (empty = free tier)',
-        help: `Empty means the free tier (one concurrent session). ${TRIM_NOTE}`, validate: V.cloakLicense },
+      { key: 'licenseKey', label: i18nKey('License key'), secret: true, required: false, placeholder: 'cb_…',
+        help: i18nKey('Empty means the free tier (one concurrent session).'), validate: V.cloakLicense },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOAK_' },
     setup: null,
     test: {
       kind: 'shape-only',
-      describe: 'Checks the key\'s shape. A real launch probe would download the browser and needs the egress precondition; neither belongs on a card opened to paste a key.',
-      caveat: 'Shape only. The seat tier is read back from the first real launch, not from this check.',
+      describe: i18nKey('Checks the key\'s shape. A real launch probe would download the browser and needs the egress precondition; neither belongs on a card opened to paste a key.'),
+      caveat: i18nKey('Shape only. The seat tier is read back from the first real launch, not from this check.'),
     },
     consumers: [],
-    wiredIn: 'agent-browser v2 (src/server/browser-backend.js, src/server/browser-keeper.js)',
+    // `wiredIn` is the PHASE in words (a key the client translates); the
+    // files that will consume the row stay beside it for tooling, off the card.
+    wiredIn: i18nKey('the agent-browser v2 track'),
+    wiredInFiles: ['src/server/browser-backend.js', 'src/server/browser-keeper.js'],
     docs: 'docs/design-agent-browser-v2.md',
   },
 ]);
@@ -273,11 +290,41 @@ function missingFields(row, values) {
 function resolvePrecedence(userValues, clusterDefault, opts = {}) {
   const user = {};
   for (const [k, v] of Object.entries(userValues || {})) if (v !== undefined && v !== null && String(v).length) user[k] = String(v);
-  if (Object.keys(user).length) return { source: 'user', values: user, clusterKey: null, label: null, why: null };
+  if (Object.keys(user).length) return { source: 'user', values: user, clusterKey: null, label: null, why: null, whyCode: null, whyParams: null };
   if (clusterDefault && clusterDefault.values) {
-    return { source: 'cluster', values: { ...clusterDefault.values }, clusterKey: clusterDefault.key || 'default', label: clusterDefault.label || null, why: null };
+    return { source: 'cluster', values: { ...clusterDefault.values }, clusterKey: clusterDefault.key || 'default', label: clusterDefault.label || null, why: null, whyCode: null, whyParams: null };
   }
-  return { source: 'none', values: {}, clusterKey: null, label: null, why: opts.clusterWhy || 'no user values and no cluster default' };
+  // `why` is the English contract sentence (logs, the CLI); `whyCode` +
+  // `whyParams` are the same fact as STRUCTURE for the client to word.
+  return {
+    source: 'none', values: {}, clusterKey: null, label: null,
+    why: opts.clusterWhy || 'no user values and no cluster default',
+    whyCode: opts.clusterWhy ? (opts.clusterWhyCode || 'cluster') : 'no-values',
+    whyParams: opts.clusterWhy ? (opts.clusterWhyParams || null) : null,
+  };
+}
+
+/**
+ * THE CREDENTIAL `why`, IN WORDS (a3 i18n). Every reason the store can give
+ * for a `none` (or a re-keyed `cluster`) answer is a CODE here with its
+ * params; the client renders it with its own `t`. An unknown code falls back
+ * to the English sentence beside it, never to silence.
+ */
+function credentialWhyText({ whyCode = null, whyParams = null, why = null } = {}, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s)) } = {}) {
+  const p = whyParams || {};
+  switch (String(whyCode || '')) {
+    case 'no-values': return t('no key of your own and no cluster default');
+    case 'no-preset': return t('the cluster provides no default for this integration');
+    case 'preset-gone': return t('the preset you chose ({key}) is no longer provided by the cluster', { key: p.key || '?' });
+    case 'ambiguous': return t('the cluster provides {n} presets and none is the preferred one — choose one', { n: p.n || 0 });
+    case 'undecryptable': return t('the stored keys ({fields}) cannot be decrypted with the current key file', { fields: Array.isArray(p.fields) ? p.fields.join(', ') : '' });
+    case 'store-unreadable': return t('the integrations store could not be read');
+    case 'rebound': return t('the cluster default this row used ({from}) was re-keyed to {to} — the only default this instance offers', { from: p.from || '?', to: p.to || '?' });
+    case 'no-store': return t('no integration store on this instance');
+    case 'lookup-failed': return t('the integration lookup failed');
+    case '': return why ? String(why) : '';
+    default: return why ? String(why) : String(whyCode);
+  }
 }
 
 /**
@@ -296,19 +343,19 @@ function resolvePrecedence(userValues, clusterDefault, opts = {}) {
  */
 function pickPreset(presets, { savedKey = null, prefer = null, rebindSingle = false } = {}) {
   const list = Array.isArray(presets) ? presets.filter((p) => p && p.key) : [];
-  if (!list.length) return { preset: null, why: 'the cluster provides no preset' };
+  if (!list.length) return { preset: null, why: 'the cluster provides no preset', whyCode: 'no-preset', whyParams: null };
   if (savedKey) {
     const hit = list.find((p) => p.key === savedKey);
-    if (hit) return { preset: hit, why: null };
-    if (rebindSingle && list.length === 1) return { preset: list[0], why: null, rebound: { from: savedKey, to: list[0].key } };
-    return { preset: null, why: `the preset you chose (${savedKey}) is no longer provided by the cluster` };
+    if (hit) return { preset: hit, why: null, whyCode: null, whyParams: null };
+    if (rebindSingle && list.length === 1) return { preset: list[0], why: null, whyCode: null, whyParams: null, rebound: { from: savedKey, to: list[0].key } };
+    return { preset: null, why: `the preset you chose (${savedKey}) is no longer provided by the cluster`, whyCode: 'preset-gone', whyParams: { key: savedKey } };
   }
   if (prefer) {
     const hit = list.find((p) => p.key === prefer);
-    if (hit) return { preset: hit, why: null };
+    if (hit) return { preset: hit, why: null, whyCode: null, whyParams: null };
   }
-  if (list.length === 1) return { preset: list[0], why: null };
-  return { preset: null, why: `the cluster provides ${list.length} presets and none is named ${prefer || 'as preferred'} — choose one` };
+  if (list.length === 1) return { preset: list[0], why: null, whyCode: null, whyParams: null };
+  return { preset: null, why: `the cluster provides ${list.length} presets and none is named ${prefer || 'as preferred'} — choose one`, whyCode: 'ambiguous', whyParams: { n: list.length, prefer: prefer || null } };
 }
 
 /** The declaration-only view of a row's fields (no validate functions): what
@@ -338,5 +385,5 @@ function checkRow(row) {
 module.exports = {
   ROWS, TEST_KINDS, TEST_BUTTON_LABEL, LARK_CALLBACK_URL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
-  fieldDecls, checkRow,
+  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText,
 };

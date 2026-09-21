@@ -1148,6 +1148,131 @@ the failure this design argues against.
   own attribution of the last real send (the §21-item-3 proof; Lark's
   declaration stays `unknown` in code until an owner-run real send is read).
 
+### Communication panel — a3 i18n: the codes cross the wire, the client says the words (2026-09-18; owner "似乎没太做好 i18n"; docs/design-communication-panel-polish-audit.md §1)
+
+- **No English leaves the server as chrome.** The a1 audit found the eight
+  surfaces' `t()` coverage at 368/369 and the leaked English elsewhere: codes
+  printed raw (`token-expired`, `NO-STORE-ON-PLATFORM`, `rpc-queue`), engine
+  sentences shown verbatim (`outcome unknown: …`, `forbidden: …`, the
+  store's `the cluster provides no default…`), the built-in row's seeded
+  `user: 'you'`, and the adapters' / the registry's DECLARED labels and help.
+  Each is now STRUCTURE the client words: `outcome` on a proposal, `whyCode`
+  + `whyParams` on a credential, `auth.self`, `authorityWhyCap`,
+  `reconcileWhyCode`, `adapterLabel`; the code composers live in the PURE
+  modules (channel-caps / channel-policy / channel-filter /
+  integration-registry) and every route failure toasts by `code`
+  (`src/lib/channel-words.js`). An agent's contract strings (`p.reason`, the
+  receipt, the CLI's output) stay English on purpose.
+- **A declared string is a key.** `i18nKey(…)` marks a human-visible string
+  in a PURE data module (registry rows, adapter OPTIONS); the extractor
+  collects it beside `t()` so the dictionaries' census sees it; zh + ja carry
+  every one (144 new keys; 45 zh / 24 ja entries re-worded — 发件箱 / 送信箱
+  for Outbox, 提案 for proposal, 频道 for channel, 适配器 for adapter, 审批
+  for review-as-a-verb; `tc('policy', …)` for the policy mode).
+- **Two wording fixes that were product bugs:** an UNTRACKED conversation's
+  footer says "Not tracked — messages are fetched once you track it." with
+  the Track verb (it said "the send capability is not known yet"); a Task
+  Group is named by its `title` (the store has no `name`, so every group
+  showed as its id in the Assign / Reach editors — pinned by
+  test-channels-e2e ⑮ since r4).
+- **r4 (2026-09-21, the verifier's i18n leaks):** the filter validator's
+  refusal carries a `code` (+ the rule kind) beside its English contract
+  sentence and the editor words it (`filterProblemText`) — "Add rule" no
+  longer prints `keyword: value is required` under zh/ja; every "For you"
+  item the channels engine files (the pointer, an access request, an
+  unknown outcome, the failure headline) rides as `i18n` STRUCTURE the
+  inbox words with the device's t() (the English text stays the dedupe key
+  and the CLI's contract); the needs-credentials line words a code on every
+  path (a self-resolving adapter's `auth.whyCode`), never the store's raw
+  sentence; the state-dot tooltip's instant uses `deviceLocale()`.
+- **Gate:** scripts/test-channels-i18n.mjs (heavy) drives the a1 driver at
+  zh AND ja over all eight surfaces and asserts ZERO Latin-only visible text
+  nodes outside a PRINTED allowlist (proper nouns, URLs, ids, the fixture's
+  own data by DOM path); a planted English literal turns it red.
+
+### Communication panel — a4 UI design: hierarchy, rhythm, icons, empty states, the stepper, the card, the Outbox views, the phone (2026-09-21; owner "界面很乱，没有层次，你需要用前端技能+实际渲染截图好好设计优化一下"; docs/design-communication-panel-ui.md §4 = the spec, direction A)
+
+- **The panel is a list, not a control panel.** Bar (`{n} conversations ·
+  {k} tracked` + the Outbox button: outbox glyph · label · accent count — the
+  label hides under a 200px container because the 260px default sidebar
+  leaves 172px for the bar, measured) → one collapsible `folder-header`
+  section per adapter (chevron · kind glyph · name · 6px state dot with the
+  lane in its tooltip · `tracked/total` · ⋯) → rows as bordered
+  `session-item-card`s on ONE grid: line 1 = title + the ONE freshness pill,
+  line 2 = participants + the needs-you badges right-aligned (awaiting =
+  accent-outline pill with a check glyph, unread = accent count, `not
+  tracked` as 9px text), line 3 only when assigned. Every adapter verb is in
+  the section's ⋯ menu (`channel-adapter`, state-driven; the Sender line is a
+  checkable row); a status line exists ONLY when the adapter has something
+  to say beyond "connected", wraps at 10px and carries its one verb, amber
+  when it needs the user. Under a 180px container the two badges collapse to
+  one accent pill carrying their sum (tooltip = the breakdown). A fresh
+  instance is `.empty-hint` + the Connect section of full-width `mounts-btn`
+  rows with the credential path as the note under each. The panel is a
+  NAMED container (`chan-panel`) — the rows are inline-size containers
+  themselves, so an unnamed query collapsed the badge pair at the default
+  width (round 3); the day separator's date follows the device's language
+  (`deviceLocale()`), never the browser's.
+- **One colour per meaning (§4.3).** Accent = needs you (unread fill,
+  awaiting outline, the card's awaiting pill), green = live evidence / sent,
+  neutral tint = an age / rejected, amber = a warning / `unknown` (the one
+  outcome that is NOT a failure), red = failed. Text on a tint uses the
+  meaning tokens `--ok-text` / `--warn-text` / `--bad-text` / `--attn-text`
+  (the raw hue mixed toward `--text`) so both themes clear AA at 9–11px; blue
+  left the feature. Every glyph is an SVG from src/lib/icons.js through
+  `channel-chrome.js icon()` (chat / mail / robot / more / chevron / check /
+  alert / outbox / filter / reach / connect / plus / copy / external / info).
+- **The connect wizard is a stepper** (Credential ✓ → Consent → Track): the
+  consent page as the ONE primary button beside Copy link, the port-busy
+  refusal as a NAMED amber line with the alert glyph, paste-back as a
+  collapsed step that opens itself when nothing listens, and a finished flow
+  turns into step 3 — the Track picker — in the same dialog.
+- **The card is five lines**: state pill · drafter · age → text → ONE meta
+  line (why · needs approval · will send as · expires · the sender line) →
+  the identity warning ONCE, only when it warns → outcome → a quiet footer
+  (reconcile facts, receipt) → reject · edit · approve right-aligned with one
+  primary. The inline section shows the cards that need the user plus the
+  newest two decided ones and links the rest to the Outbox; the Outbox
+  window is a toolbar (summary + Awaiting | All) over cards, All grouped by
+  STATE with a dot per head.
+- **The editors on the house form rhythm**: short fields paired on a
+  two-column grid, rule rows with their own kind selector + ×, Add rule
+  under the list, the estimate as ONE bold stat with its honesty as the hint
+  under it, the receipt-wake row a `dialog-check-row`; the reach dialog is
+  one bordered list (who · neutral level pill · origin · ×) with grants named
+  from the roster; one 520px width token for the whole family.
+- **Integrations**: an undecryptable row is a state chip + one sentence; the
+  Test verdict is one line; the copy button has the copy glyph; field help is
+  an info affordance (tooltip + tap-to-show) instead of a paragraph per field.
+- **The phone (≤480px)**: rows pad `8px 10px`, every card / composer /
+  footer / dialog button is ≥36px tall, the editors' grids become one column,
+  the card's three actions stay on one row; nothing scrolls sideways at
+  375px (test-channels-e2e ⑫ b).
+- **No behaviour change**: the freshness-chip honesty contract, the
+  read-mark rule (a user action, never a repaint), frame neutering and
+  `escHtml` / textContent on every wire string are byte-for-byte in meaning.
+- **r4 (2026-09-21, the verifier's findings on the build, each reproduced
+  on the rendered chrome):** the panel REPAINTS IN PLACE — the rail no
+  longer tears it down on every broadcast, `draw()` swaps one fragment and
+  keeps the scroller where the user left it, zero refetches (a1 D12 was
+  still open: 7 teardowns / 7 fetches / scroll 0 for 7 broadcasts); an
+  UNTRACKED row carries NO freshness pill (§4.3 — its `not tracked` text is
+  the claim; the pill there was the one that truncated ja's negation) and a
+  tracked row's pill never shrinks (the title yields first, the pill
+  ellipsizes only past the title's floor; ja off words shortened); the
+  warning line's alert glyph is a fixed slot beside its sentence (the
+  `> span` rule had made it a 124px box); the 200px rail hides the pill and
+  the section name (tooltips carry both) and keeps the count; the
+  assignment line's `→` became the filter glyph. Gates: test-channels-e2e
+  ⑬ (repaint in place) · ⑭ (glyph ≤ 8px from its sentence at 260/340/500) ·
+  ⑮ (group title) · ⑯ (every tracked pill whole at 260 in zh/ja/en, none on
+  an untracked row).
+- **Gates**: test-channels-e2e ⑫ (row grid ±1px, 375px overflow, SVG-only
+  glyphs, five distinct state colours + unknown ≠ failed, age pills neutral /
+  live green) + the moved legs (the Sender line through the ⋯ menu, reject
+  by `data-reject`); test-channels-i18n (zh + ja census over the new chrome);
+  test-integrations-ui; scripts/dbg-comm-surfaces.mjs for the BEFORE/AFTER.
+
 ### Integrations & keys — the shared credential layer (P0b, docs/design-communication-panel.zh.md §14; consumed by docs/design-agent-browser-v2.md §7.5 too)
 
 **What P0b ships, and nothing more.** ONE window (⚙ → Integrations & keys /

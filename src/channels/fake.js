@@ -179,7 +179,8 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
             let r = null;
             try { r = resolveIntegration('fake'); } catch (e) { return { state: 'unknown', expiresAt: null, scopes: [], why: `integration lookup failed: ${(e && e.message) || e}` }; }
             if (r && r.source === 'none' && Array.isArray(r.missing) && r.missing.length) {
-              return { state: 'needs-credentials', expiresAt: null, scopes: [], why: r.why || 'no-credentials', missing: r.missing.slice(), credentialSource: 'none' };
+              // the store's `whyCode`/`whyParams` ride beside its sentence, so the panel words the CODE (a3 i18n)
+              return { state: 'needs-credentials', expiresAt: null, scopes: [], why: r.why || 'no-credentials', whyCode: r.whyCode || null, whyParams: r.whyParams || null, missing: r.missing.slice(), credentialSource: 'none' };
             }
             return { state: 'connected', expiresAt: null, scopes: ['fake'], why: null, credentialSource: r ? r.source : null };
           }

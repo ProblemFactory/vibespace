@@ -1,0 +1,114 @@
+/* DIRECTION C — 安静账本 (the Remote idiom).
+   Hierarchy: a full-width Outbox button → section title + subtitle → the
+   ADAPTER as a bordered mounts-row (8 px state dot · name · lane badge ·
+   icon actions) with its status as the dim second line → its conversations
+   as indented plain children (title · right-aligned meta: unread as a bold
+   accent number, freshness as dim text, awaiting as an accent dot + word).
+   NO pills anywhere: weight, dots and colour carry the meaning. Cards are
+   hairline-separated blocks with a state dot. Theme vars only. */
+/* TEXT tokens per MEANING, derived from the theme (the raw --green/--yellow/--red and
+   --accent-on-its-own-tint are not theme-adapted: measured 1.7–3.9:1 in light). Dots and
+   tints keep the raw hue; TEXT mixes toward --text so both themes clear AA at 9–11 px. */
+:root {
+  --ok-text: color-mix(in srgb, var(--green, #3fb950) 44%, var(--text));
+  --warn-text: color-mix(in srgb, var(--yellow, #e5c07b) 47%, var(--text));
+  --bad-text: color-mix(in srgb, var(--red, #e55) 55%, var(--text));
+  --attn-text: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+/* ── panel ── */
+.rail-panel-channels { padding: 0; }
+.chan-panel.mounts-panel { padding: 10px 8px; gap: 8px; }
+.chan-outbox-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 9px; text-align: left; margin: 0; }
+.chan-outbox-attn { color: var(--accent); border-color: var(--accent); }
+.chan-sec-head.mounts-sec-head { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; margin: 2px 2px 0; }
+.chan-sec-sub { font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-dim); }
+.chan-adapter.mounts-row { padding: 6px 8px 4px; gap: 2px; }
+.chan-sec-name.mounts-name { font-weight: 600; }
+.chan-lane.mounts-badge { color: var(--text-secondary); border-color: var(--border); }
+.chan-sec-note.mounts-path { padding-left: 14px; font-size: 10px; color: var(--text-dim); margin-bottom: 4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-sec-note.chan-warn { color: var(--warn-text); }
+.chan-row.mounts-row-child { margin-left: 8px; padding: 3px 4px 3px 8px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); cursor: pointer; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.chan-row:hover { background: var(--hover-overlay); }
+.chan-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chan-row-title { flex: 1 1 auto; min-width: 60px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.chan-has-unread .chan-row-title { font-weight: 600; }
+.chan-row:not(.chan-tracked) .chan-row-title { color: var(--text-dim); }
+.chan-row-meta { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 6px; font-size: 10px; color: var(--text-dim); }
+.chan-unread { font-size: 11px; font-weight: 700; color: var(--accent); background: none; padding: 0; border-radius: 0; }
+.chan-awaiting { font-size: 10px; font-weight: 600; color: var(--attn-text); background: none; padding: 0; border-radius: 0; }
+.chan-fresh { font-size: 10px; color: var(--text-dim); }
+.chan-fresh.chan-chip-live { color: var(--ok-text); }
+.chan-untracked { font-size: 10px; color: var(--text-dim); }
+.chan-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block; background: var(--text-dim); }
+.chan-dot-ok { background: var(--green, #3fb950); }
+.chan-dot-warn { background: var(--yellow, #e5c07b); }
+.chan-dot-attn { background: var(--accent); }
+.chan-dot-bad { background: var(--red, #e55); }
+.chan-dot-idle { background: var(--text-dim); opacity: .6; }
+.chan-row-assign { display: block; font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-row-assign.chan-warn { color: var(--warn-text); }
+.chan-connect-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 9px; text-align: left; }
+
+/* ── conversation window ── */
+.chanwin { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.chanwin-bar { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.chanwin-bar b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chanwin-meta { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chanwin-assign { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+.chanwin-assign span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chanwin-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.chanmsg-day { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-dim); margin: 2px 0; }
+.chanmsg-day::before, .chanmsg-day::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.chanmsg { display: flex; flex-direction: column; gap: 1px; }
+.chanmsg-cont { margin-top: -3px; }
+.chanmsg-head { display: flex; align-items: baseline; gap: 6px; }
+.chanmsg-head b { font-size: 11px; font-weight: 600; }
+.chanmsg-agent .chanmsg-head b { color: var(--attn-text); }
+.chanmsg-at { font-size: 10px; color: var(--text-dim); }
+.chanmsg-body { font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chanwin-outbox { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; border-top: none; padding-top: 0; }
+.chanwin-outbox-head.mounts-sec-head { display: flex; flex-direction: row; align-items: center; gap: 8px; margin: 0; }
+.chanwin-outbox-head .chan-prop-link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.chanwin-foot { flex-shrink: 0; border-top: 1px solid var(--border); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.chanwin-composer textarea { width: 100%; box-sizing: border-box; min-height: 40px; resize: none; font: inherit; font-size: 12px; line-height: 1.4; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
+.chanwin-composer textarea:focus { outline: none; border-color: var(--accent); }
+.chanwin-composer-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.chanwin-note { flex: 1; min-width: 0; font-size: 10px; color: var(--text-dim); line-height: 1.45; margin: 0; }
+.chanwin-readonly { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.chanwin-readonly > span { flex: 1; }
+
+/* ── the approval card (inline + Outbox) ── */
+.chan-prop { border: none; border-top: 1px solid var(--border); border-radius: 0; padding: 8px 0 2px; background: transparent; display: flex; flex-direction: column; gap: 4px; }
+.chan-prop-head { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-dim); }
+.chan-prop-state { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; padding: 0; background: none; border-radius: 0; color: var(--text); flex-shrink: 0; }
+.chan-prop-state-awaiting { color: var(--attn-text); }
+.chan-prop-state-sent { color: var(--ok-text); }
+.chan-prop-state-failed { color: var(--bad-text); }
+.chan-prop-state-unknown { color: var(--warn-text); }
+.chan-prop-state-rejected { color: var(--text-secondary); }
+.chan-prop-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-prop-when { flex-shrink: 0; margin: 0; }
+.chan-prop-body { padding-left: 12px; display: flex; flex-direction: column; gap: 4px; }
+.chan-prop-text { font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chan-prop-meta { font-size: 10px; color: var(--text-dim); line-height: 1.45; }
+.chan-prop-idwarn { font-size: 10px; color: var(--warn-text); }
+.chan-prop-reason { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.chan-prop-reason.chan-warn { color: var(--warn-text); }
+.chan-prop-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+.chan-prop-link { color: var(--accent); text-decoration: none; }
+
+/* ── the Outbox window ── */
+.jobs-toolbar { background: var(--bg-panel, var(--bg-titlebar)); flex-shrink: 0; }
+.jobs-summary { flex: 1; min-width: 0; font-size: 11px; }
+.chan-sp { flex: 1; }
+.chan-seg-on { color: var(--accent); border-color: var(--accent); }
+.chan-outbox-list { gap: 4px; }
+.chan-outbox-sec.mounts-sec-head { margin: 6px 0 0; }
+.chan-outbox-list .chan-outbox-sec + .chan-prop { border-top: none; padding-top: 4px; }
+
+/* ── phone ── */
+@media (max-width: 480px) {
+  .chan-row.mounts-row-child { padding: 6px 4px 6px 8px; }
+  .chan-prop-actions .mounts-btn, .chanwin-composer-row .mounts-btn, .chanwin-readonly .mounts-btn { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+}

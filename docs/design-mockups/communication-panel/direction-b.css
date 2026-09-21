@@ -1,0 +1,114 @@
+/* DIRECTION B — 分诊看板 (the Background Work idiom).
+   Hierarchy: jobs-rail-bar (summary + Outbox) → adapter = a jobs-sec-head
+   (10 px uppercase, kind icon, tracked/total, ONE state chip, ⋯) → rows as
+   jobs-cards with a 3 px SEVERITY EDGE (accent = needs you, amber = a held
+   wake, hairline = idle / untracked), l1 = title + state word, l2 = the
+   monospace bordered chip line (freshness · awaiting · assignment · who).
+   Cards carry the same edge by state. Buttons are the jobs-btn family
+   (accent = outlined, the idiom's "primary"). Theme vars only. */
+/* TEXT tokens per MEANING, derived from the theme (the raw --green/--yellow/--red and
+   --accent-on-its-own-tint are not theme-adapted: measured 1.7–3.9:1 in light). Dots and
+   tints keep the raw hue; TEXT mixes toward --text so both themes clear AA at 9–11 px. */
+:root {
+  --ok-text: color-mix(in srgb, var(--green, #3fb950) 44%, var(--text));
+  --warn-text: color-mix(in srgb, var(--yellow, #e5c07b) 47%, var(--text));
+  --bad-text: color-mix(in srgb, var(--red, #e55) 55%, var(--text));
+  --attn-text: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+/* ── panel ── */
+.rail-panel-channels { padding: 0; }
+.chan-bar.jobs-rail-bar { padding: 8px 10px; }
+.jobs-rail-bar .jobs-summary { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-outbox-btn { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin: 0; }
+.chan-outbox-attn { color: var(--accent); border-color: var(--accent); }
+.chan-list { padding: 6px 8px; }
+.chan-sec-head.jobs-sec-head { margin: 10px 0 6px; }
+.chan-sec-head .chan-sec-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chan-sp { flex: 1; }
+.chan-sec-state { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.chan-sec-state.jobs-group-run { color: var(--ok-text); border-color: color-mix(in srgb, var(--green, #3fb950) 55%, transparent); }
+.chan-sec-state.jobs-group-ask { color: var(--warn-text); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 55%, transparent); }
+.chan-sec-more { padding: 0 4px; height: 18px; display: inline-flex; align-items: center; }
+.chan-sec-note { font-size: 10px; color: var(--text-dim); margin: -2px 0 6px; line-height: 1.4; }
+.chan-sec-note.chan-warn { color: var(--warn-text); }
+.chan-row.jobs-card { padding: 6px 10px; margin-bottom: 5px; }
+.chan-sev-attn { border-left-color: var(--accent); }
+.chan-sev-warn { border-left-color: var(--yellow, #e5c07b); }
+.chan-sev-idle { border-left-color: var(--border); }
+.chan-sev-ok { border-left-color: var(--green, #3fb950); }
+.chan-sev-bad { border-left-color: var(--red, #e55); }
+.chan-row-title.jobs-name { flex: 1; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
+.chan-row:not(.chan-tracked) .chan-row-title { color: var(--text-secondary); font-weight: 400; }
+.chan-row-state { flex-shrink: 0; }
+.chan-sev-attn .chan-row-state { color: var(--attn-text); }
+.jobs-card-l2 .jobs-ctx { flex: 1 1 60px; max-width: none; font-size: 10px; }
+.chan-chip-live.jobs-chip { color: var(--ok-text); border-color: color-mix(in srgb, var(--green, #3fb950) 50%, transparent); }
+.chan-awaiting.jobs-chip { color: var(--attn-text); border-color: var(--accent-dim); font-family: inherit; font-weight: 600; background: transparent; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
+.chan-row-assign.jobs-chip { font-family: inherit; color: var(--text-secondary); }
+.chan-row-assign.chan-warn { color: var(--warn-text); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 50%, transparent); }
+.chan-connect-btn { display: flex; align-items: center; gap: 6px; width: 100%; margin: 4px 0; padding: 6px 9px; text-align: left; }
+.chan-connect-label { flex: 1; min-width: 0; }
+.chan-connect-note { font-size: 10px; color: var(--text-dim); padding: 0 2px 6px; line-height: 1.4; }
+.chan-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block; background: var(--text-dim); }
+.chan-dot-ok { background: var(--green, #3fb950); }
+.chan-dot-warn { background: var(--yellow, #e5c07b); }
+.chan-dot-attn { background: var(--accent); }
+.chan-dot-bad { background: var(--red, #e55); }
+.chan-dot-idle { background: var(--text-dim); opacity: .6; }
+
+/* ── conversation window ── */
+.chanwin { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.chanwin-bar.jobs-toolbar { flex-direction: row; flex-wrap: wrap; gap: 6px; flex-shrink: 0; }
+.chanwin-bar b { font-size: 12px; font-weight: 600; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chanwin-bar .jobs-ctx { flex: 1 1 100px; }
+.chanwin-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.chanwin-assign.jobs-meta { margin-bottom: 4px; }
+.chanmsg { display: grid; grid-template-columns: 34px 1fr; gap: 6px; align-items: baseline; }
+.chanmsg-at { font-family: monospace; font-size: 10px; color: var(--text-dim); }
+.chanmsg-body { font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.chanmsg-body b { font-weight: 600; font-size: 11px; }
+.chanmsg-agent .chanmsg-body b { color: var(--attn-text); }
+.chanwin-outbox { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; border-top: none; padding-top: 0; }
+.chanwin-outbox-head.jobs-sec-head { margin: 4px 0 2px; display: flex; align-items: center; gap: 6px; }
+.chanwin-outbox-head .chan-prop-link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.chanwin-foot { flex-shrink: 0; border-top: 1px solid var(--border); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.chanwin-composer textarea { width: 100%; box-sizing: border-box; min-height: 40px; resize: none; font: inherit; font-size: 12px; line-height: 1.4; padding: 6px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
+.chanwin-composer textarea:focus { outline: none; border-color: var(--accent); }
+.chanwin-composer-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.chanwin-note { flex: 1; min-width: 0; font-size: 10px; color: var(--text-dim); line-height: 1.45; margin: 0; }
+.chanwin-readonly { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.chanwin-readonly > span { flex: 1; }
+.chan-btn-primary.jobs-btn { color: var(--accent); border-color: var(--accent); }
+
+/* ── the approval card (inline + Outbox) ── */
+.chan-prop.jobs-card { cursor: default; padding: 7px 10px; margin-bottom: 0; display: flex; flex-direction: column; gap: 5px; background: var(--bg-window); border-radius: var(--radius-sm); }
+.chan-prop .jobs-card-l1 { gap: 6px; font-size: 10px; color: var(--text-dim); }
+.chan-prop-state { font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0; padding: 0; background: none; border-radius: 0; flex-shrink: 0; }
+.chan-prop-state-awaiting { color: var(--attn-text); }
+.chan-prop-state-sent { color: var(--ok-text); }
+.chan-prop-state-failed { color: var(--bad-text); }
+.chan-prop-state-unknown { color: var(--warn-text); }
+.chan-prop-state-rejected { color: var(--text-secondary); }
+.chan-prop .jobs-state { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-prop-when { flex-shrink: 0; margin: 0; }
+.chan-prop-text { font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chan-prop .jobs-card-l2 { margin-top: 0; }
+.chan-prop-idwarn { font-size: 10px; color: var(--warn-text); }
+.chan-prop-reason { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.chan-prop-reason.chan-warn { color: var(--warn-text); }
+.chan-prop-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+.chan-prop-link { color: var(--accent); text-decoration: none; }
+
+/* ── the Outbox window ── */
+.jobs-toolbar { background: var(--bg-panel, var(--bg-titlebar)); flex-shrink: 0; }
+.jobs-body.chan-outbox-list { flex: 1; min-height: 0; }
+.chan-seg-on { color: var(--accent); border-color: var(--accent); }
+.jobs-body .jobs-sec-head:first-child { margin-top: 4px; }
+.jobs-body .chan-prop { margin-bottom: 6px; }
+
+/* ── phone ── */
+@media (max-width: 480px) {
+  .chan-row.jobs-card { padding: 8px 10px; }
+  .chan-prop-actions .jobs-btn, .chanwin-composer-row .jobs-btn, .chanwin-readonly .mounts-btn { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+}

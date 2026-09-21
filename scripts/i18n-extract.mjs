@@ -10,8 +10,12 @@ const ROOT = new URL('..', import.meta.url).pathname;
 const keys = new Set();
 
 // ── JS: t('...') / tr('...') with escaped-quote support (tr = the alias used
-// where a local `t` variable would shadow the import, e.g. sidebar cluster) ──
-const tRe = /\bt(?:r)?\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
+// where a local `t` variable would shadow the import, e.g. sidebar cluster);
+// i18nKey('...') = a DECLARED human-visible string in a PURE data module
+// (src/integration-registry.js rows, src/channels/*.js OPTIONS) that the
+// client renders through t() — the marker is the identity, listed here so the
+// dictionary census sees keys that never appear inside a t() call (a3 i18n) ──
+const tRe = /\b(?:t|tr|i18nKey)\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
 // tc('ctx', 'str') — pgettext-style contextual keys, emitted as "ctx::str"
 const tcRe = /\btc\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'/g;
 const walk = (dir) => {

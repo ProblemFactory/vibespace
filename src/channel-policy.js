@@ -223,10 +223,77 @@ function withHonestyLine(text, line) {
  */
 function canReconcile(caps) {
   const c = caps || {};
-  if (!Array.isArray(c.sendAs) || !c.sendAs.length) return { ok: false, why: 'this adapter is read-only — nothing was ever sent through it' };
+  if (!Array.isArray(c.sendAs) || !c.sendAs.length) return { ok: false, code: 'read-only', why: 'this adapter is read-only — nothing was ever sent through it' };
   const mode = IDEMPOTENCY_MODES.includes(c.idempotency) ? c.idempotency : 'none';
-  if (mode === 'none') return { ok: false, why: 'this adapter declares no idempotency mechanism (idempotency: none) — the outcome can only be checked on the platform by a person' };
-  return { ok: true, why: null, mode };
+  if (mode === 'none') return { ok: false, code: 'no-idempotency', why: 'this adapter declares no idempotency mechanism (idempotency: none) — the outcome can only be checked on the platform by a person' };
+  return { ok: true, code: null, why: null, mode };
+}
+/** The reconcile refusal, in words (the client's `t`). */
+function reconcileWhyText(code, { t = defaultT } = {}) {
+  switch (String(code || '')) {
+    case 'read-only': return t('this channel is read-only — nothing was ever sent through it');
+    case 'no-idempotency': return t('this channel declares no way to look a message up — only a person can check the platform');
+    case 'no-adapter': return t('the channel no longer exists');
+    case '': return '';
+    default: return String(code);
+  }
+}
+
+/** The reason stored on a rejection the user gave no words for — a CONTRACT
+ *  string (agents read it off the receipt), never rendered as-is by the card. */
+const REJECTED_DEFAULT_REASON = 'rejected by the user';
+
+/** The `t()` this module falls back to when no translator is injected — the
+ *  English key with its params substituted (src/lib/i18n.js's own rule). */
+const defaultT = (s, params) => (params ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in params ? String(params[k]) : m)) : String(s));
+
+/**
+ * WHAT HAPPENED TO THIS PROPOSAL, AS STRUCTURE (a3 i18n, 2026-09-18). The
+ * engine composes `p.reason` as an ENGLISH CONTRACT STRING — the agent CLI
+ * prints it, the receipt carries it, the outbox suite pins it — and the card
+ * used to print that same string to a zh/ja reader. The card now reads THIS:
+ * `{kind, code, detail, userReason}` where `kind` names the sentence and
+ * `detail` is the only verbatim part (an adapter's or vendor's own words, or
+ * the user's typed rejection), rendered AFTER the client's sentence, never
+ * inside it. `null` when the state carries no outcome to speak of.
+ */
+function outcomeOf(p) {
+  const q = p || {};
+  const f = q.failure || {};
+  const d = f.detail || {};
+  switch (q.state) {
+    case 'unknown':
+      if (f.code === 'lost-at-boot') return { kind: 'boot', code: f.code, detail: null, userReason: null };
+      if (d.threw) return { kind: 'threw', code: f.code || null, detail: d.message ? String(d.message) : null, userReason: null };
+      return { kind: 'lost', code: f.code || null, detail: d.message ? String(d.message) : (f.code ? String(f.code) : null), userReason: null };
+    case 'failed':
+      if (f.code === 'send-not-available') return { kind: 'send-not-available', code: f.code, detail: f.why ? String(f.why) : null, userReason: null };
+      if (q.reconcile && q.reconcile.resolvedAt && q.reconcile.lastAnswer === 'not-landed') return { kind: 'not-landed', code: f.code || null, detail: null, userReason: null };
+      return { kind: 'refused', code: f.code || 'failed', detail: (d.reason || d.message) ? String(d.reason || d.message) : null, userReason: null };
+    case 'expired': return { kind: 'expired', code: null, detail: null, userReason: null };
+    case 'rejected': {
+      const r = q.reason && q.reason !== REJECTED_DEFAULT_REASON ? String(q.reason) : '';
+      return { kind: 'rejected', code: null, detail: null, userReason: r };
+    }
+    default: return null;
+  }
+}
+/** The outcome sentence. `errorCodeText` is channel-caps' composer, injected
+ *  so this module keeps importing nothing but channel-record. */
+function outcomeText(o, { t = defaultT, errorCodeText = (c) => String(c || '') } = {}) {
+  if (!o || !o.kind) return '';
+  const code = o.code ? errorCodeText(o.code, { t }) : '';
+  switch (o.kind) {
+    case 'boot': return t('Outcome unknown: the server stopped between the attempt and the answer.');
+    case 'threw': return o.detail ? t('Outcome unknown: the channel threw while sending ({detail}).', { detail: o.detail }) : t('Outcome unknown: the channel threw while sending.');
+    case 'lost': return o.detail ? t('Outcome unknown: the request left and the answer was lost ({detail}).', { detail: o.detail }) : t('Outcome unknown: the request left and the answer was lost.');
+    case 'send-not-available': return t('Not sent: sending was not available at approval time ({detail}).', { detail: o.detail || '' });
+    case 'not-landed': return t('Not sent: the platform holds no such message.');
+    case 'refused': return o.detail ? t('Refused by the channel ({code}): {detail}', { code: code || o.code || '', detail: o.detail }) : t('Refused by the channel ({code}).', { code: code || o.code || '' });
+    case 'expired': return t('Expired: not approved within 24 h.');
+    case 'rejected': return o.userReason ? t('Rejected: {reason}', { reason: o.userReason }) : t('Rejected.');
+    default: return '';
+  }
 }
 /**
  * AN ADAPTER'S RECONCILE ANSWER → THE ONE MOVE IT LICENSES.
@@ -312,4 +379,5 @@ module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
   canTransition, isTerminal, policyMode, hasLinks, offHoursVerdict, decideOutbound, validateProposal, expiryVerdict, receiptFor, renderReceiptBlock,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
+  REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
 };

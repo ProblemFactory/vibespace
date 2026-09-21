@@ -36,6 +36,14 @@ import { fetchJson, showToast, showConfirmDialog, copyText } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
+// the shared chrome primitives (a4): one SVG helper — the copy glyph, the info affordance
+import { icon } from './channel-chrome.js';
+// PURE, bundled (a3 i18n): the registry DECLARES keys (label / help / notes /
+// prerequisites / caveats) and `credentialWhyText` words a `whyCode`; the
+// card renders every declared string through t().
+import * as R from '../integration-registry.js';
+// a3 i18n: a route failure is worded by its CODE, never by the store's sentence.
+import { routeErrorText } from './channel-words.js';
 
 const ICON = svgIcon16('<circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/>');
 const FOCUS_MS = 2500;
@@ -58,7 +66,9 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
  *  failure and it must reach the user (§14.11.6). Returns null on failure. */
 async function call(url, init, what) {
   const r = await fetchJson(url, init);
-  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: (r && r.error) || t('server unreachable') }), { type: 'error' }); return null; }
+  // the CODE is worded (a3 i18n); a refused VALUE keeps the validator's own
+  // field + rule inside the sentence — that detail no dictionary could hold
+  if (!r || r.error) { showToast(t('{what} — {reason}', { what, reason: r ? routeErrorText(r) : t('server unreachable') }), { type: 'error' }); return null; }
   return r;
 }
 const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -69,19 +79,25 @@ const json = (method, body) => ({ method, headers: { 'Content-Type': 'applicatio
  *  `code`. The row's `why` says the fact; this line says the remedy. */
 function storeErrorText(err) {
   const reason = (err && err.message) || '';
+  // the CODE picks the sentence (a3 i18n); the OS/parse detail rides after it
+  // only where it is the fact (an unreadable file's errno)
   if (err && err.code === 'store-unreadable') return t('The integrations store could not be read: {reason}', { reason });
-  if (err && err.code === 'values-undecryptable') return t('The keys stored for this row cannot be decrypted with the current key file — {reason}', { reason });
+  if (err && err.code === 'values-undecryptable') return t('The keys stored for this row cannot be decrypted with the current key file — restore the key file this instance had when they were entered, or clear the keys and enter them again.');
   return t('The secret key file could not be read: {reason}', { reason });
 }
+/** A row's `why` in the device's words — the store's `whyCode` + params (a3 i18n). */
+const whyWords = (v, fallback) => R.credentialWhyText({ whyCode: v.whyCode, whyParams: v.whyParams, why: fallback === undefined ? v.why : fallback }, { t });
 
+const undecryptable = (v) => !!(v.storeError && v.storeError.code === 'values-undecryptable');
 function sourceChip(v) {
   const chip = el('span', 'integ-chip');
-  if (v.source === 'user') { chip.classList.add('integ-chip-user'); chip.textContent = t('Your own'); }
+  if (undecryptable(v)) { chip.classList.add('integ-chip-bad'); chip.textContent = t('Cannot be decrypted'); }
+  else if (v.source === 'user') { chip.classList.add('integ-chip-user'); chip.textContent = t('Your own'); }
   else if (v.source === 'cluster') {
     chip.classList.add('integ-chip-cluster');
     chip.textContent = v.clusterLabel ? t('Cluster default · {label}', { label: v.clusterLabel }) : t('Cluster default');
   } else { chip.classList.add('integ-chip-none'); chip.textContent = t('Not configured'); }
-  if (v.why) chip.title = v.why;
+  if (v.why) chip.title = whyWords(v);
   return chip;
 }
 
@@ -93,15 +109,19 @@ function renderCard(app, v, { refresh, focus }) {
   // ── 1. head: label + source chip + wired-in note ──
   const head = el('div', 'plugin-head');
   const name = el('div', 'plugin-name');
-  name.append(el('span', null, v.label), sourceChip(v));
+  // the registry DECLARES keys; the words are the device's (a brand label
+  // without an entry falls back to itself)
+  name.append(el('span', null, t(v.label)), sourceChip(v));
   head.appendChild(name);
-  if (v.wiredIn) head.appendChild(el('span', 'plugin-state', t('Not wired until {phase}', { phase: v.wiredIn })));
+  if (v.wiredIn) head.appendChild(el('span', 'plugin-state', t('Not wired until {phase}', { phase: t(v.wiredIn) })));
   card.appendChild(head);
-  if (v.why && v.source === 'none') card.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-why', v.why));
+  // the undecryptable row says ONE sentence under its state chip (a1 I3: the
+  // `why` said the same fact a second time above a chip that contradicted both)
+  if (v.why && v.source === 'none' && !undecryptable(v)) card.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-why', whyWords(v)));
   // A `cluster` answer carries a `why` only when the saved default was re-keyed
   // to the instance's only one — said on the card, not only in the chip's title.
-  if (v.why && v.source === 'cluster') card.appendChild(el('div', 'plugin-detail integ-why', v.why));
-  if (v.storeError) card.appendChild(el('div', 'plugin-detail plugin-cfg-warn', storeErrorText(v.storeError)));
+  if (v.why && v.source === 'cluster') card.appendChild(el('div', 'plugin-detail integ-why', whyWords(v)));
+  if (v.storeError) card.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-why', storeErrorText(v.storeError)));
 
   // ── 2. SETUP BLOCK, ABOVE THE FIELDS ──
   if (v.setup) {
@@ -111,21 +131,23 @@ function renderCard(app, v, { refresh, focus }) {
       const row = el('div', 'integ-cb-row');
       row.appendChild(el('span', 'plugin-cfg-label', t('Callback URL')));
       const code = el('code', 'integ-cb-url', v.setup.callbackUrl);
-      const copy = el('button', 'mounts-btn integ-copy', t('Copy'));
+      const copy = el('button', 'mounts-btn integ-copy');
+      const copyLabel = el('span', null, t('Copy'));
+      copy.append(icon('copy', 11), copyLabel);
       copy.title = t('Copy the callback URL');
       copy.onclick = async () => {
         await copyText(v.setup.callbackUrl);
-        copy.textContent = t('Copied'); copy.dataset.copied = '1';
+        copyLabel.textContent = t('Copied'); copy.dataset.copied = '1';
         showToast(t('Copied: {text}', { text: v.setup.callbackUrl }));
-        setTimeout(() => { copy.textContent = t('Copy'); delete copy.dataset.copied; }, 1500);
+        setTimeout(() => { copyLabel.textContent = t('Copy'); delete copy.dataset.copied; }, 1500);
       };
       row.append(code, copy);
       setup.appendChild(row);
-      if (v.setup.callbackNote) setup.appendChild(el('div', 'plugin-detail', v.setup.callbackNote));
+      if (v.setup.callbackNote) setup.appendChild(el('div', 'plugin-detail', t(v.setup.callbackNote)));
     }
     if (v.setup.prerequisites && v.setup.prerequisites.length) {
       const ul = el('ul', 'integ-prereq');
-      for (const p of v.setup.prerequisites) ul.appendChild(el('li', null, p));
+      for (const p of v.setup.prerequisites) ul.appendChild(el('li', null, t(p)));
       setup.appendChild(ul);
     }
     card.appendChild(setup);
@@ -140,7 +162,7 @@ function renderCard(app, v, { refresh, focus }) {
     for (const o of v.clusterOptions || []) { const op = el('option', null, t('Cluster preset · {label}', { label: o.label })); op.value = o.key; sel.appendChild(op); }
     const own = el('option', null, t('Use my own key')); own.value = '__own__'; sel.appendChild(own);
     sel.value = v.source === 'cluster' && v.clusterKey ? v.clusterKey : '__own__';
-    if (!(v.clusterOptions || []).length) sel.title = v.clusterWhy || '';
+    if (!(v.clusterOptions || []).length) sel.title = v.clusterWhy ? R.credentialWhyText({ whyCode: v.clusterWhyCode, whyParams: v.clusterWhyParams, why: v.clusterWhy }, { t }) : '';
     sel.onchange = async () => {
       const key = sel.value === '__own__' ? null : sel.value;
       const r = await call(`/api/integrations/${encodeURIComponent(v.id)}`, json('PUT', { clusterKey: key }), t('Could not update'));
@@ -156,7 +178,7 @@ function renderCard(app, v, { refresh, focus }) {
       if (why) wrap.appendChild(el('span', 'plugin-cfg-hint', why));
       return { wrap, r };
     };
-    const cluster = mk('cluster', t('Use cluster default'), v.source === 'cluster', !v.clusterAvailable, v.clusterAvailable ? null : (v.clusterWhy || t('no cluster default on this instance')));
+    const cluster = mk('cluster', t('Use cluster default'), v.source === 'cluster', !v.clusterAvailable, v.clusterAvailable ? null : (v.clusterWhy ? R.credentialWhyText({ whyCode: v.clusterWhyCode, whyParams: v.clusterWhyParams, why: v.clusterWhy }, { t }) : t('no cluster default on this instance')));
     const own = mk('own', t('Use my own key'), v.source !== 'cluster', false, null);
     cluster.r.onchange = async () => {
       if (!cluster.r.checked) return;
@@ -178,8 +200,20 @@ function renderCard(app, v, { refresh, focus }) {
     for (const f of v.fields) {
       const row = el('div', 'plugin-cfg-row integ-field');
       row.dataset.field = f.key;
-      const lbl = el('span', 'plugin-cfg-label', f.label);
+      const lbl = el('span', 'plugin-cfg-label integ-field-label', t(f.label));   // a declared KEY, worded here
       row.appendChild(lbl);
+      let helpLine = null;
+      if (f.help) {
+        // the help is an AFFORDANCE, not a paragraph under every field (a1 I4):
+        // the tooltip says it on hover, a click/tap shows the line for touch
+        const info = el('button', 'icon-btn integ-info');
+        info.type = 'button';
+        info.title = t(f.help);
+        info.setAttribute('aria-label', t('Help'));
+        info.appendChild(icon('info', 12));
+        info.onclick = (ev) => { ev.preventDefault(); if (helpLine) helpLine.classList.toggle('integ-help-open'); };
+        lbl.appendChild(info);
+      }
       const isSet = !!(v.set && v.set[f.key]);
       const missing = (v.missing || []).includes(f.key);
       const editor = () => {
@@ -216,7 +250,8 @@ function renderCard(app, v, { refresh, focus }) {
         if (staticEl) staticEl.remove();
         staticEl = el('span', 'integ-field-value');
         if (f.secret) {
-          const m = el('code', 'integ-mask', isSet ? (v.masked && v.masked[f.key]) || '••••' : t('Not set'));
+          // the MASK is monospace (it is a value); an unset secret is a plain "Not set" like any other field (round 2, the light Gmail card)
+          const m = isSet ? el('code', 'integ-mask', (v.masked && v.masked[f.key]) || '••••') : el('span', 'integ-plain', t('Not set'));
           const btn = el('button', 'mounts-btn integ-replace', isSet ? t('Replace') : t('Set'));
           btn.onclick = () => { staticEl.remove(); staticEl = null; editor(); };
           staticEl.append(m, btn);
@@ -230,27 +265,30 @@ function renderCard(app, v, { refresh, focus }) {
         row.appendChild(staticEl);
       };
       staticView();
-      if (f.help) row.appendChild(el('div', 'plugin-cfg-hint integ-help', f.help));
+      if (f.help) { helpLine = el('div', 'plugin-cfg-hint integ-help', t(f.help)); row.appendChild(helpLine); }
       fields.appendChild(row);
     }
+    // the trim rule ONCE per card (it used to ride on every field's help — a1 §2.8 I4)
+    fields.appendChild(el('div', 'plugin-cfg-hint integ-help integ-trim-note', t(R.TRIM_NOTE)));
   }
   drawFields();
 
   // ── 5. Test + verdict + caveat (ALWAYS together) ──
   const actions = el('div', 'plugin-actions integ-actions');
   const testBtn = el('button', 'mounts-btn integ-test', (TEST_LABEL[v.testKind] || TEST_LABEL['shape-only'])());
-  testBtn.title = v.testDescribe || '';
+  testBtn.title = v.testDescribe ? t(v.testDescribe) : '';
   const result = el('div', 'integ-test-result');
   const drawVerdict = (ok, testedAt, error) => {
     result.textContent = '';
     if (ok === null || ok === undefined) { result.appendChild(el('span', 'plugin-detail', t('Not tested yet'))); }
     else {
-      const verdict = el('span', 'integ-verdict ' + (ok ? 'integ-ok' : 'integ-bad'), ok ? t('Passed') : t('Failed'));
-      result.appendChild(verdict);
-      if (testedAt) result.appendChild(el('span', 'plugin-detail', ' · ' + ago(Date.now() - testedAt)));
-      if (!ok && error) result.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-test-error', error));
+      const line = el('div', 'integ-verdict-line');
+      line.appendChild(el('span', 'integ-verdict ' + (ok ? 'integ-ok' : 'integ-bad'), ok ? t('Passed') : t('Failed')));
+      if (testedAt) line.appendChild(el('span', 'plugin-detail', '· ' + ago(Date.now() - testedAt)));
+      if (!ok && error) line.appendChild(el('span', 'plugin-detail plugin-cfg-warn integ-test-error', '— ' + error));
+      result.appendChild(line);
     }
-    if (v.testCaveat) result.appendChild(el('div', 'plugin-detail integ-caveat', v.testCaveat));
+    if (v.testCaveat) result.appendChild(el('div', 'plugin-detail integ-caveat', t(v.testCaveat)));
   };
   drawVerdict(v.lastOk, v.testedAt, v.lastError);
   testBtn.onclick = async () => {
@@ -260,8 +298,9 @@ function renderCard(app, v, { refresh, focus }) {
       if (!r || (r.error && r.ok !== false && !('testedAt' in r))) {
         // a REFUSAL (not-wired / no runner / 503): it is a line on the card, not a verdict
         result.textContent = '';
-        result.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-test-error', t('Test could not run — {reason}', { reason: (r && r.error) || t('server unreachable') })));
-        if (v.testCaveat) result.appendChild(el('div', 'plugin-detail integ-caveat', v.testCaveat));
+        // OUR sentence (worded by code) under its own class: `.integ-test-error` is the runner's / vendor's verbatim, which the i18n census excuses by path
+        result.appendChild(el('div', 'plugin-detail plugin-cfg-warn integ-test-refusal', t('Test could not run — {reason}', { reason: r ? routeErrorText(r) : t('server unreachable') })));
+        if (v.testCaveat) result.appendChild(el('div', 'plugin-detail integ-caveat', t(v.testCaveat)));
         return;
       }
       drawVerdict(!!r.ok, r.testedAt || Date.now(), r.error || null);
@@ -280,13 +319,21 @@ function renderCard(app, v, { refresh, focus }) {
   }
   card.append(actions, result);
 
-  // ── 6. where this key is used ──
+  // ── 6. where this key is used — a human phrase the row DECLARES (`usedBy`),
+  //      never a source path (a1 §2.8 I1); the docs line only when it is a
+  //      link a user can open (a repo path is a developer's, not a user's) ──
   const used = el('div', 'plugin-detail integ-used');
-  used.textContent = v.consumers && v.consumers.length
-    ? t('Used by: {files}', { files: v.consumers.join(', ') })
-    : t('Not wired until {phase} — this card only stores the values.', { phase: v.wiredIn || '?' });
+  used.textContent = v.usedBy
+    ? t(v.usedBy)
+    : (v.consumers && v.consumers.length ? t('Used by this instance') : t('Not wired until {phase} — this card only stores the values.', { phase: v.wiredIn ? t(v.wiredIn) : '?' }));
   card.appendChild(used);
-  if (v.docs) { const d = el('div', 'plugin-detail'); d.textContent = t('Docs: {ref}', { ref: v.docs }); card.appendChild(d); }
+  if (v.docs && /^https?:\/\//.test(v.docs)) {
+    const d = el('div', 'plugin-detail');
+    const a = el('a', 'integ-docs', t('Vendor documentation'));
+    a.href = v.docs; a.target = '_blank'; a.rel = 'noopener';
+    d.appendChild(a);
+    card.appendChild(d);
+  }
 
   if (focus === v.id) {
     card.classList.add('integ-focus');
@@ -365,7 +412,7 @@ export function openIntegrationsWindow(app, opts = {}) {
 }
 
 registerWindowType({
-  type: 'integrations', label: 'Integrations & keys', singleton: true, icon: ICON,
+  type: 'integrations', label: t('Integrations & keys'), singleton: true, icon: ICON,
   action: 'openIntegrations',
   replay: (app, spec, { syncId } = {}) => app.openIntegration(spec && spec.focus, { syncId }),
 });

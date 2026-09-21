@@ -1,4 +1,5 @@
-// THE OUTBOX (docs/design-communication-panel.zh.md §9.2, §9.5, §10.1; P3).
+// THE OUTBOX (docs/design-communication-panel.zh.md §9.2, §9.5, §10.1; P3;
+// the a4 UI design docs/design-communication-panel-ui.md §4.2 / §4.3).
 //
 // ONE RECORD, TWO PLACES: the approval card below is rendered INLINE in the
 // conversation window (context lives there) and in this Outbox window (the
@@ -7,11 +8,24 @@
 // are composed here in the device's language (the identity warning through
 // `chanCaps.identityWarningText`, exactly as the composer does).
 //
+// THE CARD IS FIVE LINES (a1 C1): head (state pill · drafter · age) → the
+// text → ONE meta line (why · needs approval · will send as · expires ·
+// the sender line) → the identity warning ONCE, only when it warns → actions
+// right-aligned with ONE primary (Approve). The outcome sentence and the
+// reconcile / receipt facts are a quiet footer. State colour = meaning (C2):
+// awaiting accent, sent green, failed red, UNKNOWN AMBER (the one state §9.4
+// says is not a failure), rejected neutral.
+//
 // THE IDENTITY ROW (§9.5): "Will send as <user>" on every card; when the
 // adapter's `identityMarking` is not `none` a WARNING beside it, showing the
 // adapter's own verbatim sentence (or saying the attribution is unverified —
 // `unknown` warns as loudly as `marked`). Honesty is owed to the one pressing
 // Approve, never pushed into the recipient's message.
+//
+// THE OUTBOX WINDOW is a toolbar (summary + an Awaiting | All segment) over
+// the cards: Awaiting = the queue; All = grouped by STATE with a dot per head
+// (awaiting · unknown · failed · sent · rejected) so an `unknown` outcome is
+// never buried under sent ones (the element borrowed from direction B).
 //
 // Every vendor / agent string is textContent (fence 5): a proposal's text is
 // an agent's, the reason is an adapter's, the why is a label — none of it
@@ -20,17 +34,26 @@ import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem } from './contributions.js';
+import { icon, el, btn } from './channel-chrome.js';
 import * as chanCaps from '../channel-caps.js';
+// PURE, bundled (a3 i18n): the proposal's OUTCOME as structure → words here.
+import * as P from '../channel-policy.js';
+// a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
+import { routeErrorText } from './channel-words.js';
 
 const ICON = svgIcon16('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>');
 const JSON_HDR = { 'Content-Type': 'application/json' };
+/** The Outbox's All view: the order states are grouped in (attention first). */
+const STATE_ORDER = ['awaiting-approval', 'sending', 'unknown', 'failed', 'sent', 'rejected', 'expired', 'proposed'];
+const STATE_TONE = { 'awaiting-approval': 'attn', sending: 'attn', unknown: 'warn', failed: 'bad', sent: 'ok', rejected: 'idle', expired: 'idle', proposed: 'idle' };
+/** Decided-and-closed cards the inline section keeps (the newest N). */
+const INLINE_RECENT = 2;
 
 const stamp = (ms) => {
   if (!ms) return '';
   const d = new Date(Number(ms));
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
-function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
 /** The state chip's words. */
 export function stateLabel(state) {
@@ -66,7 +89,7 @@ function drafterLabel(p) {
 
 async function post(pathname, body) {
   const r = await fetchJson(pathname, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
-  if (!r || r.error) { showToast((r && r.error) || t('Request failed'), { type: 'error' }); return null; }
+  if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
   return r;
 }
 
@@ -79,13 +102,11 @@ async function post(pathname, body) {
 export function renderProposalCard(app, p, { compact = false } = {}) {
   const card = el('div', `chan-prop chan-prop-${p.state}`);
   card.dataset.proposal = p.id;
+  // ── head: state pill · drafter · age ──
   const head = el('div', 'chan-prop-head');
-  const st = el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state));
-  head.appendChild(st);
-  const who = el('span', 'chan-prop-who', drafterLabel(p));
-  head.appendChild(who);
-  const when = el('span', 'chan-prop-when', stamp(p.updatedAt || p.at));
-  head.appendChild(when);
+  head.appendChild(el('span', `chan-prop-state chan-prop-state-${p.state}`, stateLabel(p.state)));
+  head.appendChild(el('span', 'chan-prop-who', drafterLabel(p)));
+  head.appendChild(el('span', 'chan-prop-when', stamp(p.updatedAt || p.at)));
   card.appendChild(head);
   if (!compact) {
     const where = el('div', 'chan-prop-where');
@@ -95,13 +116,7 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     where.appendChild(link);
     card.appendChild(where);
   }
-  // WHY — a structured reference the panel can link, never an agent's sentence.
-  if (p.why && (p.why.label || p.why.id)) {
-    const why = el('div', 'chan-prop-why', t('Why: {ref}', { ref: p.why.label || p.why.id }));
-    if (p.why.kind === 'record' && p.why.id) why.title = t('message {id}', { id: p.why.id });
-    card.appendChild(why);
-  }
-  // THE BODY — an agent's text, plain.
+  // ── THE BODY — an agent's text, plain (or the editor while editing) ──
   const body = el('div', 'chan-prop-text', p.text || '');
   card.appendChild(body);
   if (p.edited && p.originalText && p.originalText !== p.text) {
@@ -110,86 +125,105 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     orig.appendChild(el('div', 'chan-prop-text chan-prop-text-orig', p.originalText));
     card.appendChild(orig);
   }
+  // ── ONE meta line: why · the policy verdict · the identity · expiry · the sender line ──
+  const meta = el('div', 'chan-prop-meta');
+  // WHY — a structured reference the panel can link, never an agent's sentence.
+  if (p.why && (p.why.label || p.why.id)) {
+    const why = el('span', 'chan-prop-why', t('Why: {ref}', { ref: p.why.label || p.why.id }));
+    if (p.why.kind === 'record' && p.why.id) why.title = t('message {id}', { id: p.why.id });
+    meta.appendChild(why);
+  }
   // THE POLICY VERDICT — why it waits, or that it went directly.
   if (p.policy) {
-    const pol = el('div', 'chan-prop-policy');
+    const pol = el('span', 'chan-prop-policy');
     if (p.policy.mode === 'direct') pol.textContent = t('Sent directly: the channel policy is "direct" and no guard applied.');
     else pol.textContent = t('Needs approval: {why}', { why: (p.policy.reasons || []).map(reasonLabel).join('; ') || t('review') });
     if (p.policy.detail && p.policy.detail.unknownPolicy) pol.textContent += ' ' + t('(the stored policy value was not understood — review, fail closed)');
     if (p.policy.detail && p.policy.detail.guardsUnparseable) pol.textContent += ' ' + t('(a guard setting could not be read: {why} — review, fail closed)', { why: p.policy.detail.guardsUnparseable });
-    card.appendChild(pol);
+    meta.appendChild(pol);
   }
-  // THE IDENTITY ROW (§9.5): calm when `none`, a warning otherwise.
-  const idRow = el('div', 'chan-prop-identity');
+  // THE IDENTITY ROW (§9.5): the fact on the meta line; the warning below, once.
   const asWho = p.sendAs === 'bot' ? t('the bot') : t('you');
-  idRow.appendChild(el('span', '', t('Will send as {who}', { who: asWho })));
-  const warnText = p.identityWarning ? chanCaps.identityWarningText(p.identityWarning, { t }) : null;
-  if (warnText) idRow.appendChild(el('span', 'chan-prop-idwarn', warnText));
-  card.appendChild(idRow);
+  meta.appendChild(el('span', 'chan-prop-identity', t('Will send as {who}', { who: asWho })));
+  if (p.state === 'awaiting-approval' && p.ttlAt) meta.appendChild(el('span', 'chan-prop-ttl', t('Expires unapproved at {when}', { when: stamp(p.ttlAt) })));
   // THE SENDER HONESTY LINE (§9.5, P4): said BEFORE the approval when the
   // channel's switch is on, and recorded after the send. The line itself is
   // the adapter-neutral sentence the engine will append, shown verbatim.
   if (p.honestyLine) {
-    const hl = el('div', 'chan-prop-honesty');
-    hl.appendChild(el('span', '', p.state === 'sent' ? t('A sender line was appended:') : t('A sender line will be appended (this channel\'s option is on):')));
+    const hl = el('span', 'chan-prop-honesty');
+    hl.appendChild(el('span', '', (p.state === 'sent' ? t('A sender line was appended:') : t('A sender line will be appended (this channel\'s option is on):')) + ' '));
     hl.appendChild(el('code', 'chan-prop-honesty-line', p.honestyLine));
-    card.appendChild(hl);
+    meta.appendChild(hl);
   }
-  // OUTCOME — the reason verbatim (an adapter's or the user's), the receipt.
-  if (p.reason) card.appendChild(el('div', `chan-prop-reason${p.state === 'unknown' ? ' chan-warn' : ''}`, p.reason));
+  card.appendChild(meta);
+  // honesty is owed to the one pressing Approve (§9.5): the warning is drawn on the card that
+  // still HAS an Approve — a decided card keeps its identity fact on the meta line and stops
+  // repeating the warning (a1 C1: five cards, five amber walls; a2 §3: ONE warning in the Outbox)
+  const deciding = p.state === 'awaiting-approval' || p.state === 'sending';
+  const warnText = deciding && p.identityWarning ? chanCaps.identityWarningText(p.identityWarning, { t }) : null;
+  if (warnText) {
+    const w = el('div', 'chan-prop-idwarn');
+    w.appendChild(icon('alert', 11));
+    w.appendChild(el('span', '', warnText));
+    card.appendChild(w);
+  }
+  // ── OUTCOME — the server's STRUCTURE worded here (a3 i18n): the sentence is
+  // the device's, the adapter's / user's verbatim rides inside it, never as a
+  // second English line. A digest from an older server (no `outcome`) still
+  // shows its contract string rather than nothing. ──
+  const outcome = p.outcome || P.outcomeOf(p);
+  const outcomeLine = outcome ? P.outcomeText(outcome, { t, errorCodeText: chanCaps.errorCodeText }) : (p.reason || '');
+  if (outcomeLine) card.appendChild(el('div', `chan-prop-reason${p.state === 'unknown' ? ' chan-warn' : ''}`, outcomeLine));
   if (p.state === 'unknown') card.appendChild(el('div', 'chan-prop-reason chan-warn', t('This send is never retried automatically. Check the conversation on the platform before proposing it again.')));
+  // ── the quiet footer: reconcile facts, the receipt ──
   // RECONCILE (§9.4, P4): what the last check answered, and the control —
   // offered only when the adapter's declared idempotency can answer at all.
   if (p.reconcile && p.reconcile.n) {
-    const rc = el('div', 'chan-prop-reconcile');
     const ans = p.reconcile.lastAnswer === 'landed' ? t('it landed') : p.reconcile.lastAnswer === 'not-landed' ? t('it did not land') : p.reconcile.lastAnswer === 'not-available' ? t('this channel cannot be checked by the machine') : t('still unknown');
-    rc.textContent = t('Checked {n}× — last answer: {answer} ({when})', { n: p.reconcile.n, answer: ans, when: stamp(p.reconcile.lastAt) }) + (p.reconcile.lastWhy ? ` — ${p.reconcile.lastWhy}` : '');
-    card.appendChild(rc);
+    card.appendChild(el('div', 'chan-prop-foot chan-prop-reconcile', t('Checked {n}× — last answer: {answer} ({when})', { n: p.reconcile.n, answer: ans, when: stamp(p.reconcile.lastAt) }) + (p.reconcile.lastWhy ? ` — ${p.reconcile.lastWhy}` : '')));
   }
-  if (p.state === 'unknown') {
-    if (p.canReconcile) {
-      const act = el('div', 'chan-prop-actions');
-      const chk = el('button', 'chan-btn chan-btn-primary', t('Check outcome'));
-      chk.type = 'button';
-      chk.dataset.reconcile = '1';
-      chk.onclick = async () => {
-        chk.disabled = true;
-        const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reconcile`, {});
-        if (!r) { chk.disabled = false; return; }
-        showToast(r.resolved ? (r.state === 'sent' ? t('It landed — marked as sent') : t('It never landed — marked as failed')) : t('Still unknown: {why}', { why: r.reason || t('no evidence either way') }), { type: r.resolved ? 'info' : 'warn' });
-      };
-      act.appendChild(chk);
-      card.appendChild(act);
-    } else if (p.reconcileWhy) {
-      card.appendChild(el('div', 'chan-prop-reason', t('Cannot be checked by the machine: {why}', { why: p.reconcileWhy })));
-    }
+  if (p.state === 'unknown' && !p.canReconcile && (p.reconcileWhy || p.reconcileWhyCode)) {
+    // the refusal is a CODE (worded); the sentence beside it is the fallback
+    card.appendChild(el('div', 'chan-prop-foot chan-prop-reason', t('Cannot be checked by the machine: {why}', { why: P.reconcileWhyText(p.reconcileWhyCode, { t }) || p.reconcileWhy })));
   }
   if (p.receipt && p.draftedBy && p.draftedBy.kind === 'agent') {
     const d = p.receiptDelivery;
-    const rc = el('div', 'chan-prop-receipt', d
-      ? (d.ok ? t('Receipt handed to the agent ({lane})', { lane: d.lane }) : d.stashed ? t('Receipt stored for the agent\'s next turn') : t('Receipt not delivered: {why}', { why: d.why || '' }))
-      : t('Receipt recorded'));
-    card.appendChild(rc);
+    card.appendChild(el('div', 'chan-prop-foot chan-prop-receipt', d
+      ? (d.ok ? t('Receipt handed to the agent ({lane})', { lane: chanCaps.deliveryLaneText(d.lane, { t }) }) : d.stashed ? t('Receipt stored for the agent\'s next turn') : t('Receipt not delivered: {why}', { why: chanCaps.wakeRefusalText(d.refused, { t }) || d.why || '' }))
+      : t('Receipt recorded')));
   }
-  if (p.state === 'awaiting-approval' && p.ttlAt) card.appendChild(el('div', 'chan-prop-ttl', t('Expires unapproved at {when}', { when: stamp(p.ttlAt) })));
-
+  // ── actions: right-aligned, ONE primary ──
+  if (p.state === 'unknown' && p.canReconcile) {
+    const act = el('div', 'chan-prop-actions');
+    const chk = btn(t('Check outcome'), null);
+    chk.dataset.reconcile = '1';
+    chk.onclick = async () => {
+      chk.disabled = true;
+      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reconcile`, {});
+      if (!r) { chk.disabled = false; return; }
+      showToast(r.resolved ? (r.state === 'sent' ? t('It landed — marked as sent') : t('It never landed — marked as failed')) : t('Still unknown: {why}', { why: r.reason || t('no evidence either way') }), { type: r.resolved ? 'info' : 'warn' });
+    };
+    act.appendChild(chk);
+    card.appendChild(act);
+  }
   // DECISIONS — only while awaiting.
   if (p.state === 'awaiting-approval') {
     const act = el('div', 'chan-prop-actions');
     let editor = null;
-    const approve = el('button', 'chan-btn chan-btn-primary', t('Approve'));
-    approve.type = 'button';
+    const reject = btn(t('Reject…'), null);
+    reject.dataset.reject = '1';
+    const edit = btn(t('Edit…'), null);
+    edit.dataset.edit = '1';
+    const approve = btn(t('Approve'), null, 'mounts-btn-primary');
     approve.dataset.approve = '1';
-    const edit = el('button', 'chan-btn', t('Edit…'));
-    edit.type = 'button';
-    const reject = el('button', 'chan-btn', t('Reject…'));
-    reject.type = 'button';
     approve.onclick = async () => {
       approve.disabled = true; edit.disabled = true; reject.disabled = true;
       const text = editor ? editor.value : null;
       const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, text !== null && text !== p.text ? { text } : {});
       if (!r) { approve.disabled = false; edit.disabled = false; reject.disabled = false; return; }
-      showToast(r.proposal && r.proposal.state === 'sent' ? t('Sent') : t('Not sent: {why}', { why: (r.proposal && r.proposal.reason) || r.error || '' }), { type: r.proposal && r.proposal.state === 'sent' ? 'info' : 'error' });
+      const sent = !!(r.proposal && r.proposal.state === 'sent');
+      const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
+      showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
     };
     edit.onclick = () => {
       if (editor) return;
@@ -198,37 +232,51 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
       body.replaceWith(editor);
       approve.textContent = t('Approve edited');
       edit.disabled = true;
+      editor.focus();
     };
     reject.onclick = () => {
-      if (act.querySelector('.chan-prop-rejectbox')) return;
+      if (card.querySelector('.chan-prop-rejectbox')) return;
       const box = el('div', 'chan-prop-rejectbox');
       const inp = el('input', 'chan-opt-input');
       inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
-      const go = el('button', 'chan-btn', t('Reject'));
-      go.type = 'button';
+      const go = btn(t('Reject'), null, 'mounts-btn-primary');
       go.onclick = async () => {
         go.disabled = true;
         const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value });
         if (!r) go.disabled = false; else showToast(t('Rejected'));
       };
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
       box.append(inp, go);
-      act.appendChild(box);
+      act.after(box);
       inp.focus();
     };
-    act.append(approve, edit, reject);
+    act.append(reject, edit, approve);
     card.appendChild(act);
   }
   return card;
 }
 
-/** The section a conversation window draws above its composer: this
- *  conversation's proposals, awaiting first. Empty ⇒ nothing (no element). */
+/** The section a conversation window draws above its composer (design C4):
+ *  the cards that need the user — awaiting first, then an unknown or failed
+ *  outcome — plus the newest two decided ones (the outcome of a click stays
+ *  in view), with a link to the rest in the Outbox. Empty ⇒ nothing. */
 export function renderInlineProposals(app, proposals) {
-  const list = (proposals || []).slice().sort((a, b) => (a.state === 'awaiting-approval' ? -1 : 0) - (b.state === 'awaiting-approval' ? -1 : 0) || (b.at || 0) - (a.at || 0)).slice(0, 8);
-  if (!list.length) return null;
+  const all = (proposals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
+  if (!all.length) return null;
+  const awaiting = all.filter((p) => p.state === 'awaiting-approval' || p.state === 'sending');
+  const attention = all.filter((p) => p.state === 'unknown' || p.state === 'failed');
+  const recent = all.filter((p) => !awaiting.includes(p) && !attention.includes(p)).slice(0, INLINE_RECENT);
+  const shown = [...awaiting, ...attention, ...recent];
+  const hidden = all.length - shown.length;
   const sec = el('div', 'chanwin-outbox');
-  sec.appendChild(el('div', 'chanwin-outbox-head', t('Outbox — proposals for this conversation')));
-  for (const p of list) sec.appendChild(renderProposalCard(app, p, { compact: true }));
+  const head = el('div', 'chanwin-outbox-head');
+  head.appendChild(el('span', '', awaiting.length ? `${t('Awaiting your approval')} · ${awaiting.length}` : t('Proposals for this conversation')));
+  const link = el('a', 'chan-prop-link', hidden > 0 ? t('{n} more in the Outbox', { n: hidden }) : t('Open the Outbox'));
+  link.href = '#';
+  link.onclick = (ev) => { ev.preventDefault(); app.openChannelOutbox(); };
+  head.appendChild(link);
+  sec.appendChild(head);
+  for (const p of shown) sec.appendChild(renderProposalCard(app, p, { compact: true }));
   return sec;
 }
 
@@ -238,22 +286,52 @@ export function openChannelOutbox(app, opts = {}) {
   const winInfo = app.wm.createWindow({ title: t('Outbox'), type: 'channel-outbox', syncId: opts.syncId, openSpec: { action: 'openChannelOutbox' }, width: 560, height: 600 });
   const root = el('div', 'chanwin chan-outbox');
   winInfo.content.appendChild(root);
-  const bar = el('div', 'chanwin-bar');
-  const summary = el('span', 'chanwin-meta');
+  const bar = el('div', 'jobs-toolbar');
+  const summary = el('span', 'jobs-summary');
   bar.appendChild(summary);
+  // the Awaiting | All segment (a1 C5): Awaiting = the queue; All = grouped by state
+  const seg = el('div', 'chan-seg');
+  const segAwait = el('button', 'jobs-btn', t('Awaiting'));
+  segAwait.type = 'button'; segAwait.dataset.view = 'awaiting';
+  const segAll = el('button', 'jobs-btn', t('All'));
+  segAll.type = 'button'; segAll.dataset.view = 'all';
+  seg.append(segAwait, segAll);
+  bar.appendChild(seg);
   const list = el('div', 'chanwin-list chan-outbox-list');
   root.append(bar, list);
+  /** `null` until the user picks — the store decides the first view. */
+  let view = null;
+  let last = null;
 
   function draw(ob) {
+    last = ob;
     list.textContent = '';
-    const ps = (ob && ob.proposals) || [];
+    const ps = ((ob && ob.proposals) || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
     const awaiting = ps.filter((p) => p.state === 'awaiting-approval');
-    summary.textContent = ps.length
-      ? t('{a} awaiting your approval · {n} proposals', { a: awaiting.length, n: ps.length })
-      : t('No proposals yet. Agents propose replies with vibespace-channels; you approve, edit or reject them here.');
-    const order = [...awaiting, ...ps.filter((p) => p.state !== 'awaiting-approval')];
-    for (const p of order) list.appendChild(renderProposalCard(app, p));
+    const v = view || (awaiting.length ? 'awaiting' : 'all');
+    segAwait.classList.toggle('chan-seg-on', v === 'awaiting');
+    segAll.classList.toggle('chan-seg-on', v === 'all');
+    summary.textContent = ps.length ? t('{a} awaiting your approval · {n} proposals', { a: awaiting.length, n: ps.length }) : t('No proposals yet');
+    if (!ps.length) { list.appendChild(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.'))); return; }
+    if (v === 'awaiting') {
+      if (!awaiting.length) list.appendChild(el('div', 'empty-hint', t('Nothing is waiting for your approval.')));
+      for (const p of awaiting) list.appendChild(renderProposalCard(app, p));
+      return;
+    }
+    const known = new Set(STATE_ORDER);
+    const groups = [...STATE_ORDER, ...ps.map((p) => p.state).filter((s) => !known.has(s))];
+    for (const st of [...new Set(groups)]) {
+      const mine = ps.filter((p) => p.state === st);
+      if (!mine.length) continue;
+      const h = el('div', 'chan-outbox-sec');
+      h.appendChild(el('span', `chan-dot chan-dot-${STATE_TONE[st] || 'idle'}`));
+      h.appendChild(el('span', '', `${stateLabel(st)} · ${mine.length}`));
+      list.appendChild(h);
+      for (const p of mine) list.appendChild(renderProposalCard(app, p));
+    }
   }
+  segAwait.onclick = () => { view = 'awaiting'; draw(last); };
+  segAll.onclick = () => { view = 'all'; draw(last); };
   async function refresh() {
     const r = await fetchJson('/api/channels/outbox');
     if (!r || r.error) { summary.textContent = (r && r.error) || t('The outbox is not available.'); return; }
@@ -267,7 +345,7 @@ export function openChannelOutbox(app, opts = {}) {
 }
 
 registerWindowType({
-  type: 'channel-outbox', label: 'Outbox', icon: ICON, singleton: true,
+  type: 'channel-outbox', label: t('Outbox'), icon: ICON, singleton: true,
   action: 'openChannelOutbox',
   replay: (app, spec, { syncId } = {}) => app.openChannelOutbox({ syncId }),
 });

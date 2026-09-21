@@ -576,6 +576,7 @@ const ENV_ALLOW = new Map([
   ['src/integration-registry.js', 'DECLARES the names a row is served under (never reads them)'],
   ['scripts/test-integration-registry.mjs', 'this census + the store legs'],
   ['scripts/test-integrations-ui.mjs', 'the heavy leg injects the env into a worktree server'],
+  ['scripts/dbg-comm-surfaces.mjs', 'the comm-panel screenshot driver injects the cluster copy path into its worktree server (a1 of the polish; the i18n census drives it)'],
   ['scripts/test-agentd-session.mjs', 'the second-holder leg boots a real daemon under the name and asserts neither the daemon nor any child sees it'],
   ['deploy/helm/vibespace-user/values.yaml', 'the admin-facing values block'],
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the Secret into the env'],

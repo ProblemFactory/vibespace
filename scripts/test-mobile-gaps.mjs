@@ -458,7 +458,7 @@ try {
   };
   await openGear('System monitor…', '.rail-panel-system', 'system');
   await openGear('Ports…', '.rail-panel-ports', 'ports');
-  await openGear('Channels…', '.rail-panel-channels .chan-head', 'channels');
+  await openGear('Channels…', '.rail-panel-channels .chan-bar', 'channels');   // a4: the panel's bar (chan-head retired)
   await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`);
   check('opening System monitor… again focuses the existing window (singleton)', await evalJs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const before = app.wm.windows.size; app._showGlobalSettings(document.getElementById('mobile-nav-gear')); for (let i = 0; i < 20 && !document.querySelector('.global-settings-popover'); i++) await sleep(100); const rows = () => [...document.querySelectorAll('.global-settings-popover .gs-menu-item')]; let el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); const sub = el && el.closest('.gs-sub'); if (sub && !sub.classList.contains('open')) { const head = sub.previousElementSibling; if (head && head.classList.contains('gs-menu-item')) { head.click(); await sleep(150); } el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); } if (!el) return false; el.click(); await sleep(200); document.querySelector('.global-settings-popover')?.remove(); return app.wm.windows.size === before && app.wm.windows.get(app.wm.activeWindowId)?.type === 'system'; })()`));
   // the desktop's OWN next save must leave the phone's three windows alone

@@ -40,9 +40,16 @@ export function installUserTodos(app) {
   const displayName = (s) => {
     try { return app.sidebar?.getCustomName?.(s) || s.name; } catch { return s.name; }
   };
+  // THE WORDS OF AN ITEM (a3 i18n, 2026-09-21): a producer that filed its
+  // sentences as STRUCTURE (`i18n.text/detail/source` = `{key, params}`) is
+  // worded HERE with the device's t(); an item without it is its own words
+  // (an agent's ask). The English `text` stays the store's dedupe key.
+  const wordsOf = (i) => (i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
+  const detailOf = (i) => (i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map((l) => t(l.key, l.params || {})).join('\n') : (i && i.detail) || '');
   const nameFor = (key, items) => {
     const s = sessionFor(key);
-    return (s && displayName(s)) || items.find((i) => i.sessionName)?.sessionName
+    const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);
+    return (s && displayName(s)) || (spoken && t(spoken.i18n.source.key)) || items.find((i) => i.sessionName)?.sessionName
       || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
   };
   const jump = (key, item) => {
@@ -82,7 +89,7 @@ export function installUserTodos(app) {
   // can't be selected/copied) — markdown-rendered, selectable, with Copy.
   const openViewer = (i) => {
     const { body } = createModalShell({ id: 'ut-viewer', title: nameFor(i.sessionKey, [i]), bodyClass: 'ut-viewer-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
-    const raw = i.text + (i.detail ? '\n\n' + i.detail : '');
+    const raw = wordsOf(i) + (detailOf(i) ? '\n\n' + detailOf(i) : '');
     const md = document.createElement('div');
     md.className = 'ut-viewer-md';
     md.innerHTML = DOMPurify.sanitize(marked.parse(raw));
@@ -171,7 +178,7 @@ export function installUserTodos(app) {
     });
     // Detail rides behind a collapsed expander (open items ship up to 2000
     // chars of agent context — inline it would swamp the list).
-    const detailHtml = (i) => (i.detail ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(i.detail)}</div></details>` : '');
+    const detailHtml = (i) => (detailOf(i) ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${escHtml(detailOf(i))}</div></details>` : '');
     // STABLE ORDER WHILE OPEN (inc-mtw02kbq-kj96): the ✓ broadcast re-renders
     // this popup; if the resolved row left its group, the rows below slid up
     // under the pointer and a rapid second click hit the wrong item. While the
@@ -184,7 +191,7 @@ export function installUserTodos(app) {
       <div class="ut-item${notice ? ' ut-item-notice' : ''}" data-id="${escHtml(i.id)}">
         <span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>
         <div class="ut-body">
-          <div class="ut-text">${escHtml(i.text)}</div>
+          <div class="ut-text">${escHtml(wordsOf(i))}</div>
           ${detailHtml(i)}
           <div class="ut-meta">${notice ? `<span class="ut-sess">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ` : ''}${agoText(i.createdAt)}</div>
         </div>
@@ -197,7 +204,7 @@ export function installUserTodos(app) {
     const resolvedInPlaceHtml = (i) => `
       <div class="ut-item ut-item-resolved ut-item-inplace" data-id="${escHtml(i.id)}">
         <span class="ut-dot" data-urgency=""></span>
-        <div class="ut-body"><div class="ut-text">${escHtml(i.text)}</div>
+        <div class="ut-body"><div class="ut-text">${escHtml(wordsOf(i))}</div>
         ${detailHtml(i)}
         <div class="ut-meta">${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy && i.resolvedBy !== 'user' ? ` · ${escHtml(i.resolvedBy)}` : ''}</div></div>
         <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
@@ -208,7 +215,7 @@ export function installUserTodos(app) {
       ${recent.slice(0, 6).map((i) => `
         <div class="ut-item ut-item-resolved" data-id="${escHtml(i.id)}">
           <span class="ut-dot" data-urgency=""></span>
-          <div class="ut-body"><div class="ut-text">${escHtml(i.text)}</div>
+          <div class="ut-body"><div class="ut-text">${escHtml(wordsOf(i))}</div>
           ${detailHtml(i)}
           <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : (i.resolvedBy === 'system' ? ' · ' + t('automatically') : '')} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
           <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
@@ -314,7 +321,7 @@ export function installUserTodos(app) {
     if (prevKnown) {
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
-        const el = showToast(`${t('For you')} · ${nameFor(i.sessionKey, [i])}: ${i.text}`);
+        const el = showToast(`${t('For you')} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`);
         if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey, i); }
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
       }
