@@ -449,8 +449,16 @@ html, body {
 .usage-hour[data-h]::after { content: attr(data-h); position: absolute; bottom: -13px; left: 0; font-size: 8px; color: var(--text-dim); }
 .usage-footer { display: flex; flex-direction: column; gap: 3px; font-size: 9px; color: var(--text-dim); padding: 8px 2px 2px; border-top: 1px solid var(--border); margin-top: 6px; }
 .acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 0; }
-.acct-key-name { font-weight: 500; white-space: nowrap; }
-.acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The identity LINE (name · ident · the dim credits tag) never wraps: under a
+   wide UI font (the Actions runner resolves system-ui to DejaVu Sans, ~10 %
+   wider than Noto/Cantarell) the tail used to drop under the name and the
+   "· credits" tag left the identity line (2.369.125 r8). The name and the
+   ident ellipsize under pressure; the tag is its own flex item and never
+   shrinks or clips; .acct-key-extra still wraps to its own line below. */
+.acct-key-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1 1 100%; white-space: nowrap; }
+.acct-key-name { font-weight: 500; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 4 auto; }
+.acct-key-line > .acct-usage-credits { flex: none; }
+.acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .acct-usage-cell { display: flex; justify-content: flex-end; }
 .acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 /* Per-account usage readout (5h / 7d mini bars) inside an account row. */

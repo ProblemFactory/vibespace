@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, scratchHome } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,7 +35,14 @@ for (const f of ['src', 'public', 'server.js']) {
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+// An EMPTY home (no ~/.claude sessions): the Actions runner's condition. On a
+// developer box the real ~/.claude has sessions, the workbench renders its
+// zones and the heal at the RECENT zone ran — the runner's empty machine took
+// the early "no sessions" return first and the ghost keys were never healed
+// (red on every mirror run since 2.369.75; 2.369.125 r8 boots the suite the
+// way the runner sees it and heals the keys ahead of every early return).
+const fakeHome = scratchHome('ghost-host-home', fs);
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, HOME: fakeHome, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--disable-background-timer-throttling', `--user-data-dir=${scratch('ghost-host-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 

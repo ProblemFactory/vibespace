@@ -161,6 +161,10 @@ ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) {
 const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
 await cdp('Page.enable'); await cdp('Runtime.enable');
+// VS_ROSTER_FONT='DejaVu Sans' node scripts/test-roster-reset-eta.mjs — run EVERY section under a
+// named font (the mirror's resolved font differs from a developer box's).
+const FONT_ENV = process.env.VS_ROSTER_FONT || '';
+if (FONT_ENV) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body, .dialog { font-family: '${FONT_ENV}', sans-serif !important; }"; document.head.appendChild(st); });` });
 const openPage = async () => { await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(1200); await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */); await evalJs(`localStorage.setItem('vibespace.quotaRefreshAck', '1'); 1`); };
 const shot = async (name) => { if (!SHOTS) return; const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); };
 // the measured facts of every roster row under `root`
@@ -176,7 +180,7 @@ const ROWS = (root) => `(() => {
       miniVisible: vis(mini), miniText: mini ? mini.textContent : null, miniTitle: mini ? mini.title : null,
       next: (() => { const n = row.querySelector('.acct-usage-next'); return n ? { present: true, text: n.textContent.trim(), ms: n.dataset.nextMs ? Number(n.dataset.nextMs) : null, blocked: n.dataset.blocked === '1', title: n.title || '', visible: vis(n), minW: getComputedStyle(n).minWidth, right: R(n).right, hasIcon: !!n.querySelector('svg'), font: getComputedStyle(n).fontSize } : null; })(),
       soon: row.classList.contains('usage-acct-soon'), rowBg: getComputedStyle(row).backgroundColor,
-      credits: (() => { const c = row.querySelector('.acct-key-tail .acct-usage-credits'); return c ? { text: c.textContent.trim(), title: c.title, visible: vis(c), color: getComputedStyle(c).color, tailLine: Math.abs(R(c).top - R(row.querySelector('.acct-key-name')).top) < 4 } : null; })(),
+      credits: (() => { const c = row.querySelector('.acct-key-line > .acct-usage-credits'); return c ? { text: c.textContent.trim(), title: c.title, visible: vis(c), color: getComputedStyle(c).color, tailLine: Math.abs(R(c).top - R(row.querySelector('.acct-key-name')).top) < 4 } : null; })(),
       inUseChip: !!row.querySelector('.acct-usage-overage'), extraLine: !!row.querySelector('.acct-key-extra'), nameColor: getComputedStyle(row.querySelector('.acct-key-name')).color,
       resetLine: !!row.querySelector('.acct-reset-eta'), ageText: age ? age.textContent : null, ageMinW: age ? getComputedStyle(age).minWidth : null, ageLines: age ? age.children.length : null,
       donutTops: [...row.querySelectorAll('.acct-donut-col .acct-usage-donut')].map((d) => R(d).top - R(row).top), ageRight: age ? R(age).right : null, iconLeft: (() => { const i = row.querySelector('.acct-usage-next svg'); return i ? R(i).left : null; })(), nextW: (() => { const n = row.querySelector('.acct-usage-next'); return n ? R(n).width : null; })(),
@@ -243,7 +247,7 @@ try {
   // ── B-ad05 (2026-09-17): USAGE CREDITS ARE VISIBLE BEFORE THEY ARE SPENT ──
   console.log('§1c the dim "credits" tag on the member whose org bills pay-per-use past 100 %');
   check('Member D (overage present, not in use, vendor status not a rejection): the identity tail carries the dim "· credits" tag with the pay-per-use tooltip', !!d.credits && d.credits.visible && d.credits.text === '· credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
-  check('…it is INLINE on the identity line (same top as the name), adds no extra row line, and is not the in-use chip', !!d.credits && d.credits.tailLine === true && d.extraLine === false && d.inUseChip === false, d);
+  check(`…it is INLINE on the identity line (same top as the name), adds no extra row line, and is not the in-use chip (rowH ${d.rowH && d.rowH.toFixed(1)}, clusterRight ${d.clusterRight}, tailLine ${d.credits && d.credits.tailLine}, font ${await evalJs('getComputedStyle(document.body).fontFamily')})`, !!d.credits && d.credits.tailLine === true && d.extraLine === false && d.inUseChip === false, d);
   check('Member C (overage rejected / org_level_disabled) and every other row carry no credits tag', !c.credits && rows.filter((r) => r.credits).length === 1, rows.map((r) => [r.name, !!r.credits]));
   check('the tag is dim: its colour differs from the name colour (text-secondary, not the name text)', !!d.credits && d.credits.color !== d.nameColor, [d.credits && d.credits.color, d.nameColor]);
   const nextRights = usageRows.map((r) => r.next.right);
@@ -303,10 +307,20 @@ try {
   check('pill mode: the row highlight survives the swap (D and A still marked)', nd.soon && byId(narrow, A.id).soon && !ne.soon, narrow.map((r) => [r.name, r.soon]));
   await evalJs(`(() => { app.sidebar.el.style.width = ''; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
 
-  // ── 375×667: the mobile modal ──
-  console.log('§3 at 375×667 the roster (the Agents modal on a phone) keeps its layout and the same rule');
+  // ── 375×667: the mobile modal — under the DEFAULT font and under a WIDE one ──
+  // The Actions runner has no Noto/Cantarell: `system-ui, sans-serif` there
+  // resolves to DejaVu Sans, ~10 % wider, and the identity line + the 12.5ch
+  // label cell overflowed a 375 px phone (red on every mirror run since
+  // 2.369.75 while every developer box was green). The phone leg now runs
+  // twice; the wide pass SKIPs with a reason when DejaVu Sans is not installed.
+  const hasDejaVu = (() => { try { return /DejaVu Sans/.test(execSync('fc-list : family', { encoding: 'utf8' })); } catch { return false; } })();
+  for (const font of [null, 'DejaVu Sans']) {
+  if (font && !hasDejaVu) { console.log('  SKIP: the wide-font control needs DejaVu Sans on this machine (fc-list)'); continue; }
+  console.log(`§3 at 375×667 the roster (the Agents modal on a phone) keeps its layout and the same rule${font ? ' — WIDE FONT CONTROL: ' + font : ''}`);
+  const fontScript = font ? await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body, .dialog { font-family: '${font}', sans-serif !important; }"; document.head.appendChild(st); });` }) : null;
   await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
   await openPage();
+  if (font) check(`the wide-font control is in force (body font-family starts with "${font}")`, await evalJs(`getComputedStyle(document.body).fontFamily.startsWith('"${font}"') || getComputedStyle(document.body).fontFamily.startsWith("${font}")`), await evalJs('getComputedStyle(document.body).fontFamily'));
   check('the page came up in mobile mode', await evalJs('app.isMobile === true'));
   await evalJs(`(() => { app._showAgentsDialog(); return 1; })()`);
   const MODAL = `document.querySelector('#agents-dialog-overlay .agents-dialog-body .agents-machine-sec[data-host=""]')`;
@@ -314,8 +328,8 @@ try {
   check('the Agents modal renders the roster on the phone', !!mrows, mrows && mrows.map((r) => [r.name, r.cols.length]));
   if (mrows) {
     const ma = byId(mrows, A.id), mb = byId(mrows, B.id);
-    const geom = await evalJs(`(() => { const dlg = document.querySelector('#agents-dialog-overlay .dialog'); const body = dlg.querySelector('.dialog-body'); return { dlgW: dlg.getBoundingClientRect().width, vw: innerWidth, dlgScrollW: dlg.scrollWidth, dlgClientW: dlg.clientWidth, bodyScrollW: body.scrollWidth, bodyClientW: body.clientWidth, sec: (() => { const s = ${MODAL}; return s ? { scrollW: s.scrollWidth, clientW: s.clientWidth } : null; })() }; })()`);
-    check(`the modal fits the phone (dialog ${geom.dlgW.toFixed(0)} of ${geom.vw}) and the roster section has no sideways overflow of its own (${geom.sec && geom.sec.scrollW}/${geom.sec && geom.sec.clientW})`, geom.dlgW <= geom.vw && !!geom.sec && geom.sec.scrollW <= geom.sec.clientW + 1, geom);
+    const geom = await evalJs(`(() => { const dlg = document.querySelector('#agents-dialog-overlay .dialog'); const body = dlg.querySelector('.dialog-body'); const rowsEl = [...document.querySelectorAll('#agents-dialog-overlay .agents-machine-sec[data-host=""] .acct-key-row')]; const rowW = rowsEl.length ? Math.max(...rowsEl.map((r) => r.scrollWidth)) + ' (' + rowsEl.map((r) => [...r.children].map((c) => c.className.split(' ')[0] + ':' + Math.round(c.getBoundingClientRect().width)).join('+')).sort((x, y) => y.length - x.length)[0] + ')' : null; return { rowW, dlgW: dlg.getBoundingClientRect().width, vw: innerWidth, dlgScrollW: dlg.scrollWidth, dlgClientW: dlg.clientWidth, bodyScrollW: body.scrollWidth, bodyClientW: body.clientWidth, sec: (() => { const s = ${MODAL}; return s ? { scrollW: s.scrollWidth, clientW: s.clientWidth } : null; })() }; })()`);
+    check(`the modal fits the phone (dialog ${geom.dlgW.toFixed(0)} of ${geom.vw}) and the roster section has no sideways overflow of its own (${geom.sec && geom.sec.scrollW}/${geom.sec && geom.sec.clientW}; body ${geom.bodyScrollW}/${geom.bodyClientW}; widest row ${geom.rowW})`, geom.dlgW <= geom.vw && !!geom.sec && geom.sec.scrollW <= geom.sec.clientW + 1, geom);
     // HONEST BOUNDARY (not this branch's): `.dialog.agents-dialog .agents-dialog-body { min-width: 380px }` predates this work (byte-identical on master), so on a 375px phone the modal's BODY is wider than the 345px dialog and .dialog's overflow:hidden clips it — measured here as dialog scrollWidth > clientWidth. Recorded as an open issue; the roster cell itself is what this suite pins.
     if (geom.dlgScrollW > geom.dlgClientW) console.log(`  NOTE (pre-existing, master too): the Agents modal body min-width 380px exceeds the ${geom.dlgW.toFixed(0)}px dialog on a ${geom.vw}px phone (dialog scroll ${geom.dlgScrollW}/${geom.dlgClientW}) — outside this change`);
     const musage = mrows.filter((r) => r.cols.length > 0);
@@ -332,8 +346,36 @@ try {
       check(`phone/pill: row heights ≤ 45 px (${musage.map((r) => r.rowH.toFixed(1)).join(' / ')})`, musage.every((r) => r.rowH <= 45));
     }
     check('phone: the row-level countdown line is gone here too', mrows.every((r) => !r.resetLine));
-    await shot('roster-375x667@2x.png');
+    await shot(font ? 'roster-375x667@2x-wide-font.png' : 'roster-375x667@2x.png');
   }
+  if (fontScript) await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: fontScript.identifier });
+  }
+
+  // ── §4 the DESKTOP roster under the wide font (the mirror's condition) ──
+  // §1c is the leg the Actions mirror failed on every run: at 1200×800 under
+  // DejaVu Sans the tail dropped under the name and the "· credits" tag left
+  // the identity line (reproduced locally 2026-09-21 with VS_ROSTER_FONT). The
+  // identity line no longer wraps (style.css .acct-key-line); this control
+  // proves it under the wide font and SKIPs with a reason where DejaVu is absent.
+  if (hasDejaVu) {
+    console.log('§4 the 1200×800 rail roster under DejaVu Sans — the identity line holds the credits tag inline under a wide font');
+    const wide = await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body, .dialog { font-family: 'DejaVu Sans', sans-serif !important; }"; document.head.appendChild(st); });` });
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+    await openPage();
+    check('wide font in force on the desktop pass', await evalJs(`/DejaVu Sans/.test(getComputedStyle(document.body).fontFamily)`), await evalJs('getComputedStyle(document.body).fontFamily'));
+    // the rail item TOGGLES its panel and §1's choice persisted across the reload — open only when the section has no geometry yet
+    await evalJs(`(() => { app.sidebar.toggle(true); return 1; })()`);
+    for (let i = 0; i < 4; i++) { const w = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? sec.clientWidth : 0; })()`); if (w > 0) break; await evalJs(`(() => { const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`); await sleep(400); }
+    await evalJs(`(() => { app.sidebar.el.style.width = '504px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
+    const wrows = await until(async () => { const r = await evalJs(ROWS(LOCAL)); return r && byId(r, A.id)?.cols?.length === 3 && byId(r, AD.id)?.clusterVisible ? r : null; }, 20000, 300); // the same readiness §1 waits for (A has three donuts, D two): donut mode + laid out (a credits tag exists before the panel has any geometry)
+    if (!wrows) { const dbg = await evalJs(`(() => { const sec = ${LOCAL}; const r = (${ROWS(LOCAL)}); return { sec: !!sec, secW: sec && sec.clientWidth, isMobile: app.isMobile, sidebarW: app.sidebar.el.getBoundingClientRect().width, rows: r && r.map((x) => [x.name, x.cols.length, x.clusterVisible, x.miniVisible]) }; })()`); console.log('  §4 DEBUG: ' + JSON.stringify(dbg)); }
+    const wd = wrows && byId(wrows, AD.id);
+    check(`wide font: Member D's credits tag is still INLINE with the name (rowH ${wd && wd.rowH && wd.rowH.toFixed(1)}, clusterRight ${wd && wd.clusterRight}, tailLine ${wd && wd.credits && wd.credits.tailLine})`, !!wd && !!wd.credits && wd.credits.visible && wd.credits.tailLine === true && wd.extraLine === false, wd);
+    const wsec = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? { scrollW: sec.scrollWidth, clientW: sec.clientWidth } : null; })()`);
+    check(`wide font: the roster section has no sideways overflow (${wsec && wsec.scrollW}/${wsec && wsec.clientW})`, !!wsec && wsec.clientW > 100 && wsec.scrollW <= wsec.clientW + 1, wsec);
+    await shot('roster-1200x800-wide-font.png');
+    await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: wide.identifier });
+  } else console.log('  SKIP: §4 needs DejaVu Sans on this machine (fc-list)');
   const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
   check('no JS errors', realErrors.length === 0, realErrors.slice(0, 5));
 } catch (e) {

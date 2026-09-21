@@ -228,6 +228,20 @@ export function installSidebarWorkbench(Sidebar) {
     // forever, with no affordance hinting the fix. Heal ONLY against a
     // successfully LOADED roster (transient /api/hosts failures must not wipe
     // a valid pick). Returns the healed value.
+    // Heal BOTH stored host selections against the loaded roster, whatever the
+    // list is about to show. The reads at the Recent/History zones below did
+    // this too — but only when the workbench rendered its zones: an instance
+    // with NO sessions and no hosts takes _renderInner's "No sessions" early
+    // return first, so a ghost host id persisted in localStorage for ever
+    // there (red on every Actions mirror run since 2.369.75 — the runner is
+    // exactly such a machine; every developer box has sessions and never saw
+    // it; 2.369.125 r8). Idempotent: a healed key reads '' and _wbValidHost
+    // returns it untouched.
+    _wbHealHostSelections() {
+      this._wbValidHost(this._wbRecentHost ?? (this._wbRecentHost = localStorage.getItem('wbRecentHost') || ''), 'wbRecentHost', '_wbRecentHost');
+      this._wbValidHost(this._wbHistoryHost ?? (this._wbHistoryHost = localStorage.getItem('wbHistoryHost') || ''), 'wbHistoryHost', '_wbHistoryHost');
+    },
+
     _wbValidHost(id, storageKey, memKey) {
       if (!id) return id;
       const hosts = this._hostsData?.hosts;

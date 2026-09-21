@@ -1107,6 +1107,10 @@ class Sidebar {
     const searchActive = !!(document.getElementById('session-filter')?.value || '').trim();
     this._ensureHostsData?.();
     const hasHosts = !!this._hostsData?.hosts?.length;
+    // A stored Recent/History host that the roster no longer knows is healed
+    // HERE, before any early return — the empty branch below used to skip the
+    // workbench where the heal lived (sidebar-workbench.js _wbHealHostSelections).
+    this._wbHealHostSelections?.();
     if (!sessions.length && this._activeTab !== 'tasks' && !searchActive && !hasHosts) {
       this.listEl.insertAdjacentHTML('beforeend', `<div class="empty-hint">${tr('No sessions')}</div>`);
       // The "stopped OpenCode conversations are hidden — its service is off"

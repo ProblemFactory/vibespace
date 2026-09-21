@@ -70,6 +70,6 @@ ok(rr3.data.toString() === 'healed', 'pool self-heals after terminating the wedg
 
 srv.close();
 try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8')); if (pid) process.kill(pid); } catch { }
-fs.rmSync(tmp, { recursive: true, force: true });
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); // a worker may still be flushing agentd/state when the suite tears down: ENOTEMPTY once on the Actions mirror (2.369.125 r8), node retries it
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
