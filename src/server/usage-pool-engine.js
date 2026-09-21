@@ -14,7 +14,7 @@ const path = require('path');
 const { mk } = require('./lazy.js');
 
 function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, getAutoResume = () => null, getOtelIngest = () => null, getQuotaProbe = () => null,
-  broadcastToSession, serverNotice, serverSetting, getAccounts, getHosts,
+  broadcastToSession, serverNotice, serverSetting, harnessSetting: injectedHarnessSetting = null, harnessDeclares: injectedHarnessDeclares = null, getAccounts, getHosts,
   getUsageHistory, recordUsageAttribution, adapterRegistry, readUserState = () => ({}),
   // THE SPEND CEILING (design §4.4c / P9) is CONSTRUCTED here (`spendGuard`,
   // below) — the engine's own unattended spender, the codex reset credit, asks
@@ -69,6 +69,14 @@ const { captureRateLimitEvent } = require('../rate-limit-capture.js'); // was a 
 // /usage` for codex identities and classified auth failures in Anthropic
 // wording only).
 const harnesses = require('../harnesses');
+// THE TYPED HARNESS-SETTING READS (design-harness-settings §5): server.js
+// injects its harness-config-sync instance; a caller that does not (a suite
+// building the engine over a `serverSetting` stub) gets the SAME factory over
+// the registry — one implementation, never a null that silently closes the
+// reset-credit / fallback-stop paths.
+const { harnessSetting, harnessDeclares } = (injectedHarnessSetting && injectedHarnessDeclares)
+  ? { harnessSetting: injectedHarnessSetting, harnessDeclares: injectedHarnessDeclares }
+  : require('./harness-config-sync').accessorsFor({ serverSetting, harnesses });
 const _poolAutoLast = new Map(); // poolId → ts of last DECISION (eval gate)
 const _poolSwitchAt = new Map(); // poolId → ts of last actual SWITCH (dwell belt)
 // ── member auth-health (2.335.0, owner report: a banned/expired/out-of-credit
@@ -2896,7 +2904,7 @@ function recordCodexQuotaSignal(session, payload) {
     // per limit event, 10min re-try floor.
     const tryResetCredit = (resetsAtSec, lane = null) => {
       try {
-        if (serverSetting('codex.limitResetCredit') !== 'auto') return false;
+        if (!harnessDeclares(session.backend, 'limitResetCredit') || harnessSetting(session.backend, 'limitResetCredit') !== 'auto') return false;
         if (!session.pty || session.mode !== 'chat') return false;
         const now = Date.now();
         if (session._codexResetTriedAt && now - session._codexResetTriedAt < 10 * 60e3) return false;
@@ -3964,7 +3972,7 @@ function maybeRepinLockedModel(session) {
 
 function maybeStopOnFallback(session, id, from, to) {
   try {
-    if (serverSetting('claude.disableModelFallback') !== true) return;
+    if (!harnessDeclares(session.backend, 'disableModelFallback') || harnessSetting(session.backend, 'disableModelFallback') !== true) return; // the session's harness declares the row, or there is nothing to stop on
     if (session._fallbackStopFired || session.mode !== 'chat' || !session.pty) return;
     const adapter = adapterRegistry.get(session.backend);
     if (!adapter?.formatInterrupt) return;

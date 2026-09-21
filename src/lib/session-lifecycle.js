@@ -146,7 +146,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // reason when the cwd is not a repo, and only EMITS the flag on a new
       // session or a fork (a resume re-enters the CLI's own recorded worktree)
       worktree: worktree || undefined,
-      tuiRenderer: (backend === 'claude' && sessionMode === 'terminal' ? this.settings.get('claude.tuiRenderer') : '') || undefined,
+      // tuiRenderer: the INSTANCE default is read server-side from the harness's
+      // declared spawn rows (design-harness-settings §5) — the client sends only
+      // an explicit per-session pick, and this create path has none.
       agentKind: agentKind || undefined, agentRole: agentRole || undefined, agentNickname: agentNickname || undefined,
       sourceKind: sourceKind || undefined, parentThreadId: parentThreadId || undefined,
       // WHICH FACT each of those two strings is (B-6b6d round 3). The value is

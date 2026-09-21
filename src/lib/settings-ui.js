@@ -1,5 +1,6 @@
-import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES } from './settings-schema.js';
-import { showConfirmDialog } from './utils.js';
+import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel } from './settings-schema.js';
+import { showConfirmDialog, fetchJson } from './utils.js';
+import { receiptLine, offLine, applyHead } from './cli-config-chips.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 
@@ -79,6 +80,9 @@ class SettingsUI {
     nav.innerHTML = '';
 
     const query = this._search;
+    // CLI-config receipts are FRESH per render (design-harness-settings D2):
+    // one /api/agent-hooks read shared by every cli-config row of this pass.
+    this._cliConfigPromise = null;
 
     // Group settings by category
     const grouped = {};
@@ -115,6 +119,18 @@ class SettingsUI {
       sectionTitle.className = 'settings-section-title';
       sectionTitle.textContent = cat;
       section.appendChild(sectionTitle);
+      // A HARNESS section (derived from its descriptor table, design §4.2):
+      // one line saying what these values are for and which CLI config file
+      // the "written into the CLI config" rows land in.
+      const hs = harnessSectionFor(cat);
+      if (hs) {
+        const note = document.createElement('div');
+        note.className = 'settings-section-note';
+        note.textContent = hs.files.length
+          ? t('These values decide how new sessions start. Rows marked "written into the CLI config" are written into {files}; the machines each one reached are listed under that row.', { files: hs.files.map((f) => f.rel).join(', ') })
+          : t('These values decide how new sessions start.');
+        section.appendChild(note);
+      }
 
       for (const { path, schema } of items) {
         section.appendChild(this._renderSetting(path, schema));
@@ -168,6 +184,7 @@ class SettingsUI {
     pathEl.className = 'settings-row-path';
     pathEl.textContent = path;
     info.append(label, desc, pathEl);
+    if (schema.apply) this._renderApplyChip(info, path, schema);
 
     const controlWrap = document.createElement('div');
     controlWrap.className = 'settings-row-control';
@@ -187,6 +204,68 @@ class SettingsUI {
 
     row.append(info, controlWrap);
     return row;
+  }
+
+  /** The apply chip under a DERIVED harness row (design §4.3): what the value
+   *  is for (spawn / server), and for a cli-config row the target file+key, the
+   *  fresh local receipt, and a human-triggered "Check machines…" that asks
+   *  every registered host's helper --status (one ssh each — never on render). */
+  _renderApplyChip(info, path, schema) {
+    const box = document.createElement('div');
+    box.className = 'settings-row-apply';
+    const head = document.createElement('div');
+    head.className = 'settings-row-apply-head';
+    head.textContent = applyHead(schema.apply, { t }) || '';
+    box.appendChild(head);
+    if (schema.apply.kind === 'cli-config') {
+      const key = path.slice(schema.harness.length + 1);
+      const rel = harnessFileRel(schema.harness, schema.apply.file) || '';
+      const target = document.createElement('div');
+      target.className = 'settings-row-apply-target';
+      target.textContent = `${rel} → ${schema.apply.path.join('.')}`;
+      box.appendChild(target);
+      const list = document.createElement('div');
+      list.className = 'settings-cli-receipts';
+      const addLine = (l) => { const d = document.createElement('div'); d.className = 'settings-cli-receipt ' + (l.tone === 'ok' ? 'ob-ok' : l.tone === 'warn' ? 'ob-warn' : l.tone === 'bad' ? 'ob-bad' : 'settings-cli-dim'); d.textContent = l.text; list.appendChild(d); return d; };
+      const pending = addLine({ tone: 'dim', text: t('checking…') });
+      box.appendChild(list);
+      this._cliConfigPromise ||= fetchJson('/api/agent-hooks');
+      this._cliConfigPromise.then((hs) => {
+        if (!list.isConnected) return;
+        pending.remove();
+        const cc = hs && !hs.error ? hs.cliConfig : null;
+        if (!cc) { addLine({ tone: 'bad', text: `⚠ ${t('Could not read the hook status — {reason}', { reason: (hs && hs.error) || t('server unreachable') })}` }); return; }
+        const r = (cc.receipts || []).find((x) => x.harness === schema.harness && x.key === key);
+        const off = (cc.off || []).find((x) => x.harness === schema.harness && x.key === key);
+        if (off) addLine(offLine({ t, rel: off.rel, path: off.path }));
+        else if (r) {
+          const lw = cc.lastWrite && (cc.lastWrite.receipts || []).some((x) => x.harness === schema.harness && x.key === key && (x.state === 'applied' || x.state === 'unchanged')) ? cc.lastWrite.at : null;
+          addLine(receiptLine(r, { t, where: t('this machine'), lastWriteAt: lw }));
+        } else addLine({ tone: 'dim', text: `? ${t('this machine')}: ${t('not checked — reinstall the agent tools')}` });
+        if (cc.safe === false) addLine({ tone: 'dim', text: t('This server runs from a temporary directory and never writes the real CLI config.') });
+      });
+      const btn = document.createElement('button');
+      btn.className = 'settings-link-btn';
+      btn.textContent = t('Check machines…');
+      btn.title = t('Reads the CLI config on every registered machine (one connection each)');
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const hd = await fetchJson('/api/hosts');
+        const hosts = (hd && hd.hosts) || [];
+        if (!hosts.length) { addLine({ tone: 'dim', text: t('No other machines registered.') }); return; }
+        await Promise.all(hosts.map(async (h) => {
+          const rs = await fetchJson(`/api/hosts/${encodeURIComponent(h.id)}/agent-tools`);
+          if (!list.isConnected) return;
+          if (!rs || rs.error) { addLine({ tone: 'bad', text: `⚠ ${h.name}: ${t('could not be checked')}${rs && rs.error ? ' — ' + rs.error : ''}` }); return; }
+          const all = rs.cliConfig || [];
+          const r = all.find((x) => x.harness === schema.harness && x.key === key) || all.find((x) => x.state === 'unknown') || { state: 'unknown' };
+          addLine(receiptLine(r, { t, where: h.name, remote: true }));
+        }));
+        btn.remove();
+      };
+      box.appendChild(btn);
+    }
+    info.appendChild(box);
   }
 
   _createControl(path, schema, row) {

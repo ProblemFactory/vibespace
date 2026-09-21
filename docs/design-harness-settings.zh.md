@@ -147,3 +147,12 @@ function harnessSpawnSettings(id) { … }            // 所有 spawn 行 → 一
 | D4 | codex 的 config.toml | 只声明、标 `writable:false`、校验器按名拒绝写；等有真实需求再做 toml 写入器 | 现在就做 toml 写入器（没有需求方，且注释保留是雷） |
 
 D1–D4 都按推荐做的话，就是 §0 的方案原样。等 owner 说"继续开发"再开工（backlog 已停）。
+
+## 11. Owner 拍板与落地（2026-09-20，2.369.123）
+
+- **D1 = 推荐**：Settings 窗口派生分区 + 行下 apply 芯片与每机器回执；Machines 卡片同样的芯片；不新开 tab。
+- **D2 = 推荐**：回执不持久化（`cliConfigStatus()` 每次现读；本机最近写入只留内存 `lastWrite`）。
+- **D3 = 推荐**：改动不扇出；下次 Install / 下次在那台机器 spawn 时写（ssh prelude 与拨入 run-cmd 都带同一个 `VIBESPACE_CLI_CONFIG`）；卡片先显示 differs。
+- **D4 = 备选（owner：现在就做 toml 写入器）**：`src/harness-config.js` 的注释与格式保留的最小 TOML setter（`[section]` 内设置/替换一行 `key = value`，或文件已用的点分顶层 `section.key = value` 拼法；缺 section 追加到末尾；string/boolean/integer；inline table / array of tables / 多行字符串 / 保守分词失败一律**按名拒绝**；与 JSON 写入器同一 CAS + tmp+rename + "手改坏文件永不覆盖"）。codex descriptor 声明 `config.toml {format:'toml', writable:true}`，随附**一条真实 managed 行** `codex.historyPersistence`（enum，默认 `save-all` → `[history] persistence`；证据：安装的 codex-cli 0.154.0 二进制内嵌的 resolved-config 模板 `[history]` / `persistence = "save-all"`（5 处）、`HistoryPersistence` 结构名、"(Session persistence is disabled; cannot …" 分支；`none` 时 codex 不写 rollout，本实例历史为空；`''` = 不动 config.toml）。
+- 其余按 §2–§9 原样：PURE `src/harness-settings.js`、SHARED `src/harness-config.js`、ORCH `src/server/harness-config-sync.js`、派生 schema + `registerHarnessSettings`、apply 芯片 + 回执 UI、三个 helper 站点的 `VIBESPACE_CLI_CONFIG`、grep 门控的 `--status`、helper 用 createRequire 嵌入模块文件文本、`--uninstall` 不碰 managed key、retention 遵守 `hookRegistrationSafe()`、`autoResumeOnLimit` 移出 claude 表（key 不变，`GENERIC_LEGACY_KEYS`）、插件 harness 规则、§8 的全部门（test-harness-contract 表钉 + spawn 一致性含合成负控；test-claude-retention 保名扩容；test-architecture PURE/SHARED 集合 + §46 字面 id 普查；新 test-harness-settings 含 TOML fixtures 与 2.369.120 schema 快照）。
+- 副发现（§1 末尾的三行裸 `'Integration'`）已在 2.369.120 修掉；§46b 现在钉住拼法（负控在内）。

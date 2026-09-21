@@ -20,5 +20,7 @@ module.exports = {
   // engine's arm, the module's fire — refuses by that row rather than by an id.
   resume: null,
   settingsPrefix: null,
+  settings: null,               // no instance settings (a plain shell has no model, no CLI config)
+  configFiles: {},
   inject: null,
 };

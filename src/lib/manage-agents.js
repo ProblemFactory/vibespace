@@ -1,5 +1,23 @@
 // Manage-Agents dialog + Anthropic/ChatGPT account rosters (mixin split from app.js, 2.82.0 audit seam). Methods run with the App instance as `this`.
 import { UI_ICONS } from './icons.js';
+import { receiptLine, offLine } from './cli-config-chips.js';
+// THE CLI-CONFIG CHIPS on a machine row (design-harness-settings §4.4): one
+// line per managed key from the server's FRESH read (local /api/agent-hooks
+// cliConfig, remote agent-tools cliConfig) — the same wording as the Settings
+// window's apply chip, never a second phrasing. escHtml on every string: a
+// receipt carries a value read off a config file on another machine.
+function cliConfigChipsHtml(cc, { where, remote = false }) {
+  if (!cc) return '';
+  const lines = [];
+  for (const r of cc.receipts || []) {
+    if (r.state === 'unknown' && !r.key) { lines.push(receiptLine(r, { t, where, remote })); continue; }
+    lines.push(receiptLine(r, { t, where, remote, lastWriteAt: cc.lastWrite && (cc.lastWrite.receipts || []).some((x) => x.key === r.key && x.harness === r.harness) ? cc.lastWrite.at : null }));
+  }
+  for (const o of cc.off || []) lines.push(offLine({ t, rel: o.rel, path: o.path }));
+  if (!lines.length) return '';
+  const cls = (tone) => (tone === 'ok' ? 'ob-ok' : tone === 'warn' ? 'ob-warn' : tone === 'bad' ? 'ob-bad' : 'ob-ver');
+  return `<div class="agents-cli-config">${lines.map((l) => `<div class="${cls(l.tone)}">${escHtml(l.text)}</div>`).join('')}</div>`;
+}
 import { t } from './i18n.js';
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
@@ -1478,6 +1496,7 @@ export function installManageAgents(App, ctx = {}) {
             body.appendChild(row);
           } else {
             left.innerHTML = `<b>${t('VibeSpace integration')}</b><div>${stateOf('claude', 'Claude')} &nbsp; ${stateOf('codex', 'Codex')}</div>`
+              + cliConfigChipsHtml(hs.cliConfig, { where: t('this machine') })
               + `<div class="agents-note">${t("Lets sessions in a Task Group automatically receive the group's context (objective, shared files).")}</div>`;
             const actions = document.createElement('div'); actions.className = 'agent-actions';
             const installBtn = document.createElement('button');
@@ -1564,6 +1583,7 @@ export function installManageAgents(App, ctx = {}) {
             : `<div class="agents-note">${t('Reporting tools, the Task Group context hook, and the session keeper live under ~/.vibespace on the host. Creating a remote session re-installs them automatically.')}</div>`;
           left.innerHTML = `<b>${t('VibeSpace integration on {host}', { host: escHtml(hostName) })}</b>`
             + `<div title="${escHtml(perTool)}">${toolsHtml} &nbsp; ${hookHtml}${extras.length ? ' &nbsp; ' + extras.join(' &nbsp; ') : ''}</div>`
+            + cliConfigChipsHtml({ receipts: rs.cliConfig || [] }, { where: hostName, remote: true })
             + noteHtml;
           const actions = document.createElement('div'); actions.className = 'agent-actions';
           const allGood = presentN === names.length && !outdatedN;

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// claude.disableModelFallback contract test (2.228.0). Covers the three
+// claude.disableModelFallback contract test (2.228.0; since 2.369.123 the value rides the
+// harness spawn-settings bag `settings.disableModelFallback` — design-harness-settings §5). Covers the three
 // mechanisms: (1) spawn — buildSessionArgs merges switchModelsOnFlag:false
 // into ONE --settings flag (repeated flags = undefined CLI behavior) and arms
 // the subagent-covering env var; (2) mid-session — formatSetFallbackPolicy
@@ -22,13 +23,13 @@ const check = (name, cond, extra) => {
 const adapter = new ClaudeCodeAdapter({ claudeCmd: 'claude', chatWrapper: 'cw.js', ptyWrapper: 'pw.js', supportsName: true });
 
 // (1) spawn: plain
-let spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', disableModelFallback: true });
+let spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', settings: { disableModelFallback: true } });
 let si = spec.args.indexOf('--settings');
 check('spawn adds --settings with switchModelsOnFlag:false', si >= 0 && JSON.parse(spec.args[si + 1]).switchModelsOnFlag === false);
 check('spawn arms CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK (subagents)', spec.env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK === '1');
 
 // (1) spawn: merges with ultracode's --settings instead of a second flag
-spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', disableModelFallback: true });
+spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', settings: { disableModelFallback: true } });
 check('ONE --settings flag when ultracode also uses it', spec.args.filter((a) => a === '--settings').length === 1);
 si = spec.args.indexOf('--settings');
 const merged = JSON.parse(spec.args[si + 1]);
@@ -39,7 +40,7 @@ spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat' });
 check('toggle off leaves args/env untouched', !spec.args.includes('--settings') && !('CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK' in spec.env));
 
 // (1) terminal mode: env objects compose (tuiRenderer + fallback)
-spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'terminal', tuiRenderer: 'fullscreen', disableModelFallback: true });
+spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'terminal', tuiRenderer: 'fullscreen', settings: { disableModelFallback: true } });
 check('terminal mode composes both env vars', spec.env.CLAUDE_CODE_NO_FLICKER === '1' && spec.env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK === '1');
 
 // (2) mid-session
@@ -68,7 +69,7 @@ for (const [label, raw] of [
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', neutralizeKeyHelper: true });
 si = spec.args.indexOf('--settings');
 check('neutralizer adds --settings apiKeyHelper:""', si >= 0 && JSON.parse(spec.args[si + 1]).apiKeyHelper === '');
-spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', disableModelFallback: true, neutralizeKeyHelper: true });
+spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', settings: { disableModelFallback: true }, neutralizeKeyHelper: true });
 check('ONE --settings with all three keys merged', spec.args.filter((a) => a === '--settings').length === 1
   && (() => { const o = JSON.parse(spec.args[spec.args.indexOf('--settings') + 1]); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === ''; })());
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat' });

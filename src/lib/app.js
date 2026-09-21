@@ -26,7 +26,7 @@ import { MobileNav } from './mobile-nav.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { getAvailableFonts } from './terminal.js';
 import { SettingsManager } from './settings.js';
-import { SETTINGS_SCHEMA } from './settings-schema.js';
+import { SETTINGS_SCHEMA, registerHarnessSettings } from './settings-schema.js';
 import { SettingsUI } from './settings-ui.js';
 import { openExternalEditor, closeExternalEditor } from './external-editor.js';
 import { CommandMode } from './command-mode.js';
@@ -409,6 +409,9 @@ class App {
       this._publicUrlDefault = d.publicUrlDefault || null; // cluster-injected agentd.publicUrl default (settings placeholder)
       setInstanceUrl(d.instancePublicUrl || null); // the address every "link to something here" helper uses (utils.absUrl)
       for (const h of Array.isArray(d.harnesses) ? d.harnesses : []) { // ACP harnesses (S8): offered only where their CLI is installed
+        // A CONTRIBUTED harness ships its settings table (design-harness-settings
+        // §7): derive its Settings section here, exactly like a built-in's.
+        if (h.settings) { try { registerHarnessSettings(h.id, h.settings); } catch (e) { console.warn('[harness-settings]', h.id, e.message); } }
         const opt = document.querySelector(`#input-backend option[value="${CSS.escape(String(h.id))}"]`);
         if (opt) opt.hidden = !h.installed;
         // S9: runtime-verified caps (opencode fork = the serve OpenAPI evidence) replace the shipped guess

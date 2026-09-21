@@ -1,6 +1,8 @@
 'use strict';
 // Codex harness descriptor (S1).
 const { BACKEND_CAPS } = require('../backend-caps');
+const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
+const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file objects over the table's `files`
 const { CodexAdapter } = require('../adapters/codex');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta, lastCodexTurnModel, lastCodexTurnEffort } = require('../adapters/codex');
 const { CodexMessageManager } = require('../codex-message-manager');
@@ -36,6 +38,11 @@ function parseCodexAuthFile(file) {
   } catch { return { loggedIn: false }; }
 }
 const parseCodexAuth = (dir) => parseCodexAuthFile(path.join(dir, 'auth.json'));
+
+// THE CLI config files VibeSpace may write for codex (design-harness-settings
+// §2): paths spelled ONCE in the PURE table's `files`, resolved here.
+const HOOKS_FILE = cliConfigFile(HARNESS_SETTINGS.codex.files.hooks, { createIfMissing: true });
+const CONFIG_TOML = cliConfigFile(HARNESS_SETTINGS.codex.files.config, { createIfMissing: true });
 
 module.exports = {
   id: 'codex',
@@ -137,6 +144,14 @@ module.exports = {
     deliver: (session, text, deps) => !!deps.sendChatInput(session, text),
   },
   settingsPrefix: 'codex',
+  // THE SETTINGS TABLE (design-harness-settings §2) — object identity, like caps.
+  settings: HARNESS_SETTINGS.codex,
+  // The CLI config files VibeSpace may write: hooks.json (our hook entries;
+  // created when missing — the app-server reads it from ~/.codex which must
+  // already exist) and config.toml (WRITABLE since 2.369.123 through the
+  // comment-preserving TOML setter; `[history] persistence` is the managed
+  // row). Both objects are shared with `inject`/`creds` by identity.
+  configFiles: { hooks: HOOKS_FILE, config: CONFIG_TOML },
   // CONTEXT INJECTION strategy (S6): hooks are registered (the app-server
   // RUNS them) but their SessionStart output is IGNORED, so the WRAPPER
   // delivers teaching through thread/inject_items (prompt-context route) and
@@ -144,7 +159,7 @@ module.exports = {
   // agent-routes must NOT advance on SessionStart for this harness.
   inject: {
     kind: 'wrapper',
-    hookFile: { file: () => path.join(os.homedir(), '.codex', 'hooks.json'), createIfMissing: true },
+    hookFile: HOOKS_FILE,                  // the SAME object as configFiles.hooks
     hookEvents: ['SessionStart', 'UserPromptSubmit'],
     sessionStartHonoured: false,
   },

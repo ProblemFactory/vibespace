@@ -17,6 +17,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
+const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
 const { execFile } = require('child_process');
 const { claimJsonls, cwdToProjectDir } = require('./session-store');
 const { nameFromUserLine, interpretDiscoveryLines, synthesizeDiscoveryLines, isZstPath, isZstBuffer, ZSTD_MAGIC } = require('./discovery-facts');
@@ -789,9 +790,17 @@ class HostManager {
       + 'command -v node >/dev/null 2>&1 && echo "NODE|yes" || echo "NODE|no"; '
       + 'grep -q vibespace-hook.mjs "$HOME/.claude/settings.json" 2>/dev/null && echo "HOOK|claude|yes" || echo "HOOK|claude|no"; '
       + 'grep -q vibespace-hook.mjs "$HOME/.codex/hooks.json" 2>/dev/null && echo "HOOK|codex|yes" || echo "HOOK|codex|no"; '
-      + 'echo "KEEP|$(ls "$HOME/.vibespace/run" 2>/dev/null | grep -c "\\.sock$")"';
+      + 'echo "KEEP|$(ls "$HOME/.vibespace/run" 2>/dev/null | grep -c "\\.sock$")"; '
+      // CLI-CONFIG RECEIPTS (design-harness-settings §6), GATED: only a helper
+      // that knows the plan env (grep for the env NAME in the shipped file) is
+      // asked `--status` — an older helper would treat it as an ordinary
+      // REGISTRATION RUN (a write inside a read-only probe). Otherwise the UI
+      // says "not checked — reinstall the tools".
+      + 'if grep -q VIBESPACE_CLI_CONFIG "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; then ' + nodeFinder()
+      + `if [ -n "$VS_NODE" ]; then VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --status 2>/dev/null; else echo "CFG|*|*|no-node"; fi; `
+      + 'else echo "CFG|*|*|unknown"; fi';
     const out = await this._hostShell(h, probe, { timeoutMs: 12000 });
-    const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0 };
+    const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0, cliConfig: parseReceiptLines(out) };
     for (const line of out.split('\n')) {
       const p = line.trim().split('|');
       if (p[0] === 'T') st.tools[p[1]] = { present: !!p[2], sha256: p[2] || null };
@@ -800,6 +809,14 @@ class HostManager {
       else if (p[0] === 'KEEP') st.keeperSessions = parseInt(p[1], 10) || 0;
     }
     return st;
+  }
+
+  /** The base64 CLI-config plan for the helper's env (server.js sets
+   *  `hosts.cliConfigPlanB64`); a hosts instance with no server behind it
+   *  (tests, tooling) sends an empty hooks-only plan marker — never undefined
+   *  in a shell line. */
+  _cliConfigPlanB64() {
+    try { const v = typeof this.cliConfigPlanB64 === 'function' ? this.cliConfigPlanB64() : ''; return /^[A-Za-z0-9+/=]*$/.test(v) ? v : ''; } catch { return ''; }
   }
 
   /** Install/refresh the tools + register the hook — the SAME tar-over-stdin
@@ -818,13 +835,15 @@ class HostManager {
         // POSIX node finder (2.244.4): nvm.sh sourcing only works in bash — a
         // dash login shell leaves `node` unresolvable (userN's Novita)
         + nodeFinder()
-        // VIBESPACE_CLAUDE_KEEP_DAYS (2.369.118): the transcript-retention setting rides
-        // the register helper so the remote CLI's 30-day sweep is lifted there too
-        + `[ -n "$VS_NODE" ] && VIBESPACE_CLAUDE_KEEP_DAYS=${Math.max(0, Math.floor(Number((typeof this.claudeKeepDays === 'function' ? this.claudeKeepDays() : 0) || 0)))} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED`],
+        // VIBESPACE_CLI_CONFIG (design-harness-settings §6): the base64 CLI-config
+        // plan (claude cleanupPeriodDays, codex [history] persistence, …) rides
+        // the register helper — the helper prints one CFG| receipt per managed
+        // key, returned with the install result. Shell-safe bare (base64).
+        + `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; echo VS-INSTALLED`],
         { timeout: 30000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
           if (!String(stdout).includes('VS-INSTALLED')) return reject(new Error('unexpected response'));
-          resolve({ installed: present });
+          resolve({ installed: present, cliConfig: parseReceiptLines(String(stdout)) });
         });
       child.stdin.end(tar);
     });

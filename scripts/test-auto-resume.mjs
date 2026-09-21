@@ -263,14 +263,16 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   // spawn was otherwise handed "Concise". The value is also enum-checked
   // against the harness caps row so it can never reach a spawn.
   ok('every create path gets the instance default unless the client picked one, from ITS OWN settings family',
-    wc.includes("const want = data.outputStyle || (() => { try { return serverSetting(`${prefix}.outputStyle`) || ''; } catch { return ''; } })();")
+    // 2.369.123 (design-harness-settings §5): the family is the harness's DECLARED table, read through the descriptor of the session's backend — never a spelled prefix or id
+    wc.includes("const want = data.outputStyle || (() => { try { return harnessDeclares(backend, 'outputStyle') ? String(harnessSetting(backend, 'outputStyle') || '') : ''; } catch { return ''; } })();")
     && wc.includes("const rs = capsOf(backend).responseStyle || { closed: true, values: [] };")
     && wc.includes("return (!rs.closed || rs.values.includes(want)) ? want : '';"));
   ok('the session records what it was spawned with (the EFFECTIVE style)', wc.includes('session._outputStyle = data._effOutputStyle'));
   ok('a resume carries the saved style + auto-resume choice', read('src/lib/session-lifecycle.js').includes('outputStyle: savedCfg.outputStyle') && read('src/lib/session-lifecycle.js').includes('autoResume: savedCfg.autoResume'));
   const sb = read('src/lib/chat-status-bar.js');
   ok('the picker exists and is HONEST that it only applies next resume', sb.includes('chat-status-style') && sb.includes('A running session cannot change style'));
-  ok('the default style is a documented setting', read('src/lib/settings-schema.js').includes("'claude.outputStyle'"));
+  // 2.369.123: the row is DECLARED in the claude harness's PURE table and the schema derives the Claude section from it
+  ok('the default style is a documented setting', (() => { const { HARNESS_SETTINGS, rowOf } = require(path.join(REPO, 'src/harness-settings.js')); const r = rowOf(HARNESS_SETTINGS.claude, 'outputStyle'); return !!r && r.type === 'enum' && r.apply.via === 'outputStyle' && /deriveHarnessTable\(tbl\)/.test(read('src/lib/settings-schema.js')); })());
   // ── STRIKE FOUR (2.368.1, owner-caught within hours): the sidebar's
   // per-session-config WHITELIST silently dropped both new keys — the exact
   // bug its own comment documents for 'account' (2.43.0) and 'groupManager'

@@ -199,6 +199,7 @@ const WS_CTX_CONTRACT = [
   'activeSessions', 'WS_OPEN', 'broadcastActiveSessions', 'broadcastToSession', 'resizeSessionToMin',
   'setupSessionPty', 'reattachLocalPty', 'ptyQuietSince', 'refreshWebuiPids', 'deleteSessionMeta', 'writeSessionMeta', 'readSessionMeta', 'autoResume',
   'readLayouts', 'writeLayouts', 'getSyncStore', 'serverSetting', 'integrationEnabled', 'agentdRemote', 'dialBridge',
+  'harnessSetting', 'harnessDeclares', 'harnessSpawnSettings', 'cliConfigPlanB64', // harness settings (design-harness-settings §5/§6)
   'sessionCounterRef', 'createSessionMessages', 'poolChooser', 'sbNoteServerOp',
   'SOCKETS_DIR', 'BUFFERS_DIR', 'PTY_WRAPPER', 'CHAT_WRAPPER',
   'NODE_CMD', 'DTACH_CMD', 'ENV_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV',

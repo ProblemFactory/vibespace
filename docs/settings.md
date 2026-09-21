@@ -169,6 +169,8 @@ Every turn VibeSpace starts **without you** — the auto-continue after a usage 
 
 ### Claude
 
+Since 2.369.123 the Claude / Codex / OpenCode sections are DERIVED from each harness's declared settings table (docs/design-harness-settings.zh.md). Every row shows an *apply chip* under it — "Applies to new sessions · `--brief`", "Read by VibeSpace · pool engine", or "Written into the CLI config" with the target file and key, a fresh receipt for this machine ("✓ written 3 min ago", "⚠ is 30 (wanted 36500) — written again at the next start", "? not found — start the CLI once", "⚠ not valid after a hand edit — not touched") and a "Check machines…" button that reads every registered host. The same chips appear on Manage Agents → Machines.
+
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `claude.defaultModel` | combobox | `''` | Default Claude model — dropdown aliases + "Custom..." for specific model IDs (e.g. claude-opus-4-6-20250414). Populated from `/api/available-models` (Claude `/v1/models`). **NEW sessions only (B-6b6d): a resumed conversation keeps its own model** — for claude that is whatever the CLI recorded, because VibeSpace commands nothing (a transcript names the model that served a turn but never its 1M-context variant, so passing the served id back would silently drop `[1m]`); a per-session override (card → Session parameters) still wins. |
@@ -180,6 +182,7 @@ Every turn VibeSpace starts **without you** — the auto-continue after a usage 
 | `claude.systemPromptSnapshot` | enum | `''` (CLI default) | `--system-prompt-snapshot on\|off` — record the system prompt once per conversation and reuse it verbatim on every request and resume, which keeps the prompt cache warm across resumes. Blank = leave the CLI's own default alone |
 | `claude.excludeDynamicSystemPromptSections` | boolean | `false` | `--exclude-dynamic-system-prompt-sections` — move the per-machine sections (cwd, env info, memory paths, git status) out of the system prompt and into the first user message, so the cached prefix is identical across machines and users. Only applies with the default system prompt |
 | `claude.autocompact` | combobox | `''` (CLI default) | `--autocompact auto\|100k–1M` — the auto-compact window size. Compaction is what breaks the cached prefix, so a smaller window trades more compactions for cheaper requests. A value the CLI would reject is dropped rather than passed on |
+| `claude.transcriptRetentionDays` | number | `36500` | Written into `~/.claude/settings.json` as `cleanupPeriodDays` (Claude Code's own default sweeps transcripts after 30 days at every start — the conversations VibeSpace's history is made of). Written at start-up and on change, and onto remote hosts at the next agent-tools install or session start. `0` = leave Claude Code's own value alone |
 | `claude.tuiRenderer` | enum | `''` (Auto) | TUI renderer for terminal-mode Claude sessions: Auto (CLI `/tui` preference), Fullscreen (flicker-free alt-screen, `CLAUDE_CODE_NO_FLICKER=1`), Classic (main screen) |
 
 ### Codex
@@ -190,6 +193,7 @@ Every turn VibeSpace starts **without you** — the auto-continue after a usage 
 | `codex.defaultPermissionMode` | enum | `''` | Default Codex permission mode for new or resumed Codex sessions |
 | `codex.defaultEffort` | enum | `''` | Default Codex reasoning effort for NEW Codex sessions — a resumed thread keeps the effort its own last `turn_context` ran at (B-6b6d) |
 | `codex.defaultExtraArgs` | text | `''` | Extra Codex CLI args appended when starting a Codex session |
+| `codex.historyPersistence` | enum | `save-all` | Written into `~/.codex/config.toml` as `[history] persistence` (comments and formatting preserved; verified against codex-cli 0.154.0). `save-all` keeps every conversation (rollout) on disk — the codex analogue of Claude's retention; `none` makes Codex write no rollouts, so this instance shows no history for those sessions; `''` = leave config.toml alone. A config.toml the writer cannot read safely (inline table, array of tables, multi-line string, a root scalar named `history`, dotted `history.*` keys plus a `[history]` header) is refused by name and never overwritten; a symlinked config.toml (dotfiles) is written through and stays a symlink, its mode is kept; a value outside the listed options is never written — the default applies and the server log names it |
 
 ### OpenCode
 

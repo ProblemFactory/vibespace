@@ -128,7 +128,11 @@ const PURE = new Set(['src/plugin-manifest.js', 'src/account-pool-auto.js', 'src
   // DESKTOP APPS (docs/design-desktop-apps §2, 2026-09-13): the ONE constants home every
   // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
   // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
-  'src/keeper-limits.js', 'src/desktop-apps.js']);
+  'src/keeper-limits.js', 'src/desktop-apps.js',
+  // HARNESS SETTINGS (docs/design-harness-settings.zh.md §2, 2026-09-20): the per-harness
+  // DECLARED tables + validator + coerce + the plan builder — imports nothing, bundled into the
+  // browser (settings-schema derives the harness sections), required by the server and the daemon
+  'src/harness-settings.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
@@ -180,7 +184,11 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // desktop-app machine FACTS (design-desktop-apps §2 row 2): binaries on PATH, -displayfd X
   // allocation, the Xauthority writer, the RFB banner read-probe, window enumeration (P9 reuses
   // it), the xpra version probe; hostId is a parameter — node builtins + cli-identity only
-  'src/desktop-display.js']);
+  'src/desktop-display.js',
+  // THE SHARED CLI-CONFIG APPLIER (design-harness-settings §6): fs/path/os only — the CAS JSON
+  // writer, the comment-preserving TOML setter, applyConfigPlan/readConfigPlan, the receipt codec.
+  // Its FILE TEXT is embedded into the shipped remote helper, so it may never reach up into ORCH.
+  'src/harness-config.js']);
 const DEVICE = new Set(['src/agentd/agentd.js', 'src/agentd/mux.js', 'src/agentd/reexec.js', 'src/agentd/version.js', 'src/agentd/ws-min.js']);
 const ORCH_FILES = ['server.js', 'src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js', 'src/agentd/client.js'];
 const isOrch = (p) => p === 'server.js' || p === 'src/ws-handler.js' || p === 'src/ws-create.js' || p === 'src/hosts.js' || p === 'src/agentd/client.js'
@@ -1261,6 +1269,52 @@ for (const [edge] of EXCEPTIONS) {
   ok(!wsStray(wsText) && /pidsMatchingCmdline\(session\.socketPath\)/.test(wsText)
     && /require\('\.\/cli-identity'\)/.test(wsText),
     '(a) the kill path asks THE process reader (`pidsMatchingCmdline`) and ws-handler starts no process-table child of its own');
+}
+
+// 46. THE LITERAL HARNESS-ID CENSUS (docs/design-harness-settings.zh.md §5,
+//     2026-09-20). A harness setting is read on the server through the
+//     DESCRIPTOR — `harnessSetting(session.backend, key)` — never through a
+//     spelled harness id: `serverSetting('claude.brief')` was the shape that
+//     kept every decision point a claude special case (~18 sites), and the
+//     "minimal increment" design the reviewers struck down merely moved the
+//     literal from the key into the argument (`hsetting('codex', …)`), which a
+//     key-only grep would have blessed. Both spellings are censused, over every
+//     server-tier file (server.js + src/** minus the client), with a synthetic
+//     offender for each so the census can go red. The one generic feature
+//     under a legacy `claude.` key (auto-resume's instance default) reads it
+//     through GENERIC_LEGACY_KEYS — a NAME, not a literal.
+{
+  const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(f)) walk(f, out); } else if (/\.js$/.test(e.name)) out.push(f); } return out; };
+  const files = ['server.js', ...walk(path.join(REPO, 'src')).map(rel).filter((p) => !p.startsWith('src/lib/') && p !== 'src/client.js')];
+  const KEY_LITERAL = /serverSetting\(\s*['"](?:claude|codex|opencode)\./g;
+  const ARG_LITERAL = /harness(?:Setting|Declares|SpawnSettings)\(\s*['"](?:claude|codex|opencode)['"]/g;
+  const hits = [];
+  for (const f of files) {
+    const s = read(f);
+    for (const re of [KEY_LITERAL, ARG_LITERAL]) for (const m of s.matchAll(re)) hits.push(`${f}: ${m[0]}`);
+  }
+  ok(files.length > 80 && files.includes('src/server/usage-pool-engine.js') && files.includes('src/ws-create.js') && files.includes('src/server/auto-resume.js'),
+    `46 scope is non-vacuous and covers the deciding files (${files.length} server-tier files)`);
+  ok(hits.length === 0, `no server-tier file spells a harness id into a settings read (serverSetting('<id>.…') / harnessSetting('<id>', …))${hits.length ? ' — ' + hits.slice(0, 5).join(' ; ') : ''}`);
+  const nc1 = "  brief: (() => { try { return serverSetting('claude.brief') === true; } catch { return false; } })(),";
+  const nc2 = "  if (harnessSetting('codex', 'limitResetCredit') !== 'auto') return false;";
+  ok([...nc1.matchAll(KEY_LITERAL)].length === 1 && [...nc2.matchAll(ARG_LITERAL)].length === 1,
+    'NEGATIVE CONTROL: the old key-literal shape AND the argument-literal shape are both offenders (this census can go red)');
+  ok([...`serverSetting(GENERIC_LEGACY_KEYS.autoResumeOnLimit)`.matchAll(KEY_LITERAL)].length === 0 && /GENERIC_LEGACY_KEYS\.autoResumeOnLimit/.test(read('src/server/auto-resume.js')),
+    'the generic auto-resume default is read by NAME (GENERIC_LEGACY_KEYS), which the census does not count');
+  // 46b. A CATEGORY LITERAL THE CATEGORY LIST CANNOT MATCH (the 2.369.120 side
+  //      finding): `category: 'Integration'` beside `t('Integration')` in the
+  //      list renders into a bucket nobody lists under zh/ja — §44 runs in node
+  //      with no language and cannot see it, so the SPELLING is pinned here.
+  const schema = read('src/lib/settings-schema.js');
+  const bare = [...schema.matchAll(/category:\s*'[^']+'/g)].map((m) => m[0]);
+  ok(bare.length === 0, `every schema category is spelled t('…') (bare literals: ${bare.join(', ') || 'none'})`);
+  ok([..."    type: 'boolean', default: true, category: 'Integration',".matchAll(/category:\s*'[^']+'/g)].length === 1, 'NEGATIVE CONTROL: a bare category literal is what 46b reports');
+  // 46c. THE HARNESS SECTIONS ARE DERIVED, NOT HAND-WRITTEN: no `'claude.`/
+  //      `'codex.`/`'opencode.` key literal remains in the schema except the
+  //      ONE generic legacy row (auto-resume, category Chat).
+  const literalRows = [...schema.matchAll(/^  '(claude|codex|opencode)\.[a-zA-Z]+':/gm)].map((m) => m[0].trim());
+  ok(literalRows.length === 1 && literalRows[0] === "'claude.autoResumeOnLimit':", `the schema hand-writes exactly ONE harness-prefixed row — the generic legacy auto-resume default (found: ${literalRows.join(', ')})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

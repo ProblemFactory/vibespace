@@ -1,0 +1,430 @@
+{
+  "claude.outputStyle": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "CLI default"
+      },
+      {
+        "value": "Concise",
+        "label": "Concise"
+      },
+      {
+        "value": "Explanatory",
+        "label": "Explanatory"
+      },
+      {
+        "value": "Learning",
+        "label": "Learning"
+      },
+      {
+        "value": "Proactive",
+        "label": "Proactive"
+      }
+    ],
+    "label": "Default output style (Claude)",
+    "description": "The CLI output style new chat sessions start with. \"Concise\" makes Claude lead with results and skip preamble. Blank = the CLI's own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "codex.outputStyle": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "agent default"
+      },
+      {
+        "value": "none",
+        "label": "none"
+      },
+      {
+        "value": "friendly",
+        "label": "friendly"
+      },
+      {
+        "value": "pragmatic",
+        "label": "pragmatic"
+      }
+    ],
+    "label": "Default response style (Codex)",
+    "description": "The personality new Codex chat sessions start with. Blank = leave it to your own ~/.codex/config.toml (this is the default; VibeSpace used to force \"pragmatic\" on every session). Unlike Claude, a running Codex session CAN be re-styled from the chat status bar — it applies from the next turn.",
+    "category": "Codex",
+    "liveApply": true
+  },
+  "codex.limitResetCredit": {
+    "type": "enum",
+    "default": "off",
+    "options": [
+      {
+        "value": "off",
+        "label": "Off — never spend a reset credit automatically"
+      },
+      {
+        "value": "auto",
+        "label": "Auto — consume one before switching accounts"
+      }
+    ],
+    "label": "Use stored reset credits on a usage limit (Codex)",
+    "description": "ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, \"Auto\" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there.",
+    "category": "Codex",
+    "liveApply": true
+  },
+  "claude.defaultModel": {
+    "type": "enum",
+    "default": "",
+    "combobox": true,
+    "options": [
+      {
+        "value": "",
+        "label": "Default"
+      },
+      {
+        "value": "fable",
+        "label": "fable (latest, 200k)"
+      },
+      {
+        "value": "fable[1m]",
+        "label": "fable[1m] (latest, 1M context)"
+      },
+      {
+        "value": "opus",
+        "label": "opus (latest, 200k)"
+      },
+      {
+        "value": "opus[1m]",
+        "label": "opus[1m] (latest, 1M context)"
+      },
+      {
+        "value": "sonnet",
+        "label": "sonnet (latest)"
+      },
+      {
+        "value": "sonnet[1m]",
+        "label": "sonnet[1m] (latest, 1M context)"
+      },
+      {
+        "value": "haiku",
+        "label": "haiku (latest)"
+      }
+    ],
+    "label": "Default model",
+    "description": "Select an alias or choose \"Custom...\" to type a specific model ID (e.g. claude-opus-4-6-20250414). Applies to NEW sessions: a resumed conversation keeps the model the Claude CLI recorded for it (a transcript names the model that served a turn but never its 1M-context variant, so VibeSpace commands none) — set one for a specific conversation under Session parameters on its card.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.defaultPermissionMode": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "Default"
+      },
+      {
+        "value": "auto",
+        "label": "Auto"
+      },
+      {
+        "value": "bypassPermissions",
+        "label": "Bypass"
+      },
+      {
+        "value": "plan",
+        "label": "Plan"
+      },
+      {
+        "value": "acceptEdits",
+        "label": "Accept Edits"
+      }
+    ],
+    "label": "Default permission mode",
+    "description": "Default Claude permission mode for new or resumed Claude sessions.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.defaultEffort": {
+    "type": "enum",
+    "default": "",
+    "combobox": true,
+    "options": [
+      {
+        "value": "",
+        "label": "Auto (model default)"
+      },
+      {
+        "value": "low",
+        "label": "Low"
+      },
+      {
+        "value": "medium",
+        "label": "Medium"
+      },
+      {
+        "value": "high",
+        "label": "High"
+      },
+      {
+        "value": "max",
+        "label": "Max"
+      }
+    ],
+    "label": "Default effort level",
+    "description": "Select a level or choose \"Custom...\" to type any value (e.g. xhigh). Applies to NEW sessions: nothing Claude writes records the effort a turn ran at, so a resume commands none and the CLI’s own config decides — set one for a specific conversation under Session parameters on its card.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.defaultExtraArgs": {
+    "type": "text",
+    "default": "",
+    "label": "Default extra args",
+    "description": "Extra Claude CLI args appended when starting a Claude session.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.disableModelFallback": {
+    "type": "boolean",
+    "default": false,
+    "label": "Disable model fallback",
+    "description": "When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.transcriptRetentionDays": {
+    "type": "number",
+    "default": 36500,
+    "min": 0,
+    "max": 36500,
+    "step": 30,
+    "label": "Keep Claude Code conversations for (days)",
+    "description": "Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code's own setting alone.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.brief": {
+    "type": "boolean",
+    "default": false,
+    "label": "Let the agent send you messages and files (--brief)",
+    "description": "Starts new Claude sessions with the CLI's agent-to-user channel enabled: the agent gets the SendUserMessage and SendUserFile tools and VibeSpace renders each call as a highlighted \"message for you\" card (files are published to a private link in this instance). Off by default because it changes how the agent writes — with --brief, plain text outside the tool is hidden from the message view. Applies to newly started sessions.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.systemPromptSnapshot": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "CLI default"
+      },
+      {
+        "value": "on",
+        "label": "On — record once, reuse verbatim"
+      },
+      {
+        "value": "off",
+        "label": "Off — never record"
+      }
+    ],
+    "label": "System prompt snapshot (--system-prompt-snapshot)",
+    "description": "Passes the CLI's --system-prompt-snapshot flag to new Claude sessions: \"on\" records the system prompt once per conversation and reuses it verbatim on every request and resume, which keeps the prompt cache warm across resumes. Blank = leave the CLI's own default alone.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.excludeDynamicSystemPromptSections": {
+    "type": "boolean",
+    "default": false,
+    "label": "Move per-machine prompt sections into the first message",
+    "description": "Passes --exclude-dynamic-system-prompt-sections: the cwd, environment info, memory paths and git status move out of the system prompt and into the first user message, so the cached prefix is identical across machines and users. Only applies with the default system prompt. Off by default — measure before turning it on.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.autocompact": {
+    "type": "enum",
+    "default": "",
+    "combobox": true,
+    "options": [
+      {
+        "value": "",
+        "label": "CLI default"
+      },
+      {
+        "value": "auto",
+        "label": "Auto"
+      },
+      {
+        "value": "100k",
+        "label": "100k"
+      },
+      {
+        "value": "200k",
+        "label": "200k"
+      },
+      {
+        "value": "500k",
+        "label": "500k"
+      }
+    ],
+    "label": "Auto-compact window size (--autocompact)",
+    "description": "Passes --autocompact to new Claude sessions. \"auto\", or a token budget between 100k and 1M (e.g. 500k, 200000). A smaller window compacts sooner, which keeps each request cheaper at the cost of more compaction. Blank = the CLI decides. A value the CLI would reject is ignored rather than passed on.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "claude.tuiRenderer": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "Auto (CLI preference)"
+      },
+      {
+        "value": "fullscreen",
+        "label": "Fullscreen (flicker-free)"
+      },
+      {
+        "value": "classic",
+        "label": "Classic (main screen)"
+      }
+    ],
+    "label": "Terminal TUI renderer",
+    "description": "Renderer for terminal-mode Claude sessions. \"Fullscreen\" forces the flicker-free alternate-screen renderer with virtualized scrollback (CLAUDE_CODE_NO_FLICKER=1, same as /tui fullscreen); \"Classic\" forces the main-screen renderer; \"Auto\" follows the preference saved by the CLI (/tui). Applies to newly started sessions.",
+    "category": "Claude",
+    "liveApply": true
+  },
+  "codex.defaultModel": {
+    "type": "enum",
+    "default": "",
+    "combobox": true,
+    "options": [
+      {
+        "value": "",
+        "label": "Default"
+      },
+      {
+        "value": "gpt-6-astra",
+        "label": "gpt-6-astra"
+      }
+    ],
+    "label": "Default model",
+    "description": "Select a known model or choose \"Custom...\" to type a specific model ID. Applies to NEW sessions: a resumed conversation keeps its own value (set one for a specific conversation under Session parameters on its card).",
+    "category": "Codex",
+    "liveApply": true
+  },
+  "codex.defaultPermissionMode": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "Default"
+      },
+      {
+        "value": "read-only",
+        "label": "Read Only"
+      },
+      {
+        "value": "safe-yolo",
+        "label": "Safe Yolo"
+      },
+      {
+        "value": "yolo",
+        "label": "Yolo"
+      }
+    ],
+    "label": "Default permission mode",
+    "description": "Default Codex permission mode for new or resumed Codex sessions.",
+    "category": "Codex",
+    "liveApply": true
+  },
+  "codex.defaultEffort": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "Auto (model default)"
+      },
+      {
+        "value": "minimal",
+        "label": "Minimal"
+      },
+      {
+        "value": "low",
+        "label": "Low"
+      },
+      {
+        "value": "medium",
+        "label": "Medium"
+      },
+      {
+        "value": "high",
+        "label": "High"
+      },
+      {
+        "value": "xhigh",
+        "label": "XHigh"
+      }
+    ],
+    "label": "Default effort level",
+    "description": "Default Codex reasoning effort for NEW Codex sessions. A resumed conversation keeps the effort its own last turn ran at; set one for a specific conversation under Session parameters on its card.",
+    "category": "Codex",
+    "liveApply": true
+  },
+  "codex.defaultExtraArgs": {
+    "type": "text",
+    "default": "",
+    "label": "Default extra args",
+    "description": "Extra Codex CLI args appended when starting a Codex session.",
+    "category": "Codex",
+    "liveApply": true
+  },
+  "opencode.defaultModel": {
+    "type": "enum",
+    "default": "",
+    "combobox": true,
+    "options": [
+      {
+        "value": "",
+        "label": "Default"
+      }
+    ],
+    "label": "Default model",
+    "description": "A model id the agent offers (provider/model, e.g. opencode/big-pickle) — the list fills from the agent once a session has started; empty keeps the agent default. Applies to NEW sessions: a resumed conversation keeps the model OpenCode’s own session record names (that needs the OpenCode background service; without it the default applies and the server log says which rung it used).",
+    "category": "OpenCode",
+    "liveApply": true
+  },
+  "opencode.defaultPermissionMode": {
+    "type": "enum",
+    "default": "",
+    "options": [
+      {
+        "value": "",
+        "label": "Default"
+      },
+      {
+        "value": "build",
+        "label": "Build"
+      },
+      {
+        "value": "plan",
+        "label": "Plan"
+      }
+    ],
+    "label": "Default permission mode",
+    "description": "Default OpenCode session mode for new sessions: build executes tools per its permission rules, plan disallows edits.",
+    "category": "OpenCode",
+    "liveApply": true
+  },
+  "opencode.defaultExtraArgs": {
+    "type": "text",
+    "default": "",
+    "label": "Default extra args",
+    "description": "Extra OpenCode CLI args appended when starting an OpenCode session.",
+    "category": "OpenCode",
+    "liveApply": true
+  }
+}

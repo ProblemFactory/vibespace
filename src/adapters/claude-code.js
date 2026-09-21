@@ -45,10 +45,13 @@ const os = require('os');
  * all — an empty/invalid value simply drops the flag (spawn hygiene: flags
  * carry switches, never secrets and never unvalidated user text).
  */
+// `key` = the ROW key of the claude settings table (src/harness-settings.js)
+// — the value arrives as `opts.settings.<key>` (design-harness-settings §5),
+// never as a `claude.*` settings path the adapter would have to spell.
 const PROMPT_CACHE_FLAGS = [
-  { key: 'claude.systemPromptSnapshot', flag: '--system-prompt-snapshot', kind: 'value', validate: (v) => (v === 'on' || v === 'off' ? v : null) },
-  { key: 'claude.excludeDynamicSystemPromptSections', flag: '--exclude-dynamic-system-prompt-sections', kind: 'boolean' },
-  { key: 'claude.autocompact', flag: '--autocompact', kind: 'value', validate: (v) => validAutocompact(v) },
+  { key: 'systemPromptSnapshot', flag: '--system-prompt-snapshot', kind: 'value', validate: (v) => (v === 'on' || v === 'off' ? v : null) },
+  { key: 'excludeDynamicSystemPromptSections', flag: '--exclude-dynamic-system-prompt-sections', kind: 'boolean' },
+  { key: 'autocompact', flag: '--autocompact', kind: 'value', validate: (v) => validAutocompact(v) },
 ];
 
 /** 'auto' | 100k–1M as the CLI spells it. Returns null (⇒ drop the flag) for
@@ -85,7 +88,14 @@ class ClaudeCodeAdapter extends BackendAdapter {
    * This adapter provides the command line arguments and session config.
    */
   buildSessionArgs(options) {
-    const { cwd, model, permissionMode, resumeId, sessionName, effort, outputStyle, extraArgs = [], mode = 'chat', tuiRenderer, disableModelFallback, neutralizeKeyHelper } = options;
+    const { cwd, model, permissionMode, resumeId, sessionName, effort, outputStyle, extraArgs = [], mode = 'chat', neutralizeKeyHelper } = options;
+    // THE INSTANCE SPAWN SETTINGS BAG (design-harness-settings §5): every spawn
+    // row of the claude table, typed by the server (harnessSpawnSettings) —
+    // brief / the prompt-cache trio / disableModelFallback / tuiRenderer. An
+    // explicit per-session `tuiRenderer` pick still outranks the instance row.
+    const S = options.settings && typeof options.settings === 'object' ? options.settings : {};
+    const tuiRenderer = options.tuiRenderer || S.tuiRenderer || '';
+    const disableModelFallback = S.disableModelFallback === true;
     const args = [];
 
     if (resumeId) {
@@ -122,11 +132,11 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // communication` — the CLI's own first-class channel, which VibeSpace now
     // renders as a highlighted card (src/user-channel.js). A boolean switch,
     // no value, so nothing user-typed reaches argv.
-    if (options.brief) args.push('--brief');
+    if (S.brief === true) args.push('--brief');
     // Prompt-cache levers — each an explicit setting, each validated against
     // the CLI's own accepted vocabulary before it becomes an argv token.
     for (const row of PROMPT_CACHE_FLAGS) {
-      const raw = options.promptCache ? options.promptCache[row.key] : undefined;
+      const raw = S[row.key];
       if (row.kind === 'boolean') { if (raw === true) args.push(row.flag); continue; }
       const v = row.validate(raw);
       if (v) args.push(row.flag, v);

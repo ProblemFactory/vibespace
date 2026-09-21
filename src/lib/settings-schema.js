@@ -6,6 +6,7 @@
  */
 
 import { t } from './i18n.js';
+import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js'; // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
 
 const SETTINGS_SCHEMA = {
   // ── Toolbar & Layout ──
@@ -444,35 +445,9 @@ const SETTINGS_SCHEMA = {
     description: t('VS Code-style port discovery: linked machines (paired devices / connected hosts) are checked every ~30s, and a service that STARTS listening (a dev server, a database) shows a toast offering to forward it. Ports above 32767 and ports already forwarded are ignored. Turn off to stop the background checks.'),
     category: t('Session'), liveApply: true,
   },
-  'claude.outputStyle': {
-    // enum options are {value,label} OBJECTS (settings-ui contract) — the
-    // 2.368.0 plain-string list rendered a fully BLANK dropdown (owner-caught)
-    type: 'enum', default: '', options: [
-      { value: '', label: t('CLI default') },
-      { value: 'Concise', label: 'Concise' },
-      { value: 'Explanatory', label: 'Explanatory' },
-      { value: 'Learning', label: 'Learning' },
-      { value: 'Proactive', label: 'Proactive' },
-    ],
-    label: t('Default output style (Claude)'),
-    description: t('The CLI output style new chat sessions start with. "Concise" makes Claude lead with results and skip preamble. Blank = the CLI\'s own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'codex.outputStyle': {
-    // codex's own vocabulary (Personality: none | friendly | pragmatic — the
-    // 0.153.4 schema enum), NOT claude's output styles. The `<prefix>.outputStyle`
-    // read in ws-create is per-harness for exactly this reason.
-    type: 'enum', default: '', options: [
-      { value: '', label: t('agent default') },
-      { value: 'none', label: 'none' },
-      { value: 'friendly', label: 'friendly' },
-      { value: 'pragmatic', label: 'pragmatic' },
-    ],
-    label: t('Default response style (Codex)'),
-    description: t('The personality new Codex chat sessions start with. Blank = leave it to your own ~/.codex/config.toml (this is the default; VibeSpace used to force "pragmatic" on every session). Unlike Claude, a running Codex session CAN be re-styled from the chat status bar — it applies from the next turn.'),
-    category: t('Codex'), liveApply: true,
-  },
-  // THE KEY IS A LEGACY SPELLING, THE FEATURE IS NOT (owner ruling 2026-09-08:
+  // THE KEY IS A LEGACY SPELLING, THE FEATURE IS NOT (owner ruling 2026-09-08;
+  // design-harness-settings 2026-09-20: deliberately NOT a row of the claude
+  // table below — it is generic, so it stays a hand-written Chat row here.
   // auto-resume is generic). It is the instance default for EVERY harness that
   // can both classify a limit and restart a turn — capsOf(backend).autoResume
   // .supported — so the copy says so. The KEY keeps its 'claude.' prefix on
@@ -484,15 +459,6 @@ const SETTINGS_SCHEMA = {
     label: t('Continue automatically when a usage limit resets'),
     description: t('DEFAULT for new chat sessions on any agent that reports usage limits (Claude, Codex): when the account is out of quota and there is no other account to switch to, wait for the reset — or for the quota to come back early — and then continue the interrupted task by itself. Each session can override this in the chat status bar. Off by default because continuing spends quota without you being there.'),
     category: t('Chat'), liveApply: true,
-  },
-  'codex.limitResetCredit': {
-    type: 'enum', default: 'off', options: [
-      { value: 'off', label: t('Off — never spend a reset credit automatically') },
-      { value: 'auto', label: t('Auto — consume one before switching accounts') },
-    ],
-    label: t('Use stored reset credits on a usage limit (Codex)'),
-    description: t('ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, "Auto" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there.'),
-    category: t('Codex'), liveApply: true,
   },
   'agentd.publicUrl': {
     type: 'string', default: '',
@@ -725,194 +691,6 @@ const SETTINGS_SCHEMA = {
     category: t('Session'), liveApply: true,
   },
 
-  // ── Claude ──
-  'claude.defaultModel': {
-    type: 'enum', default: '', combobox: true,
-    options: [
-      { value: '', label: t('Default') },
-      { value: 'fable', label: 'fable (latest, 200k)' },
-      { value: 'fable[1m]', label: 'fable[1m] (latest, 1M context)' },
-      { value: 'opus', label: 'opus (latest, 200k)' },
-      { value: 'opus[1m]', label: 'opus[1m] (latest, 1M context)' },
-      { value: 'sonnet', label: 'sonnet (latest)' },
-      { value: 'sonnet[1m]', label: 'sonnet[1m] (latest, 1M context)' },
-      { value: 'haiku', label: 'haiku (latest)' },
-    ], // dynamically updated from /api/available-models; Custom... allows typing full model IDs
-    label: t('Default model'),
-    description: t('Select an alias or choose "Custom..." to type a specific model ID (e.g. claude-opus-4-6-20250414). Applies to NEW sessions: a resumed conversation keeps the model the Claude CLI recorded for it (a transcript names the model that served a turn but never its 1M-context variant, so VibeSpace commands none) — set one for a specific conversation under Session parameters on its card.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.defaultPermissionMode': {
-    type: 'enum', default: '',
-    options: [
-      { value: '', label: t('Default') },
-      { value: 'auto', label: t('Auto') },
-      { value: 'bypassPermissions', label: t('Bypass') },
-      { value: 'plan', label: t('Plan') },
-      { value: 'acceptEdits', label: t('Accept Edits') },
-    ],
-    label: t('Default permission mode'),
-    description: t('Default Claude permission mode for new or resumed Claude sessions.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.defaultEffort': {
-    type: 'enum', default: '', combobox: true,
-    options: [
-      { value: '', label: t('Auto (model default)') },
-      { value: 'low', label: t('Low') },
-      { value: 'medium', label: t('Medium') },
-      { value: 'high', label: t('High') },
-      { value: 'max', label: t('Max') },
-    ], // dynamically updated from claude --help; Custom... allows typing values like xhigh
-    label: t('Default effort level'),
-    description: t('Select a level or choose "Custom..." to type any value (e.g. xhigh). Applies to NEW sessions: nothing Claude writes records the effort a turn ran at, so a resume commands none and the CLI’s own config decides — set one for a specific conversation under Session parameters on its card.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.defaultExtraArgs': {
-    type: 'text', default: '',
-    label: t('Default extra args'),
-    description: t('Extra Claude CLI args appended when starting a Claude session.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.disableModelFallback': {
-    type: 'boolean', default: false,
-    label: t('Disable model fallback'),
-    description: t('When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI\'s "Switch models when a message is flagged" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue.'),
-    category: t('Claude'), liveApply: true,
-  },
-  // ── agent→user channel + prompt-cache levers (owner ruling 8(c),
-  // design-harness-features §2.12/§1.3). Every one of these is DEFAULT OFF and
-  // maps to ONE flag dumped from `claude --help` (2.1.257); the adapter
-  // validates the value before it becomes an argv token. ──
-  'claude.transcriptRetentionDays': {
-    // 2.369.118 (owner: "claude code 默认会删除旧对话…默认值配成 100 年"): the CLI sweeps
-    // transcripts older than cleanupPeriodDays (its default 30) at every start.
-    // The server writes this into ~/.claude/settings.json at boot + on change
-    // (agent-tool-generators ensureClaudeRetention) and hands it to remote hosts
-    // at (re)install (VIBESPACE_CLAUDE_KEEP_DAYS → the hook-register helper).
-    type: 'number', default: 36500, min: 0, max: 36500, step: 30,
-    label: t('Keep Claude Code conversations for (days)'),
-    description: t('Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code\'s own setting alone.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.brief': {
-    type: 'boolean', default: false,
-    label: t('Let the agent send you messages and files (--brief)'),
-    description: t('Starts new Claude sessions with the CLI\'s agent-to-user channel enabled: the agent gets the SendUserMessage and SendUserFile tools and VibeSpace renders each call as a highlighted "message for you" card (files are published to a private link in this instance). Off by default because it changes how the agent writes — with --brief, plain text outside the tool is hidden from the message view. Applies to newly started sessions.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.systemPromptSnapshot': {
-    type: 'enum', default: '', options: [
-      { value: '', label: t('CLI default') },
-      { value: 'on', label: t('On — record once, reuse verbatim') },
-      { value: 'off', label: t('Off — never record') },
-    ],
-    label: t('System prompt snapshot (--system-prompt-snapshot)'),
-    description: t('Passes the CLI\'s --system-prompt-snapshot flag to new Claude sessions: "on" records the system prompt once per conversation and reuses it verbatim on every request and resume, which keeps the prompt cache warm across resumes. Blank = leave the CLI\'s own default alone.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.excludeDynamicSystemPromptSections': {
-    type: 'boolean', default: false,
-    label: t('Move per-machine prompt sections into the first message'),
-    description: t('Passes --exclude-dynamic-system-prompt-sections: the cwd, environment info, memory paths and git status move out of the system prompt and into the first user message, so the cached prefix is identical across machines and users. Only applies with the default system prompt. Off by default — measure before turning it on.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.autocompact': {
-    type: 'enum', default: '', combobox: true, options: [
-      { value: '', label: t('CLI default') },
-      { value: 'auto', label: t('Auto') },
-      { value: '100k', label: '100k' },
-      { value: '200k', label: '200k' },
-      { value: '500k', label: '500k' },
-    ],
-    label: t('Auto-compact window size (--autocompact)'),
-    description: t('Passes --autocompact to new Claude sessions. "auto", or a token budget between 100k and 1M (e.g. 500k, 200000). A smaller window compacts sooner, which keeps each request cheaper at the cost of more compaction. Blank = the CLI decides. A value the CLI would reject is ignored rather than passed on.'),
-    category: t('Claude'), liveApply: true,
-  },
-  'claude.tuiRenderer': {
-    type: 'enum', default: '',
-    options: [
-      { value: '', label: t('Auto (CLI preference)') },
-      { value: 'fullscreen', label: t('Fullscreen (flicker-free)') },
-      { value: 'classic', label: t('Classic (main screen)') },
-    ],
-    label: t('Terminal TUI renderer'),
-    description: t('Renderer for terminal-mode Claude sessions. "Fullscreen" forces the flicker-free alternate-screen renderer with virtualized scrollback (CLAUDE_CODE_NO_FLICKER=1, same as /tui fullscreen); "Classic" forces the main-screen renderer; "Auto" follows the preference saved by the CLI (/tui). Applies to newly started sessions.'),
-    category: t('Claude'), liveApply: true,
-  },
-
-  // ── Codex ──
-  'codex.defaultModel': {
-    type: 'enum', default: '', combobox: true,
-    options: [
-      { value: '', label: t('Default') },
-      { value: 'gpt-6-astra', label: 'gpt-6-astra' },
-    ],
-    label: t('Default model'),
-    description: t('Select a known model or choose "Custom..." to type a specific model ID. Applies to NEW sessions: a resumed conversation keeps its own value (set one for a specific conversation under Session parameters on its card).'),
-    category: t('Codex'), liveApply: true,
-  },
-  'codex.defaultPermissionMode': {
-    type: 'enum', default: '',
-    options: [
-      { value: '', label: t('Default') },
-      { value: 'read-only', label: t('Read Only') },
-      { value: 'safe-yolo', label: t('Safe Yolo') },
-      { value: 'yolo', label: t('Yolo') },
-    ],
-    label: t('Default permission mode'),
-    description: t('Default Codex permission mode for new or resumed Codex sessions.'),
-    category: t('Codex'), liveApply: true,
-  },
-  'codex.defaultEffort': {
-    type: 'enum', default: '',
-    options: [
-      { value: '', label: t('Auto (model default)') },
-      { value: 'minimal', label: t('Minimal') },
-      { value: 'low', label: t('Low') },
-      { value: 'medium', label: t('Medium') },
-      { value: 'high', label: t('High') },
-      { value: 'xhigh', label: t('XHigh') },
-    ],
-    label: t('Default effort level'),
-    description: t('Default Codex reasoning effort for NEW Codex sessions. A resumed conversation keeps the effort its own last turn ran at; set one for a specific conversation under Session parameters on its card.'),
-    category: t('Codex'), liveApply: true,
-  },
-  'codex.defaultExtraArgs': {
-    type: 'text', default: '',
-    label: t('Default extra args'),
-    description: t('Extra Codex CLI args appended when starting a Codex session.'),
-    category: t('Codex'), liveApply: true,
-  },
-
-  // ── OpenCode (ACP v1 harness, S8) ──
-  'opencode.defaultModel': {
-    type: 'enum', default: '', combobox: true,
-    options: [
-      { value: '', label: t('Default') },
-    ],
-    label: t('Default model'),
-    description: t('A model id the agent offers (provider/model, e.g. opencode/big-pickle) — the list fills from the agent once a session has started; empty keeps the agent default. Applies to NEW sessions: a resumed conversation keeps the model OpenCode’s own session record names (that needs the OpenCode background service; without it the default applies and the server log says which rung it used).'),
-    category: t('OpenCode'), liveApply: true,
-  },
-  'opencode.defaultPermissionMode': {
-    type: 'enum', default: '',
-    options: [
-      { value: '', label: t('Default') },
-      { value: 'build', label: t('Build') },
-      { value: 'plan', label: t('Plan') },
-    ],
-    label: t('Default permission mode'),
-    description: t('Default OpenCode session mode for new sessions: build executes tools per its permission rules, plan disallows edits.'),
-    category: t('OpenCode'), liveApply: true,
-  },
-  'opencode.defaultExtraArgs': {
-    type: 'text', default: '',
-    label: t('Default extra args'),
-    description: t('Extra OpenCode CLI args appended when starting an OpenCode session.'),
-    category: t('OpenCode'), liveApply: true,
-  },
-
   // ── Sidebar ──
   'sidebar.defaultTab': {
     type: 'enum', default: 'folders',
@@ -1017,6 +795,78 @@ const SETTINGS_SCHEMA = {
     category: t('Session Card'), liveApply: true,
   },
 };
+
+// ── HARNESS SECTIONS ARE DERIVED (docs/design-harness-settings.zh.md §4) ──
+// The Claude / Codex / OpenCode categories are not hand-written rows any more:
+// every row comes from the harness's DECLARED table in src/harness-settings.js
+// (the same object the server reads through harnessSetting() and the
+// descriptor carries by identity), re-wrapped with the real t() here so the
+// same English key hits the same zh/ja entry. The persisted path is
+// `${prefix}.${key}` — byte-identical to the old literal keys, so nothing in
+// data/settings.json moves. Each derived entry also carries `harness` (the
+// prefix) and `apply` (spawn | server | cli-config) so the Settings window can
+// say WHERE a value goes and, for a cli-config row, WHICH machines it reached
+// (the apply chip + receipts). scripts/test-harness-settings.mjs pins the
+// derived rows field-equal to the pre-derivation schema snapshot.
+const HARNESS_SETTING_OWNERS = new Map(); // prefix → { category, paths[], table }
+function deriveHarnessRow(tbl, r) {
+  const entry = { type: r.type, default: r.default, label: t(r.label), description: t(r.description), category: t(tbl.category), liveApply: true, harness: tbl.prefix, apply: r.apply };
+  if (r.options) entry.options = r.options.map((o) => ({ value: o.value, label: t(o.label) }));
+  for (const k of ['combobox', 'min', 'max', 'step']) if (r[k] !== undefined) entry[k] = r[k];
+  return entry;
+}
+function deriveHarnessTable(tbl) {
+  const paths = [];
+  for (const r of tbl.rows) { const p = settingPath(tbl.prefix, r.key); SETTINGS_SCHEMA[p] = deriveHarnessRow(tbl, r); paths.push(p); }
+  HARNESS_SETTING_OWNERS.set(tbl.prefix, { category: t(tbl.category), paths, table: tbl });
+  return paths;
+}
+for (const tbl of Object.values(HARNESS_SETTINGS)) deriveHarnessTable(tbl);
+/** A CONTRIBUTED harness's table (design §7; arrives on /api/home): validated
+ *  with the contributor rules — its prefix must be its own id, never a
+ *  built-in namespace — then derived exactly like a built-in one. Mirrors
+ *  registerPluginSettings below. Throws on an invalid table. */
+export function registerHarnessSettings(id, table) {
+  const errs = checkTable(table, { contributed: { id } });
+  if (errs.length) throw new Error(`harness settings for '${id}' refused: ${errs.join('; ')}`);
+  unregisterHarnessSettings(id);
+  const paths = deriveHarnessTable(table);
+  const cat = t(table.category);
+  if (paths.length && !SETTINGS_CATEGORIES.includes(cat)) SETTINGS_CATEGORIES.push(cat);
+  return paths;
+}
+export function unregisterHarnessSettings(id) {
+  if (Object.prototype.hasOwnProperty.call(HARNESS_SETTINGS, id)) throw new Error(`harness '${id}' is built-in; its settings cannot be unregistered`);
+  const own = HARNESS_SETTING_OWNERS.get(id);
+  if (!own) return false;
+  for (const p of own.paths) delete SETTINGS_SCHEMA[p];
+  HARNESS_SETTING_OWNERS.delete(id);
+  if (![...HARNESS_SETTING_OWNERS.values()].some((o) => o.category === own.category)) {
+    const i = SETTINGS_CATEGORIES.indexOf(own.category);
+    if (i >= 0) SETTINGS_CATEGORIES.splice(i, 1);
+  }
+  return true;
+}
+/** The harness whose section a category is (built-in or registered), with the
+ *  CLI config files its cli-config rows write — for the section's intro line
+ *  and the per-row apply chip. null for a non-harness category. */
+export function harnessSectionFor(category) {
+  for (const [prefix, own] of HARNESS_SETTING_OWNERS) {
+    if (own.category !== category) continue;
+    const files = Object.entries(own.table.files || {}).map(([id, f]) => ({ id, rel: '~/' + f.rel.join('/'), format: f.format }));
+    const written = new Set(rowsOfKind(own.table, 'cli-config').map((r) => r.apply.file));
+    return { prefix, files: files.filter((f) => written.has(f.id)) };
+  }
+  return null;
+}
+/** `~/.claude/settings.json` for a (prefix, file id) — the display path of a cli-config row's target. */
+export function harnessFileRel(prefix, fileId) {
+  const own = HARNESS_SETTING_OWNERS.get(prefix);
+  const f = own && own.table.files && own.table.files[fileId];
+  return f ? '~/' + f.rel.join('/') : null;
+}
+export function harnessSettingPaths(prefix) { return [...(HARNESS_SETTING_OWNERS.get(prefix)?.paths || [])]; }
+
 
 // Ordered category list for UI rendering.
 //

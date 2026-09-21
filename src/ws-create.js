@@ -66,6 +66,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
     setupSessionPty, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta,
     readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled, agentdRemote, dialBridge,
+    harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64,
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
     NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
@@ -477,8 +478,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           {
             const isResume = !!(data.resume && data.resumeId);
             const hstore = (() => { try { return harnessOf(backend).store || {}; } catch { return {}; } })();
-            const prefix = (() => { try { return harnessOf(backend)?.settingsPrefix || backend; } catch { return backend; } })();
-            const instDefault = (key) => { try { return serverSetting(`${prefix}.${key}`) || ''; } catch { return ''; } };
+            // THE instance default of a spawn knob = the harness's DECLARED row
+            // (design-harness-settings §5): typed, defaulted, and absent for a
+            // harness that never declared it (a plain '' — never another
+            // harness's value).
+            const instDefault = (key) => { try { return harnessDeclares(backend, key) ? String(harnessSetting(backend, key) ?? '') : ''; } catch { return ''; } };
             const fromConversation = async (hook) => {
               if (!isResume || typeof hook !== 'function') return '';
               // A conversation whose records cannot be read is a MISSING FACT,
@@ -565,8 +569,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // spawn: the caps row is the ONE enum.
             outputStyle: (data._effOutputStyle = (() => {
               const rs = capsOf(backend).responseStyle || { closed: true, values: [] };
-              let prefix = backend; try { prefix = harnessOf(backend)?.settingsPrefix || backend; } catch { /* unknown id: caps are empty anyway */ }
-              const want = data.outputStyle || (() => { try { return serverSetting(`${prefix}.outputStyle`) || ''; } catch { return ''; } })();
+              const want = data.outputStyle || (() => { try { return harnessDeclares(backend, 'outputStyle') ? String(harnessSetting(backend, 'outputStyle') || '') : ''; } catch { return ''; } })();
               // A CLOSED vocabulary (codex Personality) is validated here so an
               // out-of-enum value can never reach a spawn; an OPEN one (claude,
               // whose ~/.claude/output-styles/*.md are real user-defined styles)
@@ -580,25 +583,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // rule in backend-caps decides whether the flag is actually
             // emitted (never on a plain resume — the CLI re-enters its own).
             worktree: !!data.worktree,
-            // --brief + the prompt-cache trio (owner ruling 8(c)): INSTANCE
-            // settings read server-side, so every create path (new, resume,
-            // layout restore, billing switch) behaves the same — the same
-            // reason disableModelFallback is read here and not in the client.
-            brief: (() => { try { return serverSetting('claude.brief') === true; } catch { return false; } })(),
-            promptCache: (() => {
-              const out = {};
-              for (const k of ['claude.systemPromptSnapshot', 'claude.excludeDynamicSystemPromptSections', 'claude.autocompact']) {
-                try { out[k] = serverSetting(k); } catch { /* unreadable settings store: leave the flag off */ }
-              }
-              return out;
-            })(),
+            // EVERY declared spawn row of this harness, typed, in ONE bag
+            // (design-harness-settings §5): --brief, the prompt-cache trio,
+            // disableModelFallback, tuiRenderer, … — INSTANCE settings read
+            // server-side so every create path (new, resume, layout restore,
+            // billing switch) behaves the same, and the adapter consumes them
+            // as `opts.settings.<key>` (test-harness-contract drives each row).
+            settings: (() => { try { return harnessSpawnSettings(backend); } catch { return {}; } })(),
             initialPrompt: data.initialPrompt || '',
             mode: sessionMode,
+            // an explicit per-session pick only; the instance default rides `settings.tuiRenderer`
             tuiRenderer: data.tuiRenderer || '',
-            // Server-side read (covers every create path uniformly — resume,
-            // layout restore, billing switch); only the claude adapter
-            // consumes it (codex has no model-fallback mechanism).
-            disableModelFallback: (() => { try { return serverSetting('claude.disableModelFallback') === true; } catch { return false; } })(),
             // Shell helper terminals auto-type this — the adapter arms the
             // DISABLE_UPDATE_PROMPT guard (oh-my-zsh's rc-time [Y/n] eats the
             // first typed char: "claude /login" → "laude"). 2.196.0: the field
@@ -1042,8 +1037,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                     // with the absolute path so entries self-heal to execPath.
                     // tools on PATH + the POSIX node finder (ONE definition in
                     // src/remote-shell.js), then self-heal the hook entries.
+                    // VIBESPACE_CLI_CONFIG (design-harness-settings §6): the SAME
+                    // base64 plan the install site sends — a host only ever
+                    // spawned into (never Installed) gets the managed CLI-config
+                    // keys at its next session start. base64 is shell-safe bare.
                     prelude += 'export PATH="$HOME/.vibespace/bin:$PATH"; ' + nodeFinder()
-                      + `[ -n "$VS_NODE" ] && "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; `;
+                      + `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `;
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
                     tokenAssign = `VIBESPACE_SESSION_TOKEN="$(cat "$HOME/.vibespace/bin/${tokName}")" EDITOR="$HOME/.vibespace/editor/code" `;
@@ -1120,7 +1119,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // same POSIX node finder as the ssh prelude (2.244.4 — a bare
                 // `node` is unresolvable in dash/non-login shells on nvm hosts)
                 + nodeFinder()
-                + `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`], { timeoutMs: 12000 }).catch(() => {});
+                + `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`],
+                // VIBESPACE_CLI_CONFIG rides the daemon's run-cmd env merge (no new
+                // op, no capability bit — run-cmd predates this): the device's own
+                // claude/codex configs get the managed keys too (design §6).
+                { env: { VIBESPACE_CLI_CONFIG: cliConfigPlanB64() }, timeoutMs: 12000 }).catch(() => {});
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
               const net = require('net');

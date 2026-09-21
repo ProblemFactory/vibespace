@@ -7,6 +7,8 @@ const { MessageManager } = require('../message-manager');
 const store = require('../session-store');
 const { writerSweepScript } = require('../writer-sweep');
 const { loginState } = require('../login-expiry'); // PURE: refreshTokenExpiresAt -> ok/expiring/expired/logged-out/unknown
+const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
+const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file object over the table's `files` entry
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -41,6 +43,14 @@ function parseClaudeAuth(dir) {
  *  treats as "do not block". Only harnesses whose credential format carries a
  *  login deadline declare this; the others simply do not, and accounts.js
  *  answers 'unknown' for them rather than inventing a verdict. */
+// THE ONE CLI config file VibeSpace may write for claude (design-harness-settings
+// §2): ~/.claude/settings.json — the hook entries AND the managed keys
+// (cleanupPeriodDays) live in it, so `inject.hookFile` and `configFiles.settings`
+// are the SAME object (test-harness-contract pins the identity; the path is
+// spelled once, in the PURE table's `files.settings.rel`). Never created by us:
+// the CLI writes its own on first run.
+const SETTINGS_FILE = cliConfigFile(HARNESS_SETTINGS.claude.files.settings, { createIfMissing: false });
+
 function claudeLoginState(dir, now = Date.now()) {
   const fp = path.join(dir, '.credentials.json');
   let raw = null;
@@ -152,13 +162,19 @@ module.exports = {
     deliver: (session, text, deps) => !!deps.sendChatInput(session, text),
   },
   settingsPrefix: 'claude',
+  // THE SETTINGS TABLE (design-harness-settings §2): joined by OBJECT IDENTITY
+  // like `caps` above — the schema derives the Claude section from it, the
+  // server reads every row through harnessSetting(), and every cli-config row
+  // names one of `configFiles` below.
+  settings: HARNESS_SETTINGS.claude,
+  configFiles: { settings: SETTINGS_FILE },
   // CONTEXT INJECTION strategy (S6): the CLI's own hooks carry task context
   // (SessionStart), per-prompt notices (UserPromptSubmit) and the stop-time
   // bookkeeping nudge (Stop); SessionStart output is honoured, so the
   // seen-gates in agent-routes advance on delivery.
   inject: {
     kind: 'hooks',
-    hookFile: { file: () => path.join(os.homedir(), '.claude', 'settings.json'), createIfMissing: false },
+    hookFile: SETTINGS_FILE,               // the SAME object as configFiles.settings — one spelling of the path
     hookEvents: ['SessionStart', 'UserPromptSubmit', 'Stop'],
     sessionStartHonoured: true,
   },

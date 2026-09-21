@@ -437,6 +437,7 @@ const {
   broadcastToSession, getAutoResume: () => { try { return autoResume; } catch { return null; } }, getOtelIngest: () => { try { return otelIngest; } catch { return null; } }, getQuotaProbe: () => { try { return usage.refreshViaCliPanel; } catch { return null; } }, // both lazy: created further down (TDZ otherwise); otelIngest = B-b3cd org verification
   serverNotice: (...a) => serverNotice(...a),
   serverSetting: (...a) => serverSetting(...a),
+  harnessSetting: (...a) => harnessSetting(...a), harnessDeclares: (...a) => harnessDeclares(...a), // typed per-harness reads (limitResetCredit / disableModelFallback) — lazy: harnessConfig is built further down
   getAccounts: () => { try { return accounts; } catch { return null; } },
   getHosts: () => { try { return hosts; } catch { return null; } },
   getUsageHistory: () => { try { return usageHistory; } catch { return null; } },
@@ -541,9 +542,20 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
 const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
-  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ensureClaudeRetention,
+  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
   agentHooksStatus, HOOK_OPTOUT_FILE,
 } = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT });
+// ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
+// THE typed accessors over the descriptor-declared tables (harnessSetting /
+// harnessDeclares / harnessSpawnSettings — threaded to ws-create and the pool
+// engine via deps, never a literal harness id) + the CLI-config plan every
+// machine applies (local: in-process below; remote: VIBESPACE_CLI_CONFIG on the
+// install/prelude/dial sites in hosts.js and ws-create.js).
+const harnessConfig = require('./src/server/harness-config-sync.js').create({
+  serverSetting: (...a) => serverSetting(...a), harnesses: require('./src/harnesses'), adapterRegistry, activeSessions, hookRegistrationSafe,
+  log: (...a) => console.log(...a), warn: (...a) => console.warn(...a),
+});
+const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 } = harnessConfig;
 // Generic operator-visible notice channel (2.226.0, user directive "不要静默
 // 失败"): server-side probes report through this instead of dying in the log —
 // every connected client toasts it (+ it lands in toast/notification history)
@@ -761,33 +773,22 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     const was = (prev || {})['agents.vibespaceIntegration'] !== false;
     const now = (next || {})['agents.vibespaceIntegration'] !== false;
     if (was !== now) syncHookRegistration();
-    if ((prev || {})['claude.transcriptRetentionDays'] !== (next || {})['claude.transcriptRetentionDays']) syncClaudeRetention(); // 2.369.118
-    // claude.disableModelFallback flips LIVE sessions too ("动态对对话进行调整"):
-    // apply_flag_settings merges switchModelsOnFlag into the CLI's inline
-    // flag-settings layer, effective from the next turn. Local and remote
-    // chat sessions alike (the control_request rides the same stdin channel
-    // as set_model). Sessions spawned after the flip get it at spawn instead.
-    const fbWas = (prev || {})['claude.disableModelFallback'] === true;
-    const fbNow = (next || {})['claude.disableModelFallback'] === true;
-    if (fbWas !== fbNow) {
-      for (const [sid, sess] of activeSessions) {
-        if (sess.backend !== 'claude' || sess.mode !== 'chat' || !sess.pty) continue;
-        try {
-          const ad = adapterRegistry.get('claude');
-          if (ad?.formatSetFallbackPolicy) sess.pty.write(ad.formatSetFallbackPolicy(fbNow) + '\n');
-        } catch (e) { console.warn(`[fallback-policy] ${sid}: ${e.message}`); }
-      }
-    }
+    // Harness settings (design-harness-settings §5): a cli-config row changed ⇒
+    // re-apply the plan on this machine; a spawn row with a `live` verb changed
+    // (claude disableModelFallback → formatSetFallbackPolicy: apply_flag_settings
+    // merges switchModelsOnFlag into the CLI's inline flag-settings layer,
+    // effective from the next turn, local and remote chat sessions alike) ⇒ the
+    // verb goes to every running chat session whose ADAPTER has it. Sessions
+    // spawned after the flip get it at spawn instead.
+    harnessConfig.onSettingsWrite(next, prev);
   } });
 app.use(persistenceRouter);
 // ── Agent-hook boot registration (deferred from the hook-machinery block so
 // the Integration master switch is readable) — a toggle flipped just before a
 // restart, or an imported config bundle carrying it, converges here.
 syncHookRegistration();
-// TRANSCRIPT RETENTION (2.369.118): claude.transcriptRetentionDays (default 36500 ≈ 100 y) → cleanupPeriodDays in ~/.claude/settings.json at boot + on change (the CLI's own 30-day sweep deletes the conversations this product keeps); remote hosts get it through the install helper (hosts.js)
-function claudeKeepDays() { const v = serverSetting('claude.transcriptRetentionDays'); return v === undefined || v === null || v === '' ? 36500 : Number(v); }
-function syncClaudeRetention() { try { const r = ensureClaudeRetention(claudeKeepDays()); if (r.applied && r.changed) console.log(`[claude-retention] cleanupPeriodDays=${r.days} written to ${r.file} (the CLI's own default sweeps transcripts after 30 days)`); else if (!r.applied && r.reason !== 'off') console.warn('[claude-retention] not applied: ' + r.reason); } catch (e) { console.warn('[claude-retention] failed:', e.message); } }
-if (!process.env.VIBESPACE_SKIP_AGENT_HOOKS) syncClaudeRetention();
+// CLI-CONFIG PLAN AT BOOT (design-harness-settings §5): every cli-config row of every harness (claude transcriptRetentionDays → cleanupPeriodDays, codex historyPersistence → [history] persistence) is written on THIS machine through the CAS writers — guarded by hookRegistrationSafe() inside (a /tmp worktree server never writes the real HOME) and by the smoke belt here; remote machines get the same plan as VIBESPACE_CLI_CONFIG on install / spawn (hosts.js, ws-create.js)
+if (!process.env.VIBESPACE_SKIP_AGENT_HOOKS) harnessConfig.syncCliConfig({ reason: 'boot' });
 // Health probe: catches MID-RUN poisoning (the 2.225.1 incident class) that
 // boot-time registration can't — self-heals + notifies. 60s in, then 6h.
 setTimeout(checkAgentHookHealth, 60000).unref();
@@ -1290,7 +1291,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   res.json({ ok: true, level: lv });
 });
 setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
-app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled() }));
+app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
   // right back — refuse with guidance instead of silently contradicting.
@@ -1307,7 +1308,7 @@ app.post('/api/agent-hooks/uninstall', (req, res) => {
 // ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
-hosts.claudeKeepDays = claudeKeepDays; // 2.369.118: the retention days ride the remote install (VIBESPACE_CLAUDE_KEEP_DAYS)
+hosts.cliConfigPlanB64 = cliConfigPlanB64; // the CLI-config plan rides every remote install + the gated --status probe as VIBESPACE_CLI_CONFIG (design-harness-settings §6)
 const bcastAll = (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); };
 // B-f3e8 one-time migration: dial-tokens.json (deviceId → sha256) folds into
 // the dial host records (dialTokenHash) — see hosts.migrateDialTokenFile.
@@ -1695,6 +1696,7 @@ registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
   readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled,
+  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, // harness settings (design-harness-settings §5/§6)
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,

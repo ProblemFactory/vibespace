@@ -15,6 +15,7 @@
 // stdout/stream twin of caps.streamProtocol exists here.
 const { NULL_QUOTA } = require('./null-quota');
 const { AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume } = require('../backend-caps');
+const { checkTable } = require('../harness-settings'); // PURE: the settings-table validator (design-harness-settings §2/§7)
 
 const QUOTA_PROBE_RUNGS = Object.freeze(['cli-usage', 'rpc-rate-limits', null]);
 const REQUIRED = ['id', 'label', 'kind', 'caps', 'Adapter', 'adapterConfig', 'wrapper'];
@@ -54,6 +55,23 @@ function assertQuotaContract(id, quota) {
   if (!QUOTA_PROBE_RUNGS.includes(quota.probe)) throw new Error(`harness '${id}': quota.probe must be one of ${QUOTA_PROBE_RUNGS.map(String).join('|')} (got ${String(quota.probe)})`);
 }
 
+/** THE SETTINGS TABLE CONTRACT (design-harness-settings §2 + §7). A harness
+ *  may declare `settings` (a PURE table) and `configFiles` (the files it lets
+ *  VibeSpace write). Both are validated HERE so the schema, the server
+ *  accessor and the config plan can trust them: the table's prefix is the
+ *  descriptor's, every cli-config row names a declared writable file with the
+ *  table's own `rel` object, every `live` verb is a method of the Adapter. A
+ *  CONTRIBUTED harness (register) may only own its OWN namespace — never a
+ *  built-in prefix (`claude.*` is not up for grabs), never `plugin.<id>.*`
+ *  (that is the plugin's non-harness settings home). No `settings` = fine
+ *  (shell); a declared table that fails validation THROWS at registration. */
+function assertSettingsContract(h, { full }) {
+  if (h.settings === undefined || h.settings === null) return;
+  const adapterHas = (verb) => !!(h.Adapter && h.Adapter.prototype && typeof h.Adapter.prototype[verb] === 'function');
+  const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles || {}, adapterHas, contributed: full ? null : { id: h.id } });
+  if (errs.length) throw new Error(`harness '${h.id}': settings table invalid — ${errs.join('; ')}`);
+}
+
 /** Built-ins must declare every key (null is a valid declaration for a
  *  terminal-only harness: wrapper/Normalizer/store); chat-capable ones must
  *  fill them. Contributed harnesses (register) need id + quota at minimum —
@@ -70,6 +88,7 @@ function validate(h, { full = true } = {}) {
   }
   assertQuotaContract(h.id, h.quota);
   assertResumeContract(h.id, h.resume);
+  assertSettingsContract(h, { full });
   // THE AUTO-RESUME CAPS ROW IS DERIVED HERE, from what the descriptor really
   // implements — never hand-set on the caps literal (which carries the honest
   // NO_AUTO_RESUME placeholder so an unregistered id still answers). `h.caps`
@@ -106,6 +125,8 @@ function get(id) {
 }
 const harnessOf = get;
 function has(id) { return !!id && REGISTRY.has(id); }
+/** Is this id one of the shipped descriptors (vs a register()ed one)? */
+function isBuiltin(id) { return BUILTIN.has(id); }
 function list() { return [...REGISTRY.values()]; }
 function ids() { return [...REGISTRY.keys()]; }
 const harnessIds = ids;
@@ -140,5 +161,5 @@ function resumeVerb(id) {
   try { return get(id).resume || null; } catch { return null; }
 }
 
-module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, get, has, list, ids, register, unregister, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
+module.exports = { HARNESSES, harnessOf, harnessIds, chatHarnessIds, REQUIRED_DESCRIPTOR_KEYS: REQUIRED, get, has, isBuiltin, list, ids, register, unregister, assertSettingsContract, assertQuotaContract, QUOTA_PROBE_RUNGS, NULL_QUOTA,
   hasLimitSignal, assertResumeContract, autoResumeCaps, resumeVerb, AUTO_RESUME_FORMS, NO_AUTO_RESUME };

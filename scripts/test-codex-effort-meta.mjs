@@ -1322,7 +1322,7 @@ console.log('— ⑪c WIRING: every resume/fork/restart entry point, and where t
   ok(/hasSource/.test(kb) && /nothing claude writes records the effort/i.test(kb),
     '…and the ASYMMETRY, which reads like an omission unless it is written down');
   ok(/NEW sessions only \(B-6b6d\)|NEW Codex sessions/.test(read('docs/settings.md'))
-    && /Applies to NEW sessions/.test(read('src/lib/settings-schema.js')),
+    && /Applies to NEW sessions/.test(read('src/harness-settings.js')), // 2.369.123: the row (and its description) lives in the codex harness's DECLARED table; the schema derives it
     'the SETTING itself no longer claims "new or resumed" — the description a user reads is part of the fix');
 }
 

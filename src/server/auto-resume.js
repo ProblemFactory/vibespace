@@ -39,6 +39,7 @@
 // deriveAutoResume, written by the registry at load), and every surface that
 // OFFERS or ACTS on auto-resume reads that row — never a backend id.
 const fs = require('fs');
+const { GENERIC_LEGACY_KEYS } = require('../harness-settings'); // PURE: the legacy spelling of the generic auto-resume default
 const path = require('path');
 const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this reading say the wall is gone?
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
@@ -327,7 +328,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     }
     catch (e) { log('[auto-resume] persist failed: ' + e.message); }
   };
-  const globalDefault = () => { try { return serverSetting('claude.autoResumeOnLimit') === true; } catch { return false; } };
+  // the GENERIC instance default under its legacy persisted spelling (src/harness-settings.js GENERIC_LEGACY_KEYS — not a harness row)
+  const globalDefault = () => { try { return serverSetting(GENERIC_LEGACY_KEYS.autoResumeOnLimit) === true; } catch { return false; } };
 
   /** Per-session preference: what the session was spawned with, else the global
    *  default. `session._autoResume` is set at create and by the live toggle. */

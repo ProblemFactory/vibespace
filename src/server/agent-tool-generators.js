@@ -13,6 +13,12 @@ const { execFileSync } = require('child_process');
 function create({ rootDir, port }) {
   const ensureDir = (dir) => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); };
   const USAGE_CACHE_DIR = path.join(rootDir, 'data', 'usage-cache');
+// The harness registry + the settings/plan modules are needed by createHookHelper()
+// (called at load, below) — declared FIRST so the helper generator is never in a TDZ.
+const { list: listHarnesses } = require('../harnesses');
+const { buildConfigPlan } = require('../harness-settings');                // PURE: the plan builder (the helper's embedded hooks-only DEFAULT_PLAN)
+const { configPlanSpecs } = require('./harness-config-sync');              // ORCH: descriptor facts → plan specs (ONE spelling, shared with cliConfigPlan)
+const { writeJsonManaged, findOurHookIn, registerHookEntries, stripHookEntries } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
 // ── Create editor helper script ──
 // Communicates via HTTP (not terminal output) so Claude Code treats it as a GUI editor
 // and does NOT clear the screen. The server broadcasts via WebSocket to the client.
@@ -236,65 +242,61 @@ setTimeout(() => process.exit(0), 8000); // never hang a session start
 `;
   fs.writeFileSync(HOOK_CMD, script, { mode: 0o755 });
 
-  // Remote-side registration script (P3): distributed to remote hosts alongside
-  // the hook so a REMOTE session's own Claude/Codex fires the hook natively
-  // (our LOCAL registration can't reach the remote box). Self-locating: it
-  // registers `node <its own dir>/vibespace-hook.mjs`. Same non-destructive
-  // logic as ensureAgentHooks; best-effort (a failure just means no injection).
-  // `--uninstall` (2.129.0, Manage Agents remote Remove) strips ONLY our entry
-  // from the remote configs — mirror of the local removeAgentHooks.
-  const reg = `#!/usr/bin/env node
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
-import { fileURLToPath } from 'url';
-const UNINSTALL = process.argv.includes('--uninstall');
-// Transcript retention (2.369.118): VIBESPACE_CLAUDE_KEEP_DAYS from the installing
-// server = the user's "keep conversations for N days" setting. Claude Code's own
-// default sweeps transcripts after 30 days; written beside the hook entry in
-// ~/.claude/settings.json (never on --uninstall, never when unset/invalid).
-const KEEP_DAYS = Math.floor(Number(process.env.VIBESPACE_CLAUDE_KEEP_DAYS || 0));
-// ABSOLUTE interpreter (2.244.2, userN's Novita: hook error '/bin/sh: 1:
-// node: not found'): hooks run as claude children via /bin/sh with claude's
-// PATH — hosts with nvm-style node installs (and claude as a native binary)
-// have NO node on that PATH. The register itself runs under node, so its own
-// process.execPath is an interpreter that provably exists on this machine.
-const hookCmd = JSON.stringify(process.execPath) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
-const files = [
-  { f: join(homedir(), '.claude', 'settings.json'), create: false, EVENTS: ['SessionStart', 'UserPromptSubmit', 'Stop'] },
-  { f: join(homedir(), '.codex', 'hooks.json'), create: true, EVENTS: ['SessionStart', 'UserPromptSubmit'] },
-];
-const findOur = (list) => { for (const g of (Array.isArray(list) ? list : [])) { const h = (g.hooks || []).find(h => typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')); if (h) return h; } return null; };
-for (const { f, create, EVENTS } of files) {
-  try {
-    let root = null; try { root = JSON.parse(readFileSync(f, 'utf-8')); } catch { root = null; }
-    if (!root) { if (existsSync(f)) continue; if (UNINSTALL || !create) continue; root = {}; }
-    if (!root.hooks || typeof root.hooks !== 'object') { if (UNINSTALL) continue; root.hooks = {}; }
-    let changed = false;
-    if (UNINSTALL) {
-      for (const ev of Object.keys(root.hooks)) {
-        if (!Array.isArray(root.hooks[ev])) continue;
-        for (const g of root.hooks[ev]) {
-          if (!g || !Array.isArray(g.hooks)) continue;
-          const before = g.hooks.length;
-          g.hooks = g.hooks.filter(h => !(h && typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')));
-          if (g.hooks.length !== before) changed = true;
-        }
-        root.hooks[ev] = root.hooks[ev].filter(g => g && Array.isArray(g.hooks) && g.hooks.length);
-      }
-    } else {
-      for (const ev of EVENTS) {
-        if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
-        const ours = findOur(root.hooks[ev]);
-        if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
-        else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
-      }
-      if (KEEP_DAYS >= 1 && f.endsWith('settings.json') && root.cleanupPeriodDays !== KEEP_DAYS) { root.cleanupPeriodDays = KEEP_DAYS; changed = true; }
-    }
-    if (changed) { const tmp = f + '.tmp'; writeFileSync(tmp, JSON.stringify(root, null, 2) + '\\n'); renameSync(tmp, f); }
-  } catch { }
-}
-`;
+  // Remote-side registration + CLI-CONFIG helper (P3; design-harness-settings
+  // §6 since 2.369.123): distributed to remote hosts alongside the hook so a
+  // REMOTE session's own Claude/Codex fires the hook natively (our LOCAL
+  // registration can't reach the remote box) AND so the managed CLI-config
+  // keys (claude cleanupPeriodDays, codex [history] persistence, …) reach that
+  // machine. It is driven by ONE plan — VIBESPACE_CLI_CONFIG = base64 JSON from
+  // harness-config-sync.cliConfigPlan() (the SAME env at all three sites:
+  // hosts.installAgentTools, the ssh per-spawn prelude, the dial run-cmd) —
+  // and it applies it with the SHARED applier src/harness-config.js, whose
+  // FILE TEXT is embedded below verbatim (never Function.toString: a closure
+  // reference would become a free identifier = the 2.340.2/2.341.1 lost-binding
+  // class). The helper is ESM (`import … from`) while the applier is CJS, so
+  // `require` is minted with createRequire and the applier is evaluated inside
+  // a function body with its own `module`/`exports`. Self-locating hook cmd
+  // (`node <its own dir>/vibespace-hook.mjs`).
+  //   (default)     apply the plan: our hook entries + managed keys; prints
+  //                 one CFG| receipt line per managed key
+  //   --status      READ-ONLY: prints the receipts (hosts.agentToolsStatus —
+  //                 grep-gated on this very env name so an older helper, which
+  //                 would treat --status as an ordinary REGISTRATION RUN, is
+  //                 never asked)
+  //   --uninstall   strips ONLY our hook entries; NEVER a managed key (the
+  //                 retention a user asked for is not "our entry")
+  // Without the env (an older server, or --uninstall) the embedded DEFAULT_PLAN
+  // — hooks only, no managed keys — applies, so hook registration keeps working
+  // exactly as before.
+  const applierText = fs.readFileSync(path.join(__dirname, '..', 'harness-config.js'), 'utf8'); // module-relative: the generator's own tree, whatever rootDir a test hands it
+  const defaultPlan = buildConfigPlan(configPlanSpecs(listHarnesses(), { hooksOnly: true }));
+  const reg = '#!/usr/bin/env node\n'
+    + '// GENERATED by src/server/agent-tool-generators.js (VibeSpace) — do not edit; re-shipped on every install/spawn.\n'
+    + "import { createRequire } from 'module';\n"
+    + "import { join, dirname } from 'path';\n"
+    + "import { homedir } from 'os';\n"
+    + "import { fileURLToPath } from 'url';\n"
+    + 'const require = createRequire(import.meta.url);\n'
+    + '// ---- src/harness-config.js (SHARED applier), embedded from the module FILE TEXT ----\n'
+    + 'const __applier = (() => { const module = { exports: {} }; const exports = module.exports;\n'
+    + applierText + '\n'
+    + 'return module.exports; })();\n'
+    + '// ---- end of src/harness-config.js ----\n'
+    + 'const DEFAULT_PLAN = ' + JSON.stringify(defaultPlan) + ';\n'
+    + "const UNINSTALL = process.argv.includes('--uninstall');\n"
+    + "const STATUS = process.argv.includes('--status');\n"
+    + 'const plan = __applier.decodePlan(process.env.VIBESPACE_CLI_CONFIG) || DEFAULT_PLAN;\n'
+    // ABSOLUTE interpreter (2.244.2, userN's Novita: hook error '/bin/sh: 1:
+    // node: not found'): hooks run as claude children via /bin/sh with claude's
+    // PATH — hosts with nvm-style node installs (and claude as a native binary)
+    // have NO node on that PATH. The register itself runs under node, so its own
+    // process.execPath is an interpreter that provably exists on this machine.
+    + "const hookCmd = JSON.stringify(process.execPath) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');\n"
+    + 'const home = homedir();\n'
+    + 'try {\n'
+    + "  const receipts = STATUS ? __applier.readConfigPlan(plan, { home }) : __applier.applyConfigPlan(plan, { home, hookCmd, uninstall: UNINSTALL }).receipts;\n"
+    + "  process.stdout.write(__applier.formatReceiptLines(receipts) + '\\n');\n"
+    + "} catch (e) { process.stdout.write('CFG|*|*|error|' + encodeURIComponent(JSON.stringify(String((e && e.message) || e))) + '\\n'); }\n";
   fs.writeFileSync(path.join(AGENT_BIN_DIR, 'vibespace-hook-register.mjs'), reg, { mode: 0o755 });
 }
 createHookHelper();
@@ -310,7 +312,6 @@ createHookHelper();
 // only — codex's app-server has no blockable Stop hook; its nudge rides the
 // wrapper's turn/completed) the bookkeeping nudge. A harness without a hook
 // file (shell, ACP agents) is simply absent here.
-const { list: listHarnesses } = require('../harnesses');
 const HOOK_FILES = Object.fromEntries(listHarnesses().filter((h) => h.inject && h.inject.hookFile).map((h) => [h.id, h.inject.hookFile]));
 const HOOK_EVENTS_FOR = (harness) => { const h = listHarnesses().find((x) => x.id === harness); return h?.inject?.hookEvents ? [...h.inject.hookEvents] : []; };
 // Every event any harness registers — the removal path strips our entry from all of them.
@@ -318,70 +319,16 @@ const ALL_HOOK_EVENTS = [...new Set(listHarnesses().flatMap((h) => h.inject?.hoo
 // Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
 // marker so startup does NOT silently re-register the hooks they removed.
 const HOOK_OPTOUT_FILE = path.join(rootDir, 'data', '.agent-hooks-optout');
-// DEFENSIVE: a user can hand-edit settings.json into any shape (a null group, a
-// string `hooks`, …). Never throw walking it — skip non-conforming entries so
-// agentHooksStatus/ensure/remove degrade gracefully instead of 500ing the UI.
-function _findOurHookIn(list) {
-  for (const group of Array.isArray(list) ? list : []) {
-    if (!group || !Array.isArray(group.hooks)) continue;
-    const h = group.hooks.find(h => h && typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs'));
-    if (h) return h;
-  }
-  return null;
-}
-// Read → mutate → write with a compare-and-swap re-read right before the atomic
-// rename: shrinks the lost-update window (a concurrent CLI write to the same
-// settings file between our read and write) to the two-syscall rename gap. The
-// mutate is idempotent, so re-applying it to fresher on-disk content is safe.
-function _patchHookFile(file, createIfMissing, mutate) {
-  const parse = () => { try { return { text: fs.readFileSync(file, 'utf-8') }; } catch { return { text: null }; } };
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const { text } = parse();
-    let root = null;
-    if (text != null) { try { root = JSON.parse(text); } catch { throw new Error(`${file} exists but is not valid JSON — not touching it`); } }
-    if (!root) {
-      if (text != null) throw new Error(`${file} exists but is not valid JSON — not touching it`);
-      if (!createIfMissing) throw new Error(`${file} not found (start the CLI once to create it)`);
-      // createIfMissing only creates the FILE — never the CLI's config DIR.
-      // A missing ~/.codex means codex isn't installed; manufacturing the dir
-      // (with our umask, holding only our hook) would be VibeSpace writing
-      // config for a CLI that was never present — the tmp-write below ENOENTs
-      // and registration reports "skipped", which is the correct outcome.
-      if (!fs.existsSync(path.dirname(file))) throw new Error(`${path.dirname(file)} not found (install the CLI first)`);
-      root = {};
-    }
-    if (!root.hooks || typeof root.hooks !== 'object') root.hooks = {};
-    const changed = mutate(root);
-    if (!changed) return false;
-    const out = JSON.stringify(root, null, 2) + '\n';
-    // CAS: only commit if the file hasn't changed under us since we read it.
-    const cur = parse();
-    if (cur.text !== text) continue; // someone wrote it — re-read + re-apply
-    const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, out);
-    fs.renameSync(tmp, file);
-    return true;
-  }
-  throw new Error(`${file} kept changing under concurrent writes — gave up`);
-}
-// TRANSCRIPT RETENTION (2.369.118, owner: "claude code 默认会删除旧对话…默认值配成 100 年"):
-// Claude Code sweeps ~/.claude/projects transcripts older than `cleanupPeriodDays`
-// (its own default: 30) at every start — a conversation nobody opened for a month
-// is GONE, and VibeSpace's whole history view is those files. The setting
-// claude.transcriptRetentionDays (default 36500 ≈ 100 years) is written into the
-// user's settings.json here at boot + on change through the same CAS writer as
-// the hook entry; 0/blank = leave the CLI's own value alone. Remote hosts get it
-// through the register helper's VIBESPACE_CLAUDE_KEEP_DAYS at (re)install.
-function ensureClaudeRetention(days, { file = null } = {}) {
-  const n = Math.floor(Number(days));
-  if (!(n >= 1)) return { applied: false, reason: 'off' };
-  const target = file || (HOOK_FILES.claude && typeof HOOK_FILES.claude.file === 'function' ? HOOK_FILES.claude.file() : null);
-  if (!target) return { applied: false, reason: 'no claude settings file known' };
-  try {
-    const changed = _patchHookFile(target, false, (root) => { if (root.cleanupPeriodDays === n) return false; root.cleanupPeriodDays = n; return true; });
-    return { applied: true, changed, days: n, file: target };
-  } catch (e) { return { applied: false, reason: e.message, days: n, file: target }; }
-}
+// The CAS writer (read → mutate → compare-and-swap → tmp+rename), the
+// hook-entry finder and the two mutators live in src/harness-config.js since
+// 2.369.123 — ONE implementation for this machine AND the remote helper (which
+// embeds that file's text). Hand-edited shapes never throw: skip non-conforming
+// entries so agentHooksStatus/ensure/remove degrade gracefully instead of 500ing.
+const _findOurHookIn = findOurHookIn;
+const _patchHookFile = (file, createIfMissing, mutate) => writeJsonManaged(file, { createIfMissing }, mutate);
+// TRANSCRIPT RETENTION (2.369.118) is no longer a special case here: it is the
+// claude table's cli-config row `transcriptRetentionDays` (src/harness-settings.js),
+// written by src/server/harness-config-sync.js through the same CAS writer.
 function agentHooksStatus() {
   const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE) };
@@ -430,16 +377,8 @@ function ensureAgentHooks({ auto = false } = {}) {
   const results = {};
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     try {
-      _patchHookFile(def.file(), def.createIfMissing, (root) => {
-        let changed = false;
-        for (const ev of HOOK_EVENTS_FOR(key)) {
-          if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
-          const ours = _findOurHookIn(root.hooks[ev]);
-          if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
-          else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
-        }
-        return changed;
-      }) && console.log(`Registered VibeSpace hooks in ${def.file()}`);
+      _patchHookFile(def.file(), def.createIfMissing, (root) => registerHookEntries(root, HOOK_EVENTS_FOR(key), hookCmd))
+        && console.log(`Registered VibeSpace hooks in ${def.file()}`);
       results[key] = { ok: true };
     } catch (e) {
       console.log(`Hook registration (${key}) skipped:`, e.message);
@@ -456,20 +395,8 @@ function stripAgentHookEntries() {
   if (!hookRegistrationSafe()) return; // temp/worktree server: never edit global CLI configs
   for (const def of Object.values(HOOK_FILES)) {
     try {
-      _patchHookFile(def.file(), false, (root) => {
-        let changed = false;
-        for (const ev of ALL_HOOK_EVENTS) {
-          if (!Array.isArray(root.hooks[ev])) continue;
-          for (const group of root.hooks[ev]) {
-            if (!group || !Array.isArray(group.hooks)) continue;
-            const before = group.hooks.length;
-            group.hooks = group.hooks.filter(h => !(h && typeof h.command === 'string' && h.command.includes('vibespace-hook.mjs')));
-            if (group.hooks.length !== before) changed = true;
-          }
-          root.hooks[ev] = root.hooks[ev].filter(g => g && Array.isArray(g.hooks) && g.hooks.length);
-        }
-        return changed;
-      }) && console.log(`Removed VibeSpace hooks from ${def.file()}`);
+      _patchHookFile(def.file(), false, (root) => stripHookEntries(root, ALL_HOOK_EVENTS))
+        && console.log(`Removed VibeSpace hooks from ${def.file()}`);
     } catch { }
   }
 }
@@ -481,7 +408,7 @@ function removeAgentHooks() {
   return {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
     createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
-    ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ensureClaudeRetention,
+    ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
     agentHooksStatus,
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };

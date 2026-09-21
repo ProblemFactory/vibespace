@@ -68,13 +68,17 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   // credit that fails arms a wait that names its own wall (an arm with no lane
   // can never be reopened by a reading — see src/auto-resume-signal.js).
   ok('exhaustion ladder: ① reset credit (opt-in) → ② pool switch → ③ auto-resume', /if \(tryResetCredit\(tripped\?\.resetsAt, arSignal\.laneOf\(w\.snap\)\)\) return;[\s\S]{0,200}maybePoolAutoSwitch\(session\)/.test(eng) && /if \(tryResetCredit\(resets, arSignal\.laneOf\(w2\?\.snap \|\| snap\)\)\) return;[\s\S]{0,120}maybePoolAutoSwitch\(session\)/.test(eng));
-  ok("…auto-consume is OPT-IN (codex.limitResetCredit 'auto', default off) with a 10min retry floor", /serverSetting\('codex\.limitResetCredit'\) !== 'auto'\) return false;/.test(eng) && /_codexResetTriedAt && now - session\._codexResetTriedAt < 10 \* 60e3\) return false;/.test(eng));
+  // 2.369.123 (design-harness-settings §5): the row is read through the DESCRIPTOR of the session's own backend — never a literal harness id (test-architecture §46 censuses the old spelling)
+  ok("…auto-consume is OPT-IN (codex.limitResetCredit 'auto', default off) with a 10min retry floor", /harnessDeclares\(session\.backend, 'limitResetCredit'\) \|\| harnessSetting\(session\.backend, 'limitResetCredit'\) !== 'auto'\) return false;/.test(eng) && /_codexResetTriedAt && now - session\._codexResetTriedAt < 10 \* 60e3\) return false;/.test(eng));
   // round 4: the recovery call also CLASSIFIES itself — a redeemed credit
   // moved the LIMIT, it is not proof this conversation produced anything, so
   // it disarms the wait without clearing the loop breaker (the full table of
   // noteRecovered callers is derived + enforced in test-auto-resume-loop §5)
   ok('a successful reset recovers in place (disarm yes, breaker no); a failed one falls through the ladder', /out === 'reset'[\s\S]{0,1200}noteRecovered\?\.\(session\._webuiId, 'codex reset credit consumed', \{ worked: false \}\)[\s\S]{0,800}codex-reset-credit-failed[\s\S]{0,200}maybePoolAutoSwitch\(session\)/.test(eng));
-  ok('the setting exists in the Codex group', /'codex\.limitResetCredit'/.test(read('src/lib/settings-schema.js')));
+  // the row lives in the codex harness's DECLARED table (src/harness-settings.js) and the schema DERIVES the Codex section from it (2.369.123)
+  const { HARNESS_SETTINGS: HS_TABLES, rowOf: hsRowOf } = require(path.join(REPO, 'src/harness-settings.js'));
+  const lrc = hsRowOf(HS_TABLES.codex, 'limitResetCredit');
+  ok('the setting exists in the Codex group', !!lrc && lrc.default === 'off' && lrc.options.some((o) => o.value === 'auto') && lrc.apply.kind === 'server' && /deriveHarnessTable\(tbl\)/.test(read('src/lib/settings-schema.js')));
   ok('session-schema registers the throttle fields', /_codexResetTriedAt/.test(read('src/session-schema.js')) && /_codexLastResetsAt/.test(read('src/session-schema.js')));
   const wsrc = read('src/ws-handler.js');
   ok('manual actions exist as ws cases (codex-reset-credit / codex-read-limits), codex-chat-gated', /case 'codex-reset-credit':\s*\n\s*case 'codex-read-limits':/.test(wsrc) && /session\.backend === 'codex'/.test(wsrc));
@@ -87,7 +91,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const um2 = read('src/lib/usage-meter.js');
   ok('the popup shows the stored reset-credit count', /Reset credits'\)\)\}<\/span> \$\{Number\(codex\.resetCredits\.availableCount\)/.test(um2));
   ok("…and the codex ⟳ is CAPABILITY-gated (quotaRefresh 'session-rpc'), riding a live session's app-server", /backendFeatureCaps\('codex'\)\.quotaRefresh === 'session-rpc'/.test(um2) && /_refreshCodexQuota\(btn\)/.test(um2) && /codex-read-limits', sessionId: live\.webuiId/.test(um2));
-  ok('recordCodexQuotaSignal exists: readings write the member cache, exhaustion switches then feeds the WALL MACHINE (2.369.0)', /function recordCodexQuotaSignal[\s\S]{0,9000}maybePoolAutoSwitch\(session\); \/\/ another ChatGPT account[\s\S]{0,500}noteWallSignal/.test(eng));
+  ok('recordCodexQuotaSignal exists: readings write the member cache, exhaustion switches then feeds the WALL MACHINE (2.369.0)', /function recordCodexQuotaSignal[\s\S]{0,9500}maybePoolAutoSwitch\(session\); \/\/ another ChatGPT account[\s\S]{0,500}noteWallSignal/.test(eng)); // window 9000→9500 in 2.369.123: tryResetCredit reads the row through the descriptor (harnessDeclares + harnessSetting), +~80 chars inside the function
   ok('…typed exhaustion enum covers the workspace variants (owned by the codex harness since S4)', /usage_limit_reached\|quota_exceeded\|usage_not_included\|workspace_owner_usage_limit_reached\|workspace_member_usage_limit_reached\|workspace_member_credits_depleted/.test(read('src/harnesses/codex-quota.js')) && !/CODEX_EXHAUSTION_RE/.test(eng));
   ok('…a pool-billed reading lands on the CURRENT MEMBER, never the pool wrapper', /a\.type === 'pooled'\) key = accounts\.poolCurrentFor\(key, session\._webuiId\)/.test(eng));
   const ss = read('src/server/stdout/codex-events.js'); // S5: the codex-events consumer module

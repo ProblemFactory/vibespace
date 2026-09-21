@@ -13,6 +13,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { AcpAdapter } = require('../adapters/acp');
 const { AcpMessageManager, AcpSessionMessages } = require('../acp-message-manager');
 const { NULL_QUOTA } = require('./null-quota');
+const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: a built-in ACP harness (opencode) has a declared table; a contributed one brings its own
 
 const ACP_DEFAULT_CAPS = Object.freeze({
   pool: false, hotSwitch: 'unverified', planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null,
@@ -80,6 +81,11 @@ function acpHarness({ id, label, command, args = ['acp'], env = {}, store = {}, 
     },
     creds: null,                  // the agent holds its own login; VibeSpace never manages ACP credentials
     settingsPrefix: id,
+    // THE SETTINGS TABLE (design-harness-settings §2/§7): the built-in ACP
+    // harness's table by identity; a contributed harness registers its own
+    // through register() (validated there), and one without settings is null.
+    settings: HARNESS_SETTINGS[id] || null,
+    configFiles: {},              // no CLI config file VibeSpace writes for an ACP agent (v1)
     // CONTEXT INJECTION (S6 kind 'acp'): the wrapper prefixes each prompt with
     // the /api/agent/prompt-context text (no hooks exist in a generic agent;
     // SessionStart is never honoured because it is never run).

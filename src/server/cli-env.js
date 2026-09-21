@@ -141,7 +141,7 @@ function probeCodexSandbox(registry) {
 // ACP harnesses (S8): each descriptor names its executable; resolve it ONCE
 // here (null = not installed → the New Session dialog hides the backend and a
 // create fails loudly). Env override per harness: <ID>_CMD (OPENCODE_CMD).
-const { list: listHarnesses } = require('../harnesses');
+const { list: listHarnesses, isBuiltin: isBuiltinHarness } = require('../harnesses');
 const ACP_COMMANDS = {};
 for (const h of listHarnesses()) {
   if (!h.acp) continue;
@@ -175,6 +175,10 @@ function harnessAvailability() {
     // (store.servicePlugin); the client needs enabled/prompted to decide
     // whether to show the first-use prompt and the "history is hidden" row.
     if (h.store?.servicePlugin) { try { row.service = getPlugins()?.serviceState?.(h.store.servicePlugin) || null; } catch { row.service = null; } }
+    // A CONTRIBUTED harness (register(), plugin tier-5) ships its settings
+    // table to the client, which derives its Settings section from it
+    // (design-harness-settings §7); built-ins are already in the bundle.
+    if (h.settings && !isBuiltinHarness(h.id)) row.settings = h.settings;
     return row;
   });
 }

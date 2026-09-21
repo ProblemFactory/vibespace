@@ -23,7 +23,7 @@ const { NORMALIZERS, createMessageManager } = require(path.join(REPO, 'src/norma
 const { capsOf, BACKEND_CAPS, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite, NO_WORKTREE } = require(path.join(REPO, 'src/backend-caps.js'));
 const { hasConsumer, PROTOCOLS } = require(path.join(REPO, 'src/server/stdout/index.js')); // S5: protocol → stdout consumer registry
 const { BACKEND_META, backendFeatureCaps, worktreeCapsFor, worktreePick: clientWorktreePick, worktreeLatchWrite: clientWorktreeLatchWrite } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
-const schemaSrc = fs.readFileSync(path.join(REPO, 'src/lib/settings-schema.js'), 'utf8');
+const { HARNESS_SETTINGS, rowOf, rowsOfKind, checkTable } = require(path.join(REPO, 'src/harness-settings.js')); // PURE: the declared tables (design-harness-settings §8)
 
 ok(harnessIds().length >= 3 && ['claude', 'codex', 'shell'].every((id) => HARNESSES[id]), `registry carries the three built-in harnesses (${harnessIds().join(', ')})`);
 let threw = false; try { harnessOf('gemini'); } catch { threw = true; }
@@ -55,7 +55,13 @@ for (const id of harnessIds()) {
     const w = fs.readFileSync(path.join(REPO, h.wrapper), 'utf8');
     ok(/caps\s*[:=]\s*\{/.test(w), `${id}: wrapper adverts a caps object in its sidecar meta`);
     ok(h.store && typeof h.store.locateTranscript === 'function' && Array.isArray(h.store.transcriptDirs) && typeof h.store.conversationIdField === 'string', `${id}: store declares locateTranscript/transcriptDirs/conversationIdField`);
-    ok(typeof h.settingsPrefix === 'string' && schemaSrc.includes(`'${h.settingsPrefix}.defaultModel'`) && schemaSrc.includes(`'${h.settingsPrefix}.defaultPermissionMode'`), `${id}: settings schema carries ${h.settingsPrefix}.defaultModel/.defaultPermissionMode`);
+    // SETTINGS TABLE (design-harness-settings §8): the descriptor's `settings` IS
+    // the PURE table by identity (like caps), and the two knobs every chat
+    // harness needs are ROWS of it — the schema DERIVES its section from this
+    // object, so a source-text grep (the old pin) would have let a register()ed
+    // harness through with no rows at all.
+    ok(typeof h.settingsPrefix === 'string' && h.settings === HARNESS_SETTINGS[h.settingsPrefix], `${id}: settings ARE the PURE table HARNESS_SETTINGS.${h.settingsPrefix} (identity)`);
+    ok(!!rowOf(h.settings, 'defaultModel') && !!rowOf(h.settings, 'defaultPermissionMode'), `${id}: table declares defaultModel + defaultPermissionMode rows`);
     ok(h.inject && ['hooks', 'wrapper', 'acp'].includes(h.inject.kind) && typeof h.inject.sessionStartHonoured === 'boolean' && Array.isArray(h.inject.hookEvents), `${id}: declares its context-injection strategy (${h.inject?.kind}, sessionStartHonoured=${h.inject?.sessionStartHonoured})`);
     if (h.inject?.hookFile) ok(typeof h.inject.hookFile.file === 'function' && typeof h.inject.hookFile.file() === 'string' && typeof h.inject.hookFile.createIfMissing === 'boolean', `${id}: hook file declaration is well-formed (${h.inject.hookFile.file()})`);
     ok(typeof h.caps.streamProtocol === 'string', `${id}: caps name a stream protocol (${h.caps.streamProtocol})`);
@@ -143,6 +149,52 @@ for (const id of chatHarnessIds()) {
   fs.rmSync(d, { recursive: true, force: true });
 }
 ok(chatHarnessIds().join(',') === 'claude,codex,opencode', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);
+
+// ── HARNESS SETTINGS TABLES (docs/design-harness-settings.zh.md §8, 2026-09-20) ──
+// The table is DATA joined to the descriptor by identity; what makes it TRUE
+// is (a) the validator passing WITH the descriptor's context, (b) the file
+// objects being one spelling (inject.hookFile ∈ configFiles by identity, and
+// every configFiles.<id>.rel being the table's own array), and (c) SPAWN
+// CONFORMANCE: every `apply.kind==='spawn'` row, driven into the adapter with
+// a non-default value, must CHANGE the spawn (args/env — inline --settings
+// JSON rides args). A declared row nobody consumes is red here, and the
+// synthetic negative control proves the checker can say no.
+console.log('— settings tables');
+{
+  const probeValue = (row) => {
+    if (row.type === 'boolean') return !row.default;
+    if (row.type === 'number') return (row.default || 0) + 1;
+    if (row.type === 'enum') { const o = (row.options || []).find((x) => x.value !== row.default && x.value !== ''); return o ? o.value : 'probe-value'; }
+    return 'probe-value';
+  };
+  const viaProbe = (row) => (row.apply.via === 'extraArgs' ? ['--vs-probe-flag'] : row.apply.via === 'model' && probeValue(row) === 'probe-value' ? 'probe-model' : probeValue(row));
+  const spawnOf = (ad, opts) => { const s = ad.buildSessionArgs(opts); return JSON.stringify({ args: s.args, env: s.env || {} }); };
+  const spawnRowConsumed = (ad, row) => {
+    const modes = row.apply.mode ? [row.apply.mode] : ['chat', 'terminal'];
+    return modes.some((mode) => {
+      const base = { cwd: '/tmp', mode, permissionMode: 'default', settings: {} };
+      const probe = row.apply.via ? { ...base, [row.apply.via]: viaProbe(row) } : { ...base, settings: { [row.key]: probeValue(row) } };
+      return spawnOf(ad, base) !== spawnOf(ad, probe);
+    });
+  };
+  for (const id of harnessIds()) {
+    const h = HARNESSES[id];
+    if (!h.settingsPrefix) { ok(h.settings === null && h.configFiles && Object.keys(h.configFiles).length === 0, `${id}: no settings prefix ⇒ settings null, no config files`); continue; }
+    const adapterHas = (verb) => typeof h.Adapter.prototype[verb] === 'function';
+    const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles, adapterHas });
+    ok(errs.length === 0, `${id}: checkTable passes with the descriptor's context`, errs.join('; '));
+    for (const [fid, spec] of Object.entries(h.configFiles || {})) ok(spec.rel === h.settings.files[fid].rel && typeof spec.file === 'function' && typeof spec.createIfMissing === 'boolean', `${id}: configFiles.${fid}.rel IS the table's rel array (one spelling) + file()/createIfMissing`);
+    if (h.inject && h.inject.hookFile) ok(Object.values(h.configFiles).includes(h.inject.hookFile), `${id}: inject.hookFile IS one of configFiles (identity — the hook entries and the managed keys share the file object)`);
+    for (const row of rowsOfKind(h.settings, 'cli-config')) ok(!!h.configFiles[row.apply.file] && h.configFiles[row.apply.file].writable !== false, `${id}: cli-config row ${row.key} targets a declared writable file (${row.apply.file})`);
+    const ad = registry.get(id);
+    for (const row of rowsOfKind(h.settings, 'spawn')) ok(spawnRowConsumed(ad, row), `${id}: spawn row ${row.key} CHANGES the spawn when set (${row.apply.how})`);
+    for (const row of rowsOfKind(h.settings, 'spawn').filter((r) => r.apply.live)) ok(typeof ad[row.apply.live] === 'function', `${id}: live verb ${row.apply.live} (row ${row.key}) is an adapter method`);
+  }
+  ok(!spawnRowConsumed(registry.get('claude'), { key: 'nobodyReadsMe', type: 'boolean', default: false, apply: { kind: 'spawn', how: 'nothing' } }), 'NEGATIVE CONTROL: a synthetic spawn row nobody consumes is caught (the checker can say no)');
+  ok(spawnRowConsumed(registry.get('claude'), rowOf(HARNESS_SETTINGS.claude, 'brief')), 'POSITIVE CONTROL: claude.brief flips --brief');
+  ok(HARNESS_SETTINGS.codex.rows.some((r) => r.key === 'historyPersistence' && r.apply.kind === 'cli-config' && r.apply.path.join('.') === 'history.persistence' && r.default === 'save-all'), 'codex declares ONE managed config.toml row: historyPersistence → [history] persistence (default save-all, 0.154.0 evidence in the row comment)');
+  ok(!rowOf(HARNESS_SETTINGS.claude, 'autoResumeOnLimit'), 'autoResumeOnLimit is NOT a claude row (generic feature; legacy key spelling lives in GENERIC_LEGACY_KEYS)');
+}
 // S5 pins: the stdout registry covers exactly the declared protocols; an unknown one has no consumer (never a stream-json fallback)
 ok(PROTOCOLS.every((p) => chatHarnessIds().some((id) => HARNESSES[id].caps.streamProtocol === p)), `no dead stdout consumer row: every registered protocol is declared by a chat harness (${PROTOCOLS.join(',')})`);
 ok(!hasConsumer('gemini-events') && !hasConsumer(null) && !hasConsumer(capsOf('shell').streamProtocol), 'an unregistered / null protocol has NO stdout consumer (session-stdout reports it loudly; nothing defaults to stream-json)');
@@ -180,7 +232,7 @@ ok((acc.match(/this\._readAuthFor\(/g) || []).length >= 4 && (acc.match(/this\._
 const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
 ok(!/s\.backend !== 'codex'/.test(ar) && (ar.match(/honoursSessionStart\(s\)/g) || []).length === 4, 'agent-routes: the four SessionStart seen-gates consult inject.sessionStartHonoured (no backend-id gate left)');
 const atg = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
-ok(/for \(const ev of ALL_HOOK_EVENTS\)/.test(atg) && /ALL_HOOK_EVENTS = \[\.\.\.new Set\(listHarnesses\(\)/.test(atg) && !/\[\.\.\.HOOK_EVENTS, 'Stop'\]/.test(atg), 'the hook REMOVAL path strips every event any harness registers (union from the registry; the old literal was a lost binding after S6)');
+ok(/stripHookEntries\(root, ALL_HOOK_EVENTS\)/.test(atg) && /ALL_HOOK_EVENTS = \[\.\.\.new Set\(listHarnesses\(\)/.test(atg) && !/\[\.\.\.HOOK_EVENTS, 'Stop'\]/.test(atg), 'the hook REMOVAL path strips every event any harness registers (union from the registry, through the SHARED mutator the remote helper embeds; the old literal was a lost binding after S6)');
 ok(/HOOK_FILES = Object\.fromEntries\(listHarnesses\(\)/.test(atg) && /HOOK_EVENTS_FOR = \(harness\) => \{ const h = listHarnesses\(\)/.test(atg) && !/harness === 'claude' \? \[/.test(atg), 'agent-tool-generators: hook files + events come from the registry (no per-harness literals)');
 ok(HARNESSES.claude.inject.hookEvents.includes('Stop') && !HARNESSES.codex.inject.hookEvents.includes('Stop') && HARNESSES.codex.inject.sessionStartHonoured === false, 'claude registers Stop, codex does not and ignores SessionStart (zero behaviour change)');
 
@@ -642,7 +694,10 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     // A gate that is NEAR an auto-resume mention but is not ABOUT it needs a
     // reason, and a reason that stops matching is itself a failure (the dead
     // allowlist rule from test-architecture).
-    const ALLOW = [{ file: 'src/lib/session-lifecycle.js', gate: "backend === 'claude'", why: 'tuiRenderer (a TERMINAL-mode setting) sits in the same createSession payload literal as the autoResume field — proximity, not a gate on this feature' }];
+    // (2026-09-20: the one allowed entry — session-lifecycle's `backend === 'claude'`
+    // tuiRenderer read beside the autoResume field — is GONE: the instance default
+    // now rides the server's harnessSpawnSettings bag, so the list is empty.)
+    const ALLOW = [];
     const offenders = [], allowHit = new Set();
     for (const f of SITES) {
       const txt = fs.readFileSync(path.join(REPO, f), 'utf8');
