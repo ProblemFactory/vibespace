@@ -2654,7 +2654,7 @@ usage-routes.js — setupUsage() (2.92.0 split): the usage/rate-limit cluster. *
 
 **NOTICES SECTION (2.369.118).** `renderBtn` counts the red/yellow/accent segments over `badgeCounts(todos.open).action` and appends a grey `ut-seg-notice` pill with the notice count (`ut-has-notices` on the button); `renderPanel` builds the rows from the layout as before, then `splitNotices(allRows)` moves notice rows (grouped by the same keys, resolved-in-place marks kept) into a `ut-notice-head` section rendered after the ask groups and before "Recently resolved" — `itemHtml(i, true)` draws them with a grey dot and the source name. The head's "{n} open" counts actions only. Gate: test-user-todos-layout ⑤.
 
-### vnc-view.js — THE SHARED PICTURE VIEW (docs/design-desktop-apps §2 row 6, 2026-09-13)
+### vnc-view.js — THE SHARED PICTURE VIEW (docs/design-desktop-apps §2 row 6, 2026-09-13) **2.369.136 PASTE BOX (userW inc-mubu8xdg-pvwa): `pasteBtn` refuses on a non-connected state, opens `.vnc-paste-box` (reason sentence + textarea + Send/Cancel, Ctrl+Enter/Esc, inserted before `mount`) when the clipboard is refused / empty / API-less, focuses the desktop after every send; `pasteOpen` getter for suites.**
 
 **r-fix (2026-09-21):** `url` may be a FUNCTION called at every (re)connect (the desktop-app pane mints a fresh per-socket viewer id each time).
 

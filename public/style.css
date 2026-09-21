@@ -1565,6 +1565,13 @@ html, body {
 .settings-row-path { font-size: 9px; color: var(--text-dim); opacity: 0.5; font-family: 'SF Mono','Fira Code',monospace; margin-top: 2px; }
 /* Harness sections (derived from the descriptor tables): the section intro + the per-row apply chip / CLI-config receipts */
 .settings-section-note { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; line-height: 1.4; }
+/* the session search / filter row and the quick tabs hide on the tabs they do not filter (2.369.136) */
+#sidebar.sb-no-session-filter #session-filter-row, #sidebar.sb-no-session-filter #agent-kind-quick-tabs, #sidebar.sb-no-session-filter #status-quick-tabs { display: none !important; }
+/* the vnc paste box (2.369.136): a textarea route for the clipboard when the browser will not hand it over */
+.vnc-paste-box { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+.vnc-paste-note { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.vnc-paste-input { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text); }
+.vnc-paste-actions { display: flex; gap: 6px; justify-content: flex-end; }
 /* The settings nav is a TREE (2.369.132): group heads fold their categories on desktop; the phone strip shows everything. */
 .settings-nav-group { display: flex; flex-direction: column; }
 .settings-nav-group-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); cursor: pointer; user-select: none; border-radius: var(--radius-sm); }

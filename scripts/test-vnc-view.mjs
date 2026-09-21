@@ -201,5 +201,58 @@ console.log('§4 the app window\'s options: autoReconnect ladder, labels, addCon
   ok(V.streamUrl('/api/vnc') === 'wss://vibe.example/api/vnc', 'streamUrl follows the page scheme (https ⇒ wss)');
 }
 
+// ── §5 the Paste button's failure paths (2.369.136, userW inc-mubu8xdg-pvwa "desktop 的 paste 用不了") ──
+console.log('§5 Paste: disconnected says so; a refused / empty / unavailable clipboard opens the paste box; every send hands focus back');
+{
+  FakeRFB.instances.length = 0; toasts.length = 0;
+  const host = new El('div');
+  const view = V.createVncView(host, { url: 'wss://vibe.example/api/vnc', loadRFB });
+  const [, pasteBtn] = view.bar.children;
+  const toastText = () => toasts.map((x) => (x.children || []).map((c) => String(c.textContent || '')).join(' ')).join(' | ');
+  await pasteBtn.onclick();
+  ok(FakeRFB.instances.length === 0 && /not connected/.test(toastText()) && !view.pasteOpen, 'Paste before any connection: a "not connected" toast, no paste box, nothing sent', toastText());
+  await view.connect();
+  const rfb = FakeRFB.instances[0];
+  rfb.emit('connect');
+  const f0 = rfb.focused || 0;
+  await pasteBtn.onclick();
+  ok(same(rfb.pasted, ['from-clipboard']) && (rfb.focused || 0) === f0 + 1 && !view.pasteOpen, 'a readable clipboard is sent AND the focus goes back to the desktop (the retired behaviour left it on the button)', { pasted: rfb.pasted, focused: rfb.focused });
+  // the browser refuses (permission) ⇒ the paste box with the permission sentence
+  const savedRead = clipboard.readText;
+  clipboard.readText = async () => { const e = new Error('Read permission denied.'); e.name = 'NotAllowedError'; throw e; };
+  await pasteBtn.onclick();
+  ok(view.pasteOpen && rfb.pasted.length === 1, 'a NotAllowedError opens the paste box instead of a dead-end toast', { open: view.pasteOpen });
+  const box = view.container.children.find((c) => c.className === 'vnc-paste-box');
+  const note = box && box.children[0]; const ta = box && box.children[1]; const actions = box && box.children[2];
+  ok(box && /refused clipboard access/.test(note.textContent) && ta.tagName === 'textarea' && actions.children.length === 2, 'the box = the reason sentence + a textarea + Send / Cancel', box && note.textContent);
+  actions.children[0].onclick();
+  ok(view.pasteOpen && rfb.pasted.length === 1, 'Send with an empty textarea sends nothing and keeps the box');
+  ta.value = 'typed-into-box';
+  const f1 = rfb.focused || 0;
+  actions.children[0].onclick();
+  ok(same(rfb.pasted, ['from-clipboard', 'typed-into-box']) && !view.pasteOpen && (rfb.focused || 0) === f1 + 1 && /Clipboard sent/.test(toastText()), 'Send routes the textarea text into the desktop, closes the box and focuses the desktop', { pasted: rfb.pasted });
+  // an empty clipboard ⇒ the box with the empty sentence
+  clipboard.readText = async () => '';
+  await pasteBtn.onclick();
+  const box2 = view.container.children.filter((c) => c.className === 'vnc-paste-box').pop();
+  ok(view.pasteOpen && /empty or holds no text/.test(box2.children[0].textContent), 'an empty clipboard opens the box with the empty sentence', box2 && box2.children[0].textContent);
+  box2.children[2].children[1].onclick();
+  ok(!view.pasteOpen, 'Cancel closes the box');
+  // no async Clipboard API at all (plain http by hostname) ⇒ the HTTPS sentence
+  const savedClip = navigator.clipboard; Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAgent: 'node' }, configurable: true });
+  await pasteBtn.onclick();
+  const box3 = view.container.children.filter((c) => c.className === 'vnc-paste-box').pop();
+  ok(view.pasteOpen && /not served over HTTPS/.test(box3.children[0].textContent), 'without navigator.clipboard (an http page) the box names HTTPS as the reason', box3 && box3.children[0].textContent);
+  box3.children[2].children[1].onclick();
+  Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', clipboard: savedClip, userAgent: 'node' }, configurable: true });
+  clipboard.readText = savedRead;
+  // disconnected AFTER a connection ⇒ the "not connected" toast, no box
+  rfb.emit('disconnect', { clean: true });
+  toasts.length = 0;
+  await pasteBtn.onclick();
+  ok(!view.pasteOpen && /not connected/.test(toastText()), 'a disconnected view refuses with the "not connected" toast (userW pressed Paste three times into a dead view)', toastText());
+  view.dispose();
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -156,22 +156,60 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     });
   };
 
+  // 2.369.136 (userW inc-mubu8xdg-pvwa "desktop 的 paste 用不了"): the button
+  // used to be a silent no-op on a disconnected view and a one-line toast on
+  // every clipboard failure, and the focus stayed on the button so the next
+  // keystrokes went nowhere. Now: a disconnected view says so; a refused or
+  // empty clipboard opens a PASTE BOX (Ctrl+V lands in a textarea through the
+  // `paste` event, which works on plain http and without the permission);
+  // every successful send hands the focus back to the desktop.
+  let pasteBox = null;
+  const closePasteBox = ({ refocus = true } = {}) => { if (pasteBox) { if (pasteBox.parentNode && pasteBox.parentNode.removeChild) pasteBox.parentNode.removeChild(pasteBox); else pasteBox.remove(); pasteBox = null; } if (refocus) focus(); };
+  const sendText = (text) => { if (!rfb || !text) return false; rfb.clipboardPasteFrom(text); showToast(t('Clipboard sent')); focus(); return true; };
+  const showPasteBox = (why) => {
+    if (pasteBox) { pasteBox.querySelector('textarea')?.focus(); return; }
+    pasteBox = document.createElement('div');
+    pasteBox.className = 'vnc-paste-box';
+    const note = document.createElement('div');
+    note.className = 'vnc-paste-note';
+    note.textContent = why === 'insecure' ? t('This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.')
+      : why === 'denied' ? t('The browser refused clipboard access (permission) — paste here instead (Ctrl+V), then Send.')
+        : why === 'empty' ? t('The clipboard is empty or holds no text — paste here instead (Ctrl+V), then Send.')
+          : t('Clipboard unavailable (needs HTTPS + permission)');
+    const ta = document.createElement('textarea');
+    ta.className = 'vnc-paste-input'; ta.rows = 3; ta.placeholder = t('Paste text here…');
+    const row = document.createElement('div'); row.className = 'vnc-paste-actions';
+    const send = document.createElement('button'); send.type = 'button'; send.className = 'file-tool-btn vnc-paste-send'; send.textContent = t('Send');
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'file-tool-btn vnc-paste-cancel'; cancel.textContent = t('Cancel');
+    send.onclick = () => { const v = ta.value; if (!v) { ta.focus(); return; } if (sendText(v)) closePasteBox({ refocus: false }); };
+    cancel.onclick = () => closePasteBox();
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closePasteBox(); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send.click(); } });
+    row.append(send, cancel);
+    pasteBox.append(note, ta, row);
+    container.insertBefore(pasteBox, mount);   // under the bar, above the picture
+    ta.focus();
+  };
   pasteBtn.onclick = async () => {
-    if (!rfb) return;
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) { rfb.clipboardPasteFrom(text); showToast(t('Clipboard sent')); }
-    } catch {
-      showToast(t('Clipboard unavailable (needs HTTPS + permission)'), { type: 'error' });
+    if (!rfb || state !== 'connected') { showToast(t('The desktop is not connected — reconnect first'), { type: 'error' }); return; }
+    let text = null, why = null;
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') why = 'insecure';
+    else {
+      try { text = await navigator.clipboard.readText(); }
+      catch (e) { why = (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) ? 'denied' : 'error'; }
     }
+    if (text) { sendText(text); return; }
+    // an unclassified failure keeps the retired window's exact toast (the
+    // byte-for-byte control) — and opens the box, which is the way out
+    if (why === 'error') showToast(t('Clipboard unavailable (needs HTTPS + permission)'), { type: 'error' });
+    showPasteBox(why || 'empty');
   };
   reBtn.onclick = () => { attempt = 0; connect(); };
 
   const disconnect = () => { wanted = false; clearTimeout(retryTimer); try { rfb?.disconnect(); } catch {} rfb = null; };
-  const dispose = () => { closed = true; disconnect(); };
+  const dispose = () => { closed = true; disconnect(); if (pasteBox) { if (pasteBox.parentNode && pasteBox.parentNode.removeChild) pasteBox.parentNode.removeChild(pasteBox); else pasteBox.remove(); pasteBox = null; } };
   /** Extra chrome a window type wants in the bar (inserted before Paste). */
   const addControl = (el) => { bar.insertBefore(el, pasteBtn); return el; };
   const focus = () => { try { rfb?.focus(); } catch {} };
 
-  return { container, bar, mount, status, connect, disconnect, setStatus, addControl, focus, dispose, get rfb() { return rfb; }, get state() { return state; }, get wanted() { return wanted; } };
+  return { container, bar, mount, status, connect, disconnect, setStatus, addControl, focus, dispose, get rfb() { return rfb; }, get state() { return state; }, get pasteOpen() { return !!pasteBox; }, get wanted() { return wanted; } };
 }

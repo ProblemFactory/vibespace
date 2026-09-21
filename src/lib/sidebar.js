@@ -1080,6 +1080,10 @@ class Sidebar {
     // ONE list (sidebar-rail's own PANEL_TABS) — a hand-copied literal here was
     // a second spelling of the same set, and a rail id added to only one of them
     // renders nothing at all (the whitelist-drift class).
+    // the session search / filter row belongs to the SESSION tabs — a rail
+    // panel (Channels, Ports, …) and the Remote tab carry their own controls
+    // (owner 2026-09-21: "搜索框和filter似乎和这个界面无关")
+    this.el.classList.toggle('sb-no-session-filter', PANEL_TABS.includes(this._activeTab) || this._activeTab === 'mounts');
     if (PANEL_TABS.includes(this._activeTab)) { this._renderRailPanel?.(); return; }
 
     this.listEl.innerHTML = '';

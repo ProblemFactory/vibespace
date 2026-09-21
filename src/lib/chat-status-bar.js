@@ -277,7 +277,10 @@ export class ChatStatusBar {
           if (!d || (d.status && d.status !== 'running')) { this._workflows.delete(runId); continue; }
           wf.agents = d.agentCount || 0;
           wf.done = d.doneCount || 0;
-          if (d.workflowName) wf.name = d.workflowName;
+          // the live skeleton says 'Workflow' when no persisted script names the
+          // run (a scriptPath launch) — never let that placeholder overwrite the
+          // name the launch ack carried (2.369.136)
+          if (d.workflowName && d.workflowName !== 'Workflow') wf.name = d.workflowName;
           wf.probed = true;
         } catch { /* transient — keep the chip */ }
       }

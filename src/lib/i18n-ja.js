@@ -3,6 +3,13 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "The desktop is not connected — reconnect first": "デスクトップが接続されていません — 先に再接続してください",
+  "This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.": "このページは HTTPS ではないため、ブラウザはクリップボードを渡しません — ここに貼り付け（Ctrl+V）てから送信してください。",
+  "The browser refused clipboard access (permission) — paste here instead (Ctrl+V), then Send.": "ブラウザがクリップボードへのアクセスを拒否しました（権限）— ここに貼り付け（Ctrl+V）てから送信してください。",
+  "The clipboard is empty or holds no text — paste here instead (Ctrl+V), then Send.": "クリップボードが空か、テキストがありません — ここに貼り付け（Ctrl+V）てから送信してください。",
+  "Paste text here…": "ここにテキストを貼り付け…",
+  "Your live agent sessions on this instance — the same list as the sidebar. Track one to follow its messages here; an untracked row fetches nothing.": "このインスタンスで動作中のエージェントセッション — サイドバーと同じ一覧です。追跡するとここでメッセージを追えます。未追跡の行は何も取得しません。",
+  "Your live agent sessions on this instance. Tracked ones are followed here; an untracked row fetches nothing.": "このインスタンスで動作中のエージェントセッション。追跡中のものはここで追えます。未追跡の行は何も取得しません。",
   "Appearance & layout": "外観とレイアウト",
   "Sessions & chat": "セッションとチャット",
   "Harnesses": "ハーネス",

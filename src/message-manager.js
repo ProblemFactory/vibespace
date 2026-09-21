@@ -973,6 +973,9 @@ class MessageManager {
         if (existing.taskInfo) {
           if (raw.description) existing.taskInfo.description = raw.description;
           if (raw.last_tool_name) existing.taskInfo.lastTool = raw.last_tool_name;
+          // `summary` = the run's meta.description (a Workflow) — the NAME the
+          // chips show when the launch ack carried none (2.369.136).
+          if (typeof raw.summary === 'string' && raw.summary.trim() && !existing.taskInfo.summary) existing.taskInfo.summary = raw.summary.trim().slice(0, 160);
           // LIVE DETAIL (2.369.118): the record also carries `usage` and — for a
           // Workflow — the `workflow_progress` tree (phases + agents with label /
           // state / lastToolName). The tree is INTERMITTENT (heartbeats omit it),
@@ -1722,7 +1725,16 @@ function parseBackgroundLaunch(toolName, input, resultText) {
   if (toolName === 'Workflow') {
     const rid = txt.match(/Run ID:\s*(wf_[\w-]+)/)?.[1];
     if (!rid) return null;
-    const nm = txt.match(/Workflow ["\u201c]([^"\u201d\n]+)["\u201d]/)?.[1] || input?.name || 'workflow';
+    // 2.369.136 (owner: "这个workflow没有展示正确的名称"): a run launched through
+    // `scriptPath` has no `input.name` and the ack is "Workflow launched in
+    // background… Summary: <meta.description>" — the name is the Summary line,
+    // then the inline script's `meta.name`, then the script file's basename.
+    const nm = txt.match(/Workflow ["\u201c]([^"\u201d\n]+)["\u201d]/)?.[1]
+      || txt.match(/^Summary:\s*(.+?)\s*$/m)?.[1]
+      || input?.name
+      || String(input?.script || '').match(/export\s+const\s+meta\s*=\s*\{[^}]*?\bname\s*:\s*['"]([^'"]+)['"]/)?.[1]
+      || String(input?.scriptPath || '').split('/').pop()?.replace(/\.[cm]?js$/, '')
+      || 'workflow';
     return { id: rid, type: 'workflow', description: String(nm).slice(0, 120) };
   }
   const bg = txt.match(/^Command running in background with ID:\s*([\w-]+)/);

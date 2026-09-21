@@ -656,6 +656,8 @@ export function registerChannelsGearRow() {
 /** Sections a user folded — per page session (the panel is rebuilt on every
  *  engine pass; a fold must survive the rebuild, not the reload). */
 const COLLAPSED = new Set();
+/** Sections a user explicitly OPENED (overrides a default fold). */
+const EXPANDED = new Set();
 
 /**
  * Render the rail panel into `c`. Renders ONCE per tab entry (the rail's
@@ -732,7 +734,14 @@ export function renderChannelsPanel(app, c) {
     for (const a of adapters) {
       const mine = convs.filter((x) => x.adapterId === a.id);
       const sec = document.createElement('div');
-      sec.className = 'chan-sec' + (COLLAPSED.has(a.id) ? ' chan-collapsed' : '');
+      // The built-in Agents adapter lists every live session on this instance —
+      // a list the sidebar already shows. Until one of them is tracked it is
+      // folded by default (owner 2026-09-21: "展示一堆agents意义不明"), and a
+      // caption says what tracking means; an explicit open/close survives repaints.
+      const builtinAgents = a.kind === 'agents' || a.id === 'agents';
+      const nothingTracked = mine.length > 0 && !mine.some((x) => x.tracked);
+      const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingTracked));
+      sec.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
       const h = document.createElement('div');
       h.className = 'chan-sec-head folder-header';
       h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
@@ -759,9 +768,21 @@ export function renderChannelsPanel(app, c) {
       const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine }));
       more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
       h.appendChild(more);
-      h.onclick = () => { if (COLLAPSED.has(a.id)) COLLAPSED.delete(a.id); else COLLAPSED.add(a.id); sec.classList.toggle('chan-collapsed', COLLAPSED.has(a.id)); };
+      h.onclick = () => {
+        const nowFolded = !sec.classList.contains('chan-collapsed');
+        sec.classList.toggle('chan-collapsed', nowFolded);
+        if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
+      };
       h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
       sec.appendChild(h);
+      if (builtinAgents) {
+        const note = document.createElement('div');
+        note.className = 'chan-sec-note';
+        note.textContent = nothingTracked
+          ? t('Your live agent sessions on this instance — the same list as the sidebar. Track one to follow its messages here; an untracked row fetches nothing.')
+          : t('Your live agent sessions on this instance. Tracked ones are followed here; an untracked row fetches nothing.');
+        sec.appendChild(note);
+      }
       // the status line(s) — only when there is something to say (a1 D1/D6)
       for (const n of adapterNotes(app, a)) sec.appendChild(n);
       const rows = document.createElement('div');

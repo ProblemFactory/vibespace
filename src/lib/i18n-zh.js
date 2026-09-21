@@ -3,6 +3,13 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "The desktop is not connected — reconnect first": "桌面未连接 —— 请先重新连接",
+  "This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.": "这个页面不是 HTTPS，浏览器不会交出剪贴板 —— 请在这里粘贴（Ctrl+V），再点发送。",
+  "The browser refused clipboard access (permission) — paste here instead (Ctrl+V), then Send.": "浏览器拒绝了剪贴板访问（权限）—— 请在这里粘贴（Ctrl+V），再点发送。",
+  "The clipboard is empty or holds no text — paste here instead (Ctrl+V), then Send.": "剪贴板为空或没有文本 —— 请在这里粘贴（Ctrl+V），再点发送。",
+  "Paste text here…": "在这里粘贴文本…",
+  "Your live agent sessions on this instance — the same list as the sidebar. Track one to follow its messages here; an untracked row fetches nothing.": "本实例上正在运行的 agent 会话 —— 和侧栏是同一份列表。跟踪其中一个即可在这里看它的消息；未跟踪的行不会抓取任何内容。",
+  "Your live agent sessions on this instance. Tracked ones are followed here; an untracked row fetches nothing.": "本实例上正在运行的 agent 会话。已跟踪的在这里跟进；未跟踪的行不会抓取任何内容。",
   "Appearance & layout": "外观与布局",
   "Sessions & chat": "会话与聊天",
   "Harnesses": "Harness",

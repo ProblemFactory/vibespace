@@ -101,6 +101,14 @@ try {
     return evalJs(`!!document.querySelector('.rail-panel-${id}')`);
   };
   check('ports panel renders', await openPanel('ports'));
+  // 2.369.136 (owner: "搜索框和filter似乎和这个界面无关"): the session search /
+  // filter row and the quick tabs belong to the session tabs — hidden on a panel
+  const filterOnPanel = await evalJs(`(() => { const r = document.getElementById('session-filter-row'); const q = document.getElementById('status-quick-tabs'); return { row: r ? getComputedStyle(r).display : 'missing', tabs: q ? getComputedStyle(q).display : 'missing', cls: document.getElementById('sidebar').className }; })()`);
+  check(`the session search row + quick tabs hide on a rail panel (row ${filterOnPanel.row}, tabs ${filterOnPanel.tabs})`, filterOnPanel.row === 'none' && filterOnPanel.tabs === 'none', filterOnPanel);
+  await evalJs(`app.sidebar._railGo('folders')`); await sleep(300);
+  const filterOnFolders = await evalJs(`(() => { const r = document.getElementById('session-filter-row'); return r ? getComputedStyle(r).display : 'missing'; })()`);
+  check(`…and comes back on the Folders tab (${filterOnFolders})`, filterOnFolders === 'flex', filterOnFolders);
+  await evalJs(`app.sidebar._railGo('ports')`); await sleep(400);
   // The machine row lands after the async port scan fetch — poll instead of a
   // fixed sleep (gate-only red under a loaded machine while standalone green).
   const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await evalJs(expr)) return true; await sleep(250); } return evalJs(expr); };

@@ -3221,7 +3221,7 @@ class ChatView {
     if (msg.toolName === 'Workflow' && fields.content && !this._loadingHistory) {
       const out = msg.content?.[0]?.output || '';
       const runId = out.match(/Run ID:\s*(wf_[\w-]+)/)?.[1];
-      if (runId) this._statusBar.trackWorkflow(runId, out.match(/Workflow ["“]([^"”]+)["”]/)?.[1] || msg.content?.[0]?.input?.name || null);
+      if (runId) this._statusBar.trackWorkflow(runId, out.match(/Workflow ["“]([^"”]+)["”]/)?.[1] || out.match(/^Summary:\s*(.+?)\s*$/m)?.[1] || msg.content?.[0]?.input?.name || null);
     }
     this._syncReviewAvailability();
 
@@ -4536,7 +4536,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       if (m.toolName !== 'Workflow') continue;
       const out = m.content?.[0]?.output || '';
       const runId = out.match(/Run ID:\s*(wf_[\w-]+)/)?.[1];
-      if (runId) this._statusBar.trackWorkflow(runId, m.content?.[0]?.input?.name || null);
+      if (runId) this._statusBar.trackWorkflow(runId, out.match(/Workflow ["“]([^"”]+)["”]/)?.[1] || out.match(/^Summary:\s*(.+?)\s*$/m)?.[1] || m.content?.[0]?.input?.name || null);
     }
 
     const todos = Array.isArray(taskState?.todos) ? taskState.todos : [];
