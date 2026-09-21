@@ -48,15 +48,19 @@ ok('the merge never mutates its inputs', JSON.stringify(skeleton) === untouched)
 
 console.log('§2 the normalizer exposes the live task by its run id');
 {
+  // THE REAL LIVE ORDER (2.369.122, owner "这个还是没同步啊" on a .120 instance): the CLI
+  // emits system/task_started with a SHORT task_id ('wu93ghxi2' in a real buffer)
+  // BEFORE the tool_result that carries the ack "Run ID: wf_…" — the earlier
+  // fixture put the ack first and used the run id as task_id, which is not a
+  // shape the wire ever produces (the fixtures-from-real-data rule).
   const mm = createMessageManager('claude', 'test-wf-live-view');
-  mm.convertHistory([
-    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_wf_lv', name: 'Workflow', input: { script: 'export const meta = {}' } }] } },
-    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_wf_lv', content: 'Workflow "audit" started.\nRun ID: wf_lv1' }] } },
-  ]);
-  mm.processLive({ type: 'system', subtype: 'task_started', task_id: 'wf_lv1', tool_use_id: 'toolu_wf_lv', task_type: 'local_workflow', description: 'audit' });
-  mm.processLive({ type: 'system', subtype: 'task_progress', task_id: 'wf_lv1', tool_use_id: 'toolu_wf_lv', description: 'audit', usage: { total_tokens: 10, tool_uses: 2, duration_ms: 3000 }, workflow_progress: [{ type: 'workflow_phase', index: 0, title: 'Scan' }, { type: 'workflow_agent', index: 0, label: 'scan:a', phaseIndex: 0, agentId: 'aaa111', state: 'running' }] });
+  mm.processLive({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_wf_lv', name: 'Workflow', input: { script: 'export const meta = {}' } }] } });
+  mm.processLive({ type: 'system', subtype: 'task_started', task_id: 'wu93ghxi2', tool_use_id: 'toolu_wf_lv', task_type: 'local_workflow', description: 'audit' });
+  mm.processLive({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_wf_lv', content: 'Workflow "audit" started in the background.\nRun ID: wf_lv1\nUse /workflows to watch.' }] } });
+  mm.processLive({ type: 'system', subtype: 'task_progress', task_id: 'wu93ghxi2', tool_use_id: 'toolu_wf_lv', description: 'audit', usage: { total_tokens: 10, tool_uses: 2, duration_ms: 3000 }, workflow_progress: [{ type: 'workflow_phase', index: 0, title: 'Scan' }, { type: 'workflow_agent', index: 0, label: 'scan:a', phaseIndex: 0, agentId: 'aaa111', state: 'running' }] });
   const ti = mm.taskInfoById('wf_lv1');
-  ok('taskInfoById(runId) returns the live taskInfo with the tree + usage', ti && ti.workflow && ti.workflow.agents.length === 1 && ti.usage.totalTokens === 10);
+  ok('taskInfoById(RUN id) resolves even though task_started (short task_id) landed before the ack — the run id is registered from the ack and remembered as taskInfo.runId', ti && ti.workflow && ti.workflow.agents.length === 1 && ti.usage.totalTokens === 10 && ti.id === 'wu93ghxi2' && ti.runId === 'wf_lv1', ti);
+  ok('the short task id still resolves (the CLI\'s own key for task_progress/notification)', mm.taskInfoById('wu93ghxi2') === ti);
   ok('an unknown run id answers null', mm.taskInfoById('wf_nope') === null && mm.taskInfoById(undefined) === null);
 }
 

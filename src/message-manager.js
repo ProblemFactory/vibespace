@@ -1086,6 +1086,22 @@ class MessageManager {
           if (syn.id) this.taskMsgByTaskId.set(String(syn.id), existing.id);
           if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
         }
+      } else if (existing.taskInfo && !tr.is_error) {
+        // LIVE ORDER (2.369.122, owner: "这个还是没同步啊"): on the live stream the
+        // system/task_started (SHORT task_id, e.g. 'wu93ghxi2') lands BEFORE the
+        // tool_result that carries the ack ("Run ID: wf_…"), so the synthesis above
+        // was skipped and the wf_ run id was never registered — /api/workflow's
+        // taskInfoById(runId) found nothing and the View Workflow window stayed
+        // on the disk skeleton. Register the ack's id too, and remember it on the
+        // card as runId (the short id stays `id` — the CLI's own key).
+        const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
+        if (syn && syn.id && String(syn.id) !== String(existing.taskInfo.id)) {
+          this.taskMsgByTaskId.set(String(syn.id), existing.id);
+          if (!existing.taskInfo.runId) {
+            existing.taskInfo.runId = syn.id;
+            if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
+          }
+        }
       }
       // harness TaskCreate: "Task #N created successfully" carries the id
       const subj = this._pendingTaskCreates?.get(toolUseId);
