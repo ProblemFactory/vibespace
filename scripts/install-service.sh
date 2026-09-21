@@ -48,6 +48,13 @@ Environment=PORT=${PORT:-3456}
 # server (and every CLI it spawns) can't find claude/codex/node ('/usr/bin/env:
 # claude: No such file or directory' on resume; real incident).
 Environment=PATH=$(dirname "$NODE_BIN"):$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Optional operator env for THIS machine (2.369.135): the same variables the
+# fleet chart injects from its Secret (the integration presets, the Google
+# OAuth client presets, the public URL — see deploy/helm/vibespace-user/values.yaml)
+# may be given here so a self-hosted instance gets cluster-style defaults
+# without editing this unit. Missing file = ignored. Format: VAR='value' one
+# per line, mode 600 — secrets never go in the unit.
+EnvironmentFile=-%h/.config/vibespace/env
 # Prefer killing memory hogs (browsers, builds) over the workspace server.
 OOMScoreAdjust=-500
 # CRITICAL: only kill the node server on stop/restart — NOT the whole cgroup.

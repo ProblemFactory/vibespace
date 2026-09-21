@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.135 — a self-hosted instance can take cluster-style defaults from ~/.config/vibespace/env (the service unit reads it when present)
+
+- `scripts/install-service.sh` writes `EnvironmentFile=-%h/.config/vibespace/env` into the user unit: the same variables the fleet chart injects from its Secret (`VIBESPACE_INTEGRATIONS`, `VIBESPACE_GDRIVE_CLIENTS`, `VIBESPACE_PUBLIC_URL`, …) can be given on one machine without editing the unit; a missing file is ignored; secrets stay in a mode-600 file, never in the unit. First use (owner 2026-09-21): the Lark self-built app as a keyed cluster-style preset for ⚙ → Integrations on this box, in effect after the next Update.
+
 ## 2.369.134 — the agent browser, whole (docs/design-agent-browser-v2, B-4609): P0–P4b rebased onto master, then P5 (action trace + live view Actions pane + Browser profiles panel), P6 (hard mediation: the CDP proxy, per-session urls, target scoping, input refused during a takeover), P7 (window binding: two panes on one tab chain), P9 (native windows as targets through the accessibility tree, window leases, the three modes on a window), P10 (tier 3: windows on the user's REAL desktop behind their own consent switch), one adversarial verify (11 findings) and one fix round — squash of feat-browser-v2-whole; `Browser` sits under the Settings tree's Services group
 
 Each chunk below was ONE commit on the lane branch; the sections keep the lane's own words.
