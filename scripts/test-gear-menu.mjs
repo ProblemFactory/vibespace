@@ -298,6 +298,33 @@ try {
   console.error('  ✗ smoke crashed: ' + e.message);
 }
 
+// ── THE SETTINGS WINDOW (2.369.132, owner "设置分级" + "harness 全局/会话级"): the nav is a
+//    tree of five groups; a harness section is three sub-blocks by apply kind.
+console.log('settings window — the grouped nav + the harness sub-blocks (desktop 1280×800)');
+await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+await cdp('Page.navigate', { url: URL });
+await sleep(1500);
+await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); app._settingsUI.open(); true`);
+await sleep(400);
+const sw = await evalJs(`(() => { const nav = document.querySelector('.settings-window .settings-nav'); if (!nav) return null; const groups = [...nav.querySelectorAll('.settings-nav-group')].map((g) => ({ id: g.dataset.group, head: g.querySelector('.settings-nav-group-head span')?.textContent, items: [...g.querySelectorAll('.settings-nav-item')].map((i) => i.textContent), folded: g.classList.contains('is-folded') })); const blocksOf = (cat) => { const sec = document.querySelector('.settings-window .settings-section[data-category="' + cat + '"]'); return sec ? [...sec.querySelectorAll('.settings-subsection-title')].map((b) => ({ kind: b.dataset.applyKind, text: b.textContent.slice(0, 60), rows: (() => { let n = 0; for (let e = b.nextElementSibling; e && !e.classList.contains('settings-subsection-title'); e = e.nextElementSibling) if (e.classList.contains('settings-row')) n++; return n; })() })) : null; }; const blocks = blocksOf('Claude'); const perHarness = { Claude: blocksOf('Claude'), Codex: blocksOf('Codex'), OpenCode: blocksOf('OpenCode') }; const sections = [...document.querySelectorAll('.settings-window .settings-section')].map((x) => x.dataset.category); return { groups, blocks, perHarness, sections }; })()`);
+check(`the nav is five groups in order (${sw && sw.groups.map((g) => g.id + ':' + g.items.length).join(' ')})`, !!sw && sw.groups.map((g) => g.id).join(',') === 'appearance,sessions,harness,services,spending' && sw.groups.every((g) => g.items.length >= 1 && g.head), sw && sw.groups);
+check('the Harnesses group holds Claude / Codex / OpenCode; Appearance & layout holds Toolbar & Layout / Window / Sidebar / Session Card', !!sw && sw.groups.find((g) => g.id === 'harness').items.join('|') === 'Claude|Codex|OpenCode' && sw.groups.find((g) => g.id === 'appearance').items.join('|') === 'Toolbar & Layout|Window|Sidebar|Session Card', sw && sw.groups);
+check('the sections follow the same order as the nav (groups, then categories)', !!sw && sw.sections.join('|') === sw.groups.flatMap((g) => g.items).join('|'), sw && sw.sections);
+check(`the Claude section is sub-blocks by apply kind — global cli-config first, then per-session spawn (${sw && sw.blocks && sw.blocks.map((b) => b.kind + ':' + b.rows).join(' ')})`, !!sw && !!sw.blocks && sw.blocks.map((b) => b.kind).join(',') === 'cli-config,spawn' && sw.blocks.every((b) => b.rows >= 1) && /Global/.test(sw.blocks[0].text) && /Per session/.test(sw.blocks[1].text), sw && sw.blocks);
+const ORDER = ['cli-config', 'spawn', 'server'];
+check(`every harness section's blocks follow global → per-session → server, only the kinds it has, ≥ 1 row each; at least one section carries a VibeSpace server block (${sw && Object.entries(sw.perHarness).map(([k, v]) => k + '=' + (v || []).map((b) => b.kind).join('+')).join(' ')})`, !!sw && Object.values(sw.perHarness).every((v) => v && v.length && v.every((b) => b.rows >= 1) && v.map((b) => ORDER.indexOf(b.kind)).every((x, i, arr) => x >= 0 && (i === 0 || x > arr[i - 1]))) && Object.values(sw.perHarness).some((v) => v.some((b) => b.kind === 'server')), sw && sw.perHarness);
+// fold a group: its items hide, the fold persists per device, a search shows everything again
+await evalJs(`document.querySelector('.settings-window .settings-nav-group[data-group="services"] .settings-nav-group-head').click(); true`);
+await sleep(150);
+const folded = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); const it = g.querySelector('.settings-nav-item'); return { folded: g.classList.contains('is-folded'), itemHidden: getComputedStyle(it).display === 'none', saved: localStorage.getItem('vibespace.settingsNavFolds') }; })()`);
+check(`folding Services hides its categories and persists the fold (${folded && folded.saved})`, !!folded && folded.folded && folded.itemHidden && /services/.test(folded.saved || ''), folded);
+await evalJs(`(() => { const i = document.querySelector('.settings-window .settings-search'); i.value = 'channel'; i.dispatchEvent(new Event('input')); return true; })()`);
+await sleep(300);
+const searched = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); return { present: !!g, folded: g ? g.classList.contains('is-folded') : null, items: g ? [...g.querySelectorAll('.settings-nav-item')].map((i) => i.textContent) : [] }; })()`);
+check('a search shows every matching category even inside a folded group (the fold is not a filter)', !!searched && searched.present && searched.folded === false && searched.items.includes('Channels'), searched);
+await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); document.querySelector('.settings-window')?.remove(); true`);
+
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
 process.exit(failed ? 1 : 0);

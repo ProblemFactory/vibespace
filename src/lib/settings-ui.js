@@ -1,7 +1,9 @@
-import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel } from './settings-schema.js';
+import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, orderedCategories, settingsGroupOf, settingsGroups } from './settings-schema.js';
 import { showConfirmDialog, fetchJson } from './utils.js';
 import { receiptLine, offLine, applyHead } from './cli-config-chips.js';
 import { t } from './i18n.js';
+import { escHtml } from './utils.js';
+import { UI_ICONS } from './icons.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 
 /**
@@ -84,7 +86,8 @@ class SettingsUI {
     // one /api/agent-hooks read shared by every cli-config row of this pass.
     this._cliConfigPromise = null;
 
-    // Group settings by category
+    // Group settings by category (SETTINGS_CATEGORIES is the census of what
+    // renders — test-architecture §44; the ORDER is the groups' — 2.369.132)
     const grouped = {};
     for (const cat of SETTINGS_CATEGORIES) grouped[cat] = [];
     for (const [path, schema] of Object.entries(SETTINGS_SCHEMA)) {
@@ -97,11 +100,37 @@ class SettingsUI {
       grouped[cat].push({ path, schema });
     }
 
-    for (const cat of SETTINGS_CATEGORIES) {
+    // THE NAV IS A TREE (2.369.132, owner "设置分级"): one head per group, the
+    // categories under it. Desktop heads fold (persisted per device); a search
+    // shows everything that matched; the phone strip shows every row (CSS
+    // flattens the groups there). The scroll-spy opens the group it lands in.
+    const folds = this._navFolds || (this._navFolds = (() => { try { return new Set(JSON.parse(localStorage.getItem('vibespace.settingsNavFolds') || '[]')); } catch { return new Set(); } })());
+    const saveFolds = () => { try { localStorage.setItem('vibespace.settingsNavFolds', JSON.stringify([...folds])); } catch { } };
+    const groupEls = new Map();
+    for (const g of settingsGroups()) {
+      const cats = orderedCategories().filter((c) => settingsGroupOf(c) === g.id && grouped[c] && grouped[c].length);
+      if (!cats.length) continue;
+      const box = document.createElement('div');
+      box.className = 'settings-nav-group';
+      box.dataset.group = g.id;
+      const head = document.createElement('div');
+      head.className = 'settings-nav-group-head';
+      head.innerHTML = `${UI_ICONS.chevronDown || ''}<span>${escHtml(g.label)}</span>`;
+      head.setAttribute('role', 'button');
+      const folded = !query && folds.has(g.id);
+      box.classList.toggle('is-folded', folded);
+      head.title = folded ? t('Expand group') : t('Collapse group');
+      head.onclick = () => { const now = !box.classList.contains('is-folded'); box.classList.toggle('is-folded', now); if (now) folds.add(g.id); else folds.delete(g.id); head.title = now ? t('Expand group') : t('Collapse group'); saveFolds(); };
+      box.appendChild(head);
+      nav.appendChild(box);
+      groupEls.set(g.id, box);
+    }
+
+    for (const cat of orderedCategories()) {
       const items = grouped[cat];
       if (!items || !items.length) continue;
 
-      // Nav item
+      // Nav item (inside its group)
       const navItem = document.createElement('div');
       navItem.className = 'settings-nav-item';
       navItem.textContent = cat;
@@ -109,7 +138,7 @@ class SettingsUI {
         const section = content.querySelector(`[data-category="${cat}"]`);
         if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
       };
-      nav.appendChild(navItem);
+      (groupEls.get(settingsGroupOf(cat)) || nav).appendChild(navItem);
 
       // Section
       const section = document.createElement('div');
@@ -120,16 +149,33 @@ class SettingsUI {
       sectionTitle.textContent = cat;
       section.appendChild(sectionTitle);
       // A HARNESS section (derived from its descriptor table, design §4.2):
-      // one line saying what these values are for and which CLI config file
-      // the "written into the CLI config" rows land in.
+      // one line saying what these values are for, then THREE sub-blocks by
+      // what a row is (2.369.132, owner "区分全局配置项和 session-level 配置项"):
+      // GLOBAL rows written into the CLI's own config file, PER-SESSION rows
+      // passed to the CLI at spawn, and VibeSpace's own server-side rows.
       const hs = harnessSectionFor(cat);
       if (hs) {
         const note = document.createElement('div');
         note.className = 'settings-section-note';
-        note.textContent = hs.files.length
-          ? t('These values decide how new sessions start. Rows marked "written into the CLI config" are written into {files}; the machines each one reached are listed under that row.', { files: hs.files.map((f) => f.rel).join(', ') })
-          : t('These values decide how new sessions start.');
+        note.textContent = t('These values decide how new sessions start.');
         section.appendChild(note);
+        const blocks = [
+          { kind: 'cli-config', title: hs.files.length ? t('Global — written into the CLI config file') + ' (' + hs.files.map((f) => f.rel).join(', ') + ')' : t('Global — written into the CLI config file'), note: t('Applies to every session of this harness on this machine, inside VibeSpace or not; the machines each row reached are listed under it.') },
+          { kind: 'spawn', title: t('Per session — passed to the CLI when a session starts'), note: t('New sessions start with these values; a resumed conversation keeps its own choice.') },
+          { kind: 'server', title: t('VibeSpace — server-side behaviour for this harness'), note: t('Decided by VibeSpace itself; nothing is written into the CLI.') },
+        ];
+        const rest = items.filter((it) => !blocks.some((b) => it.schema.apply && it.schema.apply.kind === b.kind));
+        for (const b of blocks) {
+          const own = items.filter((it) => it.schema.apply && it.schema.apply.kind === b.kind);
+          if (!own.length) continue;
+          const st = document.createElement('div'); st.className = 'settings-subsection-title'; st.dataset.applyKind = b.kind; st.textContent = b.title;
+          const sn = document.createElement('div'); sn.className = 'settings-subsection-note'; sn.textContent = b.note;
+          section.append(st, sn);
+          for (const { path, schema } of own) section.appendChild(this._renderSetting(path, schema));
+        }
+        for (const { path, schema } of rest) section.appendChild(this._renderSetting(path, schema));
+        content.appendChild(section);
+        continue;
       }
 
       for (const { path, schema } of items) {
@@ -155,6 +201,8 @@ class SettingsUI {
       if (content.scrollTop + content.clientHeight >= content.scrollHeight - 4) cur = secs[secs.length - 1];
       const cat = cur.dataset.category;
       nav.querySelectorAll('.settings-nav-item').forEach((n) => n.classList.toggle('active', n.textContent === cat));
+      const g = nav.querySelector(`.settings-nav-group[data-group="${settingsGroupOf(cat)}"]`);
+      if (g && g.classList.contains('is-folded')) { g.classList.remove('is-folded'); this._navFolds?.delete(g.dataset.group); }
     };
     content.onscroll = spy;
     spy();

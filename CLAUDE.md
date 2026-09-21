@@ -358,7 +358,7 @@ src/
     i18n-zh.js / i18n-ja.js — dictionaries ({'English': '翻译'}, 869 entries each; missing key = English fallback)
     autocomplete.js    — Shared directory autocomplete (setupDirAutocomplete)
     settings.js        — SettingsManager (sparse storage, server persist, WS sync, event listeners)
-    settings-schema.js — Settings schema (types, defaults, categories). Claude/Codex/OpenCode sections DERIVED from src/harness-settings.js (2.369.123; registerHarnessSettings for a contributed harness). `SETTINGS_CATEGORIES` IS SettingsUI's RENDER LOOP — an unlisted category is unreachable AND invisible to search; test-architecture §44 is the census ⇒ kb-file-structure.md
+    settings-schema.js — Settings schema (types, defaults, categories). Claude/Codex/OpenCode sections DERIVED from src/harness-settings.js (2.369.123). `SETTINGS_CATEGORIES` IS the render census (§44; an unlisted category is unreachable); `SETTINGS_GROUPS` (2.369.132) only orders and folds it into the nav tree (§44c) ⇒ kb-file-structure.md
     settings-ui.js     — SettingsUI (VS Code-style full settings, search + category nav; NON-BLOCKING same-level WINDOW, singleton-focus, 2.53.0). 2.369.123: harness sections carry an intro line + an apply chip per row; cli-config rows show the fresh local receipt and a human-triggered "Check machines…" ⇒ kb-file-structure.md
 public/
   brand/               — Backend brand SVGs (claude.svg, codex.svg)

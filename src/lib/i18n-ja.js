@@ -3,6 +3,17 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Appearance & layout": "外観とレイアウト",
+  "Sessions & chat": "セッションとチャット",
+  "Harnesses": "ハーネス",
+  "Global — written into the CLI config file": "グローバル — CLI 設定ファイルに書き込み",
+  "Applies to every session of this harness on this machine, inside VibeSpace or not; the machines each row reached are listed under it.": "このマシン上のこのハーネスの全セッションに適用されます（VibeSpace の内外を問わず）。各行が到達したマシンはその行の下に表示されます。",
+  "Per session — passed to the CLI when a session starts": "セッション単位 — セッション開始時に CLI へ渡す",
+  "New sessions start with these values; a resumed conversation keeps its own choice.": "新しいセッションはこれらの値で開始します。再開した会話は自身の選択を保持します。",
+  "VibeSpace — server-side behaviour for this harness": "VibeSpace — このハーネスのサーバー側の動作",
+  "Decided by VibeSpace itself; nothing is written into the CLI.": "VibeSpace 自身が決定します。CLI には何も書き込みません。",
+  "Collapse group": "グループを折りたたむ",
+  "Expand group": "グループを展開",
   "System monitor…": "システムモニター…",
   "Show the CLI's 'Stop hook error' notice": "CLI の「Stop hook error」通知を表示",
   "The CLI posts a 'Stop hook error occurred' notice whenever a Stop hook blocks — including VibeSpace's own bookkeeping nudge, which is expected, not an error. Off hides that notice (the 'Stop hook feedback' and hook summary cards stay); on shows it as a red immediate notice. Applies to open chats instantly.": "Stop hook が停止をブロックするたびに CLI は「Stop hook error occurred」通知を出します。VibeSpace 自身の記録リマインドも含まれますが、これは想定どおりの動作でエラーではありません。オフでその通知を隠します（「Stop hook feedback」カードと hook サマリーカードは残ります）。オンなら赤の immediate 通知として表示します。開いているチャットに即時反映されます。",

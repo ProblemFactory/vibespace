@@ -957,6 +957,20 @@ for (const [edge] of EXCEPTIONS) {
     ok(want.includes('toolbar.showDesktopButton') && SETTINGS_SCHEMA['toolbar.showDesktopButton']?.default === true, 'the incident\'s own key is read, declared and defaults to shown');
     ok(['toolbar.showZzzNope'].every((k) => !SETTINGS_SCHEMA[k]), 'NEG: an undeclared key is what this census reports (the schema does not silently accept unknowns)');
   }
+  // 44c (2.369.132): the nav is a TREE — groups only ORDER and FOLD the census set.
+  {
+    const { orderedCategories, settingsGroupOf, settingsGroups, SETTINGS_GROUPS } = schemaMod;
+    const ordered = orderedCategories();
+    const sameSet = ordered.length === SETTINGS_CATEGORIES.length && new Set(ordered).size === ordered.length && SETTINGS_CATEGORIES.every((c) => ordered.includes(c));
+    ok(sameSet, `orderedCategories() is a PERMUTATION of SETTINGS_CATEGORIES (${ordered.length} categories, none dropped, none twice)`, { ordered, cats: SETTINGS_CATEGORIES });
+    const ids = settingsGroups().map((g) => g.id);
+    const orphan = SETTINGS_CATEGORIES.filter((c) => !ids.includes(settingsGroupOf(c)));
+    ok(orphan.length === 0, 'every category maps to a group that exists (a category no static group names still lands in plugins/other by rule)', orphan);
+    const unknown = SETTINGS_GROUPS.flatMap((g) => g.categories).filter((c) => !SETTINGS_CATEGORIES.includes(c));
+    ok(unknown.length === 0, 'no group names a category that is not in the census (a typo in a group would silently move nothing)', unknown);
+    ok(/for \(const cat of orderedCategories\(\)\)/.test(ui) && /settingsGroupOf\(cat\)/.test(ui) && /settings-nav-group-head/.test(ui), 'the UI walks orderedCategories() for the sections and hangs each nav item under its group head');
+    ok(/data-apply-kind|dataset\.applyKind/.test(ui) && /'cli-config'/.test(ui) && /'spawn'/.test(ui) && /'server'/.test(ui), 'a harness section renders three sub-blocks by apply kind (global cli-config / per-session spawn / VibeSpace server)');
+  }
   ok(/for \(const cat of SETTINGS_CATEGORIES\)/.test(ui) && /grouped\[cat\]/.test(ui),
     'SettingsUI still RENDERS by iterating SETTINGS_CATEGORIES (the coupling this census stands for)');
 

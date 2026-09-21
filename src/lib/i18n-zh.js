@@ -3,6 +3,17 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Appearance & layout": "外观与布局",
+  "Sessions & chat": "会话与聊天",
+  "Harnesses": "Harness",
+  "Global — written into the CLI config file": "全局 — 写入 CLI 配置文件",
+  "Applies to every session of this harness on this machine, inside VibeSpace or not; the machines each row reached are listed under it.": "对本机该 harness 的每个会话生效，无论是否在 VibeSpace 里；每行到达的机器列在该行下方。",
+  "Per session — passed to the CLI when a session starts": "会话级 — 会话启动时经 CLI 传入",
+  "New sessions start with these values; a resumed conversation keeps its own choice.": "新会话以这些值启动；恢复的对话保留它自己的选择。",
+  "VibeSpace — server-side behaviour for this harness": "VibeSpace — 该 harness 的服务端行为",
+  "Decided by VibeSpace itself; nothing is written into the CLI.": "由 VibeSpace 自己决定；不写入 CLI。",
+  "Collapse group": "折叠分组",
+  "Expand group": "展开分组",
   "System monitor…": "系统监控…",
   "Show the CLI's 'Stop hook error' notice": "显示 CLI 的“Stop hook error”提示",
   "The CLI posts a 'Stop hook error occurred' notice whenever a Stop hook blocks — including VibeSpace's own bookkeeping nudge, which is expected, not an error. Off hides that notice (the 'Stop hook feedback' and hook summary cards stay); on shows it as a red immediate notice. Applies to open chats instantly.": "只要有 Stop hook 拦截了一次停止，CLI 就会发一条“Stop hook error occurred”提示——包括 VibeSpace 自己的簿记提醒，那是预期行为而不是错误。关闭则隐藏该提示（“Stop hook feedback”卡和 hook 汇总卡仍保留）；开启则显示为红色 immediate 提示。对已打开的聊天即时生效。",

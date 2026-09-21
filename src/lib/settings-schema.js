@@ -958,4 +958,43 @@ export function unregisterPluginSettings(pluginId) {
 }
 export function listPluginSettings(pluginId) { return [...(PLUGIN_SETTING_OWNERS.get(pluginId)?.paths || [])]; }
 
-export { SETTINGS_SCHEMA, SETTINGS_CATEGORIES };
+// ── SETTINGS GROUPS (2.369.132, owner: "所有设置界面也可以做一下设置分级") ──
+// The nav is a TREE: group heads over the categories. SETTINGS_CATEGORIES stays
+// the census of what renders (§44); a group only ORDERS and FOLDS. Every
+// category maps to exactly one group (test-architecture pins it); a category
+// no group names falls into the trailing groups by rule — a plugin's
+// "Plugin: <label>" under Plugins, anything else under Other — never dropped.
+const SETTINGS_GROUPS = [
+  { id: 'appearance', label: t('Appearance & layout'), categories: [t('Toolbar & Layout'), t('Window'), t('Sidebar'), t('Session Card')] },
+  { id: 'sessions', label: t('Sessions & chat'), categories: [t('Session'), t('Chat'), t('Terminal')] },
+  { id: 'harness', label: t('Harnesses'), categories: [t('Claude'), t('Codex'), t('OpenCode')] },
+  { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work')] },
+  { id: 'spending', label: t('Spending'), categories: [t('Spending')] },
+  { id: 'plugins', label: t('Plugins'), categories: [] },
+  { id: 'other', label: t('Other'), categories: [] },
+];
+/** The group a category belongs to (id). A contributed harness table lands in
+ *  'harness'; a plugin's category in 'plugins'; anything unknown in 'other'. */
+export function settingsGroupOf(category) {
+  for (const g of SETTINGS_GROUPS) if (g.categories.includes(category)) return g.id;
+  for (const own of HARNESS_SETTING_OWNERS.values()) if (own.category === category) return 'harness';
+  if (/^Plugin: /.test(category) || [...PLUGIN_SETTING_OWNERS.values()].some((o) => o.category === category)) return 'plugins';
+  return 'other';
+}
+/** SETTINGS_CATEGORIES re-ordered by group (the render + nav order); every
+ *  listed category appears exactly once — the census set is untouched. */
+export function orderedCategories(cats = SETTINGS_CATEGORIES) {
+  const byGroup = new Map(SETTINGS_GROUPS.map((g) => [g.id, []]));
+  for (const c of cats) byGroup.get(settingsGroupOf(c)).push(c);
+  const out = [];
+  for (const g of SETTINGS_GROUPS) {
+    const own = byGroup.get(g.id);
+    // a static group keeps its declared order, then any late-registered category of that group
+    const declared = g.categories.filter((c) => own.includes(c));
+    out.push(...declared, ...own.filter((c) => !declared.includes(c)));
+  }
+  return out;
+}
+export function settingsGroups() { return SETTINGS_GROUPS.map((g) => ({ id: g.id, label: g.label })); }
+
+export { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, SETTINGS_GROUPS };

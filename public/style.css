@@ -1565,6 +1565,17 @@ html, body {
 .settings-row-path { font-size: 9px; color: var(--text-dim); opacity: 0.5; font-family: 'SF Mono','Fira Code',monospace; margin-top: 2px; }
 /* Harness sections (derived from the descriptor tables): the section intro + the per-row apply chip / CLI-config receipts */
 .settings-section-note { font-size: 11px; color: var(--text-dim); margin: -4px 0 10px; line-height: 1.4; }
+/* The settings nav is a TREE (2.369.132): group heads fold their categories on desktop; the phone strip shows everything. */
+.settings-nav-group { display: flex; flex-direction: column; }
+.settings-nav-group-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); cursor: pointer; user-select: none; border-radius: var(--radius-sm); }
+.settings-nav-group-head:hover { color: var(--text); background: var(--bg-hover); }
+.settings-nav-group-head svg { width: 12px; height: 12px; flex: none; transition: transform 120ms; }
+.settings-nav-group.is-folded .settings-nav-group-head svg { transform: rotate(-90deg); }
+.settings-nav-group.is-folded .settings-nav-item { display: none; }
+.settings-nav-group .settings-nav-item { padding-left: 22px; }
+.settings-subsection-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); margin: 14px 0 2px; padding-top: 10px; border-top: 1px solid var(--border); }
+.settings-subsection-title:first-of-type { border-top: none; padding-top: 0; margin-top: 6px; }
+.settings-subsection-note { font-size: 10px; color: var(--text-dim); margin: 0 0 8px; line-height: 1.4; }
 .settings-row-apply { margin-top: 5px; padding: 3px 8px; border-left: 2px solid var(--border); font-size: 11px; }
 .settings-row-apply-head { color: var(--text-dim); }
 .settings-row-apply-target { font-family: 'SF Mono','Fira Code',monospace; font-size: 10px; color: var(--text); margin-top: 2px; }
@@ -2046,6 +2057,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
      unhinted horizontal scroller that clipped "Integration" at first paint */
   .settings-nav { flex-wrap: wrap; overflow-x: visible; }
   .settings-nav-item { min-height: 36px; display: inline-flex; align-items: center; }
+  /* the phone strip is FLAT: groups dissolve into the wrapping row of heads + items (2.369.132) */
+  .settings-nav-group { display: contents; }
+  .settings-nav-group-head { min-height: 36px; padding: 8px 8px; }
+  .settings-nav-group.is-folded .settings-nav-item { display: inline-flex; }
   /* terminal key row: two rows rather than keys hidden past the viewport */
   .mobile-term-keys { flex-wrap: wrap; overflow-x: hidden; }
   .mobile-term-key { min-height: 36px; min-width: 36px; display: inline-flex; align-items: center; justify-content: center; }
