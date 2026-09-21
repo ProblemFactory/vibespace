@@ -4,7 +4,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { THEMES } from './themes.js';
-import { attachPopoverClose, showToast, uiScale, COUNTER_ZOOM } from './utils.js';
+import { attachPopoverClose, showToast, uiScale, COUNTER_ZOOM, copyText } from './utils.js';
+import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 
 // Web fonts loaded via Google Fonts (always available)
@@ -475,7 +476,11 @@ class TerminalSession {
       { label: '↓', data: '\x1b[B', repeat: true },
       { label: '↑', data: '\x1b[A', repeat: true },
       { label: '→', data: '\x1b[C', repeat: true },
-      { label: '📋', paste: true, title: 'Paste (text or image)' },
+      { icon: UI_ICONS.clipboard, paste: true, title: 'Paste (text or image)' },
+      // "Copy screen" (docs/design-mobile-gaps.md #10/#54): xterm has no touch
+      // text selection and .xterm is exempt from the long-press menu, so the
+      // visible screen is otherwise uncopyable on a phone.
+      { icon: UI_ICONS.copy, copy: true, title: t('Copy screen (the visible terminal text)') },
       { label: '^C', data: '\x03', title: 'Ctrl+C — interrupt' },
       { label: '^G', data: '\x07', title: 'Ctrl+G — open editor' },
       { label: '^R', data: '\x12', title: 'Ctrl+R — history search' },
@@ -486,13 +491,17 @@ class TerminalSession {
     for (const k of keys) {
       const btn = document.createElement('button');
       btn.className = 'mobile-term-key';
-      btn.textContent = k.label;
+      if (k.icon) { btn.innerHTML = k.icon; btn.classList.add('mobile-term-key-icon'); } // SVG only (the icon law) — no emoji glyphs
+      else btn.textContent = k.label;
       if (k.title) btn.title = k.title;
       if (k.sticky) {
         this._ctrlKeyBtn = btn;
         btn.onclick = (e) => { e.preventDefault(); this._setCtrlSticky(!this._ctrlSticky); this.terminal.focus(); };
       } else if (k.paste) {
         btn.onclick = (e) => { e.preventDefault(); this._mobilePaste(); };
+      } else if (k.copy) {
+        btn.className += ' mobile-term-copy';
+        btn.onclick = (e) => { e.preventDefault(); this._copyScreen(); };
       } else if (k.repeat) {
         // Hold-to-repeat: 350ms delay then every 140ms
         let holdT = null, repT = null;
@@ -562,6 +571,25 @@ class TerminalSession {
       reader.onerror = () => resolve();
       reader.readAsDataURL(blob);
     });
+  }
+
+  /** Copy what is on screen right now (the viewport's rows, trailing blank
+   *  lines dropped) — the phone's stand-in for drag-select + Ctrl+C. Reads
+   *  xterm's buffer directly: no selection is made, so nothing on screen
+   *  changes and a sticky selection can't linger. */
+  _copyScreen() {
+    const term = this.terminal;
+    const buf = term.buffer.active;
+    const lines = [];
+    for (let i = 0; i < term.rows; i++) {
+      const line = buf.getLine(buf.viewportY + i);
+      lines.push(line ? line.translateToString(true) : '');
+    }
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    const text = lines.join('\n');
+    if (!text.trim()) { showToast(t('Nothing on screen to copy')); return; }
+    copyText(text);
+    showToast(t('Copied {n} lines', { n: lines.length }));
   }
 
   _setCtrlSticky(on) {

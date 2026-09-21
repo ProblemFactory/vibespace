@@ -1,4 +1,7 @@
 import { t } from './i18n.js';
+import { escHtml, showContextMenu } from './utils.js';
+import { showWindowContextMenu } from './taskbar.js';
+import { UI_ICONS, FILE_ICONS } from './icons.js';
 
 /**
  * MobileNav — mobile navigation bar controller.
@@ -16,7 +19,15 @@ export class MobileNav {
     this._titleEl = document.getElementById('mobile-nav-title');
 
     document.getElementById('mobile-nav-menu').onclick = () => app.sidebar.toggle(true);
-    document.getElementById('mobile-nav-new').onclick = () => app.showNewSessionDialog();
+    const newBtn = document.getElementById('mobile-nav-new');
+    newBtn.onclick = () => app.showNewSessionDialog();
+    // "+" LONG-PRESS SHEET (docs/design-mobile-gaps.md #3): #toolbar is
+    // display:none ≤768px and with it the Terminal / Files / Browser / Desktop
+    // entry points — a plain shell was reachable only through the dialog's
+    // Backend=shell, the browser not at all. installLongPressContextMenu
+    // synthesizes `contextmenu` on a 500 ms press (a mouse right-click lands
+    // here too); the tap keeps opening the New Session dialog.
+    newBtn.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this._showCreateSheet(); });
     // ⚙ — the taskbar (and its gear-adjacent chrome) is hidden on phones, so
     // without this the gs-menu (Usage/Manage agents/Diagnostics/Settings…)
     // has no entry point at all on mobile.
@@ -30,6 +41,32 @@ export class MobileNav {
 
     this._titleEl.onclick = () => this._showWindowSwitcher();
     this._setupGestures();
+  }
+
+  /** A context menu laid out as a full-width sheet under the nav bar (the
+   *  .mobile-sheet stylesheet rule beats showContextMenu's inline x/y — the
+   *  same !important-over-inline shape the usage popup uses). */
+  _sheet(items) {
+    // ONE class name to showContextMenu (it derives the row class from it —
+    // a two-word name would strip every row of .context-menu-item); the
+    // sheet modifier is added afterwards.
+    const menu = showContextMenu(0, 0, items);
+    menu.classList.add('mobile-sheet');
+    return menu;
+  }
+
+  _showCreateSheet() {
+    const app = this.app;
+    const row = (icon, label, action) => ({ labelHtml: `${icon}<span>${escHtml(label)}</span>`, action });
+    const items = [
+      row(UI_ICONS.robot, t('Agent session'), () => app.showNewSessionDialog()),
+      row(UI_ICONS.terminal, t('Terminal'), () => app.openShellTerminal()),
+      row(FILE_ICONS.folder, t('Files'), () => app.openFileExplorer()),
+      row(UI_ICONS.globe, t('Browser'), () => app.openBrowser()),
+    ];
+    // gated exactly like the toolbar button (app._vncAvailable = /api/vnc/status)
+    if (app._vncAvailable) items.push(row(UI_ICONS.monitor, t('Desktop'), () => app.openDesktop()));
+    return this._sheet(items);
   }
 
   updateTitle() {
@@ -67,39 +104,74 @@ export class MobileNav {
       // until its first switchTo — count them or fresh-load desktops read 0
       const savedCount = (deskId) => ((dm._savedStates?.get(deskId)?.windows) || [])
         .filter((ws) => ws.openSpec && !wm.windows.has(ws.winId || ws.id)).length;
-      // Desktop tabs
-      if (desktops.length >= 2) {
+      const rerender = () => { if (pop.isConnected) renderContent(); };
+      const afterSwitch = () => {
+        rerender();
+        // lazy-replayed windows materialize on a ~500ms timer inside
+        // switchTo — render once more after they land
+        setTimeout(rerender, 700);
+      };
+      // Desktop tabs — ALWAYS rendered now (design-mobile-gaps #7): the "+"
+      // tab is the phone's only way to create a desktop (the taskbar previews
+      // are hidden ≤768px), and a long-press on a tab renames / deletes it.
+      if (dm) {
         const oldTabs = pop.querySelector('.mobile-desk-tabs');
         if (oldTabs) oldTabs.remove();
         const tabBar = document.createElement('div');
         tabBar.className = 'mobile-desk-tabs';
         tabBar.style.cssText = 'display:flex;gap:0;border-bottom:2px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;flex-shrink:0';
+        const tabCss = (isActive) => `flex-shrink:0;min-height:40px;padding:10px 14px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;color:${isActive ? 'var(--accent)' : 'var(--text-dim)'};border-bottom:2px solid ${isActive ? 'var(--accent)' : 'transparent'};margin-bottom:-2px`;
         for (const desk of desktops) {
           const tab = document.createElement('button');
+          tab.className = 'mobile-desk-tab';
           const isActive = desk.id === dm.activeDesktopId;
           const deskWindows = allWindows.filter(w => w._desktopId === desk.id);
           tab.textContent = `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
-          tab.style.cssText = `flex-shrink:0;padding:10px 14px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;color:${isActive ? 'var(--accent)' : 'var(--text-dim)'};border-bottom:2px solid ${isActive ? 'var(--accent)' : 'transparent'};margin-bottom:-2px`;
-          tab.onclick = () => {
-            dm.switchTo(desk.id).then(() => {
-              renderContent();
-              // lazy-replayed windows materialize on a ~500ms timer inside
-              // switchTo — render once more after they land
-              setTimeout(() => { if (pop.isConnected) renderContent(); }, 700);
-            });
-          };
+          tab.style.cssText = tabCss(isActive);
+          tab.onclick = () => { dm.switchTo(desk.id).then(afterSwitch); };
+          tab.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            const items = [{ label: t('Rename'), action: async () => { await dm._startRename(desk); rerender(); } }];
+            if (desktops.length > 1) items.push({ label: t('Delete'), style: 'color:var(--red, #e55)', action: async () => { await dm.deleteDesktop(desk.id); afterSwitch(); } });
+            showContextMenu(e.clientX, e.clientY, items);
+          });
           tabBar.appendChild(tab);
         }
+        const addTab = document.createElement('button');
+        addTab.className = 'mobile-desk-tab mobile-desk-add';
+        addTab.textContent = '+';
+        addTab.title = t('Add desktop');
+        addTab.style.cssText = tabCss(false) + ';font-size:16px;padding:6px 14px';
+        addTab.onclick = () => { const id = dm.createDesktop(); dm.switchTo(id).then(afterSwitch); };
+        tabBar.appendChild(addTab);
         pop.insertBefore(tabBar, winList);
       }
       // Window list for current desktop
       winList.innerHTML = '';
       const windows = allWindows.filter(w => !w._hiddenByDesktop && !w.isMinimized);
       if (!windows.length) {
-        winList.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">No windows on this desktop</div>';
+        winList.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">${escHtml(t('No windows on this desktop'))}</div>`;
       } else {
         for (const win of windows) {
-          winList.appendChild(this._buildWindowItem(win, wm, pop));
+          winList.appendChild(this._buildWindowItem(win, wm, pop, rerender));
+        }
+      }
+      // Minimized windows (design-mobile-gaps #10): WindowManager.minimize is a
+      // no-op ≤768px now, but a window minimized on a desktop client before
+      // this phone joined would otherwise vanish from every list — a tap
+      // restores it.
+      const minimized = [...wm.windows.values()].filter(w => w.isMinimized && !w._hiddenByDesktop);
+      if (minimized.length) {
+        const head = document.createElement('div');
+        head.className = 'mobile-win-minimized-head';
+        head.style.cssText = 'padding:8px 16px 2px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)';
+        head.textContent = t('Minimized');
+        winList.appendChild(head);
+        for (const win of minimized) {
+          const item = this._buildWindowItem(win, wm, pop, rerender);
+          item.classList.add('mobile-win-minimized');
+          item.onclick = () => { pop.remove(); wm.restore(win.id); };
+          winList.appendChild(item);
         }
       }
     };
@@ -120,10 +192,20 @@ export class MobileNav {
     setTimeout(() => document.addEventListener('pointerdown', onTap), 0);
   }
 
-  _buildWindowItem(win, wm, pop) {
+  _buildWindowItem(win, wm, pop, rerender) {
     const item = document.createElement('div');
+    item.className = 'mobile-win-row';
     item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s';
     if (win.id === wm.activeWindowId) item.style.background = 'var(--accent-dim)';
+    // Long-press → the window's own menu (design-mobile-gaps #7/#22): the
+    // registered 'window' contributions — rename / restart / terminate /
+    // locate / properties / Move to Desktop / close — the title-bar menu the
+    // phone has no title bar for. The list stays open underneath (its
+    // outside-tap close exempts [data-popover]).
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      showWindowContextMenu(this.app, win.id, e.clientX, e.clientY, { onAction: () => setTimeout(() => rerender?.(), 50) });
+    });
 
     const icon = document.createElement('span');
     icon.style.cssText = 'flex-shrink:0;font-size:16px';
@@ -157,7 +239,7 @@ export class MobileNav {
     }
 
     const closeBtn = document.createElement('button');
-    closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:32px;min-height:32px;display:flex;align-items:center;justify-content:center';
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
     closeBtn.textContent = '\u2715';
     closeBtn.onclick = (e) => { e.stopPropagation(); wm.closeWindow(win.id); item.remove(); };
 

@@ -531,6 +531,55 @@
 .archive-entry .ae-size { flex-shrink: 0; color: var(--text-dim); font-size: 10px; }
 .archive-empty { padding: 16px; text-align: center; color: var(--text-dim); font-size: 11px; }
 
+/* Touch Select-mode bar (design-mobile-gaps #6): hidden until a long-press →
+   Select… enters the mode; the batch verbs live here. Theme vars only. */
+.file-select-bar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); background: var(--accent-dim); font-size: 12px; color: var(--text);
+}
+.file-select-count { flex: 1; min-width: 0; font-weight: 600; }
+.file-select-btn {
+  min-height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-input); color: var(--text); cursor: pointer; font-size: 12px;
+}
+.file-select-btn:active { background: var(--bg-hover); }
+.file-select-btn:disabled { opacity: 0.4; cursor: default; }
+.file-select-btn.file-select-danger { color: var(--red, #e55); }
+.file-select-btn.file-select-done { border-color: var(--accent); color: var(--accent); }
+/* the bookmark strip's fold chevron exists only on the phone layout below */
+.file-bookmark-toggle { display: none; }
+
+/* ── File explorer phone layout (docs/design-mobile-gaps.md #6, measured at
+   390×844: the bookmarks pane took 130 of 390 px, the Size/Modified header
+   cells sat at x 400–620, toolbar buttons were 9–15 px wide). ≤768px: the
+   toolbar wraps with the path on its own line, buttons are 36 px, the
+   bookmarks pane is a strip above the list that folds, and the ONE column
+   (_getVisibleColumns answers Name only there) fills the width. ── */
+@media (max-width: 768px) {
+  .file-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
+  .file-toolbar .file-path-input { flex: 1 1 100%; order: 10; min-height: 36px; font-size: 14px; padding: 4px 10px; }
+  .file-toolbar .file-tool-btn { width: 36px; height: 36px; font-size: 16px; }
+  .file-toolbar .file-tool-btn svg { width: 16px !important; height: 16px !important; }
+  .file-toolbar .file-host-select { height: 36px; font-size: 13px; }
+  .file-browse-area { flex-direction: column; }
+  .file-bookmark-panel {
+    width: auto; min-width: 0; max-width: none; flex: 0 0 auto; max-height: 40%;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  .file-bookmark-panel.bk-collapsed .file-bookmark-list { display: none; }
+  .file-bookmark-header { padding: 0 6px 0 10px; min-height: 36px; }
+  .file-bookmark-toggle { display: flex; min-width: 36px; min-height: 36px; transition: transform var(--transition); }
+  .file-bookmark-panel.bk-collapsed .file-bookmark-toggle { transform: rotate(-90deg); }
+  .file-bookmark-item { min-height: 36px; display: flex; align-items: center; }
+  .file-sort-header { padding: 2px 8px; }
+  .file-sort-header .file-sort-col { width: auto !important; flex: 1 1 auto; min-height: 28px; display: flex; align-items: center; }
+  .file-col-resize-handle { display: none; }
+  .file-item { width: 100%; min-width: 0; min-height: 40px; padding: 4px 6px; font-size: 13px; }
+  .file-item .file-name { width: auto; flex: 1 1 auto; min-width: 0; }
+  .file-icon { font-size: 16px; width: 20px; }
+  .file-icon svg { width: 16px; height: 16px; }
+}
+
 /* File explorer host selector (Files cross-host) */
 .file-host-select {
   height: 24px; max-width: 90px; padding: 0 4px; font-size: 11px;

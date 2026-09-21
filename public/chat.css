@@ -656,6 +656,11 @@
 .chat-steer-btn:active { background: var(--bg-hover); color: var(--text); }
 .chat-steer-btn svg { width: 16px; height: 16px; display: block; }
 @media (max-width: 768px) { .chat-steer-btn:not(.hidden) { display: inline-flex; } }
+/* Chat search, phone face (docs/design-mobile-gaps.md #4): the status bar's
+   magnifier is Ctrl+F's touch equivalent — same split as the steer bolt. */
+.chat-status-search { display: none; }
+.chat-status-search svg { width: 16px; height: 16px; display: block; }
+@media (max-width: 768px) { .chat-view .chat-status-bar .chat-status-search { display: inline-flex; min-width: 36px; justify-content: center; } }
 
 .chat-input-wrap { flex: 1; position: relative; min-width: 0; display: flex; align-items: flex-end; gap: 6px; }
 .chat-attach-btn {
@@ -1143,6 +1148,10 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   .chat-status-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; }
   .chat-status-bar::-webkit-scrollbar { display: none; }
   .chat-status-bar > * { flex-shrink: 0; }
+  /* Per-message hover buttons (open-in-editor / fork, 21×16 px) sat ON the
+     message text at 390 px (measured: 18 of 18 intersected). The long-press
+     message menu carries the same verbs there (design-mobile-gaps #5). */
+  .chat-msg > .chat-open-editor-btn { display: none; }
 }
 
 /* Model auto-fallback warning: the harness is serving a different model than

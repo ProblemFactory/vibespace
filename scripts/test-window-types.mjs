@@ -46,15 +46,17 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 //   desktop-app — one local desktop application on its own display (docs/design-desktop-apps §2, 2026-09-13)
 //   integrations — ⚙ → Integrations & keys, one card per registry row (docs/design-communication-panel.zh.md §14.5, P0b)
 //   channel-outbox — THE approval outbox, a singleton (docs/design-communication-panel.zh.md §9.2 / §10.1, P3)
-const CORE_TYPES = ['browser', 'channel', 'channel-outbox', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'integrations', 'job-interact', 'jobs',
-  'settings', 'stage-placeholder', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
+//   channels / system / ports — the rail-panel WINDOW FALLBACKS (docs/design-mobile-gaps.md #2/#9, 2026-09-20): the very same panel
+//     renderer in a singleton window wherever the rail is not built (a phone, sidebar.activityRail off)
+const CORE_TYPES = ['browser', 'channel', 'channel-outbox', 'channels', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'integrations', 'job-interact', 'jobs',
+  'ports', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder'];
 // kinds whose opener focuses an existing window of the kind instead of opening a second
-const CORE_SINGLETONS = ['channel-outbox', 'desktop', 'integrations', 'jobs', 'settings', 'usage'];
+const CORE_SINGLETONS = ['channel-outbox', 'channels', 'desktop', 'integrations', 'jobs', 'ports', 'settings', 'system', 'usage'];
 
 console.log('window-type registry — functional (node, DOM-free)');
 ok(typeof document === 'undefined' && typeof window === 'undefined', 'harness has no DOM (the import below must not need one)');
@@ -178,7 +180,8 @@ for (const [file, s] of Object.entries(src)) {
     if (single) actions.push(single);
     const multi = body.match(/\bactions:\s*\{([^}]*)\}/)?.[1];
     if (multi) for (const k of multi.matchAll(/\b([A-Za-z]+)\s*:/g)) actions.push(k[1]);
-    regs.push({ file, fn: m[1], type, actions, persistFalse: /\bpersist:\s*false\b/.test(body), singleton: /\bsingleton:\s*true\b/.test(body) });
+    const replay = body.match(/\breplay:\s*\([^)]*\)\s*=>\s*([^\n]*)/)?.[1] || '';
+    regs.push({ file, fn: m[1], type, actions, persistFalse: /\bpersist:\s*false\b/.test(body), singleton: /\bsingleton:\s*true\b/.test(body), replay });
   }
 }
 const typeRegs = regs.filter((r) => r.fn === 'registerWindowType');
@@ -194,12 +197,32 @@ ok(regs.every((r) => r.type && regTypes.includes(r.type)), 'every action registr
 ok(same(typeRegs.filter((r) => r.persistFalse).map((r) => r.type), CORE_TRANSIENT), "persist:false set == layout.js's former TRANSIENT_WINDOW_TYPES {chat, terminal, stage-placeholder}");
 ok(same(typeRegs.filter((r) => r.singleton).map((r) => r.type), CORE_SINGLETONS), 'singleton set == the kinds whose opener focuses an existing window {desktop, integrations, jobs, settings, usage}');
 
+// A REPLAY MUST PRODUCE THE WINDOW IT NAMES (2.369.125 r2, verifier finding on
+// docs/design-mobile-gaps.md #2/#9): four openers run a rail-first ladder for
+// the human ⚙ click (rail panel where the rail exists, else a window). A
+// layout-sync replay carries a syncId = a WINDOW another client holds; routed
+// through the ladder without `forceWindow` it opened the desktop's rail panel
+// instead (its sidebar opened by itself), no window with that id existed, and
+// the desktop's next save closed the phone's window. Census: every replay
+// closure that calls a ladder opener passes forceWindow: true.
+const RAIL_LADDER_OPENERS = ['openRailPanel(', 'app.openChannels(', 'app.openJobs(', 'app.openJobInteract('];
+const replaysViaLadder = (r) => RAIL_LADDER_OPENERS.some((o) => r.replay.includes(o));
+const replayForcesWindow = (r) => /\bforceWindow:\s*true\b/.test(r.replay);
+const ladderReplays = typeRegs.filter(replaysViaLadder);
+ok(same(ladderReplays.map((r) => r.type), ['channels', 'job-interact', 'jobs', 'ports', 'system']), `the rail-ladder replays are exactly {channels, job-interact, jobs, ports, system} (${ladderReplays.map((r) => r.type).sort().join(' ')})`);
+ok(ladderReplays.every(replayForcesWindow), 'every replay that routes through a rail-first ladder passes forceWindow: true (a replay produces the window it names)',
+  ladderReplays.filter((r) => !replayForcesWindow(r)).map((r) => `${r.type}: ${r.replay}`).join('; '));
+ok(ladderReplays.every((r) => r.replay.trim().length > 0), 'the replay text was actually captured (an empty capture would pass the predicate vacuously)');
+// negative control: the r1 closure text (no forceWindow) fails the same predicate
+ok(!replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId }) });" }) && replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId, forceWindow: true }) });" }), 'negative control: the pre-fix closure text fails the predicate, the fixed one passes');
+
 // ownership: each kind registered in the module that opens it
 const owner = Object.fromEntries(typeRegs.map((r) => [r.type, r.file]));
 const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecycle.js', files: 'app.js', editor: 'app.js',
   viewer: 'file-viewer.js', 'hex-viewer': 'file-viewer.js', browser: 'browser-window.js', desktop: 'desktop-window.js', 'desktop-app': 'desktop-app-window.js',
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
-  settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js' };
+  settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js',
+  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js' };
 ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',
   Object.entries(EXPECTED_OWNER).filter(([t, f]) => owner[t] !== f).map(([t, f]) => `${t}: ${owner[t]} (expected ${f})`).join('; '));
 ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task')

@@ -46,6 +46,9 @@ export function installExplorerOps(FileExplorer) {
     const isArchive = /\.(zip|tar|tgz|tbz2|txz|gz|bz2|xz)$/i.test(dataset.name);
     const items = [];
 
+    // Touch (design-mobile-gaps #6): a long-press is the only way into a
+    // multi-selection without modifier keys — the first row enters the mode.
+    if (this.app.isTouch && !this._selectMode) items.push({ label: t('Select\u2026'), action: () => this._enterSelectMode(dataset.name) });
     if (multi) {
       items.push({ label: t('Compress {n} items\u2026', { n: sel.length }), action: () => this._compressSelection(sel) });
       items.push({ label: t('Copy ({n})', { n: sel.length }), action: () => this._clipboardSet('copy') });
@@ -144,7 +147,8 @@ export function installExplorerOps(FileExplorer) {
     items.push({ label: t('Open Terminal Here'), action: () => this.app.openShellTerminal(this.currentPath, { hostId: this._host || undefined }) });
     items.push({ label: t('New Folder'), action: () => this.createDir() });
     items.push({ sep: true });
-    items.push({ label: t('Select All'), action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); } });
+    if (this.app.isTouch && !this._selectMode) items.push({ label: t('Select\u2026'), action: () => this._enterSelectMode(null) });
+    items.push({ label: t('Select All'), action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); if (this._selectMode) this._renderSelectBar(); } });
     items.push({ label: t('Refresh'), action: () => this.refresh() });
     items.push({ label: t('Copy Path'), action: () => copyText(this.currentPath) });
     if (!this._host) items.push({ label: t('Share this folder…'), submenu: () => this._shareFolderSubmenu(this.currentPath) });

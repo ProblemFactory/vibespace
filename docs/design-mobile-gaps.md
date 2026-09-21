@@ -82,7 +82,7 @@ Available **31** · Partial **16** · Missing **9** (Channels panel, For-you inb
 5. **Message long-press menu** — copy / fork / open-in-editor / metadata as one `showContextMenu` on touch; hide the 21×16 hover buttons ≤768 (fixes the overlap defect).
 6. **Explorer phone layout** — bookmarks as a collapsible strip, single Name column, 36 px toolbar buttons, long-press "Select" mode for multi-select.
 7. **Desktop management in the switcher** — "+" tab, long-press tab → rename/delete, switcher-row long-press → `menuItems('window')` incl. Move to Desktop.
-8. **Touch-target pass** — mobile-nav buttons (27×23…36×34), sidebar header (22-28 px), sidebar tabs (26 px), gear rows (29 px), status-bar chips (14 px) to ≥36 px via one `@media (max-width:768px)` block.
+8. **Touch-target pass** — mobile-nav buttons (27×23…36×34), sidebar header (22-28 px), sidebar tabs (26 px), status-bar chips (14 px) to ≥36 px via one `@media (max-width:768px)` block. The ⚙ gear rows (29 px) are OUT OF SCOPE here: the gear menu is being restructured by docs/design-gear-menu-hierarchy.md (its own lane owns gear-menu.js / contributions.js and their row geometry); lifting them from this block would be a second writer on rows that lane is about to reshape.
 9. **System/Ports gear rows** — "System…" and "Ports…" rows opening windows, like Usage.
 10. **Terminal: copy + key row** — a "Copy screen" key, wrap the key row to two rows (or a fade hint); guard `wm.minimize` on mobile so a synced minimize cannot strand a window.
 

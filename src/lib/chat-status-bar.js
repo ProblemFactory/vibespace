@@ -31,8 +31,12 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null, onRestartSession = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null, onRestartSession = null, onSearch = null }) {
     this._ws = ws;
+    // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
+    // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
+    // the view has no search bar (never rendered).
+    this._onSearch = onSearch;
     this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
     this._outputStyle = '';        // CLI output style (Concise/…) — what the LIVE session is running with
     // Does the RUNNING WRAPPER serve the live style verb? undefined = not told
@@ -426,6 +430,10 @@ export class ChatStatusBar {
     const tierOrange = `color-mix(in srgb, ${tierRed} 50%, ${tierYellow})`;
     const tierGreen = 'var(--green, #3fb950)';
     const parts = [];
+
+    // Chat search, phone face (design-mobile-gaps #4): a keyboard shortcut has
+    // no touch equivalent; the chip is display:none above 768px.
+    if (this._onSearch) parts.push(`<span class="chat-status-search chat-status-clickable" title="${escHtml(t('Search this conversation'))}">${UI_ICONS.search}</span>`);
 
     // Model + effort badges — separate clickable segments, both ALWAYS
     // rendered: when a value hasn't been reported/commanded we say so
@@ -845,6 +853,7 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
+    if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
       this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);

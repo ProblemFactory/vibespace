@@ -1960,7 +1960,7 @@ class App {
   /** The Channels PANEL (the rail). Returns false where there is no rail —
    *  the caller (the ⚙ row) is gated on the same fact, so a dead entry point
    *  is never offered rather than offered and refused. */
-  openChannels() { return focusChannelsPanel(this); }
+  openChannels(opts) { return focusChannelsPanel(this, opts || {}); }
   /** ⚙ → Integrations (design §14.5). Every consumer deep-links to ITS card:
    *  `openIntegration('lark')` scrolls to and highlights that row; an id that
    *  no longer exists opens the window with nothing highlighted, never throws. */

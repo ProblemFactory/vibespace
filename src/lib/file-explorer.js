@@ -116,6 +116,17 @@ class FileExplorer {
     const bkHeader = document.createElement('div'); bkHeader.className = 'file-bookmark-header';
     const bkTitle = document.createElement('span'); bkTitle.textContent = t('Bookmarks'); bkTitle.className = 'file-bookmark-title';
     bkHeader.append(bkTitle);
+    // Phone layout (docs/design-mobile-gaps.md #6): the 130 px side pane is a
+    // third of a 390 px window, so ≤768px the panel is a STRIP above the list
+    // whose header folds it (the chevron is display:none on wider screens;
+    // the class only hides the list, so the desktop side pane never changes).
+    const bkToggle = document.createElement('button');
+    bkToggle.className = 'file-bookmark-toggle icon-btn';
+    bkToggle.title = t('Show or hide bookmarks');
+    bkToggle.innerHTML = UI_ICONS.chevronDown;
+    bkToggle.onclick = (e) => { e.stopPropagation(); this._bookmarkPanel.classList.toggle('bk-collapsed'); };
+    bkHeader.appendChild(bkToggle);
+    if (this.app.isMobile) this._bookmarkPanel.classList.add('bk-collapsed');
     this._bookmarkPanel.append(bkHeader, this._bookmarkList);
 
     // Sort header (for list view)
@@ -130,7 +141,13 @@ class FileExplorer {
     // Main pane wraps sort header + file list (so columns align with bookmarks panel open)
     const mainPane = document.createElement('div');
     mainPane.className = 'file-main-pane';
-    mainPane.append(this.sortHeader, this.listEl);
+    // Touch "Select" mode bar (design-mobile-gaps #6): no modifier keys on a
+    // phone, so a long-press → Select… turns every tap into a toggle and this
+    // bar carries the batch verbs; hidden until the mode is entered.
+    this._selectBar = document.createElement('div');
+    this._selectBar.className = 'file-select-bar';
+    this._selectBar.style.display = 'none';
+    mainPane.append(this.sortHeader, this._selectBar, this.listEl);
 
     // Browse area keeps bookmarks + main pane always side-by-side
     const browseArea = document.createElement('div');
@@ -174,6 +191,7 @@ class FileExplorer {
     this._selection = new Set();
     this._selAnchor = null;      // shift-range anchor
     this._renderOrder = [];      // current sorted order (for shift ranges / select-all)
+    this._selectMode = false;    // touch multi-select (long-press → Select…)
 
     el.append(toolbar, contentArea, this.uploadInput, this._folderInput);
     winInfo.content.appendChild(el);
@@ -523,6 +541,10 @@ class FileExplorer {
 
   // ── Column configuration ──
   _getVisibleColumns() {
+    // Phone (design-mobile-gaps #6): the Size/Modified columns landed at
+    // x 400–620 on a 390 px viewport — off-screen, and the list scrolled
+    // sideways. ONE column there; the user's column choice is untouched.
+    if (this.app.isMobile) return ALL_COLUMNS.filter(c => c.key === 'name');
     return ALL_COLUMNS.filter(c => c.alwaysOn || this._columns[c.key]);
   }
 
@@ -664,7 +686,7 @@ class FileExplorer {
         }
         throw new Error(data.error);
       }
-      if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; }
+      if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; if (this._selectMode) this._exitSelectMode(); }
       this.currentPath = data.path; this.pathInput.value = data.path; this.items = data.items;
       this.winInfo._explorerPath = data.path; // for layout persistence
       if (this.winInfo._openSpec) { this.winInfo._openSpec.path = data.path; this.winInfo._openSpec.host = this._host || undefined; }
@@ -866,6 +888,13 @@ class FileExplorer {
     // (This call was lost in a refactor — domRefs stayed empty, so progress
     // updates were no-ops and the documented inline bars never rendered.)
     this._renderUploadRows();
+    // Select mode survives a refresh (a delete refreshes): drop names that no
+    // longer exist and re-count, so the bar never claims a vanished row.
+    if (this._selectMode) {
+      const live = new Set(this._renderOrder);
+      for (const n of [...this._selection]) if (!live.has(n)) this._selection.delete(n);
+      this._renderSelectBar();
+    }
     this._applySelectionClasses();
   }
 
@@ -886,6 +915,15 @@ class FileExplorer {
   // Click with ctrl/shift multi-select semantics (shared by list + icon views)
   _onItemClick(e, item) {
     const name = item.name;
+    if (this._selectMode) {
+      // every tap toggles (the ctrl-click semantics without a key)
+      if (this._selection.has(name)) this._selection.delete(name);
+      else this._selection.add(name);
+      this._selAnchor = name;
+      this._applySelectionClasses();
+      this._renderSelectBar();
+      return;
+    }
     if (e.shiftKey && this._selAnchor) {
       const a = this._renderOrder.indexOf(this._selAnchor), b = this._renderOrder.indexOf(name);
       if (a >= 0 && b >= 0) this._selection = new Set(this._renderOrder.slice(Math.min(a, b), Math.max(a, b) + 1));
@@ -906,6 +944,45 @@ class FileExplorer {
     this._updatePreview();
   }
 
+  /** Enter touch multi-select (design-mobile-gaps #6). `name` = the row the
+   *  long-press landed on (already selected by _showContextMenu). */
+  _enterSelectMode(name) {
+    this._selectMode = true;
+    if (name) this._selection = new Set([name]);
+    this._applySelectionClasses();
+    this._renderSelectBar();
+  }
+
+  _exitSelectMode() {
+    this._selectMode = false;
+    this._selection.clear();
+    this._selAnchor = null;
+    this._applySelectionClasses();
+    this._renderSelectBar();
+  }
+
+  _renderSelectBar() {
+    const bar = this._selectBar;
+    if (!bar) return;
+    if (!this._selectMode) { bar.style.display = 'none'; bar.textContent = ''; return; }
+    bar.style.display = '';
+    bar.textContent = '';
+    const n = this._selection.size;
+    const count = document.createElement('span'); count.className = 'file-select-count';
+    count.textContent = t('{n} selected', { n });
+    // verbs are DISABLED at zero selected (never a silent no-op tap); the bar
+    // re-renders on every toggle so `n` is always the current count
+    const mk = (label, fn, cls = '', needsSel = true) => { const b = document.createElement('button'); b.className = 'file-select-btn' + (cls ? ' ' + cls : ''); b.textContent = label; b.disabled = needsSel && !n; b.onclick = fn; return b; };
+    const sel = () => [...this._selection];
+    bar.append(count,
+      mk(t('All'), () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); this._renderSelectBar(); }, '', false),
+      mk(t('Copy'), () => { this._clipboardSet('copy'); this._exitSelectMode(); }),
+      mk(t('Cut'), () => { this._clipboardSet('cut'); this._exitSelectMode(); }),
+      mk(t('Compress'), () => { this._compressSelection(sel()); this._exitSelectMode(); }),
+      mk(t('Delete'), () => this._deleteSelection(), 'file-select-danger'),
+      mk(t('Done'), () => this._exitSelectMode(), 'file-select-done', false));
+  }
+
   _renderFileItem(item) {
     const fullPath = this.currentPath + '/' + item.name;
 
@@ -921,6 +998,7 @@ class FileExplorer {
       cell.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); e.dataTransfer.setData('application/x-file-host', this._host || ''); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
       cell.addEventListener('click', (e) => this._onItemClick(e, item));
       cell.addEventListener('dblclick', () => {
+        if (this._selectMode) return; // every tap toggles in Select mode (verifier r2: a quick double-tap navigated and dropped the mode)
         if (item.isDirectory) this.navigate(fullPath);
         else this.app.openFile(fullPath, item.name, { host: this._host || undefined });
       });
@@ -960,6 +1038,7 @@ class FileExplorer {
       row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', fullPath); e.dataTransfer.setData('application/x-file-path', fullPath); e.dataTransfer.setData('application/x-file-host', this._host || ''); if (item.isDirectory) e.dataTransfer.setData('application/x-folder-path', fullPath); });
       row.addEventListener('click', (e) => this._onItemClick(e, item));
       row.addEventListener('dblclick', () => {
+        if (this._selectMode) return; // every tap toggles in Select mode (verifier r2: a quick double-tap navigated and dropped the mode)
         if (item.isDirectory) this.navigate(fullPath);
         else this.app.openFile(fullPath, item.name, { host: this._host || undefined });
       });

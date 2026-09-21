@@ -9,6 +9,7 @@ import { openLayout, nextLayout, entriesFor, splitNotices, badgeCounts } from '.
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { anchorFixedPopup, copyText, createModalShell, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
+import { UI_ICONS } from './icons.js';
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -16,6 +17,12 @@ export function installUserTodos(app) {
   const btn = document.getElementById('taskbar-user-todos');
   const popup = document.getElementById('user-todos-popup');
   if (!btn || !popup) return;
+  // Phone entry point (docs/design-mobile-gaps.md #1): the taskbar — and with
+  // it the ONLY binding of this inbox — is display:none ≤768px, so an agent's
+  // question reached a phone only as a transient toast. The nav button carries
+  // the same segmented badge and opens the same popup (the stylesheet's
+  // full-width sheet rule for .usage-popup beats the inline anchor).
+  const mBtn = document.getElementById('mobile-nav-todos');
   let todos = { open: [], resolved: [] };
   let knownIds = null; // null until the first load — no toast storm at boot
   let layout = null;   // the popup's row order while OPEN (inc-mtw02kbq-kj96: a ✓ must not slide the next row under the pointer)
@@ -125,6 +132,14 @@ export function installUserTodos(app) {
       ? [cu ? t('{n} urgent', { n: cu }) : '', ch ? t('{n} high', { n: ch }) : '', cn ? t('{n} normal', { n: cn }) : '']
           .filter(Boolean).join(' · ') + ' — ' + t('waiting on you')
       : t('Nothing waiting on you')) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');
+    if (mBtn) {
+      // same badge, same classes (the CSS colours by data-urgency / ut-has-items)
+      mBtn.innerHTML = UI_ICONS.inbox + segs;
+      mBtn.title = btn.title;
+      mBtn.classList.toggle('ut-has-items', n > 0);
+      mBtn.classList.toggle('ut-has-notices', notices > 0);
+      mBtn.dataset.urgency = btn.dataset.urgency;
+    }
   };
 
   const renderPanel = () => {
@@ -227,17 +242,40 @@ export function installUserTodos(app) {
       ${resolvedHtml}`;
   };
 
-  btn.onclick = () => {
+  const togglePopup = (anchor) => {
     popup.classList.toggle('hidden');
     tab = 'inbox'; // default page on every open (user spec)
     renderPanel();
     // Anchor to the button's CURRENT position — customize mode can move it to
     // any bar, so the old fixed bottom-right CSS pointed nowhere.
-    if (!popup.classList.contains('hidden')) anchorFixedPopup(popup, btn);
+    if (!popup.classList.contains('hidden')) anchorFixedPopup(popup, anchor);
   };
+  btn.onclick = () => togglePopup(btn);
+  if (mBtn) mBtn.onclick = () => togglePopup(mBtn);
   document.addEventListener('mousedown', (e) => {
-    if (!popup.contains(e.target) && !btn.contains(e.target)) popup.classList.add('hidden');
+    // the nav button is exempt like the taskbar one — a mousedown on it would
+    // hide the popup and the click would re-open it (a tap that never closes)
+    if (!popup.contains(e.target) && !btn.contains(e.target) && !(mBtn && mBtn.contains(e.target))) popup.classList.add('hidden');
   });
+  // Escape closes the popup / phone sheet (verifier r2). This is a PERSISTENT
+  // element, so it cannot carry [data-popover] — the global handler (app.js
+  // _setupDialogs) REMOVES those nodes. Layer-by-layer like that handler,
+  // and explicitly ordered: this listener runs in the CAPTURE phase (before
+  // the global bubble one) and DEFERS whenever a transient layer sits above
+  // the sheet — an open [data-popover] or a visible #dialog-overlay — so one
+  // Escape closes exactly one layer; a terminal keeps its own Esc; the
+  // viewer modal stops propagation before either. (Not `defaultPrevented`:
+  // a synthesized keydown is rarely cancelable, so that flag is no order.)
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.isComposing) return;
+    if (popup.classList.contains('hidden')) return;
+    if (e.target?.closest?.('.xterm')) return;
+    if (document.querySelector('[data-popover]')) return;
+    const overlay = document.getElementById('dialog-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) return;
+    popup.classList.add('hidden');
+    e.preventDefault();
+  }, { capture: true });
   popup.addEventListener('click', (e) => {
     const tb = e.target.closest('.ut-tab');
     if (tb) { tab = tb.dataset.tab; renderPanel(); return; }

@@ -128,7 +128,11 @@ console.log('— wiring pins');
 {
   const wj = read('src/lib/window.js'), tg = read('src/lib/tab-group.js'), sl = read('src/lib/session-lifecycle.js'), cv = read('src/lib/chat-view.js'), css = read('public/style.css');
   ok('focusWindow re-derives on BOTH branches (grouped guest and plain)', (wj.match(/this\.activeWindowId = id; this\.syncHiddenViews\(\); this\._notify\(\);/g) || []).length === 2);
-  ok('minimize re-derives (restore goes through focusWindow)', /win\.isMinimized=true; this\.syncHiddenViews\(\);/.test(wj) && /win\.isMinimized=false; this\.focusWindow\(id\);/.test(wj));
+  // minimize's body (2.369.125 r2: the ≤768px refocus sits between the mark and the derivation — the derivation must see the NEW active class)
+  const minBody = wj.slice(wj.indexOf('  minimize(id) {'), wj.indexOf('  _focusMostRecent('));
+  ok('minimize re-derives AFTER the mark and after the phone refocus (restore goes through focusWindow)',
+    minBody.indexOf('win.isMinimized=true;') > 0 && minBody.indexOf('this._focusMostRecent(win.id)') > minBody.indexOf('win.isMinimized=true;') && minBody.indexOf('this.syncHiddenViews();') > minBody.indexOf('this._focusMostRecent(win.id)') && /win\.isMinimized=false; this\.focusWindow\(id\);/.test(wj),
+    minBody.slice(-200));
   ok('switchTab re-derives after flipping the guest\'s content', /this\.activeWindowId = chain\.tabs\[index\];\s*\n\s*this\.syncHiddenViews\?\.\(\);/.test(tg));
   ok('every ChatView registration re-derives (a view born hidden starts suspended — the page-load autoFill)', (sl.match(/sessions\.set\(winInfo\.id, (chatView|view)\); (this|app)\.wm\.syncHiddenViews\?\.\(\);/g) || []).length === 4);
   ok('the breakpoint flip re-derives (matchMedia change → syncHiddenViews)', /matchMedia\('\(max-width: 768px\)'\)/.test(wj) && /addEventListener\?\.\('change', \(\) => this\.syncHiddenViews\(\)\)/.test(wj));

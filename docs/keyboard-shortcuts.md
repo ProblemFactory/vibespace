@@ -7,6 +7,7 @@
 | **Ctrl+G** | Open external editor (split-pane CodeMirror) |
 | **Ctrl+V** | Paste text or image from clipboard |
 | **Ctrl+C** | Copy selection to clipboard (sends SIGINT if no selection) |
+| *(phone key row)* **Copy screen** | Copy the visible terminal text — the touch stand-in for drag-select + Ctrl+C; the row also carries Esc / Tab / ⇧Tab / sticky Ctrl / arrows / paste / ^C ^G ^R ^Z ^D ^\ |
 
 ## Chat Mode Shortcuts
 
@@ -15,7 +16,7 @@
 | **Enter** | Send message (normal mode) |
 | **Ctrl+Enter** | Send message (expanded input mode) |
 | **Shift+Enter** | Insert newline |
-| **Ctrl+F** | Open search bar |
+| **Ctrl+F** | Open search bar *(phone: the magnifier chip at the left of the status bar — live windows only, like the key)* |
 | **Enter** (in search) | Next search result |
 | **Shift+Enter** (in search) | Previous search result |
 | **Escape** (in search) | Close search bar |

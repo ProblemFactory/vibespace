@@ -3739,4 +3739,23 @@ export default {
   "Appearance": "外观",
   "Communication": "通讯",
   "Help": "帮助",
+  // Mobile gaps (docs/design-mobile-gaps.md, 2026-09-20): the nav inbox, the
+  // "+" sheet, the touch message menu, the explorer Select mode, the terminal
+  // Copy-screen key and the System/Ports gear rows.
+  "System…": "系统…",
+  "Ports…": "端口…",
+  "Search this conversation": "搜索此对话",
+  "Copy text": "复制文本",
+  "Fork from here": "从此处分叉",
+  "Message details": "消息详情",
+  "Show or hide bookmarks": "显示或隐藏书签",
+  "{n} selected": "已选 {n} 项",
+  "Select…": "选择…",
+  "Agent session": "Agent 会话",
+  "Add desktop": "新建桌面",
+  "No windows on this desktop": "此桌面没有窗口",
+  "Minimized": "已最小化",
+  "Copy screen (the visible terminal text)": "复制屏幕（终端当前可见文本）",
+  "Nothing on screen to copy": "屏幕上没有可复制的内容",
+  "Copied {n} lines": "已复制 {n} 行",
 };

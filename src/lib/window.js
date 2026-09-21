@@ -888,13 +888,7 @@ class WindowManager {
    *  the view keeps a reason SET so the desktop hider and these compose. */
   syncHiddenViews() {
     const app = this._app; if (!app?.sessions) return;
-    if (!this._hideMq && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-      try {
-        this._hideMq = window.matchMedia('(max-width: 768px)');
-        this._hideMq.addEventListener?.('change', () => this.syncHiddenViews());
-      } catch { this._hideMq = null; }
-    }
-    const mobile = !!this._hideMq?.matches;
+    const mobile = this._mobileLayout();
     for (const w of this.windows.values()) {
       const sess = app.sessions.get(w.id);
       if (!sess || typeof sess.setHidden !== 'function') continue;
@@ -996,6 +990,17 @@ class WindowManager {
       if (win._tabChain) this._syncChainBounds(win._tabChain);
     }, 50); this._notify(); this._scheduleOverlapUpdate();
   }
+  /** Is the ≤768px layout in force? (one lazily-built matchMedia, shared
+   *  with syncHiddenViews so the two never disagree about the breakpoint) */
+  _mobileLayout() {
+    if (!this._hideMq && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      try {
+        this._hideMq = window.matchMedia('(max-width: 768px)');
+        this._hideMq.addEventListener?.('change', () => this.syncHiddenViews());
+      } catch { this._hideMq = null; }
+    }
+    return !!this._hideMq?.matches;
+  }
   minimize(id) {
     let win = this.windows.get(id); if (!win) return;
     // For grouped guests, minimize the host
@@ -1003,7 +1008,38 @@ class WindowManager {
       win = this.windows.get(win._tabChain.tabs[0]);
       if (!win) return;
     }
-    win.element.style.display='none'; win.isMinimized=true; this.syncHiddenViews(); this._notify(); this._scheduleOverlapUpdate();
+    win.element.style.display='none'; win.isMinimized=true;
+    // ≤768px (docs/design-mobile-gaps.md #10/#23, verifier r2): the TRUTH is
+    // kept on every client — `isMinimized` rides captureState, so the phone's
+    // next layout save says min:true like the desktop that asked. (The r1
+    // guard REFUSED the minimize here instead; the phone then carried
+    // min:false and its next save RESTORED every window a desktop client had
+    // minimized — measured across two CDP clients.) What the phone changes is
+    // only what IT displays: `.window.window-active {display:flex !important}`
+    // beats the inline display:none, so a minimized ACTIVE window must also
+    // stop being active — show the most recently used remaining one (or
+    // nothing), exactly closeWindow's rule. The switcher's Minimized section
+    // is the restore path; a window that cannot be shown is still carried.
+    if (this._mobileLayout() && win.element.classList.contains('window-active')) this._focusMostRecent(win.id);
+    this.syncHiddenViews(); this._notify(); this._scheduleOverlapUpdate();
+  }
+  /** Focus the most recently used window that can be displayed (highest
+   *  z-index; never a guest, a minimized one, or one hidden by a desktop or
+   *  the stage) — the ONE rule closeWindow and the phone's minimize share.
+   *  `excludeId` = the window that just left the screen (its class is
+   *  cleared here so `.window-active` cannot keep it displayed ≤768px). */
+  _focusMostRecent(excludeId = null) {
+    const ex = excludeId ? this.windows.get(excludeId) : null;
+    ex?.element.classList.remove('window-active', 'highlight-subtle', 'highlight-strong');
+    this.activeWindowId = null;
+    let best = null, bestZ = -1;
+    for (const [wid, w] of this.windows) {
+      if (wid === excludeId || w._hiddenByDesktop || w._hiddenByStage || w.isMinimized) continue;
+      if (w._tabChain && w._tabChain.tabs[0] !== w.id) continue; // skip tab guests
+      const z = parseInt(w.element.style.zIndex) || 0;
+      if (z > bestZ) { best = wid; bestZ = z; }
+    }
+    if (best) this.focusWindow(best);
   }
   restore(id) {
     let win = this.windows.get(id); if (!win) return;
@@ -1048,17 +1084,7 @@ class WindowManager {
     }
     if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(id);
     // If closed window was active, focus the most recently used remaining window (highest z-index)
-    if (this.activeWindowId === id) {
-      this.activeWindowId = null;
-      let best = null, bestZ = -1;
-      for (const [wid, w] of this.windows) {
-        if (w._hiddenByDesktop || w._hiddenByStage || w.isMinimized) continue;
-        if (w._tabChain && w._tabChain.tabs[0] !== w.id) continue; // skip tab guests
-        const z = parseInt(w.element.style.zIndex) || 0;
-        if (z > bestZ) { best = wid; bestZ = z; }
-      }
-      if (best) this.focusWindow(best);
-    }
+    if (this.activeWindowId === id) this._focusMostRecent();
     this._notify(); this._scheduleOverlapUpdate();
   }
   setTitle(id, t) {

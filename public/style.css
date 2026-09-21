@@ -1836,10 +1836,16 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 @media (max-width: 768px) { #mobile-nav-close { display: block; } }
 /* ⚙ + quota chip — the taskbar (gear, pies, popup anchors) is hidden ≤768px,
    so these are the phone's only entry points to the gs-menu / usage popup */
-#mobile-nav-gear {
+#mobile-nav-gear, #mobile-nav-todos {
   background: none; border: none; color: var(--text-secondary); cursor: pointer;
   padding: 4px 6px; flex-shrink: 0; display: flex; align-items: center;
 }
+/* For-you inbox on the nav (design-mobile-gaps #1): the taskbar button's
+   segmented badge, same classes, so the pills colour by urgency as there */
+#mobile-nav-todos { display: none; gap: 3px; }
+#mobile-nav-todos.ut-has-items { color: var(--text); }
+#mobile-nav-todos svg { width: 18px; height: 18px; }
+#mobile-nav-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
 #mobile-nav-usage {
   background: none; border: none; cursor: pointer; padding: 2px 4px;
   flex-shrink: 0; display: flex; align-items: center;
@@ -1979,6 +1985,64 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 
   /* Popovers: prevent going off-screen on mobile */
   .session-config-popover, .upload-popover, .file-view-menu { max-width: calc(90vw / var(--ui-scale, 1)); }
+}
+
+/* ── TOUCH-TARGET PASS (docs/design-mobile-gaps.md #8, 2026-09-20) — ONE block.
+   Every control a finger must hit ≤768px is ≥36 px on its short axis. Measured
+   before this block at 390×844: nav gear 27×23 / close 29×28 / new 29×34,
+   sidebar search 22 px tall, filter·sort·manage 23–28 px, sidebar tabs 26 px,
+   status-bar chips 13–14 px tall, dropdown rows 25 px, settings nav strip an
+   unhinted 1119 px scroller, terminal keys past the viewport. The ⚙ gear
+   menu rows (gear-menu.js / contributions.js) are the gear-menu hierarchy
+   lane's (docs/design-gear-menu-hierarchy.md) and are deliberately NOT lifted
+   here — design-mobile-gaps #8 hands them over by name. Selectors carry a parent where a later
+   stylesheet (chat.css) restates the same property at (0,1,0). ── */
+@media (max-width: 768px) {
+  /* nav bar */
+  #mobile-nav { gap: 2px; padding: 0 6px; }
+  #mobile-nav-menu, #mobile-nav-new, #mobile-nav-close, #mobile-nav-gear, #mobile-nav-usage, #mobile-nav-todos {
+    min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px;
+  }
+  #mobile-nav-gear svg { width: 20px; height: 20px; }
+  /* "+" long-press sheet (#3): a context menu laid out full-width under the
+     nav; !important beats showContextMenu's inline left/top like .usage-popup */
+  .context-menu.mobile-sheet {
+    left: 8px !important; right: 8px !important; top: 48px !important; bottom: auto !important;
+    width: auto; max-width: none; padding: 6px 0; z-index: 90001;
+  }
+  .mobile-sheet .context-menu-item { min-height: 44px; font-size: 14px; gap: 12px; padding: 8px 16px; }
+  .mobile-sheet .context-menu-item svg { width: 20px; height: 20px; flex-shrink: 0; }
+  /* sidebar header, search row, tabs */
+  .sidebar-header .icon-btn, .sidebar-section .icon-btn { min-width: 36px; min-height: 36px; }
+  #session-filter.filter-input { min-height: 36px; font-size: 14px; padding: 6px 10px; }
+  .sidebar-tab, .sidebar-subtab { min-height: 36px; font-size: 12px; }
+  .status-quick-tab { min-height: 32px; font-size: 11px; }
+  /* chat status bar: chips + dropdown rows (chat.css restates the bar's
+     min-height and the row padding after this file — hence the parent) */
+  .chat-view .chat-status-bar { min-height: 40px; padding: 2px 10px; }
+  .chat-view .chat-status-bar .chat-status-clickable { display: inline-flex; align-items: center; min-height: 36px; padding: 0 8px; box-sizing: border-box; }
+  .chat-view .chat-status-dropdown-item { min-height: 36px; display: flex; align-items: center; }
+  /* settings window nav strip: wrap (every category visible) instead of an
+     unhinted horizontal scroller that clipped "Integration" at first paint */
+  .settings-nav { flex-wrap: wrap; overflow-x: visible; }
+  .settings-nav-item { min-height: 36px; display: inline-flex; align-items: center; }
+  /* terminal key row: two rows rather than keys hidden past the viewport */
+  .mobile-term-keys { flex-wrap: wrap; overflow-x: hidden; }
+  .mobile-term-key { min-height: 36px; min-width: 36px; display: inline-flex; align-items: center; justify-content: center; }
+  .mobile-term-key svg { width: 16px; height: 16px; display: block; }
+  /* For-you sheet (#1, verifier r2): tabs 17 px, ✓ / ✕ / ⤢ 20 px, the
+     session header 18 px — the button that OPENS it was lifted, these were not */
+  #user-todos-popup .ut-tab { min-height: 36px; padding: 6px 14px; font-size: 12px; }
+  #user-todos-popup .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+  #user-todos-popup .ut-actions { opacity: 1; gap: 4px; }
+  #user-todos-popup .ut-group-head { min-height: 36px; }
+  /* chat search bar (#4): Ctrl+F's touch face opened a bar with 17–20 px
+     prev / next / close — parent-qualified, chat.css restates the padding */
+  .chat-view .chat-search-bar button { min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
+  /* the Ports/System window fallback fills its window */
+  .rail-panel.rail-window { height: 100%; box-sizing: border-box; }
+  /* the switcher's minimized rows read as parked */
+  .mobile-win-row.mobile-win-minimized { opacity: 0.6; }
 }
 
 /* Mobile terminal key toolbar (hidden on desktop) */

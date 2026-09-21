@@ -22,6 +22,7 @@
 import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog } from './utils.js';
 import { t } from './i18n.js';
 import { registerMenuItem, menuItems } from './contributions.js';
+import { registerWindowType } from './window-types.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern). THE
 // SENTENCE IS COMPOSED HERE (r2): `freshnessClaim` used to build it server
 // side with no translator, so the chip this feature calls its honesty
@@ -455,14 +456,16 @@ export function registerChannelsMenus() {
 /** The ⚙ gear row — registered HERE, by the module that owns the feature
  *  (gear-menu.js never learns its name); since 2.369.124 it files itself
  *  under the Communication ▸ head with `parent:'comm'` (the tree fixture in
- *  scripts/test-contributions.mjs reads this spec off the source). `when`
- *  hides it where the rail (its only surface in P0a) does not exist, rather
- *  than offering a row that lands nowhere. */
+ *  scripts/test-contributions.mjs reads this spec off the source). No `when`
+ *  gate any more (2.369.125, docs/design-mobile-gaps.md #2): the row used to
+ *  hide itself wherever the rail did not exist, which on a phone — where the
+ *  rail is never built — meant the whole Communication panel had NO entry
+ *  point. focusChannelsPanel carries jobs-panel's ladder: rail when it
+ *  exists, a window otherwise. */
 export function registerChannelsGearRow() {
   registerMenuItem({
     menu: 'gear', parent: 'comm', order: 10, // under Communication ▸ (gear-menu.js head 'comm'; this 10 · Outbox 20 · Integrations 30)
     icon: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
-    when: (c) => !!(c.app && c.app.sidebar && c.app.sidebar._railEl),
     label: () => t('Channels…'),
     run: (c) => c.app.openChannels(),
   });
@@ -626,18 +629,44 @@ export function renderChannelsPanel(app, c) {
   return () => { try { app.ws.offGlobal(onBroadcast); } catch {} };
 }
 
-/** Focus the rail's Channels panel (the ⚙ row and any deep link). */
-export function focusChannelsPanel(app) {
+/** Focus the rail's Channels panel (the ⚙ row and any deep link) — or, where
+ *  no rail exists (mobile, `sidebar.activityRail` off), the SAME panel in a
+ *  window: openJobsWindow's ladder (2.357.0), mirrored (design-mobile-gaps #2).
+ *  Returns the rail truthy / the window record, like app.openJobs. */
+export function focusChannelsPanel(app, opts = {}) {
   const sb = app.sidebar;
-  if (!sb || !sb._railEl || !sb.listEl) return false;
-  if (sb._activeTab !== 'channels') sb._railGo('channels');
-  else {
-    if (!sb.isOpen) sb.toggle(true);
-    sb.listEl.querySelector('.rail-panel-channels')?.remove();
-    sb._renderRailPanel();
+  if (!opts.forceWindow && sb && sb._railEl && sb.listEl) {
+    if (sb._activeTab !== 'channels') sb._railGo('channels');
+    else {
+      if (!sb.isOpen) sb.toggle(true);
+      sb.listEl.querySelector('.rail-panel-channels')?.remove();
+      sb._renderRailPanel();
+    }
+    return true;
   }
-  return true;
+  return openChannelsWindow(app, opts);
 }
+
+/** The window fallback: one singleton 'channels' window hosting the very same
+ *  renderChannelsPanel (its broadcast unsubscribe is tied to the window's
+ *  listener controller, so a closed window stops repainting). */
+export function openChannelsWindow(app, { syncId } = {}) {
+  for (const [, w] of app.wm.windows) if (w.type === 'channels') { app.wm.focusWindow(w.id); return w; }
+  app._hideWelcome?.();
+  const winInfo = app.wm.createWindow({ title: t('Channels'), type: 'channels', syncId, openSpec: { action: 'openChannels' }, width: 520, height: 600 });
+  const c = document.createElement('div');
+  c.className = 'rail-panel rail-panel-channels chan-window';
+  winInfo.content.appendChild(c);
+  const dispose = renderChannelsPanel(app, c);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { dispose?.(); } catch {} });
+  return winInfo;
+}
+
+registerWindowType({
+  type: 'channels', label: 'Channels', singleton: true, icon: '',
+  // forceWindow: a REPLAY produces the window it names, never the rail panel (verifier r2, see sidebar-rail.js)
+  action: 'openChannels', replay: (app, spec, { syncId } = {}) => app.openChannels({ syncId, forceWindow: true }),
+});
 
 registerChannelsMenus();
 registerChannelsGearRow();

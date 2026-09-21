@@ -3738,4 +3738,23 @@ export default {
   "Appearance": "外観",
   "Communication": "コミュニケーション",
   "Help": "ヘルプ",
+  // Mobile gaps (docs/design-mobile-gaps.md, 2026-09-20): the nav inbox, the
+  // "+" sheet, the touch message menu, the explorer Select mode, the terminal
+  // Copy-screen key and the System/Ports gear rows.
+  "System…": "システム…",
+  "Ports…": "ポート…",
+  "Search this conversation": "この会話を検索",
+  "Copy text": "テキストをコピー",
+  "Fork from here": "ここから分岐",
+  "Message details": "メッセージの詳細",
+  "Show or hide bookmarks": "ブックマークの表示／非表示",
+  "{n} selected": "{n} 件選択中",
+  "Select…": "選択…",
+  "Agent session": "エージェントセッション",
+  "Add desktop": "デスクトップを追加",
+  "No windows on this desktop": "このデスクトップにウィンドウはありません",
+  "Minimized": "最小化済み",
+  "Copy screen (the visible terminal text)": "画面をコピー（ターミナルの表示中テキスト）",
+  "Nothing on screen to copy": "画面にコピーできる内容がありません",
+  "Copied {n} lines": "{n} 行をコピーしました",
 };

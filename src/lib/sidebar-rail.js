@@ -11,6 +11,8 @@ import { openJobsWindow } from './jobs-panel.js';
 import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
+import { registerMenuItem } from './contributions.js';
+import { registerWindowType } from './window-types.js';
 import { track } from './telemetry-client.js';
 import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler } from 'chart.js';
 // Self-contained registration (idempotent) — the rail must not depend on the
@@ -70,6 +72,56 @@ const RAIL_TITLES = {
   folders: 'Sessions', tasks: 'Task Groups', mounts: 'Remote',
   ports: 'Ports', agents: 'Agents', plugins: 'Plugins', jobs: 'Background Work', channels: 'Channels', system: 'System',
 };
+
+/** ⚙ → System… / Ports… (docs/design-mobile-gaps.md #9): the two rail-only
+ *  panels had NO entry point where the rail is not built (a phone, or
+ *  `sidebar.activityRail` off) — sysinfo was unreachable there, the Ports
+ *  panel only as a per-host dialog. Same ladder as Background Work / Channels:
+ *  the rail panel when it exists, else ONE singleton window hosting the very
+ *  same renderer (the System panel's own 5 s tick + charts are disposed with
+ *  the window through the dispose the renderer publishes). Registered HERE,
+ *  by the owning module — gear-menu.js's block stays byte-identical. */
+export function openRailPanel(app, tab, { syncId, forceWindow = false } = {}) {
+  const sb = app.sidebar;
+  if (!sb || !PANEL_TABS.includes(tab)) return null;
+  if (!forceWindow && sb._railEl && sb.listEl) {
+    if (sb._activeTab !== tab) sb._railGo(tab);
+    else {
+      if (!sb.isOpen) sb.toggle(true);
+      sb.listEl.querySelector('.rail-panel-' + tab)?.remove();
+      sb._renderRailPanel();
+    }
+    return true;
+  }
+  for (const [, w] of app.wm.windows) if (w.type === tab) { app.wm.focusWindow(w.id); return w; }
+  app._hideWelcome?.();
+  const action = tab === 'system' ? 'openSystem' : 'openPorts';
+  const winInfo = app.wm.createWindow({ title: tr(RAIL_TITLES[tab]), type: tab, syncId, openSpec: { action }, width: 560, height: 620 });
+  const c = document.createElement('div');
+  c.className = 'rail-panel rail-panel-' + tab + ' rail-window';
+  winInfo.content.appendChild(c);
+  const prevDispose = sb._panelDispose; sb._panelDispose = null; // the renderer publishes its own dispose there
+  const render = tab === 'system' ? sb._renderSystemPanel(c) : sb._renderPortsPanel(c);
+  Promise.resolve(render).then(() => {
+    const d = sb._panelDispose; sb._panelDispose = prevDispose;
+    if (typeof d !== 'function') return;
+    if (!c.isConnected) { try { d(); } catch {} return; } // closed before the async render landed
+    winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { d(); } catch {} });
+  }).catch((e) => { sb._panelDispose = prevDispose; console.warn('[rail] window panel render failed:', e); });
+  return winInfo;
+}
+const SYS_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12l3.5-3.5"/><path d="M5 19a9 9 0 1 1 14 0"/></svg>';
+const PORTS_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7V3M15 7V3"/><rect x="6" y="7" width="12" height="8" rx="2"/><path d="M12 15v6"/></svg>';
+registerMenuItem({ menu: 'gear', group: '1_admin', order: 55, icon: SYS_ICON, label: () => tr('System…'), run: (c) => openRailPanel(c.app, 'system') });
+registerMenuItem({ menu: 'gear', group: '1_admin', order: 56, icon: PORTS_ICON, label: () => tr('Ports…'), run: (c) => openRailPanel(c.app, 'ports') });
+// A layout-sync REPLAY must produce the WINDOW it names (verifier r2): without
+// forceWindow a phone-opened System window replayed on a rail-bearing desktop
+// as the rail panel (its sidebar opened by itself, no window with that syncId
+// existed) and the desktop's next save closed the phone's window. The
+// rail-first ladder is for the human ⚙ click only. test-window-types pins
+// every replay that routes through a rail ladder.
+registerWindowType({ type: 'system', label: 'System', singleton: true, icon: '', action: 'openSystem', replay: (app, spec, { syncId } = {}) => openRailPanel(app, 'system', { syncId, forceWindow: true }) });
+registerWindowType({ type: 'ports', label: 'Ports', singleton: true, icon: '', action: 'openPorts', replay: (app, spec, { syncId } = {}) => openRailPanel(app, 'ports', { syncId, forceWindow: true }) });
 
 export function installSidebarRail(Sidebar) {
   Object.assign(Sidebar.prototype, {

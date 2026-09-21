@@ -561,9 +561,10 @@ export function openInteractWindow(app, jobId, opts = {}) {
 // ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1) ── no title-bar icon today (unchanged)
 registerWindowType({
   type: 'jobs', label: 'Background Work', singleton: true, icon: '',
-  action: 'openJobs', replay: (app, spec, { syncId } = {}) => app.openJobs({ syncId }),
+  // forceWindow: a REPLAY produces the window it names, never the rail panel (2.369.125 r2, see sidebar-rail.js) — the same ladder, the same class
+  action: 'openJobs', replay: (app, spec, { syncId } = {}) => app.openJobs({ syncId, forceWindow: true }),
 });
 registerWindowType({
   type: 'job-interact', label: 'Job input', icon: '',
-  action: 'openJobInteract', replay: (app, spec, { syncId } = {}) => app.openJobInteract(spec.jobId, { syncId }),
+  action: 'openJobInteract', replay: (app, spec, { syncId } = {}) => app.openJobInteract(spec.jobId, { syncId, forceWindow: true }),
 });

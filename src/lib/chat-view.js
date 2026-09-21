@@ -1,4 +1,4 @@
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
@@ -284,6 +284,10 @@ class ChatView {
         this.app.openWorkflowDetail(runId, { claudeSessionId: ids.claudeId, cwd: ids.cwd, host: ids.host, name });
       },
       getWorkflowIds: () => { const ids = this._getSessionIds(); return { claudeId: ids.claudeId, cwd: ids.cwd, host: ids.host }; },
+      // Ctrl+F's touch face (design-mobile-gaps #4) — the same open() the key
+      // runs, and the same gate: a read-only viewer builds no ChatSearch, so
+      // it gets no chip either (a control that cannot do what it says).
+      onSearch: readOnly ? null : () => this._search?.open(),
     });
     // Initial render: a brand-new session has no chatStatus yet — show the
     // honest unknown badges (model: ? / effort: ?) instead of an empty bar.
@@ -442,12 +446,20 @@ class ChatView {
     this._messageList.addEventListener('contextmenu', (e) => {
       const msgEl = e.target.closest('.chat-msg');
       if (!msgEl || !msgEl.dataset.msgId) return;
-      if (e.clientX - msgEl.getBoundingClientRect().left > 18) return; // strip only
+      const onStrip = e.clientX - msgEl.getBoundingClientRect().left <= 18;
+      // TOUCH (design-mobile-gaps #5): a long-press anywhere on the message
+      // (installLongPressContextMenu synthesizes this event) opens ONE menu —
+      // copy / open in editor / fork from here / details — because the
+      // per-message hover buttons are hidden ≤768px (21×16 px, they sat on
+      // the text) and a 4 px strip is no long-press target. A mouse keeps the
+      // native menu off the strip (copy text…) exactly as before.
+      if (!onStrip && !this.app?.isTouch) return;
       const id = isNaN(+msgEl.dataset.msgId) ? msgEl.dataset.msgId : +msgEl.dataset.msgId;
       const msg = this._messages.find(m => m.id === id || String(m.id) === String(msgEl.dataset.msgId));
       if (!msg) return;
       e.preventDefault();
-      this._showMsgMeta(msg, e.clientX, e.clientY);
+      if (this.app?.isTouch) this._showMsgMenu(msg, e.clientX, e.clientY);
+      else this._showMsgMeta(msg, e.clientX, e.clientY);
     });
     this._messageList.addEventListener('wheel', (e) => {
       // A wheel is a POSITIONING act: it ends the resume settle AND drops the
@@ -1783,6 +1795,29 @@ class ChatView {
         : msg.kind === 'question-replied' ? t('A question in this conversation was answered.')
           : msg.kind === 'question-rejected' ? t('A question in this conversation was dismissed.') : null;
     if (text) this._renderers.appendSystem(text);
+  }
+
+  /** The touch message menu (design-mobile-gaps #5): the same four verbs the
+   *  hover buttons + the strip's right-click offer, as finger-sized rows. The
+   *  fork row follows addForkBtn's gate to the letter (caps.forkAtMessage,
+   *  assistant with a uuid, never a sub-agent viewer) — a row that cannot do
+   *  what it says is the §2.13 class. */
+  _showMsgMenu(msg, x, y) {
+    const text = this._renderers.extractMsgText(msg);
+    const items = [];
+    if (text.trim()) {
+      items.push({ label: t('Copy text'), action: () => { copyText(text); showToast(t('Copied')); } });
+      if (msg.role !== 'tool') items.push({ label: t('Open in editor'), action: () => this._renderers.openInTempEditor(text) });
+    }
+    const backend = this.winInfo?.backend || this.winInfo?.titleMeta?.backend || 'claude';
+    const canFork = !this._readOnly && backendFeatureCaps(backend).forkAtMessage && msg.role === 'assistant' && !!msg.uuid
+      && !(typeof this.sessionId === 'string' && this.sessionId.startsWith('sub-'));
+    if (canFork) items.push({ label: t('Fork from here'), action: () => this._forkFromMessage(msg.uuid, msg) });
+    if (items.length) items.push({ separator: true });
+    items.push({ label: t('Message details'), action: () => this._showMsgMeta(msg, x, y) });
+    const menu = showContextMenu(x, y, items); // one class name (the row class derives from it); the modifier after
+    menu.classList.add('chat-msg-menu');
+    return menu;
   }
 
   _showMsgMeta(msg, x, y) {

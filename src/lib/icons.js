@@ -95,5 +95,13 @@ export const UI_ICONS = {
   // ruling 9's session-card badge + the New Session row). SVG only — never an
   // emoji (the icon law).
   worktree: _s('<path d="M1.5 4.2a1 1 0 011-1h3.1l1.2 1.6h6.7a1 1 0 011 1v6.4a1 1 0 01-1 1H2.5a1 1 0 01-1-1z"/><path d="M6.2 10.6V8.4a1 1 0 011-1h2.6"/><circle cx="6.2" cy="11.6" r="1"/><circle cx="10.6" cy="7.4" r="1"/>'),
+  // Mobile-gap surfaces (2026-09-20, docs/design-mobile-gaps.md): the touch
+  // faces of Ctrl+F / the For-you inbox / copy / the "+" sheet rows. SVG only.
+  search:    _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/>'),
+  inbox:     _s('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/>'),
+  copy:      _s('<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5V3.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2"/>'),
+  globe:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>'),
+  monitor:   _s('<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/>'),
+  info:      _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 7v4.5M8 4.8v.2"/>'),
   forkBranch: _s('<path d="M5 5.372v.878c0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75v-.878a2.25 2.25 0 1 1 1.5 0v.878a2.25 2.25 0 0 1-2.25 2.25h-1.5v2.128a2.251 2.251 0 1 1-1.5 0V8.5h-1.5A2.25 2.25 0 0 1 3.5 6.25v-.878a2.25 2.25 0 1 1 1.5 0ZM5 3.25a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Zm6.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm-3 8.75a.75.75 0 1 0-1.5 0 .75.75 0 0 0 1.5 0Z"/>', { fill: true }),
 };
