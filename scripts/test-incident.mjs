@@ -6,7 +6,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = await freePort(), CDP_PORT = await freePort(), wt = scratch('incident-smoke'); // per-process (scripts/scratch.mjs)
 let failed = 0;
@@ -140,7 +140,7 @@ if (CHROME) {
     return rr.result?.result?.value;
   };
   await cdp('Page.enable');
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.captureIncident)').catch(() => false)) break; await sleep(400); }
   const ui = await evaljs(`(async () => {
     window.app.captureIncident();

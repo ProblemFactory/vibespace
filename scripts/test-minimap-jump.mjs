@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
 
@@ -112,7 +112,7 @@ const evaljs = async (expr) => {
 };
 await cdp('Runtime.enable');
 await cdp('Page.enable');
-await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(400); }
 await sleep(1500);
 

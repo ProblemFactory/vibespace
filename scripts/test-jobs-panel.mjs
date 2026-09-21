@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
 import { makeFixture, writeAliveStamp } from './jobs-triage-fixture.mjs';
 const require = createRequire(import.meta.url);
 
@@ -102,7 +102,7 @@ async function page(t) {
   return { ws, cdp, evalJs, close: () => { try { ws.close(); } catch { } } };
 }
 const p = await page(target);
-const openPage = async () => { await p.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(1500); await p.evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */); };
+const openPage = async () => { await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await p.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(1500); await p.evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */); };
 // count the archive fetches from inside the page (the row must fetch ONLY on click)
 const INSTRUMENT = `(() => { if (!window.__vsFetches) { window.__vsFetches = []; const f = window.fetch; window.fetch = function (u, ...a) { try { window.__vsFetches.push(String(u)); } catch {} return f.call(this, u, ...a); }; } return true; })()`;
 const archiveFetches = () => p.evalJs(`(window.__vsFetches || []).filter((u) => u.includes('archived=1')).length`);

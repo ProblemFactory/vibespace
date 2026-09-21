@@ -34,7 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.resolve(new URL('..', import.meta.url).pathname);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -265,7 +265,7 @@ const evaljs = async (expr) => {
 };
 await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
-await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 for (let i = 0; i < 100; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(300); }
 await evaljs('window.app.ready.then(() => true)').catch(() => { });
 await sleep(1200);

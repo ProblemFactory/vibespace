@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -74,10 +74,10 @@ await cdp('Runtime.enable');
 await cdp('Page.enable');
 
 // plant the ghost BEFORE the app boots (the incident shape: stale localStorage)
-await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 await sleep(800);
 await evaljs(`(() => { localStorage.setItem('wbRecentHost', 'ghost-host-id'); localStorage.setItem('wbHistoryHost', 'ghost-host-id'); return 1; })()`);
-await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.sidebar && window.app.sidebar.listEl)').catch(() => false)) break; await sleep(400); }
 await evaljs(`(() => { window.app.sidebar.toggle(true); return 1; })()`);
 // roster fetch + heal render pass. A FIXED sleep here was a claim about the

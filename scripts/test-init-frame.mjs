@@ -57,6 +57,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
@@ -815,7 +816,7 @@ if (!CHROME) {
     await cdp('Runtime.enable'); await cdp('Page.enable');
     const setViewport = (width, height) => cdp('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width <= 768 });
     await setViewport(1280, 800);
-    await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
     for (let i = 0; i < 80; i++) { if (await evaljs('!!(window.VS && window.VS.ChatRenderers && window.VS.ChatStatusBar)').catch(() => false)) break; await sleep(150); }
 
     // The REAL renderSystemMsg path over the REAL normalizer output — not a

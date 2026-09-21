@@ -25,6 +25,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -2649,7 +2650,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
         const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; pend.set(id, res); ws.send(JSON.stringify({ id, method, params })); });
         const ev = async (expr) => (await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result?.result?.value;
         await cdp('Runtime.enable'); await cdp('Page.enable');
-        await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+        await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
         let ready = false;
         for (let i = 0; i < 80 && !ready; i++) { await sleep(500); ready = await ev('(async()=>{ try { await window.app?.ready; return !!window.app; } catch { return false; } })()').catch(() => false); }
         ok('the app booted in headless chrome', !!ready);

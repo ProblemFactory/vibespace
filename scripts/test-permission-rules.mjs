@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let passed = 0, failed = 0;
@@ -937,7 +937,7 @@ if (!CHROME) {
     };
     await cdp('Runtime.enable'); await cdp('Page.enable');
     await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
-    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     for (let i = 0; i < 100; i++) { if (await evaljs('!!(window.app && window.app.ready)').catch(() => false)) break; await sleep(300); }
     await evaljs('window.app.ready.then(() => true)').catch(() => { });
     await sleep(900);

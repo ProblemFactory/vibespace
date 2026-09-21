@@ -27,7 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -143,7 +143,7 @@ const openGear = async () => {
 
 try {
   await cdp('Page.enable');
-  await cdp('Page.navigate', { url: URL });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: URL });
   await sleep(1500);
   await evalJs(POLL_APP);
   await sleep(600);
@@ -265,7 +265,7 @@ try {
   console.log('gear-menu — phone 390×844, touch + hover:none (accordion mode)');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); // → hover:none + pointer:coarse (see REAL_MOUSE)
-  await cdp('Page.navigate', { url: URL });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: URL });
   await sleep(1500);
   await evalJs(POLL_APP);
   await sleep(600);

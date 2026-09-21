@@ -36,7 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -223,7 +223,7 @@ try {
   // bar by design — every touch below would land on it (measured: the hit-test
   // at the inbox button's centre answered #welcome). app._maybeShowOnboarding
   // reads this flag before showing it.
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vs-onboarded', '1'); } catch {}" });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await phone.waitApp();
   await sleep(1200);
@@ -425,7 +425,7 @@ try {
   const desk = await connectPage(dTarget.webSocketDebuggerUrl);
   await desk.cdp('Runtime.enable'); await desk.cdp('Page.enable');
   await desk.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
-  await desk.cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vs-onboarded', '1'); } catch {}" });
+  await desk.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await desk.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await desk.waitApp();
   // layout.js keeps `_restoring` for 5 s after a boot restore and DROPS every

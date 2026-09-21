@@ -48,6 +48,7 @@ import os from 'node:os';
 import path from 'node:path';
 import cp from 'node:child_process';
 import { createRequire } from 'node:module';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -3404,7 +3405,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
         const ev = async (expr) => (await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result?.result?.value;
         await cdp('Runtime.enable'); await cdp('Page.enable');
         await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
-        await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+        await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
         let ready = false;
         for (let i = 0; i < 180 && !ready; i++) { ready = await ev('(async () => { if (!window.app || !window.app.ready) return false; await Promise.race([window.app.ready, new Promise(r => setTimeout(r, 100))]); return !!document.querySelector(".sidebar"); })()').catch(() => false); if (!ready) await sleep(300); }
         ok('§10 the app booted at 375×667', !!ready);

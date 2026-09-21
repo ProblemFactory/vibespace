@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import net from 'node:net';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const require = createRequire(import.meta.url);
 
@@ -94,7 +95,7 @@ await cdp('Page.enable');
 // ── phase 1: the shipped client must reach the workspace ──
 async function bootProbe(cacheBust) {
   pageErrors.length = 0;
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/${cacheBust ? '?cb=' + cacheBust : ''}` });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/${cacheBust ? '?cb=' + cacheBust : ''}` });
   let ready = false;
   // budget ~60s: the gate runs this right after a real chat turn on a box that
   // also hosts live agent sessions — a slow boot is not a broken boot (two

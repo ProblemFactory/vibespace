@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { gitEnvFrom } from './git-env.mjs';
 import { createRequire } from 'node:module';
 import net from 'node:net';
-import { scratch } from './scratch.mjs';
+import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -399,7 +399,7 @@ await cdp('Page.enable');
 // one the ≤768px rules are written for.
 const VW = 375, VH = 667;
 await cdp('Emulation.setDeviceMetricsOverride', { width: VW, height: VH, deviceScaleFactor: 2, mobile: true });
-await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 let ready = false;
 for (let i = 0; i < 180 && !ready; i++) {
   ready = await ev(`(async () => { if (!window.app || !window.app.ready) return false; await Promise.race([window.app.ready, new Promise(r => setTimeout(r, 100))]); return !!document.querySelector('.sidebar'); })()`).catch(() => false);

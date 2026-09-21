@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePort } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const R = (p) => require(path.join(REPO, p));
@@ -1380,7 +1380,7 @@ console.log('— §7 the chip at 375x667 (headless chrome)');
       const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
       const evalJs = async (e) => { const rr = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (rr.exceptionDetails) throw new Error(rr.exceptionDetails.exception?.description || 'threw'); return rr.result.value; };
       await cdp('Page.enable'); await cdp('Runtime.enable');
-      await cdp('Page.navigate', { url: 'file://' + path.join(dir, 'fixture.html') });
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: 'file://' + path.join(dir, 'fixture.html') });
       await sleep(1200);
       // AFTER the navigation: an override set on about:blank does not survive
       // it, and a measurement taken at the window's real width would be a

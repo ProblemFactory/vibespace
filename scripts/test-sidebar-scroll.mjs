@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,7 +77,7 @@ ws.on('message', (d) => { const m = JSON.parse(d);
   if (m.method === 'Runtime.exceptionThrown') { try { console.log('[pageEX]', m.params.exceptionDetails?.exception?.description?.slice(0, 300) || JSON.stringify(m.params.exceptionDetails).slice(0, 200)); } catch {} }
 });
 await cdp('Page.enable');
-await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
 for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.sidebar && window.app.sidebar.listEl)').catch(() => false)) break; await sleep(400); }
 
 // Fresh profile starts rail-collapsed (44px strip, main panel width 0) — a

@@ -1317,5 +1317,33 @@ for (const [edge] of EXCEPTIONS) {
   ok(literalRows.length === 1 && literalRows[0] === "'claude.autoResumeOnLimit':", `the schema hand-writes exactly ONE harness-prefixed row — the generic legacy auto-resume default (found: ${literalRows.join(', ')})`);
 }
 
+// 47. THE ONBOARDED-FLAG CENSUS (2.369.125 r7, the Actions mirror on cc89d748).
+//     The first-run Welcome wizard is skipped when localStorage 'vs-onboarded'
+//     is set OR when the machine already has sessions (app.js _checkOnboarding)
+//     — so a chrome suite that never sets the flag is green on every developer
+//     box and red on the runner (empty ~/.claude): the wizard's modal covered
+//     the chrome under test and its capture-phase Escape ate the first Esc
+//     (test-gear-menu's two Esc legs; the three suites red on every mirror run
+//     since 2.369.75 sat under the same modal). ONE source string lives in
+//     scripts/scratch.mjs; every suite passes it to
+//     Page.addScriptToEvaluateOnNewDocument BEFORE each Page.navigate, on the
+//     same receiver. A suite that deliberately exercises the wizard declares
+//     `// onboarding-under-test` and is exempt.
+{
+  const scope = fs.readdirSync('scripts').filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => fs.readFileSync(f, 'utf8').includes("'Page.navigate'"));
+  const judge = (s) => {
+    if (s.includes('// onboarding-under-test')) return null;
+    if (!/import\s*\{[^}]*\bONBOARDED_SOURCE\b[^}]*\}\s*from\s*'\.\/scratch\.mjs'/.test(s)) return 'no ONBOARDED_SOURCE import from ./scratch.mjs';
+    const navs = [...s.matchAll(/'Page\.navigate'/g)].map((m) => m.index);
+    const sets = [...s.matchAll(/addScriptToEvaluateOnNewDocument'\s*,\s*\{\s*source:\s*ONBOARDED_SOURCE\s*\}/g)].map((m) => m.index);
+    for (const at of navs) if (!sets.some((i) => i < at)) return 'a Page.navigate with no ONBOARDED_SOURCE addScript before it';
+    return null;
+  };
+  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, why]) => why);
+  ok(scope.length >= 30, `§47 census scope is non-vacuous (${scope.length} chrome suites navigate a page)`);
+  ok(bad.length === 0, `every chrome suite pre-sets 'vs-onboarded' through ONBOARDED_SOURCE before every Page.navigate${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
+  ok(judge("import { scratch } from './scratch.mjs';\nawait cdp('Page.navigate', { url: U });") !== null && judge("import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: U });") === null && judge("// onboarding-under-test\nawait cdp('Page.navigate', { url: U });") === null, 'NEGATIVE CONTROL: a bare navigate is caught, the shared idiom passes, the declared exemption passes');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

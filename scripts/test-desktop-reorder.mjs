@@ -4,7 +4,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path'; import http from 'node:http';
 import { createRequire } from 'node:module';
-import { freePorts, scratch } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const CHROME = ['/usr/bin/google-chrome','/usr/bin/google-chrome-stable','/usr/bin/chromium'].find(p=>fs.existsSync(p));
@@ -29,7 +29,7 @@ ws.on('message',d=>{const m=JSON.parse(d);if(m.id&&pend[m.id]){pend[m.id](m.resu
 await new Promise(r=>ws.on('open',r));
 await send('Runtime.enable'); await send('Page.enable');
 const errs=[]; ws.on('message',d=>{const m=JSON.parse(d); if(m.method==='Runtime.exceptionThrown') errs.push(JSON.stringify(m.params.exceptionDetails?.exception?.description||m.params).slice(0,200));});
-await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/`});
+await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await send('Page.navigate',{url:`http://127.0.0.1:${PORT}/`});
 await new Promise(r=>setTimeout(r,7000));
 const e=async x=>(await send('Runtime.evaluate',{expression:x,returnByValue:true,awaitPromise:true})).result?.value;
 let pass=0,fail=0; const ck=(n,c,x='')=>{if(c){pass++;console.log('  ✓ '+n)}else{fail++;console.log('  ✗ '+n+(x?' — '+x:''))}};

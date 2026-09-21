@@ -4,6 +4,7 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path';
 import { createRequire } from 'node:module';
 import net from 'node:net';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
@@ -30,7 +31,7 @@ let seq=0; const pend=new Map();
 ws.on('message',d=>{ const m=JSON.parse(d); if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id);} });
 const cdp=(method,params={})=>new Promise((res,rej)=>{const id=++seq;pend.set(id,m=>m.error?rej(new Error(m.error.message)):res(m.result));ws.send(JSON.stringify({id,method,params}));});
 const evalJs=async e=>{const r=await cdp('Runtime.evaluate',{expression:e,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw new Error(r.exceptionDetails.exception?.description||'threw');return r.result.value;};
-await cdp('Page.enable'); await cdp('Page.navigate',{url:`http://127.0.0.1:${PORT}/`});
+await cdp('Page.enable'); await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate',{url:`http://127.0.0.1:${PORT}/`});
 await evalJs('new Promise(r=>{const t=setInterval(()=>{if(window.app){clearInterval(t);r();}},100)})');
 await evalJs('app.ready'); await sleep(2500);
 // Build a ChatView-less harness is hard; instead drive the real classifier via a fake list.

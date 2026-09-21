@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1440,7 +1441,7 @@ console.log('— ⑧ the Stop button is one-shot while an interrupt is in flight
         return r.result?.result?.value;
       };
       await cdp('Runtime.enable'); await cdp('Page.enable');
-      await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
       for (let i = 0; i < 80; i++) { if (await evaljs('!!(window.VS && window.VS.ChatInput)').catch(() => false)) break; await sleep(150); }
       // A REAL ChatInput in a REAL document: the bug lived in innerHTML +
       // querySelector, which no element stub reproduces.
@@ -1574,7 +1575,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       await cdp('Runtime.enable'); await cdp('Page.enable');
       const setViewport = (width, height) => cdp('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width <= 768 });
       await setViewport(1280, 800);
-      await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
       for (let i = 0; i < 80; i++) { if (await evaljs('!!(window.VS && window.VS.ChatInput)').catch(() => false)) break; await sleep(150); }
 
       // A REAL ChatInput in a REAL document, wired the way ChatView wires it:
@@ -1854,7 +1855,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         return r.result?.result?.value;
       };
       await cdp('Runtime.enable'); await cdp('Page.enable');
-      await cdp('Page.navigate',  { url: `http://127.0.0.1:${port}/` });
+      await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate',  { url: `http://127.0.0.1:${port}/` });
       for (let i = 0; i < 80; i++) { if (await evaljs('!!(window.VS && window.VS.ChatInput)').catch(() => false)) break; await sleep(150); }
 
       const { capsOf: caps11 } = require(path.join(REPO, 'src/backend-caps.js'));
@@ -4049,7 +4050,7 @@ console.log('— ⑨ steered messages: one bubble each, live and after a reload'
           return r.result?.result?.value;
         };
         await cdp('Runtime.enable'); await cdp('Page.enable');
-        await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
+        await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
         for (let i = 0; i < 80; i++) { if (await evaljs('!!(window.VS && window.VS.ChatRenderers)').catch(() => false)) break; await sleep9(150); }
         const out = await evaljs(`(() => {
           const list = document.getElementById('list');
@@ -5539,7 +5540,7 @@ process.stdin.on('data', (d) => {
           return r.result?.result?.value;
         };
         await cdp('Runtime.enable'); await cdp('Page.enable');
-        await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+        await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
         const ready = await until(() => evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false), 60000, 300);
         await evaljs('window.app.ready.then(() => true)').catch(() => { });
         ok('BROWSER: the real client is loaded against the live worktree server', !!ready);
@@ -5666,7 +5667,7 @@ process.stdin.on('data', (d) => {
           // where the two arms diverge), PIN the stagger to the top of the
           // product's own range, and then really SIGKILL the server.
           const arm = async (label, expectGuard) => {
-            await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+            await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
             await until(() => evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false), 60000, 300);
             await evaljs('window.app.ready.then(() => true)').catch(() => { });
             // EXACTLY ONE window per session. The layout autosave re-opens the

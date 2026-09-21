@@ -21,6 +21,7 @@ import path from 'node:path';
 import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { ONBOARDED_SOURCE } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -403,7 +404,7 @@ console.log('— ⑤ the first-use dialog in a real browser');
         return r.result?.result?.value;
       };
       await send('Page.enable'); await send('Runtime.enable');
-      await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+      await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
       let ready = false;
       for (let i = 0; i < 80 && !ready; i++) { await sleep(500); ready = await evaluate('try { await window.app?.ready; return !!window.app; } catch { return false; }').catch(() => false); }
       ok('the app booted in headless chrome', !!ready);
@@ -418,7 +419,7 @@ console.log('— ⑤ the first-use dialog in a real browser');
       const t0 = await toastsOf();
       ok('a FRESH default-off instance shows no error toast at all after boot', !!ready && Array.isArray(t0?.err) && t0.err.length === 0, t0);
       await evaluate(`await fetch('/api/plugins/opencode-serve/prompted', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompted: true }) }); return 1;`);
-      await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?r=2` });
+      await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?r=2` });
       let ready2 = false;
       for (let i = 0; i < 80 && !ready2; i++) { await sleep(500); ready2 = await evaluate('try { await window.app?.ready; return !!window.app; } catch { return false; }').catch(() => false); }
       const t1 = await toastsOf();

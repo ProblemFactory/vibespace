@@ -74,7 +74,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import os from 'node:os';
-import { freePort, scratch, scratchHome, fixtureSid } from './scratch.mjs';
+import { freePort, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
 
@@ -477,7 +477,7 @@ const run = async (label) => {
   // opaque "window.app is undefined" out of the scenario.
   let booted = false;
   for (let attempt = 0; attempt < 3 && !booted; attempt++) {
-    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}` });
+    await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}` });
     for (let i = 0; i < 90 && !booted; i++) {
       booted = !!await evaljs('!!(window.app && window.app.ready && window.app.wm && window.app.desktopManager)').catch(() => false);
       if (!booted) await sleep(400);

@@ -23,6 +23,17 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { FIXTURE_CWD_PREFIX, TMP_ROOTS, FIXTURE_SID_PREFIX } = require('../src/fixture-guard.js');
 
+/** The first-run Welcome wizard is skipped when localStorage 'vs-onboarded' is
+ *  set OR when the machine already has sessions (app.js _checkOnboarding). A
+ *  chrome suite that does not pre-set the flag is therefore GREEN on a
+ *  developer box (whose ~/.claude has sessions) and RED on the Actions runner
+ *  (empty ~/.claude): the wizard's modal covers the chrome under test and its
+ *  own capture-phase Escape eats the first Esc (2.369.125 r7 — test-gear-menu's
+ *  Esc legs, and the three suites red on every mirror run since 2.369.75).
+ *  Every suite passes this to Page.addScriptToEvaluateOnNewDocument BEFORE its
+ *  first Page.navigate; test-architecture §47 is the census. */
+export const ONBOARDED_SOURCE = "try { localStorage.setItem('vs-onboarded', '1'); } catch {}";
+
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);

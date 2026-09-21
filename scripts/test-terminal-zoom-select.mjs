@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -83,7 +83,7 @@ const drag = async (zoom, mode) => {
 try {
   await cdp('Page.enable');
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1200, deviceScaleFactor: 1, mobile: false }); // the 1.25 page is 843×675 from (50,75): the headless default 800×600 clipped it
-  await cdp('Page.navigate', { url: 'file://' + path.join(dir, 'page.html') });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: 'file://' + path.join(dir, 'page.html') });
   await sleep(1200);
   await evalJs('typeof term === "object" && term.rows === 30 ? true : Promise.reject(new Error("no terminal"))');
   const base = await drag(1, 'raw');
