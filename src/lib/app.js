@@ -4,7 +4,6 @@ import { installKeybindings } from './contributions.js';
 import { buildGearMenu } from './gear-menu.js';
 import { BUILD_VERSION } from './build-version.js';
 import { track } from './telemetry-client.js';
-import { ThemeEditor } from './theme-editor.js';
 import { WsManager } from './ws.js';
 import { WindowManager } from './window.js';
 import { TerminalSession } from './terminal.js';
@@ -15,7 +14,7 @@ import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, getUiPref, UI_SCALE_MIN, UI_SCALE_MAX, UI_FONT_MIN, UI_FONT_MAX, uiScale, setInstanceUrl } from './utils.js';
+import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl } from './utils.js';
 import { t, tc } from './i18n.js';
 import { installManageAgents } from './manage-agents.js';
 import { installPluginsUI } from './plugins-ui.js';
@@ -1020,128 +1019,12 @@ class App {
     pop.style.left = '';
     pop.style.top = ((rect.bottom + 4) / uiScale()) + 'px';
     pop.style.right = ((window.innerWidth - rect.right) / uiScale()) + 'px';
-
-    const opt = (v, l) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; };
-
-    // Theme
-    const themeLabel = document.createElement('label'); themeLabel.textContent = t('Theme');
-    const themeSel = document.createElement('select');
-    themeSel.id = 'global-theme-select';
-    this._populateThemeSelect(themeSel);
-    themeSel.value = this.themeManager.current;
-    themeSel.onchange = () => {
-      this.themeManager.apply(themeSel.value);
-      for (const [, session] of this.sessions) {
-        if (session.updateTheme) session.updateTheme(this.themeManager.getTerminalTheme());
-      }
-    };
-
-    // Theme editor button
-    const editBtn = document.createElement('button');
-    editBtn.className = 'file-tool-btn';
-    editBtn.textContent = '\u270E';
-    editBtn.title = t('Theme Editor');
-    editBtn.onclick = (e) => { e.stopPropagation(); if (!this._themeEditor) this._themeEditor = new ThemeEditor(this); this._themeEditor.open(); };
-
-    // Font size
-    const sizeLabel = document.createElement('label'); sizeLabel.textContent = t('Font Size');
-    const sizeRow = document.createElement('div'); sizeRow.className = 'font-size-ctrl';
-    const sizeDown = document.createElement('button'); sizeDown.textContent = 'A-';
-    const sizeVal = document.createElement('span'); sizeVal.textContent = this._fontSize;
-    const sizeUp = document.createElement('button'); sizeUp.textContent = 'A+';
-    sizeRow.append(sizeDown, sizeVal, sizeUp);
-
-    const applyFontSize = () => {
-      localStorage.setItem('termFontSize', this._fontSize);
-      sizeVal.textContent = this._fontSize;
-      for (const [, session] of this.sessions) {
-        if (session._applyFontSize) {
-          // ChatView
-          session._applyFontSize(this._fontSize);
-        } else if (session.overrides && !session.overrides.fontSize) {
-          // TerminalSession — through applyOverride so the size passes _xtermPx
-          // (visual px × UI scale; a raw options.fontSize write is 1/scale too small)
-          session.applyOverride('fontSize', null);
-        }
-      }
-    };
-    sizeDown.onclick = () => { if (this._fontSize > 8) { this._fontSize--; applyFontSize(); } };
-    sizeUp.onclick = () => { if (this._fontSize < 28) { this._fontSize++; applyFontSize(); } };
-
-    // Font family
-    const fontLabel = document.createElement('label'); fontLabel.textContent = t('Font');
-    const fontSel = document.createElement('select');
-    for (const f of getAvailableFonts()) {
-      const o = opt(f.value === '_sep' ? '' : f.value, f.label);
-      if (f.disabled) { o.disabled = true; o.style.fontSize = '9px'; o.style.color = 'var(--text-dim)'; }
-      fontSel.appendChild(o);
-    }
-    fontSel.value = this._fontFamily;
-    // A stored font that matches no option (stale localStorage, font list not
-    // yet loaded, uninstalled font) left the select BLANK — surface it instead
-    if (fontSel.selectedIndex === -1) {
-      const curLabel = (this._fontFamily.split(',')[0] || t('Current')).replace(/"/g, '').trim() || t('Current');
-      const cur = opt(this._fontFamily, t('{name} (current)', { name: curLabel }));
-      fontSel.insertBefore(cur, fontSel.firstChild);
-      fontSel.value = this._fontFamily;
-    }
-    fontSel.onchange = () => {
-      this._fontFamily = fontSel.value;
-      localStorage.setItem('termFontFamily', this._fontFamily);
-      for (const [, session] of this.sessions) {
-        if (!session.overrides) continue; // ChatView, not TerminalSession
-        if (!session.overrides.fontFamily) {
-          session.terminal.options.fontFamily = this._fontFamily;
-          try { session.terminal.clearTextureAtlas(); } catch {}
-          session.fit();
-        }
-      }
-    };
-
-    // UI scale (DPI) + UI font size — per-DEVICE like the language (a phone
-    // and a 4K desktop viewing the same instance want different scales, so
-    // these live in localStorage, never the synced settings store). Scale =
-    // whole-app CSS zoom (terminals refit + atlas-clear on change; 100% keeps
-    // them sharpest); font size = text-only multiplier on chrome labels
-    // (sidebar/taskbar/desktop-preview names/menus) via --ui-font-scale.
-    const mkPctRow = (labelText, key, min, max, onApply) => {
-      const lab = document.createElement('label'); lab.textContent = labelText;
-      const row = document.createElement('div'); row.className = 'font-size-ctrl';
-      const down = document.createElement('button'); down.textContent = '\u2212';
-      const val = document.createElement('span');
-      const up = document.createElement('button'); up.textContent = '+';
-      const cur = () => getUiPref(key);
-      const render = () => { val.textContent = cur() + '%'; };
-      const set = (v) => {
-        const nv = Math.max(min, Math.min(max, v));
-        if (nv === 100) localStorage.removeItem(key); else localStorage.setItem(key, String(nv));
-        render(); applyUiPrefs(); onApply?.();
-      };
-      down.onclick = () => set(cur() - 5);
-      up.onclick = () => set(cur() + 5);
-      val.style.cursor = 'pointer'; val.title = t('Click to reset to 100%');
-      val.onclick = () => set(100);
-      render();
-      row.append(down, val, up);
-      return [lab, row];
-    };
-    const [scaleLab, scaleRow] = mkPctRow(t('UI scale (DPI)'), 'vibespace.uiScale', UI_SCALE_MIN, UI_SCALE_MAX, () => this._refitAllTerminals());
-    const [fscaleLab, fscaleRow] = mkPctRow(t('UI font size'), 'vibespace.uiFontScale', UI_FONT_MIN, UI_FONT_MAX);
-
-    // "All Settings" link
-    const allSettingsLink = document.createElement('div');
-    allSettingsLink.className = 'settings-all-link';
-    allSettingsLink.textContent = t('All Settings...');
-    allSettingsLink.onclick = () => { pop.remove(); this._settingsUI.open(); };
-
-    const themeRow = document.createElement('div');
-    themeRow.style.cssText = 'display:flex;align-items:center;gap:4px';
-    themeRow.append(themeSel, editBtn);
-    pop.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, scaleLab, scaleRow, fscaleLab, fscaleRow, allSettingsLink);
-
-    // Account / help section — the 'gear' MENU REGISTRY (gear-menu.js holds
-    // the core rows as contributions; a plugin adds rows through the same
-    // registerMenuItem({ menu: 'gear', … }) call). Mobile shares this menu.
+    // The whole popover is the 'gear' MENU REGISTRY rendered as a tree
+    // (gear-menu.js holds the core rows as contributions; a plugin adds rows
+    // through the same registerMenuItem({ menu: 'gear', … }) call). The
+    // quick appearance controls that used to sit above the rows are the
+    // "Appearance ▸" head's panel (src/lib/appearance-panel.js). Mobile
+    // shares this menu — the renderer picks flyout vs accordion itself.
     pop.append(buildGearMenu(this, pop));
   }
 

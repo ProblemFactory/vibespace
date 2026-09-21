@@ -15,7 +15,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + JSON.stringify(e) : '')); } };
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
-const term = read('src/lib/terminal.js'), utils = read('src/lib/utils.js'), app = read('src/lib/app.js'), vv = read('src/lib/vnc-view.js'), rec = read('src/lib/incident-recorder.js');
+const term = read('src/lib/terminal.js'), utils = read('src/lib/utils.js'), app = read('src/lib/app.js'), panel = read('src/lib/appearance-panel.js'), vv = read('src/lib/vnc-view.js'), rec = read('src/lib/incident-recorder.js');
 
 console.log('§1 ONE counter-zoom rule, ONE definition');
 ok('utils.js defines COUNTER_ZOOM verbatim (var-reactive, net zoom 1)', /export const COUNTER_ZOOM = 'calc\(1 \/ var\(--ui-scale, 1\)\)';/.test(utils));
@@ -30,7 +30,8 @@ const writers = [...term.matchAll(/(?:^\s*fontSize:|options\.fontSize =)\s*([^,\
 ok(`every fontSize writer in terminal.js goes through _xtermPx (${writers.length} writers)`, writers.length >= 3 && writers.every((w) => /^this\._xtermPx\(/.test(w)), writers);
 ok('rescale() re-derives from the override or the global size, clears the atlas and fits', /rescale\(\) \{\n\s*this\.terminal\.options\.fontSize = this\._xtermPx\(this\.overrides\.fontSize \|\| this\._getGlobalFontSize\(\)\);\n\s*try \{ this\.terminal\.clearTextureAtlas\(\); \} catch \{\}\n\s*this\.fit\(\);/.test(term));
 ok('app.js: a UI-scale change calls rescale() on every TerminalSession (a bare fit() would keep the old glyph size)', /_refitAllTerminals\(\) \{[\s\S]{0,600}session\.rescale\(\)/.test(app));
-ok('app.js: the global font-size row applies through applyOverride (no raw options.fontSize write anywhere in app.js)', /session\.applyOverride\('fontSize', null\)/.test(app) && !/session\.terminal\.options\.fontSize =/.test(app));
+// 2.369.124: the global font-size row moved VERBATIM from app.js into appearance-panel.js (the Appearance ▸ head's panel) — the invariant follows the row
+ok('appearance-panel.js: the global font-size row applies through applyOverride (no raw options.fontSize write in app.js or the panel)', /session\.applyOverride\('fontSize', null\)/.test(panel) && !/session\.terminal\.options\.fontSize =/.test(app) && !/session\.terminal\.options\.fontSize =/.test(panel));
 
 console.log('§3 forensics: the incident snapshot now says whether a UI scale was on');
 ok('incident-recorder snapshot carries uiScale + dpr + bodyZoom (the report that started this had no way to tell)', /out\.uiScale = uiScale\(\); out\.dpr = window\.devicePixelRatio; out\.bodyZoom = document\.body\.style\.zoom/.test(rec) && /\buiScale\b[^\n]*from '\.\/utils\.js'/.test(rec));

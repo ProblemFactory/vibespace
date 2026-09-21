@@ -371,7 +371,7 @@ registerWindowType({
 });
 
 registerMenuItem({
-  menu: 'gear', group: '1_admin', order: 25, icon: ICON,
+  menu: 'gear', parent: 'comm', order: 30, icon: ICON, // under Communication ▸ (gear-menu.js head 'comm'; Channels 10 · Outbox 20 · this 30)
   label: () => t('Integrations…'),
   run: (c) => c.app.openIntegration(),
 });

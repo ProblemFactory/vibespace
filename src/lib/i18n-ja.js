@@ -3734,4 +3734,8 @@ export default {
   "Reads the CLI config on every registered machine (one connection each)": "登録済みの各マシンの CLI 設定を読み取ります(各マシンに 1 接続)",
   "No other machines registered.": "他に登録済みのマシンはありません。",
   "could not be checked": "確認できませんでした",
+  // ⚙ menu heads (2.369.124, docs/design-gear-menu-hierarchy.md)
+  "Appearance": "外観",
+  "Communication": "コミュニケーション",
+  "Help": "ヘルプ",
 };

@@ -94,7 +94,7 @@ export function splitArgs(line) {
 export function installDesktopAppLauncher(app) {
   app._desktopAppsAvailable = false;
   registerCommand({ id: COMMAND_ID, title: 'Desktop apps…', icon: APPS_ICON, run: (ctx) => showLaunchDialog((ctx && ctx.app) || app) });
-  registerMenuItem({ menu: 'gear', group: '1_admin', order: 45, icon: APPS_ICON, when: (c) => !!c.app._desktopAppsAvailable, label: () => t('Desktop apps…'), run: (c) => runCommand(COMMAND_ID, { app: c.app }) });
+  registerMenuItem({ menu: 'gear', parent: 'tools', order: 30, icon: APPS_ICON, /* under Tools ▸ (gear-menu.js head 'tools'; Usage 10 · Background Work 20 · this 30 · Plugins 40) */ when: (c) => !!c.app._desktopAppsAvailable, label: () => t('Desktop apps…'), run: (c) => runCommand(COMMAND_ID, { app: c.app }) });
   const btn = document.getElementById('btn-desktop-apps');
   if (btn) btn.addEventListener('click', () => runCommand(COMMAND_ID, { app }));
 

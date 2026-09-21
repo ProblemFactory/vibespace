@@ -196,6 +196,8 @@ try {
   // gs-menu rows exist and show the current values
   await evalJs(`document.getElementById('btn-global-settings').click(); true`);
   await sleep(300);
+  await evalJs(`document.querySelector('.global-settings-popover .gs-menu-item[data-id="appearance"]').click(); true`); // 2.369.124: the quick prefs are the Appearance ▸ head's panel
+  await sleep(150);
   const rows = await evalJs(`(() => {
     const pop = document.querySelector('.global-settings-popover');
     if (!pop) return null;

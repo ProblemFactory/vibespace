@@ -452,14 +452,15 @@ export function registerChannelsMenus() {
   });
 }
 
-/** The ⚙ gear row — registered HERE, by the module that owns the feature, so
- *  gear-menu.js's own registration block stays byte-identical to the pinned
- *  legacy list it is diffed against. `when` hides it where the rail (its only
- *  surface in P0a) does not exist, rather than offering a row that lands
- *  nowhere. */
+/** The ⚙ gear row — registered HERE, by the module that owns the feature
+ *  (gear-menu.js never learns its name); since 2.369.124 it files itself
+ *  under the Communication ▸ head with `parent:'comm'` (the tree fixture in
+ *  scripts/test-contributions.mjs reads this spec off the source). `when`
+ *  hides it where the rail (its only surface in P0a) does not exist, rather
+ *  than offering a row that lands nowhere. */
 export function registerChannelsGearRow() {
   registerMenuItem({
-    menu: 'gear', group: '1_admin', order: 45,
+    menu: 'gear', parent: 'comm', order: 10, // under Communication ▸ (gear-menu.js head 'comm'; this 10 · Outbox 20 · Integrations 30)
     icon: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
     when: (c) => !!(c.app && c.app.sidebar && c.app.sidebar._railEl),
     label: () => t('Channels…'),

@@ -45,6 +45,8 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { registerPluginSettings, unregisterPluginSettings, pluginSettingPath } from './settings-schema.js';
 import { t } from './i18n.js';
 
+/** The core ⚙ heads a plugin row may file itself under (gear-menu.js ids). */
+export const CORE_MENU_HEADS = ['appearance', 'tools', 'comm', 'system', 'help'];
 export const PLUGIN_ICON = svgIcon16('<path d="M6 2h4v2.5a1.5 1.5 0 0 0 3 0V2h1v4h-2.5a1.5 1.5 0 0 0 0 3H14v5H9v-2.5a1.5 1.5 0 0 0-3 0V14H2V9h2.5a1.5 1.5 0 0 0 0-3H2V2h4z"/>');
 const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups allow-downloads';
 export const pluginThemeKey = (pluginId, themeId) => `plugin-${pluginId}-${themeId}`;
@@ -191,6 +193,13 @@ export class PluginClient {
       return /[.:]/.test(c) ? c : `plugin:${id}:${c}`;
     };
     let pluginItemSeq = 0;
+    const pluginParentId = (parent) => {
+      if (typeof parent !== 'string' || !parent) throw new Error('api.registerMenuItem: `parent` must be a head id string');
+      if (CORE_MENU_HEADS.includes(parent)) return parent;
+      if (parent.startsWith(`plugin:${id}:`)) return parent;
+      if (/^[a-z0-9-]+$/.test(parent)) return `plugin:${id}:${parent}`;
+      throw new Error(`api.registerMenuItem: \`parent\` '${parent}' must name a core head (${CORE_MENU_HEADS.join('|')}) or one of this plugin's own heads (a slug)`);
+    };
     const api = {
       id, version: m.version, manifest: m, signal: ctl.signal, app,
       t,
@@ -230,8 +239,19 @@ export class PluginClient {
       registerMenuItem: (spec = {}) => {
         if (!spec || typeof spec !== 'object') throw new Error('api.registerMenuItem expects a spec object');
         const command = spec.command === undefined ? undefined : pluginCommandId(spec.command);
+        // a HEAD needs an explicit id SLUG (the registry rule — members name it
+        // in `parent`, and pluginParentId only resolves a slug); the host's
+        // generated 'item-N' fallback used to smuggle an id-less head past it
+        if (spec.submenu && (typeof spec.id !== 'string' || !/^[a-z0-9-]+$/.test(spec.id))) throw new Error('api.registerMenuItem: a `submenu:true` head needs an explicit `id` slug ([a-z0-9-]) — members name it in `parent`');
         const itemId = `plugin:${id}:${spec.id || spec.command || 'item-' + (++pluginItemSeq)}`;
-        return registerMenuItem({ ...spec, command, id: itemId, signal: ctl.signal });
+        // `parent` / `submenu` (the ⚙ tree, 2.369.124) pass through with the
+        // NAMESPACE RULE: a plugin's parent names one of the core heads
+        // (CORE_MENU_HEADS) or one of its OWN heads (a slug, prefixed like
+        // every plugin item id — a head registered with `submenu:true,
+        // id:'my-head'` is `plugin:<id>:my-head`); anything else is refused
+        // here, loudly, rather than falling to the top level at render time.
+        const parent = spec.parent === undefined || spec.parent === null ? undefined : pluginParentId(spec.parent);
+        return registerMenuItem({ ...spec, command, id: itemId, parent, signal: ctl.signal });
       },
       registerKeybinding: ({ key, command, when, inTerminal } = {}) => registerKeybinding({ key, command: pluginCommandId(command), when, inTerminal, signal: ctl.signal }),
       runCommand: (cid, ctx) => runCommand(pluginCommandId(cid), ctx),

@@ -17,6 +17,17 @@
 //     (the item's AND the command's), items sort by group ('navigation'
 //     first, then lexicographic — name them '1_open', '2_state'…), then
 //     `order`, then registration sequence.
+//   • A menu is a TREE (2.369.124, docs/design-gear-menu-hierarchy.md §2c):
+//     `submenu:true` marks a HEAD (an explicit id + label, no verb of its
+//     own) and `parent:'<head id>'` on any item — separators and `expand`
+//     included — files it under that head. Resolution is LAZY at menuItems()
+//     time like `command`: a parent that is unknown, `when`-hidden or not a
+//     head warns once + telemetry 'menu-unknown-parent' and the row FALLS TO
+//     TOP LEVEL — never dropped (a lost row is the silent-failure class). A
+//     head's members become its `children` (same sort, same separator
+//     collapse), an EMPTY head drops itself (the existing empty-submenu
+//     rule), and a head may nest one head deeper at most (two levels —
+//     validated at registration wherever the chain is already known).
 //   • registerKeybinding({ key:'ctrl+shift+k', command, when? }) +
 //     installKeybindings(document, { signal }) — ONE document-level dispatcher
 //     bound to an AbortSignal (the app lifetime)
@@ -178,14 +189,29 @@ export function runCommand(id, ctx = {}) {
  *                trailing / doubled separators collapse at build time)
  *   kind       — free tag carried onto the produced item (the window menu's
  *                onAction(kind) hook reads it)
- *   icon / danger / keepOpen / decorate — renderer hints carried through
- *                verbatim (the gear renderer reads them; context menus ignore
- *                them). decorate(el, ctx): post-build hook on the rendered row.
+ *   submenu    — true: this item is a HEAD — a row that only holds members.
+ *                Needs an explicit `id` + `label`; forbids command/run/expand/
+ *                children (members come through `parent`). Rendered with its
+ *                members as `children`; an empty head is not shown.
+ *   parent     — '<head id>' files the item (a row, a separator, an `expand`,
+ *                or another head — two levels at most) under that head.
+ *                Resolved LAZILY at menuItems() time; an unknown / hidden /
+ *                non-head parent warns once + telemetry 'menu-unknown-parent'
+ *                and the item surfaces at top level (never dropped).
+ *   icon / danger / keepOpen / decorate / panel / caption / checked —
+ *                renderer hints carried through verbatim (the gear renderer
+ *                reads them; context menus ignore them). decorate(el, ctx):
+ *                post-build hook on the rendered row; panel(ctx) → an element
+ *                a head renders ABOVE its rows (the Appearance controls);
+ *                caption: string | (ctx) → string shown dim at a head's right
+ *                edge (a function is ALSO passed through as `captionOf` so the
+ *                renderer can refresh it live); checked: boolean | (ctx) →
+ *                boolean marks a choice row.
  *   signal     — optional AbortSignal; aborting unregisters the item
  * Returns dispose(). Throws on a duplicate item id or a malformed record.
  */
 export function registerMenuItem(spec = {}) {
-  const { menu, command, run, group, order, when, label, labelHtml, disabled, style, tooltip, children, expand, separator, kind, icon, danger, keepOpen, decorate, signal } = spec;
+  const { menu, command, run, group, order, when, label, labelHtml, disabled, style, tooltip, children, expand, separator, kind, icon, danger, keepOpen, decorate, signal, submenu, parent, panel, caption, checked } = spec;
   if (!nonEmptyString(menu)) throw new Error('registerMenuItem: `menu` (non-empty string) is required');
   const n = ++seq;
   const id = spec.id !== undefined ? spec.id : (command ? `${menu}/${command}` : `${menu}#${n}`);
@@ -194,7 +220,30 @@ export function registerMenuItem(spec = {}) {
   if (command !== undefined && !nonEmptyString(command)) throw new Error(`registerMenuItem ${id}: \`command\` must be a command id string`);
   if (run !== undefined && !isFn(run)) throw new Error(`registerMenuItem ${id}: \`run\` must be a function`);
   if (command && run) throw new Error(`registerMenuItem ${id}: use \`command\` OR an inline \`run\`, not both`);
-  if (!command && !run && !separator && children === undefined && !isFn(expand)) throw new Error(`registerMenuItem ${id}: needs a \`command\`, \`run\`, \`children\`, \`expand\` or \`separator:true\``);
+  // ── tree fields (2.369.124): a HEAD is a row whose only job is to hold members ──
+  if (submenu !== undefined && typeof submenu !== 'boolean') throw new Error(`registerMenuItem ${id}: \`submenu\` must be a boolean`);
+  if (submenu) {
+    if (spec.id === undefined) throw new Error(`registerMenuItem ${menu}: a \`submenu:true\` head needs an explicit \`id\` (members name it in \`parent\`)`);
+    if (label === undefined) throw new Error(`registerMenuItem ${id}: a \`submenu:true\` head needs a \`label\``);
+    if (command || run || isFn(expand) || expand) throw new Error(`registerMenuItem ${id}: a \`submenu:true\` head carries no command/run/expand (its members are rows registered with \`parent:'${id}'\`)`);
+    if (children !== undefined) throw new Error(`registerMenuItem ${id}: a \`submenu:true\` head builds its children from its members — do not pass \`children\``);
+    if (separator) throw new Error(`registerMenuItem ${id}: a separator cannot be a head`);
+  }
+  if (parent !== undefined && parent !== null) {
+    if (!nonEmptyString(parent)) throw new Error(`registerMenuItem ${id}: \`parent\` must be a head id string`);
+    if (parent === id) throw new Error(`registerMenuItem ${id}: an item cannot be its own parent`);
+    // Wherever the chain is ALREADY known, validate LOUDLY at registration
+    // (module load — every gate sees it). A parent registered later is
+    // resolved lazily at menuItems() time (module load order is not a contract).
+    const p = MENU_IDS.has(parent) ? findRec(parent) : null;
+    if (p && p.menu !== menu) throw new Error(`registerMenuItem ${id}: \`parent\` '${parent}' is in menu '${p.menu}', not '${menu}'`);
+    if (p && !p.submenu) throw new Error(`registerMenuItem ${id}: \`parent\` '${parent}' is not a \`submenu:true\` head`);
+    if (submenu) assertHeadDepth(id, parent, menu);
+  }
+  for (const [k, v] of Object.entries({ panel })) if (v !== undefined && v !== null && !isFn(v)) throw new Error(`registerMenuItem ${id}: \`${k}\` must be a function returning an element`);
+  if (caption !== undefined && typeof caption !== 'string' && !isFn(caption)) throw new Error(`registerMenuItem ${id}: \`caption\` must be a string or a function`);
+  if (checked !== undefined && typeof checked !== 'boolean' && !isFn(checked)) throw new Error(`registerMenuItem ${id}: \`checked\` must be a boolean or a function`);
+  if (!submenu && !command && !run && !separator && children === undefined && !isFn(expand)) throw new Error(`registerMenuItem ${id}: needs a \`command\`, \`run\`, \`children\`, \`expand\`, \`submenu:true\` or \`separator:true\``);
   if (!command && !separator && !isFn(expand) && label === undefined) throw new Error(`registerMenuItem ${id}: an item without \`command\` needs a \`label\``);
   if (separator && (command || run || children !== undefined || expand)) throw new Error(`registerMenuItem ${id}: a separator carries no command/run/children/expand`);
   if (group !== undefined && typeof group !== 'string') throw new Error(`registerMenuItem ${id}: \`group\` must be a string`);
@@ -205,7 +254,8 @@ export function registerMenuItem(spec = {}) {
   if (children !== undefined && !Array.isArray(children) && !isFn(children)) throw new Error(`registerMenuItem ${id}: \`children\` must be an array or a function`);
   if (icon !== undefined && typeof icon !== 'string') throw new Error(`registerMenuItem ${id}: \`icon\` must be an SVG string`);
   const rec = { id, menu, command: command || null, run: run || null, group: group || '', order: Number.isFinite(order) ? order : 0, when: when || null, seq: n,
-    label, labelHtml, disabled, style, tooltip, children, expand: expand || null, separator: !!separator, kind, icon, danger: !!danger, keepOpen: !!keepOpen, decorate: decorate || null };
+    label, labelHtml, disabled, style, tooltip, children, expand: expand || null, separator: !!separator, kind, icon, danger: !!danger, keepOpen: !!keepOpen, decorate: decorate || null,
+    submenu: !!submenu, parent: parent || null, panel: panel || null, caption, checked };
   if (!MENUS.has(menu)) MENUS.set(menu, []);
   MENUS.get(menu).push(rec);
   MENU_IDS.set(id, menu);
@@ -226,6 +276,27 @@ export function unregisterMenuItem(id) {
 export function listMenus() { return [...MENUS.keys()]; }
 export function listMenuItems(menu) { return (MENUS.get(menu) || []).map((r) => r.id); }
 
+const findRec = (id) => { const menu = MENU_IDS.get(id); return menu ? (MENUS.get(menu) || []).find((r) => r.id === id) || null : null; };
+/** A head may sit at most ONE head below the top (Appearance ▸ Language ▸ is
+ *  the ceiling). Checked at registration over the part of the chain that is
+ *  already registered — above (the parent's own ancestry) AND below (heads
+ *  already filed under this id) — and for cycles; the lazy resolver repeats
+ *  the depth rule at build time for chains that close later. */
+function assertHeadDepth(id, parent, menu) {
+  let above = 0;
+  const seen = new Set([id]);
+  for (let p = findRec(parent); p; p = p.parent ? findRec(p.parent) : null) {
+    if (seen.has(p.id)) throw new Error(`registerMenuItem ${id}: \`parent\` chain is a cycle (${[...seen].join(' → ')} → ${p.id})`);
+    seen.add(p.id);
+    if (p.submenu) above++;
+    // the edge that CLOSES a cycle points back at the record being registered,
+    // which is not in the registry yet — findRec would just stop there
+    if (p.parent === id) throw new Error(`registerMenuItem ${id}: \`parent\` chain is a cycle (${[...seen].join(' → ')} → ${id})`);
+  }
+  const below = (hid) => { let d = 0; for (const r of MENUS.get(menu) || []) if (r.submenu && r.parent === hid) d = Math.max(d, 1 + below(r.id)); return d; };
+  if (above + 1 + below(id) > 2) throw new Error(`registerMenuItem ${id}: heads nest at most two levels (a head under a head under a head is one too many)`);
+}
+
 const groupRank = (g) => (g === 'navigation' ? 0 : 1);
 const cmpItems = (a, b) => {
   const ra = groupRank(a.group), rb = groupRank(b.group);
@@ -241,9 +312,12 @@ const safeWhen = (fn, ctx, key, what) => {
 /**
  * Build the items of a menu for a ctx — the array showContextMenu takes,
  * plus the renderer hints (icon, danger, keepOpen, decorate, kind, command,
- * id). `action()` runs the command (or the inline run) with ctx. Unknown
- * menu → []. An item naming an unknown command → warn once + telemetry
- * 'menu-unknown-command', item skipped.
+ * id, submenu, panel, caption, checked). `action()` runs the command (or the
+ * inline run) with ctx. Unknown menu → []. An item naming an unknown
+ * command → warn once + telemetry 'menu-unknown-command', item skipped. A
+ * head's members land in its `children` (built with the same rules,
+ * recursively); an item whose `parent` resolves to nothing visible surfaces
+ * at top level with a once-per-process warn + telemetry 'menu-unknown-parent'.
  */
 export function menuItems(menu, ctx = {}) {
   const regs = MENUS.get(menu) || [];
@@ -252,53 +326,90 @@ export function menuItems(menu, ctx = {}) {
     if (reg.when && !safeWhen(reg.when, ctx, `when:${reg.id}`, `menu '${menu}' item '${reg.id}'`)) continue;
     rows.push(reg);
   }
-  rows.sort(cmpItems);
-  const out = [];
-  const pushItem = (it) => { out.push(it); };
-  const pushSep = () => { if (out.length && !out[out.length - 1].separator) out.push({ separator: true }); };
-  for (const reg of rows) {
-    if (reg.separator) { pushSep(); continue; }
-    if (reg.expand) {
-      let list = [];
-      try { list = reg.expand(ctx); } catch (e) { warnOnce(`expand:${reg.id}`, `menu '${menu}' item '${reg.id}' expand() threw: ${e?.message || e} — skipped`); }
-      for (const x of Array.isArray(list) ? list : []) if (x) pushItem(x);
-      continue;
-    }
-    let cmd = null;
-    if (reg.command) {
-      cmd = COMMANDS.get(reg.command);
-      if (!cmd) {
-        warnOnce(`menucmd:${menu}:${reg.command}`, `menu '${menu}' item '${reg.id}' names unknown command '${reg.command}' — skipped; registered: ${listCommands().join(', ')}`);
-        try { track('event', 'menu-unknown-command', `${menu}:${reg.command}`.slice(0, 120)); } catch { }
+  // ── parent resolution (lazy, over the VISIBLE heads only) ──
+  const heads = new Map();
+  for (const r of rows) if (r.submenu) heads.set(r.id, r);
+  const unknownParent = (reg, why) => {
+    warnOnce(`parent:${menu}:${reg.id}`, `menu '${menu}' item '${reg.id}' names parent '${reg.parent}' which is ${why} — shown at top level`);
+    try { track('event', 'menu-unknown-parent', `${menu}:${reg.id}→${reg.parent}`.slice(0, 120)); } catch { }
+  };
+  const parentOf = new Map(); // reg.id → resolved head id | null
+  const depthOf = (hid, guard = 0) => { const h = heads.get(hid); const p = h && parentOf.get(h.id); return p && guard < 4 ? 1 + depthOf(p, guard + 1) : (h ? 1 : 0); };
+  // heads first (a member's depth check reads its head's resolved chain)
+  for (const r of rows) if (r.submenu) parentOf.set(r.id, null);
+  for (const r of rows) {
+    if (!r.parent) { parentOf.set(r.id, null); continue; }
+    const h = heads.get(r.parent);
+    if (!h) { unknownParent(r, MENU_IDS.has(r.parent) ? 'hidden or not a head' : 'not registered'); parentOf.set(r.id, null); continue; }
+    if (r.submenu && (h.parent || depthOf(h.id) > 1 || h.parent === r.id)) { unknownParent(r, 'already a nested head (two levels at most)'); parentOf.set(r.id, null); continue; }
+    parentOf.set(r.id, h.id);
+  }
+  const membersOf = new Map();
+  for (const r of rows) { const p = parentOf.get(r.id); if (!membersOf.has(p)) membersOf.set(p, []); membersOf.get(p).push(r); }
+  const build = (list) => {
+    list.sort(cmpItems);
+    const out = [];
+    const pushItem = (it) => { out.push(it); };
+    const pushSep = () => { if (out.length && !out[out.length - 1].separator) out.push({ separator: true }); };
+    for (const reg of list) {
+      if (reg.separator) { pushSep(); continue; }
+      if (reg.expand) {
+        let l = [];
+        try { l = reg.expand(ctx); } catch (e) { warnOnce(`expand:${reg.id}`, `menu '${menu}' item '${reg.id}' expand() threw: ${e?.message || e} — skipped`); }
+        for (const x of Array.isArray(l) ? l : []) if (x) pushItem(x);
         continue;
       }
-      if (cmd.when && !safeWhen(cmd.when, ctx, `when:${cmd.id}`, `command '${cmd.id}'`)) continue;
+      let cmd = null;
+      if (reg.command) {
+        cmd = COMMANDS.get(reg.command);
+        if (!cmd) {
+          warnOnce(`menucmd:${menu}:${reg.command}`, `menu '${menu}' item '${reg.id}' names unknown command '${reg.command}' — skipped; registered: ${listCommands().join(', ')}`);
+          try { track('event', 'menu-unknown-command', `${menu}:${reg.command}`.slice(0, 120)); } catch { }
+          continue;
+        }
+        if (cmd.when && !safeWhen(cmd.when, ctx, `when:${cmd.id}`, `command '${cmd.id}'`)) continue;
+      }
+      const title = cmd ? (isFn(cmd.title) ? String(cmd.title(ctx) ?? '') : cmd.title) : '';
+      const item = { id: reg.id, label: reg.label !== undefined ? String(val(reg.label, ctx, title) ?? '') : title };
+      if (reg.command) { item.command = reg.command; item.action = () => runCommand(reg.command, ctx); }
+      else if (reg.run) item.action = () => reg.run(ctx);
+      if (reg.submenu) {
+        const kids = build(membersOf.get(reg.id) || []);
+        if (!kids.length && !reg.panel) continue; // an empty head is not shown (a panel head has content of its own)
+        item.children = kids;
+        item.submenu = true;
+        if (reg.panel) item.panel = reg.panel;
+        const cap = val(reg.caption, ctx);
+        if (cap) item.caption = String(cap);
+        // a FUNCTION caption ALSO rides through unresolved as `captionOf` so
+        // the renderer can re-evaluate it LIVE after a change made inside the
+        // head's own members (verifier r2: the Appearance head read '14px'
+        // beside a stepper that said 15 until the popover was reopened)
+        if (isFn(reg.caption)) item.captionOf = reg.caption;
+      } else if (reg.children !== undefined) {
+        const kids = val(reg.children, ctx);
+        if (!Array.isArray(kids) || !kids.length) continue; // an empty submenu is not shown
+        item.children = kids;
+      }
+      if (reg.labelHtml !== undefined) item.labelHtml = String(reg.labelHtml(ctx) ?? '');
+      if (val(reg.disabled, ctx)) item.disabled = true;
+      const style = val(reg.style, ctx);
+      if (style) item.style = String(style);
+      const tip = val(reg.tooltip, ctx);
+      if (tip) item.title = String(tip);
+      if (reg.kind !== undefined) item.kind = reg.kind;
+      const icon = reg.icon !== undefined ? reg.icon : (cmd?.icon || undefined);
+      if (icon !== undefined) item.icon = icon;
+      if (reg.danger) item.danger = true;
+      if (reg.keepOpen) item.keepOpen = true;
+      if (reg.decorate) item.decorate = reg.decorate;
+      if (reg.checked !== undefined) item.checked = !!val(reg.checked, ctx);
+      pushItem(item);
     }
-    const title = cmd ? (isFn(cmd.title) ? String(cmd.title(ctx) ?? '') : cmd.title) : '';
-    const item = { id: reg.id, label: reg.label !== undefined ? String(val(reg.label, ctx, title) ?? '') : title };
-    if (reg.command) { item.command = reg.command; item.action = () => runCommand(reg.command, ctx); }
-    else if (reg.run) item.action = () => reg.run(ctx);
-    if (reg.children !== undefined) {
-      const kids = val(reg.children, ctx);
-      if (!Array.isArray(kids) || !kids.length) continue; // an empty submenu is not shown
-      item.children = kids;
-    }
-    if (reg.labelHtml !== undefined) item.labelHtml = String(reg.labelHtml(ctx) ?? '');
-    if (val(reg.disabled, ctx)) item.disabled = true;
-    const style = val(reg.style, ctx);
-    if (style) item.style = String(style);
-    const tip = val(reg.tooltip, ctx);
-    if (tip) item.title = String(tip);
-    if (reg.kind !== undefined) item.kind = reg.kind;
-    const icon = reg.icon !== undefined ? reg.icon : (cmd?.icon || undefined);
-    if (icon !== undefined) item.icon = icon;
-    if (reg.danger) item.danger = true;
-    if (reg.keepOpen) item.keepOpen = true;
-    if (reg.decorate) item.decorate = reg.decorate;
-    pushItem(item);
-  }
-  while (out.length && out[out.length - 1].separator) out.pop();
-  return out;
+    while (out.length && out[out.length - 1].separator) out.pop();
+    return out;
+  };
+  return build(membersOf.get(null) || []);
 }
 
 // ── keybindings ──

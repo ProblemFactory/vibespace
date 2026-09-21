@@ -274,7 +274,7 @@ registerWindowType({
 registerCommand({ id: 'channels.openOutbox', title: () => t('Outbox…'), run: (c) => c.app.openChannelOutbox() });
 /** The ⚙ row beside "Channels…" — registered by the owning module. */
 registerMenuItem({
-  menu: 'gear', group: '1_admin', order: 46,
+  menu: 'gear', parent: 'comm', order: 20, // under Communication ▸ (gear-menu.js head 'comm'; Channels 10 · this 20 · Integrations 30)
   icon: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/></svg>',
   label: () => t('Outbox…'),
   run: (c) => c.app.openChannelOutbox(),

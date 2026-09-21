@@ -10,13 +10,25 @@
 //      when hides), separator collapse, empty-submenu drop, expand, the LOUD
 //      paths (duplicate/malformed registrations throw, runCommand of an unknown
 //      id throws, an unknown command on a menu item / keybinding warns once and
-//      is skipped), chord parsing + STRICT matching, dispatcher precedence,
+//      is skipped), the TREE fields (`submenu:true` heads + `parent`: loud
+//      validation, lazy resolution that FALLS TO TOP LEVEL, empty / hidden
+//      heads, expand inside a head, the two-level ceiling, plugin-style
+//      parents), chord parsing + STRICT matching, dispatcher precedence,
 //      dispose() + AbortSignal-scoped removal (a plugin's contributions leave
 //      with it).
 //   B. IDENTITY — the three migrated core menus (session-card / window / gear)
 //      are diffed against a VERBATIM copy of the pre-registry hand-built
 //      builders over a state matrix: byte-identical labels, separators,
 //      disabled flags, submenu children, styles, onAction kinds, icons, danger.
+//      Since 2.369.124 the gear menu is a TREE (docs/design-gear-menu-
+//      hierarchy.md): B3 replays the block into a nested fixture over the
+//      same 16 states, keeps the legacy flat list as the CENSUS baseline
+//      (every old row lands in exactly one head or at the top level, none
+//      twice, none lost; the additions are named), pins the top-level row
+//      budget, the single danger row and the action→method map over the
+//      flattened tree, and reads the four external owners' specs OFF THE
+//      SOURCE so the fixture follows what channels-panel / channel-outbox /
+//      integrations-window / desktop-app-launcher actually register.
 //      Command mode: every single-key action is a command that drives the same
 //      wm/desktopManager/app calls (wraparound intact, active-window guards).
 //   C. WS DEFAULT — the REAL registerWsHandler on a fake wss: an unknown type
@@ -189,6 +201,79 @@ ok(listCommands().length === 0 && listMenus().length === 0 && listKeybindings().
   ac.abort();
   ok(J(menuItems('d').map((i) => i.label)) === J(['stay']), 'aborting the signal removes only that plugin\'s items');
   ok(unregisterMenuItem('d/stay') === true && unregisterMenuItem('d/stay') === false && menuItems('d').length === 0, 'unregisterMenuItem by id (idempotent)');
+}
+
+// ── menus: the TREE — submenu heads + parent (2.369.124, docs/design-gear-menu-hierarchy.md §2c) ──
+{
+  // registration is LOUD wherever the chain is already known
+  ok(/explicit `id`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, label: 'H' }))), 'a submenu head without an explicit id THROWS');
+  ok(/needs a `label`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h0' }))), 'a head without a label THROWS');
+  ok(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h1', label: 'H', run() {} }))), 'a head with an inline run THROWS');
+  ok(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h2', label: 'H', command: 'm.a' }))), 'a head with a command THROWS');
+  ok(/carries no command/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h3', label: 'H', expand: () => [] }))), 'a head with expand THROWS');
+  ok(/children/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h4', label: 'H', children: [] }))), 'a head with static children THROWS (members come through parent)');
+  ok(/separator/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h5', label: 'H', separator: true }))), 'a separator head THROWS');
+  ok(/`submenu` must be a boolean/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: 'yes', id: 'tree/h6', label: 'H' }))), 'a non-boolean submenu THROWS');
+  ok(/`parent` must be a head id string/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, parent: 42 }))), 'a non-string parent THROWS');
+  ok(/own parent/.test(throws(() => registerMenuItem({ menu: 'tree', id: 'tree/self', label: 'x', run() {}, parent: 'tree/self' }))), 'an item that is its own parent THROWS');
+  ok(/`panel` must be a function/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h7', label: 'H', panel: 'x' }))) && /`caption`/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/h8', label: 'H', caption: 1 }))) && /`checked`/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, checked: 'y' }))), 'panel / caption / checked hints are validated');
+  registerMenuItem({ menu: 'tree', id: 'tree/plain', label: 'plain', run() {}, order: 1 });
+  ok(/not a `submenu:true` head/.test(throws(() => registerMenuItem({ menu: 'tree', label: 'x', run() {}, parent: 'tree/plain' }))), 'a parent that is a registered NON-head THROWS at registration (the chain is known — loud)');
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/A', label: 'A', order: 10 });
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/B', label: 'B', parent: 'tree/A', order: 3 });
+  ok(/two levels/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/C', label: 'C', parent: 'tree/B' }))), 'a head under a head under a head THROWS (two levels at most)');
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/E', label: 'E', parent: 'tree/D' }); // D is registered LATER (lazy) …
+  ok(/two levels/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/D', label: 'D', parent: 'tree/A' }))), '…and the ceiling is checked from BELOW too: filing D under A while E already sits under D THROWS');
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/D', label: 'D', order: 20 });
+  ok(/is in menu 'tree', not 'other'/.test(throws(() => registerMenuItem({ menu: 'other', label: 'x', run() {}, parent: 'tree/A' }))), 'a parent from ANOTHER menu THROWS');
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/F', label: 'F', parent: 'tree/G', order: 30 });
+  ok(/cycle/.test(throws(() => registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/G', label: 'G', parent: 'tree/F' }))), 'a parent cycle THROWS when the edge that closes it is registered');
+
+  // resolution is LAZY and never drops a row
+  registerMenuItem({ menu: 'tree', label: 'a1', run() {}, parent: 'tree/A', order: 2 });
+  registerMenuItem({ menu: 'tree', label: 'a0', run() {}, parent: 'tree/A', order: 1 });
+  registerMenuItem({ menu: 'tree', separator: true, parent: 'tree/A', order: 5 });
+  registerMenuItem({ menu: 'tree', expand: (c) => c.rows.map((r) => ({ label: r, action() {} })), parent: 'tree/A', order: 6 });
+  registerMenuItem({ menu: 'tree', label: 'b0', run() {}, parent: 'tree/B' });
+  registerMenuItem({ menu: 'tree', label: 'e0', run() {}, parent: 'tree/E' });
+  registerMenuItem({ menu: 'tree', label: 'f0', run() {}, parent: 'tree/F' });
+  registerMenuItem({ menu: 'tree', label: 'orphan', run() {}, parent: 'tree/nope', order: 40 });
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/hidden', label: 'Hid', when: () => false, order: 50 });
+  registerMenuItem({ menu: 'tree', label: 'h0', run() {}, parent: 'tree/hidden', order: 55 });
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'tree/empty', label: 'Empty', order: 60 });
+  registerMenuItem({ menu: 'tree', label: 'gone', run() {}, parent: 'tree/empty', when: () => false });
+  registerMenuItem({ menu: 'tree', label: 'plug', run() {}, parent: 'plugin:x:head' });
+  registerMenuItem({ menu: 'tree', submenu: true, id: 'plugin:x:head', label: 'PH', order: 70 });
+  const flat = (items, d = 0) => items.flatMap((i) => (i.separator ? ['>'.repeat(d) + '|'] : ['>'.repeat(d) + i.label, ...(i.children ? flat(i.children, d + 1) : [])]));
+  let tr, tr0;
+  const tw = captureWarns(() => { tr = menuItems('tree', { rows: ['p1'] }); tr0 = menuItems('tree', { rows: [] }); menuItems('tree', { rows: [] }); });
+  ok(J(flat(tr)) === J(['plain', 'A', '>a0', '>a1', '>B', '>>b0', '>|', '>p1', 'D', '>E', '>>e0', 'F', '>f0', 'orphan', 'h0', 'PH', '>plug']),
+    'members land in their head (sorted, separators collapsed, expand spliced INTO the head, two levels), an unknown / hidden parent surfaces the row at TOP LEVEL (never dropped), an EMPTY head drops itself, a plugin-style head id works', J(flat(tr)));
+  ok(J(flat(tr0)) === J(['plain', 'A', '>a0', '>a1', '>B', '>>b0', 'D', '>E', '>>e0', 'F', '>f0', 'orphan', 'h0', 'PH', '>plug']), 'an empty expand inside a head leaves no trailing rule', J(flat(tr0)));
+  ok(tw.filter((m) => /names parent/.test(m)).length === 3 && tw.some((m) => /'tree\/F' names parent 'tree\/G' which is not registered/.test(m)) && tw.some((m) => /'orphan'.*not registered/.test(m) || /names parent 'tree\/nope' which is not registered/.test(m)) && tw.some((m) => /parent 'tree\/hidden' which is hidden or not a head/.test(m)),
+    'each unresolved parent is reported ONCE per process (three rows, three warnings over three builds), naming the row, the parent and why', J(tw));
+  ok(tr.filter((i) => i.submenu).every((i) => !i.action && Array.isArray(i.children)) && tr.find((i) => i.label === 'A').children.find((k) => k.label === 'B').submenu === true, 'heads carry submenu:true + children and NO action; a nested head is a head');
+  ok(J(listMenuItems('tree').filter((i) => i === 'tree/A' || i === 'tree/B')) === J(['tree/A', 'tree/B']), 'heads are ordinary registrations (listMenuItems, dispose, signal all apply)');
+  // renderer hints on heads / choice rows pass through; a panel head survives with no members
+  const panelFn = () => ({ el: true });
+  registerMenuItem({ menu: 'tree2', submenu: true, id: 'tree2/p', label: 'P', panel: panelFn, caption: (c) => 'cap' + c.n, keepOpen: true });
+  registerMenuItem({ menu: 'tree2', label: 'radio', run() {}, checked: (c) => c.n > 1 });
+  registerMenuItem({ menu: 'tree2', label: 'plainrow', run() {} });
+  const t2 = menuItems('tree2', { n: 2 });
+  ok(t2[0].submenu === true && t2[0].panel === panelFn && t2[0].caption === 'cap2' && t2[0].keepOpen === true && J(t2[0].children) === '[]', 'a head with a panel is shown even with no members (the panel is its content); panel / caption / keepOpen pass through');
+  ok(t2[1].checked === true && menuItems('tree2', { n: 0 })[1].checked === false && !('checked' in t2[2]), 'checked(ctx) becomes a boolean on choice rows and stays absent elsewhere');
+  ok(!('panel' in t2[1]) && !('caption' in t2[1]), 'hints stay absent where not given');
+  // verifier r2 (2026-09-21): the caption is LIVE — a FUNCTION caption also
+  // rides through unresolved so the renderer can re-evaluate it after a change
+  // made inside the head's own members; a string caption has nothing to refresh
+  ok(typeof t2[0].captionOf === 'function' && t2[0].captionOf({ n: 7 }) === 'cap7' && t2[0].caption === 'cap2', 'a FUNCTION caption ALSO rides through as `captionOf` (re-evaluable by the renderer) beside its resolved string');
+  registerMenuItem({ menu: 'tree2', submenu: true, id: 'tree2/s', label: 'S', panel: panelFn, caption: 'static' });
+  const t2s = menuItems('tree2', { n: 2 }).find((i) => i.id === 'tree2/s');
+  ok(t2s && t2s.caption === 'static' && !('captionOf' in t2s), 'a STRING caption carries no captionOf (nothing to re-evaluate)');
+  // dispose of a head: its members surface at top level on the next build (reported once)
+  unregisterMenuItem('tree/A');
+  let trA; const twA = captureWarns(() => { trA = menuItems('tree', { rows: [] }); });
+  ok(J(flat(trA).slice(0, 5)) === J(['plain', 'a0', 'a1', 'B', '>b0']) && twA.some((m) => /'tree\/B' names parent 'tree\/A' which is not registered/.test(m)), 'unregistering a head surfaces its members at the top level (never lost)', J(flat(trA)));
 }
 
 // ── keybindings ──
@@ -457,13 +542,35 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
 }
 
-// B3. gear menu
+// B3. gear menu — a TREE FIXTURE over the 16-state matrix + the flatten CENSUS against the legacy flat list
 {
-  const GEAR_ICONS = { key: 'I.key', puzzle: 'I.puzzle', brush: 'I.brush', tour: 'I.tour', out: 'I.out', exp: 'I.exp', imp: 'I.imp', lock: 'I.lock', chart: 'I.chart', pulse: 'I.pulse', globe: 'I.globe' };
+  const GEAR_ICONS = { key: 'I.key', puzzle: 'I.puzzle', brush: 'I.brush', tour: 'I.tour', out: 'I.out', exp: 'I.exp', imp: 'I.imp', lock: 'I.lock', chart: 'I.chart', pulse: 'I.pulse', globe: 'I.globe', sliders: 'I.sliders', wrench: 'I.wrench', chat: 'I.chat', cog: 'I.cog', help: 'I.help', check: 'I.check' };
   const PLUGIN_ICON = 'I.plugin';
-  new Function('registerMenuItem', 't', 'getLangPref', 'setLang', 'showContextMenu', 'fetchJson', 'GEAR_ICONS', 'PLUGIN_ICON', extract('src/lib/gear-menu.js', 'registerGearMenu'))(
-    registerMenuItem, id, () => 'zh', () => {}, () => {}, () => Promise.resolve({}), GEAR_ICONS, PLUGIN_ICON);
-  // VERBATIM legacy row list (pre-registry app.js _showGlobalSettings, 2.369.37): [icon, label, danger] + seps
+  const calls = [];
+  const panels = [];
+  new Function('registerMenuItem', 't', 'getLangPref', 'setLang', 'fetchJson', 'GEAR_ICONS', 'PLUGIN_ICON', 'buildAppearancePanel', 'appearanceCaption', extract('src/lib/gear-menu.js', 'registerGearMenu'))(
+    registerMenuItem, id, () => 'zh', (code) => calls.push(['setLang', code]), () => Promise.resolve({}), GEAR_ICONS, PLUGIN_ICON, (app, pop) => { panels.push([app, pop]); return { panel: true }; }, (app) => 'cap:' + app._fontSize);
+  // The four rows OTHER modules file under the heads — their specs are READ
+  // OFF THE SOURCE (parent / order / label / gated-or-not) so the fixture
+  // follows what the owners register, not a typed copy of it.
+  const ownerSpec = (file) => {
+    const src = read(file);
+    const i = src.indexOf("menu: 'gear'");
+    if (i < 0) throw new Error(file + ': no gear registration');
+    const blk = src.slice(src.lastIndexOf('registerMenuItem({', i), src.indexOf('});', i));
+    const g = (k) => (blk.match(new RegExp(`\\b${k}: '([^']+)'`)) || [])[1];
+    const o = blk.match(/\border: (\d+)/);
+    const lab = blk.match(/label: \(\) => t\('([^']+)'\)/);
+    return { file, parent: g('parent'), group: g('group'), order: o ? Number(o[1]) : 0, label: lab && lab[1], gated: /\bwhen:/.test(blk) };
+  };
+  const owners = ['src/lib/channels-panel.js', 'src/lib/channel-outbox.js', 'src/lib/integrations-window.js', 'src/lib/desktop-app-launcher.js'].map(ownerSpec);
+  ok(J(owners.map((o) => [o.label, o.parent, o.order, o.gated])) === J([['Channels…', 'comm', 10, true], ['Outbox…', 'comm', 20, false], ['Integrations…', 'comm', 30, false], ['Desktop apps…', 'tools', 30, true]]),
+    'the four external owners file under comm / tools with DISTINCT orders (the two order-45 twins are gone; Channels + Desktop apps stay gated)', J(owners));
+  ok(owners.every((o) => !o.group), 'owner rows carry no `group` — inside a head, group sorts BEFORE order, so a grouped member would sink below every ungrouped core row');
+  for (const o of owners) registerMenuItem({ menu: 'gear', id: 'owner/' + o.label, parent: o.parent, order: o.order, label: o.label,
+    when: o.gated ? ((c) => (o.label === 'Desktop apps…' ? !!c.app._desktopAppsAvailable : !!c.app._railEl)) : undefined, run: (c) => c.app['owner:' + o.label]?.() });
+
+  // VERBATIM legacy row list (pre-registry app.js _showGlobalSettings, 2.369.37): [icon, label, danger] + seps — the CENSUS baseline
   const legacy = (app) => {
     const t = id; const I = GEAR_ICONS; const rows = [];
     const item = (svg, label, _fn, danger = false) => rows.push({ icon: svg, label, danger });
@@ -482,28 +589,72 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     if (app._authEnabled) item(I.out, t('Sign out'), null, true);
     return rows;
   };
-  const proj = (items) => items.map((i) => (i.separator ? { sep: 1 } : { icon: i.icon, label: i.label, danger: !!i.danger }));
-  let n = 0, bad = null;
+  // THE TREE FIXTURE (docs/design-gear-menu-hierarchy.md §2a): five heads + three direct rows
+  const tree = (app) => {
+    const t = id; const I = GEAR_ICONS;
+    const row = (icon, label, extra = {}) => ({ ...(icon !== undefined ? { icon } : {}), label, ...extra });
+    const SEP = { sep: 1 };
+    const language = row(I.globe, `${t('Language')}: 中文`, { children: [row(undefined, t('Auto (system)'), { checked: false }), row(undefined, 'English', { checked: false }), row(undefined, '中文', { checked: true }), row(undefined, '日本語', { checked: false })] });
+    const appearance = row(I.sliders, t('Appearance'), { caption: 'cap:' + app._fontSize, panel: true, children: [...(app.isMobile ? [] : [row(I.brush, t('Customize UI…'))]), language] });
+    const pluginWins = app.pluginClient?.contributedWindows?.() || [];
+    const tools = row(I.wrench, t('Tools'), { children: [row(I.chart, t('Usage…')), row(I.chart, t('Background Work…')), row(undefined, t('Desktop apps…')), row(I.puzzle, t('Plugins…')), ...(pluginWins.length ? [SEP, ...pluginWins.map((w) => row(PLUGIN_ICON, w.title))] : [])] });
+    const comm = row(I.chat, t('Communication'), { children: [row(undefined, t('Channels…')), row(undefined, t('Outbox…')), row(undefined, t('Integrations…'))] });
+    const system = row(I.cog, t('System'), { children: [row(I.alert || I.pulse, t('Report a problem…')), row(I.pulse, t('Diagnostics report…')), SEP, row(I.exp || I.pulse, t('Restore a previous layout…')), row(I.exp, t('Backup & migrate…')), row(I.lock, app._authEnabled ? t('Change password…') : t('Set password…'))] });
+    const help = row(I.help, t('Help'), { children: [row(I.tour, t('Welcome tour')), row(I.cog, t('All Settings...'))] });
+    return [appearance, SEP, row(I.key, t('Manage agents…')), tools, comm, system, ...(app._repoDir ? [row(I.key, t('Update VibeSpace…'))] : []), help, ...(app._authEnabled ? [SEP, row(I.out, t('Sign out'), { danger: true })] : [])];
+  };
+  const proj = (items) => items.map((i) => (i.separator ? { sep: 1 } : { ...(i.icon !== undefined ? { icon: i.icon } : {}), label: i.label, ...(i.danger ? { danger: true } : {}), ...(i.checked !== undefined ? { checked: i.checked } : {}), ...(i.caption ? { caption: i.caption } : {}), ...(i.panel ? { panel: true } : {}), ...(i.children ? { children: proj(i.children) } : {}) }));
+  const flatten = (items) => items.flatMap((i) => (i.sep ? [] : [i.label, ...(i.children ? flatten(i.children) : [])]));
+  // every label the tree ADDS beyond the legacy flat list — the five heads, the
+  // four owner rows (never in gear-menu.js), the four Language choices and
+  // All Settings (a quick-pref link before, a Help row now)
+  const ADDED = [id('Appearance'), id('Tools'), id('Communication'), id('System'), id('Help'), 'Channels…', 'Outbox…', 'Integrations…', 'Desktop apps…', 'Auto (system)', 'English', '中文', '日本語', 'All Settings...'];
+  let n = 0, bad = null, census = null, budget = null, dangers = null;
   for (const [isMobile, _repoDir, _authEnabled, nPlugins] of cartesian([false, true], [null, '/repo'], [false, true], [0, 2])) {
     const wins = Array.from({ length: nPlugins }, (_, i) => ({ pluginId: 'p', windowId: 'w' + i, title: 'Plugin win ' + i }));
-    const app = { isMobile, _repoDir, _authEnabled, pluginClient: { contributedWindows: () => wins, open: () => {} } };
-    const got = J(proj(menuItems('gear', { app, pop: {} }))), want = J(legacy(app));
+    const app = { isMobile, _repoDir, _authEnabled, _fontSize: 14, _railEl: {}, _desktopAppsAvailable: true, pluginClient: { contributedWindows: () => wins, open: () => {} } };
+    const items = menuItems('gear', { app, pop: {} });
+    const got = J(proj(items)), want = J(tree(app));
     n++;
     if (got !== want && !bad) bad = { isMobile, _repoDir, _authEnabled, nPlugins, got, want };
+    // CENSUS: flatten(tree) as a SET ≡ legacy labels ∪ ADDED; none twice; none lost
+    const gotFlat = flatten(proj(items));
+    const wantSet = new Set([...legacy(app).filter((r) => !r.sep).map((r) => r.label), ...ADDED]);
+    const gotSet = new Set(gotFlat);
+    const missing = [...wantSet].filter((l) => !gotSet.has(l)), extra = [...gotSet].filter((l) => !wantSet.has(l)), dup = gotFlat.filter((l, i) => gotFlat.indexOf(l) !== i);
+    if ((missing.length || extra.length || dup.length) && !census) census = { isMobile, _repoDir, _authEnabled, nPlugins, missing, extra, dup };
+    const topRows = items.filter((i) => !i.separator).length;
+    if (topRows > 9 && !budget) budget = { isMobile, _repoDir, _authEnabled, nPlugins, topRows };
+    const dangerCount = (list) => list.reduce((n, i) => n + (i.danger ? 1 : 0) + (i.children ? dangerCount(i.children) : 0), 0);
+    const nDanger = dangerCount(proj(items));
+    if (nDanger !== (_authEnabled ? 1 : 0) && !dangers) dangers = { isMobile, _repoDir, _authEnabled, nPlugins, nDanger };
   }
-  ok(!bad, `gear menu: registry rows ≡ legacy row list over ${n} states (icon/label/danger/separators, incl. the plugin-windows block)`, bad && `first diff ${J({ ...bad, got: undefined, want: undefined })}\n    got  ${bad.got}\n    want ${bad.want}`);
-  const rows = menuItems('gear', { app: { isMobile: false, _repoDir: '/r', _authEnabled: true }, pop: {} });
-  ok(typeof rows.find((r) => /^Language:/.test(r.label)).decorate === 'function' && typeof rows.find((r) => r.label === 'Update VibeSpace…').decorate === 'function', 'Language + Update rows carry decorate() (sub-menu at click point / two-line version label)');
-  ok(rows.find((r) => r.label === 'Sign out').danger === true && rows.filter((r) => r.danger).length === 1, 'Sign out is the only danger row');
-  const calls = [];
-  const app = new Proxy({ isMobile: false, _repoDir: '/r', _authEnabled: false, _customize: { enter: () => calls.push(['customize']) }, pluginClient: { contributedWindows: () => [{ pluginId: 'p', windowId: 'w', title: 'PW' }], open: (p, w) => calls.push(['pluginOpen', p, w]) } }, { get: (t, k) => (k in t ? t[k] : (...a) => calls.push([k, ...a])) });
-  const r2 = menuItems('gear', { app, pop: {} });
-  for (const l of ['Customize UI…', 'Manage agents…', 'Plugins…', 'Usage…', 'Background Work…', 'Diagnostics report…', 'Report a problem…', 'Restore a previous layout…', 'Backup & migrate…', 'Set password…', 'Update VibeSpace…', 'PW', 'Welcome tour']) r2.find((i) => i.label === l).action();
-  ok(J(calls) === J([['customize'], ['_showAgentsDialog'], ['openPluginsDialog'], ['openUsage'], ['openJobs'], ['_openDiagnostics'], ['captureIncident'], ['_showLayoutHistory'], ['_showTransferDialog'], ['_showPasswordDialog'], ['_showUpdateConfirmDialog'], ['pluginOpen', 'p', 'w'], ['_showOnboarding', true]]),
-    'gear rows call the same app methods as the legacy rows', J(calls));
+  ok(!bad, `gear menu: registry tree ≡ the TREE FIXTURE over ${n} states (icon/label/danger/checked/caption/panel/separators per level, incl. the plugin-windows block under Tools)`, bad && `first diff ${J({ ...bad, got: undefined, want: undefined })}\n    got  ${bad.got}\n    want ${bad.want}`);
+  ok(!census, `CENSUS over ${n} states: every legacy row lands in exactly one head or at the top level, none twice, none lost; the additions are exactly the named ones`, census && J(census));
+  ok(!budget, 'top-level row budget: ≤ 9 rows in every state (8 at most: Appearance / Manage agents / Tools / Communication / System / Update / Help / Sign out)', budget && J(budget));
+  ok(!dangers, 'exactly one danger row (Sign out) when auth is on, none when it is off — at any depth', dangers && J(dangers));
+  ok(panels.length === 0, 'menuItems() passes the Appearance panel BUILDER through untouched — the renderer calls it, the registry never does');
+  const rows = menuItems('gear', { app: { isMobile: false, _repoDir: '/r', _authEnabled: true, _fontSize: 14, _railEl: {}, _desktopAppsAvailable: true }, pop: {} });
+  const heads = Object.fromEntries(rows.filter((r) => r.submenu).map((r) => [r.id, r]));
+  ok(J(Object.keys(heads)) === J(['appearance', 'tools', 'comm', 'system', 'help']), 'the five heads carry the ids plugins may name in `parent` (plugin-client CORE_MENU_HEADS)', J(Object.keys(heads)));
+  ok(typeof heads.appearance.panel === 'function' && heads.appearance.keepOpen === true && heads.appearance.caption === 'cap:14', 'the Appearance head is a PANEL head (panel + keepOpen + live caption)');
+  const language = heads.appearance.children.find((k) => k.submenu);
+  ok(language && language.id === 'language' && language.children.length === 4 && language.children.filter((k) => k.checked).length === 1 && language.children.find((k) => k.checked).label === '中文' && !language.decorate,
+    'Language is a nested head (the two-level ceiling) with four choice rows, ✓ via `checked` on the current one — the legacy decorate/showContextMenu detour is gone');
+  ok(typeof rows.find((r) => r.label === 'Update VibeSpace…').decorate === 'function' && !rows.find((r) => r.label === 'Update VibeSpace…').submenu, 'Update stays a DIRECT row with decorate() (its two-line version label is the update indicator)');
+  ok(rows.find((r) => r.label === 'Sign out').danger === true && rows.filter((r) => r.danger).length === 1, 'Sign out is the only top-level danger row');
+  const app = new Proxy({ isMobile: false, _repoDir: '/r', _authEnabled: false, _fontSize: 14, _railEl: {}, _desktopAppsAvailable: true, _customize: { enter: () => calls.push(['customize']) }, _settingsUI: { open: () => calls.push(['settingsOpen']) }, pluginClient: { contributedWindows: () => [{ pluginId: 'p', windowId: 'w', title: 'PW' }], open: (p, w) => calls.push(['pluginOpen', p, w]) } }, { get: (t, k) => (k in t ? t[k] : (...a) => calls.push([k, ...a])) });
+  const leaves = (items) => items.flatMap((i) => (i.separator ? [] : (i.children ? leaves(i.children) : [i])));
+  const r2 = leaves(menuItems('gear', { app, pop: {} }));
+  calls.length = 0;
+  for (const l of ['Customize UI…', 'Auto (system)', 'English', '中文', '日本語', 'Manage agents…', 'Usage…', 'Background Work…', 'Desktop apps…', 'Plugins…', 'PW', 'Channels…', 'Outbox…', 'Integrations…', 'Report a problem…', 'Diagnostics report…', 'Restore a previous layout…', 'Backup & migrate…', 'Set password…', 'Update VibeSpace…', 'Welcome tour', 'All Settings...']) r2.find((i) => i.label === l).action();
+  ok(J(calls) === J([['customize'], ['setLang', 'auto'], ['setLang', 'en'], ['setLang', 'zh'], ['setLang', 'ja'], ['_showAgentsDialog'], ['openUsage'], ['openJobs'], ['owner:Desktop apps…'], ['openPluginsDialog'], ['pluginOpen', 'p', 'w'], ['owner:Channels…'], ['owner:Outbox…'], ['owner:Integrations…'], ['captureIncident'], ['_openDiagnostics'], ['_showLayoutHistory'], ['_showTransferDialog'], ['_showPasswordDialog'], ['_showUpdateConfirmDialog'], ['_showOnboarding', true], ['settingsOpen']]),
+    'every leaf of the tree calls the same app method the legacy row did (+ the four Language choices → setLang, All Settings → _settingsUI.open)', J(calls));
+  ok(r2.every((i) => typeof i.action === 'function') && menuItems('gear', { app, pop: {} }).filter((i) => i.submenu).every((i) => !i.action), 'every leaf has an action; no head has one');
   const gm = read('src/lib/gear-menu.js');
   ok(gm.includes(`globe: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c-1.8 1.8-2.7 4-2.7 6.5S6.2 12.7 8 14.5c1.8-1.8 2.7-4 2.7-6.5S9.8 3.3 8 1.5z"/></svg>'`), 'the globe icon is the legacy I_globe SVG verbatim');
-  ok(gm.includes("(pref === code ? '✓ ' : '  ')"), 'Language sub-menu keeps the legacy glyphs (✓ / figure-space pad)');
+  ok(!/showContextMenu\(/.test(gm) && !/import \{[^}]*\bshowContextMenu\b[^}]*\} from '\.\/utils\.js'/.test(gm) && !/\(pref === code \? '✓ ' : '  '\)/.test(gm), 'the Language showContextMenu detour + its ✓ / figure-space glyph pad are retired (the renderer draws the check from `checked`)');
+  ok(/checked: \(\) => getLangPref\(\) === code/.test(gm) && /run: \(\) => setLang\(code\)/.test(gm), 'each Language choice row reads its ✓ from getLangPref() and switches through setLang()');
 }
 
 // B4. command-mode commands + palette command
@@ -578,6 +729,27 @@ console.log('contributions — D. wiring pins');
   ok((tb.match(/showWindowContextMenu\(app, /g) || []).length >= 3 && /showWindowContextMenu\(this\._app, winInfo\.id/.test(read('src/lib/window.js')), 'all four window-menu entry points (taskbar item, group, window list, title bar) still go through showWindowContextMenu');
   const ap = read('src/lib/app.js');
   ok(/pop\.append\(buildGearMenu\(this, pop\)\);/.test(ap) && !/item\(I\.key, t\('Manage agents/.test(ap) && !/menu\.className = 'gs-menu'/.test(ap), 'gear menu renders via buildGearMenu(this, pop) (app.js inline row list gone)');
+  // 2.369.124: the quick prefs left app.js for appearance-panel.js and are the Appearance head's panel
+  const apn = read('src/lib/appearance-panel.js');
+  ok(!/themeSel\.id = 'global-theme-select'|settings-all-link|font-size-ctrl|mkPctRow/.test(ap) && /themeSel\.id = 'global-theme-select'/.test(apn) && /settings-all-link/.test(apn) && /const mkPctRow = /.test(apn) && /export function buildAppearancePanel\(app, pop\)/.test(apn) && /export function appearanceCaption\(app\)/.test(apn),
+    'the eleven quick-pref elements live in appearance-panel.js (buildAppearancePanel + appearanceCaption), none remain inline in _showGlobalSettings');
+  ok(/pop\.remove\(\); app\._settingsUI\.open\(\);/.test(apn) && /localStorage\.setItem\('termFontSize', app\._fontSize\)/.test(apn) && /session\.applyOverride\('fontSize', null\)/.test(apn) && /if \(fontSel\.selectedIndex === -1\)/.test(apn),
+    'the moved builders kept their invariants verbatim (All Settings closes the popover first; font size through applyOverride; the stale-font select rescue)');
+  const gmSrc = read('src/lib/gear-menu.js');
+  ok(/import \{ buildAppearancePanel, appearanceCaption \} from '\.\/appearance-panel\.js'/.test(gmSrc) && /panel: \(c\) => buildAppearancePanel\(c\.app, c\.pop\)/.test(gmSrc) && /caption: \(c\) => appearanceCaption\(c\.app\)/.test(gmSrc), 'gear-menu wires the panel + caption onto the Appearance head');
+  ok(/sub\.dataset\.popover = '1'/.test(gmSrc) && /e\.preventDefault\(\); e\.stopPropagation\(\);/.test(gmSrc) && /if \(!open\.length\) return;/.test(gmSrc) && /matchMedia\('\(hover: none\)'\)/.test(gmSrc) && /HOVER_INTENT_MS = 120/.test(gmSrc),
+    'renderer protocol pins: a flyout carries data-popover (outside-click child rule), Esc is popover-local with stopPropagation ONLY while a flyout is open, the mode switch reads hover:none, hover intent is 120 ms');
+  ok(/for \(const ev of \['click', 'change', 'input'\]\) sub\.addEventListener\(ev, refreshCaption\)/.test(gmSrc) && /cap\.textContent = String\(v \?\? ''\)/.test(gmSrc) && /if \(isFn\(reg\.caption\)\) item\.captionOf = reg\.caption;/.test(read('src/lib/contributions.js')),
+    'WIRING PIN (verifier r2): the registry hands a function caption through as captionOf AND the renderer re-evaluates it on click/change/input bubbling out of the head\'s members — the LIVE caption (a pure pass-through with no consumer is the 2.355.0 unstaged-wiring class)');
+  const pcs = read('src/lib/plugin-client.js');
+  ok(/export const CORE_MENU_HEADS = \['appearance', 'tools', 'comm', 'system', 'help'\]/.test(pcs) && /const parent = spec\.parent === undefined \|\| spec\.parent === null \? undefined : pluginParentId\(spec\.parent\)/.test(pcs) && /return registerMenuItem\(\{ \.\.\.spec, command, id: itemId, parent, signal: ctl\.signal \}\)/.test(pcs),
+    'plugin-client passes parent/submenu through under the namespace rule (a core head or one of the plugin\'s own prefixed heads)');
+  ok(/if \(spec\.submenu && \(typeof spec\.id !== 'string' \|\| !\/\^\[a-z0-9-\]\+\$\/\.test\(spec\.id\)\)\) throw new Error\('api\.registerMenuItem: a `submenu:true` head needs an explicit `id` slug/.test(pcs)
+    && pcs.indexOf('head needs an explicit `id` slug') < pcs.indexOf("const itemId = `plugin:${id}:${spec.id || spec.command || 'item-' + (++pluginItemSeq)}`"),
+    'plugin-client REFUSES a `submenu:true` head without an explicit id slug BEFORE the host\'s generated item-N id can smuggle it past the registry\'s explicit-id rule (verifier r2 nit)');
+  const css = read('public/style.css');
+  ok(/\.gs-flyout \{[^}]*right: 100%/.test(css) && /\.gs-acc \.gs-sub \{[^}]*padding-left: 22px/.test(css) && /@media \(hover: none\) \{[\s\S]*\.gs-menu-item \{ min-height: 44px;/.test(css) && !/\.gs-flyout \{[^}]*#[0-9a-f]{3}/i.test(css),
+    'CSS: the flyout opens LEFT, the accordion indents + borders its members, touch rows are ≥ 44 px, theme vars only');
   ok(/app\._showGlobalSettings\(gear\)/.test(read('src/lib/mobile-nav.js')), 'mobile gear shares the same menu (mobile-nav → _showGlobalSettings)');
   ok(/this\._contribCtl = new AbortController\(\);/.test(ap) && /installKeybindings\(document, \{ signal: this\._contribCtl\.signal, getCtx: \(\) => \(\{ app: this \}\) \}\)/.test(ap), 'app installs ONE keybinding dispatcher under an app-lifetime AbortController');
   const gm = read('src/lib/gear-menu.js');
@@ -628,7 +800,7 @@ console.log('contributions — D. wiring pins');
   // plugin host API
   const pc = read('src/lib/plugin-client.js');
   ok(/registerCommand: \(\{ id: slug, title, run, when, icon \} = \{\}\) =>/.test(pc) && /id: `plugin:\$\{id\}:\$\{slug\}`, title, run, when, icon, signal: ctl\.signal/.test(pc), 'host api.registerCommand namespaces the id and binds it to the plugin signal');
-  ok(/registerMenuItem: \(spec = \{\}\) =>/.test(pc) && /registerMenuItem\(\{ \.\.\.spec, command, id: itemId, signal: ctl\.signal \}\)/.test(pc) && /registerKeybinding: \(\{ key, command, when, inTerminal \} = \{\}\) => registerKeybinding\(\{ key, command: pluginCommandId\(command\), when, inTerminal, signal: ctl\.signal \}\)/.test(pc),
+  ok(/registerMenuItem: \(spec = \{\}\) =>/.test(pc) && /registerMenuItem\(\{ \.\.\.spec, command, id: itemId, parent, signal: ctl\.signal \}\)/.test(pc) && /registerKeybinding: \(\{ key, command, when, inTerminal \} = \{\}\) => registerKeybinding\(\{ key, command: pluginCommandId\(command\), when, inTerminal, signal: ctl\.signal \}\)/.test(pc),
     'host api.registerMenuItem / api.registerKeybinding are plugin-scoped (namespaced id, signal-bound)');
   ok(/runCommand: \(cid, ctx\) => runCommand\(pluginCommandId\(cid\), ctx\)/.test(pc) && /from '\.\/contributions\.js'/.test(pc), 'host api.runCommand resolves own slugs vs full ids');
   const contrib = read('src/lib/contributions.js');

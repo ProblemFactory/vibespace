@@ -2002,6 +2002,11 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   /* Finger-sized context menu rows (reached via long-press on touch) */
   .context-menu-item, .taskbar-context-menu-item { padding: 10px 14px; font-size: 13px; min-height: 40px; }
   .context-menu-item:active, .taskbar-context-menu-item:active { background: var(--bg-hover); }
+  /* ⚙ tree rows on touch (2.369.124): ≥ 44 px targets (they were ~27 px), the
+     Appearance steppers grow with them */
+  .gs-menu-item { min-height: 44px; padding: 10px 12px; box-sizing: border-box; font-size: calc(13px * var(--ui-font-scale, 1)); }
+  .gs-menu-item:active { background: var(--bg-hover); }
+  .global-settings-popover .font-size-ctrl button { width: 32px; height: 32px; }
   /* Suppress the iOS long-press callout on surfaces that have our own context menus */
   .mobile-folder-card, .session-item-card, .file-item, .folder-header { -webkit-touch-callout: none; }
 }
@@ -2255,18 +2260,49 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 }
 .ob-close:hover { color: var(--text); background: var(--hover-overlay); }
 
-/* ⚙ popover: account/help menu section */
-.gs-menu {
-  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border);
-  display: flex; flex-direction: column;
-}
+/* ⚙ popover: the gear menu TREE (2.369.124, docs/design-gear-menu-hierarchy.md
+   §2c) — five heads + three direct rows; `.gs-fly` = desktop cascading flyout
+   opening to the LEFT (the popover is right-anchored), `.gs-acc` = the
+   phone / hover:none inline accordion. Theme vars only. */
+.gs-menu { display: flex; flex-direction: column; }
 .gs-menu-item {
+  position: relative;
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px; margin: 0 -4px; border-radius: var(--radius-sm);
   font-size: calc(12px * var(--ui-font-scale, 1)); color: var(--text); cursor: pointer;
 }
 .gs-menu-item:hover { background: var(--bg-hover); }
+.gs-menu-item:focus { outline: none; }
+.gs-menu-item:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--accent); } /* no rings: a 1px inset accent edge */
 .gs-menu-item.danger { color: var(--red); }
+/* heads: [icon][label][caption][arrow] — the arrow points where the members
+   open: left for the flyout, right / down for the accordion */
+.gs-menu-item.has-sub .gs-menu-label { flex: 1 1 auto; min-width: 0; }
+.gs-menu-item.has-sub::after { content: '\25C2'; margin-left: 8px; opacity: 0.5; flex: 0 0 auto; }
+.gs-acc .gs-menu-item.has-sub::after { content: '\25B8'; }
+.gs-acc .gs-menu-item.has-sub[aria-expanded="true"]::after { content: '\25BE'; }
+.gs-menu-item[aria-expanded="true"] { background: var(--bg-hover); }
+.gs-head-caption { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+/* the flyout: a child popover hanging off its head's left edge */
+.gs-flyout {
+  position: absolute; right: 100%; top: -4px; min-width: 200px; display: none; flex-direction: column;
+  background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35); padding: 4px; z-index: 1; cursor: default;
+}
+.gs-flyout.open { display: flex; }
+/* an abs-positioned flyout at right:100% has ZERO available width, so it
+   shrinks to min-content (the 200 px floor) and long labels wrapped
+   ("Language: Auto (system)" — seen in the suite's screenshot); nowrap
+   raises min-content and the flyout grows to its content */
+.gs-flyout .gs-menu-item { margin: 0; white-space: nowrap; }
+.gs-flyout .gs-menu-sep { margin: 4px 0; }
+/* the accordion: members inline under their head, indented + bordered */
+.gs-acc .gs-sub { display: none; flex-direction: column; margin-left: 4px; padding-left: 22px; border-left: 1px solid var(--border); }
+.gs-acc .gs-sub.open { display: flex; }
+/* the Appearance panel (src/lib/appearance-panel.js) — the popover's own
+   label/select/stepper rules still apply (it is a descendant of the popover) */
+.gs-appearance { display: flex; flex-direction: column; gap: 6px; padding: 4px 4px 2px; }
+.gs-acc .gs-appearance { padding: 6px 4px 2px 0; }
 .gs-menu-item .gs-item-col { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .gs-menu-item .gs-ver { font-size: 10px; line-height: 1.2; color: var(--text-dim); white-space: nowrap; }
 .gs-menu-item .gs-ver:empty { display: none; }

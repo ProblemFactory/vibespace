@@ -3735,4 +3735,8 @@ export default {
   "Reads the CLI config on every registered machine (one connection each)": "读取每台已登记机器上的 CLI 配置(每台一次连接)",
   "No other machines registered.": "没有登记其他机器。",
   "could not be checked": "无法检查",
+  // ⚙ menu heads (2.369.124, docs/design-gear-menu-hierarchy.md)
+  "Appearance": "外观",
+  "Communication": "通讯",
+  "Help": "帮助",
 };
