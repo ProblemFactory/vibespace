@@ -764,13 +764,19 @@ function markerPids(id) {
   const liveCtl = k2.get(rec2.id).live;
   ok(!trippedCtl && k2.get(rec2.id).state === 'ready', `CONTROL: sampling live pids only, the same burner is still 'ready' after 6 s (live.cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} %)`);
   await k2.stop(rec2.id); k2.shutdown();
-  // BOUNDARY, measured not assumed: a child killed with its whole GROUP (coreutils `timeout`) is reaped by init —
-  // its ticks leave the session's /proc view entirely, so no reader over the session's own processes can see them.
-  const loop = spawn('sh', ['-c', 'while :; do timeout 0.7 sh -c "yes >/dev/null"; done'], { detached: true, stdio: 'ignore' }); loop.unref(); children.push(loop);
+  // BOUNDARY, CONSTRUCTED not sampled (2.369.125 r5): the one case no reader over the session's own /proc entries can
+  // see is a burner whose parent is DEAD before the burner is reaped — init (the subreaper) reaps it and its ticks land
+  // in nobody's cutime inside the session. The earlier shape, coreutils `timeout`'s group kill of `sh -c yes`, only
+  // SOMETIMES produced that ordering: in 4 of 6 standalone runs the intermediate sh reaped `yes` before its own signal
+  // landed and one iteration's 70 ticks rode cutime up into the loop — the heavy tier went red on the race twice
+  // (2026-09-21). So the leg kills the parent FIRST (`kill -9 $$` right after the fork) and the burner 0.7 s later.
+  const pidFile = path.join(root, 'orphan-burner.pid');
+  const loop = spawn('sh', ['-c', `while :; do sh -c 'yes >/dev/null & echo $! > "${pidFile}"; kill -9 $$'; sleep 0.7; kill -9 "$(cat "${pidFile}")" 2>/dev/null; done`], { detached: true, stdio: 'ignore' }); loop.unref(); children.push(loop);
   await sleep(2500);
   const parent = D.procSample(loop.pid);
-  ok(parent && parent.reapedTicks === 0 && parent.cpuTicks < 5, `BOUNDARY: after 2.5 s of group-killed \`timeout\` churn the loop's own reaped ticks are ${parent && parent.reapedTicks} (init reaped the yes; a per-session cgroup odometer is the only reader that would see it — deferred, named in the kb)`, parent);
+  ok(parent && parent.reapedTicks < 20 && parent.cpuTicks < 5, `BOUNDARY: after 2.5 s of orphaned-burner churn (~3 × 70 ticks burned) the loop's own reaped ticks are ${parent && parent.reapedTicks} (init reaped every yes — its parent was dead first; a per-session cgroup odometer is the only reader that would see it — deferred, named in the kb)`, parent);
   try { process.kill(-loop.pid, 'SIGKILL'); } catch {}
+  try { const op = Number(fs.readFileSync(pidFile, 'utf8').trim()); if (op > 1) process.kill(op, 'SIGKILL'); } catch {}
 }
 { // (e) an EnableContinuousUpdates from the shipped client does not blind the idle clock (through the real bridge)
   const k = mk('r3e'); await k.adoptAll(); k.start();
