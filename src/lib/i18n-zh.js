@@ -3,6 +3,7 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "System monitor…": "系统监控…",
   "Show the CLI's 'Stop hook error' notice": "显示 CLI 的“Stop hook error”提示",
   "The CLI posts a 'Stop hook error occurred' notice whenever a Stop hook blocks — including VibeSpace's own bookkeeping nudge, which is expected, not an error. Off hides that notice (the 'Stop hook feedback' and hook summary cards stay); on shows it as a red immediate notice. Applies to open chats instantly.": "只要有 Stop hook 拦截了一次停止，CLI 就会发一条“Stop hook error occurred”提示——包括 VibeSpace 自己的簿记提醒，那是预期行为而不是错误。关闭则隐藏该提示（“Stop hook feedback”卡和 hook 汇总卡仍保留）；开启则显示为红色 immediate 提示。对已打开的聊天即时生效。",
   "Last git event the agent reported: {kind}{branch}{when}": "agent 报告的最近一次 git 事件：{kind}{branch}{when}",

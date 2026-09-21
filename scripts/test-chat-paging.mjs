@@ -25,6 +25,7 @@ const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs
 const wt = scratch('chatpage-smoke');
 const CWD = scratch('chatpage-test');
 const SID = fixtureSid('1');
+const SID2 = fixtureSid('2'); // the FOLD-DOMINATED transcript (inc-mub8xwrb-z57x)
 // ISOLATED $HOME (2026-09-09). This suite used to write its 42 MB synthetic
 // transcript into the developer's REAL ~/.claude/projects, because the server
 // it spawns inherited HOME and can only discover what lives under its own
@@ -75,6 +76,29 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   fs.mkdirSync(CWD, { recursive: true });
   fs.writeFileSync(path.join(PROJ, `${SID}.jsonl`), lines.join('\n') + '\n');
   console.log(`  transcript: ${lines.length} records`);
+}
+
+// ── 1b. FOLD-DOMINATED transcript (inc-mub8xwrb-z57x, 2.369.129): 1500 consecutive
+// Bash pairs with no text between — the shape of a long agent session, which the
+// semantic fold renders as a couple of run headers per hundreds of records.
+{
+  const lines = [];
+  let t = Date.now() - 6 * 86400e3;
+  const ts = () => new Date((t += 20e3)).toISOString();
+  let n = 0;
+  const push = (o) => { lines.push(JSON.stringify(o)); };
+  push({ type: 'user', message: { role: 'user', content: 'run the whole migration and report' }, uuid: `f-u-${n++}`, timestamp: ts() });
+  for (let i = 0; i < 1500; i++) {
+    const tid = `toolu_fold_${i}`;
+    push({ type: 'assistant', message: { id: `fmsg_${n}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: tid, name: 'Bash', input: { command: `echo step ${i}` } }], usage: {} }, uuid: `f-a-${n++}`, timestamp: ts() });
+    push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tid, content: `ok ${i}\n` }] }, uuid: `f-r-${n++}`, timestamp: ts() });
+    // a one-line status between batches, as real agent sessions have — the fold
+    // closes a run at it, so a slab of 40 pairs renders as ONE header + ONE line
+    if (i % 40 === 39) push({ type: 'assistant', message: { id: `fmsg_${n}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: `batch ${(i + 1) / 40} done.` }], usage: { input_tokens: 10, output_tokens: 5 } }, uuid: `f-t-${n++}`, timestamp: ts() });
+  }
+  push({ type: 'assistant', message: { id: `fmsg_${n}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'migration done.' }], usage: { input_tokens: 10, output_tokens: 5 } }, uuid: `f-af-${n++}`, timestamp: ts() });
+  fs.writeFileSync(path.join(PROJ, `${SID2}.jsonl`), lines.join('\n') + '\n');
+  console.log(`  fold transcript: ${lines.length} records`);
 }
 
 // ── 2. throwaway server + chrome ──
@@ -223,6 +247,51 @@ if (analysis.jumps.length) console.log('  jumps:', JSON.stringify(analysis.jumps
 // settled-vs-set drift on each step (loads may legitimately grow scrollHeight;
 // what must NOT happen is the viewport landing far from where the user was)
 check('no anchor-shift/teleport jumps while paging', analysis.jumpCount === 0, `${analysis.jumpCount} jumps`);
+
+// ── 4b. THE FOLD-DOMINATED WINDOW (inc-mub8xwrb-z57x, 2.369.129) ─────────────
+// The owner paged up through a session of thousands of consecutive tool calls:
+// each 50-record extend added a few hundred px, the 600 bound trimmed the bottom
+// (the only content on screen), the height collapsed to one viewport and
+// scrollTop clamped to 0 — "跳到上面一页的最顶部，跳过了中间内容", 15 extend/trim
+// cycles in 25 s and a frozen browser. Now: NO trim while the window is shorter
+// than two viewports, and one wheel notch GROWS the window until it is.
+console.log('§4b fold-dominated: one wheel notch = one landing on a full viewport; the bottom is never trimmed while short; the reader never lands on the top of a slab they did not ask for');
+const fold = await evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.app.viewSession('${SID2}', '${CWD}', 'fold test');
+  let v = null;
+  for (let i = 0; i < 60; i++) {
+    const w = [...window.app.wm.windows.values()].find((w) => String(w.title || '').includes('fold test'));
+    v = (w && window.app.sessions.get(w.id)) || null;
+    if (v && v._messageList && v._messageList.querySelectorAll('.chat-msg').length > 10) break;
+    await sleep(300);
+  }
+  if (!v) return { ok: false };
+  await sleep(1500); // initial render + fold settle
+  const list = v._messageList;
+  const ch = list.clientHeight;
+  const out = { ok: true, ws0: v._windowStart, ch, rendered0: list.querySelectorAll('.chat-msg').length, sh0: list.scrollHeight, notches: [] };
+  for (let k = 0; k < 6; k++) {
+    if (v._windowStart <= 0) break;
+    const mark = (v._traceRing || []).length;
+    list.scrollTop = 0;
+    list.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+    await sleep(2600);
+    const tail = (v._traceRing || []).slice(mark);
+    out.notches.push({ extends: tail.filter((e) => e.tag === 'extendTop:done').length, grown: tail.some((e) => e.tag === 'extendTop:grown'), trimBottom: tail.filter((e) => e.tag === 'trimBottom').length, foldCeiling: tail.filter((e) => e.tag === 'foldCeiling').length, st: Math.round(list.scrollTop), sh: list.scrollHeight, ws: v._windowStart, rendered: list.querySelectorAll('.chat-msg').length });
+  }
+  return out;
+})()`);
+console.log('  fold:', JSON.stringify(fold).slice(0, 900));
+check('the fold-dominated view-only chat opened and paged at least twice', !!fold?.ok && fold.notches.length >= 2, JSON.stringify(fold));
+if (fold?.ok) {
+  const N = fold.notches, ch = fold.ch;
+  check(`every notch that still has history above leaves the window ≥ 2 viewports tall (grow by HEIGHT) — (${N.map((n) => n.sh + '/' + n.ws).join(' ')})`, N.every((n) => n.ws === 0 || n.sh >= 2 * ch), N);
+  check('the first notch needed more than one slab (the fold makes 50 records a few hundred px) and fired ONE grown landing', N[0].extends > 1 && N[0].grown === true && N[0].extends <= 8, N[0]);
+  check('the bottom is never trimmed while the window is short (a trim there removes the content on screen)', N.every((n) => n.trimBottom === 0 || n.sh >= 2 * ch), N);
+  check(`the reader never lands on the very top with history still above (the incident\'s "跳到最顶部") — st per notch: ${N.map((n) => n.st).join(' ')}`, N.every((n) => n.ws === 0 || n.st > 0), N);
+  check('no fold ceiling was hit in six notches (the ceiling is the bound, not the routine)', N.every((n) => n.foldCeiling === 0), N);
+}
 
 // ── 5. THE REAL HOME IS UNTOUCHED. Not "no new entry at all": this box runs
 // many real sessions concurrently and a genuine project dir may appear

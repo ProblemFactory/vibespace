@@ -346,6 +346,12 @@ try {
       check(`phone/pill: row heights ≤ 45 px (${musage.map((r) => r.rowH.toFixed(1)).join(' / ')})`, musage.every((r) => r.rowH <= 45));
     }
     check('phone: the row-level countdown line is gone here too', mrows.every((r) => !r.resetLine));
+    // SHRINK PRIORITY (2.369.129, owner "完全看不到账号名称了"): under pressure the ident
+    // (email) ellipsizes first and the NAME keeps its full text — .128 had it the other
+    // way round and every name in the modal collapsed to one letter.
+    const prio = await evalJs(`(() => { const sec = ${MODAL}; const row = sec && sec.querySelector('.acct-key-row[data-id="${AD.id}"]'); if (!row) return null; const name = row.querySelector('.acct-key-name'), tail = row.querySelector('.acct-key-tail'); if (!name || !tail) return null; const savedTail = tail.textContent; tail.textContent = 'a.very.long.identity.address.for.pressure@subdomain.example-organization.com'; const m = () => ({ nameFull: name.scrollWidth <= name.clientWidth + 1, nameW: Math.round(name.getBoundingClientRect().width), tailCut: tail.scrollWidth > tail.clientWidth + 1, tailW: Math.round(tail.getBoundingClientRect().width), lineW: Math.round(row.querySelector('.acct-key-line').getBoundingClientRect().width) }); const fixed = m(); name.style.flexShrink = '4'; tail.style.flexShrink = '1'; const swapped = m(); name.style.flexShrink = ''; tail.style.flexShrink = ''; tail.textContent = savedTail; return { fixed, swapped, name: name.textContent }; })()`);
+    check(`phone: under a 70-char ident the NAME "${prio && prio.name}" keeps its full text and the ident is the one that ellipsizes (${JSON.stringify(prio && prio.fixed)})`, !!prio && prio.fixed.nameFull && prio.fixed.tailCut, prio);
+    check(`NEGATIVE CONTROL: with the .128 weights (name 4 / tail 1) the same row crushes the name (${JSON.stringify(prio && prio.swapped)})`, !!prio && !prio.swapped.nameFull, prio);
     // THE RUNNER'S SHAPE (2.369.128): an npm-installed claude puts the ephemeral-install warning row in this section,
     // quoting an 80+ char install PATH — one unbreakable token that made the row 357 px in a 352 px section (the last
     // mirror red since 2.369.75). Inject the product's own row shape here so every machine exercises it.

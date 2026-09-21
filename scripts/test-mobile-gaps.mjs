@@ -441,10 +441,12 @@ try {
   // a REAL tap on the gear (user-dirty on the phone, so its saves go out)
   const gearRows = async () => { await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`); await tap('#mobile-nav-gear'); await sleep(300); return evalJs(`[...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((el) => el.textContent.trim())`); };
   const rows = await gearRows();
-  check(`the ⚙ menu lists System… / Ports… / Channels… on the phone (${rows.filter((r) => /System…|Ports…|Channels…/.test(r)).join(' / ')})`, ['System…', 'Ports…', 'Channels…'].every((l) => rows.some((r) => r.startsWith(l))), rows);
+  check(`the ⚙ menu lists System monitor… / Ports… / Channels… on the phone (${rows.filter((r) => /System monitor…|Ports…|Channels…/.test(r)).join(' / ')})`, ['System monitor…', 'Ports…', 'Channels…'].every((l) => rows.some((r) => r.startsWith(l))), rows);
   const openGear = async (label, sel, type) => {
     const dBefore = await desk.evalJs(`({ tab: app.sidebar._activeTab, open: app.sidebar.isOpen })`);
-    await evalJs(`[...document.querySelectorAll('.global-settings-popover .gs-menu-item')].find((el) => el.textContent.trim().startsWith(${JSON.stringify(label)})).click(); true`);
+    // 2.369.129: System monitor… / Ports… are CHILDREN of the System head (accordion: a collapsed .gs-sub) — expand the head first when the row sits in one; a missing row is a named failure, never a page exception
+    const found = await evalJs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); for (let i = 0; i < 20 && !document.querySelector('.global-settings-popover'); i++) await sleep(100); const rows = () => [...document.querySelectorAll('.global-settings-popover .gs-menu-item')]; let el = rows().find((e) => e.textContent.trim().startsWith(${JSON.stringify(label)})); if (!el) return { found: false, rows: rows().map((e) => e.textContent.trim().slice(0, 24)) }; const sub = el.closest('.gs-sub'); if (sub && !sub.classList.contains('open')) { const head = sub.previousElementSibling; if (head && head.classList.contains('gs-menu-item')) { head.click(); await sleep(150); } } el = rows().find((e) => e.textContent.trim().startsWith(${JSON.stringify(label)})); if (!el) return { found: false, rows: rows().map((e) => e.textContent.trim().slice(0, 24)) }; el.click(); return { found: true }; })()`);
+    check(`⚙ row ${label} is present on the phone menu (expanded under its head when nested)`, !!found?.found, JSON.stringify(found));
     const ok = await waitFor(`!!document.querySelector('.window-active ${sel}') && [...app.wm.windows.values()].some((w) => w.type === ${JSON.stringify(type)})`, 15000);
     check(`⚙ ${label} opens a '${type}' window hosting the rail panel renderer (${sel})`, ok);
     // r2: the phone's layout save replays it on the rail-bearing desktop as a WINDOW with the same id
@@ -454,11 +456,11 @@ try {
     check(`…and the desktop client (rail on) replays it as a '${type}' WINDOW ${id} — its rail tab stays '${dBefore.tab}', no rail panel, its sidebar does not open by itself`, mirrored && dAfter.tab === dBefore.tab && !dAfter.railPanel && !(dAfter.open && !dBefore.open) && dAfter.wins.length === 1, { dBefore, dAfter, mirrored, id });
     await gearRows();
   };
-  await openGear('System…', '.rail-panel-system', 'system');
+  await openGear('System monitor…', '.rail-panel-system', 'system');
   await openGear('Ports…', '.rail-panel-ports', 'ports');
   await openGear('Channels…', '.rail-panel-channels .chan-head', 'channels');
   await evalJs(`document.querySelector('.global-settings-popover')?.remove(); true`);
-  check('opening System… again focuses the existing window (singleton)', await evalJs(`(() => { const before = app.wm.windows.size; app._showGlobalSettings(document.getElementById('mobile-nav-gear')); [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].find((el) => el.textContent.trim().startsWith('System…')).click(); document.querySelector('.global-settings-popover')?.remove(); return app.wm.windows.size === before && app.wm.windows.get(app.wm.activeWindowId)?.type === 'system'; })()`));
+  check('opening System monitor… again focuses the existing window (singleton)', await evalJs(`(async () => { const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const before = app.wm.windows.size; app._showGlobalSettings(document.getElementById('mobile-nav-gear')); for (let i = 0; i < 20 && !document.querySelector('.global-settings-popover'); i++) await sleep(100); const rows = () => [...document.querySelectorAll('.global-settings-popover .gs-menu-item')]; let el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); const sub = el && el.closest('.gs-sub'); if (sub && !sub.classList.contains('open')) { const head = sub.previousElementSibling; if (head && head.classList.contains('gs-menu-item')) { head.click(); await sleep(150); } el = rows().find((e) => e.textContent.trim().startsWith('System monitor…')); } if (!el) return false; el.click(); await sleep(200); document.querySelector('.global-settings-popover')?.remove(); return app.wm.windows.size === before && app.wm.windows.get(app.wm.activeWindowId)?.type === 'system'; })()`));
   // the desktop's OWN next save must leave the phone's three windows alone
   {
     const phoneBefore = await evalJs(`[...app.wm.windows.values()].filter((w) => ['system', 'ports', 'channels'].includes(w.type)).map((w) => w.type + ':' + w.id).sort()`);

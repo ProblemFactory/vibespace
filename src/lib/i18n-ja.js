@@ -3,6 +3,7 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "System monitor…": "システムモニター…",
   "Show the CLI's 'Stop hook error' notice": "CLI の「Stop hook error」通知を表示",
   "The CLI posts a 'Stop hook error occurred' notice whenever a Stop hook blocks — including VibeSpace's own bookkeeping nudge, which is expected, not an error. Off hides that notice (the 'Stop hook feedback' and hook summary cards stay); on shows it as a red immediate notice. Applies to open chats instantly.": "Stop hook が停止をブロックするたびに CLI は「Stop hook error occurred」通知を出します。VibeSpace 自身の記録リマインドも含まれますが、これは想定どおりの動作でエラーではありません。オフでその通知を隠します（「Stop hook feedback」カードと hook サマリーカードは残ります）。オンなら赤の immediate 通知として表示します。開いているチャットに即時反映されます。",
   "Last git event the agent reported: {kind}{branch}{when}": "エージェントが報告した最新の git イベント: {kind}{branch}{when}",

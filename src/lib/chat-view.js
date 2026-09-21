@@ -141,6 +141,17 @@ function isScopedRefusal(msg) {
  * Displays structured messages from Claude Code's --output-format stream-json.
  * Input goes to the same PTY session via WebSocket.
  */
+// The DOM bound for a FOLD-DOMINATED window (a rendered window shorter than two
+// viewports, which is what a long folded tool run renders as): while it is that
+// short no trim may run (every trim removes visible content), so this ceiling is
+// the only bound. Fold members are display:none; 3000 hidden cards is cheap next
+// to the extend/trim churn that froze a browser (inc-mub8xwrb-z57x).
+const FOLD_DOM_CEILING = 3000;
+// How many slabs one _extendTop call may load while the window stays shorter
+// than two viewports (each pass doubles the slab up to 200 records): one wheel
+// gesture across a fold lands ONCE, on a full viewport, instead of fifteen times.
+const FOLD_GROW_PASSES = 8;
+
 class ChatView {
   constructor(winInfo, wsManager, sessionId, app, { readOnly = false, subagentView = false } = {}) {
     this.winInfo = winInfo;
@@ -2418,7 +2429,13 @@ class ChatView {
     this._loading = true;
     const endLoad = this._beginHistoryLoad(t('Loading earlier messages…'));
     try {
-      const newStart = Math.max(0, this._windowStart - count);
+      // GROW BY HEIGHT (inc-mub8xwrb-z57x): a slab of 50 folded records adds a few
+      // hundred px; while the window is still shorter than two viewports and
+      // history remains, keep loading (doubling the slab, FOLD_GROW_PASSES max)
+      // inside this ONE loading span — the reader gets one landing per gesture.
+      let slab = count, passes = 0;
+      for (;;) {
+      const newStart = Math.max(0, this._windowStart - slab);
       const fetchCount = this._windowStart - newStart;
       // A failed fetch (server restart mid-scroll) must NOT leave _loading stuck
       // true forever — that permanently blocks all pagination. The finally resets it.
@@ -2456,9 +2473,16 @@ class ChatView {
         // removed 48/50, then anchored:false landed scrollTop at 0). The DOM
         // stays bounded regardless: the live-append path trims the TOP while
         // pinned, and the next genuine (unpinned) page-up trims normally.
-        if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });
-        else this._trimBottom();
+        // FOLD FIRST (inc-mub8xwrb-z57x): the trim's height gate must see the
+        // window's REAL geometry — with the fold running after the trim, the 50
+        // fresh cards were still unfolded and tall at decision time, the gate
+        // never held, the trim removed the visible bottom, and the fold then
+        // collapsed what was left to one viewport (the 2.368.29 guard never
+        // fired for anyone). A trim changes run membership, so the fold runs
+        // again after one.
         this._updateRuns();
+        if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });
+        else { const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }
       });
       if (!anchored) {
         // no usable anchor (very top / empty list) — old delta-math fallback
@@ -2472,6 +2496,11 @@ class ChatView {
       if (this._pinned) { this._trace('pinnedRetail', { ws: newStart }); this._scrollToBottom(); }
       this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+      passes++;
+      const short = this._messageList.scrollHeight < this._messageList.clientHeight * 2;
+      if (!short || this._pinned || this._windowStart <= 0 || passes >= FOLD_GROW_PASSES || !msgs.length) { if (passes > 1) this._trace('extendTop:grown', { passes, ws: this._windowStart, sh: this._messageList.scrollHeight, ch: this._messageList.clientHeight }); break; }
+      slab = Math.min(200, slab * 2);
+      }
     } catch (e) {
       // Unhandled before: the scroll handler calls this un-awaited, so a
       // rejection just vanished into the console and scroll-up "did nothing".
@@ -2748,8 +2777,20 @@ class ChatView {
     // viewports, let it grow instead (fold members are hidden and cheap);
     // 600 rendered messages is the absolute DOM bound.
     const list = this._messageList;
-    if (list && list.scrollHeight < list.clientHeight * 2) maxRendered = 600;
     const els = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
+    // …and the 2.368.29 residual SEEN IN THE FIELD (inc-mub8xwrb-z57x, 2.369.129,
+    // owner "往上翻突然跳到上面一页的最顶部，跳过了中间内容" + a frozen Chrome): ONE fold
+    // run longer than the 600 bound (a session of thousands of consecutive tool
+    // calls). At the bound every 50-record extend trimmed 50 from the bottom —
+    // the only content on screen — the height collapsed to one viewport and
+    // scrollTop clamped to 0: the reader lands on the top of the slab they did
+    // not ask for, and the extend/trim churn (15 cycles in 25 s) is what froze
+    // the browser. While the window is shorter than ~3 viewports NO trim can
+    // remove anything but visible content (the grow loop lands at two, and a
+    // trim must never undo a landing the loop just made), so none runs; FOLD_DOM_CEILING is
+    // the only bound (fold members are display:none — cheap), and _extendTop
+    // grows by HEIGHT so one gesture crosses the fold in one landing.
+    if (list && list.scrollHeight < list.clientHeight * 3) { if (els.length <= FOLD_DOM_CEILING) return; maxRendered = FOLD_DOM_CEILING; this._trace('foldCeiling', { n: els.length }); }
     if (els.length <= maxRendered) return;
     const toRemove = els.length - maxRendered;
     const removedIds = new Set();
@@ -2778,8 +2819,20 @@ class ChatView {
     // viewports, let it grow instead (fold members are hidden and cheap);
     // 600 rendered messages is the absolute DOM bound.
     const list = this._messageList;
-    if (list && list.scrollHeight < list.clientHeight * 2) maxRendered = 600;
     const els = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
+    // …and the 2.368.29 residual SEEN IN THE FIELD (inc-mub8xwrb-z57x, 2.369.129,
+    // owner "往上翻突然跳到上面一页的最顶部，跳过了中间内容" + a frozen Chrome): ONE fold
+    // run longer than the 600 bound (a session of thousands of consecutive tool
+    // calls). At the bound every 50-record extend trimmed 50 from the bottom —
+    // the only content on screen — the height collapsed to one viewport and
+    // scrollTop clamped to 0: the reader lands on the top of the slab they did
+    // not ask for, and the extend/trim churn (15 cycles in 25 s) is what froze
+    // the browser. While the window is shorter than ~3 viewports NO trim can
+    // remove anything but visible content (the grow loop lands at two, and a
+    // trim must never undo a landing the loop just made), so none runs; FOLD_DOM_CEILING is
+    // the only bound (fold members are display:none — cheap), and _extendTop
+    // grows by HEIGHT so one gesture crosses the fold in one landing.
+    if (list && list.scrollHeight < list.clientHeight * 3) { if (els.length <= FOLD_DOM_CEILING) return; maxRendered = FOLD_DOM_CEILING; this._trace('foldCeiling', { n: els.length }); }
     if (els.length <= maxRendered) return;
     const scrollHeightBefore = this._messageList.scrollHeight;
     const toRemove = els.length - maxRendered;

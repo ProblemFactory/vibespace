@@ -21,11 +21,20 @@ if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) {
   process.exit(1);
 }
 
-const guards = cv.match(/if \(list && list\.scrollHeight < list\.clientHeight \* 2\) maxRendered = 600;/g) || [];
-ok('the short-window guard exists in BOTH trims (bottom AND top — downward paging through folds is the mirror image)', guards.length === 2, `found ${guards.length}`);
-ok('trimBottom carries the guard', /_trimBottom\(maxRendered = 150\) \{[\s\S]{0,900}maxRendered = 600;/.test(cv));
-ok('trimTop carries the guard', /_trimTop\(maxRendered = 150\) \{[\s\S]{0,900}maxRendered = 600;/.test(cv));
-ok('the incident is named at the guard (future readers find the bundle)', /inc-mtajy6wr/.test(cv));
+// 2.369.129 (inc-mub8xwrb-z57x): the 2.368.29 residual ("a single fold run longer than
+// 600 re-enters the slide regime") was SEEN — at the bound every extend trimmed the
+// visible bottom and the reader landed on the top of the previous slab. A window
+// shorter than two viewports is now NEVER trimmed (FOLD_DOM_CEILING is the only
+// bound) and _extendTop GROWS BY HEIGHT (up to FOLD_GROW_PASSES slabs per gesture).
+const GUARD = "if (list && list.scrollHeight < list.clientHeight * 3) { if (els.length <= FOLD_DOM_CEILING) return; maxRendered = FOLD_DOM_CEILING; this._trace('foldCeiling', { n: els.length }); }";
+const guards = cv.split(GUARD).length - 1;
+ok('the short-window guard exists in BOTH trims (bottom AND top — downward paging through folds is the mirror image): no trim at all below THREE viewports (the grow loop lands at two — a trim never undoes a landing), the fold ceiling as the only bound', guards === 2, `found ${guards}`);
+ok('trimBottom carries the guard', /_trimBottom\(maxRendered = 150\) \{[\s\S]{0,3200}FOLD_DOM_CEILING; this\._trace\('foldCeiling'/.test(cv));
+ok('trimTop carries the guard', /_trimTop\(maxRendered = 150\) \{[\s\S]{0,3200}FOLD_DOM_CEILING; this\._trace\('foldCeiling'/.test(cv));
+ok('the ceiling is ONE named number ≥ 2000 (fold members are display:none — cheap; 600 was the bound the field crossed)', /const FOLD_DOM_CEILING = (\d+);/.test(cv) && Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]) >= 2000);
+ok('_extendTop grows by HEIGHT: a bounded loop that keeps loading while the window is shorter than two viewports (never while pinned, never past the top), doubling the slab, and names the landing once', /let slab = count, passes = 0;\s*for \(;;\) \{/.test(cv) && /if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv) && /slab = Math\.min\(200, slab \* 2\);/.test(cv) && /_trace\('extendTop:grown'/.test(cv));
+ok('both incidents are named at the guard (future readers find the bundles)', /inc-mtajy6wr/.test(cv) && /inc-mub8xwrb-z57x/.test(cv));
+ok('_extendTop folds BEFORE the trim decision and re-folds after a trim (the gate must see real geometry — the 2.368.29 guard never fired because the fold ran after the trim)', /this\._updateRuns\(\);\s*if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}this\._trimBottom\(\); if \(this\._windowEnd !== before\) this\._updateRuns\(\);/.test(cv));
 ok('the trim trace tags survive (the capture channel that caught this)', cv.includes("this._trace('trimBottom'") && cv.includes("_trace('extendTop:done'"));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
 // The 2.369.36 gate `_windowStart > 0 && rendered < 30 && sh <= ch` was
@@ -234,7 +243,7 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   ok('…and the minimap time landing stamps in the seek module too', /_jumpToFileTime\(ts, line\) \{\s*this\._noteUserNav\('jumpToFileTime'\);/.test(sk));
 }
 ok('INVARIANT a pinned view never loses its tail: _extendTop skips trimBottom while pinned',
-  /if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}else this\._trimBottom\(\);/.test(cv));
+  /if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}else \{ const before = this\._windowEnd; this\._trimBottom\(\);/.test(cv));
 ok('…and re-asserts the tail after the prepend (the anchor restore fails under transitional geometry: anchored:false, scrollTop 0)',
   /if \(this\._pinned\) \{ this\._trace\('pinnedRetail'[\s\S]{0,80}this\._scrollToBottom\(\); \}/.test(cv));
 ok('the incident is named at the fix (future readers find the bundle)', /inc-mtq5bpjt-0o0n/.test(cv) && /inc-mtq5bpjt-0o0n/.test(sk));

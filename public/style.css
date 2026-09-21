@@ -456,9 +456,13 @@ html, body {
    ident ellipsize under pressure; the tag is its own flex item and never
    shrinks or clips; .acct-key-extra still wraps to its own line below. */
 .acct-key-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1 1 100%; white-space: nowrap; }
-.acct-key-name { font-weight: 500; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 4 auto; }
+/* SHRINK PRIORITY (2.369.129, owner: "完全看不到账号名称了" — .128 gave the NAME the
+   highest shrink weight and every name collapsed to one letter beside a full email):
+   the ident (an email) ellipsizes FIRST — a huge shrink weight — and the name yields
+   only once the ident is already gone. */
+.acct-key-name { font-weight: 500; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .acct-key-line > .acct-usage-credits { flex: none; }
-.acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1000 auto; }
 .acct-usage-cell { display: flex; justify-content: flex-end; }
 .acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }
 /* Per-account usage readout (5h / 7d mini bars) inside an account row. */

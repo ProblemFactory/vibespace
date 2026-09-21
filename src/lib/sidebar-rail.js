@@ -112,8 +112,12 @@ export function openRailPanel(app, tab, { syncId, forceWindow = false } = {}) {
 }
 const SYS_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12l3.5-3.5"/><path d="M5 19a9 9 0 1 1 14 0"/></svg>';
 const PORTS_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7V3M15 7V3"/><rect x="6" y="7" width="12" height="8" rx="2"/><path d="M12 15v6"/></svg>';
-registerMenuItem({ menu: 'gear', group: '1_admin', order: 55, icon: SYS_ICON, label: () => tr('System…'), run: (c) => openRailPanel(c.app, 'system') });
-registerMenuItem({ menu: 'gear', group: '1_admin', order: 56, icon: PORTS_ICON, label: () => tr('Ports…'), run: (c) => openRailPanel(c.app, 'ports') });
+// Under the ⚙ System HEAD (2.369.129, owner inc-mub8xwrb-z57x "设置菜单里有俩系统"): 2.369.125
+// added these as top-level rows one release after 2.369.124 made System a head — two
+// "System" entries. The monitor row is named for what the panel shows.
+registerMenuItem({ menu: 'gear', parent: 'system', order: 70, separator: true });
+registerMenuItem({ menu: 'gear', parent: 'system', order: 80, icon: SYS_ICON, label: () => tr('System monitor…'), run: (c) => openRailPanel(c.app, 'system') });
+registerMenuItem({ menu: 'gear', parent: 'system', order: 90, icon: PORTS_ICON, label: () => tr('Ports…'), run: (c) => openRailPanel(c.app, 'ports') });
 // A layout-sync REPLAY must produce the WINDOW it names (verifier r2): without
 // forceWindow a phone-opened System window replayed on a rail-bearing desktop
 // as the rail panel (its sidebar opened by itself, no window with that syncId

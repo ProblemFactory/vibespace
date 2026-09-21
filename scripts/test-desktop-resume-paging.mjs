@@ -750,7 +750,7 @@ const patch = (rel, pairs) => {
 patch('src/lib/chat-view.js', [
   ['const RESUME_SETTLE_MS = 1200;', 'const RESUME_SETTLE_MS = 0;'],                       // (2) resume settle off
   ['  _autoPagingBlocked() {', '  _autoPagingBlocked() { return null;'],                   // (1) IO/seek gate off
-  ["if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });\n        else this._trimBottom();", 'this._trimBottom();'], // (3a)
+  ["if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });\n        else { const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }", '{ const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }'], // (3a) — 2.369.129: the else block folds again after a trim
   ["if (this._pinned) { this._trace('pinnedRetail', { ws: newStart }); this._scrollToBottom(); }", ';'],                                          // (3b)
   ['if (!this._pinned && !this._pinnedAtSuspend) return;', 'if (!this._pinned) return;'],   // (4) re-tail back on the LIVE flag
 ]);
