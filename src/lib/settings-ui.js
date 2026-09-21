@@ -102,8 +102,10 @@ class SettingsUI {
 
     // THE NAV IS A TREE (2.369.132, owner "设置分级"): one head per group, the
     // categories under it. Desktop heads fold (persisted per device); a search
-    // shows everything that matched; the phone strip shows every row (CSS
-    // flattens the groups there). The scroll-spy opens the group it lands in.
+    // shows everything that matched; the phone strip is SECTIONED (2.369.133:
+    // CSS makes each group a full-width row — the head a plain label on its own
+    // line, no pointer, its categories wrapping beneath; a saved fold is ignored
+    // there). The scroll-spy opens the group it lands in.
     const folds = this._navFolds || (this._navFolds = (() => { try { return new Set(JSON.parse(localStorage.getItem('vibespace.settingsNavFolds') || '[]')); } catch { return new Set(); } })());
     const saveFolds = () => { try { localStorage.setItem('vibespace.settingsNavFolds', JSON.stringify([...folds])); } catch { } };
     const groupEls = new Map();

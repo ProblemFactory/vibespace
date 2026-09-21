@@ -2057,9 +2057,16 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
      unhinted horizontal scroller that clipped "Integration" at first paint */
   .settings-nav { flex-wrap: wrap; overflow-x: visible; }
   .settings-nav-item { min-height: 36px; display: inline-flex; align-items: center; }
-  /* the phone strip is FLAT: groups dissolve into the wrapping row of heads + items (2.369.132) */
-  .settings-nav-group { display: contents; }
-  .settings-nav-group-head { min-height: 36px; padding: 8px 8px; }
+  /* the phone strip is SECTIONED, never folded (2.369.133, owner "手机上这个配置层级渲染有点问题"):
+     .132 dissolved each group with display:contents, so the heads sat INLINE among the categories
+     (⌄ Appearance  Toolbar  Window  ⌄ Sessions …) and a tap on one toggled a fold nothing showed
+     (the chevron turned, the head stuck in :hover). Now a group is a full-width row: its head on a
+     line of its own as a plain label (no chevron, no pointer), its categories wrapping beneath it. */
+  .settings-nav-group { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; flex: 0 0 100%; }
+  .settings-nav-group-head { flex: 0 0 100%; min-height: 0; padding: 6px 8px 0; pointer-events: none; cursor: default; }
+  .settings-nav-group-head:hover { background: none; color: var(--text-dim); }
+  .settings-nav-group-head svg { display: none; }
+  .settings-nav-group .settings-nav-item { padding-left: 14px; }
   .settings-nav-group.is-folded .settings-nav-item { display: inline-flex; }
   /* terminal key row: two rows rather than keys hidden past the viewport */
   .mobile-term-keys { flex-wrap: wrap; overflow-x: hidden; }

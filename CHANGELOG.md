@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.133 — the phone's settings nav is sectioned, not a flattened row of heads and categories (owner 2026-09-21 "手机上这个配置层级渲染有点问题")
+
+- **2.369.132 dissolved each nav group on phones with `display: contents`, so the group heads sat INLINE among the categories (⌄ 外观与布局 工具栏与布局 窗口 … ⌄ 会话与聊天 会话 聊天 终端 › HARNESS Claude …), still carried the desktop's chevron and fold handler (a tap turned the chevron and folded nothing, and the head stuck in its :hover tint on touch).** Now every group is a full-width row: the head on a line of its own as a plain label (no chevron, `pointer-events: none`), its categories wrapping beneath it; a fold saved on the device is ignored on the phone. Desktop folding is unchanged (test-gear-menu's settings legs). test-mobile-gaps pins the geometry (every head spans the strip, no category shares its row, chevron hidden, no pointer), the ignored-fold negative control, and writes `settings-nav-phone.png` to its shots dir for the human look.
+
 ## 2.369.132 — the Settings window is a tree, and a harness section says which rows are global and which are per session (owner 2026-09-21)
 
 - **"所有设置界面也可以做一下设置分级"**: the fourteen flat categories now hang under five group heads — Appearance & layout (Toolbar & Layout / Window / Sidebar / Session Card), Sessions & chat (Session / Chat / Terminal), Harnesses (Claude / Codex / OpenCode + any contributed table), Services (Integration / Channels / Background Work), Spending — with Plugins and Other as the trailing groups by rule. Desktop heads fold (persisted per device in `vibespace.settingsNavFolds`), the scroll-spy opens the group it lands in, a search shows every match regardless of folds, and the phone strip stays flat. `SETTINGS_CATEGORIES` remains the census of what renders (§44); `SETTINGS_GROUPS` only orders and folds it — test-architecture §44c pins that the ordered list is a permutation of the census and that every category has a group.

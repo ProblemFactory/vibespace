@@ -165,6 +165,11 @@ const connectPage = async (wsUrl) => {
 };
 const phone = await connectPage(target.webSocketDebuggerUrl);
 const { cdp, evalJs, waitFor, pageErrors } = phone;
+// screenshots for the mandatory human look (test-gear-menu's habit): their own
+// scratch dir, NOT removed by cleanup, swept by the gate's reaper
+const SHOTS = scratch('mobile-gaps-shots');
+fs.mkdirSync(SHOTS, { recursive: true });
+const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch {} };
 // Let a RECEIVER settle before it acts as a sender: _applyRemoteState holds
 // `_restoring` for 1 s and _doAutoSave inside that window returns WITHOUT
 // rescheduling (the anti-ping-pong cooldown) — measured: a user-dirty desktop
@@ -513,6 +518,22 @@ try {
   check('the Settings window opens', await waitFor(`!!document.querySelector('.settings-window .settings-nav')`));
   const nav = await evalJs(`(() => { const n = document.querySelector('.settings-window .settings-nav'); const items = [...n.querySelectorAll('.settings-nav-item')]; return { scroll: n.scrollWidth, client: n.clientWidth, wrap: getComputedStyle(n).flexWrap, n: items.length, inside: items.every((i) => i.getBoundingClientRect().right <= innerWidth + 1), minH: Math.min(...items.map((i) => Math.round(i.getBoundingClientRect().height))) }; })()`);
   check(`the settings nav wraps (${nav.n} categories, scrollWidth ${nav.scroll} ≤ ${nav.client}, every item inside the viewport, rows ≥ 36 px)`, nav.wrap === 'wrap' && nav.scroll <= nav.client + 1 && nav.inside && nav.minH >= 36, nav);
+  await shot('settings-nav-phone.png');
+  // 2.369.133 (owner "手机上这个配置层级渲染有点问题"): .132 flattened the groups with
+  // display:contents, so the heads sat INLINE among the categories and folded on a tap.
+  // The phone strip is SECTIONED: every group head is a full-width label on a line of its
+  // own (no chevron, no pointer), and its categories start BELOW it.
+  const sections = await evalJs(`(() => { const n = document.querySelector('.settings-window .settings-nav'); const navW = n.clientWidth; return [...n.querySelectorAll('.settings-nav-group')].map((g) => { const h = g.querySelector('.settings-nav-group-head'); const hr = h.getBoundingClientRect(); const items = [...g.querySelectorAll('.settings-nav-item')].map((i) => i.getBoundingClientRect()); const svg = h.querySelector('svg'); return { id: g.dataset.group, label: h.textContent.trim(), headW: Math.round(hr.width), navW, ownRow: items.every((r) => r.top >= hr.bottom - 1), sameRowAsHead: items.filter((r) => r.top < hr.bottom - 1 && r.left > hr.left).length, chevron: svg ? getComputedStyle(svg).display : 'none', pointer: getComputedStyle(h).pointerEvents, display: getComputedStyle(g).display, itemsVisible: items.filter((r) => r.width > 0).length, items: items.length }; }); })()`);
+  check(`every group head is a full-width label on its own row (${sections.map((s) => s.label + ':' + s.headW + '/' + s.navW).join(', ')})`, sections.length >= 4 && sections.every((s) => s.headW >= s.navW - 24 && s.ownRow && s.sameRowAsHead === 0), sections);
+  check('the phone head shows no chevron and takes no pointer (a tap folds nothing, nothing sticks in :hover)', sections.every((s) => s.chevron === 'none' && s.pointer === 'none' && s.display !== 'contents'), sections);
+  // negative control: a fold saved on this device (the desktop's persisted key) is IGNORED on the phone
+  await evalJs(`localStorage.setItem('vibespace.settingsNavFolds', JSON.stringify(['services', 'harness'])); app._settingsUI._navFolds = null; const sw = [...app.wm.windows.values()].find((w) => w.type === 'settings'); if (sw) app.wm.closeWindow(sw.id); true`);
+  await sleep(200);
+  await evalJs(`app._settingsUI.open(); true`);
+  check('the Settings window reopens', await waitFor(`!!document.querySelector('.settings-window .settings-nav-group[data-group="services"]')`));
+  const foldedPhone = await evalJs(`(() => { const g = document.querySelector('.settings-window .settings-nav-group[data-group="services"]'); const items = [...g.querySelectorAll('.settings-nav-item')]; return { folded: g.classList.contains('is-folded'), visible: items.filter((i) => i.getBoundingClientRect().width > 0).length, items: items.length }; })()`);
+  check(`a fold saved for this device still shows every category on the phone (services folded=${foldedPhone.folded}, ${foldedPhone.visible}/${foldedPhone.items} visible)`, foldedPhone.folded === true && foldedPhone.items > 0 && foldedPhone.visible === foldedPhone.items, foldedPhone);
+  await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); true`);
 
   check('no uncaught page exceptions during the battery', pageErrors.length === 0, pageErrors.slice(0, 3));
   check('no uncaught page exceptions on the desktop client either', desk.pageErrors.length === 0, desk.pageErrors.slice(0, 3));
@@ -522,5 +543,6 @@ try {
   console.error('  ✗ battery crashed: ' + (e.stack || e.message));
 }
 
+console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
 process.exit(failed ? 1 : 0);
