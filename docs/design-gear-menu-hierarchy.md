@@ -137,3 +137,9 @@ Mobile accordion (full width, one head open, 44 px rows):
 │ ⎋ Sign out                       │
 └──────────────────────────────────┘
 ```
+
+
+## Amendment 2026-09-21 (2.369.131)
+
+- **All Settings… is a DIRECT row** right after Manage agents… (owner: "所有设置为啥放在外观里？"). §2a had carried it over verbatim as the Appearance panel's footer link and a Help child; the settings window is a primary destination, not an appearance preference. Top-level budget: nine rows at most (Appearance / Manage agents / All Settings / Tools / Communication / System / Update / Help / Sign out).
+- System monitor… / Ports… are CHILDREN of the System head (2.369.129).

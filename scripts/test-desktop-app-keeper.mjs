@@ -50,6 +50,8 @@ const M = require('../src/desktop-apps.js');
 const ident = require('../src/cli-identity.js');
 const alive = (p) => D.pidAlive(p);
 
+// THIS BOX's xpra verdict (2.369.131): absent ⇒ 'xpra not on PATH'; present ⇒ passed over as unwired until P8-2 — never a literal
+const XPRA_WHY = D.binOnPath('xpra', { env: process.env }) ? 'xpra present (xpra) but not wired until P8-2' : 'xpra not on PATH';
 const root = scratch('desktop-keeper');
 fs.mkdirSync(root, { recursive: true });
 const keepers = [];
@@ -153,7 +155,7 @@ console.log('§1 launch → listening → handshake → record → stop clean');
   const before = procCensus(k.logRoot);
   const t0 = Date.now();
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'first' });
-  ok(rec.state === 'launching' && rec.backend === 'vnc-display' && rec.via === 'Xvfb+x11vnc' && rec.fallbackWhy === 'xpra not on PATH', `launch answers a launching record on vnc-display via Xvfb+x11vnc with fallbackWhy "xpra not on PATH" (this box)`, rec);
+  ok(rec.state === 'launching' && rec.backend === 'vnc-display' && rec.via === 'Xvfb+x11vnc' && rec.fallbackWhy === XPRA_WHY, `launch answers a launching record on vnc-display via Xvfb+x11vnc with fallbackWhy "${XPRA_WHY}" (this box)`, rec);
   const ready = await until(() => { const r = k.get(rec.id); return r.state === 'ready' ? r : r.state === 'failed' ? r : null; });
   ok(ready && ready.state === 'ready', `ready in ${Date.now() - t0} ms`, ready && ready.lastError);
   ok(/^:\d+$/.test(ready.display) && ready.port > 0 && ready.pids.x > 0 && ready.pids.server > 0 && ready.pids.app > 0 && ready.starts.x > 0 && ready.starts.server > 0 && ready.starts.app > 0, 'the record carries display, port, three pids AND three starttimes (facts only)', ready);
@@ -434,7 +436,7 @@ setInterval(() => {}, 1000);
   const l0 = await k.list();
   ok(l0.availability.backend === 'vnc-display' && l0.availability.via === 'Xvnc' && l0.availability.bins.Xvnc === path.join(fakeBin, 'Xvnc'), 'with an Xvnc on PATH the ladder picks vnc-display via Xvnc (the fleet spelling), not Xvfb+x11vnc', l0.availability);
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'xvnc-spelling' });
-  ok(rec.via === 'Xvnc' && rec.backend === 'vnc-display' && rec.fallbackWhy === 'xpra not on PATH', 'launch records via Xvnc with the same fallbackWhy', rec);
+  ok(rec.via === 'Xvnc' && rec.backend === 'vnc-display' && rec.fallbackWhy === XPRA_WHY, 'launch records via Xvnc with the same fallbackWhy', rec);
   const ready = await until(() => { const r = k.get(rec.id); return r.state === 'ready' ? r : r.state === 'failed' ? r : null; });
   ok(ready && ready.state === 'ready', 'ready through the Xvnc recipe', ready && ready.lastError);
   ok(ready.pids.x > 0 && ready.pids.x === ready.pids.server && ready.starts.x === ready.starts.server && ready.pids.app !== ready.pids.x, 'the record says X and the picture server are ONE process (pid AND starttime), the app another', ready);

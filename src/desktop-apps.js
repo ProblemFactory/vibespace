@@ -118,7 +118,12 @@ function resolveBackend(hostFacts = {}, prefs = {}, table = DISPLAY_BACKENDS) {
   // reason — a user choosing an install sees what each would need); the FIRST
   // rung that can run wins, and the reasons of the rungs above it are its
   // fallbackWhy.
-  const ladder = order.map((rung) => { const v = needsVerdict(rung, effBins); return { backend: rung.id, ok: v.ok, via: v.via, recipe: v.ok ? recipeFor(rung.id, v.via, table) : null, why: v.ok ? null : v.missing.join('; ') }; });
+  // A rung whose binary is present but whose relay is NOT WIRED (xpra until P8-2) is
+  // reported as present and passed over — it cannot run. 2.369.131: the day xpra was
+  // installed on this box the ladder chose it and the keeper refused every desktop-app
+  // launch with backend-not-wired (a named 409, but a refusal where vnc-display had
+  // been working). DA1 ("installed ⇒ preferred") applies to a WIRED rung.
+  const ladder = order.map((rung) => { const v = needsVerdict(rung, effBins); const wired = rung.wired !== false; const ok = v.ok && wired; return { backend: rung.id, ok, present: v.ok, via: v.via, recipe: v.ok ? recipeFor(rung.id, v.via, table) : null, why: ok ? null : (v.ok ? `${rung.id} present (${v.via}) but not wired until P8-2` : v.missing.join('; ')) }; }); // a present rung reports the recipe it WOULD use even when unwired (the launcher names it)
   const winner = ladder.findIndex((r) => r.ok);
   if (winner < 0) return { backend: null, via: null, recipe: null, stream: null, fallbackWhy: ladder.map((r) => r.why).join('; ') || 'no display backend', ladder };
   const fell = ladder.slice(0, winner).map((r) => r.why);

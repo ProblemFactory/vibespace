@@ -36,6 +36,9 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
 import zhDict from '../src/lib/i18n-zh.js';
+// THIS BOX's xpra verdict (2.369.131): absent ⇒ 'xpra not on PATH'; present ⇒ passed over as unwired until P8-2 — never a literal
+const XTERM_PRESENT = (process.env.PATH || '').split(':').some((p) => { try { return fs.statSync(p + '/xterm').isFile(); } catch { return false; } });
+const XPRA_WHY = fs.existsSync('/usr/bin/xpra') || (process.env.PATH || '').split(':').some((p) => { try { return fs.statSync(p + '/xpra').isFile(); } catch { return false; } }) ? 'xpra present (xpra) but not wired until P8-2' : 'xpra not on PATH';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -145,7 +148,7 @@ let p1 = await page(target);
 try {
   await openPage(p1);
   const av = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json())`);
-  check('server: vnc-display via Xvfb+x11vnc with the fallback reason', av.availability?.backend === 'vnc-display' && av.availability?.fallbackWhy === 'xpra not on PATH', av.availability);
+  check('server: vnc-display via Xvfb+x11vnc with the fallback reason', av.availability?.backend === 'vnc-display' && av.availability?.fallbackWhy === XPRA_WHY, av.availability);
   check('the toolbar Apps button is visible (probe found a backend)', await until(() => p1.evalJs(`getComputedStyle(document.getElementById('btn-desktop-apps')).display !== 'none'`), 8000));
   // 2.369.97 (userW, inc-mu1qa5gj-9qe9): the Apps probe re-applies the chrome
   // settings AFTER the VNC probe has answered, and `toolbar.showDesktopButton`
@@ -277,8 +280,8 @@ try {
   // the launch dialog: run a command from its form (the disclosure is open from §P)
   check('the launch dialog is open', await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`));
   const availText = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-avail')?.textContent || ''`);
-  check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText) && /xpra not on PATH/.test(availText), availText);
-  check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!facts.bins.xterm ? 'true' : 'false'}; return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
+  check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText) && availText.includes(XPRA_WHY), availText);
+  check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!XTERM_PRESENT ? 'true' : 'false'}; /* 2.369.131: hostFacts.bins never carries xterm — derive presence from PATH, not from a key that is always undefined (the leg passed only while xterm was absent; xpra's install pulled it in) */ return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
   await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); d.querySelector('.desktop-launch-exec').value = ${JSON.stringify(appBin)}; d.querySelector('.desktop-launch-args').value = ${JSON.stringify(appArgs.map((a) => (/\\s/.test(a) ? '"' + a + '"' : a)).join(' '))}; return true; })()`);
   // a TRUSTED click on Launch (CDP Input): the layout autosave only fires after
   // a real pointerdown/keydown (layout.js's anti-echo guard), exactly as a human's does
@@ -292,7 +295,7 @@ try {
   const connected = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); const s = w?.content.querySelector('.desktop-status'); return s && s.textContent === 'Connected' ? s.textContent : null; })()`), 20000);
   check('the status chip says Connected (the ONE bridge relayed the RFB session)', connected === 'Connected', connected);
   const chip = await p1.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-backend')?.textContent`);
-  check('the status bar names the backend rung AND why: "vnc-display (xpra not on PATH)"', chip === 'vnc-display (xpra not on PATH)', chip);
+  check(`the status bar names the backend rung AND why: "vnc-display (${XPRA_WHY})"`, chip === `vnc-display (${XPRA_WHY})`, chip);
   const sample = await until(async () => { const s = await p1.evalJs(CANVAS_SAMPLE); return s.found && s.brightFrac > 0.02 ? s : null; }, 20000, 500);
   check('the noVNC canvas is NOT all black (the app is painted)', !!sample, sample);
   check('the idle countdown chip is showing (30 min default)', await p1.evalJs(`/idle stop in \\d+ min/.test([...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-idle')?.textContent || '')`));

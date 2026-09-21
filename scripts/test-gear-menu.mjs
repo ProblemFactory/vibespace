@@ -6,7 +6,7 @@
 //   opens its flyout only after the 120 ms intent delay (measured on the
 //   PAGE's clock — node polls until-style, never a fixed sleep against the
 //   timer), to the LEFT of the head and fully on screen; hovering another
-//   head swaps it (one at a time); ArrowDown ×4 from the first row lands on
+//   head swaps it (one at a time); ArrowDown ×5 from the first row lands on
 //   System, ArrowLeft opens it with focus on its first member, ArrowDown, Enter runs a STUBBED
 //   _openDiagnostics and closes the popover; Esc closes ONE layer (the
 //   flyout, focus back on its head) and the next Esc the popover; an outside
@@ -184,8 +184,8 @@ try {
 
   // keyboard
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
-  for (let i = 0; i < 4; i++) await key('ArrowDown');
-  check('ArrowDown ×4 from Appearance lands on System (Manage agents → Tools → Communication → System)', await evalJs(`document.activeElement?.dataset?.id === 'system'`));
+  for (let i = 0; i < 5; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → Tools → Communication → System
+  check('ArrowDown ×5 from Appearance lands on System (Manage agents → All Settings → Tools → Communication → System)', await evalJs(`document.activeElement?.dataset?.id === 'system'`));
   await key('ArrowLeft');
   check('ArrowLeft opens the System flyout, swaps out the hover-opened one, focus on its first member (Report a problem…)', await evalJs(isOpen('system')) && !(await evalJs(isOpen('comm'))) && await evalJs(`/Report a problem/.test(document.activeElement?.textContent || '')`));
   await key('ArrowDown');
@@ -207,7 +207,7 @@ try {
   const escState = () => evalJs(`(() => { const a = document.activeElement; return JSON.stringify({ pop: !!document.querySelector('${POP}'), open: [...document.querySelectorAll('${POP} .gs-flyout.open, ${POP} .gs-sub.open')].map((s) => s.parentElement?.classList?.contains('gs-menu-item') ? s.parentElement.dataset.id : (s.previousElementSibling?.dataset?.id || '?')), active: a ? (a.tagName + (a.dataset?.id ? '#' + a.dataset.id : '') + '.' + (a.className || '').toString().split(' ')[0]) : null, body: a === document.body, floats: document.querySelectorAll('[data-popover]').length }); })()`);
   await openGear();
   await evalJs(`document.querySelector('${POP} .gs-menu > .gs-menu-item[data-id="appearance"]').focus(); true`);
-  for (let i = 0; i < 4; i++) await key('ArrowDown');
+  for (let i = 0; i < 5; i++) await key('ArrowDown'); // Manage agents → All Settings (2.369.131) → Tools → Communication → System
   await key('ArrowLeft');
   check(`(setup) System flyout open by keyboard (${await escState()})`, await evalJs(isOpen('system')));
   await shot('esc-0-before.png');
@@ -234,7 +234,8 @@ try {
   await openGear();
   await click(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);
   const ap = await evalJs(`(() => { const s = document.querySelector('${POP} [data-id="appearance"] .gs-flyout'); const r = s.getBoundingClientRect(); return { open: s.classList.contains('open'), labels: [...s.querySelectorAll('label')].map((l) => l.textContent), hasLang: !!s.querySelector('.gs-menu-item[data-id="language"]'), hasAll: !!s.querySelector('.settings-all-link'), caption: document.querySelector('${POP} [data-id="appearance"] .gs-head-caption')?.textContent, onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight }; })()`);
-  check(`click opens the Appearance PANEL flyout: five quick-pref controls (${ap.labels.join(' / ')}) + Language ▸ + All Settings`, ap.open && ap.labels.length === 5 && ap.hasLang && ap.hasAll);
+  check(`click opens the Appearance PANEL flyout: five quick-pref controls (${ap.labels.join(' / ')}) + Language ▸ — and NO All Settings link (2.369.131: it is a direct ⚙ row)`, ap.open && ap.labels.length === 5 && ap.hasLang && !ap.hasAll);
+  check('All Settings… is a direct top-level row right after Manage agents…', await evalJs(`(() => { const rows = [...document.querySelectorAll('${POP} .gs-menu > .gs-menu-item')]; const i = rows.findIndex((r) => /Manage agents/.test(r.textContent)); return i >= 0 && rows[i + 1] && rows[i + 1].dataset.id === 'all-settings'; })()`));
   check(`the Appearance head shows a live caption "${ap.caption}"`, /px/.test(ap.caption || '') && /%/.test(ap.caption || ''));
   check('the panel flyout is fully on screen', ap.onScreen);
   await click(`${POP} .gs-menu > .gs-menu-item[data-id="appearance"]`);

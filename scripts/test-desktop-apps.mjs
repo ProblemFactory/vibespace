@@ -61,7 +61,7 @@ ok(M.KEEPER_ENV.includes('VIBESPACE_DESKTOP_APP'), 'a registry row may not set V
 {
   const r = M.resolveBackend({ bins: { Xvfb: '/x', x11vnc: '/x' } });
   ok(r.recipe === 'x-then-server' && r.ladder[1].recipe === 'x-then-server' && r.ladder[0].recipe === null, 'resolveBackend carries the recipe of the winner and of every rung that can run (null where it cannot)');
-  ok(M.resolveBackend({ bins: { Xvnc: '/x' } }).recipe === 'x-serves-rfb' && M.resolveBackend({ bins: {}, singletonRunning: true }).recipe === 'shared' && M.resolveBackend({ bins: { xpra: '/x' } }).recipe === 'xpra-seamless', 'each rung resolves to its own recipe name (one-pid Xvnc / the shared desktop / the not-yet-wired xpra)');
+  ok(M.resolveBackend({ bins: { Xvnc: '/x' } }).recipe === 'x-serves-rfb' && M.resolveBackend({ bins: {}, singletonRunning: true }).recipe === 'shared' && M.resolveBackend({ bins: { xpra: '/x' } }).recipe === null && M.resolveBackend({ bins: { xpra: '/x' } }).ladder[0].recipe === 'xpra-seamless', 'each rung resolves to its own recipe name (one-pid Xvnc / the shared desktop / the not-yet-wired xpra names its recipe on the ladder but never wins)');
   // A FOURTH RUNG IS ONE ROW: a table copy with a new first rung resolves to it and to its recipe — nothing else is consulted
   const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', perWindow: true, adaptive: false, stream: 'rfb', needs: Object.freeze([Object.freeze(['Xfake'])]), recipes: Object.freeze({ Xfake: 'x-then-server' }), wired: true });
   const r4 = M.resolveBackend({ bins: { Xfake: '/x', Xvfb: '/x', x11vnc: '/x' } }, {}, [fourth, ...M.DISPLAY_BACKENDS]);
@@ -76,15 +76,15 @@ const BINS = ['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc'];
 function oracle(bins, singletonRunning) {
   const has = (b) => !!bins[b];
   const rows = [
-    { id: 'xpra', groups: [['xpra']] },
-    { id: 'vnc-display', groups: [['Xvnc'], ['Xvfb', 'x11vnc']] },
-    { id: 'desktop-singleton', groups: [['Xtigervnc'], ['Xvnc'], ['desktop-singleton:running']] },
+    { id: 'xpra', groups: [['xpra']], wired: false }, // P8-1: probed, recorded, NOT wired — present ⇒ passed over with its reason (2.369.131)
+    { id: 'vnc-display', groups: [['Xvnc'], ['Xvfb', 'x11vnc']], wired: true },
+    { id: 'desktop-singleton', groups: [['Xtigervnc'], ['Xvnc'], ['desktop-singleton:running']], wired: true },
   ];
   const fell = [];
   for (const r of rows) {
     const g = r.groups.find((grp) => grp.every((b) => (b === 'desktop-singleton:running' ? singletonRunning : has(b))));
-    if (g) return { backend: r.id, via: g.join('+'), fallbackWhy: fell.length ? fell.join('; ') : null };
-    fell.push(r.groups.map((grp) => `${grp.join('+')} not on PATH`).join('; '));
+    if (g && r.wired) return { backend: r.id, via: g.join('+'), fallbackWhy: fell.length ? fell.join('; ') : null };
+    fell.push(g ? `${r.id} present (${g.join('+')}) but not wired until P8-2` : r.groups.map((grp) => `${grp.join('+')} not on PATH`).join('; '));
   }
   return { backend: null, via: null, fallbackWhy: fell.join('; ') };
 }
@@ -103,9 +103,16 @@ function oracle(bins, singletonRunning) {
   ok(!bad, `the ladder agrees with the §3 oracle on all ${n} presence combinations (backend, via, fallbackWhy, 3-rung ladder)`, bad);
 }
 {
+  // 2.369.131 (the day xpra 6.5.3 landed on this box): a PRESENT but UNWIRED rung is passed
+  // over with its reason — the ladder had chosen it and the keeper refused every launch
+  // with backend-not-wired where vnc-display had been working. DA1 ("installed ⇒ preferred")
+  // holds for a WIRED rung: the control below flips the row and xpra wins.
   const r = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } });
-  ok(r.backend === 'xpra' && r.via === 'xpra' && r.fallbackWhy === null && r.stream === 'xpra', 'xpra present ⇒ xpra, no fallback (DA1: installed ⇒ preferred)');
-  ok(M.fallbackLogLine(r) === null, 'no log line when the first rung won');
+  ok(r.backend === 'vnc-display' && r.via === 'Xvfb+x11vnc' && r.stream === 'rfb' && r.fallbackWhy === 'xpra present (xpra) but not wired until P8-2' && r.ladder[0].present === true && r.ladder[0].ok === false && r.ladder[0].recipe === 'xpra-seamless', 'THIS BOX SINCE 2026-09-21: xpra present but unwired ⇒ vnc-display, the reason names the unwired rung, the ladder still reports xpra as present with its recipe', r);
+  ok(M.fallbackLogLine(r) === '[desktop] backend fallback: xpra→vnc-display (xpra present (xpra) but not wired until P8-2)', 'the §3 log line names the unwired rung', M.fallbackLogLine(r));
+  const wiredTable = M.DISPLAY_BACKENDS.map((b) => (b.id === 'xpra' ? Object.freeze({ ...b, wired: true }) : b));
+  const rw = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } }, {}, wiredTable);
+  ok(rw.backend === 'xpra' && rw.via === 'xpra' && rw.fallbackWhy === null && rw.stream === 'xpra' && M.fallbackLogLine(rw) === null, 'CONTROL (DA1 for P8-2): with the xpra row WIRED the same box resolves to xpra, no fallback, no log line', rw);
 }
 {
   const r = M.resolveBackend({ bins: { Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } });
@@ -123,7 +130,7 @@ function oracle(bins, singletonRunning) {
   const r4 = M.resolveBackend({ bins: { xpra: '/x', Xvfb: '/x', x11vnc: '/x' } }, { backendPrefs: ['vnc-display'] });
   ok(r4.backend === 'vnc-display' && r4.fallbackWhy === null, 'a row\'s backendPrefs may RESTRICT the ladder (only vnc-display asked ⇒ vnc-display, no fallback)');
   const r5 = M.resolveBackend({ bins: { xpra: '/x', Xvfb: '/x', x11vnc: '/x' } }, { backendPrefs: ['nonsense'] });
-  ok(r5.backend === 'xpra', 'unknown pref ids are ignored, never invented as rungs');
+  ok(r5.backend === 'vnc-display' && r5.ladder.length === 3 && r5.ladder[0].backend === 'xpra' && r5.ladder[0].present === true, 'unknown pref ids are ignored, never invented as rungs (the full ladder runs — and still passes over the unwired xpra)');
   ok(M.resolveBackend().backend === null && M.resolveBackend(null).backend === null, 'no facts ⇒ no backend (never a guess)');
 }
 

@@ -181,6 +181,7 @@ console.log('§3 the xpra version probe');
   const real = D.binOnPath('xpra', { env: process.env });
   if (!real) skip('the real xpra is not installed on this box (apt has no candidate here) — the fake-binary leg above stands in; the fleet image adds the package');
   else { const rv = await D.xpraVersion({ binPath: real, env: process.env }); ok(rv && /^\d+\.\d+/.test(rv.version || ''), `the real xpra reports a version (${rv && rv.version})`, rv); }
+  D.resetBinMemo(); // the real-binary probe above memoised the real path (a YES is remembered for good) — this leg is env-isolated
   ok((await D.xpraVersion({ env: { PATH: dir } })) === null, 'no xpra anywhere ⇒ null (a rung nobody can run)');
 }
 

@@ -1,5 +1,5 @@
 // APPEARANCE PANEL — the quick per-DEVICE preference controls of the ⚙ menu
-// (Theme + ✎, Font size, Font, UI scale, UI font size, "All Settings...").
+// (Theme + ✎, Font size, Font, UI scale, UI font size).
 // Moved VERBATIM out of App._showGlobalSettings (2.369.124, docs/design-
 // gear-menu-hierarchy.md §2c): the popover used to open with these eleven
 // elements ABOVE the row list; now they are the content of the "Appearance ▸"
@@ -142,15 +142,10 @@ export function buildAppearancePanel(app, pop) {
   const [scaleLab, scaleRow] = mkPctRow(t('UI scale (DPI)'), 'vibespace.uiScale', UI_SCALE_MIN, UI_SCALE_MAX, () => app._refitAllTerminals());
   const [fscaleLab, fscaleRow] = mkPctRow(t('UI font size'), 'vibespace.uiFontScale', UI_FONT_MIN, UI_FONT_MAX);
 
-  // "All Settings" link
-  const allSettingsLink = document.createElement('div');
-  allSettingsLink.className = 'settings-all-link';
-  allSettingsLink.textContent = t('All Settings...');
-  allSettingsLink.onclick = () => { pop.remove(); app._settingsUI.open(); };
-
+  // (the "All Settings…" link left this panel in 2.369.131 — it is a direct ⚙ row now)
   const themeRow = document.createElement('div');
   themeRow.style.cssText = 'display:flex;align-items:center;gap:4px';
   themeRow.append(themeSel, editBtn);
-  panel.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, scaleLab, scaleRow, fscaleLab, fscaleRow, allSettingsLink);
+  panel.append(themeLabel, themeRow, sizeLabel, sizeRow, fontLabel, fontSel, scaleLab, scaleRow, fscaleLab, fscaleRow);
   return panel;
 }

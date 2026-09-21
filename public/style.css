@@ -462,6 +462,15 @@ html, body {
    only once the ident is already gone. */
 .acct-key-name { font-weight: 500; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .acct-key-line > .acct-usage-credits { flex: none; }
+/* TWO LINES where the row already has the height (2.369.131, owner: "名字之间空白很大…把 email 放到第二行"):
+   a row that carries a usage cell is ~41 px tall because of the donut column, so its
+   identity cell has room for the NAME on line 1 (the credits tag beside it) and the
+   ident on line 2 — no truncated names, no dead space, no taller rows. Rows without
+   a usage cell (CLI login, API keys) keep the single line. */
+.acct-key-row:has(.acct-usage-cell) .acct-key-line { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; row-gap: 0; align-items: baseline; }
+.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-key-name { grid-column: 1; grid-row: 1; }
+.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-usage-credits { grid-column: 2; grid-row: 1; justify-self: start; }
+.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-key-tail { grid-column: 1 / -1; grid-row: 2; }
 .acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1000 auto; }
 .acct-usage-cell { display: flex; justify-content: flex-end; }
 .acct-key-row.is-default { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); }

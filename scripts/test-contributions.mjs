@@ -601,14 +601,14 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const tools = row(I.wrench, t('Tools'), { children: [row(I.chart, t('Usage…')), row(I.chart, t('Background Work…')), row(undefined, t('Desktop apps…')), row(I.puzzle, t('Plugins…')), ...(pluginWins.length ? [SEP, ...pluginWins.map((w) => row(PLUGIN_ICON, w.title))] : [])] });
     const comm = row(I.chat, t('Communication'), { children: [row(undefined, t('Channels…')), row(undefined, t('Outbox…')), row(undefined, t('Integrations…'))] });
     const system = row(I.cog, t('System'), { children: [row(I.alert || I.pulse, t('Report a problem…')), row(I.pulse, t('Diagnostics report…')), SEP, row(I.exp || I.pulse, t('Restore a previous layout…')), row(I.exp, t('Backup & migrate…')), row(I.lock, app._authEnabled ? t('Change password…') : t('Set password…'))] });
-    const help = row(I.help, t('Help'), { children: [row(I.tour, t('Welcome tour')), row(I.cog, t('All Settings...'))] });
-    return [appearance, SEP, row(I.key, t('Manage agents…')), tools, comm, system, ...(app._repoDir ? [row(I.key, t('Update VibeSpace…'))] : []), help, ...(app._authEnabled ? [SEP, row(I.out, t('Sign out'), { danger: true })] : [])];
+    const help = row(I.help, t('Help'), { children: [row(I.tour, t('Welcome tour'))] });
+    return [appearance, SEP, row(I.key, t('Manage agents…')), row(I.cog, t('All Settings...')), tools, comm, system, ...(app._repoDir ? [row(I.key, t('Update VibeSpace…'))] : []), help, ...(app._authEnabled ? [SEP, row(I.out, t('Sign out'), { danger: true })] : [])];
   };
   const proj = (items) => items.map((i) => (i.separator ? { sep: 1 } : { ...(i.icon !== undefined ? { icon: i.icon } : {}), label: i.label, ...(i.danger ? { danger: true } : {}), ...(i.checked !== undefined ? { checked: i.checked } : {}), ...(i.caption ? { caption: i.caption } : {}), ...(i.panel ? { panel: true } : {}), ...(i.children ? { children: proj(i.children) } : {}) }));
   const flatten = (items) => items.flatMap((i) => (i.sep ? [] : [i.label, ...(i.children ? flatten(i.children) : [])]));
   // every label the tree ADDS beyond the legacy flat list — the five heads, the
   // four owner rows (never in gear-menu.js), the four Language choices and
-  // All Settings (a quick-pref link before, a Help row now)
+  // All Settings (a quick-pref link before, a DIRECT row since 2.369.131)
   const ADDED = [id('Appearance'), id('Tools'), id('Communication'), id('System'), id('Help'), 'Channels…', 'Outbox…', 'Integrations…', 'Desktop apps…', 'Auto (system)', 'English', '中文', '日本語', 'All Settings...'];
   let n = 0, bad = null, census = null, budget = null, dangers = null;
   for (const [isMobile, _repoDir, _authEnabled, nPlugins] of cartesian([false, true], [null, '/repo'], [false, true], [0, 2])) {
@@ -632,7 +632,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   }
   ok(!bad, `gear menu: registry tree ≡ the TREE FIXTURE over ${n} states (icon/label/danger/checked/caption/panel/separators per level, incl. the plugin-windows block under Tools)`, bad && `first diff ${J({ ...bad, got: undefined, want: undefined })}\n    got  ${bad.got}\n    want ${bad.want}`);
   ok(!census, `CENSUS over ${n} states: every legacy row lands in exactly one head or at the top level, none twice, none lost; the additions are exactly the named ones`, census && J(census));
-  ok(!budget, 'top-level row budget: ≤ 9 rows in every state (8 at most: Appearance / Manage agents / Tools / Communication / System / Update / Help / Sign out)', budget && J(budget));
+  ok(!budget, 'top-level row budget: ≤ 9 rows in every state (9 at most: Appearance / Manage agents / All Settings / Tools / Communication / System / Update / Help / Sign out)', budget && J(budget));
   ok(!dangers, 'exactly one danger row (Sign out) when auth is on, none when it is off — at any depth', dangers && J(dangers));
   ok(panels.length === 0, 'menuItems() passes the Appearance panel BUILDER through untouched — the renderer calls it, the registry never does');
   const rows = menuItems('gear', { app: { isMobile: false, _repoDir: '/r', _authEnabled: true, _fontSize: 14, _railEl: {}, _desktopAppsAvailable: true }, pop: {} });
@@ -732,10 +732,10 @@ console.log('contributions — D. wiring pins');
   ok(/pop\.append\(buildGearMenu\(this, pop\)\);/.test(ap) && !/item\(I\.key, t\('Manage agents/.test(ap) && !/menu\.className = 'gs-menu'/.test(ap), 'gear menu renders via buildGearMenu(this, pop) (app.js inline row list gone)');
   // 2.369.124: the quick prefs left app.js for appearance-panel.js and are the Appearance head's panel
   const apn = read('src/lib/appearance-panel.js');
-  ok(!/themeSel\.id = 'global-theme-select'|settings-all-link|font-size-ctrl|mkPctRow/.test(ap) && /themeSel\.id = 'global-theme-select'/.test(apn) && /settings-all-link/.test(apn) && /const mkPctRow = /.test(apn) && /export function buildAppearancePanel\(app, pop\)/.test(apn) && /export function appearanceCaption\(app\)/.test(apn),
-    'the eleven quick-pref elements live in appearance-panel.js (buildAppearancePanel + appearanceCaption), none remain inline in _showGlobalSettings');
-  ok(/pop\.remove\(\); app\._settingsUI\.open\(\);/.test(apn) && /localStorage\.setItem\('termFontSize', app\._fontSize\)/.test(apn) && /session\.applyOverride\('fontSize', null\)/.test(apn) && /if \(fontSel\.selectedIndex === -1\)/.test(apn),
-    'the moved builders kept their invariants verbatim (All Settings closes the popover first; font size through applyOverride; the stale-font select rescue)');
+  ok(!/themeSel\.id = 'global-theme-select'|settings-all-link|font-size-ctrl|mkPctRow/.test(ap) && /themeSel\.id = 'global-theme-select'/.test(apn) && !/settings-all-link/.test(apn) && /const mkPctRow = /.test(apn) && /export function buildAppearancePanel\(app, pop\)/.test(apn) && /export function appearanceCaption\(app\)/.test(apn),
+    'the ten quick-pref elements live in appearance-panel.js (buildAppearancePanel + appearanceCaption; the All Settings link left it in 2.369.131), none remain inline in _showGlobalSettings');
+  ok(/localStorage\.setItem\('termFontSize', app\._fontSize\)/.test(apn) && /session\.applyOverride\('fontSize', null\)/.test(apn) && /if \(fontSel\.selectedIndex === -1\)/.test(apn) && /id: 'all-settings'[^\n]*run: \(c\) => c\.app\._settingsUI\.open\(\)/.test(read('src/lib/gear-menu.js')),
+    'the moved builders kept their invariants verbatim (font size through applyOverride; the stale-font select rescue) and All Settings is a direct ⚙ row that opens the settings window');
   const gmSrc = read('src/lib/gear-menu.js');
   ok(/import \{ buildAppearancePanel, appearanceCaption \} from '\.\/appearance-panel\.js'/.test(gmSrc) && /panel: \(c\) => buildAppearancePanel\(c\.app, c\.pop\)/.test(gmSrc) && /caption: \(c\) => appearanceCaption\(c\.app\)/.test(gmSrc), 'gear-menu wires the panel + caption onto the Appearance head');
   ok(/sub\.dataset\.popover = '1'/.test(gmSrc) && /e\.preventDefault\(\); e\.stopPropagation\(\);/.test(gmSrc) && /if \(!open\.length\) return;/.test(gmSrc) && /matchMedia\('\(hover: none\)'\)/.test(gmSrc) && /HOVER_INTENT_MS = 120/.test(gmSrc),

@@ -20,7 +20,8 @@
 //                  Backup & migrate… · Change/Set password…
 //   Update VibeSpace… direct — its two-line "vX → vY" label IS the update
 //                  indicator, a submenu would hide it
-//   Help ▸         Welcome tour · All Settings...
+//   All Settings… direct — the settings window is a destination, not a preference (2.369.131)
+//   Help ▸         Welcome tour
 //   rule, Sign out direct, danger, auth only
 // A plugin adds a row with registerMenuItem({ menu:'gear', parent?:'tools'|
 // 'comm'|'system'|'help'|'appearance', order, label, icon, command | run });
@@ -112,6 +113,10 @@ export function registerGearMenu() {
   });
   registerMenuItem({ menu: M, group: '1_admin', order: 0, separator: true });
   registerMenuItem({ menu: M, group: '1_admin', order: 10, icon: I.key, label: () => t('Manage agents…'), run: (c) => c.app._showAgentsDialog() });
+  // All Settings… is a DIRECT row (2.369.131, owner "所有设置为啥放在外观里"): 2.369.124 had
+  // carried it over verbatim as the Appearance panel's footer link (and a Help child) —
+  // the settings window is a primary destination, not an appearance preference.
+  registerMenuItem({ menu: M, id: 'all-settings', group: '1_admin', order: 15, icon: I.cog, label: () => t('All Settings...'), run: (c) => c.app._settingsUI.open() });
   // ── Tools ▸ ──
   registerMenuItem({ menu: M, id: 'tools', submenu: true, group: '1_admin', order: 20, icon: I.wrench, label: () => t('Tools') });
   registerMenuItem({ menu: M, parent: 'tools', order: 10, icon: I.chart, label: () => t('Usage…'), run: (c) => c.app.openUsage() });
@@ -171,7 +176,6 @@ export function registerGearMenu() {
   // ── Help ▸ ──
   registerMenuItem({ menu: M, id: 'help', submenu: true, group: '1_admin', order: 60, icon: I.help, label: () => t('Help') });
   registerMenuItem({ menu: M, parent: 'help', order: 10, icon: I.tour, label: () => t('Welcome tour'), run: (c) => c.app._showOnboarding(true) });
-  registerMenuItem({ menu: M, parent: 'help', order: 20, icon: I.cog, label: () => t('All Settings...'), run: (c) => c.app._settingsUI.open() });
   registerMenuItem({ menu: M, group: '3_help', order: 0, separator: true });
   registerMenuItem({
     menu: M, group: '3_help', order: 10, when: (c) => !!c.app._authEnabled, icon: I.out, danger: true, label: () => t('Sign out'),
