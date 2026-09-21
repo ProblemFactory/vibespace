@@ -37,6 +37,16 @@ class SessionStatusManager {
       if (!this._state || typeof this._state.statuses !== 'object') this._state = { statuses: {} };
       this._lastWritten = JSON.stringify(this._state, null, 2); // avoid a redundant first write
     } catch { /* fresh */ }
+    // THE NOTICE SLOT IS A QUEUE (agent browser P1, design §3.8 layer ②): a
+    // file an older build wrote carries ONE fixed-shape `pendingNotice`; it is
+    // lifted into `pendingNotices: [{kind:'status-override', …}]` once, here,
+    // so every reader below sees one shape.
+    for (const rec of Object.values(this._state.statuses)) {
+      if (!rec || typeof rec !== 'object') continue;
+      if (!Array.isArray(rec.pendingNotices)) rec.pendingNotices = [];
+      if (rec.pendingNotice && typeof rec.pendingNotice === 'object') rec.pendingNotices.push({ kind: 'status-override', ...rec.pendingNotice });
+      delete rec.pendingNotice;
+    }
   }
 
   // In-memory state + broadcast are updated synchronously by the callers; disk
@@ -120,8 +130,8 @@ class SessionStatusManager {
     const prev = this._state.statuses[key];
     this._state.statuses[key] = {
       ...v, setBy: 'agent', at: Date.now(),
-      // an undelivered override notice survives an agent re-set (still worth telling)
-      pendingNotice: prev?.pendingNotice || null,
+      // undelivered notices survive an agent re-set (still worth telling)
+      pendingNotices: prev?.pendingNotices || [],
     };
     this._logHistory(key, { ...v, setBy: 'agent', at: Date.now() });
     this._save(); this._notify();
@@ -136,9 +146,10 @@ class SessionStatusManager {
     if (!v.state && !v.urgency && !v.reason && !overriding) return this.clear(key, 'user');
     this._state.statuses[key] = {
       ...v, setBy: 'user', at: Date.now(),
-      pendingNotice: overriding
-        ? { agent: { state: prev.state, urgency: prev.urgency, reason: prev.reason }, user: { state: v.state, urgency: v.urgency }, at: Date.now() }
-        : (prev?.pendingNotice || null),
+      pendingNotices: [
+        ...(prev?.pendingNotices || []),
+        ...(overriding ? [{ kind: 'status-override', agent: { state: prev.state, urgency: prev.urgency, reason: prev.reason }, user: { state: v.state, urgency: v.urgency }, at: Date.now() }] : []),
+      ],
     };
     this._logHistory(key, { ...v, setBy: 'user', at: Date.now() });
     this._save(); this._notify();
@@ -152,8 +163,12 @@ class SessionStatusManager {
       // clearing the agent's status is also an override worth mentioning
       this._state.statuses[key] = {
         state: null, urgency: null, reason: null, setBy: 'user', at: Date.now(),
-        pendingNotice: { agent: { state: prev.state, urgency: prev.urgency, reason: prev.reason }, user: null, at: Date.now() },
+        pendingNotices: [...(prev.pendingNotices || []), { kind: 'status-override', agent: { state: prev.state, urgency: prev.urgency, reason: prev.reason }, user: null, at: Date.now() }],
       };
+    } else if ((prev.pendingNotices || []).length) {
+      // a record that still carries undelivered notices keeps them (an agent's
+      // own clear must not eat a browser-profile notice queued for it)
+      this._state.statuses[key] = { state: null, urgency: null, reason: null, setBy: by || 'user', at: Date.now(), pendingNotices: prev.pendingNotices };
     } else {
       delete this._state.statuses[key];
     }
@@ -176,29 +191,77 @@ class SessionStatusManager {
     this._save(); this._notify();
   }
 
-  // Pull (and clear) the pending override notice — called when the user sends
-  // their next chat message; the caller appends the rendered text to it.
-  consumeNotice(key) {
+  // THE QUEUE OF TYPED NOTICES (agent browser P1, design §3.8 layer ②). One
+  // slot used to hold ONE fixed-shape status-override notice, `renderNotice`
+  // was hardcoded to its sentence and the sole injection site consumed one and
+  // `break`-ed — so a second producer (a browser-profile change, a mid-task
+  // pin) would have overwritten it or been overwritten by it: a silently
+  // dropped <system-reminder> in a feature whose whole purpose is that a
+  // notice is not silently dropped. Now every producer `pushNotice`s a
+  // `{kind, …}`, the renderer dispatches on `kind` (an unknown kind is refused
+  // LOUDLY at push time, never rendered as garbage), and the injection site
+  // DRAINS. Zero billed turns: the text rides the user's own next message.
+  pushNotice(key, notice) {
+    const n = notice && typeof notice === 'object' ? notice : null;
+    if (!n || !NOTICE_RENDERERS[n.kind]) throw new Error(`pushNotice: unknown notice kind ${JSON.stringify(n && n.kind)} (one of ${Object.keys(NOTICE_RENDERERS).join('/')})`);
+    const rec = this._state.statuses[key] || (this._state.statuses[key] = { state: null, urgency: null, reason: null, setBy: null, at: Date.now(), pendingNotices: [] });
+    if (!Array.isArray(rec.pendingNotices)) rec.pendingNotices = [];
+    // BOUNDED: a producer that fires faster than the user types must not grow
+    // the record without limit; the newest notices are the ones that describe
+    // the present, so the oldest go first.
+    rec.pendingNotices.push({ ...n, at: Number(n.at) || Date.now() });
+    if (rec.pendingNotices.length > MAX_NOTICES) rec.pendingNotices.splice(0, rec.pendingNotices.length - MAX_NOTICES);
+    this._save(); this._notify();
+    return rec.pendingNotices.length;
+  }
+
+  /** What is queued for a key, without consuming it (a UI hint, a test). */
+  pendingNotices(key) { return (this._state.statuses[key]?.pendingNotices || []).slice(); }
+
+  // Pull (and clear) EVERY pending notice — called when the user sends their
+  // next chat message; the caller renders each and appends them all.
+  consumeNotices(key) {
     const rec = this._state.statuses[key];
-    if (!rec?.pendingNotice) return null;
-    const notice = rec.pendingNotice;
-    rec.pendingNotice = null;
+    if (!rec || !Array.isArray(rec.pendingNotices) || !rec.pendingNotices.length) return [];
+    const list = rec.pendingNotices;
+    rec.pendingNotices = [];
     if (!rec.state && !rec.urgency && !rec.reason) delete this._state.statuses[key];
     this._save(); this._notify();
-    return notice;
+    return list;
   }
 
+  /** The one renderer: dispatches on `kind`; a notice with no kind is the
+   *  legacy status-override shape (files older builds wrote). */
   static renderNotice(notice) {
-    const fmt = (s) => s ? `state=${s.state || 'unset'}, urgency=${s.urgency || 'unset'}${s.reason ? `, reason="${s.reason}"` : ''}` : null;
-    const agent = fmt(notice.agent);
-    const user = fmt(notice.user);
-    return '<system-reminder>\n'
-      + (notice.user
-        ? `The user manually changed this session's status indicator that you had set via vibespace-status.\nYours: ${agent}\nUser set: ${user}\n`
-        : `The user cleared the status indicator you had set via vibespace-status (was: ${agent}).\n`)
-      + 'Treat the user\'s setting as the correct assessment and calibrate your future vibespace-status updates to their preference. Do not change it back unless the situation genuinely changes.\n'
-      + '</system-reminder>';
+    const kind = notice && notice.kind ? String(notice.kind) : 'status-override';
+    const r = NOTICE_RENDERERS[kind];
+    return r ? r(notice) : '';
   }
+  static renderNotices(list) { return (list || []).map((n) => SessionStatusManager.renderNotice(n)).filter(Boolean).join('\n'); }
+  static get NOTICE_KINDS() { return Object.keys(NOTICE_RENDERERS); }
 }
 
-module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES };
+const MAX_NOTICES = 8;
+function renderStatusOverride(notice) {
+  const fmt = (s) => s ? `state=${s.state || 'unset'}, urgency=${s.urgency || 'unset'}${s.reason ? `, reason="${s.reason}"` : ''}` : null;
+  const agent = fmt(notice.agent);
+  const user = fmt(notice.user);
+  return '<system-reminder>\n'
+    + (notice.user
+      ? `The user manually changed this session's status indicator that you had set via vibespace-status.\nYours: ${agent}\nUser set: ${user}\n`
+      : `The user cleared the status indicator you had set via vibespace-status (was: ${agent}).\n`)
+    + 'Treat the user\'s setting as the correct assessment and calibrate your future vibespace-status updates to their preference. Do not change it back unless the situation genuinely changes.\n'
+    + '</system-reminder>';
+}
+/** kind → renderer. `status-override` keeps today's text verbatim; the agent
+ *  browser's `browser-profile` (§3.8 layer ②) and `browser-pin` (§3.2.5 path 3)
+ *  render through the PURE model so the sentence is ONE spelling. */
+const NOTICE_RENDERERS = Object.freeze({
+  'status-override': renderStatusOverride,
+  'browser-profile': (n) => require('./browser-profiles').renderProfileChangeNotice(n),
+  'browser-pin': (n) => require('./browser-profiles').renderProfileChangeNotice({ ...n, by: n.by || 'user' }),
+  // agent browser P3 (§4.3.1): the zero-spend twin of the handback announcement — rides the user's next message
+  'browser-handback': (n) => require('./browser-takeover').renderHandbackNotice(n),
+});
+
+module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

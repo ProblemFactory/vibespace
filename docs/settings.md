@@ -123,6 +123,33 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `session.defaultMode` | enum | `chat` | Default mode for new sessions and single-click resume: Terminal or Chat |
 
+### Browser
+
+The agent browser (`agent-browser`, installed separately and run by the agent
+from its own shell). VibeSpace contributes four environment variables at spawn
+and nothing else — no extra process, no daemon. Turning the first one off
+restores exactly the pre-2026-09-13 behaviour: one shared profile, one shared
+session, and `agent-browser close --all` closing every agent's browser.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `browser.isolateSessions` | boolean | `true` | Give each session its own agent browser — its own tabs, cookies and daemon, ephemeral by default. Applies to sessions started after the change; a running session keeps the environment it was started with. |
+| `browser.idleTimeoutMs` | number | `900000` | How long an agent's browser may sit idle before its daemon shuts itself down. Set explicitly because the installed CLI has **no** default and newer ones exempt browsers with a visible window — nothing else reclaims them. `0` = never. |
+| `browser.takeoverIdleMs` | number | `600000` | Also the idle window of a takeover on an agent's WINDOW (P9b — the same lease.input, the same rule). When you take over an agent's browser in the live view and walk away, control goes back to the agent by itself after this many ms without your input (an abandoned takeover never parks an agent for ever). `0` = never; anything under 30 s is raised to 30 s. |
+| `browser.announceIdleHandback` | boolean | `false` | Applies to a window takeover too (P9b). OFF: an idle handback tells the agent nothing until its next browser command succeeds or your next message (no billed turn is opened by a timer; one "For you" item is filed). ON: the lapse is announced into the conversation like an explicit Hand back — a billed turn under the same unattended-spend ceiling (Settings → Spending). |
+| `window.realDesktopTargets` | boolean | `false` | **Tier 3 (P10).** OFF: an agent may act only in windows VibeSpace started on its own private displays; your desktop is never listed. ON (a confirmation dialog is the consent): every application on this machine's accessibility bus becomes a window target an agent can read (the tree contains the text on your screen) and act in through the actions a node itself declares — including the window you are typing in; nothing is ever injected on this class (no chords, no point clicks); rows are marked "your desktop"; pause an agent per window under Desktop apps → Agents on your real desktop; turning it OFF drops every such lease at once. |
+| `browser.autoBindLiveView` | boolean | `true` | ON: when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window (design §4.6), under one shared window id so a second client never opens a second copy. OFF: open the live view yourself (session menu → Live browser view) and bind it with "Snap beside" or by dropping it on the left / right half of a title bar. Never on a phone (tabs only there); an ephemeral browser (no profile) is never auto-opened. |
+| `browser.headed` | enum | `""` (inherit) | Whether the agent's browser draws a real window on this machine's desktop: *inherit* (whatever your own `~/.agent-browser/config.json` says) / *show the window* / *headless*. Three states on purpose — a checkbox would render "inherit" as "off" and make the first click a decision you never made. One visible window per session is one framebuffer per session, and on the installed CLI it is also exempt from the idle timeout above. |
+| `browser.cloak.enabled` | boolean | `false` | OFF: the `cloak` provider is refused by name. ON: once its §7.2.1 egress measurement is recorded on this build, a `cloakserve` container may be started on this machine's loopback (free tier, one session) on an internal docker network whose only way out is the allowlisting egress proxy below. Turning it on downloads and starts nothing — the pinned package is installed by you, after the measurement. |
+| `browser.cloak.executablePath` | string | `""` (PATH) | Where the `cloakbrowser` binary is, for switching a profile to the `cloak` backend in place (the same profile directory opened by that binary with the profile's own fingerprint seed). Empty: looked up on PATH. VibeSpace never downloads it — installing it is your act, after the egress measurement is recorded. |
+| `browser.cloak.egressAllowlist` | string | `""` | The only hosts a cloakserve container may reach through this instance's allowlisting proxy: exact hostnames, or `.example.com` for a domain and every sub-domain. Empty admits nothing; loopback and link-local targets are never admitted. |
+
+Remote sessions (ssh / paired device) get the session and namespace isolation
+and the idle timeout, but keep that machine's own profile directory: the
+throwaway-profile half names a local file we validate and a local directory we
+sweep, and a per-session directory nothing sweeps is exactly the orphan problem
+this feature exists to end.
+
 ### Integration
 
 Everything VibeSpace adds *into* your agent sessions lives here — and all of it can be turned off.

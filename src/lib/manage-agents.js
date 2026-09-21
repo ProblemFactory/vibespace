@@ -1452,6 +1452,44 @@ export function installManageAgents(App, ctx = {}) {
         await renderRoster(b.key);
         if (stale()) return;
       }
+      // ── CloakBrowser (the agent browser's `cloak` backend, design §7.4
+      // failure form (1)) — local machine only. Installing it is a USER act
+      // that comes AFTER the §7.2.1 egress measurement: the row states the
+      // server's verdict (a disabled Install WITH its reason) and never
+      // downloads anything by itself. A refused verdict is a 200 carrying
+      // {ok:false, code, error}; a transport failure hides the row (the
+      // browser keeper may simply not be wired on this server).
+      if (!selectedHost) {
+        let iv = null;
+        try { iv = await fetchJson('/api/browser/install'); } catch { iv = null; }
+        if (stale() || !body.isConnected) return;
+        if (iv && typeof iv.ok === 'boolean' && (iv.ok || iv.code)) {
+          const row = document.createElement('div'); row.className = 'ob-backend';
+          const left = document.createElement('div'); left.className = 'ob-backend-id';
+          const installed = iv.code === 'already_installed';
+          const running = !!(iv.state && iv.state.running);
+          left.innerHTML = `<b>CloakBrowser</b> <span class="ob-ver">${escHtml(t('browser backend'))}</span> ${
+            installed ? `<span class="ob-ok">✓ ${escHtml(t('installed at {path}', { path: String(iv.path || '') }))}</span>`
+            : running ? `<span class="ob-ver">${escHtml(t('install in progress…'))}</span>`
+            : `<span class="ob-bad">${escHtml(t('not installed'))}</span>`
+          }`;
+          const actions = document.createElement('div'); actions.className = 'agent-actions';
+          if (!installed && !running) {
+            const instBtn = document.createElement('button'); instBtn.className = 'agent-btn' + (iv.ok ? ' primary' : ''); instBtn.textContent = t('Install');
+            instBtn.disabled = !iv.ok;
+            instBtn.title = iv.ok ? `npm install ${String(iv.spec || '')}` : String(iv.error || '');
+            instBtn.onclick = async () => {
+              const r = await fetchJson('/api/browser/install', { method: 'POST' });
+              if (!r || r.error) { showToast((r && r.error) || t('server unreachable'), { type: 'error', duration: 9000 }); return; }
+              showToast(t('Installing {spec} — the row updates when it finishes', { spec: String(r.spec || '') }));
+            };
+            actions.appendChild(instBtn);
+            if (!iv.ok) { const why = document.createElement('div'); why.className = 'ob-ver'; why.textContent = String(iv.error || ''); left.appendChild(why); }
+          }
+          row.append(left, actions);
+          body.appendChild(row);
+        }
+      }
       // ── VibeSpace integration (task context hook) — local machine only.
       // Auto-installed at server start; this row makes the state VISIBLE and
       // repairable for non-engineers (auto-install can fail silently if e.g.

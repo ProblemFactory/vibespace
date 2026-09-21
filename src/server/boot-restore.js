@@ -315,6 +315,11 @@ function restoreSessions() {
       _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
       _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
       _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart // owner ruling 9: the badge + the CLI-announced path survive a restart
+      // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
+      // user-data-dir rung it spawned on. Restored so a later resume of this
+      // conversation finds its key and the orphan sweep sees this session as
+      // live in memory as well as on disk.
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
@@ -506,6 +511,11 @@ function restoreAgentdPipeSessions() {
       _outputStyle: meta.outputStyle || null,
       _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
       _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart // owner ruling 9
+      // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
+      // user-data-dir rung it spawned on. Restored so a later resume of this
+      // conversation finds its key and the orphan sweep sees this session as
+      // live in memory as well as on disk.
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
       _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
       _msgReachability: meta.msgReachability || null,
@@ -616,6 +626,11 @@ async function readoptOrphanKeeperSessions() {
       _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
       _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
       _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart // owner ruling 9: the badge + the CLI-announced path survive a restart
+      // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
+      // user-data-dir rung it spawned on. Restored so a later resume of this
+      // conversation finds its key and the orphan sweep sees this session as
+      // live in memory as well as on disk.
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null,

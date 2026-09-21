@@ -133,7 +133,11 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
     // message or a comment (`<buffer-file>`, `<remote-id>`, …). They are
     // listed with their reason so a fourteenth FRAME cannot hide among them.
     const PROSE = new Set(['buffer-file', 'json-file', 'meta-file', 'deleted-id', 'remote-id', 'short-slug',
-      'task-id', 'tool-use-id', 'webui-id', 'wss-url', 'parent-of-the-install-dir']);
+      'task-id', 'tool-use-id', 'webui-id', 'wss-url', 'parent-of-the-install-dir',
+      // agent browser (2026-09-21): usage placeholders in the CLIs' help text and comments —
+      // `<agent-browser args…>` (vibespace-browser), `<app-id>` (vibespace-window),
+      // `<per-session scratch dir>` / `<vs-key>` (browser-profiles.js's variant table + remote prelude)
+      'agent-browser', 'app-id', 'per-session', 'vs-key']);
     const seen = new Map();
     for (const f of files) {
       let txt; try { txt = fsx.readFileSync(path.join(REPO, f), 'utf-8'); } catch { continue; }

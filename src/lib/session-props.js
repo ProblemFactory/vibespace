@@ -250,6 +250,31 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     acctRow.appendChild(acctSel);
     bilSec.appendChild(acctRow);
 
+    // ── Browser (agent browser P1, §3.2.5's EXPLAINING surface) ──
+    // The pinned profile + WHICH rung chose it + how many sessions share it,
+    // and the same picker the card menu opens. Only for a live local session
+    // with a browser key while the client holds the profile digest.
+    if (app._browserProfiles && s.browserKey && s.status === 'live' && s.webuiId && !s.host) {
+      const brSec = section(t('Browser'));
+      row(brSec, t('Pinned profile'), app.browserPinSummaryHtml(s), { wrap: true });
+      const brRow = document.createElement('div');
+      brRow.className = 'session-detail-row';
+      brRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Pin'))}</span>`;
+      const brBtn = document.createElement('button');
+      brBtn.className = 'toolbar-btn';
+      brBtn.textContent = t('Browser profile…');
+      brBtn.onclick = (e) => app.showBrowserProfilePicker(s, { x: e.clientX, y: e.clientY });
+      brRow.appendChild(brBtn);
+      // P2 (§4.4): the live view — the same window the card menu and the status-bar chip open
+      const lvBtn = document.createElement('button');
+      lvBtn.className = 'toolbar-btn';
+      lvBtn.style.marginLeft = '6px';
+      lvBtn.textContent = t('Live view');
+      lvBtn.onclick = () => app.openBrowserLive({ sessionId: s.webuiId });
+      brRow.appendChild(lvBtn);
+      brSec.appendChild(brRow);
+    }
+
     // ── Config overrides (summary; edit via the card ⚙) ──
     const cfg = sidebar.getSessionConfig?.(s) || {};
     const cfgBits = ['model', 'effort', 'permission'].filter(k => cfg[k]).map(k => `${k}: ${cfg[k]}`);
@@ -277,6 +302,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const ORIGIN_LABEL = {
       chosen: () => t('your choice for this session'),
       conversation: () => t('this conversation\u2019s own value'),
+      'task-group': () => t('Task-Group default'),
       instance: () => t('instance default'),
       spawn: () => t('what this session started with'),
       saved: () => t('saved \u2014 applies on the next resume'),

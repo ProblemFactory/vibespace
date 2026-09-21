@@ -18,7 +18,15 @@ const { mk } = require('./lazy.js');
 function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
   auth, wss, WS_OPEN, bcastAll, serverSetting, mountTokens, persistenceRouter, instanceUrl,
   hosts, agentdDials, agentdHostToken, agentdMintDialPair, deviceForDial,
-  ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null }) {
+  ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null, serverNotice = null, broadcastActiveSessions = null,
+  // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
+  // zero-billed notice queue and the session-meta writer the pin persists through
+  getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null,
+  // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
+  deliver = null, userTodos = null,
+  // agent browser P4 second half (§7.5): the integration store (src/server/integrations-wiring.js, created BEFORE this
+  // wiring in server.js) the key consumer resolves through — never process.env
+  integrations = null }) {
   const portForwards = mk(getPortForwards);
 // ── Mounts (rclone S3 mounts + share minting — collaboration P1) ──
 // ── Plugins (2.140.0, B-2d44): host-level capabilities with persistent state ──
@@ -582,6 +590,175 @@ function createSessionMessages(session, sessionId) {
   // shipped ssh script) — hostId is a parameter, never a branch.
   require('./opencode-access').create({ app, hosts, broadcast: (m) => bcastAll(m) });
 
-  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader };
+  // ── AGENT BROWSER P1: the profile registry + lease keeper + its routes ──
+  // (design-agent-browser-v2 §3.3–§3.5). ONE keeper per instance, installed
+  // as the module singleton so ws-create can ask a conversation's pin lazily;
+  // LAZY by construction — nothing runs until a profile is attached, and the
+  // boot reconciliation (server.js, after restoreSessions) is what may start
+  // its tick. The spawn env it hands a browser is the sanitised base env.
+  let browserKeeper = null;
+  let browserHandback = null;
+  let browserAccess = null;
+  let egressProxy = null;
+  try {
+    const { agentEnv } = require('../ws-handler');
+    // P4 (§3.6 / §7.3 / D5 (b)): ONE way to reach a profile browser on any
+    // machine — local facts in-process, the `browser-serve` agentd op on a
+    // paired device, a CDP port tunnelled over tcpForward. `hostId` is a
+    // parameter the layer dispatches on; the keeper never asks "is this remote".
+    browserAccess = require('./browser-access').create({ hosts, env: () => agentEnv(), log: console });
+    // P4 (§7.2.1): the allowlisting egress proxy — started LAZILY, only when
+    // the cloak opt-in is on and a plan is asked for (nothing listens on a
+    // fresh instance); the allowlist is re-read per request (liveApply).
+    const cloakPlan = () => {
+      const B = require('../browser-profiles.js');
+      const enabled = serverSetting('browser.cloak.enabled') === true;
+      if (enabled && !egressProxy) {
+        try { egressProxy = require('./egress-proxy').create({ allowlist: () => serverSetting('browser.cloak.egressAllowlist') || '', log: console }); egressProxy.listen().catch((e) => { console.warn('[browser] egress proxy failed to listen — ' + (e && e.message)); egressProxy = null; }); }
+        catch (e) { console.warn('[browser] egress proxy unavailable — ' + (e && e.message)); egressProxy = null; }
+      }
+      return B.cloakservePlan({ enabled, allowlist: serverSetting('browser.cloak.egressAllowlist') || '', proxyPort: egressProxy ? egressProxy.port() || 0 : 0 });
+    };
+    // P4 second half (§7.5): THE key consumer — one module declares this
+    // track's registry rows' consumer, registers their six Test runners and
+    // resolves their keys (`keyFor`, the ONE resolve the keeper asks through
+    // before a spawn); the switcher's SOURCE chip reads its masked `sourceOf`
+    const browserBackend = require('./browser-backend').create({ integrations: () => integrations, log: console });
+    { const ids = browserBackend.registerTests(); if (ids.length) console.log(`[browser] key rows' Test runners registered: ${ids.join(', ')}`); }
+    // P6 (§6.2 / §6.5 / D6): the CDP-mediating proxy — LAZY (listens on
+    // nothing until the first mediated lease), owned by the keeper (its
+    // shutdown ends it); its presence is what makes `sharing:"instance"` a
+    // value on this instance. An unbuildable proxy is said once and the
+    // instance stays in the pre-P6 world (instance sharing refused by name).
+    let cdpMediator = null;
+    try { cdpMediator = require('./cdp-mediator').create({ log: console }); } catch (e) { console.warn('[browser] cdp mediator unavailable — instance sharing stays refused: ' + (e && e.message)); }
+    browserKeeper = require('./browser-keeper').create({
+      dataDir: path.join(rootDir, 'data'), env: () => agentEnv(), broadcast: (m) => bcastAll(m),
+      serverSetting, serverNotice, getTelemetry,
+      access: browserAccess, hostKnown: (h) => browserAccess.hostKnown(h),
+      integrations: () => integrations, keys: browserBackend, mediator: cdpMediator,
+      liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)),
+      // §3.2.5 row 3: the Task Group this create lands in (spawned-into first,
+      // else the earliest bound group naming a default). Belonging is the
+      // store's own LIVE rule (`groupsForSession`), asked with the facts a
+      // create has: cwd + the dialog's taskId (+ the session key when known).
+      taskGroupDefault: ({ cwd = null, initialGroupId = null, sessionKey = null } = {}) => {
+        const tasks = getTasks ? getTasks() : null;
+        if (!tasks) return '';
+        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId }) || [];
+        const first = (initialGroupId && groups.find((g) => g.id === initialGroupId && g.browserProfileId)) || groups.find((g) => g.browserProfileId);
+        return first ? first.browserProfileId : '';
+      },
+    });
+    const taskIdsFor = (s, id) => {
+      const tasks = getTasks ? getTasks() : null;
+      if (!tasks || !s) return [];
+      const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
+      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id);
+    };
+    let browserEnvMemo;
+    const { router: browserRouter, setup: setupBrowserRoutes } = require('../routes/browser');
+    setupBrowserRoutes({
+      keeper: browserKeeper, activeSessions,
+      // the agent's `new --adopt <dir>` may register a directory ONLY under these roots (browser-profiles.adoptDirVerdict)
+      adoptRoots: { homeDir: os.homedir(), dataDir: path.join(rootDir, 'data') },
+      // P4: the providers route's cloakserve plan (or its typed refusal) + the live CDP forwards
+      cloakPlan, forwards: () => browserAccess.forwards(),
+      // P4 second half (§7.4): a switch PROPOSAL (another session holds a lease, or somebody drives the browser) is ONE
+      // "For you" item to the owner — zero billed turns, the inbox is the channel
+      propose: (sessionId, session, { text, detail, by = 'agent' } = {}) => {
+        if (!userTodos || !sessionStatusKey) return null;
+        return userTodos.add(sessionStatusKey(session, sessionId), { text, detail, urgency: 'normal', by, sessionName: session && (session.name || session.webuiName) || null });
+      },
+      tasksForSession: (s, id) => taskIdsFor(s, id),
+      // §3.8 layer ②: a USER's pin/attach/detach queues one typed notice that
+      // rides the user's own next message (zero billed turns); the queue is
+      // session-status's, keyed the way the prompt-context route drains it
+      notice: (sessionId, session, n) => {
+        const st = getSessionStatus ? getSessionStatus() : null;
+        if (!st || !sessionStatusKey) return;
+        st.pushNotice(sessionStatusKey(session, sessionId), n);
+      },
+      // the pin outlives a restart: it rides the session's meta like the effort origin does
+      persistPin: (session, profileId, origin) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserProfileId: profileId || undefined, browserPinOrigin: origin || undefined }); },
+      // P2 (§3.8 ③): the profile the agent LAST USED rides the meta (a restart keeps the chip honest) and re-publishes the live facts (the chip gates on its own digest)
+      persistActive: (session, v) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserProfileActive: v === null || v === undefined ? undefined : String(v) }); },
+      onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
+      // the pin route re-points a RUNNING session's indirection through the
+      // same module ws-create resolves it with (file-based, so a second
+      // instance reads the same objects)
+      browserEnv: () => {
+        if (browserEnvMemo !== undefined) return browserEnvMemo;
+        try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, serverNotice: null, telemetry: null }); }
+        catch (e) { console.warn('[browser] pin re-point unavailable — ' + (e && e.message)); browserEnvMemo = null; }
+        return browserEnvMemo;
+      },
+    });
+    app.use(browserRouter);
+    // P3 (§4.3.1): the handback announcer — hangs on the keeper's input/confirmation
+    // seams; an explicit handback is delivered through the gated ladder under
+    // 'browser-handback', an idle one files one inbox item and queues the
+    // zero-spend notice unless browser.announceIdleHandback says otherwise
+    try {
+      browserHandback = require('./browser-handback').create({
+        keeper: browserKeeper, deliver, serverSetting, userTodos, activeSessions,
+        sessionKeyFor: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : null),
+        notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); },
+        onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
+      });
+      browserHandback.install();
+    } catch (e) { console.warn('[browser] handback announcer unavailable — ' + (e && e.message)); }
+  } catch (e) { console.warn('[browser] profile keeper unavailable — ' + (e && e.message)); }
+  /** §3.5's boot path — server.js calls it right AFTER restoreSessions() so
+   *  the live-key set is final: every persisted lease nobody carries is
+   *  dropped, THEN every recorded browser is judged (adopted by pid+starttime
+   *  or recorded ended), THEN the tick may start. Async and off the boot
+   *  path: a failure is logged, never thrown into the boot. */
+  function bootBrowserKeeper(after = null) {
+    if (!browserKeeper) return;
+    try {
+      browserKeeper.boot()
+        .then((r) => { if (r && (r.droppedLeases || r.browsers)) console.log(`[browser] boot: ${r.droppedLeases} orphaned lease(s) dropped, ${r.browsers} browser(s) adopted`); })
+        .catch((e) => console.warn('[browser] boot reconciliation failed:', e && e.message))
+        .then(() => { try { after?.(); } catch (e) { console.warn('[browser] post-boot step failed:', e && e.message); } }); // P5: the recorder taps only browsers the keeper has judged
+    } catch (e) { console.warn('[browser] boot reconciliation failed:', e && e.message); }
+  }
+
+  /** P2 (§4.2): the live view's cookie-authed ws bridge — ONE upstream stream
+   *  connection per (session, target) fanned out to N viewers, the VNC
+   *  bridge's backpressure numbers, the keeper's `streamPortFor` for the port.
+   *  server.js dispatches `/api/browser/stream` upgrades here. */
+  let browserStream = null;
+  try {
+    browserStream = require('./browser-stream').create({ keeper: browserKeeper, activeSessions, requestAuthed: (req) => auth.requestAuthed(req), getTelemetry });
+  } catch (e) { console.warn('[browser-live] stream bridge unavailable — ' + (e && e.message)); }
+
+  /** P5 (§4.5 / D7 / D35): the action-trace recorder, the per-profile
+   *  screencast and the housekeeping — hangs on the keeper's lease seam
+   *  (`onLease`) and the bridge's taps; its routes are thin over it; it BOOTS
+   *  inside bootBrowserKeeper AFTER the keeper reconciled its leases (a tap
+   *  never starts a browser, so the order matters). Absent keeper ⇒ absent. */
+  let browserTrace = null;
+  try {
+    if (browserKeeper) {
+      browserTrace = require('./browser-trace').create({ dataDir: path.join(rootDir, 'data'), keeper: browserKeeper, bridge: browserStream, serverSetting, broadcast: (m) => bcastAll(m) });
+      browserTrace.install();
+      const { router: traceRouter, setup: setupTraceRoutes } = require('../routes/browser-trace');
+      // the bindings READER: a stopped conversation's trace is found through the key its CLI id was bound to (P0 r5/r7's store, read off the file per ask — a human's click)
+      let bindings = null; try { bindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser-trace] bindings reader unavailable — ' + (e && e.message)); }
+      setupTraceRoutes({ keeper: browserKeeper, trace: browserTrace, activeSessions, bindings });
+      app.use(traceRouter);
+    }
+  } catch (e) { browserTrace = null; console.warn('[browser-trace] recorder unavailable — ' + (e && e.message)); }
+  const bootBrowserTrace = () => {
+    if (!browserTrace) return;
+    try {
+      browserTrace.boot()
+        .then((r) => { if (r && (r.armed || (r.sweep && (r.sweep.removed || r.sweep.recordingsRemoved)))) console.log(`[browser-trace] boot: ${r.armed} trace tap(s) armed${r.sweep ? `, sweep removed ${r.sweep.removed} entr${r.sweep.removed === 1 ? 'y' : 'ies'} + ${r.sweep.recordingsRemoved} recording(s)` : ''}`); })
+        .catch((e) => console.warn('[browser-trace] boot failed:', e && e.message));
+    } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
+  };
+
+  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace };
 }
 module.exports = { create };

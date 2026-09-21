@@ -19,6 +19,7 @@ import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel } from './chat-run-summary.js';
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { heldText } from './jobs-layout.js';
+import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -159,6 +160,8 @@ class ChatView {
     this.sessionId = sessionId;
     this.app = app;
     this._readOnly = readOnly;
+    // agent browser P5 (§4.5 / D35): ONE batched loader fills every browser-driving tool card's trace strip
+    this._browserTrace = createCardTraceLoader(this);
     // A sub-agent's own conversation opened from its parent (codex collab
     // child thread via viewSession, agentKind 'subagent'): read-only by
     // nature — resuming it would spawn a standalone session on a thread that
@@ -299,7 +302,13 @@ class ChatView {
       // runs, and the same gate: a read-only viewer builds no ChatSearch, so
       // it gets no chip either (a control that cannot do what it says).
       onSearch: readOnly ? null : () => this._search?.open(),
+      // agent browser P2 (§3.8 ③): the Browser chip's three actions
+      onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
     });
+    // The chip's facts ride the `active-sessions` payload; a window opened
+    // between two broadcasts reads the sidebar's last copy at once.
+    this._browserFacts = null;
+    try { this._onActiveSessions(this.app?.sidebar?._webuiSessions); } catch { }
     // Initial render: a brand-new session has no chatStatus yet — show the
     // honest unknown badges (model: ? / effort: ?) instead of an empty bar.
     this._statusBar.render();
@@ -765,6 +774,8 @@ class ChatView {
       this._handler = (msg) => {
         if (msg.type === 'msg' && msg.sessionId === sessionId) {
           this._onOp(msg);
+        } else if (msg.type === 'browser-trace-appended') {
+          this._browserTrace?.onAppended(msg); // a stopped conversation reviewed while its resume acts: the key matches
         }
       };
       this.ws.onGlobal(this._handler);
@@ -1057,6 +1068,16 @@ class ChatView {
         // every jobs-updated carries the held-notification digest (design
         // §13 5b ①): this conversation's status-bar chip follows it
         this._applyJobsHeld(msg.held);
+      } else if (msg.type === 'active-sessions') {
+        // agent browser P2 (§3.8 ③): the Browser chip's pair rides this payload
+        // (each half with its own LIVE_SESSION_FACTS digest); no sessionId on
+        // the frame — the row is found by this view's own id
+        this._onActiveSessions(msg.sessions);
+      } else if (msg.type === 'browser-profiles-updated') {
+        this._renderBrowserChip(); // labels may have changed (a rename), the facts did not
+      } else if (msg.type === 'browser-trace-appended') {
+        // agent browser P5 (§4.5 / D35): a new action for SOME conversation — the loader keeps only this one's
+        this._browserTrace?.onAppended(msg);
       }
     };
     this.ws.onGlobal(this._handler);
@@ -3554,6 +3575,11 @@ class ChatView {
       mark(el);
       if (el.querySelectorAll) for (const n of el.querySelectorAll('[data-tool-id]')) mark(n);
     }
+    // ③ the browser ACTION TRACE (agent browser P5, §4.5 / D35): a card whose
+    //    command drives the agent browser carries a holder the renderer made;
+    //    the loader fills it (thumbnails + the expander) — here, because this is
+    //    the ONE hook every element-making path calls (create / swap / gap).
+    this._browserTrace?.observe(el);
   }
 
   /** ONE place that turns the mark into DOM (create-path and live op share it,
@@ -3843,6 +3869,41 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
    * ruling 9). Carries-the-key guarded like every other live fact: a frame
    * that says nothing about the worktree must not clear a badge.
    */
+  /** §3.8 ③: the Browser chip's two facts off the live payload — the profile
+   *  the agent LAST USED (`browserProfileActive`: null never / '' ephemeral /
+   *  id) and the PINNED one (`browserProfileId`). Labels come from the
+   *  client's profile digest; ids the digest does not know print as ids. */
+  _onActiveSessions(list) {
+    const row = Array.isArray(list) ? list.find((s) => s && s.id === this.sessionId) : null;
+    if (!row) return;
+    if (!row.browserKey) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
+    this._browserFacts = { key: row.browserKey, active: row.browserProfileActive === undefined ? null : row.browserProfileActive, pinned: row.browserProfileId || '', input: row.browserInput || null };
+    this._renderBrowserChip();
+  }
+  _renderBrowserChip() {
+    const f = this._browserFacts;
+    if (!f) return;
+    const labelOf = (id) => (id ? ((this.app?._browserProfiles?.profiles || []).find((p) => p.id === id)?.label || id) : t('ephemeral (no profile)'));
+    this._statusBar?.setBrowserProfile?.({ key: f.key, active: f.active, pinned: f.pinned, activeLabel: f.active == null ? null : labelOf(f.active), pinnedLabel: labelOf(f.pinned), input: f.input || null });
+  }
+  _onBrowserAction(what, ev) {
+    const row = (this.app?.sidebar?._allSessions || []).find((s) => s.webuiId === this.sessionId) || null;
+    if (what === 'live') { this.app.openBrowserLive({ sessionId: this.sessionId }); return; }
+    if (what === 'pin') { if (row && this.app.showBrowserProfilePicker) this.app.showBrowserProfilePicker(row, { x: ev?.clientX || 0, y: ev?.clientY || 0 }); return; }
+    if (what === 'nudge') {
+      fetchJson('/api/browser/nudge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: this.sessionId }) }).then((r) => {
+        if (!r || r.error) { showToast(r?.error || t('server unreachable'), { type: 'error' }); return; }
+        showToast(t('Reminder queued — it reaches the agent with your next message'), { duration: 6000 });
+      });
+    }
+    // P3 (§4.3): an EXPLICIT handback from the chat surface — announced through the ladder
+    if (what === 'handback') {
+      fetchJson('/api/browser/handback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: this.sessionId }) }).then((r) => {
+        if (!r || r.error) { showToast(t('Handback failed: {why}', { why: r?.error || t('server unreachable') }), { type: 'error' }); return; }
+        showToast(t('Control handed back to the agent'), { duration: 4000 });
+      });
+    }
+  }
   _onWorktreePath(msg) {
     if (!msg || !('worktree' in msg)) return;
     this._worktree = !!msg.worktree;
@@ -5667,6 +5728,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     if (this._stallWatch) { clearInterval(this._stallWatch); this._stallWatch = null; }
     if (this._sleepTicker) { clearInterval(this._sleepTicker); this._sleepTicker = null; }
     if (this._readOnlyPollTimer) clearTimeout(this._readOnlyPollTimer);
+    this._browserTrace?.dispose(); this._browserTrace = null;
     this.ws.offGlobal(this._handler);
     this.ws.offStateChange(this._stateHandler);
     for (const [key, fn] of this._settingsListeners || []) this.app.settings?.off(key, fn);

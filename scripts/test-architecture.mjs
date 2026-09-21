@@ -44,7 +44,24 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js',
+  // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
+  // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
+  // constants home every process keeper counts and bounds by (src/keeper-limits.js)
+  'src/browser-profiles.js', 'src/keeper-limits.js',
+  // AGENT BROWSER P4 second half (design §7.4/§7.5/§7.6): the live backend SWITCH and the
+  // key-consumer half as DECISIONS — version ladder, seats in three states, the six rows'
+  // vendor env / launch args / derived test host, site hints, the blocked claim, the gate
+  'src/browser-switch.js',
+  // AGENT BROWSER P5 (design §4.5 / §6.4 / §7.1 / §8 step 3, D7 / D8 / D35): the action-trace
+  // ENTRY (what is kept, what is never — a fill's value), the after-frame pick, the retention
+  // PLAN, the recording gate, the sweep SCOPE (= exactly the ownsDir rows) and the forget /
+  // orphan verdicts — imports only the sibling PURE registry model
+  'src/browser-trace.js',
+  // AGENT BROWSER P6 (design §6.2 / §6.5 / D6): the CDP MEDIATION RULES — target scoping, the
+  // session gate, browser_paused, the whole-browser acts, the scope's growth/shrinkage, the
+  // per-session url/env composition — imports nothing (the proxy does the I/O)
+  'src/browser-mediation.js',
   'src/search-card.js', // web-search card renderer + title query + twin key — shared server (codex normalizer) + browser (chat-renderers)
   'src/path-linkify.js', // where a chat file path ENDS (CJK punctuation) — shared browser (chat-renderers) + node tests; imports nothing
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable
@@ -139,6 +156,14 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // (discovery-facts, so the daemon bundles it) beside the shell text the sweep and the
   // ssh discovery CO leg embed verbatim. node builtins only.
   'src/cli-identity.js',
+  // AGENT BROWSER machine FACTS (design-agent-browser-v2 §3.6 row 2): the installed-version
+  // probe (P0) + a recorded daemon's identity/usage and the four CLI calls a profile
+  // browser's lifecycle needs (P1) — node builtins + the PURE model + cli-identity
+  'src/browser-facts.js',
+  // AGENT BROWSER P4 (design §3.6 row 3 / §7.3): the `browser-serve` op table + runner — start /
+  // status / stop / cdp-url / version of a PROFILE browser where it runs; the daemon bundles it
+  // and the hub runs it in-process for device #0 (fs/os/path + the PURE model + browser-facts)
+  'src/browser-serve.js',
   // THE ONE usage-cache write path (quota-model-v2, 2.369.86): fs/path + the PURE model +
   // lazily the harness parsers; the daemon bundles it, so it may never reach up into ORCH.
   // Listed here so a cross-tier edge fails on the classification rule itself, not only
@@ -185,6 +210,10 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // allocation, the Xauthority writer, the RFB banner read-probe, window enumeration (P9 reuses
   // it), the xpra version probe; hostId is a parameter — node builtins + cli-identity only
   'src/desktop-display.js',
+  // WINDOW TARGETS (design-agent-browser-v2 §4.9, P9 first half): the AT-SPI snapshot / @ref
+  // minting / input-backend probe ladder / the acts — node builtins + desktop-display; the
+  // traversal itself is a bounded SUBPROCESS (src/window-targets-helper.py), never in-process
+  'src/window-targets.js',
   // THE SHARED CLI-CONFIG APPLIER (design-harness-settings §6): fs/path/os only — the CAS JSON
   // writer, the comment-preserving TOML setter, applyConfigPlan/readConfigPlan, the receipt codec.
   // Its FILE TEXT is embedded into the shipped remote helper, so it may never reach up into ORCH.
@@ -270,6 +299,30 @@ ok(!/\/\/ src\/ws-handler\.js|\/\/ src\/ws-create\.js|\/\/ src\/hosts\.js|\/\/ s
 {
   const serverLines = read('server.js').split('\n').length;
   ok(serverLines <= 2100, `server.js stays bootstrap-sized (${serverLines} ≤ 2100 lines — new mechanisms go in src/server/*)`);
+  // §48 (2.369.134): CODE APPENDED AFTER A MID-LINE // IS A COMMENT. The mounts-plugins wiring call in server.js
+  // carried three chunk notes mid-line; one chunk appended `getTelemetry: …` after them (never wired, the
+  // default null hid it) and the r-fix moved `activeSessions,` after them too — every browser route answered
+  // "no such live session", while test-plugin-loader's `/, activeSessions,$/m` pin was satisfied BY THE COMMENT.
+  // Census: in the bootstrap + wiring files no line may carry an object key (`name: () =>` / `name: (x) =>`)
+  // or a `, activeSessions,` after its first `//` outside a string.
+  {
+    const files = ['server.js', ...fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('-wiring.js')).map((f) => 'src/server/' + f)];
+    const bad = [];
+    for (const f of files) {
+      const lines = fs.readFileSync(path.join(REPO, f), 'utf8').split('\n');
+      lines.forEach((l, i) => {
+        const c = l.indexOf('//'); if (c < 0) return;
+        const head = l.slice(0, c); if ((head.match(/'/g) || []).length % 2 || (head.match(/`/g) || []).length % 2 || /https?:$/.test(head)) return;
+        const tail = l.slice(c + 2);
+        if (/\b[a-zA-Z_]\w*: \((\w+(, \w+)*)?\) =>/.test(tail) || /, activeSessions,\s*$/.test(tail)) bad.push(`${f}:${i + 1}`);
+      });
+    }
+    ok(bad.length === 0, `§48 no object key rides after a mid-line // in the bootstrap/wiring files (${files.length} files)`, bad);
+    // negative control: the exact 2.369.134 shape trips the census
+    const ctl = 'x: 1, // note getTelemetry: () => { try { return t; } catch { return null; } }, activeSessions,';
+    const cc = ctl.indexOf('//'); const ct = ctl.slice(cc + 2);
+    ok(/\b[a-zA-Z_]\w*: \((\w+(, \w+)*)?\) =>/.test(ct) && /, activeSessions,\s*$/.test(ct), '§48 control: the shipped line shape is caught');
+  }
   const mods = fs.readdirSync(path.join(REPO, 'src/server')).filter((f) => f.endsWith('.js'));
   ok(mods.length >= 14, `src/server/ holds the decomposed modules (${mods.length} ≥ 14)`);
 }
@@ -1342,11 +1395,14 @@ for (const [edge] of EXCEPTIONS) {
 //     scripts/scratch.mjs; every suite passes it to
 //     Page.addScriptToEvaluateOnNewDocument BEFORE each Page.navigate, on the
 //     same receiver. A suite that deliberately exercises the wizard declares
-//     `// onboarding-under-test` and is exempt.
+//     `// onboarding-under-test` and is exempt; a suite whose `Page.navigate`
+//     literals are CDP MESSAGES driven through the agent-browser mediation
+//     proxy (P6 — a real chrome, never VibeSpace's page, so there is no wizard
+//     to skip) declares `// cdp-protocol-under-test` and is exempt likewise.
 {
   const scope = fs.readdirSync('scripts').filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => fs.readFileSync(f, 'utf8').includes("'Page.navigate'"));
   const judge = (s) => {
-    if (s.includes('// onboarding-under-test')) return null;
+    if (s.includes('// onboarding-under-test') || s.includes('// cdp-protocol-under-test')) return null;
     if (!/import\s*\{[^}]*\bONBOARDED_SOURCE\b[^}]*\}\s*from\s*'\.\/scratch\.mjs'/.test(s)) return 'no ONBOARDED_SOURCE import from ./scratch.mjs';
     const navs = [...s.matchAll(/'Page\.navigate'/g)].map((m) => m.index);
     const sets = [...s.matchAll(/addScriptToEvaluateOnNewDocument'\s*,\s*\{\s*source:\s*ONBOARDED_SOURCE\s*\}/g)].map((m) => m.index);

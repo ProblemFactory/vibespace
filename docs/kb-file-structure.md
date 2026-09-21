@@ -38,6 +38,1718 @@ data/bin/vibespace-usage-scan — REMOTE-side usage ledger scanner (2.127.0, STA
 
 data/bin/vibespace-remote-keeper — REMOTE-side persistence for remote CHAT sessions (2.124.0, STATIC tracked; distributed to remote ~/.vibespace/bin with the other tools): claude runs setsid-DETACHED on the host under a keeper daemon (stdout→buffer file, stdin←unix socket) so an ssh drop kills only the pipe; the local chat-wrapper reattaches with a byte offset (`run <sid> <offset> -- cmd`; stdout carries ONLY raw buffer bytes — diagnostics on stderr), `_remote_exit` sentinel = claude really ended (run never restarts an exited sid); stop mode = the kill path. See the 远程session稳定性 bullet + scripts/test-remote-keeper.mjs
 
+### src/browser-profiles.js
+
+**r-fix (2026-09-21, the verifier's findings):** `childEnvFor({childKey, parentVariant, childConfigPath, parentNamesProfile})` — on rung D a child's env REPLACES the inherited `AGENT_BROWSER_CONFIG` with its own generated config (a pinned parent's config names its directory: two namespaces on one user-data-dir = the SingletonLock shape), and without one a profile-naming parent config is UNSET, a profile-less one inherited; `why` states which. `adoptDirVerdict({dir, homeDir, dataDir, existing, browserKey})` — `new --adopt` may register only a directory strictly under `~/.agent-browser/` or `data/browser-profiles/` (`..` folded by `normAbsPath`), never the legacy `default-profile` (`adopt_legacy_refused`) nor somebody else's registered dir (`adopt_registered`); one this session owns is idempotent; no roots ⇒ refused.
+
+**P6 (2026-09-21; §6.2 / D6):** `sharingVerdict({sharing, host, mediation})` is
+the ONE judge of a profile's `sharing` — `owner` always; `instance` only when
+the keeper says a mediating CDP proxy exists in this process (`mediation`)
+AND the profile runs on this machine (a paired-machine profile is refused BY
+NAME with `why:'host'`; no proxy ⇒ `why:'mediation_unavailable'` with D6's
+sentence — the pre-P6 refusal, verbatim, and the validator's DEFAULT when no
+`mediation` is passed); `validateProfileInput(input, {mediation})` threads it
+and the value's `sharing` is the verdict's; `newProfileRecord` takes
+`sharing`; `isMediatedProfile(p)` = `instance` on a record the migration did
+not create — the legacy "Shared (legacy)" record keeps `sharing:'instance'`
+for ADMISSION but is never mediated (cooperative, labelled legacy, promises no
+isolation). Gate: test-browser-mediation ①.
+
+**P4 second half (2026-09-17; §7.4 / §7.5):** the `cloud:*` FAMILY is `wired`
+(`starts:true`, `binary:'agent-browser'` — our own daemon started with
+upstream's `-p <name>` and the vendor's key in THAT child's env; `ownsDir`
+stays false because the browser is the vendor's) except `agentcore`, unwired
+BY NAME through `CLOUD_UNWIRED` (its field set is unverified against upstream,
+so the refusal says so instead of a spawn that fails at the vendor); `cloak`'s
+row names the `cloakbrowser` binary (the in-place switch opens the SAME
+directory with the other binary + `--fingerprint=<seed>`). `validateProfileInput`
+takes an INJECTABLE `control` (the keeper hands its own, which a gate may
+override — one gate ignoring the override is an inconsistent seam) and a
+`defaultBackend` (§7.4's per-profile default: a row id, validated like any
+provider; whether it can be used HERE is the switch's question);
+`newProfileRecord` carries `defaultBackend` + `lastSwitchAt`; the registry
+carries `seats` (integrationId → the seat reading from the first real launch),
+`majors` (provider → the Chromium major last seen writing) and `blocked` (the
+agent's claims, a bounded list where every entry is `by:'agent'`). Gate:
+test-browser-providers ① + test-browser-backend ③.
+
+**P4 (2026-09-16; §7.1–§7.3, §7.2.1, D34):** the provider ROWS are the
+backend-caps discipline — `PROVIDERS` (+ the `cloud:<name>` FAMILY,
+`providerRow`/`providerIds`) carry every capability cell a control reads (tier
+/ wired / keyScope / canSwitchTo / ownsDir / leaseKind / remote / starts /
+headed / binary; deliberately NO `swept` cell — P5 sweeps exactly `ownsDir`);
+`providerControl(provider, {host})` = THE ONE typed refusal a disabled control
+shows, structural refusals first (`provider_needs_local_key` for a
+`keyScope:'local-only'` row on `host != null` — D34's (a), `provider_local_only`
+for a row with no remote transport) then `provider_unavailable` naming WHY
+(`cloak`: the §7.2.1 record's refusal by name); `capabilityRefusal(provider,
+cell)` per control; `providerRows({host})` = the rows + the local verdict + the
+per-host verdict + the proof beside the row it explains. `CLOAK_EGRESS_PROOF`
+is the §7.2.1 precondition in local-oracles' SHAPE (tool + date + version +
+per-run INET counts, `status:'refused'`, `refusal:'binary_absent'`,
+`blocks:'cloak.wired'`) and `proofVerdict` enforces the discipline: a `blocks`
+claim's cell must really be false (a row re-enabled without re-measuring FAILS
+the suite), a measured record must carry all four runs each with a count, a
+refused one carries no runs. `validateProfileInput` admits `host` (a machine
+id; whether it is PAIRED is the keeper's question) and `cdpPort` (cdp only,
+required there); `newProfileRecord` keeps `dir:null` for a row that owns no
+directory or a profile on a paired machine. `attachedEnvFor({cdpUrl})` emits
+`AGENT_BROWSER_CDP=<hub-side loopback url>` INSTEAD of a profile directory for
+a reached browser (a non-loopback url is never handed to a session — only
+through the forward); `isCdpPair` names the ONE pair `use --print` withholds;
+`forwardedCdpUrl`/`cdpPortOf` re-point a loopback url at the hub's forward
+(scheme + path kept). `parseEgressAllowlist`/`egressVerdict` (exact hosts or
+`.suffix`; loopback/link-local NEVER; empty = deny) and `cloakservePlan`
+(typed refusals `cloak_opt_in_off` → `egress_proof_invalid` →
+`egress_not_measured` → `egress_allowlist_empty` → `egress_proxy_missing`, else
+the docker argv: pinned `CLOAKSERVE_IMAGE`, an `--internal` network, 9222
+published on 127.0.0.1 only, `HTTPS_PROXY`/`HTTP_PROXY` = the hub's
+allowlisting proxy as the only way out). Gate: test-browser-providers ①.
+
+**P1 second half (2026-09-16; §3.7 / §3.8):** `aliasFor`/`isAlias` (a handle =
+the label's slug, unique within a session's set), `childHandleFor`/`nextChildN`,
+`looksLikePath` (a `--profile` value that is a PATH is refused by name —
+`agent-browser`'s own flag takes a path, ours never does), `attachmentsFor` =
+the SET view (leases of one key with their aliases; the DEFAULT = the pin when
+among them, else the only member, else none; a `fingerprint` that moves on
+add/remove/default-move and on nothing else; children beside it),
+`resolveHandle` (none / one / ≥2 ⇒ `profile_required` listing every handle
+with the default marked — the sub-agent clause is an ASIDE, never the reason /
+alias·id·label / `ambiguous` / `not_attached` / `profile_path_refused` carrying
+the `new --adopt` remedy), `toldView`/`blindnessVerdict` (the one-time
+`profile_changed` = the fingerprint moved since the session was last told;
+never told ⇒ told now, not refused), `profileChangeNotice`/
+`renderProfileChangeNotice` (the typed layer-② notice), `auditLine`/`auditVerbOf`
+(`{at, sessionId, browserKey, profileId, verb, ok}` — never a fill's content),
+`childEnvFor` (a child's OWN session + daemon; rung C `unset`s the inherited
+profile symlink — two daemons on one dir die on SingletonLock), and the
+registry keeps `children` + `told`. Gate: test-browser-handles ①.
+
+**PURE (imports nothing) — the agent browser's IDENTITY and its SPAWN
+ENVIRONMENT** (docs/design-agent-browser-v2.zh.md §3.2, phase P0). Every
+decision lives here; the half that touches the filesystem is
+`src/server/browser-env.js`, and the machine fact is `src/browser-facts.js`.
+
+* `sessionNameFor` / `mintBrowserKey` / `isBrowserKey` — `bk-<8 hex>`, and the
+  ONE spelling of `vs-<browserKey>` both variables carry (§3.2.4's two names ask
+  two questions — browser context, daemon socket — about ONE browser).
+* `browserKeyFor({prior, resume, fork, mint})` — **the continuity ladder**, shaped
+  like `resume-continuity.js`: an answer plus the ORIGIN that produced it. A
+  RESUME reuses the conversation's key; a FORK mints a new one (D15 — a fork is a
+  new conversation and must not inherit another one's cookies or pinned tab); a
+  resume that finds nothing answers **`resume-unknown`, never `'new'` wearing a
+  hat**, because that is the leak the ladder exists to prevent and it has to be
+  visible when it happens rather than inferred later from orphaned directories.
+* `VARIANTS` / `REJECTED_VARIANTS` / `variantLadder` / `configNamesProfile` — the
+  (D) → (C) → (N) → `none` user-data-dir ladder, D12. **The design's (A) AND (B)
+  are NAMED REJECTS, both measured (r3)**: §3.2.2's table says (A) "SESSION
+  only" cannot collide because one daemon owns the directory, and on 0.32.0 it
+  collides exactly like (B) — every `--session` launches its own chromium, so
+  two sessions on any config that names a `profile` die on `SingletonLock: File
+  exists` whatever the namespace count. Round 2 shipped that shape as its floor
+  and called it "(A)". The floor is now (N) = the three names alone, reachable
+  ONLY when the EFFECTIVE config names no profile (each daemon then gets the
+  CLI's own ephemeral dir, measured), else `none` = nothing emitted, today's
+  shared browser, with the profile that decided it in the journal — a stolen tab
+  is the smaller harm than a browser that cannot start. `H` = REMOTE, decided on
+  the host (below). The descent is ONE RUNG AT A TIME (leaving D is always
+  "D → C", even when C then fails too — collapsing it hides that C was tried).
+  **A FENCED config never lands on C (r4)**: rung C IS `AGENT_BROWSER_PROFILE`,
+  which the CLI refuses beside `--allowed-domains` at the argument check, so
+  round 3's `D → C` under a fenced effective config was a browser that answered
+  every command `✗ --allowed-domains is not supported with --profile` where the
+  bare CLI works (measured, one injected variable — the config writer throwing).
+  `fenced` is an INPUT of the ladder (`variantLadder({…, fenced})`); a fenced
+  descent skips C by rule and is journalled as "C → N" with the fence as the
+  reason (`fencedRungReason`, ONE exported spelling) — "C was refused, and here
+  is why" is a different sentence from "C was tried and failed". A fenced config
+  cannot name a profile (the CLI refuses that combination whole), so the descent
+  lands on N by construction and the fence stays intact.
+* `USER_CONFIG_REL` / `PROJECT_CONFIG_NAME` / `layerProjectConfig` — the CLI's
+  own two-file precedence (r3): `~/.agent-browser/config.json` and then
+  `./agent-browser.json` in the invocation directory at HIGHER priority, both
+  replaced by `AGENT_BROWSER_CONFIG`. Round 2 carried only the first, so a
+  project-level fence was deleted from every local session with `dropped: []`.
+  The merge rule is MEASURED, one variable per arm: a key in both takes the
+  project value (its `args` reached the chromium cmdline, the user file's did
+  not), a key in one file survives (`userAgent`), and `extensions` is the one key
+  CONCATENATED user-first (`--load-extension=<user>,<project>`; the `--help`
+  says so). The CLI does not walk up, so the project file is EXACTLY the
+  session's directory's — which is the stated boundary of the generated config
+  (it applies that file for the whole session; a different one in a directory
+  the agent cd's into does not).
+* `REMOTE_SCRATCH_DIR_SH` / `REMOTE_SCRATCH_STALE_DAYS` / `TOP_LEVEL_PROFILE_AWK`
+  / `remoteBrowserPrelude` — the REMOTE rung (r3). A POSIX shell fragment for
+  `buildRemoteExec`'s `browser` slot that runs AFTER the `cd` on the host: it
+  asks whether the host's effective config names a profile and, only then,
+  `export AGENT_BROWSER_PROFILE=$HOME/.vibespace/browser-profiles/vs-<key>`
+  (rung C there — a dir the CLI creates lazily, measured); otherwise nothing
+  (rung N there, ephemeral per daemon). Unconditional would break a FENCED host
+  (`--allowed-domains is not supported with --profile`, measured), and none at
+  all was the collision. **The question is answered in ONE spelling per side,
+  over ONE table (r4)**: round 3's `grep -qs '"profile"[[:space:]]*:'` was a
+  LOOSER spelling than `configNamesProfile` — it counted `"profile": null` and
+  `""` (a host config `{…, allowedDomains, profile: null}` works bare and was
+  handed a profile the CLI refuses beside the fence, measured), a key nested in
+  another value, and could not see a project `null` overriding a user string.
+  `TOP_LEVEL_PROFILE_AWK` is a one-line, quote-free POSIX awk that walks the JSON
+  with a depth counter (strings and escapes honoured) and prints `yes` / `no` /
+  `absent` for the TOP-LEVEL key; the project file is asked first and a `yes` or
+  `no` there is final (the CLI's per-key precedence, `layerProjectConfig` on this
+  side). The gate drives the awk and the predicate over twelve rows under every
+  shell AND every awk on the box (mawk, busybox via a PATH shim), with the grep
+  spliced back as the control. **The socket-root rule rides here too (r4)**:
+  from the host's own `$HOME` (or `$XDG_RUNTIME_DIR`, the CLI's second rung),
+  bytes counted with `printf | wc -c` like the kernel, the tail the PURE half
+  computes from the names, a pre-set `AGENT_BROWSER_SOCKET_DIR` left alone, and
+  `<base>/vs-ab-$(id -u)` exported only when it exists, is not a symlink and
+  `-O` says this user owns it. The same fragment sweeps stale per-key dirs
+  (`find -mtime +7`) that hold no live browser, and liveness is `[ -L
+  SingletonLock ]` because chromium's lock is a DANGLING symlink while it runs
+  (`-e` says absent for a LIVE profile and would sweep it out from under the
+  browser). Single-quoted throughout, no glob, ends in `; `, last statement an
+  `if` so `$?` stays 0 — driven under sh/bash/zsh/dash/busybox by the gate.
+* `SOCKET_PATH_MAX` / `SOCKET_DIR_BASE` / `utf8Bytes` / `socketTailBytes` /
+  `socketRootFor` / `socketDirBaseOf` / `socketDirDecision` — THE FIFTH VARIABLE
+  (r4). A unix socket path is 103 bytes at most and the CLI checks it before
+  anything launches; the root is `AGENT_BROWSER_SOCKET_DIR` > `$XDG_RUNTIME_DIR/
+  agent-browser` > `$HOME/.agent-browser` (measured on `session info --json`), the
+  tail for our names is 50 bytes, so a 38-character home fits (103) and a
+  39-character one does not (104 — `tab list` refused before launching, while
+  the bare CLI's `default` name still fits): round 3's regression, recorded then
+  and closed now. `socketDirDecision({browserKey, home, xdgRuntimeDir, socketDir,
+  uid, base})` answers `needed` from the root the SESSION's environment would
+  give the CLI, names `<base>/vs-ab-<uid>` and says whether that itself `fits`;
+  `SOCKET_DIR_BASE` is the LITERAL `/tmp` (a short root is the point, and
+  `TMPDIR` may be the long path being escaped); `socketDirBaseOf` refuses a base
+  a shell could read as syntax. Bytes, never characters — the kernel counts
+  `sun_path` in bytes. The design's name shape is untouched.
+* `PIN_APPLIES_FROM` — WHEN A PIN TAKES EFFECT, MEASURED (r4). Rounds 1–3
+  inherited the pool's sentence ("never a browser already running; on the NEXT
+  launch") and on 0.32.0 it is false in the direction that costs the page: the
+  pin leaves the running chromium alone until the NEXT COMMAND, which RELAUNCHES
+  chromium onto the new directory (`get url` ⇒ `about:blank`, new pid on the
+  pinned dir; the no-pin control keeps page and pid). One exported sentence for
+  both rungs; P1's route owes a `close` first or a refusal while a browser is
+  live.
+* `browserEnvFor` — the ONE composition, returning `KEY=VALUE` strings because
+  that is what BOTH spawn shapes consume (the local `r6Argv` `env` prefix and the
+  remote `buildRemoteExec` `parts`). `hostId` never appears: it is a parameter of
+  the caller's transport choice. **Integration OFF ⇒ ZERO pairs** — the suite
+  asserts the empty array, never "a smaller set".
+* `pinResolution` / `generatedConfig` / `EPHEMERAL_DENY` / `deniedKeys` —
+  §3.2.5's indirection, and **the generated config is a DENY whose set is the
+  CLI's own classification** (r2). A custom `--config` REPLACES the user's files,
+  so anything of theirs that must survive has to be carried explicitly; round 1
+  carried an ENUMERATED seven keys, which silently deleted the user's browsing
+  FENCE and the whole confirmation/action-policy family from every local session.
+  MEASURED end to end on 0.32.0 with two daemons and one variable: through the
+  user's own config `agent-browser open http://127.0.0.1:<p>/` answers
+  `✗ Domain '127.0.0.1' is not in the allowed domains list`; through the config
+  the product generated FROM THAT SAME FILE it answers `✓`. The design names that
+  anti-pattern in its own words (§6.3: the registry must REFUSE a fence
+  "而不是接受一个之后会被悄悄丢掉的标志") and §3.2.2 sells variant D on
+  "能否带 `--allowed-domains`: 是" — a promise the ALLOW list cancelled. It also
+  dropped `restore`, `state`, `sessionName`, `autoConnect`, `cdp`, `initScripts`,
+  `downloadPath`, `maxOutput`, `hideScrollbars`, `colorScheme`, `plugins`,
+  `screenshotDir` and everything else, all of them REAL typed keys of the CLI's
+  schema (probed: a wrong type answers `invalid type: … expected a string`, while
+  an unknown key is ignored — so the schema is known-key-typed and the list was a
+  loss, not a filter).
+
+  **The deny set is DERIVED, not enumerated.** `--allowed-domains` is refused
+  beside exactly the flags that mean "this is not a fresh, isolated, controllable
+  context" — which is the property P0 sells — so the deny set is "the keys that
+  make the binary refuse to install a fence". MEASURED, one arm per candidate
+  (config = `args` + `headed` + `allowedDomains` + the candidate; the refusal is
+  an argument check, so nothing launches and `autoConnect` never reaches a real
+  browser): **`profile` / `restore` / `sessionName` / `state` / `autoConnect` /
+  `cdp` are refused**, while `extensions` / `userAgent` / `downloadPath` /
+  `engine` / `initScripts` / `actionPolicy` are fine and `confirmActions` demonstrably
+  WORKS (`Confirmation required:`). `sessionName` is why this is measured rather
+  than reasoned: "a key, not a switch" is the obvious reading and the binary
+  answers it with the `--restore` refusal. `session` and `namespace` are
+  deliberately NOT denied — the documented precedence is config < env < flags and
+  we always set both variables, so a config-file copy cannot win; a smaller deny
+  set is a better deny set. `deniedKeys` names what a given config actually
+  carries so the ORCH half can journal it, and `generatedConfig` uses that same
+  function, so the drop and the line about it cannot drift. A user config the CLI
+  already refuses stays refused: carrying a badly-typed value through reproduces
+  their own situation rather than silently repairing it, and it is not a new
+  failure class — the seven keys the ALLOW list carried had the same property.
+  `profile`'s ABSENCE is still the ephemerality.
+* `configFence` / `pinFenceConflict` — §1.5's mutual exclusion, made enforceable
+  by the fix above. Once the generated config CARRIES `allowedDomains`, a PIN
+  adds `profile` back and the CLI refuses **every** command (measured: `open` and
+  `get title` alike). "一个按任务的域名白名单和一个持久的已登录 profile，在浏览器
+  这一层是互斥的。任何同时承诺这两样的设计都在撒谎" — so the pin is REFUSED with
+  the reason and the way out, which is §6.3's ruling transposed. An EMPTY
+  `allowedDomains` is measured NOT to be a fence (`[]` + a profile opens the
+  page) and may not block a pin.
+* `PIN_ORIGINS` / `P0_PIN_ORIGINS` / `pinPick` — the pin's origin ladder written
+  whole so P1 adds rows rather than a second vocabulary. `'task-group'` is listed
+  and deliberately **never emitted by P0**: it is a fifth value in a vocabulary
+  `resume-continuity.js` froze at four, whose client mirror
+  (`agent-meta.spawnValueOrigin`) whitelists those four and **silently mislabels**
+  anything else — adding it is a two-place change in P1's own commit.
+* `FLOOR_VERSION` / `cmpVersion` / `floorVerdict` / `floorNotice` — D1. Four
+  outcomes because "we could not tell" is neither "too old" nor "not installed":
+  `ok` · `too-old` (ONE notice, capability off) · `absent` (SILENT — never nag
+  about a tool nobody uses) · `unknown` (fails CLOSED on the capability and says
+  so in its own words rather than claiming a version).
+
+MEASURED on the installed 0.32.0 (2026-09-13, this box), because every rung rests
+on one of these: SESSION+NAMESPACE alone still resolves the shared
+`~/.agent-browser/default-profile` (that is variant B, and it is why the gate
+asserts the RESOLVED directory instead of the env strings); `AGENT_BROWSER_CONFIG`
+at a config with no `profile` key gives an ephemeral `/tmp/agent-browser-chrome-<uuid>`;
+`AGENT_BROWSER_PROFILE=<dir>` resolves to exactly that dir and the CLI creates it;
+a missing or invalid config file makes the CLI print `⚠ …` and **exit 1** — a hard
+dependency pointing the UNSAFE way, which is the whole reason the ladder exists
+and the whole reason the variable is only set after a successful READ-BACK.
+Gate: scripts/test-browser-profiles.mjs (fast).
+
+  **P10 (design §7.6 tier 3 / §7.1, D27 (b) / D31, 2026-09-21):** the `local-window` row is WIRED — `tier: 3`, the three "no"s, `leaseKind:'window-target'`, and three new cells on EVERY row: `cdp` / `allowedDomains` / `pinTab` (true on every tab-lease row, false on local-window) plus `consent` (the setting that must read true — `'window.realDesktopTargets'` on local-window, null elsewhere). `providerControl(id, {host, desktopConsent})` adds the rung `provider_needs_consent` (after the structural refusals and `wired`: on a host the row is still `provider_local_only` first); `providerRows({host, desktopConsent})` passes it through; the keeper's `control` wrapper injects the setting's value on every read. `capabilityRefusal` gains `cdp` ("no url to print — vibespace-window"), `allowed-domains` (a CDP-side rule; the site is whatever the user opened), `pin-tab` (leased by handle, no target id) and `live-view`, and the local-window `switch` refusal names the act (the switch, then a WINDOW TARGET — §7.6 rule 3: no re-pointing). `validateProfileInput` refuses a `leaseKind:'window-target'` provider `tier3_is_a_window_target`: tier 3 is NOT a profile — no record is created, none re-pointed (a record would have no dir, no seed, nothing the ladder or the sweep could act on). A profile RECORD carries no `tier` field (derived from `provider`, §3.3) — test-browser-tier3 pins it.
+
+### src/browser-mediation.js
+
+**r-fix (2026-09-21):** `mediationSentence` names the fence's REAL scope — Input.* and page-navigation COMMANDS are refused while the user drives, script evaluation and reads are NOT (Runtime.evaluate passes by design, pinned by both mediation suites; a script can navigate, so the sentence, the CLI's `watch` and the manual say "do not navigate by script while they drive" instead of promising a DOM-level fence).
+
+**PURE (imports nothing; CJS so the proxy, the keeper, the routes, the CLI AND
+the bundle share ONE rule set) — THE CDP MEDIATION RULES** (agent browser P6,
+2026-09-21; design §6.2 / §6.5 / D6). A profile's CDP endpoint is
+unauthenticated and confers authority over EVERY target in the browser
+(§3.4), so a lease is handed its OWN url and every message through it is
+judged here. Invariants, one each: `judge(msg, scope, {paused})` answers
+forward / refuse / drop — `Target.attachToTarget` / `activateTarget` /
+`closeTarget` / `getTargetInfo` / `Browser.getWindowForTarget` need
+`params.targetId` IN SCOPE (`target_out_of_scope`), a message on a CDP
+`sessionId` the proxy never handed out is `session_out_of_scope`, the
+whole-browser acts (`Browser.close` / `crash*`, `Target.exposeDevToolsProtocol`
+/ `setRemoteLocations` / `sendMessageToTarget`) are `method_refused` always,
+and while the USER holds the input side every `Input.*`, the navigation
+family (`Page.navigate` / `reload` / `navigateToHistoryEntry` / `close` /
+`stopLoading` / `setDocumentContent` / `handleJavaScriptDialog`),
+`DOM.setFileInputFiles` and the target acts that change what the user sees
+(`Target.createTarget` / `closeTarget` / `activateTarget`) are
+`browser_paused` — `Runtime.evaluate` and `Page.captureScreenshot` are NOT
+(a read during a takeover is the honest use; the CLI's typed refusal (P3)
+already stops the cooperative path — stated, never sold as a DOM fence); a
+refusal is a CDP error `{id, error:{code:-32000, message:'<code>: …'}}` on
+the same session (`refusalCodeOf` reads it back); `admitReply(reply,
+pending, scope)` → `{reply, emit}` GROWS the scope from what the browser
+handed back (createTarget → the tab; attachToTarget → the session;
+createBrowserContext → the context) and FILTERS `getTargets` /
+`getBrowserContexts` to the scope; `filterEvent` forwards only what concerns
+the scope and admits the admissible — a tab OPENED BY a scoped page
+(`openerId`), a target born in an owned context, a child auto-attached under
+an owned session — while `targetDestroyed` / `detachedFromTarget` shrink it.
+**Measured ordering (0.32.0 + Chrome 153): Chrome announces
+`Target.targetCreated` BEFORE it answers `Target.createTarget`**, so the tab a
+lease is creating is out of scope for one message — `scope.recent` (bounded
+`RECENT_MAX`) remembers withheld announcements and the createTarget reply
+REPLAYS the one it names before itself (without it agent-browser's target
+registry never learns its own tab and `open` hangs forever).
+`parseMediatedPath` = the five paths under `/m/<32-char token>/…` (anything
+else null ⇒ 404); `mediatedBrowserUrl` = the `ws://127.0.0.1:<port>/m/<token>/
+devtools/browser` form a lease is handed (agent-browser connects a ws url
+directly; an http base has its PATH DROPPED when the CLI rebuilds
+`/json/version` — measured, so the http twins exist for other clients only);
+`versionAnswer` / `listAnswer` re-point endpoints and drop the frontend url (a
+raw endpoint never appears); `mediatedEnvFor` = the session name, a
+PER-SESSION namespace `vs-<profileId>-<browserKey>` (its own daemon over its
+own url — two sessions in one namespace would share one daemon and one
+scope), the scoped url, an EXPLICIT idle, and NO profile directory (the state
+lives in the profile's browser); `grantView` never carries the token or the
+upstream. Gate: test-browser-mediation ② (fast).
+
+### src/browser-facts.js
+
+**SHARED (node builtins + the PURE model) — what `agent-browser` IS on this
+machine.** P0 needs one fact, the installed VERSION for D1's floor, and this
+answers it for a machine handle rather than for "here" (P1's keeper adds "which
+browsers are running" beside it, which is why it is its own module now).
+
+**A PROBE THAT COSTS A FORK MAY NOT RUN PER ACTION**: `spawn` blocks the calling
+thread in proportion to the PARENT's RSS (1.8 ms at 45 MB, 72.5 ms at 1.5 GB on
+this box, and both production servers sit at 1.5–2 GB), so the version is probed
+at most once per 10-minute TTL and **the negative answer is cached like a
+positive one** — `null` means "we asked and there is no binary", which is a FACT.
+It never throws: a probe that threw on a machine without the tool would turn "this
+user does not browse" into a spawn failure. `''` (it ran and would not say) is
+deliberately a DIFFERENT value from `null`, because only one of them deserves a
+sentence.
+
+**IT ASKS THE BINARY, NOT THE OPERATOR'S SHELL** (r2). `execFile` inherits
+`process.env`, and an ambient `AGENT_BROWSER_CONFIG` naming a file that is not
+there makes the CLI print `⚠ config file not found` and **exit 1** — so
+`floorVerdict('')` answered `unknown` and the honest degrade notice reported
+"Could not read the installed agent-browser version, so shared profiles stay
+off" on a machine where `agent-browser --version` prints `0.32.0` in 0.103 s.
+`sanitizeProbeEnv` strips every `AGENT_BROWSER_*`, not just that one: this is a
+question about WHICH BINARY IS INSTALLED and no variable in that family can make
+the answer more true. It is the same rule `agentEnv()` in `src/ws-handler.js`
+already applies on the SPAWN path, naming this exact operator shape in its own
+comment — the probe was the one layer away that did not.
+
+### src/server/browser-env.js
+
+**r-fix (2026-09-21):** `childConfigFor(childKey)` = the parent's `<key>.json` with `profile` deleted (fence and the user's values kept), written as `<key>.<n>.json`, READ BACK and proved profile-less before its path is answered; `namesProfile` reports whether the PARENT's config names a directory (the fact `childEnvFor` falls back on). `sweep` owns a child file by its PARENT key (`parentKeyOf`) — it lives exactly as long as the parent session.
+
+**ORCH — the half that TOUCHES things.** Writes the generated config, makes the
+scratch directory, journals which rung it landed on and why, re-points the pin
+indirection, recovers a conversation's key, and sweeps what it created.
+Constructed in `src/ws-create.js`'s factory (not server.js: that file is AT its
+2100-line ratchet, and ws-create is the ONE spawn composition — the local
+`r6Argv` and all five `buildRemoteExec` call sites are in it).
+
+* `envFor({browserKey, integrationOn, remote, pinnedDir, cwd})` → `{pairs,
+  remotePrelude, variant, configPath, profileDir, fallbacks, projectConfig,
+  socket, socketDir}`.
+  **A remote session lands on rung (H) — decided ON THE HOST, by the host (r3)**:
+  (D) and (C) both name a LOCAL object, and round 2's "three names alone" floor
+  was measured to be variant (B) on any host whose config names a profile (the
+  second browser fails to launch on SingletonLock, where today both start). The
+  one fact needed lives on the host, so `remotePrelude` (the PURE fragment)
+  rides `buildRemoteExec`'s named `browser` slot at all five spawn sites and
+  chooses C or N there; the server records `H` because from here the rung is
+  genuinely unknown, and journals that once. **The LOCAL floor follows the same
+  fact**: with neither D nor C deliverable, the names alone are emitted only
+  when the effective config names no profile; otherwise `none` (nothing, today's
+  shared browser) with the journal naming the profile that decided it — and a
+  resolver that THREW also lands on `none`, because with the config unread the
+  names might collide.
+* `effectiveConfig(cwd)` — THE CLI'S TWO FILES (r3): the user file, then the
+  project-level `<cwd>/agent-browser.json` layered over it with the CLI's own
+  measured rule (`layerProjectConfig`), read from the SESSION's own directory
+  (the one the CLI would read from). Returns what it found so the journal names
+  the file and its keys; an unparseable project file is REPORTED in the journal
+  (the CLI would refuse it too), never silently skipped. Round 2 read only the
+  user file, so a project-level fence vanished from every local session with
+  `dropped: []` — finding ① for the second file.
+* **The journal states every key the generated config DROPS** (r2), one line per
+  KEY with that key's own reason, throttled on the KEY (not on "we already said
+  something about the browser") and carrying the sentence "Every other key of
+  ~/.agent-browser/config.json — and <cwd>/agent-browser.json when it exists —
+  is carried across unchanged" so it is not read as "your config was ignored".
+  Round 1 made the drop by OMISSION: the user's fence vanished with no line, no
+  telemetry and no way to notice. The resolver also RETURNS `dropped`, so a
+  caller never has to re-derive it from the file. **And the layered project
+  file gets its own line** (r3), naming the file, its keys and the one boundary
+  (per-invocation-directory in the CLI, per-session here).
+* **A pin over a fenced config is REFUSED at BOTH sites** — `repointPin` returns
+  `{ok:false, why, conflict, fence}` and the spawn path lands ephemeral with
+  `pinRefused` set and a journal line. The generated config carries the
+  session's `allowedDomains` (user file since r2, project file since r3), so
+  applying the pin would hand the session a browser that answers every command
+  with the CLI's refusal; §6.3's ruling is to refuse with a message rather than
+  accept a flag that will be silently dropped. **The pin EDITS the session's own
+  file rather than rebuilding it (r3)**: round 2 regenerated from
+  `~/.agent-browser/config.json` at pin time, which would have re-derived the
+  fence WITHOUT the project file (a pin route has no reason to know the cwd) —
+  silently un-fencing on pin, the same defect through a second door. It now
+  toggles exactly `profile` on the file on disk and asks that file for the
+  fence. **The C rung (a symlink, no config) asks the CLI's two files as they
+  stand at pin time, with the session directory it RECORDED at spawn (r4)**:
+  round 3's C branch asked `effectiveConfig(null)` — the user file alone — so a
+  PROJECT-level fence was invisible to that check; the rung now writes
+  `<key>.cwd` (`{cwd}`, 0600) beside its link, `repointPin` reads it back, and a
+  missing record is a refusal BY NAME ("start a new session"), never a fall-back
+  to half the fence. The refusal is total — nothing half-applies, and the config
+  on disk keeps its fence and no profile.
+* **A FENCED config never lands on C (r4)**: rung C exports
+  `AGENT_BROWSER_PROFILE`, which the CLI refuses beside a fence at the argument
+  check, so when the generated config could not be written AND the effective
+  config carried `allowedDomains`, round 3 landed on C and every command in the
+  session was refused while the journal called it a working `D → C` (measured,
+  one injected variable; reachable only when the config write fails while a
+  symlink and a mkdir beside it succeed — narrow, and said so). `resolveVariant`
+  reads `configFence` first, never attempts the C block under a fence (no
+  symlink, no scratch dir, no sidecar left behind), passes `fenced` to the PURE
+  ladder and journals `C → N` with `fencedRungReason(fence)`. Gate: ⑰ with two
+  patched-copy pre-fix controls (`const fenced = false;` and the C-branch pin
+  check put back to `effectiveConfig(null)`), and test-browser-resources §ⓖ on
+  the binary.
+* **THE FIFTH VARIABLE (r4)**: `socketDirDecision` (PURE) is asked for every rung
+  that emits anything, from the HOME and the `XDG_RUNTIME_DIR` the session's
+  environment carries (`env`, injected — `agentEnv()` passes the server's through
+  and strips every `AGENT_BROWSER_*`); when the CLI's own root would put the
+  socket over 103 bytes, `ensureSocketDir` makes `<base>/vs-ab-<uid>` and
+  VERIFIES it before it is named: `lstat` first (a `mkdirSync({recursive})`
+  tolerates a symlink to a directory and a chmod would follow it), a real
+  directory, owned by this uid, 0700 — a planted symlink or file means NO
+  variable and a journal line naming the CLI's consequence. `socketDirBase` is
+  injected so a suite makes its directory under its OWN scratch base and never
+  claims the production `/tmp/vs-ab-<uid>` (a machine-global name the fast tier
+  may not touch); production's is the literal `/tmp`. ONE journal line per root
+  (`daemon socket would be N bytes …`, a declared kind), and `none` still emits
+  nothing.
+* **Every file it writes is 0600 and every directory 0700** (`FILE_MODE`,
+  `DIR_MODE`, `mkdirPrivate` — which also chmods a pre-existing directory, since
+  `mkdirSync`'s mode applies only to what it creates) (r3). The generated config
+  is a verbatim copy of the user's config, proxy credentials and all; round 2
+  wrote it with the process umask (0664 in a 0775 dir, measured, from a 0600
+  source) while the token-bearing files beside it in ws-create use
+  `{mode: 0o600}`. The variant-C scratch dir is a chromium user-data-dir and
+  gets 0700 too.
+* `checkFloor({reprobe})` / `floorState` — D1's probe, ONE notice through the
+  existing `serverNotice` channel with a stable key, never blocking a spawn.
+  **ONE means once DELIVERED (r5).** The boot probe runs 3 s after the ws
+  handler registers — into an EMPTY client set on the systemd / update.sh
+  restart shape — and `serverNotice` deliberately burns its key only when a
+  client received the sentence; round 4 set `floorAnnounced = true` BEFORE
+  asking, so the notice was said to nobody for the life of the process
+  (measured on a real worktree server: a client connecting at Ready+6.3 s got
+  zero `server-notice` frames while the journal carried the line) and the
+  manual's "the user has already been told" was untrue. `serverNotice` now
+  RETURNS the delivery count (server.js: a `Map` keeps the count it reached once
+  burned; same line count), the latch is `delivered > 0` (a channel that reports
+  nothing is treated as UNDELIVERED — the loud direction; the production channel
+  reports, and its own key dedup caps a delivered notice at one per boot), a
+  latched call is FREE (no probe — it runs on every ws connection, and a fork
+  costs the parent time proportional to its RSS; round 4 probed first and looked
+  at the latch second), and `{reprobe:true}` re-reads the binary on the 6 h
+  health cadence without ever re-sending a delivered notice. ws-create's
+  `onClientConnected` (attached to the create handler, called by ws-handler on
+  every connection before the first message) is the re-ask. Gate: test-browser-
+  profiles §⑳(a) with round 4's latch spliced back as the patched-copy control,
+  and test-browser-continuity §① end to end (first client told, second not).
+* `repointPin` / `resolvedProfileDir` — §3.2.5. The variant is detected by asking
+  whether the config path is a FILE (not merely that it exists: the C rung is
+  reached precisely when something non-file is sitting where the config should
+  be, and `existsSync` there picks D and then fails writing into a directory).
+  `resolvedProfileDir` reads back off the FILE on purpose — an in-memory answer
+  passes with a writer that never lands. **Its `appliesFrom` is the MEASURED
+  moment (r4)** — `B.PIN_APPLIES_FROM`: the next COMMAND relaunches the browser
+  on the new directory and the open page is lost; rounds 1–3 returned "next
+  browser launch", which 0.32.0 falsifies (test-browser-resources §ⓗ: pid,
+  directory and page, with the no-pin control).
+* `priorKeyFor(conversationId)` — §3.2.1's continuity, TWO rungs since r5. **Rung
+  1: `browser-bindings.lookup`** (`data/browser-env/bindings.json`, see that
+  module). **Rung 2: the meta join**, REFERENCED rather than re-spelled —
+  `reading-repair._sessionKeyMap` answers conversation → `[{key, at}]` (the webui
+  key comes from the FILE NAME, so it survives any field going missing), newest
+  first, then the meta's own `browserKey`. Rounds 1–4 had rung 2 alone, and rung 2
+  reads exactly the file the product's own Terminate → Resume DELETES (ws-handler's
+  kill case and session-stdout's pty-exit path both `deleteSessionMeta`, an
+  in-memory tombstone only) — so it fired only while the previous webui session
+  was still alive, i.e. never in the flow it was written for: every resume of a
+  stopped conversation minted a new key, warned `resume-unknown` and orphaned the
+  previous namespace's daemon + chromium until the idle timeout (measured: session
+  1 `bk-c4de4a0c`, ws kill ⇒ 0 meta files name the conversation, resume ⇒
+  `bk-fa78e54c`). Gate: §⑳(b) with rung 1 removed as the patched-copy control;
+  test-browser-continuity §② drives the real kill → resume and reads the key off
+  the spawned process's `environ`.
+* `sweep(liveKeys, {graceMs})` / `liveKeysFromMeta()` — §3.2.2's promise that those
+  directories are ours and are swept. "Live" is the UNION of the in-memory set and
+  every `browserKey` a session-meta on disk still names: a session restored at
+  boot may not carry the field in memory at the instant this runs, and asking only
+  the in-memory set would make a server restart delete a running session's own
+  indirection — the pin would silently revert. A create in flight (indirection
+  written, meta not yet) is SPARED with its age named, the same in-flight floor
+  every sweeper in this tree already refuses to delete below. **`sweep(null)`
+  sweeps NOTHING and says so** — "I could not enumerate the live sessions" may
+  never be spelled the same way as "there are none". The C rung's `<key>.cwd`
+  record (r4) is swept with its link. The reported `ageMs` is
+  clamped at zero: `Date.now()` truncates where `mtimeMs` does not, so a file
+  written microseconds ago measures −1 ms old, and a negative AGE in a log line is
+  a bug report against whoever reads it.
+* `writeJson` is INJECTED so the read-back guard has a control: the failure it
+  exists for is "our writer produced a file the CLI will refuse", which cannot be
+  staged by breaking the filesystem (that also breaks the write). Production never
+  passes it.
+
+### src/server/browser-bindings.js
+
+**ORCH (r5) — the conversation → browser-key binding, in a store whose lifetime
+is the CONVERSATION's, not the webui session's.** `create({dataDir, log})` →
+`{record(conversationId, key, {at}), lookup(conversationId), keys(), refusals(),
+conversationIdOf(meta), bindableIdOf(meta), file, dir}` over `data/browser-env/bindings.json` =
+`{v: 1, byConversation: {<sid>: {key, at}}}`, in the directory browser-env
+already owns (its sweep skips it: `bindings` is not a browser key).
+
+* **Why it exists**: §3.2.1 promises a resumed conversation keeps its browser
+  key, and rounds 1–4 recovered it from `data/session-meta` — the file the
+  product's own Terminate → Resume flow UNLINKS (ws-handler's kill case,
+  session-stdout's pty-exit path). So the `conversation` rung fired only while
+  the previous session's meta still existed, i.e. never in the flow it was
+  written for; every resume of a stopped conversation minted a new key,
+  warned `resume-unknown`, and orphaned the previous namespace's daemon +
+  chromium (~1.4 GB RSS, 16 processes) until the 15-min idle timeout —
+  unbounded once P1's leases set that timeout to 0. Measured on a real
+  worktree server with a real claude session before the fix.
+* **Written at the ONE meta choke point**: `session-stdout.writeSessionMeta`
+  calls `record(bindableIdOf(meta), meta.browserKey)` after the meta write
+  (lazily constructed against the same data dir). Every producer of a meta
+  record passes through that function, including the ones that learn the
+  conversation id LATE — the init frame, the lock file — so the binding lands
+  the moment a record carries both facts. `deleteSessionMeta` never touches it.
+* **The id rule is `claudeSessionId || backendSessionId`**, the same rule
+  `reading-repair._sessionKeyMap` files a conversation under, spelled once as
+  `conversationIdOf` so the two rungs of `priorKeyFor` can never disagree.
+* **A RECORD MAY NOT BIND THE CONVERSATION IT WAS FORKED FROM (r6, the
+  round-5 verifier's HIGH, reproduced end to end on the pristine r5 store
+  before a line was changed).** r5 wrote here "a fork binds under ITS OWN new
+  id and never rewrites its parent's" — true of the ADOPTION write and false
+  of every write before it. A claude fork is created with `claudeSessionId` =
+  the PARENT's id (`--fork-session` resumes the parent; the fork's own id is
+  announced by the init frame later and adopted then), a codex fork with the
+  parent's thread id (the wrapper's `thread/fork` reports the new one in a
+  later `wrapper_meta`), and both mint a NEW browser key (D15). So the fork's
+  FIRST meta write carries {<parent id>, <fork key>}, and r5's hook — "does
+  the record carry a conversation id and a key" — bound the PARENT to the
+  FORK's browser. Measured on a real worktree server: resume X → `bk-2afad4b8`,
+  kill, fork X → `bk-02d028a3`, and within 800 ms `bindings[X].key` =
+  `bk-02d028a3`; kill the fork, resume X → the parent's process carries the
+  FORK's `AGENT_BROWSER_SESSION` (two conversations on one browser — `close
+  --all` from either closes the other's tabs, the incident P0 exists to stop,
+  D15 reversed), the parent's own daemon + chromium orphaned under its old
+  namespace, and NOT ONE journal line (rung 1 answered confidently). TWO
+  LAYERS, each with its own control:
+  * ① **the RULE, at the choke point** — the record SAYS which conversation
+    it was forked from: `forkSourceId` (`data.forkedFromId || data.resumeId`
+    under `data.fork`) is written by ws-create's origin meta write and carried
+    by every later write's spread (a printed census in test-browser-profiles
+    pins that exactly ONE producer rebuilds the record from scratch — that
+    origin write — and every other spreads the previous record), and
+    `bindableIdOf(meta)` answers '' while the record's conversation id IS that
+    source. The id a record may BIND is not the id it NAMES — `conversationIdOf`
+    is unchanged and still names the parent for every other reader. After the
+    harness adopts the fork's own id the record names a different id and binds
+    it; an opencode fork is minted BEFORE the spawn, so its first record already
+    differs from the source and binds at once, exactly as before.
+    `forkRequested` was deliberately NOT the fact asked: it stays `true` in
+    the file after a claude adoption (that write spreads the old record and
+    never re-lists it) and for ever on a codex or opencode fork (nothing clears
+    it) — asking it would have left every fork unbound and every resume of a
+    fork a `resume-unknown`.
+  * ② **the BELT, in the store** — a binding is written ONCE per conversation.
+    A different key for a conversation that already has one is REFUSED,
+    journalled once per (conversation, offered key) with both keys named, and
+    counted (`refusals()`, telemetry `browser-binding-move-refused`). A
+    refusal is never a lost binding — the conversation keeps the key it had,
+    which is the direction the incident wants. **r7 adds the other half: a
+    key is ONE conversation's** — a NEW conversation offered a key another one
+    already holds is refused the same way (`browser-binding-share-refused`,
+    once per pair, the same census).
+* **A KEY IS BOUND TO THE CONVERSATION IT WAS DECIDED FOR (r7, the round-6
+  verifier's MEDIUM — the IMPLICIT fork, reproduced on a real worktree server
+  through the real stream consumer).** r6 claimed "no producer we ship
+  re-binds"; one does, with no fork flag: a `claude --resume X` whose
+  conversation is LOCKED by another live claude silently forks to a NEW id Y
+  (claude's own double-writer protection; a codex/ACP resume can re-mint
+  too), the consumers ADOPT it (2.219.0, `forkedFrom: [X]`), and the record
+  then names Y beside the key K decided for X — which r6's rule ("were you
+  forked FROM this id?") bound: Y → K, two conversations on one browser for
+  ever, no journal line. Three pieces, one fact:
+  * ws-create's origin write states **`browserKeyFor`** = the conversation the
+    key was DECIDED for — a resume's `resumeId` (the ladder looked THAT id up
+    or minted for it); a fork NEVER (its key belongs to the id the harness will
+    announce, `forkSourceId` guards the parent); a new session NONE (its first
+    announced id is the one). Spread forward by every later write like
+    `forkSourceId`.
+  * `bindableIdOf` refuses any id that is not the decided one, and
+    `priorKeyFor`'s meta rung asks the same rule (a live record that may not
+    bind a conversation may not answer for it either).
+  * The choke point SAYS it once per (session, id) through `noteUnbound`
+    (`browser-binding-implicit-fork`, `implicitForks()`): the running process
+    keeps the browser it spawned with — a spawn env is immutable — and the
+    announced conversation mints its own key on its next resume, with the
+    honest `resume-unknown` line. The fork-source case is not announced (it is
+    expected and transient).
+  * Honest boundary: two conversations an OLDER build already bound to one key
+    stay bound (the store is not migrated); the belt only refuses new shares.
+  * Honest boundary: a terminal-mode claude fork never announces its own id to
+    us (no stream), so its record keeps naming the parent for its whole life
+    and binds NOTHING — its browser is reclaimed by the idle timeout like any
+    conversation that was never bound; the parent is untouched, which is the
+    half the incident was about.
+* **Bounded** at `MAX_BINDINGS` (4096) newest by `at`, **atomic** (tmp + rename), **0600**
+  in a 0700 dir, **change-detected** (the recorder caches what it wrote; the
+  dozens of meta writes a session makes per turn cost no disk write once the
+  binding is on disk), and the reader re-reads the file per lookup (one resume
+  = one read; the writer is another module instance). A write that fails is
+  journalled (`could not record the browser key … a later resume will mint`)
+  and never thrown — the meta write it rides is not held up.
+* Gate: test-browser-profiles §⑳(b) (the store's rules, `priorKeyFor` over an
+  unlinked meta with a patched-copy pre-fix control, the sweep leaving the file
+  alone, source pins on the choke point and on the two deleters) + §⑳(b′) (r6:
+  the rule table over the three harness shapes, the belt's refusal/journal/
+  count, the choke point mirrored over the real module and over three patched
+  copies — rule off (the belt alone holds), belt off (the rule alone holds),
+  both off = r5's bytes and the parent MOVES — the `forkSourceId` wiring pin,
+  and the meta-writer census; r7: the `browserKeyFor` rule table, the share
+  refusal, the once-per-pair journal + counters) + test-browser-continuity §②
+  (a real server: create as resume → ws kill → meta gone → resume again ⇒ the
+  SAME `AGENT_BROWSER_SESSION` in the spawned process's `environ`, one
+  `resume-unknown` line in total; then FORK ⇒ the fork's process carries a
+  DIFFERENT key, `bindings[X]` is unchanged and no refusal line was needed ⇒
+  kill ⇒ resume the parent ⇒ its own key, ONE namespace ever spawned for it)
+  + §③ (r7: a CHAT resume of X whose fake claude announces a DIFFERENT
+  `session_id` Y after 1 s ⇒ the real consumer adopts Y (`forkedFrom:[X]`, no
+  `forkSourceId`), the record carries K + `browserKeyFor: X`, `bindings[X]` =
+  K and `bindings[Y]` is EMPTY with exactly one implicit-fork journal line and
+  no refusal line ⇒ kill ⇒ resume Y ⇒ its OWN key + one `resume-unknown` ⇒
+  kill ⇒ resume X again ⇒ X's key again, both bindings unchanged, a second
+  journal line, the belt never reached).
+
+### src/lib/browser-profile-picker.js
+
+**P6 (2026-09-21):** a mediated (instance-shared) profile is NOT offered as a pin target in the pin menu or the `<select>` options — it is attached through its scoped url (`use`), never pinned (the legacy record keeps `(legacy shared)`).
+
+**P4 second half (2026-09-17; §7.4):** `pickerItems` takes the digest's
+`chips` (each profile row shows `· <chip>`) and an `onSwitch`; the pinned
+profile gets a `Backend: <chip> — switch…` item that opens
+`app.openBrowserSwitcher` — the chip's second home (the first is the live
+view's title bar); the Session Properties digest line carries the chip beside
+the name.
+
+CLIENT (agent browser P1, §3.2.5): the pin's ONE entry point — `session.pinBrowser`
+(a `session-card` `3_admin` row beside `session.switchBilling`, shown only
+while the client holds a profile digest) → `showBrowserProfilePicker` (a context
+menu: Unpinned ✓ / every profile / the ADOPT item whose label is honest per
+rung — "from this session's browser…" on C, "new EMPTY profile (reopens the
+browser)…" elsewhere), `pinBrowserProfile` (ONE write for every surface; the
+toast says when it applies), `adoptBrowserProfile`, `_fillBrowserProfileRow`
+(the New Session dialog row: the Task Group's default > the instance default >
+none, remembering WHICH filled it as `dataset.origin` so the wire says it as
+`spawnOriginHint.browserProfile`; a user pick is `chosen`), `browserPinSummaryHtml`
+(Session Properties' Browser section: the pin, its origin in the five-word
+vocabulary, how many sessions share it). The digest `app._browserProfiles` is
+fetched at boot (`refreshBrowserProfiles`; a 503 leaves it null and every
+surface hides itself) and refreshed by `browser-profiles-updated`. The
+live-view window's title (P2) will call the same picker. Gate: test-contributions
+(the session-card identity leg hides the row when no digest is held).
+
+### src/session-status.js — the notice QUEUE (P1, §3.8 layer ②)
+
+`pendingNotice` was ONE fixed-shape slot with a hardcoded renderer and an
+injection site that consumed one and `break`-ed; a second producer overwrote
+it. Now `pendingNotices: [{kind, …}]` per record: `pushNotice(key, {kind,…})`
+(an unknown kind THROWS at push time — never rendered as garbage; bounded at
+8, oldest first), `consumeNotices(key)` drains, `renderNotice` dispatches on
+`kind` (`status-override` keeps today's sentence verbatim; `browser-profile` /
+`browser-pin` render through the PURE `browser-profiles.renderProfileChangeNotice`),
+a file an older build wrote is lifted into the queue once at load, an agent's
+own clear keeps queued notices. The ONLY injection site (agent-routes
+prompt-context) drains BOTH keys instead of breaking at the first. Zero billed
+turns: the text rides the user's own next message. Gate: test-profile-blindness.
+
+### src/task-groups.js — `browserProfileId` (P1, §3.2.5 row 3)
+
+A group's DEFAULT browser profile for its NEW sessions (`bp-<8 hex>` or null,
+`sanitizeBrowserProfileId`; create + patch), edited in task-detail's Context
+section beside External visibility. The keeper's `taskGroupDefault` dep asks
+`groupsForSession({cwd, initialGroupId})` at create (spawned-into group first,
+else the earliest bound group naming one); binding/unbinding never rewrites a
+running session's pin.
+
+### src/server/browser-keeper.js
+
+**P6 (2026-09-21; §6.2 / §6.5 / D6):** `mediator` (src/server/cdp-mediator.js) is injected by the wiring and its presence is the `mediation` fact `createProfile` / `updateProfile` hand the §6.2 verdict (`sharing` is editable through `updateProfile` — refused `leased` while any session holds a lease, `bad-request` on the legacy record). `isMediated(p)` = `B.isMediatedProfile`. A mediated `attach` REFUSES by name with no proxy in this process (`mediation_unavailable`, never a silent fall-back to the cooperative env) or a browser that answered no CDP url (`mediation_no_cdp`), else asks ONE grant per (profile, browserKey) (`grantFor` with the lease's targetId and a `paused` reader over `inputStateFor(...).input === 'user'` — read per message) and answers `mediated:true`, `M.mediatedEnvFor` (the scoped url, a per-session namespace, no directory), `cdpUrl` = the scoped url, and the `note`. `start` re-points every grant on the profile (local + external arms), `stop` nulls them, `detach` and a reconcile drop `revoke` (1008 + the lease's tabs closed upstream), `switchBackend` admits each re-opened tab into its lease's scope, `streamPortFor` asks the SESSION's own daemon (`M.mediatedNamespace`, `AGENT_BROWSER_CDP` in `extraEnv`) for a mediated lease, `answerConfirmation` likewise; `list()` carries `mediation:{available, port, grants}` and `pview`/`leaseView` carry `mediated`; `shutdown()` ends the proxy (it is the keeper's). **A mediated profile is attached, never pinned**: a pin hands the next launch the DIRECTORY (P0's spawn env) and a shared browser has one owner, so `setPin` refuses `pin_refused` by name, `pinForCreate` skips a Task-Group / instance default (or a stale pin) naming one with the reason on `refused` (ws-create journals it and starts ephemeral), and `updateProfile` to `instance` refuses `pinned` while any conversation pins it. Gate: test-browser-mediation ④.
+**P4b install action (2026-09-17, §7.4 failure form (1)):** `cloakExecutable()` gains a THIRD rung — the package this keeper installed under `data/browser-tools`, its executable read from that package's OWN `package.json` `bin` (`installedCloakBin`, never a guessed name); `installVerdict({host})` = the PURE verdict over the §7.2.1 proof record (`providers.proof` injectable, else `B.CLOAK_EGRESS_PROOF`), the executable rung and the single flight; `installCloak()` acts ONLY on an ok verdict (a refusal is thrown by its code and spawns nothing): ONE `npm install --prefix <data>/browser-tools … cloakbrowser@<measured version>` (npm from the session PATH, `install_unavailable` when absent), output to `install.log`, a 15-min bound, exit recorded in `installState` and announced through the profiles broadcast; the switcher view carries `install`. Invariant: the install pins the version the measurement describes — an unpinned download would invalidate the record it is gated on.
+
+**P4 second half (2026-09-17; §7.4 / §7.5 / D33 / D34):** `start` runs the
+capability control for the profile's machine (`backend_unavailable` naming
+what is missing) and then — for a key-bearing row on THIS machine only (a
+`host` never resolves a key: D34) — THE ONE `keys.keyFor(integrationId)`
+resolve, refusing `backend_no_key` with `action.openIntegration` BEFORE any
+browser record exists (a silent fallback to chromium is what D33 rejects); the
+vendor's own env names go into THAT child's environment and nowhere else
+(`rt.launch({extraEnv, argvPrefix})`), the seed and the executable path ride
+argv, the key never does. A key-bearing launch that fails on licence/
+concurrency is the THIRD named refusal `backend_seat_taken` (under a cluster
+default: the seats are shared fleet-wide, "stop one of yours" is the wrong
+advice, the way out is "use my own key"). Read back from the launch, never
+polled: the seat TIER (`tierFromLaunch` → `reg.seats[intId] = {tier, total, at,
+source}`; nothing recognisable ⇒ the reading stays unknown, never a fabricated
+number) and the Chromium MAJOR (`probeCdp` → `/json/version` → `reg.majors`
++ the profile's `lastChromiumMajor` = the HIGHEST major that ever wrote its
+directory). `switchBackend` = `switchVerdict` (the gate; a `proposal` verdict
+returns `{mode:'proposal', text, detail, affected}` for the route to file and
+moves NOTHING) then §7.4's sequence: `switching.add` → stop the browser
+(Chromium's process singleton: no live handover) → `provider`/`seed`/
+`defaultBackend`/`lastSwitchAt` written → `start` on the SAME directory with
+the carried seed → for every lease `open <lastUrl>` under ITS OWN session name
+(`--pin-tab` at/above the floor) → `targetId` rewritten on the SAME lease
+object (the lease is looked up by (profileId, browserKey) and never destroyed)
+→ `lastChromiumMajor` raised to the ladder's `recordMajor`; mid-way `attach`,
+`switchBackend` and `resolveFor` answer the NAMED `browser_restarting`, never a
+timeout. `noteLeaseUrl` stamps a lease's `lastUrl` from BOTH producers (the
+live view's `url` mirror through `noteUserUrl`, the CLI's navigation through
+the audit route); `switcherView` (rows with reasons, the masked source chip,
+seats, versions `{recorded, dir, majors}`, blocked claims, hints, leases);
+`chipFor` (`chromium 146` / `cloak 146 (free)`); `seatStates` (`used` = this
+instance's own count, `runningOf(provider)`); `blocked` (one claim per
+(conversation, host), bounded 50; a dead conversation's claims go at
+`reconcile`); `addSiteHint`/`dropSiteHint`/`siteHints`; `readDirMajor` (the
+directory's own `Last Version`, read-only); `cloakExecutable` (the setting's
+path, else PATH — nothing is ever downloaded). `list()` carries `chips`,
+`seats`, `majors`, `blocked`, `siteHints`, `switching`. Gate:
+test-browser-backend ③.
+
+**P4 (2026-09-16; §7.3 / D5 (b)):** `hostId` is a parameter the ACCESS layer
+dispatches on, never a branch here — `access`/`hostKnown` are injected (the
+wiring hands `browser-access`). `createProfile` refuses an unpaired `host` BY
+NAME (`unsupported-host`, never a silent local fallback) and makes a directory
+only for a row that owns one on THIS machine (a paired machine composes its own
+through `browser-serve`; `cdp` has none). `start` has three arms: a LOCAL
+chromium (unchanged), a chromium on a PAIRED machine (the `start` op there →
+its own loopback cdp url → `forwardCdp` → the record carries `hostId`, the
+device's pid/starttime/dir, `remoteCdpUrl` and `forward:{remotePort,
+localPort}`; a start reporting no CDP url is `launch_failed`, because an env
+with no CDP pair would launch a LOCAL browser instead), and an EXTERNAL
+browser over `cdp` (`external:true`, no pid: the port is forwarded when
+`host` is set and PROBED at `/json/version` — a dead port is `cdp_unreachable`
+with the Chrome ≥ 136 non-default-user-data-dir remedy and NO launch).
+`isLocalRec` gates every pid act: a remote/external record is never
+pid-judged, never sampled by the runaway guard and never signalled here —
+`stop` asks the device's own `stop` op (an unreachable machine is SAID, never a
+silent success) and closes only the forward for an external browser (left
+running: it is somebody else's); `adoptRemote` at boot re-forwards and re-ASKS
+(status + cdp-url / a fresh probe), recording `stopped` WITH the reason when the
+far side is gone. `attach` hands the env the hub-side CDP url for a reached
+browser (`attachedEnvFor({cdpUrl})`); `browserView` strips `cdpUrl` AND
+`remoteCdpUrl`; `list()` carries `providers` (the rows with their local
+verdicts); `streamPortFor` refuses a reached/remote browser's live view by
+name (`stream_unavailable`, not bridged in this release). Gate:
+test-browser-providers ④.
+
+**ORCH — the profile registry, its leases and the keeper of its browsers**
+(P1, 2026-09-16; design §3.3–§3.5). Owns `data/browser-profiles.json`
+(writeJsonAtomic, 0600 because a profile may carry a credentialed proxy;
+`browser-profiles-updated` broadcast on every commit), the leases (one per
+(profile, browserKey)), the browser records (one daemon per profile,
+reuse-or-spawn through `browser-facts.createBrowserRuntime` = the CLI's own
+`open` / `session info --json` / `get cdp-url` / `close --all` under ONE
+namespace with a sanitised env), the conversation's pin, the ceiling and the
+runaway guard (`src/keeper-limits.js`). Invariants: lazy — no timer until a
+profile is attached; the daemon is launched with `AGENT_BROWSER_IDLE_TIMEOUT_MS=0`
+and THIS tick owns the idle clock (a lease that drops and returns never costs
+a cold browser); `boot()` = `reconcile({graceMs:0})` → `adoptAll()` → maybe
+`startTimer()`, in that order and no other; an unproven pid (starttime differs
+or is unreadable) is recorded ended and never signalled; `stop()` = the CLI's
+own `close --all` first, a SIGTERM/SIGKILL only when pid+starttime prove the
+process ours; a runaway is stopped, parked for `RUNAWAY_COOLDOWN_MS`, telemetered
+and announced; `removeProfile` refuses a leased or running profile and never
+deletes the directory. `keeper()` is the module singleton ws-create asks for the
+`conversation` rung lazily (the ws ctx contract is untouched); server.js calls
+`bootBrowserKeeper()` (mounts-plugins-wiring) right after `restoreSessions()`.
+Gate: test-browser-pin (fast) — the real keeper over a fake `agent-browser`
+whose daemon is a real `sleep`.
+
+**P1 second half (2026-09-16; design §3.7 / §3.8 / §3.2.5):** the registry
+gained `children` (child handles `bk-<parent>.<n>` a conversation minted for its
+sub-agents — reaped by prefix with the parent, at boot at once, at runtime
+after the lease grace) and `told` (what each conversation was LAST TOLD about
+its attachment set — the memory layer ①'s one-time refusal fires on;
+persisted only when the fingerprint moved, dropped with the conversation).
+`attach({alias})` stores the HANDLE on the lease once (an explicit alias must be
+well-formed and free, else `bad_alias`/`alias_taken`; otherwise the label's slug
+— a later rename never renames a handle an agent is using). `setFor(key)` is
+the attachment-set view (`browser-profiles.attachmentsFor`), `tell(key)` records
+the told view, `resolveFor({browserKey, handle, subagent})` = the blindness
+check FIRST (a moved fingerprint ⇒ `profile_changed` once, and the session is
+told) THEN `resolveHandle`; every agent-route mutation ends in `tell`, a USER's
+UI act deliberately does not. `newChild`/`dropChild`, `audit()` appends ONE
+`{at, sessionId, browserKey, profileId, verb, ok}` line to
+`data/browser-audit.jsonl` (0600, the verb only — never a fill's content),
+`adoptScratch({label, scratchDir, owner})` MOVES a rung-C scratch directory
+under `~/.agent-browser/vs-bp-<id>` (the login kept; EXDEV refused by name),
+and `taskGroupDefaultFor(facts)` asks the wiring's `taskGroupDefault` dep (the
+Task-Group rung's fact) — a throwing dep answers `''`, never a throw out of a
+create. Gate: test-browser-handles + test-profile-blindness (fast).
+
+**P2 (2026-09-16; design §4.2):** `streamPortFor(target)` = the ONE way the
+live view learns a port — an attachment target starts the profile's daemon if
+it is not live and asks `stream status --json` (then `stream enable` only when
+disabled) under the lease's own session name; an ephemeral target is asked with
+the session's spawn pairs and starts nothing of ours; every failure is
+`{ok:false, code, error}`, never a throw into the bridge.
+
+**P3 (2026-09-16; design §4.3 / §4.3.1):** the INPUT SIDE of every
+(conversation, browser) pair lives here IN MEMORY (`inputs`, keyed
+`browser-takeover.inputKeyFor(browserKey, profileId|null)` — never persisted: a
+restart is a handback by construction, the lease's `input` field is only a
+mirrored VIEW). `takeover`/`handback` (PURE decisions, `onInput` listeners: the
+bridge mirrors, the announcer decides what to deliver, server.js re-publishes
+live facts), `noteUserInput`/`noteUserUrl` (the idle clock and the handback
+URL), `pausedVerdictFor` + `resolveFor` refusing `browser_paused` while the user
+drives (a child handle never), `inputSummaryFor`/`inputsFor` (the card and the
+status route), the tick's `sweepIdleTakeovers` (setting `browser.takeoverIdleMs`,
+default 10 min, 0 = never, floor 30 s) and `sweepPending`, detach/reconcile
+dropping the state with a `detach` handback, and the `--confirm-actions`
+registry (`notePending`/`resolvePending`/`pendingFor`/`pendingAllFor`,
+`answerConfirmation` = the CLI's OWN `confirm|deny <id>` under the lease's
+session in the profile's namespace — or the ephemeral browser's spawn pairs —
+`onConfirmation`). Gate: test-browser-takeover (fast).
+
+### src/server/cdp-mediator.js
+
+**ORCH — THE CDP-MEDIATING PROXY** (agent browser P6, 2026-09-21; design
+§6.2 / §6.5 / D6). One loopback http server started LAZILY (a fresh instance
+listens on nothing until the first grant), serving each (profile,
+conversation) lease its OWN url: `GET /m/<token>/json/version` and
+`/json[/list]` (the upstream asked and re-pointed / filtered), `WS
+/m/<token>/devtools/browser` (the browser endpoint, every message judged by
+the PURE rules) and `WS /m/<token>/devtools/page/<id>` (in scope only, 403
+by name). Invariants: the upstream socket is opened HERE (the raw endpoint
+never leaves the server; nothing is logged with a token or a raw url in it)
+and the client is upgraded only AFTER the upstream is open (no message is
+ever queued into a socket that may not come; an unreachable upstream is 502
+on the upgrade); `grantFor({profileId, browserKey, upstream, targetIds,
+paused})` mints a token ONCE per lease for the process's life and re-uses it
+after (the scope KEPT, `targetIds` ADDED, the `paused` reader replaced — it is
+read PER MESSAGE, never cached; a reader that throws is logged and read as
+not paused, so a broken reader never wedges the browser); `repoint(profileId,
+upstream|null)` follows the profile's browser (a restart closes live
+connections 1012 `browser_restarting` and the SAME url reconnects; a stop
+nulls it and every path answers 503 `browser_stopped`); `revoke({profileId,
+browserKey, closeTargets=true})` closes the lease's connections 1008
+`lease_gone` AND closes the lease's own tabs IN THE BROWSER over one bounded
+upstream connection (`closing` is the promise) — because `Browser.close` is
+refused through a session url, a mediated `close --all` closes the session's
+daemon side only and its tabs would outlive the lease (measured on 0.32.0 +
+Chrome 153); an unknown token is 404 on every path (never 403 — nothing is
+confirmed); `list()` = grant views (counts only); `shutdown()` closes every
+connection 1001 and forgets every grant (tokens are not persisted — a lease
+that survives a server restart is re-granted lazily on its next `resolve`,
+exactly as a forwarded port is). Gate: test-browser-mediation ③ (fast, the
+real proxy over a fake CDP upstream) + test-browser-mediation-chrome (heavy,
+the real chrome — the §6.2 exit).
+
+### src/browser-takeover.js
+
+  **P9b (2026-09-21): `target: 'browser' | 'window'`** on `browserPausedRefusal` (code `window_paused`, "snapshot the window again" instead of a page), `handbackText` (a window has no URL to carry: "Snapshot it before continuing (`vibespace-window snapshot <handle>`) — refs from before the takeover are stale"), `handbackNotice` (carries `target` + `handle` for a window, nothing new for a browser) and `idleInboxItem`; `TARGETS` is the closed set, an unknown target is the browser noun; every browser string byte-identical (pinned in test-window-target §1 against P3's literals). One model, one noun switch — a window's takeover IS a tab's (§4.9).
+
+**PURE — takeover and handback** (agent browser P3, 2026-09-16; design §4.3 /
+§4.3.1). CJS with no imports so the keeper, the bridge, the routes and the
+bundle carry ONE rule set. Invariants, one each: the input state of a
+(conversation, browser) pair is `{input, takenAt, takenBy, lastUserInputAt,
+handedBackAt, handbackCause, url}` and lives only in memory; `decideTakeover`
+refuses a second live viewer with the typed `held` and is idempotent for the
+same viewer; `decideHandback` records WHY (`HANDBACK_CAUSES` = explicit / idle
+/ viewer-left / restart / detach) and any viewer may hand back;
+`idleHandbackVerdict` treats 0 as never; `announceVerdict` is §4.3.1's table —
+explicit delivers, idle/viewer-left deliver only when
+`browser.announceIdleHandback` is on, restart/detach never; `browserPausedRefusal`
+is the agent's typed refusal (who, when, what to do — never a timeout);
+`handbackText` carries the current URL first; `handbackNotice`/`renderHandbackNotice`
+are the zero-spend twin riding the next message; `idleInboxItem` is the one
+"For you" item; `confirmationFromUpstream` reads the daemon's
+`confirmation_required` answer in both nestings and off the error text,
+`decisionArgv` turns an answer into upstream's own `confirm|deny <id>` (a bad
+id never reaches a spawn), `decisionVerdict` types the daemon's reply;
+`agentCursorFromCommand` reads the last CDP coordinates off a `command`
+mirror; `modeBadge` is the badge's three sentences; `inputSummary` is what the
+card publishes. Gate: test-browser-takeover (fast).
+
+### src/server/browser-handback.js
+
+  **P9b (2026-09-21): `installWindow(engine)`** hangs the SAME `announce` on the window-targets engine's `onInput` seam (`target:'window'`, the app label as the noun, the handle in the text) — ONE announcer, ONE billed site, ONE reason `browser-handback` (no new spend-census row: the literal call is unchanged); an idle window handback files the inbox item and queues the notice with `target:'window'` + `handle`, delivering nothing. Gate: test-window-target §1 (fake ladder) + §3 (the real handback announced into the holder's conversation).
+
+**ORCH — the handback announcer** (P3, §4.3.1). The ONE producer of the
+"browser-handback" turn nobody typed: it hangs on `keeper.onInput` /
+`keeper.onConfirmation` and, per `browser-takeover.announceVerdict`, either
+delivers through `deliverToConversation(cid, text, {kind:'notification',
+spendReason:'browser-handback'})` — its single ladder site, the literal
+test-spend-paths' per-site census reads, listed under (file, 'deliver-ladder')
+— or delivers nothing: the zero-spend notice is queued on session-status and,
+for an idle lapse, ONE "For you" item is filed. A refused or failed delivery is
+stashed on the ladder's own stash and the notice is queued (nothing lost; the
+lease flip already happened). A pending `--confirm-actions` confirmation files
+one inbox item pointing at the live view. Built in mounts-plugins-wiring with
+`deliver` + `userTodos` from server.js; `shutdown()` unsubscribes. Gate:
+test-browser-takeover ③ (fast).
+
+### src/browser-stream.js
+
+**PURE — the live view's decisions** (agent browser P2, 2026-09-16; design
+§4.2 / §4.4 / §3.7). CJS with no imports so the server bridge and the browser
+bundle carry ONE set of rules. Invariants, one each: `streamTargetFor` picks the
+pane a live view shows — a handle, else the set's default, else its only
+member, else the FIRST attachment (a view is not a command; refusing to open a
+window would be a silent failure of a user act), else the session's own
+ephemeral browser under its P0 `AGENT_BROWSER_*` pairs, else a typed
+`no-browser`/`no-key`; `classifyUpstream` makes `frame` latest-wins and every
+other record ordered, and an unknown type is relayed rather than silenced (a
+newer upstream must not be muted by an old bridge); `parseStreamStatus` /
+`streamPlan` read the MEASURED 0.32.0 answers (`stream status --json` →
+`{data:{enabled, connected, port, screencasting}}`; `stream enable` on an
+enabled session exits 1 with "already enabled" and is NOT a failure; a launch
+failure surfaces inside `stream status` and IS one); `viewerMessageVerdict`
+aggregates `config` per viewer, consumes `ack`, and forwards `input_*` only from
+the viewer holding the lease's input side (Watch mode refuses every input with
+the typed `watch-mode` code; P3's `takeover`/`handback`/`confirm` are CONTROL
+verbs the keeper decides, never forwarded); P3 adds the CDP-shaped input
+builders `mouseRecord`/`wheelRecord`/`keyRecord`/`touchRecord`/`modifiersOf`
+(the stream server's own shapes; modifiers alt 1 · ctrl 2 · meta 4 · shift 8)
+and `deviceToViewport`, the inverse of `pointerToDevice`, for the agent cursor; `frameGate` drops a frame for a
+viewer that still has more than the LOW-water mark queued (latest-wins per
+viewer, one slow tab never stalls the others) while `backpressureVerdict` keeps
+the VNC bridge's 8 MiB pause / 1 MiB resume verbatim; `drawnRect` +
+`pointerToDevice` are the ONE DPI conversion (viewport px in, device px out,
+letterbox-aware, `null` outside the picture — never a clamped edge). The real
+shapes live in `scripts/fixtures/browser-stream/session-0.32.0.json` (one real
+headless session captured on 2026-09-16: status/tabs/frame/command/result, no
+`seq` on 0.32.0, a foreign Origin 403, loopback/absent accepted). Gate:
+test-browser-live (heavy).
+
+### src/server/browser-stream.js
+
+**ORCH — the live view's ws bridge** (P2). `GET
+/api/browser/stream?session=<webuiId>[&profile=<handle|id>]` upgrades a
+COOKIE-authed WebSocket (401 before the upgrade — never a socket that opens
+then dies) and bridges it to that session's loopback stream server in
+`bridgeVncSocket()`'s shape: ONE upstream connection per (session, target)
+fanned out to N viewers (a late viewer is replayed the last status/tabs/url and
+the last frame at once); the `maxFps` sent upstream is the MAX across viewers
+and each viewer is served at its own rate; a viewer over the low-water mark has
+frames dropped, the upstream is `pause()`d past 8 MiB on ANY viewer and resumed
+by a 50 ms poll once EVERY viewer is under 1 MiB; every refusal (`not-found`,
+`unsupported-host` for a remote session, `no-key`, `no-browser`,
+`not_attached`, the keeper's own launch codes) reaches the viewer as a typed
+`status` message before the close; the upstream dying, the last viewer leaving
+and the session ending each tear the relay down with a reason. The port comes
+from `keeper.streamPortFor(target)`: an attachment's profile daemon (started
+when stopped — a view is a start, like an attach), asked under the lease's own
+session name `vs-<browserKey>`, or the ephemeral browser asked with the very
+pairs the session was spawned with (`session._browserEnv`, kept in meta so a
+restart still finds it). **P3 (§4.3):** `takeover`/`handback` ask the KEEPER
+(the one owner of the input side) and `relay.mode`/`relay.holder` mirror its
+answer; every relay on that browser learns a flip through `keeper.onInput` and
+sends ONE `mode` record per viewer (`mine` for the holder); the holder's socket
+closing and the relay ending hand back as `viewer-left`; the holder's inputs
+restart the keeper's idle clock (≤ 1/s); the `url`/`tabs` mirrors feed the
+handback URL; a `confirmation_required` result becomes a typed `confirmation`
+record (+ the keeper's registry, replayed to late viewers) and a viewer's
+`confirm` is answered through `keeper.answerConfirmation`; a keeper without the
+P3 surface degrades to relay-local mode bookkeeping. Built in
+mounts-plugins-wiring; server.js only dispatches the upgrade path. Gate:
+test-browser-live (heavy, real http server + fake upstream + one real chromium). §47 (r0 rebase): both browser chrome suites (test-browser-live, test-profile-blindness-chip) pre-set `vs-onboarded` through scratch.mjs's ONBOARDED_SOURCE before their navigates, like every chrome suite since 2.369.125 r7; the ④ real-chromium leg of test-browser-live is judged by the heavy gate (on the 2026-09-21 rebase box `agent-browser stream enable` failed with "Chrome exited early (exit code: 21)" identically on the untouched original tip — environmental).
+
+### src/lib/browser-live-window.js
+
+**r-fix (2026-09-21):** the picture container's counter-zoom is utils.js's `COUNTER_ZOOM` (imported), never the calc() literal — test-terminal-ui-scale's census admits ONE spelling in src/lib.
+
+**The live view window** (P2, §4.4 / §3.7): window type `browser-live`
+registered here (openSpec `{action:'openBrowserLive', sessionId, profileId}`
+persists and replays — always back in Watch mode, a reload never re-seizes the
+controls); the picture is drawn through `img.src` (never markup) inside a
+container at NET zoom 1 (`zoom: calc(1 / var(--ui-scale, 1))`, the vnc-view
+rule) and `pointerAt(ev)` is the ONE pointer conversion; the bar carries the
+mode badge and §4.3's three modes (P3: Take over asks the bridge and the
+holder's pointer/wheel/keys are forwarded as CDP-shaped records only while
+`mine`; Hand back is a transition any viewer may trigger; a `mode` record from
+the bridge moves every viewer; a reload comes back in Watch), the labelled
+AGENT CURSOR at the last CDP coordinates the `command` mirror carried (hidden
+while the user drives), the `--confirm-actions` bar (Confirm/Deny + the
+daemon's 60 s countdown, answered by the stream's `confirm` verb), the URL line,
+the viewer count, the recording indicator (P5: the profile's live screencast from the digest, click = the Browser profiles panel), the tabs, console and (P5) Actions
+panes and the "open in the embedded browser" hand-off; a session with ≥2
+attachments grows the SWITCHER STRIP inside THIS window (one tab per
+attachment with its activity light from the stream's command/result mirrors;
+clicking reconnects the same window to the other pane; the title names the
+pane you are looking at and opens the profile picker). Page titles and URLs
+are page-controlled and set through textContent only. A dropped stream
+reconnects ≤5 times with backoff; a typed refusal shows the reason and a
+Reconnect button. Entry points: `app.openBrowserLive`, the card menu
+`session.browserLive`, Session Properties' Live view button, the status-bar
+Browser chip.
+
+**P4 second half (2026-09-17; §7.4):** the BACKEND CHIP in the bar
+(`backendBtn`, `chromium 146` / `cloak 146 (free)` from `app.browserChipFor` —
+the digest's `chips`, never fetched here; click = `app.openBrowserSwitcher`;
+hidden while the target has no `profileId`, because a backend is a property of
+a PROFILE) and the BLOCKED BANNER between the bar and the confirms
+(`app.browserBlockedFor({profileId, sessionId})`: each claim says WHO claimed
+it and the suggested tier, "Open with CloakBrowser" opens the switcher with
+`preselect:'cloak'` — the switch stays the USER's act — and Dismiss DELETEs the
+claim); both re-render on `hello` and on `browser-profiles-updated`; `state()`
+exposes `backend` + `blockedShown`.
+
+**P5 (2026-09-21; §4.5 / D7 / D35):** the ACTIONS PANE — the third side pane
+(`traceBtn`, pane `trace`) is `createTraceTimeline(app, {sessionId})` from
+browser-trace-view.js: every `hello` re-seeds it for the pane you are looking at
+(the target's profile, or the ephemeral scope — a reconnect fills the gap, ids
+dedup), the stream's `trace` record (the recorder's entry, pushed by the bridge
+to every viewer, never the bytes) grows it, a pane switch clears it, a row
+click opens the before/after dialog; the button counts `Actions (N)`. The
+RECORDING INDICATOR is now a button that reads the DIGEST only
+(`app._browserProfiles.recording[profileId]` → "recording" + the file and
+since-when; `recordingRefused[profileId]` → "recording refused" + the reason;
+else "not recording" with the per-profile opt-in hint) and opens the Browser
+profiles panel (`app.openBrowserProfiles({focus})`); it never fetches.
+`state()` adds `trace`, `traceBtn`, `recording`, `recordingOn`.
+
+**P7 (2026-09-21; §4.6 / §3.7):** WINDOW BINDING — ONE `toggleBind()` behind
+three surfaces: the bar's `bindBtn` ("Snap beside <session>" / "Unbind"), a
+`.win-btn.win-bind` on the standalone window's title bar (hidden with the
+title bar once grouped) and the 'window' menu row `window/browser-bind`
+(`when` = a browser-live window carrying `_browserLive`, so the
+contributions parity fixture never sees it; reachable from the tab and the
+phone's long-press). Bind = `wm.bindSplit(sessionWindowFor(app, sessionId),
+winInfo, {side:'right'})` — the session's own chat/terminal window on THIS
+client, found through `app.sessions` (view.sessionId), a toast when none is
+open; unbind = `wm.unbindSplit` (the group stays, nothing moves).
+`winInfo.onResize` re-reads the bound state because every chain transition
+ends in a resize of the displayed panes. THE OWNERSHIP BADGE:
+`wm.setOwnerBadge(id, {dots})` from PURE `ownerDots({leases, profileId,
+sessionId, nameOf})` — the digest's `leases` (never fetched here), the viewer
+first, re-drawn on `hello`, on `browser-profiles-updated` and cleared on
+dispose; the strip's tabs carry the same dots for THEIR profile
+(`.browser-live-strip-owners`) — the strip answers "which browsers does my
+session have", the dots answer "who else does this one belong to".
+`openBrowserLive({…, intoChain})` hands createWindow the born-in-a-chain
+option. AUTO-BIND: `installBrowserLive(App)` installs
+`onBrowserDigestChanged(prev, digest)` (called by the picker's
+`_onBrowserProfilesUpdated` with the previous digest) → `autoBindLiveViews`:
+gated by `browser.autoBindLiveView` (default ON) and never on a phone (tabs
+only there — the desktop client binds and the layout syncs), it opens a live
+view for every NEW (profile, session) lease whose session window is open on
+the desktop you are looking at (not hidden by a desktop, not minimized) and
+has no live view yet, under the deterministic syncId `win-blive-<sessionId>`
+so two clients open ONE window, BORN inside the session window's chain as a
+split. The first digest is a snapshot, not an event (prev null ⇒ nothing);
+an ephemeral browser has no lease and is never auto-opened. `state()` adds
+`bound`, `bindText`, `owners`.
+
+### src/lib/chain-layout.js
+
+**PURE (imports only the shared colour sequence; CJS so the fast suite
+requires it and the bundle carries it) — THE TAB CHAIN'S LAYOUT** (agent
+browser P7, 2026-09-21; design §4.6 / §3.7, D19 / D24). A chain
+`{ tabs, active }` gains `layout: 'tabs' | 'split'` (a MISSING field reads
+as 'tabs' — old records need no migration) and `split: { pair, ratio, dir }`
+while `tabs` and `active` keep their meanings to the byte. Invariants, one
+each: `normalizeChain` mutates IN PLACE (the chain is shared by reference
+across its windows) and is the ONE validation of `split` against `tabs` — a
+pair member not in `tabs`, a duplicated id, or a split without a record
+collapses the layout to tabs and DROPS split (never a dangling id, never a
+substitute); `clampRatio` = [0.15, 0.85], junk → 0.5; `chainSyncKey` = tabs +
+layout + pair ORDER, the ratio deliberately NOT in it (a divider drag is applied
+in place through `ratioDiffers`; a rebuild would re-parent two live views);
+`displayedPanes(chain, {narrow})` = the pair on a wide layout, the focused pane
+alone on a NARROW one — the phone renders tabs and the model is untouched;
+`splitAnchor` = the chain host when it is in the pair, else the left member,
+and `splitReplaceable` = the other one (D19 (a): a third tab replaces the
+non-anchor pane); `pairFor` orders the pair by the drop side; `splitColumns`
+is the ONE spelling of the host's grid columns; `ownerColor(webuiId)` keys
+`seqTaskColor` on the session's OWN `sess-<seq>-<ms>` counter (never the
+task-group colour: a session in no group has none, two in one group share
+one) and an off-shape id hashes to a slot so a badge ALWAYS exists;
+`ownerDots({leases, profileId, sessionId, nameOf})` lists every owner of a
+profile once, the viewer first. Gate: test-window-binding-model (fast, 65) +
+test-window-binding (heavy chrome, 61 — the model driven through the real
+window manager: bind / divider / move / minimise / desktops / collapse / D19 /
+host promotion / persistence / the phone / the badge and strip dots).
+
+### src/lib/tab-group.js + window.js + layout.js — WINDOW BINDING (agent browser P7, 2026-09-21; design §4.6)
+
+**tab-group.js.** A split is another RENDERING of the same chain: the host's
+element becomes a grid (title bar across, pane / divider / pane below) and the
+pair's `content` elements both lose `.tab-hidden` — no re-parenting, no
+second container, the window's EXTERNAL geometry is untouched (gridBounds /
+snap / minimise / desktop moves keep working because they act on the host).
+`_normalizeChain` runs at EVERY chain mutation (create / add / detach /
+restore / switch / bind / unbind) and `_applyChainLayout` re-derives every
+pane's display + the host columns + the divider after it (idempotent; it also
+calls syncHiddenViews because a pane's display changed). Three exit paths, one
+decision: closing the browser pane, closing the CHAT (host promotion) and
+dragging either pane out all reach `_detachFromChain` → `_normalizeChain` ⇒
+the layout collapses to tabs and nothing else moves. `_clearSplitDom` strips
+the marks off whoever leaves and off an old host. The divider drag follows the
+three laws: a PER-DRAG AbortController, rAF-coalesced moves, ONE kind of pixel
+(the host's bounding rect and `clientX` are both viewport px — `clientWidth`
+and `uiScale` never enter, so the ratio lands where the pointer is under any
+body zoom); double-click = 0.5; pointer capture so a pane's iframe cannot eat
+the moves. `bindSplit(anchor, guest, {side})` puts both in ONE chain (the
+anchor's wins), `unbindSplit` returns to tabs with nothing leaving.
+`switchTab` on a third tab replaces the non-anchor pane in place (D19 (a)).
+`_detectSplitDropTarget` = the ONE new drop zone: the left / right half of
+another window's title bar outside the icon / tab-bar merge zone and the
+controls (marked with `.tab-split-drop-left/right`, never ghosted); both the
+title-bar drag and the tab drag bind on it. The tab of a pair member is
+`.split-member`; a window's `_ownerBadge` renders on its tab (the guest's own
+title bar is hidden). **window.js.** `createWindow({… intoChain: {hostId,
+split, side}})` = BORN IN THE CHAIN: `display:none` from the first byte so the
+window is never painted standalone (no jump, no created-then-merged autosave
+churn), then bound/added before the trailing focus. `syncHiddenViews` derives
+the narrow-split hider from PURE `displayedPanes(chain, {narrow:true})` —
+every hider suspends (inc-mu6bfv1t-4drq). `setOwnerBadge(id, {dots})` draws
+the ownership badge after the title span (setTitle wipes the span's children)
+and re-renders the tab bar when grouped. **layout.js.** captureState persists
+`layout` + `split` through the ONE writeLayouts choke point; both restore
+sites hand them to `restoreTabChain`; the remote-vs-local chain key is
+`chainSyncKey` (the pre-fix `tabs.join(',')` did not carry the layout — a
+remote tabs→split flip of the same tabs read as "unchanged", a silent fork) and
+a remote ratio on a structural match is applied in place with no notify. The
+four §6b anti-ping-pong guards are untouched and pinned. **Mobile.** ≤768px
+the stylesheet shows only the focused pane (`.tab-split-focus`) and hides the
+divider; the model keeps the split, so a phone's save carries it verbatim and
+never flattens the desktop's layout (§6b guard 5's class). Gates:
+test-window-binding-model (fast, 65) + test-window-binding (heavy chrome, 61;
+its teardown kills the fake sessions it created — a dtach'd fake claude
+outlives the server otherwise) + test-hidden-view-suspend (the switchTab
+re-derive pin).
+
+### src/routes/browser.js
+
+**r-fix (2026-09-21):** `childEnvOf(f, childKey)` is the ONE child-env site for `resolve` (kind child) and `new-child` — on rung D it asks browser-env for the child's own config first; `POST /api/agent/browser/new {adoptDir}` runs `adoptDirVerdict` over `ctx.adoptRoots` ({homeDir, dataDir} from the wiring; absent ⇒ refused) and answers 403 `adopt_outside_roots` / `adopt_legacy_refused` / `adopt_registered` before the keeper adopts anything.
+
+**P6 (2026-09-21):** `sharing` rides the create bodies unchanged into the PURE verdict (the keeper supplies `mediation`); `fail()` carries a refusal's `why` (`mediation_unavailable` / `host` / `unknown`); new codes `mediation_unavailable` 503 / `mediation_no_cdp` 502; a mediated attach / use / resolve answer carries `mediated` + `note`, and only the wrapper form receives the scoped `cdpUrl` (the rule is unchanged — what changes is that it is never the raw one). `PATCH /api/browser/profiles/:id {sharing}` lives with the housekeeping routes (src/routes/browser-trace.js; `sharing_refused` 400 there too).
+**P4b install action:** `GET /api/browser/install` answers the verdict with 200 whether ok or refused (a card renders the disabled control WITH its reason), `POST /api/browser/install` performs it and maps the closed `INSTALL_CODES` to statuses (400 / 409 / 503); both refuse a non-local `host` by name.
+
+**P4 second half (2026-09-17; §7.4 / §7.5):** `GET /api/browser/switcher?
+profile=<id|label>` = `keeper.switcherView`; `POST /api/browser/switch
+{profile, provider, sessionId?, confirmDowngrade?, makeDefault?}` = the USER's
+switch (a `proposal` verdict is filed to the "For you" inbox through
+`ctx.propose` when a session is named — zero billed turns, the inbox is the
+channel — and answered `{mode:'proposal', filed}`); `DELETE
+/api/browser/blocked/:id`; `GET/POST/DELETE /api/browser/site-hints` — the site
+rides `site` (or `url`), NEVER `host`, because `host` is the MACHINE parameter
+every browser route refuses by name. Agent: `GET /api/agent/browser/backend[?
+profile=]` (the switcher view + the set's attachments with chips; a session on
+the ephemeral browser is refused `no_profile` with the remedy), `POST
+/api/agent/browser/backend {provider, profile?, confirmDowngrade?}` (direct only
+when this conversation is the sole lease-holder and nobody drives; else a
+proposal filed under the proposing session; ends in `tell`), `POST
+/api/agent/browser/blocked {url, why?, evidence?, tier?, profile?, remember?}`
+(records the CLAIM; `remember` files a tier-only hint `by:'agent'`; the answer
+says the switch is the user's act), `POST /api/agent/browser/site-hint`;
+`POST /api/agent/browser/audit` now takes `url` — a navigation stamps the
+lease's `lastUrl` (what a switch re-opens) while the audit LINE stays
+verb-only. `fail()` carries a refusal's `action` / `waysOut` / `needsConfirm`
+/ `provider` / `integrationId`; new STATUS codes: backend_unavailable /
+switch_refused / switch_export_only / hint_tier_with_backend / host_underivable
+400, backend_no_key / backend_seat_taken / backend_seat_ceiling /
+downgrade_refused / downgrade_unknown / switch_noop / browser_restarting /
+no_profile 409. Gate: test-browser-backend ④.
+
+**P4 (2026-09-16; §7.1–§7.3):** `GET /api/browser/providers[?host=]` and the
+agent twin `GET /api/agent/browser/providers[?host=]` answer the provider rows
+with their capability cells, the local verdict and — with `host` — the verdict
+FOR that machine (`host` here names the machine the answer is ABOUT, not one
+the route acts on, so it is NOT refused; `hostKnown` says whether it is
+paired), the §7.2.1 `proof` record, the cloakserve plan or its typed refusal
+(`cloak`), and the live CDP `forwards`. `POST /api/browser/profiles` takes
+`host` (the PAIRED machine the browser runs on — the PURE row decides whether
+the provider may run there, the keeper whether the id is paired; both refuse by
+name, so this one route no longer pre-refuses `host`; every OTHER registry
+route still does — the registry is the hub's) and `cdpPort`. New STATUS codes:
+provider_needs_local_key / provider_local_only / provider_lacks_capability /
+cdp_port_required 400, cdp_unreachable / op_failed / no_cdp / stop_failed 502,
+host_needs_daemon 409, host_unavailable 503.
+
+**P2 (§3.8 layer ③, 2026-09-16):** `stampActive(f, profileId)` is called on every SUCCESSFUL agent `resolve` (an attachment's id, or '' when the command resolves to the session's own ephemeral browser) and on `use` (it execs a subshell on that profile): it sets `session._browserProfileActive`, persists it to the session meta (`ctx.persistActive`, so a restart keeps the chip honest — boot-restore reads it back on all three restore paths) and re-publishes the live facts (`ctx.onLiveFactsChanged` → `broadcastActiveSessions`); an unchanged value stamps nothing (the sidebar's digest gate stays shut). `POST /api/browser/nudge {sessionId}` is the chip's one-click reminder: it queues the SAME typed `browser-profile` notice a pin/attach does (`noteChange`, by: user), which rides the user's next message — ZERO billed turns by construction (the route names no spend reason; the billed "wake it now" path is a later OFF-by-default producer under its own reason, D26) — and answers 409 `nothing-to-remind` when the agent has used nothing yet or is already on the pin, so a click never queues an empty sentence.
+
+**P3 (§4.3, 2026-09-16):** `POST /api/browser/handback {sessionId, profile?}` = an EXPLICIT handback from OUTSIDE the live view (the card row, the chip's dropdown): the keeper flips the lease and the announcer delivers through the gated ladder (409 `not_taken` when nobody drives; no `profile` = whichever of the conversation's browsers is taken); `POST /api/browser/confirm {sessionId, profile?, id, decision}` answers a pending `--confirm-actions` confirmation through upstream's own verb via the keeper (404 `no_confirmation`); `inputTargetFor` resolves a handle / profile id / the set's default / the ephemeral browser; the agent's `/resolve` answers 409 `browser_paused` with `takenAt` while the user drives.
+
+`/api/browser/*` (cookie) + `/api/agent/browser/*` (Bearer `vsst_`): thin —
+validation is the PURE model's, the lifecycle the keeper's. Every route takes
+`host` and refuses a non-local one by name; every failure is `{error, code}`;
+the UI answers strip the CDP url and only the wrapper form (`wrapper:true`)
+receives it (§5.1). `pinAnswer` is the ONE pin implementation for both
+surfaces (records the pin on the conversation, stamps the live session,
+re-points the running session's indirection through `browser-env.repointPin`).
+**P1 second half:** `POST /api/agent/browser/resolve {handle?, argv?, wrapper?}`
+is the ONE call the CLI's `--` form makes (layer ①'s `profile_changed` first,
+then `profile_required` / `not_attached` / `ambiguous` / `profile_path_refused`
+— every refusal typed `{error, code, handles, default?, was?, now?}`; the
+"sub-agent" clause rides only when `session._subNormalizers` has an open
+sidechain and is never the reason); `POST …/new-child` (a child handle + its
+own env, `unset` naming the parent variables that would put it INSIDE the
+parent's browser on rung C); `POST …/audit`; `new {adoptDir}` registers an
+existing directory in place (the path refusal's remedy). A USER's pin / attach
+/ detach queues a typed `browser-pin` / `browser-profile` notice through the
+wiring's `notice` dep (session-status's queue, zero billed turns) and the pin
+is persisted to the session's meta through `persistPin`; `POST
+/api/browser/adopt` is §3.2.5's "new persistent profile from this session's
+browser" — rung C moves the scratch dir (login kept), every other rung creates
+an EMPTY profile and the answer SAYS the login was not saved. Wiring:
+`tasksForSession` (the store's LIVE `groupsForSession`) feeds ownership checks.
+
+  **P10 (2026-09-21):** STATUS gains `provider_needs_consent: 403` and `tier3_is_a_window_target: 409` (the smoke found both answering 500 before); both providers routes pass the keeper's `desktopConsent()` into `providerRows` so the `local-window` row's control follows the switch live (the keeper exports `desktopConsent` beside `hostKnown`).
+
+### data/bin/vibespace-browser
+
+**r-fix (2026-09-21):** `watch` states that on a shared, mediated profile the CDP fence refuses input and page-navigation COMMANDS, not script evaluation (the wrapper path refuses every command while paused, as before).
+
+**P6 (2026-09-21; §6.2):** `new <label> --sharing owner|instance`; `use` prints the server's one-line `note` for a mediated attachment (you see and drive only your own tabs; input and navigation refused while the user drives); `profiles` marks `[shared, mediated]`, `status` marks a mediated lease; `printRefusal` spells `sharing_refused`'s `why` (no proxy ⇒ keep owner; a paired machine ⇒ run it here) and `mediation_no_cdp`. The CDP pair of a mediated attachment is withheld by `use --print` exactly like a reached browser's (§5.1).
+
+**P4 second half (2026-09-17; §7.4):** `backend [--profile <h>]` prints the
+backend this profile is on and every other row with its verdict (a row that
+cannot be used says why and, for a missing key, that the USER must open ⚙ →
+Integrations → `<id>`), its key source and its seats (`N used on this
+instance / <the three-state sentence>`); `backend <name>
+[--confirm-downgrade]` PROPOSES a switch — done directly only when this
+conversation is the sole lease-holder and nobody drives, otherwise a "For you"
+item and the agent is told to carry on meanwhile (a switch stops everybody's
+browser); `blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2|3]
+[--remember]` records a CLAIM with the agent's name (the one-click "Open with
+CloakBrowser" is the user's act; `--remember` files a per-site hint). The `--`
+form TEES a navigation verb's stdout/stderr (never swallows them) so a real
+403/429 prints `hint: may-need-cloak` — worded as a hint from the status code,
+never a detection — and posts the URL with the audit call so the lease's
+`lastUrl` is what a switch re-opens. `printRefusal` prints the way out of
+`browser_restarting` (retry in a moment, the lease survives),
+`backend_no_key`/`backend_seat_*` (`action.openIntegration`) and
+`downgrade_*` (`waysOut`, the one-time confirmation). Gate:
+test-browser-backend ④.
+
+**P4 (2026-09-16):** `providers [--host <machine>]` prints every row with its
+verdict here (or FOR that machine) and, for a row that cannot be used, the
+exact typed reason, plus the §7.2.1 egress record's status; `new` takes
+`--provider <id>`, `--host <machine>` (a PAIRED machine runs the browser) and
+`--cdp-port <n>` (`--provider cdp`: reach an existing browser's loopback CDP
+port — nothing is started) and says what it made (a directory here / on the
+machine / reached over CDP); `profiles` shows `on <host>` and `cdp:<port>` on
+the row; `use --print` WITHHOLDS the `AGENT_BROWSER_CDP` pair of a reached
+browser and says so (§5.1: `use` never prints a CDP url — the subshell and the
+`--` form carry it without printing it). Gate: test-browser-providers ⑤.
+
+STATIC tracked, in `AGENT_TOOLS`; auth `VIBESPACE_SESSION_TOKEN`. `use` execs
+a subshell with the attached env (`--print` prints the exports) and NEVER a
+CDP url; `-- <args>` runs `agent-browser` against the attached profile with
+this session's flags, adds `--pin-tab` when the server says the floor is met,
+refuses `close --all` while another session is attached, and drops the lease
+after a `close`; every answer names the profile it acted on (§3.8 layer ①).
+**P1 second half (§3.7):** `--profile <handle>` (anywhere, taken OFF the argv
+the wrapped CLI sees) or `VIBESPACE_BROWSER=<handle>` names ONE attachment;
+with two or more a bare `--` command is refused `profile_required` listing
+every handle and the default, a filesystem path is refused
+`profile_path_refused` with the `new <label> --adopt <dir>` remedy, a set the
+USER changed refuses the next command ONCE with `profile_changed` (was → now)
+— all printed with their codes; `use <ref> --alias <h>`, `new-child` (prints
+the child's env), `status` (the set with handles, `*` the default, children),
+`pin <handle|label|id>`; after every wrapped command ONE audit line is posted
+(verb only). Gate: test-browser-handles.
+
+### src/browser-switch.js
+**P4b install action (§7.4 failure form (1)):** `CLOAK_PACKAGE` + `INSTALL_CODES` (closed) + `installVerdict({proof, proofOk, exe, host, running})` — "measure first, then install" as a decision: host ⇒ `install_local_only`, an answering executable ⇒ `already_installed` naming the path, a flight ⇒ `install_running`, a record that is not `measured` (it names its own refusal) / fails its discipline / names no version ⇒ `install_precondition_unmet`, else ok with the spec PINNED to `proof.version`; `installArgv({spec, prefix})` (into OUR prefix, never `-g`; a non-spec is refused before any argv exists) and `binFromPackageJson(pkg)` (string / the `cloakbrowser` key / the first entry — the package's own bin, never a guess). The control the design names — a verdict that skips the measurement — answers ok for the refused record and is the suite's negative control.
+
+PURE (imports nothing; CJS so the keeper, the routes, the ORCH key consumer
+AND the bundle share ONE spelling of every refusal) — **agent browser P4
+second half (2026-09-17; design §7.4 / §7.5 / §7.6, D17 / D32–D34, round
+8)**: the live backend switch and the key-consumer half as DECISIONS; nothing
+here touches a file, a process or the network. One sentence per invariant:
+the version ladder (`versionLadder`) answers BEFORE a byte moves, reading the
+registry's `lastChromiumMajor` beside the directory's own `Last Version` and
+taking the HIGHER when they disagree (refusing one legitimate downgrade is
+cheaper than allowing one that destroys a profile), a lower target is
+`downgrade_refused` naming both majors with two ways out (upgrade / clone
+through export-import, saying what that drops — sessionStorage and
+non-extractable CryptoKeys), and nothing recorded, or a target whose major is
+not yet known, is `downgrade_unknown` — refused until ONE explicit human
+confirmation; the fingerprint seed is minted ONCE (`seedForSwitch`, from crypto
+bytes the keeper hands it, a positive 31-bit integer) and carried through
+every later switch, never re-minted per launch, and `fingerprintChange` /
+`fingerprintNote` word the dialog from the FACT (chromium→cloak GAINS a
+fingerprint, the reverse LOSES one; cookies cross untouched either way);
+seats are THREE STATES (`seatState`: known-fresh within `SEAT_TIER_STALE_MS`
+= 7 d carrying the reading's age / known-stale saying what the LAST tier was
+and constraining nothing / unknown = this key never launched), the total
+comes from the FIRST REAL LAUNCH (`tierFromLaunch`; nothing recognisable ⇒
+null, never a fabricated number) and never from Test or a poll, and an
+UNKNOWN or STALE total never satisfies the ceiling test (`seatVerdict` refuses
+only while known-and-fresh — `unknown` is neither 0 nor ∞); the ceiling
+wording forks on key SOURCE (the user's own key: every seat is on this
+instance, so the holders are NAMED and stopping one is offered; the cluster
+default: this instance cannot see other users' browsers, so NO profile is
+listed, the sentence says the seats are shared and `action.openIntegration`
+is the way out — a refusal may only state what its own reason knows);
+`classifyLaunchFailure` turns a licence/concurrency launch failure into
+`backend_seat_taken` (the criterion is the family of words `SEAT_TAKEN_RE`
+until §12.40 is measured — said in the comment, waiting to be narrowed), and
+under a cluster default it says the seats are shared fleet-wide ("stop one of
+yours" is the wrong advice); `KEY_ROWS` carries the six rows' VENDOR env names
+(`vendorEnvFor` emits only the fields that carry a value; `VENDOR_ENV_NAMES`
+all pass through `agentEnv` by rule — exactly why the cluster may inject ONLY
+under the store's `VIBESPACE_INTEGRATION_*` prefix) and the per-row EGRESS rule
+(`testHostFor`: a constant for browserbase/browseruse, the host INSIDE the
+field the user typed for browserless/kernel, the region for agentcore, none
+for cloak; a host it cannot derive is `host_underivable`, never "let us try
+the default"; `testRequestFor` puts the key in a HEADER, never the URL, which
+every error path logs); `launchArgsFor` = `--executable-path <p> --args
+--fingerprint=<seed>` for cloak (the two shapes upstream supports) and `-p
+<name>` for cloud — the key never rides argv; `siteHintVerdict` keys per-site
+memory by EXACT host (never a registrable domain — that needs a public-suffix
+list, a second source of truth that expires) with `by`/`at`/`why`, and `tier`
+is legal ONLY while `backend === null` (`hint_tier_with_backend` — once a
+backend is named the tier is derived, never stored twice, §7.6 rule 2);
+`blockedClaim` is made by the agent of a conversation (a claim `by:'server'`
+is refused; the record has no field for a detection) and `blockedText` says
+WHO, never "detected"; `navHint(403|429)` is a typed HINT naming its source;
+`switchVerdict` is THE GATE in this order and no other — the row exists →
+not a no-op → the capability control for THIS machine (`backend_unavailable`
+naming what is missing / `provider_needs_local_key` BEFORE `resolveKey` is
+ever called, leg viii) → `canSwitchTo` of the target AND the current backend
+(`switch_refused` for cdp / local-window, `switch_export_only` naming the
+lossy path for cloud) → the key resolved ONCE (`backend_no_key` +
+`action.openIntegration`) → the ladder → seats → direct vs PROPOSAL (a browser
+somebody is DRIVING is never interrupted, even by the user's switch; an
+agent's switch while another session holds a lease, or on a profile it does
+not own, is a proposal naming the affected sessions); `switcherRows` = every
+backend with its verdict WRITTEN ON IT, the masked SOURCE chip (`your own key`
+/ `cluster default · <label> (seats shared…)` / `not configured`), the seat
+state and the chip; `backendChip` = `chromium 146` / `cloak 146 (free)` /
+`cdp`; `restartingRefusal` = the NAMED gap. Gate: test-browser-backend ①
+(the ladder matrix, the seed, the three seat states with the unknown-as-0 and
+unknown-as-∞ controls, the fork, the classifier, the derived host driven with
+two `apiUrl`s, the hint/claim rules, and the gate's ORDER asserted through a
+recording `resolveKey`).
+
+  **P10:** `blockedText` words a tier-3 claim as "a window on your own desktop — your act: the real-desktop switch, then the agent uses vibespace-window; nothing escalates by itself" (tier 2: "your act in the switcher"), still WHO said it and never "detected"; the actual escalation decision is window-desktop's PURE `hintAction` (a tier-only hint = a suggestion whose act is `open-window-target`, never `auto`).
+
+### src/server/browser-backend.js
+
+ORCH (requires the PURE switch model only) — **agent browser P4 second half
+(2026-09-17; design §7.5 / round 8's runner registration)**: THE KEY CONSUMER
+of the track. ONE module declares the six registry rows' consumer, registers
+their Test runners and resolves their keys, because the shared layer's
+consumer census only finds three names that know about each other when they
+are one module. `keyFor(id)` = the literal per-row `resolveIntegration('<id>')`
+table (`RESOLVE`) — the ONE place a plaintext value leaves the integration
+store on this track, handed straight to the keeper for the ONE child's env;
+`sourceOf(id)` = the MASKED `publicView` (`source`, `clusterKey`,
+`clusterLabel`, `why`, `testedAt`, `lastOk`) for the switcher's SOURCE chip —
+never a value, asserted on the returned object; `registerTests()` registers
+all six with `store.registerTest` (a row that declares a `test` and registers
+nothing is a dead control the shared census reddens; no store = said and
+empty). The runners ARE the track's egress declaration: `cloak` is shape-only
+— it validates the `cb_…` shape through the row's own validator (empty = the
+free tier, legal), starts NO process, opens NO socket, downloads NO byte (the
+tier is read at the first real launch, behind the two preconditions a card
+opened to paste a key may not trigger); each `cloud:*` makes exactly ONE
+bounded read-only GET to the ONE host `testHostFor` derives from that row's
+own fields, the key in a header, `redirect:'manual'`, 2xx = ok, 401/403 =
+"refused this key", an underivable host = the named refusal and NO request,
+`agentcore` reports itself unsigned (this build cannot sign AWS requests, so
+the key was NOT exchanged); `fetchImpl` is injectable so the gate records the
+host each runner reached. Outside these Tests this track's server sends no
+third-party request. Created by mounts-plugins-wiring BEFORE the keeper
+(server.js now creates the integrations wiring ahead of it) and handed to the
+keeper as `keys`. Gate: test-browser-backend ② (legs iii, v, vi, vii) +
+test-integration-registry (f) (the six runners registered through the real
+wiring).
+
+### src/lib/browser-switcher.js
+**P4b install action:** the cloak row disabled with `backend_unavailable` carries an "Install CloakBrowser…" control read off the view's `install` verdict — enabled only when the server says ok (title = `npm install <spec>`), otherwise disabled with the verdict's reason under it, "Installing…" while `state.running`; a click POSTs `/api/browser/install`, toasts the spec and refreshes. The same control lives on Manage Agents' "CloakBrowser (browser backend)" row (src/lib/manage-agents.js, local machine only, read through `GET /api/browser/install`; a transport failure hides the row).
+
+CLIENT — **agent browser P4 second half (2026-09-17; §7.4 UX / §7.5 the
+source chip / §7.6 rule 2 / D33)**: nothing is decided here.
+`openBrowserSwitcher(app, {profileId, sessionId?, preselect?})` draws `GET
+/api/browser/switcher` in a `createModalShell`: the profile + its chip (and
+"switching…" while a switch is in flight), the agent's `blocked` claims (the
+sentence says WHO claimed it; "Open with CloakBrowser" preselects the cloak
+row — the switch is the USER's act, and the seats + fingerprint sentence are
+shown before anything moves; Dismiss DELETEs), every backend as a radio row
+enabled or DISABLED WITH ITS REASON (no row hidden; the current one marked),
+the SOURCE chip from the MASKED view (`Your own key` / `Cluster default ·
+<label> (seats shared with other users)` / `Not configured`) and an "Open
+Integrations" button wherever the row's `action.openIntegration` says so
+(`app.openIntegration(id)` — "no key" is said BEFORE the click; the typed
+`backend_no_key` refusal is the last net), the seat line in THREE states
+composed HERE from the server's `{state, total, age}` with the device's own
+`t()` (the channels r2 rule: the server sends structure, the client says the
+words), the fingerprint sentence from `fingerprintChange`, ONE checkbox for a
+downgrade the ladder cannot judge (`needsConfirm`), "Make this the profile's
+default backend", and the per-site memory section (each row deletable; adding
+one is a USER claim posted as `site`, because `host` names a MACHINE on every
+browser route); `POST /api/browser/switch` — a refusal toasts its sentence and
+deep-links its `action.openIntegration`, a `proposal` toasts what was filed,
+a switch toasts the re-opened count and the fingerprint sentence. Re-rendered
+from `browser-profiles-updated` while open, the ws handler removed BY NAME on
+close; every server string through textContent; theme vars only.
+`installBrowserSwitcher(App)` adds `openBrowserSwitcher`, `browserChipFor`
+(the digest's `chips`) and `browserBlockedFor` (the digest's `blocked`). Its
+words are in zh + ja (the i18n check in the build); the routes it draws are
+driven by test-browser-backend ④.
+
+### src/browser-serve.js
+
+SHARED (fs/os/path + the PURE model + browser-facts; the daemon bundles it) —
+**agent browser P4 (2026-09-16; design §3.6 row 3 / §7.3 / D5 (b))**: the
+`browser-serve` OP TABLE (`version` / `status` / `start` / `stop` / `cdp-url`,
+closed — an unknown op is refused by name) + `runBrowserServeOp(bs, action,
+params)`, the ONE implementation that runs where the profile browser lives:
+in-process for device #0, inside the agentd for a paired device. The hub names
+a PROFILE ID only (`bp-<8 hex>`, else `bad-request`) and the machine composes
+and owns `~/.agent-browser/vs-bp-<id>` (0700) itself — a hub can never point a
+device at an arbitrary directory. The CDP url a machine answers is ITS OWN
+loopback (§6.1); it never listens on a LAN. `start` is reuse-or-spawn through
+the CLI's own `open` with the timeout OFF; `stop` is `close --all` then a
+bounded wait — a pid that survives the grace is REPORTED (`left`), never
+signalled by this op. Every op answers `{ok, …}` or `{ok:false, code, error}`
+— never a throw across the wire. ONE facts instance per PROCESS (`install()`),
+never per connection. Gate: test-browser-providers ② (over the fake
+`agent-browser`) + ③ (a REAL daemon).
+
+The daemon installs its browser-serve facts over `daemonEnv(process.env)`, never
+the raw process env (the 2026-09-14 agent-env rule merged with P4a, re-carried by
+the r0 rebase onto 2.369.130): a daemon born from the server env must not hand the
+server's secrets to the browser probe.
+
+### src/server/browser-access.js
+
+ORCH — **ONE way to reach a profile browser on ANY machine (P4)**, the
+opencode-access shape on purpose: `call(hostId, action, params)` picks the
+transport (falsy/`local` = the shared runner in-process; a paired device = the
+`browser-serve` agentd op; an ssh host without a daemon = REFUSED
+`host_needs_daemon` — a silent local fallback would start the browser on the
+wrong machine) and turns a machine-side `{ok:false}` into a coded throw so
+callers see one shape. `forwardCdp(hostId, remotePort, {remoteUrl})` = the
+hub-side loopback listener (`net.createServer` on 127.0.0.1:0, each connection
+piped into `device.tcpForward(remotePort)` — PortForwardManager's shape, the
+device resolved PER CONNECTION so a re-dial never leaves a stale handle),
+REFERENCE-COUNTED per (hostId, remotePort): two records may name one port (a
+profile browser's own port and a `cdp` profile pointed at it), so a release
+drops ONE reference and the listener closes at zero, never under the other
+record's feet; concurrent first callers join ONE listen. For the LOCAL machine
+no forward is made. `shutdown()` is the only unconditional teardown. An
+unwired process refuses LOUDLY (`host_unavailable`). Gate:
+test-browser-providers ④ (bytes round-trip over a fake tcpForward).
+
+### src/server/egress-proxy.js
+
+ORCH — **the allowlisting egress proxy (P4, §7.2.1 "make the boundary
+enforcing rather than observed")**: a tiny HTTP forward proxy on the hub's
+loopback — `CONNECT host:port` (TLS passes through untouched) and absolute-form
+`GET http://…` — admitting a host ONLY when the PURE `egressVerdict(host,
+allowlist)` says so and answering `403` with the verdict's own sentence
+otherwise (a blocked fetch is a NAMED refusal in the browser's network log,
+never a hang); the allowlist is re-read per request (liveApply), loopback and
+link-local targets are refused by the verdict itself (never a way back into the
+hub's services), origin-form requests are 400 (it is a proxy, not a server). No
+auth (loopback only, like the stream port), no caching, bounded header read.
+Started LAZILY by mounts-plugins-wiring only when `browser.cloak.enabled` is on
+and a plan is asked for — a fresh instance listens on nothing. Gate:
+test-browser-providers ⑥ (real loopback sockets).
+
+### scripts/measure-cloak-egress.mjs
+
+**The §7.2.1 measurement, as a script (P4)**: modelled verbatim on
+src/local-oracles.js — `env -i HOME=<empty> PATH=… strace -f -qq -e
+trace=network`, every `connect(AF_INET|AF_INET6)` counted, a DNS `:53` connect
+counted as INET (resolving a vendor host is already the decision to talk to it)
+— over the four runs the design names (first launch / second launch from cache
+/ launch with a license key / 10-minute idle). It NEVER installs or downloads
+anything: it measures the binary already on the machine and, when none is,
+prints the refusal record by name (`binary_absent`) — which is exactly what
+`src/browser-profiles.CLOAK_EGRESS_PROOF` carries today (run 2026-09-16 on the
+dev box: strace present, no `cloakbrowser`/`cloakserve`, nothing downloaded).
+Its output is pasted into that constant; the `version` it names is the version
+the counts describe, so an unpinned auto-download invalidates the record.
+
+### src/keeper-limits.js
+
+PURE constants home every process keeper counts and bounds by (sample cadence,
+CPU/RSS thresholds, cooldown, `CONCURRENT_CAP`); the browser keeper reads it
+here, the desktop-app keeper and opencode-serve read the same object on master.
+
+### src/browser-trace.js
+
+**r-fix (2026-09-21, D35's side doors):** `redactParams` also turns a single-character `press`/`keydown`/`keyup` key into «1 key» (a named key or chord stays — a gesture, not content) and a `select`'s value/values/label/option into a length — a secret typed key-by-key or chosen from a list leaves no characters on disk or on the card.
+
+**P6 (2026-09-21):** the housekeeping row carries `sharing` and `mediated` (`B.isMediatedProfile`) so the panel can say which profiles are instance-shared.
+
+**PURE** (imports only the sibling PURE registry model for the provider rows;
+CJS so the recorder, the routes, the CLI AND the bundle share ONE spelling of
+every rule). Agent browser P5 (2026-09-18, design §4.5 / §6.4 / §7.1 / §8
+step 3, D7 / D8 / D35). THE ACTION TRACE: `TRACED_ACTIONS` is the closed
+action table (click / fill / press / mouse* / scroll / navigate … → the KIND of
+position an entry records); anything not in it — `get`, `snapshot`, `launch`,
+`boundingbox`, `screenshot`, `wait` — is an OBSERVATION and is never traced
+(`isTracedCommand`). `redactParams` keeps a fill's value and a type's text as
+`«N chars»` and an upload's file NAMES only (the §3.7 audit rule applies to the
+trace); `commandText` rebuilds the human-readable command from the REDACTED
+params. `positionOf` = point (CSS px) / box (the target's `{x,y,width,height}`
+from ONE `get box <selector>` probe) / target-without-box saying why / keys /
+scroll / navigation. A result is judged by its ERROR, never by `success`
+(measured on 0.32.0: `false` on every result, clicked or not). `afterFramePick`
+= the first frame ≥ 400 ms after the result, else the latest by 1.5 s (`same`
+when nothing repainted). `entryFor` = the record `{id, at, sessionId,
+browserKey, profileId, scope, action, kind, text, params, ok, error,
+durationMs, position, before, after, afterSame, url}`. RETENTION
+(`traceRetentionPlan`): 7 d, then 200 MB per profile oldest first — every
+removal names its rule, every kept group what it holds. `recordingVerdict`
+refuses BY NAME (off / not ours / not local / below the 0.37.0 floor).
+HOUSEKEEPING: `sweepScope` = exactly the provider rows with `ownsDir` on this
+machine; `queueVerdict` refuses `cloud:*` / `local-window` / `cdp` / a remote
+record as `not_ours`; `housekeepingVerdict` answers a state from the closed
+`HOUSEKEEPING_STATES` (`not-ours` / `in-use` / `live` / `recent` — in-flight
+grace with its age / `stale` / `kept`) with its `why` and NEVER answers
+"delete"; `forgetVerdict` refuses while leased or running; `orphanCandidates` =
+a Chromium-marker directory no record names; `orphanPathVerdict` = a top-level
+dir under the base only. THE CLIENT'S DOM-FREE HALF (P5 client, 2026-09-21):
+`commandDrivesBrowser` + `toolCommandText` (claude's string / codex's argv
+array) gate the tool card; `traceWindowFor` = a card's window (its ts − 2 s →
+the next message's ts + 2 s, or now); `unionWindow` = ONE fetch for many cards;
+`assignEntriesToWindows` gives each entry to EXACTLY ONE card — the one with
+the latest ts that was RUNNING when the action happened (500 ms skew; an entry
+only later cards can hold goes to the earliest of them); `overlayGeometry` =
+the dot / rect in the DRAWN picture's px; `frameUrl` only ever names an entry
+id + before|after; `bytesText` ('—' for unmeasured); `traceSummary`;
+`positionText`; `timelineLabel`. Gate: test-browser-housekeeping ① + ⑥.
+
+### src/server/browser-trace.js
+
+**ORCH** (P5). THE RECORDER hangs on two seams and decides nothing: the
+bridge's TAPS (`browserStream.tap(sessionId, profileId, cb)` — every
+`command` / `result` / `frame` / `url` record of a live relay; a tap holds a
+viewer-less relay open at `TRACE_TAP_FPS` = 4, never drives, never counts as a
+viewer, NEVER starts a browser) and the keeper's LEASE SEAM (`onLease`: attach /
+browser-ready arm a tap, detach / lease-dropped / browser-stopped disarm it).
+A traced `command` snapshots the LAST frame held as the before-picture; the
+matching `result` starts the after-clock and, for a target action, ONE bounded
+`get box <selector>` under the lease's own session (its `boundingbox` command
+is itself never traced). The entry lands as 0600 files (`<id>.json`,
+`<id>-before.jpg`, `<id>-after.jpg`) + a line in `index.ndjson` under
+`data/browser-trace/<profileId | ephemeral>/`, is pushed to the live view's
+viewers as a `trace` stream record and to every client as
+`browser-trace-appended` (never the bytes). `browser.actionTrace` (default ON,
+D35) gates the whole thing. THE SCREENCAST (D7 opt-in per profile): `record
+start <file>` / `record stop` under the lease's session, `record: true`
+profiles only, refused below the floor with the refusal kept for the panel;
+files under `data/browser-recordings/<profileId>/<sid>-<ts>.webm`. THE SWEEP
+(hourly + boot) applies the PURE plan to traces AND recordings and logs what it
+removed and why. HOUSEKEEPING: sizes by `du -sb` in a CHILD (never a sync walk —
+98 GB lived under `~/.agent-browser` on the design's machine), cached 10 min;
+`orphans()` under `~/.agent-browser`; `forgetProfile` RENAMES the directory
+beside itself (`<dir>.forgotten-<ts>`) and files a ledger row in
+`data/browser-forgotten.json` BEFORE the record goes; `deleteForgotten` is THE
+one permanent deletion (a `.forgotten-` directory under the base, a human's
+click); `adoptOrphan` labels a directory in place (§8 step 3). `list({sessionId,
+browserKey, anyOf})` matches by the webui id OR the key (a resume re-carries the
+key while the id churns). Every housekeeping change broadcasts
+`browser-housekeeping-updated`. Wired in mounts-plugins-wiring AFTER the
+keeper reconciled its leases (a tap never starts a browser, so the order is
+load-bearing); shut down from server.js. Gate: test-browser-housekeeping ②–⑤.
+
+### src/routes/browser-trace.js
+
+Thin over the two above; `host` refused by name (local-only in this release).
+`GET /api/browser/trace?sessionId=&conversation=&browserKey=&profile=&from=&to=&limit=`
+— ONE conversation's actions by the live session's key, else the bindings
+store's key for the CLI's own `conversation` id (a STOPPED conversation's
+cards still find their actions — the point of a review; the wiring hands the
+routes a `browser-bindings` reader that reads the file per ask), else a
+`browserKey` given outright (validated); at least one of the three; **nothing to
+match by ⇒ an honest EMPTY answer, never every entry** (the client-half suite
+caught the route answering everything for an unbound conversation). Answers
+`{sessionId, conversation, browserKey, keyFrom: session|conversation|given|null,
+traceOn, entries}`. `GET …/trace/:id` (never the bytes) · `GET
+…/trace/:id/frame/before|after` (image/jpeg + nosniff + private cache) · `GET
+/api/browser/housekeeping` (the panel's whole view — nothing here is a
+deletion) · `POST …/housekeeping/sweep` · `PATCH /api/browser/profiles/:id`
+`{record?, label?, notes?}` (anything else refused by name) · `POST
+…/profiles/:id/forget` (409 leased / running, 400 not_ours) · `POST
+/api/browser/orphans/adopt {dir, label}` · `POST /api/browser/orphans/forget
+{dir}` · `POST /api/browser/forgotten/:fid/delete` (THE one permanent deletion)
+· `GET /api/browser/recordings/:profileId[/:file]` (video/webm|mp4, no-store).
+Statuses by the closed `STATUS` table. Gate: test-browser-housekeeping ④.
+
+### src/lib/browser-trace-view.js
+
+**P6 (2026-09-21):** a mediated row shows a `shared` chip whose title is the confinement sentence (zh+ja).
+
+**CLIENT** (P5 client half, 2026-09-21; design §4.5 / D35). Draws the trace on
+three surfaces and decides nothing. THE TOOL CARD: chat-renderers'
+`browserTraceHolderHtml(block, msg)` puts a `.chat-browser-trace` holder (its
+`data-trace-ts` = the card's own instant, a button, a summary, a thumbnail
+strip, a list) on ALL THREE card shapes (pending / error / generic) of a shell
+tool call whose command drives the agent browser — the PURE gate over claude's
+string or codex's argv array, never a tool name; `createCardTraceLoader(view)`
+(ONE per ChatView) fills them: `observe(el)` is called from
+`_applyElementMarks` — the ONE hook every element-making path passes through
+(create / swap / gap), so a rebuilt history, a paged-in slab and a live card all
+get their strip — holders are batched for 150 ms into ONE fetch over the union
+of their windows, `assignEntriesToWindows` gives each card exactly its own
+actions, thumbnails ALWAYS (D7 (c): the after-frame of every action, the
+before-frame when nothing repainted, ≤12 with "+N earlier"), the full list
+(time · command · result · position kind + line · before/after thumbs) behind
+the card's own button; the summary says `N action(s) · M failed`, or honestly
+why not (trace off / no conversation id / waiting for actions on a running
+card / none recorded); a `browser-trace-appended` broadcast for this session or
+its key re-queues the cards whose window may hold it (600 ms debounce). A
+view-only (`view-…`) window asks by its CONVERSATION id, never by its window
+id. THE ENTRY DIALOG (`openTraceEntryDialog(app, entry, list)`): before / after
+side by side, the position DRAWN on the picture after the image lands (a dot
+for a point, a rectangle for the element's box — `overlayGeometry` in the drawn
+picture's px, right at any dialog width), the command, action + position line,
+result + duration, page, profile, ← / → through the list the click came from,
+and §6.4's retention sentence. THE TIMELINE (`createTraceTimeline(app,
+{sessionId})`, the live view's third pane): `load({profileId})` seeds ONE scope
+(the profile's, or `ephemeral`) from GET, `push(entry)` grows it from the
+stream's `trace` record (deduped by id), newest last, click = the dialog. Every
+frame is drawn through `img.src` (never markup); every wire string through
+textContent; the module never assigns innerHTML (pinned). THE BROWSER PROFILES
+PANEL (window type `browser-profiles`, singleton, openSpec
+`{action:'openBrowserProfiles'}`, ⚙ → Tools → Browser profiles… at order 35
+gated on the profile digest, `app.openBrowserProfiles({focus})` installed by
+`installBrowserTrace(App)`): the housekeeping view over `GET
+/api/browser/housekeeping` — one row per profile (label + legacy/host chips +
+the backend chip from `app.browserChipFor`, the STATE worded from the closed
+`HOUSEKEEPING_STATES` with its `why` under it, the size — "not measured" for a
+not-ours row —, the trace digest, the recordings with a live "recording" mark or
+the refusal's reason, the per-profile screencast checkbox = `PATCH
+{record}` (D7; disabled with the reason for not-ours / remote), "Set aside" =
+`POST …/forget` behind a confirm that says what moves where), the ephemeral
+row, the UNREGISTERED DIRECTORIES under `~/.agent-browser` (size, last use,
+"Adopt…" = an input dialog for the label → `POST /orphans/adopt`, "Set aside"
+→ `POST /orphans/forget`), the SET ASIDE ledger (from → to, when; "Delete
+permanently" = THE one permanent deletion, a danger-styled confirm →
+`POST /forgotten/:fid/delete`; a deleted row says when), the sweep line +
+"Sweep now". The hint repeats §6.4 in the user's words and says the action
+trace is OFF when it is. Re-rendered (1.2 s debounce) from
+`browser-housekeeping-updated` / `browser-profiles-updated` /
+`browser-trace-appended`; the ws handler is removed on close; every action
+goes through the in-app dialogs, never a native one (pinned). Gate:
+test-browser-housekeeping ⑥ (the PURE helpers, the WIRING PINS — the 2.355.0
+lesson: an unstaged caller is a green suite over dead code —, the panel's
+state words / window type / ⚙ row / install / dialogs / the one deletion, and
+the i18n census over every `t()` literal); test-window-types + test-contributions
+carry the type / action / owner / gear-row census rows.
+
+### docs/agent/browser-manual.md
+
+**P4 (2026-09-16)**: the verb table gained `providers [--host]` and `new`'s
+`--provider/--host/--cdp-port`, and one bullet ("Other providers and other
+machines") says what a paired-machine profile and a `cdp` profile are, that a
+reached browser's CDP pair is withheld by `use --print` too, and that their
+live view is not available yet.
+
+**P1 (2026-09-16)**: the manual gained the `vibespace-browser` section (named
+profiles, the lease, what `use` does and does not print, the `close --all`
+rule, the pin) and its "not available yet" sentences about shared profiles
+were replaced; the tools intro's isolated sentence now points at
+`vibespace-browser new/use` instead of telling the agent to wait.
+
+The manual `vibespace-docs browser` serves (registered in `AGENT_DOC_TOPICS`,
+`src/agent-routes.js`), beside the one budgeted line in the tools intro —
+**a line that is now chosen by the session's OWN recorded rung (r5)**:
+`browser-profiles.isolatedVariant` (D/C/N/H) gets the "this session has its own
+browser, `close --all` closes only yours" sentence, and every other session
+(rung `none`, the feature off, a resolver that threw, a session predating it)
+gets the manual's own words for the shared browser, because telling a shared
+session that `close --all` is safe is the incident P0 exists to stop. It
+describes what SHIPS: the four variables and what they mean for the agent, the
+TWO config files the generated config is built from and the one boundary of
+that (the session directory's `agent-browser.json`, once, for the whole
+session — r3), the three things to stop doing (`--profile` / `--session` /
+`--namespace`), and the honest limits — a remote host decides the user-data-dir
+itself (its own per-key dir when its config names a profile, the CLI's
+throwaway dir otherwise), one local corner gets nothing at all (a profile-naming
+config with neither D nor C deliverable — the names alone would make the browser
+fail to start), nothing watches the browser, a login does not survive, there is
+no live view and no handover yet, shared named profiles are a later phase, and
+the CLI's own 103-byte socket-path limit (`$HOME` + 65 bytes for our name shape
+⇒ a home longer than 38 characters would break every command) — which r4 now
+closes by setting `AGENT_BROWSER_SOCKET_DIR` at an owned 0700 directory only
+when the CLI's own root is over the limit, so the manual names it as the FIFTH
+variable the session may carry and tells the agent what the refusal means if it
+ever still appears (the directory could not be used and the journal says why).
+
 ### transcript-service.js
 
   transcript-service.js — ONE interface over the transcript parse stack (R3 of docs/design-three-tier.md; 2.283.0 step 1 = server-hosted, HTTP read family rerouted through it). **SWITCHED LIVE in 2.292.0** — remote page/turnmap/searchIndexed/status/taskState run as `transcript-op` on the owning machine (parsed KBs on the wire, no whole-file pull). LADDER not replacement: device op → transcript-cache pull + local parse → honest error; capability-gated (an old daemon is never asked — unknown ops hang), failures log throttled and degrade. TWO CARVE-OUTS, both load-bearing: ① a LIVE session never reads from the device (the server owns the stdout buffer overlay + live normalizer — the device would drop the un-flushed tail); ② the huge-file SEEK family switched ATOMICALLY in 2.293.0 once the daemon gained a `searchFull` op — `gapInfo` returns an OPAQUE HANDLE (`\0device:<host>` or the local path) that every follow-up (slab/search/turnmap) honours, so line numbers never come from two sources (the route already treated fp as opaque, so nothing above the service changed); device streaming search degrades honestly to one batch. Ladder test: scripts/test-transcript-switchover.mjs (7). **2.285.0 step 2: the DEVICE DAEMON hosts the SAME service** — agentd's `transcript-op` op (lazy-constructed, no buffer overlay device-side — the stdout overlay stays a server concern) runs page/turnmap/searchIndexed/status/taskState/gapInfo/gapSlab/fullTurnmap next to the bytes and streams JSON over a count-gated byte channel (read-range contract); client = DeviceManager.transcriptOp. DARK: no production consumer until the parity substrate soaks (retirement-order law). scripts/test-transcript-parity.mjs (19 asserts) pins BYTE-IDENTICAL results across in-process vs real-daemon — incl. >½MB multi-window payloads, a ~36MB fixture's real seek family, codex, and honest unknown-method/missing-file shapes. Its first run caught the tool-card ts bug (below). SafeFs/transcript-worker degrade INLINE inside the bundle (worker file absent next to the bundle → spawn fails → sync fallback, by design). **B-21e4 item 5:** `view()` warms through `harnessOf(backend).store.warmTranscript(id, cwd, {remote})` (claude parse-cache warm as before; codex thread/read fallback for a missing rollout, local only) — no backend ternary.
@@ -736,13 +2448,91 @@ Instance-hosted shareable HTML. Owner incident: the /design canvas skill publish
 
 ### src/server/desktop-stream.js — THE ONE WS BRIDGE (§2 row 4)
 
+**r-fix (2026-09-21):** a viewer id is BOUND to its socket — a second upgrade claiming a LIVE id is refused 409 `viewer id held` (`stats.held`), never a `.set` that replaces the holder; the pane mints a fresh id per (re)connect (`vnc-view`'s `url` may be a function).
+
   server/desktop-stream.js — `create({auth, resolveTarget, onInput, log})` → `{handleUpgrade, upgradeId, streamPath, stats}`. `upgradeId('/api/vnc')` = DESKTOP_SINGLETON_ID, `upgradeId('/api/desktop/<id>/stream')` = id — server.js's dispatcher asks it and hands the socket over in two lines. `handleUpgrade` asks `auth.requestAuthed(req)` ITSELF (a future caller cannot mount the bridge unauthenticated by forgetting the check — 401 + destroy), `resolveTarget(id)` (server.js composes: the singleton ⇒ `{kind:'rfb', port: vnc.port}`, else `keeper.streamTarget(id)`; null ⇒ 404), an `xpra` kind ⇒ **501 refused BY NAME** (one log line per id) until P8-2 — a rung the ladder can choose must fail loudly at the bridge, never relay the wrong protocol; `rfb` ⇒ `bridgeRfb` = the former server.js `bridgeVncSocket` VERBATIM (websockify semantics, 8 MiB pause / 1 MiB resume backpressure, close on either side) plus `onInput(id)` per browser→server frame, throttled 2 s — the keeper's idle clock is the last INPUT, not the last frame drawn. The raw port is loopback-only and never reaches a browser. Gate: test-desktop-app-keeper §2 (a real http server + real ws client through the real bridge: banner relayed, input reported, 401/404/501, stats). **r2 (2026-09-14): INPUT IS A CLIENT MESSAGE WHOSE TYPE IS INPUT, NOT A FRAME.** noVNC sends a FramebufferUpdateRequest on its own whenever the picture changes (a clock, a cursor blink), so "every browser→server frame is input" advanced the idle clock at exactly the 2 s throttle with nobody at the keyboard (measured `0 2466 4529 6652 …` ms on a once-a-second repaint vs `0 0 0 0` on a static xmessage) and the DA3 idle stop never fired for a session any tab showed. `rfbInputSieve()` walks the client→server RFB stream statefully (version → security type → None/VNCAuth bytes → ClientInit → typed messages with their lengths, several per frame) and counts ONLY KeyEvent (4), PointerEvent (5), ClientCutText (6, extended too) and the QEMU extended key event (255/0); a protocol it cannot follow (RFB 3.3, another security type, an unknown message type) flips to `opaque` and every later frame counts — today's rule, the direction that never reaps a live user. Gate: test-desktop-app-keeper §2 (a real handshake + PointerEvent reports input; 3 update requests over 6 s report none; one frame carrying an update request AND a KeyEvent reports one). **r3 (2026-09-14): `RFB_FIXED_LEN` is DERIVED FROM THE CLIENT WE SHIP — noVNC's `enableContinuousUpdates` is 10 bytes (type, enable, x, y, w, h), the round-2 table said 4, and a wrong entry does not flip the sieve to `opaque`, it MISALIGNS it for the rest of the connection (measured through the exported sieve: handshake + SetPixelFormat + SetEncodings + ECU + FramebufferUpdateRequest + KeyEvent ⇒ inputs 0, pending 4, `opaque:false`; ECU + three KeyEvents ⇒ 0), so on a server that accepts the ContinuousUpdates pseudo-encoding (TigerVNC's Xvnc, the fleet image's rung; x11vnc 0.9.17 does not) the idle stop could reap a session the user was typing in. The table is now `{0:20, 3:10, 4:8, 150:10, 250:4}`; PointerEvent (5) is read from its OWN marker bit (7 bytes with ExtendedMouseButtons, else 6 — the shipped client sends both shapes under one type); ClientFence (248) is variable (`9 + payloadLen`). test-desktop-apps §7 parses every `RFB.messages.*` encoder out of node_modules/@novnc/novnc/core/rfb.js, asserts each fixed entry against the encoder's pushes, drives every encoder shape followed by a KeyEvent (which must count, nothing pending), and runs the round-2 table as a patched copy (0 inputs, not opaque, 4 pending).**
+
+**THE INPUT POLICY (P9b, design-agent-browser-v2 §4.3 / §6.6 — the `window-live` form of this bridge, 2026-09-21).** A client names itself with `?viewer=<id>` at the upgrade (`viewerOf(url)`, `VIEWER_RE` = 1–64 of `[A-Za-z0-9._-]`, else null = anonymous as before); `create({inputPolicy, onViewerLeft})` — `inputPolicy(id, viewerId)` is asked for every client chunk and applied per MESSAGE: `rfbInputSieve().strip(chunk, allowInput)` walks the SAME parser as `feed` and returns `{inputs, dropped, relay}` where `relay` is the chunk with its input messages (KeyEvent / PointerEvent / ClientCutText / QEMU key) CUT OUT when `allowInput` is false — a FramebufferUpdateRequest riding the same frame still reaches the server, so the picture never freezes on a refused click; complete units only (a message split across chunks waits for its tail — the server could not act on half of it; a NON-input message split across chunks relays whole once complete); an `opaque` stream is all-or-nothing (a refused chunk dropped WHOLE — the direction that never injects behind a refusal; an allowed one relays raw). Every stream goes through `strip` now (allowed ⇒ byte-identical to the old raw relay). Dropped input is never reported to `onInput` (a refused click is nobody at the keyboard; the idle stop must not be fed by refused input); `onInput(id, viewerId)` carries the viewer; `stats().dropped` counts the drops; the close line names the viewer and the drop count + the last refusal code. `viewers` (id → viewerId → ws) answers `viewersOf(id)` / `viewerAlive(id, viewerId)` (the engine's holderAlive fact); `onViewerLeft(id, viewerId)` fires once per socket close so a holder whose socket died hands back. The singleton desktop (`/api/vnc`) is never gated (the wiring answers relay for it). Gate: test-window-target §1 (strip) + §2 (a fake RFB server + real ws: Watch drops the KeyEvent, keeps the update request; takeover relays the holder only; `held`; viewer-left) + §3 (the real x11vnc: a key sent in Watch never reaches the GTK fixture's witness, the same key lands after the takeover).
 
 **KEEPALIVE + A NAMED CLOSE (2.369.118, userW inc-mu3lmd4s-dmwf).** `bridgeRfb` pings every `pingMs` (`PING_MS` = 20 s; `create({pingMs})` for tests), marks the peer dead after two silent rounds and terminates it with the reason `no pong for N ms`; it logs `bridge opened → 127.0.0.1:<port>` and ONE close line per bridge — `closed (<who>) after <s>s, <down> B to the browser, <up> B to the server` where who = the browser's code/reason, `the VNC server closed its socket`, a socket error, or the ping timeout. `stats()` unchanged. The singleton Desktop window (desktop-window.js) now passes `autoReconnect: true` like the app windows. Gate: test-desktop-stream-keepalive.
 
 ### src/routes/desktop-apps.js — THE DESKTOP ROUTE FAMILY (§2 row 5)
 
-  routes/desktop-apps.js — thin over the keeper: GET /api/desktop/apps (registry + availability per row, live sessions, the ladder with reasons, the cap, the idle default), POST /api/desktop/apps (`{appId}` | `{exec, args?, cwd?, label?}`), GET /api/desktop/apps/:id, POST …/:id/stop, POST …/:id/keep-alive, and the singleton's GET /api/vnc/status · POST /api/vnc/start (moved from server.js, answers unchanged). EVERY route takes `host` (query or body) and REFUSES a non-local one by name (400 `unsupported-host`) — `hostId` is a parameter, never a silent local fallback; every failure answers `{error, code}` with a status by code (404 not-found; 400 bad-request/exec-not-found/cwd-missing/needs-wayland; 409 cap/runaway-parked/no-backend/backend-not-wired). fetchJson never throws, so a 200-with-nothing would be a silent failure of a user action.
+  **P9 (2026-09-21):** the keeper gained `x11EnvFor(id)` — the x11 env a process ADDRESSING a record's display gets (the same rule as the app's own: `x11Env` over the sanitised base, the per-app Xauthority for an owned display, the singleton's cookie file for a shared one; null before the display exists) — the window-targets engine's one way to point xdotool / the screenshot helper at a keeper display.
+
+
+  routes/desktop-apps.js — thin over the keeper: GET /api/desktop/apps (registry + availability per row, live sessions, the ladder with reasons, the cap, the idle default), POST /api/desktop/apps (`{appId}` | `{exec, args?, cwd?, label?}`), GET /api/desktop/apps/:id, POST …/:id/stop, POST …/:id/keep-alive, and the singleton's GET /api/vnc/status · POST /api/vnc/start (moved from server.js, answers unchanged). **P9b (2026-09-21): the user's side of a window lease** — `GET …/:id/lease` → `{id, origin, lease|null, idleMs}`, `POST …/:id/takeover {viewerId}` (the live view's own id — the one it put on its stream upgrade; 400 without it) → `{ok, already, lease}`, `POST …/:id/handback {viewerId?}` → `{ok, cause:'explicit', heldMs, byHolder, lease}`; decided by the window-targets engine (`setup({keeper, vnc, windowEngine})`; 503 `no-engine` without it), refusals typed at 409: `held` (another viewer drives), `not_taken` (nobody does), `no_lease` (no agent holds it — the user's input already reaches it). EVERY route takes `host` (query or body) and REFUSES a non-local one by name (400 `unsupported-host`) — `hostId` is a parameter, never a silent local fallback; every failure answers `{error, code}` with a status by code (404 not-found; 400 bad-request/exec-not-found/cwd-missing/needs-wayland; 409 cap/runaway-parked/no-backend/backend-not-wired). fetchJson never throws, so a 200-with-nothing would be a silent failure of a user action.
+
+### src/window-targets.js — WINDOW TARGETS, SHARED (design-agent-browser-v2 §4.9 / §5.1.1 / §6.6; P9 first half, 2026-09-21)
+
+  window-targets.js — node builtins + desktop-display only (the daemon can bundle it); every display-touching entry point takes `hostId` and refuses a non-local one by name. THE RULE IT ENCODES (D28): the agent talks to the TREE — AT-SPI2 is the native window's DOM — and to pixels only when the tree cannot answer. `snapshotTarget({pids, budget, text})` → `{snapshot, refs}`: the a11y tree of the applications whose pid ∈ pids with `@eN` minted in visit order (the agent-browser habit), the interface CENSUS every snapshot reports (§12.30: Action/EditableText/Text per node, buttons-with-Action — coverage is per toolkit and per desktop, never a constant), the `unreadable` subtrees, `truncated`, the timing. `refTableOf` keeps IDENTITY only (pid, path, role, name, bounds, actions, editable) — never the text; `resolveRef` refuses `ref_unknown` for anything not in the last snapshot. `actOnNode({entry, verb})` re-resolves the recorded path and the helper refuses `ref_stale` when the node there is no longer the one the ref named, `node_has_no_action` when a `do_action` lands on a node without `Action`, `node_not_editable` for text into a node without `EditableText`. `pickAction(actions, want)` = the preference `click > press > activate > doDefault > …`; Chromium/Electron put `showContextMenu` + `clickAncestor` on EVERY node (measured), so those and the `scroll*` family are NEVER picked unnamed (`--action` names one). `parseChord` is a CLOSED vocabulary (modifiers + one letter/digit/named key, spelled for xdotool) because the result reaches an argv — `ctrl+s; rm` is `bad_chord`, `ctrl++` is ctrl and the plus key, `ctrl+` is refused. `probeInputBackends({env, bins, ours})` = the RUNTIME ladder (§4.9 conclusion 2 — never a platform name): `xtest` (xdotool on OUR display; the only rung wired; a display that is not ours gets none — D27 (a)), `portal` (the RemoteDesktop portal on the session bus, `available:'consent'`, unwired — D29 (a)), `uinput` (a writable /dev/uinput, unwired, explicitly not recommended — D29 (b)); `injection` = the first row both available AND wired. `verbVerdicts({a11y, backends})` = §5.1.1's table PER VERB: `click`/`type`/`snapshot` ride the tree and are decided per NODE at act time; `key` and `click-at` exist only as injection and are refused WITH the probe rows when no wired backend exists; `screenshot` only from our display. `injectKey` (pointer moved into the window first — a bare Xvfb has PointerRoot focus — then `xdotool key --clearmodifiers <chord>`) and `injectClick` (`mousemove --sync x y click n`) are XTEST on our display; `screenshotDisplay` writes a PNG of a rectangle through the helper's Gdk op — the FALLBACK read.
+
+  **THE TRAVERSAL NEVER RUNS ON THE EVENT LOOP.** `runHelper(req, {env, wallMs, python, helper})` spawns src/window-targets-helper.py with ONE JSON request on stdin, reads ONE JSON reply, keeps an `error` listener for life, SIGKILLs at `wallMs` and answers `helper_timeout` with the elapsed ms (the child is dead by then — suite §2), maps garbage to `helper_error` with the stderr tail, ENOENT to `python3_missing` naming the packages (python3-gi + gir1.2-atspi-2.0), a missing file to `helper_missing`, and any code outside `REFUSALS` to `helper_error` (+ `helperCode`) so a route never sees an unknown code. `TRAVERSAL_LIMITS` is the ONE home of the numbers: NODE_BUDGET 600 (default), SNAPSHOT_MAX_BUDGET 3000 (clamped), CALL_TIMEOUT_MS 800 (libatspi's per-method timeout inside the helper), WALL_MS 20 s (an unresponsive app costs one call timeout per node it owns, so the wall is what bounds it), ACT_WALL_MS 8 s, PROBE_MEMO_MS 60 s (a YES from the a11y / portal probes is remembered, a NO re-asked). `REFUSALS` is CLOSED and `refuse()` throws on a stranger; the routes' STATUS map must cover every member (suite §4 census).
+
+  **P9 MEASUREMENTS (2026-09-21, this box: Ubuntu, GNOME Shell 50.1 on Wayland, xdg-desktop-portal 1.21.1 + -gnome 50.0, at-spi2 2.60.4, python 3.14.4, node 24.12 — the four things §10's P9 row said to measure FIRST; scripts/measure-window-targets.mjs reproduces them):**
+  ① **The portal from a `systemd --user` background unit** (D29 / §12.29): from a transient `systemd-run --user` service — the same manager and context as vibespace.service — `RemoteDesktop.CreateSession` answered response 0 in 3 ms, `SelectDevices(types=7, persist_mode=2)` response 0, and `Start` raised the consent dialog (journal: "Failed to associate portal window with parent window", no Response within a 3 s wait; the session was Closed). So the public "portal/D-Bus is refused in background contexts" report does NOT hold here — the D-Bus path is open; what stands between a background service and injection is the USER'S click (§6.6), which nobody clicked in this measurement, so a granted background session is unproven. D29 (a) is viable; (c) stays the shipped state.
+  ② **AT-SPI coverage on Chromium/Electron** (§12.30): LM Studio 0.3.32 (Electron) launched on our Xvfb with `--force-renderer-accessibility` — 357 nodes: Component 357/357, **Action 357/357** (`showContextMenu` on every node, `clickAncestor` 290, `press` 36, `doDefault` 13, `click` 11), **buttons with Action 43/43**, EditableText 0/357 (no field on that screen), Text 328/357. Every node has an action, which is not the same as every action being meaningful — hence `pickAction`'s never-by-default set. GTK3 (the fixture): 13 nodes, Action 3, EditableText 1, buttons with Action 2/2. gnome-shell (clutter/GJS, 600-node budget): Action 49/600, **74 buttons with 0 Action**. **Qt: NOT measured — no Qt toolkit is installed on this box**; the suite prints its own census so it can be re-read on a desktop that has one. Electron exported its tree only because the flag was passed; a keeper row for an Electron app should carry it (second half).
+  ③ **`do_action` → UI change**: a GTK button, 30 clicks — the call itself median 0.08 ms, the tree-visible change (the label's new name read back through libatspi) median 0.34 ms, p95 0.81 ms, max 0.82 ms. Not measured on Electron (no known-safe widget to press in somebody's app).
+  ④ **The node-side binding and its per-node cost** (§12.33): no maintained node AT-SPI binding exists (npm 2026-09-21: `@girs/atspi-2.0` / `@gi-types/atspi*` = GJS typings, `@girs/node-atspi-2.0` = typings for the native node-gtk, `dbus-next` 0.10.2 last modified 2022-04-28, two zero-history packages). Per-node cost is NOT what decides it — a cold walk costs the same order both ways: libatspi through python3 GI 600 gnome-shell nodes in 111–248 ms across four runs (2,400–5,400 nodes/s), the 357-node Electron tree in 78–81 ms (4,400–4,600 nodes/s); raw D-Bus with NO cache through Gio (up to 6 calls per node: GetRoleName, Name, GetInterfaces, GetExtents, GetActions, GetChildren) 0.34–0.51 ms/node = 1,970–2,900 nodes/s. The fork tax: helper spawn → probe reply 62–70 ms from a 47 MB node (+ the parent's RSS-proportional fork cost, §1.6's 72 ms at 1.5 GB), paid ONCE per traversal. Decision: python3 + GI in the bounded subprocess — the boundary is required by the event-loop law anyway, and a raw node client would be a dependency this repo does not carry for a cost it would not save.
+
+  **P10 (2026-09-21):** `probeScreenCastPortal({env, bins, now})` — two read-only property Gets on the session bus (`ScreenCast.version`, `AvailableSourceTypes`, bit 2 = window sources), a YES memoised PROBE_MEMO_MS; it starts no session and raises no dialog (that is the user's click). The engine's desktop-class `screenshot` hands its answer to window-desktop's `captureVerdict`.
+
+### src/window-desktop.js — TIER 3: THE USER'S REAL DESKTOP AS A WINDOW TARGET, PURE (design-agent-browser-v2 §7.6 / §7.1's `local-window` row / §4.9 columns 1-2 / §6.6, D27 (b) / D31; P10, 2026-09-21)
+
+  window-desktop.js — imports nothing; the ONE model of the second window class the suite, the engine, the CLI and the browser registry all read. `ORIGINS` = `vibespace` (windows we started, D27 (a)) | `desktop` (the user's own desktop, D27 (b)); `SETTING_KEY` = `window.realDesktopTargets` (a `confirmOn` setting — the confirmation dialog IS the consent; agents cannot write settings, so the switch is a user act by construction); `consentVerdict({enabled})` admits exactly `true` (a string, a stale client copy, undefined = OFF, `desktop_consent_off` naming the switch); `desktopRows(a11yApps, {ourPids, selfPid})` = every application on the accessibility bus MINUS the keeper's pids and this process, `dw-<pid>` handles, every row `origin:'desktop'` + `yourDesktop:true` + `display:'your desktop'` — the AT-SPI desktop is the ONE enumeration road that holds in both §4.9 columns (measured: an Xwayland client and a native Wayland client both appear; only the first has an X window); `desktopVerbVerdicts` / `desktopActGate` = the class's law: `snapshot` / `click @ref` / `type @ref` ride the tree (`Action.do_action` / `EditableText`, NO injection), **`key` and `click --at` are refused BY NAME (`desktop_injection_refused`) whatever backend the display has** — a chord or a point on the real desktop lands in whatever has focus, possibly the window the user is typing in (§6.6); `watch` is `no_live_view` (the user is looking at it); `captureVerdict({sessionType, xWindow, ffmpeg, portal, display})` = §4.9 columns 1/2 decided PER WINDOW: an Xwayland client's own window through `x11grab -window_id` (its redirected pixmap — measured readable while the ROOT grabs black), a native Wayland window `capture_needs_portal` by name (ScreenCast v5, window sources; a consent click per session + persist_mode=2 + a PipeWire consumer, none wired), no DISPLAY / no ffmpeg / no window for the pid `capture_unavailable`. `TIER3_MEASUREMENTS` is THE RECORD of what §10's P10 row said to measure first (scripts/measure-tier3.mjs reproduces it; the local-oracles discipline: date, tool, box, a named status per column with a why, a refusal BY NAME where nothing was measured) and `WIRED` the rungs this version wires (`x11grabWindow`, `enumerateA11y`; NOT `portalScreenCast`, NOT `injection`); `measurementVerdict(rec, wired)` fails any WIRED claim whose evidence cell is not `ok` — a rung wired without re-measuring goes red (test-browser-tier3's negative controls). `hintAction(hint, {rowOf})` = what a §7.6 hint asks for: a tier-only hint is a SUGGESTION (`act:'open-window-target'` for 3, `switch-by-user` for 2, never `auto`), a backend hint DERIVES its tier from the row — nothing here ever performs a switch. The closed `REFUSALS` set (`desktop_consent_off`, `desktop_injection_refused`, `no_live_view`, `capture_needs_portal`, `capture_unavailable`, `desktop_window_gone`, `tier3_is_a_window_target`, `provider_needs_consent`, `escalation_needs_user`) is covered by routes/window-targets' STATUS (suite census).
+
+  **P10 MEASUREMENTS (2026-09-21, this box: GNOME Shell 50.1 on Wayland with Xwayland :1, xdg-desktop-portal ScreenCast v5 / RemoteDesktop v2, ffmpeg 8.0.1, agent-browser 0.32.0 + its Chrome 151; `node scripts/measure-tier3.mjs [--sites --no-sandbox | --capture --systemd | --latency --real]`):** ① **§12.36 which tier named sites fail on** — tier 1 (the installed CLI, a STOCK headless launch under a scratch HOME so the user's config.json and its AutomationControlled flag are not read; `--no-sandbox` was a launch precondition here per the CLI's own hint, not a detection flag): bot.sannysoft.com fingerprint table 3 passed / 1 failed cells; nowsecure.nl no Cloudflare challenge; browserscan.net/bot-detection FLAGGED "Robot". Tier 2 = refused `binary_absent` (cloakbrowser not installed, no cloud key); tier 3 = refused `needs_user` (the user's own window, only behind the switch — a script driving it would be the user's act); banks = refused `owner_act` (a real login page from the owner's address is the owner's act — D31 "measure first" stands as owed). ② **§4.9 columns 1/2 on the user's OWN session**: `_NET_CLIENT_LIST` on :1 named 0 managed windows (xwininfo 14 one-pixel helpers, wmctrl nothing) — X11 enumerates only X11 clients; x11grab of the Xwayland ROOT is all black; the GTK fixture mapped as an Xwayland client: on the a11y bus, found by `xdotool search --pid`, `_NET_WM_PID` set, **`x11grab -window_id` 151200/151200 bytes non-zero** (the rung `screenshot` wires); mapped as a NATIVE Wayland client: on the a11y bus, NO X window, invisible to every X11 road; ScreenCast portal CreateSession / SelectSources(window, persist_mode=2) answer 0 from this shell AND from a `systemd-run --user` unit (the server's context), Start raises the consent dialog (2 s wait, no Response, session Closed); GNOME `Introspect.GetWindows` and `Screenshot.ScreenshotWindow` both AccessDenied. ③ **§12.39 do_action → visible PIXEL change** (XGetImage of the fixture's own window, N=10): our Xvfb median 1.7 ms / p95 15.5 ms; **the user's Xwayland :1 median 3.3 ms / p95 15.5 ms** (one 60 Hz frame); tree-visible change median 0.29 ms. Not measured: injection on the class (refused by rule), Qt/Electron on the real desktop, any bank.
+
+### src/window-targets-helper.py — THE BOUNDED AT-SPI TRAVERSAL (P9)
+
+  window-targets-helper.py — the ONLY place VibeSpace speaks AT-SPI; never imported, always a child of `runHelper`. Ops on stdin: `probe` (apps on the bus), `apps`, `snapshot {pids, budget, callTimeoutMs, maxDepth, text}` (breadth-first per application, `Atspi.set_timeout(callTimeoutMs)` first, every accessor wrapped — a node whose children cannot be read is an `unreadable` entry and its subtree is skipped, the budget or the deadline ends the walk with `truncated`), `act {pid, path, expect:{role,name}, verb: do_action|set_text|insert_text|read, action, text}` (re-resolves the path from the application, `ref_stale` on an identity mismatch, `node_has_no_action` / `node_not_editable` by interface), `focused {pids}` (the node with the `focused` state — `type`'s default target), `screenshot {out, bounds}` (Gdk pixels of the DISPLAY in the env). Interface methods are called through their CLASS (`Atspi.Text.get_text(t, …)`, `Atspi.Action.do_action(a, i)`) because PyGObject resolves `acc.get_text(…)` to the DEPRECATED `Accessible.get_text` iface-getter. The reply is always one JSON object with `ok`; exit 3 = `a11y_unavailable` (gi Atspi not importable), everything else exit 0. Gate: test-window-targets §3 (the real tree).
+
+### src/server/window-live-wiring.js — THE DESKTOP SCENE'S COMPOSITION (P9b)
+
+  server/window-live-wiring.js — `install({app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback, log})` → `{desktopStream, windowEngine, announced, boot, shutdown}`. Creates the window-targets engine and the RFB bridge and CONNECTS four existing owners so there is one truth: the bridge's `inputPolicy` IS the engine's lease verdict (the singleton desktop always relays), the bridge's `onViewerLeft` IS the engine's viewer-left handback, the engine's `holderAlive` IS the bridge's `viewerAlive`, the bridge's `onInput` feeds BOTH the keeper's idle clock and the engine's takeover idle clock, the engine's `broadcast` is the server's, and the engine's handback rides the ONE announcer (`browserHandback.installWindow`). Mounts both route families (user + agent). Moved out of server.js for its 2100-line ratchet (2098 after). `boot()` runs after restoreSessions (`bootWindowLeases()` on the same line as `bootBrowserKeeper()`), `shutdown()` stops the tick at exit. Gate: test-window-target §3 composes it on an express app with the real keeper.
+
+### src/lib/window-live-mode.js — PURE (imports nothing, DOM-free) the window-live pane's mode arithmetic (P9b)
+
+**r-fix (2026-09-21):** `windowLiveMode({lease, viewerTag})` / `leaseTransition(prev, next, viewerTag)` compare the lease's `takenBy.tag` (opaque, minted at takeover) with the tag this pane's OWN takeover answer carried — the viewer id is in no broadcast; `newViewerId()` is 128 random bits from `crypto.getRandomValues` (non-secure contexts too), the suites' `random` injectable.
+
+  lib/window-live-mode.js — `windowLiveMode({lease, viewerId})` → `{leased, mode: watch|takeover, mine, viewOnly, holder, orphaned}` (no lease ⇒ never view-only — the user's own app; an agent lease ⇒ Watch, view-only; taken over ⇒ mine when the holder viewer is this one), `windowModeBadge` (the browser live view's exact three phrases), `leaseTransition(prev, next, viewerId)` → took-over | handed-back | lapsed | other-took | agent-attached | agent-left | null (what the person looking at the pane must hear), `newViewerId()` (fits the bridge's `VIEWER_RE`). The view-visibility.js precedent: out of desktop-app-window.js so test-window-target pins it in node. Gate: test-window-target §1.
+
+### src/server/window-targets-engine.js — THE ORCH HALF OF `vibespace-window` (P9; first half + P9b leases and the three modes)
+
+**r-fix (2026-09-21):** `leaseView` and the `window_paused` refusal name a takeover by an OPAQUE `tk-<16 hex>` tag (`takenBy: {tag, at}`); the raw viewer id stays in the input state server-side (inputPolicy / viewerLeft / audit). `open(body)` refuses `exec` / `args` / `cwd` BY NAME (`exec_is_human`, `apps` = the registry ids with the keeper's presence verdict) before the keeper is asked — an exec is the user's dialog's, never an agent's (design-desktop-apps §5); `list` carries `apps` so the remedy is real.
+
+  server/window-targets-engine.js — `create({keeper, dataDir, env, activeSessions, wt, bins})`: `factsForToken(vsst_)` → the calling session; `list` = `targetRows` over the desktop-app keeper's live records (the set of addressable windows IS the set VibeSpace started — D27 (a); nothing on the user's desktop is enumerated) + the a11y presence by session pid + the lease + `verbVerdicts`; `open` launches through `keeper.launch` and attaches the opener; `attach` = ONE holder per window (`window_leased` names the holder session; idempotent for the holder, `resumed`), `detach`, `dropSession` (the kill path). Leases are IN MEMORY in this half (the window survives a restart through the keeper's adoption; the agent re-attaches — `not_attached` says so); the persisted lease + §4.3's three modes join in the second half, and `lease.input !== 'agent'` already answers `window_paused`. `snapshot` REPLACES the lease's ref table (`ref_unknown` before any snapshot). `act`: THE PER-VERB LAW — `click @ref` refuses `node_has_no_action` in the ENGINE before any helper call (the refusal names the node's bounds and the audited `--at` path as the agent's OWN decision) and holds with an injection backend present (the rule is about the node, not the column — suite §4's negative control); `type` targets the ref or the focused node (`no_focused_node`) and refuses `node_not_editable`; `key` (a chord has no road on the tree) and `click --at` are refused `no_injection_backend` carrying the probe rows when no wired backend exists on THAT display, else XTEST through xdotool with the pointer first moved to the last snapshot's frame. `screenshot` = the frame's rectangle from the last snapshot (else the whole display) as a PNG under data/window-shots/ (the route streams and unlinks it). `watch` names the Desktop-app window (the whole private display) honestly — the per-window pane arrives with the xpra transport. AUDIT `data/window-audit.jsonl`: `{at, sessionId, browserKey, handle, verb, by: node|point|inject|lease|keeper|tree|pixels, ok, code?, node:{role,name,action}?, at:{x,y}?, chord?, chars?}` — typed text NEVER (a `type` records its length; a bare key is `(key)`), a point click is marked `by:'point'` (§6.6: the one path that can touch what we are not looking at).
+
+  **P9b (2026-09-21) — THE LEASE PERSISTS, THE INPUT SIDE IS THE TAB'S.** `data/window-leases.json` (atomic, 0600) holds `{handle, sessionId, browserKey, since, origin:'vibespace'}` per window; `load` is lazy on first use, every lease change `commit()`s (save + `broadcast({type:'window-leases-updated', leases})`). A restart keeps the lease (the keeper adopts the window, the agent's next verb just works — suite: a second engine over the same data dir refuses the other session `window_leased`); the INPUT SIDE is in memory only (`inputs`: browser-takeover's state per handle) — a restart is a handback by construction, the tab's rule. `attach` on a lease whose holder session is NOT live takes it over (`orphanedFrom`, audited; a takeover in flight hands back `detach` first); `reconcile({graceMs})` drops a lease whose window is gone at once and a holder-less one after `LEASE_DROP_GRACE_MS` (60 s, stamped `carrierLostAt` at the tick — a reconnecting session never loses its window to a blink) or at once at `boot()` (called after restoreSessions, like the browser keeper); `dropSession` is the kill path; the tick (15 s) runs reconcile + the idle sweep and stops itself when nothing is held. `takeover({handle, viewerId, holderAlive?})` / `handback({handle, viewerId, cause})` / `noteUserInput` / `sweepIdleTakeovers` are the SAME PURE verdicts the browser keeper runs (`T.decideTakeover` / `decideHandback` / `idleHandbackVerdict` under `browser.takeoverIdleMs` — ONE idle window for tabs and windows); `no_lease` = no agent holds it (a human's own app is never gated), `held` = another live viewer drives (`holderAlive` is the bridge's socket fact through `setViewerProbe`). While `input` is 'user' `requireLease` throws `window_paused` with `T.browserPausedRefusal({target:'window'})`'s wording (+ `takenAt`, `viewer`) for EVERY verb — snapshot, click, type, key, --at, screenshot: §6.6's second enforcement point, a takeover stops injection of every kind and what we guarantee is that WE do not inject. `inputPolicy(handle, viewerId)` is the bridge's per-message question: no lease ⇒ relay; 'agent' ⇒ `watch-mode`; 'user' ⇒ the holder relays, everybody else `held`. `viewerLeft(handle, viewerId)` = the holder's socket closed ⇒ `viewer-left` handback. `onInput(fn)` fires `{kind: takeover|handback, target:'window', handle, label, sessionId, browserKey, state, cause, heldMs}` — the ONE announcer hangs here (`browser-handback.installWindow`). Every audit line carries `origin:'vibespace'` (§6.6's class marker — the other class, the user's desktop, never appears and the marker keeps a future row from being mistaken for this one); `takeover`/`handback` lines are `by:'user'` with the viewer and the cause; `lease-dropped` names why. `watch` answers `form:'window-live'` + the lease + a note saying whether the user is driving. `inputSummaryFor(sessionId)` (null / agent / user) is available and deliberately NOT folded into the card's `browserInput` (that fact names the browser; the card's "Hand back the browser" row posts to the browser route). Gate: test-window-target §1 (fake keeper, injected clock) + §3 (real).
+
+  **P10 (2026-09-21) — THE OTHER CLASS, THE USER'S OWN DESKTOP (model: src/window-desktop.js).** `desktopEnabled()` = `serverSetting('window.realDesktopTargets') === true`; `list` appends, ONLY while it is true, `desktopRows(a11y apps − ourPids() − selfPid)` marked `origin:'desktop'` / `yourDesktop`, records the pids it saw (`desktopSeen`) and carries `desktop:{enabled, count, setting, note}` + `verbsDesktop`; `attach`/`requireLease` ask consent FIRST (`desktop_consent_off` before existence), resolve `dw-<pid>` through `liveAny` = a seen pid that is alive (`desktop_window_gone` when the bus named it and the pid died; a persisted lease trusts its own pid across a restart — `liveDesktop(h, {trustPid})`), and the lease carries `origin:'desktop'` into data/window-leases.json, every view and every audit line; `act` runs `desktopActGate` BEFORE any backend is probed — `key` / `click --at` are `desktop_injection_refused` with xdotool present (the rule is about the class); the tree verbs run unchanged (per-node rules still apply); `screenshot` on the class = `desktopScreenshot`: `xdotool search --pid` on the SERVER'S display env (`userEnv()`, DISPLAY/XAUTHORITY — our own xdotool/ffmpeg children only, never an agent spawn) → `captureVerdict` → `ffmpeg -f x11grab -window_id` of the window's own pixmap, else refused by name; `watch` is `no_live_view`; `takeover`/`handback`/`inputPolicy` work on the class through `liveAny` (the user's pause rides the same PURE verdicts); `enforceConsent()` — at every verb, at the tick and at boot — drops every desktop lease the instant the switch reads false (`dropDesktopLeases`, audited `by:'consent'`), so the user's decision wins before any takeover is asked for. Exports `desktopEnabled` / `enforceConsent` / `dropDesktopLeases` / `desktopLeases` / `liveDesktop` / `DESKTOP_SETTING`. Gate: test-browser-tier3 (fast, 111) + test-browser-tier3-chrome (heavy, 13: a real Chrome with no automation flag).
+
+### src/routes/window-targets.js — THE AGENT WINDOW ROUTES (P9 first half)
+
+**r-fix (2026-09-21):** `POST /api/agent/window/open` takes `{appId, label?}` only — `exec_is_human` ⇒ 403.
+
+  routes/window-targets.js — agent-only (Bearer `vsst_`, auth-exempt under /api/agent/): `GET /api/agent/window/targets`, `POST …/open | attach | detach | snapshot | act | watch`, `GET …/screenshot?handle=` (image/png + `X-Window-Shot`, the temp file removed once sent). Every route takes `host` and refuses a non-local one by name (400 `unsupported-host`). `STATUS` maps EVERY code in window-targets.REFUSALS plus the engine's (404 not-found / not_attached / ref_unknown / app_gone; 400 bad-request / bad_chord / action_unknown; 409 window_leased / window_paused / node_has_no_action / node_not_editable / no_focused_node / ref_stale / no_injection_backend / action_refused + the keeper's cap / runaway-parked / no-backend / backend-not-wired / no-display; 503 a11y_unavailable / helper_missing / python3_missing / screenshot_unavailable; 504 helper_timeout; 502 helper_error / action_failed / ref_unreadable / inject_failed / screenshot_failed) — the suite's census fails a typed refusal that would fall to 500. Wired in server.js on the desktop-routes line (the 2100-line ratchet).
+
+  **P10:** STATUS covers the desktop class (403 `desktop_consent_off` / `provider_needs_consent` / `escalation_needs_user`; 409 `desktop_injection_refused` / `no_live_view` / `tier3_is_a_window_target` / `no_lease` / `held` / `not_taken`; 404 `desktop_window_gone`; 503 `capture_needs_portal` / `capture_unavailable`) and the body carries `setting` / `verb` / `class` / `origin` / `yourDesktop` / `lease` when the refusal names them. THE USER'S SIDE, cookie-authed by mount position (NOT under /api/agent/): `GET /api/window/desktop` → `{enabled, setting, leases:[desktop lease views], idleMs, note}`, `POST /api/window/desktop/:handle/pause {viewerId?}` → the engine's takeover (viewer `user` by default), `POST …/resume` → the explicit handback; a non-`dw-` handle is 400.
+
+### data/bin/vibespace-window — the agent's window-target CLI (P9; STATIC tracked, in AGENT_TOOLS)
+
+**r-fix (2026-09-21):** `open <app-id>` only; `--exec` / `--args` / `--cwd` exit 1 `exec_is_human` before any request; `list` prints the registry ids an agent may open (with the keeper's availability).
+
+  data/bin/vibespace-window — `list` (rows + the per-verb verdicts + the probe), `open <app-id> [--title]` (registry ids only since 2026-09-21 — `--exec`/`--args`/`--cwd` refused `exec_is_human`), `attach`, `snapshot <h> [--budget N] [--no-text] [--json]` (one line per node: `@ref role "name" editable [actions] (x,y wxh) {states} text=…`, then the census trailer + the unreadable subtrees), `screenshot <h> [--out p]` (saves the PNG, says it is the fallback), `click <h> @e7 [--action name]` / `click <h> --at x,y [--button n]`, `type <h> "text" [@e7] [--replace]`, `key <h> <chord>`, `watch`, `detach`; `--json` on every verb. `printRefusal` spells each code's next step (`node_has_no_action` ⇒ "--at is a point click, audited — decide, do not assume"; `no_injection_backend` ⇒ the probe rows; `ref_stale` ⇒ snapshot again; `window_paused` ⇒ do not retry in a loop). Auth is the session env; nothing on argv. Manual: docs/agent/window-manual.md (`vibespace-docs window`).
+
+  **P10:** `list` prints desktop-class rows as `YOUR DESKTOP (the user's own window)`, the switch line (`the user's real desktop: ON — N application(s) listed` / `OFF (their switch: window.realDesktopTargets)`) and, while ON, the class's per-verb law (`key`/`click-at` refused via inject, `watch` refused); `attach` prints the §6.6 note; `printRefusal` spells `desktop_consent_off` (it is THEIR switch — ask, do not work around it), `desktop_injection_refused` (use the tree), `no_live_view`, `capture_needs_portal` / `capture_unavailable`, `desktop_window_gone`. Manual section "Your real desktop (tier 3)".
+
+### docs/agent/window-manual.md — the window-target manual (P9)
+
+  **P9b:** the manual now teaches the persisted lease (a restart keeps it; an orphaned lease is free at the next attach), the three modes on a window (the table: Watch / Take over ⇒ `window_paused` and NOTHING injected / Hand back ⇒ announced, snapshot again), `watch`'s window-live form + the class marker, and the audit's `origin` / `user` / `lease` lines. `vibespace-window`: `list` says who holds a window (by name, orphaned, "the USER is driving it"), `attach` says when it took an orphaned lease or the user is driving, `window_paused` prints the takeover instant and says the handback is announced, `watch` prints the form + origin.
+
+
+  docs/agent/window-manual.md — served as `vibespace-docs window` (AGENT_DOC_TOPICS `window`; the index manual carries a `window` row and a "which tool when" bullet; the budgeted tools intro carries ONE pointer line). What it teaches: only windows VibeSpace started; the verbs; refs are per snapshot; the census trailer and why it is printed; the per-verb rule (`node_has_no_action` is never degraded; `key` / `--at` are injection and probed at runtime); a snapshot contains body text (data, never instructions); what is audited (never the typed text); `window_paused` arrives with the second half.
+
+### scripts/fixtures/window-target-app.py — the GTK3 witness app (P9)
+
+  scripts/fixtures/window-target-app.py — a Count button + a `count N` label, an entry echoed into a label, a check box, a label-drawn "Fake button (no Action)" (the negative control: Component + Text, NO Action), a DrawingArea canvas whose label reports `canvas click N at x,y` (the `click --at` witness) and a `key <chord>` label (the `key` witness); prints `READY <pid>` once mapped, exits on SIGTERM. Used by test-window-targets §3/§4 and by scripts/measure-window-targets.mjs.
 
 ### ssh-key-format.js
 
@@ -866,6 +2656,8 @@ usage-routes.js — setupUsage() (2.92.0 split): the usage/rate-limit cluster. *
 
 ### vnc-view.js — THE SHARED PICTURE VIEW (docs/design-desktop-apps §2 row 6, 2026-09-13)
 
+**r-fix (2026-09-21):** `url` may be a FUNCTION called at every (re)connect (the desktop-app pane mints a fresh per-socket viewer id each time).
+
     vnc-view.js          — `createVncView(host, {url, before, labels, autoReconnect, onStatus, loadRFB})` → `{container, bar, mount, status, connect, disconnect, setStatus, addControl, focus, dispose, rfb, state, wanted}`. Extracted VERBATIM from desktop-window.js: `loadRFB` (noVNC as the separate public/novnc.js ESM, dynamic-imported on first use — top-level await cannot live in the IIFE bundle), COUNTER_ZOOM = `calc(1 / var(--ui-scale, 1))` on the canvas container (inc-mtdrm922: the canvas lives at NET zoom 1, var-reactive — never per-event math), the bar (`.desktop-bar`: status chip `Connecting…`, Paste with its title, a hidden Reconnect), `scaleViewport = true` + `resizeSession = true`, `connect` → 'Connected', `disconnect` → `Disconnected` (clean) / `Connection lost` (red), the clipboard both ways with the same toasts. New and OPT-IN: `before` (an async gate — the singleton's POST /api/vnc/start; a desktop app's "is the record ready"; the gate's own `error` text wins over the generic label, as the retired `st?.error || …` did), `labels` overrides, `addControl` (window-type chrome inserted before Paste), `autoReconnect` = a BOUNDED ladder 1/2/4/8/15 s keyed on **`wanted`** (connect() was asked, nobody called disconnect()/dispose()) and NOT on `clean` — **measured 2026-09-13: a SIGKILLed server is a CLEAN close to noVNC** (its connected→close path never calls `_fail`), so a clean-only rule never reconnected. The singleton window passes no autoReconnect (its behaviour is byte-identical: a Reconnect button). Gate: scripts/test-vnc-view.mjs (49, fast): a grep census that vnc-view.js is the ONE noVNC surface under src/lib (the novnc import, the counter-zoom literal, `new RFB(`, the two policy writes), every t() literal and every noVNC fragment of the RETIRED desktop-window.js (`git show master:` through the sanitized git env) carried verbatim, and the real component driven under a fake DOM + fake RFB through the retired transitions, the paste/clipboard paths, dispose, and the ladder (clean AND unclean reconnect while wanted; nothing after our own disconnect).
 
 ### desktop-window.js — THE SINGLETON DESKTOP WINDOW, ON THE SHARED COMPONENT
@@ -874,11 +2666,17 @@ usage-routes.js — setupUsage() (2.92.0 split): the usage/rate-limit cluster. *
 
 ### desktop-app-window.js — THE `desktop-app` WINDOW (§2 row 7)
 
+**r-fix (2026-09-21):** `viewerId` is re-minted per connect through the url function and never leaves the pane except on its own upgrade/takeover/handback bodies; `myTag` = the tag my takeover answer carried, cleared on my handback; every mode read compares tags.
+
+    **P9b (2026-09-21) — THE `window-live` FORM.** The same window grows the browser live view's three modes when an agent holds a lease on the app: the badge (`browser-live-mode`, the exact three phrases through PURE `windowModeBadge`), Take over / Hand back (the desktop routes, this pane's `viewerId` — `newViewerId()`, put on the stream upgrade as `?viewer=` AND on the takeover so the lease names the viewer and the bridge hands back when that socket closes), the §6.6 class marker chip "VibeSpace-started window" (the other class never appears here; the tooltip says the user's own desktop is never listed), the holder chip "Agent: <name>" ("Agent gone: <name>" for an orphaned lease), the title "<label> — agent window"; noVNC `rfb.viewOnly` = `windowLiveMode({lease, viewerId}).viewOnly` (Watch, or somebody else driving) re-applied on connect and on every lease change — the client MIRRORS the server's verdict, it never enforces it (the bridge drops the input regardless); a pointerdown on the picture in Watch is a throttled hint toast. The lease arrives on `window-leases-updated` (a GET at open + on every ws reconnect); toasts by PURE `leaseTransition` (took-over / handed-back / lapsed / other-took). A window nobody leases shows none of it and behaves exactly as before (never view-only). Gate: the PURE half in test-window-target §1; the chrome leg is owed to test-desktop-app-window.
+
     desktop-app-window.js — `openDesktopApp(app, id, {syncId})`: one window per app session (`win._desktopAppId`; a second call focuses), `registerWindowType({type:'desktop-app', action:'openDesktopApp'})` with openSpec `{action:'openDesktopApp', id}` — so layout sync replays it on every other client and on reload (N viewers on one `-shared` display), it can enter a tab group like any window, and test-window-types pins the kind + action + owner. The picture is `createVncView` on `/api/desktop/<id>/stream` with `before` = the record gate (launching ⇒ "Starting application…"; exited/failed ⇒ `endedText`), `autoReconnect: true`. The bar adds: the backend chip `backendChipText` = `vnc-display (xpra not on PATH)` (the user must know whether this is one window or a whole display — §3), `liveChipText` CPU/RSS and `idleChipText` the countdown — both READ from the `desktop-apps-updated` broadcast (one GET at open; the countdown ticks locally from `lastInputAt + idleTimeoutMs`), Keep running (POST keep-alive) and Stop (POST stop; a terminal record disconnects the view and shows `Stopped` / `Exited (code N)` / `Failed: why`). `applyRecord` connects whenever the record is READY and the picture is not up (state not connected/connecting/starting), and the window re-reads its record on every main-ws reconnect — a server restart ADOPTS the session before any client reconnects, so the adoption broadcast reaches nobody; measured in the heavy suite: the SAME open window comes back with zero clicks. Labels reach the title through `setTitle` (textContent) and every list through escHtml. Gate: scripts/test-desktop-app-window.mjs (heavy, chrome).
 
 ### desktop-app-launcher.js — THE LAUNCHER (§2 row 8)
 
     desktop-app-launcher.js — `installDesktopAppLauncher(app)` (called once from App init beside `_probeVncAvailability`): `registerCommand('desktopApps.open')` + `registerMenuItem({menu:'gear', group:'1_admin', order:45, when: a backend exists})` (a CONTRIBUTION — the gear byte-identity pin extracts only `registerGearMenu`, so the row lives HERE), the toolbar `#btn-desktop-apps` (index.html, customize-mode row, setting `toolbar.showDesktopAppsButton`; hidden until the probe finds a backend, through app.js's applyChromeSettings), a probe of /api/desktop/apps at boot + on every ws reconnect (the Desktop button's lesson — a page loaded during a restart window must self-heal). `showLaunchDialog` — CATALOG-FIRST since 2026-09-14 (owner item A: a user who has never seen X11 must be able to use it): createModalShell `#desktop-launch-dialog` (escapeToClose; **`.dialog.desktop-launch` carries the WIDTH — `min(760px, calc(94vw / var(--ui-scale,1)))`, the .guided-cli-dialog precedent — and the body only `max-height: 80vh; overflow: auto`**), (1) an intro line in plain words (i18n zh+ja), (2) the ladder verdict in the chip's words (`availabilityText`), (3) RUNNING (Open focuses/opens the window; Stop; the slot count derived from the LIVE list — the `desktop-apps-updated` broadcast refreshes `data.apps`, never the cap snapshot taken at open, so a starting session read "0 of 6") shown ABOVE the catalog only when non-empty, (4) the APPLICATIONS catalog = the primary surface: an auto-fill grid of CARD buttons (label + one-line exec/reason + an SVG icon by registry `category` through `cardIconFor` — icons.js only, never emoji); one click launches, the card shows `is-launching` (spinner, disabled, aria-busy, "Launching…") until the record answers; an absent binary or a parked row is DIMMED with its reason, never hidden; an EMPTY catalog says so in plain words and forces the command form open, (5) "Advanced: run any command" = a disclosure (a BUTTON with aria-expanded/aria-controls) COLLAPSED by default whose open state persists in user state `desktopAppAdvancedOpen` (`advancedOpenFor` — the persisted preference wins, an empty catalog forces open without persisting) holding Run a command (exec, args via `splitArgs` honouring quotes, cwd with `setupDirAutocomplete`) + Recent (user state `desktopAppRecents`, `pushRecent` de-duplicates on the command line, cap 8; the two columns are `minmax(0,1fr)` — three nowrap Recent entries used to turn 1fr/1fr into 126/692px, the latent squeeze), (6) ≤768px one column, every failure a toast (fetchJson never throws; the routes always answer `{error}`). BOTH user-state keys ride the merge-only PATCH, which only works because `normalizeUserState` (routes/persistence.js) carries unknown top-level keys through since 2026-09-14 — it used to rebuild the document from the session keys alone, so `desktopAppRecents` had never survived a reload. **EVERY programmatic focus passes `{ preventScroll: true }`**: the 2026-09-14 defect (reproduced at 1000×800@2x — the owner's picture) was a body `min-width: min(760px, 92vw)` inside `.dialog`'s fixed 440px + overflow:hidden; an overflow:hidden box is still a scroll container, so the UA's focus scroll-into-view on the Command input scrolled `.dialog` itself by inputRight − clientWidth = 308px (title off-left, ✕ mid-header, the Applications column a 64px sliver of its own left-aligned buttons; 263px at 777px; nothing at ≤768px where `.dialog{width:95vw!important}` + one column hold) — the third instance of the width-on-the-body anti-pattern style.css documents. Holds no session state: re-reads on open and follows the broadcast while open. Gate: test-desktop-app-window MEASURES a fresh open at 1000×800 / 777×800 / 480×640 (scrollLeft 0, scrollWidth ≤ clientWidth, the h3 hit-testable, ✕ inside the right 48px, the first card label inside its card, both Advanced columns ≥ 38 % when two are shown, the latent three-recents case), the intro rendered in zh, a real card launch with its observed launching state (the one POST is held in-page for 1.2 s, because the keeper answers the moment bring-up starts), and the disclosure closed by default + persisted open across a reload.
+
+  **P10 (design §6.6 / D27 (b)):** the dialog gains the section "Agents on your real desktop" — `GET /api/window/desktop` on open and on every `window-leases-updated`: the switch's state ("Off — turn it on in Settings → Browser"), and per window an agent holds on the user's real desktop a row (label + the `your desktop` chip + "held by <session>" / "paused — you are in control") with ONE button, Pause agent / Resume agent → `POST /api/window/desktop/<handle>/pause|resume` (the engine's takeover / handback: the agent answers `window_paused` meanwhile). The listener is released with the dialog (the same MutationObserver as the apps listener). zh+ja entries.
 
 ### jobs-panel.js
 
@@ -935,6 +2733,8 @@ usage-routes.js — setupUsage() (2.92.0 split): the usage/rate-limit cluster. *
 
 **ROUND 4 — THE DRAG IS WHERE THE PRESS LANDED, NOT WHEN A SCROLL FOLLOWS (same incident, two MAJORs against round 3's own signature).** ① The 400 ms window admitted the ARTIFACT: the incident's re-measure bounces run +366…+602 ms after the switch, so a plain CONTENT click with one of them landing behind it satisfied "a scroll soon after a pointerdown that moved the view" → `_notePositioning('scrollbar-drag')` → `_endResumeSettle()` (window + snapshot + series) → the incident, reproduced behind the click. Round 3's leg passed only because it put the click at +300 ms and the displacement at +1400 ms. ② …and it EXCLUDED a real reader: a drag whose first move comes later than 400 ms after the press (press, look, then drag) was never positioning, so the re-tail series yanked that reader back to the live tail — a NEW harm versus master. NOW: `_pointerOnScrollbar(e)` hit-tests the pointerdown against the list's scrollbar GUTTER — `offsetWidth - clientWidth` minus the borders, on the right in LTR and on the LEFT in RTL, plus the bottom strip for a horizontal scrollbar — with coordinates converted viewport→LAYOUT px first (the uiScale body `zoom` scales `getBoundingClientRect`/`clientX` but NOT `clientWidth`; mixing the two spaces is the 2.369.5 VNC-pointer bug). The verdict rides `_pointerDownOnScrollbar` for the LIFETIME of the press, cleared by WINDOW-scoped `pointerup`/`pointercancel` listeners bound to `winInfo._listenerCtl.signal` (a scrollbar drag routinely releases outside the list; `dispose()` also removes them, for a view torn down while its window lives on), and `_pointerDragScroll` is "the flag is set AND the view moved > `POINTER_DRAG_PX`". `POINTER_DRAG_MS` is DELETED — a content click never becomes positioning however close a displacement lands, and a press-and-hold-then-drag is positioning for the whole press. `_pointerOnScrollbar` is DOM-free (it reads injected geometry) and unit-tested in plain node; the chrome suite adds a click-at-+300 ms/displacement-at-+450 ms leg and a press-hold-900 ms-then-drag leg, each with an instance-level control that restores the pre-fix outcome (the old time-window signature strands the window; a false hit-test yanks the slow dragger back).
 
+**Agent browser P5 (2026-09-21):** `this._browserTrace = createCardTraceLoader(this)` is ONE loader per view; `_applyElementMarks` ③ calls `observe(el)` (the one hook every element-making path shares); BOTH `_handler`s hand `browser-trace-appended` to `onAppended`; `dispose()` disposes it — see src/lib/browser-trace-view.js.
+
 ### chat-input.js
   chat-input.js — **THE Alt+Enter STEER CHORD + THE SEND-MODE HINT (2026-09-07, owner "顺便加入一个queue的快捷键, 不支持queue的就不显示").** `Enter` already sends as QUEUED while a turn runs; the chord is the OTHER mode. It is checked in the textarea's keydown BEFORE the plain-Enter branch — that branch tests only `!e.shiftKey`, so Alt+Enter would otherwise be swallowed as an ordinary send — and it is deliberately the ONLY new chord: `Tab` is the slash-command completion a few lines above and `Ctrl/Cmd+Enter` keeps meaning send/queue. `steerChordAllowed` (streaming ∧ the PURE `composerSendModes(this._queueCaps).allowSteerChord`) is the ONE capability answer, read by the chord, by both surfaces and by chat-view's `_canSteerComposer()`; the chord never degrades to a plain send, because a chord that silently does something else is worse than no chord. `steerNow()` sends on the ordinary `_send()` path (which now RETURNS the msgId — `null` for an empty composer, a disconnected socket, or a `/goal`, which is a control frame and never a queueable message) and hands that id to the host through `onSteerSend`, because a steer NAMES A QUEUED ITEM (`turn/steer` takes the app-server's queued-submission id) — there is no "send this text as a steer" verb to invent. `onSteerChord` routes the composer to the contributed command `chat.steerNow` so the keyboard and the button run the same verb; without a host it acts directly (standalone/test use). TWO SURFACES, ONE CAPABILITY: `_updateSendModes()` toggles `.hidden` on the hint (`ChatInput.sendHintHtml`, PURE + escaped, one segment per backed mode) and on the `.chat-steer-btn` bolt button, and is re-run wherever either input changes — `showTyping`/`hideTyping` (the streaming flag) AND `setQueue` (the caps, which arrive AFTER the composer is on screen, the same late-capability ordering that once shipped a permanently dead bubble chip). WHICH surface is visible is CSS's business, not JS's: the hint is `display:none` ≤768px and the button is `display:none` above it (`.chat-attach-btn`'s shape), so a phone gets the button, a desktop gets the line, and neither can contradict the capability. `_queueCaps` now carries `queue` too (the hint's queue segment needs it). ChatInput (textarea, send, attachments, drafts, slash commands, TODO display). **A TEXT CHANGE MUST NEVER REBUILD THE STOP BUTTON (2026-09-07 r2 — the live sub-agent counter's own regression, found by adversarial review):** `showTyping(label, kind)` renders `<spinner> <span class="chat-stream-label">…</span> [■ Stop]` and is re-asserted once a second while collab traffic ticks. The first cut guarded it with an “unchanged label” memo — which could never fire, because the label CHANGES on every tick (the age is in it). So `innerHTML` was rewritten every second and `.chat-interrupt-btn` was destroyed with it: a mousedown whose target leaves the DOM before mouseup fires `click` on the common ancestor (`.chat-stream-status`, no handler), so the interrupt is lost with NO toast and NO log — measured 6/10 (verifier) and 7/10 (this suite) trusted clicks delivered while ticking vs 10/10 with a stable node, and keyboard focus on Stop died within 1.4 s (100%). It bites in exactly the situation the readout exists for: the user believes the turn is wedged and reaches for Stop. Now: while `_isStreaming`, the button is still there and the KIND (which decides what the button DOES) is unchanged, the label is a `textContent` write into `.chat-stream-label` and NOTHING else — the button node, its focus and the two-step compaction ARM (`kind === 'compacting'` → “Cancel compaction?”) all survive. `_showPending`'s button-less “still working” line has no `.chat-interrupt-btn`, so it always falls through to the full render (it also clears `_typingLabel`). `hideTyping()` clears both memo fields; `typingLabel` exposes the current line. ChatView's read-only `_streamStatus` fallback has the same `.chat-stream-label` element and the same text-only update (`_roTypingLabel`). Which TEXT the line shows is ChatView's decision (`_applyStreamLabel`), never chat-input's — chat-input only owns the local “thinking…” / compaction label it sets on its own send. **`setSlashCommands(cmds, {terminal})` REPLACES (§2.6)**: the harness pushes the WHOLE list whenever it changes, so a command that disappeared upstream disappears here; the terminal-BOUND subset (`terminal_slash_commands`, upstream: “Phone/remote UIs should hide these from command menus”) is filtered out — `/doctor`, `/color` used to sit in the chat composer's completion and do nothing when picked. The prefixing + filtering live in ONE pure rule, `slashCompletionList` (agent-meta.js), used by the init side effect, the mid-session meta op and the attach payload alike.**
 
@@ -974,6 +2774,8 @@ usage-routes.js — setupUsage() (2.92.0 split): the usage/rate-limit cluster. *
 ### chat-renderers.js
   chat-renderers.js — Message rendering (renderUserMsg/renderAssistantMsg/renderToolMsg/renderToolResult/renderSystemMsg, linkify, diffs, permissions). **Tool-card headers**: `toolHeaderHtml(name)` = curated localized display name (toolDisplayName's map — claude built-ins AND codex raw names `web_search`/`web_fetch` → t('Web search')/t('Fetch page'), 2.369.43) or the MCP short name + server chip; the raw identifier rides the card's title tooltip. **SEARCH-CARD TITLE CHIP (2.369.43, owner ask "see the query without expanding"):** `searchQueryChipHtml(block, msg)` appends `<span class="chat-tool-query" title="<full>">…</span>` to the header of every search-kind card — claude WebSearch (input.query) / WebFetch (input.url) by tool name, codex web_search/web_fetch and ACP search tools by the normalizer's `collapseKind:'search'` hint — with the text from the PURE shared `searchQueryOf` (src/search-card.js: query → action.queries joined ' | ' → action.query → 'pattern' in url → url → pattern). Three header paths call it (pending/interrupted tool_call, error result, generic result); '' when nothing to show (a codex card is an empty stub until item/completed). XSS LAW: the query is model/web-controlled text that syncs to every client — escHtml on the chip text AND its title attribute, truncated at 90 chars with the full string in the tooltip; CSS `.chat-tool-query` (chat.css) is theme-var only. Non-search cards are untouched. Gate: scripts/test-search-card-title.mjs (35: the pure helper over real input shapes, the REAL renderer esbuild-bundled for node with a DOM shim — claude/codex/ACP chips, XSS escaping, truncation, no chip on Bash, pending stub — plus wiring pins). **COLLAB HEAD LIVENESS (2026-09-07):** `_renderCollabMsg` asks the injected `isCollabLive(msg)` (ChatView's `_liveCollabId`) and passes `{live, now}` into `collabRowsHtml`; absent (view-only windows, sub-agent viewers) means FROZEN, which is the truth for a stopped transcript. The renderer never keeps a timer — the view's single ticker rewrites the `.chat-collab-head` text in place. **THE SESSION-START CARD (§2.6, 2026-09-07)**: `renderSystemMsg`'s init branch used to return `{el:null}` — a FAILED MCP server was therefore invisible (its tools simply did not exist and nothing said why; this instance's own live sessions carry `status:'failed'` servers). `buildInitCard(frame, {repeat})` now returns a card when the frame **has facts to show**. **That gate is NOT a version test, and describing it as one was round 1's false claim** (round 2, verifier-reproduced): `tools` / `mcp_servers` / `skills` / `plugins` / `output_style` / `claude_code_version` are REQUIRED in the CLI's own zod schema (dumped from 2.1.238 / 2.1.239 / 2.1.257 — the suite pins required-vs-optional and negative-controls the reader on the keys that really are `.optional()`), so EVERY claude init renders. What renders nothing is a producer with no `frame` at all — codex (`codex-message-manager`) and ACP/OpenCode (`acp-message-manager`) both build `initData` from `{model, permissionMode, slashCommands}` — and those REAL normalizer outputs are the suite's negative control, replacing a hand-made 3-key claude record no CLI has ever emitted. **ONCE PER DISTINCT FRAME**: a conversation carries one init per spawn, and this instance's own (rotating) buffers held **62 init records in 13 conversations, 62 with a health issue, 33 byte-identical ones in ONE conversation** at 2026-09-07 05:34 — all 33 of which round 1 drew as cards, each with a warning strip; a re-measure six minutes later, after rotation, gave 30 / 14 distinct / 30 warned / 6 max, i.e. the same shape. The normalizer marks a frame equal to the previous init's as `frameRepeat` and this returns null for it; the side effects still apply, and a frame that CHANGED always draws. Shape: one collapsed `<details>` line; **what is WRONG lives in the ALWAYS-VISIBLE summary** (a health strip behind a click would not fix the invisibility it exists for) while the inventory (skills / plugins / MCP servers / sub-agents / tool count / output style / CLI version + betas) is one click away. The health rule is PURE and shared (`initHealthIssues`, agent-meta.js): any server whose status is not exactly `'connected'` (the vocabulary is an OPEN set — 'failed', 'needs-auth' observed — so the status is shown VERBATIM), plus `plugin_errors` and `mcp_server_errors`. The INVERSE is deliberately never rendered: an absent error key does NOT mean a clean load (upstream omits both on frame-persisting lanes), so the card never claims 'all healthy'. The side effect additionally carries `terminalSlashCommands` + `memoryPaths`. Every frame value is escaped (a plugin/skill name syncs to every client). CSS: `.chat-init-*` in chat.css — the closed-details rule is EXPLICIT (`display` on the child overrides the UA's slot hiding; headless chrome measured the 'collapsed' card at 202px before it was added).** **2.369.112 `resolveContextFullCards({upToTs, hint})` + PURE `ctxFullCardsToResolve` / `isCompactSummaryText` (inc-mu6btbfr-uaxg): a compaction that SUCCEEDED — the live `compact_end result:'success'` (every card on screen) or the CLI's summary record on a rebuild/page-in (only the cards whose record precedes it in time) — removes the Compact-now button and dims the card; the stage rewrite still reaches every hint (round-4 outcome line); a card after the summary keeps its button.** **design-unknown-records (2026-09-21): four new renderSystemMsg branches, every string harness-authored ⇒ escaped — `unknown-fields` (the §3 drift card: `.chat-unknown-event.chat-unknown-fields`, red border + DIM head, shape +{fields}, an "Undeclared value: field = value" line per enum drift, the redacted sample behind "Full record"), `harness-notification` (`.chat-harness-notice-<priority>`: immediate = --red, high = --yellow, an alert SVG for those two; stop-hook-error adds "(details in the Stop hook summary card)"), `away-summary` ("Recap — while you were away" + the model text through `renderMarkdown` = marked + DOMPurify, never raw), `code-change-published` ("PR #608 pushed · repo · branch" + the url as an href-ESCAPED `<a target=_blank rel="noopener noreferrer">` — http(s)-only, never auto-opened, nothing calls window.open). Gate: test-unknown-records §5/§8 (source pins) + the bundled-renderer suites.**
 
+**Agent browser P5 (2026-09-21):** `browserTraceHolderHtml(block, msg)` = the `.chat-browser-trace` holder on ALL THREE card shapes of a shell call whose command drives the agent browser (the PURE `commandDrivesBrowser` over `toolCommandText` — never a tool name), spliced at the card's END after the Input / Output expanders — the 2.369.48 seam `</span>${mediaHtml}<details` is pinned by test-owner-batch-2369-32 and a holder between them broke it (r1); the renderer only makes the holder, the ChatView's loader fills it — see src/lib/browser-trace-view.js.
+
 ### search-card.js (PURE)
   src/search-card.js — ONE home for web-search cards on both sides of the wire (PURE tier; CJS pulled into the bundle like task-color-seq.js): `renderSearchOutput({query, action, results, error})` (server: the codex normalizer's only results renderer — the wrapper does NOT render, it relays codex's typed event), `searchQueryOf(input)` (client title chip + any server consumer), `searchActionKey(action, query)` (0.14x twin pairing: action-only key, the bare query stands in only when there is no action — an open_page end's query is its url and its call twin has no query at all). Caps: 20 results, 4096 bytes (TextEncoder, char-boundary cut — no Buffer, the module ships in the browser). actionType(action)`, `searchActionKey(action, query)`. **`action.type` is spelled TWO ways for the same thing and both reach here** — core protocol `search|open_page|find_in_page|other` (0.120-0.149 `web_search_end`/`web_search_call`) and v2 camelCase `search|openPage|findInPage|other` (the wrapper's live item AND the 0.153.4 rollout's Extension item); `actionType()` canonicalises, so every head/key/title path handles both. **`url`/`pattern` are NULLABLE in the v2 schema** (a real 0.153.4 `findInPage` carried `url:null`): the head is `found '<pattern>'` with no location rather than a fabricated one, and the title chip never trails a dangling ' in'. **'no results' is a CLAIM only an EMPTY ARRAY supports** (2026-09-06 refutation: 0.120/0.125/0.130 NEVER persist the key — 1698 ends, 0 with it — so absent means *nothing known*; 42 cards of one file claimed 'no results' about searches that had them). Absent key ⇒ the card states what was DONE: the `opened <url>` / `found '<p>'` head, else `searched: <query>`, else `status: completed`. 0.149.1 and 0.153.4 always persist the array. **Twin dedup (0.120-0.130 only)**: `searchActionKey` is ACTION-ONLY (the id-less `web_search_call` twin has no query; an open_page end's query is its url) and the bare query stands in only when there is no action at all — with `{type:'other'}` and NO-ACTION deliberately in ONE bucket, because an `{type:'other'}` end's twin carries no `action` key and keying them apart produced a second empty card per search (the owner's `{"query":"","action":null}` / 'status: completed' shape; real rollout-2026-04-14T03-14-36 lines 6417-6421). Caps: 20 results, 4096 bytes (TextEncoder, char-boundary cut — no Buffer, the module ships in the browser).. actionType(action)`, `searchActionKey(action, query)`, `NO_SEARCH_DETAILS` (the label a record with NO query, NO action and NO results wears — head `web search (no details recorded)`, input `{note:…}`; the ONE 0.120.0 orphan in the local corpus used to render as the owner's `{"query":"","action":null}` / 'status: completed' shape, and a card must never reproduce it byte for byte). **`action.type` is spelled TWO ways for the same thing and both reach here** — core protocol `search|open_page|find_in_page|other` (0.120-0.149 `web_search_end`/`web_search_call`) and v2 camelCase `search|openPage|findInPage|other` (the wrapper's live item AND the 0.153.4 rollout's Extension item); `actionType()` canonicalises, so every head/key/title path handles both. **`url`/`pattern` are NULLABLE in the v2 schema** (a real 0.153.4 `findInPage` carried `url:null`): the head is `found '<pattern>'` with no location rather than a fabricated one, and the title chip never trails a dangling ' in'. **'no results' is a CLAIM only an EMPTY ARRAY supports** (2026-09-06 refutation: 0.120/0.125/0.130 NEVER persist the key — 1698 ends, 0 with it — so absent means *nothing known*; 42 cards of one file claimed 'no results' about searches that had them). Absent key ⇒ the card states what was DONE: the `opened <url>` / `found '<p>'` head, else `searched: <query>`, else `status: completed`. 0.149.1 and 0.153.4 always persist the array. **Twin dedup (0.120-0.130 only)**: `searchActionKey` is ACTION-ONLY (the id-less `web_search_call` twin has no query; an open_page end's query is its url) and the bare query stands in only when there is no action at all — with `{type:'other'}` and NO-ACTION deliberately in ONE bucket, because an `{type:'other'}` end's twin carries no `action` key and keying them apart produced a second empty card per search (the owner's `{"query":"","action":null}` / 'status: completed' shape; real rollout-2026-04-14T03-14-36 lines 6417-6421). Caps: 20 results, 4096 bytes (TextEncoder, char-boundary cut — no Buffer, the module ships in the browser)..
 
@@ -986,6 +2788,7 @@ usage-routes.js — setupUsage() (2.92.0 split): the usage/rate-limit cluster. *
   · **No pulse** — unlike `.chat-status-remote` (a transient the user waits out), this is a STANDING condition; an animation on it would read as "something is happening right now".
   · **Touch**: ≤768px the status bar is a single swipeable `nowrap` row whose children are `flex-shrink:0`, so the chip keeps its FULL label (measured 90px at 375×667, fully on screen, not clipped by its own box) and the click-dropdown is the only way to read the rows there — hover does not exist. It is deliberately placed at child index ≤2: a warning parked behind eight chips on a 375px row is a warning nobody swipes to.
   · CSS `.chat-status-health` / `.chat-status-health-row` in chat.css — theme vars only, `UI_ICONS.alert` inline SVG (never an emoji).
+  · **Browser chip (agent browser P2, design §3.8 layer ③, 2026-09-16)** — `setBrowserProfile({key, active, pinned, activeLabel, pinnedLabel})`: the profile the agent LAST ACTUALLY USED (`active`: null = never, '' = the ephemeral browser, else a profile id) beside the PINNED default; drawn only when the session has a browser key and something to say (a pin, or a use); AMBER when the two differ (a standing condition — no pulse, like the health chip), neutral on the pin alone with the tooltip saying "nothing yet"; click = a dropdown stating both facts + "Remind on next message" (only when they differ; POST /api/browser/nudge, zero-spend by construction — the reminder rides the user's next message) / "Open live view" (`app.openBrowserLive`) / "Change pin…" (the profile picker). The facts ride the `active-sessions` payload (chat-view `_onActiveSessions` finds its own row; a window opened between broadcasts reads the sidebar's last copy) and repaint on `browser-profiles-updated` (a rename changes labels, not facts). CSS `.chat-status-browser[.amber]`, `UI_ICONS.web`. Gate: test-profile-blindness-chip (heavy — a MUTATION on a real server, never two fresh renders).
   · **MEASURE THE AFFORDANCE YOU ADDED, NOT THE ONE NEXT TO IT (round 5, verifier-reproduced).** Round 4 added the dropdown *because* touch has no hover, then measured only the CHIP at 375×667 and clicked the panel open at 1280×800 — so its mobile claim covered everything except the thing the round was for, and the panel was broken there twice:
     ① **a dead declaration.** `.chat-status-health-row { white-space: normal }` never applied: the row also carries `.chat-status-dropdown-item`, declared LATER in chat.css at the same 0,1,0 specificity with `white-space: nowrap`, so an unbounded upstream `message` (2.1.257 zod: `plugin_errors[].message` is free text) hard-clipped inside the panel's `overflow: hidden` — measured 610 vs 320 at BOTH viewports, while the sibling `.chat-status-dropdown-note`, which has no competing class, wrapped correctly all along. Fixed as the compound selector `.chat-status-dropdown-item.chat-status-health-row` (0,2,0) + `overflow-wrap: anywhere` (an upstream error *type* like `unsatisfied_dependency:` is one unbreakable token and can exceed a narrow row even when wrapping). **A rule that another rule can silently take away is not a rule — assert the COMPUTED value.**
     ② **a panel positioned out of the scroller it hangs off.** `showDropdown` set `left` from the anchor's offset with no bound: at 375×667 the health panel landed at right 443.7 while `documentElement.scrollWidth === clientWidth === 375`, i.e. the 68.7px hanging off it was UNREACHABLE by any gesture (the ≤768px bar scrolls sideways; the absolutely-positioned panel does not live in that scroller). Now the placement is decided in `showDropdown` after the append (round 5 said "every status-bar dropdown is clamped ONCE" — see ③: three callers wrote their width after it returned, so that sentence was true of the clamp and false of the file): `left = clamp(anchorOffset, 0, containerW - minWidth - DROPDOWN_EDGE_PAD)` and `maxWidth = containerW - left - DROPDOWN_EDGE_PAD` — **cap the WIDTH, never the content** (the panel is `overflow: hidden`, so a row that cannot fit must WRAP). Both numbers are LAYOUT px: `offsetWidth`/`min-width` are unzoomed while `getBoundingClientRect` is not (the 2.369.5 uiScale class), and the cap never dips below the panel's own CSS `min-width`, which would win anyway. This was ALSO a pre-existing bug: at 375 the permission-mode panel landed 89px off screen (its own chip is already past the edge of the swipeable bar). Gate: test-init-frame's 375×667 dropdown legs — computed `white-space` on every row, `scrollWidth ≤ clientWidth`, `right ≤ innerWidth`, with same-run negative controls that restore the pre-fix state (nowrap ⇒ 84px clipped; raw offset + nowrap ⇒ right 470.5 on a 375px screen) and a positive control that the pre-existing panels keep their full 130px min-width.
@@ -2680,7 +4483,19 @@ user > cluster > none is walked end to end in P0 with a real consumer, a real
 setup block and a fixture-switch Test), `lark`, `gmail` (DELEGATING — reuses
 the existing `VIBESPACE_GDRIVE_CLIENTS` presets through `MountManager.
 drivePresets()`, `prefer:'channels'`, `multi:true`, declares NO env of its
-own; decision 5), `cloak`. `LARK_CALLBACK_URL = http://127.0.0.1:17865/lark/cb`
+own; decision 5) and the agent-browser track's SIX pure-key rows (P4 second
+half, 2026-09-17, design-agent-browser-v2 §7.5: `cloak` (licenseKey, empty =
+free tier; Test `shape-only` — zero network, because a real probe needs the
+200 MB binary and §7.2.1's egress proof, neither of which a card opened to
+paste a key may trigger; the seat tier is read back from the first real launch)
+and `cloud:browserbase` / `cloud:browserless` (apiKey, apiUrl, stealth) /
+`cloud:kernel` (apiKey, endpoint, stealth) / `cloud:browseruse` /
+`cloud:agentcore` (accessKeyId, secretAccessKey, region — UNVERIFIED against
+upstream, said in its help) with `credential-exchange` Tests, each reaching
+ONLY the one host derived from its own row; all six name
+`src/server/browser-backend.js` as their consumer, the ONE module that
+registers their runners and calls `resolveIntegration('<id>')`, and none
+declares a `setup` — they are pure keys). `LARK_CALLBACK_URL = http://127.0.0.1:17865/lark/cb`
 is defined here and ONLY here (decision 4: a VibeSpace-owned FIXED loopback,
 never a per-instance address; `src/oauth-loopback.js` imports it in P1 and
 the suite fails a second spelling anywhere in code). `test.kind` is a CLOSED
@@ -2931,7 +4746,7 @@ src/channel-acl.js — PURE (imports only msg-acl) AGENT REACH (design §8, P3):
 
 ### src/integration-registry.js
 
-src/integration-registry.js — PURE (imports nothing; bundled into the browser AND required by the server store) THE table of integration rows (design §14.2, P0b): `{id, label, fields[{key,label,secret,required,placeholder,help,validate}], clusterEnv{json,prefix} | delegate{to:'drive-presets',prefer,multi}, setup{callbackUrl,callbackNote,prerequisites}, test{kind,describe,caveat}, consumers, wiredIn?, docs}` for `fake` (the test adapter's own row — user > cluster > none walked end to end in P0 with a real consumer and a real setup block), `lark`, `gmail` (DELEGATING to the existing `VIBESPACE_GDRIVE_CLIENTS` presets, `prefer:'channels'`, `multi:true`, NO env of its own — decision 5) and `cloak`. A row carries no value, ever. `LARK_CALLBACK_URL` (`http://127.0.0.1:17865/lark/cb`, decision 4: a VibeSpace-owned FIXED loopback) is defined here and ONLY here. `test.kind` is a CLOSED set that decides the button's own wording; `setup.prerequisites` ⇒ `test.caveat` is mandatory; `consumers` must be ALIVE (a file that really calls `resolveIntegration('<id>')`) or the row names its `wiredIn` phase. PURE rules: `validateValues` (undefined = untouched, `''` = cleared, else trimmed + a NAMED complaint), `maskValue` (last 4 only at ≥ 12 chars), `resolvePrecedence` (user > cluster > none, one PAIR never per-field), `pickPreset` (saved choice > `prefer` > the only one; no fourth rung). The table DECLARES a row's env prefix and BUILDS no name from it (r3: `envFieldName` moved to the store — an exported builder was a second resolver the env-name census could not see). Nothing here is a setting. ⇒ kb-file-structure.md
+src/integration-registry.js — PURE (imports nothing; bundled into the browser AND required by the server store) THE table of integration rows (design §14.2, P0b): `{id, label, fields[{key,label,secret,required,placeholder,help,validate}], clusterEnv{json,prefix} | delegate{to:'drive-presets',prefer,multi}, setup{callbackUrl,callbackNote,prerequisites}, test{kind,describe,caveat}, consumers, wiredIn?, docs}` for `fake` (the test adapter's own row — user > cluster > none walked end to end in P0 with a real consumer and a real setup block), `lark`, `gmail` (DELEGATING to the existing `VIBESPACE_GDRIVE_CLIENTS` presets, `prefer:'channels'`, `multi:true`, NO env of its own — decision 5) and `cloak`. A row carries no value, ever. `LARK_CALLBACK_URL` (`http://127.0.0.1:17865/lark/cb`, decision 4: a VibeSpace-owned FIXED loopback) is defined here and ONLY here. `test.kind` is a CLOSED set that decides the button's own wording; `setup.prerequisites` ⇒ `test.caveat` is mandatory; `consumers` must be ALIVE (a file that really calls `resolveIntegration('<id>')`) or the row names its `wiredIn` phase. PURE rules: `validateValues` (undefined = untouched, `''` = cleared, else trimmed + a NAMED complaint), `maskValue` (last 4 only at ≥ 12 chars), `resolvePrecedence` (user > cluster > none, one PAIR never per-field), `pickPreset` (saved choice > `prefer` > the only one; no fourth rung). The table DECLARES a row's env prefix and BUILDS no name from it (r3: `envFieldName` moved to the store — an exported builder was a second resolver the env-name census could not see). Nothing here is a setting. ⇒ kb-file-structure.md **r0 rebase onto 2.369.130 (2026-09-21): the five `cloud:*` rows declare every label / help / describe / caveat through `i18nKey(…)` like every other row (the a3 i18n census renders them on the Integrations surface; zh + ja entries beside them) and their helps no longer append TRIM_NOTE; a WIRED row whose consumer has not registered a runner in THIS process answers the store's `no-test-runner` 501 — test-integration-registry's harness boots no browser wiring, so its cloak leg pins that wording while its §804 leg proves the six runners through the real store.**
 
 ### oauth-loopback.js
 

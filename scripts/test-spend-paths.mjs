@@ -414,6 +414,10 @@ const ALLOW = [
   // the ladder's own authorizer and reports its refusal as a typed failure.
   { file: 'src/channels/agents.js', prim: 'deliver-ladder', why: "the built-in Agents adapter sends through the gated ladder (spendReason 'peer-message' — an approved outbox message is the user's own); a refusal is a typed transport failure the outbox records, never a second attempt" },
   { file: 'src/server/channels-engine.js', prim: 'deliver-ladder', why: "the channels engine calls the gated ladder with spendReason 'channel-message' and stashes what it refuses (its per-assignment daily wake cap and the push coalescing window are pacing, not money)" },
+  // agent browser P3 (design-agent-browser-v2 §4.3.1): the handback announcer
+  // FORWARDS to the gated ladder under its own declared reason
+  // (spendReason 'browser-handback'); the ladder authorizes every call.
+  { file: 'src/server/browser-handback.js', prim: 'deliver-ladder', why: "the browser handback announcer FORWARDS to the gated ladder (spendReason 'browser-handback'): the explicit handback and the ON-by-choice idle announcement are its only sites, a refusal is stashed and the zero-spend notice rides the next message" },
 ];
 
 /** Blank whole-line comments, preserving every byte offset and line break.
@@ -1712,8 +1716,8 @@ console.log('\n§6 the Stop nudge: a persisted cooldown, an exit condition, and 
   guard = mkGuard();
   setupAgentRoutes({
     app, activeSessions: sessions, tasks: { list: () => [], forSession: () => [] },
-    sessionStatus: { snapshot: () => ({}), get: (k) => statuses.get(k) || null, consumeNotice: () => null, rekey: () => { }, history: () => [] },
-    SessionStatusManager: { renderNotice: () => '' },
+    sessionStatus: { snapshot: () => ({}), get: (k) => statuses.get(k) || null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => { }, history: () => [] },
+    SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => { }, forSession: () => [] },
     sessionStatusKey: (s, id) => `claude:${id}`,
     serverSetting: (k) => settings[k],

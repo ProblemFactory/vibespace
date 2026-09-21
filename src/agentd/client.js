@@ -250,7 +250,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -645,6 +645,20 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('opencode-serve')) throw new Error('daemon lacks opencode-serve (capabilities gate) -- upgrade the agent on this machine');
     const r = await this._request({ op: 'opencode-serve', action, params, timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || {};
+  }
+
+  /** One `browser-serve` op on THIS device (agent browser P4, design §7.3 /
+   *  D5 (b)): start / status / stop / cdp-url / version of a PROFILE browser
+   *  where it runs. The op names and shapes are the SHARED table
+   *  src/browser-serve.js — the daemon runs the same runBrowserServeOp()
+   *  against its own facts. Capability-gated: an old daemon that does not
+   *  know the op would HANG (the 2.300.0 rule), so it is never asked. */
+  async browserServe(action, params = {}, { timeoutMs = 90000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('browser-serve')) { const e = new Error('daemon lacks browser-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'browser-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};
   }

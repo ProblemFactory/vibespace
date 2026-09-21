@@ -40,7 +40,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -161,6 +161,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // changes the value, and an older client that omits it keeps the old
       // answer.
       spawnOriginHint: { model: modelPick.origin, effort: effortPick.origin },
+      // agent browser P1 (§3.2.5): an EXPLICIT profile pin for a NEW session only —
+      // a continuation keeps the conversation's own pin (the server's ladder)
+      browserProfileId: (!continuesConversation && browserProfileId) ? browserProfileId : undefined,
       // initialCommand reaches the SERVER too (2.196.0): the shell adapter
       // arms DISABLE_UPDATE_PROMPT for auto-typed shells — without this field
       // the guard was dead code and oh-my-zsh's [Y/n] ate the first typed
@@ -178,6 +181,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       // terminal path; the serve's port never reaches this browser.
       opencodePty: opencodePty || undefined,
     };
+    // agent browser P1 (§3.2.5): WHICH fact chose the browser profile rides the same
+    // hint (its own statement — test-codex-effort-meta pins the model/effort line verbatim)
+    if (browserProfileOrigin) createMsg.spawnOriginHint.browserProfile = browserProfileOrigin;
 
     // Request/reply via ws.request (2026-07-03 review structural fix):
     // self-cleanup on window close + the reply watchdog (a create swallowed by

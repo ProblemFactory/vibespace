@@ -105,6 +105,8 @@ console.log('§1 the PURE table');
   ok(R.checkRow(publicCb).some((e) => /loopback/.test(e)), 'CONTROL: a per-instance public callback URL is refused (decision 4/21)');
   ok(storeMod.envFieldName('lark', 'appSecret') === 'VIBESPACE_INTEGRATION_LARK_APPSECRET' && storeMod.envFieldName('cloud:kernel', 'api-key') === 'VIBESPACE_INTEGRATION_CLOUD_KERNEL_API_KEY', 'envFieldName (the STORE\'s since r3) upper-cases and maps - and : to _');
   ok(R.ROWS.filter((r) => r.clusterEnv).every((r) => storeMod.envFieldName(r.id, 'x').startsWith(r.clusterEnv.prefix)), 'every declared prefix IS what the store derives from the row id (one declaration, one derivation)');
+  ok(R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).length === 6 && R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).every((r) => r.consumers.length === 1 && r.consumers[0] === 'src/server/browser-backend.js' && !r.wiredIn && !r.setup), 'the agent-browser track contributes six pure-key rows (cloak + five cloud:*), each consumed by its ONE key module, none declaring a setup block (design-agent-browser-v2 §7.5)');
+  ok(R.rowById('cloak').test.kind === 'shape-only' && R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.test.kind === 'credential-exchange'), 'cloak\'s Test is shape-only (zero network), the five cloud:* Tests are credential-exchange (§7.5\'s Test-contract table)');
 }
 
 // ═══ §2 masking + validation ═══════════════════════════════════════════════
@@ -292,7 +294,7 @@ const get = async (p) => { const r = await api('GET', p); allBodies.push(r.text)
 
   // Test: dispatch to the consumer's runner (registered by the channels engine below), refusal by name, single flight
   const notWired = await api('POST', '/api/integrations/cloak/test');
-  ok(notWired.status === 501 && notWired.json.code === 'not-wired' && /agent-browser/.test(notWired.json.error), `cloak's Test is a NAMED not-wired refusal (lark and gmail are WIRED since P1 — their runners are registered by the channels engine) (${notWired.json.error})`);
+  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && /registered a runner/.test(notWired.json.error), `cloak's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below); lark and gmail are WIRED since P1 (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
   ok(store.publicView('cloak').testedAt === null, 'a refusal is not a verdict — nothing was recorded');
   const before = frames.length;
   ok(frames.length > 0 && frames.every((f) => f.type === 'integrations-updated' && f.integration && f.id), `every write broadcast integrations-updated with publicView (${frames.length} frames so far)`);
@@ -577,6 +579,7 @@ const ENV_ALLOW = new Map([
   ['scripts/test-integration-registry.mjs', 'this census + the store legs'],
   ['scripts/test-integrations-ui.mjs', 'the heavy leg injects the env into a worktree server'],
   ['scripts/dbg-comm-surfaces.mjs', 'the comm-panel screenshot driver injects the cluster copy path into its worktree server (a1 of the polish; the i18n census drives it)'],
+  ['scripts/test-browser-backend.mjs', 'the agent-browser key legs (design-agent-browser-v2 §9 iii) inject a cluster default into the store\'s env HANDLE (never process.env) and assert user > cluster > none'],
   ['scripts/test-agentd-session.mjs', 'the second-holder leg boots a real daemon under the name and asserts neither the daemon nor any child sees it'],
   ['deploy/helm/vibespace-user/values.yaml', 'the admin-facing values block'],
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the Secret into the env'],
@@ -658,7 +661,7 @@ if (tracked.length) {
 // (`ID_RE.test(req.params.id)` is a validator, not a probe); a bare `X.test(id)`
 // on an untraced receiver (`hosts.test(req.params.id)`) is not flagged either —
 // `id` alone says nothing about the store.
-const TEST_ALLOW = new Set(['src/routes/integrations.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs']);
+const TEST_ALLOW = new Set(['src/routes/integrations.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs', 'scripts/test-browser-backend.mjs' /* drives the six agent-browser runners through the real store (design-agent-browser-v2 §9 v/vi/vii) */]);
 const STORE_HANDLE_NAMES = new Set(['integrations', 'integrationStore', 'integStore', 'integrationsStore']);
 const HANDLE_RHS_RE = /integrationsWiring\.store\b|integrationStore\.create\(|integration-store(?:\.js)?['"]\)\.create\(|\.getStore\(\)|\bstore\(\)|\b(?:deps|ctx|opts)\.integrations\b/;
 const STORE_ACCESSOR_RE = /(?:^|\.)(?:store|getStore|integrations|integrationStore)\(\)$/;
@@ -793,6 +796,12 @@ if (tracked.length) {
 
 // (f) EVERY testable row has a runner, or names its phase — through the real wiring
 {
+  // the agent-browser track's six key rows register THROUGH their own key
+  // consumer (src/server/browser-backend.js, design-agent-browser-v2 §7.5) —
+  // the same wiring mounts-plugins-wiring runs, over this suite's real store
+  const bb = require(path.join(REPO, 'src/server/browser-backend.js')).create({ integrations: store, log: { warn() {} } });
+  const registered = bb.registerTests();
+  ok(registered.length === 6 && registered.includes('cloak') && registered.includes('cloud:agentcore'), `browser-backend registered its six rows' runners through the real store (${registered.join(', ')})`);
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
     ok(store.hasTestRunner(row.id), `${row.id}: declares a test and its consumer registered the runner`);

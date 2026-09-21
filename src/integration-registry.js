@@ -101,6 +101,18 @@ const V = {
     if (!/^cb_[A-Za-z0-9_-]{8,}$/.test(s)) return bad('a CloakBrowser license key starts with cb_');
     return okV;
   },
+  /** A URL with a host — the ONE host a `cloud:*` Test may reach is derived
+   *  from THIS field (design-agent-browser-v2 §7.5's egress rule). */
+  httpUrl: (v) => {
+    const s = String(v);
+    if (!s) return bad('must not be empty');
+    if (/\s/.test(s)) return bad('must not contain whitespace');
+    if (!/^https?:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?(\/.*)?$/i.test(s)) return bad('must be an http(s) URL with a host');
+    return okV;
+  },
+  /** `true` / `false` — each vendor's own stealth switch is a VALUE, not a capability promise (§7.5). */
+  boolWord: (v) => (/^(true|false|1|0)$/i.test(String(v)) ? okV : bad('true or false')),
+  awsRegion: (v) => (/^[a-z]{2}-[a-z]+-\d$/.test(String(v)) ? okV : bad('an AWS region id such as us-east-1')),
 };
 
 /**
@@ -215,7 +227,23 @@ const ROWS = Object.freeze([
     docs: 'docs/design-communication-panel.zh.md',
   },
 
-  // ── CLOAKBROWSER (docs/design-agent-browser-v2.md §7.5; consumer lands with that track) ──
+  // ── THE AGENT-BROWSER TRACK'S SIX KEY ROWS (docs/design-agent-browser-v2.md §7.5, P4 second half) ──
+  // One module declares them, registers their six Test runners and resolves
+  // their keys — src/server/browser-backend.js (`keyFor` = the literal
+  // resolveIntegration('<id>') table the keeper asks THROUGH, exactly once
+  // before a spawn). The field names are the installed 0.32.0 binary's own env
+  // names (measured with `strings`); the vendor's name appears ONLY in the
+  // environment of the one child the keeper spawns for that provider (never
+  // a file, never argv, never a log line, never agentEnv). None of the six
+  // declares a `setup`: they are pure keys — no consent page, nothing to copy
+  // into a vendor console. Tests: `cloak` is shape-only (ZERO network — a real
+  // probe needs the 200 MB binary and §7.2.1's egress proof, neither of which
+  // a card opened to paste a key may trigger; the seat tier is read back from
+  // the FIRST REAL LAUNCH); each `cloud:*` Test is ONE bounded read-only
+  // request to the ONE host DERIVED from that row's own fields (browserless /
+  // kernel: the host inside the URL the user typed; agentcore: its region;
+  // browserbase / browseruse: their constant API host) — a host that cannot
+  // be derived is a named refusal, never a default host.
   {
     id: 'cloak',
     label: 'CloakBrowser',
@@ -230,11 +258,104 @@ const ROWS = Object.freeze([
       describe: i18nKey('Checks the key\'s shape. A real launch probe would download the browser and needs the egress precondition; neither belongs on a card opened to paste a key.'),
       caveat: i18nKey('Shape only. The seat tier is read back from the first real launch, not from this check.'),
     },
-    consumers: [],
-    // `wiredIn` is the PHASE in words (a key the client translates); the
-    // files that will consume the row stay beside it for tooling, off the card.
-    wiredIn: i18nKey('the agent-browser v2 track'),
-    wiredInFiles: ['src/server/browser-backend.js', 'src/server/browser-keeper.js'],
+    consumers: ['src/server/browser-backend.js'],
+    docs: 'docs/design-agent-browser-v2.md',
+  },
+  {
+    id: 'cloud:browserbase',
+    label: i18nKey('Browserbase (cloud browser)'),
+    fields: [
+      { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true, placeholder: 'bb_live_…',
+        help: i18nKey('Your Browserbase API key (its env name in the browser child is BROWSERBASE_API_KEY).'), validate: V.minLen(8) },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOUD_BROWSERBASE_' },
+    setup: null,
+    test: {
+      kind: 'credential-exchange',
+      describe: i18nKey('One bounded read-only request to api.browserbase.com with this key; creates no session, runs no page.'),
+      caveat: i18nKey('Proves the key is accepted by the vendor\'s API — not that a browser session can be started, nor what it costs.'),
+    },
+    consumers: ['src/server/browser-backend.js'],
+    docs: 'docs/design-agent-browser-v2.md',
+  },
+  {
+    id: 'cloud:browserless',
+    label: i18nKey('Browserless (cloud browser)'),
+    fields: [
+      { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true,
+        help: i18nKey('Your Browserless token (BROWSERLESS_API_KEY in the browser child).'), validate: V.minLen(8) },
+      { key: 'apiUrl', label: i18nKey('API URL'), secret: false, required: true, placeholder: 'https://chrome.browserless.io',
+        help: i18nKey('The Browserless endpoint you use (BROWSERLESS_API_URL). Its Test reaches ONLY the host inside this URL.'), validate: V.httpUrl },
+      { key: 'stealth', label: i18nKey('Stealth'), secret: false, required: false, placeholder: 'true',
+        help: i18nKey('The vendor\'s own stealth switch (BROWSERLESS_STEALTH), a value we pass through — not a capability we measured.'), validate: V.boolWord },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOUD_BROWSERLESS_' },
+    setup: null,
+    test: {
+      kind: 'credential-exchange',
+      describe: i18nKey('One bounded read-only request to the host inside your API URL with this key; creates no session, runs no page.'),
+      caveat: i18nKey('Proves the key is accepted at that endpoint — not that a browser session can be started, nor what it costs.'),
+    },
+    consumers: ['src/server/browser-backend.js'],
+    docs: 'docs/design-agent-browser-v2.md',
+  },
+  {
+    id: 'cloud:kernel',
+    label: i18nKey('Kernel (cloud browser)'),
+    fields: [
+      { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true,
+        help: i18nKey('Your Kernel API key (KERNEL_API_KEY in the browser child).'), validate: V.minLen(8) },
+      { key: 'endpoint', label: i18nKey('Endpoint'), secret: false, required: true, placeholder: 'https://api.onkernel.com',
+        help: i18nKey('The Kernel endpoint you use (KERNEL_ENDPOINT). Its Test reaches ONLY the host inside this URL.'), validate: V.httpUrl },
+      { key: 'stealth', label: i18nKey('Stealth'), secret: false, required: false, placeholder: 'true',
+        help: i18nKey('The vendor\'s own stealth switch (KERNEL_STEALTH), a value we pass through — not a capability we measured.'), validate: V.boolWord },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOUD_KERNEL_' },
+    setup: null,
+    test: {
+      kind: 'credential-exchange',
+      describe: i18nKey('One bounded read-only request to the host inside your endpoint with this key; creates no session, runs no page.'),
+      caveat: i18nKey('Proves the key is accepted at that endpoint — not that a browser session can be started, nor what it costs.'),
+    },
+    consumers: ['src/server/browser-backend.js'],
+    docs: 'docs/design-agent-browser-v2.md',
+  },
+  {
+    id: 'cloud:browseruse',
+    label: i18nKey('Browser Use (cloud browser)'),
+    fields: [
+      { key: 'apiKey', label: i18nKey('API key'), secret: true, required: true,
+        help: i18nKey('Your Browser Use API key (BROWSER_USE_API_KEY in the browser child).'), validate: V.minLen(8) },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOUD_BROWSERUSE_' },
+    setup: null,
+    test: {
+      kind: 'credential-exchange',
+      describe: i18nKey('One bounded read-only request to api.browser-use.com with this key; creates no session, runs no page.'),
+      caveat: i18nKey('Proves the key is accepted by the vendor\'s API — not that a browser session can be started, nor what it costs.'),
+    },
+    consumers: ['src/server/browser-backend.js'],
+    docs: 'docs/design-agent-browser-v2.md',
+  },
+  {
+    id: 'cloud:agentcore',
+    label: i18nKey('Amazon Bedrock AgentCore (cloud browser)'),
+    fields: [
+      { key: 'accessKeyId', label: i18nKey('AWS access key id'), secret: false, required: true, placeholder: 'AKIA…',
+        help: i18nKey('UNVERIFIED against upstream\'s provider table (the row stays unwired until it is): passed to the browser child as AWS_ACCESS_KEY_ID.'), validate: V.noSpaces },
+      { key: 'secretAccessKey', label: i18nKey('AWS secret access key'), secret: true, required: true,
+        help: i18nKey('Passed to the browser child as AWS_SECRET_ACCESS_KEY.'), validate: V.minLen(8) },
+      { key: 'region', label: i18nKey('Region'), secret: false, required: true, placeholder: 'us-east-1',
+        help: i18nKey('AWS_REGION; its Test host is derived from this region.'), validate: V.awsRegion },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOUD_AGENTCORE_' },
+    setup: null,
+    test: {
+      kind: 'credential-exchange',
+      describe: i18nKey('One bounded request to the region-derived AgentCore host. This build cannot sign AWS requests, so the verdict says the key was NOT exchanged (the fields are unverified against upstream).'),
+      caveat: i18nKey('The field set is unverified against upstream; the provider row is unwired until it is measured. This Test proves reachability of the derived host only.'),
+    },
+    consumers: ['src/server/browser-backend.js'],
     docs: 'docs/design-agent-browser-v2.md',
   },
 ]);

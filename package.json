@@ -1,6 +1,6 @@
 {
   "name": "vibespace",
-  "version": "2.369.133",
+  "version": "2.369.134",
   "description": "VibeSpace — a backend-agnostic web workspace for coding agents (Claude Code, Codex, …) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {
@@ -12,6 +12,14 @@
     "ci:heavy": "node scripts/ci.mjs --heavy --isolate",
     "ci:status": "node scripts/ci.mjs --status",
     "postinstall": "node scripts/install-git-hooks.mjs"
+  },
+  "agentTools": {
+    "_why": "Tools the AGENT runs from its own shell, on its own PATH — NOT VibeSpace dependencies. agent-browser is deliberately NOT in dependencies/optionalDependencies: npm puts node_modules/.bin on PATH for `npm run`, so a local copy would be the binary our own gate measures while every agent session kept using the global one on PATH — the suite and production would silently test different builds. The floor is therefore DECLARED here and CHECKED AT RUNTIME (src/browser-profiles.js FLOOR_VERSION + src/browser-facts.js), with scripts/test-browser-profiles.mjs pinning the two to the same string.",
+    "agent-browser": {
+      "floor": "0.37.1",
+      "install": "npm install -g agent-browser@0.37.1",
+      "whyThisFloor": "0.34.0 brought the persistent session-to-tab binding that makes several sessions on one shared profile safe; 0.35.2 the reverse-proxy origin hardening; 0.37.0 recording. Below the floor VibeSpace still isolates every session (four env vars, measured working on 0.32.0) and refuses the shared-profile half by capability, with one honest notice."
+    }
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.2.0",

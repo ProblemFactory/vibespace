@@ -69,6 +69,10 @@ function slugify(title) {
     .slice(0, 24);
 }
 
+// agent browser P1 (§3.2.5 row 3): a group's default profile is a profile ID
+// (bp-<8 hex>) or null — a label would drift with a rename, so the picker
+// sends the id; anything else is null (never a throw out of a patch).
+function sanitizeBrowserProfileId(v) { const s = typeof v === 'string' ? v.trim() : ''; return /^bp-[0-9a-f]{8}$/.test(s) ? s : null; }
 function sanitizeStrArray(arr, cap = 200) {
   if (!Array.isArray(arr)) return [];
   const seen = new Set();
@@ -887,7 +891,7 @@ class TaskGroupManager {
     return t;
   }
 
-  create({ title, kind, archived, objective, sessions, folders, contextDir, color, pattern, injectContext } = {}) {
+  create({ title, kind, archived, objective, sessions, folders, contextDir, color, pattern, injectContext, browserProfileId } = {}) {
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
     const id = this._genId(cleanTitle);
@@ -912,6 +916,9 @@ class TaskGroupManager {
       // changes for the life of the group.
       colorSeq: pickColorSeq(Object.values(this._state.tasks), this._styleOrder()),
       injectContext: injectContext !== false, // per-group context-injection toggle (default on)
+      // agent browser P1 (§3.2.5 row 3): the DEFAULT browser profile of this
+      // group's NEW sessions — never a retroactive edit of running ones
+      browserProfileId: sanitizeBrowserProfileId(browserProfileId),
       createdAt: now,
       updatedAt: now,
       contentUpdatedAt: now,
@@ -1005,6 +1012,10 @@ class TaskGroupManager {
     if (patch.externalVisibility !== undefined) {
       t.externalVisibility = ['visible', 'messageable'].includes(patch.externalVisibility) ? patch.externalVisibility : null;
     }
+    // agent browser P1 (§3.2.5): the group's default profile for NEW sessions
+    // (a `bp-<8 hex>` id or null); binding/unbinding never rewrites a running
+    // session's pin — a default is where a session STARTS
+    if (patch.browserProfileId !== undefined) t.browserProfileId = sanitizeBrowserProfileId(patch.browserProfileId);
     // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
     // client bundle may still send it; a stored dormant t.plan stays untouched.
     if (patch.backlog !== undefined) {

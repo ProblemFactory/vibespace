@@ -64,13 +64,21 @@ const AMBIENT_OAT_UNSET = 'unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
  * security prefix meant editing five sites). One composition now; every
  * difference is a NAMED parameter:
  *  - pre:        transport prelude (ra.prelude / REMOTE_PRELUDE + tools PATH)
+ *  - browser:    the agent browser's HOST-DECIDED user-data-dir rung
+ *                (browser-profiles.remoteBrowserPrelude, r3): a shell fragment
+ *                that reads that machine's own config AFTER the `cd` (so
+ *                `./agent-browser.json` is the session's directory) and exports
+ *                AGENT_BROWSER_PROFILE only when the config names a profile —
+ *                the one shape where the names alone make two browsers collide.
+ *                Placed after `pre` because it needs the host's PATH, before
+ *                `resolve`/the token reads because it is not one of them.
  *  - resolve:    extra resolution snippet (dial pty's shellResolve)
  *  - tokenAssign/acctEnv: secret-by-$(cat) assignments — NEVER values in argv
  *  - parts:      PRE-QUOTED env pairs + argv tokens (caller owns quoting)
  *  - tail:       verbatim suffix instead of argv (the keeper runTail)
  */
-function buildRemoteExec({ cwd, shq, pre = '', resolve = '', tokenAssign = '', acctEnv = '', parts = [], tail = '' }) {
-  return `cd ${shq(cwd)} 2>/dev/null; ` + pre + resolve + AMBIENT_OAT_UNSET + tokenAssign + acctEnv
+function buildRemoteExec({ cwd, shq, pre = '', browser = '', resolve = '', tokenAssign = '', acctEnv = '', parts = [], tail = '' }) {
+  return `cd ${shq(cwd)} 2>/dev/null; ` + pre + browser + resolve + AMBIENT_OAT_UNSET + tokenAssign + acctEnv
     + 'exec env ' + parts.join(' ') + tail;
 }
 

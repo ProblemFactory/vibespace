@@ -95,6 +95,12 @@ src/server/vs-spend-mut-*.js
 # their relative requires do not resolve). Unlinked on exit, but a SIGKILL can
 # strand one — and a dirty tree is what the release gate REFUSES on.
 src/server/session-stdout.__*_control.js
+# scripts/test-browser-resources.mjs (§ⓔ) and scripts/test-browser-profiles.mjs
+# (§⑬) write PATCHED COPIES of src/server/browser-env.js beside the real one as
+# their PRE-FIX controls (SIBLINGS, or their relative requires do not resolve).
+# Unlinked on exit and swept by PID at start, but a SIGKILL can strand one —
+# and a dirty tree is what the release gate REFUSES on.
+src/server/vs-browser-mut-*.js
 # scripts/test-queue-steer.mjs (⑬d and the r3 negative controls) writes PATCHED COPIES of src/lib/chat-view.js — `.chat-view.prefix-<pid>.js` AND `.chat-view.stale-prefix-<pid>-*.js` (2.369.83: the merge verifier found the first name uncovered)
 # beside the real one (they must be SIBLINGS or their relative imports do not
 # resolve). They are unlinked on exit and swept at start, but a SIGKILL can

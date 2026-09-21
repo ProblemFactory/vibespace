@@ -561,10 +561,10 @@ const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 
 // 失败"): server-side probes report through this instead of dying in the log —
 // every connected client toasts it (+ it lands in toast/notification history)
 // and a telemetry event carries the key to the fleet collector. Key-deduped
-// per boot so a recurring probe can't spam.
-const _sentNotices = new Set();
+// per boot so a recurring probe can't spam. RETURNS how many clients got it (r5): a caller that latches "already said" latches on THIS — the boot probes fire into an EMPTY client set on a systemd restart.
+const _sentNotices = new Map(); // key → clients it reached
 function serverNotice(key, text, { level = 1 } = {}) {
-  if (_sentNotices.has(key)) return;
+  if (_sentNotices.has(key)) return _sentNotices.get(key);
   console.warn('[notice]', text);
   global.__vsEvent?.('server-notice', key);
   let delivered = 0;
@@ -575,7 +575,7 @@ function serverNotice(key, text, { level = 1 } = {}) {
   // No client connected (e.g. the 60s post-boot probe right after a pod
   // restart) → don't burn the key; the next probe run re-notices when
   // someone is actually there to see it (review finding).
-  if (delivered > 0) _sentNotices.add(key);
+  if (delivered > 0) _sentNotices.set(key, delivered); return delivered;
 }
 // Agent-hook health probe (2.226.0; born from the 2-day silent MODULE_NOT_FOUND
 // outage whose CAUSE 2.225.1 fixed): a registration that goes stale or points
@@ -1583,27 +1583,28 @@ const { exitAgentSession, remoteFs, sshKey,
   getPortForwards: () => { try { return portForwards; } catch { return null; } },
 });
 const { readLayouts, writeLayouts, flushLayouts } = persistenceRouter;
+// ── Integrations & keys (src/server/integrations-wiring.js; design §14) — the ONE resolver of the cluster integration env ──
+const integrationsWiring = require('./src/server/integrations-wiring.js').create({
+  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
+}); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader,
+const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
-  app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES,
+  app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN,
-  bcastAll: (...a) => bcastAll(...a),
+  bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),
   mountTokens, persistenceRouter, hosts,
   agentdDials, agentdHostToken,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
-  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(), activeSessions, getTelemetry: () => { try { return telemetry; } catch { return null; } },
+  // + agent browser P3 (§4.3.1): the handback announcer forwards to THE ladder under 'browser-handback'; an idle handback files one inbox item // + agent browser P2 (§3.8 ③): a stamped last-used profile re-publishes the live facts // + agent browser P1 second half: the Task-Group default rung, the zero-billed notice queue, the pin's meta persistence — the notes used to sit MID-LINE and swallowed the two keys appended after them (2.369.134: getTelemetry never reached the wiring; the r-fix moved activeSessions after them and every browser route answered "no such live session")
+  getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(), getTasks: () => tasks, sessionStatusKey, getSessionStatus: () => sessionStatus, persistSessionMeta: (session, patch) => { if (session?.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), ...patch }); }, broadcastActiveSessions: () => broadcastActiveSessions(), deliver, userTodos, getTelemetry: () => { try { return telemetry; } catch { return null; } }, activeSessions,
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting });
-// ── Integrations & keys (src/server/integrations-wiring.js; design §14) — the ONE resolver of the cluster integration env ──
-const integrationsWiring = require('./src/server/integrations-wiring.js').create({
-  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
-});
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store,
@@ -1807,7 +1808,7 @@ function activeSessionsPayload() {
       auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)
       // outputStyle = the EFFECTIVE style (2.369.58; null = the agent's own config decides); worktree/worktreePath = the per-session git worktree (owner ruling 9) — the card badge + the path the CLI ITSELF announced in its init frame
       vcs: s._vcs || null, prLinks: Array.isArray(s._prLinks) && s._prLinks.length ? s._prLinks : null, // design-unknown-records: the last VCS fact (git chip) + the published changes (PR chips)
-      mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
+      mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, browserKey: s._browserKey || null, browserVariant: s._browserVariant || null, browserProfileId: s._browserProfileId || null, browserPinOrigin: s._browserPinOrigin || null, browserProfileActive: s._browserProfileActive === undefined ? null : s._browserProfileActive, browserInput: (() => { try { const v = browserKeeper?.inputSummaryFor?.(s._browserKey); return v ? v.input : null; } catch { return null; } })(), // + agent browser P3 (§4.3): 'user' while somebody drives one of this conversation's browsers, 'agent' when it has one, null when none — the card badge / status-bar chip // + agent browser P2 (§3.8 ③): the profile the agent LAST USED (null = never, '' = the ephemeral one) beside the PINNED one — the status-bar Browser chip's pair, each with its own LIVE_SESSION_FACTS digest // + agent browser P1 (§3.2.5): the conversation's browser key/rung, the PINNED profile and which rung chose it (Session Properties' Browser section, the card picker) // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
     });
   }
   return activeList;
@@ -1833,11 +1834,10 @@ const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
   dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), broadcast: (m) => bcastAll(m),
   serverSetting: (k) => serverSetting(k), getTelemetry: () => { try { return telemetry; } catch { return null; } }, singleton: () => vnc.singletonFacts(),
 });
-const desktopStream = require('./src/server/desktop-stream.js').create({
-  auth, onInput: (id) => desktopKeeper.noteInput(id),
-  resolveTarget: (id) => (id === DESKTOP_SINGLETON_ID ? { kind: 'rfb', port: vnc.port } : desktopKeeper.streamTarget(id)),
+// P9 window targets (design-agent-browser-v2 §4.9 / §6.6): ONE wiring — the RFB bridge's input policy IS the engine's lease verdict, the routes (user + agent) and the shared handback announcer ride the same engine (src/server/window-live-wiring.js)
+const { desktopStream, windowEngine, boot: bootWindowLeases, shutdown: shutdownWindowLeases } = require('./src/server/window-live-wiring.js').install({
+  app, auth, vnc, keeper: desktopKeeper, DESKTOP_SINGLETON_ID, dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), activeSessions: () => activeSessions, serverSetting: (k) => serverSetting(k), broadcast: (m) => bcastAll(m), browserHandback,
 });
-{ const { router, setup } = require('./src/routes/desktop-apps'); setup({ keeper: desktopKeeper, vnc }); app.use(router); }
 desktopKeeper.adoptAll().then(() => desktopKeeper.start()).catch((e) => console.warn('[desktop] boot adoption failed:', e.message));
 const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B dial-in (2.144.0)
 
@@ -1856,6 +1856,7 @@ server.on('upgrade', (req, socket, head) => {
   } else if (desktopStream.upgradeId(pathname)) {
     // /api/vnc (the singleton desktop) + /api/desktop/<id>/stream: ONE bridge, cookie auth checked inside
     desktopStream.handleUpgrade(req, socket, head, desktopStream.upgradeId(pathname));
+  } else if (pathname === '/api/browser/stream' && browserStream) { browserStream.handleUpgrade(req, socket, head); // agent browser P2 (§4.2): cookie auth INSIDE (401) — the live view's bridge to a session's loopback stream server
   } else if (pathname.startsWith('/svc/')) {
     // path-mounted service WebSockets — auth is PER MOUNT inside path-mounts
     // (2.359.0 public mounts; private ones 401 there)
@@ -2008,7 +2009,7 @@ server.listen(PORT, HOST, () => {
   // …and STANDING (final verifier): a weekly window that moved between boots must not wait for the next boot — hourly, idempotent, quiet unless it changed something, the panel memory re-read only then
   setInterval(() => { try { const rep = repairIdentityAnchors('hourly'); if (rep && rep.changed) usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] hourly identity repair failed:', e.message); } }, 3600e3).unref();
   migrateLegacyHomeProjects();
-  restoreSessions();
+  restoreSessions(); bootBrowserKeeper(); bootWindowLeases(); // agent browser P1 (§3.5) + P9b window leases (the same rule: after the live-session set is final): leases reconciled + browsers adopted only AFTER the live-key set is final (async, logged, never blocks the boot — mounts-plugins-wiring)
   // Plan C boot reconciliation: a per-session pool link whose session did not
   // survive the restart is a billing pointer nobody can see or move — unlink.
   try { const n = accounts.sweepSessionPoolLinks(new Set(activeSessions.keys())); if (n) console.log(`[pool] swept ${n} orphaned per-session link(s)`); } catch { }
@@ -2087,7 +2088,8 @@ function shutdown() {
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
   try { channelsWiring.shutdown(); } catch {} // channel index + audit flush (atomic persistence law)
   try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release
-  try { desktopKeeper.shutdown(); } catch {} // timers only — desktop apps SURVIVE a restart by design (adopted at boot)
+  try { desktopKeeper.shutdown(); shutdownWindowLeases(); } catch {} // timers only — desktop apps SURVIVE a restart by design (adopted at boot); window leases persist, their input side is a handback by construction
+  try { browserTrace?.shutdown(); } catch {} try { browserStream?.shutdown(); } catch {} try { browserHandback?.shutdown(); } catch {} try { browserKeeper?.shutdown(); } catch {} // agent browser P5 trace + screencast writers, P2 live-view bridge, P3 handback timers, P1 keeper timers only — the profile browsers survive and are adopted next boot
   process.exit(0);
 }
 process.on('SIGINT', () => {

@@ -73,6 +73,14 @@ function agentEnv(base, { keep = AGENT_ENV_KEEP } = {}) {
   for (const [k, v] of Object.entries(base || {})) {
     if (AGENT_ENV_DROP.has(k)) continue;
     if (k.startsWith('npm_')) continue;
+    // AGENT BROWSER (P0): the browser environment of a session comes from
+    // VibeSpace (the `env K=v` prefix on the spawn line) or from that machine's
+    // own ~/.agent-browser/config.json — NEVER from whatever the SERVER process
+    // happened to inherit. An operator with `AGENT_BROWSER_PROFILE` exported in
+    // the shell that launched vibespace would otherwise pin every agent on the
+    // box to one cookie jar, silently, and precisely on the paths where we set
+    // nothing (integration OFF, or the isolation setting turned off).
+    if (k.startsWith('AGENT_BROWSER_')) continue;
     if (k.startsWith('VIBESPACE_') && !keep.has(k)) continue;
     out[k] = v;
   }

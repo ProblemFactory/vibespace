@@ -1,13 +1,26 @@
 import { createAgentKindIcon } from './agent-meta.js';
 import { escHtml , uiScale } from './utils.js';
+import { t } from './i18n.js';
+import { normalizeChain, displayedPanes, splitReplaceable, clampRatio, splitColumns, pairFor, dropSide, SPLIT_RATIO_DEFAULT } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
  * Adds tab chain support: drag window icon onto another to merge into tabs.
  *
- * Chain model: { tabs: [hostId, ...guestIds], active: index }
+ * Chain model: { tabs: [hostId, ...guestIds], active: index, layout, split }
  * All grouped windows share the same chain reference via win._tabChain.
  * tabs[0] is always the host (owns the physical .window element).
+ *
+ * SPLIT (agent browser P7, docs/design-agent-browser-v2.md §4.6): `layout`
+ * 'tabs' | 'split' (missing = 'tabs') and `split: { pair, ratio, dir }` —
+ * PURE src/lib/chain-layout.js owns the model; a split is another RENDERING
+ * of the same chain: the host's element becomes a grid (title bar across,
+ * pane / divider / pane below) and the pair's `content` elements lose
+ * `.tab-hidden` together — no re-parenting, no second container, the window's
+ * EXTERNAL geometry is unchanged (gridBounds / snap / desktops keep working).
+ * `_normalizeChain` runs at EVERY chain mutation (create / add / detach /
+ * restore / switch) so a pair member that left the chain collapses the layout
+ * to tabs — never a dangling id (the §4.6 invariant, ONE place).
  */
 
 // Window-kind icons live in the WINDOW-TYPE REGISTRY (window-types.js, Plugin
@@ -156,7 +169,7 @@ const tabGroupMethods = {
   },
 
   createTabChain(hostWin, guestWin) {
-    const chain = { tabs: [hostWin.id, guestWin.id], active: 1 };
+    const chain = { tabs: [hostWin.id, guestWin.id], active: 1, layout: 'tabs' };
     hostWin._tabChain = chain;
     guestWin._tabChain = chain;
     // Enforce same desktop: guest inherits host's desktop
@@ -167,6 +180,8 @@ const tabGroupMethods = {
     guestWin.element.style.display = 'none';
     guestWin.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
     this.activeWindowId = guestWin.id;
+    this._normalizeChain(chain);
+    this._applyChainLayout(chain);
     this._renderTabBar(chain);
     this._notify();
   },
@@ -189,11 +204,185 @@ const tabGroupMethods = {
     hostWin.element.appendChild(guestWin.content);
     guestWin.element.style.display = 'none';
     guestWin.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
+    this._normalizeChain(chain);
     this._renderTabBar(chain);
     // Activate the tab that was just dropped — not the last one (dropping
     // between tabs used to light up an unrelated trailing tab)
     this.switchTab(chain, insertedAt);
     this._notify();
+  },
+
+  // ── SPLIT (§4.6) ──────────────────────────────────────────────────────
+  /** The ONE validation of `split` against `tabs` (PURE chain-layout.js). */
+  _normalizeChain(chain) { return normalizeChain(chain); },
+
+  /** Render the chain's LAYOUT: which pane contents are displayed, the host's
+   *  grid columns, the divider. Idempotent; every chain mutation ends here. */
+  _applyChainLayout(chain) {
+    if (!chain) return;
+    const host = this.windows.get(chain.tabs[0]); if (!host) return;
+    this._normalizeChain(chain);
+    const split = chain.layout === 'split' ? chain.split : null;
+    const shown = new Set(displayedPanes(chain));
+    for (const id of chain.tabs) {
+      const w = this.windows.get(id); if (!w) continue;
+      const c = w.content;
+      c.classList.toggle('tab-hidden', !shown.has(id));
+      const paneIdx = split ? split.pair.indexOf(id) : -1;
+      c.classList.toggle('tab-split-pane', paneIdx >= 0);
+      c.classList.toggle('tab-split-focus', paneIdx >= 0 && chain.tabs[chain.active] === id);
+      c.style.gridColumn = paneIdx === 0 ? '1' : paneIdx === 1 ? '3' : '';
+    }
+    const el = host.element;
+    let divider = el.querySelector(':scope > .tab-split-divider');
+    if (split) {
+      if (!divider) {
+        divider = document.createElement('div');
+        divider.className = 'tab-split-divider';
+        divider.title = t('Drag to resize the panes — double-click to even them out');
+        this._setupSplitDivider(chain, divider);
+        el.appendChild(divider);
+      }
+      el.classList.add('tab-split');
+      el.style.gridTemplateColumns = splitColumns(split.ratio);
+    } else {
+      if (divider) divider.remove();
+      el.classList.remove('tab-split');
+      el.style.gridTemplateColumns = '';
+    }
+    this.syncHiddenViews?.(); // a pane's display just changed (inc-mu6bfv1t-4drq: every hider suspends)
+  },
+
+  /** Strip every split mark off a window that is leaving a chain / a host that is no longer one. */
+  _clearSplitDom(win) {
+    if (!win) return;
+    win.element.classList.remove('tab-split', 'split-resizing', 'tab-split-drop-left', 'tab-split-drop-right');
+    win.element.style.gridTemplateColumns = '';
+    win.element.querySelector(':scope > .tab-split-divider')?.remove();
+    win.content.classList.remove('tab-split-pane', 'tab-split-focus');
+    win.content.style.gridColumn = '';
+  },
+
+  _resizePanes(chain) {
+    for (const id of displayedPanes(chain)) { const w = this.windows.get(id); if (w && w.onResize) w.onResize(); }
+  },
+
+  /** The divider drag — this repository's three laws: a PER-DRAG
+   *  AbortController (a per-render one tears itself down mid-drag),
+   *  rAF-coalesced moves, and ONE kind of pixel: the host's bounding rect and
+   *  `clientX` are both VIEWPORT px, so the ratio is scale-free under the body
+   *  zoom (inc-mtdrm922 — `clientWidth` is layout px and never enters). */
+  _setupSplitDivider(chain, divider) {
+    let ctl = null, raf = 0, pending = null;
+    const host = () => this.windows.get(chain.tabs[0]);
+    const end = () => { if (ctl) { ctl.abort(); ctl = null; } if (raf) { cancelAnimationFrame(raf); raf = 0; } pending = null; };
+    const apply = (e) => {
+      const h = host(); if (!h || chain.layout !== 'split') return;
+      const r = h.element.getBoundingClientRect();
+      if (!(r.width > 0)) return;
+      this.setSplitRatio(chain, (e.clientX - r.left) / r.width, { notify: false });
+    };
+    divider.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || chain.layout !== 'split') return;
+      e.preventDefault(); e.stopPropagation();
+      end(); ctl = new AbortController();
+      divider.classList.add('dragging'); host()?.element.classList.add('split-resizing');
+      try { divider.setPointerCapture(e.pointerId); } catch { /* optional */ }
+      const onMove = (ev) => { pending = ev; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; const x = pending; pending = null; if (x) apply(x); }); };
+      const onUp = () => { const h = host(); end(); divider.classList.remove('dragging'); h?.element.classList.remove('split-resizing'); this._resizePanes(chain); this._notify(); };
+      document.addEventListener('pointermove', onMove, { signal: ctl.signal });
+      document.addEventListener('pointerup', onUp, { signal: ctl.signal });
+      document.addEventListener('pointercancel', onUp, { signal: ctl.signal });
+    });
+    divider.addEventListener('dblclick', (e) => { e.stopPropagation(); this.setSplitRatio(chain, SPLIT_RATIO_DEFAULT); });
+  },
+
+  setSplitRatio(chain, ratio, { notify = true } = {}) {
+    if (!chain || chain.layout !== 'split' || !chain.split) return;
+    const host = this.windows.get(chain.tabs[0]); if (!host) return;
+    chain.split.ratio = clampRatio(ratio);
+    host.element.style.gridTemplateColumns = splitColumns(chain.split.ratio);
+    if (notify) { this._resizePanes(chain); this._notify(); }
+    else if (!this._splitResizeRaf) this._splitResizeRaf = requestAnimationFrame(() => { this._splitResizeRaf = 0; this._resizePanes(chain); });
+  },
+
+  /** BIND: show `guestWin` beside `anchorWin` in ONE chain (the anchor's chain
+   *  wins; the guest leaves its own). `side` is where the guest lands. */
+  bindSplit(anchorWin, guestWin, { side = 'right' } = {}) {
+    if (!anchorWin || !guestWin || anchorWin.id === guestWin.id) return null;
+    if (guestWin._tabChain && guestWin._tabChain !== anchorWin._tabChain) this._detachFromChain(guestWin._tabChain, guestWin.id);
+    let chain = anchorWin._tabChain;
+    if (!chain) { this.createTabChain(anchorWin, guestWin); chain = anchorWin._tabChain; }
+    else if (!chain.tabs.includes(guestWin.id)) this.addToTabChain(chain, guestWin);
+    if (!chain) return null;
+    chain.layout = 'split';
+    chain.split = { pair: pairFor({ anchorId: anchorWin.id, guestId: guestWin.id, side }), ratio: chain.split ? chain.split.ratio : SPLIT_RATIO_DEFAULT, dir: 'row' };
+    chain.active = Math.max(0, chain.tabs.indexOf(guestWin.id));
+    this._normalizeChain(chain);
+    this._applyChainLayout(chain);
+    this._renderTabBar(chain);
+    this.activeWindowId = guestWin.id;
+    requestAnimationFrame(() => this._resizePanes(chain));
+    this._notify();
+    return chain;
+  },
+
+  /** UNBIND: back to tabs; nothing leaves the chain, nothing moves. */
+  unbindSplit(chain) {
+    if (!chain || chain.layout !== 'split') return;
+    chain.layout = 'tabs'; delete chain.split;
+    this._normalizeChain(chain);
+    this._applyChainLayout(chain);
+    this._renderTabBar(chain);
+    requestAnimationFrame(() => this._resizePanes(chain));
+    this._notify();
+  },
+
+  /** The one NEW drop zone (§4.6): the left / right half of another window's
+   *  TITLE BAR — outside the icon / tab-bar merge zone and the controls.
+   *  Returns `{ win, side }` (the chain host) or null. Same elementFromPoint
+   *  discipline as `_detectTabMergeTarget`. */
+  _detectSplitDropTarget(clientX, clientY, sourceWinId, hiddenEls = []) {
+    const savedPE = hiddenEls.map((el) => { const prev = el.style.pointerEvents; el.style.pointerEvents = 'none'; return prev; });
+    const topEl = document.elementFromPoint(clientX, clientY);
+    hiddenEls.forEach((el, i) => { el.style.pointerEvents = savedPE[i]; });
+    if (!topEl) return null;
+    if (topEl.closest('.window-icon-stack, .tab-bar-tabs, .tab-icon-wrap, .window-controls')) return null;
+    const bar = topEl.closest('.window-titlebar');
+    if (!bar) return null;
+    const hitWinEl = bar.closest('.window');
+    if (!hitWinEl) return null;
+    for (const [id, w] of this.windows) {
+      if (id === sourceWinId) continue;
+      if (w._tabChain && w._tabChain.tabs[0] !== w.id) continue;
+      if (w._hiddenByDesktop || w.isMinimized) continue;
+      if (w.element !== hitWinEl) continue;
+      const r = bar.getBoundingClientRect();
+      return { win: w, side: dropSide({ clientX, left: r.left, width: r.width }) };
+    }
+    return null;
+  },
+
+  _markSplitDrop(target) {
+    for (const [, w] of this.windows) {
+      w.element.classList.toggle('tab-split-drop-left', !!target && w === target.win && target.side === 'left');
+      w.element.classList.toggle('tab-split-drop-right', !!target && w === target.win && target.side === 'right');
+    }
+  },
+
+  /** The ownership badge element (§4.6): one dot per owner, names one per line in the title. */
+  _ownerBadgeEl(badge) {
+    const el = document.createElement('span');
+    el.className = 'win-owner-badge';
+    const dots = (badge && Array.isArray(badge.dots) ? badge.dots : []).slice(0, 6);
+    for (const d of dots) {
+      const dot = document.createElement('i');
+      dot.className = 'win-owner-dot';
+      dot.style.background = String(d.color || '');
+      el.appendChild(dot);
+    }
+    el.title = dots.map((d) => String(d.name || d.sessionId || '')).join('\n');
+    return el;
   },
 
   _renderTabBar(chain) {
@@ -262,7 +451,12 @@ const tabGroupMethods = {
       // A grouped guest's own titlebar is hidden — the tab carries its
       // waiting blink (kept live by refreshTabWaiting via the taskbar funnel).
       if (tabWin.element.classList.contains('window-waiting')) tab.classList.add('waiting');
-      tab.append(iconWrap, label, closeBtn);
+      // §4.6: a pane of the split is marked; the OWNERSHIP badge (the session's
+      // own colour + name) rides the tab because the guest's title bar is hidden
+      if (chain.layout === 'split' && chain.split && chain.split.pair.includes(tabWinId)) { tab.classList.add('split-member'); tab.title = t('Shown side by side'); }
+      tab.append(iconWrap, label);
+      if (tabWin._ownerBadge && tabWin._ownerBadge.dots && tabWin._ownerBadge.dots.length) tab.appendChild(this._ownerBadgeEl(tabWin._ownerBadge));
+      tab.appendChild(closeBtn);
       tab.addEventListener('mousedown', (e) => {
         if (e.target.closest('.tab-close')) return;
         e.stopPropagation();
@@ -281,6 +475,17 @@ const tabGroupMethods = {
     if (index < 0 || index >= chain.tabs.length) return;
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
+    this._normalizeChain(chain);
+    const targetId = chain.tabs[index];
+    let pairChanged = false;
+    if (chain.layout === 'split' && chain.split && !chain.split.pair.includes(targetId)) {
+      // D19 (a): a THIRD tab of a split chain replaces the NON-ANCHOR pane in
+      // place — the binding survives (the pane the browser is bound TO stays
+      // put), and the pane that changes is the one that was not the anchor.
+      const out = splitReplaceable(chain);
+      const i = chain.split.pair.indexOf(out);
+      if (i >= 0) { chain.split.pair[i] = targetId; pairChanged = true; }
+    }
     const prevWin = this.windows.get(chain.tabs[chain.active]);
     if (prevWin) prevWin.content.classList.add('tab-hidden');
     chain.active = index;
@@ -297,13 +502,15 @@ const tabGroupMethods = {
     tabs.forEach((t, i) => t.classList.toggle('active', i === index));
     this.activeWindowId = chain.tabs[index];
     this.syncHiddenViews?.(); // the guest's content just flipped display (inc-mu6bfv1t-4drq)
-    requestAnimationFrame(() => { if (newWin && newWin.onResize) newWin.onResize(); });
+    this._applyChainLayout(chain); // re-derives every pane's display (a split keeps its pair shown) and syncs again
+    if (pairChanged) this._renderTabBar(chain);
+    requestAnimationFrame(() => this._resizePanes(chain));
     this._notify();
   },
 
   _setupTabDrag(tabEl, winId, chain) {
     let mouseDown = false, startX = 0, startY = 0, detached = false;
-    let mergeTarget = null;
+    let mergeTarget = null, splitTarget = null;
     let mergeGhost = null;
     let savedBounds = null;
     let dragCtl = null;
@@ -357,6 +564,9 @@ const tabGroupMethods = {
       for (const [, w] of this.windows) {
         w.element.classList.toggle('tab-drop-target', w === mergeTarget);
       }
+      // §4.6: the left / right half of another window's title bar = a SPLIT drop (marked, not ghosted)
+      splitTarget = mergeTarget ? null : this._detectSplitDropTarget(e.clientX, e.clientY, winId, [win.element, mergeGhost].filter(Boolean));
+      this._markSplitDrop(splitTarget);
 
       if (mergeTarget && !prevMerge) {
         // Entering merge zone: save window bounds, hide it, show ghost
@@ -420,6 +630,19 @@ const tabGroupMethods = {
       this.snapIndicator.style.display = 'none';
       this.gridOverlay.classList.remove('dragging');
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
+      this._markSplitDrop(null);
+
+      // §4.6: dropped on the left / right half of another window's title bar ⇒ bound beside it
+      if (!mergeTarget && splitTarget && splitTarget.win.id !== winId) {
+        const { win: anchor, side } = splitTarget; splitTarget = null;
+        if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
+        win.element.style.display = '';
+        if (savedBounds) { win.element.style.width = savedBounds.width; win.element.style.height = savedBounds.height; savedBounds = null; }
+        this.bindSplit(anchor, win, { side });
+        this._clearGridHighlight();
+        return;
+      }
+      splitTarget = null;
 
       // Merge into another window's tab group takes priority over snap
       if (mergeTarget && mergeTarget.id !== winId) {
@@ -474,6 +697,10 @@ const tabGroupMethods = {
     queueMicrotask(() => { if (win._authBadge !== undefined) this.setAuthBadge(winId, win._authBadge); });
     const hostWin = this.windows.get(chain.tabs[0]);
     const isHost = idx === 0;
+    // §4.6: the split renders INSIDE the host's element — whoever leaves (and an
+    // old host on promotion) sheds every split mark; the survivor re-derives.
+    this._clearSplitDom(win);
+    if (hostWin && hostWin !== win) this._clearSplitDom(hostWin);
 
     if (isHost && chain.tabs.length > 1) {
       const newHostId = chain.tabs[1];
@@ -525,6 +752,7 @@ const tabGroupMethods = {
     const existingTabBar = win.titleBar.querySelector('.tab-bar-tabs');
     if (existingTabBar) existingTabBar.remove();
 
+    this._normalizeChain(chain); // a pair member that left ⇒ layout collapses to tabs (never a dangling id)
     if (chain.tabs.length <= 1) {
       this._ungroupLast(chain);
       // The remaining (now standalone) window's title bar needs its badge
@@ -536,6 +764,7 @@ const tabGroupMethods = {
       if (currentHost) {
         const activeWin = this.windows.get(chain.tabs[chain.active]);
         if (activeWin) activeWin.content.classList.remove('tab-hidden');
+        this._applyChainLayout(chain);
         this._renderTabBar(chain);
       }
     }
@@ -579,6 +808,7 @@ const tabGroupMethods = {
     const lastWin = this.windows.get(chain.tabs[0]);
     if (!lastWin) return;
     lastWin._tabChain = null;
+    this._clearSplitDom(lastWin);
     lastWin.content.classList.remove('tab-hidden');
     const standaloneIcon = lastWin.titleBar.querySelector(':scope > .window-icon-stack');
     if (standaloneIcon) standaloneIcon.style.display = '';
@@ -589,11 +819,11 @@ const tabGroupMethods = {
     requestAnimationFrame(() => { if (lastWin.onResize) lastWin.onResize(); });
   },
 
-  restoreTabChain(tabIds, activeIndex) {
+  restoreTabChain(tabIds, activeIndex, { layout, split } = {}) {
     if (!tabIds || tabIds.length < 2) return;
     const hostWin = this.windows.get(tabIds[0]);
     if (!hostWin) return;
-    const chain = { tabs: [], active: activeIndex || 0 };
+    const chain = { tabs: [], active: activeIndex || 0, layout: layout === 'split' ? 'split' : 'tabs', split: split ? { pair: Array.isArray(split.pair) ? [...split.pair] : [], ratio: split.ratio, dir: 'row' } : undefined };
     chain.tabs.push(hostWin.id);
     hostWin._tabChain = chain;
     for (let i = 1; i < tabIds.length; i++) {
@@ -609,6 +839,8 @@ const tabGroupMethods = {
     const activeWin = this.windows.get(chain.tabs[chain.active]);
     if (activeWin) activeWin.content.classList.remove('tab-hidden');
     if (chain.active !== 0) hostWin.content.classList.add('tab-hidden');
+    this._normalizeChain(chain); // a persisted pair whose member did not come back ⇒ tabs
+    this._applyChainLayout(chain);
     this._renderTabBar(chain);
   },
 };

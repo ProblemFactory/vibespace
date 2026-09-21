@@ -122,6 +122,10 @@ export async function showLaunchDialog(app) {
       <h4>${escHtml(t('Running'))}<span class="desktop-launch-count"></span></h4>
       <div class="desktop-launch-running"></div>
     </section>
+    <section class="desktop-launch-sec desktop-launch-desk-sec">
+      <h4>${escHtml(t('Agents on your real desktop'))}<span class="desktop-launch-desk-state"></span></h4>
+      <div class="desktop-launch-desk"></div>
+    </section>
     <section class="desktop-launch-sec">
       <h4>${escHtml(t('Applications'))}</h4>
       <div class="desktop-launch-registry desktop-launch-grid"></div>
@@ -267,7 +271,37 @@ export async function showLaunchDialog(app) {
   argsIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn.click(); });
 
   const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && overlay.isConnected) { if (data) { data.apps = m.apps; render(); } } });
-  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} obs.disconnect(); } });
+  // ── P10 (design-agent-browser-v2 §6.6 / D27 (b)): the user's side of the
+  // OTHER window class — the switch's state and, per window an agent holds on
+  // their real desktop, a Pause / Resume that rides the same takeover verdicts
+  // a window-live pane uses (the agent answers window_paused meanwhile). Reads
+  // GET /api/window/desktop on open and on every window-leases-updated. ──
+  const deskEl = body.querySelector('.desktop-launch-desk'), deskState = body.querySelector('.desktop-launch-desk-state');
+  const renderDesk = async () => {
+    const d = await fetchJson('/api/window/desktop');
+    if (!deskEl || !deskEl.isConnected) return;
+    deskEl.innerHTML = '';
+    if (!d || d.error) { deskState.textContent = ''; deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml((d && d.error) || t('Off — turn it on in Settings → Browser'))}</div>`; return; }
+    deskState.textContent = d.enabled ? '' : t('Off — turn it on in Settings → Browser');
+    const leases = d.enabled ? (d.leases || []) : [];
+    if (!leases.length) { deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(d.enabled ? t('No agent holds a window on your desktop') : t('Off — turn it on in Settings → Browser'))}</div>`; return; }
+    for (const l of leases) {
+      const row = document.createElement('div'); row.className = 'desktop-launch-run-row desktop-launch-desk-row';
+      const paused = l.input === 'user';
+      row.innerHTML = `<span class="desktop-app-row-label">${escHtml(l.label || l.handle)} <span class="desktop-app-chip desktop-app-chip-origin">${escHtml(t('your desktop'))}</span></span><span class="desktop-app-row-state">${escHtml(paused ? t('paused — you are in control') : t('held by {name}', { name: l.sessionName || l.sessionId }))}</span>`;
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'file-tool-btn desktop-launch-desk-btn'; btn.style.cssText = 'width:auto;padding:0 8px;font-size:10px'; btn.textContent = paused ? t('Resume agent') : t('Pause agent');
+      btn.onclick = async () => {
+        btn.disabled = true;
+        const r = await fetchJson(`/api/window/desktop/${encodeURIComponent(l.handle)}/${paused ? 'resume' : 'pause'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId: 'user' }) });
+        if (r && r.error) showToast(r.error, { type: 'error' });
+        renderDesk();
+      };
+      row.appendChild(btn); deskEl.appendChild(row);
+    }
+  };
+  const offDesk = app.ws.onGlobal((m) => { if (m.type === 'window-leases-updated' && overlay.isConnected) renderDesk(); });
+  renderDesk();
+  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offDesk?.(); } catch {} obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 
   render();

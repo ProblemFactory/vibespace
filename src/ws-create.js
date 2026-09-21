@@ -20,6 +20,7 @@ const { REMOTE_PRELUDE, buildRemoteExec, nodeFinder } = require('./remote-shell'
 const { sweepWriters } = require('./writer-sweep');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
+const browserProfiles = require('./browser-profiles'); // agent-browser P0: the browser key's continuity ladder + the env composition (PURE)
 
 /**
  * Is a `WorktreeCreate` hook configured for a claude run in `cwd`? — the
@@ -74,7 +75,67 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
   } = ctx;
-  return async function handleCreate(ws, data, attachedSessions) {
+
+  // ── THE AGENT BROWSER'S SPAWN ENVIRONMENT (P0, docs/design-agent-browser-v2
+  //    §3.2) — constructed HERE, not in server.js, for two reasons that are both
+  //    load-bearing. (1) This file is the ONE spawn composition: the local
+  //    `r6Argv` and all five `buildRemoteExec` call sites live below, so a
+  //    resolver built here reaches both without a second wiring. (2) server.js
+  //    is AT its size ratchet (≤2100); a new mechanism belongs in a module, and
+  //    this is that module's natural constructor.
+  //
+  //    LAZY, and that is not tidiness. Registering the ws handler must cost
+  //    NOTHING: the gate constructs it with a minimal ctx (test-contributions
+  //    passes no `path`, no `BUFFERS_DIR`) and an eager `path.dirname(...)`
+  //    here took the whole release gate down with a TypeError at registration
+  //    time. It is also the repo's own extraction discipline — a late singleton
+  //    is reached through a getter, never captured at construction — and it
+  //    means an instance where nobody ever creates a session never touches the
+  //    filesystem for this feature at all.
+  let _browserEnv;                      // undefined = not asked yet; null = deps missing
+  const browserEnvOf = () => {
+    if (_browserEnv !== undefined) return _browserEnv;
+    try {
+      _browserEnv = require('./server/browser-env.js').create({
+        // `<root>/data`, derived from BUFFERS_DIR (`<root>/data/session-buffers`)
+        // rather than added to the ws ctx contract, for the same ratchet reason.
+        dataDir: require('path').dirname(BUFFERS_DIR),
+        serverSetting, serverNotice, telemetry: ctx.telemetry || null,
+      });
+    } catch (e) {
+      // A degrade path that prints the message VERBATIM is the only reason this
+      // class of bug is ever found (2.276.0's swallowed ReferenceError).
+      console.warn('[browser] per-session browser environment unavailable — ' + (e && e.message));
+      _browserEnv = null;
+    }
+    return _browserEnv;
+  };
+  // D1's floor is probed ONCE, off the spawn path and only on an instance that
+  // has at least registered a ws handler with real deps. A too-old binary
+  // degrades by CAPABILITY with one honest notice — it never blocks a create,
+  // because P0's own isolation is measured working on the installed 0.32.0.
+  setTimeout(() => { try { browserEnvOf()?.checkFloor().catch(() => { }); } catch { } }, 3000).unref?.();
+  // …AND RE-ASKED UNTIL SOMEBODY HEARS IT (r5). A systemd / update.sh restart
+  // has NO client at boot+3 s, `serverNotice` deliberately burns its key only
+  // when a client received it, and round 4's resolver latched BEFORE asking
+  // — so the notice went to nobody for the life of the process (measured: a
+  // client at Ready+6.3 s got zero frames while the journal carried the
+  // line). The resolver now latches on DELIVERY; ws-handler calls this on
+  // every client connection (free once latched; a cached probe inside the
+  // TTL otherwise), and the 6 h re-probe follows the other health probes so
+  // a binary upgraded mid-run is re-read.
+  const onClientConnected = () => { try { browserEnvOf()?.checkFloor().catch(() => { }); } catch { } };
+  setInterval(() => { try { browserEnvOf()?.checkFloor({ reprobe: true }).catch(() => { }); } catch { } }, 6 * 3600e3).unref?.();
+  // Boot sweep of the indirection objects and variant-C scratch dirs no live
+  // session carries. §3.2.2 promises those directories are swept; a fallback
+  // rung that farms orphans is the very problem this feature exists to end.
+  // The live set is passed EXPLICITLY — `sweep(null)` means "I could not
+  // enumerate" and deliberately removes nothing.
+  setTimeout(() => {
+    try { browserEnvOf()?.sweep(new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean))); } catch { }
+  }, 20000).unref?.();
+
+  return Object.assign(async function handleCreate(ws, data, attachedSessions) {
     do {
           const backend = data.backend || 'claude';
           const adapter = adapterRegistry?.get?.(backend) || null;
@@ -952,6 +1013,99 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // VIBESPACE_SESSION_TOKEN (Ctrl+G editor auth; inert without the
           // api var — every consumer guards on both). Read per spawn = live.
           let integrationOn = integrationEnabled ? integrationEnabled() : true;
+
+          // ── AGENT BROWSER, P0 (docs/design-agent-browser-v2 §3.2) ────────
+          // Four variables at spawn, and that is the whole feature: no new
+          // process, no daemon. They go into `spawnEnvPairs` HERE — above every
+          // remote branch, which consumes that array and then empties it, and
+          // above the local `r6Argv`, which reads whatever survives. One push,
+          // both transports; `hostId` selects a transport, it never branches
+          // the decision.
+          //
+          // The KEY is the CONVERSATION's, not this webui id's (§3.2.1): the id
+          // minted 700 lines up changes on every resume, so keying on it would
+          // leak a browser, a namespace, a daemon and a pinned tab per resume.
+          // A fork mints a NEW key — a fork is a new conversation and must not
+          // inherit another one's cookies (D15).
+          //
+          // A REMOTE session also gets `spawnBrowserPre` (r3): the shell
+          // fragment that decides its user-data-dir rung ON THE HOST, from that
+          // machine's own config, riding every `buildRemoteExec` below in its
+          // named `browser` slot — the names alone were measured to make two
+          // browsers collide on a host whose config names a profile.
+          let spawnBrowserPre = '';
+          {
+            const be0 = browserEnvOf();
+            const prior = (be0 && data.resume && data.resumeId && !data.fork)
+              ? be0.priorKeyFor(data.resumeId) : '';
+            const bk = browserProfiles.browserKeyFor({
+              prior, resume: !!(data.resume && data.resumeId), fork: !!data.fork,
+              mint: () => browserProfiles.mintBrowserKey(crypto.randomBytes(4).toString('hex')),
+            });
+            // `cwd` is the session's own directory — the one the CLI reads
+            // `./agent-browser.json` from (finding ① r3: a project-level fence
+            // was dropped whole by the generated config). For a remote session
+            // it is a path on the OTHER machine; the resolver never reads it
+            // here, the host's prelude does.
+            // THE PROFILE PIN (P1, §3.2.5): explicit > this conversation's own
+            // pin (a FORK copies its parent's, D15) > the Task Group default
+            // (P1's second half hands it in) > the instance default > none.
+            // The keeper answers lazily (null before wiring ⇒ ephemeral); the
+            // ORIGIN is stated by the ladder and recorded beside the value.
+            let pin = { profileId: '', dir: null, origin: 'harness' };
+            try {
+              const kp = require('./server/browser-keeper.js').keeper();
+              if (kp && integrationOn) {
+                const forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
+                // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
+                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null });
+                pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
+                if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
+                // B-6b6d r3 for this knob: the New Session dialog sends the value it
+                // filled in on the user's behalf (the group's / the instance default)
+                // as an EXPLICIT string, so the ladder can only read it as 'chosen';
+                // the client says which fact it was and the server may only DOWNGRADE
+                // its own 'chosen' to that rung, and only when the value IS that rung's.
+                const hint = data.spawnOriginHint && typeof data.spawnOriginHint === 'object' ? data.spawnOriginHint.browserProfile : null;
+                if (pin.origin === 'chosen' && (hint === 'task-group' || hint === 'instance')) {
+                  const rungValue = hint === 'task-group' ? taskGroupDefault : kp.instanceDefault();
+                  if (rungValue && pin.profileId === rungValue) pin = { ...pin, origin: hint };
+                }
+              }
+            } catch (e) { console.warn('[browser] pin ladder unavailable — ' + (e && e.message)); }
+            const be = be0 ? be0.envFor({
+              browserKey: bk.key, integrationOn, remote: !!data.hostId, cwd, pinnedDir: pin.dir,
+            }) : { pairs: [], remotePrelude: '', variant: null };
+            if (be.variant) {
+              // The key and the rung are recorded even for `none` (nothing
+              // emitted): a later resume of this conversation reuses the key,
+              // and a properties row can say WHICH rung decided.
+              session._browserKey = bk.key;
+              session._browserVariant = be.variant;
+              session._browserProfileId = pin.profileId || null;
+              session._browserPinOrigin = pin.origin || 'harness';
+              // P2 (§4.2): the very pairs this process browses with — the live
+              // view of an EPHEMERAL browser (no attachment) asks its stream
+              // port under exactly these, never a re-run of the ladder (which
+              // would rebuild the generated config the r3 finding said not to)
+              session._browserEnv = Array.isArray(be.pairs) && be.pairs.length ? be.pairs.slice() : null;
+              // A pin that came from anywhere but this conversation's own record
+              // becomes its record now, ORIGIN kept — that is what makes the
+              // `conversation` rung answer on the next resume (and a fork's copy
+              // stick to the fork, not to its parent).
+              if (pin.profileId && pin.origin !== 'conversation') {
+                try { require('./server/browser-keeper.js').keeper()?.setPin(bk.key, pin.profileId, { origin: pin.origin }); } catch { }
+              }
+              if (pin.profileId) console.log(`[browser] ${id}: pinned to profile ${pin.profileId} "${pin.label}" (${pin.origin})${be.pinRefused ? ' — REFUSED at the browser layer: ' + be.pinRefused.why : ''}`);
+              spawnBrowserPre = be.remotePrelude || '';
+              // `resume-unknown` is the leak this ladder exists to prevent, so
+              // it is SAID rather than inferred later from orphaned dirs.
+              if (bk.origin === 'resume-unknown') {
+                console.warn(`[browser] ${id}: resuming ${String(data.resumeId).slice(0, 8)} but no previous browser key was recorded — minted ${bk.key} (this conversation's earlier browser, if any, is not reused)`);
+              }
+            }
+            if (be.pairs.length) spawnEnvPairs.push(...be.pairs);
+          }
           // A remote Add-subscription helper terminal needs this one transport
           // utility even when agent-visible Integration is OFF. It handles the
           // host's own Keychain/file login only and exposes nothing to agents.
@@ -1301,6 +1455,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 const shellCmd = buildRemoteExec({
                   cwd, shq,
                   pre: REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : ''),
+                  browser: spawnBrowserPre,
                   resolve: shellResolve, tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
                   parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))],
                 });
@@ -1339,7 +1494,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // setenvs it internally, so the VALUE never appears in any argv
             // (an `env KEY=$(cat …)` argument would expand into env's argv).
             const inner = buildRemoteExec({
-              cwd, shq, pre: ra.prelude, tokenAssign: ra.tokenAssign, acctEnv,
+              cwd, shq, pre: ra.prelude, browser: spawnBrowserPre, tokenAssign: ra.tokenAssign, acctEnv,
               parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...spawnArgs.map(shq)],
             });
             spawnCmd = 'ssh';
@@ -1471,6 +1626,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 const shellCmd = buildRemoteExec({
                   cwd, shq,
                   pre: REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : ''),
+                  browser: spawnBrowserPre,
                   tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
                   parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],
                 });
@@ -1605,7 +1761,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // existing shell-expanded prefixes (token file reads, $HOME
                 // account paths) keep their exact semantics
                 const shellCmd = buildRemoteExec({
-                  cwd, shq, pre: ra.prelude, tokenAssign: ra.tokenAssign, acctEnv,
+                  cwd, shq, pre: ra.prelude, browser: spawnBrowserPre, tokenAssign: ra.tokenAssign, acctEnv,
                   parts: [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],
                 });
                 const remoteCmd = REMOTE_PRELUDE + 'exec node "$HOME/.vibespace/agentd/current/agentd.js" --stdio';
@@ -1638,7 +1794,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             }
             if (!agentdMode || (keeperSid && !agentdAttach)) {
               const inner = buildRemoteExec({
-                cwd, shq, pre: ra.prelude, tokenAssign: ra.tokenAssign, acctEnv,
+                cwd, shq, pre: ra.prelude, browser: spawnBrowserPre, tokenAssign: ra.tokenAssign, acctEnv,
                 parts: [...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq)],
                 tail: runTail,
               });
@@ -1959,6 +2115,31 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             agentdSession: !!session._agentdSession,
             cwdRecreated: session._cwdRecreated || undefined, // B-7812: agent notice pending
             forkRequested: !!session._forkRequested,
+            // AGENT BROWSER (P0 r6): the conversation this session was asked to
+            // fork FROM. A claude fork resumes the PARENT's id (`--fork-session`)
+            // and a codex fork the parent's thread id; the fork's OWN id arrives
+            // later from the harness (init frame / wrapper_meta). Until then this
+            // record names a conversation that is NOT this session's, so the
+            // binding hook (session-stdout.writeSessionMeta → browser-bindings
+            // .bindableIdOf) must not bind the parent to THIS session's browser
+            // key — it did, and the parent's next resume landed on the fork's
+            // browser (measured, the round-5 finding). Carried forward by every
+            // later write's spread; an opencode fork is minted BEFORE the spawn,
+            // so its id already differs from this source and binds at once.
+            forkSourceId: (data.fork && (data.forkedFromId || data.resumeId)) ? String(data.forkedFromId || data.resumeId) : undefined,
+            // AGENT BROWSER (P0 r7): the conversation the browser key was
+            // DECIDED for — a resume's resumeId (the ladder looked THAT id up,
+            // or minted for it). A resume whose harness announces a DIFFERENT
+            // id (claude's implicit fork on a locked conversation; a codex/ACP
+            // resume that re-mints) is adopted by the consumer, and the record
+            // then names an id this key was never decided for — without this
+            // statement the choke point bound it, and two conversations
+            // shared one browser for ever with no fork flag and no journal
+            // line (the round-6 finding). A fork states nothing (its key
+            // belongs to the id the harness will announce; `forkSourceId`
+            // guards the parent) and a new session states nothing (its first
+            // announced id is the one). Spread forward by every later write.
+            browserKeyFor: (session._browserKey && data.resume && data.resumeId && !data.fork) ? String(data.resumeId) : undefined,
             // implicit-fork adoption (2.218.0) is armed by _resumeSpawn and
             // disarmed by _sawFirstId — neither survived a restart, so a
             // restored resume whose claude implicitly forked could never be
@@ -1979,6 +2160,24 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             modelOrigin: session._modelOrigin || null, // B-6b6d: which fact the spawn's model/effort came from — a restart must not turn an honest
             effortOrigin: session._effortOrigin || null, // "this conversation's own value" row into a guess
             outputStyle: session._outputStyle || null, // 2.369.58: the EFFECTIVE response style survives a server restart (the chip otherwise reported "default" for a session really running one)
+            // AGENT BROWSER (P0, §3.2.1): the browser key is how a CONVERSATION
+            // keeps one browser across resume/restart. This write is ALSO where
+            // the conversation → key binding is recorded (r5): writeSessionMeta
+            // hands it to src/server/browser-bindings.js, a store the kill and
+            // pty-exit paths never unlink — the meta file itself IS unlinked by
+            // them, which is why `browserEnv.priorKeyFor` asks the store first
+            // and this file's join only second. Without the record, every
+            // resume mints a new key and leaks a browser, which is the defect
+            // the ladder exists to prevent. The variant rides along so a log
+            // line, a properties row and the tools intro (r5: the Browsing
+            // sentence is chosen by this rung) can say which rung this session
+            // landed on without re-deriving it.
+            browserKey: session._browserKey || undefined,
+            browserVariant: session._browserVariant || undefined,
+            browserProfileId: session._browserProfileId || undefined, // P1 §3.2.5: the pin + its origin survive a restart
+            browserPinOrigin: session._browserPinOrigin || undefined,
+            browserEnv: session._browserEnv || undefined,        // P2: the ephemeral live view's stream is asked under these after a restart
+            browserProfileActive: session._browserProfileActive === undefined ? undefined : (session._browserProfileActive === null ? undefined : session._browserProfileActive), // P2 §3.8 ③: the profile the agent LAST USED ('' = the ephemeral one)
             worktree: session._worktree || undefined,       // owner ruling 9: the badge + properties row survive a server restart
             worktreePath: session._worktreePath || undefined, // filled by the init frame (the CLI's own announced cwd)
             modelLocked: session._modelLocked || undefined, // #6: survive server restart (else a resumed lock's badge silently reverts — review-caught)
@@ -2174,7 +2373,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           }));
           broadcastActiveSessions();
     } while (0);
-  };
+  }, { onClientConnected });
 }
 
 module.exports = { createWsCreateHandler };

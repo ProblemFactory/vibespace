@@ -82,6 +82,23 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // with no rendered difference — the churn this table exists to bound.
   spawnModel: { digest: null }, effort: { digest: null },
   modelOrigin: { digest: null }, effortOrigin: { digest: null },
+  // agent browser P1 (§3.2.5): the conversation's browser key + rung and which
+  // rung chose the pin — CARRIED-ONLY (Session Properties and the card's
+  // picker read the merged row). P2 (§3.8 layer ③): the status-bar Browser
+  // chip is TWO facts side by side — the profile the agent LAST USED vs the
+  // PINNED default — so BOTH are scalar rows with their own digest (a digest
+  // over an object must PROJECT, never return the object: `{a}` and `{b}`
+  // both digest to ':[object Object]' and the chip would never repaint).
+  // `browserProfileActive`: null = never used (no claim), '' = the ephemeral
+  // browser, else a profile id — the three states must digest differently.
+  browserKey: { digest: null }, browserVariant: { digest: null },
+  browserProfileId: { digest: (v) => v || '' },                       // the PINNED half
+  browserProfileActive: { digest: (v) => (v == null ? '' : (v || '~ephemeral')) }, // the LAST-USED half
+  browserPinOrigin: { digest: null },
+  // agent browser P3 (§4.3): 'user' while somebody drives one of this
+  // conversation's browsers, 'agent' when it has one, null when none — the
+  // card's "Hand back" row and the status-bar chip's driving state gate on it
+  browserInput: { digest: (v) => v || '' },
   worktree: { digest: (v) => (v ? '1' : '0') },       // owner ruling 9 badge
   worktreePath: { digest: (v) => v || '' },           // …and the path its tooltip names
   // design-unknown-records (2026-09-21): the last VCS fact (git chip) and the

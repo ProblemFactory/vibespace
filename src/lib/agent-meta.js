@@ -335,7 +335,10 @@ export function spawnValueOrigin(stated, live, picked) {
   // 'harness' and the live value is empty) — labelling the user's saved pick
   // "harness default" would describe the spawn while showing something else.
   if (!l && p) return 'saved';
-  if (stated === 'chosen' || stated === 'conversation' || stated === 'instance' || stated === 'harness') return stated;
+  // 'task-group' = the profile pin's third rung (agent browser P1, §3.2.5): the
+  // fifth value of the server's SPAWN_ORIGINS, mirrored here so it renders its
+  // own label instead of falling through to a wrong one.
+  if (stated === 'chosen' || stated === 'conversation' || stated === 'task-group' || stated === 'instance' || stated === 'harness') return stated;
   if (l && p === undefined) return 'unknown';   // nothing to compare ⇒ say nothing
   return responseStyleOrigin(live, picked);
 }

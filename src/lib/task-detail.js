@@ -370,6 +370,22 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
     evWrap.append(evLbl, evSel);
     ctxSec.appendChild(evWrap);
 
+    // agent browser P1 (§3.2.5 row 3): the group's DEFAULT browser profile —
+    // where a NEW session of this group starts; never a retroactive edit of a
+    // running one. Only while the client holds the profile digest.
+    if (app._browserProfiles && Array.isArray(app._browserProfiles.profiles)) {
+      const bpWrap = document.createElement('label');
+      bpWrap.className = 'task-detail-folder-rec task-detail-inject';
+      bpWrap.title = t('The default browser profile of NEW sessions in this group (never a retroactive edit of running ones)');
+      const bpLbl = document.createElement('span'); bpLbl.textContent = t('Default browser profile') + ': ';
+      const bpSel = document.createElement('select'); bpSel.className = 'toolbar-select';
+      for (const o of app.browserProfileOptions()) { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; bpSel.appendChild(opt); }
+      bpSel.value = task.browserProfileId && [...bpSel.options].some((o) => o.value === task.browserProfileId) ? task.browserProfileId : '';
+      bpSel.onchange = () => patch({ browserProfileId: bpSel.value || null });
+      bpWrap.append(bpLbl, bpSel);
+      ctxSec.appendChild(bpWrap);
+    }
+
     // ── Color ──
     const colorSec = section(t('Color'));
     const swatchRow = document.createElement('div');

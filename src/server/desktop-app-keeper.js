@@ -598,6 +598,20 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (!rec || !M.isLiveState(rec.state)) return;
     rec.lastInputAt = now(); dirty = true;
   }
+  /** The x11 env a process ADDRESSING record `id`'s display gets (P9 window
+   *  targets: xdotool / the screenshot helper) — the same rule as the app's
+   *  own env (`x11Env` over the sanitised base, the per-app Xauthority for an
+   *  owned display, the singleton's cookie file for a shared one). null when
+   *  the record has no display yet. */
+  function x11EnvFor(id) {
+    const rec = store.apps[id];
+    if (!rec || !rec.display) return null;
+    let authFile = null;
+    if (rec.backend === 'desktop-singleton') { let s = null; try { s = singleton?.(); } catch { s = null; } authFile = (s && s.authFile) || null; }
+    else authFile = path.join(logRoot, id, 'Xauthority');
+    const base = env();
+    return display.x11Env(base, { display: rec.display, authFile: authFile || base.XAUTHORITY });
+  }
   function streamTarget(id) {
     const rec = store.apps[id];
     if (!rec) return null;
@@ -739,7 +753,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function shutdown() { if (timer) clearInterval(timer); timer = null; if (dirty) save(); }
 
   load();
-  return { launch, stop, keepAlive, noteInput, get, list, listApps, liveRecords, streamTarget, facts, registry, adoptAll, start, shutdown, tick, sessionPids,
+  return { launch, stop, keepAlive, noteInput, get, list, listApps, liveRecords, streamTarget, x11EnvFor, facts, registry, adoptAll, start, shutdown, tick, sessionPids,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }
 

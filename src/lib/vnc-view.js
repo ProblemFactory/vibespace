@@ -46,7 +46,9 @@ export function streamUrl(pathname) {
 
 /**
  * createVncView(host, opts) — mounts the picture view into `host`.
- *   url           — the cookie-authed ws bridge url (streamUrl('/api/vnc') …)
+ *   url           — the cookie-authed ws bridge url (streamUrl('/api/vnc') …), or a
+ *                   FUNCTION called at every (re)connect (the desktop-app pane mints a
+ *                   fresh per-socket viewer id each time — the id is bound to ONE socket)
  *   before        — optional async () => { ok, error } gate run before every
  *                   connect (the singleton starts its server here); `error`
  *                   is shown verbatim when present, else labels.unavailable
@@ -134,7 +136,7 @@ export function createVncView(host, { url, before = null, labels = {}, autoRecon
     catch { setStatus(L.unavailable, { error: true, reconnect: true }); emit('error', L.unavailable); return; }
     if (closed) return;
     try { rfb?.disconnect(); } catch {}
-    rfb = new RFB(mount, url);
+    rfb = new RFB(mount, typeof url === 'function' ? url() : url);
     rfb.scaleViewport = true;   // fit when the server can't resize
     rfb.resizeSession = true;   // ask the server to match the window (RandR)
     rfb.addEventListener('connect', () => { attempt = 0; setStatus(t('Connected')); emit('connected'); });

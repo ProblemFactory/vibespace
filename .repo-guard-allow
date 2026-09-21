@@ -29,3 +29,9 @@ cluster-fake-key-1234
 cluster-lark-secret-000000
 expired-access-token
 fail-switch-0000
+# agent browser v2 (2.369.134): synthetic proxy credentials in test fixtures + env-variable NAMES used as values in the provider table, not keys
+user:secret@proxy.example
+alice:s3cr3t@127.0.0.1
+BROWSERBASE_API_KEY
+BROWSERLESS_API_KEY
+BROWSER_USE_API_KEY

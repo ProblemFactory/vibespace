@@ -36,6 +36,13 @@
    after the model/effort badges so it is the third chip, not the last. */
 .chat-status-health { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; display: inline-flex; align-items: center; gap: 3px; }
 .chat-status-health svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* Browser chip (agent browser P2, §3.8 layer ③): neutral while the agent is on
+   the pinned profile (or has not used one yet), AMBER when the profile it last
+   used differs from the pin — a standing condition, no pulse. */
+.chat-status-browser { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; }
+.chat-status-browser.amber { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; }
+.chat-status-browser svg { width: 10px; height: 10px; flex-shrink: 0; }
+.chat-status-dropdown-item.chat-status-browser-nudge { color: var(--yellow, #e5c07b); }
 /* The row carries BOTH classes, and `.chat-status-dropdown-item` (declared
    further down this file, same 0,1,0 specificity) sets `white-space: nowrap`
    — so the plain `.chat-status-health-row { white-space: normal }` this used

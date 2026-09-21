@@ -81,6 +81,16 @@ export function registerSessionCardMenu() {
   // title bars, so the title-bar identity badge (the desktop entry point)
   // doesn't exist; this menu is the universal path.
   registerCommand({ id: 'session.switchBilling', title: () => tr('Switch billing…'), run: (c) => c.app.showBillingSwitcher(c.s, { x: c.event.clientX, y: c.event.clientY }) });
+  // agent browser P1 (§3.2.5): the pin's ONE entry point — the same class of
+  // act as the billing switch (change an identity this session runs under);
+  // shown only when the client holds a profile digest (the feature is on)
+  registerCommand({ id: 'session.pinBrowser', title: () => tr('Browser profile…'), run: (c) => c.app.showBrowserProfilePicker(c.s, { x: c.event.clientX, y: c.event.clientY }) });
+  // agent browser P2 (§4.4): the live view of this session's browser — one
+  // window, N viewers on one upstream; shown for a live local session with a key
+  registerCommand({ id: 'session.browserLive', title: () => tr('Live browser view'), run: (c) => c.app.openBrowserLive({ sessionId: c.s.webuiId }) });
+  // agent browser P3 (§4.3): an EXPLICIT handback from the card — shown only
+  // while the live fact says a human drives one of this session's browsers
+  registerCommand({ id: 'session.browserHandback', title: () => tr('Hand back the browser'), run: (c) => c.app.browserHandback?.(c.s.webuiId) });
   // transcript rescue (2.360.0, owner request after the 79928a2b 38MB
   // poisoning): stubs oversized records in place (full backup) so a
   // conversation whose resume dies / history blanks comes back
@@ -149,6 +159,9 @@ export function registerSessionCardMenu() {
   // 3_admin: billing / rescue / properties / terminate
   registerMenuItem({ menu: M, group: '3_admin', order: 0, separator: true });
   registerMenuItem({ menu: M, group: '3_admin', order: 10, command: 'session.switchBilling', when: (c) => (c.s.backend || 'claude') === 'claude' || c.s.backend === 'codex' });
+  registerMenuItem({ menu: M, group: '3_admin', order: 15, command: 'session.pinBrowser', when: (c) => !!(c.app && c.app._browserProfiles && Array.isArray(c.app._browserProfiles.profiles)) && c.s.status === 'live' && !!c.s.webuiId && !c.s.host });
+  registerMenuItem({ menu: M, group: '3_admin', order: 16, command: 'session.browserLive', when: (c) => !!(c.app && c.app._browserProfiles) && c.s.status === 'live' && !!c.s.webuiId && !!c.s.browserKey && !c.s.host });
+  registerMenuItem({ menu: M, group: '3_admin', order: 17, command: 'session.browserHandback', when: (c) => c.s.status === 'live' && !!c.s.webuiId && !!c.s.browserKey && !c.s.host && c.s.browserInput === 'user' });
   registerMenuItem({ menu: M, group: '3_admin', order: 20, command: 'session.rescueTranscript', when: (c) => stopped(c) && !c.s.host });
   registerMenuItem({ menu: M, group: '3_admin', order: 30, command: 'session.properties' });
   registerMenuItem({ menu: M, group: '3_admin', order: 40, command: 'session.terminate', when: (c) => c.s.status !== 'stopped', style: 'color: var(--red, #e55)' });

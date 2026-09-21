@@ -9,10 +9,27 @@
 // display), CPU/RSS from the keeper's broadcast, the idle countdown, "Keep
 // running" and Stop. It never fetches process facts itself — it READS the
 // `desktop-apps-updated` broadcast (one GET at open for the first record).
+//
+// THE `window-live` FORM (P9b, docs/design-agent-browser-v2 §4.3 / §4.9 /
+// §6.6): the SAME window, when an agent holds a lease on the app — the bar
+// grows the browser live view's three modes (the badge with its exact three
+// phrases, Take over, Hand back), the §6.6 class marker ("VibeSpace-started
+// window": the other class, the user's own desktop, never appears here) and
+// who holds it; the title says it is an agent window; noVNC is view-only in
+// Watch and while somebody else drives (the bridge drops that input anyway —
+// the client mirrors the server's verdict, it never enforces it). The pane
+// names itself with ONE viewer id on its stream upgrade AND its takeover, so
+// the lease can say which viewer holds it and the bridge can hand back when
+// that socket closes. The lease arrives on the `window-leases-updated`
+// broadcast (one GET at open); the mode arithmetic is PURE
+// (src/lib/window-live-mode.js).
 import { t } from './i18n.js';
 import { escHtml, fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
+import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
+
+const WATCH_HINT_EVERY_MS = 8000;
 
 const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/>');
 
@@ -59,9 +76,18 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     openSpec: { action: 'openDesktopApp', id },
   });
   winInfo._desktopAppId = id;
+  // The viewer id is a per-SOCKET secret (2026-09-21): re-minted at every
+  // (re)connect because the bridge binds it to one socket and refuses a second
+  // claimant; the takeover answers with an OPAQUE tag, and that tag — never the
+  // id — is what the broadcast lease carries and what `mine` compares.
+  let viewerId = newViewerId();
+  let myTag = null;
+  winInfo._windowViewerId = viewerId;
 
   let rec = null;
   let gone = false;
+  let lease = null;        // P9b: the agent lease on this app (null = the user's own app, nothing gated)
+  let lastHintAt = 0;
   const readyGate = async () => {
     if (!rec) { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`); if (r && !r.error) rec = r; }
     if (!rec) return { ok: false, error: t('This desktop app no longer exists') };
@@ -69,10 +95,12 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     if (rec.state !== 'ready') return { ok: false, error: endedText(rec) };
     return { ok: true };
   };
+  const applyViewOnly = () => { const m = windowLiveMode({ lease, viewerTag: myTag }); try { if (view.rfb) view.rfb.viewOnly = m.viewOnly; } catch {} };
   const view = createVncView(winInfo.content, {
-    url: streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`),
+    url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}`; }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
+    onStatus: (s) => { if (s === 'connected') applyViewOnly(); },
   });
 
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
@@ -83,11 +111,68 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   keepBtn.textContent = t('Keep running'); keepBtn.title = t('Never stop this app for being idle');
   const stopBtn = document.createElement('button'); stopBtn.className = 'file-tool-btn desktop-app-stop'; stopBtn.style.cssText = 'width:auto;padding:0 8px;font-size:10px';
   stopBtn.textContent = t('Stop'); stopBtn.title = t('Stop this application and its display');
-  for (const el of [backendChip, liveChip, idleChip, keepBtn, stopBtn]) view.addControl(el);
+  // ── P9b: the window-live controls (shown only while an agent holds the lease) ──
+  const originChip = document.createElement('span'); originChip.className = 'desktop-app-chip desktop-app-chip-origin';
+  originChip.textContent = t('VibeSpace-started window'); originChip.title = t('This window runs on a display VibeSpace started — an agent may act in it. Your own desktop is never listed or addressable.');
+  const agentChip = document.createElement('span'); agentChip.className = 'desktop-app-chip desktop-app-chip-agent';
+  const modeBadge = document.createElement('span'); modeBadge.className = 'browser-live-mode';
+  const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over');
+  const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand back to the agent');
+  for (const el of [originChip, agentChip, modeBadge, takeBtn, handBtn, backendChip, liveChip, idleChip, keepBtn, stopBtn]) view.addControl(el);
+  // the badge's words come from the PURE table; t() needs the literal keys below to be extractable
+  void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause')];
+  const renderLease = () => {
+    const m = windowLiveMode({ lease, viewerTag: myTag });
+    const show = m.leased;
+    for (const el of [originChip, agentChip, modeBadge, takeBtn]) el.style.display = show ? '' : 'none';
+    handBtn.style.display = show && m.mode === 'takeover' ? '' : 'none';
+    if (!show) { winInfo.content.classList.remove('window-live-driving'); applyViewOnly(); return; }
+    const who = lease.sessionName || lease.sessionId || '';
+    agentChip.textContent = m.orphaned ? t('Agent gone: {name}', { name: who }) : t('Agent: {name}', { name: who });
+    agentChip.title = m.orphaned ? t('The session that held this window is no longer live — the lease is free for the next agent') : t('The agent session holding this window (one holder per window)');
+    modeBadge.textContent = t(windowModeBadge(m));
+    modeBadge.classList.toggle('takeover', m.mode === 'takeover' && m.mine);
+    modeBadge.classList.toggle('other', m.mode === 'takeover' && !m.mine);
+    takeBtn.classList.toggle('active', m.mine);
+    takeBtn.disabled = m.mode === 'takeover' && !m.mine;
+    takeBtn.title = m.mode === 'takeover' && !m.mine ? t('Another viewer holds this window') : t('Take over this window — the agent’s actions are refused and nothing is injected until you hand back');
+    winInfo.content.classList.toggle('window-live-driving', m.mine);
+    applyViewOnly();
+  };
+  const applyLease = (next) => {
+    const prev = lease; lease = next || null;
+    const tr = leaseTransition(prev, lease, myTag);
+    if (tr === 'took-over') showToast(t('You are driving this window directly — the agent is not injecting until you hand back'), { duration: 4000 });
+    else if (tr === 'handed-back') showToast(t('Control handed back to the agent'), { duration: 3500 });
+    else if (tr === 'lapsed') showToast(t('Your takeover lapsed (no input) — the agent is driving again'), { duration: 5000 });
+    else if (tr === 'other-took') showToast(t('Another viewer took over this window'), { duration: 3500 });
+    renderLease(); render();
+  };
+  takeBtn.onclick = async () => {
+    const m = windowLiveMode({ lease, viewerTag: myTag });
+    if (m.mine) return;
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/takeover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
+    if (!r || r.error) { showToast(r?.error || t('Could not take over'), { type: 'error' }); return; }
+    myTag = r.lease && r.lease.takenBy && r.lease.takenBy.tag ? String(r.lease.takenBy.tag) : null; // my takeover's public name — the only way this pane learns it
+    applyLease(r.lease); view.focus();
+  };
+  handBtn.onclick = async () => {
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/handback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
+    if (!r || r.error) { showToast(r?.error || t('Could not hand back'), { type: 'error' }); return; }
+    applyLease(r.lease); myTag = null;
+  };
+  view.mount.classList.add('desktop-app-mount');
+  // in Watch a click on the picture is a hint, never input (noVNC is view-only; the bridge would drop it anyway)
+  view.mount.addEventListener('pointerdown', () => {
+    const m = windowLiveMode({ lease, viewerTag: myTag });
+    if (!m.leased || m.mine) return;
+    const now = Date.now();
+    if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(m.mode === 'takeover' ? t('Another viewer holds this window') : t('Watch mode — the agent is driving; press Take over to send input'), { duration: 3500 }); }
+  }, { capture: true, signal: winInfo._listenerCtl?.signal });
 
   const render = () => {
     if (!rec) return;
-    app.wm.setTitle(winInfo.id, rec.label || t('Desktop app'));
+    app.wm.setTitle(winInfo.id, lease ? t('{label} — agent window', { label: rec.label || t('Desktop app') }) : (rec.label || t('Desktop app')));
     backendChip.textContent = backendChipText(rec);
     backendChip.title = rec.fallbackWhy ? t('Backend: {backend} — fell back because {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('Backend: {backend}', { backend: rec.backend || '' });
     const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
@@ -122,18 +207,22 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   };
 
   const off = app.ws.onGlobal((m) => {
+    if (m.type === 'window-leases-updated') { const l = (m.leases || []).find((x) => x && x.handle === id) || null; if ((l && !lease) || (!l && lease) || (l && lease && (l.input !== lease.input || l.sessionId !== lease.sessionId || (l.takenBy && l.takenBy.viewerId) !== (lease.takenBy && lease.takenBy.viewerId)))) applyLease(l); else lease = l; return; }
     if (m.type !== 'desktop-apps-updated') return;
     const r = (m.apps || []).find((a) => a.id === id);
     if (r) applyRecord(r);
   });
+  const refetchLease = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/lease`); if (r && !r.error) applyLease(r.lease); };
   // a server restart ADOPTS the session before any client reconnects, so the
   // adoption broadcast reaches nobody — re-read the record on every reconnect
-  const onWs = (connected) => { if (connected) refetch(); };
+  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); } };
   app.ws.onStateChange(onWs);
   const tick = setInterval(() => { if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; } }, 1000);
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); });
   winInfo.onClose = () => view.dispose();
 
+  renderLease();
+  refetchLease();
   // first record, then the connect (the gate re-reads if the GET raced the launch)
   fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
     if (r && !r.error) { rec = r; render(); }

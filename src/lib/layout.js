@@ -1,6 +1,7 @@
 import { track } from './telemetry-client.js';
 import { cssVarDefault } from './utils.js';
 import { isTransientWindowType } from './window-types.js';
+import { chainSyncKey, ratioDiffers } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place
 
 // Window types that legitimately carry no openSpec (never persisted/synced):
 // chat/terminal restore by session identity + get their openSpec async after
@@ -223,19 +224,26 @@ class LayoutManager {
           }
         }
 
-        // Sync tab chains from remote state
-        const remoteChains = new Map(); // key -> { tabs, active }
+        // Sync tab chains from remote state. THE KEY CARRIES THE LAYOUT
+        // (agent browser P7, §4.6's named trap): `tabs.join(',')` alone read a
+        // remote tabs→split flip of the same tabs as "unchanged" — a silent
+        // state fork. chainSyncKey = tabs + layout + pair; the RATIO is applied
+        // in place on a structural match (a rebuild for a divider drag would
+        // re-parent two live views).
+        const remoteChains = new Map(); // key -> { tabs, active, layout, split }
         for (const rw of state.windows) {
           if (!rw.tabChain || rw.isTabGuest) continue;
-          const key = rw.tabChain.tabs.join(',');
+          const key = chainSyncKey(rw.tabChain);
           remoteChains.set(key, rw.tabChain);
         }
         // Break local chains not in remote
         const localChainKeys = new Set();
         for (const [, w] of this.app.wm.windows) {
           if (w._tabChain && w._tabChain.tabs[0] === w.id) {
-            const key = w._tabChain.tabs.join(',');
+            const key = chainSyncKey(w._tabChain);
             localChainKeys.add(key);
+            const rc = remoteChains.get(key);
+            if (rc && ratioDiffers(rc, w._tabChain)) this.app.wm.setSplitRatio(w._tabChain, rc.split.ratio, { notify: false });
             if (!remoteChains.has(key)) {
               // Break this chain
               while (w._tabChain && w._tabChain.tabs.length > 1) {
@@ -251,7 +259,7 @@ class LayoutManager {
           if (localChainKeys.has(key)) continue;
           const validTabs = tc.tabs.filter(id => this.app.wm.windows.has(id));
           if (validTabs.length >= 2) {
-            this.app.wm.restoreTabChain(validTabs, tc.active);
+            this.app.wm.restoreTabChain(validTabs, tc.active, { layout: tc.layout, split: tc.split });
           }
         }
       }
@@ -385,10 +393,14 @@ class LayoutManager {
       if (win.type === 'browser' && win._browserUrl) {
         winState.browserUrl = win._browserUrl;
       }
-      // Tab chain persistence
+      // Tab chain persistence (+ §4.6's layout / split — a missing layout reads
+      // as 'tabs', so old records need no migration; a PHONE carries the split
+      // it cannot display and never writes its own flattening back)
       if (win._tabChain) {
-        winState.tabChain = { tabs: [...win._tabChain.tabs], active: win._tabChain.active };
-        winState.isTabGuest = win._tabChain.tabs[0] !== id;
+        const c = win._tabChain;
+        winState.tabChain = { tabs: [...c.tabs], active: c.active, layout: c.layout === 'split' ? 'split' : 'tabs' };
+        if (c.layout === 'split' && c.split) winState.tabChain.split = { pair: [...c.split.pair], ratio: c.split.ratio, dir: 'row' };
+        winState.isTabGuest = c.tabs[0] !== id;
       }
       windows.push(winState);
     }
@@ -631,13 +643,13 @@ class LayoutManager {
     setTimeout(() => {
       for (const ws of state.windows) {
         if (!ws.tabChain || ws.isTabGuest) continue; // only process from host's perspective
-        const key = ws.tabChain.tabs.join(',');
+        const key = chainSyncKey(ws.tabChain);
         if (restoredChains.has(key)) continue;
         restoredChains.add(key);
         // Verify all tabs exist
         const validTabs = ws.tabChain.tabs.filter(id => this.app.wm.windows.has(id));
         if (validTabs.length >= 2) {
-          this.app.wm.restoreTabChain(validTabs, ws.tabChain.active);
+          this.app.wm.restoreTabChain(validTabs, ws.tabChain.active, { layout: ws.tabChain.layout, split: ws.tabChain.split });
         }
       }
     }, 1000);

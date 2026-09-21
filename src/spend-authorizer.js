@@ -59,6 +59,11 @@ const SPEND_REASONS = Object.freeze({
   // opted in (`receiptWake`) or the free-lane prediction failed and the
   // wrapper's own verdict charged it. Producer: src/server/channels-engine.js.
   'channel-receipt': { turn: true, what: 'an outbox receipt handed back to the drafting agent' },
+  // agent browser P3 (design-agent-browser-v2 §4.3.1): the browser control
+  // handback — an explicit handback (the click) and, only when
+  // browser.announceIdleHandback is ON, an idle/viewer-left one. The producer
+  // is src/server/browser-handback.js, through the delivery ladder.
+  'browser-handback': { turn: true, what: 'the browser control handback announcement' },
 });
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see

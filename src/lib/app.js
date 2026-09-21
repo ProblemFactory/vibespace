@@ -34,6 +34,7 @@ import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
+import { openBrowserLive as openBrowserLiveFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
@@ -50,6 +51,9 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
+import { installBrowserProfilePicker } from './browser-profile-picker.js'; // agent browser P1 (§3.2.5): the pin's one entry point + the profile digest
+import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser P4 (§7.4/§7.5): the backend switcher, the chip, the blocked claims
+import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, noteModelCatalog, worktreeCapsFor } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
@@ -270,6 +274,8 @@ class App {
         // (esp. one never logged in) left the page unchanged (inc-msl890ua).
         try { this._agentsRefreshHook?.(); } catch {}
       }
+      // agent browser P1: the profile registry digest (every commit broadcasts it — the multi-client law)
+      if (msg.type === 'browser-profiles-updated') this._onBrowserProfilesUpdated(msg);
       if (msg.type === 'pool-auto-switched' && Array.isArray(msg.affected)) {
         // B-6217 v2 auto+COLD: the server re-pointed a pool and picked THIS
         // client (exactly one) to restart the affected conversations — every
@@ -330,6 +336,7 @@ class App {
     // Anthropic accounts (subscription ↔ API key, per-session billing identity)
     this._accounts = { accounts: [], defaultAccountId: null, subscription: {}, cliKey: {} };
     this.refreshAccounts();
+    this.refreshBrowserProfiles(); // agent browser P1: null when the server has no keeper ⇒ every pin surface hides itself
 
     // Load custom themes from server
     this._loadCustomThemes();
@@ -1402,6 +1409,10 @@ class App {
         extraArgs: document.getElementById('input-extra-args').value.trim(),
         taskId: document.getElementById('input-task')?.value || undefined,
         accountId: document.getElementById('input-account')?.value || undefined,
+        // agent browser P1 (§3.2.5): the row sends an EXPLICIT value, so the origin
+        // the client computed (task-group / instance / chosen) rides along as a hint
+        browserProfileId: document.getElementById('input-browser-profile')?.value || undefined,
+        browserProfileOrigin: document.getElementById('input-browser-profile')?.dataset.origin || undefined,
         // Only send it when the harness HAS the row (the box is hidden + cleared
         // otherwise, but the read is gated too so a stale DOM cannot leak it).
         worktree: worktreeCapsFor(backend).supported && !!document.getElementById('input-worktree')?.checked,
@@ -1684,7 +1695,9 @@ class App {
         taskSel.appendChild(o);
       }
       taskSel.value = taskId || '';
+      this._fillBrowserProfileRow(taskSel.value); // agent browser P1: the row defaults to the group's default profile
       taskSel.onchange = () => {
+        this._fillBrowserProfileRow(taskSel.value);
         const tg = this.sidebar?._taskById?.(taskSel.value);
         const cwdInput = document.getElementById('input-cwd');
         const firstFolder = tg?.folders?.[0] && (typeof tg.folders[0] === 'string' ? tg.folders[0] : tg.folders[0].path);
@@ -1827,7 +1840,7 @@ class App {
       // Wire ONCE (this method runs on every dialog open) — call through the
       // stored freshest updater.
       this._acctListenersWired = true;
-      document.getElementById('input-backend')?.addEventListener('change', () => this._updateAcctRow?.());
+      document.getElementById('input-backend')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); });
       document.getElementById('input-host')?.addEventListener('change', () => this._updateAcctRow?.());
     }
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
@@ -1967,6 +1980,16 @@ class App {
   openBrowser(url, opts) { return openBrowserFn(this, url, opts); }
   openDesktop(opts) { return openDesktopFn(this, opts); }
   openDesktopApp(id, opts) { return openDesktopAppFn(this, id, opts); }
+  /** agent browser P3 (§4.3): an EXPLICIT handback from the session card — the
+   *  server flips the lease and announces through the gated ladder. */
+  browserHandback(sessionId) {
+    if (!sessionId) return;
+    fetchJson('/api/browser/handback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) }).then((r) => {
+      if (!r || r.error) { showToast(t('Handback failed: {why}', { why: r?.error || t('server unreachable') }), { type: 'error' }); return; }
+      showToast(t('Control handed back to the agent'), { duration: 4000 });
+    });
+  }
+  openBrowserLive(opts) { return openBrowserLiveFn(this, opts); } // agent browser P2: {sessionId, profileId?, syncId?}
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
   openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }
@@ -2424,6 +2447,10 @@ installPluginsUI(App);
 installUsageMeter(App);
 installSessionLifecycle(App);
 installSetupFlows(App);
+installBrowserProfilePicker(App);
+installBrowserLive(App); // agent browser P7 (§4.6): onBrowserDigestChanged → the live view born beside its session
+installBrowserSwitcher(App);
+installBrowserTrace(App);
 
 // ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1): the kinds App itself opens ──
 registerWindowType({

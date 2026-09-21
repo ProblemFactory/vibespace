@@ -1147,6 +1147,9 @@ try { fs.unlinkSync(SOCK); } catch { }
 /** THE daemon's OpenCode facts (S9 remainder piece (e)) — one per PROCESS.
  *  See the `opencode-serve` op handler for why this may not live on `this`. */
 let ocFacts = null;
+/** THE daemon's browser-serve facts (agent browser P4) — one per PROCESS,
+ *  for the same reason as `ocFacts`. */
+let bsFacts = null;
 
 function serveConnection(sock) {
   let authed = false;
@@ -1176,7 +1179,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve'],
         });
         return;
       }
@@ -1661,6 +1664,27 @@ function serveConnection(sock) {
             // op REQUIRED on the reply (the 2.300.0 three-touch rule)
             mux.control({ op: 'opencode-serve-result', id: msg.id, result: r });
           } catch (e) { mux.control({ op: 'opencode-serve-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
+      if (msg.op === 'browser-serve') {
+        // A profile browser on THIS machine (agent browser P4, design §7.3 /
+        // D5 (b)): the daemon bundles src/browser-serve.js and runs the very
+        // same runBrowserServeOp() the hub runs for device #0 — start /
+        // status / stop / cdp-url / version, WHERE the browser lives. The hub
+        // only names the profile; this machine composes and owns the
+        // directory, and the CDP url it answers is its own loopback (the hub
+        // tcpForwards the port). ONE facts singleton per daemon PROCESS, in a
+        // module-level variable and never on `this` (= the CONNECTION — see
+        // the opencode-serve handler for the reconnect leak this avoids).
+        (async () => {
+          try {
+            const bsv = require('./../browser-serve.js');
+            if (!bsFacts) bsFacts = bsv.install({ env: daemonEnv(process.env), homeDir: process.env.HOME || require('os').homedir(), log: { warn: (m) => log(String(m)), error: (m) => log(String(m)) } });
+            const r = await bsv.runBrowserServeOp(bsFacts, String(msg.action || ''), msg.params || {});
+            // op REQUIRED on the reply (the 2.300.0 three-touch rule)
+            mux.control({ op: 'browser-serve-result', id: msg.id, result: r });
+          } catch (e) { mux.control({ op: 'browser-serve-result', id: msg.id, error: String(e.message || e) }); }
         })();
         return;
       }

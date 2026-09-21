@@ -315,6 +315,16 @@ function sessionMetaOwnerConflict(sockName, meta) {
   } catch {}
   return false;
 }
+// AGENT BROWSER (P0 r5): the conversation → browser-key binding lives in a
+// store the kill and pty-exit paths never unlink (`deleteSessionMeta` below
+// removes the meta FILE, and §3.2.1's resume rung read only that file — so
+// the product's own Terminate → Resume minted a new key every time, measured).
+// Recorded HERE because every producer of a meta record passes through this
+// function, including the ones that learn the conversation id late (the init
+// frame, the lock file). Lazy: an instance that never spawns a browser-keyed
+// session never touches the store.
+let _browserBindings = null;
+const browserBindings = () => _browserBindings || (_browserBindings = require('./browser-bindings.js').create({ dataDir: path.dirname(META_DIR) }));
 function writeSessionMeta(sockName, meta) {
   if (_metaTombstones.has(sockName)) return;
   sessionMetaOwnerConflict(sockName, meta);
@@ -335,6 +345,16 @@ function writeSessionMeta(sockName, meta) {
   fs.writeFileSync(tmp, JSON.stringify(meta));
   fs.renameSync(tmp, fp);
   try { recordUsageAttribution(meta); } catch {} // usage-ledger account-by-time
+  // r6: the id a record may BIND is not always the id it NAMES — a claude/codex
+  // fork carries the PARENT's conversation id until the harness announces its
+  // own, and binding it here moved the parent onto the fork's browser
+  // (measured). `bindableIdOf` answers '' while the record says it was forked
+  // from the very conversation it names; the store's own belt refuses a move.
+  // r7: and it answers '' when the record names a conversation its key was
+  // NOT decided for (`browserKeyFor`, an implicit fork adopted by the
+  // consumer) — that one is SAID once per (session, id), because the running
+  // process keeps the browser it spawned with and nothing else would tell.
+  try { if (meta && meta.browserKey) { const b = browserBindings(); const sid = b.bindableIdOf(meta); if (sid) b.record(sid, meta.browserKey); else b.noteUnbound(meta, sockName); } } catch (e) { console.warn('[browser] binding record failed: ' + (e && e.message)); }
 }
 function deleteSessionMeta(sockName) {
   _metaTombstones.set(sockName, Date.now());

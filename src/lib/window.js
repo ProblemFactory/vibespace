@@ -5,7 +5,8 @@ import { showWindowContextMenu } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
-import { HIDE_REASONS, hiddenReasons } from './view-visibility.js'; // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
+import { HIDE_REASONS, hiddenReasons } from './view-visibility.js';
+import { displayedPanes } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 
 class WindowManager {
   constructor(workspace) {
@@ -65,16 +66,20 @@ class WindowManager {
     app.sidebar.toggle(false);
   }
 
-  createWindow({ title, type, x, y, width, height, syncId, openSpec, titleMeta }) {
+  createWindow({ title, type, x, y, width, height, syncId, openSpec, titleMeta, intoChain }) {
     this._mobileYieldSidebar();
     const id = syncId || ('win-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6));
     this.windowCounter++;
     if (x === undefined) { const o = (this.windowCounter % 8) * 30; x = 40 + o; y = 40 + o; }
     width = width || 700; height = height || 500;
+    // BORN IN A CHAIN (agent browser P7, §4.6): `intoChain: { hostId, split, side }`
+    // — the window is never painted standalone (no visible jump, no
+    // created-then-merged autosave churn); it joins the host's chain below.
+    const born = intoChain && intoChain.hostId && intoChain.hostId !== id ? (this.windows.get(intoChain.hostId) || null) : null;
 
     const el = document.createElement('div');
     el.className = 'window';
-    el.style.cssText = `left:${x}px;top:${y}px;width:${width}px;height:${height}px;z-index:${this.zIndex++}`;
+    el.style.cssText = `left:${x}px;top:${y}px;width:${width}px;height:${height}px;z-index:${this.zIndex++}${born ? ';display:none' : ''}`;
 
     const titleBar = document.createElement('div'); titleBar.className = 'window-titlebar';
     const iconWrap = document.createElement('div'); iconWrap.className = 'window-icon-stack';
@@ -127,6 +132,11 @@ class WindowManager {
     if (openSpec) winInfo._openSpec = openSpec;
     track('event', 'window-open:' + type);
     this._app?.stage?.onWindowCreated(winInfo); // stage aux binding / transient tag
+    if (born) {
+      if (intoChain.split) this.bindSplit(born, winInfo, { side: intoChain.side || 'right' });
+      else if (born._tabChain) this.addToTabChain(born._tabChain, winInfo);
+      else this.createTabChain(born, winInfo);
+    }
     this.focusWindow(id); this._notify(); this._scheduleOverlapUpdate(); return winInfo;
   }
 
@@ -204,6 +214,7 @@ class WindowManager {
     let mouseDown = false, dragging = false, startX, startY, initL, initT;
     let shiftDragStart = -1;
     let tabMergeTarget = null;
+    let splitTarget = null; // §4.6: { win, side } while over the left/right half of another title bar
     let mergeGhost = null; // floating ghost shown when hovering over a merge target
     let savedBounds = null; // window bounds saved before collapsing to ghost
     let deskPreviewTarget = null; // desktop preview element we're hovering over
@@ -366,6 +377,9 @@ class WindowManager {
       const prevTarget = tabMergeTarget;
       tabMergeTarget = this._detectTabMergeTarget(e.clientX, e.clientY, win.id, [element]);
       for (const [, w] of this.windows) w.element.classList.toggle('tab-drop-target', w === tabMergeTarget);
+      // §4.6: the left / right half of another window's title bar = a SPLIT drop (the window keeps following the cursor; the half is marked)
+      splitTarget = tabMergeTarget ? null : this._detectSplitDropTarget(e.clientX, e.clientY, win.id, [element]);
+      this._markSplitDrop(splitTarget);
 
       // Collapse window to ghost when over merge target, restore when leaving
       if (tabMergeTarget && !prevTarget) {
@@ -494,6 +508,7 @@ class WindowManager {
       clearShakeBadge(); // remove the "snap off" indicator (all drop paths below may early-return)
       this.snapIndicator.style.display = 'none';
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
+      this._markSplitDrop(null);
       if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
       document.querySelectorAll('.desktop-preview').forEach(p => p.classList.remove('desktop-preview-drop'));
 
@@ -550,6 +565,17 @@ class WindowManager {
         deskSavedBounds = null;
       }
       deskPreviewTarget = null;
+
+      // §4.6: a split drop — bound beside the target, in ONE chain (before snap, like a merge)
+      if (!tabMergeTarget && splitTarget && splitTarget.win.id !== win.id) {
+        const { win: anchor, side } = splitTarget; splitTarget = null;
+        this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
+        element.style.display = '';
+        if (savedBounds) { element.style.left = savedBounds.left; element.style.top = savedBounds.top; element.style.width = savedBounds.width; element.style.height = savedBounds.height; savedBounds = null; }
+        this.bindSplit(anchor, win, { side });
+        return;
+      }
+      splitTarget = null;
 
       // Tab merge takes priority over snap
       if (tabMergeTarget) {
@@ -894,10 +920,12 @@ class WindowManager {
       const sess = app.sessions.get(w.id);
       if (!sess || typeof sess.setHidden !== 'function') continue;
       const top = (w._tabChain && this.windows.get(w._tabChain.tabs[0])) || w; // a guest is displayed through its host
+      // §4.6: on the narrow layout a split shows only its focused pane (CSS) — the other pane is a hidden tab
+      const narrowHidden = !!(mobile && w._tabChain && w._tabChain.layout === 'split' && !displayedPanes(w._tabChain, { narrow: true }).includes(w.id));
       const reasons = hiddenReasons({
         mobile,
         active: !!top.element?.classList?.contains('window-active'),
-        tabHidden: !!w.content?.classList?.contains('tab-hidden'),
+        tabHidden: !!w.content?.classList?.contains('tab-hidden') || narrowHidden,
         minimized: !!top.isMinimized,
       });
       for (const r of HIDE_REASONS) { try { sess.setHidden(r, reasons[r]); } catch { } }
@@ -1101,6 +1129,28 @@ class WindowManager {
       }
     }
     this._notify();
+  }
+
+  /** THE OWNERSHIP BADGE (agent browser P7, §4.6): `{ dots: [{ color, name, sessionId }] }`
+   *  — the session(s) a window belongs to, drawn on the standalone title bar
+   *  (a sibling after the title span; setTitle wipes the span's children) and
+   *  on the window's TAB when grouped (rendered by _renderTabBar from
+   *  `win._ownerBadge`). Colours are per-SESSION (chain-layout.ownerColor),
+   *  never the task-group colour. null removes it. */
+  setOwnerBadge(id, badge) {
+    const win = this.windows.get(id); if (!win) return;
+    const dots = badge && Array.isArray(badge.dots) ? badge.dots.filter(Boolean) : [];
+    const key = dots.map((d) => `${d.color || ''}:${d.name || ''}`).join('|');
+    win._ownerBadge = dots.length ? { dots } : null;
+    let el = win.titleBar.querySelector(':scope > .win-owner-badge');
+    if (!dots.length) { el?.remove(); }
+    else if (!el || el.dataset.key !== key) {
+      const fresh = this._ownerBadgeEl(win._ownerBadge);
+      fresh.dataset.key = key;
+      if (el) el.replaceWith(fresh); else win.titleSpan.insertAdjacentElement('afterend', fresh);
+    }
+    if (win._tabChain && win._ownerBadgeKey !== key) this._renderTabBar(win._tabChain);
+    win._ownerBadgeKey = key;
   }
 
   // Billing identity indicator in the TITLE BAR (mirrors the session card's

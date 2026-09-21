@@ -10,6 +10,7 @@ import { escHtml, copyText, showContextMenu, showToast, absUrl } from './utils.j
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
+import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -62,6 +63,23 @@ export function searchQueryChipHtml(block, msg) {
   if (!q) return '';
   const short = q.length > SEARCH_TITLE_MAX ? q.slice(0, SEARCH_TITLE_MAX - 1) + '…' : q;
   return ` <span class="chat-tool-query" title="${escHtml(q)}">${escHtml(short)}</span>`;
+}
+
+/**
+ * agent browser P5 (§4.5 / D35): the ACTION-TRACE holder on a shell tool call
+ * whose command drives the agent browser (`agent-browser …` /
+ * `vibespace-browser …` — the PURE gate, harness-neutral: claude's Bash
+ * string or codex's argv array). The renderer only makes the HOLDER; the
+ * ChatView's loader fills it (one batched fetch, thumbnails always, the
+ * expander behind the button). `data-trace-ts` = the card's own instant. It
+ * sits at the card's END (after the Input / Output expanders) — the 2.369.48
+ * seam `</span>${mediaHtml}<details` is pinned by test-owner-batch-2369-32.
+ */
+export function browserTraceHolderHtml(block, msg) {
+  const cmd = toolCommandText(block && block.input);
+  if (!cmd || !commandDrivesBrowser(cmd)) return '';
+  const ts = Number(msg && msg.ts) || 0;
+  return `<div class="chat-browser-trace" data-trace-ts="${ts}"><button type="button" class="chat-browser-trace-btn" title="${escHtml(t('Every action the agent sent to its browser during this call — before / after frames and where it clicked'))}">${UI_ICONS.image} ${escHtml(t('Browser actions'))}</button><span class="chat-browser-trace-sum chat-status-dim">${escHtml(t('loading…'))}</span><div class="chat-browser-trace-strip" style="display:none"></div><div class="chat-browser-trace-list" style="display:none"></div></div>`;
 }
 
 // Curated localized display names for harness built-in tools (fallback: raw
@@ -784,7 +802,7 @@ class ChatRenderers {
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner"></span> ${t('running...')}</div>`
           : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Interrupted')}</summary></details>`;
-        html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}</div>`;
+        html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}${browserTraceHolderHtml(block, msg)}</div>`;
       }
     } else if (block.type === 'tool_result') {
       // Completed tool call — show full result
@@ -829,7 +847,7 @@ class ChatRenderers {
     const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
 
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -927,7 +945,7 @@ class ChatRenderers {
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
   }
 
   /**

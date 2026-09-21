@@ -53,7 +53,12 @@
 
 /** The vocabulary BOTH tiers speak (the client labels these strings in
  *  src/lib/agent-meta.js; nothing else may invent one). */
-const SPAWN_ORIGINS = Object.freeze(['chosen', 'conversation', 'instance', 'harness']);
+// `task-group` (agent browser P1, design-agent-browser-v2 §3.2.5): the profile
+// pin's third rung — a Task Group's default — is "the user did not state this
+// for THIS session", the same claim as `instance` made more specific. Added
+// here AND in the client mirror (agent-meta.spawnValueOrigin) in one commit;
+// `resumeSpawnPick` itself never emits it (the pin resolves it before calling).
+const SPAWN_ORIGINS = Object.freeze(['chosen', 'conversation', 'task-group', 'instance', 'harness']);
 
 /**
  * Decide ONE spawn knob (model or effort) for ONE create.

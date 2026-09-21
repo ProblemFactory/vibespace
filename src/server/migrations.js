@@ -197,6 +197,27 @@ function create({ rootDir, serverNotice, homeDir = os.homedir() }) {
       },
     },
     {
+      id: '2026-09-adopt-legacy-browser-profile',
+      note: "agent browser P1, migration step 2 (design-agent-browser-v2 §8): the ONE shared profile every agent used to land in (the `profile` key of ~/.agent-browser/config.json, else ~/.agent-browser/default-profile when it exists) becomes a registry record named \"Shared (legacy)\" — sharing 'instance', marked legacy — so an agent that explicitly asks for it gets its own tab in it instead of a stolen one. Nothing moves and nothing is deleted (the 98 GB stay where they are); a registry that already names that directory is left alone.",
+      run() {
+        const B = require('../browser-profiles.js');
+        const K = require('./browser-keeper.js');
+        let cfg = {};
+        try { cfg = JSON.parse(fs.readFileSync(path.join(homeDir, B.USER_CONFIG_REL), 'utf-8')) || {}; } catch { cfg = {}; }
+        let dir = B.configNamesProfile(cfg) ? String(cfg.profile) : path.join(homeDir, '.agent-browser', 'default-profile');
+        if (dir.startsWith('~/')) dir = path.join(homeDir, dir.slice(2));
+        if (!path.isAbsolute(dir)) dir = path.join(homeDir, '.agent-browser', dir);
+        let isDir = false; try { isDir = fs.statSync(dir).isDirectory(); } catch { isDir = false; }
+        if (!isDir) { console.log(`[migrate] legacy browser profile: nothing to adopt (${dir} is not a directory)`); return; }
+        // A keeper built HERE only touches the registry file (no broadcast, no
+        // timer, not installed as the process's keeper — that one is wired
+        // later with real deps and reads what this wrote).
+        const k = K.create({ dataDir, homeDir, install: false, log: { log() { }, warn() { } } });
+        const r = k.adoptDirectory({ label: 'Shared (legacy)', dir, legacy: true, owner: { kind: 'instance', id: null } });
+        console.log('[migrate] legacy browser profile:', JSON.stringify({ dir, created: r.created, id: r.profile ? r.profile.id : null, why: r.why || null }));
+      },
+    },
+    {
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {

@@ -375,6 +375,121 @@ const SETTINGS_SCHEMA = {
     description: t('Everything the AGENT can see or use from VibeSpace. ON (default): sessions get the VibeSpace hooks (Task Group context, per-turn reminders, stop nudge) and the vibespace-status/ask/task tools on their PATH. OFF: the model gets a pristine claude/codex — the hook registration is removed from ~/.claude/settings.json and ~/.codex/hooks.json immediately (restored on re-enable, unless you had removed the hook manually in Manage Agents), new sessions spawn with no VibeSpace env or tools, and already-running sessions stop receiving injected context, nudges and task reads. Model-INVISIBLE plumbing keeps working either way: passive usage capture (statusline), billing/account env, the Ctrl+G editor, session persistence and remote transport. Every option below only applies while this is ON.'),
     category: t('Integration'), liveApply: true,
   },
+  // ── AGENT BROWSER (P0, docs/design-agent-browser-v2 §3.2) ──────────────
+  // Four environment variables at spawn; no VibeSpace process, no daemon. The
+  // kill switch exists because every path in this feature falls back
+  // structurally: OFF restores exactly today's behaviour (one shared profile,
+  // one shared session) for sessions spawned after the change.
+  'browser.isolateSessions': {
+    type: 'boolean', default: true,
+    label: t('Give each session its own agent browser'),
+    description: t('ON (default): a session that runs the agent-browser CLI gets its own browser — its own tabs, its own cookies and its own daemon — so two agents stop stealing each other\'s window and `close --all` can only close the caller\'s own. Costs four environment variables at spawn and nothing else: no extra VibeSpace process. OFF: sessions fall back to the single shared profile named by ~/.agent-browser/config.json, which is what every agent used before. Applies to sessions started after the change; a running session keeps the environment it was started with.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.idleTimeoutMs': {
+    type: 'number', default: 900000, min: 0, max: 86400000,
+    label: t('Close an idle agent browser after (ms)'),
+    description: t('How long an agent\'s browser may sit idle before its daemon shuts itself down. Set explicitly because the installed CLI has NO default (and newer ones exempt browsers with a visible window), so nothing else would ever reclaim the browsers this feature creates — one per browsing session instead of one per machine. 0 = never shut down, which is the CLI\'s own meaning and a real choice; anything unreadable falls back to 15 minutes.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.headed': {
+    // ENUM, not a boolean: the honest default is "whatever your own config
+    // says", and a checkbox cannot express three states — it would render
+    // "inherit" as "off" and turn the first click into a decision the user
+    // never made.
+    type: 'enum', default: '', options: [
+      { value: '', label: t('Inherit from ~/.agent-browser/config.json') },
+      { value: 'yes', label: t('Show the window') },
+      { value: 'no', label: t('Headless') },
+    ],
+    label: t('Show the agent browser window'),
+    description: t('Whether an agent\'s browser draws a real window on this machine\'s desktop. Unset (default): whatever your own ~/.agent-browser/config.json says. A visible window per session is one framebuffer per session and, on the installed CLI, is also exempt from the idle timeout above.'),
+    category: t('Browser'), liveApply: true,
+  },
+  // ── AGENT BROWSER P3 (design-agent-browser-v2 §4.3 / §4.3.1) ──────────
+  'browser.takeoverIdleMs': {
+    type: 'number', default: 600000, min: 0, max: 86400000,
+    label: t('Hand the browser back to the agent after this long without input (ms)'),
+    description: t('When you take over an agent\'s browser in the live view and then walk away, control goes back to the agent by itself after this many milliseconds without your input, so an abandoned takeover never parks an agent for ever. 0 = never (only an explicit Hand back or closing the live view returns control). Anything under 30 s is raised to 30 s.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.announceIdleHandback': {
+    // §4.3.1's zero-spend default: an idle handback is nobody's action, so by
+    // default it delivers NOTHING into the conversation (the lease flips, the
+    // live view and the card update, one "For you" item is filed, the notice
+    // rides your next message). ON routes it through the same declared
+    // reason and the same unattended-spend ceiling as the explicit handback.
+    type: 'boolean', default: false,
+    label: t('Announce an idle handback into the conversation (billed turn)'),
+    description: t('OFF (default): when your takeover lapses on its own, the agent is told nothing until its next browser command succeeds or you send your next message — no billed turn is opened by a timer. ON: the lapse is announced into the conversation like an explicit Hand back (a turn the agent is billed for), under the same unattended-spend ceiling (Settings → Spending).'),
+    category: t('Browser'), liveApply: true,
+  },
+  // ── AGENT BROWSER P4 (design-agent-browser-v2 §7.2 / §7.2.1) ──────────
+  // CloakBrowser is OPT-IN on the free tier, self-hosted as `cloakserve` on
+  // this machine's loopback, and it may not start before its §7.2.1 egress
+  // measurement is recorded (src/browser-profiles.CLOAK_EGRESS_PROOF) — so
+  // turning this on changes nothing but the wording of the refusal until then.
+  'browser.cloak.enabled': {
+    type: 'boolean', default: false,
+    label: t('Allow CloakBrowser (cloakserve on loopback, free tier)'),
+    description: t('OFF (default): the "cloak" provider is refused by name. ON: once its egress measurement is recorded on this build, a cloakserve container may be started on this machine\'s loopback (free tier, one session), on an internal docker network whose only way out is the allowlisting egress proxy below. Nothing is downloaded or started by turning this on — the pinned package is installed by you, after the measurement.'),
+    category: t('Browser'), liveApply: true,
+  },
+  // P4 second half (§7.4): the in-place switch opens the SAME profile directory
+  // with the cloakbrowser binary (+ `--fingerprint=<seed>`); this names where
+  // that binary is when it is not on PATH. Never downloaded by us.
+  'browser.cloak.executablePath': {
+    type: 'string', default: '',
+    label: t('CloakBrowser executable path'),
+    description: t('Where the cloakbrowser binary is, for switching a profile to the "cloak" backend in place. Empty (default): it is looked up on PATH. Nothing is downloaded by VibeSpace — installing it is your act, after the egress measurement is recorded.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.cloak.egressAllowlist': {
+    type: 'string', default: '',
+    label: t('CloakBrowser egress allowlist (hosts, comma-separated)'),
+    description: t('The only hosts a cloakserve container may reach, through this instance\'s allowlisting proxy: exact hostnames, or ".example.com" for a domain and every sub-domain. Empty (default) admits nothing. Loopback and link-local targets are never admitted. Name the sites a profile is actually for — a measurement is a snapshot of one binary; the allowlist is a property of the deployment.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.actionTrace': {
+    // D35 (owner 2026-09-13): default ON — the first action that ever needs a
+    // review is otherwise the one unrecorded. A fill's value / a type's text
+    // are NEVER stored (only their length); frames are kept per profile for
+    // 7 days or 200 MB, whichever bites first (src/browser-trace.js).
+    type: 'boolean', default: true,
+    label: t('Record the agent\'s browser actions (before/after screenshots)'),
+    description: t('ON (default): every action an agent sends to its browser is kept as a before and an after screenshot with the click point or element box and the command — expandable on the tool card in the transcript and as a timeline in the live view. A fill\'s value and a type\'s text are never stored (only their length). Kept per profile for 7 days or 200 MB, whichever comes first; a screenshot of a logged-in page is a secret, and the sweep says what it removed. OFF: nothing is recorded.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.autoBindLiveView': {
+    // Agent browser P7 (design-agent-browser-v2 §4.6): default ON — an
+    // agent-driven browser must not lose its owner, and a live view born
+    // inside the session's chain is the one that never can.
+    type: 'boolean', default: true,
+    label: t('Open the live view beside the session when its browser starts'),
+    description: t('ON (default): when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window, so the browser never loses its owner. OFF: open it yourself (session menu → Live browser view) and bind it with "Snap beside" or by dropping it on the left or right half of a title bar. An ephemeral browser (no profile) is never auto-opened.'),
+    category: t('Browser'), liveApply: true,
+  },
+  // ── AGENT BROWSER P10 (design-agent-browser-v2 §7.6 tier 3 / §6.6, D27 (b)) ──
+  // THE SWITCH with its own consent: windows on the user's REAL desktop become
+  // window targets. OFF by default; confirmOn = the confirmation dialog IS the
+  // consent; turning it off drops every such lease at once (the engine reads
+  // it at every verb, at its tick and at boot). Agents cannot write settings,
+  // so this is a user act by construction.
+  'window.realDesktopTargets': {
+    type: 'boolean', default: false, confirmOn: true,
+    label: t('\u26a0 Let agents address windows on your real desktop (tier 3)'),
+    description: t('OFF (default): an agent may act only in windows VibeSpace started on its own private displays; your own desktop is never listed. ON: every application on this machine\u2019s accessibility bus becomes a window target an agent can read (its accessibility tree contains the text on your screen) and act in through the actions a node itself declares \u2014 including the window you are typing in. Nothing is ever injected on this class (no chords, no point clicks); every such row is marked \u201cyour desktop\u201d; you can pause an agent per window (Desktop apps \u2192 Agents on your real desktop); turning this OFF drops every such lease at once.'),
+    category: t('Browser'), liveApply: true,
+  },
+  'browser.defaultProfile': {
+    // The INSTANCE rung of the profile pin ladder (design-agent-browser-v2
+    // §3.2.5): a profile id or label every NEW session lands on unless it, its
+    // conversation or its Task Group says otherwise. Empty = ephemeral (D3).
+    type: 'string', default: '',
+    label: t('Default browser profile for new sessions'),
+    description: t('The id or label of a browser profile (Browser panel / vibespace-browser profiles) that new sessions are pinned to when nothing more specific applies. Empty (default): sessions browse an ephemeral browser and keep no logins. A session\'s own choice, its conversation\'s earlier pin and its Task Group\'s default all outrank this.'),
+    category: t('Browser'), liveApply: true,
+  },
   'agents.contextInjection': {
     type: 'boolean', default: true,
     label: t('Inject Task Group context'),
@@ -907,6 +1022,7 @@ const SETTINGS_CATEGORIES = [
   t('Integration'),
   t('Background Work'),
   t('Spending'),
+  t('Browser'),
   t('Channels'),
   t('Claude'),
   t('Codex'),
@@ -968,7 +1084,7 @@ const SETTINGS_GROUPS = [
   { id: 'appearance', label: t('Appearance & layout'), categories: [t('Toolbar & Layout'), t('Window'), t('Sidebar'), t('Session Card')] },
   { id: 'sessions', label: t('Sessions & chat'), categories: [t('Session'), t('Chat'), t('Terminal')] },
   { id: 'harness', label: t('Harnesses'), categories: [t('Claude'), t('Codex'), t('OpenCode')] },
-  { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work')] },
+  { id: 'services', label: t('Services'), categories: [t('Integration'), t('Channels'), t('Background Work'), t('Browser')] }, // Browser (agent browser v2, 2.369.134) is a service the instance runs — profiles, keeper, proxy
   { id: 'spending', label: t('Spending'), categories: [t('Spending')] },
   { id: 'plugins', label: t('Plugins'), categories: [] },
   { id: 'other', label: t('Other'), categories: [] },

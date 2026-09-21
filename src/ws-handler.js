@@ -262,6 +262,10 @@ function registerWsHandler(wss, ctx) {
     ws._isAlive = true;
     ws.on('pong', () => { ws._isAlive = true; });
     const attachedSessions = new Set();
+    // A server notice nobody was connected to hear is re-asked for the client
+    // that just arrived (agent-browser P0 r5; the hook is a no-op once it was
+    // delivered — see ws-create's `onClientConnected`).
+    try { handleCreate.onClientConnected?.(); } catch { }
 
     // Send current active sessions on connect — THE SAME payload builder as
     // broadcastActiveSessions (a second hardcoded field list here silently

@@ -31,13 +31,18 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null, onRestartSession = null, onSearch = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null }) {
     this._ws = ws;
     // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
     // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
     // the view has no search bar (never rendered).
     this._onSearch = onSearch;
     this._onDesignRequest = onDesignRequest; // 2.366.0 design chip (null = view-only window: no chip)
+    // agent browser P2 (§3.8 layer ③): the Browser chip's pair — what the agent
+    // LAST USED vs what is PINNED — with labels resolved by the view; null =
+    // no browser key (no chip). `onBrowserAction(what, ev)` = nudge|live|pin.
+    this._browserProfile = null;
+    this._onBrowserAction = onBrowserAction;
     this._outputStyle = '';        // CLI output style (Concise/…) — what the LIVE session is running with
     // Does the RUNNING WRAPPER serve the live style verb? undefined = not told
     // yet (the 'created' payload cannot know), false = it refused / its sidecar
@@ -126,6 +131,10 @@ export class ChatStatusBar {
     this.render();
   }
 
+  /** The Browser chip's facts (§3.8 ③): `{key, active, pinned, activeLabel,
+   *  pinnedLabel}` or null. Drawn only when the session has a browser key AND
+   *  something to say (a pin, or a use); amber when the two halves differ. */
+  setBrowserProfile(v) { this._browserProfile = v && v.key ? v : null; this.render(); }
   /** Billing identity chip (mobile — windows have no title bar there, so the
       title-bar badge's click-to-switch has no home; this is its stand-in). */
   setBilling(auth, onSwitch) {
@@ -648,6 +657,22 @@ export class ChatStatusBar {
       parts.push(`<span class="chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}" title="${escHtml(dTitle)}">${UI_ICONS.design}${n ? ` ${n}` : ''}</span>`);
     }
 
+    // Browser chip (agent browser P2, §3.8 layer ③): the profile the agent LAST
+    // ACTUALLY USED vs the PINNED default — amber when they differ, because
+    // this is the only surface that answers "I pinned it, now what?". Drawn
+    // for the pinned half alone (neutral) before the agent has used anything.
+    if (this._browserProfile && (this._browserProfile.pinned || this._browserProfile.active != null || this._browserProfile.input === 'user')) {
+      const b = this._browserProfile;
+      const differs = b.active != null && (b.active || '') !== (b.pinned || '');
+      // P3 (§4.3): while the USER drives, the chip says so before anything else —
+      // the agent's browser commands are refused until the handback
+      const driving = b.input === 'user';
+      const shown = driving ? t('You are driving') : (b.active == null ? b.pinnedLabel : b.activeLabel);
+      const facts = t('Agent last used: {a} · pinned: {p}', { a: b.active == null ? t('nothing yet') : b.activeLabel, p: b.pinnedLabel });
+      const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + (differs ? t('The agent is still on {a} — pinned is {p}. Remind it?', { a: b.activeLabel, p: b.pinnedLabel }) + '\n' : '') + facts;
+      parts.push(`<span class="chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}" title="${escHtml(tip)}">${UI_ICONS.web} ${escHtml(String(shown || ''))}</span>`);
+    }
+
     // Remote reconnect chip — amber, only while the ssh pipe is down
     if (this._remoteState && this._remoteState.state === 'unprotected') {
       // B-0845: session predates the keeper (2.124.0) — claude hangs bare off
@@ -976,6 +1001,27 @@ export class ChatStatusBar {
         item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onOpenWorkflow?.(wf.runId, wf.name); };
         dropdown.appendChild(item);
       }
+      return;
+    }
+    // Browser chip (§3.8 ③) -> both facts as a row + the one-click nudge
+    // (zero-spend: the reminder rides the user's next message), the live
+    // view, and the pin picker. The nudge row exists only when they differ.
+    const brEl = e.target.closest('.chat-status-browser');
+    if (brEl && this._browserProfile) {
+      e.stopPropagation();
+      const dropdown = showDropdown(brEl, { minWidth: 240, maxWidth: 380 });
+      if (!dropdown) return;
+      const b = this._browserProfile;
+      const differs = b.active != null && (b.active || '') !== (b.pinned || '');
+      const facts = document.createElement('div');
+      facts.className = 'chat-status-dropdown-note chat-status-browser-facts';
+      facts.textContent = t('Agent last used: {a} · pinned: {p}', { a: b.active == null ? t('nothing yet') : b.activeLabel, p: b.pinnedLabel });
+      dropdown.appendChild(facts);
+      const row = (cls, text, title, act) => { const it = document.createElement('div'); it.className = 'chat-status-dropdown-item ' + cls; it.textContent = text; if (title) it.title = title; it.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); act(ev); }; dropdown.appendChild(it); };
+      if (b.input === 'user') row('chat-status-browser-handback', t('Hand back to the agent'), t('An explicit handback is announced into the conversation (a billed turn) with the current URL'), (ev) => this._onBrowserAction?.('handback', ev));
+      if (differs) row('chat-status-browser-nudge', t('Remind on next message'), t('The reminder rides your next message — no billed turn'), (ev) => this._onBrowserAction?.('nudge', ev));
+      row('chat-status-browser-live', t('Open live view'), '', (ev) => this._onBrowserAction?.('live', ev));
+      row('chat-status-browser-pin', t('Change pin…'), '', (ev) => this._onBrowserAction?.('pin', ev));
       return;
     }
     // Session-health chip -> the same rows the init card lists. Touch has no
