@@ -2019,7 +2019,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .status-quick-tab { min-height: 32px; font-size: 11px; }
   /* chat status bar: chips + dropdown rows (chat.css restates the bar's
      min-height and the row padding after this file — hence the parent) */
-  .chat-view .chat-status-bar { min-height: 40px; padding: 2px 10px; }
+  .chat-view .chat-status-bar { min-height: 40px; padding: 1px 10px; } /* 36 px chips + 1+1 padding + the 1 px border-top = 39 → the 40 px minimum; 2 px padding made a ONE-line bar 41 px and tripped test-turn-truth-ui's one-line pin (≤ 40) */
   .chat-view .chat-status-bar .chat-status-clickable { display: inline-flex; align-items: center; min-height: 36px; padding: 0 8px; box-sizing: border-box; }
   .chat-view .chat-status-dropdown-item { min-height: 36px; display: flex; align-items: center; }
   /* settings window nav strip: wrap (every category visible) instead of an
