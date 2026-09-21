@@ -564,8 +564,9 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     return { file, parent: g('parent'), group: g('group'), order: o ? Number(o[1]) : 0, label: lab && lab[1], gated: /\bwhen:/.test(blk) };
   };
   const owners = ['src/lib/channels-panel.js', 'src/lib/channel-outbox.js', 'src/lib/integrations-window.js', 'src/lib/desktop-app-launcher.js'].map(ownerSpec);
-  ok(J(owners.map((o) => [o.label, o.parent, o.order, o.gated])) === J([['Channels…', 'comm', 10, true], ['Outbox…', 'comm', 20, false], ['Integrations…', 'comm', 30, false], ['Desktop apps…', 'tools', 30, true]]),
-    'the four external owners file under comm / tools with DISTINCT orders (the two order-45 twins are gone; Channels + Desktop apps stay gated)', J(owners));
+  // 2.369.125 (docs/design-mobile-gaps.md #2): the Channels row lost its `when` gate — on a phone the rail is never built, so a gated row meant NO entry point; focusChannelsPanel now falls back to a window
+  ok(J(owners.map((o) => [o.label, o.parent, o.order, o.gated])) === J([['Channels…', 'comm', 10, false], ['Outbox…', 'comm', 20, false], ['Integrations…', 'comm', 30, false], ['Desktop apps…', 'tools', 30, true]]),
+    'the four external owners file under comm / tools with DISTINCT orders (the two order-45 twins are gone; Desktop apps stays gated, Channels is ungated since 2.369.125 — its window fallback)', J(owners));
   ok(owners.every((o) => !o.group), 'owner rows carry no `group` — inside a head, group sorts BEFORE order, so a grouped member would sink below every ungrouped core row');
   for (const o of owners) registerMenuItem({ menu: 'gear', id: 'owner/' + o.label, parent: o.parent, order: o.order, label: o.label,
     when: o.gated ? ((c) => (o.label === 'Desktop apps…' ? !!c.app._desktopAppsAvailable : !!c.app._railEl)) : undefined, run: (c) => c.app['owner:' + o.label]?.() });
