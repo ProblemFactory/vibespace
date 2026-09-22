@@ -260,6 +260,150 @@ try {
     ok(rep5.shards === 0 && rep5.transcripts === 0 && rep5.rowsIn === 0,
       'no ledger ⇒ no transcript walk at all (the expensive half is never paid for nothing)', JSON.stringify(rep5));
   }
+
+  // ── the weekly-lanes unfold (inc-mubu23bd-5vxi, 2026-09-21) ─────────────
+  // Since 2.361.2 a `seven_day_overage_included` rate_limit_event (the 2.1.274
+  // binary's own "per-model bucket", about twice the plan week on every capped
+  // account) was written into the PLAN weekly lane. The fixture is the
+  // incident's cache VERBATIM (plan 7d 86 %, source rate-limit-event, the
+  // Fable cap right), the account's api-phase-verified window sidecar, a pool
+  // whose per-session link names the account, and the owner's session buffer
+  // whose tail holds an OLDER windowed event, the owner's record verbatim, and
+  // non-event lines after it. Beside it: a PANEL-sourced key with the same
+  // wrong number (never touched), an event-sourced key with no linked buffer
+  // (left), an event-sourced key whose linked event states ANOTHER account's
+  // weekly reset (left, by the readings-by-window rule), and a codex session
+  // linked to the fixture account that must not count as evidence.
+  {
+    const root6 = path.join(tmp, 'inst6');
+    const d6 = path.join(root6, 'data');
+    const cache6 = path.join(d6, 'usage-cache');
+    for (const sub of ['usage-cache', 'session-meta', 'session-buffers', 'subs/sub-fixture-max', 'subs/sub-orphan', 'subs/sub-foreign', 'subs/sub-panel', 'pool-links/pool-p1']) fs.mkdirSync(path.join(d6, sub), { recursive: true });
+    const OWNER_RECORD = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1790535600, rateLimitType: 'seven_day_overage_included', utilization: 0.87, isUsingOverage: false, surpassedThreshold: 0.75, unifiedWindows: { five_hour: { utilization: 0.09, resetsAt: 1790048400 }, seven_day: { utilization: 0.43, resetsAt: 1790535600 }, seven_day_overage_included: { utilization: 0.87, resetsAt: 1790535600 } } }, uuid: 'e2e00000-0000-4000-8000-000000000001', session_id: 'e2e00000-0000-4000-8000-000000000002' };
+    const OLDER = { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1790048400, rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 0.05, resetsAt: 1790048400 }, seven_day: { utilization: 0.40, resetsAt: 1790535600 }, seven_day_overage_included: { utilization: 0.80, resetsAt: 1790535600 } } }, uuid: 'e2e00000-0000-4000-8000-000000000003', session_id: 'e2e00000-0000-4000-8000-000000000002' };
+    const incident = { fiveHour: { utilization: 0.09, resetsAt: 1790048400 }, sevenDay: { utilization: 0.86, resetsAt: 1790535600, status: 'allowed_warning' }, scopedWeekly: [{ name: 'Fable', utilization: 0.87, resetsAt: 1790535600, severity: 'normal' }], fetchedAt: 1790031730410, source: 'rate-limit-event', scopedFetchedAt: 1790030899274, overage: { inUse: false, asOf: 1790031730410, status: 'rejected', disabledReason: 'org_level_disabled' }, overallStatus: 'allowed' };
+    // the sidecar is the PANEL's minute-precise instant, 60 s before the API's (the production shape on every account here)
+    const sidecar = { sevenDay: 1790535540, fiveHour: 1790048340, scoped: { fable: 1790535540 }, at: 1790030899275, source: 'on-demand', verifiedAt: 1790030899275, verifiedBy: 'api-phase' };
+    fs.writeFileSync(path.join(cache6, 'sub-fixture-max.json'), JSON.stringify(incident));
+    fs.writeFileSync(path.join(cache6, '.window-sub-fixture-max'), JSON.stringify(sidecar));
+    // the PANEL wrote this one (the same wrong number, but a producer that states the week): never touched
+    const panelBytes = JSON.stringify({ ...incident, source: 'on-demand' });
+    fs.writeFileSync(path.join(cache6, 'sub-panel.json'), panelBytes);
+    fs.writeFileSync(path.join(cache6, '.window-sub-panel'), JSON.stringify(sidecar));
+    // event-sourced, no buffer anywhere names it
+    const orphanBytes = JSON.stringify({ ...incident, sevenDay: { utilization: 0.7, resetsAt: 1790535600 } });
+    fs.writeFileSync(path.join(cache6, 'sub-orphan.json'), orphanBytes);
+    fs.writeFileSync(path.join(cache6, '.window-sub-orphan'), JSON.stringify(sidecar));
+    // event-sourced, its linked session's event states a DIFFERENT weekly reset (2 days off)
+    const foreignBytes = JSON.stringify({ ...incident, sevenDay: { utilization: 0.9, resetsAt: 1790708400 } });
+    fs.writeFileSync(path.join(cache6, 'sub-foreign.json'), foreignBytes);
+    fs.writeFileSync(path.join(cache6, '.window-sub-foreign'), JSON.stringify({ ...sidecar, sevenDay: 1790708400, scoped: {} }));
+    // the pool: default link → the fixture account; the owner's session carries its own per-session link
+    fs.symlinkSync(path.join(d6, 'subs', 'sub-fixture-max'), path.join(d6, 'subs', 'pool-p1'));
+    fs.symlinkSync(path.join(d6, 'subs', 'sub-fixture-max'), path.join(d6, 'pool-links', 'pool-p1', 'sess-1-100'));
+    fs.writeFileSync(path.join(d6, 'session-meta', 'cw-1-100.json'), JSON.stringify({ accountId: 'pool-p1', backend: 'claude', host: null, mode: 'chat' }));
+    fs.writeFileSync(path.join(d6, 'session-buffers', 'sess-1-100.buf'), [
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hello' }] } }),
+      JSON.stringify(OLDER),
+      JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 1, resetsAt: 1790048400 }, seven_day: { utilization: 0.99, resetsAt: 1790535600 } } } }), // a REJECTION is never the evidence
+      JSON.stringify(OWNER_RECORD),
+      JSON.stringify({ type: 'result', subtype: 'success' }),
+      'not json at all',
+    ].join('\n') + '\n');
+    // a codex session linked to the same account: not claude ⇒ not evidence (its buffer would say 0.99)
+    fs.writeFileSync(path.join(d6, 'session-meta', 'cw-2-101.json'), JSON.stringify({ accountId: 'sub-fixture-max', backend: 'codex', mode: 'chat' }));
+    fs.writeFileSync(path.join(d6, 'session-buffers', 'sess-2-101.buf'), JSON.stringify({ ...OWNER_RECORD, rate_limit_info: { ...OWNER_RECORD.rate_limit_info, unifiedWindows: { ...OWNER_RECORD.rate_limit_info.unifiedWindows, seven_day: { utilization: 0.99, resetsAt: 1790535600 } } } }) + '\n');
+    // the foreign account's own session, stating the fixture account's window (a lag shadow's shape)
+    fs.writeFileSync(path.join(d6, 'session-meta', 'cw-1-102.json'), JSON.stringify({ accountId: 'sub-foreign', backend: 'claude', mode: 'chat' }));
+    fs.writeFileSync(path.join(d6, 'session-buffers', 'sess-1-102.buf'), JSON.stringify(OWNER_RECORD) + '\n');
+    const notices6 = [];
+    const m6 = create({ rootDir: root6, homeDir: scratchHomeDir, serverNotice: (k) => notices6.push(k) });
+    const res6 = m6.runLocalMigrations();
+    ok(res6.find((r) => r.id === '2026-09-weekly-lanes-unfold')?.status === 'ran', 'the weekly-lanes unfold is registered and ran');
+    const rd6 = (k) => JSON.parse(fs.readFileSync(path.join(cache6, k + '.json'), 'utf-8'));
+    const fx = rd6('sub-fixture-max');
+    ok(Math.abs(fx.sevenDay.utilization - 0.43) < 1e-9 && fx.sevenDay.resetsAt === 1790535600 && fx.sevenDay.status === 'allowed',
+      'the plan week reads 0.43 — the NEWEST windowed event\'s unifiedWindows.seven_day, not the older 0.40, not the rejection\'s 0.99, not the bucket\'s 0.86', JSON.stringify(fx.sevenDay));
+    const fable = (fx.scopedWeekly || []).find((s) => s.name === 'Fable');
+    ok(fable && Math.abs(fable.utilization - 0.87) < 1e-9 && fable.status === 'allowed_warning' && !(fx.scopedWeekly || []).some((s) => s.name === 'Model cap'),
+      'Fable reads 0.87 with the representative\'s warning — named through the sidecar, no placeholder', JSON.stringify(fx.scopedWeekly));
+    ok(Math.abs(fx.fiveHour.utilization - 0.09) < 1e-9 && fx.fiveHour.resetsAt === 1790048400, 'the 5-hour lane is exactly what it was (a tail line has no clock; the 5h was never the bucket\'s victim)', JSON.stringify(fx.fiveHour));
+    const plan = (fx.limits || []).find((l) => l.limitId === 'plan'), fl = (fx.limits || []).find((l) => l.limitId === 'model:fable');
+    ok(plan && plan.windows.find((w) => w.kind === '7d').usedPct === 43 && plan.source === 'rate-limit-event' && fl && fl.windows[0].usedPct === 87,
+      'the typed limits agree (plan 7d 43, model:fable 87) and the plan\'s provenance stays the event\'s — the number came from the session\'s own record', JSON.stringify((fx.limits || []).map((l) => [l.limitId, l.source, l.windows.map((w) => [w.kind, w.usedPct])])));
+    ok(fx.fetchedAt > incident.fetchedAt && plan.windows.find((w) => w.kind === '7d').measuredAt > incident.fetchedAt,
+      'the reading\'s clock never regresses the file\'s freshness stamp (the anchors sweep and both newest-wins merges rank on it)', JSON.stringify({ was: incident.fetchedAt, now: fx.fetchedAt }));
+    // (the registry's earlier quota-limits backfill stamps `limits` onto every
+    // pre-model file first — its job — so "untouched" is judged on the numbers,
+    // the producer and the freshness stamp, never on bytes)
+    const same = (k, u) => { const o = rd6(k); return Math.abs(o.sevenDay.utilization - u) < 1e-9 && o.fetchedAt === incident.fetchedAt && (o.limits || []).find((l) => l.limitId === 'plan')?.windows.find((w) => w.kind === '7d').usedPct === Math.round(u * 100); };
+    ok(same('sub-panel', 0.86) && rd6('sub-panel').source === 'on-demand', 'a PANEL-sourced plan week is never touched — its number, its producer and its freshness stamp are what the panel left');
+    ok(same('sub-orphan', 0.7), 'a candidate with no linked windowed event is left as it was (the next panel or event corrects it)');
+    ok(same('sub-foreign', 0.9), 'a candidate whose linked event states ANOTHER account\'s weekly reset is left as it was (the readings-by-window rule)');
+    ok(fs.existsSync(path.join(cache6, '.window-sub-fixture-max')) && fs.readFileSync(path.join(cache6, '.window-sub-fixture-max'), 'utf-8') === JSON.stringify(sidecar), 'the established-window sidecar is read, never written');
+    const { unfoldWeeklyLanes } = require('../src/weekly-lanes-unfold.js');
+    // the archive: the pre-repair object verbatim + a manifest naming the migration
+    const adirs6 = fs.readdirSync(path.join(d6, 'archive')).filter((f) => f.startsWith('weekly-lanes-unfold-'));
+    const arch6 = adirs6.length === 1 ? JSON.parse(fs.readFileSync(path.join(d6, 'archive', adirs6[0], 'sub-fixture-max.json'), 'utf-8')) : null;
+    ok(arch6 && Math.abs(arch6.sevenDay.utilization - 0.86) < 1e-9 && arch6.fetchedAt === incident.fetchedAt && arch6.source === 'rate-limit-event',
+      `the pre-repair object (plan 7d 0.86, the incident's stamp) is archived in a dated directory before the rewrite (${adirs6.join(',')})`);
+    const man6 = JSON.parse(fs.readFileSync(path.join(d6, 'archive', adirs6[0], '_migration.json'), 'utf-8'));
+    ok(man6.migration === '2026-09-weekly-lanes-unfold' && man6.keys.length === 1 && man6.keys[0] === 'sub-fixture-max' && !fs.existsSync(path.join(d6, 'archive', adirs6[0], 'sub-panel.json')),
+      'the manifest names the migration and exactly the key it rewrote', JSON.stringify(man6));
+    ok(notices6.filter((k) => k === 'weekly-lanes-unfolded').length === 1, 'ONE server notice says what was repaired (a repair nobody can see ran is a repair nobody can verify ran)', JSON.stringify(notices6));
+    // the report, per key
+    const rep6 = unfoldWeeklyLanes({ dataDir: d6, id: 'again' });
+    const verb = (k) => rep6.keys.find((r) => r.key === k)?.action;
+    ok(rep6.candidates === 3 && verb('sub-fixture-max') === 'already' && verb('sub-orphan') === 'left' && verb('sub-foreign') === 'left' && verb('sub-panel') === 'kept',
+      'IDEMPOTENT + a verb per key: the rewritten key is now `already`, the two candidates without evidence stay `left`, the panel-sourced key is `kept`', JSON.stringify(rep6));
+    ok(/is not this account's/.test(rep6.keys.find((r) => r.key === 'sub-foreign').why) && /no live buffer/.test(rep6.keys.find((r) => r.key === 'sub-orphan').why),
+      'each `left` names its reason (foreign window vs no linked buffer)');
+    ok(fs.readdirSync(path.join(d6, 'archive')).filter((f) => f.startsWith('weekly-lanes-unfold-')).length === 1 && fs.readdirSync(path.join(d6, 'archive', adirs6[0])).length === 2,
+      'a second run archives nothing twice');
+    // the second run's ledger belt: the registry does not re-run it
+    ok(m6.runLocalMigrations().find((r) => r.id === '2026-09-weekly-lanes-unfold')?.status === 'already', 'the ledger records the run (never re-run by content sniffing)');
+    // WHAT THE TASKBAR READS: /api/usage's per-account payload over the repaired directory
+    // (usage-routes' ingestPassiveUsage re-reads the cache dir on every call)
+    {
+      const routes = {};
+      const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; }, locals: {} };
+      const roster = [{ id: 'sub-fixture-max', name: 'Member Max', type: 'subscription', email: null }, { id: 'sub-panel', name: 'Member P', type: 'subscription', email: null }];
+      const accounts = { list: () => ({ accounts: roster }), subscriptionStatus: () => ({ loggedIn: false, email: null }), codexGlobalStatus: () => ({ loggedIn: false, email: null }), subCredsPath: (id) => path.join(d6, 'subs', id, '.credentials.json') };
+      const { setupUsage } = require('../src/usage-routes.js');
+      setupUsage({ app, accounts, activeSessions: new Map(), serverSetting: () => null, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(d6, 'usage-cache.json'), USAGE_CACHE_DIR: cache6, CODEX_SESSIONS_DIR: path.join(d6, 'codex-sessions'), META_DIR: path.join(d6, 'session-meta'), AVAILABLE_MODELS: { claude: [] }, BUFFERS_DIR: path.join(d6, 'session-buffers') });
+      const payload = await new Promise((resolve) => routes['GET /api/usage']({}, { json: resolve }));
+      const a = payload?.accounts?.['sub-fixture-max'];
+      ok(a && Math.abs(a.sevenDay.utilization - 0.43) < 1e-9 && Math.abs(a.fiveHour.utilization - 0.09) < 1e-9 && (a.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.87,
+        '/api/usage for the repaired key says sevenDay 0.43 · fiveHour 0.09 · Fable 0.87 — what the taskbar donut draws', JSON.stringify(a && { f: a.fiveHour, s: a.sevenDay, sc: a.scopedWeekly }));
+      ok(Math.abs(payload?.accounts?.['sub-panel']?.sevenDay?.utilization - 0.86) < 1e-9, '…and the panel-sourced neighbour still says what its panel said (0.86)');
+    }
+    // ── r2: a REFUSED repair is a FAILED run — retried next boot, never recorded ──
+    // (the runner's contract; a report that swallowed an unwritable archive was recorded as applied
+    // and the plan week kept the bucket's number for good)
+    {
+      const root7 = path.join(tmp, 'inst7'); const d7 = path.join(root7, 'data'); const cache7 = path.join(d7, 'usage-cache');
+      for (const sub of ['usage-cache', 'session-meta', 'session-buffers', 'subs/sub-r']) fs.mkdirSync(path.join(d7, sub), { recursive: true });
+      fs.writeFileSync(path.join(cache7, 'sub-r.json'), JSON.stringify(incident));
+      fs.writeFileSync(path.join(cache7, '.window-sub-r'), JSON.stringify(sidecar));
+      fs.writeFileSync(path.join(d7, 'session-meta', 'cw-7-100.json'), JSON.stringify({ accountId: 'sub-r', backend: 'claude', mode: 'chat' }));
+      fs.writeFileSync(path.join(d7, 'session-buffers', 'sess-7-100.buf'), JSON.stringify(OWNER_RECORD) + '\n');
+      fs.writeFileSync(path.join(d7, 'archive'), 'a file where the archive dir must go'); // mkdirSync(archiveDir) fails
+      const m7 = create({ rootDir: root7, homeDir: scratchHomeDir, serverNotice: () => { } });
+      const res7 = m7.runLocalMigrations().find((r) => r.id === '2026-09-weekly-lanes-unfold');
+      const led7 = () => { try { return JSON.parse(fs.readFileSync(path.join(d7, 'migrations.json'), 'utf-8')); } catch { return { applied: {} }; } };
+      const plan7 = () => JSON.parse(fs.readFileSync(path.join(cache7, 'sub-r.json'), 'utf-8')).sevenDay.utilization;
+      ok(res7?.status === 'failed' && /refused/.test(res7.error || '') && /sub-r \(archive failed/.test(res7.error || ''), 'r2: an unwritable archive makes the run FAIL, naming the key and why', JSON.stringify(res7));
+      ok(!led7().applied['2026-09-weekly-lanes-unfold'] && Math.abs(plan7() - 0.86) < 1e-9, 'r2: …no ledger row, and the plan week untouched (archive-before-rewrite held)', JSON.stringify({ ledger: led7().applied, plan: plan7() }));
+      const rep7 = unfoldWeeklyLanes({ dataDir: d7, id: 'probe' });
+      ok(rep7.refused === 1 && rep7.left === 0 && rep7.keys.find((k) => k.key === 'sub-r')?.action === 'refused', 'r2: the report says `refused`, not `left` (a refusal is the repair\'s own failure, not missing evidence)', JSON.stringify(rep7.keys));
+      fs.rmSync(path.join(d7, 'archive'));
+      const res7b = m7.runLocalMigrations().find((r) => r.id === '2026-09-weekly-lanes-unfold');
+      ok(res7b?.status === 'ran' && !!led7().applied['2026-09-weekly-lanes-unfold'] && Math.abs(plan7() - 0.43) < 1e-9, 'r2: …the next boot retries, repairs (plan 7d 0.43) and records the run', JSON.stringify({ res7b, plan: plan7() }));
+      const root8 = path.join(tmp, 'inst8'); fs.mkdirSync(path.join(root8, 'data'), { recursive: true });
+      const rep8 = unfoldWeeklyLanes({ dataDir: path.join(root8, 'data'), id: 'probe' });
+      ok(rep8.unreadable === null && rep8.refused === 0 && rep8.scanned === 0, 'r2 CONTROL: no usage-cache dir at all (a fresh instance) is nothing to repair — a success, never a retry loop', JSON.stringify(rep8));
+    }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

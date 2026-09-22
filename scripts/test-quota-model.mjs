@@ -338,6 +338,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/usage-cache-write.js', 'THE write path itself'],
       ['src/reading-repair.js', 'its generic _writeAtomic serves the ANCHOR and ATTRIBUTION stores; its three usage-cache writes go through _writeCacheAtomic → writeCacheObject({replace:true})'],
       ['src/quota-model-migrate.js', 'the backfill migration: its usage-cache writes go through writeCacheObject({replace:true}); its own appendFileSync is the archive-never-destroy ndjson'],
+      ['src/weekly-lanes-unfold.js', 'the weekly-lanes repair (inc-mubu23bd-5vxi): its usage-cache writes go through captureRateLimitEvent → the write path (the plan week, the model cap and the fold rule all apply); its own writeFileSync calls are the archive-never-destroy copy under data/archive/'],
       ['src/server/cli-env.js', 'writes __models__.json — the served-model list, not a reading; every cache scanner excludes it by name (isCacheFileName)'],
       ['src/usage-routes.js', "writeUsageCache() writes data/usage-cache.json — the machine login's SECOND snapshot and the boot seed of _rateLimitCache, a different file outside the directory (the r6 repair essay names it)"],
       ['src/server/usage-pool-engine.js', "writes data/archive/readings-window-mismatch.ndjson — the window guard's ARCHIVE of readings it refused, a different store; its own cache writes go through the write path"],
@@ -436,6 +437,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/usage-routes.js', ['migrated', 'every writer goes through the write path; the codex summariser accumulates PER limitId']],
       ['src/server/usage-pool-engine.js', ['migrated', 'its verdicts read bucketRems → bucketRemaining, so an empty window cannot set blockedUntil or an auto-resume arm time']],
       ['src/reading-repair.js', ['migrated', 'writes through the path in replace mode; its window judgements use windowOf, which now skips empty windows']],
+      ['src/weekly-lanes-unfold.js', ['migrated', 'the weekly-lanes repair reads the plan week through limitsOfCache → planLimit → windowOfKind and writes through captureRateLimitEvent; its raw spellings are a parsed event\'s `windows.sevenDay` (a producer field, not a cache bucket) and the report\'s scopedWeekly summary']],
       ['data/bin/vibespace-usage', ['migrated', 'the shipped statusline: carries the byte-identical reading-lag mirror, which skips empty windows']],
       ['src/auto-resume-signal.js', ['spent-only', 'statedBuckets/bucketSpent/windowOpened decide only whether a window is SPENT (utilization >= 1 or status limited); an empty window is 0 % used, so it is never spent and its sliding reset can never become an arm time — driven in §⑬']],
       ['src/server/auto-resume.js', ['mention', 'one comment cites a sevenDay reset while explaining why the loop breaker keys on the WALL and not on a reset instant; it reads no bucket']],
@@ -2130,6 +2132,124 @@ console.log('\n⑱ only a parse that ENUMERATED may retire a limit (r6)');
     const again = CODEXQ.toLimitSet(planAt(92), { identity: w2.cx, source: 'codex-rate-limits', fetchedAt: NEWER });
     const guardBlocks = (Number(f2.fetchedAt) || 0) >= (Number(again.fetchedAt) || 0);
     ok(guardBlocks, '⑱g NEGATIVE CONTROL: a correct reading at that same instant is exactly what the write-through freshness guard refuses');
+  }
+}
+
+
+console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholder that folds (inc-mubu23bd-5vxi)');
+{
+  const R = 1790535600;
+  const fable = (at, pct = 80) => QM.makeLimit({ limitId: 'model:fable', name: 'Fable', scope: 'model', model: 'Fable', family: 'fable', windows: [QM.makeWindow({ kind: '7d', usedPct: pct, resetsAt: R, measuredAt: at })], source: 'on-demand', fetchedAt: at });
+  const opus = (at, pct = 20) => QM.makeLimit({ limitId: 'model:opus', name: 'Opus', scope: 'model', model: 'Opus', family: 'opus', windows: [QM.makeWindow({ kind: '7d', usedPct: pct, resetsAt: R, measuredAt: at })], source: 'on-demand', fetchedAt: at });
+  const ph = (at, pct = 87, resetsAt = R) => QM.makeLimit({ limitId: QM.MODEL_CAP_PLACEHOLDER.limitId, name: QM.MODEL_CAP_PLACEHOLDER.name, scope: 'model', windows: [QM.makeWindow({ kind: '7d', usedPct: pct, resetsAt, measuredAt: at })], source: 'rate-limit-event', fetchedAt: at });
+  // the rungs
+  let v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: R });
+  ok(v.named && v.limitId === 'model:fable' && v.name === 'Fable' && v.family === 'fable' && /established window/.test(v.why), '⑲ ① the sidecar\'s scoped window with this reset names the lane (fable → model:fable, name Fable)');
+  v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + 60 });
+  ok(v.named && v.limitId === 'model:fable' && /existing model limit/.test(v.why), '⑲ ② an existing scope:model limit with the same reset (±' + QM.WINDOW_JITTER_SEC + ' s) IS the lane');
+  v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + QM.WINDOW_JITTER_SEC + 1 });
+  ok(!v.named && v.limitId === 'model:cap', '⑲ ② …a reset one second past the jitter is NOT the same lane (the tolerance is the model\'s own WINDOW_JITTER_SEC, shared with reading-lag)');
+  v = QM.nameModelCapLane({ scoped: { fable: R, opus: R }, resetsAt: R, hint: 'opus' });
+  ok(v.named && v.limitId === 'model:opus' && /session requests Opus/.test(v.why), '⑲ ③ two caps on one reset: the requesting session\'s family breaks the tie');
+  v = QM.nameModelCapLane({ scoped: { fable: R, opus: R }, resetsAt: R });
+  ok(!v.named && v.limitId === 'model:cap' && v.family === null && /no request model/.test(v.why), '⑲ ③ …with no hint an ambiguous reset decides NOTHING — the placeholder, never a guess');
+  v = QM.nameModelCapLane({ scoped: { fable: R, opus: R }, resetsAt: R, hint: 'sonnet' });
+  ok(!v.named, '⑲ ③ …a hint that names none of the candidates decides nothing either');
+  v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: null, hint: 'fable' });
+  ok(v.named && v.limitId === 'model:fable' && /no reset stated/.test(v.why), '⑲ ④ a rejection with NO reset is named only through a hint matching a cap the account has SHOWN');
+  v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: null, hint: 'opus' });
+  ok(!v.named, '⑲ ④ …a hint for a family the account never showed names nothing (the vocabulary is the account\'s own)');
+  v = QM.nameModelCapLane({ resetsAt: R });
+  ok(!v.named && v.limitId === 'model:cap' && v.name === 'Model cap' && v.family === null, '⑲ ⑤ nothing names it ⇒ model:cap / "Model cap" / family null');
+  v = QM.nameModelCapLane({ limits: [ph(1)], resetsAt: R });
+  ok(!v.named, '⑲ ⑤ …an existing PLACEHOLDER never names a lane (it is the absence of a name)');
+  // THE ROLL (r2): from a weekly reset until the next verified panel the sidecar and the stored cap
+  // carry LAST week's reset — a rolled window is the SAME lane by PHASE, never by the instant
+  const WEEK = QM.WEEK_SEC;
+  v = QM.nameModelCapLane({ scoped: { fable: R }, resetsAt: R + WEEK });
+  ok(v.named && v.limitId === 'model:fable' && WEEK === 604800, '⑲ ROLL: the sidecar rung names a window ONE WEEK after the established reset (the shape after every weekly reset until the panel restamps)');
+  v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + WEEK + 60 });
+  ok(v.named && v.limitId === 'model:fable', '⑲ ROLL: …and the existing-limit rung, a week and a minute later');
+  v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + WEEK + QM.WINDOW_JITTER_SEC + 1 });
+  ok(!v.named, '⑲ ROLL: …a week plus one second past the jitter is still NOT the lane (the phase, not "any later week")');
+  v = QM.nameModelCapLane({ limits: [fable(1)], resetsAt: R + 86400 });
+  ok(!v.named, '⑲ ROLL CONTROL: one DAY later is another window');
+  {
+    const readingLag = require(path.join(ROOT, 'src/reading-lag.js'));
+    const table = [[R, R], [R, R + 60], [R, R + 120], [R, R + 121], [R, R + WEEK], [R, R + WEEK - 60], [R, R - WEEK + 120], [R, R + 3 * WEEK + 1], [R, R + 86400], [R, R + WEEK / 2], [R, R - 121], [0, R], [R, null]];
+    ok(table.every(([a, b]) => (QM.weeklyPhaseNear(a, b) === true) === (readingLag.weeklyNear(a, b) === true)), '⑲ ROLL: weeklyPhaseNear agrees with reading-lag.weeklyNear on every row of the table (the rule is spelled twice because quota-model imports nothing)');
+  }
+  // the fold — the ONE permitted collapse, and only that one
+  let m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [ph(200)] }), QM.makeLimitSet({ identity: 'k', limits: [fable(100, 86)] }));
+  ok(m.limits.length === 1 && m.limits[0].limitId === 'model:fable' && m.limits[0].name === 'Fable' && m.limits[0].family === 'fable' && QM.windowOfKind(m.limits[0], '7d').usedPct === 87,
+    '⑲ FOLD: a placeholder on disk + a panel naming Fable on the same reset ⇒ ONE model:fable, the NEWER measurement (the event\'s 87 @200 over the panel\'s 86 @100)');
+  m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100, 86)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(50)] }));
+  ok(m.limits.length === 1 && m.limits[0].limitId === 'model:fable' && QM.windowOfKind(m.limits[0], '7d').usedPct === 86, '⑲ FOLD: …in either order (an OLDER placeholder folds and loses to the panel\'s newer number)');
+  m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200, 87, R + 86400)] }));
+  ok(m.limits.length === 2 && m.limits.some((l) => l.limitId === 'model:cap'), '⑲ FOLD: a placeholder on a DIFFERENT reset stays its own limit (never dropped)');
+  m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100, 86)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200, 30, R + WEEK)] }));
+  ok(m.limits.length === 1 && m.limits[0].limitId === 'model:fable' && QM.windowOfKind(m.limits[0], '7d').usedPct === 30 && QM.windowOfKind(m.limits[0], '7d').resetsAt === R + WEEK,
+    '⑲ FOLD ROLL (r2): a placeholder written after the week rolled folds into LAST week\'s named cap and carries the new week (30 @ R+week) — it no longer sits beside the stale Fable gating every family');
+  m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200, 87, null)] }));
+  ok(m.limits.length === 2, '⑲ FOLD: a placeholder that states NO reset stays (a later panel enumerates and retires it)');
+  m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100), opus(100)] }), QM.makeLimitSet({ identity: 'k', limits: [ph(200)] }));
+  ok(m.limits.length === 3 && m.limits.some((l) => l.limitId === 'model:cap'), '⑲ FOLD: two named caps on the same reset ⇒ ambiguous ⇒ the placeholder stays honest');
+  m = QM.mergeLimitSets(QM.makeLimitSet({ identity: 'k', limits: [fable(100)] }), QM.makeLimitSet({ identity: 'k', limits: [opus(200)] }));
+  ok(m.limits.length === 2 && m.limits.map((l) => l.limitId).join() === 'model:fable,model:opus', '⑲ FOLD CONTROL: two NAMED limits on one reset NEVER collapse (the 2026-09-09 law is untouched)');
+  // the legacy round trip and the accessors
+  const lg = QM.fromLegacy({ scopedWeekly: [{ name: 'Model cap', utilization: 0.87, resetsAt: R }, { name: 'Fable', utilization: 0.5, resetsAt: R + 604800 }] }, { fetchedAt: 5, familyOf: familyOfScopedBucket });
+  ok(lg.limits.map((l) => l.limitId).join() === 'model:cap,model:fable' && lg.limits[0].family === null && lg.limits[0].model === null && lg.limits[1].family === 'fable', '⑲ fromLegacy: "Model cap" lifts to model:cap with family/model null even with familyOf injected');
+  ok(QM.toLegacyView(lg).scopedWeekly[0].name === 'Model cap' && QM.scopedLimitId('Model cap') === 'model:cap' && QM.scopedLimitId('Fable') === 'model:fable', '⑲ toLegacyView: …and projects back under the placeholder name — the id round-trips (scopedLimitId is the ONE spelling)');
+  const both = QM.makeLimitSet({ identity: 'k', limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '7d', usedPct: 43, resetsAt: R, measuredAt: 1 })], fetchedAt: 1 }), fable(1), ph(2, 87, R + 604800)] });
+  ok(QM.limitFor(both, { family: 'fable' }).limitId === 'model:fable' && QM.limitFor(both, { family: 'opus' }).limitId === 'plan', '⑲ limitFor: a family still finds ITS named lane; the placeholder governs no named request');
+  ok(QM.applicableLimits(both, {}).some((l) => l.limitId === 'model:cap') && !QM.applicableLimits(both, { family: 'opus' }).some((l) => l.limitId === 'model:cap'), '⑲ applicableLimits: the placeholder counts for the ACCOUNT-level min (conservative) and never for a named family');
+  // the lift rung: a model cap the statusline measured (2.1.274 model_scoped) is restored from the legacy entry
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qm19-')); tmpDirs.push(dir);
+    const KEY = 'sub-qm19';
+    W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fetchedAt: 1000, source: 'on-demand', fiveHour: { utilization: 0.1 }, sevenDay: { utilization: 0.4, resetsAt: R }, scopedWeekly: [{ name: 'Fable', utilization: 0.5, resetsAt: R }, { name: 'Opus', utilization: 0.2, resetsAt: R }] }, measuredAt: 1000, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' });
+    const o = JSON.parse(fs.readFileSync(W.cacheFileFor(dir, KEY), 'utf8'));
+    // what the tool does: drops the model:fable limit it measured, writes the new Fable entry, keeps Opus and its limit
+    o.limits = o.limits.filter((l) => l.limitId !== 'model:fable');
+    o.scopedWeekly = [o.scopedWeekly.find((s) => s.name === 'Opus'), { name: 'Fable', utilization: 0.86, resetsAt: R, status: 'allowed', asOf: 2000 }];
+    o.fetchedAt = 2000; o.source = 'passive';
+    const set = W.limitsOfCache(o, { identity: KEY, backend: 'claude', familyOf: familyOfScopedBucket });
+    const f = set.limits.find((l) => l.limitId === 'model:fable'), op = set.limits.find((l) => l.limitId === 'model:opus');
+    ok(f && QM.windowOfKind(f, '7d').usedPct === 86 && f.source === 'passive' && f.family === 'fable', '⑲ LIFT: a legacy scoped entry whose limit is ABSENT from `limits` is restored with the object\'s own provenance (the statusline\'s drop rule, for a model cap)');
+    ok(op && op.source === 'on-demand' && QM.windowOfKind(op, '7d').usedPct === 20 && set.limits.filter((l) => l.limitId === 'model:opus').length === 1, '⑲ LIFT: …a scoped entry whose limit IS present is neither duplicated nor re-stamped');
+  }
+  // THE REAL STATUSLINE TOOL with a 2.1.274 payload (the parity pin of the twin)
+  {
+    const { execFileSync } = await import('child_process');
+    const TOOL = path.join(ROOT, 'data/bin/vibespace-usage');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qm19t-')); tmpDirs.push(dir);
+    const KEY = 'sub-qm19t';
+    const nowSec = Math.floor(Date.now() / 1000), RR = nowSec + 3 * 86400;
+    W.writeCacheObject({ cacheDir: dir, key: KEY, obj: { fetchedAt: Date.now() - 3600e3, source: 'on-demand', fiveHour: { utilization: 0.71, resetsAt: nowSec + 7200 }, sevenDay: { utilization: 0.44, resetsAt: RR }, scopedWeekly: [{ name: 'Fable', utilization: 0.93, resetsAt: RR }, { name: 'Opus', utilization: 0.2, resetsAt: RR }] }, measuredAt: Date.now() - 3600e3, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude' });
+    const f = W.cacheFileFor(dir, KEY);
+    const before = JSON.parse(fs.readFileSync(f, 'utf8'));
+    const old = Date.now() - 60000; fs.utimesSync(f, old / 1000, old / 1000);
+    const render = (rl) => execFileSync(TOOL, [], { input: JSON.stringify({ session_id: 'sess-qm19', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: rl }), encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: dir, VIBESPACE_ACCOUNT_KEY: KEY, HOME: dir } });
+    // the measured 2.1.274 schema: model_scoped[].utilization is the server's PERCENT, resets_at an ISO string
+    render({ five_hour: { used_percentage: 12, resets_at: nowSec + 3600 }, seven_day: { used_percentage: 46, resets_at: RR }, model_scoped: [{ display_name: 'Fable', utilization: 86, resets_at: new Date(RR * 1000).toISOString() }] });
+    const after = JSON.parse(fs.readFileSync(f, 'utf8'));
+    const lifted = W.limitsOfCache(after, { identity: KEY, backend: 'claude', familyOf: familyOfScopedBucket }).limits;
+    const fl = lifted.find((l) => l.limitId === 'model:fable'), ol = lifted.find((l) => l.limitId === 'model:opus'), pl = lifted.find((l) => l.limitId === 'plan');
+    ok(Math.abs(after.sevenDay.utilization - 0.46) < 1e-9 && pl && QM.windowOfKind(pl, '7d').usedPct === 46, '⑲ TOOL: the plan week reads the plan week (46) — never the bucket');
+    ok((after.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86 && fl && QM.windowOfKind(fl, '7d').usedPct === 86 && fl.source === 'passive' && QM.windowOfKind(fl, '7d').resetsAt === RR,
+      '⑲ TOOL: model_scoped Fable 86 (percent ÷ 100, ISO reset → unix) lands as the NAMED scoped bucket with this producer\'s provenance');
+    const beforeOpus = before.limits.find((l) => l.limitId === 'model:opus');
+    ok(ol && ol.source === beforeOpus.source && ol.fetchedAt === beforeOpus.fetchedAt && QM.windowOfKind(ol, '7d').usedPct === 20, '⑲ TOOL: a cap the payload did NOT name (Opus) keeps its own source and age');
+    // an EMPTY list states nothing (the r5 rule)
+    fs.utimesSync(f, old / 1000, old / 1000);
+    render({ five_hour: { used_percentage: 13, resets_at: nowSec + 3600 }, seven_day: { used_percentage: 47, resets_at: RR }, model_scoped: [] });
+    const after2 = JSON.parse(fs.readFileSync(f, 'utf8'));
+    ok((after2.scopedWeekly || []).length === 2 && (after2.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86 && Math.abs(after2.sevenDay.utilization - 0.47) < 1e-9, '⑲ TOOL: an empty model_scoped list leaves every scoped bucket exactly as it was (an empty read is not a retirement)');
+    // the older top-level seven_day_opus shape is the same rule (the lane is its name)
+    fs.utimesSync(f, old / 1000, old / 1000);
+    render({ five_hour: { used_percentage: 13, resets_at: nowSec + 3600 }, seven_day: { used_percentage: 47, resets_at: RR }, seven_day_opus: { used_percentage: 33, resets_at: RR } });
+    const after3 = JSON.parse(fs.readFileSync(f, 'utf8'));
+    ok((after3.scopedWeekly || []).find((s) => s.name === 'Opus')?.utilization === 0.33 && (after3.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86, '⑲ TOOL: a top-level seven_day_opus field names its lane the same way (Opus 33, Fable untouched)');
   }
 }
 

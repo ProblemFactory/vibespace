@@ -610,7 +610,8 @@ class UsageEstimator {
             buckets: {
               fiveHour: rawCache.fiveHour ? { u: rawCache.fiveHour.utilization, resetsAt: rawCache.fiveHour.resetsAt } : null,
               sevenDay: rawCache.sevenDay ? { u: rawCache.sevenDay.utilization, resetsAt: rawCache.sevenDay.resetsAt } : null,
-              scopedWeekly: (rawCache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt, asOf: rawCache.scopedFetchedAt || undefined })),
+              // the reading's clock: the newer of the entry's own stamp and the file's (usage-anchors' rule, r2)
+              scopedWeekly: (rawCache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt, asOf: Math.max(Number(s.asOf) || 0, Number(rawCache.scopedFetchedAt) || 0) || undefined })),
             },
           };
         }

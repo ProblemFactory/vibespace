@@ -76,10 +76,13 @@ class UsageAnchors {
         // stamps `state` on the bucket for it).
         fiveHour: cache.fiveHour && cache.fiveHour.status !== 'unknown' && bucketCounts(cache.fiveHour) ? { u: cache.fiveHour.utilization, resetsAt: cache.fiveHour.resetsAt } : null,
         sevenDay: cache.sevenDay && cache.sevenDay.status !== 'unknown' && bucketCounts(cache.sevenDay) ? { u: cache.sevenDay.utilization, resetsAt: cache.sevenDay.resetsAt } : null,
-        // asOf: scoped readings only refresh via ⟳ (preserve-merged into
-        // fresher caches) — record WHEN the reading was true so estimation
-        // starts its cost window there, not at the anchor write.
-        scopedWeekly: (cache.scopedWeekly || []).filter(bucketCounts).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt, asOf: cache.scopedFetchedAt || undefined })),
+        // asOf: WHEN the scoped reading was true, so estimation starts its cost
+        // window there, not at the anchor write. The NEWER of the entry's own
+        // stamp (a stream event stamps the entry it wrote) and the file-level
+        // `scopedFetchedAt` (the panel stamps the file) — r2: taking the file
+        // stamp alone gave every stream-written cap the last panel's clock, and
+        // the estimator discarded every such pair as the same reading.
+        scopedWeekly: (cache.scopedWeekly || []).filter(bucketCounts).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt, asOf: Math.max(Number(s.asOf) || 0, Number(cache.scopedFetchedAt) || 0) || undefined })),
       },
       prevFetchedAt: prev?.fetchedAt || null,
       elapsedSec: prev ? Math.round((cache.fetchedAt - prev.fetchedAt) / 1000) : null,

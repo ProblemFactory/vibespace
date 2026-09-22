@@ -310,25 +310,35 @@ function toLimitSet(raw, { identity = null, source = null, nowMs = null, familyO
 function limitSetFromEvent(ev, { identity = null, source = 'rate-limit-event', nowMs = null, familyOf = null } = {}) {
   if (!ev || (ev.kind !== 'fiveHour' && ev.kind !== 'sevenDay' && ev.kind !== 'scoped')) return null;
   const at = Number(nowMs) || Date.now();
-  const dead = ev.status === 'rejected';
+  // EVERY LANE THE RECORD STATES (2.1.274 `unifiedWindows`, inc-mubu23bd-5vxi):
+  // the representative bucket plus each window the response carried, each on
+  // the lane its own name decides — the plan limit gathers the 5h/7d windows,
+  // a scoped lane is its own model limit (the un-named model cap under the
+  // placeholder id). An older record still yields exactly one bucket.
   // A REJECTION IS A READING OF 100 %, and its window is whatever the record
   // stated — never a guess here. (The bounded `now + 5h/24h` guess the cache
   // writer makes when a rejection states no reset stays in the write path,
   // where the previous value is in hand to prefer first.)
-  const usedPct = dead ? 100 : (ev.utilization != null ? Math.max(0, Math.min(1, ev.utilization)) * 100 : null);
-  const status = dead ? 'limited' : (ev.status || null);
-  const kind = ev.kind === 'fiveHour' ? '5h' : '7d';
-  const win = quotaModel.makeWindow({ kind, usedPct, resetsAt: ev.resetsAt, measuredAt: at, status });
+  const { lanesOf } = require('../rate-limit-capture.js');
   const limits = [];
-  if (ev.kind === 'scoped') {
-    const name = String(ev.scopedName || '');
-    limits.push(quotaModel.makeLimit({
-      limitId: 'model:' + name.toLowerCase().replace(/\s+/g, '-'), name, scope: 'model',
-      model: name, family: familyOf ? familyOf(name) : null,
-      windows: [win], flags: { asOf: at }, source, fetchedAt: at,
-    }));
-  } else {
-    limits.push(quotaModel.makeLimit({ limitId: 'plan', scope: 'plan', windows: [win], source, fetchedAt: at }));
+  let plan = null;
+  for (const lane of lanesOf(ev)) {
+    const usedPct = lane.dead ? 100 : (lane.utilization != null ? Math.max(0, Math.min(1, lane.utilization)) * 100 : null);
+    const status = lane.dead ? 'limited' : (lane.status || null);
+    const win = quotaModel.makeWindow({ kind: lane.kind === 'fiveHour' ? '5h' : '7d', usedPct, resetsAt: lane.resetsAt, measuredAt: at, status });
+    if (lane.kind === 'scoped') {
+      const name = String(lane.displayName || lane.scopedName || '');
+      const limitId = quotaModel.scopedLimitId(name);
+      const placeholder = limitId === quotaModel.MODEL_CAP_PLACEHOLDER.limitId;
+      limits.push(quotaModel.makeLimit({
+        limitId, name, scope: 'model',
+        model: placeholder ? null : name, family: placeholder ? null : (familyOf ? familyOf(name) : null),
+        windows: [win], flags: { asOf: at }, source, fetchedAt: at,
+      }));
+    } else {
+      if (!plan) { plan = quotaModel.makeLimit({ limitId: 'plan', scope: 'plan', windows: [], source, fetchedAt: at }); limits.push(plan); }
+      plan.windows.push(win);
+    }
   }
   if (ev.overage && Object.values(ev.overage).some((v) => v !== undefined)) {
     limits.push(quotaModel.makeLimit({ limitId: 'overage', scope: 'overage', name: 'Extra usage', windows: [], flags: { ...ev.overage, asOf: at }, source, fetchedAt: at }));

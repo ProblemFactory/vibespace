@@ -495,27 +495,30 @@ function playWall(w, { banner = FABLE_BANNER, rawType = 'seven_day', member = 'w
       w5.readCache(w5.id.wmax).sevenDay.utilization === 1 && r5.lines.some((l) => /this session states no model/.test(l)),
       r5.lines.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 200));
 
-    // ⑥ `seven_day_overage_included` is the weekly lane's overage-INCLUDED
-    //    accounting (2.361.2) — and it names no MODEL either, so since B-ccaa
-    //    (2026-09-16 11:18:20: written on arrival beside a Fable banner ⇒ 7d
-    //    AND fable demoted in one second) it is DEFERRED like `seven_day`. With
-    //    no banner the evidence rule still lands it on the plan lane by turn
-    //    end: the 2.361.2 behaviour, one turn later.
+    // ⑥ `seven_day_overage_included` is the account's MODEL-CAP lane
+    //    (inc-mubu23bd-5vxi, 2026-09-21: the 2.1.274 binary calls that window
+    //    the "overage-included weekly (per-model bucket)", and every live buffer
+    //    on this instance reads it about twice the plan week). 2.361.2 had
+    //    mapped it to the plan lane and B-ccaa then deferred it; now it is
+    //    neither — the naming ladder finds the existing Fable cap with the
+    //    same reset, the rejection marks THAT cap on arrival, and the plan week
+    //    is never touched, with or without a banner.
     const w6 = mkWorld({ sameDeadline: true });
     w6.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-fable-5-1[1m]' });
-    w6.writeCache(w6.id.wmax, { ...w6.readCache(w6.id.wmax), scopedWeekly: [{ name: 'Fable', utilization: 0.6, resetsAt: w6.resets.wmax }] }); // a cap the evidence rule cannot pick
+    w6.writeCache(w6.id.wmax, { ...w6.readCache(w6.id.wmax), scopedWeekly: [{ name: 'Fable', utilization: 0.6, resetsAt: w6.resets.wmax }] }); // a cap the evidence rule could not pick — the ladder names it by its RESET
     const s6 = w6.sessions.get('sess-6');
     const cap6 = quiet();
     w6.eng.recordRateLimitEvent(s6, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day_overage_included', resetsAt: w6.resets.wmax, resets_at: w6.resets.wmax } });
     const pend6 = w6.eng.pendingLaneDeferrals(s6).length;
-    const before6 = w6.readCache(w6.id.wmax).sevenDay.utilization;
+    const mid6 = w6.readCache(w6.id.wmax);
     w6.eng.noteTurnEnd(s6);
     const l6 = cap6.done();
-    ok('§2b CONTROL: `seven_day_overage_included` is DEFERRED on arrival like any unscoped weekly rejection (B-ccaa) — nothing written until the lane is known',
-      pend6 === 1 && Math.abs(before6 - 0.65) < 1e-9, JSON.stringify({ pend6, before6 }));
-    ok('§2b CONTROL: …and with no banner it still marks the weekly lane by turn end (the 2.361.2 monthly-cap behaviour, one turn later), by the evidence rule',
-      w6.readCache(w6.id.wmax).sevenDay.utilization === 1 && l6.some((l) => /unscoped weekly rejection on .* → the plan weekly lane \(no banner/.test(l)),
-      JSON.stringify(w6.readCache(w6.id.wmax).sevenDay) + ' | ' + l6.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 200));
+    ok('§2b CONTROL: `seven_day_overage_included` is the MODEL-CAP lane — nothing is deferred, the FABLE cap is marked on arrival (the existing cap with this reset names it) and the plan week is untouched',
+      pend6 === 0 && Math.abs(mid6.sevenDay.utilization - 0.65) < 1e-9 && (mid6.scopedWeekly || []).find((b) => /fable/i.test(b.name))?.utilization === 1,
+      JSON.stringify({ pend6, sevenDay: mid6.sevenDay, scoped: mid6.scopedWeekly }));
+    ok('§2b CONTROL: …and with no banner the plan week STILL reads what the panel said by turn end (never the 2.361.2 plan-lane mark), the journal naming the rung that decided',
+      Math.abs(w6.readCache(w6.id.wmax).sevenDay.utilization - 0.65) < 1e-9 && l6.some((l) => /model-cap rejection on .* → the Fable model cap \(the existing model limit Fable shares this window's reset\)/.test(l)),
+      JSON.stringify(w6.readCache(w6.id.wmax).sevenDay) + ' | ' + l6.filter((l) => /\[wall\]/.test(l)).join(' | ').slice(0, 300));
 
     // ⑦ a CODEX session is never deferred — the deferral is a fact about
     //    claude's own type vocabulary, and codex's producer is a different one.
@@ -2550,12 +2553,18 @@ const R4_BELT_PATCH = [
     ok('§15 ① a `seven_day_overage_included` rejection beside a Fable banner marks the FABLE cap only — the plan week still reads what the panel said',
       Math.abs(c.sevenDay.utilization - 0.65) < 1e-9 && c.sevenDay.status !== 'limited' && !!fable && fable.utilization === 1 && fable.resetsAt === reset, JSON.stringify({ sevenDay: c.sevenDay, fable }));
     ok('§15 ① …ONE demotion (the 11:18:20 pair was two)', demotions.length === 1 && /fable/.test(demotions[0]), demotions.join(' | ').slice(0, 220));
-    ok('§15 ① …the journal says the banner decided, and the OPUS conversation on the same member is not bounced',
-      lines.some((l) => /unscoped weekly rejection on .* → the Fable model cap \(the banner names/.test(l)) && w.linkOf('sess-7') === 'wmax', w.linkOf('sess-7'));
-    // PRE-FIX CONTROL: the type excused from the deferral ⇒ written on arrival ⇒ two lanes for one wall
+    // Since inc-mubu23bd-5vxi the type is the MODEL-CAP lane itself (no
+    // deferral): the ladder names the cap by its reset ON ARRIVAL, the banner
+    // then marks the same lane, and the journal says which rung decided.
+    ok('§15 ① …the journal says the ladder named the cap on arrival (the existing Fable cap shares the reset), and the OPUS conversation on the same member is not bounced',
+      lines.some((l) => /model-cap rejection on .* → the Fable model cap \(/.test(l)) && w.linkOf('sess-7') === 'wmax', w.linkOf('sess-7') + ' | ' + lines.filter((l) => /model-cap rejection/.test(l)).join(' | ').slice(0, 200));
+    // PRE-FIX CONTROL: the 2.361.2 mapping — the overage-included type IS the
+    // weekly lane, written on arrival ⇒ two lanes for one wall (the 11:18:20
+    // shape). The patch re-maps the parsed lane at the engine's entry, which
+    // is exactly what `parseRateLimitEvent` did before the parse was fixed.
     const mut = mutate('src/server/usage-pool-engine.js', 'ccaa-type', [[
-      "const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly', 'seven_day_overage_included']);",
-      "const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']); // PRE-FIX (B-ccaa): overage-included excused from the deferral",
+      '    if (ev.modelCap || (ev.windows && ev.windows.modelCap)) ev = nameCap(preKey);\n',
+      "    if (ev.modelCap) ev = { ...ev, kind: 'sevenDay', modelCap: false, scopedName: null }; // PRE-FIX (2.361.2): the overage-included type IS the weekly lane, written on arrival\n",
     ]]);
     ok('§15 ① PRE-FIX CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
     if (mut.hit) {
@@ -2615,6 +2624,47 @@ const R4_BELT_PATCH = [
     ok('§15 ③ the banner memo is a registered session field, owned by the engine and cleared with the turn pins',
       /_turnBannerLane:\s*\{ owner: 'engine', persisted: null/.test(fs.readFileSync(path.join(REPO, 'src/session-schema.js'), 'utf8'))
       && /session\._turnLaneDefer = null; session\._turnBannerLane = null;/.test(fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8')));
+  }
+}
+
+console.log('— §16 (r2) a model-cap event after the WEEK ROLLED still names the cap, and never parks an opus session');
+// From a weekly reset until the next verified panel the member's stored cap
+// carries LAST week's reset; a 2.1.274 event then states THIS week's. The lane
+// is the same by PHASE — an absolute compare wrote an un-named placeholder
+// beside the stale Fable, and the placeholder (family null) gated EVERY family:
+// with a rejection, every opus session on the member read 0 % and was parked.
+{
+  const w = mkWorld({ sameDeadline: true });
+  if (!w) { ok('§16 SKIP — pools unsupported on this platform', true); }
+  else {
+    const { accountRemaining } = require(path.join(REPO, 'src/account-pool-auto.js'));
+    const WEEK = 604800;
+    const OLD = w.nowSec - 3600;               // last week's reset, an hour ago — the stored cap still says so
+    const NEW = OLD + WEEK;                    // this week's, as the event states it
+    const before = w.readCache(w.id.wmax);
+    w.writeCache(w.id.wmax, { ...before, sevenDay: { ...before.sevenDay, resetsAt: OLD }, scopedWeekly: [{ name: 'Fable', utilization: 0.80, resetsAt: OLD }] });
+    w.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-fable-5-1[1m]' });
+    w.mkSession('sess-7', 'wmax', { _spawnModel: 'claude-opus-4-8' });
+    const { so } = mkStdout(w);
+    const s = w.sessions.get('sess-6');
+    s._normalizer = createMessageManager('claude', 'sess-6');
+    const pty = mkPty();
+    so.setupSessionPty(s, 'sess-6', pty);
+    const cap = quiet();
+    pty.data(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: NEW, rateLimitType: 'seven_day_overage_included', overageStatus: 'rejected', isUsingOverage: false, unifiedWindows: { five_hour: { utilization: 0.03, resetsAt: w.nowSec + 3600 }, seven_day: { utilization: 0.10, resetsAt: NEW }, seven_day_overage_included: { utilization: 1, resetsAt: NEW } } } }) + '\n');
+    const lines = cap.done();
+    const c = w.readCache(w.id.wmax);
+    const fable = (c.scopedWeekly || []).find((b) => /fable/i.test(b.name || ''));
+    ok('§16 the rolled rejection lands on the FABLE cap (dead @ this week) — no placeholder beside it, one scoped entry',
+      !!fable && fable.utilization === 1 && fable.resetsAt === NEW && !(c.scopedWeekly || []).some((b) => /model cap/i.test(b.name || '')) && (c.scopedWeekly || []).length === 1, JSON.stringify(c.scopedWeekly));
+    ok('§16 …the plan week reads THIS week\'s 0.10, and the journal says the ladder named the cap by its existing limit',
+      Math.abs(c.sevenDay.utilization - 0.10) < 1e-9 && c.sevenDay.resetsAt === NEW && lines.some((l) => /model-cap rejection on .* → the Fable model cap \(/.test(l)), JSON.stringify(c.sevenDay) + ' | ' + lines.filter((l) => /model-cap rejection/.test(l)).join(' | ').slice(0, 200));
+    const remO = accountRemaining(projectCacheForFamily(c, 'opus'), w.nowSec), remF = accountRemaining(projectCacheForFamily(c, 'fable'), w.nowSec);
+    ok('§16 THE MONEY: the opus family sees the plan week (90 %), the fable family its dead cap (0 %) — no un-named bucket parks every family',
+      remO.known && Math.abs(remO.remaining - 90) < 1e-9 && remF.known && remF.remaining === 0, JSON.stringify({ remO, remF }));
+    const members = MEMBERS.map((m) => ({ id: w.id[m.tag], name: m.name }));
+    const stay = decidePoolSwitch({ currentId: w.id.wmax, members, readCache: (id) => projectCacheForFamily(w.readCache(id), 'opus'), nowSec: w.nowSec, explain: true });
+    ok('§16 …so the OPUS conversation on that member has no wall to leave (the pool reads it healthy)', stay.to == null && stay.reason === 'healthy', JSON.stringify(stay).slice(0, 200));
   }
 }
 

@@ -61,7 +61,7 @@ const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a 
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
 // the two panels ask the same function.
 const { overageState } = require('../spend-authorizer.js');
-const { captureRateLimitEvent } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
+const { captureRateLimitEvent, resolveModelCapLane, lanesSnapshot } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
 // ── THE harness registry (S4, docs/design-harness-plugins.md §2.4): each
 // harness declares its QuotaSignalSource = normalize / signalFromStream /
 // probe rung / classifyAuthFailure. The engine asks the registry, never a
@@ -1114,6 +1114,11 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write' } = {}) {
   try {
     if (!key || !ev || !(Number(ev.resetsAt) > 0)) return null;
     if (ev.kind !== 'sevenDay' && !(ev.kind === 'scoped' && ev.scopedName)) return null; // a 5h window names a TIME, never an account (reading-lag r2)
+    // the UN-NAMED model cap names no account window either: since r2 the
+    // placeholder rides the event as its own key so the wall machine can spell
+    // it, and a witness run would otherwise stamp a 'model cap' family into the
+    // sidecar that the naming ladder then reads back as a NAMED cap
+    if (ev.kind === 'scoped' && String(ev.scopedName).toLowerCase() === String(quotaModel.MODEL_CAP_PLACEHOLDER.name).toLowerCase()) return null;
     const raw = readApiWitnessFile(key) || {};
     const ring = (Array.isArray(raw.ring) ? raw.ring.filter((e) => e && Number(e.resetsAt) > 0) : []).slice(-(API_WITNESS_RING - 1));
     const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome };
@@ -1935,27 +1940,30 @@ function noteWallSignal(session, sig = {}) {
 // to kind 'scoped' through rate-limit-capture's existing regex and is never
 // deferred at all.
 //
-// `seven_day_overage_included` IS AN UNSCOPED WEEKLY REJECTION TOO (B-ccaa,
-// 2026-09-16 11:18:20 on this instance, reproduced from the telemetry shard:
-// `rate-limit-event <member>:sevenDay:rejected:reading` with NO
-// `rate-limit-lane-deferred`, then `usage-limit-banner-marked …:scoped`, then
-// TWO `wall-demote` lines — 7d AND fable — in the same second). The type names
-// the vendor's overage-INCLUDED accounting of the weekly window, and 2.361.2
-// mapped it to the plan lane on arrival; but it names no MODEL either, and the
-// only record that does is the same turn's banner. Written the instant it
-// arrived it marked the plan lane while the banner marked the Fable cap: one
-// wall, two lanes, the storm's ② over again through the one type the rule had
-// excused. So it is deferred like `seven_day` — with no banner the evidence
-// rule still lands it on the plan lane by turn end (the 2.361.2 behaviour,
-// one turn later), and a banner naming a model folds it into that cap.
+// `seven_day_overage_included` IS NOT AN UNSCOPED WEEKLY REJECTION AT ALL
+// (inc-mubu23bd-5vxi, 2026-09-21; it was B-ccaa's excused type before that).
+// The 2.1.274 binary describes that window as the "overage-included weekly
+// (per-model bucket; present only for accounts whose responses carry that
+// window)", and every live buffer on this instance reads it about twice the
+// plan week (0.43/0.87 on the owner's account, whose verified /usage panel
+// said plan 43 % · Fable 86 %). So rate-limit-capture parses it as a SCOPED
+// lane — the account's model cap — and names the model through quota-model's
+// `nameModelCapLane` (the sidecar's scoped window with this reset, an existing
+// model limit with this reset, the request family as a tie-breaker, else the
+// `model:cap` placeholder that folds into the named cap on the next panel or
+// banner). A rejection on it therefore marks the CAP on arrival and never the
+// plan lane; the same turn's Fable banner marks the same lane (or the lane the
+// placeholder folds into), so B-ccaa's "one wall, two lanes" cannot recur
+// through this type and there is nothing left to defer. Only `seven_day` /
+// `weekly` — the types that genuinely name no lane a model cap could hide in
+// — stay provisional.
 //
-// THE COST, STATED. The immediate write is what makes the pool act in the same
-// tick, and deferring it means a turn that is KILLED between the rejection and
-// its `result` leaves no bucket mark at all (today it would leave a wrong one).
-// The window is milliseconds — the incident's own rejection and its turn end
-// share a second — and `maybePoolAutoSwitch` still runs on the provisional
-// signal, so the pool moves immediately regardless of the mark.
-const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly', 'seven_day_overage_included']);
+// THE COST, STATED. A rejection that states no reset on an account whose caps
+// nothing names lands on the placeholder with no reset: it counts for the
+// account-level min (the conservative direction), names no wall the demotion
+// pass can act on (a scoped signal without a name is skipped), and is retired
+// by the next panel that enumerates the account's caps.
+const UNSCOPED_WEEKLY_TYPES = new Set(['seven_day', 'weekly']);
 // REACHABILITY, STATED HONESTLY (r3). A turn's rejections share ONE key by
 // construction — `rejectionSlotFor` pins the credential slot at the first keyed
 // signal and `noteTurnEnd` clears it — so the only way this cap binds is
@@ -2712,8 +2720,22 @@ function recordRateLimitEvent(session, msg) {
     // the session's harness classifies the record (S4 QuotaSignalSource) —
     // the parse itself is rate-limit-capture's, reached through the registry
     const sig = quotaSourceFor(session.backend).signalFromStream(msg);
-    const ev = sig && sig.source === 'rate_limit_event' ? sig.ev : null;
+    let ev = sig && sig.source === 'rate_limit_event' ? sig.ev : null;
     if (!ev) return;
+    // THE MODEL-CAP LANE IS NAMED BEFORE ANYTHING READS THE EVENT'S KIND
+    // (inc-mubu23bd-5vxi). `seven_day_overage_included` names the account's
+    // per-model weekly bucket by its ACCOUNTING, not by model, so the record
+    // arrives as a scoped lane with no name; the ladder (quota-model's
+    // `nameModelCapLane`, run by rate-limit-capture against the account's
+    // sidecar + limits) names it, and every signal, window and write below
+    // carries that name. The key here is the best PRE-attribution answer (the
+    // turn pin, else the session's slot) — `readingSlotFor` is NOT asked yet,
+    // because asking it without the window would pin the turn before the lag
+    // shadow had its say; the write re-asks the ladder on the key it lands on.
+    const capHint = (() => { try { return familyOfModel(sessionModelFor(session)); } catch { return null; } })();
+    const nameCap = (k) => resolveModelCapLane({ cacheDir: USAGE_CACHE_DIR, key: k, ev: { ...ev, modelCapLane: null, modelCapName: null, modelCapDisplay: null }, hint: capHint });
+    const preKey = (session._turnReadingSlot && session._turnReadingSlot.key) || usageCacheKeyFor(session);
+    if (ev.modelCap || (ev.windows && ev.windows.modelCap)) ev = nameCap(preKey);
     // Session-scoped actions below (pool switch, auto-resume) stay on THIS
     // session regardless of re-attribution: it is genuinely blocked no
     // matter whose bucket filled.
@@ -2731,7 +2753,16 @@ function recordRateLimitEvent(session, msg) {
     // ours about what the process is reading. A REJECTION deliberately keeps
     // the turn-pinned rejection slot untouched (its resetsAt is frequently
     // absent or a bounded guess, and its identity has its own r3 pin).
-    const win = ev.status === 'rejected' ? null : readingLag.windowOf(ev);
+    // A 2.1.274 record states EVERY window, so the evidence handed to the
+    // guard is every NAMED lane it states (the un-named placeholder carries no
+    // identity); an older record is judged on its one bucket exactly as before.
+    const win = ev.status === 'rejected' ? null : readingLag.windowOf(ev.windows ? lanesSnapshot(ev, { named: true }) : ev);
+    // THE WITNESS RING TAKES ONE CANDIDATE PER RESPONSE, and the plan weekly
+    // reset is the strongest fingerprint the response states — so it is the
+    // candidate whenever `unifiedWindows.seven_day` is present, else the
+    // representative bucket as before. (`noteApiDerivedWindow`'s own rules —
+    // weekly only, K agreeing, the anchor stamp — are untouched.)
+    const witnessEv = (ev.windows && ev.windows.sevenDay && ev.windows.sevenDay.resetsAt) ? { kind: 'sevenDay', scopedName: null, resetsAt: ev.windows.sevenDay.resetsAt } : ev;
     // THE FINGERPRINT IS "THE NUMBERS", not "the window" (caught by the shared-
     // phase leg of test-readings-attribution §14). The r3 clause says *the link
     // moved but the numbers did not*, and a window alone almost never moves —
@@ -2755,12 +2786,12 @@ function recordRateLimitEvent(session, msg) {
     if (win) {
       const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot, witness } });
       if (!target) {                             // archived with a reason — never written where it provably does not belong
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, ev, session, { outcome: 'archived' });
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'archived' });
         return;
       }
       if (target !== key) {
         key = target; refiled = true;
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, ev, session, { outcome: 'refiled' });
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled' });
         // the window is better evidence than the pin that produced the wrong
         // answer, so the REST of the turn follows it too (the 06:10:46Z shape:
         // a pin held from before three re-points filed one member's fresh
@@ -2808,15 +2839,25 @@ function recordRateLimitEvent(session, msg) {
       if (session._turnBannerLane) { try { laneFromBanner(session, session._turnBannerLane); } catch (e) { console.warn('[wall] lane-from-banner failed:', e.message); } }
       return;
     }
+    // the lane is named on the key it LANDS on (the guard may have moved it)
+    if (writeKey !== preKey && (ev.modelCap || (ev.windows && ev.windows.modelCap))) ev = nameCap(writeKey);
     if (!corr || writeKey !== slotKey) corr = corroborateReading(session, writeKey, 'rate-limit-event:' + ev.kind); // a rejection, or a re-filed reading: corroborate the key actually written
-    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, corroborated: corr ? corr.agree : undefined });
+    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, corroborated: corr ? corr.agree : undefined, hint: capHint });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); return; }
+    // THE LANE DECISION IS SAID, like resolveTurnLane says its own: a model-cap
+    // rejection names the cap it marked (or the placeholder) and which rung
+    // decided, so the journal can be read back against the pool's next move.
+    if (ev.modelCap && ev.status === 'rejected') {
+      const lane = ev.modelCapLane || {};
+      console.log(`[wall] ${session._webuiId}: model-cap rejection on ${nameOf(writeKey)} → ${lane.named ? 'the ' + lane.name + ' model cap' : 'the un-named model cap (placeholder)'} (${lane.why || 'no rule spoke'})`);
+      global.__vsEvent?.('rate-limit-lane', `${writeKey}:scoped:${ev.modelCapName || 'cap'}`);
+    }
     global.__vsEvent?.('rate-limit-event', `${writeKey}:${ev.kind}:${ev.status}${r.wroteReading ? ':reading' : ''}`);
     // THE API-DERIVED WINDOW (B-855a): a reading the account's OWN API stated,
     // filed on a slot-VALIDATED link, not re-filed by the guard and eligible
     // as a witness, is ONE candidate for the ring the panel probe is checked
     // against — K agreeing candidates make it the witness.
-    if (r.wroteReading && ev.status !== 'rejected' && win && !refiled && witness && witness.ok) noteApiDerivedWindow(writeKey, ev, session, { outcome: 'write' });
+    if (r.wroteReading && ev.status !== 'rejected' && win && !refiled && witness && witness.ok) noteApiDerivedWindow(writeKey, witnessEv, session, { outcome: 'write' });
     // a reading busts the estimator memo via fetchedAt and becomes an anchor
     // at the next sweep; exhaustion acts NOW (banner parity)
     if (r.dead) {
@@ -2832,10 +2873,15 @@ function recordRateLimitEvent(session, msg) {
       // names ONE bucket, so the snapshot handed over is that bucket in the
       // shared shape — claude states no limit lane, so the lane matches by
       // construction and every claude reading is judged on its numbers alone.
+      // A 2.1.274 record states every window, so the snapshot handed over is
+      // every lane it states (the edge's own rule — "no OTHER stated bucket of
+      // that lane is spent" — then judges them all); an older record still
+      // names its one bucket.
       if (ev.status && ev.status !== 'rejected') {
-        const snap = ev.kind === 'scoped'
-          ? { scopedWeekly: [{ name: ev.scopedName || '', utilization: ev.utilization, resetsAt: ev.resetsAt }] }
-          : { [ev.kind]: { utilization: ev.utilization, resetsAt: ev.resetsAt } };
+        const snap = ev.windows ? lanesSnapshot(ev)
+          : ev.kind === 'scoped'
+            ? { scopedWeekly: [{ name: ev.scopedName || '', utilization: ev.utilization, resetsAt: ev.resetsAt }] }
+            : { [ev.kind]: { utilization: ev.utilization, resetsAt: ev.resetsAt } };
         noteQuotaReadingForResume(session, snap, 'fresh non-rejected reading');
       }
       kickPoolEval();

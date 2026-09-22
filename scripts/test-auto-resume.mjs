@@ -1292,6 +1292,21 @@ function mkEdgeWorld({ arModule = null, rotateWall = false, streaming = false, r
   ok('a model-scoped weekly is identified by NAME (two caps are two windows)',
     windowOpened({ snapshot: { scopedWeekly: [{ name: 'Fable', utilization: 0, resetsAt: Math.floor(Date.now() / 1000) + 900 }] }, armedLane: null, armedBucket: 'scoped', armedScopedName: 'Fable' }).open === true
     && windowOpened({ snapshot: { scopedWeekly: [{ name: 'Fable', utilization: 0, resetsAt: Math.floor(Date.now() / 1000) + 900 }] }, armedLane: null, armedBucket: 'scoped', armedScopedName: 'Opus' }).why === 'other-bucket');
+  // r2: the UN-NAMED model cap wall (the placeholder) is spelled ONE way on both sides — the wall signal
+  // records the event's scopedName and the reading edge compares it with the snapshot's name; a null
+  // there left an un-named cap wall waiting only on its timer
+  {
+    const { parseRateLimitEvent, resolveModelCapLane, lanesSnapshot } = require(path.join(REPO, 'src/rate-limit-capture.js'));
+    const nowS = Math.floor(Date.now() / 1000);
+    const fresh = (u) => parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: nowS + 900, rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 0.2, resetsAt: nowS + 900 }, seven_day: { utilization: 0.1, resetsAt: nowS + 500000 }, seven_day_overage_included: { utilization: u, resetsAt: nowS + 500000 } } } });
+    const wall = resolveModelCapLane({ ev: parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: nowS + 500000, rateLimitType: 'seven_day_overage_included' } }) });
+    ok('r2: a model-cap rejection nothing names carries the placeholder\'s key as its scopedName (what the wall signal records)', wall.scopedName === 'model cap' && wall.modelCapName === null && wall.modelCapLane.named === false);
+    ok('r2: …and a later placeholder reading below the spent threshold OPENS that wall (the snapshot spells the same lane)',
+      windowOpened({ snapshot: lanesSnapshot(fresh(0.1)), armedLane: null, armedBucket: 'scoped', armedScopedName: wall.scopedName }).open === true);
+    ok('r2: …while a placeholder reading still at 100 % keeps it blocked, and a NAMED Fable arm is another bucket',
+      windowOpened({ snapshot: lanesSnapshot(fresh(1)), armedLane: null, armedBucket: 'scoped', armedScopedName: wall.scopedName }).why === 'still-blocked'
+      && windowOpened({ snapshot: lanesSnapshot(fresh(0.1)), armedLane: null, armedBucket: 'scoped', armedScopedName: 'fable' }).why === 'other-bucket');
+  }
   // …and the CONSEQUENCE, not just the verdict: a 5h wall on a session with a
   // clean breaker, and a healthy 7d reading. Without the bucket rule this
   // fires a billed turn straight back into the wall — the rule is what makes

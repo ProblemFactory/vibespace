@@ -667,7 +667,10 @@ function mergeLimitSets(prev, next) {
     if (byId.has(l.limitId)) byId.set(l.limitId, mergeLimit(byId.get(l.limitId), l));
     else { order.push(l.limitId); byId.set(l.limitId, l); }
   }
-  const limits = order.map((id) => byId.get(id));
+  // THE ONE NAMED EXCEPTION to "never collapse": the un-named model cap folds
+  // into the named lane it turns out to be (same weekly reset) — see
+  // `foldPlaceholderCap`. Two NAMED limits still never collapse.
+  const limits = foldPlaceholderCap(order.map((id) => byId.get(id)));
   const fetchedAt = Math.max(posNum(p.fetchedAt) || 0, posNum(n.fetchedAt) || 0) || null;
   // The set-level source names whoever produced the NEWEST limit — never the
   // last writer to touch the file, which is exactly the collapse this replaces.
@@ -680,6 +683,128 @@ function mergeLimitSets(prev, next) {
     source: (newest && newest.source) || n.source || p.source,
     limits, extra,
   });
+}
+
+// ── THE MODEL-CAP LANE (inc-mubu23bd-5vxi, 2026-09-21) ──────────────────────
+// claude 2.1.274's `rate_limit_event` carries `unifiedWindows` — the 5-hour,
+// the weekly and, "for accounts whose responses carry that window", the
+// `seven_day_overage_included` window, which the binary itself describes as a
+// PER-MODEL bucket. Measured on this instance (12 live buffers, both weekly
+// windows sharing one reset): seven_day vs seven_day_overage_included =
+// 0.15/0.29, 0.11/0.22, 0.13/0.25, 0.26/0.51, 0.42/0.85, 0.37/0.74, 0.43/0.87,
+// 0.29/0.59 — always two different numbers, the bucket about twice the plan —
+// and the owner's own account read 0.43/0.87 while its verified /usage panel
+// said plan 43 %, scoped weekly Fable 86 %. So that window IS the account's
+// model-cap weekly lane (`scope:'model'`), never the plan lane; but the record
+// names it by ACCOUNTING, not by model — no `seven_day_fable` exists.
+//
+// THE LANE IS DECIDED BY WHAT NAMES IT (the B-ccaa invariant, now with a
+// producer that names every lane). The rungs, in order, each PURE:
+//   ① the account's established-window sidecar (`.window-<key>`, api-phase
+//     verified) lists its scoped windows BY FAMILY with their reset — a family
+//     whose reset is this window's reset names it (`fable` → `model:fable`);
+//   ② an existing `scope:'model'` limit on the account with the same weekly
+//     reset IS the same lane;
+//   ③ several candidates ⇒ the caller's HINT (the session's request-model
+//     family: the bucket is per-model and the response is for that request)
+//     breaks the tie; a hint that names none of them decides nothing;
+//   ④ NOTHING names it ⇒ the placeholder `model:cap` / "Model cap", family
+//     null: a scoped limit like any other (it counts for the account-level
+//     min, which is the conservative direction), NEVER written into the plan,
+//     and folded into the named lane the moment one shows up with the same
+//     reset (a panel, a banner) — `foldPlaceholderCap`, run by every merge.
+// A rejection that states no reset can only be named through a hint that
+// matches one of the account's KNOWN cap families (the vocabulary is the
+// account's own; it is not a guess at a family the account never showed).
+const MODEL_CAP_PLACEHOLDER = Object.freeze({ limitId: 'model:cap', name: 'Model cap' });
+
+// A WEEKLY WINDOW IS THE SAME WINDOW BY ITS PHASE, NEVER BY THE INSTANT (r2,
+// 2026-09-21): a roll adds exactly WEEK_SEC, and from the roll until the next
+// verified panel every `.window-` sidecar and every stored cap still carry
+// LAST week's reset (the sidecar is written by the verified panel only). An
+// absolute compare made the cap un-nameable for that whole stretch — a
+// placeholder was written beside the stale named cap and, being un-named, it
+// gated EVERY family (an opus session parked on a Fable bucket). This is
+// reading-lag's `weeklyNear` rule, spelled here because this module imports
+// nothing; test-quota-model ⑲ pins the two byte-for-byte on a table.
+const WEEK_SEC = 604800;
+function weeklyPhaseNear(a, b, jitterSec = WINDOW_JITTER_SEC) {
+  const p = posNum(a), q = posNum(b);
+  if (p == null || q == null) return false;
+  const d = Math.abs((p % WEEK_SEC) - (q % WEEK_SEC));
+  return Math.min(d, WEEK_SEC - d) <= jitterSec;
+}
+
+/** The limitId of a model-scoped bucket, from its display name — ONE spelling
+ *  (fromLegacy, the harness event builder, the statusline's drop rule and the
+ *  naming rule all ask this). The placeholder's name maps to its own id so the
+ *  legacy view round-trips. */
+function scopedLimitId(name) {
+  const n = lower(name).trim();
+  if (n === lower(MODEL_CAP_PLACEHOLDER.name)) return MODEL_CAP_PLACEHOLDER.limitId;
+  return 'model:' + n.replace(/\s+/g, '-');
+}
+function isPlaceholderCap(limit) { return !!limit && limit.limitId === MODEL_CAP_PLACEHOLDER.limitId; }
+const capitalize = (s) => String(s || '').replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** Which lane is a model-cap window? `limits` = the account's typed limits,
+ *  `scoped` = the sidecar's `{family: resetsAt}` map, `resetsAt` = the
+ *  window's own reset (unix s), `hint` = the requesting session's family or
+ *  null. Returns `{limitId, name, family, named, why}` — `named:false` is the
+ *  placeholder, and `why` says which rung decided. */
+function nameModelCapLane({ limits = [], scoped = null, resetsAt = null, hint = null, jitterSec = WINDOW_JITTER_SEC } = {}) {
+  const r = posNum(resetsAt);
+  const near = (a) => r != null && weeklyPhaseNear(a, r, jitterSec); // the PHASE: a rolled week is the same lane
+  const cands = new Map(); // limitId → {limitId, name, family, via}
+  const add = (c) => { if (c && c.limitId && !cands.has(c.limitId)) cands.set(c.limitId, c); };
+  const known = new Map(); // every cap family/name the account has ever shown, reset or not
+  for (const [fam, at] of Object.entries(scoped && typeof scoped === 'object' ? scoped : {})) {
+    const f = lower(fam); if (!f) continue;
+    const c = { limitId: 'model:' + f.replace(/\s+/g, '-'), name: capitalize(f), family: f, via: 'sidecar' };
+    known.set(f, c);
+    if (near(at)) add(c);
+  }
+  for (const l of Array.isArray(limits) ? limits : []) {
+    if (!l || l.scope !== 'model' || isPlaceholderCap(l)) continue;
+    const fam = lower(l.family) || lower(l.name) || null;
+    const c = { limitId: l.limitId, name: l.name || l.limitId, family: l.family || null, via: 'limit' };
+    if (fam && !known.has(fam)) known.set(fam, c);
+    const w = windowOfKind(l, '7d') || windowsOf(l).find((x) => x && isBudgetKind(x.kind)) || null;
+    if (w && near(w.resetsAt)) add(c);
+  }
+  const h = lower(hint) || null;
+  const pick = (c, why) => ({ limitId: c.limitId, name: c.name, family: c.family, named: true, why });
+  if (cands.size === 1) { const c = [...cands.values()][0]; return pick(c, `the ${c.via === 'sidecar' ? 'established window' : 'existing model limit'} ${c.name} shares this window's reset`); }
+  if (cands.size > 1) {
+    const byHint = h ? [...cands.values()].find((c) => lower(c.family) === h || lower(c.name) === h) : null;
+    if (byHint) return pick(byHint, `${cands.size} model caps share this reset; the session requests ${byHint.name}`);
+    return { ...MODEL_CAP_PLACEHOLDER, family: null, named: false, why: `${cands.size} model caps share this reset and no request model breaks the tie` };
+  }
+  if (r == null && h && known.has(h)) { const c = known.get(h); return pick(c, `no reset stated; the session requests ${c.name}, a cap this account has shown`); }
+  return { ...MODEL_CAP_PLACEHOLDER, family: null, named: false, why: r == null ? 'no reset stated and nothing names the lane' : 'nothing on this account names a model cap with this reset' };
+}
+
+/** Fold the un-named cap into the NAMED model limit that shares its weekly
+ *  reset — the only collapse this model permits, because `model:cap` is not a
+ *  second limit but the same lane before anybody named it. The window merge is
+ *  `mergeWindow` (the newer measurement wins); the placeholder is dropped.
+ *  A placeholder that states no reset, or that matches no named lane, is left
+ *  exactly where it is (a later panel enumerates and retires it). */
+function foldPlaceholderCap(limits, { jitterSec = WINDOW_JITTER_SEC } = {}) {
+  const list = Array.isArray(limits) ? limits : [];
+  const ph = list.find(isPlaceholderCap);
+  if (!ph) return list;
+  const phW = windowOfKind(ph, '7d') || windowsOf(ph).find((x) => x && isBudgetKind(x.kind)) || null;
+  const r = phW ? posNum(phW.resetsAt) : null;
+  if (r == null) return list;
+  const named = list.filter((l) => l && l.scope === 'model' && !isPlaceholderCap(l)).filter((l) => {
+    const w = windowOfKind(l, '7d') || windowsOf(l).find((x) => x && isBudgetKind(x.kind)) || null;
+    return w && weeklyPhaseNear(w.resetsAt, r, jitterSec); // the PHASE, so a placeholder written after a roll folds into last week's named cap
+  });
+  if (named.length !== 1) return list; // none, or ambiguous: the placeholder stays honest
+  const target = named[0];
+  const folded = mergeLimit(target, { ...ph, limitId: target.limitId, name: target.name, model: target.model, family: target.family, scope: 'model' });
+  return list.filter((l) => l !== ph).map((l) => (l === target ? folded : l));
 }
 
 // ── panels: ordering + labels ───────────────────────────────────────────────
@@ -946,10 +1071,11 @@ function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, 
     const flags = {};
     if (s.severity) flags.severity = s.severity;
     if (s.asOf) flags.asOf = s.asOf;
+    const placeholder = scopedLimitId(s.name) === MODEL_CAP_PLACEHOLDER.limitId;
     limits.push(makeLimit({
-      limitId: 'model:' + lower(s.name).replace(/\s+/g, '-'),
-      name: String(s.name), scope: 'model', model: String(s.name),
-      family: familyOf ? familyOf(s.name) : null,
+      limitId: scopedLimitId(s.name),
+      name: String(s.name), scope: 'model', model: placeholder ? null : String(s.name),
+      family: placeholder ? null : (familyOf ? familyOf(s.name) : null),
       windows: [w], flags, source: srcName, fetchedAt: posNum(s.asOf) || at,
     }));
   }
@@ -1186,6 +1312,8 @@ module.exports = {
   windowStatesSpend, bucketStatesSpend, spendingWindows,
   // merge
   mergeLimitSets, mergeLimit, mergeWindow,
+  // the model-cap lane: named by what names it, else the placeholder that folds later (inc-mubu23bd-5vxi)
+  MODEL_CAP_PLACEHOLDER, scopedLimitId, isPlaceholderCap, nameModelCapLane, foldPlaceholderCap, weeklyPhaseNear, WEEK_SEC,
   // "did these numbers move?" — the write path's carried-forward rule
   windowClaimKey, limitClaimKey, sameLimitClaim,
   // "did this READ see the whole set?" — the retirement's right to speak

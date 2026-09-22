@@ -1911,9 +1911,12 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§15 …because it is NOT a field of the snapshot those producers rewrite (that is what let one statusline render disarm the whole guard)',
       w.readCache(w.LINK).ownWindow === undefined, JSON.stringify(Object.keys(w.readCache(w.LINK))));
     const ur = read('src/usage-routes.js');
-    ok('§15 SOURCE PIN: the ONLY producer that writes the window sidecar is the panel refresh — the one whose key and credential dir are the same decision',
+    // (inc-mubu23bd-5vxi: the capture READS the sidecar — the naming ladder asks
+    // its `scoped` map which model a cap window is — and must never WRITE it)
+    ok('§15 SOURCE PIN: the ONLY producer that writes the window sidecar is the panel refresh — the one whose key and credential dir are the same decision (rate-limit-capture may only READ it, for the model-cap naming ladder)',
       /windowSidecarName\(key\)/.test(ur) && /source: 'on-demand'/.test(ur)
-      && !/windowSidecarName/.test(code('src/rate-limit-capture.js')), '');
+      && !/writeSidecar|writeFileSync\([^)]*windowSidecarName|renameSync\([^)]*windowSidecarName/.test(code('src/rate-limit-capture.js'))
+      && /readFileSync\(path\.join\(cacheDir, readingLag\.windowSidecarName\(key\)\)/.test(code('src/rate-limit-capture.js')), '');
     ok('§15 …and it is never READ BACK from `sevenDay.resetsAt` (the field a mis-filed reading overwrites — that would let one bad write redefine the account)',
       /readingLag\.windowSidecarName\(key\)/.test(code('src/server/usage-pool-engine.js')) && !/ownWindow = .*sevenDay\.resetsAt/.test(code('src/server/usage-pool-engine.js')));
   }
@@ -2662,15 +2665,19 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§16b every live guard call is handed a PRODUCER PAYLOAD, never a merged cache snapshot (a merged snapshot is the one shape that can be mixed)',
       calls.length === 3 && calls.every((a) => /^readingLag\.windowOf\((parsed|snap)\)$/.test(a) || a === 'win'),
       JSON.stringify(calls));
-    ok('§16b …and the one that is not a whole payload is a rate_limit_event, which names exactly ONE bucket',
-      /const win = ev\.status === 'rejected' \? null : readingLag\.windowOf\(ev\);/.test(eng)
+    // (inc-mubu23bd-5vxi: since 2.1.274 one record states EVERY window; the guard
+    // is handed exactly those — `lanesSnapshot(ev)` is derived from the record
+    // alone, never from a cache — so the premise "one response, one payload" holds)
+    ok('§16b …and the one that is not a whole payload is a rate_limit_event — ONE response: its representative bucket, or every window that same response stated (never a cache snapshot)',
+      /const win = ev\.status === 'rejected' \? null : readingLag\.windowOf\(ev\.windows \? lanesSnapshot\(ev, \{ named: true \}\) : ev\);/.test(eng)
+      && /function lanesSnapshot\(ev, \{ named = false \} = \{\}\) \{\n  const out = \{\};\n  for \(const l of lanesOf\(ev\)\)/.test(read('src/rate-limit-capture.js'))
       && /if \(x\.kind === 'sevenDay'\) out\.sevenDay = r;/.test(read('src/reading-lag.js')), '');
     ok('§16b …and each cache writer preserves the TARGET\'s own scopedWeekly, read AFTER the guard has chosen the key (so a re-file can never import a stranger\'s bucket)',
       (() => {
         const tool = read('data/bin/vibespace-usage');
         const refile = tool.indexOf("if (d.action === 'refile') key = d.key;");
         const openFile = tool.indexOf("const f = path.join(CACHE_DIR, key + '.json');", refile);
-        const preserve = tool.indexOf('scopedWeekly: (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : []', openFile);
+        const preserve = tool.indexOf('const prevScoped = (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [];', openFile);
         return /if \(\(!parsed\.scopedWeekly \|\| !parsed\.scopedWeekly\.length\) && Array\.isArray\(prev\.scopedWeekly\)/.test(eng)
           && refile > 0 && openFile > refile && preserve > openFile;
       })(), '');

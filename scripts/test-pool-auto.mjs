@@ -29,6 +29,11 @@ ck('bucket: reset PASSED → full again (stale reading is meaningless)', bucketR
   const g = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: NOW - 30 }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
   ck('verdict: a 5h whose stated reset passed 30 s ago is still blocked, until the STATED instant + the grace', g.usable === false && g.blockedUntil === (NOW - 30 + RESET_GRACE_SEC) * 1000 && g.deadBuckets.length === 1, JSON.stringify(g));
   ck('…and the card is told the STATED instant, not the fire instant', g.until && g.until.resetsAt === NOW - 30 && g.deadBuckets[0].resetsAt === NOW - 30, JSON.stringify(g.until));
+  // r2: the un-named model cap's dead mark carries the bounded 24 h guess when the record states no reset — it ROLLS
+  const ph = { name: 'Model cap', utilization: 1, status: 'limited', resetsAt: NOW + 86400 };
+  ck('a model-cap placeholder marked dead with the bounded guess reads 0 now and rolls to 100 a minute after the guessed deadline (a dead mark always has a deadline)',
+    bucketRemaining(ph, NOW) === 0 && bucketRemaining(ph, NOW + 86400 + RESET_GRACE_SEC + 1) === 100);
+  ck('…while one with NO reset at all (the pre-r2 scoped dead mark) would never roll — the shape the ladder now forbids', bucketRemaining({ ...ph, resetsAt: undefined }, NOW + 30 * 86400) === 0);
 }
 ck('bucket: garbage → null', bucketRemaining({ utilization: 'x' }, NOW) === null);
 ck('account: min across 5h/7d/scoped (gate incl. 5h)', accountRemaining({ fiveHour: { utilization: 0.5, resetsAt: fut }, sevenDay: { utilization: 0.2, resetsAt: fut }, scopedWeekly: [{ name: 'Fable', utilization: 0.97, resetsAt: fut }] }, NOW).remaining === 3);

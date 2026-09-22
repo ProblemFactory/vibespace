@@ -197,6 +197,29 @@ function create({ rootDir, serverNotice, homeDir = os.homedir() }) {
       },
     },
     {
+      id: '2026-09-weekly-lanes-unfold',
+      note: "inc-mubu23bd-5vxi (2026-09-21, owner '刚才7d用量红了，刷新之后变成绿的了'): since 2.361.2 the rate_limit_event parse mapped claude's overage-included weekly type — the 2.1.274 binary's own 'overage-included weekly (per-model bucket)', about twice the plan week on every account with a model cap — onto the PLAN weekly lane and never read the record's unifiedWindows, so the plan 7d cache of every capped account was overwritten by the bucket whenever the representative claim was the bucket (the owner's read 86 % beside a verified panel saying 43 %; the taskbar donut flipped red/green against every panel). The parse is fixed; this re-derives each plan week last written by an event from the newest windowed event in the live buffers linked to that credential slot, judged by the account's own established window, through the one write path — a panel-sourced value is never touched, a key with no linked event is left for the next panel or event, and the report says what happened per key (src/weekly-lanes-unfold.js).",
+      run() {
+        const { unfoldWeeklyLanes } = require('../weekly-lanes-unfold.js');
+        const rep = unfoldWeeklyLanes({ dataDir, id: '2026-09-weekly-lanes-unfold' });
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran.
+        console.log('[migrate] weekly-lanes-unfold:', JSON.stringify(rep));
+        if (rep.rederived) {
+          try {
+            serverNotice?.('weekly-lanes-unfolded', `Quota bookkeeping repaired: ${rep.rederived} account(s) had their plan weekly usage overwritten by the model-cap bucket (a rate_limit_event lane mapping bug); each was re-derived from its own latest windowed reading (pre-repair copies in data/archive/). Panels and the pool re-derive from the corrected data.`, { level: 'info' });
+          } catch { }
+        }
+        // A REFUSED REPAIR IS A FAILED RUN (r2): the runner's contract is
+        // "failed = logged loudly, not recorded, retried next boot", and a
+        // report that swallowed an unwritable archive or a refused write was
+        // recorded as applied — the plan week kept the bucket's number for
+        // good. The keys already re-derived are `already` on the retry.
+        if (rep.unreadable) throw new Error(`usage-cache dir unreadable: ${rep.unreadable}`);
+        if (rep.refused) throw new Error(`${rep.refused} key(s) refused: ${rep.keys.filter((k) => k.action === 'refused').map((k) => `${k.key} (${k.why})`).join('; ')}`);
+      },
+    },
+    {
       id: '2026-09-adopt-legacy-browser-profile',
       note: "agent browser P1, migration step 2 (design-agent-browser-v2 §8): the ONE shared profile every agent used to land in (the `profile` key of ~/.agent-browser/config.json, else ~/.agent-browser/default-profile when it exists) becomes a registry record named \"Shared (legacy)\" — sharing 'instance', marked legacy — so an agent that explicitly asks for it gets its own tab in it instead of a stolen one. Nothing moves and nothing is deleted (the 98 GB stay where they are); a registry that already names that directory is left alone.",
       run() {

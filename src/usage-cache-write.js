@@ -117,17 +117,29 @@ function liftCacheObject(obj, { identity = null, backend = null, familyOf = null
     // Scoped to claude on purpose: codex names its limits itself ('codex',
     // 'codex_bengalfox', 'premium') and none of them is called 'plan', so a
     // backend-blind rung would invent a plan limit on every codex file.
-    if (be0 !== 'codex' && !set.limits.some((l) => l && l.limitId === 'plan')) {
+    if (be0 !== 'codex') {
       const { CLAUDE_EXTRA_KEYS } = require('./harnesses/claude-quota.js');
       const legacy = quotaModel.fromLegacy(obj, {
         identity, source: obj.source || null, fetchedAt: Number(measuredAt) || Number(obj.fetchedAt) || null,
         limitId: 'plan', familyOf, extraKeys: CLAUDE_EXTRA_KEYS,
       });
-      const plan = legacy.limits.find((l) => l && l.limitId === 'plan');
+      const have = new Set(set.limits.map((l) => l && l.limitId));
+      const restored = [];
+      const plan = have.has('plan') ? null : legacy.limits.find((l) => l && l.limitId === 'plan');
       // Only when the legacy view actually STATES something. An account whose
       // plan limit is genuinely absent (no buckets at all) keeps it absent —
       // this rung restores a reading, it does not manufacture one.
-      if (plan && plan.windows.length) return quotaModel.makeLimitSet({ ...set, limits: [plan, ...set.limits] });
+      if (plan && plan.windows.length) restored.push(plan);
+      // THE SAME RUNG FOR A MODEL CAP THE STATUSLINE MEASURED (2.1.274 ships
+      // `rate_limits.model_scoped[]`, inc-mubu23bd-5vxi): the tool drops the
+      // `model:<name>` limit it measured exactly as it drops the plan one, so a
+      // legacy `scopedWeekly` entry whose limit is ABSENT from the array is that
+      // reading, stamped with the object's own provenance. Every write-path
+      // write projects the array INTO `scopedWeekly`, so after a retirement the
+      // entry is gone too — the only way an entry outlives its limit is the
+      // producer that cannot construct one.
+      for (const l of legacy.limits) if (l && l.scope === 'model' && !have.has(l.limitId)) restored.push(l);
+      if (restored.length) return quotaModel.makeLimitSet({ ...set, limits: [...restored, ...set.limits] });
     }
     return set;
   }

@@ -48,7 +48,37 @@ const waitReady = (p) => new Promise((res, rej) => {
   setTimeout(() => rej(new Error('boot timeout\n' + out)), 20000);
 });
 
+// ── the boot-time weekly-lanes repair on a SEEDED scratch data/ (inc-mubu23bd-5vxi,
+// 2026-09-21): the owner's account as the incident left it (plan 7d holding the
+// model bucket's 86 %, source rate-limit-event), its api-phase-verified window
+// sidecar, a claude session on that subscription whose buffer tail carries the
+// owner's rate_limit_event VERBATIM. The one-shot migration runs inside
+// server.listen's callback and the usage routes re-read the directory, so the
+// FIRST /api/usage of this boot must already say what the taskbar donut draws.
+// Never the production data/: this is the worktree's own, throwaway, data dir.
+const FX_KEY = 'sub-fixture-max';
+{
+  const d = path.join(wt, 'data');
+  for (const sub of ['usage-cache', 'session-meta', 'session-buffers', 'subs/' + FX_KEY]) fs.mkdirSync(path.join(d, sub), { recursive: true });
+  fs.writeFileSync(path.join(d, 'accounts.json'), JSON.stringify({ version: 1, defaultAccountId: null, defaultCodexAccountId: null, accounts: [{ id: FX_KEY, name: 'Member Max', type: 'subscription', source: 'login', createdAt: Date.now() }] }));
+  fs.writeFileSync(path.join(d, 'usage-cache', FX_KEY + '.json'), JSON.stringify({ fiveHour: { utilization: 0.09, resetsAt: 1790048400 }, sevenDay: { utilization: 0.86, resetsAt: 1790535600, status: 'allowed_warning' }, scopedWeekly: [{ name: 'Fable', utilization: 0.87, resetsAt: 1790535600, severity: 'normal' }], fetchedAt: 1790031730410, source: 'rate-limit-event', scopedFetchedAt: 1790030899274, overage: { inUse: false, asOf: 1790031730410, status: 'rejected', disabledReason: 'org_level_disabled' }, overallStatus: 'allowed' }));
+  // the sidecar is the PANEL's minute-precise instant, 60 s before the API's (the production shape)
+  fs.writeFileSync(path.join(d, 'usage-cache', '.window-' + FX_KEY), JSON.stringify({ sevenDay: 1790535540, fiveHour: 1790048340, scoped: { fable: 1790535540 }, at: 1790030899275, source: 'on-demand', verifiedAt: 1790030899275, verifiedBy: 'api-phase' }));
+  fs.writeFileSync(path.join(d, 'session-meta', 'cw-1-100.json'), JSON.stringify({ accountId: FX_KEY, backend: 'claude', host: null, mode: 'chat' }));
+  fs.writeFileSync(path.join(d, 'session-buffers', 'sess-1-100.buf'), JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1790535600, rateLimitType: 'seven_day_overage_included', utilization: 0.87, isUsingOverage: false, surpassedThreshold: 0.75, unifiedWindows: { five_hour: { utilization: 0.09, resetsAt: 1790048400 }, seven_day: { utilization: 0.43, resetsAt: 1790535600 }, seven_day_overage_included: { utilization: 0.87, resetsAt: 1790535600 } } }, uuid: 'e2e00000-0000-4000-8000-000000000001', session_id: 'e2e00000-0000-4000-8000-000000000002' }) + '\n');
+}
+
 let srv = boot(); await waitReady(srv);
+let ok = true;
+{
+  const u = await (await fetch(`http://127.0.0.1:${PORT}/api/usage`)).json();
+  const a = u?.accounts?.[FX_KEY];
+  const good = a && Math.abs(a.sevenDay?.utilization - 0.43) < 1e-9 && Math.abs(a.fiveHour?.utilization - 0.09) < 1e-9 && (a.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.87;
+  let ledger = null; try { ledger = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'migrations.json'), 'utf-8')); } catch { }
+  const ran = !!ledger?.applied?.['2026-09-weekly-lanes-unfold'];
+  if (good && ran) console.log('  ✓ boot-time weekly-lanes repair: /api/usage says sevenDay 0.43 · fiveHour 0.09 · Fable 0.87 for the seeded key, and the ledger records the run');
+  else { ok = false; console.error('  ✗ boot-time weekly-lanes repair: expected sevenDay 0.43 / 5h 0.09 / Fable 0.87 + a ledger row, got', JSON.stringify({ ran, a: a && { f: a.fiveHour, s: a.sevenDay, sc: a.scopedWeekly } })); }
+}
 const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
 await new Promise((r) => ws.on('open', r));
 const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
@@ -63,7 +93,7 @@ await new Promise((r) => setTimeout(r, 1500));
 ws.close(); srv.kill('SIGKILL');
 await new Promise((r) => setTimeout(r, 800));
 srv = boot(); const out2 = await waitReady(srv);
-let ok = /Reconnected/.test(out2);
+ok = ok && /Reconnected/.test(out2);
 console.log(ok ? 'RESTORE OK — session reconnected after SIGKILL restart' : 'RESTORE FAILED:\n' + out2);
 
 // ── GET-route battery (2.333.0, after /api/agent-hooks 500'd in production):
@@ -122,5 +152,5 @@ ws2.send(JSON.stringify({ type: 'kill', sessionId: sid }));
 await new Promise((r) => setTimeout(r, 1200));
 ws2.close(); srv.kill('SIGKILL');
 await new Promise((r) => setTimeout(r, 300));
-console.log(ok ? 'ALL PASS (1)' : 'FAIL');
+console.log(ok ? 'ALL PASS (2)' : 'FAIL');
 process.exit(ok ? 0 : 1);

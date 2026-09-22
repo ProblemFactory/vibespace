@@ -59,6 +59,43 @@ function win(w) {
   };
 }
 
+// MODEL-SCOPED WEEKLY WINDOWS (claude 2.1.274, measured in the binary's own
+// statusline schema — inc-mubu23bd-5vxi): `rate_limits.model_scoped[]` =
+// `{display_name, utilization, resets_at}` ("Per-model weekly windows from the
+// server limits[] array … absent when nothing is known about them; an empty
+// array means the endpoint itself answered and listed no per-model weekly
+// window"), beside the older `seven_day_opus` / `seven_day_sonnet` fields.
+// THE UNIT IS THE PRODUCER'S FACT, NEVER A GUESS FROM THE VALUE (2.369.99):
+// `utilization` here is the server row's `percent` (the binary's `Yde`
+// projection puts `s.percent` in it) — 0-100 like `used_percentage`, divided
+// by 100 unconditionally; `resets_at` is an ISO string there (`new
+// Date(x*1000).toISOString()`), a unix number on the older fields.
+// THE LANE IS DECIDED BY WHAT NAMES IT: the display name IS the lane, so every
+// entry is written as the scoped bucket of that name and NEVER into
+// `seven_day` — the plan week is the plan week. An empty list states nothing
+// (the r5 rule: an empty read is indistinguishable from a broken parse).
+function scopedFromRateLimits(rl) {
+  const out = [];
+  const seen = new Set();
+  const at = Date.now();
+  const resetOf = (v) => (typeof v === 'number' ? v : (typeof v === 'string' && v ? (Math.floor(Date.parse(v) / 1000) || Number(v) || 0) : 0));
+  const push = (name, pct, resetsAt) => {
+    if (!name || typeof pct !== 'number') return;
+    const key = String(name).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const u = Math.max(0, Math.min(1, pct / 100));
+    out.push({ name: String(name), utilization: u, status: u >= 1 ? 'limited' : 'allowed', resetsAt: resetsAt || 0, asOf: at });
+  };
+  if (Array.isArray(rl.model_scoped)) for (const m of rl.model_scoped) if (m && typeof m === 'object') push(m.display_name, m.utilization, resetOf(m.resets_at));
+  for (const [k, v] of Object.entries(rl)) {
+    if (!/^seven_day_./.test(k) || k === 'seven_day_oauth_apps' || !v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    push(name, typeof v.used_percentage === 'number' ? v.used_percentage : v.utilization, resetOf(v.resets_at));
+  }
+  return out;
+}
+
 // WHICH ACCOUNT DOES THIS READING BELONG TO (2026-09-07 — the readings-by-slot
 // root cause, statusline half). VIBESPACE_ACCOUNT_KEY is fixed at SPAWN, and a
 // POOLED session's credentials get re-pointed under the running CLI (the pool's
@@ -545,28 +582,35 @@ function writeUsage(p) {
   // edit has to remember. A spread of what was there is a property. So `prev`
   // goes in first and only the fields this render actually measured are stated
   // after it.
+  // the model-scoped weekly windows THIS render measured (2.1.274 `model_scoped`
+  // / `seven_day_<model>`; absent on older CLIs ⇒ an empty list ⇒ the previous
+  // entries survive untouched, which is exactly the 2.70.0 rule)
+  const scopedMeasured = scopedFromRateLimits(rl);
+  const prevScoped = (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [];
+  const measuredName = (s) => scopedMeasured.some((m) => String(m.name).toLowerCase() === String((s && s.name) || '').toLowerCase());
   const out = {
     ...(prev && typeof prev === 'object' ? prev : {}),
     fiveHour, sevenDay,
-    // the statusline payload has NO model-scoped buckets (five_hour/seven_day
-    // only — verified vs CLI 2.1.206); they come from the server's on-demand
-    // refresh, and an account that has never had one still needs the field
-    // present (it is how a reader tells a claude snapshot from a codex one)
-    scopedWeekly: (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [],
+    // an account that has never had a model-scoped bucket still needs the field
+    // present (it is how a reader tells a claude snapshot from a codex one);
+    // a bucket this render did NOT measure is kept by construction
+    scopedWeekly: scopedMeasured.length ? [...prevScoped.filter((s) => !measuredName(s)), ...scopedMeasured] : prevScoped,
     overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(), source: 'passive',
   };
-  // THE ONE LIMIT THIS PRODUCER KNOWS ABOUT IS THE ONE IT DROPS. `limits` is
-  // the canonical half (src/usage-cache-write.js) and every entry carries its
-  // own source and its own age. This tool can measure exactly one of them — the
-  // plan limit — and it has just written that reading into the legacy buckets
-  // above, where `liftCacheObject` reconstructs it stamped with this object's
-  // own `source`/`fetchedAt`. Dropping it is therefore the whole update: every
-  // OTHER limit (a model-scoped cap, the overage limit) survives byte-identical
-  // with the provenance of the producer that DID measure it, and this file —
-  // which cannot require src/ and must not carry a second spelling of the
-  // model's window rules — never has to construct a limit at all.
-  if (Array.isArray(out.limits)) out.limits = out.limits.filter((l) => !l || l.limitId !== 'plan');
+  // THE LIMITS THIS PRODUCER MEASURED ARE THE ONES IT DROPS. `limits` is the
+  // canonical half (src/usage-cache-write.js) and every entry carries its own
+  // source and its own age. This tool measures the plan limit and, on 2.1.274,
+  // the model caps the payload NAMES — and it has just written those readings
+  // into the legacy buckets above, where `liftCacheObject` reconstructs each
+  // one stamped with this object's own `source`/`fetchedAt`. Dropping them is
+  // therefore the whole update: every OTHER limit (a model cap this payload did
+  // not name, the overage limit) survives byte-identical with the provenance of
+  // the producer that DID measure it, and this file — which cannot require src/
+  // and must not carry a second spelling of the model's window rules — never
+  // has to construct a limit at all. A measured model cap is matched by its
+  // NAME (the limit's `name` is the display name), never by re-spelling the id.
+  if (Array.isArray(out.limits)) out.limits = out.limits.filter((l) => !l || !(l.limitId === 'plan' || (l.scope === 'model' && measuredName(l))));
   // …and one field is deliberately NOT inherited: `corroborated` is a verdict
   // about ONE reading (did the OTel observation agree with the credential slot
   // that reading was filed on), and this is a different reading, taken by a
