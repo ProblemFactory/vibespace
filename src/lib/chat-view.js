@@ -153,6 +153,21 @@ const FOLD_DOM_CEILING = 3000;
 // than two viewports (each pass doubles the slab up to 200 records): one wheel
 // gesture across a fold lands ONCE, on a full viewport, instead of fifteen times.
 const FOLD_GROW_PASSES = 8;
+// THE KEEP ZONE (inc-mubvu3a4-x8sb, the 976 MB session: "每次都往回跳转很多，往下又直接
+// 跳到底部"): a trim may remove rendered cards only OUTSIDE the viewport plus this
+// many viewports above its top edge and below its bottom edge — whatever the card
+// count. Before this the trims measured the WHOLE window against a three-viewport
+// gate and then removed BY COUNT down to 150 cards; on a compact-mode session 150
+// cards are about one viewport, so every upward page trimmed the anchor away, the
+// delta fallback clamped scrollTop to 0 and the grow loop refilled and trimmed again
+// (750–1,300 messages walked per wheel notch). By height the two invariants are
+// structural: a trim cannot move the viewport, and cannot undo the landing a grow
+// loop just made (the loop's target is one viewport in the paging direction; the
+// zone keeps one).
+const TRIM_KEEP_VIEWPORTS = 1;
+// The card count a trim aims for; a zone that holds more keeps them (folded members
+// are display:none and cost nothing). FOLD_DOM_CEILING is the one hard bound.
+const TRIM_SOFT_CARDS = 150;
 
 class ChatView {
   constructor(winInfo, wsManager, sessionId, app, { readOnly = false, subagentView = false } = {}) {
@@ -442,8 +457,12 @@ class ChatView {
     this._scrollBtn.title = t('Scroll to bottom');
     this._scrollBtn.onclick = () => {
       if (this._teleported) { this.jumpToBottom(); return; }   // return to latest
-      if (this._readOnly || !this.sessionId) {
-        // Read-only or no session: just scroll, don't fetch
+      // A read-only view whose rendered window still ENDS at the live tail just
+      // scrolls; one that paged into history (windowEnd < total after a trim)
+      // refetches the tail like a live window does — pinning a partial window
+      // at its DOM bottom is the H2 lie (inc-mubvu3a4-x8sb).
+      if ((this._readOnly || !this.sessionId) && !(this._windowEnd < this._total && this._canPaginate)) {
+        // Read-only or no session at the tail: just scroll, don't fetch
         this._pinned = true;
         this._newMsgCount = 0;
         this._scrollBtn.classList.add('hidden');
@@ -533,20 +552,43 @@ class ChatView {
       else this._noteUserInput();
     });
     this._messageList.addEventListener('wheel', (e) => {
-      if (this._loading || !this._canPaginate) return;
+      if (!this._canPaginate) return;
       const list = this._messageList;
-      if (e.deltaY < 0 && list.scrollTop < 10) {
+      // the notch in px (deltaMode 1 = lines, 2 = pages)
+      const px = Math.abs(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * list.clientHeight : e.deltaY);
+      // what the notch can scroll into NATIVELY in its direction — the browser
+      // clamps the rest away inside this same event, so it is ours to carry
+      const roomUp = list.scrollTop;
+      const roomDown = list.scrollHeight - list.scrollTop - list.clientHeight;
+      if (e.deltaY < 0 && (roomUp < 10 || px > roomUp)) {
+        // THE NOTCH IS NOT LOST (inc-mubvu3a4-x8sb): at the top edge a wheel-up
+        // has nothing to scroll into, and while a slab is in flight (`_loading`,
+        // held 300 ms past the landing) this handler used to drop it outright —
+        // a trackpad fling paid one notch to trigger the load and lost the
+        // rest, parking the reader at the top of the fresh slab. THE OVERSHOOT
+        // IS CARRIED (verifier r1: the first cut carried only a notch that
+        // STARTED at the edge, so a 700 px notch beginning 232 px from the top
+        // still lost 468 px and the fling parked at scrollTop 43 with 2,178
+        // messages above): the part of the notch the browser cannot deliver
+        // (`px − room`) rides into the landing through _applyWheelCarry —
+        // bounded to ONE VIEWPORT PER LANDING (the keep zone's width, so a
+        // landing never leaves it) — and a notch that arrived during the
+        // lockout re-arms the extend when it lifts (_liftLoadLock), leaving
+        // its trace here first. A wheel's px are the reader's own ask —
+        // intent, not displacement.
+        this._addWheelCarry('up', px - roomUp);
+        if (this._loading) { this._wheelPending = 'up'; this._trace('wheelTop', { st: Math.round(roomUp), eaten: 1, carry: Math.round(this._wheelCarry || 0) }); return; }
         // A wheel-up that PAGES is also a statement of intent to leave the
         // live tail — unpin explicitly (inc-mspemym2, round 5): under
         // collapsed geometry scrollTop can be 0 while still pinned, and a
         // pinned view that pages up gets yanked straight back to the bottom
         // by the pin machinery on the next live edit — the visible bounce.
         this._pinned = false;
+        this._trace('wheelTop', { st: Math.round(list.scrollTop), sh: list.scrollHeight, ws: this._windowStart, tp: this._teleported ? 1 : 0, carry: Math.round(this._wheelCarry || 0) });
         if (this._teleported) this._maybeSeekEarlier();        // teleported: seek older by line
         else if (this._windowStart > 0) this._extendTop();
         else this._maybeSeekEarlier();                         // registered tail exhausted → seek gap
-      } else if (e.deltaY > 0 && list.scrollHeight - list.clientHeight > 50
-                 && list.scrollHeight - list.scrollTop - list.clientHeight < 10) {
+      } else if (e.deltaY > 0 && list.scrollHeight - list.clientHeight > 50 && (roomDown < 10 || px > roomDown)) {
         // THE BOUNCE (inc-msor3oax, still reproducing on 2.305.0): with a
         // fresh batch's heights unresolved the list has NO scrollable range
         // (sh === ch === 755 in the capture), so "parked at the bottom edge"
@@ -564,8 +606,17 @@ class ChatView {
         // history stalled at the rendered window's end and only a jiggle
         // (up+down = one scroll event) advanced it a page at a time (real
         // report: "得不断上翻下翻才会触发往下一点点").
+        // …and the mirror of the carry above: a wheel-down that reaches the
+        // DOM's bottom edge with newer history still to load (the H2 lie was
+        // that this edge re-pinned; now it pages, and the notch's overshoot
+        // rides into the landing)
+        this._addWheelCarry('down', px - roomDown);
+        if (this._loading) { if (!this._teleported && this._windowEnd < this._total) this._wheelPending = 'down'; this._trace('wheelBottom', { st: Math.round(list.scrollTop), eaten: 1, carry: Math.round(this._wheelCarry || 0) }); return; }
+        this._trace('wheelBottom', { st: Math.round(list.scrollTop), sh: list.scrollHeight, we: this._windowEnd, total: this._total, tp: this._teleported ? 1 : 0, carry: Math.round(this._wheelCarry || 0) });
         if (this._teleported) this._maybeSeekLater();          // teleported: seek newer by line
         else if (this._windowEnd < this._total) this._extendBottom();
+      } else if (e.deltaY && this._wheelCarryDir && (e.deltaY < 0) !== (this._wheelCarryDir === 'up')) {
+        this._clearWheelCarry('reversal'); // a reversal cancels a carried notch
       }
     }, { passive: true });
 
@@ -633,8 +684,14 @@ class ChatView {
           return;
         }
         const atBottom = scrollHeight - scrollTop - clientHeight < 50;
-        if (atBottom && !this._pinned) {
-          this._trace('repin', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight,
+        // PINNED ⇔ AT THE LIVE TAIL (inc-mubvu3a4-x8sb, H2): the bottom of the
+        // DOM is the middle of history after an upward page — re-pinning there
+        // (`repin we:1851 total:3201`) handed the reader to the pinned auto-
+        // follow, which walked them to the tail with no input. The DOM edge is
+        // a paging boundary (pageDown below); only the live tail is a pin.
+        const atTail = atBottom && this._atLiveTail(scrollTop, scrollHeight, clientHeight);
+        if (atTail && !this._pinned) {
+          this._trace('repin', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight, we: this._windowEnd, total: this._total,
             structAge: Date.now() - (this._lastStructuralAt || 0), n: this._messageList.childElementCount,
             fsb: this._fsbActive ? (this._fsbFrames || 0) : -1, posAgo: this._lastPositionAt ? Date.now() - this._lastPositionAt : -1 });
           this._pinned = true;
@@ -708,6 +765,7 @@ class ChatView {
           || (window.__vsViewportResizeAt && (Date.now() - window.__vsViewportResizeAt < 400)); // browser-window drag-resize = the same displacement, third door (2.339.1)
         if (!this._pinned && scrollTop < 100 && !this._loading && this._canPaginate && !goingDown && !lockUp
             && userRecentUp && !inputResizing) {
+          this._trace('pageUp', { st: Math.round(scrollTop), sh: scrollHeight, ws: this._windowStart, tp: this._teleported ? 1 : 0 });
           if (this._teleported) this._maybeSeekEarlier();       // teleported: seek older by line
           else if (this._windowStart > 0) this._extendTop();
           else this._maybeSeekEarlier();                        // registered tail exhausted → seek gap
@@ -731,6 +789,7 @@ class ChatView {
         const reading = !this._pinned && this._windowEnd < this._total;
         if (scrollHeight - scrollTop - clientHeight < 300 && !this._loading && this._canPaginate
             && !goingUp && !lockDown && (!reading || userRecent) && !inputResizing) {
+          this._trace('pageDown', { st: Math.round(scrollTop), sh: scrollHeight, we: this._windowEnd, total: this._total, pin: this._pinned ? 1 : 0, reading: reading ? 1 : 0, input: userRecent ? 1 : 0, tp: this._teleported ? 1 : 0 });
           if (this._teleported) this._maybeSeekLater();
           else if (this._windowEnd < this._total) this._extendBottom();
         }
@@ -2397,6 +2456,7 @@ class ChatView {
     this._lastNavAt = Date.now();
     this._trace?.('userNav', { via });
     this._cancelForcedScroll(via);   // …and so does an off-list navigation (B-9702)
+    this._clearWheelCarry?.(via);    // a carried notch is stale now (r1)
     this._endResumeSettle();
   }
 
@@ -2451,10 +2511,15 @@ class ChatView {
     this._loading = true;
     const endLoad = this._beginHistoryLoad(t('Loading earlier messages…'));
     try {
-      // GROW BY HEIGHT (inc-mub8xwrb-z57x): a slab of 50 folded records adds a few
-      // hundred px; while the window is still shorter than two viewports and
-      // history remains, keep loading (doubling the slab, FOLD_GROW_PASSES max)
-      // inside this ONE loading span — the reader gets one landing per gesture.
+      // GROW BY HEIGHT (inc-mub8xwrb-z57x; re-derived for inc-mubvu3a4-x8sb): a
+      // slab of 50 folded records adds a few hundred px. While the history
+      // rendered ABOVE the viewport is still shorter than one viewport and more
+      // remains, keep loading (doubling the slab, FOLD_GROW_PASSES max) inside
+      // this ONE loading span — one gesture, one landing, on a full viewport of
+      // older history. The measure is what the reader can scroll INTO (the
+      // scrollTop the anchored landing left), not the whole window's height: a
+      // window five viewports tall with a 40 px slab above the viewport still
+      // needs more, and a window that is short only BELOW the viewport does not.
       let slab = count, passes = 0;
       for (;;) {
       const newStart = Math.max(0, this._windowStart - slab);
@@ -2471,56 +2536,72 @@ class ChatView {
       // load-looping the top sentinel). The fold (_updateRuns) runs INSIDE
       // the anchored section so the restore covers every height mutation of
       // this batch in one task.
+      const fresh = [];
       const anchored = this._withViewportAnchor(() => {
         // :scope > — a bare '.chat-msg' can match a NESTED element (inside a
         // card), whose parent isn't the list → insertBefore throws NotFoundError
         // (telemetry-captured real user error). Fragment + one validated insert.
-        const firstEl = this._messageList.querySelector(':scope > .chat-msg');
+        // …and never a GAP card (verifier r1): a gap slab that survived the
+        // walk back to the tail sat directly above the newest cards, and the
+        // next tail-mode prepend landed the fresh (newer) slab ABOVE the
+        // ancient gap history. The window's first card is the first non-gap one.
+        const firstEl = this._messageList.querySelector(':scope > .chat-msg:not(.chat-gap-msg)');
         this._loadingHistory = true;
         const frag = document.createDocumentFragment();
         for (const msg of msgs) {
           const el = this._renderDetached(msg);
-          if (el) frag.appendChild(el);
+          if (el) { frag.appendChild(el); fresh.push(el); }
         }
         const ref = (firstEl && firstEl.parentNode === this._messageList) ? firstEl : this._messageList.firstChild;
         this._messageList.insertBefore(frag, ref);
         this._loadingHistory = false;
         this._windowStart = newStart;
-
-        // Trim bottom if DOM window too large (keep max ~150 rendered messages)
-        // — NEVER while PINNED (inc-mtq5bpjt-0o0n): a pinned view IS the live
-        // tail, and this trim is what CONVERTS "we paged up by accident" into
-        // permanent damage — it drops the tail (windowEnd < total), unpins, and
-        // leaves the reader stranded in history (the capture: trimBottom
-        // removed 48/50, then anchored:false landed scrollTop at 0). The DOM
-        // stays bounded regardless: the live-append path trims the TOP while
-        // pinned, and the next genuine (unpinned) page-up trims normally.
-        // FOLD FIRST (inc-mub8xwrb-z57x): the trim's height gate must see the
-        // window's REAL geometry — with the fold running after the trim, the 50
-        // fresh cards were still unfolded and tall at decision time, the gate
-        // never held, the trim removed the visible bottom, and the fold then
-        // collapsed what was left to one viewport (the 2.368.29 guard never
-        // fired for anyone). A trim changes run membership, so the fold runs
-        // again after one.
+        // MEASURED heights for the fresh slab (inc-mubvu3a4-x8sb): the anchor
+        // restore below and the trim's zone read real geometry, not the 80 px
+        // content-visibility placeholders that shrank to 14–20 px after paint.
+        this._reserveFreshHeights(fresh);
+        // FOLD FIRST (inc-mub8xwrb-z57x): the landing and the trim must see
+        // the window's REAL geometry — with the fold running after the trim,
+        // the 50 fresh cards were still unfolded and tall at decision time.
         this._updateRuns();
-        if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });
-        else { const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }
       });
       if (!anchored) {
         // no usable anchor (very top / empty list) — old delta-math fallback
-        this._traceExpect();
+        this._traceExpect('extendTop:delta');
         this._messageList.scrollTop += (this._messageList.scrollHeight - scrollHeightBefore);
       }
+      // THE TRIM COMES AFTER THE LANDING (inc-mubvu3a4-x8sb): it reads the
+      // restored scrollTop, removes only cards beyond the keep zone below the
+      // viewport (_trimEdge), and so can neither move the viewport nor take the
+      // anchor with it — inside the anchored section it measured the pre-trim
+      // window and removed the anchor by count (`anchorLost {why:removed}`,
+      // `extendTop:done anchored:false st:0`). NEVER while PINNED
+      // (inc-mtq5bpjt-0o0n): a pinned view IS the live tail, and this trim is
+      // what CONVERTS "we paged up by accident" into permanent damage — it
+      // drops the tail (windowEnd < total), unpins, and leaves the reader
+      // stranded in history. The DOM stays bounded regardless: the live-append
+      // path trims the TOP while pinned, and the next genuine (unpinned)
+      // page-up trims normally. A trim changes run membership, so the fold
+      // runs again after one.
+      if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });
+      else { const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }
       // …and re-assert the tail: a prepend must never move a PINNED viewport
       // off the bottom. Under transitional geometry the anchor restore fails
       // (anchored:false) and the delta fallback clamps scrollTop to 0 — the
       // visible "跳到历史消息了".
       if (this._pinned) { this._trace('pinnedRetail', { ws: newStart }); this._scrollToBottom(); }
-      this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
+      // THE CARRIED NOTCH (inc-mubvu3a4-x8sb): the px a wheel-up asked for
+      // beyond the top edge, applied now that there is history to scroll into
+      // — never more than one viewport (the zone's width), never while pinned.
+      // Applied BEFORE the grow check, so the loop still lands with a full
+      // viewport of history above the reader's final position.
+      this._applyWheelCarry('up', 'extendTop:carry');
+      const above = Math.round(this._messageList.scrollTop); // history rendered ABOVE the viewport after the landing
+      this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: above, sh: this._messageList.scrollHeight, ch: this._messageList.clientHeight, pass: passes + 1 });
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       passes++;
-      const short = this._messageList.scrollHeight < this._messageList.clientHeight * 2;
-      if (!short || this._pinned || this._windowStart <= 0 || passes >= FOLD_GROW_PASSES || !msgs.length) { if (passes > 1) this._trace('extendTop:grown', { passes, ws: this._windowStart, sh: this._messageList.scrollHeight, ch: this._messageList.clientHeight }); break; }
+      const short = above < this._messageList.clientHeight;
+      if (!short || this._pinned || this._windowStart <= 0 || passes >= FOLD_GROW_PASSES || !msgs.length) { if (passes > 1) this._trace('extendTop:grown', { passes, ws: this._windowStart, st: above, sh: this._messageList.scrollHeight, ch: this._messageList.clientHeight }); break; }
       slab = Math.min(200, slab * 2);
       }
     } catch (e) {
@@ -2533,8 +2614,58 @@ class ChatView {
       try { track('event', 'chat-extend-top-failed', String(e?.message || e).slice(0, 120)); } catch {}
     } finally {
       endLoad();
-      setTimeout(() => { this._loading = false; }, 300);
+      setTimeout(() => this._liftLoadLock(), 300);
     }
+  }
+
+  /** The 300 ms load lock lifts — and a wheel notch that arrived at the edge
+   *  while it was held continues the reader's gesture (inc-mubvu3a4-x8sb: a
+   *  fling outran the lockout and parked at the top of the fresh slab with
+   *  thousands of messages above; the next notch then only re-armed the
+   *  load). Positive evidence, re-checked at the edge: the notch was real, the
+   *  reader is still there, nothing else moved the view. */
+  _liftLoadLock() {
+    this._loading = false;
+    const pending = this._wheelPending; this._wheelPending = null;
+    if (!pending || this._suspended || this._disposed || this._teleported) return;
+    const list = this._messageList;
+    if (pending === 'up' && this._windowStart > 0 && list.scrollTop < 10) { this._pinned = false; this._trace('wheelPending', { dir: 'up', ws: this._windowStart }); this._extendTop(); } // a wheel-up is intent to leave the tail (the wheelTop branch unpins the same way)
+    else if (pending === 'down' && this._windowEnd < this._total && list.scrollHeight - list.scrollTop - list.clientHeight < 10) { this._trace('wheelPending', { dir: 'down', we: this._windowEnd }); this._extendBottom(); }
+  }
+
+  // ── THE CARRIED NOTCH, ONE ACCOUNTING (inc-mubvu3a4-x8sb; verifier r1) ────
+  /** Accumulate the part of a wheel notch the browser could not deliver in its
+   *  direction (`px − room`) — never more than one viewport (the keep zone's
+   *  width, so one landing never leaves the zone); a change of direction
+   *  starts over. */
+  _addWheelCarry(dir, px) {
+    if (!(px > 0)) return;
+    const cap = this._messageList.clientHeight;
+    this._wheelCarry = this._wheelCarryDir === dir ? Math.min((this._wheelCarry || 0) + px, cap) : Math.min(px, cap);
+    this._wheelCarryDir = dir;
+  }
+  /** Apply the carried px at a LANDING — both extends AND both gap slabs read
+   *  it (the seek path used to eat a carried notch silently): bounded by the
+   *  room the landing produced, never in the up direction while pinned (a
+   *  pinned view is the tail). The carry is consumed either way; returns the
+   *  px applied. */
+  _applyWheelCarry(dir, by) {
+    const list = this._messageList;
+    const room = dir === 'up' ? list.scrollTop : Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
+    const carry = (this._wheelCarryDir === dir && !(dir === 'up' && this._pinned)) ? Math.min(this._wheelCarry || 0, room) : 0;
+    this._wheelCarry = 0;
+    if (carry > 0) { this._traceExpect(by); list.scrollTop += dir === 'up' ? -carry : carry; this._trace('wheelCarry', { dir, px: Math.round(carry), by }); }
+    return carry;
+  }
+  /** A navigation the reader CHOSE (a jump, the minimap, a search reveal, a
+   *  teleport, the scroll-to-bottom button) makes a carried notch stale — it
+   *  must not ride into the next tail-mode landing (verifier r1: a notch eaten
+   *  during a gap load survived the scroll-to-bottom button and would have
+   *  landed the first extend a viewport further than the reader asked). */
+  _clearWheelCarry(why) {
+    if (!this._wheelCarryDir && !this._wheelPending) return;
+    this._trace('wheelCarry:clear', { why, px: Math.round(this._wheelCarry || 0), dir: this._wheelCarryDir || '' });
+    this._wheelCarry = 0; this._wheelCarryDir = null; this._wheelPending = null;
   }
 
   // Install an invisible sentinel at the very top of the message list. It plays
@@ -2758,23 +2889,44 @@ class ChatView {
     this._loading = true;
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try {
-      const end = Math.min(this._total, this._windowEnd + count);
+      // GROW BY HEIGHT, DOWNWARD (inc-mubvu3a4-x8sb): the mirror of _extendTop's
+      // loop — while the content rendered BELOW the viewport is shorter than one
+      // viewport and newer history remains, keep loading inside this one span,
+      // so a downward gesture through folded history lands once too.
+      let slab = count, passes = 0;
+      for (;;) {
+      const end = Math.min(this._total, this._windowEnd + slab);
       // finally resets _loading even if the fetch rejects — else pagination locks.
       const msgs = await this._fetchMessages(this._windowEnd, end - this._windowEnd);
 
+      const list = this._messageList;
+      const nBefore = list.childElementCount;
       this._loadingHistory = true;
       for (const msg of msgs) this._onCreateMessage(msg);
       this._loadingHistory = false;
       this._windowEnd = end;
+      // measured heights for the appended cards (see _extendTop)
+      const fresh = [];
+      for (let i = nBefore; i < list.children.length; i++) if (list.children[i].classList.contains('chat-msg')) fresh.push(list.children[i]);
+      this._reserveFreshHeights(fresh);
 
-      // Trim top if DOM window too large
-      this._trimTop();
-
-      // Same-task fold of the newly appended cards (see _extendTop)
+      // FOLD FIRST, then the trim, then the fold again if it removed anything —
+      // the order _extendTop keeps since 2.369.129. This side ran the trim on
+      // the tall UNFOLDED slab (the owner's `trimTop removed:351 anchored:false
+      // sh 2584→1423`) and the fold then collapsed what was left.
       this._updateRuns();
-      this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(this._messageList.scrollTop) });
+      { const before = this._windowStart; this._trimTop(); if (this._windowStart !== before) this._updateRuns(); }
+      // the carried wheel-down notch (see the wheel handler / _extendTop)
+      this._applyWheelCarry('down', 'extendBottom:carry');
+      const below = Math.round(list.scrollHeight - list.scrollTop - list.clientHeight); // content rendered BELOW the viewport
+      this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(list.scrollTop), sh: list.scrollHeight, ch: list.clientHeight, below, pass: passes + 1 });
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+      passes++;
+      const short = below < list.clientHeight;
+      if (!short || this._windowEnd >= this._total || passes >= FOLD_GROW_PASSES || !msgs.length) { if (passes > 1) this._trace('extendBottom:grown', { passes, we: this._windowEnd, below, sh: list.scrollHeight, ch: list.clientHeight }); break; }
+      slab = Math.min(200, slab * 2);
+      }
     } catch (e) {
       // Same silent class as _extendTop: the scroll handler never awaits this.
       this._showHistoryStatus(t('Couldn\'t load more messages'), {
@@ -2784,109 +2936,184 @@ class ChatView {
       try { track('event', 'chat-extend-bottom-failed', String(e?.message || e).slice(0, 120)); } catch {}
     } finally {
       endLoad();
-      setTimeout(() => { this._loading = false; }, 300);
+      setTimeout(() => this._liftLoadLock(), 300);
     }
   }
 
-  // Keep DOM under ~150 messages by removing from bottom
-  _trimBottom(maxRendered = 150) {
-    // FOLD-DOMINATED WINDOWS (inc-mtajy6wr, "上翻的时候出现大量白屏"): with
-    // semantic collapse folding whole tool/agent runs, 150 rendered messages
-    // can amount to a couple of run headers — SHORTER than the viewport
-    // (sh clamps to ch). Trimming then removes the only VISIBLE content and
-    // every wheel-tick teleports the window 50 messages through fold-space
-    // on a white screen. While the rendered window is shorter than ~2
-    // viewports, let it grow instead (fold members are hidden and cheap);
-    // 600 rendered messages is the absolute DOM bound.
+  // ── THE TRIMS: one implementation, two edges (inc-mubvu3a4-x8sb) ──────────
+  // A trim removes rendered cards OUTSIDE THE KEEP ZONE — the viewport plus
+  // TRIM_KEEP_VIEWPORTS above its top edge and below its bottom edge — and
+  // never inside it, whatever the card count. History of the rule: with
+  // semantic collapse folding whole tool runs, 150 rendered messages can be a
+  // couple of run headers (inc-mtajy6wr, "上翻的时候出现大量白屏": the fixed cap
+  // removed the only visible content and every wheel tick teleported 50
+  // messages through fold-space on a white screen); at the raised bound the
+  // same thing happened on a session of thousands of consecutive tool calls
+  // (inc-mub8xwrb-z57x, 2.369.129: "跳到上面一页的最顶部" + a frozen Chrome), so
+  // 2.369.129 refused any trim under three viewports. That gate measured the
+  // WHOLE window — including the resolved content it was about to remove —
+  // and then removed BY COUNT: on the owner's 976 MB compact-mode session
+  // (inc-mubvu3a4-x8sb) `trimBottom n:400 removed:250 sh:2851 sh2:972` took the
+  // anchor with it (`anchorLost {why:removed}`), the delta fallback clamped
+  // scrollTop to 0 and the grow loop refilled and trimmed again, five to eight
+  // passes per wheel notch. By HEIGHT the invariants are structural: a trim
+  // cannot move the viewport (everything it removes is at least a viewport
+  // away from it) and cannot undo a grow loop's landing (the loop's target is
+  // one viewport in the paging direction; the zone keeps one). TRIM_SOFT_CARDS
+  // is a target, not a rule; FOLD_DOM_CEILING is the one hard bound and
+  // removes past the zone — folded members are display:none, so that costs
+  // nothing on screen. Gap messages (.chat-gap-msg) are outside the window
+  // accounting and are never touched here (chat-view-seek's own trim keeps
+  // the same zone).
+  _trimEdge(side) {
     const list = this._messageList;
-    const els = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
-    // …and the 2.368.29 residual SEEN IN THE FIELD (inc-mub8xwrb-z57x, 2.369.129,
-    // owner "往上翻突然跳到上面一页的最顶部，跳过了中间内容" + a frozen Chrome): ONE fold
-    // run longer than the 600 bound (a session of thousands of consecutive tool
-    // calls). At the bound every 50-record extend trimmed 50 from the bottom —
-    // the only content on screen — the height collapsed to one viewport and
-    // scrollTop clamped to 0: the reader lands on the top of the slab they did
-    // not ask for, and the extend/trim churn (15 cycles in 25 s) is what froze
-    // the browser. While the window is shorter than ~3 viewports NO trim can
-    // remove anything but visible content (the grow loop lands at two, and a
-    // trim must never undo a landing the loop just made), so none runs; FOLD_DOM_CEILING is
-    // the only bound (fold members are display:none — cheap), and _extendTop
-    // grows by HEIGHT so one gesture crosses the fold in one landing.
-    if (list && list.scrollHeight < list.clientHeight * 3) { if (els.length <= FOLD_DOM_CEILING) return; maxRendered = FOLD_DOM_CEILING; this._trace('foldCeiling', { n: els.length }); }
-    if (els.length <= maxRendered) return;
-    const toRemove = els.length - maxRendered;
+    if (!list) return 0;
+    // :scope > — a bare '.chat-msg' can match an element NESTED inside a card
+    const els = list.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)');
+    if (els.length <= TRIM_SOFT_CARDS) return 0;
+    const ch = list.clientHeight, st = list.scrollTop, shBefore = list.scrollHeight;
+    const zone = this._keepZone();
+    const pos = this._cardPositions(els);
+    const must = Math.max(0, els.length - FOLD_DOM_CEILING); // past the hard bound: removed regardless of the zone
+    let n = 0;
+    if (side === 'bottom') {
+      for (let i = els.length - 1; i >= 0 && els.length - n > TRIM_SOFT_CARDS; i--) { if (n >= must && pos[i].top < zone.bottom) break; n++; }
+    } else {
+      for (let i = 0; i < els.length && els.length - n > TRIM_SOFT_CARDS; i++) { if (n >= must && pos[i].bottom > zone.top) break; n++; }
+    }
+    if (must) this._trace('foldCeiling', { side, n: els.length, forced: must });
+    if (!n) { this._trace('trimSkipZone', { side, n: els.length, st: Math.round(st), sh: shBefore, ch }); return 0; }
     const removedIds = new Set();
-    for (let i = els.length - 1; i >= els.length - toRemove; i--) {
-      const id = els[i].dataset.msgId;
+    const drop = (el) => {
+      const id = el.dataset.msgId;
       if (id) { this._elements.delete(id); this._renderedMsgIds.delete(id); removedIds.add(id); }
-      els[i].remove();
+      el.remove();
+    };
+    let anchored = null;
+    if (side === 'bottom') {
+      for (let i = els.length - 1; i >= els.length - n; i--) drop(els[i]);
+      this._windowEnd -= n;
+      this._pinned = false; // the rendered window no longer ends at the live tail
+    } else {
+      // Element-anchored ABSOLUTE restore (2.229.1, forensics-confirmed): the
+      // old relative `scrollTop -= (before - after)` double-compensated with
+      // the browser's NATIVE scroll anchoring, which reacts to the same
+      // removals with its own adjustment — the two fought in ±4000px
+      // oscillations. An absolute anchor restore converges no matter what the
+      // browser did in between. Delta math survives only as the anchorless
+      // fallback (empty/near-top viewport).
+      // A GAP SLAB LIVES ONLY DIRECTLY ABOVE MESSAGE 0 (verifier r1): the
+      // window leaving windowStart 0 here (paging down / the pinned live path)
+      // drops the seek slab with the same removal — outside the zone by
+      // construction (it sits above the cards this trim removes) and inside
+      // the same anchored section, so the viewport does not move.
+      const leavesZero = !this._teleported && this._windowStart === 0;
+      anchored = this._withViewportAnchor(() => { for (let i = 0; i < n; i++) drop(els[i]); if (leavesZero) this._dropGapSlab('trimTop', zone); });
+      this._windowStart += n;
     }
     if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
-    this._windowEnd -= toRemove;
-    this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('trimBottom', { removed: toRemove });
-    this._pinned = false; // we trimmed the bottom, can't be pinned
+    // DECISION INPUTS (inc-mubvu3a4-x8sb): the height the trim read, what it
+    // left behind, the viewport and the zone — `removed` alone could not show
+    // a trim eating the landing the grow loop had just made.
+    this._lastStructuralAt = Date.now(); this._lastStructuralDir = side === 'bottom' ? 'up' : 'down';
+    this._trace(side === 'bottom' ? 'trimBottom' : 'trimTop', { removed: n, n: els.length, anchored, sh: shBefore, sh2: list.scrollHeight, ch, st: Math.round(st), st2: Math.round(list.scrollTop), zone: [Math.round(zone.top), Math.round(zone.bottom)] });
+    if (side === 'top' && !anchored) {
+      this._traceExpect('trimTop:delta');
+      list.scrollTop -= (shBefore - list.scrollHeight);
+    }
+    return n;
+  }
+  /** Drop every loaded gap card (`.chat-gap-msg`, outside the window's
+   *  accounting) and rewind the seek sentinel, so the next exhaustion of the
+   *  registered tail re-seeks from `tailStartLine`. Refused — and said — when
+   *  a gap card still touches the keep zone (cannot happen from the top trim:
+   *  the slab sits above the cards it just removed). A slab fetch in flight
+   *  lands on a different epoch and is discarded by `_loadEarlierGap`. */
+  _dropGapSlab(why, zone) {
+    const list = this._messageList;
+    const els = list.querySelectorAll(':scope > .chat-gap-msg');
+    if (!els.length) return 0;
+    if (zone) { const pos = this._cardPositions(els); if (pos[pos.length - 1].bottom > zone.top) { this._trace('gapDrop:skip', { why, n: els.length }); return 0; } }
+    for (const el of els) el.remove();
+    const s = this._seekSentinel;
+    if (s) { s._gapCursor = null; s._gapAnchor = null; s._gapRetryAt = 0; s._gapEpoch = (s._gapEpoch || 0) + 1; }
+    // the slab's stable-heights regime ends with it (see _loadEarlierGap) — no
+    // jump-target replay: this runs inside the trim's own anchored section
+    if (!this._teleported) this._setStableHeights?.(false, { recenter: false, why: 'gapDrop' });
+    this._trace('gapDrop', { why, n: els.length });
+    return els.length;
+  }
+  /** Drop rendered cards beyond the keep zone BELOW the viewport (paging up). */
+  _trimBottom() { return this._trimEdge('bottom'); }
+  /** Drop rendered cards beyond the keep zone ABOVE the viewport (paging down / the pinned live path). */
+  _trimTop() { return this._trimEdge('top'); }
+
+  /** The reader's neighbourhood in scroll coordinates: the viewport plus
+   *  TRIM_KEEP_VIEWPORTS above and below it. Every trim (window AND gap) keeps
+   *  everything that touches it. */
+  _keepZone() {
+    const list = this._messageList;
+    const ch = list.clientHeight, st = list.scrollTop;
+    return { top: st - ch * TRIM_KEEP_VIEWPORTS, bottom: st + ch * (1 + TRIM_KEEP_VIEWPORTS) };
   }
 
-  // Keep DOM under ~150 messages by removing from top
-  _trimTop(maxRendered = 150) {
-    // Exclude lazily-loaded gap messages: they aren't part of the server
-    // window (_windowStart/_windowEnd accounting), so trimming them would
-    // corrupt the offsets and silently delete explicitly-requested history
-    // FOLD-DOMINATED WINDOWS (inc-mtajy6wr, "上翻的时候出现大量白屏"): with
-    // semantic collapse folding whole tool/agent runs, 150 rendered messages
-    // can amount to a couple of run headers — SHORTER than the viewport
-    // (sh clamps to ch). Trimming then removes the only VISIBLE content and
-    // every wheel-tick teleports the window 50 messages through fold-space
-    // on a white screen. While the rendered window is shorter than ~2
-    // viewports, let it grow instead (fold members are hidden and cheap);
-    // 600 rendered messages is the absolute DOM bound.
-    const list = this._messageList;
-    const els = list.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
-    // …and the 2.368.29 residual SEEN IN THE FIELD (inc-mub8xwrb-z57x, 2.369.129,
-    // owner "往上翻突然跳到上面一页的最顶部，跳过了中间内容" + a frozen Chrome): ONE fold
-    // run longer than the 600 bound (a session of thousands of consecutive tool
-    // calls). At the bound every 50-record extend trimmed 50 from the bottom —
-    // the only content on screen — the height collapsed to one viewport and
-    // scrollTop clamped to 0: the reader lands on the top of the slab they did
-    // not ask for, and the extend/trim churn (15 cycles in 25 s) is what froze
-    // the browser. While the window is shorter than ~3 viewports NO trim can
-    // remove anything but visible content (the grow loop lands at two, and a
-    // trim must never undo a landing the loop just made), so none runs; FOLD_DOM_CEILING is
-    // the only bound (fold members are display:none — cheap), and _extendTop
-    // grows by HEIGHT so one gesture crosses the fold in one landing.
-    if (list && list.scrollHeight < list.clientHeight * 3) { if (els.length <= FOLD_DOM_CEILING) return; maxRendered = FOLD_DOM_CEILING; this._trace('foldCeiling', { n: els.length }); }
-    if (els.length <= maxRendered) return;
-    const scrollHeightBefore = this._messageList.scrollHeight;
-    const toRemove = els.length - maxRendered;
-    const removedIds = new Set();
-    // Element-anchored ABSOLUTE restore (2.229.1, forensics-confirmed): the
-    // old relative `scrollTop -= (before - after)` double-compensated with
-    // the browser's NATIVE scroll anchoring, which reacts to the same
-    // removals with its own adjustment — the two fought in ±4000px
-    // oscillations. An absolute anchor restore converges no matter what the
-    // browser did in between. Delta math survives only as the anchorless
-    // fallback (empty/near-top viewport).
-    const anchored = this._withViewportAnchor(() => {
-      for (let i = 0; i < toRemove; i++) {
-        const id = els[i].dataset.msgId;
-        if (id) { this._elements.delete(id); this._renderedMsgIds.delete(id); removedIds.add(id); }
-        els[i].remove();
-      }
-    });
-    if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
-    this._windowStart += toRemove;
-    this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('trimTop', { removed: toRemove, anchored });
-    if (!anchored) {
-      this._traceExpect();
-      this._messageList.scrollTop -= (scrollHeightBefore - this._messageList.scrollHeight);
+  /** Scroll-coordinate spans of the given list children, in document order.
+   *  A folded card is display:none and reports offsetTop 0 — it sits at its run
+   *  header, the nearest visible thing above it, so that is the span it takes
+   *  (a member is conceptually AT its header; removing it moves no pixel). One
+   *  layout pass, reads only, no writes in between. */
+  _cardPositions(els) {
+    const out = new Array(els.length);
+    let i = 0, lastTop = 0, lastBottom = 0;
+    for (const c of this._messageList.children) {
+      const h = c.offsetHeight;
+      if (h > 0 && c.offsetParent !== null) { lastTop = c.offsetTop; lastBottom = lastTop + h; }
+      if (c === els[i]) { out[i++] = { top: lastTop, bottom: lastBottom }; if (i >= els.length) break; }
     }
+    while (i < els.length) out[i++] = { top: lastTop, bottom: lastBottom }; // a detached candidate (cannot happen for :scope > children)
+    return out;
+  }
+
+  /** MEASURED HEIGHTS FOR A FRESH SLAB (inc-mubvu3a4-x8sb): under
+   *  content-visibility a card that has never been rendered is laid out at its
+   *  80 px placeholder, so the landing and every trim decision were computed on
+   *  estimates that changed after the paint (the owner's compact rows resolved
+   *  to 14–20 px: `sh2 972 → sh 677`). Render the slab's cards once, right now
+   *  (`contentVisibility: visible`), so the anchor restore and the zone see
+   *  real geometry; two frames later the inline override comes off and
+   *  `contain-intrinsic-size: auto` keeps the LAST REMEMBERED size (recorded at
+   *  the ResizeObserver step of the frame they rendered in). A MITIGATION,
+   *  not an invariant (verifier r1 measured scrollHeight still drifting by a
+   *  few hundred px after a landing — images arriving, fonts, late layout):
+   *  the placeholders are resolved ONCE at insert; later drift is absorbed by
+   *  the browser's scroll anchoring, which keeps the reader's card where it
+   *  is. Folded members are display:none and cost nothing; a read-only view
+   *  runs without c-v already. Gap slabs (chat-view-seek) reserve the same way. */
+  _reserveFreshHeights(els) {
+    if (!els?.length || this._readOnly || this._container?.classList.contains('chat-no-content-visibility')) return;
+    for (const el of els) el.style.contentVisibility = 'visible';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (this._disposed) return;
+      for (const el of els) if (el.style.contentVisibility === 'visible') el.style.contentVisibility = '';
+    }));
+  }
+
+  /** PINNED ⇔ THE RENDERED WINDOW ENDS AT THE LIVE TAIL (inc-mubvu3a4-x8sb, H2).
+   *  `scrollHeight − scrollTop − clientHeight < 50` says "at the bottom of the
+   *  DOM", and after an upward page the DOM's bottom is the middle of history:
+   *  a down-fling reached it, the view re-pinned at `we 1851 of 3201`, and the
+   *  pinned auto-follow (pageDown needs no input while pinned, `pinnedRetail`,
+   *  the pinned extendBottom chain) walked the reader to the tail —
+   *  "往下又直接跳到底部". A teleported view has no live window at all. */
+  _atLiveTail(scrollTop, scrollHeight, clientHeight) {
+    return !this._teleported && this._windowEnd >= this._total && scrollHeight - scrollTop - clientHeight < 50;
   }
 
   // Jump to a specific message index: replace window entirely
   async jumpToIndex(targetIdx) {
     this._noteUserNav('jumpToIndex');   // a chosen destination — the resume re-tail must never overrule it
     this._trace('jumpToIndex', { idx: targetIdx });
-    this._traceExpect();
+    this._traceExpect('jumpToIndex');
     const windowSize = 50;
     const start = Math.max(0, targetIdx - 20);
     const end = Math.min(this._total, start + windowSize);
@@ -3000,6 +3227,7 @@ class ChatView {
     const step = () => {
       if (this._disposed) { this._fsbActive = false; this._programmaticScroll = false; return; }
       if (epoch !== this._fsbEpoch) return;   // cancelled/superseded — the flags belong to whoever holds the epoch now
+      this._traceExpect('fsb');
       list.scrollTop = list.scrollHeight;
       // Each frame scrolling reveals off-screen elements, browser computes
       // their real heights (replacing content-visibility estimates), scrollHeight
@@ -5150,28 +5378,30 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     // that fn may run — anchoring on one meant a dead anchor and the
     // estimate-skewed delta fallback. Members only get class-toggled: stable.
     const runChrome = (c) => c.classList.contains('chat-run-header') || c.classList.contains('chat-run-footer');
-    if (st > 0) {
-      for (const c of list.children) {
-        if (runChrome(c)) continue;
-        if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) { el = c; delta = c.offsetTop - st; break; }
-      }
-      // ALL children content-visibility-collapsed (offsetHeight 0) — their
-      // offsetTop is still valid layout truth, so anchor on position alone
-      // rather than giving up to the estimate-skewed delta fallback
-      if (!el) {
-        for (const c of list.children) {
-          if (runChrome(c)) continue;
-          if (c.offsetTop + c.offsetHeight >= st) { el = c; delta = c.offsetTop - st; break; }
-        }
-      }
-    } else if (list.children.length) {
-      // AT THE TOP EDGE (inc-mso818ry): st===0 captured NO anchor at all, so
-      // every extendTop while sitting at the top landed un-anchored and
-      // clamped into the fresh batch. The previously-first message IS the
-      // anchor — after the insert it scrolls back to the top edge, which is
-      // exactly where the reader's eyes were.
-      el = list.children[0]; delta = 0;
+    // …and NEVER the seek sentinel (inc-mubvu3a4-x8sb): in a huge session the
+    // list's first child is the 1 px `.chat-gap-sentinel`, so the top-edge
+    // branch below anchored on it and every prepend landed at scrollTop 0 —
+    // the top of the fresh slab, not the card the reader was looking at.
+    const skip = (c) => runChrome(c) || c._isSeekSentinel;
+    // THE ANCHOR IS THE FIRST VISIBLE CARD AT OR BELOW THE TOP EDGE, at every
+    // scrollTop including 0 (inc-mso818ry: st===0 used to capture NO anchor,
+    // so every extendTop from the top landed un-anchored and clamped into the
+    // fresh batch). Its offset from the edge is the delta — at the top edge
+    // that is the run header / sentinel above it, which lands back where it was.
+    for (const c of list.children) {
+      if (skip(c)) continue;
+      if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) { el = c; delta = c.offsetTop - st; break; }
     }
+    // ALL children content-visibility-collapsed (offsetHeight 0) — their
+    // offsetTop is still valid layout truth, so anchor on position alone
+    // rather than giving up to the estimate-skewed delta fallback
+    if (!el) {
+      for (const c of list.children) {
+        if (skip(c)) continue;
+        if (c.offsetTop + c.offsetHeight >= st) { el = c; delta = c.offsetTop - st; break; }
+      }
+    }
+    if (!el && list.children.length) { el = list.children[0]; delta = 0; }
     fn();
     if (el && el.isConnected) {
       let a = el;
@@ -5185,13 +5415,15 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         let next = null;
         if (!prev) { next = a.nextElementSibling; while (next && next.offsetParent === null) next = next.nextElementSibling; }
         a = prev || next;
-        if (a) { this._traceExpect?.(); list.scrollTop = a.offsetTop; return true; }
+        if (a) { this._traceExpect?.('anchor:neighbor'); list.scrollTop = a.offsetTop; return true; }
+        this._trace('anchorLost', { why: 'folded-no-neighbor', st: Math.round(st) });
         return false;
       }
-      this._traceExpect?.();
+      this._traceExpect?.('anchor');
       list.scrollTop = a.offsetTop - delta;
       return true;
     }
+    if (el) this._trace('anchorLost', { why: 'removed', st: Math.round(st), delta: Math.round(delta) });
     return false;
   }
 
@@ -5207,10 +5439,17 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
   // + tiny objects in a capped ring.
   _trace(tag, data) {
     const r = this._traceRing || (this._traceRing = []);
-    r.push(data ? { t: Date.now(), tag, ...data } : { t: Date.now(), tag });
-    if (r.length > 400) r.splice(0, r.length - 250);
+    // a monotonic `seq` per entry (verifier r1): a reader that marks a ring
+    // INDEX goes blind after the splice below (the gate's "paged but the ring
+    // recorded nothing"); marking the seq survives it
+    const seq = this._traceSeq = (this._traceSeq || 0) + 1;
+    r.push(data ? { t: Date.now(), seq, tag, ...data } : { t: Date.now(), seq, tag });
+    if (r.length > 600) r.splice(0, r.length - 400);
   }
-  _traceExpect() {}
+  /** WHO WROTE scrollTop LAST (inc-mubvu3a4-x8sb): every programmatic write
+   *  stamps its author so the coarse `scroll` sample can tell OUR write from
+   *  native anchoring / content growth (`writeAgo`, `by`). Two assignments. */
+  _traceExpect(by) { this._lastStWriteAt = Date.now(); this._lastStWriteBy = by || ''; }
   _installScrollTracer() {
     let last = 0;
     this._messageList.addEventListener('scroll', () => {
@@ -5222,6 +5461,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // key discriminator for B-21bc: a big move with NO recent user
         // wheel/touch is a programmatic yank
         wheelAgo: this._lastUserScrollAt ? Date.now() - this._lastUserScrollAt : -1,
+        writeAgo: this._lastStWriteAt ? Date.now() - this._lastStWriteAt : -1, by: this._lastStWriteBy || '',
       });
       last = st;
     }, { passive: true });
@@ -5504,7 +5744,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         if (!a) { a = anchorEl; while (a && a.offsetParent === null) a = a.nextElementSibling; }
         if (a) {
           const stBefore = list.scrollTop;
-          this._traceExpect();
+          this._traceExpect('runsRestore');
           list.scrollTop = a === anchorEl ? a.offsetTop - anchorDelta : a.offsetTop;
           if (Math.abs(list.scrollTop - stBefore) > 1) this._trace('runsRestore', { same: a === anchorEl, from: Math.round(stBefore), to: Math.round(list.scrollTop) });
         }
@@ -5620,10 +5860,10 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     this._programmaticScroll = true;
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 400);
-    this._traceExpect();
+    this._traceExpect('landOnHeader');
     list.scrollTop = run.header.offsetTop;
     this._lastStructuralAt = Date.now(); this._lastStructuralDir = null;
-    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 50;
+    const atBottom = this._atLiveTail(list.scrollTop, list.scrollHeight, list.clientHeight); // the DOM edge is not the tail (inc-mubvu3a4-x8sb)
     if (atBottom !== this._pinned) {
       this._pinned = atBottom;
       if (atBottom) this._newMsgCount = 0;

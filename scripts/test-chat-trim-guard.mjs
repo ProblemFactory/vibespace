@@ -10,6 +10,7 @@
 // (and its symmetry) from being refactored away silently.
 import fs from 'node:fs';
 import path from 'node:path';
+import { judgeGesture, PAGE_UP_BAND_PX, DELIVERY_MIN_FRACTION } from './paging-gesture-rules.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
@@ -23,19 +24,35 @@ if (!fs.existsSync(path.join(REPO, 'src/lib/build-version.js'))) {
 
 // 2.369.129 (inc-mub8xwrb-z57x): the 2.368.29 residual ("a single fold run longer than
 // 600 re-enters the slide regime") was SEEN — at the bound every extend trimmed the
-// visible bottom and the reader landed on the top of the previous slab. A window
-// shorter than two viewports is now NEVER trimmed (FOLD_DOM_CEILING is the only
-// bound) and _extendTop GROWS BY HEIGHT (up to FOLD_GROW_PASSES slabs per gesture).
-const GUARD = "if (list && list.scrollHeight < list.clientHeight * 3) { if (els.length <= FOLD_DOM_CEILING) return; maxRendered = FOLD_DOM_CEILING; this._trace('foldCeiling', { n: els.length }); }";
-const guards = cv.split(GUARD).length - 1;
-ok('the short-window guard exists in BOTH trims (bottom AND top — downward paging through folds is the mirror image): no trim at all below THREE viewports (the grow loop lands at two — a trim never undoes a landing), the fold ceiling as the only bound', guards === 2, `found ${guards}`);
-ok('trimBottom carries the guard', /_trimBottom\(maxRendered = 150\) \{[\s\S]{0,3200}FOLD_DOM_CEILING; this\._trace\('foldCeiling'/.test(cv));
-ok('trimTop carries the guard', /_trimTop\(maxRendered = 150\) \{[\s\S]{0,3200}FOLD_DOM_CEILING; this\._trace\('foldCeiling'/.test(cv));
-ok('the ceiling is ONE named number ≥ 2000 (fold members are display:none — cheap; 600 was the bound the field crossed)', /const FOLD_DOM_CEILING = (\d+);/.test(cv) && Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]) >= 2000);
-ok('_extendTop grows by HEIGHT: a bounded loop that keeps loading while the window is shorter than two viewports (never while pinned, never past the top), doubling the slab, and names the landing once', /let slab = count, passes = 0;\s*for \(;;\) \{/.test(cv) && /if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv) && /slab = Math\.min\(200, slab \* 2\);/.test(cv) && /_trace\('extendTop:grown'/.test(cv));
-ok('both incidents are named at the guard (future readers find the bundles)', /inc-mtajy6wr/.test(cv) && /inc-mub8xwrb-z57x/.test(cv));
-ok('_extendTop folds BEFORE the trim decision and re-folds after a trim (the gate must see real geometry — the 2.368.29 guard never fired because the fold ran after the trim)', /this\._updateRuns\(\);\s*if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}this\._trimBottom\(\); if \(this\._windowEnd !== before\) this\._updateRuns\(\);/.test(cv));
-ok('the trim trace tags survive (the capture channel that caught this)', cv.includes("this._trace('trimBottom'") && cv.includes("_trace('extendTop:done'"));
+// visible bottom and the reader landed on the top of the previous slab; 2.369.129
+// refused any trim under three viewports and made _extendTop grow by height.
+// inc-mubvu3a4-x8sb (the 976 MB compact-mode session, 2026-09-21) then showed that
+// gate measuring the WHOLE window — including the content it was about to remove —
+// and trimming BY COUNT to 150: `trimBottom n:400 removed:250 sh:2851 sh2:972` took
+// the anchor with it, the delta fallback clamped scrollTop to 0 and the grow loop
+// refilled and trimmed again (750–1,300 messages walked per wheel notch). THE TRIM IS
+// BY HEIGHT NOW: one implementation for both edges, a KEEP ZONE around the viewport
+// nothing inside is ever removed from, a soft card target, and the fold ceiling as
+// the one hard bound.
+const sk = fs.readFileSync(path.join(REPO, 'src/lib/chat-view-seek.js'), 'utf8');
+const rulesSrc = fs.readFileSync(path.join(REPO, 'scripts/paging-gesture-rules.mjs'), 'utf8');
+const pagingSrc = fs.readFileSync(path.join(REPO, 'scripts/test-chat-paging.mjs'), 'utf8');
+const dbgSrc = fs.readFileSync(path.join(REPO, 'scripts/dbg-huge-paging.mjs'), 'utf8');
+ok('ONE trim implementation for both edges (_trimEdge) — _trimBottom / _trimTop are its two spellings', /_trimEdge\(side\) \{/.test(cv) && /_trimBottom\(\) \{ return this\._trimEdge\('bottom'\); \}/.test(cv) && /_trimTop\(\) \{ return this\._trimEdge\('top'\); \}/.test(cv));
+ok('the keep zone is ONE named number of viewports on each side of the viewport, read through _keepZone — and the seek trim (chat-view-seek _trimGapDom) reads the same one', /const TRIM_KEEP_VIEWPORTS = 1;/.test(cv) && /_keepZone\(\) \{/.test(cv) && /top: st - ch \* TRIM_KEEP_VIEWPORTS, bottom: st \+ ch \* \(1 \+ TRIM_KEEP_VIEWPORTS\)/.test(cv) && /const zone = this\._keepZone\(\);\s*const pos = this\._cardPositions\(els\);/.test(sk));
+ok('the card target is SOFT (TRIM_SOFT_CARDS) and the zone wins: the bottom loop stops at the first card whose top is inside the zone, the top loop at the first card whose bottom is', /const TRIM_SOFT_CARDS = 150;/.test(cv) && /if \(n >= must && pos\[i\]\.top < zone\.bottom\) break;/.test(cv) && /if \(n >= must && pos\[i\]\.bottom > zone\.top\) break;/.test(cv));
+ok('the ceiling is ONE named number ≥ 2000 (fold members are display:none — cheap) and the only thing that removes INSIDE the zone (`must`)', /const FOLD_DOM_CEILING = (\d+);/.test(cv) && Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]) >= 2000 && /const must = Math\.max\(0, els\.length - FOLD_DOM_CEILING\);/.test(cv));
+ok('the pre-fix COUNT trim is gone: no `maxRendered` parameter, no three-viewport gate, no bare `.chat-msg` selector (a nested card could match)', !/_trimBottom\(maxRendered/.test(cv) && !/_trimTop\(maxRendered/.test(cv) && !/scrollHeight < list\.clientHeight \* 3/.test(cv) && /querySelectorAll\(':scope > \.chat-msg:not\(\.chat-gap-msg\)'\)/.test(cv));
+ok('folded cards take the span of the nearest VISIBLE thing above them — _cardPositions, one layout pass, reads only', /_cardPositions\(els\) \{/.test(cv) && /if \(h > 0 && c\.offsetParent !== null\) \{ lastTop = c\.offsetTop; lastBottom = lastTop \+ h; \}/.test(cv));
+ok('_extendTop grows by the history ABOVE THE VIEWPORT (the restored scrollTop), not the whole window\'s height: a bounded loop (never while pinned, never past the top), doubling the slab, naming the landing once', /let slab = count, passes = 0;\s*for \(;;\) \{/.test(cv) && /const short = above < this\._messageList\.clientHeight;/.test(cv) && /if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv) && /slab = Math\.min\(200, slab \* 2\);/.test(cv) && /_trace\('extendTop:grown'/.test(cv));
+ok('_extendBottom grows by the content BELOW THE VIEWPORT — the mirror loop under the same bound', /const short = below < list\.clientHeight;/.test(cv) && /if \(!short \|\| this\._windowEnd >= this\._total \|\| passes >= FOLD_GROW_PASSES \|\| !msgs\.length\)/.test(cv) && /_trace\('extendBottom:grown'/.test(cv));
+ok('all three incidents are named at the trim (future readers find the bundles)', /inc-mtajy6wr/.test(cv) && /inc-mub8xwrb-z57x/.test(cv) && /inc-mubvu3a4-x8sb/.test(cv));
+ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, and trims AFTER it (a trim that reads the restored scrollTop cannot take the anchor with it), re-folding after a trim', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,400}this\._updateRuns\(\);\s*\}\);[\s\S]{0,1600}if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}this\._trimBottom\(\); if \(this\._windowEnd !== before\) this\._updateRuns\(\);/.test(cv));
+ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv));
+ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', cv.includes("'trimBottom' : 'trimTop'") && /zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv) && cv.includes("_trace('extendTop:done'") && cv.includes("_trace('trimSkipZone'"));
+ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
+ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*if \(atTail && !this\._pinned\) \{/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /\(this\._readOnly \|\| !this\.sessionId\) && !\(this\._windowEnd < this\._total && this\._canPaginate\)/.test(cv));
+ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', /const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv) && !/\} else if \(list\.children\.length\) \{/.test(cv) && /if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
 // The 2.369.36 gate `_windowStart > 0 && rendered < 30 && sh <= ch` was
 // UNSATISFIABLE: every attach path ships tail(50) (ws-handler `_normalizer
@@ -125,7 +142,6 @@ ok('…the skip still applies meta/status/live state and the typing indicator', 
 // paged three PINNED windows into history with zero user input. The end-to-end
 // reproduction (with the negative control that proves the path is exercised)
 // lives in scripts/test-desktop-resume-paging.mjs; these pin the mechanism.
-const sk = fs.readFileSync(path.join(REPO, 'src/lib/chat-view-seek.js'), 'utf8');
 ok('the gap path has ONE gate predicate, _autoPagingBlocked (never re-invented per entry point)',
   /_autoPagingBlocked\(\) \{/.test(cv));
 ok('…and it names every law the scroll handler obeys (suspend / resume-settle / pin / settle / no-input)',
@@ -522,6 +538,321 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
 // hide/show writer that forgets it re-opens the whole class)
 ok('desktop _showWin resumes the ChatView (the resume settle is armed from there)',
   /_showWin\(win\) \{[\s\S]{0,500}setSuspended\?\.\(false\)/.test(dm));
+
+// ── THE KEEP ZONE, EXECUTED (inc-mubvu3a4-x8sb). _trimEdge reads only the list's
+// geometry (children, offsetTop/offsetHeight/offsetParent, scrollTop/Height,
+// clientHeight) and the view's own bookkeeping, so the SHIPPED method runs here
+// against injected geometry — the owner's numbers first (list 790 px, compact
+// rows, three of four cards folded), then the tall window, then the folded far
+// end, then the ceiling. The pre-fix count trim is the control: it is computed
+// beside every case and must differ where the incident said it did.
+{
+  const CH = 790;
+  // cards: [{ id, h, hidden }] in document order (hidden = a folded run member,
+  // display:none). offsetTop is a GETTER over the current children, as in a
+  // browser after a removal; the sentinel and run chrome are skipped by the
+  // same predicates the real list children answer.
+  const fakeList = ({ ch = CH, st = 0, cards }) => {
+    const list = { children: [], clientHeight: ch, scrollTop: st };
+    for (const c of cards) {
+      const el = {
+        dataset: c.id ? { msgId: c.id } : {}, _isSeekSentinel: !!c.sentinel, _chrome: !!c.chrome, isConnected: true,
+        classList: { contains: (k) => (k === 'chat-msg' && !c.sentinel && !c.chrome) || (k === 'chat-run-header' && !!c.chrome) },
+        get offsetParent() { return c.hidden ? null : {}; },
+        get offsetHeight() { return c.hidden ? 0 : c.h; },
+        get offsetTop() { let y = 0; for (const x of list.children) { if (x === this) return y; if (x.offsetParent) y += x.offsetHeight; } return 0; },
+        remove() { this.isConnected = false; const i = list.children.indexOf(this); if (i >= 0) list.children.splice(i, 1); },
+      };
+      list.children.push(el);
+    }
+    Object.defineProperty(list, 'scrollHeight', { get() { let h = 0; for (const x of list.children) if (x.offsetParent) h += x.offsetHeight; return Math.max(h, ch); } });
+    list.querySelectorAll = () => list.children.filter((x) => !x._isSeekSentinel && !x._chrome);
+    return list;
+  };
+  const mkView = (list, over = {}) => Object.assign(Object.create(ChatView.prototype), {
+    _messageList: list, _elements: new Map(), _renderedMsgIds: new Set(), _messages: [], _windowStart: 1000, _windowEnd: 1400, _total: 3201, _pinned: false, _traces: [],
+    _trace(tag, d) { this._traces.push({ tag, ...d }); }, _traceExpect() {}, ...over,
+  });
+  const ids = (list) => list.children.filter((x) => x.dataset.msgId).map((x) => x.dataset.msgId);
+  const preFixCount = (n, max = 150) => Math.max(0, n - max);   // the 2.369.129 trim: by COUNT to 150 (when ≥ 3 viewports)
+
+  // ① THE OWNER'S WINDOW: 400 cards after a 200-card prepend, one visible 28 px
+  //    row per four cards → 2,800 px ≈ 3.5 viewports (the trace: n:400 sh:2851).
+  //    The reader's anchor (the old first card) landed at st≈1400.
+  {
+    const cards = []; for (let i = 0; i < 400; i++) cards.push({ id: 'c' + i, h: 28, hidden: i % 4 !== 0 });
+    const list = fakeList({ st: 1400, cards });
+    const v = mkView(list);
+    const before = ids(list);
+    const removed = v._trimBottom();
+    ok(`THE OWNER'S SHAPE: 400 compact cards, viewport at 1400 of 2800 px — the zone (1400…${1400 + 2 * CH}) reaches past the window's end, so the trim removes NOTHING (pre-fix: ${preFixCount(400)} by count, the anchor among them)`,
+      removed === 0 && ids(list).length === before.length && v._windowEnd === 1400 && list.scrollTop === 1400 && v._traces.some((t) => t.tag === 'trimSkipZone'), JSON.stringify({ removed, traces: v._traces }));
+    ok('…and the pre-fix count trim would have differed exactly there (the control computes what 2.369.129 removed: 250)', preFixCount(400) === 250);
+  }
+  // ② A TALL WINDOW (unfolded 100 px cards, reader mid-window): the trim removes
+  //    only what lies beyond one viewport below the viewport, and stops there
+  //    even though the count target would allow more.
+  {
+    const cards = []; for (let i = 0; i < 400; i++) cards.push({ id: 'c' + i, h: 100 });
+    const list = fakeList({ st: 20000, cards });
+    const v = mkView(list);
+    const removed = v._trimBottom();
+    // zone.bottom = 20000 + 2·790 = 21580 → the first removable card starts at 21600 (index 216)
+    ok(`a tall window: bottom trim removes only cards beyond the zone (${removed} of the 250 the count would allow), the viewport does not move, windowEnd follows`,
+      removed === 184 && ids(list).length === 216 && ids(list)[215] === 'c215' && list.scrollTop === 20000 && v._windowEnd === 1400 - 184 && v._pinned === false, JSON.stringify({ removed, n: ids(list).length, last: ids(list)[215] }));
+  }
+  {
+    const cards = []; for (let i = 0; i < 400; i++) cards.push({ id: 'c' + i, h: 100 });
+    const list = fakeList({ st: 20000, cards });
+    const v = mkView(list);
+    const removed = v._trimTop();
+    // zone.top = 20000 − 790 = 19210 → cards whose bottom ≤ 19210 = indices 0…191; the anchor
+    // (c200, at 20000) sits at 800 after 192 removals and the restore puts scrollTop there
+    ok(`…top trim: removes only cards above the zone (${removed}), and the ANCHORED restore lands the viewport on the same card (scrollTop 20000 → 800), windowStart follows`,
+      removed === 192 && ids(list)[0] === 'c192' && list.scrollTop === 800 && v._windowStart === 1000 + 192, JSON.stringify({ removed, first: ids(list)[0], st: list.scrollTop }));
+  }
+  // ③ A FOLDED FAR END: 100 visible cards then 300 folded members of one run.
+  //    Folded cards sit at their header (the nearest visible thing above), so
+  //    they are beyond the zone and removable at no pixel cost; the visible
+  //    cards inside the zone stay.
+  {
+    const cards = []; for (let i = 0; i < 100; i++) cards.push({ id: 'v' + i, h: 100 }); for (let i = 0; i < 300; i++) cards.push({ id: 'f' + i, h: 0, hidden: true });
+    const list = fakeList({ st: 0, cards });
+    const v = mkView(list);
+    const sh0 = list.scrollHeight;
+    const removed = v._trimBottom();
+    ok(`a folded far end: the trim removes ${removed} folded members (count target 150 → 250 of the 300 folded), NO visible card, and the height does not change (${sh0} → ${list.scrollHeight})`,
+      removed === 250 && ids(list).filter((x) => x.startsWith('v')).length === 100 && list.scrollHeight === sh0 && list.scrollTop === 0, JSON.stringify({ removed, n: ids(list).length }));
+  }
+  // ④ THE CEILING: more cards than FOLD_DOM_CEILING, all inside the zone (folded)
+  //    — the hard bound removes past the zone, and says so.
+  {
+    const CEIL = Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]);
+    const cards = [{ id: 'head', h: 100 }]; for (let i = 0; i < CEIL + 199; i++) cards.push({ id: 'f' + i, h: 0, hidden: true });
+    const list = fakeList({ st: 0, cards });
+    const v = mkView(list);
+    const removed = v._trimBottom();
+    ok(`the ceiling: ${CEIL + 200} cards all inside the zone → exactly the excess over FOLD_DOM_CEILING is removed (${removed}) and the foldCeiling trace names it`,
+      removed === 200 && ids(list).length === CEIL && v._traces.some((t) => t.tag === 'foldCeiling' && t.forced === 200), JSON.stringify({ removed, traces: v._traces.slice(0, 2) }));
+  }
+  // ⑤ A WINDOW UNDER THE SOFT TARGET is never touched, whatever its height.
+  {
+    const cards = []; for (let i = 0; i < 150; i++) cards.push({ id: 'c' + i, h: 400 });
+    const list = fakeList({ st: 0, cards });
+    const v = mkView(list);
+    ok('a window at the soft target (150 cards, 60,000 px) is not trimmed', v._trimBottom() === 0 && v._trimTop() === 0 && ids(list).length === 150);
+  }
+  // ⑥ THE PIN PREDICATE: the DOM edge is not the tail.
+  {
+    const at = (over) => ChatView.prototype._atLiveTail.call(Object.assign(Object.create(ChatView.prototype), { _teleported: false, _windowEnd: 3201, _total: 3201, ...over }), 1418, 2095, 677);
+    ok('unit: at the DOM bottom with windowEnd = total → the live tail (a pin)', at({}) === true);
+    ok('unit: at the DOM bottom with windowEnd < total → NOT the tail (the owner\'s `repin we:1851 total:3201` can no longer happen)', at({ _windowEnd: 1851 }) === false);
+    ok('unit: a teleported view is never at the live tail', at({ _teleported: true }) === false);
+    ok('unit: away from the DOM bottom → not the tail', ChatView.prototype._atLiveTail.call(Object.assign(Object.create(ChatView.prototype), { _teleported: false, _windowEnd: 3201, _total: 3201 }), 100, 2095, 677) === false);
+  }
+  // ⑦ THE ANCHOR SKIPS THE SEEK SENTINEL: a huge session's list starts with the
+  //    1 px sentinel; at the top edge the anchor is the first visible CARD, and a
+  //    500 px prepend lands the viewport back on it — not at scrollTop 0.
+  {
+    const list = fakeList({ st: 0, cards: [{ sentinel: true, h: 1 }, { chrome: true, h: 24 }, { id: 'a', h: 30 }, { id: 'b', h: 30 }] });
+    const v = mkView(list);
+    const ok1 = v._withViewportAnchor(() => {
+      // prepend a 500 px card after the sentinel (where _extendTop inserts the fresh slab)
+      const fresh = fakeList({ cards: [{ id: 'fresh', h: 500 }] }).children[0];
+      Object.defineProperty(fresh, 'offsetTop', { get() { let y = 0; for (const x of list.children) { if (x === fresh) return y; if (x.offsetParent) y += x.offsetHeight; } return 0; } });
+      list.children.splice(1, 0, fresh);
+    });
+    ok(`the top-edge anchor is card "a" (sentinel + header skipped, delta 25): after a 500 px prepend the viewport is restored to it (scrollTop ${list.scrollTop}, pre-fix: 0 = the top of the fresh slab)`,
+      ok1 === true && list.scrollTop === 500, JSON.stringify({ ok1, st: list.scrollTop }));
+  }
+}
+
+
+// ── VERIFIER r1 ON THE HUGE-PAGING FIX (inc-mubvu3a4-x8sb, 2026-09-21): five
+// reproduced findings, each pinned at the source AND executed against the
+// shipped methods. (1) the carry captured only a notch that STARTED at the top
+// edge — a 700 px notch beginning 232 px from it lost 468 px and a 4×700 fling
+// parked at scrollTop 43 with 2,178 messages above; (2) inside a loaded gap
+// slab with content-visibility on, wheels in BOTH directions were absorbed
+// (native anchoring against the slab's placeholder flips — the gap cards got
+// no measured heights); (3) a gap slab survived the walk back to the tail and
+// the next prepend landed the fresh slab ABOVE the ancient cards; (4) ring
+// reads by INDEX went blind after the 600→400 splice; (5) a carried notch
+// survived a jump. The judge (scripts/paging-gesture-rules.mjs) gained the
+// pageUp BAND with history above (window OR gap) and the dead-wheel rule.
+{
+  ok('the wheel handler carries the OVERSHOOT of a notch that CROSSES an edge (px − room), not only a notch that starts there — both directions',
+    /const roomUp = list\.scrollTop;/.test(cv) && /if \(e\.deltaY < 0 && \(roomUp < 10 \|\| px > roomUp\)\) \{/.test(cv) && /this\._addWheelCarry\('up', px - roomUp\);/.test(cv)
+    && /\(roomDown < 10 \|\| px > roomDown\)\) \{/.test(cv) && /this\._addWheelCarry\('down', px - roomDown\);/.test(cv));
+  ok('a notch eaten by the load lock leaves its trace BEFORE the early return (wheelTop / wheelBottom {eaten:1})',
+    /this\._wheelPending = 'up'; this\._trace\('wheelTop', \{ st: Math\.round\(roomUp\), eaten: 1/.test(cv) && /this\._wheelPending = 'down'; this\._trace\('wheelBottom', \{[^}]*eaten: 1/.test(cv));
+  ok('ONE carry accounting (_addWheelCarry / _applyWheelCarry / _clearWheelCarry): both extends AND both gap slabs consume it; nothing else assigns _wheelCarry',
+    /_applyWheelCarry\('up', 'extendTop:carry'\)/.test(cv) && /_applyWheelCarry\('down', 'extendBottom:carry'\)/.test(cv)
+    && /_applyWheelCarry\?\.\('up', 'gapUp:carry'\)/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\)/.test(sk)
+    && (cv.match(/this\._wheelCarry = /g) || []).length === 3 && !/_wheelCarry = /.test(sk), `assignments in chat-view.js: ${(cv.match(/this\._wheelCarry = /g) || []).length} (want 3: add / apply / clear)`);
+  ok('a chosen destination clears a carried notch: _noteUserNav (jumps, minimap, search reveal, run bar), _resetGapAfterJump (both jumps), _seekTeleport',
+    /_noteUserNav\(via\) \{[\s\S]{0,400}this\._clearWheelCarry\?\.\(via\);/.test(cv) && /_resetGapAfterJump\(\) \{[\s\S]{0,300}this\._clearWheelCarry\?\.\('gapReset'\);/.test(sk) && /this\._clearWheelCarry\?\.\('teleport'\);[^\n]*\n\s*this\._teleported = true;/.test(sk));
+  ok('_extendTop prepends before the first NON-GAP card, and the top trim drops the gap slab when the window leaves message 0 — inside the same anchored removal',
+    cv.includes("querySelector(':scope > .chat-msg:not(.chat-gap-msg)');\n        this._loadingHistory = true;") && /const leavesZero = !this\._teleported && this\._windowStart === 0;/.test(cv) && /if \(leavesZero\) this\._dropGapSlab\('trimTop', zone\); \}\);/.test(cv));
+  ok('a TAIL-MODE gap slab runs with STABLE HEIGHTS from its anchored insert (content-visibility on made its cards flip size on alternate frames and the wheel was absorbed; the reserve alone did not stop it) — teleport keeps its own regime',
+    /if \(!this\._teleported\) this\._setStableHeights\(true, \{ why: 'gapSlab' \}\);/.test(sk) && /_setStableHeights\(stable, \{ recenter = true, why = '' \} = \{\}\) \{/.test(sk) && /if \(!recenter\) \{ this\._trace\?\.\('stableHeights'/.test(sk));
+  ok('a gap slab is rendered once at insert like a window slab (both gap loaders reserve measured heights), and a slab landing on a bumped sentinel epoch is discarded',
+    /this\._reserveFreshHeights\?\.\(inserted\);/.test(sk) && /this\._reserveFreshHeights\?\.\(appended\);/.test(sk) && /const epoch = markerEl\._gapEpoch \|\| 0;/.test(sk) && /if \(\(markerEl\._gapEpoch \|\| 0\) !== epoch\) \{ this\._trace\?\.\('gapUp:stale'/.test(sk) && /s\._gapEpoch = \(s\._gapEpoch \|\| 0\) \+ 1;/.test(cv));
+  ok('every ring entry carries a monotonic seq (the ring splices 600→400; an index mark goes blind) and the shared reader slices by it',
+    /const seq = this\._traceSeq = \(this\._traceSeq \|\| 0\) \+ 1;/.test(cv) && /r\.push\(data \? \{ t: Date\.now\(\), seq, tag, \.\.\.data \}/.test(cv)
+    && /ringSeq: v\._traceSeq \|\| 0/.test(rulesSrc) && /\(e\.seq \|\| 0\) > \$\{Number\(mark\) \|\| 0\}/.test(rulesSrc)
+    && /const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(pagingSrc) && /const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(dbgSrc) && !/before\.ring\b/.test(pagingSrc) && !/before\.ring\b/.test(dbgSrc));
+  ok('the §1c fixture MINTS every record id through fixtureSid (test-fixture-isolation refuses a hand-spelled member of the family)',
+    /const uuid = \(\) => fixtureSid\(\(n\+\+\)\.toString\(16\)\);/.test(pagingSrc) && !/['"`]e2e00000-0000-4000-8000-/i.test(pagingSrc));
+  ok('the by-hand driver re-tails after emulating content-visibility (a live window opens pinned at the tail, never at scrollTop 0 unpinned) and walks the gap legs',
+    /v\._pinned = true; v\._forceScrollToBottom\(\); await sleep\(600\);/.test(dbgSrc) && /gesture\(`gap-up-hold-\$\{i \+ 1\}`, 'up', 'hold'\)/.test(dbgSrc));
+  ok('both drivers wheel over a PLAIN point of the viewport (WHEEL_POINT_SOURCE — a card\'s own scroll box under the pointer takes the notches), never a fixed centre',
+    /export const WHEEL_POINT_SOURCE = \(dir, px\) => `/.test(rulesSrc) && /if \(!\/\(auto\|scroll\)\/\.test\(cs\.overflowY\)\) continue;/.test(rulesSrc) && /if \(!paged && after\.topDev != null && !row\.wheelFallback\) \{/.test(rulesSrc)
+    && /const pt = \(await evaljs\(WHEEL_POINT_SOURCE\(dir, /.test(pagingSrc) && /x: pt\.x, y: pt\.y/.test(pagingSrc) && /const pt = \(await evaljs\(WHEEL_POINT_SOURCE\(deltaY < 0 \? 'up' : 'down', /.test(dbgSrc) && /x: pt\.x, y: pt\.y/.test(dbgSrc));
+
+  // (b) THE WHEEL HANDLER, EXECUTED: the listener body lifted out of the shipped source
+  const wStart = cv.indexOf("this._messageList.addEventListener('wheel', (e) => {\n      if (!this._canPaginate) return;"); // the PAGING wheel listener (the first one is the positioning stamp)
+  const wEnd = cv.indexOf('}, { passive: true });', wStart);
+  ok('the wheel handler source is extractable for the unit below', wStart > 0 && wEnd > wStart);
+  if (wStart > 0 && wEnd > wStart) {
+    const body = cv.slice(cv.indexOf('{', wStart) + 1, wEnd);
+    const handler = new Function('e', body);
+    const mk = (over) => Object.assign(Object.create(ChatView.prototype), {
+      _canPaginate: true, _loading: false, _pinned: true, _teleported: false, _windowStart: 1000, _windowEnd: 1400, _total: 3201,
+      _messageList: { scrollTop: 232, scrollHeight: 5000, clientHeight: 700 }, _traces: [], calls: [],
+      _trace(tag, d) { this._traces.push({ tag, ...d }); }, _extendTop() { this.calls.push('extendTop'); }, _extendBottom() { this.calls.push('extendBottom'); },
+      _maybeSeekEarlier() { this.calls.push('seekEarlier'); }, _maybeSeekLater() { this.calls.push('seekLater'); }, ...over });
+    const wheel = (v, deltaY) => handler.call(v, { deltaY, deltaMode: 0 });
+    let v = mk({}); wheel(v, -700);
+    ok(`unit: the verifier's notch — 700 px beginning 232 px from the top — carries the OVERSHOOT (${v._wheelCarry}, want 468), unpins, fires _extendTop (${v.calls})`,
+      v._wheelCarry === 468 && v._wheelCarryDir === 'up' && v._pinned === false && v.calls.join() === 'extendTop' && v._traces.some((t) => t.tag === 'wheelTop' && t.carry === 468));
+    v = mk({ _messageList: { scrollTop: 5, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, -120);
+    ok('unit: at the edge (st 5) a 120 px notch carries 115 (px − room)', v._wheelCarry === 115 && v.calls.join() === 'extendTop');
+    v = mk({ _messageList: { scrollTop: 900, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, -120);
+    ok('unit: a notch the browser delivers whole (st 900, 120 px) carries nothing, pages nothing, keeps the pin', !v._wheelCarry && !v._wheelCarryDir && v.calls.length === 0 && v._pinned === true);
+    v = mk({ _loading: true }); wheel(v, -700);
+    ok('unit: a crossing notch during the load lock is carried, marked pending, traced {eaten:1} — and fires nothing', v._wheelCarry === 468 && v._wheelPending === 'up' && v.calls.length === 0 && v._traces.some((t) => t.tag === 'wheelTop' && t.eaten === 1 && t.carry === 468));
+    v = mk({}); wheel(v, -700); wheel(v, -700); wheel(v, -700);
+    ok('unit: the carry is bounded to ONE VIEWPORT per landing (three 700 px notches from st 232 → 700, not 1404)', v._wheelCarry === 700);
+    v = mk({}); wheel(v, -700); wheel(v, 120);
+    ok('unit: a reversal clears the carry and says so', !v._wheelCarry && v._wheelCarryDir === null && v._traces.some((t) => t.tag === 'wheelCarry:clear' && t.why === 'reversal'));
+    v = mk({ _pinned: false, _messageList: { scrollTop: 4200, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, 700);
+    ok('unit: the down mirror — a 700 px wheel-down with 100 px of room below carries 600 and fires _extendBottom', v._wheelCarry === 600 && v._wheelCarryDir === 'down' && v.calls.join() === 'extendBottom');
+    v = mk({ _pinned: false, _windowEnd: 3201, _messageList: { scrollTop: 4200, scrollHeight: 5000, clientHeight: 700 } }); wheel(v, 700);
+    ok('unit: …and at the live tail (windowEnd = total) the down branch fires nothing', v.calls.length === 0);
+    v = mk({ _windowStart: 0 }); wheel(v, -700);
+    ok('unit: with the registered tail exhausted the crossing notch is carried into the SEEK path (_maybeSeekEarlier consumes it at the slab landing)', v._wheelCarry === 468 && v.calls.join() === 'seekEarlier');
+  }
+  // (c) _applyWheelCarry, EXECUTED
+  {
+    const mk = (over) => Object.assign(Object.create(ChatView.prototype), { _messageList: { scrollTop: 720, scrollHeight: 5000, clientHeight: 700 }, _pinned: false, _wheelCarry: 468, _wheelCarryDir: 'up', _traces: [], _trace(tag, d) { this._traces.push({ tag, ...d }); }, _by: null, _traceExpect(by) { this._by = by; }, ...over });
+    let v = mk({}); let r = v._applyWheelCarry('up', 'extendTop:carry');
+    ok(`unit: the landing applies the carried 468 px upward (st 720 → ${v._messageList.scrollTop}), stamps the author, traces wheelCarry, consumes the carry`,
+      r === 468 && v._messageList.scrollTop === 252 && v._by === 'extendTop:carry' && v._wheelCarry === 0 && v._traces.some((t) => t.tag === 'wheelCarry' && t.dir === 'up' && t.px === 468 && t.by === 'extendTop:carry'));
+    v = mk({ _messageList: { scrollTop: 100, scrollHeight: 5000, clientHeight: 700 } }); r = v._applyWheelCarry('up', 'x');
+    ok('unit: bounded by the room the landing produced (100 px above → 100 applied)', r === 100 && v._messageList.scrollTop === 0);
+    v = mk({ _pinned: true }); r = v._applyWheelCarry('up', 'x');
+    ok('unit: never upward while pinned — the carry is consumed anyway', r === 0 && v._messageList.scrollTop === 720 && v._wheelCarry === 0);
+    v = mk({ _wheelCarryDir: 'down', _wheelCarry: 300 }); r = v._applyWheelCarry('down', 'gapDown:carry');
+    ok('unit: the down mirror scrolls further down, bounded by the room below', r === 300 && v._messageList.scrollTop === 1020);
+    v = mk({}); r = v._applyWheelCarry('down', 'x');
+    ok('unit: a carry in the OTHER direction applies nothing and is consumed', r === 0 && v._wheelCarry === 0 && v._messageList.scrollTop === 720);
+  }
+  // (d) the stale carry: a chosen destination clears it
+  {
+    const v = Object.assign(Object.create(ChatView.prototype), { _wheelCarry: 300, _wheelCarryDir: 'up', _wheelPending: 'up', _traces: [], _trace(tag, d) { this._traces.push({ tag, ...d }); }, _cancelForcedScroll() {}, _endResumeSettle() {} });
+    v._noteUserNav('jumpToBottom');
+    ok('unit: _noteUserNav clears the carry, its direction and the pending arm (the stale probe {c:0, d:"up"} survived the scroll-to-bottom button before)',
+      v._wheelCarry === 0 && v._wheelCarryDir === null && v._wheelPending === null && v._traces.some((t) => t.tag === 'wheelCarry:clear' && t.why === 'jumpToBottom' && t.px === 300));
+    v._noteUserNav('minimap');
+    ok('unit: …and clearing nothing traces nothing', v._traces.filter((t) => t.tag === 'wheelCarry:clear').length === 1);
+  }
+  // (e) the ring's seq across the splice
+  {
+    const v = Object.assign(Object.create(ChatView.prototype), {});
+    for (let i = 0; i < 650; i++) v._trace('x', { i });
+    const r = v._traceRing, mark = 500; // an INDEX mark taken at entry 500, before the splice at 601 (600→400, then 49 more)
+    ok(`unit: after 650 entries the ring holds ${r.length} (449) with seq 202…650; the index mark 500 reads ${r.slice(mark).length} entries (blind), the seq mark reads ${r.filter((e) => e.seq > mark).length} (150)`,
+      r.length === 449 && r[0].seq === 202 && r[r.length - 1].seq === 650 && r.slice(mark).length === 0 && r.filter((e) => e.seq > mark).length === 150 && v._traceSeq === 650);
+  }
+  // (f) THE GAP SLAB IS DROPPED BY THE TOP TRIM when the window leaves message 0
+  {
+    const CH = 790;
+    const fakeList = ({ ch = CH, st = 0, cards }) => {
+      const list = { children: [], clientHeight: ch, scrollTop: st };
+      for (const c of cards) {
+        const el = {
+          dataset: c.id ? { msgId: c.id } : {}, _isSeekSentinel: !!c.sentinel, _gap: !!c.gap, isConnected: true,
+          classList: { contains: (k) => (k === 'chat-msg' && !c.sentinel) || (k === 'chat-gap-msg' && !!c.gap) },
+          get offsetParent() { return {}; }, get offsetHeight() { return c.h; },
+          get offsetTop() { let y = 0; for (const x of list.children) { if (x === this) return y; y += x.offsetHeight; } return 0; },
+          remove() { this.isConnected = false; const i = list.children.indexOf(this); if (i >= 0) list.children.splice(i, 1); },
+        };
+        list.children.push(el);
+      }
+      Object.defineProperty(list, 'scrollHeight', { get() { let h = 0; for (const x of list.children) h += x.offsetHeight; return Math.max(h, ch); } });
+      // selector-aware: the trim asks for non-gap cards, the drop for gap cards
+      list.querySelectorAll = (sel = '') => list.children.filter((x) => !x._isSeekSentinel && (/:not\(\.chat-gap-msg\)/.test(sel) ? !x._gap : /\.chat-gap-msg/.test(sel) ? x._gap : true));
+      return list;
+    };
+    const build = () => { const cards = [{ sentinel: true, h: 1 }]; for (let i = 0; i < 30; i++) cards.push({ id: 'g' + i, h: 100, gap: true }); for (let i = 0; i < 400; i++) cards.push({ id: 'c' + i, h: 100 }); return cards; };
+    const mkView = (list, over = {}) => Object.assign(Object.create(ChatView.prototype), {
+      _messageList: list, _elements: new Map(), _renderedMsgIds: new Set(), _messages: [], _windowStart: 0, _windowEnd: 400, _total: 3785, _pinned: false, _teleported: false, _traces: [],
+      _seekSentinel: { _gapCursor: 5000, _gapAnchor: {}, _gapRetryAt: 0, _gapEpoch: 0 }, _stable: null,
+      _setStableHeights(on, opts) { this._stable = [on, opts]; },   // the seek mixin's toggle, recorded
+      _trace(tag, d) { this._traces.push({ tag, ...d }); }, _traceExpect() {}, ...over });
+    const gaps = (list) => list.children.filter((x) => x._gap).length;
+    {
+      const list = fakeList({ st: 30000, cards: build() }), v = mkView(list);
+      const removed = v._trimTop();
+      // zone.top = 29210 → the soft target stops the tail removal at 250 (c0…c249); the 30 gap cards go with them; the
+      // anchor c269 (top 29901, delta −99) lands at 1 + 19·100 + 99 = 2000
+      ok(`the top trim leaving message 0 removes ${removed} tail cards AND the 30 gap cards, rewinds the sentinel (cursor null, epoch 1), traces gapDrop, keeps the viewport on its card (st 30000 → ${list.scrollTop})`,
+        removed === 250 && gaps(list) === 0 && v._windowStart === 250 && v._seekSentinel._gapCursor === null && v._seekSentinel._gapAnchor === null && v._seekSentinel._gapEpoch === 1
+        && list.scrollTop === 2000 && v._traces.some((t) => t.tag === 'gapDrop' && t.why === 'trimTop' && t.n === 30), JSON.stringify({ removed, gaps: gaps(list), ws: v._windowStart, st: list.scrollTop, traces: v._traces.map((t) => t.tag) }));
+      ok('…and the slab\'s stable-heights regime ends with it: _setStableHeights(false, {recenter:false}) — no jump-target replay from inside the trim', Array.isArray(v._stable) && v._stable[0] === false && v._stable[1]?.recenter === false && v._stable[1]?.why === 'gapDrop', JSON.stringify(v._stable));
+    }
+    {
+      const list = fakeList({ st: 30000, cards: build() }), v = mkView(list, { _windowStart: 1000, _windowEnd: 1400 });
+      v._trimTop();
+      ok('control: a window that was NOT at message 0 does not run the sweep (the gate is leaving zero, not the trim itself)', gaps(list) === 30 && v._seekSentinel._gapEpoch === 0);
+    }
+    {
+      const list = fakeList({ st: 30000, cards: build() }), v = mkView(list, { _teleported: true });
+      v._trimTop();
+      ok('control: a teleported view keeps its gap slab (there is no registered tail to leave)', gaps(list) === 30);
+    }
+    {
+      const list = fakeList({ st: 500, cards: build() }), v = mkView(list);
+      const n = v._dropGapSlab('probe', { top: 1000, bottom: 3000 });
+      ok('_dropGapSlab refuses when a gap card still touches the keep zone, and says so (gapDrop:skip)', n === 0 && gaps(list) === 30 && v._traces.some((t) => t.tag === 'gapDrop:skip'));
+    }
+  }
+  // (g) THE JUDGE's new rules (scripts/paging-gesture-rules.mjs is PURE — the heavy gate feeds it real rows)
+  {
+    const base = { st: 1500, sh: 6000, ch: 700, ws: 2000, we: 2200, total: 3785, pin: 0, tp: 0, topId: 'a', topOff: 0, blankPct: 0, emptyBelow: 0, gapCursor: null, gapAbove: 0, gapCards: 0, gapBelowTail: 0, loading: 0 };
+    const row = (dir, wheelPx, before, after, ring = [{ tag: 'x' }]) => judgeGesture({ name: 't', dir, wheelPx, before: { ...base, ...before }, after: { ...base, ...after }, ring });
+    let j = row('up', -2800, { st: 876, ws: 2328 }, { st: 43, ws: 2178, topDev: 1765 });
+    ok('judge: the verifier\'s landing — st 43 with 2,178 messages above — is inside the pageUp band → violation (was one pixel from red at `<= 0`)', !j.ok && j.reasons.some((x) => /pageUp band/.test(x)), j.reasons.join('; '));
+    j = row('up', -2800, { st: 876, ws: 0, gapAbove: 1, gapCursor: 5000 }, { st: 43, ws: 0, gapAbove: 1, gapCursor: 5000, topDev: 1765 });
+    ok('judge: ws 0 with the GAP still above counts as history above', !j.ok && j.reasons.some((x) => /pageUp band/.test(x) && /and the gap/.test(x)), j.reasons.join('; '));
+    j = row('up', -2800, { st: 876, ws: 0, gapAbove: 0, gapCursor: 0 }, { st: 43, ws: 0, gapAbove: 0, gapCursor: 0, topDev: 833 });
+    ok('judge: ws 0 and no gap above → the top is the top, no violation', j.ok, j.reasons.join('; '));
+    j = row('up', -2800, { st: 876, ws: 2328 }, { st: 43, ws: 2178, topDev: 1765, loading: 1 });
+    ok('judge: a slab still in flight at the sample is not judged on its scrollTop', j.ok, j.reasons.join('; '));
+    j = row('down', 720, { st: 1554, sh: 4284, gapCards: 540, gapCursor: 3000 }, { st: 1671, sh: 4447, gapCards: 540, gapCursor: 3000, topDev: -80 });
+    ok('judge: a mid-list 720 px wheel-down that moved the card 80 px is a DEAD WHEEL → violation (the gap-slab absorption was "OK" before)', !j.ok && j.reasons.some((x) => /moved the reader's card only 80 px/.test(x)), j.reasons.join('; '));
+    j = row('up', -720, { st: 3000, sh: 4284, gapCards: 540, gapCursor: 3000 }, { st: 2900, sh: 4300, gapCards: 540, gapCursor: 3000, topDev: 60 });
+    ok('judge: …and the same dead wheel upward', !j.ok && j.reasons.some((x) => /mid-list up wheel of 720 px moved the reader's card only 60 px/.test(x)), j.reasons.join('; '));
+    j = row('down', 720, { st: 1554, sh: 4284 }, { st: 2274, sh: 4284, topDev: -717 });
+    ok('judge: a wheel delivered whole is fine', j.ok, j.reasons.join('; '));
+    j = row('up', -2800, { st: 1000 }, { st: 0, ws: 2000, topDev: 900, loading: 1 });
+    ok('judge: a wheel that reaches an edge is not held to the delivery rule (a page is expected there instead)', !j.reasons.some((x) => /moved the reader's card only/.test(x)), j.reasons.join('; '));
+    j = row('down', 720, { st: 1554, sh: 4284, gapCursor: 3000 }, { st: 1600, sh: 8284, gapCursor: 1000, topDev: -80 });
+    ok('judge: a gap slab load counts as a page (the window indices do not move for it) — the delivery rule steps aside, the evidence rule applies', j.paged === true && !j.reasons.some((x) => /moved the reader's card only/.test(x)), j.reasons.join('; '));
+    ok('judge: the band and the delivery fraction are the exported constants the gate prints', PAGE_UP_BAND_PX === 100 && DELIVERY_MIN_FRACTION === 0.5);
+  }
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

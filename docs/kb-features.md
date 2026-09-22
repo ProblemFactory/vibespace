@@ -129,7 +129,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - Window blink on `result` message when not focused
 - WebSocket reconnect: auto re-attach all sessions, chat syncs missed messages via `_reattach()`, StateSync resync for drafts/settings
 - Disconnected input stays interactive: `setDisconnected` does NOT disable the textarea (disabled blocks text selection) and the CSS has no pointer-events:none — user can select/copy/keep drafting offline; only `_send()` is guarded (toast, draft kept). Send button dimmed via `.chat-input-disconnected`
-- Virtual scroll: sliding DOM window (~150 max), trim top/bottom on extend, deferred live messages when viewing history
+- Virtual scroll: sliding DOM window trimmed by HEIGHT on extend (keep zone = viewport ± 1 viewport; ~150 cards a soft target, FOLD_DOM_CEILING the bound), pinned ⇔ at the live tail, a wheel's overshoot carried into the landing (≤ 1 viewport per landing), deferred live messages when viewing history
 - Scroll minimap: semantic turn-based navigation, user message markers, compact markers, drag-to-jump, two-line floating preview label (time + 60-char preview), hovered marker lights up, and an outline (TOC) button at the top of the track — filterable list of all user messages, click to jump, works in both index and time coordinate modes
 - Pin-to-bottom: iterative scroll convergence (10 rAF frames) for content-visibility compatibility
 

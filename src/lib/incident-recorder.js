@@ -161,7 +161,31 @@ export function installIncidentRecorder(app) {
     try {
       const traces = {};
       for (const [winId, v] of app.sessions || []) {
-        if (v?._traceRing?.length) traces[winId] = { sid: v.sessionId || null, tail: v._traceRing.slice(-200) };
+        if (!v?._traceRing?.length) continue;
+        // GEOMETRY AT CAPTURE (inc-mubvu3a4-x8sb g1): the ring says what moved
+        // the view; this says what the viewport HELD when the user pressed the
+        // button — how many cards intersect it and how many of those the
+        // browser had not rendered (content-visibility placeholders = blank
+        // strips). One DOM walk per window, at capture only, never in the ring.
+        let geom = null;
+        try {
+          const list = v._messageList;
+          if (list) {
+            const lr = list.getBoundingClientRect();
+            let inView = 0, unrendered = 0, kids = 0;
+            for (const c of list.children) {
+              kids++;
+              if (!c.classList?.contains('chat-msg')) continue;
+              const r = c.getBoundingClientRect();
+              if (r.bottom <= lr.top || r.top >= lr.bottom || r.height === 0) continue;
+              inView++;
+              if (typeof c.checkVisibility === 'function' && !c.checkVisibility({ contentVisibilityAuto: true })) unrendered++;
+            }
+            geom = { st: Math.round(list.scrollTop), sh: list.scrollHeight, ch: list.clientHeight, kids, inView, unrendered,
+              ws: v._windowStart, we: v._windowEnd, total: v._total, pin: v._pinned ? 1 : 0, tp: v._teleported ? 1 : 0, cv: !v._container?.classList?.contains('chat-no-content-visibility') };
+          }
+        } catch {}
+        traces[winId] = { sid: v.sessionId || null, geom, tail: v._traceRing.slice(-300) };
       }
       if (Object.keys(traces).length) out.chatTraces = traces;
     } catch (e) { out.chatTraces = 'failed: ' + e.message; }

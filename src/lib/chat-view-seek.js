@@ -18,15 +18,19 @@ export function installChatSeek(ChatView) {
     this._messageList.insertBefore(el, this._messageList.firstChild);
     this._seekSentinel = el;
     this._observeHistoryGap(el);
+    this._trace?.('seek:sentinel', { kids: this._messageList.childElementCount, ws: this._windowStart, tp: this._teleported ? 1 : 0 });
     return el;
   },
 
-    _setStableHeights(stable) {
+    _setStableHeights(stable, { recenter = true, why = '' } = {}) {
     if (this._readOnly) return; // read-only views run without c-v permanently
     const has = this._container.classList.contains('chat-no-content-visibility');
     if (stable === has) return;
-    if (stable) { this._container.classList.add('chat-no-content-visibility'); return; }
+    if (stable) { this._container.classList.add('chat-no-content-visibility'); this._trace?.('stableHeights', { on: 1, why }); return; }
     this._container.classList.remove('chat-no-content-visibility');
+    // `recenter:false` — the caller is mid-gesture (a gap slab dropped by the
+    // top trim on the way back to the tail): no jump-target re-centering here
+    if (!recenter) { this._trace?.('stableHeights', { on: 0, replay: 'none', why, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight }); return; }
     // Re-enabling content-visibility collapses never-c-v-rendered elements to
     // their 80px estimate ASYNCHRONOUSLY over the next frames — scrollHeight
     // shrinks massively and scrollTop clamps, so any delta-arithmetic
@@ -39,12 +43,14 @@ export function installChatSeek(ChatView) {
     const jumpAt = this._lastJumpAt || 0;
     const revealAt = this._search?._lastRevealAt || 0;
     const userScrolled = (this._lastUserScrollAt || 0) > Math.max(jumpAt, revealAt);
-    if (userScrolled) return;
     // Search reveals target a RANGE inside a (possibly very tall) message —
     // replay that if it's the most recent positioning; else re-center the
     // jump target element.
-    if (revealAt > jumpAt && this._search?._lastRevealRun) this._search._lastRevealRun();
-    else if (target && target.isConnected) this._scrollElStable(target);
+    const replay = userScrolled ? 'userScrolled' : (revealAt > jumpAt && this._search?._lastRevealRun) ? 'reveal' : (target && target.isConnected) ? 'target' : 'none';
+    this._trace?.('stableHeights', { on: 0, replay, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
+    if (userScrolled) return;
+    if (replay === 'reveal') this._search._lastRevealRun();
+    else if (replay === 'target') this._scrollElStable(target);
   },
 
     _maybeSeekLater() {
@@ -60,9 +66,11 @@ export function installChatSeek(ChatView) {
     try {
       const base = this._gapQueryBase();
       if (!base) return;
+      this._trace?.('gapDown:req', { cursor: this._gapCursorDown });
       const r = await this._gapFetch(`/api/session-history-gap?${base}&startLine=${this._gapCursorDown}&count=2000&whole=1`);
       if (this._disposed || !this._teleported) return;
       if (!r.ok) {
+        this._trace?.('gapDown:fail', { cursor: this._gapCursorDown });
         // A FAILED fetch is not "reached the end of the file": leave the
         // down-cursor where it is, back off, and say so — reading the failure
         // as end-of-file silently froze downward browsing at the blip.
@@ -76,14 +84,18 @@ export function installChatSeek(ChatView) {
       const data = r.data;
       const msgs = data?.messages || [];
       if (Number.isFinite(data?.totalLines) && this._gapBounds) this._gapBounds.totalLines = data.totalLines;
-      if (!msgs.length) { this._gapDownIdleUntil = Date.now() + 3000; return; } // reached file end (for now)
+      if (!msgs.length) { this._gapDownIdleUntil = Date.now() + 3000; this._trace?.('gapDown:end', { cursor: this._gapCursorDown }); return; } // reached file end (for now)
+      const appended = [];
       for (const msg of msgs) {
         const el = this._renderGapMsg(msg);
-        if (el) this._messageList.appendChild(el); // below viewport — no compensation
+        if (el) { this._messageList.appendChild(el); appended.push(el); } // below viewport — no compensation
       }
+      this._reserveFreshHeights?.(appended);   // measured heights (see _loadEarlierGap)
+      this._applyWheelCarry?.('down', 'gapDown:carry');
       this._gapCursorDown = Number.isFinite(data.toLine) ? data.toLine : this._gapCursorDown;
       if (this._gapBounds && this._gapCursorDown >= this._gapBounds.totalLines) this._gapDownIdleUntil = Date.now() + 3000;
       this._trimGapDom('top');
+      this._trace?.('gapDown:done', { n: msgs.length, cursor: this._gapCursorDown, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
       this._reportVisibleTsRange();
       metric('gap-slab-load-ms', performance.now() - _t0);
     } finally {
@@ -92,10 +104,20 @@ export function installChatSeek(ChatView) {
   },
 
     _trimGapDom(side, cap = 3400, keep = 2400) {
-    const els = this._messageList.querySelectorAll('.chat-gap-msg');
-    if (els.length <= cap) return;
-    const n = els.length - keep;
     const list = this._messageList;
+    const els = list.querySelectorAll(':scope > .chat-gap-msg');
+    if (els.length <= cap) return;
+    // THE KEEP ZONE (inc-mubvu3a4-x8sb): like the window trims, a gap trim never
+    // removes a card within a viewport of the viewport — by count from the far
+    // side, stopping at the zone's edge (the cursor rewind below needs the
+    // dropped set contiguous from that side, which stopping early keeps).
+    const zone = this._keepZone();
+    const pos = this._cardPositions(els);
+    let n = 0;
+    const want = els.length - keep;
+    if (side === 'bottom') { for (let i = els.length - 1; i >= 0 && n < want; i--) { if (pos[i].top < zone.bottom) break; n++; } }
+    else { for (let i = 0; i < els.length && n < want; i++) { if (pos[i].bottom > zone.top) break; n++; } }
+    if (!n) { this._trace?.('trimGap', { side, removed: 0, why: 'zone', left: els.length, st: Math.round(list.scrollTop), sh: list.scrollHeight }); return; }
     if (side === 'bottom') {
       // dropping BELOW the viewport — no scroll shift; rewind the down-cursor
       let firstDroppedLine = null;
@@ -105,21 +127,24 @@ export function installChatSeek(ChatView) {
         els[i].remove();
       }
       if (Number.isFinite(firstDroppedLine)) { this._gapCursorDown = firstDroppedLine; this._gapDownIdleUntil = 0; }
+      this._trace?.('trimGap', { side: 'bottom', removed: n, left: els.length - n, st: Math.round(list.scrollTop), sh: list.scrollHeight, cursorDown: this._gapCursorDown });
     } else {
       // dropping ABOVE the viewport — element-anchored (see _withViewportAnchor)
       const before = list.scrollHeight;
+      const stBefore = list.scrollTop;
       let lastKeptFirstLine = null;
       const ok = this._withViewportAnchor(() => {
         for (let i = 0; i < n; i++) els[i].remove();
       });
       const first = list.querySelector('.chat-gap-msg[data-line]');
       if (first) lastKeptFirstLine = Number(first.dataset.line);
-      if (!ok) list.scrollTop -= (before - list.scrollHeight);
+      if (!ok) { this._traceExpect?.('trimGap:delta'); list.scrollTop -= (before - list.scrollHeight); }
       const marker = this._seekSentinel;
       if (marker && Number.isFinite(lastKeptFirstLine)) {
         marker._gapCursor = lastKeptFirstLine;
         marker._gapAnchor = first;
       }
+      this._trace?.('trimGap', { side: 'top', removed: n, left: els.length - n, anchored: ok, from: Math.round(stBefore), to: Math.round(list.scrollTop), shBefore: before, sh: list.scrollHeight, cursor: lastKeptFirstLine });
     }
   },
 
@@ -136,6 +161,8 @@ export function installChatSeek(ChatView) {
   },
 
     _resetGapAfterJump() {
+    this._trace?.('gapReset', { wasTeleported: this._teleported ? 1 : 0 });
+    this._clearWheelCarry?.('gapReset');   // a carried notch is stale after a full-window jump (verifier r1)
     this._teleported = false;   // a full-window jump exits teleport mode
     this._gapCursorDown = null;
     clearTimeout(this._cvRestoreTimer);
@@ -165,6 +192,7 @@ export function installChatSeek(ChatView) {
     // Tail mode: load the registered tail to completion first — the sentinel
     // loads history BELOW line tailStartLine, which must sit above a fully
     // rendered tail. Teleport mode has no registered tail, so skip this.
+    if (!this._teleported && this._windowStart > 0) this._trace?.('gapUp:tail', { via, ws: this._windowStart });
     if (!this._teleported && this._windowStart > 0) { await this._extendTop(); return; }
     markerEl._gapLoading = true;
     const origLabel = btn ? btn.textContent : '';
@@ -197,6 +225,7 @@ export function installChatSeek(ChatView) {
         }
         if (!Number.isFinite(tailStartLine)) { if (btn) btn.remove(); return; }
         markerEl._gapCursor = tailStartLine;
+        this._trace?.('gapUp:first', { tailStartLine, kids: this._messageList.childElementCount });
         // Insert new (older) slabs before this. NEVER anchor on a run-fold
         // header — _updateRuns destroys and rebuilds every header on each
         // pass, and a dead anchor used to fall back to insertBefore(null)
@@ -210,7 +239,14 @@ export function installChatSeek(ChatView) {
       // Teleport mode reads across the whole file (whole=1); tail mode stops at
       // tailStartLine (the registered tail lives below).
       const whole = this._teleported ? '&whole=1' : '';
+      // the slab lands on the sentinel EPOCH it was asked on: a `_dropGapSlab`
+      // (the window left message 0 while this fetch was in flight) bumps it,
+      // and a slab from the old epoch would re-create the stale gap above a
+      // tail that no longer starts at 0 (verifier r1)
+      const epoch = markerEl._gapEpoch || 0;
+      this._trace?.('gapUp:req', { cursor: markerEl._gapCursor, via, whole: whole ? 1 : 0 });
       const r = await this._gapFetch(`/api/session-history-gap?${base}&endLine=${markerEl._gapCursor}&count=2000${whole}`);
+      if ((markerEl._gapEpoch || 0) !== epoch) { this._trace?.('gapUp:stale', { epoch, now: markerEl._gapEpoch }); return; }
       // THE incident this whole function was hardened for: `.catch(()=>null)`
       // made a transient failure (server restart mid-scroll, remote slab
       // timing out) indistinguishable from a real reply, the cursor fell to 0
@@ -218,16 +254,30 @@ export function installChatSeek(ChatView) {
       // permanently unreachable for the window's lifetime and the conversation
       // appeared to begin at the blip, with no error at all. A failure now
       // leaves the cursor untouched and never reaches _finishSeek.
-      if (!r.ok) { failed(); return; }
+      if (!r.ok) { this._trace?.('gapUp:fail', { why: 'fetch' }); failed(); return; }
       const data = r.data;
       const msgs = data?.messages || [];
-      this._trace?.('gapUp', { n: msgs.length, cursor: markerEl._gapCursor });
       const scrollHeightBefore = this._messageList.scrollHeight;
       const scrollTopBefore = this._messageList.scrollTop;
       // Element-anchored viewport preservation (same estimate-vs-real
       // content-visibility flaw as _extendTop — see _withViewportAnchor).
       let firstInserted = null;
+      const inserted = [];
       const anchoredOk = this._withViewportAnchor(() => {
+        // A TAIL-MODE GAP SLAB RUNS WITH STABLE HEIGHTS (verifier r1, measured
+        // in headless chrome on the §1c fixture): with content-visibility on,
+        // the slab's visible cards flipped between their 80 px placeholder and
+        // their real size on ALTERNATE FRAMES during a wheel (sh 4173 ↔ 18723,
+        // 2,205 resize events in six frames, no write of ours) and native
+        // scroll anchoring cancelled the wheel against the flips — a 2,800 px
+        // fling moved the reader's card under 110 px, both directions; the
+        // measured-heights reserve did not stop it, content-visibility OFF did
+        // (0 resizes, the wheel delivered exactly). Folded members are
+        // display:none, so the cost is the slab's visible cards. Turned on
+        // INSIDE the anchored section so the restore covers the re-layout;
+        // `_dropGapSlab` turns it off when the window leaves message 0, the
+        // jumps through `_resetGapAfterJump`. Teleport keeps its own regime.
+        if (!this._teleported) this._setStableHeights(true, { why: 'gapSlab' });
         // Dead anchor (removed by a runs pass / trim) → insert right after the
         // sentinel, i.e. at the TOP of history — never null (= list end, which
         // corrupted ordering by appending older records below the live tail).
@@ -237,8 +287,15 @@ export function installChatSeek(ChatView) {
           const el = this._renderGapMsg(msg);
           if (!el) continue;
           this._messageList.insertBefore(el, insRef);
+          inserted.push(el);
           if (!firstInserted) firstInserted = el;
         }
+        // MEASURED heights for the slab, like a window slab (verifier r1): with
+        // content-visibility on, a gap slab's 80 px placeholders flipped to
+        // their real size under the reader, and native scroll anchoring
+        // answered every flip inside the frame — a 2,800 px fling moved the
+        // reader's card under 110 px, in both directions, with an empty ring.
+        this._reserveFreshHeights?.(inserted);
       });
       // Next (older) slab inserts above the one we just added
       if (firstInserted) markerEl._gapAnchor = firstInserted;
@@ -251,20 +308,28 @@ export function installChatSeek(ChatView) {
         // NOT "we reached line 0", so keep the cursor and let the user retry
         // instead of ending paging (the ?host= fix makes the remote case
         // resolvable, this is the belt).
+        this._trace?.('gapUp:fail', { why: 'nofrom' });
         failed();
         return;
       }
       metric('gap-slab-load-ms', performance.now() - _t0);
       if (!anchoredOk) {
         // fallback: old delta math (no usable anchor)
-        this._traceExpect?.();
+        this._traceExpect?.('gapUp:delta');
         this._messageList.scrollTop = scrollTopBefore + (this._messageList.scrollHeight - scrollHeightBefore);
       }
+      // THE LANDING (inc-mubvu3a4-x8sb): every slab names its size, where the
+      // cursor moved to, whether the anchor held, and the geometry it left —
+      // the seek path shipped no evidence at all before this.
+      // the carried wheel-up notch lands here too (the seek path used to eat it)
+      this._applyWheelCarry?.('up', 'gapUp:carry');
+      this._trace?.('gapUp:done', { n: msgs.length, from: data.fromLine, anchored: anchoredOk, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight, dsh: this._messageList.scrollHeight - scrollHeightBefore, kids: this._messageList.childElementCount });
       if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
     } catch (e) {
       // Anything thrown between the fetch and the insert (a renderer blowing up
       // on one record) used to leave the sentinel silently stuck.
+      this._trace?.('gapUp:fail', { why: 'throw' });
       failed();
     } finally {
       endLoad();
@@ -274,6 +339,7 @@ export function installChatSeek(ChatView) {
   },
 
     _finishSeek(markerEl, btn) {
+    this._trace?.('seek:finish', { st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
     if (btn) btn.remove();
     this._gapObserver?.unobserve(markerEl);
     if (markerEl._isSeekSentinel) markerEl.remove();
@@ -355,8 +421,9 @@ export function installChatSeek(ChatView) {
     this._noteUserNav('jumpToFileTime');   // minimap time landing: a reader act, not a re-measure
     // Already rendered in the live view? Just scroll (tight tolerance — beyond
     // ±2s the actual turn isn't rendered and we teleport instead).
-    if (!this._teleported && this._scrollToNearestTs(ts, 2000)) return null;
+    if (!this._teleported && this._scrollToNearestTs(ts, 2000)) { this._trace?.('jumpTime', { line, path: 'near' }); return null; }
     let el = this._gapElForLine(line);
+    this._trace?.('jumpTime', { line, path: el ? 'loaded' : 'teleport' });
     if (!el) el = await this._seekTeleport(line);
     const target = this._nearestElByTs(ts) || el;
     if (target) {
@@ -374,10 +441,12 @@ export function installChatSeek(ChatView) {
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);
     const list = this._messageList;
+    this._trace?.('landStable', { st: Math.round(list.scrollTop), sh: list.scrollHeight });
     const center = () => {
       if (!el.isConnected) return;
       const lr = list.getBoundingClientRect();
       const rc = el.getBoundingClientRect();
+      this._traceExpect?.('landStable');
       list.scrollTop += rc.top - lr.top - lr.height / 2;
     };
     let n = 0;
@@ -386,7 +455,7 @@ export function installChatSeek(ChatView) {
     // content-visibility keeps computing off-screen heights for ~1s after the
     // jump, shifting the target after rAF convergence ends — re-center a few
     // more times on a timer to stay locked on.
-    for (const d of [180, 400, 750]) setTimeout(center, d);
+    for (const d of [180, 400, 750]) setTimeout(() => { center(); if (d === 750) this._trace?.('landStable:end', { st: Math.round(list.scrollTop), sh: list.scrollHeight, connected: el.isConnected ? 1 : 0 }); }, d);
   },
 
     async _seekTeleport(line) {
@@ -396,11 +465,13 @@ export function installChatSeek(ChatView) {
     // faster and — critically — settle their real heights almost instantly, so
     // the scroll lands in one shot. Scrolling up seek-loads more on demand.
     const start = Math.max(0, line - 300);
+    this._trace?.('teleport:req', { line, start });
     const endLoad = this._beginHistoryLoad(t('Jumping to that point in the conversation…'));
     const r = await this._gapFetch(`/api/session-history-gap?${base}&startLine=${start}&count=600&whole=1`);
     endLoad();
     if (this._disposed) return null;
     if (!r.ok) {
+      this._trace?.('teleport:fail', { line, why: 'fetch' });
       // A minimap click / search jump that silently did nothing (the whole
       // teleport is the one jump primitive, so this is the entire "go there"
       // gesture) — say it failed instead of leaving the user clicking.
@@ -411,8 +482,9 @@ export function installChatSeek(ChatView) {
     }
     const data = r.data;
     const msgs = data?.messages || [];
-    if (!msgs.length) return null;
+    if (!msgs.length) { this._trace?.('teleport:fail', { line, why: 'empty' }); return null; }
     // Replace the entire rendered view with this slab; keep + reset the sentinel.
+    this._clearWheelCarry?.('teleport');   // the reader chose a destination — no carried notch rides into it
     this._teleported = true;
     this._gapCursorDown = Number.isFinite(data.toLine) ? data.toLine : null; // next NEWER slab starts here
     this._gapDownIdleUntil = 0;
@@ -450,8 +522,10 @@ export function installChatSeek(ChatView) {
     if (target) {
       const lr = this._messageList.getBoundingClientRect();
       const rc = target.getBoundingClientRect();
+      this._traceExpect?.('teleport');
       this._messageList.scrollTop += rc.top - lr.top - lr.height / 2;
     }
+    this._trace?.('teleport:done', { n: msgs.length, from: data.fromLine, to: data.toLine, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight, target: target ? 1 : 0 });
     return target;
   },
 
@@ -471,12 +545,14 @@ export function installChatSeek(ChatView) {
       const near = this._nearestElByTs(match.ts);
       const nts = near ? (Number(near.dataset.ts) || this._tsOfRenderedEl(near)) : 0;
       if (near && Math.abs(nts - match.ts) < 2000) {
+        this._trace?.('jumpMatch', { line, path: 'near' });
         this._scrollElStable(near);
         this._reportVisibleTsRange();
         return near;
       }
     }
     let el = this._gapElForLine(line);          // fast path: already in the loaded slab
+    this._trace?.('jumpMatch', { line, path: el ? 'loaded' : 'teleport' });
     if (!el) { await this._seekTeleport(line); await settle(); }
     const target = this._nearestElByTs(match.ts) || this._gapElForLine(line);
     if (target) { this._scrollElStable(target); this._reportVisibleTsRange(); }
@@ -493,6 +569,8 @@ export function installChatSeek(ChatView) {
     }
     if (best && bestDiff <= tolMs) {
       this._programmaticScroll = true;
+      this._traceExpect?.('nearTs');
+      this._trace?.('nearTs', { diff: Math.round(bestDiff) });
       best.scrollIntoView({ block: 'center' });
       setTimeout(() => { this._programmaticScroll = false; }, 60);
       this._reportVisibleTsRange();

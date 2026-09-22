@@ -761,9 +761,26 @@ const patch = (rel, pairs) => {
 patch('src/lib/chat-view.js', [
   ['const RESUME_SETTLE_MS = 1200;', 'const RESUME_SETTLE_MS = 0;'],                       // (2) resume settle off
   ['  _autoPagingBlocked() {', '  _autoPagingBlocked() { return null;'],                   // (1) IO/seek gate off
-  ["if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });\n        else { const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }", '{ const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }'], // (3a) — 2.369.129: the else block folds again after a trim
+  ["if (this._pinned) this._trace('trimSkipPinned', { ws: newStart, n: msgs.length });\n      else { const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }", '{ const before = this._windowEnd; this._trimBottom(); if (this._windowEnd !== before) this._updateRuns(); }'], // (3a) — 2.369.129: the else block folds again after a trim; inc-mubvu3a4-x8sb moved the trim AFTER the anchored landing (6-space indent)
   ["if (this._pinned) { this._trace('pinnedRetail', { ws: newStart }); this._scrollToBottom(); }", ';'],                                          // (3b)
   ['if (!this._pinned && !this._pinnedAtSuspend) return;', 'if (!this._pinned) return;'],   // (4) re-tail back on the LIVE flag
+  // (5) THE LAYER ADDED AFTER THIS CONTROL (inc-mubvu3a4-x8sb): the keep-zone trim and the
+  // measured slab heights close the harm this control demonstrates — a pinned extend can no
+  // longer drop the tail, and a resumed subtree no longer re-measures into a transient
+  // scrollTop 0 — so with only (1)-(4) patched out the control went green on a fixed build
+  // and proved nothing. The old control strips the new layer (feedback_layered_guard_controls).
+  ["if (n >= must && pos[i].top < zone.bottom) break;", "/* control: by count */"],
+  ["if (n >= must && pos[i].bottom > zone.top) break;", "/* control: by count */"],
+  ['  _reserveFreshHeights(els) {', '  _reserveFreshHeights(els) { return;'],
+  // …and the anchor back to the list's first child at the top edge — the seek sentinel: the
+  // pre-fix landing at scrollTop 0 that this leg's "stranded at the top" reading was made of
+  ["const skip = (c) => runChrome(c) || c._isSeekSentinel;", "const skip = (c) => runChrome(c);"],
+  // …and a count target the injection's ONE extend crosses: the pre-fix build reached this leg
+  // with a 200-card window (its 2.369.129 gate skipped the scenario's earlier trims), so the
+  // injection's extend trimmed the tail and UNPINNED — the "stranded" reading; by count from
+  // the start the same window is 150 or 50 (after the rung's jumpToBottom), one extend under
+  // the 150 target, and the trim this leg's harm runs through never fires.
+  ['const TRIM_SOFT_CARDS = 150;', 'const TRIM_SOFT_CARDS = 40;'],
 ]);
 buildBundle();
 const bad = await run('gates-removed');
@@ -771,8 +788,11 @@ check('NEGATIVE CONTROL: without the gates the resume DOES page up (extendTop:do
   bad?.ok && bad.traces.some((e) => e.tag === 'extendTop:done'), JSON.stringify(bad).slice(0, 900));
 check('NEGATIVE CONTROL: …and the rendered window MOVES with zero user input',
   bad?.ok && bad.after.ws !== bad.before.ws, `${bad?.before?.ws} → ${bad?.after?.ws}`);
+// …through EITHER branch of that door: the tail-mode extend, or — when the control's own
+// gates-removed walk has already consumed the registered tail (by count from a 40-card
+// target it walks ws → 0 in the 4 s above, the incident itself) — the seek slab (gapUp:done).
 check('NEGATIVE CONTROL: the sentinel probe pages through the gap door',
-  bad?.ok && bad.probeTraces.includes('extendTop:done'), JSON.stringify(bad?.probeTraces));
+  bad?.ok && (bad.probeTraces.includes('extendTop:done') || bad.probeTraces.includes('gapUp:done')), JSON.stringify(bad?.probeTraces));
 check('NEGATIVE CONTROL: …and the re-tail-gap injection strands the window (unpinned / away from the tail)',
   bad?.ok && (bad.retail.pinned === false || bad.retail.fromBottom > 8), JSON.stringify(bad?.retail).slice(0, 500));
 
