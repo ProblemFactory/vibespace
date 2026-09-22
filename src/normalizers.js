@@ -74,7 +74,19 @@ let rebuildChain = Promise.resolve();
  * meanwhile. Concurrent attaches await the same promise instead of
  * rebuilding twice. `_historyLoaded` is set AFTER success (2.89.2 rule).
  */
-function rebuildHistory(session, sessionId, records, { budgetMs, onProgress } = {}) {
+/** The persisted task records (session-meta `taskRecords`) in the order the live
+ *  stream produced them: started → progress → notification, per task. */
+function taskReplayRecords(taskRecords) {
+  const out = [];
+  for (const cur of Object.values(taskRecords || {})) {
+    if (!cur || typeof cur !== 'object') continue;
+    if (cur.started) out.push(cur.started);
+    if (cur.progress) out.push(cur.progress);
+    if (cur.notification) out.push(cur.notification);
+  }
+  return out;
+}
+function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
   const mm = createMessageManager(session.backend || 'claude', sessionId, { threadId: session.backendSessionId || session.claudeSessionId || null }); // the rendered conversation's id = the codex ledger-key DEFAULT (file-tagged records key by their own file; wrapper_meta re-points it; null before a fresh thread is adopted)
@@ -86,6 +98,8 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress } = 
   const run = async () => {
     try {
       await mm.convertHistoryAsync(records, { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
+      // the persisted task records (2.369.140) — silent, after the history, before the live queue
+      for (const rec of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(rec); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       drainQueue(session, mm);
       session._historyLoaded = true;
     } finally {
@@ -103,4 +117,4 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress } = 
   return turn;
 }
 
-module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory };
+module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords };

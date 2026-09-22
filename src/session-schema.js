@@ -26,6 +26,8 @@ const SESSION_FIELDS = {
   _normalizer:         { owner: 'stdout', persisted: null,      note: 'MessageManager instance for the live stream' },
   _normEpoch:          { owner: 'stdout', persisted: null,      note: 'normalizer identity epoch — client full-reset discriminator (2.89.x)' },
   _subNormalizers:     { owner: 'stdout', persisted: null,      note: 'per-subagent normalizers map' },
+  _taskRecordsTimer:   { owner: 'stdout', persisted: null,      note: 'debounce for the taskRecords session-meta write' },
+  _taskRecords:        { owner: 'stdout', persisted: 'session-meta taskRecords', note: 'latest task_started / task_progress (tree kept field-wise) / task_notification per tool_use_id — replayed into the normalizer after a rebuild (2.369.140: the records are live-only and the stdout ring drops them)' },
   _historyLoaded:      { owner: 'ws',     persisted: null,      note: 'first-attach full-JSONL rebuild flag (set AFTER success, 2.89.2)' },
   _rebuildQueue:       { owner: 'ws',     persisted: null,      note: 'live records held back during the time-sliced first-attach rebuild, replayed in order (2.369.16 feedLive gate)' },
   _rebuildPromise:     { owner: 'ws',     persisted: null,      note: 'single-flight rebuild promise — concurrent attaches await it instead of rebuilding twice (2.369.16)' },

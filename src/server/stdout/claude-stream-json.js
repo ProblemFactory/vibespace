@@ -1191,6 +1191,33 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             setTimeout(() => { if (activeSessions.has(id)) checkClaudeGoalStatus(session, id); }, 2000);
           }
 
+          // PERSIST THE TASK RECORDS (2.369.140, inc-muc2fmtt-5jat "还是上面的俩workflow都没展示细节"):
+          // task_started / task_progress / task_notification exist only on the live
+          // stream — the transcript never carries them and the wrapper's stdout ring
+          // (a few hundred KB) drops them within minutes of a big tool output — so a
+          // server restart rebuilt every Workflow card WITHOUT its phases/agents and the
+          // CLI's next task_progress (throttled; none while an agent runs quietly) was
+          // the first chance to see them again. The latest record per task lives in
+          // the server's own session-meta (`taskRecords`, never the wrapper's sidecar)
+          // and rebuildHistory replays it silently after the transcript + ring.
+          if (msg.type === 'system' && msg.tool_use_id && (msg.subtype === 'task_started' || msg.subtype === 'task_progress' || msg.subtype === 'task_notification')) {
+            try {
+              const recs = session._taskRecords || (session._taskRecords = {});
+              const cur = recs[msg.tool_use_id] || (recs[msg.tool_use_id] = {});
+              if (msg.subtype === 'task_started') cur.started = msg;
+              else if (msg.subtype === 'task_progress') {
+                // the tree is INTERMITTENT (heartbeats omit it) — keep the last one seen
+                const prevTree = cur.progress && cur.progress.workflow_progress;
+                cur.progress = (msg.workflow_progress || !prevTree) ? msg : { ...msg, workflow_progress: prevTree };
+              } else cur.notification = msg;
+              cur.at = Date.now();
+              // bound: keep the 40 most recent tasks
+              const ids = Object.keys(recs);
+              if (ids.length > 40) for (const k of ids.sort((a, b) => (recs[a].at || 0) - (recs[b].at || 0)).slice(0, ids.length - 40)) delete recs[k];
+              clearTimeout(session._taskRecordsTimer);
+              session._taskRecordsTimer = setTimeout(() => { try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), taskRecords: session._taskRecords || {} }); } catch { } }, 1500);
+            } catch { }
+          }
           // Track subagent lifecycle: start/stop JSONL watchers
           if (msg.type === 'system' && msg.subtype === 'task_started' && msg.task_type === 'local_agent' && msg.task_id && msg.tool_use_id) {
             startSubagentWatcher(msg.tool_use_id, msg.task_id);

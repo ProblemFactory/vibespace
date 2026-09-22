@@ -349,6 +349,7 @@ function restoreSessions() {
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
+    session._taskRecords = (meta.taskRecords && typeof meta.taskRecords === 'object') ? meta.taskRecords : null; // 2.369.140: the live-only task records survive the restart
     attachToDtach(id, socketPath, session);
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
@@ -644,6 +645,7 @@ async function readoptOrphanKeeperSessions() {
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
     session._msgReachability = meta.msgReachability || null; // Channels v1 per-session reach override survives restarts
+    session._taskRecords = (meta.taskRecords && typeof meta.taskRecords === 'object') ? meta.taskRecords : null; // 2.369.140: the live-only task records survive the restart
     setupSessionPty(session, id, ptyProc);
     writeSessionMeta(sockName, { ...meta, orphanedAt: undefined, readoptedAt: Date.now(), webuiSessionId: id, mode: 'chat' });
     try { fs.unlinkSync(path.join(META_DIR, f)); } catch { }

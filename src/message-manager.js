@@ -368,6 +368,13 @@ class MessageManager {
   /**
    * Process a single live message. Emits create/edit ops via listeners.
    */
+  /** Feed a record WITHOUT emitting ops — the rebuild's tail for the task
+   *  records the server persisted (2.369.140): task_started / task_progress /
+   *  task_notification are live-only (the transcript never carries them, the
+   *  stdout ring drops them within minutes), so without this a restart emptied
+   *  every Workflow card's tree until the CLI's next throttled emission. */
+  replay(raw) { if (raw && typeof raw === 'object') this._processMessage(raw, false); }
+
   processLive(claudeMsg) {
     this._processMessage(claudeMsg, true);
   }

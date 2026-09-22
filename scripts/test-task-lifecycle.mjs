@@ -165,6 +165,27 @@ ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) 
     mm4.processLive({ type: "system", subtype: "task_progress", task_id: "wu9order1", tool_use_id: "toolu_wf_order", description: "Build: b1", workflow_progress: TREE });
     ok("…the ack registers the wf_ run id and a later task_progress edit carries the tree with type 'workflow'", cardMsg?.taskInfo?.runId === 'wf_order-1' && cardMsg.taskInfo.type === 'workflow' && cardMsg.taskInfo.workflow?.agents?.length === 2 && edits4.filter((e) => e.fields?.taskInfo?.workflow).every((e) => e.fields.taskInfo.type === 'workflow'), JSON.stringify(cardMsg?.taskInfo).slice(0, 300));
   }
+  // REPLAY AFTER A RESTART (2.369.140, inc-muc2fmtt-5jat): the server persists the latest
+  // task_started / task_progress (tree kept) / task_notification per task and replays them
+  // SILENTLY after the history rebuild — the card gets its tree back with zero ops emitted
+  {
+    const { taskReplayRecords } = require('../src/normalizers.js');
+    const mm5 = createMessageManager("claude", "test-wf-replay");
+    mm5.convertHistory([
+      { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_wf_rep", name: "Workflow", input: { scriptPath: "/tmp/x/lane-wf.js" } }] } },
+      { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_wf_rep", content: "Workflow launched in background. Task ID: wu9rep1\nSummary: lane: replay\nRun ID: wf_rep-1" }] } },
+    ]);
+    const ops5 = []; mm5.onOp((e) => ops5.push(e));
+    const persisted = { toolu_wf_rep: { started: { type: "system", subtype: "task_started", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", task_type: "local_workflow", description: "lane" },
+      progress: { type: "system", subtype: "task_progress", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", description: "Build: b1", usage: { total_tokens: 5, tool_uses: 1, duration_ms: 9 }, workflow_progress: TREE }, at: 1 } };
+    const recs = taskReplayRecords(persisted);
+    ok("taskReplayRecords orders started → progress (→ notification) per task", recs.length === 2 && recs[0].subtype === 'task_started' && recs[1].subtype === 'task_progress');
+    for (const r of recs) mm5.replay(r);
+    const card5 = mm5.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_rep");
+    ok("after the silent replay the card carries the tree, type 'workflow', running — and NO op was emitted (a rebuild has no client yet)", card5?.taskInfo?.workflow?.agents?.length === 2 && card5.taskInfo.type === 'workflow' && card5.taskInfo.status === 'running' && ops5.length === 0, JSON.stringify({ ti: card5?.taskInfo, ops: ops5.length }).slice(0, 300));
+    mm5.replay({ type: "system", subtype: "task_notification", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", status: "completed", summary: "done" });
+    ok("a replayed notification closes it (completed) — still silently", card5.taskInfo.status === 'completed' && ops5.length === 0, JSON.stringify(card5.taskInfo).slice(0, 200));
+  }
   // renderer + wiring pins
   const cr = read("src/lib/chat-renderers.js"), cv = read("src/lib/chat-view.js"), css = read("public/chat.css");
   ok("chat-renderers renders phases + agent chips (label · state dot · last tool) from taskInfo.workflow, every string escaped", /workflowLiveHtml\(ti\)/.test(cr) && /class=\"chat-wf-agent\" data-state=\"\$\{escHtml\(st\)\}\"/.test(cr) && /\$\{escHtml\(a\.label \|\| a\.agentId \|\| \x27\?\x27\)\}/.test(cr) && /\$\{wfLiveHtml\}<details/.test(cr));
