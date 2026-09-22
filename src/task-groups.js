@@ -40,7 +40,16 @@ const { pickColorSeq } = require('./task-color-seq');
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
 // which now includes `done`).
 const KINDS = ['task', 'group'];
-const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500, backlogItem: 500, backlogItems: 200 };
+// NO CAP ON THE BACKLOG STORE (2026-09-22, owner: "没必要设上限，只要有合适的
+// priority 分级和 ownership，每次 push 能选择正确的条目就行"). The old
+// `backlogItems: 200` was a cap on the STORE — the 工作 group sat at exactly
+// 200 (150 done + 48 open + 2 dropped) and every backlog-add was sliced off
+// silently while the CLI echoed the last surviving id. A bound belongs to a
+// READ (what an injection or a listing SELECTS, by ownership and priority
+// within its byte budget), never to a WRITE: storage keeps everything, a
+// write is acknowledged only once it is found stored (agent-routes), and
+// scripts/test-backlog-no-truncation.mjs fails any slice on this store.
+const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500, backlogItem: 500 };
 // Backlog (2.122.0) = the group's PARKING LOT for non-immediate items: deferred
 // user decisions, "later" work. Semantically NOT the removed checklist (agent
 // work items — those live on each session's own todo): injection never dumps
@@ -1021,7 +1030,7 @@ class TaskGroupManager {
     if (patch.backlog !== undefined) {
       if (!Array.isArray(patch.backlog)) throw new Error('backlog must be an array');
       const taken = new Set(); // ids stay unique — a duplicated id gets re-minted
-      t.backlog = patch.backlog.slice(0, CAPS.backlogItems).map((it) => ({
+      const normalized = patch.backlog.map((it) => ({
         // stable identity — survives text edits, referenced by CLI/diff/user
         id: (typeof it?.id === 'string' && BACKLOG_ID_RE.test(it.id) && !taken.has(it.id)) ? (taken.add(it.id), it.id) : mintBacklogId(taken),
         text: String(it?.text || '').slice(0, CAPS.backlogItem),
@@ -1036,6 +1045,7 @@ class TaskGroupManager {
         ...(it?.resolvedBy ? { resolvedBy: String(it.resolvedBy).slice(0, 120) } : {}),
         ...(Number(it?.resolvedAt) ? { resolvedAt: Number(it.resolvedAt) } : {}),
       })).filter((it) => it.text);
+      t.backlog = normalized; // every item — see the CAPS note: a bound is a READ's, never the store's
     }
     if (patch.attention !== undefined) {
       t.attention = patch.attention
@@ -1248,7 +1258,7 @@ class TaskGroupManager {
       backlog: (() => {
         const prevById = new Map((existing?.backlog || []).filter((b) => b.id).map((b) => [b.id, b]));
         const taken = new Set();
-        return (backlog.length ? backlog.slice(0, CAPS.backlogItems) : (existing?.backlog || [])).map((b) => {
+        return (backlog.length ? backlog : (existing?.backlog || [])).map((b) => {
           const prev = b.id ? prevById.get(b.id) : null;
           return {
             ...(prev || {}),
@@ -1294,7 +1304,7 @@ class TaskGroupManager {
         objective: typeof raw.objective === 'string' ? raw.objective.slice(0, CAPS.objective) : '',
         backlog: (() => {
           const taken = new Set();
-          return Array.isArray(raw.backlog) ? raw.backlog.slice(0, CAPS.backlogItems).map((it) => ({
+          return Array.isArray(raw.backlog) ? raw.backlog.map((it) => ({
             id: (typeof it?.id === 'string' && BACKLOG_ID_RE.test(it.id) && !taken.has(it.id)) ? (taken.add(it.id), it.id) : mintBacklogId(taken),
             text: String(it?.text || '').slice(0, CAPS.backlogItem),
             status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',

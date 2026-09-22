@@ -836,12 +836,14 @@ app.post('/api/agent/task-backlog', (req, res) => {
       if (typeof r !== 'number') return res.status(404).json({ error: r.err });
       return res.json({ success: true, item: backlog[r] }); // read-only — no update
     }
-    let actedIdx = -1;      // claim/unclaim → echo the item + co-claimants back
+    let actedId = null;      // claim/unclaim → echo the item + co-claimants back (BY ID — the store may evict earlier items, so a position is not an identity)
+    let added = null;        // add → the item as pushed; echoed back only once it is FOUND in the stored backlog
     let alreadyMine = false; // idempotent re-claim
     if (typeof add === 'string' && add.trim()) {
       // parking auto-CLAIMS for the caller (user directive) — the parker is
       // the natural owner until it hands the item back
-      backlog.push({ text: add.trim(), status: 'open', claimedBy: [key], ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() });
+      added = { text: add.trim(), status: 'open', claimedBy: [key], ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() };
+      backlog.push(added);
     } else if (edit !== undefined) {
       // EDIT an existing item's text and/or detail in place (2.130.0) — the
       // id stays, so refs elsewhere survive and the diff surfaces as
@@ -870,7 +872,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
         if (b.claimedBy.includes(key)) alreadyMine = true;
         else b.claimedBy.push(key);
       } else b.claimedBy = b.claimedBy.filter((k) => k !== key);
-      actedIdx = r;
+      actedId = b.id || null;
     } else if (done !== undefined || drop !== undefined) {
       const r = findIdx(done !== undefined ? done : drop);
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
@@ -883,7 +885,15 @@ app.post('/api/agent/task-backlog', (req, res) => {
     const updated = tasks.update(gid, { backlog });
     // claim ack carries the CO-CLAIMANTS (user directive: claiming must warn
     // when other sessions already hold the item, so agents coordinate)
-    const acted = actedIdx >= 0 ? updated.backlog[actedIdx] : null;
+    let acted = actedId ? updated.backlog.find((b) => b.id === actedId) || null : null;
+    if (added) {
+      // THE ECHO IS THE STORED ITEM, FOUND BY IDENTITY (2026-09-22): the old
+      // positional read (and the CLI's `backlog[backlog.length - 1]`) echoed
+      // the last SURVIVING item when a full store sliced the new one off —
+      // "parked as [B-a5b0]" for an item that was never stored.
+      acted = updated.backlog.find((b) => b.addedAt === added.addedAt && b.addedBy === key && b.text === added.text) || null;
+      if (!acted) return res.status(500).json({ error: 'the item was not stored — nothing parked (the store kept its previous contents)' });
+    }
     res.json({
       success: true,
       backlog: updated.backlog.filter((b) => b.status === 'open'),

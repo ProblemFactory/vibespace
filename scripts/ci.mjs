@@ -208,6 +208,7 @@ export const SUITES = [
   { name: 'test-otel-truth', tier: 'fast' }, // per-request billing truth: parser + loopback ingest + bake override + wiring pins
   { name: 'test-search-card-title', tier: 'fast' }, // search cards carry the query in the TITLE (claude WebSearch/WebFetch, codex web_search, ACP search): pure helper + the REAL renderer (esbuild→node) incl. XSS escaping + wiring pins
   { name: 'test-path-linkify', tier: 'fast' }, // where a chat file path ENDS: CJK/fullwidth punctuation terminates it, CJK filenames still link (owner screenshot 2026-09-10); pre-fix negative control + renderer wiring pin
+  { name: 'test-backlog-no-truncation', tier: 'fast' }, // THE BACKLOG STORE NEVER TRUNCATES (2026-09-22: a group at exactly the old 200-item cap lost every backlog-add silently while the CLI echoed a stranger's id): 2000 items round-trip, the REAL route echoes the STORED item by identity, source pins (no CAPS.backlogItems, no positional echo)
   { name: 'test-user-todos-layout', tier: 'fast' }, // the For-you popup keeps rows in their slots while open (inc-mtw02kbq-kj96: a ✓ slid the next row under the pointer); PURE layout + pre-fix control + wiring pin
   // CHANNELS v2 / the communication panel (docs/design-communication-panel.zh.md).
   // All PURE/SHARED logic — no server, no chrome, no vendor call anywhere: the
