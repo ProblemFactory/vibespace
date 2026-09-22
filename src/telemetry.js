@@ -36,8 +36,12 @@ class Telemetry {
     const now = Date.now();
     let ts = now;
     if (remote && Number.isFinite(ev.ts)) ts = Math.min(now + 300000, Math.max(now - 90 * 86400000, ev.ts));
+    // the client's OWN clock (2.369.143): batches flush 15 s apart or later
+    // under a stall, so `ts` (receipt) misplaces an event by up to the stall —
+    // keep `cts` when it is sane (within 10 min of receipt) for timelines.
+    const cts = Number.isFinite(ev.t) && Math.abs(now - ev.t) < 600000 ? ev.t : undefined;
     return {
-      ts,
+      ts, cts,
       kind: String(ev.kind || 'event').slice(0, 24),
       name: String(ev.name || '').slice(0, 120),
       // kind:'trace' = diagnostic ring-buffer dumps (e.g. chat-scroll-jump)

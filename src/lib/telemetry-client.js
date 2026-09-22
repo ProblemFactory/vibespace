@@ -57,7 +57,7 @@ let metricSeq = 0;
 export function metric(name, value) {
   if (!Number.isFinite(value) || metricSeq >= 500) return;
   metricSeq++;
-  QUEUE.push({ kind: 'metric', name, value: Math.round(value * 10) / 10, version: BUILD_VERSION });
+  QUEUE.push({ kind: 'metric', name, value: Math.round(value * 10) / 10, version: BUILD_VERSION, t: Date.now() });
   if (QUEUE.length >= 10) flush();
   else if (!flushTimer) flushTimer = setTimeout(flush, 15000);
 }
@@ -72,7 +72,7 @@ export function track(kind, name, detail, stack) {
     (track._sent = track._sent || {})[name] = same + 1;
   }
   seq++;
-  QUEUE.push({ kind, name, detail, stack, ua: navigator.userAgent, version: BUILD_VERSION });
+  QUEUE.push({ kind, name, detail, stack, ua: navigator.userAgent, version: BUILD_VERSION, t: Date.now() });
   if (QUEUE.length >= 10) flush();
   else if (!flushTimer) flushTimer = setTimeout(flush, 15000);
 }
@@ -195,6 +195,24 @@ export function installScreenWatch() {
  *  previous tick fired after the page last became visible, no hide happened
  *  since, the page is not hidden now, and it did not become visible within
  *  the last 3 s (the return spike). */
+/** PURE: a JANK STORM — frames that keep coming but slowly (2.369.143, the owner's
+ *  live reproduction: a ~14 s stall he felt, timers late by 1–3 s per tick and
+ *  frames every 1–2 s — under both freeze detectors' thresholds). Over the last
+ *  `windowMs` of frame intervals (ms): a storm when the slow frames (≥ slowMs)
+ *  together cover ≥ `coverMs` — the page was "alive" but unusable. */
+export function jankStormVerdict(intervals, { now, windowMs = 20000, slowMs = 500, coverMs = 6000 } = {}) {
+  let covered = 0, slow = 0, worst = 0;
+  for (const f of intervals) {
+    if (!f || now - f.t > windowMs) continue;
+    if (f.gap >= slowMs) { covered += f.gap; slow++; if (f.gap > worst) worst = f.gap; }
+  }
+  return { storm: covered >= coverMs, coveredMs: covered, slowFrames: slow, worstMs: worst };
+}
+const _frameGaps = [];   // {t, gap} for every frame that took ≥ 300 ms
+const _tickLags = [];    // {t, gap, hidden, visibleAgo} for every 1 s tick ≥ 1.5 s late
+export function recentFrameGaps() { return _frameGaps.slice(); }
+export function recentTickLags() { return _tickLags.slice(); }
+try { window.__vsFrameGaps = recentFrameGaps; window.__vsTickLags = recentTickLags; } catch { }
 export function selfGapIsFreeze({ tickGap, prevTick, now, hiddenNow, visibleSince, hiddenAt, minGapMs = 4000 }) {
   if (!(tickGap > minGapMs) || hiddenNow) return false;
   if (prevTick < visibleSince) return false;           // the gap started before the page came back
@@ -205,7 +223,12 @@ export function selfGapIsFreeze({ tickGap, prevTick, now, hiddenNow, visibleSinc
 export function installCompositorStallWatch() {
   let lastRaf = Date.now();
   let stallStart = 0;
-  const loop = () => { lastRaf = Date.now(); requestAnimationFrame(loop); };
+  let stormOpen = 0;
+  const loop = () => {
+    const now = Date.now(); const gap = now - lastRaf; lastRaf = now;
+    if (gap >= 300 && !document.hidden) { _frameGaps.push({ t: now, gap }); if (_frameGaps.length > 200) _frameGaps.shift(); }
+    requestAnimationFrame(loop);
+  };
   try { requestAnimationFrame(loop); } catch { return; }
   let lastTick = Date.now();
   let visibleSince = document.hidden ? 0 : Date.now(), hiddenAt = document.hidden ? Date.now() : 0;
@@ -218,6 +241,19 @@ export function installCompositorStallWatch() {
     const tickNow = Date.now();
     const prevTick = lastTick;
     const tickGap = tickNow - prevTick; lastTick = tickNow;
+    if (tickGap >= 1500) { _tickLags.push({ t: tickNow, gap: tickGap, hidden: !!document.hidden, visibleAgo: tickNow - visibleSince }); if (_tickLags.length > 120) _tickLags.shift(); }
+    // JANK STORM (2.369.143): frames alive but slow — the freeze the owner feels
+    // that neither the self-gap nor the rAF-dead arm can see. One event + one
+    // capture per storm; the storm closes after 20 s without a slow frame.
+    if (!document.hidden && tickNow - visibleSince >= 3000) {
+      const v = jankStormVerdict(_frameGaps, { now: tickNow });
+      if (v.storm && !stormOpen) {
+        stormOpen = tickNow;
+        metric('jank-storm-covered-s', Math.round(v.coveredMs / 100) / 10);
+        track('event', 'jank-storm', `${Math.round(v.coveredMs / 1000)}s of slow frames in 20 s (${v.slowFrames} frames ≥ 500 ms, worst ${Math.round(v.worstMs)} ms; timers alive)`);
+        notifyFreeze({ kind: 'jank', s: Math.round(v.coveredMs / 100) / 10, at: tickNow - 20000, longTasks: _longTasks.slice(-5), frames: v });
+      } else if (stormOpen && !v.storm && tickNow - stormOpen > 20000) stormOpen = 0;
+    }
     if (selfGapIsFreeze({ tickGap, prevTick, now: tickNow, hiddenNow: document.hidden, visibleSince, hiddenAt })) {
       metric('renderer-freeze-s', Math.round((tickGap - 1000) / 100) / 10);
       track('event', 'renderer-freeze', `${Math.round((tickGap - 1000) / 1000)}s (timer AND rAF stalled — whole renderer/system)`);

@@ -138,6 +138,8 @@ export function installIncidentRecorder(app) {
       };
     } catch (e) { out.inventory = 'failed: ' + e.message; }
     try { out.longTasks = window.__vsLongTasks ? window.__vsLongTasks().slice(-20) : null; } catch { }
+    try { out.frameGaps = window.__vsFrameGaps ? window.__vsFrameGaps().slice(-60) : null; } catch { }
+    try { out.tickLags = window.__vsTickLags ? window.__vsTickLags().slice(-40) : null; } catch { }
     try { out.screenEvents = window.__vsScreenEvents ? window.__vsScreenEvents().slice(-40) : null; } catch { }
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
@@ -222,7 +224,7 @@ export function installIncidentRecorder(app) {
     else showToast(t('Freeze capture failed ({err})', { err: r?.error || 'no answer' }), { type: 'error' });
     return r?.id || null;
   };
-  try { onRendererFreeze((f) => { if (f && f.s >= 5) app.autoCaptureIncident(f.kind === 'compositor' ? 'compositor stall' : 'renderer freeze', `${f.s}s (${f.kind}; ${f.longTasks && f.longTasks.length ? 'long tasks beside it' : 'no long task — GPU/OS side'})`); }); } catch { }
+  try { onRendererFreeze((f) => { if (f && f.s >= 5) app.autoCaptureIncident(f.kind === 'compositor' ? 'compositor stall' : f.kind === 'jank' ? 'jank storm' : 'renderer freeze', `${f.s}s (${f.kind}; ${f.longTasks && f.longTasks.length ? 'long tasks beside it' : 'no long task — GPU/OS side'}${f.frames ? `; ${f.frames.slowFrames} slow frames, worst ${Math.round(f.frames.worstMs)} ms` : ''})`); }); } catch { }
 
   // ── the capture flow ──
   app.captureIncident = async () => {
