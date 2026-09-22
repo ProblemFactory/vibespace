@@ -863,7 +863,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
         const d = detail.trim();
         if (d === '' || d === '-') delete backlog[r].detail; else backlog[r].detail = d;
       }
-      actedIdx = r;
+      actedId = backlog[r].id || null;
     } else if (claim !== undefined || unclaim !== undefined) {
       const r = findIdx(claim !== undefined ? claim : unclaim);
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
