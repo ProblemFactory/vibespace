@@ -393,7 +393,7 @@ function orphanPathVerdict({ dir, base } = {}) {
 /** The closed set of states `housekeepingVerdict` answers — the panel's phrase table must cover every one (pinned by the suite). */
 const HOUSEKEEPING_STATES = Object.freeze(['not-ours', 'in-use', 'live', 'recent', 'stale', 'kept']);
 /** The URL a frame is drawn from through `.src` (never markup); '' for anything that is not an entry id. */
-function frameUrl(id, which) { return isEntryId(id) && (which === 'before' || which === 'after') ? `/api/browser/trace/${id}/frame/${which}` : ''; }
+function frameUrl(id, which) { return isEntryId(id) && (which === 'before' || which === 'after') ? `/api/browser/actions/${id}/frame/${which}` : ''; }
 /** Bytes as the panel prints them (units are units, not prose); '—' for an unmeasured size. */
 function bytesText(n) {
   if (n === null || n === undefined || n === '') return '—';

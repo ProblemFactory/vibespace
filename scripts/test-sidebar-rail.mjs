@@ -88,9 +88,13 @@ try {
   // day the Channels panel (2.369.94) became the sixth, after 105 green runs.
   const railSrc = fs.readFileSync(path.join(repo, 'src/lib/sidebar-rail.js'), 'utf-8');
   const panelTabs = JSON.parse((railSrc.match(/export const PANEL_TABS = (\[[^\]]*\]);/) || [])[1].replace(/'/g, '"'));
-  const wantItems = 3 + panelTabs.length + 2;
+  // …and the LAUNCHERS are read off the source too (2.369.145 added a Browser
+  // profiles window launcher beside the panels — a typed "+ 2" went red).
+  const itemIds = [...railSrc.matchAll(/\bitem\('([a-z-]+)'/g)].map((m) => m[1]);
+  const launchers = itemIds.filter((id) => !['folders', 'tasks', 'mounts'].includes(id) && !panelTabs.includes(id));
+  const wantItems = 3 + panelTabs.length + launchers.length;
   const gotItems = await evalJs(`document.querySelectorAll('#sidebar-rail .rail-item').length`);
-  check(`rail has ${wantItems} items (3 content tabs + ${panelTabs.length} panels: ${panelTabs.join('/')} + 2 launchers) — got ${gotItems}`, gotItems === wantItems);
+  check(`rail has ${wantItems} items (3 content tabs + ${panelTabs.length} panels: ${panelTabs.join('/')} + ${launchers.length} launchers: ${launchers.join('/')}) — got ${gotItems}`, gotItems === wantItems && launchers.includes('browser') && launchers.includes('settings'));
   check('classic tab bar hidden', await evalJs(`getComputedStyle(document.querySelector('.sidebar-tabs')).display === 'none'`));
   check('sidebar content wrapped', await evalJs(`!!document.querySelector('#sidebar .sidebar-main')`));
 

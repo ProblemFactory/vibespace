@@ -4288,6 +4288,8 @@ export default {
   "No sweep has run yet (it runs at boot and every hour).": "还没有执行过清扫(启动时以及每小时执行一次)。",
   "Sweep failed": "清扫失败",
   "Sweep: removed {n} trace entr(ies) ({bytes}) and {r} recording(s) ({rbytes})": "清扫: 删除了 {n} 条轨迹({bytes})与 {r} 个录像({rbytes})",
+  "not traced — this browser was not started through VibeSpace (Browser profiles)": "未记录 —— 这个浏览器不是由 VibeSpace 启动的（见“浏览器配置”）",
+  "Actions are recorded only for browsers VibeSpace started (profiles) — this call drove a browser of its own.": "只有 VibeSpace 启动的浏览器（配置）才会记录操作 —— 这次调用驱动的是它自己的浏览器。",
   "Browser profiles…": "浏览器配置…",
   "Drag to resize the panes — double-click to even them out": "拖动调整两格宽度 — 双击均分",
   "Shown side by side": "并排显示中",

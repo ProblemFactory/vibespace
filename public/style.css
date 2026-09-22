@@ -4400,7 +4400,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bprof { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); font-size: 12px; }
 .bprof-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
 .bprof-summary { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bprof-btn { width: auto; padding: 0 9px; font-size: 11px; }
+.bprof-btn { width: auto; padding: 0 9px; font-size: 11px; white-space: nowrap; flex-shrink: 0; } /* 2.369.145: a CJK label's min-content is ONE glyph — without nowrap the grid's auto track stacked 收编…/搁置 vertically */
 .bprof-hint { padding: 6px 10px; font-size: 11px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .bprof-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 12px; }
 .bprof-section { padding: 6px 10px 2px; }

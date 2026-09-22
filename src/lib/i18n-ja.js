@@ -4287,6 +4287,8 @@ export default {
   "No sweep has run yet (it runs at boot and every hour).": "スイープはまだ実行されていません(起動時と毎時に実行されます)。",
   "Sweep failed": "スイープに失敗しました",
   "Sweep: removed {n} trace entr(ies) ({bytes}) and {r} recording(s) ({rbytes})": "スイープ: トレース {n} 件({bytes})と録画 {r} 件({rbytes})を削除しました",
+  "not traced — this browser was not started through VibeSpace (Browser profiles)": "未記録 — このブラウザは VibeSpace が起動したものではありません（「ブラウザプロファイル」参照）",
+  "Actions are recorded only for browsers VibeSpace started (profiles) — this call drove a browser of its own.": "操作が記録されるのは VibeSpace が起動したブラウザ（プロファイル）だけです — この呼び出しは独自のブラウザを操作しました。",
   "Browser profiles…": "ブラウザプロファイル…",
   "Drag to resize the panes — double-click to even them out": "ドラッグでペイン幅を調整 — ダブルクリックで均等に",
   "Shown side by side": "並べて表示中",

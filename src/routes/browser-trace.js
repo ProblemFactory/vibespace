@@ -7,15 +7,15 @@
  * decides nothing. `host` is a parameter refused by name (local-only).
  *
  *   UI (cookie-authed)
- *   GET    /api/browser/trace?sessionId=&conversation=&browserKey=&profile=&from=&to=&limit=
+ *   GET    /api/browser/actions?sessionId=&conversation=&browserKey=&profile=&from=&to=&limit=
  *                                                 ONE conversation's actions — matched by its webui id OR by its browser key:
  *                                                 the key a LIVE session carries, the key the bindings store holds for a
  *                                                 `conversation` (the CLI's own id — a STOPPED conversation's cards still find
  *                                                 their actions, the point of a review), or a `browserKey` given outright (a
  *                                                 resume re-carries the key, the webui id churns); at least one of the three;
  *                                                 `profile` = a profile id, `ephemeral`, or empty for every scope; oldest first
- *   GET    /api/browser/trace/:id                 one entry (never the bytes)
- *   GET    /api/browser/trace/:id/frame/:which    the before|after JPEG (image/jpeg, nosniff, private cache)
+ *   GET    /api/browser/actions/:id                 one entry (never the bytes)
+ *   GET    /api/browser/actions/:id/frame/:which    the before|after JPEG (image/jpeg, nosniff, private cache)
  *   GET    /api/browser/housekeeping              the panel: every registry row with its state + why + size, the ephemeral
  *                                                 trace digest, the adoptable orphans (§8 step 3), the forgotten ledger,
  *                                                 the last sweep, the limits — NOTHING here is a deletion
@@ -84,7 +84,10 @@ function scopeOf(q) {
 }
 
 // ── the trace ──
-router.get('/api/browser/trace', (req, res) => {
+// THE PATH IS `actions`, NOT `trace` (2.369.145): EasyPrivacy carries the rule `/trace?sessionid=`
+// (filters match case-insensitively), so the old `/api/browser/trace?sessionId=…` was blocked by
+// every content blocker on the owner's browser — fetch threw, the card said "server unreachable".
+router.get('/api/browser/actions', (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
   const sessionId = req.query.sessionId == null ? '' : String(req.query.sessionId);
@@ -107,7 +110,7 @@ router.get('/api/browser/trace', (req, res) => {
     res.json({ sessionId: sessionId || null, conversation: conversation || null, browserKey, keyFrom, traceOn: tr.enabled(), entries });
   } catch (e) { fail(res, e); }
 });
-router.get('/api/browser/trace/:id', (req, res) => {
+router.get('/api/browser/actions/:id', (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
   if (!T.isEntryId(req.params.id)) return res.status(400).json({ error: 'bad trace id', code: 'bad-request' });
@@ -115,7 +118,7 @@ router.get('/api/browser/trace/:id', (req, res) => {
   if (!e) return res.status(404).json({ error: `no trace entry ${req.params.id}`, code: 'not-found' });
   res.json({ entry: e });
 });
-router.get('/api/browser/trace/:id/frame/:which', (req, res) => {
+router.get('/api/browser/actions/:id/frame/:which', (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
   if (!T.isEntryId(req.params.id)) return res.status(400).json({ error: 'bad trace id', code: 'bad-request' });

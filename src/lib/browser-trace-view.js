@@ -216,15 +216,20 @@ export function createCardTraceLoader(view) {
     const q = askParams();
     if (![...q.keys()].length) { for (const { h } of windows) render(h, [], { off: false, unknown: true }); return; }
     q.set('from', String(u.from)); q.set('to', String(u.to)); q.set('limit', '1000');
-    const r = await fetchJson(`/api/browser/trace?${q}`);
+    const r = await fetchJson(`/api/browser/actions?${q}`);
     if (st.disposed) return;
     if (!r || r.error) { for (const { h } of windows) render(h, [], { error: (r && r.error) || t('server unreachable') }); return; }
     if (r.browserKey && !st.key) st.key = String(r.browserKey);
+    // no key to match by (a browser the keeper never started — an agent's own agent-browser profile, an
+    // unregistered directory): the honest word is NOT "no actions", it is "not traced" (2.369.145, owner
+    // "为啥都是没有记录到操作" — every card on an instance whose agents drive their own profiles read that)
+    const untraced = !r.browserKey && !r.sessionId;
     const byCard = assignEntriesToWindows(windows.map((x) => x.w), r.entries || []);
-    for (const { h, w } of windows) render(h, byCard[w.id] || [], { off: r.traceOn === false });
+    for (const { h, w } of windows) render(h, byCard[w.id] || [], { off: r.traceOn === false, untraced });
   }
-  function render(h, entries, { off = false, error = null, unknown = false } = {}) {
+  function render(h, entries, { off = false, error = null, unknown = false, untraced = false } = {}) {
     h.dataset.traceState = error ? 'error' : 'loaded';
+    h.dataset.traceUntraced = untraced && !entries.length ? '1' : '';
     h._traceEntries = entries;
     const sum = h.querySelector('.chat-browser-trace-sum');
     const strip = h.querySelector('.chat-browser-trace-strip');
@@ -234,6 +239,7 @@ export function createCardTraceLoader(view) {
       else if (s.n) sum.textContent = t('{n} action(s)', { n: s.n }) + (s.failed ? ' · ' + t('{n} failed', { n: s.failed }) : '');
       else if (off) sum.textContent = t('action trace is off (Settings → Browser)');
       else if (unknown) sum.textContent = t('no conversation id to look up');
+      else if (untraced) sum.textContent = t('not traced — this browser was not started through VibeSpace (Browser profiles)');
       else sum.textContent = h.closest('.chat-msg')?.querySelector('.chat-tool-output-pending') ? t('waiting for actions…') : t('no recorded actions in this call');
       sum.classList.toggle('empty', !s.n);
     }
@@ -244,7 +250,7 @@ export function createCardTraceLoader(view) {
     const list = h.querySelector('.chat-browser-trace-list'); if (!list) return;
     list.replaceChildren();
     const entries = h._traceEntries || [];
-    if (!entries.length) { list.appendChild(el('div', 'chat-status-dim', t('No actions were recorded in this call.'))); return; }
+    if (!entries.length) { list.appendChild(el('div', 'chat-status-dim', h.dataset.traceUntraced === '1' ? t('Actions are recorded only for browsers VibeSpace started (profiles) — this call drove a browser of its own.') : t('No actions were recorded in this call.'))); return; }
     for (const e of entries) {
       const row = el('div', 'browser-trace-row' + (e.ok === false ? ' failed' : ''));
       const top = el('div', 'browser-trace-row-top');
@@ -340,7 +346,7 @@ export function createTraceTimeline(app, { sessionId } = {}) {
     st.loading = true;
     const q = new URLSearchParams({ sessionId, limit: '300' });
     const sc = scopeQuery(); if (sc) q.set('profile', sc);
-    const r = await fetchJson(`/api/browser/trace?${q}`);
+    const r = await fetchJson(`/api/browser/actions?${q}`);
     st.loading = false;
     if (!r || r.error) { st.error = (r && r.error) || t('server unreachable'); renderHead(); return; }
     st.off = r.traceOn === false;
