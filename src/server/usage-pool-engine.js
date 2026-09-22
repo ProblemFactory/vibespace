@@ -55,7 +55,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
@@ -124,7 +124,7 @@ const _wallRing = new Map();             // account key → [{at, sid}] walled-t
 const _divergenceLogAt = new Map();      // webuiId → last "observed on X while linked to Y" log (10min floor)
 const _sessionWalls = new Map();         // webuiId → Map(memberId → ts): the members that walled THIS session
 const _noTargetLogAt = new Map();        // webuiId → last "nowhere to go" per-session log (10min floor)
-const _warmHoldLogAt = new Map();        // poolId:webuiId (per-session) | poolId:default (the pool default) → last "warm cache, proactive move deferred" log (10min floor)
+const _warmHoldLogAt = new Map();        // poolId:webuiId (per-session) | poolId:default (the pool default), each also with a ':soft' twin for the soft-exhaustion defer → last "warm cache, move deferred" log (10min floor); a per-session RE-POINT deletes that conversation's two keys (a new deferral episode speaks again — verifier LOW-3)
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
 // The get_usage control request makes the CLI (first-party client) fetch usage
 // itself — strictly better ToS posture than our bare /api/oauth/usage call.
@@ -2140,7 +2140,7 @@ function noteTurnEnd(session) {
     return;
   }
   clearRefile();
-  maybePoolAutoSwitch(session); // the per-turn pool evaluation this boundary always ran
+  maybePoolAutoSwitch(session, { stop: true }); // the per-turn pool evaluation this boundary always ran — and the FIRST STOP a soft-deferred move waits for
   // a normally-completed turn is sufficient proof the session is not blocked —
   // and it is WORK (the default classification), so it is one of the only two
   // signals allowed to clear the loop breaker (round 4); a continue that
@@ -3227,8 +3227,35 @@ function markLimitBanner(session, text) {
   } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
 }
 
-function maybePoolAutoSwitch(session) {
-  try { if (session._accountId) maybePoolAutoSwitchForPool(session._accountId); } catch { }
+function maybePoolAutoSwitch(session, { stop = false } = {}) {
+  try {
+    if (!session._accountId) return;
+    // THE FIRST STOP (2026-09-22, warm-soft-defer): a conversation whose SOFT
+    // move waits because it is mid-turn with a warm cache is owed that move the
+    // moment it stops — in THIS call, never a later tick. The 10 s eval gate
+    // throttles per-record kicks, and a stop is not a kick (a default switch a
+    // few seconds earlier closes that gate). EVERY signalled stop of a
+    // conversation no longer in a turn forces the re-decide, owed or not
+    // (verifier LOW-2): a turn the gate never let the pool evaluate while it ran
+    // has recorded nothing, yet owes the same move — the evaluation is cheap,
+    // and the 180 s dwell belt is NOT forced, exactly as for the new-member wake.
+    const force = stop
+      && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState });
+    maybePoolAutoSwitchForPool(session._accountId, force ? { force: true } : undefined);
+  } catch { }
+}
+/** The conversation's turn state went IDLE (claude `system/session_state_changed`,
+ *  the harness's own authoritative turn-over signal — strictly LATER than the
+ *  `result` record the turn-end boundary runs on, so a session under that
+ *  authority is still 'running' at the boundary and is decided in-turn there).
+ *  This record is that conversation's STOP: it re-decides every time, owed or
+ *  not (verifier LOW-2 — a `result` boundary that landed inside the 10 s eval
+ *  gate evaluated nothing and recorded nothing to owe). */
+function noteTurnStopped(session) {
+  try {
+    if (!session || !session._accountId) return;
+    maybePoolAutoSwitch(session, { stop: true });
+  } catch { }
 }
 
 // ── A MEMBER BECAME USABLE, AND NOBODY NOTICED (2026-09-08, from the
@@ -3791,10 +3818,23 @@ function hasOwnPoolLink(poolId, sid) {
 // key is the pool's (`poolId:default`, the verifier's LOW-B: keyed on the warmest
 // sid, N rotating followers spoke N times per 10 min); the line still names the
 // conversation holding it.
+// The SOFT-exhaustion defer (decidePoolSwitch's 'warm-soft-defer') speaks through
+// the same throttle under its own `:soft` key, in its own words: it is a move
+// OWED at the conversation's first stop, not a proactive jump waiting for a cold
+// cache. No user notice — the move itself posts the normal switch notice. Both
+// lines name the target by its NAME (`wouldToName`, verifier INFO-a), the id
+// only when the verdict carries none. A per-session RE-POINT clears that
+// conversation's two keys (verifier LOW-3): the next deferral is a new episode
+// and speaks at once, not after the old episode's 10-min floor.
 function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid) {
   if (now - (_warmHoldLogAt.get(key) || 0) < 10 * 60e3) return;
   _warmHoldLogAt.set(key, now);
-  console.log(`[pool] hold ${sid}: warm cache (last output ${d.agoSec}s ago < ttl ${d.ttlSec}s) — proactive move to ${d.wouldTo} deferred${scope}`);
+  if (d.reason === 'warm-soft-defer') {
+    const b = d.softBucket || {};
+    console.log(`[pool] defer ${sid}: soft-exhausted (${b.label || '?'} ${b.remaining ?? '?'}% < hot ${b.hot ?? '?'}%) but mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`);
+    return;
+  }
+  console.log(`[pool] hold ${sid}: warm cache (last output ${d.agoSec}s ago < ttl ${d.ttlSec}s) — proactive move to ${d.wouldToName || d.wouldTo} deferred${scope}`);
 }
 function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
   try {
@@ -3888,13 +3928,17 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // re-bills the whole context. `_lastPtyDataAt` is the last instant its CLI
       // produced output (at or after its last API request); a FORCED move is
       // never held (decidePoolSwitch applies this to 'edf' only).
-      const warm = warmCache({ lastActivityMs: s2._lastPtyDataAt, nowMs: now, model: cacheModelFor(s2) });
+      // …and `inTurn` (2026-09-22, the owner's first-stop rule): a SOFT-band move
+      // of a conversation that is mid-turn with a warm cache waits for its first
+      // stop (warm-soft-defer); the turn boundary re-decides it.
+      const warm = { ...warmCache({ lastActivityMs: s2._lastPtyDataAt, nowMs: now, model: cacheModelFor(s2) }), inTurn: conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState }) };
       // never pick a member that just answered THIS session with a limit
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
       const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
       if (!ds || !ds.to) {
         if (ds && ds.reason === 'warm-cache') { noteWarmHold(poolId, sid, ds, now); continue; }
+        if (ds && ds.reason === 'warm-soft-defer') { noteWarmHold(poolId, sid, ds, now, '', poolId + ':' + sid + ':soft'); continue; }
         // PARKED ON CREDITS (B-ad05): this conversation's member serves past
         // its quota on pay-per-use billing — say so once per 6 h per (pool,
         // member); it is deliberately NOT in `noWay` (the member serves).
@@ -3927,6 +3971,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       _poolSwitchAt.set(dwellKey, now);
       try {
         accounts.ensureSessionPoolLink(poolId, sid, ds.to, { why: 'per-session-switch' });
+        _warmHoldLogAt.delete(poolId + ':' + sid); _warmHoldLogAt.delete(poolId + ':' + sid + ':soft'); // a re-point ends this conversation's deferral episode (LOW-3)
         try { recordUsageAttribution({ claudeSessionId: s2.claudeSessionId || s2.backendSessionId, accountId: poolId }); } catch { }
         const toName = accounts.get(ds.to)?.name || ds.to;
         // a same-target re-point (observed ≠ linked, the link was already on
@@ -3959,16 +4004,32 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // without its own link at once (the `affected` set below), so its proactive
     // move waits while ANY of them is warm — the warmest one (largest ttl − ago
     // margin) holds it and names it in the journal.
+    // THE FIRST STOP, pool-default form (2026-09-22): a warm follower that is IN
+    // A TURN outranks every idle one — it is the only kind that can defer a SOFT
+    // move — so the default's soft move waits for that conversation's first stop.
+    // WHY NOT PIN IT to the old member through its own link and move the default
+    // for everyone else: a default follower's CLI reads the pool's OWN link
+    // (data/subs/<pool>, fixed in its env at spawn — it has no per-session link),
+    // so a per-session link created now would never be read by that process —
+    // the default re-point would still move it mid-turn, while
+    // sessionBillingMember (which reads the per-session link first) would bill
+    // its requests to the OLD member: the stale-slot misattribution class. So
+    // the default HOLDS; its cold co-followers wait with it (one turn at most,
+    // the band is still usable, and the HARD band never waits). Every local
+    // claude session spawned since plan C carries its own link and is decided by
+    // the per-session pass above, one conversation at a time.
     let defaultWarm = null, defaultWarmSid = null;
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || hasOwnPoolLink(poolId, sid)) continue;
-      const w = warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) });
-      if (w.warm && (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec)) { defaultWarm = w; defaultWarmSid = sid; }
+      const w = { ...warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) }), inTurn: conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState }) };
+      if (!w.warm) continue;
+      if (!defaultWarm || (w.inTurn && !defaultWarm.inTurn) || (w.inTurn === defaultWarm.inTurn && w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec)) { defaultWarm = w; defaultWarmSid = sid; }
     }
     const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
     if (!d) return;
     if (!d.to) {
       if (d.reason === 'warm-cache') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default'); return; }
+      if (d.reason === 'warm-soft-defer') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default:soft'); return; }
       // PARKED ON CREDITS (B-ad05): not "stuck" — the current member serves,
       // billed pay-per-use past its quota. ONE notice per (pool, member) per 6 h.
       if (d.reason === 'on-credits') { noteCreditsParking(poolId, currentId, poolCreditsNotice(d, { poolName: a.name, memberName: nameOf(currentId) }), now); return; }
@@ -4102,7 +4163,7 @@ function maybeStopOnFallback(session, id, from, to) {
   return {
     _vsuPending, usageAnchors, usageEstimator,
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
-    markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
+    markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
     onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)

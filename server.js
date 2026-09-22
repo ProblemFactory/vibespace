@@ -423,7 +423,7 @@ function broadcastToSession(session, id, msg) {
 const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
-  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure,
+  markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
   maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, autoCliReady, lastMemberReadAt, // …+ the new-member wake (2026-09-08)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
@@ -508,7 +508,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   CLAUDE_STREAM_TYPES, _seenStreamTypes, activeSessions,
   engine: { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner, // EVERY name the registered consumers destructure from `engine` must be here — test-fable-cap-pool-storm §10 derives that set from their own `const {…} = engine;` and fails THIS literal (r3: two were missing and every claude chat record became raw output)
     maybePoolAutoSwitch, maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
-    modelsMatch, noteSessionProduced, noteTurnEnd, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },
+    modelsMatch, noteSessionProduced, noteTurnEnd, noteTurnStopped, noteWallSignal, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, usageEstimator, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane },
   checkClaudeGoalStatus,
   broadcastToSession,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),

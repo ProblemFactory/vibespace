@@ -401,8 +401,8 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   const edfCaches = { a: acct(0.3, 6 * D), b: acct(0.4, 12 * H) };
   const hot = (caches, extra = {}) => decidePoolSwitch({ currentId: 'a', members, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive: true, hot: true, explain: true, ...extra });
   const held = hot(edfCaches, { warm: w1 });
-  ck('warm: a WARM conversation is not moved by the proactive EDF jump — none(\'warm-cache\') carrying agoSec/ttlSec/wouldTo',
-    held.to === null && held.reason === 'warm-cache' && held.agoSec === 120 && held.ttlSec === 300 && held.wouldTo === 'b', JSON.stringify(held));
+  ck('warm: a WARM conversation is not moved by the proactive EDF jump — none(\'warm-cache\') carrying agoSec/ttlSec/wouldTo/wouldToName',
+    held.to === null && held.reason === 'warm-cache' && held.agoSec === 120 && held.ttlSec === 300 && held.wouldTo === 'b' && held.wouldToName === 'B', JSON.stringify(held));
   ck('…and without explain it keeps the historical null contract', decidePoolSwitch({ currentId: 'a', members, readCache: (id) => edfCaches[id] ?? null, nowSec: NOW, proactive: true, hot: true, warm: w1 }) === null);
   const cold = hot(edfCaches, { warm: wEdge });
   ck('warm: a COLD conversation (ago >= ttl) gets the EDF jump exactly as before', cold.to === 'b' && cold.reason === 'edf', JSON.stringify(cold));
@@ -433,6 +433,91 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: a warm-cache refusal is journalled through the throttled noteWarmHold at both sites',
     (eng.match(/reason === 'warm-cache'\) \{ noteWarmHold\(/g) || []).length === 2);
   ck('WIRING PIN: the hot bootstrap / placement site stays warm-less (no conversation yet)', calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c)) && calls.filter((c) => !/proactive:/.test(c)).length === 1);
+}
+
+
+// ── THE FIRST STOP (2026-09-22, owner: "软耗尽的话 热对话切走时机晚一点，普通10%，热对话的话就5%这样。
+// 如果一个对话到达了冷对话切走的标准但还热着，就在停下来的第一时间切走。"): on a HOT pool a
+// SOFT-band exhaustion (under the hot bar, above the hard bar) moves a cold / idle
+// conversation at once but DEFERS a warm one that is mid-turn to its first stop —
+// none('warm-soft-defer'); the HARD band and a dead login move everyone at once. ──
+{
+  const { conversationInTurn, warmCache, THRESH } = require(path.resolve('src/account-pool-auto.js'));
+  const fs = require('node:fs');
+  // inTurn truth table — two protocol facts, ignorance is NOT a turn
+  ck('inTurn: _isStreaming true ⇒ in a turn', conversationInTurn({ isStreaming: true }) === true);
+  ck('inTurn: turnState running ⇒ in a turn', conversationInTurn({ isStreaming: false, turnState: 'running' }) === true);
+  ck('inTurn: turnState requires_action ⇒ in a turn (paused on the user, not over)', conversationInTurn({ turnState: 'requires_action' }) === true);
+  ck('inTurn: turnState idle + not streaming ⇒ NOT in a turn', conversationInTurn({ isStreaming: false, turnState: 'idle' }) === false);
+  ck('inTurn: neither fact (a terminal-mode session) ⇒ NOT in a turn — moves at once', conversationInTurn({ isStreaming: undefined, turnState: undefined }) === false && conversationInTurn() === false);
+  ck('inTurn: a truthy non-boolean isStreaming is not the protocol flag', conversationInTurn({ isStreaming: 1 }) === false);
+
+  const nowMs = NOW * 1000;
+  const warmW = warmCache({ lastActivityMs: nowMs - 30e3, nowMs, model: 'claude-fable-5-1' });
+  const coldW = warmCache({ lastActivityMs: nowMs - 10 * 60e3, nowMs, model: 'claude-fable-5-1' });
+  const W = (w, inTurn) => ({ ...w, inTurn });
+  // A: 5h at 7 % remaining — under the hot bar (10), above the hard bar (5); B healthy
+  const softC = { a: acct(0.3, 6 * D, { u5: 0.93 }), b: acct(0.3, 6 * D) };
+  const hardC = { a: acct(0.3, 6 * D, { u5: 0.97 }), b: acct(0.3, 6 * D) };
+  const hot = (caches, extra = {}) => decidePoolSwitch({ currentId: 'a', members, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive: true, hot: true, explain: true, ...extra });
+  ck('bars: the fixture sits in the soft band (hot 10 > 7 ≥ hard 5)', THRESH.fiveHour.hot === 10 && THRESH.fiveHour.hard === 5);
+
+  const def = hot(softC, { warm: W(warmW, true) });
+  ck('soft + warm + inTurn ⇒ none(\'warm-soft-defer\') with wouldTo, band soft, agoSec/ttlSec',
+    def.to === null && def.reason === 'warm-soft-defer' && def.wouldTo === 'b' && def.wouldToName === 'B' && def.band === 'soft' && def.agoSec === 30 && def.ttlSec === 300, JSON.stringify(def));
+  ck('…it NAMES the tripped bucket and both of its bars (the journal line reads them)',
+    def.softBucket && def.softBucket.label === '5h' && def.softBucket.kind === 'fiveHour' && def.softBucket.remaining === 7 && def.softBucket.hot === 10 && def.softBucket.hard === 5, JSON.stringify(def.softBucket));
+  ck('…and speaks the quota bands like every other refusal (lowBuckets names the 5h)', Array.isArray(def.lowBuckets) && def.lowBuckets.includes('5h 7%'), JSON.stringify(def.lowBuckets));
+  ck('…without explain it keeps the historical null contract', decidePoolSwitch({ currentId: 'a', members, readCache: (id) => softC[id] ?? null, nowSec: NOW, proactive: true, hot: true, warm: W(warmW, true) }) === null);
+  const idle = hot(softC, { warm: W(warmW, false) });
+  ck('soft + warm + IDLE (its first stop) ⇒ the exhaustion move, band soft', idle.to === 'b' && idle.reason === 'exhausted' && idle.band === 'soft', JSON.stringify(idle));
+  const coldIn = hot(softC, { warm: W(coldW, true) });
+  ck('soft + COLD + inTurn ⇒ the exhaustion move at once (nothing to protect)', coldIn.to === 'b' && coldIn.reason === 'exhausted' && coldIn.band === 'soft', JSON.stringify(coldIn));
+  const noInTurn = hot(softC, { warm: warmW });
+  ck('soft + warm with NO inTurn field ⇒ the move (the 2.369.149 shape is byte-identical)', noInTurn.to === 'b' && noInTurn.reason === 'exhausted', JSON.stringify(noInTurn));
+  ck('soft + warm:null ⇒ identical to omitting it', JSON.stringify(hot(softC, { warm: null })) === JSON.stringify(hot(softC)));
+  const hardIn = hot(hardC, { warm: W(warmW, true) });
+  ck('HARD + warm + inTurn ⇒ the exhaustion move at once, band hard', hardIn.to === 'b' && hardIn.reason === 'exhausted' && hardIn.band === 'hard', JSON.stringify(hardIn));
+  const deadLogin = hot({ a: acct(0.3, 6 * D), b: acct(0.3, 6 * D) }, { warm: W(warmW, true), readLogin: (id) => (id === 'a' ? { state: 'expired' } : { state: 'live' }) });
+  ck('login-dead + warm + inTurn ⇒ login-expired move at once, band hard', deadLogin.to === 'b' && deadLogin.reason === 'login-expired' && deadLogin.band === 'hard', JSON.stringify(deadLogin));
+  const softNoSettle = hot({ a: acct(0.3, 6 * D, { u5: 0.93 }), b: acct(0.3, 6 * D, { u5: 0.92 }) }, { warm: W(warmW, true) });
+  ck('soft + warm + inTurn with nowhere settleable ⇒ still no-settleable (the refusal that SPEAKS wins; nothing is owed)', softNoSettle.to === null && softNoSettle.reason === 'no-settleable', JSON.stringify(softNoSettle));
+  const coldPoolIn = decidePoolSwitch({ currentId: 'a', members, readCache: (id) => softC[id] ?? null, nowSec: NOW, warm: W(warmW, true), explain: true });
+  ck('a COLD pool has no soft band: 7 % is healthy there, nothing deferred', coldPoolIn.to === null && coldPoolIn.reason === 'healthy', JSON.stringify(coldPoolIn));
+  // the EDF tier is UNCHANGED: a warm conversation waits for a cold cache whether or not it is in a turn
+  const edfC = { a: acct(0.3, 6 * D), b: acct(0.4, 12 * H) };
+  ck('edf + warm (idle) ⇒ warm-cache, unchanged', hot(edfC, { warm: W(warmW, false) }).reason === 'warm-cache');
+  ck('edf + warm + inTurn ⇒ warm-cache too (the proactive rule is the owner\'s FIRST rule, untouched)', hot(edfC, { warm: W(warmW, true) }).reason === 'warm-cache');
+
+  // WIRING PIN (the 2.355.0 lesson): code only, comments stripped (the 2.369.134 lesson)
+  const strip = (f) => fs.readFileSync(path.resolve(f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
+  const eng = strip('src/server/usage-pool-engine.js');
+  ck('WIRING PIN: the per-session site passes inTurn from s2._isStreaming AND s2._turnState',
+    /inTurn: conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)/.test(eng));
+  ck('WIRING PIN: the pool-default site computes inTurn from s._isStreaming AND s._turnState',
+    /inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng));
+  ck('WIRING PIN: both sites journal a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts)',
+    (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*sid \+ ':soft'\); continue; \}/g) || []).length === 1
+    && (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*':default:soft'\); return; \}/g) || []).length === 1
+    && !/_softDeferred/.test(eng));
+  ck('WIRING PIN: the default site does NOT pin a follower through ensureSessionPoolLink (its CLI never reads a per-session link — see the engine essay)',
+    !/ensureSessionPoolLink\([^\n]*warm-soft-defer/.test(eng));
+  ck('WIRING PIN: the turn-end boundary is the FIRST STOP (maybePoolAutoSwitch(session, { stop: true }) inside noteTurnEnd)',
+    /function noteTurnEnd\(session\) \{[\s\S]*?maybePoolAutoSwitch\(session, \{ stop: true \}\);[\s\S]*?\n\}/.test(eng));
+  ck('WIRING PIN: EVERY signalled stop of a conversation no longer in a turn forces past the eval gate, owed or not (verifier LOW-2)',
+    /const force = stop\n\s*&& !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\);/.test(eng));
+  ck('WIRING PIN: the authoritative idle record re-decides every pooled conversation\'s stop (noteTurnStopped is not gated on an owed move — LOW-2)',
+    /function noteTurnStopped\(session\) \{\n\s*try \{\n\s*if \(!session \|\| !session\._accountId\) return;\n\s*maybePoolAutoSwitch\(session, \{ stop: true \}\);/.test(eng));
+  ck('WIRING PIN: a per-session re-point clears that conversation\'s two hold/defer throttle keys (a new deferral episode speaks — LOW-3)',
+    /accounts\.ensureSessionPoolLink\(poolId, sid, ds\.to, \{ why: 'per-session-switch' \}\);\n\s*_warmHoldLogAt\.delete\(poolId \+ ':' \+ sid\); _warmHoldLogAt\.delete\(poolId \+ ':' \+ sid \+ ':soft'\);/.test(eng));
+  ck('WIRING PIN: both journal lines name the target by its NAME, the id only as the fallback (verifier INFO-a)',
+    (eng.match(/\$\{d\.wouldToName \|\| d\.wouldTo\}/g) || []).length === 2 && !/\$\{d\.wouldTo\}/.test(eng));
+  const parse = strip('src/server/stdout/claude-stream-json.js');
+  ck('WIRING PIN: the authoritative idle record is the first stop too (claude-stream-json calls noteTurnStopped on a CHANGE to idle)',
+    /if \(changed && st === 'idle'\) \{ try \{ noteTurnStopped\?\.\(session\); \} catch \{ \} \}/.test(parse) && /settleTurnLane, noteTurnStopped \} = engine;/.test(parse));
+  const srv = strip('server.js');
+  ck('WIRING PIN: server.js destructures noteTurnStopped from the engine AND hands it to the stdout engine literal',
+    /notePoolAuthFailure, noteTurnStopped,/.test(srv) && /noteTurnEnd, noteTurnStopped, noteWallSignal,/.test(srv));
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

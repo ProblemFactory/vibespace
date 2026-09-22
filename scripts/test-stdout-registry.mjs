@@ -55,6 +55,7 @@ const engine = {
   _vsuPending: new Map(), armWorkflowUsageWatcher() { }, kickPoolEval() { }, markLimitBanner() { }, maybePoolAutoSwitch() { },
   maybeRepinLockedModel() { }, maybeStopOnFallback() { }, notePoolAuthFailure() { }, modelsMatch: () => false,
   noteServedModel(s, m) { s._servedModel = m; s._servedModelAt = Date.now(); }, noteModelFallback() { }, // 2026-09-13: the served model + the fallback stamp are ONE engine consumer, shared by the parse and the device feed
+  noteTurnStopped() { }, // 2026-09-22: the authoritative idle record is a soft-deferred pool move's FIRST STOP (warm-soft-defer)
   settleTurnLane() { }, // r3: the consumer binds it on the session so session-stdout's TEARDOWN can close the per-turn lane decision (a turn that ends by the wrapper dying emits no `result`)
   // r3-r2: the target-less lock latch asks the engine whether the model that
   // ANSWERED is this session's model or the classifier's substitute. Modelled

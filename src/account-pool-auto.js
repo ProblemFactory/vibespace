@@ -111,6 +111,15 @@ function warmCache({ lastActivityMs, nowMs, model } = {}) {
   const agoMs = Math.max(0, now - last);
   return { warm: agoMs < ttlSec * 1000, agoSec: Math.floor(agoMs / 1000), ttlSec };
 }
+// IS THIS CONVERSATION IN A TURN RIGHT NOW (2026-09-22, the soft-exhaustion defer
+// below). Two protocol facts, both owned by the stdout consumer: `_isStreaming`
+// (an explicit turn-in-flight flag) and `_turnState` (the harness's OWN last
+// word — 'requires_action' is a turn PAUSED on the user, not an ended one). A
+// session with neither fact (a terminal-mode session: no stream to read) is NOT
+// in a turn, so a soft move reaches it at once — ignorance never defers a move.
+function conversationInTurn({ isStreaming, turnState } = {}) {
+  return isStreaming === true || turnState === 'running' || turnState === 'requires_action';
+}
 
 // Remaining % for one bucket ({utilization: 0..1, resetsAt: unix seconds}).
 // A reset that already PASSED means the window rolled over since the reading
@@ -303,9 +312,12 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 // `on-credits` instead of 'no-members' so the engine can say it is billing,
 // not that it is stuck. Omit it and every decision is byte-identical.
 // warm = warmCache(…) of the conversation(s) this decision would move, or null
-// (2026-09-22): a warm cache holds the PROACTIVE 'edf' jump only — answered
-// `none('warm-cache', {agoSec, ttlSec, wouldTo})` — and nothing else; every
-// forced move is decided exactly as before. Omit it ⇒ byte-identical.
+// (2026-09-22): a warm cache holds the PROACTIVE 'edf' jump — answered
+// `none('warm-cache', {agoSec, ttlSec, wouldTo, wouldToName})`. With `warm.inTurn` (the
+// conversationInTurn fact) it ALSO defers a SOFT-band exhaustion move of a
+// conversation that is mid-turn — `none('warm-soft-defer', {…, softBucket})`,
+// the move owed at its first stop; the HARD band and a dead login are decided
+// exactly as before. Omit it ⇒ byte-identical.
 function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, explain = false }) {
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
   // `explain` keeps the historical contract (null = no switch) for every
@@ -541,12 +553,32 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // notice); `toLoginNear` says what we could get. Collapsing the two into
       // one string would have made a login-expired escape onto a scrap lose
       // its 180s-belt exemption.
-      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: curLoginDead ? 'login-expired' : 'exhausted', ...scrapsInfo(best) };
+      // band 'hard': a bucket under its HARD bar or a dead login — every
+      // conversation moves NOW, warm or mid-turn (the owner's rule below never
+      // reaches this branch).
+      return { to: best.id, toName: best.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: best.remaining, reason: curLoginDead ? 'login-expired' : 'exhausted', band: 'hard', ...scrapsInfo(best) };
     }
     // soft-exhausted (only a hot-raised threshold tripped): still usable,
     // so only move somewhere that can actually SETTLE
     if (!bestSettle) return none('no-settleable', { fromRemaining: cur.known ? cur.remaining : null, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
-    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'exhausted' };
+    // THE FIRST STOP (2026-09-22, owner: "软耗尽的话 热对话切走时机晚一点，普通10%，热对话
+    // 的话就5%这样。如果一个对话到达了冷对话切走的标准但还热着，就在停下来的第一时间切走。").
+    // The soft band is still USABLE, so a conversation that is mid-turn with a
+    // warm cache is not cut over mid-turn (the re-point cold-starts it): the move
+    // is DEFERRED to its first stop — the engine re-decides at the turn boundary,
+    // when `inTurn` is false and this branch returns the move (a cache still warm
+    // at that instant is accepted). A cold conversation, or one not in a turn,
+    // moves at once; the HARD band above never defers.
+    if (warm && warm.warm && warm.inTurn) {
+      const tripped = curBr.filter(soft).sort((x, y) => (x.remaining - THRESH[x.kind].hot) - (y.remaining - THRESH[y.kind].hot))[0];
+      return none('warm-soft-defer', {
+        agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id, wouldToName: bestSettle.name, band: 'soft',
+        fromRemaining: cur.known ? cur.remaining : null,
+        softBucket: tripped ? { label: tripped.label, kind: tripped.kind, remaining: Math.round(tripped.remaining), hot: THRESH[tripped.kind].hot, hard: THRESH[tripped.kind].hard } : null,
+        ...bucketDetail(curBr),
+      });
+    }
+    return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'exhausted', band: 'soft' };
   }
   // Proactive tier (hot pools): jump to a strictly-sooner KNOWN deadline —
   // drain the soonest-expiring quota while the current target's keeps. Never
@@ -557,7 +589,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // …and never while the conversation's prompt cache is still warm: the jump
     // is VOLUNTARY, and a re-point cold-starts it (THE WARM CACHE, above). The
     // pool asks again next cycle; the cache goes cold on its own.
-    if (warm && warm.warm) return none('warm-cache', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id });
+    if (warm && warm.warm) return none('warm-cache', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id, wouldToName: bestSettle.name });
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'edf' };
   }
   return none('hold', { fromRemaining: cur.known ? cur.remaining : null });
@@ -812,4 +844,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName,
-  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

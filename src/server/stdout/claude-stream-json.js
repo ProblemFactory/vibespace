@@ -56,7 +56,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
     maybeRepinLockedModel, maybeStopOnFallback, notePoolAuthFailure,
     modelsMatch, noteSessionProduced, noteTurnEnd, recordRateLimitEvent, resolveUsageKey, usageEstimator,
-    noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane } = engine;
+    noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, noteTurnStopped } = engine;
 
   /**
    * IS THIS DIRECTORY A LINKED GIT WORKTREE? (round-4 verifier — the positive
@@ -950,6 +950,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               session._turnState = st;
               session._isStreaming = eff.streaming;
               if (!eff.streaming) { session._fallbackStopFired = false; retireCompaction(session, id); }
+              // THE FIRST STOP (2026-09-22): under this authority the `result`
+              // boundary still reads 'running', so a pool move deferred to this
+              // conversation's first stop (warm-soft-defer) is made HERE, on the
+              // harness's own turn-over word — the pool re-decides every idle
+              // stop, owed or not (a `result` inside the 10 s eval gate recorded
+              // nothing to owe — verifier LOW-2).
+              if (changed && st === 'idle') { try { noteTurnStopped?.(session); } catch { } }
               if (eff.label !== null) newLabel = eff.label;
               // Only on a CHANGE (the CLI can restate the same state) — and NOT
               // through broadcastActiveSessions: the session-card payload

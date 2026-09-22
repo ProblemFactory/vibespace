@@ -540,7 +540,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     const eng2 = read('src/server/usage-pool-engine.js');
     ok('PIN: onWalledTurn demotes BEFORE the verdict, and the verdict is session-aware', /function onWalledTurn\(session, sigs\) \{[\s\S]{0,900}demoteWalledAccount\(session, sigs\)[\s\S]{0,900}quotaVerdictFor\(scope, \{ model, session \}\)/.test(eng2));
     ok("PIN: the walled turn's pool evaluation runs AFTER the arm (finally) so fireNow finds the session armed", /ar\.armIfEnabled\(id, session, Date\.now\(\) \+ 45000[\s\S]{0,2000}\} finally \{[\s\S]{0,700}maybePoolAutoSwitch\(session\);\s*\n\s*\}\s*\n\}/.test(eng2));
-    ok('PIN: noteTurnEnd evaluates the pool only on the NORMAL branch (the walled branch owns its own, after the arm)', /if \(sigs\.length && workAfter <= 1\) \{[\s\S]{0,700}return;\s*\n\s*\}\s*\n\s*(?:clearRefile\(\);\s*\n\s*)?maybePoolAutoSwitch\(session\);/.test(eng2) && !/session\._turnWallSigs = \[\]; session\._turnWorkAfterSig = 0;\s*\n\s*maybePoolAutoSwitch\(session\);/.test(eng2));
+    ok('PIN: noteTurnEnd evaluates the pool only on the NORMAL branch (the walled branch owns its own, after the arm)', /if \(sigs\.length && workAfter <= 1\) \{[\s\S]{0,700}return;\s*\n\s*\}\s*\n\s*(?:clearRefile\(\);\s*\n\s*)?maybePoolAutoSwitch\(session(?:, \{ stop: true \})?\);/.test(eng2) && !/session\._turnWallSigs = \[\]; session\._turnWorkAfterSig = 0;\s*\n\s*maybePoolAutoSwitch\(session\);/.test(eng2));
     // …and the proven re-file is dropped on BOTH exits, but only AFTER the
     // demotion — it is that pass's evidence for every signal that carries no
     // window of its own, and clearing it beside the two turn pins (where it

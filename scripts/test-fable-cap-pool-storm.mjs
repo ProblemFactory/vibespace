@@ -2700,8 +2700,8 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     ok('§17 the COLD sibling takes the proactive EDF move (the control — same pool, same verdict)', w.linkOf('sess-cold') === 'soon', w.linkOf('sess-cold') + ' | ' + pool.join(' | ').slice(0, 300));
     ok('§17 THE RULE: the WARM conversation (output 60 s ago < 300 s) stays where its cache is', w.linkOf('sess-warm') === 'far', w.linkOf('sess-warm') + ' | ' + pool.join(' | ').slice(0, 300));
     ok('§17 …and a [1m] conversation idle 20 min is still warm (1-hour cache, read off the REQUEST model after a variant-less answer)', w.linkOf('sess-1m') === 'far', w.linkOf('sess-1m'));
-    ok('§17 the hold SPEAKS in the journal, naming the conversation, its ago/ttl and where it would have gone',
-      pool.some((l) => l === `[pool] hold sess-warm: warm cache (last output 60s ago < ttl 300s) — proactive move to ${w.id.soon} deferred`), pool.join(' | ').slice(0, 400));
+    ok('§17 the hold SPEAKS in the journal, naming the conversation, its ago/ttl and where it would have gone — by the member\'s NAME (verifier INFO-a)',
+      pool.some((l) => l === `[pool] hold sess-warm: warm cache (last output 60s ago < ttl 300s) — proactive move to Member Soon deferred`), pool.join(' | ').slice(0, 400));
     const cap2 = quiet();
     w.eng.maybePoolAutoSwitchForPool(w.P, { force: true });
     const again = cap2.done().filter((l) => /\[pool\] hold sess-warm/.test(l));
@@ -2733,7 +2733,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
     const cd = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P); const dl = cd.done().filter((l) => /\[pool\]/.test(l));
     ok('§17 POOL DEFAULT: a warm default-following conversation defers the default\'s proactive move', wd.am.poolCurrent(wd.P) === wd.id.far, wd.am.poolCurrent(wd.P) + ' | ' + dl.join(' | ').slice(0, 300));
     ok('§17 POOL DEFAULT: …and says so, naming the conversation that holds it',
-      dl.some((l) => l === `[pool] hold sess-follow: warm cache (last output 30s ago < ttl 300s) — proactive move to ${wd.id.soon} deferred (pool default)`), dl.join(' | ').slice(0, 300));
+      dl.some((l) => l === `[pool] hold sess-follow: warm cache (last output 30s ago < ttl 300s) — proactive move to Member Soon deferred (pool default)`), dl.join(' | ').slice(0, 300));
     follower._lastPtyDataAt = Date.now() - 6 * 60e3; // the cache went cold on its own
     const cd2 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P, { force: true }); cd2.done();
     ok('§17 POOL DEFAULT: once the cache is cold the next cycle makes the move', wd.am.poolCurrent(wd.P) === wd.id.soon, wd.am.poolCurrent(wd.P));
@@ -2771,7 +2771,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
       ok('§17 LOW-A: a lock SPELLED "fable[1m]" is the 1-hour cache ⇒ held',
         wl.linkOf('lock-1m') === 'far', wl.linkOf('lock-1m'));
       ok('§17 LOW-A: the latched hold speaks with the 1-hour ttl',
-        lines.some((l) => l === `[pool] hold lock-latched: warm cache (last output 1200s ago < ttl 3600s) — proactive move to ${wl.id.soon} deferred`), lines.join(' | ').slice(0, 400));
+        lines.some((l) => l === `[pool] hold lock-latched: warm cache (last output 1200s ago < ttl 3600s) — proactive move to Member Soon deferred`), lines.join(' | ').slice(0, 400));
     }
     // NEGATIVE CONTROL (the pre-fix code): without the lock rule the user lock borrows the spawn's [1m] and is held for an hour.
     const mutL = mutate('src/server/usage-pool-engine.js', 'warmlock', [[
@@ -2833,7 +2833,7 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
       const inTen = holds.filter((h) => h.tick <= 20);
       ok('§17 LOW-B: five rotating warm followers ⇒ exactly ONE pool-default hold line in 10 min', inTen.length === 1, JSON.stringify(holds.map((h) => [h.tick, h.sid])));
       ok('§17 LOW-B: …the line still names the conversation holding it, scoped "(pool default)"',
-        inTen.length === 1 && inTen[0].l === `[pool] hold ${inTen[0].sid}: warm cache (last output 1s ago < ttl 300s) — proactive move to ${wr.id.soon} deferred (pool default)`, inTen[0]?.l || '');
+        inTen.length === 1 && inTen[0].l === `[pool] hold ${inTen[0].sid}: warm cache (last output 1s ago < ttl 300s) — proactive move to Member Soon deferred (pool default)`, inTen[0]?.l || '');
       ok('§17 LOW-B: …and it speaks again once the 10-min floor has passed (a floor, not a gag)', holds.filter((h) => h.tick === 21).length === 1, JSON.stringify(holds.map((h) => [h.tick, h.sid])));
       ok('§17 LOW-B: the default never moved while a follower was warm', wr.am.poolCurrent(wr.P) === wr.id.far, wr.am.poolCurrent(wr.P));
     }
@@ -2849,6 +2849,314 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
       ok('§17 LOW-B NEGATIVE CONTROL: pre-fix, the five followers speak five times in 10 min — the finding reproduced', inTen.length === 5, JSON.stringify(inTen.map((h) => [h.tick, h.sid])));
     }
   }
+}
+
+// ═══ §18 A SOFT MOVE OF A WARM CONVERSATION WAITS FOR ITS FIRST STOP ═════════
+// Owner, 2026-09-22: "软耗尽的话 热对话切走时机晚一点，普通10%，热对话的话就5%这样。如果一个对话到达了
+// 冷对话切走的标准但还热着，就在停下来的第一时间切走。" On a HOT pool the soft band (under the
+// hot bar, above the hard bar) moves a cold conversation at once and DEFERS a warm one
+// that is mid-turn to the moment it stops; the hard band moves everyone at once.
+// Driven through the REAL engine (per-session pass, pool default, the turn-end
+// boundary) and, for the authoritative turn state, the REAL stdout pipeline.
+console.log('— §18 a soft move of a warm mid-turn conversation waits for its first stop');
+{
+  const SOFT = [
+    { tag: 'cur', name: 'Member Cur', u5: 0.93, u7: 0.30, fable: 0.30, hoursOut: 48 }, // 5h 7 % left: under hot 10, above hard 5
+    { tag: 'alt', name: 'Member Alt', u5: 0.05, u7: 0.30, fable: 0.30, hoursOut: 48 },
+  ];
+  const HARD = [{ ...SOFT[0], u5: 0.97 }, SOFT[1]]; // 5h 3 % left: under the hard bar
+  const inTurn = (t) => ({ _isStreaming: true, _turnState: 'running', _lastPtyDataAt: t - 20e3, _spawnModel: 'claude-fable-5-1' });
+  const coldIdle = (t) => ({ _isStreaming: false, _turnState: 'idle', _lastPtyDataAt: t - 10 * 60e3, _spawnModel: 'claude-fable-5-1' });
+  const follow = (w, sid, fields) => {
+    const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: w.P, name: sid, cwd: w.root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, ...fields };
+    w.sessions.set(sid, s); // NO own link — it follows the pool default
+    return s;
+  };
+  const perSessionWorld = (roster, engineModule = engMod) => {
+    const w = mkWorld({ roster, sameDeadline: true, engineModule });
+    if (!w) return null;
+    w.am.setPoolTarget(w.P, w.id.alt); // the DEFAULT is healthy: only the per-session pass acts here
+    const t = Date.now();
+    w.mkSession('sess-hot', 'cur', inTurn(t));
+    w.mkSession('sess-cold', 'cur', coldIdle(t));
+    return w;
+  };
+  const w = perSessionWorld(SOFT);
+  if (!w) { ok('§18 SKIP — pools unsupported on this platform', true); }
+  else {
+    const c1 = quiet(); w.eng.maybePoolAutoSwitchForPool(w.P); const l1 = c1.done().filter((l) => /\[pool\]/.test(l));
+    ok('§18 (b) the COLD sibling on the soft-exhausted member moves at once', w.linkOf('sess-cold') === 'alt', w.linkOf('sess-cold') + ' | ' + l1.join(' | ').slice(0, 300));
+    ok('§18 (a) THE RULE: the warm conversation mid-turn is NOT moved by the tick', w.linkOf('sess-hot') === 'cur', w.linkOf('sess-hot') + ' | ' + l1.join(' | ').slice(0, 300));
+    ok('§18 (a) …the defer SPEAKS once in the journal, naming the bucket, both numbers and where it goes at its first stop — by the member\'s NAME (verifier INFO-a)',
+      l1.filter((l) => /\[pool\] defer sess-hot/.test(l)).length === 1
+      && l1.includes(`[pool] defer sess-hot: soft-exhausted (5h 7% < hot 10%) but mid-turn with a warm cache — moves at its first stop (to Member Alt)`), l1.join(' | ').slice(0, 400));
+    ok('§18 (a) …and posts NO user notice for the deferred conversation (the cold one\'s move notice is the only one)',
+      w.notices.length === 1 && /sess-cold/.test(w.notices[0]) && !w.notices.some((n) => /sess-hot/.test(n)), JSON.stringify(w.notices).slice(0, 300));
+    const c2 = quiet(); w.eng.maybePoolAutoSwitchForPool(w.P, { force: true }); const l2 = c2.done().filter((l) => /\[pool\]/.test(l));
+    ok('§18 (a) the next tick defers again, SILENTLY (one line per (pool, conversation) per 10 min)', w.linkOf('sess-hot') === 'cur' && !l2.some((l) => /defer sess-hot/.test(l)), l2.join(' | ').slice(0, 300));
+    // THE FIRST STOP: the turn ends. A default switch seconds ago closed the 10 s
+    // eval gate — the owed move must still happen IN THIS CALL, not a later tick.
+    w.eng._poolAutoLast.set(w.P, Date.now());
+    const sh = w.sessions.get('sess-hot');
+    sh._isStreaming = false; sh._turnState = 'idle'; sh._lastPtyDataAt = Date.now() - 1e3; // the cache is still warm at the stop — accepted
+    const c3 = quiet(); w.eng.noteTurnEnd(sh); const l3 = c3.done().filter((l) => /\[pool\]/.test(l));
+    ok('§18 (a) FIRST STOP: the turn-end boundary moves it IN THAT CALL (gate closed, cache still warm)', w.linkOf('sess-hot') === 'alt', w.linkOf('sess-hot') + ' | ' + l3.join(' | ').slice(0, 300));
+    ok('§18 (a) …with the normal switch notice', w.notices.some((n) => /conversation "sess-hot" moved to Member Alt/.test(n)), JSON.stringify(w.notices).slice(0, 300));
+
+    // NEGATIVE CONTROL ①: the pre-fix engine (2.369.149 — no inTurn) moves the warm mid-turn conversation at once.
+    const mutA = mutate('src/server/usage-pool-engine.js', 'softps', [[
+      ', inTurn: conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState }) };',
+      ' }; // PRE-FIX (2.369.149): no inTurn — a soft move is never deferred',
+    ]]);
+    ok('§18 (a) NEGATIVE CONTROL: the patch hit the product source', mutA.hit === true, mutA.why || '');
+    if (mutA.hit) {
+      const wm = perSessionWorld(SOFT, mutA.mod);
+      const c = quiet(); wm.eng.maybePoolAutoSwitchForPool(wm.P); c.done();
+      ok('§18 (a) NEGATIVE CONTROL: pre-fix, the warm mid-turn conversation IS moved by the tick (the cold start mid-turn)', wm.linkOf('sess-hot') === 'alt', wm.linkOf('sess-hot'));
+    }
+    // NEGATIVE CONTROL ②: without the boundary's force the closed gate swallows the first stop.
+    const mutG = mutate('src/server/usage-pool-engine.js', 'softgate', [[
+      'maybePoolAutoSwitchForPool(session._accountId, force ? { force: true } : undefined);',
+      'maybePoolAutoSwitchForPool(session._accountId); // PRE-FIX: the stop is an ordinary kick',
+    ]]);
+    ok('§18 (a) GATE CONTROL: the patch hit the product source', mutG.hit === true, mutG.why || '');
+    if (mutG.hit) {
+      const wg = perSessionWorld(SOFT, mutG.mod);
+      const c = quiet(); wg.eng.maybePoolAutoSwitchForPool(wg.P); c.done();
+      wg.eng._poolAutoLast.set(wg.P, Date.now());
+      const s = wg.sessions.get('sess-hot'); s._isStreaming = false; s._turnState = 'idle';
+      const c2b = quiet(); wg.eng.noteTurnEnd(s); c2b.done();
+      ok('§18 (a) GATE CONTROL: without the force the first stop is lost to the 10 s gate — the move waits for a later tick', wg.linkOf('sess-hot') === 'cur', wg.linkOf('sess-hot'));
+    }
+  }
+
+  // (a') THE AUTHORITATIVE TURN STATE, through the REAL stdout pipeline: the CLI's
+  // `result` arrives while its own turn state still says 'running' (idle is strictly
+  // later), so the boundary defers again and the move is made on the idle record.
+  const authRun = (engineModule = engMod) => {
+    const wa = mkWorld({ roster: SOFT, sameDeadline: true, engineModule });
+    wa.am.setPoolTarget(wa.P, wa.id.alt);
+    const s = wa.mkSession('sess-auth', 'cur', { _spawnModel: 'claude-fable-5-1' });
+    s._normalizer = createMessageManager('claude', 'sess-auth');
+    const { so } = mkStdout(wa);
+    const pty = mkPty(); so.setupSessionPty(s, 'sess-auth', pty);
+    const feed = (o) => pty.data(JSON.stringify(o) + '\n');
+    const out = {};
+    const c = quiet();
+    feed({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: 'cid-sess-auth' });
+    s._lastPtyDataAt = Date.now() - 5e3; // the liveness stamp setupSessionPty wires (the fake pty keeps only the LAST onData callback, the consumer's) — the conversation just produced output
+    wa.eng.maybePoolAutoSwitchForPool(wa.P);
+    out.afterTick = wa.linkOf('sess-auth');
+    feed({ type: 'result', subtype: 'success', session_id: 'cid-sess-auth' });
+    out.afterResult = wa.linkOf('sess-auth');
+    out.stateAtResult = s._turnState;
+    feed({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: 'cid-sess-auth' });
+    out.afterIdle = wa.linkOf('sess-auth');
+    out.lines = c.done().filter((l) => /\[pool\]/.test(l));
+    out.notices = wa.notices;
+    return out;
+  };
+  if (w) {
+    const r = authRun();
+    ok('§18 (a\') authoritative: a warm conversation whose harness says running is deferred by the tick', r.afterTick === 'cur', r.afterTick + ' | ' + r.lines.join(' | ').slice(0, 300));
+    ok('§18 (a\') …the `result` boundary still reads running, so the move stays owed', r.afterResult === 'cur' && r.stateAtResult === 'running', r.afterResult + '/' + r.stateAtResult);
+    ok('§18 (a\') …and the harness\'s own idle record is the first stop: moved on that record, notice posted',
+      r.afterIdle === 'alt' && r.notices.some((n) => /conversation "sess-auth" moved to Member Alt/.test(n)), r.afterIdle + ' | ' + JSON.stringify(r.notices).slice(0, 200));
+    const mutI = mutate('src/server/usage-pool-engine.js', 'softidle', [[
+      "    if (!session || !session._accountId) return;\n",
+      "    return; // PRE-FIX: the idle record re-decides nothing\n",
+    ]]);
+    ok('§18 (a\') NEGATIVE CONTROL: the patch hit the product source', mutI.hit === true, mutI.why || '');
+    if (mutI.hit) {
+      const rm = authRun(mutI.mod);
+      ok('§18 (a\') NEGATIVE CONTROL: without the idle hook the authoritative conversation is still on the spent member after it stopped', rm.afterIdle === 'cur', rm.afterIdle);
+    }
+  }
+
+  // (c) THE HARD BAND never waits: the warm mid-turn conversation moves at once.
+  // Control = an over-broad defer (a pure copy that also defers the hard band).
+  const hardRun = (engineModule = engMod) => {
+    const wh = perSessionWorld(HARD, engineModule);
+    const c = quiet(); wh.eng.maybePoolAutoSwitchForPool(wh.P); const lines = c.done().filter((l) => /\[pool\]/.test(l));
+    return { wh, lines };
+  };
+  const overBroad = () => {
+    const pure = mutate('src/account-pool-auto.js', 'softhardpure', [[
+      '    if (hardDead) {\n',
+      '    if (hardDead && !(warm && warm.warm && warm.inTurn)) { // OVER-BROAD: the hard band defers too\n',
+    ]]);
+    if (!pure.hit) return pure;
+    return mutate('src/server/usage-pool-engine.js', 'softhardeng', [[
+      "require('../account-pool-auto.js');",
+      "require('../" + path.basename(pure.file) + "');",
+    ]]);
+  };
+  if (w) {
+    const { wh, lines } = hardRun();
+    ok('§18 (c) HARD band: the warm mid-turn conversation moves at once', wh.linkOf('sess-hot') === 'alt' && wh.linkOf('sess-cold') === 'alt', wh.linkOf('sess-hot') + ' | ' + lines.join(' | ').slice(0, 300));
+    ok('§18 (c) …no defer line, and its move notice is posted', !lines.some((l) => /defer/.test(l)) && wh.notices.some((n) => /sess-hot/.test(n)), JSON.stringify(wh.notices).slice(0, 200));
+    const ob = overBroad();
+    ok('§18 (c) NEGATIVE CONTROL: the patch hit the product source', ob.hit === true, ob.why || '');
+    if (ob.hit) {
+      const { wh: wo } = hardRun(ob.mod);
+      ok('§18 (c) NEGATIVE CONTROL: a copy that defers the hard band too leaves the conversation on a member under the hard bar', wo.linkOf('sess-hot') === 'cur', wo.linkOf('sess-hot'));
+    }
+  }
+
+  // (d)/(e) THE POOL DEFAULT. A default follower's CLI reads the pool's OWN link
+  // (fixed in its env at spawn), so it cannot be pinned to the old member through a
+  // per-session link the process never reads — the default HOLDS its soft move while
+  // a follower is warm and mid-turn, and makes it at that follower's first stop; its
+  // cold co-followers share the one credential path and wait with it (the recorded
+  // deviation — see the engine essay). The HARD band moves them all at once.
+  const defaultWorld = (roster, engineModule = engMod) => {
+    const wd = mkWorld({ roster, sameDeadline: true, engineModule }); // default = roster[0] = cur
+    const t = Date.now();
+    follow(wd, 'fol-turn', inTurn(t));
+    follow(wd, 'fol-idle', { _isStreaming: false, _turnState: 'idle', _lastPtyDataAt: t - 5e3, _spawnModel: 'claude-fable-5-1' }); // WARMER than fol-turn, but idle: it cannot hold a soft move
+    follow(wd, 'fol-cold', coldIdle(t));
+    return wd;
+  };
+  if (w) {
+    const wd = defaultWorld(SOFT);
+    const c1 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P); const l1 = c1.done().filter((l) => /\[pool\]/.test(l));
+    ok('§18 (d) default soft-exhausted with a warm MID-TURN follower: the default is held on the old member', wd.am.poolCurrent(wd.P) === wd.id.cur, wd.am.poolCurrent(wd.P) + ' | ' + l1.join(' | ').slice(0, 300));
+    ok('§18 (d) …the hold speaks once, naming the mid-turn follower (not the warmer idle one), scoped "(pool default)"',
+      l1.includes(`[pool] defer fol-turn: soft-exhausted (5h 7% < hot 10%) but mid-turn with a warm cache — moves at its first stop (to Member Alt) (pool default)`), l1.join(' | ').slice(0, 400));
+    ok('§18 (d) …no user notice at the hold', wd.notices.length === 0, JSON.stringify(wd.notices).slice(0, 200));
+    ok('§18 (d) RECORDED DEVIATION: the cold and idle co-followers wait with the default (one credential path — they cannot move without it)',
+      wd.am.poolCurrentFor(wd.P, 'fol-cold') === wd.id.cur && wd.am.poolCurrentFor(wd.P, 'fol-idle') === wd.id.cur);
+    ok('§18 (d) …the default is NOT pinned through a per-session link (no own link was created for any follower)',
+      ['fol-turn', 'fol-idle', 'fol-cold'].every((sid) => !fs.existsSync(wd.am.sessionPoolLinkPath(wd.P, sid))));
+    const c2 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P, { force: true }); const l2 = c2.done().filter((l) => /\[pool\]/.test(l));
+    ok('§18 (d) the next tick holds again, silently', wd.am.poolCurrent(wd.P) === wd.id.cur && !l2.some((l) => /defer/.test(l)), l2.join(' | ').slice(0, 200));
+    wd.eng._poolAutoLast.set(wd.P, Date.now());
+    const ft = wd.sessions.get('fol-turn'); ft._isStreaming = false; ft._turnState = 'idle';
+    const c3 = quiet(); wd.eng.noteTurnEnd(ft); c3.done();
+    ok('§18 (d) FIRST STOP: the mid-turn follower\'s turn end moves the default IN THAT CALL — every follower with it', wd.am.poolCurrent(wd.P) === wd.id.alt, wd.am.poolCurrent(wd.P));
+    ok('§18 (d) …with the normal pool switch notice', wd.notices.some((n) => /auto-switched to Member Alt \(previous account down to 7% remaining\)/.test(n)), JSON.stringify(wd.notices).slice(0, 200));
+    const mutD = mutate('src/server/usage-pool-engine.js', 'softdef', [[
+      ', inTurn: conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState }) };',
+      ' }; // PRE-FIX (2.369.149): no inTurn at the default',
+    ]]);
+    ok('§18 (d) NEGATIVE CONTROL: the patch hit the product source', mutD.hit === true, mutD.why || '');
+    if (mutD.hit) {
+      const wdm = defaultWorld(SOFT, mutD.mod);
+      const c = quiet(); wdm.eng.maybePoolAutoSwitchForPool(wdm.P); c.done();
+      ok('§18 (d) NEGATIVE CONTROL: pre-fix, the default moves at once — the mid-turn follower is cut over mid-turn', wdm.am.poolCurrent(wdm.P) === wdm.id.alt, wdm.am.poolCurrent(wdm.P));
+    }
+    const we = defaultWorld(HARD);
+    const c4 = quiet(); we.eng.maybePoolAutoSwitchForPool(we.P); const l4 = c4.done().filter((l) => /\[pool\]/.test(l));
+    ok('§18 (e) default HARD-exhausted: all three followers move now (the default re-points at once)', we.am.poolCurrent(we.P) === we.id.alt && !l4.some((l) => /defer/.test(l)), we.am.poolCurrent(we.P) + ' | ' + l4.join(' | ').slice(0, 300));
+    const ob = overBroad();
+    if (ob.hit) {
+      const weo = defaultWorld(HARD, ob.mod);
+      const c = quiet(); weo.eng.maybePoolAutoSwitchForPool(weo.P); c.done();
+      ok('§18 (e) NEGATIVE CONTROL: the over-broad copy holds a HARD-exhausted default — the leg can see it', weo.am.poolCurrent(weo.P) === weo.id.cur, weo.am.poolCurrent(weo.P));
+    } else ok('§18 (e) NEGATIVE CONTROL: the patch hit the product source', false, ob.why || '');
+  }
+  // (f) LOW-2 (the verifier): A STOP INSIDE THE 10 s WINDOW STILL MOVES A TURN THE
+  // POOL NEVER EVALUATED WHILE IT RAN. No tick saw the turn, so nothing was recorded
+  // as owed; a default switch seconds ago closed the eval gate; the stop is the first
+  // time the pool looks. The stop forces the re-decide, owed or not — at the turn-end
+  // boundary AND at the authoritative idle record. Control = the PRE-FIX engine: the
+  // owed-move map, the boundary's force and the idle hook both gated on it.
+  const preFixOwed = () => mutate('src/server/usage-pool-engine.js', 'softowed', [
+    ['const _warmHoldLogAt = new Map();', 'const _softDeferred = new Map(); // PRE-FIX: the owed-move map\nconst _warmHoldLogAt = new Map();'],
+    ["if (ds && ds.reason === 'warm-soft-defer') { noteWarmHold(", "if (ds && ds.reason === 'warm-soft-defer') { _softDeferred.set(poolId + ':' + sid, 1); noteWarmHold("],
+    ['    const force = stop\n', "    const force = stop && _softDeferred.has(session._accountId + ':' + session._webuiId) // PRE-FIX: forced only for an owed move\n"],
+    ['    if (!session || !session._accountId) return;\n    maybePoolAutoSwitch(session, { stop: true });',
+      "    if (!session || !session._accountId || !_softDeferred.has(session._accountId + ':' + session._webuiId)) return; // PRE-FIX: only an owed move\n    maybePoolAutoSwitch(session, { stop: true });"],
+  ]);
+  const neverEvaluated = (engineModule = engMod) => {
+    const wn = perSessionWorld(SOFT, engineModule);
+    wn.eng._poolAutoLast.set(wn.P, Date.now()); // the gate closed before the pool ever looked at this turn
+    const s = wn.sessions.get('sess-hot');
+    s._isStreaming = false; s._turnState = 'idle'; s._lastPtyDataAt = Date.now() - 1e3; // the stop, cache still warm
+    const c = quiet(); wn.eng.noteTurnEnd(s); const lines = c.done().filter((l) => /\[pool\]/.test(l));
+    return { wn, lines };
+  };
+  const authNeverEvaluated = (engineModule = engMod) => {
+    const wa = mkWorld({ roster: SOFT, sameDeadline: true, engineModule });
+    wa.am.setPoolTarget(wa.P, wa.id.alt);
+    const s = wa.mkSession('sess-auth', 'cur', { _spawnModel: 'claude-fable-5-1' });
+    s._normalizer = createMessageManager('claude', 'sess-auth');
+    const { so } = mkStdout(wa);
+    const pty = mkPty(); so.setupSessionPty(s, 'sess-auth', pty);
+    const feed = (o) => pty.data(JSON.stringify(o) + '\n');
+    const out = {};
+    const c = quiet();
+    feed({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: 'cid-sess-auth' });
+    s._lastPtyDataAt = Date.now() - 5e3;
+    wa.eng._poolAutoLast.set(wa.P, Date.now()); // no tick ever saw the turn, and the gate is closed
+    feed({ type: 'result', subtype: 'success', session_id: 'cid-sess-auth' });
+    out.afterResult = wa.linkOf('sess-auth');
+    feed({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: 'cid-sess-auth' });
+    out.afterIdle = wa.linkOf('sess-auth');
+    out.lines = c.done().filter((l) => /\[pool\]/.test(l));
+    out.notices = wa.notices;
+    return out;
+  };
+  if (w) {
+    const { wn, lines } = neverEvaluated();
+    ok('§18 (f) LOW-2: a turn the pool never evaluated while it ran is moved AT ITS STOP although the stop lands inside the 10 s eval window',
+      wn.linkOf('sess-hot') === 'alt' && wn.notices.some((n) => /conversation "sess-hot" moved to Member Alt/.test(n)), wn.linkOf('sess-hot') + ' | ' + lines.join(' | ').slice(0, 300));
+    const ra = authNeverEvaluated();
+    ok('§18 (f) LOW-2 authoritative: the `result` boundary still reads running (decided in-turn, nothing moved)', ra.afterResult === 'cur', ra.afterResult);
+    ok('§18 (f) LOW-2 authoritative: …and the idle record inside the window moves it though nothing was recorded as owed',
+      ra.afterIdle === 'alt' && ra.notices.some((n) => /conversation "sess-auth" moved to Member Alt/.test(n)), ra.afterIdle + ' | ' + ra.lines.join(' | ').slice(0, 300));
+    const mutO = preFixOwed();
+    ok('§18 (f) LOW-2 NEGATIVE CONTROL: the patch hit the product source', mutO.hit === true, mutO.why || '');
+    if (mutO.hit) {
+      const { wn: wo } = neverEvaluated(mutO.mod);
+      ok('§18 (f) LOW-2 NEGATIVE CONTROL: pre-fix, the stop inside the window is swallowed by the gate — still on the soft-exhausted member',
+        wo.linkOf('sess-hot') === 'cur', wo.linkOf('sess-hot'));
+      const rao = authNeverEvaluated(mutO.mod);
+      ok('§18 (f) LOW-2 NEGATIVE CONTROL: pre-fix, the authoritative idle record re-decides nothing — still on the soft-exhausted member',
+        rao.afterIdle === 'cur', rao.afterIdle);
+    }
+  }
+
+  // (g) LOW-3 (the verifier): A NEW DEFERRAL EPISODE SPEAKS. Episode 1 defers and
+  // moves at the stop; a minute later the conversation's NEW member is the soft-
+  // exhausted one while it is in its next turn — a new owed move, inside the first
+  // line's 10-min floor, and the journal must say it. Control = the engine whose
+  // re-point keeps the conversation's throttle keys.
+  const twoEpisodes = (engineModule = engMod) => {
+    const we = perSessionWorld(SOFT, engineModule);
+    const defers = [];
+    const run = (fn) => { const c = quiet(); fn(); defers.push(...c.done().filter((l) => /\[pool\] defer sess-hot/.test(l))); };
+    run(() => we.eng.maybePoolAutoSwitchForPool(we.P)); // episode 1: deferred
+    const s = we.sessions.get('sess-hot');
+    s._isStreaming = false; s._turnState = 'idle';
+    run(() => we.eng.noteTurnEnd(s)); // …and moved at its first stop
+    const moved = we.linkOf('sess-hot');
+    const cAlt = we.readCache(we.id.alt), cCur = we.readCache(we.id.cur);
+    // a FRESH reading of each (the estimator's 30 s memo yields only to newer ground truth)
+    we.writeCache(we.id.alt, { ...cAlt, fetchedAt: Date.now(), fiveHour: { ...cAlt.fiveHour, utilization: 0.93 } });
+    we.writeCache(we.id.cur, { ...cCur, fetchedAt: Date.now(), fiveHour: { ...cCur.fiveHour, utilization: 0.05 } });
+    Object.assign(s, inTurn(Date.now())); // episode 2: its next turn, warm, on a member now soft-exhausted
+    run(() => we.eng.maybePoolAutoSwitchForPool(we.P, { force: true }));
+    return { we, defers, moved };
+  };
+  if (w) {
+    const { we, defers, moved } = twoEpisodes();
+    ok('§18 (g) LOW-3: episode 1 deferred, then moved at its stop', moved === 'alt', moved);
+    ok('§18 (g) LOW-3: two deferral episodes inside 10 min ⇒ TWO defer lines, the second naming its own target',
+      defers.length === 2 && defers[1] === '[pool] defer sess-hot: soft-exhausted (5h 7% < hot 10%) but mid-turn with a warm cache — moves at its first stop (to Member Cur)',
+      JSON.stringify(defers).slice(0, 400));
+    ok('§18 (g) LOW-3: …and episode 2 is deferred (still on the member it moved to)', we.linkOf('sess-hot') === 'alt', we.linkOf('sess-hot'));
+    const mutT = mutate('src/server/usage-pool-engine.js', 'softthrottle', [[
+      "        _warmHoldLogAt.delete(poolId + ':' + sid); _warmHoldLogAt.delete(poolId + ':' + sid + ':soft');",
+      '        // PRE-FIX: a re-point keeps the throttle keys',
+    ]]);
+    ok('§18 (g) LOW-3 NEGATIVE CONTROL: the patch hit the product source', mutT.hit === true, mutT.why || '');
+    if (mutT.hit) {
+      const { defers: dt } = twoEpisodes(mutT.mod);
+      ok('§18 (g) LOW-3 NEGATIVE CONTROL: pre-fix, the second episode is swallowed by the first one\'s 10-min floor — one line', dt.length === 1, JSON.stringify(dt).slice(0, 300));
+    }
+  }
+
 }
 
 console.log(fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')');
