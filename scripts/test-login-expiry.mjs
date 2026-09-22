@@ -995,7 +995,7 @@ console.log('— §5 wiring');
   // resolved tail credits 'agent' for agent-resolved items, and the watch's
   // retraction is neither the user nor an agent.
   ck("the resolved tail labels a watch-retracted item 'automatically' (not the user, not an agent)",
-    /i\.resolvedBy === 'system' \? ' · ' \+ t\('automatically'\)/.test(panel));
+    /by === 'system' \? t\('automatically'\)/.test(panel) /* 2.369.152 moved the wording into resolvedByText(); the panel still says it */);
   // ROUND 3: the item text asks the STATE what happened, not the rung how
   // urgent it is — warnStageFor collapses 'logged-out' onto 'expired'.
   const lew = fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8');
