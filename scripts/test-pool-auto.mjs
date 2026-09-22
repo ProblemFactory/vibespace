@@ -379,5 +379,61 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('…and a SPENT credits member is still listed (last) — the hard floor does not gate what serves past its quota', rankPoolMembers({ members: M, readCache: (id) => ({ a: acct(0.5, 5 * D), b: acct(0.5, 4 * D), k: deadK })[id], nowSec: NOW, creditsIds: ['k'] }).map((r) => r.id).join(',') === 'b,a,k');
 }
 
+
+// ── THE WARM CACHE (2026-09-22, owner: "如果一个对话最近在活跃（缓存还热）那就尽量不要切，
+// 因为无缓启动要消耗大量额度"): a re-point cold-starts the conversation, so a PROACTIVE
+// move ('edf') of a warm one is held; a FORCED move ('exhausted') never is. ──────
+{
+  const { cacheTtlSecFor, warmCache } = require(path.resolve('src/account-pool-auto.js'));
+  const fs = require('node:fs');
+  ck('warm: a [1m] model runs on the 1-hour prompt cache', cacheTtlSecFor('claude-fable-5-1[1m]') === 3600 && cacheTtlSecFor('fable[1m]') === 3600);
+  ck('warm: a plain model on the 5-minute default (and no model at all)', cacheTtlSecFor('claude-fable-5-1') === 300 && cacheTtlSecFor(null) === 300);
+  const nowMs = NOW * 1000;
+  ck('warm: no activity stamp ⇒ NOT warm (a hold never rests on ignorance)', (() => { const w = warmCache({ lastActivityMs: undefined, nowMs, model: 'fable[1m]' }); return w.warm === false && w.agoSec === null && w.ttlSec === 3600; })());
+  const w1 = warmCache({ lastActivityMs: nowMs - 120e3, nowMs, model: 'claude-fable-5-1' });
+  ck('warm: output 120 s ago on a 300 s cache ⇒ warm, agoSec 120, ttlSec 300', w1.warm === true && w1.agoSec === 120 && w1.ttlSec === 300, JSON.stringify(w1));
+  const wEdge = warmCache({ lastActivityMs: nowMs - 300e3, nowMs, model: 'claude-fable-5-1' });
+  ck('warm: exactly at the ttl the cache is COLD (ago >= ttl)', wEdge.warm === false && wEdge.agoSec === 300, JSON.stringify(wEdge));
+  const w1m = warmCache({ lastActivityMs: nowMs - 20 * 60e3, nowMs, model: 'claude-fable-5-1[1m]' });
+  ck('warm: 20 min ago on a [1m] conversation is still warm (1 h cache)', w1m.warm === true && w1m.ttlSec === 3600, JSON.stringify(w1m));
+
+  // the proactive shape from the tier legs above: A healthy, B resets sooner ⇒ 'edf'
+  const edfCaches = { a: acct(0.3, 6 * D), b: acct(0.4, 12 * H) };
+  const hot = (caches, extra = {}) => decidePoolSwitch({ currentId: 'a', members, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive: true, hot: true, explain: true, ...extra });
+  const held = hot(edfCaches, { warm: w1 });
+  ck('warm: a WARM conversation is not moved by the proactive EDF jump — none(\'warm-cache\') carrying agoSec/ttlSec/wouldTo',
+    held.to === null && held.reason === 'warm-cache' && held.agoSec === 120 && held.ttlSec === 300 && held.wouldTo === 'b', JSON.stringify(held));
+  ck('…and without explain it keeps the historical null contract', decidePoolSwitch({ currentId: 'a', members, readCache: (id) => edfCaches[id] ?? null, nowSec: NOW, proactive: true, hot: true, warm: w1 }) === null);
+  const cold = hot(edfCaches, { warm: wEdge });
+  ck('warm: a COLD conversation (ago >= ttl) gets the EDF jump exactly as before', cold.to === 'b' && cold.reason === 'edf', JSON.stringify(cold));
+  ck('warm: warm:null is byte-identical to omitting it', JSON.stringify(hot(edfCaches, { warm: null })) === JSON.stringify(hot(edfCaches)));
+  // a wall is a wall: the FORCED moves are never held
+  const forced = hot({ a: acct(0.99, 6 * D), b: acct(0.4, 12 * H) }, { warm: w1 });
+  ck('warm: a warm conversation on an EXHAUSTED member still switches — {to, reason:\'exhausted\'}', forced.to === 'b' && forced.reason === 'exhausted', JSON.stringify(forced));
+  const soft = hot({ a: acct(0.97, 6 * D), b: acct(0.4, 12 * H) }, { warm: w1 });
+  ck('warm: …and a soft-exhausted one too (the exhaustion tier is untouched)', soft.to === 'b' && soft.reason === 'exhausted', JSON.stringify(soft));
+  const coldPool = decidePoolSwitch({ currentId: 'a', members, readCache: (id) => ({ a: acct(0.99, 6 * D), b: acct(0.4, 12 * H) })[id] ?? null, nowSec: NOW, warm: w1, explain: true });
+  ck('warm: a COLD pool\'s exhaustion switch ignores the warm cache too', coldPool.to === 'b' && coldPool.reason === 'exhausted', JSON.stringify(coldPool));
+
+  // WIRING PIN (the 2.355.0 unstaged-wiring lesson): the pure rule is dead unless
+  // the ENGINE passes `warm:` at both sites that can make a proactive move. Code
+  // only — a `//` comment can never satisfy the pin (the 2.369.134 lesson).
+  const eng = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8')
+    .split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
+  const calls = [...eng.matchAll(/decidePoolSwitch\(\{[^\n]*\}\)/g)].map((m) => m[0]);
+  const proactiveCalls = calls.filter((c) => /proactive:\s*hot/.test(c));
+  const perSession = proactiveCalls.filter((c) => /exclude:\s*rejected/.test(c));
+  const poolDefault = proactiveCalls.filter((c) => !/exclude:/.test(c));
+  ck('WIRING PIN: the engine has exactly two proactive decidePoolSwitch sites — the per-session one and the pool default', perSession.length === 1 && poolDefault.length === 1 && proactiveCalls.length === 2, JSON.stringify(calls.map((c) => c.slice(0, 90))));
+  ck('WIRING PIN: the PER-SESSION site passes warm:', perSession.length === 1 && /[{,]\s*warm[,:\s}]/.test(perSession[0]), perSession[0]);
+  ck('WIRING PIN: the POOL-DEFAULT site passes warm:', poolDefault.length === 1 && /[{,]\s*warm\s*:/.test(poolDefault[0]), poolDefault[0]);
+  const warmCalls = [...eng.matchAll(/warmCache\(\{[^\n]*\}\)/g)].map((m) => m[0]);
+  ck('WIRING PIN: warmCache( is called with the pty liveness stamp _lastPtyDataAt (per-session s2 AND the default set)',
+    warmCalls.some((c) => /s2\._lastPtyDataAt/.test(c)) && warmCalls.some((c) => /\bs\._lastPtyDataAt/.test(c)), JSON.stringify(warmCalls));
+  ck('WIRING PIN: a warm-cache refusal is journalled through the throttled noteWarmHold at both sites',
+    (eng.match(/reason === 'warm-cache'\) \{ noteWarmHold\(/g) || []).length === 2);
+  ck('WIRING PIN: the hot bootstrap / placement site stays warm-less (no conversation yet)', calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c)) && calls.filter((c) => !/proactive:/.test(c)).length === 1);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

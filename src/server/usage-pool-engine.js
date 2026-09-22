@@ -55,7 +55,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
@@ -124,6 +124,7 @@ const _wallRing = new Map();             // account key → [{at, sid}] walled-t
 const _divergenceLogAt = new Map();      // webuiId → last "observed on X while linked to Y" log (10min floor)
 const _sessionWalls = new Map();         // webuiId → Map(memberId → ts): the members that walled THIS session
 const _noTargetLogAt = new Map();        // webuiId → last "nowhere to go" per-session log (10min floor)
+const _warmHoldLogAt = new Map();        // poolId:webuiId (per-session) | poolId:default (the pool default) → last "warm cache, proactive move deferred" log (10min floor)
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
 // The get_usage control request makes the CLI (first-party client) fetch usage
 // itself — strictly better ToS posture than our bare /api/oauth/usage call.
@@ -794,6 +795,30 @@ function sessionModelFor(s) {
   const picked = s._pickedModel ? { m: s._pickedModel, at: s._pickedModelAt || 0 } : null;
   const newest = served && picked ? (picked.at >= served.at ? picked : served) : (picked || served);
   return (newest && newest.m) || s._spawnModel || null;
+}
+// THE MODEL WHOSE PROMPT CACHE A CONVERSATION RUNS ON (2026-09-22, the warm-cache
+// hold). `sessionModelFor` is the answer, with ONE correction: the '[1m]' variant
+// is a REQUEST-side fact and a served model never carries it (an assistant
+// record's `message.model` is the API's base id, `claude-fable-5-1`), so once an
+// unlocked conversation has been answered its model reads variant-less and the
+// 1-hour cache would read as 5 minutes. The request model that names the SAME
+// model (pick, else spawn — the ladder's order) supplies the variant.
+// …EXCEPT A LOCK SPELLED BY SOMEBODY (the verifier's LOW-A, reproduced on the real
+// engine): a lock is the REQUEST model as it was spelled — `/model fable` asks
+// for the 5-minute cache, and the server re-asserts exactly that spelling at
+// every repin — so a variant-less lock is read as written and never borrows a
+// '[1m]' off the spawn model. Only a lock COPIED off the served model (the
+// target-less latch, `set-model {lock:true}` adopting `_servedModel`) is spelled
+// by the API, which cannot carry the variant: it is recognisable as exactly that
+// string, and only it (like the served rung) takes the read-back. Exact equality,
+// not `modelsMatch`: modelsMatch answers true for an unknown served model and
+// for 'fable' against 'claude-fable-5-1', i.e. in exactly the repro's shapes.
+function cacheModelFor(s) {
+  const m = sessionModelFor(s);
+  if (!m || /\[1m\]\s*$/i.test(m)) return m;
+  if (s._modelLocked && s._lockedModel && m === s._lockedModel && m !== s._servedModel) return m;
+  const req = [s._pickedModel, s._spawnModel].find((x) => x && modelsMatch(x, m));
+  return req && /\[1m\]\s*$/i.test(req) ? req : m;
 }
 
 // WHICH MODEL-SCOPED CAP CAN REFUSE THIS SESSION'S NEXT TURN — the PROJECTION
@@ -3753,6 +3778,24 @@ function notePoolAuthFailure(session, sid, info = {}) {
   } catch (e) { console.warn('[pool] auth-failure evict failed:', e.message); }
 }
 
+// Does this conversation carry its OWN pool link (plan C)? The pool DEFAULT
+// moves exactly the ones that do not — the warm-cache hold and the default
+// switch's `affected` list ask the SAME question through this one predicate.
+function hasOwnPoolLink(poolId, sid) {
+  try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; }
+}
+// A PROACTIVE move held because the conversation's prompt cache is warm
+// (decidePoolSwitch's 'warm-cache'): once per (pool, conversation) per 10 min —
+// the decision re-runs every cycle and a per-cycle line would be spam. The POOL
+// DEFAULT's hold is ONE deferral whichever follower is warmest this cycle, so its
+// key is the pool's (`poolId:default`, the verifier's LOW-B: keyed on the warmest
+// sid, N rotating followers spoke N times per 10 min); the line still names the
+// conversation holding it.
+function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid) {
+  if (now - (_warmHoldLogAt.get(key) || 0) < 10 * 60e3) return;
+  _warmHoldLogAt.set(key, now);
+  console.log(`[pool] hold ${sid}: warm cache (last output ${d.agoSec}s ago < ttl ${d.ttlSec}s) — proactive move to ${d.wouldTo} deferred${scope}`);
+}
 function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
   try {
     if (!poolId) return;
@@ -3824,7 +3867,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       if (s2._accountId !== poolId || s2.host) continue;
       let linkCur = null;
       try { linkCur = accounts.poolCurrentFor(poolId, sid); } catch { }
-      const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
+      const hasOwnLink = hasOwnPoolLink(poolId, sid);
       if (!hasOwnLink || !linkCur) continue;
       // Decide FROM the member whose credentials this session's CLI reads —
       // its token slot (2026-09-07, reversing B-2c9b plan B for DECISIONS):
@@ -3840,11 +3883,18 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // whose cap for the model that is ANSWERING it is spent.
       const fam = projectionFamilyFor(s2, sessionModelFor(s2));
       const projected = (id) => projectCacheForFamily(readCache(id), fam);
+      // THE WARM CACHE (2026-09-22, owner): a proactive move of a conversation
+      // whose prompt cache is still warm cold-starts it — the next request
+      // re-bills the whole context. `_lastPtyDataAt` is the last instant its CLI
+      // produced output (at or after its last API request); a FORCED move is
+      // never held (decidePoolSwitch applies this to 'edf' only).
+      const warm = warmCache({ lastActivityMs: s2._lastPtyDataAt, nowMs: now, model: cacheModelFor(s2) });
       // never pick a member that just answered THIS session with a limit
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
-      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, explain: true });
+      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
       if (!ds || !ds.to) {
+        if (ds && ds.reason === 'warm-cache') { noteWarmHold(poolId, sid, ds, now); continue; }
         // PARKED ON CREDITS (B-ad05): this conversation's member serves past
         // its quota on pay-per-use billing — say so once per 6 h per (pool,
         // member); it is deliberately NOT in `noWay` (the member serves).
@@ -3905,9 +3955,20 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         }
       } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
     }
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, explain: true });
+    // THE WARM CACHE, pool-default form: the default moves EVERY conversation
+    // without its own link at once (the `affected` set below), so its proactive
+    // move waits while ANY of them is warm — the warmest one (largest ttl − ago
+    // margin) holds it and names it in the journal.
+    let defaultWarm = null, defaultWarmSid = null;
+    for (const [sid, s] of activeSessions) {
+      if (s._accountId !== poolId || hasOwnPoolLink(poolId, sid)) continue;
+      const w = warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) });
+      if (w.warm && (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec)) { defaultWarm = w; defaultWarmSid = sid; }
+    }
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
     if (!d) return;
     if (!d.to) {
+      if (d.reason === 'warm-cache') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default'); return; }
       // PARKED ON CREDITS (B-ad05): not "stuck" — the current member serves,
       // billed pay-per-use past its quota. ONE notice per (pool, member) per 6 h.
       if (d.reason === 'on-credits') { noteCreditsParking(poolId, currentId, poolCreditsNotice(d, { poolName: a.name, memberName: nameOf(currentId) }), now); return; }
@@ -3958,7 +4019,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       if (s._accountId !== poolId) continue;
       // plan C: a session with its own link didn't move with the default —
       // restarting it for the pool-level switch would be the old collateral
-      try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); continue; } catch { }
+      if (hasOwnPoolLink(poolId, sid)) continue;
       try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch {}
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }

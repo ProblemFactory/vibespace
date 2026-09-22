@@ -20,6 +20,9 @@
 // pools additionally switch PROACTIVELY when another member's weekly deadline
 // is strictly sooner (hot re-points are free — no restart; cold pools stay
 // exhaustion-only because each switch restarts conversations).
+// A proactive jump is held while the conversation's prompt cache is WARM
+// (warmCache below): "free" means no restart, not no cost — a re-point
+// cold-starts the cache and the next request re-bills the whole context.
 
 // LOGIN LIFETIME (2026-09-07, src/login-expiry.js — PURE→PURE): quota is not
 // the only way a member becomes unusable. A subscription's OAuth login session
@@ -82,6 +85,32 @@ const PROACTIVE_MARGIN_SEC = 3600;
 // remaining by this much (two members leapfrogging inside the exhaustion band
 // otherwise ping-pong every evaluation tick).
 const MIN_GAIN_PCT = 3;
+
+// THE WARM CACHE (2026-09-22, owner: "如果一个对话最近在活跃（缓存还热）那就尽量不要切，
+// 因为无缓启动要消耗大量额度"). Moving a conversation to another member COLD-STARTS
+// it: the prompt cache belongs to the account that wrote it, so the next request
+// re-bills the whole context at uncached prices. A PROACTIVE move ('edf' — the
+// current member can still serve) of a conversation whose cache is still warm
+// therefore spends the quota it was meant to save; the pool waits until the cache
+// has gone cold on its own. A FORCED move ('exhausted' / 'login-expired' — the
+// member cannot serve) is never held: a wall is a wall.
+// The TTL is a property of the REQUEST model: a '[1m]' variant runs on the
+// 1-hour prompt cache, everything else on the 5-minute default.
+const CACHE_TTL_SEC = 300;
+const CACHE_TTL_1M_SEC = 3600;
+function cacheTtlSecFor(model) {
+  return /\[1m\]\s*$/i.test(String(model || '')) ? CACHE_TTL_1M_SEC : CACHE_TTL_SEC;
+}
+// warm while now − the last instant the conversation produced output < its TTL.
+// No stamp ⇒ not warm (never hold a move on ignorance of activity: the hold is a
+// cost saving, and a conversation with no known output has no cache to save).
+function warmCache({ lastActivityMs, nowMs, model } = {}) {
+  const ttlSec = cacheTtlSecFor(model);
+  const last = Number(lastActivityMs), now = Number(nowMs);
+  if (!Number.isFinite(last) || last <= 0 || !Number.isFinite(now)) return { warm: false, agoSec: null, ttlSec };
+  const agoMs = Math.max(0, now - last);
+  return { warm: agoMs < ttlSec * 1000, agoSec: Math.floor(agoMs / 1000), ttlSec };
+}
 
 // Remaining % for one bucket ({utilization: 0..1, resetsAt: unix seconds}).
 // A reset that already PASSED means the window rolled over since the reading
@@ -273,7 +302,11 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
 // one (current member is a credits member with nowhere else to go) answers
 // `on-credits` instead of 'no-members' so the engine can say it is billing,
 // not that it is stuck. Omit it and every decision is byte-identical.
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, explain = false }) {
+// warm = warmCache(…) of the conversation(s) this decision would move, or null
+// (2026-09-22): a warm cache holds the PROACTIVE 'edf' jump only — answered
+// `none('warm-cache', {agoSec, ttlSec, wouldTo})` — and nothing else; every
+// forced move is decided exactly as before. Omit it ⇒ byte-identical.
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, warm = null, explain = false }) {
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
   // `explain` keeps the historical contract (null = no switch) for every
   // existing caller and test, while letting the engine ask WHY nothing
@@ -521,6 +554,10 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // onto a member below the settle bar (the oscillation guard above).
   if (proactive && bestSettle && bestSettle.deadline != null && curDeadline != null && bestSettle.known
       && curDeadline - bestSettle.deadline > PROACTIVE_MARGIN_SEC) {
+    // …and never while the conversation's prompt cache is still warm: the jump
+    // is VOLUNTARY, and a re-point cold-starts it (THE WARM CACHE, above). The
+    // pool asks again next cycle; the cache goes cold on its own.
+    if (warm && warm.warm) return none('warm-cache', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id });
     return { to: bestSettle.id, toName: bestSettle.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: bestSettle.remaining, reason: 'edf' };
   }
   return none('hold', { fromRemaining: cur.known ? cur.remaining : null });
@@ -775,4 +812,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName,
-  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

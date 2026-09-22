@@ -2668,5 +2668,188 @@ console.log('— §16 (r2) a model-cap event after the WEEK ROLLED still names t
   }
 }
 
+
+// ═══ §17 A WARM CONVERSATION IS NEVER MOVED PROACTIVELY ══════════════════════
+// Owner, 2026-09-22: "如果一个对话最近在活跃（缓存还热）那就尽量不要切，因为无缓启动要消耗大量额度".
+// A re-point cold-starts the conversation (the prompt cache belongs to the account
+// that wrote it), so the pool's PROACTIVE 'edf' jump waits until the cache has gone
+// cold on its own; a forced move never waits (test-pool-auto pins that half). Driven
+// through the REAL engine's per-session pass and pool-default decision, with the
+// cold sibling on the same verdict as the control.
+console.log('— §17 a warm conversation is never moved proactively (the owner\'s warm-cache rule)');
+{
+  // two healthy members: FAR resets in 120 h, SOON in 30 h ⇒ EDF wants every conversation on SOON
+  const ROSTER = [
+    { tag: 'far', name: 'Member Far', u5: 0.05, u7: 0.30, fable: 0.30, hoursOut: 120 },
+    { tag: 'soon', name: 'Member Soon', u5: 0.05, u7: 0.30, fable: 0.30, hoursOut: 30 },
+  ];
+  const w = mkWorld({ roster: ROSTER });
+  if (!w) { ok('§17 SKIP — pools unsupported on this platform', true); }
+  else {
+    const now = Date.now();
+    w.mkSession('sess-warm', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: now - 60e3 });
+    w.mkSession('sess-cold', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: now - 10 * 60e3 });
+    // a [1m] conversation already ANSWERED: its served model is the API's base id
+    // (no variant) — the 1-hour cache must still be read off its request model
+    const s1m = w.mkSession('sess-1m', 'far', { _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: now - 20 * 60e3 });
+    w.eng.noteServedModel(s1m, 'claude-fable-5-1');
+    const cap = quiet();
+    w.eng.maybePoolAutoSwitchForPool(w.P);
+    const lines = cap.done();
+    const pool = lines.filter((l) => /\[pool\]/.test(l));
+    ok('§17 the COLD sibling takes the proactive EDF move (the control — same pool, same verdict)', w.linkOf('sess-cold') === 'soon', w.linkOf('sess-cold') + ' | ' + pool.join(' | ').slice(0, 300));
+    ok('§17 THE RULE: the WARM conversation (output 60 s ago < 300 s) stays where its cache is', w.linkOf('sess-warm') === 'far', w.linkOf('sess-warm') + ' | ' + pool.join(' | ').slice(0, 300));
+    ok('§17 …and a [1m] conversation idle 20 min is still warm (1-hour cache, read off the REQUEST model after a variant-less answer)', w.linkOf('sess-1m') === 'far', w.linkOf('sess-1m'));
+    ok('§17 the hold SPEAKS in the journal, naming the conversation, its ago/ttl and where it would have gone',
+      pool.some((l) => l === `[pool] hold sess-warm: warm cache (last output 60s ago < ttl 300s) — proactive move to ${w.id.soon} deferred`), pool.join(' | ').slice(0, 400));
+    const cap2 = quiet();
+    w.eng.maybePoolAutoSwitchForPool(w.P, { force: true });
+    const again = cap2.done().filter((l) => /\[pool\] hold sess-warm/.test(l));
+    ok('§17 …once per (pool, conversation) per 10 min — the next cycle holds again, silently', again.length === 0 && w.linkOf('sess-warm') === 'far', again.join(' | '));
+    ok('§17 no user notice is posted for a hold (it is a deferral, not a blocked pool)', !w.notices.some((n) => /warm/i.test(n)), JSON.stringify(w.notices).slice(0, 200));
+
+    // NEGATIVE CONTROL: the engine WITHOUT the per-session wiring moves the warm conversation too.
+    const mut = mutate('src/server/usage-pool-engine.js', 'warm', [[
+      'overageIds: overageMemberIds(members), creditsIds, warm, explain: true });',
+      'overageIds: overageMemberIds(members), creditsIds, explain: true }); // PRE-FIX: no warm-cache hold',
+    ]]);
+    ok('§17 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
+    if (mut.hit) {
+      const wm = mkWorld({ roster: ROSTER, engineModule: mut.mod });
+      wm.mkSession('sess-warm', 'far', { _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 60e3 });
+      const c = quiet(); wm.eng.maybePoolAutoSwitchForPool(wm.P); c.done();
+      ok('§17 NEGATIVE CONTROL: without the wiring the warm conversation IS moved (the cold start the owner named)', wm.linkOf('sess-warm') === 'soon', wm.linkOf('sess-warm'));
+    }
+
+    // THE POOL DEFAULT: it moves every conversation WITHOUT its own link at once,
+    // so one warm follower defers its proactive move; cold, the move goes through.
+    const wd = mkWorld({ roster: ROSTER });
+    const follower = {
+      backend: 'claude', mode: 'chat', host: null, _webuiId: 'sess-follow', claudeSessionId: 'cid-sess-follow',
+      _accountId: wd.P, name: 'sess-follow', cwd: wd.root, sockName: 'cw-sess-follow', buffer: '', createdAt: Date.now(),
+      pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 30e3,
+    };
+    wd.sessions.set('sess-follow', follower); // NO own link — it follows the pool default
+    const cd = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P); const dl = cd.done().filter((l) => /\[pool\]/.test(l));
+    ok('§17 POOL DEFAULT: a warm default-following conversation defers the default\'s proactive move', wd.am.poolCurrent(wd.P) === wd.id.far, wd.am.poolCurrent(wd.P) + ' | ' + dl.join(' | ').slice(0, 300));
+    ok('§17 POOL DEFAULT: …and says so, naming the conversation that holds it',
+      dl.some((l) => l === `[pool] hold sess-follow: warm cache (last output 30s ago < ttl 300s) — proactive move to ${wd.id.soon} deferred (pool default)`), dl.join(' | ').slice(0, 300));
+    follower._lastPtyDataAt = Date.now() - 6 * 60e3; // the cache went cold on its own
+    const cd2 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P, { force: true }); cd2.done();
+    ok('§17 POOL DEFAULT: once the cache is cold the next cycle makes the move', wd.am.poolCurrent(wd.P) === wd.id.soon, wd.am.poolCurrent(wd.P));
+
+    // ── LOW-A (the verifier, reproduced on the real engine): A LOCK IS THE
+    // REQUEST MODEL AS SPELLED. `/model fable` asks for the 5-minute cache, so a
+    // variant-less lock never borrows the spawn model's '[1m]'; only a lock
+    // COPIED off the served model (the API's base id — it cannot carry the
+    // variant) reads the variant back, like the served rung does.
+    const lockLegs = (engineModule) => {
+      const wl = mkWorld({ roster: ROSTER, engineModule });
+      const t = Date.now();
+      // the repro, verbatim: a user lock 'fable' over a [1m] spawn, nothing served yet, idle 20 min
+      wl.mkSession('lock-bare', 'far', { _modelLocked: true, _lockedModel: 'fable', _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: t - 20 * 60e3 });
+      // …and the same lock once the conversation has been ANSWERED (served = the base id)
+      const sAns = wl.mkSession('lock-answered', 'far', { _modelLocked: true, _lockedModel: 'fable', _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: t - 20 * 60e3 });
+      wl.eng.noteServedModel(sAns, 'claude-fable-5-1');
+      // a lock COPIED off the served model (the target-less latch / `set-model {lock:true}` adopting _servedModel)
+      const sLat = wl.mkSession('lock-latched', 'far', { _modelLocked: true, _spawnModel: 'claude-fable-5-1[1m]', _lastPtyDataAt: t - 20 * 60e3 });
+      wl.eng.noteServedModel(sLat, 'claude-fable-5-1');
+      sLat._lockedModel = sLat._servedModel;
+      // a lock SPELLED with the variant
+      wl.mkSession('lock-1m', 'far', { _modelLocked: true, _lockedModel: 'fable[1m]', _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: t - 20 * 60e3 });
+      const c = quiet(); wl.eng.maybePoolAutoSwitchForPool(wl.P); const lines = c.done().filter((l) => /\[pool\]/.test(l));
+      return { wl, lines };
+    };
+    {
+      const { wl, lines } = lockLegs(engMod);
+      ok('§17 LOW-A: a user lock "fable" over a [1m] spawn, idle 20 min, is COLD (the 5-minute cache the lock asks for) ⇒ the EDF move goes through',
+        wl.linkOf('lock-bare') === 'soon', wl.linkOf('lock-bare') + ' | ' + lines.join(' | ').slice(0, 300));
+      ok('§17 LOW-A: …and so once it has been answered (served base id known — `modelsMatch` would call the two the same model)',
+        wl.linkOf('lock-answered') === 'soon', wl.linkOf('lock-answered') + ' | ' + lines.join(' | ').slice(0, 300));
+      ok('§17 LOW-A: a lock COPIED off the served model reads the [1m] back off the spawn model ⇒ still warm at 20 min, held',
+        wl.linkOf('lock-latched') === 'far', wl.linkOf('lock-latched') + ' | ' + lines.join(' | ').slice(0, 300));
+      ok('§17 LOW-A: a lock SPELLED "fable[1m]" is the 1-hour cache ⇒ held',
+        wl.linkOf('lock-1m') === 'far', wl.linkOf('lock-1m'));
+      ok('§17 LOW-A: the latched hold speaks with the 1-hour ttl',
+        lines.some((l) => l === `[pool] hold lock-latched: warm cache (last output 1200s ago < ttl 3600s) — proactive move to ${wl.id.soon} deferred`), lines.join(' | ').slice(0, 400));
+    }
+    // NEGATIVE CONTROL (the pre-fix code): without the lock rule the user lock borrows the spawn's [1m] and is held for an hour.
+    const mutL = mutate('src/server/usage-pool-engine.js', 'warmlock', [[
+      '  if (s._modelLocked && s._lockedModel && m === s._lockedModel && m !== s._servedModel) return m;\n',
+      '  // PRE-FIX: every answer, a user-spelled lock included, reads the variant back\n',
+    ]]);
+    ok('§17 LOW-A NEGATIVE CONTROL: the patch hit the product source', mutL.hit === true, mutL.why || '');
+    if (mutL.hit) {
+      const { wl } = lockLegs(mutL.mod);
+      ok('§17 LOW-A NEGATIVE CONTROL: pre-fix, the user lock "fable" IS held (ttl 3600 s borrowed off the spawn) — the finding reproduced',
+        wl.linkOf('lock-bare') === 'far' && wl.linkOf('lock-answered') === 'far', wl.linkOf('lock-bare') + '/' + wl.linkOf('lock-answered'));
+      ok('§17 LOW-A NEGATIVE CONTROL: …while the latched lock is held either way (the rule narrows the read-back, it does not remove it)', wl.linkOf('lock-latched') === 'far', wl.linkOf('lock-latched'));
+    }
+    // WHY EXACT EQUALITY: the `modelsMatch(m, s._servedModel)` spelling of the same
+    // rule reads the variant back in both of the repro's shapes (it answers true
+    // for an unknown served model and for 'fable' against 'claude-fable-5-1').
+    const mutM = mutate('src/server/usage-pool-engine.js', 'warmlockmm', [[
+      'm === s._lockedModel && m !== s._servedModel) return m;',
+      'm === s._lockedModel && !modelsMatch(m, s._servedModel)) return m; // the modelsMatch spelling',
+    ]]);
+    ok('§17 LOW-A CONTROL (modelsMatch spelling): the patch hit the product source', mutM.hit === true, mutM.why || '');
+    if (mutM.hit) {
+      const { wl } = lockLegs(mutM.mod);
+      ok('§17 LOW-A CONTROL (modelsMatch spelling): it holds BOTH user-lock shapes for an hour — why the rule compares the spelling exactly',
+        wl.linkOf('lock-bare') === 'far' && wl.linkOf('lock-answered') === 'far', wl.linkOf('lock-bare') + '/' + wl.linkOf('lock-answered'));
+    }
+
+    // ── LOW-B (the verifier): THE POOL DEFAULT'S HOLD IS ONE DEFERRAL. Keyed on
+    // the warmest follower, five followers taking turns being the most recent
+    // spoke five times in ten minutes; keyed on the pool it speaks once, still
+    // naming the conversation holding it — and again after the 10-min floor.
+    const rotate = (engineModule) => {
+      const wr = mkWorld({ roster: ROSTER, engineModule });
+      const realNow = Date.now;
+      const T0 = realNow();
+      let fake = T0;
+      const ids = ['fol-1', 'fol-2', 'fol-3', 'fol-4', 'fol-5'];
+      for (const f of ids) {
+        wr.sessions.set(f, {
+          backend: 'claude', mode: 'chat', host: null, _webuiId: f, claudeSessionId: 'cid-' + f,
+          _accountId: wr.P, name: f, cwd: wr.root, sockName: 'cw-' + f, buffer: '', createdAt: T0,
+          pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: T0 - 5e3,
+        }); // NO own link — every one follows the pool default
+      }
+      const holds = [];
+      Date.now = () => fake;
+      try {
+        for (let tick = 1; tick <= 21; tick++) { // 30 s cadence: ticks 1..20 span 10 min, tick 21 is 600 s after tick 1
+          fake = T0 + tick * 30e3;
+          wr.sessions.get(ids[tick % ids.length])._lastPtyDataAt = fake - 1e3; // a different follower is the warmest each tick
+          const c = quiet(); wr.eng.maybePoolAutoSwitchForPool(wr.P);
+          for (const l of c.done()) if (/\[pool\] hold /.test(l)) holds.push({ tick, sid: /hold (\S+):/.exec(l)?.[1], l });
+        }
+      } finally { Date.now = realNow; }
+      return { wr, holds };
+    };
+    {
+      const { wr, holds } = rotate(engMod);
+      const inTen = holds.filter((h) => h.tick <= 20);
+      ok('§17 LOW-B: five rotating warm followers ⇒ exactly ONE pool-default hold line in 10 min', inTen.length === 1, JSON.stringify(holds.map((h) => [h.tick, h.sid])));
+      ok('§17 LOW-B: …the line still names the conversation holding it, scoped "(pool default)"',
+        inTen.length === 1 && inTen[0].l === `[pool] hold ${inTen[0].sid}: warm cache (last output 1s ago < ttl 300s) — proactive move to ${wr.id.soon} deferred (pool default)`, inTen[0]?.l || '');
+      ok('§17 LOW-B: …and it speaks again once the 10-min floor has passed (a floor, not a gag)', holds.filter((h) => h.tick === 21).length === 1, JSON.stringify(holds.map((h) => [h.tick, h.sid])));
+      ok('§17 LOW-B: the default never moved while a follower was warm', wr.am.poolCurrent(wr.P) === wr.id.far, wr.am.poolCurrent(wr.P));
+    }
+    // NEGATIVE CONTROL (the pre-fix code): keyed on the warmest sid, the same run prints one line per follower.
+    const mutB = mutate('src/server/usage-pool-engine.js', 'warmdefkey', [[
+      "noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default');",
+      "noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)' /* PRE-FIX: keyed on the warmest follower */);",
+    ]]);
+    ok('§17 LOW-B NEGATIVE CONTROL: the patch hit the product source', mutB.hit === true, mutB.why || '');
+    if (mutB.hit) {
+      const { holds } = rotate(mutB.mod);
+      const inTen = holds.filter((h) => h.tick <= 20);
+      ok('§17 LOW-B NEGATIVE CONTROL: pre-fix, the five followers speak five times in 10 min — the finding reproduced', inTen.length === 5, JSON.stringify(inTen.map((h) => [h.tick, h.sid])));
+    }
+  }
+}
+
 console.log(fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')');
 process.exit(fail ? 1 : 0);
