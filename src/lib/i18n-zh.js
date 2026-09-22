@@ -3,6 +3,8 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Expose chat transcripts to assistive technology": "向辅助技术暴露聊天转录",
+  "On: screen readers and other assistive tools see every chat message. Off: the transcripts are marked aria-hidden so the browser builds a small accessibility tree — turn it off when an assistive tool (an IME, PowerToys, …) makes Chrome or Edge freeze on large conversations (Chrome serialises the whole DOM into its accessibility tree on the browser UI thread: 39 s for 27k nodes, measured).": "开：读屏器等辅助工具能看到每条聊天消息。关：转录标为 aria-hidden，浏览器只建一棵很小的无障碍树——当某个辅助工具（输入法、PowerToys 等）让 Chrome/Edge 在大对话上卡死时关掉它（Chrome 会在浏览器 UI 线程上把整个 DOM 序列化进无障碍树：实测 27k 节点 39 秒）。",
   "WebGL renderer": "WebGL 渲染器",
   "Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).": "用 WebGL 绘制终端（快）。关掉可以验证 GPU 侧的卡顿是否来自终端 —— 之后新开的终端改用 DOM 渲染器（已开的保持原样，重开才变）。",
   "Freeze captured automatically ({id}) — see Diagnostics → Incidents": "已自动抓取卡顿现场（{id}）—— 见诊断 → 事故",

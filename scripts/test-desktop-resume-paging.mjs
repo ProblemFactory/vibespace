@@ -808,6 +808,35 @@ check('NEGATIVE CONTROL: …and the re-tail-gap injection strands the window (un
     fs.existsSync(path.join(PROJ, `${SID}.jsonl`)), path.join(PROJ, `${SID}.jsonl`));
 }
 
+// ── 2.369.144 the accessibility-tree lever (the owner's Windows freeze: Chrome's browser UI thread
+// spent 39.5 s in HandleAXEvents serialising a 27k-node DOM) — the transcript lists go aria-hidden
+// on demand, a desktop-hidden window always. BEFORE ws.close() — a cdp() after it never answers ──
+{
+  const ax = await evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const lists = () => [...document.querySelectorAll('.chat-message-list')];
+    const n = lists().length;
+    window.app.settings.set('accessibility.exposeChat', false); await sleep(200);
+    const off = lists().map((l) => l.getAttribute('aria-hidden'));
+    window.app.settings.set('accessibility.exposeChat', true); await sleep(200);
+    const on = lists().map((l) => l.hasAttribute('aria-hidden'));
+    const dm = window.app.desktopManager; const before = dm.activeDesktopId;
+    const wins = [...window.app.wm.windows.values()].filter((w) => !w._hiddenByDesktop && !w.isMinimized);
+    // a switch holds _restoring for 1 s and QUEUES the next one (latest wins) — wait for
+    // the state, never a fixed sleep (the first cut read the queued switch-back too early)
+    const until = async (f, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await sleep(50); } return f(); };
+    const other = dm.createDesktop('AX'); await dm.switchTo(other);
+    const wentHidden = await until(() => wins.every((w) => w._hiddenByDesktop), 5000);
+    const hidden = wins.map((w) => w.element.getAttribute('aria-hidden'));
+    await dm.switchTo(before);
+    const cameBack = await until(() => dm.activeDesktopId === before && wins.every((w) => !w._hiddenByDesktop), 8000);
+    const back = wins.map((w) => w.element.hasAttribute('aria-hidden'));
+    return { n, off, on, wins: wins.length, wentHidden, hidden, cameBack, back };
+  })()`);
+  check(`accessibility.exposeChat=false marks every chat message list aria-hidden and true removes it (${ax.n} lists, live)`, ax.n > 0 && ax.off.every((v) => v === 'true') && ax.on.every((v) => v === false), JSON.stringify(ax));
+  check(`a desktop-hidden window carries aria-hidden and loses it when its desktop returns (${ax.wins} windows)`, ax.wins > 0 && ax.wentHidden && ax.hidden.every((v) => v === 'true') && ax.cameBack && ax.back.every((v) => v === false), JSON.stringify(ax));
+}
 ws.close();
+
 console.log(failed ? `\n${failed} FAILED (${passed} passed)` : `\nALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

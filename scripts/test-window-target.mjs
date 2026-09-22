@@ -321,7 +321,11 @@ console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring
     const dataDir = path.join(dir, 'real'); fs.mkdirSync(dataDir, { recursive: true });
     const K = require('../src/server/desktop-app-keeper.js');
     const bcasts = [];
-    const keeper = K.create({ dataDir, env: () => ({ ...base }), broadcast: (m) => bcasts.push(m), serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } } });
+    // AN EXEC IS A HUMAN'S (design-desktop-apps §5, engine 2026-09-21): an agent opens a
+    // REGISTRY app by id, so the fixture is a registry ROW of this keeper — `open --exec`
+    // is the refusal test-window-targets pins, not the way in.
+    const registryRows = [{ id: 'vs-window-fixture', label: 'vs window fixture', exec: python, args: [fixture], category: 'test' }];
+    const keeper = K.create({ dataDir, env: () => ({ ...base }), broadcast: (m) => bcasts.push(m), serverSetting: () => undefined, registryRows, log: { log() { }, warn() { }, error() { } } });
     keepers.push(keeper);
     await keeper.adoptAll(); keeper.start();
     const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha', backendSessionId: 'conv-1' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta', backendSessionId: 'conv-2' }]]);
@@ -342,7 +346,9 @@ console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring
     const engine = wired.windowEngine;
     const f1 = engine.factsForToken('vsst_aaaa');
     // the agent (session 1) opens the fixture through the CLI
-    const opened = await cli('vsst_aaaa', 'open', '--exec', python, '--args', fixture, '--title', 'vs window fixture', '--json');
+    const refused = await cli('vsst_aaaa', 'open', '--exec', python, '--args', fixture, '--json');
+    ok(refused.code !== 0 && /exec_is_human/.test(refused.err), `open --exec is refused by the CLI itself, exec_is_human (${refused.err.trim().split('\n').pop().slice(0, 80)})`);
+    const opened = await cli('vsst_aaaa', 'open', 'vs-window-fixture', '--title', 'vs window fixture', '--json');
     let handle = null; try { handle = JSON.parse(opened.out).handle; } catch { }
     ok(opened.code === 0 && handle && /^da-/.test(handle), `vibespace-window open (as a child process) starts the fixture through the keeper and answers a handle (${handle}) — ${opened.err.trim().split('\n').pop() || 'no stderr'}`);
     if (!handle) { console.log(opened.out, opened.err); }

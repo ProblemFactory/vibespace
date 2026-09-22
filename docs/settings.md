@@ -107,6 +107,7 @@ Overrides persist in the layout auto-save.
 | `terminal.preserveCustomTitle` | boolean | `false` | Prevent Claude's title updates from overwriting user-set names |
 | `terminal.preserveScrollOnFit` | boolean | `false` | Keep scroll position anchored on terminal resize |
 | `terminal.webgl` | boolean | `true` | Draw terminals with WebGL. Off ⇒ new terminals use the DOM renderer (the A/B lever for GPU-side freezes; 2.369.137). |
+| `accessibility.exposeChat` | boolean | `true` | Off ⇒ chat message lists are aria-hidden (a small accessibility tree — the Windows/UIA freeze lever, 2.369.144); hidden-desktop windows are always aria-hidden. |
 | `terminal.waitingBlinkBehavior` | enum | `onlyUnfocused` | When to blink on idle: always, only when unfocused, never |
 
 ### Chat

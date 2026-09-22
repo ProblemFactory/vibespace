@@ -857,6 +857,7 @@ export class DesktopManager {
     win._hiddenByDesktop = true;
     win.element.style.visibility = 'hidden';
     win.element.style.pointerEvents = 'none';
+    try { win.element.setAttribute('aria-hidden', 'true'); } catch { } // 2.369.144: a desktop-hidden window is not in the accessibility tree
     // chat views SUSPEND while desktop-hidden — their geometry is meaningless
     // and the paging machinery must make no decisions off it (inc-mtd1d0ft)
     try { this.app.sessions?.get(win.id)?.setSuspended?.(true); } catch { }
@@ -876,6 +877,7 @@ export class DesktopManager {
     win._hiddenByDesktop = false;
     win.element.style.visibility = '';
     win.element.style.pointerEvents = '';
+    try { win.element.removeAttribute('aria-hidden'); } catch { }
     try { if (win.type === 'chat') win.element.style.contentVisibility = ''; } catch { }
     try { this.app.sessions?.get(win.id)?.setSuspended?.(false); } catch { }
   }

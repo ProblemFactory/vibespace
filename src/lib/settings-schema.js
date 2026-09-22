@@ -304,6 +304,11 @@ const SETTINGS_SCHEMA = {
   // .126 as an immediate notice + toast; owner 2026-09-21: "本质上是预期行为,
   // 每次都这样渲染好丑"). The nudge itself stays visible as the "Stop hook
   // feedback" card and the Stop-hook summary card; this notice adds nothing.
+  'accessibility.exposeChat': {
+    type: 'boolean', default: true, label: t('Expose chat transcripts to assistive technology'),
+    description: t('On: screen readers and other assistive tools see every chat message. Off: the transcripts are marked aria-hidden so the browser builds a small accessibility tree — turn it off when an assistive tool (an IME, PowerToys, …) makes Chrome or Edge freeze on large conversations (Chrome serialises the whole DOM into its accessibility tree on the browser UI thread: 39 s for 27k nodes, measured).'),
+    category: t('Chat'), liveApply: true,
+  },
   'chat.showStopHookErrorNotice': {
     type: 'boolean', default: false,
     label: t("Show the CLI's 'Stop hook error' notice"),

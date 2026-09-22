@@ -198,6 +198,17 @@ class App {
     const applyStopNoticeVis = () => document.body.classList.toggle('hide-stop-hook-notice', this.settings.get('chat.showStopHookErrorNotice') !== true);
     applyStopNoticeVis();
     this.settings.on('chat.showStopHookErrorNotice', applyStopNoticeVis);
+    // ACCESSIBILITY TREE SIZE (2.369.144, the owner's Windows freeze: Chrome's
+    // browser UI thread spent 39.5 s in HandleAXEvents serialising a 27k-node
+    // DOM into the accessibility tree because an assistive tool had the mode
+    // on). Off ⇒ every chat message list is aria-hidden; new views read it too.
+    const applyAxExposure = () => {
+      const off = this.settings.get('accessibility.exposeChat') === false;
+      document.body.classList.toggle('ax-lean', off);
+      for (const el of document.querySelectorAll('.chat-message-list')) { if (off) el.setAttribute('aria-hidden', 'true'); else el.removeAttribute('aria-hidden'); }
+    };
+    applyAxExposure();
+    this.settings.on('accessibility.exposeChat', applyAxExposure);
     setTimeout(applyHookVis, 2000); // re-apply once the async settings load lands
     // Empty-thinking visibility (chat.hideEmptyThinking, default ON): same
     // pure-CSS body-class toggle. Flipping it changes run-collapse adjacency

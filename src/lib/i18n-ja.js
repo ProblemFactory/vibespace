@@ -3,6 +3,8 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Expose chat transcripts to assistive technology": "チャットの記録を支援技術に公開する",
+  "On: screen readers and other assistive tools see every chat message. Off: the transcripts are marked aria-hidden so the browser builds a small accessibility tree — turn it off when an assistive tool (an IME, PowerToys, …) makes Chrome or Edge freeze on large conversations (Chrome serialises the whole DOM into its accessibility tree on the browser UI thread: 39 s for 27k nodes, measured).": "オン：スクリーンリーダーなどの支援ツールにすべてのメッセージが見えます。オフ：記録を aria-hidden にしてブラウザのアクセシビリティツリーを小さく保ちます — 支援ツール（IME、PowerToys など）が大きな会話で Chrome/Edge を固まらせるときにオフに（Chrome はブラウザ UI スレッドで DOM 全体をアクセシビリティツリーに直列化します：27k ノードで 39 秒、実測）。",
   "WebGL renderer": "WebGL レンダラー",
   "Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).": "ターミナルを WebGL で描画します（高速）。GPU 側のフリーズがターミナル由来か確かめるにはオフに — 以降の新しいターミナルは DOM レンダラーを使います（既存のものは開き直すまでそのまま）。",
   "Freeze captured automatically ({id}) — see Diagnostics → Incidents": "フリーズの現場を自動取得しました（{id}）— 診断 → インシデントを参照",

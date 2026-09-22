@@ -334,6 +334,7 @@ class ChatView {
     // Message list
     this._messageList = document.createElement('div');
     this._messageList.className = 'chat-message-list';
+    try { if (this.app?.settings?.get('accessibility.exposeChat') === false) this._messageList.setAttribute('aria-hidden', 'true'); } catch { } // 2.369.144: keep the transcript out of the accessibility tree when asked
     // Media-card thumbnails that cannot load (file deleted, or a history viewed
     // from a machine that does not have it) swap to the honest "not available"
     // line — `error` does not bubble, so this is a CAPTURE-phase delegate on
