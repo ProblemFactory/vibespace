@@ -159,6 +159,13 @@ console.log('§6 the routed names (design-unknown-records, 2026-09-21): a routed
   ok('…dropped again ⇒ soft-closed again (the reopen is symmetric, never sticky)', one.taskInfo.status === 'finished' && one.taskInfo.closedBy === 'level');
   bg.processLive({ type: 'system', subtype: 'task_progress', task_id: 't-one', tool_use_id: 'toolu_bg1', description: 'one', last_tool_name: 'Read', uuid: 'bp1', session_id: 's' });
   ok('task_progress for a level-closed card ⇒ running again (progress is liveness)', one.taskInfo.status === 'running' && one.taskInfo.closedBy === undefined && one.taskInfo.lastTool === 'Read');
+  // 2.369.147: the level set's meta op carries the wf_ run id the CARD learned from the launch ack — the
+  // status bar hands such a task to the ⛭ workflow chip (the existing display), never to the task rows
+  one.taskInfo.runId = 'wf_abc123'; one.taskInfo.summary = 'B-x: the lane';
+  bops.length = 0;
+  bg.processLive({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 't-one', task_type: 'local_workflow', description: 'one' }, { task_id: 't-two', task_type: 'local_agent', description: 'two' }], uuid: 'bt4', session_id: 's' });
+  const metaOp = bops.find((o) => o.op === 'meta' && o.subtype === 'background-tasks');
+  ok('background-tasks meta op: the entry whose card knows a run id carries runId + summary (type normalized to workflow); the other carries none', metaOp?.data?.tasks?.find((x) => x.id === 't-one')?.runId === 'wf_abc123' && metaOp.data.tasks.find((x) => x.id === 't-one').type === 'workflow' && metaOp.data.tasks.find((x) => x.id === 't-one').summary === 'B-x: the lane' && metaOp.data.tasks.find((x) => x.id === 't-two').runId === undefined);
   bg.processLive({ type: 'system', subtype: 'task_updated', task_id: 't-two', patch: { status: 'failed', end_time: 1 }, uuid: 'tu1', session_id: 's' });
   ok('task_updated {patch:{status:failed}} ⇒ the task card closes as failed without waiting for task_notification (closedBy task_updated)', two.taskInfo.status === 'failed' && two.taskInfo.closedBy === 'task_updated');
   // NEGATIVE (r3 2026-09-21, reproduced on the production buffers: 86 of 107 task_started were local_bash is_backgrounded:false and 5 of them

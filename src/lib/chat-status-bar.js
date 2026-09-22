@@ -294,7 +294,11 @@ export class ChatStatusBar {
   setTasks(tasks) {
     const next = new Map();
     for (const [toolCallId, taskInfo] of Object.entries(tasks || {})) {
-      if (taskInfo?.status === 'running') next.set(toolCallId, { ...taskInfo });
+      if (taskInfo?.status !== 'running') continue;
+      // a running WORKFLOW belongs to the ⛭ chip (the existing workflow display:
+      // View Workflow window, phase progress), never to the task rows (2.369.147)
+      if (taskInfo.type === 'workflow' && (taskInfo.runId || taskInfo.id)) { this.trackWorkflow(taskInfo.runId || taskInfo.id, shortWorkflowName(taskInfo.summary || taskInfo.description), taskInfo.summary || taskInfo.description || null); continue; }
+      next.set(toolCallId, { ...taskInfo });
     }
     this._activeTasks = next.size ? next : null;
     this.render();
@@ -311,7 +315,15 @@ export class ChatStatusBar {
    *  card-derived set as before). */
   setBackgroundTasks(list) {
     if (!Array.isArray(list)) { this._bgTasks = null; this.render(); return; }
-    this._bgTasks = list.filter((t) => t && typeof t === 'object' && t.id != null).map((t) => ({ id: String(t.id), type: t.type || null, description: String(t.description || '') }));
+    const rows = [];
+    for (const t of list) {
+      if (!t || typeof t !== 'object' || t.id == null) continue;
+      // a Workflow the harness names WITH a run id ⇒ the ⛭ chip (the existing display); one
+      // without ⇒ a row that says so (2.369.147, owner: "接到已有的工作流展示方案")
+      if (t.type === 'workflow' && t.runId) { this.trackWorkflow(String(t.runId), shortWorkflowName(t.summary || t.description), t.summary || t.description || null); continue; }
+      rows.push({ id: String(t.id), type: t.type || null, description: String(t.description || ''), runId: t.runId ? String(t.runId) : null });
+    }
+    this._bgTasks = rows;
     this.render();
   }
 

@@ -911,8 +911,11 @@ class MessageManager {
     // observed task_updated{failed}.
     if (raw.subtype === 'background_tasks_changed' && Array.isArray(raw.tasks)) {
       const set = raw.tasks.filter((t) => t && typeof t === 'object' && t.task_id != null)
-        .map((t) => ({ id: String(t.task_id).slice(0, 64), type: normalizeTaskType(typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null), description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' }))
+        .map((t) => ({ id: String(t.task_id).slice(0, 64), type: normalizeTaskType(typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null), description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' , ...(() => { const m = this._taskMsgFor(null, t.task_id); const ti = m && m.taskInfo; return ti && ti.runId ? { runId: String(ti.runId), summary: ti.summary || null } : {}; })() }))
         .slice(0, 100);
+      // each entry also carries the wf_ run id the CARD learned from the launch ack (2.369.147:
+      // the status bar hands a Workflow to the ⛭ chip — the EXISTING workflow display — not to
+      // the generic background-task rows; owner: "没办法和已有的工作流展示方案接起来吗")
       this._bgTasks = set;
       const live = new Set(set.map((t) => t.id));
       // THE SET NAMES IT AGAIN ⇒ THE SOFT CLOSE WAS A TRANSIENT DROP (2.369.147,
