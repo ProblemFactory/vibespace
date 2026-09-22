@@ -115,7 +115,7 @@ const get = (url) => new Promise((resolve) => { http.get(url, (res) => { let b =
   ok(CH.validateCaps('lark', lark.caps) === true, 'the declaration validates under the registry contract');
   ok(lark.integration === 'lark' && Array.isArray(lark.EGRESS) && lark.EGRESS.includes('open.feishu.cn') && lark.EGRESS.includes('accounts.feishu.cn'), 'it names its integration row and DECLARES its egress hosts');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-  ok(src.includes("resolveIntegration('lark')") || /resolveIntegration\(INTEGRATION\)/.test(src), 'it asks resolveIntegration for its credential (the registry census requires the call)');
+  ok(/resolveIntegration\('lark'\s*[,)]/.test(src) || /resolveIntegration\(INTEGRATION\)/.test(src), 'it asks resolveIntegration for its credential, carrying the ACCOUNT\'s credentialKey (the registry census requires the call)');
   ok(!/process\.env/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')), 'it never reads process.env (a census reads CODE — comments blanked)');
 }
 

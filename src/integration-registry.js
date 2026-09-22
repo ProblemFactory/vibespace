@@ -442,6 +442,8 @@ function credentialWhyText({ whyCode = null, whyParams = null, why = null } = {}
     case 'store-unreadable': return t('the integrations store could not be read');
     case 'rebound': return t('the cluster default this row used ({from}) was re-keyed to {to} — the only default this instance offers', { from: p.from || '?', to: p.to || '?' });
     case 'no-store': return t('no integration store on this instance');
+    case 'own-missing': return t('no keys of your own are saved for this integration');
+    case 'unknown-credential': return t('the credential key ({key}) is not one this instance offers', { key: p.key || '?' });
     case 'lookup-failed': return t('the integration lookup failed');
     case '': return why ? String(why) : '';
     default: return why ? String(why) : String(whyCode);

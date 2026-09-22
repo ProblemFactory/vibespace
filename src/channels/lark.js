@@ -302,15 +302,22 @@ function create(record = {}, deps = {}) {
   const members = new Map();    // convId -> { names: Map, at }
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
 
+  /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
+   *  handed down by the engine (`deps.credentialKey`) and read LIVE off the
+   *  record as a fallback (the legacy stamp lands after construction); null
+   *  = the row's own pick. EVERY resolveIntegration below carries it, so
+   *  the consent, the refresh, the status and the Test all name ONE tenant app. */
+  const credentialKeyOf = () => (typeof deps.credentialKey === 'string' && deps.credentialKey) || (record && typeof record.credentialKey === 'string' && record.credentialKey) || null;
   /** The app credential, from THE resolver. `null` = none/missing, with why. */
   function credential() {
-    if (!resolveIntegration) return { values: null, why: 'no integration resolver was handed to this adapter', missing: [] };
+    const credentialKey = credentialKeyOf();
+    if (!resolveIntegration) return { values: null, why: 'no integration resolver was handed to this adapter', missing: [], credentialKey };
     let r;
-    try { r = resolveIntegration('lark'); } catch (e) { return { values: null, why: `integration lookup failed: ${(e && e.message) || e}`, missing: [] }; }
+    try { r = resolveIntegration('lark', { credentialKey }); } catch (e) { return { values: null, why: `integration lookup failed: ${(e && e.message) || e}`, missing: [], credentialKey }; }
     if (!r || r.source === 'none' || (Array.isArray(r.missing) && r.missing.length)) {
-      return { values: null, why: (r && r.why) || 'no Lark app credential is configured', missing: (r && r.missing) || [], source: r ? r.source : 'none' };
+      return { values: null, why: (r && r.why) || 'no Lark app credential is configured', whyCode: (r && r.whyCode) || null, whyParams: (r && r.whyParams) || null, missing: (r && r.missing) || [], source: r ? r.source : 'none', credentialKey };
     }
-    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null };
+    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };
   }
 
   function readToken() {
@@ -444,13 +451,14 @@ function create(record = {}, deps = {}) {
       /** Four-valued and honest (§13): the credential question FIRST. */
       async state() {
         const cred = credential();
-        if (!cred.values) return { state: 'needs-credentials', expiresAt: null, scopes: [], why: cred.why, missing: cred.missing.slice(), credentialSource: cred.source || 'none' };
+        const credentialKey = cred.credentialKey || null;   // the view NAMES the account's credential
+        if (!cred.values) return { state: 'needs-credentials', expiresAt: null, scopes: [], why: cred.why, whyCode: cred.whyCode || null, whyParams: cred.whyParams || null, missing: cred.missing.slice(), credentialSource: cred.source || 'none', credentialKey };
         const { token, why } = readToken();
-        if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: cred.source };
+        if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: cred.source, credentialKey };
         const refreshExpiresAt = Number(token.refreshExpiresAt) || null;
-        if (refreshExpiresAt && refreshExpiresAt <= now()) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-token-expired', credentialSource: cred.source };
-        if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source };
-        return { state: 'connected', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: null, credentialSource: cred.source, user: token.name || token.openId || null, brand };
+        if (refreshExpiresAt && refreshExpiresAt <= now()) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-token-expired', credentialSource: cred.source, credentialKey };
+        if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source, credentialKey };
+        return { state: 'connected', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, credentialKey, user: token.name || token.openId || null, brand };
       },
       /** The FIXED-mode loopback flow (§12.4): the vendor consent URL is built
        *  with the REGISTERED redirect_uri; the exchange mints the user token

@@ -157,7 +157,10 @@ function renderCard(app, v, { refresh, focus }) {
   const choice = el('div', 'integ-choice');
   const ownMode = v.source === 'user' || (v.source === 'none' && !v.clusterAvailable) || (v.source === 'none' && v.hasOwnValues) || (v.source === 'none' && !v.savedClusterKey);
   if (v.delegate && v.delegate.multi) {
-    const lbl = el('span', 'plugin-cfg-label', t('Credentials'));
+    // THE ACCOUNT MODEL (2026-09-22): this pick is the DEFAULT a NEW channel
+    // account is bound to — an existing account keeps the credential it was
+    // minted under (its own row in the Channels panel says which)
+    const lbl = el('span', 'plugin-cfg-label', t('Default for new accounts'));
     const sel = el('select', 'plugin-cfg-select integ-preset');
     for (const o of v.clusterOptions || []) { const op = el('option', null, t('Cluster preset · {label}', { label: o.label })); op.value = o.key; sel.appendChild(op); }
     const own = el('option', null, t('Use my own key')); own.value = '__own__'; sel.appendChild(own);

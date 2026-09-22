@@ -72,6 +72,7 @@
  * user's panel.
  */
 const path = require('path');
+const crypto = require('crypto');
 const { createChannelStore } = require('../channel-store.js');
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const caps = require('../channel-caps.js');
@@ -79,6 +80,7 @@ const fake = require('../channels/fake.js');
 const lark = require('../channels/lark.js');
 const gmail = require('../channels/gmail.js');
 const { secretBox } = require('../secret-box.js');
+const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const { createOAuthLoopback } = require('../oauth-loopback.js');
 // P2: the PURE filter / assignment / renderer (design §7). Everything after
 // `store.append` is PURE except the two ORCH calls at the end of `wake()`.
@@ -224,17 +226,65 @@ function create(deps = {}) {
     for (const m of REAL_ADAPTERS) if (m.integration && typeof m.integrationTest === 'function') reg(m.integration, (args) => m.integrationTest(args, fetchFn));
   }
   const resolveIntegration = integrations && typeof integrations.resolveIntegration === 'function'
-    ? (id) => integrations.resolveIntegration(id) : undefined;
+    ? (id, opts) => integrations.resolveIntegration(id, opts) : undefined;
   /** The credential FACTS the panel's connect wizard needs (§10.1's three
    *  copy paths: none / cluster / user) — never the values. */
-  function credentialFacts(integrationId) {
+  function credentialFacts(integrationId, credentialKey = null) {
     // `why` is the store's English contract sentence; `whyCode` + `whyParams`
     // are the same fact as STRUCTURE — the client words them (a3 i18n).
-    if (!integrationId || !resolveIntegration) return { source: 'unknown', why: 'no integration store', whyCode: 'no-store', whyParams: null, missing: [], clusterLabel: null };
+    // `credentialKey` (2026-09-22) = an ACCOUNT's own binding (`cluster:<k>` /
+    // `own`); null asks the row's pick — what a NEW account would be bound to.
+    if (!integrationId || !resolveIntegration) return { source: 'unknown', why: 'no integration store', whyCode: 'no-store', whyParams: null, missing: [], clusterLabel: null, credentialKey: credentialKey || null };
     try {
-      const r = resolveIntegration(integrationId);
-      return { source: r.source, why: r.why || null, whyCode: r.whyCode || null, whyParams: r.whyParams || null, missing: Array.isArray(r.missing) ? r.missing.slice() : [], clusterLabel: r.clusterLabel || null };
-    } catch (e) { return { source: 'unknown', why: `integration lookup failed: ${(e && e.message) || e}`, whyCode: 'lookup-failed', whyParams: null, missing: [], clusterLabel: null }; }
+      const r = resolveIntegration(integrationId, { credentialKey: credentialKey || null });
+      return { source: r.source, why: r.why || null, whyCode: r.whyCode || null, whyParams: r.whyParams || null, missing: Array.isArray(r.missing) ? r.missing.slice() : [], clusterLabel: r.clusterLabel || null, credentialKey: r.credentialKey || null };
+    } catch (e) { return { source: 'unknown', why: `integration lookup failed: ${(e && e.message) || e}`, whyCode: 'lookup-failed', whyParams: null, missing: [], clusterLabel: null, credentialKey: credentialKey || null }; }
+  }
+  /** Every credential a NEW account of this integration may bind to right
+   *  now (the store's `offeredCredentials`: key + label only); `[]` without
+   *  a store — the wizard then shows no credential step. */
+  function offeredCredentials(integrationId) {
+    if (!integrationId || !integrations || typeof integrations.offeredCredentials !== 'function') return [];
+    try { return integrations.offeredCredentials(integrationId); } catch { return []; }
+  }
+  /** The key the integration row's OWN pick resolves to — a new account's
+   *  default and the honest stamp for a legacy record (the client it minted
+   *  its token under is the one the row pointed at). null = nothing resolves. */
+  function defaultCredentialKey(integrationId) {
+    if (!integrationId || !resolveIntegration) return null;
+    try { return resolveIntegration(integrationId).credentialKey || null; } catch { return null; }
+  }
+  const credentialLabelFor = (integrationId, key) => { const o = key ? offeredCredentials(integrationId).find((c) => c.key === key) : null; return o ? (o.label || null) : null; };
+  /** A key the caller names must be one the integration OFFERS right now —
+   *  refused `400 unknown-credential` BY NAME with the offered list. */
+  function assertOffered(mod, key) {
+    const offered = offeredCredentials(mod.integration);
+    if (offered.some((c) => c.key === key)) return;
+    const err = new Error(`'${key}' is not a credential this instance offers for ${mod.label || mod.kind} (offered: ${offered.map((c) => c.key).join(', ') || 'none'})`);
+    err.status = 400; err.code = 'unknown-credential'; err.detail = { key, offered: offered.map((c) => c.key) };
+    throw err;
+  }
+  /** THE HONEST STAMP for a record with no `credentialKey` (the
+   *  `2026-09-channel-credential-key` migration, a legacy record's
+   *  re-authorize): what MINTED its token wins whenever the token says so
+   *  and this instance still offers it — a Gmail token records the preset
+   *  key it was exchanged under (`clusterKey`; null = the user's own values),
+   *  a Lark token records nothing — else the row's own pick (what refreshed
+   *  it until now), and the answer NAMES its evidence either way. `boundKey`
+   *  = the credential a HELD token provably binds the record to (null when
+   *  the token names nothing this instance offers). Verifier r1 (2026-09-22):
+   *  stamping the row's pick alone re-bound an org1-minted token to the
+   *  channels client the moment the pick had flipped before the upgrade —
+   *  the exact case the model exists for. */
+  function credentialKeyEvidence(rec, mod) {
+    const integrationId = mod && mod.integration;
+    const { token, why } = tokensFor(rec).read();
+    const named = token && Object.prototype.hasOwnProperty.call(token, 'clusterKey')
+      ? (typeof token.clusterKey === 'string' && token.clusterKey ? CLUSTER_PREFIX + token.clusterKey : OWN_KEY) : null;
+    const boundKey = named && offeredCredentials(integrationId).some((c) => c.key === named) ? named : null;
+    if (boundKey) return { key: boundKey, evidence: 'token', tokenKey: named, boundKey };
+    const pick = defaultCredentialKey(integrationId);
+    return { key: pick, evidence: pick ? 'row-pick' : 'nothing-resolves', tokenKey: named, tokenWhy: token ? null : (why || null), boundKey: null };
   }
 
   const live = new Map();     // adapterId -> { adapter, record, passing, failures, nextAt, budget }
@@ -333,7 +383,10 @@ function create(deps = {}) {
       // engine's finish hook and the injected fetch — ride on `adapterDeps`.
       // P3: the built-in Agents adapter sends through THE ladder and lists
       // the sessions the server names — both handed down, never reached for.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions };
+      // `credentialKey` = THIS account's binding (2026-09-22): every
+      // resolveIntegration the adapter makes carries it, so two accounts of
+      // one kind refresh with their OWN clients whatever the row's pick says.
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null };
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration, ...adapterDeps });
       e = { kind: rec.kind, adapter, record: rec, passing: null, failures: 0, nextAt: 0, spent: 0, windowAt: now(), authState: null,
         // P1b: the push lane's runtime — the handle, the arm token every
@@ -593,7 +646,7 @@ function create(deps = {}) {
     // The kinds a user may still CONNECT (one record per kind in v1), each
     // with the credential facts the wizard's three copy paths need.
     const have = new Set(recs.adapters.map((r) => r.kind));
-    const available = REAL_ADAPTERS.filter((m) => !have.has(m.kind)).map((m) => ({ kind: m.kind, label: m.label || m.kind, integration: m.integration || null, credential: credentialFacts(m.integration), receive: m.caps.receive, sendAs: m.caps.sendAs }));
+    const available = REAL_ADAPTERS.filter((m) => !have.has(m.kind)).map((m) => ({ kind: m.kind, label: m.label || m.kind, integration: m.integration || null, credential: credentialFacts(m.integration), credentials: offeredCredentials(m.integration), credentialDefault: defaultCredentialKey(m.integration), receive: m.caps.receive, sendAs: m.caps.sendAs }));
     const byId = new Map(recs.adapters.map((r) => [r.id, r]));
     const conversations = Object.values(snap.conversations).map((en) => {
       const rec = byId.get(en.adapterId);
@@ -663,14 +716,30 @@ function create(deps = {}) {
       id: rec.id, kind: rec.kind, label: rec.label, enabled: rec.enabled !== false, builtin: !!rec.builtin,
       // The built-in row's login IS this instance (`self`), never a named
       // user — the seed's `user: 'you'` was an English word on the wire (a3 i18n).
-      auth: { ...auth, self: !!rec.builtin, user: rec.builtin ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null },
+      // `tokenHeld` (verifier r1): does the record HOLD a token — a token-less
+      // account (never authenticated / disconnected) may be re-bound by the
+      // wizard's credential step; a held one is bound to its credential
+      auth: { ...auth, self: !!rec.builtin, user: rec.builtin ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null, credentialKey: (st && st.credentialKey) || rec.credentialKey || null, tokenHeld: !!(rec.auth && rec.auth.tokenEnc) },
       lastPass: rec.lastPass || null, consecutiveFailures: rec.consecutiveFailures || 0,
       lane: { via: lane.via, why: lane.why, live: !!lane.live, carryContent: !!lane.carryContent },
       sendAs: c.sendAs, receive: c.receive, identityMarking: c.identityMarking,
       // P1: what the panel's connect / re-authorize / options controls read.
       connectable: !!mod,
       integration: mod ? mod.integration || null : null,
-      credential: mod ? credentialFacts(mod.integration) : null,
+      // THE ACCOUNT MODEL (2026-09-22): which credential THIS account is bound
+      // to (`cluster:<k>` / `own` / null = legacy, follows the row's pick),
+      // its label (a preset's env label; `own` is worded by the client), the
+      // facts resolved FOR THAT KEY, and every credential a further account
+      // of this kind may bind to (the wizard's credential step, shown only
+      // when more than one is offered).
+      credentialKey: rec.credentialKey || null,
+      credentialLabel: mod ? credentialLabelFor(mod.integration, rec.credentialKey || null) : null,
+      credential: mod ? credentialFacts(mod.integration, rec.credentialKey || null) : null,
+      credentials: mod ? offeredCredentials(mod.integration) : [],
+      // the row's CURRENT pick = what a further account of this kind is bound
+      // to unless the wizard says otherwise (c2: the credential step's
+      // pre-picked radio) — never this account's own key
+      credentialDefault: mod ? defaultCredentialKey(mod.integration) : null,
       flow: safeFlow(flows.runningFor(rec.id)),
       lastAuthError: rec.lastAuthError || null, lastAuthAt: rec.lastAuthAt || null,
       failureItem: rec.failureItem ? { id: rec.failureItem.id, code: rec.failureItem.code, at: rec.failureItem.at } : null,
@@ -1087,18 +1156,32 @@ function create(deps = {}) {
 
   // ── connect / re-authorize / disconnect: the user's consent flow ─────────
   /** A CONNECTABLE kind is one with a real module (an integration row, a
-   *  consent flow). One record per kind in v1 — its id IS the kind. */
+   *  consent flow). N ACCOUNTS per kind since 2026-09-22 (the owner's mounts
+   *  model): the FIRST record's id IS the kind (every existing record,
+   *  conversation, reach entry and filter stays valid untouched); every
+   *  further one is `<kind>:<8 hex>` with its own label and credential. */
   function connectableFor(kind) {
     const mod = realByKind.get(kind);
     if (!mod) throw new ChannelError('not-supported', `'${kind}' cannot be connected — it is not a channel adapter with a consent flow (connectable: ${[...realByKind.keys()].join(', ')})`, { retryable: false });
     return mod;
   }
-  function newRecord(mod) {
+  /** The id of the NEXT account of a kind: the kind itself while no record
+   *  carries it, else `<kind>:<8 hex>` — never one already taken. */
+  function mintAdapterId(kind, recs) {
+    const taken = new Set(recs.adapters.map((r) => r.id));
+    if (!taken.has(kind)) return kind;
+    for (let i = 0; i < 16; i++) { const id = `${kind}:${crypto.randomBytes(4).toString('hex')}`; if (!taken.has(id)) return id; }
+    throw new Error(`could not mint a free adapter id for ${kind}`);
+  }
+  function newRecord(mod, { id = mod.kind, credentialKey = null } = {}) {
     const c = mod.caps;
     const options = {};
     for (const o of mod.OPTIONS || []) if (o.default !== undefined) options[o.key] = o.default;
     return {
-      id: mod.kind, kind: mod.kind, label: mod.label || mod.kind, enabled: true,
+      id, kind: mod.kind, label: mod.label || mod.kind, enabled: true,
+      // THE ACCOUNT'S CREDENTIAL BINDING, stamped at connect from the
+      // wizard's choice and never re-picked by the row's default afterwards.
+      credentialKey: credentialKey || null,
       auth: { tokenEnc: null, expiresAt: null, scopes: [], user: null },
       options, state: {},
       lastPass: null, consecutiveFailures: 0, failureItem: null, lastAuthError: null, lastAuthAt: null,
@@ -1107,34 +1190,82 @@ function create(deps = {}) {
       scan: c.receive === 'scan' ? EMPTY_SCAN() : null,
     };
   }
-  /** Begin (or re-begin) the consent flow for a kind: creates the record on
-   *  first connect, else re-authorizes the existing one. The adapter refuses
-   *  with a typed `auth-expired {needsCredentials}` when its integration row
-   *  resolves to none — the wizard opens THAT card first (§10.1). */
-  async function connect(kind) {
+  /** CONNECT (2026-09-22, the account model): mints a NEW account of a kind
+   *  — always when `newAccount` is asked, and when no record of the kind
+   *  exists yet — stamped with the wizard's `credentialKey` (validated
+   *  against what the integration OFFERS right now, refused by name
+   *  otherwise; omitted = the row's own pick), then begins its consent
+   *  flow. Without `newAccount` on a kind that already has an account it is
+   *  the P1a per-kind path: the FIRST account is re-authorized (its id is
+   *  the kind). The adapter refuses with a typed `auth-expired
+   *  {needsCredentials}` when THAT key resolves to none — the wizard opens
+   *  the Integrations card first (§10.1). */
+  async function connect(kind, { credentialKey = null, newAccount = false } = {}) {
     const mod = connectableFor(kind);
     const recs = adapterRecords();
-    let rec = recs.adapters.find((r) => r.kind === kind);
-    const fresh = !rec;
-    if (fresh) {
-      // THE CREDENTIAL QUESTION IS ASKED BEFORE A RECORD EXISTS: a row nobody
-      // can connect is never minted (the r2 ④ rule — "a route may not mint an
-      // index row" — at this seam; measured on a fresh instance, a refused
-      // connect used to leave a permanent adapter row behind, and the 404 the
-      // PUT/disconnect routes promise answered 200 about it).
-      const cf = credentialFacts(mod.integration);
-      if (cf.source === 'none' || (Array.isArray(cf.missing) && cf.missing.length)) {
-        throw new ChannelError('auth-expired', `cannot start a ${mod.label || kind} consent flow: ${cf.why || 'no application credential is configured'}`, { retryable: false, detail: { needsCredentials: true, missing: cf.missing || [] } });
-      }
-      rec = newRecord(mod);
-    } else if (rec.enabled === false) {
-      await store.adapters.update(() => { rec.enabled = true; });
+    const existing = recs.adapters.filter((r) => r.kind === kind);
+    if (!newAccount && existing.length) return reauthorize((existing.find((r) => r.id === kind) || existing[0]).id, { credentialKey });   // the key is judged THERE: a token-less first account re-binds, a bound one refuses by name
+    // THE CREDENTIAL QUESTION IS ASKED BEFORE A RECORD EXISTS: a row nobody
+    // can connect is never minted (the r2 ④ rule — "a route may not mint an
+    // index row" — at this seam; measured on a fresh instance, a refused
+    // connect used to leave a permanent adapter row behind, and the 404 the
+    // PUT/disconnect routes promise answered 200 about it).
+    let key = credentialKey == null || credentialKey === '' ? null : String(credentialKey);
+    if (key) assertOffered(mod, key);
+    else key = defaultCredentialKey(mod.integration);
+    const cf = credentialFacts(mod.integration, key);
+    if (cf.source === 'none' || (Array.isArray(cf.missing) && cf.missing.length)) {
+      throw new ChannelError('auth-expired', `cannot start a ${mod.label || kind} consent flow: ${cf.why || 'no application credential is configured'}`, { retryable: false, detail: { needsCredentials: true, missing: cf.missing || [] } });
     }
+    const rec = newRecord(mod, { id: mintAdapterId(kind, recs), credentialKey: key });
     const e = adapterFor(rec);
     let flow;
     try { flow = await e.adapter.auth.begin(); }
-    catch (err) { if (fresh) live.delete(rec.id); throw err; }   // a refused begin on a fresh record leaves nothing behind
-    if (fresh) await store.adapters.update((a) => { a.adapters.push(rec); });
+    catch (err) { live.delete(rec.id); throw err; }   // a refused begin on a fresh record leaves nothing behind
+    await store.adapters.update((a) => { a.adapters.push(rec); });
+    notify([]);
+    return { adapter: adapterView(rec), flow: safeFlow(flow) };
+  }
+  /** RE-AUTHORIZE one ACCOUNT by its adapter id — never by kind (2026-09-22):
+   *  re-enables a disabled record and begins its consent flow under ITS
+   *  credential. A `credentialKey` (validated: `400 unknown-credential`)
+   *  RE-BINDS a TOKEN-LESS record — never authenticated, or disconnected:
+   *  nothing is minted under its key, so the stamp is only the pick the next
+   *  consent mints under — and is REFUSED BY NAME (`400 credential-bound`)
+   *  on a record that HOLDS a token bound to another credential (its stamp,
+   *  else what the token itself names): dropping the key without a word was
+   *  verifier r1's third finding, and a re-point of a held token is the
+   *  silent swap the model forbids. A legacy record with no key is stamped
+   *  by `credentialKeyEvidence` (the token's own client when offered, else
+   *  the row's current pick). */
+  async function reauthorize(adapterId, { credentialKey = null } = {}) {
+    const rec = recordOrThrow(adapterId);
+    const mod = connectableFor(rec.kind);
+    const key = credentialKey == null || credentialKey === '' ? null : String(credentialKey);
+    if (key) {
+      assertOffered(mod, key);
+      const held = !!(rec.auth && rec.auth.tokenEnc);
+      const bound = held ? (rec.credentialKey || credentialKeyEvidence(rec, mod).boundKey) : null;
+      if (bound && key !== bound) {
+        const err = new Error(`${rec.label || rec.id} (${rec.id}) is bound to '${bound}' by the token it holds — '${key}' cannot replace it; disconnect the account first (the token is dropped, its conversations stay) or add another account under '${key}'`);
+        err.status = 400; err.code = 'credential-bound'; err.detail = { key, bound };
+        throw err;
+      }
+      if (key !== rec.credentialKey) {
+        await store.adapters.update(() => { rec.credentialKey = key; });
+        // the live adapter was BUILT on the old key (`adapterDeps.credentialKey`
+        // is handed down at construction) — drop it so `adapterFor` rebuilds
+        // it under the new one, exactly as an options change does (measured:
+        // the re-stamp alone left the consent URL carrying the old client)
+        const e = live.get(rec.id); if (e) { disarmPush(e, 'credential re-bound'); live.delete(rec.id); }
+      }
+    } else if (!rec.credentialKey) {
+      const ev = credentialKeyEvidence(rec, mod);
+      if (ev.key) await store.adapters.update(() => { rec.credentialKey = ev.key; });
+    }
+    if (rec.enabled === false) await store.adapters.update(() => { rec.enabled = true; });
+    const e = adapterFor(rec);
+    const flow = await e.adapter.auth.begin();
     await store.adapters.update(() => { rec.lastAuthError = null; });
     notify([]);
     return { adapter: adapterView(rec), flow: safeFlow(flow) };
@@ -1183,8 +1314,11 @@ function create(deps = {}) {
     if (r && r.ok && !stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after connect failed:', err && err.message));
     if (r && r.ok && !stopped && timer) syncPushLanes().catch(() => {});   // a fresh consent may be what the lane was waiting for
   }
-  /** Drop the token (the record and its conversations stay — a later Connect
-   *  resumes them); any running flow is cancelled. */
+  /** Drop the token (the FIRST account's record and its conversations stay —
+   *  a later Connect resumes them); any running flow is cancelled. A FURTHER
+   *  account (`<kind>:<hex>`, 2026-09-22) is removed outright with its
+   *  index rows — only its own; the first account and its conversations are
+   *  untouched (its message logs stay on disk: archive-never-destroy). */
   async function disconnect(adapterId) {
     const rec = recordOrThrow(adapterId);
     const running = flows.runningFor(rec.id);
@@ -1193,10 +1327,51 @@ function create(deps = {}) {
     await tokensFor(rec).clear();
     await store.adapters.update(() => { rec.lastAuthError = null; rec.state = {}; rec.lastPass = null; rec.consecutiveFailures = 0; });
     await retractFailure(rec);
+    if (rec.id !== rec.kind && !rec.builtin) {
+      await removeRecord(rec);
+      notify([]);
+      return { ok: true, removed: true };
+    }
     const e = live.get(rec.id);
     if (e) { e.failures = 0; e.nextAt = 0; await refreshAuth(e); }
     notify([]);
     return { ok: true };
+  }
+  /** Remove ONE further account: its live entry, its pending wake windows,
+   *  its index rows and its adapter record — through the two serialized
+   *  doors, nothing else's. */
+  async function removeRecord(rec) {
+    { const e = live.get(rec.id); if (e) { disarmPush(e, 'removed'); live.delete(rec.id); } }
+    for (const [key, w] of [...wakeTimers.entries()]) if (key.startsWith(rec.id + '/')) { clearTimeout(w.timer); wakeTimers.delete(key); }
+    await store.index.update((ix) => { for (const k of Object.keys(ix.conversations)) if (ix.conversations[k] && ix.conversations[k].adapterId === rec.id) delete ix.conversations[k]; });
+    await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
+  }
+  /** THE ONE-SHOT STAMP for records that predate the account model (the
+   *  `2026-09-channel-credential-key` migration calls it): every real
+   *  adapter record lacking `credentialKey` is stamped by
+   *  `credentialKeyEvidence` — the client its own TOKEN names when this
+   *  instance still offers it (`evidence:'token'`), else the integration's
+   *  CURRENT pick (`evidence:'row-pick'`, what refreshed it until now) — on
+   *  the LIVE records (visible to every adapter built from now on), written
+   *  through the store's serialized door; every stamped row carries its
+   *  evidence and the key the token named. A record whose token names
+   *  nothing offered and whose integration resolves to nothing is left
+   *  unstamped (it keeps following the row's pick, as before). Idempotent: a
+   *  stamped record is `already`. */
+  function stampCredentialKeys() {
+    const report = { stamped: [], skipped: [] };
+    for (const rec of adapterRecords().adapters) {
+      if (typeof rec.credentialKey === 'string' && rec.credentialKey) { report.skipped.push({ id: rec.id, why: 'already' }); continue; }
+      const mod = realByKind.get(rec.kind);
+      if (!mod || !mod.integration) { report.skipped.push({ id: rec.id, why: 'no-integration' }); continue; }
+      const ev = credentialKeyEvidence(rec, mod);
+      if (!ev.key) { report.skipped.push({ id: rec.id, why: 'nothing-resolves', tokenKey: ev.tokenKey }); continue; }
+      rec.credentialKey = ev.key;
+      report.stamped.push({ id: rec.id, key: ev.key, evidence: ev.evidence, tokenKey: ev.tokenKey });
+    }
+    const write = report.stamped.length ? saveAdapters() : Promise.resolve();
+    write.catch((err) => log.error(`[channels] credential-key stamp write failed (the live records carry it; the next adapters write persists it): ${(err && err.message) || err}`));
+    return { ...report, write };
   }
   async function setEnabled(adapterId, enabled) {
     const rec = recordOrThrow(adapterId);
@@ -2489,7 +2664,9 @@ function create(deps = {}) {
   return {
     store, registry, digest, notify, pass, setTracked, refreshConvCaps, markRead, messages,
     adapterRecords, laneOrScan, start, stop,
-    connect, finishAuth, cancelAuth, disconnect, setEnabled, setOptions, adapterView,
+    connect, reauthorize, finishAuth, cancelAuth, disconnect, setEnabled, setOptions, adapterView,
+    // 2026-09-22 the account model: the offered credentials (key + label) and the legacy stamp
+    offeredCredentials, defaultCredentialKey, stampCredentialKeys,
     // P1b: the push lanes
     setPush, syncPushLanes, pushView, kick: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); if (rec) kick(rec, adapterFor(rec)); },
     oauth: flows,

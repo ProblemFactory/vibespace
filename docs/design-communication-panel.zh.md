@@ -600,7 +600,12 @@ adapter 的活, 而这件事做错一次就已经在运维工具里把一条消�
 
 ```
 data/channels/
-  adapters.json                 atomic JSON. id, kind, label, enabled, inclusion scope,
+  adapters.json                 atomic JSON, ONE record per connected ACCOUNT (2026-09-22,
+                                §14.5 "账号, 像挂载一样": 一个 kind 的第一条记录 id === kind,
+                                其后每一条 `<kind>:<8 hex>`). id, kind, label, enabled,
+                                credentialKey ('cluster:<presetKey>' | 'own' —— 铸出这枚 token 的
+                                那个凭据, 添加账号时盖章, 之后绝不由集成行的选择重指),
+                                inclusion scope,
                                 auth {tokenEnc, expiresAt, scopes}, lastPass {at, ok, code},
                                 consecutiveFailures,
                                 push {enabled, claimedExclusive, state, lastEventAt,
@@ -1903,6 +1908,8 @@ VibeSpace 以**两种形态**运行, 而这一节存在的全部理由就是这�
 | `gmail` | `clientPreset` —— 一个**选择器**(非密, 选项来自 delegate; 它选的是集群的哪一个预设, 不是用户自己的凭据, §14.3)· `clientId` / `clientSecret`(密, 只在"用我自己的"时出现) | `{via:'drive-presets', prefer:'channels', multi:true}` —— **复用** `VIBESPACE_GDRIVE_CLIENTS`, 不新增第二份解析者; `prefer` 点名 §12.2 让集群加的那个 key, `multi` 告诉界面画下拉而不是那对单选 | **无** —— 既有的 mounts 同意流程已经在生产里跑, 而 Google 接受任何 loopback 端口(RFC 8252 §7.3), 所以没有任何一个值需要用户抄进控制台 | `shape-only`, 并且**说出来**: 一个 Google OAuth client 的 id/secret 单独换不出任何东西(它没有 client-credentials 那条路), 所以这里能做的只有形状检查加把授权 URL 构造出来 —— 真正的判决在那次 OAuth 往返上 | `src/channels/gmail.js` | P1 |
 | `whatsapp-business` | `phoneNumberId`(非密) · `accessToken`(密) | **没有, 而且不该有**: 这是一条按号码计费的商业 API 凭据, 集群注一把就是集群替所有人付账 | **无**(这条路没有 OAuth 同意页) | `credential-exchange`(读一次号码的元数据) | —— 今天没有 | **不进 v1。** §14.2 的普查要求 `consumers` 是活的, 而这条路今天只是 §15 里那条"合规替代"的名字; 它**与它的 adapter 在同一个 commit 里进表**。这一行写在这里是为了把字段与"没有集群默认"这两件事先定下来, 不是为了先摆一张空卡片 |
 
+**2026-09-22 账号模型**: 这张表里一行的选择(`clusterKey` / 用户自己的值)从此只是**新账号的默认值** —— 每个已连接的账号绑定铸出它 token 的那个凭据, 经 `resolveIntegration(id, {credentialKey})` 解析; 决定、记录形状、迁移与范围见 §14.5 末尾"账号, 像挂载一样"。
+
 ### 14.3 `src/server/integration-store.js` —— 解析、遮蔽、广播
 
 落盘形状(经 `writeJsonAtomic`, 与每一个 `data/*.json` 一样):
@@ -2031,6 +2038,52 @@ env 里有没有那个默认在读的时候算出来, 理由有二, 而且两条
   (`src/lib/settings-schema.js:941`), 装的是 `agents.*` 那一组"agent 能看见什么"的开关
   (`:334-362`)—— 与这扇窗口不是同一个问题。所以窗口的中文名是**集成与密钥**, 而那个设置分类
   **一个字都不改**。
+
+**账号, 像挂载一样(2026-09-22, owner: "为啥不能和mount那种类似, 管理的是账号, 每个账号添加的时候可以选oauth client?"; 已落地)。**
+
+- **决定。** 这个面板管理的是**账号**, 与存储挂载同一个模型: 一个 Gmail 挂载只存它被授权时所用
+  OAuth client 的预设 **key**(`src/mounts.js` 的 `clientPreset`, id/secret 用时才解析), 所以两个
+  Gmail 文件夹可以挂在两个 client 下。修前的形状(在代码里量过): 引擎每个 kind 只有**一条**记录
+  (`connect(kind)` 重新授权 `id === kind` 那条 —— 一个 Gmail 账号、一个 Lark 租户, 到此为止), 而
+  gmail.js / lark.js 在同意**与**每一次 refresh 时都经 `resolveIntegration(<id>)` 拿这一行**当下**
+  的选择 —— 换掉那个选择, 在 client A 下铸出的 refresh token 就拿 client B 去刷新(Google 答
+  `invalid_client`): §14.2 那句"never a silent swap"被模型本身违反。
+- **记录形状(§5 的 `adapters.json`)。** 一个 kind N 条 adapter 记录: 第一条保留 `id === kind`(已有
+  的记录、会话、reach 条目与 filter 原样有效, 一个字节都不动), 其后每一条 `id = <kind>:<8 hex>`,
+  按**账号**命名(token 里的邮箱 / 租户名, 同 kind 多于一个时才编号); 每条记录带 `credentialKey` =
+  `cluster:<presetKey>` | `own`, 在 CONNECT 时从向导的选择盖章 —— 对着集成**当下提供的**清单
+  (`offeredCredentials(id)`: 每个预设, 以及用户把值填全时的 `own`)校验, 不在清单里的 key
+  `400 unknown-credential` 点名拒绝, 省略 = 这一行当前的选择 —— 之后它的同意、refresh、status 与
+  Test 全部只解析**这个** key(`resolveIntegration(id, {credentialKey})`: 环境撤掉的预设答
+  `preset-gone` 点名, **绝不**换另一个 client); 这一行自己的选择只是新账号与 legacy 记录的**默认值**
+  (卡上那个下拉的标题从此就是 "Default for new accounts", 卡上别的什么都不动)。
+- **向导与行。** "Add account…" / Connect 一律**新建**账号; 凭据步**只在**集成提供多于一个凭据时
+  出现, 否则静默跳过; 账号行显示账号, 多凭据时显示它绑的是哪一个; 现有账号按**自己的 id** 重新授权
+  (`POST /api/channels/adapters/:id/reauthorize`); **没有 token** 的账号(从未授权 / 已断开; 行上
+  `auth.tokenHeld` 为 false)的 Connect **先走凭据步**(预选它**自己**的 key, 不是这一行的默认值), 选好的
+  key 经它自己的 `/reauthorize {credentialKey}` **改绑**(服务端重建该账号的 live adapter, 同意页立刻
+  带新 client; 只提供一个凭据时静默带上); **持有** token 的账号被铸出它的那份凭据绑定 —— 换 key 点名拒绝
+  `400 credential-bound`(先 Disconnect 再 Connect, 或另加账号), 绝不静默丢弃(验证者 r1 2026-09-22:
+  修前的 P1a 路径把带来的 key 一声不响扔掉, 第一个账号的凭据于是永久不可改); 第二个及之后账号的
+  Disconnect 只删它自己的记录与 index 行, 第一个账号的记录与会话照旧留下(P1a 不变)。
+- **迁移 `2026-09-channel-credential-key`**(`src/server/migrations.js`, 经共享 runner: 账本键控、最
+  多跑一次、失败下次 boot 重试): 没有 `credentialKey` 的旧记录盖**一次**章 —— token **自己**记下的
+  client 优先(Gmail token 自 P1a 起带 `clusterKey`, null = `own`; 本实例仍提供它时 `evidence:'token'`
+  —— 这才是"它的 token 是谁铸的"最诚实的读法; 验证者 r1: 只盖当时的选择, 会把 org1 铸的 token 在升级前
+  选择已翻到 channels 的实例上绑给 channels, 正是这个模型为之存在的那种情形), 否则集成**当时**的选择
+  (`evidence:'row-pick'`, 升级前一直用来 refresh 它的那个; Lark token 什么都不记), `[migrate]` 行逐条
+  点名证据 —— 经引擎自己那唯一的串行写入口(`stampCredentialKeys()` → `credentialKeyEvidence`);
+  token 没点名可提供的凭据且解析不到的记录不盖章, 照旧跟随这一行的选择; 没有引擎的 boot 上若存在真 adapter 的旧记录, 该次运
+  行**点名失败**而不是记成空跑, 下次有引擎的 boot 重试。
+- **范围之外**(owner 2026-09-22 "不要过度设计"): 不做凭据管理器, 预设不搬出 env, Integrations 窗口
+  除那个下拉标题外不动, Task-Group assignment、outbox 与 agents adapter(它没有同意流程)不碰。
+- **Gate。** `test-channels-accounts`(fast; 含一份把 hand-down 与记录盖章都拿掉的引擎修前副本 ——
+  它必须复现那次静默换 client; ⑤ 持有 token 点名拒绝 / 无 token 改绑且同意页带新 client),
+  `test-migrations`(盖章幂等、无引擎时点名失败; token 证据: org1 铸的 token 在选择翻到 channels 后仍盖 org1,
+  `own`/撤掉的预设/无 token/解不开的 token/Lark ⇒ 这一行的选择并点名证据), `test-integrations-ui ⑩`
+  (heavy, chrome: 两个凭据 ⇒ 凭据步且所选 key 进请求体; "Add account…" ⇒ 两个分区、各自的名字与
+  chip; 无 token 账号的 Connect = 凭据步预选它自己的 key、所选 key 发到**它的** `/reauthorize` 并被改绑;
+  只有一个 ⇒ 静默跳过; 下拉标题)。
 
 ### 14.6 优先级, 以及那条常设 grep 普查
 
@@ -2282,6 +2335,7 @@ URL 里根本没有实例的地址。在集群部署里用户的浏览器与实�
 | `test-channels-egress` | fast | 每一个被构造出来的出向请求, 要么来自声明了自己主机的那个 adapter, 要么来自一条**带理由的**白名单 `(file, host)` 对 —— 出生即种下 `src/gmail-sync.js` 与 `src/mounts.js`(§3.1) | 一个带未声明主机的临时文件必须变红; 一条**死掉的白名单条目**(文件被移动或改名)同样必须变红 |
 | `test-oauth-loopback` | fast | 两种模式(§12.4): Gmail 的临时绑定、Lark 的固定绑定; 请求处理器**与**粘回两处的 `state` 拒绝; 完成/取消/超时时端口被释放 | 一个**被预先占住**的固定端口必须产生那次具名拒绝与粘回回落, 绝不是一个不透明的 `EADDRINUSE`; 一次 `state` 错误的回调在两种模式下都必须被拒绝 |
 | `test-integration-registry` | fast | 每一行的 `fields` / `test` / `consumers`; `publicView` 从不出明文, 而 last 4 只在值长度 ≥ 12 时出现; **省略一个密字段 = 不动, `''` = 清掉**; 优先级 user > cluster > none; 集群默认消失 ⇒ `none` **加一个点名的理由**; 必填字段缺失 ⇒ `missing` 点名字段。**grep 普查(文件集由 `git ls-files` 经 `scripts/git-env.mjs` 的净化环境推导, 并由套件**打印**出来)**: 正则 `/VIBESPACE_INTEGRATIONS?\b\|VIBESPACE_INTEGRATION_/` —— 查的是 **env 名字**不是取值的写法 —— 只许出现在 store 里; **一个 env 名字只有一个解析者**(两行 row 同名、或一行 row 与一个 delegate 同名, 都变红); 每个 `consumers` 名字既是存在的文件又**真的**调用 `resolveIntegration`; 每个声明了 `test` 的行都有注册的 runner; **一行声明了 `setup.prerequisites` 就必须声明 `test.caveat`**; **一个消费者跑 OAuth 同意流程的行必须声明 `setup.callbackUrl`**, 而 `src/oauth-loopback.js` 里**不出现**那条 URL 的字面量(唯一定义处是那一行); **没有任何调度器 / 定时器 / 摄入循环调 `test(`**。**r8 的委托与来源那一组**: 一个 `{via:'drive-presets', prefer, multi:true}` 的行, 在一个有两个预设(`org1` + `channels`)且**没有** `'default'` 的 env 上必须解析到 `prefer` 指的那个 key; 用户存过选择时那个选择胜过 `prefer`; 一条**只带选择器**的记录必须答 `source:'cluster'` 并带上 `clusterKey`; `DELETE` 在有/没有集群默认时分别落到 `cluster` / `none`, 而 `useClusterDefault` 在没有集群默认时**具名拒绝** | 一行 `consumers` 指向一个存在但**从不调用** `resolveIntegration` 的文件必须变红(仅仅"文件存在"是这条普查最容易退化成的那个形状); 一份把 `''` 当成"不动"的副本必须变红; 一份把集群默认**拷进** `data/integrations.json` 的副本, 必须在"轮换 env"那条腿上变红(它会拿旧值继续服务), **而同一条腿还要求把 env 撤掉时翻的是 Adapters 那一行**(`auth.state()` 答 `needs-credentials`), 不只是 Integrations 那张卡 —— 只翻卡片的副本必须变红; 一个在定时器里调 `test(` 的合成生产者必须变红; 一份在 `publicView` **之外**做遮蔽的副本必须让广播那条腿变红; **两种绕过 env 普查的写法各一个临时文件当负控**(`process.env['VIBESPACE_INTEGRATIONS']` 与 `const { VIBESPACE_INTEGRATIONS } = process.env`), 两个都必须变红; **一份把委托行解析成 `_driveClient()` 那条 `'default'` 兜底的副本**, 必须在两预设 env 上答 null 从而变红; **一条只带选择器却答 `source:'user'` 的记录必须变红**(它会让来源芯片说反话并把指针导出去) |
+| `test-channels-accounts` | fast | §14.5 的账号模型: 两个 Gmail 账号在两个预设下各自用**自己的** client id 刷新; 翻转集成的默认值之后第一个账号仍留在它的 client 上; 撤掉的预设答 `preset-gone` **点名**而不是换另一个 client; 未知的 key 一条记录都不铸; `own` 只在值填全时才被提供; 第二个账号的 Disconnect 只删它自己的记录与 index 行; 路由(`{credentialKey, newAccount}` / 按 id 的 reauthorize / P1a 按 kind 的路径); Lark 的 keyed rung 从记录上**活**读 | 一份把 hand-down 与记录盖章都拿掉的引擎补丁副本必须复现那次静默换 client(第一个账号拿新默认值的 client 去刷新); 一份不校验 `credentialKey` 的副本必须在未知 key 上铸出记录从而变红 |
 | `test-secret-box` | fast | 与 mounts 的 **parity**(用修前 `_enc` 的补丁副本加密 ⇒ `secret-box` 解得开, 反向亦然, `iv.tag.data` 三段逐字节同形); **只在 `ENOENT` 上创建密钥**, 其它 errno **带类型抛出**; 写走 tmp+rename; **绝不覆盖一个已经存在的密钥文件** | 一份照抄 `src/mounts.js:360-367` 那个裸 catch 的副本, 在一次注入的 `EACCES` 上必须铸出新密钥, 于是"旧密文还解得开"那条断言变红 —— 那就是 §14.7 讲的那个缺陷本身, 当作常驻负控 |
 | `test-channels-lark-shape` | fast | 录制 fixture 的归一化: `next_page_token` *翻页到 anchor*、`@_user_N` 占位符对着记录自己的 `mentions` 解析、带类型的错误 | 一份 anchor 落在**第二页**上的 fixture 必须被翻进去, 而不是停在第一页 |
 | `test-plugin-loader`(已有) | fast | `channelAdapters` 进了 `RESERVED_CONTRIBUTIONS` ⇒ 那句"保留给后续阶段 —— 已忽略"的警告真的会发(§15) | 如果那个词被加进去而没更新套件, 它的期望集合断言就会变红 —— 而这正是重点 |

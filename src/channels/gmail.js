@@ -305,14 +305,21 @@ function create(record = {}, deps = {}) {
   const threads = new Map();   // convId -> { thread, at }
   const meta = new Map();      // convId -> { title, participants, lastAt, at }
 
+  /** THIS ACCOUNT's credential binding (2026-09-22): `cluster:<k>` / `own`,
+   *  handed down by the engine (`deps.credentialKey`) and read LIVE off the
+   *  record as a fallback (the legacy stamp lands after construction); null
+   *  = the row's own pick. EVERY resolveIntegration below carries it, so
+   *  the consent, the refresh, the status and the Test all name ONE client. */
+  const credentialKeyOf = () => (typeof deps.credentialKey === 'string' && deps.credentialKey) || (record && typeof record.credentialKey === 'string' && record.credentialKey) || null;
   function credential() {
-    if (!resolveIntegration) return { values: null, why: 'no integration resolver was handed to this adapter', missing: [] };
+    const credentialKey = credentialKeyOf();
+    if (!resolveIntegration) return { values: null, why: 'no integration resolver was handed to this adapter', missing: [], credentialKey };
     let r;
-    try { r = resolveIntegration('gmail'); } catch (e) { return { values: null, why: `integration lookup failed: ${(e && e.message) || e}`, missing: [] }; }
+    try { r = resolveIntegration('gmail', { credentialKey }); } catch (e) { return { values: null, why: `integration lookup failed: ${(e && e.message) || e}`, missing: [], credentialKey }; }
     if (!r || r.source === 'none' || (Array.isArray(r.missing) && r.missing.length)) {
-      return { values: null, why: (r && r.why) || 'no Google OAuth client is configured', missing: (r && r.missing) || [], source: r ? r.source : 'none' };
+      return { values: null, why: (r && r.why) || 'no Google OAuth client is configured', whyCode: (r && r.whyCode) || null, whyParams: (r && r.whyParams) || null, missing: (r && r.missing) || [], source: r ? r.source : 'none', credentialKey };
     }
-    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null };
+    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };
   }
   function readToken() {
     if (!tokens) return { token: null, why: 'no token store was handed to this adapter' };
@@ -426,15 +433,16 @@ function create(record = {}, deps = {}) {
     auth: {
       async state() {
         const cred = credential();
-        if (!cred.values) return { state: 'needs-credentials', expiresAt: null, scopes: [], why: cred.why, missing: cred.missing.slice(), credentialSource: cred.source || 'none' };
+        const credentialKey = cred.credentialKey || null;   // the view NAMES the account's credential
+        if (!cred.values) return { state: 'needs-credentials', expiresAt: null, scopes: [], why: cred.why, whyCode: cred.whyCode || null, whyParams: cred.whyParams || null, missing: cred.missing.slice(), credentialSource: cred.source || 'none', credentialKey };
         const { token, why } = readToken();
-        if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: cred.source };
-        if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source };
-        if (!token.refresh_token) return { state: 'needs-reauth', expiresAt: Number(token.expiresAt) || null, scopes: token.scopes || [], why: 'no-refresh-token', credentialSource: cred.source };
+        if (!token) return { state: 'unknown', expiresAt: null, scopes: [], why, credentialSource: cred.source, credentialKey };
+        if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: null, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source, credentialKey };
+        if (!token.refresh_token) return { state: 'needs-reauth', expiresAt: Number(token.expiresAt) || null, scopes: token.scopes || [], why: 'no-refresh-token', credentialSource: cred.source, credentialKey };
         // A Google refresh token carries no stated lifetime (a Testing
         // client's 7-day one is a policy, not a field), so the countdown is
         // null and the honest signal is the vendor's `invalid_grant`.
-        return { state: 'connected', expiresAt: null, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, user: token.email || null };
+        return { state: 'connected', expiresAt: null, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, credentialKey, user: token.email || null };
       },
       /** The EPHEMERAL-mode loopback flow (§12.4): gmail-sync's own consent
        *  parameters, the CLIENT from the resolver, the exchange requiring a

@@ -404,6 +404,106 @@ try {
       ok(rep8.unreadable === null && rep8.refused === 0 && rep8.scanned === 0, 'r2 CONTROL: no usage-cache dir at all (a fresh instance) is nothing to repair — a success, never a retry loop', JSON.stringify(rep8));
     }
   }
+
+  // ── the channel credential-key stamp (2026-09-22: the account model) ──
+  // A record from before the model is stamped ONCE with the integration's
+  // CURRENT key through the ENGINE (adapters.json's one writer); a record
+  // with no integration row is left alone; an already-stamped account keeps
+  // its own key; a second boot with the row's pick flipped changes nothing.
+  {
+    const ENG = require('../src/server/channels-engine.js');
+    const STORE = require('../src/server/integration-store.js');
+    const quiet = { log() {}, warn() {}, error() {} };
+    const PRESETS = [
+      { key: 'org1', label: 'Org 1', clientId: 'org1.apps.googleusercontent.com', clientSecret: 'org1-secret-000000' },
+      { key: 'channels', label: 'Channels', clientId: 'ch.apps.googleusercontent.com', clientSecret: 'channels-secret-0000' },
+    ];
+    const legacyRec = (id, kind, extra = {}) => ({ id, kind, label: kind, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [], user: null }, options: {}, state: {}, lastPass: null, consecutiveFailures: 0, failureItem: null, lastAuthError: null, lastAuthAt: null, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null, ...extra });
+    const root9 = path.join(tmp, 'inst9'); const d9 = path.join(root9, 'data'); fs.mkdirSync(path.join(d9, 'channels'), { recursive: true });
+    const adaptersFile = path.join(d9, 'channels', 'adapters.json');
+    fs.writeFileSync(adaptersFile, JSON.stringify({ v: 1, adapters: [legacyRec('gmail', 'gmail'), legacyRec('fake-poll', 'fake-poll'), legacyRec('gmail:0badcafe', 'gmail', { credentialKey: 'cluster:channels' })] }));
+    const integrations = STORE.create({ dataDir: d9, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+    integrations.setClusterKey('gmail', 'org1');   // the row's pick at the upgrade boot
+    const eng = ENG.create({ dataDir: d9, env: {}, integrations, log: quiet });   // never started: no scheduler, no flows
+    const m9 = create({ rootDir: root9, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eng });
+    const disk = () => JSON.parse(fs.readFileSync(adaptersFile, 'utf-8')).adapters;
+    const drain = () => eng.store.adapters.update(() => { });   // the serialized door — the stamp's write is queued behind it
+    const res9 = m9.runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
+    await drain();
+    ok(res9?.status === 'ran' && disk().find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'a legacy gmail record is stamped with the integration\'s CURRENT key (cluster:org1) through the engine\'s door', JSON.stringify({ res9, disk: disk().map((r) => [r.id, r.credentialKey]) }));
+    ok(!('credentialKey' in disk().find((r) => r.id === 'fake-poll')), 'a record with no integration row is left alone');
+    ok(disk().find((r) => r.id === 'gmail:0badcafe').credentialKey === 'cluster:channels', 'an already-stamped further account keeps ITS key');
+    ok(eng.adapterRecords().adapters.find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'the LIVE record carries the stamp (an adapter built from now on reads it)');
+    integrations.setClusterKey('gmail', 'channels');   // the pick flips before the next boot
+    const res9b = m9.runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
+    await drain();
+    ok(res9b?.status === 'already' && disk().find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'idempotent: the next boot skips it by ledger and the stamp stays org1 whatever the pick says now');
+    const again = eng.stampCredentialKeys(); await again.write;
+    ok(again.stamped.length === 0 && again.skipped.map((s) => `${s.id}:${s.why}`).sort().join() === 'fake-poll:no-integration,gmail:0badcafe:already,gmail:already', 'the stamp itself is idempotent: every record `already` or `no-integration`', JSON.stringify(again.skipped));
+    // no engine on this boot: a legacy REAL record makes the run FAIL by name (retried next boot); no records at all is a success
+    const root10 = path.join(tmp, 'inst10'); const d10 = path.join(root10, 'data'); fs.mkdirSync(path.join(d10, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(d10, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [legacyRec('gmail', 'gmail')] }));
+    const res10 = create({ rootDir: root10, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
+    const led10 = JSON.parse(fs.readFileSync(path.join(d10, 'migrations.json'), 'utf-8'));
+    ok(res10?.status === 'failed' && /no channels engine/.test(res10.error) && /gmail/.test(res10.error) && !led10.applied['2026-09-channel-credential-key'], 'without an engine a legacy real record FAILS the run by name — never recorded as a no-op', JSON.stringify(res10));
+    const root11 = path.join(tmp, 'inst11'); fs.mkdirSync(path.join(root11, 'data'), { recursive: true });
+    const res11 = create({ rootDir: root11, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
+    ok(res11?.status === 'ran', 'CONTROL: a fresh instance (no adapters.json) is nothing to stamp — a success');
+    // the resolver names nothing (no presets, no own values): the record is left unstamped and the run still succeeds
+    const root12 = path.join(tmp, 'inst12'); const d12 = path.join(root12, 'data'); fs.mkdirSync(path.join(d12, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(d12, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [legacyRec('gmail', 'gmail')] }));
+    const s12 = STORE.create({ dataDir: d12, env: {}, broadcast: () => {}, drivePresets: () => [], log: quiet });
+    const e12 = ENG.create({ dataDir: d12, env: {}, integrations: s12, log: quiet });
+    const res12 = create({ rootDir: root12, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e12 }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
+    await e12.store.adapters.update(() => { });
+    ok(res12?.status === 'ran' && !('credentialKey' in JSON.parse(fs.readFileSync(path.join(d12, 'channels', 'adapters.json'), 'utf-8')).adapters[0]), 'a record whose integration resolves to nothing is left unstamped (it keeps following the row\'s pick) and the run succeeds');
+    // ── verifier r1: THE TOKEN'S OWN EVIDENCE WINS ──
+    // A Gmail token records the preset key it was exchanged under
+    // (`clusterKey`; null = the user's own values); the stamp names THAT
+    // client when this instance still offers it, whatever the row's pick says
+    // now — the pre-fix migration stamped the pick, so an org1-minted token
+    // was re-bound to the channels client the moment the pick had flipped
+    // before the upgrade (Google: invalid_client), the exact case the model
+    // exists for. A key the token names but the env withdrew, a token that
+    // names nothing (Lark), no token, an undecryptable token ⇒ the row's pick.
+    const SB = require('../src/secret-box.js');
+    const root13 = path.join(tmp, 'inst13'); const d13 = path.join(root13, 'data'); fs.mkdirSync(path.join(d13, 'channels'), { recursive: true });
+    const box13 = SB.secretBox(path.join(d13, ENG.KEY_FILE));   // the engine's own box — the key file is minted here, the engine reads the same one
+    const held = (id, kind, tok, extra = {}) => legacyRec(id, kind, { auth: { tokenEnc: box13.enc(JSON.stringify({ access_token: 'at-x', expiresAt: 1, refresh_token: 'rt-x', scopes: ['s'], ...tok })), expiresAt: null, scopes: ['s'], user: 'member.x@example.com' }, ...extra });
+    fs.writeFileSync(path.join(d13, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [
+      held('gmail', 'gmail', { clusterKey: 'org1' }),                   // minted under org1 — the row's pick is channels
+      held('gmail:00000001', 'gmail', { clusterKey: null }),            // minted under the user's OWN values (gmail writes null for source user) — none saved now
+      held('gmail:00000002', 'gmail', { clusterKey: 'gone' }),          // minted under a preset the env no longer offers
+      held('lark', 'lark', {}),                                         // a Lark token names nothing
+      legacyRec('gmail:00000003', 'gmail'),                             // never authenticated
+      legacyRec('gmail:00000004', 'gmail', { auth: { tokenEnc: 'not-a-blob', expiresAt: null, scopes: [], user: null } }),   // undecryptable
+    ] }));
+    const s13 = STORE.create({ dataDir: d13, env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'tA', label: 'Tenant A', values: { appId: 'cli_a', appSecret: 'fs-a' } }]) }, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+    s13.setClusterKey('gmail', 'channels');   // the pick flipped BEFORE the upgrade — the pre-fix symptom
+    const larkPick = s13.resolveIntegration('lark').credentialKey;
+    ok(s13.resolveIntegration('gmail').credentialKey === 'cluster:channels' && larkPick === 'cluster:tA', `FIXTURE: the gmail row's pick is channels, the lark row's is its one tenant (${larkPick})`);
+    const e13 = ENG.create({ dataDir: d13, env: {}, integrations: s13, log: quiet });
+    const res13 = create({ rootDir: root13, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e13 }).runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
+    await e13.store.adapters.update(() => { });
+    const k13 = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(d13, 'channels', 'adapters.json'), 'utf-8')).adapters.map((r) => [r.id, r.credentialKey || null]));
+    ok(res13?.status === 'ran' && k13.gmail === 'cluster:org1', `the token's OWN client wins: an org1-minted token is stamped cluster:org1 although the row's pick is channels (${JSON.stringify(k13)})`);
+    ok(k13['gmail:00000001'] === 'cluster:channels' && k13['gmail:00000002'] === 'cluster:channels' && k13['gmail:00000003'] === 'cluster:channels' && k13['gmail:00000004'] === 'cluster:channels', 'a token naming `own` with no values saved, a withdrawn preset, no token, an undecryptable token ⇒ the row\'s pick (what refreshed them until now)');
+    ok(k13.lark === 'cluster:tA', 'a Lark token names nothing ⇒ the row\'s pick');
+    // the report names the evidence per record (the [migrate] line prints it)
+    const root14 = path.join(tmp, 'inst14'); const d14 = path.join(root14, 'data'); fs.mkdirSync(path.join(d14, 'channels'), { recursive: true });
+    const box14 = SB.secretBox(path.join(d14, ENG.KEY_FILE));
+    const held14 = (id, tok) => legacyRec(id, 'gmail', { auth: { tokenEnc: box14.enc(JSON.stringify({ access_token: 'at-y', expiresAt: 1, refresh_token: 'rt-y', scopes: ['s'], ...tok })), expiresAt: null, scopes: ['s'], user: null } });
+    fs.writeFileSync(path.join(d14, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [held14('gmail', { clusterKey: null }), held14('gmail:00000005', { clusterKey: 'org1' }), held14('gmail:00000006', { clusterKey: 'gone' })] }));
+    const s14 = STORE.create({ dataDir: d14, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+    s14.setIntegration('gmail', { clientId: 'own.apps.googleusercontent.com', clientSecret: 'own-sec-01' });   // the user's own values: the row's pick is `own`, and `own` is OFFERED
+    const e14 = ENG.create({ dataDir: d14, env: {}, integrations: s14, log: quiet });
+    const rep14 = e14.stampCredentialKeys(); await rep14.write;
+    const by14 = Object.fromEntries(rep14.stamped.map((r) => [r.id, r]));
+    ok(by14.gmail && by14.gmail.key === 'own' && by14.gmail.evidence === 'token' && by14.gmail.tokenKey === 'own', `a token minted under the user's own values is stamped \`own\` with evidence 'token' once the values are complete (${JSON.stringify(by14.gmail)})`);
+    ok(by14['gmail:00000005'] && by14['gmail:00000005'].key === 'cluster:org1' && by14['gmail:00000005'].evidence === 'token', 'an org1-minted token is stamped org1 with evidence \'token\' even while the row\'s pick is own');
+    ok(by14['gmail:00000006'] && by14['gmail:00000006'].key === 'own' && by14['gmail:00000006'].evidence === 'row-pick' && by14['gmail:00000006'].tokenKey === 'cluster:gone', 'a withdrawn key falls to the row\'s pick with evidence \'row-pick\' and the token\'s own key NAMED beside it', JSON.stringify(by14['gmail:00000006']));
+    try { eng.stop(); e12.stop(); e13.stop(); e14.stop(); } catch { }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

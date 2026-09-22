@@ -63,11 +63,35 @@ function fail(res, e) {
 }
 
 // ── P1: connect / re-authorize / paste-back / cancel / disconnect / options ──
-/** CONNECT (or RE-AUTHORIZE): begins the adapter's consent flow, creating
- *  the record on first connect. `409 needs-credentials` when the row's
- *  integration resolves to none — the client opens that card FIRST. */
+/** CONNECT: mints a NEW account of a kind (`{credentialKey?, newAccount?}`,
+ *  2026-09-22 — `credentialKey` = `cluster:<presetKey>` | `own`, validated
+ *  against what the integration offers right now, `400 unknown-credential`
+ *  by name otherwise; omitted = the row's own pick; `newAccount:true` mints
+ *  a further account even when one exists) and begins its consent flow.
+ *  Without `newAccount` on a kind that already has an account: the P1a
+ *  path, re-authorizing the FIRST account — a `credentialKey` there is judged
+ *  as by `/reauthorize` (a token-less first account re-binds, a bound one
+ *  `400 credential-bound`). `409 needs-credentials` when the account's key
+ *  resolves to none — the client opens that card FIRST. */
 router.post('/api/channels/adapters/:kind/connect', async (req, res) => {
-  try { forHost(req); res.json(await engine().connect(req.params.kind)); } catch (e) { fail(res, e); }
+  try {
+    forHost(req);
+    const b = req.body || {};
+    res.json(await engine().connect(req.params.kind, { credentialKey: typeof b.credentialKey === 'string' ? b.credentialKey : null, newAccount: b.newAccount === true }));
+  } catch (e) { fail(res, e); }
+});
+/** RE-AUTHORIZE one ACCOUNT by its adapter id (never by kind): begins its
+ *  consent flow under ITS credential. `{credentialKey?}` RE-BINDS a
+ *  TOKEN-LESS account (never authenticated / disconnected — nothing is
+ *  minted under its key) after validation (`400 unknown-credential`); on an
+ *  account that HOLDS a token bound to another credential it is refused BY
+ *  NAME (`400 credential-bound`), never dropped. `404 no-such-adapter`. */
+router.post('/api/channels/adapters/:id/reauthorize', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    res.json(await engine().reauthorize(req.params.id, { credentialKey: typeof b.credentialKey === 'string' ? b.credentialKey : null }));
+  } catch (e) { fail(res, e); }
 });
 /** PASTE-BACK: the user pastes the redirect URL their browser landed on. */
 router.post('/api/channels/adapters/:id/auth/finish', async (req, res) => {

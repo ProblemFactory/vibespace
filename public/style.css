@@ -4009,6 +4009,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-sec-kind { font-size: 13px; color: var(--text-dim); }
 .chan-sec-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 600; }
 .chan-sec-count { font-size: 10px; color: var(--text-dim); font-weight: 400; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* the account model (2026-09-22): the credential an account is bound to, on its head only where it disambiguates */
+.chan-sec-head .chan-cred-chip { max-width: 38%; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .chan-sec-more { width: 20px; height: 20px; font-size: 13px; flex-shrink: 0; }
 .chan-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block; background: var(--text-dim); }
 .chan-dot-ok { background: var(--green, #3fb950); }
@@ -4063,6 +4065,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .chan-rows { padding-left: 0; }
   .chan-row-line .chan-chip { display: none; }
   .chan-sec-name { display: none; }
+  .chan-sec-head .chan-cred-chip { display: none; }
   .chan-sec-count { flex: 1; text-align: left; }
 }
 /* the bar's Outbox button keeps only its glyph + count where the summary and
@@ -4168,6 +4171,10 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-flow-note, .chan-opt-help { font-size: 10px; color: var(--text-dim); line-height: 1.45; margin: 0; }
 .chan-flow-note.chan-warn { color: var(--warn-text); }
 .chan-flow-intro { font-size: 12px; color: var(--text-secondary); line-height: 1.45; margin: 0; }
+/* the wizard's credential step (the account model): one radio row per offered credential, the house check-row grid */
+.chan-cred-list { display: flex; flex-direction: column; gap: 6px; }
+.chan-cred-item input[type="radio"] { margin: 0; width: auto; justify-self: start; }
+.chan-cred-label { font-weight: 600; }
 .chan-flow-refusal { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; line-height: 1.45; color: var(--warn-text); padding: 6px 8px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--yellow, #e5c07b) 10%, transparent); }
 .chan-flow-refusal .chan-ic { font-size: 12px; margin-top: 2px; }
 .chan-flow-refusal b { font-weight: 600; }

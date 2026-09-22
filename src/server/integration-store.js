@@ -63,6 +63,9 @@ const { writeJsonAtomic } = require('../channel-store.js');
 const TEST_TIMEOUT_MS = 15000;          // a human-triggered probe, bounded
 const FILE = 'integrations.json';
 const KEY_FILE = '.integrations-key';
+/** An ACCOUNT's credential key: `cluster:<presetKey>` (one env preset by key) or `own` (the user's saved values). */
+const OWN_KEY = 'own';
+const CLUSTER_PREFIX = 'cluster:';
 /** `VIBESPACE_INTEGRATION_<ID>_<FIELD>`: id and field upper-cased, `-`/`:` → `_`.
  *  Lives in THE resolver (r3): the registry DECLARES a row's prefix, this
  *  module is the only thing that turns it into a name it reads. */
@@ -222,13 +225,14 @@ function create(deps = {}) {
     }
     return Object.keys(out).length ? out : null;
   }
-  /** What the environment offers this row RIGHT NOW: `{key,label,values}` or null. */
-  function clusterDefaultFor(row) {
+  /** THE PRESET LIST the environment offers this row RIGHT NOW, as
+   *  `[{key,label,values}]` — the delegating row's through the injected
+   *  `drivePresets`, every other row's from the keyed JSON entries or the
+   *  single-field form as ONE preset named 'default'. `clusterDefaultFor`
+   *  PICKS from it; the per-account rung (`cluster:<key>`) INDEXES it. */
+  function clusterPresetsFor(row) {
     if (row.delegate) {
-      const r = rec(row.id);
-      const presets = (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || '') } }));
-      const pick = R.pickPreset(presets, { savedKey: r && r.clusterKey, prefer: row.delegate.prefer });
-      return { def: pick.preset, why: pick.why, whyCode: pick.whyCode || null, whyParams: pick.whyParams || null, options: presets.map((p) => ({ key: p.key, label: p.label })) };
+      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || '') } }));
     }
     const json = envJsonEntries().filter((e) => e.id === row.id);
     const fromPrefix = envPrefixValues(row);
@@ -236,7 +240,18 @@ function create(deps = {}) {
       envFormSaid = true;
       log.log(`[integrations] ${row.id}: both VIBESPACE_INTEGRATIONS and VIBESPACE_INTEGRATION_${row.id.toUpperCase()}_* are set — the JSON form is in effect`);
     }
+    return json.length
+      ? json.map((e) => ({ key: e.key, label: e.label || row.label, values: e.values }))
+      : (fromPrefix ? [{ key: 'default', label: row.label, values: fromPrefix }] : []);
+  }
+  /** What the environment offers this row RIGHT NOW: `{key,label,values}` or null. */
+  function clusterDefaultFor(row) {
     const r = rec(row.id);
+    const presets = clusterPresetsFor(row);
+    if (row.delegate) {
+      const pick = R.pickPreset(presets, { savedKey: r && r.clusterKey, prefer: row.delegate.prefer });
+      return { def: pick.preset, why: pick.why, whyCode: pick.whyCode || null, whyParams: pick.whyParams || null, options: presets.map((p) => ({ key: p.key, label: p.label })) };
+    }
     // The env's offers for this row, as PRESETS: every JSON entry (keyed), or
     // the single-field form as one preset named 'default'. The same pick rule
     // as the delegating row — the user's saved choice > the only one — with
@@ -250,9 +265,6 @@ function create(deps = {}) {
     // preset here (`rebindSingle`, reported in `why`); §14.2's "never a silent
     // swap" stays exactly where it was written — the delegating dropdown,
     // where a key names an OAuth client a refresh token is bound to.
-    const presets = json.length
-      ? json.map((e) => ({ key: e.key, label: e.label || row.label, values: e.values }))
-      : (fromPrefix ? [{ key: 'default', label: row.label, values: fromPrefix }] : []);
     const options = presets.map((p) => ({ key: p.key, label: p.label }));
     if (!presets.length) {
       const why = r && r.clusterKey
@@ -277,10 +289,58 @@ function create(deps = {}) {
     undecryptableSaid.set(row.id, line);
     log.error(line);
   }
-  function resolveIntegration(id) {
+  /** THE CREDENTIAL KEY an ACCOUNT is bound to (2026-09-22, the owner's
+   *  "manage accounts like mounts — each one picks its OAuth client"):
+   *  `cluster:<presetKey>` names ONE env preset by key, `own` names the
+   *  user's saved values, `null` = the row's own pick (today's precedence).
+   *  The keyed rungs NEVER fall through to another client — a refresh token
+   *  is bound to the client it was minted under, so a key the env stopped
+   *  offering answers `preset-gone` BY NAME rather than another preset
+   *  (§14.2 "never a silent swap", now a property of the model itself). */
+  const keyOf = (source, clusterKey) => (source === 'cluster' ? CLUSTER_PREFIX + clusterKey : source === 'user' ? OWN_KEY : null);
+  function resolveByKey(row, r, key) {
+    const base = {
+      id: row.id, label: row.label, credentialKey: key,
+      savedClusterKey: (r && r.clusterKey) || null,
+      testedAt: (r && r.testedAt) || null, lastOk: r ? r.lastOk : null, lastError: (r && r.lastError) || null,
+    };
+    const none = (why, whyCode, whyParams = null) => ({ ...base, source: 'none', values: {}, whyCode, whyParams, clusterKey: null, clusterLabel: null, fromEnv: false, missing: R.missingFields(row, {}), why });
+    if (key === OWN_KEY) {
+      const { values: own, undecryptable } = userValues(row);
+      noteUndecryptable(row, undecryptable);
+      if (undecryptable.length) return none(undecryptableWhy(undecryptable), 'undecryptable', { fields: undecryptable.slice() });
+      if (loadError) return none(loadError.message, 'store-unreadable');
+      const res = R.resolvePrecedence(own, null, {});
+      if (res.source !== 'user') return none(`no keys of your own are saved for ${row.label}`, 'own-missing');
+      return { ...base, source: 'user', values: res.values, whyCode: null, whyParams: null, clusterKey: null, clusterLabel: null, fromEnv: false, missing: R.missingFields(row, res.values), why: null };
+    }
+    if (key.startsWith(CLUSTER_PREFIX)) {
+      const k = key.slice(CLUSTER_PREFIX.length);
+      const hit = clusterPresetsFor(row).find((p) => p.key === k);
+      if (!hit) return none(`credential ${k} is no longer provided by this instance`, 'preset-gone', { key: k });
+      return { ...base, source: 'cluster', values: { ...hit.values }, whyCode: null, whyParams: null, clusterKey: k, clusterLabel: hit.label || null, fromEnv: true, missing: R.missingFields(row, hit.values), why: null };
+    }
+    return none(`unknown credential key '${key}' for ${row.label}`, 'unknown-credential', { key });
+  }
+  /** Every credential this row can bind a NEW account to right now:
+   *  `[{key:'cluster:<k>', label, source:'cluster', presetKey}, …,
+   *  {key:'own', label:null, source:'user'}]` — `own` only while the user's
+   *  saved values are complete and readable (the client words it; a label
+   *  here would be an English sentence on the wire). Key + label only. */
+  function offeredCredentials(id) {
+    const row = R.rowById(id);
+    if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    const out = clusterPresetsFor(row).map((p) => ({ key: CLUSTER_PREFIX + p.key, label: p.label || null, source: 'cluster', presetKey: p.key }));
+    const { values: own, undecryptable } = userValues(row);
+    if (!undecryptable.length && !loadError && Object.keys(own).length && !R.missingFields(row, own).length) out.push({ key: OWN_KEY, label: null, source: 'user', presetKey: null });
+    return out;
+  }
+  function resolveIntegration(id, { credentialKey = null } = {}) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
     const r = rec(row.id);
+    const key = credentialKey == null || credentialKey === '' ? null : String(credentialKey);
+    if (key) return resolveByKey(row, r, key);
     const { values: own, undecryptable } = userValues(row);
     const cluster = clusterDefaultFor(row);
     noteUndecryptable(row, undecryptable);
@@ -302,6 +362,7 @@ function create(deps = {}) {
     return {
       id: row.id, label: row.label,
       source: res.source, values: res.values,
+      credentialKey: keyOf(res.source, res.clusterKey),                   // the key a NEW account would be stamped with (the row's own pick)
       // `why` is the English contract sentence; `whyCode` + `whyParams` are the
       // same fact as STRUCTURE (the client words it, a3 i18n)
       whyCode, whyParams,
@@ -444,7 +505,7 @@ function create(deps = {}) {
     if (typeof fn !== 'function') throw new Error(`registerTest(${id}): a runner function is required`);
     runners.set(id, fn);
   }
-  async function test(id) {
+  async function test(id, { credentialKey = null } = {}) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
     const runner = runners.get(id);
@@ -459,7 +520,7 @@ function create(deps = {}) {
       const timer = setTimeout(() => ac.abort(), TEST_TIMEOUT_MS);
       let verdict;
       try {
-        const resolved = resolveIntegration(id);
+        const resolved = resolveIntegration(id, { credentialKey });   // a per-ACCOUNT probe resolves THAT account's key; the card's button the row's pick
         const out = await Promise.race([
           runner({ resolved, row, signal: ac.signal }),
           new Promise((_, rej) => ac.signal.addEventListener('abort', () => rej(new Error(`test timed out after ${TEST_TIMEOUT_MS / 1000}s`)))),
@@ -479,7 +540,7 @@ function create(deps = {}) {
   }
 
   return {
-    resolveIntegration, publicView, list,
+    resolveIntegration, offeredCredentials, publicView, list,
     setIntegration, setClusterKey, useClusterDefault, clearUserValues,
     test, registerTest, hasTestRunner: (id) => runners.has(id),
     onChange, file, keyFile: box.keyFile,
@@ -487,4 +548,4 @@ function create(deps = {}) {
   };
 }
 
-module.exports = { create, IntegrationError, TEST_TIMEOUT_MS, FILE, KEY_FILE, envFieldName };
+module.exports = { create, IntegrationError, TEST_TIMEOUT_MS, FILE, KEY_FILE, OWN_KEY, CLUSTER_PREFIX, envFieldName };

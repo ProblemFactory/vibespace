@@ -15,7 +15,12 @@ const { runMigrations } = require('../migration-runner.js');
 // transcript tree (the origin backfill) must be drivable against a scratch
 // home, or its suite reads — and its timing depends on — whatever ~/.claude
 // the developer happens to have (measured: 3.9 GB / 27 s on this instance).
-function create({ rootDir, serverNotice, homeDir = os.homedir() }) {
+// `channels` (2026-09-22) is the CHANNELS ENGINE handle (or a getter for it):
+// `data/channels/adapters.json` has exactly ONE writer — the engine's
+// serialized door — so a migration that reshapes an adapter record goes
+// through the engine, never through a second store instance (a private copy
+// written back is the read-modify-write lost update §5.1 exists to forbid).
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -238,6 +243,38 @@ function create({ rootDir, serverNotice, homeDir = os.homedir() }) {
         const k = K.create({ dataDir, homeDir, install: false, log: { log() { }, warn() { } } });
         const r = k.adoptDirectory({ label: 'Shared (legacy)', dir, legacy: true, owner: { kind: 'instance', id: null } });
         console.log('[migrate] legacy browser profile:', JSON.stringify({ dir, created: r.created, id: r.profile ? r.profile.id : null, why: r.why || null }));
+      },
+    },
+    {
+      id: '2026-09-channel-credential-key',
+      note: "the Communication panel manages ACCOUNTS like the storage mounts do (owner 2026-09-22): every channel adapter record carries `credentialKey` — `cluster:<presetKey>` or `own` — naming the OAuth client / tenant app its token was minted under, so a change of the integration's default pick never refreshes an existing token with another client (Google answers invalid_client; §14.2 'never a silent swap'). A record from before the model is stamped ONCE through the engine's own serialized writer with the client its OWN TOKEN names when this instance still offers it (a Gmail token records the preset key it was exchanged under — the honest reading of what minted it, whatever the row's pick says now), else with the integration's CURRENT pick (what refreshed it until now); the report names the evidence per record. A record whose token names nothing offered and whose integration resolves to nothing is left unstamped and keeps following the row's pick, as before.",
+      run() {
+        const eng = typeof channels === 'function' ? channels() : channels;
+        if (!eng || typeof eng.stampCredentialKeys !== 'function') {
+          // No engine on this boot (a suite, a build without the panel):
+          // nothing to stamp unless a real adapter record exists — then the
+          // run FAILS by name so the runner retries it on a boot that has one
+          // (a recorded no-op would leave the record legacy for good).
+          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')); } catch { return; }
+          const { REAL_ADAPTERS } = require('./channels-engine.js');
+          const real = new Set(REAL_ADAPTERS.map((m) => m.kind));
+          const pending = (doc && Array.isArray(doc.adapters) ? doc.adapters : []).filter((r) => r && real.has(r.kind) && !(typeof r.credentialKey === 'string' && r.credentialKey));
+          if (pending.length) throw new Error(`no channels engine to stamp ${pending.length} adapter record(s) (${pending.map((r) => r.id).join(', ')}) — retried on a boot that has one`);
+          return;
+        }
+        const rep = eng.stampCredentialKeys();
+        // The shared runner is synchronous (the daemon bundles it), so the stamp's
+        // store write is not awaited here: the live records carry the key at once and
+        // the engine logs a failed write; the next adapters.json write persists it
+        // (verifier r1 low, accepted with this reason).
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran. Each stamped row names its
+        // EVIDENCE (`token` = the client the token itself recorded; `row-pick`
+        // = the integration's pick) and the key the token named.
+        console.log('[migrate] channel-credential-key:', JSON.stringify({ stamped: rep.stamped, skipped: rep.skipped }));
+        // Deliberately NO serverNotice: no token moved and nothing was
+        // archived — each account gained the name of the client it already
+        // used. The Communication panel shows it on the row.
       },
     },
     {

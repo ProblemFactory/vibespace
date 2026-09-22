@@ -509,7 +509,11 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     ok(R.pickPreset(one, { savedKey: 'tenantA', rebindSingle: true }).rebound === undefined, 'PURE: a saved key that still exists reports no re-bind');
     // the delegating row keeps its refusal (§4's gm2 leg is the functional twin of this control)
     const wiringSrc = fs.readFileSync(STORE_PATH, 'utf-8');
-    ok((wiringSrc.match(/rebindSingle: true/g) || []).length === 1 && /json\.length[\s\S]{0,900}rebindSingle: true/.test(wiringSrc) && !/row\.delegate[\s\S]{0,400}rebindSingle/.test(wiringSrc.slice(wiringSrc.indexOf('if (row.delegate) {'), wiringSrc.indexOf('const json = envJsonEntries()'))), 'WIRING: the flag is passed at the env-preset site ONLY — the delegating branch never passes it');
+    // 2026-09-22: the preset LIST moved out to `clusterPresetsFor` (the per-account
+    // `cluster:<key>` rung indexes it); the PICK — and the flag — stay in
+    // `clusterDefaultFor`, whose delegating branch returns before the flag.
+    const cdf = wiringSrc.slice(wiringSrc.indexOf('function clusterDefaultFor(row)'), wiringSrc.indexOf('// ── resolution: THE ONE ANSWER'));
+    ok((wiringSrc.match(/rebindSingle: true/g) || []).length === 1 && /rebindSingle: true/.test(cdf) && !/rebindSingle/.test(cdf.slice(cdf.indexOf('if (row.delegate) {'), cdf.indexOf('// The env\'s offers for this row, as PRESETS'))), 'WIRING: the flag is passed at the env-preset site ONLY — the delegating branch never passes it');
   }
 }
 
@@ -581,6 +585,8 @@ const ENV_ALLOW = new Map([
   ['scripts/dbg-comm-surfaces.mjs', 'the comm-panel screenshot driver injects the cluster copy path into its worktree server (a1 of the polish; the i18n census drives it)'],
   ['scripts/test-browser-backend.mjs', 'the agent-browser key legs (design-agent-browser-v2 §9 iii) inject a cluster default into the store\'s env HANDLE (never process.env) and assert user > cluster > none'],
   ['scripts/test-agentd-session.mjs', 'the second-holder leg boots a real daemon under the name and asserts neither the daemon nor any child sees it'],
+  ['scripts/test-channels-accounts.mjs', 'the account-model Lark leg hands two keyed tenants to the store\'s env HANDLE (never process.env) and asserts `cluster:<k>` resolves by key'],
+  ['scripts/test-migrations.mjs', 'the credential-key stamp\'s token-evidence leg hands ONE keyed Lark tenant to the store\'s env HANDLE (never process.env) so a Lark token — which names no client — is stamped with the row\'s pick'],
   ['deploy/helm/vibespace-user/values.yaml', 'the admin-facing values block'],
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the Secret into the env'],
   ['deploy/README.md', 'documents the two forms'],
@@ -752,13 +758,14 @@ if (tracked.length) {
   ok(/agentEnvPure\(base\)/.test(readRepo('src/ws-handler.js')) && !/function agentEnv\(base = process\.env\) \{\s*const out = \{\}/.test(readRepo('src/ws-handler.js')), 'WIRING: ws-handler\'s agentEnv is the PURE rule re-exported, not a second copy');
 }
 
-// (c) CONSUMERS: every named consumer exists AND calls resolveIntegration('<id>')
+// (c) CONSUMERS: every named consumer exists AND calls resolveIntegration('<id>'[, {credentialKey}])
 function consumerCensus(rows, read) {
   const problems = [];
   for (const row of rows) {
     for (const f of row.consumers) {
       let s; try { s = read(f); } catch { problems.push(`${row.id}: consumer ${f} does not exist`); continue; }
-      if (!s.includes(`resolveIntegration('${row.id}')`) && !s.includes(`resolveIntegration("${row.id}")`)) problems.push(`${row.id}: consumer ${f} never calls resolveIntegration('${row.id}')`);
+      // the call may carry the ACCOUNT's key as a second argument (2026-09-22: `resolveIntegration('<id>', { credentialKey })`) — the census asks for the id literal, not the arity
+      if (!new RegExp(`resolveIntegration\\(['"]${row.id}['"]\\s*[,)]`).test(s)) problems.push(`${row.id}: consumer ${f} never calls resolveIntegration('${row.id}')`);
     }
     if (!row.consumers.length && !row.wiredIn) problems.push(`${row.id}: no consumer and no wiredIn phase`);
   }

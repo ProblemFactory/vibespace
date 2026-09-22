@@ -229,20 +229,43 @@ question about another machine is the failure the rule exists to stop.
   client opens the Integrations card FIRST; `501 not-supported` = an
   undeclared capability / a kind with no consent flow; `401 auth-expired`;
   `502` = a vendor refusal; `404 no-such-adapter`).
-  - `POST /api/channels/adapters/:kind/connect` — begins (or re-begins) the
-    consent flow; creates the adapter record on first connect (its id IS the
-    kind, one record per kind in v1); answers `{adapter, flow}` where `flow` is
-    `{flowId, mode, running, consentUrl, redirectUri, port, listening,
-    refusal, pasteBack:true, startedAt, expiresAt}` — never the flow's `state`.
-    A fixed-mode port already held answers `refusal:{code:'port-busy'}` on
-    the flow and the flow keeps running on paste-back.
+  - `POST /api/channels/adapters/:kind/connect` `{credentialKey?, newAccount?}`
+    — THE ACCOUNT MODEL (2026-09-22): mints a NEW account of the kind (the
+    first record's id IS the kind, every further one `<kind>:<8 hex>`) when
+    `newAccount:true` or no record of the kind exists, stamped with
+    `credentialKey` = `cluster:<presetKey>` | `own` (validated against what
+    the integration offers RIGHT NOW — `400 unknown-credential` naming it and
+    the offered keys otherwise; omitted = the integration's current pick) and
+    begins its consent flow under THAT credential. Without `newAccount` on a
+    kind that already has an account it is the P1a path: the FIRST account is
+    re-authorized, a `credentialKey` there judged exactly as by
+    `/reauthorize` (token-less ⇒ re-bind; bound ⇒ `400 credential-bound`).
+    Answers `{adapter, flow}` where `flow` is `{flowId, mode,
+    running, consentUrl, redirectUri, port, listening, refusal, pasteBack:true,
+    startedAt, expiresAt}` — never the flow's `state`. A fixed-mode port
+    already held answers `refusal:{code:'port-busy'}` on the flow and the
+    flow keeps running on paste-back. `409 needs-credentials` when the
+    account's key resolves to none (a withdrawn preset says `preset-gone`
+    naming it — never another client).
+  - `POST /api/channels/adapters/:id/reauthorize` `{credentialKey?}` —
+    re-begins ONE account's consent flow by its adapter id (never by kind)
+    under ITS credential. A key RE-BINDS a TOKEN-LESS account (never
+    authenticated / disconnected — nothing is minted under its key) after
+    validation (`400 unknown-credential`), and is `400 credential-bound
+    {error, detail:{key, bound}}` on an account HOLDING a token bound to
+    another credential (its stamp, else what the token itself names) — never
+    dropped (verifier r1). A legacy record with no key is stamped first by its
+    token's own evidence, else the integration's current pick.
+    `404 no-such-adapter`.
   - `POST /api/channels/adapters/:id/auth/finish` `{url}` — PASTE-BACK: the
     redirect URL the user's browser landed on; `400 auth-failed` with the
     reason (a `state` mismatch says "restart the flow"); `501 no-flow` when
     nothing is running.
   - `POST /api/channels/adapters/:id/auth/cancel` — `{ok, cancelled}`.
-  - `POST /api/channels/adapters/:id/disconnect` — drops the token (record
-    and conversations stay), cancels a running flow, retracts the failure item.
+  - `POST /api/channels/adapters/:id/disconnect` — drops the token (the
+    FIRST account's record and conversations stay), cancels a running flow,
+    retracts the failure item; a FURTHER account (`<kind>:<hex>`) is REMOVED
+    with its index rows — only its own — and answers `{ok, removed:true}`.
   - `PUT /api/channels/adapters/:id` `{enabled?, options?}` — enable/disable
     and/or the adapter's DECLARED options (an undeclared key or a value
     outside its `choices` is a `400` naming it; `''` restores the default; a
@@ -286,10 +309,22 @@ question about another machine is the failure the rule exists to stop.
     the editor says the words.
   The digest (`GET /api/channels`) now also carries `available` (connectable
   kinds not yet connected: `{kind, label, integration, credential:{source,
-  why, missing, clusterLabel}, receive, sendAs}`) and per adapter
+  why, missing, clusterLabel, credentialKey}, credentials, receive, sendAs}`) and per adapter
   `connectable`, `integration`, `credential`, `flow`, `lastAuthError`,
   `lastAuthAt`, `failureItem {id, code, at}`, `options`, `optionsSchema` and
   `auth.user`/`auth.scopes`/`auth.credentialSource` — never a token.
+  **The account model (2026-09-22):** per adapter `credentialKey`
+  (`cluster:<presetKey>` | `own` | null = legacy, follows the row's pick),
+  `credentialLabel` (a preset's env label; `own` is worded by the client),
+  `credential` = the facts resolved FOR THAT KEY, `credentials` = every
+  credential a further account of this kind may bind to (`[{key, label,
+  source, presetKey}]`, key + label only — the wizard shows a credential step
+  only when more than one is offered), `credentialDefault` (the row's CURRENT
+  pick = what a further account is bound to unless the wizard says otherwise —
+  never this account's own key; c2), `auth.credentialKey` and
+  `auth.tokenHeld` (does the record hold a token — false = never
+  authenticated / disconnected, the ONE state the Connect verb may re-bind);
+  `available[]` carries the same `credentials` list and `credentialDefault`.
   **P1b:** each adapter row carries `push` (`null` when it declares no push
   lane): `{enabled, optIn, transport, claimedExclusive, state, lastStateWhy,
   lastEventAt, demotedAt, demotedWhy, demoted{missed,total,rate,threshold,at},

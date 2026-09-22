@@ -23,6 +23,11 @@ export function routeErrorText(r, { fallback = null } = {}) {
   switch (code) {
     case 'not-found': return t('No such conversation');
     case 'needs-credentials': return t('The application credential is missing — set it up under Integrations first');
+    // the account model (2026-09-22): a key the integration no longer offers / an account that is gone
+    case 'unknown-credential': return t('That credential is not one this instance offers — pick another');
+    // verifier r1: a HELD token binds its account to the credential it was minted under
+    case 'credential-bound': return t('This account is bound to the credential its token was minted under — disconnect it first, or add another account');
+    case 'no-such-adapter': return t('That account no longer exists');
     case 'auth-expired': return t('The login expired — re-authorize the channel');
     case 'auth-failed': return raw ? t('The consent flow failed: {error}', { error: raw }) : t('The consent flow failed');
     case 'not-supported': return t('This channel does not support that');

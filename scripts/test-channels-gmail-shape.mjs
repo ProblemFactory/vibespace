@@ -101,7 +101,7 @@ const quiet = { log() {}, warn() {}, error() {} };
   ok(gmail.integration === 'gmail' && gmail.EGRESS.includes('gmail.googleapis.com') && gmail.EGRESS.includes('oauth2.googleapis.com') && gmail.EGRESS.includes('accounts.google.com'), 'it names its integration row and DECLARES its egress hosts');
   ok(Array.isArray(gmail.OPTIONS) && gmail.OPTIONS[0].key === 'query' && gmail.OPTIONS[0].default === 'label:INBOX', 'the include query is a DECLARED per-record option with the INBOX default');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
-  ok(src.includes("resolveIntegration('gmail')"), 'it asks resolveIntegration for its OAuth client (the registry census requires the call)');
+  ok(/resolveIntegration\('gmail'\s*[,)]/.test(src), 'it asks resolveIntegration for its OAuth client, carrying the ACCOUNT\'s credentialKey (the registry census requires the call)');
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   ok(!/process\.env/.test(code) && !/VIBESPACE_GDRIVE_CLIENTS/.test(code), 'it never reads process.env and never names the presets env — the row DELEGATES and the store resolves');
 }

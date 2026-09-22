@@ -166,7 +166,7 @@ function connectRow(app, av) {
     frag.appendChild(noteLine('chan-connect-note', t('Not configured — set up the application credential first'), { warn: true }));
   } else {
     txt.textContent = t('Connect {label}', { label });
-    b.onclick = () => startConnect(app, av.kind, av.integration, label);
+    b.onclick = () => startConnect(app, av);
     frag.appendChild(b);
     if (cred.source === 'cluster') frag.appendChild(chanLine('chan-connect-note', cred.clusterLabel ? t('Provided by the cluster · {label}', { label: cred.clusterLabel }) : t('Provided by the cluster')));
     else if (cred.source === 'unknown') frag.appendChild(chanLine('chan-connect-note', R.credentialWhyText(cred, { t }) || t('credential state unknown')));
@@ -174,17 +174,141 @@ function connectRow(app, av) {
   return frag;
 }
 
-async function startConnect(app, kind, integration, label) {
-  const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(kind)}/connect`, { method: 'POST', headers: JSON_HDR, body: '{}' });
+// ── THE ACCOUNT MODEL (2026-09-22, the owner's mounts analogy) ────────────
+// A kind holds N ACCOUNTS, each bound at connect to the credential it was
+// minted under. The wizard MINTS (`newAccount: true`, never the P1a re-point
+// of the first record); an existing account re-authorizes ITSELF by id.
+// Every fact below is read off the digest: `credentials` = what the
+// integration offers a NEW account right now, `credentialDefault` = the row's
+// own pick (pre-picked, never forced), `credentialKey` / `credentialLabel` =
+// what THIS account is bound to.
+
+/** The wizard's SPEC for a kind, read off an `available[]` entry OR an
+ *  existing account's row (both carry the same three facts). */
+function wizardSpec(x) {
+  return {
+    kind: x.kind, integration: x.integration || null, label: x.label || x.kind,
+    credentials: Array.isArray(x.credentials) ? x.credentials.filter((c) => c && c.key) : [],
+    credentialDefault: x.credentialDefault || null,
+  };
+}
+/** The credential's words: a cluster preset by its env label (data — never
+ *  translated), `own` by ours; a bare key when no label is known. */
+function credentialText(key, label) {
+  if (key === 'own') return t('Own client');
+  return label || String(key || '').replace(/^cluster:/, '');
+}
+/** The name a section carries: the account the token names (an e-mail, a
+ *  tenant user) when known, else the kind's label — NUMBERED only when the
+ *  kind holds more than one account, so a lone "Gmail" stays "Gmail". The
+ *  built-in row's login is this instance, never a named user (`auth.self`). */
+function accountName(a, siblings = 1, n = 1) {
+  const user = a.auth && !a.auth.self && a.auth.user ? String(a.auth.user) : '';
+  if (user) return user;
+  const label = a.label || a.id;
+  return siblings > 1 ? t('{label} account {n}', { label, n }) : label;
+}
+
+/** THE WIZARD'S ENTRY — every Connect / "Add account…" lands here. Step 1
+ *  (Credential) is DRAWN only when the integration offers MORE THAN ONE
+ *  credential right now; exactly one ⇒ it is sent as the account's key and
+ *  the step is skipped silently (no empty step, no extra click); none ⇒ the
+ *  server stamps the row's pick. The consent step follows in the SAME dialog. */
+async function startConnect(app, spec) {
+  const s = wizardSpec(spec);
+  if (s.credentials.length > 1) return showCredentialStep(app, s);
+  const body = { newAccount: true };
+  if (s.credentials.length === 1) body.credentialKey = s.credentials[0].key;
+  const r = await postConnect(app, s, body);
+  if (r) showFlowDialog(app, r.adapter && r.adapter.id ? r.adapter.id : s.kind, s.label, r.flow);
+}
+async function postConnect(app, s, body) {
+  const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(s.kind)}/connect`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
   if (!r || r.error) {
     // A missing application credential is not a failed consent — it is the
     // card the user has not filled in yet (§10.1): open it, and say why.
     // The toast words the CODE (a3 i18n); the engine's sentence is the contract.
     showToast(routeErrorText(r), { type: 'error' });
-    if (r && r.code === 'needs-credentials') app.openIntegration(integration);
-    return;
+    if (r && r.code === 'needs-credentials') app.openIntegration(s.integration);
+    return null;
   }
-  showFlowDialog(app, r.adapter && r.adapter.id ? r.adapter.id : kind, label, r.flow);
+  return r;
+}
+/** RE-AUTHORIZE one ACCOUNT by its id — never by kind: a further account's
+ *  consent runs under ITS credential (`POST /adapters/:id/reauthorize`).
+ *  A TOKEN-LESS account (`auth.tokenHeld` false: never authenticated, or
+ *  disconnected) has nothing minted under its key, so the consent it begins
+ *  may RE-BIND it — the wizard's credential step runs first when more than
+ *  one credential is offered (the account's OWN key pre-picked, never the
+ *  row's default over it), exactly one rides the body (the same silent rule
+ *  as a new account); a HELD token binds the account, so nothing about the
+ *  key is sent — the server refuses a different one by name
+ *  (`credential-bound`; the remedy is Disconnect, then Connect). */
+async function reauthorize(app, a) {
+  const s = wizardSpec(a);
+  const held = !!(a.auth && a.auth.tokenHeld);
+  if (!held && s.credentials.length > 1) {
+    const own = s.credentials.some((c) => c.key === a.credentialKey) ? a.credentialKey : s.credentialDefault;
+    return showCredentialStep(app, { ...s, credentialDefault: own }, { submit: (credentialKey) => postReauthorize(app, a, { credentialKey }) });
+  }
+  const body = !held && s.credentials.length === 1 ? { credentialKey: s.credentials[0].key } : {};
+  const r = await postReauthorize(app, a, body);
+  if (r) showFlowDialog(app, a.id, a.label || a.id, r.flow);
+}
+async function postReauthorize(app, a, body) {
+  const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(a.id)}/reauthorize`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
+  if (!r || r.error) {
+    showToast(routeErrorText(r), { type: 'error' });
+    if (r && r.code === 'needs-credentials' && a.integration) app.openIntegration(a.integration);
+    return null;
+  }
+  return r;
+}
+/** STEP 1 — THE CREDENTIAL: one radio per offered credential (a preset by
+ *  its label, `own` in our words), `s.credentialDefault` pre-picked (the
+ *  row's default for a NEW account; a token-less account's own key when it
+ *  re-binds); Continue hands the chosen key to `submit` — by default
+ *  `{credentialKey, newAccount: true}` to the kind's connect; the re-bind
+ *  path posts it to the account's own `/reauthorize` — and the SAME dialog
+ *  moves on to the consent step. Cancel here mints nothing (the record is
+ *  created by the server only after the credential resolved — the r2 ④ rule). */
+function showCredentialStep(app, s, { submit = (credentialKey) => postConnect(app, s, { credentialKey, newAccount: true }) } = {}) {
+  const shell = createModalShell({ id: 'chan-flow-dialog', title: t('Connect {label}', { label: s.label }), dialogClass: 'chan-dialog chan-flow', escapeToClose: true });
+  const { body, close } = shell;
+  body.appendChild(stepper(0));
+  body.appendChild(chanLine('chan-flow-intro', t('Choose the application credential this account is authorized under. It stays bound to the account — the pick on the Integrations card is only the default for new accounts.')));
+  const list = document.createElement('div');
+  list.className = 'chan-cred-list';
+  const picked = s.credentials.some((c) => c.key === s.credentialDefault) ? s.credentialDefault : s.credentials[0].key;
+  for (const c of s.credentials) {
+    const lab = document.createElement('label');
+    lab.className = 'dialog-check-row chan-cred-item';
+    const r = document.createElement('input');
+    r.type = 'radio'; r.name = 'chan-cred'; r.value = c.key; r.checked = c.key === picked;
+    const name = document.createElement('span');
+    name.className = 'chan-cred-label';
+    name.textContent = credentialText(c.key, c.label);
+    const hint = document.createElement('span');
+    hint.className = 'dialog-check-hint';
+    hint.textContent = c.key === 'own' ? t('The keys saved on the Integrations card') : t('Provided by the cluster');
+    lab.append(r, name, hint);
+    list.appendChild(lab);
+  }
+  body.appendChild(list);
+  const actions = document.createElement('div');
+  actions.className = 'chan-flow-actions';
+  const status = chanLine('chan-flow-status', '');
+  const next = btn(t('Continue'), async () => {
+    const chosen = list.querySelector('input[name="chan-cred"]:checked');
+    const credentialKey = chosen ? chosen.value : picked;
+    next.disabled = true;
+    const r = await submit(credentialKey);
+    next.disabled = false;
+    if (!r) return;
+    showFlowDialog(app, r.adapter && r.adapter.id ? r.adapter.id : s.kind, s.label, r.flow, shell);
+  }, 'mounts-btn-primary');
+  actions.append(btn(t('Cancel'), close), next);
+  body.append(actions, status);
 }
 
 /** The wizard's step strip: keys (done) → consent (current) → track. */
@@ -214,8 +338,10 @@ function stepper(current) {
  *  PASTE-BACK — the path a remote browser takes anyway (§12.4) — as a
  *  collapsed step that opens itself when nothing is listening. The dialog
  *  follows the adapter's broadcast: a finished flow moves to the Track step. */
-function showFlowDialog(app, adapterId, label, flow) {
-  const { body, close } = createModalShell({ id: 'chan-flow-dialog', title: t('Connect {label}', { label }), dialogClass: 'chan-dialog chan-flow', escapeToClose: true });
+function showFlowDialog(app, adapterId, label, flow, shell = null) {
+  // `shell` = the wizard's own dialog when the credential step ran first (ONE dialog, three steps)
+  const { body, close } = shell || createModalShell({ id: 'chan-flow-dialog', title: t('Connect {label}', { label }), dialogClass: 'chan-dialog chan-flow', escapeToClose: true });
+  body.textContent = '';
   body.appendChild(stepper(1));
   body.appendChild(chanLine('chan-flow-intro', t('Open the consent page in your browser and approve the access. When it lands on a page this VibeSpace cannot see, paste that page\'s URL back here.')));
   const refused = !!(flow && flow.refusal);
@@ -481,7 +607,7 @@ function adapterDot(a) {
 function adapterNotes(app, a) {
   const notes = [];
   const auth = a.auth || { state: 'unknown' };
-  const reconnect = () => startConnect(app, a.kind, a.integration, a.label || a.id);
+  const reconnect = () => reauthorize(app, a);   // by id — a further account re-authorizes ITSELF, never the kind's first
   const line = (text, { warn = false, verbs = [] } = {}) => {
     const n = noteLine('chan-sec-note', text, { warn });
     for (const v of verbs) { v.classList.add('chan-sec-verb'); n.appendChild(v); }
@@ -569,7 +695,11 @@ export function registerChannelAdapterMenu() {
   });
   registerMenuItem({ menu: M, group: '2_send', order: 20, when: (c) => !!A(c).senderHonestyLine && A(c).senderHonestyLine.record !== null, label: () => t('Use instance default'), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { senderHonestyLine: null }) });
   registerMenuItem({ menu: M, group: '3_auth', order: 0, separator: true, when: (c) => !!A(c).connectable });
-  registerMenuItem({ menu: M, group: '3_auth', order: 10, when: (c) => !!A(c).connectable && !(A(c).flow && A(c).flow.running), label: (c) => ((A(c).auth || {}).state === 'connected' ? t('Re-authorize') : t('Connect')), run: (c) => startConnect(c.app, A(c).kind, A(c).integration, A(c).label || A(c).id) });
+  registerMenuItem({ menu: M, group: '3_auth', order: 10, when: (c) => !!A(c).connectable && !(A(c).flow && A(c).flow.running), label: (c) => ((A(c).auth || {}).state === 'connected' ? t('Re-authorize') : t('Connect')), run: (c) => reauthorize(c.app, A(c)) });
+  // THE ACCOUNT MODEL: another account of this kind, through the wizard
+  // (its own credential step when more than one is offered) — never a
+  // re-point of this one
+  registerMenuItem({ menu: M, group: '3_auth', order: 15, when: (c) => !!A(c).connectable, label: () => t('Add account…'), tooltip: (c) => t('Another {label} account, under its own credential', { label: A(c).label || A(c).id }), run: (c) => startConnect(c.app, A(c)) });
   registerMenuItem({
     menu: M, group: '3_auth', order: 20,
     when: (c) => !!A(c).connectable && (A(c).auth || {}).state !== 'unknown',
@@ -731,9 +861,16 @@ export function renderChannelsPanel(app, c) {
       e.textContent = t('Connect a channel and track a conversation — new messages will be listed here.');
       into.appendChild(e);
     }
+    // THE ACCOUNT MODEL: how many accounts each kind holds (a lone one keeps
+    // the kind's label; further ones are numbered in record order until the
+    // token names them) and which is the n-th
+    const siblings = new Map();
+    const ordinal = new Map();
+    for (const a of adapters) { const n = (siblings.get(a.kind) || 0) + 1; siblings.set(a.kind, n); ordinal.set(a.id, n); }
     for (const a of adapters) {
       const mine = convs.filter((x) => x.adapterId === a.id);
       const sec = document.createElement('div');
+      sec.dataset.adapter = a.id;
       // The built-in Agents adapter lists every live session on this instance —
       // a list the sidebar already shows. Until one of them is tracked it is
       // folded by default (owner 2026-09-21: "展示一堆agents意义不明"), and a
@@ -748,9 +885,22 @@ export function renderChannelsPanel(app, c) {
       h.appendChild(icon(kindGlyph(a, mine), 13, 'chan-sec-kind'));
       const nm = document.createElement('b');
       nm.className = 'chan-sec-name';
-      nm.textContent = a.label || a.id;
-      h.title = a.label || a.id;   // under a 180px container the name hides and the glyph + count stand for it
+      const kindCount = siblings.get(a.kind) || 1;
+      const name = accountName(a, kindCount, ordinal.get(a.id) || 1);
+      nm.textContent = name;
+      // under a 180px container the name hides and the glyph + count stand for it; the tooltip keeps the kind beside the account
+      h.title = name === (a.label || a.id) ? name : `${a.label || a.id} · ${name}`;
       h.appendChild(nm);
+      // the credential chip: WHICH application credential this account is
+      // bound to — drawn only where it disambiguates (the kind holds several
+      // accounts, or the integration offers several credentials)
+      if (a.credentialKey && (kindCount > 1 || (Array.isArray(a.credentials) && a.credentials.length > 1))) {
+        const cc = document.createElement('span');
+        cc.className = 'chan-chip chan-cred-chip';
+        cc.textContent = credentialText(a.credentialKey, a.credentialLabel);
+        cc.title = t('Authorized under this application credential — it stays bound to this account.');
+        h.appendChild(cc);
+      }
       const dot = document.createElement('span');
       dot.className = 'chan-dot chan-dot-' + adapterDot(a);
       dot.title = dotTitle(a);

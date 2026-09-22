@@ -2002,7 +2002,7 @@ server.listen(PORT, HOST, () => {
   // One-shot data migrations (src/server/migrations.js, plan B step 1): the
   // ledger-driven registry runs BEFORE any session restore touches the data
   // it may reshape. Failures notice + retry next boot, never block startup.
-  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
+  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */ }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
   catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
   // B-855a c2: the STANDING identity repair — every boot, AFTER the one-shot registry (it may have reshaped the stores this reads), idempotent; then the panel memory re-reads the repaired disk
   try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); }

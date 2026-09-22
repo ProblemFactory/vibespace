@@ -23,6 +23,16 @@
 //      without the caveat; a failed Test draws the words; lark's Test is a
 //      named refusal
 //   ⑨ at 375×667 every control of every card is inside the viewport
+//   ⑩ THE ACCOUNT MODEL (2026-09-22, the owner's mounts analogy — c2, the
+//      wizard and the panel): a kind whose integration offers TWO credentials
+//      draws the wizard's credential step (the row's default pre-picked) and
+//      the CHOSEN key reaches the connect body; "Add account…" on a kind's
+//      section mints a SECOND account, the two list as two sections with
+//      distinct names and a credential chip each; re-authorize on the second
+//      section posts to ITS id; a kind offering ONE credential skips the step
+//      silently (rebooted with a single preset — the account minted under the
+//      withdrawn one says so BY NAME, the other is untouched); the
+//      Integrations chooser's caption reads "Default for new accounts"
 //
 // Everything is per-pid (scripts/scratch.mjs); the server gets a NAMED
 // scratch HOME. Run: node scripts/test-integrations-ui.mjs   (SKIPs without chrome)
@@ -332,6 +342,155 @@ const p2 = await newPage();
   ok((await chipOf(p1, 'fake')) === 'Not configured', 'chip: Not configured');
   ok(await p1.evaljs(`/no longer provided/.test((${CARD('fake')}.querySelector('.integ-why') || {}).textContent || '')`), 'and the card says the cluster default this row used is no longer provided');
   ok(await p1.evaljs(`${CARD('fake')}.querySelector('input[value="cluster"]').disabled && /no longer provided|no default/.test(${CARD('fake')}.querySelector('.integ-radio-off').textContent)`), 'the "Use cluster default" radio is greyed WITH the reason');
+}
+
+// ── ⑩ THE ACCOUNT MODEL (2026-09-22, c2): the credential step, N accounts per kind, re-authorize by id ──
+// The server runs with the two Gmail presets (PRESETS) and no cluster row;
+// gmail's SAVED pick is org1 (④). Gmail's `auth.begin()` only builds a consent
+// URL and listens on a free loopback port — no vendor is called (the flows are
+// cancelled before any exchange).
+{
+  const PANEL = `(async () => {
+    window.app.openChannels();
+    for (let i = 0; i < 80; i++) { if (document.querySelector('.rail-panel-channels .chan-connect-btn[data-connect-kind="gmail"]')) return true; await new Promise((r) => setTimeout(r, 100)); }
+    return false;
+  })()`;
+  // record every write the wizard makes (url + body) — the proof that the CHOSEN key reaches the connect body
+  const PATCH = `(() => { const m = { posts: [] }; window.__wiz = m; const of = window.fetch; window.fetch = function (u, init, ...r) { if (/^\\/api\\/channels\\/adapters\\//.test(String(u)) && init && init.method === 'POST') m.posts.push({ url: String(u), body: (() => { try { return JSON.parse(init.body || '{}'); } catch { return null; } })() }); return of.call(this, u, init, ...r); }; return 1; })()`;
+  const SECS = `[...document.querySelectorAll('.rail-panel-channels .chan-sec')].filter((s) => (s.dataset.adapter || '').startsWith('gmail')).map((s) => ({ id: s.dataset.adapter, name: (s.querySelector('.chan-sec-name') || {}).textContent || null, chip: (s.querySelector('.chan-cred-chip') || {}).textContent || null, title: s.querySelector('.chan-sec-head').title, notes: [...s.querySelectorAll('.chan-sec-note')].map((n) => n.textContent) }))`;
+  const CANCEL = `(async () => { const d = document.querySelector('#chan-flow-dialog'); if (!d) return 'no dialog'; const b = [...d.querySelectorAll('.chan-flow-actions button')].find((x) => x.textContent.trim() === 'Cancel'); if (!b) return 'no cancel'; b.click(); for (let i = 0; i < 40; i++) { if (!document.querySelector('#chan-flow-dialog')) return 'closed'; await new Promise((r) => setTimeout(r, 100)); } return 'still open'; })()`;
+  const MENU = (secIdx, item) => `(async () => { const s = [...document.querySelectorAll('.rail-panel-channels .chan-sec')].filter((x) => (x.dataset.adapter || '').startsWith('gmail'))[${secIdx}]; if (!s) return 'no section'; s.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 150)); const m = document.querySelector('.context-menu'); if (!m) return 'no menu'; const it = [...m.querySelectorAll('.context-menu-item')].find((x) => x.textContent.trim() === ${JSON.stringify(item)}); if (!it) { const names = [...m.querySelectorAll('.context-menu-item')].map((x) => x.textContent.trim()).join('|'); m.remove(); return 'no item among ' + names; } it.click(); return 'ok'; })()`;
+  const WAIT_DIALOG = (sel) => `(async () => { for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-flow-dialog ' + ${JSON.stringify(sel)})) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`;
+
+  ok(await p1.evaljs(PANEL), 'the Channels panel (its window on a phone) lists the Gmail connect entry');
+  await p1.evaljs(PATCH);
+  const gm0 = (await api('GET', '/api/channels')).json;
+  const av = ((gm0 && gm0.available) || []).find((a) => a.kind === 'gmail');
+  ok(av && av.credentials.length === 2 && av.credentialDefault === 'cluster:org1', `FIXTURE: Gmail offers TWO credentials and the row's default is cluster:org1 (${JSON.stringify(av && { credentials: av.credentials.map((c) => c.key), credentialDefault: av.credentialDefault })})`);
+
+  // (a) two offered ⇒ the CREDENTIAL step is drawn, the row's default pre-picked, nothing posted yet
+  const step = await p1.evaljs(`(async () => {
+    document.querySelector('.rail-panel-channels .chan-connect-btn[data-connect-kind="gmail"]').click();
+    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-flow-dialog .chan-cred-list')) break; await new Promise((r) => setTimeout(r, 100)); }
+    const d = document.querySelector('#chan-flow-dialog'); if (!d) return null;
+    const radios = [...d.querySelectorAll('.chan-cred-item input[type="radio"]')];
+    return { radios: radios.map((r) => ({ value: r.value, checked: r.checked, label: r.parentElement.querySelector('.chan-cred-label').textContent })), on: [...d.querySelectorAll('.chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), flowInput: !!d.querySelector('.chan-flow-input'), posts: window.__wiz.posts.length };
+  })()`);
+  ok(step && step.radios.length === 2 && step.radios[0].value === 'cluster:org1' && step.radios[0].checked && step.radios[1].value === 'cluster:channels' && !step.radios[1].checked, `two offered ⇒ the CREDENTIAL step: one radio per preset, the row's default (org1) pre-picked (${JSON.stringify(step)})`);
+  ok(step && step.radios[0].label === 'Org 1' && step.radios[1].label === 'Channels' && step.on === 0 && !step.flowInput && step.posts === 0, 'each preset is named by its label, step 1 is current, no consent input yet and NOTHING was posted');
+  // choose the OTHER preset → Continue → the SAME dialog is on the consent step; the chosen key is in the connect body
+  const flow = await p1.evaljs(`(async () => {
+    const d = document.querySelector('#chan-flow-dialog');
+    d.querySelector('.chan-cred-item input[value="cluster:channels"]').click();
+    [...d.querySelectorAll('.chan-flow-actions button')].find((b) => b.textContent.trim() === 'Continue').click();
+    for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-flow-dialog .chan-flow-input')) break; await new Promise((r) => setTimeout(r, 100)); }
+    const d2 = document.querySelector('#chan-flow-dialog');
+    return { same: d2 === d, flowInput: !!(d2 && d2.querySelector('.chan-flow-input')), credList: !!(d2 && d2.querySelector('.chan-cred-list')), on: d2 ? [...d2.querySelectorAll('.chan-step')].findIndex((s) => s.classList.contains('chan-step-on')) : -1, posts: window.__wiz.posts.slice() };
+  })()`);
+  ok(flow && flow.same && flow.flowInput && !flow.credList && flow.on === 1, `Continue moves the SAME dialog on to the consent step (${JSON.stringify(flow && { same: flow.same, flowInput: flow.flowInput, credList: flow.credList, on: flow.on })})`);
+  ok(flow && flow.posts.length === 1 && /\/api\/channels\/adapters\/gmail\/connect$/.test(flow.posts[0].url) && flow.posts[0].body && flow.posts[0].body.credentialKey === 'cluster:channels' && flow.posts[0].body.newAccount === true, `the CHOSEN key reaches the connect body {credentialKey:'cluster:channels', newAccount:true} (${JSON.stringify(flow && flow.posts)})`);
+  ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends the first account\'s consent flow (nothing exchanged)');
+  const g1 = (await api('GET', '/api/channels')).json;
+  const a1 = ((g1 && g1.adapters) || []).filter((a) => a.kind === 'gmail');
+  ok(a1.length === 1 && a1[0].id === 'gmail' && a1[0].credentialKey === 'cluster:channels' && a1[0].credentialLabel === 'Channels' && !a1[0].flow, `the FIRST account keeps id === kind and is stamped with the chosen key (${JSON.stringify(a1.map((a) => ({ id: a.id, credentialKey: a.credentialKey, credentialLabel: a.credentialLabel })))})`);
+  await sleep(600);
+  const secs1 = await p1.evaljs(SECS);
+  ok(secs1.length === 1 && secs1[0].id === 'gmail' && secs1[0].name === 'Gmail' && secs1[0].chip === 'Channels', `ONE section: a lone account keeps the kind's name; its chip names the credential because two are offered (${JSON.stringify(secs1)})`);
+
+  // (b) "Add account…" on the kind's section → the credential step again → the default this time → a SECOND account
+  ok((await p1.evaljs(MENU(0, 'Add account…'))) === 'ok', 'the section\'s ⋯ menu carries "Add account…"');
+  ok(await p1.evaljs(WAIT_DIALOG('.chan-cred-list')), 'it opens the wizard at the credential step (two are offered)');
+  const second = await p1.evaljs(`(async () => {
+    const d = document.querySelector('#chan-flow-dialog');
+    const picked = d.querySelector('.chan-cred-item input:checked').value;
+    [...d.querySelectorAll('.chan-flow-actions button')].find((b) => b.textContent.trim() === 'Continue').click();
+    for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-flow-dialog .chan-flow-input')) break; await new Promise((r) => setTimeout(r, 100)); }
+    return { picked, flowInput: !!document.querySelector('#chan-flow-dialog .chan-flow-input'), post: window.__wiz.posts[window.__wiz.posts.length - 1] };
+  })()`);
+  ok(second && second.picked === 'cluster:org1' && second.flowInput && second.post && /\/adapters\/gmail\/connect$/.test(second.post.url) && second.post.body.credentialKey === 'cluster:org1' && second.post.body.newAccount === true, `the default (org1) is pre-picked; Continue posts {credentialKey:'cluster:org1', newAccount:true} to the KIND's connect (${JSON.stringify(second)})`);
+  ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends the second account\'s consent flow');
+  const g2 = (await api('GET', '/api/channels')).json;
+  const a2 = ((g2 && g2.adapters) || []).filter((a) => a.kind === 'gmail');
+  const idB = a2.length === 2 ? a2[1].id : null;
+  ok(a2.length === 2 && a2[0].id === 'gmail' && /^gmail:[0-9a-f]{8}$/.test(idB || '') && a2[0].credentialKey === 'cluster:channels' && a2[1].credentialKey === 'cluster:org1', `TWO accounts of one kind: the first keeps id === kind, the second is <kind>:<8 hex>, each under ITS key (${JSON.stringify(a2.map((a) => ({ id: a.id, credentialKey: a.credentialKey })))})`);
+  await sleep(600);
+  const secs2 = await p1.evaljs(SECS);
+  ok(secs2.length === 2 && secs2[0].id === 'gmail' && secs2[1].id === idB && secs2[0].name === 'Gmail account 1' && secs2[1].name === 'Gmail account 2', `two SECTIONS with DISTINCT names, numbered in record order until the token names them (${JSON.stringify(secs2.map((s) => s.name))})`);
+  ok(secs2.every((s) => s.title === 'Gmail · ' + s.name) && secs2[0].chip === 'Channels' && secs2[1].chip === 'Org 1', `each head's tooltip keeps the kind beside the account and each chip names ITS credential (${JSON.stringify(secs2.map((s) => [s.title, s.chip]))})`);
+
+  // (c) Connect on a TOKEN-LESS account (verifier r1): the wizard's credential
+  // step first, ITS OWN key pre-picked (never the row's default over it), the
+  // chosen key posted to ITS /reauthorize — the server re-binds; a second
+  // pass re-binds it back so (e) sees the fixture it expects
+  const STEP = `(() => { const d = document.querySelector('#chan-flow-dialog'); if (!d) return null; const radios = [...d.querySelectorAll('.chan-cred-item input[type="radio"]')]; return { picked: (radios.find((r) => r.checked) || {}).value || null, values: radios.map((r) => r.value), on: [...d.querySelectorAll('.chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), flowInput: !!d.querySelector('.chan-flow-input'), posts: window.__wiz.posts.length }; })()`;
+  const CHOOSE = (key) => `(async () => { const d = document.querySelector('#chan-flow-dialog'); d.querySelector('.chan-cred-item input[value=' + JSON.stringify(${JSON.stringify(key)}) + ']').click(); [...d.querySelectorAll('.chan-flow-actions button')].find((b) => b.textContent.trim() === 'Continue').click(); for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-flow-dialog .chan-flow-input')) break; await new Promise((r) => setTimeout(r, 100)); } const d2 = document.querySelector('#chan-flow-dialog'); return { same: d2 === d, flowInput: !!(d2 && d2.querySelector('.chan-flow-input')), posts: window.__wiz.posts.slice() }; })()`;
+  await p1.evaljs(`window.__wiz.posts.length = 0; 1`);
+  ok(a2[0].auth && a2[0].auth.tokenHeld === false && a2[0].credentialKey === 'cluster:channels', 'FIXTURE: the first account holds no token (its flow was cancelled) and is stamped channels while the row\'s default is org1');
+  ok((await p1.evaljs(MENU(0, 'Connect'))) === 'ok', 'the first section\'s ⋯ menu carries the consent verb (Connect — it never connected)');
+  ok(await p1.evaljs(WAIT_DIALOG('.chan-cred-list')), 'a token-less account opens at the CREDENTIAL step (two are offered) — not straight at consent');
+  const st1 = await p1.evaljs(STEP);
+  ok(st1 && st1.picked === 'cluster:channels' && st1.values.length === 2 && st1.on === 0 && st1.posts === 0, `the account's OWN key (channels) is pre-picked, not the row's default (org1); nothing posted yet (${JSON.stringify(st1)})`);
+  const rb1 = await p1.evaljs(CHOOSE('cluster:org1'));
+  ok(rb1 && rb1.same && rb1.flowInput && rb1.posts.length === 1 && rb1.posts[0].url === '/api/channels/adapters/gmail/reauthorize' && rb1.posts[0].body && rb1.posts[0].body.credentialKey === 'cluster:org1' && !('newAccount' in rb1.posts[0].body), `choosing org1 posts {credentialKey:'cluster:org1'} to ITS /reauthorize (no newAccount) and the SAME dialog moves on to consent (${JSON.stringify(rb1.posts)})`);
+  const g3 = (await api('GET', '/api/channels')).json;
+  const a3 = ((g3 && g3.adapters) || []).filter((a) => a.kind === 'gmail');
+  ok(a3.length === 2 && a3[0].credentialKey === 'cluster:org1' && a3[0].flow && a3[0].flow.running === true && !a3[1].flow, `the server RE-BOUND the token-less first account to org1 and only ITS flow is running; the second is untouched (${JSON.stringify(a3.map((a) => ({ id: a.id, key: a.credentialKey, flow: !!a.flow })))})`);
+  ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends it');
+  await sleep(600);
+  const secsRb = await p1.evaljs(SECS);
+  ok(secsRb.length === 2 && secsRb[0].chip === 'Org 1', `the first section's chip follows the re-bind (${JSON.stringify(secsRb.map((x) => x.chip))})`);
+  // …and back to channels, so the withdrawn-preset legs of (e) see the fixture they expect
+  await p1.evaljs(`window.__wiz.posts.length = 0; 1`);
+  ok((await p1.evaljs(MENU(0, 'Connect'))) === 'ok' && (await p1.evaljs(WAIT_DIALOG('.chan-cred-list'))), 'Connect again opens the credential step');
+  const st2 = await p1.evaljs(STEP);
+  ok(st2 && st2.picked === 'cluster:org1', 'now org1 — the account\'s current key — is pre-picked');
+  const rb2 = await p1.evaljs(CHOOSE('cluster:channels'));
+  ok(rb2 && rb2.flowInput && rb2.posts.length === 1 && rb2.posts[0].body.credentialKey === 'cluster:channels', 'choosing channels posts it to /reauthorize');
+  ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends it');
+  const g3b = (await api('GET', '/api/channels')).json;
+  ok(((g3b && g3b.adapters) || []).find((a) => a.id === 'gmail').credentialKey === 'cluster:channels', 'the first account is back on channels');
+  // the SECOND section: its consent verb targets ITS id (the colon encoded), never the kind's first
+  await p1.evaljs(`window.__wiz.posts.length = 0; 1`);
+  ok((await p1.evaljs(MENU(1, 'Connect'))) === 'ok' && (await p1.evaljs(WAIT_DIALOG('.chan-cred-list'))), 'the second section\'s Connect opens the credential step too (token-less, two offered)');
+  const rb3 = await p1.evaljs(CHOOSE('cluster:org1'));
+  ok(rb3 && rb3.flowInput && rb3.posts.length === 1 && rb3.posts[0].url === '/api/channels/adapters/' + encodeURIComponent(idB) + '/reauthorize' && rb3.posts[0].body.credentialKey === 'cluster:org1', `the POST went to /adapters/${idB}/reauthorize — ITS id, the colon encoded (${JSON.stringify(rb3.posts)})`);
+  const g3c = (await api('GET', '/api/channels')).json;
+  const a3c = ((g3c && g3c.adapters) || []).filter((a) => a.kind === 'gmail');
+  ok(a3c.length === 2 && !a3c[0].flow && a3c[1].flow && a3c[1].flow.running === true && a3c[1].credentialKey === 'cluster:org1', `only the SECOND account's flow is running; the first is untouched (${JSON.stringify(a3c.map((a) => ({ id: a.id, flow: !!a.flow })))})`);
+  ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends it');
+
+  // (d) the Integrations chooser's caption: the pick is the DEFAULT for new accounts
+  ok(await p1.evaljs(OPEN('gmail')), 'the Integrations window is open on the gmail card');
+  ok((await p1.evaljs(`${CARD('gmail')}.querySelector('.integ-choice .plugin-cfg-label').textContent`)) === 'Default for new accounts', 'the delegating chooser\'s caption reads "Default for new accounts"');
+  ok(await p1.evaljs(`${CARD('gmail')}.querySelector('select.integ-preset').value === 'org1'`), 'and its value is still the saved pick (nothing else there moved)');
+
+  // (e) ONE offered ⇒ the step is skipped silently: reboot with a SINGLE preset
+  srv.kill('SIGKILL'); await waitDown();
+  srv = bootServer({ VIBESPACE_GDRIVE_CLIENTS: JSON.stringify([JSON.parse(PRESETS)[0]]) });
+  ok(await waitServer(), 'rebooted with ONE Gmail preset (org1)');
+  ok(await p1.load(), 'page 1 reloaded');
+  ok(await p1.evaljs(`(async () => { window.app.openChannels(); for (let i = 0; i < 80; i++) { if ([...document.querySelectorAll('.rail-panel-channels .chan-sec')].filter((s) => (s.dataset.adapter || '').startsWith('gmail')).length === 2) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the panel lists the two Gmail accounts again');
+  await p1.evaljs(PATCH);
+  const g4 = (await api('GET', '/api/channels')).json;
+  const a4 = ((g4 && g4.adapters) || []).filter((a) => a.kind === 'gmail');
+  ok(a4.length === 2 && a4[0].credentials.length === 1 && a4[0].credentials[0].key === 'cluster:org1', `FIXTURE: Gmail now offers ONE credential (${JSON.stringify(a4[0] && a4[0].credentials)})`);
+  ok((await p1.evaljs(MENU(1, 'Add account…'))) === 'ok', '"Add account…" from the second section');
+  ok(await p1.evaljs(WAIT_DIALOG('.chan-flow-input')), 'the wizard opens STRAIGHT at the consent step');
+  const skip = await p1.evaljs(`(() => ({ credList: !!document.querySelector('#chan-flow-dialog .chan-cred-list'), on: [...document.querySelectorAll('#chan-flow-dialog .chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), posts: window.__wiz.posts.slice() }))()`);
+  ok(skip && !skip.credList && skip.on === 1 && skip.posts.length === 1 && skip.posts[0].body.credentialKey === 'cluster:org1' && skip.posts[0].body.newAccount === true, `ONE offered ⇒ no credential step, no extra click — the single key rides the body (${JSON.stringify(skip)})`);
+  ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends the third account\'s flow');
+  const g5 = (await api('GET', '/api/channels')).json;
+  const a5 = ((g5 && g5.adapters) || []).filter((a) => a.kind === 'gmail');
+  ok(a5.length === 3 && a5[2].credentialKey === 'cluster:org1' && a5[0].credentialKey === 'cluster:channels' && a5[0].credential && a5[0].credential.whyCode === 'preset-gone', `a THIRD account under org1; the first still names the WITHDRAWN preset and its facts say preset-gone (${JSON.stringify(a5.map((a) => ({ id: a.id, key: a.credentialKey, why: a.credential && a.credential.whyCode })))})`);
+  // the withdrawn credential is the ADAPTER'S OWN answer (§14.3), asked at the
+  // start of its first pass — the tick fires 5 s after boot — and broadcast
+  // on that pass's failure; the route reflects it first, the panel on the broadcast
+  let st0 = null;
+  for (let i = 0; i < 100; i++) { const g = (await api('GET', '/api/channels')).json; st0 = (((g && g.adapters) || []).find((a) => a.id === 'gmail') || {}).auth || null; if (st0 && st0.state === 'needs-credentials') break; await sleep(250); }
+  ok(st0 && st0.state === 'needs-credentials' && st0.credentialKey === 'cluster:channels', `after its first pass the first account's auth is needs-credentials under ITS key (${JSON.stringify(st0)})`);
+  let secs3 = [];
+  for (let i = 0; i < 40; i++) { secs3 = await p1.evaljs(SECS); if (secs3[0] && secs3[0].notes.some((n) => /application credential missing/.test(n))) break; await sleep(250); }
+  ok(secs3.length === 3 && secs3[0].notes.some((n) => /application credential missing/.test(n) && /channels/.test(n) && /no longer provided/.test(n)) && !secs3[1].notes.some((n) => /application credential missing/.test(n)) && !secs3[2].notes.some((n) => /application credential missing/.test(n)), `the withdrawn preset is said BY NAME on the account it minted, and the two org1 accounts' sections carry no such line (${JSON.stringify(secs3.map((s) => s.notes))})`);
 }
 
 p1.close(); p2.close();
