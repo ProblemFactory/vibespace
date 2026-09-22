@@ -2,6 +2,23 @@
 
 Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
+## THE COLLAB COUNTER LOST ITS SHARED LABEL ELEMENT (2.369.150 → fixed 2.369.NEXT, heavy gate red twice on bbd87d56 and ce5f415e)
+
+**What went red.** scripts/test-collab-live-counter.mjs, one leg of 77: "✗ the read-only stream line carries the same label element (a ticking age is a text write there too)". Green on 2.369.149 (694b52fb, 122/122 heavy), red from 2.369.150 (2368bd72, the lean accessibility-tree fix) on every run, the retry included.
+
+**Root cause — a pin on a spelling, not a fact.** The leg was a SOURCE regex over src/lib/chat-view.js that required the literal `<span class="chat-spinner"></span> <span class="chat-stream-label">${escHtml(label)}</span>`. 2368bd72 marked every spinner creation site paint-only at the source (test-ax-paint ③'s census), and the read-only fallback of `_showTyping` changed by exactly that attribute:
+
+```
+-    this._streamStatus.innerHTML = `<span class="chat-spinner"></span> <span class="chat-stream-label">${escHtml(label)}</span>`;
++    this._streamStatus.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span> <span class="chat-stream-label">${escHtml(label)}</span>`;
+```
+
+(the ChatInput line and the button-less pending line got the same attribute in the same commit). The label element, the `roLabel` text-write branch and `_roTypingLabel` are byte-identical before and after; the leg's second clause (the `if (roLabel && …)` branch) still matched. **The product invariant never broke** — proven, not argued: the leg is now also a BEHAVIOURAL one (below), green on the 2.369.150+ product, and red (3 legs) on a patched copy whose read-only branch rebuilds the line on every call. Reverting the attribute instead would have reddened test-ax-paint ③ and put a paint-only node back into the reader's tree.
+
+**Fix (suite only; no product change).** ① The static pin became a TWIN-PARITY pin: the spinner+label template is extracted from BOTH chat-view.js and chat-input.js with a regex that tolerates the paint-only spinner's attributes (`<span class="chat-spinner"[^>]*></span>` — those belong to test-ax-paint) and the two must be EQUAL, plus the `roLabel` text-write branch. Controls (node, on the strings): the read-only spinner alone losing `aria-hidden` (twin drift) → red; the read-only label inlined without its own element → red; the 694b52fb pair → green. ② ⑤b, new: on the REAL read-only view the suite already opens, the REAL bundled `_showTyping` is driven through three ticks under a MutationObserver — the `.chat-stream-label` and `.chat-spinner` nodes are the same across ticks, a changed label is exactly ONE mutation record inside the label element, an unchanged label is ZERO records, and `_hideTyping` restores the stopped view.
+
+**Invariants.** (1) A pin on a behaviour names the behaviour's own facts (the label is its own element in both twins; the tick is a text write), never the incidental markup of a NEIGHBOUR another lane owns — a paint-only spinner's attribute list is test-ax-paint's, not this suite's. (2) When two lines are twins, pin their PARITY (extract both, compare), so a change to one alone is red and a change to both is green. (3) A source pin on a DOM behaviour is backed by a behavioural leg on the real bundle with a negative control — a source regex went red on a harmless attribute here, and the same regex would have stayed green on a real regression that kept the spelling.
+
 ## SPEND NOTICES LIVED FOREVER AS ACTIONS (2.369.152, measured on the owner's instance 2026-09-22)
 
 **What the owner saw.** The "For you" inbox held 33 open items; 15 were from Spending, and 13 of those sat in the ACTION list, colouring the red badge, 137–288 h old: "X has used 10 of its 12 unattended turns this hour (83%)", "… 48 of 60 today (80%)", "VibeSpace refused the Stop bookkeeping mini-turn in …" — warnings about hour and day windows that had closed weeks earlier. Only the two newest were in the Notices section.

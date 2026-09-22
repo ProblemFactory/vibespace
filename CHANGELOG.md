@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.369.NEXT — the collab live-counter gate pins the read-only stream line by what it guarantees, not by the spinner's spelling
+
+The heavy gate went red on every run since 2.369.150 on one leg of test-collab-live-counter: "the read-only stream line carries the same label element". The product was fine — the leg was a source regex that required the spinner's literal `<span class="chat-spinner"></span>`, and 2.369.150's accessibility pass rightly marked every spinner `aria-hidden="true"` (test-ax-paint ③ requires it). The label element and its one-text-write-per-tick path were untouched. The leg now pins what it is about: the spinner+label template of the read-only line and of the ChatInput line are extracted and must be EQUAL (a change to one twin alone is red; the spinner's own attributes stay test-ax-paint's), and a new behavioural leg (⑤b) drives the real `_showTyping` on the real read-only view — same label and spinner nodes across ticks, one mutation per changed label, none for an unchanged one; red on a patched copy that rebuilds the line. Gates: test-collab-live-counter 79 (×2) · test-ax-paint 20 · test-status-bar-chips 39 · test-fold-ux 70 · test-turn-truth-ui 80 · test-architecture 190.
+
 ## 2.369.152 — spend notices die with the window they are about, and the stale ones already in the inbox are retired
 
 - **Spend notices no longer live forever:** every "For you" item the spending ceiling files now carries the end of the window it talks about — the "this hour" warning expires 60 minutes after it is filed, the "today" warning after 24 hours, a refusal after 6 hours (its own re-file cadence) — and the inbox resolves it as `expired` then (checked at startup and every 5 minutes). The owner's inbox held 13 such warnings about windows that had closed 137–288 hours earlier.
