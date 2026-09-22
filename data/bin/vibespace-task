@@ -145,8 +145,14 @@ async function main() {
     if (!arg) { console.error('vibespace-task: backlog-add needs text, e.g. vibespace-task backlog-add "user will pick a DB later" --detail "options discussed: ..."'); process.exit(1); }
     const r = await call('POST', '/api/agent/task-backlog', { add: arg, ...(detail ? { detail } : {}) });
     // the echo is the STORED item the server found by identity — never the
-    // last element of the list (2026-09-22: a full store echoed a stranger's id)
-    const mine = r && r.item;
+    // last element of the list (2026-09-22: a full store echoed a stranger's id).
+    // An OLDER server (built before 2.369.150, still running on instances that
+    // have not updated) stores the item but answers with only the open
+    // `backlog`: there the item's exact text in that list is the only proof it
+    // was stored (the old route trimmed the text before storing), matched by
+    // text — never by position. Neither ⇒ refused below.
+    const added = String(arg).trim();
+    const mine = (r && r.item) || ((r && r.backlog) || []).find((b) => b && b.text === added && b.status === 'open') || null;
     if (!mine || !mine.id) { console.error('vibespace-task: the server did not store the item — nothing parked'); process.exit(1); }
     console.log('parked as [' + mine.id + ']' + (detail ? ' (with detail)' : '') + ' — auto-claimed by you; it will be re-surfaced to you; do not start it unasked');
   } else if (cmd === 'backlog-claim' || cmd === 'backlog-unclaim') {

@@ -37,7 +37,25 @@ const DEFAULT_PRICING = {
   // instance the stale $1 cache-read rate overstated seven days of Fable by 38 %
   // (the main session is cache-heavy) — the owner asked "is Opus really cheaper".
   'fable-5-1': { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
-  opus:   { input: 5,  output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },  // Opus 4.5–4.8
+  // Mythos 5 / Mythos 5.1 (2026-09-22): the installed CLI 2.1.280's catalog prices
+  // `claude-mythos-5` at `tier_10_50` and `claude-mythos-5-1` at
+  // `tier_10_50_cache_read_0_25` — the SAME two tiers as Fable 5 / Fable 5.1 ($10/$50,
+  // cache write 5m $12.5 / 1h $20, cache hit $1 vs $0.25). No key matched either id,
+  // so both fell to `_default` ($3/$15 — a Mythos turn priced at under a third of its
+  // list cost). Longest key wins: 'claude-mythos-5-1' lands on `mythos-5-1`,
+  // 'claude-mythos-5' on `mythos`; the fable ids never contain either key.
+  mythos: { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 1.0 },
+  'mythos-5-1': { input: 10, output: 50, cacheWrite5m: 12.5, cacheWrite1h: 20, cacheRead: 0.25 },
+  // Opus 5.5 (2026-09-22): the installed CLI 2.1.280's model catalog prices
+  // `claude-opus-5-5` at its tier `tier_4_20_cache_read_0_20` = $4/$20, cache
+  // write 5m $5 / 1h $8, cache hit $0.20 — and 2.1.280 resolves the `opus` /
+  // `opus[1m]` aliases to it. Without this key every Opus 5.5 turn fell to the
+  // `opus` row below (+25 % on input/output, 2.5× on cache reads); on the one
+  // measured result this row reproduces the CLI's own list cost exactly. Longest
+  // key wins, so 'claude-opus-5-5[1m]' lands here while 'claude-opus-5' and
+  // 'claude-opus-4-8' stay on `opus`.
+  'opus-5-5': { input: 4, output: 20, cacheWrite5m: 5, cacheWrite1h: 8, cacheRead: 0.2 },
+  opus:   { input: 5,  output: 25, cacheWrite5m: 6.25, cacheWrite1h: 10, cacheRead: 0.5 },  // Opus 4.5–4.8 and Opus 5 (the catalog's tier_5_25)
   sonnet: { input: 3,  output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6,  cacheRead: 0.3 },  // Sonnet 4.x
   'sonnet-5': { input: 2, output: 10, cacheWrite5m: 2.5, cacheWrite1h: 4, cacheRead: 0.2 },  // Sonnet 5: the $2/$10 launch price became the standard price (the 2026-09-01 increase was cancelled)
   haiku:  { input: 1,  output: 5,  cacheWrite5m: 1.25, cacheWrite1h: 2,  cacheRead: 0.1 },

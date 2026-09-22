@@ -14,6 +14,7 @@ import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // 
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
+import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { pathRe as sharedPathRe, cleanPath as sharedCleanPath } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10)
 import { mcpParts } from './chat-run-summary.js';
@@ -586,8 +587,9 @@ class ChatRenderers {
       label = `/${cmdMatch[1]}`;
       if (argsMatch) detail = argsMatch[1].trim();
     } else if (stdoutMatch) {
-      // TUI echoes carry raw ANSI (e.g. "Set model to [1mopus[22m") — strip
-      const so = stripAnsi(stdoutMatch[1]).trim();
+      // TUI echoes carry raw ANSI (e.g. "Set model to [1mopus[22m") — strip;
+      // the CLI backticks the model token since 2.1.257 — the ONE echo module drops the pair
+      const so = stripSetModelBackticks(stripAnsi(stdoutMatch[1]).trim());
       label = so.substring(0, 80);
       if (so.length > 80) { label += '…'; detail = so; }
     } else if (hookMatch) {

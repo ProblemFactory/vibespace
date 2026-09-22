@@ -129,7 +129,10 @@ export function installUsageMeter(App, ctx = {}) {
   // codex session's own app-server — carries the stored reset-credit count,
   // which the passive push never does. No live session ⇒ honest toast.
   _refreshCodexQuota(btn) {
-    const live = (this.sidebar?._allSessions || []).find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live' && s.webuiId && !s.host);
+    // The session is picked by the client caps MIRROR (`quotaRefresh:
+    // 'session-rpc'` = the read rides the live wrapper's own app-server), never
+    // by the id — the server's ws case gates the same verb on caps.quotaProbe.
+    const live = (this.sidebar?._allSessions || []).find((s) => backendFeatureCaps(s.backend || 'claude').quotaRefresh === 'session-rpc' && s.status === 'live' && s.webuiId && !s.host);
     if (!live) { showToast(t('Needs a running Codex chat session (the read rides its own app-server)'), { type: 'error' }); return; }
     try { this.ws.send({ type: 'codex-read-limits', sessionId: live.webuiId }); } catch { }
     if (btn) { btn.classList.add('spin'); setTimeout(() => btn.classList.remove('spin'), 1500); }

@@ -10,7 +10,11 @@
 // on a 600-item store echoes THE STORED ITEM found by identity (a fresh id,
 // present afterwards); (4) source pins — no `CAPS.backlogItems` anywhere, the
 // route finds the added item by identity (never by position), the CLI reads
-// `r.item` (never the last element). Run: node scripts/test-backlog-no-truncation.mjs
+// `r.item` (never the last element); (5) the REAL CLI against an OLDER server
+// (built before 2.369.150 — it stores the item and answers with only the open
+// `backlog`): the item is found by its exact (trimmed) text, never by position,
+// a truncated store is refused, and master's pre-fallback CLI as the CONTROL
+// reported "not stored" for a stored item. Run: node scripts/test-backlog-no-truncation.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,9 +26,9 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { TaskGroupManager } = require('../src/task-groups.js');
 const { setupAgentRoutes } = require('../src/agent-routes.js');
 
-let failed = 0;
+let failed = 0, passed = 0;
 const check = (name, cond, extra) => {
-  if (cond) { console.log(`  ✓ ${name}`); return; }
+  if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
 
@@ -108,8 +112,42 @@ check('no `.slice(0, CAPS.` on a backlog array in task-groups.js', !/backlog\.sl
 check('the route finds the added item by identity (addedAt + addedBy + text)', /updated\.backlog\.find\(\(b\) => b\.addedAt === added\.addedAt && b\.addedBy === key && b\.text === added\.text\)/.test(ar));
 check('the route never echoes by position', !/updated\.backlog\[actedIdx\]/.test(ar));
 check('the route refuses when the item is not found stored', /the item was not stored/.test(ar));
-check('the CLI reads r.item for backlog-add and never the last element', /const mine = r && r\.item;/.test(cli) && !/backlog\[backlog\.length - 1\]/.test(cli.slice(cli.indexOf("cmd === 'backlog-add'"), cli.indexOf("cmd === 'backlog-claim'"))));
+const addBranch = cli.slice(cli.indexOf("cmd === 'backlog-add'"), cli.indexOf("cmd === 'backlog-claim'"));
+check('the CLI reads r.item FIRST for backlog-add, the older-server fallback matches by EXACT text + open, never the last element',
+  /const mine = \(r && r\.item\) \|\| \(\(r && r\.backlog\) \|\| \[\]\)\.find\(\(b\) => b && b\.text === added && b\.status === 'open'\) \|\| null;/.test(addBranch)
+  && /const added = String\(arg\)\.trim\(\);/.test(addBranch)
+  && !/backlog\[backlog\.length - 1\]|\.at\(-1\)|\.pop\(\)/.test(addBranch));
+
+// (5) the REAL CLI against an older server's answer shape
+const { execFile } = await import('node:child_process');
+const http = await import('node:http');
+let reply = null;
+const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(reply)); }); });
+await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+const apiUrl = `http://127.0.0.1:${srv.address().port}`;
+const runCli = (file, args) => new Promise((resolve) => execFile(process.execPath, [file, ...args], { env: { ...process.env, VIBESPACE_API: apiUrl, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 15000 }, (err, stdout, stderr) => resolve({ code: err ? (err.code ?? 1) : 0, out: String(stdout) + String(stderr) })));
+const CLI = path.join(REPO, 'data/bin/vibespace-task');
+const OLD_SHAPE = { success: true, backlog: [{ id: 'B-aaaa', text: 'another item', status: 'open' }, { id: 'B-bbbb', text: 'my parked item', status: 'open' }, { id: 'B-cccc', text: 'a later stranger', status: 'open' }] };
+reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: OLD_SHAPE.backlog };
+let c = await runCli(CLI, ['backlog-add', 'my parked item']);
+check('a current server: the CLI echoes r.item', c.code === 0 && /parked as \[B-1111\]/.test(c.out), c.out);
+reply = OLD_SHAPE;
+c = await runCli(CLI, ['backlog-add', '  my parked item  ']);
+check('an older server (backlog only): the stored item found by its exact trimmed text — NOT the last element', c.code === 0 && /parked as \[B-bbbb\]/.test(c.out) && !/B-cccc/.test(c.out), c.out);
+reply = { success: true, backlog: [{ id: 'B-aaaa', text: 'another item', status: 'open' }, { id: 'B-zzzz', text: 'a stranger that survived the slice', status: 'open' }] };
+c = await runCli(CLI, ['backlog-add', 'my parked item']);
+check('an older server that did NOT store it: refused (exit 1), the stranger never echoed', c.code === 1 && /did not store/.test(c.out) && !/B-zzzz/.test(c.out), c.out);
+reply = { success: true, backlog: [{ id: 'B-dddd', text: 'my parked item', status: 'done' }] };
+c = await runCli(CLI, ['backlog-add', 'my parked item']);
+check('an older server whose only exact-text row is closed: refused (the fallback is open rows only)', c.code === 1 && !/B-dddd/.test(c.out), c.out);
+// CONTROL — the pre-fallback CLI (r.item only) on the older server's answer
+const preSrc = fs.readFileSync(CLI, 'utf8').replace(/const mine = \(r && r\.item\) \|\| [^\n]*\n/, 'const mine = r && r.item;\n');
+const preFile = path.join(tmp, 'vibespace-task.pre'); fs.writeFileSync(preFile, preSrc);
+reply = OLD_SHAPE;
+c = await runCli(preFile, ['backlog-add', 'my parked item']);
+check('control: the r.item-only CLI reports "not stored" for an item the older server stored', preSrc !== fs.readFileSync(CLI, 'utf8') && c.code === 1 && /did not store/.test(c.out), c.out);
+srv.close();
 
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
-console.log(`\nALL PASS (${20})`);
+console.log(`\nALL PASS (${passed})`); // counted, never a literal (the literal said 20 over 19 checks)

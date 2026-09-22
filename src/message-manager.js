@@ -1843,6 +1843,11 @@ const KNOWN_IGNORED_RECORD_TYPES = new Set([
   // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
   'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published)
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
+  // the /design canvas session's own bookkeeping (corpus-verified 2026-09-22 by a read-only grep:
+  // ONE 2.1.238 transcript, 60 rows — artifact-autoreact-ledger 52 / frame-link 5 /
+  // artifact-comment-monitor 3). Each names artifacts or a canvas frame by id + url and carries no
+  // conversation text; the design itself reaches the user through the published page, never a card.
+  'artifact-autoreact-ledger', 'frame-link', 'artifact-comment-monitor',
 ]);
 // System subtypes that trip the breadcrumb but are NOT worth a card: seen in the
 // 2026-09-20 census and judged bookkeeping. (thinking_tokens = a per-turn count
@@ -1854,6 +1859,9 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'api_error',              // history-only twin of the live api_retry (which already drives the "API retrying (n/10)" spinner label); 529/429/503 retries deserve no card. The transcript rows are NOT consumed for side effects (a days-old 401 must not evict today's pool member; the live api_retry twin fires on the first request of any resume) — session-brain's noteApiErrorAuth is a FORWARD-COMPAT consumer for the stream twin the binary declares and no census has observed
   'microcompact_boundary',  // legacy 2.1.2xx micro-compaction marker (not in the 2.1.274 SDK union); the REPL renders nothing for it
   'vcs_state_changed',      // card-less BY DESIGN: the server consumer owns it (session-vcs broadcast → the session card's git chip, the explorer refresh, the Session Properties timeline); a card per push/commit would be noise in the flow
+  // 2026-09-22 (CLI 2.1.280 pass), each corpus-verified by a read-only grep before it was declared:
+  'scheduled_task_fire',    // a /loop (cron) timer firing — "resuming /loop wakeup (<time>)"; the harness's own bookkeeping: the turn it opens renders as itself, the fire line adds nothing (transcript 2.1.118, 1 row; in the 2.1.280 SDK union). Was wrongly listed as declared-upstream-unseen, so a /loop history rendered a red Unknown-event card
+  'bridge_status',          // the TUI's "/remote-control is active" banner (transcript 2.1.81, 11 rows; NOT in the SDK union — record-shape CORPUS_ONLY_SUBTYPES); VibeSpace never runs the remote-control bridge
 ]);
 
 module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

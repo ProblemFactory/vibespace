@@ -2040,7 +2040,7 @@ console.log('— §12 (r3-r2) the lock rung refuses a target that is the reroute
     { file: 'src/ws-handler.js', has: '= data.model;', why: 'the REQUEST: a pick while locked re-targets the lock (§7b pins it)' },
     { file: 'src/server/boot-restore.js', has: 'meta.lockedModel', why: 'restores what one of the writers above wrote' },
     { file: 'src/server/stdout/claude-stream-json.js', has: '= session._servedModel;', why: 'the target-less latch — GATED on servedDefinesModel (§11)' },
-    { file: 'src/server/stdout/claude-stream-json.js', has: '= em[1];', why: 'refines the SAME model to its full id, gated on modelsMatch — never another model' },
+    { file: 'src/server/stdout/claude-stream-json.js', has: '= echo.id;', why: 'refines the SAME model to its full id (the resolved id from src/model-echo.js), gated on modelsMatch — never another model' },
     { file: 'src/session-schema.js', has: 'owner:', why: 'the schema ROW, not a write' },
   ];
   const sites = [];

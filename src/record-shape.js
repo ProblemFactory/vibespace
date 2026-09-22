@@ -24,9 +24,11 @@
 //     reason, exactly like the record lists in the normalizers.
 //   · ENVELOPES and the VibeSpace-own wrapper fields ("ours") are declared groups, never drift.
 //
-// EVERY claude stream row below is VERBATIM from the installed 2.1.274 binary's zod union (dumped by
+// EVERY claude stream row below is VERBATIM from the 2.1.274 binary's zod union (dumped by
 // scripts/test-record-shape.mjs §4's extractor — the same walk over `u({type:R("…")…})` that produced
-// the design's census); `uuid`/`session_id` ride the stream envelope and are omitted per row. Corpus-
+// the design's census); the fields 2.1.280 added sit in each shape's `ignored` map with a reason, and
+// the oracle runs STRICT against 2.1.280 (SCHEMA_CLI_VERSION); `uuid`/`session_id` ride the stream
+// envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
 const asSet = (a) => new Set(a || []);
@@ -70,6 +72,12 @@ const SUBAGENT_RETRY = sh(['agent_id', 'attempt', 'max_retries', 'retry_delay_ms
 // these only. server_tool_use / web_search_tool_result / web_fetch_tool_result are the vendor's
 // server-tool blocks the renderer already folds under search cards.
 const CONTENT_BLOCK_TYPES = asSet(['text', 'thinking', 'redacted_thinking', 'tool_use', 'tool_result', 'image', 'document', 'search_result', 'fallback', 'server_tool_use', 'web_search_tool_result', 'web_fetch_tool_result', 'tool_reference']);
+
+// The seven result latency fields 2.1.280 added. The truth, measured 2026-09-22: NOTHING in VibeSpace
+// reads any latency field — not these, and not the ttft_ms / ttft_stream_ms / duration_api_ms the
+// shape already knew (a grep for ttft over src/ finds only this file); the message meta popup shows
+// no latency at all. (The first declaration said "the meta popup shows ttft only" — it never did.)
+const LATENCY_UNREAD = 'latency telemetry (2.1.280) — nothing in VibeSpace reads it: no surface shows latency (ttft_ms / duration_api_ms are unread too); declared so the drift card stays quiet — move to known with the first consumer';
 
 const SHAPES = {
   // ── claude STREAM (stdout / the live buffer) — generated from the 2.1.274 binary ──
@@ -124,7 +132,7 @@ const SHAPES = {
   "claude:stream:system/turn_preempted": sh(['reason', 'preempted_by_uuid', 'preempted_message_uuids']),
   "claude:stream:system/cloud_session_delta": sh(['seq', 'changed', 'cloud_session']),
   "claude:stream:system/upgrade_relay_marker": sh(['content']),
-  "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)', 'first_stream_post_queued_behind': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)', 'frame_received_wall_ms': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)', 'frame_enqueued_wall_ms': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)', 'turn_started_wall_ms': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)', 'first_text_post_ms': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)', 'first_text_post_wall_ms': 'latency telemetry (2.1.280); the meta popup shows ttft only — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
+  "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
   "claude:stream:bash_command": sh(['command', 'cwd']),
   "claude:stream:assistant": sh(['message', 'parent_tool_use_id', 'error', 'historical', 'request_id', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'resumed_from_incomplete_thinking', 'supersedes', 'aborted', 'subagent_type', 'task_description', 'tool_use_meta', 'narration_block_indexes', 'timestamp', 'is_meta', 'context_usage', 'usage_report', 'local_command_source', 'local_command_run', 'is_virtual', 'batch_tool_uses', 'wire_tool_inputs', 'wire_ingest_context', 'is_api_error_message', 'api_error_status', 'api_error', 'api_error_params', 'api_error_code', 'error_details', 'advisor_model', 'attribution_agent', 'attribution_skill', 'attribution_plugin', 'attribution_mcp_server', 'attribution_mcp_tool'], { ignored: { 'narration_hint': 'a UI narration hint (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
@@ -204,6 +212,10 @@ Object.assign(SHAPES, {
   'claude:transcript:system/notification': sh(['key', 'text', 'priority', 'color', 'timeoutMs', 'timeout_ms'], { enums: { priority: ['low', 'medium', 'high', 'immediate'] } }),
   'claude:transcript:system/vcs_state_changed': sh(['kind', 'branch'], { enums: { kind: ['commit', 'push', 'merge', 'rebase'] } }),
   'claude:transcript:system/code_change_published': sh(['provider', 'url', 'repo', 'identifier', 'action', 'branch']),
+  // corpus-verified 2026-09-22 (read-only grep over ~/.claude/projects): the /loop wakeup row (2.1.118, 1 row)
+  // and the TUI's remote-control banner (2.1.81, 11 rows) — both card-less (message-manager KNOWN_IGNORED_SYSTEM_SUBTYPES)
+  'claude:transcript:system/scheduled_task_fire': sh(['content']),
+  'claude:transcript:system/bridge_status': sh(['content', 'url']),
   'claude:transcript:user': sh([], { blocks: CONTENT_BLOCK_TYPES }),
   'claude:transcript:assistant': sh([], { blocks: CONTENT_BLOCK_TYPES }),
   'claude:transcript:pr-link': sh(['sessionId', 'prNumber', 'prUrl', 'prRepository', 'timestamp']), // the same fact as code_change_published, persisted last-wins
@@ -252,7 +264,8 @@ Object.assign(SHAPES, {
   'codex:rollout:response_item/agent_message': sh(['type', 'id', 'author', 'recipient', 'content', 'phase', 'delivery', 'msg_type', 'internal_chat_message_metadata_passthrough']),
 });
 
-// ── Declared upstream, never seen on this instance (2.1.274 union minus HANDLED ∪ KNOWN_IGNORED) ──
+// ── Declared upstream, never seen on this instance (the 2.1.280 union minus HANDLED ∪ KNOWN_IGNORED) ──
+// (scheduled_task_fire LEFT this list on 2026-09-22: a transcript row exists — it is KNOWN_IGNORED now.)
 // Each name carries its ONE-LINE disposition. The binary oracle (test-record-shape §4) asserts every
 // subtype/type in the installed binary is on exactly one of the three lists — a CLI update that adds
 // a record fails the build with the name printed, before a user ever sees a red card.
@@ -270,7 +283,6 @@ const DECLARED_UPSTREAM_UNSEEN = Object.freeze({
     model_fallback: 'capacity/overload model fallback — the SAME notice as the `fallback` content block (noticeKind model-fallback)',
     model_consent_fallback: '@internal the pre-send consent gate swapped the model (usage-credit gate) — MONEY-relevant: a red notice + the served-model latch',
     file_snapshot: '@internal plan/todo file snapshot for rewind — card-less',
-    scheduled_task_fire: '@internal a scheduled (cron) task fired — a notice naming it; spend-guard interest',
     peer_message_hold: '@internal a cross-session message HELD by receive-side policy — the sender must see it (vibespace-msg receipt)',
     local_command_output: 'output of a local slash command (/usage, /voice) — assistant-style text card',
     hook_progress: 'incremental hook stdout/stderr — extend the hook card in place',
@@ -316,6 +328,7 @@ const CORPUS_ONLY_SUBTYPES = Object.freeze({
   local_command: 'the TUI user\'s slash command as persisted — history only, rendered through the command bubble',
   microcompact_boundary: 'legacy 2.1.2xx micro-compaction marker, the REPL renders nothing for it',
   success: 'legacy list entry (never observed as a system subtype)',
+  bridge_status: 'the TUI\'s "/remote-control is active" banner (2.1.81 transcripts, 11 rows) — not in the SDK union; VibeSpace never runs the remote-control bridge, card-less',
 });
 
 // ── carrier + shape key ──────────────────────────────────────────────────────────────────────────
@@ -466,9 +479,10 @@ function declaredFields(shapeKey) {
   return s ? new Set([...s.known, ...s.ignored.keys()]) : null;
 }
 
-// The claude build every STREAM shape below was dumped from. test-record-shape's binary oracle is STRICT
-// against this exact build and on any developer box; on the Actions mirror (which installs whatever
-// npm serves today) a NEWER build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSION = '2.1.274';
+// The claude build the STREAM shapes are verified against (2.1.274 dump + the 2.1.280 additions declared
+// 2026-09-22). test-record-shape's binary oracle is STRICT against this exact build and on any developer
+// box; on the Actions mirror (which installs whatever npm serves today) a NEWER build's drift is printed
+// and skipped, never a red gate nobody reads.
+const SCHEMA_CLI_VERSION = '2.1.280';
 
 module.exports = { SCHEMA_CLI_VERSION, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, declaredFields, isSecretKey, keySegments };

@@ -34,6 +34,7 @@ const { feedPeerCard } = require('../../normalizers'); // the rebuild-gated peer
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
+const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
 
 // SendUserFile → the published-pages channel (owner ruling 8(c),
 // design-harness-features §2.12). The CLI's tool names LOCAL files; we turn
@@ -970,10 +971,12 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               // reroutes via the startsWith rule, e.g. 'opus' vs 'opus-4-8',
               // and the repin never fires).
               if (session._modelLocked && session._lockedModel && !/\d/.test(session._lockedModel)) {
-                const em = /^<local-command-stdout>Set model to \S+ \(([^)]+)\)/.exec(uText.trim());
-                if (em && modelsMatch(session._lockedModel, em[1])) {
-                  session._lockedModel = em[1];
-                  try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: em[1] }); } catch {}
+                // The ONE echo parser (src/model-echo.js): the resolved id in
+                // parentheses, the plain spelling and the backticked one (CLI ≥2.1.257) alike.
+                const echo = parseSetModelEcho(uText, { envelope: 'required' });
+                if (echo && echo.id && modelsMatch(session._lockedModel, echo.id)) {
+                  session._lockedModel = echo.id;
+                  try { if (session.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), lockedModel: echo.id }); } catch {}
                 }
               }
               if (!/^<local-command-/.test(uText.trim())) {

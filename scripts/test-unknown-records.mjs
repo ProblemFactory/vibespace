@@ -266,5 +266,30 @@ console.log('§8 the renderers for the routed names escape every harness string 
   ok('the notice colours are theme vars (immediate = --red, high = --yellow)', /\.chat-harness-notice-immediate \{[^}]*var\(--red/.test(css) && /\.chat-harness-notice-high \{[^}]*var\(--yellow\)/.test(css));
 }
 
+console.log('§9 the CLI 2.1.280 pass (2026-09-22): records the corpus PROVES are harness bookkeeping are card-less — declared by name, live and rebuilt; an undeclared neighbour is still the card');
+{
+  const IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, IGNT = MM.KNOWN_IGNORED_RECORD_TYPES;
+  ok('list pins: scheduled_task_fire + bridge_status are KNOWN_IGNORED system subtypes (not HANDLED); artifact-autoreact-ledger / frame-link / artifact-comment-monitor are KNOWN_IGNORED top-level types',
+    ['scheduled_task_fire', 'bridge_status'].every((n) => IGN.has(n) && !MM.HANDLED_SYSTEM_SUBTYPES.has(n)) && ['artifact-autoreact-ledger', 'frame-link', 'artifact-comment-monitor'].every((t) => IGNT.has(t)));
+  const env = { parentUuid: 'p', isSidechain: false, sessionId: 's', timestamp: 't', version: '2.1.118' };
+  const rows = [
+    { ...env, uuid: 'st', type: 'system', subtype: 'scheduled_task_fire', content: 'resuming /loop wakeup' },
+    { ...env, uuid: 'bs', type: 'system', subtype: 'bridge_status', content: 'banner', url: 'https://example.invalid/x' },
+    { type: 'artifact-autoreact-ledger', v: 1, sessionId: 's', accountUuid: 'acct', artifacts: {} },
+    { type: 'frame-link', sessionId: 's', path: '/p', frameUrl: 'https://example.invalid/f', title: 't', artifactCount: 1, timestamp: 't' },
+    { type: 'artifact-comment-monitor', v: 1, sessionId: 's', artifacts: {} },
+  ];
+  const h = createMessageManager('claude', 'test-unknown-280-h');
+  h.convertHistory(rows);
+  ok('HISTORY: a /loop transcript and the /design canvas rows render NO card of any kind', h.messages.length === 0, h.messages.map((m) => m.noticeKind));
+  const l = createMessageManager('claude', 'test-unknown-280-l');
+  l.processLive({ type: 'system', subtype: 'scheduled_task_fire', content: 'resuming /loop wakeup', uuid: 'st2', session_id: 's' });
+  ok('LIVE: the stream scheduled_task_fire (in the 2.1.280 union) renders no card either', l.messages.length === 0, l.messages.map((m) => m.noticeKind));
+  // NEGATIVE CONTROL: the same shapes under names nobody declared are still the red card
+  const n = createMessageManager('claude', 'test-unknown-280-n');
+  n.convertHistory([{ ...env, uuid: 'nx', type: 'system', subtype: 'scheduled_task_fired', content: 'x' }, { type: 'frame-links', sessionId: 's' }]);
+  ok('NEGATIVE CONTROL: an undeclared neighbour (system/scheduled_task_fired, type frame-links) is still the Unknown-event card, one each', cards(n).length === 2 && cards(n).map((m) => m.content[0].name).join(',') === 'scheduled_task_fired,frame-links', cards(n).map((m) => m.content[0].name));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

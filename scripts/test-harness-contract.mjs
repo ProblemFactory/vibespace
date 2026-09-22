@@ -319,7 +319,10 @@ ok(capsOf('codex').review === true && capsOf('claude').review === false && capsO
 // The checker: a backend-id gate anywhere in a named block. Proven on a
 // PLANTED gate before it is trusted to report a clean tree (a grep pin that
 // can only ever pass is not a pin).
-const hasBackendIdGate = (text) => /backend\s*[!=]==\s*'(?:codex|claude|opencode|shell)'/.test(text);
+// Both spellings of the literal id test: the bare `backend === 'codex'` and
+// the DEFAULTED `(s.backend || 'claude') === 'codex'` (the codex ⟳ trigger's
+// spelling — the bare-only regex read it as clean).
+const hasBackendIdGate = (text) => /backend(?:\s*(?:\|\||\?\?)\s*'[a-z-]+'\s*\))?\s*[!=]==\s*'(?:codex|claude|opencode|shell)'/.test(text);
 const blockOf = (src, marker, lines) => {
   const i = src.indexOf(marker);
   return i < 0 ? null : src.slice(i).split('\n').slice(0, lines).join('\n');
@@ -341,12 +344,43 @@ const SITES = [
   // with the halves swapped: the first harness whose row flips to true would
   // have had a server ready to write and a client that never asks.
   ['src/lib/sidebar-state.js', 'proto.renameSession = async function', 28, 'client rename-writeback trigger'],
+  // The manual codex quota verbs (2.369.151): the ws case read
+  // `session.backend === 'codex'`; it now reads resetCredit / quotaProbe.
+  ['src/ws-handler.js', "case 'codex-reset-credit':", 10, 'ws codex quota verbs (reset credit / read limits)'],
+  // …and its CLIENT half (the rename lesson: a server ready to serve and a
+  // client that never asks). The ⟳ picked its session by the literal id; it
+  // now picks through the client mirror row `quotaRefresh === 'session-rpc'`.
+  ['src/lib/usage-meter.js', '_refreshCodexQuota(btn) {', 6, 'client codex ⟳ trigger'],
 ];
+ok(hasBackendIdGate("const live = all.find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live');"), 'NEGATIVE CONTROL: the checker catches the DEFAULTED spelling `(s.backend || \'claude\') === \'codex\'` (the pre-fix codex ⟳ trigger)');
+ok(!hasBackendIdGate("const live = all.find((s) => backendFeatureCaps(s.backend || 'claude').quotaRefresh === 'session-rpc');"), '…and reads a caps read with a defaulted id as clean');
 for (const [file, marker, lines, label] of SITES) {
   const block = blockOf(fs.readFileSync(path.join(REPO, file), 'utf8'), marker, lines);
   ok(block !== null, `${label}: the call site is still where the pin looks (${file} :: ${marker})`);
   ok(block !== null && !hasBackendIdGate(block), `${label}: gated on caps, no backend-id branch left`, block ? block.split('\n').filter((l) => hasBackendIdGate(l)).join(' / ') : 'marker gone');
   ok(hasBackendIdGate(`${block}\n  if (backend !== 'claude') return;`), `${label}: NEGATIVE CONTROL — the checker DOES catch a planted backend-id gate`);
+}
+
+// The quota verbs are pinned POSITIVELY too (deleting the gate would write a
+// codex stdin verb into a claude wrapper): each verb reads ITS capability.
+{
+  const qBlock = blockOf(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'), "case 'codex-reset-credit':", 10) || '';
+  const READS_QUOTA_CAPS = /capsOf\(session\?\.backend\)[\s\S]*resetCredit === true[\s\S]*quotaProbe === 'rpc-rate-limits'[\s\S]*&& served\)/;
+  ok(READS_QUOTA_CAPS.test(qBlock), 'ws codex quota verbs: reset credit reads caps.resetCredit, read limits reads caps.quotaProbe === rpc-rate-limits, and the write is gated on that verdict');
+  ok(!READS_QUOTA_CAPS.test("if (session?.pty && session.mode === 'chat' && session.backend === 'codex') {"), '…NEGATIVE CONTROL: that checker reads FALSE on the pre-fix backend-id line');
+  ok(capsOf('codex').resetCredit === true && capsOf('codex').quotaProbe === 'rpc-rate-limits' && capsOf('claude').resetCredit === false && capsOf('claude').quotaProbe !== 'rpc-rate-limits' && capsOf('shell').resetCredit === false && capsOf('shell').quotaProbe === null && capsOf('gemini-unknown').resetCredit === false && capsOf('gemini-unknown').quotaProbe === null,
+    '…and the verdict is unchanged: codex is served both verbs, claude / shell / an unknown id refuse both');
+}
+
+// The client ⟳ trigger is pinned POSITIVELY as well (deleting the filter
+// would send the verb to a claude session the server then refuses).
+{
+  const READS_QUOTA_MIRROR = /backendFeatureCaps\(s\.backend \|\| 'claude'\)\.quotaRefresh === 'session-rpc'/;
+  const cBlock = blockOf(fs.readFileSync(path.join(REPO, 'src/lib/usage-meter.js'), 'utf8'), '_refreshCodexQuota(btn) {', 6) || '';
+  ok(READS_QUOTA_MIRROR.test(cBlock), 'client codex ⟳ trigger: picks its session by the mirror row quotaRefresh === session-rpc');
+  ok(!READS_QUOTA_MIRROR.test("const live = (this.sidebar?._allSessions || []).find((s) => (s.backend || 'claude') === 'codex' && s.status === 'live' && s.webuiId && !s.host);"), '…NEGATIVE CONTROL: that checker reads FALSE on the pre-fix id line');
+  ok(backendFeatureCaps('codex').quotaRefresh === 'session-rpc' && backendFeatureCaps('claude').quotaRefresh === undefined && backendFeatureCaps('shell').quotaRefresh === undefined && backendFeatureCaps('nope').quotaRefresh === undefined,
+    '…and the pick is unchanged: codex sessions qualify, claude / shell / an unknown id never do');
 }
 
 // "No backend-id branch left" is an ABSENCE test, and deleting the gate

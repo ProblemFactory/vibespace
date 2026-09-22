@@ -591,10 +591,18 @@ function registerWsHandler(wss, ctx) {
         // credit / on-demand rateLimits read — both ride the session's own
         // app-server via a wrapper stdin verb (official client makes the
         // fetch; §ban-safety). Result comes back on the normal event stream.
+        // Gated on the harness's CAPABILITY row, never a backend id
+        // (2.369.151): the reset verb needs `resetCredit`, the read needs
+        // the live-app-server rung `quotaProbe === 'rpc-rate-limits'` — the
+        // same rung usage-pool-engine's probeQuotaForKey writes this verb
+        // on. Codex answers yes to both; claude (resetCredit:false,
+        // cli-usage), shell and an unknown id (NO_CAPS) still refuse.
         case 'codex-reset-credit':
         case 'codex-read-limits': {
           const session = activeSessions.get(data.sessionId);
-          if (session?.pty && session.mode === 'chat' && session.backend === 'codex') {
+          const qcaps = capsOf(session?.backend);
+          const served = data.type === 'codex-reset-credit' ? qcaps.resetCredit === true : qcaps.quotaProbe === 'rpc-rate-limits';
+          if (session?.pty && session.mode === 'chat' && served) {
             try { session.pty.write(JSON.stringify({ type: data.type }) + '\n'); } catch { }
           } else {
             try { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, code: 'not-codex-chat', message: 'This action needs a live Codex chat session.' })); } catch { }

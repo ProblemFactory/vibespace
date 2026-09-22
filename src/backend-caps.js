@@ -301,7 +301,8 @@ const BACKEND_CAPS = {
     hotSwitch: 'verified',
     planC: true,          // per-session pool links (model-family projection)
     sealedOrders: true,   // device-side offline fallback switch
-    resetCredit: false,   // no such product concept
+    resetCredit: false,   // NEVER (§ban-safety): the CLI's own limit reset is the hidden interactive `/limit-reset`,
+                          // a raw vendor POST with no control verb — kb-design-lessons §9 (2026-09-22)
     quotaProbe: 'cli-usage',      // `claude -p /usage` auto-cli rung
     fork: true,                   // --fork-session (+ --resume-session-at for a mid-conversation fork)
     forkAtMessage: true,          // --resume-session-at <uuid> --fork-session (the per-message boundary the CLI accepts)

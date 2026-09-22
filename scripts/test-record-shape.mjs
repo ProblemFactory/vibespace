@@ -331,6 +331,39 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   }
 }
 
+console.log('§4b the CLI 2.1.280 pass (2026-09-22): the pinned build, the latency reason told true, the lists moved by corpus evidence');
+{
+  ok('SCHEMA_CLI_VERSION is the build the oracle was re-run STRICT against (2.1.280)', R.SCHEMA_CLI_VERSION === '2.1.280', R.SCHEMA_CLI_VERSION);
+  const res = R.SHAPES['claude:stream:result'];
+  const LAT = ['first_stream_post_queue_wait_ms', 'first_stream_post_queued_behind', 'frame_received_wall_ms', 'frame_enqueued_wall_ms', 'turn_started_wall_ms', 'first_text_post_ms', 'first_text_post_wall_ms'];
+  ok('the seven 2.1.280 result latency fields are declared ignored, each with a reason that no longer claims a surface shows ttft', LAT.every((f) => res.ignored.has(f) && !/shows ttft/.test(res.ignored.get(f)) && /nothing in VibeSpace reads it/.test(res.ignored.get(f))), LAT.map((f) => res.ignored.get(f)));
+  // …and the reason STAYS true: the day a src/ file reads a latency field, this goes red and says to move it to known
+  const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) walk(f, out); else if (/\.js$/.test(e.name)) out.push(f); } return out; };
+  const LAT_RE = new RegExp('\\b(?:ttft_ms|ttft_stream_ms|duration_api_ms|' + LAT.join('|') + ')\\b');
+  const readers = walk(path.join(REPO, 'src')).map((f) => path.relative(REPO, f)).filter((f) => f !== 'src/record-shape.js' && LAT_RE.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok('no src/ file reads a latency field (the reason "nothing reads it" is a census, not a claim) — a consumer ⇒ move the field to known', readers.length === 0, readers);
+  ok('…NEGATIVE CONTROL: the census regex does catch a reader', LAT_RE.test('const t = raw.first_text_post_ms;') && LAT_RE.test('meta.ttft_ms = r.ttft_ms'));
+  const U = R.DECLARED_UPSTREAM_UNSEEN.system, IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, IGNT = MM.KNOWN_IGNORED_RECORD_TYPES;
+  ok('scheduled_task_fire LEFT declared-upstream-unseen (a transcript row exists) and is KNOWN_IGNORED (card-less)', !('scheduled_task_fire' in U) && IGN.has('scheduled_task_fire'));
+  ok('bridge_status is KNOWN_IGNORED and excused on CORPUS_ONLY_SUBTYPES (not in the SDK union — the dead-entry check would otherwise call it dead)', IGN.has('bridge_status') && typeof R.CORPUS_ONLY_SUBTYPES.bridge_status === 'string' && R.CORPUS_ONLY_SUBTYPES.bridge_status.length > 12);
+  ok('the /design canvas bookkeeping rows are KNOWN_IGNORED top-level types', ['artifact-autoreact-ledger', 'frame-link', 'artifact-comment-monitor'].every((t) => IGNT.has(t)));
+  // the transcript twins the corpus proves: a clean row judges clean, a grown row is drift (the shape is live, not decoration)
+  const envT = { parentUuid: 'p', isSidechain: false, isMeta: false, timestamp: '2026-01-01T00:00:00.000Z', uuid: 'u1', userType: 'external', entrypoint: 'cli', cwd: '/w/proj', sessionId: 's', version: '2.1.118', gitBranch: 'main', slug: 'x' };
+  ok('transcript system/scheduled_task_fire {content} + the envelope ⇒ no drift', R.unknownFields('claude', 'transcript', { ...envT, type: 'system', subtype: 'scheduled_task_fire', content: 'wakeup' }) === null);
+  const grown = R.unknownFields('claude', 'transcript', { ...envT, type: 'system', subtype: 'scheduled_task_fire', content: 'wakeup', cron_id: 'c1' });
+  ok('…a scheduled_task_fire row that GREW a field is drift, naming it (negative control)', grown && grown.shape === 'claude:transcript:system/scheduled_task_fire' && grown.fields.join(',') === 'cron_id', grown);
+  ok('transcript system/bridge_status {content, url} + the envelope (incl. agentId) ⇒ no drift', R.unknownFields('claude', 'transcript', { ...envT, agentId: 'a1', type: 'system', subtype: 'bridge_status', content: 'banner', url: 'https://example.invalid/x' }) === null);
+  const mm = createMessageManager('claude', 'test-shape-280');
+  mm.convertHistory([
+    { ...envT, uuid: 'st', type: 'system', subtype: 'scheduled_task_fire', content: 'wakeup' },
+    { ...envT, uuid: 'bs', agentId: 'a1', type: 'system', subtype: 'bridge_status', content: 'banner', url: 'https://example.invalid/x' },
+    { type: 'artifact-autoreact-ledger', v: 1, sessionId: 's', accountUuid: 'acct', artifacts: { a1: {} } },
+    { type: 'frame-link', sessionId: 's', path: '/p', frameUrl: 'https://example.invalid/f', title: 't', artifactCount: 2, timestamp: 't' },
+    { type: 'artifact-comment-monitor', v: 1, sessionId: 's', artifacts: { a1: {} } },
+  ]);
+  ok('a history carrying all five renders NO card of any kind (neither unknown-event nor drift)', unknownCards(mm).length === 0 && driftCards(mm).length === 0, mm.messages.map((m) => m.noticeKind));
+}
+
 console.log('§5 negative control — a scratch copy with every `ignored` map emptied goes red on §1');
 {
   const src = read('src/record-shape.js');

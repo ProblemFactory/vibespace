@@ -81,7 +81,8 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   ok('the setting exists in the Codex group', !!lrc && lrc.default === 'off' && lrc.options.some((o) => o.value === 'auto') && lrc.apply.kind === 'server' && /deriveHarnessTable\(tbl\)/.test(read('src/lib/settings-schema.js')));
   ok('session-schema registers the throttle fields', /_codexResetTriedAt/.test(read('src/session-schema.js')) && /_codexLastResetsAt/.test(read('src/session-schema.js')));
   const wsrc = read('src/ws-handler.js');
-  ok('manual actions exist as ws cases (codex-reset-credit / codex-read-limits), codex-chat-gated', /case 'codex-reset-credit':\s*\n\s*case 'codex-read-limits':/.test(wsrc) && /session\.backend === 'codex'/.test(wsrc));
+  // 2.369.151: CAPABILITY-gated (resetCredit / quotaProbe 'rpc-rate-limits'), never a backend id — test-harness-contract pins the verdict per harness
+  ok('manual actions exist as ws cases (codex-reset-credit / codex-read-limits), gated on the harness caps row (resetCredit / quotaProbe rpc-rate-limits), not a backend id', /case 'codex-reset-credit':\s*\n\s*case 'codex-read-limits':/.test(wsrc) && /qcaps\.resetCredit === true : qcaps\.quotaProbe === 'rpc-rate-limits'/.test(wsrc) && !/session\.backend === 'codex'/.test(wsrc));
   const w2 = read('data/bin/codex-chat-wrapper.js');
   ok('the wrapper serves both verbs via the LIVE app-server RPC (rateLimits/read + rateLimitResetCredit/consume)', /account\/rateLimits\/read/.test(w2) && /account\/rateLimitResetCredit\/consume/.test(w2) && /reset_credit_result/.test(w2));
   // ── reset-credit COUNT in the usage popup (owner: usage里展示剩余reset) ──

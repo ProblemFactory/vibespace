@@ -1,4 +1,5 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
+import { parseSetModelEcho } from '../model-echo.js'; // the ONE /model echo parser (shared with the server's lock repin)
 import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
@@ -3423,11 +3424,14 @@ class ChatView {
     // set_model confirmation: the CLI echoes "Set model to X (resolved-id)" as a
     // user record — the RESOLVED id is the authoritative model for the status
     // bar (the control_response reports success even for bogus names). Parsed
-    // before the defer check so it applies even while viewing history.
+    // before the defer check so it applies even while viewing history. The
+    // ONE parser (src/model-echo.js) — the CLI backticks the token since
+    // 2.1.257 and the inline regex here stopped matching, leaving the bar on
+    // the old model after every /model (noticed on 2.1.280).
     if (msg.role === 'user' && this._statusBar) {
       const txt = (msg.content || []).map(b => b.text || '').join('');
-      const m = txt.match(/^<local-command-stdout>Set model to (\S+?)(?: \(([^)]+)\))?<\/local-command-stdout>/);
-      if (m) this._statusBar.setModel(m[2] || m[1]);
+      const echo = parseSetModelEcho(txt, { envelope: 'required' });
+      if (echo) this._statusBar.setModel(echo.id || echo.alias);
     }
     if (!this._loadingHistory && msg.backendMeta?.reviewThreadId && msg.backendMeta?.delivery === 'detached') {
       if (!this._openedDetachedReviews) this._openedDetachedReviews = new Set();
