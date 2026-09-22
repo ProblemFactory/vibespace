@@ -2849,3 +2849,34 @@ r7 取于 2026-09-11; 这里没有任何一条在真实租户或真实客户端�
 - **(r7)** Lark/飞书**自建应用**是企业内部使用的应用, 与可跨租户分发的应用商店应用相对
   (§14.9 那条"集群默认只服务同租户"的依据):
   <https://open.feishu.cn/document/develop-process/self-built-application-development-process>
+
+
+## 22. owner 澄清 (2026-09-22): 群列表优先 —— 这是一个简易 IM, 不是"agent 的信息源面板"
+
+owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息作为信息源这种 feature … 应该是一个'顺便'功能, 比如 'message watcher — lark/gmail/agent', 而不应该在界面里放在第一位。我设想的是第一位看到的是'群列表', 所有的群都至少有两个成员 (agent channel: 至少俩 agent + 我作为虚拟观察者, 我能通过面板发消息进去, 俩 agent 都能看到; lark 之类: 至少是我和对面的人/群, agent 作为我的代理人/观察者)。第一屏实际上是给我看每个'群'的沟通历史的 —— 一个简易 IM, 按来源支持的 feature 不同 (telegram 不支持讨论串只能引用, lark 支持)。"
+
+### 22.1 对照现状 (哪些已经是, 哪些不是)
+
+| 设想 | 现状 | 差距 |
+|---|---|---|
+| 第一屏 = 群列表, 按最近活动排 | 第一屏 = 按 adapter 分节的列表 + tracking pill (a4); 群 (conversation) 是二级 | 重排: conversation 升为一级, 跨 adapter 按活动排; adapter/账号/tracking 降为次级区 ("账号" + "message watcher") |
+| 每个群的沟通历史 = IM 视图 | channel-window 已是会话历史 + composer | 基本已有; composer 的语义要改 (见 22.2) |
+| 我是每个群的成员 | Lark/Telegram 的 user token 已能以我发送 (`sendAsUser`); 但 composer 走 PROPOSE (P3) | 我**自己**写的消息应直接发出 (IM 语义); propose/policy/审批只留给 **agent 起草**的回复 |
+| agent 群 = ≥2 agent + 我 | agents adapter 把每个 agent **会话**当一个 conversation (这正是 owner 说的"订阅信息源"形态) | 需要"群"的定义 (22.3 D1) + 群级消息日志 (convId = 群 id, 不是会话 id) |
+| 按来源的 feature 差异 (讨论串 vs 引用) | channel-caps 建模了接收方式与平台能力两轴, 无"回复模型"轴 | 加一轴 `reply: thread \| quote \| none`, composer 只画来源支持的动作 |
+| agent 订阅/过滤/assign = 顺便功能 | §7 的 filter/assign 是面板的中心之一 | 保留, 降级为 "message watcher" 一节 |
+
+### 22.2 我的判断
+
+合理, 而且比现状**简单**: 它把三个概念 (adapter、tracking、agent-会话-即-conversation) 收成一个 —— 群 (conversation) 是唯一的一级对象, 账号和 watcher 都是它的附属。存储、投递、outbox 已经按 conversation 键控, 大部分是**重排**而不是重写。两处是真正的模型变化: ①我自己的消息直接发 (不走 propose); ②agent 群需要一个定义和一个群级日志。
+
+一个必须先立的围栏 (钱): agent 群里 agent 的每条消息都会叫醒其他成员 = 一条没人打字的计费 turn × (N−1); 三个 agent 一来一往就是回声室。既有的 spend-authorizer (`peer-message`) 只封顶不封形状。建议: 群内 agent 消息默认只**追加到群日志并在成员下一次 turn 作为上下文送达**, 只有 @提到 或群策略允许时才立刻叫醒; 我 (观察者) 发的消息按现在的规则叫醒 (那是用户动作)。
+
+### 22.3 要 owner 拍板
+
+- **D1 agent 群的定义**: (a) 一个含 ≥2 个会话的 Task Group 自动就是一个群 (成员 = 它的会话, 我 = 观察者; msg-acl 的"组内互通"已经是这个边界) —— 推荐; (b) 显式建群。
+- **D2 群内 agent 消息的叫醒规则**: (a) 追加日志 + 下一 turn 送达, @提到才立刻叫醒 —— 推荐; (b) 每条都叫醒所有成员 (今天 vibespace-msg 的形状, 乘以成员数)。
+- **D3 顺序**: 排在频道账号 lane (feat-channel-cred, 前置: 账号是群的来源) 之后开工。
+
+### 22.4 归属
+B-afa0 (改写为本节); 前置 B-f0a2 (账号); 不动 §7/§8/§9 的机制, 只改它们在界面里的位置与 composer 的语义。
