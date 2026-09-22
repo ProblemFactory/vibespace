@@ -35,6 +35,8 @@ export default {
   "git {kind}": "git {kind}",
   "1 background task": "1 个后台任务",
   "{count} background tasks": "{count} 个后台任务",
+  "Workflow — reported by the harness (run id unknown)": "工作流 —— 由 harness 报告（运行 id 未知）",
+  "Workflow — reported by the harness": "工作流 —— 由 harness 报告",
   "reported by the harness": "由 harness 报告",
   "budget {used}/{limit}": "预算 {used}/{limit}",
   "Turn": "回合",

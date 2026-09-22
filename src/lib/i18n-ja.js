@@ -35,6 +35,8 @@ export default {
   "git {kind}": "git {kind}",
   "1 background task": "バックグラウンドタスク 1 件",
   "{count} background tasks": "バックグラウンドタスク {count} 件",
+  "Workflow — reported by the harness (run id unknown)": "ワークフロー — ハーネスの報告（run id 不明）",
+  "Workflow — reported by the harness": "ワークフロー — ハーネスの報告",
   "reported by the harness": "ハーネスの報告",
   "budget {used}/{limit}": "予算 {used}/{limit}",
   "Turn": "ターン",

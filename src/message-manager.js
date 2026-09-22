@@ -915,6 +915,19 @@ class MessageManager {
         .slice(0, 100);
       this._bgTasks = set;
       const live = new Set(set.map((t) => t.id));
+      // THE SET NAMES IT AGAIN ⇒ THE SOFT CLOSE WAS A TRANSIENT DROP (2.369.147,
+      // owner: a running Workflow card said 已完成 while the same run sat in the
+      // popup as an unclickable "reported by the harness" row): the CLI omits a
+      // member for a record or two around its own phase changes; a level close
+      // is a GUESS, and the set is stronger evidence than the guess — reopen.
+      for (const [tid, msgId] of this.taskMsgByTaskId) {
+        if (!live.has(String(tid))) continue;
+        const m = this.messageIndex.get(msgId);
+        if (m?.taskInfo && m.taskInfo.status === 'finished' && m.taskInfo.closedBy === 'level') {
+          m.taskInfo.status = 'running'; delete m.taskInfo.closedBy;
+          if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+        }
+      }
       for (const [tid, msgId] of this.taskMsgByTaskId) {
         if (live.has(String(tid))) continue;
         const m = this.messageIndex.get(msgId);
@@ -979,6 +992,8 @@ class MessageManager {
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
       } else if (raw.subtype === 'task_progress') {
         if (existing.taskInfo) {
+          // progress IS liveness: a card the level set closed softly is running (2.369.147)
+          if (existing.taskInfo.status === 'finished' && existing.taskInfo.closedBy === 'level') { existing.taskInfo.status = 'running'; delete existing.taskInfo.closedBy; }
           if (raw.description) existing.taskInfo.description = raw.description;
           if (raw.last_tool_name) existing.taskInfo.lastTool = raw.last_tool_name;
           // `summary` = the run's meta.description (a Workflow) — the NAME the

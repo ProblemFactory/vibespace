@@ -1057,11 +1057,22 @@ export class ChatStatusBar {
       // the harness's own level set first — rows the cards never learned about
       // (a task launched by a sub-agent, a task whose launch ack was lost)
       const known = new Set([...(this._activeTasks?.values() || [])].map((t) => String(t.id)));
-      for (const r of (this._bgTasks || [])) {
-        if (known.has(r.id)) continue;
+      // 2.369.147 (owner: "这个看起来是个 workflow? 为啥展示成了后台任务? 而且也点不开"): a
+      // harness row that IS a Workflow says so, opens the run when its id is
+      // known (the wf chip's tracked runs, matched by the run's name line), and
+      // rows of one run are collapsed — the CLI's set can name a killed run and
+      // its resumed successor by two ids under the same description.
+      const seenBg = new Map();
+      for (const r of (this._bgTasks || [])) { if (!known.has(r.id)) seenBg.set(`${r.type || ''}\u0000${r.description || r.id}`, r); }
+      for (const r of seenBg.values()) {
+        const isWf = r.type === 'workflow';
+        const wf = isWf ? [...(this._workflows?.values() || [])].find((w) => w.summary === r.description || w.name === r.description) : null;
         const item = document.createElement('div');
-        item.className = 'chat-status-dropdown-item chat-task-detail';
-        item.innerHTML = `<div class="chat-task-title">${r.type === 'agent' ? UI_ICONS.robot : UI_ICONS.tasks} ${escHtml(r.description || r.id)}</div><div class="chat-status-dim">${escHtml(t('reported by the harness'))}</div>`;
+        item.className = 'chat-status-dropdown-item chat-task-detail' + (wf ? ' chat-status-clickable' : '');
+        const icon = isWf ? '⛭' : (r.type === 'agent' ? UI_ICONS.robot : UI_ICONS.tasks);
+        const sub = isWf ? (wf ? t('Workflow — reported by the harness') : t('Workflow — reported by the harness (run id unknown)')) : t('reported by the harness');
+        item.innerHTML = `<div class="chat-task-title">${icon} ${escHtml(r.description || r.id)}</div><div class="chat-status-dim">${escHtml(sub)}</div>`;
+        if (wf) item.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onOpenWorkflow?.(wf.runId, wf.name); };
         dropdown.appendChild(item);
       }
       if (!this._activeTasks?.size) return;
@@ -1074,6 +1085,7 @@ export class ChatStatusBar {
         item.innerHTML = detail;
         item.onclick = (ev) => {
           ev.stopPropagation(); dropdown.remove();
+          if (task.type === 'workflow' && (task.runId || task.id)) { this._onOpenWorkflow?.(task.runId || task.id, task.summary || task.description); return; } // 2.369.147: a Workflow task opens its run, not the editor
           if (task.type === 'agent') {
             this._openSubagentViewer({
               parentToolUseId: toolUseId,
