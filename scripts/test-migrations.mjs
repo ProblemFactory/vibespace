@@ -504,6 +504,169 @@ try {
     ok(by14['gmail:00000006'] && by14['gmail:00000006'].key === 'own' && by14['gmail:00000006'].evidence === 'row-pick' && by14['gmail:00000006'].tokenKey === 'cluster:gone', 'a withdrawn key falls to the row\'s pick with evidence \'row-pick\' and the token\'s own key NAMED beside it', JSON.stringify(by14['gmail:00000006']));
     try { eng.stop(); e12.stop(); e13.stop(); e14.stop(); } catch { }
   }
+
+  // ── 2026-09-spend-notices-expire (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS") ──
+  // The fixture is shaped like the owner's store (measured 2026-09-22, every
+  // text redacted to a template): 13 Spending items filed before the notice
+  // lane existed (no kind ⇒ action) and 137–288 h old, 2 fresh Spending
+  // notices, one real action from a session, one resolved Spending item.
+  {
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const { badgeCounts } = await import('../src/lib/user-todos-layout.js');
+    const ID = '2026-09-spend-notices-expire';
+    const H = 3600e3;
+    const fixture = (now) => {
+      const items = [];
+      const ages = [288, 285, 283, 268, 268, 247, 192, 188, 187, 174, 147, 147, 137];
+      ages.forEach((h, i) => items.push({ id: 'ut-old' + i, sessionKey: 'accounts', text: i % 3 === 2 ? `VibeSpace refused the Stop bookkeeping mini-turn in "conv ${i}"` : `Account ${i} has used 10 of its 12 unattended turns ${i % 2 ? 'today' : 'this hour'} (83%).`, detail: 'd', urgency: 'normal', status: 'open', by: 'agent', sessionName: 'Spending', jobId: null, createdAt: now - h * H, resolvedAt: null, resolvedBy: null }));
+      for (const i of [0, 1]) items.push({ id: 'ut-fresh' + i, sessionKey: 'accounts', text: `Account F${i} has used 24 of its 30 unattended turns this hour (80%).`, detail: 'd', urgency: 'normal', kind: 'notice', status: 'open', by: 'agent', sessionName: 'Spending', jobId: null, i18n: null, createdAt: now - 10 * 60e3, resolvedAt: null, resolvedBy: null });
+      items.push({ id: 'ut-act', sessionKey: 'claude:00000000-0000-4000-8000-000000000001', text: 'Pick the schema for the export', detail: null, urgency: 'high', kind: 'action', status: 'open', by: 'agent', sessionName: 'some conversation', jobId: null, createdAt: now - 200 * H, resolvedAt: null, resolvedBy: null });
+      items.push({ id: 'ut-res', sessionKey: 'accounts', text: 'Account R has used 10 of its 12 unattended turns this hour (83%).', detail: 'd', urgency: 'normal', status: 'done', by: 'agent', sessionName: 'Spending', jobId: null, createdAt: now - 300 * H, resolvedAt: now - 290 * H, resolvedBy: 'user' });
+      return { items };
+    };
+    const setup = (name) => {
+      const root = path.join(tmp, name); const d = path.join(root, 'data'); fs.mkdirSync(d, { recursive: true });
+      const now = Date.now();
+      fs.writeFileSync(path.join(d, 'user-todos.json'), JSON.stringify(fixture(now)));
+      return { root, d, now };
+    };
+    const byId = (items) => Object.fromEntries(items.map((i) => [i.id, i]));
+    const judge = (items, t0, t1) => {
+      const b = byId(items);
+      const old = Array.from({ length: 13 }, (_, i) => b['ut-old' + i]);
+      return {
+        // resolvedAt = when it SHOULD have expired (filing + 24 h: the fixture's
+        // details name no scope), never the upgrade boot — the LOW-2 finding
+        oldAll: old.every((x) => x.kind === 'notice' && x.status === 'done' && x.resolvedBy === 'expired' && x.resolvedAt === x.createdAt + 24 * H),
+        fresh: [b['ut-fresh0'], b['ut-fresh1']].every((x) => x.kind === 'notice' && x.status === 'open' && x.expiresAt === x.createdAt + 24 * H),
+        action: b['ut-act'].status === 'open' && b['ut-act'].kind === 'action' && b['ut-act'].expiresAt == null,
+        badge: badgeCounts(items.filter((x) => x.status === 'open')),
+      };
+    };
+
+    // (a) THROUGH THE LIVE STORE (the production wiring: server.js hands the manager in)
+    {
+      const { root, d, now } = setup('inst-spend-live');
+      let broadcasts = 0;
+      const live = new UserTodoManager({ dataDir: d, expirySweepMs: 0, onChange: () => { broadcasts++; } });
+      const b0 = broadcasts;
+      const t0 = Date.now();
+      const res = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: () => live }).runLocalMigrations().find((r) => r.id === ID);
+      const t1 = Date.now();
+      // LOW-1: read the FILE before anything else touches the store — the
+      // migration flushed the live store's 500 ms debounce itself, so the
+      // reshaping is on disk before the runner wrote applied[id]
+      const disk0 = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
+      ok(judge(disk0, t0, t1).oldAll && judge(disk0, t0, t1).fresh && live._writeTimer === null, 'the live path FLUSHES too: when run() returns the file already carries the reshaping and no debounced write is pending (the ledger row never lands before the data)', { pending: !!live._writeTimer });
+      const j = judge(live._state.items, t0, t1);
+      ok(res?.status === 'ran' && j.oldAll, 'the 13 stale Spending items become notices AND are resolved done/expired at the end of the window they were about (kept in the store, never deleted)', res);
+      const newestRetired = Math.max(...live._state.items.filter((x) => /^ut-old/.test(x.id)).map((x) => x.resolvedAt));
+      ok(newestRetired <= t0 - (137 - 24) * H, 'the retirements sort as OLD history: the newest is 113 h in the past, not the upgrade boot', { hoursAgo: (t0 - newestRetired) / H });
+      ok(j.fresh, 'the 2 fresh Spending notices stay open and gain expiresAt = filing + 24 h (they can no longer live forever either)', live._state.items.filter((x) => /^ut-fresh/.test(x.id)).map((x) => [x.status, x.expiresAt - x.createdAt]));
+      ok(j.action, 'the session\'s own action is untouched (no kind change, no expiry)', byId(live._state.items)['ut-act']);
+      const r = byId(live._state.items)['ut-res'];
+      ok(r.status === 'done' && r.resolvedBy === 'user' && r.resolvedAt === now - 290 * H && r.kind === 'notice', 'the already-resolved Spending item keeps its status/resolvedBy/resolvedAt (it is only re-kinded, so a later ↺ reopens it as a notice)', r);
+      ok(j.badge.action.length === 1 && j.badge.notices === 2, 'the badge: 1 action (the real one), 2 notices — was 14 actions', { action: j.badge.action.length, notices: j.badge.notices });
+      ok(broadcasts - b0 === 1, 'ONE broadcast for the whole reshaping (every client sees it live)', broadcasts - b0);
+      live.setStatus('ut-act', 'done');
+      ok(live.snapshot().resolved[0]?.id === 'ut-act', 'a resolution made after the upgrade tops Recently resolved (the 13 retirements do not crowd it out)', live.snapshot().resolved.slice(0, 3).map((x) => x.id));
+      live.setStatus('ut-act', 'open');
+      live.flush();
+      const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
+      ok(judge(disk, t0, t1).oldAll, 'the live store persisted it through its own atomic writer');
+      const led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
+      const rep = led.reports && led.reports[ID];
+      ok(!!led.applied[ID] && rep && rep.matched === 16 && rep.rekinded === 14 && rep.expired === 13 && rep.stamped === 2 && rep.store === 'live' && rep.at === led.applied[ID], 'the ledger row carries the counts (matched 16, rekinded 14, expired 13, stamped 2) beside its timestamp', rep);
+      // run-at-most-once: a stale Spending action added after the upgrade is NOT swept by a second boot
+      live._state.items.push({ ...fixture(Date.now()).items[0], id: 'ut-late' });
+      const res2 = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live }).runLocalMigrations().find((r) => r.id === ID);
+      ok(res2?.status === 'already' && byId(live._state.items)['ut-late'].status === 'open', 'run-at-most-once: the next boot skips it by ledger (a later item is untouched)', res2);
+    }
+
+    // (b) NO LIVE STORE (a suite, a boot without the inbox): a PRIVATE manager on the file, flushed, no timer left behind
+    {
+      const { root, d } = setup('inst-spend-private');
+      const t0 = Date.now();
+      const res = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+      const t1 = Date.now();
+      const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
+      const j = judge(disk, t0, t1);
+      ok(res?.status === 'ran' && res.report?.store === 'private' && j.oldAll && j.fresh && j.action, 'without a live store the migration writes through a private manager and flushes before it returns', res);
+      const root2 = path.join(tmp, 'inst-spend-absent'); fs.mkdirSync(path.join(root2, 'data'), { recursive: true });
+      const res3 = create({ rootDir: root2, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+      ok(res3?.status === 'ran' && res3.report?.store === 'absent' && !fs.existsSync(path.join(root2, 'data', 'user-todos.json')), 'CONTROL: no store on disk is nothing to do — no file is created', res3);
+    }
+
+    // (c) NEGATIVE CONTROL — the pre-fix registry (this row absent): the same
+    // fixture keeps 13 stale open ACTIONS colouring the badge, so the legs above
+    // fail on the code without the migration
+    {
+      const { root, d } = setup('inst-spend-control');
+      const m = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { } });
+      runMigrations({ ledgerPath: path.join(d, 'migrations.json'), migrations: m.MIGRATIONS.filter((x) => x.id !== ID), log: () => { }, warn: () => { } });
+      const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
+      const j = judge(disk, 0, Date.now());
+      ok(!j.oldAll && j.badge.action.length === 14, 'CONTROL: without the row the 13 stale items stay open actions (badge 14 actions) — the leg fails on it', { action: j.badge.action.length });
+      // a store-age sweep alone would not do it either: expireDue never touches an item without expiresAt
+      const live = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+      ok(live.expireDue(Date.now() + 1000 * H) === 0, 'CONTROL: the store\'s own sweep leaves them (expiry is declared by a producer, never inferred) — the migration is what moves them');
+    }
+
+    // (d) NEGATIVE CONTROL for the live-path flush (LOW-1): a patched copy of
+    // the registry whose flush is back behind `if (priv)` — the pre-fix run —
+    // leaves the FILE unchanged when run() returns (the runner has already
+    // written applied[id]) until the store's 500 ms debounce fires
+    {
+      const { root, d } = setup('inst-spend-noflush');
+      const srcDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'src');
+      const orig = fs.readFileSync(path.join(srcDir, 'server', 'migrations.js'), 'utf-8');
+      const FIXED = '          store.flush();\n        } finally { if (priv) store.stop(); }';
+      const patched = orig.split(FIXED).join('          if (priv) store.flush();\n        } finally { if (priv) store.stop(); }')
+        .replace(/require\('\.\.\//g, `require('${srcDir}/`).replace(/require\('\.\//g, `require('${srcDir}/server/`);
+      ok(orig.split(FIXED).length === 2 && patched !== orig, 'CONTROL setup: the patched copy differs from the registry in exactly the live-path flush');
+      const pdir = path.join(tmp, 'patched-registry'); fs.mkdirSync(pdir, { recursive: true });
+      fs.writeFileSync(path.join(pdir, 'migrations.js'), patched);
+      const pre = require(path.join(pdir, 'migrations.js'));
+      const before = fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8');
+      const live = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+      const res = pre.create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live }).runLocalMigrations().find((r) => r.id === ID);
+      const led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8'));
+      ok(res?.status === 'ran' && !!led.applied[ID] && fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8') === before && live._writeTimer !== null,
+        'CONTROL: the pre-fix run left the file UNCHANGED with the ledger row already written (a crash now would lose the reshaping for good) — the flush leg above fails on it');
+      await new Promise((r) => setTimeout(r, 700));
+      const disk = JSON.parse(fs.readFileSync(path.join(d, 'user-todos.json'), 'utf-8')).items;
+      ok(disk.filter((x) => /^ut-old/.test(x.id)).every((x) => x.status === 'done'), 'CONTROL: …and the change reached the file only when the debounce fired');
+      live.stop();
+    }
+
+    // (e) THE WINDOW A NOTICE WAS ABOUT (the verifier's INFO): an open Spending
+    // item with no expiresAt dies at the end of the window its own detail names
+    // — spend-guard writes `Scope: hour|day|instance` on a warning and a
+    // `Refusal:` line on a refusal — through the same noticeExpiry(); no such
+    // line ⇒ 24 h. Past ⇒ retired at that end; ahead ⇒ stamped with it.
+    {
+      const root = path.join(tmp, 'inst-spend-scope'); const d = path.join(root, 'data'); fs.mkdirSync(d, { recursive: true });
+      const now = Date.now();
+      const warn = (scope) => `Reason of the latest turn: auto-resume\nScope: ${scope}\nUsed: 10 of 12`;
+      const refusal = 'Reason: stop-nudge\nIdentity: Account A\nRefusal: identity-hour\nUnattended turns used: 12/12 this hour';
+      const mk = (id, detail, ageMin) => ({ id, sessionKey: 'accounts', text: 'Account A has used 10 of its 12 unattended turns this hour (83%).', detail, urgency: 'normal', kind: 'notice', status: 'open', by: 'agent', sessionName: 'Spending', jobId: null, createdAt: now - ageMin * 60e3, resolvedAt: null, resolvedBy: null });
+      fs.writeFileSync(path.join(d, 'user-todos.json'), JSON.stringify({ items: [
+        mk('h-fresh', warn('hour'), 10), mk('h-old', warn('hour'), 180),
+        mk('r-fresh', refusal, 120), mk('r-old', refusal, 480),
+        mk('i-mid', warn('instance'), 180), mk('none-mid', null, 180),
+      ] }));
+      const live = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+      const res = create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live }).runLocalMigrations().find((r) => r.id === ID);
+      const b = byId(live._state.items);
+      const stamped = (x, ms) => x.status === 'open' && x.expiresAt === x.createdAt + ms;
+      const retired = (x, ms) => x.status === 'done' && x.resolvedBy === 'expired' && x.resolvedAt === x.createdAt + ms;
+      ok(stamped(b['h-fresh'], H) && retired(b['h-old'], H), '`Scope: hour` ⇒ filing + 1 h: a 10-min-old warning is stamped, a 3 h-old one is retired at the hour\'s end', [b['h-fresh'], b['h-old']].map((x) => [x.status, (x.expiresAt || x.resolvedAt) - x.createdAt]));
+      ok(stamped(b['r-fresh'], 6 * H) && retired(b['r-old'], 6 * H), 'a refusal ⇒ filing + 6 h (its re-file cadence): 2 h old stamped, 8 h old retired', [b['r-fresh'], b['r-old']].map((x) => [x.status, (x.expiresAt || x.resolvedAt) - x.createdAt]));
+      ok(stamped(b['i-mid'], 24 * H) && stamped(b['none-mid'], 24 * H), '`Scope: instance` (the instance DAY) and a detail naming nothing ⇒ filing + 24 h', [b['i-mid'], b['none-mid']].map((x) => x.expiresAt - x.createdAt));
+      ok(res?.report?.matched === 6 && res.report.expired === 2 && res.report.stamped === 4, 'the report counts it (matched 6, expired 2, stamped 4)', res?.report);
+      live.stop();
+    }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

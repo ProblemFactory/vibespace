@@ -3493,6 +3493,8 @@ export default {
   "{n} min ago": "{n} 分前",
   "{what} — {reason}": "{what} — {reason}",
   "expired": "期限切れ",
+  "expires in {n} min": "{n} 分後に失効",
+  "expires in {n} h": "{n} 時間後に失効",
   "{n}d": "{n}日",
   "Not configured — set up the application credential first": "未設定 — まずアプリケーション資格情報を設定してください",
   "Set up {label} credentials…": "{label} の資格情報を設定…",

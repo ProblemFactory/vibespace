@@ -45,6 +45,21 @@ function writeJsonAtomic(file, obj) {
 const REFUSE_LOG_MS = 5 * 60 * 1000;      // one journal line per (reason, identity, why)
 const REFUSE_INBOX_MS = 6 * 60 * 60 * 1000; // one "For you" item per (identity, why)
 const INBOX_KEY = 'accounts';             // the same inbox row login-expiry-watch files under
+// WHAT A NOTICE IS ABOUT DECIDES WHEN IT DIES (2.369.152, "SPEND NOTICES LIVED
+// FOREVER AS ACTIONS"): every inbox item this module files carries the end of
+// the window it talks about as `expiresAt`, and the store resolves it
+// 'expired' then. 13 warnings about hour/day windows that had closed 137–288 h
+// earlier were still open on the owner's instance.
+const NOTICE_TTL_MS = {
+  hour: 60 * 60 * 1000,        // "… this hour (83%)" — the rolling hour it counts
+  day: 24 * 60 * 60 * 1000,    // "… today (80%)" (per identity, and the instance's day)
+  refusal: REFUSE_INBOX_MS,    // a refusal is re-filed at most every 6 h — its own cadence
+};
+/** @param about 'hour' | 'day' | 'instance' | 'refusal' */
+function noticeExpiry(about, now = Date.now()) {
+  const ttl = about === 'hour' ? NOTICE_TTL_MS.hour : about === 'refusal' ? NOTICE_TTL_MS.refusal : NOTICE_TTL_MS.day;
+  return now + ttl;
+}
 
 /**
  * @param deps.dataDir            data/ root
@@ -174,13 +189,14 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     } catch { return null; }
   }
 
-  function fileInbox(text, detail, urgency) {
+  function fileInbox(text, detail, urgency, expiresAt) {
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
     // kind 'notice' (2.369.118): a spend ceiling is FOR THE USER'S INFORMATION —
     // it sits in the popup's own Notices section and never in the red badge
-    try { userTodos.add(INBOX_KEY, { text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice' }); return true; }
+    // …and it dies with the window it is about (`expiresAt`, see NOTICE_TTL_MS)
+    try { userTodos.add(INBOX_KEY, { text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 
@@ -235,7 +251,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal');
+        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now));
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -269,7 +285,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       const text = A.noticeText(r.warn);
       log(`[spend] ${text}`);
       try { global.__vsEvent?.('spend-budget-notice', `${r.warn.scope}:${r.warn.pct}`); } catch { }
-      fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}`, 'normal');
+      fileInbox(text, `Reason of the latest turn: ${reason || 'unattended'}\nScope: ${r.warn.scope}\nUsed: ${r.warn.used} of ${r.warn.limit}`, 'normal', noticeExpiry(r.warn.scope, now));
     }
     return r.warn;
   }
@@ -323,4 +339,4 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   };
 }
 
-module.exports = { create, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY };
+module.exports = { create, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, noticeExpiry };

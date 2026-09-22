@@ -24,9 +24,19 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
     if (!m || !m.id || typeof m.run !== 'function') continue;
     if (ledger.applied[m.id]) { results.push({ id: m.id, status: 'already' }); continue; }
     try {
-      m.run();
+      const report = m.run();
       ledger.applied[m.id] = Date.now();
-      results.push({ id: m.id, status: 'ran' });
+      // A migration MAY return a plain object of counts (2.369.152): it rides
+      // the ledger beside the timestamp (`reports[id]`), so "what did the
+      // upgrade boot do" is answerable from the file after the journal rolled.
+      // `applied[id]` stays a number — every reader tests it for truth.
+      const rec = { id: m.id, status: 'ran' };
+      if (report && typeof report === 'object' && !Array.isArray(report)) {
+        if (!ledger.reports || typeof ledger.reports !== 'object') ledger.reports = {};
+        ledger.reports[m.id] = { at: ledger.applied[m.id], ...report };
+        rec.report = report;
+      }
+      results.push(rec);
       log(`[migrate] ${m.id} ✓${m.note ? ' — ' + m.note : ''}`);
     } catch (e) {
       // VERBATIM message (the loud-catch rule): a silent migration failure

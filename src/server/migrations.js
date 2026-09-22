@@ -20,7 +20,13 @@ const { runMigrations } = require('../migration-runner.js');
 // serialized door — so a migration that reshapes an adapter record goes
 // through the engine, never through a second store instance (a private copy
 // written back is the read-modify-write lost update §5.1 exists to forbid).
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null }) {
+// `userTodos` (2.369.152) is the LIVE UserTodoManager (or a getter for it):
+// server.js builds it ~770 lines before the migrations run and it holds
+// data/user-todos.json in memory, so a migration that wrote the file beside it
+// would be overwritten by its next save. Without one (a suite, a boot with no
+// inbox) the migration builds a PRIVATE manager on the same file — no timer,
+// flushed through the store's own atomic writer before it returns.
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -275,6 +281,57 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         // Deliberately NO serverNotice: no token moved and nothing was
         // archived — each account gained the name of the client it already
         // used. The Communication panel shows it on the row.
+      },
+    },
+    {
+      id: '2026-09-spend-notices-expire',
+      note: "SPEND NOTICES LIVED FOREVER AS ACTIONS (owner's instance, measured 2026-09-22: 33 open 'For you' items, 15 from Spending, 13 of them filed before the notice lane existed (2.369.118) — no kind, so in the ACTION list colouring the badge — and 137–288 h old: '… has used 10 of its 12 unattended turns this hour (83%)', '… 48 of 60 today (80%)', 'VibeSpace refused the Stop bookkeeping mini-turn …', warnings about hour/day windows that closed weeks ago). The producer now stamps expiresAt and the store expires it; this moves what the store already holds into the lane: every Spending item (sessionName 'Spending' in the 'accounts' row — the name spend-guard's one fileInbox freezes on every item it files, and nothing else writes) becomes kind 'notice'; an OPEN one gets the end of the window it was about (its detail's `Scope: hour` = filing + 1 h, a refusal = + 6 h, anything else + 24 h — the longest window any spend notice talks about): past ⇒ resolved 'expired' with resolvedAt = that end (when it SHOULD have died, so it sorts as old history — kept in the ledger, never deleted), still ahead ⇒ stamped as its expiresAt so it cannot live forever either. Written through the live store and flushed before the ledger row; counts in the ledger's report row.",
+      run() {
+        const { noticeExpiry } = require('./spend-guard.js');
+        const isSpend = (it) => !!it && it.sessionName === 'Spending' && it.sessionKey === 'accounts';
+        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        let store = live, priv = false;
+        if (!store || typeof store.reshapeItems !== 'function') {
+          if (!fs.existsSync(path.join(dataDir, 'user-todos.json'))) return { matched: 0, rekinded: 0, expired: 0, stamped: 0, store: 'absent' };
+          const { UserTodoManager } = require('../user-todos.js');
+          store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+          priv = true;
+        }
+        const rep = { matched: 0, rekinded: 0, expired: 0, stamped: 0, store: priv ? 'private' : 'live' };
+        try {
+          store.reshapeItems((it, now) => {
+            if (!isSpend(it)) return false;
+            rep.matched++;
+            let changed = false;
+            if (it.kind !== 'notice') { it.kind = 'notice'; rep.rekinded++; changed = true; }
+            if (it.status === 'open' && it.expiresAt == null) {
+              const born = Number(it.createdAt) || 0;
+              // the window the notice was ABOUT: spend-guard's own detail line
+              // `Scope: hour|day|instance`, a refusal's 6 h cadence, else a day
+              const d = String(it.detail || '');
+              const end = noticeExpiry(/^Scope: (\w+)$/m.exec(d)?.[1] || (/^Refusal: /m.test(d) ? 'refusal' : 'day'), born);
+              if (end <= now) {
+                // resolvedAt = when it SHOULD have expired, never the upgrade
+                // boot: the instant is true and the retirements sort as old
+                // history under Recently resolved, not as today's resolutions
+                it.status = 'done'; it.resolvedAt = born > 0 ? end : now; it.resolvedBy = 'expired';
+                rep.expired++; changed = true;
+              } else { it.expiresAt = end; rep.stamped++; changed = true; }
+            }
+            return changed;
+          });
+          // BOTH paths flush (the live store's save is a 500 ms debounce): the
+          // atomic write lands BEFORE the runner records applied[id], so a crash
+          // in between re-runs the migration instead of losing the reshaping.
+          // A throw here FAILS the run (retried next boot).
+          store.flush();
+        } finally { if (priv) store.stop(); }
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran.
+        console.log('[migrate] spend-notices-expire:', JSON.stringify(rep));
+        // Deliberately NO serverNotice: the user sees the result — the stale
+        // rows left the inbox (resolved 'expired', under Recently resolved).
+        return rep;
       },
     },
     {

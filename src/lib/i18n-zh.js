@@ -3494,6 +3494,8 @@ export default {
   "{n} min ago": "{n} 分钟前",
   "{what} — {reason}": "{what} — {reason}",
   "expired": "已过期",
+  "expires in {n} min": "{n} 分钟后过期",
+  "expires in {n} h": "{n} 小时后过期",
   "{n}d": "{n}天",
   "Not configured — set up the application credential first": "未配置 — 请先设置应用凭据",
   "Set up {label} credentials…": "设置 {label} 凭据…",

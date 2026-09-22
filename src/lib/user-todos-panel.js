@@ -113,6 +113,16 @@ export function installUserTodos(app) {
     const h = Math.round(m / 60);
     return h < 24 ? t('{h}h ago', { h }) : new Date(ts).toLocaleDateString();
   };
+  // 2.369.152: a notice about a WINDOW carries the window's end (`expiresAt`)
+  // and the store resolves it 'expired' then — the row says when
+  const expiresText = (ts) => {
+    if (!(typeof ts === 'number' && Number.isFinite(ts))) return '';
+    const m = Math.ceil((ts - Date.now()) / 60000);
+    if (m <= 0) return '';
+    return m < 60 ? t('expires in {n} min', { n: m }) : t('expires in {n} h', { n: Math.round(m / 60) });
+  };
+  // who resolved it, in words ('expired' = the store's expiry sweep)
+  const resolvedByText = (by) => by === 'agent' ? t('by the agent') : by === 'system' ? t('automatically') : by === 'expired' ? t('expired') : (by && by !== 'user' ? by : '');
 
   const renderBtn = () => {
     // NOTICES (2.369.118, owner: spend notices are DISTRACTING beside real asks):
@@ -193,7 +203,7 @@ export function installUserTodos(app) {
         <div class="ut-body">
           <div class="ut-text">${escHtml(wordsOf(i))}</div>
           ${detailHtml(i)}
-          <div class="ut-meta">${notice ? `<span class="ut-sess">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ` : ''}${agoText(i.createdAt)}</div>
+          <div class="ut-meta">${notice ? `<span class="ut-sess">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ` : ''}${agoText(i.createdAt)}${notice && expiresText(i.expiresAt) ? ' · ' + escHtml(expiresText(i.expiresAt)) : ''}</div>
         </div>
         <span class="ut-actions">
           <button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button>
@@ -206,7 +216,7 @@ export function installUserTodos(app) {
         <span class="ut-dot" data-urgency=""></span>
         <div class="ut-body"><div class="ut-text">${escHtml(wordsOf(i))}</div>
         ${detailHtml(i)}
-        <div class="ut-meta">${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy && i.resolvedBy !== 'user' ? ` · ${escHtml(i.resolvedBy)}` : ''}</div></div>
+        <div class="ut-meta">${i.status === 'dismissed' ? t('dismissed') : t('done')}${resolvedByText(i.resolvedBy) ? ` · ${escHtml(resolvedByText(i.resolvedBy))}` : ''}</div></div>
         <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
       </div>`;
     const recent = todos.resolved.filter((i) => !inPlace.has(i.id)); // a row still holding its slot above is not listed twice
@@ -217,7 +227,7 @@ export function installUserTodos(app) {
           <span class="ut-dot" data-urgency=""></span>
           <div class="ut-body"><div class="ut-text">${escHtml(wordsOf(i))}</div>
           ${detailHtml(i)}
-          <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' ? ' · ' + t('by the agent') : (i.resolvedBy === 'system' ? ' · ' + t('automatically') : '')} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
+          <div class="ut-meta"><span class="ut-sess" title="${t('Go to this session')}">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ${i.status === 'dismissed' ? t('dismissed') : t('done')}${i.resolvedBy === 'agent' || i.resolvedBy === 'system' || i.resolvedBy === 'expired' ? ' · ' + escHtml(resolvedByText(i.resolvedBy)) : ''} · ${agoText(i.resolvedAt || i.createdAt)}</div></div>
           <span class="ut-actions"><button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button><button class="ut-act ut-reopen" title="${t('Reopen')}">↺</button></span>
         </div>`).join('')}` : '';
     // Rows come from the LAYOUT while open (resolved ones in place), from the sorted groups otherwise.

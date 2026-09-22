@@ -52,9 +52,20 @@ const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (defau
 const STATUSES = ['open', 'done', 'dismissed'];
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
 const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
+const EXPIRY_SWEEP_MS = 5 * 60 * 1000; // 2.369.152: how often an open item whose `expiresAt` passed is resolved 'expired'
+
+/** An `expiresAt` a producer may stamp: a finite ms epoch in the FUTURE, else
+ *  null (ignored — a past or garbage instant must never make an item die on
+ *  arrival, nor throw a producer's filing away). */
+function validExpiry(x, now = Date.now()) {
+  const n = typeof x === 'number' ? x : NaN;
+  return Number.isFinite(n) && n > now ? n : null;
+}
 
 class UserTodoManager {
-  constructor({ dataDir, onChange }) {
+  /** @param expirySweepMs how often expireDue() runs (0 = never on a timer —
+   *  a migration or a suite that builds a private manager must not leave one) */
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS }) {
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
     this._state = { items: [] };
@@ -64,6 +75,52 @@ class UserTodoManager {
       if (parsed && Array.isArray(parsed.items)) this._state = parsed;
       this._lastWritten = JSON.stringify(this._state, null, 2);
     } catch { /* fresh */ }
+    // EXPIRY (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS"): a notice
+    // about a WINDOW (this hour's / today's unattended-turn budget, a 6 h
+    // refusal) carries the window's end as `expiresAt` and dies with it. The
+    // store owns the clock: once after load (an item that expired while the
+    // server was down goes at boot, not 5 min later) and on an unref'd
+    // interval — the store's OWN timer, because server.js has no shared sweep
+    // cadence other stores hook into (each keeper runs its own).
+    this._expiryTimer = null;
+    this.expireDue();
+    if (expirySweepMs > 0) {
+      this._expiryTimer = setInterval(() => { try { this.expireDue(); } catch { } }, expirySweepMs);
+      if (this._expiryTimer.unref) this._expiryTimer.unref();
+    }
+  }
+
+  /** stop the expiry timer (suites, a migration's private manager) */
+  stop() { if (this._expiryTimer) { clearInterval(this._expiryTimer); this._expiryTimer = null; } }
+
+  /** Resolve every OPEN item whose `expiresAt` has passed — `resolvedBy:
+   *  'expired'`, status 'done', the record kept (the ledger is history). An
+   *  item WITHOUT `expiresAt` is never touched: expiry is a producer's
+   *  declaration, never inferred from age or text. ONE save + ONE broadcast
+   *  per sweep however many items went. @returns the count resolved */
+  expireDue(now = Date.now()) {
+    let n = 0;
+    for (const it of this._state.items) {
+      if (it.status !== 'open') continue;
+      if (!(typeof it.expiresAt === 'number' && Number.isFinite(it.expiresAt)) || it.expiresAt > now) continue;
+      it.status = 'done'; it.resolvedAt = now; it.resolvedBy = 'expired';
+      n++;
+    }
+    if (n) { this._save(); this._notify(); }
+    return n;
+  }
+
+  /** THE store's door for a one-shot reshaping (src/server/migrations.js):
+   *  `fn(item, now)` mutates an item in place and returns true when it did.
+   *  The migration goes through the LIVE manager because it runs long after
+   *  server.js built it — a second writer on data/user-todos.json would be
+   *  overwritten by this manager's next save. ONE save + ONE broadcast.
+   *  @returns the number of items `fn` changed */
+  reshapeItems(fn, now = Date.now()) {
+    let n = 0;
+    for (const it of this._state.items) { if (fn(it, now)) n++; }
+    if (n) { this._save(); this._notify(); }
+    return n;
   }
 
   _save() {
@@ -111,8 +168,10 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null } = {}) {
     text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
+    // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
+    expiresAt = validExpiry(expiresAt);
     if (!text) throw new Error('text required');
     // WORDS AS STRUCTURE (a3 i18n, 2026-09-21): a server-side producer may
     // file, beside its English `text`/`detail` (the dedupe key and the agent
@@ -142,7 +201,14 @@ class UserTodoManager {
         if (openCount >= MAX_OPEN_PER_SESSION) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
         existing.status = 'open'; existing.resolvedAt = null; existing.resolvedBy = null;
         existing.createdAt = Date.now();
+        // a re-file of a resolved item is a NEW filing: its own expiry or none
+        // (the old one is past — kept, it would expire the item on the next sweep)
+        existing.expiresAt = expiresAt;
         changed = true;
+      } else if (expiresAt && existing.expiresAt != null && expiresAt > existing.expiresAt) {
+        // an OPEN item merges to the LATER end; one with no expiresAt is lasting
+        // (it never expires) and a re-file never shortens that
+        existing.expiresAt = expiresAt; changed = true;
       }
       if (detail && detail !== existing.detail) { existing.detail = detail; changed = true; }
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
@@ -161,6 +227,7 @@ class UserTodoManager {
       sessionName: sessionName || null, // display fallback frozen at file time
       jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel
       i18n, // the words as structure, or null (an agent's own item is its own words)
+      expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
       createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
     };
     this._state.items.push(item);
@@ -191,7 +258,8 @@ class UserTodoManager {
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
     item.status = status;
-    if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; }
+    // a reopen is the user saying it still matters: it no longer expires
+    if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; }
     else { item.resolvedAt = Date.now(); item.resolvedBy = by; }
     this._save(); this._notify();
     return item;
@@ -221,4 +289,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES };
+module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, validExpiry };
