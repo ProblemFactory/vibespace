@@ -188,6 +188,8 @@ ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) 
   }
   // renderer + wiring pins
   const cr = read("src/lib/chat-renderers.js"), cv = read("src/lib/chat-view.js"), css = read("public/chat.css");
+  const sb = read("src/lib/chat-status-bar.js");
+  ok("the status bar's single-task chip shows shortWorkflowName(description) (2.369.141: a Workflow's task description is its whole meta.description)", /import \{ shortWorkflowName \} from '\.\.\/workflow-name\.js'/.test(sb) && /shortWorkflowName\(this\._bgTasks\[0\]\.description\)/.test(sb) && /shortWorkflowName\(tasks\[0\]\.description\)/.test(sb));
   ok("chat-renderers renders phases + agent chips (label · state dot · last tool) from taskInfo.workflow, every string escaped", /workflowLiveHtml\(ti\)/.test(cr) && /class=\"chat-wf-agent\" data-state=\"\$\{escHtml\(st\)\}\"/.test(cr) && /\$\{escHtml\(a\.label \|\| a\.agentId \|\| \x27\?\x27\)\}/.test(cr) && /\$\{wfLiveHtml\}<details/.test(cr));
     ok("chat-view re-renders a WORKFLOW tool card on its taskInfo edit through _swapMessageEl (agent cards excluded — their live line is drawn elsewhere); the gate also admits any card that carries the tree", /\(fields\.taskInfo\.type === \x27workflow\x27 \|\| fields\.taskInfo\.workflow\) && msg\.role === \x27tool\x27/.test(cv) && /this\._swapMessageEl\(oldEl, newEl, id\)/.test(cv));
   ok("chat.css styles the chips with theme vars (dot by state)", /\.chat-wf-agent\[data-state="running"\] \.chat-wf-dot \{ background: var\(--accent\)/.test(css) && /\.chat-wf-agent\[data-state="error"\] \.chat-wf-dot \{ background: var\(--red/.test(css));

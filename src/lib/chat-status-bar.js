@@ -2,6 +2,7 @@ import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absU
 import { UI_ICONS } from './icons.js';
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel } from './agent-meta.js';
 import { t } from './i18n.js';
+import { shortWorkflowName } from '../workflow-name.js';
 
 /** Gap kept between a status-bar dropdown and the right edge of the chat view
  *  (layout px). The panel is positioned OUT of the ≤768px bar's horizontal
@@ -723,12 +724,12 @@ export class ChatStatusBar {
     // card-derived running set as the pre-2026-09-21 fallback.
     if (this._bgTasks?.length) {
       const count = this._bgTasks.length;
-      const label = count === 1 ? (this._bgTasks[0].description || t('1 background task')) : t('{count} background tasks', { count });
+      const label = count === 1 ? (shortWorkflowName(this._bgTasks[0].description) || t('1 background task')) : t('{count} background tasks', { count }); // 2.369.141: a Workflow's task description is its whole meta.description — the chip shows the short form, the tooltip the whole
       parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(this._bgTasks.map((r) => r.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
     } else if (this._activeTasks?.size > 0) {
       const count = this._activeTasks.size;
       const tasks = [...this._activeTasks.values()];
-      const label = count === 1 ? tasks[0].description : t('{count} tasks', { count });
+      const label = count === 1 ? shortWorkflowName(tasks[0].description) : t('{count} tasks', { count });
       parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(tasks.map(t => t.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
     }
 

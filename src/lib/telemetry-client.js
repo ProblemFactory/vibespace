@@ -187,25 +187,43 @@ export function installScreenWatch() {
     document.addEventListener('visibilitychange', () => { _screenEvents.push({ t: Date.now(), k: 'visibility', v: document.visibilityState }); if (_screenEvents.length > 40) _screenEvents.shift(); });
   } catch { }
 }
+/** PURE: is a late 1 s tick a FREEZE, or a tab that was hidden / just returned?
+ *  (2.369.141, owner: "没有实际卡顿但我切回标签页的时候突然提示抓取卡顿现场" —
+ *  Chrome throttles a hidden tab's timers to once a minute, so the first tick
+ *  after a return arrives 4–60 s late with `document.hidden` already false.)
+ *  A gap counts only when the page was VISIBLE for the whole of it: the
+ *  previous tick fired after the page last became visible, no hide happened
+ *  since, the page is not hidden now, and it did not become visible within
+ *  the last 3 s (the return spike). */
+export function selfGapIsFreeze({ tickGap, prevTick, now, hiddenNow, visibleSince, hiddenAt, minGapMs = 4000 }) {
+  if (!(tickGap > minGapMs) || hiddenNow) return false;
+  if (prevTick < visibleSince) return false;           // the gap started before the page came back
+  if (hiddenAt > prevTick) return false;               // it went hidden during the gap
+  if (now - visibleSince < 3000) return false;         // the return spike itself
+  return true;
+}
 export function installCompositorStallWatch() {
   let lastRaf = Date.now();
   let stallStart = 0;
   const loop = () => { lastRaf = Date.now(); requestAnimationFrame(loop); };
   try { requestAnimationFrame(loop); } catch { return; }
   let lastTick = Date.now();
+  let visibleSince = document.hidden ? 0 : Date.now(), hiddenAt = document.hidden ? Date.now() : 0;
+  try { document.addEventListener('visibilitychange', () => { if (document.hidden) hiddenAt = Date.now(); else visibleSince = Date.now(); }); } catch { }
   setInterval(() => {
     // SELF-GAP (2.340.3): if THIS 1s timer itself fired late by >3s, the whole
     // renderer (or the OS) was frozen — a case rAF-vs-timer cannot see (both
     // stop together) and the 45s suspend detector ignores. Covers the 5-45s
-    // whole-freeze band.
+    // whole-freeze band. A hidden or just-returned tab is NOT a freeze (2.369.141).
     const tickNow = Date.now();
-    const tickGap = tickNow - lastTick; lastTick = tickNow;
-    if (tickGap > 4000 && !document.hidden) {
+    const prevTick = lastTick;
+    const tickGap = tickNow - prevTick; lastTick = tickNow;
+    if (selfGapIsFreeze({ tickGap, prevTick, now: tickNow, hiddenNow: document.hidden, visibleSince, hiddenAt })) {
       metric('renderer-freeze-s', Math.round((tickGap - 1000) / 100) / 10);
       track('event', 'renderer-freeze', `${Math.round((tickGap - 1000) / 1000)}s (timer AND rAF stalled — whole renderer/system)`);
       notifyFreeze({ kind: 'renderer', s: Math.round((tickGap - 1000) / 100) / 10, at: tickNow - tickGap, longTasks: _longTasks.slice(-5) });
     }
-    if (document.hidden) { lastRaf = Date.now(); stallStart = 0; return; } // hidden tabs legitimately stop rAF
+    if (document.hidden || Date.now() - visibleSince < 3000) { lastRaf = Date.now(); stallStart = 0; return; } // hidden tabs legitimately stop rAF; a return spike is not a stall
     const age = Date.now() - lastRaf;
     if (age > 2000 && !stallStart) stallStart = lastRaf;
     if (age <= 2000 && stallStart) {
