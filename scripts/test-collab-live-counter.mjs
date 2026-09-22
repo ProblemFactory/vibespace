@@ -17,7 +17,8 @@
 //     own timestamp and says so) and the wiring pins.
 //   Part 2 (headless chrome, SKIPs without chrome): a REAL codex rollout of the
 //     shape the owner's root thread writes, opened READ-ONLY (frozen totals, no
-//     ticking, no encrypted blob anywhere in the DOM), and a LIVE codex chat
+//     ticking, no encrypted blob anywhere in the DOM, and — ⑤b — its stream
+//     line ticks as text writes into ONE label element), and a LIVE codex chat
 //     session driven by a stub app-server through the real wrapper → real
 //     normalizer → real ws push: the head count grows, the age ticks, the
 //     spinner switches to the sub-agents form and yields back when another
@@ -271,9 +272,20 @@ console.log('— ④ wiring pins (a pure composer with an unstaged call site is 
     && /this\._typingLabel = null;[\s\S]{0,80}this\._typingKind = null;/.test(ci));
   check('…and the button-less pending line still falls through to a FULL render (it has no .chat-interrupt-btn)',
     /this\._typingLabel = null; \/\/ this line has no Stop button/.test(ci));
+  // The two lines are TWINS: the pin is their PARITY, never one spelling of
+  // the paint-only spinner. 2.369.150's accessibility pass added
+  // aria-hidden="true" to the spinner at every creation site (test-ax-paint ③
+  // owns that census) and the old literal `<span class="chat-spinner"></span>`
+  // went red on markup the invariant never depended on. What it depends on:
+  // the label is its OWN element in BOTH lines (same template, extracted from
+  // each file and compared) and the read-only line takes the text-write path.
+  // The behaviour itself is proven in ⑤b on a real read-only view.
+  const STREAM_LINE = /<span class="chat-spinner"[^>]*><\/span> <span class="chat-stream-label">\$\{escHtml\(label\)\}<\/span>/;
+  const roLine = (cv.match(STREAM_LINE) || [])[0] || null, ciLine = (ci.match(STREAM_LINE) || [])[0] || null;
   check('the read-only stream line carries the same label element (a ticking age is a text write there too)',
-    /<span class="chat-spinner"><\/span> <span class="chat-stream-label">\$\{escHtml\(label\)\}<\/span>/.test(cv)
-    && /if \(roLabel && !this\._streamStatus\.classList\.contains\('hidden'\)\) \{/.test(cv));
+    !!roLine && roLine === ciLine
+    && /if \(roLabel && !this\._streamStatus\.classList\.contains\('hidden'\)\) \{/.test(cv),
+    `read-only: ${roLine} · chat-input: ${ciLine}`);
   check('the run label takes a PRE-COMPOSED collab segment — chat-run-summary still imports nothing',
     /collabPart: collabRunPart\(collabStats, \{ now, live, t \}\)/.test(cv) && /collabPart = ''/.test(rs) && !/^\s*import /m.test(rs));
   check('the run record carries the label recipe so the ticker never builds a second kind table',
@@ -503,6 +515,39 @@ console.log('— ⑤ a stopped transcript shows FROZEN totals (read-only reload)
   check('…and NOTHING ticks on a stopped transcript (same text 2.6s later)', after === opened?.head, `${opened?.head} → ${after}`);
   const blobHit = await evaljs(`(() => { const h = document.body.innerHTML; return h.indexOf(${JSON.stringify(BLOB)}); })()`);
   check('⑦ no encrypted blob text anywhere in the DOM (5 blobs in the fixture: 2 spawn arguments, 3 payloads)', blobHit === -1, `index ${blobHit}`);
+  // The read-only stream line's BEHAVIOUR, on this real read-only view through
+  // the real bundled _showTyping (the ④ pin reads source; a source pin once
+  // went red on a spinner attribute while this held — 2.369.150): a ticking
+  // label keeps ONE label element and ONE spinner element, a changed label is
+  // exactly one text write INTO that element, an unchanged one writes nothing.
+  const roView = await evaljs(`(() => {
+    const v = [...window.app.sessions.values()].find((x) => x && x._messageList === window.__frozen);
+    if (!v || !v._readOnly || v._chatInput || !v._streamStatus) return { ok: false, why: 'no read-only view', readOnly: !!v?._readOnly, input: !!v?._chatInput };
+    const st = v._streamStatus;
+    const L = (s) => 'Sub-agents working — 5 messages, last ' + s + 's ago';
+    v._showTyping(L(1), 'subagents');
+    const label = st.querySelector('.chat-stream-label'), spin = st.querySelector('.chat-spinner');
+    const built = !!label && !!spin && label.textContent === L(1) && !st.classList.contains('hidden');
+    const mo = new MutationObserver(() => {}); mo.observe(st, { childList: true, subtree: true, characterData: true, attributes: true });
+    const ticks = [];
+    for (const [n, text] of [[2, L(2)], [3, L(3)], [3, L(3)]]) {
+      v._showTyping(text, 'subagents');
+      const recs = mo.takeRecords();
+      ticks.push({ n, sameLabel: st.querySelector('.chat-stream-label') === label, sameSpin: st.querySelector('.chat-spinner') === spin,
+        text: label.textContent, writes: recs.length, allInLabel: recs.every((r) => r.target === label || r.target.parentNode === label) });
+    }
+    mo.disconnect();
+    const out = { ok: true, built, ticks };
+    v._hideTyping(); // restore the stopped view exactly as it was (watchdog disarmed, line hidden)
+    out.restored = st.classList.contains('hidden') && !v._typingSince;
+    return out;
+  })()`);
+  const [t2, t3, tSame] = roView?.ticks || [];
+  check('⑤b the read-only stream line keeps ONE label element and ONE spinner element across ticks (real _showTyping, real read-only view)',
+    roView?.ok && roView.built && [t2, t3, tSame].every((x) => x && x.sameLabel && x.sameSpin), JSON.stringify(roView));
+  check('…a changed label is ONE text write inside that element, an unchanged label writes NOTHING',
+    t2?.writes === 1 && t2.allInLabel && /last 2s ago$/.test(t2.text) && t3?.writes === 1 && t3.allInLabel && /last 3s ago$/.test(t3.text)
+    && tSame?.writes === 0 && roView?.restored, JSON.stringify(roView?.ticks));
 }
 
 // ── LIVE: a real codex chat session driven by the stub app-server ───────────
