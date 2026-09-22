@@ -80,3 +80,19 @@
 | §4 门 | 步骤 0 的交付物; ci.mjs tier 行 + test-architecture §43 |
 | §5 OQ1–OQ7 | 步骤 0 的腿 ①–⑦ + 下一次 incident inventory |
 | §6 D1–D4 | owner 收件箱 (vibespace-ask) |
+
+## §8 精简版 (owner 2026-09-22: "先分析每一点的影响, 不要做太多过度设计")
+
+按 owner 那一分钟的页面 (50k) 逐条算账后的取舍:
+
+| 做 | 影响 | 理由 |
+|---|---|---|
+| §3 步骤 1 带外卡片 aria-hidden | 转录 26–34k → 7–10k, 全页 ≈ −45 %; 之后不随翻页 / gap slab / 搜索增长 | 这一条就是根治 |
+| §3 步骤 2 图标 / 行号 / 箭头 / handle aria-hidden | 做完 1 后再 −2–3k | 属性级, 极低风险 |
+| minimap 条整条 aria-hidden (步骤 3 的最小形态) | −2–5k (5 个长窗) | 一个属性; 单画布重写 = 过度设计 |
+| 状态栏 chip 原地更新 (步骤 8 的一半) | stale 20 % 里唯一与体积无关、且每个 turn 都在发生的 churn | 中等成本, 值得 |
+| 测量腿 ×1 (步骤 0 的最小形态) | 不削减; 证明 aria-hidden 缩了序列化载荷 (OQ1), 钉住每窗总数 + 翻 4 页不变 + 负控副本变大 | 现有 §1c fixture 上一条 heavy 腿, 不做七条 |
+
+不做 (本轮): 步骤 4 (代码块默认在关闭 details 里, 按规则已不在树里 — OQ2 未证实前不动)、5b gap 折叠 (碰 .142 landing 核心; 1 落地后最坏情况已被带封住)、6 Stage (默认关)、7c/9 (瞬时或与卡顿无关)、run header diff (先量)。
+决定: 不分两条 lane, 一次交付; `accessibility.exposeChat` 保持布尔 (开 = 视口附近暴露、带外剪掉; 关 = 全不暴露), 不做三值; 侧栏默认不改 — owner 先用状态过滤器去掉 stopped (零代码, −16–24 %); `write` 不进 collapseKinds。
+预期: 50k → 15–20k; 再去掉 stopped ≈ 10k。
