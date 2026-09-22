@@ -25,6 +25,8 @@ const crypto = require('crypto');
 // drain — never dropped. The injection channel wraps at 10 KiB upstream and
 // the whole context is capped at INLINE_CAP, hence the section budget.
 const { BLOCK_MAX_BYTES: MSG_STASH_BLOCK_MAX_BYTES } = require('./channel-filter.js');
+// the backlog's ONE read order (priority, then newest) + its closed priority set
+const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
 const MSG_STASH_MAX_BYTES = 6144;
@@ -32,6 +34,28 @@ const MSG_STASH_BLOCK_SOURCES = new Set(['channel', 'channel-receipt']);
 const clipBytes = (text, max) => { const b = Buffer.from(String(text), 'utf-8'); if (b.length <= max) return String(text); let cut = b.subarray(0, max).toString('utf-8'); const nl = cut.lastIndexOf('\n'); if (nl > max * 0.5) cut = cut.slice(0, nl); return cut + '\n(… clipped)'; };
 /** @returns {{text:string, shown:object[], rest:object[]}} — `shown` are the
  *  entries rendered (emit their cards), `rest` the ones to re-stash. */
+// ── Stay INLINE (verified 2026-07-13 by binary search) ──
+// Claude Code wraps a hook's additionalContext into a <persisted-output>
+// 2KB-preview + on-disk file at EXACTLY 10240 bytes = 10 KiB (10000 inline,
+// 10240 wrapped). Beyond that the agent must Read a file to see the full
+// context — exactly the 2.68.0 "never learned the tools" failure. Cap with
+// margin so the critical HEAD (tools/identity/objective — ordered first) is
+// always in-context; only the TAIL (oldest activity-log lines) is dropped, and
+// it's recoverable via `vibespace-task show --full`. ONE implementation for
+// BOTH hook payloads (task-context had none until 2026-09-22: a 3-group
+// SessionStart with CJK backlog items was 12.8 KB — wrapped).
+const INLINE_CAP = 9600; // bytes; margin under the 10240 wrap threshold
+function capInline(ctx, multi) {
+  const text = String(ctx || '');
+  if (Buffer.byteLength(text, 'utf-8') <= INLINE_CAP) return text;
+  const ptr = `\n\n…[context trimmed to stay inline — run \`vibespace-task${multi ? ' --group <id>' : ''} show --full\` for the rest]`;
+  const room = INLINE_CAP - Buffer.byteLength(ptr, 'utf-8');
+  let head = Buffer.from(text, 'utf-8').subarray(0, room).toString('utf-8');
+  const nl = head.lastIndexOf('\n'); // clean cut at a line boundary (also avoids a split multibyte char)
+  if (nl > room * 0.5) head = head.slice(0, nl);
+  return head + ptr;
+}
+
 function renderMsgStash(entries) {
   if (!entries || !entries.length) return { text: '', shown: [], rest: [] };
   const line = (e) => {
@@ -56,6 +80,27 @@ function renderMsgStash(entries) {
   return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
 }
 function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null }) {
+  // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
+  // backlog` prints 1-based numbers over GET task's sortBacklog order, and a
+  // mutating verb run LATER (`backlog-done 3`) must mean the item that was
+  // printed as 3 — newest-first numbering shifts on every add by anyone, so
+  // the live order is not that list. `${key}|${gid}` → the ids in the order
+  // served; a session that never listed resolves against the live order.
+  // In memory only (a restart falls back to the live order); bounded.
+  const backlogListingShown = new Map();
+  const BACKLOG_LISTINGS_MAX = 1000;
+  const rememberBacklogListing = (k, ids) => {
+    backlogListingShown.delete(k);
+    backlogListingShown.set(k, ids);
+    if (backlogListingShown.size > BACKLOG_LISTINGS_MAX) backlogListingShown.delete(backlogListingShown.keys().next().value);
+  };
+  // "is this claimant running" for the unclaimed-HIGH surfacing — every key a
+  // live session answers to (its status key AND its pre-conversation webui key)
+  const liveClaimPredicate = () => {
+    const live = new Set();
+    for (const [sid, sess] of activeSessions) { live.add(`webui:${sid}`); try { live.add(sessionStatusKey(sess, sid)); } catch { } }
+    return (k) => live.has(k);
+  };
 app.post('/api/agent/user-todo', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -271,7 +316,7 @@ app.get('/api/agent/task-context', (req, res) => {
     let context = '';
     if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools() });
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools(), isLiveClaim: liveClaimPredicate() });
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -349,7 +394,7 @@ app.get('/api/agent/task-context', (req, res) => {
         if (pm.text) context = context ? context + '\n\n' + pm.text : pm.text;
       }
     } catch { }
-    res.json({ success: true, context });
+    res.json({ success: true, context: capInline(context, injectGroups.length > 1) });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 // UserPromptSubmit hook payload — delivered through the harness's own prompt
@@ -395,6 +440,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
+    // groups whose FULL context rides this prompt — their backlog note already
+    // carries the cleanup nudge, the per-turn one below skips them
+    const fullCovered = new Set();
     if (injectGroups.length) {
       s._groupSeenAt = s._groupSeenAt || {};
       s._ctxSig = s._ctxSig || {};
@@ -464,8 +512,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
           : tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })));
       const fullBlocks = [];
       for (const g of updatedFulls) {
-        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags });
-        if (ctx) fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`);
+        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate() });
+        if (ctx) { fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`); fullCovered.add(g.id); }
       }
       let newFullGroups = [];
       if (firstGroups.length) {
@@ -479,11 +527,12 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // count-free multi phrasing instead.
         const allNew = firstGroups.length === injectGroups.length;
         const fulls = (firstGroups.length > 1 && allNew)
-          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags })].filter(Boolean)
-          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags })).filter(Boolean);
+          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate() })].filter(Boolean)
+          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate() })).filter(Boolean);
         if (fulls.length) {
           fullBlocks.push(...fulls);
           newFullGroups = firstGroups;
+          for (const g of firstGroups) fullCovered.add(g.id);
           for (const g of firstGroups) {
             s._groupSeenAt[g.id] = g.contentUpdatedAt || g.updatedAt;
             s._ctxSig[g.id] = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
@@ -584,6 +633,18 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // "Per turn" means per turn: on prompts that already carry a bigger
     // delivery the extra still rides at the very top as its own block.
     if (outParts.length && extra) outParts.unshift(`<vibespace-reminder>${extra}</vibespace-reminder>`);
+    // THE BACKLOG CLEANUP NUDGE, EVERY TURN (2026-09-22 verifier: it rode only
+    // the full context injections, so a session that never ran a backlog verb
+    // saw it once per session). ONE paragraph under ONE 500 B budget for every
+    // injected group this session is over `tasks.backlogNudgeAt` in (0 = off),
+    // minus the groups whose full context this prompt already carries — the
+    // same words (tasks.backlogNudgeFor → nudgeTextAll) as the route's answer.
+    let backlogNudge = '';
+    try {
+      const nudgeIds = injectGroups.map((g) => g.id).filter((gid) => !fullCovered.has(gid));
+      if (nudgeIds.length) backlogNudge = tasks.backlogNudgeFor(nudgeIds, key, { multi: injectGroups.length > 1, tools: toolFlags });
+    } catch { backlogNudge = ''; }
+    if (outParts.length && backlogNudge) outParts.push(`<vibespace-reminder>${backlogNudge}</vibespace-reminder>`);
     if (!outParts.length) {
       const multi = injectGroups.length > 1;
       const mgrClause = isManagerSession(key) ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
@@ -599,27 +660,11 @@ app.get('/api/agent/prompt-context', (req, res) => {
         : '';
       // User extra rides at the TOP of the reminder block (per-hook custom,
       // 2.88.0); it delivers even with the standard reminder toggled off.
-      const body = [extra, std].filter(Boolean).join('\n');
+      const body = [extra, std, backlogNudge].filter(Boolean).join('\n');
       if (body) outParts.push(`<vibespace-reminder>${body}</vibespace-reminder>`);
     }
-    // ── Stay INLINE (verified 2026-07-13 by binary search) ──
-    // Claude Code wraps a hook's additionalContext into a <persisted-output>
-    // 2KB-preview + on-disk file at EXACTLY 10240 bytes = 10 KiB (10000 inline,
-    // 10240 wrapped). Beyond that the agent must Read a file to see the full
-    // context — exactly the 2.68.0 "never learned the tools" failure. Cap with
-    // margin so the critical HEAD (tools/identity/objective — ordered
-    // first) is always in-context; only the TAIL (oldest activity-log lines) is
-    // dropped, and it's recoverable via `vibespace-task show --full`.
-    let ctx = outParts.join('\n\n');
-    const INLINE_CAP = 9600; // bytes; margin under the 10240 wrap threshold
-    if (Buffer.byteLength(ctx, 'utf-8') > INLINE_CAP) {
-      const ptr = `\n\n…[context trimmed to stay inline — run \`vibespace-task${injectGroups.length > 1 ? ' --group <id>' : ''} show --full\` for the rest]`;
-      const room = INLINE_CAP - Buffer.byteLength(ptr, 'utf-8');
-      let head = Buffer.from(ctx, 'utf-8').subarray(0, room).toString('utf-8');
-      const nl = head.lastIndexOf('\n'); // clean cut at a line boundary (also avoids a split multibyte char)
-      if (nl > room * 0.5) head = head.slice(0, nl);
-      ctx = head + ptr;
-    }
+    // Stay INLINE — capInline (module scope; the one cap both hook payloads use)
+    const ctx = capInline(outParts.join('\n\n'), injectGroups.length > 1);
     res.json({ success: true, context: ctx });
   } catch (e) { res.json({ success: true, context: '' }); }
 });
@@ -775,9 +820,14 @@ app.get('/api/agent/task', (req, res) => {
   if (!gid) return;
   try {
     const t = tasks.get(gid);
-    // backlog: OPEN items only — that's what the CLI numbers for backlog-done
-    // (the resolve route indexes the same open-items list)
-    res.json({ success: true, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, backlog: (t.backlog || []).filter((b) => b.status === 'open'), progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
+    // backlog: OPEN items only, in sortBacklog order (priority high → normal →
+    // low, newest first) — that's what the CLI numbers for backlog-done (the
+    // resolve route's findIdx indexes the SAME sorted open list). `you` = this
+    // session's key so the CLI can mark the items it owns.
+    const you = sessionStatusKey(hit[0], hit[1]);
+    const openSorted = sortBacklog((t.backlog || []).filter((b) => b.status === 'open'));
+    rememberBacklogListing(`${you}|${gid}`, openSorted.map((b) => b.id)); // the numbers this session now holds
+    res.json({ success: true, you, task: { id: t.id, title: t.title, archived: !!t.archived, objective: t.objective, backlog: openSorted, progress: (t.progress || []).slice(-10), contextDir: t.contextDir } });
   } catch (e) { res.status(404).json({ error: e.message }); }
 });
 app.post('/api/agent/task-progress', (req, res) => {
@@ -816,17 +866,34 @@ app.post('/api/agent/task-backlog', (req, res) => {
   try {
     const t = tasks.get(gid);
     const backlog = (t.backlog || []).map((b) => ({ ...b, claimedBy: [...(b.claimedBy || [])] }));
-    const { add, detail, done, drop, claim, unclaim, show, edit, text: newText } = req.body || {};
+    const { add, detail, done, drop, claim, unclaim, show, edit, text: newText, priority } = req.body || {};
     const key = sessionStatusKey(hit[0], hit[1]);
+    // priority: a CLOSED set; absent = not given (add ⇒ 'normal'), anything
+    // else outside the set is refused by name — never silently normalized
+    const hasPriority = priority !== undefined && priority !== null;
+    if (hasPriority && !BACKLOG_PRIORITIES.includes(priority)) return res.status(400).json({ error: `invalid priority ${JSON.stringify(String(priority)).slice(0, 40)} — use one of: ${BACKLOG_PRIORITIES.join(', ')}` });
     const findIdx = (ref, { openOnly = true } = {}) => {
-      const pool = backlog.map((b, i) => [b, i]).filter(([b]) => !openOnly || b.status === 'open');
-      if (typeof ref === 'string' && /^B-[0-9a-f]{4,8}$/i.test(ref.trim())) {
-        const hitById = backlog.findIndex((b) => (b.id || '').toLowerCase() === ref.trim().toLowerCase());
+      const r = String(ref ?? '').trim();
+      if (/^B-[0-9a-f]{4,8}$/i.test(r)) {
+        const hitById = backlog.findIndex((b) => (b.id || '').toLowerCase() === r.toLowerCase());
         if (hitById >= 0) return hitById;
-        return { err: `no backlog item with id ${ref.trim()}` };
+        return { err: `no backlog item with id ${r}` };
       }
-      const n = Number(ref);
-      if (Number.isInteger(n) && n >= 1 && n <= pool.length) return pool[n - 1][1];
+      // A NUMBER is a position in THE numbered list — the open items in
+      // sortBacklog order, as THIS session was last shown them (GET task);
+      // never the store order, and `openOnly:false` (show / edit) widens only
+      // the id and text matches below, never what a number means.
+      if (/^\d+$/.test(r)) {
+        const n = Number(r);
+        const shown = backlogListingShown.get(`${key}|${gid}`);
+        const ids = shown || sortBacklog(backlog.filter((b) => b.status === 'open')).map((b) => b.id);
+        if (n < 1 || n > ids.length) return { err: `no item #${n} in ${shown ? 'the backlog list you were last shown' : 'the open backlog'} (${ids.length} item${ids.length === 1 ? '' : 's'}) — run \`vibespace-task backlog\` and use the item's id` };
+        const i = backlog.findIndex((b) => b.id === ids[n - 1]);
+        if (i < 0) return { err: `item #${n} of the list you were shown ([${ids[n - 1]}]) no longer exists — nothing changed; run \`vibespace-task backlog\`` };
+        if (openOnly && backlog[i].status !== 'open') return { err: `item #${n} of the list you were shown ([${backlog[i].id}] ${String(backlog[i].text).slice(0, 80)}) is already ${backlog[i].status} — nothing changed; run \`vibespace-task backlog\` for the current list` };
+        return i;
+      }
+      const pool = (openOnly ? backlog.filter((b) => b.status === 'open') : backlog).map((b) => [b, backlog.indexOf(b)]);
       const matches = pool.filter(([b]) => b.text.includes(String(ref)));
       if (matches.length === 1) return matches[0][1];
       return { err: matches.length ? 'ambiguous item — use its id or number from `vibespace-task backlog`' : 'no matching backlog item' };
@@ -836,13 +903,13 @@ app.post('/api/agent/task-backlog', (req, res) => {
       if (typeof r !== 'number') return res.status(404).json({ error: r.err });
       return res.json({ success: true, item: backlog[r] }); // read-only — no update
     }
-    let actedId = null;      // claim/unclaim → echo the item + co-claimants back (BY ID — the store may evict earlier items, so a position is not an identity)
+    let actedId = null;      // edit/claim/unclaim/done/drop → echo the item + co-claimants back (BY ID — the store may evict earlier items, so a position is not an identity)
     let added = null;        // add → the item as pushed; echoed back only once it is FOUND in the stored backlog
     let alreadyMine = false; // idempotent re-claim
     if (typeof add === 'string' && add.trim()) {
       // parking auto-CLAIMS for the caller (user directive) — the parker is
       // the natural owner until it hands the item back
-      added = { text: add.trim(), status: 'open', claimedBy: [key], ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() };
+      added = { text: add.trim(), status: 'open', priority: hasPriority ? priority : 'normal', claimedBy: [key], ...(typeof detail === 'string' && detail.trim() ? { detail: detail.trim() } : {}), addedBy: key, addedAt: Date.now() };
       backlog.push(added);
     } else if (edit !== undefined) {
       // EDIT an existing item's text and/or detail in place (2.130.0) — the
@@ -854,7 +921,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
       const hasText = typeof newText === 'string';
       const hasDetail = typeof detail === 'string';
-      if (!hasText && !hasDetail) return res.status(400).json({ error: 'edit needs --text and/or --detail' });
+      if (!hasText && !hasDetail && !hasPriority) return res.status(400).json({ error: 'edit needs --text, --detail and/or --priority' });
       if (hasText) {
         if (!newText.trim()) return res.status(400).json({ error: 'item text cannot be empty' });
         backlog[r].text = newText.trim();
@@ -863,7 +930,8 @@ app.post('/api/agent/task-backlog', (req, res) => {
         const d = detail.trim();
         if (d === '' || d === '-') delete backlog[r].detail; else backlog[r].detail = d;
       }
-      actedId = backlog[r].id || null;
+      if (hasPriority) backlog[r].priority = priority;
+      actedId = backlog[r].id || null; // echo BY ID (was an undeclared `actedIdx` — the edit never echoed its item)
     } else if (claim !== undefined || unclaim !== undefined) {
       const r = findIdx(claim !== undefined ? claim : unclaim);
       if (typeof r !== 'number') return res.status(400).json({ error: r.err });
@@ -879,6 +947,7 @@ app.post('/api/agent/task-backlog', (req, res) => {
       backlog[r].status = done !== undefined ? 'done' : 'dropped';
       backlog[r].resolvedBy = key;
       backlog[r].resolvedAt = Date.now();
+      actedId = backlog[r].id || null; // echo WHICH item was resolved — a wrong hit must be visible
     } else {
       return res.status(400).json({ error: 'need add, done, drop, claim, unclaim, or show' });
     }
@@ -894,10 +963,22 @@ app.post('/api/agent/task-backlog', (req, res) => {
       acted = updated.backlog.find((b) => b.addedAt === added.addedAt && b.addedBy === key && b.text === added.text) || null;
       if (!acted) return res.status(500).json({ error: 'the item was not stored — nothing parked (the store kept its previous contents)' });
     }
+    // THE CLEANUP NUDGE (2026-09-22): a verb that can GROW what the caller
+    // holds (add / edit / claim — never done / drop / unclaim, which shrink
+    // it; never show, which writes nothing) answers, AFTER the write, with the
+    // nudge when the caller holds ≥ tasks.backlogNudgeAt open items. The words
+    // are nudgeText's — the injection and every turn's reminder print the same paragraph.
+    let nudge = null;
+    if (added || edit !== undefined || claim !== undefined) {
+      let raw; try { raw = serverSetting('tasks.backlogNudgeAt'); } catch { raw = undefined; }
+      const n = backlogNudge(updated.backlog, key, { threshold: nudgeThreshold(raw) });
+      if (n) nudge = { text: nudgeText(n, String(req.query?.group || req.body?.group || '').trim() ? `--group ${gid} ` : ''), owned: n.owned, stale: n.stale, threshold: n.threshold };
+    }
     res.json({
       success: true,
-      backlog: updated.backlog.filter((b) => b.status === 'open'),
+      backlog: sortBacklog(updated.backlog.filter((b) => b.status === 'open')),
       ...(acted ? { item: acted, others: (acted.claimedBy || []).filter((k) => k !== key), alreadyMine } : {}),
+      ...(nudge ? { nudge } : {}),
     });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

@@ -14,7 +14,9 @@
 // (built before 2.369.150 — it stores the item and answers with only the open
 // `backlog`): the item is found by its exact (trimmed) text, never by position,
 // a truncated store is refused, and master's pre-fallback CLI as the CONTROL
-// reported "not stored" for a stored item. Run: node scripts/test-backlog-no-truncation.mjs
+// reported "not stored" for a stored item; `--priority` the older server
+// ignores is SAID, never claimed (add + edit, with a no-check control).
+// Run: node scripts/test-backlog-no-truncation.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -140,6 +142,22 @@ check('an older server that did NOT store it: refused (exit 1), the stranger nev
 reply = { success: true, backlog: [{ id: 'B-dddd', text: 'my parked item', status: 'done' }] };
 c = await runCli(CLI, ['backlog-add', 'my parked item']);
 check('an older server whose only exact-text row is closed: refused (the fallback is open rows only)', c.code === 1 && !/B-dddd/.test(c.out), c.out);
+// --priority against an older server: it stores the item and ignores the
+// field — the CLI says so instead of claiming it (add AND edit)
+reply = OLD_SHAPE;
+c = await runCli(CLI, ['backlog-add', 'my parked item', '--priority', 'high']);
+check('an older server + --priority high: parked, and the CLI says the priority was NOT recorded (never "priority high")', c.code === 0 && /parked as \[B-bbbb\]/.test(c.out) && /note: the server did not record --priority high/.test(c.out) && !/parked as \[B-bbbb\] priority high/.test(c.out), c.out);
+reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open', priority: 'high' }, backlog: [] };
+c = await runCli(CLI, ['backlog-add', 'my parked item', '--priority', 'high']);
+check('a current server + --priority high: "priority high", no unrecorded note', c.code === 0 && /parked as \[B-1111\] priority high/.test(c.out) && !/did not record/.test(c.out), c.out);
+reply = { success: true, backlog: OLD_SHAPE.backlog }; // an old edit echoes no item
+c = await runCli(CLI, ['backlog-edit', 'B-bbbb', '--text', 'renamed', '--priority', 'low']);
+check('an older server + backlog-edit --priority: "updated text", never "priority low", plus the unrecorded note', c.code === 0 && /^updated text$/m.test(c.out) && !/priority low$/m.test(c.out) && /note: the server did not record --priority low/.test(c.out), c.out);
+const noNote = fs.readFileSync(CLI, 'utf8').replace("if (!priorityRecorded(mine)) printPriorityUnrecorded(mine.id);", '');
+const noNoteFile = path.join(tmp, 'vibespace-task.nonote'); fs.writeFileSync(noNoteFile, noNote);
+reply = OLD_SHAPE;
+c = await runCli(noNoteFile, ['backlog-add', 'my parked item', '--priority', 'high']);
+check('control: a CLI without the check parks silently on an older server (no note)', noNote !== fs.readFileSync(CLI, 'utf8') && c.code === 0 && !/did not record/.test(c.out), c.out);
 // CONTROL — the pre-fallback CLI (r.item only) on the older server's answer
 const preSrc = fs.readFileSync(CLI, 'utf8').replace(/const mine = \(r && r\.item\) \|\| [^\n]*\n/, 'const mine = r && r.item;\n');
 const preFile = path.join(tmp, 'vibespace-task.pre'); fs.writeFileSync(preFile, preSrc);

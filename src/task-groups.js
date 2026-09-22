@@ -35,6 +35,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { pickColorSeq } = require('./task-color-seq');
+// Backlog PRIORITY + the ownership-aware selection every READ uses (TASK.md,
+// the per-turn reminders, the show/backlog listing) — the store keeps every
+// item; which ones a read shows is decided there (2026-09-22).
+const { PRIORITIES: BACKLOG_PRIORITIES, normalizePriority, markedText, escapeItemText, unescapeItemText, sortBacklog, selectReminders, nudgeThreshold, backlogNudge, nudgeTextAll } = require('./backlog-select');
 
 // Task Groups (岗位) have NO status — they are persistent roles; only an
 // `archived` flag. Task STATUS lives on the session (session-status.js STATES,
@@ -50,6 +54,14 @@ const KINDS = ['task', 'group'];
 // write is acknowledged only once it is found stored (agent-routes), and
 // scripts/test-backlog-no-truncation.mjs fails any slice on this store.
 const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500, backlogItem: 500 };
+// the unclaimed-HIGH reminder line's TEXT budget in BYTES (CJK = 3 B/char), shared by every group of one injection
+const HIGH_LINE_TEXT_BYTES = 600;
+// Multi-group payloads share ONE text budget for the "claimed by THIS session"
+// item lines too (2026-09-22 verifier: 2 groups × 5 CJK items ≈ 4.8 KB of item
+// text put a 2-group SessionStart at 9.8 KB before anything else was added);
+// past it an item keeps its id + marker + a short clip (`backlog-show <id>`).
+const MINE_LINE_TEXT_BYTES = 1500;
+const MINE_CLIP_OVER_BUDGET = 40;
 // Backlog (2.122.0) = the group's PARKING LOT for non-immediate items: deferred
 // user decisions, "later" work. Semantically NOT the removed checklist (agent
 // work items — those live on each session's own todo): injection never dumps
@@ -221,11 +233,14 @@ class TaskGroupManager {
     // injection payload (cap 0) deliberately omits it (user directive 2.122.0:
     // don't dump the backlog every hook; renderContext adds only a summary of
     // items THIS session parked + a one-line query pointer).
-    const openBl = (t.backlog || []).filter((b) => b.status === 'open');
+    // Listed in sortBacklog order (priority high → normal → low, newest first
+    // within a priority); `!` = high, `↓` = low after the id.
+    const openBl = sortBacklog((t.backlog || []).filter((b) => b.status === 'open'));
     if (cap > 0 && openBl.length) {
-      lines.push('', '## Backlog  _(parked — deferred decisions / future work, NOT immediate tasks)_', '');
+      lines.push('', '## Backlog  _(parked — deferred decisions / future work, NOT immediate tasks; `!` high · `↓` low)_', '');
       for (const b of openBl) {
-        lines.push(`- [${b.id || '?'}] ${b.text}${b.claimedBy?.length ? `  _(claimed by ${b.claimedBy.join(', ')})_` : ''}`);
+        // markedText: the marker, then the text — a text that itself begins "! "/"↓ " is backslash-escaped
+        lines.push(`- [${b.id || '?'}] ${markedText(b)}${b.claimedBy?.length ? `  _(claimed by ${b.claimedBy.join(', ')})_` : '  _(unclaimed)_'}`);
         if (b.detail) for (const dl of b.detail.split('\n')) lines.push(`  > ${dl}`);
       }
     }
@@ -404,7 +419,7 @@ class TaskGroupManager {
       `\`\`\``,
       `vibespace-task ${g}backlog-add "one-line item" --detail "context for whoever picks it up later"`,
       `\`\`\``,
-      `(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. \`vibespace-task ${g}backlog\` lists; \`backlog <id>\` shows one in full; \`backlog-claim/-unclaim <id>\` take/hand back ownership — if the user hands you a backlog id, view it and claim it; \`backlog-done <id>\` once decided or finished)`);
+      `(parking auto-CLAIMS the item for you — claimed items are re-surfaced to you and their changes notify you. \`vibespace-task ${g}backlog\` lists; \`backlog <id>\` shows one in full; \`backlog-claim/-unclaim <id>\` take/hand back ownership — if the user hands you a backlog id, view it and claim it; \`backlog-done <id>\` once decided or finished; \`--priority high|low\` on backlog-add/-edit ranks it — an unclaimed high item is shown to every session)`);
     if (T.status) out.push(
       '',
       "Your session's live state on the board — set it the MOMENT it changes. Waiting states REQUIRE both flags:",
@@ -433,32 +448,111 @@ class TaskGroupManager {
   }
 
   // Backlog note for INJECTION (user directive 2.122.0/2.123.0): never dump
-  // the whole backlog per hook — show a summary reminder of the OPEN items
-  // THIS session CLAIMED (the session that parks one auto-claims it), so the
-  // responsible agent re-surfaces them; otherwise just one line saying how to
-  // query/claim. Returns lines.
-  _backlogNoteLines(t, { gid = '', sessionKey = null, tools = null } = {}) {
+  // the whole backlog per hook. The SELECTION is selectReminders
+  // (src/backlog-select.js, 2026-09-22 — the store has no cap, so the read
+  // picks): ≤ 5 OPEN items THIS session CLAIMED, by priority then recency
+  // (the session that parks one auto-claims it, so the responsible agent
+  // re-surfaces them); ONE line naming the open HIGH items nobody owns (so an
+  // unowned urgent item cannot rot); everything else is a count. Returns lines.
+  //
+  // `isLiveClaim(key)` (optional — agent-routes passes "is that session
+  // running"): a high item whose claimants are all gone counts as unowned.
+  // `highBudget` = the BYTES the unclaimed-HIGH line may spend on item TEXT
+  // (default 600; ids beyond it). renderMultiContext passes ONE shared budget
+  // so N groups never repeat ~1.5 KB of CJK text each.
+  //
+  // `mineBudget` = the same for the claimed-item lines (multi-group only;
+  // absent = each item's own 160-char clip, the single-group shape).
+  //
+  // THE CLEANUP NUDGE (2026-09-22): when the items this session HOLDS (claimed
+  // or parked by it, open) reach `tasks.backlogNudgeAt` (default 20, 0 = off;
+  // `nudgeAt` overrides the setting for callers that already read it), the
+  // note ends with ONE nudgeText paragraph — the same words the route's
+  // add/edit/claim answers carry. `nudge: false` = the caller aggregates
+  // (renderMultiContext: ONE paragraph for every group, one 500 B budget).
+  // This note rides every FULL context injection (SessionStart, the codex
+  // first prompt, a full re-delivery); the turns in between get the same
+  // paragraph from prompt-context through backlogNudgeFor.
+  _backlogNoteLines(t, { gid = '', sessionKey = null, tools = null, isLiveClaim = null, highBudget = null, mineBudget = null, nudgeAt = null, nudge: withNudge = true } = {}) {
     if (tools && tools.task === false) return []; // backlog commands ride vibespace-task
     const open = (t.backlog || []).filter((b) => b.status === 'open');
     if (!open.length) return [];
-    const mine = sessionKey ? open.filter((b) => (b.claimedBy || []).includes(sessionKey)) : [];
-    const out = [''];
-    if (mine.length) {
-      out.push(`### Backlog reminders — items CLAIMED by THIS session, still open  _(surface them to the user when relevant; \`vibespace-task ${gid}backlog-done <id>\` once decided/finished; \`backlog-unclaim <id>\` to hand one back)_`);
-      for (const b of mine.slice(0, 5)) {
-        const clipped = b.text.length > 160;
-        out.push(`- [${b.id || '?'}] ${clipped ? b.text.slice(0, 159).trimEnd() + '…' : b.text}${(b.detail || clipped) ? ' †' : ''}`);
+    const LIMIT = 5;
+    const sel = selectReminders(open, sessionKey, { limit: LIMIT, isLive: isLiveClaim });
+    const clip = (txt, n) => (txt.length > n ? txt.slice(0, n - 1).trimEnd() + '…' : txt);
+    const budget = highBudget || { bytes: HIGH_LINE_TEXT_BYTES };
+    const highLine = () => {
+      if (!sel.unclaimedHigh.length) return [];
+      const more = sel.unclaimedHighTotal - sel.unclaimedHigh.length;
+      const parts = [];
+      let used = 0;
+      for (const b of sel.unclaimedHigh) {
+        const full = `[${b.id || '?'}] ${escapeItemText(clip(String(b.text || ''), 100))}${b.stale ? ' (claimant not running)' : ''}`;
+        const cost = Buffer.byteLength(full, 'utf-8') + 3;
+        if (used + cost <= budget.bytes) { parts.push(full); used += cost; } else parts.push(`[${b.id || '?'}]`);
       }
-      if (mine.length > 5) out.push(`- … +${mine.length - 5} more claimed by you`);
-      const others = open.length - mine.length;
+      budget.bytes = Math.max(0, budget.bytes - used);
+      return [`- unclaimed HIGH: ${parts.join(' · ')}${more > 0 ? ` · +${more} more` : ''}  _(no running session owns these — \`backlog-claim <id>\` if one is yours to carry)_`];
+    };
+    const out = [''];
+    if (sel.mine.length) {
+      out.push(`### Backlog reminders — items CLAIMED by THIS session, still open  _(highest priority first, \`!\` high · \`↓\` low; surface them to the user when relevant; \`vibespace-task ${gid}backlog-done <id>\` once decided/finished; \`backlog-unclaim <id>\` to hand one back)_`);
+      for (const b of sel.mine) {
+        let clipped = b.text.length > 160;
+        let text = clipped ? b.text.slice(0, 159).trimEnd() + '…' : b.text;
+        if (mineBudget) {
+          const cost = Buffer.byteLength(text, 'utf-8');
+          if (cost <= mineBudget.bytes) mineBudget.bytes -= cost;
+          else if (b.text.length > MINE_CLIP_OVER_BUDGET) { text = clip(b.text, MINE_CLIP_OVER_BUDGET); clipped = true; }
+        }
+        out.push(`- [${b.id || '?'}] ${markedText({ priority: b.priority, text })}${(b.detail || clipped) ? ' †' : ''}`);
+      }
+      if (sel.mineTotal > LIMIT) out.push(`- … +${sel.mineTotal - LIMIT} more claimed by you`);
+      out.push(...highLine());
+      const others = sel.othersCount;
       out.push(`(group backlog holds ${open.length} open parked item${open.length > 1 ? 's' : ''}${others ? ` incl. ${others} not claimed by you` : ''} — \`vibespace-task ${gid}backlog\` lists them)`);
     } else {
       out.push(`Group backlog: ${open.length} open parked item${open.length > 1 ? 's' : ''} (deferred decisions / future work — NOT immediate tasks; never start one unasked). \`vibespace-task ${gid}backlog\` lists them; \`backlog-claim <id>\` takes ownership of one.`);
+      out.push(...highLine());
+    }
+    if (withNudge) {
+      const e = this._nudgeEntry(t, sessionKey, gid, nudgeAt);
+      if (e) out.push(nudgeTextAll([e]));
     }
     return out;
   }
 
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null } = {}) {
+  // one group's nudge for this session, or null (under the threshold / off)
+  _nudgeEntry(t, sessionKey, gid = '', nudgeAt = null) {
+    const nudge = backlogNudge((t && t.backlog) || [], sessionKey, { threshold: nudgeAt != null ? nudgeAt : this.backlogNudgeAt() });
+    return nudge ? { nudge, gid, group: t.id } : null;
+  }
+
+  // THE nudge paragraph for a session across `groupIds` ('' = none): ONE
+  // paragraph under ONE 500 B budget however many groups are over the
+  // threshold (nudgeTextAll). Used by renderMultiContext and by the per-turn
+  // delivery (prompt-context) — one wording on every carrier. `multi` = the
+  // session belongs to several groups (commands carry --group). The backlog
+  // commands ride vibespace-task, so the task tool off ⇒ ''.
+  backlogNudgeFor(groupIds, sessionKey, { multi = false, tools = null, nudgeAt = null } = {}) {
+    if (!sessionKey || (tools && tools.task === false)) return '';
+    const entries = [];
+    for (const id of (groupIds || [])) {
+      const t = this._state.tasks[id];
+      if (!t || t.archived) continue;
+      const e = this._nudgeEntry(t, sessionKey, multi ? `--group ${id} ` : '', nudgeAt);
+      if (e) entries.push(e);
+    }
+    return nudgeTextAll(entries);
+  }
+
+  // `tasks.backlogNudgeAt` as a number (absent ⇒ 20; 0 = off) — the store's
+  // getSetting IS serverSetting in production (server.js)
+  backlogNudgeAt() {
+    try { return nudgeThreshold(this._getSetting?.('tasks.backlogNudgeAt')); } catch { return nudgeThreshold(undefined); }
+  }
+
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null } = {}) {
     const t = this.get(id);
     const parts = [
       `<vibespace-task-context>`,
@@ -467,7 +561,7 @@ class TaskGroupManager {
       '',
       // cap=0: meta/objective only — the log is appended LAST below.
       this.renderTaskMd(t, 0).replace(/\n---\n[\s\S]*$/, '').trim(),
-      ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey, tools }),
+      ...this._backlogNoteLines(t, { gid: multi ? `--group ${t.id} ` : '', sessionKey, tools, isLiveClaim }),
     ];
     // ── How to report back — self-documenting + scoped + enum-disambiguated ──
     // In multi-group payloads the tools section is emitted ONCE by
@@ -537,7 +631,7 @@ class TaskGroupManager {
       title: t.title,
       objHash: this._h(t.objective || ''),
       contextDir: t.contextDir || null,
-      backlog: (t.backlog || []).map((b) => ({ id: b.id, text: b.text, status: b.status || 'open', d: b.detail ? this._h(b.detail) : '', addedBy: b.addedBy || null, claimedBy: [...(b.claimedBy || [])] })),
+      backlog: (t.backlog || []).map((b) => ({ id: b.id, text: b.text, status: b.status || 'open', p: normalizePriority(b.priority), d: b.detail ? this._h(b.detail) : '', addedBy: b.addedBy || null, claimedBy: [...(b.claimedBy || [])] })),
       // New activity = entries with at > this. Two writes inside the SAME ms
       // split by an injection in between could drop one line from a diff —
       // accepted (unreachable in practice; recoverable via show --full).
@@ -612,6 +706,8 @@ class TaskGroupManager {
       const lost = oldClaims.filter((x) => !newClaims.includes(x));
       if (gained.length) blCh.push(`- Backlog CLAIMED [${b.id}]: ${b.text}  _(by ${gained.join(', ')})_`);
       if (lost.length) blCh.push(`- Backlog UNCLAIMED [${b.id}]: ${b.text}  _(${lost.join(', ')} handed it back)_`);
+      // a snapshot taken before priorities existed carries no `p` — that is not a change
+      if (st === 'open' && o.p !== undefined && o.p !== normalizePriority(b.priority)) blCh.push(`- Backlog priority ${o.p} → ${normalizePriority(b.priority)} [${b.id}]: ${b.text}`);
       if (st === 'open' && o.text !== b.text) blCh.push(`- Backlog item reworded [${b.id}]: ${b.text}`);
       else if (st === 'open' && (b.detail ? this._h(b.detail) : '') !== (o.d || '')) {
         blCh.push(`- Backlog item detail updated [${b.id}]: ${b.text}  _(† \`vibespace-task ${gid}show --full\`)_`);
@@ -781,11 +877,11 @@ class TaskGroupManager {
   // to the baseline tools intro). 1 → the normal single-group context. N → each
   // group's context, prefaced so the agent knows it spans multiple 岗位 and must
   // use `--group <id>` to act on a specific one.
-  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null } = {}) {
+  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null, isLiveClaim = null } = {}) {
     const ids = (groupIds || []).filter((id) => this._state.tasks[id] && !this._state.tasks[id].archived);
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
-    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools });
+    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools, isLiveClaim });
     // LAYERED, not per-group blocks (user directive): tools → ALL identities →
     // ALL shared folders → ALL activity logs. Truncation then degrades by
     // LAYER — the first group's bulk can no longer erase the very EXISTENCE of
@@ -799,15 +895,23 @@ class TaskGroupManager {
     ];
     head.push(...this._toolsSectionParts('--group <id> ', true, tools));
     head.push('', '## Your Task Groups');
+    // ONE text budget for every group's unclaimed-HIGH line — past it, ids
+    // only — and ONE for every group's claimed-item lines (short clips past it)
+    const highBudget = { bytes: HIGH_LINE_TEXT_BYTES };
+    const mineBudget = { bytes: MINE_LINE_TEXT_BYTES };
     for (const id of ids) {
       // renderTaskMd's H1/H2 demoted one level so groups nest under the layer heading
       const md = this.renderTaskMd(ts[id], 0).replace(/\n---\n[\s\S]*$/, '').trim().replace(/^(#{1,2}) /gm, '#$1 ');
       head.push('', md);
       // per-group backlog note (own-parked summary or a one-line pointer)
-      const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey, tools })
+      const bl = this._backlogNoteLines(ts[id], { gid: `--group ${id} `, sessionKey, tools, isLiveClaim, highBudget, mineBudget, nudge: false })
         .map((l) => l.replace(/^### /, '#### '));
       head.push(...bl);
     }
+    // THE cleanup nudge, ONCE for every group over the threshold (one 500 B
+    // budget — N per-group paragraphs pushed a 2-group payload past 10 KiB)
+    const nudge = this.backlogNudgeFor(ids, sessionKey, { multi: true, tools });
+    if (nudge) head.push('', nudge);
     const withDir = ids.filter((id) => ts[id].contextDir);
     if (withDir.length) {
       head.push('', `## Shared context folders (each group's shared memory)`, '',
@@ -1035,6 +1139,8 @@ class TaskGroupManager {
         id: (typeof it?.id === 'string' && BACKLOG_ID_RE.test(it.id) && !taken.has(it.id)) ? (taken.add(it.id), it.id) : mintBacklogId(taken),
         text: String(it?.text || '').slice(0, CAPS.backlogItem),
         status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
+        // closed set high|normal|low — anything else (absent, typo) is 'normal'
+        priority: normalizePriority(it?.priority),
         // sessions that CLAIMED the item (reminder + diff-notification targets)
         claimedBy: sanitizeStrArray(it?.claimedBy, 20),
         // optional full context behind the one-liner (same split as Activity)
@@ -1134,6 +1240,7 @@ class TaskGroupManager {
       'kind: ' + t.kind,
       'archived: ' + (t.archived ? 'true' : 'false'),
       'color: ' + (t.color ? JSON.stringify(t.color) : 'null'),
+      'backlog_priority: markers',
       '---',
       '',
     ];
@@ -1147,9 +1254,12 @@ class TaskGroupManager {
     const bl = t.backlog || [];
     if (bl.length) {
       body.push('', '## Backlog', '');
-      // [ ] open · [x] done · [-] dropped; the [B-xxxx] id round-trips — parsed back on import
+      // [ ] open · [x] done · [-] dropped; the [B-xxxx] id round-trips — parsed back on import;
+      // a priority marker after the id (`!` high · `↓` low · none = normal) round-trips too, and a
+      // text that itself begins "! "/"↓ " is backslash-escaped (markedText) so it never reads back
+      // as one. The frontmatter's `backlog_priority: markers` tells the reader to parse markers.
       for (const b of bl) {
-        body.push(`- [${b.status === 'done' ? 'x' : b.status === 'dropped' ? '-' : ' '}]${b.id ? ` [${b.id}]` : ''} ${b.text}`);
+        body.push(`- [${b.status === 'done' ? 'x' : b.status === 'dropped' ? '-' : ' '}]${b.id ? ` [${b.id}]` : ''} ${markedText(b)}`);
         if (b.detail) for (const dl of b.detail.split('\n')) body.push(`  > ${dl}`);
       }
     }
@@ -1209,13 +1319,22 @@ class TaskGroupManager {
     // Backlog = "- [ |x|-] text" lines under "## Backlog" (open/done/dropped);
     // blockquote continuations = the preceding item's detail (export round-trip)
     const backlog = [];
+    const markersOn = fm.backlog_priority === 'markers';
     const blM = body.match(/##\s+Backlog\s*\n([\s\S]*?)(?=\n##\s+(?:Plan|Checklist|Progress|Activity log)\b|$)/i);
     if (blM) {
       for (const line of blM[1].split('\n')) {
-        const bm = line.match(/^\s*-\s*\[([ xX-])\]\s+(?:\[(B-[0-9a-fA-F]{4,8})\]\s+)?(.+)$/);
+        // optional priority marker after the id: `!` high · `↓` low — read ONLY
+        // in a file whose frontmatter says `backlog_priority: markers` (written
+        // since priorities exist; there a marker-like text is `\`-escaped). A
+        // file without it (every file written before priorities) is taken
+        // VERBATIM: its lines are normal and "! text" stays text.
+        const bm = markersOn
+          ? line.match(/^\s*-\s*\[([ xX-])\]\s+(?:\[(B-[0-9a-fA-F]{4,8})\]\s+)?(?:([!↓])\s+)?(.+)$/)
+          : line.match(/^\s*-\s*\[([ xX-])\]\s+(?:\[(B-[0-9a-fA-F]{4,8})\]\s+)?()(.+)$/);
         if (bm) {
           const mark = bm[1].toLowerCase();
-          backlog.push({ ...(bm[2] ? { id: bm[2] } : {}), text: bm[3].trim().slice(0, CAPS.backlogItem), status: mark === 'x' ? 'done' : mark === '-' ? 'dropped' : 'open' });
+          const txt = markersOn ? unescapeItemText(bm[4].trim()) : bm[4].trim();
+          backlog.push({ ...(bm[2] ? { id: bm[2] } : {}), text: txt.slice(0, CAPS.backlogItem), status: mark === 'x' ? 'done' : mark === '-' ? 'dropped' : 'open', priority: bm[3] === '!' ? 'high' : bm[3] === '↓' ? 'low' : 'normal' });
           continue;
         }
         const dm = line.match(/^\s*>\s?(.*)$/);
@@ -1264,6 +1383,7 @@ class TaskGroupManager {
             ...(prev || {}),
             ...b,
             id: (b.id && BACKLOG_ID_RE.test(b.id) && !taken.has(b.id)) ? (taken.add(b.id), b.id) : mintBacklogId(taken),
+            priority: normalizePriority(b.priority),
             claimedBy: Array.isArray(b.claimedBy) && b.claimedBy.length ? b.claimedBy : (prev?.claimedBy || []),
           };
         });
@@ -1308,6 +1428,7 @@ class TaskGroupManager {
             id: (typeof it?.id === 'string' && BACKLOG_ID_RE.test(it.id) && !taken.has(it.id)) ? (taken.add(it.id), it.id) : mintBacklogId(taken),
             text: String(it?.text || '').slice(0, CAPS.backlogItem),
             status: BACKLOG_STATUSES.includes(it?.status) ? it.status : 'open',
+            priority: normalizePriority(it?.priority),
             claimedBy: sanitizeStrArray(it?.claimedBy, 20),
             ...(typeof it?.detail === 'string' && it.detail ? { detail: it.detail.slice(0, CAPS.detail) } : {}),
             ...(it?.addedBy ? { addedBy: String(it.addedBy).slice(0, 120) } : {}),
@@ -1334,4 +1455,4 @@ class TaskGroupManager {
   }
 }
 
-module.exports = { TaskGroupManager };
+module.exports = { TaskGroupManager, BACKLOG_PRIORITIES };

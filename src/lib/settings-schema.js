@@ -571,6 +571,12 @@ const SETTINGS_SCHEMA = {
     description: t('After nudging a session once, wait at least this long before nudging it again — the ceiling on how often an agent pays the bookkeeping mini-turn. 0 = no cooldown.'),
     category: t('Integration'), liveApply: true,
   },
+  'tasks.backlogNudgeAt': {
+    type: 'number', default: 20, min: 0, max: 1000, step: 1,
+    label: t('Backlog cleanup nudge: items per session'),
+    description: t('When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.stopBookkeepingNudge': {
     type: 'boolean', default: true,
     label: t('Stop-time bookkeeping nudge for agents'),

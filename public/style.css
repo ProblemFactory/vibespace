@@ -4474,3 +4474,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .window.tab-split > .tab-split-divider { display: none !important; }
   .window.tab-split > .window-content.tab-split-pane.tab-split-focus { box-shadow: none; }
 }
+/* backlog priority chip (Task Group log → Backlog): high = accent, low = muted, normal = none */
+.bl-prio { flex-shrink: 0; font-size: 9px; line-height: 14px; padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid transparent; }
+.bl-prio-high { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.bl-prio-low { color: var(--text-dim); border-color: var(--border); }
+.task-log-edit-prio { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }

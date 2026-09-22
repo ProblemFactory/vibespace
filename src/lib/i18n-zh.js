@@ -4341,4 +4341,9 @@ export default {
   "Could not take over": "无法接管",
   "Could not hand back": "无法交还",
   "{label} — agent window": "{label} — agent 窗口",
+  "Priority": "优先级",
+  "High priority": "高优先级",
+  "Low priority": "低优先级",
+  "Backlog cleanup nudge: items per session": "待办清理提醒：每会话条目数",
+  "When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.": "当一个会话持有这么多未完成的待办条目（由它认领或搁置）时，它的待办命令和每轮待办提示会要求它先完成、丢弃或合并条目，再搁置新的。0 = 从不提醒。",
 };

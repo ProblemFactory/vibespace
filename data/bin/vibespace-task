@@ -14,6 +14,7 @@ let group = '';
 let detail = '';
 let hasDetailFlag = false; // distinguish "no --detail" from "--detail ''" (edit clears detail)
 let newText;               // undefined = no --text; '' = explicit empty (rejected for text)
+let priority;              // undefined = no --priority; the server refuses a value outside high|normal|low
 const gflags = {};         // group-admin verbs: --title/--objective/--context-dir/--color/--archived/--session
 const gfolders = [];       // repeatable --folder
 let full = false;
@@ -34,6 +35,9 @@ for (let i = 0; i < rawArgs.length; i++) {
   if (a === '--folder' && rawArgs[i + 1] !== undefined) { gfolders.push(rawArgs[++i]); continue; }
   const gf = /^--folder=([\s\S]*)$/.exec(a);
   if (gf) { gfolders.push(gf[1]); continue; }
+  if (a === '--priority' && rawArgs[i + 1] !== undefined) { priority = rawArgs[++i]; continue; }
+  const mp = /^--priority=(.*)$/.exec(a);
+  if (mp) { priority = mp[1]; continue; }
   if (a === '--full') { full = true; continue; }
   argv.push(a);
 }
@@ -45,16 +49,21 @@ const USAGE = [
   '  vibespace-task progress "one-line summary" [--detail "full context"]',
   '      append to the Activity log. The SUMMARY is what everyone sees inline — keep it one tight line;',
   '      put specifics (numbers, paths, caveats other agents may need) in --detail.',
-  '  vibespace-task backlog [<id|#|text>] [--full]   list open backlog items — or show ONE in full (by its B-xxxx id,',
-  '      open-list number, or unique text; works for resolved items too — if the user hands you an id, start here)',
-  '  vibespace-task backlog-add "item" [--detail "context"]',
+  '  vibespace-task backlog [<id|#|text>] [--full]   list open backlog items — highest priority first, newest first within',
+  '      a priority (`!` high · `↓` low; (you) / (unclaimed) / (claimed by N)) — or show ONE in full (by its B-xxxx id,',
+  '      list number, or unique text; works for resolved items too — if the user hands you an id, start here)',
+  '  vibespace-task backlog-add "item" [--detail "context"] [--priority high|normal|low]',
   '      PARK a non-immediate item: a decision the user deferred, or work they said comes later.',
   '      NOT for your own working steps (session todo) and NOT things to start now. Parking auto-CLAIMS it for you.',
+  '      --priority (default normal): high = must not be forgotten — a high item no RUNNING session owns is reminded',
+  '      to every session of the group; low = someday. Your reminders show YOUR claimed items by priority, then recency.',
+  '  (a # is the number in the list YOU were last shown by `backlog` / `show`; prefer the B-xxxx id for the verbs below)',
   '  vibespace-task backlog-claim <id|#|text>     claim an item — claimed items are re-surfaced to you and their changes notify you',
   '  vibespace-task backlog-unclaim <id|#|text>   hand a claimed item back',
   '  vibespace-task backlog-done <id|#|text>      mark a parked item decided/finished',
   '  vibespace-task backlog-drop <id|#|text>      drop a parked item as obsolete',
-  '  vibespace-task backlog-edit <id|#|text> [--text "new"] [--detail "new"]   edit an item in place (id stays; --detail "" clears)',
+  '  vibespace-task backlog-edit <id|#|text> [--text "new"] [--detail "new"] [--priority high|normal|low]',
+  '      edit an item in place (id stays; --detail "" clears)',
   '  Group manager verbs (need the user-enabled setting + this session designated as Group manager;',
   '  a manager organizes ALL groups — not just the ones this session belongs to):',
   '  vibespace-task group-list                    id + title of every group (avoid duplicates before creating)',
@@ -80,31 +89,50 @@ async function call(method, url, body) {
   if (!res.ok) { console.error('vibespace-task:', data.error || res.status); process.exit(1); }
   return data;
 }
-const fmtBacklog = (items, showDetail) => {
+// The listing is printed in the order the SERVER sent it = sortBacklog
+// (src/backlog-select.js: priority high → normal → low, newest first) — the
+// numbers MUST match the server's findIdx, so this file never re-sorts (it is
+// shipped to hosts without a checkout and cannot require the module).
+const MARK = { high: '! ', low: '↓ ' };
+const fmtBacklog = (items, showDetail, you) => {
   items.forEach((b, i) => {
-    const claims = (b.claimedBy || []).length;
-    console.log('  ' + (i + 1) + '. [' + (b.id || '?') + '] ' + b.text
+    const claimed = b.claimedBy || [];
+    const mine = !!you && claimed.includes(you);
+    const others = claimed.filter((k) => k !== you).length;
+    const tail = mine ? '  (you' + (others ? ' + ' + others + ' other' + (others > 1 ? 's' : '') : '') + ')'
+      : claimed.length ? '  (claimed by ' + claimed.length + ')' : '  (unclaimed)';
+    console.log('  ' + (i + 1) + '. ' + (MARK[b.priority] || '') + '[' + (b.id || '?') + '] ' + b.text
       + (b.detail && !showDetail ? '  †' : '')
-      + (claims ? '  (claimed' + (showDetail ? ' by ' + b.claimedBy.join(', ') : ' ×' + claims) + ')' : '  (unclaimed)'));
+      + tail);
+    if (showDetail && claimed.length) console.log('       claimed by ' + claimed.join(', '));
     if (showDetail && b.addedBy) console.log('       parked by ' + b.addedBy + (b.addedAt ? ' at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
     if (showDetail && b.detail) for (const dl of b.detail.split('\n')) console.log('       ' + dl);
   });
   if (!showDetail && items.some((b) => b.detail)) console.log('  († = has detail — rerun with --full)');
 };
 const printItem = (b) => {
-  console.log('[' + (b.id || '?') + '] ' + b.text + '   status: ' + (b.status || 'open'));
+  console.log('[' + (b.id || '?') + '] ' + b.text + '   status: ' + (b.status || 'open') + '   priority: ' + (b.priority || 'normal'));
   if (b.addedBy) console.log('  parked by: ' + b.addedBy + (b.addedAt ? '  at ' + new Date(b.addedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
   console.log('  claimed by: ' + ((b.claimedBy || []).join(', ') || '(no one — `vibespace-task backlog-claim ' + (b.id || '<id>') + '` to take it)'));
   if (b.resolvedBy) console.log('  resolved by: ' + b.resolvedBy + (b.resolvedAt ? '  at ' + new Date(b.resolvedAt).toISOString().slice(0, 16).replace('T', ' ') : ''));
   if (b.detail) { console.log('  detail:'); for (const dl of b.detail.split('\n')) console.log('    ' + dl); }
 };
+// THE CLEANUP NUDGE (2026-09-22): add / edit / claim answer with `nudge` when
+// this session holds too many open items — print the server's paragraph as-is
+const printNudge = (r) => { if (r && r.nudge && r.nudge.text) console.log('note: ' + r.nudge.text); };
+// --priority against a server that predates backlog priority (checkout updated,
+// server not yet restarted): it stores the item and IGNORES the field — never
+// claim it was set; say so (an item with no priority field reads as normal)
+const priorityRecorded = (item) => priority === undefined || (!!item && (item.priority || 'normal') === priority);
+const printPriorityUnrecorded = (id) => console.log('note: the server did not record --priority ' + priority
+  + ' (it predates backlog priority — restart VibeSpace after updating, then `vibespace-task backlog-edit ' + (id || '<id>') + ' --priority ' + priority + '`)');
 async function printShow() {
-  const { task } = await call('GET', '/api/agent/task');
+  const { task, you } = await call('GET', '/api/agent/task');
   console.log('# ' + task.title + ' (' + task.id + ')' + (task.archived ? ' [archived]' : ''));
   if (task.objective) console.log('\nObjective: ' + task.objective);
   if (task.backlog && task.backlog.length) {
     console.log('\nBacklog (parked, NOT immediate — never start one unasked):');
-    fmtBacklog(task.backlog, full);
+    fmtBacklog(task.backlog, full, you);
   }
   if (task.progress && task.progress.length) {
     console.log('\nActivity log (recent):');
@@ -137,13 +165,13 @@ async function main() {
       printItem(item);
       return;
     }
-    const { task } = await call('GET', '/api/agent/task');
-    if (!task.backlog || !task.backlog.length) { console.log('backlog empty — park a non-immediate item with: vibespace-task backlog-add "item" [--detail "context"]'); return; }
-    console.log('Open backlog (parked, NOT immediate — never start one unasked; claim with backlog-claim <id>):');
-    fmtBacklog(task.backlog, full);
+    const { task, you } = await call('GET', '/api/agent/task');
+    if (!task.backlog || !task.backlog.length) { console.log('backlog empty — park a non-immediate item with: vibespace-task backlog-add "item" [--detail "context"] [--priority high|normal|low]'); return; }
+    console.log('Open backlog (parked, NOT immediate — never start one unasked; claim with backlog-claim <id>; `!` high · `↓` low):');
+    fmtBacklog(task.backlog, full, you);
   } else if (cmd === 'backlog-add') {
     if (!arg) { console.error('vibespace-task: backlog-add needs text, e.g. vibespace-task backlog-add "user will pick a DB later" --detail "options discussed: ..."'); process.exit(1); }
-    const r = await call('POST', '/api/agent/task-backlog', { add: arg, ...(detail ? { detail } : {}) });
+    const r = await call('POST', '/api/agent/task-backlog', { add: arg, ...(detail ? { detail } : {}), ...(priority !== undefined ? { priority } : {}) });
     // the echo is the STORED item the server found by identity — never the
     // last element of the list (2026-09-22: a full store echoed a stranger's id).
     // An OLDER server (built before 2.369.150, still running on instances that
@@ -154,7 +182,9 @@ async function main() {
     const added = String(arg).trim();
     const mine = (r && r.item) || ((r && r.backlog) || []).find((b) => b && b.text === added && b.status === 'open') || null;
     if (!mine || !mine.id) { console.error('vibespace-task: the server did not store the item — nothing parked'); process.exit(1); }
-    console.log('parked as [' + mine.id + ']' + (detail ? ' (with detail)' : '') + ' — auto-claimed by you; it will be re-surfaced to you; do not start it unasked');
+    console.log('parked as [' + mine.id + ']' + (mine.priority && mine.priority !== 'normal' ? ' priority ' + mine.priority : '') + (detail ? ' (with detail)' : '') + ' — auto-claimed by you; it will be re-surfaced to you; do not start it unasked');
+    if (!priorityRecorded(mine)) printPriorityUnrecorded(mine.id);
+    printNudge(r);
   } else if (cmd === 'backlog-claim' || cmd === 'backlog-unclaim') {
     if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item id, number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
     const r = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-claim' ? { claim: arg } : { unclaim: arg });
@@ -163,22 +193,32 @@ async function main() {
       console.log((r.alreadyMine ? 'you had already claimed ' + id : 'claimed ' + id) + '— the item will be re-surfaced to you and its changes will notify you');
       const others = r.others || [];
       if (others.length) console.log('note: ALSO claimed by ' + others.join(', ') + ' — coordinate with them to avoid duplicate work');
+      printNudge(r);
     } else {
       console.log('unclaimed — you will no longer be reminded of it');
     }
   } else if (cmd === 'backlog-done' || cmd === 'backlog-drop') {
     if (!arg) { console.error('vibespace-task: ' + cmd + ' needs an item id, number or unique text (run `vibespace-task backlog` to see them)'); process.exit(1); }
-    const { backlog } = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-done' ? { done: arg } : { drop: arg });
-    console.log((cmd === 'backlog-done' ? 'resolved' : 'dropped') + '; ' + backlog.length + ' still open');
+    const { backlog, item } = await call('POST', '/api/agent/task-backlog', cmd === 'backlog-done' ? { done: arg } : { drop: arg });
+    // name WHICH item was resolved (the server echoes it by id) so a wrong hit is visible at once
+    console.log((cmd === 'backlog-done' ? 'resolved' : 'dropped') + (item && item.id ? ' [' + item.id + '] ' + item.text : '') + '; ' + backlog.length + ' still open');
   } else if (cmd === 'backlog-edit') {
-    if (!arg) { console.error('vibespace-task: backlog-edit needs an item id/number/text, then --text and/or --detail\n   e.g. vibespace-task backlog-edit B-1a2b --text "new summary" --detail "updated context"\n   (--detail "" clears the detail; the item id stays, so references survive)'); process.exit(1); }
-    if (newText === undefined && !hasDetailFlag) { console.error('vibespace-task: backlog-edit needs --text and/or --detail to change'); process.exit(1); }
+    if (!arg) { console.error('vibespace-task: backlog-edit needs an item id/number/text, then --text, --detail and/or --priority\n   e.g. vibespace-task backlog-edit B-1a2b --text "new summary" --detail "updated context" --priority high\n   (--detail "" clears the detail; the item id stays, so references survive)'); process.exit(1); }
+    if (newText === undefined && !hasDetailFlag && priority === undefined) { console.error('vibespace-task: backlog-edit needs --text, --detail and/or --priority to change'); process.exit(1); }
     const body = { edit: arg };
     if (newText !== undefined) body.text = newText;
     if (hasDetailFlag) body.detail = detail;
+    if (priority !== undefined) body.priority = priority;
     const r = await call('POST', '/api/agent/task-backlog', body);
     const id = r.item && r.item.id ? '[' + r.item.id + '] ' : '';
-    console.log('updated ' + id + (newText !== undefined ? 'text ' : '') + (newText !== undefined && hasDetailFlag ? '+ ' : '') + (hasDetailFlag ? (detail.trim() === '' || detail.trim() === '-' ? 'detail cleared ' : 'detail ') : ''));
+    const changed = [];
+    if (newText !== undefined) changed.push('text');
+    if (hasDetailFlag) changed.push(detail.trim() === '' || detail.trim() === '-' ? 'detail cleared' : 'detail');
+    const prioOk = priorityRecorded(r.item); // the echoed item carries it, or the change is not claimed
+    if (priority !== undefined && prioOk) changed.push('priority ' + priority);
+    console.log('updated ' + id + changed.join(' + '));
+    if (!prioOk) printPriorityUnrecorded(r.item && r.item.id ? r.item.id : arg);
+    printNudge(r);
   } else if (cmd === 'group-list') {
     const { groups } = await call('POST', '/api/agent/group-admin', { list: true });
     if (!groups.length) { console.log('no Task Groups yet'); return; }

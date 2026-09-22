@@ -4340,4 +4340,9 @@ export default {
   "Could not take over": "引き継げませんでした",
   "Could not hand back": "戻せませんでした",
   "{label} — agent window": "{label} — エージェントウィンドウ",
+  "Priority": "優先度",
+  "High priority": "高優先度",
+  "Low priority": "低優先度",
+  "Backlog cleanup nudge: items per session": "バックログ整理ナッジ：セッションあたりの項目数",
+  "When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.": "1 つのセッションが（自分で引き受けた、または保留した）未解決のバックログ項目をこの数だけ抱えると、そのバックログコマンドとターンごとのバックログ通知が、新しく保留する前に項目の完了・破棄・統合を求めます。0 = 通知しない。",
 };

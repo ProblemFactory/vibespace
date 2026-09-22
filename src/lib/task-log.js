@@ -1,6 +1,9 @@
-import { escHtml, showToast } from './utils.js';
+import { escHtml, showToast, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { registerOpenAction } from './window-types.js';
+// the ONE backlog order every reader shares (PURE CJS, esbuild interop like
+// backend-caps): open by priority high → normal → low, newest first within one
+import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../backlog-select.js';
 
 /**
  * Task Group log viewer — a full-window browser for the two lists that
@@ -201,7 +204,8 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     wireChips(body);
   };
 
-  // ── Backlog tab: open first, then resolved; expandable detail + inline edit ──
+  // ── Backlog tab: open first (by priority, newest first — sortBacklog), then
+  //    resolved; expandable detail + inline edit; a priority chip per row ──
   const STATUS_META = () => ({
     open: { icon: '○', label: t('Open') },
     done: { icon: '✓', label: t('Done') },
@@ -209,7 +213,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   });
   const renderBacklog = (body) => {
     const items = (task.backlog || []).map((b, i) => ({ ...b, _i: i }));
-    const visible = items.filter((it) =>
+    const visible = sortBacklog(items).filter((it) =>
       (state.statusFilter === 'all' || it.status === state.statusFilter)
       && (!state.session || it.addedBy === state.session || it.resolvedBy === state.session)
       && (matches(it.text) || matches(it.detail)));
@@ -218,6 +222,22 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     const patchItem = (idx, fn) => {
       const next = task.backlog.map((b, j) => (j === idx ? fn({ ...b }) : b));
       sidebar._taskUpdate(taskId, { backlog: next.filter(Boolean) });
+    };
+    // Priority: ONE whole-backlog write through the same persistence path; the
+    // store's tasks-updated broadcast repaints (never a local mutation).
+    const PRIO_LABEL = () => ({ high: t('High'), normal: t('Normal'), low: t('Low') });
+    const setPriority = (it, p) => {
+      if (normalizePriority(it.priority) === p) return;
+      patchItem(it._i, (b) => ({ ...b, priority: p }));
+    };
+    const prioChip = (p) => {
+      const n = normalizePriority(p);
+      if (n === 'normal') return null;
+      const c = document.createElement('span');
+      c.className = 'bl-prio bl-prio-' + n;
+      c.textContent = PRIO_LABEL()[n];
+      c.title = n === 'high' ? t('High priority') : t('Low priority');
+      return c;
     };
 
     const attrHtml = (it) => {
@@ -252,6 +272,19 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       ta.className = 'task-log-edit-detail'; ta.rows = 5;
       ta.placeholder = t('Detail — context, options discussed, why it was deferred (optional)');
       ta.value = it.detail || '';
+      const prioWrap = document.createElement('label');
+      prioWrap.className = 'task-log-edit-prio';
+      const prioLbl = document.createElement('span');
+      prioLbl.textContent = t('Priority');
+      const ps = document.createElement('select');
+      ps.className = 'task-log-sessfilter';
+      for (const p of PRIORITIES) {
+        const o = document.createElement('option');
+        o.value = p; o.textContent = PRIO_LABEL()[p];
+        if (normalizePriority(it.priority) === p) o.selected = true;
+        ps.appendChild(o);
+      }
+      prioWrap.append(prioLbl, ps);
       const btns = document.createElement('div');
       btns.className = 'task-log-edit-btns';
       const save = document.createElement('button');
@@ -259,13 +292,13 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       save.onclick = () => {
         const text = ti.value.trim();
         if (!text) return;
-        patchItem(it._i, (b) => { b.text = text; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; });
+        patchItem(it._i, (b) => { b.text = text; b.priority = ps.value; if (ta.value.trim()) b.detail = ta.value.trim(); else delete b.detail; return b; });
       };
       const cancel = document.createElement('button');
       cancel.className = 'task-detail-btn'; cancel.textContent = t('Cancel');
       cancel.onclick = () => render();
       btns.append(save, cancel);
-      form.append(ti, ta, btns);
+      form.append(ti, prioWrap, ta, btns);
       replaceEl.replaceWith(form);
       ti.focus();
     };
@@ -302,6 +335,8 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
         };
         top.appendChild(idc);
       }
+      const chip = prioChip(it.priority);
+      if (chip) top.appendChild(chip);
       const txt = document.createElement('span');
       txt.className = 'task-log-note';
       txt.textContent = it.text;
@@ -333,6 +368,17 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       metaRow.innerHTML = attrHtml(it);
       line.appendChild(metaRow);
 
+      // right-click / long-press: the row's menu — a Priority submenu (three
+      // choices, the current one ticked) beside the verbs the buttons carry
+      line.addEventListener('contextmenu', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const cur = normalizePriority(it.priority);
+        showContextMenu(e.clientX, e.clientY, [
+          { label: t('Priority'), children: PRIORITIES.map((p) => ({ label: (p === cur ? '✓ ' : '\u2003') + PRIO_LABEL()[p], action: () => setPriority(it, p) })) },
+          { separator: true },
+          { label: t('Edit text and detail'), action: () => editForm(it, row) },
+        ]);
+      });
       row.appendChild(line);
       if (isExp) {
         const d = document.createElement('div');
@@ -422,9 +468,10 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
         return `- ${new Date(p.at).toISOString().slice(0, 16).replace('T', ' ')} ${p.note}${who}${detail}`;
       }).join('\n');
     } else {
-      md = (task.backlog || [])
+      // the view's own order (sortBacklog) and TASK.md's markers (`!` high · `↓` low)
+      md = sortBacklog(task.backlog || [])
         .filter((it) => (state.statusFilter === 'all' || it.status === state.statusFilter) && (matches(it.text) || matches(it.detail)))
-        .map((it) => `- [${it.status === 'done' ? 'x' : it.status === 'dropped' ? '-' : ' '}] ${it.text}${it.resolvedBy ? ` _(${sessionLabel(it.resolvedBy)})_` : ''}${it.detail ? '\n' + it.detail.split('\n').map((l) => '  > ' + l).join('\n') : ''}`).join('\n');
+        .map((it) => `- [${it.status === 'done' ? 'x' : it.status === 'dropped' ? '-' : ' '}] ${priorityMarker(it.priority) ? priorityMarker(it.priority) + ' ' : ''}${it.text}${it.resolvedBy ? ` _(${sessionLabel(it.resolvedBy)})_` : ''}${it.detail ? '\n' + it.detail.split('\n').map((l) => '  > ' + l).join('\n') : ''}`).join('\n');
     }
     import('./utils.js').then(({ copyText }) => copyText(md).then(() => showToast(t('Copied'))));
   };
