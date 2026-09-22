@@ -233,6 +233,11 @@ const SETTINGS_SCHEMA = {
     description: t('Prevent Claude\'s OSC title updates from overwriting user-set session names'),
     category: t('Terminal'), liveApply: true,
   },
+  'terminal.webgl': {
+    type: 'boolean', default: true, label: t('WebGL renderer'),
+    description: t('Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).'),
+    category: t('Terminal'), liveApply: false,
+  },
   'terminal.preserveScrollOnFit': {
     type: 'boolean', default: false, label: t('Preserve scroll on resize'),
     description: t('Keep viewport scroll position anchored when terminal is resized'),

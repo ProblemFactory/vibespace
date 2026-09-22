@@ -14,6 +14,7 @@
  */
 
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
+const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -1729,13 +1730,13 @@ function parseBackgroundLaunch(toolName, input, resultText) {
     // `scriptPath` has no `input.name` and the ack is "Workflow launched in
     // background… Summary: <meta.description>" — the name is the Summary line,
     // then the inline script's `meta.name`, then the script file's basename.
-    const nm = txt.match(/Workflow ["\u201c]([^"\u201d\n]+)["\u201d]/)?.[1]
-      || txt.match(/^Summary:\s*(.+?)\s*$/m)?.[1]
-      || input?.name
-      || String(input?.script || '').match(/export\s+const\s+meta\s*=\s*\{[^}]*?\bname\s*:\s*['"]([^'"]+)['"]/)?.[1]
-      || String(input?.scriptPath || '').split('/').pop()?.replace(/\.[cm]?js$/, '')
-      || 'workflow';
-    return { id: rid, type: 'workflow', description: String(nm).slice(0, 120) };
+    const nm = workflowNameFromAck(input, txt) || 'workflow';
+    // the chip needs a SHORT name (owner: "这个任务名称是不是太长了"): the ack's
+    // Summary line is the run's whole description — keep it whole as `summary`
+    // and derive the label: the leading id-like token before ':' / ' — ' when
+    // it reads like a name (≤ 40 chars, no spaces), else the first clause cut
+    // at a word boundary near 48 chars.
+    return { id: rid, type: 'workflow', description: shortWorkflowName(nm), summary: String(nm).slice(0, 300) };
   }
   const bg = txt.match(/^Command running in background with ID:\s*([\w-]+)/);
   if (bg) return { id: bg[1], type: 'command', description: String(input?.description || input?.command || '').slice(0, 120) };

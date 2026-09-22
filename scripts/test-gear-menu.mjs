@@ -325,6 +325,19 @@ const searched = await evalJs(`(() => { const g = document.querySelector('.setti
 check('a search shows every matching category even inside a folded group (the fold is not a filter)', !!searched && searched.present && searched.folded === false && searched.items.includes('Channels'), searched);
 await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); document.querySelector('.settings-window')?.remove(); true`);
 
+// ── 2.369.137 the freeze probe: an automatic capture carries the GPU/canvas inventory ──
+{
+  const id = await evalJs(`app.autoCaptureIncident('probe', 'suite')`);
+  check(`autoCaptureIncident answers an incident id (${id})`, typeof id === 'string' && /^inc-/.test(id), id);
+  const second = await evalJs(`app.autoCaptureIncident('probe', 'again')`);
+  check('a second auto capture inside 10 minutes is refused (rate limit)', second === null, second);
+  let bundle = null;
+  try { bundle = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'incidents', String(id), 'bundle.json'), 'utf8')); } catch (e) { bundle = { error: String(e.message) }; }
+  const inv = bundle && bundle.client && bundle.client.snapshot && bundle.client.snapshot.inventory;
+  check('the bundle note names the freeze and the snapshot carries the inventory (canvases, webgl, domNodes, screen, memory, visibility)', !!inv && typeof inv.canvases === 'number' && 'webgl' in inv && typeof inv.domNodes === 'number' && inv.screen && typeof inv.screen.dpr === 'number' && 'memory' in inv && typeof inv.visibility === 'string' && /^auto: probe — suite/.test(bundle.note || ''), JSON.stringify({ note: bundle && bundle.note, inv }).slice(0, 400));
+  const toast = await evalJs(`[...document.querySelectorAll('#global-toasts *')].map((e) => e.textContent).join(' | ')`);
+  check('the capture is not silent: a toast names the incident id', new RegExp(String(id)).test(toast), toast);
+}
 console.log(`screenshots: ${SHOTS}`);
 console.log(failed ? `FAILED (${failed})` : 'ALL PASS');
 process.exit(failed ? 1 : 0);

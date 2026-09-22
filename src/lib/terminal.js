@@ -68,6 +68,7 @@ async function _buildFontList() {
 
 function getAvailableFonts() { return _fontList || [{ label: 'System Default', value: 'monospace' }]; }
 
+try { window.__vsWebglCount = () => TerminalSession._webglCount || 0; } catch { }
 class TerminalSession {
   constructor(winInfo, wsManager, sessionId, themeManager, onEditorRequest, overrides = {}, settings = null) {
     this.winInfo = winInfo; this.ws = wsManager; this.sessionId = sessionId;
@@ -130,6 +131,9 @@ class TerminalSession {
       // the GPU process = the WHOLE page freezes. Terminals beyond the cap
       // start on the DOM renderer instead of evicting someone else's context.
       if ((TerminalSession._webglCount || 0) >= 12) throw new Error('webgl-cap');
+      // terminal.webgl (2.369.137): the A/B lever for the owner's GPU-side
+      // Windows freezes — off ⇒ new terminals start on the DOM renderer.
+      if (this._settings?.get('terminal.webgl') === false) throw new Error('webgl-off');
       const webgl = new WebglAddon();
       TerminalSession._webglCount = (TerminalSession._webglCount || 0) + 1;
       webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} if (this._webgl) { TerminalSession._webglCount--; this._webgl = null; } });

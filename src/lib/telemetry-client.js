@@ -138,6 +138,7 @@ export function installTelemetry() {
 // ring to tell the two apart.
 const _longTasks = [];
 export function recentLongTasks() { return _longTasks.slice(); }
+try { window.__vsLongTasks = recentLongTasks; window.__vsScreenEvents = () => _screenEvents.slice(); } catch { }
 // ── COMPOSITOR-STALL detector (2.339.4, the RTX-5090 verdict) ────────────
 // rAF callbacks are driven by the compositor's vsync; timers are not. When a
 // 1s timer observes the last rAF tick aging past 2s while the page is
@@ -146,6 +147,46 @@ export function recentLongTasks() { return _longTasks.slice(); }
 // longtasks). Records duration on recovery; ring feeds incident bundles.
 const _compStalls = [];
 export function recentCompositorStalls() { return _compStalls.slice(); }
+// FREEZE LISTENERS (2.369.137, owner: Windows 上越用越卡, 切桌面/跨显示器拖窗口整机卡顿 —
+// "想办法解决或者埋点识别问题"): the month's telemetry from that client said 54
+// renderer freezes (timer AND rAF stopped) of which only 7 sat beside a long
+// task — the rest are GPU / OS side, invisible to the main thread. A listener
+// gets every freeze ≥ 1 s on recovery so the incident recorder can capture the
+// scene AUTOMATICALLY (what happened in the seconds before, what the page held).
+const _freezeListeners = [];
+export function onRendererFreeze(fn) { if (typeof fn === 'function') _freezeListeners.push(fn); }
+function notifyFreeze(f) { for (const fn of _freezeListeners) { try { fn(f); } catch { } } }
+// SCREEN WATCH: a DPR change (a window dragged to a monitor with another
+// scale) and a screen move are the owner's two named triggers — recorded as
+// events with the numbers, and kept in a ring the snapshot carries.
+const _screenEvents = [];
+export function recentScreenEvents() { return _screenEvents.slice(); }
+function noteScreen(kind, detail) {
+  _screenEvents.push({ t: Date.now(), k: kind, ...detail });
+  if (_screenEvents.length > 40) _screenEvents.shift();
+  track('event', kind, JSON.stringify(detail).slice(0, 160));
+}
+export function installScreenWatch() {
+  try {
+    let dpr = window.devicePixelRatio;
+    const arm = () => {
+      try {
+        const mq = matchMedia(`(resolution: ${dpr}dppx)`);
+        const onChange = () => { const next = window.devicePixelRatio; if (next !== dpr) { noteScreen('dpr-change', { from: dpr, to: next, screen: `${screen.width}x${screen.height}` }); dpr = next; } try { mq.removeEventListener('change', onChange); } catch { } arm(); };
+        mq.addEventListener('change', onChange);
+      } catch { }
+    };
+    arm();
+    let last = `${window.screenX},${window.screenY},${screen.width}x${screen.height},${screen.availLeft || 0},${screen.availTop || 0}`;
+    setInterval(() => {
+      try {
+        const cur = `${window.screenX},${window.screenY},${screen.width}x${screen.height},${screen.availLeft || 0},${screen.availTop || 0}`;
+        if (cur !== last) { noteScreen('screen-move', { from: last, to: cur, dpr: window.devicePixelRatio }); last = cur; }
+      } catch { }
+    }, 1000);
+    document.addEventListener('visibilitychange', () => { _screenEvents.push({ t: Date.now(), k: 'visibility', v: document.visibilityState }); if (_screenEvents.length > 40) _screenEvents.shift(); });
+  } catch { }
+}
 export function installCompositorStallWatch() {
   let lastRaf = Date.now();
   let stallStart = 0;
@@ -162,6 +203,7 @@ export function installCompositorStallWatch() {
     if (tickGap > 4000 && !document.hidden) {
       metric('renderer-freeze-s', Math.round((tickGap - 1000) / 100) / 10);
       track('event', 'renderer-freeze', `${Math.round((tickGap - 1000) / 1000)}s (timer AND rAF stalled — whole renderer/system)`);
+      notifyFreeze({ kind: 'renderer', s: Math.round((tickGap - 1000) / 100) / 10, at: tickNow - tickGap, longTasks: _longTasks.slice(-5) });
     }
     if (document.hidden) { lastRaf = Date.now(); stallStart = 0; return; } // hidden tabs legitimately stop rAF
     const age = Date.now() - lastRaf;
@@ -172,6 +214,7 @@ export function installCompositorStallWatch() {
       if (_compStalls.length > 20) _compStalls.shift();
       metric('compositor-stall-s', dur);
       track('event', 'compositor-stall', `${dur}s (rAF dead, timers alive — GPU/driver side)`);
+      notifyFreeze({ kind: 'compositor', s: dur, at: stallStart, longTasks: _longTasks.slice(-5) });
       stallStart = 0;
     }
   }, 1000);

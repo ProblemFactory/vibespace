@@ -106,6 +106,7 @@ Overrides persist in the layout auto-save.
 | `terminal.minimumContrastRatio` | number | `1` | Auto-adjust text colors for contrast (4.5 = WCAG AA, 1 = disabled). Auto-set to 4.5 for light backgrounds. |
 | `terminal.preserveCustomTitle` | boolean | `false` | Prevent Claude's title updates from overwriting user-set names |
 | `terminal.preserveScrollOnFit` | boolean | `false` | Keep scroll position anchored on terminal resize |
+| `terminal.webgl` | boolean | `true` | Draw terminals with WebGL. Off ⇒ new terminals use the DOM renderer (the A/B lever for GPU-side freezes; 2.369.137). |
 | `terminal.waitingBlinkBehavior` | enum | `onlyUnfocused` | When to blink on idle: always, only when unfocused, never |
 
 ### Chat

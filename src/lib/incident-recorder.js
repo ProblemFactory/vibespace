@@ -12,6 +12,7 @@
 // captured (transcripts already live on disk — the bundle's timestamps point
 // at them). The user-supplied note is the only free text.
 import { t } from './i18n.js';
+import { onRendererFreeze } from './telemetry-client.js';
 import { BUILD_VERSION } from './build-version.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 
@@ -117,6 +118,27 @@ export function installIncidentRecorder(app) {
     try { out.uiScale = uiScale(); out.dpr = window.devicePixelRatio; out.bodyZoom = document.body.style.zoom || ''; } catch { }
     try { out.compStalls = window.__vsCompStalls ? window.__vsCompStalls() : null; } catch { }
     try { out.heapMB = Math.round((performance.memory?.usedJSHeapSize || 0) / 1048576); } catch {}
+    // FREEZE INVENTORY (2.369.137): what the page holds that the GPU has to
+    // carry — the owner's Windows freezes are GPU/OS side, so the question is
+    // "how much surface, how many contexts, which screen" at the moment.
+    try {
+      const canvases = [...document.querySelectorAll('canvas')];
+      out.inventory = {
+        canvases: canvases.length, canvasMpx: Math.round(canvases.reduce((n, c) => n + (c.width * c.height), 0) / 1e5) / 10,
+        webgl: typeof window.__vsWebglCount === 'function' ? window.__vsWebglCount() : null,
+        domNodes: document.getElementsByTagName('*').length,
+        terminals: [...app.sessions.values()].filter((v) => v && v.terminal).length,
+        chatViews: [...app.sessions.values()].filter((v) => v && v._elements).length,
+        renderedMsgs: [...app.sessions.values()].reduce((n, v) => n + (v && v._elements ? v._elements.size : 0), 0),
+        windows: app.wm.windows.size, desktops: app.desktopManager?.desktops?.length ?? null,
+        screen: { w: screen.width, h: screen.height, availW: screen.availWidth, availH: screen.availHeight, x: window.screenX, y: window.screenY, dpr: window.devicePixelRatio, extended: !!screen.isExtended },
+        memory: performance.memory ? { usedMB: Math.round(performance.memory.usedJSHeapSize / 1048576), totalMB: Math.round(performance.memory.totalJSHeapSize / 1048576), limitMB: Math.round(performance.memory.jsHeapSizeLimit / 1048576) } : null,
+        deviceMemoryGB: navigator.deviceMemory ?? null, hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+        visibility: document.visibilityState,
+      };
+    } catch (e) { out.inventory = 'failed: ' + e.message; }
+    try { out.longTasks = window.__vsLongTasks ? window.__vsLongTasks().slice(-20) : null; } catch { }
+    try { out.screenEvents = window.__vsScreenEvents ? window.__vsScreenEvents().slice(-40) : null; } catch { }
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
         id: w.id, type: w.type, title: w.titleSpan?.textContent?.slice(0, 60),
@@ -145,6 +167,38 @@ export function installIncidentRecorder(app) {
     } catch (e) { out.chatTraces = 'failed: ' + e.message; }
     return out;
   };
+
+  // ── desktop switches into the action ring (a named trigger of the freezes) ──
+  try {
+    const dm = app.desktopManager;
+    for (const m of ['switchDesktop', 'switchTo', 'activateDesktop', 'setActiveDesktop', 'goToDesktop']) {
+      if (dm && typeof dm[m] === 'function') {
+        const orig = dm[m].bind(dm);
+        dm[m] = (...a) => { try { push(rings.action, CAP.action, { t: Date.now(), k: 'desktop', to: String(a[0] || '').slice(0, 40), from: String(dm._activeId || '').slice(0, 40) }); } catch { } return orig(...a); };
+        break;
+      }
+    }
+  } catch { }
+
+  // ── AUTO CAPTURE on a renderer / compositor freeze (2.369.137) ──
+  // The owner cannot click "Report a problem" while the machine is frozen, and
+  // afterwards the scene is gone. Every freeze ≥ 5 s captures itself once per
+  // 10 minutes: the same bundle as the button, the note names the freeze, and a
+  // toast names the incident id so the capture is never silent.
+  let lastAuto = 0;
+  app.autoCaptureIncident = async (reason, detail) => {
+    if (Date.now() - lastAuto < 10 * 60e3) return null;
+    lastAuto = Date.now();
+    const note = `auto: ${reason} — ${detail}`.slice(0, 2000);
+    const r = await fetchJson('/api/incident', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note, rings, snapshot: snapshot(), version: BUILD_VERSION, auto: true }),
+    });
+    if (r?.id) showToast(t('Freeze captured automatically ({id}) — see Diagnostics → Incidents', { id: r.id }));
+    else showToast(t('Freeze capture failed ({err})', { err: r?.error || 'no answer' }), { type: 'error' });
+    return r?.id || null;
+  };
+  try { onRendererFreeze((f) => { if (f && f.s >= 5) app.autoCaptureIncident(f.kind === 'compositor' ? 'compositor stall' : 'renderer freeze', `${f.s}s (${f.kind}; ${f.longTasks && f.longTasks.length ? 'long tasks beside it' : 'no long task — GPU/OS side'})`); }); } catch { }
 
   // ── the capture flow ──
   app.captureIncident = async () => {

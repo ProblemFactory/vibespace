@@ -254,11 +254,11 @@ export class ChatStatusBar {
   // a light poll against /api/workflow keeps agent counts fresh and drops the
   // chip the moment the run leaves 'running'. Click → the workflow detail
   // window (live view). Poll only runs while chips exist.
-  trackWorkflow(runId, name) {
+  trackWorkflow(runId, name, summary = null) {
     if (!runId) return;
     if (!this._workflows) this._workflows = new Map();
     if (this._workflows.has(runId)) return;
-    this._workflows.set(runId, { runId, name: name || runId, agents: 0, done: 0, probed: false });
+    this._workflows.set(runId, { runId, name: name || runId, summary: summary || null, agents: 0, done: 0, probed: false });
     this.render();
     this._pollWorkflows();
   }
@@ -740,7 +740,7 @@ export class ChatStatusBar {
       if (wfs.length === 1) {
         const wf = wfs[0];
         const prog = wf.probed && wf.agents ? ` ${wf.done}/${wf.agents}` : '';
-        parts.push(`<span class="chat-status-wf chat-status-clickable" data-wf-run="${escHtml(wf.runId)}" data-wf-name="${escHtml(wf.name)}" title="${escHtml(t('Workflow running — click for the live view'))}">⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}</span>`);
+        parts.push(`<span class="chat-status-wf chat-status-clickable" data-wf-run="${escHtml(wf.runId)}" data-wf-name="${escHtml(wf.name)}" title="${escHtml((wf.summary ? wf.summary + '\n' : '') + t('Workflow running — click for the live view'))}">⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}</span>`);
       } else {
         const agents = wfs.reduce((n, w) => n + (w.agents || 0), 0);
         const done = wfs.reduce((n, w) => n + (w.done || 0), 0);

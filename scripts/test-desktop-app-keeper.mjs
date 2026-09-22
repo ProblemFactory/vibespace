@@ -52,6 +52,12 @@ const alive = (p) => D.pidAlive(p);
 
 // THIS BOX's xpra verdict (2.369.131): absent ⇒ 'xpra not on PATH'; present ⇒ passed over as unwired until P8-2 — never a literal
 const XPRA_WHY = D.binOnPath('xpra', { env: process.env }) ? 'xpra present (xpra) but not wired until P8-2' : 'xpra not on PATH';
+// 2.369.137 (tigervnc-standalone-server landed on this box for the vnc-fit work):
+// with an Xvnc on PATH the keeper takes the `x-serves-rfb` recipe (X IS the
+// picture server), so every leg that pins the Xvfb+x11vnc recipe hands the
+// keeper display FACTS with Xvnc/Xtigervnc hidden — the leg tests the recipe,
+// not this box's inventory (the .131 lesson: judge by presence, never a literal).
+const NO_XVNC = { ...D, hostFacts: async (o) => { const f = await D.hostFacts(o); return { ...f, bins: { ...f.bins, Xvnc: null, Xtigervnc: null } }; } };
 const root = scratch('desktop-keeper');
 fs.mkdirSync(root, { recursive: true });
 const keepers = [];
@@ -120,7 +126,8 @@ const baseEnv = () => ({ PATH: process.env.PATH, HOME: process.env.HOME, WAYLAND
 const mk = (name, extra = {}) => {
   const dataDir = path.join(root, name); fs.mkdirSync(dataDir, { recursive: true });
   const events = [];
-  const k = K.create({ dataDir, env: baseEnv, broadcast: (m) => events.push(m), serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, ...extra });
+  // every keeper in this suite runs the Xvfb+x11vnc recipe unless a leg asks for the Xvnc rung (display: D)
+  const k = K.create({ dataDir, env: baseEnv, display: NO_XVNC, broadcast: (m) => events.push(m), serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, ...extra });
   k._events = events; keepers.push(k);
   return k;
 };
@@ -430,7 +437,7 @@ setInterval(() => {}, 1000);
 `, { mode: 0o755 });
   const envWithShim = () => ({ ...baseEnv(), PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` });
   D.resetBinMemo(); // a NO for `Xvnc` is memoised for 60 s by the probes above — the shim must be SEEN
-  const k = mk('k7', { env: envWithShim });
+  const k = mk('k7', { env: envWithShim, display: D }); // this leg WANTS the Xvnc rung (the shim on PATH)
   await k.adoptAll(); k.start();
   const before = procCensus(k.logRoot);
   const l0 = await k.list();
@@ -531,7 +538,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
 { // (c) the picture port is a MEASURED fact: a stranger on 127.0.0.1:<port> that speaks RFB never becomes "ready"
   const impostor = net.createServer((sock) => { sock.write('RFB 003.008\n'); }); await new Promise((r) => impostor.listen(0, '127.0.0.1', r));
   const port = impostor.address().port;
-  const k = mk('r2c', { display: { ...D, freePort: async () => port } }); await k.adoptAll(); k.start();
+  const k = mk('r2c', { display: { ...NO_XVNC, freePort: async () => port } }); await k.adoptAll(); k.start();
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'impostor' });
   const done = await until(() => { const r = k.get(rec.id); return r.state !== 'launching' ? r : null; }, 20000);
   ok(done && done.state === 'failed' && /not held by the picture server/.test(done.lastError) && /taken by another process/.test(done.lastError), 'the record FAILS naming the port and the pid instead of turning ready on a stranger\'s display', done && done.lastError);
@@ -548,7 +555,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const impostor2 = net.createServer((sock) => { sock.write('RFB 003.008\n'); }); await new Promise((r) => impostor2.listen(0, '127.0.0.1', r));
   const { mod: K1 } = mutant('c', [["        const holder = display.listenerHeldBy(up.port, display.sessionCensus([serverPid], { fresh: true }));", "        const holder = serverPid; // pre-fix: the banner was the whole proof"]]);
   const dataDir = path.join(root, 'r2c-ctl'); fs.mkdirSync(dataDir, { recursive: true });
-  const k3 = K1.create({ dataDir, env: baseEnv, broadcast: () => {}, display: { ...D, freePort: async () => impostor2.address().port }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
+  const k3 = K1.create({ dataDir, env: baseEnv, broadcast: () => {}, display: { ...NO_XVNC, freePort: async () => impostor2.address().port }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
   await k3.adoptAll(); k3.start();
   const rec3 = await k3.launch({ exec: appBin, args: appArgs, label: 'impostor-ctl' });
   const r3 = await until(() => { const r = k3.get(rec3.id); return r.state !== 'launching' ? r : null; }, 20000);
@@ -618,7 +625,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   ok(!/rec\.via ===|'Xvfb\+x11vnc'|'Xvnc'|unknown bring-up/.test(src), 'the keeper source spells no rung (no `rec.via ===`, no Xvnc / Xvfb+x11vnc literal, no "unknown bring-up")');
   ok(/display\.RECIPES\[/.test(src) && /M\.recipeFor|resolved\.recipe/.test(src), 'it looks the recipe UP by the name the PURE table gives it');
   const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', perWindow: true, adaptive: false, stream: 'rfb', needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server-copy' }), wired: true });
-  const display = { ...D, RECIPES: Object.freeze({ ...D.RECIPES, 'x-then-server-copy': D.RECIPES['x-then-server'] }) };
+  const display = { ...NO_XVNC, RECIPES: Object.freeze({ ...D.RECIPES, 'x-then-server-copy': D.RECIPES['x-then-server'] }) };
   const k = mk('r2f', { display, backends: [fourth, ...M.DISPLAY_BACKENDS] }); await k.adoptAll(); k.start();
   const l = await k.list();
   ok(l.availability.backend === 'fake-rung' && l.availability.recipe === 'x-then-server-copy' && l.availability.ladder.length === 4, 'the ladder resolves to the fourth rung and names ITS recipe');
@@ -740,7 +747,7 @@ function markerPids(id) {
   const dataDir2 = path.join(root, 'r3c-ctl'); fs.mkdirSync(dataDir2, { recursive: true });
   const rec2 = { ...mkRec('da-r3c2', nullStarts), pids: { x: victims[0].pid, server: victims[1].pid, app: victims[2].pid, wm: null } };
   fs.writeFileSync(path.join(dataDir2, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-r3c2': rec2 }, runawayParkedUntil: {} }));
-  const k2 = K.create({ dataDir: dataDir2, env: baseEnv, broadcast: () => {}, display: { ...D, sameProcess: preFixSame }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
+  const k2 = K.create({ dataDir: dataDir2, env: baseEnv, broadcast: () => {}, display: { ...NO_XVNC, sameProcess: preFixSame }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
   await k2.adoptAll(); await sleep(300);
   ok(victims.every((c) => !alive(c.pid)), 'CONTROL: with the pre-fix sameProcess (null starttime ⇒ liveness) the same adoption SIGKILLs all three strangers', victims.map((c) => alive(c.pid)));
   for (const c of [...strangers, ...victims]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
@@ -759,7 +766,7 @@ function markerPids(id) {
   k.shutdown();
   // NEGATIVE CONTROL: the round-2 sample (the LIVE pids' own ticks only) on the same shape stays `ready`
   const liveOnly = (pids) => { let cpuTicks = 0, rssBytes = 0, n = 0; for (const pid of pids || []) { const s = D.procSample(pid); if (!s) continue; cpuTicks += s.cpuTicks; rssBytes += s.rssBytes; n++; } return n ? { cpuTicks, rssBytes, pids: n } : null; };
-  const k2 = mk('r3d-ctl', { limits, registryRows: [churn], guardSampleMs: 400, tickMs: 200, display: { ...D, sessionSample: liveOnly } }); await k2.adoptAll(); k2.start();
+  const k2 = mk('r3d-ctl', { limits, registryRows: [churn], guardSampleMs: 400, tickMs: 200, display: { ...NO_XVNC, sessionSample: liveOnly } }); await k2.adoptAll(); k2.start();
   const rec2 = await k2.launch({ appId: 'churn' });
   await until(() => k2.get(rec2.id).state !== 'launching');
   const trippedCtl = await until(() => (k2.get(rec2.id).state === 'failed' ? k2.get(rec2.id) : null), 6000);
@@ -811,7 +818,7 @@ console.log('§10 r4 — the round-3 verifier\'s findings, each reproduced on th
 async function stopBetweenParts(Kmod, dataDir, at, label) {
   fs.mkdirSync(dataDir, { recursive: true });
   let k, cur = null, stopP = null;
-  const display = { ...D,
+  const display = { ...NO_XVNC,
     startApp: (o) => { if (at === 'startApp' && !stopP) stopP = k.stop(cur).catch((e) => ({ err: e.message })); return D.startApp(o); },
     freePort: () => { if (at === 'freePort' && !stopP) stopP = k.stop(cur).catch((e) => ({ err: e.message })); return D.freePort(); },
   };

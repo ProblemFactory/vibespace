@@ -3,6 +3,10 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "WebGL renderer": "WebGL レンダラー",
+  "Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).": "ターミナルを WebGL で描画します（高速）。GPU 側のフリーズがターミナル由来か確かめるにはオフに — 以降の新しいターミナルは DOM レンダラーを使います（既存のものは開き直すまでそのまま）。",
+  "Freeze captured automatically ({id}) — see Diagnostics → Incidents": "フリーズの現場を自動取得しました（{id}）— 診断 → インシデントを参照",
+  "Freeze capture failed ({err})": "フリーズの現場取得に失敗しました（{err}）",
   "The desktop is not connected — reconnect first": "デスクトップが接続されていません — 先に再接続してください",
   "This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.": "このページは HTTPS ではないため、ブラウザはクリップボードを渡しません — ここに貼り付け（Ctrl+V）てから送信してください。",
   "The browser refused clipboard access (permission) — paste here instead (Ctrl+V), then Send.": "ブラウザがクリップボードへのアクセスを拒否しました（権限）— ここに貼り付け（Ctrl+V）てから送信してください。",

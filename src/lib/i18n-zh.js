@@ -3,6 +3,10 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "WebGL renderer": "WebGL 渲染器",
+  "Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).": "用 WebGL 绘制终端（快）。关掉可以验证 GPU 侧的卡顿是否来自终端 —— 之后新开的终端改用 DOM 渲染器（已开的保持原样，重开才变）。",
+  "Freeze captured automatically ({id}) — see Diagnostics → Incidents": "已自动抓取卡顿现场（{id}）—— 见诊断 → 事故",
+  "Freeze capture failed ({err})": "卡顿现场抓取失败（{err}）",
   "The desktop is not connected — reconnect first": "桌面未连接 —— 请先重新连接",
   "This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.": "这个页面不是 HTTPS，浏览器不会交出剪贴板 —— 请在这里粘贴（Ctrl+V），再点发送。",
   "The browser refused clipboard access (permission) — paste here instead (Ctrl+V), then Send.": "浏览器拒绝了剪贴板访问（权限）—— 请在这里粘贴（Ctrl+V），再点发送。",
