@@ -103,6 +103,17 @@ ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) 
   ok('a queued_command attachment closes it too…', tma?.taskInfo?.status === 'completed');
   const card = ma.messages.find((m) => m.originKind === 'task-notification');
   ok("…and renders a NOTIFICATION card, never a 'You' bubble of XML (provenance law)", !!card && !card.typed);
+  // 2.369.147 r3 (owner: the View Workflow window said "valid runId required"): on a rebuild the ACK is in the
+  // transcript and task_started is REPLAYED after it — the replay must MERGE (keep the wf_ run id as runId, the
+  // summary, the ack's type), never replace the card's taskInfo with the CLI's short id
+  const mr = createMessageManager('claude', 't-merge');
+  mr.convertHistory([
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_m1', name: 'Workflow', input: { script: 'x' } }] } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_m1', content: 'Workflow launched in background. Task ID: sh0rt1d\nSummary: B-1: the lane\nRun ID: wf_merge-1' }] } },
+  ]);
+  mr.replay({ type: 'system', subtype: 'task_started', task_id: 'sh0rt1d', tool_use_id: 'toolu_m1', description: 'B-1', task_type: 'local_workflow', is_backgrounded: true, uuid: 'ms1', session_id: 's' });
+  const mc = mr.messages.find((m) => m.content?.[0]?.toolCallId === 'toolu_m1');
+  ok('a replayed task_started MERGES into the ack-synthesized card: id = the CLI short id, runId = the ack\'s wf_ id, summary and type kept', mc?.taskInfo?.id === 'sh0rt1d' && mc.taskInfo.runId === 'wf_merge-1' && mc.taskInfo.summary === 'B-1: the lane' && mc.taskInfo.type === 'workflow' && mc.taskInfo.status === 'running', JSON.stringify(mc?.taskInfo));
   // supersede: a Workflow resumed under the same run id closes the original card
   const mw = createMessageManager('claude', 't-w');
   mw.convertHistory([

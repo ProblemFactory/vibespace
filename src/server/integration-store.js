@@ -332,7 +332,11 @@ function create(deps = {}) {
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
     const out = clusterPresetsFor(row).map((p) => ({ key: CLUSTER_PREFIX + p.key, label: p.label || null, source: 'cluster', presetKey: p.key }));
     const { values: own, undecryptable } = userValues(row);
-    if (!undecryptable.length && !loadError && Object.keys(own).length && !R.missingFields(row, own).length) out.push({ key: OWN_KEY, label: null, source: 'user', presetKey: null });
+    // `own` is ALWAYS offered (2.369.147 r3, owner: "为啥没有自定义选项"): available when the user's
+    // values are complete, else listed with what is missing — the wizard draws it and sends
+    // the user to the Integrations card; the engine refuses an unavailable key by name.
+    const missing = (undecryptable.length || loadError) ? row.fields.filter((f) => f.required).map((f) => f.key) : R.missingFields(row, own);
+    out.push({ key: OWN_KEY, label: null, source: 'user', presetKey: null, available: !missing.length, missing });
     return out;
   }
   function resolveIntegration(id, { credentialKey = null } = {}) {

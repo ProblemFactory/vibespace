@@ -297,7 +297,8 @@ export class ChatStatusBar {
       if (taskInfo?.status !== 'running') continue;
       // a running WORKFLOW belongs to the ⛭ chip (the existing workflow display:
       // View Workflow window, phase progress), never to the task rows (2.369.147)
-      if (taskInfo.type === 'workflow' && (taskInfo.runId || taskInfo.id)) { this.trackWorkflow(taskInfo.runId || taskInfo.id, shortWorkflowName(taskInfo.summary || taskInfo.description), taskInfo.summary || taskInfo.description || null); continue; }
+      const rid = [taskInfo.runId, taskInfo.id].map((v) => (v == null ? '' : String(v))).find((v) => /^wf_/.test(v)) || null; // only a REAL run id reaches the chip — a short harness id opened a window that said 'valid runId required'
+      if (taskInfo.type === 'workflow' && rid) { this.trackWorkflow(rid, shortWorkflowName(taskInfo.summary || taskInfo.description), taskInfo.summary || taskInfo.description || null); continue; }
       next.set(toolCallId, { ...taskInfo });
     }
     this._activeTasks = next.size ? next : null;
@@ -320,7 +321,7 @@ export class ChatStatusBar {
       if (!t || typeof t !== 'object' || t.id == null) continue;
       // a Workflow the harness names WITH a run id ⇒ the ⛭ chip (the existing display); one
       // without ⇒ a row that says so (2.369.147, owner: "接到已有的工作流展示方案")
-      if (t.type === 'workflow' && t.runId) { this.trackWorkflow(String(t.runId), shortWorkflowName(t.summary || t.description), t.summary || t.description || null); continue; }
+      if (t.type === 'workflow' && t.runId && /^wf_/.test(String(t.runId))) { this.trackWorkflow(String(t.runId), shortWorkflowName(t.summary || t.description), t.summary || t.description || null); continue; }
       rows.push({ id: String(t.id), type: t.type || null, description: String(t.description || ''), runId: t.runId ? String(t.runId) : null });
     }
     this._bgTasks = rows;
@@ -1097,7 +1098,7 @@ export class ChatStatusBar {
         item.innerHTML = detail;
         item.onclick = (ev) => {
           ev.stopPropagation(); dropdown.remove();
-          if (task.type === 'workflow' && (task.runId || task.id)) { this._onOpenWorkflow?.(task.runId || task.id, task.summary || task.description); return; } // 2.369.147: a Workflow task opens its run, not the editor
+          { const rid = [task.runId, task.id].map((v) => (v == null ? '' : String(v))).find((v) => /^wf_/.test(v)); if (task.type === 'workflow' && rid) { this._onOpenWorkflow?.(rid, task.summary || task.description); return; } } // 2.369.147: a Workflow task opens its run, not the editor
           if (task.type === 'agent') {
             this._openSubagentViewer({
               parentToolUseId: toolUseId,

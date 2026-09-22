@@ -366,7 +366,7 @@ const p2 = await newPage();
   await p1.evaljs(PATCH);
   const gm0 = (await api('GET', '/api/channels')).json;
   const av = ((gm0 && gm0.available) || []).find((a) => a.kind === 'gmail');
-  ok(av && av.credentials.length === 2 && av.credentialDefault === 'cluster:org1', `FIXTURE: Gmail offers TWO credentials and the row's default is cluster:org1 (${JSON.stringify(av && { credentials: av.credentials.map((c) => c.key), credentialDefault: av.credentialDefault })})`);
+  ok(av && av.credentials.length === 3 && av.credentials[2].key === 'own' && av.credentials[2].available === false && av.credentialDefault === 'cluster:org1', `FIXTURE: Gmail offers TWO credentials and the row's default is cluster:org1 (${JSON.stringify(av && { credentials: av.credentials.map((c) => c.key), credentialDefault: av.credentialDefault })})`);
 
   // (a) two offered ⇒ the CREDENTIAL step is drawn, the row's default pre-picked, nothing posted yet
   const step = await p1.evaljs(`(async () => {
@@ -376,8 +376,8 @@ const p2 = await newPage();
     const radios = [...d.querySelectorAll('.chan-cred-item input[type="radio"]')];
     return { radios: radios.map((r) => ({ value: r.value, checked: r.checked, label: r.parentElement.querySelector('.chan-cred-label').textContent })), on: [...d.querySelectorAll('.chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), flowInput: !!d.querySelector('.chan-flow-input'), posts: window.__wiz.posts.length };
   })()`);
-  ok(step && step.radios.length === 2 && step.radios[0].value === 'cluster:org1' && step.radios[0].checked && step.radios[1].value === 'cluster:channels' && !step.radios[1].checked, `two offered ⇒ the CREDENTIAL step: one radio per preset, the row's default (org1) pre-picked (${JSON.stringify(step)})`);
-  ok(step && step.radios[0].label === 'Org 1' && step.radios[1].label === 'Channels' && step.on === 0 && !step.flowInput && step.posts === 0, 'each preset is named by its label, step 1 is current, no consent input yet and NOTHING was posted');
+  ok(step && step.radios.length === 3 && step.radios[0].value === 'cluster:org1' && step.radios[0].checked && step.radios[1].value === 'cluster:channels' && !step.radios[1].checked && step.radios[2].value === 'own' && !step.radios[2].checked, `two offered ⇒ the CREDENTIAL step: one radio per preset, the row's default (org1) pre-picked (${JSON.stringify(step)})`);
+  ok(step && step.radios[0].label === 'Org 1' && step.radios[1].label === 'Channels' && step.radios[2].label === 'Own client' && step.on === 0 && !step.flowInput && step.posts === 0, 'each preset is named by its label, step 1 is current, no consent input yet and NOTHING was posted');
   // choose the OTHER preset → Continue → the SAME dialog is on the consent step; the chosen key is in the connect body
   const flow = await p1.evaljs(`(async () => {
     const d = document.querySelector('#chan-flow-dialog');
@@ -429,7 +429,7 @@ const p2 = await newPage();
   ok((await p1.evaljs(MENU(0, 'Connect'))) === 'ok', 'the first section\'s ⋯ menu carries the consent verb (Connect — it never connected)');
   ok(await p1.evaljs(WAIT_DIALOG('.chan-cred-list')), 'a token-less account opens at the CREDENTIAL step (two are offered) — not straight at consent');
   const st1 = await p1.evaljs(STEP);
-  ok(st1 && st1.picked === 'cluster:channels' && st1.values.length === 2 && st1.on === 0 && st1.posts === 0, `the account's OWN key (channels) is pre-picked, not the row's default (org1); nothing posted yet (${JSON.stringify(st1)})`);
+  ok(st1 && st1.picked === 'cluster:channels' && st1.values.length === 3 && st1.on === 0 && st1.posts === 0, `the account's OWN key (channels) is pre-picked, not the row's default (org1); nothing posted yet (${JSON.stringify(st1)})`);
   const rb1 = await p1.evaljs(CHOOSE('cluster:org1'));
   ok(rb1 && rb1.same && rb1.flowInput && rb1.posts.length === 1 && rb1.posts[0].url === '/api/channels/adapters/gmail/reauthorize' && rb1.posts[0].body && rb1.posts[0].body.credentialKey === 'cluster:org1' && !('newAccount' in rb1.posts[0].body), `choosing org1 posts {credentialKey:'cluster:org1'} to ITS /reauthorize (no newAccount) and the SAME dialog moves on to consent (${JSON.stringify(rb1.posts)})`);
   const g3 = (await api('GET', '/api/channels')).json;
@@ -473,11 +473,15 @@ const p2 = await newPage();
   await p1.evaljs(PATCH);
   const g4 = (await api('GET', '/api/channels')).json;
   const a4 = ((g4 && g4.adapters) || []).filter((a) => a.kind === 'gmail');
-  ok(a4.length === 2 && a4[0].credentials.length === 1 && a4[0].credentials[0].key === 'cluster:org1', `FIXTURE: Gmail now offers ONE credential (${JSON.stringify(a4[0] && a4[0].credentials)})`);
+  ok(a4.length === 2 && a4[0].credentials.length === 2 && a4[0].credentials[0].key === 'cluster:org1' && a4[0].credentials[1].key === 'own' && a4[0].credentials[1].available === false, `FIXTURE: Gmail now offers ONE preset + the listed-but-unavailable own (${JSON.stringify(a4[0] && a4[0].credentials)})`);
   ok((await p1.evaljs(MENU(1, 'Add account…'))) === 'ok', '"Add account…" from the second section');
-  ok(await p1.evaljs(WAIT_DIALOG('.chan-flow-input')), 'the wizard opens STRAIGHT at the consent step');
-  const skip = await p1.evaljs(`(() => ({ credList: !!document.querySelector('#chan-flow-dialog .chan-cred-list'), on: [...document.querySelectorAll('#chan-flow-dialog .chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), posts: window.__wiz.posts.slice() }))()`);
-  ok(skip && !skip.credList && skip.on === 1 && skip.posts.length === 1 && skip.posts[0].body.credentialKey === 'cluster:org1' && skip.posts[0].body.newAccount === true, `ONE offered ⇒ no credential step, no extra click — the single key rides the body (${JSON.stringify(skip)})`);
+  // r3 (owner: "为啥没有自定义选项 / lark 为啥没有这个选择 oauth client 的菜单"): the step is ALWAYS drawn — the one preset
+  // pre-picked, `own` listed as unavailable (its row says the card must be filled first); Continue posts the preset
+  ok(await p1.evaljs(WAIT_DIALOG('.chan-cred-list')), 'the wizard opens at the credential step even with one preset (own is listed beside it)');
+  const drawn = await p1.evaljs(`(() => { const d = document.querySelector('#chan-flow-dialog'); const radios = [...d.querySelectorAll('.chan-cred-item input[type="radio"]')]; return { radios: radios.map((r) => ({ value: r.value, checked: r.checked, unavailable: r.parentElement.classList.contains('chan-cred-unavailable') })), on: [...d.querySelectorAll('.chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), posts: window.__wiz.posts.length }; })()`);
+  ok(drawn && drawn.radios.length === 2 && drawn.radios[0].value === 'cluster:org1' && drawn.radios[0].checked && drawn.radios[1].value === 'own' && !drawn.radios[1].checked && drawn.radios[1].unavailable && drawn.on === 0 && drawn.posts === 0, `one preset + unavailable own ⇒ the step is drawn, the preset pre-picked, nothing posted yet (${JSON.stringify(drawn)})`);
+  const skip = await p1.evaljs(`(async () => { const d = document.querySelector('#chan-flow-dialog'); [...d.querySelectorAll('.chan-flow-actions button')].find((b) => b.textContent.trim() === 'Continue').click(); for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-flow-dialog .chan-flow-input')) break; await new Promise((r) => setTimeout(r, 100)); } return { credList: !!document.querySelector('#chan-flow-dialog .chan-cred-list'), on: [...document.querySelectorAll('#chan-flow-dialog .chan-step')].findIndex((s) => s.classList.contains('chan-step-on')), posts: window.__wiz.posts.slice() }; })()`);
+  ok(skip && !skip.credList && skip.on === 1 && skip.posts.length === 1 && skip.posts[0].body.credentialKey === 'cluster:org1' && skip.posts[0].body.newAccount === true, `Continue ⇒ the consent step; the preset rides the body (${JSON.stringify(skip)})`);
   ok((await p1.evaljs(CANCEL)) === 'closed', 'Cancel ends the third account\'s flow');
   const g5 = (await api('GET', '/api/channels')).json;
   const a5 = ((g5 && g5.adapters) || []).filter((a) => a.kind === 'gmail');

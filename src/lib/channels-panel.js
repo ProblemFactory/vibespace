@@ -216,9 +216,10 @@ function accountName(a, siblings = 1, n = 1) {
  *  server stamps the row's pick. The consent step follows in the SAME dialog. */
 async function startConnect(app, spec) {
   const s = wizardSpec(spec);
-  if (s.credentials.length > 1) return showCredentialStep(app, s);
+  // the step is drawn whenever ANYTHING is offered (2.369.147 r3, owner: "lark 为啥没有这个选择 oauth client 的菜单") —
+  // the presets and the user's own client, the latter marked when its fields are missing
+  if (s.credentials.length >= 1) return showCredentialStep(app, s);
   const body = { newAccount: true };
-  if (s.credentials.length === 1) body.credentialKey = s.credentials[0].key;
   const r = await postConnect(app, s, body);
   if (r) showFlowDialog(app, r.adapter && r.adapter.id ? r.adapter.id : s.kind, s.label, r.flow);
 }
@@ -247,7 +248,7 @@ async function postConnect(app, s, body) {
 async function reauthorize(app, a) {
   const s = wizardSpec(a);
   const held = !!(a.auth && a.auth.tokenHeld);
-  if (!held && s.credentials.length > 1) {
+  if (!held && s.credentials.length >= 1) {
     const own = s.credentials.some((c) => c.key === a.credentialKey) ? a.credentialKey : s.credentialDefault;
     return showCredentialStep(app, { ...s, credentialDefault: own }, { submit: (credentialKey) => postReauthorize(app, a, { credentialKey }) });
   }
@@ -279,7 +280,8 @@ function showCredentialStep(app, s, { submit = (credentialKey) => postConnect(ap
   body.appendChild(chanLine('chan-flow-intro', t('Choose the application credential this account is authorized under. It stays bound to the account — the pick on the Integrations card is only the default for new accounts.')));
   const list = document.createElement('div');
   list.className = 'chan-cred-list';
-  const picked = s.credentials.some((c) => c.key === s.credentialDefault) ? s.credentialDefault : s.credentials[0].key;
+  const usable = s.credentials.filter((c) => c.available !== false);
+  const picked = usable.some((c) => c.key === s.credentialDefault) ? s.credentialDefault : (usable[0] || s.credentials[0]).key;
   for (const c of s.credentials) {
     const lab = document.createElement('label');
     lab.className = 'dialog-check-row chan-cred-item';
@@ -290,7 +292,8 @@ function showCredentialStep(app, s, { submit = (credentialKey) => postConnect(ap
     name.textContent = credentialText(c.key, c.label);
     const hint = document.createElement('span');
     hint.className = 'dialog-check-hint';
-    hint.textContent = c.key === 'own' ? t('The keys saved on the Integrations card') : t('Provided by the cluster');
+    hint.textContent = c.key === 'own' ? (c.available === false ? t('Not filled in yet — Continue opens the Integrations card to enter the client id and secret') : t('The keys saved on the Integrations card')) : t('Provided by the cluster');
+    if (c.available === false) lab.classList.add('chan-cred-unavailable');
     lab.append(r, name, hint);
     list.appendChild(lab);
   }
@@ -301,6 +304,8 @@ function showCredentialStep(app, s, { submit = (credentialKey) => postConnect(ap
   const next = btn(t('Continue'), async () => {
     const chosen = list.querySelector('input[name="chan-cred"]:checked');
     const credentialKey = chosen ? chosen.value : picked;
+    const pick = s.credentials.find((c) => c.key === credentialKey);
+    if (pick && pick.available === false) { close(); app.openIntegration(s.integration); return; } // fill the own client in first — one 'Add account…' away
     next.disabled = true;
     const r = await submit(credentialKey);
     next.disabled = false;

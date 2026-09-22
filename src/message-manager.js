@@ -989,7 +989,17 @@ class MessageManager {
         // never a member of background_tasks_changed, so only a backgrounded
         // task may be closed by that level set; the launch-ack synthesis below
         // sets it as well, because the ack text itself says "in background")
-        existing.taskInfo = { id: raw.task_id, type: normalizeTaskType(raw.task_type), description: raw.description, status: 'running', backgrounded: raw.is_backgrounded === true };
+        // MERGE, never replace (2.369.147 r3, owner: the View Workflow window said "valid runId
+        // required"): on a rebuild the launch ACK (transcript) lands BEFORE the replayed
+        // task_started (session-meta taskRecords), and this line used to overwrite the ack's
+        // synthesis — the wf_ run id, the summary line, the type — with the CLI's short id,
+        // so a Workflow card lost its run id and its name. Keep the prior fields; a prior id
+        // that IS a run id moves to runId; the ack's type wins (2.369.139).
+        const prior = existing.taskInfo && typeof existing.taskInfo === 'object' ? existing.taskInfo : null;
+        const next = { ...(prior || {}), id: raw.task_id, type: (prior && prior.type) || normalizeTaskType(raw.task_type), description: raw.description || (prior && prior.description) || '', status: 'running', backgrounded: raw.is_backgrounded === true || !!(prior && prior.backgrounded === true) };
+        if (prior && prior.id != null && /^wf_/.test(String(prior.id)) && String(prior.id) !== String(raw.task_id) && !next.runId) next.runId = String(prior.id);
+        delete next.closedBy;
+        existing.taskInfo = next;
         this.taskMsgByToolUse.set(raw.tool_use_id, existing.id);
         if (raw.task_id != null) this.taskMsgByTaskId.set(String(raw.task_id), existing.id);
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });

@@ -3472,6 +3472,7 @@ export default {
   "Not wired until {phase} — this card only stores the values.": "要到 {phase} 才接线 — 这张卡片目前只保存值。",
   "Passed": "通过",
   "Preferred preset: {key}": "首选预设:{key}",
+  "Not filled in yet — Continue opens the Integrations card to enter the client id and secret": "尚未填写 —— 点“继续”打开集成卡片填入 client id 与 secret",
   "Provided by the cluster": "由集群提供",
   "Replace": "替换",
   "Test connection": "测试连接",

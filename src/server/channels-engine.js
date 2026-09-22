@@ -259,7 +259,15 @@ function create(deps = {}) {
    *  refused `400 unknown-credential` BY NAME with the offered list. */
   function assertOffered(mod, key) {
     const offered = offeredCredentials(mod.integration);
-    if (offered.some((c) => c.key === key)) return;
+    const hit = offered.find((c) => c.key === key);
+    if (hit && hit.available === false) {
+      // offered but not fillable yet (the user's own client with fields missing): the wizard
+      // opens the Integrations card on this code — never a silent fallback to a preset
+      const err = new Error(`'${key}' needs ${(hit.missing || []).join(', ') || 'its fields'} on the Integrations card before an account can use it`);
+      err.status = 409; err.code = 'needs-credentials'; err.detail = { key, needsCredentials: true, missing: hit.missing || [] };
+      throw err;
+    }
+    if (hit) return;
     const err = new Error(`'${key}' is not a credential this instance offers for ${mod.label || mod.kind} (offered: ${offered.map((c) => c.key).join(', ') || 'none'})`);
     err.status = 400; err.code = 'unknown-credential'; err.detail = { key, offered: offered.map((c) => c.key) };
     throw err;
@@ -281,7 +289,7 @@ function create(deps = {}) {
     const { token, why } = tokensFor(rec).read();
     const named = token && Object.prototype.hasOwnProperty.call(token, 'clusterKey')
       ? (typeof token.clusterKey === 'string' && token.clusterKey ? CLUSTER_PREFIX + token.clusterKey : OWN_KEY) : null;
-    const boundKey = named && offeredCredentials(integrationId).some((c) => c.key === named) ? named : null;
+    const boundKey = named && offeredCredentials(integrationId).some((c) => c.key === named && c.available !== false) ? named : null; // an unavailable `own` (listed since r3) never binds
     if (boundKey) return { key: boundKey, evidence: 'token', tokenKey: named, boundKey };
     const pick = defaultCredentialKey(integrationId);
     return { key: pick, evidence: pick ? 'row-pick' : 'nothing-resolves', tokenKey: named, tokenWhy: token ? null : (why || null), boundKey: null };

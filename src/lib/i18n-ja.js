@@ -3471,6 +3471,7 @@ export default {
   "Not wired until {phase} — this card only stores the values.": "{phase} まで配線されません — このカードは値を保存するだけです。",
   "Passed": "合格",
   "Preferred preset: {key}": "優先プリセット:{key}",
+  "Not filled in yet — Continue opens the Integrations card to enter the client id and secret": "未入力 — 「続行」で統合カードを開き client id と secret を入力します",
   "Provided by the cluster": "クラスターが提供",
   "Replace": "置き換え",
   "Test connection": "接続をテスト",

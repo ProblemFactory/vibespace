@@ -150,14 +150,14 @@ console.log('⓪ the store');
   const a = integrations.resolveIntegration('gmail', { credentialKey: 'cluster:org1' });
   ok(a.source === 'cluster' && a.clusterKey === 'org1' && a.values.clientId === 'org1.apps.googleusercontent.com' && a.credentialKey === 'cluster:org1' && a.missing.length === 0, '`cluster:org1` resolves THAT preset whatever the pick prefers');
   const off = integrations.offeredCredentials('gmail');
-  ok(off.length === 2 && off.map((o) => o.key).join() === 'cluster:org1,cluster:channels' && off[0].label === 'Org 1' && off.every((o) => !('values' in o) && !('clientSecret' in o)), 'offeredCredentials = the two presets, key + label only — no `own` while the user saved nothing');
+  ok(off.length === 3 && off.map((o) => o.key).join() === 'cluster:org1,cluster:channels,own' && off[0].label === 'Org 1' && off[2].available === false && off[2].missing.length >= 1 && off.every((o) => !('values' in o) && !('clientSecret' in o)), 'offeredCredentials = the two presets, key + label only, and `own` LISTED as unavailable while the user saved nothing (r3: the wizard always draws the choice)');
   const own0 = integrations.resolveIntegration('gmail', { credentialKey: 'own' });
   ok(own0.source === 'none' && own0.whyCode === 'own-missing' && /no keys of your own/.test(own0.why), '`own` with nothing saved is `none` with its own code (never the cluster)');
   const bogus = integrations.resolveIntegration('gmail', { credentialKey: 'nope' });
   ok(bogus.source === 'none' && bogus.whyCode === 'unknown-credential', 'a key of neither form is `unknown-credential`, not a throw');
   const d0 = eng.digest();
   const av = d0.available.find((x) => x.kind === 'gmail');
-  ok(av && Array.isArray(av.credentials) && av.credentials.length === 2 && av.credential.credentialKey === 'cluster:channels', 'the digest offers gmail with BOTH credentials for the wizard and the facts of the default key');
+  ok(av && Array.isArray(av.credentials) && av.credentials.length === 3 && av.credentials[2].key === 'own' && av.credentials[2].available === false && av.credential.credentialKey === 'cluster:channels', 'the digest offers gmail with BOTH credentials for the wizard and the facts of the default key');
 }
 
 // ── ① two accounts, two presets, two refreshes, two client ids ──
@@ -173,8 +173,8 @@ let idA = null, idB = null;
   const ra = rowOf(eng, idA), rb = rowOf(eng, idB);
   ok(ra && ra.auth.state === 'connected' && ra.auth.user === 'member.a@example.com' && ra.credentialKey === 'cluster:org1' && ra.credentialLabel === 'Org 1' && ra.credential.source === 'cluster' && ra.credential.clusterLabel === 'Org 1' && ra.auth.credentialKey === 'cluster:org1',
     'A\'s row: connected as member.a, credentialKey cluster:org1, its label, the facts FOR THAT KEY, auth.state naming the key', JSON.stringify(ra && { auth: ra.auth, credentialKey: ra.credentialKey, credentialLabel: ra.credentialLabel }));
-  ok(rb && rb.auth.state === 'connected' && rb.auth.user === 'member.b@example.com' && rb.credentialKey === 'cluster:channels' && rb.credentialLabel === 'Channels' && Array.isArray(rb.credentials) && rb.credentials.length === 2,
-    'B\'s row: connected as member.b under cluster:channels, and the row carries the offered list (the "Add account" step reads it)');
+  ok(rb && rb.auth.state === 'connected' && rb.auth.user === 'member.b@example.com' && rb.credentialKey === 'cluster:channels' && rb.credentialLabel === 'Channels' && Array.isArray(rb.credentials) && rb.credentials.length === 3 && rb.credentials[2].key === 'own' && rb.credentials[2].available === false,
+    'B\'s row: connected as member.b under cluster:channels, and the row carries the offered list incl. the unavailable `own` (the "Add account" step reads it)');
   const disk = JSON.parse(fs.readFileSync(path.join(engDir, 'channels', 'adapters.json'), 'utf-8')).adapters;
   ok(disk.length === 2 && disk.find((r) => r.id === idA).credentialKey === 'cluster:org1' && disk.find((r) => r.id === idB).credentialKey === 'cluster:channels', 'adapters.json holds both records with their keys');
   const convs = eng.digest().conversations;
@@ -258,7 +258,7 @@ console.log('③ a withdrawn preset');
   const pb = await eng.pass(idB, { force: true });
   const tb = v.tokenCalls().find((c) => c.form.refresh_token === '1//rb');
   ok(pb.ok !== false && tb && tb.form.client_id === 'ch.apps.googleusercontent.com', 'B (channels) is untouched: it refreshed with its own client');
-  ok(eng.digest().available.every((x) => x.kind !== 'gmail') && integrations.offeredCredentials('gmail').map((o) => o.key).join() === 'cluster:channels', 'the offered list shrank to channels (a NEW account cannot pick org1 either)');
+  ok(eng.digest().available.every((x) => x.kind !== 'gmail') && integrations.offeredCredentials('gmail').filter((o) => o.available !== false).map((o) => o.key).join() === 'cluster:channels', 'the offered list shrank to channels (a NEW account cannot pick org1 either)');
   holder.list = PRESETS.slice();
   clock += 3600e3;
   v.calls.length = 0;
@@ -274,7 +274,7 @@ console.log('④ refused keys, the own rung');
   const e1 = await threw(() => eng.connect('gmail', { credentialKey: 'cluster:nope', newAccount: true }));
   ok(e1 && e1.code === 'unknown-credential' && e1.status === 400 && /'cluster:nope'/.test(e1.message) && /offered: cluster:org1, cluster:channels/.test(e1.message), 'an unknown preset key is refused BY NAME with the offered list', e1 && e1.message);
   const e2 = await threw(() => eng.connect('gmail', { credentialKey: 'own', newAccount: true }));
-  ok(e2 && e2.code === 'unknown-credential', '`own` is refused while the user saved no values (it is not OFFERED)', e2 && e2.message);
+  ok(e2 && e2.code === 'needs-credentials' && e2.status === 409 && /clientId, clientSecret/.test(e2.message), '`own` is refused BY NAME as needs-credentials while the user saved no values (listed, not usable — the wizard opens the card)', e2 && e2.message);
   ok(eng.adapterRecords().adapters.length === before && eng.oauth.runningFor(idA) === null && JSON.parse(fs.readFileSync(path.join(engDir, 'channels', 'adapters.json'), 'utf-8')).adapters.length === before, 'no record minted, no flow started, nothing on disk');
   integrations.setIntegration('gmail', { clientId: 'own.apps.googleusercontent.com', clientSecret: 'own-secret-0000000' });
   await sleep(20);
@@ -290,7 +290,7 @@ console.log('④ refused keys, the own rung');
   for (const r of eng.adapterRecords().adapters.filter((x) => x.credentialKey === 'own')) { await eng.cancelAuth(r.id); await eng.disconnect(r.id); }
   integrations.clearUserValues('gmail');
   await sleep(20);
-  ok(eng.adapterRecords().adapters.length === before && integrations.offeredCredentials('gmail').length === 2, 'the two `own` accounts removed on disconnect, the values cleared, the list back to two');
+  ok(eng.adapterRecords().adapters.length === before && integrations.offeredCredentials('gmail').filter((o) => o.available !== false).length === 2, 'the two `own` accounts removed on disconnect, the values cleared, the usable list back to two');
 }
 
 // ── ⑤ a HELD token binds its account; a token-less one re-binds (verifier r1) ──
@@ -371,7 +371,7 @@ console.log('⑦ the routes');
   ok(c5.status === 404 && c5.body.code === 'no-such-adapter', 'reauthorize on an unknown id is 404 no-such-adapter');
   const d = await api('GET', '/api/channels');
   const rowC = d.body.adapters.find((a) => a.id === idC);
-  ok(d.status === 200 && rowC && rowC.credentialKey === 'cluster:channels' && rowC.credentialLabel === 'Channels' && rowC.credentials.length === 2 && rowC.flow && rowC.flow.running === true, 'GET /api/channels carries the account\'s key, its label, the offered list and its running flow');
+  ok(d.status === 200 && rowC && rowC.credentialKey === 'cluster:channels' && rowC.credentialLabel === 'Channels' && rowC.credentials.length === 3 && rowC.credentials[2].key === 'own' && rowC.flow && rowC.flow.running === true, 'GET /api/channels carries the account\'s key, its label, the offered list (incl. the listed-but-unavailable `own`) and its running flow');
   await eng.cancelAuth(idC); await eng.cancelAuth(idA);
   // verifier r1: `{credentialKey}` on reauthorize — a HELD token refuses by name, a token-less account re-binds
   const c7 = await api('POST', '/api/channels/adapters/gmail/reauthorize', { credentialKey: 'cluster:channels' });
@@ -405,7 +405,7 @@ console.log('⑧ lark');
   ok(d.source === 'none' && d.whyCode === 'ambiguous' && d.credentialKey === null, 'two tenants and no saved pick: the row\'s own resolution is ambiguous (unchanged) and names no key');
   const b = s2.resolveIntegration('lark', { credentialKey: 'cluster:tB' });
   ok(b.source === 'cluster' && b.values.appId === 'cli_fixture000b' && b.clusterLabel === 'Tenant B' && b.credentialKey === 'cluster:tB', '`cluster:tB` resolves tenant B by key through the keyed JSON entries');
-  ok(s2.offeredCredentials('lark').map((o) => `${o.key}=${o.label}`).join() === 'cluster:tA=Tenant A,cluster:tB=Tenant B', 'the offered list is the two keyed entries with the env\'s labels');
+  ok(s2.offeredCredentials('lark').map((o) => `${o.key}=${o.label}`).join() === 'cluster:tA=Tenant A,cluster:tB=Tenant B,own=null' && s2.offeredCredentials('lark')[2].available === false, 'the offered list is the two keyed entries with the env\'s labels + `own` listed as unavailable (r3: the wizard always draws the choice)');
   const calls = [];
   const fetchFn = async (url, init = {}) => {
     const u = new URL(String(url));
