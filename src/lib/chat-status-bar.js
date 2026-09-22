@@ -1060,7 +1060,7 @@ export class ChatStatusBar {
         if (known.has(r.id)) continue;
         const item = document.createElement('div');
         item.className = 'chat-status-dropdown-item chat-task-detail';
-        item.innerHTML = `<div class="chat-task-title">${r.type === 'local_agent' ? UI_ICONS.robot : UI_ICONS.tasks} ${escHtml(r.description || r.id)}</div><div class="chat-status-dim">${escHtml(t('reported by the harness'))}</div>`;
+        item.innerHTML = `<div class="chat-task-title">${r.type === 'agent' ? UI_ICONS.robot : UI_ICONS.tasks} ${escHtml(r.description || r.id)}</div><div class="chat-status-dim">${escHtml(t('reported by the harness'))}</div>`;
         dropdown.appendChild(item);
       }
       if (!this._activeTasks?.size) return;

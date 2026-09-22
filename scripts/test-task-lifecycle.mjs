@@ -140,19 +140,35 @@ ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) 
     { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_wf_live", content: "Workflow \"audit\" started.\nRun ID: wf_live1" }] } },
   ]);
   const edits = [];
-  mm3.onChange = (e) => edits.push(e);
+  mm3.onOp((e) => edits.push(e));
   const liveMsg = mm3.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_live");
   mm3.processLive({ type: "system", subtype: "task_started", task_id: "wf_live1", tool_use_id: "toolu_wf_live", task_type: "local_workflow", description: "audit" });
+  ok("the CLI's `local_workflow` task_type is normalized to 'workflow' on the card (2.369.139, inc-muc1hfeg-0qn2: the live re-render gate compared 'local_workflow' with 'workflow' and dropped every task_progress until a reload)", liveMsg?.taskInfo?.type === 'workflow' && edits.some((e) => e.op === 'edit' && e.fields?.taskInfo?.type === 'workflow'), JSON.stringify(liveMsg?.taskInfo));
   mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", usage: { total_tokens: 1105301, tool_uses: 262, duration_ms: 2122694 }, last_tool_name: "Bash", workflow_progress: TREE });
   ok("a task_progress with the tree lands on taskInfo.workflow + usage", liveMsg?.taskInfo?.workflow?.agents?.length === 2 && liveMsg.taskInfo.usage.totalTokens === 1105301 && liveMsg.taskInfo.usage.toolUses === 262 && liveMsg.taskInfo.lastTool === "Bash", JSON.stringify(liveMsg?.taskInfo));
   mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", usage: { total_tokens: 1200000, tool_uses: 270, duration_ms: 2200000 } });
   ok("a HEARTBEAT without the tree keeps the tree and refreshes usage (field-wise latest value)", liveMsg.taskInfo.workflow.agents.length === 2 && liveMsg.taskInfo.usage.totalTokens === 1200000, JSON.stringify(liveMsg.taskInfo));
   mm3.processLive({ type: "system", subtype: "task_progress", task_id: "wf_live1", tool_use_id: "toolu_wf_live", description: "audit", workflow_progress: [TREE[0], TREE[1], { ...TREE[2] }, { ...TREE[3], state: "done" }] });
   ok("a later tree REPLACES the held one (running → done)", liveMsg.taskInfo.workflow.agents[1].state === "done");
+  // LIVE ORDER (the incident's exact shape): the tool_use streams, task_started lands with the CLI's
+  // `local_workflow` BEFORE the tool_result ack, then task_progress carries the tree — every edit op
+  // must already say 'workflow' (the client gate) and the ack's runId still registers
+  {
+    const mm4 = createMessageManager("claude", "test-wf-live");
+    const edits4 = []; mm4.onOp((e) => edits4.push(e));
+    mm4.processLive({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_wf_order", name: "Workflow", input: { scriptPath: "/tmp/x/lane-wf.js" } }] } });
+    mm4.processLive({ type: "system", subtype: "task_started", task_id: "wu9order1", tool_use_id: "toolu_wf_order", task_type: "local_workflow", description: "lane" });
+    const cardMsg = mm4.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_order");
+    const firstType = edits4.find((e) => e.op === 'edit' && e.fields?.taskInfo)?.fields?.taskInfo?.type;
+    ok("live order: task_started before the ack — the first taskInfo edit already carries type 'workflow' (pre-fix: 'local_workflow', the gate dropped it)", firstType === 'workflow' && cardMsg?.taskInfo?.type === 'workflow', JSON.stringify({ firstType, ti: cardMsg?.taskInfo }));
+    mm4.processLive({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_wf_order", content: "Workflow launched in background. Task ID: wu9order1\nSummary: lane: the thing\nRun ID: wf_order-1" }] } });
+    mm4.processLive({ type: "system", subtype: "task_progress", task_id: "wu9order1", tool_use_id: "toolu_wf_order", description: "Build: b1", workflow_progress: TREE });
+    ok("…the ack registers the wf_ run id and a later task_progress edit carries the tree with type 'workflow'", cardMsg?.taskInfo?.runId === 'wf_order-1' && cardMsg.taskInfo.type === 'workflow' && cardMsg.taskInfo.workflow?.agents?.length === 2 && edits4.filter((e) => e.fields?.taskInfo?.workflow).every((e) => e.fields.taskInfo.type === 'workflow'), JSON.stringify(cardMsg?.taskInfo).slice(0, 300));
+  }
   // renderer + wiring pins
   const cr = read("src/lib/chat-renderers.js"), cv = read("src/lib/chat-view.js"), css = read("public/chat.css");
   ok("chat-renderers renders phases + agent chips (label · state dot · last tool) from taskInfo.workflow, every string escaped", /workflowLiveHtml\(ti\)/.test(cr) && /class=\"chat-wf-agent\" data-state=\"\$\{escHtml\(st\)\}\"/.test(cr) && /\$\{escHtml\(a\.label \|\| a\.agentId \|\| \x27\?\x27\)\}/.test(cr) && /\$\{wfLiveHtml\}<details/.test(cr));
-  ok("chat-view re-renders a WORKFLOW tool card on its taskInfo edit through _swapMessageEl (agent cards excluded — their live line is drawn elsewhere)", /fields\.taskInfo\.type === \x27workflow\x27 && msg\.role === \x27tool\x27[\s\S]{0,400}_swapMessageEl\(oldEl, newEl, id\)/.test(cv));
+    ok("chat-view re-renders a WORKFLOW tool card on its taskInfo edit through _swapMessageEl (agent cards excluded — their live line is drawn elsewhere); the gate also admits any card that carries the tree", /\(fields\.taskInfo\.type === \x27workflow\x27 \|\| fields\.taskInfo\.workflow\) && msg\.role === \x27tool\x27/.test(cv) && /this\._swapMessageEl\(oldEl, newEl, id\)/.test(cv));
   ok("chat.css styles the chips with theme vars (dot by state)", /\.chat-wf-agent\[data-state="running"\] \.chat-wf-dot \{ background: var\(--accent\)/.test(css) && /\.chat-wf-agent\[data-state="error"\] \.chat-wf-dot \{ background: var\(--red/.test(css));
 }
 

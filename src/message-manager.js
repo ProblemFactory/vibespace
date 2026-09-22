@@ -904,7 +904,7 @@ class MessageManager {
     // observed task_updated{failed}.
     if (raw.subtype === 'background_tasks_changed' && Array.isArray(raw.tasks)) {
       const set = raw.tasks.filter((t) => t && typeof t === 'object' && t.task_id != null)
-        .map((t) => ({ id: String(t.task_id).slice(0, 64), type: typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null, description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' }))
+        .map((t) => ({ id: String(t.task_id).slice(0, 64), type: normalizeTaskType(typeof t.task_type === 'string' ? t.task_type.slice(0, 32) : null), description: typeof t.description === 'string' ? t.description.slice(0, 200) : '' }))
         .slice(0, 100);
       this._bgTasks = set;
       const live = new Set(set.map((t) => t.id));
@@ -966,7 +966,7 @@ class MessageManager {
         // never a member of background_tasks_changed, so only a backgrounded
         // task may be closed by that level set; the launch-ack synthesis below
         // sets it as well, because the ack text itself says "in background")
-        existing.taskInfo = { id: raw.task_id, type: raw.task_type, description: raw.description, status: 'running', backgrounded: raw.is_backgrounded === true };
+        existing.taskInfo = { id: raw.task_id, type: normalizeTaskType(raw.task_type), description: raw.description, status: 'running', backgrounded: raw.is_backgrounded === true };
         this.taskMsgByToolUse.set(raw.tool_use_id, existing.id);
         if (raw.task_id != null) this.taskMsgByTaskId.set(String(raw.task_id), existing.id);
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
@@ -1334,7 +1334,9 @@ class MessageManager {
         // on the disk skeleton. Register the ack's id too, and remember it on the
         // card as runId (the short id stays `id` — the CLI's own key).
         const syn = parseBackgroundLaunch(pending.block.name, pending.block.input, resultText);
-        if (syn && existing.taskInfo.backgrounded !== true) { existing.taskInfo.backgrounded = true; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); } // the ack says background even when task_started lacked the flag (older CLI)
+        if (syn && existing.taskInfo.backgrounded !== true) { existing.taskInfo.backgrounded = true; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); }
+        // the ack's own TYPE wins over whatever task_started spelled (2.369.139)
+        if (syn && syn.type && existing.taskInfo.type !== syn.type) { existing.taskInfo.type = syn.type; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); } // the ack says background even when task_started lacked the flag (older CLI)
         if (syn && syn.id && String(syn.id) !== String(existing.taskInfo.id)) {
           this.taskMsgByTaskId.set(String(syn.id), existing.id);
           if (!existing.taskInfo.runId) {
@@ -1718,6 +1720,19 @@ MessageManager._seenShapeDrift = new Set(); // telemetry `harness-shape-drift` o
  *  so anything derived from them dies on the first resume. The launch ack
  *  itself names the task; both the normalizer and session-store's taskState
  *  scan derive from IT (one parser, no twin). */
+/** The CLI's task_type vocabulary (`local_workflow`, `local_bash`, `local_agent` on
+ *  2.1.274's system/task_started + background_tasks_changed) → the ONE type our
+ *  cards and chips gate on (2.369.139, inc-muc1hfeg-0qn2 "有个workflow卡片没有展示细节":
+ *  task_started lands BEFORE the launch ack, stamped `local_workflow`, and the
+ *  chat view's live re-render gate compared it with 'workflow' — every live
+ *  task_progress was dropped until a reload rebuilt the card from the server's
+ *  normalizer). Unknown values keep their spelling minus a `local_` prefix. */
+const TASK_TYPE_MAP = Object.freeze({ local_workflow: 'workflow', workflow: 'workflow', local_bash: 'command', bash: 'command', command: 'command', local_agent: 'agent', agent: 'agent' });
+function normalizeTaskType(t) {
+  const s = typeof t === 'string' ? t.trim() : '';
+  if (!s) return null;
+  return TASK_TYPE_MAP[s] || s.replace(/^local_/, '');
+}
 function parseBackgroundLaunch(toolName, input, resultText) {
   const txt = String(resultText || '');
   if (toolName === 'Agent' && /^Async agent launched/.test(txt)) {
@@ -1806,4 +1821,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'vcs_state_changed',      // card-less BY DESIGN: the server consumer owns it (session-vcs broadcast → the session card's git chip, the explorer refresh, the Session Properties timeline); a card per push/commit would be noise in the flow
 ]);
 
-module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };
+module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

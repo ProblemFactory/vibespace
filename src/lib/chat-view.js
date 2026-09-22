@@ -3299,7 +3299,7 @@ class ChatView {
       // so a Workflow's taskInfo edit re-renders its tool card through the ONE
       // swap point. Agent cards are excluded on purpose — their live status line
       // is drawn by _onSubagentMessage and a re-render would wipe it.
-      if (fields.taskInfo.type === 'workflow' && msg.role === 'tool') {
+      if ((fields.taskInfo.type === 'workflow' || fields.taskInfo.workflow) && msg.role === 'tool') {
         const oldEl = this._elements.get(id);
         if (oldEl) { try { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(oldEl, newEl, id); } catch { /* the status bar already has it */ } }
       }
