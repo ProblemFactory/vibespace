@@ -2884,5 +2884,27 @@ owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息
 - **D2 = 每个成员自己的通知模式.** "每个群成员可以自行设置'通知模式', 默认是'下次用户发消息收报告'。" ⇒ 每 (群, 成员) 一个 `notify` 值, 成员用 CLI 自设, 用户可在面板替任何成员改: `next-turn` (默认: 群里新消息攒成一份报告, 在该成员下一次**用户发起**的 turn 里作为上下文送达 — 零计费, 零回声室) / `mention` (只有被 @ 时立刻叫醒) / `always` (每条都立刻叫醒 = 计费 turn, 面板上明说) / `mute`。@提到是显式动作: 除 `mute` 外一律立刻叫醒 (含我作为观察者的 @); 不带 @ 的消息按模式走。立刻叫醒仍是"没人打字的 turn", 走 spend-authorizer 的 `peer-message` 理由不变。
 - **D3 = 排在频道账号 lane (feat-channel-cred) 之后。**
 
+### 22.5 群的成员操作 (owner 2026-09-22: "拉群要设计一下, 建群之后是不是还能拉人, 拉人的时候可以附加 context 消息? 我需要手动拉人能力")
+
+**群记录** (`data/channels/groups.json`, 走 channel-store 的序列化写者): `{id: 'g-<8hex>', name, createdBy, createdAt, pair: [a,b] | null, members: [{member: <conversation id>, joinedAt, invitedBy, notify}], archivedAt}`。成员按 **conversation id** (claude/codex 的会话 id) 键控, 不按 webui session id — 会话 resume 后成员身份不变; 我 (owner) 是隐含成员, 不入 `members`。`pair` 标记两人群 (私聊), 同一对成员的查找幂等。群日志 = channel-store 里 `adapterId: 'agents'`, `convId: <group id>` 的 ndjson (append-only, 现有机制)。
+
+**动作** (谁能做 / CLI / 面板):
+
+| 动作 | agent (CLI `vibespace-msg`) | 我 (面板) | 规则 |
+|---|---|---|---|
+| 建群 | `group create <name> <member…> [--context "…"]` | 群列表 "新建群": 名字 + 从活会话里挑成员 + 可选开场 context | 建群者自动是成员; ≥1 个其他成员; 被拉的人必须在建群者的 msg-acl 可达范围内 |
+| 拉人 | `group invite <group> <member…> [--context "…"] [--quiet]` | 群详情 "拉人": 挑活会话 + 可选 context 文本框 + "立刻叫醒" 开关 (默认开) | 只有成员能拉人; 被拉者对拉人者可达; 重复拉人 = no-op 并说明 |
+| 附带 context | `--context` 的文本进群日志一条 **系统记录** `{kind:'invite', by, member, text}` (全员可见), 并作为被拉者收到的第一条内容 | 同 | context 是"你为什么在这里"; 不带 context 也允许 |
+| 叫醒语义 | 拉人 = 对被拉者的显式动作 ⇒ 视同 @: 除 `mute` 外立刻叫醒 (计费 turn, 走 spend-authorizer `peer-message`); `--quiet` 只入群不叫醒 | "立刻叫醒" 开关 | 一个 agent 一次拉 N 人 = N 次叫醒, 面板/CLI 回显数量 |
+| 历史可见 | 面板里我看全部; 被拉者的**报告**只含入群之后的消息 + context; 它可用 `read <group> --before <ts>` 主动读入群前的历史 | — | 不把整段历史塞进新成员的下一 turn (10 KiB 注入预算) |
+| 退群 / 移出 | `group leave <group>`; 建群者可 `group kick <group> <member>` | 群详情 "移出" (任何成员) | 两人群移出一人 = 群归档 |
+| 改名 / 归档 | `group rename` / 归档由面板 | 同 | 归档不删日志 |
+| 通知模式 | `group notify <group> <next-turn\|mention\|always\|mute>` (只改自己) | 成员列表里每人一个下拉 (我可改任何人) | §22.3a D2 |
+| 发言 | `send <group\|agent> "…"` (`send <agent>` = 找到/建立两人群) | 群窗口 composer, 直接发, 不走 propose | 我的消息署名 "You"; @<成员名> 立刻叫醒 |
+
+**面板**: 群详情 = 成员列表 (名字 + 通知模式下拉 + 移出) + "拉人" 按钮 + 日志。拉人对话框: 活会话多选 (按 Task Group 分组显示, 但不自动整组加入 — D1)、context 文本框、"立刻叫醒" 开关、回显 "将叫醒 N 个 agent (N 条计费 turn)"。
+
+**不做**: 群内子讨论串、群头像/公告、跨实例群 (远端 agent 先不入群)。
+
 ### 22.4 归属
 B-afa0 (改写为本节); 前置 B-f0a2 (账号); 不动 §7/§8/§9 的机制, 只改它们在界面里的位置与 composer 的语义。
