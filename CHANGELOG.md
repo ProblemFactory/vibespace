@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.369.148 — the Workflow card's full name is one hover away
+
+- **Gate:** test-channels-i18n's Latin census now excuses `.chan-cred-label` as DATA — a cluster preset's label is the admin's own words, and since 2.369.147 the wizard's credential step is always drawn, so it reached the eight-surface census (heavy red on de6876d6).
+- **Workflow card head (owner: "这个卡片名字展示不全我怎么看完整的"):** the head cut the run's name at 120 characters with no way to read the rest short of expanding the Output. The head now shows up to 160 characters and carries the WHOLE Summary line of the launch ack as its tooltip; the collapsed summary row below it carries the same tooltip. The View Workflow window's title was already complete.
+
 ## 2.369.147 — a running Workflow card said 已完成 while the same run sat in the status bar's popup as an unclickable "reported by the harness" row
 
 - **The soft level close reopens (owner: "这个看起来是个 workflow？为啥展示成了后台任务？而且也点不开？"):** the CLI's `background_tasks_changed` set omits a member for a record or two around its own phase changes; the normalizer's SOFT close (`finished`, `closedBy: level`) is a guess, and nothing ever took it back — the card read 已完成 with 4/5 agents done, and because the card was no longer "running" the popup listed the same run again from the harness's set, without a click. Now the set naming the id again, or a `task_progress` for it, reopens the card (running, closedBy gone); dropped again ⇒ closed again. test-unknown-records +3.

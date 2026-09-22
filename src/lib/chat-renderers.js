@@ -933,7 +933,10 @@ class ChatRenderers {
       const runId = (block.input && block.input.resumeFromRunId)
         || (resultText.match(/Run ID:\s*(wf_[\w-]+)/)?.[1])
         || (resultText.match(/"runId":\s*"(wf_[\w-]+)"/)?.[1]) || '';
-      const wfName = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim().substring(0, 120) || '';
+      // the FULL name lives in the ack's Summary line (untruncated); the head shows ≤ 160 chars and
+      // carries the whole line as its tooltip (2.369.148, owner: "这个卡片名字展示不全我怎么看完整的")
+      const wfNameFull = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim() || '';
+      const wfName = wfNameFull.length > 160 ? wfNameFull.substring(0, 159) + '…' : wfNameFull;
       const tiW = msg?.taskInfo;
       const wfChipHtml = taskStatusChipHtml(tiW);
       const wfLiveHtml = this.workflowLiveHtml(tiW); // 2.369.118: phases + agent chips while the run is live
@@ -941,7 +944,7 @@ class ChatRenderers {
         ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
         : '';
       const firstLineW = (tiW?.summary ? String(tiW.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${wfChipHtml}${viewBtn}</span>${wfLiveHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label"${wfNameFull ? ` title="${escHtml(wfNameFull)}"` : ''}>${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${wfChipHtml}${viewBtn}</span>${wfLiveHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary"${wfNameFull ? ` title="${escHtml(wfNameFull)}"` : ''}>\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
