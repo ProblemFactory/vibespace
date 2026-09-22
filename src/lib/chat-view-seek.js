@@ -96,6 +96,7 @@ export function installChatSeek(ChatView) {
       if (this._gapBounds && this._gapCursorDown >= this._gapBounds.totalLines) this._gapDownIdleUntil = Date.now() + 3000;
       this._trimGapDom('top');
       this._trace?.('gapDown:done', { n: msgs.length, cursor: this._gapCursorDown, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
+      this._scheduleAxSync?.('gapDown'); // the reader's band lands with the slab (chat-view.js _syncAxExposure)
       this._reportVisibleTsRange();
       metric('gap-slab-load-ms', performance.now() - _t0);
     } finally {
@@ -128,6 +129,7 @@ export function installChatSeek(ChatView) {
       }
       if (Number.isFinite(firstDroppedLine)) { this._gapCursorDown = firstDroppedLine; this._gapDownIdleUntil = 0; }
       this._trace?.('trimGap', { side: 'bottom', removed: n, left: els.length - n, st: Math.round(list.scrollTop), sh: list.scrollHeight, cursorDown: this._gapCursorDown });
+      this._scheduleAxSync?.('trimGap'); // the reader's band lands with the slab (chat-view.js _syncAxExposure)
     } else {
       // dropping ABOVE the viewport — element-anchored (see _withViewportAnchor)
       const before = list.scrollHeight;
@@ -145,6 +147,7 @@ export function installChatSeek(ChatView) {
         marker._gapAnchor = first;
       }
       this._trace?.('trimGap', { side: 'top', removed: n, left: els.length - n, anchored: ok, from: Math.round(stBefore), to: Math.round(list.scrollTop), shBefore: before, sh: list.scrollHeight, cursor: lastKeptFirstLine });
+      this._scheduleAxSync?.('trimGap'); // the reader's band lands with the slab (chat-view.js _syncAxExposure)
     }
   },
 
@@ -324,6 +327,7 @@ export function installChatSeek(ChatView) {
       // the carried wheel-up notch lands here too (the seek path used to eat it)
       this._applyWheelCarry?.('up', 'gapUp:carry');
       this._trace?.('gapUp:done', { n: msgs.length, from: data.fromLine, anchored: anchoredOk, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight, dsh: this._messageList.scrollHeight - scrollHeightBefore, kids: this._messageList.childElementCount });
+      this._scheduleAxSync?.('gapUp'); // the reader's band lands with the slab (chat-view.js _syncAxExposure)
       if (this._teleported) this._trimGapDom('bottom');
       if (markerEl._gapCursor <= 0) this._finishSeek(markerEl, btn);
     } catch (e) {
@@ -526,6 +530,7 @@ export function installChatSeek(ChatView) {
       this._messageList.scrollTop += rc.top - lr.top - lr.height / 2;
     }
     this._trace?.('teleport:done', { n: msgs.length, from: data.fromLine, to: data.toLine, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight, target: target ? 1 : 0 });
+    this._scheduleAxSync?.('teleport'); // the reader's band lands with the slab (chat-view.js _syncAxExposure)
     return target;
   },
 

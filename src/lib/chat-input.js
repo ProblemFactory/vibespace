@@ -616,7 +616,7 @@ export class ChatInput {
     // Remembered so the button can be re-rendered in place when the pending
     // Stop state ends (the label keeps changing under it while the turn runs).
     this._typingLabel = label; this._typingKind = kind;
-    this._streamStatus.innerHTML = `<span class="chat-spinner"></span> <span class="chat-stream-label">${escHtml(label)}</span><button class="chat-interrupt-btn" title="${escHtml(t('Interrupt'))}">\u25A0 ${escHtml(t('Stop'))}</button>`;
+    this._streamStatus.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span> <span class="chat-stream-label">${escHtml(label)}</span><button class="chat-interrupt-btn" title="${escHtml(t('Interrupt'))}">\u25A0 ${escHtml(t('Stop'))}</button>`;
     const btn = this._streamStatus.querySelector('.chat-interrupt-btn');
     // A STOP ALREADY IN FLIGHT OWNS THE BUTTON (round-3 review). showTyping is
     // re-run on every label change, so re-applying the pending state HERE is
@@ -1026,7 +1026,7 @@ export class ChatInput {
     if (!this._streamStatus) return;
     this._typingLabel = null; // this line has no Stop button — showTyping must fall through to a full render
     this._pendingLine = true;
-    this._streamStatus.innerHTML = `<span class="chat-spinner"></span> ${escHtml(label)}`;
+    this._streamStatus.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span> ${escHtml(label)}`;
     this._streamStatus.classList.remove('hidden');
   }
 

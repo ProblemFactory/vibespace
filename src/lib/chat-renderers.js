@@ -782,7 +782,7 @@ class ChatRenderers {
       if (isPending && String(block.toolName || '').toLowerCase() === 'sleep') {
         const ms = Number(block.input?.durationMs) || 0;
         const until = (Number(msg.ts) || Date.now()) + ms;
-        html = `<div class="chat-tool-pending"><span class="chat-tool-label">${UI_ICONS.hourglass} ${escHtml(t('Sleeping'))} <span class="chat-sleep-remaining" data-sleep-until="${escHtml(String(until))}">${escHtml(formatSleepRemaining(until - Date.now()))}</span> ${escHtml(t('remaining'))}</span><span class="chat-spinner"></span></div>`;
+        html = `<div class="chat-tool-pending"><span class="chat-tool-label">${UI_ICONS.hourglass} ${escHtml(t('Sleeping'))} <span class="chat-sleep-remaining" data-sleep-until="${escHtml(String(until))}">${escHtml(formatSleepRemaining(until - Date.now()))}</span> ${escHtml(t('remaining'))}</span><span class="chat-spinner" aria-hidden="true"></span></div>`;
         this.wrapMsg(el, 'tool', UI_ICONS.hourglass, html);
         return el;
       }
@@ -795,12 +795,12 @@ class ChatRenderers {
           ? (block.toolName === 'Read' ? t('Memory read') : t('Memory update'))
           : block.toolName === 'Edit' ? t('Update') : block.toolName === 'Write' ? t('Write') : t('Read');
         const label = `${UI_ICONS.hourglass} ${escHtml(verb)} ${this.clickablePath(fp, mb)}`;
-        html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner"></span></div>`;
+        html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner" aria-hidden="true"></span></div>`;
       } else {
         const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`;
         const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
         const statusHtml = isPending
-          ? `<div class="chat-tool-output-pending"><span class="chat-spinner"></span> ${t('running...')}</div>`
+          ? `<div class="chat-tool-output-pending"><span class="chat-spinner" aria-hidden="true"></span> ${t('running...')}</div>`
           : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Interrupted')}</summary></details>`;
         html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}${browserTraceHolderHtml(block, msg)}</div>`;
       }
@@ -1453,7 +1453,7 @@ class ChatRenderers {
     for (const line of diffLines) {
       const cls = line.type === 'add' ? 'chat-diff-add' : line.type === 'del' ? 'chat-diff-del' : 'chat-diff-ctx';
       const prefix = line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' ';
-      body += `<div class="${cls}"><span class="chat-diff-prefix">${prefix}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
+      body += `<div class="${cls}"><span class="chat-diff-prefix" aria-hidden="true">${prefix}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
     }
 
     const mbE = memoryBase(filePath);
@@ -1503,7 +1503,7 @@ class ChatRenderers {
           : `\u2713 ${t('Added {a} lines, removed {d} lines', { a: addCount, d: delCount })}`;
       const body = diffLines.map((line) => {
         const cls = line.type === 'add' ? 'chat-diff-add' : line.type === 'del' ? 'chat-diff-del' : 'chat-diff-ctx';
-        return `<div class="${cls}"><span class="chat-diff-prefix">${escHtml(line.prefix)}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
+        return `<div class="${cls}"><span class="chat-diff-prefix" aria-hidden="true">${escHtml(line.prefix)}</span><span class="chat-diff-text">${escHtml(line.text)}</span></div>`;
       }).join('');
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.memo} ${action} ${pathLabel}</span><details class="chat-diff"><summary class="chat-diff-summary">${summary}</summary><div class="chat-diff-body">${body}</div></details></div>`;
     }).join('');

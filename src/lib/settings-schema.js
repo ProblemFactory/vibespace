@@ -306,7 +306,7 @@ const SETTINGS_SCHEMA = {
   // feedback" card and the Stop-hook summary card; this notice adds nothing.
   'accessibility.exposeChat': {
     type: 'boolean', default: true, label: t('Expose chat transcripts to assistive technology'),
-    description: t('On: screen readers and other assistive tools see every chat message. Off: the transcripts are marked aria-hidden so the browser builds a small accessibility tree — turn it off when an assistive tool (an IME, PowerToys, …) makes Chrome or Edge freeze on large conversations (Chrome serialises the whole DOM into its accessibility tree on the browser UI thread: 39 s for 27k nodes, measured).'),
+    description: t('On: assistive tools see the messages near where you are reading — every rendered card farther than two viewports from the visible area is marked aria-hidden, so the browser\'s accessibility tree stays small however long the conversation grows (nothing visual or keyboard-reachable changes). Off: whole transcripts are marked aria-hidden — turn it off when an assistive tool (an IME, PowerToys, …) still makes Chrome or Edge freeze on large conversations (Chrome serialises the tree on the browser UI thread: 39 s for 27k nodes, measured).'),
     category: t('Chat'), liveApply: true,
   },
   'chat.showStopHookErrorNotice': {

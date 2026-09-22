@@ -383,13 +383,13 @@
 [data-role-indicator] .chat-msg.chat-agent-report { border-left-color: var(--magenta, var(--accent)); }
 .chat-system-notification > summary { cursor: pointer; list-style: none; }
 .chat-system-notification > summary::-webkit-details-marker { display: none; }
-.chat-system-notification > summary::before { content: '\25B8  '; }
-.chat-system-notification[open] > summary::before { content: '\25BE  '; }
+.chat-system-notification > summary::before { content: '\25B8  '; content: '\25B8  ' / ""; }
+.chat-system-notification[open] > summary::before { content: '\25BE  '; content: '\25BE  ' / ""; }
 .chat-system-notification pre { font-size: 10px; color: var(--text-dim); white-space: pre-wrap; word-break: break-word; margin: 4px 0; padding: 4px 8px; background: var(--bg-root); border-radius: var(--radius-sm); max-height: 150px; overflow: auto; }
 .chat-hook-summary { cursor: pointer; list-style: none; }
 .chat-hook-summary::-webkit-details-marker { display: none; }
-.chat-hook-summary::before { content: '\25B8  '; }
-.chat-hook-details[open] > .chat-hook-summary::before { content: '\25BE  '; }
+.chat-hook-summary::before { content: '\25B8  '; content: '\25B8  ' / ""; }
+.chat-hook-details[open] > .chat-hook-summary::before { content: '\25BE  '; content: '\25BE  ' / ""; }
 /* Full hook output (no char truncation) — cap the height + scroll so a large
    hook payload stays fully readable without flooding the transcript. */
 .chat-hook-output { max-height: 420px; overflow: auto; } /* wrap via the standard chat-pre-wrapped toggle */
@@ -405,11 +405,11 @@
 .chat-msg.chat-msg-init { display: block; padding: 2px 0; margin: 2px 0; font-size: 11px; color: var(--text-dim); }
 .chat-init-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; cursor: pointer; list-style: none; padding: 1px 4px; }
 .chat-init-summary::-webkit-details-marker { display: none; }
-.chat-init-summary::before { content: '\25B8'; opacity: 0.7; }
-.chat-init-details[open] > .chat-init-summary::before { content: '\25BE'; }
+.chat-init-summary::before { content: '\25B8'; content: '\25B8' / ""; opacity: 0.7; }
+.chat-init-details[open] > .chat-init-summary::before { content: '\25BE'; content: '\25BE' / ""; }
 .chat-init-head { color: var(--text-secondary); }
 .chat-init-chip { opacity: 0.8; }
-.chat-init-chip::before { content: '\00B7'; margin-right: 6px; opacity: 0.6; }
+.chat-init-chip::before { content: '\00B7'; content: '\00B7' / ""; margin-right: 6px; opacity: 0.6; }
 /* The health strip: the ONE part that must be legible without expanding —
    a failed MCP server is otherwise indistinguishable from an absent one. */
 .chat-init-warn { display: inline-flex; align-items: center; gap: 4px; color: var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, transparent); border-radius: var(--radius-sm); padding: 0 6px; max-width: 100%; }
@@ -487,8 +487,8 @@
 .chat-diff > summary::-webkit-details-marker { display: none; }
 .chat-diff-summary { font-size: 11px; color: var(--text-dim); padding: 2px 0; }
 .chat-diff-summary:hover { color: var(--text-secondary); }
-.chat-diff-summary::before { content: '\25B8  '; }
-.chat-diff[open] > .chat-diff-summary::before { content: '\25BE  '; }
+.chat-diff-summary::before { content: '\25B8  '; content: '\25B8  ' / ""; }
+.chat-diff[open] > .chat-diff-summary::before { content: '\25BE  '; content: '\25BE  ' / ""; }
 .chat-diff-body { font-family: 'SF Mono','Fira Code','JetBrains Mono',monospace; font-size: 11px; line-height: 1.5; overflow-x: auto; margin-top: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .chat-diff-body > div { display: flex; padding: 0 10px; white-space: pre; min-height: 18px; }
 .chat-diff-prefix { flex: 0 0 14px; color: var(--text-dim); user-select: none; }
@@ -927,7 +927,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-long-msg > summary::-webkit-details-marker { display: none; }
-.chat-long-msg > summary::after { content: ' \25B8'; color: var(--text-dim); font-size: 10px; }
+.chat-long-msg > summary::after { content: ' \25B8'; content: ' \25B8' / ""; color: var(--text-dim); font-size: 10px; }
 /* history/paging pill — a .chat-view overlay child, NEVER a list row (an
    in-flow row would be picked up by _withViewportAnchor/_trimTop and shift the
    very scroll it exists to explain). Positioned HERE, not inline, so the
@@ -1035,7 +1035,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 }
 .chat-long-msg[open] > summary > span { display: none; }
 .chat-long-msg[open] > summary::before { content: 'Collapse'; }
-.chat-long-msg[open] > summary::after { content: ' \25B4'; }
+.chat-long-msg[open] > summary::after { content: ' \25B4'; content: ' \25B4' / ""; }
 .chat-compact-content {
   flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; overflow-wrap: break-word;
   padding: 2px 0;
@@ -1088,11 +1088,11 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 /* Role indicator: icon — small icon replacing text labels */
 [data-role-indicator="icon"] .chat-role { min-width: auto; margin-right: 6px; font-size: 13px; text-align: center; }
 [data-role-indicator="icon"] .chat-role-user { font-size: 0; }
-[data-role-indicator="icon"] .chat-role-user::before { font-size: 13px; content: '\1F464'; }
+[data-role-indicator="icon"] .chat-role-user::before { font-size: 13px; content: '\1F464'; content: '\1F464' / ""; }
 [data-role-indicator="icon"] .chat-role-assistant::before { content: none; }
 [data-role-indicator="icon"] .chat-role-assistant .chat-role-backend-icon { width: 13px; height: 13px; }
 [data-role-indicator="icon"] .chat-role-tool { font-size: 0; }
-[data-role-indicator="icon"] .chat-role-tool::before { font-size: 11px; content: '\2699'; }
+[data-role-indicator="icon"] .chat-role-tool::before { font-size: 11px; content: '\2699'; content: '\2699' / ""; }
 
 /* Role indicator: label — default text labels (no override needed) */
 

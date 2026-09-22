@@ -29,6 +29,11 @@ export class ChatMinimap {
     // Create DOM elements
     this._minimap = document.createElement('div');
     this._minimap.className = 'chat-minimap hidden';
+    // The strip is paint-only (design-accessibility-tree §3 row 3, lean form): one marker div per
+    // user turn of the WHOLE conversation, uncapped — the one subtree that grew with the
+    // conversation's length, not the rendered window. aria-hidden on the strip; the TOC button
+    // below is the accessible path to the same turns and is a SIBLING (never inside this subtree).
+    this._minimap.setAttribute('aria-hidden', 'true');
     container.appendChild(this._minimap);
 
     this._thumb = document.createElement('div');

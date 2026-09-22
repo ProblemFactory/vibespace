@@ -97,6 +97,13 @@ export class ChatStatusBar {
     // Build DOM
     this._element = document.createElement('div');
     this._element.className = 'chat-status-bar';
+    // KEYED CHIP ELEMENTS (design-accessibility-tree §3 row 8 (b)): one element
+    // per chip KEY, created the first time the key renders and patched in place
+    // on every render after — see _reconcile. The whole-bar innerHTML rebuild
+    // this replaced re-created every chip's subtree on every context% / cost /
+    // turn-state tick: an accessibility subtree remove+insert per window per
+    // update (the "stale" 20 % of the owner's 50,150 nodes).
+    this._chipEls = new Map();
 
     // Click handlers
     this._element.addEventListener('click', (e) => {
@@ -477,11 +484,18 @@ export class ChatStatusBar {
     const tierYellow = 'var(--yellow, #e5c07b)';
     const tierOrange = `color-mix(in srgb, ${tierRed} 50%, ${tierYellow})`;
     const tierGreen = 'var(--green, #3fb950)';
-    const parts = [];
+    // The chip SET as descriptors, in bar order: `chip(key, cls, title, html,
+    // {style, attrs})` — key = the chip's identity across renders (one element
+    // per key, see _reconcile), cls/title/style/attrs = the <span>'s attributes
+    // as RAW strings (set through setAttribute — no HTML escaping on the way),
+    // html = the chip's inner markup (escHtml'd exactly as before, it still
+    // reaches innerHTML). The descriptor list is what the old join(' ') was.
+    const chips = [];
+    const chip = (key, cls, title, html, extra) => chips.push({ key, cls, title, html, style: extra?.style || '', attrs: extra?.attrs || null });
 
     // Chat search, phone face (design-mobile-gaps #4): a keyboard shortcut has
     // no touch equivalent; the chip is display:none above 768px.
-    if (this._onSearch) parts.push(`<span class="chat-status-search chat-status-clickable" title="${escHtml(t('Search this conversation'))}">${UI_ICONS.search}</span>`);
+    if (this._onSearch) chip('search', 'chat-status-search chat-status-clickable', t('Search this conversation'), UI_ICONS.search);
 
     // Model + effort badges — separate clickable segments, both ALWAYS
     // rendered: when a value hasn't been reported/commanded we say so
@@ -499,7 +513,7 @@ export class ChatStatusBar {
       const label = locked
         ? UI_ICONS.lock + (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : escHtml(this._statusModel || '?'))
         : (mismatch ? `\u26a0 ${escHtml(this._servedModel)}` : (known ? escHtml(this._statusModel) : t('model: ?')));
-      parts.push(`<span class="chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}" title="${escHtml(title)}${escHtml(lockTip)}">${label}</span>`);
+      chip('model', `chat-status-model chat-status-clickable${known ? '' : ' chat-status-dim'}${mismatch ? ' chat-status-model-fallback' : ''}${locked ? ' chat-status-model-locked' : ''}`, title + lockTip, label);
       const eKnown = !!this._statusEffort;
       // The DELEGATION mode reads as a downgrade unless the tooltip names the
       // level the model really reasons at (2.369.62 — codex 'ultra' runs the
@@ -531,7 +545,7 @@ export class ChatStatusBar {
       const eFull = (eShown && eShown !== this._statusEffort ? eShown + ' · ' : '') + eTitle
         + (eLive ? '\n' + t('{effort} is still in effect until the next turn starts', { effort: eLive }) : '')
         + (eOriginLine ? '\n' + eOriginLine() : '');
-      parts.push(`<span class="chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}" title="${escHtml(eFull)}">${eKnown ? escHtml(this._statusEffort) : t('effort: ?')}</span>`);
+      chip('effort', `chat-status-effort chat-status-clickable${eKnown ? '' : ' chat-status-dim'}`, eFull, eKnown ? escHtml(this._statusEffort) : t('effort: ?'));
     }
 
     // TURN STATE, third value (§2.5). idle/running are ALREADY said by the
@@ -542,7 +556,7 @@ export class ChatStatusBar {
     // request_user_dialog, a tool waiting on the host). Drawn ONLY when the
     // harness itself reported it, never inferred, never on a backend id.
     if (this._turnState === 'requires_action') {
-      parts.push(`<span class="chat-status-turnstate chat-status-needs-action" title="${escHtml(t('The agent is waiting for you — the turn is paused, not finished (reported by the harness).'))}">${UI_ICONS.hourglass} ${escHtml(t('waiting for you'))}</span>`);
+      chip('turnstate', 'chat-status-turnstate chat-status-needs-action', t('The agent is waiting for you — the turn is paused, not finished (reported by the harness).'), `${UI_ICONS.hourglass} ${escHtml(t('waiting for you'))}`);
     }
 
     // SESSION HEALTH (§2.6, round 4) — the init frame's non-working MCP
@@ -562,7 +576,7 @@ export class ChatStatusBar {
     if (this._initHealth?.length) {
       const rows = this._initHealth.map((i) => this._healthLabel(i));
       const tip = t('Reported by the harness at session start — click for the list') + '\n' + rows.join('\n');
-      parts.push(`<span class="chat-status-health chat-status-clickable" title="${escHtml(tip)}">${UI_ICONS.alert} ${escHtml(t('{n} not working', { n: this._initHealth.length }))}</span>`);
+      chip('health', 'chat-status-health chat-status-clickable', tip, `${UI_ICONS.alert} ${escHtml(t('{n} not working', { n: this._initHealth.length }))}`);
     }
 
     // HELD Background Work notifications (design §13 5b ①): the one-line chip
@@ -570,7 +584,7 @@ export class ChatStatusBar {
     // reason in the tooltip; it disappears when the stash drains
     if (this._jobsHeld) {
       const head = this._jobsHeld.split(' — ')[0];
-      parts.push(`<span class="chat-status-held" title="${escHtml(this._jobsHeld)}">${UI_ICONS.clock} ${escHtml(head)}</span>`);
+      chip('held', 'chat-status-held', this._jobsHeld, `${UI_ICONS.clock} ${escHtml(head)}`);
     }
 
     // Goal indicator — always rendered so there's a discoverable entry point
@@ -586,9 +600,9 @@ export class ChatStatusBar {
       const statusHint = status === 'usagelimited' ? t(' — paused by usage limit, click → Continue Goal to resume')
         : status === 'budgetlimited' ? t(' — token budget exhausted, click → Continue Goal to resume') : '';
       const shortGoal = this._goal.length > 30 ? this._goal.substring(0, 30) + '…' : this._goal;
-      parts.push(`<span class="chat-status-goal chat-status-clickable" title="${escHtml(this._goal + statusHint)}">${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}</span>`);
+      chip('goal', 'chat-status-goal chat-status-clickable', this._goal + statusHint, `${UI_ICONS.goal}${statusIcon ? ' ' + statusIcon : ''} <span class="chat-goal-timer">${elapsed}</span> ${escHtml(shortGoal)}`);
     } else {
-      parts.push(`<span class="chat-status-goal chat-status-goal-empty chat-status-clickable" title="${escHtml(t('Set a goal \u2014 the agent keeps working until the condition is met'))}">${UI_ICONS.goal}</span>`);
+      chip('goal', 'chat-status-goal chat-status-goal-empty chat-status-clickable', t('Set a goal \u2014 the agent keeps working until the condition is met'), UI_ICONS.goal);
     }
 
     // Response style (2.368.0 outputStyle, generalized 2.369.58): the chip is
@@ -617,7 +631,7 @@ export class ChatStatusBar {
                : t('Response style: whatever this agent\u2019s own config says \u2014 click to pick one (applies from the next turn)'))
           : (os ? t('Response style: {v} \u2014 set at spawn; a change applies on the next resume', { v: os })
                : t('Response style: the agent default \u2014 click to pick (applies on the next resume)'));
-      parts.push(`<span class="chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}" title="${escHtml(tip)}">${label}</span>`);
+      chip('style', `chat-status-style chat-status-clickable${(os || hasPend) ? '' : ' chat-status-dim'}`, tip, label);
     }
 
     // Auto-continue after a usage limit (2.368.0; GENERIC since 2026-09-08).
@@ -662,7 +676,7 @@ export class ChatStatusBar {
       // hourglasses meaning different things read as one broken widget.
       const arState = a.armed ? ' chat-status-autoresume-armed' : (a.enabled ? ' chat-status-autoresume-on' : ' chat-status-dim');
       const arLabel = a.armed ? (a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(when)) : (a.enabled ? ' ' + escHtml(t('auto')) : '');
-      parts.push(`<span class="chat-status-autoresume chat-status-clickable${arState}" title="${escHtml(title)}">${UI_ICONS.autoContinue}${arLabel}</span>`);
+      chip('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}${arLabel}`);
     }
 
     // Design canvas entry (2.366.0): rendered like the goal chip — the
@@ -671,7 +685,7 @@ export class ChatStatusBar {
     if (this._onDesignRequest) {
       const n = this._pages.length;
       const dTitle = n ? t('{n} page(s) published from this session — click to view or request a design', { n }) : t('Request a design canvas — drafted by the agent, hosted by this VibeSpace, shareable by link');
-      parts.push(`<span class="chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}" title="${escHtml(dTitle)}">${UI_ICONS.design}${n ? ` ${n}` : ''}</span>`);
+      chip('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);
     }
 
     // Browser chip (agent browser P2, §3.8 layer ③): the profile the agent LAST
@@ -687,14 +701,14 @@ export class ChatStatusBar {
       const shown = driving ? t('You are driving') : (b.active == null ? b.pinnedLabel : b.activeLabel);
       const facts = t('Agent last used: {a} · pinned: {p}', { a: b.active == null ? t('nothing yet') : b.activeLabel, p: b.pinnedLabel });
       const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + (differs ? t('The agent is still on {a} — pinned is {p}. Remind it?', { a: b.activeLabel, p: b.pinnedLabel }) + '\n' : '') + facts;
-      parts.push(`<span class="chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}" title="${escHtml(tip)}">${UI_ICONS.web} ${escHtml(String(shown || ''))}</span>`);
+      chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}`, tip, `${UI_ICONS.web} ${escHtml(String(shown || ''))}`);
     }
 
     // Remote reconnect chip — amber, only while the ssh pipe is down
     if (this._remoteState && this._remoteState.state === 'unprotected') {
       // B-0845: session predates the keeper (2.124.0) — claude hangs bare off
       // the ssh pipe; one network wobble kills it. Rebuild = terminate+resume.
-      parts.push(`<span class="chat-status-remote" title="${escHtml(t('This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.'))}">⚠ ${escHtml(t('no disconnect protection'))}</span>`);
+      chip('remote', 'chat-status-remote', t('This session was created before disconnect protection existed — a network drop can kill it. Terminate and Resume the session to rebuild it protected.'), `⚠ ${escHtml(t('no disconnect protection'))}`);
     } else if (this._remoteState) {
       const n = this._remoteState.attempts || 0;
       // Name the concrete failure (2.228.1): "reconnecting (9)…" alone is
@@ -704,7 +718,7 @@ export class ChatStatusBar {
       const err = this._remoteState.lastError;
       const tip = t('The connection to the remote host dropped — reconnecting. The session keeps running on the host; nothing is lost.')
         + (err ? `\n${t('Last error:')} ${err}` : '');
-      parts.push(`<span class="chat-status-remote" title="${escHtml(tip)}">⟳ ${escHtml(t('host reconnecting'))}${n > 1 ? ` (${n})` : ''}…</span>`);
+      chip('remote', 'chat-status-remote', tip, `⟳ ${escHtml(t('host reconnecting'))}${n > 1 ? ` (${n})` : ''}…`);
     }
 
     // Billing identity chip — only rendered when fed (app gates it to mobile)
@@ -724,13 +738,13 @@ export class ChatStatusBar {
         + (a.hostName && (a.name || isApi) ? ' · ' + t('on "{name}"', { name: a.hostName }) : '')
         + (a.guessed ? ' · ' + t('estimated from the login state at spawn') : '')
         + ' · ' + t('Click to switch billing');
-      parts.push(`<span class="chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}" title="${escHtml(tip)}">${escHtml(label)}</span>`);
+      chip('billing', `chat-status-billing chat-status-clickable${isApi ? ' api' : ''}${isPooled ? ' pooled' : ''}`, tip, escHtml(label));
     }
 
     // Permission mode (always show, click to change; Codex sandbox policy in tooltip)
     const permLabel = this._statusPermMode || 'default';
     const permTitle = this._statusSandbox ? t('Click to change permission mode \u00B7 sandbox: {sandbox}', { sandbox: this._statusSandbox }) : t('Click to change permission mode');
-    parts.push(`<span class="chat-status-perm chat-status-clickable" title="${escHtml(permTitle)}">${UI_ICONS.lock} ${escHtml(permLabel)}</span>`);
+    chip('perm', 'chat-status-perm chat-status-clickable', permTitle, `${UI_ICONS.lock} ${escHtml(permLabel)}`);
 
     // Background tasks. The harness's LEVEL signal (setBackgroundTasks), when
     // published, is the count's truth — "N background tasks" — with the
@@ -738,12 +752,12 @@ export class ChatStatusBar {
     if (this._bgTasks?.length) {
       const count = this._bgTasks.length;
       const label = count === 1 ? (shortWorkflowName(this._bgTasks[0].description) || t('1 background task')) : t('{count} background tasks', { count }); // 2.369.141: a Workflow's task description is its whole meta.description — the chip shows the short form, the tooltip the whole
-      parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(this._bgTasks.map((r) => r.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
+      chip('tasks', 'chat-status-tasks chat-status-clickable', this._bgTasks.map((r) => r.description).join(', '), `${UI_ICONS.refresh} ${escHtml(label)}`);
     } else if (this._activeTasks?.size > 0) {
       const count = this._activeTasks.size;
       const tasks = [...this._activeTasks.values()];
       const label = count === 1 ? shortWorkflowName(tasks[0].description) : t('{count} tasks', { count });
-      parts.push(`<span class="chat-status-tasks chat-status-clickable" title="${escHtml(tasks.map(t => t.description).join(', '))}">${UI_ICONS.refresh} ${escHtml(label)}</span>`);
+      chip('tasks', 'chat-status-tasks chat-status-clickable', tasks.map(t => t.description).join(', '), `${UI_ICONS.refresh} ${escHtml(label)}`);
     }
 
     // Running dynamic workflows — one chip; MULTIPLE collapse into a count
@@ -754,11 +768,11 @@ export class ChatStatusBar {
       if (wfs.length === 1) {
         const wf = wfs[0];
         const prog = wf.probed && wf.agents ? ` ${wf.done}/${wf.agents}` : '';
-        parts.push(`<span class="chat-status-wf chat-status-clickable" data-wf-run="${escHtml(wf.runId)}" data-wf-name="${escHtml(wf.name)}" title="${escHtml((wf.summary ? wf.summary + '\n' : '') + t('Workflow running — click for the live view'))}">⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}</span>`);
+        chip('wf', 'chat-status-wf chat-status-clickable', (wf.summary ? wf.summary + '\n' : '') + t('Workflow running — click for the live view'), `⛭ ${escHtml(String(wf.name).slice(0, 24))}${prog}`, { attrs: { 'data-wf-run': String(wf.runId), 'data-wf-name': String(wf.name) } });
       } else {
         const agents = wfs.reduce((n, w) => n + (w.agents || 0), 0);
         const done = wfs.reduce((n, w) => n + (w.done || 0), 0);
-        parts.push(`<span class="chat-status-wf chat-status-wf-multi chat-status-clickable" title="${escHtml(wfs.map((w) => w.name).join(', '))}">⛭ ${escHtml(t('{count} workflows', { count: wfs.length }))}${agents ? ` ${done}/${agents}` : ''}</span>`);
+        chip('wf', 'chat-status-wf chat-status-wf-multi chat-status-clickable', wfs.map((w) => w.name).join(', '), `⛭ ${escHtml(t('{count} workflows', { count: wfs.length }))}${agents ? ` ${done}/${agents}` : ''}`);
       }
     }
 
@@ -767,13 +781,13 @@ export class ChatStatusBar {
       const reviewTitle = this._reviewEnabled
         ? t('Start Codex review')
         : t('Review becomes available after the first completed assistant turn');
-      parts.push(`<span class="chat-status-review ${reviewClass}" title="${escHtml(reviewTitle)}">\u2713 ${escHtml(t('Review'))}</span>`);
+      chip('review', `chat-status-review ${reviewClass}`, reviewTitle, `\u2713 ${escHtml(t('Review'))}`);
     }
 
     // Context: used tokens without a fake percentage when the window is unknown
     if (!this._statusContextWindow && this._statusLastInputTokens) {
       const usedK = fmtK(this._statusLastInputTokens);
-      parts.push(`<span class="chat-status-ctx chat-status-dim" title="${escHtml(t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }))}">${escHtml(usedK)}/?</span>`);
+      chip('ctx-unknown', 'chat-status-ctx chat-status-dim', t('Context used last turn: {used} tokens. The context window size was not reported by the CLI, so no percentage is shown.', { used: usedK }), `${escHtml(usedK)}/?`);
     }
     // Context % with pie chart
     if (this._statusContextWindow && this._statusLastInputTokens) {
@@ -790,7 +804,7 @@ export class ChatStatusBar {
           out: fmtK(u.output_tokens || 0), reasoning: u.reasoning_output_tokens ? t(', reasoning {n}', { n: fmtK(u.reasoning_output_tokens) }) : '',
         });
       }
-      parts.push(`<span class="chat-status-ctx" title="${escHtml(ctxTitle)}"><span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span style="color:${color}">${pct}%</span><span class="chat-status-dim">[${usedK}/${totalK}]</span></span>`);
+      chip('ctx', 'chat-status-ctx', ctxTitle, `<span class="chat-status-ctx-pie" style="background:conic-gradient(${color} ${deg}deg, var(--bg-input) ${deg}deg)"></span> <span style="color:${color}">${pct}%</span><span class="chat-status-dim">[${usedK}/${totalK}]</span>`);
     }
 
     // Cache ratio
@@ -799,16 +813,63 @@ export class ChatStatusBar {
       const cachePct = cacheTotal > 0 ? Math.round((this._statusLastCacheRead / cacheTotal) * 100) : 0;
       const cacheColor = cachePct >= 80 ? tierGreen : cachePct >= 50 ? tierYellow : tierOrange;
       const cacheTip = t('Prompt cache hit rate (last turn): {pct}% of input tokens were read from cache ({read} of {total}). Higher = cheaper + faster.', { pct: cachePct, read: fmtK(this._statusLastCacheRead), total: fmtK(cacheTotal) });
-      parts.push(`<span style="color:${cacheColor}" title="${escHtml(cacheTip)}">${UI_ICONS.bolt}${cachePct}%</span><span class="chat-status-dim" title="${escHtml(cacheTip)}">[${fmtK(this._statusLastCacheRead)}]</span>`);
+      chip('cache', '', cacheTip, `${UI_ICONS.bolt}${cachePct}%`, { style: `color:${cacheColor}` });
+      chip('cache-k', 'chat-status-dim', cacheTip, `[${fmtK(this._statusLastCacheRead)}]`);
     }
 
     // Cost with color tiers
     if (this._statusCost > 0) {
       const costColor = this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
-      parts.push(`<span style="color:${costColor}">$${this._statusCost.toFixed(2)}</span>`);
+      chip('cost', '', '', `$${this._statusCost.toFixed(2)}`, { style: `color:${costColor}` });
     }
 
-    this._element.innerHTML = parts.join(' ');
+    this._reconcile(chips);
+  }
+
+  /** THE IN-PLACE UPDATE (design-accessibility-tree §3 row 8 (b), §8 lean set):
+   *  every chip is a <span> keyed by its descriptor's `key`, created ONCE and
+   *  kept across renders — a render patches only what differs (class / title /
+   *  style / data attributes via setAttribute, the inner markup via innerHTML
+   *  when the string changed), moves an element only when its position
+   *  changed, and removes the elements whose key left the set. Same node
+   *  object across 20 context%/cost ticks; a chip that appears or disappears
+   *  is inserted at / removed from its place without touching its neighbours.
+   *  The bar's own delegated click listener (_onClick, `closest`) is the ONE
+   *  handler binding — nothing is bound per chip, so nothing is re-bound. */
+  _reconcile(chips) {
+    const bar = this._element;
+    const seen = new Set();
+    let i = 0;
+    for (const c of chips) {
+      if (seen.has(c.key)) continue; // a duplicate key would fight over one element — first wins
+      seen.add(c.key);
+      let rec = this._chipEls.get(c.key);
+      if (!rec) {
+        const el = document.createElement('span');
+        el.setAttribute('data-chip', c.key);
+        rec = { el, cls: null, title: null, style: null, html: null, attrs: null };
+        this._chipEls.set(c.key, rec);
+      }
+      const el = rec.el;
+      if (rec.cls !== c.cls) { if (c.cls) el.setAttribute('class', c.cls); else el.removeAttribute('class'); rec.cls = c.cls; }
+      if (rec.title !== c.title) { if (c.title) el.setAttribute('title', c.title); else el.removeAttribute('title'); rec.title = c.title; }
+      if (rec.style !== c.style) { if (c.style) el.setAttribute('style', c.style); else el.removeAttribute('style'); rec.style = c.style; }
+      // data-* attributes: set what the descriptor names, drop what it no longer does
+      const prevAttrs = rec.attrs || {}, nextAttrs = c.attrs || {};
+      for (const k of Object.keys(prevAttrs)) if (!(k in nextAttrs)) el.removeAttribute(k);
+      for (const [k, v] of Object.entries(nextAttrs)) if (prevAttrs[k] !== v) el.setAttribute(k, v);
+      rec.attrs = c.attrs ? { ...c.attrs } : null;
+      if (rec.html !== c.html) { el.innerHTML = c.html; rec.html = c.html; }
+      // position: the i-th child must be this element (insertBefore MOVES a
+      // node already in the bar; a null reference appends)
+      if (bar.children[i] !== el) bar.insertBefore(el, bar.children[i] || null);
+      i++;
+    }
+    for (const [key, rec] of this._chipEls) {
+      if (seen.has(key)) continue;
+      rec.el.remove();
+      this._chipEls.delete(key);
+    }
   }
 
   // ── Private ──

@@ -127,7 +127,7 @@ html, body {
 .session-card-sub { display: flex; min-width: 0; }
 /* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
 .session-card-cwd { font-size: calc(9px * var(--ui-font-scale, 1)); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
-.session-card-cwd::before { content: '\200e'; }
+.session-card-cwd::before { content: '\200e'; content: '\200e' / ""; }
 /* Connection-status dot (left of the name): LIVE/TMUX green, EXTERNAL amber, STOPPED dim */
 /* Connection status as a TOP-RIGHT corner dot on the backend icon (2.224.0
    structural merge — the standalone dot + gap left the row; the mode badge
@@ -578,7 +578,7 @@ html, body {
 .sp-status-detail summary { cursor: pointer; color: var(--text-dim); }
 .sp-status-detail > div { margin-top: 2px; white-space: pre-wrap; color: var(--text-secondary); line-height: 1.45; }
 .task-detail-progress-exp summary { cursor: pointer; list-style: none; }
-.task-detail-progress-exp summary::after { content: ' †'; color: var(--text-dim); }
+.task-detail-progress-exp summary::after { content: ' †'; content: ' †' / ""; color: var(--text-dim); }
 .task-detail-progress-exp[open] summary::after { content: ''; }
 .task-detail-progress-detail { margin: 3px 0 4px 14px; padding-left: 8px; border-left: 2px solid var(--border); white-space: pre-wrap; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
 .empty-hint { padding: 12px; text-align: center; color: var(--text-dim); font-size: 11px; }
@@ -725,7 +725,7 @@ html, body {
 .folder-group.collapsed .folder-chevron { transform: rotate(-90deg); }
 .folder-group.collapsed .folder-sessions { display: none; }
 .folder-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.folder-path::before { content: '\200e'; }
+.folder-path::before { content: '\200e'; content: '\200e' / ""; }
 .folder-count { font-size: 10px; color: var(--text-dim); font-weight: 400; }
 .folder-sessions { padding-left: 6px; }
 /* Mobile two-level folder/group navigation */
@@ -1340,8 +1340,8 @@ html, body {
 .ut-detail-exp { margin-top: 1px; }
 .ut-detail-exp > summary { font-size: 9px; color: var(--text-dim); cursor: pointer; list-style: none; user-select: none; }
 .ut-detail-exp > summary::-webkit-details-marker { display: none; }
-.ut-detail-exp > summary::before { content: '▸ '; }
-.ut-detail-exp[open] > summary::before { content: '▾ '; }
+.ut-detail-exp > summary::before { content: '▸ '; content: '▸ ' / ""; }
+.ut-detail-exp[open] > summary::before { content: '▾ '; content: '▾ ' / ""; }
 .ut-detail-exp > summary:hover { color: var(--accent); }
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
 .ut-actions { display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; }
@@ -1685,7 +1685,7 @@ html, body {
   font-family: 'SF Mono','Fira Code',monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left;
 }
-.autocomplete-item::before { content: '\200e'; } /* LTR mark so text reads normally, but truncation happens on the left */
+.autocomplete-item::before { content: '\200e'; content: '\200e' / ""; } /* LTR mark so text reads normally, but truncation happens on the left */
 .autocomplete-item:hover, .autocomplete-item.active { background: var(--bg-hover); color: var(--accent-hover); }
 .autocomplete-item-task { background: color-mix(in srgb, var(--accent) 12%, transparent); border-left: 3px solid var(--accent); color: var(--accent-hover); }
 .autocomplete-item-task:hover, .autocomplete-item-task.active { background: color-mix(in srgb, var(--accent) 22%, transparent); }
@@ -2168,7 +2168,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 /* LTR mark: under direction:rtl the leading '~' (bidi-neutral) is reordered to
    the visual END ("/foo/bar~") — anchor the run LTR so it reads normally while
    still truncating on the left. Same trick as .session-card-cwd. */
-.cwd-recent-chip::before { content: '\200e'; }
+.cwd-recent-chip::before { content: '\200e'; content: '\200e' / ""; }
 /* Task-Group folder chips — pinned first, marked with the group's color dot.
    ltr flex wrapper (the color dot must stay leftmost); the inner path span
    keeps the rtl front-truncation trick. */
@@ -2181,7 +2181,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .cwd-task-chip .cwd-chip-path {
   direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.cwd-task-chip .cwd-chip-path::before { content: '\200e'; }
+.cwd-task-chip .cwd-chip-path::before { content: '\200e'; content: '\200e' / ""; }
 /* the chip itself is ltr flex (dot leftmost) — the ::before LRM belongs on the inner path span, not the button */
 .cwd-task-chip.cwd-recent-chip::before { content: none; }
 
@@ -2395,9 +2395,9 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 /* heads: [icon][label][caption][arrow] — the arrow points where the members
    open: left for the flyout, right / down for the accordion */
 .gs-menu-item.has-sub .gs-menu-label { flex: 1 1 auto; min-width: 0; }
-.gs-menu-item.has-sub::after { content: '\25C2'; margin-left: 8px; opacity: 0.5; flex: 0 0 auto; }
-.gs-acc .gs-menu-item.has-sub::after { content: '\25B8'; }
-.gs-acc .gs-menu-item.has-sub[aria-expanded="true"]::after { content: '\25BE'; }
+.gs-menu-item.has-sub::after { content: '\25C2'; content: '\25C2' / ""; margin-left: 8px; opacity: 0.5; flex: 0 0 auto; }
+.gs-acc .gs-menu-item.has-sub::after { content: '\25B8'; content: '\25B8' / ""; }
+.gs-acc .gs-menu-item.has-sub[aria-expanded="true"]::after { content: '\25BE'; content: '\25BE' / ""; }
 .gs-menu-item[aria-expanded="true"] { background: var(--bg-hover); }
 .gs-head-caption { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
 /* the flyout: a child popover hanging off its head's left edge */
@@ -2766,7 +2766,7 @@ label.cfg-row {
 .mounts-path-text {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0;
 }
-.mounts-path-text::before { content: '\200e'; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
+.mounts-path-text::before { content: '\200e'; content: '\200e' / ""; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
 .mounts-errline { padding-left: 14px; font-size: 10px; color: var(--red, #e55); line-height: 1.4; }
 .mounts-btn {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
@@ -2846,7 +2846,7 @@ label.cfg-row {
    same rtl trick as .session-card-cwd / .mounts-path-text */
 .wb-card-path-host { flex-shrink: 0; color: var(--text-secondary); }
 .wb-card-path-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
-.wb-card-path-text::before { content: '\200e'; }
+.wb-card-path-text::before { content: '\200e'; content: '\200e' / ""; }
 .wb-proj-dot {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
   background: var(--wb-proj-color, var(--text-dim));
@@ -2890,7 +2890,7 @@ label.cfg-row {
 .palette-dot.on { background: var(--green, #3fb950); opacity: 1; box-shadow: 0 0 4px var(--green, #3fb950); }
 .palette-name { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-path { color: var(--text-dim); font-size: 10px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; direction: rtl; }
-.palette-path::before { content: '\200e'; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
+.palette-path::before { content: '\200e'; content: '\200e' / ""; } /* LTR mark — leading '~'/neutrals reorder to the end under rtl otherwise */
 
 /* Manage Agents: host selector row */
 /* (the .agents-host-row machine selector was retired by the 2.245.0
@@ -3294,8 +3294,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .agents-adv { border: 1px solid var(--border); border-radius: var(--radius); padding: 0; margin-top: 4px; }
 .agents-adv > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; font-size: 12px; }
 .agents-adv > summary::-webkit-details-marker { display: none; }
-.agents-adv > summary::before { content: '▸'; color: var(--text-dim); font-size: 10px; }
-.agents-adv[open] > summary::before { content: '▾'; }
+.agents-adv > summary::before { content: '▸'; content: '▸' / ""; color: var(--text-dim); font-size: 10px; }
+.agents-adv[open] > summary::before { content: '▾'; content: '▾' / ""; }
 .agents-adv-hint { font-size: 10px; color: var(--text-dim); }
 .agents-adv-body { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 10px; }
 .agents-field { display: flex; flex-direction: column; gap: 4px; }
@@ -3778,7 +3778,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; list-style: none;
   font-size: 12px; color: var(--text); border-radius: var(--radius);
 }
-.agents-mach-sum::before { content: '▸'; font-size: 9px; color: var(--text-dim); transition: transform var(--transition); }
+.agents-mach-sum::before { content: '▸'; content: '▸' / ""; font-size: 9px; color: var(--text-dim); transition: transform var(--transition); }
 .agents-mach-acc[open] > .agents-mach-sum::before { transform: rotate(90deg); }
 .agents-mach-sum::-webkit-details-marker { display: none; }
 .agents-mach-name { font-weight: 600; }
@@ -4454,7 +4454,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .window.tab-split > .tab-split-divider:hover, .window.tab-split > .tab-split-divider.dragging { background: var(--accent); }
 .window.tab-split.split-resizing > .window-content { pointer-events: none; }
 .window.tab-split > .window-content.tab-split-pane.tab-split-focus { box-shadow: inset 0 1px 0 var(--accent); }
-.tab-item.split-member .tab-label::before { content: '⫿ '; opacity: 0.55; font-size: 9px; }
+.tab-item.split-member .tab-label::before { content: '⫿ '; content: '⫿ ' / ""; opacity: 0.55; font-size: 9px; }
 /* the split drop hint: the half of the title bar the drag is over */
 .window.tab-split-drop-left::before, .window.tab-split-drop-right::before { content: ''; position: absolute; top: 0; height: var(--title-height); width: 50%; z-index: 20; pointer-events: none; background: color-mix(in srgb, var(--accent) 28%, transparent); border-bottom: 2px solid var(--accent); }
 .window.tab-split-drop-left::before { left: 0; }

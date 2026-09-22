@@ -38,6 +38,7 @@ const sk = fs.readFileSync(path.join(REPO, 'src/lib/chat-view-seek.js'), 'utf8')
 const rulesSrc = fs.readFileSync(path.join(REPO, 'scripts/paging-gesture-rules.mjs'), 'utf8');
 const pagingSrc = fs.readFileSync(path.join(REPO, 'scripts/test-chat-paging.mjs'), 'utf8');
 const dbgSrc = fs.readFileSync(path.join(REPO, 'scripts/dbg-huge-paging.mjs'), 'utf8');
+const hugeSrc = fs.readFileSync(path.join(REPO, 'scripts/huge-transcript-fixture.mjs'), 'utf8'); // the §1c generator's home since it is shared with test-ax-budget
 ok('ONE trim implementation for both edges (_trimEdge) — _trimBottom / _trimTop are its two spellings', /_trimEdge\(side\) \{/.test(cv) && /_trimBottom\(\) \{ return this\._trimEdge\('bottom'\); \}/.test(cv) && /_trimTop\(\) \{ return this\._trimEdge\('top'\); \}/.test(cv));
 ok('the keep zone is ONE named number of viewports on each side of the viewport, read through _keepZone — and the seek trim (chat-view-seek _trimGapDom) reads the same one', /const TRIM_KEEP_VIEWPORTS = 1;/.test(cv) && /_keepZone\(\) \{/.test(cv) && /top: st - ch \* TRIM_KEEP_VIEWPORTS, bottom: st \+ ch \* \(1 \+ TRIM_KEEP_VIEWPORTS\)/.test(cv) && /const zone = this\._keepZone\(\);\s*const pos = this\._cardPositions\(els\);/.test(sk));
 ok('the card target is SOFT (TRIM_SOFT_CARDS) and the zone wins: the bottom loop stops at the first card whose top is inside the zone, the top loop at the first card whose bottom is', /const TRIM_SOFT_CARDS = 150;/.test(cv) && /if \(n >= must && pos\[i\]\.top < zone\.bottom\) break;/.test(cv) && /if \(n >= must && pos\[i\]\.bottom > zone\.top\) break;/.test(cv));
@@ -702,8 +703,9 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     /const seq = this\._traceSeq = \(this\._traceSeq \|\| 0\) \+ 1;/.test(cv) && /r\.push\(data \? \{ t: Date\.now\(\), seq, tag, \.\.\.data \}/.test(cv)
     && /ringSeq: v\._traceSeq \|\| 0/.test(rulesSrc) && /\(e\.seq \|\| 0\) > \$\{Number\(mark\) \|\| 0\}/.test(rulesSrc)
     && /const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(pagingSrc) && /const ringSince = \(mark\) => evaljs\(RING_SINCE_SOURCE\(mark\)\);/.test(dbgSrc) && !/before\.ring\b/.test(pagingSrc) && !/before\.ring\b/.test(dbgSrc));
-  ok('the §1c fixture MINTS every record id through fixtureSid (test-fixture-isolation refuses a hand-spelled member of the family)',
-    /const uuid = \(\) => fixtureSid\(\(n\+\+\)\.toString\(16\)\);/.test(pagingSrc) && !/['"`]e2e00000-0000-4000-8000-/i.test(pagingSrc));
+  ok('the §1c fixture MINTS every record id through fixtureSid (test-fixture-isolation refuses a hand-spelled member of the family) — in its shared home, scripts/huge-transcript-fixture.mjs, which test-chat-paging is WIRED to (imports + calls it with SID3)',
+    /const uuid = \(\) => fixtureSid\(\(n\+\+\)\.toString\(16\)\);/.test(hugeSrc) && /import \{ fixtureSid \} from '\.\/scratch\.mjs';/.test(hugeSrc) && !/['"`]e2e00000-0000-4000-8000-/i.test(hugeSrc)
+    && /import \{ writeHugeTranscript \} from '\.\/huge-transcript-fixture\.mjs';/.test(pagingSrc) && /await writeHugeTranscript\(\{ file: path\.join\(PROJ, `\$\{SID3\}\.jsonl`\), sid: SID3, cwd: CWD, targetBytes: HUGE_TARGET_BYTES \}\)/.test(pagingSrc) && !/['"`]e2e00000-0000-4000-8000-/i.test(pagingSrc));
   ok('the by-hand driver re-tails after emulating content-visibility (a live window opens pinned at the tail, never at scrollTop 0 unpinned) and walks the gap legs',
     /v\._pinned = true; v\._forceScrollToBottom\(\); await sleep\(600\);/.test(dbgSrc) && /gesture\(`gap-up-hold-\$\{i \+ 1\}`, 'up', 'hold'\)/.test(dbgSrc));
   ok('both drivers wheel over a PLAIN point of the viewport (WHEEL_POINT_SOURCE — a card\'s own scroll box under the pointer takes the notches), never a fixed centre',

@@ -94,8 +94,9 @@ class WindowManager {
     titleBar.append(iconWrap, titleSpan, controls);
 
     const content = document.createElement('div'); content.className = 'window-content';
+    // the 8 resize handles are paint-only (design-accessibility-tree §3 row 2): empty divs, aria-hidden so none is a node
     for (const dir of ['n','s','e','w','ne','nw','se','sw']) {
-      const h = document.createElement('div'); h.className = `resize-handle resize-${dir}`; h.dataset.dir = dir; el.appendChild(h);
+      const h = document.createElement('div'); h.className = `resize-handle resize-${dir}`; h.dataset.dir = dir; h.setAttribute('aria-hidden', 'true'); el.appendChild(h);
     }
     el.append(titleBar, content); this.workspace.appendChild(el);
 

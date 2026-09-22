@@ -173,10 +173,10 @@ export function renderCodeBlock(code, filePath) {
   const gutterW = String(lines.length).length;
   let body = '';
   for (let i = 0; i < shown; i++) {
-    body += `<div class="chat-code-line"><span class="chat-code-ln" style="width:${gutterW + 1}ch">${i + 1}</span><span class="chat-code-text">${lines[i] || ' '}</span></div>`;
+    body += `<div class="chat-code-line"><span class="chat-code-ln" aria-hidden="true" style="width:${gutterW + 1}ch">${i + 1}</span><span class="chat-code-text">${lines[i] || ' '}</span></div>`;
   }
   if (lines.length > MAX_LINES) {
-    body += `<div class="chat-code-line chat-code-truncated"><span class="chat-code-ln" style="width:${gutterW + 1}ch">…</span><span class="chat-code-text">${escHtml(t('(+{n} more lines — open the file to see all)', { n: lines.length - MAX_LINES }))}</span></div>`;
+    body += `<div class="chat-code-line chat-code-truncated"><span class="chat-code-ln" aria-hidden="true" style="width:${gutterW + 1}ch">…</span><span class="chat-code-text">${escHtml(t('(+{n} more lines — open the file to see all)', { n: lines.length - MAX_LINES }))}</span></div>`;
   }
   const langLabel = lang || 'plain';
   const deferred = skipHighlight ? ' data-highlight-deferred="1"' : '';

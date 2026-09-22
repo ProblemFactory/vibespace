@@ -32,7 +32,7 @@ export function installExplorerUploads(FileExplorer) {
         const item = document.createElement('div'); item.className = 'upload-active-item';
         // Row 1: spinner + name + cancel
         const row1 = document.createElement('div'); row1.className = 'upload-active-row1';
-        const spinner = document.createElement('span'); spinner.className = 'upload-active-spinner';
+        const spinner = document.createElement('span'); spinner.className = 'upload-active-spinner'; spinner.setAttribute('aria-hidden', 'true');
         const nameList = upload.displayNames || [];
         const label = nameList.length > 1 ? t('{n} files', { n: nameList.length }) : (nameList[0] || t('uploading...'));
         const name = document.createElement('span'); name.className = 'upload-active-name'; name.textContent = label;

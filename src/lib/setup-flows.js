@@ -25,7 +25,7 @@ export function installSetupFlows(App) {
       return new Promise((resolve) => {
         const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, dialogClass: 'guided-cli-dialog', bodyClass: 'guided-cli-body' });
         body.innerHTML = `
-          <div class="guided-cli-status"><span class="upload-active-spinner"></span><span class="gc-msg">${escHtml(t('Follow the prompts in the terminal below — this closes automatically when done.'))}</span></div>
+          <div class="guided-cli-status"><span class="upload-active-spinner" aria-hidden="true"></span><span class="gc-msg">${escHtml(t('Follow the prompts in the terminal below — this closes automatically when done.'))}</span></div>
           ${hint ? `<div class="mounts-field-hint">${escHtml(hint)}</div>` : ''}
           <div class="guided-cli-term"></div>`;
         const statusEl = body.querySelector('.guided-cli-status');

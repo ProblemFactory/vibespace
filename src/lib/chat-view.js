@@ -168,6 +168,26 @@ const TRIM_KEEP_VIEWPORTS = 1;
 // The card count a trim aims for; a zone that holds more keeps them (folded members
 // are display:none and cost nothing). FOLD_DOM_CEILING is the one hard bound.
 const TRIM_SOFT_CARDS = 150;
+// THE READER'S BAND (docs/design-accessibility-tree.zh.md §3 row 1 / §8; the
+// owner's 50,150-node Windows freeze, 2.369.144): a rendered card farther than
+// this many viewports from the viewport's edges is marked aria-hidden, so the
+// tree Chrome serialises holds the reader's neighbourhood only — whatever the
+// rendered count, the gap slab or the fold state. aria-hidden and not
+// content-visibility:hidden: test-ax-budget (a0) measured aria-hidden per card
+// layout-neutral and pruning 85 % of a card's live nodes, while c-v:hidden moved
+// scrollHeight (767 → 658) — the landing geometry every 2.369.142 invariant
+// stands on. Wider than TRIM_KEEP_VIEWPORTS on purpose: the trim bounds what
+// the DOM keeps (a paged fold-dominated window is ~4 viewports, inside this
+// band whole); the band bounds what the tree sees where the trim does not
+// reach — a window under TRIM_SOFT_CARDS of tall cards, a 2,000-card gap slab.
+const AX_BAND_VIEWPORTS = 2;
+// Landings and scroll events coalesce into ONE derivation this long after the
+// last of them (a wheel gesture is many scroll events; the pass runs once) —
+// and ONE settle pass this much later, because heights keep resolving after a
+// landing (the kb's "scrollHeight still drifting by a few hundred px"; measured
+// by test-ax-budget: a tail card 300 px past where the first pass saw it).
+const AX_SYNC_DEBOUNCE_MS = 150;
+const AX_SYNC_SETTLE_MS = 1200;
 
 class ChatView {
   constructor(winInfo, wsManager, sessionId, app, { readOnly = false, subagentView = false } = {}) {
@@ -209,6 +229,7 @@ class ChatView {
     // grouped-tab guests and minimized windows are display:none and never did.
     // `_suspended` is derived from this set — see setHidden / src/lib/view-visibility.js.
     this._hiddenReasons = new Set();
+    this._axSyncTimer = null; this._axSettleTimer = null; this._axRevealEl = null; // the reader's band (see _syncAxExposure)
     // When the resume happened, and when the reader last POSITIONED the view
     // on purpose through a path that is not one of the message list's own
     // input listeners (minimap, search reveal, floating run bar, jump). The
@@ -334,6 +355,7 @@ class ChatView {
     // Message list
     this._messageList = document.createElement('div');
     this._messageList.className = 'chat-message-list';
+    this._messageList._axView = this; // app.js applyAxExposure reaches EVERY view's band through its list (sub-agent viewers are not in app.sessions)
     try { if (this.app?.settings?.get('accessibility.exposeChat') === false) this._messageList.setAttribute('aria-hidden', 'true'); } catch { } // 2.369.144: keep the transcript out of the accessibility tree when asked
     // Media-card thumbnails that cannot load (file deleted, or a history viewed
     // from a machine that does not have it) swap to the honest "not available"
@@ -552,6 +574,20 @@ class ChatView {
       if (NAV_KEYS.includes(e.key)) this._notePositioning('key');
       else this._noteUserInput();
     });
+    // FOCUS EXPOSES ITS CARD IN THE FOCUS EVENT'S OWN TASK (the reader's band,
+    // _syncAxExposure): Tab / Shift+Tab / .focus() can land inside a band-hidden
+    // card, and the pass that exempts the focused card runs ≥ AX_SYNC_DEBOUNCE_MS
+    // later (never, for a .focus() without a scroll) — focus sat under
+    // aria-hidden, and Chrome 153 had to repair our markup itself ("Blocked
+    // aria-hidden on an element because its descendant retained focus"; other
+    // engines need not). No layout read: the attribute leaves in the same batch
+    // as the focus change, and the pass that follows keeps the card exposed
+    // through its activeElement exemption. Gate: test-ax-budget ⑦.
+    this._messageList.addEventListener('focusin', (e) => {
+      const card = this._axCardOf(e.target);
+      if (card && card.getAttribute('aria-hidden') === 'true') card.removeAttribute('aria-hidden');
+      this._scheduleAxSync('focus');
+    });
     this._messageList.addEventListener('wheel', (e) => {
       if (!this._canPaginate) return;
       const list = this._messageList;
@@ -624,6 +660,7 @@ class ChatView {
     // Scroll detection: pin-to-bottom + auto-load earlier messages (throttled)
     let scrollTick = false;
     this._messageList.addEventListener('scroll', () => {
+      this._scheduleAxSync('scroll'); // the reader's band follows every scroll, programmatic ones included (a jump moves the band with it); debounced, no read here, gated on suspension inside
       if (scrollTick) return;
       scrollTick = true;
       requestAnimationFrame(() => {
@@ -901,6 +938,9 @@ class ChatView {
       jumpToFileMatch: (m) => this.jumpToFileMatch(m),
       // a REVEAL positions the viewport without any event the message list can
       // see — it must end the resume settle like a wheel does
+      // the revealed card stays in the accessibility tree even when a settle
+      // leaves it just outside the reader's band (_syncAxExposure)
+      onReveal: (el) => { this._axRevealEl = el; this._axRevealAt = Date.now(); },
       onNav: () => this._noteUserNav('search-reveal'),
     });
     container.insertBefore(this._search.element, this._messageList);
@@ -2204,6 +2244,7 @@ class ChatView {
     if (spinner) {
       const sp = document.createElement('span');
       sp.className = 'chat-spinner';
+      sp.setAttribute('aria-hidden', 'true');
       pill.appendChild(sp);
     }
     pill.appendChild(document.createTextNode(text));
@@ -2297,6 +2338,7 @@ class ChatView {
       this._lastStructuralAt = Date.now();
       this._scheduleRunBar();
       this._tickCollab(); // the ages went stale while hidden — repaint on the first frame back
+      this._scheduleAxSync('resume'); // the band is re-derived once the geometry is real again (a suspended view skips the pass)
       // The settle carries the re-tail timer's slack (see reTail below): the
       // scroll handler must not be free to decide in the gap BETWEEN the
       // window expiring and the re-tail running.
@@ -2599,6 +2641,7 @@ class ChatView {
       this._applyWheelCarry('up', 'extendTop:carry');
       const above = Math.round(this._messageList.scrollTop); // history rendered ABOVE the viewport after the landing
       this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: above, sh: this._messageList.scrollHeight, ch: this._messageList.clientHeight, pass: passes + 1 });
+      this._scheduleAxSync('extendTop');
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       passes++;
       const short = above < this._messageList.clientHeight;
@@ -2921,6 +2964,7 @@ class ChatView {
       this._applyWheelCarry('down', 'extendBottom:carry');
       const below = Math.round(list.scrollHeight - list.scrollTop - list.clientHeight); // content rendered BELOW the viewport
       this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(list.scrollTop), sh: list.scrollHeight, ch: list.clientHeight, below, pass: passes + 1 });
+      this._scheduleAxSync('extendBottom');
       // Newly rendered messages need the search highlight re-applied
       if (this._search?.hasHighlight) this._search.applyHighlightLayer();
       passes++;
@@ -3022,6 +3066,7 @@ class ChatView {
       this._traceExpect('trimTop:delta');
       list.scrollTop -= (shBefore - list.scrollHeight);
     }
+    this._scheduleAxSync(side === 'bottom' ? 'trimBottom' : 'trimTop');
     return n;
   }
   /** Drop every loaded gap card (`.chat-gap-msg`, outside the window's
@@ -3052,6 +3097,84 @@ class ChatView {
   /** The reader's neighbourhood in scroll coordinates: the viewport plus
    *  TRIM_KEEP_VIEWPORTS above and below it. Every trim (window AND gap) keeps
    *  everything that touches it. */
+  // ── THE READER'S BAND (docs/design-accessibility-tree.zh.md §3 row 1 / §8) ──
+  // ONE derivation, ONE layout read: every rendered card (gap cards too) whose
+  // span lies farther than AX_BAND_VIEWPORTS from the viewport is aria-hidden;
+  // everything inside the band, the card holding the focus, and the last jump
+  // target / search reveal (until the reader scrolls away from it) are exposed. Runs after every landing
+  // the paging machinery makes (extend / trim / gap slab / teleport / fold
+  // pass) and AX_SYNC_DEBOUNCE_MS after the last scroll event, coalesced
+  // through _scheduleAxSync — never mid-gesture inside an anchored section.
+  // Under `accessibility.exposeChat === false` the whole list is aria-hidden
+  // at birth (2.369.144, app.js applyAxExposure) and this pass has nothing to
+  // decide. A suspended view (any hidden reason) skips — its geometry is
+  // meaningless — and re-syncs on resume. aria-hidden changes no geometry
+  // (a0 measured it), so the 2.369.142 paging invariants are untouched.
+  // Gate: test-ax-budget ④ (the band on a 2,600-card gap slab, the growth
+  // invariant, the neutered-copy control).
+  _scheduleAxSync(why) {
+    if (this._disposed || this._suspended) return;
+    clearTimeout(this._axSyncTimer); clearTimeout(this._axSettleTimer);
+    // NEVER MID-GESTURE: a held wheel at the list's edge fires notches without
+    // scroll events (wheelTop / the carry), so the debounce alone could run the
+    // pass — one forced layout read — between two notches of a landing gesture;
+    // a pass whose input is younger than the debounce re-arms instead
+    const inFlight = () => Date.now() - (this._lastUserScrollAt || 0) < AX_SYNC_DEBOUNCE_MS;
+    this._axSyncTimer = setTimeout(() => {
+      this._axSyncTimer = null;
+      if (inFlight()) { this._scheduleAxSync(why); return; }
+      requestAnimationFrame(() => { if (!this._disposed) this._syncAxExposure(why); });
+      // the settle pass: superseded by any newer schedule, so a gesture still runs two passes at most
+      this._axSettleTimer = setTimeout(() => {
+        this._axSettleTimer = null;
+        if (inFlight()) { this._scheduleAxSync(why); return; }
+        requestAnimationFrame(() => { if (!this._disposed) this._syncAxExposure(why + ':settle'); });
+      }, AX_SYNC_SETTLE_MS);
+    }, AX_SYNC_DEBOUNCE_MS);
+  }
+
+  _syncAxExposure(why) {
+    const list = this._messageList;
+    if (!list || !list.isConnected || this._disposed || this._suspended) return;
+    if (this.app?.settings?.get('accessibility.exposeChat') === false) return; // the list itself is aria-hidden: nothing per card to decide
+    const els = list.querySelectorAll(':scope > .chat-msg');
+    if (!els.length) return;
+    const ch = list.clientHeight, st = list.scrollTop;
+    if (!ch) return; // not laid out (between birth and attach): decide nothing
+    const top = st - ch * AX_BAND_VIEWPORTS, bottom = st + ch * (1 + AX_BAND_VIEWPORTS);
+    const pos = this._cardPositions(els); // the one layout read
+    const keep = new Set();
+    const keepCardOf = (el) => { const c = this._axCardOf(el); if (c) keep.add(c); };
+    const active = document.activeElement;
+    if (active && list.contains(active)) keepCardOf(active);
+    // the jump / reveal target stays exposed until the reader scrolls away from
+    // it (the rule _setStableHeights already uses: a user scroll after the
+    // landing ends the landing's claim) — test-ax-budget found the teleport's
+    // target still exempt 2.5 viewports away after two wheel gestures
+    const scrolledSince = (t) => (this._lastUserScrollAt || 0) > (t || 0);
+    if (!scrolledSince(this._lastJumpAt)) keepCardOf(this._lastJumpTargetEl);
+    if (!scrolledSince(this._axRevealAt)) keepCardOf(this._axRevealEl);
+    let hidden = 0, changed = 0;
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      const out = (pos[i].bottom < top || pos[i].top > bottom) && !keep.has(el);
+      const was = el.getAttribute('aria-hidden') === 'true';
+      if (out) { hidden++; if (!was) { el.setAttribute('aria-hidden', 'true'); changed++; } }
+      else if (was) { el.removeAttribute('aria-hidden'); changed++; }
+    }
+    this._axBand = { why, cards: els.length, hidden, changed, at: Date.now(), st: Math.round(st), ch, top: Math.round(top), bottom: Math.round(bottom) }; // the pass's own geometry (incident bundles, test-ax-budget)
+    if (changed) this._trace('axBand', { why, n: els.length, hidden, changed, st: Math.round(st), ch });
+  }
+
+  /** The band's unit holding `el`: the message list's direct `.chat-msg` child
+   *  (the element `_syncAxExposure` writes aria-hidden on), or null. */
+  _axCardOf(el) {
+    const list = this._messageList;
+    let c = el && el.isConnected ? el : null;
+    while (c && c.parentElement !== list) c = c.parentElement;
+    return c && c.classList.contains('chat-msg') ? c : null;
+  }
+
   _keepZone() {
     const list = this._messageList;
     const ch = list.clientHeight, st = list.scrollTop;
@@ -4308,7 +4431,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       return;
     }
     this._roTypingLabel = label;
-    this._streamStatus.innerHTML = `<span class="chat-spinner"></span> <span class="chat-stream-label">${escHtml(label)}</span>`;
+    this._streamStatus.innerHTML = `<span class="chat-spinner" aria-hidden="true"></span> <span class="chat-stream-label">${escHtml(label)}</span>`;
     this._streamStatus.classList.remove('hidden');
   }
 
@@ -5682,7 +5805,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           const agentsHtml = agents.length
             ? `${label ? ' · ' : ' '}<span class="chat-run-agents">${agents.slice(0, 4).map((a) => `<span class="chat-collab-name" role="link" tabindex="0" data-agent-path="${escHtml(a.path)}"${a.threadId ? ` data-thread-id="${escHtml(a.threadId)}"` : ''}>${escHtml(a.name)}</span>`).join(', ')}${agents.length > 4 ? `, +${agents.length - 4}` : ''}</span>`
             : '';
-          header.innerHTML = `<span class="chat-run-arrow">▸</span><span class="chat-run-label">${escHtml(label)}</span>${agentsHtml}`;
+          header.innerHTML = `<span class="chat-run-arrow" aria-hidden="true">▸</span><span class="chat-run-label">${escHtml(label)}</span>${agentsHtml}`;
           for (const nameEl of header.querySelectorAll('.chat-collab-name')) {
             nameEl.onclick = (ev) => {
               ev.stopPropagation();
@@ -5758,6 +5881,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       // synchronously between our pass and this drain.
       this._runsObserver?.takeRecords();
       this._scheduleRunBar();
+      this._scheduleAxSync('fold'); // a fold pass moves cards (display:none members sit at their header): the band is re-derived after it
     }
   }
 
@@ -5812,7 +5936,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         if (!run.footer) {
           const f = document.createElement('div');
           f.className = 'chat-run-footer';
-          f.innerHTML = `<span class="chat-run-arrow">${UI_ICONS.chevronUp}</span><span class="chat-run-label">${escHtml(t('Collapse'))} · ${escHtml(run.label)}</span>`;
+          f.innerHTML = `<span class="chat-run-arrow" aria-hidden="true">${UI_ICONS.chevronUp}</span><span class="chat-run-label">${escHtml(t('Collapse'))} · ${escHtml(run.label)}</span>`;
           f.onclick = () => this._collapseRunTo(run);
           run.footer = f;
         }
@@ -5955,6 +6079,8 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     if (this._searchBarObserver) { this._searchBarObserver.disconnect(); this._searchBarObserver = null; }
     if (this._runsTimer) { clearTimeout(this._runsTimer); this._runsTimer = null; }
     if (this._runBarRaf) { cancelAnimationFrame(this._runBarRaf); this._runBarRaf = null; }
+    if (this._axSyncTimer) { clearTimeout(this._axSyncTimer); this._axSyncTimer = null; } // teardown removes no attribute — the list is gone with the view
+    if (this._axSettleTimer) { clearTimeout(this._axSettleTimer); this._axSettleTimer = null; }
     this._stopCollabTick();
     if (this._queueChipRaf && this._queueChipRaf !== -1) { try { cancelAnimationFrame(this._queueChipRaf); } catch { } this._queueChipRaf = 0; }
     this._clearResumeRetail();

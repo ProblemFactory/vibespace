@@ -14,7 +14,7 @@ class ChatSearch {
    * @param {(idx: number) => Promise<void>} callbacks.jumpToIndex
    * @param {() => {windowStart: number, windowEnd: number}} callbacks.getWindowBounds
    */
-  constructor(messageList, { getSessionIds, getSessionId, jumpToIndex, getWindowBounds, getGapActive, jumpToFileMatch, onNav }) {
+  constructor(messageList, { getSessionIds, getSessionId, jumpToIndex, getWindowBounds, getGapActive, jumpToFileMatch, onNav, onReveal }) {
     this._messageList = messageList;
     this._getSessionIds = getSessionIds;
     this._getSessionId = getSessionId;
@@ -25,6 +25,7 @@ class ChatSearch {
     // A reveal SCROLLS the list from outside its own event listeners — the
     // owner needs to know a reader positioned the view (desktop-resume re-tail).
     this._onNav = onNav || null;
+    this._onReveal = onReveal || null;   // the card a reveal lands on — ChatView keeps it in the accessibility tree (its reader's band)
     this._fullFileMode = false;
     this._truncated = false;
 
@@ -237,7 +238,7 @@ class ChatSearch {
         return;
       }
     }
-    if (el) el.scrollIntoView({ block: 'center' });
+    if (el) { this._onReveal?.(el); el.scrollIntoView({ block: 'center' }); }
   }
 
   /**
@@ -251,7 +252,7 @@ class ChatSearch {
   _revealNearest(el) {
     this.applyHighlightLayer();
     const ranges = this._highlightRanges;
-    if (!ranges || !ranges.length) { if (el) el.scrollIntoView({ block: 'center' }); return; }
+    if (!ranges || !ranges.length) { if (el) { this._onReveal?.(el); el.scrollIntoView({ block: 'center' }); } return; }
     // Prefer a match INSIDE the anchor message — that's where the server located
     // the hit (a visible copy of the query in a neighbouring message must not
     // win). Fall back to the physically nearest MEASURABLE one (ranges inside
@@ -291,6 +292,7 @@ class ChatSearch {
     if (!range) return;
     this._lastRevealAt = Date.now();
     this._onNav?.();
+    { const n = range.startContainer; const c = n && (n.nodeType === 1 ? n : n.parentElement)?.closest?.('.chat-msg'); if (c) this._onReveal?.(c); }   // the card the reveal lands on stays in the reader's band
     this._lastRevealRun = () => this._scrollToRange(range); // replayed after c-v restore
     const list = this._messageList;
     let node = range.startContainer;

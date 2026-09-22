@@ -107,7 +107,7 @@ Overrides persist in the layout auto-save.
 | `terminal.preserveCustomTitle` | boolean | `false` | Prevent Claude's title updates from overwriting user-set names |
 | `terminal.preserveScrollOnFit` | boolean | `false` | Keep scroll position anchored on terminal resize |
 | `terminal.webgl` | boolean | `true` | Draw terminals with WebGL. Off ⇒ new terminals use the DOM renderer (the A/B lever for GPU-side freezes; 2.369.137). |
-| `accessibility.exposeChat` | boolean | `true` | Off ⇒ chat message lists are aria-hidden (a small accessibility tree — the Windows/UIA freeze lever, 2.369.144); hidden-desktop windows are always aria-hidden. |
+| `accessibility.exposeChat` | boolean | `true` | On ⇒ assistive tools see the messages near where you are reading: every rendered card farther than two viewports from the visible area is aria-hidden (the reader's band — the browser's accessibility tree stays small however long the conversation grows and never grows with paging, gap slabs or search; nothing visual or keyboard-reachable changes; the focused, jumped-to or search-revealed card stays exposed until you scroll away). Off ⇒ whole chat message lists are aria-hidden (the Windows/UIA freeze lever, 2.369.144). Hidden-desktop windows are always aria-hidden. |
 | `terminal.waitingBlinkBehavior` | enum | `onlyUnfocused` | When to blink on idle: always, only when unfocused, never |
 
 ### Chat

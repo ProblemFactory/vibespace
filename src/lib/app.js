@@ -202,10 +202,19 @@ class App {
     // browser UI thread spent 39.5 s in HandleAXEvents serialising a 27k-node
     // DOM into the accessibility tree because an assistive tool had the mode
     // on). Off ⇒ every chat message list is aria-hidden; new views read it too.
+    // On ⇒ each view exposes only the reader's band (ChatView._syncAxExposure,
+    // design-accessibility-tree §8) — re-derived here on the flip, so a list that
+    // just lost its own attribute does not expose every rendered card until the
+    // reader's next scroll. Both flips walk the SAME set — every list, through
+    // its own view's backref (`_axView`): a sub-agent viewer is not in
+    // app.sessions, so a sessions loop left its band un-derived on the ON flip.
     const applyAxExposure = () => {
       const off = this.settings.get('accessibility.exposeChat') === false;
       document.body.classList.toggle('ax-lean', off);
-      for (const el of document.querySelectorAll('.chat-message-list')) { if (off) el.setAttribute('aria-hidden', 'true'); else el.removeAttribute('aria-hidden'); }
+      for (const el of document.querySelectorAll('.chat-message-list')) {
+        if (off) el.setAttribute('aria-hidden', 'true'); else el.removeAttribute('aria-hidden');
+        el._axView?._scheduleAxSync?.('setting');
+      }
     };
     applyAxExposure();
     this.settings.on('accessibility.exposeChat', applyAxExposure);
@@ -1116,7 +1125,7 @@ class App {
   async _runSelfUpdate() {
     const { body } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace') });
     body.innerHTML = `
-      <div class="selfupd-phase"><span class="upload-active-spinner"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
+      <div class="selfupd-phase"><span class="upload-active-spinner" aria-hidden="true"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
       <pre class="selfupd-log"></pre>
       <div class="mounts-field-hint">${escHtml(t('Sessions keep running (dtach) — the page reloads by itself when the new version is up.'))}</div>
       <div class="dialog-actions"><button type="button" class="mounts-btn su-reload" style="display:none">${escHtml(t('Reload now'))}</button></div>`;

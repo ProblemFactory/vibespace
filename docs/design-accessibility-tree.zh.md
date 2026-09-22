@@ -57,7 +57,11 @@
 ## §5 待活测量的问题 (步骤 0 回答)
 
 - **OQ1** aria-hidden 是从**序列化载荷**里剪 (TOTAL 变小) 还是只从平台树剪 (仍序列化为 ignored, reason ariaHiddenSubtree)? 决定步骤 1 写哪个属性, 也决定 .144 的开关到底帮了多少 (owner 只确认了 Chrome 的 Suppress 开关, 没试过 exposeChat=off)。
+  - **已测 (a0, test-ax-budget, Chrome 153, 三跑一致):** 两者都有一点 — 列表 aria-hidden 后平台树里它的 130 个非忽略节点全没了(列表节点本身出树), 但序列化载荷只少 118/449 (26 %); **每卡** aria-hidden −81 total / −111 非忽略 (85 %), 布局中立; **每卡** content-visibility:hidden −153 / −105 但 scrollHeight 767→658 (**不**布局中立, 会碰 .142 的 landing 几何)。剩下的 71 % 本来就是 ignored: 关闭 `<details>` 的两个 UA 影子 `<slot>` + 内容 wrapper、display:none 卡下的 `<summary>` 以 `notRendered` 序列化, aria-hidden 只把 reason 换成 `ariaHiddenSubtree` — 任何属性都删不掉, 只有离开 DOM (trim) 才行。**结论: 带写 aria-hidden** (剪的是活节点 = 未折叠卡片的主体), §0 的"display:none 在树外"只对平台树成立。
+  - **已测 (a1, test-ax-budget ④–⑥, 1,310 张 gap 卡 = teleport + 两个 2,000 行 slab):** 带内 aria-hidden 后**平台树封顶** — 第二个 slab 让 NON-IGNORED 1094 → 1096 (中性化副本 12,260, 11×); 序列化 TOTAL 5,788 vs 20,158 (3.5×), 但每张带外卡仍序列化 ≈ 5 个 `ariaHiddenSubtree` 忽略节点 (5.4 vs 15.4/卡) — 就是上一条说的"只有离开 DOM 才删得掉"的那份, 归 5b; 每窗 5,448 TOTAL / 916 NON-IGNORED, 按 ×1.25 钉。带 = 视口 ± 2 (`AX_BAND_VIEWPORTS`), 比 keep zone 宽: 翻页后的折叠主导窗口 (~4 视口) 整个在带内, 带咬的是 trim 够不到的 — <150 张高卡的窗与 gap slab。
+  - **已测 (a2, 步骤 2 + 3 的精简形态: 图标 `_s()` / 行号 / diff 前缀 / run 箭头 / spinner / 8 个 resize handle / 生成字形 alt-text "" / minimap 条 aria-hidden):** 50 张卡基线 1001 → 733 TOTAL, 516 → 260 NON-IGNORED, 每窗 724 → 462; 翻 4 页 3214 → 2769; 1,310 张 slab 的窗 5,448 → 4,576 / 916 → 516 (已在 §4 的 5,000 之下); 中性化副本 20,158 → 14,871。**minimap 条整棵出树** (自身节点也不序列化, 199 个标记 → 0; 一个空 div 在 aria-hidden 下花 0, 卡片才花 ≈ 5); 生成字形的 `::before` 文本节点消失 (关闭 details 的 summary 各一)。钉: ①b/④e 条 ≤ 10, ④d 每窗 5,700 / 650 (×1.25)。
 - **OQ2** 关闭的 `<details class=chat-diff>` 内容在 owner 的 Chrome 153 上是否布局 / 在树里? chat.css:418-421 记录过 headless 里 202 px 的反例。是 ⇒ 步骤 4 升到第 2 位。
+  - **已测 (a0):** 关闭 wrapper 以下的内容**被剪** — 每个关闭的 `<details>` 只序列化 wrapper 1 个节点 + 2 个 `<slot>` (+ summary), 不是 ≈ 500; 步骤 4 不升位。
 - **OQ3** SVG 子形状 (`<path>` 等无 `<title>`) 算不算; 裸 `<span>` (hljs token / .chat-link) 是按元素序列化还是只经文本? 决定每行 12 vs ≈ 8、每图标 3 vs 1。
 - **OQ4** owner 各窗的 minimap 标记实际数量 (bundle 里没有 turn 数) — 下次抓取把 `.chat-minimap-marker` 计数加进 inventory。
 - **OQ5** 浏览器侧成本模型: HandleAXEvents 时间正比于序列化节点数、事件批次数 (stale 9,902 暗示 churn 有份)、还是 UIA 客户端 kInlineTextBoxes 模式下的 inline-text-box 展开 (每个换行段落 / 代码行再乘一次)? 步骤 2 单独落地后 owner 再录一段 chrome://tracing 即可分辨。
@@ -90,9 +94,11 @@
 | §3 步骤 1 带外卡片 aria-hidden | 转录 26–34k → 7–10k, 全页 ≈ −45 %; 之后不随翻页 / gap slab / 搜索增长 | 这一条就是根治 |
 | §3 步骤 2 图标 / 行号 / 箭头 / handle aria-hidden | 做完 1 后再 −2–3k | 属性级, 极低风险 |
 | minimap 条整条 aria-hidden (步骤 3 的最小形态) | −2–5k (5 个长窗) | 一个属性; 单画布重写 = 过度设计 |
-| 状态栏 chip 原地更新 (步骤 8 的一半) | stale 20 % 里唯一与体积无关、且每个 turn 都在发生的 churn | 中等成本, 值得 |
+| 状态栏 chip 原地更新 (步骤 8 的一半) | stale 20 % 里唯一与体积无关、且每个 turn 都在发生的 churn | 中等成本, 值得。**已做 (a3):** chat-status-bar.js `_reconcile` — 每个 chip 一个按 key 的 `<span data-chip>`, 跨 render 保持同一节点, 只 patch 变了的 class / title / style / markup, 出集合才移除; 门 test-status-bar-chips (fast, 真类 + 计数假 DOM, 中性化副本负控)。 |
 | 测量腿 ×1 (步骤 0 的最小形态) | 不削减; 证明 aria-hidden 缩了序列化载荷 (OQ1), 钉住每窗总数 + 翻 4 页不变 + 负控副本变大 | 现有 §1c fixture 上一条 heavy 腿, 不做七条 |
 
 不做 (本轮): 步骤 4 (代码块默认在关闭 details 里, 按规则已不在树里 — OQ2 未证实前不动)、5b gap 折叠 (碰 .142 landing 核心; 1 落地后最坏情况已被带封住)、6 Stage (默认关)、7c/9 (瞬时或与卡顿无关)、run header diff (先量)。
 决定: 不分两条 lane, 一次交付; `accessibility.exposeChat` 保持布尔 (开 = 视口附近暴露、带外剪掉; 关 = 全不暴露), 不做三值; 侧栏默认不改 — owner 先用状态过滤器去掉 stopped (零代码, −16–24 %); `write` 不进 collapseKinds。
 预期: 50k → 15–20k; 再去掉 stopped ≈ 10k。
+
+**SHIPPED 2.369.150 (a0 测量腿 → a1 带 → a2 涂装 + minimap 条 → a3 状态栏 chip → a4 收口; 全部在 test-ax-budget 同一 fixture / 同一 Chrome 153 上量):** 50 张卡基线 TOTAL 1001 → 733, NON-IGNORED 516 → 260, 每窗 724 → 462 (−36 %); 翻 4 页后 3214 → 2769; 1,310 张 gap 卡的窗 (teleport + 两个 2,000 行 slab) 5,448 → 4,576 TOTAL / 916 → 516 NON-IGNORED (§4 的 5,000 之下, 钉 ×1.25 = 5,700 / 650); 第二个 slab 让平台树 1,094 → 1,096 (中性化副本 12,260 = 11×, TOTAL 20,158 → 14,871); minimap 条 201 → 0。OQ1 判决: 带写 aria-hidden (每卡布局中立, 剪活节点; 每张带外卡仍序列化 ≈ 5 个 ariaHiddenSubtree 忽略节点, 只有离开 DOM 才删得掉 — 归 5b, 本轮不做); OQ2: 关闭 details 的内容已被剪, 步骤 4 不升位。owner 的验收 (5 窗 ≈ 300 张卡 50k → 15–20k) 按同一比例 (每窗 −36 %, 带外全剪) 预期成立, 待 owner 下一次 chrome://accessibility 计数确认。焦点落进带外卡片 (Tab / Shift+Tab / `.focus()`) 时, 该卡在焦点事件自己的 task 里取消 aria-hidden (列表的 focusin), 不等 ≥ 150 ms 后的下一遍 — 验证者发现旧行为让 Chrome 自己出面修补 ("Blocked aria-hidden … descendant retained focus"), test-ax-budget ⑦ 守门。门: test-ax-budget (heavy) + test-ax-paint / test-status-bar-chips (fast), ci.mjs 各一行。
