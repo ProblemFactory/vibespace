@@ -111,7 +111,9 @@ function allProcs() {
     if (!/^\d+$/.test(d)) continue;
     let c; try { c = fs.readFileSync(`/proc/${d}/cmdline`); } catch { continue; }
     let e = ''; try { e = fs.readFileSync(`/proc/${d}/environ`, 'utf8'); } catch { }
-    out.push({ pid: Number(d), s: c.toString('utf8').split('\0').join(' '), e });
+    // ppid off /proc/<pid>/stat (the comm is parenthesised and may hold spaces — split after the last ')')
+    let ppid = 0; try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'); ppid = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) || 0; } catch { }
+    out.push({ pid: Number(d), ppid, s: c.toString('utf8').split('\0').join(' '), e });
   }
   return out;
 }
@@ -225,10 +227,24 @@ function envFor(key, extra = {}) {
 }
 const ab = (env, args, ms = 120000) => spawnSync('agent-browser', args, { env, encoding: 'utf8', timeout: ms });
 function learnDirs(before) {
-  for (const p of allProcs()) {
+  // OWNERSHIP IS THE ENVIRONMENT, NEVER "IT IS NEW" (r5, heavy RED on e0108c05):
+  // the heavy tier runs four lanes, and a chromium another suite started between
+  // our before-snapshot and this scan (vs-roster-eta-chrome-<pid>) was claimed
+  // as ours — the dirs leg counted three and, with its ~20 processes wearing our
+  // label, k=1 read 41 and the per-browser slope failed. A chromium we started
+  // inherits the daemon's tagged AGENT_BROWSER_* env (or the fixture HOME of the
+  // untagged arms) — that is the only rule that survives a busy machine.
+  // The chromium's OWN environ does not carry the names (the daemon spawns it
+  // clean — measured: k=1 read 3 processes with an environ-only rule), so the
+  // ownership walks UP: a chromium is ours when it, or an ancestor still alive,
+  // carries our tagged names or our fixture HOME (the daemon does).
+  const procs = allProcs();
+  const byPid = new Map(procs.map((p) => [p.pid, p]));
+  const lineageOurs = (p) => { let cur = p; for (let i = 0; cur && i < 12; i++) { if (envNamesTag(cur.e) || envHomeOurs(cur.e)) return true; cur = byPid.get(cur.ppid); } return false; };
+  for (const p of procs) {
     if (before.has(p.pid)) continue;
     const m = p.s.match(/--user-data-dir=(\S+)/);
-    if (m && p.s.includes('/chrome')) OWNED.add(m[1]);
+    if (m && p.s.includes('/chrome') && lineageOurs(p)) OWNED.add(m[1]);
   }
 }
 function open(env, url) {
