@@ -51,7 +51,7 @@ ok('all three incidents are named at the trim (future readers find the bundles)'
 ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, and trims AFTER it (a trim that reads the restored scrollTop cannot take the anchor with it), re-folding after a trim', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,400}this\._updateRuns\(\);\s*\}\);[\s\S]{0,1600}if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}this\._trimBottom\(\); if \(this\._windowEnd !== before\) this\._updateRuns\(\);/.test(cv));
 ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv));
 ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', cv.includes("'trimBottom' : 'trimTop'") && /zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv) && cv.includes("_trace('extendTop:done'") && cv.includes("_trace('trimSkipZone'"));
-ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
+ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els(, \{ live = false \} = \{\})?\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
 ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*if \(atTail && !this\._pinned\) \{/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /\(this\._readOnly \|\| !this\.sessionId\) && !\(this\._windowEnd < this\._total && this\._canPaginate\)/.test(cv));
 ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', /const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv) && !/\} else if \(list\.children\.length\) \{/.test(cv) && /if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
@@ -296,7 +296,7 @@ ok('a POSITIONING act and an off-list NAVIGATION both cancel the chain — a bar
     // ① the chain writes and mutes
     let list = mkList(), v = mkView(list);
     v._forceScrollToBottom();
-    drain(3);
+    drain(1);
     ok('unit: the force-scroll chain writes scrollTop each frame and mutes the boundary decision while it runs',
       list.scrollTop === 5000 && v._programmaticScroll === true && v._fsbActive === true);
     // ② a reader cancels it: no further write, mute released, flag down
@@ -308,14 +308,16 @@ ok('a POSITIONING act and an off-list NAVIGATION both cancel the chain — a bar
     // ③ …and auto-follow is not dead afterwards (the regression an epoch-less
     //    cancel would cause: a pinned view that never follows the stream again)
     v._forceScrollToBottom();
-    drain(3);
+    drain(1);
     ok('unit: auto-follow still works after a cancel — the next _forceScrollToBottom starts a fresh chain',
       list.scrollTop === 5000 && v._fsbActive === true);
     // ④ the mute outlives the LAST write by one frame (a scroll event is
     //    delivered after the callback that wrote scrollTop)
+    // (since inc-mudv05ja-n5rv a steady scrollHeight CONVERGES the chain after
+    // three frames — write, then two unchanged reads — instead of ten writes)
     list = mkList(); v = mkView(list); frames = [];
     v._forceScrollToBottom();
-    drain(10);                                   // all ten writes
+    drain(3);                                    // write · steady · steady ⇒ converged
     ok('unit: after the final write the chain is over but the mute is STILL up — its own scroll event has not been delivered yet',
       v._fsbActive === false && v._programmaticScroll === true && frames.length === 1);
     drain(1);
@@ -323,11 +325,44 @@ ok('a POSITIONING act and an off-list NAVIGATION both cancel the chain — a bar
     // ⑤ a chain restarted inside that trailing frame keeps ITS mute
     list = mkList(); v = mkView(list); frames = [];
     v._forceScrollToBottom();
-    drain(10);
+    drain(3);
     v._forceScrollToBottom();                    // a live append while pinned, in the gap
     drain(2);
     ok('unit: a chain restarted in that trailing frame keeps its own mute (the release is guarded on _fsbActive)',
       v._programmaticScroll === true && v._fsbActive === true);
+    // ⑦ THE PIN NEVER WRITES WHEN ALREADY AT THE BOTTOM, AND STOPS ONCE
+    //    CONVERGED (inc-mudv05ja-n5rv): the ten-frame rewrite re-followed a
+    //    scrollHeight that content-visibility alternated every frame — the
+    //    owner's ring shows 12 writes in 197 ms, ±678–836 px. A counting list:
+    {
+      const mkCounting = (shSeq) => { let st = 0, i = 0; const l = { clientHeight: 700, writes: 0 };
+        Object.defineProperty(l, 'scrollHeight', { get: () => shSeq[Math.min(i, shSeq.length - 1)] });
+        // the browser's clamp: a shrinking scrollHeight pulls scrollTop down with it
+        Object.defineProperty(l, 'scrollTop', { get: () => Math.min(st, Math.max(0, l.scrollHeight - l.clientHeight)), set: (x) => { l.writes++; st = Math.min(x, l.scrollHeight - l.clientHeight); } });
+        l.tick = () => { i++; }; return l; };
+      // a) already at the bottom: zero writes, chain ends after two steady reads
+      let cl = mkCounting([5000]); cl.scrollTop = 4300; cl.writes = 0; frames = [];
+      v = mkView(cl); v._forceScrollToBottom(); drain(12);
+      ok('unit: a chain step at the bottom writes NOTHING and the chain ends once scrollHeight held still for two frames (3 frames, not 10)',
+        cl.writes === 0 && v._fsbActive === false && v._fsbFrames === 3, { writes: cl.writes, frames: v._fsbFrames });
+      // b) an A-B-A scrollHeight (a card resolving and re-locking): the old
+      //    chain wrote on every frame; the new one ends at the first A-B-A
+      const seq = [5000, 5060, 5000, 5060, 5000, 5060, 5000, 5060, 5000, 5060];
+      cl = mkCounting(seq); frames = []; v = mkView(cl);
+      v._forceScrollToBottom();
+      for (let k = 0; k < 12 && frames.length; k++) { frames.shift()(); cl.tick(); }
+      const newWrites = cl.writes;
+      // CONTROL: the pre-fix step, verbatim semantics (`scrollTop = scrollHeight` every frame for 10)
+      const old = mkCounting(seq); for (let k = 0; k < 10; k++) { old.scrollTop = old.scrollHeight; old.tick(); }
+      ok(`unit: an alternating scrollHeight is not re-followed every frame — ${newWrites} write(s) vs the pre-fix chain's ${old.writes} (the control reproduces the per-frame chase)`,
+        old.writes === 10 && newWrites <= 2 && v._fsbActive === false, { newWrites, old: old.writes });
+      // c) a GROWING scrollHeight keeps the chain alive (convergence is its purpose)
+      cl = mkCounting([5000, 5200, 5400, 5600, 5800, 6000, 6000, 6000]); frames = []; v = mkView(cl);
+      v._forceScrollToBottom();
+      for (let k = 0; k < 12 && frames.length; k++) { frames.shift()(); cl.tick(); }
+      ok('unit: a growing scrollHeight is followed to the end (every growth frame written, the landing is the real bottom)',
+        cl.writes === 6 && cl.scrollTop === 6000 - 700, { writes: cl.writes, st: cl.scrollTop });
+    }
     // ⑥ cancelling when no chain of OURS is running touches nothing: a jump
     //    landing (_scrollElStable / _landOnHeader) owns _programmaticScroll
     v = mkView(mkList()); v._programmaticScroll = true;   // a jump landing's mute

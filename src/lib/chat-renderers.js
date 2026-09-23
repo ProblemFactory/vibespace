@@ -137,6 +137,18 @@ const taskStatusChipHtml = (ti) => {
   return ` <span class="chat-task-status-chip err">${escHtml(ti.status)}</span>`;
 };
 
+// THE CLI's WORDS FOR A WORKING AGENT (inc-mudv05ja-n5rv): a `workflow_agent`'s state is
+// `start` / `progress` while it works — measured on 8 production buffers: 161 progress,
+// 26 start, 253 done, 56 error, ZERO `running` — and the card's pulse (chat.css
+// `[data-state="running"]`) and the tally's "N running" compared against the fixture's
+// word, so neither ever showed in production. ONE mapping, read by the chip AND the tally
+// in `renderWorkflowLive` — and so by ChatView's in-place patch, which draws through it.
+const WF_WORKING_STATES = new Set(['running', 'progress', 'start']);
+export function workflowAgentState(raw) {
+  const s = String(raw || 'queued');
+  return WF_WORKING_STATES.has(s) ? 'running' : s;
+}
+
 // ── Image media cards (2.369.48, owner: "view image 能不能也多媒体化") ──
 // Every image a tool looked at renders as ONE media block: an expandable
 // <details> (open by default — the owner wants to SEE it) whose body is the
@@ -958,8 +970,8 @@ class ChatRenderers {
       const wfNameFull = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim() || '';
       const wfName = wfNameFull.length > 160 ? wfNameFull.substring(0, 159) + '…' : wfNameFull;
       const tiW = msg?.taskInfo;
-      const wfChipHtml = taskStatusChipHtml(tiW);
-      const wfLiveHtml = this.workflowLiveHtml(tiW); // 2.369.118: phases + agent chips while the run is live
+      const wfChipHtml = this.renderTaskChip(tiW);
+      const wfLiveHtml = this.renderWorkflowLive(tiW); // 2.369.118: phases + agent chips while the run is live (the in-place patch renders the same two fragments)
       const viewBtn = runId
         ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
         : '';
@@ -1175,12 +1187,32 @@ class ChatRenderers {
     return null;
   }
 
+  /** The task-lifecycle chip as a renderer method — the card render and
+   *  ChatView's in-place Workflow patch share this ONE spelling. */
+  renderTaskChip(ti) { return taskStatusChipHtml(ti); }
+
+  /** Does renderToolMsg draw THE Workflow result card — the one that reads taskInfo
+   *  (the lifecycle chip, the live tree, the ✓ line) — for this message? A pending
+   *  tool_call or an error result draws nothing from taskInfo, so ChatView's in-place
+   *  patch leaves those alone, exactly as a fresh render would (inc-mudv05ja-n5rv:
+   *  it used to put a ⟳ chip on the pending card and could overwrite an error
+   *  card's ✗ line). Mirrors the branch order of renderToolMsg/renderToolResult. */
+  drawsWorkflowCard(msg) {
+    const b = msg?.content?.[0];
+    return !!b && !msg.collab && b.type === 'tool_result' && b.status !== 'error' && b.toolName === 'Workflow';
+  }
+
   // LIVE WORKFLOW DETAIL (2.369.118): the phases with their agents as chips —
   // label · state dot · last tool — from the CLI's own task_progress tree that
   // message-manager keeps field-wise on taskInfo.workflow. Live sessions only
   // (the transcript never carries task_progress); the post-hoc View Workflow
   // window stays the history surface. Every string is agent-authored ⇒ escaped.
-  workflowLiveHtml(ti) {
+  // KEYED (inc-mudv05ja-n5rv): each phase carries `data-phase`, each chip
+  // `data-agent-key` (the agentId, else its tree index) so ChatView patches a
+  // live card IN PLACE on every task_progress (`_patchWorkflowCard`) — the same
+  // chip node, its pulsing dot never restarted — instead of re-creating the
+  // card. The dot is paint (`aria-hidden`).
+  renderWorkflowLive(ti) {
     const wf = ti?.workflow;
     if (!wf || !Array.isArray(wf.agents) || !wf.agents.length) return '';
     const byPhase = new Map();
@@ -1188,19 +1220,21 @@ class ChatRenderers {
     const phaseTitle = (k) => (wf.phases || []).find((p) => p.index === k)?.title || byPhase.get(k)?.find((a) => a.phaseTitle)?.phaseTitle || '';
     const keys = [...byPhase.keys()].sort((a, b) => a - b);
     const chip = (a) => {
-      const st = String(a.state || 'queued');
+      const st = workflowAgentState(a.state);
       const tip = [a.label, st, a.lastToolSummary || a.lastToolName, a.model, a.attempt > 1 ? `attempt ${a.attempt}` : ''].filter(Boolean).join(' · ');
       const tool = a.lastToolName && st !== 'done' && st !== 'error' ? `<span class="chat-wf-tool">${escHtml(a.lastToolName)}</span>` : '';
-      return `<span class="chat-wf-agent" data-state="${escHtml(st)}" title="${escHtml(tip)}"><i class="chat-wf-dot"></i>${escHtml(a.label || a.agentId || '?')}${tool}</span>`;
+      const key = a.agentId ? 'a:' + a.agentId : 'i:' + (Number.isFinite(a.index) ? a.index : '?');
+      return `<span class="chat-wf-agent" data-state="${escHtml(st)}" data-agent-key="${escHtml(key)}" title="${escHtml(tip)}"><i class="chat-wf-dot" aria-hidden="true"></i>${escHtml(a.label || a.agentId || '?')}${tool}</span>`;
     };
     const u = ti.usage;
     const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'k' : String(n));
     const usage = u && (u.totalTokens || u.toolUses)
       ? `<div class="chat-wf-usage">${u.totalTokens ? escHtml(fmtTok(u.totalTokens)) + ' ' + t('tokens') : ''}${u.toolUses ? ' · ' + t('{n} tool uses', { n: u.toolUses }) : ''}${u.durationMs ? ' · ' + t('{n} min', { n: Math.max(1, Math.round(u.durationMs / 60000)) }) : ''}</div>`
       : '';
-    const done = wf.agents.filter((a) => a.state === 'done').length, err = wf.agents.filter((a) => a.state === 'error').length, run = wf.agents.filter((a) => a.state === 'running').length;
+    const states = wf.agents.map((a) => workflowAgentState(a.state));
+    const done = states.filter((s) => s === 'done').length, err = states.filter((s) => s === 'error').length, run = states.filter((s) => s === 'running').length;
     const tally = `<span class="chat-wf-tally">${done}/${wf.agents.length}${err ? ` · ${err} ${t('failed')}` : ''}${run ? ` · ${run} ${t('running')}` : ''}</span>`;
-    return `<div class="chat-wf-live">${keys.map((k) => `<div class="chat-wf-phase"><span class="chat-wf-phase-title">${escHtml(phaseTitle(k) || t('Agents'))}</span>${byPhase.get(k).map(chip).join('')}</div>`).join('')}<div class="chat-wf-foot">${tally}${usage}</div></div>`;
+    return `<div class="chat-wf-live">${keys.map((k) => `<div class="chat-wf-phase" data-phase="${k}"><span class="chat-wf-phase-title">${escHtml(phaseTitle(k) || t('Agents'))}</span>${byPhase.get(k).map(chip).join('')}</div>`).join('')}<div class="chat-wf-foot">${tally}${usage}</div></div>`;
   }
 
   renderPermissionOverlay(el, msg) {

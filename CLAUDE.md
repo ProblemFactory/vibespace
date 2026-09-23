@@ -589,6 +589,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- PINNED CHAT WINDOWS FLICKERED (inc-mudv05ja-n5rv, 2.369.160): fresh cards at the c-v placeholder, lost folds on swap, the pin chasing both, a Workflow card re-created per progress. FIX = neutral swap + foldPassMode + keyed in-place patch. 不变量=no update re-creates a card. ⇒ kb-bugfix-invariants.md
 - A WATCH VIEWER'S configure-window RESIZED THE HOLDER'S APP (2.369.156, P8-2 r3 open item): FIX = x5, ONE ACTIVE viewer per app window (owner: block non-active clients, Resume here); others get no upstream, Watch sends no geometry. 不变量=a shared display has ONE geometry owner. ⇒ kb-bugfix-invariants.md
 - A WATCH VIEWER COULD END THE APP SESSION (2.369.156, P8-2 r6): r5 relayed every non-input xpra packet — `shutdown-server` killed xpra. FIX = a refused viewer's ALLOWLIST, lifecycle never relayed, the socket refuses `request: stop`. 不变量=a refusal names what the refused MAY say. ⇒ kb-bugfix-invariants.md
 - THE STATUS BAR KEPT THE OLD MODEL AFTER /model SINCE CLI 2.1.257 (2.369.151, noticed on 2.1.280): the echo gained backticks (2026-09-02) and the bar's end-anchored regex stopped matching. FIX = ONE parser src/model-echo.js + verbatim fixtures dated by each row's version. ⇒ kb-bugfix-invariants.md

@@ -18,7 +18,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 // wrapper-files.js). Imported, never re-typed: the two ends disagreeing about
 // "no list" is the bug this constant now prevents.
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
-import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel } from './chat-run-summary.js';
+import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode } from './chat-run-summary.js';
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { heldText } from './jobs-layout.js';
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
@@ -382,11 +382,14 @@ class ChatView {
       // already folded. Only for pure TAIL APPENDS (live streaming): bulk
       // inserts (pagination, jumps, trims) keep the debounce, where the pass
       // is expensive and a frame of delay is invisible anyway.
+      // A SWAP IS NOT A BULK INSERT (inc-mudv05ja-n5rv): the batch is classified
+      // by the PURE `foldPassMode` — tail appends, 1:1 replaces (a tool
+      // completion's `replaceWith`) and the live trim's head removals mixed
+      // with them all fold before the next paint; `every(tailAppend)` sent the
+      // swap and every append at the trim cap to the 180 ms debounce, and the
+      // replacement painted unfolded for ~11 frames (the owner's +940 px jump).
       const list = this._messageList;
-      const tailAppend = list && records.length && records.every((r) =>
-        r.type === 'childList' && r.removedNodes.length === 0 && r.addedNodes.length > 0
-        && r.nextSibling === null);
-      if (tailAppend) {
+      if (list && foldPassMode(records) === 'raf') {
         // rAF-coalesced (2.338.0): rAF callbacks run BEFORE the next paint,
         // so the no-flash guarantee above holds — but a streaming burst now
         // costs ONE full-list runs pass per frame instead of one per append.
@@ -3207,19 +3210,53 @@ class ChatView {
    *  (`contentVisibility: visible`), so the anchor restore and the zone see
    *  real geometry; two frames later the inline override comes off and
    *  `contain-intrinsic-size: auto` keeps the LAST REMEMBERED size (recorded at
-   *  the ResizeObserver step of the frame they rendered in). A MITIGATION,
+   *  the ResizeObserver step of the frame they rendered in) — a LIVE card
+   *  (inc-mudv05ja-n5rv) is held until it has left the screen instead. A MITIGATION,
    *  not an invariant (verifier r1 measured scrollHeight still drifting by a
    *  few hundred px after a landing — images arriving, fonts, late layout):
    *  the placeholders are resolved ONCE at insert; later drift is absorbed by
    *  the browser's scroll anchoring, which keeps the reader's card where it
    *  is. Folded members are display:none and cost nothing; a read-only view
    *  runs without c-v already. Gap slabs (chat-view-seek) reserve the same way. */
-  _reserveFreshHeights(els) {
+  _reserveFreshHeights(els, { live = false } = {}) {
     if (!els?.length || this._readOnly || this._container?.classList.contains('chat-no-content-visibility')) return;
     for (const el of els) el.style.contentVisibility = 'visible';
+    // A paging SLAB keeps its measured two-frame release (the landing and the
+    // keep zone were tuned on it — test-chat-paging §4c/§4d); a LIVE card
+    // (a swap, a live append — `live: true`) is held as below.
+    if (!live) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (this._disposed) return;
+        for (const el of els) if (el.style.contentVisibility === 'visible') el.style.contentVisibility = '';
+      }));
+      return;
+    }
+    // THE RE-LOCK FRAME (inc-mudv05ja-n5rv, measured in headless chrome): the
+    // override used to be dropped two frames later wherever the card was, and
+    // dropping it hands an ON-SCREEN card back to `content-visibility:auto` as a
+    // NEW lock — every layout read before that frame's relevance check (the
+    // pin's own scrollHeight read, the fold anchor, …) saw the card at 0 px
+    // (a measured 197 → 0 → 197; the scrollTop clamp it causes is real). So the
+    // override stays while the card is on or near the screen and comes off only
+    // once it has LEFT (one IntersectionObserver per view), its placeholder
+    // pinned to the height it last had there.
+    const io = this._cvReleaseIO || (this._cvReleaseIO = typeof IntersectionObserver === 'function' ? new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) continue;
+        const el = e.target;
+        this._cvReleaseIO.unobserve(el);
+        if (el.style.contentVisibility !== 'visible') continue;
+        const h = e.boundingClientRect?.height || 0;
+        if (h > 0) el.style.containIntrinsicSize = `auto ${Math.round(h)}px`;
+        el.style.contentVisibility = '';
+      }
+    }, { root: this._messageList, rootMargin: '600px 0px' }) : null);
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (this._disposed) return;
-      for (const el of els) if (el.style.contentVisibility === 'visible') el.style.contentVisibility = '';
+      for (const el of els) {
+        if (el.style.contentVisibility !== 'visible') continue;
+        if (io) io.observe(el); else el.style.contentVisibility = '';
+      }
     }));
   }
 
@@ -3341,6 +3378,7 @@ class ChatView {
     // layouts per frame during streaming. One chain, countdown refreshed by
     // each call — same convergence semantics, one forced layout per frame.
     this._fsbFrames = 0;
+    this._fsbStable = 0; this._fsbLastSh = -1; this._fsbPrevSh = -1;   // new content: convergence is re-measured from here
     if (this._fsbActive) return;
     this._fsbActive = true;
     // …and the chain carries an EPOCH (B-9702): it is AUTOMATIC repositioning,
@@ -3352,12 +3390,29 @@ class ChatView {
     const step = () => {
       if (this._disposed) { this._fsbActive = false; this._programmaticScroll = false; return; }
       if (epoch !== this._fsbEpoch) return;   // cancelled/superseded — the flags belong to whoever holds the epoch now
-      this._traceExpect('fsb');
-      list.scrollTop = list.scrollHeight;
+      // THE PIN NEVER WRITES WHEN ALREADY AT THE BOTTOM, AND STOPS ONCE
+      // CONVERGED (inc-mudv05ja-n5rv): the chain used to rewrite
+      // `scrollTop = scrollHeight` for ten frames whatever happened, so while
+      // off-screen content-visibility cards resolved and re-locked the write
+      // re-followed a height that alternated every frame — a one-frame
+      // transient became a multi-frame whole-list shake (the owner's ring:
+      // 12 writes in 197 ms, ±678–836 px). A write only when there is somewhere
+      // to go; the chain ends once scrollHeight held still for two frames.
+      const sh = list.scrollHeight;
+      if (sh - list.scrollTop - list.clientHeight > 1) {
+        this._traceExpect('fsb');
+        list.scrollTop = sh;
+      }
+      // An A-B-A height (back to the value of two frames ago) is a card
+      // resolving and re-locking, not growth: following it is the shake —
+      // the chain ends there too (the next real append restarts it).
+      const flicker = sh === this._fsbPrevSh && sh !== this._fsbLastSh;
+      if (sh === this._fsbLastSh) this._fsbStable++; else this._fsbStable = 0;
+      this._fsbPrevSh = this._fsbLastSh; this._fsbLastSh = sh;
       // Each frame scrolling reveals off-screen elements, browser computes
       // their real heights (replacing content-visibility estimates), scrollHeight
       // grows — repeat until converged or max 10 frames (~166ms)
-      if (++this._fsbFrames < 10) requestAnimationFrame(step);
+      if (++this._fsbFrames < 10 && this._fsbStable < 2 && !flicker) requestAnimationFrame(step);
       // THE MUTE OUTLIVES THE LAST WRITE BY ONE FRAME (B-9702, the same
       // capture): a scroll event is delivered AFTER the callback that wrote
       // scrollTop, so clearing `_programmaticScroll` in the frame of the final
@@ -3529,6 +3584,12 @@ class ChatView {
     this._renderers.addOpenInEditorBtn(el);
     // Update window bounds for live messages (not history batch)
     if (!this._loadingHistory) {
+      // A LIVE card is laid out at its real height in its first frame
+      // (inc-mudv05ja-n5rv): appended below a pinned viewport it is off-screen,
+      // so content-visibility paints it at the 80 px placeholder, the pin
+      // scrolls to THAT bottom and the next frame the real height lands — the
+      // follow chases every append. Batch loads reserve per slab already.
+      this._reserveFreshHeights([el], { live: true });
       this._total++;
       this._windowEnd = this._total;
       // Update minimap with new user turns (CLI-injected page-image
@@ -3651,13 +3712,17 @@ class ChatView {
     // Task info update — delegate to status bar
     if (fields.taskInfo) {
       this._statusBar.updateTask(fields.taskInfo, msg.toolCallId, msg.content);
-      // LIVE WORKFLOW CARD (2.369.118): the phases/agent chips live IN the card,
-      // so a Workflow's taskInfo edit re-renders its tool card through the ONE
-      // swap point. Agent cards are excluded on purpose — their live status line
-      // is drawn by _onSubagentMessage and a re-render would wipe it.
+      // LIVE WORKFLOW CARD (2.369.118): the phases/agent chips live IN the card.
+      // PATCHED IN PLACE (inc-mudv05ja-n5rv): re-creating the card on every
+      // task_progress painted it at its content-visibility placeholder for a
+      // frame and restarted every running chip's pulse — the workflow window
+      // was the loudest flicker in the owner's rings. The status chip, the
+      // phases/agent chips (keyed by agentId) and the ✓ summary line are
+      // updated inside the SAME element, coalesced per card to one pass per
+      // frame / 150 ms like the streaming text. Agent cards are excluded on
+      // purpose — their live status line is drawn by _onSubagentMessage.
       if ((fields.taskInfo.type === 'workflow' || fields.taskInfo.workflow) && msg.role === 'tool') {
-        const oldEl = this._elements.get(id);
-        if (oldEl) { try { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(oldEl, newEl, id); } catch { /* the status bar already has it */ } }
+        this._scheduleWorkflowPatch(id);
       }
       // TERMINAL state also freezes the AGENT CARD's live status line
       // (2.233.1, real report "已经回复完了还写着回应中"): the line is only
@@ -3669,6 +3734,108 @@ class ChatView {
         this._freezeAgentStatus(msg.toolCallId, fields.taskInfo.status);
       }
     }
+  }
+
+  /** Coalesce live Workflow-card patches: one pass per frame, at most one per
+   *  150 ms per view (the `_renderStreamingText` cadence). */
+  _scheduleWorkflowPatch(id) {
+    (this._wfPatchPending ||= new Set()).add(id);
+    if (this._wfPatchTimer) return;
+    const wait = Math.max(0, 150 - (Date.now() - (this._lastWfPatchAt || 0)));
+    this._wfPatchTimer = setTimeout(() => requestAnimationFrame(() => {
+      this._wfPatchTimer = null;
+      if (this._disposed) return;
+      this._lastWfPatchAt = Date.now();
+      const ids = this._wfPatchPending; this._wfPatchPending = new Set();
+      for (const mid of ids) { try { this._patchWorkflowCard(mid); } catch { /* the status bar already has it */ } }
+    }), wait);
+  }
+
+  /** THE LIVE WORKFLOW CARD, UPDATED INSIDE ITS OWN ELEMENT (inc-mudv05ja-n5rv).
+   *  The fragments come from the SAME renderer methods the card render uses
+   *  (`renderTaskChip`, `renderWorkflowLive`); a chip already in place keeps its
+   *  node (data-state / title / label updated, the dot element untouched so
+   *  `chat-wf-pulse` never restarts), `<details>` open state and the View
+   *  Workflow button are never touched. A card without the label row (never a
+   *  shape the renderer produces) falls back to the ONE swap point. */
+  _patchWorkflowCard(id) {
+    const el = this._elements.get(id);
+    const msg = this._messages.find((m) => m.id === id);
+    if (!el || !msg || !el.isConnected) return;
+    // a card that draws nothing from taskInfo (still a pending tool_call, an error
+    // result) is left alone — a fresh render of it would draw none of this
+    if (!this._renderers.drawsWorkflowCard(msg)) return;
+    const ti = msg.taskInfo;
+    const label = el.querySelector('.chat-tool-use > .chat-tool-label');
+    if (!label) { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(el, newEl, id); return; }
+    const frag = (html) => { const tpl = document.createElement('template'); tpl.innerHTML = html.trim(); return tpl.content.firstElementChild; };
+    // ① the lifecycle chip (inside the label, before the View Workflow button)
+    const chipHtml = this._renderers.renderTaskChip(ti).trim();
+    const oldChip = label.querySelector(':scope > .chat-task-status-chip');
+    if (!chipHtml) oldChip?.remove();
+    else if (!oldChip) label.insertBefore(frag(chipHtml), label.querySelector(':scope > .chat-workflow-view-btn'));
+    else if (oldChip.outerHTML !== chipHtml) {
+      const nc = frag(chipHtml);   // the same node, its class / tooltip / words updated
+      if (oldChip.className !== nc.className) oldChip.className = nc.className;
+      if (oldChip.getAttribute('title') !== nc.getAttribute('title')) { if (nc.hasAttribute('title')) oldChip.setAttribute('title', nc.getAttribute('title')); else oldChip.removeAttribute('title'); }
+      if (oldChip.textContent !== nc.textContent) oldChip.textContent = nc.textContent;
+    }
+    // ② the phases + agent chips, keyed
+    const liveHtml = this._renderers.renderWorkflowLive(ti);
+    const oldLive = label.parentElement.querySelector(':scope > .chat-wf-live');
+    if (!liveHtml) oldLive?.remove();
+    else if (!oldLive) label.after(frag(liveHtml));
+    else if (oldLive.outerHTML !== liveHtml) this._morphWorkflowLive(oldLive, frag(liveHtml));
+    // ③ the ✓ line of the result expander follows the task's own summary
+    if (ti?.summary) {
+      const sums = label.parentElement.querySelectorAll(':scope > details.chat-diff > summary.chat-diff-summary');
+      const last = sums[sums.length - 1];
+      const txt = '\u2713 ' + String(ti.summary).slice(0, 160);
+      if (last && last.textContent !== txt) last.textContent = txt;
+    }
+  }
+
+  /** Keyed morph of `.chat-wf-live`: phases by `data-phase`, chips by
+   *  `data-agent-key`; a node is only MOVED when the order really changed. */
+  _morphWorkflowLive(oldLive, next) {
+    const oldPhases = new Map([...oldLive.querySelectorAll(':scope > .chat-wf-phase')].map((p) => [p.dataset.phase, p]));
+    const oldChips = new Map([...oldLive.querySelectorAll('.chat-wf-agent')].map((c) => [c.dataset.agentKey, c]));
+    const keep = new Set();
+    let at = oldLive.firstElementChild;
+    for (const np of [...next.children]) {
+      let target;
+      if (np.classList.contains('chat-wf-phase')) {
+        target = oldPhases.get(np.dataset.phase) || np.cloneNode(false);
+        const title = np.querySelector(':scope > .chat-wf-phase-title');
+        let t0 = target.querySelector(':scope > .chat-wf-phase-title');
+        if (!t0) { t0 = title.cloneNode(true); target.prepend(t0); } else if (t0.textContent !== title.textContent) t0.textContent = title.textContent;
+        let cAt = t0.nextElementSibling;
+        for (const nc of [...np.querySelectorAll(':scope > .chat-wf-agent')]) {
+          let c = oldChips.get(nc.dataset.agentKey);
+          if (c) {
+            oldChips.delete(nc.dataset.agentKey);
+            for (const a of ['data-state', 'title']) if (c.getAttribute(a) !== nc.getAttribute(a)) c.setAttribute(a, nc.getAttribute(a));
+            // label text + tool span, never the dot
+            const dot = c.querySelector(':scope > .chat-wf-dot');
+            const want = [...nc.childNodes].filter((n) => !(n.nodeType === 1 && n.classList.contains('chat-wf-dot')));
+            const have = [...c.childNodes].filter((n) => n !== dot);
+            const same = want.length === have.length && want.every((n, i) => (n.nodeType === 1 ? n.outerHTML === have[i].outerHTML : n.textContent === have[i].textContent && have[i].nodeType === n.nodeType));
+            if (!same) { for (const n of have) n.remove(); for (const n of want) c.appendChild(n); }
+          } else c = nc;
+          if (c !== cAt) target.insertBefore(c, cAt); else cAt = cAt.nextElementSibling;
+        }
+        // chips that left this phase (moved elsewhere they were already re-inserted; the rest go)
+        while (cAt) { const nx = cAt.nextElementSibling; if (cAt.classList.contains('chat-wf-agent') && !keep.has(cAt)) cAt.remove(); cAt = nx; }
+      } else {
+        // the foot (tally + usage): no animation inside, replaced when different
+        const of = oldLive.querySelector(':scope > .chat-wf-foot');
+        target = of && of.outerHTML === np.outerHTML ? of : np;
+      }
+      keep.add(target);
+      for (const c of target.querySelectorAll('.chat-wf-agent')) keep.add(c);
+      if (target !== at) oldLive.insertBefore(target, at); else at = at.nextElementSibling;
+    }
+    while (at) { const nx = at.nextElementSibling; if (!keep.has(at)) at.remove(); at = nx; }
   }
 
   // Render the latest streaming text for a message (called once per rAF batch)
@@ -4211,7 +4378,29 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     // same record the dataset above is read from, so a stub-`_rawMsg` system
     // element is marked from whatever it does carry rather than not at all.
     this._applyElementMarks(newEl, raw);
+    // GEOMETRY- AND FOLD-NEUTRAL (inc-mudv05ja-n5rv, the owner's "界面有点异常闪烁"):
+    // a swap used to hand the list a card with NONE of the fold state the old
+    // one carried and at its content-visibility PLACEHOLDER height — a fresh
+    // `.chat-msg` enters `content-visibility:auto` locked at 80 px until its
+    // first intersection check — so every tool completion and every re-render
+    // painted the card collapsed-to-80 (or unfolded, until the debounced pass)
+    // for 1–3 frames while the pinned follow chased the transient: whole-list
+    // jumps of +678/+940 px at 120 Hz. ① The four run classes ride across and
+    // every run record that named the old element names the new one (a folded
+    // member stays display:none with no pass needed). ② A RENDERED card is laid
+    // out at its real height in its first frame (the fresh-slab reservation).
+    const RUN_CLASSES = ['chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last'];
+    for (const c of RUN_CLASSES) if (oldEl.classList?.contains(c)) newEl.classList.add(c);
+    if (this._runs?.length) {
+      for (const run of this._runs) {
+        const i = run.members ? run.members.indexOf(oldEl) : -1;
+        if (i >= 0) run.members[i] = newEl;
+        if (run.inline?.has(oldEl)) { run.inline.delete(oldEl); run.inline.add(newEl); }
+      }
+    }
+    const wasRendered = oldEl.offsetParent != null;   // loose: a detached / display:none / non-DOM node reads null or undefined
     oldEl.replaceWith(newEl);
+    if (wasRendered) this._reserveFreshHeights([newEl], { live: true });
     // Only re-point the map when it really pointed HERE: a gap-loaded element
     // is not in `_elements` at all, and clobbering a different live element's
     // entry would strand THAT one instead.
@@ -6069,6 +6258,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
   dispose() {
     this._statusBar?.dispose?.();
     this._disposed = true;
+    try { this._cvReleaseIO?.disconnect(); } catch { }
     LIVE_CHAT_VIEWS.delete(this);
     // The keybinding is signal-bound to the WINDOW, but a view can be replaced
     // while its window lives on — an orphaned binding would keep answering the

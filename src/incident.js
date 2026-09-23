@@ -32,7 +32,11 @@ const listHarnesses = () => require('./harnesses').list();
 
 const MAX_HOSTS = 6;
 const MAX_CIDS = 12;
-const META_COPY_MAX = 64 * 1024;      // per session-meta / wrapper-meta file
+// per session-meta / wrapper-meta file: copied WHOLE up to this ceiling, and
+// above it trimmed as DATA into valid JSON (inc-mudv05ja-n5rv — the 64 KiB byte
+// cap froze every meta carrying taskRecords (2.369.140) unparseable)
+const META_COPY_MAX = 2 * 1024 * 1024;
+const META_PARSE_MAX = 16 * 1024 * 1024; // above this a meta is not parsed (a sync parse on the server loop) — marker + raw tail
 const BUF_TAIL = 256 * 1024;          // per session buffer tail
 const TRANSCRIPT_TAIL = 512 * 1024;   // per local transcript tail
 const TERMINAL_TAIL = 64 * 1024;      // per terminal-mode session: the last raw PTY bytes (2.369.118)
@@ -102,6 +106,60 @@ function copyCapped(src, dest, cap) {
   } catch (e) { return { error: e.code || e.message }; }
 }
 
+/** A JSON file frozen WHOLE up to `ceiling` bytes; above it a VALID JSON
+ *  trimmed as data, never a byte-truncated file (inc-mudv05ja-n5rv: the 64 KiB
+ *  byte cap cut exactly the metas of sessions with workflows — 40 taskRecords ≈
+ *  97 KB — into unparseable halves). Trim ladder: the LARGEST top-level array
+ *  keeps its newest records (halving until the file fits), then the next; a
+ *  non-array field too big to fit is dropped. `_frozenTrimmed` names every
+ *  field touched and the original size. An unparseable file over the ceiling
+ *  becomes `{_frozenTrimmed: {unparseable}, rawTail}` — the tail as a string. */
+function copyJsonWhole(src, dest, ceiling = META_COPY_MAX) {
+  try {
+    const st = fs.statSync(src);
+    if (st.size <= ceiling) { fs.copyFileSync(src, dest); return { bytes: st.size, trimmed: false }; }
+    const marker = { originalBytes: st.size, ceiling, dropped: [] };
+    let obj = null;
+    if (st.size <= META_PARSE_MAX) { try { obj = JSON.parse(fs.readFileSync(src, 'utf8')); } catch { obj = null; } }
+    const size = (o) => Buffer.byteLength(JSON.stringify(o));
+    let out;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      marker.unparseable = true;
+      const tailBytes = Math.max(0, Math.floor(ceiling / 4) - 1024);   // escaping may grow a string up to ~×2 (×6 for control bytes); stay well inside
+      const fd = fs.openSync(src, 'r');
+      let raw = '';
+      try { const n = Math.min(st.size, tailBytes); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, st.size - n); raw = buf.toString('utf8'); } finally { fs.closeSync(fd); }
+      out = { _frozenTrimmed: marker, rawTail: raw };
+      while (size(out) > ceiling && out.rawTail.length) out.rawTail = out.rawTail.slice(Math.ceil(out.rawTail.length / 2));
+    } else {
+      out = { ...obj, _frozenTrimmed: marker };
+      const entries = {};   // field → its dropped-record entry
+      for (let guard = 0; guard < 200 && size(out) > ceiling; guard++) {
+        let big = null, bigBytes = -1;
+        for (const [k, v] of Object.entries(out)) {
+          if (k === '_frozenTrimmed') continue;
+          const b = size(v === undefined ? null : v);
+          if (b > bigBytes) { big = k; bigBytes = b; }
+        }
+        if (big == null) break;
+        const v = out[big];
+        if (Array.isArray(v) && v.length > 0) {
+          const e = entries[big] || (entries[big] = { field: big, from: v.length, kept: v.length });
+          const keep = v.length > 1 ? Math.floor(v.length / 2) : 0;
+          out[big] = v.slice(v.length - keep);
+          e.kept = out[big].length;
+          if (!marker.dropped.includes(e)) marker.dropped.push(e);
+        } else {
+          marker.dropped.push({ field: big, bytes: bigBytes, whole: true });
+          delete out[big];
+        }
+      }
+    }
+    fs.writeFileSync(dest, JSON.stringify(out));
+    return { bytes: size(out), trimmed: true, truncatedFrom: st.size, dropped: marker.dropped.map((d) => d.field) };
+  } catch (e) { return { error: e.code || e.message }; }
+}
+
 /** LOCAL scene — everything a kill/respawn/restart would erase. */
 async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
   const frozen = path.join(dir, 'frozen');
@@ -128,7 +186,8 @@ async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
     for (const f of fs.readdirSync(metaDir).slice(0, 200)) {
       const src = path.join(metaDir, f);
       out.sessionMetas[f] = statOf(src);
-      copyCapped(src, path.join(frozen, 'session-meta', f), META_COPY_MAX);
+      const c = copyJsonWhole(src, path.join(frozen, 'session-meta', f), META_COPY_MAX);
+      if (c.trimmed || c.error) out.sessionMetas[f].frozen = c;
     }
   } catch (e) { out.sessionMetas = { error: e.message }; }
 
@@ -138,7 +197,7 @@ async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
     fs.mkdirSync(path.join(frozen, 'buffers'), { recursive: true });
     const names = fs.readdirSync(bufDir);
     for (const f of names.filter((n) => n.endsWith('.json')).slice(0, 200)) {
-      copyCapped(path.join(bufDir, f), path.join(frozen, 'buffers', f), META_COPY_MAX); // wrapper meta = streaming/remote state
+      copyJsonWhole(path.join(bufDir, f), path.join(frozen, 'buffers', f), META_COPY_MAX); // wrapper meta = streaming/remote state (JSON: whole, or trimmed as data)
     }
     for (const f of names.slice(0, 400)) out.buffers[f] = statOf(path.join(bufDir, f));
   } catch (e) { out.buffers = { error: e.message }; }
@@ -298,4 +357,4 @@ async function captureRemote({ hosts, hostIds, cids }) {
   return out;
 }
 
-module.exports = { captureLocal, captureRemote, buildRemoteTranscriptProbe, REMOTE_SCRIPT };
+module.exports = { captureLocal, captureRemote, buildRemoteTranscriptProbe, REMOTE_SCRIPT, copyJsonWhole, META_COPY_MAX };

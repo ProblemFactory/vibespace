@@ -77,9 +77,36 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
 check('the pure module imports nothing (DOM-free by construction)', !/^\s*import /m.test(read('src/lib/chat-run-summary.js')));
 
+// ── inc-mudv05ja-n5rv: WHEN THE FOLD PASS RUNS — the PURE classifier ─────────
+{
+  const N = (n) => ({ length: n });
+  const rec = (a, d, { prev = {}, next = null } = {}) => ({ type: 'childList', addedNodes: N(a), removedNodes: N(d), previousSibling: prev, nextSibling: next });
+  const tail = rec(1, 0), replace = rec(1, 1, { next: {} }), replaceLast = rec(1, 1), head = rec(0, 1, { prev: null, next: {} });
+  const rows = [
+    ['a live tail append', [tail], 'raf'],
+    ['three tail appends in one batch', [tail, tail, tail], 'raf'],
+    ['a 1:1 replace in the middle (a tool completion\'s replaceWith)', [replace], 'raf'],
+    ['a 1:1 replace of the LAST card', [replaceLast], 'raf'],
+    ['a tail append + the live trim of the first children', [tail, head, head], 'raf'],
+    ['a replace + a head trim', [replace, head], 'raf'],
+    ['a head trim ALONE (nothing new to fold)', [head, head], 'debounce'],
+    ['a non-tail insert (prepend / page-up slab)', [rec(5, 0, { next: {} })], 'debounce'],
+    ['a multi-node replace', [rec(3, 2, { next: {} })], 'debounce'],
+    ['a removal in the middle', [rec(0, 1, { prev: {}, next: {} })], 'debounce'],
+    ['a bulk insert mixed with a tail append', [tail, rec(4, 0, { next: {} })], 'debounce'],
+    ['no records', [], 'debounce'],
+    ['an attribute record', [{ type: 'attributes' }], 'debounce'],
+  ];
+  const bad = rows.filter(([, r, want]) => S.foldPassMode(r) !== want).map(([n, r]) => n + ' → ' + S.foldPassMode(r));
+  check(`foldPassMode table (${rows.length} rows): tail append / 1:1 replace / append+first-child trim ⇒ raf; bulk / non-tail / head-trim-only ⇒ debounce`, bad.length === 0, bad);
+  // CONTROL: the pre-fix rule `every(tailAppend)` sends the swap and the trim-cap append to the debounce
+  const preFix = (records) => (records.length && records.every((r) => r.type === 'childList' && r.removedNodes.length === 0 && r.addedNodes.length > 0 && r.nextSibling === null) ? 'raf' : 'debounce');
+  check('CONTROL: the pre-fix every(tailAppend) rule debounces a 1:1 replace and an append at the trim cap (the 180 ms unfolded paint)', preFix([replace]) === 'debounce' && preFix([tail, head]) === 'debounce' && preFix([tail]) === 'raf');
+}
+
 // ── wiring pins (a pure fix with an unstaged call site is dead: the 2.355.0 lesson) ──
 const cv = read('src/lib/chat-view.js');
-check('chat-view imports the classifier + composer from chat-run-summary.js', /import \{ mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel \} from '\.\/chat-run-summary\.js';/.test(cv));
+check('chat-view imports the classifier + composer from chat-run-summary.js', /import \{ mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode \} from '\.\/chat-run-summary\.js';/.test(cv));
 // …and the ONE composer also positions the collab traffic segment (2026-09-07):
 // chat-view hands it a PRE-COMPOSED string from the pure collab module, so this
 // module still imports nothing and the order never forks between the header,
@@ -101,8 +128,22 @@ check('the sticky (user-opened) mark rides EVERY element swap — ONE helper, an
   (cv.match(/if \(this\._runStickyOpen\?\.has\(oldEl\)\) this\._runStickyOpen\.add\(newEl\);/g) || []).length === 1
   && (cv.match(/if \(this\._runExpanded\?\.has\(oldEl\)\) this\._runExpanded\.add\(newEl\);/g) || []).length === 1
   && /_swapMessageEl\(oldEl, newEl, id\) \{/.test(cv)
-  && (cv.match(/this\._swapMessageEl\(/g) || []).length === 4 // 2.369.118 added the 4th site: a live Workflow card's taskInfo edit re-renders through the ONE helper
+  && (cv.match(/this\._swapMessageEl\(/g) || []).length === 4 // the 4th site (2.369.118): a live Workflow card — since inc-mudv05ja only the in-place patch's structural fallback
   && (cv.match(/\.replaceWith\(/g) || []).length === 1);
+check('inc-mudv05ja WIRING: the runs observer classifies through foldPassMode; the swap carries the four run classes, re-points the run records and reserves a rendered card\'s height; a live append reserves too',
+  /if \(list && foldPassMode\(records\) === 'raf'\) \{/.test(cv) && !/records\.every\(\(r\) =>\s*r\.type === 'childList' && r\.removedNodes\.length === 0/.test(cv)
+  && /for \(const c of RUN_CLASSES\) if \(oldEl\.classList\?\.contains\(c\)\) newEl\.classList\.add\(c\);/.test(cv)
+  && /if \(i >= 0\) run\.members\[i\] = newEl;/.test(cv)
+  && /const wasRendered = oldEl\.offsetParent != null;[\s\S]{0,120}oldEl\.replaceWith\(newEl\);\n\s*if \(wasRendered\) this\._reserveFreshHeights\(\[newEl\], \{ live: true \}\);/.test(cv)
+  && /if \(!this\._loadingHistory\) \{[\s\S]{0,700}this\._reserveFreshHeights\(\[el\], \{ live: true \}\);\n\s*this\._total\+\+;/.test(cv));
+check('inc-mudv05ja WIRING: the pin writes only with somewhere to go and ends on convergence or an A-B-A height; a Workflow taskInfo edit schedules the in-place patch (no swap on the heartbeat)',
+  /if \(sh - list\.scrollTop - list\.clientHeight > 1\) \{\n\s*this\._traceExpect\('fsb'\);\n\s*list\.scrollTop = sh;/.test(cv)
+  && /if \(\+\+this\._fsbFrames < 10 && this\._fsbStable < 2 && !flicker\) requestAnimationFrame\(step\);/.test(cv)
+  && /msg\.role === 'tool'\) \{\n\s*this\._scheduleWorkflowPatch\(id\);\n\s*\}/.test(cv)
+  && /this\._renderers\.renderTaskChip\(ti\)/.test(cv) && /this\._renderers\.renderWorkflowLive\(ti\)/.test(cv)
+  && /this\.renderTaskChip\(tiW\)/.test(read('src/lib/chat-renderers.js')) && /this\.renderWorkflowLive\(tiW\)/.test(read('src/lib/chat-renderers.js')));
+check('inc-mudv05ja WIRING: the workflow detail window is digest-gated with a persistent head, keyed rows and preserved expanders',
+  (() => { const wd = read('src/lib/workflow-detail.js'); return /if \(digest === lastDigest\) return;/.test(wd) && /const rows = new Map\(\);/.test(wd) && /if \(openBoxes\.has\('result'\)\) box\.open = true;/.test(wd) && !/const render = \(wf\) => \{[\s\S]{0,400}root\.innerHTML = '';\n\n/.test(wd) && /class="workflow-agent-state" aria-hidden="true"/.test(wd); })());
 check('the pinned auto-refold still folds every non-last run EXCEPT one the user opened deliberately (_runStickyOpen, keyed by member like _runExpanded)',
   /this\._runStickyOpen = new WeakSet\(\);/.test(cv) && /for \(const r of built\.slice\(0, -1\)\) \{/.test(cv)
   && /if \(r\.members\.some\(\(el\) => this\._runStickyOpen\.has\(el\)\)\) continue;/.test(cv)
@@ -510,6 +551,225 @@ const img1 = img0?.err ? { err: img0.err } : await evaljs(`(async () => {
     displays: cards.map((el) => getComputedStyle(el).display) };
 })()`);
 check('mixed run EXPANDED: everything visible, the image carries the grouping rail like any member', img1?.open && img1.collapsed === 0 && img1.members === 3 && img1.mediaIsMember && img1.footers === 1 && img1.displays.every((d) => d !== 'none'), JSON.stringify(img1));
+
+// ── inc-mudv05ja-n5rv: THE FLICKER — a swap is geometry- and fold-neutral, the
+// live Workflow card is patched in place, the pin never re-follows a transient.
+// The owner's five pinned compact windows jumped by up to 1.5 viewports for 1–3
+// frames on every tool completion / workflow heartbeat / live append. The legs
+// run on THIS view turned into a live-shaped one (content-visibility on, not
+// read-only, compact, pinned) and drive the REAL `_onEditMessage` /
+// `_onCreateMessage`; every leg carries a CONTROL that reverts exactly the new
+// layer IN THE PAGE (the pre-fix code, verbatim semantics) and must reproduce
+// the defect — else the leg proves nothing (the layered-guard rule).
+const liveShape = await chatView(`
+  const view = list.closest('.chat-view');
+  cv._readOnly = false; view.classList.remove('chat-no-content-visibility'); view.classList.add('chat-compact');
+  cv._runStickyOpen = new WeakSet(); cv._runExpanded = new WeakSet();
+  for (const r of cv._runs || []) cv._setRunOpen(r, false);
+  for (let i = 0; i < 4 && !cv._pinned; i++) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); await new Promise((r) => setTimeout(r, 300)); }
+  return { cv: getComputedStyle(list.querySelector(':scope > .chat-msg')).contentVisibility, pinned: !!cv._pinned, runs: cv._runs.length };`);
+check('inc-mudv05ja fixture: the view is live-shaped (content-visibility:auto on its cards, pinned, runs built)', liveShape?.cv === 'auto' && liveShape.pinned && liveShape.runs === 2, JSON.stringify(liveShape));
+// the per-frame sampler (the repro's probe-osc idiom): a card's height every rAF,
+// scrollHeight/scrollTop A-B-A frames, scrollTop writes (setter interceptor)
+const SAMPLER = `
+  const sample = async (frames, getEl, act) => {
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+    let writes = 0, atBottomWrites = 0;
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get() { return desc.get.call(this); },
+      set(x) { writes++; if (this.scrollHeight - desc.get.call(this) - this.clientHeight <= 1) atBottomWrites++; desc.set.call(this, x); } });
+    const hs = [], shs = [], sts = [];
+    try {
+      act && act();
+      const el0 = getEl && getEl();
+      if (el0) hs.push(Math.round(el0.getBoundingClientRect().height));
+      for (let f = 0; f < frames; f++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        const el = getEl && getEl();
+        if (el) hs.push(el.isConnected ? Math.round(el.getBoundingClientRect().height) : -1);
+        shs.push(list.scrollHeight); sts.push(Math.round(desc.get.call(list)));
+      }
+    } finally { delete list.scrollTop; }
+    let aba = 0;
+    for (let i = 2; i < shs.length; i++) if ((shs[i] === shs[i - 2] && shs[i] !== shs[i - 1]) || (sts[i] === sts[i - 2] && sts[i] !== sts[i - 1])) aba++;
+    return { hs, shs: shs.slice(0, 12), sts: sts.slice(0, 12), aba, writes, atBottomWrites };
+  };`;
+// F1(a)+(c): a FOLDED member's completion edit keeps it folded in the very next frame
+const RUN_CLS = `['chat-run-collapsed', 'chat-run-member', 'chat-run-first', 'chat-run-last']`;
+const PRE_FIX_OBSERVER = `
+  cv._runsObserver.disconnect();
+  cv._runsObserver = new MutationObserver((records) => {
+    if (cv._runsMutating) return;
+    const tailAppend = records.length && records.every((r) => r.type === 'childList' && r.removedNodes.length === 0 && r.addedNodes.length > 0 && r.nextSibling === null);
+    if (tailAppend) { clearTimeout(cv._runsTimer); cv._runsTimer = null; if (!cv._runsRaf) cv._runsRaf = requestAnimationFrame(() => { cv._runsRaf = null; cv._updateRuns(); }); return; }
+    clearTimeout(cv._runsTimer); cv._runsTimer = setTimeout(() => cv._updateRuns(), 180);
+  });
+  cv._runsObserver.observe(list, { childList: true });`;
+const foldLeg = (control) => chatView(`${SAMPLER}
+  const saved = { swap: cv._swapMessageEl, reserve: cv._reserveFreshHeights, obs: cv._runsObserver };
+  if (${control}) {
+    const orig = Object.getPrototypeOf(cv)._swapMessageEl;
+    cv._swapMessageEl = function (o, n, id) { const r = orig.call(this, o, n, id); for (const c of ${RUN_CLS}) n.classList.remove(c); return r; };
+    cv._reserveFreshHeights = () => {};
+    ${PRE_FIX_OBSERVER}
+  }
+  try {
+    const folded = [...list.querySelectorAll(':scope > .chat-msg.chat-msg-tool-result.chat-run-collapsed')][5];
+    if (!folded) return { err: 'no folded member' };
+    const id = folded.dataset.msgId;
+    // the fold state per frame is its computed DISPLAY (an off-screen card is 0 px
+    // either way under content-visibility — height cannot see an unfolded paint)
+    cv._onEditMessage(id, { status: 'complete' });
+    const syncDisplay = getComputedStyle(cv._elements.get(id)).display;
+    const frameDisplays = [];
+    for (let f = 0; f < 6; f++) { await new Promise((res) => requestAnimationFrame(res)); frameDisplays.push(getComputedStyle(cv._elements.get(id)).display); }
+    await new Promise((res) => setTimeout(res, 400));
+    const el = cv._elements.get(id);
+    return { swapped: el !== folded, syncDisplay, frameDisplays, displayAfter: getComputedStyle(el).display,
+      inRun: (cv._runs || []).some((run) => run.members.includes(el)), staleInRun: (cv._runs || []).some((run) => run.members.includes(folded)) };
+  } finally {
+    if (${control}) { cv._swapMessageEl = saved.swap; cv._reserveFreshHeights = saved.reserve; cv._runsObserver.disconnect(); cv._runsObserver = saved.obs; cv._runsObserver.observe(list, { childList: true }); delete cv._swapMessageEl; delete cv._reserveFreshHeights; }
+  }`);
+const fl = await foldLeg(false);
+check('inc-mudv05ja F1: a FOLDED member\'s completion edit swaps the card and the replacement is display:none synchronously AND in every sampled frame (the run classes ride the swap)',
+  fl?.swapped && fl.syncDisplay === 'none' && fl.frameDisplays.every((d) => d === 'none') && fl.displayAfter === 'none', JSON.stringify(fl));
+check('…and the run record names the NEW element, never the detached one (no pass needed)', fl?.inRun && !fl.staleInRun, JSON.stringify({ inRun: fl?.inRun, stale: fl?.staleInRun }));
+const flc = await foldLeg(true);
+check(`CONTROL (swap without the run classes + the pre-fix every(tailAppend) observer): the replacement is UNFOLDED for ≥ 1 frame (${(flc?.frameDisplays || []).filter((d) => d !== 'none').length} frame(s) not display:none) — the leg sees the defect`,
+  flc?.syncDisplay !== 'none' && (flc?.frameDisplays || []).filter((d) => d !== 'none').length >= 1, JSON.stringify(flc));
+// F1(b): a RENDERED card's swap is laid out at its real height in its first frame
+const popLeg = (control) => chatView(`${SAMPLER}
+  if (${control}) cv._reserveFreshHeights = () => {};
+  try {
+    list.scrollTop = list.scrollHeight; await new Promise((r) => setTimeout(r, 300));
+    const lb = list.getBoundingClientRect();
+    const vis = [...list.querySelectorAll(':scope > .chat-msg.chat-msg-assistant:not(.chat-msg-tool-result)')].filter((e) => { const r = e.getBoundingClientRect(); return r.height > 120 && r.top >= lb.top && r.bottom <= lb.bottom + 400; }).pop();
+    if (!vis) return { err: 'no visible tall assistant card' };
+    const id = vis.dataset.msgId, before = Math.round(vis.getBoundingClientRect().height);
+    const r = await sample(6, () => cv._elements.get(id), () => cv._onEditMessage(id, { status: 'complete' }));
+    await new Promise((res) => setTimeout(res, 400));
+    const settled = Math.round(cv._elements.get(id).getBoundingClientRect().height);
+    return { before, settled, hs: r.hs, pops: r.hs.filter((h) => Math.abs(h - settled) > 1).length, aba: r.aba, swapped: cv._elements.get(id) !== vis };
+  } finally { if (${control}) delete cv._reserveFreshHeights; }`);
+const pl = await popLeg(false);
+check(`inc-mudv05ja F1: a visible card\'s completion swap never paints at the content-visibility placeholder — ZERO frames off its settled height (${pl?.settled}px), zero A-B-A frames`,
+  pl?.swapped && pl.pops === 0 && pl.aba === 0 && pl.hs.length >= 6, JSON.stringify(pl));
+const plc = await popLeg(true);
+check(`CONTROL (no fresh-height reservation): the same swap paints at the placeholder for ≥ 1 frame (${plc?.pops} pop frame(s), heights ${JSON.stringify(plc?.hs)}) — the leg sees the defect`,
+  plc?.swapped && plc.pops >= 1, JSON.stringify(plc));
+// F3 (+F1 on appends): a pinned compact window under steady live appends — the
+// pin never writes at the bottom and never re-follows an A-B-A height
+const PRE_FIX_FSB = `function () {
+    this._programmaticScroll = true; this._fsbFrames = 0;
+    if (this._fsbActive) return;
+    this._fsbActive = true;
+    const epoch = this._fsbEpoch = (this._fsbEpoch || 0) + 1;
+    const list = this._messageList;
+    const step = () => {
+      if (this._disposed) { this._fsbActive = false; this._programmaticScroll = false; return; }
+      if (epoch !== this._fsbEpoch) return;
+      list.scrollTop = list.scrollHeight;
+      if (++this._fsbFrames < 10) requestAnimationFrame(step);
+      else { this._fsbActive = false; requestAnimationFrame(() => { if (!this._fsbActive) this._programmaticScroll = false; }); }
+    };
+    requestAnimationFrame(step);
+  }`;
+const appendLeg = (control, n0) => chatView(`${SAMPLER}
+  if (${control}) { cv._forceScrollToBottom = ${PRE_FIX_FSB}; cv._reserveFreshHeights = () => {}; }
+  try {
+    list.scrollTop = list.scrollHeight; await new Promise((r) => setTimeout(r, 300));
+    const PROSE = 'a synthetic live line that wraps and gives the card real height\\n'.repeat(6);
+    let k = ${n0};
+    const timer = setInterval(() => {
+      const i = k++;
+      cv._onCreateMessage({ id: 'e2e00000-live-' + i, role: 'assistant', status: 'complete', ts: Date.now(), content: [{ type: 'text', text: 'live ' + i + ':\\n' + PROSE }] });
+    }, 700);
+    let r;
+    try { r = await sample(360, null, null); } finally { clearInterval(timer); }
+    return { appended: k - ${n0}, aba: r.aba, writes: r.writes, atBottomWrites: r.atBottomWrites, pinned: !!cv._pinned };
+  } finally { if (${control}) { delete cv._forceScrollToBottom; delete cv._reserveFreshHeights; } }`);
+const al = await appendLeg(false, 0);
+check(`inc-mudv05ja F3: ~6 s of live appends at 1.4 msg/s into a pinned compact window — zero A-B-A frames and ZERO scrollTop writes while already at the bottom (${al?.appended} appends, ${al?.writes} writes)`,
+  al?.appended >= 7 && al.aba === 0 && al.atBottomWrites === 0 && al.pinned, JSON.stringify(al));
+const alc = await appendLeg(true, 1000);
+check(`CONTROL (the pre-fix ten-frame chain + no fresh-height reservation): the same stream rewrites scrollTop while already at the bottom (${alc?.atBottomWrites} such writes) — the per-frame re-follow the fix removes`,
+  alc?.atBottomWrites >= 10, JSON.stringify(alc));
+// F2: the live Workflow card is patched IN PLACE — five task_progress edits
+const wfLeg = (control) => chatView(`${SAMPLER}
+  const id = 'e2e00000-wf-card-' + (${control} ? 'c' : 'f');
+  const ack = 'Workflow "synthetic" started in the background.\\nRun ID: wf_e2e00000synth\\nSummary: a synthetic run';
+  cv._onCreateMessage({ id, role: 'tool', toolName: 'Workflow', toolCallId: 'toolu_e2e00000wf', status: 'complete', ts: Date.now(),
+    content: [{ type: 'tool_result', toolName: 'Workflow', toolCallId: 'toolu_e2e00000wf', input: { script: 'export const meta = {}' }, output: ack }] });
+  await new Promise((r) => setTimeout(r, 400));
+  // the CLI's OWN words for a working agent (start / progress — production never says 'running'; the card draws both as running)
+  const agents = (states) => states.map((st, i) => ({ index: i, label: 'lane:' + i, phaseIndex: i < 2 ? 0 : 1, agentId: 'e2e00000ag' + i, state: st, lastToolName: st === 'progress' || st === 'start' ? 'Bash' : undefined }));
+  const trees = [['start', 'queued', 'queued', 'queued'], ['progress', 'start', 'queued', 'queued'], ['done', 'progress', 'start', 'queued'], ['done', 'done', 'progress', 'start'], ['done', 'done', 'done', 'progress']];
+  const before = cv._elements.get(id);
+  const card = () => cv._elements.get(id);
+  const chipsOf = (el) => Object.fromEntries([...el.querySelectorAll('.chat-wf-agent')].map((c) => [c.dataset.agentKey, c]));
+  let firstChips = null, chipsKept = true, sameEl = true, maxH = 0, minH = 1e9, hsAll = [], dotsKept = true;
+  for (let e = 0; e < trees.length; e++) {
+    const ti = { id: 'e2e00000task', runId: 'wf_e2e00000synth', type: 'workflow', status: 'running', usage: { totalTokens: 1000 * (e + 1), toolUses: e + 1 },
+      workflow: { phases: [{ index: 0, title: 'Scan' }, { index: 1, title: 'Repair' }], agents: agents(trees[e]) } };
+    if (${control}) { const m = cv._messages.find((x) => x.id === id); m.taskInfo = ti; const nx = cv._renderers.renderToolMsg(m); cv._swapMessageEl(card(), nx, id); }
+    else cv._onEditMessage(id, { taskInfo: ti });
+    const r = await sample(14, card, null);
+    if (e >= 1) hsAll.push(...r.hs);   // edit 0 ADDS the live section (a real growth); from then on the tree's shape is fixed
+    const el = card();
+    if (el !== before) sameEl = false;
+    const chips = chipsOf(el);
+    if (!firstChips) firstChips = chips;
+    else for (const k of Object.keys(firstChips)) { if (chips[k] !== firstChips[k]) chipsKept = false; else if (chips[k].querySelector('.chat-wf-dot') !== firstChips[k].__dot) dotsKept = false; }
+    if (e === 0) for (const k of Object.keys(chips)) chips[k].__dot = chips[k].querySelector('.chat-wf-dot');
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const el = card();
+  const settled = Math.round(el.getBoundingClientRect().height);
+  const out = { sameEl, chipsKept, dotsKept, settled, off: hsAll.filter((h) => h > 0 && h < settled - 30).length, hsMin: Math.min(...hsAll), states: [...el.querySelectorAll('.chat-wf-agent')].map((c) => c.dataset.state).join(','),
+    tally: el.querySelector('.chat-wf-tally')?.textContent || '', btnKept: !!el.querySelector('.chat-workflow-view-btn'), dotAria: el.querySelector('.chat-wf-dot')?.getAttribute('aria-hidden'),
+    pulse: (el.querySelector('.chat-wf-agent[data-state="running"] .chat-wf-dot')?.getAnimations?.() || []).map((a) => a.animationName).join(',') };
+  return out;`);
+const wl = await wfLeg(false);
+check('inc-mudv05ja F2: five task_progress edits patch the Workflow card IN PLACE — the same element, every agent chip the same node (its pulsing dot never re-created), the View Workflow button kept',
+  wl?.sameEl && wl.chipsKept && wl.dotsKept && wl.btnKept, JSON.stringify(wl));
+check('…the patch really applied the last tree (states + tally) and the card never left its settled height in any sampled frame; the dot is aria-hidden paint',
+  wl?.states === 'done,done,done,running' && /^3\/4/.test(wl.tally) && wl.off === 0 && wl.dotAria === 'true', JSON.stringify(wl));
+check("…fed the CLI's REAL words (start / progress, never 'running'): the working chip draws `running`, its dot carries the chat-wf-pulse animation and the tally counts it (the pulse and the count never showed in production before)",
+  wl?.pulse === 'chat-wf-pulse' && /· 1 running$/.test(wl.tally), JSON.stringify({ pulse: wl?.pulse, tally: wl?.tally }));
+const wlc = await wfLeg(true);
+check('CONTROL (the pre-fix swap per heartbeat): the card element and its chips are re-created — the leg sees the swap',
+  wlc && !wlc.sameEl && !wlc.chipsKept, JSON.stringify(wlc));
+// F4: the View Workflow window renders only what changed (fetch stubbed with a synthetic run)
+const wd = await evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const realFetch = window.fetch;
+  let tick = 0, mutate = false;
+  const run = () => ({ runId: 'wf_e2e00000det', status: 'running', live: true, liveTree: true, workflowName: 'synthetic detail', agentCount: 2, doneCount: 0, totalTokens: 10, totalToolCalls: mutate ? 2 + tick : 1,
+    phases: [{ index: 0, title: 'Scan', agents: [{ index: 0, label: 'lane:0', state: 'progress', agentId: 'e2e00000d0', onDisk: true }, { index: 1, label: 'lane:1', state: 'queued', agentId: 'e2e00000d1', onDisk: false }] }] });
+  window.fetch = async (u, o) => { if (String(u).startsWith('/api/workflow?')) { tick++; return new Response(JSON.stringify(run()), { status: 200, headers: { 'content-type': 'application/json' } }); } return realFetch(u, o); };
+  try {
+    window.app.replayOpenSpec({ action: 'openWorkflowDetail', runId: 'wf_e2e00000det', claudeSessionId: '', cwd: '', name: 'synthetic detail' });
+    let root = null;
+    for (let i = 0; i < 40 && !(root = document.querySelector('.workflow-detail'))?.querySelector('.workflow-status-chip'); i++) await sleep(150);
+    if (!root) return { err: 'no detail window' };
+    const chip = root.querySelector('.workflow-status-chip'), btn = root.querySelector('.workflow-agent-view-btn');
+    let muts = 0; const mo = new MutationObserver((rs) => { for (const r of rs) if (r.type === 'childList') muts++; });
+    mo.observe(root, { childList: true, subtree: true });
+    const t0 = tick; await sleep(5600);
+    const polls = tick - t0, mutsEqual = muts;
+    mutate = true; muts = 0; await sleep(2900);
+    const mutsChanged = muts;
+    mo.disconnect();
+    const out = { polls, mutsEqual, mutsChanged, chipKept: root.querySelector('.workflow-status-chip') === chip, live: chip.classList.contains('workflow-status-live'),
+      btnKept: root.querySelector('.workflow-agent-view-btn') === btn, stateAria: root.querySelector('.workflow-agent-state')?.getAttribute('aria-hidden') };
+    const w = [...window.app.wm.windows.values()].find((x) => x._workflowRunId === 'wf_e2e00000det');
+    if (w) window.app.wm.closeWindow(w.id);
+    return out;
+  } finally { window.fetch = realFetch; }
+})()`);
+check('inc-mudv05ja F4: two+ live polls with an unchanged run → ZERO childList mutations under the detail root; the status chip is the same node (its pulse never restarts); state dots are aria-hidden',
+  wd?.polls >= 2 && wd.mutsEqual === 0 && wd.chipKept && wd.live && wd.stateAria === 'true', JSON.stringify(wd));
+check('CONTROL: a CHANGED run does mutate the window (the observer sees renders) while the chip and the keyed row\'s View Log button stay the same nodes',
+  wd?.mutsChanged > 0 && wd.chipKept && wd.btnKept, JSON.stringify(wd));
 
 check('zero uncaught page exceptions during the whole flow', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
 

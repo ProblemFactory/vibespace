@@ -1,7 +1,7 @@
 // CDP smoke: a Skill card folds, and a newly appended foldable card is folded
 // BEFORE it can paint (no flash) — 2.227.9.
 import { execSync, spawn } from 'node:child_process';
-import fs from 'node:fs'; import path from 'node:path';
+import fs from 'node:fs'; import path from 'node:path'; import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import { ONBOARDED_SOURCE } from './scratch.mjs';
@@ -53,6 +53,15 @@ check('Skill folds by default (the reported expectation)', out.inDefault);
 // bundle-level assertions for the two code paths
 const b = fs.readFileSync(path.join(wt,'public','bundle.js'),'utf8');
 check('memberKind classifies Skill', /==="Skill"\)return"skill"|===\"Skill\"\)return\"skill\"/.test(b) || b.includes('"skill"'));
-check('observer has a synchronous tail-append path', /nextSibling===null/.test(b));
+// the pre-paint fold path is decided by the PURE classifier since inc-mudv05ja-n5rv (foldPassMode,
+// chat-run-summary.js) — pinned on its BEHAVIOUR and on the observer's call, never on the minified
+// spelling of one comparison (`nextSibling===null` vs `== null`: the old pin went red on a rename)
+{
+  const { foldPassMode } = await import(pathToFileURL(path.join(wt, 'src', 'lib', 'chat-run-summary.js')).href);
+  const rec = (a, d, next) => ({ type: 'childList', addedNodes: { length: a }, removedNodes: { length: d }, nextSibling: next, previousSibling: null });
+  const cvSrc = fs.readFileSync(path.join(wt, 'src', 'lib', 'chat-view.js'), 'utf8');
+  check('observer has a synchronous tail-append path (a live tail append folds before the next paint: foldPassMode → raf, a mid-list insert → debounce; the runs observer routes through it)',
+    foldPassMode([rec(1, 0, null)]) === 'raf' && foldPassMode([rec(1, 0, {})]) === 'debounce' && /if \(list && foldPassMode\(records\) === 'raf'\) \{/.test(cvSrc));
+}
 console.log(failed===0?'ALL PASS':`${failed} FAILED`);
 process.exit(failed?1:0);

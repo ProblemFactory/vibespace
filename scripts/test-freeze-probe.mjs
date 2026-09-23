@@ -4,6 +4,8 @@
 // visible for the whole gap. PURE function, every branch a leg, the pre-fix rule
 // (gap > 4 s && !hidden) as the negative control.
 import { selfGapIsFreeze, jankStormVerdict } from '../src/lib/telemetry-client.js';
+import * as tc from '../src/lib/telemetry-client.js';
+import fs from 'node:fs';
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + JSON.stringify(e) : ''}`); } };
 const T = 1_000_000;
@@ -34,6 +36,35 @@ ok(selfGapIsFreeze({ tickGap: 4001, prevTick: T + 100000, now: T + 104001, hidde
   ok(jankStormVerdict(storm, { now: now + 30000 }).storm === false, 'a storm ages out of the 20 s window');
   ok(jankStormVerdict([{ t: now - 1000, gap: 2000 }, { t: now - 2000, gap: 2000 }], { now }).storm === false && jankStormVerdict([{ t: now - 1000, gap: 3000 }, { t: now - 2000, gap: 3000 }], { now }).storm === true, 'the 6 s coverage threshold (4 s no, 6 s yes)');
   ok(jankStormVerdict([], { now }).storm === false, 'no frames, no storm');
+}
+// ── A TAB RETURN IS NOT A JANK STORM (inc-mudv05ja-n5rv): the auto incident
+// "jank storm — 13.3s" was ONE rAF interval spanning a 254 s hidden period — the
+// return frame passed the `!document.hidden` gate (already false at the return)
+// and the verdict read it 3 s later as 13.3 s of slow frames. The numbers below
+// are that bundle's timestamps (numbers only — no names, no paths).
+{
+  const HID = 1790152237901, VIS = 1790152491821;           // hidden → visible (254 s away)
+  const retGap = { t: 1790152491822, gap: 13288 };          // the ring's frame gap, logged 1 ms after the return
+  const verdictAt = VIS + 3000 + 79;                        // the first tick allowed to judge (tickNow − visibleSince ≥ 3000)
+  const fgr = tc.frameGapIsReturn;
+  ok(typeof fgr === 'function' && fgr({ now: retGap.t, gap: retGap.gap, visibleSince: VIS, hiddenAt: HID }) === true, 'the return frame (starts 13.3 s before the page came back) is a RETURN, never pushed to the frame ring');
+  ok(typeof fgr === 'function' && fgr({ now: VIS + 5000, gap: 900, visibleSince: VIS, hiddenAt: HID }) === false, 'a 900 ms frame that starts after the return is a real slow frame');
+  ok(typeof fgr === 'function' && fgr({ now: VIS - 100000, gap: 2000, visibleSince: VIS - 200000, hiddenAt: VIS - 100500 }) === true, 'a frame the page went hidden during (hiddenAt after its start) is a return too');
+  ok(typeof fgr === 'function' && fgr({ now: 5000, gap: 400, visibleSince: 0, hiddenAt: 0 }) === false, 'no visibility history (visible since install) ⇒ nothing is excused');
+  const v = jankStormVerdict([retGap], { now: verdictAt, visibleSince: VIS });
+  ok(v.storm === false && v.coveredMs === 0, 'the verdict handed visibleSince never counts the interval that straddles the return (the auto incident\'s whole evidence)', v);
+  ok(jankStormVerdict([retGap], { now: verdictAt }).storm === true, 'NEGATIVE CONTROL: without visibleSince the pre-fix verdict calls that return a 13.3 s storm');
+  // the tick lag of the same return (13 356 ms, visibleAgo 69) was already excused by the self-gap rule
+  ok(selfGapIsFreeze({ tickGap: 13356, prevTick: VIS + 69 - 13356, now: VIS + 69, hiddenNow: false, visibleSince: VIS, hiddenAt: HID }) === false, 'the same return\'s 13.4 s tick lag is not a renderer freeze');
+  // GENUINE-STORM CONTROL: 8 × 900 ms slow frames inside a visible 20 s window still fire — before AND after a return
+  const genuine = Array.from({ length: 8 }, (_, i) => ({ t: VIS + 10000 + i * 1500, gap: 900 }));
+  const g = jankStormVerdict(genuine, { now: VIS + 22000, visibleSince: VIS });
+  ok(g.storm === true && g.slowFrames === 8 && g.coveredMs === 7200, 'eight 900 ms frames after the return (7.2 s of a visible 20 s) are still a storm', g);
+  ok(jankStormVerdict([retGap, ...genuine], { now: VIS + 22000, visibleSince: VIS }).slowFrames === 8, 'a storm after a return counts its own frames and not the return');
+  // WIRING PIN: the ring filter and the verdict's visibleSince are both in the live loop
+  const src = fs.readFileSync(new URL('../src/lib/telemetry-client.js', import.meta.url), 'utf8');
+  ok(/if \(gap >= 300 && !document\.hidden && !frameGapIsReturn\(\{ now, gap, visibleSince, hiddenAt \}\)\)/.test(src), 'WIRING: the rAF loop pushes a frame gap only when it is not a return');
+  ok(/jankStormVerdict\(_frameGaps, \{ now: tickNow, visibleSince \}\)/.test(src), 'WIRING: the live verdict is handed visibleSince');
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -771,7 +771,8 @@ patch('src/lib/chat-view.js', [
   // and proved nothing. The old control strips the new layer (feedback_layered_guard_controls).
   ["if (n >= must && pos[i].top < zone.bottom) break;", "/* control: by count */"],
   ["if (n >= must && pos[i].bottom > zone.top) break;", "/* control: by count */"],
-  ['  _reserveFreshHeights(els) {', '  _reserveFreshHeights(els) { return;'],
+  // (inc-mudv05ja-n5rv gave it a `{ live }` option — the marker follows the signature)
+  ['  _reserveFreshHeights(els, { live = false } = {}) {', '  _reserveFreshHeights(els, { live = false } = {}) { return;'],
   // …and the anchor back to the list's first child at the top edge — the seek sentinel: the
   // pre-fix landing at scrollTop 0 that this leg's "stranded at the top" reading was made of
   ["const skip = (c) => runChrome(c) || c._isSeekSentinel;", "const skip = (c) => runChrome(c);"],

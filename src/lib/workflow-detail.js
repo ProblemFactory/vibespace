@@ -98,24 +98,57 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     if (w) agentViewers.set(virtualId, w.id);
   };
 
+  // DIGEST-GATED, IN PLACE (inc-mudv05ja-n5rv): the 2.5 s live poll used to
+  // `root.innerHTML = ''` and rebuild the whole window on every tick — the
+  // pulsing `.workflow-status-live` chip re-created (its animation restarted =
+  // a 2.5 s blink), every View Log button re-created under the pointer, an open
+  // Result/Error expander closed, and the first render's title change rebuilt
+  // the taskbar. Now: an unchanged run is not rendered at all; the head (title
+  // + status chip) is built ONCE and updated in place; agent rows are keyed by
+  // agentId and updated in place; `<details>` keep their open state.
+  let lastDigest = '';
+  let lastTitle = null;
+  let head = null, headTitle = null, headChip = null, body = null;
+  const rows = new Map(); // agent key -> { row, sig }
   const render = (wf) => {
-    app.wm.setTitle(winInfo.id, wf.workflowName || name || 'Workflow');
-    root.innerHTML = '';
+    if (head && !head.isConnected) lastDigest = '';   // an error / loading line replaced the view: the next answer renders
+    const digest = JSON.stringify(wf);
+    if (digest === lastDigest) return;
+    lastDigest = digest;
+    const title = wf.workflowName || name || 'Workflow';
+    if (title !== lastTitle) { lastTitle = title; app.wm.setTitle(winInfo.id, title); }
 
-    // ── Header ──
-    const head = document.createElement('div');
-    head.className = 'workflow-detail-head';
+    // ── Header (built once; class/text/colour updated in place) ──
+    if (!head || !head.isConnected) {
+      root.innerHTML = '';
+      head = document.createElement('div');
+      head.className = 'workflow-detail-head';
+      headTitle = document.createElement('div');
+      headTitle.className = 'workflow-detail-title';
+      headChip = document.createElement('span');
+      head.append(headTitle, headChip);
+      body = document.createElement('div');
+      body.className = 'workflow-detail-body';
+      root.append(head, body);
+      rows.clear();
+    }
     const st = RUN_STATUS_META[wf.status] || { label: wf.status || '?', color: 'var(--text-dim)' };
-    head.innerHTML =
-      `<div class="workflow-detail-title">${escHtml(wf.workflowName || 'Workflow')}</div>` +
-      `<span class="workflow-status-chip${wf.live ? ' workflow-status-live' : ''}" style="--chip-color:${st.color}">${escHtml(st.label)}</span>`;
-    root.appendChild(head);
+    const wfTitle = wf.workflowName || 'Workflow';
+    if (headTitle.textContent !== wfTitle) headTitle.textContent = wfTitle;
+    const chipCls = 'workflow-status-chip' + (wf.live ? ' workflow-status-live' : '');
+    if (headChip.className !== chipCls) headChip.className = chipCls;
+    if (headChip.style.getPropertyValue('--chip-color') !== st.color) headChip.style.setProperty('--chip-color', st.color);
+    if (headChip.textContent !== st.label) headChip.textContent = st.label;
+
+    // the open state of every expander survives the rebuild of the body
+    const openBoxes = new Set([...body.querySelectorAll('details.workflow-detail-box')].filter((d) => d.open).map((d) => d.dataset.box));
+    const nextBody = document.createDocumentFragment();
 
     if (wf.summary) {
       const sum = document.createElement('div');
       sum.className = 'workflow-detail-summary';
       sum.textContent = wf.summary;
-      root.appendChild(sum);
+      nextBody.appendChild(sum);
     }
 
     // ── Meta line ──
@@ -133,7 +166,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       if (wf.durationMs) bits.push(fmtDuration(wf.durationMs));
     }
     meta.textContent = bits.join(' · ');
-    root.appendChild(meta);
+    nextBody.appendChild(meta);
 
     if (wf.live) {
       const note = document.createElement('div');
@@ -144,10 +177,11 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       note.textContent = wf.liveTree
         ? t('Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.')
         : t('Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.');
-      root.appendChild(note);
+      nextBody.appendChild(note);
     }
 
-    // ── Phases → agents ──
+    // ── Phases → agents (rows keyed by agentId, updated in place) ──
+    const seen = new Set();
     for (const phase of wf.phases || []) {
       const sec = document.createElement('div');
       sec.className = 'workflow-phase';
@@ -159,40 +193,60 @@ export function openWorkflowDetail(app, runId, opts = {}) {
         `<span class="workflow-phase-count">${doneN}/${phase.agents.length}</span>`;
       sec.appendChild(hdr);
 
-      for (const ag of phase.agents) {
+      phase.agents.forEach((ag, i) => {
+        const key = ag.agentId ? 'a:' + ag.agentId : `p:${phase.index}:${i}`;
+        seen.add(key);
         const sm = STATE_META[ag.state] || { label: ag.state || '?', color: 'var(--text-dim)' };
-        const row = document.createElement('div');
-        row.className = 'workflow-agent-row';
         const model = ag.model ? ag.model.replace(/^claude-/, '') : '';
-        row.innerHTML =
-          `<span class="workflow-agent-state" style="--chip-color:${sm.color}" title="${escHtml(sm.label)}"></span>` +
+        const spans =
+          `<span class="workflow-agent-state" aria-hidden="true" style="--chip-color:${sm.color}" title="${escHtml(sm.label)}"></span>` +
           `<span class="workflow-agent-label">${escHtml(ag.label || '(agent)')}</span>` +
           (ag.lastToolName && (ag.state === 'progress' || ag.state === 'queued') ? `<span class="workflow-agent-tool" title="${escHtml(ag.lastToolSummary || ag.lastToolName)}">${escHtml(ag.lastToolName)}</span>` : '') +
           (model ? `<span class="workflow-agent-model">${escHtml(model)}</span>` : '');
-        const btn = document.createElement('button');
-        btn.className = 'workflow-agent-view-btn';
-        btn.textContent = t('View Log');
-        btn.disabled = !ag.agentId || ag.onDisk === false; // a tree-named agent whose transcript file has not appeared yet
-        btn.title = !ag.agentId ? 'No transcript on disk' : (ag.onDisk === false ? t('No transcript on disk yet') : 'Open this agent’s transcript');
-        btn.onclick = () => openAgentLog(ag.agentId, ag.label);
-        row.appendChild(btn);
-        sec.appendChild(row);
-      }
-      root.appendChild(sec);
+        let rec = rows.get(key);
+        if (!rec) {
+          const row = document.createElement('div');
+          row.className = 'workflow-agent-row';
+          const btn = document.createElement('button');
+          btn.className = 'workflow-agent-view-btn';
+          btn.textContent = t('View Log');
+          row.appendChild(btn);
+          rec = { row, btn, sig: null };
+          rows.set(key, rec);
+        }
+        if (rec.sig !== spans) {
+          rec.sig = spans;
+          while (rec.row.firstChild && rec.row.firstChild !== rec.btn) rec.row.firstChild.remove();
+          rec.btn.insertAdjacentHTML('beforebegin', spans);
+        }
+        const disabled = !ag.agentId || ag.onDisk === false; // a tree-named agent whose transcript file has not appeared yet
+        if (rec.btn.disabled !== disabled) rec.btn.disabled = disabled;
+        const tip = !ag.agentId ? 'No transcript on disk' : (ag.onDisk === false ? t('No transcript on disk yet') : 'Open this agent’s transcript');
+        if (rec.btn.title !== tip) rec.btn.title = tip;
+        rec.btn.onclick = () => openAgentLog(ag.agentId, ag.label);
+        sec.appendChild(rec.row);
+      });
+      nextBody.appendChild(sec);
     }
+    for (const k of [...rows.keys()]) if (!seen.has(k)) rows.delete(k);
 
     // ── Result / error ──
     if (wf.error) {
       const box = document.createElement('details');
       box.className = 'workflow-detail-box workflow-detail-error';
+      box.dataset.box = 'error';
       box.innerHTML = `<summary>${escHtml(t('Error'))}</summary><pre>${escHtml(wf.error)}</pre>`;
-      root.appendChild(box);
+      if (openBoxes.has('error')) box.open = true;
+      nextBody.appendChild(box);
     } else if (wf.result) {
       const box = document.createElement('details');
       box.className = 'workflow-detail-box';
+      box.dataset.box = 'result';
       box.innerHTML = `<summary>${escHtml(t('Result'))}</summary><pre>${escHtml(wf.result)}</pre>`;
-      root.appendChild(box);
+      if (openBoxes.has('result')) box.open = true;
+      nextBody.appendChild(box);
     }
+    body.replaceChildren(nextBody);
   };
 
   // While the run is in progress the endpoint returns a live skeleton (status

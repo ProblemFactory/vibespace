@@ -3113,6 +3113,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 
 /* ── Workflow detail window (post-hoc dynamic-workflow viewer) ── */
 .workflow-detail { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow-y: auto; padding: 10px 12px; font-size: 12px; }
+.workflow-detail-body { display: flex; flex-direction: column; gap: 10px; } /* the rebuilt part under the persistent head (inc-mudv05ja-n5rv) keeps the root's rhythm */
 .workflow-detail-head { display: flex; gap: 8px; align-items: center; }
 .workflow-detail-title { flex: 1; min-width: 0; color: var(--text); font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-status-chip {

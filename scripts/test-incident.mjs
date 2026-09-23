@@ -49,6 +49,15 @@ const dir = path.join(wt, 'data', 'incidents', r.id);
 const metaDir = path.join(wt, 'data', 'session-meta');
 fs.mkdirSync(metaDir, { recursive: true });
 fs.writeFileSync(path.join(metaDir, 'cw-99-test.json'), JSON.stringify({ sessionId: 'sess-99-test', name: 'frozen probe' }));
+// inc-mudv05ja-n5rv: session-meta carries taskRecords since 2.369.140 — a meta of a
+// session with workflows is ~100 KB and the 64 KiB byte cap froze it UNPARSEABLE.
+// SYNTHETIC shapes only: 40 task records of ~2.4 KB (≈100 KB) and a 3 MB one.
+const taskRec = (i, pad) => ({ type: 'system', subtype: 'task_progress', task_id: `t${i}`, description: `synthetic step ${i}`, pad: 'x'.repeat(pad) });
+const midMeta = { sessionId: 'sess-98-wf', name: 'workflow meta', taskRecords: Array.from({ length: 40 }, (_, i) => taskRec(i, 2400)) };
+fs.writeFileSync(path.join(metaDir, 'cw-98-wf.json'), JSON.stringify(midMeta));
+const bigMeta = { sessionId: 'sess-97-wf', name: 'huge workflow meta', taskRecords: Array.from({ length: 1200 }, (_, i) => taskRec(i, 2500)) };
+fs.writeFileSync(path.join(metaDir, 'cw-97-wf.json'), JSON.stringify(bigMeta));
+const midBytes = fs.statSync(path.join(metaDir, 'cw-98-wf.json')).size, bigBytes = fs.statSync(path.join(metaDir, 'cw-97-wf.json')).size;
 const CID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const cacheDir = path.join(wt, 'data', 'remote-jsonl', 'host-test');
 fs.mkdirSync(cacheDir, { recursive: true });
@@ -62,6 +71,18 @@ const env = JSON.parse(fs.readFileSync(path.join(dir2, 'env.json'), 'utf8'));
 check('process table captured (the kill-erases-it evidence)', Array.isArray(env.local.processes) && env.local.processes.length > 0);
 check('session metas frozen as real copies', fs.existsSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'))
   && JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', 'cw-99-test.json'), 'utf8')).name === 'frozen probe');
+{
+  const readFrozen = (f) => { try { return JSON.parse(fs.readFileSync(path.join(dir2, 'frozen', 'session-meta', f), 'utf8')); } catch (e) { return { __parseError: e.message }; } };
+  const mid = readFrozen('cw-98-wf.json');
+  check(`a ${Math.round(midBytes / 1024)} KB meta with 40 taskRecords freezes WHOLE and parseable (inc-mudv05ja-n5rv)`, midBytes > 64 * 1024 && mid.name === 'workflow meta' && mid.taskRecords?.length === 40 && !mid._frozenTrimmed, JSON.stringify(mid).slice(0, 200));
+  const big = readFrozen('cw-97-wf.json');
+  const bigSize = (() => { try { return fs.statSync(path.join(dir2, 'frozen', 'session-meta', 'cw-97-wf.json')).size; } catch { return -1; } })();
+  check(`a ${(bigBytes / 1048576).toFixed(1)} MB meta freezes to VALID JSON ≤ 2 MiB, trimmed as data with a marker naming the field and the original size`,
+    bigBytes > 2 * 1048576 && big.name === 'huge workflow meta' && bigSize > 0 && bigSize <= 2 * 1048576
+    && big._frozenTrimmed?.originalBytes === bigBytes && big._frozenTrimmed.dropped?.[0]?.field === 'taskRecords'
+    && big._frozenTrimmed.dropped[0].from === 1200 && big.taskRecords.length === big._frozenTrimmed.dropped[0].kept && big.taskRecords.length > 0
+    && big.taskRecords[big.taskRecords.length - 1].task_id === 't1199', JSON.stringify(big._frozenTrimmed || big).slice(0, 300));
+}
 const tr = env.local.transcripts?.[CID];
 check('transcript fingerprinted (sha256 + size) for the referenced conversation', Array.isArray(tr) && tr.length > 0 && /^[0-9a-f]{64}$/.test(tr[0].sha256 || ''), JSON.stringify(tr));
 check('transcript tail frozen to disk', fs.readdirSync(path.join(dir2, 'frozen', 'transcripts')).some((f) => f.startsWith(CID)));
@@ -109,6 +130,26 @@ check('the frozen codex tail is the real bytes', fs.readFileSync(path.join(dir3,
 check('the claude conversation in the same report still freezes exactly once (locate dedups against the scan)', Array.isArray(env3.local.transcripts?.[CID]) && env3.local.transcripts[CID].length === 1);
 // the remote probe is built from every harness's store.remoteFind — claude's line unchanged, codex's added
 const inc = (await import(path.join(repo, 'src', 'incident.js'))).default || (await import('node:module')).createRequire(import.meta.url)(path.join(repo, 'src', 'incident.js'));
+// the copier itself (inc-mudv05ja-n5rv): a frozen file is truncated as DATA, never as bytes
+{
+  const cj = inc.copyJsonWhole;
+  const d = scratch('inc-copyjson'); fs.mkdirSync(d, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} });
+  const src = path.join(d, 'src.json'), dst = path.join(d, 'dst.json');
+  fs.writeFileSync(src, JSON.stringify({ a: 1, taskRecords: Array.from({ length: 100 }, (_, i) => ({ i, p: 'y'.repeat(1000) })), small: [1, 2] }));
+  const r0 = typeof cj === 'function' ? cj(src, dst, 20 * 1024) : null;
+  const o = (() => { try { return JSON.parse(fs.readFileSync(dst, 'utf8')); } catch { return null; } })();
+  check('copyJsonWhole: over the ceiling ⇒ valid JSON under it, the largest array keeps its NEWEST records, marker names field/from/kept + original size',
+    r0 && o && fs.statSync(dst).size <= 20 * 1024 && o.a === 1 && o.small.length === 2 && o._frozenTrimmed?.originalBytes === fs.statSync(src).size
+    && o._frozenTrimmed.dropped[0].field === 'taskRecords' && o._frozenTrimmed.dropped[0].from === 100 && o.taskRecords.at(-1).i === 99 && r0.trimmed === true, JSON.stringify(r0));
+  fs.writeFileSync(src, '{"not json' + 'z'.repeat(50 * 1024));
+  const r1 = typeof cj === 'function' ? cj(src, dst, 20 * 1024) : null;
+  const o1 = (() => { try { return JSON.parse(fs.readFileSync(dst, 'utf8')); } catch { return null; } })();
+  check('copyJsonWhole: an unparseable file over the ceiling still freezes to VALID JSON (marker + the raw tail as a string)', r1 && o1 && o1._frozenTrimmed?.unparseable === true && typeof o1.rawTail === 'string' && fs.statSync(dst).size <= 20 * 1024, JSON.stringify(r1));
+  fs.writeFileSync(src, '{"x":1}');
+  const r2c = typeof cj === 'function' ? cj(src, dst, 20 * 1024) : null;
+  check('copyJsonWhole: under the ceiling ⇒ the bytes verbatim', r2c && fs.readFileSync(dst, 'utf8') === '{"x":1}' && !r2c.trimmed);
+}
 const probe = inc.buildRemoteTranscriptProbe([CID, TID]);
 check('remote probe: claude find line = the pre-B-8ebb expression', probe.includes(`find "$HOME"/.claude/projects -maxdepth 2 -name "${CID}.jsonl" 2>/dev/null | head -3); do probe_transcript "$f" "claude"; done`), probe.slice(0, 300));
 check('remote probe: codex rollouts (.jsonl and .jsonl.zst) probed under $HOME/.codex/sessions', probe.includes(`rollout-*${TID}.jsonl.zst`) && probe.includes('"$HOME"/.codex/sessions') && probe.includes('probe_transcript "$f" "codex"'), probe.slice(-400));

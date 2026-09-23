@@ -256,6 +256,8 @@ What survives for codex is the SESSION scope, which asks the session's OWN alrea
 **Find/GoTo split button**: Session card detail panel has a Find/GoTo split button (like Resume). Find flashes window + taskbar + desktop preview rect. GoTo switches to the window's desktop and flashes. Mode persisted via `sessionCard.findMode` setting (broadcast to all clients). For tab group guests, both resolve to the host window and switch to the target tab first.
 
 ### 11. Chat Mode (Dual-Mode Architecture)
+**Content-visibility first-frame lock (inc-mudv05ja-n5rv):** every FRESH `.chat-msg` (append, swap, re-render) and every card whose `content-visibility` override is dropped enters `content-visibility:auto` as a new lock and lays out at its intrinsic placeholder (0 px in compact) for 1–2 frames — so a swap carries the old element's fold classes + run records and reserves a rendered card's height, live appends reserve, a live reservation's override is released only once the card is off-screen (an on-screen release re-locks it for a frame), the fold pass is scheduled by the PURE `foldPassMode`, and the pinned follow writes only with somewhere to go (never an A-B-A chase). A live card is patched in place, never re-created per update.
+
 **Two session modes** share the same dtach persistence layer but use different wrappers:
 - **Terminal**: `dtach → pty-wrapper.js → claude` (TUI, raw PTY output, xterm.js)
 - **Chat**: `dtach → chat-wrapper.js → claude --output-format stream-json --input-format stream-json --verbose --permission-prompt-tool stdio` (structured JSON, ChatView)

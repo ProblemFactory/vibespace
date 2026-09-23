@@ -200,15 +200,31 @@ export function installScreenWatch() {
  *  frames every 1–2 s — under both freeze detectors' thresholds). Over the last
  *  `windowMs` of frame intervals (ms): a storm when the slow frames (≥ slowMs)
  *  together cover ≥ `coverMs` — the page was "alive" but unusable. */
-export function jankStormVerdict(intervals, { now, windowMs = 20000, slowMs = 500, coverMs = 6000 } = {}) {
+export function jankStormVerdict(intervals, { now, visibleSince = 0, windowMs = 20000, slowMs = 500, coverMs = 6000 } = {}) {
   let covered = 0, slow = 0, worst = 0;
   for (const f of intervals) {
     if (!f || now - f.t > windowMs) continue;
+    // A TAB RETURN IS NOT A FRAME (inc-mudv05ja-n5rv): an interval that began
+    // before the page last became visible spans the hidden period — the 13.3 s
+    // "storm" the auto incident captured was one such return, read 3 s later.
+    if (frameGapIsReturn({ now: f.t, gap: f.gap, visibleSince })) continue;
     if (f.gap >= slowMs) { covered += f.gap; slow++; if (f.gap > worst) worst = f.gap; }
   }
   return { storm: covered >= coverMs, coveredMs: covered, slowFrames: slow, worstMs: worst };
 }
-const _frameGaps = [];   // {t, gap} for every frame that took ≥ 300 ms
+/** PURE (inc-mudv05ja-n5rv): is a rAF interval a RETURN rather than a frame?
+ *  On a tab return the first frame's interval spans the hidden period and
+ *  `document.hidden` is already false, so a `!hidden` gate lets it through.
+ *  An interval whose START (now − gap) precedes the last visibility return
+ *  (`visibleSince`), or during which the page went hidden (`hiddenAt` after
+ *  its start), measured the tab being away — never the renderer. */
+export function frameGapIsReturn({ now, gap, visibleSince = 0, hiddenAt = 0 }) {
+  const start = now - gap;
+  if (visibleSince && start < visibleSince) return true;
+  if (hiddenAt && hiddenAt > start) return true;
+  return false;
+}
+const _frameGaps = [];   // {t, gap} for every frame that took ≥ 300 ms (a tab return excluded)
 const _tickLags = [];    // {t, gap, hidden, visibleAgo} for every 1 s tick ≥ 1.5 s late
 export function recentFrameGaps() { return _frameGaps.slice(); }
 export function recentTickLags() { return _tickLags.slice(); }
@@ -221,18 +237,20 @@ export function selfGapIsFreeze({ tickGap, prevTick, now, hiddenNow, visibleSinc
   return true;
 }
 export function installCompositorStallWatch() {
-  let lastRaf = Date.now();
+  const t0 = Date.now();
+  let lastRaf = t0;
   let stallStart = 0;
   let stormOpen = 0;
+  // visibility state first: the rAF loop's return filter reads it
+  let visibleSince = document.hidden ? 0 : t0, hiddenAt = document.hidden ? t0 : 0;
+  try { document.addEventListener('visibilitychange', () => { if (document.hidden) hiddenAt = Date.now(); else visibleSince = Date.now(); }); } catch { }
   const loop = () => {
     const now = Date.now(); const gap = now - lastRaf; lastRaf = now;
-    if (gap >= 300 && !document.hidden) { _frameGaps.push({ t: now, gap }); if (_frameGaps.length > 200) _frameGaps.shift(); }
+    if (gap >= 300 && !document.hidden && !frameGapIsReturn({ now, gap, visibleSince, hiddenAt })) { _frameGaps.push({ t: now, gap }); if (_frameGaps.length > 200) _frameGaps.shift(); }
     requestAnimationFrame(loop);
   };
   try { requestAnimationFrame(loop); } catch { return; }
   let lastTick = Date.now();
-  let visibleSince = document.hidden ? 0 : Date.now(), hiddenAt = document.hidden ? Date.now() : 0;
-  try { document.addEventListener('visibilitychange', () => { if (document.hidden) hiddenAt = Date.now(); else visibleSince = Date.now(); }); } catch { }
   setInterval(() => {
     // SELF-GAP (2.340.3): if THIS 1s timer itself fired late by >3s, the whole
     // renderer (or the OS) was frozen — a case rAF-vs-timer cannot see (both
@@ -246,7 +264,7 @@ export function installCompositorStallWatch() {
     // that neither the self-gap nor the rAF-dead arm can see. One event + one
     // capture per storm; the storm closes after 20 s without a slow frame.
     if (!document.hidden && tickNow - visibleSince >= 3000) {
-      const v = jankStormVerdict(_frameGaps, { now: tickNow });
+      const v = jankStormVerdict(_frameGaps, { now: tickNow, visibleSince });
       if (v.storm && !stormOpen) {
         stormOpen = tickNow;
         metric('jank-storm-covered-s', Math.round(v.coveredMs / 100) / 10);

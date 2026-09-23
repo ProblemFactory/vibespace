@@ -176,4 +176,35 @@ export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, runn
   return label;
 }
 
+/** WHEN THE FOLD PASS RUNS (inc-mudv05ja-n5rv): the runs MutationObserver hands
+ *  a batch of childList records here and gets back 'raf' (fold before the next
+ *  paint — a card never shows at its unfolded size) or 'debounce' (the 180 ms
+ *  pass for bulk work: pagination, jumps, a page-up trim). A live window meets
+ *  THREE record shapes, and before this only the first counted:
+ *    tail append   — added > 0, removed 0, nothing after it (a live create);
+ *    1:1 replace   — one node out, one node in at the same place (`replaceWith`:
+ *                    a tool completion, a re-rendered card) — a swap is not a
+ *                    bulk insert, and waiting 180 ms painted the replacement
+ *                    unfolded (the owner's +940 px jump at the debounce mark);
+ *    head removal  — removed > 0, added 0, nothing before it (the live-append
+ *                    trim at the window cap drops the list's FIRST children).
+ *  Any other shape (an insert in the middle, a prepend, a multi-node replace)
+ *  is bulk ⇒ 'debounce'. A batch made ONLY of head removals is a trim with
+ *  nothing new to fold ⇒ 'debounce' as before. Takes MutationRecords or plain
+ *  objects of the same shape (addedNodes/removedNodes with `length`,
+ *  previousSibling/nextSibling). PURE. */
+export function foldPassMode(records) {
+  if (!records || !records.length) return 'debounce';
+  let live = false;
+  for (const r of records) {
+    if (!r || r.type !== 'childList') return 'debounce';
+    const a = r.addedNodes?.length || 0, d = r.removedNodes?.length || 0;
+    if (a > 0 && d === 0 && r.nextSibling == null) { live = true; continue; }        // tail append
+    if (a === 1 && d === 1) { live = true; continue; }                               // 1:1 replace
+    if (a === 0 && d > 0 && r.previousSibling == null) continue;                     // head removal (trim)
+    return 'debounce';
+  }
+  return live ? 'raf' : 'debounce';
+}
+
 export { SUMMARY_ORDER };
