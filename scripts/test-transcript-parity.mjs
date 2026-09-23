@@ -152,8 +152,23 @@ const missing = await dm.transcriptOp('gapInfo', { backend: 'claude', sessionId:
 ok(missing.hasFile === false && missing.gap === null, 'missing transcript answers honestly (hasFile:false), not an error');
 
 os.homedir = origHomedir;
-try { const pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf-8')); if (pid) process.kill(pid); } catch { }
-fs.rmSync(home, { recursive: true, force: true });
-fs.rmSync(dataDir, { recursive: true, force: true });
+// Teardown: the daemon keeps writing its state files while it shuts down, so a
+// bare rmSync right after SIGTERM raced it (ENOTEMPTY on the scratch home —
+// three red fast gates on 2026-09-23 with every assertion green). Wait for the
+// pid to be gone first, then remove with retries.
+{
+  let pid = 0;
+  try { pid = parseInt(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf-8')) || 0; } catch { }
+  if (pid) {
+    try { process.kill(pid); } catch { }
+    const until = Date.now() + 5000;
+    while (Date.now() < until) {
+      try { process.kill(pid, 0); } catch { break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    try { process.kill(pid, 'SIGKILL'); } catch { }
+  }
+  for (const d of [home, dataDir]) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
