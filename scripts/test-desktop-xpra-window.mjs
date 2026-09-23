@@ -49,6 +49,7 @@ import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE } from '.
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const D = require('../src/desktop-display.js');
+const { fixtureLitter } = require('../src/fixture-guard.js');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 const bin = (n) => D.binOnPath(n, { env: process.env });
 const XPRA = bin('xpra'), XAUTH = bin('xauth'), XTERM = bin('xterm'), XCLIP = bin('xclip'), XDOTOOL = bin('xdotool');
@@ -63,7 +64,12 @@ console.log(`box: ${xpraVersion || 'xpra ?'}, xterm ${XTERM}, xclip ${XCLIP || '
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('deskxpra-smoke');
-const home = scratchHome('deskxpra-home', fs);
+const fakeHome = scratchHome('deskxpra-home', fs);
+// THE REAL HOME IS CENSUSED (scripts/test-fixture-isolation.mjs, census (c)): every suite that
+// carries a synthetic session id into a server's home snapshots ~/.claude/projects before and
+// proves it gained no FIXTURE entry after — src/fixture-guard.js owns the predicate.
+const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
+const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 let failed = 0, skipped = 0;
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } };
 const skip = (n, why) => { skipped++; console.log(`  ⚠ SKIP ${n}: ${why}`); };
@@ -78,16 +84,16 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
 // §5's agent lease needs a LIVE agent session: a fake claude (prints the init frame, then sleeps) under the real ws create
-const FAKE_BIN = path.join(home, 'fake-bin');
+const FAKE_BIN = path.join(fakeHome, 'fake-bin');
 const FAKE_CLAUDE = path.join(FAKE_BIN, 'claude');
 fs.mkdirSync(FAKE_BIN, { recursive: true });
 {
   const sid = fixtureSid('5a');
-  const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, cwd: home, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
+  const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, cwd: fakeHome, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
   fs.writeFileSync(FAKE_CLAUDE, `#!/bin/sh\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n' '${init}';; esac\nexec sleep 600\n`, { mode: 0o755 });
 }
 const agentTokens = [];
-const srvEnv = { ...process.env, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
+const srvEnv = { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
 let srv = null;
 const srvLog = [];
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'] }); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
@@ -132,7 +138,7 @@ const cleanup = () => {
   for (const w of worktrees) { try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch {} }
   try { fs.rmSync(scratch('deskxpra-chrome'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-x5ctl-home'), { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -174,7 +180,7 @@ const measurePane = async (p, appId) => {
   const coverage = main ? (main.w * main.h) / (st.pane.w * st.pane.h) : 0;
   return { ...r, pane: st.pane, main, coverage, els: st.els, title: st.title, status: st.status };
 };
-const typedFile = path.join(home, 'typed.txt');
+const typedFile = path.join(fakeHome, 'typed.txt');
 
 let p1 = await page(target);
 let appId = null, rec = null;
@@ -469,7 +475,7 @@ try {
   console.log('§5 x5 — one active viewer, two pages of different sizes on one xpra app');
   await p1.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`);
   await openPage(p1, `http://127.0.0.1:${PORT}`);
-  const x5File = path.join(home, 'x5.txt');
+  const x5File = path.join(fakeHome, 'x5.txt');
   // LOW-2 (2.369.156): the app's OWN title is HOSTILE — markup and quotes, which the overlay must show as TEXT, never as the launch label
   const X5_TITLE = 'vs-x5 <b>"t"</b> & <i>x</i>';
   const l5 = await p1.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ exec: XTERM, args: ['-T', X5_TITLE, '-geometry', '80x24', '-e', 'sh', '-c', `cat > ${x5File}`], label: 'vs-x5' }))} }).then((r) => r.json())`);
@@ -548,7 +554,7 @@ try {
       const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
       const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch {} });
       await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
-      wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: home, cols: 80, rows: 24, reqId: 'x5a', name: 'x5-agent' }));
+      wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: fakeHome, cols: 80, rows: 24, reqId: 'x5a', name: 'x5-agent' }));
       const created = await until(() => msgs.find((m) => m.type === 'created' && m.reqId === 'x5a'), 20000, 100);
       token = created && await until(() => { for (const f of fs.readdirSync(path.join(wt, 'data', 'session-meta'))) { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', f), 'utf8')); if (j.agentToken && j.webuiSessionId === created.sessionId) return j.agentToken; } catch {} } return null; }, 10000, 200);
       agentTokens.push(token);
@@ -653,6 +659,16 @@ try {
   console.error('  page console tail:', p1.logs.slice(-12));
 } finally {
   p1.close();
+}
+// ── THE REAL HOME IS UNTOUCHED (census (c)): not "no new entry" — this box runs real
+// sessions concurrently — but no FIXTURE entry, the class this suite could have written.
+{
+  const after = (() => { try { return fs.readdirSync(REAL_PROJECTS, { withFileTypes: true }); } catch { return []; } })();
+  const added = after.filter((d) => !realBefore.has(d.name))
+    .map((d) => ({ name: d.name, mtimeMs: (() => { try { return fs.statSync(path.join(REAL_PROJECTS, d.name)).mtimeMs; } catch { return Date.now(); } })() }));
+  const lit = fixtureLitter(added);
+  check(`the real ~/.claude/projects gained no fixture entry (${added.length} new entr${added.length === 1 ? 'y' : 'ies'} from concurrent real sessions, 0 of them fixtures)`,
+    lit.offenders.length === 0, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 console.log(failed ? `\n${failed} FAILED${skipped ? ` (${skipped} skipped)` : ''}` : `\ndesktop-xpra window test passed${skipped ? ` (${skipped} skipped)` : ''}`);
 process.exit(failed ? 1 : 0);
