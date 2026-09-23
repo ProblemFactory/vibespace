@@ -590,6 +590,241 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
   view.dispose();
 }
 
+console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps.zh.md §7.6): device px end to end, the min pane from size-constraints, the scaled-to-fit picture');
+{
+  // ── the PURE words ──
+  ok(P.METADATA_SUPPORTED.includes('size-constraints'), 'the hello asks for `size-constraints` — xpra 6.x\'s NAME for the X size hints (the server only sends the keys a client lists)');
+  // the root cause of the owner's cropped calculator: xpra filters window metadata by the client's list (measured on 6.5.3:
+  // the calculator's new-window carried has-alpha,title,class-instance,window-type,decorations — no hints — under the v21 list)
+  const serverMeta = { title: 'Calculator', 'size-constraints': { increment: [2, 2], 'minimum-size': [720, 1232] } };
+  const filtered = (list) => Object.fromEntries(Object.entries(serverMeta).filter(([k]) => list.includes(k)));
+  const OLD = P.METADATA_SUPPORTED.filter((k) => k !== 'size-constraints');
+  const fitNew = P.fitGeometry({ paneW: 1400, paneH: 800 }, P.sizeHintsOf(filtered(P.METADATA_SUPPORTED)));
+  const fitOld = P.fitGeometry({ paneW: 1400, paneH: 800 }, P.sizeHintsOf(filtered(OLD)));
+  ok(fitNew.h === 1232 && fitNew.w === 1400, `the fit NEVER asks for less than the app's minimum: a 1400x800 pane ⇒ ${fitNew.w}x${fitNew.h} (the minimum height 1232; the view scales the picture)`, fitNew);
+  ok(fitOld.h === 800, `CONTROL: under the pre-fix metadata list the hints never arrive and the same pane asks for ${fitOld.w}x${fitOld.h} — below the minimum, X clamps it and the pane crops the keypad (the owner's screenshot)`, fitOld);
+  ok(same(P.devicePane({ width: 640, height: 400 }, 2), { width: 1280, height: 800 }) && same(P.devicePane({ width: 641.4, height: 400 }, 1.25), { width: 801, height: 500 }) && same(P.devicePane({ width: 733, height: 700 }, 1.15), { width: 842, height: 805 }) && same(P.devicePane({ width: 640, height: 400 }, 'x'), { width: 640, height: 400 }), 'devicePane: CSS px × the ratio, rounded DOWN (2 ⇒ 1280x800; 641.4 × 1.25 = 801.75 ⇒ 801, never 802 — whose 641.6 CSS box overflows the pane; 700 × 1.15 = 804.99…98 ⇒ 805, float noise absorbed; a junk ratio ⇒ 1)');
+  ok(same(P.minPaneCss({ 'minimum-size': [720, 1232], increment: [2, 2] }, 2), { w: 360, h: 616 }), 'minPaneCss: the calculator at GDK_SCALE=2 (minimum 720x1232 device px) on a 2x screen needs a 360x616 CSS pane');
+  ok(same(P.minPaneCss({ 'minimum-size': [721, 1233] }, 2), { w: 361, h: 617 }), 'minPaneCss rounds UP (721x1233 at 2 ⇒ 361x617 — never a pane half a pixel short)');
+  ok(same(P.minPaneCss({ 'base-size': [4, 4], increment: [6, 13] }, 1), { w: 4, h: 4 }) && same(P.minPaneCss({ 'base-size': [4, 4], increment: [6, 13], 'minimum-size': [10, 17] }, 1), { w: 10, h: 17 }), 'minPaneCss: the minimum wins, an unset minimum falls back to the base (ICCCM) — xterm\'s 10x17');
+  ok(P.minPaneCss(null, 2) === null && P.minPaneCss({}, 2) === null && P.minPaneCss({ increment: [6, 13] }, 2) === null && P.minPaneCss({ 'minimum-size': [0, 5] }, 1) === null, 'missing hints (or neither size, or a zero size) ⇒ NO minimum');
+  let everyRatio = true; const bad = [];
+  for (const r of [1, 1.1, 1.25, 1.333, 1.5, 1.75, 2, 2.5, 3]) for (const [mw, mh] of [[720, 1232], [721, 1233], [10, 17], [333, 555]]) {
+    const m = P.minPaneCss({ 'minimum-size': [mw, mh] }, r); const d = P.devicePane({ width: m.w, height: m.h }, r);
+    const g = P.fitGeometry({ paneW: d.width, paneH: d.height }, { 'minimum-size': [mw, mh], increment: [3, 7], 'base-size': [1, 1] });
+    if (d.width < mw || d.height < mh || g.w > d.width || g.h > d.height) { everyRatio = false; bad.push({ r, mw, mh, d, g }); }
+  }
+  ok(everyRatio, 'for 9 ratios × 4 minimums: a pane of exactly minPaneCss holds the minimum in device px AND the increment-snapped fit never exceeds it (never cropped at the clamp)', bad.slice(0, 3));
+
+  // ── the client: device px out, the display's dpi (never 96 × ratio), the main's constraints named ──
+  const src = read('src/lib/xpra-client.js');
+  const ratioLine = "  const ratioNow = () => P.pixelRatioOf(typeof ratio === 'function' ? ratio() : ratio);";
+  ok(src.split(ratioLine).length === 2, 'the ratio is read in ONE place in xpra-client.js (the control patches exactly it)');
+  const mutFile = path.join(repo, 'src/lib', `vs-xc-dpr-${process.pid}.js`);
+  fs.writeFileSync(mutFile, src.replace(ratioLine, '  const ratioNow = () => 1; // pre-fix: CSS px are X px'));
+  const runDpr = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const cons = [];
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 700, height: 450 }, ratio: () => 2, dpi: 96, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, on: { constraints: (h) => cons.push(h) } });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 720, 1232, { title: 'Calculator', 'size-constraints': { increment: [2, 2], 'minimum-size': [720, 1232] }, 'window-type': ['NORMAL'] }]);
+    c.resize(800, 700);
+    return { c, w, cons, hello: w.sent('hello')[0][1], map: w.sent('map-window')[0], disp: w.sent('display-configure').slice(-1)[0], cfg: w.sent('configure-window').slice(-1)[0] };
+  };
+  try {
+    const A = await runDpr(C);
+    ok(same(A.hello.display.desktop_size, [1400, 900]) && A.hello.screen_sizes[0][1] === 1400 && A.hello.screen_sizes[0][2] === 900, `ratio 2: the hello's desktop size is the pane in DEVICE px (700x450 CSS ⇒ ${A.hello.display.desktop_size.join('x')})`);
+    ok(A.hello.dpi.x === 96 && A.disp[1].dpi.x === 96, 'the hello and every display-configure carry the DISPLAY\'s font dpi (96 at GDK_SCALE=2) — never 96 × the ratio (xpra would rewrite Xft.dpi to 192: 4x text, measured)');
+    ok(same(A.map.slice(2, 6), [0, 0, 1400, 1232]), `the main window is mapped at the device-px fit, the height held at its minimum 1232 (the 900 px pane is shorter — the view scales): ${A.map.slice(2, 6).join(',')}`);
+    ok(same(A.disp[1]['desktop-size'], [1600, 1400]) && same(A.cfg.slice(2, 6), [0, 0, 1600, 1400]), `resize(800x700 CSS) ⇒ display-configure 1600x1400 and the main refitted 1600x1400 at 0,0 (device px, ≥ the minimum): ${A.disp[1]['desktop-size']} / ${A.cfg.slice(2, 6)}`);
+    ok(A.cons.length === 1 && same(A.cons[0], { increment: [2, 2], 'minimum-size': [720, 1232] }) && same(A.c.mainConstraints, A.cons[0]), 'on.constraints names the MAIN window\'s size constraints once (and mainConstraints reads them)', A.cons);
+    A.w.feed(['window-metadata', 1, { 'size-constraints': { increment: [2, 2], 'minimum-size': [800, 1300] } }]);
+    ok(A.cons.length === 2 && A.cons[1]['minimum-size'][1] === 1300, 'a size-constraints change on the main window is announced again (the window re-clamps)');
+    A.w.feed(['window-metadata', 1, { title: 'Calculator — sci' }]);
+    ok(A.cons.length === 2, 'a metadata change that is not the constraints announces nothing');
+    A.w.feed(['lost-window', 1]);
+    ok(A.cons.length === 3 && A.cons[2] === null, 'the main window gone ⇒ constraints null (no minimum any more)');
+    A.c.close();
+    const M = await runDpr(await import(mutFile));
+    ok(same(M.hello.display.desktop_size, [700, 450]) && M.disp[1]['desktop-size'][0] === 800, `CONTROL: the pre-fix client (CSS px are X px) says ${M.hello.display.desktop_size.join('x')} / ${M.disp[1]['desktop-size'].join('x')} — a 96-dpi bitmap the 2x screen blows up (the owner's "looks like VNC")`);
+    M.c.close();
+  } finally { try { fs.unlinkSync(mutFile); } catch {} }
+
+  // ── the view: device-px canvases in CSS boxes, the pointer ×ratio, the minimum out, scaled-to-fit (never cropped) ──
+  const vsrc = read('src/lib/xpra-view.js');
+  const vLine = "  const ratio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);";
+  ok(vsrc.split(vLine).length === 2, 'the view reads the ratio in ONE place (the control patches exactly it)');
+  const runView = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const host = new El('div'); const mins = [];
+    const view = mod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 2, dpi: 96, onMinSize: (m) => mins.push(m) });
+    const pane = view.pane; pane.clientWidth = 700; pane.clientHeight = 450; pane.rect = { left: 10, top: 20 };
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 720, 1232, { title: 'Calculator', 'size-constraints': { increment: [2, 2], 'minimum-size': [720, 1232] }, 'window-type': ['NORMAL'] }]);
+    const winEl = view.stage.children[0];
+    return { view, w, mins, winEl, pane };
+  };
+  const vMut = path.join(repo, 'src/lib', `vs-xv-dpr-${process.pid}.js`);
+  fs.writeFileSync(vMut, vsrc.replace(vLine, '  const ratio = () => 1; // pre-fix'));
+  try {
+    const A = await runView(V);
+    const cv = A.winEl.children[0];
+    ok(cv.width === 1400 && cv.height === 1232 && A.winEl.style.width === '700px' && A.winEl.style.height === '616px' && cv.style.width === '700px' && cv.style.height === '616px', `the canvas backing store is DEVICE px (${cv.width}x${cv.height}) in a CSS box of device ÷ 2 (${A.winEl.style.width} × ${A.winEl.style.height}) — 1:1 on the 2x screen, crisp`);
+    ok(same(A.mins, [{ w: 360, h: 616 }]) && same(A.view.minSize, { w: 360, h: 616 }), 'onMinSize hands the window the smallest pane in CSS px (360x616)', A.mins);
+    const s = A.view.stageScale;
+    ok(Math.abs(s - 450 / 616) < 1e-9 && A.view.fitBadge.style.display === '' && A.view.fitBadge.textContent === 'Scaled to fit — the app needs at least 360×616', `a 450 px tall pane under a 616 px minimum: the ACTIVE picture is scaled to fit (${s.toFixed(3)}), never cropped, and the badge says why ("${A.view.fitBadge.textContent}")`);
+    A.w.posted.length = 0;
+    const ox = A.view.stageOffset.x;
+    A.pane.fire('pointerdown', { clientX: 10 + ox + 100 * s, clientY: 20 + 200 * s, button: 0, pointerId: 1 });
+    const ba = A.w.all.slice(-1)[0];
+    ok(ba[0] === 'button-action' && Math.abs(ba[4][0] - 200) <= 1 && Math.abs(ba[4][1] - 400) <= 1, `the pointer is mapped through the stage's fit AND the ratio: CSS (100,200) on the scaled stage ⇒ device (${ba[4][0]},${ba[4][1]}) ≈ (200,400)`, ba);
+    A.pane.clientWidth = 800; A.pane.clientHeight = 700;
+    observers.filter((o) => o.el === A.pane && !o.off).forEach((o) => o.cb());
+    await until(() => (A.view.stageScale === 1 ? true : null), 1000, 10);
+    ok(A.view.stageScale === 1 && A.view.fitBadge.style.display === 'none' && A.view.stage.style.transform === '', 'a pane that holds the minimum: identity stage, no badge, the app at 0,0 (its increment leftover right/bottom, as before)');
+    A.view.dispose();
+    const M = await runView(await import(vMut));
+    const mcv = M.winEl.children[0];
+    ok(!(mcv.width === 1400 && M.winEl.style.width === '700px'), `CONTROL: the pre-fix view (ratio 1) draws the canvas at CSS size = backing store (${mcv.width} px wide in a ${M.winEl.style.width} box, the hello ${M.w.sent('hello')[0][1].display.desktop_size.join('x')}) — the 96-dpi bitmap upscaled by the 2x screen`);
+    M.view.dispose();
+  } finally { try { fs.unlinkSync(vMut); } catch {} }
+}
+
+console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 1:1, the display CONTAINS the fitted app, an active scale only in the minimum case');
+{
+  // a PRE-FIX trio: copies of proto/client/view (imports rewired to each other) with named levers pulled back
+  const mkTrio = async (tag, { proto = [], client = [], view = [] } = {}) => {
+    const n = (f) => `vs-${f}-${tag}-${process.pid}.js`;
+    const edit = (src, subs, file) => { for (const [from, to] of subs) { if (src.split(from).length !== 2) throw new Error(`${file}: lever not spelled exactly once: ${from.slice(0, 80)}`); src = src.replace(from, to); } return src; };
+    const files = [
+      [n('xp'), edit(read('src/lib/xpra-proto.js'), proto, 'proto')],
+      [n('xc'), edit(read('src/lib/xpra-client.js'), client, 'client').replace("from './xpra-proto.js'", `from './${n('xp')}'`)],
+      [n('xv'), edit(read('src/lib/xpra-view.js'), view, 'view').replace("from './xpra-client.js'", `from './${n('xc')}'`).replace("from './xpra-proto.js'", `from './${n('xp')}'`)],
+    ];
+    for (const [f, src] of files) fs.writeFileSync(path.join(repo, 'src/lib', f), src);
+    const cleanup = () => { for (const [f] of files) { try { fs.unlinkSync(path.join(repo, 'src/lib', f)); } catch {} } };
+    try { return { P: await import(`../src/lib/${n('xp')}`), C: await import(`../src/lib/${n('xc')}`), V: await import(`../src/lib/${n('xv')}`), cleanup }; } catch (e) { cleanup(); throw e; }
+  };
+  const ROUND = ['  return { width: Math.max(1, Math.floor((Number(width) || 1) * r + 1e-6)), height: Math.max(1, Math.floor((Number(height) || 1) * r + 1e-6)) };', '  return { width: Math.max(1, Math.round((Number(width) || 1) * r)), height: Math.max(1, Math.round((Number(height) || 1) * r)) };'];
+  const NO_SLACK = ['  const FIT_SLACK_CSS = 1;', '  const FIT_SLACK_CSS = 0;'];
+  const PANE_DISPLAY = ['    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'];
+  const ALL_WINDOWS = ["      if (mode === 'watch') {\n        for (const w of client.windows.values())", "      if (true) {\n        for (const w of client.windows.values())"];
+
+  // ── F1 (major): a fractional ratio — the device pane never overflows the pane ⇒ the stage stays identity, the picture 1:1 ──
+  let worst = null;
+  for (const r of [1, 1.1, 1.25, 1.333, 1.5, 1.75, 2, 2.25, 2.5, 3]) for (let w = 200; w <= 1400; w += 1) { const d = P.devicePane({ width: w, height: w }, r); const over = d.width / r - w; if (over > 1e-9 || w - d.width / r >= 1 / r) { worst = { r, w, d: d.width, over }; break; } }
+  ok(P.gridStep(2) === 2 && P.gridStep(1) === 1 && P.gridStep(1.5) === 3 && P.gridStep(1.25) === 5 && P.gridStep(1.75) === 7 && P.gridStep(1.1) === 11 && P.gridStep(1.3337) === 1, 'gridStep: the smallest device step whose CSS size is a WHOLE CSS px (2 ⇒ 2 — an odd width at DPR 2 is 697.5 CSS, measured resampled —, 1.5 ⇒ 3, 1.25 ⇒ 5, 1.75 ⇒ 7, 1.1 ⇒ 11; none ≤ 16 ⇒ 1)');
+  let exact = true; const inexact = [];
+  for (const r of [1, 1.1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3]) for (let n = 1; n <= 2000; n += 1) { const b = P.backingSize(n, r); const u = b / r; if (b < n || b - n >= P.gridStep(r) || Math.abs(u - Math.round(u)) > 1e-6) { exact = false; inexact.push({ r, n, b }); break; } }
+  ok(exact, 'backingSize: for 9 ratios × every size 1..2000 the backing is ≥ the window, less than one step larger, and its CSS box (backing ÷ ratio) is a whole CSS px', inexact.slice(0, 3));
+  const cssOf = (n, r) => n / r;
+  ok(!Number.isInteger(cssOf(1346, 1.5)) && !Number.isInteger(cssOf(1395, 2)) && P.backingSize(1395, 2) === 1396 && P.backingSize(1346, 1.5) === 1347, `CONTROL: the unpadded boxes are not whole CSS px — 1346 at 1.5 = ${cssOf(1346, 1.5).toFixed(3)} CSS, 1395 at 2 = ${cssOf(1395, 2)} CSS (measured: resampled, 1.5 % / 18.6 % of the pixels off); padded: 1347 ⇒ 898, 1396 ⇒ 698`);
+  ok(worst === null, 'for 10 ratios × every pane width 200..1400: the device pane\'s CSS box (device ÷ ratio) is never larger than the pane and less than one device px short of it', worst);
+  const preRound = (w, r) => Math.round(w * r) / r - w;
+  ok(preRound(733, 1.5) > 0.3 && preRound(898, 1.25) > 0.3 && preRound(898, 1.75) > 0.2, `CONTROL: the pre-fix rounding (to the nearest) makes a CSS box LARGER than the pane — 733 × 1.5 ⇒ 1100 device ⇒ ${(1100 / 1.5).toFixed(2)} CSS, 898 × 1.25 ⇒ 1123 ⇒ ${(1123 / 1.25).toFixed(1)}, 898 × 1.75 ⇒ 1572 ⇒ ${(1572 / 1.75).toFixed(2)} (the verifier's probe3 §B)`);
+  const runFrac = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const host = new El('div');
+    const view = mod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 1.5, dpi: 144 });
+    view.pane.clientWidth = 898; view.pane.clientHeight = 733;
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    // GNOME Calculator at 1.5x (GDK_SCALE 1, 144 dpi): minimum 370x616 device px (measured), no increment
+    w.feed(['new-window', 1, 0, 0, 370, 616, { title: 'Calculator', 'size-constraints': { 'minimum-size': [370, 616] }, 'window-type': ['NORMAL'] }]);
+    await sleep(5);
+    return { view, map: w.sent('map-window')[0] };
+  };
+  {
+    const A = await runFrac(V);
+    const fcv = A.view.stage.children[0].children[0];
+    ok(fcv.width === 1347 && fcv.height === 1101 && fcv.style.width === '898px' && fcv.style.height === '734px', `…and its canvas backing is the window rounded UP to the ratio's grid step (1347x1099 ⇒ ${fcv.width}x${fcv.height}, multiples of 3 at 1.5) in a CSS box of ${fcv.style.width} × ${fcv.style.height} — whole CSS px, so the browser draws it 1:1 (1347 / 1.5 = 898 exactly; the bare 1346 / 1.5 = 897.33… CSS is snapped and RESAMPLED — measured 1.5 % of the pixels off)`, { w: fcv.width, h: fcv.height, cw: fcv.style.width, ch: fcv.style.height });
+    ok(same(A.map.slice(4, 6), [1347, 1099]) && A.view.stageScale === 1 && A.view.stage.style.transform === '' && A.view.fitBadge.style.display === 'none', `DPR 1.5, an 898x733 pane holding the calculator: the app is fitted to ${A.map.slice(4, 6).join('x')} device px (CSS ${(A.map[4] / 1.5).toFixed(2)} × ${(A.map[5] / 1.5).toFixed(2)} ≤ the pane) and the stage stays IDENTITY — no transform, no badge (the picture is the canvas 1:1)`, { map: A.map, scale: A.view.stageScale, t: A.view.stage.style.transform });
+    A.view.dispose();
+    const T = await mkTrio('frac', { proto: [ROUND], view: [NO_SLACK] });
+    try {
+      const B = await runFrac(T.V);
+      ok(same(B.map.slice(4, 6), [1347, 1100]) && B.view.stageScale < 1 && B.view.fitBadge.style.display === '', `CONTROL: the pre-fix rounding (and no slack) fits 1347x1100 and the stage takes scale(${B.view.stageScale.toFixed(6)}) with the "Scaled to fit" badge on a pane that HOLDS the app — the resampled, blurred picture the verifier measured (4.18 % of the pixels off)`, { map: B.map, scale: B.view.stageScale });
+      B.view.dispose();
+    } finally { T.cleanup(); }
+  }
+
+  // ── F2 (major): the X display CONTAINS the window it places — a phone pane smaller than the app's minimum ──
+  const runPhone = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 320, height: 491 }, ratio: () => 2, dpi: 96, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 740, 1232, { title: 'Calculator', 'size-constraints': { increment: [2, 2], 'minimum-size': [740, 1232] }, 'window-type': ['NORMAL'] }]);
+    const seq = w.all.map((p) => p[0]);
+    const disp = () => w.sent('display-configure').map((p) => p[1]['desktop-size']);
+    const out = { c, w, hello: w.sent('hello')[0][1].display.desktop_size, map: w.sent('map-window')[0].slice(2, 6), dispAtMap: disp().slice(-1)[0] || null, dispBeforeMap: seq.lastIndexOf('display-configure') >= 0 && seq.lastIndexOf('display-configure') < seq.indexOf('map-window') };
+    c.resize(800, 700); out.big = disp().slice(-1)[0];
+    c.resize(320, 491); out.back = disp().slice(-1)[0];
+    w.feed(['lost-window', 1]); out.gone = disp().slice(-1)[0];
+    return out;
+  };
+  {
+    const A = await runPhone(C);
+    ok(same(A.hello, [640, 982]) && same(A.map, [0, 0, 740, 1232]) && same(A.dispAtMap, [740, 1232]) && A.dispBeforeMap, `a 320x491 phone pane @2 (640x982 device) under a calculator whose minimum is 740x1232: the display is GROWN to ${A.dispAtMap && A.dispAtMap.join('x')} BEFORE the window is mapped at ${A.map.slice(2).join('x')} — X never clamps the pointer at the pane's last row (the verifier: '0' landed on row 981)`, A);
+    ok(same(A.big, [1600, 1400]) && same(A.back, [740, 1232]) && same(A.gone, [640, 982]), `the display follows: a pane that holds the app ⇒ the pane (${A.big}); small again ⇒ the app's minimum (${A.back}); no main window ⇒ the pane (${A.gone})`, A);
+    A.c.close();
+    const T = await mkTrio('disp', { client: [PANE_DISPLAY] });
+    try {
+      const B = await runPhone(T.C);
+      ok(!B.dispAtMap || B.dispAtMap[1] < 1232, `CONTROL: the pre-fix display is the pane (${B.dispAtMap ? B.dispAtMap.join('x') : 'the hello\'s 640x982'}) under a 740x1232 window — the app's lower rows and right column are outside X's screen, unclickable`, B.dispAtMap);
+      B.c.close();
+    } finally { T.cleanup(); }
+  }
+
+  // ── low: an ACTIVE pane scales ONLY in the minimum case — an oversized dialog never zooms the whole picture ──
+  const runDialog = async (mod) => {
+    FakeWorker.instances.length = 0;
+    const host = new El('div');
+    const view = mod.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 1, dpi: 96 });
+    view.pane.clientWidth = 800; view.pane.clientHeight = 500;
+    await view.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 1, 0, 0, 400, 300, { title: 'Editor', 'size-constraints': { 'minimum-size': [200, 150] }, 'window-type': ['NORMAL'] }]);
+    await sleep(5);
+    const before = view.stageScale;
+    w.feed(['new-window', 2, 50, 40, 1000, 700, { title: 'Preferences', 'transient-for': 1, 'window-type': ['DIALOG'] }]);
+    await sleep(5);
+    return { view, before, after: view.stageScale, badge: view.fitBadge.style.display, t: view.stage.style.transform };
+  };
+  {
+    const A = await runDialog(V);
+    ok(A.before === 1 && A.after === 1 && A.badge === 'none' && A.t === '', `ACTIVE, the main window fits the pane: a 1000x700 dialog larger than the 800x500 pane leaves the stage at identity (${A.after}) — no mid-session zoom jump, no silent scale`, { before: A.before, after: A.after, badge: A.badge, t: A.t });
+    A.view.setMode('watch'); await sleep(5);
+    ok(A.view.stageScale < 1, `…while WATCH still contains every non-popup window (the dialog included: scale ${A.view.stageScale.toFixed(3)}) — its rule is unchanged`);
+    A.view.dispose();
+    const T = await mkTrio('dlg', { view: [ALL_WINDOWS] });
+    try {
+      const B = await runDialog(T.V);
+      ok(B.after < 1, `CONTROL: the r1 rule (every non-popup window, active too) zooms the whole picture to ${B.after.toFixed(3)} when the dialog opens — a mid-session jump whose badge (${B.badge === 'none' ? 'none' : 'shown'}) could only name the MAIN window's minimum, which the pane holds (the verifier's low finding)`, { after: B.after, badge: B.badge, t: B.t });
+      B.view.dispose();
+    } finally { T.cleanup(); }
+  }
+}
+
+{
+  // the launch half: the launcher sends THIS client's devicePixelRatio as `dpr` (clamped to the route's 1..3)
+  const L = await import('../src/lib/desktop-app-launcher.js');
+  ok(L.launchDpr(2) === 2 && L.launchDpr(1.25) === 1.25 && L.launchDpr(0.9) === 1 && L.launchDpr(4) === 3 && L.launchDpr('x') === 1, 'launchDpr: the page\'s devicePixelRatio, clamped to 1..3 (a zoomed-out page launches at 1)');
+  ok(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\) \}\)/.test(read('src/lib/desktop-app-launcher.js')), 'WIRING PIN: every launch POST carries `dpr: launchDpr()`');
+}
+
 console.log('§4 the census (grep over src/lib + style.css)');
 {
   const lib = path.join(repo, 'src/lib');

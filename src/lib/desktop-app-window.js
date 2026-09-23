@@ -53,8 +53,20 @@
 // broadcast echo) and POSTs /viewers/takeover; the answer or the broadcast
 // corrects it. The pane names itself with a stable PUBLIC pane key (`?pane=`)
 // beside the per-socket secret viewer id; the broadcast only ever says panes.
+//
+// HiDPI + THE APP'S MINIMUM (2.369.158, docs/design-desktop-apps.zh.md §7.6;
+// the owner's 2026-09-23 report on a devicePixelRatio-2 screen): the xpra view
+// renders the app at the record's SCALE (fixed at launch by `desktop.appScale`
+// — the bar's `2×` chip says which; a change needs a relaunch) in device px,
+// with the record's font `dpi` as the client's dpi. The app's minimum (its size
+// constraints, via the view's `onMinSize`) becomes THIS window's minimum —
+// pane + this window's own chrome (title bar, status strip), measured in
+// viewport px and turned into layout px under the UI scale — through
+// WindowManager.setMinSize: the resize drag stops there and a smaller size is
+// raised. On a phone the view scales the picture to fit instead.
 import { t } from './i18n.js';
-import { escHtml, fetchJson, showToast } from './utils.js';
+import { escHtml, fetchJson, showToast, uiScale } from './utils.js';
+import { windowMinForPane } from './window-min-size.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
 import { createXpraView } from './xpra-view.js';
@@ -65,6 +77,12 @@ const WATCH_HINT_EVERY_MS = 8000;
 
 const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/>');
 
+/** HiDPI (2.369.158): the scale chip — "2×" / "1.5×" for an xpra record, '' elsewhere (a whole-display rung is CSS px). */
+export function scaleChipText(rec) {
+  if (!rec || rec.stream !== 'xpra') return '';
+  const s = Number(rec.scale);
+  return Number.isFinite(s) && s > 0 ? `${s}×` : '';
+}
 /** The status-chip text for a record: "vnc-display (xpra not on PATH)". */
 export function backendChipText(rec) {
   if (!rec || !rec.backend) return '';
@@ -177,10 +195,11 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const ensureView = (kind) => {
     if (view) return view;
     view = kind === 'xpra'
-      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon })
+      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96) })
       : createVncView(winInfo.content, viewOpts());
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
+    for (const el of [view.bar, view.pane]) if (el && minRo) minRo.observe(el); // the status strip's height is chrome; the pane shown again re-measures (the RFB view has no pane)
     for (const el of controls) view.addControl(el);
     view.mount.appendChild(blockedEl); // x5: the overlay of a blocked pane (hidden while active / watching)
     // in Watch a click on the picture is a hint, never input (the view is view-only; the bridge would drop it anyway)
@@ -194,6 +213,27 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     applyViewOnly();
     return view;
   };
+
+  // ── the app's minimum → this window's minimum (pane + chrome, viewport px → layout px) ──
+  // Re-measured whenever it can change (r2, the verifier: a one-time snapshot went stale): the chrome's own size
+  // (the title bar / the status strip — the UI font scale, a wrapping strip), the window becoming visible again
+  // (a background tab, another desktop, a minimize: display:none measures nothing — a ResizeObserver fires when
+  // it is laid out again, where the old bounded retry gave up after 20 s), and the UI scale (layout = viewport ÷ it).
+  let minPane = null, minRaf = 0;
+  function applyMinSize(m) { minPane = m || null; applyMinNow(); }
+  function applyMinNow() {
+    if (!minPane) { app.wm.setMinSize(winInfo.id, null); winInfo._desktopMinPane = null; return; }
+    const paneEl = view && view.pane;
+    const er = winInfo.element.getBoundingClientRect(), pr = paneEl ? paneEl.getBoundingClientRect() : null;
+    if (!pr || !(er.width > 0) || !(pr.width > 0)) return; // hidden: the observer below re-runs this once it is laid out
+    const min = windowMinForPane(minPane, { w: er.width - pr.width, h: er.height - pr.height }, uiScale());
+    winInfo._desktopMinPane = { ...minPane }; // the raw handle the heavy suite reads
+    app.wm.setMinSize(winInfo.id, min);
+  }
+  const scheduleMin = () => { if (!minPane || minRaf) return; minRaf = requestAnimationFrame(() => { minRaf = 0; applyMinNow(); }); };
+  const minRo = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleMin) : null;
+  minRo?.observe(winInfo.element); minRo?.observe(winInfo.titleBar);
+  window.addEventListener('vs:ui-scale', scheduleMin, { signal: winInfo._listenerCtl?.signal });
 
   // ── x5: the BLOCKED overlay (the terminal's "Resume here", house classes) ──
   const blockedEl = document.createElement('div'); blockedEl.className = 'term-blocked-overlay desktop-app-blocked'; blockedEl.style.display = 'none';
@@ -244,6 +284,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
 
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
   const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend';
+  const scaleChip = document.createElement('span'); scaleChip.className = 'desktop-app-chip desktop-app-chip-scale'; // HiDPI: the app's scale, fixed at launch
+  scaleChip.title = t('The scale this app was started at (Settings → Desktop app scale). A change takes effect when the app is launched again.');
   const fitChip = document.createElement('span'); fitChip.className = 'desktop-app-chip desktop-app-chip-fit'; // P8-2 x4: names a display that cannot follow the window
   fitChip.title = t('This rung’s display cannot resize: the app is fitted to the fixed framebuffer and scaled in the browser. With TigerVNC (Xvnc) the display follows the window.');
   const liveChip = document.createElement('span'); liveChip.className = 'desktop-app-chip desktop-app-chip-live';
@@ -259,7 +301,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const modeBadge = document.createElement('span'); modeBadge.className = 'browser-live-mode';
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over');
   const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand back to the agent');
-  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, backendChip, fitChip, liveChip, idleChip, keepBtn, stopBtn];
+  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn];
   // the badge's words come from the PURE table; t() needs the literal keys below to be extractable
   void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause')];
   const renderLease = () => {
@@ -310,6 +352,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     blockedTitle.textContent = label; // x5: the overlay names the app (textContent — the title is peer-controlled)
     backendChip.textContent = backendChipText(rec);
     backendChip.title = rec.fallbackWhy ? t('Backend: {backend} — fell back because {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('Backend: {backend}', { backend: rec.backend || '' });
+    if (rec.stream === 'xpra') backendChip.title += ' — ' + t('xpra streams each app window as pixels; text stays crisp at your screen’s scale');
+    const sc = scaleChipText(rec); scaleChip.textContent = sc; scaleChip.style.display = sc ? '' : 'none';
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
     const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none';
@@ -358,7 +402,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   app.ws.onStateChange(onWs);
   const tick = setInterval(() => { if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; } }, 1000);
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); });
-  winInfo.onClose = () => view?.dispose();
+  winInfo.onMoved = () => view?.resnap?.(); // a moved window puts the picture back on the device-pixel grid (r2)
+  winInfo.onClose = () => { minRo?.disconnect(); if (minRaf) cancelAnimationFrame(minRaf); view?.dispose(); };
 
   renderLease();
   refetchLease();

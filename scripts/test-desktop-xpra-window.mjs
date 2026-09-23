@@ -138,6 +138,8 @@ const cleanup = () => {
   for (const w of worktrees) { try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch {} }
   try { fs.rmSync(scratch('deskxpra-chrome'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-x5ctl-home'), { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(scratch('deskxpra-hidpictl-home'), { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(scratch('deskxpra-r2ctl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
@@ -644,6 +646,411 @@ try {
     }
     try { sc.kill('SIGKILL'); } catch {}
   }
+
+  // ── (6) HiDPI + THE APP'S MINIMUM (2.369.158, docs/design-desktop-apps.zh.md §7.6; the owner on a devicePixelRatio-2
+  // screen with GNOME Calculator: "the DPI is way too low", the keypad's lower rows cut off, "this still looks like VNC"):
+  // a headless page at deviceScaleFactor 2 on OUR server, and the SAME legs on a CONTROL copy of this tree carrying the
+  // pre-fix behaviour (the view's ratio pinned to 1, the app's scale pinned to 1, `size-constraints` not asked for) ──
+  // the raw handles + the pixel-for-pixel identity measure §6 and §7 share (r2)
+  const R2 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const v = w._desktopAppView; if (!v || !v.pane) return null; const pr = v.pane.getBoundingClientRect(); const c = v.client; const main = c && c.windows.get(c.mainWid); const cv = v.pane.querySelector('.xpra-win-main canvas'); const cr = cv ? cv.getBoundingClientRect() : null; const er = w.element.getBoundingClientRect(); const ws = app.wm.workspace.getBoundingClientRect(); return { status: v.status.textContent, mode: v.mode, pane: { x: pr.x, y: pr.y, w: pr.width, h: pr.height }, main: main ? { x: main.x, y: main.y, w: main.w, h: main.h } : null, ratio: v.ratio, minSize: v.minSize, scale: v.stageScale, offset: v.stageOffset, transform: v.stage.style.transform, badge: v.fitBadge ? { shown: v.fitBadge.style.display !== 'none', text: v.fitBadge.textContent } : { shown: false, text: '' }, canvas: cv ? { w: cv.width, h: cv.height, rw: cr.width, rh: cr.height, rx: cr.x, ry: cr.y } : null, win: { x: er.x, y: er.y, w: er.width, h: er.height }, workspace: { x: ws.x, y: ws.y, w: ws.width, h: ws.height }, constraints: c ? c.mainConstraints : null, display: c ? c.display : null, lastReceived: c ? c.lastReceived : null }; })()`;
+  // the digit keys of GNOME Calculator's basic keypad, found in the canvas BACKING (device px): dark glyph components on the digit-key grey
+  const DIGITS7 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const cv = w._desktopAppView.pane.querySelector('.xpra-win-main canvas'); const main = w._desktopAppView.client.windows.get(w._desktopAppView.client.mainWid); const W = Math.min(cv.width, main.w), H = Math.min(cv.height, main.h); const d = cv.getContext('2d').getImageData(0, 0, W, H).data; const g = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) g[i] = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3; const seen = new Uint8Array(W * H); const blobs = []; const y0 = Math.floor(H * 0.45); const st = []; for (let y = y0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (seen[i] || g[i] >= 110) continue; let x0 = x, x1 = x, ya = y, yb = y, n = 0; st.push(i); seen[i] = 1; while (st.length) { const j = st.pop(); n++; const jx = j % W, jy = (j - jx) / W; if (jx < x0) x0 = jx; if (jx > x1) x1 = jx; if (jy < ya) ya = jy; if (jy > yb) yb = jy; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = jx + dx, ny = jy + dy; if (nx < 0 || ny < y0 || nx >= W || ny >= H) continue; const k = ny * W + nx; if (!seen[k] && g[k] < 110) { seen[k] = 1; st.push(k); } } } const bh = yb - ya + 1, bw = x1 - x0 + 1; if (bh < H * 0.008 || bh > H * 0.06 || bw > W * 0.08 || n < 20) continue; const cy = Math.round((ya + yb) / 2); const L = g[cy * W + Math.max(0, x0 - Math.round(bh * 0.6))], R = g[cy * W + Math.min(W - 1, x1 + Math.round(bh * 0.6))]; if (!(L >= 196 && L <= 216 && R >= 196 && R <= 216)) continue; blobs.push({ cx: (x0 + x1) / 2, cy: (ya + yb) / 2, h: bh }); } const rows = []; for (const b of blobs.sort((a, b) => a.cy - b.cy)) { const row = rows.find((r) => Math.abs(r[0].cy - b.cy) < b.h); if (row) row.push(b); else rows.push([b]); } for (const r of rows) r.sort((a, b) => a.cx - b.cx); return rows.filter((r) => r.length === 3 || r.length === 1).slice(-4).map((r) => r.map((b) => ({ cx: b.cx, cy: b.cy }))); })()`;
+  const copyBack7 = async (p, id, prev) => {
+    await p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });
+    await p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+    await p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+    await p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 });
+    return (await until(async () => { const v = await p.evalJs(R2(id)); return v && v.lastReceived && v.lastReceived !== prev ? v.lastReceived : null; }, 6000, 200)) || '';
+  };
+  /** every digit key clicked through the page (the stage's offset + scale, the ratio), then the calculator's own copy read back */
+  const allDigits7 = async (p, id) => {
+    const s = await p.evalJs(R2(id));
+    const rows = await p.evalJs(DIGITS7(id));
+    const order = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ['0']];
+    let want = '';
+    if (rows.length === 4) for (let i = 0; i < 4; i++) for (let j = 0; j < order[i].length; j++) { const q = rows[i][j]; if (!q) continue; await trustedClickAt(p, s.pane.x + s.offset.x + (q.cx / s.ratio) * s.scale, s.pane.y + s.offset.y + (q.cy / s.ratio) * s.scale); await sleep(400); want += order[i][j]; }
+    const got = await copyBack7(p, id, s.lastReceived);
+    await p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    return { want, got, rows: rows.length };
+  };
+  /** the canvas vs the screen, pixel for pixel: a FULL screenshot (device px — no clip resampling), the canvas read before and
+   *  after it (a pixel xpra repainted in between is not counted), compared at the canvas's device origin (best of ±1 px) */
+  const identity7 = async (p, id, dpr) => {
+    const v = await p.evalJs(R2(id));
+    const cw = Math.min(v.canvas.w, v.main.w, Math.floor(v.pane.w * dpr)) - 4, chh = Math.min(v.canvas.h, v.main.h, Math.floor(v.pane.h * dpr)) - 4;
+    const px = (x, y, w, h) => p.evalJs(`(() => { const ww = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const cv = ww._desktopAppView.pane.querySelector('.xpra-win-main canvas'); const d = cv.getContext('2d').getImageData(${x}, ${y}, ${w}, ${h}).data; const g = new Array(${w} * ${h}); for (let i = 0; i < g.length; i++) g[i] = Math.round((d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3); return g; })()`);
+    const c0 = await px(2, 2, cw, chh);
+    const shot = await p.cdp('Page.captureScreenshot', { format: 'png' });
+    const c1 = await px(2, 2, cw, chh);
+    const sg = await p.evalJs(`(async () => { const img = new Image(); img.src = 'data:image/png;base64,' + ${JSON.stringify(shot.data)}; await img.decode(); const W = img.naturalWidth, H = img.naturalHeight; const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, W, H).data; const g = new Array(W * H); for (let i = 0; i < W * H; i++) g[i] = Math.round((d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3); return { W, g }; })()`);
+    const X0 = Math.round((v.canvas.rx + 2 / dpr) * dpr), Y0 = Math.round((v.canvas.ry + 2 / dpr) * dpr);
+    let best = null;
+    for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
+      let diff = 0, n = 0;
+      for (let y = 0; y < chh; y++) for (let x = 0; x < cw; x++) { const i = y * cw + x; if (c0[i] !== c1[i]) continue; n++; if (Math.abs(c1[i] - sg.g[(Y0 + dy + y) * sg.W + X0 + dx + x]) > 2) diff++; }
+      if (!best || diff / n < best.frac) best = { dx, dy, diff, n, frac: diff / n };
+    }
+    return { ...best, transform: v.transform, scale: v.scale, badge: !!(v.badge && v.badge.shown), box: [v.canvas.rw, v.canvas.rh], backing: [v.canvas.w, v.canvas.h], main: v.main && [v.main.w, v.main.h] };
+  };
+  console.log('§6 HiDPI + the app\'s minimum — a deviceScaleFactor-2 page, xterm + GNOME Calculator, our server vs the pre-fix control');
+  const CALC6 = bin('gnome-calculator');
+  const HI = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const v = w._desktopAppView; if (!v || !v.pane) return null; const pr = v.pane.getBoundingClientRect(); const c = v.client; const main = c && c.windows.get(c.mainWid); const cv = v.pane.querySelector('.xpra-win-main canvas'); const cr = cv ? cv.getBoundingClientRect() : null; const er = w.element.getBoundingClientRect(); const chip = w.content.querySelector('.desktop-app-chip-scale'); return { dpr: devicePixelRatio, status: v.status.textContent, pane: { x: pr.x, y: pr.y, w: pr.width, h: pr.height }, main: main ? { x: main.x, y: main.y, w: main.w, h: main.h } : null, constraints: c ? c.mainConstraints : null, ratio: v.ratio, minSize: v.minSize, scale: v.stageScale, offset: v.stageOffset, badge: v.fitBadge ? { shown: v.fitBadge.style.display !== 'none', text: v.fitBadge.textContent } : null, canvas: cv ? { w: cv.width, h: cv.height, rw: cr.width, rh: cr.height, rx: cr.x, ry: cr.y } : null, win: { w: er.width, h: er.height, minW: w.minWidth, minH: w.minHeight }, chip: chip ? { shown: chip.style.display !== 'none', text: chip.textContent, title: chip.title } : null, backendTitle: (w.content.querySelector('.desktop-app-chip-backend') || {}).title || '' }; })()`;
+  const mkPage = async (origin, metrics) => { const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json(); const p = await page(t); await p.cdp('Emulation.setDeviceMetricsOverride', metrics); await p.cdp('Emulation.setFocusEmulationEnabled', { enabled: true }); await openPage(p, origin); return { p, t }; };
+  const dropPage = async (x) => { if (!x || x.dropped) return; x.dropped = true; x.p.close(); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${x.t.id}`); } catch {} };
+  /** x5: a page that replayed the window later than another client is BLOCKED — make THIS pane the active one (Resume here) */
+  const ensureActive = async (p, id) => {
+    const s = await until(async () => { const v = await p.evalJs(SEAT(id)); return v && v.seats && v.seats.known ? v : null; }, 10000, 250);
+    if (s && s.seats.active === s.paneKey) return true;
+    await p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const b = w && w.content.querySelector('.desktop-app-resume'); if (b) b.click(); return true; })()`);
+    return !!(await until(async () => { const v = await p.evalJs(SEAT(id)); return v && v.seats && v.seats.active === v.paneKey ? v : null; }, 10000, 250));
+  };
+  const launchOn = (p, body) => p.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...${JSON.stringify(body)}, dpr: devicePixelRatio }) }).then((r) => r.json())`); // the launcher's own field (desktop-app-launcher.js launchDpr)
+  const readyOn = (p, id) => until(() => p.evalJs(`fetch('/api/desktop/apps/${id}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 40000);
+  const sizeWinOn = (p, id, W, H) => p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); app.wm.focusWindow(w.id); w.element.style.left = '20px'; w.element.style.top = '10px'; w.element.style.width = '${W}px'; w.element.style.height = '${H}px'; if (w.onResize) w.onResize(); return true; })()`);
+  const xenvFor = (w, r) => ({ ...process.env, DISPLAY: r.display, XAUTHORITY: path.join(w, 'data', 'desktop-apps', r.id, 'Xauthority') });
+  const xq = (xe, cmd, args) => { try { return execFileSync(cmd, args, { env: xe, encoding: 'utf8', timeout: 5000 }); } catch { return ''; } };
+  /** REDUNDANCY of the app's main canvas as SHOWN (a screenshot at the device scale): a 96-dpi picture the browser blows up
+   *  2× carries one source pixel per 2 device pixels — along each axis one PHASE of pixels is (nearly) predictable from its
+   *  neighbours (bilinear: the in-between pixel is their average) or equal to its partner (nearest). A picture rendered AT
+   *  the device resolution has no such phase. Per axis: B = 1 − min(err₀, err₁) / max(err₀, err₁) over the second difference
+   *  |2p − p₋ − p₊| of each phase, A = |eq₀ − eq₁| over "equal to the next pixel" per phase; score = max over both axes of
+   *  max(A, B), computed on INK pixels only (|p − background| > 24 somewhere in the triple). ~0 = native, → 1 = upscaled. */
+  const sharpness = async (p, id) => {
+    const s = await p.evalJs(HI(id));
+    if (!s || !s.canvas) return null;
+    const clip = { x: Math.round(s.canvas.rx) + 2, y: Math.round(s.canvas.ry) + 2, width: Math.floor(Math.min(s.canvas.rw, s.pane.w)) - 4, height: Math.floor(Math.min(s.canvas.rh, s.pane.h)) - 4, scale: 1 };
+    const shot = await p.cdp('Page.captureScreenshot', { format: 'png', clip });
+    return p.evalJs(`(async () => { const img = new Image(); img.src = 'data:image/png;base64,' + ${JSON.stringify(shot.data)}; await img.decode(); const W = img.naturalWidth, H = img.naturalHeight; const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, W, H).data; const g = new Float32Array(W * H); const hist = new Uint32Array(256); for (let i = 0; i < W * H; i++) { const v = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3; g[i] = v; hist[Math.round(v)]++; } let bg = 0; for (let v = 1; v < 256; v++) if (hist[v] > hist[bg]) bg = v; const axis = (dx, dy) => { const err = [0, 0], cnt = [0, 0], eq = [0, 0]; for (let y = dy; y < H - dy; y++) for (let xx = dx; xx < W - dx; xx++) { const i = y * W + xx, a = g[i - dy * W - dx], b = g[i], cc = g[i + dy * W + dx]; if (Math.abs(a - bg) <= 24 && Math.abs(b - bg) <= 24 && Math.abs(cc - bg) <= 24) continue; const ph = (dx ? xx : y) & 1; err[ph] += Math.abs(2 * b - a - cc); cnt[ph]++; if (Math.abs(b - cc) <= 3) eq[ph]++; } const e0 = err[0] / (cnt[0] || 1), e1 = err[1] / (cnt[1] || 1); const B = Math.max(e0, e1) ? 1 - Math.min(e0, e1) / Math.max(e0, e1) : 0; const A = Math.abs(eq[0] / (cnt[0] || 1) - eq[1] / (cnt[1] || 1)); return { A, B, n: cnt[0] + cnt[1] }; }; const hx = axis(1, 0), vy = axis(0, 1); return { w: W, hh: H, bg, hx, vy, score: Math.max(hx.A, hx.B, vy.A, vy.B) }; })()`);
+  };
+  /** drag the window's SE resize handle by (dx, dy) with REAL mouse events; returns the pane and the window after */
+  const dragSE = async (p, id, dx, dy) => {
+    const h = await p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const r = w.element.querySelector('.resize-se').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: h.x, y: h.y });
+    await p.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: h.x, y: h.y, button: 'left', clickCount: 1 });
+    for (let i = 1; i <= 8; i++) { await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: h.x + (dx * i) / 8, y: h.y + (dy * i) / 8, button: 'left', buttons: 1 }); await sleep(40); }
+    await p.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: h.x + dx, y: h.y + dy, button: 'left', clickCount: 1 });
+    await sleep(1500);
+    return p.evalJs(HI(id));
+  };
+  /** one full run of the HiDPI legs against the server at `origin` (worktree `w`); returns what it measured */
+  const runHi = async (origin, w, tag) => {
+    const out = { tag };
+    const H = await mkPage(origin, { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
+    out.dpr = await H.p.evalJs('devicePixelRatio');
+    const seqFile = path.join(fakeHome, `hidpi-${tag}.txt`);
+    const lx = await launchOn(H.p, { exec: XTERM, args: ['-T', `vs-hidpi-${tag}`, '-geometry', '80x24', '-e', 'sh', '-c', `seq 1 900 | tr '\\n' ' '; cat > ${seqFile}`], label: `vs-hidpi-${tag}` });
+    const rx = lx && lx.id && await readyOn(H.p, lx.id);
+    out.xterm = rx ? { id: rx.id, scale: rx.scale, dpi: rx.dpi } : { error: (lx && (lx.error || lx.lastError)) || 'no record' };
+    if (rx) {
+      await H.p.evalJs(`app.openDesktopApp(${JSON.stringify(rx.id)}); true`);
+      await ensureActive(H.p, rx.id);
+      await sizeWinOn(H.p, rx.id, 700, 500);
+      const s = await until(async () => { const v = await H.p.evalJs(HI(rx.id)); return v && v.status === 'Connected' && v.main && v.canvas && v.canvas.w > 1 ? v : null; }, 30000, 300);
+      await sleep(2500); // the repaint after the fit
+      out.x = await H.p.evalJs(HI(rx.id));
+      const xe = xenvFor(w, rx);
+      out.xdpy = (xq(xe, 'xdpyinfo', []).match(/resolution:\s+(\S+)/) || [])[1] || null;
+      const xr = xq(xe, 'xrdb', ['-query']);
+      out.xftDpi = Number((xr.match(/^Xft\.dpi:\s+(\d+)/m) || [])[1]) || null;
+      out.xtermFace = (xr.match(/^XTerm\*faceSize:\s+(\d+)/m) || [])[1] || null;
+      const xw = ((await H.p.evalJs(`fetch('/api/desktop/apps/${rx.id}/windows').then((r) => r.json())`)).windows || []).slice().sort((a, b) => b.w * b.h - a.w * a.h)[0] || null;
+      out.xwin = xw && { w: xw.w, h: xw.h };
+      out.sharp = await sharpness(H.p, rx.id);
+      out.ident = await identity7(H.p, rx.id, 2); // r2: the canvas IS the screen, pixel for pixel (the redundancy score is printed, not judged — see below)
+      // the pointer at DPR 2: a CSS point on the pane lands on X at twice it (through xdotool's own reading)
+      if (XDOTOOL && s) {
+        out.pointer = [];
+        for (const [px, py] of [[101, 57], [Math.round(s.pane.w * 0.7), Math.round(s.pane.h * 0.6)]]) {
+          await H.p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: s.pane.x + px, y: s.pane.y + py });
+          await sleep(400);
+          const m = /x:(\d+) y:(\d+)/.exec(xq(xe, XDOTOOL, ['getmouselocation']) || '');
+          out.pointer.push({ css: [px, py], x: m ? [Number(m[1]), Number(m[2])] : null });
+        }
+      }
+      await H.p.evalJs(`fetch('/api/desktop/apps/${rx.id}/stop', { method: 'POST' }).then((r) => r.status)`);
+    }
+    if (CALC6) {
+      const lc = await launchOn(H.p, { exec: CALC6, args: [], label: `vs-calc-${tag}` });
+      const rc = lc && lc.id && await readyOn(H.p, lc.id);
+      if (rc) {
+        out.calcId = rc.id; out.calcRec = { scale: rc.scale, dpi: rc.dpi };
+        await H.p.evalJs(`app.openDesktopApp(${JSON.stringify(rc.id)}); true`);
+        await ensureActive(H.p, rc.id);
+        await sizeWinOn(H.p, rc.id, 900, 800);
+        out.c0 = await until(async () => { const v = await H.p.evalJs(HI(rc.id)); return v && v.status === 'Connected' && v.main && v.main.h > 100 ? v : null; }, 40000, 300);
+        await sleep(1500);
+        out.c1 = await dragSE(H.p, rc.id, -700, -700); // far below any minimum
+        await sleep(1500);
+        out.c1 = await H.p.evalJs(HI(rc.id));
+        out.c1x = ((await H.p.evalJs(`fetch('/api/desktop/apps/${rc.id}/windows').then((r) => r.json())`)).windows || []).slice().sort((a, b) => b.w * b.h - a.w * a.h)[0] || null;
+        // the '7' key: GNOME Calculator 50's basic keypad is bottom-anchored — at its minimum (720x1232 device px at 2x) '7'
+        // sits at 12 % of the width and 357 device px above the bottom (measured on a GDK_SCALE=2 capture of the window)
+        const c = out.c1;
+        if (c && c.main) {
+          const k = c.ratio, sc = c.scale, off = c.offset || { x: 0, y: 0 };
+          const tx = c.pane.x + off.x + ((c.main.w * 0.12) / k) * sc, ty = c.pane.y + off.y + ((c.main.h - 357) / k) * sc;
+          await trustedClickAt(H.p, tx, ty); await sleep(500); await trustedClickAt(H.p, tx, ty); await sleep(700);
+          // read back through the product's own clipboard lane: Ctrl+C on the pane goes to the app, the app's copy comes back
+          // as xpra's clipboard-token and the client surfaces its text (`client.lastReceived`)
+          await H.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });
+          await H.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+          await H.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+          await H.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 });
+          out.seven = (await until(() => H.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(rc.id)}); const c = w && w._desktopAppView && w._desktopAppView.client; return c && c.lastReceived ? c.lastReceived : null; })()`), 6000, 200)) || '';
+          out.sevenAt = { tx, ty };
+          if (process.env.VS_HIDPI_SHOTS) { const sh = await H.p.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.VS_HIDPI_SHOTS, `seven-${tag}.png`), Buffer.from(sh.data, 'base64')); }
+        }
+      }
+    }
+    return { out, H };
+  };
+
+  if (!CALC6) skip('§6 GNOME Calculator legs', 'gnome-calculator not on PATH');
+  const A6 = await runHi(`http://127.0.0.1:${PORT}`, wt, 'ours');
+  const o = A6.out;
+  console.log(`  ours: DPR ${o.dpr}; xterm record scale ${o.xterm.scale} dpi ${o.xterm.dpi}; xdpyinfo ${o.xdpy}, Xft.dpi ${o.xftDpi}; pane ${o.x && `${o.x.pane.w}×${o.x.pane.h}`} CSS, X window ${o.xwin && `${o.xwin.w}×${o.xwin.h}`}, the client's main ${o.x && o.x.main && `${o.x.main.w}×${o.x.main.h}`}, increment ${o.x && JSON.stringify(o.x.constraints && o.x.constraints.increment)}; canvas ${o.x && o.x.canvas && `${o.x.canvas.w}×${o.x.canvas.h} backing in ${o.x.canvas.rw.toFixed(1)}×${o.x.canvas.rh.toFixed(1)} CSS`}; upscale redundancy ${o.sharp && `${o.sharp.score.toFixed(3)} (${JSON.stringify(o.sharp)})`}; pointer ${JSON.stringify(o.pointer)}`);
+  check(`the page runs at devicePixelRatio 2 (${o.dpr})`, o.dpr === 2);
+  check(`the launch carried the page's dpr and desktop.appScale auto made the app 2× — the record says scale ${o.xterm.scale}, the display's font dpi ${o.xterm.dpi}`, o.xterm.scale === 2 && o.xterm.dpi === 96, o.xterm);
+  check(`the display's font dpi is 96 at GDK_SCALE=2 (Xft.dpi ${o.xftDpi}, xdpyinfo ${o.xdpy} — the client sends the SAME dpi; 192 there would double the app's text on top of GDK_SCALE, measured)`, o.xftDpi === 96 && o.xdpy === '96x96', { xft: o.xftDpi, xdpy: o.xdpy });
+  const inc = (o.x && o.x.constraints && o.x.constraints.increment) || [1, 1];
+  check(`the app window's X geometry is the pane × 2 (X ${o.xwin && `${o.xwin.w}×${o.xwin.h}`} vs pane ${o.x && `${o.x.pane.w}×${o.x.pane.h}`} CSS ⇒ ${o.x && `${Math.round(o.x.pane.w * 2)}×${Math.round(o.x.pane.h * 2)}`} device, within one ${inc.join('×')} cell)`, !!o.xwin && !!o.x && o.xwin.w <= Math.round(o.x.pane.w * 2) + 1 && Math.round(o.x.pane.w * 2) - o.xwin.w < inc[0] + 1 && o.xwin.h <= Math.round(o.x.pane.h * 2) + 1 && Math.round(o.x.pane.h * 2) - o.xwin.h < inc[1] + 1, { x: o.xwin, pane: o.x && o.x.pane, inc });
+  check(`the canvas backing store is 2× its CSS size (${o.x && o.x.canvas && `${o.x.canvas.w}×${o.x.canvas.h} in ${o.x.canvas.rw.toFixed(1)}×${o.x.canvas.rh.toFixed(1)}`}) — one app pixel per screen pixel`, !!o.x && !!o.x.canvas && Math.abs(o.x.canvas.w - o.x.canvas.rw * 2) <= 2 && Math.abs(o.x.canvas.h - o.x.canvas.rh * 2) <= 2, o.x && o.x.canvas);
+  check(`xterm's character cell is ${inc[0]}×${inc[1]} DEVICE px (the X resources gave it an Xft face at 2× before it started; its 6×13 bitmap at 1× — the text is drawn at the screen's resolution, not blown up)`, inc[0] >= 12 && inc[1] >= 26, inc);
+  check(`the pointer at DPR 2 lands on X at TWICE the CSS point (${JSON.stringify(o.pointer)})`, !XDOTOOL || (Array.isArray(o.pointer) && o.pointer.length === 2 && o.pointer.every((q) => q.x && Math.abs(q.x[0] - 2 * q.css[0]) <= 2 && Math.abs(q.x[1] - 2 * q.css[1]) <= 2)), o.pointer);
+  check('the status strip names the scale (the chip says "2×", its tooltip says a relaunch applies a change) and the backend chip says what xpra is', !!o.x && !!o.x.chip && o.x.chip.shown && o.x.chip.text === '2×' && /launched again/.test(o.x.chip.title) && /streams each app window as pixels/.test(o.x.backendTitle), o.x && { chip: o.x.chip, backend: o.x.backendTitle });
+  if (CALC6) {
+    console.log(`  ours calculator: record ${JSON.stringify(o.calcRec)}, constraints ${JSON.stringify(o.c0 && o.c0.constraints)}, min pane ${JSON.stringify(o.c1 && o.c1.minSize)}; window min ${o.c1 && `${o.c1.win.minW}×${o.c1.win.minH}`} layout px; after a drag 700 px past it: window ${o.c1 && `${o.c1.win.w.toFixed(0)}×${o.c1.win.h.toFixed(0)}`}, pane ${o.c1 && `${o.c1.pane.w}×${o.c1.pane.h}`}, main ${o.c1 && o.c1.main && `${o.c1.main.w}×${o.c1.main.h}`} device, stage ${o.c1 && o.c1.scale}; '7' clicked twice ⇒ the calculator copies "${o.seven}"`);
+    const cmin = (o.c0 && o.c0.constraints && o.c0.constraints['minimum-size']) || [0, 0];
+    check(`GNOME Calculator at 2× announces its minimum (${JSON.stringify(o.c0 && o.c0.constraints)}) — the height exactly 2 × its 616 at 1× (GDK_SCALE=2), and the font dpi did not double it again`, cmin[1] === 1232 && cmin[0] >= 700 && cmin[0] < 800, o.c0 && o.c0.constraints);
+    const wantMin = { w: Math.ceil(cmin[0] / 2), h: Math.ceil(cmin[1] / 2) };
+    check(`the VibeSpace window's minimum follows the app: pane ≥ ${wantMin.w}×${wantMin.h} CSS (${o.c1 && JSON.stringify(o.c1.minSize)}); a resize DRAG 700 px past it stops there — the pane ${o.c1 && `${o.c1.pane.w}×${o.c1.pane.h}`} still holds the app`, !!o.c1 && !!o.c1.minSize && o.c1.minSize.w === wantMin.w && o.c1.minSize.h === wantMin.h && o.c1.pane.w >= wantMin.w - 0.5 && o.c1.pane.h >= wantMin.h - 0.5 && o.c1.win.w < 800, o.c1);
+    check(`…and nothing is cropped: the main window (${o.c1 && o.c1.main && `${o.c1.main.w}×${o.c1.main.h}`} device) fits the pane at ratio 2, the picture unscaled (${o.c1 && o.c1.scale})`, !!o.c1 && !!o.c1.main && o.c1.main.w / 2 <= o.c1.pane.w + 1 && o.c1.main.h / 2 <= o.c1.pane.h + 1 && o.c1.scale === 1, o.c1);
+    check(`a click on the '7' key at DPR 2 registers (the calculator copies "${o.seven}")`, /^77$/.test(o.seven || ''), o.seven);
+  }
+  // the UI scale on top of DPR 2: the counter-zoom keeps the canvas at net zoom 1 AND the device mapping
+  if (CALC6 && o.calcId) {
+    await A6.H.p.evalJs(`localStorage.setItem('vibespace.uiScale', '125'); true`);
+    await openPage(A6.H.p, `http://127.0.0.1:${PORT}`);
+    const has = await until(() => A6.H.p.evalJs(`!!${HI(o.calcId)}`), 15000, 250); if (!has) await A6.H.p.evalJs(`app.openDesktopApp(${JSON.stringify(o.calcId)}); true`);
+    await ensureActive(A6.H.p, o.calcId);
+    const u = await until(async () => { const v = await A6.H.p.evalJs(HI(o.calcId)); return v && v.status === 'Connected' && v.canvas && v.canvas.w > 1 ? v : null; }, 30000, 300);
+    await sleep(1500);
+    const u2 = await A6.H.p.evalJs(HI(o.calcId));
+    console.log(`  UI scale 1.25 at DPR 2: canvas ${u2 && u2.canvas && `${u2.canvas.w}×${u2.canvas.h} backing in ${u2.canvas.rw.toFixed(1)}×${u2.canvas.rh.toFixed(1)} CSS`}, pane ${u2 && `${u2.pane.w}×${u2.pane.h}`}, window min ${u2 && `${u2.win.minW}×${u2.win.minH}`} layout px, window ${u2 && `${u2.win.w.toFixed(0)}×${u2.win.h.toFixed(0)}`} on screen`);
+    check('UI scale 1.25 on the 2× page: the canvas is still 2× its on-screen CSS box (net zoom 1 under the counter-zoom) and the pane still holds the app\'s minimum', !!u && !!u2 && !!u2.canvas && Math.abs(u2.canvas.w - u2.canvas.rw * 2) <= 2 && u2.pane.h >= 615.5 && u2.pane.w >= 359.5, u2);
+    await A6.H.p.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`);
+  }
+  // the phone: the window IS the screen, the pane smaller than the app's minimum ⇒ the picture SCALED to fit, never cropped
+  if (CALC6 && o.calcId) {
+    await dropPage(A6.H); // the phone page is then the calculator's only (hence active) viewer
+    for (const [PW, PH] of [[390, 844], [320, 568]]) {
+      const Ph = await mkPage(`http://127.0.0.1:${PORT}`, { width: PW, height: PH, deviceScaleFactor: 2, mobile: true });
+      const has = await until(() => Ph.p.evalJs(`!!${HI(o.calcId)}`), 15000, 250); if (!has) await Ph.p.evalJs(`app.openDesktopApp(${JSON.stringify(o.calcId)}); true`);
+      await Ph.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(o.calcId)}); app.wm.focusWindow(w.id); return true; })()`);
+      await ensureActive(Ph.p, o.calcId);
+      const ph = await until(async () => { const v = await Ph.p.evalJs(HI(o.calcId)); return v && v.status === 'Connected' && v.main && v.canvas && v.pane.w > 0 ? v : null; }, 30000, 300);
+      await sleep(2000);
+      const v = await Ph.p.evalJs(HI(o.calcId));
+      const shown = v && v.main ? { w: (v.main.w / v.ratio) * v.scale, h: (v.main.h / v.ratio) * v.scale } : null;
+      const needsScale = v && v.minSize && (v.pane.w < v.minSize.w - 0.5 || v.pane.h < v.minSize.h - 0.5);
+      console.log(`  phone ${PW}×${PH} @2: pane ${v && `${v.pane.w}×${v.pane.h}`}, app minimum pane ${v && JSON.stringify(v.minSize)}, stage ${v && v.scale}, the app shown ${shown && `${shown.w.toFixed(1)}×${shown.h.toFixed(1)}`} CSS, badge ${v && JSON.stringify(v.badge)}`);
+      check(`phone ${PW}×${PH}: the app is shown WHOLE inside the pane (${shown && `${shown.w.toFixed(1)}×${shown.h.toFixed(1)}`} in ${v && `${v.pane.w}×${v.pane.h}`}) — never cropped${needsScale ? ', scaled to fit with the badge "' + (v.badge && v.badge.text) + '"' : ' (the pane holds its minimum: unscaled, no badge)'}`, !!ph && !!v && !!shown && shown.w <= v.pane.w + 1 && shown.h <= v.pane.h + 1 && (needsScale ? v.scale < 1 && v.badge.shown && v.badge.text === `Scaled to fit — the app needs at least ${v.minSize.w}×${v.minSize.h}` : v.scale === 1 && !v.badge.shown), v);
+      if (PW === 320) check('the small phone really is below the app\'s minimum (the scaled leg ran, not the unscaled one)', !!needsScale, v);
+      await dropPage(Ph);
+    }
+    await fetch(`http://127.0.0.1:${PORT}/api/home`).catch(() => {});
+  }
+  if (o.calcId) await p1.evalJs(`fetch('/api/desktop/apps/${o.calcId}/stop', { method: 'POST' }).then((r) => r.status)`);
+  await dropPage(A6.H);
+
+  // CONTROL — THE PRE-FIX BEHAVIOUR: a scratch copy of this tree with the three levers of this change pulled back (the view's
+  // ratio pinned to 1 — CSS px are X px; the app's scale pinned to 1; `size-constraints` not asked for — the v21 list)
+  {
+    const wtc = scratch('deskxpra-hidpictl');
+    try { execSync(`git worktree remove --force ${wtc}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+    execSync(`git worktree add --detach ${wtc} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.push(wtc);
+    for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wtc}/${f} && cp -r ${wt}/${f} ${wtc}/${f}`);
+    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtc, 'node_modules'));
+    fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
+    const patches = [
+      ['src/lib/xpra-view.js', "  const ratio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);", '  const ratio = () => 1; // pre-fix CONTROL'],
+      ['src/server/desktop-app-keeper.js', "const knobs = backend.stream === 'xpra' ? M.scaleKnobs(M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr)) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'],
+      ['src/lib/xpra-proto.js', "'title', 'size-hints', 'size-constraints', 'class-instance'", "'title', 'size-hints', 'class-instance'"],
+    ];
+    let allOnce = true;
+    for (const [f, from, to] of patches) { const src = fs.readFileSync(path.join(wtc, f), 'utf8'); if (src.split(from).length !== 2) allOnce = false; fs.writeFileSync(path.join(wtc, f), src.replace(from, to)); }
+    check('CONTROL: each pre-fix lever is spelled exactly once in the tree (the control patches exactly those)', allOnce);
+    execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+    const [PORTH] = await freePorts(1);
+    const homeH = scratchHome('deskxpra-hidpictl-home', fs);
+    const sh = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTH), HOME: homeH }, stdio: 'ignore' }); ctlServers.push(sh);
+    let upH = false; for (let i = 0; i < 80 && !upH; i++) { try { await fetch(`http://127.0.0.1:${PORTH}/api/home`); upH = true; } catch { await sleep(250); } }
+    check('CONTROL: the pre-fix copy boots', upH);
+    if (upH) {
+      const B6 = await runHi(`http://127.0.0.1:${PORTH}`, wtc, 'ctl');
+      const q = B6.out;
+      console.log(`  CONTROL: record scale ${q.xterm.scale}; X window ${q.xwin && `${q.xwin.w}×${q.xwin.h}`} for pane ${q.x && `${q.x.pane.w}×${q.x.pane.h}`}; canvas ${q.x && q.x.canvas && `${q.x.canvas.w}×${q.x.canvas.h} backing in ${q.x.canvas.rw.toFixed(1)}×${q.x.canvas.rh.toFixed(1)} CSS`}; sharpness ${q.sharp && q.sharp.score.toFixed(3)} vs ours ${o.sharp && o.sharp.score.toFixed(3)}; calculator after the drag: pane ${q.c1 && `${q.c1.pane.w}×${q.c1.pane.h}`}, main ${q.c1 && q.c1.main && `${q.c1.main.w}×${q.c1.main.h}`}, stage ${q.c1 && q.c1.scale}`);
+      check(`CONTROL: pre-fix, the canvas backing store is its CSS size (${q.x && q.x.canvas && `${q.x.canvas.w}×${q.x.canvas.h} in ${q.x.canvas.rw.toFixed(1)}×${q.x.canvas.rh.toFixed(1)}`}) and X is the pane in CSS px — a 96-dpi bitmap the 2× screen blows up (the "2× backing store" leg fails there)`, !!q.x && !!q.x.canvas && Math.abs(q.x.canvas.w - q.x.canvas.rw) <= 2 && !!q.xwin && q.xwin.w <= q.x.pane.w + 1, q.x && q.x.canvas);
+      // r2: the redundancy score is PRINTED, no longer judged — with the race fixed xterm's cell is 13×26 (EVEN), and text rows on an even
+      // period give one row parity more "equal to the next pixel" (vy.A 0.12 on a native picture); the judged fact is the identity below
+      console.log(`  upscale redundancy (informational): ours ${o.sharp && o.sharp.score.toFixed(3)} ${JSON.stringify(o.sharp && { hx: o.sharp.hx, vy: o.sharp.vy })}, pre-fix ${q.sharp && q.sharp.score.toFixed(3)}`);
+      check(`the picture carries a pixel per DEVICE pixel — the xterm canvas IS the screen (${o.ident && `${o.ident.diff} of ${o.ident.n} stable px off`}) where the pre-fix canvas is blown up by the browser (${q.ident && `${(100 * q.ident.frac).toFixed(1)} % off at the same device origin`}) — the owner's "looks like VNC" was the 96-dpi bitmap blown up 2×`, !!o.ident && !!q.ident && o.ident.n > 100000 && o.ident.frac < 0.001 && q.ident.frac > 0.05, { ours: o.ident, ctl: q.ident });
+      if (CALC6) check(`CONTROL: pre-fix, the same drag takes the calculator's pane below its minimum and the app is CROPPED (X keeps it ${q.c1x && `${q.c1x.w}×${q.c1x.h}`} in a ${q.c1 && `${q.c1.pane.w}×${q.c1.pane.h}`} pane, unscaled) — the owner's screenshot`, !!q.c1 && !!q.c1x && q.c1x.h > q.c1.pane.h + 1 && q.c1.scale === 1, { c1: q.c1, x: q.c1x });
+      if (q.calcId) await B6.H.p.evalJs(`fetch('/api/desktop/apps/${q.calcId}/stop', { method: 'POST' }).then((r) => r.status)`);
+      await dropPage(B6.H);
+    }
+    try { sh.kill('SIGKILL'); } catch {}
+  }
+  // ── (7) HiDPI r2 — THE VERIFIER'S FIVE FINDINGS, on the real rung, ours vs a CONTROL copy carrying the r1 code (every
+  // r2 lever pulled back, each spelled exactly once): (a) a FRACTIONAL ratio (DPR 1.5) draws the app 1:1 — no sub-1 stage
+  // transform, no badge, the canvas's pixels ARE the screen's (a full screenshot, only pixels stable across the capture
+  // counted); (b) a phone pane smaller than the app's minimum: every digit AND the app's bottom-right corner reachable —
+  // the X display contains the window; (c) a DPR-1 client taking over a 2× app: the window stays on the workspace,
+  // scaled to fit with the badge, and the digits land; (d) xterm at 1.5×: the keeper waited for xpra's resource write —
+  // the cell is the 144-dpi face (10×19), the merged XTerm* resources survive a client connecting; auto from DPR 1.5 = 2 ──
+  console.log('§7 HiDPI r2 — a fractional ratio 1:1, the phone\'s lower rows, a DPR-1 takeover, the xterm face at 1.5×; ours vs the r1 control');
+  const setScaleOn = (p, value) => p.evalJs(`fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'desktop.appScale': ${JSON.stringify(value)} }) }).then((r) => r.status)`);
+  const runR2 = async (origin, w, tag) => {
+    const out = { tag };
+    const stopOn = (p, id) => p.evalJs(`fetch('/api/desktop/apps/${id}/stop', { method: 'POST' }).then((r) => r.status)`);
+    // (a) DPR 1.5 — a calculator in a pane that holds it
+    if (CALC6) {
+      const A = await mkPage(origin, { width: 1400, height: 1100, deviceScaleFactor: 1.5, mobile: false });
+      const l = await launchOn(A.p, { exec: CALC6, args: [], label: `vs-r2a-${tag}` });
+      const r = l && l.id && await readyOn(A.p, l.id);
+      if (r) {
+        out.aRec = { scale: r.scale, dpi: r.dpi };
+        await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(r.id)}); true`);
+        await ensureActive(A.p, r.id);
+        out.a = [];
+        for (const [W, H] of [[900, 950], [901, 951]]) {
+          await sizeWinOn(A.p, r.id, W, H);
+          await until(async () => { const v = await A.p.evalJs(R2(r.id)); return v && v.status === 'Connected' && v.main && v.canvas && v.main.h > 100 ? v : null; }, 30000, 300);
+          await sleep(4000); // xpra's lossless refresh after the fit
+          out.a.push({ W, H, ...(await identity7(A.p, r.id, 1.5)) });
+        }
+        await stopOn(A.p, r.id);
+      }
+      await dropPage(A);
+    }
+    // (b) the phone — the calculator launched from a DPR-2 page (2×: minimum 720x1232 device px), then a 320x568 @2 phone takes it
+    if (CALC6) {
+      const L = await mkPage(origin, { width: 1400, height: 900, deviceScaleFactor: 2, mobile: false });
+      const l = await launchOn(L.p, { exec: CALC6, args: [], label: `vs-r2b-${tag}` });
+      const r = l && l.id && await readyOn(L.p, l.id);
+      await dropPage(L);
+      if (r) {
+        out.bId = r.id;
+        const Ph = await mkPage(origin, { width: 320, height: 568, deviceScaleFactor: 2, mobile: true });
+        const has = await until(() => Ph.p.evalJs(`!!${R2(r.id)}`), 15000, 250); if (!has) await Ph.p.evalJs(`app.openDesktopApp(${JSON.stringify(r.id)}); true`);
+        await Ph.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(r.id)}); app.wm.focusWindow(w.id); return true; })()`);
+        await ensureActive(Ph.p, r.id);
+        await until(async () => { const v = await Ph.p.evalJs(R2(r.id)); return v && v.status === 'Connected' && v.main && v.canvas && v.main.h > 100 ? v : null; }, 30000, 300);
+        await sleep(3000);
+        const v = await Ph.p.evalJs(R2(r.id));
+        const xe = xenvFor(w, r);
+        out.bView = { pane: v.pane, scale: v.scale, badge: v.badge, main: v.main, display: v.display };
+        out.bXdpy = (xq(xe, 'xdpyinfo', []).match(/dimensions:\s+(\d+)x(\d+)/) || []).slice(1).map(Number);
+        out.bDigits = await allDigits7(Ph.p, r.id);
+        if (XDOTOOL && v.main) { // the app's bottom-right corner (the '=' column's last row), 40 device px in
+          const tx = v.pane.x + v.offset.x + ((v.main.w - 40) / v.ratio) * v.scale, ty = v.pane.y + v.offset.y + ((v.main.h - 40) / v.ratio) * v.scale;
+          await Ph.p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: tx, y: ty }); await sleep(500);
+          const m = /x:(\d+) y:(\d+)/.exec(xq(xe, XDOTOOL, ['getmouselocation']) || '');
+          out.bCorner = { want: [v.main.w - 40, v.main.h - 40], got: m ? [Number(m[1]), Number(m[2])] : null };
+        }
+        await dropPage(Ph);
+        // (c) the same 2× app taken over by a DPR-1 page (1400x900): the window must stay on the workspace
+        const One = await mkPage(origin, { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+        const has1 = await until(() => One.p.evalJs(`!!${R2(r.id)}`), 15000, 250); if (!has1) await One.p.evalJs(`app.openDesktopApp(${JSON.stringify(r.id)}); true`);
+        await ensureActive(One.p, r.id);
+        await until(async () => { const q = await One.p.evalJs(R2(r.id)); return q && q.status === 'Connected' && q.main && q.canvas && q.main.h > 100 ? q : null; }, 30000, 300);
+        await sleep(3000);
+        out.c = await One.p.evalJs(R2(r.id));
+        out.cDigits = await allDigits7(One.p, r.id);
+        await stopOn(One.p, r.id);
+        await dropPage(One);
+      }
+    }
+    // (d) xterm at desktop.appScale 1.5: the keeper's own xterm cell and the merged resources after a client connected
+    {
+      const X = await mkPage(origin, { width: 1400, height: 900, deviceScaleFactor: 1.5, mobile: false });
+      await setScaleOn(X.p, '1.5');
+      const l = await launchOn(X.p, { exec: XTERM, args: ['-T', `vs-r2d-${tag}`, '-geometry', '80x24', '-e', 'sh', '-c', 'sleep 600'], label: `vs-r2d-${tag}` });
+      const r = l && l.id && await readyOn(X.p, l.id);
+      await setScaleOn(X.p, null);
+      if (r) {
+        await X.p.evalJs(`app.openDesktopApp(${JSON.stringify(r.id)}); true`);
+        await ensureActive(X.p, r.id);
+        const v = await until(async () => { const q = await X.p.evalJs(R2(r.id)); return q && q.status === 'Connected' && q.constraints ? q : null; }, 30000, 300);
+        await sleep(1500);
+        out.dRec = { scale: r.scale, dpi: r.dpi };
+        out.dCell = v && v.constraints && v.constraints.increment;
+        out.dRes = xq(xenvFor(w, r), 'xrdb', ['-query']);
+        await stopOn(X.p, r.id);
+      }
+      await dropPage(X);
+    }
+    return out;
+  };
+  const r2Report = (o) => console.log(`  ${o.tag}: (a) record ${JSON.stringify(o.aRec)} ${JSON.stringify((o.a || []).map((x) => ({ W: x.W, H: x.H, t: x.transform, scale: x.scale, badge: x.badge, off: `${x.diff}/${x.n}`, box: x.box, backing: x.backing })))}; (b) pane ${o.bView && `${o.bView.pane.w}×${o.bView.pane.h}`} stage ${o.bView && o.bView.scale.toFixed(3)} X display ${o.bXdpy && o.bXdpy.join('×')} main ${o.bView && o.bView.main && `${o.bView.main.w}×${o.bView.main.h}`} digits ${JSON.stringify(o.bDigits)} corner ${JSON.stringify(o.bCorner)}; (c) window ${o.c && `${o.c.win.x.toFixed(0)},${o.c.win.y.toFixed(0)} ${o.c.win.w.toFixed(0)}×${o.c.win.h.toFixed(0)}`} workspace ${o.c && `${o.c.workspace.y.toFixed(0)}+${o.c.workspace.h.toFixed(0)}`} stage ${o.c && o.c.scale.toFixed(3)} badge ${o.c && JSON.stringify(o.c.badge)} digits ${JSON.stringify(o.cDigits)}; (d) record ${JSON.stringify(o.dRec)} cell ${JSON.stringify(o.dCell)}`);
+  const O7 = await runR2(`http://127.0.0.1:${PORT}`, wt, 'ours');
+  r2Report(O7);
+  const aOk = (o) => Array.isArray(o.a) && o.a.length === 2 && o.a.every((x) => x.scale === 1 && !x.badge && !/scale/.test(x.transform) && x.n > 100000 && x.frac < 0.001);
+  const bOk = (o) => !!o.bDigits && o.bDigits.got === '7894561230';
+  const cornerOk = (o) => !!o.bCorner && !!o.bCorner.got && Math.abs(o.bCorner.got[0] - o.bCorner.want[0]) <= 4 && Math.abs(o.bCorner.got[1] - o.bCorner.want[1]) <= 4;
+  const cOk = (o) => !!o.c && o.c.win.y + o.c.win.h <= o.c.workspace.y + o.c.workspace.h + 1 && o.c.win.x + o.c.win.w <= o.c.workspace.x + o.c.workspace.w + 1;
+  const dOk = (o) => Array.isArray(o.dCell) && o.dCell[0] >= 9 && o.dCell[1] >= 18;
+  if (CALC6) {
+    check(`(a) DPR 1.5: auto made the calculator 2× (a DPR ≥ 1.5 screen never gets the text-only 1.5×): record ${JSON.stringify(O7.aRec)}`, !!O7.aRec && O7.aRec.scale === 2 && O7.aRec.dpi === 96, O7.aRec);
+    check(`(a) DPR 1.5, a pane that holds the app at two sizes: the stage is identity (no sub-1 transform, no badge) and the canvas IS the screen — ${(O7.a || []).map((x) => `${x.diff} of ${x.n} stable px off (${(100 * x.frac).toFixed(3)} %)`).join(', ')}`, aOk(O7), O7.a);
+    check(`(b) the phone 320×568 @2: the X display CONTAINS the app (${O7.bXdpy && O7.bXdpy.join('×')} ⊇ ${O7.bView && O7.bView.main && `${O7.bView.main.w}×${O7.bView.main.h}`}) and the picture is scaled to fit (${O7.bView && O7.bView.scale.toFixed(3)})`, !!O7.bXdpy && !!O7.bView && !!O7.bView.main && O7.bXdpy[0] >= O7.bView.main.w && O7.bXdpy[1] >= O7.bView.main.h && O7.bView.scale < 1 && O7.bView.badge.shown, { x: O7.bXdpy, v: O7.bView });
+    check(`(b) …every digit key lands, the lower rows included (clicked ${O7.bDigits && O7.bDigits.want}, the calculator copies "${O7.bDigits && O7.bDigits.got}")`, bOk(O7), O7.bDigits);
+    check(`(b) …and the pointer reaches the app's bottom-right corner (X reads ${JSON.stringify(O7.bCorner && O7.bCorner.got)}, wanted ${JSON.stringify(O7.bCorner && O7.bCorner.want)}) — the '=' column is operable`, !XDOTOOL || cornerOk(O7), O7.bCorner);
+    check(`(c) a DPR-1 page takes over the 2× calculator: the window stays ON the workspace (${O7.c && `top ${O7.c.win.y.toFixed(0)} + ${O7.c.win.h.toFixed(0)} ≤ ${(O7.c.workspace.y + O7.c.workspace.h).toFixed(0)}`}), the picture scaled to fit (${O7.c && O7.c.scale.toFixed(3)}) with the badge "${O7.c && O7.c.badge.text}"`, cOk(O7) && O7.c.scale < 1 && O7.c.badge.shown, O7.c);
+    check(`(c) …and its digits land (the calculator copies "${O7.cDigits && O7.cDigits.got}")`, !!O7.cDigits && O7.cDigits.got === '7894561230', O7.cDigits);
+  }
+  check(`(d) xterm at desktop.appScale 1.5: the keeper waited for xpra's resource write — the cell is ${JSON.stringify(O7.dCell)} (the 144-dpi face; 7×14 = Xvfb's 100 dpi, the race) and the merged XTerm* face is still in the display's resources after a client connected`, dOk(O7) && /XTerm\*faceSize/.test(O7.dRes || '') && /Xft\.dpi:\s*144/.test(O7.dRes || ''), { cell: O7.dCell, res: O7.dRes });
+  // CONTROL — the r1 code: a scratch copy of this tree with every r2 lever pulled back (each spelled exactly once)
+  {
+    const wtr = scratch('deskxpra-r2ctl');
+    try { execSync(`git worktree remove --force ${wtr}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+    execSync(`git worktree add --detach ${wtr} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.push(wtr);
+    for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wtr}/${f} && cp -r ${wt}/${f} ${wtr}/${f}`);
+    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtr, 'node_modules'));
+    fs.mkdirSync(path.join(wtr, 'data'), { recursive: true });
+    const levers = [
+      ['src/lib/xpra-proto.js', '  return { width: Math.max(1, Math.floor((Number(width) || 1) * r + 1e-6)), height: Math.max(1, Math.floor((Number(height) || 1) * r + 1e-6)) };', '  return { width: Math.max(1, Math.round((Number(width) || 1) * r)), height: Math.max(1, Math.round((Number(height) || 1) * r)) };'],
+      ['src/lib/xpra-view.js', '    const bw = backingSize(win.w, r), bh = backingSize(win.h, r);', '    const bw = win.w, bh = win.h;'],
+      ['src/lib/xpra-view.js', '    const g = gridNudge(ox, oy); ox += g.x; oy += g.y;', '    const g = { x: 0, y: 0 };'],
+      ['src/lib/xpra-view.js', '  const FIT_SLACK_CSS = 1;', '  const FIT_SLACK_CSS = 0;'],
+      ['src/lib/xpra-view.js', "      if (mode === 'watch') {\n        for (const w of client.windows.values())", "      if (true) {\n        for (const w of client.windows.values())"],
+      ['src/lib/xpra-client.js', '    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'],
+      ['src/lib/window.js', '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }', '  _ownMinOf(win) { return minOf(win); }'],
+      ['src/server/desktop-app-keeper.js', "      if (own && M.streamKindOf(rec, backends) === 'xpra') {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
+      ['src/desktop-apps.js', '  return normalizeDpr(dpr) >= 1.5 ? 2 : 1;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2));'],
+    ];
+    let once = true;
+    for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtr, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtr, f), src.replace(from, to)); }
+    check('CONTROL (r1): each of the nine r2 levers is spelled exactly once in the tree (the control pulls back exactly those)', once);
+    execSync('npm run build', { cwd: wtr, stdio: 'ignore' });
+    const [PORTR] = await freePorts(1);
+    const homeR = scratchHome('deskxpra-r2ctl-home', fs);
+    const sr = spawn(process.execPath, ['server.js'], { cwd: wtr, env: { ...srvEnv, PORT: String(PORTR), HOME: homeR }, stdio: 'ignore' }); ctlServers.push(sr);
+    let upR = false; for (let i = 0; i < 80 && !upR; i++) { try { await fetch(`http://127.0.0.1:${PORTR}/api/home`); upR = true; } catch { await sleep(250); } }
+    check('CONTROL (r1): the r1 copy boots', upR);
+    if (upR) {
+      const Q = await runR2(`http://127.0.0.1:${PORTR}`, wtr, 'r1-ctl');
+      r2Report(Q);
+      if (CALC6) {
+        check(`CONTROL (r1): at DPR 1.5 the r1 code is NOT 1:1 — ${(Q.a || []).map((x) => `${x.transform || 'no transform'}, badge ${x.badge}, ${(100 * x.frac).toFixed(2)} % off`).join('; ')} (the verifier's 0.9995 transform / 4 %)`, !aOk(Q), Q.a);
+        check(`CONTROL (r1): on the phone the r1 display is the pane (${Q.bXdpy && Q.bXdpy.join('×')}) — the lower rows / the corner are out of X's reach (copies "${Q.bDigits && Q.bDigits.got}", corner ${JSON.stringify(Q.bCorner && Q.bCorner.got)})`, !bOk(Q) || (XDOTOOL && !cornerOk(Q)), { d: Q.bDigits, c: Q.bCorner, x: Q.bXdpy });
+        check(`CONTROL (r1): the r1 DPR-1 takeover puts the window past the workspace (${Q.c && `top ${Q.c.win.y.toFixed(0)} + ${Q.c.win.h.toFixed(0)} > ${(Q.c.workspace.y + Q.c.workspace.h).toFixed(0)}`})`, !cOk(Q), Q.c && { win: Q.c.win, ws: Q.c.workspace });
+      }
+      check(`CONTROL (r1): the r1 keeper starts xterm before xpra's resource write — cell ${JSON.stringify(Q.dCell)} (Xvfb's 100 dpi), the merged face wiped`, !dOk(Q), { cell: Q.dCell, res: Q.dRes });
+    }
+    try { sr.kill('SIGKILL'); } catch {}
+  }
+  await p1.cdp('Page.bringToFront').catch(() => {});
 
   if (typeof id5 === 'string' && id5) await p1.evalJs(`fetch('/api/desktop/apps/${id5}/stop', { method: 'POST' }).then((r) => r.status)`);
   check('the first app\'s window is on the current page again (layout replay after §5\'s page swap)', !!(await ensureWin()));

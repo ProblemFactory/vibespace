@@ -877,12 +877,15 @@ export function applyUiPrefs() {
   const sp = Math.max(UI_SCALE_MIN, Math.min(UI_SCALE_MAX, getUiPref('vibespace.uiScale')));
   const fp = Math.max(UI_FONT_MIN, Math.min(UI_FONT_MAX, getUiPref('vibespace.uiFontScale')));
   const s = mobile ? 1 : sp / 100;
+  const changed = _uiScaleVal !== s;
   _uiScaleVal = s;
   try {
     document.body.style.zoom = s === 1 ? '' : String(s);
     document.documentElement.style.setProperty('--ui-scale', String(s));
     document.documentElement.style.setProperty('--ui-font-scale', String(fp / 100));
   } catch { }
+  // a surface that converts viewport px ↔ layout px by the scale re-measures (the desktop-app window's minimum, 2.369.158)
+  if (changed) { try { window.dispatchEvent(new CustomEvent('vs:ui-scale', { detail: { scale: s } })); } catch { } }
 }
 
 export function getStateSync() { return _stateSync; }

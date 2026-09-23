@@ -740,5 +740,43 @@ console.log('§9 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: the
   ok(/^\s*keeper\.setWatchProbe\?\.\(\(id\) => stream\.connections\(id\) > 0\);/m.test(read('src/server/window-live-wiring.js')) && /beltDue\(rec\.id, fitState\(rec\.id\), t\)/.test(read('src/server/desktop-app-keeper.js')), 'WIRING PIN: the fit belt\'s "somebody watches" fact is the bridge\'s open-socket count, wired as CODE at the start of a line (never text after a mid-line //)');
 }
 
+console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the app scale, its knobs, the launch dpr');
+{
+  ok(same(M.APP_SCALES, [1, 1.5, 2]) && Object.isFrozen(M.APP_SCALES), 'the scales the setting offers: 1, 1.5, 2');
+  ok(M.appScaleFor('auto', 2) === 2 && M.appScaleFor(undefined, 2) === 2 && M.appScaleFor('', 1) === 1 && M.appScaleFor(null, 1.5) === 2, 'auto (also unset — the setting\'s default) follows the launching client\'s devicePixelRatio');
+  // r2 (the verifier, measured): 1.5× is TEXT ONLY in GTK (no fractional GDK_SCALE on X11 — the calculator's minimum 370x616 device px
+  // at 1.5× vs 720x1232 at 2×), so on a DPR-1.5 screen its keys drew at 0.67× their 1×-screen size. auto never picks the fraction:
+  const AUTO = [[1, 1], [1.2, 1], [1.25, 1], [1.49, 1], [1.5, 2], [1.75, 2], [2, 2], [3, 2], [0.5, 1], ['x', 1]];
+  const autoGot = AUTO.map(([d]) => M.appScaleFor('auto', d));
+  ok(same(autoGot, AUTO.map(([, w]) => w)), `auto = 2 from a DPR of 1.5 up, else 1 — never the text-only 1.5 (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
+  const preFixAuto = (d) => Math.min(2, Math.max(1, Math.round(M.normalizeDpr(d) * 2) / 2)); // the shipped-then-refuted rule: the nearest 0.5
+  ok(!same(AUTO.map(([d]) => preFixAuto(d)), AUTO.map(([, w]) => w)) && preFixAuto(1.5) === 1.5 && preFixAuto(1.25) === 1.5, 'CONTROL: the pre-fix rule (the nearest 0.5) fails that table — it picks 1.5 on a 1.25 and a 1.5 screen');
+  ok(M.appScaleFor('1', 2) === 1 && M.appScaleFor('1.5', 1) === 1.5 && M.appScaleFor(2, 1) === 2 && M.appScaleFor('3', 1) === 1, 'an explicit scale wins over the DPR (as a string — the enum\'s values — or a number); an unknown value ⇒ 1');
+  const k2 = M.scaleKnobs(2), k15 = M.scaleKnobs(1.5), k1 = M.scaleKnobs(1);
+  ok(k2.gdkScale === 2 && k2.dpi === 96 && k2.env.GDK_SCALE === '2' && k2.env.QT_SCALE_FACTOR === '2' && k2.env.QT_ENABLE_HIGHDPI_SCALING === '1', '2×: GDK_SCALE=2 (GTK3 + GTK4 widgets AND fonts 2×, measured) with the display at 96 dpi — Xft.dpi multiplies with GDK_SCALE (192 would be 4× text, measured)');
+  ok(k15.gdkScale === 1 && k15.dpi === 144 && k15.env.GDK_SCALE === '1', '1.5×: the integer part in GDK_SCALE, the fraction in the display\'s font dpi (144)');
+  ok(k1.dpi === 96 && k1.xresources === '' && k1.env.GDK_SCALE === '1', '1×: 96 dpi, no X resources');
+  ok(!('GDK_DPI_SCALE' in k2.env) && !('GDK_DPI_SCALE' in k15.env), 'GDK_DPI_SCALE is NOT set (GTK4 ignores it — measured — and in GTK3 it would double-count the fraction already in Xft.dpi)');
+  ok(/XTerm\*faceName: Monospace\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k2.xresources) && /UXTerm\*faceSize: 16\n/.test(k2.xresources) && /XTerm\*faceSize: 8\n/.test(k15.xresources), 'xterm gets an Xft face at a scale > 1 (its bitmap default no dpi reaches — measured): faceSize 8 × GDK_SCALE, the fraction through Xft.dpi');
+  ok(M.scaleKnobs(7).scale === 1 && M.scaleKnobs('2').scale === 2, 'scaleKnobs takes only the offered scales (anything else ⇒ 1)');
+  // the launch request's dpr
+  const reg = M.DEFAULT_REGISTRY;
+  const v1 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2 }, reg), v2 = M.validateLaunchRequest({ exec: 'xterm' }, reg), v3 = M.validateLaunchRequest({ appId: 'xterm', dpr: 1.25 }, reg);
+  ok(v1.ok && v1.launch.dpr === 2 && v2.ok && v2.launch.dpr === 1 && v3.launch.dpr === 1.25, 'POST /api/desktop/apps `dpr`: carried through (2, 1.25); absent ⇒ 1');
+  const bad = [0.5, 3.5, 'x', -1, Infinity].map((d) => M.validateLaunchRequest({ appId: 'xterm', dpr: d }, reg));
+  ok(bad.every((b) => !b.ok && /dpr must be a number from 1 to 3/.test(b.error)), 'a dpr outside 1..3 (or not a number) is REFUSED by name, never silently clamped');
+  const rec = M.newRecord({ id: 'da-1', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'xpra', now: 1, scale: 2, dpi: 96 });
+  const recD = M.newRecord({ id: 'da-2', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'vnc-display', now: 1 });
+  ok(rec.scale === 2 && rec.dpi === 96 && recD.scale === 1 && recD.dpi === 96, 'the record carries its scale and its display\'s font dpi (fixed at launch; defaults 1 / 96)');
+  const keeper = read('src/server/desktop-app-keeper.js'), disp = read('src/desktop-display.js');
+  ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(M\.appScaleFor\(serverSetting\('desktop\.appScale'\), v\.launch\.dpr\)\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch from `desktop.appScale` + the request\'s dpr — on the xpra STREAM only (a whole-display rung\'s picture is CSS px)');
+  ok(/\.\.\.\(M\.streamKindOf\(rec, backends\) === 'xpra' \? knobs\.env : \{\}\), \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
+  { const iWait = keeper.indexOf('display.waitForXftDpi('), iMerge = keeper.indexOf('display.applyXResources('), iApp = keeper.indexOf('display.startApp(');
+    ok(iWait > 0 && iWait < iMerge && iMerge < iApp && /if \(own && M\.streamKindOf\(rec, backends\) === 'xpra'\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
+  ok(/dpi: rec\.dpi \|\| 96,/.test(keeper) && /startXpra\(\{ binPath: ctx\.bins\.xpra, port, dir: ctx\.dir, env, logFd: ctx\.logFd, dpi: ctx\.dpi \}\)/.test(disp), 'WIRING PIN: the record\'s dpi reaches `xpra start --dpi` through the recipe ctx');
+  const schema = read('src/lib/settings-schema.js');
+  ok(/'desktop\.appScale': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: '1', [^\]]*\{ value: '1\.5', [^\]]*\{ value: '2', /.test(schema), 'the setting `desktop.appScale` (auto | 1 | 1.5 | 2, default auto) exists in the schema — only for working code');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

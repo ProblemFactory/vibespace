@@ -46,6 +46,13 @@ const APPS_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" s
 // rows carry one) — all from icons.js, SVG only, never emoji.
 const CATEGORY_ICONS = Object.freeze({ terminal: UI_ICONS.terminal, editor: UI_ICONS.pencil, browser: FILE_ICONS.web, utility: UI_ICONS.wrench });
 
+/** The launching client's devicePixelRatio for POST /api/desktop/apps (`dpr`, the route accepts 1..3):
+ *  a zoomed-out page (< 1) launches at 1, anything above 3 at 3. */
+export function launchDpr(v = (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1)) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(3, Math.max(1, Math.round(n * 100) / 100)) : 1;
+}
+
 /** The availability sentence for the dialog head — the ladder's verdict in
  *  the same words the status chip uses. */
 export function availabilityText(av) {
@@ -175,7 +182,8 @@ export async function showLaunchDialog(app) {
 
   const launch = async (payload, recent) => {
     runBtn.disabled = true;
-    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    // HiDPI (2.369.158): THIS client's devicePixelRatio rides the launch — under `desktop.appScale: auto` it is the app's scale
+    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr() }) });
     runBtn.disabled = false;
     if (!r || r.error) { showToast(r?.error || t('Could not launch the application'), { type: 'error' }); return null; }
     if (recent) {

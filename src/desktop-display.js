@@ -154,7 +154,7 @@ function assertExecutable(binPath, name) {
 }
 
 /** Every binary a backend rung, a light WM or the enumeration may need. */
-const PROBE_BINS = Object.freeze(['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc', 'xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo', 'xauth']);
+const PROBE_BINS = Object.freeze(['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc', 'xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo', 'xauth', 'xrdb']);
 
 /** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, at }`. */
 async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, now = Date.now } = {}) {
@@ -451,13 +451,24 @@ function startX11vnc({ binPath, display, authFile, rfbPort, env, logFd = 'ignore
  *   --pidfile=<dir>/xpra/server.pid   under the app dir (never $XPRA_SESSION_DIR); with
  *                          --daemon=no xpra logs to stderr = the app dir's app.log (a
  *                          --log-file only applies when daemonising — measured: none written)
+ *   --dpi=<n>              THE DISPLAY'S FONT DPI (2.369.158, HiDPI): xpra writes it as Xft.dpi into the
+ *                          resource manager AND as Xft/DPI into XSETTINGS before any client connects —
+ *                          but ~1 s AFTER the display is up (measured 6.5.3: the recipe returns, the app
+ *                          would start at ~0.2 s, Xft.dpi appears at ~1.25 s and the write REPLACES the
+ *                          whole database), so the keeper waits for it (`waitForXftDpi`) before it merges
+ *                          its own resources and starts the app. It is 96 × scale / GDK_SCALE
+ *                          (PURE desktop-apps `scaleKnobs`) — the integer part of the scale is GDK_SCALE in
+ *                          the app's env, and Xft.dpi MULTIPLIES with it (GDK_SCALE=2 + Xft.dpi 192 = 4× text,
+ *                          measured on GTK 3.24 and 4.22). Spelled always, 96 included, so the value is in
+ *                          the argv and never a client's: the client sends the SAME dpi (xpra rewrites
+ *                          Xft.dpi to a client's dpi when it changes — measured 96 → 144).
  * `--commands` stays at its default: `no` disables every `--start*` (measured), and a
  * future recipe may want one.
  */
 const XPRA_GEOMETRY_MAX = '4096x2304';
 /** Socket options on `--bind-tcp`: the hello `request`s that act on (or read out) the session, refused by xpra. */
 const XPRA_BIND_REFUSALS = 'stop=no,exit=no,detach=no,run=no,info=no,screenshot=no,print=no';
-const XPRA_ARGS = ({ port, dir, geometryMax = XPRA_GEOMETRY_MAX }) => [
+const XPRA_ARGS = ({ port, dir, geometryMax = XPRA_GEOMETRY_MAX, dpi = 96 }) => [
   'start', '--daemon=no', '--displayfd=3', '--use-display=no',
   `--xvfb=Xvfb -screen 0 ${geometryMax}x24 +extension GLX +extension RANDR +extension RENDER +extension Composite -extension DOUBLE-BUFFER -nolisten tcp -noreset -auth $XAUTHORITY`,
   '--html=on', `--bind-tcp=127.0.0.1:${port},${XPRA_BIND_REFUSALS}`, '--bind=none', `--socket-dir=${dir}/xpra`, `--sessions-dir=${dir}/xpra`,
@@ -469,6 +480,7 @@ const XPRA_ARGS = ({ port, dir, geometryMax = XPRA_GEOMETRY_MAX }) => [
   '--input-method=none', '--start-new-commands=no', '--shell=no', '--opengl=no', '--splash=no', '--remote-logging=no', '--http-scripts=off',
   '--sharing=yes', '--lock=no',
   `--pidfile=${dir}/xpra/server.pid`,
+  `--dpi=${Number.isInteger(dpi) && dpi >= 48 && dpi <= 288 ? dpi : 96}`,
 ];
 /**
  * Start ONE xpra seamless server on a free loopback port and learn its display
@@ -478,8 +490,8 @@ const XPRA_ARGS = ({ port, dir, geometryMax = XPRA_GEOMETRY_MAX }) => [
  * answer through `waitForListen('http', …)`). Detached + unref'd like every
  * part; a spawn failure / exit-before-ready / deadline is a named rejection.
  */
-function startXpra({ binPath, port, dir, env, logFd = 'ignore', deadlineMs = 15000, geometryMax = XPRA_GEOMETRY_MAX }) {
-  const args = XPRA_ARGS({ port, dir, geometryMax });
+function startXpra({ binPath, port, dir, env, logFd = 'ignore', deadlineMs = 15000, geometryMax = XPRA_GEOMETRY_MAX, dpi = 96 }) {
+  const args = XPRA_ARGS({ port, dir, geometryMax, dpi });
   return new Promise((resolve, reject) => {
     // XPRA_CLIENT_CAN_SHUTDOWN=0: xpra ignores a client's `shutdown-server` (server/base.py `_request_stop`) — the keeper stops it
     const { child, spawned } = spawnDetached(binPath || 'xpra', args, { env: { ...(env || process.env), XPRA_CLIENT_CAN_SHUTDOWN: '0' }, logFd, extraStdio: 'pipe', name: 'xpra' });
@@ -537,6 +549,53 @@ function startApp({ exec, args = [], cwd, env, logFd = 'ignore' }) {
   return spawnDetached(exec, args, { env, cwd, logFd, name: path.basename(String(exec)) }).spawned;
 }
 
+/**
+ * Merge X resources into a display's resource database BEFORE its app starts
+ * (2.369.158, HiDPI — PURE desktop-apps `scaleKnobs().xresources`: an Xft face
+ * for xterm at a scale > 1, whose default bitmap font no dpi reaches; measured).
+ * `xrdb -merge` from stdin, async with a deadline (never a sync spawn). Resolves
+ * `{ ok, why }` — a missing xrdb or a failure is REPORTED, never thrown: the app
+ * still starts, only its bitmap-font terminal stays at 1×.
+ */
+function applyXResources({ binPath, env, text, deadlineMs = 5000 }) {
+  if (!text) return Promise.resolve({ ok: true, why: null });
+  if (!binPath) return Promise.resolve({ ok: false, why: 'xrdb not on PATH' });
+  return new Promise((resolve) => {
+    let child;
+    try { child = execFile(binPath, ['-merge'], { env, timeout: deadlineMs }, (err) => resolve(err ? { ok: false, why: `xrdb -merge failed: ${err.message.split('\n')[0]}` } : { ok: true, why: null })); }
+    catch (e) { resolve({ ok: false, why: `xrdb -merge failed: ${e.message}` }); return; }
+    child.stdin.on('error', () => { /* the exit callback reports */ });
+    child.stdin.end(text);
+  });
+}
+
+/**
+ * Wait until xpra has written ITS resource database (r2, 2.369.158 — the verifier's race, measured on
+ * 6.5.3): xpra REPLACES the display's RESOURCE_MANAGER (Xft.dpi, Xcursor.size, …) about a second
+ * AFTER its display is up — after the recipe returns — so an app started at once read Xvfb's own
+ * 100 dpi (a "1.5×" xterm got a 7×14 cell, not 10×19), and the X resources merged before that write
+ * were wiped (the XTerm* Xft face gone). `xrdb -query` is polled (async, each query under its own
+ * deadline) until an `Xft.dpi:` line is there; resolves `{ ok, dpi, ms, why }` — a missing xrdb, a
+ * failing query or the deadline is REPORTED, never thrown (the app still starts).
+ */
+function waitForXftDpi({ binPath, env, deadlineMs = 5000, stepMs = 100, now = Date.now } = {}) {
+  if (!binPath) return Promise.resolve({ ok: false, dpi: null, ms: 0, why: 'xrdb not on PATH' });
+  const t0 = now();
+  return new Promise((resolve) => {
+    let lastErr = null;
+    const tick = () => {
+      execFile(binPath, ['-query'], { env, timeout: Math.min(2000, deadlineMs) }, (err, stdout) => {
+        const m = !err && /^Xft\.dpi:\s*(\d+(?:\.\d+)?)\s*$/m.exec(String(stdout || ''));
+        if (m) { resolve({ ok: true, dpi: Number(m[1]), ms: now() - t0, why: null }); return; }
+        if (err) lastErr = err.message.split('\n')[0];
+        if (now() - t0 + stepMs > deadlineMs) { resolve({ ok: false, dpi: null, ms: now() - t0, why: `no Xft.dpi in the display's resources within ${deadlineMs} ms${lastErr ? ` (xrdb: ${lastErr})` : ''}` }); return; }
+        setTimeout(tick, stepMs);
+      });
+    };
+    tick();
+  });
+}
+
 // ── the bring-up RECIPES (one per name the PURE table can say) ──────────────
 /**
  * Each recipe brings up the DISPLAY HALF of a session and returns
@@ -545,6 +604,7 @@ function startApp({ exec, args = [], cwd, env, logFd = 'ignore' }) {
  * it THROUGH `ctx.onPart(part, child, facts)` — called the moment each pid is
  * known, so a failure one step later still leaves a reapable record. ctx =
  *   { bins, dir (the per-app dir), authFile, cookie, geometry, base (sanitised env), logFd,
+ *     dpi (the display's font dpi — the xpra recipe spells it; 96 elsewhere),
  *     freePort, x11Env(display), writeAuth(display), onPart, singleton() }
  * A recipe may add `wm:false` (it IS the window manager) and `probe:'http'`
  * (its READY fact is an HTTP answer, not an RFB banner) to what it returns.
@@ -601,7 +661,7 @@ const RECIPES = Object.freeze({
     const port = await ctx.freePort();
     const env = ctx.x11Env(':0');
     delete env.DISPLAY; // xpra starts the display; a stale DISPLAY would be "an existing display"
-    const x = await startXpra({ binPath: ctx.bins.xpra, port, dir: ctx.dir, env, logFd: ctx.logFd });
+    const x = await startXpra({ binPath: ctx.bins.xpra, port, dir: ctx.dir, env, logFd: ctx.logFd, dpi: ctx.dpi });
     ctx.onPart('x', x.child, { display: x.display, port, alsoServer: true });
     return { display: x.display, port, shared: false, wm: false, probe: 'http' };
   },
@@ -886,7 +946,7 @@ module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, hostFacts, x11Env,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
-  spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, RECIPES,
+  spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, markerCensus, environCensus,

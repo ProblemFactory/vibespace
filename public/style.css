@@ -1953,7 +1953,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .window {
     left: 0 !important; top: 0 !important;
     width: 100% !important; height: 100% !important;
-    border-radius: 0; min-width: 0; min-height: 0; border: none;
+    border-radius: 0; min-width: 0 !important; min-height: 0 !important; border: none; /* !important: a window's own minimum (desktop-app, 2.369.158) is an inline style — on a phone the window IS the screen and the picture scales instead */
     box-shadow: none; display: none !important;
     position: relative !important;
   }
@@ -2258,6 +2258,9 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .xpra-win > canvas { display: block; }
 .xpra-ime { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; background: transparent; color: transparent; caret-color: transparent; z-index: 0; }
 .xpra-pane.xpra-view-only { cursor: default !important; }
+/* 2.369.158: an ACTIVE picture scaled to fit (the app's minimum is larger than the pane) says so — never cropped */
+.desktop-app-chip-scale { flex-shrink: 0; } /* "2×" is two characters — never ellipsised to "2…" when the window sits at the app's minimum width */
+.xpra-fit-badge { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 400000; max-width: calc(100% - 12px); padding: 2px 8px; border-radius: var(--radius-sm); font-size: 11px; color: var(--text-secondary); background: color-mix(in srgb, var(--bg-window) 88%, transparent); border: 1px solid var(--border); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* x5: a BLOCKED pane (another client is active) — the terminal's "Resume here" overlay (.term-blocked-*), NO picture */
 .desktop-app-blocked { z-index: 20; }
 .desktop-app-blocked-title { font-size: 13px; font-weight: 600; color: var(--text); max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

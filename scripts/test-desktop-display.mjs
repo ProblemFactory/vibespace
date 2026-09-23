@@ -316,6 +316,8 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
   ok(!args.some((a) => /^--start(-child)?=/.test(a)) && !has('--commands=no'), 'xpra starts NOTHING (the keeper spawns the app as its own leader) and --commands stays on (measured: `no` disables --start too)');
   ok(!has('--mmap=no'), 'NO --mmap=no (measured on 6.5.3: it blocks xpra.net.mmap in sys.modules and every client is then answered "connection error / error accepting new connection")');
   ok(args.some((a) => /^--xvfb=Xvfb -screen 0 4096x2304x24 /.test(a) && /-nolisten tcp/.test(a) && /-auth \$XAUTHORITY/.test(a)) && D.XPRA_GEOMETRY_MAX === '4096x2304', 'the Xvfb framebuffer is capped at 4096x2304 (the RSS: 98 MB vs 192 MB at the 8192x4096 default) with tcp off and the cookie file');
+  ok(has('--dpi=96') && D.XPRA_ARGS({ port: 1, dir: '/d', dpi: 144 }).includes('--dpi=144') && D.XPRA_ARGS({ port: 1, dir: '/d', dpi: 'x' }).includes('--dpi=96') && D.XPRA_ARGS({ port: 1, dir: '/d', dpi: 9999 }).includes('--dpi=96'), 'HiDPI: --dpi = the display\'s font dpi (96 × scale / GDK_SCALE), spelled ALWAYS (96 by default; junk ⇒ 96) — never left to a client');
+  ok(D.PROBE_BINS.includes('xrdb'), 'xrdb is a probed binary (the keeper merges the scale\'s X resources through it)');
   ok(Object.isFrozen(D.LISTEN_PROBES) && typeof D.LISTEN_PROBES.rfb === 'function' && typeof D.LISTEN_PROBES.http === 'function', 'LISTEN_PROBES is a frozen table: rfb (the banner) and http (xpra) — a recipe names its kind, the keeper never spells it');
   // (b) the HTTP probe + waitForListen against a tiny server, and the unknown kind
   const httpSrv = (await import('node:http')).createServer((req, res) => { res.statusCode = 200; res.end('hi'); });
@@ -363,7 +365,7 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
     const parts = [];
     const homeAuth = path.join(process.env.HOME || '', '.Xauthority');
     const homeAuthBefore = fs.existsSync(homeAuth) ? fs.statSync(homeAuth).mtimeMs : null;
-    const ctx = { bins, dir: adir, authFile, cookie: D.newCookie(), geometry: '1280x800', base, logFd, freePort: () => D.freePort(), x11Env: (disp) => D.x11Env(base, { display: disp, authFile }), writeAuth: () => {}, onPart: (part, child, facts) => parts.push({ part, pid: child.pid, facts }), singleton: async () => null };
+    const ctx = { bins, dir: adir, authFile, cookie: D.newCookie(), geometry: '1280x800', base, logFd, dpi: 144, freePort: () => D.freePort(), x11Env: (disp) => D.x11Env(base, { display: disp, authFile }), writeAuth: () => {}, onPart: (part, child, facts) => parts.push({ part, pid: child.pid, facts }), singleton: async () => null };
     let refused = null;
     try { await D.RECIPES['xpra-seamless']({ ...ctx, bins: { xpra: bins.xpra, xauth: null } }); } catch (e) { refused = e; }
     ok(refused && refused.code === 'exec-not-found' && /xauth/.test(refused.message), 'without xauth the recipe refuses BY NAME before anything spawns');
@@ -386,6 +388,27 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
       const members = D.sessionMembers(xpid, { fresh: true });
       ok(members.length >= 2, `xpra's session holds its own Xvfb (${members.length} members: ${members.join(', ')})`);
       ok(!D.environHas(xpid, 'VIBESPACE_DESKTOP_APP=da-display-xpra'), 'MEASURED: xpra rewrites its own environ — the session marker is NOT readable on the xpra pid (the keeper\'s boot belt reaps its leftovers by pid+starttime instead)');
+      // HiDPI (2.369.158): the recipe's ctx.dpi IS the display's font dpi (xpra writes Xft.dpi before any client) and
+      // the keeper's X resources merge into THAT display's database (xterm's Xft face at a scale > 1)
+      const XRDB = D.binOnPath('xrdb', { env: process.env });
+      if (!XRDB) skip('xrdb not on PATH — the display\'s resource database cannot be read here (the keeper then logs that a bitmap-font terminal stays at 1x)');
+      else {
+        const xq = () => new Promise((r) => execFile(XRDB, ['-query'], { env: { ...ctx.x11Env(up.display) }, timeout: 5000 }, (e, out) => r(e ? '' : String(out))));
+        // r2 (the verifier's race): xpra REPLACES the database ~1 s after its display is up — the keeper waits for it
+        const w0 = await D.waitForXftDpi({ binPath: XRDB, env: ctx.x11Env(up.display) });
+        ok(w0.ok === true && w0.dpi === 144 && w0.why === null, `waitForXftDpi resolves once xpra has written the display's font dpi (${w0.dpi} after ${w0.ms} ms of polling)`, w0);
+        const wNo = await D.waitForXftDpi({ binPath: null, env: {} });
+        const wDead = await D.waitForXftDpi({ binPath: XRDB, env: { ...ctx.x11Env(':98765') }, deadlineMs: 400, stepMs: 100 });
+        ok(wNo.ok === false && wNo.why === 'xrdb not on PATH' && wDead.ok === false && /no Xft\.dpi in the display's resources within 400 ms/.test(wDead.why) && wDead.ms < 3000, `CONTROL: no xrdb, and a display that never answers, are REPORTED by name within the deadline — never thrown, never a hang (${wDead.why})`, { wNo, wDead });
+        const q0 = await xq();
+        ok(/^Xft\.dpi:\s+144$/m.test(q0), `xpra started with ctx.dpi 144 ⇒ the display's resource database says Xft.dpi 144 before any client (${(q0.match(/^Xft\.dpi:.*$/m) || ['none'])[0]})`);
+        const merged = await D.applyXResources({ binPath: XRDB, env: ctx.x11Env(up.display), text: 'XTerm*faceName: Monospace\nXTerm*faceSize: 16\n' });
+        const q1 = await xq();
+        ok(merged.ok === true && /^XTerm\*faceName:\s+Monospace$/m.test(q1) && /^XTerm\*faceSize:\s+16$/m.test(q1) && /^Xft\.dpi:\s+144$/m.test(q1), 'applyXResources merges into THAT display (xterm\'s Xft face) and keeps xpra\'s Xft.dpi', merged);
+        const none = await D.applyXResources({ binPath: null, env: {}, text: 'XTerm*faceSize: 16\n' });
+        const empty = await D.applyXResources({ binPath: XRDB, env: {}, text: '' });
+        ok(none.ok === false && none.why === 'xrdb not on PATH' && empty.ok === true, 'CONTROL: without xrdb the merge is REPORTED by name (never thrown — the app still starts); nothing to merge is a no-op');
+      }
       // an app on that display, admitted by the same cookie file, shows up as the ONE seamless window
       const [appName, appPath] = appBin;
       const appArgs = appName === 'xmessage' ? ['-geometry', '300x100+10+10', 'vs xpra rung'] : appName === 'xterm' ? ['-geometry', '80x24', '-T', 'vs-xpra'] : [];

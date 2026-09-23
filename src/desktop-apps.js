@@ -328,6 +328,71 @@ function windowTitleOf(name) {
   return s || null;
 }
 
+// ── HiDPI: the app's SCALE and the knobs that carry it (2.369.158) ─────────
+// The owner (2026-09-23, GNOME Calculator on a devicePixelRatio-2 screen):
+// "the DPI is way too low — nowhere to adjust?". The app is rendered at a
+// SCALE chosen at launch (settings `desktop.appScale`: auto = 2 on a launching
+// client whose devicePixelRatio is 1.5 or more, else 1 — r2, see below) and
+// the xpra client maps pane CSS px → device px, so a 2× screen gets 2× pixels.
+// WHICH KNOBS, MEASURED on this box (xpra 6.5.3, gnome-calculator 50 = GTK 4.22,
+// a GTK 3.24 probe window, xterm; docs/design-desktop-apps.zh.md §7.6):
+//   • GDK_SCALE=2 doubles GTK3 AND GTK4 exactly (calculator min 360x616 →
+//     720x1232; the GTK3 probe 195x53 → 390x106) — the integer part.
+//   • Xft.dpi (xpra's `--dpi`, written into the resource manager AND the
+//     XSETTINGS Xft/DPI) scales FONTS only, in GTK3, GTK4 and an Xft xterm —
+//     and it MULTIPLIES with GDK_SCALE (GDK_SCALE=2 + Xft.dpi 192 = 4× text:
+//     calculator 800x1232, the GTK3 probe 796x168). So the display's font dpi
+//     is 96 × scale / GDK_SCALE: 96 at 1× and 2×, 144 at 1.5× (the fraction).
+//   • GDK_DPI_SCALE is IGNORED by GTK4 (the calculator unchanged) and would
+//     double-count the fraction in GTK3 on top of Xft.dpi — not set.
+//   • xterm's default font is the bitmap `fixed` — no dpi reaches it (6x13
+//     cells under Xft.dpi 96 and 192 alike); an Xft face does (8 → 16 px cells
+//     at faceSize 10, 96 → 192 dpi). At a scale > 1 the display's resource
+//     database gives XTerm/UXTerm an Xft face (`faceName: Monospace`,
+//     `faceSize: 8 × GDK_SCALE`, the fraction again through Xft.dpi).
+//   • Qt: QT_ENABLE_HIGHDPI_SCALING=1 + QT_SCALE_FACTOR=<the integer part>
+//     (Qt derives the fraction from Xft.dpi itself) — NOT measured here (no Qt
+//     application on this box), set per Qt's documented rule.
+//   • 1.5× IS TEXT ONLY FOR GTK (r2, the verifier, measured): GDK_SCALE has no
+//     fraction on X11, so 1.5× = GDK_SCALE 1 + fonts at 144 dpi — the
+//     calculator's minimum 370x616 device px against 360x616 at 1× and 720x1232
+//     at 2×: the widgets stay 1×, only the text grows. On a DPR-1.5 screen
+//     that is a 247x411 CSS pane — keys at 0.67× of their 1×-screen size. So
+//     `auto` never picks it: a DPR ≥ 1.5 screen gets 2 (widgets 1.33× on a
+//     1.5 screen, 1.14× on 1.75), below that 1 (0.8× on a 1.25 screen) — the
+//     nearer of the two integer scales in ratio. 1.5× stays a CHOICE, labelled
+//     for what it does (bigger text in GTK apps, an Xft xterm scales whole).
+//   • The CLIENT's dpi (hello / display-configure) must equal the display's
+//     font dpi: xpra rewrites Xft.dpi to a client's dpi whenever it CHANGES
+//     (measured: 96 → 144 through one display-configure), so a client that
+//     sent 96 × devicePixelRatio would quadruple a GDK_SCALE=2 app's text.
+/** The scales `desktop.appScale` offers (the setting's enum is these + 'auto'). */
+const APP_SCALES = Object.freeze([1, 1.5, 2]);
+/** A launch request's devicePixelRatio: a finite number in 1..3, else the default 1. */
+function normalizeDpr(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 && n <= 3 ? n : 1;
+}
+/** The app's scale from the setting (auto | 1 | 1.5 | 2, as a string or a number) and the launching client's DPR.
+ *  auto = 2 from a DPR of 1.5 up, else 1 — never the text-only 1.5 (see the table above). */
+function appScaleFor(setting, dpr = 1) {
+  const s = setting === undefined || setting === null || setting === '' ? 'auto' : String(setting);
+  if (s !== 'auto') {
+    const n = Number(s);
+    return APP_SCALES.includes(n) ? n : 1;
+  }
+  return normalizeDpr(dpr) >= 1.5 ? 2 : 1;
+}
+/** Every knob a scale sets (see the table above): `{scale, gdkScale, dpi, env, xresources}`. */
+function scaleKnobs(scale) {
+  const s = APP_SCALES.includes(Number(scale)) ? Number(scale) : 1;
+  const gdkScale = s >= 2 ? 2 : 1;
+  const dpi = Math.round(96 * s / gdkScale);
+  const env = { GDK_SCALE: String(gdkScale), QT_ENABLE_HIGHDPI_SCALING: '1', QT_SCALE_FACTOR: String(gdkScale) };
+  const xresources = s > 1 ? ['XTerm', 'UXTerm'].map((c) => `${c}*faceName: Monospace\n${c}*faceSize: ${8 * gdkScale}\n`).join('') : '';
+  return { scale: s, gdkScale, dpi, env, xresources };
+}
+
 // ── registry rows + launch requests ─────────────────────────────────────────
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const ENV_KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
@@ -361,23 +426,26 @@ function validateAppRow(row) {
 /**
  * The launch dialog's two shapes (§2 routes): `{appId}` or `{exec, args, cwd}`.
  * Returns { ok, error, launch } where launch is
- *   { source:'registry', row }  |  { source:'adhoc', row:{ id:null, label, exec, args, cwd } }
+ *   { source:'registry', row, dpr }  |  { source:'adhoc', row:{ id:null, label, exec, args, cwd }, dpr }
+ * `dpr` = the launching client's devicePixelRatio (1..3, absent ⇒ 1; out of range ⇒ refused) —
+ * the input `appScaleFor` turns into the app's scale under `desktop.appScale: auto`.
  * `registry` is the array of rows the keeper serves. Nothing here checks PATH
  * or the file system — the keeper does (exec resolved on PATH, cwd must exist).
  */
 function validateLaunchRequest(body, registry = []) {
   if (!body || typeof body !== 'object') return { ok: false, error: 'expected a JSON object' };
+  if (body.dpr !== undefined && body.dpr !== null && !(Number.isFinite(Number(body.dpr)) && Number(body.dpr) >= 1 && Number(body.dpr) <= 3)) return { ok: false, error: 'dpr must be a number from 1 to 3' };
   if (body.appId !== undefined) {
     if (!ID_RE.test(String(body.appId))) return { ok: false, error: 'appId is not a valid id' };
     const row = registry.find((r) => r.id === body.appId);
     if (!row) return { ok: false, error: `unknown appId ${JSON.stringify(body.appId)}` };
-    return { ok: true, error: null, launch: { source: 'registry', row } };
+    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr) } };
   }
   const row = { id: null, label: cleanStr(body.label, 80) ? body.label : null, exec: body.exec, args: body.args === undefined ? [] : body.args, cwd: body.cwd === undefined || body.cwd === '' ? null : body.cwd };
   if (!row.label) row.label = typeof row.exec === 'string' ? row.exec.split('/').pop().slice(0, 80) : null;
   const v = validateAppRow({ ...row, id: 'adhoc' });
   if (!v.ok) return { ok: false, error: v.error };
-  return { ok: true, error: null, launch: { source: 'adhoc', row } };
+  return { ok: true, error: null, launch: { source: 'adhoc', row, dpr: normalizeDpr(body.dpr) } };
 }
 
 /** The small default registry (§2 "a small default registry"): every row is
@@ -487,13 +555,14 @@ function streamTargetOf(rec) {
 }
 
 /** New record shape (§4) — facts only. */
-function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fallbackWhy, idleTimeoutMs, now }) {
+function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fallbackWhy, idleTimeoutMs, now, scale = 1, dpi = 96 }) {
   return {
     id, label, exec, args: Array.isArray(args) ? args.slice() : [], cwd: cwd || null, env: env && Object.keys(env).length ? { ...env } : undefined,
     source, backend, via: via || null, fallbackWhy: fallbackWhy || null,
     display: null, port: null, pids: { x: null, app: null, server: null, wm: null }, starts: { x: null, app: null, server: null, wm: null },
     startedAt: now, state: 'launching', exitCode: null, lastError: null,
     idleTimeoutMs: Number(idleTimeoutMs) || 0, lastInputAt: now,
+    scale: APP_SCALES.includes(Number(scale)) ? Number(scale) : 1, dpi: Number.isInteger(dpi) && dpi >= 48 && dpi <= 288 ? dpi : 96, // HiDPI (2.369.158): the app's scale + the display's font dpi, fixed at launch
   };
 }
 
@@ -501,7 +570,7 @@ module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
-  validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY,
+  validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs,
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, runawayVerdict, runawayParkVerdict, adoptVerdict, streamTargetOf, newRecord,
 };

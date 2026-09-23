@@ -4403,4 +4403,11 @@ export default {
   "Low priority": "低優先度",
   "Backlog cleanup nudge: items per session": "バックログ整理ナッジ：セッションあたりの項目数",
   "When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.": "1 つのセッションが（自分で引き受けた、または保留した）未解決のバックログ項目をこの数だけ抱えると、そのバックログコマンドとターンごとのバックログ通知が、新しく保留する前に項目の完了・破棄・統合を求めます。0 = 通知しない。",
+  "Scaled to fit — the app needs at least {w}×{h}": "収まるように縮小 — アプリには少なくとも {w}×{h} が必要です",
+  "The scale this app was started at (Settings → Desktop app scale). A change takes effect when the app is launched again.": "このアプリを起動したときのスケール（設定 → デスクトップアプリのスケール）。変更はアプリを再起動したときに反映されます。",
+  "xpra streams each app window as pixels; text stays crisp at your screen’s scale": "xpra は各アプリウィンドウをピクセルとして配信します。文字は画面のスケールで描かれ、くっきり表示されます",
+  "Auto (this screen)": "自動（この画面）",
+  "Desktop app scale (xpra)": "デスクトップアプリのスケール（xpra）",
+  "How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: 2× when the screen you launch it from is scaled 150 % or more, else 1×. 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). A change takes effect when the app is launched again; the window shows its scale in the status bar.": "高解像度の画面で文字をくっきり表示するための、デスクトップアプリ自身の描画サイズ。自動：起動した画面のスケールが 150% 以上なら 2×、それ以外は 1×。1.5× は GTK アプリの文字だけを拡大し、ボタンは 1× のままです（X11 の GTK は小数倍に拡大できません）。変更はアプリを再起動したときに反映され、ウィンドウのステータスバーにスケールが表示されます。",
+  "1.5× (text only in GTK apps)": "1.5×（GTK アプリは文字のみ）",
 };

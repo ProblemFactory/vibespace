@@ -246,7 +246,7 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
  *   dataDir        — the instance's data/ (record + per-app logs)
  *   env            — () => sanitised base env (ws-handler.agentEnv), NEVER process.env
  *   broadcast      — (msg) => void  (desktop-apps-updated)
- *   serverSetting  — (key) => value (desktop.idleTimeoutMin)
+ *   serverSetting  — (key) => value (desktop.idleTimeoutMin, desktop.backendPrefs, desktop.appScale)
  *   getTelemetry   — () => telemetry | null
  *   singleton      — optional () => ({ running, display, port, authFile, refresh? }) — the
  *                    pre-existing in-container desktop (src/vnc.js) for the
@@ -543,7 +543,11 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     const line = M.fallbackLogLine(resolved);
     if (line) log.log?.(line);
     const id = newId();
-    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: row.args || [], cwd, env: row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin() * 60000, now: now() });
+    // HiDPI (2.369.158): the app's SCALE is decided ONCE, here, from `desktop.appScale` and the launching
+    // client's devicePixelRatio — on the xpra rung only (its client maps CSS px → device px; a whole-display
+    // rung's picture is CSS px, so an app scaled there would only look twice as big). A change needs a relaunch.
+    const knobs = backend.stream === 'xpra' ? M.scaleKnobs(M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr)) : M.scaleKnobs(1);
+    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: row.args || [], cwd, env: row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin() * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi });
     if (v.launch.source === 'registry') rec.appId = row.id;
     rec.recipe = resolved.recipe;
     store.apps[id] = rec;
@@ -610,7 +614,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
       const authFile = path.join(dir, 'Xauthority');
       display.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }]);
       const ctx = {
-        bins: f.bins, dir, authFile, cookie, geometry, base, logFd,
+        bins: f.bins, dir, authFile, cookie, geometry, base, logFd, dpi: rec.dpi || 96,
         freePort: () => display.freePort(),
         x11Env: (disp) => display.x11Env(base, { display: disp, authFile }),
         writeAuth: (disp) => display.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }, { display: disp, cookieHex: cookie }]),
@@ -643,9 +647,23 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
         if (wm) ctx.onPart('wm', wm.child, {});
         if (gone()) return;
       } else commit();
-      // the app itself — the sanitised env + the row's own + the display
-      const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(rec.env || {}) };
+      // the app itself — the sanitised env + the scale's knobs + the row's own (a row may pin GDK_SCALE) + the display
+      const knobs = M.scaleKnobs(rec.scale || 1);
+      const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.streamKindOf(rec, backends) === 'xpra' ? knobs.env : {}), ...(rec.env || {}) };
       if (!sessionAuth) delete appEnv.XAUTHORITY;
+      // r2 (the verifier's race): xpra REPLACES the display's resource database ~1 s after its display is up — an app
+      // started before read no Xft.dpi (Xvfb's 100 dpi: a "1.5×" xterm got a 7×14 cell) and a merge before it was wiped.
+      // Wait for xpra's write (bounded; a miss is logged, the app still starts), THEN merge, THEN start the app.
+      if (own && M.streamKindOf(rec, backends) === 'xpra') {
+        const xd = await display.waitForXftDpi({ binPath: f.bins.xrdb, env: appEnv }); // wall clock (an injected test clock never stalls a real display wait)
+        if (!xd.ok) log.warn?.(`[desktop] ${id}: ${xd.why} — the app starts without the display's font dpi`);
+        if (gone()) return;
+      }
+      if (own && knobs.xresources) { // an Xft face for xterm at a scale > 1 (its bitmap default no dpi reaches) — on OUR display only, before the app reads its resources
+        const xr = await display.applyXResources({ binPath: f.bins.xrdb, env: appEnv, text: knobs.xresources });
+        if (!xr.ok) log.warn?.(`[desktop] ${id}: ${xr.why} — a bitmap-font terminal stays at 1x on this ${rec.scale}x display`);
+        if (gone()) return;
+      }
       const a = await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: appEnv, logFd });
       ctx.onPart('app', a, {});
       if (gone()) return;

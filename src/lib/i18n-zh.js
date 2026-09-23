@@ -4404,4 +4404,11 @@ export default {
   "Low priority": "低优先级",
   "Backlog cleanup nudge: items per session": "待办清理提醒：每会话条目数",
   "When one session holds this many open backlog items (claimed or parked by it), its backlog commands and its per-turn backlog note ask it to finish, drop or merge items before parking more. 0 = never.": "当一个会话持有这么多未完成的待办条目（由它认领或搁置）时，它的待办命令和每轮待办提示会要求它先完成、丢弃或合并条目，再搁置新的。0 = 从不提醒。",
+  "Scaled to fit — the app needs at least {w}×{h}": "已缩放以适应 — 应用至少需要 {w}×{h}",
+  "The scale this app was started at (Settings → Desktop app scale). A change takes effect when the app is launched again.": "此应用启动时的缩放（设置 → 桌面应用缩放）。修改后需重新启动应用才会生效。",
+  "xpra streams each app window as pixels; text stays crisp at your screen’s scale": "xpra 把每个应用窗口作为像素流传输；文字按你屏幕的缩放渲染，保持清晰",
+  "Auto (this screen)": "自动（当前屏幕）",
+  "Desktop app scale (xpra)": "桌面应用缩放（xpra）",
+  "How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: 2× when the screen you launch it from is scaled 150 % or more, else 1×. 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). A change takes effect when the app is launched again; the window shows its scale in the status bar.": "桌面应用绘制自身的尺寸，用于在高分辨率屏幕上获得清晰的文字。自动：从缩放 150% 及以上的屏幕启动时为 2×，否则为 1×。1.5× 只放大 GTK 应用的文字 — 按钮仍为 1×（X11 上 GTK 不能按小数缩放）。修改后需重新启动应用才会生效；窗口的状态栏会显示它的缩放。",
+  "1.5× (text only in GTK apps)": "1.5×（GTK 应用仅放大文字）",
 };

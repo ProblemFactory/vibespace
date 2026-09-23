@@ -1,4 +1,5 @@
 import { attachPopoverClose, escHtml, uiScale } from './utils.js';
+import { minOf, clampToMin, raiseToMin, keepInside } from './window-min-size.js';
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { showWindowContextMenu } from './taskbar.js';
@@ -101,7 +102,7 @@ class WindowManager {
     el.append(titleBar, content); this.workspace.appendChild(el);
 
     const winInfo = { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, backendIconSlot, agentKindSlot, content, title, type,
-      isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false,
+      isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false, minWidth: null, minHeight: null,
       _typeIcon: windowTypeIcon(type), _tabChain: null, titleMeta: { ...(titleMeta || {}) },
       // All document-level listeners for this window register with this signal
       // and are removed together on close (they used to leak per window).
@@ -198,6 +199,7 @@ class WindowManager {
       if (win.gridBounds && !win.isMinimized && !win.isMaximized) {
         this._applyGridBounds(win);
       }
+      if (win.minWidth || win.minHeight) this._applyOwnMin(win); // the workspace cap follows the workspace (r2)
     }
   }
 
@@ -630,6 +632,7 @@ class WindowManager {
         this._captureGridBounds(win);
         if (win._tabChain) this._syncChainBounds(win._tabChain);
         this._scheduleOverlapUpdate(); this._notify();
+        if (win.onMoved) { try { win.onMoved(); } catch {} } // a MOVE (no resize): a device-pixel-exact surface re-snaps (the xpra view, 2.369.158)
       }, 250);
     };
     const signal = win._listenerCtl?.signal;
@@ -669,10 +672,13 @@ class WindowManager {
           const dx = (e.clientX - sX) / uiScale(), dy = (e.clientY - sY) / uiScale();
           let newL = sL, newT = sT, newW = sW, newH = sH;
 
-          if (dir.includes('e')) newW = Math.max(320, sW + dx);
-          if (dir.includes('w')) { newW = Math.max(320, sW - dx); newL = sL + sW - newW; }
-          if (dir.includes('s')) newH = Math.max(180, sH + dy);
-          if (dir.includes('n')) { newH = Math.max(180, sH - dy); newT = sT + sH - newH; }
+          // the window's minimum (the .window floor, or its own — a desktop app's size constraints, 2.369.158):
+          // the drag STOPS there, the opposite edge stays put (window-min-size.js)
+          const min = this._ownMinOf(win); // capped at the workspace (r2): never a window the screen cannot hold
+          if (dir.includes('e')) newW = Math.max(min.w, sW + dx);
+          if (dir.includes('w')) { newW = Math.max(min.w, sW - dx); newL = sL + sW - newW; }
+          if (dir.includes('s')) newH = Math.max(min.h, sH + dy);
+          if (dir.includes('n')) { newH = Math.max(min.h, sH - dy); newT = sT + sH - newH; }
 
           if (this.grid && !e.altKey) {
             const gl = this._getGridLines();
@@ -682,8 +688,9 @@ class WindowManager {
             if (dir.includes('n')) { const snapped = this._snapVal(newT, gl.y, SNAP_T); newH = newH + (newT - snapped); newT = snapped; }
           }
 
+          ({ left: newL, top: newT, width: newW, height: newH } = clampToMin({ left: newL, top: newT, width: newW, height: newH }, dir, min)); // a grid snap never takes it below
           win.element.style.left = newL + 'px'; win.element.style.top = newT + 'px';
-          win.element.style.width = Math.max(320, newW) + 'px'; win.element.style.height = Math.max(180, newH) + 'px';
+          win.element.style.width = newW + 'px'; win.element.style.height = newH + 'px';
           if (win.onResize) win.onResize();
         };
         // rAF-coalesce: win.onResize() per raw mousemove means an xterm fit()
@@ -712,6 +719,61 @@ class WindowManager {
         document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
       });
     });
+  }
+
+  /**
+   * A window's OWN minimum size (layout px; 2.369.158 — a desktop-app window from its app's size
+   * constraints; null clears it). The terminal's rule, per window: the inline min-width/min-height
+   * holds it through snap zones, grid cells, presets, maximize and layout restore (a cell smaller than
+   * the minimum leaves the window at its minimum, overlapping the next cell — never squeezed), the
+   * resize drag stops at it, and an open window below it is raised NOW (its top-left kept, or slid
+   * up/left just enough to stay on the workspace). NEVER LARGER THAN THE WORKSPACE (r2): the minimum is
+   * capped at the workspace box and re-capped when the workspace resizes — a minimum the screen cannot
+   * hold leaves the content smaller than it wants, and the content scales (the desktop-app view's badge).
+   * The ≤768 px phone layout ignores it (style.css) — there the content scales instead.
+   */
+  setMinSize(id, size) {
+    const win = this.windows.get(id); if (!win) return;
+    const w = size && Number(size.w) > 0 ? Math.ceil(size.w) : null, h = size && Number(size.h) > 0 ? Math.ceil(size.h) : null;
+    if (win.minWidth === w && win.minHeight === h) return;
+    win.minWidth = w; win.minHeight = h;
+    this._applyOwnMin(win);
+  }
+
+  /** The workspace box (layout px) a window's own minimum is capped at; null while the workspace is not laid out. */
+  _workspaceBox() {
+    const w = this.workspace.offsetWidth, h = this.workspace.offsetHeight;
+    return w > 0 && h > 0 ? { w, h } : null;
+  }
+  /** A window's effective minimum: its own (or the floor), capped at the workspace (window-min-size.js minOf). */
+  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }
+
+  /**
+   * Apply a window's own minimum: the inline min-width/min-height (the workspace-capped value — re-applied
+   * when the workspace resizes, so a larger screen gets the app's full minimum back) and, off the phone
+   * layout and unless maximized, a window below it RAISED now and slid inside the workspace when it fits.
+   */
+  _applyOwnMin(win) {
+    const el = win.element, own = !!(win.minWidth || win.minHeight), min = this._ownMinOf(win);
+    // measured BEFORE the inline min (which would already report the raised box); a window that is not rendered
+    // (minimized = display:none ⇒ offset 0) is judged by its inline size — never "raised" from a zero measurement
+    let before = { width: el.offsetWidth, height: el.offsetHeight };
+    if (!(before.width > 0) || !(before.height > 0)) before = { width: parseFloat(el.style.width) || Infinity, height: parseFloat(el.style.height) || Infinity };
+    const mw = win.minWidth ? `${min.w}px` : '', mh = win.minHeight ? `${min.h}px` : '';
+    if (el.style.minWidth !== mw) el.style.minWidth = mw;
+    if (el.style.minHeight !== mh) el.style.minHeight = mh;
+    if (!own || win.isMaximized || this._mobileLayout()) return;
+    const r = raiseToMin(before, min);
+    if (!r.raised) return;
+    const ws = this._workspaceBox();
+    const k = keepInside({ left: el.offsetLeft, top: el.offsetTop, width: r.width, height: r.height }, ws);
+    el.style.width = r.width + 'px'; el.style.height = r.height + 'px';
+    if (k.moved) { el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; }
+    if (win.gridBounds) this._captureGridBounds(win);
+    if (win._tabChain) this._syncChainBounds(win._tabChain);
+    if (win.onResize) win.onResize();
+    this._scheduleOverlapUpdate();
+    this._notify();
   }
 
   // ── Snap Zones ──

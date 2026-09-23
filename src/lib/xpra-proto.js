@@ -44,8 +44,14 @@
 // package manager keeps it matched to the xpra on that machine); everything
 // above the packets is this file, xpra-client.js and xpra-view.js.
 
-/** The window metadata keys this client understands (xpra-html5 v21's list). */
-export const METADATA_SUPPORTED = Object.freeze(['fullscreen', 'maximized', 'iconic', 'above', 'below', 'title', 'size-hints', 'class-instance', 'transient-for', 'window-type', 'has-alpha', 'decorations', 'override-redirect', 'tray', 'modal', 'opacity', 'desktop', 'shadow']);
+/** The window metadata keys this client understands (xpra-html5 v21's list + `size-constraints`).
+ *  `size-constraints` IS THE 6.x NAME of the X size hints (2.369.158, MEASURED on 6.5.3): the server
+ *  only sends the keys a client lists, and v21's list says `size-hints` (the pre-4 name) — so until
+ *  this entry no window ever carried its minimum / increment, the fit belt ran blind and GNOME
+ *  Calculator (minimum 360x616) was asked for a shorter pane, clamped by X and cropped (the owner's
+ *  2026-09-23 report). With it: calculator `{increment:[2,2], minimum-size:[720,1232]}` at GDK_SCALE=2,
+ *  xterm `{base-size:[4,4], increment:[6,13], minimum-size:[10,17]}`. */
+export const METADATA_SUPPORTED = Object.freeze(['fullscreen', 'maximized', 'iconic', 'above', 'below', 'title', 'size-hints', 'size-constraints', 'class-instance', 'transient-for', 'window-type', 'has-alpha', 'decorations', 'override-redirect', 'tray', 'modal', 'opacity', 'desktop', 'shadow']);
 
 /** Picture encodings this client can paint. NO rgb32/rgb24 on purpose: raw
  *  pixel data may arrive lz4-compressed inside the packet and the decoder for
@@ -222,6 +228,59 @@ export function placeInside({ x, y, w, h }, { paneW, paneH }) {
   if (nx < 0) nx = 0;
   if (ny < 0) ny = 0;
   return { x: nx, y: ny, w, h, moved: nx !== x || ny !== y };
+}
+
+/**
+ * HiDPI (2.369.158): the pane in DEVICE px — what the X display and every geometry packet speak
+ * (the view hands the client CSS px × devicePixelRatio, so a 2× screen gets an app rendered with 2×
+ * pixels drawn 1:1; the canvas's CSS size is device / ratio). A ratio that is not a finite positive
+ * number is 1.
+ * ROUNDED DOWN, never to the nearest (the verifier, DPR 1.5: 733 CSS × 1.5 = 1099.5 → 1100 device
+ * px, whose CSS box 733.33 overflowed the 733 pane ⇒ the stage took a 0.9995 transform, the picture
+ * was RESAMPLED — blurred, 4 % of its pixels off — and the "Scaled to fit" badge showed on a pane
+ * that holds the app): the device pane's CSS box (device ÷ ratio) is never larger than the pane.
+ * `minPaneCss` rounds UP, so a pane of exactly the minimum still holds it (floor(ceil(m/r)·r) ≥ m).
+ * The 1e-6 absorbs float noise (700 × 1.15 = 804.9999…) so an exact product is never a pixel short.
+ */
+export function pixelRatioOf(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(4, n) : 1; }
+export function devicePane({ width, height }, ratio = 1) {
+  const r = pixelRatioOf(ratio);
+  return { width: Math.max(1, Math.floor((Number(width) || 1) * r + 1e-6)), height: Math.max(1, Math.floor((Number(height) || 1) * r + 1e-6)) };
+}
+/**
+ * THE WHOLE-CSS-PX BACKING (r2, MEASURED): Chrome paints a canvas into its box snapped to WHOLE CSS
+ * px — a box of 1346 / 1.5 = 897.33… CSS (DPR 1.5, a calculator: 1.5 % of the pixels off a 1:1 copy)
+ * or even 1395 / 2 = 697.5 CSS (DPR 2, an xterm 1395 device px wide: 18.6 % off, every glyph edge
+ * softened) is RESAMPLED; the same canvases with a whole-CSS-px box are the screen pixel for pixel.
+ * `gridStep(r)` is the smallest device-px step k (≤ 16) whose CSS size k / r is a WHOLE CSS px
+ * (DPR 2 ⇒ 2, 1.5 ⇒ 3, 1.25 ⇒ 5, 1.75 ⇒ 7, 1.1 ⇒ 11, 1 ⇒ 1); a ratio with none is 1 (no padding —
+ * it cannot be exact). `backingSize(n, r)` = n rounded UP to
+ * that step: the view sizes each window's canvas backing to it (the window's pixels at 0,0, the
+ * < k-px transparent margin clipped by the window's own box), so the canvas box is exact.
+ */
+export function gridStep(ratio = 1) {
+  const r = pixelRatioOf(ratio);
+  for (let k = 1; k <= 16; k++) { const u = k / r; if (Math.abs(u - Math.round(u)) < 1e-6) return k; }
+  return 1;
+}
+export function backingSize(n, ratio = 1) {
+  const k = gridStep(ratio), v = Math.max(1, Math.ceil(Number(n) || 1));
+  return Math.ceil(v / k) * k;
+}
+
+/**
+ * The SMALLEST pane (CSS px) the app window fits in without scaling, from its size constraints
+ * (device px): `minimum-size`, else `base-size` (ICCCM: an unset minimum defaults to the base),
+ * divided by the ratio and rounded UP — so `devicePane(minPaneCss(h, r), r)` is never below the
+ * minimum. A pane at least this big gets a fit that is never larger than the pane (fitGeometry snaps
+ * DOWN to the increment grid and only then raises to the minimum). No hints (or neither size) ⇒ null.
+ */
+export function minPaneCss(constraints, ratio = 1) {
+  const c = constraints || {};
+  const m = sizePair(c['minimum-size']) || sizePair(c['base-size']);
+  if (!m) return null;
+  const r = pixelRatioOf(ratio);
+  return { w: Math.ceil(m[0] / r - 1e-9), h: Math.ceil(m[1] / r - 1e-9) };
 }
 
 /** The size hints of a window's metadata under either name xpra has used. */

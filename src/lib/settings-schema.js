@@ -130,6 +130,16 @@ const SETTINGS_SCHEMA = {
     description: t('A desktop application window with no input for this long is stopped; 0 = never. "Keep running" in a window exempts that app.'),
     category: t('Window'), liveApply: true,
   },
+  'desktop.appScale': {
+    type: 'enum', default: 'auto', options: [
+      { value: 'auto', label: t('Auto (this screen)') },
+      { value: '1', label: '1×' },
+      { value: '1.5', label: t('1.5× (text only in GTK apps)') },
+      { value: '2', label: '2×' },
+    ], label: t('Desktop app scale (xpra)'),
+    description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: 2× when the screen you launch it from is scaled 150 % or more, else 1×. 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). A change takes effect when the app is launched again; the window shows its scale in the status bar.'),
+    category: t('Window'), liveApply: true,
+  },
   'desktop.backendPrefs': {
     type: 'string', default: '',
     label: t('Desktop app display backend order'),

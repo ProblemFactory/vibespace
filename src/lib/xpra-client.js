@@ -42,6 +42,27 @@
 //   invents a keycode (measured on 6.5.3, see xpra-proto.js).
 // • `viewOnly` (the window-live Watch mode) drops every input at the source;
 //   the bridge would drop it anyway — the client MIRRORS the verdict.
+// • HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the session
+//   speaks DEVICE px. `screen` and `resize()` take the pane in CSS px and
+//   `ratio` (the view's devicePixelRatio, a number or a function read at
+//   every resize) turns it into device px (`devicePane`) — the hello's
+//   desktop size, every display-configure, every fit and so every
+//   configure-window; windows, draws and pointer coordinates are device px
+//   (the view divides for CSS and multiplies the pointer). `dpi` is the
+//   DISPLAY's font dpi (the record's, 96 × scale / GDK_SCALE) and never
+//   96 × ratio: xpra rewrites Xft.dpi to a client's dpi when it changes
+//   (measured), which would quadruple a GDK_SCALE=2 app's text.
+//   `on.constraints(hints|null)` names the MAIN window's size constraints
+//   (device px) whenever the main window or its constraints change — the
+//   view turns them into the smallest pane (`minPaneCss`) and the window
+//   manager clamps the VibeSpace window to it; the fit never asks for less
+//   than the minimum (a smaller pane shows the picture scaled to fit).
+//   THE DISPLAY CONTAINS THE WINDOW IT PLACES (r2, the verifier on a 320x568
+//   phone): the display size sent is max(the pane, the main window's fit) —
+//   a display the size of the pane under an app fitted to its larger
+//   minimum left X clamping the pointer at the display's last row, so the
+//   scaled picture's lower keypad rows could not be clicked. `displayFor()`
+//   is the ONE rule; every display packet goes through `syncDisplay()`.
 // • x5 (docs/design-desktop-apps §7 P8-2 "x5 多客户端 = 单活跃 viewer"): ONE
 //   viewer of a window is ACTIVE. `watch` (an agent drives the window) sends
 //   NO geometry at all — no fit, no belt, `resize()` only remembers the pane,
@@ -65,25 +86,30 @@ export function defaultDecode(bytes, mime) {
 }
 
 /**
- * createXpraClient({ url, workerUrl, screen:{width,height}, dpi, layout, on, Worker, decode, now, log })
+ * createXpraClient({ url, workerUrl, screen:{width,height} (CSS px), dpi (the display's font dpi), ratio (devicePixelRatio: number | () => number), layout, on, Worker, decode, now, log })
  *   on.status(state, detail)   'connecting' | 'connected' | 'closed'
+ *   on.constraints(hints|null) the MAIN window's size constraints (device px) — on every change
  *   on.window(kind, win)       'new' | 'geometry' | 'raise' | 'meta' | 'lost'
  *   on.paint(win, op)          {type:'image', img, x, y, w, h} | {type:'scroll', moves}
  *   on.title(text) / on.icon({w,h,data}) / on.clipboard(text) / on.cursor(cur|null) / on.ready()
  * Returns the session handle (see the tail).
  */
-export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS } = {}) {
+export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
   const ime = new P.ImeKeymap();
   const wheel = new P.WheelAccumulator();
   let worker = null, state = 'idle', closedReason = null;
   let serverCaps = null, packetTypes = [];
-  let pane = { width: Math.max(1, Math.floor(screen?.width || 1)), height: Math.max(1, Math.floor(screen?.height || 1)) };
+  const ratioNow = () => P.pixelRatioOf(typeof ratio === 'function' ? ratio() : ratio);
+  let cssPane = { width: Math.max(1, Math.floor(screen?.width || 1)), height: Math.max(1, Math.floor(screen?.height || 1)) };
+  let pane = P.devicePane(cssPane, ratioNow()); // DEVICE px — what X, the fit and the pointer speak
+  let lastConstraints; // the main window's size constraints last announced (undefined = never)
   let mainWid = 0, focusedWid = 0, zTop = 0;
   let helloTimer = null, pingTimer = null;
   let lastPaste = null, lastReceived = null, viewOnly = false;
-  let watch = false, dormant = false, helloPane = null; // x5 (see the header)
+  let watch = false, dormant = false; // x5 (see the header)
+  let sentDisplay = null; // the display size this client last asked for (device px) — the hello's desktop size first
   const unknownTypes = new Set();
 
   const send = (packet) => { if (!worker || state === 'closed') return false; try { worker.postMessage({ c: 's', p: packet }); return true; } catch (e) { log?.warn?.(`[xpra] send failed: ${e && e.message}`); return false; } };
@@ -99,17 +125,42 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
 
   // ── windows ──────────────────────────────────────────────────────────────
   const winTitle = (meta) => P.bytesToString(meta && meta.title != null ? meta.title : '');
+  /** HiDPI / min size: tell the view the MAIN window's constraints (device px) when they change. */
+  const announceConstraints = () => {
+    const main = mainWid ? windows.get(mainWid) : null;
+    const c = main ? P.sizeHintsOf(main.meta) : null;
+    const key = c ? JSON.stringify(c) : null;
+    if (key === lastConstraints) return;
+    lastConstraints = key;
+    emit('constraints', c ? { ...c } : null);
+  };
+  /** The display size (device px): the pane, grown to CONTAIN the main window's fit (its minimum may be larger than the pane). */
+  const displayFor = () => {
+    const main = mainWid ? windows.get(mainWid) : null;
+    const g = main && main.kind === 'main' ? P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(main.meta)) : null;
+    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };
+  };
+  /** Ask for `displayFor()` when it differs from what this client last asked (or always, `force`) — never in Watch/before the hello. */
+  function syncDisplay(force = false) {
+    if (state !== 'connected' || watch) return;
+    const d = displayFor();
+    if (!force && sentDisplay && sentDisplay.width === d.width && sentDisplay.height === d.height) return;
+    sentDisplay = d;
+    send(P.displayPacket(packetTypes, { width: d.width, height: d.height, dpi }));
+  }
   const pickMain = () => {
     if (mainWid && windows.has(mainWid)) return;
     const next = [...windows.values()].find((w) => w.kind === 'main') || null;
     mainWid = next ? next.wid : 0;
     if (next) { emit('title', next.title); refit(next); }
-    else emit('title', '');
+    else { emit('title', ''); syncDisplay(); } // no main: the display is the pane again
+    announceConstraints();
   };
   /** The main window follows the pane: a new fit ⇒ configure-window (the server confirms with window-move-resize / window-resized). */
   const refit = (win) => {
     if (!win || win.wid !== mainWid || win.kind !== 'main' || watch) return;
     const g = P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(win.meta));
+    syncDisplay(); // the display follows the fit FIRST (a minimum larger than the pane grows it; a smaller one gives it back)
     if (g.x === win.x && g.y === win.y && g.w === win.w && g.h === win.h) return;
     Object.assign(win, g);
     beltOf(win).at = now(); // a client-initiated fit: a packet inside the gap is its confirmation
@@ -159,8 +210,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
     else if (kind !== 'popup') { const placed = P.placeInside(g, { paneW: pane.width, paneH: pane.height }); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // a dialog OR a second top-level: inside, never lost off the pane
     const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve() };
     windows.set(wid, win);
-    if (isMain) { mainWid = wid; emit('title', win.title); }
+    if (isMain) { mainWid = wid; emit('title', win.title); syncDisplay(); } // the display contains the fit before the map
     emit('window', 'new', win);
+    if (isMain) announceConstraints();
     if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }
   };
   const lostWindow = (wid) => {
@@ -224,7 +276,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
     switch (type) {
       case 'open': // the worker's own event: the socket is up ⇒ hello
         emit('status', 'connecting');
-        helloPane = { ...pane };
+        sentDisplay = { ...pane };
         send(['hello', P.helloCaps({ width: pane.width, height: pane.height, dpi, uuid: uuid || `vibespace-${Math.random().toString(36).slice(2, 10)}`, layout })]);
         return;
       case 'close': finish(closedReason || P.bytesToString(p[1]) || 'the connection closed'); return;
@@ -235,8 +287,8 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
         packetTypes = Array.isArray(serverCaps['packet-types']) ? serverCaps['packet-types'].map(P.bytesToString) : [];
         send(P.keyboardConfigPacket(packetTypes, { layout }));
         // x5: a hello held while this pane was blocked carried the pane of THAT moment — the display follows the pane of now
-        if (!watch && helloPane && (helloPane.width !== pane.width || helloPane.height !== pane.height)) send(P.displayPacket(packetTypes, { width: pane.width, height: pane.height, dpi }));
         state = 'connected';
+        syncDisplay();
         emit('status', 'connected', { version: P.bytesToString(serverCaps.version || '') });
         clearInterval(pingTimer);
         pingTimer = setInterval(() => send(P.pingPacket(now())), PING_EVERY_MS);
@@ -259,7 +311,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
         if (!win) return;
         Object.assign(win.meta, meta);
         if ('title' in meta) { win.title = winTitle(meta); if (win.wid === mainWid) emit('title', win.title); }
-        if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); }
+        if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); if (win.wid === mainWid) announceConstraints(); }
         emit('window', 'meta', win);
         return;
       }
@@ -310,7 +362,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
   function setWatch(v) {
     const was = watch; watch = !!v;
     if (!was || watch || state !== 'connected') return;
-    send(P.displayPacket(packetTypes, { width: pane.width, height: pane.height, dpi }));
+    syncDisplay(true); // the watched viewer set the display — this pane's is asked for again, whatever it last sent
     for (const win of windows.values()) resetBelt(win);
     refit(windows.get(mainWid));
     for (const win of windows.values()) if (win.wid !== mainWid && win.kind !== 'popup') belt(win, 'active again');
@@ -318,12 +370,15 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
   function setDormant(v) { dormant = !!v; if (dormant) clearTimeout(helloTimer); else if (worker) armHello(); }
 
   // ── input (every method is a no-op in view-only) ─────────────────────────
+  /** The pane in CSS px; the device size (× the ratio of NOW — a monitor move changes it) is what is sent. */
   const resize = (width, height) => {
-    const w = Math.max(1, Math.floor(width || 1)), h = Math.max(1, Math.floor(height || 1));
+    cssPane = { width: Math.max(1, Math.floor(width || 1)), height: Math.max(1, Math.floor(height || 1)) };
+    const d = P.devicePane(cssPane, ratioNow());
+    const w = d.width, h = d.height;
     if (w === pane.width && h === pane.height) return;
     pane = { width: w, height: h };
     if (state !== 'connected' || watch) return; // x5 Watch: the pane is remembered, the geometry is the active viewer's (the view scales)
-    send(P.displayPacket(packetTypes, { width: w, height: h, dpi }));
+    syncDisplay();
     for (const win of windows.values()) resetBelt(win); // a new pane is a new target: an app that won the last fight is fitted again
     refit(windows.get(mainWid));
     for (const win of windows.values()) if (win.wid !== mainWid && win.kind !== 'popup') belt(win, 'pane resized'); // a shrunk pane keeps dialogs inside
@@ -397,7 +452,9 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, layout = 'u
     connect, close: () => finish('closed by the window'), send, resize, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
     get state() { return state; }, get closedReason() { return closedReason; }, get windows() { return windows; }, get mainWid() { return mainWid; }, get focusedWid() { return focusedWid; },
     beltState: (wid) => { const w = windows.get(wid); return w && w.belt ? { at: w.belt.at, fights: w.belt.fights, gaveUp: w.belt.gaveUp, pending: !!w.belt.timer } : null; },
-    get pane() { return pane; }, get serverCaps() { return serverCaps; }, get packetTypes() { return packetTypes; },
+    get pane() { return pane; }, get display() { return sentDisplay ? { ...sentDisplay } : null; }, get cssPane() { return cssPane; }, get ratio() { return ratioNow(); }, get dpi() { return dpi; },
+    get mainConstraints() { const m = mainWid ? windows.get(mainWid) : null; const c = m ? P.sizeHintsOf(m.meta) : null; return c ? { ...c } : null; },
+    get serverCaps() { return serverCaps; }, get packetTypes() { return packetTypes; },
     get viewOnly() { return viewOnly; }, set viewOnly(v) { viewOnly = !!v; },
     get watch() { return watch; }, set watch(v) { setWatch(v); }, get dormant() { return dormant; }, set dormant(v) { setDormant(v); },
     get lastPaste() { return lastPaste; }, get lastReceived() { return lastReceived; },

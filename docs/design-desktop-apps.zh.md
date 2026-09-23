@@ -187,6 +187,51 @@ owner 原话：“直接block掉非active客户端的app界面，因为多客户
 | LOW-2（test-desktop-xpra-window §5，真 xpra + xterm，恶意标题 `vs-x5 <b>"t"</b> & <i>x</i>`） | B blocked 时覆盖层与标题栏都是该标题原文（0 个子元素）；A 被切断后的覆盖层同上；对照（去掉加入时读取的 keeper 副本）：记录没有标题，只能显示 label |
 | Watch 不放大（test-desktop-xpra-window §5） | A 的 pane 1078×633 大于应用窗口 698×433 ⇒ 舞台缩放 1（不设上限的适配值 1.462）、画布 698×433 即窗口本身尺寸、留白 左/右 190/190、上/下 100/100（后台标签页不跑渲染步，ResizeObserver 的重新适配等到标签页被显示——实测先读到未居中的 0/380） |
 
+### 7.6 HiDPI + 应用的最小尺寸（2.369.158，owner 报障 2026-09-23；本机 xpra v6.5.3 + gnome-calculator 50（GTK 4.22）+ 一个 GTK 3.24 探针窗口 + xterm，worktree 服务器 + deviceScaleFactor 2 的无头 Chrome）
+
+owner 在 devicePixelRatio 2 的屏幕上用 xpra 级打开 GNOME Calculator 截图报了三件事，原话：
+1. 应用被 resize 成 pane 大小了，但**高度不对**——键盘下面几行被裁掉：“如果内窗口有最小高度，外窗口的 resize 也要被限制在这个高度”。
+2. “DPI 太低了——没有地方可以调吗？”
+3. “看起来还是像 VNC，我以为你们是在前端渲染 X11 窗口”。
+
+**根因（实测）。** (1) 客户端 hello 的 `metadata.supported` 抄的是 xpra-html5 v21 的清单，里面只有 `size-hints`（4.x 之前的名字）；xpra 6.x 的名字是 `size-constraints`，而服务端**只发客户端列出的键**——计算器的 new-window 只带 `has-alpha,title,class-instance,window-type,decorations`。所以 x2 以来的贴合皮带一直是“盲的”：从没收到过最小尺寸，按 pane 请求一个比 616 px 矮的高度，X 按最小值夹住，pane 把多出来的部分裁掉——就是截图。加上 `size-constraints` 后：1× 时计算器 `{increment:[2,2], minimum-size:[360,616]}`，xterm `{base-size:[4,4], increment:[6,13], minimum-size:[10,17]}`。(2) pane 的 CSS px 就是 X px（§9-7），应用按 96 dpi 渲染，2× 屏幕再把位图放大 2 倍。(3) xpra **本来就是**逐窗口的像素流（damage 区域，png/webp/jpeg/h264），不是矢量/DOM 渲染；“像 VNC”的是那张被放大的 96 dpi 位图（以及文字上的有损编码）。
+
+**做了什么。**
+- **HiDPI 端到端。** 启动请求带上发起客户端的 `devicePixelRatio`（`POST /api/desktop/apps` 的 `dpr`，1..3，缺省 1，越界按名拒绝）；新设置 `desktop.appScale`（auto | 1 | 1.5 | 2，默认 auto；r1 的 auto = 发起屏幕的 DPR 取整到 0.5、夹在 1..2——r2 改为 DPR ≥ 1.5 取 2、否则 1，见下文 r2）在**启动时**决定应用的 SCALE，记录带 `scale` 与 `dpi`；改设置要重新启动应用才生效（设置说明里写明，窗口状态条的 `2×` 芯片显示当前缩放）。客户端把 pane 的 CSS px × DPR 作为**设备像素**发给 hello 的桌面尺寸、每个 display-configure、每次贴合的 configure-window（仍按应用的 increment 取整）；每个窗口 canvas 的 backing store 是设备像素、CSS 盒子是设备 ÷ DPR（2× 屏幕上 1:1，清晰）；指针 CSS → 设备（再穿过 stage 的缩放）；UI 缩放的 counter-zoom（net zoom 1）不变，Watch 的舞台缩放与 1/DPR 组合。DPR 变化（换显示器、浏览器缩放）由分辨率媒体查询触发重新布局。
+- **哪些旋钮真的有效（逐项实测，只留有效的）：** GDK_SCALE=2 让 GTK3 与 GTK4 **精确**翻倍（计算器最小 360x616 → 720x1232；GTK3 探针 195x53 → 390x106）；Xft.dpi（xpra 的 `--dpi`，同时写进 resource manager 与 XSETTINGS）只放大**字体**，并且与 GDK_SCALE **相乘**——GDK_SCALE=2 + 192 dpi = 4 倍文字（计算器 800x1232，GTK3 探针 796x168），所以显示器的字体 dpi = 96 × scale / GDK_SCALE（1× 与 2× 都是 96，1.5× 是 144，小数部分走 dpi）；GDK_DPI_SCALE 被 GTK4 **忽略**（计算器不变），在 GTK3 上会把 dpi 已经承载的小数再算一次——不设；客户端 hello / display-configure 里的 `dpi` **必须等于**这个字体 dpi，因为 xpra 会在客户端 dpi **变化**时把 Xft.dpi 改写成它（实测 96 → 144），若发 96 × DPR 就是 4 倍文字；xterm 的默认字体是位图 `fixed`，任何 dpi 都到不了它（Xft.dpi 96 与 192 下格子都是 6x13），Xft 字体可以（faceSize 10 下 8 → 16 px 格子）——所以 scale > 1 时 keeper 在**该应用自己的显示器**上用 `xrdb -merge` 给 XTerm/UXTerm 一个 Xft 字体（`faceName: Monospace`，`faceSize: 8 × GDK_SCALE`），2× 时 xterm 的格子是 13x26 设备 px（r1 表里的 13x27 是 100 dpi 下量的，见 r2 ④）；~~xpra 在客户端连上时会重写 resource manager~~——**r2 更正**：xpra 是在显示器起来**约 1 秒后**一次性**替换**整个资源库（与客户端无关），r1 在那之前就合并并启动了应用，见 r2 ④。Qt：QT_ENABLE_HIGHDPI_SCALING=1 + QT_SCALE_FACTOR=整数部分（小数由 Qt 从 Xft.dpi 自己推）——**本机没有 Qt 应用，未实测**。xdpyinfo 的分辨率跟随客户端的 dpi，因此是 96x96（不是 192：那会把字体翻倍）。
+- **应用的最小尺寸限制 VibeSpace 窗口。** 主窗口的 size-constraints（设备 px 的 minimum-size，没有则 base-size）÷ DPR 向上取整 = 最小 pane（CSS px，`minPaneCss`）；desktop-app-window 加上窗口自己的 chrome（标题栏 + 状态条 + 边框，按 viewport 矩形测、按 UI 缩放换成 layout px）经 `WindowManager.setMinSize` 设为这个窗口的最小尺寸。规则就是终端自己的最小尺寸（`.window` 的 CSS min-width/min-height 320×180）按窗口提高：内联 min-width/min-height 管住每条改尺寸的路径（snap、网格格子、预设、最大化、布局恢复——格子比最小值小时窗口保持最小值、诚实地压到相邻格子上，从不被挤小），resize 拖动**停在最小值**（光标可以越过去，窗口不动，对边保持不动），已经打开的窗口低于新最小值时立即抬高；贴合永远不会请求低于应用最小值的几何。≤768 px 手机布局上窗口就是屏幕（CSS 强制 min 0 !important），pane 比应用最小值小时画面**缩放适配、绝不裁剪**，角标 t('Scaled to fit — the app needs at least {w}×{h}')。
+- **措辞。** 后端芯片的 tooltip 说明 xpra 是什么：t('xpra streams each app window as pixels; text stays crisp at your screen’s scale')。
+
+| 项（test-desktop-xpra-window §6，DPR 2 页面） | 实测 |
+|---|---|
+| 启动 xterm（`dpr: devicePixelRatio`） | 记录 `scale 2, dpi 96`；Xft.dpi 96、xdpyinfo 96x96 |
+| pane 698×433 CSS | X 窗口 1395×841 = pane × 2（xterm 格子 13×27 以内）；canvas backing 1395×841 在 697.5×420.5 CSS 盒子里（r1 实测。r2：竞态修好后格子 13×26、X 1395×862；697.5 CSS 的盒子被 Chrome 重采样——18.6 % 像素不同——backing 补到 1396 ⇒ 698 CSS 后 119 万像素只差 1 个） |
+| 指针 | CSS (101,57) → X (202,114)；(489,260) → (978,520) |
+| 清晰度（放大冗余：每轴一相位像素可由邻居预测的程度，0 = 原生，→1 = 被放大） | r2：此分数只打印不再判定——格子高 26（偶数）时文字行的奇偶相位本身就不对称（逐像素 1:1 的画面也得 0.13），判定改为 canvas 与屏幕逐像素恒等（我们 1 / 1,193,478；对照 45.7 %）。r1：我们 0.006；对照（ratio 固定 1、scale 固定 1、不要 size-constraints 的补丁副本）0.126，canvas backing 698×433 = CSS 尺寸 |
+| GNOME Calculator 2× | `minimum-size [740,1232]`（高度正好 2 × 616，宽度随字体；740 是 r1 在 100 dpi 竞态下量的，r2 起 720×1232）⇒ 最小 pane 370×616，窗口最小 372×683 layout px；向左上拖 700 px 后窗口停在 372×683、pane 370×616、应用 740×1232 完整不裁；点两次“7”，应用复制出 “77” |
+| 对照：同样的拖动 | pane 318×113，X 仍把计算器留在最小值——被裁掉（owner 的截图） |
+| UI 缩放 1.25 + DPR 2 | canvas 796×1232 在 398×616 CSS 盒子里（仍然 2×），pane 仍 ≥ 最小值 |
+| 手机 390×844 @2 | pane 390×767 ≥ 最小值：不缩放、无角标 |
+| 手机 320×568 @2 | pane 320×491 < 370×616：舞台缩放 0.797，应用整体显示为 294.9×491，角标 “Scaled to fit — the app needs at least 370×616” |
+
+#### 7.6.1 r2 — 验证者的五条发现（2026-09-23，每条先在真实一级上复现再修；repro = 真 worktree 服务器 + 无头 Chrome，同一探针在修前/修后两棵树上各跑一遍）
+
+| # | 发现（复现） | 根因 | 修复 | 修后实测 |
+|---|---|---|---|---|
+| ① | 小数 DPR（1.25/1.5/1.75）：DPR 1.5、900×800 窗口里的计算器，舞台被加了 `scale(0.999545)`、角标 “Scaled to fit” 出现在**装得下**应用的 pane 上，截图与 canvas 有 4.18 % 像素不同——模糊，“像 VNC” | `devicePane` 四舍五入：733 × 1.5 = 1099.5 → 1100，CSS 盒子 733.33 > pane 733；另外两处：Chrome 把 canvas 的绘制盒对齐到**整 CSS px**——1346 / 1.5 = 897.33… CSS 会被重采样（去掉 transform 后仍有 1.3–1.9 %），连 DPR 2 下奇数宽度的 xterm（1395 / 2 = 697.5 CSS）也是 18.6 % 像素不同、每个字形边缘变软（补到 1396 ⇒ 698 CSS 后 119 万像素里只差 1 个）；pane 在 CSS 65 处 = 设备 97.5（半像素） | `devicePane` 向下取整；舞台适配容忍 < 1 CSS px 的溢出；canvas backing 向上取到该比例的网格步长（2 ⇒ 2、1.5 ⇒ 3、1.25 ⇒ 5、1.75 ⇒ 7），CSS 盒子 = backing ÷ 比例（整 CSS px）；舞台原点推到设备像素网格上（每次适配、指针进入、窗口移动后） | DPR 1.5 三个窗口尺寸：~1.7 M 个稳定像素里只有 9 / 12 / 229 个不同；1.25、1.75 同样；DPR 2 不变；舞台恒等、无角标 |
+| ② | 手机 320×568 @2：X 显示器 640×982（pane），计算器按最小值 740×1232 放在 0,0；点击发到了正确的设备坐标，但 X 把指针夹在显示器最后一行（点 “0” 后 xdotool 读到 97,981）——依次点 7…0 显示 `7894564564`，第 3–4 行和右侧一列（`=`、`mod`、`%`）点不到 | 显示器尺寸 = pane，而贴合请求的是更大的应用最小值：显示器没有**包含**它放置的窗口 | 显示器尺寸 = max(pane, 主窗口的贴合)（`displayFor`，唯一规则），`syncDisplay` 唯一发送者：hello 之后、resize、离开 Watch、refit **之前**、新主窗口 map 之前、主窗口消失 | 显示器 720×1232 ⊇ 应用；十个数字全部命中，xdotool 读到应用右下角 |
+| ③ | 窗口最小值不受工作区限制：DPR-1 页面接管 2× 计算器 ⇒ 最小 742×1299，在 815 px 高的工作区上窗口被抬到 1299 高、键盘在屏幕外、不缩放、无角标，而且再也拉不小；`desktop.appScale=2` 在 1366×768 的 1× 屏幕上同样 | `setMinSize` 只按应用要的值设 | 窗口的有效最小值 = min(应用最小值 + chrome, 工作区)（`minOf(win, 工作区)`，不低于 320×180），抬高时滑回工作区内；工作区变大时（ResizeObserver 的 reflow）还给完整最小值；于是 pane 小于应用最小值 ⇒ 视图的缩放适配 + 角标（②修好后输入也能到） | 900×815 的窗口正好在 815 px 工作区里，缩放 0.607 + 角标 “…at least 720×1232”，数字全部命中 |
+| ④ | 竞态：应用在 xpra 写入 Xft.dpi **之前约 1 秒**启动，而那次写入会**抹掉** keeper 合并的 XTerm* 资源——“1.5×” 的 xterm 格子 7×14（Xvfb 的 100 dpi），文档里的测量也因此不对 | xpra 在显示器起来约 1 秒后一次性**替换** RESOURCE_MANAGER（Xft.dpi、Xcursor.size…）；recipe 在 ~0.2 s 就返回 | keeper 在自己的 xpra 显示器上先等 `xrdb -query` 出现 `Xft.dpi:`（`waitForXftDpi`，异步、有界 5 s、失败只告警），再合并、再启动应用 | xterm 格子 1× / 1.5× / 2× = 6×13 / 10×19 / 13×26；客户端连上后合并的字体仍在；launch→ready 不变（1.52 s，ready 本来就等 xpra 的 HTTP 监听） |
+| ⑤ | “1.5×” 让 GTK 控件在 1.25/1.5 屏幕上**变小**：GDK_SCALE=1 只有字体 144 dpi，计算器最小值 360×616 设备 px（与 1× 相同；2× 是 720×1232）——在 DPR 1.5 屏幕上是 240×411 CSS，按键只有 1× 屏幕上的 0.67 | X11 上的 GTK 没有小数 GDK_SCALE，1.5× 只放大文字 | auto 改为 DPR ≥ 1.5 取 2（1.5 屏幕上控件 1.33×、1.75 上 1.14×）、否则 1（1.25 上 0.8×）——两个整数缩放里比例上更近的那个；1.5× 保留为显式选择，标成 t('1.5× (text only in GTK apps)')，说明里写明原因 | auto 从 DPR 1.5 启动 ⇒ scale 2、dpi 96，计算器 720×1232 |
+
+两条低优先级也修了：**主动 pane 只在最小值情形缩放**（只看主窗口、且应用有最小值——正是角标的条件；比 pane 大的对话框不再让整个画面中途跳一下缩放；Watch 仍包含所有非弹出窗口）；**窗口最小值会重新测量**（窗口元素、标题栏、状态条、pane 上一个 ResizeObserver——chrome 高度变化与窗口从 display:none 重新布局都会触发；UI 缩放变化由 `applyUiPrefs` 发出的 `vs:ui-scale` 事件触发；r1 那个 500 ms × 40 次、20 秒后放弃的重试删掉了）。
+
+后果，照实写：DPR 1.5 的小屏（1080p 笔记本 150 %，约 1280×720 CSS）上，auto = 2× 的计算器最小高度 822 CSS 放不下，会缩放适配并显示角标——想要不缩放就选 1×（按键 0.67×，但清晰）。
+
+Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个宽度都不溢出、网格步长对 9 个比例 × 1..2000 每个尺寸都是整 CSS px、DPR 1.5 的恒等适配、显示器先于 map 长大、超大对话框；每条都有 r1 补丁副本做对照）；test-window-minsize（工作区上限、滑回、reflow 还原；未加上限的 r1 写法做对照）；test-desktop-apps §10（auto 表 + r1 的“取整到 0.5”做对照；等待 < 合并 < 启动的顺序钉）；heavy test-desktop-xpra-window §7（真 xpra 一级：DPR 1.5 逐像素 1:1、手机上十个数字 + 右下角、DPR-1 接管、1.5× 的 xterm 格子；对照 = 把九个 r2 杠杆全部拉回的 r1 副本）。
+
+**诚实的限制。** xpra 仍然是**像素流**，不是矢量渲染：清晰来自“按屏幕分辨率渲染 + 1:1 显示”，文字仍可能经过有损编码（h264/jpeg 在大面积变化时）；缩放只在启动时决定（改设置要重启应用）；另一台 DPR 不同的客户端看同一个应用时，按它自己的 DPR 映射设备像素（清晰，但应用的尺寸按启动时的缩放；r2：放不进它的工作区时缩放适配并显示角标）；Qt 的旋钮未实测；vnc-display 级的画面仍是 CSS px（缩放只作用于 xpra 级——在整屏级上放大应用只会让它显得更大）。**GTK Broadway**（GTK3 自带的 HTML5 后端，把 GTK 窗口画进浏览器）记为一个可能的、只限 GTK 的未来一级，**未做**。
+
 ## 8. 决定（owner 已批：按建议）
 
 | # | 决定 | 建议 |
@@ -205,7 +250,7 @@ owner 原话：“直接block掉非active客户端的app界面，因为多客户
 4. （x2）机队镜像的 xpra 3.1.3 及其自带 html5 客户端：窗口加载的是那台机器自己的 `Protocol.js`（包管理器保证与服务器匹配），但 hello 与报文形式是 6.5.3 的（`display-configure` / `keyboard-config` 按服务器的 packet-types 回退；native `x11_keycodes` 路径与剪贴板形式在 3.1 上**未实测**）——仍 OPEN，绝不从这里对机队实测。
 5. （x2）剪贴板图片：只有文本（携带 `image/png` 的 `clipboard-token` 两个方向都忽略）。
 6. （x2）应用把 override-redirect 弹出窗放到 pane 之外时，与 X 在 root 边缘的裁剪一致（Xt 按连接时缓存的屏幕尺寸摆放）——没有客户端能移动它；只有更大的 pane 能解决。
-7. （x2）HiDPI：pane 的 CSS px 就是 X px（UI 缩放下 net zoom 1）；2× 屏幕看到的是 1:2 放大的应用，不是设备分辨率的渲染。
+7. （x2）HiDPI：pane 的 CSS px 就是 X px（UI 缩放下 net zoom 1）；2× 屏幕看到的是 1:2 放大的应用，不是设备分辨率的渲染。**2.369.158 已关（§7.6）**：设备像素端到端 + 启动时的应用缩放；剩下的是 Qt 旋钮未实测、另一台不同 DPR 的客户端按启动缩放显示。
 8. （x4；r5 已实测，2026-09-22）有窗口管理器时的贴合路径（机队镜像有 xfwm4）：用机队镜像**自带的** xfwm4 4.18（从镜像里跑，接本机一个临时 X；另经真实 keeper 跑，test-desktop-app-keeper §13 (g)，`VIBESPACE_TEST_WM_DIR`）实测。x4 的计划在那里是错的：重设父窗口的 WM 把客户窗口放进一个无名框架的下一层，并在 depth 1 留着一个**已映射**、有 class 的 5x5 "Xfwm4" 辅助窗口（-1000,-1000），depth-1 规则把它当成了主窗口。现在计划贴合的是**客户窗口**（`appWindows`），`wmctrl -i -r <客户窗口> -b add,maximized_*` 让框架恰好等于帧缓冲（xterm 1280x776+0+24，标题栏 24 px），应用自己缩放、根窗口缩放（1000x700 再回来）时 WM 都保持最大化，`appTitle` 取客户窗口自己的名字。仍然绝不从这里对机队本身实测；bookworm 的 xfwm4 4.18 就是镜像自带的那个二进制。
 9. （x4）override-redirect 弹窗（菜单）与对话框在裸 X 上无法区分（都是 root 的直接子窗口）：贴合步骤只在**越界**时推回（尺寸不动）——菜单通常在帧缓冲内所以不受影响；一个被打开时越界的菜单会被移动，未观察到副作用但也未专门实测。
 10. （x4 收尾）vnc-display 级的窗口**图标**：xpra 级的图标走协议（x2）；vnc-display 级只有标题（`appTitle`，来自已有的枚举）。读 `_NET_WM_ICON` 需要每个 tick 多一次 xprop spawn 再在服务端编码 PNG（spawn 的 fork 税与 RSS 成正比）——未做，OPEN。COMPOUND_TEXT 标题（没有 `_NET_WM_NAME` 的 xterm 用非 Latin-1 标题时）读不出，窗口显示 label。
