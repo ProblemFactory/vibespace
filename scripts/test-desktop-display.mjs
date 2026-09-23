@@ -226,10 +226,20 @@ console.log('§4 r2 — spawns are awaited, a probe is not a guarantee, a socket
   ok(Number.isInteger(D.listenerInode(port)) && D.listenerHeldBy(port, [process.pid]) === process.pid, 'listenerHeldBy finds OUR pid holding our 127.0.0.1 listener (inode from /proc/net/tcp ↔ /proc/<pid>/fd)');
   ok(D.listenerHeldBy(port, [1, 999999]) === null, 'a candidate set that does not hold it ⇒ null (a stranger listens)');
   own.close();
-  const v6 = net.createServer(); await new Promise((r) => v6.listen(0, '::1', r));
-  const p6 = v6.address().port;
-  ok(D.listenerInode(p6) === null && D.listenerHeldBy(p6, [process.pid]) === null, 'an [::1]-only listener is NOT a 127.0.0.1 listener (the measured x11vnc race shape: same number, wrong family)');
-  v6.close();
+  // The [::1]-only port must ALSO be free on IPv4 at assertion time — under the gate's concurrency the
+  // kernel happily hands a v6 ephemeral number that some other suite holds on 127.0.0.1 (2.369.156 r4:
+  // one such collision made this leg red inside the fast gate while green standalone). The precondition
+  // is proved INDEPENDENTLY of the function under test: a 127.0.0.1 bind on the same number must succeed.
+  let v6 = null, p6 = 0;
+  for (let attempt = 0; attempt < 8 && !v6; attempt++) {
+    const cand = net.createServer(); await new Promise((r) => cand.listen(0, '::1', r));
+    const port = cand.address().port;
+    const v4free = await new Promise((r) => { const probe = net.createServer(); probe.once('error', () => r(false)); probe.listen(port, '127.0.0.1', () => probe.close(() => r(true))); });
+    if (v4free) { v6 = cand; p6 = port; } else cand.close();
+  }
+  ok(!!v6, 'found an [::1] ephemeral port that is free on 127.0.0.1 (precondition, proved by a v4 bind)');
+  ok(v6 && D.listenerInode(p6) === null && D.listenerHeldBy(p6, [process.pid]) === null, 'an [::1]-only listener is NOT a 127.0.0.1 listener (the measured x11vnc race shape: same number, wrong family)');
+  if (v6) v6.close();
   ok(D.listenerInode(await D.freePort()) === null, 'a port nobody listens on ⇒ null');
   // (d) the session census + marker + sample
   const marker = 'VIBESPACE_DESKTOP_APP=da-display-suite';
@@ -491,7 +501,11 @@ console.log('§6 P8-2 x4 — the display\'s size, the fit act, depth in the tree
   const noPlan = await D.applyWindowPlan({ display: ':999', authFile: '/nonexistent', env: { PATH: '/nonexistent' }, bins: { xdotool: null }, plan: { main: { id: 1 }, resize: { id: 1, w: 1, h: 1 }, moves: [] } });
   ok(noPlan.ok === false && /xdotool not on PATH/.test(noPlan.why), 'applyWindowPlan without xdotool refuses BY NAME, never throws');
   const deadDisplay = await D.displaySize({ display: ':999', authFile: '/nonexistent', env: { PATH: process.env.PATH }, bins: facts.bins });
-  ok(deadDisplay.ok === false && /xdpyinfo failed/.test(deadDisplay.why), 'a display that does not answer is a named failure (never a throw, never a size)');
+  // MACHINE-DEPENDENT LEG, judged on the evidence (2.369.156 r3 — the Actions runner has no xdpyinfo, so the
+  // probe refuses BY NAME before it can fail; both are the named failure the leg is about, never a throw or a size)
+  const deadWhy = facts.bins.xdpyinfo ? /^xdpyinfo failed/ : /^xdpyinfo not on PATH/;
+  ok(deadDisplay.ok === false && deadWhy.test(String(deadDisplay.why)) && !(deadDisplay.w > 0),
+    `a display that does not answer is a named failure (never a throw, never a size) — ${facts.bins.xdpyinfo ? 'xdpyinfo present: the probe failed' : 'xdpyinfo absent on this box: refused by name'}`);
   ok((await D.applyWindowPlan({ display: ':1', authFile: '/x', bins: { xdotool: '/bin/true' }, plan: { main: { id: 1 }, resize: null, moves: [] } })).acts === 0, 'a settled plan spawns nothing (acts 0)');
   let threw = null; try { await D.displaySize({ hostId: 'h2', display: ':1' }); } catch (e) { threw = e; }
   ok(threw && threw.code === 'unsupported-host', 'a non-local host is refused by name (v1 is local-only)');
