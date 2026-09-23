@@ -389,6 +389,16 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     else if (k !== 'overage') delete out[k]; // never leave a stale bucket the model does not carry
   }
   out.limits = merged.limits;
+  // THE STORED RESET-CREDIT COUNT survives a push that does not state it (r2,
+  // reproduced: one passive codex push erased it from the file the roster and
+  // the rung read). The producer's own count wins when it has one; else the
+  // merged set's (a set lifted from producers that stated it); else the FILE's
+  // own — a lifted file with `limits` carries no `extra`, so the view alone
+  // cannot remember it. Never on a REPLACE (the repair names what survives).
+  if (out.resetCredits === undefined) {
+    if (view.resetCredits !== undefined) out.resetCredits = view.resetCredits;
+    else if (prevObj && prevObj.resetCredits && typeof prevObj.resetCredits === 'object') out.resetCredits = prevObj.resetCredits;
+  }
   // `fetchedAt` IS NEVER INVENTED HERE. It means "this file was promoted to
   // freshest at t", the producers own that decision (the sibling fan-out
   // deliberately withholds it), and the repair writes an identity-only remnant

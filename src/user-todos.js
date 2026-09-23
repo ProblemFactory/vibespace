@@ -47,6 +47,30 @@ function normalizeI18n(x) {
   return out;
 }
 
+/** A producer's ACTION PAYLOAD (design-reset-credits §5, 2026-09-22): what the
+ *  inbox button does when the user decides — `{type, …flat facts}`. Validated
+ *  here like `i18n`: a kebab-case `type`, at most 12 flat fields of
+ *  strings (≤ 200 chars) / finite numbers / booleans / null — never HTML,
+ *  never a nested object (the CLIENT maps `type` to a verb it already owns;
+ *  the payload only names WHICH session/account, never HOW). null = none. */
+function normalizeAction(x) {
+  if (x == null) return null;
+  if (typeof x !== 'object' || Array.isArray(x)) throw new Error('action must be an object');
+  if (typeof x.type !== 'string' || !/^[a-z][a-z0-9-]{0,40}$/.test(x.type)) throw new Error('action.type must be a kebab-case name');
+  const out = { type: x.type };
+  let n = 0;
+  for (const [k, v] of Object.entries(x)) {
+    if (k === 'type') continue;
+    if (++n > 12) throw new Error('action has too many fields (max 12)');
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k)) throw new Error(`action.${k}: not a plain field name`);
+    if (v === null || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'number') { if (!Number.isFinite(v)) throw new Error(`action.${k} must be finite`); out[k] = v; }
+    else if (typeof v === 'string') out[k] = v.slice(0, 200);
+    else throw new Error(`action.${k} must be a string, number, boolean or null`);
+  }
+  return out;
+}
+
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -168,7 +192,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null } = {}) {
     text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
     expiresAt = validExpiry(expiresAt);
@@ -180,6 +204,7 @@ class UserTodoManager {
     // name — so a zh/ja inbox does not read "Channels: Proposals awaiting
     // approval in …". Validated here; a malformed shape is refused by name.
     i18n = normalizeI18n(i18n);
+    action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
     // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // 'action' = the user must do something (default, every older item);
@@ -214,6 +239,7 @@ class UserTodoManager {
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
+      if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
       if (changed) { this._save(); this._notify(); }
       return { ...existing, existing: true };
     }
@@ -227,6 +253,7 @@ class UserTodoManager {
       sessionName: sessionName || null, // display fallback frozen at file time
       jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel
       i18n, // the words as structure, or null (an agent's own item is its own words)
+      action, // what the item's button does ({type, …facts}), or null — a server producer's only
       expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
       createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
     };
@@ -289,4 +316,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, validExpiry };
+module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, validExpiry, normalizeAction };

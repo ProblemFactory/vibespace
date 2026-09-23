@@ -494,11 +494,16 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   const eng = strip('src/server/usage-pool-engine.js');
   ck('WIRING PIN: the per-session site passes inTurn from s2._isStreaming AND s2._turnState',
     /inTurn: conversationInTurn\(\{ isStreaming: s2\._isStreaming, turnState: s2\._turnState \}\)/.test(eng));
-  ck('WIRING PIN: the pool-default site computes inTurn from s._isStreaming AND s._turnState',
-    /inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng));
-  ck('WIRING PIN: both sites journal a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts)',
+  // 2.369.157 (owner ruling 2026-09-22, design-reset-credits §8 ③): the pool
+  // DEFAULT's soft hold is DROPPED — a default follower is legacy — so that site
+  // computes NO inTurn; it still passes `warm` (2.369.149's proactive hold stays)
+  ck('WIRING PIN: the pool-default site computes NO inTurn (the soft hold is dropped) but still hands `warm: defaultWarm` to the decision',
+    !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
+    && /const w = warmCache\(\{ lastActivityMs: s\._lastPtyDataAt, nowMs: now, model: cacheModelFor\(s\) \}\);/.test(eng)
+    && /creditsIds, warm: defaultWarm, explain: true \}\);/.test(eng));
+  ck('WIRING PIN: the per-session site journals a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts); the default site has none',
     (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*sid \+ ':soft'\); continue; \}/g) || []).length === 1
-    && (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*':default:soft'\); return; \}/g) || []).length === 1
+    && !/':default:soft'/.test(eng) // …and the default no longer journals one (it never defers a soft move)
     && !/_softDeferred/.test(eng));
   ck('WIRING PIN: the default site does NOT pin a follower through ensureSessionPoolLink (its CLI never reads a per-session link — see the engine essay)',
     !/ensureSessionPoolLink\([^\n]*warm-soft-defer/.test(eng));

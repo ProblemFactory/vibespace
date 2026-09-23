@@ -10,6 +10,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { anchorFixedPopup, copyText, createModalShell, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -197,6 +198,12 @@ export function installUserTodos(app) {
     if (popup.classList.contains('hidden')) layout = null;
     else layout = layout ? nextLayout(layout, todos) : openLayout(gs);
     const inPlace = new Set(layout ? layout.groups.flatMap((g) => g.ids) : []);
+    // A PRODUCER'S ACTION (design-reset-credits p2): an item that carries
+    // `action` gets ONE button doing it — the client maps the TYPE to a verb it
+    // already owns (the payload only names which account / session). Today:
+    // 'reset-credit' ⇒ THE confirm dialog; the decision resolves the item.
+    const actionBtnHtml = (i) => (i && i.action && i.action.type === 'reset-credit' && i.action.accountKey
+      ? `<button class="ut-act ut-action-reset" title="${escHtml(t('Use a reset credit…'))}">${UI_ICONS.refresh || ''}</button>` : '');
     const itemHtml = (i, notice = false) => `
       <div class="ut-item${notice ? ' ut-item-notice' : ''}" data-id="${escHtml(i.id)}">
         <span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>
@@ -206,7 +213,7 @@ export function installUserTodos(app) {
           <div class="ut-meta">${notice ? `<span class="ut-sess">${escHtml(nameFor(i.sessionKey, [i]))}</span> · ` : ''}${agoText(i.createdAt)}${notice && expiresText(i.expiresAt) ? ' · ' + escHtml(expiresText(i.expiresAt)) : ''}</div>
         </div>
         <span class="ut-actions">
-          <button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button>
+          ${actionBtnHtml(i)}<button class="ut-act ut-view" title="${t('Open in viewer (copyable, rendered)')}">⤢</button>
           <button class="ut-act ut-done" title="${t('Handled — mark done')}">✓</button>
           <button class="ut-act ut-dismiss" title="${t('Dismiss (not going to act on this)')}">✕</button>
         </span>
@@ -307,6 +314,11 @@ export function installUserTodos(app) {
     if (e.target.closest('.ut-view')) {
       const rec = todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id);
       if (rec) openViewer(rec);
+      return;
+    }
+    if (e.target.closest('.ut-action-reset')) {
+      const rec = todos.open.find((i) => i.id === id);
+      if (rec && rec.action) openResetCreditDialog(app, { accountKey: rec.action.accountKey, sessionId: rec.action.sessionId || null, todoId: rec.id });
       return;
     }
     if (e.target.closest('.ut-done')) setStatus(id, 'done');

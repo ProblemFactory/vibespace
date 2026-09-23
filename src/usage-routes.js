@@ -1240,8 +1240,16 @@ function summarizeCodexRateLimits() {
     const view = quotaModel.toLegacyView(setOf[key]);
     // Non-bucket fields (planType, resetCredits, the limit ids) come from the
     // NEWEST snapshot; the buckets come from the merged set.
-    const base = (!byAccount[key] || (snapshot.fetchedAt || 0) >= (byAccount[key].fetchedAt || 0)) ? snapshot : byAccount[key];
-    byAccount[key] = { ...base, ...view, limits: setOf[key].limits, fetchedAt: setOf[key].fetchedAt || base.fetchedAt };
+    const prev = byAccount[key];
+    const base = (!prev || (snapshot.fetchedAt || 0) >= (prev.fetchedAt || 0)) ? snapshot : prev;
+    const out = { ...base, ...view, limits: setOf[key].limits, fetchedAt: setOf[key].fetchedAt || base.fetchedAt };
+    // THE STORED RESET-CREDIT COUNT IS CARRIED, like the cache writer carries it
+    // (reset credits r3): only the on-demand read states it, a DISK-seeded set
+    // has no `extra` to project it from, and a live wrapper whose startup read
+    // failed pushes newer readings without one — its snapshot must not erase
+    // the count the file (the previous projection) still holds.
+    if (out.resetCredits === undefined && prev && prev.resetCredits && typeof prev.resetCredits === 'object') out.resetCredits = prev.resetCredits;
+    byAccount[key] = out;
   };
   // SEED FROM DISK first (P1, design-backend-parity.md §1): snapshots used to
   // be re-derived from rollout tails only (24 files / 14 days) — an idle

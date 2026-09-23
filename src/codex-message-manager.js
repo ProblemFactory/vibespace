@@ -17,6 +17,7 @@ const { peerDisplayName } = require('./message-manager');
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
 const { agentName, collabSummaryText } = require('./collab-row');
 const { rewoundByTurns, applyRewound, rewoundOp } = require('./rewind-ops.js');
+const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
 
 function safeJsonParse(text, fallback = null) {
   try { return JSON.parse(text); } catch { return fallback; }
@@ -482,7 +483,7 @@ class CodexMessageManager {
   // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
-  injectPeerCard({ fromName, text }) {
+  injectPeerCard({ fromName, text, resetCredit = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
@@ -492,6 +493,10 @@ class CodexMessageManager {
     const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
     msg.originKind = 'peer-message';
     msg.peerFrom = fromName ? String(fromName) : null;
+    // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
+    // card / the auto-resume arm card — two numbers-and-a-mode, never markup
+    const rc = offerOf(resetCredit);
+    if (rc) msg.resetCredit = rc;
     this._emit({ op: 'create', message: msg });
     return msg;
   }

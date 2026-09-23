@@ -362,7 +362,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('WIRING: the probe ladder is 0→30m→1h→2h then a LOUD give-up', /WALL_PROBE_BACKOFF = \[0, 1800000, 3600000, 7200000\]/.test(eng) && /giving up \(manual resume needed\)/.test(eng));
   ok('WIRING: a CONFIDENT blocked verdict is VERIFIED too — one throttled probe on BLOCKED entry (a lying cache armed a 2.6-day wait on an alive account, inc-mtdsoj5f)', /_wallVerifyAt\.get\(scope\) \|\| 0\) > 10 \* 60e3/.test(eng) && /_wallVerifyAt\.set\(scope, Date\.now\(\)\);\s*\n\s*scheduleWallProbe\(session, scope, model, 0\)/.test(eng));
   ok('WIRING: pool verdict = any member usable / min over members blockedUntil', /verdicts\.find\(\(x\) => x\.v\.usable === true\)/.test(eng) && /Math\.min\(\.\.\.untils\)/.test(eng));
-  ok('WIRING: the pre-fire gate probes + re-verdicts and can VETO the spend', /async function beforeAutoResumeFire/.test(eng) && /if \(v\.usable === false\)/.test(eng) && /return false;/.test(eng));
+  ok('WIRING: the pre-fire gate probes + re-verdicts and can VETO the spend', /async function beforeAutoResumeFire/.test(eng) && /if \(v\.usable === false( \|\| \(v\.held && v\.usable !== true\))?\) \{/.test(eng) && /return false;/.test(eng));
   const srv8 = read('server.js');
   ok('WIRING: server.js routes beforeFire → beforeAutoResumeFire and provides the probe', /beforeFire: \(id, s\) => \{ try \{ return beforeAutoResumeFire\(id, s\); \}/.test(srv8) && /getQuotaProbe: \(\) => \{ try \{ return usage\.refreshViaCliPanel; \}/.test(srv8));
   const ss8 = read('src/server/stdout/claude-stream-json.js') + '\n' + read('src/server/stdout/codex-events.js'); // S5: per-protocol consumer modules
@@ -543,7 +543,9 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     // order-of-operations pins (the fix IS the order)
     const eng2 = read('src/server/usage-pool-engine.js');
     ok('PIN: onWalledTurn demotes BEFORE the verdict, and the verdict is session-aware', /function onWalledTurn\(session, sigs\) \{[\s\S]{0,900}demoteWalledAccount\(session, sigs\)[\s\S]{0,900}quotaVerdictFor\(scope, \{ model, session \}\)/.test(eng2));
-    ok("PIN: the walled turn's pool evaluation runs AFTER the arm (finally) so fireNow finds the session armed", /ar\.armIfEnabled\(id, session, Date\.now\(\) \+ 45000[\s\S]{0,2000}\} finally \{[\s\S]{0,700}maybePoolAutoSwitch\(session\);\s*\n\s*\}\s*\n\}/.test(eng2));
+    // (reset credits r3: the held process's cold-restart re-ask follows the pool
+    // evaluation — it reads where the pool landed — and nothing else does)
+    ok("PIN: the walled turn's pool evaluation runs AFTER the arm (finally) so fireNow finds the session armed", /ar\.armIfEnabled\(id, session, Date\.now\(\) \+ 45000[\s\S]{0,2000}\} finally \{[\s\S]{0,700}maybePoolAutoSwitch\(session\);(\s*\n\s*\/\/[^\n]*)*\s*\n\s*requestHeldRestart\(session\);\s*\n\s*\}\s*\n\}/.test(eng2));
     ok('PIN: noteTurnEnd evaluates the pool only on the NORMAL branch (the walled branch owns its own, after the arm)', /if \(sigs\.length && workAfter <= 1\) \{[\s\S]{0,700}return;\s*\n\s*\}\s*\n\s*(?:clearRefile\(\);\s*\n\s*)?maybePoolAutoSwitch\(session(?:, \{ stop: true \})?\);/.test(eng2) && !/session\._turnWallSigs = \[\]; session\._turnWorkAfterSig = 0;\s*\n\s*maybePoolAutoSwitch\(session\);/.test(eng2));
     // …and the proven re-file is dropped on BOTH exits, but only AFTER the
     // demotion — it is that pass's evidence for every signal that carries no
@@ -570,14 +572,16 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     ok('PIN: the per-session pool pass decides from sessionBillingMember (the credential slot), not from the observation', /const cm = sessionBillingMember\(s2, poolId\);\s*\n\s*const curFor = cm\.id \|\| linkCur;/.test(eng2) && /decidePoolSwitch\(\{ currentId: curFor, members, readCache: projected/.test(eng2));
     ok('PIN: resolveUsageKey resolves the CREDENTIAL SLOT for pooled sessions (live odometer, probe matching, derived cache keys) — the observation routes nothing', /function resolveUsageKey\(session\)[\s\S]{0,1200}sessionBillingMember\(session, acct\)\.id/.test(eng2) && !/sessionReadingMember/.test(eng2.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')));
     ok('PIN: both probe targets (wall ladder + pre-fire gate) are the member whose credentials the CLI reads', (eng2.match(/sessionBillingMember\(session, scope\)\.id : scope/g) || []).length === 2);
-    ok('PIN: every wall signal carries the key its mark landed on (claude rejected + banner + all three codex sites)', /noteWallSignal\(session, \{ resetsAtMs: \(Number\(ev\.resetsAt\) \|\| 0\) \* 1000, bucket: ev\.kind, scopedName: ev\.scopedName, key, slot: !!slot\?\.slotOk \}\)/.test(eng2) && /noteWallSignal\(session, \{ bucket: hit\.kind, scopedName: hit\.kind === 'scoped' \? hit\.name : null, key: pinKey, slot: !!slot\.slotOk \}\)/.test(eng2) && (eng2.match(/noteWallSignal\(session, \{ resetsAtMs:[^\n]*key: (w\.key|w2\?\.key \|\| codexQuotaKeyFor\(session\)|codexQuotaKeyFor\(session\))(?:, lane: [^}]+)? \}\)/g) || []).length === 3);
+    ok('PIN: every wall signal carries the key its mark landed on (claude rejected + banner + all three codex sites)', /noteWallSignal\(session, \{ resetsAtMs: \(Number\(ev\.resetsAt\) \|\| 0\) \* 1000, bucket: ev\.kind, scopedName: ev\.scopedName, key, slot: !!slot\?\.slotOk \}\)/.test(eng2) && /noteWallSignal\(session, \{ bucket: hit\.kind, scopedName: hit\.kind === 'scoped' \? hit\.name : null, key: pinKey, slot: !!slot\.slotOk \}\)/.test(eng2) && (eng2.match(/noteWallSignal\(session, \{ resetsAtMs:[^\n]*key: (w\.key|w2\?\.key \|\| codexQuotaKeyFor\(session\)|codexQuotaKeyFor\(session\))(?:, lane: [^}]+)? \}\)/g) || []).length === 2
+      // design-reset-credits r2: the third codex site (a credit that did not land) is the ONE ladder the attempt's conversation AND its followers walk — walkLadderAfterCredit — keyed by the attempt's identity
+      && /function walkLadderAfterCredit\(s, [^\n]*\n\s*maybePoolAutoSwitch\(s\);\s*\n\s*try \{ noteWallSignal\(s, \{ resetsAtMs: [^\n]*key: key \|\| codexQuotaKeyFor\(s\), lane: lane \|\| null \}\)/.test(eng2));
     // …AND ITS LANE (2026-09-08): the armed wait carries which of the harness's
     // limit windows it is waiting on, so a reading about a SIBLING lane can
     // never be read as "the wall is gone". Every CODEX wall site states it
     // (that harness reports more than one lane per login); claude states none,
     // which is the honest answer for a harness with a single lane.
     ok('PIN: every codex wall signal also carries its LANE (the sibling-lane false positive)',
-      (eng2.match(/noteWallSignal\(session, \{[^\n]*lane: /g) || []).length === 3);
+      (eng2.match(/noteWallSignal\(session, \{[^\n]*lane: /g) || []).length === 2 && /try \{ noteWallSignal\(s, \{[^\n]*lane: lane \|\| null \}\)/.test(eng2)); // r2: the credit-failure site is walkLadderAfterCredit(s, …)
     ok('PIN: session-schema documents the signal shape on _turnWallSigs', /_turnWallSigs:[^\n]*\{at, resetsAtMs, bucket, scopedName, key, slot\}/.test(read('src/session-schema.js')));
     try { fs.rmSync(root, { recursive: true, force: true }); } catch { }
   }

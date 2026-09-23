@@ -2261,11 +2261,23 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   // depended on. Both halves are now driven: the real exhaustion payload, and
   // a positive control proving the path is REACHED when the budget allows it.
   const resetPayload = () => ({ type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: Math.floor(Date.now() / 1000) + 7200 });
-  const creditWorld = (hour) => {
+  // 2.369.157 (design-reset-credits §2): the credit rung is FORKED BY WARMTH — a
+  // conversation mid-turn tries the credit before the pool switch, a cold one with
+  // a healthy member switches first and never reaches the ceiling at all. The
+  // world's conversation is therefore IN A TURN (the wall arrives mid-turn, which
+  // is the production shape of `task_failed`); `cold` drives the other branch.
+  const creditWorld = (hour, { cold = false } = {}) => {
     const w2 = mkWorld({ settings: { 'codex.limitResetCredit': 'auto', 'spend.unattendedPerIdentityHour': hour } });
     const wrote = [];
-    const s2 = { backend: 'codex', mode: 'chat', _webuiId: 'cx1', _accountId: w2.P, pty: { write: (x) => wrote.push(String(x)) }, name: 'cx' };
+    const s2 = { backend: 'codex', mode: 'chat', _webuiId: 'cx1', _accountId: w2.P, pty: { write: (x) => wrote.push(String(x)) }, name: 'cx',
+      ...(cold ? { _isStreaming: false, _turnState: 'idle' } : { _isStreaming: true, _turnState: 'running', _lastPtyDataAt: Date.now() }) };
     w2.sessions.set('cx1', s2);
+    // the wall comes LATER than the world's healthy readings (test-codex-pool's
+    // rule): a wall stamped in the same millisecond loses the cache tie, the
+    // switch rung then reads the member as healthy and moves nothing — and since
+    // design-reset-credits r2 a cold switch that moved nothing asks the credit
+    // rung at `after-switch`, so the tie made the cold leg flaky (1 in ~2 runs)
+    { const t0 = Date.now(); while (Date.now() < t0 + 2) { } }
     w2.eng.recordCodexQuotaSignal(s2, resetPayload());
     return { w: w2, spent: wrote.some((x) => /codex-reset-credit/.test(x)) };
   };
@@ -2275,6 +2287,10 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
   const denied = creditWorld(0);
   ok('§9 the codex reset credit is under the same ceiling (0/hour ⇒ no credit is spent), in the shape server.js builds',
     denied.spent === false);
+  const coldW = creditWorld(100, { cold: true });
+  coldW.w.eng.spendGuard.flush();
+  ok('§9 a COLD conversation with a healthy pool member never reaches the ceiling: no credit, nothing charged (the switch rung comes first)',
+    coldW.spent === false && (() => { try { return (JSON.parse(fs.readFileSync(path.join(coldW.w.dataDir, 'spend-budget.json'), 'utf8')).budget.instance || []).length === 0; } catch { return true; } })());
   // and the LEDGER agrees with the pty in both directions (an assertion about
   // the frame alone cannot tell "refused" from "charged but never written")
   allowed.w.eng.spendGuard.flush(); denied.w.eng.spendGuard.flush();

@@ -413,6 +413,10 @@ module.exports = {
   signalFromStream,
   probe: capsOf('codex').quotaProbe, // 'rpc-rate-limits': account/rateLimits/read on a LIVE app-server
   classifyAuthFailure,
+  // THE RESET-CREDIT SEMANTICS (src/reset-credit.js, design-reset-credits §1): a
+  // consumed credit RE-OPENS the period (account/rateLimitResetCredit/consume) —
+  // the pool engine hands this to resetCreditVerdict as `vendor`, never a harness id.
+  resetCreditVendor: 'openai',
   // THE TYPED PRODUCERS (src/quota-model.js, B-9213) — the write path takes these
   toLimitSet, limitSetFromSnapshot, codexWindowKind, CODEX_EXTRA_KEYS,
   // named helpers for current callers / tests

@@ -18,11 +18,17 @@ function create({ app, rootDir, HOST, CLAUDE_CMD, NODE_CMD,
   buildClaudeSubscriptionLoginCommand, getAccounts, getHosts, getMounts,
   getTelemetry, getUsageHistory, getLoginExpiryWatch }) {
   const { clearSealedOrders } = engine;
+  // r4: a conversation whose cold restart is already in flight is never handed to
+  // a client again (a second request resumes it twice) — the engine's ONE rule
+  const claimRestarts = (affected) => (typeof engine.claimColdRestarts === 'function' ? engine.claimColdRestarts(affected) : affected);
   const accounts = mk(getAccounts);
   const hosts = mk(getHosts);
   const mounts = mk(getMounts);
   const telemetry = mk(getTelemetry);
   const usageHistory = mk(getUsageHistory);
+  // THE MANUAL RESET-CREDIT USE (design-reset-credits p2): the preview + the
+  // POST, thin over the engine (src/routes/reset-credit.js)
+  require('../routes/reset-credit.js').registerResetCreditRoutes(app, { engine });
 // A SUCCESSFUL LOGIN is the one moment the login-expiry watch's picture is
 // stale by construction: the deadline it warned about no longer exists. Its
 // poll is 5 min, which is a long time to keep staring at a red chip and an
@@ -378,11 +384,13 @@ app.patch('/api/accounts/pool/:id', (req, res) => {
     if (before !== after) {
       for (const [sid, sess] of activeSessions) {
         if (sess._accountId !== id) continue;
-        try { recordUsageAttribution({ claudeSessionId: sess.claudeSessionId || sess.backendSessionId, accountId: id }); } catch {}
+        // a HELD process (a non-hot pool — r3) keeps billing its member until the restart lands
+        let held = false; try { held = !!accounts.poolMemberOfSession(id, sess, sid).held; } catch { }
+        if (!held) { try { recordUsageAttribution({ claudeSessionId: sess.claudeSessionId || sess.backendSessionId, accountId: id }); } catch {} }
         affected.push({ serverId: sid, backend: sess.backend || 'claude', backendSessionId: sess.claudeSessionId || sess.backendSessionId || null, cwd: sess.cwd || null, name: sess.name || null, host: sess.host || null });
       }
     }
-    res.json({ success: true, retargeted: before !== after ? { from: before, to: after, name: after ? (accounts.get(after)?.name || after) : null } : null, affected });
+    res.json({ success: true, retargeted: before !== after ? { from: before, to: after, name: after ? (accounts.get(after)?.name || after) : null } : null, affected: claimRestarts(affected) });
   }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -404,7 +412,7 @@ app.post('/api/accounts/pool/:id/target', (req, res) => {
       if (s._accountId !== id) continue;
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }
-    res.json({ success: true, ...r, previous: before, affected });
+    res.json({ success: true, ...r, previous: before, affected: hot ? affected : claimRestarts(affected) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

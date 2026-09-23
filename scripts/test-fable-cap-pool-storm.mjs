@@ -3003,57 +3003,59 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     }
   }
 
-  // (d)/(e) THE POOL DEFAULT. A default follower's CLI reads the pool's OWN link
-  // (fixed in its env at spawn), so it cannot be pinned to the old member through a
-  // per-session link the process never reads — the default HOLDS its soft move while
-  // a follower is warm and mid-turn, and makes it at that follower's first stop; its
-  // cold co-followers share the one credential path and wait with it (the recorded
-  // deviation — see the engine essay). The HARD band moves them all at once.
+  // (d)/(e) THE POOL DEFAULT — NO SOFT HOLD (owner ruling 2026-09-22, design-reset-
+  // credits §8 ③, reversing 2.369.153's first-stop rule at this site). A follower of
+  // the pool default has no link of its own: it is LEGACY and gets no compatibility.
+  // The default's SOFT move is made at once, like a cold conversation's — even with
+  // a warm follower mid-turn — while 2.369.149's PROACTIVE warm-cache hold stays
+  // (§17 above pins it). The per-session first-stop rule (a–c) is untouched.
   const defaultWorld = (roster, engineModule = engMod) => {
     const wd = mkWorld({ roster, sameDeadline: true, engineModule }); // default = roster[0] = cur
     const t = Date.now();
     follow(wd, 'fol-turn', inTurn(t));
-    follow(wd, 'fol-idle', { _isStreaming: false, _turnState: 'idle', _lastPtyDataAt: t - 5e3, _spawnModel: 'claude-fable-5-1' }); // WARMER than fol-turn, but idle: it cannot hold a soft move
+    follow(wd, 'fol-idle', { _isStreaming: false, _turnState: 'idle', _lastPtyDataAt: t - 5e3, _spawnModel: 'claude-fable-5-1' });
     follow(wd, 'fol-cold', coldIdle(t));
     return wd;
   };
+  // the PRE-RULING shape (2.369.153): the default computed `inTurn` and held its
+  // soft move while a warm follower was mid-turn
+  const HELD_DEFAULT = [
+    '      const w = warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) });\n',
+    '      const w = { ...warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) }), inTurn: conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState }) }; // PRE-RULING (2.369.153)\n',
+  ];
+  const HELD_PICK = [ // …and its pick: a mid-turn follower outranked every idle one
+    '      if (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec) { defaultWarm = w; defaultWarmSid = sid; }\n',
+    '      if (!defaultWarm || (w.inTurn && !defaultWarm.inTurn) || (w.inTurn === defaultWarm.inTurn && w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec)) { defaultWarm = w; defaultWarmSid = sid; } // PRE-RULING\n',
+  ];
   if (w) {
     const wd = defaultWorld(SOFT);
     const c1 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P); const l1 = c1.done().filter((l) => /\[pool\]/.test(l));
-    ok('§18 (d) default soft-exhausted with a warm MID-TURN follower: the default is held on the old member', wd.am.poolCurrent(wd.P) === wd.id.cur, wd.am.poolCurrent(wd.P) + ' | ' + l1.join(' | ').slice(0, 300));
-    ok('§18 (d) …the hold speaks once, naming the mid-turn follower (not the warmer idle one), scoped "(pool default)"',
-      l1.includes(`[pool] defer fol-turn: soft-exhausted (5h 7% < hot 10%) but mid-turn with a warm cache — moves at its first stop (to Member Alt) (pool default)`), l1.join(' | ').slice(0, 400));
-    ok('§18 (d) …no user notice at the hold', wd.notices.length === 0, JSON.stringify(wd.notices).slice(0, 200));
-    ok('§18 (d) RECORDED DEVIATION: the cold and idle co-followers wait with the default (one credential path — they cannot move without it)',
-      wd.am.poolCurrentFor(wd.P, 'fol-cold') === wd.id.cur && wd.am.poolCurrentFor(wd.P, 'fol-idle') === wd.id.cur);
-    ok('§18 (d) …the default is NOT pinned through a per-session link (no own link was created for any follower)',
-      ['fol-turn', 'fol-idle', 'fol-cold'].every((sid) => !fs.existsSync(wd.am.sessionPoolLinkPath(wd.P, sid))));
-    const c2 = quiet(); wd.eng.maybePoolAutoSwitchForPool(wd.P, { force: true }); const l2 = c2.done().filter((l) => /\[pool\]/.test(l));
-    ok('§18 (d) the next tick holds again, silently', wd.am.poolCurrent(wd.P) === wd.id.cur && !l2.some((l) => /defer/.test(l)), l2.join(' | ').slice(0, 200));
-    wd.eng._poolAutoLast.set(wd.P, Date.now());
-    const ft = wd.sessions.get('fol-turn'); ft._isStreaming = false; ft._turnState = 'idle';
-    const c3 = quiet(); wd.eng.noteTurnEnd(ft); c3.done();
-    ok('§18 (d) FIRST STOP: the mid-turn follower\'s turn end moves the default IN THAT CALL — every follower with it', wd.am.poolCurrent(wd.P) === wd.id.alt, wd.am.poolCurrent(wd.P));
-    ok('§18 (d) …with the normal pool switch notice', wd.notices.some((n) => /auto-switched to Member Alt \(previous account down to 7% remaining\)/.test(n)), JSON.stringify(wd.notices).slice(0, 200));
-    const mutD = mutate('src/server/usage-pool-engine.js', 'softdef', [[
-      ', inTurn: conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState }) };',
-      ' }; // PRE-FIX (2.369.149): no inTurn at the default',
-    ]]);
+    ok('§18 (d) default soft-exhausted with a warm MID-TURN follower: the default MOVES AT ONCE (no soft hold for legacy followers)', wd.am.poolCurrent(wd.P) === wd.id.alt, wd.am.poolCurrent(wd.P) + ' | ' + l1.join(' | ').slice(0, 300));
+    ok('§18 (d) …no defer line, and the normal pool switch notice is posted', !l1.some((l) => /defer|hold/.test(l)) && wd.notices.some((n) => /auto-switched to Member Alt \(previous account down to 7% remaining\)/.test(n)), l1.join(' | ').slice(0, 300) + ' | ' + JSON.stringify(wd.notices).slice(0, 200));
+    ok('§18 (d) …every follower moves with it (one credential path) — no per-session link is created for any of them',
+      ['fol-turn', 'fol-idle', 'fol-cold'].every((sid) => wd.am.poolCurrentFor(wd.P, sid) === wd.id.alt && !fs.existsSync(wd.am.sessionPoolLinkPath(wd.P, sid))));
+    const mutD = mutate('src/server/usage-pool-engine.js', 'softdef', [HELD_DEFAULT, HELD_PICK]);
     ok('§18 (d) NEGATIVE CONTROL: the patch hit the product source', mutD.hit === true, mutD.why || '');
     if (mutD.hit) {
       const wdm = defaultWorld(SOFT, mutD.mod);
       const c = quiet(); wdm.eng.maybePoolAutoSwitchForPool(wdm.P); c.done();
-      ok('§18 (d) NEGATIVE CONTROL: pre-fix, the default moves at once — the mid-turn follower is cut over mid-turn', wdm.am.poolCurrent(wdm.P) === wdm.id.alt, wdm.am.poolCurrent(wdm.P));
+      ok('§18 (d) NEGATIVE CONTROL: the pre-ruling copy (inTurn at the default) HOLDS the default — the leg can see the hold', wdm.am.poolCurrent(wdm.P) === wdm.id.cur, wdm.am.poolCurrent(wdm.P));
     }
     const we = defaultWorld(HARD);
     const c4 = quiet(); we.eng.maybePoolAutoSwitchForPool(we.P); const l4 = c4.done().filter((l) => /\[pool\]/.test(l));
     ok('§18 (e) default HARD-exhausted: all three followers move now (the default re-points at once)', we.am.poolCurrent(we.P) === we.id.alt && !l4.some((l) => /defer/.test(l)), we.am.poolCurrent(we.P) + ' | ' + l4.join(' | ').slice(0, 300));
-    const ob = overBroad();
-    if (ob.hit) {
-      const weo = defaultWorld(HARD, ob.mod);
+    // control: the over-broad pure copy (the hard band defers too) ON the pre-ruling
+    // engine — the only shape that could hold a hard-exhausted default
+    const pure = mutate('src/account-pool-auto.js', 'softhardpure-e', [[
+      '    if (hardDead) {\n',
+      '    if (hardDead && !(warm && warm.warm && warm.inTurn)) { // OVER-BROAD: the hard band defers too\n',
+    ]]);
+    const obE = pure.hit ? mutate('src/server/usage-pool-engine.js', 'softhardeng-e', [["require('../account-pool-auto.js');", "require('../" + path.basename(pure.file) + "');"], HELD_DEFAULT, HELD_PICK]) : pure;
+    if (obE.hit) {
+      const weo = defaultWorld(HARD, obE.mod);
       const c = quiet(); weo.eng.maybePoolAutoSwitchForPool(weo.P); c.done();
-      ok('§18 (e) NEGATIVE CONTROL: the over-broad copy holds a HARD-exhausted default — the leg can see it', weo.am.poolCurrent(weo.P) === weo.id.cur, weo.am.poolCurrent(weo.P));
-    } else ok('§18 (e) NEGATIVE CONTROL: the patch hit the product source', false, ob.why || '');
+      ok('§18 (e) NEGATIVE CONTROL: the over-broad pre-ruling copy holds a HARD-exhausted default — the leg can see it', weo.am.poolCurrent(weo.P) === weo.id.cur, weo.am.poolCurrent(weo.P));
+    } else ok('§18 (e) NEGATIVE CONTROL: the patch hit the product source', false, obE.why || '');
   }
   // (f) LOW-2 (the verifier): A STOP INSIDE THE 10 s WINDOW STILL MOVES A TURN THE
   // POOL NEVER EVALUATED WHILE IT RAN. No tick saw the turn, so nothing was recorded

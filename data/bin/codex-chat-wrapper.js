@@ -3097,13 +3097,22 @@ async function handleInput(msg) {
     // reset | nothingToReset | alreadyRedeemed (+ cooldown_active state).
     try {
       const r = await request('account/rateLimitResetCredit/consume', {}, 30000);
-      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null });
-      // refresh limits so every consumer sees the post-reset state
+      // THE POST-RESET READING GOES OUT FIRST (reset credits r3): the server
+      // decides the pool on the account's cache, and until this re-read lands
+      // that cache still carries the wall's spent mark — answering `reset`
+      // first let a pool eval in the gap move every conversation off the
+      // account the credit had just re-opened. The answer follows the reading
+      // whatever the reading did (a failed re-read must not lose the answer).
+      // A FAILED re-read is SAID (r4): `{error, onDemand}` — the on-demand
+      // read's own failure shape — so the server can tell "failed" from "late"
+      // (it keeps the account on the vendor's `reset` and asks again).
       try {
         const r2 = await request('account/rateLimits/read', {}, 20000);
         const rl2 = r2?.rateLimits || r2?.rate_limits || null;
         if (rl2) { meta.rateLimits = rl2; meta.rateLimitsFetchedAt = Date.now(); scheduleMeta(); emitTaskEvent('rate_limits_updated', { rateLimits: rl2, resetCredits: r2?.rateLimitResetCredits || null }); }
-      } catch { }
+        else emitTaskEvent('rate_limits_updated', { error: 'no rateLimits in the post-reset read', onDemand: true, afterReset: true });
+      } catch (e2) { emitTaskEvent('rate_limits_updated', { error: String((e2 && e2.message) || e2), onDemand: true, afterReset: true }); }
+      emitTaskEvent('reset_credit_result', { result: r || null, outcome: r?.outcome || null });
     } catch (e) { emitTaskEvent('reset_credit_result', { error: String(e.message || e) }); }
     return;
   }

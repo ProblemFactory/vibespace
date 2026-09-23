@@ -23,7 +23,9 @@ import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { agoText, api, copyText, createModalShell, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showContextMenu, showInputDialog, showToast } from './utils.js';
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
-import { permissionRulesCaps } from './agent-meta.js';
+import { permissionRulesCaps, resetCreditCapable } from './agent-meta.js';
+import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
+import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one confirm dialog (three entry points: this roster, the chat wall card, the For-you item)
 // The oracle registry + its measured PROOFS and the measured-and-REJECTED
 // candidates are PURE and shared with the server (CJS pulled into the bundle
 // like search-card.js): the menu can only offer what the server will run, and
@@ -193,6 +195,28 @@ export function rosterUsageSnapshot(stamp, maps) {
   return u ? { u, est } : null;
 }
 
+// ── THE RESET CHIP (design-reset-credits §5, p2) ─────────────────────────────
+// A row's stored reset credits ride its identity line (like the credits tag —
+// never the usage cell, whose right edge the donut columns align on): the
+// count, then a "Use…" button that opens THE confirm dialog. Where the harness
+// cannot spend one (backend-caps `resetCredit`), the button is DISABLED WITH
+// its reason — never a grey button that says nothing. `offer` = PURE
+// `rosterResetOffer(u, {capable})`; '' when there is nothing to say.
+const CLAUDE_RESET_WHY = () => t('Claude Code offers only the interactive /limit-reset — run it in a terminal session');
+export function resetChipHtml(offer, { key = '', disabledWhy = '' } = {}) {
+  if (!offer) return '';
+  const label = offer.count === 1 ? t('1 reset credit') : t('{n} reset credits', { n: offer.count });
+  let until = '';
+  if (offer.useBySec) { try { until = ' · ' + t('use by {date}', { date: new Date(offer.useBySec * 1000).toLocaleDateString() }); } catch { until = ''; } }
+  const tip = offer.canUse
+    ? t('Stored rate-limit reset credits on this account — “Use…” spends one now, after a confirmation')
+    : (disabledWhy || t('This agent offers no reset-credit interface VibeSpace can use.'));
+  const btn = offer.canUse
+    ? `<button class="agent-btn acct-reset-use" data-reset-key="${escHtml(key)}" title="${escHtml(t('Use one stored reset credit on this account now…'))}">${escHtml(t('Use…'))}</button>`
+    : `<button class="agent-btn acct-reset-use" disabled title="${escHtml(disabledWhy || tip)}">${escHtml(t('Use…'))}</button>`;
+  return `<span class="acct-linked-hint acct-reset-chip" title="${escHtml(tip)}">· ${escHtml(label + until)}</span>${btn}`;
+}
+
 export function installManageAgents(App, ctx = {}) {
   Object.assign(App.prototype, {
   /** REPAINT EVERY MOUNTED ROSTER USAGE CELL FROM THE CURRENT MAPS (2026-09-18,
@@ -219,6 +243,16 @@ export function installManageAgents(App, ctx = {}) {
       if (cell.innerHTML !== html) { cell.innerHTML = html; n++; const list = cell.closest && cell.closest('.acct-list'); if (list) lists.add(list); }
     }
     for (const list of lists) markSoonRows(list);
+    // …and the RESET CHIP beside each capable row's name (p2): the count moves
+    // when a credit is spent or the on-demand read lands, from the SAME maps
+    try {
+      for (const slot of document.querySelectorAll('.acct-reset-slot[data-reset-src]')) {
+        const snap = rosterUsageSnapshot({ usageSrc: slot.dataset.resetSrc, usageKey: slot.dataset.resetKey }, maps);
+        if (!snap) continue;
+        const html = resetChipHtml(rosterResetOffer(snap.u, { capable: true }), { key: slot.dataset.resetKey });
+        if (slot.innerHTML !== html) { slot.innerHTML = html; n++; }
+      }
+    } catch { }
     return n;
   },
   /**
@@ -1043,6 +1077,12 @@ export function installManageAgents(App, ctx = {}) {
     const left = document.createElement('div'); left.style.flex = '1';
     const gDef = !accts.defaultCodexAccountId;
     const usageHtml = (u) => this._acctUsageHtml(u);
+    // THE RESET SLOT (p2): the local rows of a harness that can SPEND a stored
+    // credit carry it, stamped with the usage key so the 8 s poll repaints the
+    // count (`_repaintRosterUsage`); empty until the count is known and > 0
+    const canReset = !selectedHost && resetCreditCapable('codex');
+    const resetSlot = (key) => canReset
+      ? `<span class="acct-reset-slot" data-reset-src="codex" data-reset-key="${escHtml(key)}">${resetChipHtml(rosterResetOffer(this._codexAccountUsage?.[key], { capable: true }), { key })}</span>` : '';
     const cgl = !selectedHost ? (this._usageCodexGlobal || {}) : {};
     const gName = selectedHost ? t('CLI login on {host}', { host: escHtml(hostLabel) }) : t('CLI login');
     // Host codex identity from its auth.json JWT (probed once in refresh —
@@ -1066,7 +1106,7 @@ export function installManageAgents(App, ctx = {}) {
       ? `<button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>` : '';
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
-      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span></span>
+      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && gLoggedIn ? resetSlot('__global_codex__') : ''}</span></span>
       <span class="acct-usage-cell"${!selectedHost && gLoggedIn ? ' data-usage-src="codex" data-usage-key="__global_codex__"' : ''}>${!selectedHost && gLoggedIn ? usageHtml(this._codexAccountUsage?.['__global_codex__']) : ''}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
@@ -1112,7 +1152,7 @@ export function installManageAgents(App, ctx = {}) {
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span></span></span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${!isPool && a.loggedIn ? resetSlot(a.id) : ''}</span></span>
         <span class="acct-usage-cell"${isPool ? (a.current ? ` data-usage-src="codex" data-usage-key="${escHtml(a.current)}"` : '') : (a.loggedIn ? ` data-usage-src="codex" data-usage-key="${escHtml(a.id)}"` : '')}>${usageCell}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -1148,6 +1188,9 @@ export function installManageAgents(App, ctx = {}) {
       const keyRow = e.target.closest?.('.acct-key-row');
       if (!keyRow) return;
       const id = keyRow.dataset.id;
+      // THE ROSTER ENTRY POINT of the one confirm dialog (p2)
+      const useBtn = e.target.closest('.acct-reset-use');
+      if (useBtn) { e.stopPropagation(); if (!useBtn.disabled && useBtn.dataset.resetKey) openResetCreditDialog(this, { accountKey: useBtn.dataset.resetKey }); return; }
       if (id === '__codex_global__') {
         const doHostLogin = async () => {
           // Runs ON the selected host — lands in ITS ~/.codex, not VibeSpace.
@@ -2209,6 +2252,13 @@ export function installManageAgents(App, ctx = {}) {
       const creditsChip = rowSnap ? overageChip(overageState(rowSnap.u), { t }) : null;
       const creditsTag = creditsChip && creditsChip.kind === 'credits'
         ? ` <span class="acct-linked-hint acct-usage-credits" title="${escHtml(creditsChip.tip)}">· ${escHtml(creditsChip.label)}</span>` : '';
+      // THE RESET CHIP (p2): Claude Code has no reset interface VibeSpace can
+      // drive (`resetCredit:false` — the CLI offers only the interactive
+      // /limit-reset), so a row speaks only when a PASSIVE grant sample exists
+      // (none is produced yet — design §7 P2) and its button is disabled WITH
+      // that reason. Capability-gated, never a harness id.
+      const claudeCanReset = resetCreditCapable('claude');
+      const resetTag = !selectedHost && rowSnap ? resetChipHtml(rosterResetOffer(rowSnap.u, { capable: claudeCanReset }), { key: a.id, disabledWhy: claudeCanReset ? '' : CLAUDE_RESET_WHY() }) : '';
       const iconTitle = isPool ? t('Pooled account — one billing identity auto-switching across your subscriptions')
         : isSub ? t('Subscription (Pro/Max) — runs on this machine (or a host you log into)') : t('API key — stored in VibeSpace, runs on any machine');
       // Redesign (2.178.0): rows carry ONLY the star + a ⋯ menu — Test/Rename/
@@ -2216,7 +2266,7 @@ export function installManageAgents(App, ctx = {}) {
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${(provTag || noteTag || oatTag || loginTag) ? `<span class="acct-key-extra">${provTag}${noteTag}${oatTag}${loginTag}</span>` : ''}</span>
         <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est) : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -2333,6 +2383,10 @@ export function installManageAgents(App, ctx = {}) {
       const keyRow = e.target.closest?.('.acct-key-row');
       if (!keyRow) return;
       const id = keyRow.dataset.id;
+      // the reset chip's button (p2): disabled here while the harness cannot
+      // spend a credit; the same ONE dialog the day it can
+      const useBtn = e.target.closest('.acct-reset-use');
+      if (useBtn) { e.stopPropagation(); if (!useBtn.disabled && useBtn.dataset.resetKey) openResetCreditDialog(this, { accountKey: useBtn.dataset.resetKey }); return; }
       // The peer CLI-login row: default star + (host sections) a ⋯ menu —
       // the host actions moved OFF the row into the menu in 2.245.2 so every
       // row's actions column is the same [★][⋯] width (donut alignment).

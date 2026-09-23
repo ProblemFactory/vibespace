@@ -15,6 +15,7 @@
 
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
+const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -268,7 +269,7 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text, msgId = null }) {
+  injectPeerCard({ fromName, text, msgId = null, resetCredit = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     // A harness-delivered message carries the CLI's msg_id (the turn-start
@@ -283,6 +284,10 @@ class MessageManager {
     const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
     msg.originKind = 'peer-message';
     msg.peerFrom = fromName ? String(fromName) : null;
+    // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
+    // card / the auto-resume arm card — two numbers-and-a-mode, never markup
+    const rc = offerOf(resetCredit);
+    if (rc) msg.resetCredit = rc;
     this._emit({ op: 'create', message: msg });
     return msg;
   }

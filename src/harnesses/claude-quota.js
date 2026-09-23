@@ -351,6 +351,11 @@ module.exports = { projectReset, WEEK_SEC,
   signalFromStream,
   probe: capsOf('claude').quotaProbe, // 'cli-usage': the `claude -p /usage` auto-cli rung (usage-routes refreshViaCliPanel)
   classifyAuthFailure,               // account-pool-auto's Anthropic-wording classifier, verbatim
+  // THE RESET-CREDIT SEMANTICS (src/reset-credit.js, design-reset-credits §1): an
+  // Anthropic reset REFILLS IN PLACE (the weekly deadline does not move). A fact
+  // about the vendor, not a capability — `capsOf('claude').resetCredit` stays
+  // false (the CLI offers only the interactive /limit-reset, §ban-safety).
+  resetCreditVendor: 'anthropic',
   // THE TYPED PRODUCERS (src/quota-model.js) — the write path takes these.
   // `limitSetFromSnapshot` is the HARNESS-NEUTRAL name the engine dispatches on
   // (`quotaSourceFor(backend).limitSetFromSnapshot`), never a backend-id branch:

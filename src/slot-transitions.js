@@ -58,7 +58,12 @@ class SlotTransitions {
     if (!to) return null;
     const k = this._key(sessionId, poolId);
     const prev = this._last.get(k);
-    if (prev && prev.to === to && at - prev.at < DEDUP_MS) return null;
+    // A REPEAT is the same target with no NEW `from` (r4, reproduced): a row
+    // whose `from` is neither the previous row's `to` nor unknown says the link
+    // was somewhere else in between — a re-point this ledger never saw — and
+    // dropping it as "same target inside a minute" erased the only evidence of
+    // that gap (the held-member rule reads the disagreement as unknown).
+    if (prev && prev.to === to && at - prev.at < DEDUP_MS && (!from || from === prev.to)) return null;
     const row = { sessionId: sessionId || null, poolId: poolId || null, from: from || null, to, at, ...(why ? { why: String(why).slice(0, 40) } : {}) };
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });

@@ -1057,6 +1057,70 @@ class AccountManager {
     }
     return this.poolCurrent(poolId);
   }
+  /** THE member a pool SESSION's process speaks as (design-reset-credits r3 —
+   *  ONE rule for the engine's credit/reading/wall/fire resolution, the ledger's
+   *  attribution and the billing badge). A pool whose backend cannot hot-switch
+   *  (`capsOf(backend).hotSwitch !== 'verified'` — codex canonicalizes CODEX_HOME
+   *  at startup and keeps the tokens in memory) HOLDS the member its process was
+   *  spawned with for the process's whole life:
+   *    origin 'stamp'   the spawn stamp ws-create writes (`_heldPoolMember`)
+   *    origin 'ledger'  no stamp (a process spawned before the stamp existed):
+   *                     the pool default the slot-transition ledger says was
+   *                     current at the session's `createdAt` — the last default
+   *                     row before it, else (the ledger was recording, no row of
+   *                     this pool yet: a pool older than the ledger) the `from` of
+   *                     the pool's first row after it, else the current default.
+   *                     STABLE: a later move never changes the answer (r4)
+   *    origin 'unknown' nothing names it — no stamp, the ledger was not recording
+   *                     at `createdAt` (or the start instant itself is unknown:
+   *                     `_heldPoolOrigin === 'no-start'`), or the rows on either
+   *                     side of the start disagree (an unrecorded re-point) — `id`
+   *                     is the link (the pre-stamp answer) but NOTHING may spend on it
+   *  Every other pool session (a hot pool, a remote one) bills its own link / the
+   *  default (origin 'link', held false). `session` may be null (no live process).
+   *  → {id, held, origin} */
+  poolMemberOfSession(poolId, session, sessKey = null) {
+    const key = sessKey || (session && session._webuiId) || null;
+    const link = () => this.poolCurrentFor(poolId, key) || null;
+    const a = this.get(poolId);
+    if (!a || a.type !== 'pooled' || !session || session._accountId !== poolId || session.host) return { id: a && a.type === 'pooled' ? link() : null, held: false, origin: 'link' };
+    if (capsOf(a.backend || session.backend || 'claude').hotSwitch === 'verified') return { id: link(), held: false, origin: 'link' };
+    const stamp = typeof session._heldPoolMember === 'string' ? session._heldPoolMember : null;
+    if (stamp && this.get(stamp)) return { id: stamp, held: true, origin: session._heldPoolOrigin === 'ledger' ? 'ledger' : 'stamp' };
+    // a session restored from a meta that never recorded its start (boot-restore
+    // fills `createdAt` with the boot instant): the ledger would answer the pool
+    // default at the BOOT, not at the process's start — nothing can name it (r4)
+    const at = session._heldPoolOrigin === 'no-start' ? 0 : (Number(session.createdAt) || 0);
+    if (at) {
+      // THE POOL'S OWN DEFAULT ROWS ON EITHER SIDE OF THE START (r4, reproduced):
+      // `before` = the last one at or before `createdAt` (what the default was),
+      // `after` = the first one after it — whose `from` IS the default the
+      // process started on when no row of this pool precedes the start (a pool
+      // created before the ledger existed: every codex pool older than
+      // 2026-09-07). Reading only `before` made the answer flip from "the current
+      // member" to unknown at the pool's first recorded move — the very row that
+      // names it — so a restarted server filed the process's wall on the pool's
+      // new member. The two rows must AGREE (`after.from === before.to`): a
+      // disagreement is a re-point the ledger never saw, and then the ledger
+      // cannot say which side of it the process started on.
+      let rows = null;
+      try { rows = this.slotTransitions.all(); } catch { rows = null; }
+      if (rows && rows.length) {
+        let before = null, after = null;
+        for (const r of rows) {
+          if (r.sessionId || r.poolId !== poolId) continue;
+          if (r.at <= at) before = r;
+          else { after = r; break; }
+        }
+        const recording = rows[0].at <= at; // the ledger's oldest retained row predates the start (a trim drops only the oldest)
+        let id = null;
+        if (before) id = after && after.from && after.from !== before.to ? null : before.to;
+        else if (recording) id = after ? (after.from || null) : this.poolCurrent(poolId);
+        if (id && this.get(id)) return { id, held: true, origin: 'ledger' };
+      }
+    }
+    return { id: link(), held: false, origin: 'unknown' };
+  }
   dropSessionPoolLink(poolId, sessKey) { try { fs.unlinkSync(this.sessionPoolLinkPath(poolId, sessKey)); } catch { } }
   /** Boot reconciliation: unlink per-session links whose session no longer
    *  exists — a leaked link is a billing pointer nobody can see or move. */

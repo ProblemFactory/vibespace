@@ -869,6 +869,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             }
           }
 
+          // THE MEMBER THIS PROCESS WILL HOLD (design-reset-credits r2): a pool on
+          // a backend that cannot hot-switch (caps row, never an id — codex's
+          // app-server canonicalizes CODEX_HOME at startup) bills the member the
+          // pool pointed at NOW for its whole life, whatever the link says after
+          // a switch. Local only (pools are local-only); resolved AFTER
+          // resolveForSpawn's self-heal re-pointed a dead target.
+          let heldPoolMember = null;
+          try {
+            const pa = spawnAccount && !data.hostId && accounts ? accounts.get(spawnAccount.id) : null;
+            if (pa && pa.type === 'pooled' && capsOf(backend).hotSwitch !== 'verified') heldPoolMember = accounts.poolCurrent(pa.id) || null;
+          } catch { heldPoolMember = null; }
           const session = {
             mode: sessionMode,
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
@@ -887,6 +898,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // env); a linked account spawns via the host's login but IS that
             // account — keep its identity (2.241.0)
             _accountId: spawnAccount?.id || linkedAccountId || null,
+            _heldPoolMember: heldPoolMember, // the pool member this (non-hot) process bills for its life — src/server/usage-pool-engine.js heldPoolMemberFor
             // HOW the billing resolved (B-f531): rides the created reply so
             // the client persists/displays the POST-FACTO truth, never the
             // pre-facto intent
@@ -2185,6 +2197,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
+            heldPoolMember: session._heldPoolMember || undefined, // the member a non-hot pool process holds — survives a server restart with the process it describes
             authAtSpawn: session._authAtSpawn || null,
             createdAt: session.createdAt,
             webuiSessionId: id,

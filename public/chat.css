@@ -1393,3 +1393,9 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .sess-pr-chip { text-decoration: none; }
 /* the schema-drift card (§3): same red border — something changed upstream — with the DIM head, because handling is unchanged */
 .chat-unknown-fields .chat-unknown-event-title { color: var(--text-dim); font-weight: 500; }
+/* A wall / auto-resume arm card that carries a stored reset-credit offer
+   (design-reset-credits p2): one compact button under the card's text that
+   opens THE confirm dialog — nothing is spent by the click alone. */
+.chat-reset-credit-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; padding: 2px 8px; font-size: 11px; color: var(--accent); background: transparent; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-sm); cursor: pointer; }
+.chat-reset-credit-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.chat-reset-credit-btn svg { width: 12px; height: 12px; }

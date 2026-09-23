@@ -248,7 +248,11 @@ function writeJsonAtomic(file, obj) {
  *        transcript and the UI); returns false when the session cannot take it.
  * @param deps.serverSetting  (key) => value  — the global default
  * @param deps.broadcast      (sessionId, msg) => void — per-session UI state
- * @param deps.notify         (sessionId, session, text) => void — a visible line in the chat
+ * @param deps.notify         (sessionId, session, text, extra?) => void — a visible line in the chat;
+ *        `extra.resetCredit` = `{available, mode}` rides the ARM card (design-reset-credits §5)
+ * @param deps.resetCreditOffer (sessionId, session) => {available, mode} | null — the stored reset
+ *        credits the arm card offers (the engine's resetCreditOffer: only where the
+ *        session's harness can spend one AND the identity holds one). Absent = none.
  */
 /**
  * @param deps.authorizeSpend (id, session, identity, {hold}) => {ok, why, detail, retryAfter, hold?}
@@ -269,7 +273,7 @@ function writeJsonAtomic(file, obj) {
  *        stands, so the money has to go back — otherwise a pty that refuses one
  *        frame keeps that slot's budget booked until the hold times out.
  */
-function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, notifyDelayMs = 90000, log = () => { } }) {
+function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { } }) {
   const file = path.join(dataDir, 'auto-resume.json');
   let armed = new Map(); // webuiId -> { at, resetsAt, reason, cid, fired }
   let fires = new Map(); // webuiId -> loop-breaker record (see FIRE_* above)
@@ -460,7 +464,14 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         // 提示到达上限了"): a hot pool switch arms a 45 s near-nudge, and this line
         // used to call THAT instant a "reset" — "已安排在 03:24:53 重置后自动继续"
         // about a window that resets at 07:50. armNoticeFor is PURE and pinned.
-        if (s2) { try { notify(id, s2, armNoticeFor(reason, resets, Date.now(), a.cause)); } catch { } }
+        // A STORED RESET CREDIT is the one way out that does not wait (design-
+        // reset-credits §5): the card carries the offer so the client can put the
+        // button on it — only where the harness can spend one and credits exist.
+        if (s2) {
+          let offer = null;
+          try { offer = resetCreditOffer ? resetCreditOffer(id, s2) : null; } catch { offer = null; }
+          try { notify(id, s2, armNoticeFor(reason, resets, Date.now(), a.cause), offer ? { resetCredit: offer } : undefined); } catch { }
+        }
       }, Math.max(0, notifyDelayMs));
       if (t.unref) t.unref();
       _armNotifyTimers.set(id, t);

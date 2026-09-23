@@ -587,21 +587,24 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
-        // Manual codex quota actions (2.368.21): consume a stored reset
-        // credit / on-demand rateLimits read — both ride the session's own
-        // app-server via a wrapper stdin verb (official client makes the
-        // fetch; §ban-safety). Result comes back on the normal event stream.
-        // Gated on the harness's CAPABILITY row, never a backend id
-        // (2.369.151): the reset verb needs `resetCredit`, the read needs
-        // the live-app-server rung `quotaProbe === 'rpc-rate-limits'` — the
-        // same rung usage-pool-engine's probeQuotaForKey writes this verb
-        // on. Codex answers yes to both; claude (resetCredit:false,
-        // cli-usage), shell and an unknown id (NO_CAPS) still refuse.
-        case 'codex-reset-credit':
+        // Manual codex quota read (2.368.21): the on-demand rateLimits read
+        // rides the session's own app-server via a wrapper stdin verb
+        // (official client makes the fetch; §ban-safety). Result comes back
+        // on the normal event stream. Gated on the harness's CAPABILITY row,
+        // never a backend id (2.369.151): the live-app-server rung
+        // `quotaProbe === 'rpc-rate-limits'` — the same rung
+        // usage-pool-engine's probeQuotaForKey writes this verb on.
+        // The RESET-CREDIT verb is NOT a ws case any more (design-reset-credits
+        // r2): it was a second writer outside the engine's ONE writer — no
+        // spend ceiling, no per-identity floor, no origin, so its failure walked
+        // the switch/wait ladder as an auto attempt. A person spends a credit
+        // through POST /api/accounts/:id/reset-credit (the confirm dialog), which
+        // writes through writeResetCredit; an old client's frame now gets the
+        // `unknown-type` answer.
         case 'codex-read-limits': {
           const session = activeSessions.get(data.sessionId);
           const qcaps = capsOf(session?.backend);
-          const served = data.type === 'codex-reset-credit' ? qcaps.resetCredit === true : qcaps.quotaProbe === 'rpc-rate-limits';
+          const served = qcaps.quotaProbe === 'rpc-rate-limits';
           if (session?.pty && session.mode === 'chat' && served) {
             try { session.pty.write(JSON.stringify({ type: data.type }) + '\n'); } catch { }
           } else {

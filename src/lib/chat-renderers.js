@@ -26,6 +26,9 @@ import { collabRowsHtml, collabReportHeadText, collabRowTitle } from '../collab-
 // SendUserFile). Same contract as collab-row: esc/t/icons injected, so the
 // escaping is provable in a unit test rather than reviewed by eye.
 import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHtml } from '../user-channel.js';
+// THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
+// the auto-resume arm card that carries a stored-credit offer gets its button
+import { openResetCreditDialog } from './reset-credit-dialog.js';
 
 // Agent-memory files get their own card treatment (user ask: a memory write
 // is a different concern than a project write — render "记忆更新 <name>"
@@ -528,6 +531,21 @@ class ChatRenderers {
       ? t('Message from “{name}”', { name: `<span class="chat-peer-name" role="link" tabindex="0">${escHtml(msg.peerFrom)}</span>` })
       : escHtml(t('Message from another session'));
     el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>${nameHtml}</div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
+    // A STORED RESET CREDIT this card offers (the wall card / the auto-resume
+    // arm card — design-reset-credits §5, p2): ONE button opening THE confirm
+    // dialog on the account the offer names; the click alone spends nothing.
+    // The offer is the normalizer's sanitized `{available, mode, accountKey}`
+    // (src/reset-credit.js offerOf) — numbers, a mode and a plain id, never markup.
+    const rc = msg.resetCredit;
+    if (rc && rc.accountKey && Number(rc.available) > 0) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chat-reset-credit-btn';
+      b.innerHTML = `${UI_ICONS.refresh || ''}<span>${escHtml(t('Use a reset credit'))}</span>`;
+      b.title = Number(rc.available) === 1 ? t('1 stored reset credit on this account — opens the confirmation') : t('{n} stored reset credits on this account — opens the confirmation', { n: Number(rc.available) });
+      b.onclick = (e) => { e.stopPropagation(); openResetCreditDialog(this.app, { accountKey: rc.accountKey, sessionId: this.sessionId || null }); };
+      el.appendChild(b);
+    }
     if (msg.peerFrom) {
       const nameEl = el.querySelector('.chat-peer-name');
       if (nameEl) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(msg.peerFrom); };

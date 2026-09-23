@@ -1001,6 +1001,15 @@ function toLegacyView(set, { nowSec = null } = {}) {
   if (scoped.length) out.scopedWeekly = scoped;
   const over = limitsOf(set).find((l) => l && l.scope === 'overage');
   if (over && over.flags && Object.keys(over.flags).length) out.overage = { ...over.flags };
+  // THE STORED RESET-CREDIT COUNT (design-reset-credits r2, reproduced): it
+  // rides ONLY a harness's on-demand read (codex account/rateLimits/read), and
+  // the set's `extra` keeps it across the passive pushes that do not state it —
+  // but the view dropped it, so the Manage Agents roster's reset chip (and its
+  // Use… button, which read the projected map) vanished after the next passive
+  // push on every turn. The view carries it WHEN THE SET HOLDS ONE; a set that
+  // never read a count projects nothing (no fabricated zero).
+  const rc = set && set.extra && set.extra.resetCredits;
+  if (rc && typeof rc === 'object' && Number.isFinite(Number(rc.availableCount))) out.resetCredits = { ...rc, availableCount: Number(rc.availableCount) };
   if (set && set.fetchedAt) out.fetchedAt = set.fetchedAt;
   if (set && set.source) out.source = set.source;
   return out;

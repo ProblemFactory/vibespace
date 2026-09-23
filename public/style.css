@@ -1353,6 +1353,9 @@ html, body {
 .ut-act:hover { color: var(--text); border-color: var(--border-active); }
 .ut-done:hover { color: var(--green, #3fb950); }
 .ut-dismiss:hover { color: var(--red, #e55); }
+/* a producer's action (design-reset-credits p2: the ask-mode reset-credit item) — the one accent button */
+.ut-action-reset { color: var(--accent); display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.ut-action-reset svg { width: 12px; height: 12px; }
 .ut-resolved-head { font-size: 10px; color: var(--text-dim); margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
 .ut-item-resolved { opacity: 0.55; }
 .ut-item-inplace .ut-text { text-decoration: line-through; } /* a row resolved while the popup is open keeps its slot (inc-mtw02kbq-kj96) */
@@ -4496,3 +4499,21 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bl-prio-high { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .bl-prio-low { color: var(--text-dim); border-color: var(--border); }
 .task-log-edit-prio { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+/* THE RESET CHIP (design-reset-credits p2): a row's stored reset credits on its
+   identity line — the dim count + a compact "Use…" button. Beside the name
+   (grid column 2 on two-line rows, like the credits tag), never in the usage
+   cell whose right edge the donut columns align on; the button is sized to the
+   line so the row keeps its height. A disabled button still carries its reason
+   in the title (Claude: the interactive /limit-reset only). */
+.acct-key-line > .acct-reset-slot { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; overflow: hidden; }
+.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-reset-slot { grid-column: 2; grid-row: 1; justify-self: start; max-width: 100%; }
+/* the count yields (ellipsis) before the button does — the button is the control */
+.acct-linked-hint.acct-reset-chip { color: var(--text-secondary); opacity: 0.85; font-size: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.acct-reset-slot > .acct-reset-use { flex: none; }
+.agent-btn.acct-reset-use { font-size: 10px; line-height: 14px; padding: 0 6px; min-height: 0; border-radius: var(--radius-sm); }
+.agent-btn.acct-reset-use:disabled { opacity: 0.5; cursor: not-allowed; }
+/* the confirm dialog + the chat wall card's button */
+.reset-credit-body { display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.5; color: var(--text); }
+.reset-credit-refusal { display: flex; align-items: flex-start; gap: 6px; font-size: 11px; margin-top: 4px; }
+.reset-credit-refusal svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.reset-credit-confirm:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }

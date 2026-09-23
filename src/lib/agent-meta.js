@@ -6,7 +6,7 @@ import { t } from './i18n.js';
 // drifted verb LIST (which scripts/test-queue-steer.mjs ① deep-compares
 // against the server row) and never a hand-copied boolean that disagrees with
 // the list next to it.
-import { deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite } from '../backend-caps.js';
+import { deriveInputModes, notificationDelivery, worktreeCaps as serverWorktreeCaps, NO_WORKTREE, worktreePick, worktreeLatchWrite, capsOf as serverCapsOf } from '../backend-caps.js';
 
 export const BACKEND_META = {
   claude: {
@@ -382,6 +382,14 @@ export function permissionRulesCaps(backend) {
  *  row is the source and test-harness-contract deep-compares them. */
 export function autoResumeCapsFor(backend) {
   return backendFeatureCaps(backend).autoResume || NO_FEATURE_CAPS.autoResume;
+}
+
+/** CAN THIS HARNESS SPEND A STORED RESET CREDIT (design-reset-credits p2)? The
+ *  SERVER row itself (src/backend-caps.js `resetCredit`, pulled into the bundle
+ *  like the verb table) — no client mirror to drift: the roster's "Use…" button
+ *  is live where this is true and disabled WITH its reason elsewhere. */
+export function resetCreditCapable(backend) {
+  return serverCapsOf(backend).resetCredit === true;
 }
 
 /** Every backend's agent-memory path pattern (see BACKEND_META.claude). */

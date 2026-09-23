@@ -264,12 +264,23 @@ const HARNESS_SETTINGS = {
     {
       key: "limitResetCredit",
       type: "enum", default: "off",
+      // THREE MODES (docs/design-reset-credits.zh.md §3, owner 2026-09-22):
+      // automatic consumption is NEVER the default. `ask` files ONE For-you
+      // decision per limit event when the verdict (src/reset-credit.js) says a
+      // credit is worth it; `auto` consumes it through the spend ceiling. WHEN
+      // is the pure verdict's call and the ladder forks by warmth (a warm
+      // conversation tries the credit before a pool switch, a cold one after).
+      // The claude table has NO such row: Claude Code offers only the
+      // interactive /limit-reset, and this table cannot express a declared-but-
+      // disabled row (a row here is a working control — the "only working
+      // code" settings law).
       options: [
         { value: "off", label: t("Off — never spend a reset credit automatically") },
-        { value: "auto", label: t("Auto — consume one before switching accounts") },
+        { value: "ask", label: t("Ask — offer it in For you when it is worth it") },
+        { value: "auto", label: t("Auto — use one when it is worth it (advanced)") },
       ],
       label: t("Use stored reset credits on a usage limit (Codex)"),
-      description: t("ChatGPT plans can hold rate-limit reset credits. When a Codex session hits a limit, \"Auto\" consumes one stored credit first (the limit resets and the same account continues); only if that fails does VibeSpace fall back to switching accounts (pool) and then waiting for the reset. Off by default because it spends a stored credit without you being there."),
+      description: t("ChatGPT plans can hold rate-limit reset credits. A consumed credit starts a NEW window at once: the limit is full again and the next reset moves one full window from now (Claude's web reset works differently — it refills in place and the weekly reset time does not move; Claude Code offers it only as the interactive /limit-reset). Because a re-opened window is worth most right at the limit, VibeSpace judges a credit worth using as soon as a limit is hit — except the last credit with less than a tenth of a window left. A conversation that is mid-turn or whose prompt cache is still warm tries the credit before switching accounts (a switch re-bills the whole context); a cold one switches first and uses a credit only when no pool member can take it. \"Off\" (the default) never spends one by itself; \"Ask\" files one decision in For you per limit; \"Auto\" spends it for you, within the unattended-spend ceiling."),
       apply: { kind: 'server', how: 'pool engine — the codex reset-credit rung of the exhaustion ladder' },
     },
     {

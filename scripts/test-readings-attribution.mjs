@@ -1354,9 +1354,17 @@ if (!probe) {
     st2._key = (sessionId) => sessionId || '__default__';   // the pre-fix key, verbatim
     st2.record({ sessionId: null, poolId: 'pool-B', from: null, to: 'sub-old', at: t0 - 300000, why: 'pool-target' });
     st2.record({ sessionId: null, poolId: 'pool-A', from: 'sub-x', to: 'sub-shared', at: t0, why: 'pool-target' });
-    const b2 = st2.record({ sessionId: null, poolId: 'pool-B', from: 'sub-old', to: 'sub-shared', at: t0 + 10000, why: 'pool-target' });
+    // a FROM-LESS row (readlink failed / an old caller): since 2.369.157 r4 a row whose
+    // `from` contradicts the previous row's `to` is kept whatever the key (the dedup
+    // only drops a TRUE repeat), so only a row that says nothing about its origin
+    // still isolates the KEY — and the fixed key keeps that one too (asserted below)
+    const b2 = st2.record({ sessionId: null, poolId: 'pool-B', from: null, to: 'sub-shared', at: t0 + 10000, why: 'pool-target' });
     ok('§12e NEGATIVE CONTROL: with the pre-fix key pool B\'s row is dropped and the ledger answers it CONFIDENTLY WRONG (sub-old), which is worse than "unknown"', b2 === null && st2.slotAt(null, t0 + 20000, { poolId: 'pool-B' }).id === 'sub-old', JSON.stringify(st2.slotAt(null, t0 + 20000, { poolId: 'pool-B' })));
   }
+  { const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-dedupkey3-')); cleanup.push(d3); const st3 = new SlotTransitions({ dataDir: d3 });
+    st3.record({ sessionId: null, poolId: 'pool-B', from: null, to: 'sub-old', at: t0 - 300000, why: 'pool-target' });
+    st3.record({ sessionId: null, poolId: 'pool-A', from: 'sub-x', to: 'sub-shared', at: t0, why: 'pool-target' });
+    ok('§12e …the fixed key keeps the same FROM-LESS row of pool B (the control\'s input)', !!st3.record({ sessionId: null, poolId: 'pool-B', from: null, to: 'sub-shared', at: t0 + 10000, why: 'pool-target' })); }
   // the SESSION dedup is unchanged: a session key is globally unique and a
   // conversation belongs to exactly one pool, so it needs nothing more.
   ok('§12e a repeated re-point of the SAME session link inside the window is still ONE fact', (() => {

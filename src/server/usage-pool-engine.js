@@ -57,6 +57,8 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // appears — the switch itself never waits on a browser).
 const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
+const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
+const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-card writer (the wall card that names the credits)
 // THE ONE READER of `cache.overage` (design §1.4: it was written by
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
 // the two panels ask the same function.
@@ -124,7 +126,7 @@ const _wallRing = new Map();             // account key → [{at, sid}] walled-t
 const _divergenceLogAt = new Map();      // webuiId → last "observed on X while linked to Y" log (10min floor)
 const _sessionWalls = new Map();         // webuiId → Map(memberId → ts): the members that walled THIS session
 const _noTargetLogAt = new Map();        // webuiId → last "nowhere to go" per-session log (10min floor)
-const _warmHoldLogAt = new Map();        // poolId:webuiId (per-session) | poolId:default (the pool default), each also with a ':soft' twin for the soft-exhaustion defer → last "warm cache, move deferred" log (10min floor); a per-session RE-POINT deletes that conversation's two keys (a new deferral episode speaks again — verifier LOW-3)
+const _warmHoldLogAt = new Map();        // poolId:webuiId (per-session, with a ':soft' twin for the soft-exhaustion defer) | poolId:default (the pool default — its proactive warm-cache hold only; no soft twin since the default dropped its soft hold, design-reset-credits §8 ③) → last "warm cache, move deferred" log (10min floor); a per-session RE-POINT deletes that conversation's two keys (a new deferral episode speaks again — verifier LOW-3)
 // ── get_usage control channel + chat-mode limit banner (B-7edc/B-292b) ──────
 // The get_usage control request makes the CLI (first-party client) fetch usage
 // itself — strictly better ToS posture than our bare /api/oauth/usage call.
@@ -1455,6 +1457,25 @@ function validateBillingSlot(poolId, linkedId) {
   } catch { return { ok: false, reason: 'slot-unreadable' }; }
   return { ok: true, reason: null };
 }
+/** THE SLOT OF A PROCESS THAT HOLDS ITS MEMBER (r4, reproduced): the held
+ *  member IS the credential this process speaks as — its app-server loaded the
+ *  login at spawn and keeps it in memory — whether or not the pool still lists
+ *  it (the user narrowed the members) and whether or not its file still holds a
+ *  login (wiped / expired on disk: the process keeps the tokens it read). Asking
+ *  `validateBillingSlot`'s membership leg about it answered `slot-not-a-member`,
+ *  so the process's own wall was HELD (never written on the account that
+ *  refused it) and the verdict read the empty member set as "no data". The
+ *  stamp is authority for a wall exactly like a validated link: it names a
+ *  known subscription of the pool's harness, and the rest is its own. */
+function validateHeldSlot(poolId, heldId) {
+  try {
+    const m = heldId && accounts.get(heldId);
+    if (!m || m.type === 'pooled') return { ok: false, reason: 'held-unknown-account' };
+    const p = accounts.get(poolId);
+    if (p && (m.backend || 'claude') !== (p.backend || 'claude')) return { ok: false, reason: 'held-other-harness' };
+  } catch { return { ok: false, reason: 'slot-unreadable' }; }
+  return { ok: true, reason: null };
+}
 /** The credential state of one CLAUDE account key (src/login-state.js — the
  *  shared reader; also what the panels and the migration read, one
  *  implementation).
@@ -1520,12 +1541,86 @@ function accountCredentialState(id) {
   } catch { return null; }
   try { return accountLoginState(fp, { oatMintedAt: minted, backend: 'claude' }); } catch { return null; }
 }
+/** THE MEMBER A NON-HOT POOL SESSION'S PROCESS HOLDS (design-reset-credits
+ *  r2, 2026-09-22 — reproduced on the real engine before it was fixed). A
+ *  backend whose `capsOf(backend).hotSwitch` is not 'verified' reads its
+ *  credentials ONCE, at spawn (codex: the app-server canonicalizes CODEX_HOME at
+ *  startup and keeps the tokens in process memory — the 2026-08-24 experiment),
+ *  so after a pool re-point the RUNNING process still speaks as the member it
+ *  was spawned with until the cold restart lands (and on a headless instance
+ *  that restart never comes). Resolving "the member this session bills" to the
+ *  pool's CURRENT member in that window charged a stored reset credit spent on
+ *  member A to member B (A's per-identity ceiling dodged, the last-credit floor
+ *  unreachable), demoted the healthy member for the old one's wall and offered
+ *  a button whose carrier could no longer be found. ws-create stamps the member
+ *  at spawn (`_heldPoolMember`, persisted as session-meta `heldPoolMember`);
+ *  a process spawned BEFORE the stamp existed is answered from the
+ *  slot-transition ledger (the pool default at its `createdAt`, r3), else it is
+ *  'unknown' (the auto rung refuses it by name). null = not held (a hot-capable
+ *  pool, a non-pool session, a remote one, an unknown holder) and the caller
+ *  keeps the link. The rule itself is accounts.poolMemberOfSession — gated on
+ *  the caps row, never a harness id. */
+function heldPoolMemberFor(session, poolId = null) {
+  const r = poolMemberOfSessionFor(session, poolId);
+  return r && r.held ? r.id : null;
+}
+/** The whole answer (accounts.poolMemberOfSession — ONE rule shared with the
+ *  ledger's attribution and the billing badge in server.js): {id, held,
+ *  origin: stamp|ledger|unknown|link}, or null when this is not the session's
+ *  pool. A LEDGER answer (a process spawned before the stamp existed, r3) is
+ *  memoized onto the session as its stamp AND PERSISTED into its session-meta
+ *  (r4: a restart must read the same answer, never re-derive it), journaled
+ *  once. An UNKNOWN answer is NOT memoized (r4, reproduced): one transiently
+ *  unreadable ledger read at first resolution used to pin the process unknown
+ *  for its whole life; the ledger is re-asked (a stat, cached rows) and the
+ *  journal speaks once (`_heldPoolOrigin` 'unknown' is only that marker). */
+function poolMemberOfSessionFor(session, poolId = null) {
+  try {
+    if (!session) return null;
+    const pid = poolId || session._accountId;
+    if (!pid || pid !== session._accountId) return null;
+    const r = accounts.poolMemberOfSession(pid, session);
+    if (r && r.origin === 'unknown' && !session._heldPoolOrigin) { session._heldPoolOrigin = 'unknown'; console.log(`[pool] ${session._webuiId}: no spawn stamp and no slot-transition row that names its start — which login this process holds is unknown; no credit is spent through it until it restarts`); }
+    if (r && r.origin === 'ledger' && session._heldPoolMember !== r.id) {
+      session._heldPoolMember = r.id; session._heldPoolOrigin = 'ledger';
+      console.log(`[pool] ${session._webuiId}: no spawn stamp — the slot-transition ledger says this process started on ${nameOf(r.id)} (the pool default at ${new Date(Number(session.createdAt) || 0).toISOString()}); it holds that login until it restarts`);
+      persistHeldStamp(session);
+    }
+    return r || null;
+  } catch { return null; }
+}
+/** The ledger-derived held member, written into the session's meta the way ws-create
+ *  writes the spawn stamp (`heldPoolMember`, + `heldPoolOrigin: 'ledger'`): the
+ *  ledger answer is final for the process, and a restart restores it instead of
+ *  asking a ledger that may have been trimmed, rotated or unreadable by then. */
+function persistHeldStamp(session) {
+  try {
+    if (!session || !session.sockName) return;
+    const prev = sessionMetaStore.readSessionMeta?.(session.sockName);
+    if (!prev || typeof prev !== 'object' || !Object.keys(prev).length) return; // the store is not wired, or this session has no meta (never create one here) — memory only
+    if (prev.heldPoolMember === session._heldPoolMember) return;
+    sessionMetaStore.writeSessionMeta?.(session.sockName, { ...prev, heldPoolMember: session._heldPoolMember, heldPoolOrigin: session._heldPoolOrigin || null });
+  } catch (e) { console.warn('[pool] held stamp not persisted:', e.message); }
+}
+/** A non-hot pool session whose held member NOTHING can name (no stamp, no
+ *  ledger row before it started — r3): money never moves on its behalf. */
+function heldPoolUnknown(session) {
+  const r = poolMemberOfSessionFor(session);
+  return !!(r && r.origin === 'unknown');
+}
 /** THE member a pooled session's requests are BILLED to: its link, validated
  *  against the credential slot. Every blocking decision uses this — the wall's
  *  demotion target, the verdict order, the per-session switch's `currentId`,
  *  both probe targets and the identity the loop breaker keys fires on.
  *  `observedId`/`divergent` ride along as corroboration for the journal. */
 function sessionBillingMember(session, poolId) {
+  // A NON-HOT POOL'S PROCESS BILLS THE MEMBER IT WAS SPAWNED WITH, whatever the
+  // link says now (reset credits r2, reproduced): see heldPoolMemberFor.
+  const held = heldPoolMemberFor(session, poolId);
+  if (held) {
+    const hs = validateHeldSlot(poolId, held);
+    return { id: held, linkedId: held, observedId: null, divergent: false, slotOk: hs.ok, slotReason: hs.reason, held: true };
+  }
   let linkedId = null;
   try { linkedId = accounts.poolCurrentFor(poolId, session?._webuiId || null) || null; } catch { }
   const observedId = observedMemberFor(session, poolId);
@@ -1802,7 +1897,37 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
   const proj = (c) => { try { return fam ? projectCacheForFamily(c, fam) : c; } catch { return c; } };
   const a = accounts.get(scope);
   if (a && a.type === 'pooled') {
-    const members = accounts.poolMembers(scope) || [];
+    // A PROCESS THAT HOLDS ITS MEMBER CAN ONLY BE CONTINUED BY THAT MEMBER
+    // (reset credits r3, reproduced on the real engine + the real auto-resume):
+    // a non-hot pool's process keeps the login it was spawned with until its
+    // cold restart lands, so "another member is usable" is not a way out for a
+    // CONTINUE into it — the 45 s near-arm said "switched to a usable account
+    // (B)", the pre-fire gate agreed, and the billed continue went into the
+    // process still holding walled A, re-fired every quarantine window. Every
+    // caller of this verdict decides a fire (the wall's arm, the probe ladder,
+    // the pre-fire gate), so for such a session the verdict IS the held
+    // member's; the other members help through the cold restart
+    // (requestHeldRestart), never through a continue.
+    // THE HELD MEMBER IS JUDGED DIRECTLY (r4, reproduced): never through
+    // `poolMembers`, which lists only the pool's CURRENT logged-in members — a
+    // held member the user removed from the pool, or whose login file was wiped
+    // (the process keeps its in-memory tokens), left an EMPTY set, the verdict
+    // said `usable: null` ("pool has no members") and the pre-fire gate let null
+    // through: a billed continue into the process still holding walled A, its
+    // own spent probe ignored. Its cache and its login state are read below like
+    // any member's; a held member nothing can read is `usable: false`.
+    // …AND A HELD MEMBER THE POOL NO LONGER LISTS IS NEVER CONTINUED (r5): the
+    // login reader is VACUOUS for codex (its descriptor declares no
+    // creds.loginState and memberLoginState reads claude creds only — codex
+    // answers 'unknown', which never refuses), so a member the user narrowed out
+    // of the pool or whose login file was wiped read healthy again at its reset
+    // and got ONE automatic continue into the process still holding it. Not
+    // listed (poolMembers = the pool's logged-in members) ⇒ usable:false with no
+    // blockedUntil (no timer heals it — its cold restart onto a listed member,
+    // or the user re-adding it, does), exactly like a dead login.
+    const heldId = session ? heldPoolMemberFor(session, scope) : null;
+    const heldRec = heldId ? (() => { try { return accounts.get(heldId) || null; } catch { return null; } })() : null;
+    const members = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);
     // The member whose credentials the CLI reads is judged FIRST, so `via`
     // names the account the session is actually billing whenever that one is
     // usable; the verdict carries on/linked/observed/divergent/slotOk for the
@@ -1820,6 +1945,8 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
     // on a timer, so it contributes NO blockedUntil: only the user's re-login
     // unblocks it (2026-09-07 login expiry). Judged before the wall override
     // because it is the more fundamental refusal AND the actionable one.
+    let heldListed = true;
+    if (heldId) { try { heldListed = (accounts.poolMembers(scope) || []).some((m) => m.id === heldId); } catch { heldListed = false; } }
     const readLogin = poolReadLogin();
     const walled = session ? sessionWalledMembers(session._webuiId) : new Set();
     const verdicts = ordered.map((m) => {
@@ -1829,11 +1956,15 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
       if (walled.has(m.id) && v.usable !== false) {
         return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, reason: `rejected this conversation (${v.reason})` } };
       }
+      if (heldId && m.id === heldId && !heldListed) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: `no longer a logged-in member of this pool (narrowed out, or its login file is gone) — it waits for its cold restart` } };
       return { id: m.id, name: m.name || m.id, v };
     });
-    const ctx = cm ? { on: cm.id, linked: cm.linkedId, observed: cm.observedId || null, divergent: cm.divergent, slotOk: cm.slotOk } : {};
-    const note = cm?.divergent ? ` — session observed on ${nameOf(cm.observedId)} while linked to ${nameOf(cm.linkedId)}` : '';
-    if (!verdicts.length) return { usable: null, known: false, blockedUntil: 0, reason: 'pool has no members', ...ctx };
+    const ctx = cm ? { on: cm.id, linked: cm.linkedId, observed: cm.observedId || null, divergent: cm.divergent, slotOk: cm.slotOk, ...(heldId ? { held: heldId } : {}) } : {};
+    const note = (cm?.divergent ? ` — session observed on ${nameOf(cm.observedId)} while linked to ${nameOf(cm.linkedId)}` : '') + (heldId ? ` — this process holds ${nameOf(heldId)}'s login until it restarts` : '');
+    // a HELD verdict fails CLOSED: its process can be continued by nothing else
+    if (!verdicts.length) return heldId
+      ? { usable: false, known: false, blockedUntil: 0, reason: `${nameOf(heldId)} (the login this process holds) cannot be read${note}`, ...ctx }
+      : { usable: null, known: false, blockedUntil: 0, reason: 'pool has no members', ...ctx };
     const ok = verdicts.find((x) => x.v.usable === true);
     if (ok) return { usable: true, known: true, blockedUntil: 0, via: ok.name, viaId: ok.id, reason: `${ok.name} usable (${ok.v.reason})${note}`, ...ctx };
     const untils = verdicts.map((x) => x.v.blockedUntil).filter(Boolean);
@@ -2603,7 +2734,72 @@ function onWalledTurn(session, sigs) {
     // switch's fireNow() continues the armed session — through the breaker,
     // which refuses a second continue onto an identity that just rejected it
     maybePoolAutoSwitch(session);
+    // a HELD process whose pool has moved on is left out of the continue path
+    // (quotaVerdictFor above): its way out is the cold restart the switch asked
+    // a client for — ask again if that one never landed (r3)
+    requestHeldRestart(session);
   }
+}
+/** THE COLD RESTART A HELD PROCESS IS OWED (reset credits r3). A non-hot pool
+ *  process whose pool moved to another member keeps the old login until it is
+ *  restarted, and the continue path no longer fires into it (quotaVerdictFor
+ *  judges only the held member). The switch that moved the pool asked ONE
+ *  client to restart its followers; when that did not land (no client was
+ *  connected, the restart had no conversation id, a lost broadcast) and the
+ *  held process walls again, ask again — at most once per 10 min per session,
+ *  and never within 10 min of any restart request that named it (a second
+ *  request while the first is in flight would resume the conversation twice).
+ *  No client ⇒ journal it: the conversation waits for its own member's reset
+ *  (the arm above) or for somebody to open VibeSpace. */
+const HELD_RESTART_GAP_MS = 10 * 60e3;
+function requestHeldRestart(session, now = Date.now()) {
+  try {
+    const poolId = session && session._accountId;
+    const held = heldPoolMemberFor(session, poolId);
+    if (!held) return false;
+    const cur = accounts.poolCurrent(poolId);
+    if (!cur || cur === held) return false;
+    if (now - (Number(session._heldRestartAskedAt) || 0) < HELD_RESTART_GAP_MS) return false;
+    const bsid = session.claudeSessionId || session.backendSessionId || null;
+    if (!bsid) { console.log(`[pool] ${session._webuiId}: holds ${nameOf(held)}'s login while the pool is on ${nameOf(cur)}, and has no conversation id to restart by — it waits for ${nameOf(held)}'s reset`); session._heldRestartAskedAt = now; return false; }
+    if (sendColdRestart(poolId, [{ serverId: session._webuiId, backend: session.backend || 'claude', backendSessionId: bsid, cwd: session.cwd || null, name: session.name || null, host: session.host || null }], now).sent) {
+      console.log(`[pool] ${session._webuiId}: holds ${nameOf(held)}'s login while the pool is on ${nameOf(cur)} — asked a client to restart it there (no continue into the held login)`);
+      global.__vsEvent?.('pool-held-restart', String(poolId));
+      return true;
+    }
+    console.log(`[pool] ${session._webuiId}: holds ${nameOf(held)}'s login while the pool is on ${nameOf(cur)} — no client connected to restart it; it waits for ${nameOf(held)}'s reset`);
+    return false;
+  } catch { return false; }
+}
+/** THE ONE SENDER of a cold-restart request (`pool-auto-switched`, r4 — the
+ *  "never doubled" rule lived only inside requestHeldRestart, so the default
+ *  switch, the auth-failure evict and the per-session switch still re-named a
+ *  conversation whose restart was in flight, and a second request resumes the
+ *  conversation twice). A conversation asked inside HELD_RESTART_GAP_MS is left
+ *  out; the rest go to ONE client (every client acting would race duplicate
+ *  restarts) and are stamped only when the request went out. → {sent, affected} */
+function restartInFlight(s, now = Date.now()) { return !!s && now - (Number(s._heldRestartAskedAt) || 0) < HELD_RESTART_GAP_MS; }
+function sendColdRestart(poolId, affected, now = Date.now()) {
+  const all = Array.isArray(affected) ? affected : [];
+  const fresh = all.filter((t) => !restartInFlight(activeSessions.get(t.serverId), now));
+  if (fresh.length < all.length) console.log(`[pool] ${all.length - fresh.length} conversation(s) on ${nameOf(poolId)} already have a restart request in flight — not asked again`);
+  if (!fresh.length) return { sent: false, affected: fresh };
+  const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected: fresh });
+  for (const c of wss.clients) {
+    if (c.readyState !== WS_OPEN) continue;
+    try { c.send(payload); } catch { continue; }
+    for (const t of fresh) { const s3 = activeSessions.get(t.serverId); if (s3) s3._heldRestartAskedAt = now; } // the stamp: a request that went out is never doubled
+    return { sent: true, affected: fresh };
+  }
+  return { sent: false, affected: fresh };
+}
+/** The MANUAL routes (pool target / member narrowing) answer `affected` to the
+ *  client that asked, which restarts them itself: the same rule — a conversation
+ *  already being restarted is left out — and the ones handed over are stamped. */
+function claimColdRestarts(affected, now = Date.now()) {
+  const fresh = (Array.isArray(affected) ? affected : []).filter((t) => !restartInFlight(activeSessions.get(t.serverId), now));
+  for (const t of fresh) { const s3 = activeSessions.get(t.serverId); if (s3) s3._heldRestartAskedAt = now; }
+  return fresh;
 }
 
 // ── CAPS-ROUTED QUOTA PROBE (S4): ONE dispatcher for every "refresh this
@@ -2623,8 +2819,10 @@ function onWalledTurn(session, sigs) {
 // rungs make the OFFICIAL client do the fetch; nothing here touches a vendor.
 function codexQuotaKeyFor(session) {
   let key = session._accountId || '__global_codex__';
-  // a pool wrapper never owns quota — the reading belongs to the CURRENT member
-  try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrentFor(key, session._webuiId) || accounts.poolCurrent(key) || key; } catch { }
+  // a pool wrapper never owns quota — the reading belongs to the member its
+  // app-server HOLDS (stamped at spawn: it cannot hot-switch, see
+  // heldPoolMemberFor), else the pool's CURRENT member (no stamp)
+  try { const a = accounts.get(key); if (a && a.type === 'pooled') key = heldPoolMemberFor(session, key) || accounts.poolCurrentFor(key, session._webuiId) || accounts.poolCurrent(key) || key; } catch { }
   return key;
 }
 function pickCodexProbeSession(target, session) {
@@ -2721,7 +2919,9 @@ async function beforeAutoResumeFire(id, session) {
     }
     maybePoolAutoSwitch(session);
     const v = quotaVerdictFor(scope, { model, session });
-    if (v.usable === false) {
+    // a HELD process (r4) is continued only on a POSITIVE answer about the login
+    // it holds: its verdict is that one member's, and "cannot tell" is not a go
+    if (v.usable === false || (v.held && v.usable !== true)) {
       if (v.blockedUntil > Date.now()) getAutoResume()?.armIfEnabled?.(id, session, v.blockedUntil, 're-armed at fire: ' + v.reason, { cause: armCauseFor(v, null, null, 0) });
       else scheduleWallProbe(session, scope, model, 1);
       return false;
@@ -2913,6 +3113,591 @@ function recordRateLimitEvent(session, msg) {
     }
   } catch (e) { console.warn('[usage] rate_limit_event capture failed:', e.message); }
 }
+// ── THE RESET-CREDIT RUNG (docs/design-reset-credits.zh.md §2-§4, owner rulings
+// 2026-09-22) ─────────────────────────────────────────────────────────────────
+// A stored reset credit is spent at a WALL only, and only when the PURE verdict
+// (src/reset-credit.js) says it is worth it at this rung. The ladder FORKS BY
+// WARMTH: a credit keeps the SAME account, so the prompt cache stays warm, while
+// a pool switch cold-starts the whole context — a WARM conversation (in a turn,
+// or its cache not yet cold) tries the credit BEFORE the switch; a COLD one
+// switches first, and the credit is its rung only when no pool member can take
+// it (`poolAlternative === false`). ONE call site shape, before the switch rung:
+// the verdict answers `cold-switch-first` for a cold conversation with somewhere
+// to go, so the fork is the verdict's, never a second branch here.
+// Three MODES (`limitResetCredit`, read through the session's own harness, never
+// an id): off (default, NEVER auto) — the wall card names the credits and nothing
+// is spent; ask — ONE For-you decision per limit event, then the switch/wait
+// rungs run as usual; auto — consumed through the spend ceiling (fail closed).
+const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs): the client words the item with t(key, params)
+const RESET_CREDIT_FLOOR_MS = 10 * 60e3; // one try per limit event (the 2.368.21 floor, now the verdict's `cooldownUntilSec`)
+// THE ONE-TRY FLOOR IS PER IDENTITY, NOT PER SESSION (r2, reproduced on the real
+// engine): one account wall seen by two warm conversations billing it spent TWO
+// credits — the floor lived on each session — and the second one's
+// `alreadyRedeemed` then demoted the account the first had just re-opened and
+// moved the whole pool off it. An attempt is recorded HERE, keyed by the
+// credit's identity (the member the carrying process holds — creditIdentityFor),
+// and read by the rung's `cooldownUntilSec` AND the manual preview. While an
+// attempt is IN FLIGHT (written, no answer yet, inside the floor) a sibling
+// conversation walled on the same identity FOLLOWS it instead of walking the
+// switch/wait ladder: the leader's answer settles every follower (a reset
+// re-opens the window for all of them; a failure walks each one's ladder; no
+// answer within the floor counts as a failure).
+const _resetCreditTries = new Map(); // credit identity → { key, at, sid, origin, resetsAtSec, lane, followers: Map(sid → {resetsAtSec, lane}), outcome, outcomeAt, timer }
+/** The newest attempt on this identity (its identity GROUP — one login under
+ *  two account records is one credit store). */
+function resetCreditTryFor(key) {
+  if (!key) return null;
+  const ids = new Set([key]);
+  try { for (const id of usageIdentityAccountIds(key) || []) ids.add(id); } catch { }
+  let best = null;
+  for (const id of ids) { const t = _resetCreditTries.get(id); if (t && (!best || t.at > best.at)) best = t; }
+  return best;
+}
+function resetCreditTriedAt(key) { const t = resetCreditTryFor(key); return t ? t.at : 0; }
+function resetCreditInFlight(t, now = Date.now()) { return !!(t && !t.outcome && now - t.at < RESET_CREDIT_FLOOR_MS); }
+/** A WALL RECORD RESTATING THE EVENT A CREDIT JUST RE-OPENED (r5, reproduced on
+ *  the real engine): a third conversation whose turn was in flight at the vendor
+ *  when the credit landed comes back rejected with the SAME stated reset. It is
+ *  the old event, not a new wall — writing it re-marked the re-opened account
+ *  spent (newer than its open post-reset reading), released the reset hold, and
+ *  the next evaluation moved the pool off the account the credit had just paid
+ *  to re-open (every follower cold-restarted). The try with outcome `reset`
+ *  inside the one-try floor whose stated reset EQUALS this record's (0 = "stated
+ *  none" on both sides counts as equal; a record that states a DIFFERENT reset,
+ *  or states one the try did not, is a new wall) → the try, else null. */
+function restatedResetWallTry(key, resetsAtSec, now = Date.now()) {
+  const t = resetCreditTryFor(key);
+  if (!t || t.outcome !== 'reset' || !(now - t.outcomeAt < RESET_CREDIT_FLOOR_MS)) return null;
+  return (Number(resetsAtSec) || 0) === (Number(t.resetsAtSec) || 0) ? t : null;
+}
+/** The switch/wait rungs after a credit that did not land — ONE spelling for
+ *  the attempt's own conversation and every follower. */
+function walkLadderAfterCredit(s, { resetsAtSec = 0, lane = null, key = null } = {}) {
+  maybePoolAutoSwitch(s);
+  try { noteWallSignal(s, { resetsAtMs: (Number(resetsAtSec) || 0) * 1000, bucket: 'sevenDay', key: key || codexQuotaKeyFor(s), lane: lane || null }); noteTurnEnd(s); } catch { }
+}
+/** Settle an attempt: the followers get the leader's answer. `failed` walks
+ *  their ladder; `superseded` (the limit is open after all) walks nothing. */
+function settleResetCreditTry(t, outcome, { failed = false, superseded = false } = {}) {
+  if (!t || t.outcome) return;
+  t.outcome = outcome; t.outcomeAt = Date.now();
+  try { clearTimeout(t.timer); } catch { }
+  for (const [sid, f] of t.followers) {
+    const s = activeSessions.get(sid);
+    if (!s) continue;
+    if (!failed) { try { getAutoResume()?.noteRecovered?.(sid, 'codex reset credit consumed (by another conversation on this account)', { worked: false }); } catch { } continue; }
+    if (superseded) continue;
+    console.log(`[reset-credit] ${sid}: the credit it waited on did not land (${outcome}) — walking its switch/wait ladder`);
+    walkLadderAfterCredit(s, { resetsAtSec: f.resetsAtSec, lane: f.lane, key: t.key });
+  }
+  t.followers.clear();
+}
+// ── THE RE-OPENED WINDOW WAITS FOR ITS OWN READING (reset credits r3,
+// reproduced in the wrapper's REAL event order). A consumed credit's answer
+// `reset` says the limit re-opened, but the account's cache still carries the
+// wall's own spent mark until a post-reset reading lands — and a 0.x wrapper
+// emits `reset_credit_result` FIRST and re-reads (a second rpc round trip, up
+// to 20 s) after. An eval taken in that gap read the spent mark and moved the
+// pool off the account the credit had just re-opened ("auto-switched to Cx Beta
+// — restarting its conversations" seconds after "continuing on the same
+// account"): the credit spent AND every follower cold-restarted. So a `reset`
+// with no reading newer than the attempt HOLDS every pool decision away from
+// that identity until its next reading lands (the release re-decides at once)
+// or RESET_PENDING_MS passes. The current wrapper also emits its re-read
+// BEFORE the result, which makes the hold the fallback for the ones still
+// running (a restart leaves a live wrapper on its old code).
+const RESET_PENDING_MS = 30e3;        // the first wait: the wrapper's re-read (one rpc round trip, ≤ 20 s)
+const RESET_HOLD_MAX_MS = 10 * 60e3;  // the ceiling: the credit's own 10-min floor (RESET_CREDIT_FLOOR_MS)
+const _resetCreditPending = new Map(); // identity key → { at, sid, until, timer, probes }
+/** [key, pending] for identity `key` (or one of its identity group), or null. */
+function resetHoldEntry(key, now = Date.now()) {
+  if (!key) return null;
+  const ids = new Set([key]);
+  try { for (const id of usageIdentityAccountIds(key) || []) ids.add(id); } catch { }
+  for (const id of ids) { const p = _resetCreditPending.get(id); if (p && now < p.until) return [id, p]; }
+  return null;
+}
+function resetCreditPendingFor(key, now = Date.now()) { const e = resetHoldEntry(key, now); return e ? e[1] : null; }
+/** THE VENDOR'S `reset` IS THE FACT UNTIL A READING SAYS OTHERWISE (r4,
+ *  reproduced): the r3 hold lifted after 30 s with no reading and FORCED a
+ *  re-decide on the wall's own pre-reset mark — the pool left the account the
+ *  credit had just re-opened and cold-restarted every follower (the r2 incident,
+ *  30 s later), while nothing had even asked the account for its state. Now the
+ *  hold ASKS (the identity's own app-server, the `superseded` branch's rung —
+ *  §ban-safety: the official client does the fetch) at once and again at 30 s,
+ *  and lasts until a reading ENDS it (resetReadingEndsHold) or a new wall on the
+ *  account does; at its 10-min ceiling it lifts WITHOUT a forced decision. */
+function holdForResetReading(key, sid, now = Date.now()) {
+  const prev = _resetCreditPending.get(key);
+  try { clearTimeout(prev && prev.timer); } catch { }
+  const p = { at: now, sid, until: now + RESET_HOLD_MAX_MS, timer: null, probes: 0 };
+  _resetCreditPending.set(key, p);
+  console.log(`[reset-credit] ${sid}: ${nameOf(key)}'s limit was reset — pool decisions about it wait for its post-reset reading (asking its app-server now; the pool keeps it meanwhile)`);
+  probeDuringResetHold(key, p);
+  armResetHoldTimer(key, p, RESET_PENDING_MS);
+}
+function armResetHoldTimer(key, p, ms) {
+  try { clearTimeout(p.timer); } catch { }
+  p.timer = setTimeout(() => onResetHoldTimer(key, p), ms);
+  if (p.timer && p.timer.unref) p.timer.unref();
+}
+function probeDuringResetHold(key, p) {
+  p.probes++;
+  try {
+    const s = activeSessions.get(p.sid) || null;
+    Promise.resolve(probeQuotaForKey(key, { session: s })).catch(() => { });
+  } catch { }
+}
+function onResetHoldTimer(key, p) {
+  if (_resetCreditPending.get(key) !== p) return; // released (or replaced) meanwhile
+  const now = Date.now();
+  if (now >= p.until) { releaseResetHold(key, `no post-reset reading within ${RESET_HOLD_MAX_MS / 60e3} min — the next evaluation decides on the cache as it stands`, { force: false }); return; }
+  console.log(`[reset-credit] ${nameOf(key)}: no post-reset reading within ${RESET_PENDING_MS / 1000} s — asked its app-server again; the pool keeps it on the vendor's word (≤ ${Math.round((p.until - now) / 60e3)} min more)`);
+  probeDuringResetHold(key, p);
+  armResetHoldTimer(key, p, p.until - now);
+}
+/** Does THIS reading end the hold (r4, low)? Only a reading that is evidence
+ *  about the account AFTER the reset: newer than the attempt AND either the
+ *  leader's own (the conversation whose credit it was — its app-server answered
+ *  after the consume, whatever it says) or one the verdict calls usable. A
+ *  sibling's stale spent push in the gap is neither, and lifting the hold on it
+ *  moved the pool off the re-opened account. → [key, p] | null */
+function resetReadingEndsHold(identityKey, session, snap) {
+  const e = resetHoldEntry(identityKey);
+  if (!e) return null;
+  const [, p] = e;
+  if ((Number(snap && snap.fetchedAt) || Date.now()) < p.at) return null;
+  if (session && session._webuiId === p.sid) return e;
+  try { if (quotaVerdict(snap, Math.floor(Date.now() / 1000)).usable === true) return e; } catch { }
+  console.log(`[reset-credit] ${nameOf(identityKey)}: a reading from ${session ? session._webuiId : '?'} still shows the wall — not the post-reset reading; the hold stands`);
+  return null;
+}
+/** Lift the hold. `force` (a post-reset READING landed) re-decides every auto
+ *  pool NOW on that reading (the per-record kick gate would otherwise swallow
+ *  it: the reset's own kick closed that gate a moment ago); the ceiling and a
+ *  new wall lift it without forcing anything. */
+function releaseResetHold(key, why, { force = true } = {}) {
+  const p = _resetCreditPending.get(key);
+  if (!p) return false;
+  try { clearTimeout(p.timer); } catch { }
+  _resetCreditPending.delete(key);
+  console.log(`[reset-credit] ${nameOf(key)}: pool decisions resume (${why})`);
+  if (!force) return true;
+  try {
+    for (const a of accounts.list().accounts || []) {
+      if (a.type !== 'pooled' || !a.auto) continue;
+      if ((accounts.poolMembers(a.id) || []).some((m) => m.id === key)) { try { maybePoolAutoSwitchForPool(a.id, { force: true }); } catch { } }
+    }
+  } catch { }
+  return true;
+}
+// ── AN ASK ITEM OUTLIVES ITS CARRIER (reset credits r3). The ask-mode For-you
+// item's button spends the credit through a RUNNING session holding that
+// account's login; once none does (the conversation restarted onto another
+// member, or ended) the item could only ever answer no_live_session. The sweep
+// dismisses it, by name in the journal — run on every pool evaluation kick
+// (every codex reading) and whenever a preview finds no carrier. The item also
+// carries `expiresAt` = the wall's own reset: after it the question is moot.
+const _resetCreditAsks = new Map(); // For-you item id → { key, sid }
+let _resetCreditAsksSeeded = false;
+function sweepResetCreditAsks() {
+  let todos = null;
+  try { todos = getUserTodos(); } catch { todos = null; }
+  // RE-SEEDED FROM THE INBOX once per process (r4): the map is memory, and an
+  // item filed before a server restart was never dismissed by the new engine
+  // (its button then answered no_live_session forever). The item itself carries
+  // what the sweep needs (its action: accountKey + sessionId).
+  if (!_resetCreditAsksSeeded && todos && typeof todos.snapshot === 'function') {
+    _resetCreditAsksSeeded = true;
+    try {
+      for (const it of todos.snapshot().open || []) {
+        const act = it && it.action;
+        if (act && act.type === 'reset-credit' && act.accountKey && !_resetCreditAsks.has(it.id)) _resetCreditAsks.set(it.id, { key: String(act.accountKey), sid: act.sessionId || '?' });
+      }
+    } catch { }
+  }
+  if (!_resetCreditAsks.size) return 0;
+  let n = 0;
+  for (const [id, a] of [..._resetCreditAsks]) {
+    let open = true;
+    try { if (todos && typeof todos.snapshot === 'function') open = (todos.snapshot().open || []).some((x) => x.id === id); } catch { }
+    if (!open) { _resetCreditAsks.delete(id); continue; }
+    if (resetCreditCarriers(a.key).length) continue;
+    _resetCreditAsks.delete(id);
+    try { todos && todos.setStatus && todos.setStatus(id, 'dismissed', 'vibespace'); n++; } catch { }
+    console.log(`[reset-credit] dismissed the For-you question about ${nameOf(a.key)}'s reset credit — no running conversation holds that login any more (${a.sid} restarted onto another member or ended)`);
+  }
+  return n;
+}
+/** WHOSE credit a session can spend: the member its process HOLDS (a non-hot
+ *  pool's spawn member — heldPoolMemberFor), else the slot it bills. `moved` =
+ *  the pool's current member is no longer the one this process holds (a cold
+ *  restart is pending): the auto rung refuses by name there. `unknown` (r3) = a
+ *  non-hot pool process with no stamp and no ledger row before it started:
+ *  whose login it speaks as cannot be named, so the auto rung refuses it too. */
+function creditIdentityFor(session) {
+  let key = null;
+  try { key = wallKeyFor(session); } catch { }
+  key = key || codexQuotaKeyFor(session);
+  let current = key, moved = false, unknown = false;
+  try {
+    const a = session._accountId && accounts.get(session._accountId);
+    if (a && a.type === 'pooled') { current = accounts.poolCurrent(session._accountId) || key; moved = !!heldPoolMemberFor(session) && current !== key; unknown = heldPoolUnknown(session); }
+  } catch { }
+  return { key, current, moved, unknown };
+}
+/** The pool's current member for a pooled session (null otherwise) — what the
+ *  exhaustion sites compare around the switch rung. */
+function poolDefaultOf(session) {
+  try { const a = session && session._accountId && accounts.get(session._accountId); return a && a.type === 'pooled' ? (accounts.poolCurrent(session._accountId) || null) : null; } catch { return null; }
+}
+/** The session harness's reset-credit mode, or null when it has no credit to spend. */
+function resetCreditMode(session) {
+  try {
+    if (!session || capsOf(session.backend).resetCredit !== true) return null;
+    if (!harnessDeclares(session.backend, 'limitResetCredit')) return null;
+    return harnessSetting(session.backend, 'limitResetCredit') || 'off';
+  } catch { return null; }
+}
+/** Stored credits for this identity: the account cache (the on-demand read's
+ *  `resetCredits`), else the last count this session's own wrapper reported.
+ *  null = unknown — never zero (the vendor answers "nothing to reset" to a
+ *  consume with none, harmlessly). */
+function resetCreditsLeft(session, key) {
+  const n = (v) => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
+  // the session's own last read — only for the identity it was read FOR (p2: a
+  // pool session switched to another member must not offer the old one's count)
+  const seen0 = session && session._resetCreditsSeen;
+  const seen = seen0 && !(seen0.key && key && seen0.key !== key) && n(seen0.count) !== null ? seen0 : null;
+  let cached = null, cachedAt = 0;
+  try { const c = key ? readRawUsageCache(key) : null; cached = n(c && c.resetCredits && c.resetCredits.availableCount); cachedAt = Number(c && c.resetCredits && c.resetCredits.at) || 0; } catch { }
+  // the FRESHER statement wins (r2): the file carries a count across passive
+  // pushes, so a later read this session heard (a write that lost a tie or was
+  // archived) must not be shadowed by an older carried count
+  if (cached !== null && seen && (Number(seen.at) || 0) > cachedAt) return n(seen.count);
+  if (cached !== null) return cached;
+  return seen ? n(seen.count) : null;
+}
+/** Warm = the conversation is in a turn OR its prompt cache has not gone cold
+ *  (the SAME two facts the pool's warm-cache hold reads). */
+function conversationWarmth(session, now = Date.now()) {
+  const w = warmCache({ lastActivityMs: session._lastPtyDataAt, nowMs: now, model: cacheModelFor(session) });
+  return { ...w, inTurn: conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState }) };
+}
+/** Can the pool move this conversation onto another member RIGHT NOW? The same
+ *  decision the switch rung makes (exhaustion tier, this conversation's own
+ *  rejections excluded). A member that would only serve on USAGE CREDITS
+ *  (pay-per-use, B-ad05) is NOT an alternative to a credit already paid for.
+ *  Not a pool / auto off ⇒ false; a failure ⇒ null (unknown ⇒ switch first). */
+function poolAlternativeFor(session, now = Date.now()) {
+  try {
+    const poolId = session && session._accountId;
+    const a = poolId && accounts.get(poolId);
+    if (!a || a.type !== 'pooled' || !a.auto || session.host) return false;
+    const sid = session._webuiId;
+    let currentId = null;
+    try { currentId = accounts.poolCurrentFor(poolId, sid); } catch { }
+    currentId = currentId || accounts.poolCurrent(poolId);
+    if (!currentId) return false;
+    const members = switchCandidates(poolId);
+    const hot = !!a.hot && capsOf(a.backend).hotSwitch === 'verified';
+    // AT A WALL THE CURRENT MEMBER CANNOT SERVE — asked as such, never read back
+    // from the cache: the wall's own write may lose a same-instant tie with the
+    // last reading (writeSnap keeps the newer file) or be archived by the window
+    // guard, and a cache that still says "healthy" would answer "no alternative"
+    // and spend a credit the switch rung did not need.
+    const rc = poolReadCache(poolId);
+    const readCache = (id) => (id === currentId ? { fetchedAt: now, sevenDay: { utilization: 1, resetsAt: 0 } } : rc(id));
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+    return !!(d && d.to && !d.toCredits);
+  } catch { return null; }
+}
+/** The tripped window's facts off a normalized snapshot: the bucket whose reset
+ *  is the wall's (else the most-spent one) → {periodSec, remainingPct}. */
+function trippedWindowFacts(snap, resetsAtSec) {
+  const bs = [snap && snap.fiveHour, snap && snap.sevenDay].filter((b) => b && typeof b === 'object');
+  const R = Number(resetsAtSec) || 0;
+  const b = (R && bs.find((x) => Number(x.resetsAt) === R)) || bs.slice().sort((x, y) => (Number(y.utilization) || 0) - (Number(x.utilization) || 0))[0] || null;
+  if (!b) return { periodSec: null, remainingPct: null };
+  const u = Number.isFinite(Number(b.utilization)) ? Number(b.utilization) : (Number.isFinite(Number(b.usedPercent)) ? Number(b.usedPercent) / 100 : null);
+  return { periodSec: Number(b.windowMinutes) > 0 ? Number(b.windowMinutes) * 60 : null, remainingPct: u === null ? null : Math.max(0, Math.min(100, (1 - u) * 100)) };
+}
+/** What a chat card at the wall / the auto-resume arm card carries so the
+ *  client can offer the button (p2): `{available, mode}` — only when the
+ *  session's harness can spend a credit AND this identity holds one. */
+function resetCreditOffer(session) {
+  try {
+    const mode = resetCreditMode(session);
+    if (!mode) return null;
+    const key = creditIdentityFor(session).key; // the member this process HOLDS (r2)
+    const n = resetCreditsLeft(session, key);
+    // accountKey (p2): the card's button opens the dialog on THIS identity
+    return n !== null && n > 0 ? { available: n, mode, accountKey: key } : null;
+  } catch { return null; }
+}
+/**
+ * THE ONE WRITER OF THE VERB (the auto rung AND the manual button, p2): the
+ * spend ceiling first, then the one-try floor's stamp, the stdin verb on the
+ * session's own wrapper, and the charge. A stored reset credit is money the
+ * owner already paid for; the auto rung spends it while nobody is present —
+ * the same consent class as an auto-resume continue — and design §4 routes
+ * EVERY consumption through the same ceiling ("消费一律经 spend authorizer"), so
+ * the manual button is counted too. Fail closed: an authorizer that throws does
+ * not get to green-light it. THE MODULE'S OWN GUARD, not an injected dep (r2):
+ * `spendGuard` is constructed above in this very file; the dep version of this
+ * gate shipped DEAD — server.js never passed it.
+ * `origin` 'auto' | 'user' rides the session so the RESULT handler knows whose
+ * attempt it is answering: a failed USER attempt is reported, never walked
+ * down the ladder a second time (the wall already ran it, or there is no wall).
+ * `key` = THE CREDIT'S IDENTITY (r2): the member the carrying process holds,
+ * handed to the ceiling as its identity so the spend is charged to, capped on
+ * and named as the account whose credit it is — never re-resolved to the
+ * pool's current member (which, after a switch the codex wrapper cannot follow,
+ * is somebody else).
+ * → {ok:true, identity} | {ok:false, why, detail} (why = the ceiling's refusal CODE, detail its sentence — which names the identity and the count; why null when it threw)
+ */
+function writeResetCredit(session, { resetsAtSec = 0, lane = null, origin = 'auto', now = Date.now(), key = null } = {}) {
+  key = key || creditIdentityFor(session).key;
+  let av = null;
+  try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session, sessionId: session._webuiId, sessionName: session.name || null, identity: key ? { key, name: nameOf(key) || key } : null }); }
+  catch (e) { console.warn('[codex] spend authorizer threw — not spending a reset credit:', e.message); return { ok: false, why: null }; }
+  if (av && av.ok === false) { console.log(`[codex] reset credit refused for ${session._webuiId} (spend budget: ${av.why})`); return { ok: false, why: av.why || 'refused', detail: av.detail || null }; }
+  session._codexResetTriedAt = now;
+  session._codexLastResetsAt = Number(resetsAtSec) || 0;
+  // …and WHICH LANE it was: if the credit fails we arm from these two, and an
+  // arm with no lane can never be reopened by a reading.
+  session._codexLastLane = lane || null;
+  session._resetCreditOrigin = origin === 'user' ? 'user' : 'auto';
+  session._resetCreditKey = key || null;
+  // the IDENTITY's attempt (r2): the floor every session and the preview read
+  if (key) {
+    const prev = _resetCreditTries.get(key);
+    try { clearTimeout(prev && prev.timer); } catch { }
+    const t = { key, at: now, sid: session._webuiId, origin: session._resetCreditOrigin, resetsAtSec: Number(resetsAtSec) || 0, lane: lane || null, followers: new Map(), outcome: null, outcomeAt: 0, timer: null };
+    // NO ANSWER WITHIN THE FLOOR = a failure for the followers (and for the
+    // auto leader): a dead wrapper must not leave them waiting on nothing
+    t.timer = setTimeout(() => {
+      if (t.outcome) return;
+      console.log(`[reset-credit] ${t.sid}: no answer to the reset credit on ${nameOf(key)} within ${RESET_CREDIT_FLOOR_MS / 60e3} min — treating it as not landed`);
+      settleResetCreditTry(t, 'no-answer', { failed: true });
+      const leader = activeSessions.get(t.sid);
+      if (leader && t.origin === 'auto') walkLadderAfterCredit(leader, { resetsAtSec: t.resetsAtSec, lane: t.lane, key });
+    }, RESET_CREDIT_FLOOR_MS);
+    if (t.timer.unref) t.timer.unref();
+    _resetCreditTries.set(key, t);
+    if (_resetCreditTries.size > 256) _resetCreditTries.delete(_resetCreditTries.keys().next().value);
+  }
+  session.pty.write(JSON.stringify({ type: 'codex-reset-credit' }) + '\n');
+  // CHARGE WHAT YOU AUTHORIZED (r4): the slot the verdict resolved, handed back.
+  try { spendGuard.note({ reason: 'codex-reset-credit', session, identity: av && av.identity, hold: av && av.hold }); } catch (e) { console.warn('[codex] spend accounting failed:', e.message); }
+  return { ok: true, identity: av && av.identity };
+}
+// ── THE MANUAL USE (p2, design-reset-credits §5): POST /api/accounts/:id/reset-credit
+// (src/routes/reset-credit.js) — the roster's "Use…", the wall/arm card's
+// button and the ask-mode For-you item all land here through ONE dialog. The
+// verb needs a RUNNING wrapper on that identity (the vendor call is the
+// session's own app-server — §ban-safety: nothing here touches a vendor).
+/** The live chat sessions that can carry the verb for usage identity `key`:
+ *  the harness can spend a credit (caps row, never an id) and the session bills
+ *  that identity (a pool session: its CURRENT member). */
+function resetCreditCarriers(key) {
+  const ids = new Set(usageIdentityAccountIds(key)); ids.add(key);
+  const out = [];
+  for (const [, s] of activeSessions) {
+    // (a process whose held login nobody can name carries nobody's credit — r3)
+    try { if (s && s.pty && s.mode === 'chat' && capsOf(s.backend).resetCredit === true && ids.has(codexQuotaKeyFor(s)) && !heldPoolUnknown(s)) out.push(s); } catch { }
+  }
+  return out;
+}
+/** The window a manual use would replace: the account's MOST-spent bucket
+ *  (that is the one a wall is on) → {resetsAtSec, periodSec, remainingPct}. */
+function spentWindowOf(snap) {
+  const bs = [snap && snap.fiveHour, snap && snap.sevenDay].filter((b) => b && typeof b === 'object');
+  const used = (b) => (Number.isFinite(Number(b.utilization)) ? Number(b.utilization) : (Number.isFinite(Number(b.usedPercent)) ? Number(b.usedPercent) / 100 : null));
+  const b = bs.slice().sort((x, y) => (used(y) ?? -1) - (used(x) ?? -1))[0] || null;
+  if (!b) return { resetsAtSec: null, periodSec: null, remainingPct: null };
+  const u = used(b);
+  return { resetsAtSec: Number(b.resetsAt) > 0 ? Number(b.resetsAt) : null, periodSec: Number(b.windowMinutes) > 0 ? Number(b.windowMinutes) * 60 : null, remainingPct: u === null ? null : Math.max(0, Math.min(100, Math.round((1 - u) * 1000) / 10)) };
+}
+/**
+ * What the confirm dialog shows AND what the POST would answer (the refusal is
+ * named here once, in precedence order): not_supported → no_live_session →
+ * no_credits → cooldown. `preferSessionId` = the session the entry point sat in
+ * (the wall card's window, the item's session) — used as the carrier when it is one.
+ */
+function resetCreditPreview(key, { preferSessionId = null, now = Date.now() } = {}) {
+  key = String(key || '');
+  try { const a = accounts.get(key); if (a && a.type === 'pooled') key = accounts.poolCurrent(key) || key; } catch { }
+  const backend = quotaBackendFor(key);
+  const vendor = quotaSourceFor(backend).resetCreditVendor || null;
+  let recName = null; try { recName = accounts.get(key)?.name || null; } catch { }
+  // name null = the machine's own login (the client says so in its own words)
+  const base = { key, name: recName, backend, vendor, creditsLeft: null, resetsAtSec: null, periodSec: null, remainingPct: null, sessionId: null, cooldownUntilSec: null };
+  if (capsOf(backend).resetCredit !== true) return { ...base, code: 'not_supported', error: 'this agent has no reset-credit interface (Claude Code offers only the interactive /limit-reset)' };
+  const carriers = resetCreditCarriers(key);
+  // a carrier that is LEAVING this account (r4): a held process whose pool moved
+  // on, or one whose cold restart is in flight — kept only when no other carrier
+  // exists. THE STATE IS NAMED (r5): `inFlight` = a restart request WENT OUT
+  // (restartInFlight) — the verb would ride a process a client is killing, so
+  // the use is REFUSED by name (`restart_pending`); `pending` = the pool moved
+  // but no request went out yet (no client connected) — allowed, and the dialog
+  // says the process keeps this login until a client restarts it
+  const leavingTo = (s) => { try { if (restartInFlight(s, now)) return { to: accounts.poolCurrent(s._accountId) || null, inFlight: true }; const h = heldPoolMemberFor(s); const cur = h ? accounts.poolCurrent(s._accountId) : null; return h && cur && cur !== h ? { to: cur, inFlight: false } : null; } catch { return null; } };
+  const pick = (list) => list.find((s) => s._webuiId === preferSessionId) || list.find((s) => !s.host) || list[0] || null;
+  const staying = carriers.filter((s) => !leavingTo(s));
+  const notKilled = carriers.filter((s) => !(leavingTo(s) || {}).inFlight);
+  const carrier = pick(staying) || pick(notKilled) || pick(carriers);
+  const leaving = carrier ? leavingTo(carrier) : null;
+  const restartPending = leaving ? { id: leaving.to || null, name: leaving.to ? (accounts.get(leaving.to)?.name || leaving.to) : null, ...(leaving.inFlight ? { inFlight: true } : { pending: true }) } : null;
+  const win = spentWindowOf(readRawUsageCache(key));
+  const creditsLeft = resetCreditsLeft(carrier, key);
+  // the IDENTITY's floor (r2) — an attempt through ANY session on this account
+  const tried = resetCreditTriedAt(key);
+  const coolMs = tried ? tried + RESET_CREDIT_FLOOR_MS : 0;
+  const out = { ...base, ...win, creditsLeft, sessionId: carrier ? carrier._webuiId : null, cooldownUntilSec: coolMs > now ? Math.ceil(coolMs / 1000) : null, ...(restartPending ? { restartPending } : {}) };
+  if (!carrier) { try { sweepResetCreditAsks(); } catch { } return { ...out, code: 'no_live_session', error: 'no running chat session holds this account\'s login (the verb rides that session\'s own CLI; a pool conversation moved to another member restarts there and no longer can)' }; }
+  if (creditsLeft !== null && creditsLeft <= 0) return { ...out, code: 'no_credits', error: 'no stored reset credits on this account' };
+  if (coolMs > now) return { ...out, code: 'cooldown', error: 'a reset credit was tried on this account in the last 10 minutes' };
+  if (restartPending && restartPending.inFlight) return { ...out, code: 'restart_pending', error: `the only running conversation holding this login is being restarted${restartPending.name ? ' onto ' + restartPending.name : ''} — the verb would ride a process that is being replaced` };
+  return out;
+}
+/** THE MANUAL USE: one verb through the same writer as the auto rung. →
+ *  {ok:true, sessionId, preview} | {ok:false, code, error, preview} */
+function consumeResetCreditFor(key, { preferSessionId = null, now = Date.now() } = {}) {
+  const p = resetCreditPreview(key, { preferSessionId, now });
+  if (p.code) return { ok: false, code: p.code, error: p.error, preview: p };
+  const session = activeSessions.get(p.sessionId);
+  if (!session) return { ok: false, code: 'no_live_session', error: 'the session ended', preview: p };
+  const wr = writeResetCredit(session, { resetsAtSec: p.resetsAtSec || 0, lane: null, origin: 'user', now, key: p.key });
+  if (!wr.ok) return { ok: false, code: 'spend_refused', error: wr.why ? `${wr.why}${wr.detail ? ': ' + wr.detail : ''}` : 'the spend authorizer failed', preview: p };
+  console.log(`[reset-credit] ${session._webuiId}: a person asked for a reset credit on ${nameOf(p.key)} (credits=${p.creditsLeft ?? '?'})`);
+  global.__vsEvent?.('codex-reset-credit-user', session._accountId || 'global');
+  return { ok: true, sessionId: session._webuiId, preview: p };
+}
+/**
+ * THE RUNG. Returns
+ *   'consumed'     a credit is IN FLIGHT for this wall — the verb this call wrote,
+ *                  or a sibling conversation's on the same account (this one then
+ *                  FOLLOWS it, r2), or the window a credit re-opened moments ago —
+ *                  the outcome event continues the ladder; the caller returns
+ *   'switch-first' the verdict's `cold-switch-first`: the caller runs the switch
+ *                  rung and, when it moved nothing, asks again at
+ *                  `ladderPosition: 'after-switch'` (the verdict's cold rung)
+ *   'asked'        one For-you decision filed
+ *   'skipped'      nothing to do here
+ * The caller runs the switch rung and the wall machine after anything but
+ * 'consumed'.
+ */
+function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null, snap = null, ladderPosition = 'wall' } = {}) {
+  try {
+    const mode = resetCreditMode(session);
+    if (!mode) return 'skipped';
+    if (!session.pty || session.mode !== 'chat') return 'skipped'; // the verb (and p2's button) ride the live wrapper
+    const now = Date.now(), nowSec = Math.floor(now / 1000);
+    const vendor = quotaSourceFor(session.backend).resetCreditVendor || null;
+    const R = Number(resetsAtSec) || 0;
+    // THE CREDIT'S IDENTITY is the member this process HOLDS (r2), never the
+    // pool's current member: `key` from the caller names where the READING was
+    // filed and is only a fallback
+    const ci = creditIdentityFor(session);
+    key = ci.key || key;
+    // ONE limit EVENT = (identity, stated reset): the ask item and the wall card
+    // speak once per event, however many records restate it
+    const eventKey = `${key}|${R || '?'}`;
+    const firstOfEvent = session._resetCreditEvent !== eventKey;
+    session._resetCreditEvent = eventKey;
+    const speak = firstOfEvent || ladderPosition !== 'wall';
+    // THE POOL ALREADY MOVED (r2): this process still holds the old member's
+    // login until its cold restart lands. A credit spent here would be that
+    // member's, spent for a conversation that is leaving it — refused by name;
+    // the switch rung already answered this wall. (A PERSON may still spend it
+    // on that account through the button: consumeResetCreditFor.)
+    if (ci.moved) {
+      if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (pool-moved — this conversation still holds ${nameOf(key)}'s login, the pool moved to ${nameOf(ci.current)}; it restarts there) mode=${mode}`);
+      return 'skipped';
+    }
+    // …or NOBODY CAN SAY which login this process holds (r3: spawned before
+    // the stamp, no slot-transition row before it started). Spending on the
+    // pool's current member through it was the pre-stamp misattribution — B's
+    // credit charged, A's login asked. Refused by name (and such a process is
+    // no carrier for a person's Use… either — resetCreditCarriers).
+    if (ci.unknown) {
+      if (speak) console.log(`[reset-credit] ${session._webuiId}: kept (held-unknown — this process started before the pool stamped its member and no slot-transition row names the pool default at its start; it is re-stamped at its next restart) mode=${mode}`);
+      return 'skipped';
+    }
+    // A SIBLING'S CREDIT IS IN FLIGHT on this account (r2): follow it — its
+    // answer settles this conversation too (settleResetCreditTry)
+    const t = resetCreditTryFor(key);
+    if (resetCreditInFlight(t, now) && t.sid !== session._webuiId) {
+      t.followers.set(session._webuiId, { resetsAtSec: R, lane: lane || null });
+      if (speak) console.log(`[reset-credit] ${session._webuiId}: following ${t.sid}'s reset credit in flight on ${nameOf(key)} (one credit per account wall) mode=${mode}`);
+      return 'consumed';
+    }
+    // …or it LANDED moments ago and this record restates the wall it re-opened
+    // (the same stated reset): the window is open — no switch, no wait. ONE
+    // predicate with the task_failed branch's pre-write check (r5).
+    if (restatedResetWallTry(key, R, now)) {
+      if (speak) console.log(`[reset-credit] ${session._webuiId}: this wall on ${nameOf(key)} was re-opened by a reset credit ${Math.round((now - t.outcomeAt) / 1000)}s ago — not switching`);
+      return 'consumed';
+    }
+    const { periodSec, remainingPct } = trippedWindowFacts(snap, R);
+    const creditsLeft = resetCreditsLeft(session, key);
+    const warmth = conversationWarmth(session, now);
+    const poolAlternative = poolAlternativeFor(session, now);
+    const tried = resetCreditTriedAt(key); // the IDENTITY's floor (r2), across every session on it
+    const v = resetCredit.resetCreditVerdict({
+      vendor, wallHit: true, remainingPct, resetsAtSec: R || null, nowSec, periodSec, creditsLeft,
+      cooldownUntilSec: tried ? Math.floor((tried + RESET_CREDIT_FLOOR_MS) / 1000) : null,
+      inTurn: warmth.inTurn, warm: warmth.warm, poolAlternative, ladderPosition: ladderPosition === 'after-switch' ? 'after-switch' : 'wall',
+    });
+    if (speak) console.log(`[reset-credit] ${session._webuiId}: ${v.use ? 'worth it' : 'kept'} (${v.reason} — ${resetCredit.reasonText(v.reason)}) mode=${mode} ${warmth.inTurn ? 'in-turn' : warmth.warm ? 'warm' : 'cold'} poolAlternative=${poolAlternative}${ladderPosition !== 'wall' ? ' ' + ladderPosition : ''} credits=${creditsLeft ?? '?'} on ${nameOf(key)}`);
+    const desc = resetCredit.describeUse(vendor, v, { nowSec, resetsAtSec: R || null, periodSec, creditsLeft });
+    const wallCard = (refusedBy = null) => {
+      // OFF / ASK / a refused verdict: the wall card NAMES the credits (§3) and
+      // carries the offer for the button; only when the count is KNOWN and > 0
+      if (!firstOfEvent || !(creditsLeft > 0)) return;
+      const n = creditsLeft;
+      const why = refusedBy ? ` Not used automatically: ${refusedBy}.` : v.use || mode === 'off' ? '' : ` Not used automatically: ${resetCredit.reasonText(v.reason)}.`;
+      try { feedPeerCard(session, { fromName: 'VibeSpace', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key } }); } catch { }
+    };
+    if (!v.use || mode === 'off') { wallCard(); return v.reason === 'cold-switch-first' ? 'switch-first' : 'skipped'; }
+    if (mode === 'ask') {
+      wallCard();
+      // ONE decision per limit event — asked at the wall, or (a cold
+      // conversation) after a switch that moved nothing
+      if (session._resetCreditAsked === eventKey) return 'skipped';
+      session._resetCreditAsked = eventKey;
+      let todos = null;
+      try { todos = getUserTodos(); } catch { todos = null; }
+      if (!todos) return 'skipped';
+      const bsid = session.backendSessionId || session.claudeSessionId;
+      const sessionKey = bsid ? `${session.backend || 'claude'}:${bsid}` : `webui:${session._webuiId}`;
+      const who = nameOf(key);
+      try {
+        const item = todos.add(sessionKey, {
+          text: `Use a stored reset credit on ${who}? (limit resets ${R ? new Date(R * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'at an unknown time'})`,
+          detail: desc.text, urgency: 'normal', kind: 'action', sessionName: session.name || null,
+          i18n: { text: { key: i18nKey('Use a stored reset credit on {account}?'), params: { account: who } }, detail: desc.lines },
+          action: { type: 'reset-credit', sessionId: session._webuiId, accountKey: key, resetsAtSec: R || null, creditsLeft, reason: v.reason },
+          // the question is moot once the limit resets by itself (r3)
+          expiresAt: R && R * 1000 > now ? R * 1000 : null,
+        });
+        if (item && item.id) { _resetCreditAsks.set(item.id, { key, sid: session._webuiId }); if (_resetCreditAsks.size > 256) _resetCreditAsks.delete(_resetCreditAsks.keys().next().value); }
+      } catch (e) { console.warn('[reset-credit] could not file the For-you decision:', e.message); }
+      return 'asked';
+    }
+    // AUTO — through the ONE writer the manual button uses too (writeResetCredit).
+    const wr = writeResetCredit(session, { resetsAtSec: R, lane, origin: 'auto', now, key });
+    // the card NAMES the account the ceiling refused (r3 — the code alone said
+    // "hour-cap" and only the journal said whose hour it was)
+    if (!wr.ok) { if (wr.why) wallCard(`the unattended-spend ceiling refused it (${wr.why}) for ${nameOf(key)}${wr.detail ? ` — ${String(wr.detail).replace(/\.$/, '')}` : ''}`); return 'skipped'; }
+    const saved = v.waitSavedSec ? ` — saves a wait of ${resetCredit.fmtWait(v.waitSavedSec)}` : '';
+    const leftTxt = creditsLeft > 0 ? `; ${creditsLeft - 1} left after this one` : '';
+    serverNotice(`codex-reset-${session._webuiId}-${now}`, `Usage limit hit on ${nameOf(key)} — using a stored reset credit${saved}${leftTxt} (${warmth.inTurn || warmth.warm ? 'warm conversation: before switching accounts' : 'no pool member can take it'}).`);
+    global.__vsEvent?.('codex-reset-credit-try', session._accountId || 'global');
+    return 'consumed';
+  } catch (e) { console.warn('[reset-credit] rung failed:', e.message); return 'skipped'; }
+}
 // ── Codex quota signals (P2, design-backend-parity.md §2) ──────────────────
 // The wrapper relays account/rateLimits/updated as `rate_limits_updated` and
 // forwards the typed codex_error_info on task_failed. Readings write the SAME
@@ -2951,6 +3736,11 @@ function recordCodexQuotaSignal(session, payload) {
       // every codex panel rendered "via unknown · No producer recorded this
       // reading" about the one codex producer that exists.
       snap.source = source;
+      // WHEN the stored reset-credit count was STATED (r2): the cache writer now
+      // carries the count across pushes that do not state it, so the file's
+      // `fetchedAt` no longer dates the count — resetCreditsLeft compares this
+      // stamp with the session's own last read and trusts the fresher one
+      if (snap.resetCredits && typeof snap.resetCredits === 'object' && !snap.resetCredits.at) snap.resetCredits = { ...snap.resetCredits, at: Number(snap.fetchedAt) || Date.now() };
       try {
         const cur = usageWrite.readCacheObject(USAGE_CACHE_DIR, key);
         if (!cur || (Number(cur.fetchedAt) || 0) < (Number(snap.fetchedAt) || 0)) {
@@ -2968,52 +3758,19 @@ function recordCodexQuotaSignal(session, payload) {
       } catch { }
       return { key, snap };
     };
-    // Escape ladder on codex exhaustion (owner-designed order): ① stored
-    // RESET CREDIT when opted in (codex.limitResetCredit='auto' — spending a
-    // stored reset unattended is the same consent class as auto-resume, so
-    // default off) → ② pool switch → ③ auto-resume wait. One credit attempt
-    // per limit event, 10min re-try floor.
-    const tryResetCredit = (resetsAtSec, lane = null) => {
-      try {
-        if (!harnessDeclares(session.backend, 'limitResetCredit') || harnessSetting(session.backend, 'limitResetCredit') !== 'auto') return false;
-        if (!session.pty || session.mode !== 'chat') return false;
-        const now = Date.now();
-        if (session._codexResetTriedAt && now - session._codexResetTriedAt < 10 * 60e3) return false;
-        // A stored reset credit is money the owner already paid for, spent
-        // while nobody is present — the same consent class as an auto-resume
-        // continue, so it passes the SAME ceiling (design §4.4c: the seven
-        // producers, this is the one that does not open a turn but still
-        // spends). Fail closed: an authorizer that throws does not get to
-        // green-light a purchase.
-        // THE MODULE'S OWN GUARD, not an injected dep (r2): `spendGuard` is
-        // constructed above in this very file and the reset-credit path runs
-        // long after the factory returns, so there is nothing to inject and
-        // nothing that can arrive null. The dep version of this gate shipped
-        // DEAD — server.js never passed it — and the suite leg that "proved"
-        // it passed a payload that reached no branch at all.
-        let av = null;
-        {
-          try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session, sessionId: session._webuiId, sessionName: session.name || null }); }
-          catch (e) { console.warn('[codex] spend authorizer threw — not spending a reset credit:', e.message); return false; }
-          if (av && av.ok === false) { console.log(`[codex] reset credit refused for ${session._webuiId} (spend budget: ${av.why})`); return false; }
-        }
-        session._codexResetTriedAt = now;
-        session._codexLastResetsAt = Number(resetsAtSec) || 0;
-        // …and WHICH LANE it was: if the credit fails we arm from these two,
-        // and an arm with no lane can never be reopened by a reading (an
-        // unknown lane may not authorise a billed turn).
-        session._codexLastLane = lane || null;
-        session.pty.write(JSON.stringify({ type: 'codex-reset-credit' }) + '\n');
-        // CHARGE WHAT YOU AUTHORIZED (r4): the slot the verdict resolved, handed
-        // back — never a session for the guard to resolve a second time.
-        try { spendGuard.note({ reason: 'codex-reset-credit', session, identity: av && av.identity, hold: av && av.hold }); } catch (e) { console.warn('[codex] spend accounting failed:', e.message); }
-        serverNotice(`codex-reset-${session._webuiId}-${now}`, `Codex hit a usage limit — trying a stored rate-limit reset credit before switching accounts.`);
-        global.__vsEvent?.('codex-reset-credit-try', session._accountId || 'global');
-        return true;
-      } catch { return false; }
-    };
+    // Escape ladder on codex exhaustion: the RESET-CREDIT RUNG (resetCreditRung,
+    // above — the verdict forks it by warmth) → ② pool switch → ③ auto-resume wait.
     if (payload.type === 'reset_credit_result') {
       const out = payload.outcome || payload.result?.outcome || null;
+      const userAttempt = session._resetCreditOrigin === 'user';
+      session._resetCreditOrigin = null; // one answer per attempt
+      // THE IDENTITY'S ATTEMPT this answer belongs to (r2) — its followers are
+      // settled with it; an attempt already settled by the no-answer timer has
+      // walked its ladder once and must not walk it twice
+      const tKey = session._resetCreditKey || codexQuotaKeyFor(session);
+      const t0 = tKey ? _resetCreditTries.get(tKey) : null;
+      const tryRec = t0 && t0.sid === session._webuiId ? t0 : null;
+      const alreadyWalked = !!(tryRec && tryRec.outcome === 'no-answer');
       if (out === 'reset') {
         serverNotice(`codex-reset-ok-${session._webuiId}-${Date.now()}`, `Codex reset credit consumed — the limit was reset, continuing on the same account.`);
         // worked:false — codex says the LIMIT was reset on this identity; the
@@ -3023,16 +3780,60 @@ function recordCodexQuotaSignal(session, payload) {
         // only decides whether a still-live failed fire keeps its quarantine —
         // and a redeemed credit is not a reason to re-open the hour's budget:
         // that quarantine self-expires in 10min, the same floor
-        // tryResetCredit itself paces on.
+        // the credit rung itself paces on (RESET_CREDIT_FLOOR_MS).
         try { getAutoResume()?.noteRecovered?.(session._webuiId, 'codex reset credit consumed', { worked: false }); } catch { }
-        kickPoolEval();
+        if (tryRec && tryRec.outcome) { tryRec.outcome = 'reset'; tryRec.outcomeAt = Date.now(); } // a late answer still re-opened the window
+        settleResetCreditTry(tryRec, 'reset');
+        // THE POOL WAITS FOR THE POST-RESET READING (r3, see holdForResetReading):
+        // unless one already landed (the current wrapper re-reads BEFORE it
+        // answers), the cache still says spent — deciding on it now moves the
+        // pool off the account this credit just re-opened
+        let reRead = false;
+        try {
+          const c = tKey ? readRawUsageCache(tKey) : null;
+          const triedAt = (tryRec && tryRec.at) || Number(session._codexResetTriedAt) || 0;
+          reRead = !!(c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && c.source === 'codex-rate-limits');
+        } catch { }
+        if (tKey && !reRead) holdForResetReading(tKey, session._webuiId);
+        else kickPoolEval();
       } else {
         // credit didn't land (nothingToReset / alreadyRedeemed / cooldown /
         // error) — fall through to the normal ladder: switch, else wait.
         global.__vsEvent?.('codex-reset-credit-failed', String(out || payload.error || 'unknown').slice(0, 60));
-        maybePoolAutoSwitch(session);
-        const resets = Number(session._codexLastResetsAt) || 0;
-        try { noteWallSignal(session, { resetsAtMs: resets * 1000, bucket: 'sevenDay', key: codexQuotaKeyFor(session), lane: session._codexLastLane || null }); noteTurnEnd(session); } catch { }
+        // SUPERSEDED (r2, reproduced): `alreadyRedeemed` means somebody's credit
+        // already re-opened this limit, and a reading of this account NEWER than
+        // the attempt that shows it usable says the same — neither is a wall.
+        // Demoting/arming from the attempt's stale stated reset moved the whole
+        // pool off the account a sibling's credit had just re-opened. Re-read
+        // instead (the existing caps-routed rung — the account's own app-server;
+        // nothing here touches a vendor) and let THAT reading run the ladder.
+        let superseded = null;
+        if (out === 'alreadyRedeemed') superseded = 'the vendor says this limit was already redeemed';
+        else {
+          try {
+            const c = tKey ? readRawUsageCache(tKey) : null;
+            const triedAt = (tryRec && tryRec.at) || Number(session._codexResetTriedAt) || 0;
+            if (c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && quotaVerdict(c, Math.floor(Date.now() / 1000)).usable === true) superseded = 'a reading newer than the attempt shows the limit open';
+          } catch { }
+        }
+        if (superseded) {
+          console.log(`[reset-credit] ${session._webuiId}: credit answer ${out || 'unknown'} on ${nameOf(tKey)} — ${superseded}; not a wall (re-reading instead of demoting)`);
+          settleResetCreditTry(tryRec, String(out || 'superseded'), { failed: true, superseded: true });
+          if (userAttempt) serverNotice(`codex-reset-fail-${session._webuiId}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — ${superseded}.`);
+          try { Promise.resolve(probeQuotaForKey(tKey, { session })).then(() => kickPoolEval(), () => kickPoolEval()); } catch { }
+          return;
+        }
+        // the attempt's followers walk THEIR ladder whoever asked for it
+        settleResetCreditTry(tryRec, String(out || 'failed'), { failed: true });
+        // A PERSON'S attempt (p2) is REPORTED, never walked down the ladder: the
+        // wall that card sat on already ran it, and a roster click may have no
+        // wall at all (arming a wait from it would invent one).
+        if (userAttempt) {
+          serverNotice(`codex-reset-fail-${session._webuiId}-${Date.now()}`, `Reset credit not used on ${nameOf(tKey)} — the vendor answered ${String(out || payload.error || 'unknown').slice(0, 120)}.`);
+          return;
+        }
+        if (alreadyWalked) return; // the no-answer timer already walked it
+        walkLadderAfterCredit(session, { resetsAtSec: Number(session._codexLastResetsAt) || 0, lane: session._codexLastLane || null, key: tKey });
       }
       return;
     }
@@ -3046,12 +3847,24 @@ function recordCodexQuotaSignal(session, payload) {
       // cache write — its next quotaVerdictFor already reads the fresh file
       settleCodexLimitsWaiters(session, w && w.key ? { ok: true }
         : { ok: false, reason: w && w.archived ? 'the reading\'s window is not this account\'s (archived)' : 'unparseable rateLimits' });
+      // the stored reset-credit count rides ONLY the on-demand read — remember it on
+      // the session so the rung knows it even when a later passive push drops it
+      // (p2: WITH the identity it was read for — after a pool switch the session
+      // bills another member, and that member's count is not this one)
+      if (snap0 && snap0.resetCredits && Number.isFinite(Number(snap0.resetCredits.availableCount))) session._resetCreditsSeen = { count: Number(snap0.resetCredits.availableCount), at: Date.now(), key: (w && w.key) || null };
       if (!w || !w.key) return;
+      // the post-reset reading a `reset` answer was waiting on (r3): the pool
+      // re-decides on it now — whatever it says
+      { const e = resetReadingEndsHold(w.key, session, w.snap); if (e) releaseResetHold(e[0], 'its post-reset reading landed'); }
       global.__vsEvent?.('codex-rate-limits', `${w.key}${w.snap.rateLimitReachedType ? ':reached-' + w.snap.rateLimitReachedType : ''}`);
       if (sig.kind === 'exhausted') {
         const tripped = sig.tripped; // the window rate_limit_reached_type named
-        if (tryResetCredit(tripped?.resetsAt, arSignal.laneOf(w.snap))) return; // outcome event continues the ladder
+        const rcArgs = { resetsAtSec: tripped?.resetsAt, lane: arSignal.laneOf(w.snap), key: w.key, snap: w.snap };
+        const rung = resetCreditRung(session, rcArgs);
+        if (rung === 'consumed') return; // outcome event continues the ladder (this conversation's credit, or a sibling's on the same account)
+        const poolBefore = poolDefaultOf(session);
         maybePoolAutoSwitch(session); // another ChatGPT account = seconds, not hours
+        if (rung === 'switch-first' && poolDefaultOf(session) === poolBefore && resetCreditRung(session, { ...rcArgs, ladderPosition: 'after-switch' }) === 'consumed') return; // the switch moved nothing (gated / nowhere after all): the cold conversation's credit rung
         try { noteWallSignal(session, { resetsAtMs: (Number(tripped?.resetsAt) || 0) * 1000, bucket: tripped && tripped === w.snap.fiveHour ? 'fiveHour' : 'sevenDay', key: w.key, lane: arSignal.laneOf(w.snap) }); } catch { }
       } else {
         // the codex twin of the passive claude reading above — and the ONE
@@ -3066,6 +3879,10 @@ function recordCodexQuotaSignal(session, payload) {
       // an on-demand rateLimits/read that FAILED ({error, onDemand}) — settle
       // any rpc-rate-limits probe waiting on this session, honestly
       settleCodexLimitsWaiters(session, { ok: false, reason: String(payload.error || 'no rateLimits in reply') });
+      // …and a hold waiting on THIS session's post-reset re-read hears that it
+      // FAILED (r4) — not merely that it is late: the pool keeps the account on
+      // the vendor's `reset` and the hold's own timer asks again
+      try { const e = resetHoldEntry(codexQuotaKeyFor(session)); if (e && e[1].sid === session._webuiId) console.log(`[reset-credit] ${session._webuiId}: the post-reset re-read of ${nameOf(e[0])} failed (${String(payload.error || 'no rateLimits').slice(0, 120)}) — the pool keeps it on the vendor's word; asking again shortly`); } catch { }
       return;
     }
     if (payload.type === 'task_failed') {
@@ -3095,6 +3912,15 @@ function recordCodexQuotaSignal(session, payload) {
         // restore that claim without re-measuring it.
         // Inventing a lane we cannot read would be worse in the other
         // direction (a wait no reading can ever open).
+        // A RESTATED WALL (r5) is decided BEFORE anything is written: the
+        // event it restates was re-opened by a reset credit moments ago, so it
+        // neither re-marks the account nor ends the reset hold (only a reading
+        // or a wall with a different stated reset may) nor walks the ladder
+        const restated = restatedResetWallTry(creditIdentityFor(session).key, resets, Date.now());
+        if (restated) {
+          console.log(`[reset-credit] ${session._webuiId}: restated wall of the re-opened event on ${nameOf(restated.key)} (stated reset ${resets || 'none'}, re-opened by ${restated.sid}'s credit ${Math.round((Date.now() - restated.outcomeAt) / 1000)}s ago) — not re-marking it, not switching`);
+          return;
+        }
         const snap = sig.snapshot || {
           limitId: 'codex', sevenDay: { utilization: 1, usedPercent: 100, windowMinutes: 10080, resetsAt: resets > nowSec ? resets : nowSec + 24 * 3600, status: 'limited' },
           fiveHour: null, rateLimitReachedType: 'unknown', fetchedAt: Date.now(),
@@ -3105,9 +3931,16 @@ function recordCodexQuotaSignal(session, payload) {
         // not a reading at all. Calling either one 'codex-rate-limits' would
         // claim a producer that did not produce it.
         const w2 = writeSnap(snap, 'limit-banner');
+        // a WALL on an account whose reset credit is pending says the reset did
+        // not hold (r4): the hold ends here, and the ladder below decides on it
+        try { const e = w2 && w2.key ? resetHoldEntry(w2.key) : null; if (e) releaseResetHold(e[0], 'a new wall on it after the reset', { force: false }); } catch { }
         global.__vsEvent?.('codex-usage-limit', info);
-        if (tryResetCredit(resets, arSignal.laneOf(w2?.snap || snap))) return; // ① reset credit first when opted in
+        const rcArgs = { resetsAtSec: resets, lane: arSignal.laneOf(w2?.snap || snap), key: w2?.key || null, snap: w2?.snap || snap };
+        const rung = resetCreditRung(session, rcArgs);
+        if (rung === 'consumed') return; // the credit rung (warm: before the switch; cold: only with nowhere to switch)
+        const poolBefore = poolDefaultOf(session);
         maybePoolAutoSwitch(session);
+        if (rung === 'switch-first' && poolDefaultOf(session) === poolBefore && resetCreditRung(session, { ...rcArgs, ladderPosition: 'after-switch' }) === 'consumed') return; // the switch moved nothing: the cold conversation's credit rung
         try { noteWallSignal(session, { resetsAtMs: resets > nowSec ? resets * 1000 : 0, bucket: 'sevenDay', key: w2?.key || codexQuotaKeyFor(session), lane: arSignal.laneOf(w2?.snap || snap) }); noteTurnEnd(session); } catch { }
       } else if (sig.kind === 'auth-failure') {
         global.__vsEvent?.('codex-auth-failure', session._accountId || 'global'); // v1: surfaced, not auto-evicted (claude's evict is creds-path-specific)
@@ -3597,6 +4430,7 @@ function kickPoolEval() {
         if (a.type === 'pooled' && a.auto) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
       }
     } catch { }
+    try { sweepResetCreditAsks(); } catch { } // an ask item whose carrier is gone (r3)
   });
 }
 // WORKFLOW usage tailer (2.266.0, user question "不能拦截workflow agents吗"):
@@ -3799,8 +4633,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
           if (!own) affected.push(pack(sid2, s2));
         }
       }
-      const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
-      for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch { } break; } }
+      sendColdRestart(poolId, affected, now);
     }
   } catch (e) { console.warn('[pool] auth-failure evict failed:', e.message); }
 }
@@ -3850,6 +4683,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     if (!force && (now - (_poolAutoLast.get(poolId) || 0)) < 10000) return; // event-driven kicks need a tight gate; anti-flap = MIN_GAIN, not cadence
     const currentId = accounts.poolCurrent(poolId);
     if (!currentId) return;
+    // a reset credit just re-opened this member and its post-reset reading is
+    // still on the way (r3): the cache's spent mark is the WALL's, not a fact
+    // about now — no decision off it until the reading (or 30 s) arrives
+    if (resetCreditPendingFor(currentId, now)) return;
     // Capability-gated (P4 slice, src/backend-caps.js): hot only where a
     // live re-read is VERIFIED (codex: experimentally refuted, 2026-08-24 —
     // CODEX_HOME canonicalized at startup + tokens held in process memory);
@@ -3995,8 +4832,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         // restarts the conversation through the client instead.
         if (a.hot) { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
         if (!a.hot) {
-          const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected: [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }] });
-          for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
+          sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }], now);
         }
       } catch (e) { console.warn('[pool] per-session re-point failed:', e.message); }
     }
@@ -4004,32 +4840,28 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // without its own link at once (the `affected` set below), so its proactive
     // move waits while ANY of them is warm — the warmest one (largest ttl − ago
     // margin) holds it and names it in the journal.
-    // THE FIRST STOP, pool-default form (2026-09-22): a warm follower that is IN
-    // A TURN outranks every idle one — it is the only kind that can defer a SOFT
-    // move — so the default's soft move waits for that conversation's first stop.
-    // WHY NOT PIN IT to the old member through its own link and move the default
-    // for everyone else: a default follower's CLI reads the pool's OWN link
-    // (data/subs/<pool>, fixed in its env at spawn — it has no per-session link),
-    // so a per-session link created now would never be read by that process —
-    // the default re-point would still move it mid-turn, while
-    // sessionBillingMember (which reads the per-session link first) would bill
-    // its requests to the OLD member: the stale-slot misattribution class. So
-    // the default HOLDS; its cold co-followers wait with it (one turn at most,
-    // the band is still usable, and the HARD band never waits). Every local
-    // claude session spawned since plan C carries its own link and is decided by
-    // the per-session pass above, one conversation at a time.
+    // NO SOFT HOLD AT THE DEFAULT (owner ruling 2026-09-22, design-reset-credits
+    // §8 ③ — reversing 2.369.153's "first stop, pool-default form"): a follower
+    // of the pool default (a conversation with NO link of its own) is LEGACY and
+    // gets no compatibility. The default's SOFT-band move is made at once, like a
+    // cold conversation's — a mid-turn follower is re-pointed mid-turn (its CLI
+    // reads the pool's own link, so nothing per-session could keep it). Every
+    // local claude session spawned since plan C carries its own link and keeps
+    // the first-stop rule in the per-session pass above. What STAYS is 2.369.149's
+    // PROACTIVE hold: an 'edf' jump still waits while any follower's cache is
+    // warm (the warmest names it) — only the soft-band defer is gone, so `inTurn`
+    // is deliberately not computed here.
     let defaultWarm = null, defaultWarmSid = null;
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || hasOwnPoolLink(poolId, sid)) continue;
-      const w = { ...warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) }), inTurn: conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState }) };
+      const w = warmCache({ lastActivityMs: s._lastPtyDataAt, nowMs: now, model: cacheModelFor(s) });
       if (!w.warm) continue;
-      if (!defaultWarm || (w.inTurn && !defaultWarm.inTurn) || (w.inTurn === defaultWarm.inTurn && w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec)) { defaultWarm = w; defaultWarmSid = sid; }
+      if (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec) { defaultWarm = w; defaultWarmSid = sid; }
     }
     const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
     if (!d) return;
     if (!d.to) {
       if (d.reason === 'warm-cache') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default'); return; }
-      if (d.reason === 'warm-soft-defer') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default:soft'); return; }
       // PARKED ON CREDITS (B-ad05): not "stuck" — the current member serves,
       // billed pay-per-use past its quota. ONE notice per (pool, member) per 6 h.
       if (d.reason === 'on-credits') { noteCreditsParking(poolId, currentId, poolCreditsNotice(d, { poolName: a.name, memberName: nameOf(currentId) }), now); return; }
@@ -4081,7 +4913,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // plan C: a session with its own link didn't move with the default —
       // restarting it for the pool-level switch would be the old collateral
       if (hasOwnPoolLink(poolId, sid)) continue;
-      try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch {}
+      // a HELD follower (a non-hot process — r3) keeps billing the member it
+      // holds until the cold restart below lands; its ledger row must not move
+      // to the new member ahead of the process (the restart's spawn records it)
+      if (!heldPoolMemberFor(s, poolId)) { try { recordUsageAttribution({ claudeSessionId: s.claudeSessionId || s.backendSessionId, accountId: poolId }); } catch {} }
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }
     const fromPct = d.fromRemaining != null ? Math.round(d.fromRemaining) : null;
@@ -4103,8 +4938,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left, hot=${hot}, affected=${affected.length})`);
     if (!hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
-      const payload = JSON.stringify({ type: 'pool-auto-switched', poolId, affected });
-      for (const c of wss.clients) { if (c.readyState === WS_OPEN) { try { c.send(payload); } catch {} break; } }
+      sendColdRestart(poolId, affected, now);
     }
     // default-link sessions on a HOT switch: same c1206711 rule as the
     // per-session pass — an ARMED (limit-blocked, idle) session must be
@@ -4171,6 +5005,7 @@ function maybeStopOnFallback(session, id, from, to) {
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,
+    resetCreditRung, resetCreditOffer, poolAlternativeFor, conversationWarmth, resetCreditPreview, consumeResetCreditFor, creditIdentityFor, heldPoolMemberFor, heldPoolUnknown, requestHeldRestart, sendColdRestart, claimColdRestarts, sweepResetCreditAsks, _resetCreditAsks, _resetCreditPending, _resetCreditTries, // r2: the credit's identity (the member the process HOLDS), the per-identity attempt record (WALL-CLOCK floor — a suite winds `.at` back instead of sleeping, the _poolAutoLast seam); p2: the manual use (src/routes/reset-credit.js) — the preview the dialog shows and the one writer the auto rung shares; THE RESET-CREDIT RUNG (design-reset-credits §4): the verdict's consumer, the offer the wall/arm cards carry, and its two inputs
     probeQuotaForKey, quotaSourceFor, quotaBackendFor, // S4 caps-routed quota probe + the per-harness QuotaSignalSource lookup (functional seams for test-quota-source)
     overageState, readRawUsageCache, reserveFloorPct, overageMemberIds, creditsMemberIds, spendGuard, // the ONE overage reader, the two voluntary-move bars (D2/D3) and THE SPEND CEILING (§4.4c)
     apiDerivedWindow, noteApiDerivedWindow, apiWitnessEligibility, API_WITNESS_K, establishedWindows, inLagShadow, recentRepointRow, lastRepointRow, // B-855a: the two identity witnesses the panel probe is checked against (the API one a ring of K eligible readings) + the ⟳ control-rung eligibility test

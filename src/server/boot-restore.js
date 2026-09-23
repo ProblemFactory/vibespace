@@ -16,6 +16,32 @@ const { fdScanShellFns } = require('../writer-sweep.js');
 
 const { mk } = require('./lazy.js');
 
+/** Where a restored session's held pool member came from (design-reset-credits
+ *  r4): 'ledger' = the engine derived it from the slot-transition ledger and
+ *  persisted it; 'no-start' = no stamp AND the meta never recorded `createdAt`
+ *  (the restore fills it with the boot instant, and the ledger would then name
+ *  the pool default at the BOOT — accounts.poolMemberOfSession answers unknown). */
+function heldOriginOf(meta) {
+  if (!meta) return null;
+  if (typeof meta.heldPoolMember === 'string') return meta.heldPoolOrigin === 'ledger' ? 'ledger' : null;
+  // THE MARKER ITSELF IS PERSISTED (r5, reproduced): the restore fills the
+  // missing createdAt with the boot instant, and the rename / codex thread-meta
+  // writers then persist THAT — so the second restart read a createdAt and the
+  // ledger confidently named the pool default at the previous BOOT. The first
+  // restore writes `heldPoolOrigin: 'no-start'` (persistNoStart) and it is
+  // honoured before createdAt is looked at.
+  if (meta.heldPoolOrigin === 'no-start') return 'no-start';
+  return meta.createdAt ? null : 'no-start';
+}
+/** Persist the 'no-start' marker the first time a restore infers it (r5). */
+function persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }) {
+  try {
+    if (!meta || !meta.accountId || heldOriginOf(meta) !== 'no-start' || meta.heldPoolOrigin === 'no-start') return false; // only a session billed to an account can hold a pool member
+    writeSessionMeta(sockFile, { ...(readSessionMeta(sockFile) || meta), heldPoolOrigin: 'no-start' });
+    return true;
+  } catch { return false; }
+}
+
 function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   ENV_CMD, NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
@@ -212,6 +238,7 @@ function restoreSessions() {
 
     const meta = readSessionMeta(sockFile);
     const id = meta.webuiSessionId || ('sess-' + (++sessionCounterRef.value) + '-' + Date.now());
+    persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5: before any writer persists the boot instant as its createdAt
 
     // stale duplicate of a conversation another socket owns — do NOT adopt (two
     // cards); retire the husk so it can't double-write the JSONL. SIGTERM the
@@ -325,6 +352,8 @@ function restoreSessions() {
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
       _accountId: meta.accountId || null, // billing identity the session was spawned with (badge only — env lives in the surviving dtach process)
+      _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
+      _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       _authAtSpawn: meta.authAtSpawn || null,
       _apiKeySource: meta.apiKeySource || null, // CLI-confirmed auth (init record); backfilled from the buffer below when absent
       sockName: sockFile,
@@ -500,11 +529,14 @@ function restoreAgentdPipeSessions() {
     const sockFile = mf.slice(0, -5);
     const id = 'sess-' + sockFile.replace(/^cw-/, '');
     if (activeSessions.has(id)) continue;
+    persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }); // r5
     const session = {
       mode: 'chat', backend: meta.backend || 'claude', cwd: meta.cwd || os.homedir(),
       name: meta.name || 'Session', createdAt: meta.createdAt || Date.now(), sockName: sockFile,
       clients: new Map(), buffer: '', agentToken: meta.agentToken || null, taskId: meta.taskId || null,
       _accountId: meta.accountId || null, claudeSessionId: meta.claudeSessionId || null,
+      _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // design-reset-credits r2: the member the surviving pipe process holds
+      _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
       agentdSession: true, keeperSid: id, agentdPipe: true,
       _permissionMode: meta.permissionMode || null, _effort: meta.effort || null,
@@ -659,4 +691,4 @@ async function readoptOrphanKeeperSessions() {
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions };
 }
-module.exports = { create };
+module.exports = { create, heldOriginOf, persistNoStart }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

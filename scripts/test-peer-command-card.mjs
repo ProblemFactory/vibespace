@@ -219,7 +219,7 @@ console.log('— wiring pins (the unstaged-wiring class)');
   const sv = read('server.js');
   ok('server.js lists command_lifecycle as a HANDLED stream type (the breadcrumb must not cry unhandled for a handled type)', /'command_lifecycle',/.test(sv));
   const mm = read('src/message-manager.js');
-  ok('injectPeerCard notes msgId and refuses a msg_id already on screen', /injectPeerCard\(\{ fromName, text, msgId = null \}\)/.test(mm) && /if \(msgId && this\._peerMsgIds\.has\(msgId\)\) return null;\s*\n\s*this\._notePeerMsgId\(msgId\);/.test(mm));
+  ok('injectPeerCard notes msgId and refuses a msg_id already on screen', /injectPeerCard\(\{ fromName, text, msgId = null(, resetCredit = null)? \}\)/.test(mm) && /if \(msgId && this\._peerMsgIds\.has\(msgId\)\) return null;\s*\n\s*this\._notePeerMsgId\(msgId\);/.test(mm));
   ok('the user-record and attachment peer sites skip a msg_id already rendered', (mm.match(/origin\.msg_id && this\._peerMsgIds\.has\([a-z]+\.origin\.msg_id\)\) return;/g) || []).length === 2);
   ok('ci.mjs runs this suite', /'test-peer-command-card'/.test(read('scripts/ci.mjs')));
 }

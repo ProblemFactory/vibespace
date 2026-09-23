@@ -93,11 +93,18 @@ console.log('§2 derived schema rows vs the 2.369.120 snapshot');
   const schemaMod = await import(path.join(repo, 'src/lib/settings-schema.js'));
   const fx = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/harness-settings-schema-2.369.120.json'), 'utf8'));
   ok('the snapshot holds the 21 hand-written harness rows of 2.369.120', Object.keys(fx).length === 21);
+  // DELIBERATE CHANGES SINCE THE SNAPSHOT, each named with its release and the
+  // fields it may change — everything else of that row must still be identical
+  // (the snapshot proves the DERIVATION lost nothing; a product change is not a loss)
+  const CHANGED_SINCE = {
+    // 2.369.157 (docs/design-reset-credits.zh.md §3): the `ask` mode + the two vendors' mechanics in the description
+    'codex.limitResetCredit': ['options', 'description'],
+  };
   let diffs = [];
   for (const [k, v] of Object.entries(fx)) {
     const d = schemaMod.SETTINGS_SCHEMA[k];
     if (!d) { diffs.push(`${k}: missing`); continue; }
-    for (const f of Object.keys(v)) if (JSON.stringify(v[f]) !== JSON.stringify(d[f])) diffs.push(`${k}.${f}`);
+    for (const f of Object.keys(v)) if (!(CHANGED_SINCE[k] || []).includes(f) && JSON.stringify(v[f]) !== JSON.stringify(d[f])) diffs.push(`${k}.${f}`);
     if (!d.harness || !d.apply) diffs.push(`${k}: no harness/apply`);
   }
   ok('every snapshot row exists with identical type/default/options/label/description/category/liveApply/min/max/step/combobox', diffs.length === 0, diffs.slice(0, 8).join(', '));
@@ -138,6 +145,22 @@ console.log('§3 the typed accessors');
   ok('a boolean row is strict (a truthy string is NOT true)', sync.harnessSetting('claude', 'brief') === false);
   store['codex.limitResetCredit'] = undefined;
   ok('enum default', sync.harnessSetting('codex', 'limitResetCredit') === 'off' && sync.harnessSetting('codex', 'historyPersistence') === 'save-all');
+  // the reset-credit MODES (design-reset-credits §3): off | ask | auto, default off
+  store['codex.limitResetCredit'] = 'ask';
+  ok('limitResetCredit: the NEW `ask` value is in the closed vocabulary and survives the typed read', sync.harnessSetting('codex', 'limitResetCredit') === 'ask');
+  store['codex.limitResetCredit'] = 'always';
+  ok('…an unlisted mode falls back to the default `off` (NEVER to auto)', sync.harnessSetting('codex', 'limitResetCredit') === 'off');
+  const lrcRow = rowOf(HARNESS_SETTINGS.codex, 'limitResetCredit');
+  const schemaMod = await import(path.join(repo, 'src/lib/settings-schema.js'));
+  const fx = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/harness-settings-schema-2.369.120.json'), 'utf8'));
+  ok('…the row lists exactly off | ask | auto with off the default, and the schema derives the same options',
+    JSON.stringify(lrcRow.options.map((o) => o.value)) === '["off","ask","auto"]' && lrcRow.default === 'off'
+    && JSON.stringify(schemaMod.SETTINGS_SCHEMA['codex.limitResetCredit'].options.map((o) => o.value)) === '["off","ask","auto"]');
+  ok('…and its description names BOTH vendors\' mechanics (a re-opened window vs a refill in place)', /starts a NEW window/.test(lrcRow.description) && /refills in place/.test(lrcRow.description));
+  // NEGATIVE CONTROL: the 2.369.120 snapshot's vocabulary would refuse `ask`
+  const oldRow = { ...lrcRow, options: fx['codex.limitResetCredit'].options };
+  ok('NEGATIVE CONTROL: the snapshot\'s off|auto row refuses `ask` (the new value is what this leg sees)', HS.refusedValue(oldRow, 'ask') === 'ask' && HS.refusedValue(lrcRow, 'ask') === null);
+  store['codex.limitResetCredit'] = undefined;
   store['codex.historyPersistence'] = 'bogus';
   ok('a CLOSED enum refuses an out-of-vocabulary value: the row default answers, never the stored string', sync.harnessSetting('codex', 'historyPersistence') === 'save-all');
   const hpRow = rowOf(HARNESS_SETTINGS.codex, 'historyPersistence');

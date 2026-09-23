@@ -594,6 +594,82 @@ e2e: {
     ws.close();
   }
   srv.kill('SIGKILL'); servers.delete(srv);
+
+  // ④ A HELD POOL STAMP SURVIVES THE RESTORE (design-reset-credits r2/r3). A
+  //    session-meta carrying `heldPoolMember` restores as a process that still
+  //    speaks as that member: the billing badge (sessionAuth → accounts.
+  //    poolMemberOfSession, the ONE rule) names it even after the pool default
+  //    moved on — while the same meta WITHOUT the stamp (a process older than
+  //    every ledger row of its pool) is `unknown` and follows the link. Same
+  //    self-upgrading daemon, same dead channel, zero input.
+  installStale();
+  srv = boot(); jrn = journal(srv); await waitReady(srv);
+  let sid2 = null;
+  {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const m2 = []; ws.on('message', (d) => { try { m2.push(JSON.parse(d)); } catch { } });
+    ws.send(JSON.stringify({ type: 'create', backend: 'shell', mode: 'terminal', cwd: ROOT, cols: 80, rows: 24, reqId: 'r2' }));
+    await new Promise((res, rej) => {
+      const t = setInterval(() => { if (m2.some((m) => m.type === 'created')) { clearInterval(t); res(); } }, 200);
+      setTimeout(() => { clearInterval(t); rej(new Error('no created reply (2nd): ' + JSON.stringify(m2.map((m) => m.type)))); }, 20000);
+    });
+    sid2 = m2.find((m) => m.type === 'created').sessionId;
+    ws.close();
+  }
+  await sleep(1500);   // the second session's meta lands
+  srv.kill('SIGKILL'); servers.delete(srv);
+  await sleep(600);
+  // the accounts, written with the server DOWN: two ChatGPT logins + a codex
+  // pool whose default is moved A→B AFTER both sessions were created
+  const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
+  const prevHome = process.env.CODEX_HOME; process.env.CODEX_HOME = path.join(ROOT, 'shared-codex'); // keep the seed off the real ~/.codex
+  const wam = new AccountManager({ dataDir: path.join(wt, 'data') });
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const sub = (name) => {
+    const { id } = wam.createCodexSubscription({ name });
+    const idTok = `${b64u({ alg: 'none', typ: 'JWT' })}.${b64u({ email: name.replace(/\W+/g, '').toLowerCase() + '@example.com', 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus', chatgpt_account_id: 'acct-' + name.replace(/\W+/g, '') } })}.sig`;
+    fs.writeFileSync(path.join(wam.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-' + name, id_token: idTok } }));
+    return id;
+  };
+  const cxA = sub('Cx Alpha'), cxB = sub('Cx Beta');
+  wam.createPool({ name: 'CxRestore', backend: 'codex' });
+  const cxP = wam.list().accounts.find((a) => a.type === 'pooled' && a.backend === 'codex').id;
+  wam.setPoolTarget(cxP, cxA); wam.setPoolTarget(cxP, cxB, { why: 'pool-switch' });
+  if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome;
+  ok(wam.poolCurrent(cxP) === cxB, 'e2e ④ setup: the pool default is on Cx Beta — only a STAMP can answer Cx Alpha now');
+  const metaDir = path.join(wt, 'data', 'session-meta');
+  const patchMeta = (id, extra) => {
+    for (const f of fs.readdirSync(metaDir)) {
+      const p = path.join(metaDir, f);
+      let m; try { m = JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { continue; }
+      if (m.webuiSessionId === id) { fs.writeFileSync(p, JSON.stringify({ ...m, ...extra })); return true; }
+    }
+    return false;
+  };
+  ok(patchMeta(sid, { backend: 'codex', accountId: cxP, heldPoolMember: cxA }), 'e2e ④ setup: the first session\'s meta carries accountId + heldPoolMember (the r2 spawn stamp)');
+  ok(patchMeta(sid2, { backend: 'codex', accountId: cxP }), 'e2e ④ setup: the second session\'s meta carries the pool and NO stamp');
+  installStale();
+  srv = boot(); jrn = journal(srv); await waitReady(srv);
+  {
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => ws.on('open', r));
+    const all = []; ws.on('message', (d) => { try { all.push(JSON.parse(d)); } catch { } });
+    const rowOf = (id) => { const l = all.filter((m) => m.type === 'active-sessions').pop(); return l ? (l.sessions || []).find((s) => (s.id || s.webuiId || s.sessionId) === id) : null; };
+    const t0 = Date.now();
+    while (Date.now() - t0 < 10000 && !(rowOf(sid) && rowOf(sid2))) await sleep(200);
+    const row = rowOf(sid), row2 = rowOf(sid2);
+    ok(!!row && !!row2, 'e2e ④ both sessions restored (the active-sessions payload on connect)', JSON.stringify(((all.filter((m) => m.type === 'active-sessions').pop() || {}).sessions || []).map((s) => s.id || s.webuiId || s.sessionId)));
+    ok(!!row && !!row.auth && row.auth.source === 'pooled' && row.auth.poolTarget === 'Cx Alpha',
+      'FIX e2e ④ the restored process\'s billing badge names the member it HOLDS (Cx Alpha) although the pool default is on Cx Beta — the stamp survived the restore', JSON.stringify(row && row.auth));
+    ok(!!row2 && !!row2.auth && row2.auth.source === 'pooled' && row2.auth.poolTarget === 'Cx Beta',
+      'e2e ④ CONTROL: the same meta WITHOUT the stamp (older than every ledger row of its pool ⇒ unknown) follows the link (Cx Beta)', JSON.stringify(row2 && row2.auth));
+    const tUp = Date.now();
+    while (Date.now() - tUp < 25000 && !/upgrading \(attempt 1\/3\)/.test(jrn())) await sleep(250);
+    ok(/upgrading \(attempt 1\/3\)/.test(jrn()), 'e2e ④ …measured under the same self-upgrading daemon', jrn().slice(-300));
+    ws.close();
+  }
+  srv.kill('SIGKILL'); servers.delete(srv);
 }   // the worktree is removed by cleanup() — see `worktrees` above
 
 // ── § 5 ONE HEALER, TWO TRIGGERS ───────────────────────────────────────────

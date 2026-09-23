@@ -270,7 +270,7 @@ if (!probe) {
   const armSwitch = arMod.armNoticeFor(st.reason, st.resetsAt, Date.now() - 1000);
   ok('…and the delayed ARM notice for a switch names the member and the seconds, never a "reset"', /^账号池已切换到 B-Stack Max，约 \d+ 秒后自动继续这个任务/.test(armSwitch) && !/重置|已达上限/.test(armSwitch), armSwitch);
   ok('…NEGATIVE CONTROL: an arm anchored on a real reset keeps the reset sentence', /^用量已达上限。已安排在 .+ 重置后自动继续/.test(arMod.armNoticeFor('5h 0% < 10%', Date.now() + 3600000, Date.now())));
-  ok('WIRING: the delayed notice site asks armNoticeFor with the arm\'s own reason AND its cause (B-73fe)', /notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\), a\.cause\)\)/.test(require('fs').readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8')));
+  ok('WIRING: the delayed notice site asks armNoticeFor with the arm\'s own reason AND its cause (B-73fe) — and hands the stored reset-credit offer beside it (design-reset-credits §5)', /notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\), a\.cause\), offer \? \{ resetCredit: offer \} : undefined\)/.test(require('fs').readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8')));
   const rec = w.ar._fires.get(w.SID);
   ok('…the breaker recorded the fire against the member the continue LANDED on', rec && rec.last && rec.last.key === w.SPARE, JSON.stringify(rec && rec.last));
   // the CLI rejects that continue too — through the real producer again
@@ -1232,6 +1232,7 @@ if (!probe) {
     // literal whys are pinned separately below, one per producer.
     ['src/server/usage-pool-engine.js', '<non-literal>', false],             //  the shared reading edge; its callers' whys are pinned below
     ['src/server/usage-pool-engine.js', 'codex reset credit consumed', false], // the LIMIT moved; the conversation produced nothing
+    ['src/server/usage-pool-engine.js', 'codex reset credit consumed (by another conversation on this account)', false], // design-reset-credits r2: a FOLLOWER of a sibling's credit — the limit moved for it too; it produced nothing
     ['src/server/auto-resume.js', 'disabled', false],                       //  the feature was switched off under a live arm
   ];
   const walk = (d, out = []) => {
@@ -1270,7 +1271,7 @@ if (!probe) {
   const table = new Set(AUDIT.map(([f, why, worked]) => `${f}|${why}|${worked}`));
   ok('AUDIT: every noteRecovered call site in src/ is classified in the table (an unclassified new caller fails here, not in production)', [...derived].every((k) => table.has(k)), 'unlisted: ' + [...derived].filter((k) => !table.has(k)).join(' ; '));
   ok('AUDIT: …and every row of the table is a real call site (no dead rows)', [...table].every((k) => derived.has(k)), 'dead rows: ' + [...table].filter((k) => !derived.has(k)).join(' ; '));
-  ok('AUDIT: the derivation actually found them all — 2 that claim WORK, 3 that do not', callSites.length === AUDIT.length && callSites.filter((c) => c.worked).length === 2, JSON.stringify(callSites));
+  ok('AUDIT: the derivation actually found them all — 2 that claim WORK, 4 that do not', callSites.length === AUDIT.length && callSites.filter((c) => c.worked).length === 2, JSON.stringify(callSites));
   // …and the ONE non-literal row is not a hole: its callers are enumerated
   // from the source with their own literal whys, so a NEW reading producer that
   // forgets to route through the shared edge is caught here rather than in
