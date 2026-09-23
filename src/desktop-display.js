@@ -64,10 +64,45 @@
  *     `PORT=<requested>` — so the recorded number can be "right" while the
  *     address the bridge connects to belongs to somebody else. The only fact
  *     is the socket's owner.
+ *
+ * XPRA (P8-2, measured 2026-09-21 on xpra v6.5.3 / xpra-html5 21, this box):
+ *   · `xpra start --daemon=no --displayfd=3` answers the display number on
+ *     fd 3 ~1.2 s after spawn (it starts its own Xvfb, `--use-display=no`
+ *     spelled so it never adopts a stranger's display), the `--bind-tcp`
+ *     port answers `GET /` 200 (the html5 client) at ~2.3 s, and a GTK app
+ *     started on the display has a mapped window at ~2.5 s. The port is the
+ *     READY fact — xpra sniffs HTTP vs its own protocol on ONE socket, so the
+ *     bridge relays a WebSocket to the same number.
+ *   · idle RSS: xpra 86 MB + its Xvfb 98 MB at `-screen 0 4096x2304x24`
+ *     (192 MB with xpra's default 8192x4096 — the framebuffer is the whole
+ *     difference, and `--resize-display=yes` only ever resizes DOWN to the
+ *     client, so 4096x2304 is the ceiling a 4K viewport can ask for) +
+ *     gnome-calculator 132 MB; idle CPU over 10 s with no client: 0 %.
+ *   · `xpra info tcp://127.0.0.1:<port>` costs ~115-135 ms and a full
+ *     connection per call (1,048 lines, a `windows.<xid>.*` family with
+ *     title/class-instance/pid/size) — too dear for a poll. The live window
+ *     title + icon ride the html5 PROTOCOL for free (`new-window` /
+ *     `window-metadata` / `window-icon` packets, pushed on every change) and
+ *     that is what the client renders; the server-side snapshot a route wants
+ *     is `enumerateWindows` (two spawns, ~10 ms) through `seamlessWindows`,
+ *     which drops xpra's own `Xpra-CorralWindow-*` wrappers and 1x1 leaders.
+ *   · with XAUTHORITY unset in its env, `xpra start` wrote the cookie into
+ *     the user's REAL ~/.Xauthority (mtime moved during the measurement);
+ *     the recipe pins XAUTHORITY to the per-app file and xpra's `xauth add`
+ *     lands there, so the app started with the same file is admitted.
+ *   · `--commands=no` disables `--start*` too (measured: no "started command"
+ *     line, no app) — the recipe leaves commands on and starts NOTHING
+ *     through xpra: the keeper spawns the app itself (its own detached
+ *     leader, handle + starttime + session marker — every keeper rule
+ *     unchanged; under xpra's `--start-child` the app would be xpra's child
+ *     with no handle, and its exit would read as `display-gone`).
+ *   · xpra's `--input-method=auto` launches an ibus-daemon that wrote under
+ *     the real ~/.config/ibus; `none` keeps the session to xpra + Xvfb.
  */
 const fs = require('fs');
 const os = require('os');
 const net = require('net');
+const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
@@ -119,14 +154,14 @@ function assertExecutable(binPath, name) {
 }
 
 /** Every binary a backend rung, a light WM or the enumeration may need. */
-const PROBE_BINS = Object.freeze(['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc', 'xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo']);
+const PROBE_BINS = Object.freeze(['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc', 'xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo', 'xauth']);
 
 /** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, at }`. */
 async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, now = Date.now } = {}) {
   assertLocal(hostId, 'hostFacts');
   const out = {};
   for (const b of bins) out[b] = binOnPath(b, { env, now });
-  const xpra = out.xpra ? await xpraVersion({ binPath: out.xpra, env }) : null;
+  const xpra = out.xpra ? { ...(await xpraVersion({ binPath: out.xpra, env })), www: xpraWwwDir({ binPath: out.xpra, env }) } : null;
   return { hostId: 'local', bins: out, xpra, at: now() };
 }
 
@@ -204,6 +239,51 @@ async function waitForRfb(port, { deadlineMs = 10000, child = null, now = Date.n
     await new Promise((r) => setTimeout(r, stepMs));
   }
   return { ok: false, banner: null, why: `picture server did not answer on 127.0.0.1:${port} within ${deadlineMs} ms` };
+}
+
+/** ONE HTTP GET against 127.0.0.1:port — resolves the status code, or null
+ *  (refused / no answer within timeoutMs). xpra's `--bind-tcp` socket answers
+ *  `GET /` with its html5 client the moment the server is ready (P8-2). */
+function httpProbe(port, { path: p = '/', timeoutMs = 1500 } = {}) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(t); resolve(v); };
+    let req;
+    try { req = http.get({ host: '127.0.0.1', port, path: p, timeout: timeoutMs, headers: { connection: 'close' } }, (res) => { res.resume(); finish(res.statusCode); }); }
+    catch { finish(null); return; }
+    const t = setTimeout(() => { try { req.destroy(); } catch { } finish(null); }, timeoutMs);
+    req.on('error', () => finish(null));
+    req.on('timeout', () => { try { req.destroy(); } catch { } finish(null); });
+  });
+}
+/** Like waitForRfb, for a port that speaks HTTP (xpra). */
+async function waitForHttp(port, { deadlineMs = 10000, child = null, now = Date.now, stepMs = 100 } = {}) {
+  const until = now() + deadlineMs;
+  let exited = null;
+  if (child) child.once('exit', (code, signal) => { exited = { code, signal }; });
+  while (now() < until) {
+    if (exited) return { ok: false, banner: null, why: `picture server exited (${exited.signal || `code ${exited.code}`}) before listening` };
+    const st = await httpProbe(port, { timeoutMs: Math.max(200, Math.min(1500, until - now())) });
+    if (st) return { ok: true, banner: `HTTP ${st}`, why: null };
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return { ok: false, banner: null, why: `picture server did not answer HTTP on 127.0.0.1:${port} within ${deadlineMs} ms` };
+}
+/** The LISTEN probe of a rung's own kind: 'rfb' = the banner read, 'http' =
+ *  xpra's GET /. A recipe says which (`probe`), the keeper never spells it. */
+const LISTEN_PROBES = Object.freeze({ rfb: waitForRfb, http: waitForHttp });
+function waitForListen(kind, port, opts = {}) {
+  const fn = LISTEN_PROBES[kind];
+  if (!fn) return Promise.resolve({ ok: false, banner: null, why: `unknown listen probe ${JSON.stringify(kind)}` });
+  return fn(port, opts);
+}
+/** ONE shot of the same probe (boot adoption): does 127.0.0.1:port answer as
+ *  `kind` right now? */
+async function portAnswers(kind, port, timeoutMs = 1500) {
+  if (!port) return false;
+  if (kind === 'http') return !!(await httpProbe(port, { timeoutMs }));
+  const b = await rfbBanner(port, timeoutMs);
+  return !!(b && /^RFB /.test(b));
 }
 
 // ── who holds a listening socket (the identity the banner cannot give) ──────
@@ -285,7 +365,16 @@ const X_SERVER_ARGS = Object.freeze({
   // -localhost + SecurityTypes None is safe BECAUSE the only route in is the
   // cookie-authed ws bridge; -UseBlacklist 0 is REQUIRED (src/vnc.js: our own
   // read-probes count as failed attempts and lock localhost out).
-  Xvnc: ({ authFile, geometry, depth, rfbPort }) => ['-displayfd', '3', '-auth', authFile, '-nolisten', 'tcp', '-localhost', '-SecurityTypes', 'None', '-UseBlacklist', '0', '-rfbport', String(rfbPort), '-geometry', geometry, '-depth', String(depth)],
+  // -AcceptSetDesktopSize (P8-2 x4, MEASURED 2026-09-22 on Xtigervnc 1.15 with
+  // this exact argv): the framebuffer FOLLOWS the client's SetDesktopSize —
+  // 1280x800 → 900x600 answered with an ExtendedDesktopSize rect (status 0)
+  // in 43 ms, xdpyinfo/xrandr showing the new size at 50 ms, growing past
+  // -geometry (1600x1000) and back; `-AcceptSetDesktopSize=0` is the ONE
+  // lever that refuses it (the framebuffer stayed 1280x800), while
+  // `-extension RANDR` only blinds xrandr on the X side and the client resize
+  // still lands. The default is on; it is spelled so the invariant "the
+  // display follows the window" is in the argv, not in a distro default.
+  Xvnc: ({ authFile, geometry, depth, rfbPort }) => ['-displayfd', '3', '-auth', authFile, '-nolisten', 'tcp', '-localhost', '-SecurityTypes', 'None', '-UseBlacklist', '0', '-AcceptSetDesktopSize', '-rfbport', String(rfbPort), '-geometry', geometry, '-depth', String(depth)],
 });
 /**
  * Start an X server and learn its display number from `-displayfd` (fd 3),
@@ -324,6 +413,111 @@ function startX11vnc({ binPath, display, authFile, rfbPort, env, logFd = 'ignore
   return spawnDetached(binPath || 'x11vnc', args, { env, logFd, name: 'x11vnc' }).spawned;
 }
 
+/**
+ * The argv of `xpra start` for ONE seamless app session (P8-2; every flag
+ * chosen against `xpra start --help` on v6.5.3 and recorded here):
+ *   --daemon=no            the keeper owns the pid (detached by spawnDetached, not by xpra)
+ *   --displayfd=3          the display number arrives on fd 3, never guessed
+ *   --use-display=no       start our own Xvfb; never adopt a display somebody else runs
+ *   --xvfb=…4096x2304x24   the framebuffer IS the RSS (98 MB vs 192 MB at the 8192x4096 default);
+ *                          resize-display only shrinks to the client, so this is the ceiling a viewport can ask for
+ *   --html=on              serve the html5 client on the same socket (the validation slice hosts it behind our auth)
+ *   --bind-tcp=127.0.0.1:P one loopback socket: HTTP + WebSocket + the xpra protocol, sniffed;
+ *                          `,stop=no,exit=no,detach=no,run=no,info=no,screenshot=no,print=no`
+ *                          (XPRA_BIND_REFUSALS) refuses every hello `request` that ACTS on the
+ *                          session — measured 6.5.3: without it a hello carrying `request: stop`
+ *                          or `exit` from ANY client ended the server (record exited / failed);
+ *                          with it xpra answers `disconnect permission error: 'stop' requests are
+ *                          not enabled for this connection` and lives. The server's lifecycle is
+ *                          the keeper's; the bridge drops the packet spellings (desktop-stream
+ *                          XPRA_LIFECYCLE_TYPES) and XPRA_CLIENT_CAN_SHUTDOWN=0 in xpra's env
+ *                          makes xpra itself ignore `shutdown-server` (exit-server has no such
+ *                          switch in 6.5.3 — the bridge is its only gate)
+ *   --bind=none            no unix socket (nothing under ~/.xpra or /run/user); --socket-dir/--sessions-dir
+ *                          keep xpra's session files under the app dir all the same
+ *   --resize-display=yes   the virtual screen follows the client's viewport (RANDR)
+ *   --clipboard=yes --clipboard-direction=both   text both ways (owner acceptance 2)
+ *   --exit-with-children=no / --terminate-children=no   xpra starts nothing (see the header): the keeper's app is its own leader
+ *   --notifications=no --audio=no --pulseaudio=no --speaker=disabled --microphone=disabled --printing=no
+ *   --webcam=no --file-transfer=no --open-files=no --open-url=no --system-tray=no --bell=no   each off BY NAME
+ *   --mdns=no --systemd-run=no --dbus=no --dbus-launch=no --dbus-control=no   no publishing, no cgroup wrapper, no bus
+ *   --input-method=none    no ibus-daemon (it wrote under the real ~/.config/ibus)
+ *   --start-new-commands=no --shell=no --opengl=no --splash=no --remote-logging=no --http-scripts=off
+ *   (NOT --mmap=no: xpra 6.5.3 blocks the whole `xpra.net.mmap` package in sys.modules for
+ *   that flag and its per-connection image-filter class then fails to import — EVERY client
+ *   was answered `disconnect: connection error / error accepting new connection`, measured;
+ *   a browser cannot mmap a server anyway, the default costs nothing over TCP)
+ *   --sharing=yes --lock=no   N browsers on one session, none may lock the others out
+ *   --pidfile=<dir>/xpra/server.pid   under the app dir (never $XPRA_SESSION_DIR); with
+ *                          --daemon=no xpra logs to stderr = the app dir's app.log (a
+ *                          --log-file only applies when daemonising — measured: none written)
+ * `--commands` stays at its default: `no` disables every `--start*` (measured), and a
+ * future recipe may want one.
+ */
+const XPRA_GEOMETRY_MAX = '4096x2304';
+/** Socket options on `--bind-tcp`: the hello `request`s that act on (or read out) the session, refused by xpra. */
+const XPRA_BIND_REFUSALS = 'stop=no,exit=no,detach=no,run=no,info=no,screenshot=no,print=no';
+const XPRA_ARGS = ({ port, dir, geometryMax = XPRA_GEOMETRY_MAX }) => [
+  'start', '--daemon=no', '--displayfd=3', '--use-display=no',
+  `--xvfb=Xvfb -screen 0 ${geometryMax}x24 +extension GLX +extension RANDR +extension RENDER +extension Composite -extension DOUBLE-BUFFER -nolisten tcp -noreset -auth $XAUTHORITY`,
+  '--html=on', `--bind-tcp=127.0.0.1:${port},${XPRA_BIND_REFUSALS}`, '--bind=none', `--socket-dir=${dir}/xpra`, `--sessions-dir=${dir}/xpra`,
+  '--resize-display=yes', '--clipboard=yes', '--clipboard-direction=both',
+  '--exit-with-children=no', '--terminate-children=no',
+  '--notifications=no', '--audio=no', '--pulseaudio=no', '--speaker=disabled', '--microphone=disabled', '--printing=no',
+  '--webcam=no', '--file-transfer=no', '--open-files=no', '--open-url=no', '--system-tray=no', '--bell=no',
+  '--mdns=no', '--systemd-run=no', '--dbus=no', '--dbus-launch=no', '--dbus-control=no',
+  '--input-method=none', '--start-new-commands=no', '--shell=no', '--opengl=no', '--splash=no', '--remote-logging=no', '--http-scripts=off',
+  '--sharing=yes', '--lock=no',
+  `--pidfile=${dir}/xpra/server.pid`,
+];
+/**
+ * Start ONE xpra seamless server on a free loopback port and learn its display
+ * from `--displayfd=3` (the same fd-3 discipline as startXServer; ~1.2 s
+ * measured). Resolves { display, pid, child } once the number arrived — the
+ * PORT is not ready yet at that instant (the keeper waits for the HTTP
+ * answer through `waitForListen('http', …)`). Detached + unref'd like every
+ * part; a spawn failure / exit-before-ready / deadline is a named rejection.
+ */
+function startXpra({ binPath, port, dir, env, logFd = 'ignore', deadlineMs = 15000, geometryMax = XPRA_GEOMETRY_MAX }) {
+  const args = XPRA_ARGS({ port, dir, geometryMax });
+  return new Promise((resolve, reject) => {
+    // XPRA_CLIENT_CAN_SHUTDOWN=0: xpra ignores a client's `shutdown-server` (server/base.py `_request_stop`) — the keeper stops it
+    const { child, spawned } = spawnDetached(binPath || 'xpra', args, { env: { ...(env || process.env), XPRA_CLIENT_CAN_SHUTDOWN: '0' }, logFd, extraStdio: 'pipe', name: 'xpra' });
+    let settled = false;
+    const done = (fn, v) => { if (settled) return; settled = true; clearTimeout(t); fn(v); };
+    const t = setTimeout(() => { if (!settled) { try { child?.kill('SIGTERM'); } catch { } done(reject, namedError('x-timeout', `xpra did not report a display within ${deadlineMs} ms`)); } }, deadlineMs);
+    spawned.catch((e) => done(reject, e));
+    if (!child) return;
+    child.once('exit', (code, signal) => done(reject, namedError('x-exited', `xpra exited (${signal || `code ${code}`}) before reporting a display — see xpra.log in the app dir`)));
+    let buf = '';
+    child.stdio[3].on('data', (b) => {
+      buf += b.toString('utf8');
+      const m = /^\s*(\d+)\s*\n/.exec(buf);
+      if (m) { child.stdio[3].destroy(); done(resolve, { display: `:${m[1]}`, pid: child.pid, child }); }
+    });
+  });
+}
+/** Where the installed xpra ships its html5 client (the validation slice
+ *  hosts it behind VibeSpace's auth): `<prefix>/share/xpra/www` beside the
+ *  binary's prefix, else the two packaging spellings; null when none has an
+ *  index.html. XPRA_WWW_DIR (an operator's own build) wins when it exists. */
+function xpraWwwDir({ binPath = null, env = process.env } = {}) {
+  const cands = [];
+  if (env && env.XPRA_WWW_DIR) cands.push(env.XPRA_WWW_DIR);
+  if (binPath) cands.push(path.resolve(path.dirname(binPath), '..', 'share', 'xpra', 'www'));
+  cands.push('/usr/share/xpra/www', '/usr/local/share/xpra/www', '/usr/share/xpra/html5');
+  for (const d of cands) { try { if (fs.statSync(path.join(d, 'index.html')).isFile()) return d; } catch { /* next */ } }
+  return null;
+}
+/** The APPLICATION's windows on an xpra display: xpra is the window manager
+ *  there and wraps every managed top-level in an `Xpra-CorralWindow-<xid>`
+ *  frame (measured: `0x200006 "Xpra-CorralWindow-0xa00005"` around
+ *  `0xa00005 "Calculator"`), keeps 1x1 helper windows of its own and the
+ *  toolkit's 1x1 group leaders — none of those is a window a user sees. */
+function seamlessWindows(rows) {
+  return (rows || []).filter((w) => w && !(typeof w.name === 'string' && /^Xpra(-CorralWindow-|$)/.test(w.name)) && w.w > 1 && w.h > 1 && (w.cls || w.instance || w.name));
+}
+
 /** A light window manager when one is present (xfwm4 preferred, else
  *  openbox); resolves { name, child } or null. Bare X otherwise — the app
  *  still renders, it just has no title bar. A WM that fails to spawn is a
@@ -350,8 +544,10 @@ function startApp({ exec, args = [], cwd, env, logFd = 'ignore' }) {
  * manager and the application afterwards and records what the recipe hands
  * it THROUGH `ctx.onPart(part, child, facts)` — called the moment each pid is
  * known, so a failure one step later still leaves a reapable record. ctx =
- *   { bins, authFile, cookie, geometry, base (sanitised env), logFd,
+ *   { bins, dir (the per-app dir), authFile, cookie, geometry, base (sanitised env), logFd,
  *     freePort, x11Env(display), writeAuth(display), onPart, singleton() }
+ * A recipe may add `wm:false` (it IS the window manager) and `probe:'http'`
+ * (its READY fact is an HTTP answer, not an RFB banner) to what it returns.
  * Every spawn inside a recipe is re-statted and awaited (see the header);
  * a rejection is a named error the keeper turns into `failed` + teardown.
  */
@@ -383,9 +579,32 @@ const RECIPES = Object.freeze({
     if (!s || !s.running) throw namedError('shared-desktop-down', 'the shared desktop is not running');
     return { display: s.display, port: s.port, shared: true, authFile: s.authFile || null };
   },
-  /** P8-2 owns `xpra start --html=on`; until then the name exists so the
-   *  table is complete and the refusal is BY NAME. */
-  'xpra-seamless': async () => { throw namedError('backend-not-wired', 'xpra bring-up is not wired until P8-2'); },
+  /**
+   * ONE xpra per app session (P8-2): xpra starts its own Xvfb and is the
+   * window manager AND the picture server on one loopback port; the keeper
+   * starts the app on the display afterwards like every other rung (no WM
+   * of ours — `wm:false`; xpra IS the WM, a second one would fight it). The
+   * READY probe is HTTP (`probe:'http'`), the stream kind is 'xpra'. XAUTHORITY
+   * is pinned to the per-app file: xpra's own `xauth add` writes the cookie
+   * there (measured: unset, it wrote the user's real ~/.Xauthority), and the
+   * app started with the same file is admitted. `xauth` must be on PATH for
+   * that — refused by name before anything spawns.
+   */
+  'xpra-seamless': async (ctx) => {
+    assertExecutable(ctx.bins.xpra, 'xpra');
+    if (!ctx.bins.xauth) throw namedError('exec-not-found', 'xauth not on PATH — xpra writes the display cookie through it');
+    // THE FILE MUST EXIST BEFORE xpra STARTS (measured 2026-09-21, xpra/x11/vfb_util.py
+    // `valid_xauth`): a missing XAUTHORITY path is treated as none and xpra writes the
+    // user's REAL ~/.Xauthority instead — the keeper writes a placeholder first, and
+    // the recipe guarantees it on its own so no caller can reopen that hole.
+    if (!fs.existsSync(ctx.authFile)) writeXauthority(ctx.authFile, [{ display: '0', cookieHex: ctx.cookie || newCookie() }]);
+    const port = await ctx.freePort();
+    const env = ctx.x11Env(':0');
+    delete env.DISPLAY; // xpra starts the display; a stale DISPLAY would be "an existing display"
+    const x = await startXpra({ binPath: ctx.bins.xpra, port, dir: ctx.dir, env, logFd: ctx.logFd });
+    ctx.onPart('x', x.child, { display: x.display, port, alsoServer: true });
+    return { display: x.display, port, shared: false, wm: false, probe: 'http' };
+  },
 });
 
 // ── liveness + identity (pid AND starttime) ──────────────────────────────────
@@ -469,23 +688,39 @@ function sessionSample(pids) {
  * uid mint disjoint ids, and a foreign id must never be signalled.
  */
 function markerCensus(key, ids, { procRoot = '/proc' } = {}) {
-  const out = new Map();
   const want = new Map();
   for (const id of ids || []) if (id) want.set(`${key}=${id}`, id);
-  if (!want.size) return out;
+  return environCensus(want, { procRoot });
+}
+/**
+ * The same ONE walk over ANY verbatim `KEY=value` needles (2026-09-22):
+ * `needles` = Map<needle, id> → Map<id, pid[]> (a pid is listed once per id,
+ * whichever of that id's needles it carries). The keeper asks it with TWO
+ * needles per record — the session marker, and the per-app
+ * `XAUTHORITY=<data>/desktop-apps/<id>/Xauthority` every process ON the
+ * record's own display carries: xpra hands its Xvfb a SANITISED env (no
+ * marker) that still names that file (measured on 6.5.3: `XAUTHORITY`,
+ * `XPRA_SESSION_DIR` under the app dir, nothing else of ours), and the path
+ * holds the record id, so it names this session and no other.
+ */
+function environCensus(needles, { procRoot = '/proc' } = {}) {
+  const out = new Map();
+  if (!needles || !needles.size) return out;
+  const keys = [...new Set([...needles.keys()].map((n) => n.slice(0, n.indexOf('=') + 1)).filter(Boolean))];
   let ents = [];
   try { ents = fs.readdirSync(procRoot); } catch { return out; }
   for (const name of ents) {
     if (!/^\d+$/.test(name)) continue;
     let env;
     try { env = fs.readFileSync(`${procRoot}/${name}/environ`).toString('utf8'); } catch { continue; }
-    if (!env.includes(`${key}=`)) continue;
+    if (!keys.some((k) => env.includes(k))) continue;
+    const seen = new Set();
     for (const kv of env.split('\0')) {
-      const id = want.get(kv);
-      if (id === undefined) continue;
+      const id = needles.get(kv);
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
       if (!out.has(id)) out.set(id, []);
       out.get(id).push(Number(name));
-      break;
     }
   }
   return out;
@@ -497,40 +732,143 @@ function run(bin, args, { env, timeout = 3000 } = {}) {
     execFile(bin, args, { env, timeout, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') }));
   });
 }
-// `0x200020 "xmessage": ("xmessage" "Xmessage")  300x100+10+10  +10+10` — a
-// class-less window prints `(has no name): ()`, so the class group is optional
-const TREE_RE = /^\s*(0x[0-9a-fA-F]+)\s+(?:"((?:[^"\\]|\\.)*)"|\(has no name\))(?::\s*\((?:"((?:[^"\\]|\\.)*)"\s+"((?:[^"\\]|\\.)*)")?\))?\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)/;
+// One `xwininfo -root -tree` child line: indent, id, the NAME, `: ("instance" "Class")`,
+// then `WxH+relX+relY  +absX+absY`. Parsed from the RIGHT, because the name is
+// printed UNESCAPED or not at all — MEASURED on xwininfo 1.1.6 (2026-09-22):
+//   0x40000c "计算器 "x" \ é": ("xterm" "XTerm")  484x316+0+0  +0+0   ← a UTF-8 _NET_WM_NAME, quotes verbatim
+//   0x20000c (name in unsupported encoding COMPOUND_TEXT): ("xterm" "XTerm") …   ← xterm with a non-Latin-1 title
+//   0x40000c " (failure in conversion from UTF8_STRING to ANSI_X3.4-1968)": (…) … ← UTF-8 under a non-UTF-8 locale
+//   0x400001 (has no name): ()  10x10+0+0  +0+0
+// The pre-x4 regex read a quoted name as `"(?:[^"\\]|\\.)*"` and required
+// `(has no name)` otherwise, so the first two lines were DROPPED: the app's
+// window vanished from the fit plan and from windows(id). An unreadable name
+// is `null`; the window is still a row.
+const TREE_HEAD_RE = /^(\s*)(0x[0-9a-fA-F]+)\s(.*)$/;
+const TREE_GEOM_RE = /\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)\s*$/;
+const TREE_CLASS_RE = /^(.*):\s\((?:"(.*?)"\s"(.*)")?\)$/; // greedy head ⇒ the LAST `: (` — the class group always ends the line's text part
+const UNREADABLE_NAME_RE = /^(?:\(has no name\)|\(name in unsupported encoding [^)]*\)|" \(failure in conversion from \S+ to \S+\)")$/;
+function wininfoName(part) {
+  if (UNREADABLE_NAME_RE.test(part)) return null;
+  return part.length >= 2 && part[0] === '"' && part[part.length - 1] === '"' ? part.slice(1, -1) : null;
+}
 /** Parse `xwininfo -root -tree` into rows — exported so the suite can drive it
- *  over captured output. */
+ *  over captured output. `depth` (P8-2 x4) comes from the line's indentation:
+ *  xwininfo indents root's direct children by 5 spaces and every level below
+ *  by 3 more (measured: `     0x20000c "xterm"` then `        0x200011 (has no
+ *  name)` for xterm's inner VT window), so depth 1 = a TOP-LEVEL window — the
+ *  only kind the fit plan may move; a child moved inside its parent would
+ *  wreck the app. `x`/`y` are the ABSOLUTE position (the last pair). */
 function parseWininfoTree(text) {
   const rows = [];
   for (const line of String(text).split('\n')) {
-    const m = TREE_RE.exec(line);
-    if (!m) continue;
-    rows.push({ id: parseInt(m[1], 16), name: m[2] != null ? m[2] : null, instance: m[3] || null, cls: m[4] || null, w: +m[5], h: +m[6], x: +m[9], y: +m[10] });
+    const h = TREE_HEAD_RE.exec(line);
+    if (!h) continue;
+    const g = TREE_GEOM_RE.exec(h[3]);
+    if (!g) continue;
+    const body = h[3].slice(0, g.index);
+    const c = TREE_CLASS_RE.exec(body);
+    const depth = Math.max(1, Math.round((h[1].length - 2) / 3));
+    rows.push({ id: parseInt(h[2], 16), name: wininfoName(c ? c[1] : body), instance: (c && c[2]) || null, cls: (c && c[3]) || null, w: +g[1], h: +g[2], x: +g[5], y: +g[6], depth });
   }
   return rows;
 }
+/** The window TREE of a display: ONE bounded `xwininfo -root -tree` →
+ *  `{ ok, why, rows, text }` (`text` = the raw output, which the keeper's belt
+ *  compares with the last read: an unchanged tree needs no visibility read
+ *  and no plan — 2026-09-22, the spawn-count finding). */
+async function windowTree({ hostId = null, display, authFile, env = process.env, bins = null } = {}) {
+  assertLocal(hostId, 'windowTree');
+  const bin = (bins && bins.xwininfo) || (bins ? null : binOnPath('xwininfo', { env }));
+  if (!bin) return { ok: false, why: 'xwininfo not on PATH', rows: [], text: '' };
+  // LC_ALL=C.UTF-8: xwininfo converts a UTF-8 _NET_WM_NAME to the LOCALE's charset and prints a
+  // "failure in conversion" under C/POSIX (measured) — we decode its stdout as UTF-8, so we ask for UTF-8
+  const tree = await run(bin, ['-root', '-tree'], { env: { ...x11Env(env, { display, authFile }), LC_ALL: 'C.UTF-8' } });
+  if (tree.err) return { ok: false, why: `xwininfo failed: ${tree.err.message}`, rows: [], text: '' };
+  return { ok: true, why: null, rows: parseWininfoTree(tree.stdout), text: tree.stdout };
+}
+/** The VIEWABLE window ids of a display (a window and every ancestor mapped):
+ *  ONE `xdotool search --onlyvisible` → a Set, or null when xdotool is
+ *  absent or failed (then nothing is known — never "nothing is visible"). */
+async function viewableWindows({ hostId = null, display, authFile, env = process.env, bins = null } = {}) {
+  assertLocal(hostId, 'viewableWindows');
+  const bin = (bins && bins.xdotool) || (bins ? null : binOnPath('xdotool', { env }));
+  if (!bin) return null;
+  const vis = await run(bin, ['search', '--onlyvisible', '--name', ''], { env: x11Env(env, { display, authFile }) });
+  return vis.err ? null : new Set(vis.stdout.split(/\s+/).filter(Boolean).map((s) => parseInt(s, 10)));
+}
+/** Tree rows + the viewable set ⇒ rows with `mapped` true/false (null when unknown). */
+const withMapped = (rows, visible) => rows.map((r) => ({ ...r, mapped: visible ? visible.has(r.id) : null }));
 /**
- * The windows on a display: `[{ id, name, instance, cls, x, y, w, h, mapped }]`.
+ * The windows on a display: `[{ id, name, instance, cls, x, y, w, h, depth, mapped }]`.
  * `mapped` is true/false when xdotool could answer, null when only xwininfo
- * was available. Two child processes per call, bounded, async — never a
- * per-window spawn.
+ * was available. Two child processes per call (`windowTree` +
+ * `viewableWindows`), bounded, async — never a per-window spawn.
  */
 async function enumerateWindows({ hostId = null, display, authFile, env = process.env, bins = null } = {}) {
   assertLocal(hostId, 'enumerateWindows');
   const b = bins || { xwininfo: binOnPath('xwininfo', { env }), xdotool: binOnPath('xdotool', { env }) };
-  if (!b.xwininfo) return { ok: false, why: 'xwininfo not on PATH', windows: [] };
+  const tree = await windowTree({ display, authFile, env, bins: b });
+  if (!tree.ok) return { ok: false, why: tree.why, windows: [] };
+  const visible = await viewableWindows({ display, authFile, env, bins: b });
+  return { ok: true, why: null, windows: withMapped(tree.rows, visible) };
+}
+
+// ── the display's size and the fit act (P8-2 x4) ───────────────────────────
+const DIMS_RE = /dimensions:\s+(\d+)x(\d+)\s+pixels/;
+/** The framebuffer of a display as the X server states it — ONE `xdpyinfo`
+ *  (~10 ms; no RANDR needed, measured: the size reads right with `-extension
+ *  RANDR` too). `{ ok, w, h, why }`; never throws. */
+async function displaySize({ hostId = null, display, authFile, env = process.env, bins = null } = {}) {
+  assertLocal(hostId, 'displaySize');
+  const bin = (bins && bins.xdpyinfo) || binOnPath('xdpyinfo', { env });
+  if (!bin) return { ok: false, w: 0, h: 0, why: 'xdpyinfo not on PATH' };
+  const r = await run(bin, [], { env: x11Env(env, { display, authFile }) });
+  if (r.err) return { ok: false, w: 0, h: 0, why: `xdpyinfo failed: ${r.err.message}` };
+  const m = DIMS_RE.exec(r.stdout);
+  if (!m) return { ok: false, w: 0, h: 0, why: 'xdpyinfo printed no dimensions line' };
+  return { ok: true, w: +m[1], h: +m[2], why: null };
+}
+/**
+ * Apply a fit plan (src/desktop-apps.js `appFitPlan`) to a display. On bare X
+ * ONE `xdotool` invocation chains `windowmove --sync … windowsize --sync …`
+ * for the main window and a `windowmove` per nudged window (xdotool runs a
+ * chain of commands in one process — measured: a bare-X xterm and a GTK3
+ * gnome-calculator each landed at 1280x800+0+0 in 2-3 ms: the server applies
+ * a client's ConfigureWindow directly when nobody manages the window). A main
+ * in a WM FRAME (`plan.resize.framed`) is MAXIMISED through the WM — `wmctrl
+ * -i -r <CLIENT> -b add,maximized_vert,maximized_horz` — MEASURED 2026-09-22
+ * on the fleet image's xfwm4 4.18 over a scratch X: the frame becomes exactly
+ * the framebuffer (xterm 1280x776+0+24 under a 24 px title), the WM keeps it
+ * so when the app resizes itself and when the root is resized (1000x700 and
+ * back); wmctrl on the FRAME id is ignored (it is no client). Without wmctrl
+ * the client is moved/resized so the frame lands at 0,0 with the framebuffer
+ * size (`windowmove <client> 0 0` puts the frame's corner there — measured).
+ * `{ ok, why, ms, acts, via }`; never throws.
+ */
+async function applyWindowPlan({ hostId = null, display, authFile, env = process.env, bins = null, plan } = {}) {
+  assertLocal(hostId, 'applyWindowPlan');
+  const b = bins || { xdotool: binOnPath('xdotool', { env }), wmctrl: binOnPath('wmctrl', { env }) };
+  if (!b.xdotool) return { ok: false, why: 'xdotool not on PATH', ms: 0, acts: 0, via: null };
+  if (!plan || !plan.main) return { ok: false, why: (plan && plan.why) || 'no plan', ms: 0, acts: 0, via: null };
+  const viaWm = !!(plan.resize && plan.resize.framed && b.wmctrl);
+  const args = [];
+  if (plan.resize && !viaWm) args.push('windowmove', '--sync', String(plan.resize.id), '0', '0', 'windowsize', '--sync', String(plan.resize.id), String(plan.resize.w), String(plan.resize.h));
+  for (const m of plan.moves || []) args.push('windowmove', '--sync', String(m.id), String(m.x), String(m.y));
+  if (!args.length && !viaWm) return { ok: true, why: null, ms: 0, acts: 0, via: null };
   const xenv = x11Env(env, { display, authFile });
-  const tree = await run(b.xwininfo, ['-root', '-tree'], { env: xenv });
-  if (tree.err) return { ok: false, why: `xwininfo failed: ${tree.err.message}`, windows: [] };
-  const rows = parseWininfoTree(tree.stdout);
-  let visible = null;
-  if (b.xdotool) {
-    const vis = await run(b.xdotool, ['search', '--onlyvisible', '--name', ''], { env: xenv });
-    if (!vis.err) visible = new Set(vis.stdout.split(/\s+/).filter(Boolean).map((s) => parseInt(s, 10)));
+  const t0 = Date.now();
+  let acts = 0;
+  if (viaWm) {
+    const w = await run(b.wmctrl, ['-i', '-r', String(plan.resize.id), '-b', 'add,maximized_vert,maximized_horz'], { env: xenv, timeout: 5000 });
+    if (w.err) return { ok: false, why: `wmctrl failed: ${w.err.message}`, ms: Date.now() - t0, acts: 0, via: 'wm' };
+    acts++;
   }
-  return { ok: true, why: null, windows: rows.map((r) => ({ ...r, mapped: visible ? visible.has(r.id) : null })) };
+  if (args.length) {
+    const r = await run(b.xdotool, args, { env: xenv, timeout: 5000 });
+    if (r.err) return { ok: false, why: `xdotool failed: ${r.err.message}`, ms: Date.now() - t0, acts, via: viaWm ? 'wm' : 'xdotool' };
+    acts += (plan.resize && !viaWm ? 1 : 0) + (plan.moves || []).length;
+  }
+  return { ok: true, why: null, ms: Date.now() - t0, acts, via: viaWm ? 'wm' : 'xdotool' };
 }
 
 // ── xpra ─────────────────────────────────────────────────────────────────────
@@ -546,10 +884,11 @@ async function xpraVersion({ binPath, env = process.env } = {}) {
 
 module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, hostFacts, x11Env,
-  newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb,
+  newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, RECIPES,
+  XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
-  sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, markerCensus,
-  parseWininfoTree, enumerateWindows, xpraVersion,
+  sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, markerCensus, environCensus,
+  parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion,
 };

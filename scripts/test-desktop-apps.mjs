@@ -35,6 +35,25 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   const da = read('src/desktop-apps.js');
   const reqs = [...da.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
   ok(same(reqs, ['./keeper-limits']), 'desktop-apps.js imports nothing but the constants home', reqs);
+  // P8-2 x3 (2026-09-22): the guard numbers are IMPORTED, never copied — every consumer of the keeper's
+  // ceiling names a guard number ONLY through the home (`limits.X` / `LIMITS.X`) and none re-spells a
+  // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
+  const consumers = ['src/server/desktop-app-keeper.js', 'src/desktop-display.js', 'src/server/desktop-stream.js', 'src/routes/desktop-apps.js', 'src/desktop-apps.js', 'src/vnc.js'];
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const GUARD_NAMES = /(GUARD_SAMPLE_MS|GUARD_CPU_PCT|GUARD_CPU_SUSTAIN_MS|GUARD_RSS_BYTES|RUNAWAY_COOLDOWN_MS|CONCURRENT_CAP)/;
+  const bareUses = [], literals = [], reads = [];
+  for (const f of consumers) {
+    const code = strip(read(f));
+    for (const m of code.matchAll(new RegExp(`(?<![\\w.])${GUARD_NAMES.source}\\b`, 'g'))) bareUses.push(`${f}: ${m[1]}`);
+    for (const m of code.matchAll(new RegExp(`\\b(?:limits|LIMITS)\\.${GUARD_NAMES.source}\\b`, 'g'))) reads.push(m[1]);
+    for (const re of [new RegExp(`\\b${GUARD_NAMES.source}\\s*=\\s*\\d`), /2 \* 1024 \* 1024 \* 1024|2 \* 1024 \*\* 3/, /(?<!\d\s*\*\s*)5 \* 60 \* 1000/, /(?<!\d\s*\*\s*)60 \* 60 \* 1000/]) if (re.test(code)) literals.push(`${f}: ${re}`);
+  }
+  ok(reads.length >= 6 && new Set(reads).size >= 5, `census scope is non-vacuous (${reads.length} reads of ${new Set(reads).size} guard names through the home)`, reads);
+  ok(bareUses.length === 0, 'no consumer names a guard number except through `limits.`/`LIMITS.` — imported, not copied', bareUses);
+  ok(literals.length === 0, 'no consumer re-spells a guard literal (150 / 5 min / 2 GiB / 1 h / the cap)', literals);
+  ok(/const GUARD_CPU_PCT = 150;/.test(strip(read('src/keeper-limits.js'))) && !!strip(`const X = 1; // GUARD_CPU_PCT = 150\n`).match(/const X = 1;\s*$/), 'CONTROL: the literal lives exactly once, in the home; the census strips comments (a quoted "150" in a comment is not a copy)');
+  const neg = [...strip('const CONCURRENT_CAP = 6; x = limits.GUARD_CPU_PCT; // GUARD_RSS_BYTES\n').matchAll(new RegExp(`(?<![\\w.])${GUARD_NAMES.source}\\b`, 'g'))].map((m) => m[1]);
+  ok(same(neg, ['CONCURRENT_CAP']), 'NEGATIVE CONTROL: a bare re-definition is what the census catches — a `limits.` read and a comment are not', neg);
 }
 
 console.log('§2 DISPLAY_BACKENDS — the capability table');
@@ -43,7 +62,8 @@ for (const b of M.DISPLAY_BACKENDS) {
   ok(typeof b.perWindow === 'boolean' && typeof b.adaptive === 'boolean' && Array.isArray(b.needs) && b.needs.every((g) => Array.isArray(g) && g.length) && ['rfb', 'xpra'].includes(b.stream) && typeof b.wired === 'boolean', `row ${b.id} declares perWindow/adaptive/needs/stream/wired`);
   ok(Object.isFrozen(b) && Object.isFrozen(b.needs), `row ${b.id} is frozen (a rung is a declaration, not state)`);
 }
-ok(M.backendById('xpra').perWindow && M.backendById('xpra').adaptive && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === false, 'xpra: per-window, adaptive, xpra stream, NOT wired in P8-1');
+ok(M.backendById('xpra').perWindow && M.backendById('xpra').adaptive && M.backendById('xpra').stream === 'xpra' && M.backendById('xpra').wired === true, 'xpra: per-window, adaptive, xpra stream, WIRED since P8-2 (DA1: installed ⇒ every NEW session takes it)');
+ok(M.DISPLAY_BACKENDS.every((b) => b.wired === true), 'every SHIPPED row is wired — an unwired row is a table copy the suites hand in, never a product state');
 ok(!M.backendById('vnc-display').perWindow && !M.backendById('vnc-display').adaptive && M.backendById('vnc-display').stream === 'rfb' && M.backendById('vnc-display').wired === true, 'vnc-display: whole display, not adaptive, rfb, wired');
 {
   const probed = new Set([...D.PROBE_BINS, 'desktop-singleton:running']);
@@ -61,7 +81,7 @@ ok(M.KEEPER_ENV.includes('VIBESPACE_DESKTOP_APP'), 'a registry row may not set V
 {
   const r = M.resolveBackend({ bins: { Xvfb: '/x', x11vnc: '/x' } });
   ok(r.recipe === 'x-then-server' && r.ladder[1].recipe === 'x-then-server' && r.ladder[0].recipe === null, 'resolveBackend carries the recipe of the winner and of every rung that can run (null where it cannot)');
-  ok(M.resolveBackend({ bins: { Xvnc: '/x' } }).recipe === 'x-serves-rfb' && M.resolveBackend({ bins: {}, singletonRunning: true }).recipe === 'shared' && M.resolveBackend({ bins: { xpra: '/x' } }).recipe === null && M.resolveBackend({ bins: { xpra: '/x' } }).ladder[0].recipe === 'xpra-seamless', 'each rung resolves to its own recipe name (one-pid Xvnc / the shared desktop / the not-yet-wired xpra names its recipe on the ladder but never wins)');
+  ok(M.resolveBackend({ bins: { Xvnc: '/x' } }).recipe === 'x-serves-rfb' && M.resolveBackend({ bins: {}, singletonRunning: true }).recipe === 'shared' && M.resolveBackend({ bins: { xpra: '/x' } }).recipe === 'xpra-seamless' && M.resolveBackend({ bins: { xpra: '/x' } }).backend === 'xpra' && M.resolveBackend({ bins: { xpra: '/x' } }).stream === 'xpra', 'each rung resolves to its own recipe name (one-pid Xvnc / the shared desktop / xpra ⇒ xpra-seamless, stream xpra)');
   // A FOURTH RUNG IS ONE ROW: a table copy with a new first rung resolves to it and to its recipe — nothing else is consulted
   const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', perWindow: true, adaptive: false, stream: 'rfb', needs: Object.freeze([Object.freeze(['Xfake'])]), recipes: Object.freeze({ Xfake: 'x-then-server' }), wired: true });
   const r4 = M.resolveBackend({ bins: { Xfake: '/x', Xvfb: '/x', x11vnc: '/x' } }, {}, [fourth, ...M.DISPLAY_BACKENDS]);
@@ -76,7 +96,7 @@ const BINS = ['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc'];
 function oracle(bins, singletonRunning) {
   const has = (b) => !!bins[b];
   const rows = [
-    { id: 'xpra', groups: [['xpra']], wired: false }, // P8-1: probed, recorded, NOT wired — present ⇒ passed over with its reason (2.369.131)
+    { id: 'xpra', groups: [['xpra']], wired: true }, // P8-2: wired (DA1) — 2.369.131's present-but-unwired verdict lives on as the control below
     { id: 'vnc-display', groups: [['Xvnc'], ['Xvfb', 'x11vnc']], wired: true },
     { id: 'desktop-singleton', groups: [['Xtigervnc'], ['Xvnc'], ['desktop-singleton:running']], wired: true },
   ];
@@ -84,7 +104,7 @@ function oracle(bins, singletonRunning) {
   for (const r of rows) {
     const g = r.groups.find((grp) => grp.every((b) => (b === 'desktop-singleton:running' ? singletonRunning : has(b))));
     if (g && r.wired) return { backend: r.id, via: g.join('+'), fallbackWhy: fell.length ? fell.join('; ') : null };
-    fell.push(g ? `${r.id} present (${g.join('+')}) but not wired until P8-2` : r.groups.map((grp) => `${grp.join('+')} not on PATH`).join('; '));
+    fell.push(g ? `${r.id} present (${g.join('+')}) but not wired` : r.groups.map((grp) => `${grp.join('+')} not on PATH`).join('; '));
   }
   return { backend: null, via: null, fallbackWhy: fell.join('; ') };
 }
@@ -103,16 +123,22 @@ function oracle(bins, singletonRunning) {
   ok(!bad, `the ladder agrees with the §3 oracle on all ${n} presence combinations (backend, via, fallbackWhy, 3-rung ladder)`, bad);
 }
 {
-  // 2.369.131 (the day xpra 6.5.3 landed on this box): a PRESENT but UNWIRED rung is passed
-  // over with its reason — the ladder had chosen it and the keeper refused every launch
-  // with backend-not-wired where vnc-display had been working. DA1 ("installed ⇒ preferred")
-  // holds for a WIRED rung: the control below flips the row and xpra wins.
+  // THIS BOX SINCE P8-2 (2026-09-21): xpra 6.5.3 installed AND wired ⇒ xpra wins outright (DA1), nothing
+  // fell, no log line. 2.369.131's present-but-unwired verdict (the day the binary landed on an unwired
+  // row: the ladder chose it and the keeper refused every launch) is kept as the CONTROL through a table
+  // copy — the shipped table has no unwired row.
   const r = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } });
-  ok(r.backend === 'vnc-display' && r.via === 'Xvfb+x11vnc' && r.stream === 'rfb' && r.fallbackWhy === 'xpra present (xpra) but not wired until P8-2' && r.ladder[0].present === true && r.ladder[0].ok === false && r.ladder[0].recipe === 'xpra-seamless', 'THIS BOX SINCE 2026-09-21: xpra present but unwired ⇒ vnc-display, the reason names the unwired rung, the ladder still reports xpra as present with its recipe', r);
-  ok(M.fallbackLogLine(r) === '[desktop] backend fallback: xpra→vnc-display (xpra present (xpra) but not wired until P8-2)', 'the §3 log line names the unwired rung', M.fallbackLogLine(r));
-  const wiredTable = M.DISPLAY_BACKENDS.map((b) => (b.id === 'xpra' ? Object.freeze({ ...b, wired: true }) : b));
-  const rw = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } }, {}, wiredTable);
-  ok(rw.backend === 'xpra' && rw.via === 'xpra' && rw.fallbackWhy === null && rw.stream === 'xpra' && M.fallbackLogLine(rw) === null, 'CONTROL (DA1 for P8-2): with the xpra row WIRED the same box resolves to xpra, no fallback, no log line', rw);
+  ok(r.backend === 'xpra' && r.via === 'xpra' && r.stream === 'xpra' && r.recipe === 'xpra-seamless' && r.fallbackWhy === null && r.ladder[0].ok === true && r.ladder[0].present === true && M.fallbackLogLine(r) === null, 'THIS BOX SINCE P8-2: xpra present + wired ⇒ xpra via xpra-seamless, stream xpra, no fallback, no log line', r);
+  ok(r.ladder.length === 3 && r.ladder[1].backend === 'vnc-display' && r.ladder[1].ok === true && r.ladder[1].via === 'Xvfb+x11vnc', 'the ladder still reports the rungs below the winner as runnable (the launcher shows every rung)', r.ladder);
+  const unwiredTable = M.DISPLAY_BACKENDS.map((b) => (b.id === 'xpra' ? Object.freeze({ ...b, wired: false }) : b));
+  const ru = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } }, {}, unwiredTable);
+  ok(ru.backend === 'vnc-display' && ru.via === 'Xvfb+x11vnc' && ru.stream === 'rfb' && ru.fallbackWhy === 'xpra present (xpra) but not wired' && ru.ladder[0].present === true && ru.ladder[0].ok === false && ru.ladder[0].recipe === 'xpra-seamless', 'CONTROL (2.369.131): with the xpra row UNWIRED the same box resolves to vnc-display, the reason names the unwired rung, the ladder still reports xpra as present with its recipe', ru);
+  ok(M.fallbackLogLine(ru) === '[desktop] backend fallback: xpra→vnc-display (xpra present (xpra) but not wired)', 'the §3 log line names the unwired rung', M.fallbackLogLine(ru));
+  // the instance preference (settings desktop.backendPrefs): REORDERS, never invents — the suites' pin and the owner's escape hatch
+  const rp = M.resolveBackend({ bins: { xpra: '/usr/bin/xpra', Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } }, { backendPrefs: M.parseBackendPrefs('vnc-display, xpra, desktop-singleton') });
+  ok(rp.backend === 'vnc-display' && rp.fallbackWhy === null && rp.ladder.length === 3 && rp.ladder[0].backend === 'vnc-display' && rp.ladder[1].backend === 'xpra' && rp.ladder[1].ok === true, 'prefs "vnc-display, xpra, desktop-singleton" put the whole-display rung first: it wins with NO fallback (nothing fell) and xpra is still reported runnable below it', rp);
+  ok(same(M.parseBackendPrefs('vnc-display, xpra,nonsense,, xpra'), ['vnc-display', 'xpra']) && same(M.parseBackendPrefs(['xpra', 'bogus']), ['xpra']) && same(M.parseBackendPrefs(''), []) && same(M.parseBackendPrefs(undefined), []) && same(M.parseBackendPrefs(42), []), 'parseBackendPrefs: comma/space list or array, known ids only, deduped, empty/garbage ⇒ [] (= the table order)');
+  ok(M.streamKindOf({ backend: 'xpra' }) === 'xpra' && M.streamKindOf({ backend: 'vnc-display' }) === 'rfb' && M.streamKindOf({ backend: 'desktop-singleton' }) === 'rfb' && M.streamKindOf({ backend: 'nope' }) === null && M.streamKindOf(null) === null, 'streamKindOf: the rung\'s stream kind from the table (the client picks its view by KIND, never by a backend id)');
 }
 {
   const r = M.resolveBackend({ bins: { Xvfb: '/usr/bin/Xvfb', x11vnc: '/usr/bin/x11vnc' } });
@@ -130,7 +156,7 @@ function oracle(bins, singletonRunning) {
   const r4 = M.resolveBackend({ bins: { xpra: '/x', Xvfb: '/x', x11vnc: '/x' } }, { backendPrefs: ['vnc-display'] });
   ok(r4.backend === 'vnc-display' && r4.fallbackWhy === null, 'a row\'s backendPrefs may RESTRICT the ladder (only vnc-display asked ⇒ vnc-display, no fallback)');
   const r5 = M.resolveBackend({ bins: { xpra: '/x', Xvfb: '/x', x11vnc: '/x' } }, { backendPrefs: ['nonsense'] });
-  ok(r5.backend === 'vnc-display' && r5.ladder.length === 3 && r5.ladder[0].backend === 'xpra' && r5.ladder[0].present === true, 'unknown pref ids are ignored, never invented as rungs (the full ladder runs — and still passes over the unwired xpra)');
+  ok(r5.backend === 'xpra' && r5.ladder.length === 3 && r5.ladder[0].backend === 'xpra' && r5.ladder[0].present === true, 'unknown pref ids are ignored, never invented as rungs (the full ladder runs in table order — xpra wins)');
   ok(M.resolveBackend().backend === null && M.resolveBackend(null).backend === null, 'no facts ⇒ no backend (never a guess)');
 }
 
@@ -292,6 +318,41 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const s3 = S.rfbInputSieve(); let n3 = 0; for (const b of [...hs, spf, se, ecu, key, key, key]) n3 += s3.feed(b);
     ok(n3 === 3, 'ECU then three KeyEvents ⇒ 3 inputs (round 2: 0, opaque:false, pending 10 — followable and permanently wrong)');
   }
+  // P8-2 x4: a SetDesktopSize is REPORTED (w, h) as it passes — split across chunks it is reported ONCE — and is never an input
+  {
+    const got = [];
+    const s4 = S.rfbInputSieve({ onDesktopSize: (w, h) => got.push([w, h]) });
+    const sd = Buffer.alloc(24); sd[0] = 251; sd.writeUInt16BE(900, 2); sd.writeUInt16BE(600, 4); sd[6] = 1; sd.writeUInt16BE(900, 16); sd.writeUInt16BE(600, 18);
+    let n4 = 0; for (const b of [...hs, sd.subarray(0, 9), sd.subarray(9), key]) n4 += s4.feed(b);
+    ok(same(got, [[900, 600]]) && n4 === 1 && s4.state().pending === 0 && !s4.state().opaque, 'a SetDesktopSize split across two chunks is reported ONCE as 900x600, counts as no input, and the KeyEvent after it counts');
+    const s5 = S.rfbInputSieve(); let n5 = 0; for (const b of [...hs, sd, key]) n5 += s5.feed(b);
+    ok(n5 === 1 && s5.state().messages === 2, 'CONTROL: a sieve built without the hook walks the same bytes unchanged');
+    const s6 = S.rfbInputSieve({ onDesktopSize: () => { throw new Error('keeper down'); } }); let n6 = 0; for (const b of [...hs, sd, key]) n6 += s6.feed(b);
+    ok(n6 === 1 && !s6.state().opaque, 'a hook that throws never breaks the walk (the keeper is optional at the bridge)');
+    const hsLen = hs.reduce((a, b) => a + b.length, 0);
+    const ra = S.rfbInputSieve({ onDesktopSize: (w, h) => got.push(['allowed', w, h]) }).strip(Buffer.concat([...hs, sd, key]), true);
+    ok(same(got[1], ['allowed', 900, 600]) && ra.dropped === 0 && ra.relay && ra.relay.length === hsLen + 24 + key.length, 'through strip() with input ALLOWED the SetDesktopSize is relayed and reported (the holder\'s pane sizes the display)');
+    // r8 (2026-09-22, the twin of the xpra display-size fence): a REFUSED viewer's SetDesktopSize is cut — Xvnc resizes the
+    // SHARED display for whoever asks — and never reported (the display did not move); the FramebufferUpdateRequest beside it passes
+    const fur = Buffer.from([3, 1, 0, 0, 0, 0, 3, 0, 2, 0]);
+    const sr = S.rfbInputSieve({ onDesktopSize: (w, h) => got.push(['refused', w, h]) });
+    const r = sr.strip(Buffer.concat([...hs, sd, fur, key]), false);
+    ok(got.length === 2 && r.dropped === 2 && r.relay && r.relay.equals(Buffer.concat([...hs, fur])) && !sr.state().opaque, 'through strip() with input REFUSED the SetDesktopSize is CUT and not reported, beside the KeyEvent; the handshake + FramebufferUpdateRequest pass', { got, dropped: r.dropped });
+    const r2 = sr.strip(Buffer.concat([sd.subarray(0, 9)]), false), r3 = sr.strip(sd.subarray(9), false);
+    ok(r2.relay === null && r3.relay === null && r3.dropped === 1 && got.length === 2, 'a refused SetDesktopSize split across two chunks is cut whole, never reported');
+    const r4 = sr.strip(sd, true);
+    ok(r4.relay && r4.relay.equals(sd) && same(got[2], ['refused', 900, 600]), 'the same viewer ALLOWED (a takeover) ⇒ its next SetDesktopSize passes and is reported (the sieve\'s refusal is per message, never sticky)');
+    // CONTROL: the x4 strip (a SetDesktopSize relayed whatever the policy) — the reproduced class
+    const srcS = read('src/server/desktop-stream.js');
+    const from = "if ((input || type === 251) && !allowInput) dropped++;";
+    ok(srcS.split(from).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
+    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-rfbsize.js`);
+    fs.writeFileSync(file, srcS.replace(from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;"));
+    try {
+      const rc = require(file).rfbInputSieve().strip(Buffer.concat([...hs, sd, key]), false);
+      ok(rc.relay && rc.relay.equals(Buffer.concat([...hs, sd])) && rc.dropped === 1, 'CONTROL: the x4 strip relays a refused viewer\'s SetDesktopSize (Xvnc would resize the holder\'s display)');
+    } finally { try { fs.unlinkSync(file); } catch {} }
+  }
   // NEGATIVE CONTROL: a patched copy of the real bridge with the round-2 table — same sequence, KeyEvents lost, sieve still 'followable'
   {
     const srcS = read('src/server/desktop-stream.js');
@@ -309,6 +370,374 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
       ok(n === 0 && s.state().opaque === false && s.state().pending === 4, `CONTROL: the round-2 table on the same bytes counts 0 inputs, is NOT opaque and leaves 4 bytes pending (misaligned, not refused)`, s.state());
     } finally { try { fs.unlinkSync(file); } catch {} }
   }
+}
+
+console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the netem knob, the client\'s own vocabulary');
+{
+  const S = require('../src/server/desktop-stream.js');
+  // a rencodeplus packet: header P, flags 0x10 (rencodeplus), level 0, index 0, size; payload = list [type, 0]
+  const rpkt = (type, { flags = 0x10, level = 0, index = 0, tail = Buffer.from([0]) } = {}) => { const t = Buffer.from(type); const payload = Buffer.concat([Buffer.from([192 + 2, 128 + t.length]), t, tail]); const h = Buffer.alloc(8); h[0] = 0x50; h[1] = flags; h[2] = level; h[3] = index; h.writeUInt32BE(payload.length, 4); return Buffer.concat([h, payload]); };
+  const bpkt = (type) => { const b = Buffer.from(`l${type.length}:${type}i0ee`); const h = Buffer.alloc(8); h[0] = 0x50; h.writeUInt32BE(b.length, 4); return Buffer.concat([h, b]); };
+  const sv = S.xpraInputSieve();
+  ok(sv.feed(rpkt('ping')) === 0 && sv.feed(rpkt('damage-sequence')) === 0 && sv.feed(rpkt('hello')) === 0 && sv.feed(rpkt('configure-window')) === 0, 'ping / damage-sequence / hello / configure-window are the client talking, not the user (0 inputs)');
+  ok(sv.feed(rpkt('key-action')) === 1 && sv.feed(rpkt('button-action')) === 1 && sv.feed(rpkt('pointer-position')) === 1 && sv.feed(rpkt('wheel-motion')) === 1 && sv.feed(rpkt('clipboard-token')) === 1 && sv.feed(rpkt('clipboard-contents')) === 1, 'key-action / button-action / pointer-position / wheel-motion / clipboard-token / clipboard-contents each count as ONE input');
+  ok(sv.feed(Buffer.concat([rpkt('damage-sequence'), rpkt('key-action'), rpkt('ping_echo'), rpkt('pointer-button')])) === 2, 'several packets in one chunk: each judged, two inputs');
+  const half = rpkt('button-action');
+  ok(sv.feed(half.subarray(0, 5)) === 0 && sv.state().pending === 5 && sv.feed(half.subarray(5)) === 1 && sv.state().pending === 0, 'a packet split across chunks waits for its tail, then counts once');
+  ok(sv.feed(rpkt('ping', { index: 1 })) === 0 && sv.feed(rpkt('key-action', { index: 2 })) === 0 && sv.state().group === 2, 'a raw chunk (packet index ≠ 0) is never judged on its own — it waits for the main packet that FOLLOWS it (xpra\'s net/protocol.py sends raw chunks first)');
+  ok(sv.feed(rpkt('ping', { level: 0x10 | 1 })) === 1 && sv.state().unread === 1, 'a COMPRESSED packet cannot be read ⇒ it COUNTS (never reap a live user)');
+  ok(sv.feed(rpkt('ping', { flags: 0x4 })) === 1, 'a yaml-encoded packet cannot be read ⇒ counts');
+  ok(sv.feed(Buffer.from('not a header at all')) === 1 && sv.state().pending === 0, 'bytes that are not an xpra header count once and are dropped (resync on the next chunk)');
+  // strip(): THE POLICY PER PACKET (2026-09-22) — a refused viewer's INPUT packets are cut out, everything else relayed byte-identical
+  {
+    const st = S.xpraInputSieve();
+    const talk = ['hello', 'ping_echo', 'damage-sequence', 'map-window'];
+    const r1 = st.strip(Buffer.concat([rpkt('hello'), rpkt('key-action'), rpkt('ping_echo'), rpkt('button-action'), rpkt('damage-sequence'), rpkt('clipboard-token'), rpkt('map-window'), rpkt('configure-window'), rpkt('keyboard-config')]), false);
+    ok(r1.inputs === 3 && r1.dropped === 5 && r1.relay.equals(Buffer.concat(talk.map((t) => rpkt(t)))), 'strip(refused): key-action / button-action / clipboard-token cut out, keyboard-config and (x5) configure-window fenced, hello / ping_echo / damage-sequence / map-window relayed byte-identical in order', { inputs: r1.inputs, dropped: r1.dropped });
+    const r2 = st.strip(Buffer.concat([rpkt('hello'), rpkt('key-action')]), true);
+    ok(r2.inputs === 1 && r2.dropped === 0 && r2.replayed === 2 && r2.replayedKinds.join() === 'keymap,window geometry' && r2.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('configure-window'), rpkt('hello'), rpkt('key-action')])), 'strip(allowed): everything relayed, the input still COUNTED — and the keyboard-config + configure-window fenced a moment ago go FIRST, in that order (held for the takeover)');
+    const ka = rpkt('key-action');
+    const r3a = st.strip(ka.subarray(0, 6), false), r3b = st.strip(ka.subarray(6), false);
+    ok(r3a.relay === null && r3a.dropped === 0 && r3b.dropped === 1 && r3b.relay === null && st.state().pending === 0, 'a refused input split across two messages: the head is HELD (never relayed alone), the tail completes it and the whole packet is dropped');
+    const hl = rpkt('hello');
+    const r4a = st.strip(hl.subarray(0, 9), false), r4b = st.strip(hl.subarray(9), false);
+    ok(r4a.relay === null && r4b.relay && r4b.relay.equals(hl), 'a hello split across two messages under a refusal is relayed WHOLE once complete');
+    const r5 = st.strip(Buffer.concat([rpkt('x', { index: 1 }), rpkt('key-action')]), false);
+    const r6 = st.strip(Buffer.concat([rpkt('x', { index: 1 }), rpkt('damage-sequence')]), false);
+    ok(r5.relay === null && r5.dropped === 1 && r6.relay && r6.relay.equals(Buffer.concat([rpkt('x', { index: 1 }), rpkt('damage-sequence')])), 'a raw chunk travels WITH the main packet after it: dropped with a refused input, relayed with a relayed packet');
+    const r7 = st.strip(Buffer.from('garbage that is not a header'), false), r8 = S.xpraInputSieve().strip(Buffer.from('garbage that is not a header'), true);
+    ok(r7.relay === null && r7.dropped === 1 && r8.relay && r8.relay.toString() === 'garbage that is not a header' && r8.inputs === 1, 'unreadable bytes are input: DROPPED under a refusal (never injected behind it), relayed and counted when allowed');
+    const r9 = st.strip(rpkt('ping', { level: 0x10 | 1 }), false);
+    ok(r9.relay === null && r9.dropped === 1, 'a COMPRESSED packet cannot be read ⇒ treated as input ⇒ dropped under a refusal (the upstream html5 client never compresses what it sends)');
+  }
+  // WHAT A REFUSED VIEWER MAY SAY (round 2 of the P8-2 verify, 2026-09-22): an ALLOWLIST. A Watch-mode viewer's relayed
+  // `shutdown-server` ended the whole app session on the real rung (xpra honours it from any client); every CONTROL
+  // packet xpra knows is the same class. The server's lifecycle is the keeper's: shutdown-server / exit-server are cut
+  // from EVERY viewer.
+  const CONTROL = ['shutdown-server', 'exit-server', 'control', 'command_request', 'info-request', 'set-clipboard-enabled', 'sharing-toggle', 'logging', 'disconnect', 'suspend', 'set_deflate', 'no-such-packet'];
+  const refusedBytes = Buffer.concat([rpkt('hello'), ...CONTROL.map((t) => rpkt(t)), rpkt('ping_echo')]);
+  {
+    const st = S.xpraInputSieve();
+    const r = st.strip(refusedBytes, false);
+    ok(r.relay && r.relay.equals(Buffer.concat([rpkt('hello'), rpkt('ping_echo')])) && r.dropped === CONTROL.length && r.lifecycle === 2 && r.inputs === 0, `strip(refused): only hello + ping_echo relayed — ${CONTROL.length} control packets cut (${CONTROL.join(', ')}), none of them counted as input, 2 named server-lifecycle`, { dropped: r.dropped, lifecycle: r.lifecycle, relayed: r.relay && r.relay.length });
+    const a = S.xpraInputSieve().strip(Buffer.concat([rpkt('shutdown-server'), rpkt('control'), rpkt('exit-server'), rpkt('key-action')]), true);
+    ok(a.relay && a.relay.equals(Buffer.concat([rpkt('control'), rpkt('key-action')])) && a.dropped === 2 && a.lifecycle === 2 && a.inputs === 1, 'strip(ALLOWED): shutdown-server and exit-server are cut from an input-allowed viewer too (the keeper owns the server\'s lifecycle); its other control and input packets pass');
+    const bl = S.xpraInputSieve().strip(Buffer.concat([bpkt('shutdown-server'), bpkt('exit-server')]), true);
+    ok(bl.relay === null && bl.lifecycle === 2, 'the bencode spelling of shutdown-server / exit-server is cut the same way');
+    ok([...S.XPRA_WATCH_TYPES].every((t) => !S.XPRA_INPUT_TYPES.has(t) && !S.XPRA_LIFECYCLE_TYPES.has(t)), 'no watch type is input or lifecycle (the three sets are disjoint where it matters)');
+    for (const t of S.XPRA_WATCH_TYPES) { const x = S.xpraInputSieve().strip(rpkt(t), false); ok(x.relay && x.relay.equals(rpkt(t)) && x.dropped === 0, `watch type ${t} is relayed for a refused viewer`); }
+  }
+  // THE SHIPPED CLIENT'S OWN PACKETS (src/lib/xpra-proto.js builders xpra-client.js sends with): every non-input one is
+  // a watch type — a refused viewer's picture never loses a packet it needs (the r5 regression this allowlist must not reopen)
+  {
+    const P = await import('../src/lib/xpra-proto.js');
+    const hints = ['display-configure', 'configure-display', 'keyboard-config'];
+    const built = [
+      ['hello', {}], P.pingPacket(1), P.pingEcho(1), P.damageAck(1, 1, 10, 10, 0), P.mapWindow(1, { x: 0, y: 0, w: 1, h: 1 }), P.configureWindow(1, { x: 0, y: 0, w: 1, h: 1 }), P.unmapWindow(1), P.clipboardNone(1, 'CLIPBOARD'),
+    ].map((p) => String(p[0]));
+    const keymaps = [P.keyboardConfigPacket(hints), P.keyboardConfigPacket([])].map((p) => String(p[0]));
+    ok(keymaps.join() === 'keyboard-config,keymap-changed' && keymaps.every((t) => S.XPRA_KEYMAP_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t)), `both keymap spellings the shipped client builds (${keymaps.join(', ')}) are XPRA_KEYMAP_TYPES and NOT watch types — the keymap fence`);
+    const sizes = [P.displayPacket(['display-configure'], { width: 10, height: 10 }), P.displayPacket(['configure-display'], { width: 10, height: 10 }), P.displayPacket([], { width: 10, height: 10 })].map((p) => String(p[0]));
+    ok(sizes.join() === 'display-configure,configure-display,desktop_size' && sizes.every((t) => S.XPRA_DISPLAY_TYPES.has(t) && !S.XPRA_WATCH_TYPES.has(t)), `all three display-size spellings the shipped client builds (${sizes.join(', ')}) are XPRA_DISPLAY_TYPES and NOT watch types — the display-size fence`);
+    const client = read('src/lib/xpra-client.js');
+    const used = [...new Set([...client.matchAll(/send\(P\.([a-zA-Z]+)\(/g)].map((m) => m[1]))];
+    const nonInputBuilders = ['pingPacket', 'pingEcho', 'damageAck', 'mapWindow', 'configureWindow', 'clipboardNone', 'keyboardConfigPacket', 'displayPacket'];
+    const inputBuilders = ['keyAction', 'buttonAction', 'pointerPosition', 'clipboardToken', 'clipboardContents', 'focusPacket', 'closeWindow'];
+    ok(used.length >= 10 && used.every((u) => nonInputBuilders.includes(u) || inputBuilders.includes(u)), `every builder xpra-client.js sends through is classified here (${used.join(', ')}) — a new one must be judged watch or input`, used);
+    // x5: configure-window LEFT the watch list (the geometry is the ACTIVE viewer's — held, replayed at a takeover) and so
+    // did unmap-window (it unmaps the window for EVERY client; the shipped client never sends one — `used` above pins it)
+    const watchOrHeld = (t) => S.XPRA_WATCH_TYPES.has(t) || S.XPRA_GEOMETRY_TYPES.has(t);
+    ok(built.filter((t) => t !== 'unmap-window').every(watchOrHeld), `every non-input packet the shipped client sends is a watch type or a HELD geometry packet (${built.join(', ')})`, built.filter((t) => !watchOrHeld(t)));
+    ok(!S.XPRA_WATCH_TYPES.has('configure-window') && S.XPRA_GEOMETRY_TYPES.has('configure-window') && !S.XPRA_WATCH_TYPES.has('unmap-window') && !used.includes('unmapWindow'), 'x5: configure-window is a HELD geometry packet and unmap-window is cut for a refused viewer (the shipped client never sends one)');
+  }
+  // the installed server's own lifecycle handlers (SKIP without the package): both spellings it registers are ours
+  {
+    const base = ['/usr/lib/python3/dist-packages/xpra/server/base.py'].find((f) => fs.existsSync(f));
+    if (!base) console.log('  ⚠ SKIP: no xpra server/base.py on this box — the lifecycle census needs the installed server');
+    else { const txt = fs.readFileSync(base, 'utf8'); const reg = /add_packets\(\s*"shutdown-server",\s*"exit-server"\s*\)/.test(txt); ok(reg && S.XPRA_LIFECYCLE_TYPES.has('shutdown-server') && S.XPRA_LIFECYCLE_TYPES.has('exit-server'), 'the installed server registers shutdown-server + exit-server as client packets (server/base.py add_packets) — both are XPRA_LIFECYCLE_TYPES'); }
+  }
+  // NEGATIVE CONTROL: the r5 strip (a denylist of input — every non-input packet relayed) on the same bytes relays the lifecycle packets
+  {
+    const srcS = read('src/server/desktop-stream.js');
+    const from = "      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);";
+    ok(srcS.split(from).length === 2, 'the allowlist decision is spelled once in the bridge (the control patches exactly it)');
+    const dir = path.join(repo, 'src/server');
+    const file = path.join(dir, `vs-dak-mut-${process.pid}-xstream.js`);
+    fs.writeFileSync(file, srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'));
+    try {
+      const Pm = require(file);
+      const r = Pm.xpraInputSieve().strip(refusedBytes, false);
+      const types = []; for (let b = r.relay || Buffer.alloc(0); b.length >= 8;) { const n = b.readUInt32BE(4); types.push(S.xpraPacketType(b.subarray(8, 8 + n))); b = b.subarray(8 + n); }
+      ok(types.includes('shutdown-server') && types.includes('exit-server') && r.dropped === 0, `CONTROL: the r5 strip relays a refused viewer's ${types.length} packets incl. shutdown-server + exit-server (the reproduced session kill)`, types);
+    } finally { try { fs.unlinkSync(file); } catch {} }
+  }
+  // THE KEYMAP FENCE (hole B the r6 verify left open, 2026-09-22 — measured on the real rung: a Watch viewer's
+  // keyboard-config reprogrammed the display's X keymap, which the holder / an agent's xdotool types through). A refused
+  // viewer's keyboard-config / keymap-changed are cut like input; the LAST one is HELD and replayed ahead of everything
+  // the first time its input is allowed (the shipped client sends its keymap once, after the hello: a pane that connected
+  // in Watch mode and took over typed garbage without the replay — test-desktop-app-keeper §15 measures both on xpra).
+  {
+    const kc = rpkt('keyboard-config'), km = rpkt('keymap-changed'), pe = rpkt('ping_echo');
+    ok([...S.XPRA_KEYMAP_TYPES].sort().join() === 'keyboard-config,keymap-changed' && [...S.XPRA_KEYMAP_TYPES].every((t) => !S.XPRA_WATCH_TYPES.has(t) && !S.XPRA_INPUT_TYPES.has(t)), 'XPRA_KEYMAP_TYPES = keyboard-config + keymap-changed: neither a watch type nor input');
+    const st = S.xpraInputSieve();
+    const a = st.strip(Buffer.concat([rpkt('hello'), kc, pe, km]), false);
+    ok(a.relay && a.relay.equals(Buffer.concat([rpkt('hello'), pe])) && a.dropped === 2 && a.inputs === 0 && st.state().heldKeymap === km.length, 'refused: keyboard-config and keymap-changed are cut (neither counted as input), the hello and ping_echo pass; the LAST keymap packet is held', st.state());
+    const b2 = st.strip(pe, false);
+    ok(b2.relay && b2.relay.equals(pe) && b2.replayed === 0 && st.state().heldKeymap === km.length, 'still refused: nothing replayed, the keymap still held');
+    const c = st.strip(pe, true);
+    ok(c.replayed === 1 && c.relay && c.relay.equals(Buffer.concat([km, pe])) && st.state().heldKeymap === 0, 'the first ALLOWED message (a takeover) carries the held keymap AHEAD of its own packets, in one write');
+    const d = st.strip(pe, true);
+    ok(d.replayed === 0 && d.relay.equals(pe), 'replayed once, never again');
+    const e = st.strip(kc, true);
+    ok(e.relay && e.relay.equals(kc) && e.dropped === 0, 'an ALLOWED viewer\'s keyboard-config passes as before (the holder\'s keymap is the one X should carry)');
+    const s2 = S.xpraInputSieve();
+    const big = rpkt('keyboard-config', { tail: Buffer.alloc(S.XPRA_KEYMAP_HOLD_BYTES) });
+    const f1 = s2.strip(big, false), f2 = s2.strip(pe, true);
+    ok(f1.relay === null && f1.dropped === 1 && s2.state().heldKeymap === 0 && f2.replayed === 0 && f2.relay.equals(pe), `a refused keymap packet over XPRA_KEYMAP_HOLD_BYTES (${S.XPRA_KEYMAP_HOLD_BYTES} B; the shipped client's is ~2.4 KB) is cut and NOT held — nothing to replay`);
+    const s3 = S.xpraInputSieve();
+    s3.strip(kc, false);
+    const g = s3.strip(Buffer.concat([rpkt('shutdown-server'), pe]), true);
+    ok(g.replayed === 1 && g.relay.equals(Buffer.concat([kc, pe])) && g.lifecycle === 1, 'the replay rides a message whose other packet is cut (the lifecycle rule still holds)');
+  }
+  // CONTROL: the r6 allowlist (keyboard-config / keymap-changed listed as watch types) relays a refused viewer's keymap
+  {
+    const srcS = read('src/server/desktop-stream.js');
+    const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
+    ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the control patches exactly it)');
+    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xkeymap.js`);
+    fs.writeFileSync(file, srcS.replace(from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "));
+    try {
+      const Pm = require(file);
+      const r = Pm.xpraInputSieve().strip(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')]), false);
+      ok(r.relay && r.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')])) && r.dropped === 0, 'CONTROL: the r6 allowlist relays a refused viewer\'s keyboard-config + keymap-changed (the reproduced keymap change)');
+    } finally { try { fs.unlinkSync(file); } catch {} }
+  }
+  // THE DISPLAY-SIZE FENCE (round 3 of the P8-2 verify, 2026-09-22 — reproduced on the real rung: a Watch viewer's
+  // display-configure 1x1 shrank the holder's 900x600 shared display to 1x1, and it stayed after the watcher left). The
+  // keymap rule applied to the virtual root: cut for a refused viewer, the LAST one held and replayed at its takeover
+  // (after the keymap, in one write) — test-desktop-app-keeper §16 measures both on the real xpra.
+  {
+    const dc = rpkt('display-configure'), cd = rpkt('configure-display'), ds = rpkt('desktop_size'), kc = rpkt('keyboard-config'), pe = rpkt('ping_echo');
+    ok([...S.XPRA_DISPLAY_TYPES].sort().join() === 'configure-display,desktop_size,display-configure' && [...S.XPRA_DISPLAY_TYPES].every((t) => !S.XPRA_WATCH_TYPES.has(t) && !S.XPRA_INPUT_TYPES.has(t) && !S.XPRA_KEYMAP_TYPES.has(t)), 'XPRA_DISPLAY_TYPES = display-configure + configure-display + desktop_size: not a watch type, not input, not a keymap type');
+    const st = S.xpraInputSieve();
+    const a = st.strip(Buffer.concat([rpkt('hello'), dc, pe, cd, ds]), false);
+    ok(a.relay && a.relay.equals(Buffer.concat([rpkt('hello'), pe])) && a.dropped === 3 && a.inputs === 0 && st.state().heldDisplay === ds.length && st.state().heldKeymap === 0, 'refused: all three display-size spellings are cut (none counted as input), the hello and ping_echo pass; the LAST one is held', st.state());
+    st.strip(kc, false);
+    const b2 = st.strip(pe, false);
+    ok(b2.relay && b2.relay.equals(pe) && b2.replayed === 0 && st.state().heldDisplay === ds.length && st.state().heldKeymap === kc.length, 'still refused: nothing replayed — a keymap and a display size both held');
+    const c = st.strip(pe, true);
+    ok(c.replayed === 2 && c.replayedKinds.join() === 'keymap,display size' && c.relay && c.relay.equals(Buffer.concat([kc, ds, pe])) && st.state().heldDisplay === 0 && st.state().heldKeymap === 0, 'the takeover carries the held keymap THEN the held display size ahead of its own packets, in one write; replayedKinds names both (the log line\'s words)', c.replayedKinds);
+    const d = st.strip(dc, true);
+    ok(d.relay && d.relay.equals(dc) && d.dropped === 0 && d.replayed === 0, 'an ALLOWED viewer\'s display-configure passes as before (the holder\'s pane sizes the display)');
+    const s2 = S.xpraInputSieve();
+    const f1 = s2.strip(rpkt('display-configure', { tail: Buffer.alloc(S.XPRA_DISPLAY_HOLD_BYTES) }), false), f2 = s2.strip(pe, true);
+    ok(f1.relay === null && f1.dropped === 1 && s2.state().heldDisplay === 0 && f2.replayed === 0 && f2.relay.equals(pe), `a refused display packet over XPRA_DISPLAY_HOLD_BYTES (${S.XPRA_DISPLAY_HOLD_BYTES} B) is cut and NOT held — nothing to replay`);
+    const src = read('src/server/desktop-stream.js');
+    ok(!/XPRA_WATCH_TYPES = [^\n]*'(display-configure|configure-display|desktop_size)'/.test(src), 'the bridge spells no display-size packet in its watch allowlist');
+  }
+  // CONTROL: the r7 allowlist (the display-size packets listed as watch types) relays a refused viewer's display size
+  {
+    const srcS = read('src/server/desktop-stream.js');
+    const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
+    ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the display control patches exactly it)');
+    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xdisplay.js`);
+    fs.writeFileSync(file, srcS.replace(from, from + "'display-configure', 'configure-display', 'desktop_size', "));
+    try {
+      const Pm = require(file);
+      const bytes = Buffer.concat([rpkt('display-configure'), rpkt('configure-display'), rpkt('desktop_size')]);
+      const r = Pm.xpraInputSieve().strip(bytes, false);
+      ok(r.relay && r.relay.equals(bytes) && r.dropped === 0, 'CONTROL: the r7 allowlist relays a refused viewer\'s display-configure + configure-display + desktop_size (the reproduced 900x600 ⇒ 1x1)');
+    } finally { try { fs.unlinkSync(file); } catch {} }
+    // CONTROL: the fence without the replay — a takeover carries nothing it held
+    const fromN = '    if (allowInput && !st.oversize) {';
+    ok(srcS.split(fromN).length === 2, 'the replay is spelled once in the bridge (the no-replay control patches exactly it)');
+    const nfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xnoreplay.js`);
+    fs.writeFileSync(nfile, srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'));
+    try {
+      const sn = require(nfile).xpraInputSieve();
+      sn.strip(rpkt('display-configure'), false);
+      const c = sn.strip(rpkt('ping_echo'), true);
+      ok(c.replayed === 0 && c.relay.equals(rpkt('ping_echo')), 'CONTROL: fenced without the replay, the takeover carries no held display size (the pane that took over keeps the old holder\'s)');
+    } finally { try { fs.unlinkSync(nfile); } catch {} }
+  }
+  // THE HELD-BYTES CAP (hole A the r6 verify left open, 2026-09-22 — reproduced: a viewer DECLARING a 2 GiB packet and
+  // streaming it grew the server by ~1 GB). A header declaring more than XPRA_MAX_PACKET_BYTES is judged in the chunk that
+  // carries it; an incomplete packet + its raw chunks may hold at most one largest packet; the rfb stream's one
+  // self-declared length (ClientCutText) has the same cap. test-desktop-stream-keepalive §5 drives the bridge's close.
+  {
+    const MiB = 1024 * 1024;
+    ok(S.XPRA_MAX_PACKET_BYTES === 16 * MiB && S.RFB_MAX_MESSAGE_BYTES === 16 * MiB && S.WS_MAX_MESSAGE_BYTES === 16 * MiB + 8 && S.OVERSIZE_CLOSE === 1009 && S.OVERSIZE_REASON === 'packet-too-large', 'the caps: 16 MiB per xpra packet and per rfb cut text, one packet + its header per WebSocket message, closed 1009 packet-too-large');
+    const consts = '/usr/lib/python3/dist-packages/xpra/net/constants.py', core = '/usr/lib/python3/dist-packages/xpra/server/core.py';
+    if (!fs.existsSync(consts) || !fs.existsSync(core)) console.log('  ⚠ SKIP: no installed xpra net/constants.py + server/core.py — the "same number as xpra\'s own limit" census needs the package');
+    else ok(/MAX_PACKET_SIZE: int = envint\("XPRA_MAX_PACKET_SIZE", 16 \* 1024 \* 1024\)/.test(fs.readFileSync(consts, 'utf8')) && /def accept_protocol[\s\S]{0,600}proto\.max_packet_size = MAX_PACKET_SIZE/.test(fs.readFileSync(core, 'utf8')), 'the installed xpra refuses a client packet over the SAME 16 MiB (net/constants.py MAX_PACKET_SIZE, set on every client connection by server/core.py accept_protocol) — the cap cuts nothing xpra would take');
+    const hdr = (size, index = 0) => { const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h[3] = index; h.writeUInt32BE(size >>> 0, 4); return h; };
+    const st = S.xpraInputSieve();
+    const r = st.strip(Buffer.concat([rpkt('ping_echo'), hdr(2 ** 31), Buffer.alloc(1024)]), true);
+    ok(r.oversize && r.oversize.declared === 2 ** 31 && r.oversize.cap === 16 * MiB && r.relay && r.relay.equals(rpkt('ping_echo')) && st.state().pending === 0, 'a header DECLARING 2 GiB is judged in the chunk that carries it: oversize named (declared, cap), nothing held, the complete packet before it still relayed', r.oversize);
+    const r2 = st.strip(Buffer.alloc(MiB), true);
+    ok(r2.relay === null && r2.oversize && st.state().pending === 0 && st.state().group === 0, 'after it NOTHING is held or relayed (the bridge is closing this viewer)');
+    const s3 = S.xpraInputSieve();
+    const e3 = s3.strip(hdr(16 * MiB), true);
+    ok(!e3.oversize && s3.state().pending === 8 && s3.state().need === 16 * MiB + 8, 'exactly 16 MiB is xpra\'s own limit (it refuses MORE): the header is held, waiting for its bytes');
+    const s3b = S.xpraInputSieve();
+    ok(s3b.strip(hdr(16 * MiB + 1), true).oversize, '16 MiB + 1 is oversize');
+    const s4 = S.xpraInputSieve({ maxPacket: 1024 });
+    const raw = Buffer.concat([hdr(1000, 1), Buffer.alloc(1000)]);
+    const g1 = s4.strip(raw, true);
+    ok(!g1.oversize && s4.state().group === 1, 'a raw chunk (index 1) waits for its main packet');
+    const g2 = s4.strip(Buffer.concat([hdr(1000), Buffer.alloc(100)]), true);
+    ok(g2.oversize && /raw chunks \+ a partial packet/.test(g2.oversize.what) && s4.state().group === 0 && s4.state().pending === 0, `raw chunks + a partial packet holding more than one largest packet (1008 + 108 > 1032 at a 1024 cap) ⇒ oversize, both released`, g2.oversize);
+    // a legitimate 16 MiB packet streamed in 64 KiB messages completes and is relayed WHOLE (held as a list, joined once)
+    const s5 = S.xpraInputSieve();
+    const bigPkt = rpkt('clipboard-contents', { tail: Buffer.alloc(16 * MiB - 64) });
+    const t5 = Date.now(); const outs = [];
+    for (let i = 0; i < bigPkt.length; i += 64 * 1024) { const x = s5.strip(bigPkt.subarray(i, i + 64 * 1024), true); if (x.relay) outs.push(x.relay); if (x.oversize) outs.push(null); }
+    ok(outs.length === 1 && outs[0] && outs[0].equals(bigPkt) && s5.state().pending === 0, `a ${bigPkt.length - 8} B packet in ${Math.ceil(bigPkt.length / 65536)} messages is relayed whole, once (${Date.now() - t5} ms)`);
+    // RFB: ClientCutText declares its own length (u32; negative = the extended clipboard)
+    const hsR = [Buffer.from('RFB 003.008\n'), Buffer.from([1]), Buffer.from([1])];
+    const cut = (n) => { const b = Buffer.alloc(8); b[0] = 6; b.writeInt32BE(n, 4); return b; };
+    const rs = S.rfbInputSieve(); for (const x of hsR) rs.feed(x);
+    const c1 = rs.strip(Buffer.concat([Buffer.from([3, 1, 0, 0, 0, 0, 0x04, 0x00, 0x03, 0x00]), cut(2 ** 31 - 1), Buffer.alloc(100)]), true);
+    ok(c1.oversize && c1.oversize.declared === 2 ** 31 - 1 && c1.oversize.what === 'ClientCutText' && c1.relay && c1.relay.length === 10 && rs.state().pending === 0, 'rfb: a ClientCutText DECLARING 2 GiB is oversize in its own chunk; the FramebufferUpdateRequest before it relayed, nothing held', c1.oversize);
+    ok(rs.feed(Buffer.alloc(MiB)) === 0 && rs.state().pending === 0, 'rfb: after it nothing is held');
+    const rx = S.rfbInputSieve(); for (const x of hsR) rx.feed(x);
+    ok(rx.strip(cut(-(2 ** 31)), true).oversize, 'rfb: the extended clipboard\'s negative length is judged by its magnitude (2^31 ⇒ oversize)');
+    const ry = S.rfbInputSieve(); for (const x of hsR) ry.feed(x);
+    const txt = Buffer.concat([cut(MiB), Buffer.alloc(MiB, 0x61)]); let yIn = 0, yRel = 0;
+    for (let i = 0; i < txt.length; i += 64 * 1024) { const x = ry.strip(txt.subarray(i, i + 64 * 1024), true); yIn += x.inputs; if (x.relay) yRel += x.relay.length; if (x.oversize) yIn = -99; }
+    ok(yIn === 1 && yRel === txt.length && ry.state().pending === 0, 'rfb: a 1 MiB cut text in 64 KiB chunks is relayed whole and counted ONE input (x11vnc takes up to 1 MB)');
+  }
+  // CONTROL: the bridge WITHOUT the cap (the constants patched to Infinity — the r6 sieve held every byte of an
+  // incomplete packet) keeps holding a 2 GiB-declared packet's bytes as they stream
+  {
+    const srcS = read('src/server/desktop-stream.js');
+    const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;';
+    ok(srcS.split(from1).length === 2 && srcS.split(from2).length === 2, 'each cap is spelled once in the bridge (the control patches exactly them)');
+    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xcap.js`);
+    fs.writeFileSync(file, srcS.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'));
+    try {
+      const Pm = require(file);
+      const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(2 ** 31, 4);
+      const xs = Pm.xpraInputSieve(); let ov = null; xs.strip(h, true);
+      for (let i = 0; i < 8; i++) { const x = xs.strip(Buffer.alloc(1024 * 1024), true); ov = ov || x.oversize; }
+      ok(!ov && xs.state().pending === 8 + 8 * 1024 * 1024, `CONTROL: without the cap the xpra sieve HOLDS ${xs.state().pending} B of the 2 GiB packet and says nothing (the reproduced growth)`);
+      const rs2 = Pm.rfbInputSieve(); for (const x of [Buffer.from('RFB 003.008\n'), Buffer.from([1]), Buffer.from([1])]) rs2.feed(x);
+      const c = Buffer.alloc(8); c[0] = 6; c.writeInt32BE(2 ** 31 - 1, 4); rs2.feed(c);
+      for (let i = 0; i < 4; i++) rs2.feed(Buffer.alloc(1024 * 1024));
+      ok(!rs2.state().oversize && rs2.state().pending === 8 + 4 * 1024 * 1024, `CONTROL: without the cap the rfb sieve HOLDS ${rs2.state().pending} B of a 2 GiB cut text`);
+    } finally { try { fs.unlinkSync(file); } catch {} }
+  }
+  const b = S.xpraInputSieve();
+  ok(b.feed(bpkt('key-action')) === 1 && b.feed(bpkt('ping')) === 0 && b.feed(bpkt('clipboard-contents')) === 1, 'a bencode client (flags 0) is read the same way');
+  ok(S.xpraPacketType(Buffer.concat([Buffer.from([192 + 1]), Buffer.from('70:'), Buffer.alloc(70, 0x61)])) === 'a'.repeat(70) && S.xpraPacketType(Buffer.from([192 + 1, 128 + 3])) === null && S.xpraPacketType(Buffer.from([1, 2, 3])) === null, 'xpraPacketType: the long-string spelling (length:bytes), a truncated string ⇒ null, a non-list ⇒ null');
+  ok(same(S.xpraStrings(Buffer.concat([Buffer.from([192 + 3, 128 + 10]), Buffer.from('disconnect'), Buffer.from([128 + 16]), Buffer.from('connection error'), Buffer.from([128 + 5]), Buffer.from('oops!')])), ['disconnect', 'connection error', 'oops!']), 'xpraStrings reads the leading strings of a list — the words a `disconnect` carries, so the close line can NAME why xpra hung up');
+  for (const t of S.XPRA_INPUT_TYPES) ok(S.xpraInputSieve().feed(rpkt(t)) === 1, `input type ${t} counts`);
+  // the client's OWN vocabulary (xpra-html5's Constants.js on this box; SKIP with the reason elsewhere): every
+  // type we count that the html5 client can emit is spelled there — a renamed packet would silently stop counting
+  const consts = ['/usr/share/xpra/www/js/Constants.js', '/usr/local/share/xpra/www/js/Constants.js'].find((f) => fs.existsSync(f));
+  if (!consts) console.log('  ⚠ SKIP: no xpra-html5 Constants.js on this box — the client-vocabulary census needs the installed client');
+  else {
+    const txt = fs.readFileSync(consts, 'utf8');
+    const spelled = new Set([...txt.matchAll(/:"([a-z_-]+)"/g)].map((m) => m[1]));
+    const ours = [...S.XPRA_INPUT_TYPES].filter((t) => spelled.has(t));
+    ok(ours.length >= 6 && ['key-action', 'button-action', 'pointer-position', 'wheel-motion', 'clipboard-token', 'clipboard-contents'].every((t) => spelled.has(t)), `the installed html5 client spells ${ours.length} of our input types (${ours.join(', ')}) — key/button/pointer/wheel/clipboard all present`, [...spelled].filter((x) => /key|pointer|button|wheel|clip/.test(x)));
+    for (const notInput of ['ping', 'ping_echo', 'damage-sequence', 'buffer-refresh', 'hello', 'connection-data', 'configure-window']) ok(spelled.has(notInput) && !S.XPRA_INPUT_TYPES.has(notInput), `${notInput} is a client packet and NOT input`);
+  }
+  // netem: the parser and the queue (dev-only, env-gated at the bridge)
+  ok(same(S.parseNetem('rtt:200,kbps:1000'), { rttMs: 200, kbps: 1000 }) && same(S.parseNetem('kbps:500'), { rttMs: 0, kbps: 500 }) && same(S.parseNetem('RTT:50'), { rttMs: 50, kbps: 0 }) && S.parseNetem('off') === null && S.parseNetem('') === null && S.parseNetem('garbage') === null && S.parseNetem('rtt:0') === null, 'parseNetem: rtt/kbps in any order, off/empty/garbage/zero ⇒ null');
+  ok(S.netemOfUrl('/api/desktop/x/stream?viewer=a&netem=rtt:200') === 'rtt:200' && S.netemOfUrl('/api/desktop/x/stream') === null, 'netemOfUrl reads the upgrade url\'s own knob');
+  await new Promise((resolve) => {
+    const t0 = Date.now(); const got = [];
+    const q = S.netemQueue({ rttMs: 60, kbps: 8000 }); // 8000 kbps ⇒ 1000 bytes = 1 ms of air
+    q.send(1000, () => got.push(['a', Date.now() - t0])); q.send(60000, () => got.push(['b', Date.now() - t0])); q.send(10, () => got.push(['c', Date.now() - t0]));
+    setTimeout(() => {
+      ok(got.map((g) => g[0]).join('') === 'abc', 'netemQueue delivers in order', got);
+      ok(got[0][1] >= 28 && got[1][1] >= got[0][1] + 55 && got[2][1] >= got[1][1], `each message waits rtt/2 (a at ${got[0][1]} ms ≥ 30) and a 60 kB message lands only after its own airtime at 8 Mbps (b at ${got[1][1]} ms ≥ a + 60; c follows b)`, got);
+      const q2 = S.netemQueue({ rttMs: 40 }); let fired = false; q2.send(1, () => { fired = true; }); q2.stop();
+      setTimeout(() => { ok(!fired, 'stop() drops what is still queued (a closed bridge sends nothing late)'); resolve(); }, 60);
+    }, 160);
+  });
+  // the bridge refuses NOTHING by rung any more: an xpra target is relayed (the keeper suite drives it against a fake upstream + the real xpra)
+  const src = read('src/server/desktop-stream.js');
+  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(ws, id, target\.port, viewerId, netem, req\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra');
+  ok(/netemEnabled \? /.test(src) && !/parseNetem\(q\)/.test(src.replace(/netemEnabled\) \{ const q = netemOfUrl[^\n]*/, '')), 'netem is read ONLY behind the netemEnabled gate (never on by default)');
+  ok(/VIBESPACE_DESKTOP_NETEM === '1'/.test(read('server.js')), 'server.js flips the gate from VIBESPACE_DESKTOP_NETEM=1 and nothing else');
+}
+
+console.log('§9 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: the fit policy column + the PURE fit plan');
+{
+  // the policy: a CAPABILITY of the (rung, via) pair, from the table — never a backend-id switch anywhere else
+  ok(same(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' }), { mode: 'follows', by: 'keeper' }), 'vnc-display via Xvnc: the display FOLLOWS (SetDesktopSize) and the keeper fits');
+  ok(same(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvfb+x11vnc' }), { mode: 'fixed', by: 'keeper' }), 'vnc-display via Xvfb+x11vnc: the display is FIXED, the keeper still fits the app to it');
+  ok(same(M.fitPolicyOf({ backend: 'xpra', via: 'xpra' }), { mode: 'client', by: 'client' }), 'xpra: the CLIENT fits (x2) — the keeper never touches an xpra display');
+  ok(same(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'Xtigervnc' }), { mode: 'shared', by: null }) && same(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'desktop-singleton:running' }), { mode: 'shared', by: null }), 'the shared desktop: never fitted (its own WM, the user\'s other windows)');
+  ok(M.fitPolicyOf({ backend: 'vnc-display', via: null }) === null && M.fitPolicyOf({ backend: 'nope', via: 'Xvnc' }) === null && M.fitPolicyOf(null) === null && M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' }, [{ id: 'vnc-display', stream: 'rfb' }]) === null, 'an older record without a via / an unknown rung / a table row without a fit column ⇒ null: no fit, no claim');
+  ok(M.keeperFits(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvnc' })) && M.keeperFits(M.fitPolicyOf({ backend: 'vnc-display', via: 'Xvfb+x11vnc' })) && !M.keeperFits(M.fitPolicyOf({ backend: 'xpra', via: 'xpra' })) && !M.keeperFits(M.fitPolicyOf({ backend: 'desktop-singleton', via: 'Xvnc' })) && !M.keeperFits(null), 'keeperFits = exactly the two vnc-display spellings');
+  for (const b of M.DISPLAY_BACKENDS) ok(b.fit && Object.keys(b.recipes).every((via) => typeof b.fit[via] === 'string'), `${b.id}: every via that has a recipe has a fit verdict (${Object.entries(b.fit).map(([k, v]) => `${k}→${v}`).join(', ')})`);
+  // the plan
+  const fb = { w: 1280, h: 800 };
+  const main = { id: 5, depth: 1, mapped: true, w: 484, h: 316, x: 0, y: 0, cls: 'XTerm', instance: 'xterm', name: 'xterm' };
+  const child = { id: 6, depth: 2, mapped: true, w: 484, h: 316, x: 1, y: 1, cls: null, instance: null, name: null };
+  const leader = { id: 7, depth: 1, mapped: true, w: 1, h: 1, x: 0, y: 0, cls: 'XTerm', instance: 'xterm', name: null };
+  const p1 = M.appFitPlan([main, child, leader], fb);
+  ok(p1.main && p1.main.id === 5 && same(p1.resize, { id: 5, w: 1280, h: 800 }) && p1.moves.length === 0 && !p1.settled, 'the largest CLASSED top-level is the main: moved to 0,0 and resized to the framebuffer; the depth-2 child and the 1x1 leader are never candidates');
+  ok(M.topLevelWindows([main, child, leader, { id: 8, depth: 1, mapped: false, w: 300, h: 300 }]).map((w) => w.id).join(',') === '5', 'topLevelWindows = depth 1, mapped (or unknown), larger than 1x1');
+  const fitted = { ...main, w: 1280, h: 800 };
+  const p2 = M.appFitPlan([fitted, child], fb);
+  ok(p2.main && p2.main.id === 5 && p2.resize === null && p2.settled, 'a main already at 0,0 × the framebuffer is SETTLED — nothing to do (the tick belt must not touch it)');
+  const bigDialog = { id: 9, depth: 1, mapped: true, w: 1300, h: 200, x: 10, y: 10, cls: 'XTerm', name: 'dialog' }; // 260,000 px² > the unfitted main's 152,944
+  const p3 = M.appFitPlan([main, bigDialog], fb, { applied: { wid: 5 } });
+  ok(p3.main.id === 5 && same(p3.resize, { id: 5, w: 1280, h: 800 }) && same(p3.moves, [{ id: 9, x: 0, y: 10 }]), 'STABILITY: the applied main stays the main even when a LARGER top-level appears (it is re-fitted); a dialog wider than the framebuffer goes to x 0 (never resized), its y kept');
+  const p3b = M.appFitPlan([main, bigDialog], fb);
+  ok(p3b.main.id === 9, 'CONTROL: without an applied wid the larger one would be picked (why the plan carries the applied main)');
+  ok(M.appFitPlan([fitted, bigDialog], fb).main.id === 5, 'and once fitted the main IS the largest — the applied wid only matters before the first act');
+  const dlg = { id: 10, depth: 1, mapped: true, w: 300, h: 200, x: 1200, y: 700, cls: 'Gtk', name: 'Open' };
+  const p4 = M.appFitPlan([fitted, dlg], fb, { applied: { wid: 5 } });
+  ok(same(p4.moves, [{ id: 10, x: 980, y: 600 }]) && p4.resize === null && !p4.settled, 'a dialog overflowing the framebuffer is NUDGED inside (x/y clamped to fb − size), its size untouched');
+  const inside = { ...dlg, x: 100, y: 100 };
+  ok(M.appFitPlan([fitted, inside], fb, { applied: { wid: 5 } }).settled, 'a dialog already inside is left where the app put it');
+  ok(M.appFitPlan([fitted, { ...dlg, x: -20, y: -5 }], fb, { applied: { wid: 5 } }).moves[0].x === 0 && M.appFitPlan([fitted, { ...dlg, x: -20, y: -5 }], fb, { applied: { wid: 5 } }).moves[0].y === 0, 'a negative origin is clamped to 0');
+  const p5 = M.appFitPlan([main, child], { w: 900, h: 600 }, { applied: { wid: 5 } });
+  ok(same(p5.resize, { id: 5, w: 900, h: 600 }), 'a framebuffer that shrank ⇒ the main is re-fitted to the NEW size (the follow)');
+  ok(M.appFitPlan([], fb).main === null && /no top-level/.test(M.appFitPlan([], fb).why) && M.appFitPlan([main], null).main === null && /no framebuffer/.test(M.appFitPlan([main], { w: 0, h: 0 }).why), 'no window / no framebuffer ⇒ main null with the reason (the keeper keeps asking, bounded)');
+  const unnamed = { id: 11, depth: 1, mapped: true, w: 200, h: 200, x: 5, y: 5, cls: null, instance: null, name: null };
+  ok(M.appFitPlan([unnamed], fb).main.id === 11, 'a display whose only top-level is class-less still gets it as the main (better than nothing on screen)');
+  ok(M.appFitPlan([{ id: 12, mapped: true, w: 200, h: 100, x: 0, y: 0, cls: 'A' }], fb).main.id === 12, 'rows WITHOUT a depth (the pre-x4 enumeration shape) are taken as top-levels');
+  ok(M.appFitPlan([{ ...main, id: 20 }, { ...main, id: 21, w: 484, h: 316 }], fb).main.id === 20, 'two equal top-levels: the LOWER id (the older window) is the main — deterministic');
+  // A REPARENTING WM (2026-09-22 — the fleet image starts xfwm4 on this rung; the verifier's minimal WM and the real
+  // xfwm4 4.18 show the same shape): an UNNAMED depth-1 frame holds the CLASSED client at depth 2; the WM's own helpers
+  // are classed depth-1 rows. The CLIENT is the app window; the FRAME must cover the framebuffer.
+  const frame = { id: 30, depth: 1, mapped: true, w: 494, h: 350, x: 393, y: 225, cls: null, instance: null, name: null };
+  const client = { id: 31, depth: 2, mapped: true, w: 484, h: 316, x: 398, y: 254, cls: 'XTerm', instance: 'xterm', name: 'xv-wm-title' };
+  const deco = { id: 32, depth: 2, mapped: true, w: 21, h: 29, x: 861, y: 225, cls: null, instance: null, name: null };
+  const helper = { id: 33, depth: 1, mapped: true, w: 5, h: 5, x: -1000, y: -1000, cls: 'Xfwm4', instance: 'xfwm4', name: 'Xfwm4' };
+  const menu = { id: 34, depth: 1, mapped: true, w: 200, h: 300, x: 1200, y: 700, cls: 'XTerm', instance: 'xterm', name: null };
+  const wmPlan = M.appFitPlan([frame, client, deco, helper, menu], fb);
+  ok(same(M.appWindows([frame, client, deco, helper, menu]).map((w) => [w.id, w.frame && w.frame.id]), [[31, 30]]), 'appWindows: the frame\'s shallowest CLASSED descendant is the app window (with its frame); once a frame is seen, depth-1 classed rows (the WM\'s helper, an override-redirect menu) are not the app\'s');
+  ok(wmPlan.main.id === 31 && wmPlan.main.name === 'xv-wm-title' && same(wmPlan.resize, { id: 31, w: 1270, h: 766, framed: true }) && wmPlan.moves.length === 0, 'the main is the CLIENT (its own name → the title), the act names the client with the size that makes its FRAME the framebuffer; the helper and the menu are never moved', wmPlan);
+  ok(M.appFitPlan([{ ...frame, x: 0, y: 0, w: 1280, h: 800 }, { ...client, x: 0, y: 24, w: 1280, h: 776 }], fb).settled, 'a frame at 0,0 × the framebuffer (the WM maximised the client under its title bar) is SETTLED');
+  const frame2 = { id: 40, depth: 1, mapped: true, w: 310, h: 230, x: 2000, y: 1500, cls: null, instance: null, name: null };
+  const client2 = { id: 41, depth: 2, mapped: true, w: 300, h: 200, x: 2005, y: 1529, cls: 'Zenity', instance: 'zenity', name: 'Info' };
+  const p6 = M.appFitPlan([{ ...frame, x: 0, y: 0, w: 1280, h: 800 }, { ...client, x: 0, y: 24, w: 1280, h: 776 }, frame2, client2], fb, { applied: { wid: 31 } });
+  ok(same(p6.moves, [{ id: 41, x: 970, y: 570 }]) && p6.resize === null, 'a second framed window off the framebuffer: the move names its CLIENT and the corner that puts its FRAME inside (1280−310, 800−230)', p6.moves);
+  ok(M.appWindows([frame, { ...client, mapped: false }]).length === 0 && M.appFitPlan([frame, { ...client, mapped: false }], fb).main === null, 'a frame whose client is not viewable (iconified) holds no app window');
+  ok(M.appWindows([main, child, leader]).length === 1 && M.appWindows([main, child, leader])[0].frame === null, 'CONTROL: bare X (a classed top-level with an unnamed child) is NOT a frame — the pre-WM rule is unchanged');
+  // the keeper's records are FACTS: newRecord carries no fb/fit; the VIEW lays fitMode over
+  ok(!('fb' in M.newRecord({ id: 'x', label: 'x', exec: 'x', args: [], cwd: null, env: null, source: 'adhoc', backend: 'vnc-display', via: 'Xvnc', fallbackWhy: null, idleTimeoutMs: 0, now: 1 })), 'a new record carries no fb/fit — the keeper writes them as measured facts');
+  // the chip (client PURE helper): fixed names the geometry + the group's X server; follows/client/none print nothing
+  const win = read('src/lib/desktop-app-window.js');
+  ok(/export function fitChipText\(rec\)/.test(win) && /rec\.fitMode !== 'fixed'\) return ''/.test(win) && /desktop-app-chip-fit/.test(win) && /install tigervnc for a window that follows/.test(win), 'desktop-app-window.js exports fitChipText: only a FIXED display prints, naming the geometry and the group\'s X server, with the tigervnc remedy');
+  // the app's OWN title on a keeper-fitted rung (x4): X's name, cleaned; null ⇒ the window keeps the label
+  ok(M.windowTitleOf('Calculator') === 'Calculator' && M.windowTitleOf('计算器 "x" \\ é') === '计算器 "x" \\ é' && M.windowTitleOf('vs-fit "q" <b>x</b>') === 'vs-fit "q" <b>x</b>', 'windowTitleOf keeps a title VERBATIM (quotes, backslashes, CJK, angle brackets — escaping is the page\'s job, textContent)');
+  ok(M.windowTitleOf('  a\tb\u0007c\u009b\n ') === 'abc' && M.windowTitleOf('\u0000\u0001') === null && M.windowTitleOf('') === null && M.windowTitleOf(null) === null && M.windowTitleOf(42) === null, 'control characters (C0, DEL, C1) are dropped and the rest trimmed; nothing left / not a string ⇒ null (the label stays)');
+  const longT = M.windowTitleOf('中'.repeat(250) + '😀');
+  ok(Array.from(longT).length === M.APP_TITLE_MAX && M.APP_TITLE_MAX === 200 && M.windowTitleOf('a'.repeat(199) + '😀') === 'a'.repeat(199) + '😀', `capped at APP_TITLE_MAX (${M.APP_TITLE_MAX}) CODE POINTS — a surrogate pair is never split`);
+  ok(/const title = M\.windowTitleOf\(plan\.main\.name\)/.test(read('src/server/desktop-app-keeper.js')) && /rec\.appTitle = title/.test(read('src/server/desktop-app-keeper.js')) && /appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\)/.test(read('src/lib/desktop-app-window.js')) && /const label = titleText\(\);/.test(read('src/lib/desktop-app-window.js')), 'WIRING PIN: the keeper records the fitted main\'s title as `appTitle` and the window shows it before the label (titleText — the title bar and the blocked overlay read the same name)');
+  { const one = (p2) => M.appMainWindow(p2); const rows = [{ id: 1, name: 'Xpra-CorralWindow-0x5', cls: null, instance: null, w: 640, h: 472, depth: 1 }, { id: 5, name: 'app "t"', cls: 'XTerm', instance: 'xterm', w: 640, h: 472, depth: 2 }];
+    const seam = rows.filter((w) => !/^Xpra/.test(w.name));
+    ok(M.appMainWindow(seam, { seamless: true })?.id === 5 && one(seam) === null, 'appMainWindow({seamless}) picks the app among xpra\'s seamless rows (depth 2, its Corral parent dropped) — CONTROL: the frame grouping (seamless off) drops that orphaned row and finds nothing'); }
+  ok(/onDesktopSize: \(id, w, h\) => keeper\.noteDesktopSize/.test(read('src/server/window-live-wiring.js')) && /noteDesktopSize\(id, w, h\)/.test(read('src/server/desktop-app-keeper.js')), 'WIRING PIN: the bridge\'s SetDesktopSize report reaches keeper.noteDesktopSize through the desktop scene\'s wiring (the 2.331.0 dead-fix lesson)');
+  ok(/^\s*keeper\.setWatchProbe\?\.\(\(id\) => stream\.connections\(id\) > 0\);/m.test(read('src/server/window-live-wiring.js')) && /beltDue\(rec\.id, fitState\(rec\.id\), t\)/.test(read('src/server/desktop-app-keeper.js')), 'WIRING PIN: the fit belt\'s "somebody watches" fact is the bridge\'s open-socket count, wired as CODE at the start of a line (never text after a mid-line //)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

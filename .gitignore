@@ -83,6 +83,9 @@ src/server/vs-aredge-mut-*.js
 # r2 findings. Unlinked on exit and swept by PID at start, but a SIGKILL can
 # strand one — and a dirty tree is what the release gate REFUSES on.
 src/server/vs-dak-mut-*.js
+# §5 (f) of scripts/test-desktop-display.mjs: a patched copy of src/desktop-display.js
+# (the pre-fix xpra argv/env) as the lifecycle legs' negative control — same rules.
+src/vs-dd-mut-*.js
 
 # §5c of scripts/test-spend-paths.mjs writes PATCHED COPIES of
 # src/server/conversation-deliver.js beside the real one (SIBLINGS, or their

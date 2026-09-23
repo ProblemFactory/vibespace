@@ -130,6 +130,12 @@ const SETTINGS_SCHEMA = {
     description: t('A desktop application window with no input for this long is stopped; 0 = never. "Keep running" in a window exempts that app.'),
     category: t('Window'), liveApply: true,
   },
+  'desktop.backendPrefs': {
+    type: 'string', default: '',
+    label: t('Desktop app display backend order'),
+    description: t('Comma-separated rung ids that reorder the picture-backend ladder for NEW desktop apps on this instance, e.g. "vnc-display, xpra" to keep the whole-display rung first. Empty = installed order (xpra > vnc-display > desktop-singleton). Unknown ids are ignored; a running app keeps the backend it started with.'),
+    category: t('Window'), liveApply: true,
+  },
   'desktop.stageKeepAlive': {
     type: 'number', default: 3, min: 0, max: 10, step: 1, label: t('Stage: workspaces kept alive'),
     description: t('How many recent session workspaces stay loaded (hidden) for instant switching; older ones are saved and closed'),

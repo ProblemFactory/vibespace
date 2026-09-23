@@ -422,6 +422,20 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (s.takenBy && String(s.takenBy.viewerId) === String(viewerId)) return { relay: true, code: null, why: null };
     return { relay: false, code: 'held', why: `another viewer took over ${h}` };
   }
+  /**
+   * P8-2 x5 (docs/design-desktop-apps §7 P8-2): the lease as the viewer rule
+   * reads it — null (no agent holds the window: the human election alone
+   * decides), `{input:'agent', holder:null}` (every human is Watch) or
+   * `{input:'user', holder:<the taker's viewer id>}` (the taker is the active
+   * viewer). Server-side only: the holder is the socket's secret.
+   */
+  function leaseInput(handle) {
+    load();
+    const h = String(handle || '');
+    if (!leases.has(h)) return null;
+    const s = inputs.get(h);
+    return s && s.input === 'user' ? { input: 'user', holder: s.takenBy ? String(s.takenBy.viewerId) : null } : { input: 'agent', holder: null };
+  }
   /** The holder's socket closed: control goes back (`viewer-left`), a state change only. */
   function viewerLeft(handle, viewerId) {
     const s = inputs.get(String(handle || ''));
@@ -612,7 +626,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
 
   return { factsForToken, list, open, attach, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
-    takeover, handback, noteUserInput, inputPolicy, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
+    takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
     leases: () => allViews(), auditFile: path.join(dataDir, AUDIT_FILE), leaseFile, ORIGIN,
     // P10: the other class
     desktopEnabled, enforceConsent, dropDesktopLeases, liveDesktop: (h) => liveDesktop(h, { trustPid: leases.has(String(h || '')) }), desktopLeases: () => allViews().filter((v) => v.origin === 'desktop'), DESKTOP_SETTING: DESK.SETTING_KEY };

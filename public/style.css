@@ -2244,6 +2244,23 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-app-chip-agent { color: var(--accent); }
 .window-live-driving .desktop-app-mount { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
 .desktop-app-stop { color: var(--red, #e55); }
+/* P8-2 x2 (2026-09-22) — the xpra seamless pane (xpra-view.js): the pane is the X root and it is a THEME colour, never
+   black (owner acceptance 1); one absolutely placed canvas per xpra window; the IME textarea sits under everything,
+   invisible but focusable so an IME can compose; a view-only pane (window-live Watch) shows the default cursor. */
+.xpra-pane { position: absolute; inset: 0; overflow: hidden; background: var(--bg-secondary); outline: none; touch-action: none; user-select: none; isolation: isolate; }
+/* x5 (design-desktop-apps §7 P8-2): the windows ride a STAGE — identity while this pane drives the app, a fit-scale
+   (contain, never cropped) in Watch; the pane isolates its stacking so the blocked overlay sits above every window */
+.xpra-stage { position: absolute; inset: 0; transform-origin: 0 0; }
+.xpra-win { position: absolute; overflow: hidden; background: transparent; }
+.xpra-win > canvas { display: block; }
+.xpra-ime { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0; resize: none; overflow: hidden; pointer-events: none; background: transparent; color: transparent; caret-color: transparent; z-index: 0; }
+.xpra-pane.xpra-view-only { cursor: default !important; }
+/* x5: a BLOCKED pane (another client is active) — the terminal's "Resume here" overlay (.term-blocked-*), NO picture */
+.desktop-app-blocked { z-index: 20; }
+.desktop-app-blocked-title { font-size: 13px; font-weight: 600; color: var(--text); max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-app-is-blocked > :not(.desktop-app-blocked) { visibility: hidden; }
+.desktop-copied-chip { color: var(--accent); border-color: var(--accent); }
+.window-app-icon { width: 1em; height: 1em; vertical-align: -0.1em; object-fit: contain; }
 /* Width belongs on the DIALOG, never on the body (the third instance of the
    anti-pattern this file documents twice, .ucl-* and .guided-cli-dialog):
    .dialog is a fixed 440px box with overflow:hidden, so a body min-width of

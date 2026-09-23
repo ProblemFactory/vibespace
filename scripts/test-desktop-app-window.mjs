@@ -36,9 +36,11 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
 import zhDict from '../src/lib/i18n-zh.js';
-// THIS BOX's xpra verdict (2.369.131): absent ⇒ 'xpra not on PATH'; present ⇒ passed over as unwired until P8-2 — never a literal
+// P8-2 (2026-09-21): xpra is wired and wins the default ladder when installed; this suite drives the noVNC picture, so the
+// worktree server is PINNED to vnc-display through settings `desktop.backendPrefs` (a reorder — nothing falls, the chip reads
+// the plain rung). The xpra window is chunk x2's leg.
 const XTERM_PRESENT = (process.env.PATH || '').split(':').some((p) => { try { return fs.statSync(p + '/xterm').isFile(); } catch { return false; } });
-const XPRA_WHY = fs.existsSync('/usr/bin/xpra') || (process.env.PATH || '').split(':').some((p) => { try { return fs.statSync(p + '/xpra').isFile(); } catch { return false; } }) ? 'xpra present (xpra) but not wired until P8-2' : 'xpra not on PATH';
+const XPRA_WHY = null;
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,6 +67,8 @@ try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore'
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) { execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`); }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
+fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton' })); // the pin (see the header)
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
 const srvEnv = { ...process.env, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
@@ -280,7 +284,7 @@ try {
   // the launch dialog: run a command from its form (the disclosure is open from §P)
   check('the launch dialog is open', await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`));
   const availText = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-avail')?.textContent || ''`);
-  check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText) && availText.includes(XPRA_WHY), availText);
+  check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText), availText);
   check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!XTERM_PRESENT ? 'true' : 'false'}; /* 2.369.131: hostFacts.bins never carries xterm — derive presence from PATH, not from a key that is always undefined (the leg passed only while xterm was absent; xpra's install pulled it in) */ return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
   await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); d.querySelector('.desktop-launch-exec').value = ${JSON.stringify(appBin)}; d.querySelector('.desktop-launch-args').value = ${JSON.stringify(appArgs.map((a) => (/\\s/.test(a) ? '"' + a + '"' : a)).join(' '))}; return true; })()`);
   // a TRUSTED click on Launch (CDP Input): the layout autosave only fires after
@@ -291,11 +295,14 @@ try {
   const appId = win && win.appId;
   const rec = await until(() => p1.evalJs(`fetch('/api/desktop/apps/${appId}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 20000);
   check('the server record reaches ready', !!rec && rec.state === 'ready', rec && rec.lastError);
-  check('the window title is the app label (escaped, textContent)', await until(() => p1.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.title === ${JSON.stringify(path.basename(appBin))}`), 5000));
+  // P8-2 x4: on a keeper-fitted rung the title bar names the APP WINDOW (X's own name, read by the fit's enumeration) — the label only until then
+  const xName = await until(async () => { const r = await p1.evalJs(`fetch('/api/desktop/apps/${appId}/windows').then((r) => r.json())`); const top = (r.windows || []).filter((w) => w.depth === 1 && w.w > 1 && w.h > 1 && w.title).sort((a, b) => b.w * b.h - a.w * a.h)[0]; return top ? top.title : null; }, 10000);
+  const shown = xName && await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); return w && w.title === ${JSON.stringify(xName)} && w.titleSpan.textContent === ${JSON.stringify(xName)} ? w.title : null; })()`), 8000);
+  check(`the window title is the app window's OWN title ${JSON.stringify(xName)} (X's name; the label ${JSON.stringify(path.basename(appBin))} only until the keeper read it), set as text`, !!shown, { xName, shown });
   const connected = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); const s = w?.content.querySelector('.desktop-status'); return s && s.textContent === 'Connected' ? s.textContent : null; })()`), 20000);
   check('the status chip says Connected (the ONE bridge relayed the RFB session)', connected === 'Connected', connected);
   const chip = await p1.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-backend')?.textContent`);
-  check(`the status bar names the backend rung AND why: "vnc-display (${XPRA_WHY})"`, chip === `vnc-display (${XPRA_WHY})`, chip);
+  check('the status bar names the backend rung: "vnc-display" (pinned first — nothing fell, no reason to print)', chip === 'vnc-display', chip);
   const sample = await until(async () => { const s = await p1.evalJs(CANVAS_SAMPLE); return s.found && s.brightFrac > 0.02 ? s : null; }, 20000, 500);
   check('the noVNC canvas is NOT all black (the app is painted)', !!sample, sample);
   check('the idle countdown chip is showing (30 min default)', await p1.evalJs(`/idle stop in \\d+ min/.test([...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-idle')?.textContent || '')`));
@@ -310,9 +317,25 @@ try {
   const win2 = await until(() => p2.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); return w ? w.id : null; })()`), 15000);
   const dbg2 = win2 ? null : { p2windows: await p2.evalJs(`[...app.wm.windows.values()].map((w) => [w.type, w._desktopAppId || null, JSON.stringify(w._openSpec || null)])`), autosave: await p1.evalJs(`fetch('/api/layouts').then((r) => r.json()).then((d) => JSON.stringify(d).slice(0, 1500))`), p1windows: await p1.evalJs(`[...app.wm.windows.values()].map((w) => [w.type, JSON.stringify(w._openSpec || null)])`) };
   check('a second browser client gets the same desktop-app window (openSpec replayed by layout sync)', !!win2, dbg2);
-  const conn2 = await until(() => p2.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-status')?.textContent === 'Connected'`), 20000);
-  check('…and it is Connected too (one display, N viewers — x11vnc -shared)', !!conn2);
+  // x5 (docs/design-desktop-apps §7 P8-2 "x5 多客户端 = 单活跃 viewer"): the first client is the ACTIVE viewer — the second
+  // opens BLOCKED behind the overlay and takes the window over with Resume here; closing it hands the window back
+  const statusOf = (p) => p.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-status')?.textContent || null`);
+  const overlayOf = (p) => p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); const o = w && w.content.querySelector('.desktop-app-blocked'); if (!o || getComputedStyle(o).display === 'none') return null; app.wm.focusWindow(w.id); const r = o.querySelector('.desktop-app-resume').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, msg: o.querySelector('.term-blocked-msg').textContent, title: o.querySelector('.desktop-app-blocked-title').textContent }; })()`);
+  const ov2 = await until(() => overlayOf(p2), 20000, 250);
+  check(`x5: the second client opens BLOCKED behind "${ov2 && ov2.msg}" naming the app (${ov2 && ov2.title}) — one active viewer per window`, !!ov2 && ov2.msg === 'Active on another client' && !!ov2.title, ov2);
+  if (ov2) {
+    await p2.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: ov2.x, y: ov2.y });
+    await p2.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: ov2.x, y: ov2.y, button: 'left', clickCount: 1 });
+    await p2.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: ov2.x, y: ov2.y, button: 'left', clickCount: 1 });
+  }
+  const conn2 = await until(async () => ((await statusOf(p2)) === 'Connected' && !(await overlayOf(p2)) ? true : null), 20000);
+  check('…Resume here: the second client is Connected (one display — the window is ITS now)', !!conn2, await statusOf(p2));
+  const blocked1 = await until(() => overlayOf(p1), 10000, 250);
+  check('…and the FIRST client is now blocked behind the overlay', !!blocked1, await statusOf(p1));
   p2.close();
+  await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t2.id}`);
+  const back1 = await until(async () => ((await statusOf(p1)) === 'Connected' && !(await overlayOf(p1)) ? true : null), 20000, 250);
+  check('the second client closing hands the window back: the first is re-elected and Connected again', !!back1, await statusOf(p1));
 
   // SIGKILL the server, reboot: adopted + the window reconnects
   const pidsBefore = rec.pids;
@@ -331,9 +354,19 @@ try {
   const t3 = await (async () => { const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' }); return r.json(); })();
   const p3 = await page(t3);
   await openPage(p3);
-  const restored = await until(() => p3.evalJs(`[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-status')?.textContent === 'Connected'`), 30000, 500);
-  check('a page loaded after the reboot restores the window from its openSpec and connects', !!restored);
+  // x5: p1 (reconnected above) is the active viewer — the fresh page restores the window BLOCKED, and Resume here connects it
+  const ov3 = await until(() => overlayOf(p3), 30000, 500);
+  check('a page loaded after the reboot restores the window from its openSpec — blocked behind the overlay while the first page is active (x5)', !!ov3, await statusOf(p3));
+  if (ov3) {
+    await p3.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: ov3.x, y: ov3.y });
+    await p3.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: ov3.x, y: ov3.y, button: 'left', clickCount: 1 });
+    await p3.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: ov3.x, y: ov3.y, button: 'left', clickCount: 1 });
+  }
+  const restored = await until(async () => ((await statusOf(p3)) === 'Connected' && !(await overlayOf(p3)) ? true : null), 30000, 500);
+  check('…and connects after Resume here (the adopted session serves the new active viewer)', !!restored, await statusOf(p3));
   p3.close();
+  await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t3.id}`);
+  await until(async () => ((await statusOf(p1)) === 'Connected' && !(await overlayOf(p1)) ? true : null), 20000, 250); // handed back to the first page
 
   // Stop from the window's own button
   await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); w.content.querySelector('.desktop-app-stop').click(); return true; })()`);

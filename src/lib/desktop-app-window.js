@@ -23,11 +23,43 @@
 // that socket closes. The lease arrives on the `window-leases-updated`
 // broadcast (one GET at open); the mode arithmetic is PURE
 // (src/lib/window-live-mode.js).
+//
+// THE XPRA RUNG (P8-2; chunk x1 2026-09-21 hosted the upstream client in an
+// iframe as the D21 (c) (a) VALIDATION SLICE; chunk x2 2026-09-22 draws it
+// OURSELVES — D21 (c) (b), §4.4: the window is ours): a record whose `stream`
+// is 'xpra' renders through xpra-view.js (one canvas per xpra top-level
+// window on the SAME picture shell as the RFB view — DPI-correct at net zoom
+// 1, the app window filling the pane and following its size, dialogs inside
+// it, the clipboard both ways with the plain-http chip) with the upstream
+// html5 protocol WORKER as its transport (served from the installed package
+// behind our auth at /api/desktop/<id>/xpra-ui/js/Protocol.js). The picture
+// KIND is the record's `stream`, never a backend id, and it is known only
+// once the first record answers — so the view is built lazily, the bar's
+// controls are added to whichever view it is. The app window's OWN title
+// (escaped: setTitle uses textContent) and icon (PNG bytes → a validated
+// data: URL → <img>.src, never innerHTML interpolation) reach the title bar;
+// the label is the fallback until the protocol names the window.
+//
+// ONE ACTIVE VIEWER (P8-2 x5, docs/design-desktop-apps.zh.md §7 P8-2 "x5
+// 多客户端 = 单活跃 viewer"; the owner's ruling: "直接block掉非active客户端的app
+// 界面，因为多客户端同时操作鼠标感觉也会有问题" + "仿照terminal…可以手动take
+// over"): the pane reads its state from the `desktop-app-viewers` broadcast
+// (+ the lease) through PURE src/desktop-viewers.js `paneState` — ACTIVE (as
+// before: its size drives the app), BLOCKED (the picture hidden behind an
+// overlay: the app's title as TEXT, "Active on another client", a house
+// "Resume here" — the terminal's size-override overlay made the default) or
+// WATCH (an agent drives: the picture scaled to fit, nothing sent). Resume
+// here flips the pane LOCALLY at once (optimistic — never waiting for the
+// broadcast echo) and POSTs /viewers/takeover; the answer or the broadcast
+// corrects it. The pane names itself with a stable PUBLIC pane key (`?pane=`)
+// beside the per-socket secret viewer id; the broadcast only ever says panes.
 import { t } from './i18n.js';
 import { escHtml, fetchJson, showToast } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { createVncView, streamUrl } from './vnc-view.js';
+import { createXpraView } from './xpra-view.js';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
+import { paneState } from '../desktop-viewers.js';
 
 const WATCH_HINT_EVERY_MS = 8000;
 
@@ -37,6 +69,17 @@ const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><pa
 export function backendChipText(rec) {
   if (!rec || !rec.backend) return '';
   return rec.fallbackWhy ? `${rec.backend} (${rec.fallbackWhy})` : rec.backend;
+}
+/** P8-2 x4: the FIT limit of a whole-display rung whose framebuffer cannot
+ *  follow the window ('fixed' — Xvfb+x11vnc: the keeper fits the app to the
+ *  fixed framebuffer and the browser scales); '' on a rung whose display
+ *  follows (Xvnc, xpra) or before the keeper measured the framebuffer. The
+ *  binary named is the group's X server (`via` 'Xvfb+x11vnc' ⇒ Xvfb). */
+export function fitChipText(rec) {
+  if (!rec || rec.fitMode !== 'fixed') return '';
+  const by = String(rec.via || '').split('+')[0] || rec.backend || '';
+  const fb = rec.fb && rec.fb.w > 0 && rec.fb.h > 0 ? `${rec.fb.w}x${rec.fb.h}` : '';
+  return fb ? t('fixed {geometry} ({by}) — install tigervnc for a window that follows', { geometry: fb, by }) : t('fixed display ({by}) — install tigervnc for a window that follows', { by });
 }
 /** "CPU 3% · 120 MB" or '' when the keeper has not sampled yet. */
 export function liveChipText(rec) {
@@ -83,6 +126,18 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   let viewerId = newViewerId();
   let myTag = null;
   winInfo._windowViewerId = viewerId;
+  // x5: the pane's PUBLIC key — stable across its sockets, the only name the viewers broadcast uses for it
+  const paneKey = 'pn-' + newViewerId().slice(3, 23);
+  winInfo._desktopPaneKey = paneKey;
+  // 2.369.156 (the grace): the pane THIS TAB's previous window of this app had (a page reload, a closed-and-reopened
+  // window) rides the stream url as `prev` — inside the keeper's grace the successor keeps the seat instead of the app
+  // going to another device. Per tab (sessionStorage); only a hint — it never takes a seat that is not being held.
+  const prevKey = `vibespace.desktopPane.${id}`;
+  let prevPane = null;
+  try { prevPane = sessionStorage.getItem(prevKey); sessionStorage.setItem(prevKey, paneKey); } catch { /* storage off: no successor hint */ }
+  if (prevPane === paneKey || !/^[A-Za-z0-9._-]{1,64}$/.test(prevPane || '')) prevPane = null;
+  let seats = { known: false, active: null, viewers: [] }; // the last `desktop-app-viewers` answer for this app
+  let optimistic = null;  // { state, until } — Resume here flips the pane before the answer / the broadcast
 
   let rec = null;
   let gone = false;
@@ -95,16 +150,102 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     if (rec.state !== 'ready') return { ok: false, error: endedText(rec) };
     return { ok: true };
   };
-  const applyViewOnly = () => { const m = windowLiveMode({ lease, viewerTag: myTag }); try { if (view.rfb) view.rfb.viewOnly = m.viewOnly; } catch {} };
-  const view = createVncView(winInfo.content, {
-    url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}`; }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id
+  /** x5: 'active' | 'blocked' | 'watch' — this pane's state (PURE paneState over the lease + the viewers broadcast). */
+  const seatState = () => (optimistic && Date.now() < optimistic.until ? optimistic.state : paneState({ lease, myTag, active: seats.active, myPane: paneKey, known: seats.known }));
+  const applyViewOnly = () => renderSeat();
+  // THE PICTURE KIND IS THE RECORD'S `stream` (never a backend id) — known once the
+  // first record answers, so the view is built then; both kinds share the shell.
+  let view = null;
+  let appTitle = '';      // the app window's own title, from the xpra protocol ('' = none yet)
+  const streamKindOf = (r) => (r && r.stream === 'xpra' ? 'xpra' : 'rfb');
+  const viewOpts = () => ({
+    url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
     onStatus: (s) => { if (s === 'connected') applyViewOnly(); },
   });
+  const setAppIcon = (dataUrl) => {
+    if (!dataUrl || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return;
+    const img = document.createElement('img');
+    img.className = 'window-app-icon';
+    img.alt = '';
+    img.src = dataUrl; // the .src PROPERTY — the image-overlay law
+    winInfo.iconSpan.replaceChildren(img);
+    winInfo._typeIcon = `<img class="window-app-icon" alt="" src="${dataUrl}">`; // the tab bar re-renders from _typeIcon; the url's alphabet was validated above
+    if (winInfo._tabChain) app.wm.setTitleMeta(winInfo.id, {});
+  };
+  const ensureView = (kind) => {
+    if (view) return view;
+    view = kind === 'xpra'
+      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon })
+      : createVncView(winInfo.content, viewOpts());
+    view.mount.classList.add('desktop-app-mount');
+    winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
+    for (const el of controls) view.addControl(el);
+    view.mount.appendChild(blockedEl); // x5: the overlay of a blocked pane (hidden while active / watching)
+    // in Watch a click on the picture is a hint, never input (the view is view-only; the bridge would drop it anyway)
+    view.mount.addEventListener('pointerdown', () => {
+      const m = windowLiveMode({ lease, viewerTag: myTag });
+      if (!m.leased || m.mine || seatState() !== 'watch') return;
+      const now = Date.now();
+      if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(m.mode === 'takeover' ? t('Another viewer holds this window') : t('Watch mode — the agent is driving; press Take over to send input'), { duration: 3500 }); }
+    }, { capture: true, signal: winInfo._listenerCtl?.signal });
+    lastSeat = null;
+    applyViewOnly();
+    return view;
+  };
+
+  // ── x5: the BLOCKED overlay (the terminal's "Resume here", house classes) ──
+  const blockedEl = document.createElement('div'); blockedEl.className = 'term-blocked-overlay desktop-app-blocked'; blockedEl.style.display = 'none';
+  const blockedTitle = document.createElement('div'); blockedTitle.className = 'desktop-app-blocked-title';
+  const blockedMsg = document.createElement('div'); blockedMsg.className = 'term-blocked-msg'; blockedMsg.textContent = t('Active on another client');
+  const resumeBtn = document.createElement('button'); resumeBtn.type = 'button'; resumeBtn.className = 'term-blocked-btn desktop-app-resume'; resumeBtn.textContent = t('Resume here');
+  resumeBtn.title = t('Make this window the active one — the other client is blocked until it resumes');
+  blockedEl.append(blockedTitle, blockedMsg, resumeBtn);
+  let lastSeat = null;
+  // THE APP'S NAME (LOW-2, 2.369.156): an active / watching pane names the app by its LIVE protocol title (xpra) and
+  // the record's otherwise; a BLOCKED pane has no protocol session (or only the last title it saw before the cut),
+  // so the RECORD's title — the keeper re-reads it from X while a blocked pane exists — comes first. The launch label
+  // only when neither exists. Peer-controlled text: it reaches the page through textContent / setTitle only.
+  const titleText = () => (seatState() === 'blocked' ? (rec && rec.appTitle) || appTitle : appTitle || (rec && rec.appTitle)) || (rec && rec.label) || t('Desktop app');
+  /** Applies this pane's state to the view: the overlay, the mode (input / geometry / fit), the reconnect of a cut pane. */
+  function renderSeat() {
+    if (!view) return;
+    const st = seatState();
+    if (rec) render(); else blockedTitle.textContent = titleText(); // the title bar + the overlay follow the seat (the name's source depends on it) — peer-controlled text, never markup
+    if (st === lastSeat) return;
+    lastSeat = st;
+    const blocked = st === 'blocked';
+    blockedEl.style.display = blocked ? '' : 'none';
+    view.mount.classList.toggle('desktop-app-is-blocked', blocked);
+    if (typeof view.setMode === 'function') view.setMode(st);
+    else if (typeof view.setViewOnly === 'function') view.setViewOnly(st !== 'active');
+    // a pane the bridge cut (another client resumed) reconnects at once as a blocked viewer — it must stay seated to be re-elected
+    if (rec && rec.state === 'ready' && !gone && view.wanted && view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') view.connect();
+  }
+  const applyViewers = (v) => {
+    if (!v || v.id !== id) return;
+    seats = { known: true, active: v.active == null ? null : String(v.active), viewers: Array.isArray(v.viewers) ? v.viewers : [] };
+    winInfo._desktopSeats = seats; // the raw handle the heavy suite reads (never the DOM)
+    renderSeat();
+  };
+  resumeBtn.onclick = async () => {
+    optimistic = { state: 'active', until: Date.now() + 8000 };
+    renderSeat(); // the overlay goes NOW — the takeover never waits for the broadcast echo
+    if (view && view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') { view.connect(); await new Promise((r) => setTimeout(r, 600)); }
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/viewers/takeover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
+    optimistic = null;
+    if (!r || r.error) { showToast(r?.error || t('Could not resume here'), { type: 'error' }); renderSeat(); return; }
+    if (r.lease && r.lease.takenBy && r.lease.takenBy.tag) myTag = String(r.lease.takenBy.tag);
+    if (r.lease !== undefined) lease = r.lease || null;
+    applyViewers(r.viewers); renderLease();
+    view?.focus();
+  };
 
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
   const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend';
+  const fitChip = document.createElement('span'); fitChip.className = 'desktop-app-chip desktop-app-chip-fit'; // P8-2 x4: names a display that cannot follow the window
+  fitChip.title = t('This rung’s display cannot resize: the app is fitted to the fixed framebuffer and scaled in the browser. With TigerVNC (Xvnc) the display follows the window.');
   const liveChip = document.createElement('span'); liveChip.className = 'desktop-app-chip desktop-app-chip-live';
   const idleChip = document.createElement('span'); idleChip.className = 'desktop-app-chip desktop-app-chip-idle';
   const keepBtn = document.createElement('button'); keepBtn.className = 'file-tool-btn'; keepBtn.style.cssText = 'width:auto;padding:0 8px;font-size:10px';
@@ -118,7 +259,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const modeBadge = document.createElement('span'); modeBadge.className = 'browser-live-mode';
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over');
   const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand back to the agent');
-  for (const el of [originChip, agentChip, modeBadge, takeBtn, handBtn, backendChip, liveChip, idleChip, keepBtn, stopBtn]) view.addControl(el);
+  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, backendChip, fitChip, liveChip, idleChip, keepBtn, stopBtn];
   // the badge's words come from the PURE table; t() needs the literal keys below to be extractable
   void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause')];
   const renderLease = () => {
@@ -154,42 +295,38 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/takeover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
     if (!r || r.error) { showToast(r?.error || t('Could not take over'), { type: 'error' }); return; }
     myTag = r.lease && r.lease.takenBy && r.lease.takenBy.tag ? String(r.lease.takenBy.tag) : null; // my takeover's public name — the only way this pane learns it
-    applyLease(r.lease); view.focus();
+    if (r.viewers) applyViewers(r.viewers); // x5: the human who took over is the ACTIVE viewer
+    applyLease(r.lease); view?.focus();
   };
   handBtn.onclick = async () => {
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/handback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
     if (!r || r.error) { showToast(r?.error || t('Could not hand back'), { type: 'error' }); return; }
     applyLease(r.lease); myTag = null;
   };
-  view.mount.classList.add('desktop-app-mount');
-  // in Watch a click on the picture is a hint, never input (noVNC is view-only; the bridge would drop it anyway)
-  view.mount.addEventListener('pointerdown', () => {
-    const m = windowLiveMode({ lease, viewerTag: myTag });
-    if (!m.leased || m.mine) return;
-    const now = Date.now();
-    if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(m.mode === 'takeover' ? t('Another viewer holds this window') : t('Watch mode — the agent is driving; press Take over to send input'), { duration: 3500 }); }
-  }, { capture: true, signal: winInfo._listenerCtl?.signal });
-
   const render = () => {
     if (!rec) return;
-    app.wm.setTitle(winInfo.id, lease ? t('{label} — agent window', { label: rec.label || t('Desktop app') }) : (rec.label || t('Desktop app')));
+    const label = titleText(); // the app window's own title — xpra's protocol names it, on a keeper-fitted rung (and for a blocked xpra pane) the record does — else the label
+    app.wm.setTitle(winInfo.id, lease ? t('{label} — agent window', { label }) : label);
+    blockedTitle.textContent = label; // x5: the overlay names the app (textContent — the title is peer-controlled)
     backendChip.textContent = backendChipText(rec);
     backendChip.title = rec.fallbackWhy ? t('Backend: {backend} — fell back because {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('Backend: {backend}', { backend: rec.backend || '' });
+    const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
     const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none';
     keepBtn.style.display = rec.state === 'ready' && rec.idleTimeoutMs > 0 ? '' : 'none';
     stopBtn.style.display = rec.state === 'ready' || rec.state === 'launching' ? '' : 'none';
     if (rec.state === 'exited' || rec.state === 'failed') {
-      if (!gone) { gone = true; view.disconnect(); }
-      view.setStatus(endedText(rec), { error: rec.state === 'failed', reconnect: false });
+      if (!gone) { gone = true; view?.disconnect(); }
+      view?.setStatus(endedText(rec), { error: rec.state === 'failed', reconnect: false });
     }
   };
   const applyRecord = (r) => {
-    rec = r; render();
+    rec = r; ensureView(streamKindOf(r)); render();
     // the keeper's answer is the fact: ready (just came up, or ADOPTED after a
     // restart) and the picture is not up ⇒ connect; the view's own ladder
     // covers a dropped transport in between
-    if (r.state === 'ready' && !gone && view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') view.connect();
+    if (r.state !== 'ready' || gone) return;
+    if (view.state !== 'connected' && view.state !== 'connecting' && view.state !== 'starting') view.connect();
   };
   const refetch = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`); if (r && !r.error) applyRecord(r); };
 
@@ -207,26 +344,29 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   };
 
   const off = app.ws.onGlobal((m) => {
+    if (m.type === 'desktop-app-viewers') { if (m.id === id) applyViewers(m); return; } // x5
     if (m.type === 'window-leases-updated') { const l = (m.leases || []).find((x) => x && x.handle === id) || null; if ((l && !lease) || (!l && lease) || (l && lease && (l.input !== lease.input || l.sessionId !== lease.sessionId || (l.takenBy && l.takenBy.viewerId) !== (lease.takenBy && lease.takenBy.viewerId)))) applyLease(l); else lease = l; return; }
     if (m.type !== 'desktop-apps-updated') return;
     const r = (m.apps || []).find((a) => a.id === id);
     if (r) applyRecord(r);
   });
   const refetchLease = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/lease`); if (r && !r.error) applyLease(r.lease); };
+  const refetchViewers = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/viewers`); if (r && !r.error) applyViewers(r); };
   // a server restart ADOPTS the session before any client reconnects, so the
   // adoption broadcast reaches nobody — re-read the record on every reconnect
-  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); } };
+  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); refetchViewers(); } };
   app.ws.onStateChange(onWs);
   const tick = setInterval(() => { if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; } }, 1000);
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); });
-  winInfo.onClose = () => view.dispose();
+  winInfo.onClose = () => view?.dispose();
 
   renderLease();
   refetchLease();
+  refetchViewers();
   // first record, then the connect (the gate re-reads if the GET raced the launch)
   fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
-    if (r && !r.error) { rec = r; render(); }
-    else { view.setStatus(t('This desktop app no longer exists'), { error: true, reconnect: false }); return; }
+    if (r && !r.error) { rec = r; ensureView(streamKindOf(r)); render(); }
+    else { ensureView('rfb').setStatus(t('This desktop app no longer exists'), { error: true, reconnect: false }); return; }
     if (rec.state === 'launching') {
       view.setStatus(t('Starting application…'));
       // the broadcast flips it to ready; connect then (applyRecord)

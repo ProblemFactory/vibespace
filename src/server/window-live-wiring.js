@@ -18,6 +18,14 @@
  * `holderAlive` IS the bridge's socket fact, the engine's `broadcast` IS the
  * server's, and the engine's handback rides the announcer. The routes are
  * mounted here too (the user's takeover/handback beside the agent's verbs).
+ *
+ * P8-2 x5 (docs/design-desktop-apps §7 P8-2 "x5 多客户端 = 单活跃 viewer"): the
+ * bridge's `viewerSeats` IS the keeper's one-active-viewer election composed
+ * with the engine's lease through the PURE rule (src/desktop-viewers.js
+ * `viewerState`): an agent driving ⇒ every human Watch; a human takeover ⇒
+ * the taker active; no lease ⇒ the election. Every change re-applies at once:
+ * the keeper's viewer listener and every `window-leases-updated` the engine
+ * publishes call the bridge's `refresh`.
  * `boot()` runs after restoreSessions (the live-session set is final);
  * `shutdown()` stops the tick. A missing python3/AT-SPI is a per-verb typed
  * refusal at call time, never a boot failure — this wiring throws only on a
@@ -25,18 +33,33 @@
  */
 const path = require('path');
 
-function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, log = console } = {}) {
+function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, log = console } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
-  const engine = require('./window-targets-engine.js').create({ keeper, dataDir, env, activeSessions, serverSetting, broadcast, log });
+  const DV = require('../desktop-viewers.js');
+  let streamRef = null;
+  // a lease change re-applies every viewer's state (x5): the engine publishes through this broadcast
+  const leaseBroadcast = (m) => { broadcast?.(m); if (m && m.type === 'window-leases-updated') { try { streamRef?.refreshAll(); } catch (e) { log.warn?.(`[window] viewer refresh failed — ${e && e.message}`); } } };
+  const engine = require('./window-targets-engine.js').create({ keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, log });
+  const governed = (id) => id !== DESKTOP_SINGLETON_ID && typeof keeper.viewerJoined === 'function';
   const stream = require('./desktop-stream.js').create({
     auth, onInput: (id) => { keeper.noteInput(id); engine.noteUserInput(id); },
+    onDesktopSize: (id, w, h) => keeper.noteDesktopSize?.(id, w, h), // P8-2 x4: the client asked the display to follow its pane ⇒ the keeper fits the app to it
     resolveTarget: (id) => (id === DESKTOP_SINGLETON_ID ? { kind: 'rfb', port: vnc.port } : keeper.streamTarget(id)),
     inputPolicy: (id, viewerId) => (id === DESKTOP_SINGLETON_ID ? { relay: true } : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated
     onViewerLeft: (id, viewerId) => { if (id !== DESKTOP_SINGLETON_ID) engine.viewerLeft(id, viewerId); },
+    viewerSeats: { // x5: the singleton desktop is the user's own and never governed ('free')
+      join: (id, { viewerId, pane, prev, ua }) => { if (governed(id)) keeper.viewerJoined(id, { viewerId, pane, prev, label: DV.viewerLabel(ua) }); },
+      leave: (id, viewerId) => { if (governed(id)) keeper.viewerLeft(id, viewerId); },
+      state: (id, viewerId) => (governed(id) ? DV.viewerState({ active: keeper.activeViewer(id) }, viewerId, engine.leaseInput(id)) : 'free'),
+    },
+    netemEnabled, // P8-2 validation slice: VIBESPACE_DESKTOP_NETEM=1 on a dev server only, never on by default
     log,
   });
+  streamRef = stream;
+  keeper.onViewers?.((id) => stream.refresh(id)); // x5: join / leave / Resume here / the session ended ⇒ every socket of that window re-applied
   engine.setViewerProbe((id, viewerId) => stream.viewerAlive(id, viewerId));
-  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine }); app.use(router); }
+  keeper.setWatchProbe?.((id) => stream.connections(id) > 0); // the fit belt checks a WATCHED session every tick (a window that appears without input), an unwatched one on the slow belt
+  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream }); app.use(router); }
   { const wt = require('../routes/window-targets'); wt.setup({ engine }); app.use(wt.router); }
   let announced = false;
   if (browserHandback && typeof browserHandback.installWindow === 'function') { try { announced = browserHandback.installWindow(engine); } catch (e) { log.warn?.(`[window] handback announcer not attached — ${e && e.message}`); } }

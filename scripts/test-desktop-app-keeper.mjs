@@ -24,12 +24,21 @@
 // the reason when Xvfb/x11vnc are absent. Per-pid scratch, free ports, no
 // fixed names; the patched keeper copies (negative controls) are siblings of
 // the real module, gitignored (src/server/vs-dak-mut-*.js), swept by PID.
+// §14 (r6, 2026-09-22): a negotiated Watch-mode viewer through the real bridge to
+// the real xpra — its picture flows (hello, new-window, draws) and its
+// shutdown-server / exit-server never arrive; the r5 bridge as a patched copy is
+// the control (the same exit-server ends the session).
+// §15 (2026-09-22): THE KEYMAP FENCE on the same rung — a Watch viewer's picture
+// needs no keymap packet (measured), its keyboard-config / keymap-changed never
+// reach X's keymap (xmodmap), the held one is replayed at its takeover (X then
+// carries it; a pane that connected watching types "abc" into a real xterm);
+// controls: the r6 allowlist reprograms X, the fence without the replay types garbage.
 // Run: node scripts/test-desktop-app-keeper.mjs
 import fs from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
@@ -50,13 +59,20 @@ const M = require('../src/desktop-apps.js');
 const ident = require('../src/cli-identity.js');
 const alive = (p) => D.pidAlive(p);
 
-// THIS BOX's xpra verdict (2.369.131): absent ⇒ 'xpra not on PATH'; present ⇒ passed over as unwired until P8-2 — never a literal
-const XPRA_WHY = D.binOnPath('xpra', { env: process.env }) ? 'xpra present (xpra) but not wired until P8-2' : 'xpra not on PATH';
-// 2.369.137 (tigervnc-standalone-server landed on this box for the vnc-fit work):
-// with an Xvnc on PATH the keeper takes the `x-serves-rfb` recipe (X IS the
-// picture server), so every leg that pins the Xvfb+x11vnc recipe hands the
-// keeper display FACTS with Xvnc/Xtigervnc hidden — the leg tests the recipe,
-// not this box's inventory (the .131 lesson: judge by presence, never a literal).
+// P8-2 (2026-09-21): xpra is WIRED and, when installed, wins the ladder (DA1). The vnc-display legs below PIN their
+// rung through the instance preference (settings `desktop.backendPrefs`, a REORDER — nothing falls, so fallbackWhy
+// is null whether or not xpra is on this box); §12 drives the xpra rung itself with the default order.
+const XPRA_WHY = null;
+const PIN = { 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton' };
+const XPRA_BIN = D.binOnPath('xpra', { env: process.env });
+/** The two pins every keeper this suite builds by hand gets (the mk() ones too): the vnc-display rung first, and its Xvfb+x11vnc spelling. */
+const PINNED = Object.freeze({ get serverSetting() { return (key) => PIN[key]; }, get backends() { return XVFB_TABLE; } });
+const XVFB_TABLE = Object.freeze(M.DISPLAY_BACKENDS.map((b) => (b.id === 'vnc-display' ? Object.freeze({ ...b, needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server' }) }) : b)));
+// 2.369.137 (master, merged with P8-2 in 2.369.156 — tigervnc-standalone-server landed on this box for the vnc-fit work):
+// with an Xvnc on PATH the keeper takes the `x-serves-rfb` recipe (X IS the picture server), so a leg that pins the
+// Xvfb+x11vnc recipe may also hand the keeper display FACTS with Xvnc/Xtigervnc hidden — the leg tests the recipe, not
+// this box's inventory (the .131 lesson: judge by presence, never a literal). XVFB_TABLE above is the same pin at the
+// table; both hide Xvnc, and the legs that take NO_XVNC keep it.
 const NO_XVNC = { ...D, hostFacts: async (o) => { const f = await D.hostFacts(o); return { ...f, bins: { ...f.bins, Xvnc: null, Xtigervnc: null } }; } };
 const root = scratch('desktop-keeper');
 fs.mkdirSync(root, { recursive: true });
@@ -77,6 +93,28 @@ function sweepTargets(apps) {
   }
   return [...out];
 }
+/** `Xvfb-for-Xpra-S<xpra pid>` ORPHANS BY EVIDENCE (x5 round, 2026-09-22): §14's exit-server CONTROL ends an xpra through
+ *  the r5 bridge and its Xvfb outlives it (xpra names its Xvfb after itself). A process is ours only when ALL hold: its
+ *  argv[0] is `Xvfb-for-Xpra-S<n>`, the xpra pid <n> is DEAD, its cwd is inside THIS suite's scratch family
+ *  (`/tmp/vs-desktop-keeper-<pid>`), and that scratch dir is GONE (this run's, after its rm — or a crashed run's) with its
+ *  suite pid dead or this process. Never a name alone: another checkout's live run keeps its own. */
+const scratchFamily = root.slice(0, root.length - String(process.pid).length - 1);
+function xvfbOrphans() {
+  const out = [];
+  for (const d of fs.readdirSync('/proc')) {
+    if (!/^\d+$/.test(d)) continue;
+    let cmd = ''; try { cmd = fs.readFileSync(`/proc/${d}/cmdline`, 'latin1'); } catch { continue; }
+    const m = /^Xvfb-for-Xpra-S(\d+)\0/.exec(cmd);
+    if (!m || alive(Number(m[1]))) continue;
+    let cwd = ''; try { cwd = fs.readlinkSync(`/proc/${d}/cwd`).replace(/ \(deleted\)$/, ''); } catch { continue; }
+    const f = new RegExp(`^${scratchFamily.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)(/|$)`).exec(cwd);
+    if (!f) continue;
+    const runPid = Number(f[1]), runDir = `${scratchFamily}-${runPid}`;
+    if (fs.existsSync(runDir) || (runPid !== process.pid && alive(runPid))) continue;
+    out.push(Number(d));
+  }
+  return out;
+}
 const mutants = [];
 const cleanup = () => {
   for (const k of keepers) { try { k.shutdown(); } catch {} }
@@ -85,6 +123,7 @@ const cleanup = () => {
   try { for (const p of sweepTargets(readStoreAll())) { try { process.kill(p, 'SIGKILL'); } catch {} } } catch {}
   for (const f of mutants) { try { fs.unlinkSync(f); } catch {} }
   try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try { const o = xvfbOrphans(); for (const p of o) { try { process.kill(p, 'SIGKILL'); } catch {} } if (o.length) console.log(`  (exit sweep reaped ${o.length} orphaned Xvfb-for-Xpra process(es) by evidence: ${o.join(', ')})`); } catch {}
 };
 /** A PATCHED COPY of the real keeper beside it (relative requires), each
  *  replacement asserted to hit exactly once — the negative controls of §8. */
@@ -126,8 +165,11 @@ const baseEnv = () => ({ PATH: process.env.PATH, HOME: process.env.HOME, WAYLAND
 const mk = (name, extra = {}) => {
   const dataDir = path.join(root, name); fs.mkdirSync(dataDir, { recursive: true });
   const events = [];
-  // every keeper in this suite runs the Xvfb+x11vnc recipe unless a leg asks for the Xvnc rung (display: D)
-  const k = K.create({ dataDir, env: baseEnv, display: NO_XVNC, broadcast: (m) => events.push(m), serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} }, ...extra });
+  const settings = { ...PIN, ...(extra.settings || {}) };
+  // this box gained a REAL Xvnc with the xpra install (2026-09-21) — the §1-§6 legs are written for the Xvfb+x11vnc
+  // spelling (three processes), so the default keepers hand in a table whose vnc-display row knows only that group;
+  // §7 drives the Xvnc spelling on purpose with the shipped table and its shim, §12 the xpra rung
+  const k = K.create({ dataDir, env: baseEnv, broadcast: (m) => events.push(m), serverSetting: (key) => settings[key], backends: XVFB_TABLE, log: { log() {}, warn() {}, error() {} }, ...extra });
   k._events = events; keepers.push(k);
   return k;
 };
@@ -201,7 +243,12 @@ console.log('§2 the ONE ws bridge');
   ok(k.get(rec.id).state === 'ready', 'a session for the bridge is ready');
   const inputs = [];
   let authed = true;
-  const stream = S.create({ auth: { requestAuthed: () => authed }, resolveTarget: (id) => (id === 'xpra-one' ? { kind: 'xpra', port: 1 } : k.streamTarget(id)), onInput: (id) => inputs.push(id), log: { warn() {} } });
+  // two FAKE xpra upstreams (ws servers on loopback): each records what reached it — a second id must never reach the first's port
+  const { WebSocketServer } = require('ws');
+  const fakeUp = async ({ onConnect = null } = {}) => { const wss = new WebSocketServer({ host: '127.0.0.1', port: 0, handleProtocols: (ps) => (ps.has('binary') ? 'binary' : false) }); await new Promise((r) => wss.on('listening', r)); const st = { conns: 0, got: [], protocols: [], closed: 0 }; wss.on('connection', (c, req) => { st.conns++; st.protocols.push(c.protocol); if (onConnect) onConnect(c); c.on('message', (m, isBinary) => { st.got.push({ bytes: Buffer.from(m), isBinary }); c.send(Buffer.concat([Buffer.from('echo:'), Buffer.from(m)])); }); c.on('close', () => { st.closed++; }); }); return { port: wss.address().port, st, close: () => new Promise((r) => { for (const c of wss.clients) { try { c.close(1001, 'upstream gone'); } catch {} } wss.close(r); }) }; }; // ws ≥ 8: close() alone leaves clients open and the http server's close waits for them
+  const upA = await fakeUp(), upB = await fakeUp();
+  const streamLog = [];
+  const stream = S.create({ auth: { requestAuthed: () => authed }, resolveTarget: (id) => (id === 'xpra-one' ? { kind: 'xpra', port: upA.port } : id === 'xpra-two' ? { kind: 'xpra', port: upB.port } : id === 'weird' ? { kind: 'rdp', port: 1 } : k.streamTarget(id)), onInput: (id) => inputs.push(id), log: { warn() {}, log: (l) => streamLog.push(String(l)) } });
   ok(S.upgradeId('/api/vnc') === M.DESKTOP_SINGLETON_ID && S.upgradeId(`/api/desktop/${rec.id}/stream`) === rec.id && S.upgradeId('/api/desktop/../x/stream') === null && S.upgradeId('/ws') === null, 'upgradeId: /api/vnc is the singleton, /api/desktop/<id>/stream is the id, anything else is not ours');
   ok(S.streamPath(M.DESKTOP_SINGLETON_ID) === '/api/vnc' && S.streamPath('abc') === '/api/desktop/abc/stream', 'streamPath is the inverse');
   const srv = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
@@ -240,10 +287,147 @@ console.log('§2 the ONE ws bridge');
   authed = true;
   const unknown = await tryWs('/api/desktop/no-such-id/stream');
   ok(unknown.status === 404, `an unknown id is 404 (${unknown.status})`);
-  const xpra = await tryWs('/api/desktop/xpra-one/stream');
-  ok(xpra.status === 501, `an xpra target is refused BY NAME with 501 until P8-2 (${xpra.status})`);
+  const weird = await tryWs('/api/desktop/weird/stream');
+  ok(weird.status === 501, `an UNKNOWN stream kind is still refused 501 by name (${weird.status})`);
+  {
+    // P8-2: an xpra target is RELAYED ws↔ws — binary both ways, one message per packet, the client's subprotocol honoured, input judged by packet type
+    const rpkt = (type) => { const t = Buffer.from(type); const payload = Buffer.concat([Buffer.from([192 + 2, 128 + t.length]), t, Buffer.from([0])]); const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(payload.length, 4); return Buffer.concat([h, payload]); };
+    const n0 = inputs.length;
+    const wsx = new WebSocket(`ws://127.0.0.1:${port}/api/desktop/xpra-one/stream?viewer=v-x1`, ['binary']);
+    const gotBack = [];
+    wsx.on('message', (m) => gotBack.push(Buffer.from(m)));
+    let xerr = null; wsx.on('error', (e) => { xerr = e; });
+    await new Promise((r) => wsx.on('open', r));
+    ok(wsx.protocol === 'binary', `the browser's 'binary' subprotocol is answered on the bridge (${wsx.protocol})`);
+    wsx.send(rpkt('ping')); wsx.send(rpkt('key-action'));
+    await until(() => (upA.st.got.length >= 2 ? true : null), 3000);
+    ok(upA.st.conns === 1 && upA.st.protocols[0] === 'binary' && upA.st.got.length === 2 && upA.st.got.every((g) => g.isBinary) && upA.st.got[1].bytes.equals(rpkt('key-action')), 'the fake xpra received ONE connection speaking binary, both packets byte-identical, binary frames', { conns: upA.st.conns, n: upA.st.got.length });
+    await until(() => (gotBack.length >= 2 ? true : null), 3000);
+    ok(gotBack.length === 2 && gotBack[1].equals(Buffer.concat([Buffer.from('echo:'), rpkt('key-action')])), 'the upstream\'s answers reach the browser as binary messages, framing preserved');
+    ok(inputs.length === n0 + 1 && inputs[inputs.length - 1] === 'xpra-one', `ping is not input, key-action is: exactly ONE input reported for xpra-one (${inputs.length - n0})`);
+    ok(upB.st.conns === 0, 'the second fake upstream saw NOTHING — an id reaches only its own port');
+    ok(stream.viewerAlive('xpra-one', 'v-x1') && stream.viewersOf('xpra-one').join() === 'v-x1', 'the viewer id is registered on an xpra stream too');
+    ok(stream.connections('xpra-one') === 1 && stream.connections('xpra-two') === 0, 'connections(id) counts the OPEN bridge sockets of an id (the keeper\'s "somebody watches" fact)');
+    const wsy = new WebSocket(`ws://127.0.0.1:${port}/api/desktop/xpra-two/stream`, ['binary']);
+    await new Promise((r) => wsy.on('open', r));
+    wsy.send(rpkt('pointer-position'));
+    await until(() => (upB.st.got.length >= 1 ? true : null), 3000);
+    ok(upB.st.conns === 1 && upA.st.conns === 1 && upB.st.got[0].bytes.equals(rpkt('pointer-position')), 'xpra-two reaches ITS port and only it (A still 1 connection, B 1)');
+    wsx.close(); wsy.close();
+    await until(() => (upA.st.closed === 1 && upB.st.closed === 1 ? true : null), 3000);
+    ok(upA.st.closed === 1 && upB.st.closed === 1, 'closing the browser side closes the upstream socket (close on either side)');
+    ok(stream.connections('xpra-one') === 0 && stream.connections('xpra-two') === 0, 'connections(id) is back to 0 once the sockets closed');
+    ok(streamLog.some((l) => /xpra-one: bridge opened → ws:\/\/127\.0\.0\.1:\d+\/ \(xpra\) \(viewer v-x1\)/.test(l)) && streamLog.some((l) => /xpra-one: closed \(the browser closed, code \d+\) after \d+s, \d+ B to the browser, \d+ B to the server \(xpra\), viewer v-x1/.test(l)), 'the xpra bridge logs the open and ONE named close line', streamLog.filter((l) => /xpra-one/.test(l)));
+    ok(!xerr, `no browser-side socket error (${xerr && xerr.message})`);
+    ok(!stream.viewerAlive('xpra-one', 'v-x1'), 'the viewer is gone after its socket closed');
+    // the upstream hanging up NAMES itself: a fake that sends a `disconnect` packet then closes
+    const dis = Buffer.concat([Buffer.from([192 + 3, 128 + 10]), Buffer.from('disconnect'), Buffer.from([128 + 12]), Buffer.from('server error'), Buffer.from([128 + 8]), Buffer.from('bad luck')]);
+    const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(dis.length, 4);
+    const upC = await fakeUp({ onConnect: (c) => { c.send(Buffer.concat([h, dis])); setTimeout(() => { try { c.close(1000, 'bye'); } catch {} }, 100); } });
+    const streamC = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upC.port }), log: { warn() {}, log: (l) => streamLog.push(String(l)) } });
+    const srvC = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+    srvC.on('upgrade', (req, socket, head) => streamC.handleUpgrade(req, socket, head, 'xpra-c'));
+    const portC = await freePort(); await new Promise((r) => srvC.listen(portC, '127.0.0.1', r));
+    const wsc = new WebSocket(`ws://127.0.0.1:${portC}/api/desktop/xpra-c/stream`, ['binary']);
+    const gotC = [];
+    wsc.on('message', (m) => gotC.push(Buffer.from(m)));
+    await new Promise((r) => wsc.on('open', r));
+    await until(() => (streamLog.some((l) => /xpra-c: closed/.test(l)) ? true : null), 4000);
+    ok(gotC.length === 1 && gotC[0].equals(Buffer.concat([h, dis])), 'the disconnect packet itself still reached the browser (the bridge names, it never eats)');
+    await upC.close();
+    const upE = await fakeUp({ onConnect: (c) => { c.send(Buffer.from('disconnect invalid packet encoding: no decoder')); setTimeout(() => { try { c.close(1000, 'bye'); } catch {} }, 100); } });
+    const streamE = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upE.port }), log: { warn() {}, log: (l) => streamLog.push(String(l)) } });
+    const srvE = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+    srvE.on('upgrade', (req, socket, head) => streamE.handleUpgrade(req, socket, head, 'xpra-e'));
+    const portE = await freePort(); await new Promise((r) => srvE.listen(portE, '127.0.0.1', r));
+    const wse = new WebSocket(`ws://127.0.0.1:${portE}/api/desktop/xpra-e/stream`, ['binary']);
+    await new Promise((r) => wse.on('open', r));
+    await until(() => (streamLog.some((l) => /xpra-e: closed/.test(l)) ? true : null), 4000);
+    ok(/closed \(the xpra server disconnected: invalid packet encoding: no decoder\)/.test(streamLog.find((l) => /xpra-e: closed/.test(l)) || ''), 'the BARE TEXT `disconnect <reason>` shape (what 6.5.3 sends a client it cannot decode) is named in the close line too', streamLog.filter((l) => /xpra-e/.test(l)));
+    try { wse.close(); } catch {}
+    await new Promise((r) => srvE.close(r)); await upE.close();
+    const closeLine = streamLog.find((l) => /xpra-c: closed/.test(l)) || '';
+    ok(/closed \(the xpra server disconnected: server error \/ bad luck\)/.test(closeLine), 'a `disconnect` packet from the xpra side puts ITS reason in the close line (the close names who closed and why)', closeLine);
+    try { wsc.close(); } catch {}
+    await new Promise((r) => srvC.close(r));
+    // NETEM (dev-only): with the gate ON and ?netem=rtt:120 an echo round trip takes ≥ 120 ms; with the gate OFF the same url is plain
+    const upD = await fakeUp();
+    for (const [gate, min] of [[true, 115], [false, 0]]) {
+      const streamD = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upD.port }), netemEnabled: gate, log: { warn() {}, log() {} } });
+      const srvD = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+      srvD.on('upgrade', (req, socket, head) => streamD.handleUpgrade(req, socket, head, 'xpra-d'));
+      const portD = await freePort(); await new Promise((r) => srvD.listen(portD, '127.0.0.1', r));
+      const wsd = new WebSocket(`ws://127.0.0.1:${portD}/api/desktop/xpra-d/stream?netem=rtt:120`, ['binary']);
+      await new Promise((r) => wsd.on('open', r));
+      await sleep(150); // the upstream open
+      const t0 = Date.now();
+      const rt = await new Promise((resolve) => { wsd.once('message', () => resolve(Date.now() - t0)); wsd.send(rpkt('ping')); });
+      ok(gate ? rt >= min && rt < 1000 : rt < 100, `netem gate ${gate ? 'ON' : 'OFF'}: an echo round trip through the bridge took ${rt} ms (${gate ? '≥ 120 ms — rtt/2 each way' : 'no delay: the parameter is IGNORED off the gate'})`);
+      ok(streamD.stats().netem === (gate ? 1 : 0) && streamD.netemEnabled === gate, `stats.netem counts ${gate ? 'the one' : 'no'} shaped bridge`);
+      ok(streamD.setNetem('any', 'rtt:50') === (gate ? null : null) || true, 'setNetem exists'); // shape asserted below
+      ok((gate ? JSON.stringify(streamD.setNetem('z', 'rtt:50,kbps:2000')) === '{"rttMs":50,"kbps":2000}' : streamD.setNetem('z', 'rtt:50') === null) && (gate ? JSON.stringify(streamD.netemOf('z')) === '{"rttMs":50,"kbps":2000}' : streamD.netemOf('z') === null), `setNetem/netemOf ${gate ? 'remember a spec per id' : 'answer null off the gate'}`);
+      wsd.close(); await new Promise((r) => srvD.close(r));
+    }
+    await upD.close();
+    // THE POLICY PER PACKET on the xpra kind (2026-09-22, the verifier's 09-policy repro): a REFUSED viewer (Watch
+    // mode / held) still gets its hello, ping echoes, damage acks and window packets through — only its INPUT packets
+    // are cut out. Pre-fix the refused CHUNK was dropped whole: the hello never reached xpra and the pane timed out.
+    {
+      const upP = await fakeUp();
+      let relay = false;
+      const pInputs = [];
+      const streamP = S.create({ auth: { requestAuthed: () => true }, resolveTarget: () => ({ kind: 'xpra', port: upP.port }), inputPolicy: () => (relay ? { relay: true } : { relay: false, code: 'watch-mode' }), onInput: (id) => pInputs.push(id), log: { warn: (l) => streamLog.push(String(l)), log: (l) => streamLog.push(String(l)) } });
+      const srvP = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+      srvP.on('upgrade', (req, socket, head) => streamP.handleUpgrade(req, socket, head, 'xpra-p'));
+      const portP = await freePort(); await new Promise((r) => srvP.listen(portP, '127.0.0.1', r));
+      const wsp = new WebSocket(`ws://127.0.0.1:${portP}/api/desktop/xpra-p/stream?viewer=v-watch`, ['binary']);
+      const backP = [];
+      wsp.on('message', (m) => backP.push(Buffer.from(m)));
+      await new Promise((r) => wsp.on('open', r));
+      const talk = ['hello', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh']; // x5: configure-window is the ACTIVE viewer's (held, never relayed for a refused one)
+      const human = ['key-action', 'button-action', 'clipboard-token', 'pointer-position', 'focus'];
+      for (const t of ['hello', 'key-action', 'ping_echo', 'button-action', 'damage-sequence', 'clipboard-token', 'map-window', 'pointer-position', 'configure-window', 'focus', 'keyboard-config', 'buffer-refresh']) wsp.send(rpkt(t));
+      await until(() => (upP.st.got.length >= talk.length ? true : null), 3000);
+      await sleep(150);
+      const typesUp = upP.st.got.map((g) => S.xpraPacketType(g.bytes.subarray(8)));
+      ok(JSON.stringify(typesUp) === JSON.stringify(talk) && upP.st.got.every((g, i) => g.bytes.equals(rpkt(talk[i]))), `a REFUSED viewer's hello / ping_echo / damage-sequence / map-window / buffer-refresh reach xpra byte-identical, in order — and nothing else, its keyboard-config (the keymap fence) and configure-window (x5, the geometry fence) included (${typesUp.join(', ')})`);
+      ok(backP.length === talk.length && backP[0].equals(Buffer.concat([Buffer.from('echo:'), rpkt('hello')])), `…so the upstream's answers (its hello first) reach the refused viewer: ${backP.length} message(s) back — the picture flows in Watch mode`);
+      const stP = streamP.stats();
+      ok(stP.dropped === human.length + 2 && stP.relayed === talk.length, `stats: dropped counts the ${human.length} input packets + the fenced keyboard-config + configure-window (${stP.dropped}), relayed the ${talk.length} messages that went through (${stP.relayed})`, stP);
+      ok(pInputs.length === 0, 'a refused input is nobody at the keyboard: no input reported to the idle clock');
+      // several packets in ONE message: the input is cut out of the middle, the rest relayed as one write
+      const n0 = upP.st.got.length;
+      wsp.send(Buffer.concat([rpkt('damage-sequence'), rpkt('key-action'), rpkt('ping_echo')]));
+      await until(() => (upP.st.got.length > n0 ? true : null), 3000);
+      ok(upP.st.got.length === n0 + 1 && upP.st.got[n0].bytes.equals(Buffer.concat([rpkt('damage-sequence'), rpkt('ping_echo')])), 'ONE message carrying damage-sequence + key-action + ping_echo ⇒ the key-action cut out, the other two relayed together');
+      // the takeover flips the verdict: the same viewer's input now goes through and counts
+      // round 2 of the verify: a refused viewer's CONTROL packets (not input) never reach xpra — the allowlist; a relayed
+      // `shutdown-server` from a Watch viewer ended the real session. `control` / `info-request` are the same class.
+      const n1 = upP.st.got.length;
+      wsp.send(Buffer.concat([rpkt('shutdown-server'), rpkt('exit-server'), rpkt('control'), rpkt('info-request'), rpkt('ping_echo')]));
+      await until(() => (upP.st.got.length > n1 ? true : null), 3000);
+      await sleep(150);
+      ok(upP.st.got.length === n1 + 1 && upP.st.got[n1].bytes.equals(rpkt('ping_echo')) && streamP.stats().lifecycle === 2, 'a REFUSED viewer\'s shutdown-server / exit-server / control / info-request are cut out, its ping_echo relayed alone (stats.lifecycle names the two)', streamP.stats());
+      relay = true;
+      const n2 = upP.st.got.length;
+      wsp.send(rpkt('key-action'));
+      await until(() => (upP.st.got.length > n2 ? true : null), 3000);
+      ok(upP.st.got.length === n2 + 1 && upP.st.got[n2].bytes.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('configure-window'), rpkt('key-action')])) && pInputs.length === 1 && streamLog.some((l) => /xpra-p: viewer v-watch may type now — the keymap and the window geometry it sent while refused reach xpra first/.test(l)), 'the policy relaying again (a takeover) ⇒ the keyboard-config and (x5) the configure-window it sent while refused reach xpra FIRST, then the next key-action, in one write; the key-action IS input (reported once), the replay is named');
+      const n3 = upP.st.got.length;
+      wsp.send(Buffer.concat([rpkt('shutdown-server'), rpkt('control')]));
+      await until(() => (upP.st.got.length > n3 ? true : null), 3000);
+      await sleep(150);
+      ok(upP.st.got.length === n3 + 1 && upP.st.got[n3].bytes.equals(rpkt('control')) && streamP.stats().lifecycle === 3 && streamLog.some((l) => /xpra-p: 1 server-lifecycle packet\(s\).*viewer v-watch dropped — the keeper owns/.test(l)), 'an ALLOWED viewer\'s shutdown-server is cut too (the keeper owns the server\'s lifecycle, a warn line names it); its control packet passes', streamP.stats());
+      wsp.close();
+      await until(() => (streamLog.some((l) => /xpra-p: closed/.test(l)) ? true : null), 3000);
+      ok(/xpra-p: closed .*, viewer v-watch, 13 packet\(s\) refused \(server lifecycle\)/.test(streamLog.find((l) => /xpra-p: closed/.test(l)) || ''), 'the close line counts every refused packet (6 input + 1 keymap + 1 geometry (x5) + 4 control + 1 lifecycle) and names the last verdict', streamLog.filter((l) => /xpra-p/.test(l)));
+      await new Promise((r) => srvP.close(r)); await upP.close();
+    }
+    await upA.close(); await upB.close();
+  }
   const st = stream.stats();
-  ok(st.opened === 2 && st.refused === 3, `stats: 2 opened, 3 refused (${JSON.stringify(st)})`);
+  ok(st.opened === 4 && st.refused === 3, `stats: 4 opened (2 rfb + 2 xpra), 3 refused (${JSON.stringify(st)})`);
+  ok(st.relayed >= 3 + 3 && st.dropped === 0, `stats.relayed counts the relayed client messages on BOTH kinds — it was never incremented (${st.relayed})`);
   await new Promise((r) => srv.close(r));
   await k.stop(rec.id);
   k.shutdown();
@@ -257,7 +441,9 @@ console.log('§3 SIGKILL the keeper PROCESS and rebuild ⇒ ADOPTED');
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const K = require(${JSON.stringify(path.join(repo, 'src/server/desktop-app-keeper.js'))});
-const k = K.create({ dataDir: ${JSON.stringify(dataDir)}, env: () => (${JSON.stringify(baseEnv())}), broadcast: () => {}, log: { log() {}, warn() {}, error() {} } });
+const M = require(${JSON.stringify(path.join(repo, 'src/desktop-apps.js'))});
+const XVFB_TABLE = M.DISPLAY_BACKENDS.map((b) => (b.id === 'vnc-display' ? { ...b, needs: [['Xvfb', 'x11vnc']], recipes: { 'Xvfb+x11vnc': 'x-then-server' } } : b));
+const k = K.create({ dataDir: ${JSON.stringify(dataDir)}, env: () => (${JSON.stringify(baseEnv())}), broadcast: () => {}, serverSetting: (key) => (${JSON.stringify(PIN)})[key], backends: XVFB_TABLE, log: { log() {}, warn() {}, error() {} } });
 k.start();
 const rec = await k.launch({ exec: ${JSON.stringify(appBin)}, args: ${JSON.stringify(appArgs)}, label: 'survivor' });
 for (let i = 0; i < 200; i++) { const r = k.get(rec.id); if (r.state !== 'launching') { console.log(JSON.stringify(r)); break; } await new Promise((r) => setTimeout(r, 100)); }
@@ -304,7 +490,7 @@ setInterval(() => {}, 1000); // stay alive until SIGKILLed — the apps must out
 
 console.log('§4 idle timeout, keep-alive, input, the cap');
 {
-  const k = mk('k4', { serverSetting: (key) => (key === 'desktop.idleTimeoutMin' ? 0.02 : undefined), tickMs: 150 }); // 1.2 s
+  const k = mk('k4', { settings: { 'desktop.idleTimeoutMin': 0.02 }, tickMs: 150 }); // 1.2 s
   await k.adoptAll(); k.start();
   const a = await k.launch({ exec: appBin, args: appArgs, label: 'idle' });
   await until(() => k.get(a.id).state !== 'launching');
@@ -437,7 +623,7 @@ setInterval(() => {}, 1000);
 `, { mode: 0o755 });
   const envWithShim = () => ({ ...baseEnv(), PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` });
   D.resetBinMemo(); // a NO for `Xvnc` is memoised for 60 s by the probes above — the shim must be SEEN
-  const k = mk('k7', { env: envWithShim, display: D }); // this leg WANTS the Xvnc rung (the shim on PATH)
+  const k = mk('k7', { env: envWithShim, backends: M.DISPLAY_BACKENDS }); // the shipped table: Xvnc is a group of the vnc-display rung there
   await k.adoptAll(); k.start();
   const before = procCensus(k.logRoot);
   const l0 = await k.list();
@@ -456,7 +642,7 @@ setInterval(() => {}, 1000);
   const during = procCensus(k.logRoot);
   ok(during.length >= 3, `census while running: ${during.length} process(es) name this keeper's dir (the shim + its X + its picture server)`);
   // ADOPTION of a one-pid record: a second keeper on the same store
-  const k2 = mk('k7', { env: envWithShim });
+  const k2 = mk('k7', { env: envWithShim, backends: M.DISPLAY_BACKENDS });
   await k2.adoptAll();
   const adopted = k2.get(rec.id);
   ok(adopted && adopted.state === 'ready' && adopted.adoptedAt > 0 && adopted.pids.x === ready.pids.x && adopted.pids.server === ready.pids.x, 'a second keeper ADOPTS the one-pid record (the server === x branch of adoptAll)', adopted);
@@ -523,7 +709,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
     ...NO_BELT, // r4: the round-1 keeper had no marker belt either
   ]);
   const dataDir = path.join(root, 'r2b-ctl'); fs.mkdirSync(dataDir, { recursive: true });
-  const k1 = K1.create({ dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k1);
+  const k1 = K1.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k1);
   await k1.adoptAll(); k1.start();
   const rec1 = await k1.launch({ exec: 'sh', args: ['-c', 'sleep 3600 & exec sleep 3600'], label: 'forks-ctl' });
   await until(() => k1.get(rec1.id).state !== 'launching');
@@ -555,7 +741,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const impostor2 = net.createServer((sock) => { sock.write('RFB 003.008\n'); }); await new Promise((r) => impostor2.listen(0, '127.0.0.1', r));
   const { mod: K1 } = mutant('c', [["        const holder = display.listenerHeldBy(up.port, display.sessionCensus([serverPid], { fresh: true }));", "        const holder = serverPid; // pre-fix: the banner was the whole proof"]]);
   const dataDir = path.join(root, 'r2c-ctl'); fs.mkdirSync(dataDir, { recursive: true });
-  const k3 = K1.create({ dataDir, env: baseEnv, broadcast: () => {}, display: { ...NO_XVNC, freePort: async () => impostor2.address().port }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
+  const k3 = K1.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, display: { ...D, freePort: async () => impostor2.address().port }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
   await k3.adoptAll(); k3.start();
   const rec3 = await k3.launch({ exec: appBin, args: appArgs, label: 'impostor-ctl' });
   const r3 = await until(() => { const r = k3.get(rec3.id); return r.state !== 'launching' ? r : null; }, 20000);
@@ -613,7 +799,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const app2 = mkShared(dataDir2, 'da-shared2'); await sleep(200);
   fs.writeFileSync(path.join(dataDir2, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-shared2': rec('da-shared2', app2) }, runawayParkedUntil: {} }));
   const facts2 = { running: false, display: ':7', port: rfb.address().port, authFile: null };
-  const k1 = K1.create({ dataDir: dataDir2, env: baseEnv, broadcast: () => {}, singleton: () => ({ ...facts2, refresh: async () => { facts2.running = true; return { available: true, running: true, port: rfb.address().port }; } }), log: { log() {}, warn() {}, error() {} } }); keepers.push(k1);
+  const k1 = K1.create({ ...PINNED, dataDir: dataDir2, env: baseEnv, broadcast: () => {}, singleton: () => ({ ...facts2, refresh: async () => { facts2.running = true; return { available: true, running: true, port: rfb.address().port }; } }), log: { log() {}, warn() {}, error() {} } }); keepers.push(k1);
   await k1.adoptAll();
   const r1 = k1.get('da-shared2');
   ok(r1.state === 'exited' && /X display gone/.test(r1.lastError) && !alive(app2.pid), 'CONTROL: judged by the cached `running:false`, the pre-fix adoption REAPS a live app on the shared desktop at every boot');
@@ -625,8 +811,8 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   ok(!/rec\.via ===|'Xvfb\+x11vnc'|'Xvnc'|unknown bring-up/.test(src), 'the keeper source spells no rung (no `rec.via ===`, no Xvnc / Xvfb+x11vnc literal, no "unknown bring-up")');
   ok(/display\.RECIPES\[/.test(src) && /M\.recipeFor|resolved\.recipe/.test(src), 'it looks the recipe UP by the name the PURE table gives it');
   const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', perWindow: true, adaptive: false, stream: 'rfb', needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server-copy' }), wired: true });
-  const display = { ...NO_XVNC, RECIPES: Object.freeze({ ...D.RECIPES, 'x-then-server-copy': D.RECIPES['x-then-server'] }) };
-  const k = mk('r2f', { display, backends: [fourth, ...M.DISPLAY_BACKENDS] }); await k.adoptAll(); k.start();
+  const display = { ...D, RECIPES: Object.freeze({ ...D.RECIPES, 'x-then-server-copy': D.RECIPES['x-then-server'] }) };
+  const k = mk('r2f', { display, backends: [fourth, ...M.DISPLAY_BACKENDS], settings: { 'desktop.backendPrefs': '' } }); await k.adoptAll(); k.start(); // table order: a preference names only rungs it knows, and this one is new
   const l = await k.list();
   ok(l.availability.backend === 'fake-rung' && l.availability.recipe === 'x-then-server-copy' && l.availability.ladder.length === 4, 'the ladder resolves to the fourth rung and names ITS recipe');
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'fourth-rung' });
@@ -689,7 +875,7 @@ function markerPids(id) {
     ...NO_BELT,
   ]);
   const dataDir = path.join(root, 'r3a-ctl'); fs.mkdirSync(dataDir, { recursive: true });
-  const k2 = K2.create({ dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
+  const k2 = K2.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
   await k2.adoptAll(); k2.start();
   const c = await k2.launch({ exec: '/bin/sleep', args: ['3600'], label: 'stop-in-flight-ctl' });
   const sc = await k2.stop(c.id);
@@ -699,11 +885,11 @@ function markerPids(id) {
   ok(sc.state === 'exited' && Object.values(sc.pids).every((p) => !p) && lc.state === 'exited' && leftover.length >= 2, `CONTROL: the pre-fix keeper answers exited with NO pids, then ${leftover.length} process(es) carry the marker under that exited record 5 s later (the orphans)`, { sc: sc.pids, later: lc.pids, leftover });
   // the pre-fix leftovers are exactly what the BOOT BELT reaps: a fresh keeper on the same store finds them by marker
   const warned = [];
-  const k3b = K.create({ dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn: (m) => warned.push(m), error() {} } }); keepers.push(k3b);
+  const k3b = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn: (m) => warned.push(m), error() {} } }); keepers.push(k3b);
   await k3b.adoptAll();
   await sleep(300);
   ok(markerPids(c.id).length === 0 && leftover.every((p) => !alive(p)), `the next BOOT's marker census reaped the ${leftover.length} leftover(s) of the exited record (${leftover.join(', ')})`);
-  ok(warned.some((m) => new RegExp(`${c.id} \\(exited\\) still has ${leftover.length} process\\(es\\) carrying its marker at boot`).test(m)), 'and said so, naming the record, its state and the pids', warned);
+  ok(warned.some((m) => new RegExp(`${c.id} \\(exited\\) still has ${leftover.length} process\\(es\\) carrying its marker or its per-app XAUTHORITY at boot`).test(m)), 'and said so, naming the record, its state and the pids', warned);
   k2.shutdown(); k3b.shutdown();
 }
 { // (b) the boot belt is scoped to OUR store: a marker for an id we do not hold is never signalled
@@ -716,7 +902,7 @@ function markerPids(id) {
   const rfb = net.createServer((sock) => { sock.write('RFB 003.008\n'); }); await new Promise((r) => rfb.listen(0, '127.0.0.1', r));
   const liveOne = { ...M.newRecord({ id: 'da-r3b-live', label: 'live', exec: 'sleep', args: ['3600'], cwd: null, source: 'adhoc', backend: 'desktop-singleton', via: 'Xtigervnc', fallbackWhy: null, idleTimeoutMs: 0, now: Date.now() - 60000 }), state: 'ready', display: ':7', port: rfb.address().port, pids: { x: null, app: liveRec.pid, server: null, wm: null }, starts: { x: null, app: D.procStart(liveRec.pid), server: null, wm: null } };
   fs.writeFileSync(path.join(dataDir, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-r3b-ours': term, 'da-r3b-live': liveOne }, runawayParkedUntil: {} }));
-  const k = K.create({ dataDir, env: baseEnv, broadcast: () => {}, singleton: () => ({ running: true, display: ':7', port: rfb.address().port, authFile: null, refresh: async () => ({ available: true, running: true, port: rfb.address().port }) }), log: { log() {}, warn() {}, error() {} } }); keepers.push(k);
+  const k = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, singleton: () => ({ running: true, display: ':7', port: rfb.address().port, authFile: null, refresh: async () => ({ available: true, running: true, port: rfb.address().port }) }), log: { log() {}, warn() {}, error() {} } }); keepers.push(k);
   await k.adoptAll();
   await sleep(300);
   ok(!alive(ours.pid), 'a process carrying a TERMINAL record\'s marker (no pid recorded at all — the SIGKILL-mid-stop shape) is reaped at boot');
@@ -733,7 +919,7 @@ function markerPids(id) {
   const nullStarts = { x: null, server: null, app: null, wm: null };
   const dataDir = path.join(root, 'r3c'); fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-r3c': mkRec('da-r3c', nullStarts) }, runawayParkedUntil: {} }));
-  const k = K.create({ dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k);
+  const k = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k);
   await k.adoptAll(); await sleep(300);
   const r = k.get('da-r3c');
   ok(r.state === 'exited' && /X display gone/.test(r.lastError), 'a record whose starttimes are null is not adopted — nothing about it is proven — and is recorded as ended', r && { state: r.state, lastError: r.lastError });
@@ -747,7 +933,7 @@ function markerPids(id) {
   const dataDir2 = path.join(root, 'r3c-ctl'); fs.mkdirSync(dataDir2, { recursive: true });
   const rec2 = { ...mkRec('da-r3c2', nullStarts), pids: { x: victims[0].pid, server: victims[1].pid, app: victims[2].pid, wm: null } };
   fs.writeFileSync(path.join(dataDir2, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-r3c2': rec2 }, runawayParkedUntil: {} }));
-  const k2 = K.create({ dataDir: dataDir2, env: baseEnv, broadcast: () => {}, display: { ...NO_XVNC, sameProcess: preFixSame }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
+  const k2 = K.create({ ...PINNED, dataDir: dataDir2, env: baseEnv, broadcast: () => {}, display: { ...D, sameProcess: preFixSame }, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
   await k2.adoptAll(); await sleep(300);
   ok(victims.every((c) => !alive(c.pid)), 'CONTROL: with the pre-fix sameProcess (null starttime ⇒ liveness) the same adoption SIGKILLs all three strangers', victims.map((c) => alive(c.pid)));
   for (const c of [...strangers, ...victims]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
@@ -823,7 +1009,7 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
     freePort: () => { if (at === 'freePort' && !stopP) stopP = k.stop(cur).catch((e) => ({ err: e.message })); return D.freePort(); },
   };
   const warned = [];
-  k = Kmod.create({ dataDir, env: baseEnv, broadcast: () => {}, display, log: { log() {}, warn: (m) => warned.push(m), error() {} } }); keepers.push(k);
+  k = Kmod.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, display, log: { log() {}, warn: (m) => warned.push(m), error() {} } }); keepers.push(k);
   await k.adoptAll(); k.start();
   const rec = await k.launch({ exec: '/bin/sleep', args: ['3600'], label }); cur = rec.id;
   await until(() => stopP, 10000);
@@ -878,7 +1064,7 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   // NEGATIVE CONTROL: the belt removed — the round-3 teardown (sid table only) leaves the worker under `exited`, and the BOOT belt is what reaps it
   const { mod: Kb } = mutant('r4b-belt-off', NO_BELT);
   const dataDir = path.join(root, 'r4b-ctl'); fs.mkdirSync(dataDir, { recursive: true });
-  const kb = Kb.create({ dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(kb);
+  const kb = Kb.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(kb);
   await kb.adoptAll(); kb.start();
   const c = await kb.launch({ exec: 'sh', args: ['-c', daemonise], label: 'daemonising app ctl' });
   await until(() => (kb.get(c.id).state === 'ready' ? true : null), 20000);
@@ -887,7 +1073,7 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   const leftover = markerPids(c.id);
   ok(sc.state === 'exited' && sc.lastError == null && leftover.length === 1 && alive(leftover[0]), `CONTROL: with the marker belt removed the same stop answers exited/lastError null and the setsid'd worker (${leftover.join(', ')}) still carries the marker 1.5 s later`, { state: sc.state, leftover });
   kb.shutdown();
-  const k3 = K.create({ dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
+  const k3 = K.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(k3);
   await k3.adoptAll(); await sleep(300);
   ok(markerPids(c.id).length === 0 && leftover.every((p) => !alive(p)), 'the next boot\'s census reaps it (the layer the verifier measured — a restart was the only thing that ever found it)');
   k3.shutdown();
@@ -907,7 +1093,7 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   // NEGATIVE CONTROL: the guard over the sid table alone stays `ready` at 0 %
   const { mod: Kg } = mutant('r4c-sid-only', NO_GUARD_UNION);
   const dataDir = path.join(root, 'r4c-ctl'); fs.mkdirSync(dataDir, { recursive: true });
-  const k2 = Kg.create({ dataDir, env: baseEnv, broadcast: () => {}, limits, registryRows: [esc], guardSampleMs: 400, tickMs: 200, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
+  const k2 = Kg.create({ ...PINNED, dataDir, env: baseEnv, broadcast: () => {}, limits, registryRows: [esc], guardSampleMs: 400, tickMs: 200, log: { log() {}, warn() {}, error() {} } }); keepers.push(k2);
   await k2.adoptAll(); k2.start();
   const rec2 = await k2.launch({ appId: 'esc' });
   await until(() => (k2.get(rec2.id).state !== 'launching' ? true : null), 20000);
@@ -917,6 +1103,649 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   await k2.stop(rec2.id); k2.shutdown();
   await sleep(300);
   ok(markerPids(rec2.id).length === 0, 'CONTROL cleanup: the fixed stop of the mutant keeper (its belt intact) reaped the escaped burner');
+}
+
+console.log('§12 THE XPRA RUNG (P8-2): the default ladder picks it, one xpra per session, the real bridge relays to it, stop/adopt/no-migration');
+{
+  const XAUTH = D.binOnPath('xauth', { env: process.env });
+  if (!XPRA_BIN) skip('xpra is not on PATH — the xpra rung cannot be driven on this box (apt install xpra; the fleet image adds the package)');
+  else if (!XAUTH) skip('xauth is not on PATH — the xpra recipe refuses by name without it');
+  else {
+    // (a) the DEFAULT order (no pin): xpra wins; the record's facts
+    const k = mk('k12', { settings: { 'desktop.backendPrefs': '' } });
+    await k.adoptAll(); k.start();
+    const l0 = await k.list();
+    ok(l0.availability.backend === 'xpra' && l0.availability.via === 'xpra' && l0.availability.recipe === 'xpra-seamless' && l0.availability.stream === 'xpra' && l0.availability.fallbackWhy === null && Array.isArray(l0.availability.prefs) && l0.availability.prefs.length === 0, 'list(): with no preference the ladder picks xpra (DA1), stream xpra, nothing fell, prefs empty', l0.availability);
+    const t0 = Date.now();
+    const rec = await k.launch({ exec: appBin, args: appArgs, label: 'seamless' });
+    ok(rec.state === 'launching' && rec.backend === 'xpra' && rec.via === 'xpra' && rec.recipe === 'xpra-seamless' && rec.stream === 'xpra' && rec.fallbackWhy === null, 'launch answers a launching record on xpra via xpra-seamless, stream xpra', rec);
+    await until(() => (k.get(rec.id).state !== 'launching' ? true : null), 30000);
+    const r1 = k.get(rec.id);
+    const readyMs = Date.now() - t0;
+    ok(r1.state === 'ready' && r1.probe === 'http' && /^:\d+$/.test(r1.display) && r1.port > 0, `ready in ${readyMs} ms on ${r1.display} port ${r1.port} (probe http) — lastError ${r1.lastError}`, r1);
+    ok(r1.pids.x > 0 && r1.pids.server === r1.pids.x && r1.starts.server === r1.starts.x && r1.pids.app > 0 && r1.pids.app !== r1.pids.x && r1.pids.wm === null, 'ONE xpra pid is recorded as x AND server (one process owns the Xvfb and the picture socket), the app is its own pid, no WM of ours (xpra is the WM)', r1.pids);
+    ok(D.listenerHeldBy(r1.port, D.sessionCensus([r1.pids.x], { fresh: true })) === r1.pids.x, 'the 127.0.0.1 listener is held by the xpra pid itself (rule 3 on this rung)');
+    const members = D.sessionMembers(r1.pids.x, { fresh: true });
+    ok(members.length >= 2 && members.includes(r1.pids.x), `xpra's session holds its Xvfb too (${members.length} members) — the sid identity that survives xpra's environ rewrite`);
+    ok(!D.environHas(r1.pids.x, `${K.SESSION_ENV}=${rec.id}`) && D.environHas(r1.pids.app, `${K.SESSION_ENV}=${rec.id}`), 'MEASURED FACT the belt rests on: xpra rewrites its own environ (the marker is invisible on the xpra pid) while the app we spawned still carries it');
+    ok(fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')) && fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).size > 0 && fs.existsSync(path.join(k.logRoot, rec.id, 'xpra')), 'the per-app dir holds the Xauthority xpra wrote into (pinned, never ~/.Xauthority) and xpra\'s own socket/session dir');
+    ok(k.streamTarget(rec.id) && k.streamTarget(rec.id).kind === 'xpra' && k.streamTarget(rec.id).port === r1.port, 'streamTarget: kind xpra on the recorded port');
+    // (b) per-window facts: the app's window, no xpra wrapper rows
+    const w = await until(async () => { const r = await k.windows(rec.id); return r.ok && r.windows.length ? r : null; }, 10000, 300);
+    ok(w && w.windows.length === 1 && w.windows.every((x) => !/^Xpra/.test(x.title || '')) && (w.windows[0].cls || w.windows[0].instance), `windows(): exactly the app's own window (${w && JSON.stringify(w.windows.map((x) => [x.title, x.cls, x.w, x.h]))}) — xpra's Corral wrappers and 1x1 leaders filtered`, w);
+    ok(await k.windows('no-such').then(() => false, (e) => e.code === 'not-found'), 'windows() of an unknown id is a named not-found');
+    // (c) the REAL bridge to the REAL xpra: bytes both ways — a bencode hello is answered by xpra's own `disconnect` naming the reason
+    const stream = S.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), onInput: (id) => k.noteInput(id), log: { warn() {}, log: (l) => xlog.push(String(l)) } });
+    const xlog = [];
+    const srv = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+    srv.on('upgrade', (req, socket, head) => { const id = S.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } stream.handleUpgrade(req, socket, head, id); });
+    const port = await freePort(); await new Promise((r) => srv.listen(port, '127.0.0.1', r));
+    const WebSocket = require('ws');
+    const wsx = new WebSocket(`ws://127.0.0.1:${port}/api/desktop/${rec.id}/stream`, ['binary']);
+    const back = [];
+    wsx.on('message', (m) => back.push(Buffer.from(m)));
+    await new Promise((r) => wsx.on('open', r));
+    const hello = Buffer.from('l5:hellod0:0:ee'); const hh = Buffer.alloc(8); hh[0] = 0x50; hh.writeUInt32BE(hello.length, 4);
+    wsx.send(Buffer.concat([hh, hello]));
+    await until(() => (back.length ? true : null), 5000);
+    // MEASURED on 6.5.3: a client whose hello xpra cannot decode is answered with a BARE TEXT line
+    // `disconnect <reason>` (no header) — "invalid packet encoding: 'bencode' decoder is not available." — and closed;
+    // a decodable hello without encoder capabilities gets "disconnect protocol error failed to negotiate a packet encoder."
+    const first = back[0] ? back[0].toString('latin1') : '';
+    const bare = /^disconnect /.test(first);
+    const packet = back[0] && back[0][0] === 0x50 && S.xpraStrings(back[0].subarray(8))[0] === 'disconnect';
+    ok(back.length >= 1 && (bare || packet), `the real xpra answered through the bridge: ${back.length} message(s), the first a disconnect (${bare ? 'bare text' : packet ? 'packet' : 'neither'}: ${JSON.stringify(first.replace(/[^\x20-\x7e]/g, '.').slice(0, 90))})`, back.map((b) => b.length));
+    await until(() => (xlog.some((l) => new RegExp(`${rec.id}: closed`).test(l)) ? true : null), 5000);
+    const cl = xlog.find((l) => new RegExp(`${rec.id}: closed`).test(l)) || '';
+    ok(/closed \(the xpra server disconnected: (invalid packet encoding|protocol error)/.test(cl), 'the close line names xpra\'s own reason (the bare-text shape read by the bridge)', cl);
+    try { wsx.close(); } catch {}
+    await new Promise((r) => srv.close(r));
+    // the SAME hello from a viewer the window-live policy REFUSES (Watch mode on an agent-held window) still reaches the
+    // real xpra and is answered — pre-fix the refused chunk was dropped whole and the pane waited 15 s for a hello
+    const streamW = S.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), inputPolicy: () => ({ relay: false, code: 'watch-mode' }), log: { warn() {}, log() {} } });
+    const srvW = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+    srvW.on('upgrade', (req, socket, head) => { const id = S.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } streamW.handleUpgrade(req, socket, head, id); });
+    const portW = await freePort(); await new Promise((r) => srvW.listen(portW, '127.0.0.1', r));
+    const wsw = new WebSocket(`ws://127.0.0.1:${portW}/api/desktop/${rec.id}/stream?viewer=v-watch`, ['binary']);
+    const backW = [];
+    wsw.on('message', (m) => backW.push(Buffer.from(m)));
+    await new Promise((r) => wsw.on('open', r));
+    wsw.send(Buffer.concat([hh, hello]));
+    await until(() => (backW.length ? true : null), 5000);
+    ok(backW.length >= 1 && /^disconnect /.test(backW[0].toString('latin1')) && streamW.stats().dropped === 0 && streamW.stats().relayed === 1, `a REFUSED (watch-mode) viewer's hello reaches the REAL xpra and is answered (${backW.length} message(s) back; dropped ${streamW.stats().dropped})`, streamW.stats());
+    try { wsw.close(); } catch {}
+    await new Promise((r) => srvW.close(r));
+    // (d) ADOPTION keeps the backend a record was BORN with: a vnc-display record (pinned keeper) + the xpra record survive a rebuild under the DEFAULT order
+    const kv = mk('k12-vnc');
+    await kv.adoptAll(); kv.start();
+    const vrec = await kv.launch({ exec: appBin, args: appArgs, label: 'born-vnc' });
+    await until(() => (kv.get(vrec.id).state !== 'launching' ? true : null), 20000);
+    ok(kv.get(vrec.id).state === 'ready' && kv.get(vrec.id).backend === 'vnc-display', 'a pinned keeper brings a vnc-display session up beside the xpra one');
+    kv.shutdown(); k.shutdown();
+    const kv2 = mk('k12-vnc', { settings: { 'desktop.backendPrefs': '' } }); // SAME dataDir, default order
+    await kv2.adoptAll();
+    const va = kv2.get(vrec.id);
+    ok(va.state === 'ready' && va.adoptedAt > 0 && va.backend === 'vnc-display' && va.via === 'Xvfb+x11vnc' && va.stream === 'rfb', 'DA1: the vnc-display record is ADOPTED as vnc-display under a ladder that would now pick xpra — never migrated', { state: va.state, backend: va.backend });
+    const k2 = mk('k12', { settings: { 'desktop.backendPrefs': '' } }); // SAME dataDir as k
+    await k2.adoptAll();
+    const xa = k2.get(rec.id);
+    ok(xa.state === 'ready' && xa.adoptedAt > 0 && xa.backend === 'xpra' && xa.pids.x === r1.pids.x && xa.starts.x === r1.starts.x && xa.port === r1.port, 'the xpra record is ADOPTED after a rebuild: same pid + starttime, its HTTP port answering (the probe kind is the record\'s own)', { state: xa.state, lastError: xa.lastError });
+    // (e) stop: app → xpra (+ its Xvfb), verified; nothing carries the marker, the xpra pid is gone
+    const stopped = await k2.stop(rec.id, { why: 'user' });
+    ok(stopped.state === 'exited' && stopped.stoppedBy === 'user' && stopped.lastError === null, `stop ⇒ exited, clean (${stopped.lastError})`);
+    await sleep(300);
+    ok(!D.pidAlive(r1.pids.x) && !D.pidAlive(r1.pids.app) && members.every((p) => !D.pidAlive(p)) && markerPids(rec.id).length === 0, 'the xpra pid, its Xvfb and the app are gone; nothing carries the marker');
+    await kv2.stop(vrec.id); kv2.shutdown(); k2.shutdown();
+    // (f) THE BOOT BELT BY IDENTITY: a TERMINAL record whose recorded x pid+starttime is still alive is reaped by that identity (xpra's environ carries no marker)
+    const kb = mk('k12-belt', { settings: { 'desktop.backendPrefs': '' } });
+    const stray = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore' }); stray.unref(); children.push(stray);
+    await sleep(150);
+    const trec = { ...M.newRecord({ id: 'da-belt-x', label: 'belt', exec: 'sleep', args: [], cwd: null, source: 'adhoc', backend: 'xpra', via: 'xpra', fallbackWhy: null, idleTimeoutMs: 0, now: Date.now() }), state: 'exited', endedAt: Date.now(), probe: 'http' };
+    trec.pids.x = stray.pid; trec.pids.server = stray.pid; trec.starts.x = D.procStart(stray.pid); trec.starts.server = trec.starts.x;
+    kb._store().apps['da-belt-x'] = trec;
+    const stray2 = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore' }); stray2.unref(); children.push(stray2);
+    await sleep(150);
+    const trec2 = { ...M.newRecord({ id: 'da-belt-y', label: 'belt-recycled', exec: 'sleep', args: [], cwd: null, source: 'adhoc', backend: 'xpra', via: 'xpra', fallbackWhy: null, idleTimeoutMs: 0, now: Date.now() }), state: 'exited', endedAt: Date.now(), probe: 'http' };
+    trec2.pids.x = stray2.pid; trec2.pids.server = stray2.pid; trec2.starts.x = D.procStart(stray2.pid) - 12345; trec2.starts.server = trec2.starts.x; // a WRONG starttime = a recycled pid
+    kb._store().apps['da-belt-y'] = trec2;
+    await kb.adoptAll();
+    await sleep(200);
+    ok(!D.pidAlive(stray.pid), 'a terminal record\'s recorded x (pid AND starttime match) is reaped at boot by IDENTITY — the marker was never needed');
+    ok(D.pidAlive(stray2.pid), 'CONTROL: the same shape with a WRONG starttime (a recycled pid) is never signalled');
+    try { process.kill(stray2.pid, 'SIGKILL'); } catch {}
+    kb.shutdown();
+    // (g) A CRASHED xpra LEAKS NOTHING (2026-09-22, the verifier's xvfb-leak repro): xpra's own Xvfb inherits a
+    // SANITISED env — no session marker — so a DEAD xpra's Xvfb (sid = that dead pid) was proven by nothing and
+    // outlived the teardown AND every later boot (~100-190 MB each). It carries the per-app XAUTHORITY, whose path
+    // holds the record id: that is its proof now (needlesOf), in the teardown, the leftover census and the boot belt.
+    const xvfbOf = (xpraPid) => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number).filter((p) => { try { return fs.readFileSync(`/proc/${p}/cmdline`, 'latin1').startsWith(`Xvfb-for-Xpra-S${xpraPid}\0`); } catch { return false; } });
+    const launchReady = async (kk, label) => { const r0 = await kk.launch({ exec: appBin, args: appArgs, label }); await until(() => (kk.get(r0.id).state !== 'launching' ? true : null), 30000); return kk.get(r0.id); };
+    const kg = mk('k12-crash', { settings: { 'desktop.backendPrefs': '' } });
+    await kg.adoptAll(); kg.start();
+    const g1 = await launchReady(kg, 'crash-live');
+    const xv1 = xvfbOf(g1.pids.x);
+    const authG1 = `XAUTHORITY=${path.join(kg.logRoot, g1.id, 'Xauthority')}`;
+    ok(g1.state === 'ready' && g1.backend === 'xpra' && xv1.length === 1 && !D.environHas(xv1[0], `${K.SESSION_ENV}=${g1.id}`) && D.environHas(xv1[0], authG1) && D.sessionMembers(g1.pids.x, { fresh: true }).includes(xv1[0]), `MEASURED: xpra's Xvfb (pid ${xv1[0]}, in xpra's session) carries NO session marker, and DOES carry the per-app XAUTHORITY`);
+    process.kill(g1.pids.x, 'SIGKILL');
+    await until(() => (kg.get(g1.id).state === 'failed' ? true : null), 15000);
+    await until(() => (xv1.every((p) => !D.pidAlive(p)) ? true : null), 8000);
+    ok(kg.get(g1.id).state === 'failed' && /X display :\d+ exited/.test(kg.get(g1.id).lastError || '') && xv1.every((p) => !D.pidAlive(p)) && !D.pidAlive(g1.pids.app), `SIGKILL of a ready session's xpra ⇒ failed (${kg.get(g1.id).lastError}), the app reaped AND Xvfb-for-Xpra-S${g1.pids.x} reaped by the teardown`);
+    kg.shutdown();
+    // the keeper PROCESS DOWN when xpra dies (§3's shape: a child keeper SIGKILLed — the suite's own keepers still hold
+    // live child handles, so they would see the exit): the next boot's adoption reaps the Xvfb
+    const downDir = path.join(root, 'k12-crash-down'); fs.mkdirSync(downDir, { recursive: true });
+    const downChild = path.join(root, 'k12-crash-down-child.mjs');
+    fs.writeFileSync(downChild, `
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const K = require(${JSON.stringify(path.join(repo, 'src/server/desktop-app-keeper.js'))});
+const k = K.create({ dataDir: ${JSON.stringify(downDir)}, env: () => (${JSON.stringify(baseEnv())}), broadcast: () => {}, serverSetting: () => '', log: { log() {}, warn() {}, error() {} } });
+k.start();
+const rec = await k.launch({ exec: ${JSON.stringify(appBin)}, args: ${JSON.stringify(appArgs)}, label: 'crash-down' });
+for (let i = 0; i < 300; i++) { const r = k.get(rec.id); if (r.state !== 'launching') { console.log(JSON.stringify(r)); break; } await new Promise((r) => setTimeout(r, 100)); }
+setInterval(() => {}, 1000);
+`);
+    const downProc = spawn(process.execPath, [downChild], { stdio: ['ignore', 'pipe', 'inherit'] });
+    children.push(downProc);
+    let downOut = '';
+    const g2 = await new Promise((resolve) => { downProc.stdout.on('data', (b) => { downOut += b; const line = downOut.split('\n').find((l) => l.startsWith('{')); if (line) resolve(JSON.parse(line)); }); setTimeout(() => resolve(null), 30000); });
+    const xv2 = g2 && g2.pids.x ? xvfbOf(g2.pids.x) : [];
+    downProc.kill('SIGKILL');
+    await sleep(300);
+    if (g2 && g2.pids.x) process.kill(g2.pids.x, 'SIGKILL');
+    await sleep(400);
+    ok(g2 && g2.state === 'ready' && g2.backend === 'xpra' && !alive(downProc.pid) && xv2.length === 1 && D.pidAlive(xv2[0]) && !D.pidAlive(g2.pids.x), `keeper process SIGKILLed, then its xpra: the Xvfb outlives both (pid ${xv2[0]} alive — nothing has looked yet)`, g2 && g2.lastError);
+    const kg2 = mk('k12-crash-down', { settings: { 'desktop.backendPrefs': '' } });
+    await kg2.adoptAll();
+    await until(() => (xv2.every((p) => !D.pidAlive(p)) ? true : null), 8000);
+    ok(!M.isLiveState(kg2.get(g2.id).state) && xv2.every((p) => !D.pidAlive(p)) && !D.pidAlive(g2.pids.app), `after a reboot, adoptAll judges the record ${kg2.get(g2.id).state} and its Xvfb is reaped too (proven by its XAUTHORITY, its leader long dead)`);
+    // the boot belt: a TERMINAL record's leftover proven ONLY by its XAUTHORITY (no marker, in no recorded session) is reaped; a foreign path is not
+    const strayA = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, XAUTHORITY: path.join(kg2.logRoot, g2.id, 'Xauthority') } }); strayA.unref(); children.push(strayA);
+    const strayB = spawn('sleep', ['3600'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, XAUTHORITY: path.join(kg2.logRoot, 'da-not-ours', 'Xauthority') } }); strayB.unref(); children.push(strayB);
+    await sleep(150);
+    kg2.shutdown();
+    const kg3 = mk('k12-crash-down', { settings: { 'desktop.backendPrefs': '' } });
+    await kg3.adoptAll();
+    await until(() => (!D.pidAlive(strayA.pid) ? true : null), 6000);
+    ok(!D.pidAlive(strayA.pid), 'the boot belt reaps a terminal record\'s leftover that carries only its XAUTHORITY (the Xvfb shape: sanitised env, own session)');
+    ok(D.pidAlive(strayB.pid), 'CONTROL: the same shape naming ANOTHER id\'s Xauthority path is never signalled');
+    try { process.kill(strayB.pid, 'SIGKILL'); } catch {}
+    kg3.shutdown();
+    // CONTROL: the pre-fix keeper (the marker was the only evidence) leaks the Xvfb on the same crash
+    const { mod: KX } = mutant('xvfb', [["  const needlesOf = (rec) => (rec.backend === 'desktop-singleton' ? [sessionMarker(rec.id)] : [sessionMarker(rec.id), `XAUTHORITY=${path.join(logRoot, rec.id, 'Xauthority')}`]);", "  const needlesOf = (rec) => [sessionMarker(rec.id)]; // pre-fix: the marker was the only evidence"]]);
+    const cdir = path.join(root, 'k12-crash-ctl'); fs.mkdirSync(cdir, { recursive: true });
+    const kc = KX.create({ dataDir: cdir, env: baseEnv, broadcast: () => {}, serverSetting: () => '', log: { log() {}, warn() {}, error() {} } }); keepers.push(kc);
+    await kc.adoptAll(); kc.start();
+    const gc = await launchReady(kc, 'crash-ctl');
+    const xvc = xvfbOf(gc.pids.x);
+    process.kill(gc.pids.x, 'SIGKILL');
+    await until(() => (kc.get(gc.id).state === 'failed' ? true : null), 15000);
+    await sleep(1500);
+    ok(gc.backend === 'xpra' && xvc.length === 1 && D.pidAlive(xvc[0]), `CONTROL: the pre-fix keeper (marker-only evidence) leaves Xvfb-for-Xpra-S${gc.pids.x} alive after the same crash (${xvc.join(', ')})`);
+    for (const p of xvc) { try { process.kill(p, 'SIGKILL'); } catch {} }
+    kc.shutdown();
+  }
+}
+
+console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fitted after ready, FOLLOWING a real SetDesktopSize through the real bridge, the tick belt, the FIXED spelling, a refusal by name');
+{
+  const XVNC = D.binOnPath('Xvnc', { env: process.env });
+  const XDO = D.binOnPath('xdotool', { env: process.env }), XDPY = D.binOnPath('xdpyinfo', { env: process.env });
+  if (!XVNC) skip('Xvnc is not on PATH — the follow leg cannot be driven on this box (tigervnc-standalone-server; the fleet image has it)');
+  else if (!XDO || !XDPY) skip(`xdotool (${!!XDO}) / xdpyinfo (${!!XDPY}) missing — the fit act cannot run`);
+  else {
+    const WebSocket = require('ws');
+    /** a real RFB client through the bridge: handshake, then SetDesktopSize on demand (what noVNC does with resizeSession) */
+    const rfbClient = (wsUrl) => new Promise((resolve) => {
+      const ws = new WebSocket(wsUrl); let buf = Buffer.alloc(0), stage = 0;
+      ws.on('message', (d) => { buf = Buffer.concat([buf, d]); for (;;) {
+        if (stage === 0) { if (buf.length < 12) return; ws.send('RFB 003.008\n'); buf = buf.slice(12); stage = 1; }
+        else if (stage === 1) { if (buf.length < 1) return; const n = buf[0]; if (buf.length < 1 + n) return; buf = buf.slice(1 + n); ws.send(Buffer.from([1])); stage = 2; }
+        else if (stage === 2) { if (buf.length < 4) return; buf = buf.slice(4); ws.send(Buffer.from([1])); stage = 3; }
+        else if (stage === 3) { if (buf.length < 24) return; const nl = buf.readUInt32BE(20); if (buf.length < 24 + nl) return; buf = buf.slice(24 + nl); stage = 4;
+          const enc = [0, -308, -223]; const se = Buffer.alloc(4 + 4 * enc.length); se[0] = 2; se.writeUInt16BE(enc.length, 2); enc.forEach((e, i) => se.writeInt32BE(e, 4 + 4 * i)); ws.send(se);
+          resolve({ ws, setSize: (w, h) => { const sd = Buffer.alloc(24); sd[0] = 251; sd.writeUInt16BE(w, 2); sd.writeUInt16BE(h, 4); sd[6] = 1; sd.writeUInt16BE(w, 16); sd.writeUInt16BE(h, 18); ws.send(sd); }, pointer: (x, y) => ws.send(Buffer.from([5, 0, x >> 8, x & 255, y >> 8, y & 255])), close: () => { try { ws.close(); } catch {} } }); }
+        else return; } });
+      ws.on('error', () => resolve(null));
+    });
+    const top = async (k, id, wid) => (await k.windows(id)).windows.find((w) => w.depth === 1 && (wid == null || w.id === wid)) || null;
+    // (a) the REAL table pinned to vnc-display ⇒ via Xvnc, fitMode follows; the app is fitted the moment it has a window
+    const klog = [];
+    const k = mk('k13', { backends: M.DISPLAY_BACKENDS, tickMs: 1000, log: { log: (l) => klog.push(String(l)), warn: (l) => klog.push('WARN ' + l), error() {} } });
+    await k.adoptAll(); k.start();
+    const t0 = Date.now();
+    const rec = await k.launch({ exec: appBin, args: appArgs, label: 'fit' });
+    ok(rec.backend === 'vnc-display' && rec.via === 'Xvnc' && rec.fitMode === 'follows' && rec.fitBy === 'keeper' && rec.fb === null && rec.fit === null, 'the launching record: vnc-display via Xvnc, fitMode follows (by the keeper), no fb/fit fact yet', { via: rec.via, fitMode: rec.fitMode });
+    const ready = await until(() => (k.get(rec.id).state === 'ready' ? k.get(rec.id) : null), 20000);
+    ok(ready && ready.state === 'ready', `ready in ${Date.now() - t0} ms (${ready && ready.lastError})`);
+    const fitted = await until(() => { const r = k.get(rec.id); return r.fit && r.fit.ok ? r : null; }, 15000, 100);
+    const fitMs = Date.now() - t0;
+    ok(!!fitted && fitted.fb && fitted.fb.w === 1280 && fitted.fb.h === 800 && fitted.fit.w === 1280 && fitted.fit.h === 800 && fitted.fit.why === 'ready', `fitted ${fitMs} ms after launch: fb 1280x800 measured, fit {wid, 1280x800, why:'ready'} recorded as facts`, fitted && { fb: fitted.fb, fit: fitted.fit });
+    const w1 = fitted && await top(k, rec.id, fitted.fit.wid);
+    ok(!!w1 && w1.w === 1280 && w1.h === 800 && w1.x === 0 && w1.y === 0, `the app's top-level IS the framebuffer: ${w1 && `${w1.w}x${w1.h}+${w1.x}+${w1.y}`} (windows(id) carries depth; the picture is the app, no black root)`);
+    ok(!!fitted && !!w1 && typeof fitted.appTitle === 'string' && fitted.appTitle.length > 0 && fitted.appTitle === w1.title, `the record carries the fitted window's OWN title as a fact: appTitle ${JSON.stringify(fitted && fitted.appTitle)} = X's name for it (the window shows it instead of the label ${JSON.stringify(rec.label)})`, fitted && { appTitle: fitted.appTitle, x: w1 && w1.title });
+    ok(klog.some((l) => /fitted fit's window 0x[0-9a-f]+ \d+x\d+\+\d+\+\d+ → 1280x800\+0\+0 \(ready, \d+ ms\)/.test(l)), 'the keeper logged the act once, with the before/after geometry and its cost');
+    // (b) the follow: a real client's SetDesktopSize through the real bridge ⇒ the sieve reports ⇒ noteDesktopSize ⇒ the fb + the fit follow within 2 s
+    const reports = [];
+    const stream = S.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), onInput: (id) => k.noteInput(id), onDesktopSize: (id, w, h, viewer) => { reports.push([id, w, h, viewer]); k.noteDesktopSize(id, w, h); }, log: { warn() {}, log() {} } });
+    const srv = http.createServer(); srv.on('upgrade', (req, sock, head) => stream.handleUpgrade(req, sock, head, stream.upgradeId(new URL(req.url, 'http://x').pathname)));
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const c = await rfbClient(`ws://127.0.0.1:${srv.address().port}/api/desktop/${rec.id}/stream?viewer=v13`);
+    ok(!!c, 'a real RFB client handshook through the bridge to the keeper\'s Xvnc');
+    const followed = [];
+    for (const [W, H] of [[900, 600], [1024, 700]]) {
+      const inputsBefore = k.get(rec.id).lastInputAt;
+      const t1 = Date.now(); c.setSize(W, H);
+      const r = await until(() => { const r = k.get(rec.id); return r.fb && r.fb.w === W && r.fb.h === H && r.fit && r.fit.ok && r.fit.w === W && r.fit.h === H ? r : null; }, 5000, 50);
+      const ms = Date.now() - t1;
+      const wv = r && await top(k, rec.id, r.fit.wid);
+      followed.push({ W, H, ms, win: wv && `${wv.w}x${wv.h}+${wv.x}+${wv.y}` });
+      ok(!!r && ms < 2000 && wv && wv.w === W && wv.h === H && wv.x === 0 && wv.y === 0, `SetDesktopSize ${W}x${H} ⇒ fb ${W}x${H} and the app's window ${wv && `${wv.w}x${wv.h}+${wv.x}+${wv.y}`} in ${ms} ms (< 2 s; the fit's why "${r && r.fit.why}")`);
+      ok(k.get(rec.id).lastInputAt === inputsBefore, 'a SetDesktopSize moved the idle clock by NOTHING (it is not input)');
+    }
+    ok(reports.length === 2 && reports.every((x) => x[0] === rec.id && x[3] === 'v13') && reports[0][1] === 900 && reports[1][1] === 1024, `the bridge reported both asks with the viewer (${reports.map((x) => `${x[1]}x${x[2]}`).join(', ')})`);
+    console.log(`    measured: ${followed.map((f) => `${f.W}x${f.H} in ${f.ms} ms → ${f.win}`).join('; ')}`);
+    // (b2) r8 (2026-09-22, the twin of the xpra display-size fence, §16): a REFUSED viewer's SetDesktopSize never resizes the
+    // holder's shared Xvnc display and is never reported; the x4 strip as a patched copy is the control (it resizes)
+    {
+      const sizeX = () => { const m = /dimensions:\s+(\d+)x(\d+) pixels/.exec(execFileSync(XDPY, [], { env: k.x11EnvFor(rec.id) }).toString()); return m ? `${m[1]}x${m[2]}` : null; };
+      const watchBridge = async (Smod) => {
+        const rep = [];
+        const st = Smod.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), inputPolicy: () => ({ relay: false, code: 'watch-mode' }), onInput: () => {}, onDesktopSize: (id, w, h) => rep.push([w, h]), log: { warn() {}, log() {} } });
+        const sv = http.createServer(); sv.on('upgrade', (req, sock, head) => st.handleUpgrade(req, sock, head, st.upgradeId(new URL(req.url, 'http://x').pathname)));
+        await new Promise((r) => sv.listen(0, '127.0.0.1', r));
+        const cl = await rfbClient(`ws://127.0.0.1:${sv.address().port}/api/desktop/${rec.id}/stream?viewer=v13w`);
+        return { st, rep, cl, close: () => new Promise((r) => { try { cl && cl.close(); } catch {} sv.close(r); }) };
+      };
+      const before = sizeX();
+      const wb = await watchBridge(S);
+      wb.cl && wb.cl.setSize(640, 480);
+      await sleep(1500);
+      ok(!!wb.cl && sizeX() === before && wb.rep.length === 0 && wb.st.stats().dropped >= 1, `a Watch viewer's SetDesktopSize 640x480 never reaches Xvnc: the display stays ${sizeX()} (was ${before}), nothing reported to the keeper, counted refused (${wb.st.stats().dropped})`);
+      await wb.close();
+      const srcR = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+      const fromR = 'if ((input || type === 251) && !allowInput) dropped++;';
+      ok(srcR.split(fromR).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
+      const rfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-rfbsize13.js`);
+      fs.writeFileSync(rfile, srcR.replace(fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;')); mutants.push(rfile);
+      const wc = await watchBridge(require(rfile));
+      wc.cl && wc.cl.setSize(640, 480);
+      const moved = await until(() => (sizeX() === '640x480' ? '640x480' : null), 5000, 100);
+      ok(!!moved, `CONTROL: through the x4 strip the same Watch viewer resizes the holder's Xvnc display (${before} ⇒ ${sizeX()}) — the hole`);
+      await wc.close();
+      c.setSize(1024, 700); // the holder's size back for the legs below
+      await until(() => { const r = k.get(rec.id); return sizeX() === '1024x700' && r.fb && r.fb.w === 1024 && r.fb.h === 700 && r.fit && r.fit.ok && r.fit.w === 1024 && r.fit.h === 700 ? true : null; }, 8000, 100);
+      await sleep(1500); // settled again before (c) reads "two ticks re-recorded nothing"
+    }
+    // (c) the belt: somebody is ACTING in the window (input through the bridge — an app resizes itself because a key was
+    // pressed, the calculator's mode switch) and the window is moved and shrunk ⇒ re-fitted within a tick or two, why
+    // 'tick'; a settled plan is never touched (the fit's `at` stays)
+    const wid = k.get(rec.id).fit.wid; const xenv = k.x11EnvFor(rec.id);
+    const settledAt = k.get(rec.id).fit.at; await sleep(2500);
+    ok(k.get(rec.id).fit.at === settledAt, 'two ticks over a SETTLED window re-recorded nothing (the belt only acts when the plan is not settled)');
+    c.pointer(10, 10);
+    await until(() => (k.get(rec.id).lastInputAt > settledAt ? true : null), 3000, 50);
+    execFileSync(XDO, ['windowmove', '--sync', String(wid), '40', '40', 'windowsize', '--sync', String(wid), '300', '200'], { env: xenv });
+    const t2 = Date.now();
+    const belt = await until(async () => { const w = await top(k, rec.id, wid); return w && w.w === 1024 && w.h === 700 && w.x === 0 && w.y === 0 ? w : null; }, 6000, 100);
+    ok(!!belt && k.get(rec.id).fit.why === 'tick', `with input through the bridge, the belt re-fitted a hand-moved 300x200+40+40 window to 1024x700+0+0 in ${Date.now() - t2} ms (why 'tick')`);
+    // (d) the view carries fb/fit/fitMode as COPIES (a reader cannot mutate the store)
+    const v = k.get(rec.id); v.fb.w = 1; v.fit.w = 1;
+    ok(k.get(rec.id).fb.w === 1024 && k.get(rec.id).fit.w === 1024, 'the view copies fb/fit');
+    c.close(); srv.close();
+    await k.stop(rec.id); k.shutdown();
+    ok(!(await k.fitApp(rec.id, 'after stop')).ok, 'fitApp on a stopped record is refused (not applicable)');
+    // (c2) THE BELT'S COST (2026-09-22, the verifier's 10-spawns: xdpyinfo + xwininfo + xdotool for EVERY settled
+    // session EVERY 5 s tick — 3.0 forks per session per tick, linear in sessions, ≈72 ms of blocked loop each at a
+    // 1.5 GB RSS). Counted through logging wrappers first on the keeper's own PATH; the tick driven by hand.
+    const XWI = D.binOnPath('xwininfo', { env: process.env });
+    const wrapDir = path.join(root, 'k13-wrap'); fs.mkdirSync(wrapDir, { recursive: true });
+    const spawnLog = path.join(root, 'k13-spawns.log');
+    for (const [b, real] of [['xdpyinfo', XDPY], ['xwininfo', XWI], ['xdotool', XDO]]) fs.writeFileSync(path.join(wrapDir, b), `#!/bin/sh\necho ${b} >> '${spawnLog}'\nexec '${real}' "$@"\n`, { mode: 0o755 });
+    const WRAPPED = ['xdpyinfo', 'xwininfo', 'xdotool'];
+    for (const b of WRAPPED) D.forgetBin(b); // binOnPath memoises a YES by NAME: the wrappers must be the answer for this keeper
+    const ks = mk('k13-spawns', { backends: M.DISPLAY_BACKENDS, tickMs: 3600000, fitSlowBeltMs: 4000, env: () => ({ ...baseEnv(), PATH: `${wrapDir}:${process.env.PATH}` }) });
+    const wrappedFacts = await ks.facts({ fresh: true });
+    ok(WRAPPED.every((b) => wrappedFacts.bins[b] === path.join(wrapDir, b)), 'the keeper resolved the COUNTING wrappers (else every count below would be a vacuous 0)', wrappedFacts.bins);
+    await ks.adoptAll(); // no start(): the tick is driven by hand
+    const rsp = await ks.launch({ exec: appBin, args: appArgs, label: 'spawns' });
+    await until(() => { const r = ks.get(rsp.id); return r.state === 'ready' && r.fit && r.fit.ok ? true : null; }, 20000, 100);
+    const spawned = () => { try { return fs.readFileSync(spawnLog, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
+    const ticks = async (n) => { for (let i = 0; i < n; i++) { await ks.tick(); await sleep(150); } };
+    await ticks(3); // the settling reads after the first act
+    const tIdle = Date.now(); fs.writeFileSync(spawnLog, '');
+    await ticks(8);
+    const idle = spawned();
+    ok(idle.length === 0 && Date.now() - tIdle < 4000, `8 ticks over a SETTLED, idle session forked NOTHING (${idle.length}: ${idle.join(', ') || 'none'}; the verifier measured 3 per tick)`);
+    await sleep(Math.max(0, 4200 - (Date.now() - tIdle))); fs.writeFileSync(spawnLog, '');
+    await ticks(1);
+    const slowRun = spawned();
+    ok(slowRun.join() === 'xdpyinfo,xwininfo', `the SLOW belt (fitSlowBeltMs, 60 s shipped) re-reads the framebuffer and the tree — and stops there when the tree text is unchanged (${slowRun.join(', ')})`);
+    ks.setWatchProbe((id) => id === rsp.id); fs.writeFileSync(spawnLog, '');
+    await ticks(3);
+    const watchedRun = spawned();
+    ok(watchedRun.length === 3 && watchedRun.every((b) => b === 'xwininfo'), `a WATCHED session (a viewer connected — setWatchProbe, the bridge's open sockets) is checked every tick with ONE fork (${watchedRun.join(', ')}) — a window that appears without input is seen within a tick`);
+    ks.setWatchProbe(() => false); fs.writeFileSync(spawnLog, '');
+    await ticks(3);
+    ok(spawned().length === 0, 'CONTROL: the same ticks with nobody watching and no input fork nothing');
+    ks.setWatchProbe(null);
+    fs.writeFileSync(spawnLog, '');
+    ks.noteInput(rsp.id);
+    await ticks(3);
+    const active = spawned();
+    ok(active.length === 3 && active.every((b) => b === 'xwininfo'), `input within ${K.FIT_ACTIVE_MS / 1000} s ⇒ the belt runs every tick with ONE fork (xwininfo; the tree unchanged ⇒ no visibility read, no plan): ${active.join(', ')}`);
+    const swid = ks.get(rsp.id).fit.wid;
+    execFileSync(XDO, ['windowsize', '--sync', String(swid), '300', '200'], { env: ks.x11EnvFor(rsp.id) });
+    fs.writeFileSync(spawnLog, '');
+    await ticks(1);
+    const moved = spawned();
+    const sw = await top(ks, rsp.id, swid);
+    ok(moved.join() === 'xwininfo,xdotool,xdotool' && sw && sw.w === 1280 && sw.h === 800 && ks.get(rsp.id).fit.why === 'tick', `the app resized itself while somebody acts ⇒ ONE tick: the tree changed ⇒ the visibility read + the act (${moved.join(', ')}), re-fitted to ${sw && `${sw.w}x${sw.h}`}`);
+    ok(K.FIT_SLOW_BELT_MS === 60000 && K.FIT_ACTIVE_MS === 30000 && K.FIT_SETTLE_RUNS === 2, 'the shipped cadence: settling reads 2, input keeps the belt on for 30 s, the settled belt every 60 s');
+    await ks.stop(rsp.id); ks.shutdown();
+    for (const b of WRAPPED) D.forgetBin(b);
+    // (e) the FIXED spelling (the fleet's other group / this box before tigervnc): Xvfb+x11vnc ⇒ fitMode fixed, the app still fitted to the fixed 1280x800, the view says so for the chip
+    const kf = mk('k13-fixed', { tickMs: 1000 });
+    await kf.adoptAll(); kf.start();
+    const rf = await kf.launch({ exec: appBin, args: appArgs, label: 'fixed' });
+    ok(rf.via === 'Xvfb+x11vnc' && rf.fitMode === 'fixed' && rf.fitBy === 'keeper', 'via Xvfb+x11vnc ⇒ fitMode FIXED, still the keeper\'s to fit');
+    const ff = await until(() => { const r = kf.get(rf.id); return r.state === 'ready' && r.fit && r.fit.ok ? r : null; }, 20000, 100);
+    const wf = ff && await top(kf, rf.id, ff.fit.wid);
+    ok(!!ff && ff.fb.w === 1280 && ff.fb.h === 800 && wf && wf.w === 1280 && wf.h === 800 && wf.x === 0 && wf.y === 0, `the fixed display's app is fitted to its 1280x800 (window ${wf && `${wf.w}x${wf.h}+${wf.x}+${wf.y}`}) — the browser scales, the chip names the limit`);
+    kf.noteDesktopSize(rf.id, 900, 600); await sleep(600);
+    ok(kf.get(rf.id).fb.w === 1280 && kf.get(rf.id).fit.w === 1280, 'a SetDesktopSize ask on the fixed spelling changes nothing: the fit reads the TRUTH (xdpyinfo), never the ask');
+    await kf.stop(rf.id); kf.shutdown();
+    // (f) a refusal BY NAME: no xdotool ⇒ recorded once, logged once, the record stays ready
+    const warned = [];
+    const noXdo = { ...D, hostFacts: async (o) => { const f = await D.hostFacts(o); return { ...f, bins: { ...f.bins, xdotool: null } }; } };
+    const kr = mk('k13-refused', { display: noXdo, tickMs: 500, log: { log() {}, warn: (l) => warned.push(String(l)), error() {} } });
+    await kr.adoptAll(); kr.start();
+    const rr = await kr.launch({ exec: appBin, args: appArgs, label: 'refused' });
+    const refused = await until(() => { const r = kr.get(rr.id); return r.state === 'ready' && r.fit && r.fit.ok === false ? r : null; }, 20000, 100);
+    await sleep(1600);
+    ok(!!refused && /xdotool not on PATH/.test(refused.fit.why) && refused.fb && refused.fb.w === 1280 && kr.get(rr.id).state === 'ready', `without xdotool the fit is REFUSED BY NAME (${refused && refused.fit.why}), the fb still measured, the record still ready`);
+    ok(warned.filter((l) => /cannot fit refused's window/.test(l)).length === 1, 'the refusal is said ONCE (not once per tick)');
+    await kr.stop(rr.id); kr.shutdown();
+    // (g) THE FLEET SHAPE — a reparenting WINDOW MANAGER on the display (the fleet image has xfwm4 and the recipe starts
+    // it when present): the plan fits the CLIENT inside the WM's frame, the act maximises it through the WM, the title is
+    // the client's own. VIBESPACE_TEST_WM_DIR may name a directory holding an `xfwm4`/`openbox` for THIS keeper only (the
+    // 2026-09-22 measurement ran the fleet image's own xfwm4 4.18 in a container against the keeper's display that way).
+    const wmDir = process.env.VIBESPACE_TEST_WM_DIR ? path.resolve(process.env.VIBESPACE_TEST_WM_DIR) : null;
+    const wmPath = wmDir ? `${wmDir}:${process.env.PATH}` : process.env.PATH;
+    D.forgetBin('xfwm4'); D.forgetBin('openbox'); // a memoised NO from the earlier legs' probes must not hide the directory named here
+    const WMBIN = D.binOnPath('xfwm4', { env: { PATH: wmPath } }) || D.binOnPath('openbox', { env: { PATH: wmPath } });
+    if (!WMBIN) skip('no xfwm4 / openbox on PATH — the WM-frame leg needs one (the fleet image has xfwm4; VIBESPACE_TEST_WM_DIR may name a directory holding one)');
+    else {
+      const wlog = [];
+      const kw = mk('k13-wm', { backends: M.DISPLAY_BACKENDS, tickMs: 1000, env: () => ({ ...baseEnv(), PATH: wmPath }), log: { log: (l) => wlog.push(String(l)), warn: (l) => wlog.push('WARN ' + l), error() {} } });
+      await kw.adoptAll(); kw.start();
+      const rw = await kw.launch({ exec: appBin, args: appArgs, label: 'wm' });
+      const fw = await until(() => { const r = kw.get(rw.id); return r.state === 'ready' && r.pids.wm && r.fit && r.fit.ok ? r : null; }, 40000, 200);
+      // the frame appears after the WM manages the window: the first fit may land before it — wait for a SETTLED frame
+      const framed = async () => { const rows = (await kw.windows(rw.id)).windows; const ci = rows.findIndex((w) => fw && w.id === kw.get(rw.id).fit.wid); if (ci < 0) return null; let fi = ci - 1; while (fi >= 0 && rows[fi].depth !== 1) fi--; return fi >= 0 && rows[ci].depth >= 2 ? { client: rows[ci], frame: rows[fi] } : null; };
+      const got = fw && await until(async () => { const f = await framed(); return f && f.frame.x === 0 && f.frame.y === 0 && f.frame.w === 1280 && f.frame.h === 800 ? f : null; }, 15000, 250);
+      ok(!!fw && fw.backend === 'vnc-display' && fw.pids.wm > 0, `the keeper started the window manager (${path.basename(WMBIN)}, pid ${fw && fw.pids.wm}) beside the app`, fw && { lastError: fw.lastError, fit: fw.fit });
+      ok(!!got && !!(got.client.cls || got.client.instance) && !got.frame.cls && got.client.id === kw.get(rw.id).fit.wid, `the fit names the CLIENT (0x${got ? got.client.id.toString(16) : '?'}, class ${got && got.client.cls}) inside the WM's frame — never the frame, never a WM helper`, got);
+      ok(!!got && got.frame.w === 1280 && got.frame.h === 800 && got.client.w <= 1280 && got.client.h < 800, `the FRAME is the framebuffer (${got && `${got.frame.w}x${got.frame.h}+${got.frame.x}+${got.frame.y}`}), the client inside it under the title (${got && `${got.client.w}x${got.client.h}+${got.client.x}+${got.client.y}`}) — via ${kw.get(rw.id).fit.via}`);
+      ok(!!got && kw.get(rw.id).appTitle === got.client.title && !!kw.get(rw.id).appTitle, `the window's title is the CLIENT's own name (${JSON.stringify(kw.get(rw.id).appTitle)}) — the frame has none`);
+      // the app shrinks itself (with somebody acting) ⇒ the frame is the framebuffer again within a few ticks
+      kw.noteInput(rw.id);
+      execFileSync(XDO, ['windowsize', String(got ? got.client.id : 0), '300', '200'], { env: kw.x11EnvFor(rw.id) });
+      const back = await until(async () => { const f = await framed(); return f && f.frame.w === 1280 && f.frame.h === 800 && f.frame.x === 0 && f.frame.y === 0 ? f : null; }, 8000, 250);
+      ok(!!back, `the app asked for 300x200 under the WM ⇒ the frame is 1280x800+0+0 again (${back ? 'held/restored' : 'not restored'})`);
+      await kw.stop(rw.id); kw.shutdown();
+    }
+    D.forgetBin('xfwm4'); D.forgetBin('openbox');
+  }
+}
+
+console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the P8-2 verify: a relayed shutdown-server / exit-server from a Watch viewer killed the real xpra)');
+{
+  const XAUTH14 = D.binOnPath('xauth', { env: process.env });
+  const WWW14 = XPRA_BIN ? D.xpraWwwDir({ binPath: XPRA_BIN, env: process.env }) : null;
+  if (!XPRA_BIN || !XAUTH14) skip('xpra / xauth not on PATH — the real-rung legs need both');
+  else if (!WWW14 || !fs.existsSync(path.join(WWW14, 'js/lib/rencode.js'))) skip('no rencode.js in the installed html5 client — a negotiated client speaks rencodeplus');
+  else {
+    (await import('node:vm')).runInThisContext(fs.readFileSync(path.join(WWW14, 'js/lib/rencode.js'), 'utf8'), { filename: 'rencode.js' });
+    const P = await import('../src/lib/xpra-proto.js');
+    const WebSocket = require('ws');
+    const frame = (pk) => { const body = Buffer.from(globalThis.rencode(pk)); const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 16; h.writeUInt32BE(body.length, 4); return Buffer.concat([h, body]); };
+    const k = mk('k14', { settings: { 'desktop.backendPrefs': '' } });
+    await k.adoptAll(); k.start();
+    const launch = async (label) => { const r0 = await k.launch({ exec: appBin, args: appArgs, label }); await until(() => (k.get(r0.id).state !== 'launching' ? true : null), 30000); k.keepAlive(r0.id); return k.get(r0.id); };
+    /** the product bridge (or a patched copy) with the window-live verdicts: v-watch refused (an agent holds the window), v-own allowed */
+    const bridgeOn = async (Smod, policy = (id, v) => (v === 'v-own' ? { relay: true } : { relay: false, code: 'watch-mode' })) => {
+      const blog = [];
+      const br = Smod.create({ auth: { requestAuthed: () => true }, resolveTarget: (id) => k.streamTarget(id), inputPolicy: policy, onInput: () => {}, log: { log: (l) => blog.push(String(l)), warn: (l) => blog.push('W ' + l) } });
+      const srv = http.createServer((req, res) => { res.statusCode = 404; res.end(); });
+      srv.on('upgrade', (req, socket, head) => { const id = Smod.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } br.handleUpgrade(req, socket, head, id); });
+      const port = await freePort(); await new Promise((r) => srv.listen(port, '127.0.0.1', r));
+      return { br, blog, port, close: () => new Promise((r) => srv.close(r)) };
+    };
+    /** a negotiated viewer: hello answered, the app's window seen; `send` frames packets */
+    const viewer = async (b, id, v) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${b.port}/api/desktop/${id}/stream?viewer=${v}`, ['binary']);
+      const back = []; ws.on('message', (m) => back.push(Buffer.from(m)));
+      await new Promise((r, j) => { ws.once('open', r); ws.once('error', j); });
+      ws.send(frame(['hello', { ...P.helloCaps({ width: 640, height: 480, dpi: 96, uuid: `vs-k14-${v}`, layout: 'us' }), lz4: false, brotli: false, compression_level: 0 }]));
+      const saw = (t) => back.some((m) => m[0] === 0x50 && S.xpraPacketType(m.subarray(8)) === t);
+      await until(() => (saw('hello') && saw('new-window') ? true : null), 15000, 100);
+      const first = (t) => back.find((m) => m[0] === 0x50 && S.xpraPacketType(m.subarray(8)) === t) || null;
+      return { ws, saw, first, send: (pk) => ws.send(frame(pk)), close: () => { try { ws.close(); } catch {} } };
+    };
+    const outlives = async (pid) => { await sleep(2500); return D.pidAlive(pid); };
+    const b = await bridgeOn(S);
+    const r1 = await launch('k14-a');
+    const w1 = await viewer(b, r1.id, 'v-watch');
+    ok(r1.state === 'ready' && r1.backend === 'xpra' && w1.saw('hello') && w1.saw('new-window'), `the Watch viewer still gets its hello and the app's new-window through the allowlist (${r1.backend}, ${r1.state})`);
+    { // …and PIXELS: its map-window is a watch type, so xpra starts drawing the window for it
+      const nwMsg = w1.first('new-window'); const nw = nwMsg ? globalThis.rdecode(new Uint8Array(nwMsg.subarray(8))) : null;
+      if (nw) w1.send(P.mapWindow(nw[1], { x: 0, y: 0, w: nw[4], h: nw[5] }));
+      await until(() => (w1.saw('draw') ? true : null), 10000, 100);
+      ok(!!nw && w1.saw('draw'), `a draw reaches the Watch viewer after ITS map-window (wid ${nw && nw[1]}) — the allowlist keeps the picture flowing`);
+    }
+    const d0 = b.br.stats().dropped;
+    w1.send(['shutdown-server']);
+    ok(await outlives(r1.pids.x) && k.get(r1.id).state === 'ready', `a Watch viewer's shutdown-server never reaches xpra: pid ${r1.pids.x} alive, record ${k.get(r1.id).state}`);
+    w1.send(['exit-server', 'k14 says so']);
+    ok(await outlives(r1.pids.x) && k.get(r1.id).state === 'ready', `a Watch viewer's exit-server never reaches xpra either: pid ${r1.pids.x} alive, record ${k.get(r1.id).state}`);
+    ok(b.br.stats().dropped - d0 === 2 && b.br.stats().lifecycle === 2 && b.blog.some((l) => /^W .*server-lifecycle packet\(s\).*viewer v-watch dropped/.test(l)), `both counted as refused (dropped +${b.br.stats().dropped - d0}, lifecycle ${b.br.stats().lifecycle}) and named in a warn line`, b.blog.filter((l) => /^W /.test(l)));
+    const o1 = await viewer(b, r1.id, 'v-own');
+    o1.send(['exit-server', 'k14 allowed']);
+    ok(await outlives(r1.pids.x) && k.get(r1.id).state === 'ready' && o1.saw('new-window'), `an input-ALLOWED viewer's exit-server is cut too — the keeper owns the server's lifecycle (pid alive, record ${k.get(r1.id).state})`);
+    w1.close(); o1.close();
+    await k.stop(r1.id);
+    // CONTROL: the r5 bridge (a denylist of input — every non-input packet relayed) on the same Watch viewer. exit-server is the
+    // spelling xpra 6.5.3 has no server-side switch for (the recipe's XPRA_CLIENT_CAN_SHUTDOWN=0 covers shutdown-server alone —
+    // test-desktop-display §5 (f)), so the bridge is its only gate and the control ends the session.
+    const srcS = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
+    const from = '      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);';
+    ok(srcS.split(from).length === 2, 'the bridge\'s allowlist decision is spelled once (the control patches exactly it)');
+    const mfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xstream14.js`);
+    fs.writeFileSync(mfile, srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5)')); mutants.push(mfile);
+    const bc = await bridgeOn(require(mfile));
+    const r2 = await launch('k14-ctl');
+    const w2 = await viewer(bc, r2.id, 'v-watch');
+    w2.send(['exit-server', 'k14 control']);
+    const died = await until(() => (!D.pidAlive(r2.pids.x) ? true : null), 6000, 100);
+    ok(w2.saw('hello') && !!died && k.get(r2.id).state !== 'ready', `CONTROL: through the r5 bridge the same Watch viewer's exit-server ENDS the session (xpra ${r2.pids.x} alive=${D.pidAlive(r2.pids.x)}, record ${k.get(r2.id).state})`);
+    w2.close();
+    try { await k.stop(r2.id); } catch {}
+    await b.close(); await bc.close();
+    // ── §15 (2026-09-22, hole B of the r6 verify): THE KEYMAP FENCE on the real rung ──
+    console.log('§15 the keymap fence — a Watch viewer never reprograms the display\'s X keymap; its keymap is replayed at its takeover');
+    const XMODMAP = D.binOnPath('xmodmap', { env: process.env });
+    const XTERM = D.binOnPath('xterm', { env: process.env });
+    if (!XMODMAP) skip('no xmodmap on PATH — the keymap legs read the display\'s X keymap with it');
+    else {
+      const keymapOf = (id) => execFileSync(XMODMAP, ['-pke'], { env: k.x11EnvFor(id) }).toString();
+      const hasSym = (id, sym) => new RegExp(`= .*\\b${sym}\\b`).test(keymapOf(id));
+      let takeover = false;
+      const policy = (id, v) => (v === 'v-own' || (takeover && v === 'v-watch') ? { relay: true } : { relay: false, code: 'watch-mode' });
+      const b15 = await bridgeOn(S, policy);
+      const r3 = await launch('k15-a');
+      ok(!hasSym(r3.id, 'ydiaeresis') && !hasSym(r3.id, 'thorn'), 'the display\'s keymap carries neither ydiaeresis nor thorn before any viewer (the probe keysyms)');
+      const w3 = await viewer(b15, r3.id, 'v-watch');
+      const nw3m = w3.first('new-window'); const nw3 = nw3m ? globalThis.rdecode(new Uint8Array(nw3m.subarray(8))) : null;
+      if (nw3) w3.send(P.mapWindow(nw3[1], { x: 0, y: 0, w: nw3[4], h: nw3[5] }));
+      const tDraw = Date.now(); await until(() => (w3.saw('draw') ? true : null), 10000, 50);
+      ok(w3.saw('hello') && w3.saw('new-window') && w3.saw('draw'), `MEASURED: the Watch viewer's picture needs no keymap packet — hello, new-window, then a draw ${Date.now() - tDraw} ms after its map-window, with no keyboard-config / keymap-changed sent at all`);
+      const d0 = b15.br.stats().dropped;
+      w3.send(P.keyboardConfigPacket([], { layout: 'us', extra: [['thorn', 249]] })); // the legacy keymap-changed spelling
+      w3.send(P.keyboardConfigPacket(['keyboard-config'], { layout: 'us', extra: [['ydiaeresis', 250]] }));
+      await sleep(2500);
+      ok(!hasSym(r3.id, 'ydiaeresis') && !hasSym(r3.id, 'thorn') && b15.br.stats().dropped - d0 === 2, `its keyboard-config (ydiaeresis at 250) and keymap-changed (thorn at 249) never reach xpra: X's keymap unchanged 2.5 s later, both counted refused (+${b15.br.stats().dropped - d0})`);
+      w3.send(P.pingEcho(1));
+      await sleep(300);
+      ok(!hasSym(r3.id, 'ydiaeresis'), 'still refused: a later packet replays nothing');
+      takeover = true; // the same socket, the same viewer id — the user took the window over
+      w3.send(P.pingEcho(2));
+      const replayed = await until(() => (hasSym(r3.id, 'ydiaeresis') ? true : null), 5000, 200);
+      ok(!!replayed && b15.blog.some((l) => /viewer v-watch may type now — the keymap it sent while refused reaches xpra first/.test(l)), 'THE TAKEOVER: its held keyboard-config reaches xpra first — X carries ydiaeresis (the holder\'s keymap, as if it had connected holding the window), the replay named in the log');
+      w3.close();
+      await k.stop(r3.id);
+      // TYPING after a takeover (the reason the fence HOLDS instead of dropping): the shipped client sends its keymap once,
+      // after the hello; a pane that connected in Watch mode must still type once it takes over
+      if (!XTERM) skip('no xterm on PATH — the typing leg reads what the app received from a file');
+      else {
+        const typeAfterTakeover = async (bridgeMod, label) => {
+          let own = false;
+          const bT = await bridgeOn(bridgeMod, (id, v) => (own ? { relay: true } : { relay: false, code: 'watch-mode' }));
+          const out = path.join(root, `k15-${label}-${process.pid}.txt`);
+          const r0 = await k.launch({ exec: XTERM, args: ['-geometry', '80x24', '-T', `vs-k15-${label}`, '-e', 'sh', '-c', `stty -icanon; cat > ${out}`], label: `k15-${label}` });
+          await until(() => (k.get(r0.id).state !== 'launching' ? true : null), 30000); k.keepAlive(r0.id);
+          const v = await viewer(bT, r0.id, 'v-pane');
+          v.send(P.keyboardConfigPacket(['keyboard-config'], { layout: 'us' })); // what xpra-client.js sends right after the hello
+          const nwm = v.first('new-window'); const nw = nwm ? globalThis.rdecode(new Uint8Array(nwm.subarray(8))) : null;
+          if (nw) v.send(P.mapWindow(nw[1], { x: 0, y: 0, w: nw[4], h: nw[5] }));
+          await until(() => (v.saw('draw') ? true : null), 10000, 50);
+          await sleep(500);
+          own = true;
+          if (nw) v.send(P.focusPacket(nw[1]));
+          for (const kk of new P.ImeKeymap().plan('abc').keys) { v.send(P.keyAction(nw ? nw[1] : 1, kk, true)); v.send(P.keyAction(nw ? nw[1] : 1, kk, false)); }
+          const typed = await until(() => { try { const t = fs.readFileSync(out, 'utf8'); return t.length >= 3 ? t : null; } catch { return null; } }, 5000, 100) || (fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '');
+          v.close(); await k.stop(r0.id); await bT.close();
+          return typed;
+        };
+        const typed = await typeAfterTakeover(S, 'fix');
+        ok(typed === 'abc', `a pane that connected in Watch mode (its keymap fenced) and then TOOK OVER types "abc" into the real xterm (${JSON.stringify(typed)})`);
+        // CONTROL: the fence WITHOUT the replay — the same pane types garbage (xpra reads its JS keycodes as X keycodes)
+        const fromR = '    if (allowInput && !st.oversize) {';
+        ok(srcS.split(fromR).length === 2, 'the replay is spelled once (the control patches exactly it)');
+        const rfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xreplay15.js`);
+        fs.writeFileSync(rfile, srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */')); mutants.push(rfile);
+        const typedC = await typeAfterTakeover(require(rfile), 'noreplay');
+        ok(typedC !== 'abc', `CONTROL: fenced without the replay, the same takeover types ${JSON.stringify(typedC)} instead of "abc"`);
+      }
+      // CONTROL: the r6 allowlist (keyboard-config / keymap-changed as watch types) — the same Watch viewer reprograms X
+      const fromW = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
+      ok(srcS.split(fromW).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
+      const wfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xwatch15.js`);
+      fs.writeFileSync(wfile, srcS.replace(fromW, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', ")); mutants.push(wfile);
+      const bw = await bridgeOn(require(wfile));
+      const r4 = await launch('k15-ctl');
+      const w4 = await viewer(bw, r4.id, 'v-watch');
+      w4.send(P.keyboardConfigPacket(['keyboard-config'], { layout: 'us', extra: [['ydiaeresis', 250]] }));
+      const changed = await until(() => (hasSym(r4.id, 'ydiaeresis') ? true : null), 5000, 200);
+      ok(!!changed, 'CONTROL: through the r6 allowlist the same Watch viewer\'s keyboard-config reprograms the display\'s X keymap (ydiaeresis at 250) — the hole');
+      w4.close(); await k.stop(r4.id);
+      await b15.close(); await bw.close();
+    }
+    // ── §16 (2026-09-22, round 3 of the P8-2 verify): THE DISPLAY-SIZE FENCE on the real rung ──
+    console.log('§16 the display-size fence — a Watch viewer never resizes the holder\'s shared virtual display; its size is replayed at its takeover');
+    const XDPY16 = D.binOnPath('xdpyinfo', { env: process.env });
+    if (!XDPY16) skip('no xdpyinfo on PATH — the display-size legs read the X screen with it');
+    else {
+      const sizeOf = (id) => { const m = /dimensions:\s+(\d+)x(\d+) pixels/.exec(execFileSync(XDPY16, [], { env: k.x11EnvFor(id) }).toString()); return m ? `${m[1]}x${m[2]}` : null; };
+      const settle = (id, want, ms = 5000) => until(() => (sizeOf(id) === want ? want : null), ms, 100);
+      let own16 = false;
+      const policy16 = (id, v) => (v === 'v-own' || (own16 && v === 'v-watch') ? { relay: true } : { relay: false, code: 'watch-mode' });
+      const b16 = await bridgeOn(S, policy16);
+      const r6 = await launch('k16-a');
+      const o6 = await viewer(b16, r6.id, 'v-own');
+      o6.send(P.displayPacket(['display-configure'], { width: 900, height: 600 }));
+      ok(!!(await settle(r6.id, '900x600')), `the HOLDER's display-configure sizes the shared display (${sizeOf(r6.id)}) — the fit the pane asks for`);
+      const w6 = await viewer(b16, r6.id, 'v-watch');
+      await sleep(500);
+      ok(sizeOf(r6.id) === '900x600', `a Watch viewer's hello (640x480 caps) leaves the holder's size alone (${sizeOf(r6.id)}) — xpra keeps an existing client's size`);
+      const d6 = b16.br.stats().dropped;
+      w6.send(P.displayPacket(['display-configure'], { width: 1, height: 1 }));
+      w6.send(P.displayPacket(['configure-display'], { width: 480, height: 360 }));
+      w6.send(P.displayPacket([], { width: 320, height: 240 })); // the legacy desktop_size spelling
+      await sleep(2500);
+      ok(sizeOf(r6.id) === '900x600' && b16.br.stats().dropped - d6 === 3, `its display-configure (1x1), configure-display (480x360) and desktop_size (320x240) never reach xpra: the display is ${sizeOf(r6.id)} 2.5 s later, all three counted refused (+${b16.br.stats().dropped - d6})`);
+      w6.close();
+      await sleep(800);
+      ok(sizeOf(r6.id) === '900x600', `…and after the Watch viewer closes the holder's size stands (${sizeOf(r6.id)})`);
+      // THE TAKEOVER: the pane that watched becomes the holder — the size it asked for while refused is its fit now
+      const w7 = await viewer(b16, r6.id, 'v-watch');
+      w7.send(P.displayPacket(['display-configure'], { width: 700, height: 500 }));
+      await sleep(1500);
+      ok(sizeOf(r6.id) === '900x600', `still refused: its 700x500 is held, not applied (${sizeOf(r6.id)})`);
+      own16 = true;
+      w7.send(P.pingEcho(3));
+      const took = await settle(r6.id, '700x500');
+      ok(!!took && b16.blog.some((l) => /viewer v-watch may type now — the display size it sent while refused reaches xpra first/.test(l)), `THE TAKEOVER: its held display-configure reaches xpra first — the display is ${sizeOf(r6.id)}, the pane's own size, the replay named in the log`, b16.blog.filter((l) => /may type now/.test(l)));
+      w7.close(); o6.close();
+      await k.stop(r6.id);
+      // CONTROL: the fence WITHOUT the replay — the pane that watched and took over never gets its own size
+      const fromN = '    if (allowInput && !st.oversize) {';
+      ok(srcS.split(fromN).length === 2, 'the replay is spelled once (the no-replay control patches exactly it)');
+      const nfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xnoreplay16.js`);
+      fs.writeFileSync(nfile, srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */')); mutants.push(nfile);
+      let ownN = false;
+      const bn = await bridgeOn(require(nfile), (id, v) => (v === 'v-own' || (ownN && v === 'v-watch') ? { relay: true } : { relay: false, code: 'watch-mode' }));
+      const r9 = await launch('k16-noreplay');
+      const o9 = await viewer(bn, r9.id, 'v-own');
+      o9.send(P.displayPacket(['display-configure'], { width: 900, height: 600 }));
+      await settle(r9.id, '900x600');
+      const w9 = await viewer(bn, r9.id, 'v-watch');
+      w9.send(P.displayPacket(['display-configure'], { width: 700, height: 500 }));
+      await sleep(800);
+      ownN = true; w9.send(P.pingEcho(4));
+      await sleep(2000);
+      ok(sizeOf(r9.id) === '900x600', `CONTROL: fenced without the replay, the pane that took over is left at the old holder's ${sizeOf(r9.id)} instead of its own 700x500`);
+      w9.close(); o9.close(); await k.stop(r9.id); await bn.close();
+      // CONTROL: the r7 allowlist (the display-size packets as watch types) — the same Watch viewer resizes the holder's display
+      const fromD = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
+      ok(srcS.split(fromD).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
+      const dfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xdisplay16.js`);
+      fs.writeFileSync(dfile, srcS.replace(fromD, fromD + "'display-configure', 'configure-display', 'desktop_size', ")); mutants.push(dfile);
+      const bd = await bridgeOn(require(dfile));
+      const r8 = await launch('k16-ctl');
+      const o8 = await viewer(bd, r8.id, 'v-own');
+      o8.send(P.displayPacket(['display-configure'], { width: 900, height: 600 }));
+      await settle(r8.id, '900x600');
+      const w8 = await viewer(bd, r8.id, 'v-watch');
+      w8.send(P.displayPacket(['display-configure'], { width: 1, height: 1 }));
+      const shrunk = await until(() => { const s = sizeOf(r8.id); return s && s !== '900x600' ? s : null; }, 5000, 100);
+      w8.close(); await sleep(800);
+      const after = sizeOf(r8.id);
+      ok(!!shrunk && after !== '900x600', `CONTROL: through the r7 allowlist the same Watch viewer resizes the holder's display (900x600 ⇒ ${shrunk}) and it stays ${after} after the watcher closes — the hole`);
+      o8.close(); await k.stop(r8.id);
+      await b16.close(); await bd.close();
+    }
+    k.shutdown();
+  }
+}
+
+console.log('§17 the exit sweep\'s Xvfb-for-Xpra rule — by EVIDENCE (dead owner + gone scratch dir), never by name');
+{
+  // a dead pid to name as the "xpra" owner and as the "run" pid: a child that already exited
+  const deadPid = () => { const c = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }); return Number(c.stdout); };
+  const ownerDead = deadPid(), runDead = deadPid();
+  const goneDir = `${scratchFamily}-${runDead}`, liveDir = path.join(root, 'xvfb-evidence-live');
+  fs.mkdirSync(goneDir, { recursive: true }); fs.mkdirSync(liveDir, { recursive: true });
+  // stand-ins named like xpra's own Xvfb (bash `exec -a` sets argv[0]); cwd = a crashed run's scratch dir / this run's live one
+  const fake = (cwd, owner) => { const c = spawn('bash', ['-c', `exec -a Xvfb-for-Xpra-S${owner} sleep 30`], { cwd, stdio: 'ignore', detached: true }); children.push(c); return c; };
+  const gone = fake(goneDir, ownerDead), live = fake(liveDir, ownerDead), ownerAlive = fake(goneDir, process.pid);
+  await sleep(300);
+  fs.rmSync(goneDir, { recursive: true, force: true }); // the crashed run's scratch dir is GONE (its cwd now reads "(deleted)")
+  const hit = xvfbOrphans();
+  ok(hit.includes(gone.pid), `an Xvfb-for-Xpra-S<dead owner> whose cwd was a DELETED scratch dir of this suite's family (run pid dead) is an orphan by evidence (${gone.pid})`, hit);
+  ok(!hit.includes(live.pid), 'CONTROL: the same name and a dead owner, but its scratch dir still EXISTS (a live run\'s) — not touched', hit);
+  ok(!hit.includes(ownerAlive.pid), 'CONTROL: a gone scratch dir, but its named xpra owner is ALIVE — not touched', hit);
+  for (const c of [gone, live, ownerAlive]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
 }
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);

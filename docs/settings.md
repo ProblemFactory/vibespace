@@ -98,6 +98,8 @@ Overrides persist in the layout auto-save.
 | `window.tabWrap` | boolean | `false` | Allow tab bar to wrap into multiple rows |
 | `window.closeBehavior` | enum | `terminate` | Close window: terminate session, or detach (keep alive for re-attach) |
 | `window.activeHighlightIntensity` | enum | `normal` | Focused window highlight: subtle (shadow), normal (accent border), strong (border + glow) |
+| `desktop.idleTimeoutMin` | number | `30` | A desktop application window with no input for this long is stopped; `0` = never. "Keep running" in a window exempts that app. Stamped on each app at launch (changing it never touches a running app) |
+| `desktop.backendPrefs` | string | *(empty)* | Comma-separated rung ids that reorder the desktop-app picture-backend ladder for NEW apps on this instance, e.g. `vnc-display, xpra` to keep the whole-display rung first. Empty = installed order (`xpra` > `vnc-display` > `desktop-singleton`). Unknown ids are ignored; a running app keeps the backend it started with |
 
 ### Terminal
 

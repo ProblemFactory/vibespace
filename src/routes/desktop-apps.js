@@ -14,6 +14,22 @@
  *   GET  /api/vnc/status · POST /api/vnc/start   the singleton desktop's two
  *                                     routes (moved from server.js — same
  *                                     answers, one home for desktop routes)
+ *   GET  /api/desktop/apps/:id/windows       P8-2: the app's windows on its display
+ *                                     (title / class / geometry — the on-demand
+ *                                     snapshot; the live title rides the picture)
+ *   GET  /api/desktop/:id/xpra-ui/           P8-2, D21 (c) (a) THE VALIDATION SLICE:
+ *   GET  /api/desktop/:id/xpra-ui/*          the UPSTREAM xpra html5 client, served
+ *                                     from the installed xpra's www tree behind
+ *                                     VibeSpace's cookie auth (nosniff, no listing,
+ *                                     no dotfiles), the bare dir REDIRECTING to
+ *                                     index.html with the client's `path` set to
+ *                                     OUR relay (/api/desktop/<id>/stream) — the
+ *                                     raw xpra port never reaches a browser;
+ *                                     `?netem=rtt:200,kbps:1000` is remembered
+ *                                     for the id ONLY under VIBESPACE_DESKTOP_NETEM=1;
+ *                                     its socket names no viewer (the page strips
+ *                                     `?`/`=`/`&` from `path`), so since 2.369.156
+ *                                     it is a read-only WATCH seat — never elected
  *   GET  /api/desktop/apps/:id/lease         P9b (design-agent-browser-v2 §4.3 /
  *   POST /api/desktop/apps/:id/takeover      §6.6): the agent lease on this
  *   POST /api/desktop/apps/:id/handback      window and the user's two moves
@@ -21,6 +37,21 @@
  *                                     own id (the one it put on its stream
  *                                     upgrade); decided by the window-targets
  *                                     engine, the ONE owner of lease.input
+ *                                     (a takeover also makes that viewer the
+ *                                     ACTIVE one — x5)
+ *   GET  /api/desktop/apps/:id/viewers        P8-2 x5 (design §7 P8-2 "x5 多客户端 =
+ *   POST /api/desktop/apps/:id/viewers/takeover  单活跃 viewer"): who watches the
+ *                                     window and which pane is ACTIVE (the
+ *                                     `desktop-app-viewers` payload — panes by
+ *                                     their public key, never a socket's id);
+ *                                     "Resume here" = `{viewerId}` (the pane's
+ *                                     live socket id) becomes the active viewer
+ *                                     — through the engine's human takeover when
+ *                                     an agent holds the window (a takeover held
+ *                                     by another human moves WITHOUT a handback:
+ *                                     nothing is announced, nothing billed),
+ *                                     else a plain swap; `no_viewer` 409 when
+ *                                     that socket is not open
  *
  * EVERY route takes `host` (query or body) and REFUSES a non-local host by
  * name (v1 has no daemon op yet) — `hostId` is a parameter, never a silent
@@ -29,6 +60,7 @@
  * of a user action.
  */
 const express = require('express');
+const { streamKindOf } = require('../desktop-apps');
 const router = express.Router();
 
 let ctx = null;
@@ -45,8 +77,8 @@ function refuseHost(req, res) {
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' ? 400
-    : code === 'cap' || code === 'runaway-parked' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' ? 409
-      : code === 'no-engine' ? 503 : 500;
+    : code === 'cap' || code === 'runaway-parked' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' ? 409
+      : code === 'no-engine' || code === 'xpra-ui-unavailable' ? 503 : 500;
   res.status(status).json({ error: String(e?.message || e), code });
 }
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
@@ -77,6 +109,55 @@ router.post('/api/desktop/apps/:id/keep-alive', (req, res) => {
   try { res.json(ctx.keeper.keepAlive(req.params.id)); } catch (e) { fail(res, e); }
 });
 
+// P8-2: the app's windows on its display — an on-demand snapshot (two spawns),
+// never a poll; the LIVE title/icon a window shows ride the picture protocol
+router.get('/api/desktop/apps/:id/windows', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  try { res.json(await ctx.keeper.windows(req.params.id)); } catch (e) { fail(res, e); }
+});
+
+// P8-2, D21 (c) (a) — THE HOSTED UPSTREAM CLIENT. Auth is the app-level cookie
+// middleware every /api route sits behind (server.js mounts auth.middleware()
+// before any router); the tree is the installed package's own files, served
+// with express.static's listing/redirect/dotfiles all OFF and nosniff on every
+// answer. The bare dir composes the client's parameters server-side: `path`
+// = OUR relay for THIS id (the client concatenates ws://host + path, and its
+// getstrparam FILTERS the value to [0-9A-Za-z _+-:/] — an id is [a-z0-9-] by
+// construction), sound/printing/file transfer/remote logging off by name.
+const XPRA_UI_RE = /^\/api\/desktop\/([A-Za-z0-9._-]{1,80})\/xpra-ui(?:\/(.*))?$/;
+const xpraStatics = new Map(); // www dir → express.static handler
+async function xpraUiGate(req, res) {
+  const m = XPRA_UI_RE.exec(req.path);
+  if (!m) { res.status(404).json({ error: 'not a desktop route', code: 'not-found' }); return null; }
+  const id = m[1];
+  const rec = ctx.keeper.get(id);
+  if (!rec) { res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' }); return null; }
+  if (streamKindOf(rec) !== 'xpra') { fail(res, { code: 'not-xpra', message: `desktop app ${id} runs on ${rec.backend} — the xpra client cannot show it` }); return null; }
+  let www = null;
+  try { www = await ctx.keeper.xpraWww(); } catch { www = null; }
+  if (!www) { fail(res, { code: 'xpra-ui-unavailable', message: 'the installed xpra ships no html5 client (no www/index.html found)' }); return null; }
+  return { id, rec, www, rest: m[2] || '' };
+}
+router.get(XPRA_UI_RE, async (req, res) => {
+  const g = await xpraUiGate(req, res);
+  if (!g) return;
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Cache-Control', 'no-store');
+  if (g.rest === '' || g.rest === undefined) {
+    // dev-only: remember a netem spec for this id (the page cannot carry a query on the client's `path`)
+    if (req.query.netem != null && ctx.stream) { const n = ctx.stream.setNetem(g.id, String(req.query.netem)); res.set('X-VibeSpace-Netem', ctx.stream.netemEnabled ? (n ? `rtt:${n.rttMs},kbps:${n.kbps}` : 'off') : 'disabled'); }
+    const q = new URLSearchParams({ path: `/api/desktop/${g.id}/stream`, sound: 'false', printing: 'false', file_transfer: 'false', remote_logging: 'false', autohide: 'true', reconnect: 'true' });
+    res.redirect(302, `/api/desktop/${g.id}/xpra-ui/index.html?${q.toString()}`);
+    return;
+  }
+  if (/(^|\/)\.|\.\.|\0/.test(g.rest)) { res.status(404).json({ error: 'not found', code: 'not-found' }); return; }
+  let handler = xpraStatics.get(g.www);
+  if (!handler) { handler = express.static(g.www, { index: false, redirect: false, dotfiles: 'deny', etag: false, lastModified: false, maxAge: 0, fallthrough: true }); xpraStatics.set(g.www, handler); }
+  req.url = '/' + g.rest; // the static handler sees the path under the www root
+  handler(req, res, () => res.status(404).json({ error: `no such file in the xpra client: ${g.rest}`, code: 'not-found' }));
+});
+
 // P9b: the agent lease on a window + the user's takeover / handback (the
 // engine decides; a refusal is typed — `held` when another viewer drives,
 // `not_taken` when nobody does, `no_lease` when no agent holds the window)
@@ -97,7 +178,41 @@ router.post('/api/desktop/apps/:id/takeover', (req, res) => {
   const viewerId = String(req.body?.viewerId || '');
   if (!VIEWER_RE.test(viewerId)) return res.status(400).json({ error: 'a takeover needs the viewer taking it (viewerId)', code: 'bad-request' });
   if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
-  try { const r = engine.takeover({ handle: req.params.id, viewerId }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, already: !!r.already, lease: r.lease }); } catch (e) { fail(res, e); }
+  try {
+    const r = engine.takeover({ handle: req.params.id, viewerId }); if (!r.ok) return fail(res, { code: r.code, message: r.error });
+    const v = ctx.keeper.takeoverViewer ? ctx.keeper.takeoverViewer(req.params.id, viewerId) : null; // x5: the human who took over an agent's window is the ACTIVE viewer
+    res.json({ ok: true, already: !!r.already, lease: r.lease, viewers: v && v.viewers ? v.viewers : (ctx.keeper.viewersView ? ctx.keeper.viewersView(req.params.id) : null) });
+  } catch (e) { fail(res, e); }
+});
+// P8-2 x5: ONE active viewer per app window — who watches, and "Resume here"
+router.get('/api/desktop/apps/:id/viewers', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
+  res.json(ctx.keeper.viewersView(req.params.id));
+});
+router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
+  if (refuseHost(req, res)) return;
+  const id = req.params.id;
+  if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  const viewerId = String(req.body?.viewerId || '');
+  if (!VIEWER_RE.test(viewerId)) return res.status(400).json({ error: 'Resume here needs the pane\'s viewer id (viewerId)', code: 'bad-request' });
+  if (!ctx.keeper.get(id)) return res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' });
+  if (ctx.stream && !ctx.stream.viewerAlive(id, viewerId)) return fail(res, { code: 'no_viewer', message: 'this pane is not connected to the app yet — wait for it to reconnect, then Resume here' });
+  try {
+    const engine = ctx.windowEngine || null;
+    const lease = engine && typeof engine.leaseInput === 'function' ? engine.leaseInput(id) : null;
+    let leaseView = null;
+    if (lease) { // an agent holds the window: the engine's human takeover makes this viewer the holder (another human's hold moves, never handed back)
+      const other = lease.input === 'user' && lease.holder && lease.holder !== viewerId;
+      const r = engine.takeover({ handle: id, viewerId, ...(other ? { holderAlive: false } : {}) });
+      if (!r.ok) return fail(res, { code: r.code, message: r.error });
+      leaseView = r.lease;
+    }
+    const v = ctx.keeper.takeoverViewer(id, viewerId);
+    if (!v.ok) return fail(res, { code: v.code, message: v.error });
+    res.json({ ok: true, already: !!v.already, viewers: v.viewers, lease: leaseView || (engine ? engine.leaseOf(id) : null) });
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/handback', (req, res) => {
   if (refuseHost(req, res)) return;

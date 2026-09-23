@@ -51,15 +51,26 @@ const DISPLAY_BACKENDS = Object.freeze([
     id: 'xpra', label: 'xpra', perWindow: true, adaptive: true, stream: 'xpra',
     needs: Object.freeze([Object.freeze(['xpra'])]),
     recipes: Object.freeze({ xpra: 'xpra-seamless' }),
-    // P8-1: probed + recorded only; the relay is a named refusal in
-    // desktop-stream.js until P8-2 lands the HTML5 client (D21 (c)).
-    wired: false,
+    // P8-2 x4: the app window follows the pane from the CLIENT (xpra-client's configure-window) — the keeper's fit never runs here
+    fit: Object.freeze({ xpra: 'client' }),
+    // P8-2 (2026-09-21, DA1): WIRED — desktop-display's `xpra-seamless` recipe
+    // brings one xpra per app session up, desktop-stream relays its ws (kind
+    // 'xpra'), routes/desktop-apps hosts the HTML5 client. Installed ⇒ every
+    // NEW session takes this rung; a running vnc-display session is never
+    // migrated (adoption keeps the backend a record was born with).
+    wired: true,
   }),
   Object.freeze({
     id: 'vnc-display', label: 'vnc-display', perWindow: false, adaptive: false, stream: 'rfb',
     needs: Object.freeze([Object.freeze(['Xvnc']), Object.freeze(['Xvfb', 'x11vnc'])]),
     // one pid serves both X and RFB / an X server, then a picture server on it
     recipes: Object.freeze({ Xvnc: 'x-serves-rfb', 'Xvfb+x11vnc': 'x-then-server' }),
+    // P8-2 x4 (2026-09-22, owner: "就算是vnc也不能这样啊"): whether the DISPLAY can follow the window. TigerVNC's Xvnc
+    // honours the client's SetDesktopSize (RFB ExtendedDesktopSize; measured on this box: 1280x800 → 900x600 in 43 ms,
+    // status 0, xdpyinfo/xrandr agree; `-AcceptSetDesktopSize=0` is the one lever that refuses it) — 'follows'. Xvfb has a
+    // fixed framebuffer and x11vnc 0.9.17 offers no SetDesktopSize — 'fixed': the app is still FITTED to it by the keeper
+    // and the browser scales; the chip names the limit. Keyed by `via`, like recipes.
+    fit: Object.freeze({ Xvnc: 'follows', 'Xvfb+x11vnc': 'fixed' }),
     wired: true,
   }),
   Object.freeze({
@@ -69,6 +80,8 @@ const DISPLAY_BACKENDS = Object.freeze([
     // the latter as the pseudo-binary `desktop-singleton:running`
     needs: Object.freeze([Object.freeze(['Xtigervnc']), Object.freeze(['Xvnc']), Object.freeze(['desktop-singleton:running'])]),
     recipes: Object.freeze({ Xtigervnc: 'shared', Xvnc: 'shared', 'desktop-singleton:running': 'shared' }),
+    // a SHARED desktop with its own WM and the user's other windows — never fitted by the keeper
+    fit: Object.freeze({ Xtigervnc: 'shared', Xvnc: 'shared', 'desktop-singleton:running': 'shared' }),
     wired: true,
   }),
 ]);
@@ -118,12 +131,14 @@ function resolveBackend(hostFacts = {}, prefs = {}, table = DISPLAY_BACKENDS) {
   // reason — a user choosing an install sees what each would need); the FIRST
   // rung that can run wins, and the reasons of the rungs above it are its
   // fallbackWhy.
-  // A rung whose binary is present but whose relay is NOT WIRED (xpra until P8-2) is
-  // reported as present and passed over — it cannot run. 2.369.131: the day xpra was
-  // installed on this box the ladder chose it and the keeper refused every desktop-app
-  // launch with backend-not-wired (a named 409, but a refusal where vnc-display had
-  // been working). DA1 ("installed ⇒ preferred") applies to a WIRED rung.
-  const ladder = order.map((rung) => { const v = needsVerdict(rung, effBins); const wired = rung.wired !== false; const ok = v.ok && wired; return { backend: rung.id, ok, present: v.ok, via: v.via, recipe: v.ok ? recipeFor(rung.id, v.via, table) : null, why: ok ? null : (v.ok ? `${rung.id} present (${v.via}) but not wired until P8-2` : v.missing.join('; ')) }; }); // a present rung reports the recipe it WOULD use even when unwired (the launcher names it)
+  // A rung whose binary is present but whose relay is NOT WIRED is reported as
+  // present and passed over — it cannot run. 2.369.131: the day xpra was
+  // installed on this box (then an unwired row) the ladder chose it and the keeper
+  // refused every desktop-app launch with backend-not-wired (a named 409, but a
+  // refusal where vnc-display had been working). DA1 ("installed ⇒ preferred")
+  // applies to a WIRED rung; since P8-2 every shipped row is wired and this
+  // branch is reachable only through a table copy (the suites' control).
+  const ladder = order.map((rung) => { const v = needsVerdict(rung, effBins); const wired = rung.wired !== false; const ok = v.ok && wired; return { backend: rung.id, ok, present: v.ok, via: v.via, recipe: v.ok ? recipeFor(rung.id, v.via, table) : null, why: ok ? null : (v.ok ? `${rung.id} present (${v.via}) but not wired` : v.missing.join('; ')) }; }); // a present rung reports the recipe it WOULD use even when unwired (the launcher names it)
   const winner = ladder.findIndex((r) => r.ok);
   if (winner < 0) return { backend: null, via: null, recipe: null, stream: null, fallbackWhy: ladder.map((r) => r.why).join('; ') || 'no display backend', ladder };
   const fell = ladder.slice(0, winner).map((r) => r.why);
@@ -136,6 +151,181 @@ function fallbackLogLine(resolved) {
   const first = resolved.ladder[0];
   if (!first || first.backend === resolved.backend) return null;
   return `[desktop] backend fallback: ${first.backend}→${resolved.backend} (${resolved.fallbackWhy})`;
+}
+
+/**
+ * The INSTANCE preference (settings `desktop.backendPrefs`, P8-2): a comma
+ * list or array of rung ids that REORDERS the ladder for every launch whose
+ * registry row names no `backendPrefs` of its own — "keep the whole-display
+ * rung first on this instance" is a legitimate choice (an app that misbehaves
+ * under xpra's seamless window management), and the suites pin the rung they
+ * drive through it. Unknown ids are dropped, never invented (the same rule as
+ * a row's prefs); empty ⇒ the table's own DA1 order. PURE.
+ */
+function parseBackendPrefs(value, table = DISPLAY_BACKENDS) {
+  const ids = table.map((b) => b.id);
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,\s]+/) : [];
+  const out = [];
+  for (const v of raw) { const id = String(v || '').trim(); if (id && ids.includes(id) && !out.includes(id)) out.push(id); }
+  return out;
+}
+
+/** The stream KIND a record's rung speaks ('rfb' | 'xpra'), from the table —
+ *  the client picks its view by this, never by a backend id. */
+function streamKindOf(rec, table = DISPLAY_BACKENDS) {
+  const b = rec && rec.backend ? backendById(rec.backend, table) : null;
+  return b ? b.stream : null;
+}
+
+// ── P8-2 x4: the picture IS the app — the FIT policy and the FIT plan ───────
+/**
+ * Can the DISPLAY of a record follow the VibeSpace window, and who fits the
+ * app window to it? From the table's `fit` column (keyed by `via`):
+ *   { mode:'follows', by:'keeper' }  — Xvnc: the framebuffer follows the client's SetDesktopSize and the KEEPER fits
+ *                                      the app's top-level to it (xdotool) on every size change
+ *   { mode:'fixed',   by:'keeper' }  — Xvfb+x11vnc: the framebuffer never changes; the keeper fits the app to it once
+ *                                      and the browser scales; the window chip NAMES the limit
+ *   { mode:'client',  by:'client' }  — xpra: the client re-fits its window on every pane resize (x2); nothing here
+ *   { mode:'shared',  by:null }      — the shared desktop: its own WM, never touched
+ *   null                             — an unknown rung/via (older record): no fit, no claim
+ * `keeperFits(policy)` is the keeper's one gate.
+ */
+function fitPolicyOf(rec, table = DISPLAY_BACKENDS) {
+  const b = rec && rec.backend ? backendById(rec.backend, table) : null;
+  if (!b || !b.fit || typeof rec.via !== 'string' || !Object.prototype.hasOwnProperty.call(b.fit, rec.via)) return null;
+  const mode = b.fit[rec.via];
+  if (mode === 'follows' || mode === 'fixed') return { mode, by: 'keeper' };
+  if (mode === 'client') return { mode, by: 'client' };
+  if (mode === 'shared') return { mode, by: null };
+  return null;
+}
+const keeperFits = (policy) => !!(policy && policy.by === 'keeper');
+
+/** The rows of an enumeration that are top-level windows: a direct child of
+ *  root (`depth` 1 — an enumeration without depths is taken as-is, the
+ *  pre-x4 shape), mapped (or unknown), larger than 1x1. */
+function topLevelWindows(rows) {
+  return (rows || []).filter((w) => w && (w.depth == null || w.depth === 1) && w.mapped !== false && w.w > 1 && w.h > 1);
+}
+/**
+ * The APPLICATION's own windows — the CLIENT, never a window manager's frame
+ * (2026-09-22, MEASURED on the fleet image's xfwm4 4.18 over a scratch X):
+ * a reparenting WM puts every managed client one level down inside an
+ * UNNAMED depth-1 frame (`0x2019db (has no name): () 494x350+393+225` around
+ * `0x80000c … ("xterm" "XTerm") 484x316+5+29`), and keeps CLASSED helpers of
+ * its own at depth 1 (`0x200122 "Xfwm4": ("xfwm4" "Xfwm4") 5x5+-1000+-1000`,
+ * mapped) — the depth-1 rule picked THAT 5x5 helper as the main and would
+ * have resized it over the whole framebuffer. So: a depth-1 row with no
+ * class/instance/name whose subtree holds a CLASSED window is a FRAME and its
+ * shallowest classed descendant is the client; once any frame is seen the
+ * display is managed and depth-1 classed rows (the WM's helpers,
+ * override-redirect menus) are never the app's. Without frames (bare X) the
+ * top-levels are the app's windows, as before. Entries are the client's own
+ * fields (absolute x/y, its w/h, `mapped` = viewable) plus `frame`
+ * ({id,x,y,w,h} of the WM's frame, or null).
+ */
+function appWindows(rows) {
+  const list = (rows || []).filter(Boolean);
+  const named = (w) => !!(w.cls || w.instance || w.name);
+  const classed = (w) => !!(w.cls || w.instance);
+  const shown = (w) => w.mapped !== false && w.w > 1 && w.h > 1;
+  if (!list.some((w) => w.depth != null)) return list.filter(shown).map((w) => ({ ...w, frame: null }));
+  const groups = [];
+  for (const w of list) { if (w.depth == null || w.depth <= 1) groups.push({ top: w, sub: [] }); else if (groups.length) groups[groups.length - 1].sub.push(w); }
+  const framed = [];
+  for (const g of groups) {
+    if (named(g.top)) continue;
+    let client = null;
+    for (const c of g.sub) if (classed(c) && (!client || c.depth < client.depth)) client = c;
+    if (client) framed.push({ top: g.top, client });
+  }
+  if (framed.length) {
+    return framed.filter(({ top, client }) => top.mapped !== false && shown(client))
+      .map(({ top, client }) => ({ ...client, frame: { id: top.id, x: top.x, y: top.y, w: top.w, h: top.h } }));
+  }
+  return groups.map((g) => g.top).filter(shown).map((w) => ({ ...w, frame: null }));
+}
+/**
+ * THE FIT PLAN (PURE): given the windows on a display and its framebuffer,
+ * what must move so the picture is the app and nothing else.
+ *   · the MAIN window = the app window (`appWindows` — the CLIENT under a
+ *     WM) the previous plan fitted (`applied.wid`) while it still exists,
+ *     else the largest one that carries a class/instance/name (a class-less
+ *     1x1 helper or a bare popup is never it)
+ *   · on bare X the main is moved to 0,0 and resized to the framebuffer; in a
+ *     WM FRAME the frame must cover the framebuffer: `resize` is
+ *     `{id: <client>, w, h, framed:true}` with the client size = the
+ *     framebuffer minus the frame's decorations (the act maximises the CLIENT
+ *     through the WM when it can — measured on xfwm4: frame = the
+ *     framebuffer, the WM keeps it so through the app's own resizes and a
+ *     root resize — else moves/resizes the client so the frame lands at 0,0);
+ *     `resize` is null when the frame (or the bare window) already is the
+ *     framebuffer — the tick's belt must not touch a settled window
+ *   · every OTHER app window (a dialog, a second window of the app) keeps its
+ *     size and is NUDGED inside the framebuffer when its frame (or itself)
+ *     overflows (x/y clamped; one larger than the framebuffer goes to 0,0 —
+ *     it cannot fit, and it is never resized: a dialog's size is the app's
+ *     business); a move names the CLIENT and the frame's target corner
+ *     (xdotool windowmove on a managed client places its frame there, measured)
+ * Returns { main, resize, moves, settled, why }: `settled` = nothing to do.
+ */
+function appFitPlan(windows, fb, { applied = null } = {}) {
+  const fw = Number(fb && fb.w) || 0, fh = Number(fb && fb.h) || 0;
+  if (!(fw > 0 && fh > 0)) return { main: null, resize: null, moves: [], settled: false, why: 'no framebuffer size' };
+  const tops = appWindows(windows);
+  if (!tops.length) return { main: null, resize: null, moves: [], settled: false, why: 'no top-level window yet' };
+  let main = applied && applied.wid ? tops.find((w) => w.id === applied.wid) || null : null;
+  if (!main) main = largestNamed(tops);
+  const box = (w) => w.frame || w; // what must lie inside the framebuffer: the WM's frame, else the window itself
+  const mb = box(main);
+  let resize = null;
+  if (!(mb.x === 0 && mb.y === 0 && mb.w === fw && mb.h === fh)) {
+    resize = main.frame
+      ? { id: main.id, w: Math.max(1, fw - (main.frame.w - main.w)), h: Math.max(1, fh - (main.frame.h - main.h)), framed: true }
+      : { id: main.id, w: fw, h: fh };
+  }
+  const moves = [];
+  for (const w of tops) {
+    if (w.id === main.id) continue;
+    const b = box(w);
+    const x = b.w > fw ? 0 : Math.max(0, Math.min(b.x, fw - b.w));
+    const y = b.h > fh ? 0 : Math.max(0, Math.min(b.y, fh - b.h));
+    if (x !== b.x || y !== b.y) moves.push({ id: w.id, x, y });
+  }
+  return { main: { id: main.id, x: main.x, y: main.y, w: main.w, h: main.h, name: main.name || null, cls: main.cls || null, frame: main.frame ? { ...main.frame } : null }, resize, moves, settled: !resize && !moves.length, why: null };
+}
+
+/** The largest NAMED (classed / instanced / titled) window of a list, else the
+ *  largest of all; ties by the lower id — the ONE "which window is the app"
+ *  rule (appFitPlan's main, appMainWindow's). */
+function largestNamed(tops) {
+  const named = tops.filter((w) => w.cls || w.instance || w.name);
+  return (named.length ? named : tops).slice().sort((a, b) => (b.w * b.h - a.w * a.h) || (a.id - b.id))[0] || null;
+}
+/** The APPLICATION's main window among enumerated rows (x5 LOW-2: the xpra
+ *  rung's record names the app by it for a BLOCKED pane, which has no
+ *  protocol session to read the title from) — appWindows' top-levels, then
+ *  appFitPlan's rule; null when there is none. `seamless`: the rows are
+ *  ALREADY the app's own (desktop-display.seamlessWindows dropped xpra's
+ *  Corral wrappers, so the app sits at depth 2 with no depth-1 parent left —
+ *  appWindows' frame grouping would drop it). */
+function appMainWindow(windows, { seamless = false } = {}) {
+  const tops = seamless ? (windows || []).filter((w) => w && w.w > 1 && w.h > 1) : appWindows(windows);
+  return tops.length ? largestNamed(tops) : null;
+}
+
+/** The app window's OWN title as the VibeSpace window shows it on a rung the
+ *  keeper fits (P8-2 x4 — xpra's rides its protocol): the fitted main
+ *  window's name as X states it, control characters dropped, whitespace
+ *  trimmed, at most APP_TITLE_MAX code points; null when X gives none (an
+ *  unreadable encoding, no name) — the window then keeps the label. The
+ *  result is still APP-CONTROLLED text: it reaches the page through
+ *  textContent only. */
+const APP_TITLE_MAX = 200;
+function windowTitleOf(name) {
+  if (typeof name !== 'string') return null;
+  const s = Array.from(name.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim()).slice(0, APP_TITLE_MAX).join('').trim();
+  return s || null;
 }
 
 // ── registry rows + launch requests ─────────────────────────────────────────
@@ -275,7 +465,10 @@ function runawayParkVerdict(appId, parkedUntil, now) {
  * Boot ADOPTION (§4): a record is alive only when its X server AND its
  * picture server AND its app are the processes it recorded — pid AND
  * starttime — and the picture port still answers. `alive` = { x, server, app }
- * booleans the keeper measured; `portOk` = the banner probe. Returns either
+ * booleans the keeper measured; `portOk` = the LISTEN probe of the rung's own
+ * kind (the RFB banner, or xpra's HTTP answer — P8-2). The backend a record
+ * was BORN with is never re-resolved here (DA1: a vnc-display session
+ * survives the day xpra is installed). Returns either
  * { state:'ready', adopted:true } or { state:'exited'|'failed', lastError }.
  */
 function adoptVerdict(rec, alive, portOk) {
@@ -306,7 +499,8 @@ function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fall
 
 module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
-  DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine,
+  DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
+  fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY,
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, runawayVerdict, runawayParkVerdict, adoptVerdict, streamTargetOf, newRecord,

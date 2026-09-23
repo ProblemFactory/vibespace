@@ -147,6 +147,9 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
   // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
   'src/keeper-limits.js', 'src/desktop-apps.js',
+  // P8-2 x5 (docs/design-desktop-apps §7 P8-2): ONE active viewer per app window — the election, the
+  // active/blocked/watch rule with the agent lease, the broadcast shape; bundled into the window too
+  'src/desktop-viewers.js',
   // HARNESS SETTINGS (docs/design-harness-settings.zh.md §2, 2026-09-20): the per-harness
   // DECLARED tables + validator + coerce + the plan builder — imports nothing, bundled into the
   // browser (settings-schema derives the harness sections), required by the server and the daemon
