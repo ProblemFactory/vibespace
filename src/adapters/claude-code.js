@@ -169,6 +169,45 @@ class ClaudeCodeAdapter extends BackendAdapter {
       mergeSettings({ switchModelsOnFlag: false });
       env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK = '1';
     }
+    // CLAUDE CODE'S OWN AUTO-CONTINUE AT A USAGE LIMIT (owner ruling
+    // 2026-09-22; row `autoContinueAtUsageLimit`, default OFF). The CLI's own
+    // settings key, read from policy > --settings > user settings (2.1.280
+    // disassembly: `D7` walks ["policySettings","flagSettings","userSettings"])
+    // and treated as ON when absent. WHAT IT CHANGES DEPENDS ON THE MODE (2.1.280,
+    // read by byte offset): the feature arms only in an INTERACTIVE launch
+    // (`ETe` → `lzr` → `Wmt` → `id()` = launchOptions.isInteractive, set from
+    // `Zrn(argv)`, which is false whenever `!process.stdout.isTTY`).
+    //   · CHAT: every chat transport hands the CLI a pipe/file for stdout
+    //     (chat-wrapper `stdio:['pipe','pipe','pipe']`, the ssh keeper, the
+    //     agentd pipe session) ⇒ non-interactive ⇒ the CLI's continue NEVER
+    //     arms, whatever this key says. src/server/auto-resume.js is the only
+    //     producer there; the key is passed anyway as belt and braces (a later
+    //     CLI that armed non-interactively would otherwise double-bill).
+    //   · TERMINAL: pty-wrapper gives it a TTY ⇒ interactive ⇒ the CLI's own
+    //     continue WAS the only automatic continue (VibeSpace's auto-resume
+    //     delivers through sendChatInput, chat only). OFF therefore means a
+    //     terminal session stops at the wall with the limit dialog offering the
+    //     wait as a choice, and NOBODY continues it by itself — accepted because
+    //     the CLI's continue is a turn nobody typed that no spend ceiling bounds
+    //     (the owner's ruling; the trade-off is his to revisit via this row).
+    // A --settings value also hides the CLI's own /config toggle (it only
+    // toggles a userSettings or absent value). It rides EVERY transport because
+    // it is in `args`: ws-create shq's each arg into buildRemoteExec (ssh
+    // terminal / ssh keeper chat / ssh agentd pipe / dial pty / dial pipe) and
+    // the local r6Argv/dtach tail reads the same array.
+    // NEVER CLOBBER A USER'S OWN --settings FILE for a DEFAULT: when
+    // `extraArgs` already carries `--settings <path>` (not inline JSON), the
+    // other merges here overwrite it (their long-standing behaviour); a value
+    // this spawn adds on its own would do that on every spawn, so it stands
+    // down and the user's file governs (policy settings still outrank both).
+    // An explicit key in the user's own inline JSON is kept too.
+    if (S.autoContinueAtUsageLimit !== true) {
+      const si = args.indexOf('--settings');
+      let userObj = null;
+      if (si >= 0) { try { userObj = JSON.parse(args[si + 1]); } catch { userObj = undefined; } }
+      const mergeable = si < 0 || (userObj && typeof userObj === 'object' && !Array.isArray(userObj));
+      if (mergeable && !(userObj && Object.prototype.hasOwnProperty.call(userObj, 'autoContinueAtUsageLimit'))) mergeSettings({ autoContinueAtUsageLimit: false });
+    }
     // AUTHORITATIVE TURN STATE (design-harness-features §2.5/§3.5, owner
     // decision 8(c)): 2.1.257 emits `system/session_state_changed`
     // {idle|running|requires_action} — its own describe calls 'idle' the

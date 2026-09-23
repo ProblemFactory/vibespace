@@ -415,6 +415,62 @@ const PLAN = [['up-slow-1', 'up', 'slow'], ['up-slow-2', 'up', 'slow'], ['up-slo
   ['gap-down-mid-1', 'down', 'mid'], ['gap-down-mid-2', 'down', 'mid'], ['gap-down-fast-1', 'down', 'fast'],
   ['gap-up-mid-1', 'up', 'mid'], ['gap-up-mid-2', 'up', 'mid'], ['gap-up-fast-1', 'up', 'fast'],
   ['gap-down-hold-1', 'down', 'hold'], ['gap-down-hold-2', 'down', 'hold'], ['gap-down-hold-3', 'down', 'hold'], ['gap-tail-up-slow-1', 'up', 'slow']];
+// THE ② PROBE — CONSTRUCTED, NOT HOPED FOR (2.369.155; the mirror's red on 0c7f6af0, 3a1b77ca and 89c33c29,
+// both attempts each: the combined control's down rows never caught the pin). The rule ② can only go red if a
+// SNAPSHOT at settle sees the pin (or the walk to the tail on a short wheel). On the pre-fix copy a mid-history
+// repin happened on every mirror run (3-4 `repin we < total` in the ring) but inside a 4×700 px fling whose
+// later notches — and the count trim's st-0 landing — unpinned it before the settle, and a ≥ 2-viewport wheel is
+// excused from the teleport rule by design; locally the same fling happened to settle pinned. What the rule
+// needs is exactly this geometry: a PARTIAL window (we < total), the viewport parked `PROBE_D` px above the DOM's
+// bottom — ≥ 50 so the park itself is outside the pin band, < one 120 px notch so the notch MUST cross into it —
+// no input inside the paging gates' 1.5 s horizon (so nothing but the notch moves the view), then ONE notch and
+// nothing after it. On the pre-fix copy that notch pins in the middle of history and nothing ever unpins it
+// (measured: pinned at 1.5 s, 2.5 s, 4 s; 4/4 runs, 3/3 at CPU ×6); on the fix the same notch pages (the
+// overshoot carry) and never pins (3/3). The probe runs on BOTH builds — a control whose construction the fix
+// fails proves nothing — and its precondition is ASSERTED and printed, never assumed.
+const ringSince = (mark) => evaljs(RING_SINCE_SOURCE(mark));
+const snap = (topIdBefore = null, topOffBefore = 0) => evaljs(`(${SNAP_SOURCE})(${JSON.stringify(topIdBefore)}, ${topOffBefore})`);
+const TELEPORT = (x) => /pinned with the window|re-pinned mid-history|DOM's bottom|teleported to the tail/.test(x);
+const PROBE_D = 80;
+const PROBE_UPS = [['probe-up-mid', 'mid'], ['probe-up-fast-1', 'fast'], ['probe-up-fast-2', 'fast']];
+const pinProbe = async (port, label) => {
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
+  for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(400); }
+  await sleep(1500);
+  const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge probe ' + label));
+  if (!opened?.ok) return { opened };
+  // leave the live tail with the product's OWN paging (three real upward gestures)
+  for (const [, speed] of PROBE_UPS) {
+    const c = CADENCE[speed];
+    const pt = (await evaljs(WHEEL_POINT_SOURCE('up', c.notches * c.deltaY))) || { x: Math.round(opened.rect.x + opened.rect.w / 2), y: Math.round(opened.rect.y + opened.rect.h / 2) };
+    for (let i = 0; i < c.notches; i++) { await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY: -c.deltaY }); if (c.gap) await sleep(c.gap); }
+    await sleep(c.settle);
+  }
+  // PARK: the viewport PROBE_D px above the DOM's bottom, re-parked until the geometry holds (content-visibility
+  // resolves heights after a write, so one write can drift); a scripted scrollTop is no user input, so it pages nothing
+  let park = null, parks = 0;
+  for (; parks < 15; parks++) {
+    park = await evaljs(`(async () => { const l = window.__list; l.scrollTop = l.scrollHeight - l.clientHeight - ${PROBE_D}; await new Promise((r) => setTimeout(r, 400)); const a = Math.round(l.scrollHeight - l.scrollTop - l.clientHeight); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); const b = Math.round(l.scrollHeight - l.scrollTop - l.clientHeight); return { a, b }; })()`);
+    if (Math.abs(park.a - PROBE_D) <= 4 && park.a === park.b) break;
+  }
+  await sleep(1600);   // past the gates' 1.5 s user-input horizon, measured from the LAST wheel (the parks are not input)
+  const before = await snap(); const mark = before.ringSeq;
+  const room = before.sh - before.st - before.ch;
+  const pre = { we: before.we, total: before.total, ws: before.ws, room, pin: before.pin, loading: before.loading, tp: before.tp, parks: parks + 1 };
+  pre.ok = before.we < before.total && room >= 50 && room < CADENCE.slow.deltaY && !before.pin && !before.loading && !before.tp;
+  if (!pre.ok) return { opened, pre };
+  const pt = (await evaljs(WHEEL_POINT_SOURCE('down', CADENCE.slow.deltaY))) || { x: Math.round(opened.rect.x + opened.rect.w / 2), y: Math.round(opened.rect.y + opened.rect.h / 2) };
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY: CADENCE.slow.deltaY });
+  await sleep(CADENCE.slow.settle);
+  const after = await snap(before.topId, before.topOff); const ring = await ringSince(mark);
+  const row = { name: 'pin-probe', dir: 'down', speed: 'slow', wheelPx: CADENCE.slow.deltaY, before, after, ring, pt };
+  row.verdict = judgeGesture(row);
+  const midRepins = ring.filter((e) => e.tag === 'repin' && e.we < e.total).length;
+  const tags = {}; for (const e of ring) tags[e.tag] = (tags[e.tag] || 0) + 1;
+  console.log(`  [${label}] ② probe precondition: window ${pre.ws}..${pre.we} of ${pre.total} (${pre.total - pre.we} messages below it), viewport parked ${room} px above the DOM's bottom in ${pre.parks} write(s), pin ${pre.pin}, loading ${pre.loading}`);
+  console.log('    ' + formatGesture(row, row.verdict) + '  ring: ' + Object.entries(tags).map(([k, v]) => k + (v > 1 ? '×' + v : '')).join(' '));
+  return { opened, pre, row, midRepins };
+};
 const huge = await runGestures(PLAN, 'fix');
 check('the huge fixture opened view-only with the whole-file turn map armed (the seek sentinel installed = the owner\'s tail-mode paging), content-visibility on, compact mode', huge.opened?.ok && huge.opened.armed && huge.opened.cv && huge.opened.compact, JSON.stringify(huge.opened));
 if (huge.opened?.ok) {
@@ -427,7 +483,7 @@ if (huge.opened?.ok) {
   const bad = (pred) => R.filter((r) => r.verdict.reasons.some(pred));
   const jumps = bad((x) => /further|gone from the DOM|pageUp band/.test(x));
   check(`① no jump back > ${JUMP_SLACK_VIEWPORTS} viewports on any gesture (the reader's card stays where the wheel put it; a notch never lands inside the ${PAGE_UP_BAND_PX} px pageUp band with history — window OR gap — above)`, jumps.length === 0, jumps.map((r) => r.name + ': ' + r.verdict.reasons.join('; ')).join('\n    '));
-  const teleports = bad((x) => /pinned with the window|DOM's bottom|teleported to the tail/.test(x));
+  const teleports = bad((x) => /pinned with the window|re-pinned mid-history|DOM's bottom|teleported to the tail/.test(x));
   check('② no pin and no bottom landing before the window reaches the live tail (the DOM edge is a paging boundary, not a pin)', teleports.length === 0, teleports.map((r) => r.name + ': ' + r.verdict.reasons.join('; ')).join('\n    '));
   const blanks = bad((x) => /blank|empty below/.test(x));
   check('③ no blank over 25 % of the viewport after any gesture', blanks.length === 0, blanks.map((r) => r.name + ': ' + r.verdict.reasons.join('; ')).join('\n    '));
@@ -460,6 +516,13 @@ if (huge.opened?.ok) {
   console.log(`  grow passes per landing: ${grown.join(' ') || '(single-pass landings only)'}; trims: ${allTags.filter((e) => e.tag === 'trimBottom').length} bottom / ${allTags.filter((e) => e.tag === 'trimTop').length} top / ${allTags.filter((e) => e.tag === 'trimSkipZone').length} zone-skips; carried notches: ${allTags.filter((e) => e.tag === 'wheelCarry').length}`);
 }
 
+// ── 4c'. THE ② PROBE ON THE FIX (the positive half of the constructed control below) ──
+{
+  const p = await pinProbe(PORT, 'fix');
+  check(`② probe on the fix — precondition held: a partial window with the viewport parked ${PROBE_D} px above the DOM's bottom, unpinned, idle (${JSON.stringify(p.pre || p.opened)})`, !!p.pre?.ok, JSON.stringify(p.pre || p.opened));
+  if (p.row) check('② probe on the fix: the notch that crosses into the pin band pages instead — no pin, no bottom landing, no walk to the tail, no repin with we < total', !p.row.verdict.reasons.some(TELEPORT) && p.midRepins === 0, p.row.verdict.reasons.join('; ') + ` (repins with we < total: ${p.midRepins})`);
+}
+
 // ── 4d. THE PRE-FIX CONTROL: the same fixture and gestures on a scratch copy of
 // the client whose two rules are patched out — the trim's keep zone (back to
 // BY COUNT) and the pin predicate's `windowEnd ≥ total` term. The control must
@@ -467,6 +530,9 @@ if (huge.opened?.ok) {
 // bottom landing mid-history on a downward one); a control that passes the
 // legs means the legs test nothing. The patch is by exact strings, so a
 // refactor of the fix fails here loudly instead of silently unpatching.
+// ① is judged on the plan's up rows; ② on the CONSTRUCTED probe (pinProbe,
+// 2.369.155) — the plan's down rows settled pinned locally and unpinned on the
+// Actions runner, so a ② judged on them was a coin toss, not a control.
 console.log('§4d pre-fix control: the same legs on a copy with the keep zone and the pin predicate patched out must reproduce the incident');
 {
   const CONTROL_PATCHES = [
@@ -516,10 +582,15 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
     const jumps = R.filter((r) => r.dir === 'up' && r.verdict.reasons.some((x) => /further|gone from the DOM|pageUp band/.test(x)));
     const countTrims = allTags.filter((e) => e.tag === 'anchorLost' && e.why === 'removed').length + allTags.filter((e) => e.tag === 'extendTop:done' && !e.anchored && e.st === 0).length;
     check(`NEGATIVE CONTROL ①: with the trim back to BY COUNT an upward gesture JUMPS by the rules themselves (${jumps.length} of ${R.filter((r) => r.dir === 'up').length} up gestures violate; anchor-lost / st-0 landings in the ring: ${countTrims}) — the rule can go red`, jumps.length >= 1 && countTrims >= 1, R.filter((r) => r.dir === 'up').map((r) => r.name + ' dev=' + (r.after.topDev == null ? 'gone' : r.after.topDev - (-r.wheelPx)) + ' ws ' + r.before.ws + '→' + r.after.ws).join('\n    '));
-    const teleports = R.filter((r) => r.dir === 'down' && r.verdict.reasons.some((x) => /pinned with the window|DOM's bottom|teleported to the tail/.test(x)));
-    const midRepins = allTags.filter((e) => e.tag === 'repin' && e.we < e.total).length;
-    check(`NEGATIVE CONTROL ②: without the windowEnd ≥ total term a downward gesture PINS / lands on the DOM's bottom mid-history by the rules themselves (${teleports.length} rows violate; repins with we < total in the ring: ${midRepins}) — the rule can go red`, teleports.length >= 1 && midRepins >= 1, R.filter((r) => r.dir === 'down').map((r) => r.name + ' pin ' + r.before.pin + '→' + r.after.pin + ' we ' + r.after.we + '/' + r.after.total).join('\n    '));
+    // the plan's own down rows are TIMING-DEPENDENT evidence for ② (the mirror: repins every run, rows that settle
+    // unpinned) — printed, never judged; the constructed probe below is the control
+    const teleports = R.filter((r) => r.dir === 'down' && r.verdict.reasons.some(TELEPORT));
+    console.log(`  (informational) the plan's down rows: ${teleports.length} violate ②; repins with we < total in the plan's ring: ${allTags.filter((e) => e.tag === 'repin' && e.we < e.total).length}`);
   }
+  // NEGATIVE CONTROL ② — the constructed probe on the patched copy (see pinProbe)
+  const p = await pinProbe(CPORT, 'control');
+  check(`NEGATIVE CONTROL ② precondition held: a partial window with the viewport parked ${PROBE_D} px above the DOM's bottom, unpinned, idle (${JSON.stringify(p.pre || p.opened)})`, !!p.pre?.ok, JSON.stringify(p.pre || p.opened));
+  if (p.row) check(`NEGATIVE CONTROL ②: without the windowEnd ≥ total term ONE notch across the pin band PINS the view in the middle of history by the rules themselves (${p.row.verdict.reasons.filter(TELEPORT).join('; ') || 'no ② reason'}; repins with we < total in the probe's ring: ${p.midRepins}) — the rule can go red`, p.row.verdict.reasons.some(TELEPORT) && p.midRepins >= 1, formatGesture(p.row, p.row.verdict));
   cleanupControl();
   process.off('exit', cleanupControl);
   void prevCleanup;

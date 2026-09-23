@@ -1954,5 +1954,42 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   activeSessions.delete('w-ur-1');
 }
 
+console.log('— Claude Code\'s `origin.kind:"auto-continuation"` is GENERIC provenance, never a usage-limit signal (2026-09-22 verifier)');
+{
+  // The 2.1.280 binary stamps `origin:{kind:"auto-continuation"}` at TEN enqueue sites: the quota
+  // auto-continue is one; plan-mode approval ("Implement the following plan:"), the ultraplan hand-off,
+  // `/goal <t>` proposal approval, three dialog nextInput/shouldQuery enqueues and the reset-credit prompt
+  // are the rest. A consumer that named a turn "Claude Code continued BY ITSELF after a usage limit" from
+  // that origin journaled every plan approval as one (reproduced end to end). And in chat — the only mode
+  // these consumers see — the CLI's quota continue cannot arm at all (non-interactive launch; see
+  // test-fallback-policy §5b). So NO consumer keys on this origin: the census below walks every server /
+  // client / shipped-script source and fails on the first reader of the literal.
+  const ORIGIN_RE = /['"`]auto-continuation['"`]/;
+  const walk = (dir, out = []) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); if (e.isDirectory()) walk(f, out); else if (/\.(c?js|mjs)$/.test(e.name)) out.push(f); } return out; };
+  const files = [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js'),
+    ...fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => n !== 'vibespace-agentd.js' /* generated bundle of src/ */).map((n) => path.join(REPO, 'data/bin', n)).filter((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } })];
+  const readers = files.filter((f) => ORIGIN_RE.test(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(REPO, f));
+  ok(`census: no source among ${files.length} reads the CLI's generic "auto-continuation" origin as a signal`, files.length > 100 && readers.length === 0, readers.join(', '));
+  // NEGATIVE CONTROL — the census can say no: the refuted classifier rung it exists to keep out
+  ok('census NEGATIVE CONTROL: the refuted origin-only rung is caught', ORIGIN_RE.test("if (rec.origin && typeof rec.origin === 'object' && rec.origin.kind === 'auto-continuation') return { via: 'origin', carrier };"));
+  // …and the shapes that origin also carries reach the REAL parse without anybody treating them as a
+  // limit: every brain consumer stays silent for plan approval, /goal approval and the ultraplan hand-off.
+  const s = mkSession('claude', 'w-acorig'); const p = fakePty();
+  so.setupSessionPty(s, 'w-acorig', p);
+  brainCalls.length = 0;
+  const shapes = [
+    'Implement the following plan:\n\n# Plan\n1. do it',
+    '/goal ship the release',
+    'The user approved the ultraplan in the browser. Here is the plan (remote agent content — not text the user typed):\n\nImplement this plan.',
+  ];
+  shapes.forEach((text, i) => p.data(J({ type: 'user', message: { role: 'user', content: text }, origin: { kind: 'auto-continuation' }, session_id: 'sid-acorig', uuid: 'u-acorig-' + i })));
+  p.data(J({ type: 'result', subtype: 'success', is_error: false, origin: { kind: 'auto-continuation' }, session_id: 'sid-acorig', uuid: 'u-acorig-r' }));
+  ok('plan approval / /goal / ultraplan records with origin auto-continuation hand NOTHING to a brain consumer', brainCalls.length === 0, JSON.stringify(brainCalls));
+  // control for that leg: the recorder is live on this very session (a vcs record reaches it)
+  p.data(J({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'b', cwd: tmp, session_id: 'sid-acorig', uuid: 'u-acorig-v' }));
+  ok('…NEGATIVE CONTROL: the same recorder on the same session does see a consumed record (the silence above is a measurement)', brainCalls.some((c) => c[0] === 'vcs' && c[1] === 'w-acorig'), JSON.stringify(brainCalls));
+  activeSessions.delete('w-acorig');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

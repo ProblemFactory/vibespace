@@ -251,9 +251,13 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const ad = new ClaudeCodeAdapter({ buffersDir: '/tmp' });
   const argsOf = (opts) => ad.buildSessionArgs({ cwd: '/tmp', mode: 'chat', ...opts }).args;
   const settingsOf = (args) => { const i = args.indexOf('--settings'); return i < 0 ? null : JSON.parse(args[i + 1]); };
-  ok('no style ⇒ no settings flag invented', settingsOf(argsOf({})) === null);
+  // 2.369.155: every claude spawn carries autoContinueAtUsageLimit:false on the ONE flag (owner ruling —
+  // the CLI's own continue arms only interactively, i.e. in terminal sessions this module never reaches; it is
+  // a billed turn no spend ceiling bounds, so it is spawned off — test-fallback-policy §5b pins the per-mode premise)
+  ok('no style ⇒ no outputStyle key invented', !('outputStyle' in (settingsOf(argsOf({})) || {})));
   ok('Concise rides --settings as outputStyle', settingsOf(argsOf({ outputStyle: 'Concise' })).outputStyle === 'Concise');
-  ok('"default" is treated as unset', settingsOf(argsOf({ outputStyle: 'default' })) === null);
+  ok('"default" is treated as unset', !('outputStyle' in (settingsOf(argsOf({ outputStyle: 'default' })) || {})));
+  ok('the CLI\'s OWN auto-continue is spawned OFF (row off by default; row ON ⇒ nothing passed)', settingsOf(argsOf({})).autoContinueAtUsageLimit === false && !('autoContinueAtUsageLimit' in (settingsOf(argsOf({ settings: { autoContinueAtUsageLimit: true } })) || {})));
   const both = argsOf({ outputStyle: 'Concise', effort: 'ultracode' });
   ok('MERGED with the other settings keys, never a second --settings flag', both.filter((a) => a === '--settings').length === 1 && settingsOf(both).outputStyle === 'Concise' && settingsOf(both).ultracode === true);
   ok('there is no --output-style flag to pass (the CLI has none)', !argsOf({ outputStyle: 'Concise' }).includes('--output-style'));

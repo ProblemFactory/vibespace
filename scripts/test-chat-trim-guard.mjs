@@ -853,6 +853,15 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     j = row('down', 720, { st: 1554, sh: 4284, gapCursor: 3000 }, { st: 1600, sh: 8284, gapCursor: 1000, topDev: -80 });
     ok('judge: a gap slab load counts as a page (the window indices do not move for it) — the delivery rule steps aside, the evidence rule applies', j.paged === true && !j.reasons.some((x) => /moved the reader's card only/.test(x)), j.reasons.join('; '));
     ok('judge: the band and the delivery fraction are the exported constants the gate prints', PAGE_UP_BAND_PX === 100 && DELIVERY_MIN_FRACTION === 0.5);
+    // ② DURING the gesture (2.369.155, the Actions runner's control rows): the pre-fix copy re-pinned mid-history on
+    // every mirror run and a later scroll event unpinned it before the settle sample — the rule reads the ring's own
+    // repin record, so the verdict no longer depends on when the sample landed
+    j = row('down', 120, { st: 1208, sh: 2002 }, { st: 0, sh: 1828, ws: 2150, we: 2300, pin: 0, topDev: -500 }, [{ tag: 'wheelBottom' }, { tag: 'repin', we: 2200, total: 3785 }, { tag: 'extendBottom' }, { tag: 'unpin' }]);
+    ok('judge: a repin with a PARTIAL window in the gesture\'s ring is a ② violation even when the settle sample is unpinned', !j.ok && j.reasons.some((x) => /re-pinned mid-history during the gesture \(repin at window end 2200 of 3785\)/.test(x)), j.reasons.join('; '));
+    j = row('down', 120, { st: 1208, sh: 2002, we: 3700 }, { st: 1300, sh: 2102, we: 3785, ws: 3600, pin: 1, topDev: -120 }, [{ tag: 'wheelBottom' }, { tag: 'extendBottom' }, { tag: 'repin', we: 3785, total: 3785 }]);
+    ok('judge: …a repin AT the live tail (we = total) is the designed pin — no violation (control)', !j.reasons.some((x) => /re-pinned mid-history|pinned with the window/.test(x)), j.reasons.join('; '));
+    j = row('down', 120, { st: 1208, sh: 2002 }, { st: 1300, sh: 2102, ws: 2150, we: 2300, pin: 1, topDev: -120 }, [{ tag: 'repin', we: 2300, total: 3785 }]);
+    ok('judge: …a pin that is still there at the settle is reported ONCE, by the sample (the ring clause is its else)', j.reasons.filter((x) => /pinned/.test(x)).length === 1 && j.reasons.some((x) => /^pinned with the window ending at 2300 of 3785/.test(x)), j.reasons.join('; '));
   }
 }
 

@@ -14,7 +14,12 @@
 //      was trimmed out of the DOM, is a jump (JUMP_SLACK_VIEWPORTS).
 //   ② "往下又直接跳到底部" — no teleport: a downward gesture may land at the
 //      DOM's bottom only when the rendered window ends at the live tail, and a
-//      partial window is never pinned.
+//      partial window is never pinned — not at the settle, and not DURING the
+//      gesture either: a `repin` the ring recorded with `we < total` is the
+//      pin (2.369.155). The pinned auto-follow runs from that decision with no
+//      input; a later scroll event may unpin before the settle sample (the
+//      Actions runner's control rows: repinned every run, settled unpinned), and
+//      a sample-only rule then called the pre-fix copy green by timing.
 //   ③ "还有大量空白" — no blank: at most BLANK_MAX_PCT of the viewport's sample
 //      points hit nothing / an unrendered card once the gesture settled.
 //   ④ evidence: the trace ring is never empty after a gesture that paged.
@@ -74,6 +79,12 @@ export function judgeGesture(row) {
   }
   // ② teleport — the pin, the bottom landing, and the walk to the tail
   if (after.pin === 1 && after.we < after.total && !after.tp) reasons.push(`pinned with the window ending at ${after.we} of ${after.total} (the DOM edge, not the tail)`);
+  // …and the pin taken DURING the gesture: the product's own decision record, independent of when the sample
+  // landed (a teleported view never repins — `_atLiveTail` is false there on either build)
+  else {
+    const midPins = (row.ring || []).filter((e) => e && e.tag === 'repin' && e.we < e.total);
+    if (midPins.length) reasons.push(`re-pinned mid-history during the gesture (repin at window end ${midPins[0].we} of ${midPins[0].total}${midPins.length > 1 ? `, ×${midPins.length}` : ''}) — the pinned auto-follow ran from it`);
+  }
   const atBottom = after.sh - after.st - after.ch < 4;
   if (dir === 'down' && atBottom && after.we < after.total && !after.tp) reasons.push(`landed on the DOM's bottom with the window ending at ${after.we} of ${after.total}`);
   // the owner's "往下又直接跳到底部" as a single row: the reader's card is gone, the

@@ -167,7 +167,29 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   await A.send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   const bootOk = async (X) => { for (let i = 0; i < 120; i++) { try { if (await X.evaluate('(async () => { if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]); })()')) return true; } catch { } await sleep(250); } return false; };
   if (!ok(await bootOk(A), 'the app booted in headless chrome (desktop, 1280×900)')) return;
+  // THE RUNNER, LOCALLY (2.369.155): VS_CPU_THROTTLE=8 slows page A's main thread the way a loaded 4-vCPU Actions
+  // runner does (two heavy lanes, each a server + chrome) — at 8 the pre-fix ③ reproduced the mirror's (18, 20) exactly
+  const THROTTLE = Number(process.env.VS_CPU_THROTTLE) || 0;
+  if (THROTTLE > 1) { await A.send('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); console.log(`  (page A's CPU throttled ×${THROTTLE} — VS_CPU_THROTTLE)`); }
   await A.evaluate('window.app.refreshBrowserProfiles()');
+  /** GEOMETRY SETTLE (2.369.155, the mirror's standing red): a CSS change that resizes the workspace (② puts the
+   *  body zoom back) reaches the windows ASYNCHRONOUSLY — the workspace ResizeObserver fires after the next layout and
+   *  `_scheduleReflowWindows` applies every gridBounds-tracked window one animation frame later. A leg that probes
+   *  geometry and then presses on it must wait for that reflow, or the press lands wherever the window WAS: on a
+   *  loaded runner the reflow landed between ③'s probe and its press, moved the title bar 20 px down from under the
+   *  pointer (the press hit empty workspace — no drag at all) and the host "moved by (18, 20)" = the reflow itself.
+   *  Each sample is taken after two frames + a task (past the ResizeObserver's own reflow frame); settled = the
+   *  host rect unchanged across three consecutive samples with no reflow pending. */
+  const settledGeometry = async (X, budgetMs = 8000) => {
+    const t0 = Date.now(); let prev = null, same = 0, n = 0, last = null;
+    while (Date.now() - t0 < budgetMs) {
+      last = await X.evaluate(`new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { const wm = window.app.wm; const c = [...wm.windows.values()].find((w) => w.type === 'chat'); const host = c && c._tabChain ? wm.windows.get(c._tabChain.tabs[0]) : c; const r = host.element.getBoundingClientRect(); res({ rect: [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 4) / 4).join(','), pending: !!wm._reflowScheduled, workspace: wm.workspace.offsetWidth + 'x' + wm.workspace.offsetHeight }); }, 0))))`);
+      n++;
+      if (!last.pending && prev && last.rect === prev.rect) { if (++same >= 2) return { ok: true, samples: n, ms: Date.now() - t0, ...last }; } else same = 0;
+      prev = last;
+    }
+    return { ok: false, samples: n, ms: Date.now() - t0, ...last };
+  };
   const ev = (X, js) => X.evaluate(`(() => { const app = window.app, wm = app.wm; const byType = (t) => [...wm.windows.values()].filter((w) => w.type === t); const live = () => byType('browser-live')[0] || null; const chat = () => byType('chat')[0] || null; const rect = (el) => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; }; const disp = (el) => getComputedStyle(el).display; ${js} })()`);
 
   // ── ① auto-bind: the chat window is open, the session attaches a profile ──
@@ -226,7 +248,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     ok(cap && cap.layout === 'split' && cap.split && Math.abs(cap.split.ratio - 0.3) < 0.02 && cap.split.pair[0] === chatId, 'captureState carries layout: split + the pair + the dragged ratio', JSON.stringify(cap));
     const dbl = await ev(A, `const host = wm.windows.get(chat()._tabChain.tabs[0]); const d = host.element.querySelector(':scope > .tab-split-divider'); d.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return chat()._tabChain.split.ratio;`);
     ok(dbl === 0.5, 'double-clicking the divider evens the panes out (ratio 0.5)');
+    const g0 = await ev(A, `const r = rect(wm.windows.get(chat()._tabChain.tabs[0]).element); return [r.left, r.top, r.width, r.height].map(Math.round).join(',');`);
     await ev(A, "document.body.style.zoom = ''; document.documentElement.style.removeProperty('--ui-scale'); return true;");
+    // the reset resizes the workspace; the captureState above recorded gridBounds UNDER the zoom, so the reflow
+    // rescales the host — ③ probes and presses on geometry, so it starts only once that reflow has landed
+    const st = await settledGeometry(A);
+    ok(st.ok, `the zoom reset SETTLED before ③ (workspace ${st.workspace}; host ${g0} → ${st.rect} after the ResizeObserver's reflow; ${st.samples} samples, ${st.ms} ms)`, JSON.stringify(st));
   }
 
   // ── ③ move / minimise / desktop switch keep them together ──
@@ -237,6 +264,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     // tab drag-out (the designed "drag either pane out"), which is a different path — landing on empty workspace
     ok(before.probeInBar && !before.probeIsTab, 'the press point is on the title bar, outside every tab (a tab press would be the drag-out path)');
     const sx = before.lastTab.right + 30, sy = before.tb.top + before.tb.height / 2;
+    // WHERE THE PRESS LANDED, recorded by the page (capture phase, before any handler): a drag that "did not move"
+    // is first a press that never reached the title bar — say so by name instead of printing a small delta
+    await ev(A, `const host = wm.windows.get(chat()._tabChain.tabs[0]); window.__press = null; document.addEventListener('mousedown', (e) => { const t = e.target; const r = rect(host.element); window.__press = { x: e.clientX, y: e.clientY, onBar: !!(t && t.closest && t.closest('.window-titlebar') === host.titleBar), onTab: !!(t && t.closest && t.closest('.tab-item')), target: t ? (t.tagName.toLowerCase() + (typeof t.className === 'string' && t.className ? '.' + t.className.split(/\\s+/).slice(0, 2).join('.') : '')) : null, host: [r.left, r.top, r.width, r.height].map(Math.round).join(',') }; }, { capture: true, once: true }); return true;`);
     await A.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sx, y: sy });
     await A.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: sx, y: sy, button: 'left', clickCount: 1 });
     for (let i = 1; i <= 8; i++) { await A.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sx + 15 * i, y: sy + 8 * i, button: 'left' }); await sleep(25); }
@@ -244,7 +274,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await sleep(450);
     const moved = await ev(A, `const c = chat(); const host = wm.windows.get(c._tabChain.tabs[0]); return { chat: rect(c.content), live: rect(live().content), h: rect(host.element), layout: c._tabChain.layout, sameChain: live()._tabChain === c._tabChain, snapped: !!host._isSnapped, maximized: !!host.isMaximized, grid: !!wm.grid, styleW: host.element.style.width, styleH: host.element.style.height, gridBounds: host.gridBounds, snapSetting: app.settings.get('layout.enableDragSnap') };`);
     const dx = moved.h.left - before.h.left, dy = moved.h.top - before.h.top;
-    ok(dx > 60 && dy > 30, `a real title-bar drag moved the host by (${Math.round(dx)}, ${Math.round(dy)})`);
+    const press = await ev(A, 'return window.__press;');
+    ok(press && press.onBar && !press.onTab, `the press reached the host's title bar outside every tab (${press ? press.target + ' at ' + press.x + ',' + press.y + ', host ' + press.host : 'no mousedown seen'})`, JSON.stringify({ press, hostBefore: before.h }));
+    ok(dx > 60 && dy > 30, `a real title-bar drag moved the host by (${Math.round(dx)}, ${Math.round(dy)})`, JSON.stringify({ press, hBefore: before.h, hAfter: moved.h }));
     // one window: the panes are INSIDE the host wherever it went (a workspace reflow may rescale a gridBounds-tracked window — both panes with it)
     const inside = Math.abs(moved.chat.left - moved.h.left) <= 2 && Math.abs(moved.live.right - moved.h.right) <= 2 && Math.abs(moved.chat.top - moved.live.top) < 2 && moved.chat.width > 100 && moved.live.width > 100 && Math.abs(moved.chat.width - moved.live.width) < 10;
     ok(inside && moved.layout === 'split' && moved.sameChain && !moved.snapped && !moved.maximized, 'both panes travelled with the host — side by side inside it, equal at 0.5, the split intact, no snap (the drop-zone code ran and bound nothing)', JSON.stringify({ dx, dy, hBefore: before.h, hAfter: moved.h, chatAfter: moved.chat, liveAfter: moved.live, snapped: moved.snapped, maximized: moved.maximized, grid: moved.grid, gridBounds: moved.gridBounds }));

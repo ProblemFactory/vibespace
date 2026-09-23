@@ -82,6 +82,31 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
   // second implementation. Strip comments first so the guard measures CODE.
   const wsCode = ws.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   ok(!/['"`]--worktree/.test(wsCode), 'no remote builder hand-writes a --worktree literal — it can only arrive through the adapter args (drift guard)');
+
+  // ── CLAUDE CODE'S OWN AUTO-CONTINUE reaches EVERY transport OFF (owner ruling
+  // 2026-09-22). The switch is inline --settings JSON in the adapter's args, so
+  // — like --worktree — it rides every remote builder through `spawnArgs.map(shq)`
+  // with no transport branch. Driven with the REAL adapter + the REAL builder:
+  const acLine = remoteLine({});
+  ok(acLine.includes(`'--settings' '{"autoContinueAtUsageLimit":false}'`), 'a remote claude spawn carries --settings autoContinueAtUsageLimit:false, quoted like every other arg', acLine.slice(-160));
+  ok(!remoteLine({ settings: { autoContinueAtUsageLimit: true } }).includes('autoContinueAtUsageLimit'), 'NEGATIVE CONTROL: the row ON ⇒ the remote line carries nothing (the leg above can say no)');
+  const termSpec = ad.buildSessionArgs({ cwd: '/home/u/proj', mode: 'terminal' });
+  ok(termSpec.args.includes('--settings') && JSON.parse(termSpec.args[termSpec.args.indexOf('--settings') + 1]).autoContinueAtUsageLimit === false, 'a terminal-mode spec (ssh terminal / dial pty / local dtach) carries it too');
+  // TWIN SWEEP (drift guard): ONE buildSessionArgs call feeds every spawn path
+  // (local dtach/r6Argv + the five remote builders all read sessionSpec.args ⇒
+  // spawnArgs), and every ws-create site that rewrites the --settings value
+  // MERGES the parsed JSON (the remote + local statusline injections) — a
+  // site that assigned a fresh object would silently drop the switch.
+  const wcCode = wsCode;
+  ok((wcCode.match(/\.buildSessionArgs\(/g) || []).length === 1, 'exactly ONE buildSessionArgs call feeds every spawn path in ws-create/ws-handler (no second spec builder that could miss the switch)');
+  const rewrites = (wcCode.match(/spawnArgs\[si \+ 1\] = sjson/g) || []).length;
+  const merges = (wcCode.match(/settingsObj = JSON\.parse\(spawnArgs\[si \+ 1\]\)/g) || []).length;
+  ok(rewrites >= 2 && rewrites === merges, `every --settings rewrite in ws-create merges the parsed spawn JSON (${rewrites} rewrite(s), ${merges} merge(s))`);
+  ok((("spawnArgs[si + 1] = sjson;").match(/spawnArgs\[si \+ 1\] = sjson/g) || []).length === 1 && (("let settingsObj = {};").match(/settingsObj = JSON\.parse\(spawnArgs\[si \+ 1\]\)/g) || []).length === 0, 'NEGATIVE CONTROL: a rewrite with no merge is what the census counts apart');
+  // the statusline merge itself, run on the adapter's real args (the remote terminal injection's exact shape)
+  { let spawnArgs = [...termSpec.args]; let settingsObj = {}; const si = spawnArgs.indexOf('--settings'); if (si >= 0 && spawnArgs[si + 1]) { try { settingsObj = JSON.parse(spawnArgs[si + 1]) || {}; } catch {} } settingsObj.statusLine = { type: 'command', command: 'x', padding: 0 }; const sjson = JSON.stringify(settingsObj); if (si >= 0) spawnArgs[si + 1] = sjson; else spawnArgs = [...spawnArgs, '--settings', sjson];
+    const o = JSON.parse(spawnArgs[spawnArgs.indexOf('--settings') + 1]);
+    ok(o.autoContinueAtUsageLimit === false && o.statusLine && spawnArgs.filter((a) => a === '--settings').length === 1, 'the statusline injection keeps the switch on the ONE flag'); }
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

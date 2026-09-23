@@ -146,6 +146,33 @@ const HARNESS_SETTINGS = {
       description: t("When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue."),
       apply: { kind: 'spawn', how: '--settings switchModelsOnFlag=false + CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK', live: 'formatSetFallbackPolicy' },
     },
+    // CLAUDE CODE'S OWN "WAIT FOR THE RESET, THEN CONTINUE" (owner ruling
+    // 2026-09-22). The 2.1.280 binary declares `autoContinueAtUsageLimit` in
+    // its settings schema ("When a claude.ai usage limit stops your session,
+    // wait for the limit to reset and continue the task automatically. When
+    // off, the limit dialog offers the wait as a choice instead.") and reads it
+    // from policySettings > flagSettings > userSettings only (`$x`/`D7`, list
+    // `["policySettings","flagSettings","userSettings"]`) — so the inline
+    // `--settings` JSON IS a real layer for it, and a project/local settings
+    // file is not. Absent everywhere ⇒ the CLI treats it as ON
+    // (`SWt(e){return jmt()??e==="absent"}`) behind its `tengu_marble_heron`
+    // flag — BUT it only ever arms in an INTERACTIVE launch (stdout a TTY):
+    // chat sessions (piped stdout on every transport) never run it, so there
+    // VibeSpace's auto-resume is the only producer and this row changes
+    // nothing; terminal sessions (a real pty) did run it, and it was their
+    // ONLY automatic continue. Default OFF = the owner's ruling: the CLI's
+    // continue is a turn nobody typed that no spend ceiling bounds, so a
+    // terminal session now stops at the wall and waits for the user. The
+    // adapter spawns `--settings {"autoContinueAtUsageLimit":false}` on every
+    // claude session (a missing settings bag is treated as off too). ON =
+    // leave Claude Code's own setting alone (nothing passed).
+    {
+      key: "autoContinueAtUsageLimit",
+      type: "boolean", default: false,
+      label: t("Let Claude Code continue by itself at a usage limit"),
+      description: t("Claude Code's own wait-and-continue at a usage limit (its autoContinueAtUsageLimit setting). Chat sessions never run it — VibeSpace starts Claude Code non-interactively there, and VibeSpace's own auto-resume (with the unattended-spend ceiling and the account pool) is what continues them, when it is on. In terminal sessions it is the only automatic continue: off (the default) means a terminal session stops at the limit, the limit dialog offers the wait as a choice, and nothing continues it by itself; on leaves Claude Code's own setting alone (its default is on), so terminal sessions continue by themselves at the reset — outside the unattended-spend ceiling. Applies to newly started sessions."),
+      apply: { kind: 'spawn', how: '--settings autoContinueAtUsageLimit=false (while off)' },
+    },
     {
       key: "transcriptRetentionDays",
       type: "number", default: 36500, min: 0, max: 36500, step: 30,

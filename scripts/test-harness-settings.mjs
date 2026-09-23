@@ -158,6 +158,20 @@ console.log('§3 the typed accessors');
   const bag = sync.harnessSpawnSettings('claude');
   ok('harnessSpawnSettings = every spawn row, typed (brief true, autocompact 200k, tuiRenderer default)', bag.brief === true && bag.autocompact === '200k' && bag.tuiRenderer === '' && bag.disableModelFallback === false && !('transcriptRetentionDays' in bag) && 'defaultModel' in bag);
   ok('shell has an empty bag', Object.keys(sync.harnessSpawnSettings('shell')).length === 0);
+  // CLAUDE CODE'S OWN AUTO-CONTINUE (owner ruling 2026-09-22): a spawn row, default OFF, strict boolean
+  {
+    const row = HS.rowOf(HS.HARNESS_SETTINGS.claude, 'autoContinueAtUsageLimit');
+    ok('claude declares autoContinueAtUsageLimit: boolean, default false, apply kind SPAWN (inline --settings — the CLI reads policy > --settings > user; never cli-config, which would change the user\'s OWN non-VibeSpace sessions)',
+      !!row && row.type === 'boolean' && row.default === false && row.apply.kind === 'spawn' && /--settings autoContinueAtUsageLimit/.test(row.apply.how) && !row.apply.mode && !row.apply.via);
+    ok('…and it is NOT a cli-config row (NEGATIVE CONTROL: the ~/.claude/settings.json plan never names it)', !HS.rowsOfKind(HS.HARNESS_SETTINGS.claude, 'cli-config').some((r) => r.key === 'autoContinueAtUsageLimit'));
+    ok('unset ⇒ the bag says false (default off)', sync.harnessSpawnSettings('claude').autoContinueAtUsageLimit === false);
+    store['claude.autoContinueAtUsageLimit'] = 'true';
+    ok('coerce is strict: the string "true" is NOT on', sync.harnessSpawnSettings('claude').autoContinueAtUsageLimit === false);
+    store['claude.autoContinueAtUsageLimit'] = true;
+    ok('an explicit true reaches the bag (the ON leg — the coercion can say yes)', sync.harnessSpawnSettings('claude').autoContinueAtUsageLimit === true && sync.harnessSetting('claude', 'autoContinueAtUsageLimit') === true);
+    delete store['claude.autoContinueAtUsageLimit'];
+    ok('codex does not declare it (a claude CLI key, not a generic feature)', !sync.harnessDeclares('codex', 'autoContinueAtUsageLimit'));
+  }
   ok('cliConfigKeys lists every cli-config path', JSON.stringify(sync.cliConfigKeys().sort()) === JSON.stringify(['claude.transcriptRetentionDays', 'codex.historyPersistence']));
 }
 

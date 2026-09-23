@@ -137,6 +137,45 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   ok('a task-notification wake → no peer card', cards(s).length === 0);
 }
 {
+  // Claude Code's GENERIC `origin:{kind:"auto-continuation"}` (2026-09-22 verifier): 2.1.280 stamps it at ten
+  // enqueue sites — plan-mode approval, the ultraplan hand-off, `/goal` proposal approval, dialog
+  // nextInput… — and only ONE is its usage-limit continue. This carrier must neither draw a card for them
+  // nor hand them to any brain consumer as something else. A second consumer instance with a RECORDING
+  // brainRef (every method it is asked for is logged) watches the whole turn-start → result path.
+  const brainLog = [];
+  const recBrain = new Proxy({}, { get: (_, name) => (typeof name === 'string' ? (...a) => { brainLog.push([name, a[2]?.type || null]); } : undefined) });
+  const { attach: attachRec } = consumer.create({
+    activeSessions, engine, CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', 'command_lifecycle']), _seenStreamTypes: new Set(),
+    USAGE_SCANNER_PATH: path.join(tmp, 'none'), checkClaudeGoalStatus() { }, noteModelSeen() { }, sbSeenFirst: () => true, hosts: null, usageHistory: null, pagesRef: { current: null }, brainRef: recBrain,
+  });
+  const shapes = [
+    ['plan approval', 'Implement the following plan:\n\n# Plan\n1. do it'],
+    ['/goal approval', '/goal ship the release'],
+    ['ultraplan hand-off', 'The user approved the ultraplan in the browser. Here is the plan:\n\nImplement this plan.'],
+  ];
+  for (const [label, text] of shapes) {
+    const cid = 'c1d00000-0000-4000-8000-' + String(++n).padStart(12, '0');
+    const id = 'w-ac-' + label.replace(/\W+/g, '-');
+    const sx = { mode: 'chat', backend: 'claude', name: id, cwd: CWD, host: null, claudeSessionId: cid, backendSessionId: cid, sockName: 'cw-' + id, buffer: '', createdAt: Date.now() };
+    sx._normalizer = createMessageManager('claude', id);
+    activeSessions.set(id, sx);
+    const px = fakePty(); attachRec(sx, id, px, helpers);
+    const U = 'acacacac-0000-4000-8000-' + String(n).padStart(12, '0');
+    fs.writeFileSync(path.join(projDir, cid + '.jsonl'), J({ type: 'user', uuid: U, isMeta: false, origin: { kind: 'auto-continuation' }, message: { role: 'user', content: text }, timestamp: new Date().toISOString() }));
+    brainLog.length = 0;
+    px.data(J(started(U)));
+    await sleep(120);
+    px.data(J({ type: 'result', subtype: 'success', is_error: false, origin: { kind: 'auto-continuation' }, session_id: 'x' }));
+    await sleep(20);
+    ok(`${label} (origin auto-continuation) → no peer card, and the brain is handed nothing`, cards(sx).length === 0 && brainLog.length === 0, JSON.stringify(brainLog));
+    if (label === 'plan approval') {
+      // NEGATIVE CONTROL for the "handed nothing" half: the recorder is live on this very session
+      px.data(J({ type: 'system', subtype: 'vcs_state_changed', kind: 'push', branch: 'b', cwd: CWD, session_id: 'x', uuid: 'v-' + U }));
+      ok('…NEGATIVE CONTROL: the same recording brain DOES see a record the consumer hands it (the silence is a measurement)', brainLog.some((c) => c[0] === 'noteVcsState'), JSON.stringify(brainLog));
+    }
+  }
+}
+{
   const { s, p, jsonl } = mkSession('w-remote', { host: 'host-remote' });
   const U = 'ffffffff-0000-4000-8000-000000000001', M = 'ffffffff-0000-4000-8000-000000000002';
   fs.writeFileSync(jsonl, J(peerRecord(U, M)));
