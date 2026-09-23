@@ -31,10 +31,16 @@
 //    invites the question "why?", and the honest answer belongs in the
 //    footer beside the conversation it is about.
 //
-// The composer PROPOSES (P3): the channel's policy decides whether the reply
-// goes out at once or waits in the approval outbox; the card appears above.
-// The identity warning lives ON THE CARD (once, only when it warns), never as
-// a standing line under the composer (a1 W1).
+// THE OWNER'S OWN MESSAGE GOES OUT DIRECTLY (design §22.2 ①, g3 — "an IM,
+// not a feed"): where the conversation offers `sendAsUser` the composer is a
+// SEND, as you, at once (`POST …/send`: no policy, no approval card — those
+// are for AGENT drafts, which keep the inline outbox cards). Where only the
+// bot identity is offered, a message would not be the owner speaking, so the
+// composer PROPOSES (P3) and says why sending as you is not offered here. The
+// identity warning lives ON THE CARD (once, only when it warns), never as a
+// standing line under the composer (a1 W1). An AGENT GROUP (the same window
+// type, `adapterId` = the group namespace) is drawn by `openGroupWindow`
+// below: its composer sends as You, @name wakes.
 import { fetchJson, showToast, showContextMenu } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -51,6 +57,11 @@ import { routeErrorText } from './channel-words.js';
 // server sends STRUCTURE and the sentence is composed HERE, because the
 // digest is broadcast to every client while the language is per DEVICE.
 import * as chanCaps from '../channel-caps.js';
+// g3 (design §22): the composer's mode by conversation kind, the @-autocomplete,
+// the wake preview, and the group dialogs + words.
+import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, OWNER } from './channel-groups-view.js';
+import { showGroupDetail, showGroupMembersDialog, renameGroup, archiveGroup } from './channel-group-dialogs.js';
+import { groupErrorText, wakeEchoText } from './channel-words.js';
 
 const ICON = svgIcon16('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>');
 
@@ -137,6 +148,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   const list = el('div', 'chanwin-list');
   const foot = el('div', 'chanwin-foot');
   root.append(bar, list, foot);
+  // an agent GROUP is a different object behind the same window type (g3)
+  if (isGroupConv(adapterId)) { root.classList.add('chanwin-group'); return openGroupWindow(app, winInfo, convId, { bar, list, foot }); }
 
   // THE PAGE BOUNDARY IS A RECORD, NOT AN INSTANT (r2). `at` is not unique —
   // a Lark burst shares a millisecond, Gmail's `internalDate` is
@@ -198,33 +211,41 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       bar.appendChild(chipEl);
     }
 
-    // The send half: offered, or NOT offered WITH its reason (never silence).
-    const send = c.offers && (c.offers.sendAsUser.offered ? c.offers.sendAsUser : (c.offers.sendAsBot.offered ? c.offers.sendAsBot : null));
-    if (send) {
-      // P3: the composer PROPOSES (drafted by you, send authority) — the
-      // channel's policy decides whether it goes out at once or waits in the
-      // approval outbox with the guards' reasons; the card appears above.
+    // The send half by the capability row (g3): DIRECT as you, the proposal
+    // path when only the bot identity is offered, or NOT offered WITH its
+    // reason (never silence).
+    const cm = composerMode({ conv: c });
+    if (cm.mode === 'direct' || cm.mode === 'propose') {
+      const direct = cm.mode === 'direct';
+      // r3: a send that STARTS A TURN (the adapter declares `sendStartsTurn` —
+      // the built-in Agents adapter's send wakes that agent) says its cost
+      // before the click and echoes it with the Send (`expectWakes`)
+      const wakes = r.adapter && r.adapter.sendStartsTurn ? 1 : 0;
       const comp = el('div', 'chanwin-composer');
       comp.dataset.channelSend = '1';
       const ta = document.createElement('textarea');
-      ta.placeholder = t('Write a reply…');
+      ta.placeholder = direct ? t('Write a message — it is sent at once, as you') : t('Write a reply…');
       ta.rows = 2;
       const row = el('div', 'chanwin-composer-row');
-      const pol = c.policy && c.policy.mode === 'direct' ? t('Policy: direct — your reply is sent at once unless a guard (link, attachment, off-hours) sends it to the outbox for approval.') : t('Policy: review — your reply waits in the outbox for your approval.');
-      const note = el('div', 'chanwin-note', pol);
-      const sendBtn = btn(t('Propose'), null, 'mounts-btn-primary');
-      sendBtn.dataset.channelPropose = '1';
+      const pol = direct
+        ? (wakes ? t('Sent at once, as you — it wakes this agent: 1 billed turn.') : t('Sent at once, as you — no policy, no approval. The outbox holds only replies an agent drafts.'))
+        : `${t('Sending as you is not offered here ({why})', { why: chanCaps.sendWhyText(cm.why, { t }) })} — ${c.policy && c.policy.mode === 'direct' ? t('Policy: direct — your reply is sent at once unless a guard (link, attachment, off-hours) sends it to the outbox for approval.') : t('Policy: review — your reply waits in the outbox for your approval.')}`;
+      const note = el('div', 'chanwin-note' + (wakes && direct ? ' chan-warn' : ''), pol);
+      const sendBtn = btn(direct ? t('Send') : t('Propose'), null, 'mounts-btn-primary');
+      if (direct) { sendBtn.dataset.channelDirect = '1'; sendBtn.prepend(icon('send', 11)); } else sendBtn.dataset.channelPropose = '1';
       sendBtn.onclick = async () => {
         const text = ta.value.trim();
         if (!text) return;
         sendBtn.disabled = true;
-        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/propose`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+        const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/${direct ? 'send' : 'propose'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakes }) });
         sendBtn.disabled = false;
         if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
         const st = r2.proposal && r2.proposal.state;
         // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
-        showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: ((r2.decision && r2.decision.reasons) || []).map(reasonLabel).join('; ') }) : t('Proposal {state}', { state: st || '?' }));
+        if (st === 'failed') showToast(t('The channel refused the send: {error}', { error: (r2.proposal && r2.proposal.reason) || '' }), { type: 'error' });
+        else if (st === 'unknown') showToast(t('The send left but its answer was lost — check the conversation on the platform'), { type: 'warn' });
+        else showToast(st === 'sent' ? t('Sent') : st === 'awaiting-approval' ? t('Held in the outbox for your approval ({why})', { why: ((r2.decision && r2.decision.reasons) || []).map(reasonLabel).join('; ') }) : t('Proposal {state}', { state: st || '?' }));
       };
       ta.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); } });
       row.append(note, sendBtn);
@@ -388,6 +409,301 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
 
   render({ read: true }).catch((e) => showToast(String(e && e.message ? e.message : e), { type: 'error' }));
   return winInfo;
+}
+
+// ── THE AGENT-GROUP WINDOW (design §22.5, chunk g3) ───────────────────────
+// The same window type and openSpec (`{action:'openChannel', adapterId:
+// GROUP_ADAPTER_ID, convId:<groupId>}`), so layout restore, sync, tabs and
+// the taskbar work unchanged. What differs is the OBJECT: a group's log is
+// read from `/api/channel-groups/:id/messages`, its system records (create /
+// invite / leave / kick / rename / archive) are worded HERE by kind with the
+// device's `t` (the record's own `text` is the agent-facing English), and the
+// composer SENDS DIRECTLY AS YOU — no proposal, no outbox: the owner's own
+// words go out at once (§22.2 ①), @<member> wakes that member (a billed turn
+// through the spend authorizer on the server; the toast says the count), and
+// a preview under the box says who THIS text would wake before the click.
+// Every name, message and invite context is agent-controlled ⇒ textContent.
+
+/** A system record in the device's words; the agent-facing `text` is the fallback. */
+function groupSysText(rec, nameOf) {
+  const raw = rec.raw || {};
+  const by = nameOf(raw.by || (rec.author && rec.author.id));
+  const member = raw.member ? nameOf(raw.member) : '';
+  switch (raw.kind) {
+    case 'create': return t('{by} created the group', { by });
+    case 'invite': return t('{by} added {member}', { by, member });
+    case 'leave': return raw.archived ? t('{member} left — the group is archived', { member }) : t('{member} left', { member });
+    case 'kick': return raw.archived ? t('{by} removed {member} — the group is archived', { by, member }) : t('{by} removed {member}', { by, member });
+    case 'rename': return raw.from ? t('{by} renamed the group (was "{from}")', { by, from: raw.from }) : t('{by} renamed the group', { by });
+    case 'archive': return t('{by} archived the group — the log is kept', { by });
+    default: return rec.text || '';
+  }
+}
+
+function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
+  let group = null;
+  let oldest = null;
+  const seen = new Set();   // vendorIds already drawn — a broadcast's record may be one we appended from the send answer
+  const nameOf = (id) => {
+    if (id === OWNER) return t('You');
+    const m = group && (group.members || []).find((x) => x.member === id);
+    return (m && m.name) || String(id || '').slice(0, 8) || t('unknown');
+  };
+
+  function renderGroupRecord(rec, { cont = false } = {}) {
+    const raw = rec.raw || {};
+    if (raw.kind && raw.kind !== 'message') {
+      const row = el('div', 'chanmsg chanmsg-sys');
+      row.dataset.at = String(rec.at || 0);
+      row.dataset.vid = rec.vendorId || '';
+      row.appendChild(el('div', 'chanmsg-sys-line', `${groupSysText(rec, nameOf)} · ${stamp(rec.at)}`));
+      if (raw.kind === 'invite' && raw.context) row.appendChild(el('div', 'chanmsg-ctx', raw.context));
+      return row;
+    }
+    const self = !!(rec.author && (rec.author.isSelf || rec.author.id === OWNER));
+    const row = el('div', 'chanmsg' + (cont ? ' chanmsg-cont' : '') + (self ? ' chanmsg-self' : ' chanmsg-agent'));
+    row.dataset.at = String(rec.at || 0);
+    row.dataset.author = authorKey(rec);
+    row.dataset.vid = rec.vendorId || '';
+    if (!cont) {
+      const head = el('div', 'chanmsg-head');
+      head.append(el('b', '', self ? t('You') : nameOf(rec.author && rec.author.id) || (rec.author && rec.author.name) || t('unknown')), el('span', 'chanmsg-at', stamp(rec.at)));
+      row.appendChild(head);
+    }
+    row.appendChild(el('div', 'chanmsg-body', rec.text || ''));
+    return row;
+  }
+
+  /** Append records (oldest-first) at the bottom or prepend a page at the top. */
+  function place(recs, { prepend = false } = {}) {
+    const fresh = recs.filter((r) => r && !seen.has(r.vendorId));
+    if (!fresh.length) return 0;
+    for (const r of fresh) seen.add(r.vendorId);
+    const frag = document.createDocumentFragment();
+    let prev = null;
+    if (!prepend) { const tail = [...list.querySelectorAll('.chanmsg')].pop(); if (tail) prev = { at: Number(tail.dataset.at), author: { id: tail.dataset.author }, raw: { kind: tail.classList.contains('chanmsg-sys') ? 'sys' : 'message' } }; }
+    for (const rec of fresh) {
+      if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
+      const isMsg = !(rec.raw && rec.raw.kind && rec.raw.kind !== 'message');
+      const prevMsg = prev && !(prev.raw && prev.raw.kind && prev.raw.kind !== 'message');
+      const cont = isMsg && prevMsg && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS;
+      frag.appendChild(renderGroupRecord(rec, { cont }));
+      prev = rec;
+    }
+    list.querySelector('.chanwin-empty')?.remove();
+    const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    if (prepend) list.insertBefore(frag, list.firstChild); else list.appendChild(frag);
+    dedupeDaysIn(list);
+    if (!prepend && stick) list.scrollTop = list.scrollHeight;
+    return fresh.length;
+  }
+
+  async function loadPage({ prepend = false } = {}) {
+    const q = new URLSearchParams({ limit: String(PAGE) });
+    if (prepend && oldest !== null) q.set('before', String(oldest));
+    const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/messages?${q}`);
+    if (!r || r.error) return { error: r || {} };
+    if (r.group) group = r.group;
+    const recs = r.records || [];
+    if (recs.length) oldest = Number(recs[0].at) || 0;
+    return { n: place(recs, { prepend }) };
+  }
+
+  function drawBar() {
+    bar.textContent = '';
+    app.wm.setTitle(winInfo.id, group.name || groupId);
+    const titleRow = el('div', 'chanwin-title-row');
+    titleRow.appendChild(el('b', '', group.name || groupId));
+    const chipB = document.createElement('button');
+    chipB.type = 'button';
+    chipB.className = 'chan-members-chip';
+    chipB.dataset.groupMembers = '1';
+    chipB.appendChild(icon('users', 11));
+    chipB.appendChild(el('span', '', t('{n} members', { n: (group.members || []).length })));
+    chipB.title = t('Members & notifications…');
+    chipB.onclick = () => showGroupDetail(app, group);
+    titleRow.appendChild(chipB);
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'icon-btn';
+    more.title = t('More actions');
+    more.appendChild(icon('more', 13));
+    more.onclick = (ev) => {
+      ev.stopPropagation();
+      const rr = more.getBoundingClientRect();
+      const items = [{ label: t('Members & notifications…'), action: () => showGroupDetail(app, group) }];
+      if (!group.archivedAt) {
+        if (!(group.pair && group.pair.length)) items.push({ label: t('Invite…'), action: () => showGroupMembersDialog(app, { group }) });
+        items.push({ separator: true }, { label: t('Rename…'), action: () => renameGroup(group) }, { label: t('Archive'), action: () => archiveGroup(group) });
+      }
+      showContextMenu(rr.left, rr.bottom + 2, items);
+    };
+    titleRow.appendChild(more);
+    bar.appendChild(titleRow);
+    const names = (group.members || []).map((m) => m.name || String(m.member).slice(0, 8));
+    const kind = group.pair && group.pair.length ? t('Direct conversation') : t('Agent group');
+    const meta = el('div', 'chanwin-meta', [kind, t('You (observer)'), ...names].join(' · ') + (group.archivedAt ? ' · ' + t('Archived') : ''));
+    meta.title = t('You see every message; each agent is woken only by its own notify mode or an @mention.');
+    bar.appendChild(meta);
+  }
+
+  function drawFoot() {
+    foot.textContent = '';
+    const mode = composerMode({ group });
+    if (mode.mode === 'archived') {
+      const ro = el('div', 'chanwin-readonly');
+      ro.appendChild(el('span', '', t('Archived — the log is kept, nothing new can be posted.')));
+      foot.appendChild(ro);
+      return;
+    }
+    const comp = el('div', 'chanwin-composer chan-group-composer');
+    comp.dataset.groupComposer = '1';
+    const ta = document.createElement('textarea');
+    ta.placeholder = t('Message the group as You — @name wakes that agent');
+    ta.rows = 2;
+    const pop = el('div', 'chan-mention-pop');
+    pop.style.display = 'none';
+    const row = el('div', 'chanwin-composer-row');
+    const note = el('div', 'chanwin-note', '');
+    const sendBtn = btn(t('Send'), null, 'mounts-btn-primary');
+    sendBtn.dataset.groupSend = '1';
+    sendBtn.prepend(icon('send', 11));
+    row.append(note, sendBtn);
+    comp.append(pop, ta, row);
+    foot.appendChild(comp);
+    // the preview: who THIS text would wake — said before the click
+    const preview = () => {
+      const w = wakePreview(group, ta.value);
+      note.classList.toggle('chan-warn', w.length > 0);
+      note.textContent = w.length
+        ? t('Will wake {names} — {n} billed turn(s)', { names: w.map((x) => x.name).join(', '), n: w.length })
+        : t('Sent as You. Members on "next turn" read it in their next report — nobody is woken.');
+    };
+    // the @-autocomplete over the member list
+    let q = null, cands = [], sel = 0;
+    const closePop = () => { pop.style.display = 'none'; q = null; cands = []; };
+    const drawPop = () => {
+      pop.textContent = '';
+      if (!q || !cands.length) { pop.style.display = 'none'; return; }
+      cands.forEach((c, i) => {
+        const it = el('div', 'chan-mention-item' + (i === sel ? ' chan-mention-on' : ''), c.name);
+        it.dataset.member = c.member;
+        it.addEventListener('mousedown', (ev) => { ev.preventDefault(); pick(i); });
+        pop.appendChild(it);
+      });
+      pop.style.display = '';
+    };
+    const pick = (i) => {
+      const c = cands[i];
+      if (!c || !q) return;
+      const r = insertMention(ta.value, q, c.name);
+      ta.value = r.text;
+      ta.setSelectionRange(r.caret, r.caret);
+      closePop();
+      preview();
+      ta.focus();
+    };
+    const update = () => {
+      q = mentionQuery(ta.value, ta.selectionStart);
+      cands = q ? mentionCandidates(group.members || [], q.query) : [];
+      sel = 0;
+      drawPop();
+      preview();
+    };
+    ta.addEventListener('input', update);
+    ta.addEventListener('click', update);
+    ta.addEventListener('blur', () => setTimeout(closePop, 120));
+    ta.addEventListener('keydown', (e) => {
+      if (pop.style.display !== 'none' && cands.length) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % cands.length; drawPop(); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + cands.length) % cands.length; drawPop(); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(sel); return; }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePop(); return; }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendBtn.click(); }
+    });
+    sendBtn.onclick = async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      sendBtn.disabled = true;
+      // the count the preview SAID travels with the send (r2): the server refuses
+      // `wake-count-mismatch` if the act would wake a different number
+      const r = await fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/post`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, expectWakes: wakePreview(group, text).length }) });
+      sendBtn.disabled = false;
+      if (!r || r.error) {
+        // r3: a `wake-count-mismatch` CARRIES the view the server counted
+        // against (live names — a member renamed since this window drew them):
+        // repaint from it, so the preview, the @-autocomplete and the next
+        // click count against the same names the server does
+        if (r && r.code === 'wake-count-mismatch' && r.group && r.group.id === groupId) { group = { ...group, ...r.group }; drawBar(); preview(); }
+        showToast(groupErrorText(r), { type: 'error' });
+        return;
+      }
+      ta.value = '';
+      preview();
+      // the send answers with its record — drawn NOW, never waiting for the broadcast echo
+      if (r.message) place([r.message]);
+      if (r.group) { group = { ...group, ...r.group }; }
+      showToast(`${t('Sent')} — ${wakeEchoText(r)}`);
+    };
+    preview();
+  }
+
+  let readInFlight = false;
+  function markRead() {
+    if (readInFlight) return;
+    readInFlight = true;
+    fetchJson(`/api/channel-groups/${encodeURIComponent(groupId)}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .catch(() => {}).finally(() => { readInFlight = false; });
+  }
+
+  async function render() {
+    list.textContent = '';
+    seen.clear(); oldest = null;
+    const r = await loadPage({});
+    if (r.error || !group) {
+      bar.textContent = '';
+      bar.appendChild(el('div', 'chanwin-err', groupErrorText(r.error && r.error.code ? r.error : { code: 'not-found' })));
+      foot.textContent = '';
+      return;
+    }
+    if (!r.n) list.appendChild(el('div', 'chanwin-empty', t('No messages yet.')));
+    drawBar();
+    drawFoot();
+    list.scrollTop = list.scrollHeight;
+    markRead();   // opening the window is a USER act
+  }
+
+  list.addEventListener('scroll', () => {
+    if (list.scrollTop > 4 || oldest === null) return;
+    const before = list.scrollHeight;
+    loadPage({ prepend: true }).then((x) => { if (x && x.n) list.scrollTop = list.scrollHeight - before; }).catch(() => {});
+  });
+
+  // THE BROADCAST CARRIES BOTH HALVES: the recomputed list (the bar repaints
+  // from its entry) and the new records (appended, deduplicated by vendorId —
+  // the send answer may have drawn one already). No full re-render per event.
+  const onBroadcast = (msg) => {
+    if (msg.type !== 'channel-groups-updated' || !group) return;
+    const g = Array.isArray(msg.groups) ? msg.groups.find((x) => x.id === groupId) : null;
+    const wasArchived = !!group.archivedAt;
+    if (g) { group = g; drawBar(); }
+    if (Array.isArray(msg.messages)) place(msg.messages.filter((m) => m && m.convId === groupId));
+    if (g && !!g.archivedAt !== wasArchived) drawFoot();
+  };
+  app.ws.onGlobal(onBroadcast);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} });
+  winInfo.element?.addEventListener('pointerdown', () => { if (group && group.unread) markRead(); }, { signal: winInfo._listenerCtl?.signal });
+  render().catch((e) => showToast(String(e && e.message ? e.message : e), { type: 'error' }));
+  return winInfo;
+}
+
+/** Drop a day separator that repeats the one before it. */
+function dedupeDaysIn(list) {
+  let prev = null;
+  for (const node of [...list.querySelectorAll('.chanmsg-day')]) {
+    if (prev && prev.dataset.day === node.dataset.day) node.remove(); else prev = node;
+  }
 }
 
 registerWindowType({

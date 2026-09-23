@@ -62,7 +62,10 @@ import * as chanCaps from '../channel-caps.js';
 // already in the bundle for the Integrations window).
 import * as R from '../integration-registry.js';
 // a3 i18n: a route failure is worded by its CODE here, never by the engine's sentence.
-import { routeErrorText } from './channel-words.js';
+import { routeErrorText, groupErrorText } from './channel-words.js';
+// g3 (design §22): the IM-first list's arithmetic and the group dialogs.
+import { groupListRows, foldsFrom, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 // P2: the Assign & filter editor and the one-line summary a row draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
@@ -791,14 +794,71 @@ export function registerChannelsGearRow() {
 /** Sections a user folded — per page session (the panel is rebuilt on every
  *  engine pass; a fold must survive the rebuild, not the reload). */
 const COLLAPSED = new Set();
-/** Sections a user explicitly OPENED (overrides a default fold). */
+/** Sections a user EXPLICITLY OPENED (overrides a default fold). */
 const EXPANDED = new Set();
+/** The archived-groups fold (per page session — a list the user asked to see). */
+let ARCHIVED_OPEN = false;
+
+// ── THE SECONDARY SECTIONS' FOLDS (g3): persisted in user state
+// (`channelsPanelFolds`, PATCH merge-only, the jobsPanelFolds pattern) —
+// loaded ONCE per page, kept in step with other clients by the
+// `user-state-updated` broadcast. ──
+let FOLDS = null;
+let foldsWired = false;
+/** Every live panel's `{c, draw}` — a fold another client made repaints them
+ *  all; a panel no longer in the document is pruned at the next dispatch. */
+const FOLD_LISTENERS = new Set();
+async function loadFolds(app) {
+  if (!foldsWired) {
+    foldsWired = true;
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsPanelFolds) { FOLDS = foldsFrom(msg.state); for (const l of [...FOLD_LISTENERS]) { if (!l.c.isConnected) { FOLD_LISTENERS.delete(l); continue; } try { l.draw(); } catch {} } } });
+  }
+  if (FOLDS) return FOLDS;
+  const st = await fetchJson('/api/user-state');
+  FOLDS = foldsFrom(st && !st.error ? st : {});
+  return FOLDS;
+}
+function setFold(part, folded) {
+  FOLDS = { ...(FOLDS || {}), [part]: !!folded };
+  fetch('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ channelsPanelFolds: FOLDS }) }).catch(() => {});
+}
+
+/** A row's time: HH:MM today, "Yesterday", else the date in the DEVICE's language. */
+function rowTime(ms, now = Date.now()) {
+  if (!ms) return '';
+  const d = new Date(ms), n = new Date(now);
+  if (d.toDateString() === n.toDateString()) return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (d.toDateString() === new Date(now - 86400e3).toDateString()) return t('Yesterday');
+  try { return d.toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' }); } catch { return ''; }
+}
+
+/** THE GROUP ROW's menu (a group, not a channel conversation — its verbs are
+ *  the group's own; a channel row keeps the `channel-row` contributions). */
+function groupMenu(app, g) {
+  const items = [{ label: t('Open'), action: () => app.openChannel(GROUP_ADAPTER_ID, g.id) }];
+  items.push({ label: t('Members & notifications…'), action: () => showGroupDetail(app, g) });
+  if (!g.archivedAt) {
+    if (!(g.pair && g.pair.length)) items.push({ label: t('Invite…'), action: () => showGroupMembersDialog(app, { group: g }) });
+    items.push({ separator: true });
+    items.push({ label: t('Rename…'), action: () => renameGroup(g) });
+    items.push({ label: t('Archive'), action: () => archiveGroup(g) });
+  }
+  return items;
+}
 
 /**
- * Render the rail panel into `c`. Renders ONCE per tab entry (the rail's
- * renders-once guard) and re-renders on the engine's `channels-updated`
- * broadcast, which carries the recomputed digest — so a repaint costs no
- * fetch (the cache-invalidation law: one dirty signal, one computation).
+ * Render the rail panel into `c`. THE FIRST SCREEN IS THE GROUP LIST (design
+ * §22, the owner's IM model): every agent group and every TRACKED conversation
+ * of a connected account in ONE list sorted by last activity — row = glyph +
+ * name + time / source chip + last line + unread. The accounts (connect,
+ * re-authorize, the per-account conversation rows with Track / Assign /
+ * Reach) and the MESSAGE WATCHER (the built-in agents-as-sources section) are
+ * SECONDARY sections below, each folded by the user and the fold persisted.
+ *
+ * Renders ONCE per tab entry (the rail's renders-once guard) and repaints IN
+ * PLACE from the two broadcasts — `channels-updated` carries the recomputed
+ * digest, `channel-groups-updated` the recomputed group list — so a repaint
+ * costs no fetch (the cache-invalidation law: one dirty signal, one computation).
  */
 export function renderChannelsPanel(app, c) {
   const bar = document.createElement('div');
@@ -806,6 +866,15 @@ export function renderChannelsPanel(app, c) {
   const summary = document.createElement('div');
   summary.className = 'chan-summary';
   bar.appendChild(summary);
+  // g3: "New group" — the owner's explicit act (D1: a group exists only by an action)
+  const newBtn = btn('', () => showGroupMembersDialog(app), 'chan-newgroup-btn');
+  newBtn.dataset.newGroup = '1';
+  newBtn.title = t('New group — pick live agent sessions to talk with');
+  const newLabel = document.createElement('span');
+  newLabel.className = 'chan-newgroup-label';
+  newLabel.textContent = t('New group');
+  newBtn.append(icon('plus', 12), newLabel);
+  bar.appendChild(newBtn);
   // P3: the Outbox entry point, with the awaiting count from the digest.
   const outboxBtn = btn('', () => app.openChannelOutbox(), 'chan-outbox-btn');
   outboxBtn.dataset.outboxButton = '1';
@@ -822,6 +891,9 @@ export function renderChannelsPanel(app, c) {
   root.className = 'chan-list';
   c.append(bar, root);
 
+  /** The two inputs the list is drawn from — each replaced whole by its own broadcast. */
+  let digest = null, groups = null;
+
   /** The nearest scroll container above the list (the rail's `#all-sessions-list`,
    *  a window's content) — the thing whose scrollTop a repaint must not move. */
   function scrollerOf() {
@@ -836,138 +908,250 @@ export function renderChannelsPanel(app, c) {
   /** REPAINT IN PLACE (a1 D12): the new tree is built into a fragment and
    *  swapped in with ONE `replaceChildren` — the scroller never sees an empty
    *  list, so its scrollTop is restored exactly where the user left it, the
-   *  module-level fold set keeps every collapsed section, and nothing is
-   *  fetched (the digest on the broadcast IS the computation). */
-  function draw(d) {
+   *  module-level fold sets keep every collapsed section, and nothing is
+   *  fetched (the digest / the group list on the broadcast IS the computation). */
+  function draw() {
+    if (!c.isConnected) return;
     const scroller = scrollerOf();
     const keep = scroller ? scroller.scrollTop : 0;
     const frag = document.createDocumentFragment();
-    build(frag, d);
+    build(frag, digest || {});
     root.replaceChildren(frag);
     if (scroller && scroller.scrollTop !== keep) scroller.scrollTop = keep;
+  }
+
+  /** A SECONDARY section (Accounts / Message watcher): a fold head + a body;
+   *  the fold is the user's, persisted (`channelsPanelFolds`). */
+  function part(key, label, countText, fill) {
+    const p = document.createElement('div');
+    const folded = !!(FOLDS && FOLDS[key]);
+    p.className = 'chan-part' + (folded ? ' chan-part-collapsed' : '');
+    p.dataset.part = key;
+    const h = document.createElement('div');
+    h.className = 'chan-part-head';
+    h.appendChild(icon('chevronDown', 10, 'chan-part-chev'));
+    const nm = document.createElement('span');
+    nm.className = 'chan-part-name';
+    nm.textContent = label;
+    h.appendChild(nm);
+    if (countText) { const n = document.createElement('span'); n.className = 'chan-part-count'; n.textContent = countText; h.appendChild(n); }
+    h.onclick = () => { const now = !p.classList.contains('chan-part-collapsed'); p.classList.toggle('chan-part-collapsed', now); setFold(key, now); };
+    p.appendChild(h);
+    const b = document.createElement('div');
+    b.className = 'chan-part-body';
+    fill(b);
+    p.appendChild(b);
+    return p;
   }
 
   function build(into, d) {
     const adapters = (d && d.adapters) || [];
     const convs = (d && d.conversations) || [];
     const available = (d && d.available) || [];
-    const tracked = convs.filter((x) => x.tracked).length;
-    summary.textContent = adapters.length
-      ? t('{n} conversations · {k} tracked', { n: convs.length, k: tracked })
-      : t('No channels connected');
+    const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters });
+    const unreadTotal = rows.reduce((s, r) => s + (r.unread || 0), 0);
+    summary.textContent = rows.length ? t('{n} groups · {k} unread', { n: rows.length, k: unreadTotal }) : t('No groups yet');
     const awaiting = Number(d && d.awaitingTotal) || 0;
     outboxCount.textContent = String(awaiting);
     if (awaiting) { if (!outboxCount.isConnected) outboxBtn.appendChild(outboxCount); } else outboxCount.remove();
     outboxBtn.classList.toggle('chan-outbox-attn', awaiting > 0);
     outboxBtn.title = awaiting ? t('Outbox ({n} awaiting)', { n: awaiting }) : t('Outbox');
-    if (!adapters.length) {
-      const e = document.createElement('div');
-      e.className = 'empty-hint';
-      e.textContent = t('Connect a channel and track a conversation — new messages will be listed here.');
-      into.appendChild(e);
+
+    // r3: a store file set aside (or BLOCKED) at boot is said HERE, on the
+    // first screen — accounts that vanished with an unreadable adapters.json
+    // were otherwise unexplained unless the For-you inbox was opened
+    for (const q of (d && d.quarantined) || []) {
+      const text = q.blocked
+        ? t('{file} could not be read and could NOT be set aside — changes to it are refused until it is fixed or moved', { file: q.file })
+        : q.file === 'adapters.json'
+          ? t('{file} could not be read — set aside as {to}; your accounts were reset, reconnect them', { file: q.file, to: q.to })
+          : t('{file} could not be read — set aside as {to}; that store started empty', { file: q.file, to: q.to });
+      into.appendChild(noteLine('chan-quarantine-note', text, { warn: true }));
     }
+
+    // ── THE FIRST SCREEN: the group list ──
+    const list = document.createElement('div');
+    list.className = 'chan-groups';
+    if (!rows.length) {
+      list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). A conversation you track in an account below appears here as well.')));
+    }
+    for (const r of rows) list.appendChild(groupRow(r));
+    if (archived.length) {
+      const tog = document.createElement('div');
+      tog.className = 'chan-archived-toggle' + (ARCHIVED_OPEN ? ' chan-archived-open' : '');
+      tog.appendChild(icon('chevronDown', 9, 'chan-part-chev'));
+      tog.appendChild(chanLine('chan-archived-label', t('Archived groups ({n})', { n: archived.length })));
+      tog.onclick = () => { ARCHIVED_OPEN = !ARCHIVED_OPEN; draw(); };
+      list.appendChild(tog);
+      if (ARCHIVED_OPEN) for (const r of archived) list.appendChild(groupRow(r));
+    }
+    into.appendChild(list);
+
+    // ── SECONDARY: the accounts (every non-built-in adapter + Connect) ──
+    const accounts = adapters.filter((a) => !a.builtin);
+    const watcher = adapters.filter((a) => a.builtin);
     // THE ACCOUNT MODEL: how many accounts each kind holds (a lone one keeps
     // the kind's label; further ones are numbered in record order until the
     // token names them) and which is the n-th
     const siblings = new Map();
     const ordinal = new Map();
     for (const a of adapters) { const n = (siblings.get(a.kind) || 0) + 1; siblings.set(a.kind, n); ordinal.set(a.id, n); }
-    for (const a of adapters) {
-      const mine = convs.filter((x) => x.adapterId === a.id);
-      const sec = document.createElement('div');
-      sec.dataset.adapter = a.id;
-      // The built-in Agents adapter lists every live session on this instance —
-      // a list the sidebar already shows. Until one of them is tracked it is
-      // folded by default (owner 2026-09-21: "展示一堆agents意义不明"), and a
-      // caption says what tracking means; an explicit open/close survives repaints.
-      const builtinAgents = a.kind === 'agents' || a.id === 'agents';
-      const nothingTracked = mine.length > 0 && !mine.some((x) => x.tracked);
-      const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingTracked));
-      sec.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
-      const h = document.createElement('div');
-      h.className = 'chan-sec-head folder-header';
-      h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
-      h.appendChild(icon(kindGlyph(a, mine), 13, 'chan-sec-kind'));
-      const nm = document.createElement('b');
-      nm.className = 'chan-sec-name';
-      const kindCount = siblings.get(a.kind) || 1;
-      const name = accountName(a, kindCount, ordinal.get(a.id) || 1);
-      nm.textContent = name;
-      // under a 180px container the name hides and the glyph + count stand for it; the tooltip keeps the kind beside the account
-      h.title = name === (a.label || a.id) ? name : `${a.label || a.id} · ${name}`;
-      h.appendChild(nm);
-      // the credential chip: WHICH application credential this account is
-      // bound to — drawn only where it disambiguates (the kind holds several
-      // accounts, or the integration offers several credentials)
-      if (a.credentialKey && (kindCount > 1 || (Array.isArray(a.credentials) && a.credentials.length > 1))) {
-        const cc = document.createElement('span');
-        cc.className = 'chan-chip chan-cred-chip';
-        cc.textContent = credentialText(a.credentialKey, a.credentialLabel);
-        cc.title = t('Authorized under this application credential — it stays bound to this account.');
-        h.appendChild(cc);
+    into.appendChild(part('accounts', t('Accounts'), accounts.length ? String(accounts.length) : '', (b) => {
+      if (!accounts.length && !available.length) b.appendChild(chanLine('empty-hint empty-hint-inline', t('No account connected.')));
+      for (const a of accounts) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
+      // The kinds a user may still CONNECT — one full-width button each, worded
+      // by the credential facts the digest carries (§10.1's three copy paths).
+      if (available.length) {
+        const blk = document.createElement('div');
+        blk.className = 'chan-sec chan-connect';
+        const h = document.createElement('div');
+        h.className = 'chan-sec-head';
+        const nm = document.createElement('span');
+        nm.className = 'chan-sec-name';
+        nm.textContent = t('Connect');
+        h.appendChild(nm);
+        blk.appendChild(h);
+        for (const av of available) blk.appendChild(connectRow(app, av));
+        b.appendChild(blk);
       }
-      const dot = document.createElement('span');
-      dot.className = 'chan-dot chan-dot-' + adapterDot(a);
-      dot.title = dotTitle(a);
-      h.appendChild(dot);
-      const cnt = document.createElement('span');
-      cnt.className = 'chan-sec-count';
-      cnt.textContent = `${mine.filter((x) => x.tracked).length}/${mine.length}`;
-      cnt.title = t('{k} tracked of {n}', { k: mine.filter((x) => x.tracked).length, n: mine.length });
-      h.appendChild(cnt);
-      const more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'icon-btn chan-sec-more';
-      more.title = t('More actions');
-      more.appendChild(icon('more', 13));
-      const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine }));
-      more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
-      h.appendChild(more);
-      h.onclick = () => {
-        const nowFolded = !sec.classList.contains('chan-collapsed');
-        sec.classList.toggle('chan-collapsed', nowFolded);
-        if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
-      };
-      h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
-      sec.appendChild(h);
-      if (builtinAgents) {
-        const note = document.createElement('div');
-        note.className = 'chan-sec-note';
-        note.textContent = nothingTracked
-          ? t('Your live agent sessions on this instance — the same list as the sidebar. Track one to follow its messages here; an untracked row fetches nothing.')
-          : t('Your live agent sessions on this instance. Tracked ones are followed here; an untracked row fetches nothing.');
-        sec.appendChild(note);
-      }
-      // the status line(s) — only when there is something to say (a1 D1/D6)
-      for (const n of adapterNotes(app, a)) sec.appendChild(n);
-      const rows = document.createElement('div');
-      rows.className = 'chan-rows';
-      if (!mine.length) {
-        const e = document.createElement('div');
-        e.className = 'empty-hint empty-hint-inline chan-sec-empty';
-        e.textContent = t('No conversations discovered yet.');
-        rows.appendChild(e);
-      }
-      for (const conv of mine) rows.appendChild(row(conv));
-      sec.appendChild(rows);
-      into.appendChild(sec);
+    }));
+    // ── SECONDARY: the message watcher (agents as SOURCES: track / assign / filter) ──
+    if (watcher.length) {
+      into.appendChild(part('watcher', t('Message watcher'), '', (b) => {
+        b.appendChild(chanLine('chan-part-note', t('Follow a live agent session as a source: track it, then assign or filter it for another agent. To talk WITH agents, use a group.')));
+        for (const a of watcher) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
+      }));
     }
-    // The kinds a user may still CONNECT — one full-width button each, worded
-    // by the credential facts the digest carries (§10.1's three copy paths).
-    // On a fresh instance this is the ONLY section (a1 D7).
-    if (available.length) {
-      const blk = document.createElement('div');
-      blk.className = 'chan-sec chan-connect';
-      const h = document.createElement('div');
-      h.className = 'chan-sec-head';
-      const nm = document.createElement('span');
-      nm.className = 'chan-sec-name';
-      nm.textContent = t('Connect');
-      h.appendChild(nm);
-      blk.appendChild(h);
-      for (const av of available) blk.appendChild(connectRow(app, av));
-      into.appendChild(blk);
+  }
+
+  /** ONE row of the first screen: an agent group or a tracked conversation. */
+  function groupRow(r) {
+    const el = document.createElement('div');
+    el.className = 'chan-grow' + (r.unread ? ' chan-grow-unread-on' : '') + (r.archived ? ' chan-grow-archived' : '');
+    el.dataset.grow = r.key;
+    el.dataset.at = String(r.lastAt || 0);   // the activity instant the list is ordered by
+    if (r.kind === 'group') el.dataset.group = r.id;
+    const line = document.createElement('div');
+    line.className = 'chan-grow-line';
+    line.appendChild(icon(r.kind === 'group' ? 'users' : r.mail ? 'mail' : 'chat', 12, 'chan-grow-ic'));
+    const title = document.createElement('span');
+    title.className = 'chan-grow-title';
+    title.textContent = r.title;
+    title.title = r.title;
+    line.appendChild(title);
+    const at = document.createElement('span');
+    at.className = 'chan-grow-at';
+    at.textContent = rowTime(r.lastAt);
+    if (r.lastAt) at.title = new Date(r.lastAt).toLocaleString(deviceLocale());
+    line.appendChild(at);
+    el.appendChild(line);
+    const sub = document.createElement('div');
+    sub.className = 'chan-grow-sub';
+    const src = document.createElement('span');
+    src.className = 'chan-src-chip';
+    src.textContent = r.kind === 'group' ? (r.pair ? t('Direct') : t('Agents')) : r.sourceLabel;
+    src.title = r.kind === 'group' ? (r.pair ? t('A direct conversation between two agents') : t('An agent group · {n} members', { n: r.memberCount })) : t('From your {label} account', { label: r.sourceLabel });
+    sub.appendChild(src);
+    const last = document.createElement('span');
+    last.className = 'chan-grow-last';
+    last.textContent = r.lastText || '';
+    sub.appendChild(last);
+    if (r.unread) {
+      const u = document.createElement('span');
+      u.className = 'chan-grow-unread';
+      u.textContent = String(r.unread);
+      u.title = t('{n} unread', { n: r.unread });
+      sub.appendChild(u);
     }
+    el.appendChild(sub);
+    el.onclick = () => app.openChannel(r.adapterId, r.id);
+    el.oncontextmenu = (ev) => {
+      ev.preventDefault();
+      if (r.kind === 'group') showContextMenu(ev.clientX, ev.clientY, groupMenu(app, r.group));
+      else showContextMenu(ev.clientX, ev.clientY, menuItems('channel-row', rowMenuCtx(app, r.conv)));
+    };
+    return el;
+  }
+
+  /** One ADAPTER section (an account, or the built-in agents source). */
+  function section(a, mine, siblings, ordinal) {
+    const sec = document.createElement('div');
+    sec.dataset.adapter = a.id;
+    // The built-in Agents adapter lists every live session on this instance —
+    // a list the sidebar already shows. Until one of them is tracked it is
+    // folded by default (owner 2026-09-21: "展示一堆agents意义不明"), and a
+    // caption says what tracking means; an explicit open/close survives repaints.
+    const builtinAgents = !!a.builtin;
+    const nothingTracked = mine.length > 0 && !mine.some((x) => x.tracked);
+    const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingTracked));
+    sec.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
+    const h = document.createElement('div');
+    h.className = 'chan-sec-head folder-header';
+    h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
+    h.appendChild(icon(kindGlyph(a, mine), 13, 'chan-sec-kind'));
+    const nm = document.createElement('b');
+    nm.className = 'chan-sec-name';
+    const kindCount = siblings.get(a.kind) || 1;
+    const name = accountName(a, kindCount, ordinal.get(a.id) || 1);
+    nm.textContent = name;
+    // under a 180px container the name hides and the glyph + count stand for it; the tooltip keeps the kind beside the account
+    h.title = name === (a.label || a.id) ? name : `${a.label || a.id} · ${name}`;
+    h.appendChild(nm);
+    // the credential chip: WHICH application credential this account is
+    // bound to — drawn only where it disambiguates (the kind holds several
+    // accounts, or the integration offers several credentials)
+    if (a.credentialKey && (kindCount > 1 || (Array.isArray(a.credentials) && a.credentials.length > 1))) {
+      const cc = document.createElement('span');
+      cc.className = 'chan-chip chan-cred-chip';
+      cc.textContent = credentialText(a.credentialKey, a.credentialLabel);
+      cc.title = t('Authorized under this application credential — it stays bound to this account.');
+      h.appendChild(cc);
+    }
+    const dot = document.createElement('span');
+    dot.className = 'chan-dot chan-dot-' + adapterDot(a);
+    dot.title = dotTitle(a);
+    h.appendChild(dot);
+    const cnt = document.createElement('span');
+    cnt.className = 'chan-sec-count';
+    cnt.textContent = `${mine.filter((x) => x.tracked).length}/${mine.length}`;
+    cnt.title = t('{k} tracked of {n}', { k: mine.filter((x) => x.tracked).length, n: mine.length });
+    h.appendChild(cnt);
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'icon-btn chan-sec-more';
+    more.title = t('More actions');
+    more.appendChild(icon('more', 13));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine }));
+    more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
+    h.appendChild(more);
+    h.onclick = () => {
+      const nowFolded = !sec.classList.contains('chan-collapsed');
+      sec.classList.toggle('chan-collapsed', nowFolded);
+      if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
+    };
+    h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
+    sec.appendChild(h);
+    if (builtinAgents) {
+      const note = document.createElement('div');
+      note.className = 'chan-sec-note';
+      note.textContent = nothingTracked
+        ? t('Your live agent sessions on this instance — the same list as the sidebar. Track one to follow its messages here; an untracked row fetches nothing.')
+        : t('Your live agent sessions on this instance. Tracked ones are followed here; an untracked row fetches nothing.');
+      sec.appendChild(note);
+    }
+    // the status line(s) — only when there is something to say (a1 D1/D6)
+    for (const n of adapterNotes(app, a)) sec.appendChild(n);
+    const rows = document.createElement('div');
+    rows.className = 'chan-rows';
+    if (!mine.length) {
+      const e = document.createElement('div');
+      e.className = 'empty-hint empty-hint-inline chan-sec-empty';
+      e.textContent = t('No conversations discovered yet.');
+      rows.appendChild(e);
+    }
+    for (const conv of mine) rows.appendChild(row(conv));
+    sec.appendChild(rows);
+    return sec;
   }
 
   function row(conv) {
@@ -1056,10 +1240,14 @@ export function renderChannelsPanel(app, c) {
   }
 
   async function refresh() {
-    const d = await fetchJson('/api/channels');
+    const [d, g] = await Promise.all([fetchJson('/api/channels'), fetchJson('/api/channel-groups'), loadFolds(app)]);
     if (!c.isConnected) return;
     if (d && d.error) { root.textContent = ''; const e = document.createElement('div'); e.className = 'empty-hint'; e.textContent = d.error; root.appendChild(e); return; }
-    draw(d);
+    digest = d;
+    // a refused group list is an EMPTY list plus a toast — the channel half still draws
+    if (g && !g.error) groups = Array.isArray(g.groups) ? g.groups : [];
+    else { groups = []; if (g && g.code !== 'unavailable') showToast(groupErrorText(g), { type: 'error' }); }
+    draw();
   }
 
   // THE HANDLER IS HELD IN A NAMED CONST AND REMOVED BY NAME (r2) — see the
@@ -1068,13 +1256,26 @@ export function renderChannelsPanel(app, c) {
   // form is the belt. `off?.()` on the result of `onGlobal` was a no-op while
   // that method returned undefined, so every rail repaint left another live
   // handler behind.
+  //
+  // TWO BROADCASTS, EACH CARRYING ITS OWN RECOMPUTED HALF (g3): the digest on
+  // `channels-updated`, the group list on `channel-groups-updated` — neither
+  // repaint fetches (test-channels-e2e ⑬ counts the /api/channels fetches).
   const onBroadcast = (msg) => {
-    if (msg.type !== 'channels-updated' || !c.isConnected) return;
-    if (msg.digest) draw(msg.digest); else refresh().catch(() => {});
+    if (!c.isConnected) return;
+    if (msg.type === 'channel-groups-updated') {
+      if (!Array.isArray(msg.groups) || digest === null) return;   // the first paint is refresh()'s
+      groups = msg.groups;
+      draw();
+      return;
+    }
+    if (msg.type !== 'channels-updated') return;
+    if (msg.digest) { digest = msg.digest; if (groups !== null) draw(); } else refresh().catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
+  const foldListener = { c, draw };
+  FOLD_LISTENERS.add(foldListener);
   refresh().catch(() => {});
-  return () => { try { app.ws.offGlobal(onBroadcast); } catch {} };
+  return () => { FOLD_LISTENERS.delete(foldListener); try { app.ws.offGlobal(onBroadcast); } catch {} };
 }
 
 /** Focus the rail's Channels panel (the ⚙ row and any deep link) — or, where

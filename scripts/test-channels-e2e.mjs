@@ -12,13 +12,16 @@
 //   ⑤ two simultaneous passes each advance their own cursor (asserted through
 //      the REAL routes against the REAL store, not a unit fixture)
 //   ⑥ A READ-ONLY CONVERSATION RENDERS NO SEND CONTROL AT ALL
-//   ⑩ P3 (design §9): the composer PROPOSES → the inline approval card (identity
+//   ⑩ P3 (design §9): a user-drafted PROPOSAL (the /propose route) → the inline approval card (identity
 //      row + the identityMarking warning) and the OTHER client's Outbox window
 //      show the same record → ONE For-you pointer with its id on the row →
 //      Approve sends (fake adapter), client 2 repaints off the broadcast, the
 //      pointer is retracted, the audit holds propose→approve→attempt→outcome
 //      with draftedBy/approvedBy/sentAs/identityMarking; Reject with a reason;
 //      the outbox survives the restart in ③
+//   ⑩b g3 (design §22.2 ①): the composer SENDS the owner's own words at once,
+//      as the user — no approval card, no approve line in the audit; a user
+//      proposal the owner wants reviewed goes through the /propose route
 //   ⑪ P4 (design §9.4/§9.5): a send whose answer was LOST lands as `unknown`
 //      (never failed, never re-sent) with ONE For-you item and a Check
 //      outcome button; Check outcome from the card settles it to sent, the
@@ -213,7 +216,7 @@ const send = await p1.evaljs(`(async () => {
 })()`);
 ok(send.composer === 1, 'POSITIVE CONTROL: the SENDABLE conversation does draw one (the read-only zero is a decision, not an empty window)', JSON.stringify(send));
 ok(send.msgs > 0, 'a tracked conversation renders its ingested messages', JSON.stringify(send));
-ok(send.note && /policy/i.test(send.note) && /outbox/i.test(send.note), 'the composer SAYS which policy governs the reply and that it goes through the outbox (P3) — never a control that silently does nothing', send.note);
+ok(send.note && /sent at once, as you/i.test(send.note) && /outbox/i.test(send.note), 'the composer SAYS what a Send does here: out at once, as you — the outbox holds only agent drafts (g3, §22.2 ①) — never a control that silently does nothing', send.note);
 // …and NOW a poll-lane row says how long its evidence may be: the chip moved
 // from "not polling" to "within …" the moment tracking made the fetch real.
 const tracked1 = await p1.evaljs(OPEN_PANEL);
@@ -283,13 +286,14 @@ const readTodos = async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/
 const readRow = () => JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations['fake-poll/fake-poll-ops'];
 // the index reaches disk on the store's 500 ms debounce (2 s interval); wait for the write, bounded
 const waitRow = async (pred) => { for (let i = 0; i < 24; i++) { const r = readRow(); if (pred(r)) return r; await sleep(250); } return readRow(); };
+// A USER-DRAFTED PROPOSAL through the /propose route (g3, design §22.2 ①: the
+// composer on a conversation that offers send-as-user now SENDS the owner's
+// own words directly — ⑩b below — so a proposal the owner wants reviewed is
+// the route's; the card still arrives through `channel-outbox-updated`).
 const PROPOSE = (text) => `(async () => {
   const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
-  const ta = w.content.querySelector('.chanwin-composer textarea');
-  const btn = w.content.querySelector('[data-channel-propose]');
-  if (!ta || !btn) return { fail: 'no composer' };
-  ta.value = ${JSON.stringify(text)};
-  btn.click();
+  const r = await fetch('/api/channels/fake-poll/fake-poll-ops/propose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: ${JSON.stringify(text)} }) }).then((x) => x.json());
+  if (!r || r.error) return { fail: 'propose refused', r };
   for (let i = 0; i < 80; i++) {
     const card = w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval');
     if (card) return {
@@ -307,7 +311,7 @@ const PROPOSE = (text) => `(async () => {
 })()`;
 {
   const propose = await p1.evaljs(PROPOSE('Hello from the e2e user'));
-  ok(!propose.fail, 'EXIT P3 ①: a reply from the composer becomes a PROPOSAL and lands in awaiting-approval (fake-poll reads `review`)', JSON.stringify(propose));
+  ok(!propose.fail, 'EXIT P3 ①: a user-drafted PROPOSAL lands in awaiting-approval (fake-poll reads `review`) and its card appears INLINE in the open window', JSON.stringify(propose));
   ok(propose.text === 'Hello from the e2e user', 'the inline card carries the drafted text (textContent, never innerHTML)', JSON.stringify(propose));
   ok(!!propose.identity && /Will send as/.test(propose.identity), 'the card carries the IDENTITY ROW ("Will send as …")', String(propose.identity));
   ok(!!propose.warn, "fake-poll declares identityMarking:'unknown' ⇒ the card WARNS (unverified is as loud as marked — §9.5)", String(propose.identity));
@@ -404,6 +408,32 @@ const PROPOSE = (text) => `(async () => {
   ok(auditB.includes('reject') && !auditB.includes('attempt'), 'a rejected proposal has a reject line and NO attempt line (nothing was sent)', auditB.join(' → '));
   // client 2's Outbox window is closed again so the restart leg below restores only the channel windows it measures
   await p2.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel-outbox')) window.app.wm.closeWindow(w.id); return true; })()`);
+}
+
+// ── ⑩b g3 (design §22.2 ①): THE OWNER'S OWN MESSAGE GOES OUT DIRECTLY — the
+//    composer's Send on a conversation offering send-as-user: sent at once, as
+//    the user, NO approval card, the audit holding propose → attempt → outcome
+//    with no approve line (the policy never saw it); the review channel's own
+//    guard (a link) does not hold it ──
+{
+  const direct = await p1.evaljs(`(async () => {
+    const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
+    const ta = w.content.querySelector('.chanwin-composer textarea');
+    const b = w.content.querySelector('[data-channel-direct]');
+    if (!ta || !b) return { fail: 'no direct composer', propose: !!w.content.querySelector('[data-channel-propose]') };
+    const cardsBefore = w.content.querySelectorAll('.chanwin-outbox .chan-prop-awaiting-approval').length;
+    ta.value = 'My own words, see https://example.com/doc';
+    b.click();
+    for (let i = 0; i < 40; i++) { if (!ta.value) break; await new Promise((r) => setTimeout(r, 150)); }
+    await new Promise((r) => setTimeout(r, 600));
+    return { cleared: ta.value === '', label: b.textContent, cardsBefore, cardsAfter: w.content.querySelectorAll('.chanwin-outbox .chan-prop-awaiting-approval').length, toast: [...document.querySelectorAll('.global-toast')].map((t) => t.textContent).pop() || null };
+  })()`);
+  ok(!direct.fail && direct.cleared && /Send/.test(direct.label) && direct.cardsAfter === direct.cardsBefore && /^Sent/.test(direct.toast || ''), 'g3: the composer SENDS the owner\'s own words at once — no approval card appears, the toast says Sent (a link does not hold it)', JSON.stringify(direct));
+  const ob = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox?conv=fake-poll/fake-poll-ops`)).json();
+  const mine = (ob.proposals || []).find((p) => p.text === 'My own words, see https://example.com/doc');
+  ok(mine && mine.state === 'sent' && mine.sendAs === 'user' && mine.draftedBy && mine.draftedBy.kind === 'user' && mine.approvedBy === 'policy', 'the record is SENT as the user, drafted by the user', JSON.stringify(mine && { state: mine.state, sendAs: mine.sendAs, draftedBy: mine.draftedBy, approvedBy: mine.approvedBy }));
+  const opsD = fs.readFileSync(path.join(wt, 'data/channels/audit.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((a) => a.kind === 'outbox' && mine && a.proposalId === mine.id).map((a) => a.op);
+  ok(JSON.stringify(opsD) === '["propose","attempt","outcome"]', 'its audit is propose → attempt → outcome — no approve line (the policy and its guards never judged the owner\'s own words)', opsD.join(' → '));
 }
 
 // ── ⑪ P4: A LOST ANSWER IS UNKNOWN, AND A PERSON SETTLES IT (design §9.4 / §9.5) ──
@@ -714,7 +744,9 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const titles = rows.map((r) => Math.round(R(r.querySelector('.chan-row-title')).left));
     const lineOne = rows.map((r) => { const l = r.querySelector('.chan-row-line'); return [r.classList.contains('chan-tracked'), [...l.querySelectorAll('.chan-chip, .chan-unread, .chan-awaiting, .chan-untracked')].length]; });
     const spread = (xs) => xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
-    return { rows: rows.length, trackedRows, pills, badges, titles, lineOne, pillSpread: spread(pills), badgeSpread: spread(badges), titleSpread: spread(titles) };
+    const panel = document.querySelector('.rail-panel-channels');
+    const geo = { panel: panel && [Math.round(R(panel).left), Math.round(R(panel).width), panel.scrollWidth, panel.clientWidth], list: (() => { const l = window.app.sidebar.listEl; return l && [Math.round(R(l).left), Math.round(R(l).width), l.scrollLeft, l.scrollWidth, l.clientWidth]; })(), wide: [...panel.querySelectorAll('*')].filter((e) => R(e).right > R(panel).right + 1).slice(0, 6).map((e) => e.className + ':' + Math.round(R(e).width)) };
+    return { rows: rows.length, trackedRows, pills, badges, titles, lineOne, pillSpread: spread(pills), badgeSpread: spread(badges), titleSpread: spread(titles), geo };
   })()`);
   ok(grid.rows >= 4 && grid.trackedRows >= 2 && grid.pills.length === grid.trackedRows && grid.pillSpread <= 1, `(a) every TRACKED row's freshness pill sits on the same right edge (±1px over ${grid.trackedRows} of ${grid.rows} rows: spread ${grid.pillSpread})`, JSON.stringify(grid));
   ok(grid.badgeSpread <= 1 && grid.titleSpread <= 1, `(a) the line-2 badges share a right edge and the titles a left edge (spreads ${grid.badgeSpread} / ${grid.titleSpread})`, JSON.stringify(grid));

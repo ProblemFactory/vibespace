@@ -158,6 +158,10 @@ const BOOT_PENDING_DELAY_MS = 5000;
 /** The coalescing window's default and ceiling (fence 12; the setting
  *  `channels.pushCoalesceSeconds` overrides within [0, max]). */
 const COALESCE_DEFAULT_SECONDS = 60;
+/** The group list's LAST LINE (design §22, 2.369.159): one line, bounded —
+ *  a cache on the index entry beside `lastAt`, re-derivable from the log. */
+const LAST_TEXT_MAX = 160;
+const lastTextOf = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, LAST_TEXT_MAX);
 const COALESCE_MAX_SECONDS = 600;
 
 function create(deps = {}) {
@@ -203,7 +207,30 @@ function create(deps = {}) {
   } = deps;
   if (!dataDir) throw new Error('channels-engine: dataDir is required');
 
-  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now });
+  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now, log });
+  // A store file that could not be read at boot was SET ASIDE (r2 — never
+  // silently read as empty and overwritten): ONE "For you" item per file,
+  // naming where its bytes are. The store already logged the named line.
+  for (const q of store.quarantined || []) {
+    if (!userTodos || typeof userTodos.add !== 'function') break;
+    try {
+      // r3: a BLOCKED file (the rename failed) was NOT set aside — its
+      // headline says so, never "set aside as <its own name>"
+      const head = q.blocked
+        ? { text: `Channels: ${q.file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved`, key: i18nKey('Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved'), params: { file: q.file } }
+        : { text: `Channels: ${q.file} could not be read and was set aside as ${q.to}`, key: i18nKey('Channels: {file} could not be read and was set aside as {where}'), params: { file: q.file, where: q.to } };
+      userTodos.add(INBOX_KEY, {
+        text: head.text,
+        detail: `${q.file} was ${q.why}.\n${q.to ? `Its bytes are kept as data/channels/${q.to} — nothing was deleted; the store started empty.` : 'It could NOT be renamed, so writes to it are refused until the file is fixed or moved.'}\n\nRestore it by fixing the JSON and moving it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.`,
+        urgency: 'high', by: 'agent', sessionName: 'Channels',
+        i18n: {
+          text: { key: head.key, params: head.params },
+          detail: [{ key: i18nKey('Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.') }],
+          source: INBOX_SOURCE,
+        },
+      });
+    } catch (e) { log.warn(`[channels] could not file the set-aside notice for ${q.file}: ${(e && e.message) || e}`); }
+  }
   const box = secretBox(path.join(dataDir, KEY_FILE));
   const flows = oauth || createOAuthLoopback({ now, log });
 
@@ -568,6 +595,9 @@ function create(deps = {}) {
     if (lane.via === 'scan' && !lane.source) return { appended: 0, duplicates: 0, anchorMoved: false, complete: false, why: lane.why };
     let anchor = before.anchor || null;
     let appended = 0, duplicates = 0, lastAt = before.lastAt || null, complete = true, pages = 0;
+    // the newest APPENDED record's text + instant (the group list's last line, §22): tracked apart from
+    // `lastAt`, which discovery may already have set from the vendor's listing to that very instant
+    let lastText = null, lastTextAt = -Infinity;
     const freshAt = [];
     const freshRecs = [];   // P2: exactly what became durable on this pass — the filter's input
 
@@ -581,6 +611,7 @@ function create(deps = {}) {
       if (Array.isArray(w.freshAt)) freshAt.push(...w.freshAt);
       if (Array.isArray(w.fresh) && w.fresh.length) freshRecs.push(...w.fresh);
       if (w.lastAt && (!lastAt || w.lastAt > lastAt)) lastAt = w.lastAt;
+      if (w.lastAt && w.lastAt >= lastTextAt && typeof w.lastText === 'string') { lastTextAt = w.lastAt; lastText = w.lastText; }
       anchor = r.anchor || anchor;
       if (r.reachedAnchor && r.complete) break;
       if (++pages >= MAX_PAGES || !r.records.length) { complete = false; break; }
@@ -609,6 +640,8 @@ function create(deps = {}) {
       if (complete && anchor && anchor !== en.anchor) { en.anchor = anchor; anchorMoved = true; }
       if (judged) { en.lane = en.lane || {}; en.lane.firstSeenTotal = (en.lane.firstSeenTotal || 0) + judged; en.lane.firstSeenByPoll = (en.lane.firstSeenByPoll || 0) + missed; }
       if (lastAt && (!en.lastAt || lastAt > en.lastAt)) en.lastAt = lastAt;
+      // the group list's LAST LINE (§22): cached beside `lastAt`, re-derivable from the log
+      if (typeof lastText === 'string' && lastTextAt >= (Number(en.lastAt) || 0)) en.lastText = lastTextOf(lastText);
       // DERIVED, never a stored fact (§5 invariant 7): cached for render speed
       // and always re-derivable from the log and the read mark.
       en.unread = store.countSince(rec.id, convId, en.readAt || 0);
@@ -664,7 +697,7 @@ function create(deps = {}) {
       const cc = caps.convCapsState(en.convCaps, t);
       return {
         key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: en.title, kind: en.kind,
-        participants: en.participants, lastAt: en.lastAt, unread: en.unread || 0, tracked: !!en.tracked,
+        participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', unread: en.unread || 0, tracked: !!en.tracked,
         convCaps: cc,
         offers: {
           read: caps.offers(c, en.convCaps, 'read', t),
@@ -699,6 +732,10 @@ function create(deps = {}) {
       adapters, available, conversations,
       unreadTotal: conversations.reduce((n, c) => n + (c.tracked ? c.unread : 0), 0),
       awaitingTotal: conversations.reduce((n, c) => n + ((c.outbox && c.outbox.awaiting) || 0), 0),
+      // r3: a store file set aside (or BLOCKED) at boot, on the FIRST SCREEN —
+      // the For-you item alone left a real instance's vanished accounts
+      // unexplained in the panel
+      quarantined: (store.quarantined || []).map(({ file, to, why, at, blocked }) => ({ file, to: to || null, why, at, blocked: !!blocked })),
       at: t,
     };
   }
@@ -722,6 +759,9 @@ function create(deps = {}) {
     const auth = caps.authState(rec, t, { adapterState: st });
     return {
       id: rec.id, kind: rec.kind, label: rec.label, enabled: rec.enabled !== false, builtin: !!rec.builtin,
+      // r3: a send here starts a BILLED TURN (the module's declaration) — the
+      // composer says so and echoes the count with its Send (`expectWakes`)
+      sendStartsTurn: sendStartsTurn(rec),
       // The built-in row's login IS this instance (`self`), never a named
       // user — the seed's `user: 'you'` was an English word on the wire (a3 i18n).
       // `tokenHeld` (verifier r1): does the record HOLD a token — a token-less
@@ -902,9 +942,10 @@ function create(deps = {}) {
    *  ONE broadcast per batch — never per message. */
   function afterPush(rec, e, convId, w) {
     if (!e.pushBatch) e.pushBatch = new Map();
-    const b = e.pushBatch.get(convId) || { appended: 0, lastAt: null };
+    const b = e.pushBatch.get(convId) || { appended: 0, lastAt: null, lastText: null, lastTextAt: -Infinity };
     b.appended += w.appended;
     if (w.lastAt && (!b.lastAt || w.lastAt > b.lastAt)) b.lastAt = w.lastAt;
+    if (w.lastAt && w.lastAt >= b.lastTextAt && typeof w.lastText === 'string') { b.lastTextAt = w.lastAt; b.lastText = w.lastText; }
     e.pushBatch.set(convId, b);
     if (e.pushTimer) return;
     e.pushTimer = setTimeout(() => { e.pushTimer = null; flushPushBatch(rec, e).catch((err) => log.warn(`[channels] ${rec.id}: push batch failed: ${(err && err.message) || err}`)); }, PUSH_NOTIFY_DEBOUNCE_MS);
@@ -919,6 +960,7 @@ function create(deps = {}) {
         const en = store.index.entry(rec.id, convId, { create: false });
         if (!en) continue;
         if (b.lastAt && (!en.lastAt || b.lastAt > en.lastAt)) en.lastAt = b.lastAt;
+        if (typeof b.lastText === 'string' && b.lastTextAt >= (Number(en.lastAt) || 0)) en.lastText = lastTextOf(b.lastText);
         en.unread = store.countSince(rec.id, convId, en.readAt || 0);
         en.lane = { ...(en.lane || {}), via: 'push', lastPushAt: now(), firstSeenTotal: ((en.lane && en.lane.firstSeenTotal) || 0) + b.appended };
         changed.push(convId);
@@ -1853,10 +1895,10 @@ function create(deps = {}) {
   function sendIdentityFor(rec, en, t) {
     const c = registry.capsOf(rec.kind);
     const u = caps.offers(c, en && en.convCaps, 'send-as-user', t);
-    if (u.offered) return { as: 'user', why: null };
+    if (u.offered) return { as: 'user', why: null, userWhy: null };
     const b = caps.offers(c, en && en.convCaps, 'send-as-bot', t);
-    if (b.offered) return { as: 'bot', why: null };
-    return { as: null, why: u.why || b.why || 'unknown' };
+    if (b.offered) return { as: 'bot', why: null, userWhy: u.why || 'unknown' };
+    return { as: null, why: u.why || b.why || 'unknown', userWhy: u.why || 'unknown' };
   }
   /** The principal's reach on ONE conversation. The built-in Agents adapter
    *  answers with msg-acl through the ONE crosswalk (§12.3); every other
@@ -1900,6 +1942,9 @@ function create(deps = {}) {
     const can = p.state === 'unknown' ? (c ? P.canReconcile(c) : { ok: false, code: 'no-adapter', why: 'the adapter no longer exists' }) : null;
     return {
       ...p, adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, identityWarning: c ? caps.identityWarning(c) : null, ttlAt, canDecide: p.state === 'awaiting-approval',
+      // r3: how many agents approving this WAKES (a billed turn each) — the
+      // card says it and echoes it with the Approve (`expectWakes`)
+      wakes: sendStartsTurn(rec) ? 1 : 0,
       honestyLine, canReconcile: !!(can && can.ok), reconcileWhy: can && !can.ok ? can.why : null, reconcileWhyCode: can && !can.ok ? (can.code || null) : null,
       // THE OUTCOME AS STRUCTURE (a3 i18n): `p.reason` stays the English
       // contract string agents read; the card words `outcome` in its language.
@@ -1954,8 +1999,73 @@ function create(deps = {}) {
    * BEFORE this is asked, or `{kind:'user'}` from the composer. On a
    * conversation where no identity is offered the answer is the typed
    * `send-not-available` and NOTHING is created (§4).
+   *
+   * THE OWNER'S OWN MESSAGE (design §22, 2.369.159 — "an IM, not a feed"):
+   * `input.direct === true` from the USER (the composer's Send, `POST …/send`)
+   * skips the policy and its guards — the owner's own words go out at once,
+   * AS THE OWNER, the way a message typed into the platform's own client
+   * would. It still rides the whole outbox machinery (the record, the audit
+   * attempt/outcome, the lost-answer `unknown` that is never re-sent); only
+   * `sendAs:'user'` qualifies (a bot identity is not the owner speaking — that
+   * conversation answers `send-not-available` with the send-as-user reason,
+   * and the composer offers the proposal path instead). An AGENT's `direct`
+   * is ignored: agent drafts are what the policy exists for.
    */
-  async function propose(ctx, adapterId, convId, input) {
+  /** Does a send on this record START A BILLED TURN? The adapter MODULE
+   *  declares it (`sendStartsTurn` — the built-in Agents adapter's send is a
+   *  wake through the delivery ladder), never its id (r3). */
+  function sendStartsTurn(rec) { try { return !!(rec && registry.get(rec.kind).sendStartsTurn); } catch { return false; } }
+  /**
+   * THE WAKE GATE of a send that starts a turn (r3 — the side doors r2 left
+   * beside the group routes). `n` = the wakes the act causes NOW (0 or 1).
+   * `consent(n)` first (the owner's echo: a caller that never saw the
+   * preview cannot wake — `wake-count-mismatch`, with `wakes`), then
+   * `mayWake(convId)` (THE groups engine's pacer — one ledger for every owner
+   * route, handed in only when auth is off; an agent route hands its own):
+   * a floored send is `rate-floor` and NOTHING moves. `{ok:true, granted}`
+   * — a granted slot is refunded when the send did not go out.
+   */
+  function wakeGate(convId, n, { consent = null, mayWake = null } = {}) {
+    if (!n) return { ok: true, granted: false };
+    if (typeof consent === 'function') {
+      const v = consent(n);
+      if (!(v === true || (v && v.ok === true))) return { ok: false, code: (v && v.code) || 'wake-count-mismatch', error: (v && v.error) || 'the wake was not confirmed', wakes: n };
+    }
+    if (typeof mayWake !== 'function') return { ok: true, granted: false };
+    const pace = mayWake(convId);
+    if (pace !== true) {
+      const reason = String((pace && pace.reason) || 'rate floor').replace(/ — it reaches them on their next turn instead$/, '');
+      return { ok: false, code: 'rate-floor', error: `${reason} — nothing was sent (send again once the floor passes, or post in a group: that reaches them on their next turn, free)`, why: (pace && pace.why) || null, wakes: n };
+    }
+    return { ok: true, granted: true };
+  }
+  /** The proposals whose adapter send was CALLED (r4): set right before
+   *  `adapter.send`, cleared when sendNow returns — an entry that survives
+   *  is a sendNow that THREW after the request may have left. */
+  const sendLeft = new Set();
+  /**
+   * Give a granted wake slot back when the send did not go out. `threw`
+   * (r4): the act threw between the grant and its outcome (a blocked store's
+   * 503, an EACCES/ENOSPC write) — a proposal that never reached its adapter
+   * returns the PAIR and the sender's minute (nothing reached the
+   * authorizer, so it was not an attempt: the retry is sent, never a 429
+   * blaming a wake that never happened); one whose request may have LEFT
+   * keeps the whole slot. Without a throw: `sent`/`unknown` keep the slot,
+   * anything else (a refusal) returns the pair and keeps the attempt.
+   */
+  function wakeRefundIfUnsent(gate, guards, convId, id, { threw = false } = {}) {
+    const left = id ? sendLeft.has(id) : false;
+    if (threw && id) sendLeft.delete(id);
+    if (!gate || !gate.granted || !guards || typeof guards.mayWake !== 'function' || typeof guards.mayWake.refund !== 'function') return;
+    const p = id ? store.outbox.snapshot().proposals[id] : null;
+    // `unknown` keeps the slot: the request LEFT, the turn may be running
+    if (p && (p.state === 'sent' || p.state === 'unknown')) return;
+    if (threw && left && !(p && p.state === 'failed')) return;
+    const attempted = !threw || left;
+    try { guards.mayWake.refund(convId, { attempted }); } catch { }
+  }
+
+  async function propose(ctx, adapterId, convId, input, guards = {}) {
     const { en, rec } = convFor(adapterId, convId);
     if (!en || !rec) return ACL.notFound();
     const t = now();
@@ -1971,6 +2081,8 @@ function create(deps = {}) {
       if (fresh) who = sendIdentityFor(rec, { ...en, convCaps: fresh }, now());
     }
     if (!who.as) return { ok: false, code: 'send-not-available', error: `sending is not available on this conversation (${who.why})`, why: who.why };
+    const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');
+    if (own && who.as !== 'user') return { ok: false, code: 'send-not-available', error: `sending as you is not available on this conversation (${who.userWhy || 'unknown'})`, why: who.userWhy || 'unknown' };
     const v = P.validateProposal(input);
     if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error };
     // The authority the drafter holds HERE: the user's own is `send`; an
@@ -1978,26 +2090,40 @@ function create(deps = {}) {
     let authority = 'draft';
     if (!ctx || ctx.kind === 'user') authority = 'send';
     else if (assignmentNames(en.assignment, ctx)) authority = F.effectiveAuthority(en.assignment, authorityCapsFor(rec, en, t)).authority;
-    const decision = P.decideOutbound({ channelPolicy: policyFor(rec, en), guards: guardsFromSettings(), proposal: { ...v.proposal, authority }, now: t });
+    const decision = own
+      ? { mode: 'direct', reasons: [], detail: { ownMessage: true } }
+      : P.decideOutbound({ channelPolicy: policyFor(rec, en), guards: guardsFromSettings(), proposal: { ...v.proposal, authority }, now: t });
+    // r3: a direct send on a channel whose send starts a turn IS a wake —
+    // consented and paced BEFORE anything is written
+    const gate = wakeGate(convId, decision.mode === 'direct' && sendStartsTurn(rec) ? 1 : 0, guards || {});
+    if (!gate.ok) return gate;
     const drafter = !ctx || ctx.kind === 'user' ? { kind: 'user', id: null, name: null } : { kind: 'agent', id: ctx.id, name: ctx.name || null };
     let created = null;
-    await store.outbox.update((ob) => {
-      const id = store.outbox.nextId();
-      created = ob.proposals[id] = {
-        id, adapterId, convId, key: en.key, title: en.title || convId,
-        text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: v.proposal.attachments,
-        draftedBy: drafter, authority, at: t, updatedAt: t, state: 'proposed',
-        policy: { mode: decision.mode, reasons: decision.reasons, detail: decision.detail },
-        sendAs: who.as, identity: identityFor(rec, who.as),
-        ttlMs: P.PROPOSAL_TTL_MS, awaitingSince: null, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null,
-        history: [{ state: 'proposed', at: t, by: drafter.kind }],
-      };
-    });
-    auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons });
-    if (decision.mode === 'direct') {
-      await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
-      await sendNow(created.id);
-    } else {
+    // r4: a THROW after the grant (a blocked / full store) gives the slot back
+    try {
+      await store.outbox.update((ob) => {
+        const id = store.outbox.nextId();
+        created = ob.proposals[id] = {
+          id, adapterId, convId, key: en.key, title: en.title || convId,
+          text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: v.proposal.attachments,
+          draftedBy: drafter, authority, at: t, updatedAt: t, state: 'proposed',
+          policy: { mode: decision.mode, reasons: decision.reasons, detail: decision.detail },
+          sendAs: who.as, identity: identityFor(rec, who.as),
+          ttlMs: P.PROPOSAL_TTL_MS, awaitingSince: null, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null,
+          history: [{ state: 'proposed', at: t, by: drafter.kind }],
+        };
+      });
+      auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons });
+      if (decision.mode === 'direct') {
+        await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
+        await sendNow(created.id);
+        wakeRefundIfUnsent(gate, guards, convId, created.id);
+      }
+    } catch (err) {
+      wakeRefundIfUnsent(gate, guards, convId, created && created.id, { threw: true });
+      throw err;
+    }
+    if (decision.mode !== 'direct') {
       await transition(created.id, 'awaiting-approval', 'policy');
       await pointerSync(en.key);
       notifyOutbox([created.id]);
@@ -2015,10 +2141,15 @@ function create(deps = {}) {
    * typed `send-not-available` plus the adapter's own reason, the proposal
    * lands in `failed`, and the receipt carries that reason verbatim.
    */
-  async function approve(id, { text = null, by = 'user' } = {}) {
+  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null } = {}) {
     const p0 = store.outbox.snapshot().proposals[id];
     if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal' };
     if (p0.state !== 'awaiting-approval') return { ok: false, code: 'bad-state', error: `proposal is ${p0.state}, not awaiting approval` };
+    // r3: approving a send that starts a turn is a wake — the echo first
+    // (nothing moves on a refusal: the proposal still awaits)
+    const wakeN = sendStartsTurn(adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null) ? 1 : 0;
+    const echo = wakeGate(p0.convId, wakeN, { consent });
+    if (!echo.ok) return { ...echo, proposal: proposalView(p0) };
     const edited = typeof text === 'string' && text.trim() && text !== p0.text;
     if (edited) {
       const v = P.validateProposal({ ...p0, text });
@@ -2044,10 +2175,22 @@ function create(deps = {}) {
       log.log(`[channels] outbox ${id}: approval refused — ${why}`);
       return { ok: false, code: 'send-not-available', error: `cannot send now: ${why}`, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
     }
-    const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } });
-    if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why };
-    auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
-    await sendNow(id);
+    // …then the pace, only once the send is still offered (a refusal above
+    // spends no slot); a floored approve leaves the proposal AWAITING
+    const gate = wakeGate(p0.convId, wakeN, { mayWake });
+    if (!gate.ok) return { ...gate, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
+    // r4: a THROW after the grant (the transition's or the send's store
+    // write refused) gives the slot back unless the request may have left
+    try {
+      const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } });
+      if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
+      auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
+      await sendNow(id);
+    } catch (err) {
+      wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id, { threw: true });
+      throw err;
+    }
+    wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id);
     const fresh = store.outbox.snapshot().proposals[id];
     return { ok: fresh.state === 'sent', code: fresh.state === 'sent' ? null : fresh.state, error: fresh.state === 'sent' ? null : (fresh.reason || fresh.state), proposal: proposalView(fresh) };
   }
@@ -2093,6 +2236,7 @@ function create(deps = {}) {
       // it is persisted the moment it exists, so a crash between the phases
       // leaves `reconcile()` something to ask about (§9.4).
       const onHandle = async (h) => { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.sendHandle = h; }); };
+      sendLeft.add(id);
       try { r = await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle }); }
       catch (err) {
         r = err && typeof err.toJSON === 'function' ? err.toJSON() : { ok: false, code: (err && err.code) || 'vendor-error', retryable: false, detail: { threw: true, message: (err && err.message) || String(err) } };
@@ -2126,6 +2270,7 @@ function create(deps = {}) {
     await pointerSync(p1.key);
     notifyOutbox([id]); notify([p1.convId]);
     log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId}: ${to}${p1.reason ? ` — ${p1.reason}` : ''}`);
+    sendLeft.delete(id);
     return { ok: to === 'sent', state: to };
   }
   /** An unknown outcome owes the USER a look (§9.4), not the agent a verdict. */

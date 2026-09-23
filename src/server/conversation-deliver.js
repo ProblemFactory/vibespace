@@ -294,7 +294,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // CLI's semantics), and a codex `peer` frame is `thread/queue/add`, which is
       // likewise its own turn afterwards. The exception is a fact about the LANE,
       // read off the caps row, never a backend id.
-      const spent = () => { if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
+      // THE TURN THIS OPENS IS NOBODY'S TYPING (design-communication-panel
+      // §22 D2): stamped on the live local session at every rung that hands it
+      // the frame, so prompt-context can tell the next UserPromptSubmit is a
+      // machine turn and hold the next-turn group reports for the owner's own.
+      const machineTurn = () => { try { const s = localSessionFor(cid); if (s) s._machineInputAt = Date.now(); } catch { } };
+      const spent = () => { machineTurn(); if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
       const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
       // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
       try {
@@ -353,7 +358,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // the settle queue now owns this hold: it is charged when the wrapper
           // says the frame opened a turn after all, and released when it confirms
           // the steer — so the money is NOT settled here, it is handed on
-          if (steersIntoRunningTurn) { money.settled = true; noteFrameWritten(cid, charged); }
+          if (steersIntoRunningTurn) { machineTurn(); money.settled = true; noteFrameWritten(cid, charged); }
           else { spent(); noteFrameWritten(cid, null); }
           return { ok: true, lane: 'rpc-queue', kind, steered: steersIntoRunningTurn, peerName: rpc.s.name || null };
         } catch (e) { log('[deliver] rpc-queue write failed (falling through): ' + e.message); }

@@ -225,6 +225,16 @@ export function installSidebarRail(Sidebar) {
       badge.textContent = String(val);
     },
 
+    /** The Channels badge = the channels digest's unread + awaiting AND the
+     *  agent groups' unread for the owner (g3, design §22 — the panel is an IM
+     *  whose first screen is the group list, so a new group message must light
+     *  the rail too). Each half arrives on its own broadcast and is kept here. */
+    _railChanBadge(part, n) {
+      this._chanBadgeParts = { ...(this._chanBadgeParts || {}), [part]: Number(n) || 0 };
+      const p = this._chanBadgeParts;
+      this._railSetBadge('channels', ((p.ch || 0) + (p.grp || 0)) || '');
+    },
+
     /** Badge sources (design: tasks=⚠, remote=offline machines, ports=active
      *  forwards, diagnostics=recent errors). Wired once per rail build; ws
      *  handlers self-guard on the rail element still being alive. */
@@ -238,13 +248,15 @@ export function installSidebarRail(Sidebar) {
         // from the digest the engine ALREADY sends with every pass — one dirty
         // signal, one computation (the cache-invalidation law).
         if (msg.type === 'channels-updated') {
-          if (msg.digest) this._railSetBadge('channels', ((msg.digest.unreadTotal || 0) + (msg.digest.awaitingTotal || 0)) || '');   // P3: unread + proposals awaiting approval (the pointer's degrade surface)
+          if (msg.digest) this._railChanBadge('ch', (msg.digest.unreadTotal || 0) + (msg.digest.awaitingTotal || 0));   // P3: unread + proposals awaiting approval (the pointer's degrade surface)
           // The open Channels panel is NOT torn down here: its own broadcast
           // handler redraws in place from this very digest (a1 D12 — the
           // remove + re-render + refetch emptied the list for the fetch's
           // duration, so the scroller clamped to 0 on every pass and
           // /api/channels was asked once per broadcast; test-channels-e2e ⑬).
         }
+        // g3: the agent groups' unread for the owner rides its own broadcast (the recomputed list)
+        if (msg.type === 'channel-groups-updated' && Array.isArray(msg.groups)) this._railChanBadge('grp', msg.groups.reduce((a, g) => a + (g && !g.archivedAt ? Number(g.unread) || 0 : 0), 0));
         if (msg.type === 'jobs-updated') {
           this._railRefreshBadges();
           if (this._activeTab === 'jobs') { this.listEl.querySelector('.rail-panel-jobs')?.remove(); this._renderRailPanel(); }
@@ -268,7 +280,8 @@ export function installSidebarRail(Sidebar) {
       // broadcast (app.js toasts it and calls _railSysBadge)
       fetchJson('/api/sysinfo').then((r) => this._railSysBadge(r?.mem?.pct)).catch(() => {});
       // channels: one probe at load; live updates ride 'channels-updated'
-      fetchJson('/api/channels').then((r) => this._railSetBadge('channels', ((r?.unreadTotal || 0) + (r?.awaitingTotal || 0)) || '')).catch(() => {});
+      fetchJson('/api/channels').then((r) => this._railChanBadge('ch', (r?.unreadTotal || 0) + (r?.awaitingTotal || 0))).catch(() => {});
+      fetchJson('/api/channel-groups').then((r) => { if (r && Array.isArray(r.groups)) this._railChanBadge('grp', r.groups.reduce((a, g) => a + (g && !g.archivedAt ? Number(g.unread) || 0 : 0), 0)); }).catch(() => {});
     },
 
     async _railRefreshBadges() {
@@ -280,7 +293,7 @@ export function installSidebarRail(Sidebar) {
         const off = (ho?.hosts || []).filter((h) => h.transport === 'dial' && !h.online).length;
         this._railSetBadge('mounts', off ? off + '⏻' : '');
         const ch = await fetchJson('/api/channels').catch(() => null);
-        if (ch && !ch.error) this._railSetBadge('channels', ((ch.unreadTotal || 0) + (ch.awaitingTotal || 0)) || '');
+        if (ch && !ch.error) this._railChanBadge('ch', (ch.unreadTotal || 0) + (ch.awaitingTotal || 0));
         const jb = await fetchJson('/api/jobs').catch(() => null);
         if (jb?.jobs) {
           // TRIAGE (design §13 rule 2): the badge counts awaiting-user +

@@ -10,9 +10,10 @@
  * feature is in `src/server/channels-engine.js` and `src/routes/channels.js`.
  */
 const { create: createEngine } = require('./channels-engine.js');
+const { create: createGroups } = require('./groups-engine.js');
 const channelsRoutes = require('../routes/channels.js');
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [] } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
 
@@ -25,10 +26,17 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // spend authorizer inside it), `serverSetting` reads the coalescing window
   // and `liveSessions` names the agent sessions an assignment can address.
   const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions });
-  channelsRoutes.setup({ getEngine: () => channels });
+  // AGENT GROUPS (design §22): the SAME store (groups.json + the group logs
+  // behind its serialized doors), the SAME ladder (a wake is a billed turn —
+  // spendReason peer-message, the authorizer inside it), reach = msg-acl over
+  // the live roster + the Task Groups' externalVisibility (`groupSetting`).
+  const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting });
+  // `authEnabled` (r2): with auth OFF the owner's group routes are reachable by any
+  // local caller, so they are PACED like an agent's (src/routes/channels.js ownerPacer)
+  channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled });
   app.use(channelsRoutes.router);
   channels.start();
-  return { channels, shutdown: () => { try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
+  return { channels, groups, shutdown: () => { try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
 module.exports = { create };

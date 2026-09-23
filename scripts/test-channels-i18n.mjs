@@ -87,6 +87,10 @@ export const DATA_PATH_CLASSES = [
   'window-title', 'win-title', 'titlebar', 'taskbar', 'rail-badge',
   'chan-reach-who',   // the principal's own name (a session / group title)
   'chan-cred-label',  // a credential's NAME is the cluster's / the user's own label (2.369.148: the wizard's credential step is always drawn, so the preset label reaches the census)
+  // g3 (design §22, the IM-first panel): an agent GROUP's name, its last line and a source's label are
+  // AGENT / vendor data; so are member names (the detail + the New group picker), an invite's context,
+  // a system record's names and an @-autocomplete candidate
+  'chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chan-gpick-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item',
 ];
 // The eight surfaces' shot-name stems; a leak seen ONLY on the house-style
 // reference shots (`house-*`, the full page) is not this feature's to answer for.

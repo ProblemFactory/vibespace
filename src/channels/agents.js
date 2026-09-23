@@ -96,4 +96,8 @@ function create(record = {}, deps = {}) {
  *  the MODULE's declaration, never the kind. */
 /** THE DECLARED EGRESS (§3.1): this adapter constructs no request of its own — the ladder does the delivering. */
 const EGRESS = Object.freeze([]);
-module.exports = { kind: KIND, caps, create, builtin: true, label: 'Agents', policyDefault: 'direct', EGRESS };
+/** `sendStartsTurn` (r3): a send here is a WAKE — a billed turn through the
+ *  ladder — so the engine asks the owner's consent echo and (auth off) the
+ *  owner's pace before it (src/server/channels-engine.js wakeGate). The
+ *  engine reads the MODULE's declaration, never the kind. */
+module.exports = { kind: KIND, caps, create, builtin: true, label: 'Agents', policyDefault: 'direct', sendStartsTurn: true, EGRESS };

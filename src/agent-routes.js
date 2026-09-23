@@ -56,6 +56,22 @@ function capInline(ctx, multi) {
   return head + ptr;
 }
 
+// NEXT-TURN GROUP REPORTS (§22 D2) share the prompt-context payload with
+// everything else under INLINE_CAP; this is their own ceiling inside it.
+const GROUP_REPORT_BUDGET = 4096;
+/** Is the turn prompt-context is being asked about one a PERSON started? The
+ *  session remembers the last instant somebody typed into it (ws input /
+ *  chat-input) and the last instant a turn nobody typed was handed to it (the
+ *  delivery ladder, auto-resume's continue). A machine hand-off newer than the
+ *  last keystroke ⇒ this UserPromptSubmit is that machine turn. Neither stamp
+ *  (a fresh boot, a terminal typed before the restart) reads as a user turn —
+ *  the report is free either way; what this gate stops is a woken agent's
+ *  turn carrying every OTHER group's news into an echo. */
+function turnIsUserInitiated(s) {
+  const u = Number(s && s._userInputAt) || 0;
+  const m = Number(s && s._machineInputAt) || 0;
+  return !(m > u);
+}
 function renderMsgStash(entries) {
   if (!entries || !entries.length) return { text: '', shown: [], rest: [] };
   const line = (e) => {
@@ -79,7 +95,7 @@ function renderMsgStash(entries) {
   if (shown.some((e) => e.source === 'channel')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
   return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
 }
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null }) {
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
   // backlog` prints 1-based numbers over GET task's sortBacklog order, and a
   // mutating verb run LATER (`backlog-done 3`) must mean the item that was
@@ -663,6 +679,31 @@ app.get('/api/agent/prompt-context', (req, res) => {
       const body = [extra, std, backlogNudge].filter(Boolean).join('\n');
       if (body) outParts.push(`<vibespace-reminder>${body}</vibespace-reminder>`);
     }
+    // NEXT-TURN GROUP REPORTS (design-communication-panel §22 D2): every agent
+    // group this conversation is in that has news since its last report
+    // yields ONE report — on a USER-initiated turn only (a turn somebody typed:
+    // `_userInputAt` not older than the last machine hand-off), never a billed
+    // turn of its own. LAST, because it is budgeted from what the rest of this
+    // delivery left under INLINE_CAP — capInline must never be the thing that
+    // trims it (its markers advance when it is handed out). Only groups that
+    // fit are marked; the rest wait for the next turn and are NAMED.
+    try {
+      const ge = groupsEngine();
+      const myCid = s.claudeSessionId || s.backendSessionId || null;
+      if (ge && myCid && turnIsUserInitiated(s)) {
+        const used = Buffer.byteLength(outParts.join('\n\n'), 'utf-8');
+        const room = Math.min(GROUP_REPORT_BUDGET, INLINE_CAP - used - 64);
+        const rep = room >= 400 ? ge.reportsForTurn(myCid, { budget: room }) : { text: '', marks: [] };
+        // the section goes in WHOLE or not at all: its markers move only when
+        // it is handed out uncut (2026-09-23 verifier — capInline trimmed a
+        // section whose markers had already moved, and those reports were lost)
+        const fits = !rep.text || used + 2 + Buffer.byteLength(rep.text, 'utf-8') <= INLINE_CAP - 64;
+        if (fits) {
+          if (rep.text) outParts.push(rep.text);
+          if (rep.marks.length) ge.commitReports(myCid, rep.marks).catch((e) => console.warn('[groups] report marker not stamped:', e && e.message));
+        } else console.warn(`[groups] next-turn report (${Buffer.byteLength(rep.text, 'utf-8')} B) did not fit the ${INLINE_CAP - 64 - used} B left — it waits for the next turn`);
+      }
+    } catch (e) { console.warn('[groups] next-turn report skipped:', e && e.message); }
     // Stay INLINE — capInline (module scope; the one cap both hook payloads use)
     const ctx = capInline(outParts.join('\n\n'), injectGroups.length > 1);
     res.json({ success: true, context: ctx });
@@ -1123,7 +1164,27 @@ function findVisible(jm, caller, ref) { return findVisibleIn([...jm.jobs.values(
 // COORDINATION boundary, not a security one (same-OS-user agents could always
 // reach the raw CLI sockets); it exists so groups stay quiet by default.
 const msgAcl = require('./msg-acl.js');
-const _msgRate = new Map(); // senderCid|targetCid → {ts, text}
+const _msgRate = new Map(); // senderCid|targetKey → {ts, text}
+// THE WAKE PACE (2026-09-23 verifier, r2): asked of EVERY wake a send /
+// invite would cause (an @mention, `--wake`, an invite, a member on
+// `always`), keyed by the conversation id the wake goes to, never by how
+// `to` was spelled — one wake per (sender, member) per 30 s AND at most 8
+// wakes per sender per minute, so one command never spends a slot's hour.
+// ONE implementation: the groups engine's `pacerFor` (PURE rules in
+// src/channel-groups.js, the ledger PERSISTED in data/channels/wake-pace.json
+// — the in-memory Map it replaces forgot every floor on a restart), and a
+// wake that did not go out refunds its slot. A floored wake is not billed and
+// loses nothing: the message is in the group log and rides that member's
+// next report. The spend authorizer's ceiling still binds behind it.
+const GROUPS_MODEL = require('./channel-groups.js');
+function wakeFloorFor(senderCid) {
+  const ge = groupsEngine();
+  return ge && typeof ge.pacerFor === 'function' ? ge.pacerFor(senderCid) : null;
+}
+/** An agent's CONSENT to the wakes its act would cause: more than
+ *  WAKE_CONFIRM_ABOVE need `--yes` (`confirm-wakes`, with the count) —
+ *  said BEFORE the act, like the owner's "will wake N" in the panel. */
+const agentConsent = (yes) => (n) => GROUPS_MODEL.consentVerdict(n, { yes: yes === true });
 function _msgEndpoints(exceptId) {
   const out = [];
   for (const [tid, t] of activeSessions) {
@@ -1138,13 +1199,13 @@ function _msgEndpoints(exceptId) {
 const _groupExtVis = (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } };
 const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id);
 app.get('/api/agent/msg/peers', (req, res) => {
-  const hit = agentSession(req, res);
-  if (!hit) return;
+  const who = msgCaller(req, res);   // a session, or a job speaking for its owner conversation
+  if (!who) return;
   if (!integrationOnMaster()) return res.json({ peers: [] });
-  const [s, id] = hit;
-  const myGroups = _myGroupIds(s, id);
+  const { id, myGroups } = who;
   const peers = [];
   for (const ep of _msgEndpoints(id)) {
+    if (who.cid && ep.cid === who.cid) continue;
     const lv = msgAcl.levelFor(ep, myGroups, _groupExtVis);
     if (!msgAcl.canSee(lv)) continue;
     const st = sessionStatus.get(sessionStatusKey(ep.t, ep.id)) || sessionStatus.get(`webui:${ep.id}`) || {};
@@ -1156,17 +1217,83 @@ app.get('/api/agent/msg/peers', (req, res) => {
   }
   res.json({ peers });
 });
-app.post('/api/agent/msg/send', async (req, res) => {
+const groupsEngine = () => { try { const g = getGroups(); return g && typeof g.post === 'function' ? g : null; } catch { return null; } };
+/** A refusal from the groups engine as an HTTP answer (its codes are the
+ *  closed set in src/channel-groups.js + the engine's `unreachable`). */
+const groupAnswer = (res, r) => {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' || code === 'job-token' ? 403 : code === 'archived' || code === 'pair-group' || code === 'confirm-wakes' ? 409 : 400;
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && Array.isArray(r.candidates) ? { candidates: r.candidates } : {}), ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}) });
+};
+/** WHO is calling vibespace-msg: a session (vsst_) acts as its own
+ *  conversation; a Background Work job (jbt_) acts as the conversation that
+ *  OWNS it — it may list, read and post, never create a group or change
+ *  membership (`job-token`). Replies itself on failure (null). */
+function msgCaller(req, res) {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token || '';
+  if (token.startsWith('jbt_')) {
+    const jm = getJobs && getJobs();
+    if (!jm || !jm.ready || !jm.jobByToken) { res.status(503).json({ error: 'the jobs engine is not ready — retry shortly', code: 'unavailable' }); return null; }
+    const job = jm.jobByToken(token);
+    if (!job) { res.status(401).json({ error: 'unknown job token', code: 'auth' }); return null; }
+    const cid = (job.owner && job.owner.conversation && job.owner.conversation.id) || null;
+    if (!cid) { res.status(409).json({ error: 'this job has no owner conversation to speak for — run vibespace-msg from a conversation', code: 'job-token' }); return null; }
+    // the owner's LIVE session (if any) lends its Task Groups to reach; a job
+    // whose owner is not running still posts into groups it already has
+    let s = null, id = null;
+    for (const [tid, t] of activeSessions) if ((t.claudeSessionId || t.backendSessionId) === cid) { s = t; id = tid; break; }
+    return { job, cid, s, id, myGroups: s ? _myGroupIds(s, id) : [] };
+  }
   const hit = agentSession(req, res);
-  if (!hit) return;
-  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  if (!hit) return null;
   const [s, id] = hit;
+  return { job: null, cid: s.claudeSessionId || s.backendSessionId || null, s, id, myGroups: _myGroupIds(s, id) };
+}
+const JOB_NO_MEMBERSHIP = 'a job token may list, read and send — it never creates a group or changes membership (create / invite / leave / kick / rename / archive / notify); run that from the conversation that owns this job';
+app.post('/api/agent/msg/send', async (req, res) => {
+  const who = msgCaller(req, res);
+  if (!who) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const { s, id } = who;
   const to = String(req.body?.to || '').trim();
   const text = String(req.body?.text || '');
   if (!to || !text.trim()) return res.status(400).json({ error: 'need {to, text}' });
   if (Buffer.byteLength(text, 'utf-8') > 16 * 1024) return res.status(400).json({ error: 'message too large (16KB cap) — write a file and send its path instead' });
-  const myCid = s.claudeSessionId || s.backendSessionId || null;
-  const myGroups = _myGroupIds(s, id);
+  const myCid = who.cid;
+  const myGroups = who.myGroups;
+  // AGENT GROUPS (design §22, owner D1/D2): `send <group>` posts into a group
+  // this session belongs to; `send <agent>` finds-or-creates the TWO-MEMBER
+  // group of the pair and posts there. Either way the receivers' notify modes
+  // decide — the default is their NEXT turn at no cost; `wake:true` (= an @ of
+  // every other member) is a billed turn through the ladder's authorizer.
+  const ge = groupsEngine();
+  if (ge) {
+    // no conversation id yet (a chat before its init record, a terminal before
+    // discovery links its transcript) ⇒ the SAME refusal the group verbs give;
+    // the pre-groups direct lane below would wake the receiver at once and
+    // bypass every notify mode (2026-09-23 verifier)
+    if (!myCid) return res.status(409).json({ error: 'this session has no conversation id yet — try again after its first turn', code: 'bad-member' });
+    // ONE resolution: a group id, a conversation id, or a bare name that is
+    // exactly one of them — a name that is BOTH is refused `ambiguous`
+    const tgt = ge.resolveTarget(to, myCid);
+    if (!tgt.ok) return groupAnswer(res, tgt);
+    const floorKey = myCid + '|' + (tgt.kind === 'group' ? tgt.group.id : tgt.cid);   // the RESOLVED target, never the `to` spelling
+    const rate = _msgRate.get(floorKey) || {};
+    if (rate.text === text && rate.ts && Date.now() - rate.ts < 600000) return res.status(429).json({ error: 'identical message within 10min — not resent' });
+    const mayWake = wakeFloorFor(myCid);
+    let r;
+    const consent = agentConsent(req.body?.yes);
+    try { r = tgt.kind === 'group' ? await ge.post({ group: tgt.group.id, from: myCid, text, wake: req.body?.wake === true, mayWake, consent }) : await ge.sendToAgent({ from: myCid, to: tgt.cid, text, wake: req.body?.wake === true, create: !who.job, mayWake, consent }); }
+    catch (e) { return res.status(500).json({ error: 'group send failed: ' + e.message }); }
+    if (!r || !r.ok) return groupAnswer(res, r);
+    _msgRate.set(floorKey, { ts: Date.now(), text });
+    if (_msgRate.size > 500) { const cut = Date.now() - 600000; for (const [k, v] of _msgRate) if (v.ts < cut) _msgRate.delete(k); }
+    const nm = (x) => x.map((w) => w.name);
+    return res.json({ posted: true, group: { id: r.group.id, name: r.group.name, pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: nm(r.woke), refused: r.refused.map((w) => ({ name: w.name, reason: w.reason })), nextTurn: nm(r.later) });
+  }
+  // the legacy direct lane — ONLY when this instance has no groups engine; it speaks as a SESSION only
+  if (who.job) return res.status(503).json({ error: 'agent groups are not available on this instance, and a job token has no direct lane — send from the conversation', code: 'job-token' });
   // resolve name-or-cid among MESSAGEABLE endpoints only — an unknown or
   // merely-invisible target gets ONE uniform error (no existence oracle)
   const matches = _msgEndpoints(id).filter((ep) => ep.cid === to || (ep.t.name && ep.t.name === to));
@@ -1189,6 +1316,56 @@ app.post('/api/agent/msg/send', async (req, res) => {
   if (r.ok) return res.json({ delivered: true, lane: r.lane, peerName: r.peerName || target.t.name || null, machine: r.hostId || null });
   deliver?.stashFor(target.cid, { source: 'agent', fromName, text });
   res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
+});
+
+// ── vibespace-msg groups (design §22.5): the agent's verbs over the groups
+//    engine. The caller is ALWAYS its own conversation id — an agent can act
+//    only as itself; reach is checked inside the engine (msg-acl), a group it
+//    is not in answers exactly like one that does not exist. ──
+function groupCaller(req, res) {
+  const who = msgCaller(req, res);
+  if (!who) return null;
+  if (!integrationOnMaster()) { res.status(403).json({ error: 'VibeSpace integration is off' }); return null; }
+  const ge = groupsEngine();
+  if (!ge) { res.status(503).json({ error: 'agent groups are not available on this instance', code: 'unavailable' }); return null; }
+  const cid = who.cid;
+  if (!cid) { res.status(409).json({ error: 'this session has no conversation id yet — try again after its first turn', code: 'bad-member' }); return null; }
+  return { ge, cid, job: who.job };
+}
+app.get('/api/agent/msg/groups', (req, res) => {
+  const c = groupCaller(req, res);
+  if (!c) return;
+  res.json({ groups: c.ge.listFor(c.cid).map((g) => ({ id: g.id, name: g.name, pair: !!g.pair, archived: !!g.archivedAt, unread: g.unread, notify: g.notify, members: g.members.map((m) => ({ name: m.name, conversationId: m.member, notify: m.notify, live: m.live })) })) });
+});
+app.get('/api/agent/msg/read', (req, res) => {
+  const c = groupCaller(req, res);
+  if (!c) return;
+  const r = c.ge.read({ by: c.cid, group: req.query.group, before: req.query.before !== undefined && req.query.before !== '' ? Number(req.query.before) : null, limit: Number(req.query.limit) || 50 });
+  if (!r.ok) return groupAnswer(res, r);
+  res.json({ ok: true, group: { id: r.group.id, name: r.group.name }, records: r.records.map((x) => ({ at: x.at, from: x.author.name || x.author.id, kind: (x.raw && x.raw.kind) || 'message', text: x.text })) });
+});
+app.post('/api/agent/msg/group', async (req, res) => {
+  const c = groupCaller(req, res);
+  if (!c) return;
+  const b = req.body || {};
+  if (c.job) return res.status(403).json({ error: JOB_NO_MEMBERSHIP, code: 'job-token' });
+  const members = Array.isArray(b.members) ? b.members.map(String) : [];
+  let r;
+  try {
+    switch (b.op) {
+      case 'create': r = await c.ge.create({ by: c.cid, name: b.name, members, context: b.context || '', quiet: b.quiet === true, mayWake: wakeFloorFor(c.cid), consent: agentConsent(b.yes) }); break;
+      case 'invite': r = await c.ge.invite({ by: c.cid, group: b.group, members, context: b.context || '', quiet: b.quiet === true, mayWake: wakeFloorFor(c.cid), consent: agentConsent(b.yes) }); break;
+      case 'leave': r = await c.ge.leave({ by: c.cid, group: b.group }); break;
+      case 'kick': r = await c.ge.kick({ by: c.cid, group: b.group, member: b.member }); break;
+      case 'rename': r = await c.ge.rename({ by: c.cid, group: b.group, name: b.name }); break;
+      case 'archive': r = await c.ge.archive({ by: c.cid, group: b.group }); break;
+      case 'notify': r = await c.ge.setNotify({ by: c.cid, group: b.group, notify: b.notify }); break;   // an agent sets only its OWN mode
+      default: return res.status(400).json({ error: 'op must be create | invite | leave | kick | rename | archive | notify', code: 'bad-request' });
+    }
+  } catch (e) { return res.status(500).json({ error: 'group ' + b.op + ' failed: ' + e.message }); }
+  if (!r || !r.ok) return groupAnswer(res, r);
+  const nm = (x) => (x || []).map((w) => w.name);
+  res.json({ ok: true, op: b.op, group: { id: r.group.id, name: r.group.name, archived: !!r.group.archivedAt, members: r.group.members.map((m) => ({ name: m.name, notify: m.notify })) }, added: r.added || null, already: r.already || null, woke: nm(r.woke), refused: (r.refused || []).map((w) => ({ name: w.name, reason: w.reason })), quiet: !!r.quiet, archived: !!r.archived, noop: r.noop || null, notify: r.notify || null });
 });
 
 // ── vibespace-channels (Communication panel P3, design §11): the agent's
@@ -1218,7 +1395,7 @@ const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'send-not-available' ? 409 : code === 'bad-proposal' || code === 'bad-request' ? 400 : 500;
+  const status = code === 'not-found' ? 404 : code === 'send-not-available' ? 409 : code === 'rate-floor' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : 500;
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
 app.get('/api/agent/channels/list', (req, res) => {
@@ -1252,7 +1429,10 @@ app.post('/api/agent/channels/reply', async (req, res) => {
   const b = req.body || {};
   const key = splitConvKey(b.conv);
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
-  try { chanAnswer(res, await eng.propose(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments })); }
+  // r3: where the reply's send starts a turn (the Agents adapter) and the policy sends it now, the
+  // agent's own wake pace applies — the same persisted pacer its group wakes spend from
+  const cidR = s.claudeSessionId || s.backendSessionId || null;
+  try { chanAnswer(res, await eng.propose(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, { mayWake: cidR ? wakeFloorFor(cidR) : null })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/agent/channels/status', (req, res) => {
@@ -1527,7 +1707,7 @@ function sessionToolsIntro(T, facts = {}) {
       'Flags pick the kind: --keep-up = keep-alive service · --every 30m / --cron "41 9 * * *" / --at "2026-09-05 06:00" = schedule. Your conversation is auto-messaged when a job finishes/fails/asks (create output says so); inside a job, `vibespace-job announce "found X"` notifies NOW (watch jobs: exit code ≠ newsworthiness); `subscribe <id> [--filter regex]` = get another visible job\'s messages; `list --mine|--subscribed` and `show <id>` re-inspect everything you registered. Turn-scoped waits stay in background Bash/Monitor; /goal covers in-session continuation; dated obligations go to --at, not the group backlog. FULL manual anytime: `vibespace-job docs`; every tool: `vibespace-docs [status|ask|task|jobs]`.');
   }
   L.push(
-    'Other agent sessions may be working alongside you. `vibespace-msg list` shows the ones you can reach (your Task Group by default); `vibespace-msg send <name|id> "text"` delivers into their conversation — an idle receiver pays a billed turn, so message purposefully (what you need + whether you expect a reply). Replies arrive here as peer-message cards. Manual: vibespace-docs msg.');
+    'Other agent sessions may be working alongside you. `vibespace-msg list` shows the ones you can reach (your Task Group by default); `vibespace-msg send <name|id|group> "text"` posts into your direct (two-member) group with them, or into a group — by default it reaches them on THEIR next turn at no cost, `--wake` (or an @name in the text) wakes them now as a billed turn. `vibespace-msg group create <name> <member…>` makes a group. Group messages reach you here as a report on your next turn. Manual: vibespace-docs msg.');
   L.push(browserIntroLine(facts.browserVariant));
   // §3.8 layer ②: the session-start context lists the CURRENT attachment set
   // (a resumed conversation re-carries its leases, so the agent must not
@@ -1585,4 +1765,5 @@ function browserSetLine(set) {
 }
 
 
-module.exports = { setupAgentRoutes, renderMsgStash, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine };
+module.exports = {
+  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine };

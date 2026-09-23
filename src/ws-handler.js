@@ -124,6 +124,24 @@ function getSessionKey(session = {}) {
 // XTGETTCAP/DECRQSS/DA3). Used by the 'input' case to arbitrate multi-client
 // answers — keep in sync with TERM_QUERY_RESP_RE in src/lib/terminal.js.
 const TERM_QUERY_RESP_RE = /\x1b\[\??\d+(?:;\d+){0,2}R|\x1b\[[?>][\d;]*c|\x1b\[0n|\x1b\[\?\d+;\d+\$y|\x1b\](?:4|1[0-2]);[^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+// Is an `input` chunk a PERSON typing? (design-communication-panel §22 D2: the
+// `_userInputAt` stamp decides whether the next UserPromptSubmit is a user
+// turn that may carry next-turn group reports.) A chunk made only of the
+// terminal's own automatic answers — query responses (TERM_QUERY_RESP_RE) and
+// focus-in/out events (\e[I / \e[O, sent when the window gains/loses focus
+// under DEC 1004) — is the emulator, not the owner (2026-09-23 verifier: a
+// focus-in flipped a machine turn into a user turn). MOUSE REPORTS too (r2):
+// the CLI turns mouse tracking on, so a wheel scroll or a click in the
+// terminal sends SGR (\e[<b;x;yM / m) or X10 (\e[M + 3 bytes) reports — a
+// person LOOKING, not a prompt (the same SGR shape src/lib/terminal.js strips
+// while the Ctrl+G editor is open).
+const TERM_FOCUS_RE = /\x1b\[[IO]/g;
+const TERM_MOUSE_RE = /\x1b\[<\d+;\d+;\d+[Mm]|\x1b\[M[\s\S]{3}/g;
+function isTypedInput(chunk) {
+  if (typeof chunk !== 'string') return !!chunk;
+  if (!chunk) return false;
+  return !!chunk.replace(TERM_QUERY_RESP_RE, '').replace(TERM_MOUSE_RE, '').replace(TERM_FOCUS_RE, '');
+}
 
 function normalizeComparablePath(pathLib, value) {
   const raw = String(value || '').trim();
@@ -441,6 +459,10 @@ function registerWsHandler(wss, ctx) {
               ? session._sizeOwnerWs : session.clients.keys().next().value;
             if (owner && owner !== ws) break;
           }
+          // a PERSON is typing into this session: the next UserPromptSubmit is
+          // theirs, so prompt-context may hand it the next-turn group reports
+          // (design-communication-panel §22 D2 — never on a machine turn)
+          if (isTypedInput(chunk)) session._userInputAt = Date.now();
           session.pty.write(chunk);
           break;
         }
@@ -448,6 +470,7 @@ function registerWsHandler(wss, ctx) {
         case 'chat-input': {
           const session = activeSessions.get(data.sessionId);
           if (session?.pty && session.mode === 'chat') {
+            session._userInputAt = Date.now();   // the owner's own turn (§22 D2: next-turn reports ride THIS kind of turn only)
             const adapter = adapterRegistry.get(session.backend);
             if (!adapter) break;
             // New input means prior interrupt succeeded (or user proceeded) —
@@ -1665,4 +1688,4 @@ function registerWsHandler(wss, ctx) {
 
 // pickCodexThreadCandidate also serves restoreSessions' id recapture (a
 // restart inside the create-time capture window killed the retry chain)
-module.exports = { registerWsHandler, noConvoRef, pickCodexThreadCandidate, agentEnv, WS_CTX_CONTRACT };
+module.exports = { registerWsHandler, noConvoRef, pickCodexThreadCandidate, agentEnv, WS_CTX_CONTRACT, isTypedInput };

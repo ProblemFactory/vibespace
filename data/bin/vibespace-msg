@@ -1,36 +1,106 @@
 #!/usr/bin/env node
-// vibespace-msg — agent-to-agent messaging, Communication Channels v1
-// (2.362.0, STATIC tracked). Auth: VIBESPACE_SESSION_TOKEN. Reach is scoped
-// by Task Group ACL server-side: same group = mutual; other groups only when
-// opened (group externalVisibility / per-session override). Delivery: a LIVE
-// target's CLI gets the message now (an IDLE receiver opens a BILLED turn —
-// message like you'd interrupt a colleague, not like logging); an unreachable
-// target gets it injected on its next turn. Full manual: vibespace-docs msg.
+// vibespace-msg — agent-to-agent messaging (Communication Channels v1 2.362.0;
+// AGENT GROUPS 2.369.159, design-communication-panel §22). STATIC tracked.
+// Auth: VIBESPACE_SESSION_TOKEN. Reach is msg-acl, server-side: same Task
+// Group = mutual; other groups only when the user opened them.
+// Every message lives in a GROUP: `send <agent>` posts into the two-member
+// group of the pair (found or created — the same pair is always the same
+// group), `send <group>` into a group you belong to. Each member's NOTIFY MODE
+// decides what reaches it when: next-turn (default — a report on its next
+// user turn, zero cost), mention (woken when @named), always (woken by every
+// message), mute. A WAKE is a BILLED turn for the receiver — every answer
+// ECHOES the count ("woke 2 agents = 2 billed turns"). Members and groups
+// are named by conversation id / group id OR by name, resolved SERVER-side; a
+// name that matches more than one is refused with the candidates, never
+// guessed. Inside a Background Work job (VIBESPACE_JOB_TOKEN) it speaks as
+// the conversation that owns the job: list / read / send only — creating a
+// group or changing membership is refused locally, before any request.
+// Exit codes: 0 ok · 1 refused (the server's typed code + its remedy) ·
+// 2 not inside a session · 3 server unreachable. Full manual: vibespace-docs msg.
 'use strict';
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
-if (!API || !SESS) { console.error('vibespace-msg: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
+const JOBT = process.env.VIBESPACE_JOB_TOKEN;
+const TOKEN = SESS || JOBT;
+const AS_JOB = !SESS && !!JOBT;
+if (!API || !TOKEN) { console.error('vibespace-msg: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
 
-const args = process.argv.slice(2);
+const argv = process.argv.slice(2);
+// flags anywhere: --context "…" --quiet --wake --yes --before <ts> --limit <n>
+const flags = {};
+const args = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === '--quiet' || a === '--wake' || a === '--yes') flags[a.slice(2)] = true;
+  else if (a === '--context' || a === '--before' || a === '--limit') { flags[a.slice(2)] = argv[i + 1]; i++; }
+  else args.push(a);
+}
 const verb = args[0];
 
+// The remedy for each typed refusal (the server's `code`; its `error` text is
+// printed first and already names the specifics).
+const REMEDY = {
+  unreachable: 'vibespace-msg list shows every session you can message; ask the user to open a scope if the one you need is not there',
+  'not-found': 'vibespace-msg group list shows the groups you are in (a group you are not in answers the same way)',
+  ambiguous: 'repeat the command with one of the ids above',
+  'not-member': 'only a member can do that — vibespace-msg group list shows yours',
+  'not-allowed': 'only the group\'s creator (or the user, in the Channels panel) may do that',
+  archived: 'the group is archived (its log stays readable with vibespace-msg read); start a new one with vibespace-msg group create',
+  'pair-group': 'a direct (two-member) group takes no third member — vibespace-msg group create <name> <member…> makes a group',
+  'job-token': 'run it from the conversation that owns this job (its own VIBESPACE_SESSION_TOKEN)',
+  'bad-notify': 'the modes are next-turn | mention | always | mute',
+  'bad-name': 'a group name is 1–80 characters',
+  'too-few-members': 'a group needs at least one other agent besides you',
+  self: 'that is this session',
+  'confirm-wakes': 'nothing was sent. Repeat with --yes if waking them all NOW is worth that many billed turns — or send without --wake (add --quiet to an invite): they read it on their next turn, free',
+};
+function refused(j, status) {
+  const code = j.code || (status === 429 ? 'rate-floor' : status === 401 ? 'auth' : 'error');
+  console.error(`vibespace-msg: refused [${code}] — ${j.error || 'refused (HTTP ' + status + ')'}`);
+  for (const c of Array.isArray(j.candidates) ? j.candidates : []) console.error(`    ${c.conversationId || c.groupId}${c.name ? '  "' + c.name + '"' : ''}`);
+  if (REMEDY[code]) console.error('  → ' + REMEDY[code]);
+  process.exit(1);
+}
 async function call(method, p, body) {
   const res = await fetch(API + p, {
-    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS },
+    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
     body: body === undefined ? undefined : JSON.stringify(body),
   }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-msg: server unreachable (' + res._neterr + ')'); process.exit(3); }
   let j = {};
   try { j = await res.json(); } catch { }
-  if (j.error) { console.error(j.error); process.exit(1); }
+  if (j.error || !res.ok) refused(j, res.status);
   return j;
 }
 
-const USAGE = `vibespace-msg — message other agent sessions (Task-Group scoped)
-  vibespace-msg list                    ← sessions you can see/message (name · id · group · state)
-  vibespace-msg send <name|id> "text"   ← deliver now (idle receiver = a billed turn for THEM) or queue
+const USAGE = `vibespace-msg — message other agent sessions (groups; Task-Group scoped reach)
+  vibespace-msg list                              ← sessions you can see/message (name · id · state)
+  vibespace-msg group list                        ← the groups you are in (id · members · unread · your notify mode; also: groups)
+  vibespace-msg send <name|id|group> "text" [--wake] [--yes]
+        ← an agent: your direct (two-member) group with it · a group: everyone in it.
+          Default: it reaches them on THEIR next turn (free). @name in the text, or --wake, wakes them NOW (a billed turn each).
+          Waking more than 5 at once is refused with the count until you add --yes; at most 8 wakes per minute are yours.
+  vibespace-msg read <group> [--before <ts>] [--limit N]   ← the group's log (older history on purpose)
+  vibespace-msg group create <name> <member…> [--context "why"] [--quiet] [--yes]
+  vibespace-msg group invite <group> <member…> [--context "why"] [--quiet] [--yes]   ← an invite wakes each invitee (billed) unless --quiet; > 5 need --yes
+  vibespace-msg group leave <group> | kick <group> <member> | rename <group> <new name> | archive <group>
+  vibespace-msg group notify <group> <next-turn|mention|always|mute>        ← YOUR mode in that group
+Members: a session name or conversation id · <group>: a group id (g-…) or its name — an ambiguous name is refused with the candidates.
 Reach: same Task Group = mutual by default; other groups only if opened by the user.
-Keep it purposeful — state what you need and whether you expect a reply.`;
+Inside a Background Work job: list / group list / read / send only (as the conversation that owns the job).`;
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+/** THE wake echo: every wake is a billed turn, so the count is always said. */
+const wakeCount = (n, who = 'agent') => `woke ${plural(n, who, who + 's')} = ${plural(n, 'billed turn', 'billed turns')}`;
+const wokeLine = (r) => {
+  const bits = [];
+  const woke = r.woke || [];
+  bits.push(`${wakeCount(woke.length)}${woke.length ? ': ' + woke.join(', ') : ''}`);
+  if (r.refused && r.refused.length) bits.push(`${plural(r.refused.length, 'wake', 'wakes')} refused (not billed) — ${r.refused.map((x) => `${x.name}: ${x.reason}`).join('; ')} — they get it on their next turn instead`);
+  if (r.nextTurn && r.nextTurn.length) bits.push(`on their next turn (free): ${r.nextTurn.join(', ')}`);
+  return bits.join(' · ');
+};
+const MEMBERSHIP_OPS = new Set(['create', 'invite', 'leave', 'kick', 'rename', 'archive', 'notify']);
 
 (async () => {
   if (!verb || verb === 'list') {
@@ -44,13 +114,81 @@ Keep it purposeful — state what you need and whether you expect a reply.`;
     console.log('\n"·" = visible only (cannot be messaged). Send: vibespace-msg send <name|id> "..."');
     return;
   }
+  if (verb === 'groups' || (verb === 'group' && args[1] === 'list')) {
+    const r = await call('GET', '/api/agent/msg/groups');
+    if (!r.groups || !r.groups.length) { console.log('you are in no group yet. vibespace-msg send <agent> "..." starts a direct one; vibespace-msg group create <name> <member…> a group.'); return; }
+    for (const g of r.groups) {
+      console.log(`${g.id}  "${g.name}"${g.pair ? ' (direct)' : ''}${g.archived ? ' [archived]' : ''} — ${g.unread} unread · your notify: ${g.notify}`);
+      console.log(`    members: ${g.members.map((m) => `${m.name}${m.live ? '' : ' (not live)'} [${m.notify}]`).join(', ')} + the user`);
+    }
+    return;
+  }
   if (verb === 'send') {
     const to = args[1];
     const text = args[2];
-    if (!to || !text) { console.error('usage: vibespace-msg send <name|id> "text"'); process.exit(1); }
-    const r = await call('POST', '/api/agent/msg/send', { to, text });
+    if (!to || !text) { console.error('usage: vibespace-msg send <name|id|group> "text" [--wake]'); process.exit(1); }
+    const body = { to, text, wake: !!flags.wake };
+    if (flags.yes) body.yes = true;
+    const r = await call('POST', '/api/agent/msg/send', body);
+    if (r.posted) {
+      console.log(`posted to ${r.group.pair ? 'your direct group' : 'group'} "${r.group.name}" (${r.group.id})${r.pairCreated ? ' — created just now' : ''}`);
+      const w = wokeLine(r);
+      if (w) console.log('  ' + w);
+      console.log('  replies arrive in this conversation (a report on your next turn, or now if they @name you and you are not muted)');
+      return;
+    }
+    // legacy direct delivery (a server without the groups engine)
     if (r.delivered) console.log(`delivered (${r.lane}${r.machine ? ' via ' + r.machine : ''}) to "${r.peerName || to}" — if they reply, it arrives as a peer message in this conversation`);
     else console.log(`not delivered now (${r.reason}) — ${r.note || 'queued for their next turn'}`);
+    return;
+  }
+  if (verb === 'read') {
+    const group = args[1];
+    if (!group) { console.error('usage: vibespace-msg read <group> [--before <ts>] [--limit N]'); process.exit(1); }
+    const q = new URLSearchParams({ group });
+    if (flags.before) q.set('before', flags.before);
+    if (flags.limit) q.set('limit', flags.limit);
+    const r = await call('GET', '/api/agent/msg/read?' + q.toString());
+    console.log(`group "${r.group.name}" (${r.group.id}) — ${r.records.length} record(s), oldest first:`);
+    for (const x of r.records) console.log(`- [${x.at}] ${x.kind === 'message' ? x.from + ':' : '(' + x.kind + ')'} ${x.text}`);
+    if (r.records.length) console.log(`older: vibespace-msg read ${r.group.id} --before ${r.records[0].at}`);
+    return;
+  }
+  if (verb === 'group') {
+    const op = args[1];
+    const rest = args.slice(2);
+    if (AS_JOB && MEMBERSHIP_OPS.has(op)) {
+      console.error(`vibespace-msg: refused [job-token] — a job token may list, read and send; it never creates a group or changes membership (group ${op})`);
+      console.error('  → ' + REMEDY['job-token']);
+      process.exit(1);
+    }
+    const body = { op };
+    if (op === 'create') { body.name = rest[0]; body.members = rest.slice(1); }
+    else if (op === 'invite') { body.group = rest[0]; body.members = rest.slice(1); }
+    else if (op === 'leave' || op === 'archive') body.group = rest[0];
+    else if (op === 'kick') { body.group = rest[0]; body.member = rest[1]; }
+    else if (op === 'rename') { body.group = rest[0]; body.name = rest.slice(1).join(' '); }
+    else if (op === 'notify') { body.group = rest[0]; body.notify = rest[1]; }
+    else { console.log(USAGE); process.exit(1); }
+    if (flags.context !== undefined) body.context = flags.context;
+    if (flags.quiet) body.quiet = true;
+    if (flags.yes && (op === 'create' || op === 'invite')) body.yes = true;
+    const r = await call('POST', '/api/agent/msg/group', body);
+    const g = r.group;
+    if (op === 'create') console.log(`created group "${g.name}" (${g.id}) — members: ${g.members.map((m) => m.name).join(', ')} + the user`);
+    else if (op === 'invite') {
+      if (r.added && r.added.length) console.log(`added to "${g.name}": ${r.added.join(', ')}`);
+      if (r.already && r.already.length) console.log(`already members (nothing done): ${r.already.join(', ')}`);
+    } else if (op === 'leave') console.log(`left "${g.name}"${r.archived ? ' — it is archived now (a direct group ends when one side leaves)' : ''}`);
+    else if (op === 'kick') console.log(`removed from "${g.name}"${r.archived ? ' — it is archived now' : ''}`);
+    else if (op === 'rename') console.log(r.noop ? `already named "${g.name}"` : `renamed to "${g.name}"`);
+    else if (op === 'archive') console.log(r.noop ? `"${g.name}" was already archived` : `archived "${g.name}" (its log is kept)`);
+    else if (op === 'notify') console.log(r.noop ? `your notify mode in "${g.name}" was already ${r.notify}` : `your notify mode in "${g.name}" is now ${r.notify}`);
+    if (op === 'create' || op === 'invite') {
+      const n = (r.woke || []).length;
+      if (r.quiet) console.log('  --quiet: woke 0 invitees = 0 billed turns; they see the invite on their next turn');
+      else console.log(`  ${wakeCount(n, 'invitee')}${n ? ': ' + r.woke.join(', ') : ''}${(r.refused || []).length ? ` · ${plural(r.refused.length, 'wake', 'wakes')} refused (not billed) — ${r.refused.map((x) => `${x.name}: ${x.reason}`).join('; ')} — they see it on their next turn` : ''}`);
+    }
     return;
   }
   console.log(USAGE);

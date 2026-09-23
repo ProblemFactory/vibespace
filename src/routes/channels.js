@@ -249,7 +249,8 @@ function answer3(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' ? 409
+    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' ? 409
+    : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
   return res.status(status).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
@@ -266,22 +267,41 @@ router.get('/api/channels/outbox', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 /** The USER's own draft from the composer: a proposal drafted by the user
- *  (authority `send`), judged by the same policy + guards as an agent's. */
+ *  (authority `send`), judged by the same policy + guards as an agent's.
+ *  WAKE GUARDS (r3, every wake-capable owner route — test-architecture §49):
+ *  where the send STARTS A TURN (the adapter's `sendStartsTurn`) and goes out
+ *  now, `expectWakes` must echo it (`409 wake-count-mismatch`) and, auth off,
+ *  the owner's pace applies (`429 rate-floor`, nothing created). */
 router.post('/api/channels/:adapterId/:convId/propose', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, wakeGuards(b)));
+  } catch (e) { fail(res, e); }
+});
+/** THE OWNER'S OWN MESSAGE (design §22, 2.369.159): the composer's Send on
+ *  a conversation that offers send-as-user — out at once as the user, no
+ *  policy, no approval card (the IM rule: propose/approve is for AGENT
+ *  drafts). Same answer shape as /propose; `409 send-not-available` + `why`
+ *  when sending as the user is not offered here. */
+router.post('/api/channels/:adapterId/:convId/send', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, attachments: b.attachments, direct: true }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** APPROVE (`{text?}` = approve with an edit) — the unconditional convCaps
  *  re-resolution happens inside; a refusal answers 409 `send-not-available`
- *  with the adapter's own reason and the proposal is `failed`. */
+ *  with the adapter's own reason and the proposal is `failed`. A proposal
+ *  whose send starts a turn (the card's `wakes`) needs `expectWakes` (`409
+ *  wake-count-mismatch`) and, auth off, is paced (`429 rate-floor`) — both
+ *  refusals leave the proposal AWAITING (r3). */
 router.post('/api/channels/outbox/:id/approve', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user' }));
+    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', ...wakeGuards(b) }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {
@@ -329,6 +349,101 @@ router.post('/api/channels/reach-requests/:id/:verdict', async (req, res) => {
     const v = req.params.verdict;
     if (v !== 'approve' && v !== 'deny') return bad(res, 400, 'verdict must be approve or deny', { code: 'bad-request' });
     answer3(res, await engine().decideRequest(req.params.id, v === 'approve', 'user'));
+  } catch (e) { fail(res, e); }
+});
+
+// ── AGENT GROUPS, the owner's side (design §22.5). A distinct prefix on
+// purpose: `/api/channels/:adapterId/:convId` would swallow `groups/<id>`.
+// The owner is the implicit member of every group (`by: 'user'`); every verb
+// answers the engine's typed refusal by code, every change broadcasts
+// `channel-groups-updated` from the engine's one announce point. ──
+function groupsEngine() {
+  const g = ctx && ctx.getGroups && ctx.getGroups();
+  if (!g) { const err = new Error('Agent groups are not available on this instance'); err.status = 503; err.code = 'unavailable'; throw err; }
+  return g;
+}
+const OWNER = 'user';
+const { consentVerdict } = require('../channel-groups.js');
+/** THE OWNER'S CONSENT ECHO (r2): the panel sends the number of wakes it
+ *  PREVIEWED (`expectWakes` — "will wake N" said before the click); the engine
+ *  counts the wakes the act would cause inside its door and refuses
+ *  `wake-count-mismatch` on any other number (a missing echo is 0). So the
+ *  route that wakes agents signed "User" is never reached by a caller that
+ *  did not first know — and say — what it costs. */
+const ownerConsent = (b) => (n) => consentVerdict(n, { expect: Number.isInteger(b && b.expectWakes) ? b.expectWakes : 0 });
+/** With auth OFF the owner cannot be told apart from a local agent's curl:
+ *  the owner's routes are then PACED exactly like an agent (the engine's
+ *  pacer — one wake per target per 30 s, 8 per minute). With auth on, a
+ *  cookie proved the owner and the owner's own act is not paced. A missing
+ *  switch counts as OFF (fail closed). */
+const authOn = () => !!(ctx && typeof ctx.authEnabled === 'function' && ctx.authEnabled());
+function ownerPacer(ge) {
+  return authOn() || typeof ge.pacerFor !== 'function' ? null : ge.pacerFor(OWNER);
+}
+/** THE WAKE GUARDS of every OTHER owner route that can start a billed turn
+ *  (r3 — the Channels composer's /send and /propose and the outbox /approve:
+ *  the built-in Agents adapter's send IS a wake through the delivery
+ *  ladder). The same two as the group routes: the consent echo always, and —
+ *  auth off — THE SAME pacer (the groups engine's persisted ledger keyed
+ *  `user|<conversation>`, so a target the group route just woke is floored
+ *  here too). No groups engine with auth off ⇒ a pacer that refuses by name
+ *  (fail closed). The channels engine applies them only where the adapter
+ *  DECLARES its send starts a turn (`sendStartsTurn`), never by its id. */
+function wakeGuards(b) {
+  const ge = ctx && ctx.getGroups && ctx.getGroups();
+  let mayWake = null;
+  if (!authOn()) mayWake = ge && typeof ge.pacerFor === 'function' ? ge.pacerFor(OWNER) : () => ({ reason: 'the wake pace is not available on this instance — turn on sign-in, or retry once agent groups are available', why: 'no-pacer' });
+  return { consent: ownerConsent(b), mayWake };
+}
+function groupReply(res, r) {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' ? 403 : code === 'archived' || code === 'pair-group' || code === 'wake-count-mismatch' ? 409 : 400;
+  // r3: a wake-count-mismatch carries the group view the server counted
+  // against, so the panel repaints before its next click
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}), ...(r && r.group && code === 'wake-count-mismatch' ? { group: r.group } : {}) });
+}
+router.get('/api/channel-groups', (req, res) => {
+  try { forHost(req); res.json({ groups: groupsEngine().list() }); } catch (e) { fail(res, e); }
+});
+/** The live agent sessions the owner may add to a group (New group /
+ *  Invite…): `{sessions:[{cid, name, groups}]}` — structure, the dialog words it. */
+router.get('/api/channel-groups/roster', (req, res) => {
+  try { forHost(req); res.json({ sessions: groupsEngine().liveRoster() }); } catch (e) { fail(res, e); }
+});
+router.get('/api/channel-groups/:id/messages', (req, res) => {
+  try {
+    forHost(req);
+    const before = req.query.before !== undefined && req.query.before !== '' ? Number(req.query.before) : null;
+    groupReply(res, groupsEngine().read({ by: OWNER, group: req.params.id, before, limit: Number(req.query.limit) || 50 }));
+  } catch (e) { fail(res, e); }
+});
+router.post('/api/channel-groups', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    const ge = groupsEngine();
+    groupReply(res, await ge.create({ by: OWNER, name: b.name, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }));
+  } catch (e) { fail(res, e); }
+});
+router.post('/api/channel-groups/:id/:verb', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    const ge = groupsEngine();
+    const group = req.params.id;
+    let r;
+    switch (req.params.verb) {
+      case 'post': r = await ge.post({ group, from: OWNER, text: b.text, wake: b.wake === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }); break;   // the owner's own words go DIRECTLY (§22.5), never through the outbox
+      case 'invite': r = await ge.invite({ by: OWNER, group, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }); break;
+      case 'kick': r = await ge.kick({ by: OWNER, group, member: b.member }); break;
+      case 'rename': r = await ge.rename({ by: OWNER, group, name: b.name }); break;
+      case 'archive': r = await ge.archive({ by: OWNER, group }); break;
+      case 'notify': r = await ge.setNotify({ by: OWNER, group, member: b.member, notify: b.notify }); break;   // the owner may set ANY member's mode
+      case 'read': r = await ge.markRead({ group }); break;   // g3: the owner opened/touched the group's window — a USER act, never a repaint
+      default: return bad(res, 404, `no group verb "${req.params.verb}"`, { code: 'bad-request' });
+    }
+    groupReply(res, r);
   } catch (e) { fail(res, e); }
 });
 

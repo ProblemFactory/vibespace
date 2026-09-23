@@ -309,13 +309,14 @@ const openWin = async (page, adapterId, convId, { composer = false } = {}) => {
   await sleep(350);
 };
 const closeWin = (page, convId) => page.evaljs(`(() => { const w = ${WIN(convId)}; if (w) window.app.wm.closeWindow(w.id); return 1; })()`);
+// a user-drafted PROPOSAL through the /propose route (g3: the composer on a
+// send-as-user conversation now SENDS the owner's own words directly, so the
+// cards this driver shoots come from the route; they arrive in the open window
+// through `channel-outbox-updated` exactly as before)
 const PROPOSE = (convId, text) => `(async () => {
   const w = ${WIN(convId)};
-  const ta = w.content.querySelector('.chanwin-composer textarea');
-  const btn = w.content.querySelector('[data-channel-propose]');
-  if (!ta || !btn) return { fail: 'no composer' };
-  ta.value = ${JSON.stringify(text)};
-  btn.click();
+  const r = await fetch('/api/channels/' + encodeURIComponent(w._openSpec.adapterId) + '/' + encodeURIComponent(${JSON.stringify(convId)}) + '/propose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: ${JSON.stringify(text)} }) }).then((x) => x.json());
+  if (!r || r.error) return { fail: 'propose refused' };
   for (let i = 0; i < 80; i++) {
     const cards = [...w.content.querySelectorAll('.chanwin-outbox .chan-prop')];
     const card = cards.find((c) => (c.querySelector('.chan-prop-text') || {}).textContent === ${JSON.stringify(text)});

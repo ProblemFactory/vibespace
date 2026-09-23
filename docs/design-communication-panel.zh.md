@@ -956,6 +956,8 @@ P1 落一个开关后面, 默认关。
 
 ## 7. Assign、过滤, 以及叫醒一个人的成本
 
+> **2.369.159 (§22): 现在是「消息观察 (Message watcher)」—— 次级区.** 本节的 filter / assign / 唤醒机制不变, 但它们在面板里不再是第一屏: 第一屏是群列表, 这一套收在下方可折叠的「消息观察」与「账号」两区。
+
 ### 7.1 Filter(PURE)
 
 ```js
@@ -1066,6 +1068,8 @@ Reply with: vibespace-channels reply <convId> "…"   (this PROPOSES; the user a
 
 ## 8. 可见性(AgentReach)
 
+> **2.369.159 (§22): 现在属于「消息观察 (Message watcher)」—— 次级区.** Reach 编辑挂在「账号」区的会话行与「消息观察」里, 不在第一屏; agent **群**的"谁能拉谁"不走本节而走 msg-acl (§22.5)。
+
 `src/channel-acl.js`, PURE, 为了序关系与只许放宽律而 import `src/msg-acl.js`(架构套件允许
 PURE→PURE, 禁止其余一切)。
 
@@ -1099,6 +1103,8 @@ effective(principalCtx, scope, grants) -> { level, via:'group'|'agent'|'default'
 ---
 
 ## 9. Outbox: propose → policy → approve → send → receipt
+
+> **2.369.159 (§22): 现在只管「消息观察 (Message watcher)」一侧的 agent 起草 —— 次级.** 我自己写的消息直接发出 (群 composer 以"你"发; 外部会话在提供 `sendAsUser` 时走 `POST …/send`, `direct:true`, 不过策略不过守卫, 但仍留 outbox 记录/审计/`unknown`); propose → policy → approve 只留给 agent 起草的回复。
 
 ### 9.1 状态
 
@@ -2956,9 +2962,34 @@ owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息
 | 通知模式 | `group notify <group> <next-turn\|mention\|always\|mute>` (只改自己) | 成员列表里每人一个下拉 (我可改任何人) | §22.3a D2 |
 | 发言 | `send <group\|agent> "…"` (`send <agent>` = 找到/建立两人群) | 群窗口 composer, 直接发, 不走 propose | 我的消息署名 "You"; @<成员名> 立刻叫醒 |
 
+**已交付 (SHIPPED 2.369.159) —— 上表逐行, 写的是实测行为 (括号里是证明它的门与腿)**:
+
+- **建群 — SHIPPED.** agent: `group create <name> <member…> [--context "…"] [--quiet]`; 我: 群列表栏的 "新建群" (名称 + 按 Task Group 分组的**活**会话逐个勾选, 不预选、无整组勾选 + 开场 context + "立刻叫醒" 默认开, 点击**之前**回显 "将叫醒 2 个 agent (2 条计费 turn)")。建群者 (agent) 自动入群, 我永不入 `members`; 任何群至少两个 agent (我建群也要挑两个); 可达性按 msg-acl `messageable` 从建群者判定, 一个被拉者不可达 = 整个调用拒绝、什么都不写、谁也不叫醒 (统一的"不存在或不可达", 无存在性 oracle); 用户**打开过**的会话 (reachability override) 跨 Task Group 可拉 (只放宽)。重名 ⇒ `ambiguous` 并列出候选 conversation id, 绝不猜。后台任务 (jbt_) 建群 ⇒ `job-token`, CLI 本地先拒 (零请求)、路由再拒 403。(test-channel-groups §1/§3, test-msg-cli-groups §1/§2, test-channels-groups-e2e: 两个 stub CLI 各录到**恰好一帧**邀请唤醒)
+- **拉人 — SHIPPED.** `group invite <group> <member…> [--context] [--quiet]`; 面板群详情 "拉人…" = 新建群对话框去掉名称。成员与我都能拉人; 非成员拉人得到的回答与"群不存在"逐字相同; 重复拉人 = no-op 并点名说明 (`already-member`), 不叫醒; **双人群 (私聊) 不收第三人** —— `pair-group` 409, "要加人请建群" (上表没写这条, 是实现时定的: 双人群是 `send <agent>` 的幂等目标, 加第三人会让同一对成员找不到自己的私聊); 群上限 32 人。(test-channel-groups §1/§3)
+- **附带 context — SHIPPED.** 每个被拉者一条系统记录 `{kind:'invite', by, member, context, wake}` 进群日志 (全员可见; 面板在该记录下显示 context); 它是被拉者收到的第一段内容: 邀请唤醒的报告里 "You were added by <谁> — context: …" 排在最前 (context 占报告预算至多 1/3)。context 上限 4000 字符, 帧惰化 (agent 可控文本)。(test-channel-groups §1c "the invite CONTEXT comes first", e2e "the invite frame carries the lead line AND the opening context")
+- **叫醒语义 — SHIPPED.** 邀请 = 对被拉者的显式动作: `wakeVerdict` 对被拉者本人的 invite 记录回答 wake (除 `mute`), `--quiet` ⇒ `quiet-invite` 不叫醒; 拉 N 人 = N 次授权 (录制的 authorizer 被问 N 次, 理由 `peer-message`), CLI 回显 "woke 2 invitees = 2 billed turns: …", 0 也说; 被拒的叫醒标 `(not billed)` 并带支出上限的原因。唤醒 = 该成员的报告**立刻**经 THE ladder (`deliverToConversation`, `spendReason:'peer-message'`) 送达, 授权器决定; 被拒的叫醒写审计 (`group-wake`)、**不 stash** (消息在日志里, 下一份报告会带上它; stash 会送两次)。一个被邀请唤醒的成员下一 turn 不会再收到同样的内容。(test-channel-groups §1b 全表 4 模式 × 8 种消息, §3, test-spend-paths 的 ladder 白名单)
+- **历史可见 — SHIPPED.** 面板里我看全部日志。成员的报告 (`reportFor`) 只含**入群之后**、`reportedUpTo` 之后、非自己写的记录; 最新的保留, 旧的截掉并给出 `vibespace-msg read <group> --before <最早显示的 ts>` 指针 (`upTo` 仍覆盖被截的, 所以不会再报); 最新一条必显示 (必要时截断到剩余空间)。预算: 单群报告 2 KiB (模型默认), 唤醒报告 4 KiB (走它自己的 turn, 不占 10 KiB 注入), **一次用户 turn 里所有群报告合计 ≤ 4 KiB** 且排在 prompt-context 投递的最后、从 9600 B 硬上限剩下的空间里预算; 剩余 < 320 B 的群等下一 turn 而不是送一个残片。`read <group> [--before ts] [--limit n]` 主动读历史, 非成员读不到 (统一 not-found), 成员可读已归档群。(test-channel-groups §1c/§3c/§4 "the whole delivery stays under the 9600 B inline cap")
+- **退群 / 移出 — SHIPPED.** `group leave <group>`; `group kick <group> <member>` 只能建群者或我, 踢自己 ⇒ `self` ("用 leave"); 面板群详情每个成员一个 "移出" (我 = 可移出任何人)。**双人群少一人 = 归档** (日志保留, 之后同一对再 `send` 会开一个**新**双人群); 三人群走一人仍然活着; 没有 agent 剩下的群也归档。(test-channel-groups §1/§3c)
+- **改名 / 归档 — SHIPPED, 比上表多一条 CLI.** `group rename` 任一成员或我; 归档除面板外也有 CLI `group archive` (建群者或我; 重复归档 = no-op)。归档不删日志, 已归档群不收邀请/改名, 在群列表里另折叠。(test-channel-groups §1, test-channels-groups-ui "an archived group is listed apart")
+- **通知模式 — SHIPPED.** `group notify <group> <next-turn|mention|always|mute>` 只改调用者自己 (请求里根本没有 member 字段); 面板群详情每个成员一个下拉, 我可改任何人 (e2e: 我把 alpha 改成 always, beta 不动); jbt_ 改通知 ⇒ `job-token`。四个模式实测: next-turn 零授权、下一次**用户发起**的 turn 收一份报告且只一次; mention 未点名不叫醒、@ 只叫醒被点名者; always 每条都问授权器 (被拒的照样入日志、照样进报告); mute 连 @ 也不叫醒、没有报告。"用户发起" = 会话的 `_userInputAt` (ws input / chat-input) 不早于 `_machineInputAt` (投递梯每一级 + auto-resume 的 continue) —— 机器开的 turn 不拿报告, 回声室因此在构造上不可能。(test-channel-groups §1b/§3b/§4 经**真实** prompt-context 路由)
+- **发言 — SHIPPED.** agent: `send <group|agent> "…" [--wake]` —— `send <agent>` = 找到或建立这两人的双人群 (pairKey 对称, 两边互发落在**同一个**群, 恰好一个), 默认 next-turn = 零计费 turn, `--wake` = 对另一方的一次 @ = 一条计费 turn; 回答回显唤醒数。我: 群窗口 composer 以 "你" **直接**发 (不走 propose; 群窗口根本没有 proposal 路径), `@` 自动补全成员名, 输入框下方预览**这段文字**会叫醒谁 (与引擎 `wakeVerdict` 在 320 行上做一致性测试, 负控 = 让 @ 压过 mute 的预览被同一比较抓住), 发送后 toast 说服务器实际叫醒了几个。外部会话 (Lark/Gmail) 在提供 `sendAsUser` 时我的消息也直接发 (`POST /api/channels/:a/:c/send`, `direct:true`: 无策略无守卫, 仍有 outbox 记录/审计/不重发的 unknown); agent 的 `direct` 被忽略, agent 起草的回复保留 outbox 卡片。(test-channels-groups-ui §1/§2, e2e: always 成员的 stub 录到唤醒帧, next-turn 成员的 stub 什么也没录) **r1:** agent 的动作会引起的每一次唤醒 (@ / `--wake` / 邀请 / `always`) 都按 (发送方, 接收会话) 每 30 秒一次限速, 键是解析后的会话 id 而不是 `to` 的写法; 被限速的唤醒 = 拒绝 (不计费, 消息照常入群); 一个裸名字既是群又是会话 ⇒ `ambiguous`; 还没有会话 id 的发送方 ⇒ `bad-member` (test-msg-cli-groups §2)。
+- **r2 (第二轮对抗验证, 九条, 每条先复现再修) — SHIPPED.** ① **一条命令花不掉一个槽位一小时的额度**: 限速在 (发送方, 接收者) 每 30 秒一次之外, 再加**每个发送方每分钟至多 8 次唤醒** (此前一次 `group create` 拉 25 人 = 25 条计费 turn, 同一发送方 31 秒 62 条); 而且**数量在动作之前说**: 一个 agent 的动作会叫醒 **5 个以上**时回 `confirm-wakes` (带 `wakes: N`, 什么都不写) 直到带 `--yes`。② **我的路由**: 面板把预览说过的数 (`expectWakes`) 随请求一起发, 引擎在门内数出这次动作实际会叫醒几个, 不一致 (缺省 = 0) ⇒ `wake-count-mismatch`, 什么都不写 —— 本地脚本不先知道并说出代价就无法以 "User" 的名义叫醒成员; **auth 关闭时**这些路由对本机任何进程开放, 所以此时我的 post/create/invite 与 agent 一样限速 (auth 开启时 cookie 证明了是我, 不限速)。③ 损坏的 `groups.json` (及 index/adapters/outbox) 不再被当成空的读入后覆盖: 原文件改名为 `<name>.corrupt-<ts>` 原样保留 (绝不删除), 记一行日志, "For you" 收件箱一条, 之后才以空存储启动; 改名失败则该存储拒绝一切写入。④ 报告里被截断的长消息后面跟一行 `(N message(s) above cut short — the whole text: vibespace-msg read <群> --before <ts> --limit <n>)`, 照做即可读到全文。⑤ 未读数不再在每次广播时重读每个未读群的整份日志 (200 群 × 500 条时每条 agent 消息卡主循环约 100 ms): 按 (标记, lastAt) 记忆, 由写日志的唯一入口增量推进, 标记移动才重算; 实测每条消息 ≈ 1–2 ms。⑥ 限速账本持久化 (`data/channels/wake-pace.json`), 重启不再忘记。⑦ 一个 turn 里连一份报告都放不下时, 仍然**点名**等待中的群 (以前是空白)。⑧ 被授权器拒绝 (未计费) 的唤醒退还限速名额, 不再让下一次合法唤醒被一句"已计费"的假话挡掉。⑨ 终端里的鼠标报告 (滚轮/点击, CLI 开了鼠标跟踪) 不算"人在打字", 不再把一次被唤醒的计费 turn 变成用户 turn。(test-channel-groups §1c/§2b/§3e–§3h/§4c, test-msg-cli-groups §1/§2, test-channels-groups-e2e)
+- **r3 (第三轮对抗验证, 八条, 每条先复现再修) — SHIPPED.** ① **群路由之外的三个侧门**: auth 关闭时, Channels composer 的 `/send`、`/propose` 与 outbox 的 `/approve` 经内置 Agents 适配器叫醒任何活会话, 不回显、不限速 (一秒十次 = 十条计费 turn), 群路由刚限速的目标从侧门照样能叫醒。现在适配器**模块**声明 `sendStartsTurn` (引擎读声明, 不看适配器 id): 立刻发出且会开 turn 的发送先过回显 (`expectWakes`, 否则 409 `wake-count-mismatch`, 什么都不建) 再过限速 (auth 关闭时, 与群路由**同一个**持久账本 `user|<会话>`, 否则 429 `rate-floor`, 什么都不建, approve 的 proposal 继续等待); 没发出去的退还名额。composer 在点击前说 "会唤醒这个 agent: 1 次计费回合", 审批卡说 "批准会唤醒这个 agent"; agent 用 `vibespace-channels reply` 发往 Agents 适配器时按它自己的限速。test-architecture §49 普查 routes/channels.js 里每一个能开 turn 的 owner 路由。② **成员改名后我的发送永远 409**: 面板按画出来的名字数 @, 服务器按活名字数, 改名不广播。现在 409 附带服务器计数所依据的群视图 (面板先重绘再下一次点击), 会话列表的唯一通知点调用 `noteRoster()`, 只为成员名字/在线状态变了的群广播。③ heavy 门 e2e 以 auth 开启运行 (cookie 登录), 不再真睡 30 秒 (43 s → 14 s)。④ `wake-pace.json` 里超前 5 秒以上的时间戳不再被当成一次唤醒 (时钟回拨不再把每一对锁住回拨那么久), 丢弃时记一行日志。⑤ 被拒的唤醒只退还 (发送方, 接收者) 那一格, 尝试仍计入发送方的每分钟 8 次 —— 支出上限下反复尝试每分钟至多问授权器 8 次 (以前 6 秒 60 次)。⑥ index.json 被 BLOCKED 时 `update()` 也拒绝 (以前界面显示成功、重启后消失), 所有 blocked 拒绝带 `code:'store-blocked'` (503), 每次被拒的写入都记日志。⑦ 被另存的 `adapters.json` 出现在第一屏: digest 带 `quarantined`, 面板在群列表上方画一行警告。⑧ 改名失败 (blocked) 的文件, 收件箱标题说"无法另存", 不再说"已另存为它自己"。(test-channel-groups §1e/§2c/§3i–§3k, test-channel-store §r3, test-architecture §49, test-channels-groups-e2e)
+- **r4 (第四轮对抗验证) — SHIPPED.** 唤醒许可发放之后、发送之前的一次抛错 (outbox 被封锁的 503、EACCES/ENOSPC 写失败) 会留下节流戳: 存储恢复后的重试是 429, 措辞怪罪一次从未发生的唤醒, 八次这样的错误就让一个无关的群唤醒被节流一分钟. 现在 `propose`/`approve` 在抛错时归还名额 —— 请求既没到授权者也没到适配器时, 同时归还 pair 戳与发送者的分钟计数; 请求可能已经发出之后的抛错保留节流 (那次唤醒是真的).
+
+**第一屏 — SHIPPED.** 群列表 = 全部 agent 群 + 各账号里**已跟踪**的外部会话, 同一个列表按最近活动排序 (行 = 来源图标 · 名称 · 时间 / 来源 chip · 末行 · 未读), 由广播**原地重绘** (e2e: 零次 `/api/channels*` 或 `/api/channel-groups*` 请求); 未读 = 我的已读标记之后非我写的记录 (只有我的动作移动它), rail 上的 Channels 徽标把群的未读也算进去; "账号"与"消息观察 (Message watcher)"是下方的次级区, 折叠状态存 user state 并跨客户端同步。
+
+**未交付 (仍是设计)**: 22.1 表里"按来源的回复模型"一轴 (`reply: thread | quote | none`, composer 只画来源支持的动作) 这一轮**没有做** —— channel-caps 里还没有这一轴, composer 目前按 `sendAsUser` / bot / 只读三分。
+
 **面板**: 群详情 = 成员列表 (名字 + 通知模式下拉 + 移出) + "拉人" 按钮 + 日志。拉人对话框: 活会话多选 (按 Task Group 分组显示, 但不自动整组加入 — D1)、context 文本框、"立刻叫醒" 开关、回显 "将叫醒 N 个 agent (N 条计费 turn)"。
 
 **不做**: 群内子讨论串、群头像/公告、跨实例群 (远端 agent 先不入群)。
+
+**实现状态 (2.369.159, g1 = 模型 + 引擎)**: PURE `src/channel-groups.js` + ORCH `src/server/groups-engine.js`; 群日志落在 `adapterId: 'groups'` (而非上文写的 `'agents'` —— agents adapter 的 conversation 是**会话**, 群是另一种对象, 共用一个 adapterId 会让两者的 convId 空间相撞), `convId: <group id>`; 成员行多带一个 `name` 快照 (会话不在时报告仍能署名) 与 `reportedUpTo`; 群记录多带 `lastAt`/`lastText` (群列表按活动排序用, 可从日志重算)。"用户发起的 turn" 的判定: 会话上 `_userInputAt` (ws input / chat-input) 不早于 `_machineInputAt` (投递梯每一级 + auto-resume 的 continue)。面板 (群列表一级、composer、成员下拉) 是下一块。
+
+**实现状态 (g2 = agent CLI)**: `vibespace-msg` 的 `group list`/`group create|invite|leave|kick|rename|archive|notify`/`read --before`/`send <group|agent> [--wake]` 全部落地; 每个回答回显唤醒计数 ("woke 2 agents = 2 billed turns", 0 也说); 重名 ⇒ `ambiguous` 拒绝并列出候选 id, 绝不猜; 拒绝 = 类型码 + 补救一行, exit 1。**jbt_ (后台任务) 的边界**: 以拥有该 job 的对话身份 list/read/send (send <agent> 只进已存在的双人群), 建群与改成员一律 `job-token` 拒绝 (CLI 本地先拒, 路由再拒)。手册 `## Groups` 一节用 owner 的原意写; Task Group 会话的 Reporting back 段多一行群指针 (277 B)。门: test-msg-cli-groups。
+
+**实现状态 (g3 = 面板)**: 第一屏 = 群列表 (agent 群 + 各账号里**已跟踪**的会话, 按最近活动排, 行 = 来源图标 · 名称 · 时间 / 来源 chip · 末行 · 未读; 已归档另折叠), "账号"与"消息观察 (Message watcher)"降为下方可折叠的次级区, 折叠状态存 user state `channelsPanelFolds` 并跨客户端同步。"新建群"对话框: 名称 + 按 Task Group 分组的活会话 (逐个勾选, 不预选, 无整组勾选 — D1) + 开场 context + "立刻叫醒"(默认开) 并在点击**之前**回显 "将叫醒 N 个 agent (N 条计费 turn)"。群窗口 = 同一 `channel` 窗口类型; 系统记录按 kind 用设备语言措辞; 成员 chip / ⋯ 打开群详情 (我 = "你 (观察者)" 排第一; 每个成员一个通知模式下拉, 我可改任何人; 移出; 拉人 = 新建群对话框去掉名称; 改名; 归档)。**composer 以"你"直接发出**: `@` 自动补全成员名, 输入框下方预览这段文字会叫醒谁 (模型自己的 `mentionsIn` + D2 表, 与引擎的 `wakeVerdict` 做了全表一致性测试), 发送的回答带唤醒计数。**外部会话 (Lark/Gmail) 我自己的消息也直接发出**: `sendAsUser` 可用时 composer = 发送 (`POST /api/channels/:a/:c/send` = 用户 proposal + `direct:true`: 不走策略与守卫, 仍保留 outbox 记录/审计/不重发的 unknown); 只提供 bot 身份时仍走 propose 并说明为何不能以你的身份发送; agent 起草的回复保留 outbox 卡片。服务器补充: digest 的 `lastText`, 群引擎的**我的已读标记** (`ownerRead`, 只由我的动作移动, 未移动不广播), `GET /api/channel-groups/roster`, `POST /api/channel-groups/:id/read`。窄栏容器阈值 180 → 160 px (面板变高后默认宽度出现滚动条, 实测内容宽 187 → 172)。门: test-channels-groups-ui (fast) + test-channels-groups-e2e (heavy, 两个 stub CLI 会话, 每次唤醒都经真实投递梯进入录制 stub)。
 
 ### 22.4 归属
 B-afa0 (改写为本节); 前置 B-f0a2 (账号); 不动 §7/§8/§9 的机制, 只改它们在界面里的位置与 composer 的语义。

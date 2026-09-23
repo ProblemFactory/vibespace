@@ -248,6 +248,10 @@ const EXCEPTIONS = new Map([
   ['src/lib/channel-window.js->src/channel-caps.js', 'pure module, shared server+browser by design — same rule as the panel, for the context bar and the identity warning'],
   ['src/lib/channel-filter-editor.js->src/channel-filter.js', 'pure module, shared server+browser by design — the editor draws the CLOSED rule set and validates a rule with the same code the route refuses it with, so the two cannot disagree'],
   ['src/lib/channel-filter-editor.js->src/channel-caps.js', 'pure module, shared server+browser by design — the editor words the per-lane wake latency from the digest\'s structured lane, like the panel\'s chip'],
+  // g3 (design §22): the IM-first panel's arithmetic asks the PURE group model for the group
+  // namespace, the notify modes, the owner's actor id and `mentionsIn` — so the wake PREVIEW under
+  // the composer and the engine's wakeVerdict read ONE definition of what an @ is.
+  ['src/lib/channel-groups-view.js->src/channel-groups.js', 'pure module, shared server+browser by design — the wake preview and the engine apply the SAME mention rule; the group namespace / notify modes / owner id are spelled once'],
   ['src/lib/channel-outbox.js->src/channel-caps.js', 'pure module, shared server+browser by design — the approval card composes the §9.5 identity warning from the digest\'s structure in the device\'s language, exactly as the composer does'],
 ]);
 
@@ -1417,6 +1421,30 @@ for (const [edge] of EXCEPTIONS) {
   ok(scope.length >= 30, `§47 census scope is non-vacuous (${scope.length} chrome suites navigate a page)`);
   ok(bad.length === 0, `every chrome suite pre-sets 'vs-onboarded' through ONBOARDED_SOURCE before every Page.navigate${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
   ok(judge("import { scratch } from './scratch.mjs';\nawait cdp('Page.navigate', { url: U });") !== null && judge("import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: U });") === null && judge("// onboarding-under-test\nawait cdp('Page.navigate', { url: U });") === null, 'NEGATIVE CONTROL: a bare navigate is caught, the shared idiom passes, the declared exemption passes');
+}
+
+
+// 49. THE WAKE-DOOR CENSUS (r3 of agent groups, 2026-09-23). With auth OFF the
+//     owner's routes are reachable by any local caller, so every owner route
+//     that can start a BILLED turn (a group post/create/invite, and the
+//     Channels engine's propose/approve/send — the built-in Agents adapter's
+//     send IS a wake through the delivery ladder) must hand its door BOTH the
+//     consent echo and the pacer. r2 fenced the group routes and left three
+//     side doors beside them; this census reads every router.post/put in
+//     src/routes/channels.js and fails a wake-capable one that does not.
+{
+  const src = fs.readFileSync('src/routes/channels.js', 'utf8');
+  const blocks = (text) => text.split(/\n(?=router\.(?:post|put|get|delete)\()/).filter((b) => /^router\.(post|put)\(/.test(b));
+  const WAKES = /engine\(\)\.(propose|approve)\(|\bge\.(post|create|invite)\(/;
+  const judge = (text) => blocks(text).filter((b) => WAKES.test(b)).filter((b) => {
+    const calls = [...b.matchAll(/(engine\(\)\.(?:propose|approve)|\bge\.(?:post|create|invite))\(([^\n]*)/g)];
+    return calls.some((m) => !(/consent: /.test(m[2]) && /mayWake: /.test(m[2])) && !/wakeGuards\(/.test(m[2]));
+  }).map((b) => b.split('\n')[0].slice(0, 90));
+  const wakeBlocks = blocks(src).filter((b) => WAKES.test(b));
+  ok(wakeBlocks.length >= 5, `§49 census scope is non-vacuous (${wakeBlocks.length} owner routes can start a billed turn)`);
+  const bad = judge(src);
+  ok(bad.length === 0, `§49 every wake-capable owner route hands its door the consent echo AND the pacer${bad.length ? ' — ' + bad.join('; ') : ''}`);
+  ok(judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }));\n});") .length === 1 && judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }, wakeGuards(b)));\n});").length === 0, '§49 NEGATIVE CONTROL: a planted side door with no guards is caught; the guarded spelling passes');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

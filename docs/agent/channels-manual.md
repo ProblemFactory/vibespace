@@ -50,6 +50,11 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
   chat the user left, an adapter with no send permission yet) `reply`
   answers `send-not-available` with the reason and creates NO proposal —
   do not draft again until the user changes that.
+- A reply that goes DIRECTLY to another agent session (the built-in `agents/…`
+  conversations) wakes that agent — a billed turn — so it is paced like your
+  group wakes (one per target per 30 s, 8 per minute): past that it answers
+  `rate-floor` and NOTHING is sent. Prefer `vibespace-msg send` (free on the
+  receiver's next turn) unless the agent must act now.
 - The `--why` reference (an alert, a task, a message id) is shown on the
   approval card so the user knows what prompted the reply. Keep the text
   final: the recipient reads exactly what the user approves.

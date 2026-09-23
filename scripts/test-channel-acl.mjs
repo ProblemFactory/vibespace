@@ -130,5 +130,42 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   eng.stop();
 }
 
+// ── §3 AGENT GROUPS ask msg-acl for reach (design §22.5) — the SAME answer
+// `vibespace-msg list` gets, widen-only: same Task Group = mutual, another
+// group only through a messageable override or the group's externalVisibility;
+// `visible` is NOT enough to be invited. Uniform refusal, atomic create.
+console.log('§3 agent groups: invite reach = msg-acl (widen-only)');
+{
+  const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
+  const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
+  const store = createChannelStore({ dir: path.join(ROOT, 'groups-acl', 'channels') });
+  const roster = [
+    { cid: 'c-alpha', name: 'alpha', groups: ['tg1'], reachability: null },
+    { cid: 'c-beta', name: 'beta', groups: ['tg1'], reachability: null },
+    { cid: 'c-vis', name: 'vis', groups: ['tg2'], reachability: 'visible' },
+    { cid: 'c-open', name: 'open', groups: ['tg2'], reachability: 'messageable' },
+    { cid: 'c-grp', name: 'grp', groups: ['tg3'], reachability: null },
+    { cid: 'c-lone', name: 'lone', groups: [], reachability: null },
+  ];
+  const ext = { tg3: 'messageable' };
+  const eng = GE.create({ store, deliver: null, roster: () => roster, groupSetting: (g) => ext[g] || 'none', log: { info() {}, warn() {}, log() {} } });
+  ok(eng.reach('c-alpha', 'c-beta') === 'messageable', 'same Task Group = mutual (messageable)');
+  ok(eng.reach('c-alpha', 'c-vis') === 'visible' && eng.reach('c-alpha', 'c-open') === 'messageable' && eng.reach('c-alpha', 'c-grp') === 'messageable' && eng.reach('c-alpha', 'c-lone') === 'none',
+    'another group: only the override / the group\'s externalVisibility widens; an ungrouped session is closed');
+  ok(eng.reach('user', 'c-lone') === 'messageable', 'the owner reaches every live session');
+  const vis = await eng.create({ by: 'c-alpha', name: 'x', members: ['beta', 'vis'], quiet: true });
+  ok(vis.ok === false && vis.code === 'unreachable', 'VISIBLE is not enough to be invited (messageable is the bar)');
+  const lone = await eng.create({ by: 'c-alpha', name: 'x', members: ['lone'], quiet: true });
+  const ghost = await eng.create({ by: 'c-alpha', name: 'x', members: ['no-such-session'], quiet: true });
+  ok(lone.code === ghost.code && lone.error.replace('lone', '?') === ghost.error.replace('no-such-session', '?'), 'an unreachable session and a nonexistent one get the SAME refusal (no existence oracle)');
+  ok(Object.keys(store.groups.live().groups).length === 0, 'NEGATIVE CONTROL: every refused create wrote nothing');
+  const good = await eng.create({ by: 'c-alpha', name: 'x', members: ['beta', 'open', 'grp'], quiet: true });
+  ok(good.ok && good.group.members.length === 4, 'the override and the open group are invitable');
+  const byOpen = await eng.invite({ by: 'c-open', group: good.group.id, members: ['vis'] });
+  ok(byOpen.ok && byOpen.added.join() === 'vis', 'reach is judged from the INVITER: open shares vis\'s Task Group and brings it in — the same session alpha could not invite', JSON.stringify(byOpen));
+  ok(byOpen.refused.length === 1 && /no delivery ladder/.test(byOpen.refused[0].reason), '…and a wake with no ladder wired is an honest refusal, never a silent drop');
+  store.close();
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

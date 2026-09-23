@@ -10,6 +10,12 @@
  *     adapters.json                  atomic JSON — one record per connected adapter
  *     index.json                     atomic JSON — ONE in-process owner (§5.1)
  *     msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY log, one ChannelRecord per line
+ *     groups.json                    atomic JSON — agent groups (§22.5), ONE serialized owner
+ *     msgs/groups/<groupId>.ndjson   a group's log: an ordinary append-only conversation log
+ *     wake-pace.json                 atomic JSON — the groups' WAKE PACE ledger (r2): who woke whom
+ *                                    when, pruned to its windows, so a restart forgets no floor
+ *     <file>.corrupt-<ts>            a JSON store that could not be read at boot, SET ASIDE with its
+ *                                    bytes intact (r2) — never unlinked, never overwritten
  *     audit.ndjson                   APPEND-ONLY, rolled by DATE into archive/
  *     archive/                       archive-never-destroy
  *
@@ -154,10 +160,6 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-function readJson(file, fallback) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return fallback; }
-}
-
 /** An adapter/conversation id may not escape its directory. Channel ids come
  *  from vendors, so this is a boundary, not a formality. */
 function safeSeg(s) {
@@ -172,8 +174,9 @@ const dayStamp = (ms) => new Date(ms).toISOString().slice(0, 10);
  * Build the store. `dir` is `<dataDir>/channels`. `now` is injectable so the
  * retention and audit-roll rules are testable without a clock.
  */
-function createChannelStore({ dir, now = () => Date.now() } = {}) {
+function createChannelStore({ dir, now = () => Date.now(), log = console } = {}) {
   if (!dir) throw new Error('channel-store: dir is required');
+  const warn = (...a) => { try { (log.warn || log.log || console.warn).apply(log, a); } catch { } };
   const msgsDir = path.join(dir, 'msgs');
   const archiveDir = path.join(dir, 'archive');
   const indexFile = path.join(dir, 'index.json');
@@ -183,8 +186,49 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
   fs.mkdirSync(msgsDir, { recursive: true });
   fs.mkdirSync(archiveDir, { recursive: true });
 
-  let ix = readJson(indexFile, null);
-  if (!ix || typeof ix !== 'object' || typeof ix.conversations !== 'object') ix = EMPTY_INDEX();
+  // ── FAIL CLOSED ON AN UNREADABLE STORE FILE (r2, 2026-09-23 verifier: a
+  // truncated groups.json read as EMPTY with no log line, and the first group
+  // verb overwrote it — every group, membership, notify mode and report
+  // marker gone). A MISSING file is an empty store; a file that exists but
+  // cannot be parsed (or has the wrong shape) is RENAMED beside itself as
+  // `<name>.corrupt-<ts>` — never unlinked — with ONE named log line, and the
+  // store starts empty only once the bytes are safe. If even the rename fails
+  // the family is BLOCKED: its door refuses every write rather than overwrite
+  // the only copy. `quarantined` names what was set aside (the channels
+  // engine files ONE "For you" item per entry).
+  const quarantined = [];
+  function loadJsonFamily(file, valid, empty) {
+    const name = path.basename(file);
+    const setAside = (why) => {
+      const to = `${name}.corrupt-${new Date(now()).toISOString().replace(/[:.]/g, '-')}`;
+      try { fs.renameSync(file, path.join(dir, to)); } catch (e) {
+        warn(`[channels] ${name} is ${why} and could NOT be set aside (${(e && e.code) || (e && e.message)}) — writes to it are REFUSED until the file is fixed or moved by hand`);
+        quarantined.push({ file: name, to: null, why, at: now(), blocked: true });
+        return { value: empty(), blocked: `${name} is ${why} and could not be set aside — refusing to overwrite it (fix or move the file, then restart)` };
+      }
+      warn(`[channels] ${name} was ${why} — set aside as ${to} (its bytes kept, never overwritten); that store starts empty`);
+      quarantined.push({ file: name, to, why, at: now() });
+      return { value: empty(), blocked: null };
+    };
+    let text;
+    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) {
+      if (e && e.code === 'ENOENT') return { value: empty(), blocked: null };
+      return setAside(`unreadable (${(e && e.code) || (e && e.message)})`);
+    }
+    let v;
+    try { v = JSON.parse(text); } catch (e) { return setAside(`corrupt JSON (${String((e && e.message) || e).slice(0, 80)})`); }
+    if (!valid(v)) return setAside('not the expected shape');
+    return { value: v, blocked: null };
+  }
+
+  /** A BLOCKED family's refusal (r3): a typed Error the routes answer as
+   *  `503 {error, code:'store-blocked'}` — the panel words the code, the
+   *  message names the file. */
+  const blockedError = (msg) => { const e = new Error(msg); e.code = 'store-blocked'; e.status = 503; return e; };
+
+  const ixLoad = loadJsonFamily(indexFile, (v) => v && typeof v === 'object' && v.conversations && typeof v.conversations === 'object', EMPTY_INDEX);
+  let ix = ixLoad.value;
+  const ixBlocked = ixLoad.blocked;
 
   let dirty = false;
   let debounce = null;
@@ -203,6 +247,8 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
 
   function flush() {
     if (!dirty) return false;
+    // every refusal is said (r3: a once-only line went silent after the first)
+    if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); return false; }
     dirty = false;
     ix.updatedAt = now();
     writeJsonAtomic(indexFile, ix);
@@ -216,6 +262,10 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
   // and hands it to THIS caller only.
   let chain = Promise.resolve();
   function update(fn) {
+    // r3: a BLOCKED index refuses the ACTION, not only the write — an update
+    // that resolved while the flush was refused was a user action that
+    // succeeded on screen and vanished at the next restart
+    if (ixBlocked) return Promise.reject(blockedError(ixBlocked));
     const run = chain.then(() => fn(ix)).then((r) => { markDirty(); return r; });
     chain = run.then(() => {}, () => {});
     return run;
@@ -313,7 +363,7 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
       inBatch.add(r.vendorId);
       fresh.push(r);
     }
-    if (!fresh.length) return { appended: 0, duplicates, lastAt: null, healed: false, freshAt: [], fresh: [] };
+    if (!fresh.length) return { appended: 0, duplicates, lastAt: null, lastText: null, healed: false, freshAt: [], fresh: [] };
     const fp = logPath(adapterId, convId);
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     let healed;
@@ -325,15 +375,18 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
     }
     // DURABLE NOW — and only now may the set claim to hold them.
     for (const r of fresh) rememberVendorId(set, r.vendorId);
-    let lastAt = null;
-    for (const r of fresh) if (Number.isFinite(r.at) && (lastAt === null || r.at > lastAt)) lastAt = r.at;
+    let lastAt = null, lastText = null;
+    for (const r of fresh) if (Number.isFinite(r.at) && (lastAt === null || r.at > lastAt)) { lastAt = r.at; lastText = typeof r.text === 'string' ? r.text : null; }
     // `freshAt`: each appended record's instant (P1 push — the exclusivity
     // measurement judges only records stamped after the lane began carrying
     // content, so a first ingest's backlog is never a "miss").
     // `fresh`: the appended records THEMSELVES (P2): the filter runs over
     // exactly what became durable, on every lane, which is what makes the
     // wake count a property of the corpus and not of the lane (fence 12).
-    return { appended: fresh.length, duplicates, lastAt, healed, freshAt: fresh.map((r) => (Number.isFinite(r.at) ? r.at : 0)), fresh: fresh.slice() };
+    // `lastText` (2.369.159, the IM-first group list — design §22): the newest
+    // appended record's text, so the index can cache the row's LAST LINE beside
+    // its `lastAt` (a derived, re-derivable cache like `unread`, never a fact).
+    return { appended: fresh.length, duplicates, lastAt, lastText, healed, freshAt: fresh.map((r) => (Number.isFinite(r.at) ? r.at : 0)), fresh: fresh.slice() };
   }
 
   /**
@@ -559,10 +612,11 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
   // LIVE inside a serialized door, and written by that door only — there is
   // deliberately no `writeAdapters(obj)` for a caller to hand a private copy
   // to, for the same reason there is no `writeIndex`.
-  let ad = readJson(adaptersFile, null);
-  if (!ad || typeof ad !== 'object' || !Array.isArray(ad.adapters)) ad = { v: 1, adapters: [] };
+  const adLoad = loadJsonFamily(adaptersFile, (v) => v && typeof v === 'object' && Array.isArray(v.adapters), () => ({ v: 1, adapters: [] }));
+  let ad = adLoad.value;
   let adChain = Promise.resolve();
   function adaptersUpdate(fn) {
+    if (adLoad.blocked) return Promise.reject(blockedError(adLoad.blocked));
     const run = adChain.then(() => fn(ad)).then((r) => { writeJsonAtomic(adaptersFile, ad); return r; });
     adChain = run.then(() => {}, () => {});
     return run;
@@ -575,8 +629,8 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
   // disagree (§9.2). Bounded: terminal proposals past OUTBOX_KEEP fall off
   // oldest-first at write time (the audit log keeps the record for ever).
   const outboxFile = path.join(dir, 'outbox.json');
-  let ob = readJson(outboxFile, null);
-  if (!ob || typeof ob !== 'object' || !ob.proposals || typeof ob.proposals !== 'object') ob = { v: 1, proposals: {}, seq: 0 };
+  const obLoad = loadJsonFamily(outboxFile, (v) => v && typeof v === 'object' && v.proposals && typeof v.proposals === 'object', () => ({ v: 1, proposals: {}, seq: 0 }));
+  let ob = obLoad.value;
   if (!Number.isFinite(ob.seq)) ob.seq = 0;
   let obChain = Promise.resolve();
   function outboxPrune() {
@@ -586,6 +640,7 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
     for (const p of done.slice(0, all.length - OUTBOX_KEEP)) delete ob.proposals[p.id];
   }
   function outboxUpdate(fn) {
+    if (obLoad.blocked) return Promise.reject(blockedError(obLoad.blocked));
     const run = obChain.then(() => fn(ob)).then((r) => { outboxPrune(); writeJsonAtomic(outboxFile, ob); return r; });
     obChain = run.then(() => {}, () => {});
     return run;
@@ -594,6 +649,52 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
   /** A new proposal id — a sequence under the owner, so two proposals born
    *  in the same millisecond cannot share one. */
   function outboxNextId() { ob.seq = (Number(ob.seq) || 0) + 1; return `p-${now().toString(36)}-${ob.seq.toString(36)}`; }
+
+  // ── agent groups (design §22.5): groups.json, THE SAME SINGLE-OWNER SHAPE
+  // (invariant 3). Read once, mutated LIVE inside a serialized door, written
+  // by that door only — atomic JSON; there is no `writeGroups(obj)` for a
+  // caller to hand a private copy to. The group LOG is not here: it is an
+  // ordinary conversation log (`appendRecords(GROUP_ADAPTER_ID, groupId, …)`),
+  // append-only like every channel's, so a group's history gets invariants
+  // 1/2/5 for free and a busy group never rewrites this file per message
+  // beyond its `lastAt`/`lastText` summary.
+  const groupsFile = path.join(dir, 'groups.json');
+  const grLoad = loadJsonFamily(groupsFile, (v) => v && typeof v === 'object' && v.groups && typeof v.groups === 'object' && !Array.isArray(v.groups), () => ({ v: 1, groups: {} }));
+  let gr = grLoad.value;
+  let grChain = Promise.resolve();
+  function groupsUpdate(fn) {
+    if (grLoad.blocked) return Promise.reject(blockedError(grLoad.blocked));
+    const run = grChain.then(() => fn(gr)).then((r) => { writeJsonAtomic(groupsFile, gr); return r; });
+    grChain = run.then(() => {}, () => {});
+    return run;
+  }
+  function groupsSnapshot() { return JSON.parse(JSON.stringify(gr)); }
+
+  // ── the groups' WAKE PACE ledger (r2): who woke whom when — the PURE rules
+  // are src/channel-groups.js paceVerdict/paceGrant/paceRefund, the engine
+  // owns the calls. Held LIVE, written atomically a moment after a change
+  // (a burst of grants is one write) and on close — a restart keeps every
+  // floor (the in-memory Map it replaces forgot them all). Small by
+  // construction: the engine prunes it to its windows on every change.
+  const paceFile = path.join(dir, 'wake-pace.json');
+  const pcLoad = loadJsonFamily(paceFile, (v) => v && typeof v === 'object' && !Array.isArray(v), () => ({ v: 1, pairs: {}, senders: {} }));
+  let pc = pcLoad.value;
+  let paceDirty = false;
+  let paceTimer = null;
+  function paceFlush() {
+    if (paceTimer) { clearTimeout(paceTimer); paceTimer = null; }
+    if (!paceDirty) return;
+    paceDirty = false;
+    // a BLOCKED ledger is never overwritten (the floors live in memory; said each time)
+    if (pcLoad.blocked) { warn('[channels] wake-pace.json not written: ' + pcLoad.blocked); return; }
+    try { writeJsonAtomic(paceFile, pc); } catch (e) { warn('[channels] wake-pace.json not written:', (e && e.message) || e); }
+  }
+  function paceSet(next) {
+    pc = next;
+    paceDirty = true;
+    if (closed) { paceFlush(); return; }
+    if (!paceTimer) { paceTimer = setTimeout(paceFlush, 100); if (paceTimer.unref) paceTimer.unref(); }
+  }
 
   /** The audit log's LIVE tail (today's file), newest last, bounded. A
    *  reader for THIS instance's own record — it never leaves the instance. */
@@ -613,13 +714,17 @@ function createChannelStore({ dir, now = () => Date.now() } = {}) {
     if (debounce) { clearTimeout(debounce); debounce = null; }
     if (interval) { clearInterval(interval); interval = null; }
     flush();
+    paceFlush();
   }
 
   return {
-    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, logPath,
+    dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, logPath,
     index: { update, snapshot, entry, flush, isDirty: () => dirty },
     adapters: { update: adaptersUpdate, live: () => ad },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
+    groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
+    pace: { live: () => pc, set: paceSet, flush: paceFlush },
+    quarantined,
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
   };
 }

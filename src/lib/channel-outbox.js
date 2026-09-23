@@ -145,6 +145,8 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
   // THE IDENTITY ROW (§9.5): the fact on the meta line; the warning below, once.
   const asWho = p.sendAs === 'bot' ? t('the bot') : t('you');
   meta.appendChild(el('span', 'chan-prop-identity', t('Will send as {who}', { who: asWho })));
+  // r3: approving a send that starts a turn WAKES the agent — the cost, said before the click
+  if (p.wakes && p.state === 'awaiting-approval') meta.appendChild(el('span', 'chan-prop-wakes chan-warn', t('Approving wakes this agent: 1 billed turn')));
   if (p.state === 'awaiting-approval' && p.ttlAt) meta.appendChild(el('span', 'chan-prop-ttl', t('Expires unapproved at {when}', { when: stamp(p.ttlAt) })));
   // THE SENDER HONESTY LINE (§9.5, P4): said BEFORE the approval when the
   // channel's switch is on, and recorded after the send. The line itself is
@@ -219,7 +221,8 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     approve.onclick = async () => {
       approve.disabled = true; edit.disabled = true; reject.disabled = true;
       const text = editor ? editor.value : null;
-      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, text !== null && text !== p.text ? { text } : {});
+      // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`)
+      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: Number(p.wakes) || 0 });
       if (!r) { approve.disabled = false; edit.disabled = false; reject.disabled = false; return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;

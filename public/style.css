@@ -4077,8 +4077,14 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* the narrow rail (the 200px sidebar = 143px of content): the two needs-you
    badges collapse to ONE accent pill carrying their sum, the breakdown in its
    tooltip — the account roster's ≥/< 340px pattern, at this panel's own
-   threshold (the badge cluster is ~50px where the roster's donuts are ~100). */
-@container chan-panel (max-width: 180px) {
+   threshold (the badge cluster is ~50px where the roster's donuts are ~100).
+   g3 (the IM-first panel, MEASURED): the group list on top makes the rail SCROLL
+   at the default 260px sidebar, and the list's own scrollbar takes 15px — the
+   content box fell from 187px to 172px, under the old 180px threshold, so the
+   DEFAULT width drew the narrow layout whenever the list scrolled (latent before
+   g3 on any long list). 160px keeps the default wide with or without a
+   scrollbar and the 200px sidebar (112px of content) narrow. */
+@container chan-panel (max-width: 160px) {
   .chan-row-sub .chan-awaiting, .chan-row-sub .chan-unread { display: none; }
   .chan-row-sub .chan-row-needs { display: inline-block; }
   /* the 200px sidebar (112px of panel): the rows lose their indent; the freshness
@@ -4096,6 +4102,72 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 @container chan-panel (max-width: 200px) {
   .chan-outbox-label { display: none; }
 }
+/* g3 (design §22): THE GROUP LIST — the first screen. One row per agent group or
+   tracked conversation, sorted by activity: glyph · name · time / source chip ·
+   last line · unread. Distinct classes from the account rows (.chan-row) on purpose. */
+.chan-newgroup-btn { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; margin: 0; }
+.chan-newgroup-btn .chan-ic { font-size: 12px; }
+@container chan-panel (max-width: 160px) { .chan-newgroup-label { display: none; } }
+.chan-groups { display: flex; flex-direction: column; gap: 2px; }
+.chan-groups-empty { font-size: 11px; line-height: 1.45; }
+.chan-grow { padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; transition: all var(--transition); min-width: 0; }
+.chan-grow:hover { background: var(--bg-hover); border-color: var(--border-active); }
+.chan-grow-archived { opacity: .65; }
+.chan-grow-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chan-grow-ic { font-size: 12px; color: var(--text-secondary); }
+.chan-grow-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
+.chan-grow-unread-on .chan-grow-title { font-weight: 600; }
+.chan-grow-at { flex-shrink: 0; font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.chan-grow-sub { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 2px; font-size: 10px; color: var(--text-dim); }
+.chan-src-chip { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 600; padding: 0 6px; line-height: 15px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
+.chan-grow-last { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-grow-unread { flex-shrink: 0; font-size: 10px; font-weight: 700; min-width: 16px; box-sizing: border-box; text-align: center; padding: 0 5px; border-radius: 999px; line-height: 15px; background: var(--accent); color: var(--accent-fg); font-variant-numeric: tabular-nums; }
+.chan-archived-toggle { display: flex; align-items: center; gap: 5px; padding: 3px 6px; font-size: 10px; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); }
+.chan-archived-toggle:hover { background: var(--bg-hover); }
+.chan-archived-toggle:not(.chan-archived-open) .chan-part-chev { transform: rotate(-90deg); }
+/* the SECONDARY sections (Accounts / Message watcher), folded by the user, the fold persisted */
+.chan-part { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 4px; }
+.chan-part-head { display: flex; align-items: center; gap: 5px; padding: 4px 4px; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-dim); cursor: pointer; user-select: none; border-radius: var(--radius-sm); }
+.chan-part-head:hover { background: var(--bg-hover); }
+.chan-part-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-part-count { flex-shrink: 0; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.chan-part-chev { transition: transform var(--transition); }
+.chan-part.chan-part-collapsed .chan-part-chev { transform: rotate(-90deg); }
+.chan-part.chan-part-collapsed .chan-part-body { display: none; }
+.chan-part-note { font-size: 10px; color: var(--text-dim); line-height: 1.45; padding: 2px 4px 4px; }
+
+/* the group dialogs: the member picker (sessions by Task Group, one checkbox each) and the detail's member list */
+.chan-gpick { max-height: 40vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 6px; }
+.chan-gpick-sec { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-dim); margin: 4px 0 1px; }
+.chan-gpick-sec:first-child { margin-top: 0; }
+.chan-gpick-item { padding: 2px 4px; border-radius: var(--radius-sm); }
+.chan-gpick-item:hover { background: var(--bg-hover); }
+.chan-gpick-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-gpick-member { opacity: .6; cursor: default; }
+.chan-group-echo { color: var(--text-secondary); }
+.chan-gm-list { display: flex; flex-direction: column; gap: 4px; }
+.chan-gm-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; flex-wrap: wrap; }
+.chan-gm-who { flex: 1 1 140px; display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; }
+.chan-gm-who .chan-ic { color: var(--text-secondary); }
+.chan-gm-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-gm-off { flex-shrink: 0; font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; }
+.chan-gm-hint { font-size: 10px; color: var(--text-dim); }
+.chan-gm-row .chan-gm-notify { width: auto; flex: 0 1 210px; min-width: 0; }
+.chan-gm-remove { margin: 0; }
+
+/* the group WINDOW: the members chip, system records, the invite context, the @-autocomplete */
+.chan-members-chip { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font: inherit; font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; }
+.chan-members-chip:hover { border-color: var(--border-active); color: var(--text); }
+.chanmsg-sys { align-items: center; }
+.chanmsg-sys-line { font-size: 10px; color: var(--text-dim); text-align: center; overflow-wrap: anywhere; }
+.chanmsg-ctx { font-size: 11px; color: var(--text-secondary); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; padding: 4px 8px; border-left: 2px solid var(--border); max-width: 90%; }
+.chanmsg-self .chanmsg-head b { color: var(--accent); }
+.chan-group-composer { position: relative; }
+.chan-mention-pop { position: absolute; left: 0; bottom: calc(100% + 2px); min-width: 160px; max-width: 100%; max-height: 180px; overflow: auto; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-window); z-index: 5; padding: 2px; }
+.chan-mention-item { font-size: 12px; padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-mention-item:hover, .chan-mention-on { background: var(--bg-hover); color: var(--text); }
+.chanwin-note.chan-warn { color: var(--warn-text); }
+
 /* the fresh-instance connect block (the ONLY section when nothing is connected) */
 .chan-connect .chan-sec-head { cursor: default; }
 .chan-connect .chan-sec-head:hover { background: transparent; }
@@ -4105,6 +4177,10 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-connect-note { display: flex; align-items: flex-start; gap: 4px; font-size: 10px; color: var(--text-dim); padding: 2px 2px 6px; line-height: 1.4; }
 .chan-connect-note .chan-ic { font-size: 11px; margin-top: 1px; }
 .chan-connect-note.chan-warn { color: var(--warn-text); }
+/* r3: a store file set aside at boot, said on the first screen */
+.chan-quarantine-note { display: flex; align-items: flex-start; gap: 4px; font-size: 10px; line-height: 1.4; padding: 4px 8px; overflow-wrap: anywhere; }
+.chan-quarantine-note .chan-ic { font-size: 11px; margin-top: 1px; flex: 0 0 auto; }
+.chan-quarantine-note.chan-warn { color: var(--warn-text); }
 
 /* the conversation window */
 .chanwin { display: flex; flex-direction: column; height: 100%; min-height: 0; }

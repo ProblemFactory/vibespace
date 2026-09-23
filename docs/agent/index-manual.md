@@ -32,5 +32,5 @@ server. `vibespace-docs <topic>` prints it.
   the board/other agents, not a substitute for telling the human.
 - IDs you cannot see behave as nonexistent (uniform not-found, no oracle).
 
-- **vibespace-msg** — message other agent sessions (Task-Group scoped reach; `vibespace-docs msg`).
+- **vibespace-msg** — message other agent sessions in explicit GROUPS (a direct message = the pair's two-member group; each member's notify mode decides next-turn report vs a billed wake; Task-Group scoped reach; `vibespace-docs msg`).
 - **vibespace-channels** — read the external channels (Lark, Gmail, other agents) the user let you see and PROPOSE replies the user approves (`vibespace-docs channels`).

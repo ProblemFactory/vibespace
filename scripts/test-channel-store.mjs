@@ -776,5 +776,57 @@ function rebuildUnderFault(PS, name, code) {
   ok(/writeJsonAtomic/.test(src) && !/fs\.writeFileSync\(indexFile/.test(src), 'the index goes through writeJsonAtomic (tmp+rename) — a bare writeFileSync is silent data loss on the exact crash this product exists to survive');
 }
 
+
+console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 finding 6)');
+{
+  const dir = path.join(ROOT, 'blocked', 'channels');
+  fs.mkdirSync(path.join(dir, 'msgs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'archive'), { recursive: true });
+  const HALF = '{"v":1,"half';
+  for (const n of ['index.json', 'adapters.json', 'outbox.json', 'groups.json', 'wake-pace.json']) fs.writeFileSync(path.join(dir, n), HALF);
+  fs.chmodSync(dir, 0o555);   // the rename cannot happen — the BLOCKED rung
+  let canRename = false;
+  try { fs.renameSync(path.join(dir, 'index.json'), path.join(dir, 'probe')); fs.renameSync(path.join(dir, 'probe'), path.join(dir, 'index.json')); canRename = true; } catch {}
+  if (canRename) console.log('  … SKIP: a read-only directory still allows a rename here (running as root?) — no blocked rung to produce');
+  else {
+    const warns = [];
+    const st = S.createChannelStore({ dir, log: { warn: (...a) => warns.push(a.join(' ')), log() {}, info() {} } });
+    ok(['index.json', 'adapters.json', 'outbox.json', 'groups.json'].every((f) => st.quarantined.some((q) => q.file === f && q.blocked === true)), 'FIXTURE: every family is BLOCKED (named in store.quarantined)', JSON.stringify(st.quarantined));
+    let ixErr = null;
+    const r = await st.index.update((ix) => { ix.conversations['fake/c1'] = { key: 'fake/c1', id: 'c1', adapterId: 'fake', tracked: true }; }).then(() => 'RESOLVED', (e) => { ixErr = e; return 'rejected'; });
+    ok(r === 'rejected' && ixErr && ixErr.code === 'store-blocked' && ixErr.status === 503 && /index\.json/.test(ixErr.message), 'index.update over a BLOCKED index.json REJECTS with code store-blocked (503) — never a success the next restart takes back', JSON.stringify({ r, code: ixErr && ixErr.code, status: ixErr && ixErr.status }));
+    ok(!st.index.entry('fake', 'c1', { create: false }), '…and the mutation never ran: nothing lives in memory that the disk will not hold');
+    for (const fam of ['adapters', 'outbox', 'groups']) {
+      let e = null;
+      await st[fam].update(() => {}).catch((x) => { e = x; });
+      ok(e && e.code === 'store-blocked' && e.status === 503, `${fam}.update over a blocked file rejects with code store-blocked (503) — a route answers {error, code} the panel can word`, JSON.stringify(e && { code: e.code, status: e.status }));
+    }
+    // the ROUTE answers the code (routes/channels.js fail()): the panel's routeErrorText words it
+    const express = require(path.join(REPO, 'node_modules/express'));
+    const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
+    const CR = require(path.join(REPO, 'src/routes/channels.js'));
+    const RA = 'aaaaaaaa-1111-4000-8000-000000000001', RB = 'bbbbbbbb-2222-4000-8000-000000000002';
+    const ge = GE.create({ store: st, deliver: null, broadcast() {}, roster: () => [{ cid: RA, name: 'alpha', groups: ['t'] }, { cid: RB, name: 'beta', groups: ['t'] }], groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+    CR.setup({ getEngine: () => null, getGroups: () => ge, authEnabled: () => true });
+    const app = express(); app.use(express.json()); app.use(CR.router);
+    const srv = await new Promise((resolve) => { const s2 = app.listen(0, '127.0.0.1', () => resolve(s2)); });
+    const rr = await fetch(`http://127.0.0.1:${srv.address().port}/api/channel-groups`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'x', members: [RA, RB], quiet: true }) }).then(async (x) => ({ status: x.status, body: await x.json() }));
+    await new Promise((resolve) => srv.close(resolve));
+    ok(rr.status === 503 && rr.body.code === 'store-blocked' && /groups\.json/.test(rr.body.error), 'the owner\'s create over a blocked groups.json answers 503 {error, code:"store-blocked"} (was 500 with code null)', JSON.stringify(rr));
+    const W = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+    ok((W.match(/case 'store-blocked'/g) || []).length === 2, 'PIN: both route-error worders (channels + groups) say store-blocked in words');
+    const pw = warns.length;
+    st.pace.set({ v: 1, pairs: { 'a|b': 1 }, senders: {} });
+    st.pace.flush();
+    st.pace.set({ v: 1, pairs: { 'a|c': 2 }, senders: {} });
+    st.pace.flush();
+    ok(fs.readFileSync(path.join(dir, 'wake-pace.json'), 'utf-8') === HALF && warns.slice(pw).filter((l) => /wake-pace\.json not written/.test(l)).length === 2, 'the BLOCKED pace ledger is never overwritten either, and EVERY refused flush says so (not only the first)', JSON.stringify(warns.slice(pw)));
+    st.close();
+  }
+  fs.chmodSync(dir, 0o755);
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  ok(!/_said/.test(src), 'PIN: no once-only flag silences a refused index flush after its first line');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

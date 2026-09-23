@@ -418,6 +418,12 @@ const ALLOW = [
   // FORWARDS to the gated ladder under its own declared reason
   // (spendReason 'browser-handback'); the ladder authorizes every call.
   { file: 'src/server/browser-handback.js', prim: 'deliver-ladder', why: "the browser handback announcer FORWARDS to the gated ladder (spendReason 'browser-handback'): the explicit handback and the ON-by-choice idle announcement are its only sites, a refusal is stashed and the zero-spend notice rides the next message" },
+  // AGENT GROUPS (design-communication-panel §22, owner D2): a WAKE — an
+  // @mention, an invite, a member on `always`, `send --wake` — is a billed
+  // turn, and the engine's ONE site for it forwards to the gated ladder
+  // (spendReason 'peer-message'). Everything else a group does is FREE: the
+  // default next-turn mode rides the member's own next user turn as context.
+  { file: 'src/server/groups-engine.js', prim: 'deliver-ladder', why: "the agent-groups engine's ONE wake site FORWARDS to the gated ladder (spendReason 'peer-message'); a refusal is journaled and the message rides the member's next-turn report — the engine never stashes and never opens a turn beside the ladder" },
 ];
 
 /** Blank whole-line comments, preserving every byte offset and line break.
@@ -636,6 +642,24 @@ function trackedServerSource() {
       fileGranularGated(scratch, 'src/server/doc-only.js') === true);
   }
 
+  // THE GROUPS ENGINE'S ROW EXCUSES THE FORWARD, NOT A BYPASS (§22): a patched
+  // copy of the real engine that posts into the CLI inbox itself — skipping the
+  // ladder and therefore the authorizer inside it — must read UNWIRED, and the
+  // allowlist row (keyed by file AND primitive) must not cover it.
+  if (gitOk) {
+    const scratch2 = tmpdir('vs-spend-groups-');
+    fs.mkdirSync(path.join(scratch2, 'src', 'server'), { recursive: true });
+    const real = read('src/server/groups-engine.js');
+    fs.writeFileSync(path.join(scratch2, 'src/server/groups-engine.js'), real.replace('deliver.deliverToConversation(', 'peerMsg.postToPeer('));
+    const gHits = censusOver(scratch2, ['src/server/groups-engine.js']);
+    const allowSet2 = new Set(ALLOW.map((a) => a.file + '#' + a.prim));
+    const gUnwired = gHits.filter((h) => !h.gated && !allowSet2.has(h.file + '#' + h.prim));
+    ok('§2 NEGATIVE CONTROL (groups): the real engine patched to post into the CLI inbox BESIDE the ladder is reported UNWIRED',
+      gUnwired.length === 1 && gUnwired[0].prim === 'cli-inbox', JSON.stringify(gHits));
+    const realHits = censusOver(REPO, ['src/server/groups-engine.js']);
+    ok('§2 …while the real engine holds exactly ONE site, the allowlisted forward to the ladder',
+      realHits.length === 1 && realHits[0].prim === 'deliver-ladder' && allowSet2.has('src/server/groups-engine.js#deliver-ladder'), JSON.stringify(realHits));
+  }
   // WIRING PIN — the census proves a file ASKS; these prove server.js HANDS it
   // the real guard (an unwired dep degrades to "allow", which is the shape a
   // test harness needs and production must never have).
