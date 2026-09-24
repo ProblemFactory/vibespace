@@ -44,8 +44,9 @@
 //     the bar's "Snap beside <session>" / "Unbind" button, a title-bar button
 //     on the standalone window, and the 'window' menu row (the title bar's own
 //     menu, reachable from the tab and the phone's long-press) — binds this
-//     pane beside its session's window in one tab group (wm.bindSplit) or
-//     unbinds (the group stays, nothing moves); the OWNERSHIP badge
+//     pane beside its session's window in one tab group (wm.bindSplit,
+//     announced ⇒ the 5 s Undo toast — split UX R5) or unbinds (the group
+//     stays, nothing moves); the OWNERSHIP badge
 //     (wm.setOwnerBadge: the session's own colour + name, N dots when the
 //     profile is shared, from the digest's `leases`) rides the title bar and
 //     the tab; AUTO-BIND (`browser.autoBindLiveView`, default ON): when a
@@ -285,7 +286,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (isBound()) { app.wm.unbindSplit(winInfo._tabChain); renderBind(); return true; }
     const host = sessionWindowFor(app, sessionId);
     if (!host) { showToast(t('Open the session’s window first — there is nothing to snap beside'), { type: 'warn' }); return false; }
-    app.wm.bindSplit(host, winInfo, { side: 'right' });
+    app.wm.bindSplit(host, winInfo, { side: 'right', announce: true }); // a user's explicit act ⇒ the 5 s Undo toast (split UX R5); the auto-bind (createWindow({intoChain})) stays silent
     renderBind();
     return true;
   }

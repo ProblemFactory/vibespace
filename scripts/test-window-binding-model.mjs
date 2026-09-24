@@ -10,6 +10,8 @@
 //      is applied in place, the displayed panes on a wide vs a NARROW layout
 //      (the phone renders tabs, the model keeps the split), D19 (a)'s
 //      replaceable pane, the bind pair by side, the one grid-columns spelling;
+//      and (split UX chunk 1, docs/design-split-ux.zh.md) dropSide GONE, the
+//      strip's visual order, the swap, the default partner;
 //   ② the OWNERSHIP badge: two sessions in one task group produce
 //      distinguishable badges (the colour is per SESSION, the group never
 //      enters), a session bound to no group produces a badge at all, an
@@ -21,7 +23,10 @@
 //      restoreTabChain is handed them, the divider computes its ratio in ONE
 //      kind of pixel, syncHiddenViews derives the narrow-split hider, the
 //      ≤768px stylesheet rule exists — and kb-design-lessons §6b's four
-//      anti-ping-pong guards are UNTOUCHED (the chunk's exit condition).
+//      anti-ping-pong guards are UNTOUCHED (the chunk's exit condition);
+//      split UX chunk 1 FLIPPED the drop-zone pins to NEGATIVE ones (no drag
+//      ever splits; the three user merge drops call _afterUserMerge once;
+//      restore / remote paths never do; the button, the glyph, the undo).
 // Fast: no DOM, no ports, no chrome. The chrome half is test-window-binding.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -89,7 +94,25 @@ console.log('— ① displayed panes, the anchor, D19 (a), the bind pair, the co
   ok(C.splitReplaceable({ tabs: ['a', 'b'], active: 0 }) === null, 'a tabs chain has nothing to replace');
   ok(J(C.pairFor({ anchorId: 'chat', guestId: 'live', side: 'right' })) === J(['chat', 'live']) && J(C.pairFor({ anchorId: 'chat', guestId: 'live', side: 'left' })) === J(['live', 'chat']), 'pairFor puts the guest on the side it was dropped on');
   ok(C.splitColumns(0.3) === 'minmax(0, 0.3fr) 6px minmax(0, 0.7fr)' && C.splitColumns(2) === 'minmax(0, 0.85fr) 6px minmax(0, 0.15fr)', 'splitColumns is the ONE spelling of the host grid (clamped)');
-  ok(C.dropSide({ clientX: 10, left: 0, width: 100 }) === 'left' && C.dropSide({ clientX: 60, left: 0, width: 100 }) === 'right' && C.dropSide({ clientX: 5, left: 0, width: 0 }) === 'right', 'dropSide halves the title bar');
+}
+
+console.log('— ① split UX chunk 1 (docs/design-split-ux.zh.md §4): no pointer half, the visual order, swap, the default partner');
+{
+  const F = (n) => (typeof C[n] === 'function' ? C[n] : () => undefined); // a missing export reds its legs instead of crashing the suite
+  ok(!('dropSide' in C), 'dropSide is GONE from the model (R1/R2: no pointer position ever picks a side — the verb names it)');
+  const s = { tabs: ['A', 'B', 'C'], active: 1, layout: 'split', split: { pair: ['B', 'A'], ratio: 0.5 } };
+  ok(J(F('visualTabOrder')(s)) === J(['B', 'A', 'C']), 'visualTabOrder: a split strip reads [left pane, right pane, …the rest in chain order] (R3 — the left pane\'s tab is on the left)');
+  ok(J(F('visualTabOrder')({ tabs: ['A', 'B', 'C'], active: 0, layout: 'split', split: { pair: ['A', 'C'], ratio: 0.5 } })) === J(['A', 'C', 'B']), '…a hidden tab follows the pair');
+  ok(J(F('visualTabOrder')({ tabs: ['A', 'B', 'C'], active: 2 })) === J(['A', 'B', 'C']) && J(F('visualTabOrder')({ tabs: ['A', 'B'], layout: 'split', split: { pair: ['A', 'Z'] } })) === J(['A', 'B']), 'visualTabOrder: a tabs chain (or an invalid split) keeps the chain order');
+  ok(J(F('visualTabOrder')(null)) === J([]), 'no chain, no strip');
+  ok(F('visualTabOrder')(s) !== s.tabs && J(s.tabs) === J(['A', 'B', 'C']), 'visualTabOrder never mutates `tabs` (a rendering, not a model change)');
+  ok(J(F('swappedPair')(s)) === J(['A', 'B']) && F('swappedPair')({ tabs: ['A', 'B'], active: 0 }) === null, 'swappedPair reverses a valid pair; a tabs chain has none');
+  ok(C.chainSyncKey({ ...s, split: { ...s.split, pair: F('swappedPair')(s) } }) !== C.chainSyncKey(s), 'a swap changes the structural key (the other clients rebuild the pair order)');
+  const t3 = { tabs: ['A', 'B', 'C'], active: 0 };
+  ok(F('splitPartner')(t3, ['A', 'C', 'B']) === 'C', 'splitPartner: the most RECENT other tab (the active one skipped)');
+  ok(F('splitPartner')(t3, ['Z', 'A']) === 'B', '…a recent id no longer in the chain is skipped, then the NEXT neighbour');
+  ok(F('splitPartner')(t3, []) === 'B' && F('splitPartner')({ tabs: ['A', 'B', 'C'], active: 2 }) === 'B', 'splitPartner with no record: the next neighbour, else the previous one');
+  ok(F('splitPartner')({ tabs: ['A'], active: 0 }) === null && F('splitPartner')(null) === null, 'a one-tab chain has no partner');
 }
 
 console.log('— ② the ownership badge');
@@ -122,17 +145,38 @@ console.log('— ③ wiring pins');
 {
   const tg = read('src/lib/tab-group.js');
   const fnBody = (name) => { const i = tg.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = tg.indexOf('\n  },', i); return tg.slice(i, j); };
-  for (const m of ['createTabChain', 'addToTabChain', '_detachFromChain', 'restoreTabChain', 'switchTab', 'bindSplit', 'unbindSplit']) ok(/this\._normalizeChain\(chain\)/.test(fnBody(m)), `tab-group.js ${m} runs _normalizeChain (the ONE validation at every chain mutation)`);
+  for (const m of ['createTabChain', 'addToTabChain', '_detachFromChain', 'restoreTabChain', 'switchTab', 'bindSplit', 'unbindSplit', 'swapSplit', 'undoSplit']) ok(/this\._normalizeChain\(chain\)/.test(fnBody(m)), `tab-group.js ${m} runs _normalizeChain (the ONE validation at every chain mutation)`);
   ok(/_normalizeChain\(chain\) \{ return normalizeChain\(chain\); \}/.test(tg), '_normalizeChain IS the PURE normalizeChain (no second spelling)');
   ok(/splitReplaceable\(chain\)/.test(fnBody('switchTab')), 'switchTab applies D19 (a) through the PURE splitReplaceable');
   const div = fnBody('_setupSplitDivider');
   ok(/new AbortController\(\)/.test(div) && /requestAnimationFrame/.test(div) && /getBoundingClientRect\(\)/.test(div) && !/clientWidth|uiScale/.test(div), 'the divider drag: a PER-DRAG AbortController, rAF-coalesced, ONE kind of pixel (the host rect + clientX, never clientWidth / uiScale)');
   ok(/restoreTabChain\(tabIds, activeIndex, \{ layout, split \} = \{\}\)/.test(tg), 'restoreTabChain takes { layout, split }');
   ok(/_applyChainLayout\(chain\)/.test(fnBody('_detachFromChain')) && /_clearSplitDom\(win\)/.test(fnBody('_detachFromChain')), '_detachFromChain sheds the split marks and re-applies the layout on the survivor');
-  ok(/_detectSplitDropTarget\(/.test(fnBody('_setupTabDrag')) && /this\.bindSplit\(anchor, win, \{ side \}\)/.test(fnBody('_setupTabDrag')), 'a tab dragged onto the half of another title bar binds beside it');
+  // split UX chunk 1 (R1): NO drag ever splits — the tab merge is the only drag exception
   const wj = read('src/lib/window.js');
+  const css0 = read('public/style.css');
+  const classBody = (src, name) => { const i = src.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = src.indexOf('\n  }\n', i); return src.slice(i, j); };
+  for (const [f, src] of [['tab-group.js', tg], ['window.js', wj], ['style.css', css0]]) {
+    const hits = (src.match(/_detectSplitDropTarget|_markSplitDrop|tab-split-drop|dropSide/g) || []).length;
+    ok(hits === 0, `${f}: zero hits of _detectSplitDropTarget / _markSplitDrop / tab-split-drop / dropSide (the title-bar half drop zone is deleted, no body zone added) — ${hits}`);
+  }
+  const tabDrag = fnBody('_setupTabDrag'), barDrag = classBody(wj, '_setupDrag'), iconDrag = fnBody('_setupIconDrag');
+  ok(tabDrag.length > 500 && barDrag.length > 500 && iconDrag.length > 200, 'the three drag bodies were found (control for the negative pins below)');
+  ok(!/bindSplit\(/.test(tabDrag) && !/bindSplit\(/.test(barDrag) && !/bindSplit\(/.test(iconDrag), 'no drag (tab drag / title-bar drag / icon drag) ever calls bindSplit');
+  const cnt = (src, re) => (src.match(re) || []).length;
+  ok(cnt(iconDrag, /_afterUserMerge\(/g) === 1 && cnt(tabDrag, /_afterUserMerge\(/g) === 1 && cnt(barDrag, /_afterUserMerge\(/g) === 1, 'the three USER merge drops (icon drag, tab drag, title-bar drag) each call _afterUserMerge exactly once (the bridge to the second step)');
+  const lj0 = read('src/lib/layout.js');
+  ok(cnt(fnBody('restoreTabChain'), /_afterUserMerge/g) === 0 && cnt(fnBody('createTabChain'), /_afterUserMerge/g) === 0 && cnt(fnBody('addToTabChain'), /_afterUserMerge/g) === 0 && cnt(lj0, /_afterUserMerge/g) === 0 && cnt(classBody(wj, 'createWindow'), /_afterUserMerge/g) === 0, 'restore / remote sync / programmatic chain paths never call _afterUserMerge (no pulse, no toast for what the user did not do)');
+  ok(/\.tab-split-btn/.test(barDrag.slice(0, barDrag.indexOf('processMove'))), 'the title-bar drag\'s mousedown excludes .tab-split-btn (the button is not a drag handle)');
+  ok(/visualTabOrder\(chain\)/.test(fnBody('_renderTabBar')) && /tab-split-glyph/.test(fnBody('_renderTabBar')) && /tab-split-btn/.test(fnBody('_renderTabBar')), '_renderTabBar lays the strip out through the PURE visualTabOrder, with the glyph and the one split button');
+  const bs = fnBody('bindSplit');
+  ok(/announce/.test(bs) && /showToast\([^;]*\{ action/.test(bs) && /guestWasFree/.test(bs) && /chainBefore/.test(bs), 'bindSplit: the announce path snapshots (guestWasFree / rects / chainBefore) BEFORE the mutation and offers Undo through showToast(…, { action })');
+  ok(/splitPartner\(/.test(fnBody('splitActive')) && /swappedPair\(chain\)/.test(fnBody('swapSplit')), 'splitActive picks the partner through PURE splitPartner; swapSplit through swappedPair');
+  const ud = fnBody('undoSplit');
+  ok(/chain\.layout !== 'split'/.test(ud) && /this\.windows\.has\(/.test(ud) && /Nothing to undo any more/.test(ud), 'undoSplit guards chain identity + layout + pair + both windows alive, and SAYS so when it cannot');
+  ok(/t\.dataset\.winId === /.test(fnBody('switchTab')) && !/t\.classList\.toggle\('active', i === index\)/.test(fnBody('switchTab')), 'switchTab marks the active tab by window id, never by strip index (the strip is in visual order)');
+  ok(/chain\.recent/.test(fnBody('switchTab')), 'switchTab records the recent tabs (the default partner)');
   ok(/createWindow\(\{ title, type, x, y, width, height, syncId, openSpec, titleMeta, intoChain \}\)/.test(wj) && /this\.bindSplit\(born, winInfo, \{ side: intoChain\.side \|\| 'right' \}\)/.test(wj) && /\$\{born \? ';display:none' : ''\}/.test(wj), 'createWindow accepts intoChain and a born window is never painted standalone');
-  ok(/_detectSplitDropTarget\(e\.clientX, e\.clientY, win\.id, \[element\]\)/.test(wj) && /this\.bindSplit\(anchor, win, \{ side \}\)/.test(wj), 'the title-bar drag has the left/right drop zone and binds on drop');
   ok(/displayedPanes\(w\._tabChain, \{ narrow: true \}\)/.test(wj) && /tabHidden: !!w\.content\?\.classList\?\.contains\('tab-hidden'\) \|\| narrowHidden/.test(wj), 'syncHiddenViews derives the narrow-split hider from the PURE displayedPanes (every hider suspends)');
   ok(/^  setOwnerBadge\(id, badge\) \{/m.test(wj), 'WindowManager.setOwnerBadge exists');
   const lj = read('src/lib/layout.js');
@@ -148,6 +192,12 @@ console.log('— ③ wiring pins');
   ok(/\.window\.tab-split \{ display: grid;/.test(css) && /\.window\.tab-split > \.tab-split-divider \{/.test(css), 'the split renders as the host grid with a divider (stylesheet)');
   ok(/@media \(max-width: 768px\) \{\n  \.window\.tab-split \{ display: flex !important; \}\n  \.window\.tab-split > \.window-content\.tab-split-pane:not\(\.tab-split-focus\) \{ display: none !important; \}/.test(css), '≤768px: the phone shows only the focused pane (tabs only) — by stylesheet, the model untouched');
   ok(!/\.win-owner-dot \{[^}]*#[0-9a-f]{3,6}/i.test(css), 'the badge dot rule carries no literal colour (the per-session colour is data, set inline)');
+  ok(/\.tab-split-btn \{/.test(css) && /\.tab-split-btn\.on \{/.test(css) && /\.tab-split-btn\.pulse \{/.test(css) && /@media \(prefers-reduced-motion: reduce\) \{[^}]*\.tab-split-btn\.pulse/.test(css), 'the ONE split button: resting / .on (the badge state) / .pulse, and no motion under prefers-reduced-motion');
+  ok(/\.tab-split-glyph \{/.test(css) && /\.tab-item\.tab-pane::before \{[^}]*var\(--pane-color/.test(css), 'the glyph between the pane tabs + the pane tab underline in the pane\'s owner colour');
+  ok(/\.window\.tab-split > \.tab-split-divider \{[^}]*background: color-mix\(in srgb, var\(--accent\) 35%, var\(--border\)\)/.test(css), 'the divider at rest is brighter than the window border (never var(--border) alone — P3)');
+  ok(!/content: '⫿ '/.test(css), 'the tofu pseudo-glyph is gone (a real element + SVG now)');
+  ok(/@media \(max-width: 768px\) \{[^@]*\.tab-split-btn, \.tab-split-glyph \{ display: none !important; \}/.test(css), '≤768px: the button and the glyph hide (R6 — the phone shows one pane)');
+  ok(/\.window-titlebar\.split-btn-hidden \.tab-split-btn|\.tab-split-btn\.narrow-host/.test(css), 'a very narrow host (< 260 px) hides the button');
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

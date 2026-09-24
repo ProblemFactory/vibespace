@@ -492,7 +492,7 @@ const SETTINGS_SCHEMA = {
     // inside the session's chain is the one that never can.
     type: 'boolean', default: true,
     label: t('Open the live view beside the session when its browser starts'),
-    description: t('ON (default): when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window, so the browser never loses its owner. OFF: open it yourself (session menu → Live browser view) and bind it with "Snap beside" or by dropping it on the left or right half of a title bar. An ephemeral browser (no profile) is never auto-opened.'),
+    description: t('ON (default): when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window, so the browser never loses its owner. OFF: open it yourself (session menu → Live browser view) and bind it with "Snap beside" (or group it with the session\'s window as tabs, then choose "Show side by side"). An ephemeral browser (no profile) is never auto-opened.'),
     category: t('Browser'), liveApply: true,
   },
   // ── AGENT BROWSER P10 (design-agent-browser-v2 §7.6 tier 3 / §6.6, D27 (b)) ──

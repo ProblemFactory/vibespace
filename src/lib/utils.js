@@ -134,7 +134,10 @@ function _recordToast(message, type) {
   } catch {}
   try { window.dispatchEvent(new CustomEvent('vs-toast')); } catch {}
 }
-export function showToast(message, { type = 'info', duration } = {}) {
+// `action: { label, run }` (split UX R5, 2026-09-23) = ONE button inside the
+// toast (Undo / Show side by side): a click runs it and dismisses the toast; an
+// action toast lives 5 s unless the user's toast-seconds setting says otherwise.
+export function showToast(message, { type = 'info', duration, action } = {}) {
   let stack = document.getElementById('global-toasts');
   if (!stack) {
     stack = document.createElement('div');
@@ -167,13 +170,21 @@ export function showToast(message, { type = 'info', duration } = {}) {
   x.setAttribute('aria-label', 'Dismiss');
   x.textContent = '✕';
   x.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); };
-  el.append(body, x);
+  el.append(body);
+  if (action && typeof action.run === 'function') {
+    const act = document.createElement('button');
+    act.className = 'global-toast-action';
+    act.textContent = String(action.label || '');
+    act.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); try { action.run(); } catch (err) { console.warn('toast action failed', err); } };
+    el.appendChild(act);
+  }
+  el.append(x);
   stack.appendChild(el);
   _recordToast(message, type);
   // Cap the stack so a burst of errors doesn't fill the screen
   while (stack.children.length > 4) stack.firstChild.remove();
   const secs = Number(_toastCfg.getSeconds?.());
-  const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : 3000));
+  const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : (action ? 5000 : 3000)));
   setTimeout(() => {
     el.classList.add('global-toast-out');
     setTimeout(() => { el.remove(); if (!stack.children.length) stack.remove(); }, 250);

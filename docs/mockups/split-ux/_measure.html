@@ -1,0 +1,10 @@
+<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><body>
+<div id="m" style="font-size:11px;white-space:nowrap"></div>
+<script>
+const L = { en: ['Side by side', 'Show side by side', 'Beside {name} (on the right)', 'Unsplit', 'Swap left and right', 'Undo', 'Grouped as tabs'],
+  zh: ['并排', '并排显示', '与 {name} 并排（在右侧）', '取消并排', '交换左右', '撤销', '已合并为标签组'],
+  ja: ['並べて表示', '並べて表示', '{name} の隣に並べる（右側）', '並べ表示を解除', '左右を入れ替え', '元に戻す', 'タブとしてまとめました'] };
+const out = {}; const m = document.getElementById('m');
+for (const [lang, arr] of Object.entries(L)) { out[lang] = arr.map((s) => { const sp = document.createElement('span'); sp.textContent = s.replace('{name}', 'Alpha'); m.appendChild(sp); const w = Math.round(sp.getBoundingClientRect().width); sp.remove(); return [s, w]; }); }
+document.title = JSON.stringify(out);
+</script></body></html>

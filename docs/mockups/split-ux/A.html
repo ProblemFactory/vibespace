@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>A</title><link rel="stylesheet" href="_base.css">
+<style>
+.tab-item.tab-pane { border-bottom: 2px solid var(--pane-color, var(--accent)); }
+.tab-item.tab-pane.active { box-shadow: -1px 0 0 var(--border), 1px 0 0 var(--border); }
+.tab-split-glyph { width: 10px; height: 18px; margin: 0 2px 4px; flex-shrink: 0; position: relative; }
+.tab-split-glyph::before { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: var(--accent); opacity: 0.85; }
+.tab-split-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 4px; color: var(--accent); background: rgba(45,212,191,0.14); border: 1px solid rgba(45,212,191,0.35); font-size: 13px; margin-left: 6px; flex-shrink: 0; }
+.tab-split-divider { background: var(--accent); opacity: 0.55; }
+</style>
+<body><div class="window">
+<div class="window-titlebar"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><div class="tab-bar-tabs">
+<div class="tab-item tab-pane" style="--pane-color: var(--owner-a)"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><span class="tab-label">Fix split UX</span><span class="chip">pool</span><span class="tab-close">✕</span></div>
+<span class="tab-split-glyph" aria-hidden="true"></span>
+<div class="tab-item tab-pane active" style="--pane-color: var(--owner-b)"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><span class="tab-label">VibeSpace notes</span><span class="chip">pool</span><span class="tab-close">✕</span></div>
+<div class="tab-item"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><span class="tab-label">Third tab</span><span class="tab-close">✕</span></div>
+</div><span class="tab-split-btn" title="并排显示中 — 取消并排 / 交换左右"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg></span><div class="window-controls"><span class="win-btn">□</span><span class="win-btn">─</span><span class="win-btn">□</span><span class="win-btn">✕</span></div></div><div class="window-content left"><div class="fake-line w80"></div><div class="fake-line w60"></div><div class="fake-line w40"></div><div class="fake-line w80"></div></div><div class="tab-split-divider"></div><div class="window-content right tab-split-focus"><div class="fake-line w60"></div><div class="fake-line w80"></div><div class="fake-line w40"></div></div></div>
+<p class="caption">A: 一条标签栏, 两个面的标签按<b>视觉顺序</b>(左面在左, 右面在右), 中间一枚映射分隔条的竖线 glyph, 各自以面的归属色下划线, 活动面的标签高亮, 其它(隐藏)标签排在后面; 标签栏末尾的 ⫿ 徽章 = 同一个控件的第二态 (tabs 态是"并排"入口, split 态点开 取消并排 / 交换左右); 分隔条 hover 走 accent.</p></body></html>

@@ -35,6 +35,7 @@ See [CLAUDE.md](../CLAUDE.md) in the project root for:
 - Bug fix history
 
 - **[Collaboration Design](design-collaboration.md)** — Remote sessions, multi-host gateway, shared storage, session migration (roadmap)
+- **[Side-by-side UX](design-split-ux.md)** — Why a drag never splits, the explicit ⫿ entry after a tab merge, the visual-order strip, undo; three pixel-checked mockups ([zh original](design-split-ux.zh.md))
 - **[Codex Support Plan](codex-support-plan.md)** — Research notes, parity gaps, and phased integration plan for first-class Codex support
 
 ## Knowledge base (agent operating manual detail tier)

@@ -217,7 +217,6 @@ class WindowManager {
     let mouseDown = false, dragging = false, startX, startY, initL, initT;
     let shiftDragStart = -1;
     let tabMergeTarget = null;
-    let splitTarget = null; // §4.6: { win, side } while over the left/right half of another title bar
     let mergeGhost = null; // floating ghost shown when hovering over a merge target
     let savedBounds = null; // window bounds saved before collapsing to ghost
     let deskPreviewTarget = null; // desktop preview element we're hovering over
@@ -279,7 +278,8 @@ class WindowManager {
     };
 
     titleBar.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.button !== 0) return;
+      // the split button is a button, never a drag handle (split UX R1)
+      if (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.target.closest('.tab-split-btn') || e.button !== 0) return;
       mouseDown = true; dragging = false; tabMergeTarget = null;
       startX = e.clientX; startY = e.clientY;
       initL = element.offsetLeft; initT = element.offsetTop;
@@ -380,9 +380,7 @@ class WindowManager {
       const prevTarget = tabMergeTarget;
       tabMergeTarget = this._detectTabMergeTarget(e.clientX, e.clientY, win.id, [element]);
       for (const [, w] of this.windows) w.element.classList.toggle('tab-drop-target', w === tabMergeTarget);
-      // §4.6: the left / right half of another window's title bar = a SPLIT drop (the window keeps following the cursor; the half is marked)
-      splitTarget = tabMergeTarget ? null : this._detectSplitDropTarget(e.clientX, e.clientY, win.id, [element]);
-      this._markSplitDrop(splitTarget);
+      // split UX R1 (docs/design-split-ux.zh.md): NO split zone — a window drag is move / snap / grid; the merge above is the one exception
 
       // Collapse window to ghost when over merge target, restore when leaving
       if (tabMergeTarget && !prevTarget) {
@@ -511,7 +509,6 @@ class WindowManager {
       clearShakeBadge(); // remove the "snap off" indicator (all drop paths below may early-return)
       this.snapIndicator.style.display = 'none';
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
-      this._markSplitDrop(null);
       if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
       document.querySelectorAll('.desktop-preview').forEach(p => p.classList.remove('desktop-preview-drop'));
 
@@ -569,35 +566,29 @@ class WindowManager {
       }
       deskPreviewTarget = null;
 
-      // §4.6: a split drop — bound beside the target, in ONE chain (before snap, like a merge)
-      if (!tabMergeTarget && splitTarget && splitTarget.win.id !== win.id) {
-        const { win: anchor, side } = splitTarget; splitTarget = null;
-        this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
-        element.style.display = '';
-        if (savedBounds) { element.style.left = savedBounds.left; element.style.top = savedBounds.top; element.style.width = savedBounds.width; element.style.height = savedBounds.height; savedBounds = null; }
-        this.bindSplit(anchor, win, { side });
-        return;
-      }
-      splitTarget = null;
-
       // Tab merge takes priority over snap
       if (tabMergeTarget) {
         this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
         element.style.display = '';
         if (savedBounds) { element.style.left = savedBounds.left; element.style.top = savedBounds.top; element.style.width = savedBounds.width; element.style.height = savedBounds.height; savedBounds = null; }
         if (tabMergeTarget._tabChain) {
-          // Calculate insert position from cursor relative to existing tabs
-          let insertIdx = null;
-          const tabItems = tabMergeTarget.element.querySelectorAll('.tab-item');
+          // Calculate insert position from cursor relative to existing tabs. The
+          // strip is in VISUAL order in a split (split UX R3) — map the strip
+          // neighbour back to its CHAIN index by window id, never by position.
+          const ch = tabMergeTarget._tabChain;
+          const tabItems = [...tabMergeTarget.element.querySelectorAll('.tab-item')];
+          let before = tabItems.length; // append at end
           for (let i = 0; i < tabItems.length; i++) {
             const r = tabItems[i].getBoundingClientRect();
-            if (e.clientX < r.left + r.width / 2) { insertIdx = i - 1; break; }
+            if (e.clientX < r.left + r.width / 2) { before = i; break; }
           }
-          if (insertIdx === null) insertIdx = tabItems.length - 1; // append at end
-          this.addToTabChain(tabMergeTarget._tabChain, win, insertIdx < 0 ? 0 : insertIdx);
+          const prevId = before > 0 ? tabItems[before - 1].dataset.winId : null;
+          const insertIdx = prevId ? ch.tabs.indexOf(prevId) : -1;
+          this.addToTabChain(ch, win, insertIdx < 0 ? 0 : insertIdx);
         } else {
           this.createTabChain(tabMergeTarget, win);
         }
+        this._afterUserMerge(win._tabChain); // the bridge to the explicit second step (split UX R1)
         tabMergeTarget = null;
         return;
       }

@@ -49,6 +49,9 @@ export const UI_ICONS = {
   lock:      _s('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/>'),
   unlock:    _s('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 015.8-1"/>'),
   clipboard: _s('<path d="M5 2h6a1 1 0 011 1v11a1 1 0 01-1 1H4a1 1 0 01-1-1V5"/><path d="M6 1h4v2H6z"/>'),
+  // split UX (docs/design-split-ux.zh.md R1/R4): the tab strip's ONE side-by-side button (two columns) + the swap verb
+  columns:   _s('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11"/>'),
+  swap:      _s('<path d="M2 5h11M10 2l3 3-3 3M14 11H3M6 8l-3 3 3 3"/>'),
   refresh:   _s('<path d="M2 8a6 6 0 0111-3M14 8a6 6 0 01-11 3"/><path d="M13 2v3h-3M3 14v-3h3"/>'),
   upload:    _s('<path d="M8 11V1M4 4l4-4 4 4"/><path d="M2 13h12"/>'),
   import:    _s('<path d="M8 1v9M4 7l4 4 4-4"/><path d="M2 13h12"/>'),

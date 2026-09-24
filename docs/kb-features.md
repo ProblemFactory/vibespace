@@ -718,14 +718,14 @@ impossible rather than a review promise.
 - Built-in presets: maximize, 2-col, 2-row, quad, 3-col (all via grid mechanism)
 - Custom grid presets: + button to add, right-click to remove, auto SVG icons, persisted
 - Grid overflow: round-robin distribution when windows > cells (`i % totalCells`)
-- Window menu: right-click title bar → full menu (Switch-window submenu w/ configurable scope + Rename + Task Groups + Move/Minimize/Close); □ button keeps the classic overlap popup; taskbar item right-click carries Rename/Task Groups too (2.212.0)
+- Window menu: right-click title bar → full menu (Switch-window submenu w/ configurable scope + Rename + Task Groups + Move/Minimize/Close); □ button keeps the classic overlap popup; taskbar item right-click carries Rename/Task Groups too (2.212.0). **Side by side (split UX chunk 2, 2026-09-23):** in a tab group of ≥ 2 the menu has **Show side by side ▸ Beside {name} (on the right)** per other tab (this window left, the named one right, the focus staying on this window — split r1, every user entry keeps the focus on the window acted on — 5 s Undo toast); a split group shows **Unsplit** + **Swap left and right** instead; a chain-less / one-tab window shows neither; a phone is not offered the submenu (one pane shown). A tab's right-click opens that tab's own menu
 - Overlap indicator: ⧉/□ icon on title bar shows whether other windows overlap, click opens switcher
-- Command mode: `Ctrl+\` prefix key (tmux-style), [CMD] indicator in taskbar, 2s auto-exit
+- Command mode: `Ctrl+\` prefix key (tmux-style), [CMD] indicator in taskbar, 2s auto-exit. **`v`** = side by side on / off for the active window's tab group (active tab left, most recently used other tab right, undoable), **`V`** = swap left and right; without a group of ≥ 2 tabs a toast says "Group two windows first" (never silent); the armed hint lists `v split`
 - Shift+drag: select rectangular cell range in grid mode, window spans entire range
 - Presets (renamed from Layouts): save/restore full workspace state (windows, positions, z-order, grid, theme, fonts). Sessions matched by claudeSessionId. Non-preset windows minimized not killed.
 - Active window highlight intensity: `window.activeHighlightIntensity` setting (subtle = shadow only, normal = accent border, strong = border + glow)
 - Window close behavior: `window.closeBehavior` setting — **default DETACH for everything (2.108.8, user directive: no per-type exceptions)**; sessions stay alive in the sidebar for re-attach. Ephemeral helper terminals always terminate. (The 2.108.7 shell-only default was replaced by this.)
-- Tab groups: drag window icon onto another window's icon to merge into Chrome-style tab group. Tab bar with rounded top tabs, active tab connects to content. Drag tab downward to pull out (follows cursor with snap). Close individual tabs. Tab chain data synced across clients via layout-sync.
+- Tab groups: drag window icon onto another window's icon to merge into Chrome-style tab group. Tab bar with rounded top tabs, active tab connects to content. Drag tab downward to pull out (follows cursor with snap). Close individual tabs. Tab chain data synced across clients via layout-sync. **Side by side (split UX, 2026-09-23, docs/design-split-ux.zh.md):** the tab merge is the ONE exception to ordinary drag-and-snap — no drag ever splits. After a merge the strip's two-column button pulses once and a 5 s toast offers "Show side by side"; the button (active tab left, the most recent other tab right) is the entry, and in a split the same button is the badge (Unsplit / Swap left and right; the divider's right-click has the same two). The strip is drawn in visual order with a bar between the pane tabs and an owner-colour underline on each; every user-initiated split shows "Side by side: A | B · Undo" for 5 s. Right-clicking a tab opens THAT tab's window menu. **Split r1:** the button's tooltip is re-written on every tab switch (it names the partner the click will use — on a ≥ 3-tab group the most recent other tab changes with each switch); a split taken any way withdraws the post-merge "Grouped as tabs" toast, and its button, if it still runs after the group changed, says "Already shown side by side" / "The tab group changed — nothing to show side by side" (never a silent no-op).
 - Window type icons: each type has an inline SVG icon (chat bubble, terminal `>_`, folder, document, etc.) shown in title bar, tab bar, taskbar, overlap switcher. Chat/terminal windows with a backend show a composite icon (backend logo + mode badge). Taskbar icons scale uniformly via `transform:scale()`. All session card buttons (star, archive, rename, find, resume, history, terminate) use SVG icons instead of emoji.
 - Taskbar: two-row layout with large icon (18px) + title/subtitle. Items show window type icon, starred sessions prefixed with ★.
 - Taskbar tab-group stacking (Windows-style): a tab-group host renders ONE stacked item (`_buildGroupItem`/`_buildStackIcon` in taskbar.js) — the unique tab icons offset like a card stack (active tab frontmost; a lone icon gets a faded ghost behind), a count badge, titled by the active tab + "N windows grouped". Click → `showTabGroupList` popover of all tabs (click one → restore+focus group + `switchTab`). Right-click acts on the whole group. active/minimized/waiting is group-aware (`_applyTaskbarItemState`, reads `dataset.groupTabs`). Previously only the host showed and every guest silently vanished from the taskbar.
@@ -1677,9 +1677,14 @@ gains `layout` and `split {pair, ratio, dir}`; `tabs` and `active` keep
 their meanings, a missing `layout` reads as tabs (no migration). PURE
 src/lib/chain-layout.js owns the model.
 
-**How it behaves.** Bind = drop a window on the LEFT or RIGHT half of another
-window's title bar (the one new drop zone; the icon / tab-bar zone still
-merges as tabs), or the live view's own bind control (P7 client half). The
+**How it behaves.** Bind = the strip's side-by-side button after a tab
+merge (split UX, 2026-09-23 — the title-bar half drop zone this line used to
+describe is DELETED: the owner dragged a window left to snap it and landed in
+a split, on the side the target bar's half chose; no drag ever splits now, the
+tab merge is the one drag exception), or the live view's own bind control (P7
+client half). The strip reads in VISUAL order (the left pane's tab on the
+left), the same button is the badge in a split (Unsplit / Swap left and
+right), and an announced split can be undone for 5 s. The
 divider drags (clamped 0.15–0.85, double-click = 0.5, ratio in one kind of
 pixel so it lands under the pointer at any UI scale). Moves, minimise,
 maximise and desktop switches happen together — it is one window. Clicking a

@@ -89,7 +89,7 @@ function displayedPanes(chain, { narrow = false } = {}) {
 
 /** The ANCHOR of a split = the window the other one was bound TO: the chain
  *  host when it is in the pair (the bind merges the browser INTO the chat's
- *  chain, the drop lands on the anchor's title bar), else the left member. */
+ *  chain), else the left member. */
 function splitAnchor(chain) {
   if (!chain || chain.layout !== 'split' || !splitValid(chain.split, chain.tabs)) return null;
   const host = String(chain.tabs[0]);
@@ -105,7 +105,8 @@ function splitReplaceable(chain) {
   return chain.split.pair[0] === anchor ? String(chain.split.pair[1]) : String(chain.split.pair[0]);
 }
 
-/** The pair in VISUAL order for a bind: `side` is where the GUEST lands. */
+/** The pair in VISUAL order for a bind: `side` is where the GUEST lands —
+ *  it comes from the CALLER's verb (R2), never from a pointer position. */
 function pairFor({ anchorId, guestId, side = 'right' } = {}) {
   return side === 'left' ? [String(guestId), String(anchorId)] : [String(anchorId), String(guestId)];
 }
@@ -117,10 +118,44 @@ function splitColumns(ratio) {
   return `minmax(0, ${l}fr) ${SPLIT_DIVIDER_PX}px minmax(0, ${rr}fr)`;
 }
 
-/** Which half of a title bar a point is over (viewport px in, both sides). */
-function dropSide({ clientX, left, width }) {
-  if (!(width > 0)) return 'right';
-  return clientX < left + width / 2 ? 'left' : 'right';
+// ── split UX (docs/design-split-ux.zh.md §4, 2026-09-23) ──
+// No POINTER POSITION ever picks a side any more (the title-bar half drop zone
+// and its `dropSide` are gone — the owner dragged left and landed right): a
+// split is entered by an explicit verb that names the side, and the strip is
+// drawn in the order the panes are SHOWN.
+
+/** The tab strip in VISUAL order: a split draws [left pane, right pane,
+ *  …the rest in chain order] so the left pane's tab is on the left (R3); a
+ *  tabs chain (or an invalid split) keeps the chain order. A rendering only —
+ *  `tabs` / `active` never change. */
+function visualTabOrder(chain) {
+  if (!chain || !Array.isArray(chain.tabs)) return [];
+  const tabs = chain.tabs.map(String);
+  if (chain.layout !== 'split' || !splitValid(chain.split, tabs)) return tabs;
+  const pair = [String(chain.split.pair[0]), String(chain.split.pair[1])];
+  return [...pair, ...tabs.filter((id) => !pair.includes(id))];
+}
+
+/** "Swap left and right": the valid pair reversed, else null. */
+function swappedPair(chain) {
+  if (!chain || chain.layout !== 'split' || !Array.isArray(chain.tabs) || !splitValid(chain.split, chain.tabs.map(String))) return null;
+  return [String(chain.split.pair[1]), String(chain.split.pair[0])];
+}
+
+/** The DEFAULT partner when the active tab is put side by side (the button):
+ *  the most recently active OTHER tab still in the chain (`recent` = ids,
+ *  most recent first — local state, never persisted, never in the sync key),
+ *  else the next neighbour, else the previous one; a one-tab chain has none. */
+function splitPartner(chain, recent = chain && chain.recent) {
+  if (!chain || !Array.isArray(chain.tabs) || chain.tabs.length < 2) return null;
+  const tabs = chain.tabs.map(String);
+  const ai = Number.isInteger(chain.active) && chain.active >= 0 && chain.active < tabs.length ? chain.active : 0;
+  const active = tabs[ai];
+  for (const r of Array.isArray(recent) ? recent : []) {
+    const id = String(r);
+    if (id !== active && tabs.includes(id)) return id;
+  }
+  return tabs[ai + 1] ?? tabs[ai - 1] ?? null;
 }
 
 // ── the ownership badge (§4.6) ──
@@ -168,6 +203,6 @@ function ownerDots({ leases = [], profileId = null, sessionId = null, nameOf = n
 
 module.exports = {
   SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_SIDES, LAYOUTS,
-  clampRatio, splitValid, normalizeChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, splitReplaceable, pairFor, splitColumns, dropSide,
+  clampRatio, splitValid, normalizeChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, splitReplaceable, pairFor, splitColumns, visualTabOrder, swappedPair, splitPartner,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
 };

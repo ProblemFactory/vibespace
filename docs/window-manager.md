@@ -98,6 +98,8 @@ Command mode auto-exits after 2 seconds or on Escape.
 | w | Close window |
 | Tab | Cycle to next window (stays in command mode) |
 | ] / [ | Move active window to the next / previous desktop |
+| v | Side by side on / off for the active window's tab group (see [Side by side](#side-by-side)) |
+| V | Swap the left and right panes |
 
 ### Global commands
 
@@ -205,6 +207,22 @@ When windows merge, the title bar is replaced by a tab bar with rounded-top tabs
 - **Click** a tab to switch to that window's content
 - **Close button** on each tab to remove it from the group (window closes or becomes standalone)
 - **Drag a tab downward** (>30px) to pull it out of the group. The detached window is raised above all others and follows the cursor. You can then drop it in empty space (becomes standalone), onto another window's icon/tab bar (merges into that group — including the original group), or on a snap zone.
+- **Right-click** a tab to open that tab's own window menu.
+
+Merging is the **only** drag that does something other than move and snap: dragging a window over another window's title bar (anywhere but its icon or tab bar) just moves it, and dropping it near a screen edge snaps it as usual.
+
+### Side by side
+
+Two tabs of a group can be shown **side by side** in the same window — one pane on the left, one on the right, a divider between them. It is always an explicit second step after grouping, never a side effect of a drag:
+
+- **The side-by-side button** (the two-column icon at the right end of the tab bar, before the window controls): the current tab goes on the left, the tab you used most recently before it goes on the right (its tooltip names that tab). Right after you merge windows into a group, the button pulses once and a notification offers **Show side by side** in one click.
+- **The window menu** (right-click the title bar, or a tab): in a group of two or more, **Show side by side ▸ Beside {name} (on the right)** — this window on the left, the tab you pick on the right; the focus stays on the window you right-clicked. In side-by-side mode the menu has **Unsplit** and **Swap left and right** instead.
+- **Command mode**: `Ctrl+\` then `v` turns side by side on or off for the active window's group, `V` swaps the sides. Outside a group of two or more tabs it tells you to group two windows first.
+- **In side-by-side mode** the same button is highlighted. Click it for **Unsplit** (back to tabs — nothing moves) or **Swap left and right**. Right-clicking the divider offers the same two.
+- The tab bar follows the panes: the left pane's tab is on the left, a short bar sits between the two pane tabs, and each pane tab is underlined in its own colour. Clicking a third tab replaces one pane in place.
+- Drag the divider to resize the panes; double-click it to make them equal.
+- Every side-by-side you start shows a notification with **Undo** for 5 seconds — it puts both windows back exactly where they were.
+- On a phone (≤ 768 px wide) a side-by-side group shows one pane at a time as tabs; the button is hidden and the layout on your other devices is not changed.
 
 ### In the taskbar
 
@@ -217,7 +235,7 @@ The item blinks if **any** tab is waiting for input.
 
 ### Data model
 
-Tab groups share a `{tabs, active}` object among all grouped windows. The `tabs` array holds references to each window in the group, and `active` tracks the currently displayed tab.
+Tab groups share a `{tabs, active, layout, split}` object among all grouped windows. The `tabs` array holds references to each window in the group, and `active` tracks the currently displayed tab; `layout` is `tabs` or `split`, and `split.pair` names the left and right panes.
 
 ### Layout persistence
 

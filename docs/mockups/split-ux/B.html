@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>B</title><link rel="stylesheet" href="_base.css">
+<style>
+.window { grid-template-rows: auto minmax(0, 1fr); }
+.window-titlebar { grid-column: auto; }
+.window-titlebar.left { grid-column: 1; } .window-titlebar.right { grid-column: 3; }
+.bar-gap { grid-row: 1; grid-column: 2; background: var(--bg-titlebar-active); border-bottom: 1px solid var(--border); }
+.window-titlebar.pane-focus { background: var(--bg-titlebar-active); box-shadow: inset 0 2px 0 var(--pane-color); }
+.window-titlebar.pane-idle { background: var(--bg-titlebar); }
+.window-titlebar.right .tab-item.active { flex: 3 1 0; }
+.tab-split-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 4px; color: var(--accent); background: rgba(45,212,191,0.14); border: 1px solid rgba(45,212,191,0.35); font-size: 13px; margin-left: 6px; flex-shrink: 0; }
+.tab-split-divider { background: var(--accent); opacity: 0.55; }
+</style>
+<body><div class="window">
+<div class="window-titlebar left pane-idle" style="--pane-color: var(--owner-a)"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><div class="tab-bar-tabs">
+<div class="tab-item active"><span class="tab-label">Fix split UX</span><span class="chip">pool</span><span class="tab-close">✕</span></div></div></div>
+<div class="bar-gap"></div>
+<div class="window-titlebar right pane-focus" style="--pane-color: var(--owner-b)"><div class="tab-bar-tabs">
+<div class="tab-item active"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><span class="tab-label">VibeSpace notes</span><span class="chip">pool</span><span class="tab-close">✕</span></div>
+<div class="tab-item"><span class="tab-label">Third tab</span><span class="tab-close">✕</span></div></div><span class="tab-split-btn"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg></span><div class="window-controls"><span class="win-btn">□</span><span class="win-btn">─</span><span class="win-btn">□</span><span class="win-btn">✕</span></div></div>
+<div class="window-content left"><div class="fake-line w80"></div><div class="fake-line w60"></div><div class="fake-line w40"></div><div class="fake-line w80"></div></div><div class="tab-split-divider"></div><div class="window-content right tab-split-focus"><div class="fake-line w60"></div><div class="fake-line w80"></div><div class="fake-line w40"></div></div></div>
+<p class="caption">B: 每个面自己一条标题栏 (各自的标签), 窗口控制钮只在右面; 焦点面的标题栏顶部一条归属色; 隐藏的第三个标签只能挂在一边. 拖动手感: 两条标题栏都是同一个窗口的把手.</p></body></html>

@@ -1,0 +1,14 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>C</title><link rel="stylesheet" href="_base.css">
+<style>
+.split-chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 11px; background: rgba(45,212,191,0.12); border: 1px solid rgba(45,212,191,0.35); color: var(--text); font-size: 11px; max-width: 100%; }
+.split-chip .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.split-chip .name.focus { font-weight: 600; }
+.split-chip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.split-chip .sep { color: var(--accent); font-weight: 700; }
+.more { color: var(--text-dim); font-size: 11px; margin-left: 8px; }
+.tab-split-divider { background: var(--accent); opacity: 0.55; }
+</style>
+<body><div class="window">
+<div class="window-titlebar"><span class="window-icon-stack"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h12v8H6l-3 3v-3H2z"/></svg></span><span class="split-chip"><span style="color:var(--accent)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg></span><span class="dot" style="background:var(--owner-a)"></span><span class="name">Fix split UX</span><span class="sep">|</span><span class="dot" style="background:var(--owner-b)"></span><span class="name focus">VibeSpace notes</span></span><span class="more">+1 ▾</span><span style="flex:1"></span><div class="window-controls"><span class="win-btn">□</span><span class="win-btn">─</span><span class="win-btn">□</span><span class="win-btn">✕</span></div></div>
+<div class="window-content left"><div class="fake-line w80"></div><div class="fake-line w60"></div><div class="fake-line w40"></div><div class="fake-line w80"></div></div><div class="tab-split-divider"></div><div class="window-content right tab-split-focus"><div class="fake-line w60"></div><div class="fake-line w80"></div><div class="fake-line w40"></div></div></div>
+<p class="caption">C: 标签隐藏, 一枚"并排"芯片点名两个面 (归属色点 + 名字, 焦点面加粗), 其它标签折进 "+1 ▾"; 芯片即徽章. 代价: 第三个标签失去直接可点性, 拖出一个面没有把手.</p></body></html>

@@ -453,7 +453,9 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
 // B2. window menu (title bar / taskbar / window list)
 {
   const switchWindowItems = () => [{ label: 'W-other' }, { label: '(no windows)', disabled: true }];
-  new Function('registerCommand', 'registerMenuItem', 't', 'switchWindowItems', extract('src/lib/taskbar.js', 'registerWindowMenu'))(registerCommand, registerMenuItem, id, switchWindowItems);
+  // t = the identity with the runtime's {param} interpolation (every legacy label is param-free, so the matrix is unchanged)
+  const ti = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s);
+  new Function('registerCommand', 'registerMenuItem', 't', 'switchWindowItems', extract('src/lib/taskbar.js', 'registerWindowMenu'))(registerCommand, registerMenuItem, ti, switchWindowItems);
   ok(hasCommand('window.close') && hasCommand('window.move') && hasCommand('window.terminateSession'), 'taskbar block registers the window.* commands + the window menu');
   // VERBATIM legacy builder (pre-registry taskbar.js showWindowContextMenu, 2.369.37), labels + act kinds
   const legacy = (app, id_, win, sess, { closeLabel = null, switchSubmenu = false } = {}) => {
@@ -516,8 +518,10 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   const sessSet = [null, { status: 'live', webuiId: 'w1', sessionId: 'abc', name: 'N' }, { status: 'stopped', sessionId: 'abc', name: 'N' }, { status: 'stopped', name: 'N' }, { status: 'external', sessionId: 'abc', name: 'N' }];
   const groupsSets = [[], [{ id: 'g1', title: 'Alpha' }, { id: 'g2', title: 'Beta', archived: true }, { id: 'g3', title: 'Gamma' }]];
   let n = 0, bad = null;
-  for (const [sess, groups, desks, isMinimized, switchSubmenu, closeLabel] of cartesian(sessSet, groupsSets, [0, 2], [false, true], [false, true], [null, '✕ Close group'])) {
-    const win = { isMinimized };
+  // split UX chunk 2: a window with NO chain, or a ONE-tab chain, keeps the pre-registry menu byte for byte (no side-by-side rows)
+  const chainSets = [null, 'one-tab'];
+  for (const [sess, groups, desks, isMinimized, switchSubmenu, closeLabel, chainKind] of cartesian(sessSet, groupsSets, [0, 2], [false, true], [false, true], [null, '✕ Close group'], chainSets)) {
+    const win = { isMinimized, ...(chainKind === 'one-tab' ? { _tabChain: { tabs: ['win-1'], active: 0, layout: 'tabs' } } : {}) };
     const app = {
       sidebar: { _tasks: groups, _getSessionTasks: () => groups.filter((g) => g.id === 'g1'), _getSessionTaskGroups: () => groups.filter((g) => g.id === 'g3') },
       desktopManager: { getDesktopMenuItems: () => Array.from({ length: desks }, (_, i) => ({ label: 'Desk ' + i, action() {} })) },
@@ -526,7 +530,7 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     const ctx = { app, id: 'win-1', win, s: sess, switchSubmenu, closeLabel: closeLabel || '✕ Close' };
     const got = J(projectRegistry(menuItems('window', ctx))), want = J(projectLegacy(legacy(app, 'win-1', win, sess, { closeLabel, switchSubmenu })));
     n++;
-    if (got !== want && !bad) bad = { sess, groups: groups.length, desks, isMinimized, switchSubmenu, closeLabel, got, want };
+    if (got !== want && !bad) bad = { sess, groups: groups.length, desks, isMinimized, switchSubmenu, closeLabel, chainKind, got, want };
   }
   ok(!bad, `window menu: registry output ≡ legacy builder over ${n} states (labels/separators/kinds/submenus/close label)`, bad && `first diff ${J({ ...bad, got: undefined, want: undefined })}\n    got  ${bad.got}\n    want ${bad.want}`);
   const plain = menuItems('window', { app: { sidebar: null, wm: { windows: new Map() } }, id: 'x', win: {}, s: null, switchSubmenu: false, closeLabel: '✕ Close' });
@@ -540,6 +544,47 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   ok(J(calls) === J([['wm.startMoveMode', 'win-1'], ['wm.restore', 'win-1'], ['renameSession', 'N', 'N'], ['restartConversationInPlace', sess], ['killSession', 'w1'], ['locateSessionInSidebar', 'abc'], ['openSessionProps', sess], ['wm.closeWindow', 'win-1']]),
     'window actions call the same wm/app handlers with the same arguments (session ops via the shared session.* commands)', J(calls));
   ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
+
+  // ── split UX chunk 2 (docs/design-split-ux.zh.md R1 ②/R2): the window menu names the side-by-side verbs by the CHAIN ──
+  const splitCalls = [];
+  const mkWins = () => new Map([['w1', { id: 'w1', title: 'Alpha — /work/a' }], ['w2', { id: 'w2', title: 'Beta — /work/b' }], ['w3', { id: 'w3', title: 'Gamma' }]]);
+  const mkApp = (wins) => ({ sidebar: null, desktopManager: { getDesktopMenuItems: () => [] }, wm: { windows: wins, bindSplit: (...a) => splitCalls.push(['bindSplit', ...a]), unbindSplit: (...a) => splitCalls.push(['unbindSplit', ...a]), swapSplit: (...a) => splitCalls.push(['swapSplit', ...a]) } });
+  const labelsOf = (its) => its.map((i) => (i.separator ? '|' : i.label));
+  {
+    const wins = mkWins(); const app = mkApp(wins);
+    const chain = { tabs: ['w1', 'w2', 'w3'], active: 0, layout: 'tabs' };
+    for (const w of wins.values()) w._tabChain = chain;
+    const its = menuItems('window', { app, id: 'w1', win: wins.get('w1'), s: null, switchSubmenu: false, closeLabel: '✕ Close' });
+    const sub = its.find((i) => i.label === 'Show side by side');
+    ok(J(labelsOf(its)) === J(['✥ Move', '– Minimize', 'Show side by side', '✕ Close']), 'a ≥2-tab tabs chain: the window menu gains ONE "Show side by side" submenu after the window block (no Unsplit / Swap)', J(labelsOf(its)));
+    ok(!!sub && J((sub.children || []).map((k) => k.label)) === J(['Beside Beta (on the right)', 'Beside Gamma (on the right)']), 'its children: one "Beside {name} (on the right)" per OTHER tab, named by the title\'s name part, in chain order', sub && J(sub.children.map((k) => k.label)));
+    ok(sub && sub.kind === 'split', 'the submenu carries kind "split" (the window list refreshes after it)');
+    splitCalls.length = 0; sub.children[1].action();
+    ok(splitCalls.length === 1 && splitCalls[0][0] === 'bindSplit' && splitCalls[0][1] === wins.get('w1') && splitCalls[0][2] === wins.get('w3') && J(splitCalls[0][3]) === J({ side: 'right', announce: true, focus: 'anchor' }),
+      'a child calls wm.bindSplit(thisWin, thatWin, {side:"right", announce:true, focus:"anchor"}) — this window on the left, the named one on the right, undoable, the focus staying on the window right-clicked (split r1)', J(splitCalls.map((c) => [c[0], c[1]?.id, c[2]?.id, c[3]])));
+    const g = menuItems('window', { app, id: 'w2', win: wins.get('w2'), s: null, switchSubmenu: false, closeLabel: '✕ Close' }).find((i) => i.label === 'Show side by side');
+    ok(g && J(g.children.map((k) => k.label)) === J(['Beside Alpha (on the right)', 'Beside Gamma (on the right)']), 'from a guest tab (a tab\'s right-click opens its OWN window menu) the children name every tab but itself', g && J(g.children.map((k) => k.label)));
+    const phone = menuItems('window', { app: { ...app, isMobile: true }, id: 'w1', win: wins.get('w1'), s: null, switchSubmenu: false, closeLabel: '✕ Close' });
+    ok(!labelsOf(phone).includes('Show side by side'), 'a phone (one pane shown, R6) is not offered "Show side by side"', J(labelsOf(phone)));
+  }
+  {
+    const wins = mkWins(); const app = mkApp(wins);
+    const chain = { tabs: ['w1', 'w2', 'w3'], active: 1, layout: 'split', split: { pair: ['w2', 'w1'], ratio: 0.5, dir: 'row' } };
+    for (const w of wins.values()) w._tabChain = chain;
+    const its = menuItems('window', { app, id: 'w1', win: wins.get('w1'), s: null, switchSubmenu: false, closeLabel: '✕ Close' });
+    ok(J(labelsOf(its)) === J(['✥ Move', '– Minimize', 'Unsplit', 'Swap left and right', '✕ Close']), 'a split chain: "Unsplit" + "Swap left and right" instead of the submenu', J(labelsOf(its)));
+    splitCalls.length = 0;
+    its.find((i) => i.label === 'Unsplit').action(); its.find((i) => i.label === 'Swap left and right').action();
+    ok(J(splitCalls.map((c) => [c[0], c[1] === chain])) === J([['unbindSplit', true], ['swapSplit', true]]), 'they call wm.unbindSplit(chain) / wm.swapSplit(chain) on the window\'s own chain', J(splitCalls.map((c) => c[0])));
+    ok(J(its.filter((i) => ['Unsplit', 'Swap left and right'].includes(i.label)).map((i) => i.kind)) === J(['split', 'split']), 'both carry kind "split"');
+  }
+  {
+    const wins = mkWins(); const app = mkApp(wins);
+    const lone = { tabs: ['w1'], active: 0, layout: 'tabs' }; wins.get('w1')._tabChain = lone;
+    const a = labelsOf(menuItems('window', { app, id: 'w1', win: wins.get('w1'), s: null, switchSubmenu: false, closeLabel: '✕ Close' }));
+    const b = labelsOf(menuItems('window', { app, id: 'w2', win: wins.get('w2'), s: null, switchSubmenu: false, closeLabel: '✕ Close' }));
+    ok(J(a) === J(['✥ Move', '– Minimize', '✕ Close']) && J(b) === J(a), 'a one-tab chain and a chain-less window get NEITHER (no submenu, no Unsplit / Swap)', J([a, b]));
+  }
 }
 
 // B3. gear menu — a TREE FIXTURE over the 16-state matrix + the flatten CENSUS against the legacy flat list
@@ -661,7 +706,9 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
 // B4. command-mode commands + palette command
 {
   const dialogs = [];
-  new Function('registerCommand', 'showInputDialog', extract('src/lib/command-mode.js', 'registerCommandModeCommands'))(registerCommand, (o) => { dialogs.push(o); return Promise.resolve('3x2'); });
+  const toasts = [];
+  const tcm = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : s);
+  new Function('registerCommand', 'showInputDialog', 'showToast', 't', extract('src/lib/command-mode.js', 'registerCommandModeCommands'))(registerCommand, (o) => { dialogs.push(o); return Promise.resolve('3x2'); }, (msg, o) => toasts.push([msg, o || null]), tcm);
   const want = ['commandMode.toggle', 'activeWindow.snapLeft', 'activeWindow.snapRight', 'activeWindow.snapTop', 'activeWindow.snapBottom', 'activeWindow.toggleMaximize', 'activeWindow.close', 'activeWindow.cycle', 'layout.freeform', 'layout.customGrid', 'session.new', 'sidebar.toggle', 'browser.open', 'explorer.open', 'desktop.next', 'desktop.previous', 'activeWindow.moveToNextDesktop', 'activeWindow.moveToPreviousDesktop'];
   ok(want.every((w) => hasCommand(w)), 'command-mode registers every single-key action as a command', want.filter((w) => !hasCommand(w)).join(','));
   const cm = read('src/lib/command-mode.js');
@@ -682,6 +729,41 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   ok(calls.length === 0, 'active-window commands are no-ops without an active window (legacy `if (activeWin)` guards)', J(calls));
   dm.desktops = [{ id: 'd1' }]; runCommand('desktop.next', { app });
   ok(calls.length === 0, 'desktop.next is a no-op with a single desktop (legacy guard)');
+
+  // ── split UX chunk 2: the side-by-side verbs in command mode (v / V) + two unkeyed commands ──
+  const splitCmds = ['chain.toggleSplit', 'chain.swapSides', 'chain.unsplit', 'chain.splitBeside'];
+  ok(splitCmds.every((w) => hasCommand(w)), 'command-mode registers chain.toggleSplit / swapSides / unsplit / splitBeside', splitCmds.filter((w) => !hasCommand(w)).join(','));
+  ok(/case 'v': runCommand\('chain\.toggleSplit', cctx\)/.test(cm) && /case 'V': runCommand\('chain\.swapSides', cctx\)/.test(cm), "'v' routes to chain.toggleSplit and 'V' to chain.swapSides through runCommand");
+  ok(/\[CMD\][^']*· v split/.test(cm), 'the armed [CMD] hint line lists "v split"');
+  const sc = [];
+  const w1 = { id: 'w1', title: 'Alpha' }, w2 = { id: 'w2', title: 'Beta' }, w3 = { id: 'w3', title: 'Gamma' };
+  const chain = { tabs: ['w1', 'w2', 'w3'], active: 0, layout: 'tabs' };
+  const swm = { activeWindowId: 'w1', windows: new Map([['w1', w1], ['w2', w2], ['w3', w3]]), splitActive: (...a) => sc.push(['splitActive', ...a]), unbindSplit: (...a) => sc.push(['unbindSplit', ...a]), swapSplit: (...a) => sc.push(['swapSplit', ...a]), bindSplit: (...a) => sc.push(['bindSplit', ...a]) };
+  const sapp = { wm: swm };
+  const shape = () => sc.map((c) => c.map((x) => (x === chain ? '<chain>' : x && x.id ? x.id : x)));
+  for (const w of [w1, w2, w3]) w._tabChain = chain;
+  runCommand('chain.toggleSplit', { app: sapp });
+  ok(J(shape()) === J([['splitActive', '<chain>', { announce: true }]]), "'v' on a ≥2-tab tabs chain → wm.splitActive(chain, {announce:true}) (the active tab on the left, undoable)", J(shape()));
+  sc.length = 0; chain.layout = 'split'; chain.split = { pair: ['w1', 'w2'], ratio: 0.5, dir: 'row' };
+  runCommand('chain.toggleSplit', { app: sapp }); runCommand('chain.swapSides', { app: sapp }); runCommand('chain.unsplit', { app: sapp });
+  ok(J(shape()) === J([['unbindSplit', '<chain>'], ['swapSplit', '<chain>'], ['unbindSplit', '<chain>']]), "'v' on a split chain → unbindSplit; 'V' → swapSplit; chain.unsplit → unbindSplit", J(shape()));
+  sc.length = 0; chain.layout = 'tabs'; delete chain.split;
+  runCommand('chain.splitBeside', { app: sapp, partnerId: 'w3' });
+  ok(J(shape()) === J([['bindSplit', 'w1', 'w3', { side: 'right', announce: true, focus: 'anchor' }]]), 'chain.splitBeside(partnerId) → wm.bindSplit(active, partner, {side:"right", announce:true, focus:"anchor"}) — the focus stays on the active window (split r1)', J(shape()));
+  sc.length = 0; toasts.length = 0;
+  for (const w of [w1, w2, w3]) delete w._tabChain;
+  runCommand('chain.toggleSplit', { app: sapp }); runCommand('chain.swapSides', { app: sapp }); runCommand('chain.unsplit', { app: sapp });
+  ok(sc.length === 0 && toasts.length === 3 && toasts.every(([m]) => m === 'Group two windows first'), "no chain: 'v' / 'V' / unsplit say 'Group two windows first' (never silent) and touch nothing", J([shape(), toasts]));
+  toasts.length = 0; w1._tabChain = { tabs: ['w1'], active: 0, layout: 'tabs' };
+  runCommand('chain.toggleSplit', { app: sapp });
+  ok(sc.length === 0 && toasts.length === 1 && toasts[0][0] === 'Group two windows first', "a one-tab chain is not a group: 'v' says so too");
+  toasts.length = 0; w1._tabChain = chain; w2._tabChain = chain; w3._tabChain = chain;
+  runCommand('chain.swapSides', { app: sapp });
+  ok(sc.length === 0 && toasts.length === 1 && toasts[0][0] === 'Not shown side by side', "'V' on a tabs chain says 'Not shown side by side' and touches nothing", J(toasts));
+  toasts.length = 0; runCommand('chain.splitBeside', { app: sapp, partnerId: 'nope' });
+  ok(sc.length === 0 && toasts.length === 1 && toasts[0][0] === 'Group two windows first', 'chain.splitBeside with an unknown partner says so and touches nothing');
+  toasts.length = 0; swm.activeWindowId = null; runCommand('chain.toggleSplit', { app: sapp });
+  ok(sc.length === 0 && toasts.length === 1, "'v' with no active window is never silent either");
 }
 
 // ── C. ws-handler default: the REAL handler on a fake wss ──

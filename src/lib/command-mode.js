@@ -1,10 +1,12 @@
 /**
  * Command Mode — Ctrl+\ prefix key (tmux-style).
  * Yellow [CMD] indicator in taskbar, 2s auto-exit.
- * Single keystrokes: arrows=snap, m=maximize, w=close, Tab=cycle, f/g/n/s/b/e=global.
+ * Single keystrokes: arrows=snap, m=maximize, w=close, Tab=cycle, v/V=side by side
+ * (toggle / swap), f/g/n/s/b/e=global.
  */
 
-import { showInputDialog } from './utils.js';
+import { showInputDialog, showToast } from './utils.js';
+import { t } from './i18n.js';
 import { registerCommand, runCommand } from './contributions.js';
 
 // ── COMMANDS (contributions registry, Plugin Ph1) ──
@@ -18,7 +20,7 @@ import { registerCommand, runCommand } from './contributions.js';
 // behaviour. Titles are plain English (no menu shows them; wrap in t() at
 // render time, like window-types' `label`).
 // Keep this block self-contained (the gate suite extracts + replays it): it
-// closes over registerCommand and showInputDialog only.
+// closes over registerCommand, showInputDialog, showToast and t only.
 export function registerCommandModeCommands() {
   const activeWin = (app) => app.wm.windows.get(app.wm.activeWindowId);
   const snap = (side) => (c) => { const wm = c.app.wm; if (activeWin(c.app)) wm.snapToHalf(wm.activeWindowId, side); };
@@ -87,6 +89,29 @@ export function registerCommandModeCommands() {
   registerCommand({ id: 'desktop.previous', title: 'Previous desktop', run: (c) => desktopStep(c.app, -1) });
   registerCommand({ id: 'activeWindow.moveToNextDesktop', title: 'Move window to next desktop', run: (c) => moveWinDesktop(c.app, +1) });
   registerCommand({ id: 'activeWindow.moveToPreviousDesktop', title: 'Move window to previous desktop', run: (c) => moveWinDesktop(c.app, -1) });
+  // SIDE BY SIDE (split UX chunk 2, docs/design-split-ux.zh.md R1 ③): the
+  // tmux-style verbs on the ACTIVE window's tab chain. A split is a layout OF a
+  // ≥2-tab chain, so without one every verb SAYS so (never a silent no-op).
+  // Entries are announced ⇒ the 5 s Undo toast (bindSplit).
+  const groupOf = (app) => { const w = activeWin(app); const ch = w && w._tabChain; return ch && Array.isArray(ch.tabs) && ch.tabs.length >= 2 ? ch : null; };
+  const needGroup = () => showToast(t('Group two windows first'));
+  registerCommand({
+    id: 'chain.toggleSplit', title: 'Toggle side by side',
+    run: (c) => { const ch = groupOf(c.app); if (!ch) return needGroup(); if (ch.layout === 'split') c.app.wm.unbindSplit(ch); else c.app.wm.splitActive(ch, { announce: true }); },
+  });
+  registerCommand({
+    id: 'chain.swapSides', title: 'Swap left and right',
+    run: (c) => { const ch = groupOf(c.app); if (!ch) return needGroup(); if (ch.layout !== 'split') return showToast(t('Not shown side by side')); c.app.wm.swapSplit(ch); },
+  });
+  registerCommand({
+    id: 'chain.unsplit', title: 'Unsplit',
+    run: (c) => { const ch = groupOf(c.app); if (!ch) return needGroup(); if (ch.layout !== 'split') return showToast(t('Not shown side by side')); c.app.wm.unbindSplit(ch); },
+  });
+  // ctx.partnerId = the window to show on the right of the active one (a plugin row / palette)
+  registerCommand({
+    id: 'chain.splitBeside', title: 'Show side by side with…',
+    run: (c) => { const wm = c.app.wm; const w = activeWin(c.app); const p = c.partnerId && wm.windows.get(c.partnerId); if (!w || !p || p === w) return needGroup(); wm.bindSplit(w, p, { side: 'right', announce: true, focus: 'anchor' }); }, // the focus stays on the active window (split r1)
+  });
 }
 registerCommandModeCommands();
 // end registerCommandModeCommands (scripts/test-contributions.mjs extracts the block above)
@@ -184,6 +209,9 @@ export class CommandMode {
         // [ = move active window to prev desktop, ] = next desktop
         case '[': runCommand('activeWindow.moveToPreviousDesktop', cctx); this.exit(); break;
         case ']': runCommand('activeWindow.moveToNextDesktop', cctx); this.exit(); break;
+        // v = side by side on / off for the active tab group, V (shift+v) = swap left and right
+        case 'v': runCommand('chain.toggleSplit', cctx); this.exit(); break;
+        case 'V': runCommand('chain.swapSides', cctx); this.exit(); break;
         default: this.exit(); break;
       }
     }, true); // capture phase
@@ -197,7 +225,7 @@ export class CommandMode {
     clearTimeout(this._cmdDigitTimer);
     this._cmdIndicator.classList.add('active');
     // Show the available keys while armed — command mode was undiscoverable
-    this._cmdIndicator.textContent = '[CMD] ←↑↓→ snap · m max · w close · Tab cycle · f free · g grid · n new · s sidebar';
+    this._cmdIndicator.textContent = '[CMD] ←↑↓→ snap · m max · w close · Tab cycle · v split · f free · g grid · n new · s sidebar';
     this._resetTimer();
   }
 

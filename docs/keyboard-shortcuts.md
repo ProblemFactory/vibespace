@@ -81,6 +81,8 @@ Command mode auto-exits after **2 seconds** or on **Escape**. All commands are s
 | **Tab** | Cycle to next window (stays in command mode) |
 | **]** | Move active window to next desktop |
 | **[** | Move active window to previous desktop |
+| **v** | Side by side on / off for the active window's tab group (the active tab on the left, the most recently used other tab on the right; 5 s Undo toast). Not in a group of ≥ 2 tabs ⇒ a toast "Group two windows first" |
+| **V** | Swap the left and right panes of a side-by-side group |
 
 ### Global Commands
 
@@ -109,7 +111,9 @@ Command mode auto-exits after **2 seconds** or on **Escape**. All commands are s
 | Action | Result |
 |--------|--------|
 | **Double-click** title bar | (reserved) |
-| **Right-click** title bar | Show overlapping windows switcher |
+| **Right-click** title bar | Window menu (Switch window ▸, Move, Minimize, **Show side by side ▸ Beside {name} (on the right)** in a tab group of ≥ 2 / **Unsplit** + **Swap left and right** when split, session verbs, Move to Desktop, Close) |
+| **Right-click** a tab | That tab's own window menu |
+| Click the **side-by-side button** (two-column icon, tab strip) | Tab group: show the active tab and the last one you used side by side. Split: Unsplit / Swap left and right |
 | Click **─** | Minimize window |
 | Click **□** | Maximize / restore |
 | Click **✕** | Close window |

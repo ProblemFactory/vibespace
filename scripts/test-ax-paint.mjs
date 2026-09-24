@@ -25,8 +25,9 @@
 //   ③ the paint-only sites — `.chat-code-ln` gutters, `.chat-diff-prefix`,
 //     `.chat-run-arrow`, every spinner (`chat-spinner` / `upload-active-spinner`
 //     — a census: every creation site carries the attribute, not a hand-picked
-//     list), the 8 resize handles, the `.chat-minimap` strip — each carries
-//     aria-hidden at the source; the TOC button is a SIBLING of the strip.
+//     list), the 8 resize handles, the `.chat-minimap` strip, the tab strip's
+//     `.tab-split-glyph` (2.369.162, the DOM successor of the CSS `⫿` glyph) —
+//     each carries aria-hidden at the source; the TOC button is a SIBLING of the strip.
 //   ④ the CSS glyph census — every `content:` string that is a GLYPH (a `\25B8`-
 //     style escape or a non-ASCII character, and no letters) carries the alt-text
 //     form `content: '…' / ""` as the LAST content declaration of its rule (the
@@ -142,7 +143,7 @@ function census(dir) {
 
 // ── ③ the paint-only sites carry aria-hidden at the source ──
 {
-  const hl = read('src/lib/highlight.js'), cr = read('src/lib/chat-renderers.js'), cv = read('src/lib/chat-view.js'), win = read('src/lib/window.js'), mm = read('src/lib/chat-minimap.js');
+  const hl = read('src/lib/highlight.js'), cr = read('src/lib/chat-renderers.js'), cv = read('src/lib/chat-view.js'), win = read('src/lib/window.js'), mm = read('src/lib/chat-minimap.js'), tg = read('src/lib/tab-group.js');
   const count = (s, re) => (s.match(re) || []).length;
   const ln = count(hl, /<span class="chat-code-ln"/g), lnH = count(hl, /<span class="chat-code-ln" aria-hidden="true"/g);
   ok(ln >= 2 && ln === lnH, `③ every .chat-code-ln gutter span in highlight.js is aria-hidden (${lnH} of ${ln})`);
@@ -169,6 +170,8 @@ function census(dir) {
     '③ window.js marks each of the 8 resize handles aria-hidden as it creates it');
   ok(/this\._minimap\.className = 'chat-minimap hidden';[\s\S]{0,600}?this\._minimap\.setAttribute\('aria-hidden', 'true'\);\s*container\.appendChild\(this\._minimap\);/.test(mm),
     '③ chat-minimap.js marks the strip aria-hidden before it is appended');
+  ok(/const glyph = document\.createElement\('span'\);\s*glyph\.className = 'tab-split-glyph';\s*glyph\.setAttribute\('aria-hidden', 'true'\);\s*tabBar\.appendChild\(glyph\);/.test(tg),
+    '③ tab-group.js marks the split glyph (the divider\'s mirror between the pane tabs) aria-hidden before it is appended');
   ok(/container\.appendChild\(this\._tocBtn\);/.test(mm) && !/this\._minimap\.appendChild\(this\._tocBtn\)/.test(mm) && /this\._tocBtn\.title = t\('Your messages \(outline\)'\);/.test(mm),
     '③ the TOC button is a SIBLING of the strip (appended to the container, never inside the hidden subtree) and keeps its title');
 }
@@ -195,7 +198,9 @@ function census(dir) {
   ok(glyphRules.length >= 30, `④ the glyph census is non-vacuous (${glyphRules.length} generated-glyph rules across the stylesheets)`);
   ok(missing.length === 0, `④ every generated glyph's LAST content declaration is the alt-text form \`content: '…' / ""\` (${missing.length} plain)`, missing.join('\n    '));
   ok(textWithAlt.length === 0, `④ no generated TEXT (letters) carries the empty alt (${textWithAlt.length} would vanish from the tree)`, textWithAlt.join('\n    '));
-  const known = ['\\25B8', '\\25BE', '\\25B4', '\\00B7', '\\200e', '\\25C2', '\\1F464', '\\2699', '▸', '▾', '†', '⫿'];
+  // '⫿' left this list in 2.369.162: the split-member tab's generated `⫿ ` glyph was deleted (design-split-ux R3) —
+  // the split mark is now the `.tab-split-glyph` ELEMENT, pinned aria-hidden in ③
+  const known = ['\\25B8', '\\25BE', '\\25B4', '\\00B7', '\\200e', '\\25C2', '\\1F464', '\\2699', '▸', '▾', '†'];
   ok(known.every((k) => glyphRules.some((g) => g.lit.includes(k))), `④ the census reaches every glyph family the design named (${known.join(' ')})`);
   ok(isGlyph("'\\25B8  '") && isGlyph("'▸ '") && isGlyph("'\\200e'") && !isGlyph("'Collapse'") && !isGlyph("'Extra row — drag elements here'") && !isGlyph("''"),
     '④ NEGATIVE CONTROL: the glyph classifier takes escapes / symbols / the LRM and refuses words, a sentence with a dash, and the empty string');

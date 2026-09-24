@@ -221,6 +221,25 @@ export function registerWindowMenu() {
       }));
     },
   });
+  // SIDE BY SIDE (split UX chunk 2, docs/design-split-ux.zh.md R1 ②/R2): the
+  // verb NAMES the side — "Beside {name} (on the right)" puts THIS window on the
+  // left and the named tab on the right; no pointer position ever picks it. Offered
+  // only inside a ≥2-tab group (a split is a layout OF a tab chain — merge first),
+  // never on a phone (one pane shown, R6). A split chain offers its two verbs
+  // instead. Every entry is announced ⇒ undoable for 5 s (bindSplit's toast).
+  const chainOf = (c) => (c.win && c.win._tabChain && Array.isArray(c.win._tabChain.tabs) ? c.win._tabChain : null);
+  const inTabsGroup = (c) => { const ch = chainOf(c); return !!(ch && ch.layout !== 'split' && ch.tabs.length >= 2 && ch.tabs.includes(c.id) && !c.app.isMobile); };
+  const inSplit = (c) => { const ch = chainOf(c); return !!(ch && ch.layout === 'split' && ch.split); };
+  const nameOfWin = (w) => String((w && w.title) || '').split(' \u2014 ')[0] || String(w && w.id);
+  registerCommand({ id: 'window.unsplit', title: () => t('Unsplit'), run: (c) => c.app.wm.unbindSplit(chainOf(c)) });
+  registerCommand({ id: 'window.swapSides', title: () => t('Swap left and right'), run: (c) => c.app.wm.swapSplit(chainOf(c)) });
+  registerMenuItem({
+    menu: M, group: '1_window', order: 50, id: 'window/side-by-side', kind: 'split', when: inTabsGroup, label: () => t('Show side by side'),
+    children: (c) => chainOf(c).tabs.filter((tid) => tid !== c.id).map((tid) => c.app.wm.windows.get(tid)).filter(Boolean)
+      .map((w) => ({ label: t('Beside {name} (on the right)', { name: nameOfWin(w) }), action: () => c.app.wm.bindSplit(c.win, w, { side: 'right', announce: true, focus: 'anchor' }) })), // the focus stays on the window right-clicked (split r1)
+  });
+  registerMenuItem({ menu: M, group: '1_window', order: 50, command: 'window.unsplit', kind: 'split', when: inSplit });
+  registerMenuItem({ menu: M, group: '1_window', order: 55, command: 'window.swapSides', kind: 'split', when: (c) => inSplit(c) && !c.app.isMobile });
   // Common SESSION ops on the window chrome (owner UX 2.369.8: restart after a
   // style pick meant a sidebar hunt; the title menu is right here)
   registerMenuItem({ menu: M, group: '2_session', order: 0, when: hasSess, separator: true });

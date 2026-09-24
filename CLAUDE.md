@@ -338,7 +338,7 @@ src/
     browser-switcher.js — CLIENT (P4 second half, §7.4 UX / §7.5 / D33): `app.openBrowserSwitcher({profileId, sessionId?, preselect?})` = the dialog over `GET /api/browser/switcher` (every backend a row, disabled WITH its reason; the SOURCE chip; seats in three states from the server's structure) ⇒ kb-file-structure.md
     browser-trace-view.js — CLIENT (P5 client half, §4.5/§8 step 3/D35): the tool card's "Browser actions" row (thumbnails ALWAYS, list behind the button, ONE batched fetch per view), the before/after dialog with the position DRAWN, the live view's Actions pane, the Browser housekeeping panel ⇒ kb-file-structure.md
     ws.js              — WsManager (WebSocket with reconnect)
-    window.js          — WindowManager (drag/resize/snap/grid; `syncHiddenViews()` = ONE derivation of the hiders; ≤768px a synced minimize is TRUTH; P7 `createWindow({intoChain})`, `setOwnerBadge`, the narrow-split hider; a2 the 8 resize handles born `aria-hidden`) ⇒ kb-file-structure.md
+    window.js          — WindowManager (drag/resize/snap/grid; syncHiddenViews = ONE hider derivation; ≤768px synced minimize = TRUTH; P7 createWindow({intoChain}), setOwnerBadge; a2 resize handles aria-hidden; a drag never splits, merge ⇒ _afterUserMerge) ⇒ kb-file-structure.md
     window-min-size.js — PURE a window's OWN minimum (2.369.158): the .window floor, capped at the workspace (r2), the drag clamp keeping the opposite edge, raise-to-min + keepInside, windowMinForPane; WindowManager.setMinSize = the terminal's CSS-min rule per window ⇒ kb-file-structure.md
     view-visibility.js — PURE (imports nothing) `hiddenReasons({mobile, active, tabHidden, minimized})`: which display:none hiders hold a window's content off-screen (2.369.112, inc-mu6bfv1t-4drq); gate test-hidden-view-suspend (42) ⇒ kb-file-structure.md
     plugin-client.js   — PLUGIN CLIENT (Ph2): fetches /api/plugins/manifests, registers every enabled iframe plugin's windows as window types (sandboxed iframe + postMessage bridge ready/init/storage/notify/close), ⚙ menu rows; trusted-module host API incl. Ph1 `api.registerCommand/registerMenuItem/registerKeybinding/runCommand` (ids `plugin:<id>:<slug>`, all bound to the plugin's signal)
@@ -346,8 +346,8 @@ src/
     contributions.js   — COMMANDS + MENUS + KEYBINDINGS REGISTRY (Plugin Ph1): register{Command,MenuItem,Keybinding}/menuItems + ONE dispatcher; loud unknowns. MENUS ARE A TREE (2.369.124): submenu heads + parent, lazy resolution falls to top level, two levels max. ⇒ kb-file-structure.md
     gear-menu.js       — ⚙ menu TREE (2.369.124): heads Appearance/Tools/Communication/System/Help + Manage agents / Update / Sign out; ONE renderer: desktop left-opening flyout (120 ms hover intent, layered Esc, LIVE captions), phone/hover:none accordion (≥ 44 px rows). ⇒ kb-file-structure.md
     appearance-panel.js — the quick per-DEVICE prefs (Theme+✎ / Font size / Font / UI scale / UI font size / All Settings) moved VERBATIM out of app.js (2.369.124) = the Appearance ▸ head's panel; appearanceCaption = the head's live "Dark · 14px · 100%". ⇒ kb-file-structure.md
-    tab-group.js       — Tab grouping mixin (chain model, icon drag, tab bar, drag-out) … P7 SPLIT (§4.6): layout/split on the chain, `_normalizeChain` at EVERY mutation, the divider, bindSplit/unbindSplit ⇒ kb-file-structure.md
-    chain-layout.js    — PURE (CJS; imports only task-color-seq) the tab chain's LAYOUT model (P7, §4.6): normalizeChain (in place, the ONE validation of split against tabs), clampRatio, chainSyncKey (tabs+layout+pair), displayedPanes wide/narrow, ownerColor per SESSION ⇒ kb-file-structure.md
+    tab-group.js       — Tab grouping mixin (chain, icon drag, tab bar, drag-out); SPLIT (§4.6): _normalizeChain at EVERY mutation, divider; split UX: NO drag splits (merge = the one exception), the strip button/badge, visual order, undo ⇒ kb-file-structure.md
+    chain-layout.js    — PURE (CJS) the tab chain LAYOUT (P7 §4.6): normalizeChain (the ONE split validation), chainSyncKey (tabs+layout+pair), displayedPanes, ownerColor; split UX: visualTabOrder/swappedPair/splitPartner, dropSide GONE ⇒ kb-file-structure.md
     terminal.js        — TerminalSession (xterm.js wrapper, per-terminal settings). NET ZOOM 1 (2.369.118: counter-zoomed container, `_xtermPx`, `rescale()`). 2.369.125 phone key row: Copy screen key (`_copyScreen` reads the buffer, toast names the lines), SVG icon keys, the row wraps ⇒ kb-file-structure.md
     sidebar.js — Sidebar shell (filter/sort/merge pipeline, tab switching). **`LIVE_SESSION_FACTS` + `liveSessionFacts()` (2026-09-07 r3) = THE list of per-session live facts the `active-sessions` payload publishes under the names every client surface reads them by.** `_merge()` REBUILDS the row … … P2: `browserProfileActive` is its own scalar row + digest ⇒ kb-file-structure.md
     sidebar-workbench.js — Folders-tab three-zone rendering (installSidebarWorkbench mixin, ~540 lines)
@@ -395,11 +395,11 @@ src/
     desktop-manager.js — DesktopManager (virtual desktops, Ubuntu-style previews, window routing) DRAG-REORDER (2.250.0): desktop preview wrappers are draggable(text/desktop-id); dropping onto another preview → reorderDeskt… ⇒ kb-file-structure.md
     stage-manager.js — StageManager (2.112.0 dynamic desktop 'Stage', default OFF via desktop.dynamicEnabled — docs/design-dynamic-desktop.md is the blueprint+progress anchor. ⇒ kb-file-structure.md
     external-editor.js — Ctrl+G split-pane CodeMirror editor (extracted from app.js)
-    command-mode.js    — CommandMode (Ctrl+\ prefix key, tmux-style shortcuts, desktop switch)
+    command-mode.js    — CommandMode (Ctrl+\ prefix key, tmux-style shortcuts, desktop switch); `v` = side by side on/off for the active tab group, `V` = swap (no group ⇒ a toast, never silent) ⇒ kb-file-structure.md (contributions.js essay)
     session-palette.js — Ctrl+K session palette (fuzzy session switcher; installSessionPalette, desktop only). ⇒ kb-file-structure.md
     icons.js           — Centralized inline SVG icon library (FILE_ICONS + UI_ICONS; `folder` is in FILE_ICONS); a2: `_s()` puts `aria-hidden` + `focusable="false"` on every <svg> — an icon is never a name, so icon-only buttons carry title/aria-label (test-ax-paint) ⇒ kb-file-structure.md
     customize-mode.js  — CustomizeMode (Firefox-style chrome edit mode: click-to-toggle + drag-to-move elements, zone arrangement, position pills)
-    taskbar.js         — Taskbar rendering + window list popup (extracted from app.js)
+    taskbar.js         — Taskbar rendering + window list popup + the 'window' menu registrations; split UX: Show side by side ▸ Beside {name} (on the right) in a ≥2-tab group, Unsplit / Swap left and right when split ⇒ kb-file-structure.md (contributions.js essay)
     browser-window.js  — Embedded browser window (iframe + URL bar + proxy toggle)
     vnc-view.js        — THE shared picture-view component (docs/design-desktop-apps §2 row 6, 2026-09-13): `loadRFB` (noVNC as the separate public/novnc.js ESM, dynamic-imported), COUNTER_ZOOM = inc-mtdrm922's `calc(1 / var(--ui-scale, 1))` on the canvas container (NET zoom 1, var-reactive) … ⇒ kb-file-structure.md
     picture-shell.js   — THE shared picture shell (P8-2 x2): counter-zoomed container, the ONE `.desktop-bar` (status/Paste/Reconnect), the mount, the bounded reconnect ladder keyed on `wanted`; vnc-view.js and xpra-view.js stand on it; `streamUrl` lives here ⇒ kb-file-structure.md
@@ -427,6 +427,7 @@ public/
 CLAUDE.md              — This file
 docs/
   design-account-hardening.md — 2026-09-08 DESIGN (owner decisions pending, no code yet): the root fix for the 5-incident money batch (auto-resume's 130 billed continues / readings keyed by the spawn org / unseen login deadlines / unretracted warnings / inc-mts8a8mr-ulmm's in-flight-on-the-new-slot cascade). … ⇒ kb-file-structure.md
+  design-split-ux.zh.md — 2026-09-23, SHIPPED 2.369.162: 拖动零并排 (tab 合并是唯一例外) + 合并后显式入口 (⫿ 按钮/菜单/命令 v) + 视觉顺序标签条 + 徽章 + 撤销; test-split-ux (85, heavy) ⇒ kb-file-structure.md
   design-accessibility-tree.zh.md — 2026-09-22 设计: AX 节点来源表 + 十步根治 + test-ax-budget; §8 精简版 SHIPPED 2.369.150(带外卡片/涂装/minimap 条 aria-hidden, chip 原地更新): 每窗 724 → 462, 不随 slab 增长; 4/5b/6/7/9 未做 ⇒ kb-file-structure.md
   design-reset-credits.zh.md — 2026-09-22 设计 + 定案 (自动消费默认永不; 有接口给按钮; 高级 auto): 收益模型 = openai 平滑递减 (撞墙即用) vs anthropic ReLU (拐点 = 剩余时间 ≥ 周额度/燃烧率), 原地补满已实测证实; 梯子按冷热分叉; 三模式 off/ask/auto; P1 codex / P2 claude 被动 / P3 待接口 ⇒ kb-file-structure.md
   design-harness-settings.zh.md — 2026-09-20 设计稿(未开工, 等 owner D1-D4): harness 级全局设置的专用区 = descriptor 声明的 PURE 表(src/harness-settings.js) + schema 派生分区 + harnessSetting 访问器(字面 harness id 归零) + 一个 base64 plan env 走既有 helper/run-cmd(不新增 daemon op) + 行下"写到哪里了"回执; 值留 data/settings.json 零迁移; 否决独立存储+迁移
@@ -460,7 +461,7 @@ docs/
 | **Backend metadata / icons** | `src/lib/agent-meta.js` | Backend/agent meta, createBackendIcon, createModeBackendIcon, contrast adaptation |
 | **Session discovery (RUNNING/STOPPED)** | `src/routes/sessions.js` + `src/session-store.js` | Lock-first algorithm, tmux detection, PID verification |
 | **Window tiling / grid / snap** | `src/lib/window.js` | Drag, resize, grid cells, layout presets, freeform, Alt bypass, overlap switcher, pre-snap size memory, move mode |
-| **Tab groups** | `src/lib/tab-group.js` | Drag icon-to-icon to merge windows into tabs, Chrome-style tab bar, drag-out to split |
+| **Tab groups** | `src/lib/tab-group.js` + `src/lib/chain-layout.js` | Drag icon-to-icon to merge windows into tabs, Chrome-style tab bar, drag-out; side by side = the strip's button after a merge (never a drag) |
 | **Custom grid presets** | `src/lib/app.js` → `_addCustomGrid()` + `src/routes/persistence.js` | + button adds, right-click removes, persisted in layouts.json |
 | **Session starring** | `src/lib/sidebar.js` → `toggleStar()`, `isStarred()` | ★/☆ per session, starred first in sidebar + taskbar |
 | **Task system / board** | `src/task-groups.js` + `src/lib/sidebar-tasks.js` + `src/lib/task-detail.js` | tasks.json store, board (Tasks tab), bind-as-tag, detail window, attention — design in docs/design-task-system.md |
