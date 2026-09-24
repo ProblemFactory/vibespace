@@ -316,7 +316,10 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     ok('R1 warm + auto: the reset-credit verb is written ONCE', w.verbs() === 1, `verbs=${w.verbs()} | ${lines.join(' | ').slice(0, 300)}`);
     ok('R1 …BEFORE any switch: the pool default did not move', w.current() === w.A, w.current());
     ok('R1 …through the spend ceiling: the guard charged exactly one unattended spend', (w.eng.spendGuard.snapshot().budget.instance || []).length === 1, JSON.stringify(w.eng.spendGuard.snapshot().budget.instance));
-    ok('R1 …the notice names the account, the wait saved and the credits left', w.notices.some((n) => /Usage limit hit on Cx Alpha — using a stored reset credit — saves a wait of 2h; 2 left after this one \(warm conversation: before switching accounts\)\./.test(n)), JSON.stringify(w.notices));
+    // the wall is stamped nowS + 7200 at world creation and the product measures the wait from ITS clock at the wall,
+    // so the saved wait is 2h minus the fixture's age — under a loaded gate a second boundary passed and the hook
+    // read "1h 59m" (2.369.170, the .169 push): the wait is asserted as a band, never a literal
+    ok('R1 …the notice names the account, the wait saved and the credits left', w.notices.some((n) => /Usage limit hit on Cx Alpha — using a stored reset credit — saves a wait of (2h|1h 5\dm); 2 left after this one \(warm conversation: before switching accounts\)\./.test(n)), JSON.stringify(w.notices));
     ok('R1 …journaled with the verdict reason', lines.some((l) => /\[reset-credit\] cx1: worth it \(wall-use-now/.test(l) && /in-turn/.test(l)), lines.join(' | ').slice(0, 300));
     quietly(() => w.wall());
     ok('R1 a second wall inside the 10-min floor writes NO second verb (the verdict\'s cooldown)…', w.verbs() === 1, `verbs=${w.verbs()}`);

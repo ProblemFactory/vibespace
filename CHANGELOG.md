@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.369.170 — the gate's reaper names every pid it kills; lane worktrees leave the scratch-root namespace (B-a965)
+
+A stray `node scripts/ci.mjs --help` on 2026-09-24 ran the scratch-orphan sweep and killed 34 processes under 22 roots. One root was `/tmp/vs-work`, the directory the development lanes' worktrees lived in — their detached dev servers were orphaned by construction and older than the 10-minute floor, so the evidence-based rule fired correctly on the wrong thing, and the log named only the roots.
+
+- `reapReport(list)` (PURE, exported) is the head line plus one `[ci]   pid <pid> (ppid <n>) <name>: <argv head> — root <dir> — <rule>` line per victim; both reapers (the fast tier's sync sweep and the heavy lanes' async twin) print it before the first SIGTERM. test-ci-gate §9 pins the report's shape, that every victim line carries its pid / root / rule / command head, and the wiring in both reapers.
+- test-codex-pool R1 asserted the saved wait as the literal `2h`; the wall is stamped at world creation and the product measures from its own clock at the wall, so a second boundary under a loaded gate read `1h 59m` and blocked the 2.369.169 push. The assertion is a band (`2h` … `1h 50m`).
+- Lane worktrees now live under `/tmp/vibespace-lanes/`, outside `SCRATCH_ROOT_RE` — a development checkout is never a suite's scratch dir. The product is unchanged by that half; the convention is recorded in kb-file-structure (ci.mjs) and kb-bugfix-invariants.
 ## 2.369.169 — the For-you inbox gets a Reply: what you type on an item reaches its agent as your own message, quoting the item it answers
 
 docs/design-user-inbox-reply.md (+ the zh twin). The owner: "实际上现在inbox功能被利用的很少，原因是agent经常大量发inbox，然后我做为用户也没有什么方便的方法快速针对一个inbox message给出响应，而只能markdone和叉掉" — agents flood the inbox and the only answers were ✓ and ✕ — plus "发给agent的消息得带有对应的引用信息": a reply must carry the item's quote. Built in four chunks on one branch; this entry grows one bullet per chunk.

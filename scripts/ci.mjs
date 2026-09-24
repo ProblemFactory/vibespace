@@ -714,16 +714,23 @@ export function scratchOrphans({ procRoot = '/proc', now = Date.now(), staleMs =
     if (gone) why = 'scratch dir gone';
     else if (!live && oldEnough) why = `orphaned ${Math.round(Math.min(...ages) / 60000)} min (no live suite owns ${root})`;
     if (!why) continue;
-    for (const i of members) out.push({ pid: i.pid, name: i.a0, root, why });
+    for (const i of members) out.push({ pid: i.pid, name: i.a0, root, why, cmd: i.argv.slice(0, 3).join(' ').slice(0, 120), ppid: i.ppid });
   }
   return out;
+}
+/** THE VICTIM LIST, ONE LINE PER PID (B-a965, 2026-09-24): a sweep that named only its
+ *  roots left "22 roots / 34 processes" unattributable after a stray `ci.mjs --help`
+ *  reaped a lane's detached servers under /tmp/vs-work. PURE over the list. */
+export function reapReport(list) {
+  const roots = [...new Set(list.map((o) => o.root))];
+  const head = `[ci] reaping ${list.length} scratch orphan process(es) from ${roots.length} finished scratch dir(s): ${roots.slice(0, 4).join(' ')}${roots.length > 4 ? ' …' : ''}`;
+  return [head, ...list.map((o) => `[ci]   pid ${o.pid} (ppid ${o.ppid}) ${o.name}: ${o.cmd || o.name} — root ${o.root} — ${o.why}`)];
 }
 /** SIGTERM, then SIGKILL the survivors after `graceMs`. Returns the list it acted on. */
 export function reapScratchOrphans({ log = console.log, graceMs = 3000, ...opts } = {}) {
   const list = scratchOrphans(opts);
   if (!list.length) return list;
-  const roots = [...new Set(list.map((o) => o.root))];
-  log(`[ci] reaping ${list.length} scratch orphan process(es) from ${roots.length} finished scratch dir(s): ${roots.slice(0, 4).join(' ')}${roots.length > 4 ? ' …' : ''}`);
+  for (const line of reapReport(list)) log(line);
   for (const o of list) { try { process.kill(o.pid, 'SIGTERM'); } catch { } }
   const until = Date.now() + graceMs;
   while (Date.now() < until && list.some((o) => alive(o.pid))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
@@ -740,8 +747,7 @@ export function reapScratchOrphans({ log = console.log, graceMs = 3000, ...opts 
 export async function reapScratchOrphansAsync({ log = console.log, graceMs = 3000, ...opts } = {}) {
   const list = scratchOrphans(opts);
   if (!list.length) return list;
-  const roots = [...new Set(list.map((o) => o.root))];
-  log(`[ci] reaping ${list.length} scratch orphan process(es) from ${roots.length} finished scratch dir(s): ${roots.slice(0, 4).join(' ')}${roots.length > 4 ? ' …' : ''}`);
+  for (const line of reapReport(list)) log(line);
   for (const o of list) { try { process.kill(o.pid, 'SIGTERM'); } catch { } }
   const until = Date.now() + graceMs;
   while (Date.now() < until && list.some((o) => alive(o.pid))) await new Promise((r) => setTimeout(r, 100));

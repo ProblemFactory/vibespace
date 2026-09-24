@@ -25,7 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, SCRATCH_ROOT_RE, REAP_NAMES } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, SCRATCH_ROOT_RE, REAP_NAMES, reapReport } from './ci.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1298,6 +1298,16 @@ console.log('\n§9 the scratch-orphan reaper');
   ok(/console\.log\(r\.lines\.join\('\\n'\)\);\n(?:\s*\/\/[^\n]*\n)*\s*try \{ await reapScratchOrphansAsync\(\{\}\); \}/.test(wired), 'WIRING: every LANE sweeps after each suite completes (the async twin — the sync reaper would block the other lanes)');
   ok(typeof (await import('./ci.mjs')).reapScratchOrphansAsync === 'function', '…and the async twin is exported');
   ok(/if \(arg\('reap'\)\)/.test(wired), 'WIRING: `--reap` runs the sweep by hand');
+  // B-a965 (2026-09-24): a sweep NAMES EVERY PID IT KILLS. A stray `ci.mjs --help` reaped
+  // 34 processes under 22 roots (one of them a lane's own detached servers under
+  // /tmp/vs-work) and the log said only which roots — nothing to attribute a dead
+  // server to. Each victim carries its command head + ppid; both reapers print
+  // one line per pid through the ONE report function.
+  const report = reapReport(list);
+  ok(report.length === list.length + 1 && /^\[ci\] reaping 4 scratch orphan process\(es\) from 2 finished scratch dir\(s\)/.test(report[0]), `the report is the head line + one line per victim (got ${report.length} lines for ${list.length} victims)`);
+  ok(list.every((o) => report.some((l) => l.includes(`pid ${o.pid} `) && l.includes(o.root) && l.includes(o.why))), 'every victim line names the pid, its root and the rule that fired');
+  ok(report.some((l) => /pid 500 \(ppid 1\) dtach: dtach -a \S+cw-1 — root/.test(l)), 'a victim line carries the command head (argv[0..3]) — what the dead process WAS, not only its name');
+  ok(/export function reapScratchOrphans\([^)]*\) \{\n\s*const list = scratchOrphans\(opts\);\n\s*if \(!list\.length\) return list;\n\s*for \(const line of reapReport\(list\)\) log\(line\);/.test(wired) && /export async function reapScratchOrphansAsync\([^)]*\) \{\n\s*const list = scratchOrphans\(opts\);\n\s*if \(!list\.length\) return list;\n\s*for \(const line of reapReport\(list\)\) log\(line\);/.test(wired), 'WIRING: BOTH reapers (sync + the lanes\' async twin) print the per-pid report before the first SIGTERM');
 }
 
 } finally {
