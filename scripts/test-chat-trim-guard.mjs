@@ -812,6 +812,53 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     ok(`NEGATIVE CONTROL ⑧: the same loop with the gate neutered re-pins on the wheel's own scroll (${ctl.verdicts.join(',')}), stops after ONE slab and re-tails (${ctl.passes} pass, ${ctl.above} px above, retailed ${ctl.retailed}) — the runner's shape, and the unit can go red`,
       ctl.verdicts[0] === 'repin' && ctl.pinned && ctl.passes === 1 && !ctl.grown && ctl.retailed >= 1 && ctl.above < ctl.ch, JSON.stringify(ctl));
   }
+  // ⑨ THE BAND-0 NOTCH (2.369.167 r1b, the verifier's reproduction on r1 — identical on 3207e03b): a list
+  //    TALLER than its rendered window has no scroll range, so the grow loop's first passes add history with NO
+  //    room above the reader (the anchored landing clamps at scrollTop 0). _applyWheelCarry consumed the carry
+  //    at that room-less pass, the loop landed at the very bottom and the landing's own scroll re-pinned the
+  //    view (`wheelTop{carry:120} extendTop:done{st:0,sh:565} … extendTop:grown repin`, no wheelCarry). THE LOOP
+  //    below is the real _extendTop with the REAL carry accounting (add / apply / drop) over a fake list 120 px
+  //    taller than its 445 px window (the fold transcript's 48 px per 50 records), the anchor restore clamped at
+  //    the list's range as a browser clamps it; THE CONTROL strips keepRest on the instance (pre-r1b).
+  {
+    const runBand0 = async ({ strip }) => {
+      const CHB = 565, PX_PER_RECORD = 48 / 50, NOTCH = 120;
+      let contentPx = 445; // band 0: the list 120 px taller than the rendered window
+      const list = { clientHeight: CHB, scrollTop: 0, childElementCount: 310, firstChild: null, _slabs: [] };
+      Object.defineProperty(list, 'scrollHeight', { get: () => Math.max(contentPx, CHB) });
+      list.querySelector = () => ({ parentNode: list });
+      list.insertBefore = (frag) => { list._slabs.push(frag.children.length); };
+      const errors = [];
+      const v = Object.assign(Object.create(ChatView.prototype), {
+        _messageList: list, _windowStart: 1229, _windowEnd: 1539, _total: 1539, _pinned: false, _loading: false, _suspended: false, _traces: [],
+        _trace(tag, d) { this._traces.push({ tag, ...d }); }, _traceExpect() {}, _beginHistoryLoad: () => () => {}, _renderDetached: (m) => ({ m }),
+        _reserveFreshHeights() {}, _updateRuns() {}, _trimBottom() { return 0; }, _scheduleAxSync() {}, _liftLoadLock() {},
+        _scrollToBottom() { this._retailed = (this._retailed || 0) + 1; list.scrollTop = list.scrollHeight - CHB; },
+        _showHistoryStatus(msg) { errors.push(String(msg)); },
+        async _fetchMessages(start, count) { return Array.from({ length: count }, (_, i) => ({ id: 'm' + (start + i) })); },
+        // the anchored restore keeps the anchor where it was — as far as the list's range allows (a browser clamps scrollTop)
+        _withViewportAnchor(fn) { const n0 = list._slabs.length; fn(); const add = (list._slabs[n0] || 0) * PX_PER_RECORD; contentPx += add; list.scrollTop = Math.min(list.scrollTop + add, Math.max(0, contentPx - CHB)); return true; },
+      });
+      if (strip) { const a0 = ChatView.prototype._applyWheelCarry; v._applyWheelCarry = function (dir, by) { return a0.call(this, dir, by); }; }
+      // the wheel at the top edge of a list with no range: roomUp 0 → the whole notch is carried (the handler's _addWheelCarry)
+      v._addWheelCarry('up', NOTCH);
+      const doc0 = globalThis.document;
+      globalThis.document = { createDocumentFragment: () => ({ children: [], appendChild(el) { this.children.push(el); } }) };
+      try { await v._extendTop(); } finally { globalThis.document = doc0; }
+      const done = v._traces.filter((e) => e.tag === 'extendTop:done');
+      const st = Math.round(list.scrollTop), sh = list.scrollHeight;
+      return { passes: done.length, pass1: done[0] && { st: done[0].st, sh: done[0].sh }, st, sh, ch: CHB, fromBottom: sh - st - CHB,
+        carried: v._traces.filter((e) => e.tag === 'wheelCarry').map((e) => e.px), drops: v._traces.filter((e) => e.tag === 'wheelCarry:drop').map((e) => e.px),
+        left: v._wheelCarry || 0, ws: v._windowStart, errors };
+    };
+    const b = await runBand0({ strip: false });
+    ok(`BAND 0, the construction: the first pass landed with NO room above the reader (st ${b.pass1?.st}, sh ${b.pass1?.sh} = ch ${b.ch})`, b.pass1?.st === 0 && b.pass1?.sh === b.ch, JSON.stringify(b));
+    ok(`BAND 0, THE LOOP: the room-less passes keep the carry and a later one applies it — the whole notch (${b.carried.join('+')} = 120 px) reaches the reader, the loop lands ONE NOTCH above the bottom (${b.fromBottom} px ≥ 120 — past the 50 px pin band, so the landing's own scroll cannot re-pin), nothing dropped or left over`,
+      b.carried.reduce((a, x) => a + x, 0) === 120 && b.carried.length >= 2 && b.fromBottom >= 120 - 1 && !b.drops.length && b.left === 0 && b.ws > 0 && !b.errors.length, JSON.stringify(b));
+    const c = await runBand0({ strip: true });
+    ok(`NEGATIVE CONTROL ⑨: the same loop with keepRest stripped (pre-r1b) consumes the notch at the room-less first pass (carried: ${c.carried.join('+') || 'none'}) and lands AT THE BOTTOM (${c.fromBottom} px from it — inside the pin band, where the landing's scroll re-pins) — the verifier's shape, and the unit can go red`,
+      c.pass1?.st === 0 && c.carried.length === 0 && c.fromBottom < 50, JSON.stringify(c));
+  }
 }
 
 
@@ -833,10 +880,14 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     && /\(roomDown < 10 \|\| px > roomDown\)\) \{/.test(cv) && /this\._addWheelCarry\('down', px - roomDown\);/.test(cv));
   ok('a notch eaten by the load lock leaves its trace BEFORE the early return (wheelTop / wheelBottom {eaten:1})',
     /this\._wheelPending = 'up'; this\._trace\('wheelTop', \{ st: Math\.round\(roomUp\), eaten: 1/.test(cv) && /this\._wheelPending = 'down'; this\._trace\('wheelBottom', \{[^}]*eaten: 1/.test(cv));
-  ok('ONE carry accounting (_addWheelCarry / _applyWheelCarry / _clearWheelCarry): both extends AND both gap slabs consume it; nothing else assigns _wheelCarry',
-    /_applyWheelCarry\('up', 'extendTop:carry'\)/.test(cv) && /_applyWheelCarry\('down', 'extendBottom:carry'\)/.test(cv)
+  ok('ONE carry accounting (_addWheelCarry / _applyWheelCarry / _clearWheelCarry / _dropWheelCarry): both extends AND both gap slabs consume it; nothing else assigns _wheelCarry',
+    /_applyWheelCarry\('up', 'extendTop:carry'[,)]/.test(cv) && /_applyWheelCarry\('down', 'extendBottom:carry'[,)]/.test(cv)
     && /_applyWheelCarry\?\.\('up', 'gapUp:carry'\)/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\)/.test(sk)
-    && (cv.match(/this\._wheelCarry = /g) || []).length === 3 && !/_wheelCarry = /.test(sk), `assignments in chat-view.js: ${(cv.match(/this\._wheelCarry = /g) || []).length} (want 3: add / apply / clear)`);
+    && (cv.match(/this\._wheelCarry = /g) || []).length === 4 && !/_wheelCarry = /.test(sk), `assignments in chat-view.js: ${(cv.match(/this\._wheelCarry = /g) || []).length} (want 4: add / apply / clear / drop)`);
+  ok('r1b: both GROW LOOPS keep the rest a pass had no room for (keepRest) and drop what no pass applied in their finally; the single-landing gap slabs consume the carry either way',
+    /this\._applyWheelCarry\('up', 'extendTop:carry', \{ keepRest: true \}\);/.test(cv) && /this\._applyWheelCarry\('down', 'extendBottom:carry', \{ keepRest: true \}\);/.test(cv)
+    && /this\._extendingTop = false;\n\s*endLoad\(\);\n\s*this\._dropWheelCarry\('up', 'extendTop:end'\);/.test(cv) && /endLoad\(\);\n\s*this\._dropWheelCarry\('down', 'extendBottom:end'\);/.test(cv)
+    && /this\._wheelCarry = keepRest \? held - carry : 0;/.test(cv) && /_applyWheelCarry\?\.\('up', 'gapUp:carry'\);/.test(sk) && /_applyWheelCarry\?\.\('down', 'gapDown:carry'\);/.test(sk));
   ok('a chosen destination clears a carried notch: _noteUserNav (jumps, minimap, search reveal, run bar), _resetGapAfterJump (both jumps), _seekTeleport',
     /_noteUserNav\(via\) \{[\s\S]{0,400}this\._clearWheelCarry\?\.\(via\);/.test(cv) && /_resetGapAfterJump\(\) \{[\s\S]{0,300}this\._clearWheelCarry\?\.\('gapReset'\);/.test(sk) && /this\._clearWheelCarry\?\.\('teleport'\);[^\n]*\n\s*this\._teleported = true;/.test(sk));
   ok('_extendTop prepends before the first NON-GAP card, and the top trim drops the gap slab when the window leaves message 0 — inside the same anchored removal',
@@ -905,6 +956,16 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     ok('unit: the down mirror scrolls further down, bounded by the room below', r === 300 && v._messageList.scrollTop === 1020);
     v = mk({}); r = v._applyWheelCarry('down', 'x');
     ok('unit: a carry in the OTHER direction applies nothing and is consumed', r === 0 && v._wheelCarry === 0 && v._messageList.scrollTop === 720);
+    v = mk({ _messageList: { scrollTop: 100, scrollHeight: 5000, clientHeight: 700 } }); r = v._applyWheelCarry('up', 'x', { keepRest: true });
+    ok('unit (r1b): a grow loop\'s pass (keepRest) with 100 px of room applies 100 and KEEPS the other 368 for its next pass', r === 100 && v._messageList.scrollTop === 0 && v._wheelCarry === 368 && v._wheelCarryDir === 'up');
+    v = mk({ _messageList: { scrollTop: 0, scrollHeight: 700, clientHeight: 700 } }); r = v._applyWheelCarry('up', 'x', { keepRest: true });
+    ok('unit (r1b): …a ROOM-LESS pass (band 0: no scroll range) applies nothing and keeps all of it, no wheelCarry trace', r === 0 && v._wheelCarry === 468 && !v._traces.some((t) => t.tag === 'wheelCarry'));
+    v = mk({ _pinned: true }); r = v._applyWheelCarry('up', 'x', { keepRest: true });
+    ok('unit (r1b): …never while pinned, keepRest or not — the carry goes', r === 0 && v._wheelCarry === 0);
+    v = mk({ _wheelCarry: 368 }); v._dropWheelCarry('up', 'extendTop:end');
+    ok('unit (r1b): the loop\'s end drops what no pass applied and says so (wheelCarry:drop, the px, the author)', v._wheelCarry === 0 && v._traces.some((t) => t.tag === 'wheelCarry:drop' && t.px === 368 && t.by === 'extendTop:end'));
+    v = mk({ _wheelCarryDir: 'down', _wheelCarry: 300 }); v._dropWheelCarry('up', 'extendTop:end');
+    ok('unit (r1b): …and never a carry of the other direction', v._wheelCarry === 300 && !v._traces.length);
   }
   // (d) the stale carry: a chosen destination clears it
   {

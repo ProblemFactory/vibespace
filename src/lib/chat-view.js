@@ -2713,8 +2713,11 @@ class ChatView {
       // beyond the top edge, applied now that there is history to scroll into
       // — never more than one viewport (the zone's width), never while pinned.
       // Applied BEFORE the grow check, so the loop still lands with a full
-      // viewport of history above the reader's final position.
-      this._applyWheelCarry('up', 'extendTop:carry');
+      // viewport of history above the reader's final position. `keepRest`
+      // (r1b): a pass whose landing has less room than the carry (band 0 — the
+      // list taller than the window, scrollTop clamped at 0) keeps the rest for
+      // the next pass; the finally drops what no pass could apply.
+      this._applyWheelCarry('up', 'extendTop:carry', { keepRest: true });
       const above = Math.round(this._messageList.scrollTop); // history rendered ABOVE the viewport after the landing
       this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'up'; this._trace('extendTop:done', { ws: newStart, n: msgs.length, anchored, st: above, sh: this._messageList.scrollHeight, ch: this._messageList.clientHeight, pass: passes + 1 });
       this._scheduleAxSync('extendTop');
@@ -2735,6 +2738,7 @@ class ChatView {
     } finally {
       this._extendingTop = false;
       endLoad();
+      this._dropWheelCarry('up', 'extendTop:end');
       setTimeout(() => this._liftLoadLock(), 300);
     }
   }
@@ -2768,15 +2772,33 @@ class ChatView {
   /** Apply the carried px at a LANDING — both extends AND both gap slabs read
    *  it (the seek path used to eat a carried notch silently): bounded by the
    *  room the landing produced, never in the up direction while pinned (a
-   *  pinned view is the tail). The carry is consumed either way; returns the
-   *  px applied. */
-  _applyWheelCarry(dir, by) {
+   *  pinned view is the tail); returns the px applied. A single landing (a gap
+   *  slab) consumes the carry either way. A GROW LOOP's pass (`keepRest`, both
+   *  extends) consumes only what it APPLIED — the rest rides into the loop's
+   *  next pass, and the loop's end drops what no pass could apply
+   *  (_dropWheelCarry). THE BAND-0 NOTCH (2.369.167 r1b): a list taller than
+   *  its rendered window has no scroll range, so the first passes of a
+   *  fold-dominated extend add history with NO room above the reader (their
+   *  landing clamps at scrollTop 0); consumed there, the notch was gone, the
+   *  loop landed at the very bottom and the landing's own scroll re-pinned the
+   *  view the wheel had just unpinned (`wheelTop{carry:120} extendTop:done
+   *  {st:0,sh:565} … extendTop:grown repin`, no wheelCarry anywhere). */
+  _applyWheelCarry(dir, by, { keepRest = false } = {}) {
     const list = this._messageList;
     const room = dir === 'up' ? list.scrollTop : Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
-    const carry = (this._wheelCarryDir === dir && !(dir === 'up' && this._pinned)) ? Math.min(this._wheelCarry || 0, room) : 0;
-    this._wheelCarry = 0;
+    const held = (this._wheelCarryDir === dir && !(dir === 'up' && this._pinned)) ? (this._wheelCarry || 0) : 0;
+    const carry = Math.min(held, room);
+    this._wheelCarry = keepRest ? held - carry : 0;
     if (carry > 0) { this._traceExpect(by); list.scrollTop += dir === 'up' ? -carry : carry; this._trace('wheelCarry', { dir, px: Math.round(carry), by }); }
     return carry;
+  }
+  /** A grow loop ended with carried px no pass had room for (history
+   *  exhausted, the pass cap, a pin): they belong to no landing — dropped and
+   *  said, never left to inflate the next notch. */
+  _dropWheelCarry(dir, by) {
+    if (this._wheelCarryDir !== dir || !(this._wheelCarry > 0)) return;
+    this._trace('wheelCarry:drop', { dir, px: Math.round(this._wheelCarry), by });
+    this._wheelCarry = 0;
   }
   /** A navigation the reader CHOSE (a jump, the minimap, a search reveal, a
    *  teleport, the scroll-to-bottom button) makes a carried notch stale — it
@@ -3037,8 +3059,9 @@ class ChatView {
       // sh 2584→1423`) and the fold then collapsed what was left.
       this._updateRuns();
       { const before = this._windowStart; this._trimTop(); if (this._windowStart !== before) this._updateRuns(); }
-      // the carried wheel-down notch (see the wheel handler / _extendTop)
-      this._applyWheelCarry('down', 'extendBottom:carry');
+      // the carried wheel-down notch (see the wheel handler / _extendTop — the
+      // rest a pass had no room for rides into the next pass here too)
+      this._applyWheelCarry('down', 'extendBottom:carry', { keepRest: true });
       const below = Math.round(list.scrollHeight - list.scrollTop - list.clientHeight); // content rendered BELOW the viewport
       this._lastStructuralAt = Date.now(); this._lastStructuralDir = 'down'; this._trace('extendBottom', { we: end, n: msgs.length, st: Math.round(list.scrollTop), sh: list.scrollHeight, ch: list.clientHeight, below, pass: passes + 1 });
       this._scheduleAxSync('extendBottom');
@@ -3058,6 +3081,7 @@ class ChatView {
       try { track('event', 'chat-extend-bottom-failed', String(e?.message || e).slice(0, 120)); } catch {}
     } finally {
       endLoad();
+      this._dropWheelCarry('down', 'extendBottom:end');
       setTimeout(() => this._liftLoadLock(), 300);
     }
   }
@@ -3381,8 +3405,15 @@ class ChatView {
    *  there). While an upward page is in flight (`_extendingTop`, raised and
    *  dropped by _extendTop itself) the reader has said where they are going:
    *  no re-pin; the landing's carried notch moves them out of the band, and a
-   *  later scroll re-pins honestly. Gates: test-chat-trim-guard ⑧ (unit + the
-   *  loop) and test-chat-paging §4b (the constructed band + its control). */
+   *  later scroll re-pins honestly. That holds in band 0 too (a list TALLER
+   *  than its window, no scroll range) only because a grow loop's pass keeps
+   *  the part of the carry it had no room for (_applyWheelCarry keepRest,
+   *  r1b): consumed at the first, room-less pass, the loop landed at the very
+   *  bottom and the landing's own scroll — after this flag drops — re-pinned.
+   *  A notch smaller than the 50 px band still lands inside it and re-pins
+   *  (the tail's own hysteresis, as a 30 px scroll up from any tail does).
+   *  Gates: test-chat-trim-guard ⑧/⑨ (unit + the loop) and test-chat-paging
+   *  §4b (the constructed bands + their controls). */
   _repinVerdict(atTail) {
     if (!atTail || this._pinned) return null;
     return this._extendingTop ? 'skip' : 'repin';

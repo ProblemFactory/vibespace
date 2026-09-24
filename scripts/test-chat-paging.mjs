@@ -319,7 +319,7 @@ check('no anchor-shift/teleport jumps while paging', analysis.jumpCount === 0, `
 // and stop after one slab, or the leg proves nothing.
 const FOLD_BAND = 25;
 console.log(`§4b fold-dominated: one wheel notch = one landing on a full viewport; the bottom is never trimmed while short; the reader never lands on the top of a slab they did not ask for — in the PIN BAND (the list ${FOLD_BAND} px shorter than the rendered attach slab)`);
-const FOLD_RUN = (title, { neuter = false, maxNotches = 6 } = {}) => `(async () => {
+const FOLD_RUN = (title, { neuter = false, maxNotches = 6, tall = 0, stripKeep = false } = {}) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   window.app.viewSession('${SID2}', '${CWD}', ${JSON.stringify(title)});
   let v = null, w = null;
@@ -334,16 +334,26 @@ const FOLD_RUN = (title, { neuter = false, maxNotches = 6 } = {}) => `(async () 
   await sleep(1500); // initial render + fold settle
   const list = v._messageList;
   const open = { ch: list.clientHeight, sh: list.scrollHeight, rendered: list.querySelectorAll(':scope > .chat-msg').length };
-  // THE BAND: resize the window until the list is FOLD_BAND px shorter than the content (heights settle after a resize)
-  let resizes = 0;
+  // THE BAND: resize the window until the list is FOLD_BAND px shorter than the content (heights settle after a resize).
+  // BAND 0 (tall > 0, r1b): the list TALL px TALLER than the rendered slab — no scroll range at all. The slab is
+  // measured with the list first sized well under it (200 px: its scrollHeight is then the content), then the
+  // list is opened to content + TALL.
+  let resizes = 0, content = 0;
+  if (${tall} > 0) {
+    w.element.style.height = (w.element.offsetHeight - list.clientHeight + 200) + 'px'; if (w.onResize) try { w.onResize(); } catch {}
+    await sleep(500);
+    content = list.scrollHeight;
+  }
   for (; resizes < 8; resizes++) {
-    const d = (list.scrollHeight - ${FOLD_BAND}) - list.clientHeight;
+    const d = (${tall} > 0 ? content + ${tall} : list.scrollHeight - ${FOLD_BAND}) - list.clientHeight;
     if (Math.abs(d) <= 3) break;
     w.element.style.height = (w.element.offsetHeight + d) + 'px'; if (w.onResize) try { w.onResize(); } catch {}
     await sleep(500);
   }
   await sleep(1800); // past the paging gates' 1.5 s structural horizon — a resize is no input
   if (${neuter ? 'true' : 'false'}) Object.defineProperty(v, '_extendingTop', { configurable: true, get: () => false, set: () => {} });
+  // the band-0 CONTROL: the pre-r1b accounting on the instance — the loop's keepRest stripped, so a pass consumes the whole carry
+  if (${stripKeep ? 'true' : 'false'}) { const a0 = Object.getPrototypeOf(v)._applyWheelCarry; v._applyWheelCarry = function (dir, by) { return a0.call(this, dir, by); }; }
   // THE ORDER, CONSTRUCTED: the wheel's own scroll is decided (next frame, the handler's rAF) while the
   // first slab is still in flight — each fetch is held three frames on the instance. A real server's round
   // trip is longer than a frame (the mirror's was); a loopback one on an idle box can land FIRST, the
@@ -352,7 +362,7 @@ const FOLD_RUN = (title, { neuter = false, maxNotches = 6 } = {}) => `(async () 
   { const f0 = v._fetchMessages; const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
     v._fetchMessages = async function (...a) { await frame(); await frame(); await frame(); return f0.apply(this, a); }; }
   const ch = list.clientHeight;
-  const out = { ok: true, open, resizes, ws0: v._windowStart, ch, sh0: list.scrollHeight, band: list.scrollHeight - ch, pin0: !!v._pinned, rendered0: list.querySelectorAll(':scope > .chat-msg').length, notches: [] };
+  const out = { ok: true, open, resizes, ws0: v._windowStart, ch, sh0: list.scrollHeight, band: list.scrollHeight - ch, content, tall: content ? ch - content : 0, pin0: !!v._pinned, rendered0: list.querySelectorAll(':scope > .chat-msg').length, notches: [] };
   for (let k = 0; k < ${maxNotches}; k++) {
     if (v._windowStart <= 0) break;
     const mark = (v._traceRing || []).length, t0 = Date.now();
@@ -368,7 +378,9 @@ const FOLD_RUN = (title, { neuter = false, maxNotches = 6 } = {}) => `(async () 
     }
     await sleep(400); // late layout (the fold's debounced pass, the slab reservation's release)
     const tail = (v._traceRing || []).slice(mark);
-    out.notches.push({ ms: Date.now() - t0, extends: tail.filter((e) => e.tag === 'extendTop:done').length, grown: tail.some((e) => e.tag === 'extendTop:grown'), trimBottom: tail.filter((e) => e.tag === 'trimBottom').length, foldCeiling: tail.filter((e) => e.tag === 'foldCeiling').length,
+    const pass1 = tail.find((e) => e.tag === 'extendTop:done') || {};
+    out.notches.push({ ms: Date.now() - t0, extends: tail.filter((e) => e.tag === 'extendTop:done').length,
+      pass1: { st: pass1.st, sh: pass1.sh, ch: pass1.ch }, carryPx: tail.filter((e) => e.tag === 'wheelCarry' && e.dir === 'up').reduce((a, e) => a + (e.px || 0), 0), carryDrops: tail.filter((e) => e.tag === 'wheelCarry:drop').length, grown: tail.some((e) => e.tag === 'extendTop:grown'), trimBottom: tail.filter((e) => e.tag === 'trimBottom').length, foldCeiling: tail.filter((e) => e.tag === 'foldCeiling').length,
       repins: tail.filter((e) => e.tag === 'repin').length, repinSkips: tail.filter((e) => e.tag === 'repinSkipPageUp').length, pinnedRetail: tail.filter((e) => e.tag === 'pinnedRetail').length,
       st: Math.round(list.scrollTop), sh: list.scrollHeight, ws: v._windowStart, pin: !!v._pinned, rendered: list.querySelectorAll('.chat-msg').length });
   }
@@ -396,6 +408,35 @@ if (fold?.ok) {
   console.log('  fold control:', JSON.stringify({ ...c, notches: undefined }), n ? 'notch: ' + JSON.stringify(n) : '');
   check(`NEGATIVE CONTROL §4b: in the same band (${c?.band} px) with the re-pin gate neutered, the notch's own scroll RE-PINS the view and the grow loop stops after one slab (repins ${n?.repins}, extends ${n?.extends}, grown ${n?.grown}, sh ${n?.sh} vs 2 × ${c?.ch}) — the legs can go red`,
     !!n && Math.abs(c.band - FOLD_BAND) <= 3 && n.repins >= 1 && n.extends === 1 && !n.grown && n.sh < 2 * c.ch, JSON.stringify(c));
+}
+// §4b BAND 0 (2.369.167 r1b — the verifier's reproduction on r1, identical on 3207e03b): a list TALLER than its
+// rendered window has no scroll range, so the grow loop's first passes add history with NO room above the reader
+// (their landing clamps at scrollTop 0). The carried notch was consumed at that room-less pass, the loop landed at
+// the very bottom, and the landing's own scroll re-pinned the view (`wheelTop{carry:120} extendTop:done{st:0,sh:565}
+// … extendTop:grown repin`, no wheelCarry anywhere): the reader's first wheel-up on a tall window over a
+// fold-dominated session went nowhere. The height law cannot see it (1327/565 ≥ 2) — the loss is in scrollTop, so
+// the leg is asserted on scrollTop. THE CONTROL: the same band-0 view with the loop's keepRest stripped on the
+// instance (the pre-r1b accounting — a pass consumes the whole carry) must land at the bottom and re-pin.
+const FOLD_TALL = 120, NOTCH_PX = 120;
+{
+  const b0 = await evaljs(FOLD_RUN('fold band0', { tall: FOLD_TALL, maxNotches: 2 }));
+  const n1 = b0?.notches?.[0];
+  console.log('  fold band0:', JSON.stringify({ ...b0, notches: undefined }));
+  for (const n of b0?.notches || []) console.log('    notch:', JSON.stringify(n));
+  const built = (r, n) => !!r?.ok && !!n && Math.abs(r.tall - FOLD_TALL) <= 3 && r.sh0 === r.ch && r.pin0 && r.ws0 > 0 && n.pass1.st === 0 && n.pass1.sh === n.pass1.ch;
+  check(`BAND 0 was constructed: the list is ${b0?.tall} px TALLER than the rendered slab (${b0?.content} px; ${FOLD_TALL} ± 3 — no scroll range, sh ${b0?.sh0} = ch ${b0?.ch}), pinned with history above (ws ${b0?.ws0}), and the notch's first pass landed with NO room above the reader (st ${n1?.pass1?.st}, sh ${n1?.pass1?.sh} = ch ${n1?.pass1?.ch})`,
+    built(b0, n1), JSON.stringify(b0));
+  if (built(b0, n1)) {
+    check(`BAND 0: the whole notch reached the reader across the passes — the room-less first pass kept it (Σ wheelCarry ${n1.carryPx} px = the ${NOTCH_PX} px notch)`, Math.abs(n1.carryPx - NOTCH_PX) <= 1, JSON.stringify(n1));
+    check(`BAND 0: the first notch lands ONE NOTCH into history, never at the bottom: st ${n1.st} ≤ (sh ${n1.sh} − ch ${b0.ch}) − ${NOTCH_PX} (+2), no re-pin, not pinned at the notch's end`,
+      n1.st <= n1.sh - b0.ch - NOTCH_PX + 2 && n1.repins === 0 && !n1.pin, JSON.stringify(n1));
+    check('BAND 0: every notch after it keeps the whole notch too, or ran out of history — no re-pin, never pinned', b0.notches.every((n) => (n.ws === 0 || Math.abs(n.carryPx - NOTCH_PX) <= 1) && n.repins === 0 && !n.pin), JSON.stringify(b0.notches));
+  }
+  const c0 = await evaljs(FOLD_RUN('fold band0 control', { tall: FOLD_TALL, maxNotches: 1, stripKeep: true }));
+  const cn = c0?.notches?.[0];
+  console.log('  fold band0 control:', JSON.stringify({ ...c0, notches: undefined }), cn ? 'notch: ' + JSON.stringify(cn) : '');
+  check(`NEGATIVE CONTROL §4b band 0: the same shape (tall ${c0?.tall}, first pass st ${cn?.pass1?.st} / sh ${cn?.pass1?.sh} = ch ${cn?.pass1?.ch}) with keepRest stripped on the instance loses the notch at the room-less pass (Σ wheelCarry ${cn?.carryPx}), lands at the bottom (st ${cn?.st} vs sh − ch ${cn ? cn.sh - c0.ch : '?'}) and RE-PINS (repins ${cn?.repins}, pinned ${cn?.pin}) — the verifier's shape, and the legs can go red`,
+    built(c0, cn) && cn.carryPx === 0 && cn.st >= cn.sh - c0.ch - 2 && cn.repins >= 1 && cn.pin, JSON.stringify(c0));
 }
 
 // ── 4c. THE HUGE COMPACT-MODE SESSION (inc-mubvu3a4-x8sb, 2026-09-21, owner on
