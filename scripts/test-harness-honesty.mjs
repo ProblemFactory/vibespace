@@ -40,7 +40,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, withoutVendorKeys } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -463,12 +463,12 @@ ok(events().some((e) => e.type === 'server_request_resolved' && e.payload.id ===
     const dumpDir = path.join(dir, 'schema-dump');
     fs.mkdirSync(dumpDir, { recursive: true });
     let dumped = true;
-    try { execSync(`codex app-server generate-json-schema --experimental --out ${dumpDir}`, { env: { ...process.env, CODEX_HOME: path.join(dir, 'no-such-home') }, stdio: 'ignore' }); }
+    try { execSync(`codex app-server generate-json-schema --experimental --out ${dumpDir}`, { env: { ...withoutVendorKeys(process.env), CODEX_HOME: path.join(dir, 'no-such-home') }, stdio: 'ignore' }); }
     catch { dumped = false; }
     if (!dumped) console.log('  SKIP: `codex app-server generate-json-schema` failed here — fixture diff skipped');
     else {
       let ver = '?';
-      try { ver = execSync('codex --version', { encoding: 'utf8' }).trim(); } catch { }
+      try { ver = execSync('codex --version', { encoding: 'utf8', env: withoutVendorKeys(process.env) }).trim(); } catch { }
       for (const [method, file] of Object.entries(RESP_SCHEMAS.fileByMethod)) {
         const live = JSON.parse(fs.readFileSync(path.join(dumpDir, file + '.json'), 'utf8'));
         ok(JSON.stringify(live) === JSON.stringify(RESP_SCHEMAS.byMethod[method]),

@@ -73,6 +73,7 @@ const AM = await import(path.join(REPO, 'src/lib/agent-meta.js'));
 console.log('— schema pin (2.1.257 zod, dumped)');
 const CONSUMED = ['tools', 'mcp_servers', 'agents', 'skills', 'plugins', 'plugin_errors', 'plugin_warnings',
   'mcp_server_errors', 'terminal_slash_commands', 'output_style', 'memory_paths', 'betas', 'claude_code_version', 'slash_commands'];
+// real-cli-env: the installed claude is only READ (its zod schema bytes) — never spawned for a turn (B-5f0b audit)
 let claudeBin = null;
 try { claudeBin = fs.realpathSync(execFileSync('bash', ['-lc', 'command -v claude'], { encoding: 'utf8' }).trim()); } catch { }
 // A bounded window after a literal marker inside the (215MB, single-line)

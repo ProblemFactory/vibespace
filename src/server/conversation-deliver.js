@@ -88,8 +88,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
         if (s.mode !== 'chat' || !s.pty || s.host) continue;
         if (capsOf(s.backend).peerDelivery !== 'rpc-queue') continue;
-        if (!wrapperCaps(path.join(dataDir, 'session-buffers'), wid, s.socketPath).peerMessage) continue;
-        return { wid, s };
+        const wc = wrapperCaps(path.join(dataDir, 'session-buffers'), wid, s.socketPath);
+        if (!wc.peerMessage) continue;
+        return { wid, s, wc };
       }
     } catch { }
     return null;
@@ -344,9 +345,23 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // check and the wrapper's RPC, and a review/compact turn is not steerable
         // — so the wrapper's own `peer_message_result{mode}` SETTLES it: a steer
         // that fell back to 'queued'/'turn' is charged then (settleRpcDelivery).
-        const steersIntoRunningTurn = kind === 'notification'
+        const steerLane = kind === 'notification'
           && notificationDelivery(capsOf(rpc.s.backend)) === 'steer'
           && !!rpc.s._isStreaming;
+        // THE OLD-WRAPPER SKEW (B-d963, the owner saw two queued). The lane
+        // above is the HARNESS's; THIS process may predate it — a wrapper
+        // spawned before the verb table (its sidecar names no `queueVerbs`)
+        // answers a notification frame with thread/queue/add, a BILLED turn
+        // after the running one. Its own advert is read BEFORE the write
+        // (wrapperCaps, never a version number) and the miss is TYPED so the
+        // caller stashes: the notification then rides the next prompt and the
+        // drain site renders its chat card. Only while a turn runs — an idle
+        // old wrapper opens a turn exactly as a new one does. The hold goes
+        // back in `finally` (no frame, no turn).
+        if (steerLane && !rpc.wc.notificationSteer) {
+          return { ok: false, lane: 'rpc-queue', kind, refused: 'wrapper-no-steer', reason: "this session's agent predates notification steering — delivering now would queue a billed turn after the running one; held for the conversation's next prompt (restart the session to receive notifications mid-turn)" };
+        }
+        const steersIntoRunningTurn = steerLane;
         // no free lane right now ⇒ noWake refuses here rather than opening a
         // turn (the frame is not written; the hold goes back in `finally`)
         if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };

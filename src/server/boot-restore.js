@@ -10,6 +10,7 @@ const path = require('path');
 const pty = require('node-pty');
 const { execFileSync, spawn } = require('child_process');
 const { createMessageManager } = require('../normalizers');
+const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck holds a listener SET (the liveness stamp + the consumer)
 const { cwdToProjectDir, dedupWebuiSockets } = require('../session-store');
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
@@ -557,13 +558,9 @@ function restoreAgentdPipeSessions() {
       let offset = 0;
       try { offset = fs.statSync(path.join(BUFFERS_DIR, id + '.buf')).size; } catch { }
       const h = await dm.openPipeSession({ sid: id, offset });
-      const shim = {
-        pid: h.pid || -1,
-        onData: (cb) => { h.onData = (buf) => cb(buf.toString('utf-8')); },
-        onExit: (cb) => { h.onExit = (code) => cb({ exitCode: code ?? 0 }); },
-        write: (str) => { try { h.write(str); } catch { } },
-        resize: () => { }, kill: () => { try { h.kill(); } catch { } },
-      };
+      // the SAME duck as ws-create's R6 create path (it was a verbatim one-slot
+      // twin that dropped the liveness stamp — B-ae4b)
+      const shim = pipePtyShim(h);
       activeSessions.set(id, session);
       session._webuiId = id;
       setupSessionPty(session, id, shim);

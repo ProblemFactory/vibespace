@@ -60,6 +60,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const BE = require('../src/server/browser-env.js');
@@ -799,18 +800,13 @@ console.log('\n⑧ the sweep (§3.2.2: those directories are ours, and they are 
 // ═══ PATCHED COPIES of the ORCH module (the branch's pre-fix-control idiom) ═
 // A control must be the thing it names: round 2's behaviour is the shipped
 // module with ONE call put back, not a hand-written imitation. Copies are
-// SIBLINGS of the real module (relative requires), gitignored, swept by PID at
-// start (a SIGKILL strands one; a dirty tree is what the release gate refuses).
-const SRC_DIR = path.join(REPO, 'src/server');
-const mutants = [];
-for (const f of fs.readdirSync(SRC_DIR)) {
-  const m = /^vs-browser-mut-(\d+)-/.exec(f);
-  if (!m || Number(m[1]) === process.pid) continue;
-  try { process.kill(Number(m[1]), 0); continue; } catch (e) { if (e.code === 'EPERM') continue; }
-  try { fs.unlinkSync(path.join(SRC_DIR, f)); } catch { }
-}
-process.on('exit', () => { for (const f of mutants) { try { fs.unlinkSync(f); } catch { } } });
-let mutN = 0;
+// written OUTSIDE the tree (scripts/mutant-copy.mjs: this process's scratch
+// dir, `require` re-bound on line 1 to the real module's path, so relative
+// requires resolve as a sibling's); ㉑ measures that while they exist. They
+// used to be siblings in src/server/ (vs-browser-mut-*, gitignored).
+sweepLegacy(REPO, ['src/server'], /^vs-browser-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
+const MUTB = mutantCopies('bprof', REPO);
+
 const beSrc0 = read('src/server/browser-env.js');
 function mutantBE(edits) {
   let src = beSrc0, hits = 0;
@@ -818,12 +814,10 @@ function mutantBE(edits) {
     if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 70) };
     src = src.split(from).join(to); hits++;
   }
-  const f = path.join(SRC_DIR, `vs-browser-mut-${process.pid}-${++mutN}.js`);
-  fs.writeFileSync(f, src); mutants.push(f);
-  return { mod: require(f), hits };
+  return { mod: MUTB.load('src/server/browser-env.js', src), hits };
 }
 // The same for src/server/browser-bindings.js (r6): it has no relative
-// requires, but it lives under the same swept, gitignored prefix on purpose.
+// requires, but it goes through the same outside-the-tree helper on purpose.
 const bbSrc0 = read('src/server/browser-bindings.js');
 function mutantBB(edits) {
   let src = bbSrc0, hits = 0;
@@ -831,9 +825,7 @@ function mutantBB(edits) {
     if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 70) };
     src = src.split(from).join(to); hits++;
   }
-  const f = path.join(SRC_DIR, `vs-browser-mut-${process.pid}-${++mutN}.js`);
-  fs.writeFileSync(f, src); mutants.push(f);
-  return { mod: require(f), hits };
+  return { mod: MUTB.load('src/server/browser-bindings.js', src), hits };
 }
 
 // ═══ ⑬ THE CLI'S OTHER FILE: ./agent-browser.json (r3) ════════════════════
@@ -1655,7 +1647,8 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
     }
     return out;
   };
-  const files = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => f.endsWith('.js') && !/vs-[a-z]+-mut-/.test(f)).map((f) => path.join('src', f))];
+  // no name-based exclusion: no suite writes a patched copy under src/ any more (test-architecture §51)
+  const files = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => f.endsWith('.js')).map((f) => path.join('src', f))];
   const sites = files.flatMap((f) => classifySites(read(f), f));
   const nonSpread = sites.filter((x) => !x.spreads);
   console.log(`    meta-writer census: ${sites.length} call sites over ${files.length} files; non-spreading: ${nonSpread.map((x) => x.file + ':' + x.line).join(', ') || 'none'}`);
@@ -1693,6 +1686,17 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
 console.log('\n⑲ no machine-global name was claimed');
 if (prodSockPreExisted) skip(`${PROD_SOCK} already existed before this run, so whether a leg would have created it cannot be told here`);
 else ok(!fs.existsSync(PROD_SOCK), `this suite did not create the production per-uid socket dir ${PROD_SOCK} — every resolver it builds gets a scratch base or a short runtime dir`);
+
+
+// ── ㉑ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n㉑ the patched copies never touch the tree');
+for (const r of copiesCensus(MUTB.files, MUTB.dir, REPO, { minCopies: 2 })) ok(r.pass, '㉑ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
 process.exit(fail ? 1 : 0);

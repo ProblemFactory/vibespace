@@ -17,8 +17,15 @@ import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// §5 (f)'s pre-fix recipe is a patched copy written OUTSIDE the tree
+// (scripts/mutant-copy.mjs, `require` re-bound to the real path; it used to be
+// src/vs-dd-mut-<pid>-life.js); the tree census at the end measures that.
+const MUTDD = mutantCopies('ddisp', repo);
+sweepLegacy(repo, ['src'], /^vs-dd-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
+
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
@@ -482,14 +489,12 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
       const R1 = ["`--bind-tcp=127.0.0.1:${port},${XPRA_BIND_REFUSALS}`", '`--bind-tcp=127.0.0.1:${port}`'];
       const R2 = ["{ env: { ...(env || process.env), XPRA_CLIENT_CAN_SHUTDOWN: '0' }, logFd, extraStdio: 'pipe', name: 'xpra' }", "{ env, logFd, extraStdio: 'pipe', name: 'xpra' }"];
       ok(srcD.split(R1[0]).length === 2 && srcD.split(R2[0]).length === 2, 'the bind refusals and the shutdown switch are each spelled once (the control patches exactly them)');
-      for (const f of fs.readdirSync(path.join(repo, 'src'))) { const mm = /^vs-dd-mut-(\d+)-/.exec(f); if (mm && !D.pidAlive(Number(mm[1]))) { try { fs.unlinkSync(path.join(repo, 'src', f)); } catch {} } }
-      const mfile = path.join(repo, 'src', `vs-dd-mut-${process.pid}-life.js`);
-      fs.writeFileSync(mfile, srcD.replace(R1[0], R1[1]).replace(R2[0], R2[1]));
+      const mfile = MUTDD.write('src/desktop-display.js', srcD.replace(R1[0], R1[1]).replace(R2[0], R2[1]), 'life');
       try {
         const Dm = require(mfile);
         const ca = await session(Dm, 'c-stop', stopReq), cb = await session(Dm, 'c-exit', exitReq), cc = await session(Dm, 'c-shut', shutdown);
         ok(ca.alive === false && cb.alive === false && cc.alive === false, `CONTROL: the pre-fix recipe's xpra is ENDED by each of the three (stop ${ca.alive}, exit ${cb.alive}, shutdown-server ${cc.alive} alive) — the reproduced session kill`, { ca, cb, cc });
-      } finally { try { fs.unlinkSync(mfile); } catch {} }
+      } finally { /* MUTDD's scratch dir is removed at exit */ }
     }
   }
 }
@@ -688,6 +693,18 @@ console.log('§6 P8-2 x4 — the display\'s size, the fit act, depth in the tree
     }
   }
 }
+
+
+// ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n§tree the patched copies never touch the tree');
+if (!MUTDD.files.length) skip('§tree: no patched copy was made this run (§5 (f) needs xpra) — nothing to measure');
+else for (const r of copiesCensus(MUTDD.files, MUTDD.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

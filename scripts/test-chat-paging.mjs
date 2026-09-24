@@ -142,7 +142,19 @@ process.on('exit', cleanup);
 // to ingest. The fixture lives under an isolated home now, so a missed cleanup
 // is only disk; the handlers keep it from being disk FOREVER.
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
-for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+// THE BOOT WAITS (B-1192 — the heavy run's OTHER first-attempt red, `Cannot read
+// properties of undefined (reading 'viewSession')`): a fixed 10 s server wait and
+// a fixed 24 s page wait fell through under load, the page sat on Chrome's
+// connection-refused page (the §4d control's freshly started server had not
+// answered yet) and the next eval called window.app.viewSession on it. Both waits
+// are deadlines now, the page is re-navigated until the app boots, and a page
+// that never boots fails a NAMED check instead of throwing a TypeError.
+const serverUp = async (port, ms = 90000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { try { await fetch(`http://127.0.0.1:${port}/api/home`); return true; } catch { await sleep(250); } }
+  return false;
+};
+check('the scratch server answered', await serverUp(PORT));
 
 const WebSocket = require('ws');
 let target = null;
@@ -166,8 +178,19 @@ const evaljs = async (expr) => {
 };
 await cdp('Runtime.enable');
 await cdp('Page.enable');
-await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(400); }
+// every navigation below (pageReady's included) runs with the wizard pre-dismissed (test-architecture §47)
+await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+const pageReady = async (port, label, ms = 150000) => {
+  const end = Date.now() + ms; let navs = 0;
+  while (Date.now() < end) {
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` }); navs++;
+    const until = Math.min(end, Date.now() + 30000);
+    while (Date.now() < until) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm && window.app.viewSession)').catch(() => false)) return true; await sleep(400); }
+  }
+  check(`${label}: the app booted on the page (${navs} navigation(s) in ${Math.round(ms / 1000)} s)`, false, 'the page never exposed window.app — the legs on it are not run');
+  return false;
+};
+await pageReady(PORT, 'boot');
 await sleep(1500);
 
 // ── 3. open the view-only chat + install the drift recorder ──
@@ -327,6 +350,7 @@ const LIST_H = 790;
 const CADENCE = { slow: { notches: 1, deltaY: 120, gap: 0, settle: 1500 }, mid: { notches: 6, deltaY: 120, gap: 70, settle: 1500 }, fast: { notches: 4, deltaY: 700, gap: 30, settle: 2000 }, hold: { notches: 40, deltaY: 300, gap: 100, settle: 2400 } };
 const OPEN_HUGE = (sid, cwd, title) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  if (!window.app || typeof window.app.viewSession !== 'function') return { ok: false, why: 'no app on this page (see the boot check)' };
   window.app.viewSession(${JSON.stringify(sid)}, ${JSON.stringify(cwd)}, ${JSON.stringify(title)});
   let v = null, w = null, n = 0, armed = false;
   for (let i = 0; i < 300; i++) {
@@ -356,6 +380,29 @@ const OPEN_HUGE = (sid, cwd, title) => `(async () => {
   const r = list.getBoundingClientRect();
   return { ok: true, armed, n: list.querySelectorAll('.chat-msg').length, ch: list.clientHeight, sh: list.scrollHeight, st: list.scrollTop, ws: v._windowStart, we: v._windowEnd, total: v._total, gap: v._gapBounds, cv: !v._container.classList.contains('chat-no-content-visibility'), compact: v._container.classList.contains('chat-compact'), rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
 })()`;
+const TRIM_WITNESS_SOURCE = `(() => {
+  const v = window.__v; if (!v || v.__trimWitnessed) return 0;
+  const orig = v._trimEdge;
+  v._trimEdge = function (side) {
+    try {
+      const list = this._messageList, id = window.__pgReader;
+      const el = id ? list.querySelector(':scope > [data-msg-id="' + CSS.escape(id) + '"]') : null;
+      const rec = { side, st: Math.round(list.scrollTop), sh: list.scrollHeight, ch: list.clientHeight, zone: (() => { const z = this._keepZone(); return [Math.round(z.top), Math.round(z.bottom)]; })(), reader: !!el };
+      if (el) {
+        const els = [...list.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)')];
+        const i = els.indexOf(el), pos = this._cardPositions(els)[i];
+        let zeros = 0; for (let j = Math.max(0, i - 40); j <= i; j++) if (els[j].offsetHeight === 0 && getComputedStyle(els[j]).display !== 'none') zeros++;
+        Object.assign(rec, { idx: i, of: els.length, top: el.offsetTop, h: el.offsetHeight, read: pos && [Math.round(pos.top), Math.round(pos.bottom)], cv: el.style.contentVisibility || '-', cis: el.style.containIntrinsicSize || '-', zeroAbove: zeros });
+      }
+      window.__trimWitness && window.__trimWitness.push(rec);
+    } catch (e) { window.__trimWitness && window.__trimWitness.push({ err: String(e).slice(0, 120) }); }
+    const n = orig.call(this, side);
+    if (window.__trimWitness?.length) window.__trimWitness[window.__trimWitness.length - 1].removed = n;
+    return n;
+  };
+  v.__trimWitnessed = true;
+  return 1;
+})()`;
 const runGestures = async (plan, label) => {
   const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge test ' + label));
   console.log(`  [${label}] opened:`, JSON.stringify(opened));
@@ -366,6 +413,13 @@ const runGestures = async (plan, label) => {
   // by SEQ, never by index: the ring splices 600→400 mid-run and an index mark taken before the splice reads nothing after it (verifier r1)
   const ringSince = (mark) => evaljs(RING_SINCE_SOURCE(mark));
   const rows = [];
+  // THE TRIM WITNESS (B-1192): a downward gesture that lost the reader's card
+  // failed once per heavy run with nothing but the ring's tag counts to go on.
+  // Every trim now records, BEFORE it decides, where the reader's card (the
+  // gesture's top card) is and how the trim's own position read places it —
+  // printed only on a "gone from the DOM" violation, so the next red carries
+  // its geometry. Suite-side, read-only: it never changes a decision.
+  await evaljs(TRIM_WITNESS_SOURCE);
   for (const [name, dir, speed] of plan) {
     if (dir === 'jump') {
       // a SETUP step, not a judged gesture: the minimap's own jump (jumpToIndex) to a
@@ -388,6 +442,7 @@ const runGestures = async (plan, label) => {
     }
     const c = CADENCE[speed];
     const before = await snap(); const mark = before.ringSeq;
+    await evaljs(`(() => { window.__pgReader = ${JSON.stringify(before.topId)}; window.__trimWitness = []; return 1; })()`);
     // over a PLAIN point of the viewport (never a card's own scroll box — that box would take the notches)
     const pt = (await evaljs(WHEEL_POINT_SOURCE(dir, c.notches * c.deltaY))) || { x: cx, y: cy, moved: 0 };
     for (let i = 0; i < c.notches; i++) {
@@ -399,6 +454,11 @@ const runGestures = async (plan, label) => {
     const row = { name, dir, speed, wheelPx: c.notches * c.deltaY * (dir === 'up' ? -1 : 1), before, after, ring, pointerMoved: pt.moved ? 1 : 0, wheelFallback: pt.fallback ? 1 : 0, pt };
     row.verdict = judgeGesture(row); rows.push(row);
     const tags = {}; for (const e of ring) tags[e.tag] = (tags[e.tag] || 0) + 1;
+    if (row.verdict.reasons.some((x) => /gone from the DOM/.test(x))) {
+      const w = await evaljs('window.__trimWitness || []');
+      console.log(`      [evidence] reader ${before.topId} at ${before.topOff}px before the gesture; trims (reader as the trim read it): ${JSON.stringify(w)}`);
+      console.log(`      [evidence] ring: ${JSON.stringify(ring.filter((e) => /^(trim|pageDown|pageUp|extend|anchorLost|wheelCarry|gapDrop|scroll$)/.test(e.tag))).slice(0, 3000)}`);
+    }
     console.log('    ' + formatGesture(row, row.verdict) + (row.pointerMoved ? '  [pointer moved off a nested scroller]' : '') + (row.wheelFallback ? `  [NO plain point: wheel at the centre over ${pt.under || '?'} — ⑤ not judged; ${pt.boxes} scroll boxes in the list]` : '') + (row.verdict.ok || row.wheelFallback ? '' : `  [wheel at ${pt.x},${pt.y} over ${pt.under || '?'}; scroll boxes in the list: ${pt.boxes ?? '?'}]`) + '  ring: ' + Object.entries(tags).map(([k, v]) => k + (v > 1 ? '×' + v : '')).join(' '));
   }
   return { opened, rows };
@@ -434,8 +494,7 @@ const TELEPORT = (x) => /pinned with the window|re-pinned mid-history|DOM's bott
 const PROBE_D = 80;
 const PROBE_UPS = [['probe-up-mid', 'mid'], ['probe-up-fast-1', 'fast'], ['probe-up-fast-2', 'fast']];
 const pinProbe = async (port, label) => {
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
-  for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(400); }
+  await pageReady(port, 'probe ' + label);
   await sleep(1500);
   const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge probe ' + label));
   if (!opened?.ok) return { opened };
@@ -523,6 +582,115 @@ if (huge.opened?.ok) {
   if (p.row) check('② probe on the fix: the notch that crosses into the pin band pages instead — no pin, no bottom landing, no walk to the tail, no repin with we < total', !p.row.verdict.reasons.some(TELEPORT) && p.midRepins === 0, p.row.verdict.reasons.join('; ') + ` (repins with we < total: ${p.midRepins})`);
 }
 
+// ── 4e. THE RELEASE FRAME (B-1192): a paging slab's fresh-height reservation
+// (_reserveFreshHeights) used to come off two frames after the landing wherever
+// the card was. A fresh slab card never rendered under content-visibility:auto,
+// so it has no remembered size, and the frame its override came off laid it out
+// at its lock size — measured on this fixture: a 407 px slab read 10 px and
+// scrollTop swung 562 → 168 → 562 inside one page-up landing. Any layout read in
+// that frame (the keep zone's _cardPositions, the scroll handler, the pin) saw a
+// geometry the reader never did; the heavy tier caught it as a downward gesture
+// whose trim took the reader's top card (red on the first attempt of both .160
+// integration runs, green on every retry). The leg: page-up landings driven by
+// the view's own _extendTop under a synthetic 3-frame main-thread stall starting
+// in the landing's frame, a per-rAF logger reading every fresh card's height
+// after EVERY rAF callback (the release callback included), judged against the
+// settled heights for cards inside the TRIM KEEP ZONE (viewport ± one viewport);
+// the reader's card must survive every landing. The control swaps the pre-fix
+// two-frame release onto the same view (an own property over the prototype).
+// On a red, the first offending frame's geometry is printed — the evidence.
+const RELEASE_LEG = (control) => `(async () => {
+  const v = window.__v, list = v._messageList, ch = list.clientHeight;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const raf0 = window.requestAnimationFrame;
+  const proto = Object.getPrototypeOf(v)._reserveFreshHeights;
+  const PRE_FIX = function (els) {
+    if (!els?.length || this._readOnly || this._container?.classList.contains('chat-no-content-visibility')) return;
+    for (const el of els) el.style.contentVisibility = 'visible';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (this._disposed) return;
+      for (const el of els) if (el.style.contentVisibility === 'visible') el.style.contentVisibility = '';
+    }));
+  };
+  const base = ${control} ? PRE_FIX : proto;
+  let stalled = 0;
+  v._reserveFreshHeights = function (els, o) {
+    const r = base.call(this, els, o);
+    let n = 3; const spin = () => { const e = performance.now() + 45; while (performance.now() < e); stalled++; if (--n > 0) raf0.call(window, spin); };
+    raf0.call(window, spin);
+    return r;
+  };
+  const topCard = () => { const st = list.scrollTop; for (const c of list.children) { if (c.classList.contains('chat-msg') && c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st) return c; } return null; };
+  const out = [];
+  // 6 page-up landings (then the product's bottom trim leaves the window short of the tail), then 5
+  // page-DOWN landings parked at the DOM's bottom — where the fresh slab lands ON
+  // SCREEN, the case the two-frame release re-locked in view
+  const plan = ['up', 'up', 'up', 'up', 'up', 'up', 'down', 'down', 'down', 'down', 'down'];
+  try {
+    for (const dir of plan) {
+      if (dir === 'up' && v._windowStart <= 0) continue;
+      if (dir === 'down' && v._windowEnd >= v._total) {
+        // leave the live tail the way an upward reader does: park at the top, the product's own bottom trim
+        list.scrollTop = 0; await sleep(400); v._trimBottom(); await sleep(300);
+        if (v._windowEnd >= v._total) continue;
+      }
+      if (dir === 'down') { list.scrollTop = list.scrollHeight - list.clientHeight; await sleep(700); }
+      const old = new Set(list.children);
+      const reader = topCard();
+      const log = [];
+      const snap = () => {
+        const st = list.scrollTop;
+        const fresh = [];
+        for (const c of list.children) if (!old.has(c) && c.classList.contains('chat-msg')) fresh.push({ c, h: c.offsetHeight, top: c.offsetTop - st, cv: c.style.contentVisibility ? 'V' : '.' });
+        log.push({ t: Math.round(performance.now()), st: Math.round(st), sh: list.scrollHeight, fresh, readerIn: reader ? reader.isConnected : true, readerAt: reader && reader.isConnected ? Math.round(reader.offsetTop - st) : null });
+      };
+      window.requestAnimationFrame = (cb) => raf0.call(window, (ts) => { cb(ts); snap(); });
+      const ws0 = v._windowStart, we0 = v._windowEnd;
+      try { if (dir === 'up') await v._extendTop(); else await v._extendBottom(); await sleep(900); }
+      finally { window.requestAnimationFrame = raf0; }
+      snap();
+      const fin = log[log.length - 1];
+      const settled = new Map(fin.fresh.map((f) => [f.c, f.h]));
+      let first = null, nBad = 0, nScreen = 0;
+      for (const l of log) {
+        const off = l.fresh.filter((f) => settled.has(f.c) && Math.abs(f.h - settled.get(f.c)) > 2 && f.top + f.h > -ch && f.top < 2 * ch);
+        if (!off.length) continue;
+        nBad++;
+        const vis = (f) => f.top + Math.max(f.h, 1) > 0 && f.top < ch; // in THAT frame's geometry: a card whose box (or 0 px line) lies in the viewport
+        const onScreen = off.some(vis);
+        off.sort((a, b) => vis(b) - vis(a));
+        if (onScreen) nScreen++;
+        if (!first || (onScreen && !first.onScreen)) first = { t: l.t, st: l.st, sh: l.sh, settledSt: fin.st, settledSh: fin.sh, readerAt: l.readerAt, cv: l.fresh.map((f) => f.cv).join(''), onScreen, cards: off.slice(0, 6).map((f) => ({ top: f.top, h: f.h, settled: settled.get(f.c), cv: f.cv, cls: f.c.className.replace('chat-msg ', '').slice(0, 32) })) };
+      }
+      out.push({ dir, ws: [ws0, v._windowStart], we: [we0, v._windowEnd], frames: log.length, fresh: fin.fresh.length, nBad, nScreen, first, readerLost: log.some((l) => !l.readerIn), readerAt: [log[0]?.readerAt, fin.readerAt] });
+    }
+  } finally { delete v._reserveFreshHeights; window.requestAnimationFrame = raf0; }
+  return { ch, stalled, landings: out };
+})()`;
+const releaseLeg = async (control) => {
+  await pageReady(PORT, 'release ' + (control ? 'control' : 'fix'));
+  await sleep(1500);
+  const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge release ' + (control ? 'control' : 'fix')));
+  if (!opened?.ok) return { opened };
+  return { opened, ...(await evaljs(RELEASE_LEG(control))) };
+};
+console.log('§4e the release frame (B-1192): a paging landing under a 3-frame stall never lays a fresh slab card out ON SCREEN at a height the reader does not see');
+{
+  const fix = await releaseLeg(false);
+  const L = fix.landings || [];
+  const line = (tag, l) => `    [${tag}] ${l.dir.padEnd(4)} landing ws ${l.ws[0]}→${l.ws[1]} we ${l.we[0]}→${l.we[1]}: ${l.fresh} fresh cards, ${l.frames} rAF reads, ${l.nScreen} read(s) with a fresh card ON SCREEN off its settled height, ${l.nBad} in the keep zone (informational — off screen, absorbed by scroll anchoring), reader ${l.readerLost ? 'LOST' : 'kept'}${l.first ? ` — first: st ${l.first.st} (settles at ${l.first.settledSt}), sh ${l.first.sh} (settles at ${l.first.settledSh}), ${JSON.stringify(l.first.cards.slice(0, 2))}` : ''}`;
+  for (const l of L) console.log(line('fix', l));
+  const up = L.filter((l) => l.dir === 'up'), down = L.filter((l) => l.dir === 'down');
+  check(`§4e the leg ran: ≥ 3 page-up and ≥ 2 page-down landings with fresh cards under the stall (${up.length} up, ${down.length} down, ${fix.stalled} stalled frames)`, up.length >= 3 && down.length >= 2 && L.every((l) => l.fresh > 0) && fix.stalled >= 3 * L.length, JSON.stringify(fix.opened || fix).slice(0, 400));
+  const bad = L.filter((l) => l.nScreen);
+  check('§4e no fresh slab card ON SCREEN is ever laid out at a height other than its settled one — in its release frame or any other (the override comes off only once the card has left the viewport)', L.length && !bad.length, 'first offending frame (evidence): ' + JSON.stringify(bad[0]?.first));
+  check('§4e the reader\'s card survives every landing', L.length && !L.some((l) => l.readerLost), JSON.stringify(L.map((l) => l.readerAt)));
+  const ctl = await releaseLeg(true);
+  const C = ctl.landings || [];
+  for (const l of C) console.log(line('control', l));
+  check(`§4e NEGATIVE CONTROL: the pre-fix two-frame release on the same view lays a fresh card out ON SCREEN off its height (${C.filter((l) => l.nScreen).length} of ${C.length} landings) — the leg sees the defect`, C.length >= 5 && C.some((l) => l.nScreen), JSON.stringify(ctl.opened || C).slice(0, 400));
+}
+
 // ── 4d. THE PRE-FIX CONTROL: the same fixture and gestures on a scratch copy of
 // the client whose two rules are patched out — the trim's keep zone (back to
 // BY COUNT) and the pin predicate's `windowEnd ≥ total` term. The control must
@@ -569,9 +737,8 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
   const prevCleanup = cleanup;
   const cleanupControl = () => { try { csrv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${cwt}`, { cwd: repo, stdio: 'ignore' }); } catch {} };
   process.on('exit', cleanupControl);
-  for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${CPORT}/api/home`); break; } catch { await sleep(250); } }
-  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: `http://127.0.0.1:${CPORT}/` });
-  for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(400); }
+  check('control: the patched copy\'s server answered', await serverUp(CPORT));
+  await pageReady(CPORT, 'control');
   await sleep(1500);
   const CONTROL_PLAN = [['up-slow-1', 'up', 'slow'], ['up-slow-2', 'up', 'slow'], ['up-mid-1', 'up', 'mid'], ['up-mid-2', 'up', 'mid'], ['up-fast-1', 'up', 'fast'], ['up-fast-2', 'up', 'fast'],
     ['down-mid-1', 'down', 'mid'], ['down-mid-2', 'down', 'mid'], ['down-fast-1', 'down', 'fast'], ['down-fast-2', 'down', 'fast'], ['down-fast-3', 'down', 'fast'], ['down-fast-4', 'down', 'fast']];

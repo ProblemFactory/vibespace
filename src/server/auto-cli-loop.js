@@ -49,6 +49,7 @@
 const fs = require('fs');
 const path = require('path');
 const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketBought, PROJECTION_WINDOW_MS } = require('../account-pool-auto.js');
+const { cliRefreshDrift } = require('../usage-estimator.js');
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
@@ -140,14 +141,14 @@ function createAutoCliLoop(d) {
         const f = fails.get(a.id) || 0;
         if (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6))) continue;
         let est = null; try { est = raw ? d.usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
-        let drift = 0, moved = false;
-        const cmp = (e, r) => { if (e && r && typeof e.utilization === 'number' && typeof r.utilization === 'number') { const x = Math.abs(e.utilization - r.utilization) * 100; drift = Math.max(drift, x); if (x > 0.2) moved = true; } };
-        cmp(est?.fiveHour, raw?.fiveHour); cmp(est?.sevenDay, raw?.sevenDay);
-        for (const s of est?.scopedWeekly || []) cmp(s, (raw?.scopedWeekly || []).find((x) => x.name === s.name));
+        // B-a5c0: a raw bucket whose window already reset is NO control for the
+        // logged drift (it printed a 100-point "drift" old-window-vs-new); the
+        // scheduler keeps its inputs (triggerDrift/moved) — the refresh was right
+        const dr = cliRefreshDrift(est, raw, now);
         const pj = d.projectionRereadFor(a.id, now), reads = mergedReads(mem);
         // ONE attempt clock for both schedulers (lastMemberReadAt, 2026-09-08); pj = the estimator's PROJECTION (B-f69c ③):
         // a crossing before the next scheduled read asks this same rung now — once per BUCKET (projLabel/projResetsAt vs projReads, quota r2)
-        list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: drift, activeBurn: moved, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });
+        list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(...mem.map((x) => Math.max(attempts.get(x) || 0, d.lastMemberReadAt(x) || 0))), estDriftPct: dr.triggerDrift, activeBurn: dr.moved, drift: dr.drift, rolled: dr.rolled, projCrossInMs: pj ? pj.inMs : null, estBurnPtPerMin: pj ? pj.burnPtPerMin : 0, projLabel: pj ? pj.label : null, projResetsAt: pj ? (pj.resetsAt || 0) : 0, projReads: reads, projReadCrossAt: lastBoughtInstant(reads), pj, mem });
       }
       // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
       // a wandering threshold, not a fixed cadence
@@ -167,7 +168,7 @@ function createAutoCliLoop(d) {
         }
         saveState(d.dataDir, st, warn); // the backoff and the bought buckets outlive a restart (quota r2)
         if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); } catch (e) { warn(`[auto-cli] reading wake failed for ${key}: ${e.message}`); } } // the THIRD producer of a fresh reading takes the SAME edge (2026-09-08: its 02:31:43 success changed nothing) — AFTER the bookkeeping (quota r3)
-        log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (${why || '?'}; drift ${Math.round(it?.estDriftPct || 0)}pt${it?.pj ? `; ${it.pj.label} crosses its ${it.pj.line}% line in ~${Math.max(1, Math.round(it.pj.inMs / 60e3))} min at ${it.pj.pctPerMin}%/min` : ''})`);
+        log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (${why || '?'}; ${it?.drift == null ? (it?.rolled ? 'no drift control — the reading\'s window already reset' : 'no drift control') : `drift ${Math.round(it.drift)}pt`}${it?.pj ? `; ${it.pj.label} crosses its ${it.pj.line}% line in ~${Math.max(1, Math.round(it.pj.inMs / 60e3))} min at ${it.pj.pctPerMin}%/min` : ''})`);
         (d.metric || global.__vsMetric)?.('auto-cli-refresh-ms', 0);
       }
     } catch (e) { warn('[auto-cli] tick failed: ' + e.message); }

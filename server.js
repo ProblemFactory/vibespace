@@ -78,22 +78,10 @@ const PORT = process.env.PORT || 3456;
 const CLAUDE_CMD_RAW = process.env.CLAUDE_CMD || 'claude';
 const CODEX_CMD_RAW = process.env.CODEX_CMD || 'codex';
 // Resolve full paths at startup — node-pty's posix_spawnp may not find commands
-// if Homebrew/nvm paths (/opt/homebrew/bin) aren't in Node's inherited PATH
-function resolveCmd(name) {
-  // Try 'which' first
-  try {
-    const r = execFileSync('/usr/bin/which', [name], { encoding: 'utf-8', timeout: 2000 }).trim();
-    if (r && r.startsWith('/')) return r;
-  } catch {}
-  // Search common paths directly
-  const dirs = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin',
-    ...(process.env.PATH || '').split(path.delimiter)];
-  for (const dir of dirs) {
-    const p = path.join(dir, name);
-    try { fs.accessSync(p, fs.constants.X_OK); return p; } catch {}
-  }
-  return name;
-}
+// if Homebrew/nvm paths (/opt/homebrew/bin) aren't in Node's inherited PATH.
+// The agent CLIs are re-resolved at SPAWN time when the boot answer went stale
+// (B-a18e, the installer-window restart) ⇒ src/server/cli-cmd.js
+const { resolveCmd } = require('./src/server/cli-cmd.js');
 const DTACH_CMD = resolveCmd('dtach');
 const NODE_CMD = process.execPath;
 const ENV_CMD = resolveCmd('env');
@@ -104,7 +92,7 @@ const { X_ENV, detectXDisplay, refreshXEnv, stabilizeXAuth, adapterRegistry,
   CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
   CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
   EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
-  noteModelSeen, refreshAvailableModels, harnessAvailability, noteHarnessModels,
+  noteModelSeen, refreshAvailableModels, harnessAvailability, noteHarnessModels, cliCmds,
 } = require('./src/server/cli-env.js').create({
   rootDir: __dirname, CLAUDE_CMD_RAW, CODEX_CMD_RAW, resolveCmd,
   getOAuthToken: (...a) => getOAuthToken(...a),
@@ -1072,7 +1060,7 @@ process.on('unhandledRejection', (e) => { try { telemetry.record({ kind: 'server
 }
 
 // Zero-coupling metric hook for deep modules (session-store slow-parse etc.)
-global.__vsMetric = (name, value) => { try { telemetry.record({ kind: 'metric', name, value }); } catch {} };
+global.__vsMetric = (name, value, detail) => { try { telemetry.record({ kind: 'metric', name, value, detail }); } catch {} }; // detail = short attribution (account=… bucket=…), never content (B-a5c0)
 // Server-side EVENT hook (2.207.0): the debugging-pain batch — session
 // lifecycle anomalies, CLI error classes, probe failures — flows into the
 // same Diagnostics report/fleet forwarding as client events. NAMES + short
@@ -1660,7 +1648,7 @@ registerWsHandler(wss, {
   harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, // harness settings (design-harness-settings §5/§6)
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
+  NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
   USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, // telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1)
@@ -1926,8 +1914,10 @@ server.listen(PORT, HOST, () => {
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 
   // Local sessions run through the device daemon (machine #0) — GRADUATED,
-  // no flag: bring it up BEFORE restore so re-adopted sessions attach through
-  // it too. attachToDtach still falls back to a local pty on ANY failure.
+  // no flag. Started here, but the boot restore below does NOT wait for it:
+  // attachToDtach takes the daemon only on an ALREADY-live link (2.369.82), so
+  // restored sessions attach LOCALLY while connect() is in flight; the onExit
+  // re-attach ladder takes the daemon later. Any daemon failure = local pty.
   {
     try {
       const { DeviceManager } = require('./src/agentd/client.js');

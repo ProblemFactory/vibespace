@@ -41,6 +41,7 @@
  * inotify-watched the user's whole worktree (see src/opencode-serve.js).
  */
 const { access } = require('./opencode-access');
+const { ptyListeners } = require('../pty-duck');
 
 const RECONNECT_MS = 800;
 const MAX_RECONNECTS = 5;
@@ -66,16 +67,21 @@ async function openOpencodePty({ cwd = null, title = null, command = null, args 
   const bridge = await access().openPtyBridge({ cwd, title, command, args });
   const ptyId = bridge.pty.id;
 
-  let onData = null, onExit = null;
+  // node-pty keeps a listener SET and so must this duck: setupSessionPty
+  // registers the liveness stamp FIRST and the terminal consumer second. The
+  // one-slot version let the consumer replace the stamp AND flushed the held
+  // banner (below) into the stamp alone — the terminal opened blank again, the
+  // exact bug the hold was written for (B-ae4b).
+  const data = ptyListeners({ hold: 500 }), exits = ptyListeners();
   let sock = null, closed = false, reconnects = 0, gone = false;
   const pending = [];                       // input typed before the socket is up
   // …and the mirror problem, which cost a blank terminal until the browser leg
   // caught it: the serve greets the socket with the shell's banner/prompt the
   // instant it opens — BEFORE the session layer has registered onData (the
-  // create is still in flight). Whatever arrives first is held here and
-  // flushed when the consumer shows up; without this the window opens on an
-  // empty screen and only wakes up when the user types.
-  let preData = [];
+  // create is still in flight). Whatever arrives first is held by `data`
+  // (bounded at 500: a consumer that never arrives must not grow memory) and
+  // replayed to EVERY listener registered in the first tick; without this the
+  // window opens on an empty screen and only wakes up when the user types.
 
   function connect() {
     const headers = bridge.auth ? { authorization: bridge.auth } : undefined;
@@ -84,8 +90,7 @@ async function openOpencodePty({ cwd = null, title = null, command = null, args 
     sock.on('message', (buf, isBinary) => {
       if (isBinary) return;                 // \0-prefixed control json (cursor), never output
       const text = buf.toString('utf8');
-      if (!onData) { if (preData.length < 500) preData.push(text); return; }   // bounded: a consumer that never arrives must not grow memory
-      try { onData(text); } catch { }
+      data.emit(text);
     });
     sock.on('error', (e) => {
       // the serve ANSWERING "no such pty" is not a transport failure — it is
@@ -101,8 +106,8 @@ async function openOpencodePty({ cwd = null, title = null, command = null, args 
       // …unless the serve says the pty is GONE (HTTP 404/410): that is a
       // verdict, not a hiccup, so the session ends NOW instead of retrying a
       // shell that has already exited.
-      if (gone) { closed = true; log?.warn?.(`[opencode-pty] ${ptyId} is gone on the serve (HTTP 404) — the shell exited`); try { onExit?.({ exitCode: 0 }); } catch { } return; }
-      if (reconnects++ >= MAX_RECONNECTS) { closed = true; try { onExit?.({ exitCode: 0 }); } catch { } return; }
+      if (gone) { closed = true; log?.warn?.(`[opencode-pty] ${ptyId} is gone on the serve (HTTP 404) — the shell exited`); exits.emit({ exitCode: 0 }); return; }
+      if (reconnects++ >= MAX_RECONNECTS) { closed = true; exits.emit({ exitCode: 0 }); return; }
       setTimeout(() => { if (!closed) connect(); }, RECONNECT_MS * reconnects).unref?.();
     });
   }
@@ -111,12 +116,8 @@ async function openOpencodePty({ cwd = null, title = null, command = null, args 
   const shim = {
     pid: bridge.pty.pid || -1,
     cols: 0, rows: 0,
-    onData: (cb) => {
-      onData = cb;
-      const held = preData; preData = [];
-      for (const chunk of held) { try { cb(chunk); } catch { } }
-    },
-    onExit: (cb) => { onExit = cb; },
+    onData: (cb) => data.on(cb),
+    onExit: (cb) => exits.on(cb),
     write: (str) => {
       const data = typeof str === 'string' ? str : String(str);
       if (sock && sock.readyState === 1) { try { sock.send(data); } catch { } }
@@ -130,7 +131,7 @@ async function openOpencodePty({ cwd = null, title = null, command = null, args 
       closed = true;
       try { sock?.close(); } catch { }
       access().call(null, 'pty-close', { ptyId, cwd }).catch((e) => log?.warn?.(`[opencode-pty] ${ptyId} close failed: ${e.message}`));
-      try { onExit?.({ exitCode: 0 }); } catch { }
+      exits.emit({ exitCode: 0 });
     },
   };
   return { ptyId, shim, pty: bridge.pty };

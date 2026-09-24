@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -31,37 +32,17 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 fs.rmSync(ROOT, { recursive: true, force: true });
 
 // ── PATCHED-COPY HYGIENE ──────────────────────────────────────────────────
-// ⑤b's negative control writes a PRE-FIX copy of src/channel-store.js BESIDE
-// the real module (it must be a SIBLING or that module's relative requires do
-// not resolve). The `finally` unlinks it, but a SIGKILL runs no cleanup — and
-// a dirty tree is what the release gate REFUSES on. So: it is gitignored (the
-// assert below fails if that stanza is ever removed) AND swept at start by PID
-// LIVENESS, never by age: this suite can legitimately run twice in one
-// worktree, and deleting a copy a LIVE run is importing is worse than litter.
-const PATCH_DIR = path.join(REPO, 'src');
-// `-<pid>` (⑤b) or `-<pid>-<n>` (r3's controls): each control gets its OWN
-// name, because node caches modules by resolved path and two controls sharing
-// a filename would silently drive the FIRST patch twice.
-const PATCH_RE = /^\.channel-store\.prefix-(\d+)(?:-\d+)?\.js$/;
-let patchSeq = 0;
-const patchPath = () => path.join(PATCH_DIR, `.channel-store.prefix-${process.pid}-${++patchSeq}.js`);
-{
-  let swept = 0, spared = [];
-  for (const f of fs.readdirSync(PATCH_DIR)) {
-    const m = f.match(PATCH_RE);
-    if (!m) continue;
-    let alive = false;
-    try { process.kill(Number(m[1]), 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
-    if (alive) { spared.push(f); continue; }
-    try { fs.unlinkSync(path.join(PATCH_DIR, f)); swept++; } catch {}
-  }
-  if (swept || spared.length) console.log(`  … swept ${swept} stranded patched copies, spared ${spared.length} live (${spared.join(',') || 'none'})`);
-}
-{
-  const gi = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf-8');
-  ok(/^src\/\.channel-store\.prefix-\*\.js$/m.test(gi),
-    'the pre-fix copy this suite writes into src/ is GITIGNORED — a SIGKILL strands one, and a dirty tree is what the release gate refuses on');
-}
+// ⑤b's (and r3's) negative controls load PRE-FIX copies of src/channel-store.js.
+// They are written OUTSIDE the tree (scripts/mutant-copy.mjs: this process's
+// scratch dir, `require` re-bound on line 1 to the real module's path, so its
+// relative requires resolve as a sibling's) and ⑩ measures that while they
+// exist. They used to be gitignored siblings, src/.channel-store.prefix-*.js —
+// a SIGKILL stranded one, and every src/ scanner running beside this suite read
+// a second channel-store. Each control still gets its OWN file (node caches
+// modules by resolved path; two controls sharing a name would drive the FIRST
+// patch twice) — the helper numbers every copy.
+const MUTCS = mutantCopies('channel-store', REPO);
+sweepLegacy(REPO, ['src'], /^\.channel-store\.prefix-(\d+)(?:-\d+)?\.js$/);   // what a pre-fix run stranded (dead PIDs only)
 
 let seq = 0;
 const mk = (name) => S.createChannelStore({ dir: path.join(ROOT, name || `s${++seq}`) });
@@ -272,8 +253,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   };
   const arms = [['r2-only', R2_ONLY], ['both', BOTH]];
   for (const [arm, PRE] of arms) {
-    const pf = patchPath();
-    fs.writeFileSync(pf, PRE);
+    const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
     try {
       const r = drive(require(pf), `durable-dedup-pre-${arm}`);
       if (arm === 'r2-only') {
@@ -286,7 +266,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
           'NEGATIVE CONTROL (r2+r4 reverted, r5 stripped): the r1 copy reports the whole batch as DUPLICATES after one failed append of EITHER shape — the shape that advanced the anchor past nine real messages', JSON.stringify(r));
         ok(r.rows === 0, 'NEGATIVE CONTROL (r2+r4 reverted, r5 stripped): …and both logs are empty, for ever', String(r.rows));
       }
-    } finally { try { fs.unlinkSync(pf); } catch {} }
+    } finally { /* MUTCS's scratch dir is removed at exit */ }
   }
 }
 
@@ -327,8 +307,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
   const PRE = src.replace("      healed = appendLines(fp, fresh.map((r) => JSON.stringify(r)).join('\\n') + '\\n');",
                           "      healed = false; fs.appendFileSync(fp, fresh.map((r) => JSON.stringify(r)).join('\\n') + '\\n');");
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the r2 writer was reconstructed from the shipped bytes');
-  const pf = patchPath();
-  fs.writeFileSync(pf, PRE);
+  const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
     const PS = require(pf);
     const st = PS.createChannelStore({ dir: path.join(ROOT, 'partial-line-pre') });
@@ -342,7 +321,7 @@ const rec = (conv, i, at) => ({ id: `a:${conv}:v${i}`, adapterId: 'a', convId: c
       'NEGATIVE CONTROL: the r2 writer reports v4 appended and cannot serve it — its bytes are glued to the fragment', served.join(','));
     ok(re.appendRecords('a', 'c', [rec('c', 4)]).duplicates === 1, 'NEGATIVE CONTROL: …and every later pass calls it a duplicate: dropped for ever');
     st.close(); re.close();
-  } finally { try { fs.unlinkSync(pf); } catch {} }
+  } finally { /* MUTCS's scratch dir is removed at exit */ }
 }
 
 // ── ⑤i A FAILED APPEND THAT STOPPED ON A RECORD BOUNDARY (r4) ──
@@ -426,8 +405,7 @@ function boundaryRetry(PS, name, land, { restart = false } = {}) {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
   const PRE = src.replace("      dedup.delete(`${adapterId}/${convId}`);   // r4: the log is the only witness now\n", "");
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the r3 spelling (the set kept across the throw) was reconstructed from the shipped bytes');
-  const pf = patchPath();
-  fs.writeFileSync(pf, PRE);
+  const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
     const PS = require(pf);
     for (const [shape, land] of CUTS) {
@@ -443,7 +421,7 @@ function boundaryRetry(PS, name, land, { restart = false } = {}) {
       ok(rr.retry.appended === 1 && rr.retry.duplicates === 1 && rr.dup === 0 && rr.unread === 5,
         `NEGATIVE CONTROL (cut ${shape}): …while a RESTART over the same log is correct — the mechanism is the stale LIVE set, not the file`, JSON.stringify(rr.retry));
     }
-  } finally { try { fs.unlinkSync(pf); } catch {} }
+  } finally { /* MUTCS's scratch dir is removed at exit */ }
   ok(fs.writeSync === realWriteSync, 'the fault harness restored fs.writeSync after the control too');
 }
 
@@ -532,8 +510,7 @@ function rebuildUnderFault(PS, name, code) {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
   const PRE = src.replace("if (strict && e.code !== 'ENOENT') throw e; ", '').replace("if (strict) throw e; ", '');
   ok(PRE !== src && (PRE.match(/throw e/g) || []).length === (src.match(/throw e/g) || []).length - 2, 'NEGATIVE CONTROL setup: the r4 spelling (every read error is an empty read) was reconstructed from the shipped bytes');
-  const pf = patchPath();
-  fs.writeFileSync(pf, PRE);
+  const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
     const PS = require(pf);
     const r = rebuildUnderFault(PS, 'rebuild-pre-EIO', 'EIO');
@@ -541,7 +518,7 @@ function rebuildUnderFault(PS, name, code) {
       'NEGATIVE CONTROL: the r4 bytes read the unreadable log as EMPTY and append the whole replay — v5 written again', JSON.stringify({ threw: r.threw, first: r.first }));
     ok(r.served === 'v1,v2,v3,v4,v5,v5,v6' && r.dup === 1 && r.unread === 7,
       'NEGATIVE CONTROL: …and the log serves seven rows for six records, for ever', `${r.served} unread=${r.unread}`);
-  } finally { try { fs.unlinkSync(pf); } catch {} }
+  } finally { /* MUTCS's scratch dir is removed at exit */ }
   ok(fs.openSync === realOpenSync, 'the open-fault harness restored fs.openSync after the control too');
 }
 
@@ -583,8 +560,7 @@ function rebuildUnderFault(PS, name, code) {
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
   const PRE = src.replace('      while (end > 0 && out.length < want) {', '      while (end === size) {');
   ok(PRE !== src, 'NEGATIVE CONTROL setup: the one-window reader was reconstructed from the shipped bytes');
-  const pf = patchPath();
-  fs.writeFileSync(pf, PRE);
+  const pf = MUTCS.write('src/channel-store.js', PRE, 'prefix');
   try {
     const PS = require(pf);
     const st = PS.createChannelStore({ dir: path.join(ROOT, 'deep-pre') });
@@ -599,7 +575,7 @@ function rebuildUnderFault(PS, name, code) {
     const dupe = PS.createChannelStore({ dir: st.dir });      // a fresh set, rebuilt from the tail
     ok(dupe.appendRecords('a', 'c', [all[0]]).appended === 1, 'NEGATIVE CONTROL: …and its dedup set has FORGOTTEN the oldest record, so a replayed page writes it twice');
     st.close(); dupe.close();
-  } finally { try { fs.unlinkSync(pf); } catch {} }
+  } finally { /* MUTCS's scratch dir is removed at exit */ }
 }
 
 // ── ⑤c A BATCH MAY CARRY THE SAME vendorId TWICE ──
@@ -827,6 +803,17 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
   ok(!/_said/.test(src), 'PIN: no once-only flag silences a refused index flush after its first line');
 }
+
+
+// ── ⑩ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n⑩ the patched copies never touch the tree');
+for (const r of copiesCensus(MUTCS.files, MUTCS.dir, REPO, { minCopies: 5 })) ok(r.pass, '⑩ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -43,6 +43,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -59,8 +60,12 @@ const routes = require(path.join(REPO, 'src/routes/channels.js'));
 const ENGINE_PATH = path.join(REPO, 'src/server/channels-engine.js');
 
 const ROOT = scratch('chan-accounts');
-const patched = [];
-const cleanup = () => { for (const f of patched) { try { fs.unlinkSync(f); } catch {} } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
+// The pre-fix engine copy is written OUTSIDE the tree (scripts/mutant-copy.mjs,
+// `require` re-bound on line 1 to the real module's path); its scratch dir is
+// removed at exit.
+const MUTA = mutantCopies('chan-accounts', REPO);
+sweepLegacy(REPO, ['src/server'], /^\.channels-engine\.prefix-(\d+)-\d+\.js$/);   // what a pre-fix run stranded (dead PIDs only)
+const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 fs.rmSync(ROOT, { recursive: true, force: true });
@@ -217,9 +222,7 @@ console.log('② flipping the default');
   const src = fs.readFileSync(ENGINE_PATH, 'utf-8');
   const NEEDLES = [[', credentialKey: rec.credentialKey || null };', ' };'], ['      credentialKey: credentialKey || null,\n', '      credentialKey: null,\n']];
   ok(NEEDLES.every(([n]) => src.split(n).length === 2), 'POSITIVE CONTROL: both patched strings exist exactly once in the engine (the control really removes the key hand-down and the record stamp)');
-  const copy = path.join(REPO, 'src/server', `.channels-engine.prefix-${process.pid}-${patched.length + 1}.js`);
-  fs.writeFileSync(copy, NEEDLES.reduce((acc, [a, b]) => acc.replace(a, b), src));
-  patched.push(copy);
+  const copy = MUTA.write(ENGINE_PATH, NEEDLES.reduce((acc, [a, b]) => acc.replace(a, b), src), 'prefix');
   const ENG0 = require(copy);
   const store0 = STORE.create({ dataDir: path.join(ROOT, 'store0'), env: {}, now, broadcast: () => {}, drivePresets: () => holder.list, log: quiet });
   store0.setClusterKey('gmail', 'org1');
@@ -433,6 +436,13 @@ console.log('⑧ lark');
 }
 
 eng.oauth.stopAll(); eng.stop();
+
+// ── THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──────────────
+// Measured HERE, while the pre-fix engine copy still exists (cleanup removes
+// it). It used to be a gitignored sibling, src/server/.channels-engine.prefix-*,
+// that every src/ scanner running beside this suite read as a second engine.
+console.log('tree: the patched copy never touches the tree');
+for (const r of copiesCensus(MUTA.files, MUTA.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 cleanup();
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

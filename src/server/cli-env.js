@@ -10,6 +10,7 @@ const os = require('os');
 const path = require('path');
 const { execFile, execFileSync } = require('child_process');
 const { createAdapterRegistry } = require('../adapters');
+const { createCliCmds } = require('./cli-cmd.js');
 const { capsOf, setVerifiedCap } = require('../backend-caps');
 
 /** THE predicate "this harness's STORE is broken", or null. Module scope on
@@ -143,10 +144,12 @@ function probeCodexSandbox(registry) {
 // create fails loudly). Env override per harness: <ID>_CMD (OPENCODE_CMD).
 const { list: listHarnesses, isBuiltin: isBuiltinHarness } = require('../harnesses');
 const ACP_COMMANDS = {};
+const ACP_RAW = {}; // what the spawn-time re-resolve asks for (B-a18e)
 for (const h of listHarnesses()) {
   if (!h.acp) continue;
   const raw = process.env[h.id.toUpperCase().replace(/-/g, '_') + '_CMD'] || h.acp.command;
   ACP_COMMANDS[h.id] = raw.startsWith('/') ? raw : (resolveCmd(raw) || null);
+  ACP_RAW[h.id] = raw;
 }
 const adapterRegistry = createAdapterRegistry({
   claudeCmd: CLAUDE_CMD,
@@ -159,6 +162,15 @@ const adapterRegistry = createAdapterRegistry({
   ptyWrapper: path.join(rootDir, 'data', 'bin', 'pty-wrapper.js'),
   buffersDir: path.join(rootDir, 'data', 'session-buffers'),
 });
+// SPAWN-TIME RE-RESOLVE (B-a18e): the paths above are the BOOT answer; a spawn
+// whose path has gone (an Update restart inside an installer's window) asks
+// once more and hands the new path to the adapter ⇒ src/server/cli-cmd.js
+const cliCmds = createCliCmds();
+cliCmds.register('claude', { name: CLAUDE_CMD_RAW, current: CLAUDE_CMD, apply: (p) => { const ad = adapterRegistry.get('claude'); if (ad) ad.config.claudeCmd = p; } });
+cliCmds.register('codex', { name: CODEX_CMD_RAW, current: CODEX_CMD, apply: (p) => { const ad = adapterRegistry.get('codex'); if (ad) ad.config.codexCmd = p; require('../codex-thread-read').configure({ codexCmd: p, enabled: true }); } });
+for (const id of Object.keys(ACP_COMMANDS)) {
+  cliCmds.register(id, { name: ACP_RAW[id], current: ACP_COMMANDS[id], apply: (p) => { ACP_COMMANDS[id] = p; const ad = adapterRegistry.get(id); if (ad) ad.config.command = p; } });
+}
 /** Installed-state per harness for the client (New Session backend picker).
  *  ACP harnesses also carry their RUNTIME-VERIFIED feature caps (S9: opencode
  *  fork = the serve OpenAPI evidence) so the client's BACKEND_META merges the
@@ -413,6 +425,6 @@ function refreshAvailableModels() {
     CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
     CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
     EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
-    noteModelSeen, refreshAvailableModels, ACP_COMMANDS, harnessAvailability, noteHarnessModels, opencodeServe };
+    noteModelSeen, refreshAvailableModels, ACP_COMMANDS, harnessAvailability, noteHarnessModels, opencodeServe, cliCmds };
 }
 module.exports = { create, storeFailureReason };

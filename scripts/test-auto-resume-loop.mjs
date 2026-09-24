@@ -38,6 +38,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -50,6 +52,36 @@ const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 
 const cleanup = [];
 process.on('exit', () => { for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
+
+// ── THE SUITE THAT RAN BESIDE US (B-0220) ───────────────────────────────────
+// A 2026-09-22 integration ran this suite and test-new-member-wake side by
+// side: 3 red here, green alone. That suite wrote its patched copies of the
+// engine as SIBLINGS inside src/server/, and §5's AUDIT (walk src/, classify
+// every noteRecovered call site) counted the copies as product code. So the
+// pair is driven for real, and not by luck: a child run of test-new-member-wake
+// HOLDS at the point where every copy it made still exists (VS_WAKE_HOLD) and
+// this whole suite runs inside that window; it is released at the end and its
+// own verdict is asserted too. Pre-fix placement ⇒ the AUDIT goes red here.
+const PAIR = scratch('arl-pair');
+fs.mkdirSync(PAIR, { recursive: true }); cleanup.push(PAIR);
+const HOLD = path.join(PAIR, 'hold');
+let heldGone = false;          // a child that died before holding must not cost the full wait
+process.on('exit', () => { try { fs.writeFileSync(HOLD + '.go', '1'); } catch { } });
+const held = new Promise((resolve) => {
+  const c = spawn(process.execPath, [path.join(REPO, 'scripts', 'test-new-member-wake.mjs')],
+    { cwd: REPO, env: { ...process.env, VS_WAKE_HOLD: HOLD }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
+  const kill = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 300e3);
+  c.on('exit', (code) => { heldGone = true; clearTimeout(kill); resolve({ code, out }); });
+});
+let heldCopies = null;
+for (let i = 0; i < 2400 && !heldCopies && !heldGone; i++) {
+  if (fs.existsSync(HOLD + '.ready')) heldCopies = JSON.parse(fs.readFileSync(HOLD + '.ready', 'utf8'));
+  else await new Promise((r) => setTimeout(r, 50));
+}
+ok('PAIR: a run of test-new-member-wake is holding, every patched copy it made still on disk, before anything here reads src/',
+  Array.isArray(heldCopies) && heldCopies.length >= 5 && heldCopies.every((f) => fs.existsSync(f)), JSON.stringify(heldCopies));
 
 /** A real pool of three logged-in subscriptions, a real engine, a real
  *  auto-resume, a fake OTel source, and a scripted CLI that rejects.
@@ -1338,6 +1370,16 @@ if (!probe) {
   ok('…an unpooled (single-account) wall names its bucket and keeps the reset sentence', arMod.armNoticeFor('5h 0% < 10%', st.resetsAt, Date.now(), w.eng.armCauseFor({ usable: false, until: { label: '5h', resetsAt: RL } }, null, null, 0)) === `用量已达上限（5h）。已安排在 ${new Date(RL * 1000).toLocaleString()} 重置约 1 分钟后自动继续（状态栏可取消）。`); // the STATED instant (the cause's until), the arm itself is a minute later
   ok('…armCauseFor is null for a usable verdict and for a blocked pool verdict with no soonest (the arm then inherits or stays cause-less)', w.eng.armCauseFor({ usable: true }, null, null, 0) === null && w.eng.armCauseFor({ usable: false, soonest: null, rejector: null }, null, null, 0) === null);
   ok('…the chip payload carries the same structure (statusFor().cause === the arm\'s cause)', JSON.stringify(w.ar.statusFor(w.SID).cause) === JSON.stringify(st.cause));
+}
+
+// ── THE PAIR'S VERDICT (B-0220) ─────────────────────────────────────────────
+{
+  ok('PAIR: the held copies outlived this whole run (the AUDIT above walked src/ inside the window), and none of them is in the checkout',
+    Array.isArray(heldCopies) && heldCopies.every((f) => fs.existsSync(f) && path.relative(REPO, f).startsWith('..' + path.sep)), JSON.stringify(heldCopies));
+  fs.writeFileSync(HOLD + '.go', '1');
+  const r = await held;
+  ok('PAIR: …and the held run of test-new-member-wake is green too', r.code === 0 && /ALL PASS/.test(r.out),
+    r.out.split('\n').filter((l) => /✗|FAILED|Error/.test(l)).slice(0, 8).join(' | ') || r.out.slice(-400));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

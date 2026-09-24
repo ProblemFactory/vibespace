@@ -4,7 +4,7 @@
 //
 // A gesture row is { name, dir: 'up'|'down'|'btn', wheelPx (signed, the sum of
 // the wheel deltas), before, after, ring } where before/after are SNAPs
-// { st, sh, ch, ws, we, total, pin, topId, topOff, blankPct, emptyBelow, ring }
+// { st, sh, ch, ws, we, total, pin, topId, topOff, topH, blankPct, emptyBelow, ring }
 // and `after.topDev` is the displacement of the card that was at the top of the
 // viewport BEFORE the gesture, measured AFTER it (null when that card left the
 // DOM). The rules, in the owner's words:
@@ -34,6 +34,9 @@
 export const JUMP_SLACK_VIEWPORTS = 1.5;
 export const BLANK_MAX_PCT = 25;
 export const DELIVERY_MIN_FRACTION = 0.5;
+/** The trim's keep zone in viewports on each side of the viewport — src/lib/chat-view.js
+ *  TRIM_KEEP_VIEWPORTS (test-chat-trim-guard pins the two equal). */
+export const KEEP_ZONE_VIEWPORTS = 1;
 export const PAGE_UP_BAND_PX = 100;   // the scroll handler's own pageUp band: a landing inside it with history above is a landing on the slab's top
 
 /** Is there history above the rendered window — in the window index space OR in the seek gap? */
@@ -50,9 +53,19 @@ export function judgeGesture(row) {
   // ① jump back — the reader's card
   if (dir === 'up' || dir === 'down') {
     if (after.topDev == null) {
-      // the reader's card left the DOM: a jump unless the gesture itself was
-      // longer than the keep zone (a 4 s hold legitimately walks past it)
-      if (Math.abs(wheelPx) < 2 * ch) reasons.push(`the card at the top of the viewport before the gesture (${before.topId}) is gone from the DOM`);
+      // the reader's card left the DOM: a jump unless the gesture itself
+      // carried it past the keep zone (a 4 s hold legitimately walks past it).
+      // DOWNWARD the card leaves the zone once the wheel exceeds the zone above
+      // the viewport plus the card's own bottom edge below the viewport top
+      // (B-1192: the §4c plan's 720 px `mid` wheel against a 714 px viewport
+      // trimmed a reader card whose bottom sat ≤ 6 px below the top — by the
+      // rule, once per few heavy runs, judged as a jump because the old bound
+      // was a flat 2 viewports). Upward the card must cross the viewport AND
+      // the zone below it, so 2 viewports stays the bound; a snapshot without
+      // the card's height (older rows) keeps it too.
+      const edge = before.topH != null ? (before.topOff || 0) + before.topH : null;
+      const past = dir === 'down' && edge != null ? KEEP_ZONE_VIEWPORTS * ch + edge : 2 * ch;
+      if (Math.abs(wheelPx) < past) reasons.push(`the card at the top of the viewport before the gesture (${before.topId}) is gone from the DOM${dir === 'down' && edge != null ? ` (its bottom was ${Math.round(edge)} px below the viewport top: the ${Math.abs(wheelPx)} px wheel left it ${Math.round(past - Math.abs(wheelPx))} px inside the ${KEEP_ZONE_VIEWPORTS}-viewport keep zone)` : ''}`);
     } else {
       // expected: the card moves by what the wheel asked (down the screen for
       // an upward wheel); deviation beyond that IN THE GESTURE'S DIRECTION is a jump
@@ -113,8 +126,8 @@ export function formatGesture(row, verdict) {
 export const SNAP_SOURCE = `(function (topIdBefore, topOffBefore) {
   const v = window.__v, list = window.__list; const r = list.getBoundingClientRect();
   const st = list.scrollTop, sh = list.scrollHeight, ch = list.clientHeight;
-  let top = null, topOff = 0;
-  for (const c of list.children) { if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st && c.dataset && c.dataset.msgId) { top = c; topOff = c.offsetTop - st; break; } }
+  let top = null, topOff = 0, topH = null;
+  for (const c of list.children) { if (c.offsetHeight > 0 && c.offsetTop + c.offsetHeight > st && c.dataset && c.dataset.msgId) { top = c; topOff = c.offsetTop - st; topH = c.offsetHeight; break; } }
   let topDev = null;
   if (topIdBefore != null) {
     const el = list.querySelector('[data-msg-id="' + String(topIdBefore).replace(/"/g, '') + '"]');
@@ -149,7 +162,7 @@ export const SNAP_SOURCE = `(function (topIdBefore, topOffBefore) {
   return { st: Math.round(st), sh, ch, ws: v._windowStart, we: v._windowEnd, total: v._total, tp: v._teleported ? 1 : 0, pin: v._pinned ? 1 : 0,
     loading: (v._loading || (s && s._gapLoading)) ? 1 : 0, gapCursor, gapAbove, gapCards: gapEls.length, gapBelowTail,
     rendered: list.querySelectorAll(':scope > .chat-msg').length, kids: list.childElementCount,
-    topId: top ? top.dataset.msgId : null, topOff: Math.round(topOff), topDev: topDev == null ? null : Math.round(topDev),
+    topId: top ? top.dataset.msgId : null, topOff: Math.round(topOff), topH, topDev: topDev == null ? null : Math.round(topDev),
     blankPct: samples ? Math.round(100 * (empty + unrendered) / samples) : 0, emptyPct: samples ? Math.round(100 * empty / samples) : 0, unrenderedPct: samples ? Math.round(100 * unrendered / samples) : 0,
     emptyBelow: Math.max(0, Math.round(ch - contentBottom)), ring: (v._traceRing || []).length, ringSeq: v._traceSeq || 0 };
 })`;

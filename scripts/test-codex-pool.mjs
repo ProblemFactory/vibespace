@@ -9,8 +9,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// Every patched copy (the R-series negative controls) is written OUTSIDE the
+// tree (scripts/mutant-copy.mjs: this process's scratch dir, `require` re-bound
+// on line 1 to the real module's path, so relative requires resolve as a
+// sibling's). They used to be un-ignored siblings (src/.accounts.<tag>-<pid>.js,
+// src/server/.usage-pool-engine.<tag>-<pid>.js, …): the tree was DIRTY while
+// the suite ran and every src/ scanner beside it read them as source.
+// `copyPath` names a copy, `writeCopy` writes it; R-tree measures the placement.
+const MUTCP = mutantCopies('codex-pool', REPO);
+const copyOrig = new Map();
+let copySeq = 0;
+const copyPath = (origRel, tag) => { const p = MUTCP.pathFor(`${path.basename(origRel, '.js')}-${tag}-${++copySeq}`); copyOrig.set(p, origRel); return p; };
+const writeCopy = (p, src) => MUTCP.write(copyOrig.get(p), src, null, { esm: false, name: path.basename(p, '.cjs') });
+
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -372,13 +386,13 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const hit = src.includes(from);
     ok('R6 NEGATIVE CONTROL: the patch hit the product source', hit);
     if (hit) {
-      const f = path.join(REPO, 'src/server', `.usage-pool-engine.nofork-${process.pid}.js`);
-      fs.writeFileSync(f, src.replace(from, 'inTurn: false, warm: false, poolAlternative,'));
+      const f = copyPath('src/server/usage-pool-engine.js', 'nofork');
+      writeCopy(f, src.replace(from, 'inTurn: false, warm: false, poolAlternative,'));
       try {
         const w = world({ mode: 'auto', engineModule: require(f) });
         quietly(() => w.wall());
         ok('R6 NEGATIVE CONTROL: without the warmth fork the warm conversation is switched and no credit is tried — R1 can see the fork', w.verbs() === 0 && w.current() === w.B, `${w.current() === w.A ? 'A' : 'B'} verbs=${w.verbs()}`);
-      } finally { fs.rmSync(f, { force: true }); }
+      } finally { /* MUTCP's scratch dir is removed at exit */ }
     }
   }
   // (7) THE ARM CARD carries the same offer: the REAL auto-resume, wired the way
@@ -416,9 +430,9 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
   const patchedEngine = (tag, edits) => {
     let src = read('src/server/usage-pool-engine.js');
     for (const [from, to] of edits) { if (!src.includes(from)) return null; src = src.split(from).join(to); }
-    const f = path.join(REPO, 'src/server', `.usage-pool-engine.${tag}-${process.pid}.js`);
-    fs.writeFileSync(f, src);
-    try { return require(f); } finally { fs.rmSync(f, { force: true }); }
+    const f = copyPath('src/server/usage-pool-engine.js', `${tag}`);
+    writeCopy(f, src);
+    try { return require(f); } finally { /* MUTCP's scratch dir is removed at exit */ }
   };
   // (8) ONE ACCOUNT WALL, TWO WARM CONVERSATIONS: ONE credit, and the pool stays
   {
@@ -568,21 +582,21 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const qsrc = read('src/quota-model.js');
     const qfrom = "  if (rc && typeof rc === 'object' && Number.isFinite(Number(rc.availableCount))) out.resetCredits = { ...rc, availableCount: Number(rc.availableCount) };\n";
     ok('R11 NEGATIVE CONTROL: the quota-model patch hit the product source', qsrc.includes(qfrom));
-    const qf = path.join(REPO, 'src', `.quota-model.norc-${process.pid}.js`);
-    fs.writeFileSync(qf, qsrc.replace(qfrom, ''));
-    try { const qn = require(qf); ok('R11 NEGATIVE CONTROL: without the projection the roster map loses the count (the pre-r2 chip)', ({ ...pv, ...qn.toLegacyView(qn.mergeLimitSets(cq.limitSetFromSnapshot({ ...od, fetchedAt: Date.now() - 1000 }, { identity: 'k' }), cq.limitSetFromSnapshot({ ...pv, fetchedAt: Date.now() }, { identity: 'k' }))) }).resetCredits === undefined); } finally { fs.rmSync(qf, { force: true }); }
+    const qf = copyPath('src/quota-model.js', 'norc');
+    writeCopy(qf, qsrc.replace(qfrom, ''));
+    try { const qn = require(qf); ok('R11 NEGATIVE CONTROL: without the projection the roster map loses the count (the pre-r2 chip)', ({ ...pv, ...qn.toLegacyView(qn.mergeLimitSets(cq.limitSetFromSnapshot({ ...od, fetchedAt: Date.now() - 1000 }, { identity: 'k' }), cq.limitSetFromSnapshot({ ...pv, fetchedAt: Date.now() }, { identity: 'k' }))) }).resetCredits === undefined); } finally { /* MUTCP's scratch dir is removed at exit */ }
     const usrc = read('src/usage-cache-write.js');
     const ufrom = "    else if (prevObj && prevObj.resetCredits && typeof prevObj.resetCredits === 'object') out.resetCredits = prevObj.resetCredits;\n";
     ok('R11 NEGATIVE CONTROL: the cache-writer patch hit the product source', usrc.includes(ufrom));
-    const uf = path.join(REPO, 'src', `.usage-cache-write.norc-${process.pid}.js`);
-    fs.writeFileSync(uf, usrc.replace(ufrom, ''));
+    const uf = copyPath('src/usage-cache-write.js', 'norc');
+    writeCopy(uf, usrc.replace(ufrom, ''));
     try {
       const un = require(uf);
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrung-uc-')); worlds.push(dir);
       un.writeCacheObject({ cacheDir: dir, key: 'k', obj: { ...od }, set: cq.limitSetFromSnapshot(od, { identity: 'k', source: 's' }), source: 's', backend: 'codex' });
       un.writeCacheObject({ cacheDir: dir, key: 'k', obj: { ...pv, fetchedAt: od.fetchedAt + 5 }, set: cq.limitSetFromSnapshot({ ...pv, fetchedAt: od.fetchedAt + 5 }, { identity: 'k', source: 's' }), source: 's', backend: 'codex' });
       ok('R11 NEGATIVE CONTROL: without the carry one passive push erases the count from the file (the pre-r2 defect)', JSON.parse(fs.readFileSync(path.join(dir, 'k.json'), 'utf8')).resetCredits === undefined);
-    } finally { fs.rmSync(uf, { force: true }); }
+    } finally { /* MUTCP's scratch dir is removed at exit */ }
   }
   // (12) A COLD WALL THE SWITCH RUNG COULD NOT MOVE (the 10 s eval gate): the
   //      verdict's `after-switch` rung — it had no call site
@@ -965,7 +979,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       } catch { }
     }
 `;
-    const acctPatched = (tag, src) => { const f = path.join(REPO, 'src', `.accounts.${tag}-${process.pid}.js`); fs.writeFileSync(f, src); try { return require(f).AccountManager; } finally { fs.rmSync(f, { force: true }); } };
+    const acctPatched = (tag, src) => { const f = copyPath('src/accounts.js', `${tag}`); writeCopy(f, src); try { return require(f).AccountManager; } finally { /* MUTCP's scratch dir is removed at exit */ } };
     const R3AM = newBlock.length > 100 ? acctPatched('r3Ledger', acctSrc.replace(newBlock, r3Block)) : null;
     ok('R17b NEGATIVE CONTROL source: the r4 ledger block was found and the r3 rule rebuilt', !!R3AM);
     const preLedgerPool = async (w) => {
@@ -1018,10 +1032,10 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const stSrc = read('src/slot-transitions.js');
       const oldDedup = stSrc.replace(' && (!from || from === prev.to)) return null;', ') return null;');
       ok('R17b NEGATIVE CONTROL: the dedup patch hit the product source', oldDedup !== stSrc);
-      const f = path.join(REPO, 'src', `.slot-transitions.r3dedup-${process.pid}.js`); fs.writeFileSync(f, oldDedup);
+      const f = copyPath('src/slot-transitions.js', 'r3dedup'); writeCopy(f, oldDedup);
       try { const ST = require(f).SlotTransitions; const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrung-st-')); worlds.push(d); const t = new ST({ dataDir: d }); const now = Date.now();
         t.record({ poolId: 'p', from: 'a', to: 'b', at: now }); t.record({ poolId: 'p', from: 'a', to: 'b', at: now + 10 });
-        ok('R17b NEGATIVE CONTROL: the r3 dedup drops the contradicting row — the leg sees the rule', t.all().length === 1, String(t.all().length)); } finally { fs.rmSync(f, { force: true }); }
+        ok('R17b NEGATIVE CONTROL: the r3 dedup drops the contradicting row — the leg sees the rule', t.all().length === 1, String(t.all().length)); } finally { /* MUTCP's scratch dir is removed at exit */ }
       { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrung-st-')); worlds.push(d); const { SlotTransitions: ST } = require(path.join(REPO, 'src/slot-transitions.js')); const t = new ST({ dataDir: d }); const now = Date.now();
         t.record({ poolId: 'p', from: 'a', to: 'b', at: now }); t.record({ poolId: 'p', from: 'b', to: 'b', at: now + 10 }); t.record({ poolId: 'p', from: null, to: 'b', at: now + 20 });
         ok('R17b …a TRUE repeat (same target, `from` = that target or unknown) is still one fact', t.all().length === 1, String(t.all().length)); }
@@ -1066,9 +1080,9 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       let src = fs.readFileSync(brPath, 'utf8');
       const r4 = src.replace("  if (meta.heldPoolOrigin === 'no-start') return 'no-start';\n", '').replace("  try {\n    if (!meta || !meta.accountId || heldOriginOf(meta) !== 'no-start'", "  try {\n    return false;\n    if (!meta || !meta.accountId || heldOriginOf(meta) !== 'no-start'");
       ok('R17b r5 NEGATIVE CONTROL: the patch hit the product source (both edits)', r4 !== src && (r4.match(/return false;\n    if \(!meta \|\| !meta\.accountId/g) || []).length === 1 && !/heldPoolOrigin === 'no-start'\) return 'no-start'/.test(r4));
-      const f = path.join(REPO, 'src/server', `.boot-restore.r4NoStart-${process.pid}.js`);
-      fs.writeFileSync(f, r4);
-      let C = null; try { C = require(f); } finally { fs.rmSync(f, { force: true }); }
+      const f = copyPath('src/server/boot-restore.js', 'r4NoStart');
+      writeCopy(f, r4);
+      let C = null; try { C = require(f); } finally { /* MUTCP's scratch dir is removed at exit */ }
       if (C) { const c = runBoots(C); ok('R17b r5 NEGATIVE CONTROL: the r4 restore forgets no-start after the rename and names the pool default at the previous BOOT confidently — the leg sees the marker', c.b2.origin === null && c.r.held === true && c.r.origin === 'ledger', JSON.stringify(c)); }
       ok('R17b r5 WIRING: both restore paths persist the marker before any writer runs', (fs.readFileSync(brPath, 'utf8').match(/persistNoStart\(sockFile, meta, \{ readSessionMeta, writeSessionMeta \}\);/g) || []).length === 2);
     }
@@ -1214,13 +1228,24 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const src = read('src/usage-routes.js');
     const from = "    if (out.resetCredits === undefined && prev && prev.resetCredits && typeof prev.resetCredits === 'object') out.resetCredits = prev.resetCredits;\n";
     ok('R20 NEGATIVE CONTROL: the patch hit the product source', src.includes(from));
-    const f = path.join(REPO, 'src', `.usage-routes.nocarry-${process.pid}.js`);
-    fs.writeFileSync(f, src.replace(from, ''));
-    try { const outN = run(require(f).setupUsage); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { fs.rmSync(f, { force: true }); }
+    const f = copyPath('src/usage-routes.js', 'nocarry');
+    writeCopy(f, src.replace(from, ''));
+    try { const outN = run(require(f).setupUsage); ok('R20 NEGATIVE CONTROL: without the carry the chip disappears — the leg sees it', !(outN && outN.resetCredits), JSON.stringify(outN && outN.resetCredits)); } finally { /* MUTCP's scratch dir is removed at exit */ }
   }
   for (const r of worlds) fs.rmSync(r, { recursive: true, force: true });
 }
 
 fs.rmSync(dataDir, { recursive: true, force: true });
+
+// ── R-tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\nR-tree the patched copies never touch the tree');
+for (const r of copiesCensus(MUTCP.files, MUTCP.dir, REPO, { minCopies: 8 })) ok('R-tree ' + r.name, r.pass, r.detail);
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

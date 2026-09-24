@@ -14,9 +14,18 @@
 // Run: node scripts/test-xpra-client.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The negative controls' patched copies of src/lib/xpra-*.js are written
+// OUTSIDE the tree (scripts/mutant-copy.mjs: `.mjs`, every relative import
+// rewritten to the real file's URL; a trio's copies import each OTHER by URL).
+// They used to be un-ignored siblings in src/lib/ (vs-xc-*, vs-xv-*, vs-xp-*) —
+// a dirty tree while the suite ran, read as source by every src/ scanner.
+const MUTXC = mutantCopies('xpra-client', repo);
+const fileUrl = (p) => pathToFileURL(p).href;
+
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
@@ -501,9 +510,8 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
   ];
   const guardHits = guards.map(([from]) => src.split(from).length - 1);
   ok(guardHits.every((n) => n === 1), `the Watch guards are spelled once each in xpra-client.js (the control patches exactly them: ${guardHits.join(', ')})`);
-  const mutFile = path.join(repo, 'src/lib', `vs-xc-mut-${process.pid}.js`);
   let mut = src; for (const [from, to] of guards) mut = mut.replace(from, to);
-  fs.writeFileSync(mutFile, mut);
+  const mutFile = MUTXC.write('src/lib/xpra-client.js', mut, 'watch');
   const runWatch = async (mod) => {
     FakeWorker.instances.length = 0;
     const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null });
@@ -532,7 +540,7 @@ console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): W
     const M = await runWatch(await import(mutFile));
     ok(M.after.includes('display-configure') || M.after.includes('configure-window'), `CONTROL: the pre-x5 client in the same Watch pane sends geometry (${M.after.join(', ')}) — the r3 open item, a Watch pane resizing the holder's app`, M.after);
     M.c.close();
-  } finally { try { fs.unlinkSync(mutFile); } catch {} }
+  } finally { /* MUTXC's scratch dir is removed at exit */ }
 
   // DORMANT: a blocked pane's hello is held by the bridge — no hello timeout while dormant; a hello that arrives later with the pane changed re-sizes
   FakeWorker.instances.length = 0;
@@ -620,8 +628,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
   const src = read('src/lib/xpra-client.js');
   const ratioLine = "  const ratioNow = () => P.pixelRatioOf(typeof ratio === 'function' ? ratio() : ratio);";
   ok(src.split(ratioLine).length === 2, 'the ratio is read in ONE place in xpra-client.js (the control patches exactly it)');
-  const mutFile = path.join(repo, 'src/lib', `vs-xc-dpr-${process.pid}.js`);
-  fs.writeFileSync(mutFile, src.replace(ratioLine, '  const ratioNow = () => 1; // pre-fix: CSS px are X px'));
+  const mutFile = MUTXC.write('src/lib/xpra-client.js', src.replace(ratioLine, '  const ratioNow = () => 1; // pre-fix: CSS px are X px'), 'dpr');
   const runDpr = async (mod) => {
     FakeWorker.instances.length = 0;
     const cons = [];
@@ -651,7 +658,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     const M = await runDpr(await import(mutFile));
     ok(same(M.hello.display.desktop_size, [700, 450]) && M.disp[1]['desktop-size'][0] === 800, `CONTROL: the pre-fix client (CSS px are X px) says ${M.hello.display.desktop_size.join('x')} / ${M.disp[1]['desktop-size'].join('x')} — a 96-dpi bitmap the 2x screen blows up (the owner's "looks like VNC")`);
     M.c.close();
-  } finally { try { fs.unlinkSync(mutFile); } catch {} }
+  } finally { /* MUTXC's scratch dir is removed at exit */ }
 
   // ── the view: device-px canvases in CSS boxes, the pointer ×ratio, the minimum out, scaled-to-fit (never cropped) ──
   const vsrc = read('src/lib/xpra-view.js');
@@ -670,8 +677,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     const winEl = view.stage.children[0];
     return { view, w, mins, winEl, pane };
   };
-  const vMut = path.join(repo, 'src/lib', `vs-xv-dpr-${process.pid}.js`);
-  fs.writeFileSync(vMut, vsrc.replace(vLine, '  const ratio = () => 1; // pre-fix'));
+  const vMut = MUTXC.write('src/lib/xpra-view.js', vsrc.replace(vLine, '  const ratio = () => 1; // pre-fix'), 'dpr');
   try {
     const A = await runView(V);
     const cv = A.winEl.children[0];
@@ -693,23 +699,19 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     const mcv = M.winEl.children[0];
     ok(!(mcv.width === 1400 && M.winEl.style.width === '700px'), `CONTROL: the pre-fix view (ratio 1) draws the canvas at CSS size = backing store (${mcv.width} px wide in a ${M.winEl.style.width} box, the hello ${M.w.sent('hello')[0][1].display.desktop_size.join('x')}) — the 96-dpi bitmap upscaled by the 2x screen`);
     M.view.dispose();
-  } finally { try { fs.unlinkSync(vMut); } catch {} }
+  } finally { /* MUTXC's scratch dir is removed at exit */ }
 }
 
 console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 1:1, the display CONTAINS the fitted app, an active scale only in the minimum case');
 {
   // a PRE-FIX trio: copies of proto/client/view (imports rewired to each other) with named levers pulled back
   const mkTrio = async (tag, { proto = [], client = [], view = [] } = {}) => {
-    const n = (f) => `vs-${f}-${tag}-${process.pid}.js`;
     const edit = (src, subs, file) => { for (const [from, to] of subs) { if (src.split(from).length !== 2) throw new Error(`${file}: lever not spelled exactly once: ${from.slice(0, 80)}`); src = src.replace(from, to); } return src; };
-    const files = [
-      [n('xp'), edit(read('src/lib/xpra-proto.js'), proto, 'proto')],
-      [n('xc'), edit(read('src/lib/xpra-client.js'), client, 'client').replace("from './xpra-proto.js'", `from './${n('xp')}'`)],
-      [n('xv'), edit(read('src/lib/xpra-view.js'), view, 'view').replace("from './xpra-client.js'", `from './${n('xc')}'`).replace("from './xpra-proto.js'", `from './${n('xp')}'`)],
-    ];
-    for (const [f, src] of files) fs.writeFileSync(path.join(repo, 'src/lib', f), src);
-    const cleanup = () => { for (const [f] of files) { try { fs.unlinkSync(path.join(repo, 'src/lib', f)); } catch {} } };
-    try { return { P: await import(`../src/lib/${n('xp')}`), C: await import(`../src/lib/${n('xc')}`), V: await import(`../src/lib/${n('xv')}`), cleanup }; } catch (e) { cleanup(); throw e; }
+    const xp = MUTXC.write('src/lib/xpra-proto.js', edit(read('src/lib/xpra-proto.js'), proto, 'proto'), tag);
+    const xc = MUTXC.write('src/lib/xpra-client.js', edit(read('src/lib/xpra-client.js'), client, 'client').replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), tag);
+    const xv = MUTXC.write('src/lib/xpra-view.js', edit(read('src/lib/xpra-view.js'), view, 'view').replace("from './xpra-client.js'", `from '${fileUrl(xc)}'`).replace("from './xpra-proto.js'", `from '${fileUrl(xp)}'`), tag);
+    const cleanup = () => { /* MUTXC's scratch dir is removed at exit */ };
+    return { P: await import(fileUrl(xp)), C: await import(fileUrl(xc)), V: await import(fileUrl(xv)), cleanup };
   };
   const ROUND = ['  return { width: Math.max(1, Math.floor((Number(width) || 1) * r + 1e-6)), height: Math.max(1, Math.floor((Number(height) || 1) * r + 1e-6)) };', '  return { width: Math.max(1, Math.round((Number(width) || 1) * r)), height: Math.max(1, Math.round((Number(height) || 1) * r)) };'];
   const NO_SLACK = ['  const FIT_SLACK_CSS = 1;', '  const FIT_SLACK_CSS = 0;'];
@@ -849,6 +851,17 @@ console.log('§4 the census (grep over src/lib + style.css)');
   ok(!/Press Ctrl\+V to paste into the application/.test(read('src/lib/i18n-zh.js') + read('src/lib/i18n-ja.js') + read('src/lib/xpra-view.js')), 'the retired "Press Ctrl+V" hint is gone (the paste box replaced it) — from the view AND the dictionaries');
   ok(!/hosted xpra client/.test(read('src/lib/i18n-zh.js')) && !/hosted xpra client/.test(read('src/lib/i18n-ja.js')), 'the iframe interim\'s key is gone from the dictionaries');
 }
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 9 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);

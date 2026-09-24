@@ -19,8 +19,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const MUTU = mutantCopies('ut-expiry', REPO);
+
 let pass = 0, fail = 0;
 const ok = (c, m, e) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -28,19 +31,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const cleanup = [];
 process.on('exit', () => { for (const f of cleanup) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { } } });
 const tmpdir = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-expiry-')); cleanup.push(d); return d; };
-// A PATCHED COPY written beside the original (so its relative requires still
-// resolve), removed on exit. Every needle must exist — a control whose edit
+// A PATCHED COPY written OUTSIDE the tree (scripts/mutant-copy.mjs: `require`
+// re-bound on line 1 to the real module's path, so its relative requires
+// resolve as the original's), removed on exit. It used to be an un-ignored
+// sibling (vs-ut-expiry-mut-*) — a dirty tree while the suite ran. Every needle must exist — a control whose edit
 // silently missed would be the real module wearing a control's name.
-let mutN = 0;
 function mutant(rel, edits) {
   let src = fs.readFileSync(path.join(REPO, rel), 'utf8');
   for (const [from, to] of edits) {
     if (!src.includes(from)) throw new Error(`control needle missing in ${rel}: ${from.slice(0, 70)}`);
     src = src.split(from).join(to);
   }
-  const f = path.join(REPO, path.dirname(rel), `vs-ut-expiry-mut-${process.pid}-${++mutN}.js`);
-  fs.writeFileSync(f, src); cleanup.push(f);
-  return require(f);
+  return MUTU.load(rel, src);
 }
 
 const UT = require(path.join(REPO, 'src/user-todos.js'));
@@ -239,6 +241,17 @@ try {
 } catch (err) {
   fail++; console.log('  ✗ the suite threw: ' + (err && err.stack || err));
 }
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTU.files, MUTU.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -46,38 +47,27 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { clean
 fs.rmSync(ROOT, { recursive: true, force: true });
 
 // ── PATCHED-COPY HYGIENE ──────────────────────────────────────────────────
-// Each negative control writes a patched copy of a real module BESIDE it (it
-// must be a SIBLING or the module's relative requires do not resolve). The
-// `finally` blocks unlink them, but a SIGKILL runs no cleanup — and a dirty
-// tree is what the release gate REFUSES on. So: gitignored (asserted below)
-// AND swept at start by PID LIVENESS, never by age — this suite can
-// legitimately run twice in one worktree, and deleting a copy a LIVE run is
-// importing is worse than litter.
-for (const [dir, re] of [['src', /^\.channel-store\.prefix-(\d+)-\d+\.js$/], ['src/server', /^\.channels-engine\.prefix-(\d+)-\d+\.js$/], ['src/channels', /^\.(?:index|fake)\.prefix-(\d+)-\d+\.js$/]]) {
-  let swept = 0, spared = 0;
-  for (const f of fs.readdirSync(path.join(REPO, dir))) {
-    const m = f.match(re);
-    if (!m) continue;
-    let alive = false;
-    try { process.kill(Number(m[1]), 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
-    if (alive) { spared++; continue; }
-    try { fs.unlinkSync(path.join(REPO, dir, f)); swept++; } catch {}
-  }
-  if (swept || spared) console.log(`  … ${dir}: swept ${swept} stranded patched copies, spared ${spared} live`);
-}
-{
-  const gi = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf-8');
-  ok(/^src\/\.channel-store\.prefix-\*\.js$/m.test(gi) && /^src\/server\/\.channels-engine\.prefix-\*\.js$/m.test(gi)
-     && /^src\/channels\/\.index\.prefix-\*\.js$/m.test(gi) && /^src\/channels\/\.fake\.prefix-\*\.js$/m.test(gi),
-    'ALL FOUR patched-copy families this suite writes are GITIGNORED — a SIGKILL strands one, and a dirty tree is what the release gate refuses on');
-}
+// Each negative control loads a patched copy of a real module. They used to be
+// gitignored SIBLINGS (src/.channel-store.prefix-*, src/server/.channels-engine.prefix-*,
+// src/channels/.{index,fake}.prefix-*) — a SIGKILL stranded them and every src/
+// scanner running beside this suite read them as source. They are written
+// outside the tree now (MUTE below); this only removes what a pre-fix run left.
+for (const [dir, re] of [['src', /^\.channel-store\.prefix-(\d+)-\d+\.js$/], ['src/server', /^\.channels-engine\.prefix-(\d+)-\d+\.js$/], ['src/channels', /^\.(?:index|fake)\.prefix-(\d+)-\d+\.js$/]]) sweepLegacy(REPO, [dir], re);   // what a pre-fix run stranded (dead PIDs only)
 
 let seq = 0, patchSeq = 0;
+
 const engines = [];
-// A patched copy must be a SIBLING of the module it replaces (relative
-// requires) and must have its OWN name: node caches by resolved path, so two
-// controls sharing one filename silently drive the FIRST patch twice.
-const patchPath = (dir, base) => path.join(REPO, dir, `.${base}.prefix-${process.pid}-${++patchSeq}.js`);
+// A patched copy is written OUTSIDE the tree (scripts/mutant-copy.mjs: this
+// process's scratch dir, `require` re-bound on line 1 to the real module's
+// path, so its relative requires resolve as a sibling's) and must have its OWN
+// name: node caches by resolved path, so two controls sharing one filename
+// silently drive the FIRST patch twice. `patchPath` names the copy before it
+// exists (a copy that requires ANOTHER copy is re-pointed at that path);
+// `writeCopy` writes it. The tree census at the end measures the placement.
+const MUTE = mutantCopies('chan-engine', REPO);
+const copyOrig = new Map();
+const patchPath = (dir, base) => { const p = MUTE.pathFor(`${base}-${++patchSeq}`); copyOrig.set(p, `${dir}/${base}.js`); return p; };
+const writeCopy = (p, src) => MUTE.write(copyOrig.get(p), src, null, { esm: false, name: path.basename(p, '.cjs') });
 function mkEngine(opts = {}) {
   const dataDir = path.join(ROOT, opts.name || `e${++seq}`);
   const events = [];
@@ -162,9 +152,9 @@ function dayStartClock() {
     'NEGATIVE CONTROL setup: the pre-fix store (the r2 order, the r4 invalidation AND the r5 strict rebuild reverted) was reconstructed from the shipped bytes (a control that cannot be built proves nothing)');
   const storeCopy = patchPath('src', 'channel-store');
   const engCopy = patchPath('src/server', 'channels-engine');
-  fs.writeFileSync(storeCopy, PRE);
+  writeCopy(storeCopy, PRE);
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  fs.writeFileSync(engCopy, esrc.replace("require('../channel-store.js')", `require('../${path.basename(storeCopy)}')`));
+  writeCopy(engCopy, esrc.replace("require('../channel-store.js')", `require(${JSON.stringify(storeCopy)})`));
   try {
     const PE = require(engCopy);
     const eng = PE.create({ dataDir: path.join(ROOT, 'append-fail-pre'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {} });
@@ -185,7 +175,7 @@ function dayStartClock() {
     const p3 = await eng.pass(A, { force: true });
     ok(p3.ok === true && (fs.existsSync(lp) ? fs.readFileSync(lp, 'utf-8').trim().length : 0) === 0,
       'NEGATIVE CONTROL: …and it never recovers — the cursor is past them');
-  } finally { for (const f of [storeCopy, engCopy]) { try { fs.unlinkSync(f); } catch {} } }
+  } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
 // ── ② A FAILING ADAPTER'S HEALTH SURVIVES A HEALTHY NEIGHBOUR'S PASS ──────
@@ -268,7 +258,7 @@ function dayStartClock() {
   ok(PRE !== esrc && /JSON.parse\(JSON.stringify\(store.adapters.live\(\)\)\)/.test(PRE),
     'NEGATIVE CONTROL setup: the pre-fix engine (a private re-parsed copy per call, written whole back) was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
-  fs.writeFileSync(engCopy, PRE);
+  writeCopy(engCopy, PRE);
   try {
     const PE = require(engCopy);
     const mkMod = (kind, { fails = false, delayMs = 0 } = {}) => {
@@ -297,7 +287,7 @@ function dayStartClock() {
     const b = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')).adapters.find((a) => a.id === 'broken') || {};
     ok(b.consecutiveFailures === 0 && !b.lastPass,
       'NEGATIVE CONTROL: the pre-fix engine persists ZERO failures for a token-expired adapter — the panel draws it as healthy', JSON.stringify(b.lastPass));
-  } finally { try { fs.unlinkSync(engCopy); } catch {} }
+  } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
 // ── ③ markRead: NO-OP MEANS NO BROADCAST, AND "READ" MEANS THE NEWEST ─────
@@ -368,7 +358,7 @@ function dayStartClock() {
   ok(PRE !== esrc && !/const newest = store.readTail/.test(PRE) && /\n    notify\(\[convId\]\);/.test(PRE),
     'NEGATIVE CONTROL setup: the pre-fix markRead (now() + an unconditional notify) was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
-  fs.writeFileSync(engCopy, PRE);
+  writeCopy(engCopy, PRE);
   try {
     const PE = require(engCopy);
     const events = [];
@@ -385,7 +375,7 @@ function dayStartClock() {
       'NEGATIVE CONTROL: with `now()` the unread count NEVER reaches zero — the condition an open window re-POSTs on, for ever', String(en.unread));
     ok(events.length === 6,
       'NEGATIVE CONTROL: …and every one of the six no-ops broadcasts, which is the other half of the ~490/s loop', String(events.length));
-  } finally { try { fs.unlinkSync(engCopy); } catch {} }
+  } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
 // ── ④ A ROUTE MAY NOT MINT AN INDEX ROW ───────────────────────────────────
@@ -565,11 +555,11 @@ function dayStartClock() {
     .replace("    if (lane.via === 'scan' && !lane.source) return { appended: 0, duplicates: 0, anchorMoved: false, complete: false, why: lane.why };\n", '')
     .replace(/        let mayIngest = true;\n        if \(laneOrScan\(rec, \{\}\)\.via === 'scan'\) \{[\s\S]*?\n        \}\n/, '        let mayIngest = true;\n')
     .replace("      if (lane.via === 'scan') opts.source = lane.source;   // HANDED DOWN, never re-derived by the adapter\n", '')
-    .replace("require('../channels/index.js')", `require('../channels/${path.basename(idxCopy)}')`)
-    .replace("require('../channels/fake.js')", `require('../channels/${path.basename(fakeCopy)}')`);
+    .replace("require('../channels/index.js')", `require(${JSON.stringify(idxCopy)})`)
+    .replace("require('../channels/fake.js')", `require(${JSON.stringify(fakeCopy)})`);
   ok(IPRE !== isrc && FPRE !== fsrc && !/opts\.source = lane\.source/.test(EPRE) && !/scanHost\(/.test(EPRE.replace(/^\s*\/\/.*$/gm, '')) && !/!lane\.source\) return/.test(EPRE),
     'NEGATIVE CONTROL setup: all three pre-fix pieces were reconstructed from the shipped bytes');
-  fs.writeFileSync(idxCopy, IPRE); fs.writeFileSync(fakeCopy, FPRE); fs.writeFileSync(engCopy, EPRE);
+  writeCopy(idxCopy, IPRE); writeCopy(fakeCopy, FPRE); writeCopy(engCopy, EPRE);
   try {
     const PE = require(engCopy);
     const eng = PE.create({ dataDir: path.join(ROOT, 'scan-gate-pre'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {} });
@@ -585,7 +575,7 @@ function dayStartClock() {
       `NEGATIVE CONTROL: the r2 engine ingests ${n} records and advances the anchor while the chip says "not scanning" (why host-facts-stale, source null) — the honesty contract publishing the opposite of what happened`,
       JSON.stringify({ n, anchor: en.anchor, lane: row.lane, freshness: row.freshness }));
     ok(eng.adapterRecords().adapters.find((r) => r.id === A).scan.hostFacts === null, 'NEGATIVE CONTROL: …and `scan.hostFacts` is still null after the pass — nothing ever produced it');
-  } finally { for (const f of [idxCopy, fakeCopy, engCopy]) { try { fs.unlinkSync(f); } catch {} } }
+  } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
 // ── ⑦ "READ" IS THE NEWEST RECORD'S — FOR RECORDS STAMPED IN THE PAST TOO (r3) ──
@@ -651,13 +641,13 @@ function dayStartClock() {
                            "      const stamp = Number.isFinite(at) ? at : Math.max(now(), Number(newest && newest.at) || 0);");
   ok(PRE !== esrc, 'NEGATIVE CONTROL setup: the r2 stamp was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
-  fs.writeFileSync(engCopy, PRE);
+  writeCopy(engCopy, PRE);
   try {
     const p = await drive(require(engCopy), 'markread-past-pre');
     ok(p.readAt !== p.newestAt && p.readAt >= Date.now() - 60e3, 'NEGATIVE CONTROL: the r2 stamp is now(), not the newest record\'s', `${p.readAt} vs newest ${p.newestAt}`);
     ok(p.b1 === 1 && p.b2 === 1, 'NEGATIVE CONTROL: …so an identical second mark broadcasts AGAIN (the no-op rule was inert)', `${p.b1},${p.b2}`);
     ok(p.unread === 0, 'NEGATIVE CONTROL: …and the backdated arrival is SILENTLY marked read — never badged', String(p.unread));
-  } finally { try { fs.unlinkSync(engCopy); } catch {} }
+  } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
 // ── ⑧ TRACKING BROADCASTS EVEN WHEN THE PASS IT KICKS CANNOT BE AFFORDED (r3) ──
@@ -712,11 +702,11 @@ function dayStartClock() {
                            "    if (tracked) pass(adapterId, { force: true }).catch(() => {}); else notify([convId]);");
   ok(PRE !== esrc, 'NEGATIVE CONTROL setup: the r2 setTracked was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
-  fs.writeFileSync(engCopy, PRE);
+  writeCopy(engCopy, PRE);
   try {
     const p = await drive(require(engCopy), 'track-budget-pre');
     ok(p.silent > 0 && p.onDisk === 30, `NEGATIVE CONTROL: the r2 engine persists all 30 and broadcasts NOTHING for ${p.silent} of them — the route said ok and no client learned`, JSON.stringify(p));
-  } finally { try { fs.unlinkSync(engCopy); } catch {} }
+  } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
 // ── ⑨ THE DIGEST'S FRESHNESS CLAIM IS `off` FOR ROWS NOTHING FETCHES (r3) ──
@@ -1108,5 +1098,16 @@ console.log('⑥ (P2) assign, filter, wake');
 }
 
 for (const e of engines) { try { e.stop(); } catch {} }
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 9 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

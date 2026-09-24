@@ -57,6 +57,8 @@ const MUTANTS = [
     from: '  for (const old of running) {', to: '  for (const old of []) {' },
   { name: 'kill-identity gate removed (looksLikeHeavyRun)', file: CI, suite: 'test-ci-heavy-launch',
     from: '    if (!looksLikeHeavyRun(old.pid)) {', to: '    if (false) {' },
+  { name: 'already-green launch runs the tier again (B-3ccf)', file: CI, suite: 'test-ci-heavy-launch',
+    from: '    if (g.skip) {', to: '    if (false) {' },
   { name: 'machine lock never taken', file: CI, suite: 'test-ci-heavy-launch',
     from: '  const held = acquireMachineLock(lockPath, {', to: '  const held = ((x) => ({ ok: true, release() {} }))({' },
   // heavyGate's handler loop. The two-space `) {` spelling is what makes this

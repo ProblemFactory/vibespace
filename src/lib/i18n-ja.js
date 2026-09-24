@@ -4513,6 +4513,9 @@ export default {
   "Desktop app scale (xpra)": "デスクトップアプリのスケール（xpra）",
   "How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: 2× when the screen you launch it from is scaled 150 % or more, else 1×. 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). A change takes effect when the app is launched again; the window shows its scale in the status bar.": "高解像度の画面で文字をくっきり表示するための、デスクトップアプリ自身の描画サイズ。自動：起動した画面のスケールが 150% 以上なら 2×、それ以外は 1×。1.5× は GTK アプリの文字だけを拡大し、ボタンは 1× のままです（X11 の GTK は小数倍に拡大できません）。変更はアプリを再起動したときに反映され、ウィンドウのステータスバーにスケールが表示されます。",
   "1.5× (text only in GTK apps)": "1.5×（GTK アプリは文字のみ）",
+  "Restart this session to receive notifications without a billed turn": "このセッションを再起動すると、課金ターンなしで通知を受け取れます",
+  "Remove — it is delivered with the next prompt instead, without a billed turn": "削除 — 代わりに次のプロンプトと一緒に届き、課金ターンは発生しません",
+  "this session’s agent predates notification steering, so a delivery now would queue a billed turn; delivered with the conversation’s next prompt": "このセッションのエージェントは通知の割り込み機能より古いため、今届けると課金ターンとしてキューに入ります。会話の次のプロンプトと一緒に届きます",
   // split UX chunk 1 (docs/design-split-ux.zh.md)
   "Undo": "元に戻す",
   "Unsplit": "並べ表示を解除",

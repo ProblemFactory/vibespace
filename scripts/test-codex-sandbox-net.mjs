@@ -11,12 +11,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { withoutVendorKeys } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skip = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const SKIP = (n, why) => { skip++; console.log('  ~ SKIP ' + n + ' — ' + why); };
-const run = (cmd, args, opts = {}) => new Promise((r) => execFile(cmd, args, { timeout: 30000, ...opts }, (err, stdout, stderr) => r({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
+// every child runs with NO ambient API key (B-5f0b, test-architecture §50):
+// `codex sandbox` makes no vendor call, and a key must not be why one could
+const run = (cmd, args, opts = {}) => new Promise((r) => execFile(cmd, args, { timeout: 30000, env: withoutVendorKeys(), ...opts }, (err, stdout, stderr) => r({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
 
 // ── static pins ──
 const wrapper = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');

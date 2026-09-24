@@ -674,10 +674,103 @@ class UsageEstimator {
   }
 }
 
+// ── Estimator telemetry hygiene (B-a5c0) ─────────────────────────────────────
+// A metric that reports on every tick is not a metric: the old absolute-error
+// stream wrote 118k rows in two days, nearly all 0 and none of them naming an
+// account — the real errors drowned in the zeros (the "gauge that can never
+// fall" class). THE calibration metric is therefore emitted from exactly ONE
+// place — `sweepAnchorGroup` below — and only when a NEW ground-truth reading
+// arrived to compare against (the reading was accepted as an anchor), once
+// per moved bucket, carrying WHICH account and WHICH bucket it measured.
+const CALIB_METRIC = 'usage-est-rel-err-pct';
+function calibMetricRows(calib, { account } = {}) {
+  const rows = [];
+  for (const [bucket, c] of Object.entries(calib || {})) {
+    if (!c || c.rel == null || !Number(c.actDu)) continue; // barely-moved window ⇒ noise division, not accuracy (2.368.13)
+    rows.push({ name: CALIB_METRIC, value: Math.abs(c.predDu - c.actDu) / Math.abs(c.actDu) * 100, detail: `account=${account || '__global__'} bucket=${bucket}` });
+  }
+  return rows;
+}
+
+// ONE identity group's step of the engine's 60 s anchor sweep (moved out of
+// usage-pool-engine so the "no new reading ⇒ nothing" rule is a TESTED
+// behaviour, not a comment). Every dependency is injected; the engine passes
+// its real anchors store, estimator, ledger cost and dark-host reader.
+//   anchors   — { lastAnchor(key), maybeRecord(rec) → true iff a NEW anchor was written }
+//   estimator — { accountIdsFor, ratesFor, invalidate }
+//   costBetween(ids, fromMs, toMs), darkHosts(allIds) → [host], metric(name, value, detail)
+// Returns { fresh, recorded, metrics } (the rows it emitted).
+function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween, darkHosts, metric }) {
+  const cache = group?.cache;
+  const prev = anchors.lastAnchor(identityKey);
+  // NEW ground truth = a reading newer than the last anchor. Anything else is
+  // the same snapshot re-seen (statusline rewrites it every 8 s) or an older
+  // sibling cache — there is nothing to compare against, so no cost walk, no
+  // calibration, no metric.
+  const fresh = !!cache?.fetchedAt && (!prev || Number(cache.fetchedAt) > (Number(prev.fetchedAt) || 0));
+  if (!fresh) return { fresh: false, recorded: false, metrics: [] };
+  const allIds = estimator.accountIdsFor(identityKey, group.accountIds);
+  const costSince = prev ? costBetween(allIds, prev.fetchedAt, cache.fetchedAt) : null;
+  // calibration: what the CURRENT rates would have predicted for this new
+  // reading — recorded into the anchor for offline analysis + Diagnostics.
+  // Same-source only (B-b3cd metric hygiene): a cross-source pair carries the
+  // unknown inter-source offset, not prediction error — the exact rule
+  // extractPairs already enforces for LEARNING (2.340.0).
+  let calib = null;
+  if (prev && costSince && (prev.source || 'unknown') === (cache.source || 'unknown')) {
+    try {
+      const newBuckets = {
+        fiveHour: cache.fiveHour ? { u: cache.fiveHour.utilization, resetsAt: cache.fiveHour.resetsAt } : null,
+        sevenDay: cache.sevenDay ? { u: cache.sevenDay.utilization, resetsAt: cache.sevenDay.resetsAt } : null,
+        scopedWeekly: (cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt })),
+      };
+      calib = predictCalib(prev, newBuckets, estimator.ratesFor(identityKey), costSince, (cache.fetchedAt - prev.fetchedAt) / 1000);
+    } catch { calib = null; }
+  }
+  // pairs recorded while ANY tainted source was dark must not teach rates
+  // (Δu real, cost missing ⇒ a falsely HOT rate) — mark the record so
+  // extractPairs voids pairs touching it (both sides of the gap).
+  let dark = [];
+  try { dark = darkHosts ? darkHosts(allIds) || [] : []; } catch { dark = []; }
+  const recorded = !!anchors.maybeRecord({ identityKey, accountId: group.accountId, cache, costSince, calib, accountIds: allIds, dark });
+  if (!recorded) return { fresh: true, recorded: false, metrics: [] };
+  estimator.invalidate(identityKey); // rates re-derive from the grown pair set
+  const metrics = calibMetricRows(calib, { account: group.accountId || identityKey });
+  for (const m of metrics) { try { metric?.(m.name, m.value, m.detail); } catch { } }
+  return { fresh: true, recorded: true, metrics };
+}
+
+// The auto-cli scheduler's drift read (server.js, B-a5c0): est vs the last
+// raw reading, per bucket. A raw bucket whose `resetsAt` is already PAST is
+// no control — its window rolled, the estimator re-based it at 0 and the
+// comparison is "old window vs new window", the 100-point "drift" the log
+// used to print. `drift` is the max over CONTROLLED buckets only (null when
+// none had a control — the log says so instead of a number). The SCHEDULER'S
+// inputs are unchanged: `triggerDrift`/`moved` still count a rolled bucket,
+// because a reading from a closed window IS stale and refreshing it is the
+// right act (the backlog's own finding: the trigger was correct, only the
+// number was wrong) — this keeps the vendor-facing spawn cadence identical.
+function cliRefreshDrift(est, raw, nowMs = Date.now()) {
+  const nowSec = nowMs / 1000;
+  let drift = null, triggerDrift = 0, moved = false, rolled = 0;
+  const cmp = (e, r) => {
+    if (!e || !r || typeof e.utilization !== 'number' || typeof r.utilization !== 'number') return;
+    const d = Math.abs(e.utilization - r.utilization) * 100;
+    triggerDrift = Math.max(triggerDrift, d); if (d > 0.2) moved = true;
+    const rs = Number(r.resetsAt) || 0;
+    if (rs && rs <= nowSec) { rolled++; return; } // stale raw ⇒ no control
+    drift = Math.max(drift == null ? 0 : drift, d);
+  };
+  cmp(est?.fiveHour, raw?.fiveHour); cmp(est?.sevenDay, raw?.sevenDay);
+  for (const s of est?.scopedWeekly || []) cmp(s, (raw?.scopedWeekly || []).find((x) => x.name === s.name));
+  return { drift, triggerDrift, moved, rolled };
+}
+
 module.exports = {
   PRIOR_WEIGHT_DU, CLAUDE_MAX_PRIOR_FULL_USD,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
+  CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift,
   burnRates, BURN_WINDOW_MS,
   UsageEstimator,
 };

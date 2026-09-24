@@ -196,7 +196,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 // on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
 const { REMOTE_PRELUDE, nodeFinder, buildRemoteExec } = require('./remote-shell.js');
 const { sweepWriters } = require('./writer-sweep.js');
-const { wrapperCaps, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES } = require('./server/wrapper-files.js');
+const { wrapperCaps, notificationSteerOf, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES } = require('./server/wrapper-files.js');
 
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
   return new Promise((resolve, reject) => {
@@ -220,7 +220,7 @@ const WS_CTX_CONTRACT = [
   'harnessSetting', 'harnessDeclares', 'harnessSpawnSettings', 'cliConfigPlanB64', // harness settings (design-harness-settings §5/§6)
   'sessionCounterRef', 'createSessionMessages', 'poolChooser', 'sbNoteServerOp',
   'SOCKETS_DIR', 'BUFFERS_DIR', 'PTY_WRAPPER', 'CHAT_WRAPPER',
-  'NODE_CMD', 'DTACH_CMD', 'ENV_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV',
+  'NODE_CMD', 'DTACH_CMD', 'ENV_CMD', 'CLAUDE_CMD', 'EDITOR_CMD', 'AGENT_BIN_DIR', 'PORT', 'X_ENV', 'cliCmds', // cliCmds: the spawn-time re-resolve (B-a18e)
   'adapterRegistry', 'pty', 'path', 'fs', 'os', 'execFileSync', 'ensureDir', 'hosts',
   'accounts', 'scheduleCtxSync', 'activeSessionsPayload',
   'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice', 'otelEnv', 'telemetry',
@@ -1203,7 +1203,10 @@ function registerWsHandler(wss, ctx) {
                 // guess (a row nobody can act on is worse than a row that
                 // reappears one round trip later) and the resync below asks
                 // the one process that actually knows.
-                return { queueSupported: !!served, queueVerbs: served || null, queueKnown: !served || published };
+                // …and whether THIS process steers a notification into a
+                // running turn or queues it as a billed one (B-d963) — the
+                // strip's restart hint; null = unknown, never a hint.
+                return { queueSupported: !!served, queueVerbs: served || null, queueKnown: !served || published, queueNotifSteer: notificationSteerOf(wc, { inBand, published }) };
               })();
               ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
                 messages, totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,

@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -44,27 +45,19 @@ const { decidePoolSwitch, poolBlockedNotice } = require(path.join(REPO, 'src/acc
 const { projectCacheForFamily } = require(path.join(REPO, 'src/model-family.js'));
 
 const cleanup = [];
-// PATCHED COPIES live BESIDE the real module (their relative requires must
-// resolve), are gitignored, and are swept by PID at start — a SIGKILL must
-// never leave this suite's litter in the tree, because a dirty tree is what the
-// release gate refuses on. Only a PID that is GONE may be swept: this suite can
-// legitimately run twice in the same checkout.
-for (const dir of ['src', 'src/server', 'src/server/stdout']) {
-  try {
-    for (const f of fs.readdirSync(path.join(REPO, dir))) {
-      const m = /^vs-fable-mut-(\d+)-/.exec(f);
-      if (!m || Number(m[1]) === process.pid) continue;
-      try { process.kill(Number(m[1]), 0); continue; } catch { }
-      try { fs.unlinkSync(path.join(REPO, dir, f)); } catch { }
-    }
-  } catch { }
-}
-const mutants = [];
+// PATCHED COPIES are written OUTSIDE the tree (scripts/mutant-copy.mjs: this
+// process's scratch dir, `require` re-bound on line 1 to the real module's
+// path, so relative requires resolve as a sibling's); §tree measures that while
+// they exist. They used to be siblings in src/, src/server/ and
+// src/server/stdout/ (vs-fable-mut-*, gitignored) — and §14f's census had to
+// skip them by NAME, which is exactly what any other src/ scanner could not.
+// A copy that must reach ANOTHER copy is re-pointed at its absolute path.
+sweepLegacy(REPO, ['src', 'src/server', 'src/server/stdout'], /^vs-fable-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
+const MUTF = mutantCopies('fable', REPO);
 process.on('exit', () => {
   for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
-  for (const f of mutants) { try { fs.unlinkSync(f); } catch { } }
 });
-/** Write a patched SIBLING of a real module and require it. */
+/** Write a patched copy of a real module (outside the tree) and require it. */
 function mutate(rel, tag, replacements) {
   const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
   let out = src;
@@ -72,8 +65,7 @@ function mutate(rel, tag, replacements) {
     if (!out.includes(from)) return { hit: false, why: 'anchor not found: ' + from.slice(0, 70) };
     out = out.replace(from, to);
   }
-  const fp = path.join(REPO, path.dirname(rel), 'vs-fable-mut-' + process.pid + '-' + tag + '.js');
-  fs.writeFileSync(fp, out); mutants.push(fp);
+  const fp = MUTF.write(rel, out, tag, { esm: false });
   return { hit: out !== src, mod: require(fp), file: fp };
 }
 /** MASTER'S BLOCKED-NOTICE MACHINERY, verbatim from d2065aa2 — the two-band
@@ -1910,11 +1902,11 @@ function playLatch({ stdoutModule = null, engineModule = engMod, restored = fals
   if (mutC.hit) {
     const mutI = mutate('src/server/stdout/index.js', 'registry', [[
       "'stream-json': require('./claude-stream-json.js'),",
-      `'stream-json': require('./${path.basename(mutC.file)}'),`,
+      `'stream-json': require(${JSON.stringify(mutC.file)}),`,
     ]]);
     const mutS = mutI.hit ? mutate('src/server/session-stdout.js', 'sostdout', [[
       "require('./stdout/index.js')",
-      `require('./stdout/${path.basename(mutI.file)}')`,
+      `require(${JSON.stringify(mutI.file)})`,
     ]]) : { hit: false, why: 'registry patch missed' };
     ok('§11d NEGATIVE CONTROL: …and the registry + session-stdout were re-pointed at it',
       mutI.hit === true && mutS.hit === true, (mutI.why || '') + ' ' + (mutS.why || ''));
@@ -2312,12 +2304,12 @@ function chainConsumer(tag, replacements) {
   if (!mutC.hit) return { hit: false, why: mutC.why };
   const mutI = mutate('src/server/stdout/index.js', tag + 'reg', [[
     "'stream-json': require('./claude-stream-json.js'),",
-    `'stream-json': require('./${path.basename(mutC.file)}'),`,
+    `'stream-json': require(${JSON.stringify(mutC.file)}),`,
   ]]);
   if (!mutI.hit) return { hit: false, why: 'registry patch missed' };
   const mutS = mutate('src/server/session-stdout.js', tag + 'so', [[
     "require('./stdout/index.js')",
-    `require('./stdout/${path.basename(mutI.file)}')`,
+    `require(${JSON.stringify(mutI.file)})`,
   ]]);
   if (!mutS.hit) return { hit: false, why: 'session-stdout patch missed' };
   return { hit: true, mod: mutS.mod };
@@ -2451,7 +2443,7 @@ const R4_BELT_PATCH = [
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const fp = path.join(dir, e.name);
       if (e.isDirectory()) { if (!/^(node_modules)$/.test(e.name)) walk(fp); }
-      else if (e.name.endsWith('.js') && !/^vs-fable-mut-/.test(e.name)) files.push(fp);
+      else if (e.name.endsWith('.js')) files.push(fp);   // no name-based exclusion: this suite's copies never live under src/ (§tree)
     }
   };
   walk(path.join(REPO, 'src'));
@@ -2989,7 +2981,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     if (!pure.hit) return pure;
     return mutate('src/server/usage-pool-engine.js', 'softhardeng', [[
       "require('../account-pool-auto.js');",
-      "require('../" + path.basename(pure.file) + "');",
+      'require(' + JSON.stringify(pure.file) + ');',
     ]]);
   };
   if (w) {
@@ -3051,7 +3043,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
       '    if (hardDead) {\n',
       '    if (hardDead && !(warm && warm.warm && warm.inTurn)) { // OVER-BROAD: the hard band defers too\n',
     ]]);
-    const obE = pure.hit ? mutate('src/server/usage-pool-engine.js', 'softhardeng-e', [["require('../account-pool-auto.js');", "require('../" + path.basename(pure.file) + "');"], HELD_DEFAULT, HELD_PICK]) : pure;
+    const obE = pure.hit ? mutate('src/server/usage-pool-engine.js', 'softhardeng-e', [["require('../account-pool-auto.js');", 'require(' + JSON.stringify(pure.file) + ');'], HELD_DEFAULT, HELD_PICK]) : pure;
     if (obE.hit) {
       const weo = defaultWorld(HARD, obE.mod);
       const c = quiet(); weo.eng.maybePoolAutoSwitchForPool(weo.P); c.done();
@@ -3161,6 +3153,17 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
   }
 
 }
+
+
+// ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n§tree the patched copies never touch the tree');
+for (const r of copiesCensus(MUTF.files, MUTF.dir, REPO, { minCopies: 20 })) ok('§tree ' + r.name, r.pass, r.detail);
 
 console.log(fail ? fail + ' FAILED (' + pass + ' passed)' : 'ALL PASS (' + pass + ')');
 process.exit(fail ? 1 : 0);

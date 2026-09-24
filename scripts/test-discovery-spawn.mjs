@@ -23,7 +23,7 @@
 //
 // The census PRINTS what it counted, the fixture is a scratch HOME (the real
 // ~/.claude is never read), and each half has `master`'s own copy of the module
-// under test as its NEGATIVE CONTROL — the sweep's dropped in beside the real
+// under test as its NEGATIVE CONTROL — the sweep's loaded from outside the tree as if it were the real
 // one, refreshWebuiPids' sliced out of `git show ${PRE_FIX_REF}:server.js`.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +32,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 
 // THE PRE-FIX BYTES ARE PINNED TO A SHA, NEVER TO `master` (the 2.369.85 lesson,
 // paid again on this suite's first push: the negative controls read
@@ -70,7 +71,7 @@ const censusStop = () => { CENSUS.on = false; let n = 0; for (const v of CENSUS.
 
 if (process.env.VS_DISC_ARM) {
   const cfg = JSON.parse(process.env.VS_DISC_ARM);
-  const store = require(path.join(REPO, cfg.impl));
+  const store = require(path.resolve(REPO, cfg.impl));   // a repo-relative product path, or an absolute pre-fix copy (§4)
   const activeSessions = new Map();
   for (const s of cfg.sessions) activeSessions.set(s.id, { claudeSessionId: s.sid, _childPid: s.pid });
   censusStart();
@@ -91,28 +92,14 @@ const ok = (c, n, extra) => {
   else { fail++; console.error('  ✗ ' + n + (extra ? ' — ' + JSON.stringify(extra) : '')); }
 };
 
-// ── §0 the pre-fix copy lives BESIDE the real module (relative requires) and
-//    can therefore dirty the tree, which is what the release gate refuses on.
-//    Two protections, as a pair: a .gitignore stanza and a PID sweep that only
-//    removes copies whose owner is GONE (this suite can legitimately run twice
-//    in one worktree, and deleting a LIVE run's module is worse than litter).
-const MUT_PREFIX = '.session-store.spawnfix-';
-const mutPath = (pid) => path.join(REPO, 'src', `${MUT_PREFIX}${pid}.js`);
-{
-  const gi = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8');
-  ok(gi.includes(`src/${MUT_PREFIX}*.js`), `.gitignore covers src/${MUT_PREFIX}*.js (a SIGKILL must never leave a tracked file)`);
-  const swept = [], spared = [];
-  for (const f of fs.readdirSync(path.join(REPO, 'src'))) {
-    if (!f.startsWith(MUT_PREFIX) || !f.endsWith('.js')) continue;
-    const pid = Number(f.slice(MUT_PREFIX.length, -3));
-    let alive = false; try { process.kill(pid, 0); alive = true; } catch { alive = false; }
-    if (alive && pid !== process.pid) { spared.push(f); continue; }
-    try { fs.unlinkSync(path.join(REPO, 'src', f)); swept.push(f); } catch { }
-  }
-  ok(true, `stale pre-fix copies swept by PID liveness (swept ${swept.length}, spared-because-live ${spared.length})`);
-}
-process.on('exit', () => { try { fs.unlinkSync(mutPath(process.pid)); } catch { } });
-for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { try { fs.unlinkSync(mutPath(process.pid)); } catch { } process.exit(1); });
+// ── §0 the pre-fix copy is written OUTSIDE the tree (scripts/mutant-copy.mjs:
+//    this process's scratch dir, `require`/__dirname re-bound on line 1 to the
+//    real module's path, so its relative requires resolve as a sibling's);
+//    §10 measures that while it exists. It used to be a gitignored sibling,
+//    src/.session-store.spawnfix-<pid>.js — a SIGKILL stranded it and every
+//    src/ scanner running beside this suite read a second session-store.
+const MUTS = mutantCopies('disc-spawn', REPO);
+sweepLegacy(REPO, ['src'], /^\.session-store\.spawnfix-(\d+)\.js$/);   // what a pre-fix run stranded (dead PIDs only)
 
 const ident = require(path.join(REPO, 'src/cli-identity.js'));
 
@@ -283,8 +270,9 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   ok(noTmux.spawns === 0, `ZERO child processes when no tmux binary exists (${noTmux.spawns}: ${JSON.stringify(noTmux.byCmd)})`);
 }
 
-// ── §4 NEGATIVE CONTROL: `master`'s own session-store, beside the real one.
+// ── §4 NEGATIVE CONTROL: `master`'s own session-store, standing in for the real one.
 //    Without it, "0 spawns" could just mean the fixture never reaches the code.
+//    (Loaded from outside the tree — §0.)
 {
   const git = spawnSync('git', ['show', `${PRE_FIX_REF}:src/session-store.js`],
     { cwd: REPO, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: gitEnvFrom(process.env) });
@@ -295,17 +283,16 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     // the control must really BE the retired shape, or it controls nothing
     ok(/pgrep/.test(pre) && /'ps', \['-p', String\(pid\), '-o', 'ppid='\]/.test(pre),
       'the control copy really carries the retired per-item shapes (`pgrep -P`, `ps -p -o ppid=`)');
-    fs.writeFileSync(mutPath(process.pid), pre);
+    const preFile = MUTS.write('src/session-store.js', pre, 'prefix', { esm: false });
     // …with this box's NORMAL PATH, on purpose: master's identity rung for a
     // lock without procStart IS a `ps`, so an emptied PATH would make it fail
     // for a reason that has nothing to do with forks and the two arms would no
     // longer differ in ONE variable (measured: 50 of 55 locks vanish).
-    const preRun = runArm(`src/${MUT_PREFIX}${process.pid}.js`);
+    const preRun = runArm(preFile);
     console.log(`  · PRE-FIX sweep, same fixture, same PATH: ${JSON.stringify(preRun)}`);
     ok(!preRun.error, `the control arm ran (${preRun.error || 'ok'})`);
     ok(preRun.sessions === TOTAL, `the control discovered the same ${TOTAL} locks (${preRun.sessions}) — same fixture, one variable`);
     ok(preRun.spawns >= TOTAL, `PRE-FIX: ${preRun.spawns} child processes for ${TOTAL} locks (${JSON.stringify(preRun.byCmd)}) — the defect reproduces`);
-    fs.unlinkSync(mutPath(process.pid));
   }
 }
 
@@ -656,6 +643,15 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   }
   ident.resetProcTables();
 }
+
+// ── §10 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──────────
+// Measured HERE, while §4's pre-fix copy still exists (the exit handler
+// removes it — a census after exit passes on the pre-fix placement too). It
+// used to be src/.session-store.spawnfix-<pid>.js (gitignored, so a plain
+// `git status` never saw it) and any suite scanning src/ beside this one
+// counted a second session-store as product code.
+console.log('\n§10 the pre-fix copy never touches the tree');
+for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: 1 })) ok(r.pass, '§10 ' + r.name, r.pass ? undefined : r.detail);
 
 cleanup();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

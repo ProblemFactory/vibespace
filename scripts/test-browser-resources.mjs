@@ -50,6 +50,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const BE = require('../src/server/browser-env.js');
 const B = require('../src/browser-profiles.js');
@@ -144,29 +145,20 @@ function mainChrome(ns) {
   return { pid: ps[0].pid, dir: m ? m[1] : null };
 }
 // PATCHED COPIES of the ORCH module — the branch's pre-fix-control idiom, as
-// in test-browser-profiles: SIBLINGS of the real module (relative requires),
-// gitignored, swept by PID at start (a SIGKILL strands one and a dirty tree is
-// what the release gate refuses on), unlinked on exit.
-const SRC_DIR = path.join(REPO_DIR, 'src/server');
-const mutants = [];
-for (const f of fs.readdirSync(SRC_DIR)) {
-  const m = /^vs-browser-mut-(\d+)-/.exec(f);
-  if (!m || Number(m[1]) === process.pid) continue;
-  try { process.kill(Number(m[1]), 0); continue; } catch (e) { if (e.code === 'EPERM') continue; }
-  try { fs.unlinkSync(path.join(SRC_DIR, f)); } catch { }
-}
-process.on('exit', () => { for (const f of mutants) { try { fs.unlinkSync(f); } catch { } } });
-let mutN = 0;
-const beSrc0 = fs.readFileSync(path.join(SRC_DIR, 'browser-env.js'), 'utf8');
+// in test-browser-profiles: written OUTSIDE the tree (scripts/mutant-copy.mjs:
+// this process's scratch dir, `require` re-bound on line 1 to the real
+// module's path, so relative requires resolve as a sibling's); ⓙ measures that
+// while they exist. They used to be gitignored siblings (src/server/vs-browser-mut-*).
+const MUTBR = mutantCopies('bres', REPO_DIR);
+sweepLegacy(REPO_DIR, ['src/server'], /^vs-browser-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
+const beSrc0 = fs.readFileSync(path.join(REPO_DIR, 'src/server/browser-env.js'), 'utf8');
 function mutantBE(edits) {
   let src = beSrc0, hits = 0;
   for (const [from, to] of edits) {
     if (src.split(from).length !== 2) return { err: 'needle not exactly once: ' + from.slice(0, 70) };
     src = src.split(from).join(to); hits++;
   }
-  const f = path.join(SRC_DIR, `vs-browser-mut-${process.pid}-${++mutN}.js`);
-  fs.writeFileSync(f, src); mutants.push(f);
-  return { mod: require(f), hits };
+  return { mod: MUTBR.load('src/server/browser-env.js', src), hits };
 }
 /** Every socket-dir root the CLI writes under, INCLUDING the per-namespace
  *  subdirectory. Round 1 read only the top level while the CLI keeps namespaced
@@ -793,5 +785,16 @@ console.log('\nⓓ ownership: this suite reaps every process it started');
 }
 
 clearTimeout(WATCHDOG);
+
+// ── ⓙ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\nⓙ the patched copies never touch the tree');
+for (const r of copiesCensus(MUTBR.files, MUTBR.dir, REPO_DIR, { minCopies: 2 })) ok(r.pass, 'ⓙ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+
 console.log(`\n  · reaped ${reap()} further process(es) this suite started`);
 done();

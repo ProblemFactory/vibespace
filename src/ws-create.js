@@ -17,6 +17,7 @@ const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { REMOTE_PRELUDE, buildRemoteExec, nodeFinder } = require('./remote-shell');
+const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { sweepWriters } = require('./writer-sweep');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
@@ -70,7 +71,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
     harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64,
     sessionCounterRef, createSessionMessages, poolChooser, sbNoteServerOp,
     SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
-    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV,
+    NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload, otelEnv,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, serverNotice, autoResume,
@@ -1943,6 +1944,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               return;
             }
           }
+          // SPAWN-TIME RE-RESOLVE (B-a18e): the pty terminal, the chat wrapper
+          // and the daemon pipe all run THIS argv — the boot-resolved CLI path
+          // is re-checked here, once, and re-resolved when it has gone (an
+          // Update restart inside an installer's window). Local only: every
+          // remote branch above already replaced spawnCmd (ssh / node).
+          if (!session.host && cliCmds) spawnCmd = await cliCmds.forSpawn(backend, spawnCmd);
           let createPty;
           try {
             const r6Argv = [
@@ -2047,18 +2054,16 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             session.socketPath = null;
             setupSessionPty(session, id, ocPty.shim);
           } else if (r6Handle) {
-            // pipe → pty-shaped shim: setupSessionPty consumes onData(string)/
-            // onExit({exitCode})/write/kill/pid; resize is a chat no-op.
-            const h = r6Handle;
-            const shim = {
-              pid: h.pid || -1,
-              onData: (cb) => { h.onData = (buf) => cb(buf.toString('utf-8')); },
-              onExit: (cb) => { h.onExit = (code) => cb({ exitCode: code ?? 0 }); },
-              write: (str) => { try { h.write(str); } catch { } },
-              resize: () => { },
-              kill: () => { try { h.kill(); } catch { } },
-            };
-            setupSessionPty(session, id, shim);
+            // pipe → pty-shaped duck: setupSessionPty consumes onData(string)/
+            // onExit({exitCode})/write/kill/pid; resize is a chat no-op. The
+            // duck holds a listener SET (src/pty-duck.js): setupSessionPty
+            // registers the liveness stamp FIRST and the consumer second, and
+            // the one-slot literal that lived here let the consumer REPLACE the
+            // stamp — ptyQuietSince then read "silent" for a relaying bridge,
+            // and this session keeps a socketPath, so the broken-stdin
+            // detector's healer (whose first act kills the pipe) was one late
+            // ack away (B-ae4b).
+            setupSessionPty(session, id, pipePtyShim(r6Handle));
           } else setupSessionPty(session, id, createPty);
 
           session._cwdRecreated = cwdRecreated; // B-7812: prompt-context tells the agent once

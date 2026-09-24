@@ -89,13 +89,17 @@ function updateSessionTodos(session, todos) {
 function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {}) {
   session.pty = ptyProcess;
 
-  // LIVENESS STAMP — the ONE place every pty (local node-pty or daemonPtyShim)
-  // is wired, so "did ANY byte arrive from this bridge since T" has ONE answer
-  // for every mode and every stream protocol. It is registered FIRST and holds
-  // no other duty: the terminal branch SWALLOWS dtach's attach preamble and a
-  // chat consumer may not append every byte to session.buffer, so a reader
-  // that asks `session.buffer.length` cannot see the bytes that prove the
-  // bridge is alive. (This is why daemonPtyShim had to grow a listener SET.)
+  // LIVENESS STAMP — the ONE place every pty (local node-pty, daemonPtyShim,
+  // the R6 pipePtyShim, the OpenCode serve terminal) is wired, so "did ANY
+  // byte arrive from this bridge since T" has ONE answer for every mode and
+  // every stream protocol. It is registered FIRST and holds no other duty: the
+  // terminal branch SWALLOWS dtach's attach preamble and a chat consumer may
+  // not append every byte to session.buffer, so a reader that asks
+  // `session.buffer.length` cannot see the bytes that prove the bridge is
+  // alive. Every duck therefore holds a listener SET (src/pty-duck.js): with
+  // ONE slot the consumer registered second REPLACES this stamp — the consumer
+  // keeps streaming and ptyQuietSince reads "silent" for a relaying bridge
+  // (B-ae4b; test-pty-duck is the census).
   ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });
 
   if (session.mode === 'chat') {
@@ -562,7 +566,7 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
       }).catch((e) => { abandoned = true; try { h.kill(); } catch { } throw e; });
     }).then((h) => {
       const openedAt = Date.now();
-      const shim = daemonPtyShim(h);   // reassigns h.onData to its listener SET
+      const shim = daemonPtyShim(h);   // reassigns h.onData to its listener SET (one slot would drop the stamp registered first)
       setupSessionPty(session, id, shim);
       for (const buf of (h._earlyData || []).splice(0)) { try { h.onData(buf); } catch { } }
       repaintClients();

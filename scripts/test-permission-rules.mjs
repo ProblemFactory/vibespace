@@ -573,6 +573,7 @@ const mod = mkModule();
 }
 // a REAL run when codex is installed (the whole point of an oracle is that it runs)
 {
+  // real-cli-env: the oracle runner's child env is built from nothing but {PATH, HOME} (agentEnv stub below) — no ambient key can reach it, and each oracle is exit-awaited (B-5f0b audit)
   let codexPath = null;
   try { codexPath = execSync('command -v codex', { encoding: 'utf8' }).trim() || null; } catch { codexPath = null; }
   if (!codexPath) {

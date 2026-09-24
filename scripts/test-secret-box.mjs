@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -31,7 +32,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 
 const { secretBox, SecretBoxError } = require(path.join(REPO, 'src/secret-box.js'));
 const ROOT = scratch('secretbox');
-const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} try { fs.unlinkSync(LEGACY_PATH); } catch {} };
+const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 fs.rmSync(ROOT, { recursive: true, force: true });
@@ -67,18 +68,14 @@ module.exports = function makeLegacy(fs, keyFile) {
   return self;
 };
 `;
-// Written BESIDE src/ as a gitignored patched copy (the repo's negative-control
-// idiom); swept at start by PID liveness, unlinked on exit.
-const LEGACY_RE = /^\.mounts-legacy-enc\.prefix-(\d+)\.js$/;
-for (const f of fs.readdirSync(path.join(REPO, 'src'))) {
-  const m = f.match(LEGACY_RE); if (!m) continue;
-  let alive = false; try { process.kill(Number(m[1]), 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
-  if (!alive) { try { fs.unlinkSync(path.join(REPO, 'src', f)); } catch {} }
-}
-const LEGACY_PATH = path.join(REPO, 'src', `.mounts-legacy-enc.prefix-${process.pid}.js`);
-fs.writeFileSync(LEGACY_PATH, LEGACY_SRC);
-const makeLegacy = require(LEGACY_PATH);
-ok(/src\/\.mounts-legacy-enc\.prefix-\*\.js/.test(fs.readFileSync(path.join(REPO, '.gitignore'), 'utf-8')), 'the legacy patched copy is gitignored (a SIGKILL must not dirty the tree the release gate refuses on)');
+// Loaded from a copy written OUTSIDE the tree (scripts/mutant-copy.mjs — this
+// process's scratch dir, removed at exit); the tree census at the end measures
+// that. It used to be a gitignored sibling, src/.mounts-legacy-enc.prefix-<pid>.js,
+// that every src/ scanner running beside this suite read as source.
+const MUTSB = mutantCopies('secret-box', REPO);
+sweepLegacy(REPO, ['src'], /^\.mounts-legacy-enc\.prefix-(\d+)\.js$/);   // what a pre-fix run stranded (dead PIDs only)
+const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
+
 
 // The embedded bytes are the ones the tree shipped: cross-check against git
 // when it can answer (a tarball export cannot — SKIP with the reason, never
@@ -250,6 +247,17 @@ ok(/src\/\.mounts-legacy-enc\.prefix-\*\.js/.test(fs.readFileSync(path.join(REPO
   ok(/not valid JSON \(SyntaxError/.test(dp) && (!/at position/.test(pos.message) || /at position \d+/.test(dp)), `the position is kept exactly when V8 states one (${dp})`);
   ok(describeJsonError(new Error('not an array')) === 'not an array' && describeJsonError('plain') === 'plain', 'a non-SyntaxError keeps its own message (it carries no input bytes)');
 }
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTSB.files, MUTSB.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

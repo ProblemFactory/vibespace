@@ -74,6 +74,7 @@ ok(unescapeTemplate('x \\u{1F3A8} y') === 'x 🎨 y', 'unescapeTemplate: \\u{…
 }
 
 // ── 1-3. against the installed CLI ──
+// real-cli-env: the installed claude is only asked `--version` (by the kit module) and read as bytes — no turn, no server, nothing a key could bill (B-5f0b audit)
 let bin = null;
 try { bin = execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim(); } catch { }
 if (!bin) {

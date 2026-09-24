@@ -61,6 +61,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 // §8g reads master's copy of continueNoticeFor. This suite runs inside
@@ -79,6 +80,26 @@ const { capsOf } = require(path.join(REPO, 'src/backend-caps.js')); // §8c′: 
 
 const cleanup = [];
 process.on('exit', () => { for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
+// PATCHED COPIES LIVE OUTSIDE THE TREE (B-0220). Every negative control below
+// loads a copy of a product module with one named edit. They used to be written
+// as SIBLINGS of the real module (src/server/vs-wake-mut-*.js, src/vs-wake-*.js)
+// so their relative requires resolved — and so every suite that SCANS src/
+// while this one runs saw them as product code: test-auto-resume-loop's
+// noteRecovered census counted the mutant engine's call sites (3 red in a
+// 2026-09-22 integration, green alone). Now each copy is written into this
+// process's scratch dir and its `require` is re-bound, on line 1 so every
+// line number stays the original's, to a createRequire pointed at the REAL
+// module's path: './x' and '../x' resolve to the very files (and the very
+// require-cache entries) a sibling would have reached. The tree is never
+// written; the census at the bottom of the suite measures that.
+// ONE implementation since batch r1: scripts/mutant-copy.mjs (every suite's
+// patched copies go through it; test-architecture §51 is the census).
+const MUTW = mutantCopies('wake', REPO);
+const MUT_DIR = MUTW.dir;
+/** Load `src` as if it were the module at `origRel`, from a file in MUT_DIR.
+ *  Returns the module; `mutantFiles` records every path written. */
+const mutantFiles = MUTW.files;
+function loadCopy(origRel, src) { return MUTW.load(origRel, src); }
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 // attemptFire returns TRUE the moment the async PRE-FIRE GATE is in flight —
 // `fired` is a decision, the send lands one or more turns later (the gate runs
@@ -535,23 +556,17 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
   // THE FIVE LOGIN EXITS, through the REAL route factory.
   const routes = require(path.join(REPO, 'src/server/account-usage-routes.js'));
   const routesSrc0 = read('src/server/account-usage-routes.js');
-  const routeMutants = [];
-  process.on('exit', () => { for (const f of routeMutants) { try { fs.unlinkSync(f); } catch { } } });
-  let mutR = 0;
-  /** A patched copy of the ROUTES module, as a SIBLING of the real one so its
-   *  relative requires resolve — same shape as §8's mutantEngine, same name
-   *  prefix so its stale-PID sweep collects these too, and gitignored. Every
-   *  replacement is counted and the count is asserted by the caller: an
-   *  unpatched "control" is not a control. */
+  /** A patched copy of the ROUTES module, loaded through loadCopy (scratch
+   *  dir, requires bound to the real module's path). Every replacement is
+   *  counted and the count is asserted by the caller: an unpatched "control"
+   *  is not a control. */
   function mutantRoutes(edits) {
     let src = routesSrc0, hits = 0;
     for (const [from, to] of edits) {
       if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 70) };
       src = src.split(from).join(to); hits++;
     }
-    const f = path.join(REPO, 'src/server/vs-wake-mut-' + process.pid + '-r' + (++mutR) + '.js');
-    fs.writeFileSync(f, src); routeMutants.push(f);
-    return { mod: require(f), hits };
+    return { mod: loadCopy('src/server/account-usage-routes.js', src), hits };
   }
   function mkRoutes(opts = {}) {
     const w = mkWorld(opts);
@@ -736,16 +751,11 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
 {
   const engPath = path.join(REPO, 'src/server/usage-pool-engine.js');
   const engSrc0 = read('src/server/usage-pool-engine.js');
-  const mutants = [];
-  process.on('exit', () => { for (const f of mutants) { try { fs.unlinkSync(f); } catch { } } });
-  // A run killed with SIGKILL leaves its copies behind. Sweep them, but only
-  // the ones whose PID is GONE — this suite can legitimately be running twice
-  // in one worktree, and deleting a LIVE run's module mid-require is worse than
-  // the litter. (Same shape as the wire probe's stale sweep: the cleaner states
-  // its own rule instead of assuming it is alone.)
-  // Both directories hold copies: §6/§8 write engine + routes mutants into
-  // src/server/, §9 writes a usage-routes mutant into src/ (a patched copy must
-  // be a SIBLING of the real module or its relative requires do not resolve).
+  // LEGACY LITTER: before B-0220 a run killed with SIGKILL left its in-tree
+  // copies behind (src/server/vs-wake-mut-*, src/vs-wake-*). Nothing writes
+  // there any more; this only removes what an old run stranded, and only for
+  // a PID that is GONE (a live pre-fix run in the same worktree keeps its
+  // modules — deleting one mid-require is worse than the litter).
   for (const dir of ['src/server', 'src']) {
     try {
       for (const f of fs.readdirSync(path.join(REPO, dir))) {
@@ -756,19 +766,17 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
       }
     } catch { }
   }
-  let mutN = 0;
-  /** A patched copy of the engine, as a SIBLING of the real one so its relative
-   *  requires resolve. Every replacement is counted, and the count is asserted
-   *  by the caller — an unpatched "control" is not a control. */
+  /** A patched copy of the engine, loaded through loadCopy (scratch dir,
+   *  requires bound to the real module's path). Every replacement is counted,
+   *  and the count is asserted by the caller — an unpatched "control" is not a
+   *  control. */
   function mutantEngine(edits) {
     let src = engSrc0, hits = 0;
     for (const [from, to] of edits) {
       if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 70) };
       src = src.split(from).join(to); hits++;
     }
-    const f = path.join(REPO, 'src/server/vs-wake-mut-' + process.pid + '-' + (++mutN) + '.js');
-    fs.writeFileSync(f, src); mutants.push(f);
-    return { mod: require(f), hits };
+    return { mod: loadCopy('src/server/usage-pool-engine.js', src), hits };
   }
 
   /** The world, ARMED through the REAL rejection producer, with the newcomer
@@ -1039,9 +1047,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     let masterAr = null, gitErr = null;
     try {
       const src = execFileSync('git', ['-C', REPO, 'show', 'master:src/server/auto-resume.js'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: GIT_ENV });
-      const f = path.join(REPO, 'src/server/vs-wake-master-ar-' + process.pid + '.js');
-      fs.writeFileSync(f, src); mutants.push(f);
-      masterAr = require(f);
+      masterAr = loadCopy('src/server/auto-resume.js', src);
     } catch (e) { gitErr = e.message; }
     if (masterAr?.continueNoticeFor) {
       const SHAPES = [
@@ -1105,21 +1111,15 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
 {
   const usageMod = require(path.join(REPO, 'src/usage-routes.js'));
   const usageSrc0 = read('src/usage-routes.js');
-  const usageMutants = [];
-  process.on('exit', () => { for (const f of usageMutants) { try { fs.unlinkSync(f); } catch { } } });
-  let mutU = 0;
-  /** A patched copy of src/usage-routes.js, as a SIBLING of the real one (its
-   *  requires are relative to src/); same name prefix as the other mutants so
-   *  §8's stale-PID sweep collects it, and gitignored. */
+  /** A patched copy of src/usage-routes.js, loaded through loadCopy (scratch
+   *  dir, requires bound to src/usage-routes.js's own path). */
   function mutantUsage(edits) {
     let src = usageSrc0, hits = 0;
     for (const [from, to] of edits) {
       if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 70) };
       src = src.split(from).join(to); hits++;
     }
-    const f = path.join(REPO, 'src/vs-wake-mut-' + process.pid + '-u' + (++mutU) + '.js');
-    fs.writeFileSync(f, src); usageMutants.push(f);
-    return { mod: require(f), hits };
+    return { mod: loadCopy('src/usage-routes.js', src), hits };
   }
   // A panel WITH reset clauses: the window sidecar is stamped only when the
   // reading actually names a window, and both writes have to be in play for
@@ -1264,6 +1264,41 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
       okd2 === true && !w2.am.get(w2.id) && w2.files().some((f) => f.endsWith('.json')) && w2.files().some((f) => f.startsWith('.window-')),
       JSON.stringify({ okd2, files: w2.files() }));
   }
+}
+
+// ── §10 THE TREE IS NEVER WRITTEN (B-0220) ──────────────────────────────────
+// Measured HERE, while every copy this run made still exists (the exit
+// handlers remove them — a census taken after exit would pass on the pre-fix
+// suite too). Two readings: git's own view of src/ (untracked AND ignored —
+// the pre-fix copies were gitignored, so a plain `git status` never saw them),
+// narrowed to what THIS process could have written (the family's copies carry
+// the writer's pid; a concurrent suite's litter is not ours to judge); and the
+// helper's own ledger, every path of which must sit outside the checkout.
+console.log('\n§10 the patched copies never touch the tree');
+{
+  let porcelain = null, gitErr = null;
+  try {
+    porcelain = execFileSync('git', ['-C', REPO, 'status', '--porcelain', '--ignored', '--untracked-files=all', '--', 'src'],
+      { encoding: 'utf8', env: GIT_ENV });
+  } catch (e) { gitErr = e.message; }
+  const ours = (porcelain || '').split('\n').filter((l) => l && (/vs-wake-/.test(l) || l.includes('-' + process.pid + '-') || l.includes('-' + process.pid + '.')));
+  ok('git status (untracked + ignored) shows nothing under src/ that this run wrote', porcelain !== null && ours.length === 0, gitErr || ours.join(' ; '));
+  ok(`…and the run really made copies to judge (${mutantFiles.length}), every one of them outside the checkout, in this process's scratch dir`,
+    mutantFiles.length >= 5 && mutantFiles.every((f) => path.relative(REPO, f).startsWith('..' + path.sep) && f.startsWith(MUT_DIR + path.sep) && fs.existsSync(f)),
+    JSON.stringify(mutantFiles));
+}
+
+// HOLD (B-0220): test-auto-resume-loop runs THIS suite as a child with
+// VS_WAKE_HOLD=<path> and runs its own src/ census while the child waits here,
+// every copy still on disk — the concurrency the 2026-09-22 integration hit by
+// chance (3 red there, green alone), held open deterministically for a whole
+// run. `<path>.ready` carries the copies' paths; `<path>.go` releases. A
+// holder whose parent died, or that waited 5 min, lets go by itself.
+if (process.env.VS_WAKE_HOLD) {
+  fs.writeFileSync(process.env.VS_WAKE_HOLD + '.ready', JSON.stringify(mutantFiles));
+  const parent = process.ppid, until = Date.now() + 300e3;
+  const parentAlive = () => { try { process.kill(parent, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+  while (!fs.existsSync(process.env.VS_WAKE_HOLD + '.go') && Date.now() < until && parentAlive()) await tick(50);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -177,6 +177,7 @@ export function heldText(digest, { t, cid = null } = {}) {
     why = scope + '; ' + tr('delivered with the conversation’s next prompt') + ' · ' + tr('Settings → Spending');
   } else if (kind === 'rate-floor') why = tr('the 30 s per-conversation floor is pacing them; delivered with the conversation’s next prompt');
   else if (kind === 'off') why = tr('auto-notify is off for this conversation');
+  else if (kind === 'wrapper-no-steer') why = tr('this session’s agent predates notification steering, so a delivery now would queue a billed turn; delivered with the conversation’s next prompt') + ' · ' + tr('Restart this session to receive notifications without a billed turn');
   else why = tr('the conversation has no live inbox right now; delivered when it next resumes');
   return `${head} — ${why}`;
 }

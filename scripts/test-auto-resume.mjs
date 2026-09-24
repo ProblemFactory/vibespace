@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -613,24 +614,17 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
 // wall-clock time. The producer-driven leg is (a) above; this one measures the
 // RATE the producer's readings can authorise.
 //
-// PATCHED COPIES live beside the real module (a sibling, or its relative
-// requires do not resolve), are unlinked on exit, and are swept at start —
-// only for PIDs that are GONE, because this suite can legitimately run twice
-// in one worktree, and a dirty tree is what the release gate REFUSES on.
+// PATCHED COPIES are written OUTSIDE the tree (scripts/mutant-copy.mjs: this
+// process's scratch dir, `require` re-bound on line 1 to the real module's
+// path, so its relative requires resolve as a sibling's) — §15 measures that
+// while they exist. They used to be siblings in src/server/ (vs-aredge-mut-*),
+// which every src/-scanning suite running beside this one read as source.
 const AR_PATH = path.join(REPO, 'src/server/auto-resume.js');
 const AR_SRC0 = read('src/server/auto-resume.js');
 const { FIRE_MAX_IMMEDIATE, EDGE_HOLD_MS } = require(AR_PATH);
-const arMutants = [];
-process.on('exit', () => { for (const f of arMutants) { try { fs.unlinkSync(f); } catch { } } });
-try {
-  for (const f of fs.readdirSync(path.join(REPO, 'src/server'))) {
-    const m = /^vs-aredge-mut-(\d+)[-.]/.exec(f);
-    if (!m || Number(m[1]) === process.pid) continue;
-    try { process.kill(Number(m[1]), 0); continue; } catch (e) { if (e.code === 'EPERM') continue; }
-    try { fs.unlinkSync(path.join(REPO, 'src/server', f)); } catch { }
-  }
-} catch { }
-let arMutN = 0;
+const MUTX = mutantCopies('aredge', REPO);
+sweepLegacy(REPO, ['src/server'], /^vs-aredge-mut-(\d+)[-.]/);   // what a pre-fix run stranded (dead PIDs only)
+
 // THE TWO ROUND-1 SHAPES, named once and used by the controls below.
 // EDIT_NO_EDGE_GUARD is the money half (every healthy reading re-enters
 // fireNow); EDIT_OPTIMISTIC_LOG is the journal half (the line is written
@@ -672,9 +666,7 @@ function mutantAr(edits) {
     if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 90), hits };
     src = src.split(from).join(to); hits++;
   }
-  const f = path.join(REPO, 'src/server/vs-aredge-mut-' + process.pid + '-' + (++arMutN) + '.js');
-  fs.writeFileSync(f, src); arMutants.push(f);
-  return { mod: require(f), hits };
+  return { mod: MUTX.load('src/server/auto-resume.js', src), hits };
 }
 /** The incident's shape, on a clock we advance: a WATCH whose reset is six days
  *  out, a lane that keeps reading HEALTHY, and a CLI that answers every
@@ -1375,6 +1367,17 @@ function mkEdgeWorld({ arModule = null, rotateWall = false, streaming = false, r
     ok('…and its continue is delivered through the ACP prompt verb', a.ar.tick(Date.now() + 120000) === 1 && a.sent.some((x) => x.id === 'oc' && x.text === CONTINUE_PROMPT), JSON.stringify(a.sent));
   }
 }
+
+
+// ── 15. THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n15. the patched copies never touch the tree');
+for (const r of copiesCensus(MUTX.files, MUTX.dir, REPO, { minCopies: 6 })) ok('15. ' + r.name, r.pass, r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

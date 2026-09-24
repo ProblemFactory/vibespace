@@ -39,6 +39,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { WebSocketServer, WebSocket } = require(path.join(repo, 'node_modules/ws'));
@@ -52,8 +53,13 @@ const until = async (fn, ms = 3000, step = 10) => { const t = Date.now() + ms; w
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 const root = scratch('desktop-viewers');
 fs.rmSync(root, { recursive: true, force: true }); fs.mkdirSync(root, { recursive: true });
-const mutants = [];
-const cleanup = () => { for (const f of mutants) { try { fs.unlinkSync(f); } catch {} } try { fs.rmSync(root, { recursive: true, force: true }); } catch {} };
+// The negative controls' patched bridge/keeper copies are written OUTSIDE the
+// tree (scripts/mutant-copy.mjs, `require` re-bound on line 1 to the real
+// module's path). They used to be un-ignored siblings (src/server/vs-dv-mut-*):
+// a dirty tree while the suite ran, read as source by every src/ scanner.
+const MUTV = mutantCopies('dviewers', repo);
+
+const cleanup = () => { try { fs.rmSync(root, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 
@@ -270,12 +276,10 @@ async function xpraScenario(Smod, label) {
   const src = read('src/server/desktop-stream.js');
   const from = "    if (!viewerSeats || !seat) return 'free';";
   ok(src.split(from).length === 2, 'the seat gate is spelled once in the bridge (the control patches exactly it)');
-  const mfile = path.join(repo, 'src/server', `vs-dv-mut-${process.pid}-stream.js`);
-  fs.writeFileSync(mfile, src.replace(from, "    return 'free'; // pre-x5: every socket relayed")); mutants.push(mfile);
+  const mfile = MUTV.write('src/server/desktop-stream.js', src.replace(from, "    return 'free'; // pre-x5: every socket relayed"), 'stream');
   const skipLine = "if (typeof c.reconcile !== 'function') continue; ";
   ok(src.split(skipLine).length === 2, 'LOW-1: the refresh skip is spelled once (the control removes exactly it)');
-  const lfile = path.join(repo, 'src/server', `vs-dv-mut-${process.pid}-low1.js`);
-  fs.writeFileSync(lfile, src.replace(skipLine, '')); mutants.push(lfile);
+  const lfile = MUTV.write('src/server/desktop-stream.js', src.replace(skipLine, ''), 'low1');
   const L1 = await xpraScenario(require(lfile), 'CONTROL LOW-1 (no skip)');
   const l1w = L1.log.filter((l) => /^W .*reconcile failed — c\.reconcile is not a function/.test(l));
   ok(l1w.length >= 5, `CONTROL: without the skip every join logs the false "reconcile failed — c.reconcile is not a function" warn (${l1w.length} over 5 joins)`, L1.log.filter((l) => l.startsWith('W ')).slice(0, 3));
@@ -395,8 +399,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   const ksrc = read('src/server/desktop-app-keeper.js');
   const low4 = 'if (cur && cur.pane === p && s.active !== v) {';
   ok(ksrc.split(low4).length === 2, 'LOW-4: the seat move is spelled once in the keeper (the control disables exactly it)');
-  const kfile = path.join(repo, 'src/server', `vs-dv-mut-${process.pid}-keeper.js`);
-  fs.writeFileSync(kfile, ksrc.replace(low4, 'if (false && cur && cur.pane === p && s.active !== v) {')); mutants.push(kfile);
+  const kfile = MUTV.write('src/server/desktop-app-keeper.js', ksrc.replace(low4, 'if (false && cur && cur.pane === p && s.active !== v) {'), 'keeper');
   const low4Leg = async (Kmod) => {
     const up = await fakeXpra();
     const R = await rig(DS, { kind: 'xpra', upstreamPort: up.port, Kmod });
@@ -462,8 +465,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   ok(N3.active === 'v-a' && N3.aTypes.join() === 'hello,key-action' && N3.panes.join() === 'pa' && N3.afterA === null && N3.log.length === 1, 'LOW-3: …it is never elected — the first NAMED pane is active and drives, the broadcast lists only named panes, and when that pane leaves nobody (not the anonymous socket) is active; the bridge names it once', N3);
   const seatAt = 'const seat = viewerSeats ? (viewerId || ANON) : null;';
   ok(src.split(seatAt).length === 2, 'LOW-3: the anonymous seat is spelled once (the control restores the old `anon-<n>` seating)');
-  const afile = path.join(repo, 'src/server', `vs-dv-mut-${process.pid}-anon.js`);
-  fs.writeFileSync(afile, src.replace(seatAt, "const seat = viewerSeats ? (viewerId || 'anon-1') : null;")); mutants.push(afile);
+  const afile = MUTV.write('src/server/desktop-stream.js', src.replace(seatAt, "const seat = viewerSeats ? (viewerId || 'anon-1') : null;"), 'anon');
   const N3c = await anonLeg(require(afile));
   ok(N3c.anonTypes.includes('key-action') && N3c.anonTypes.includes('configure-window') && N3c.active === 'anon-1', `CONTROL: seated as anon-<n> (the pre-fix bridge) the anonymous socket TAKES the active seat and its keys + geometry reach xpra (${N3c.anonTypes.join(', ')}; active ${N3c.active})`, N3c);
 
@@ -498,8 +500,7 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   // CONTROL: the keeper before LOW-2 (the join's read removed) — the xpra record never learns the title, so a blocked pane's overlay could only name the label
   const joinRead = "if (s.active !== v) refreshAppTitle(id, 'blocked-join');";
   ok(ksrc.split(joinRead).length === 2, 'LOW-2: the blocked join\'s title read is spelled once (the control removes exactly it)');
-  const tfile = path.join(repo, 'src/server', `vs-dv-mut-${process.pid}-title.js`);
-  fs.writeFileSync(tfile, ksrc.replace(joinRead, '')); mutants.push(tfile);
+  const tfile = MUTV.write('src/server/desktop-app-keeper.js', ksrc.replace(joinRead, ''), 'title');
   reads = 0;
   const kc = require(tfile).create({ dataDir: path.join(root, 'tc'), env: () => ({ PATH: process.env.PATH }), broadcast: () => {}, display: fakeDisplay, viewerGraceMs: 0, log: { log() {}, warn() {} } });
   kc._store().apps['da-t'] = { id: 'da-t', state: 'ready', backend: 'xpra', display: ':93', label: 'the launch label', pids: {}, starts: {} };
@@ -511,6 +512,17 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   ok(/const titleText = \(\) => \(seatState\(\) === 'blocked' \? \(rec && rec\.appTitle\) \|\| appTitle : appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\) \|\| t\('Desktop app'\);/.test(w), 'the window: a BLOCKED pane names the app by the record\'s title first (its own protocol title is the last one it saw before the cut), an active one by its live protocol title — the launch label only when neither exists');
   ok(/sessionStorage\.getItem\(prevKey\)/.test(w) && /&prev=\$\{encodeURIComponent\(prevPane\)\}/.test(w), 'the window names its predecessor pane (`prev`, per tab, sessionStorage) on its stream url — the grace\'s reload successor');
 }
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTV.files, MUTV.dir, repo, { minCopies: 5 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

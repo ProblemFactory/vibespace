@@ -10,7 +10,7 @@
 // (and its symmetry) from being refactored away silently.
 import fs from 'node:fs';
 import path from 'node:path';
-import { judgeGesture, PAGE_UP_BAND_PX, DELIVERY_MIN_FRACTION } from './paging-gesture-rules.mjs';
+import { judgeGesture, PAGE_UP_BAND_PX, DELIVERY_MIN_FRACTION, KEEP_ZONE_VIEWPORTS, SNAP_SOURCE } from './paging-gesture-rules.mjs';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
@@ -888,6 +888,20 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     j = row('down', 720, { st: 1554, sh: 4284, gapCursor: 3000 }, { st: 1600, sh: 8284, gapCursor: 1000, topDev: -80 });
     ok('judge: a gap slab load counts as a page (the window indices do not move for it) — the delivery rule steps aside, the evidence rule applies', j.paged === true && !j.reasons.some((x) => /moved the reader's card only/.test(x)), j.reasons.join('; '));
     ok('judge: the band and the delivery fraction are the exported constants the gate prints', PAGE_UP_BAND_PX === 100 && DELIVERY_MIN_FRACTION === 0.5);
+    // B-1192: the heavy tier's once-per-few-runs red was THIS geometry — §4c's 720 px `mid` wheel-down against a
+    // 714 px viewport trims, by the keep-zone rule, a reader card whose bottom sat ≤ 6 px below the viewport top
+    // (the witness: the trim at st 1386 with zone.top 672, the card's bottom ≤ 672). The judge's flat 2-viewport
+    // excuse called the rule's own trim a jump; downward it is now the zone plus the card's bottom edge.
+    const b1192 = { st: 666, ch: 714, topOff: -14, topH: 18 };
+    j = row('down', 720, b1192, { st: 725, ch: 714, ws: 2074, topDev: null }, [{ tag: 'pageDown' }, { tag: 'trimTop' }, { tag: 'extendBottom' }]);
+    ok('judge (B-1192): a 720 px wheel-down that carried the reader\'s card (bottom 4 px below the top) past the 714 px keep zone — its trim is the rule, not a jump', !j.reasons.some((x) => /gone from the DOM/.test(x)), j.reasons.join('; '));
+    j = row('down', 720, { ...b1192, topOff: 0 }, { st: 725, ch: 714, ws: 2074, topDev: null }, [{ tag: 'pageDown' }, { tag: 'trimTop' }, { tag: 'extendBottom' }]);
+    ok('judge (B-1192) CONTROL: the same wheel with the card\'s bottom 18 px below the top leaves it INSIDE the zone — gone is a violation, and the reason names the geometry', !j.ok && j.reasons.some((x) => /gone from the DOM \(its bottom was 18 px below the viewport top: the 720 px wheel left it 12 px inside the 1-viewport keep zone\)/.test(x)), j.reasons.join('; '));
+    j = row('up', -720, b1192, { st: 725, ch: 714, ws: 2074, topDev: null });
+    ok('judge (B-1192): upward the bound stays two viewports (the card must cross the viewport and the zone below it)', !j.ok && j.reasons.some((x) => /gone from the DOM$/.test(x)), j.reasons.join('; '));
+    j = row('down', 720, { st: 666, ch: 714, topOff: -14 }, { st: 725, ch: 714, ws: 2074, topDev: null });
+    ok('judge (B-1192): a snapshot without the card\'s height keeps the two-viewport bound (never a silent pass)', !j.ok && j.reasons.some((x) => /gone from the DOM$/.test(x)), j.reasons.join('; '));
+    ok('judge (B-1192): the rules\' keep zone is the product\'s (TRIM_KEEP_VIEWPORTS), and the snapshot carries the card\'s height', KEEP_ZONE_VIEWPORTS === Number((cv.match(/const TRIM_KEEP_VIEWPORTS = (\d+(?:\.\d+)?);/) || [])[1]) && /topOff: Math\.round\(topOff\), topH,/.test(SNAP_SOURCE));
     // ② DURING the gesture (2.369.155, the Actions runner's control rows): the pre-fix copy re-pinned mid-history on
     // every mirror run and a later scroll event unpinned it before the settle sample — the rule reads the ring's own
     // repin record, so the verdict no longer depends on when the sample landed

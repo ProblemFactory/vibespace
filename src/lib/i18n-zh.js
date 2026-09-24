@@ -4514,6 +4514,9 @@ export default {
   "Desktop app scale (xpra)": "桌面应用缩放（xpra）",
   "How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: 2× when the screen you launch it from is scaled 150 % or more, else 1×. 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). A change takes effect when the app is launched again; the window shows its scale in the status bar.": "桌面应用绘制自身的尺寸，用于在高分辨率屏幕上获得清晰的文字。自动：从缩放 150% 及以上的屏幕启动时为 2×，否则为 1×。1.5× 只放大 GTK 应用的文字 — 按钮仍为 1×（X11 上 GTK 不能按小数缩放）。修改后需重新启动应用才会生效；窗口的状态栏会显示它的缩放。",
   "1.5× (text only in GTK apps)": "1.5×（GTK 应用仅放大文字）",
+  "Restart this session to receive notifications without a billed turn": "重启此会话，即可在不产生计费轮次的情况下接收通知",
+  "Remove — it is delivered with the next prompt instead, without a billed turn": "移除 — 它会改为随下一条提示送达，不产生计费轮次",
+  "this session’s agent predates notification steering, so a delivery now would queue a billed turn; delivered with the conversation’s next prompt": "此会话的 agent 早于通知插入功能，现在投递会排队成一个计费轮次；将随对话的下一条提示送达",
   // split UX chunk 1 (docs/design-split-ux.zh.md)
   "Undo": "撤销",
   "Unsplit": "取消并排",

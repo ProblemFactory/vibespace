@@ -97,16 +97,38 @@ const QUEUE_EDIT_MAX_CHARS = 20000;
  *  and neither is silent. */
 const QUEUE_OP_MAX_BYTES = 64 * 1024;
 
+/** notificationSteer (B-d963): the RUNNING wrapper folds a kind:'notification'
+ *  peer frame INTO a running turn (turn/steer) instead of queueing it as a
+ *  billed turn of its own. There is no separate advert for it: the notification
+ *  steer and the verb table shipped in ONE release (2.369.63), so a process
+ *  that wrote an EXPLICIT `queueVerbs` list naming 'steer' serves it, and a
+ *  verb-less advert (the legacy three are only this module's DEFAULT for such
+ *  a process, not something it said) does not — it QUEUES. Never guessed yes:
+ *  no sidecar = false here; the attach payload's `notificationSteerOf` keeps
+ *  "unknown" (null) apart for a remote wrapper. */
 function wrapperCaps(BUFFERS_DIR, id, sockPath) {
   const { sidecar } = resolveWrapperFiles(BUFFERS_DIR, id, sockPath);
   let m;
-  try { m = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch { return { frameFile: false, peerMessage: false, inputQueue: false, queueVerbs: [], queueResync: false, responseStyle: false, permissionRules: false, caps: null, reason: 'no-sidecar', startedAt: null, pid: null }; }
+  try { m = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch { return { frameFile: false, peerMessage: false, inputQueue: false, queueVerbs: [], notificationSteer: false, queueResync: false, responseStyle: false, permissionRules: false, caps: null, reason: 'no-sidecar', startedAt: null, pid: null }; }
   const caps = (m && m.caps && typeof m.caps === 'object') ? m.caps : null;
   const inputQueue = !!(caps && caps.inputQueue);
   const queueVerbs = Array.isArray(caps && caps.queueVerbs)
     ? caps.queueVerbs.map((v) => String(v))
     : (inputQueue ? LEGACY_QUEUE_VERBS.slice() : []);
-  return { frameFile: !!(caps && caps.frameFile), peerMessage: !!(caps && caps.peerMessage), inputQueue, queueVerbs, queueResync: !!(caps && caps.queueResync), responseStyle: !!(caps && caps.responseStyle), permissionRules: !!(caps && caps.permissionRules), caps, reason: caps ? 'ok' : 'no-caps', startedAt: (m && m.startedAt) || null, pid: (m && m.pid) || null };
+  const notificationSteer = !!(caps && Array.isArray(caps.queueVerbs) && caps.queueVerbs.map((v) => String(v)).includes('steer'));
+  return { frameFile: !!(caps && caps.frameFile), peerMessage: !!(caps && caps.peerMessage), inputQueue, queueVerbs, notificationSteer, queueResync: !!(caps && caps.queueResync), responseStyle: !!(caps && caps.responseStyle), permissionRules: !!(caps && caps.permissionRules), caps, reason: caps ? 'ok' : 'no-caps', startedAt: (m && m.startedAt) || null, pid: (m && m.pid) || null };
 }
 
-module.exports = { resolveWrapperFiles, wrapperCaps, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES };
+/** The attach payload's answer to "does THIS session's wrapper steer
+ *  notifications" (B-d963): true / false / null = unknown. Local sidecar first;
+ *  a REMOTE wrapper's sidecar lives on its own machine, so its in-band
+ *  publication decides — a named verb list is the proof either way, a
+ *  publication with NO list is a pre-verb-table build (false), and a wrapper
+ *  never heard from is unknown (the strip then shows no hint). */
+function notificationSteerOf(wc, { inBand = null, published = false } = {}) {
+  if (wc && wc.inputQueue) return !!wc.notificationSteer;
+  if (Array.isArray(inBand)) return inBand.map((v) => String(v)).includes('steer');
+  return published ? false : null;
+}
+
+module.exports = { resolveWrapperFiles, wrapperCaps, notificationSteerOf, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES };

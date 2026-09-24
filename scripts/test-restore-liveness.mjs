@@ -38,6 +38,7 @@ import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { WebSocket } from 'ws';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -62,13 +63,17 @@ const ROOT = scratch('restore-liveness');
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 
-// The pre-fix control must be a SIBLING of the real module (its own relative
-// requires — ./agent-tool-generators.js, ../normalizers — resolve from there).
-const CONTROL_MODULE = path.join(REPO, 'src/server/session-stdout.__prefix_control.js');
-// every patched copy we write beside the real module (gitignored as
-// `session-stdout.__*_control.js`; a SIGKILL must never dirty the tree, which
-// is what the release gate REFUSES on)
-const controlModules = new Set([CONTROL_MODULE]);
+// The pre-fix controls are patched copies written OUTSIDE the tree
+// (scripts/mutant-copy.mjs: this process's scratch dir, `require` re-bound on
+// line 1 to the real module's path, so ./agent-tool-generators.js and
+// ../normalizers resolve exactly as a sibling's). They used to be gitignored
+// siblings (src/server/session-stdout.__*_control.js) that every src/ scanner
+// running beside this suite read as source; §tree measures the new placement
+// while they exist. CONTROL_SRC keeps the control's raw text for the e2e boot,
+// which installs it INTO a worktree (where it must resolve that tree's files).
+const MUTR = mutantCopies('restore-liveness', REPO);
+let CONTROL_MODULE = null, CONTROL_SRC = null;
+
 const daemonRoots = new Set();      // every VIBESPACE_AGENTD_ROOT we spawned into
 const servers = new Set();          // every worktree server child
 const stray = new Set();            // dtach fixture sockets
@@ -102,7 +107,6 @@ function cleanup() {
   // the paths it matches on still exist.
   try { execFileSync('pkill', ['-f', ROOT], { stdio: 'ignore' }); } catch { }
   for (const wt of worktrees) { try { execFileSync('git', ['-C', REPO, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { } }
-  for (const m of controlModules) { try { fs.unlinkSync(m); } catch { } }
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
 }
 process.on('exit', cleanup);
@@ -161,7 +165,8 @@ ok(fs.readFileSync(FAULT_BUNDLE, 'utf-8').includes('injected fault: open-session
   ok(hits === 3, 'PATCH LANDED: the pre-fix control took all 3 replacements (gate, fire-and-forget open, no local probe)', `hits=${hits}`);
   ok(!out.includes('h.ready.then') && !out.includes("armProbe(shim, 'device')"),
     'PATCH LANDED: the control observes neither `ready` nor the attach probe');
-  fs.writeFileSync(CONTROL_MODULE, out);
+  CONTROL_SRC = out;
+  CONTROL_MODULE = MUTR.write('src/server/session-stdout.js', out, 'prefix');
 }
 
 // ── harness: a session-stdout engine over a given DeviceManager ────────────
@@ -371,20 +376,18 @@ console.log('— §2b a byte that arrives before `ready` settles must not be dro
   // NEGATIVE CONTROL — a copy of the REAL module with ONLY the early-data
   // replay removed. One mechanism, one control: the byte is lost AND the
   // probe then heals a bridge that was working the whole time.
-  const noReplay = path.join(REPO, 'src/server/session-stdout.__noreplay_control.js');
+  let noReplay;
   {
     const src = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf-8');
     const line = "      for (const buf of (h._earlyData || []).splice(0)) { try { h.onData(buf); } catch { } }\n";
     ok(src.includes(line), 'PATCH LANDED: the early-data replay is where the control expects it');
-    fs.writeFileSync(noReplay, src.replace(line, ''));
-    controlModules.add(noReplay);
+    noReplay = MUTR.write('src/server/session-stdout.js', src.replace(line, ''), 'noreplay');
   }
   const ctl = await earlyLeg(noReplay);
   ok(!ctl.early, 'NEGATIVE CONTROL: without the replay that byte is dropped on the floor (no listener existed yet)', ctl.logs.join(' | '));
   ok(ctl.healed, 'NEGATIVE CONTROL: …and the probe then heals a bridge that was never broken', `healed=${ctl.healed} | ${ctl.logs.join(' | ')}`);
   ok(ctl.tick, 'NEGATIVE CONTROL: the local heal does rescue it (the cost is a needless re-attach, not a lost session)');
   ok(ctl.heals === 1, 'NEGATIVE CONTROL: …and exactly ONE heal is counted (the counter moves only when the probe really acted)', `heals=${ctl.heals}`);
-  fs.unlinkSync(noReplay); controlModules.delete(noReplay);
 }
 
 // ── § 3 BOOT ORDERING: the daemon path is taken only on an ALREADY-LIVE link ─
@@ -541,7 +544,7 @@ e2e: {
   // ② the CONTROL boot: master's attach + the dead channel
   installStale();
   const savedFixed = fs.readFileSync(path.join(wt, 'src/server/session-stdout.js'), 'utf-8');
-  fs.writeFileSync(path.join(wt, 'src/server/session-stdout.js'), fs.readFileSync(CONTROL_MODULE, 'utf-8'));
+  fs.writeFileSync(path.join(wt, 'src/server/session-stdout.js'), CONTROL_SRC);
   srv = boot(); jrn = journal(srv); await waitReady(srv);
   {
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -715,7 +718,9 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   try { session.pty?.kill?.(); } catch { }
 }
 
-// daemonPtyShim must serve MORE THAN ONE data listener (the stamp + the consumer)
+// daemonPtyShim must serve MORE THAN ONE data listener (the stamp + the consumer).
+// With one slot the consumer registered second REPLACES the stamp — the stamp is
+// what dies, not the consumer. The other ducks + the census: test-pty-duck.
 console.log('— §6 the device pty shim is a real node-pty duck (multi-listener) —');
 {
   const seen = [];
@@ -724,12 +729,23 @@ console.log('— §6 the device pty shim is a real node-pty duck (multi-listener
   const d1 = shim.onData((s) => seen.push('a:' + s));
   shim.onData((s) => seen.push('b:' + s));
   fakeHandle.onData(Buffer.from('x'));
-  ok(seen.join(',') === 'a:x,b:x', 'both onData listeners fire (a single-slot shim silently killed the stdout consumer)', seen.join(','));
+  ok(seen.join(',') === 'a:x,b:x', 'both onData listeners fire (a one-slot shim let the consumer REPLACE the liveness stamp registered first)', seen.join(','));
   d1.dispose();
   seen.length = 0;
   fakeHandle.onData(Buffer.from('y'));
   ok(seen.join(',') === 'b:y', 'dispose() removes only its OWN listener', seen.join(','));
 }
+
+
+// ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n§tree the patched copies never touch the tree');
+for (const r of copiesCensus(MUTR.files, MUTR.dir, REPO, { minCopies: 2, match: /session-stdout\.__\w+_control\.js/ })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\nFAIL (${fail} failed, ${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

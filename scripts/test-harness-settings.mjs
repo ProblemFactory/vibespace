@@ -24,7 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { scratch } from './scratch.mjs';
+import { scratch, withoutVendorKeys } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -387,7 +387,7 @@ console.log('§5c the TOML shapes codex refuses (root scalar / dotted root + hea
   } else {
     const load = (text) => {
       fs.writeFileSync(cf, text);
-      const p = spawnSync(which, ['features', 'list'], { cwd: home, encoding: 'utf8', timeout: 30000, env: { ...process.env, HOME: home, CODEX_HOME: path.join(home, '.codex') } });
+      const p = spawnSync(which, ['features', 'list'], { cwd: home, encoding: 'utf8', timeout: 30000, env: { ...withoutVendorKeys(process.env), HOME: home, CODEX_HOME: path.join(home, '.codex') } });
       return { rc: p.status, err: String(p.stderr || ''), spawnErr: p.error ? String(p.error.message || p.error) : null };
     };
     const shapes = [];

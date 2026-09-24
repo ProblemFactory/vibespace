@@ -25,7 +25,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
-import { ONBOARDED_SOURCE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -2296,7 +2296,7 @@ console.log('\n— A REAL BOOT WITH THE SERVICE OFF (nothing of ours runs or wat
     for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execFileSync('bash', ['-c', `mkdir -p ${wt}/${path.dirname(f)} && rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`]);
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
     const env = {
-      ...process.env, PORT: String(PORT), VIBESPACE_PASSWORD: '',
+      ...withoutVendorKeys(process.env), PORT: String(PORT), VIBESPACE_PASSWORD: '',
       VIBESPACE_OPENCODE_SERVE: '',                     // no ops override: the PLUGIN is the switch, exactly as a user has it
       HOME: ocHome, XDG_DATA_HOME: path.join(ocHome, '.local/share'), XDG_CONFIG_HOME: path.join(ocHome, '.config'),
       XDG_CACHE_HOME: path.join(ocHome, '.cache'), XDG_STATE_HOME: path.join(ocHome, '.local/state'),
@@ -2381,7 +2381,7 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
     const cwd = path.join(home, 'cwd');
     fs.mkdirSync(cwd, { recursive: true });
     try { execFileSync('git', ['init', '-q', cwd], { timeout: 10000 }); } catch { }
-    const env = { ...process.env, HOME: home, XDG_DATA_HOME: path.join(home, '.local/share'), XDG_CONFIG_HOME: path.join(home, '.config'), XDG_CACHE_HOME: path.join(home, '.cache'), XDG_STATE_HOME: path.join(home, '.local/state') };
+    const env = { ...withoutVendorKeys(process.env), HOME: home, XDG_DATA_HOME: path.join(home, '.local/share'), XDG_CONFIG_HOME: path.join(home, '.config'), XDG_CACHE_HOME: path.join(home, '.cache'), XDG_STATE_HOME: path.join(home, '.local/state') };
     const dataDir = path.join(home, 'data');
     const facts = serve.install({ dataDir, command: process.env.OPENCODE_CMD || 'opencode', env: () => env, log: { warn() { }, error() { } }, stopOnExit: true, autostart: true, live: false });
     let client = null;
@@ -2397,7 +2397,9 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
       // the live lane against the real serve
       const lane = events.createLiveLane({ locator: facts.locator, storeDirs: dirs, onEvent: () => { }, log: { warn() { } } });
       lane.start();
-      await sleep(2500);
+      // wait for the TERMINAL signal (connected), bounded — a fixed 2.5 s
+      // sleep judged a loaded box's slow connect as "never connects" (B-5f0b)
+      for (let i = 0; i < 60 && lane.state().sse.connected !== true; i++) await sleep(250);
       ok('…and the REAL /global/event stream connects (the lane the poll was replaced by)', lane.state().sse.connected === true, lane.state());
       lane.stop();
       try {
@@ -2435,9 +2437,15 @@ console.log('\n— REAL BINARY (skips WITH EVIDENCE when opencode is absent) —
         skip('…while a SECOND opencode process on the same store DOES read external', `a second serve would not boot here: ${secondOut.slice(-160) || 'no listen line'}`);
       } else {
         await fetch(`${secondBase}/session/${sess.id}/message`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ noReply: true, parts: [{ type: 'text', text: 'written by another opencode process' }] }) }).catch(() => { });
-        await sleep(400);
-        facts.invalidate();
-        const xRow = (await facts.discover({})).find((r) => r.backendSessionId === sess.id);
+        // bounded wait for the store row to say so (B-5f0b): one fixed 400 ms
+        // beat judged a loaded box's slower write as "the rung is dead"
+        let xRow = null;
+        for (let i = 0; i < 40; i++) {
+          facts.invalidate();
+          xRow = (await facts.discover({})).find((r) => r.backendSessionId === sess.id);
+          if (xRow?.status === 'external') break;
+          await sleep(250);
+        }
         ok('…while a SECOND opencode process writing the same store DOES read external (the rung is alive, not switched off)', xRow?.status === 'external', { before2, after: xRow?.status });
       }
       try { second.kill('SIGTERM'); } catch { }
@@ -2539,7 +2547,7 @@ console.log('\n— REAL BINARY: THE PENDING-ASK LIST IS PER SERVE PROCESS —');
     const cwd = path.join(home, 'cwd');
     fs.mkdirSync(cwd, { recursive: true });
     try { execFileSync('git', ['init', '-q', cwd], { timeout: 10000 }); } catch { }
-    const env = { ...process.env, HOME: home, XDG_DATA_HOME: path.join(home, '.local/share'), XDG_CONFIG_HOME: path.join(home, '.config'), XDG_CACHE_HOME: path.join(home, '.cache'), XDG_STATE_HOME: path.join(home, '.local/state') };
+    const env = { ...withoutVendorKeys(process.env), HOME: home, XDG_DATA_HOME: path.join(home, '.local/share'), XDG_CONFIG_HOME: path.join(home, '.config'), XDG_CACHE_HOME: path.join(home, '.cache'), XDG_STATE_HOME: path.join(home, '.local/state') };
     const facts = serve.install({ dataDir: path.join(home, 'data'), command: process.env.OPENCODE_CMD || 'opencode', env: () => env, log: { warn() { }, error() { } }, stopOnExit: true, autostart: true, live: false, backoffBaseMs: 300 });
     let client = null;
     try { client = await facts.locator.ensure(); } catch { client = null; }
@@ -2605,7 +2613,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
       for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`mkdir -p ${wt}/${path.dirname(f)} && rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`);
       fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
       const env = {
-        ...process.env, PORT: String(PORT), VIBESPACE_PASSWORD: '',
+        ...withoutVendorKeys(process.env), PORT: String(PORT), VIBESPACE_PASSWORD: '',
         VIBESPACE_OPENCODE_SERVE: '',                        // no ops override: the PLUGIN is the switch, exactly as a user has it
         HOME: ocHome, XDG_DATA_HOME: path.join(ocHome, '.local/share'), XDG_CONFIG_HOME: path.join(ocHome, '.config'),
         XDG_CACHE_HOME: path.join(ocHome, '.cache'), XDG_STATE_HOME: path.join(ocHome, '.local/state'),

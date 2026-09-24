@@ -38,6 +38,8 @@
 //   §4  the REAL auto-resume + REAL pool engine: the ceiling refuses a continue
 //       the loop breaker would have allowed, the arm survives, and an
 //       owner-typed prompt is never counted
+//   §4b  the hold is GIVEN BACK on both of deliver()'s non-delivering exits
+//       (a failed send, no verb) — each with a patched-copy negative control
 //   §5  the REAL delivery ladder: a refusal STASHES (nothing is lost) and an
 //       allowed delivery is charged exactly once
 //   §6  the REAL Stop-nudge route: the cooldown survives a restart, the exit
@@ -51,6 +53,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -71,30 +74,28 @@ const deliverMod = require(path.join(REPO, 'src/server/conversation-deliver.js')
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 const { decidePoolSwitch } = require(path.join(REPO, 'src/account-pool-auto.js'));
 const { capsOf, notificationDelivery } = require(path.join(REPO, 'src/backend-caps.js')); // §5b reads the LANE off the caps row, never a backend id
+// The sidecar caps a CURRENT codex wrapper writes: the rpc rung gates on
+// `peerMessage`, and (B-d963) a notification is only written to a busy wrapper
+// whose own advert names a verb table with 'steer' — a verb-less advert is a
+// pre-2.369.63 build that would QUEUE it (a billed turn), and the ladder holds
+// it instead. Fixture shape taken from data/bin/codex-chat-wrapper.js's caps.
+const CURRENT_WRAPPER_CAPS = { peerMessage: true, inputQueue: true, queueVerbs: capsOf('codex').inputModes.queueVerbs.slice() };
 const { setupAgentRoutes } = require(path.join(REPO, 'src/agent-routes.js'));
 
 // ── NEGATIVE CONTROLS ARE PATCHED COPIES OF THE REAL MODULE ─────────────────
 // A control written from memory tests the code I believe shipped; a control built
 // by replacing ONE expression in the real file tests the code that did. The
-// copy is a SIBLING of the original so its relative requires resolve, it is
-// unlinked on exit, gitignored, and stale copies of DEAD pids are swept at
-// start (a SIGKILL must never leave the tree dirty and block the release gate).
+// copy is written OUTSIDE the tree (scripts/mutant-copy.mjs: this process's
+// scratch dir, its `require` re-bound on line 1 to the real module's path, so
+// relative requires and the require cache are a sibling's) and §11 measures
+// that while the copies exist. It used to be a SIBLING in src/server/
+// (vs-spend-mut-*, gitignored): a SIGKILL stranded it and any suite scanning
+// src/ beside this one counted it as product code (the B-0220 shape).
 // ONE implementation, because r5 needed the same machinery for the guard that
 // r4 needed for the ladder — and two hand-rolled sweeps is how the next one
 // leaks.
-const _mutants = [];
-process.on('exit', () => { for (const f of _mutants) { try { fs.unlinkSync(f); } catch { } } });
-for (const dir of ['src/server']) {
-  try {
-    for (const f of fs.readdirSync(path.join(REPO, dir))) {
-      const m = /^vs-spend-mut-(\d+)-/.exec(f);
-      if (!m || Number(m[1]) === process.pid) continue;
-      try { process.kill(Number(m[1]), 0); continue; } catch (e) { if (e.code === 'EPERM') continue; }
-      try { fs.unlinkSync(path.join(REPO, dir, f)); } catch { }
-    }
-  } catch { }
-}
-let _mutN = 0;
+const MUT = mutantCopies('spend', REPO);
+sweepLegacy(REPO, ['src/server'], /^vs-spend-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
 /** A copy of `rel` with each [from, to] applied. Returns {mod, hits} or {err}:
  *  a needle that no longer matches is an UNAPPLIED PATCH, i.e. a control that
  *  would pass by doing nothing. */
@@ -105,8 +106,7 @@ function mutantModule(rel, edits) {
     if (!src.includes(from)) return { err: 'needle missing: ' + from.slice(0, 60) };
     src = src.split(from).join(to); hits++;
   }
-  const f = path.join(REPO, path.dirname(rel), 'vs-spend-mut-' + process.pid + '-' + (++_mutN) + '.js');
-  fs.writeFileSync(f, src); _mutants.push(f);
+  const f = MUT.write(rel, src);
   return { mod: require(f), hits, file: f };
 }
 
@@ -901,7 +901,7 @@ console.log('\n§4 the real auto-resume: the ceiling refuses what the loop break
 /** The world: one pooled member, one conversation, real symlinks, real engine
  *  (which constructs the real guard), real auto-resume wired exactly as
  *  server.js wires it. */
-function mkWorld({ settings = {} } = {}) {
+function mkWorld({ settings = {}, send = null, resumeVerb = null, arModule = arMod } = {}) {
   const root = tmpdir('vs-spend-world-');
   const dataDir = path.join(root, 'data');
   const am = new AccountManager({ dataDir });
@@ -931,10 +931,15 @@ function mkWorld({ settings = {} } = {}) {
     getAutoResume: () => ar, getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null,
     getUserTodos: () => ({ add: (key, item) => { inbox.push({ key, ...item }); return { id: 'ut' }; } }),
   });
-  const ar = arMod.create({
+  // `send` stands in the delivery channel's ANSWER (§4b: a failed send is one
+  // of deliver()'s two non-delivering exits); `resumeVerb` the descriptor's
+  // verb (the other); `arModule` a patched copy for the negative controls.
+  // Defaults are the shipped wiring: the registry's verb, a send that lands.
+  const ar = arModule.create({
     dataDir, activeSessions: sessions, serverSetting: () => true, log: () => { },
     notify: (id, s2, text) => notes.push({ id, text }),
-    sendToSession: (id, s2, text) => { fired.push({ id, text }); return true; },
+    sendToSession: (id, s2, text) => { if (send && !send(id, s2, text)) return false; fired.push({ id, text }); return true; },
+    ...(resumeVerb ? { resumeVerb } : {}),
     beforeFire: (id, s2) => { try { return eng.beforeAutoResumeFire(id, s2); } catch { return false; } },
     fireIdentity: (id, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } },
     // MIRRORS server.js, including r5's probe flag and release half — a harness
@@ -1001,6 +1006,89 @@ if (!probe) {
   ok('§4 an OWNER-TYPED prompt (and the turn end it produces) charges nothing (D6)', (led2.budget.instance || []).length === before);
 }
 
+// ── §4b THE HOLD IS GIVEN BACK ON EVERY EXIT THAT DOES NOT DELIVER (B-59b8) ─
+// deliver() authorizes WITH a hold (the slot is reserved from the ceiling's
+// answer to the send), and two of its exits deliver nothing: the channel
+// refused the continue (`sendToSession` → false, "will retry") and the
+// harness declares no resume verb at fire time. Each calls `giveBack()`. The
+// merge verifier measured that deleting either call left this suite,
+// test-auto-resume and test-auto-resume-loop all green — the release was
+// unpinned. With the hour cap at ONE, a hold left booked IS the whole budget:
+// the next continue on that slot is refused until the hold times out
+// (A.RESERVE_TTL_MS, 3 min), so each leg below measures the release by the
+// behaviour it buys — the SAME slot authorizes again — and by the guard's own
+// census (`holdsOpen`). NEGATIVE CONTROL: a patched copy of auto-resume.js with
+// that exit's `giveBack();` removed must FAIL its leg.
+console.log('\n§4b a continue that is not delivered gives its hold back (failed send / no verb)');
+{
+  const harnessReg = require(path.join(REPO, 'src/harnesses/index.js'));
+  const HOUR1 = { 'spend.unattendedPerIdentityHour': 1 };
+  /** exit 1: the channel refuses the continue. Returns the measured facts. */
+  async function failedSendLeg(arModule) {
+    let sendOk = false;
+    const w = mkWorld({ settings: HOUR1, send: () => sendOk, arModule });
+    const s = w.mkSession('sess-send-1');
+    w.arm(s); await w.fireDue();
+    const snap = w.eng.spendGuard.snapshot();
+    const a = w.ar._armed.get('sess-send-1');
+    const r = { notDelivered: w.fired.length === 0, holdsOpen: snap.holdsOpen, stillArmed: !!a && !a.fired };
+    // the same slot, the same (still armed) session, a channel that lands now
+    sendOk = true; await w.fireDue();
+    r.refired = w.fired.length === 1;
+    const led = w.eng.spendGuard.snapshot().budget;
+    r.charged = (led.identities[w.M1] || []).length;
+    return r;
+  }
+  /** exit 2: a verb at arm time (armIfEnabled refuses a harness without one),
+   *  none at fire time. */
+  async function noVerbLeg(arModule) {
+    let verbOn = true;
+    const w = mkWorld({ settings: HOUR1, resumeVerb: (s2) => (verbOn ? harnessReg.resumeVerb(s2 && s2.backend) : null), arModule });
+    const s = w.mkSession('sess-verb-1');
+    const armedOk = !!w.arm(s) && !!w.ar._armed.get('sess-verb-1');
+    verbOn = false; await w.fireDue();
+    const snap = w.eng.spendGuard.snapshot();
+    const r = { armedOk, notDelivered: w.fired.length === 0, holdsOpen: snap.holdsOpen, disarmed: !w.ar._armed.get('sess-verb-1') };
+    // a second arm + fire on the SAME slot (the verb is back) must authorize
+    verbOn = true;
+    const s2 = w.mkSession('sess-verb-2');
+    w.arm(s2); await w.fireDue();
+    r.refired = w.fired.length === 1 && w.fired[0].id === 'sess-verb-2';
+    return r;
+  }
+  const fs1 = await failedSendLeg(arMod);
+  ok('§4b FAILED SEND: nothing was delivered (the channel refused the continue)', fs1.notDelivered, JSON.stringify(fs1));
+  ok('§4b …the hold was GIVEN BACK (the guard holds nothing open)', fs1.holdsOpen === 0, JSON.stringify(fs1));
+  ok('§4b …the session is STILL ARMED ("will retry" is a promise that stands)', fs1.stillArmed, JSON.stringify(fs1));
+  ok('§4b …and the SAME slot, at an hour cap of ONE, authorizes the retry — which lands and is charged once',
+    fs1.refired && fs1.charged === 1, JSON.stringify(fs1));
+  const nv = await noVerbLeg(arMod);
+  ok('§4b NO VERB: the session armed while its harness had a verb', nv.armedOk, JSON.stringify(nv));
+  ok('§4b …nothing was delivered when the verb was gone at fire time', nv.notDelivered, JSON.stringify(nv));
+  ok('§4b …the hold was GIVEN BACK (the guard holds nothing open)', nv.holdsOpen === 0, JSON.stringify(nv));
+  ok('§4b …the arm is dropped (no verb = a promise nobody can keep; the shipped exit disarms)', nv.disarmed, JSON.stringify(nv));
+  ok('§4b …and a second arm + fire on the SAME slot, at an hour cap of ONE, still authorizes and lands', nv.refired, JSON.stringify(nv));
+
+  // NEGATIVE CONTROLS: each exit's own `giveBack();` removed in a patched copy
+  const legFails = (r) => !(r.holdsOpen === 0 && r.refired);
+  const mSend = mutantModule('src/server/auto-resume.js', [["could not deliver the continue prompt (will retry)`); giveBack(); return false; }", "could not deliver the continue prompt (will retry)`); return false; }"]]);
+  ok('§4b CONTROL: the failed-send patch applies to the real file (a needle that misses would pass by doing nothing)', !mSend.err, mSend.err);
+  if (mSend.mod) {
+    const r = await failedSendLeg(mSend.mod);
+    ok('§4b CONTROL: with the failed-send giveBack() removed the leg FAILS (the hold stays booked, the retry is refused)', legFails(r) && r.holdsOpen === 1 && !r.refired, JSON.stringify(r));
+    const other = await noVerbLeg(mSend.mod);
+    ok('§4b CONTROL: …and that patch leaves the no-verb leg green (each leg pins its OWN exit)', !legFails(other), JSON.stringify(other));
+  }
+  const mVerb = mutantModule('src/server/auto-resume.js', [["declares no resume verb — cannot continue`); giveBack(); armed.delete(id);", "declares no resume verb — cannot continue`); armed.delete(id);"]]);
+  ok('§4b CONTROL: the no-verb patch applies to the real file', !mVerb.err, mVerb.err);
+  if (mVerb.mod) {
+    const r = await noVerbLeg(mVerb.mod);
+    ok('§4b CONTROL: with the no-verb giveBack() removed the leg FAILS (the hold stays booked, the second arm is refused)', legFails(r) && r.holdsOpen === 1 && !r.refired, JSON.stringify(r));
+    const other = await failedSendLeg(mVerb.mod);
+    ok('§4b CONTROL: …and that patch leaves the failed-send leg green', !legFails(other), JSON.stringify(other));
+  }
+}
+
 // ── §5 THE REAL DELIVERY LADDER ─────────────────────────────────────────────
 console.log('\n§5 the delivery ladder: a refusal stashes, an allowed delivery is charged once');
 {
@@ -1052,7 +1140,7 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
     const dataDir = tmpdir('vs-spend-steer-');
     fs.mkdirSync(path.join(dataDir, 'session-buffers'), { recursive: true });
     // the wrapper sidecar the rpc rung gates on (caps.peerMessage)
-    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: { peerMessage: true } }));
+    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: CURRENT_WRAPPER_CAPS }));
     const settings = { 'spend.unattendedPerIdentityHour': 12 };
     const guard = guardMod.create({
       dataDir, serverSetting: (k) => settings[k],
@@ -1218,7 +1306,7 @@ console.log('\n§5c the charge is debited to the identity the authorization reso
   const mkWorld = (ladderMod = deliverMod, hourCap = 1, { livePeer = false, backend = 'codex' } = {}) => {
     const dataDir = tmpdir('vs-spend-slot-');
     fs.mkdirSync(path.join(dataDir, 'session-buffers'), { recursive: true });
-    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: { peerMessage: true } }));
+    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: CURRENT_WRAPPER_CAPS }));
     const settings = { 'spend.unattendedPerIdentityHour': hourCap };
     let live = { key: 'sub-AAA', name: 'AAA' };
     const guard = guardMod.create({
@@ -1585,7 +1673,7 @@ console.log('\n§5e the two calls that must NOT consume the budget: the probe an
   const mkSteer = () => {
     const dataDir = tmpdir('vs-spend-steer-hold-');
     fs.mkdirSync(path.join(dataDir, 'session-buffers'), { recursive: true });
-    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: { peerMessage: true } }));
+    fs.writeFileSync(path.join(dataDir, 'session-buffers', 'w1.json'), JSON.stringify({ caps: CURRENT_WRAPPER_CAPS }));
     const guard = guardMod.create({
       dataDir, serverSetting: (k) => ({ 'spend.unattendedPerIdentityHour': 12 }[k]),
       identityOf: () => ({ key: 'slot-A', name: 'Alpha' }), getUserTodos: () => null, log: () => { },
@@ -2211,13 +2299,14 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
     // NEGATIVE CONTROL: a PATCHED COPY of the real module with the PRE-FIX
     // shapes restored (P12 — and the patch must be asserted to have landed, or
     // a control that silently stopped matching goes green forever). The copy is
-    // a SIBLING, through the same `mutantModule` every other control here uses:
+    // loaded through the same `mutantModule` every other control here uses:
     // this module DOES have relative requires (`../auto-resume-signal.js`,
-    // `../harnesses` — the generic resume verb), so a tmpdir copy would not
-    // even load. That is an assertion, not a note: if the requires ever go
-    // away, the reason for the sibling rule goes with them.
+    // `../harnesses` — the generic resume verb), so a bare tmpdir copy would
+    // not even load — the copy's `require` is re-bound to the real path
+    // (scripts/mutant-copy.mjs). That is an assertion, not a note: the copy
+    // loading at all proves the re-binding reached those requires.
     const arSrc = read('src/server/auto-resume.js');
-    ok('§9 NEGATIVE CONTROL scope: the module HAS relative requires, so the copy must be a sibling (mutantModule writes one)',
+    ok('§9 NEGATIVE CONTROL scope: the module HAS relative requires, so the copy must resolve them as the real module does (mutantModule re-binds its require)',
       /require\('\.\.?\//.test(arSrc));
     // the pre-fix bytes, byte-exact (git show 40ad936d:src/server/auto-resume.js
     // — the commit BOTH chains branched from, so it is the one shape that
@@ -2377,6 +2466,15 @@ console.log('\n§9 fail closed: an authorizer that throws spends nothing (P8)');
     ok('§10 …and persists in that shape', onDisk.budget.identities['sub-G'][0].reason === 'job-notification');
   }
 }
+
+// ── §11 THE TREE IS NEVER WRITTEN (B-59b8 r1 / B-0220) ──────────────────────
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handler removes them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS in src/server/ (gitignored,
+// so a plain `git status` never saw them) and any suite scanning src/ beside
+// this one counted them as product code.
+console.log('\n§11 the patched copies never touch the tree');
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok('§11 ' + r.name, r.pass, r.detail);
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

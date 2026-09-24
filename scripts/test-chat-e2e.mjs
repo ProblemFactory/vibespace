@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome } from './scratch.mjs';
+import { freePort, scratch, scratchHome, withoutVendorKeys } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
 
@@ -100,7 +100,11 @@ am.setOat(acct.id, token);
 
 const cwd = scratch('chat-e2e-cwd');
 fs.mkdirSync(cwd, { recursive: true });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+// NO AMBIENT API KEY (B-5f0b): agentEnv() hands ANTHROPIC_API_KEY /
+// ANTHROPIC_AUTH_TOKEN to the CLI (a user's own choice), and either one
+// OUTRANKS the oat this suite seeds — the turn would bill metered API while
+// the badge assert below still read "the oat account".
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...withoutVendorKeys(process.env), PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 // UNCONDITIONAL cleanup (2026-09-09). The transcript removal used to live at
 // the very END of the happy path, so every early `process.exit(1)` — and every
 // signal — left it behind. It runs here, from one function, on 'exit' AND on

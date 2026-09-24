@@ -22,8 +22,9 @@
 // sweep, which used to SIGKILL by bare pid — including the pid it had
 // recorded as a fixture: this process (ALL PASS, then exit 137). SKIPs with
 // the reason when Xvfb/x11vnc are absent. Per-pid scratch, free ports, no
-// fixed names; the patched keeper copies (negative controls) are siblings of
-// the real module, gitignored (src/server/vs-dak-mut-*.js), swept by PID.
+// fixed names; the patched keeper/bridge copies (negative controls) are written
+// OUTSIDE the tree (scripts/mutant-copy.mjs, `require` re-bound to the real
+// module's path) — §18 measures that while they exist.
 // §14 (r6, 2026-09-22): a negotiated Watch-mode viewer through the real bridge to
 // the real xpra — its picture flows (hello, new-window, draws) and its
 // shutdown-server / exit-server never arrive; the r5 bridge as a patched copy is
@@ -42,7 +43,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
-import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -115,28 +116,28 @@ function xvfbOrphans() {
   }
   return out;
 }
-const mutants = [];
+const MUTK = mutantCopies('dak', repo);
+
 const cleanup = () => {
   for (const k of keepers) { try { k.shutdown(); } catch {} }
   for (const c of children) { try { c.kill('SIGKILL'); } catch {} }
   // reap anything still on a display of ours (a failed leg must not leave an X server) — by the RULE above
   try { for (const p of sweepTargets(readStoreAll())) { try { process.kill(p, 'SIGKILL'); } catch {} } } catch {}
-  for (const f of mutants) { try { fs.unlinkSync(f); } catch {} }
   try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
   try { const o = xvfbOrphans(); for (const p of o) { try { process.kill(p, 'SIGKILL'); } catch {} } if (o.length) console.log(`  (exit sweep reaped ${o.length} orphaned Xvfb-for-Xpra process(es) by evidence: ${o.join(', ')})`); } catch {}
 };
-/** A PATCHED COPY of the real keeper beside it (relative requires), each
- *  replacement asserted to hit exactly once — the negative controls of §8. */
+/** A PATCHED COPY of the real keeper (outside the tree, its relative requires
+ *  re-bound to the real path), each replacement asserted to hit exactly once —
+ *  the negative controls of §8. */
 function mutant(tag, replacements) {
   const src = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8');
   let out = src;
   for (const [from, to] of replacements) { const n = out.split(from).length - 1; if (n !== 1) throw new Error(`mutant ${tag}: expected exactly one hit for ${JSON.stringify(from)}, got ${n}`); out = out.replace(from, to); }
-  const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-${tag}.js`);
-  fs.writeFileSync(file, out); mutants.push(file);
+  const file = MUTK.write('src/server/desktop-app-keeper.js', out, tag);
   return { mod: require(file), file };
 }
-// stranded copies of DEAD runs are swept (never a live run's — two checkouts may run this suite at once)
-for (const f of fs.readdirSync(path.join(repo, 'src/server'))) { const m = /^vs-dak-mut-(\d+)-/.exec(f); if (m && !alive(Number(m[1]))) { try { fs.unlinkSync(path.join(repo, 'src/server', f)); } catch {} } }
+// in-tree copies a PRE-FIX run stranded are swept (DEAD pids only — two checkouts may run this suite at once)
+sweepLegacy(repo, ['src/server'], /^vs-dak-mut-(\d+)-/);
 // The r4 (2026-09-14) layers as mutant replacements — §10's own controls, and the OLDER pre-fix controls of
 // §8(b)/§9(a) remove them too: those keepers predate the layers, and the marker belt at the end of every
 // teardown would otherwise reap the very orphans those controls exist to show. Each anchor is asserted to
@@ -833,9 +834,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const bogus = { apps: { 'da-me': { pids: { app: process.pid, x: null, server: null, wm: null }, starts: { app: 12345, x: null, server: null, wm: null } }, 'da-me2': { pids: { app: process.pid }, starts: { app: D.procStart(process.pid) } } } };
   ok(sweepTargets(bogus.apps).length === 0, 'a fixture naming THIS process — wrong starttime or even the right one — is never a sweep target');
   ok(alive(process.pid), 'CONTROL: the round-1 predicate (`alive(p)`) would have selected it — this process is alive');
-  const rel = path.relative(repo, path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-x.js`));
-  const ign = spawnSync('git', ['-C', repo, 'check-ignore', '-q', rel], { env: gitEnvFrom(process.env), stdio: 'ignore' });
-  ok(ign.status === 0, `the patched-copy path ${rel} is GITIGNORED (a SIGKILLed run may never dirty the tree and block the release gate)`);
+  // (the patched copies' placement: no longer a gitignored path in src/ — §18 measures they never touch the tree)
 }
 
 console.log('§9 r3 — the round-2 verifier\'s findings, each reproduced on the real keeper and closed with a control');
@@ -1366,8 +1365,7 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
       const srcR = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
       const fromR = 'if ((input || type === 251) && !allowInput) dropped++;';
       ok(srcR.split(fromR).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
-      const rfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-rfbsize13.js`);
-      fs.writeFileSync(rfile, srcR.replace(fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;')); mutants.push(rfile);
+      const rfile = MUTK.write('src/server/desktop-stream.js', srcR.replace(fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;'), 'rfbsize13');
       const wc = await watchBridge(require(rfile));
       wc.cl && wc.cl.setSize(640, 480);
       const moved = await until(() => (sizeX() === '640x480' ? '640x480' : null), 5000, 100);
@@ -1561,8 +1559,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
     const srcS = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
     const from = '      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);';
     ok(srcS.split(from).length === 2, 'the bridge\'s allowlist decision is spelled once (the control patches exactly it)');
-    const mfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xstream14.js`);
-    fs.writeFileSync(mfile, srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5)')); mutants.push(mfile);
+    const mfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5)'), 'xstream14');
     const bc = await bridgeOn(require(mfile));
     const r2 = await launch('k14-ctl');
     const w2 = await viewer(bc, r2.id, 'v-watch');
@@ -1632,16 +1629,14 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
         // CONTROL: the fence WITHOUT the replay — the same pane types garbage (xpra reads its JS keycodes as X keycodes)
         const fromR = '    if (allowInput && !st.oversize) {';
         ok(srcS.split(fromR).length === 2, 'the replay is spelled once (the control patches exactly it)');
-        const rfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xreplay15.js`);
-        fs.writeFileSync(rfile, srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */')); mutants.push(rfile);
+        const rfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xreplay15');
         const typedC = await typeAfterTakeover(require(rfile), 'noreplay');
         ok(typedC !== 'abc', `CONTROL: fenced without the replay, the same takeover types ${JSON.stringify(typedC)} instead of "abc"`);
       }
       // CONTROL: the r6 allowlist (keyboard-config / keymap-changed as watch types) — the same Watch viewer reprograms X
       const fromW = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
       ok(srcS.split(fromW).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
-      const wfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xwatch15.js`);
-      fs.writeFileSync(wfile, srcS.replace(fromW, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', ")); mutants.push(wfile);
+      const wfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromW, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xwatch15');
       const bw = await bridgeOn(require(wfile));
       const r4 = await launch('k15-ctl');
       const w4 = await viewer(bw, r4.id, 'v-watch');
@@ -1691,8 +1686,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       // CONTROL: the fence WITHOUT the replay — the pane that watched and took over never gets its own size
       const fromN = '    if (allowInput && !st.oversize) {';
       ok(srcS.split(fromN).length === 2, 'the replay is spelled once (the no-replay control patches exactly it)');
-      const nfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xnoreplay16.js`);
-      fs.writeFileSync(nfile, srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */')); mutants.push(nfile);
+      const nfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay16');
       let ownN = false;
       const bn = await bridgeOn(require(nfile), (id, v) => (v === 'v-own' || (ownN && v === 'v-watch') ? { relay: true } : { relay: false, code: 'watch-mode' }));
       const r9 = await launch('k16-noreplay');
@@ -1709,8 +1703,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       // CONTROL: the r7 allowlist (the display-size packets as watch types) — the same Watch viewer resizes the holder's display
       const fromD = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
       ok(srcS.split(fromD).length === 2, 'the watch allowlist is spelled once (the control patches exactly it)');
-      const dfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xdisplay16.js`);
-      fs.writeFileSync(dfile, srcS.replace(fromD, fromD + "'display-configure', 'configure-display', 'desktop_size', ")); mutants.push(dfile);
+      const dfile = MUTK.write('src/server/desktop-stream.js', srcS.replace(fromD, fromD + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay16');
       const bd = await bridgeOn(require(dfile));
       const r8 = await launch('k16-ctl');
       const o8 = await viewer(bd, r8.id, 'v-own');
@@ -1747,6 +1740,17 @@ console.log('§17 the exit sweep\'s Xvfb-for-Xpra rule — by EVIDENCE (dead own
   ok(!hit.includes(ownerAlive.pid), 'CONTROL: a gone scratch dir, but its named xpra owner is ALIVE — not touched', hit);
   for (const c of [gone, live, ownerAlive]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
 }
+
+
+// ── §18 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n§18 the patched copies never touch the tree');
+for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(r.pass, '§18 ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

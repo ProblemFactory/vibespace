@@ -858,6 +858,101 @@ console.log('ALL PASS (1)');
     try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
   }
 
+  // ── (8) ALREADY GREEN IS NOT RELAUNCHED (B-3ccf, 2.369.164): a hand-run
+  //     `npm run ci:heavy` before the push left <sha>.green, and the hook's
+  //     `--heavy-launch` for that very sha started the SAME tier again
+  //     (2.369.102: 35 min holding the machine lock). The launcher asks the
+  //     marker first; a RED, a PARTIAL, a STALE (older than the commit) or a
+  //     narrower-scoped green still relaunches. End to end in a stub repo
+  //     (the real module), then every arm of the pure decision.
+  {
+    const mod = await import('./ci.mjs');
+    const decide = mod.heavyAlreadyGreen;
+    ok(typeof decide === 'function', 'ci.mjs exports heavyAlreadyGreen (the launcher\'s pure decision)');
+    const CI_SRC_G = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+    const s = stubGateRepo('already-green', { ciSource: CI_SRC_G, suites: { [SLICE]: "console.log('ALL PASS (1)');\n" } });
+    const md = path.join(s.root, 'data', 'ci-heavy');
+    fs.mkdirSync(md, { recursive: true });
+    const ctMs = Number((spawnSync('git', ['-C', s.root, 'show', '-s', '--format=%ct', s.sha], { encoding: 'utf-8', env: GIT_ENV }).stdout || '').trim()) * 1000;
+    const plant = (kind, rec, mtimeMs) => {
+      for (const k of ['green', 'red']) { try { fs.unlinkSync(path.join(md, `${s.sha}.${k}`)); } catch { } }
+      const f = path.join(md, `${s.sha}.${kind}`);
+      fs.writeFileSync(f, JSON.stringify({ sha: s.sha, result: kind, failed: kind === 'red' ? [SLICE] : [], scope: 'full', suites: 1, endedAt: mtimeMs, ...rec }) + '\n');
+      fs.utimesSync(f, mtimeMs / 1000, mtimeMs / 1000);
+      return f;
+    };
+    const pidOf = () => { try { return JSON.parse(fs.readFileSync(path.join(md, `${s.sha}.pid`), 'utf-8')).pid; } catch { return null; } };
+    const launchG = () => spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), '--heavy-launch', s.sha, '--only=' + SLICE, '--lock=' + s.lock, '--lock-wait-ms=20000'],
+      { cwd: s.root, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
+    // A launched child is waited out (it runs one stub suite) and then made
+    // sure of: nothing it started may outlive this leg.
+    const settle = async () => {
+      const pid = pidOf();
+      for (let i = 0; i < 1200 && fs.existsSync(path.join(md, `${s.sha}.pid`)); i++) await sleep(50);
+      if (pid) { try { process.kill(-pid, 'SIGKILL'); } catch { } try { fs.rmSync(path.join(os.tmpdir(), `vs-ci-heavy-${s.sha.slice(0, 8)}-${pid}`), { recursive: true, force: true }); } catch { } }
+      try { fs.unlinkSync(path.join(md, `${s.sha}.pid`)); } catch { }
+      try { fs.unlinkSync(path.join(md, `${s.sha}.log`)); } catch { }
+    };
+    const t0 = Math.max(Date.now(), ctMs + 2000);
+
+    // FRESH FULL GREEN ⇒ no child.
+    const gf = plant('green', {}, t0);
+    const before = fs.readFileSync(gf, 'utf-8');
+    const r1 = launchG();
+    ok(r1.status === 0 && new RegExp(`heavy already GREEN for ${s.sha.slice(0, 8)} \\(\\d+ min old\\), not relaunching`).test(r1.stderr || ''),
+      `a fresh FULL green for exactly this sha: "heavy already GREEN for ${s.sha.slice(0, 8)} (<age>), not relaunching", exit 0 (exit ${r1.status}: ${(r1.stderr || '').trim().split('\n').pop()})`);
+    ok(!fs.existsSync(path.join(md, `${s.sha}.pid`)) && !fs.existsSync(path.join(md, `${s.sha}.log`)) && !/launched the/.test(r1.stderr || ''),
+      '…and NO child was spawned (no pid file, no log, no "launched" line)');
+    ok(fs.existsSync(gf) && fs.readFileSync(gf, 'utf-8') === before, '…and the green marker is left exactly as it was');
+    await settle();
+
+    // STALE GREEN (older than the commit it names) ⇒ launches.
+    plant('green', {}, ctMs - 3600 * 1000);
+    const r2 = launchG();
+    const p2 = pidOf();
+    ok(r2.status === 0 && /launched the FULL tier/.test(r2.stderr || '') && p2 > 0 && !/already GREEN/.test(r2.stderr || ''),
+      `a STALE green (mtime an hour before the commit) is not evidence: the launcher starts a run (pid ${p2})`);
+    await settle();
+
+    // FRESH RED ⇒ launches.
+    plant('red', {}, t0);
+    const r3 = launchG();
+    const p3 = pidOf();
+    ok(r3.status === 0 && /launched the FULL tier/.test(r3.stderr || '') && p3 > 0, `a fresh RED marker still relaunches (pid ${p3})`);
+    await settle();
+
+    // FRESH PARTIAL GREEN ⇒ launches.
+    plant('green', { partial: [SLICE] }, t0);
+    const r4 = launchG();
+    const p4 = pidOf();
+    ok(r4.status === 0 && /launched the FULL tier/.test(r4.stderr || '') && p4 > 0, `a fresh PARTIAL green (--only) still relaunches (pid ${p4})`);
+    await settle();
+    try { spawnSync('git', ['-C', s.root, 'worktree', 'prune'], { env: GIT_ENV }); } catch { }
+    try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
+
+    // The pure decision, every arm.
+    if (typeof decide === 'function') {
+      const SH = 'a'.repeat(40), CT = 1_000_000_000_000, NOW = CT + 600_000;
+      const G = (x = {}) => ({ sha: SH, kind: 'green', scope: 'full', mtimeMs: CT + 60_000, file: '/x/' + SH + '.green', ...x });
+      const d = (markers, x = {}) => decide({ markers, sha: SH, full: SH, commitTimeMs: CT, scope: 'full', now: NOW, ...x });
+      ok(d([G()]).skip === true && d([G()]).age === '9 min old', 'pure: a fresh FULL green skips, with its age');
+      ok(d([G({ sha: 'b'.repeat(40) })]).skip === false, 'pure: a green for ANOTHER sha does not');
+      ok(decide({ markers: [G()], sha: SH.slice(0, 8), full: SH, commitTimeMs: CT, scope: 'full', now: NOW }).skip === true, 'pure: a short sha resolved to the full one matches its marker');
+      ok(d([G({ mtimeMs: CT - 1 })]).skip === false && d([G({ mtimeMs: CT })]).skip === false, 'pure: a green not NEWER than the commit time does not');
+      ok(d([G()], { commitTimeMs: 0 }).skip === false, 'pure: an unknown commit time claims nothing (never skip on a missing fact)');
+      ok(d([G({ partial: ['x'] })]).skip === false, 'pure: a PARTIAL green does not');
+      ok(d([{ sha: SH, kind: 'red', mtimeMs: CT + 60_000 }]).skip === false, 'pure: a RED does not');
+      ok(d([G(), { sha: SH, kind: 'red', mtimeMs: CT + 90_000 }]).skip === false && d([G({ mtimeMs: CT + 90_000 }), { sha: SH, kind: 'red', mtimeMs: CT + 60_000 }]).skip === true,
+        'pure: a green and a red for one sha — the NEWER decides');
+      ok(d([G()], { scope: 'affected', range: 'x..y' }).skip === true, 'pure: a FULL green covers an AFFECTED launch');
+      const A = G({ scope: 'affected', range: 'x..y' });
+      ok(d([A], { scope: 'affected', range: 'x..y' }).skip === true, 'pure: an AFFECTED green covers an AFFECTED launch over the SAME range');
+      ok(d([A], { scope: 'affected', range: 'w..y' }).skip === false, 'pure: …but not one over a different range');
+      ok(d([A], { scope: 'full', range: 'x..y' }).skip === false, 'pure: …and never a launch the 24 h net made FULL');
+      ok(d([G({ mtimeMs: NOW - 3 * 3600_000 })], { commitTimeMs: NOW - 4 * 3600_000 }).age === '3 h old', 'pure: an old green says its age in hours');
+    }
+  }
+
   // An unknown commit is refused rather than stamped.
   const bogus = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy-launch', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', '--markers=' + dir],
     { cwd: REPO, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });

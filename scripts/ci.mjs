@@ -87,6 +87,13 @@
 //                                        unless the newest FULL green marker is
 //                                        older than 24 h — then the FULL tier.
 //                                        THE LAUNCHER DECIDES, no cron.
+//                                        ALREADY GREEN (B-3ccf): a fresh GREEN
+//                                        marker for exactly <sha> (newer than
+//                                        its commit, not partial, FULL — or
+//                                        AFFECTED over the same range) prints
+//                                        "heavy already GREEN for <sha> (<age>),
+//                                        not relaunching" and exits 0 with no
+//                                        run; a RED or partial marker relaunches.
 //   node scripts/ci.mjs --heavy --affected --range=<old>..<new>
 //                                        (alias --heavy-affected) the impact-
 //                                        scoped tier by hand; --range=<sha> alone
@@ -159,6 +166,7 @@ export const SUITES = [
   { name: 'test-browser-pin', tier: 'fast' }, // AGENT BROWSER P1 first half (design-agent-browser-v2 §3.3–§3.5, §5.1, §8 steps 1–2): the PURE registry/lease/verdict decisions and the five-rung pin ladder with its two-site vocabulary (SPAWN_ORIGINS + the client mirror), then the REAL keeper over a FAKE `agent-browser` on PATH (a daemon that is a real `sleep`): attach/detach leases, one browser per profile, the ceiling naming its holders, boot reconciliation dropping an orphaned lease BEFORE anything is kept alive, adoption across a keeper "death" by pid+starttime (a recycled/unproven pid is never signalled), the runaway stop + park, the migration's legacy record, the routes on an in-process express app and the shipped CLI (`use --print` never prints a CDP url; `close --all` refused on a shared profile). ~5 s, no ports claimed by name, no real browser, scratch dirs only
   { name: 'test-browser-handles', tier: 'fast' }, // AGENT BROWSER P1 second half (design-agent-browser-v2 §3.7 + §3.8 layer ①, §3.2.5 adopt): the ATTACHMENT SET + HANDLES — the PURE aliases/child handles/path-vs-handle/set view/fingerprint/`resolveHandle` outcomes (profile_required listing every handle with the default marked, the sub-agent clause an ASIDE, not_attached, ambiguous, profile_path_refused with the `new --adopt` remedy) + the one-time `profile_changed` bookkeeping + the audit line (verb only, never a fill's content), then the REAL keeper over a fake `agent-browser` (aliases, resolveFor = blindness check THEN handle, children minted/resolved/reaped by prefix, the audit file, adoptScratch moving a scratch dir under ~/.agent-browser/), then the routes + the shipped CLI + a REAL browser-env: two attachments ⇒ a bare `--` command refused, `--profile`/VIBESPACE_BROWSER run under that profile's daemon, a USER pin re-points the per-session config WITHOUT a restart (the direct `agent-browser` command resolves to the DEFAULT's dir and to no other) and the CLI's next command is refused ONCE with was → now, the agent's own pin never is. ~5 s, port 0, scratch dirs only
   { name: 'test-browser-continuity', tier: 'fast' },
+  { name: 'test-cli-cmd-refresh', tier: 'fast' }, // B-a18e: the agent-CLI path re-resolved at SPAWN time when the boot answer went stale (the installer-window restart) — the helper over injected facts, the wiring pins, and a scratch server whose fake claude is renamed A → B → A between spawns (each spawn runs it where it NOW is, no restart; gone everywhere ⇒ the old error path + one line). ~8 s, dtach required (SKIP names it)
   { name: 'test-browser-takeover', tier: 'fast' }, // AGENT BROWSER P3 (design-agent-browser-v2 §4.3/§4.3.1): the PURE takeover/handback/idle/announce verdicts + the CDP-shaped input records, the REAL keeper's input side over the fake agent-browser (browser_paused on resolve, idle lapse on the keeper's own tick with an injected clock, detach, the confirmation registry answered through the CLI's own confirm/deny), the announcer's three moments against a fake ladder (one billed site under 'browser-handback', a refusal stashed + noticed), the REAL bridge over a fake upstream (mode records, holder-only forwarding, held, viewer-left), the routes in-process and the shipped CLI's refusal. ~6s, no real chromium
   { name: 'test-browser-providers', tier: 'fast' }, // AGENT BROWSER P4 first half (design-agent-browser-v2 §7.1–§7.3, §7.2.1, §3.6 row 3): the PURE provider rows with their capability cells and the exact typed refusal each control produces (provider_unavailable naming the §7.2.1 refusal, provider_needs_local_key on host != null, provider_local_only, provider_lacks_capability per cell), the local-oracles discipline over the egress proof record (a `blocks` claim's cell IS false; a measured record without its four runs FAILS), the cdp env pair + url re-pointing, the cloakserve plan's typed refusals + docker argv, the egress allowlist verdict table; the SHARED browser-serve runner over the fake agent-browser; a REAL agentd daemon answering `browser-serve` with its capability asserted and an old daemon never asked; the ORCH access layer forwarding a paired machine's CDP port over a fake tcpForward (bytes round-trip), the keeper's remote chromium / remote cdp / local cdp records (never pid-signalled, stop closes the forward), the routes (providers, create with host/cdpPort, refusals by name) and the allowlisting egress proxy over real loopback sockets. ~8s, port 0, scratch dirs, no real browser, no vendor call
   { name: 'test-browser-backend', tier: 'fast' }, // AGENT BROWSER P4 second half (design-agent-browser-v2 §7.4 / §7.5 / §7.6, D17 / D32–D34, round 8): the PURE switch model in src/browser-switch.js — the version ladder over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ the HIGHER), the carried seed, the fingerprint sentence, SEATS AS THREE STATES (known-fresh / known-stale / unknown; an unknown total never satisfies the ceiling — controls that treat it as 0 and as ∞ are red; a stale verdict degrades past SEAT_TIER_STALE_MS), the ceiling wording forked on key source (the user's own names holders; the cluster default lists no profile and offers the one click out), the launch-failure classifier's SHAPE (backend_seat_taken), the site hint carrying WHO claimed it with `tier` legal only while `backend === null`, `blocked` a CLAIM the server never manufactures, the gate's ORDER (keyScope refused before any key is resolved) — then the REAL keeper over a fake `agent-browser` playing cloak: the gate's three named refusals (backend_unavailable / backend_no_key + action / backend_seat_taken) and a real in-place switch (stop → same dir + carried seed → one tab re-opened per lease at its lastUrl → re-pinned → targetId rewritten → the lease OBJECT never destroyed; attach/resolve answer browser_restarting mid-way), a proposal when another session holds a lease, the routes + the shipped CLI's `backend`/`blocked`. ~4 s, port 0, scratch dirs only, no real browser, no vendor call
@@ -270,6 +278,7 @@ export const SUITES = [
   { name: 'test-codex-effort-meta', tier: 'fast' }, // the effort a TURN ran at (owner: "调成了 ultra 但 metadata 显示 xhigh"): the resume race reproduced against a stub app-server with the REAL wrapper (+ a negative control in master's record shapes), set-effort reaching the app-server AND the live status, per-message meta following its own turn, the wrapper_meta fallback, the merge fold vs codex's own copy, the session-meta writer, and the "ultra (multi-agent · reasoning …)" label read from the model catalog
   { name: 'test-plugin-security', tier: 'fast' }, // plugin-system security regressions (2.369.43): shim code-injection via manifest free text, capability-path collapsing, agent-tools consent gate, reinstall-under-a-trusted-id, proxied-reply headers, per-child stop mark, upload cleanup
   { name: 'test-local-device', tier: 'fast' },
+  { name: 'test-pty-duck', tier: 'fast' }, // B-ae4b: every node-pty duck holds a listener SET (daemon / R6 pipe / OpenCode serve terminal) — the liveness stamp AND the consumer through the real setupSessionPty, the one-slot census, the pre-fix control
   { name: 'test-agent-msg', tier: 'fast' }, // Channels v1: ACL matrix + delivery ladder + wiring pins
   { name: 'test-plugin-trust', tier: 'fast' }, // Plugin Ph4: validator (settings/themes/capabilities/module tier), consent 409 + trusted enable + drift re-prompt, module 403/200 + theme serving, node --permission denial vs granted path, install path/zip/Zip-Slip/update/uninstall-to-trash, shim shipping, client pins
   { name: 'test-codex-history', tier: 'fast' }, // codex rollout coverage: custom_tool_call_output routing, sub-agent visibility, live contextWindow, encrypted reasoning, web_search_end cards (rollout-only searches, live twin dedup, 0.14x call pairing)
@@ -381,7 +390,7 @@ export const SUITES = [
   { name: 'test-terminal-zoom-select', tier: 'heavy', why: 'headless chrome: real xterm from node_modules under body zoom 1.25/0.8, CDP mouse drags — the un-fixed page selects row 20×scale, the counter-zoomed page selects row 20 (~6s)' }, // 2.369.118, userW inc-mu92zsgw-6c9y
   { name: 'test-desktop-drop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (6696ms) — chrome' }, // Desktop-preview drop resolves the target desktop by the preview's OWN id, NOT by DOM index (task #165, real report: dropping a window on a preview landed it on the…
   { name: 'test-ghost-host-heal', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7202ms) — chrome' }, // GHOST-HOST SELF-HEAL (2.334.1, real fleet report): a persisted Recent/History host selection whose host record was REMOVED left the switcher <select> rendering…
-  { name: 'test-auto-resume-loop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7458ms) — cli' }, // THE AUTO-RESUME FIRE LOOP (2026-09-07 incident; owner decision ut-1c6c15a2db ①④). What happened, from the frozen journal (last 6h of the production server):
+  { name: 'test-auto-resume-loop', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7458ms; ~14s since B-0220 — it runs a HELD test-new-member-wake beside itself, the pair a 2026-09-22 integration hit by chance) — cli' }, // THE AUTO-RESUME FIRE LOOP (2026-09-07 incident; owner decision ut-1c6c15a2db ①④). What happened, from the frozen journal (last 6h of the production server):
   { name: 'test-harness-honesty', tier: 'heavy', why: 'chrome — the fast tier never launches a browser (7631ms here; a browser leg\'s cost follows machine load)' }, // the 2026-09-07 survey's four defects: codex personality is the USER's choice (unset ⇒ key absent; thread/settings/update applies it live), one explicit reply shape per ServerRequest method (+ MCP elicitation as a question card, unsupported ⇒ JSON-RPC error not a hang), the ACP unknown-sessionUpdate breadcrumb, and image_gen/sleep shape-equal across all THREE producers (live wrapper / rollout / thread-read) with a headless-chrome leg proving the image really draws
   { name: 'test-sidebar-empty-remote', tier: 'heavy', why: 'adopted 2026-09-07, was in NO runner (7799ms) — chrome' }, // Zero-local-sessions + a configured remote host must still render the workbench with its Recent host switcher (2.186.8, real report: a fresh instance with a remote…
   { name: 'test-codex-remote-wrapper', tier: 'heavy', reads: ['data/bin/codex-chat-wrapper.js'], why: 'adopted 2026-09-07, was in NO runner (8128ms) — server' }, // E2E for codex-chat-wrapper's REMOTE MODE (2.139.0, B-0588): a minimal JSON-RPC app-server stub runs under the REAL vibespace-remote-keeper; the wrapper attaches…
@@ -1623,6 +1632,39 @@ const reachableFromABranch = (sha) => {
   const r = spawnSync('git', ['-C', repo, 'for-each-ref', '--contains', sha, 'refs/heads/', 'refs/remotes/'], { encoding: 'utf-8', env: GIT_ENV });
   return r.status !== 0 || !!(r.stdout || '').trim(); // a git too old to answer ⇒ treat as live (queue, never kill)
 };
+// ALREADY GREEN (B-3ccf, 2.369.164). A hand-run `npm run ci:heavy` before the
+// push leaves data/ci-heavy/<sha>.green, and the pre-push hook then launched
+// the SAME tier for the SAME sha again — measured on 2.369.102: a 35-min re-run
+// that held the machine lock for a verdict already on disk. The launcher now
+// asks first. A marker is only EVIDENCE when all of these hold:
+//   · it is a GREEN for exactly this sha (a RED still relaunches — a fix
+//     re-pushed at the same sha, a flaky red — the push hook's re-run is how
+//     it clears);
+//   · it is not PARTIAL (`--only=…` judged a slice, never the tier);
+//   · its FILE is newer than the sha's commit time (a marker older than the
+//     commit it names was not written by a run of that commit — a planted,
+//     copied or clock-skewed file claims nothing);
+//   · its scope covers what this launch would run: a FULL green covers any
+//     launch; an AFFECTED green covers only an AFFECTED launch over the SAME
+//     range (a launch the 24 h net turned FULL is not covered by a slice).
+// PURE over its inputs (the marker records, their mtimes, the commit time) so
+// test-ci-heavy-launch drives every arm; heavyLaunch feeds it the disk.
+export function heavyAlreadyGreen({ markers = [], sha, full, commitTimeMs, scope, range, now = Date.now() } = {}) {
+  const mine = (m) => m.sha === sha || (full && m.sha === full);
+  const red = markers.find((m) => m.kind === 'red' && mine(m));
+  const g = markers.find((m) => m.kind === 'green' && mine(m));
+  if (!g) return { skip: false, why: red ? 'the marker for this sha is RED' : 'no green marker for this sha' };
+  if (red && (red.mtimeMs || 0) >= (g.mtimeMs || 0)) return { skip: false, why: 'a RED marker for this sha is at least as new as its green' };
+  if (g.partial) return { skip: false, why: `the green is PARTIAL (${[].concat(g.partial).join(',')}) — a slice, not the tier` };
+  if (!(commitTimeMs > 0) || !((g.mtimeMs || 0) > commitTimeMs)) return { skip: false, why: 'the green marker is not newer than the commit it names' };
+  const markerFull = g.scope !== 'affected';
+  if (!markerFull && !(scope === 'affected' && range && g.range === range)) {
+    return { skip: false, why: scope === 'affected' ? `the green is AFFECTED over ${g.range || '?'}, this launch is over ${range}` : 'the green is AFFECTED and this launch is FULL' };
+  }
+  const ageMs = Math.max(0, now - g.mtimeMs);
+  const age = ageMs < 120 * 60000 ? `${Math.round(ageMs / 60000)} min old` : `${Math.round(ageMs / 3600000)} h old`;
+  return { skip: true, marker: g, ageMs, age, why: markerFull ? 'a FULL green' : `an AFFECTED green over the same range ${range}` };
+}
 function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   const d = markerDir(dir);
   try { reapScratchOrphans({ log: (m) => console.error(m) }); } catch { } // the tier starts on a box the last runs did not litter (2.369.104)
@@ -1662,6 +1704,22 @@ function heavyLaunch(sha, { dir, only, lock, lockWaitMs, range } = {}) {
   // green is older than FULL_EVERY_MS (or there is none).
   const due = fullTierDue(dir, Date.now(), { sha });
   const scope = range && !only && !due.due ? 'affected' : 'full';
+  // ALREADY GREEN? (B-3ccf, see heavyAlreadyGreen) — asked AFTER supersession
+  // on purpose: a run for an ancestor is still superseded (this sha's green
+  // subsumes it and the machine is freed), only OUR run is not started.
+  {
+    const full = gitOut(['rev-parse', sha + '^{commit}']) || sha;
+    const ct = Number(gitOut(['show', '-s', '--format=%ct', full]));
+    const markers = readMarkers(dir).filter((m) => m.kind === 'green' || m.kind === 'red').map((m) => {
+      let mtimeMs = 0; try { mtimeMs = fs.statSync(m.file).mtimeMs; } catch { }
+      return { ...m, mtimeMs };
+    });
+    const g = heavyAlreadyGreen({ markers, sha, full, commitTimeMs: ct > 0 ? ct * 1000 : 0, scope, range });
+    if (g.skip) {
+      console.error(`[ci:heavy] heavy already GREEN for ${shortSha(sha)} (${g.age}), not relaunching — ${g.why} (${path.relative(repo, g.marker.file)})`);
+      return 0;
+    }
+  }
   fs.mkdirSync(d, { recursive: true });
   const logPath = path.join(d, `${sha}.log`);
   const pidPath = path.join(d, `${sha}.pid`);

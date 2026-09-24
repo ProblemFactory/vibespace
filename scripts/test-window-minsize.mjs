@@ -15,8 +15,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The negative controls' patched copies of src/lib/window.js are written
+// OUTSIDE the tree (scripts/mutant-copy.mjs: `.mjs`, every relative import
+// rewritten to the real file's URL). They used to be un-ignored siblings
+// (src/lib/vs-wm-{min,cap}-<pid>.js) — a dirty tree while the suite ran.
+const MUTW = mutantCopies('wm-minsize', repo);
+
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
@@ -147,17 +154,15 @@ const run = async (WM, label) => {
   const hits = lines.map(([from]) => src.split(from).length - 1);
   ok(hits.every((n) => n === 1), `the drag's minimum is spelled once per edge in window.js (the control patches exactly those lines: ${hits.join(', ')})`);
   let mut = src; for (const [from, to] of lines) mut = mut.replace(from, to);
-  const mutFile = path.join(repo, 'src/lib', `vs-wm-min-${process.pid}.js`);
-  fs.writeFileSync(mutFile, mut);
+  const mutFile = MUTW.write('src/lib/window.js', mut, 'min');
   try {
     const M = await run((await import(mutFile)).WindowManager, 'pre-fix');
     ok(M.se.height < 700 && M.se.width < 402, `CONTROL: the pre-fix drag takes the calculator's window to ${M.se.width}×${M.se.height} — below its 402×700 minimum (CSS would hold the box; the drag itself never stopped)`, M.se);
-  } finally { try { fs.unlinkSync(mutFile); } catch {} }
+  } finally { /* MUTW's scratch dir is removed at exit */ }
   // CONTROL (r2): the uncapped minimum — the shipped-then-refuted r1 spelling — puts the window past the workspace
   const capLine = '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }';
   ok(src.split(capLine).length === 2, 'the workspace cap is spelled once in window.js (the control patches exactly it)');
-  const capFile = path.join(repo, 'src/lib', `vs-wm-cap-${process.pid}.js`);
-  fs.writeFileSync(capFile, src.replace(capLine, '  _ownMinOf(win) { return minOf(win); } // pre-fix CONTROL'));
+  const capFile = MUTW.write('src/lib/window.js', src.replace(capLine, '  _ownMinOf(win) { return minOf(win); } // pre-fix CONTROL'), 'cap');
   try {
     const WC = (await import(capFile)).WindowManager;
     const wmC = mkWm(WC); wmC.workspace = { offsetWidth: 1356, offsetHeight: 815 };
@@ -165,7 +170,7 @@ const run = async (WM, label) => {
     wmC.windows.set('wc', wc);
     wmC.setMinSize('wc', { w: 742, h: 1299 });
     ok(wc.element.style.minHeight === '1299px' && parseFloat(wc.element.style.top) + parseFloat(wc.element.style.height) > 815, `CONTROL: uncapped, the same minimum makes a ${wc.element.style.height} window at top ${wc.element.style.top} on an 815 px workspace — the keypad off-screen, and no size smaller possible (the verifier's p2-B)`, wc.element.style);
-  } finally { try { fs.unlinkSync(capFile); } catch {} }
+  } finally { /* MUTW's scratch dir is removed at exit */ }
 }
 
 console.log('§3 wiring pins');
@@ -180,6 +185,17 @@ console.log('§3 wiring pins');
   ok(/const changed = _uiScaleVal !== s;/.test(read('src/lib/utils.js')) && /if \(changed\) \{ try \{ window\.dispatchEvent\(new CustomEvent\('vs:ui-scale'/.test(read('src/lib/utils.js')), 'WIRING PIN (r2): applyUiPrefs announces a UI-scale CHANGE (`vs:ui-scale`) — the one place the scale is applied');
   ok(/onMinSize\?\.\(m \? \{ \.\.\.m \} : null\)/.test(xv) && /minPaneCss\(constraints, drawRatio\)/.test(xv), 'the xpra view computes the minimum pane from the main window\'s constraints and the ratio');
 }
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);

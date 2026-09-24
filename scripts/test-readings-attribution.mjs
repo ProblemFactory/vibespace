@@ -49,6 +49,7 @@ import path from 'node:path';
 import cp from 'node:child_process';
 import { createRequire } from 'node:module';
 import { ONBOARDED_SOURCE } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -73,21 +74,15 @@ const stampWindow = (cacheDir, id, win) =>
 const readWindow = (cacheDir, id) => { try { return JSON.parse(fs.readFileSync(path.join(cacheDir, readingLag.windowSidecarName(id)), 'utf8')); } catch { return null; } };
 
 const cleanup = [];
-/** §18's negative control writes a patched copy of the engine BESIDE the real
- *  one (relative requires). Swept at start for the strand a SIGKILL leaves —
- *  by PID, so a concurrent run's live mutant is never deleted. */
-const mutants = [];
-try {
-  for (const f of fs.readdirSync(path.join(REPO, 'src/server'))) {
-    const m = /^vs-readattr-mut-(\d+)\.js$/.exec(f);
-    if (!m || Number(m[1]) === process.pid) continue;
-    try { process.kill(Number(m[1]), 0); continue; } catch { }
-    try { fs.unlinkSync(path.join(REPO, 'src/server', f)); } catch { }
-  }
-} catch { }
+/** §18's negative control loads a patched copy of the engine. It is written
+ *  OUTSIDE the tree (scripts/mutant-copy.mjs: this process's scratch dir, its
+ *  `require` re-bound on line 1 to the real module's path, so `./lazy.js` and
+ *  `../account-pool-auto.js` resolve exactly as a sibling's) — §21 measures
+ *  that while the copies exist. It used to be a sibling in src/server/. */
+const MUT = mutantCopies('readattr', REPO);
+sweepLegacy(REPO, ['src/server'], /^vs-readattr-mut-(\d+)[-.]/);   // what a pre-fix run stranded (dead PIDs only)
 process.on('exit', () => {
   for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
-  for (const f of mutants) { try { fs.unlinkSync(f); } catch { } }
 });
 
 /** Write a PATCHED COPY of a real src/ module somewhere else and require it.
@@ -2840,7 +2835,9 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const eng = read('src/server/usage-pool-engine.js');
     ok('§16c SOURCE PIN: the sweep anchors the FRESHEST cache of an identity group, so the machine login\'s snapshot is what the next tick records for the whole identity',
       /if \(!g\.cache \|\| cache\.fetchedAt > g\.cache\.fetchedAt\) \{ g\.cache = cache; g\.accountId = accountId; \}/.test(eng)
-      && /usageAnchors\.maybeRecord\(\{ identityKey, accountId: g\.accountId, cache: g\.cache,/.test(eng), '');
+      // B-a5c0: the per-group step moved into usage-estimator's sweepAnchorGroup — the engine hands it the group whole
+      && /sweepAnchorGroup\(\{\s*identityKey, group: g, anchors: usageAnchors,/.test(eng)
+      && /const cache = group\?\.cache;[\s\S]{0,3000}anchors\.maybeRecord\(\{ identityKey, accountId: group\.accountId, cache,/.test(read('src/usage-estimator.js')), '');
     const { UsageAnchors, identityKeyFor } = require(path.join(REPO, 'src/usage-anchors.js'));
     const sweepOnce = (dd) => {
       const dir = path.join(dd, 'usage-cache');
@@ -3628,19 +3625,16 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       // (src/server/) because its relative requires — `./lazy.js`,
       // `./spend-guard.js`, `../account-pool-auto.js` — only resolve there; the
       // generic `patchedModule` helper re-points `./x` at src/, which is right
-      // for a module that LIVES in src/ and wrong for this one. Swept at start
-      // and unlinked on exit, and gitignored: a SIGKILL may never leave the
-      // tree dirty, because a dirty tree is what the release gate refuses on.
+      // for a module that LIVES in src/ and wrong for this one. So it goes
+      // through MUT (scratch dir, `require` re-bound to the real path): the
+      // tree is never written, §21 measures it.
       const src = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
       const marker = 'function wallTargetFor(session, poolId, b, pinned) {';
       const patched = src.replace(marker, marker + '\n  return { member: pinned, why: null };  // PRE-FIX: the turn pin, unconditionally');
       ok('§18 NEGATIVE CONTROL: the patch hit the product source', patched !== src && patched.includes('PRE-FIX: the turn pin'));
       const I2 = mkIncident();
       const w2 = I2.w;
-      const mutFile = path.join(REPO, 'src/server/vs-readattr-mut-' + process.pid + '.js');
-      fs.writeFileSync(mutFile, patched);
-      mutants.push(mutFile);
-      const prefixMod = require(mutFile);
+      const prefixMod = MUT.load('src/server/usage-pool-engine.js', patched, '18');
       const eng2 = prefixMod.create({
         app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} },
         rootDir: w2.root, USAGE_CACHE_DIR: w2.cacheDir, activeSessions: w2.sessions,
@@ -3790,10 +3784,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       ok('§18d NEGATIVE CONTROL setup: the per-record call is a single line (the patch must hit it)', src.split(NEEDLE).length === 2);
       const patched = src.replace(NEEDLE, '      writeKey = key;  // PRE-FIX: the per-record write asked nothing');
       const T2 = mkTwoBucket();
-      const mutFile = path.join(REPO, 'src/server/vs-readattr-mut-' + process.pid + '-18d.js');
-      fs.writeFileSync(mutFile, patched);
-      mutants.push(mutFile);
-      const eng2 = require(mutFile).create({
+      const eng2 = MUT.load('src/server/usage-pool-engine.js', patched, '18d').create({
         app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} },
         rootDir: T2.w.root, USAGE_CACHE_DIR: T2.w.cacheDir, activeSessions: T2.w.sessions,
         wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
@@ -4414,6 +4405,14 @@ esac
   ok('§20 …the human-triggered route exists and hands the engine\'s entry point to setupUsage',
     /app\.post\('\/api\/usage\/repair-identity'/.test(read('src/usage-routes.js')) && /repairIdentityAnchors\('manual'\)/.test(read('src/usage-routes.js')) && /establishedWindows, repairIdentityAnchors, probeUsageForAccountKey/.test(read('server.js')));
 }
+
+// ── §21 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ────────────
+// Measured while §18's patched engines still exist (exit removes them; a
+// census after exit passes on the pre-fix placement too). They used to be
+// SIBLINGS in src/server/ (vs-readattr-mut-*, gitignored — so git never saw
+// them) and any suite scanning src/ beside this one counted them as product.
+console.log('\n§21 the patched copies never touch the tree');
+for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 2 })) ok('§21 ' + r.name, r.pass, r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

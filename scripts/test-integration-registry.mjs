@@ -33,6 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -44,33 +45,29 @@ const STORE_PATH = path.join(REPO, 'src/server/integration-store.js');
 const ENGINE_PATH = path.join(REPO, 'src/server/channels-engine.js');
 const storeMod = require(STORE_PATH);
 const ROOT = scratch('integ');
-const patched = [];
-const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} for (const p of patched) { try { fs.unlinkSync(p); } catch {} } };
+const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(ROOT, { recursive: true });
 
-// patched copies: gitignored, PID-swept, unique names (node caches by path)
-let seq = 0;
-function patchCopy(srcPath, prefix, replacements) {
-  const dir = path.dirname(srcPath);
-  for (const f of fs.readdirSync(dir)) {
-    const m = f.match(new RegExp(`^\\${prefix}(\\d+)-\\d+\\.js$`)); if (!m) continue;
-    let alive = false; try { process.kill(Number(m[1]), 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
-    if (!alive) { try { fs.unlinkSync(path.join(dir, f)); } catch {} }
-  }
+// patched copies: written OUTSIDE the tree (scripts/mutant-copy.mjs: this
+// process's scratch dir, `require` re-bound on line 1 to the real module's
+// path, so relative requires resolve as a sibling's), each under its own name
+// (node caches by path). They used to be gitignored siblings in src/server/
+// (.integration-store.prefix-*, .channels-engine.prefix-*) that every src/
+// scanner running beside this suite read as source; the tree census at the end
+// measures the new placement while the copies exist.
+const MUTI = mutantCopies('integ', REPO);
+sweepLegacy(REPO, ['src/server'], /^\.(?:integration-store|channels-engine)\.prefix-(\d+)-\d+\.js$/);   // what a pre-fix run stranded (dead PIDs only)
+function patchCopy(srcPath, tag, replacements) {
   let s = fs.readFileSync(srcPath, 'utf-8');
   for (const [from, to] of replacements) {
     if (!s.includes(from)) throw new Error(`patchCopy(${path.basename(srcPath)}): anchor not found: ${from.slice(0, 80)}`);
     s = s.replace(from, to);
   }
-  const p = path.join(dir, `${prefix}${process.pid}-${++seq}.js`);
-  fs.writeFileSync(p, s); patched.push(p);
-  return p;
+  return MUTI.write(srcPath, s, tag);
 }
-const gi = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf-8');
-ok(/src\/server\/\.integration-store\.prefix-\*\.js/.test(gi) && /src\/server\/\.channels-engine\.prefix-\*\.js/.test(gi), 'the patched copies this suite writes are gitignored');
 
 // ═══ §1 THE PURE TABLE ═══════════════════════════════════════════════════
 console.log('§1 the PURE table');
@@ -279,7 +276,7 @@ const get = async (p) => { const r = await api('GET', p); allBodies.push(r.text)
   ok(store.publicView('gmail').source === 'cluster' && store.publicView('gmail').clusterKey === 'channels', 'DELETE lands on the only preset');
 
   // NEGATIVE CONTROL: a copy that COPIES the cluster values into the record
-  const copyPath = patchCopy(STORE_PATH, '.integration-store.prefix-', [[
+  const copyPath = patchCopy(STORE_PATH, 'prefix', [[
     "    r.values = {};\n    r.clusterKey = cluster.def.key;\n    r.updatedAt = now();\n    save();\n    return changed(id, 'use-cluster');",
     "    r.values = Object.fromEntries(Object.entries(cluster.def.values).map(([k, val]) => [k, encField(row, k, val)]));\n    r.clusterKey = cluster.def.key;\n    r.updatedAt = now();\n    save();\n    return changed(id, 'use-cluster');",
   ]]);
@@ -414,7 +411,7 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     const disk = JSON.parse(fs.readFileSync(f, 'utf-8')).integrations;
     ok(Object.keys(disk).sort().join() === 'fake,lark' && !!disk.lark.values.appSecret, 'a write after recovery keeps every earlier credential on disk');
     // PRE-FIX CONTROL: a copy that reads "unreadable" as "fresh" (the shipped bare catch, one mechanism) destroys lark on the next write
-    const preFix = patchCopy(STORE_PATH, '.integration-store.prefix-', [[
+    const preFix = patchCopy(STORE_PATH, 'prefix', [[
       "return unreadable('exists but cannot be read', e);",
       '{ loadError = null; state = fresh(); return state; }',
     ]]);
@@ -546,7 +543,7 @@ console.log('§5 the Adapters row flips');
   await sleep(20);
   ok(eng.digest().adapters.find((a) => a.id === 'fake-poll').auth.state === 'unknown', "and flips back (to the record's honest unknown) when a key is saved");
   // CONTROL: a card-only copy — an engine whose adapters get no resolver — never flips
-  const cardOnly = patchCopy(ENGINE_PATH, '.channels-engine.prefix-', [[
+  const cardOnly = patchCopy(ENGINE_PATH, 'prefix', [[
     'registry.create(rec.kind, rec, { now, resolveIntegration, ...adapterDeps })', 'registry.create(rec.kind, rec, { now, ...adapterDeps })',
   ]]);
   const d2 = path.join(ROOT, 'eng2'); fs.mkdirSync(d2, { recursive: true });
@@ -825,5 +822,16 @@ if (tracked.length) {
 }
 
 server.close();
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

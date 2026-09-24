@@ -11,8 +11,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// The mutation control's copy of src/ws-create.js is written OUTSIDE the tree
+// (scripts/mutant-copy.mjs, `require` re-bound on line 1 to the real module's
+// path). It used to be an un-ignored sibling (src/.ws-create-negctl-<pid>.js).
+const MUTH = mutantCopies('harness-contract', REPO);
+
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 
@@ -605,16 +611,16 @@ const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')
     'NEGATIVE CONTROL: `unsupported` stays UNCONDITIONAL — a harness with no such flag refuses on a resume too (accept-and-ignore is the 2.361.4 failure)', JSON.stringify(codexResume.codes));
 
   // MUTATION CONTROL: the pre-fix gate, reproduced from the product source. The
-  // copy lives beside the original so its relative requires still resolve.
+  // copy's `require` is re-bound to the real path (MUTH), so its relative
+  // requires resolve exactly as the original's.
   const mutSrc = wsCreateSrc.replace('if (wtWillPass) {', 'if (data.worktree) {');
   ok(mutSrc !== wsCreateSrc, 'MUTATION CONTROL: the gate is one identifiable line');
-  const mutPath = path.join(REPO, 'src', `.ws-create-negctl-${process.pid}.js`);
+  const mutPath = MUTH.write('src/ws-create.js', mutSrc, 'negctl');
   try {
-    fs.writeFileSync(mutPath, mutSrc);
     const mutResume = await drive(require(mutPath), { ...base, resume: true, resumeId: RID, ignoreNoConvo: true });
     ok(mutResume.codes.join() === 'worktree-not-a-git-repo' && mutResume.built.length === 0,
       '…and with it the RESUME is refused again — the pre-fix behaviour, reproduced from the product source (so the leg above measures the fix)', JSON.stringify(mutResume.codes));
-  } finally { try { fs.rmSync(mutPath, { force: true }); } catch { } }
+  } finally { /* MUTH's scratch dir is removed at exit */ }
   try { fs.rmSync(NOREPO, { recursive: true, force: true }); } catch { }
 }
 
@@ -766,6 +772,17 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     ok((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length === 3, 'WIRING: ONE shared reading edge with exactly its two producers (claude + codex), never a per-harness answer', String((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length));
   }
 }
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTH.files, MUTH.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

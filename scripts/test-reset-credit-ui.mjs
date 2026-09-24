@@ -20,8 +20,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// The negative control's patched engine is written OUTSIDE the tree
+// (scripts/mutant-copy.mjs, `require` re-bound on line 1 to the real module's
+// path). It used to be an un-ignored sibling (src/server/.usage-pool-engine.rcui-<pid>.js).
+const MUTRC = mutantCopies('rcui', REPO);
+
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
@@ -173,8 +179,7 @@ console.log('\n§3 the route over the real engine');
     const src = read('src/server/usage-pool-engine.js');
     const from = "  try { av = spendGuard.authorize({ reason: 'codex-reset-credit', session, sessionId: session._webuiId, sessionName: session.name || null, identity: key ? { key, name: nameOf(key) || key } : null }); }";
     ok('NEGATIVE CONTROL: the patch hits the product source', src.includes(from));
-    const f = path.join(REPO, 'src/server', `.usage-pool-engine.rcui-${process.pid}.js`);
-    fs.writeFileSync(f, src.replace(from, '  try { av = { ok: true }; }'));
+    const f = MUTRC.write('src/server/usage-pool-engine.js', src.replace(from, '  try { av = { ok: true }; }'), 'rcui');
     try {
       const patched = require(f);
       const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcui-ctl-')); roots.push(root);
@@ -186,7 +191,7 @@ console.log('\n§3 the route over the real engine');
       const q = (fn) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = o; console.warn = w; } };
       const r = q(() => eng2.consumeResetCreditFor('__global_codex__', {}));
       ok('NEGATIVE CONTROL: without the authorizer the 0/hour ceiling no longer refuses — the spend_refused leg sees the gate', r.ok === true && wrote.length === 1, JSON.stringify(r));
-    } finally { fs.rmSync(f, { force: true }); }
+    } finally { /* MUTRC's scratch dir is removed at exit */ }
   }
   for (const r of roots) fs.rmSync(r, { recursive: true, force: true });
   const eng = read('src/server/usage-pool-engine.js');
@@ -257,6 +262,17 @@ console.log('\n§5 i18n');
   ok(`every new key has zh + ja (${keys.size} keys)`, keys.size > 25 && missing.length === 0, missing.join(' | '));
 }
 ok('ci.mjs runs this suite', /'test-reset-credit-ui'/.test(read('scripts/ci.mjs')));
+
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTRC.files, MUTRC.dir, REPO, { minCopies: 1 })) ok('tree: ' + r.name, r.pass, r.detail);
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

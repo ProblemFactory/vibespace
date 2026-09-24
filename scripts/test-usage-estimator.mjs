@@ -166,7 +166,8 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('calib: reset-crossed bucket skipped', est.predictCalib(prev, crossed.buckets, rates, cs(17.3)) === null);
   // the engine metric must be the RELATIVE one, gated on rel
   const engSrc = fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
-  ck('engine emits usage-est-rel-err-pct only when the window moved (no absolute-error headline metric)', /c\.rel != null[\s\S]{0,120}usage-est-rel-err-pct/.test(engSrc) && !/usage-est-err-pct/.test(engSrc));
+  const estSrc = fs.readFileSync(new URL('../src/usage-estimator.js', import.meta.url), 'utf8');
+  ck('the calib metric is usage-est-rel-err-pct, gated on rel (no absolute-error headline metric anywhere)', /CALIB_METRIC = 'usage-est-rel-err-pct'/.test(estSrc) && /c\.rel == null/.test(estSrc) && !/usage-est-err-pct/.test(engSrc + estSrc));
 }
 
 // ── costBetweenMulti sums across an identity's account ids ───────────────────
@@ -484,6 +485,79 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('③ idle trail = zero extrapolation', Math.abs(eIdle.sevenDay.utilization - eOff.sevenDay.utilization) < 1e-9);
 }
 
+// ── B-a5c0 telemetry hygiene: the calib metric reports only on NEW ground truth, attributed ──
+const { UsageAnchors } = require(path.resolve('src/usage-anchors.js'));
+const runTicks = (sweep, label) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-est-a5c0-'));
+  try {
+    const anchors = new UsageAnchors({ dataDir: dir });
+    const rates = { sevenDay: { rate: 1 / 1730 }, fiveHour: { rate: 1 / 500 } };
+    const estimator = { accountIdsFor: (k, ids) => ids || [], ratesFor: () => rates, invalidate: () => { estimator.inv++; }, inv: 0 };
+    const out = [];
+    let costCalls = 0;
+    const deps = {
+      identityKey: 'acct:sub-x', anchors, estimator,
+      costBetween: () => { costCalls++; return cs(17.3); }, darkHosts: () => [],
+      metric: (name, value, detail) => out.push({ name, value, detail }),
+    };
+    const R5 = Math.floor(T0 / 1000) + 4 * 3600;
+    const reading = (fetchedAt, u7, u5) => ({ accountId: 'sub-x', accountIds: ['sub-x'], cache: { fetchedAt, source: 'statusline', sevenDay: { utilization: u7, resetsAt: RESET }, fiveHour: { utilization: u5, resetsAt: R5 } } });
+    const t = [];
+    t.push({ r: sweep({ ...deps, group: reading(T0, 0.40, 0.10) }), n: out.length, c: costCalls });           // 0: first reading, nothing to compare
+    t.push({ r: sweep({ ...deps, group: reading(T0 + HR, 0.45, 0.11) }), n: out.length, c: costCalls });      // 1: NEW reading, 7d moved 5pt, 5h 1pt
+    t.push({ r: sweep({ ...deps, group: reading(T0 + HR, 0.45, 0.11) }), n: out.length, c: costCalls });      // 2: the same snapshot re-seen
+    t.push({ r: sweep({ ...deps, group: reading(T0 + HR / 2, 0.40, 0.10) }), n: out.length, c: costCalls });  // 3: an OLDER sibling cache
+    return { t, out, inv: estimator.inv, label };
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+};
+{
+  const { t, out, inv } = runTicks(est.sweepAnchorGroup);
+  ck('B-a5c0: a first reading anchors but emits nothing (no prior truth to compare)', t[0].r.recorded && t[0].n === 0);
+  ck('B-a5c0: a tick WITH a new reading emits exactly once — the moved bucket only (5h moved 1pt ⇒ none)', t[1].r.recorded && t[1].n === 1 && out[0].name === 'usage-est-rel-err-pct');
+  ck('B-a5c0: the row carries its attribution {account, bucket}', out[0]?.detail === 'account=sub-x bucket=sevenDay');
+  ck('B-a5c0: the value is |predΔ−actΔ|/|actΔ| (pred Δ 1pt vs act 5pt = 80%)', approx(out[0]?.value, 80, 0.01));
+  ck('B-a5c0: a tick WITHOUT a new reading (same snapshot) emits nothing and walks no ledger', !t[2].r.fresh && t[2].n === 1 && t[2].c === t[1].c);
+  ck('B-a5c0: an older sibling cache is not new truth — nothing emitted, nothing recorded', !t[3].r.fresh && !t[3].r.recorded && t[3].n === 1);
+  ck('B-a5c0: the estimator is invalidated once per accepted anchor (2), never on a re-seen tick', inv === 2);
+  ck('B-a5c0: calibMetricRows skips a barely-moved bucket and names the account default', est.calibMetricRows({ sevenDay: { rel: null, predDu: 0, actDu: 0.01 }, fiveHour: { rel: 0.5, predDu: 0.02, actDu: 0.04 } }, {}).map((r) => r.detail).join() === 'account=__global__ bucket=fiveHour');
+  // NEGATIVE CONTROL — the pre-fix engine shape: calib computed and emitted on EVERY sweep, before
+  // (and regardless of) whether the reading was new. The same ticks must go red on it.
+  const srcFn = est.sweepAnchorGroup.toString();
+  const patched = srcFn
+    .replace(/if \(!fresh\) return \{[^}]*\};/, '')
+    .replace(/if \(!recorded\) return \{[^}]*\};\n\s*estimator\.invalidate\(identityKey\);/, 'if (recorded) estimator.invalidate(identityKey);');
+  const control = patched !== srcFn && new Function('predictCalib', 'calibMetricRows', `return (${patched});`)(est.predictCalib, est.calibMetricRows);
+  const ctl = control ? runTicks(control, 'control') : null;
+  ck('B-a5c0 control: the every-tick shape floods (the older sibling re-emits) — the legs above can see it', !!ctl && ctl.t[3].n > ctl.t[2].n);
+}
+{
+  // the auto-cli drift read: a raw bucket whose window already reset is NO control
+  const NOW = T0 + 10 * HR, nowS = Math.floor(NOW / 1000);
+  const estRolled = { sevenDay: { utilization: 0.0 }, fiveHour: { utilization: 0.30 } };
+  const rawStale7 = { sevenDay: { utilization: 1.0, resetsAt: nowS - 60 }, fiveHour: { utilization: 0.25, resetsAt: nowS + 3600 } };
+  const d1 = est.cliRefreshDrift(estRolled, rawStale7, NOW);
+  ck('B-a5c0 drift: a stale raw (resetsAt past) is skipped — drift = the controlled 5h only (5pt, not 100)', approx(d1.drift, 5, 1e-6) && d1.rolled === 1);
+  ck('B-a5c0 drift: the scheduler inputs are unchanged (triggerDrift 100, moved) — the refresh a closed window earns still fires', approx(d1.triggerDrift, 100, 1e-6) && d1.moved);
+  const d2 = est.cliRefreshDrift({ sevenDay: { utilization: 0.0 } }, { sevenDay: { utilization: 1.0, resetsAt: nowS - 1 } }, NOW);
+  ck('B-a5c0 drift: every bucket stale ⇒ drift null (the log says "no control", never a number)', d2.drift === null && d2.rolled === 1);
+  const d3 = est.cliRefreshDrift({ sevenDay: { utilization: 0.42 } }, { sevenDay: { utilization: 0.40, resetsAt: nowS + 86400 } }, NOW);
+  ck('B-a5c0 drift: a live window still reports its drift (2pt)', approx(d3.drift, 2, 1e-6) && d3.rolled === 0);
+  const d4 = est.cliRefreshDrift({ sevenDay: { utilization: 0.42 } }, { sevenDay: { utilization: 0.40 } }, NOW);
+  ck('B-a5c0 drift: a resetsAt-less raw keeps its control (no evidence of a roll)', approx(d4.drift, 2, 1e-6));
+}
+{
+  // WIRING PINS — the engine and the auto-cli loop go through the helpers (a pure fix without its call site is dead, 2.355.0)
+  const eng = fs.readFileSync(new URL('../src/server/usage-pool-engine.js', import.meta.url), 'utf8');
+  const sweepBody = eng.slice(eng.indexOf('function sweepUsageAnchors'), eng.indexOf('function sweepUsageAnchors') + 2500);
+  ck('B-a5c0 wiring: sweepUsageAnchors delegates to sweepAnchorGroup and emits no metric of its own', /sweepAnchorGroup\(/.test(sweepBody) && !/__vsMetric\?\.\('usage-est/.test(eng) && !/predictCalib\(/.test(sweepBody));
+  const srv = fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
+  // the loop lives in src/server/auto-cli-loop.js since 2.369.163 (quota r2); server.js only starts it
+  const loop = fs.readFileSync(new URL('../src/server/auto-cli-loop.js', import.meta.url), 'utf8');
+  ck('B-a5c0 wiring: server.js starts THE auto-cli loop module (no inline twin)', /require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(/.test(srv) && !/estDriftPct:/.test(srv));
+  ck('B-a5c0 wiring: the auto-cli loop reads cliRefreshDrift and schedules on its triggerDrift', /cliRefreshDrift\(/.test(loop) && /estDriftPct: dr\.triggerDrift/.test(loop) && !/const cmp = \(e, r\)/.test(loop));
+  ck('B-a5c0 wiring: the refresh log prints a drift only when a control existed', /drift == null/.test(loop));
+  ck('B-a5c0 wiring: __vsMetric carries a detail', /global\.__vsMetric = \(name, value, detail\) => \{[^\n]*detail/.test(srv));
+}
 // ── THE BURN (B-f69c ③): the projection's input — utilization per MINUTE ─────
 {
   ck('burn: the window is ten minutes', est.BURN_WINDOW_MS === 10 * 60000);

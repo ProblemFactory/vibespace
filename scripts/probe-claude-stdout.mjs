@@ -51,6 +51,7 @@
 //   any leftover that crosses the threshold during the probe's own runtime
 //   (round 7) — exclude `spared` by NAME, it is a decision, not a measurement.
 import { spawn, execFileSync } from 'node:child_process';
+import { withoutVendorKeys } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -185,7 +186,9 @@ const args = [...WRAPPER_FLAGS, '--model', 'haiku'];
 // by its own first check) and every data/bin PATH entry (the agent-tool shims),
 // on top of the CLAUDE_CODE_CHILD_SESSION strip that keeps a parent session's
 // marker from suppressing the child's transcript (project_child_session_env).
-const env = { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1' };
+// …and no ambient API key (B-5f0b): ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+// outrank the machine's login, so the probe's turn would bill metered API.
+const env = { ...withoutVendorKeys(process.env), CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1' };
 for (const k of Object.keys(env)) if (k.startsWith('VIBESPACE_') && k !== 'VIBESPACE_SKIP_AGENT_HOOKS' && k !== 'VIBESPACE_WIRE_PROBE_MS') delete env[k];
 delete env.CLAUDE_CODE_CHILD_SESSION;
 if (env.PATH) env.PATH = env.PATH.split(':').filter((d) => !/(^|\/)data\/bin(\/|$)/.test(d)).join(':');
@@ -245,6 +248,10 @@ function openRaw() {
 const RAW_CAP = 8 * 1024 * 1024;
 const rawChunks = []; let rawBytes = 0;
 const types = {}; let toolUses = 0, toolResults = 0, buf = '', stderr = '';
+// THE TERMINAL SIGNAL (B-5f0b): did the turn's `result` record arrive? A
+// capture without it (the CLI died mid-turn, the budget expired on a loaded
+// box) is PARTIAL, and the reader must not judge it — it says so here.
+let sawResult = false, resultSubtype = null;
 const note = (t) => { types[t] = (types[t] || 0) + 1; };
 let done = false;
 const finish = (extra) => {
@@ -255,7 +262,7 @@ const finish = (extra) => {
     try { fs.writeSync(fd, Buffer.concat(rawChunks)); } catch (e) { rawSkip = `write ${e.code || e.message}`; }
     try { fs.closeSync(fd); } catch { }
   }
-  out({ ok: true, version, bin, args, cwd, raw: rawSkip ? null : rawPath, rawSkip, toolUses, toolResults, types, stderr: stderr.slice(-400), ...extra });
+  out({ ok: true, version, bin, args, cwd, raw: rawSkip ? null : rawPath, rawSkip, toolUses, toolResults, types, sawResult, resultSubtype, stderr: stderr.slice(-400), ...extra });
 };
 
 child.stdout.on('data', (d) => {
@@ -278,7 +285,10 @@ child.stdout.on('data', (d) => {
     }
     // Give the CLI a beat after the result: the whole point is to catch records
     // that trail a turn (the CLI's own `idle` fires AFTER the result).
-    if (r.type === 'result') setTimeout(() => { try { child.kill('SIGTERM'); } catch { } }, 2000);
+    if (r.type === 'result') {
+      sawResult = true; resultSubtype = r.subtype || null;
+      setTimeout(() => { try { child.kill('SIGTERM'); } catch { } }, 2000);
+    }
   }
 });
 child.stderr.on('data', (d) => { stderr += d.toString(); });

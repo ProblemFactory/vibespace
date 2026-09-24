@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { mk } = require('./lazy.js');
+const { ptyListeners } = require('../pty-duck'); // the node-pty duck's listener SET (B-ae4b)
 
 function create({ rootDir, AGENTD_DIR, agentdHostToken, getHosts, getMounts,
   getMachineMounts, getPortForwards, getExitProxy }) {
@@ -112,21 +113,24 @@ async function ensureAgentdOnHost(hostId) {
   _agentdInstalled.set(hostId, version);
 }
 // The node-pty DUCK over a device session handle. `onData`/`onExit` hold a SET
-// of listeners, not one slot, because that is what node-pty's own onData does
-// and setupSessionPty now registers TWO of them (the liveness stamp + the
-// protocol consumer). A single-slot shim silently REPLACED the first
-// registration — with the stamp registered first, the whole stdout consumer
-// would have gone dead on every daemon-attached session. `dispose()` removes
-// only its own callback.
+// of listeners (src/pty-duck.js, shared with the R6 pipe duck and the OpenCode
+// serve terminal), not one slot, because that is what node-pty's own onData
+// does and setupSessionPty registers TWO of them: the liveness stamp FIRST,
+// then the protocol consumer. With one slot the LAST registration wins, so the
+// consumer keeps streaming and the STAMP is silently dropped — ptyQuietSince
+// then reads "silent" for a bridge that is relaying bytes and the attach probe
+// heals a healthy daemon attach (measured: test-pty-duck §2's control). The
+// consumer never died; the liveness fact did. `dispose()` removes only its own
+// callback.
 function daemonPtyShim(handle) {
-  const dataCbs = new Set(), exitCbs = new Set();
-  handle.onData = (buf) => { const s = buf.toString('utf-8'); for (const cb of [...dataCbs]) { try { cb(s); } catch {} } };
-  handle.onExit = (code) => { for (const cb of [...exitCbs]) { try { cb({ exitCode: code }); } catch {} } };
+  const data = ptyListeners(), exits = ptyListeners();
+  handle.onData = (buf) => data.emit(buf.toString('utf-8'));
+  handle.onExit = (code) => exits.emit({ exitCode: code });
   return {
     _daemon: true,
     get pid() { return handle.pid; },
-    onData(cb) { dataCbs.add(cb); return { dispose() { dataCbs.delete(cb); } }; },
-    onExit(cb) { exitCbs.add(cb); return { dispose() { exitCbs.delete(cb); } }; },
+    onData(cb) { return data.on(cb); },
+    onExit(cb) { return exits.on(cb); },
     write(s) { try { handle.write(s); } catch {} },
     resize(cols, rows) { try { handle.resize(cols, rows); } catch {} },
     kill() { try { handle.kill(); } catch {} },

@@ -386,6 +386,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   //    CLI is installed, ASK IT which spelling it emits; when it is not,
   //    SKIP LOUDLY with the reason (an environment-capability assert must carry
   //    evidence, never quietly pass).
+  // real-cli-env: here the installed claude is only grepped and asked `--version`; the ONE real turn runs in scripts/probe-claude-stdout.mjs, which strips the keys itself (§50 scope) (B-5f0b audit)
   let bin = null;
   try { bin = fs.realpathSync(require('child_process').execFileSync('sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim()); } catch { }
   if (!bin || !fs.existsSync(bin)) {
@@ -673,6 +674,17 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
       hitsRe(`onInProgressToolUseIDs\\?\\.\\(${ID}\\.op\\)`) > 0, 'the swallowing callback is gone — re-run the wire probe, the cap may be flippable');
   }
 }
+// THE WIRE LEG'S VERDICT, one function so the fake-CLI harness below can drive
+// it: SKIP (with the reason) when the probe could not measure, else JUDGE.
+const wireVerdict = (res, why = '') => {
+  if (!res || res.skip || !res.ok) return { skip: `wire probe did not run (${res?.skip || why || 'unknown'}) — the caps rows were not re-measured against a live CLI` };
+  // B-5f0b: judge only a capture that reached the turn's TERMINAL record — a
+  // budget expiry or a mid-turn death leaves a tool_use with no result and
+  // none of the records that trail a turn (asserting then is the 2.369.69 red)
+  if (!res.sawResult) return { skip: `wire probe ran ${res.version} but the turn never reached its result record${res.budgetExpired ? ' (budget expired)' : ''} — a partial capture is not evidence (${JSON.stringify(res.types)})` };
+  if (!res.toolUses) return { skip: `wire probe ran ${res.version} but no tool executed (${JSON.stringify(res.types)}) — nothing to measure the run-set record against` };
+  return { judge: true };
+};
 {
   // ⓕ THE WIRE. Everything above feeds records WE wrote. This leg spawns the
   //    installed CLI in chat-wrapper.js's exact flag shape, runs read-only
@@ -688,8 +700,8 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
     const raw = require('child_process').execFileSync(process.execPath, [path.join(REPO, 'scripts/probe-claude-stdout.mjs')], { encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'ignore'] });
     res = JSON.parse(String(raw).trim().split('\n').filter(Boolean).pop() || '{}');
   } catch (e) { why = e.message; }
-  if (!res || res.skip || !res.ok) console.log(`  SKIP: wire probe did not run (${res?.skip || why || 'unknown'}) — the caps rows were not re-measured against a live CLI`);
-  else if (!res.toolUses) console.log(`  SKIP: wire probe ran ${res.version} but no tool executed (${JSON.stringify(res.types)}) — nothing to measure the run-set record against`);
+  const verdict = wireVerdict(res, why);
+  if (verdict.skip) console.log(`  SKIP: ${verdict.skip}`);
   else {
     const n = (t) => res.types[t] || 0;
     ok(`${res.version} wire probe: ${res.toolUses} tool_use / ${res.toolResults} tool_result really executed in the wrapper's flag shape`, res.toolResults > 0, JSON.stringify(res.types));
@@ -906,6 +918,9 @@ process.stdin.on('data', () => {});
 setTimeout(() => {
   e({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: sid });
   e({ type: 'assistant', session_id: sid, message: { id: 'm', role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } });
+  // B-5f0b: the turn CUT before its terminal record (a CLI that died mid-turn,
+  // or the probe's budget expiring on a loaded box) — no tool_result, no result
+  if (process.env.FAKE_CLI_NO_RESULT === '1') { setTimeout(() => process.exit(0), 20); return; }
   e({ type: 'user', session_id: sid, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }] } });
   e({ type: 'result', session_id: sid, subtype: 'success' });
 }, 30);
@@ -1082,6 +1097,21 @@ setTimeout(() => process.exit(0), 60000);
     const rF = runProbe();
     ok('…and the NEXT probe run sweeps it (sparing defers, it does not exempt)',
       !fs.existsSync(edge.d) && !fs.existsSync(edge.c) && rF.cleaned.swept >= 1, JSON.stringify(rF.cleaned));
+  }
+  {
+    // ── THE TERMINAL SIGNAL (B-5f0b, the 2.369.69 class) ─────────────────────
+    //    The wire leg judges a capture. A capture that ended BEFORE the turn's
+    //    `result` record — the CLI died mid-turn, or the probe's budget expired
+    //    on a loaded gate machine — holds whatever had arrived by then: a
+    //    tool_use with no tool_result, and none of the records that trail the
+    //    turn. Judging THAT is asserting before the terminal signal. Driven
+    //    deterministically: the fake CLI emits the tool_use and exits.
+    const rCut = runProbe({ FAKE_CLI_NO_RESULT: '1' });
+    const vCut = wireVerdict(rCut);
+    ok('TERMINAL SIGNAL: a capture cut BEFORE the turn\'s result record is SKIPPED by the wire verdict (with the reason), never judged — a partial capture is not evidence',
+      !!vCut.skip && /result/.test(vCut.skip), JSON.stringify({ vCut, cut: { ok: rCut.ok, toolUses: rCut.toolUses, toolResults: rCut.toolResults, sawResult: rCut.sawResult, types: rCut.types } }));
+    ok('…and the COMPLETE capture (result seen) is still JUDGED — the gate is not a blanket skip',
+      wireVerdict(r1).judge === true && r1.sawResult === true, JSON.stringify({ v: wireVerdict(r1), sawResult: r1.sawResult }));
   }
   fs.rmSync(tdir, { recursive: true, force: true });
   }

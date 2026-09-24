@@ -319,11 +319,13 @@ console.log('— §17: no literal colours in the new CSS');
   // rewrites src/agentd/version.js AFTER esbuild, so it is newer than a
   // perfectly fresh bundle every single time.
   // ONLY THE COMMIT'S OWN SOURCES (2026-09-16, the heavy tier's parallel
-  // lanes): ten suites write gitignored PATCHED COPIES into src/ (the
-  // `src/server/vs-*-mut-*.js` and `src/lib/.chat-view.*prefix-*.js` families)
-  // and under the lanes one of them is routinely on disk while this check
-  // runs — measured on the first 4-lane run: `bundle 09:30:20 < src 09:30:22`,
-  // a retry paid for a file the build never read. The build's inputs are the
+  // lanes): ten suites used to write gitignored PATCHED COPIES into src/
+  // (the `src/server/vs-*-mut-*.js` and `src/lib/.chat-view.*prefix-*.js`
+  // families) and under the lanes one of them was routinely on disk while this
+  // check ran — measured on the first 4-lane run: `bundle 09:30:20 < src
+  // 09:30:22`, a retry paid for a file the build never read. (Since batch r1 no
+  // suite writes into src/ — scripts/mutant-copy.mjs, test-architecture §51 —
+  // but an untracked file is still no build input.) The build's inputs are the
   // TRACKED files, so that is the set asked (`git ls-files`, through the
   // sanitized git env because a suite runs inside somebody else's git process);
   // a tree git cannot list (an export) falls back to the directory walk.

@@ -153,7 +153,10 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // HARNESS SETTINGS (docs/design-harness-settings.zh.md §2, 2026-09-20): the per-harness
   // DECLARED tables + validator + coerce + the plan builder — imports nothing, bundled into the
   // browser (settings-schema derives the harness sections), required by the server and the daemon
-  'src/harness-settings.js']);
+  'src/harness-settings.js',
+  // THE node-pty DUCK's listener SET (B-ae4b): daemonPtyShim, the R6 pipe duck and the OpenCode
+  // serve terminal share it so setupSessionPty's liveness stamp is never replaced by the consumer
+  'src/pty-duck.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
@@ -1260,7 +1263,6 @@ for (const [edge] of EXCEPTIONS) {
     { file: 'server.js', needle: "execFileSync('git', ['-C', repoDir, 'pull', '--ff-only']", why: 'BOOT ONLY, ONCE (the auto-update pull, before anything is served).' },
     { file: 'server.js', needle: "execFileSync('npm', ['install'", why: 'BOOT ONLY, ONCE, and only when the pull actually moved.' },
     { file: 'server.js', needle: "execFileSync('npm', ['run', 'build']", why: 'BOOT ONLY, ONCE, same branch.' },
-    { file: 'server.js', needle: "execFileSync('/usr/bin/which', [name]", why: 'BOOT ONLY, ONCE PER COMMAND NAME (resolveCmd, three of them) — node-pty needs absolute paths. Never on a session path.' },
   ];
   const swWalked = [], swStray = [], swHit = new Set();
   for (const f of [...sweepFiles].sort()) {
@@ -1445,6 +1447,116 @@ for (const [edge] of EXCEPTIONS) {
   const bad = judge(src);
   ok(bad.length === 0, `§49 every wake-capable owner route hands its door the consent echo AND the pacer${bad.length ? ' — ' + bad.join('; ') : ''}`);
   ok(judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }));\n});") .length === 1 && judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }, wakeGuards(b)));\n});").length === 0, '§49 NEGATIVE CONTROL: a planted side door with no guards is caught; the guarded spelling passes');
+}
+
+// 50. THE REAL-CLI KEY CENSUS (B-5f0b, 2026-09-23). The 2.369.69 red was a
+//     real `codex app-server` leg on a logged-out CODEX_HOME: the server's own
+//     idle drain starts a turn, and only the missing login made it die on a
+//     401 — a fake home removes the LOGIN, never an env key, so a leaked
+//     OPENAI_API_KEY / CODEX_API_KEY would have BILLED that turn (and
+//     ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN outrank the oat a claude leg
+//     seeds). Every suite (and the wire probe) that resolves a REAL claude /
+//     codex / opencode by name spawns it through scratch.mjs's
+//     withoutVendorKeys(), or declares `// real-cli-env: <why>` — a leg whose
+//     child env is built from nothing, or that only reads the binary.
+{
+  const REAL_CLI = /command -v (claude|codex|opencode)\b|(?:spawn|spawnSync|execFile|execFileSync)\(\s*'(?:codex|claude|opencode)'|OPENCODE_CMD \|\| 'opencode'|execSync\(\s*'(?:codex|claude|opencode) /;
+  const judge = (s) => {
+    if (!REAL_CLI.test(s)) return null;
+    const decl = /\/\/ real-cli-env: (.{10,})/.exec(s);
+    if (decl) return null;
+    if (!/import\s*\{[^}]*\bwithoutVendorKeys\b[^}]*\}\s*from\s*'\.\/scratch\.mjs'/.test(s)) return 'resolves a real agent CLI but imports no withoutVendorKeys from ./scratch.mjs (and declares no `// real-cli-env:` reason)';
+    if ((s.match(/withoutVendorKeys\(/g) || []).length < 1) return 'imports withoutVendorKeys but never calls it';
+    return null;
+  };
+  const scope = fs.readdirSync('scripts').filter((f) => /^(test|probe)-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => f !== 'scripts/test-architecture.mjs' && REAL_CLI.test(fs.readFileSync(f, 'utf8')));   // this census's own control strings are not a spawn
+  ok(scope.length >= 8, `§50 census scope is non-vacuous (${scope.length} suites resolve a real agent CLI by name)`);
+  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, why]) => why);
+  ok(bad.length === 0, `§50 every real-CLI suite strips the ambient vendor keys (or declares why it need not)${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
+  ok(judge("const srv = spawn('codex', ['app-server'], { env: { ...process.env, CODEX_HOME: home } });") !== null
+    && judge("import { withoutVendorKeys } from './scratch.mjs';\nconst srv = spawn('codex', ['app-server'], { env: { ...withoutVendorKeys(process.env), CODEX_HOME: home } });") === null
+    && judge("// real-cli-env: the child env is {PATH, HOME} only\nexecSync('command -v codex');") === null
+    && judge("// real-cli-env: x\nexecSync('command -v codex');") !== null,
+  '§50 NEGATIVE CONTROL: a bare real-codex spawn is caught, the shared strip passes, a reasoned declaration passes, a reason-less one does not');
+  const { VENDOR_KEY_ENV, withoutVendorKeys } = await import(path.resolve('scripts/scratch.mjs'));
+  const planted = withoutVendorKeys({ PATH: '/bin', OPENAI_API_KEY: 'a', CODEX_API_KEY: 'b', ANTHROPIC_API_KEY: 'c', ANTHROPIC_AUTH_TOKEN: 'd' });
+  ok(['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'].every((k) => VENDOR_KEY_ENV.includes(k) && !(k in planted)) && planted.PATH === '/bin',
+    '§50 withoutVendorKeys strips all four ambient credentials and keeps everything else');
+}
+
+// §51 A SUITE NEVER WRITES A PATCHED COPY INTO THE TREE (B-0220 generalized,
+// 2.369.164 batch r1). A negative control used to load a copy of a product
+// module written as a SIBLING in src/ (so its relative requires resolved),
+// gitignored, unlinked on exit, swept by PID at start. Gitignored hides a file
+// from git only: every suite that SCANS src/ while such a copy exists counts it
+// as product code (a 2026-09-22 integration: test-auto-resume-loop's census
+// counted test-new-member-wake's mutant engine, 3 red, green alone), a SIGKILL
+// strands it, and seven of the families were not even ignored (a dirty tree
+// mid-run). The ONE place a copy goes is scripts/mutant-copy.mjs (the process's
+// scratch dir, `require`/relative imports re-bound to the real module's path).
+// DERIVED: every scripts/*.mjs write (writeFileSync/copyFileSync) whose target
+// is `path.join(<the checkout>, 'src…')`, `path.join(<the checkout>,
+// path.dirname(rel))`, or a variable assigned one of those — <the checkout> =
+// a name bound from `import.meta.url` + '..'. The two generated build
+// artifacts a bare run stands in for (src/lib/build-version.js,
+// src/agentd/version.js) are the declared exceptions. And .gitignore carries
+// no wildcard `.js` pattern that could apply under src/ — a stray copy must be
+// VISIBLE, never hidden.
+console.log('§51 no suite writes a patched copy into the tree');
+{
+  const judge = (src) => {
+    const checkout = new Set();
+    for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*import\.meta\.url[^;\n]*['"]\.\.['"][^;\n]*/g)) checkout.add(m[1]);
+    for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*['"]\.\.['"][^;\n]*import\.meta\.url[^;\n]*/g)) checkout.add(m[1]);
+    if (!checkout.size) return [];
+    const C = [...checkout].join('|');
+    const inTree = new RegExp(`path\\.(?:join|resolve)\\(\\s*(?:${C})\\s*,\\s*(?:['"\`]src\\b|path\\.dirname\\()`);
+    const vars = new Map();   // name → its definition (the exception is judged on WHAT it names)
+    for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*([^;\n]+)/g)) if (inTree.test(m[2])) vars.set(m[1], m[2]);
+    // one hop: a name joined under an in-tree DIRECTORY variable (`path.join(SRC_DIR, …)`)
+    for (const m of src.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*([^;\n]+)/g)) {
+      const j = /path\.join\(\s*(\w+)\s*,/.exec(m[2]);
+      if (j && vars.has(j[1])) vars.set(m[1], vars.get(j[1]) + ' ' + m[2]);
+    }
+    const hits = [];
+    for (const m of src.matchAll(/(?:writeFileSync|copyFileSync)\(\s*([^,]+),/g)) {
+      const a = m[1].trim();
+      const call = src.slice(m.index, m.index + 240).replace(/^(?:writeFileSync|copyFileSync)\(\s*/, '');
+      const direct = new RegExp('^' + inTree.source).test(call) || (/^path\.join\(\s*(\w+)\s*,/.test(a) && vars.has(/^path\.join\(\s*(\w+)/.exec(a)[1]));
+      if (!(direct || vars.has(a))) continue;
+      const line = src.slice(0, m.index).split('\n').length;
+      if (/build-version\.js|agentd\/version\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
+      hits.push(`${line}: ${a.slice(0, 70)}`);
+    }
+    return hits;
+  };
+  const scope = fs.readdirSync('scripts').filter((f) => f.endsWith('.mjs') && f !== 'test-architecture.mjs').map((f) => 'scripts/' + f);
+  const bad = scope.map((f) => [f, judge(fs.readFileSync(f, 'utf8'))]).filter(([, h]) => h.length);
+  ok(scope.length >= 100, `§51 census scope is non-vacuous (${scope.length} scripts)`);
+  ok(bad.length === 0, `§51 no script writes into src/ (patched copies go through scripts/mutant-copy.mjs)${bad.length ? ' — ' + bad.map(([f, h]) => f + ' [' + h.join(' ; ') + ']').join(' | ') : ''}`);
+  const HDR = "const REPO = path.resolve(new URL('..', import.meta.url).pathname);\n";
+  ok(judge(HDR + "const f = path.join(REPO, path.dirname(rel), 'vs-spend-mut-' + process.pid + '.js');\nfs.writeFileSync(f, src);").length === 1
+    && judge(HDR + "const SRC_DIR = path.join(REPO, 'src/server');\nconst f = path.join(SRC_DIR, `vs-browser-mut-${process.pid}.js`);\nfs.writeFileSync(f, src);").length === 1
+    && judge(HDR + "fs.writeFileSync(path.join(REPO, 'src/lib', `.chat-view.prefix-${process.pid}.js`), cut);").length === 1
+    && judge(HDR + "const f = MUT.write('src/server/auto-resume.js', src);\nfs.writeFileSync(path.join(ROOT, 'src', 'x.js'), s);").length === 0
+    && judge(HDR + "const bv = path.join(REPO, 'src/lib/build-version.js');\nif (!fs.existsSync(bv)) fs.writeFileSync(bv, 'x');").length === 0,
+  '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not');
+  const gi = fs.readFileSync('.gitignore', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  const hides = gi.filter((l) => /\*/.test(l) && /\.js$/.test(l) && (l.startsWith('src/') || !l.includes('/')));
+  ok(hides.length === 0, `§51 .gitignore hides no wildcard .js family under src/ (a stray copy must be visible)${hides.length ? ' — ' + hides.join(', ') : ''}`);
+  // the helper's own contract, driven: a CJS copy resolves the real module's
+  // relative requires, keeps its line numbers, and lives outside the checkout
+  const { mutantCopies } = await import(path.resolve('scripts/mutant-copy.mjs'));
+  const M = mutantCopies('arch51', REPO);
+  const orig = fs.readFileSync('src/server/spend-guard.js', 'utf8');
+  const loaded = (() => { try { return M.load('src/server/spend-guard.js', orig); } catch (e) { return e; } })();
+  const body = fs.readFileSync(M.files[0], 'utf8');
+  ok(typeof loaded.create === 'function' && body.split('\n').length === orig.split('\n').length && !path.relative(REPO, M.files[0]).startsWith('src'),
+    '§51 mutant-copy: a CJS copy of a module with relative requires loads, keeps every line number, and is written outside the checkout');
+  const esm = M.write('src/lib/chat-view.js', fs.readFileSync('src/lib/chat-view.js', 'utf8'));
+  const eb = fs.readFileSync(esm, 'utf8');
+  ok(esm.endsWith('.mjs') && !/from\s*['"]\.\.?\//.test(eb) && /from "file:\/\//.test(eb),
+    '§51 mutant-copy: an ESM copy has every relative specifier rewritten to the real file\'s URL');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

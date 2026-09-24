@@ -26,9 +26,16 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Every patched copy ⑯–⑱ load is written OUTSIDE the tree
+// (scripts/mutant-copy.mjs: this process's scratch dir, `require` re-bound on
+// line 1 to the real module's path); ⑲' measures that while they exist.
+const MUTC = mutantCopies('qm', ROOT);
+// what a pre-fix run stranded (dead PIDs only): vs-qmr{3,4,6}-mut-<pid>-*
+sweepLegacy(ROOT, ['src', 'src/harnesses', 'src/adapters'], /^vs-qmr[346]-mut-(\d+)-/);
 const QM = require(path.join(ROOT, 'src/quota-model.js'));
 const W = require(path.join(ROOT, 'src/usage-cache-write.js'));
 const CODEXQ = require(path.join(ROOT, 'src/harnesses/codex-quota.js'));
@@ -445,7 +452,10 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/lib/manage-agents.js', ['pending', 'the Agents roster donuts read u.fiveHour/u.sevenDay/u.scopedWeekly directly — they show the DERIVED view (now the plan limit, deterministically) but do not yet render the other limits or the not-started note']],
       ['src/lib/session-lifecycle.js', ['pending', "the billing switcher's per-account chips read the legacy pair for a one-line summary"]],
       ['src/lib/usage-pace.js', ['pending', "the pace/burn helper is a parity port of claude-swap's pace.py and reads the legacy pair verbatim"]],
-      ['src/server/auto-cli-loop.js', ['pending', 'the auto-cli drift signal compares the estimate against the reading per legacy bucket (fiveHour/sevenDay/scopedWeekly) — server.js\'s old row, moved with the loop in quota r2 (same reads)']],
+      // server.js left the table in batch 8 (B-a5c0): its only bucket reads — the
+      // calibration compare — moved into usage-estimator.js (sweepAnchorGroup); the
+      // auto-cli loop (src/server/auto-cli-loop.js since quota r2) reads its drift
+      // through usage-estimator.js's cliRefreshDrift, so it touches no raw bucket either.
     ]);
     console.log('  … readers found:', found.length);
     const unlisted = found.filter((f) => !TABLE.has(f));
@@ -763,42 +773,27 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
 // into a second green arm.
 console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped counting');
 {
-  const MUT = `vs-qmr3-mut-${process.pid}-`;
-  // Sweep any sibling left by a run that was SIGKILLed (a crashed suite must
-  // never be able to dirty the tree and block the release gate).
-  try {
-    for (const f of fs.readdirSync(path.join(ROOT, 'src'))) {
-      const m = /^vs-qmr3-mut-(\d+)-/.exec(f);
-      if (!m || Number(m[1]) === process.pid) continue;
-      try { process.kill(Number(m[1]), 0); continue; } catch { }   // still running: leave it
-      try { fs.unlinkSync(path.join(ROOT, 'src', f)); } catch { }
-    }
-  } catch { }
-  const mutants = [];
-  process.on('exit', () => { for (const f of mutants) { try { fs.unlinkSync(f); } catch { } } });
-
-  /** Write patched sibling copies of `names` (paths under src/) and return a
-   *  require()-able map. `patches` is {file: [[from, to], …]}; every entry must
-   *  hit exactly once. Cross-requires between the copies are re-pointed so the
-   *  mutant world is closed — a control that half-loads the real module is not
-   *  a control. */
+  /** Patched copies of `names` (paths under src/), written OUTSIDE the tree
+   *  (MUTC), each with its `require` re-bound to the real module's path so
+   *  every other relative require resolves as a sibling's. `patches` is
+   *  {file: [[from, to], …]}; every entry must hit exactly once. Cross-requires
+   *  between the copies are re-pointed at the other COPIES (absolute paths) so
+   *  the mutant world is closed — a control that half-loads the real module is
+   *  not a control. */
   const mutantWorld = (tag, names, patches) => {
     const out = {}, hits = [];
-    const nameOf = (n) => `${MUT}${tag}-${path.basename(n)}`;
+    const nameOf = (n) => `q16-${tag}-${path.basename(n, '.js')}`;
     for (const n of names) {
       let src = fs.readFileSync(path.join(ROOT, n), 'utf8');
       for (const other of names) {
         const rel = './' + path.basename(other);
-        if (src.includes(`require('${rel}')`)) src = src.split(`require('${rel}')`).join(`require('./${nameOf(other)}')`);
+        if (src.includes(`require('${rel}')`)) src = src.split(`require('${rel}')`).join(`require(${JSON.stringify(MUTC.pathFor(nameOf(other)))})`);
       }
       for (const [from, to] of (patches[n] || [])) {
         hits.push([n, src.split(from).length - 1]);
         src = src.split(from).join(to);
       }
-      const dst = path.join(ROOT, 'src', nameOf(n));
-      fs.writeFileSync(dst, src);
-      mutants.push(dst);
-      out[n] = dst;
+      out[n] = MUTC.write(n, src, null, { esm: false, name: nameOf(n) });
     }
     return { out, hits };
   };
@@ -1442,36 +1437,23 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
 // said nothing about either defect.
 console.log('\n⑰ per-limit provenance and the right to retire a limit');
 {
-  const MUT17 = `vs-qmr4-mut-${process.pid}-`;
-  // Same crashed-run sweep as ⑯: a SIGKILLed suite must never leave a sibling
-  // in src/ that dirties the tree and blocks the release gate.
-  try {
-    for (const f of fs.readdirSync(path.join(ROOT, 'src'))) {
-      const m = /^vs-qmr4-mut-(\d+)-/.exec(f);
-      if (!m || Number(m[1]) === process.pid) continue;
-      try { process.kill(Number(m[1]), 0); continue; } catch { }
-      try { fs.unlinkSync(path.join(ROOT, 'src', f)); } catch { }
-    }
-  } catch { }
-  const mutants17 = [];
-  process.on('exit', () => { for (const f of mutants17) { try { fs.unlinkSync(f); } catch { } } });
+  // Same outside-the-tree copies as ⑯ (MUTC); `pathOf17` is how one world's
+  // producer is re-pointed at ANOTHER world's patched write path.
+  const nameOf17 = (tag, n) => `q17-${tag}-${path.basename(n, '.js')}`;
+  const pathOf17 = (tag, n) => MUTC.pathFor(nameOf17(tag, n));
   const mutantWorld17 = (tag, names, patches) => {
     const out = {}, hits = [];
-    const nameOf = (n) => `${MUT17}${tag}-${path.basename(n)}`;
     for (const n of names) {
       let src = fs.readFileSync(path.join(ROOT, n), 'utf8');
       for (const other of names) {
         const rel = './' + path.basename(other);
-        if (src.includes(`require('${rel}')`)) src = src.split(`require('${rel}')`).join(`require('./${nameOf(other)}')`);
+        if (src.includes(`require('${rel}')`)) src = src.split(`require('${rel}')`).join(`require(${JSON.stringify(pathOf17(tag, other))})`);
       }
       for (const [from, to] of (patches[n] || [])) {
         hits.push([n, src.split(from).length - 1]);
         src = src.split(from).join(to);
       }
-      const dst = path.join(ROOT, 'src', nameOf(n));
-      fs.writeFileSync(dst, src);
-      mutants17.push(dst);
-      out[n] = dst;
+      out[n] = MUTC.write(n, src, null, { esm: false, name: nameOf17(tag, n) });
     }
     return { out, hits };
   };
@@ -1556,7 +1538,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
       [WF]: [['    next = carryUnmeasuredLimits(prevSet, next);\n', '']],
     });
     hit17(wA, '⑰a removes the carried-forward rule');
-    const CAPa = mutantWorld17('ac', [CF], { [CF]: [["require('./usage-cache-write.js')", `require('./${MUT17}a-usage-cache-write.js')`]] });
+    const CAPa = mutantWorld17('ac', [CF], { [CF]: [["require('./usage-cache-write.js')", `require(${JSON.stringify(pathOf17('a', WF))})`]] });
     hit17(CAPa, '⑰a re-points the real producer at the patched write path');
     const pre = runEvent(load17(wA, WF), load17(CAPa, CF));
     const pf = limOf(pre.after, 'model:fable'), po = limOf(pre.after, 'overage');
@@ -1578,7 +1560,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
       [WF]: [['    for (const w of quotaModel.windowsOf(prev)) if (w) prevByKind.set(w.kind, w);\n', '']],
     });
     hit17(wW, '⑰a resolves the rule per LIMIT instead of per WINDOW');
-    const CAPw = mutantWorld17('wc', [CF], { [CF]: [["require('./usage-cache-write.js')", `require('./${MUT17}w-usage-cache-write.js')`]] });
+    const CAPw = mutantWorld17('wc', [CF], { [CF]: [["require('./usage-cache-write.js')", `require(${JSON.stringify(pathOf17('w', WF))})`]] });
     hit17(CAPw, '⑰a re-points the real producer at the per-limit copy');
     const preW = runEvent(load17(wW, WF), load17(CAPw, CF));
     const pwPlan = limOf(preW.after, 'plan'), pwFable = limOf(preW.after, 'model:fable');
@@ -1715,67 +1697,25 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
 // by the mechanism built to end its mirror image.
 console.log('\n⑱ only a parse that ENUMERATED may retire a limit (r6)');
 {
-  const MUT18 = `vs-qmr6-mut-${process.pid}-`;
-  const MUT_DIRS = ['src', 'src/harnesses', 'src/adapters'];
-  // Same crashed-run sweep as ⑯/⑰ — a SIGKILLed suite must never leave a
-  // sibling in the tree, because a dirty tree is what the release gate REFUSES
-  // on. (r5's own prefix was never added to .gitignore; ⑱-0 below is why that
-  // cannot happen again silently.)
-  for (const d of MUT_DIRS) {
-    try {
-      for (const f of fs.readdirSync(path.join(ROOT, d))) {
-        const m = /^vs-qmr6-mut-(\d+)-/.exec(f);
-        if (!m || Number(m[1]) === process.pid) continue;
-        try { process.kill(Number(m[1]), 0); continue; } catch { }
-        try { fs.unlinkSync(path.join(ROOT, d, f)); } catch { }
-      }
-    } catch { }
-  }
-  const mutants18 = [];
-  process.on('exit', () => { for (const f of mutants18) { try { fs.unlinkSync(f); } catch { } } });
-  /** A patched copy BESIDE the original (same directory, or its `../` requires
-   *  do not resolve). Returns {path, hits} so the patch can be asserted to hit. */
-  // Every mutant gets its OWN file name: `require` caches by path, so two
-  // mutants of the same source written to one name would make the second
-  // `require` return the FIRST mutant — a negative control silently driving
-  // the wrong code (⑱g's pre-fix control read ⑱f's mutant that way).
-  let mutSeq = 0;
+  /** A patched copy, written OUTSIDE the tree (MUTC) with its `require`
+   *  re-bound to the real module's path — its `../` requires resolve exactly as
+   *  a sibling's did. Returns {path, hits} so the patch can be asserted to hit.
+   *  Every copy gets its OWN file name: `require` caches by path, so two
+   *  mutants of the same source under one name would make the second `require`
+   *  return the FIRST mutant (⑱g's pre-fix control once read ⑱f's that way). */
   const mutantBeside = (rel, patches) => {
     let src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
     const hits = [];
     for (const [from, to] of patches) { hits.push(src.split(from).length - 1); src = src.split(from).join(to); }
-    const dst = path.join(ROOT, path.dirname(rel), `${MUT18}${++mutSeq}-${path.basename(rel)}`);
-    fs.writeFileSync(dst, src);
-    mutants18.push(dst);
-    return { path: dst, hits };
+    return { path: MUTC.write(rel, src, 'q18', { esm: false }), hits };
   };
   const hit18 = (m, label) => ok(m.hits.length > 0 && m.hits.every((c) => c === 1),
     `⑱ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(m.hits)})`);
 
-  // ── ⑱0 the copies this leg writes can never become tree state ─────────────
-  // r5 introduced `vs-qmr4-mut-*` and never added it to .gitignore, so a
-  // SIGKILL between its two writes would have left a file in src/ that dirties
-  // the tree, blocks every push, AND is walked by the architecture suite as
-  // source. The rule is only real if the suite asks git itself.
-  {
-    const { execFileSync } = await import('node:child_process');
-    const { gitEnvFrom } = await import('./git-env.mjs');
-    const env = gitEnvFrom(process.env); // this suite runs inside `npm run ci` and inside the pre-push hook
-    const ask = (p) => {
-      try { execFileSync('git', ['-C', ROOT, 'check-ignore', '-q', p], { env, stdio: 'ignore' }); return true; }
-      catch (e) { if (e && e.status === 1) return false; throw e; }
-    };
-    try {
-      const probes = [...MUT_DIRS.map((d) => `${d}/${MUT18}x.js`), `src/vs-qmr3-mut-${process.pid}-x.js`, `src/vs-qmr4-mut-${process.pid}-x.js`];
-      const bad = probes.filter((p) => !ask(p));
-      ok(bad.length === 0, `⑱0 every mutant-copy path this file can write is git-ignored (${bad.length ? 'NOT IGNORED: ' + bad.join(', ') : probes.length + ' checked'})`);
-      ok(ask('src/quota-model.js') === false, '⑱0 …and the probe is not answering "ignored" to everything (a real source file is not)');
-    } catch (e) {
-      // No git / no repo (a tarball or `git archive` export): SKIP LOUDLY with
-      // the failure, never a green line that invented its own reason.
-      ok(true, `⑱0 SKIPPED — cannot ask git whether the mutant paths are ignored: ${String(e && e.message || e).split('\n')[0]}`);
-    }
-  }
+  // ⑱0 (r6) used to ask git whether every in-tree mutant path was IGNORED. A
+  // gitignored copy is still a file in src/ that a scanning suite reads as
+  // source, so the copies moved out of the tree instead (batch r1); ⑲' at the
+  // end of the suite measures that while they exist.
 
   const CQ = require(path.join(ROOT, 'src/harnesses/claude-quota.js'));
   const { ClaudeCodeAdapter: ADP } = require(path.join(ROOT, 'src/adapters/claude-code.js'));
@@ -2256,6 +2196,16 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
     ok((after3.scopedWeekly || []).find((s) => s.name === 'Opus')?.utilization === 0.33 && (after3.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86, '⑲ TOOL: a top-level seven_day_opus field names its lane the same way (Opus 33, Fable untouched)');
   }
 }
+
+// ── ⑲' THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ─────────────
+// Measured HERE, while every patched copy ⑯–⑱ made still exists (the exit
+// handlers remove them — a census after exit passes on the pre-fix placement
+// too). The copies used to be SIBLINGS in src/, src/harnesses/, src/adapters/
+// (vs-qmr{3,4,6}-mut-*, gitignored — so git never saw them, and ⑱0 only asked
+// whether they WERE ignored); any suite scanning src/ beside this one counted
+// them as product code.
+console.log("\n⑲' the patched copies never touch the tree");
+for (const r of copiesCensus(MUTC.files, MUTC.dir, ROOT, { minCopies: 20 })) ok(r.pass, "⑲' " + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 // ── ⑳ B-9f4b: THE r6 VERIFIER'S TWO INFO FINDINGS, ON ITS OWN FIXTURES ──────
 //

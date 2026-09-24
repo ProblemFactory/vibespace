@@ -10,12 +10,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// Patched copies of the bridge (negative controls) are written OUTSIDE the tree
+// (scripts/mutant-copy.mjs, `require` re-bound to the real module's path); §11
+// measures that while they exist. They used to be src/server/vs-dak-mut-*.
+const MUTD = mutantCopies('dapps', repo);
+sweepLegacy(repo, ['src/server'], /^vs-dak-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
+
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const M = require('../src/desktop-apps.js');
@@ -346,29 +353,25 @@ console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED fro
     const srcS = read('src/server/desktop-stream.js');
     const from = "if ((input || type === 251) && !allowInput) dropped++;";
     ok(srcS.split(from).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
-    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-rfbsize.js`);
-    fs.writeFileSync(file, srcS.replace(from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;"));
+    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, "if (input && !allowInput) /* pre-fix (x4) */ dropped++;"), 'rfbsize');
     try {
       const rc = require(file).rfbInputSieve().strip(Buffer.concat([...hs, sd, key]), false);
       ok(rc.relay && rc.relay.equals(Buffer.concat([...hs, sd])) && rc.dropped === 1, 'CONTROL: the x4 strip relays a refused viewer\'s SetDesktopSize (Xvnc would resize the holder\'s display)');
-    } finally { try { fs.unlinkSync(file); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // NEGATIVE CONTROL: a patched copy of the real bridge with the round-2 table — same sequence, KeyEvents lost, sieve still 'followable'
   {
     const srcS = read('src/server/desktop-stream.js');
     const from = 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 150: 10, 250: 4 });';
     ok(srcS.split(from).length === 2, 'the fixed table is spelled once in the bridge (the control patches exactly it)');
-    const dir = path.join(repo, 'src/server');
-    for (const f of fs.readdirSync(dir)) { const mm = /^vs-dak-mut-(\d+)-/.exec(f); if (mm) { try { process.kill(Number(mm[1]), 0); } catch { try { fs.unlinkSync(path.join(dir, f)); } catch {} } } }
-    const file = path.join(dir, `vs-dak-mut-${process.pid}-stream.js`);
-    fs.writeFileSync(file, srcS.replace(from, 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 5: 6, 150: 4 }); // pre-fix'));
+    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, 'const RFB_FIXED_LEN = Object.freeze({ 0: 20, 3: 10, 4: 8, 5: 6, 150: 4 }); // pre-fix'), 'stream');
     try {
       const P = require(file);
       const spf = Buffer.alloc(20); const se = Buffer.from([2, 0, 0, 1, 0, 0, 0, 0]);
       const ecu = Buffer.from([150, 1, 0, 0, 0, 0, 0x05, 0x00, 0x03, 0x20]); const fbur = Buffer.from([3, 1, 0, 0, 0, 0, 0x04, 0x00, 0x03, 0x00]);
       const s = P.rfbInputSieve(); let n = 0; for (const b of [...hs, spf, se, ecu, fbur, key]) n += s.feed(b);
       ok(n === 0 && s.state().opaque === false && s.state().pending === 4, `CONTROL: the round-2 table on the same bytes counts 0 inputs, is NOT opaque and leaves 4 bytes pending (misaligned, not refused)`, s.state());
-    } finally { try { fs.unlinkSync(file); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
   }
 }
 
@@ -461,15 +464,13 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/desktop-stream.js');
     const from = "      if (life || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);";
     ok(srcS.split(from).length === 2, 'the allowlist decision is spelled once in the bridge (the control patches exactly it)');
-    const dir = path.join(repo, 'src/server');
-    const file = path.join(dir, `vs-dak-mut-${process.pid}-xstream.js`);
-    fs.writeFileSync(file, srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'));
+    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, '      if (input && !allowInput) dropped++; else keep.push(u); // pre-fix (r5): a denylist of input'), 'xstream');
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(refusedBytes, false);
       const types = []; for (let b = r.relay || Buffer.alloc(0); b.length >= 8;) { const n = b.readUInt32BE(4); types.push(S.xpraPacketType(b.subarray(8, 8 + n))); b = b.subarray(8 + n); }
       ok(types.includes('shutdown-server') && types.includes('exit-server') && r.dropped === 0, `CONTROL: the r5 strip relays a refused viewer's ${types.length} packets incl. shutdown-server + exit-server (the reproduced session kill)`, types);
-    } finally { try { fs.unlinkSync(file); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // THE KEYMAP FENCE (hole B the r6 verify left open, 2026-09-22 — measured on the real rung: a Watch viewer's
   // keyboard-config reprogrammed the display's X keymap, which the holder / an agent's xdotool types through). A refused
@@ -504,13 +505,12 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/desktop-stream.js');
     const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
     ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the control patches exactly it)');
-    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xkeymap.js`);
-    fs.writeFileSync(file, srcS.replace(from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "));
+    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', 'keyboard-config', 'keymap-changed', "), 'xkeymap');
     try {
       const Pm = require(file);
       const r = Pm.xpraInputSieve().strip(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')]), false);
       ok(r.relay && r.relay.equals(Buffer.concat([rpkt('keyboard-config'), rpkt('keymap-changed')])) && r.dropped === 0, 'CONTROL: the r6 allowlist relays a refused viewer\'s keyboard-config + keymap-changed (the reproduced keymap change)');
-    } finally { try { fs.unlinkSync(file); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // THE DISPLAY-SIZE FENCE (round 3 of the P8-2 verify, 2026-09-22 — reproduced on the real rung: a Watch viewer's
   // display-configure 1x1 shrank the holder's 900x600 shared display to 1x1, and it stayed after the watcher left). The
@@ -540,25 +540,23 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/desktop-stream.js');
     const from = "const XPRA_WATCH_TYPES = Object.freeze(new Set(['hello', 'ping', 'ping_echo', 'damage-sequence', 'map-window', 'buffer-refresh', ";
     ok(srcS.split(from).length === 2, 'the watch allowlist is spelled once in the bridge (the display control patches exactly it)');
-    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xdisplay.js`);
-    fs.writeFileSync(file, srcS.replace(from, from + "'display-configure', 'configure-display', 'desktop_size', "));
+    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from, from + "'display-configure', 'configure-display', 'desktop_size', "), 'xdisplay');
     try {
       const Pm = require(file);
       const bytes = Buffer.concat([rpkt('display-configure'), rpkt('configure-display'), rpkt('desktop_size')]);
       const r = Pm.xpraInputSieve().strip(bytes, false);
       ok(r.relay && r.relay.equals(bytes) && r.dropped === 0, 'CONTROL: the r7 allowlist relays a refused viewer\'s display-configure + configure-display + desktop_size (the reproduced 900x600 ⇒ 1x1)');
-    } finally { try { fs.unlinkSync(file); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
     // CONTROL: the fence without the replay — a takeover carries nothing it held
     const fromN = '    if (allowInput && !st.oversize) {';
     ok(srcS.split(fromN).length === 2, 'the replay is spelled once in the bridge (the no-replay control patches exactly it)');
-    const nfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xnoreplay.js`);
-    fs.writeFileSync(nfile, srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'));
+    const nfile = MUTD.write('src/server/desktop-stream.js', srcS.replace(fromN, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xnoreplay');
     try {
       const sn = require(nfile).xpraInputSieve();
       sn.strip(rpkt('display-configure'), false);
       const c = sn.strip(rpkt('ping_echo'), true);
       ok(c.replayed === 0 && c.relay.equals(rpkt('ping_echo')), 'CONTROL: fenced without the replay, the takeover carries no held display size (the pane that took over keeps the old holder\'s)');
-    } finally { try { fs.unlinkSync(nfile); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   // THE HELD-BYTES CAP (hole A the r6 verify left open, 2026-09-22 — reproduced: a viewer DECLARING a 2 GiB packet and
   // streaming it grew the server by ~1 GB). A header declaring more than XPRA_MAX_PACKET_BYTES is judged in the chunk that
@@ -613,8 +611,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
     const srcS = read('src/server/desktop-stream.js');
     const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;';
     ok(srcS.split(from1).length === 2 && srcS.split(from2).length === 2, 'each cap is spelled once in the bridge (the control patches exactly them)');
-    const file = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-xcap.js`);
-    fs.writeFileSync(file, srcS.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'));
+    const file = MUTD.write('src/server/desktop-stream.js', srcS.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'xcap');
     try {
       const Pm = require(file);
       const h = Buffer.alloc(8); h[0] = 0x50; h[1] = 0x10; h.writeUInt32BE(2 ** 31, 4);
@@ -625,7 +622,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
       const c = Buffer.alloc(8); c[0] = 6; c.writeInt32BE(2 ** 31 - 1, 4); rs2.feed(c);
       for (let i = 0; i < 4; i++) rs2.feed(Buffer.alloc(1024 * 1024));
       ok(!rs2.state().oversize && rs2.state().pending === 8 + 4 * 1024 * 1024, `CONTROL: without the cap the rfb sieve HOLDS ${rs2.state().pending} B of a 2 GiB cut text`);
-    } finally { try { fs.unlinkSync(file); } catch {} }
+    } finally { /* MUTD's scratch dir is removed at exit */ }
   }
   const b = S.xpraInputSieve();
   ok(b.feed(bpkt('key-action')) === 1 && b.feed(bpkt('ping')) === 0 && b.feed(bpkt('clipboard-contents')) === 1, 'a bencode client (flags 0) is read the same way');
@@ -777,6 +774,17 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   const schema = read('src/lib/settings-schema.js');
   ok(/'desktop\.appScale': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: '1', [^\]]*\{ value: '1\.5', [^\]]*\{ value: '2', /.test(schema), 'the setting `desktop.appScale` (auto | 1 | 1.5 | 2, default auto) exists in the schema — only for working code');
 }
+
+
+// ── §11 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\n§11 the patched copies never touch the tree');
+for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 7 })) ok(r.pass, '§11 ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

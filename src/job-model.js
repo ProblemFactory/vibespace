@@ -410,10 +410,13 @@ function lastLineOf(text, max = 200) {
 }
 // ── HELD NOTIFICATIONS ARE TYPED (2026-09-15, owner: the spend cap stashed
 //    every notification and the product read as a broken notifier) ──────────
-const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'off'];
+// 'wrapper-no-steer' (B-d963): the session's running wrapper predates the
+// notification steer, so the ladder held it rather than queue a billed turn.
+const HELD_KINDS = ['spend-cap', 'rate-floor', 'not-reachable', 'off', 'wrapper-no-steer'];
 /** PURE. Type a stash reason from the ladder's own answer + the engine's text. */
 function heldKind(r, reason) {
   if (r && r.refused === 'spend') return 'spend-cap';
+  if (r && r.refused === 'wrapper-no-steer') return 'wrapper-no-steer';
   const s = String((r && r.reason) || reason || '');
   if (/^rate floor/.test(s)) return 'rate-floor';
   if (/auto-notify off/.test(s)) return 'off';

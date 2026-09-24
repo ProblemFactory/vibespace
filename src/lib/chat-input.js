@@ -2,6 +2,7 @@ import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMen
 import { UI_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
+import { isNotificationQueueItem } from '../notification-senders.js';
 
 /**
  * ChatInput — input area for chat mode sessions.
@@ -1329,7 +1330,7 @@ export class ChatInput {
    *  `queueVerbs` is the table, `steer`/`queueOps` its derived view. */
   setQueue(items, caps) {
     this._queue = Array.isArray(items) ? items : [];
-    if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [] };
+    if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [], notifSteerMissing: !!caps.notifSteerMissing };
     // A row that left the queue cannot still be pending/refused/edited — the
     // republish IS the outcome (a spinner outliving its row is a lie).
     const live = new Set(this._queue.map((it) => String(it.id || '')));
@@ -1798,9 +1799,20 @@ export class ChatInput {
         ? `<button type="button" class="chat-queue-all" data-queue-op="steer-all" title="${escHtml(t('Inject every queued message into the running turn, in order'))}">${UI_ICONS.bolt}<span>${escHtml(t('Steer all'))}</span></button>`
         : ''
     }</div>`;
+    // THE OLD-WRAPPER SKEW (B-d963): this session's wrapper predates the
+    // notification steer (`notifSteerMissing`, derived in chat-view from the
+    // process's own advert), so every queued NOTIFICATION here is a billed
+    // turn waiting to run. Say what fixes it, and mark those rows' ✕ as the
+    // suggested action: the wrapper hands a removed peer item back to the
+    // delivery ladder, which stashes it for the next prompt (no turn).
+    const notifMarked = (it) => !!caps.notifSteerMissing && isNotificationQueueItem(it);
+    const skew = items.some(notifMarked)
+      ? `<div class="chat-queue-skew">${UI_ICONS.info}<span>${escHtml(t('Restart this session to receive notifications without a billed turn'))}</span></div>`
+      : '';
     const rows = items.map((it) => {
       const id = escHtml(String(it.id || ''));
       const st = stateOf(it.id);
+      const notif = notifMarked(it);
       const from = it.kind === 'peer' && it.from ? `<span class="chat-queue-from">${escHtml(String(it.from))}</span>` : '';
       // The drag handle is chrome for a pointer; Alt+Up/Down on the focused
       // row is the keyboard path, and the title says so.
@@ -1815,14 +1827,19 @@ export class ChatInput {
         : '';
       const runNow = has('run-now') ? btn('run-now', it.id, UI_ICONS.play, t('Run this one now')) : '';
       const steer = has('steer') ? btn('steer', it.id, UI_ICONS.bolt, t('Steer now — the agent sees it at its next reply')) : '';
-      const remove = has('remove') ? btn('remove', it.id, UI_ICONS.close, t('Remove'), 'chat-queue-btn-remove') : '';
+      const remove = has('remove')
+        ? (notif
+          ? btn('remove', it.id, UI_ICONS.close, t('Remove — it is delivered with the next prompt instead, without a billed turn'), 'chat-queue-btn-remove chat-queue-btn-suggest')
+          : btn('remove', it.id, UI_ICONS.close, t('Remove'), 'chat-queue-btn-remove'))
+        : '';
       const stateAttr = st?.state ? ` data-queue-state="${escHtml(st.state)}"` : '';
       // Its own attribute, never a value of `data-queue-state`: an op in
       // flight on the row being edited (a batch verb marks every row) must
       // not repaint the row as "not being edited".
       const editAttr = isEditing ? ' data-queue-editing="1"' : '';
       const stateTitle = st?.title ? ` title="${escHtml(String(st.title))}"` : '';
-      return `<div class="chat-queue-item" tabindex="0" data-queue-id="${id}"${stateAttr}${editAttr}${stateTitle}>${grip}${from}<span class="chat-queue-preview">${escHtml(String(it.preview || ''))}</span>${edit}${runNow}${steer}${remove}</div>`;
+      const notifAttr = notif ? ' data-queue-notif="1"' : '';
+      return `<div class="chat-queue-item" tabindex="0" data-queue-id="${id}"${stateAttr}${editAttr}${notifAttr}${stateTitle}>${grip}${from}<span class="chat-queue-preview">${escHtml(String(it.preview || ''))}</span>${edit}${runNow}${steer}${remove}</div>`;
     }).join('');
     // THE EDIT'S ✕ LIVES ON THE ROW, and a COLLAPSED strip has no rows — so
     // the hint line (which is outside the body and therefore always drawn)
@@ -1837,7 +1854,9 @@ export class ChatInput {
       }</div>`
       : '';
     // The body is the ONLY thing that scrolls; a collapsed strip omits it.
-    return head + (collapsed ? '' : `<div class="chat-queue-body">${rows}</div>`) + editing;
+    // The skew hint sits OUTSIDE the body like the edit hint: a collapsed
+    // strip (25 queued notifications collapse it) must still say it.
+    return head + skew + (collapsed ? '' : `<div class="chat-queue-body">${rows}</div>`) + editing;
   }
 
   _updateTodoDisplay() {

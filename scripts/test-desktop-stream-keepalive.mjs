@@ -15,8 +15,15 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The no-cap control's patched bridge is written OUTSIDE the tree
+// (scripts/mutant-copy.mjs, `require` re-bound to the real path); the tree
+// census at the end measures that while it exists (it used to be
+// src/server/vs-dak-mut-<pid>-kacap.js).
+const MUTK = mutantCopies('dka', repo);
+
 const WebSocket = require(path.join(repo, 'node_modules/ws'));
 const DS = require(path.join(repo, 'src/server/desktop-stream.js'));
 let pass = 0, fail = 0;
@@ -173,9 +180,7 @@ console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a vie
   const src = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
   const from1 = 'const XPRA_MAX_PACKET_BYTES = 16 * 1024 * 1024;', from2 = 'const RFB_MAX_MESSAGE_BYTES = 16 * 1024 * 1024;';
   ok('each cap is spelled once (the control patches exactly them)', src.split(from1).length === 2 && src.split(from2).length === 2);
-  const mfile = path.join(repo, 'src/server', `vs-dak-mut-${process.pid}-kacap.js`);
-  fs.writeFileSync(mfile, src.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'));
-  process.on('exit', () => { try { fs.unlinkSync(mfile); } catch {} });
+  const mfile = MUTK.write('src/server/desktop-stream.js', src.replace(from1, 'const XPRA_MAX_PACKET_BYTES = Infinity; // pre-fix').replace(from2, 'const RFB_MAX_MESSAGE_BYTES = Infinity; // pre-fix'), 'kacap');
   try {
     const Rc = await rig(require(mfile));
     const Ac = await viewer(Rc.port, '/api/desktop/xp/stream', 'v-a');
@@ -187,12 +192,23 @@ console.log('§5 the HELD-BYTES CAP (2026-09-22, hole A of the r6 verify): a vie
     const cAb = (c1.ab - c0.ab) / MiB;
     ok(`CONTROL: without the cap the same viewer streams all ${sentC} chunks, stays OPEN and the bridge holds +${cAb.toFixed(1)} MiB (arrayBuffers) — the reproduced growth`, sentC === 97 && Ac.ws.readyState === 1 && cAb > 80 && Rc.br.stats().oversize === 0, { sentC, cAb, state: Ac.ws.readyState });
     Ac.ws.close(); await sleep(100); await Rc.close();
-  } finally { try { fs.unlinkSync(mfile); } catch {} }
+  } finally { /* MUTK's scratch dir is removed at exit */ }
   for (const s of tcpHeld) s.destroy();
   rfbSrv.close(); up.close();
 }
 
 for (const s of held) s.destroy();
 vnc.close(); srv.close();
+
+// ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+// Measured HERE, while every patched copy this run made still exists (the exit
+// handlers remove them — a census taken after exit passes on the pre-fix
+// placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
+// a plain `git status` never saw them) and any suite scanning src/ beside this
+// one counted them as product code; they are written to this process's scratch
+// dir now (scripts/mutant-copy.mjs).
+console.log('\ntree: the patched copies never touch the tree');
+for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok('tree: ' + r.name, r.pass, r.detail);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

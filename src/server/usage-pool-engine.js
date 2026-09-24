@@ -184,7 +184,7 @@ function quotaBackendFor(key, session) {
 }
 const { quotaVerdict, THRESH: VERDICT_THRESH } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
-const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // READ-ONLY view of the transition ledger. The single WRITER is accounts.js
 // (every re-point goes through ensureSessionPoolLink / setPoolTarget — spawn,
@@ -382,42 +382,17 @@ function sweepUsageAnchors() {
   // file, each record's costSince missing the sibling account's spend — real
   // data bug caught in the Member Q analysis). One identity = one
   // anchor stream; cost sums across ALL its account ids.
+  // ONE STEP PER GROUP = usage-estimator's `sweepAnchorGroup` (B-a5c0): no new
+  // reading ⇒ no ledger walk, no calibration, no metric; a new anchor ⇒ the
+  // calib metric once per moved bucket, attributed {account, bucket}.
   for (const [identityKey, g] of usageIdentityGroups()) {
     try {
-      const prev = usageAnchors.lastAnchor(identityKey);
-      const allIds = usageEstimator.accountIdsFor(identityKey, g.accountIds);
-      const costSince = prev ? costBetweenMulti(usageHistory, allIds, prev.fetchedAt, g.cache.fetchedAt) : null;
-      // calibration: what the CURRENT rates would have predicted for this new
-      // reading — recorded into the anchor for offline analysis + Diagnostics
-      let calib = null;
-      // Same-source only (B-b3cd metric hygiene): a cross-source pair carries
-      // the unknown inter-source offset, not prediction error — the exact rule
-      // extractPairs already enforces for LEARNING (2.340.0); without it here
-      // the calib stream's worst rows were all source flips, drowning the real
-      // error signal (48↔95 "errors" that were attribution, not estimation).
-      if (prev && costSince && (prev.source || 'unknown') === (g.cache.source || 'unknown')) {
-        try {
-          const newBuckets = {
-            fiveHour: g.cache.fiveHour ? { u: g.cache.fiveHour.utilization, resetsAt: g.cache.fiveHour.resetsAt } : null,
-            sevenDay: g.cache.sevenDay ? { u: g.cache.sevenDay.utilization, resetsAt: g.cache.sevenDay.resetsAt } : null,
-            scopedWeekly: (g.cache.scopedWeekly || []).map((s) => ({ name: s.name, u: s.utilization, resetsAt: s.resetsAt })),
-          };
-          calib = predictCalib(prev, newBuckets, usageEstimator.ratesFor(identityKey), costSince, (g.cache.fetchedAt - prev.fetchedAt) / 1000);
-          // Metric is DELTA-RELATIVE (owner-corrected, 2.368.13): absolute
-          // error rewards refresh cadence, not model quality — emit only for
-          // windows that actually moved, as |predΔ−actΔ|/|actΔ|.
-          if (calib) for (const c of Object.values(calib)) {
-            if (c.rel != null) global.__vsMetric?.('usage-est-rel-err-pct', Math.abs(c.predDu - c.actDu) / Math.abs(c.actDu) * 100);
-          }
-        } catch { }
-      }
-      // pairs recorded while ANY tainted source was dark must not teach rates
-      // (Δu real, cost missing ⇒ a falsely HOT rate) — mark the record so
-      // extractPairs voids pairs touching it (both sides of the gap).
-      const darkHosts = (() => { try { const t = darkTaintedAccounts(); return allIds.some((a) => t[a]) ? darkSources().map((d) => d.host) : []; } catch { return []; } })();
-      if (usageAnchors.maybeRecord({ identityKey, accountId: g.accountId, cache: g.cache, costSince, calib, accountIds: allIds, dark: darkHosts })) {
-        usageEstimator.invalidate(identityKey); // rates re-derive from the grown pair set
-      }
+      sweepAnchorGroup({
+        identityKey, group: g, anchors: usageAnchors, estimator: usageEstimator,
+        costBetween: (ids, from, to) => costBetweenMulti(usageHistory, ids, from, to),
+        darkHosts: (allIds) => { const t = darkTaintedAccounts(); return allIds.some((a) => t[a]) ? darkSources().map((d) => d.host) : []; },
+        metric: (name, value, detail) => global.__vsMetric?.(name, value, detail),
+      });
     } catch { }
   }
 }

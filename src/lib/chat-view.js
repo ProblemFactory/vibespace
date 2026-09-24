@@ -11,7 +11,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
-import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf } from './agent-meta.js';
+import { isAgentMemoryPath, effortDisplay, getBackendMeta, backendFeatureCaps, noteMemoryPaths, initHealthIssues, initFrameOf, notificationDeliveryFor } from './agent-meta.js';
 import { registerCommand, registerKeybinding, runCommand, hasCommand } from './contributions.js';
 // The verb list a wrapper that publishes a queue WITHOUT naming verbs serves —
 // the SAME array the server maps a verb-less sidecar onto (src/server/
@@ -128,7 +128,7 @@ const POINTER_DRAG_PX = 2;
 // "This session has no queue surface" — one frozen object, so every caller of
 // _queueCaps() gets the SAME shape (a missing queueVerbs key would render a
 // strip with no controls instead of no strip).
-const NO_QUEUE_CAPS = Object.freeze({ queue: false, steer: false, queueOps: false, queueVerbs: Object.freeze([]) });
+const NO_QUEUE_CAPS = Object.freeze({ queue: false, steer: false, queueOps: false, queueVerbs: Object.freeze([]), notifSteerMissing: false });
 const SCOPED_REFUSAL_CODES = new Set([
   'input-rejected',        // chat-input refused (size / frame-file capability)
   'not-codex-chat',        // a codex-only action on a non-codex or dead-chat session
@@ -166,6 +166,13 @@ const FOLD_GROW_PASSES = 8;
 // loop just made (the loop's target is one viewport in the paging direction; the
 // zone keeps one).
 const TRIM_KEEP_VIEWPORTS = 1;
+// The fresh-height reservation's hold (see _reserveFreshHeights / _cvHoldIO): a
+// LIVE card keeps its override until it is 600 px off screen (inc-mudv05ja-n5rv);
+// a paging SLAB holds only its cards within half a viewport at release time,
+// until they leave that band (B-1192 — the rest release on the old schedule).
+const CV_HOLD_LIVE_MARGIN = '600px 0px';
+const CV_HOLD_SLAB_NEAR = 0.5;   // viewports: a slab card this close to the viewport at release time is held
+const CV_HOLD_SLAB_MARGIN = `${CV_HOLD_SLAB_NEAR * 100}% 0px`;
 // The card count a trim aims for; a zone that holds more keeps them (folded members
 // are display:none and cost nothing). FOLD_DOM_CEILING is the one hard bound.
 const TRIM_SOFT_CARDS = 150;
@@ -260,6 +267,10 @@ class ChatView {
     // WHICH verbs the running wrapper serves (null = nothing has said yet —
     // the harness row alone then decides, exactly as before the verb table).
     this._queueVerbsServed = null;
+    // Does the RUNNING wrapper steer a notification into a running turn
+    // (B-d963)? true / false / null = nothing has said. Written only by
+    // _setQueueSupported, from the same two statements as the verb list.
+    this._queueNotifSteer = null;
     this._queueChipRaf = 0;   // pending re-application of the chips (see _setQueueSupported)
 
     // Build DOM
@@ -1443,7 +1454,12 @@ class ChatView {
     // harness row, or a control could survive its own gate.
     const served = this._queueVerbsServed;
     const verbs = (row.queueVerbs || []).filter((v) => !served || served.includes(v));
-    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs };
+    // ④ THE OLD-WRAPPER SKEW (B-d963): the harness steers notifications (its
+    // caps row's DERIVED lane — never a backend id) but THIS process said it
+    // cannot, so a queued notification is a billed turn waiting to happen and
+    // the strip says so. Unknown (null) is never a hint.
+    const notifSteerMissing = this._queueNotifSteer === false && notificationDeliveryFor(backend) === 'steer';
+    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, notifSteerMissing };
   }
 
   /** This view's harness id — the ONE resolution order (live session record,
@@ -1651,19 +1667,23 @@ class ChatView {
    *  `supported:true` with the same verbs), so a guard below that return would
    *  never record the answer's instant and the stale payload would still win.
    *  Measured, both ways. */
-  _setQueueSupported(next, verbs, { at = performance.now() } = {}) {
+  _setQueueSupported(next, verbs, { at = performance.now(), notifSteer } = {}) {
     // Monotonic (performance.now), like the rows' stamp: the only question
     // ever asked of these two numbers is which of the two frames arrived first.
     if ((this._queueAdvertStatedAt || 0) > at) return;
     this._queueAdvertStatedAt = at;
     const val = !!next;
     const list = Array.isArray(verbs) ? verbs.map((v) => String(v)) : this._queueVerbsServed;
+    // `notifSteer` (B-d963) rides the same statement: undefined = this frame
+    // says nothing about it (an older server's payload), so the last word stays.
+    const steerNotif = notifSteer === undefined ? this._queueNotifSteer : (notifSteer === null ? null : !!notifSteer);
     // The VERB LIST is part of this flag, not a second one: a wrapper can
     // advertise more verbs without `supported` changing (an attach after a
     // Terminate+Resume), and that flip must re-apply the chips too.
-    if (val === this._queueSupported && JSON.stringify(list) === JSON.stringify(this._queueVerbsServed)) return;
+    if (val === this._queueSupported && JSON.stringify(list) === JSON.stringify(this._queueVerbsServed) && steerNotif === this._queueNotifSteer) return;
     this._queueSupported = val;
     this._queueVerbsServed = list;
+    this._queueNotifSteer = steerNotif;
     this._refreshQueueChips();
     // both faces of the flag are owned by its ONE writer (round-3 verifier): the
     // strip used to stay correct only by caller ordering
@@ -1777,7 +1797,7 @@ class ChatView {
     // case is a behaviour and behaviours get written down.
     const rxTick = ('__rxTick' in meta) ? Number(meta.__rxTick) : NaN;
     const rxAt = Number.isFinite(rxTick) ? rxTick : performance.now();
-    if ('queueSupported' in meta) this._setQueueSupported(meta.queueSupported, ('queueVerbs' in meta) ? meta.queueVerbs : undefined, { at: rxAt });
+    if ('queueSupported' in meta) this._setQueueSupported(meta.queueSupported, ('queueVerbs' in meta) ? meta.queueVerbs : undefined, { at: rxAt, notifSteer: ('queueNotifSteer' in meta) ? meta.queueNotifSteer : undefined });
     // `queueKnown:false` = the server's list is a GUESS (see _setQueue). It is
     // a MODIFIER of `queue`, so it is read inside that key's guard — but it
     // carries its own `in meta` test all the same, because the fact it states
@@ -3208,10 +3228,13 @@ class ChatView {
    *  estimates that changed after the paint (the owner's compact rows resolved
    *  to 14–20 px: `sh2 972 → sh 677`). Render the slab's cards once, right now
    *  (`contentVisibility: visible`), so the anchor restore and the zone see
-   *  real geometry; two frames later the inline override comes off and
-   *  `contain-intrinsic-size: auto` keeps the LAST REMEMBERED size (recorded at
-   *  the ResizeObserver step of the frame they rendered in) — a LIVE card
-   *  (inc-mudv05ja-n5rv) is held until it has left the screen instead. A MITIGATION,
+   *  real geometry; the inline override comes off only once the card has LEFT
+   *  the screen, its placeholder pinned to the height it had there — a live
+   *  card since inc-mudv05ja-n5rv, a paging slab since B-1192 (a card whose
+   *  override came off two frames later had NO remembered size — it never
+   *  rendered under `content-visibility:auto` — so the release frame laid the
+   *  whole slab out at 0 px: measured on the §1c fixture, a 407 px slab read
+   *  10 px and scrollTop swung 562 → 168 → 562 in one landing). A MITIGATION,
    *  not an invariant (verifier r1 measured scrollHeight still drifting by a
    *  few hundred px after a landing — images arriving, fonts, late layout):
    *  the placeholders are resolved ONCE at insert; later drift is absorbed by
@@ -3221,16 +3244,6 @@ class ChatView {
   _reserveFreshHeights(els, { live = false } = {}) {
     if (!els?.length || this._readOnly || this._container?.classList.contains('chat-no-content-visibility')) return;
     for (const el of els) el.style.contentVisibility = 'visible';
-    // A paging SLAB keeps its measured two-frame release (the landing and the
-    // keep zone were tuned on it — test-chat-paging §4c/§4d); a LIVE card
-    // (a swap, a live append — `live: true`) is held as below.
-    if (!live) {
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (this._disposed) return;
-        for (const el of els) if (el.style.contentVisibility === 'visible') el.style.contentVisibility = '';
-      }));
-      return;
-    }
     // THE RE-LOCK FRAME (inc-mudv05ja-n5rv, measured in headless chrome): the
     // override used to be dropped two frames later wherever the card was, and
     // dropping it hands an ON-SCREEN card back to `content-visibility:auto` as a
@@ -3238,26 +3251,67 @@ class ChatView {
     // pin's own scrollHeight read, the fold anchor, …) saw the card at 0 px
     // (a measured 197 → 0 → 197; the scrollTop clamp it causes is real). So the
     // override stays while the card is on or near the screen and comes off only
-    // once it has LEFT (one IntersectionObserver per view), its placeholder
-    // pinned to the height it last had there.
-    const io = this._cvReleaseIO || (this._cvReleaseIO = typeof IntersectionObserver === 'function' ? new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) continue;
-        const el = e.target;
-        this._cvReleaseIO.unobserve(el);
-        if (el.style.contentVisibility !== 'visible') continue;
-        const h = e.boundingClientRect?.height || 0;
-        if (h > 0) el.style.containIntrinsicSize = `auto ${Math.round(h)}px`;
-        el.style.contentVisibility = '';
-      }
-    }, { root: this._messageList, rootMargin: '600px 0px' }) : null);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    // once it has LEFT (an IntersectionObserver per view and kind), its
+    // placeholder pinned to the height it last had there.
+    // A PAGING SLAB IS HELD TOO (B-1192): the downward slab lands at the DOM's
+    // bottom, on screen, and its two-frame release re-locked those cards in
+    // view (a 0 px card at the viewport's bottom edge, measured under a 3-frame
+    // stall — test-chat-paging §4e). Only the slab cards within half a viewport
+    // of it are held (CV_HOLD_SLAB_NEAR), until they leave that band; the rest
+    // are released on the old schedule. Released off screen, a card's release
+    // frame still reads its lock size (the pin does not change that frame: a
+    // 312 px card read 232 px with `auto 312px`, `312px` and no pin alike),
+    // which scroll anchoring absorbs off screen.
+    const io = this._cvHoldIO(live ? 'live' : 'slab');
+    // A SLAB releases its OFF-screen cards on the old schedule: only the cards
+    // near the viewport go to the observer, and which ones is read in the FIRST
+    // frame's callback (that frame lays the slab out anyway).
+    if (!live && io) requestAnimationFrame(() => {
+      if (this._disposed) return;
+      const lr = this._messageList.getBoundingClientRect(), m = lr.height * CV_HOLD_SLAB_NEAR;
+      // a GAP card (the seek slab's) is never held: measured on test-ax-budget's
+      // teleported view, five held gap cards alone raised the band's
+      // non-ignored nodes 652 → 1,311 after the first slab (④c; releasing the
+      // same five restored 652 exactly) — and a non-teleported gap slab runs
+      // with content-visibility off anyway
+      const near = els.map((el) => { if (el.classList.contains('chat-gap-msg')) return false; const r = el.getBoundingClientRect(); return (r.width > 0 || r.height > 0) && r.bottom > lr.top - m && r.top < lr.bottom + m; });
+      requestAnimationFrame(() => {
+        if (this._disposed) return;
+        els.forEach((el, i) => {
+          if (el.style.contentVisibility !== 'visible') return;
+          if (near[i]) io.observe(el); else el.style.contentVisibility = '';
+        });
+      });
+    });
+    else requestAnimationFrame(() => requestAnimationFrame(() => {
       if (this._disposed) return;
       for (const el of els) {
         if (el.style.contentVisibility !== 'visible') continue;
         if (io) io.observe(el); else el.style.contentVisibility = '';
       }
     }));
+  }
+
+  /** The fresh-height reservation's release observer for one KIND ('live' |
+   *  'slab'), created once per view (disposed with it): an override comes off
+   *  once its card is no longer intersecting the list + the kind's margin. */
+  _cvHoldIO(kind) {
+    if (typeof IntersectionObserver !== 'function') return null;
+    const key = kind === 'live' ? '_cvReleaseIO' : '_cvSlabIO';
+    if (this[key]) return this[key];
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) continue;
+        const el = e.target;
+        io.unobserve(el);
+        if (el.style.contentVisibility !== 'visible') continue;
+        const h = e.boundingClientRect?.height || 0;
+        if (h > 0) el.style.containIntrinsicSize = `auto ${Math.round(h)}px`;
+        el.style.contentVisibility = '';
+      }
+    }, { root: this._messageList, rootMargin: kind === 'live' ? CV_HOLD_LIVE_MARGIN : CV_HOLD_SLAB_MARGIN });
+    this[key] = io;
+    return io;
   }
 
   /** PINNED ⇔ THE RENDERED WINDOW ENDS AT THE LIVE TAIL (inc-mubvu3a4-x8sb, H2).
@@ -3949,7 +4003,10 @@ class ChatView {
     // known before, which for a fresh window is the create/attach payload's
     // "nothing known" — the intersection then hid the ENTIRE strip from a
     // session the server would have served remove/steer/steer-all for).
-    if (op.subtype === 'queue') { if (op.supported) this._setQueueSupported(true, Array.isArray(op.verbs) ? op.verbs : LEGACY_QUEUE_VERBS.slice()); this._setQueue(op.items); return; }
+    // …and the SAME statement answers B-d963: a named list with 'steer' is a
+    // wrapper that steers notifications; no list is a pre-verb-table build
+    // that queues them (the legacy three are a mapping, not its words).
+    if (op.subtype === 'queue') { if (op.supported) this._setQueueSupported(true, Array.isArray(op.verbs) ? op.verbs : LEGACY_QUEUE_VERBS.slice(), { notifSteer: Array.isArray(op.verbs) ? op.verbs.map((v) => String(v)).includes('steer') : false }); this._setQueue(op.items); return; }
     // The outcome of ONE queue op: the strip row ends its pending state and,
     // on a refusal, wears the reason (the system card the normalizer also
     // emits scrolls away — the control the user pressed must speak too).
@@ -6259,6 +6316,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     this._statusBar?.dispose?.();
     this._disposed = true;
     try { this._cvReleaseIO?.disconnect(); } catch { }
+    try { this._cvSlabIO?.disconnect(); } catch { }
     LIVE_CHAT_VIEWS.delete(this);
     // The keybinding is signal-bound to the WINDOW, but a view can be replaced
     // while its window lives on — an orphaned binding would keep answering the

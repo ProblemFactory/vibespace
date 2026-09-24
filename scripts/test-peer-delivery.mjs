@@ -119,6 +119,77 @@ frames.length = 0;
 const r3 = await deliver.deliverToConversation(CID, 'again2');
 ok('a claude session never rides rpc-queue (registry gate, even with a caps-bearing sidecar)', r3.ok === false && frames.length === 0, JSON.stringify(r3));
 
+// ── B-d963: OLD-WRAPPER SKEW — a wrapper that cannot steer never gets a notification it would QUEUE ──
+// A codex wrapper started before the verb table (2.369.63, which shipped the
+// notification steer in the same release) adverts `inputQueue` and NO
+// `queueVerbs` list (the sess-13 sidecar, verbatim below). Handed a
+// kind:'notification' frame while a turn runs it does thread/queue/add — a
+// BILLED turn after the current one (the owner saw two). The ladder reads the
+// running process's own advert BEFORE writing and refuses with a TYPED miss so
+// the caller stashes (next prompt, drained with the chat card) instead.
+{
+  const OLD_CAPS = { peerMessage: true, frameFile: true, threadScoped: true, inputQueue: true, responseStyle: true };
+  const NEW_CAPS = { ...OLD_CAPS, queueVerbs: capsOf('codex').inputModes.queueVerbs.slice(), permissionRules: true, queueResync: true };
+  const writeSidecar = (caps) => fs.writeFileSync(path.join(dataDir, 'session-buffers', WID + '.json'),
+    JSON.stringify({ pid: process.pid, startedAt: Date.now(), mode: 'chat', backend: 'codex', threadId: CID, ...(caps ? { caps } : {}) }));
+  const skewFrames = [];
+  const S = { backend: 'codex', mode: 'chat', backendSessionId: CID, name: 'Cx13', host: null, socketPath: path.join(dataDir, 'sockets', 'cw-' + WID), _isStreaming: true, pty: { write: (x) => skewFrames.push(String(x)) } };
+  const sessions = new Map([[WID, S]]);
+  const money = { auth: 0, note: 0, release: 0 };
+  const L = require(path.join(REPO, 'src/server/conversation-deliver.js')).create({
+    dataDir,
+    peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false, reason: 'unused' }), postChannelEvent: async () => ({ ok: false }) },
+    getHosts: () => null, getConvIndex: () => null, serverSetting: () => false, activeSessions: sessions, emitPeerCard: () => true,
+    authorizeSpend: () => { money.auth++; return { ok: true, identity: { key: 'slot-a', name: 'A' }, hold: { id: 'h' + money.auth } }; },
+    noteSpend: () => { money.note++; }, releaseSpend: () => { money.release++; },
+    log: () => { },
+  });
+  const { wrapperCaps } = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const BUF = path.join(dataDir, 'session-buffers');
+  writeSidecar(OLD_CAPS);
+  ok('B-d963: wrapperCaps says a verb-LESS advert does NOT steer notifications (its own process wrote no verb table)', wrapperCaps(BUF, WID, S.socketPath).notificationSteer === false, JSON.stringify(wrapperCaps(BUF, WID, S.socketPath)));
+  const r0 = await L.deliverToConversation(CID, '[VibeSpace Background Work] task "nightly" (job-1): done.', { fromName: 'Background Work · nightly', kind: 'notification', spendReason: 'job-notification' });
+  ok("B-d963: a notification to a BUSY old wrapper is NOT written (it would queue a billed turn) — a typed miss 'wrapper-no-steer' the caller stashes", r0.ok === false && r0.refused === 'wrapper-no-steer' && skewFrames.length === 0, JSON.stringify(r0));
+  ok('…the refusal SAYS what to do (restart the session) — a held entry must name its cause', /restart/i.test(r0.reason || ''), r0.reason);
+  ok('…and the spend hold is GIVEN BACK, never charged (no turn happened)', money.note === 0 && money.release === 1, JSON.stringify(money));
+  // the rules this does NOT change (negative controls)
+  const r1 = await L.deliverToConversation(CID, 'hello from B', { fromName: 'session B' });
+  ok("…a PERSON's message to the same busy old wrapper still queues (its own turn by design, old and new wrappers alike)", r1.ok === true && skewFrames.length === 1 && JSON.parse(skewFrames[0]).kind === 'peer', JSON.stringify(r1));
+  S._isStreaming = false; skewFrames.length = 0;
+  const r2 = await L.deliverToConversation(CID, '[VibeSpace Background Work] idle case', { fromName: 'Background Work · nightly', kind: 'notification' });
+  ok('…an IDLE old wrapper still gets the notification (it opens a turn either way — the same lane a new wrapper takes)', r2.ok === true && skewFrames.length === 1, JSON.stringify(r2));
+  S._isStreaming = true; skewFrames.length = 0;
+  writeSidecar(NEW_CAPS);
+  ok('B-d963: …a wrapper that NAMES a verb table with steer does steer notifications', wrapperCaps(BUF, WID, S.socketPath).notificationSteer === true);
+  const r3 = await L.deliverToConversation(CID, '[VibeSpace Background Work] new wrapper', { fromName: 'Background Work · nightly', kind: 'notification' });
+  ok('…and a BUSY new wrapper is written the frame, predicted steered (the ladder is unchanged for it)', r3.ok === true && r3.steered === true && skewFrames.length === 1 && JSON.parse(skewFrames[0]).kind === 'notification', JSON.stringify(r3));
+  fs.rmSync(path.join(BUF, WID + '.json'));
+  ok('…and NO sidecar at all is not a steer (never guess yes for a process that said nothing)', wrapperCaps(BUF, WID, S.socketPath).notificationSteer === false);
+  // the caller's stash is TYPED with the new cause (the Background Work panel
+  // names it instead of "the conversation has no live inbox")
+  const M = require(path.join(REPO, 'src/job-model.js'));
+  ok("B-d963: job-model types the stash 'wrapper-no-steer' from the ladder's answer (a closed HELD_KINDS member)", M.heldKind(r0, r0.reason) === 'wrapper-no-steer' && M.HELD_KINDS.includes('wrapper-no-steer'), M.heldKind(r0, r0.reason));
+  const JL = await import(path.join(REPO, 'src/lib/jobs-layout.js'));
+  const held = JL.heldText({ total: 1, byConversation: { [CID]: { count: 1, kinds: { 'wrapper-no-steer': 1 }, reason: { kind: 'wrapper-no-steer' } } } });
+  ok('…and the panel sentence names the restart', /Restart this session/.test(held), held);
+  writeSidecar({ peerMessage: true });
+}
+
+// ── B-d963: WHICH queued items are notifications — ONE list of the senders
+// VibeSpace itself speaks as, shared by the client strip and pinned against
+// every producer that delivers kind:'notification' ──
+{
+  const NS = require(path.join(REPO, 'src/notification-senders.js'));
+  ok('B-d963: a Background Work queue row is a notification; a person is not; a typed kind:notification row is', NS.isNotificationQueueItem({ kind: 'peer', from: 'Background Work · nightly' }) && !NS.isNotificationQueueItem({ kind: 'peer', from: 'session B' }) && !NS.isNotificationQueueItem({ kind: 'user', from: 'Background Work · x' }) && NS.isNotificationQueueItem({ kind: 'notification' }));
+  const files = ['src/jobs.js', 'src/server/browser-handback.js', 'src/server/channels-engine.js'];
+  const producers = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.js$/.test(e.name) && /deliverToConversation\([^;]*kind: 'notification'/.test(read(rel))) producers.push(rel); } };
+  walk('src');
+  ok(`…the census finds every kind:'notification' producer (${producers.join(', ')})`, JSON.stringify(producers.sort()) === JSON.stringify(files.slice().sort()), producers);
+  for (const f of producers) ok(`…${f} speaks under a sender the list names`, NS.NOTIFICATION_SENDERS.some((p) => read(f).includes(p)), f);
+  ok('NEGATIVE CONTROL: a producer file with an unlisted sender fails the census', !NS.NOTIFICATION_SENDERS.some((p) => "fromName: 'Somebody new · x', kind: 'notification'".includes(p)));
+}
+
 // stash still works as the final rung
 deliver.stashFor(CID, { source: 'agent', fromName: 'A', text: 'queued' });
 ok('the stash rung is intact (queued + drained once)', deliver.drainStash(CID).length === 1 && deliver.drainStash(CID).length === 0);

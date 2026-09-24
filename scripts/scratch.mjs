@@ -77,3 +77,19 @@ export async function freePorts(n) {
 }
 
 export async function freePort() { return (await freePorts(1))[0]; }
+
+/** The ambient vendor credentials a REAL agent CLI would bill against instead
+ *  of the login the leg means to use (B-5f0b, the 2.369.69 lesson): a fake
+ *  CODEX_HOME / HOME removes the LOGIN, never an env key — a leaked
+ *  OPENAI_API_KEY / CODEX_API_KEY lets a real `codex app-server`'s own idle
+ *  drain run a billed turn, and ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
+ *  outrank the oat/subscription a claude leg seeds. */
+export const VENDOR_KEY_ENV = Object.freeze(['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
+
+/** A copy of `env` without VENDOR_KEY_ENV — every spawn of a REAL claude /
+ *  codex / opencode in a suite goes through this (test-architecture §50). */
+export function withoutVendorKeys(env = process.env) {
+  const out = { ...env };
+  for (const k of VENDOR_KEY_ENV) delete out[k];
+  return out;
+}
