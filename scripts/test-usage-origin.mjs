@@ -59,7 +59,7 @@ w(path.join(PROJ, SID_A, 'subagents', 'workflows', 'wf_r1', 'agent-w2.jsonl'), r
 w(path.join(PROJ, SID_B + '.jsonl'), rec('req_b_main', REPO_CWD, 5));
 
 const uh = new UsageHistory({ dataDir, homeDir: home });
-uh.scan({ force: true });
+await uh.scan({ force: true });
 const agg = uh.aggregate({ pivots: [['session', 'origin'], ['project', 'origin']] });
 
 // ── ① the origin DIMENSION ────────────────────────────────────────────────

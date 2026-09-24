@@ -61,6 +61,14 @@ function runOp(op, payload = {}) {
       }
       return { result: records };
     }
+    case 'jsonlTail': {
+      // perf chunk C: the async warm's cold read — readJsonlTail's FULL path
+      // (no previous entry here: the cache lives on the main thread), so the
+      // entry that crosses back carries its byte span and the next change to
+      // the file is folded in as an append on the main thread. Same function
+      // as the sync reader — zero duplication.
+      return { result: _codex().readJsonlTail(payload.fp, null, { dropSubagent: !!payload.dropSubagent }) };
+    }
     case 'codexThreadMetas': {
       // S3 discovery hot path: the ~/.codex/sessions walk + per-rollout head
       // reads (dir-mtime + file-mtime cached) — the facts half of

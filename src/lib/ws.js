@@ -1,10 +1,24 @@
 import { metric } from './telemetry-client.js';
 
+// THE ATTACH CAPABILITY ADVERT (perf lane chunk D): every `attach` this client
+// sends says it reads `seq` on `msg` frames, resumes by `sinceSeq` and answers
+// `lagged` by re-attaching — the server cuts a stalled socket ONLY for a client
+// that said so (an old client keeps today's unbounded delivery). One spelling,
+// applied at the wire so no attach site can forget it (and `request`'s
+// pending-dedup compares the same text `send` queued).
+const ATTACH_CAPS = ['op-seq'];
+const wireText = (d) => JSON.stringify(d && d.type === 'attach' && !d.caps ? { ...d, caps: ATTACH_CAPS } : d);
+
 class WsManager {
   constructor() {
     this.ws = null; this.handlers = new Map(); this.globalHandlers = []; this.pending = [];
     this._connected = false;
     this._stateListeners = []; // {connected: bool} listeners
+    // ATTACHES IN FLIGHT (perf r1): sessionId → when its attach was sent (or
+    // queued), until its `attached`/`error` lands. The burst half of the slab
+    // verdict (view-visibility.js attachSlab) reads the count; a drop clears it
+    // (an unanswered attach on a dead socket is not in flight on the next one).
+    this._attachInFlight = new Map();
     this.connect();
   }
   connect() {
@@ -22,6 +36,12 @@ class WsManager {
       // tiny attribution ring for the long-task telemetry (what was being
       // processed when the main thread stalled) — cheap, 16 entries
       try { const r = (window.__vsWsRing = window.__vsWsRing || []); r.push(d.type + (d.op ? ':' + d.op : '')); if (r.length > 16) r.shift(); } catch { }
+      // the ATTACH SLAB's cost on the wire (perf lane A: the slab is a text
+      // window, not tail(50)) — frame length + record count, 32 entries; read by
+      // test-chat-paging's first-paint legs and the incident capture
+      // (+ chunk D: whether it carried a slab at all, and how many ops a held resume replayed)
+      if ((d.type === 'attached' || d.type === 'error') && d.sessionId) this._attachInFlight.delete(d.sessionId);
+      if (d.type === 'attached') { try { const r = (window.__vsAttachFrames = window.__vsAttachFrames || []); r.push({ sid: d.sessionId, len: e.data.length, n: Array.isArray(d.messages) ? d.messages.length : 0, slab: Array.isArray(d.messages), held: d.slab === 'held', replay: Array.isArray(d.replay) ? d.replay.length : 0, total: d.totalCount || 0, t: Date.now() }); if (r.length > 32) r.shift(); } catch { } }
       // Isolate each handler: one throwing handler (a disposed ChatView, a stale
       // closure) must NOT abort delivery to every later handler — layout-sync,
       // settings-updated, editor-open etc. all ride these same lists.
@@ -37,6 +57,7 @@ class WsManager {
       // another "Disconnected from server" marker to every chat window.
       const wasConnected = this._connected;
       this._connected = false;
+      this._attachInFlight.clear();
       if (wasConnected) { this._outageStart = Date.now(); this._notifyState(false); }
       // Auth token revoked/expired? The WS upgrade gets rejected before open —
       // probe once per close and bounce to the login page instead of retrying
@@ -51,7 +72,18 @@ class WsManager {
     this.ws.onerror = () => {};
   }
   get connected() { return this._connected; }
-  send(d) { const m = JSON.stringify(d); this.ws?.readyState === 1 ? this.ws.send(m) : this.pending.push(m); }
+  send(d) {
+    const m = wireText(d);
+    if (d && d.type === 'attach' && d.sessionId) this._attachInFlight.set(d.sessionId, Date.now());
+    this.ws?.readyState === 1 ? this.ws.send(m) : this.pending.push(m);
+  }
+  /** How many attaches this socket sent (or queued) that are not answered yet —
+   *  an entry older than 15 s no longer counts (a slow rebuild is not a burst). */
+  attachesInFlight(now = Date.now()) {
+    let n = 0;
+    for (const [sid, t] of this._attachInFlight) { if (now - t < 15000) n++; else this._attachInFlight.delete(sid); }
+    return n;
+  }
   // One-time request/reply: sends `msg`, watches the global stream until
   // matchFn(m) returns truthy (reply consumed), then unhooks itself. Retires
   // the hand-rolled one-time-handler pattern (2026-07-03 review structural
@@ -91,7 +123,7 @@ class WsManager {
       // Request made while disconnected → the original still sits in the
       // pending queue and onopen's flush (which runs AFTER state notify) will
       // deliver it — a resend here would double-send (double-spawn class).
-      if (this.pending.includes(JSON.stringify(msg))) return;
+      if (this.pending.includes(wireText(msg))) return;
       this.send(msg);
     };
     this.onGlobal(handler);
@@ -114,4 +146,4 @@ class WsManager {
   _notifyState(connected) { for (const h of this._stateListeners) h(connected); }
 }
 
-export { WsManager };
+export { WsManager, ATTACH_CAPS, wireText };

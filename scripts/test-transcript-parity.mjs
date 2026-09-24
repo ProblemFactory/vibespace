@@ -52,6 +52,25 @@ const claudeRecords = [
 ];
 fs.writeFileSync(path.join(PROJ, SID + '.jsonl'), claudeRecords.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
+// THE TEXT WINDOW (perf lane A): a tool-heavy conversation whose last 50
+// records hold only 3 text cards — the default page is the text window
+// (src/text-window.js), not tail(50), on BOTH legs. Fails on the unfixed code
+// (both legs ship 50) and on a ONE-SIDED edit (a server that learned the rule
+// while the daemon bundle did not ships two different slabs).
+const WSID = 'dddddddd-1111-2222-3333-444444444444';
+{
+  const recs = [];
+  let n = 0;
+  for (let t = 0; t < 40; t++) {
+    recs.push({ type: 'user', uuid: `wu-${n++}`, timestamp: ts(n % 60), sessionId: WSID, message: { role: 'user', content: [{ type: 'text', text: `turn ${t} 问题` }] } });
+    for (let k = 0; k < 14; k++) {
+      recs.push({ type: 'assistant', uuid: `wa-${n++}`, timestamp: ts(n % 60), sessionId: WSID, requestId: `req_w${t}_${k}`, message: { id: `msg_w${t}_${k}`, model: 'claude-fable-5', role: 'assistant', content: [{ type: 'tool_use', id: `toolu_w${t}_${k}`, name: 'Bash', input: { command: `ls ${k}` } }], usage: { input_tokens: 1, output_tokens: 1 } } });
+      recs.push({ type: 'user', uuid: `wr-${n++}`, timestamp: ts(n % 60), sessionId: WSID, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_w${t}_${k}`, content: 'ok' }] } });
+    }
+  }
+  fs.writeFileSync(path.join(PROJ, WSID + '.jsonl'), recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+}
+
 const TID = 'bbbbbbbb-5555-6666-7777-888888888888';
 const cxDir = path.join(home, '.codex', 'sessions', '2026', '08', '10');
 fs.mkdirSync(cxDir, { recursive: true });
@@ -95,7 +114,18 @@ const parity = async (name, inprocPromise, opArgs) => {
 };
 
 const ref = { backend: 'claude', sessionId: SID, cwd: CWD };
-await parity('page (tail 50)', svc.page(ref, {}), ['page', ref, {}]);
+await parity('page (default = the text window)', svc.page(ref, {}), ['page', ref, {}]);
+{
+  const wref = { backend: 'claude', sessionId: WSID, cwd: CWD };
+  const { inproc } = await parity('page (text window over a tool-heavy tail)', svc.page(wref, {}), ['page', wref, {}]);
+  const { isTextCard, jsonSize, TEXT_WINDOW } = require(REPO + '/src/text-window.js');
+  const tailText = inproc.messages.slice(-50).filter(isTextCard).length;
+  const texts = inproc.messages.filter(isTextCard).length;
+  // perf r1: the window reaches minText OR stops at the growth budget (≤ 128 KiB past the floor)
+  const growth = inproc.messages.slice(0, -50).reduce((n, m) => n + jsonSize(m), 0);
+  ok(inproc.messages.length > 50 && tailText === 3 && (texts === TEXT_WINDOW.minText || texts > tailText) && growth <= TEXT_WINDOW.maxGrowthBytes,
+    `the default page is the TEXT window: ${inproc.messages.length} records holding ${texts} text cards (its last 50 hold ${tailText}), ${(growth / 1024).toFixed(0)} KB past the floor ≤ ${TEXT_WINDOW.maxGrowthBytes / 1024} KB — never tail(50)`);
+}
 const big = await parity('page (all, multi-window payload)', svc.page(ref, { offset: 0, limit: 999 }), ['page', ref, { offset: 0, limit: 999 }]);
 ok(big.a.length > 512 * 1024, `page-all payload spans >2 mux windows (${(big.a.length / 1024).toFixed(0)}KB) — count-gating actually exercised`);
 ok(big.a.includes('大文本结尾марker'), 'multibyte content survived chunked byte-channel transfer intact');
@@ -104,6 +134,36 @@ await parity('turnmap', svc.turnmap(ref), ['turnmap', ref, {}]);
 await parity('searchIndexed', svc.searchIndexed(ref, '世界'), ['searchIndexed', ref, { q: '世界' }]);
 await parity('status (chatStatus+taskState)', svc.status(ref), ['status', ref, {}]);
 await parity('taskState (TodoWrite replay)', svc.taskState(ref), ['taskState', ref, {}]);
+
+// THE INCREMENTAL TAIL CACHE (perf lane C): both legs cache the parse by byte
+// span now, and an append between two reads is folded in as an append — the
+// transcript grows between two page()/status() calls, then is truncated back.
+// Byte-identical on both legs after each, AND the in-process answer equals a
+// COLD read of the same file (the cache changes cost, never content).
+{
+  const fp = path.join(PROJ, SID + '.jsonl');
+  const orig = fs.readFileSync(fp);
+  const p0 = await parity('page (before an append)', svc.page(ref, {}), ['page', ref, {}]);
+  const st0 = await parity('status (before an append)', svc.status(ref), ['status', ref, {}]);
+  const more = [
+    { type: 'user', uuid: 'u-5', timestamp: ts(9), sessionId: SID, message: { role: 'user', content: [{ type: 'text', text: 'appended 追加 марker' }] } },
+    { type: 'assistant', uuid: 'a-5', timestamp: ts(10), sessionId: SID, requestId: 'req_005', message: { id: 'msg_05', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_5', name: 'TodoWrite', input: { todos: [{ content: 'step one', status: 'completed', activeForm: 'doing step one' }, { content: 'step two', status: 'in_progress', activeForm: 'doing step two' }] } }], usage: { input_tokens: 50, output_tokens: 7 } } },
+    { type: 'user', uuid: 'u-6', timestamp: ts(11), sessionId: SID, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_5', content: 'ok' }] } },
+    { type: 'assistant', uuid: 'sub-2', timestamp: ts(12), sessionId: SID, parent_tool_use_id: 'toolu_5', isSidechain: true, message: { id: 'msg_sub2', role: 'assistant', content: [{ type: 'text', text: 'sidechain noise' }] } },
+    { type: 'assistant', uuid: 'a-6', timestamp: ts(13), sessionId: SID, requestId: 'req_006', message: { id: 'msg_06', model: 'claude-fable-5', role: 'assistant', content: [{ type: 'text', text: 'done 完成' }], usage: { input_tokens: 60, output_tokens: 3 } } },
+  ];
+  fs.appendFileSync(fp, more.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const p1 = await parity('page after an APPEND between two calls', svc.page(ref, {}), ['page', ref, {}]);
+  const st1 = await parity('status after an APPEND between two calls', svc.status(ref), ['status', ref, {}]);
+  ok(p1.a !== p0.a && p1.a.includes('done 完成') && !p1.a.includes('sidechain noise') && st1.a !== st0.a && st1.a.includes('"completed"'), 'the appended records are visible on both legs (text, TodoWrite state), the sidechain one is not');
+  const { jsonlCacheClear } = require(REPO + '/src/session-store.js');
+  jsonlCacheClear();
+  ok(J(await svc.page(ref, {})) === p1.a && J(await svc.status(ref)) === st1.a, 'the appended page/status equal a COLD read of the same file (in-process cache cleared)');
+  fs.truncateSync(fp, orig.length);
+  const p2 = await parity('page after a TRUNCATE (back to the original bytes)', svc.page(ref, {}), ['page', ref, {}]);
+  await parity('status after a TRUNCATE', svc.status(ref), ['status', ref, {}]);
+  ok(p2.a === p0.a, 'after the truncate the page is the original page again (a full re-read, never the cached append)');
+}
 
 // gap family: a small file has NO gap (below the head+tail threshold) — the
 // null shape must round-trip honestly…

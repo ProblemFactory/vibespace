@@ -11,7 +11,7 @@ const { extractTailIds, nameFromUserRecord } = require('./discovery-facts');
 // THE process reader (B-3185): identity, and since 2026-09-09 the two
 // process-tree facts this sweep used to buy with one child process per item.
 const { isCliProcess, hasProcfs, readPpid, readChildPids } = require('./cli-identity.js');
-const { readJsonlBounded } = require('./adapters/codex');
+const { readJsonlTail } = require('./adapters/codex');
 // A test suite's synthetic transcript is never a conversation (see the essay
 // in src/fixture-guard.js — one declaration, shared with the usage walk).
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
@@ -425,27 +425,73 @@ function findSessionJsonlPath(claudeSessionId, cwd) {
 // JSONL parse cache — stores ALL non-subagent messages (unfiltered).
 // LRU-bounded: it retains the FULL parsed history of each session, so an
 // uncapped map slowly pins every session ever viewed in memory.
+//
+// INCREMENTAL (perf lane chunk C, 2.369.167): an entry is the byte SPAN it
+// was parsed from — `{mtimeMs, size, ino, dev, spanStart, spanEnd, messages,
+// starts, partial, headProbe, tailProbe, incr}` (src/adapters/codex.js
+// readJsonlTail owns the shape). A live conversation's transcript grows
+// between any two attaches, and every re-attach reads chatStatus() and
+// activePendingPermissions() through here SYNC — so the (mtime, size) key
+// alone re-read and re-parsed the whole 32 MiB tail on the loop to learn about
+// the few KB the CLI had appended. Now a grown, append-only file is read from
+// `spanEnd` only, and the head slides out by byte span where readJsonlBounded's
+// tail rule cuts it; a shrink, a replaced inode or a rewritten probe byte is
+// today's full read. `messages` is always a NEW array (never grown in place):
+// a SessionMessages whose `_all` is the old one keeps what it read.
+// Metrics (global hook — this module stays decoupled from the telemetry
+// instance in server.js): `srv-jsonl-parse-bytes` = bytes read and parsed and
+// `srv-jsonl-parse-ms` = the time it took, stamped on EVERY non-hit read (the
+// ms metric was only the >200 ms outliers before; the cold/append split is what
+// the pair now shows).
 const _jsonlCache = new Map();
 const JSONL_CACHE_MAX = 30;
+// A grown file the ASYNC warm folds in inline (on the loop) instead of handing
+// a full re-parse to the worker: the append is the only work, bounded here.
+const WARM_INLINE_APPEND_MAX = 4 * 1024 * 1024;
+
+function _jsonlCachePut(id, entry) {
+  _jsonlCache.delete(id);
+  _jsonlCache.set(id, entry);
+  while (_jsonlCache.size > JSONL_CACHE_MAX) _jsonlCache.delete(_jsonlCache.keys().next().value);
+}
+function _stampJsonlParse(bytes, ms) {
+  global.__vsMetric?.('srv-jsonl-parse-bytes', bytes);
+  global.__vsMetric?.('srv-jsonl-parse-ms', Math.round(ms * 10) / 10);
+}
+/** Test hook: forget every cached parse (the cold-read control). */
+function jsonlCacheClear() { _jsonlCache.clear(); }
 
 // Async warm (2.235.0): populate _jsonlCache OFF the main thread via the
-// transcript worker, so the sync parseSessionJsonl below (unchanged, many sync
-// callers) hits a warm cache instead of blocking the loop for the 0.5-1s a
-// 32MB tail parse costs. Await this at the HOT entry points (ws attach
-// history rebuild, /api/session-messages) before the sync machinery runs.
+// transcript worker, so the sync parseSessionJsonl below (many sync callers)
+// hits a warm cache instead of blocking the loop for the 0.5-1s a 32MB tail
+// parse costs. Await this at the HOT entry points (ws attach history rebuild,
+// /api/session-messages) before the sync machinery runs. Since chunk C: a
+// cached entry the file merely GREW past (≤ WARM_INLINE_APPEND_MAX) is folded
+// in inline — reading the appended bytes costs less than the worker round trip
+// plus the structured-clone of a whole tail — and the worker's full read
+// returns the same span entry, so the NEXT change is an append too.
 async function warmSessionJsonlAsync(claudeSessionId, cwd) {
   try {
     const fp = findSessionJsonlPath(claudeSessionId, cwd);
     if (!fp) return false;
     const stat = fs.statSync(fp);
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return true; // already warm
-    const { readJsonlBoundedParsedAsync } = require('./adapters/codex');
-    const records = await readJsonlBoundedParsedAsync(fp, { tailOnly: true, dropSubagent: true });
-    if (!records) return false; // worker unavailable — sync path will parse inline
-    _jsonlCache.delete(claudeSessionId);
-    _jsonlCache.set(claudeSessionId, { mtimeMs: stat.mtimeMs, size: stat.size, messages: records });
-    while (_jsonlCache.size > JSONL_CACHE_MAX) _jsonlCache.delete(_jsonlCache.keys().next().value);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) return true; // already warm
+    const { readJsonlTail, readJsonlTailAsync } = require('./adapters/codex');
+    if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
+      const t0 = performance.now();
+      const r = readJsonlTail(fp, cached, { dropSubagent: true, stat, appendOnly: true });
+      if (r) {
+        _stampJsonlParse(r.bytes, performance.now() - t0);
+        _jsonlCachePut(claudeSessionId, r.entry);
+        return true;
+      }
+    }
+    const t0 = performance.now();
+    const r = await readJsonlTailAsync(fp, { dropSubagent: true });
+    if (!r || !r.entry) return false; // worker unavailable — sync path will parse inline
+    _stampJsonlParse(r.bytes, performance.now() - t0);
+    _jsonlCachePut(claudeSessionId, r.entry);
     return true;
   } catch { return false; }
 }
@@ -456,38 +502,15 @@ function parseSessionJsonl(claudeSessionId, cwd) {
   try {
     const stat = fs.statSync(fp);
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-      // refresh LRU position
-      _jsonlCache.delete(claudeSessionId);
-      _jsonlCache.set(claudeSessionId, cached);
-      return cached.messages;
-    }
-
     // Bounded read: a full readFileSync('utf-8') THROWS past Node's ~512MB
     // string limit (and blocks the event loop for hundreds of MB below it).
     // Tail-only: the client seek-loads the earlier history as a continuous
     // virtual scroll, so no seam marker is stitched in.
-    const _t0 = Date.now();
-    const content = readJsonlBounded(fp, { tailOnly: true });
-    const messages = [];
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const msg = JSON.parse(trimmed);
-        if (!isSubagentMessage(msg)) messages.push(msg);
-      } catch {}
-    }
-    // Slow-parse observation (>200ms — a big tail re-read). global hook keeps
-    // this module decoupled from the telemetry instance living in server.js.
-    const _dt = Date.now() - _t0;
-    if (_dt > 200) global.__vsMetric?.('srv-jsonl-parse-ms', _dt);
-    _jsonlCache.delete(claudeSessionId);
-    _jsonlCache.set(claudeSessionId, { mtimeMs: stat.mtimeMs, size: stat.size, messages });
-    while (_jsonlCache.size > JSONL_CACHE_MAX) {
-      _jsonlCache.delete(_jsonlCache.keys().next().value);
-    }
-    return messages;
+    const t0 = performance.now();
+    const r = readJsonlTail(fp, cached && cached.spanEnd != null ? cached : null, { dropSubagent: true, stat });
+    if (r.mode !== 'hit') _stampJsonlParse(r.bytes, performance.now() - t0);
+    _jsonlCachePut(claudeSessionId, r.entry);   // refreshes the LRU position on a hit too
+    return r.entry.messages;
   } catch { return []; }
 }
 
@@ -648,6 +671,11 @@ function getHistorySessionId(session) {
 
 // ── SessionMessages class ──
 
+// jsonl array (the parse cache's, by identity) → {buffer, all, perms}: the
+// last buffer merge over it. Weak: a cache entry that is evicted or replaced
+// takes its memo with it.
+const _mergeMemo = new WeakMap();
+
 class SessionMessages {
   constructor(session, sessionId, { buffersDir, permissionModes } = {}) {
     this._session = session;
@@ -666,6 +694,20 @@ class SessionMessages {
     const session = this._session;
     const historySessionId = getHistorySessionId(session);
     const jsonl = historySessionId ? parseSessionJsonl(historySessionId, session.cwd) : [];
+    // THE MERGE MEMO (perf chunk C): the merge below is a pure function of
+    // (the jsonl array, the buffer string) and the cache hands back the SAME
+    // array until the file changes, so a burst of SessionMessages over one
+    // session (a reconnect storm: chatStatus + pending permissions per
+    // re-attach) merges once. `_all` is shared exactly as the no-insert case
+    // always shared the cache's array; `_pendingPerms` is copied per instance.
+    const buffer = session.buffer || '';
+    const memo = _mergeMemo.get(jsonl);
+    if (memo && memo.buffer === buffer) {
+      this._pendingPerms = { ...memo.perms };
+      this._all = memo.all;
+      this._display = this._all.filter(isDisplayMessage);
+      return;
+    }
     const uuids = new Set();
     const msgIds = new Set();
     for (const m of jsonl) {
@@ -695,7 +737,7 @@ class SessionMessages {
       if (mid && !jsonlPos.has('m:' + mid)) jsonlPos.set('m:' + mid, i);
     });
     const parsed = [];
-    for (const line of (session.buffer || '').split('\n')) {
+    for (const line of buffer.split('\n')) {
       const trimmed = line.replace(/\r/g, '').trim();
       if (!trimmed) continue;
       try { parsed.push(JSON.parse(trimmed)); } catch {}
@@ -738,6 +780,7 @@ class SessionMessages {
       }
       this._all = all;
     }
+    _mergeMemo.set(jsonl, { buffer, all: this._all, perms: { ...this._pendingPerms } });
     this._display = this._all.filter(isDisplayMessage);
   }
 
@@ -1303,7 +1346,7 @@ function dedupWebuiSockets(entries) {
 }
 
 module.exports = {
-  warmSessionJsonlAsync,
+  warmSessionJsonlAsync, jsonlCacheClear,
   SESSIONS_DIR,
   dedupWebuiSockets,
   isPidAlive,

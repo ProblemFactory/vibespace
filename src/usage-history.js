@@ -76,12 +76,27 @@ const DEFAULT_PRICING = {
   _default: { input: 3, output: 15, cacheWrite5m: 3.75, cacheWrite1h: 6, cacheRead: 0.3 },
 };
 
+// THE PER-TICK BYTE BUDGET of the in-process ledger walk (2.369.167, perf
+// lane ⑥): the loop is handed back after every MiB of consumed transcript —
+// one MiB parses in single-digit ms, so no ws frame / heartbeat / attach waits
+// behind a ledger scan again (a 200 MB catch-up used to hold the loop for the
+// whole walk).
+const SCAN_BUDGET_BYTES = 1024 * 1024;
+
 class UsageHistory {
   // resolveAccount(acctId) → { type:'subscription'|'api'|'codex-subscription', name, tail } | null
   // Lets the ledger BAKE which account (and its billing TYPE) each request used,
   // so subscription usage (plan quota) and API-key usage (real $) never mix, and
   // the label survives even if the account is later deleted.
-  constructor({ dataDir, homeDir = os.homedir(), resolveAccount = () => null }) {
+  // scanBudgetBytes / scanYield (2.369.167, perf ⑥): the in-process walk
+  // yields to `scanYield()` every `scanBudgetBytes` of consumed transcript
+  // bytes (default 1 MiB / setImmediate). Injected only by the parity suite,
+  // which holds the yield shut to prove no reader sees a half-walked ledger.
+  constructor({ dataDir, homeDir = os.homedir(), resolveAccount = () => null,
+    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise(setImmediate) }) {
+    this._scanBudgetBytes = scanBudgetBytes;
+    this._scanYield = scanYield;
+    this._scanPromise = null;
     this.dir = path.join(dataDir, 'usage-history');
     this.metaDir = path.join(dataDir, 'session-meta');
     this.projectsDir = path.join(homeDir, '.claude', 'projects');
@@ -344,6 +359,17 @@ class UsageHistory {
     if (changed) console.log(`[usage-history] re-attributed ${changed} events (pre-binding history → global)`);
   }
 
+  /** ONE LOGICAL WALK, YIELDING (2.369.167, perf ⑥). Throttled (15 s) or
+   *  already in flight ⇒ the SYNC `{skipped: true}` answer, exactly as before.
+   *  Otherwise the walk runs as the walker's budgeted yielding form (the loop
+   *  is handed back every `scanBudgetBytes`) and scan() returns its PROMISE of
+   *  `{added, filesTouched}` — which is also what `scanSettled()` answers until
+   *  the next scan starts. NO HALF LEDGER: nothing of a walk is visible before
+   *  it settles — events are buffered and appended to the shards once, at the
+   *  end, beside the cursor write — and a reader that must see the freshest
+   *  ledger (the /api/usage-stats route, the pool odometer, the popup's rid
+   *  lookups) calls scan() then AWAITS scanSettled(). The promise never
+   *  rejects: a failed walk logs and answers `{added: 0, filesTouched: 0, error}`. */
   scan(force = false) {
     if (this._scanning) return { skipped: true };
     try { this._maybeRebakeAttribution(); } catch (e) { console.error('[usage-history] rebake failed:', e.message); }
@@ -354,6 +380,15 @@ class UsageHistory {
     if (!force && this._lastScanAt && Date.now() - this._lastScanAt < 15000) return { skipped: true };
     this._lastScanAt = Date.now();
     this._scanning = true;
+    this._scanPromise = this._walkAndAppend();
+    return this._scanPromise;
+  }
+
+  /** The promise of the scan in flight, or of the last one (a reader awaits it
+   *  before answering from the ledger — never a half-walked answer). */
+  scanSettled() { return this._scanPromise || Promise.resolve({ added: 0, filesTouched: 0 }); }
+
+  async _walkAndAppend() {
     let added = 0, filesTouched = 0;
     try {
       const meta = this._metaMap();
@@ -377,10 +412,14 @@ class UsageHistory {
       // the rid/mid join fields are all the walker's single implementation
       // now; scripts/test-usage-walk-parity.mjs pins it against the shipped
       // scanner (the one remaining, documented copy).
-      const walk = runUsageWalk({
+      const cursorsAtStart = this._cursors;
+      const walk = await runUsageWalk({
         projectsDir: this.projectsDir,
         codexSessionsDir: this.codexSessionsDir,
-        cursors: this._cursors,
+        cursors: cursorsAtStart,
+        // the per-tick byte budget: the walk hands the loop back every MiB
+        budgetBytes: this._scanBudgetBytes,
+        onBudget: this._scanYield,
         onEvent: (ev) => {
           const minfo = meta[ev.sid] || {};
           // A per-request identity override, when one is wired (see
@@ -425,13 +464,24 @@ class UsageHistory {
         },
       });
       filesTouched = walk.filesTouched;
+      // A repair re-read the cursor store WHILE this walk was parked at a
+      // budget point (reloadCursors after a migration): the walk advanced the
+      // map the repair replaced, so writing it back would resurrect what the
+      // repair dropped (the 2.369.85 class). Drop this walk whole — the next
+      // scan re-walks from the repaired cursors; nothing was appended yet.
+      if (this._cursors !== cursorsAtStart) return { added: 0, filesTouched, dropped: 'cursors-reloaded' };
       this._cursors = walk.cursors;
 
+      // THE ONE COMMIT POINT — synchronous, so no reader interleaves between
+      // the shard appends and the cursor write
       for (const [shard, lines] of Object.entries(shardBuffers)) {
         if (lines.length) { fs.appendFileSync(shard, lines.join('\n') + '\n'); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       }
       this._writeAtomic(this.cursorsFile, JSON.stringify(this._cursors));
       this._lastScan = Date.now();
+    } catch (e) {
+      console.error('[usage-history] scan failed:', e && e.message);
+      return { added: 0, filesTouched, error: String((e && e.message) || e) };
     } finally { this._scanning = false; }
     return { added, filesTouched };
   }
@@ -639,9 +689,10 @@ class UsageHistory {
   // Which ledger event carries this requestId — the per-message meta popup's
   // "which account handled this?" (2.266.1, user request). Backwards search:
   // the asked-about message is almost always recent.
-  eventForRid(rid) {
+  async eventForRid(rid) {
     if (!rid) return null;
     try { this.scan(); } catch { } // throttled incremental — freshens just-streamed messages
+    await this.scanSettled(); // the walk yields (perf ⑥): answer from the SETTLED ledger
     const evs = this._loadEvents();
     for (let i = evs.length - 1; i >= 0; i--) if (evs[i].rid === rid) return evs[i];
     // REMOTE sessions (real report: every reply on a remote conversation
@@ -661,9 +712,10 @@ class UsageHistory {
    *  billing lookup joins here: ev.mid (baked since 2.267.3), or ev.rid
    *  when the walker fell back to msg.id (records without requestId), or a
    *  host-namespaced rid ending in the mid. */
-  eventForMid(mid) {
+  async eventForMid(mid) {
     if (!mid) return null;
     try { this.scan(); } catch { }
+    await this.scanSettled();
     const evs = this._loadEvents();
     const suf = ':' + mid;
     for (let i = evs.length - 1; i >= 0; i--) {

@@ -20,6 +20,8 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode } from './chat-run-summary.js';
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
+import { TEXT_WINDOW } from '../text-window.js';
+import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
 import { heldText } from './jobs-layout.js';
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 
@@ -176,6 +178,12 @@ const CV_HOLD_SLAB_MARGIN = `${CV_HOLD_SLAB_NEAR * 100}% 0px`;
 // The card count a trim aims for; a zone that holds more keeps them (folded members
 // are display:none and cost nothing). FOLD_DOM_CEILING is the one hard bound.
 const TRIM_SOFT_CARDS = 150;
+// THE SHORT-VIEW RESCUE'S HARM BOUND (re-derived for the text-window attach
+// slab, perf lane A — see _shortViewNeedsFill). The largest slab any attach
+// path ships (src/text-window.js maxRecords): a slab capped there that still
+// does not fill its viewport may add one page; a window grown past it by
+// paging belongs to the paging machinery.
+const SHORT_FILL_MAX_CARDS = TEXT_WINDOW.maxRecords;
 // THE READER'S BAND (docs/design-accessibility-tree.zh.md §3 row 1 / §8; the
 // owner's 50,150-node Windows freeze, 2.369.144): a rendered card farther than
 // this many viewports from the viewport's edges is marked aria-hidden, so the
@@ -1169,6 +1177,11 @@ class ChatView {
           this._renderers.appendSystem(msg.detail ? `${t('Session ended.')} — ${msg.detail}` : t('Session ended.'));
           this._setReadOnly();
         }
+      } else if (msg.type === 'lagged' && msg.sessionId === sessionId) {
+        // The server stopped sending this session's frames to this socket (its
+        // send queue went past the limit — perf lane chunk D) and said where:
+        // re-attach, resuming by seq. The explicit form of inc-msp3klen's class.
+        this._onLagged(msg);
       } else if (msg.type === 'attach-ack' && msg.sessionId === sessionId) {
         this._lastAttachAckAt = Date.now(); // proof-of-life: server got our attach and is processing
       } else if (msg.type === 'attached' && msg.sessionId === sessionId) {
@@ -1214,7 +1227,7 @@ class ChatView {
         this._renderers.appendSystem(t('Disconnected from server'));
       } else if (this._hasConnected) {
         this._renderers.appendSystem(t('Reconnected'));
-        this._reattach(true);
+        this._reconnectAttach(); // displayed ⇒ now; suspended ⇒ the App's reconnect queue (perf ⑤b)
       }
       this._hasConnected = true;
     };
@@ -1353,7 +1366,10 @@ class ChatView {
     this._applyLiveMeta(meta);
     if (isStreaming) this._onServerStreamLabel(meta?.streamingLabel || t('thinking...'), meta?.streamingKind || null);
     this._scrollToBottom();
-    metric('history-render-ms', performance.now() - _t0);
+    // the view keeps its own last first-paint cost (perf lane A): the suites read
+    // it off the view (test-chat-paging prints it; the metric ring is sampled)
+    this._lastHistoryRenderMs = performance.now() - _t0;
+    metric('history-render-ms', this._lastHistoryRenderMs);
     if (this._chatInput) this._loadPages(); // design chip count/list (live windows only)
     // ── Blank-window telemetry (user-reported "session窗口空白" class) ──
     // The server said this session has messages but NOTHING rendered — the exact
@@ -1383,8 +1399,8 @@ class ChatView {
   // window and this fired an ungated _extendTop on a PINNED view — the slab
   // landed 7s later (stalled server), trimBottom dropped the live tail and the
   // view unpinned 1500px up ("content jumped after I sent a message"). That fix
-  // added `rendered < 30`, which is UNSATISFIABLE: every attach path ships
-  // tail(50) (ws-handler + transcripts.page), `_windowStart > 0` holds EXACTLY
+  // added `rendered < 30`, which is UNSATISFIABLE: every attach path shipped
+  // tail(50) then (ws-handler + transcripts.page), `_windowStart > 0` held EXACTLY
   // when those 50 arrived, and folding HIDES members (`.chat-run-collapsed`,
   // display:none) without removing them — so `rendered` is ~50 whenever the
   // gate is armed (measured over 33 real production transcripts: 50/50 render,
@@ -1394,14 +1410,27 @@ class ChatView {
   // CORROBORATE the reading instead of guessing a card count: measure twice
   // across the settle window and require the same verdict with no structural
   // change in between. The card count survives only as the harm bound — the
-  // rescue adds ONE page and never at a size where a trim could fire (the
+  // rescue adds ONE page and never where a trim could reach the live tail (the
   // incident's actual damage was trimBottom eating the live tail).
+  // THE HARM BOUND, RE-DERIVED AGAIN (perf lane A, 2.369.167): the attach slab
+  // is a TEXT window now (src/text-window.js — 50 to maxRecords records), so
+  // `rendered + 50 > TRIM_SOFT_CARDS` refused every slab of 101+ cards — a
+  // constant-false guard for exactly the slab that can still be short (a
+  // pure-tool conversation that hit maxRecords, folded into a few run headers).
+  // What protects the live tail is not the count: at or under TRIM_SOFT_CARDS
+  // the trim's count gate removes nothing; above it the trim is by HEIGHT and
+  // removes only cards outside the keep zone — and a window that does not
+  // fill its viewport (this predicate's last clause) lies wholly inside that
+  // zone, so after one page the live tail (in the viewport) cannot be reached.
+  // The only in-zone removal is FOLD_DOM_CEILING's `must`, which a slab of
+  // ≤ SHORT_FILL_MAX_CARDS plus one grow burst never reaches; and a PINNED view
+  // (every fresh attach) never trims inside _extendTop at all.
   _shortViewNeedsFill(list) {
     if (!list || this._suspended || this._disposed) return false;
     if (this._teleported) return false;        // teleport pages by file line — _maybeSeekEarlier owns that mode
     if (!(this._windowStart > 0)) return false; // nothing above this window
     const rendered = list.querySelectorAll(':scope > .chat-msg').length;
-    if (rendered + 50 > 150) return false;      // one more page must stay under the trim cap
+    if (rendered > SHORT_FILL_MAX_CARDS) return false; // grown past any attach slab: paging's, not the rescue's
     return list.scrollHeight <= list.clientHeight; // no scrollable range at all
   }
 
@@ -1780,6 +1809,22 @@ class ChatView {
   // showed "default" while the session verifiably ran Concise; 2.368.4).
   _applyLiveMeta(meta) {
     if (!meta) return;
+    // THE OP-SEQ ADVERT (perf lane chunk D), carries-the-key guarded like every
+    // fact here: a server that stamps its ops says the last seq this socket is
+    // current to. Seeing it is what lets _reattach ask for a replay; a slab
+    // payload (`slab` absent) makes it the view's position — never backwards
+    // inside one epoch (a delayed epoch reset must not rewind past live ops
+    // that already landed), always re-anchored on a new epoch. A HELD resume
+    // leaves the position to its replay (_applyHeldResume).
+    if ('opSeq' in meta && typeof meta.opSeq === 'number') {
+      this._serverOpSeq = meta.opSeq;
+      if (!('slab' in meta && meta.slab === 'held')) {
+        const ep = 'normEpoch' in meta ? meta.normEpoch : null;
+        const sameEpoch = !!ep && this._seqEpoch === ep;
+        if (!(sameEpoch && typeof this._lastSeq === 'number' && this._lastSeq > meta.opSeq)) this._lastSeq = meta.opSeq;
+        if (ep) this._seqEpoch = ep;
+      }
+    }
     // Attach/create replay of the input queue — carries-the-key guard, so a
     // partial-meta path never clears a live strip. The wrapper advert is read
     // FIRST: it decides which controls the items are rendered with.
@@ -2418,6 +2463,10 @@ class ChatView {
       this._resumeSettleUntil = 0;
       this._resumeAt = 0;
     }
+    // A window un-hidden while it waits for its reconnect slot attaches NOW
+    // and its slot is cancelled (perf ⑤b): no displayed window ever shows
+    // stale content longer than it would without the queue.
+    if (!on && this.app?._reconnectQueue?.take(this)) this._runQueuedReattach('unhide');
   }
 
   _clearResumeRetail() {
@@ -3515,16 +3564,36 @@ class ChatView {
 
   // Handle normalized message ops from server (create/edit/meta)
   _onOp(op) {
-    if (op.op === 'create') {
-      this._onCreateMessage(op.message);
-      this._noteRecordKind(op.message);
-    } else if (op.op === 'edit') {
-      this._onEditMessage(op.id, op.fields);
-      // AFTER the assign: a coalescing collab edit carries the grown rows
-      this._noteRecordKind(this._messages.find((m) => m.id === op.id));
-    } else if (op.op === 'meta') {
-      this._onMeta(op);
+    // THE LAST FRAME THIS VIEW HAS (perf lane chunk D): a stamped op carries the
+    // server's per-session `seq`; the epoch it belongs to is the one this view
+    // holds right now (a frame of a newer epoch that lands before its `attached`
+    // is re-anchored by _applyLiveMeta's epoch rule). _reattach resumes from it.
+    // THE WATERMARK MEANS APPLIED, NOT RECEIVED (perf r1, the verifier's race
+    // probe): it is advanced only AFTER the op ran. An op that throws (a
+    // renderer exception — the class ws.js's per-handler isolation swallows)
+    // POISONS the watermark: the ops after it may still apply, so no seq this
+    // view holds says "everything up to here is on screen" any more, and a
+    // resume from it would skip the lost card for the life of the epoch. A
+    // poisoned view re-attaches WITHOUT sinceSeq and rebuilds from the slab
+    // (_reattach), which clears the flag (_fullViewReset).
+    try {
+      if (op.op === 'create') {
+        this._onCreateMessage(op.message);
+        this._noteRecordKind(op.message);
+      } else if (op.op === 'edit') {
+        this._onEditMessage(op.id, op.fields);
+        // AFTER the assign: a coalescing collab edit carries the grown rows
+        this._noteRecordKind(this._messages.find((m) => m.id === op.id));
+      } else if (op.op === 'meta') {
+        this._onMeta(op);
+      }
+    } catch (e) {
+      this._seqPoisoned = true;
+      try { this._trace('op:failed', { op: op.op, opSeq: op.seq }); } catch { }
+      throw e;
     }
+    // (a poisoned watermark stays where the last fully-applied prefix ended)
+    if (typeof op.seq === 'number' && !this._seqPoisoned) { this._lastSeq = op.seq; this._seqEpoch = this._normEpoch; }
   }
 
   // Create a new normalized message → render and append to DOM
@@ -5268,6 +5337,38 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     return collectDroppedFiles(dt); // shared with the file explorer (utils.js)
   }
 
+  // RECONNECT HYGIENE (perf lane ⑤b, inc-mtndq0vb's third layer): after a
+  // socket drop every view used to re-attach in the same tick — 19 windows in
+  // one second, most of them hidden. A view the user can SEE re-attaches at
+  // once; a SUSPENDED one (the reason set: desktop / mobile / tab / minimized —
+  // the same derivation, never a fourth flag) takes a slot in the App's queue
+  // (src/lib/reconnect-queue.js, delays from the PURE reconnectSlot). The
+  // ladder below stamps `reattachAt` when the queued attach is SENT, so queue
+  // time is never read as server silence (2.234.1).
+  /** The slab this view's next attach asks for (perf r1): the PURE verdict
+   *  over the DERIVED suspended flag and the socket's attaches in flight. */
+  _attachSlabHint() {
+    return attachSlab({ suspended: !!this._suspended, inFlight: this.ws?.attachesInFlight?.() ?? 0 });
+  }
+
+  _reconnectAttach() {
+    const q = this.app?._reconnectQueue;
+    if (q && this._suspended && !this._readOnly && !this._disposed) {
+      if (this._chatInput) this._chatInput.setDisconnected(true); // as _reattach(true) would — nothing is sent from a window not yet re-registered
+      q.enqueue(this);
+      return;
+    }
+    this._reattach(true);
+  }
+
+  /** The queue's (or an un-hide's) deferred attach. A socket that dropped
+   *  again meanwhile has already reset the queue; this is the belt. */
+  _runQueuedReattach(why) {
+    if (this._disposed || this._disconnected) return;
+    try { this._trace('reconnect:attach', { why }); } catch { }
+    this._reattach(true);
+  }
+
   // Re-attach to session after reconnect: re-register with server + sync missed messages
   _reattach(keepDisabled = false) {
     // Read-only windows (view-history, terminated, rescued) have nothing to
@@ -5282,8 +5383,26 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     // this._normEpoch inside the temp handler would always match.
     const epochBefore = this._normEpoch;
 
-    // Re-attach so server adds this WS to session.clients again
-    this.ws.send({ type: 'attach', sessionId: this.sessionId });
+    // Re-attach so server adds this WS to session.clients again — RESUMING BY
+    // SEQ (perf lane chunk D) once this server has shown it stamps its ops
+    // (`opSeq` seen on an attach payload): the frames after the last one this
+    // view applied come back verbatim instead of a slab + a catch-up fetch.
+    // Never asked of a server that never advertised it (an old server).
+    const attachFrame = { type: 'attach', sessionId: this.sessionId };
+    // …unless an op this view was handed FAILED to apply (perf r1): the
+    // watermark then no longer means "everything up to here is on screen", so
+    // the resume asks for no seq — the server answers the full rung and the
+    // handler below rebuilds from its slab (the heal), never a replay from a
+    // position the view does not actually hold.
+    if (!this._seqPoisoned && this._serverOpSeq != null && typeof this._lastSeq === 'number' && this._seqEpoch) {
+      attachFrame.sinceSeq = this._lastSeq;
+      attachFrame.sinceEpoch = this._seqEpoch;
+    }
+    // THE SLAB IT ASKS FOR (perf r1): a view nobody is looking at (suspended —
+    // the queued reconnect of a hidden window) or one behind another attach in
+    // flight (a burst) takes the floor (tail(50)); a displayed one the text window.
+    attachFrame.slab = this._attachSlabHint();
+    this.ws.send(attachFrame);
     // NO-REPLY fallback (REWRITTEN 2.234.1, userL's mass false-death
     // incident): the old one-shot 20s timer declared "session no longer
     // exists (likely a restart)" on ANY slow reply — but a degraded server
@@ -5311,7 +5430,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       const freshAck = acked && Date.now() - this._lastAttachAckAt < 30000 && Date.now() - reattachAt < 15 * 60000;
       if (!freshAck) waits++;
       if (waits < 5) {
-        if (!acked) this.ws.send({ type: 'attach', sessionId: this.sessionId });
+        if (!acked) this.ws.send(attachFrame);
         setTimeout(checkOrRetry, 25000);
         return;
       }
@@ -5360,6 +5479,25 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         setTimeout(() => { if (!this._disposed) this._fullViewReset(msg); }, Math.random() * 500);
         return;
       }
+      // THE HELD RUNG (perf lane chunk D): the server's ring still held every
+      // frame after ours — it sent THOSE (verbatim) and no slab. Nothing is
+      // rebuilt, compared or fetched; the live facts apply and the frames run
+      // through _onOp exactly as they would have live. SYNCHRONOUS, so the live
+      // frames queued behind this one land after the replay, in order.
+      if (msg.slab === 'held' && Array.isArray(msg.replay)) {
+        this._applyHeldResume(msg);
+        return;
+      }
+      // A POISONED view (an op it was handed failed to apply — perf r1) asked
+      // for no seq, and a catch-up from `_windowEnd` cannot heal it either: the
+      // live creates after the lost one moved `_windowEnd` past it. The slab
+      // this payload carries is the truth, so the view is rebuilt from it —
+      // the epoch path's reset, once — and the flag clears there.
+      if (this._seqPoisoned && Array.isArray(msg.messages)) {
+        try { this._trace('reattach:heal', { n: msg.messages.length, total: msg.totalCount }); } catch { }
+        this._fullViewReset(msg);
+        return;
+      }
       // The attach payload's AUTHORITATIVE snapshot (§2.6 round 5). Every
       // other attach path applies it — loadHistory's rebuild, its
       // identical-skip branch, the read-only poll — and this one, the
@@ -5399,6 +5537,44 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     setTimeout(() => {
       if (this._chatInput) this._chatInput.setDisconnected(false);
     }, 30000);
+  }
+
+  /** Apply a `slab:'held'` attach (perf lane chunk D): the live facts, then the
+   *  ring's frames through _onOp — a replayed create dedups via
+   *  `_renderedMsgIds` and passes `_noteRecordKind`/fold like a live one, an
+   *  edit is an idempotent assign, an edit for a message outside the rendered
+   *  window no-ops (its final state comes with the page that brings it in).
+   *  A frame this view already applied (seq ≤ its last, same epoch) is skipped. */
+  _applyHeldResume(msg) {
+    if (msg.chatStatus) this.applyStatus(msg.chatStatus);
+    this._applyLiveMeta(msg);
+    const have = this._seqEpoch === msg.normEpoch && typeof this._lastSeq === 'number' ? this._lastSeq : null;
+    let applied = 0, skipped = 0, failed = 0;
+    for (const op of msg.replay) {
+      if (!op || op.type !== 'msg' || op.sessionId !== this.sessionId) { skipped++; continue; }
+      if (have != null && typeof op.seq === 'number' && op.seq <= have) { skipped++; continue; }
+      // a failing op poisons the watermark inside _onOp (never advanced past
+      // it); the rest still apply — later cards are real — and the NEXT attach
+      // asks for no seq, so the full rung rebuilds the lost one (perf r1)
+      try { this._onOp(op); applied++; } catch (e) { failed++; console.error('[chat] held replay op failed', e); }
+    }
+    if (typeof msg.opSeq === 'number' && !this._seqPoisoned) {
+      if (!(typeof this._lastSeq === 'number' && this._seqEpoch === msg.normEpoch && this._lastSeq > msg.opSeq)) this._lastSeq = msg.opSeq;
+      if (msg.normEpoch) this._seqEpoch = msg.normEpoch;
+    }
+    try { this._trace('reattach:held', { applied, skipped, failed, opSeq: msg.opSeq, poisoned: this._seqPoisoned ? 1 : 0 }); } catch { }
+    if (msg.isStreaming) this._onServerStreamLabel(msg.streamingLabel || t('thinking...'), msg.streamingKind || null);
+    else this._hideTyping();
+  }
+
+  /** The server cut this socket for this session (`lagged`, perf lane chunk D):
+   *  say so in telemetry and re-attach resuming by seq. A view that is offline
+   *  or read-only has nothing to resume (the reconnect path re-attaches). */
+  _onLagged(msg) {
+    try { this._trace('lagged', { lagSeq: msg.seq, normEpoch: msg.normEpoch, have: this._lastSeq }); } catch { } // (never a `seq` key: it would overwrite the ring entry's own)
+    try { window.__vsEvent?.('chat-lagged', { detail: `seq=${msg.seq} have=${this._lastSeq} sid=${String(this.sessionId).slice(0, 24)}` }); } catch { }
+    if (this._readOnly || this._disconnected || this._disposed) return;
+    this._reattach(false);
   }
 
   // Same-epoch reconnect: fetch just the messages we missed while offline
@@ -5456,6 +5632,9 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     // maintained list silently dropped outputStyle/autoResume on the sibling
     // attach path; the whitelist-drift class, 2.368.4).
     this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
+    // the slab is the truth now: a poisoned watermark is healed (perf r1) —
+    // only when the rebuild itself ran through (a throw above keeps it poisoned)
+    this._seqPoisoned = false;
   }
 
   _clearWaiting() {
@@ -5574,7 +5753,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     };
     this.ws.onGlobal(handler);
     this.ws.send({
-      type: 'attach', sessionId: viewId, viewOnly: true, backend,
+      type: 'attach', sessionId: viewId, viewOnly: true, backend, slab: this._attachSlabHint(),
       backendSessionId: bsid, claudeSessionId: backend === 'claude' ? bsid : undefined,
       host: ids.host || undefined, cwd: ids.cwd || '', name: this.winInfo?.title || '',
     });
@@ -6315,6 +6494,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
   dispose() {
     this._statusBar?.dispose?.();
     this._disposed = true;
+    try { this.app?._reconnectQueue?.cancel(this); } catch { } // a disposed view never takes its reconnect slot (perf ⑤b)
     try { this._cvReleaseIO?.disconnect(); } catch { }
     try { this._cvSlabIO?.disconnect(); } catch { }
     LIVE_CHAT_VIEWS.delete(this);

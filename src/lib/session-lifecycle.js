@@ -11,6 +11,7 @@ import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDial
 // collab-row), so "the instance default is a NEW-session default" is ONE law
 // with two callers instead of two `||` chains that drift.
 import { resumeSpawnPick } from '../resume-continuity.js';
+import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {
@@ -669,7 +670,10 @@ export function installSessionLifecycle(App, ctx = {}) {
     // answers error → the view-only rescue below; without the re-send a
     // window awaiting its FIRST 'attached' had no session object, so
     // app.js's reconnect loop never covered it (blank-shell class).
-    this.ws.request({ type: 'attach', sessionId: serverId }, (msg) => {
+    // perf r1: the slab this attach asks for — a window just created is
+    // displayed, so only the burst rule applies (a page reload / a cold open of
+    // many windows shares a few text windows; the rest take the floor).
+    this.ws.request({ type: 'attach', sessionId: serverId, slab: attachSlab({ inFlight: this.ws.attachesInFlight?.() ?? 0 }) }, (msg) => {
       // PROOF OF LIFE (2.234.1's ack, consumed here too): the server answers
       // this synchronously at the top of every attach, so a long wait after it
       // is the transcript pull / history rebuild working — not a dead
@@ -1494,6 +1498,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       type: 'attach',
       sessionId: viewId,
       viewOnly: true,
+      slab: attachSlab({ suspended: !!chatView._suspended, inFlight: this.ws.attachesInFlight?.() ?? 0 }), // perf r1 (a boot resume-all opens N at once)
       backend,
       backendSessionId,
       claudeSessionId: backend === 'claude' ? backendSessionId : undefined,

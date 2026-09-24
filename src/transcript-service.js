@@ -161,7 +161,11 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (offset !== undefined || limit !== undefined) {
       return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total };
     }
-    return { messages: mm.tail(50), total: mm.total };
+    // THE DEFAULT PAGE = the attach slab's rule (src/text-window.js) — the HTTP
+    // withStatus read AND the daemon's `transcript-op page` (agentd bundles this
+    // service), byte-identical by test-transcript-parity. An OLD daemon answers
+    // tail(50); the client renders any N (nothing assumes 50).
+    return { messages: mm.tailWindow(), total: mm.total };
   }
 
   async function turnmap(ref) {

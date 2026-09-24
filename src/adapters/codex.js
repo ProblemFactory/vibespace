@@ -232,6 +232,146 @@ function readJsonlBounded(fp, opts = {}) {
   } finally { fs.closeSync(fd); }
 }
 
+// ── THE INCREMENTAL TAIL (perf lane chunk C, 2.369.167) ──
+// readJsonlBounded's tailOnly rule as a BYTE SPAN, so a caller that already
+// holds the parse of a file can fold in only what was appended. The rule, in
+// bytes: a file ≤ HEAD+TAIL is kept whole (from 0); a bigger one keeps every
+// line whose FIRST byte lies strictly after `size − TAIL` (the tail read drops
+// the cut-off line up to and including the first '\n' at or after that byte —
+// a line starting exactly there is dropped too). `jsonlTailLower(size)` is that
+// bound (−1 = keep everything).
+function jsonlTailLower(size) { return size <= JSONL_HEAD_BYTES + JSONL_TAIL_BYTES ? -1 : size - JSONL_TAIL_BYTES; }
+
+/** Read [from, to) of an open fd fully (readSync may return short). */
+function _preadAll(fd, from, to) {
+  const buf = Buffer.allocUnsafe(Math.max(0, to - from));
+  let off = 0;
+  while (off < buf.length) {
+    const n = fs.readSync(fd, buf, off, buf.length - off, from + off);
+    if (!(n > 0)) break;                        // truncated under us — the caller sees a short buffer
+    off += n;
+  }
+  return off === buf.length ? buf : buf.subarray(0, off);
+}
+
+/** Parse the lines of `buf` (whose byte 0 is file offset `base` and a line
+ *  start). Every '\n'-terminated line is parsed exactly as the string path
+ *  does (`trim()`, blank skipped, unparseable skipped, `dropSubagent` = the
+ *  session-store isSubagentMessage rule); the bytes after the last '\n' (the
+ *  line the writer has not finished) are parsed too — the string path parses
+ *  them — but reported apart, never consumed. */
+function _parseJsonlLines(buf, base, dropSubagent) {
+  const records = [], starts = [];
+  const keep = (msg) => !(dropSubagent && (msg.parent_tool_use_id || msg.isSidechain));
+  let pos = 0;
+  for (;;) {
+    const nl = buf.indexOf(10, pos);
+    if (nl === -1) break;
+    if (nl > pos) {
+      const t = buf.toString('utf8', pos, nl).trim();
+      if (t) { try { const msg = JSON.parse(t); if (keep(msg)) { records.push(msg); starts.push(base + pos); } } catch { } }
+    }
+    pos = nl + 1;
+  }
+  let partial;
+  if (pos < buf.length) {
+    const t = buf.toString('utf8', pos, buf.length).trim();
+    if (t) { try { const msg = JSON.parse(t); if (keep(msg)) partial = msg; } catch { } }
+  }
+  return { records, starts, end: base + pos, partial };
+}
+
+const _PROBE = 4096;
+/** THE ONE tail reader with a memory. `prev` = the entry this function
+ *  returned last time for the same path (or null). Returns
+ *  `{entry, mode: 'hit'|'append'|'full', bytes}` — `bytes` = bytes read and
+ *  parsed (the probes, ≤ 2 × 4 KiB, are verification and not counted).
+ *  entry = {mtimeMs, size, ino, dev, spanStart, spanEnd, messages, starts,
+ *  partial, headProbe, tailProbe, incr}: `messages` = every kept record of the
+ *  complete lines in [spanStart, spanEnd) in file order, plus the parsed
+ *  unterminated tail line when it parses (`partial` = 1); `starts[i]` = the
+ *  file offset of messages[i]'s line. OUTPUT IDENTITY: `messages` is
+ *  deep-equal to readJsonlBounded(tailOnly) + the line parse at the same size.
+ *  An append is taken only when the file is the SAME inode, strictly grown,
+ *  the appended region is below the tail bound, and the bytes at both ends of
+ *  the cached span re-read equal (the append-only check); anything else is a
+ *  full read. `opts.appendOnly` = return null instead of a full read (the
+ *  async warm hands the full read to the worker). Never a new array in place:
+ *  a caller holding the old `messages` never sees it change. */
+function readJsonlTail(fp, prev, opts = {}) {
+  const dropSubagent = !!opts.dropSubagent;
+  // the hit is decided on a stat alone — before the zstd magic read, so an
+  // unchanged transcript costs one stat and no read at all
+  const isHit = (st) => !!prev && prev.mtimeMs === st.mtimeMs && prev.size === st.size && prev.ino === st.ino;
+  const stat0 = opts.stat || fs.statSync(fp);
+  if (isHit(stat0)) return { entry: prev, mode: 'hit', bytes: 0 };
+  const plain = plainJsonlPath(fp);           // a zstd rollout reads through its materialized twin (S3)
+  const stat = plain === fp ? stat0 : fs.statSync(plain);
+  if (plain !== fp && isHit(stat)) return { entry: prev, mode: 'hit', bytes: 0 };
+  fp = plain;
+  const size = stat.size;
+  const lower = jsonlTailLower(size);
+  const fd = fs.openSync(fp, 'r');
+  try {
+    if (prev && prev.incr && prev.ino === stat.ino && prev.dev === stat.dev && size > prev.size
+      && prev.spanEnd <= prev.size && lower < prev.spanEnd) {
+      const hp = prev.headProbe, tp = prev.tailProbe;
+      const headOk = _preadAll(fd, prev.spanStart, prev.spanStart + hp.length).toString('latin1') === hp;
+      const tailOk = headOk && _preadAll(fd, prev.spanEnd - tp.length, prev.spanEnd).toString('latin1') === tp;
+      if (headOk && tailOk) {
+        const buf = _preadAll(fd, prev.spanEnd, size);
+        const got = _parseJsonlLines(buf, prev.spanEnd, dropSubagent);
+        const nOld = prev.messages.length - (prev.partial ? 1 : 0);
+        let drop = 0;
+        while (drop < nOld && prev.starts[drop] <= lower) drop++;
+        // lower < prev.spanEnd (checked above) ⇒ no appended line can be at or below it
+        const messages = prev.messages.slice(drop, nOld).concat(got.records);
+        const starts = prev.starts.slice(drop, nOld).concat(got.starts);
+        if (got.partial !== undefined) messages.push(got.partial);
+        const end = got.end;
+        let spanStart = prev.spanStart;
+        let headProbe = hp;
+        if (lower >= spanStart) {                 // the head slid: re-anchor on the first kept line
+          spanStart = starts.length ? starts[0] : end;
+          headProbe = _preadAll(fd, spanStart, Math.min(end, spanStart + _PROBE)).toString('latin1');
+        }
+        const tailFrom = Math.max(spanStart, end - _PROBE);
+        const tailProbe = end - prev.spanEnd >= end - tailFrom
+          ? buf.toString('latin1', tailFrom - prev.spanEnd, end - prev.spanEnd)
+          : _preadAll(fd, tailFrom, end).toString('latin1');
+        const readEnd = prev.spanEnd + buf.length;
+        const entry = { mtimeMs: readEnd === size ? stat.mtimeMs : -1, size: readEnd, ino: stat.ino, dev: stat.dev, spanStart, spanEnd: end, messages, starts, partial: got.partial !== undefined ? 1 : 0, headProbe, tailProbe, incr: true };
+        return { entry, mode: 'append', bytes: buf.length };
+      }
+    }
+    if (opts.appendOnly) return null;
+    // FULL: exactly readJsonlBounded's tailOnly rule, on bytes
+    const from = Math.max(lower, 0);
+    const raw = _preadAll(fd, from, size);
+    let start = from, buf = raw, incr = true;
+    if (lower >= 0) {
+      const nl = raw.indexOf(10);
+      if (nl === -1) incr = false;              // one line longer than the tail: the string path keeps the fragment — never extended
+      else { buf = raw.subarray(nl + 1); start = from + nl + 1; }
+      if (opts.warnLarge !== false) console.warn(`[jsonl] large session file ${path.basename(fp)} (${Math.round(size / 1048576)}MB): tail-only display (last ${JSONL_TAIL_BYTES / 1048576}MB), earlier history seek-loaded on scroll`);
+    }
+    const got = _parseJsonlLines(buf, start, dropSubagent);
+    const messages = got.records;
+    if (got.partial !== undefined) messages.push(got.partial);
+    const end = got.end;
+    const readEnd = from + raw.length;
+    const entry = {
+      // a short read (truncated under us) is never a hit next time
+      mtimeMs: readEnd === size ? stat.mtimeMs : -1, size: readEnd, ino: stat.ino, dev: stat.dev, spanStart: start, spanEnd: end,
+      messages, starts: got.starts, partial: got.partial !== undefined ? 1 : 0,
+      headProbe: buf.toString('latin1', 0, Math.min(end - start, _PROBE)),
+      tailProbe: buf.toString('latin1', Math.max(0, end - start - _PROBE), end - start),
+      incr,
+    };
+    return { entry, mode: 'full', bytes: raw.length };
+  } finally { fs.closeSync(fd); }
+}
+
 
 // ── Byte-offset line index for seek-based lazy loading of huge JSONL files ──
 // A full readFileSync is impossible (>512MB string) and a full normalize is
@@ -313,7 +453,7 @@ function _transcriptPoolGet() {
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'),
         poolSize: 2,
         inlineRun: runOp,
-        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000 },
+        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000 },
       });
     } catch (e) {
       _transcriptPool = false; // construction failed once — stay inline forever
@@ -336,6 +476,15 @@ async function scanJsonlUserTurnsAsync(fp, backend) {
   const pool = _transcriptPoolGet();
   if (pool) { try { return await pool.call('userTurns', { fp, backend }); } catch {} }
   return scanJsonlUserTurns(fp, backend);
+}
+/** readJsonlTail's FULL read in the worker (the async warm's cold path, chunk
+ *  C): resolves `{entry, mode, bytes}` — the same span entry the sync reader
+ *  builds, so the next change folds in as an append — or null when the pool
+ *  is down (the caller's sync path then parses inline). */
+async function readJsonlTailAsync(fp, { dropSubagent = false } = {}) {
+  const pool = _transcriptPoolGet();
+  if (pool) { try { return await pool.call('jsonlTail', { fp, dropSubagent }); } catch {} }
+  return null;
 }
 async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent = false } = {}) {
   const pool = _transcriptPoolGet();
@@ -1161,7 +1310,7 @@ class CodexAdapter extends BackendAdapter {
 }
 
 module.exports = {
-  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, transcriptWorkerCall,
+  jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
@@ -1170,6 +1319,7 @@ module.exports = {
   parseCodexSessionJsonl,
   extractCodexThreadMeta,
   readJsonlBounded,
+  readJsonlTail, jsonlTailLower, JSONL_TAIL_BYTES,
   jsonlGapInfo,
   readJsonlLineRange,
   scanJsonlUserTurns,

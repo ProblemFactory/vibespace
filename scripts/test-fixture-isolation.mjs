@@ -428,7 +428,10 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   // still spawn a server with no HOME in its env. Unreachable (shallow clone,
   // tarball) ⇒ the loud SKIP below, never a red.
   const PRE_FIX_REF = process.env.VIBESPACE_FIXTURE_PREFIX_REF || 'e87d9893';
-  const spawnsServer = (t) => /\[\s*['"`]server\.js['"`]\s*\]/.test(t);
+  // `server.js` as the LAST argv element — `['server.js']` and a preloaded
+  // `['-r', preload, 'server.js']` alike (perf chunk C: the storm harness's
+  // loop-delay preload hid its server from this census for a whole chunk)
+  const spawnsServer = (t) => /['"`]server\.js['"`]\s*\]/.test(t);
   const writesTranscript = (t) => /['"`]\.claude['"`]\s*,\s*['"`]projects['"`]/.test(t) && /writeFileSync|writeSync|openSync/.test(t);
   const namesHome = (t) => {
     // the HOME must be in the env of a server.js spawn, not merely mentioned
@@ -509,13 +512,18 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   const carriers = suites.filter((f) => /fixtureSid\(/.test(src(f)) && f !== CENSUS_SELF);
   console.log(`  census (c): suites carrying a synthetic session id into a server's home: ${carriers.join(', ') || '(none)'}`);
   ok(carriers.length >= 3, `the census found the fixture-carrying suites (${carriers.length})`, JSON.stringify(carriers));
-  ok(carriers.every((f) => serverWriters.includes(f)),
-    'every fixture carrier is in the isolation census too (the two sets are about one class of suite)');
+  // An IN-PROCESS carrier (no server: the code under test is required into the
+  // suite itself — test-jsonl-incremental) isolates ITS OWN process instead: HOME
+  // and os.homedir are re-pointed at a scratchHome before the code loads.
+  const inProcessHome = (t) => !spawnsServer(t) && /process\.env\.HOME\s*=/.test(t) && /os\.homedir\s*=/.test(t);
+  ok(carriers.every((f) => serverWriters.includes(f) || inProcessHome(src(f))),
+    'every fixture carrier is in the isolation census too, or re-homes its OWN process (the two sets are about one class of suite)',
+    JSON.stringify(carriers.filter((f) => !serverWriters.includes(f) && !inProcessHome(src(f)))));
   const SID_LITERAL = /['"`]e2e00000-0000-4000-8000-/i;
   for (const f of carriers) {
     const t = src(f);
-    ok(/scratchHome\(/.test(t) && /HOME:\s*fakeHome/.test(t),
-      `${f} runs its server under an ISOLATED home (scratchHome + HOME: fakeHome)`);
+    ok(/scratchHome\(/.test(t) && (/HOME:\s*fakeHome/.test(t) || inProcessHome(t)),
+      `${f} runs its server under an ISOLATED home (scratchHome + HOME: fakeHome, or its own process re-homed)`);
     ok(!SID_LITERAL.test(t), `${f} MINTS its session id (fixtureSid), never a hand-spelled literal that could drift from the guard`);
     ok(/for \(const sig of \[/.test(t) && /SIGTERM/.test(t) && /SIGINT/.test(t),
       `${f} cleans up on SIGNALS too ('exit' does not fire for a default-terminated SIGINT/SIGTERM)`);

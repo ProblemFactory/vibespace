@@ -41,8 +41,8 @@ ok(byMid.msg_1?.host === 'host-x', 'the machine dimension is preserved (device f
 ok(byMid.msg_2?.acct === 'host-x' && byMid.msg_2?.atype === 'host',
   'a session VibeSpace never spawned keeps the honest host bucket (never invented into an account)');
 ok(byMid.msg_0?.acct === 'host-x', 'a request predating the attribution entry is NOT back-billed to the account');
-ok(uh.eventForMid('msg_1')?.acct === ACCT, 'the message-billing popup lookup (by message.id) resolves the account');
-ok(uh.eventForRid('h:host-x:req_1')?.acct === ACCT, 'the request-id lookup resolves it too');
+ok((await uh.eventForMid('msg_1'))?.acct === ACCT, 'the message-billing popup lookup (by message.id) resolves the account');
+ok((await uh.eventForRid('h:host-x:req_1'))?.acct === ACCT, 'the request-id lookup resolves it too');
 
 // re-attribution on load must not undo it
 const uh2 = new UsageHistory({ dataDir, homeDir: home, resolveAccount: (id) => (id === ACCT ? { type: 'subscription', name: 'Fish Max' } : null) });

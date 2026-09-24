@@ -86,7 +86,30 @@ ok('a window with no history above it asks for nothing', !decide({ ...attached, 
 ok('a desktop-hidden (suspended) window decides nothing — its geometry is meaningless (inc-mtd1d0ft)', !decide({ ...attached, _suspended: true }, mkList(50, 240, 700)));
 ok('a disposed view decides nothing', !decide({ ...attached, _disposed: true }, mkList(50, 240, 700)));
 ok('teleport mode is left to its own seek paths (window indices are stale there)', !decide({ ...attached, _teleported: true }, mkList(50, 240, 700)));
-ok('the harm bound holds: never extend where the extra page could trip a trim and eat the live tail (inc-mtox23xw)', !decide(attached, mkList(120, 240, 700)));
+// THE HARM BOUND, RE-DERIVED (perf lane A): the attach slab is a TEXT window
+// now (src/text-window.js, 50–maxRecords records), so the old
+// `rendered + 50 > 150` refused every slab of 101+ cards — constant-false for
+// exactly the slab that can still be short (a pure-tool conversation capped at
+// maxRecords, folded into a few run headers). The bound is the largest slab
+// any attach path ships; below it the live tail is protected by HEIGHT (a
+// window that does not fill lies wholly inside the keep zone) and by the pin
+// (a pinned _extendTop never trims).
+{
+  const { TEXT_WINDOW } = await import(path.join(REPO, 'src/text-window.js'));
+  const cap = TEXT_WINDOW.maxRecords;
+  ok('the bound is ONE named number read from the text window (SHORT_FILL_MAX_CARDS = TEXT_WINDOW.maxRecords), not a literal', /const SHORT_FILL_MAX_CARDS = TEXT_WINDOW\.maxRecords;/.test(cv) && /if \(rendered > SHORT_FILL_MAX_CARDS\) return false;/.test(cv) && !/rendered \+ 50 > 150/.test(cv));
+  ok(`THE CAPPED SHORT SLAB: ${cap} cards folded into 240 px of a 700 px viewport still asks for one page (satisfiable, never constant-false)`, decide(attached, mkList(cap, 240, 700)));
+  ok('…the pre-fix bound refused exactly that slab (the regression this pins: 400 + 50 > 150)', cap + 50 > 150);
+  ok('a 300-card slab that FILLS its viewport asks for nothing (the geometry clause, not the count, decides)', !decide(attached, mkList(300, 4200, 700)));
+  ok('a window grown PAST any attach slab by paging is the paging machinery\'s, never the rescue\'s', !decide(attached, mkList(cap + 1, 240, 700)));
+  // the in-zone removal is FOLD_DOM_CEILING's `must`; one rescue (a pinned view adds exactly one page,
+  // an unpinned one at most one grow burst) can never reach it from a slab of ≤ maxRecords cards
+  const ceiling = Number(cv.match(/const FOLD_DOM_CEILING = (\d+);/)[1]);
+  const passes = Number(cv.match(/const FOLD_GROW_PASSES = (\d+);/)[1]);
+  let burst = 0; for (let i = 0, slab = 50; i < passes; i++) { burst += slab; slab = Math.min(200, slab * 2); }
+  ok(`the only in-zone trim (FOLD_DOM_CEILING ${ceiling}) is out of reach: ${cap} + one grow burst (${burst}) = ${cap + burst} < ${ceiling}`, cap + burst < ceiling);
+  ok('…and a PINNED view (every fresh attach) never trims inside _extendTop, nor grows past one page there', /if \(this\._pinned\) this\._trace\('trimSkipPinned'/.test(cv) && /if \(!short \|\| this\._pinned \|\| this\._windowStart <= 0 \|\| passes >= FOLD_GROW_PASSES/.test(cv));
+}
 
 // FUNCTIONAL: the two-reading corroboration (the artifact the 2.369.36 fix saw
 // was a TALL pinned window reading sh<=ch while heights were unresolved).
@@ -135,6 +158,41 @@ ok('the legacy dialog overlay closes only when the interaction STARTED on it (in
 // every session; identical slabs must not rebuild N windows' DOM)
 ok('loadHistory skips the rebuild for an IDENTICAL slab (same epoch/total/tail ids, tail-anchored)', /loadHistory:identical-skip/.test(cv) && /lastCur\.id === lastNew\.id/.test(cv) && /this\._windowEnd === this\._total/.test(cv));
 ok('…the skip still applies meta/status/live state and the typing indicator', /identical-skip[\s\S]{0,900}applyStatus\(meta\.chatStatus\)[\s\S]{0,600}_applyLiveMeta\?\.\(meta\)/.test(cv));
+// FUNCTIONAL (perf lane A): the identical-skip stays REACHABLE with the text-window slab. The window is a
+// pure function of the message list, so two independent conversions of one transcript (content-derived ids,
+// R0) ship the SAME ~300-card slab and a same-epoch re-attach skips the rebuild — run through the REAL
+// loadHistory prototype on a view that rendered the first slab.
+{
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
+  const recs = [];
+  let u = 0;
+  for (let t = 0; t < 60; t++) {
+    recs.push({ type: 'user', uuid: 'tu' + (u++), message: { role: 'user', content: [{ type: 'text', text: 'turn ' + t }] } });
+    for (let k = 0; k < 12; k++) {
+      recs.push({ type: 'assistant', uuid: 'tu' + (u++), message: { id: `m${t}_${k}`, role: 'assistant', content: [{ type: 'tool_use', id: `x${t}_${k}`, name: 'Bash', input: { command: 'ls ' + k } }] } });
+      recs.push({ type: 'user', uuid: 'tu' + (u++), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `x${t}_${k}`, content: 'ok' }] } });
+    }
+  }
+  const a = new MessageManager('skip'); a.convertHistory(recs);
+  const b = new MessageManager('skip'); b.convertHistory(recs);
+  const first = a.tailWindow(), again = b.tailWindow();
+  const total = a.total;
+  const reattach = (slab, tot, epoch) => {
+    const traces = [];
+    const view = Object.assign(Object.create(ChatView.prototype), {
+      _normEpoch: 'e1', _teleported: false, _messages: first.slice(), _total: total, _windowStart: total - first.length, _windowEnd: total,
+      _trace: (tag) => traces.push(tag), _hideTyping: () => {}, _applyLiveMeta: () => {},
+    });
+    try { ChatView.prototype.loadHistory.call(view, slab, tot, false, { normEpoch: epoch }); } catch { /* a rebuild needs the DOM — reaching it IS the non-skip */ }
+    return traces.includes('loadHistory:identical-skip');
+  };
+  ok(`the attach slab is ~300 cards here (${first.length} records, total ${total}) — well past tail(50)`, first.length >= 290 && first.length <= 400);
+  ok('a same-epoch re-attach of the SAME transcript ships the same slab and SKIPS the rebuild (2.369.2 stays reachable)', again.length === first.length && reattach(again, total, 'e1'));
+  ok('…control: a new epoch rebuilds', !reattach(again, total, 'e2'));
+  b.processLive({ type: 'user', uuid: 'tu-new', message: { role: 'user', content: [{ type: 'text', text: 'one more' }] } });
+  ok('…control: one more message (a different list ⇒ a different slab) rebuilds', !reattach(b.tailWindow(), b.total, 'e1'));
+}
 
 // ── the RESUME transition (inc-mtq5bpjt-0o0n "切换桌面后，新桌面的窗口内容跳到
 // 历史消息了"): suspending covered the HIDDEN state; the un-hide TRANSITION was

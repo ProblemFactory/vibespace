@@ -153,7 +153,7 @@ ok(/pricingToken\(\) \{/.test(uhs) && /this\._priceTokFor === this\._pricing/.te
 // inc-mtq5bpjt-0o0n it ALSO defers through the desktop-resume settle window —
 // same law, second source of transitional geometry.
 const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
-ok(/_shortViewNeedsFill\(list\) \{/.test(cv) && /rendered \+ 50 > 150/.test(cv) && /tryAutoFill\(2\), 700\);/.test(cv) && /autoFill/.test(cv), 'chat-view: the auto-fill page-up after attach waits for heights to settle, corroborates the reading and stays under the trim cap (never a pinned tall window)');
+ok(/_shortViewNeedsFill\(list\) \{/.test(cv) && /if \(rendered > SHORT_FILL_MAX_CARDS\) return false;/.test(cv) && /tryAutoFill\(2\), 700\);/.test(cv) && /autoFill/.test(cv), 'chat-view: the auto-fill page-up after attach waits for heights to settle, corroborates the reading and keeps its harm bound (the largest attach slab, SHORT_FILL_MAX_CARDS — perf lane A re-derived it from the old `rendered + 50 > 150`; never a pinned tall window)');
 ok(/const tryAutoFill = \(retries\) => \{[\s\S]{0,400}this\._resumeSettleUntil \|\| 0\) - Date\.now\(\)/.test(cv), 'chat-view: …and it defers through a desktop-resume settle instead of deciding on transitional geometry (inc-mtq5bpjt-0o0n)');
 fs.rmSync(dataDir, { recursive: true, force: true });
 fs.rmSync(priceDir, { recursive: true, force: true });

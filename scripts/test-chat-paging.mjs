@@ -763,6 +763,103 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
   void prevCleanup;
 }
 
+// ── 4f. FIRST PAINT BY TEXT COUNT (perf lane A, 2.369.167): the attach slab is a
+// TEXT window (src/text-window.js), not tail(50). On the §1c fixture, opened
+// exactly as §4c opens it, the view must — after attach and BEFORE any gesture —
+// hold ≥ minText text cards, be ≥ 2 viewports tall (the reader can scroll into
+// history without a page), and need NO rescue (no autoFill, no grown landing).
+// THE CONTROL is a scratch copy whose server keeps tail(50) (the client is the
+// fix's): it must fail the text and height legs, or the legs test nothing.
+// First paint (history-render-ms, kept on the view) and the attach frame's
+// length (ws.js `__vsAttachFrames`) are printed; the frame is bounded.
+console.log('§4f first paint by text count: the §1c attach slab holds ≥ minText text cards, is ≥ 2 viewports tall and needs no rescue; the control (server tail(50)) must not');
+{
+  const TW_SRC = fs.readFileSync(path.join(repo, 'src/text-window.js'), 'utf8');
+  const { TEXT_WINDOW } = require('../src/text-window.js');
+  const FIRST = `(() => {
+    const tw = (function () { const module = { exports: {} }; ${TW_SRC}; return module.exports; })();
+    const v = window.__v, list = window.__list;
+    const byId = new Map((v._messages || []).map((m) => [m.id, m]));
+    const cards = [...list.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)')];
+    const ring = v._traceRing || [];
+    const frames = (window.__vsAttachFrames || []).filter((f) => f.sid === v.sessionId);
+    return { renderMs: v._lastHistoryRenderMs == null ? null : Math.round(v._lastHistoryRenderMs), n: cards.length, textCards: cards.filter((c) => tw.isTextCard(byId.get(c.dataset.msgId))).length,
+      sh: list.scrollHeight, ch: list.clientHeight, autoFill: ring.filter((e) => e.tag === 'autoFill').length, grown: ring.filter((e) => e.tag === 'extendTop:grown').length,
+      extends: ring.filter((e) => e.tag === 'extendTop:done').length, ws: v._windowStart, total: v._total, frame: frames[frames.length - 1] || null, frames: frames.length };
+  })()`;
+  const firstPaint = async (port, label) => {
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${port}/` });
+    for (let i = 0; i < 60; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(400); }
+    await sleep(1500);
+    const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge first ' + label));
+    if (!opened?.ok) return { opened };
+    const m = await evaljs(FIRST);
+    console.log(`  [${label}] first paint ${m.renderMs} ms; ${m.n} cards (${m.textCards} text) = window ${m.ws}..${m.total}; sh/ch ${m.sh}/${m.ch} = ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}, grown ${m.grown}, extends ${m.extends}; attached frame ${m.frame ? (m.frame.len / 1024).toFixed(0) + ' KB / ' + m.frame.n + ' records' : 'NOT SEEN'}`);
+    return { opened, m };
+  };
+  const fix = await firstPaint(PORT, 'fix');
+  check('§4f the fix opened the §1c fixture and saw its attached frame', !!fix.m && !!fix.m.frame, JSON.stringify(fix.opened));
+  if (fix.m) {
+    const m = fix.m;
+    check(`§4f …and is ≥ 2 viewports tall (sh/ch ${(m.sh / m.ch).toFixed(2)})`, m.sh / m.ch >= 2, JSON.stringify(m));
+    check('§4f …and needed no rescue: zero autoFill, zero grown landings, zero extends before the first gesture', m.autoFill === 0 && m.grown === 0 && m.extends === 0, JSON.stringify(m));
+    check(`§4f the attached frame is bounded: ${(m.frame.len / 1048576).toFixed(2)} MB ≤ 1.9 MB and the slab ≤ maxRecords (${m.frame.n}) (the tight bound — ≤ 128 KiB over tail(50) — is asserted against the control below)`, m.frame.len <= 1.9 * 1048576 && m.frame.n <= TEXT_WINDOW.maxRecords, JSON.stringify(m.frame));
+    // the reconnect no-op (2.369.2) with the bigger slab: a SECOND attach of the same conversation (the reconnect
+    // re-attach's round trip, sent by hand — the reconnect ladder skips read-only windows, and this view-only
+    // window has no live session to re-attach) must ship the SAME slab, and loadHistory must skip the rebuild
+    const re = await evaljs(`(async () => {
+      const v = window.__v, mark = v._traceSeq || 0;
+      const d = await new Promise((resolve) => {
+        const h = (m) => { if (m.type === 'attached' && m.sessionId === v.sessionId) { window.app.ws.offGlobal(h); resolve(m); } };
+        window.app.ws.onGlobal(h);
+        window.app.ws.send({ type: 'attach', sessionId: v.sessionId, viewOnly: true, backend: 'claude', backendSessionId: ${JSON.stringify(SID3)}, claudeSessionId: ${JSON.stringify(SID3)}, cwd: ${JSON.stringify(CWD)} });
+        setTimeout(() => { window.app.ws.offGlobal(h); resolve(null); }, 30000);
+      });
+      if (!d) return { ok: false };
+      const cur = v._messages || [];
+      const same = d.messages.length === cur.length && d.messages[0]?.id === cur[0]?.id && d.messages[d.messages.length - 1]?.id === cur[cur.length - 1]?.id;
+      v.loadHistory(d.messages, d.totalCount, false, { chatStatus: d.chatStatus });
+      const ring = (v._traceRing || []).filter((e) => e.seq > mark);
+      return { ok: true, n: d.messages.length, same, skip: ring.some((e) => e.tag === 'loadHistory:identical-skip') };
+    })()`);
+    console.log(`  [fix] second attach: ${re.n} records, same slab ${re.same}; identical-skip ${re.skip}`);
+    check('§4f a second attach of the same conversation ships the SAME slab (the window is a pure function of the list) and loadHistory skips the rebuild (2.369.2 stays reachable)', re.ok && re.same && re.n === m.frame.n && re.skip, JSON.stringify(re));
+  }
+  // THE CONTROL: the fix's client, a server whose attach paths keep tail(50)
+  const [TPORT] = await freePorts(1);
+  const twt = scratch('chatpage-tail50');
+  try { execSync(`git worktree remove --force ${twt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+  execSync(`git worktree add --detach ${twt} HEAD`, { cwd: repo, stdio: 'ignore' });
+  for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${twt}/${f} && cp -r ${repo}/${f} ${twt}/${f}`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(twt, 'node_modules'));
+  const TAIL50 = [['src/ws-handler.js', 'session._normalizer.tailWindow(attachWindowOpts(data.slab))', 'session._normalizer.tail(50)'], ['src/ws-handler.js', 'messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount', 'messages: mm.tail(50), totalCount'], ['src/transcript-service.js', 'messages: mm.tailWindow(), total', 'messages: mm.tail(50), total']];
+  let tp = 0;
+  for (const [f, from, to] of TAIL50) { const fp = path.join(twt, f); const src = fs.readFileSync(fp, 'utf8'); if (src.split(from).length === 2) { fs.writeFileSync(fp, src.replace(from, to)); tp++; } }
+  check(`§4f control setup: all ${TAIL50.length} tail(50) anchors found exactly once (a control that cannot be built proves nothing)`, tp === TAIL50.length, `${tp} patched`);
+  execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: twt, stdio: 'ignore' });
+  const tsrv = spawn(process.execPath, ['server.js'], { cwd: twt, env: { ...process.env, PORT: String(TPORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+  const cleanupTail = () => { try { tsrv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${twt}`, { cwd: repo, stdio: 'ignore' }); } catch {} };
+  process.on('exit', cleanupTail);
+  for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${TPORT}/api/home`); break; } catch { await sleep(250); } }
+  const ctl = await firstPaint(TPORT, 'control tail(50)');
+  check('§4f control: the fixture opened on the tail(50) copy', !!ctl.m && !!ctl.m.frame, JSON.stringify(ctl.opened));
+  if (ctl.m) {
+    const m = ctl.m;
+    check(`NEGATIVE CONTROL §4f: tail(50) ships 50 records holding fewer than minText text cards (${m.textCards}) and under 2 viewports (${(m.sh / m.ch).toFixed(2)}) — the legs can go red`, m.frame.n === 50 && m.textCards < TEXT_WINDOW.minText && m.sh / m.ch < 2, JSON.stringify(m));
+    // perf r1: the window is bounded by GROWTH (≤ maxGrowthBytes past the floor), so on a cut whose next
+    // records past the budget are heavy it may stop short of minText — it must then still hold MORE text than
+    // tail(50) and have paid at most the growth budget over the control's frame (same turnMap, same live facts)
+    if (fix.m && fix.m.frame && m.frame) {
+      const extra = fix.m.frame.len - m.frame.len;
+      check(`§4f the attach slab holds ≥ minText (${TEXT_WINDOW.minText}) text cards, or — stopped by the growth budget — more than tail(50) (${fix.m.textCards} vs ${m.textCards}) for ≤ maxGrowthBytes over the control's frame (+${(extra / 1024).toFixed(0)} KB ≤ ${TEXT_WINDOW.maxGrowthBytes / 1024} KB)`,
+        (fix.m.textCards >= TEXT_WINDOW.minText || fix.m.textCards > m.textCards) && extra <= TEXT_WINDOW.maxGrowthBytes * 1.02, JSON.stringify({ fix: fix.m.frame, ctl: m.frame }));
+    }
+    if (fix.m) console.log(`  first paint fix ${fix.m.renderMs} ms vs control ${m.renderMs} ms; attached frame fix ${(fix.m.frame.len / 1024).toFixed(0)} KB vs control ${(m.frame.len / 1024).toFixed(0)} KB (×${(fix.m.frame.len / m.frame.len).toFixed(1)}); text cards ${fix.m.textCards} vs ${m.textCards}; sh/ch ${(fix.m.sh / fix.m.ch).toFixed(2)} vs ${(m.sh / m.ch).toFixed(2)}; rescue ${fix.m.autoFill}/${m.autoFill}`);
+  }
+  cleanupTail();
+  process.off('exit', cleanupTail);
+}
+
 // ── 5. THE REAL HOME IS UNTOUCHED. Not "no new entry at all": this box runs
 // many real sessions concurrently and a genuine project dir may appear
 // mid-run. What must be impossible is a FIXTURE entry — anything this suite

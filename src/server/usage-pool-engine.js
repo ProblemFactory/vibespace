@@ -4474,11 +4474,15 @@ function armWorkflowUsageWatcher(session, sessionId, runId) {
 // unchanged). §ban-safety: local reads only — the ledger scan mines the CLI's
 // own transcripts (self-throttled), the decision reads cache files; no
 // network anywhere.
-setInterval(() => {
+setInterval(async () => {
   try {
     const pools = (accounts.list().accounts || []).filter((a) => a.type === 'pooled' && a.auto);
     if (!pools.length) return;
-    try { usageHistory.scan(); } catch { } // freshen the odometer first (incremental, 15s-throttled)
+    // freshen the odometer first (incremental, 15s-throttled) — and read it
+    // only once the walk has SETTLED: the scan yields every MiB (perf ⑥), and
+    // an odometer read mid-walk would decide on a ledger missing its newest
+    // bytes (or re-decide on the one a scan in flight is about to commit)
+    try { usageHistory.scan(); await usageHistory.scanSettled(); } catch { }
     for (const a of pools) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
   } catch { }
   // 30s (was 60s): the 2026-08-09 #2 exhaustion burned HALF the Fable bucket

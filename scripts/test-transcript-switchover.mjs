@@ -64,7 +64,7 @@ const deviceHosts = (behavior) => ({
 {
   calls.length = 0;
   const live = new Map([['x', { backend: 'claude', backendSessionId: 's1', host: 'host-a', _historyLoaded: true,
-    _normalizer: { total: 3, messages: [{ id: 'm1' }], tail: () => [{ id: 'm1' }], slice: () => [], turnMap: () => [], search: () => [] } }]]);
+    _normalizer: { total: 3, messages: [{ id: 'm1' }], tail: () => [{ id: 'm1' }], tailWindow: () => [{ id: 'm1' }], slice: () => [], turnMap: () => [], search: () => [] } }]]);
   const svc = mkSvc({ hosts: deviceHosts({}), activeSessions: live });
   const r = await svc.page({ backend: 'claude', sessionId: 's1', cwd: '/w', host: 'host-a' }, {});
   ok(calls.length === 0 && r.total === 3, 'a LIVE remote session keeps the server-side normalizer + stdout overlay (device skipped)');

@@ -23,12 +23,21 @@
 // Bound: a client that stays pong-less across MAX_TAINTED_MISSES consecutive
 // tainted rounds is terminated anyway — a server that stalls every round for
 // minutes is not a reason to keep a dead socket forever.
+//
+// THE PULSE IS ALSO A MEASUREMENT (perf lane ⑤b, 2.369.167): every round's
+// longest loop gap ≥ LOOP_GAP_METRIC_FLOOR_MS is recorded as telemetry metric
+// `srv-loop-gap-ms` (Diagnostics percentiles; the reconnect-storm harness reads
+// it). Before, the number existed only inside a warn line printed when it
+// crossed the 5 s taint — every sub-stall storm was invisible. The floor keeps
+// an idle server's timer jitter out of the ledger (≤ one record per 30 s round).
 const INTERVAL_MS = 30000;
 const STALL_GRACE_MS = 5000;
 const PULSE_MS = 1000;
 const MAX_TAINTED_MISSES = 6;
+const LOOP_GAP_METRIC = 'srv-loop-gap-ms';
+const LOOP_GAP_METRIC_FLOOR_MS = 50;
 
-function createWsHeartbeat(wss, { intervalMs = INTERVAL_MS, stallGraceMs = STALL_GRACE_MS, pulseMs = PULSE_MS, maxTaintedMisses = MAX_TAINTED_MISSES, now = Date.now, log = console } = {}) {
+function createWsHeartbeat(wss, { intervalMs = INTERVAL_MS, stallGraceMs = STALL_GRACE_MS, pulseMs = PULSE_MS, maxTaintedMisses = MAX_TAINTED_MISSES, now = Date.now, log = console, metric = (name, value) => global.__vsMetric?.(name, value), gapFloorMs = LOOP_GAP_METRIC_FLOOR_MS } = {}) {
   let expectedAt = null;
   let lastPulse = null, maxGapMs = 0;
   /** Loop-gap pulse: called every ~pulseMs; a long gap = the loop was blocked. */
@@ -44,6 +53,7 @@ function createWsHeartbeat(wss, { intervalMs = INTERVAL_MS, stallGraceMs = STALL
     expectedAt = t + intervalMs;
     pulse();
     const gap = maxGapMs; maxGapMs = 0;
+    if (gap >= gapFloorMs) { try { metric(LOOP_GAP_METRIC, Math.round(gap)); } catch {} }
     const stalled = lateMs > stallGraceMs || gap > stallGraceMs;
     let terminated = 0, pinged = 0;
     if (stalled) {
@@ -80,4 +90,4 @@ function createWsHeartbeat(wss, { intervalMs = INTERVAL_MS, stallGraceMs = STALL
   return { tick, pulse, start, INTERVAL_MS: intervalMs, STALL_GRACE_MS: stallGraceMs };
 }
 
-module.exports = { createWsHeartbeat, INTERVAL_MS, STALL_GRACE_MS, PULSE_MS, MAX_TAINTED_MISSES };
+module.exports = { createWsHeartbeat, INTERVAL_MS, STALL_GRACE_MS, PULSE_MS, MAX_TAINTED_MISSES, LOOP_GAP_METRIC, LOOP_GAP_METRIC_FLOOR_MS };

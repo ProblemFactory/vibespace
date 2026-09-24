@@ -25,6 +25,7 @@ const SESSION_FIELDS = {
   _opencodePtyId:      { owner: 'ws',     persisted: null,      note: 'S9 remainder (c): the OpenCode serve pty this terminal session bridges (pty_… on the serve, not a local process)' },
   _normalizer:         { owner: 'stdout', persisted: null,      note: 'MessageManager instance for the live stream' },
   _normEpoch:          { owner: 'stdout', persisted: null,      note: 'normalizer identity epoch — client full-reset discriminator (2.89.x)' },
+  _opRing:             { owner: 'stdout', persisted: null,      note: "the session's OP RING (src/op-seq.js, perf lane chunk D): the last ≤ 2000 / ≤ 4 MiB `msg` frames the broadcast choke point (src/server/session-broadcast.js) stamped with `seq`, kept as the exact text sent — a same-epoch re-attach with `sinceSeq` inside it gets them replayed (`attached {slab:'held', replay}`) instead of a slab. Created on the first stamped frame, reset with `_normEpoch` by rebuildHistory; in-memory by nature (a restart is a new epoch)" },
   _subNormalizers:     { owner: 'stdout', persisted: null,      note: 'per-subagent normalizers map' },
   _taskRecordsTimer:   { owner: 'stdout', persisted: null,      note: 'debounce for the taskRecords session-meta write' },
   _taskRecords:        { owner: 'stdout', persisted: 'session-meta taskRecords', note: 'latest task_started / task_progress (tree kept field-wise) / task_notification per tool_use_id — replayed into the normalizer after a rebuild (2.369.140: the records are live-only and the stdout ring drops them)' },

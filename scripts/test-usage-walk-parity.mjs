@@ -19,12 +19,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { UsageHistory } = require(path.join(REPO, 'src/usage-history.js'));
 
 let pass = 0, fail = 0;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n, why) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (why ? ' — ' + why : '')); } };
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-'));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-data-'));
@@ -52,7 +53,7 @@ write(path.join(proj, SID, 'subagents', 'workflows', 'wf_run1', 'journal.jsonl')
 
 // ── LOCAL walk ──
 const uh = new UsageHistory({ dataDir, homeDir: home });
-uh.scan({ force: true });
+await uh.scan({ force: true });
 const localEvents = uh._loadEvents ? uh._loadEvents() : null;
 const localRids = new Set((localEvents?.events || localEvents || []).map((e) => e.rid).filter(Boolean));
 
@@ -92,7 +93,7 @@ const stdout3 = execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibesp
   encoding: 'utf8', env: { ...process.env, HOME: home, VIBESPACE_USAGE_CURSOR: cursor }, timeout: 30000,
 });
 ok(stdout3.split('\n').filter(Boolean).length === 1, 'remote walk picks up an append inside a workflow agent file');
-uh.scan({ force: true });
+await uh.scan({ force: true });
 const after = uh._loadEvents ? uh._loadEvents() : null;
 const afterRids = new Set((after?.events || after || []).map((e) => e.rid).filter(Boolean));
 ok(afterRids.size === 5, 'local walk picks up the same append');
@@ -171,16 +172,16 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
   ok(JSON.stringify(modCx) === JSON.stringify(scCx), 'module codex events BYTE-IDENTICAL to the scanner (mid + effort included)');
 
   process.env.CODEX_HOME = path.join(home, '.codex');
-  const uh3 = new UsageHistory({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-cx2-')), homeDir: home });
-  uh3.scan({ force: true });
+  const uh3 = new UsageHistory({ dataDir: path.join(dataDir, 'cx2'), homeDir: home }); // under dataDir: removed with it (the per-run mkdtemp here leaked one dir per run)
+  await uh3.scan({ force: true });
   if (prevCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCodexHome;
   const l3 = uh3._loadEvents();
   const localCx = (l3?.events || l3 || []).filter((e) => e.be === 'codex');
   ok(localCx.length === 2 && localCx.every((e, i) => e.rid === scCx[i].rid), 'LOCAL walk counts the same codex rids (three-walker parity)');
   ok(localCx[0].mid === 'resp_p1' && localCx[0].effort === 'high' && !('mid' in localCx[1]), 'LOCAL ledger bakes the same mid/effort (scan enrichment passes them through)');
   // the rid-info route's two lookups (rid first, mid fallback) resolve a codex event
-  ok(uh3.eventForRid('cx:' + TID + ':1050')?.mid === 'resp_p1', 'eventForRid finds the codex event by its ledger key');
-  ok(uh3.eventForMid('resp_p1')?.rid === 'cx:' + TID + ':1050', 'eventForMid finds the codex event by its response id');
+  ok((await uh3.eventForRid('cx:' + TID + ':1050'))?.mid === 'resp_p1', 'eventForRid finds the codex event by its ledger key');
+  ok((await uh3.eventForMid('resp_p1'))?.rid === 'cx:' + TID + ':1050', 'eventForMid finds the codex event by its response id');
 
   // THE JOIN the popup depends on: the codex normalizer must derive the SAME
   // requestId the ledger minted for this rollout, and the same msgId.
@@ -298,8 +299,8 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     'the shipped scanner carries wf/agent/wcwd too — the 2.265.0/2.271.0 one-sided-port class');
 
   // …and the LOCAL ledger passes them through the scan enrichment unchanged.
-  const uhOrg = new UsageHistory({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-org-data-')), homeDir: oHome });
-  uhOrg.scan({ force: true });
+  const uhOrg = new UsageHistory({ dataDir: path.join(dataDir, 'org-data'), homeDir: oHome }); // under dataDir: removed with it
+  await uhOrg.scan({ force: true });
   const lo = byRid([...uhOrg._events(0, Date.now() + 1e9)]);
   ok(lo.req_o_wf?.origin === 'workflow' && lo.req_o_wf.wf === 'wf_run9' && lo.req_o_wf.agent === 'agent-wt'
     && lo.req_o_wf.cwd === OREPO && lo.req_o_wf.wcwd === OTREE && lo.req_o_main?.origin === 'main',
@@ -385,6 +386,210 @@ ok(afterRids.size === 5, 'local walk picks up the same append');
     'the parity table exercises both answers (an all-no table would agree vacuously)');
 
   fs.rmSync(fxHome, { recursive: true, force: true });
+}
+
+// ── THE PER-TICK BYTE BUDGET (2.369.167, perf lane ⑥) ─────────────────────
+// UsageHistory.scan() runs ON the server's event loop, and a ledger scan over
+// hundreds of MB of new transcript bytes held that loop for the whole walk.
+// The walk now yields to an `onBudget` hook every `budgetBytes` of consumed
+// bytes — a HOOK INSIDE THE ONE WALK (2.297.0), never a second walker — so the
+// PARITY LAW gains a third spelling: the budgeted yielding walk must equal the
+// sync module walk AND the shipped scanner (events, cursors, filesTouched) over
+// one multi-MiB fixture that spans all four file kinds (main / subagent /
+// workflow / codex rollout, plus a zst rollout when this runtime reads zstd).
+{
+  const MiB = 1 << 20;
+  const { runUsageWalk: walkB, ZSTD_OK } = require(path.join(REPO, 'src/usage-walker.js'));
+  const bHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-budget-'));
+  const bData = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-budget-data-'));
+  const BPROJ = path.join(bHome, '.claude', 'projects', '-home-u-budget');
+  const BSID = '11111111-2222-4333-8444-555555555555';
+  const BTID = '22222222-3333-4444-8555-666666666666';
+  const ZTID = '33333333-4444-4555-8666-777777777777';
+  const cxDirB = path.join(bHome, '.codex', 'sessions', '2026', '09', '24');
+  const tsAt = (i) => new Date(Date.UTC(2026, 8, 24, 0, 0, 0) + i * 1000).toISOString();
+  let bn = 0;
+  // a usage record + a ~2 KB filler record (the filler is what a real transcript
+  // is mostly made of — bytes the walk must consume and NOT count)
+  const brec = () => { bn++; return JSON.stringify({ type: 'assistant', requestId: 'req_b' + bn, timestamp: tsAt(bn), cwd: '/home/u/budget',
+    message: { id: 'msg_b' + bn, model: 'claude-fable-5-1', usage: { input_tokens: 10 + bn, output_tokens: 3, cache_read_input_tokens: 100, cache_creation: { ephemeral_5m_input_tokens: 2 } } } }) + '\n'; };
+  const filler = (k) => JSON.stringify({ type: 'user', timestamp: tsAt(k), cwd: '/home/u/budget', message: { role: 'user', content: 'y'.repeat(2000) } }) + '\n';
+  const transcript = (bytes) => { let out = ''; while (out.length < bytes) out += brec() + filler(bn) + filler(bn); return out; };
+  const rollout = (tid, bytes) => {
+    const lines = [{ timestamp: tsAt(0), type: 'session_meta', payload: { id: tid, cwd: '/tmp/cxb' } },
+      { timestamp: tsAt(0), type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-5.6-sol', cwd: '/tmp/cxb', effort: 'high' } }];
+    let total = 0, k = 0, len = 0;
+    while (len < bytes) {
+      k++; total += 1100;
+      const add = [
+        { timestamp: tsAt(k), type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'z'.repeat(2500) }] } },
+        { timestamp: tsAt(k), type: 'token_usage_record', payload: { thread_id: tid, turn_id: 't1', response_id: 'resp_' + tid.slice(0, 4) + k, usage: { input_tokens: 1000, cached_input_tokens: 700, output_tokens: 100, total_tokens: 1100 } } },
+        { timestamp: tsAt(k), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 1000, cached_input_tokens: 700, output_tokens: 100, total_tokens: 1100 }, total_token_usage: { total_tokens: total } } } },
+      ];
+      for (const a of add) { const l = JSON.stringify(a); lines.push(a); len += l.length + 1; }
+    }
+    return lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
+  };
+  write(path.join(BPROJ, BSID + '.jsonl'), transcript(3 * MiB + 12345));
+  write(path.join(BPROJ, BSID, 'subagents', 'agent-bsub.jsonl'), transcript(1.2 * MiB));
+  write(path.join(BPROJ, BSID, 'subagents', 'workflows', 'wf_budget', 'agent-bwf.jsonl'), transcript(0.6 * MiB));
+  write(path.join(cxDirB, `rollout-2026-09-24T00-00-00-${BTID}.jsonl`), rollout(BTID, 1.5 * MiB));
+  if (ZSTD_OK) write(path.join(cxDirB, `rollout-2026-09-24T01-00-00-${ZTID}.jsonl.zst`), require('node:zlib').zstdCompressSync(Buffer.from(rollout(ZTID, 1.1 * MiB))));
+  // an INCOMPLETE trailing line stays unconsumed in every spelling
+  fs.appendFileSync(path.join(BPROJ, BSID + '.jsonl'), '{"type":"assistant","requestId":"req_cut"');
+  // the bytes the walk CONSUMES (the zst file's plain bytes are what it reads)
+  let fixtureBytes = 0;
+  for (const f of fs.readdirSync(bHome, { recursive: true })) {
+    const fp = path.join(bHome, String(f)); const st = fs.statSync(fp);
+    if (!st.isFile()) continue;
+    fixtureBytes += fp.endsWith('.zst') ? require('node:zlib').zstdDecompressSync(fs.readFileSync(fp)).length : st.size;
+  }
+  const cxRoot = path.join(bHome, '.codex', 'sessions');
+  const syncW = walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: {} });
+  let yields = 0;
+  const hooked = walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: {}, budgetBytes: MiB,
+    onBudget: () => { yields++; return new Promise(setImmediate); } });
+  ok(!!hooked && typeof hooked.then === 'function', 'the hooked walk answers a PROMISE (async only when a hook is given)');
+  ok(!!syncW && typeof syncW.then !== 'function' && Array.isArray(syncW.events), 'without a hook the walk stays SYNCHRONOUS (the daemon child + the shipped scanner form)');
+  const yW = await hooked;
+  const scanCur = path.join(bData, 'budget-scan-cursor.json');
+  const scanEvB = execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-usage-scan')], {
+    encoding: 'utf8', env: { ...process.env, HOME: bHome, CODEX_HOME: path.join(bHome, '.codex'), VIBESPACE_USAGE_CURSOR: scanCur }, timeout: 60000, maxBuffer: 64 * MiB,
+  }).split('\n').filter(Boolean);
+  const scanCurB = JSON.parse(fs.readFileSync(scanCur, 'utf-8'));
+  console.log(`  budget fixture: ${(fixtureBytes / MiB).toFixed(2)} MiB consumed, ${syncW.events.length} events, ${yields} yields at 1 MiB (zstd ${ZSTD_OK ? 'on' : 'off'})`);
+  ok(syncW.events.length > 1000 && syncW.events.some((l) => l.includes('"be":"codex"')), `the budget fixture is non-vacuous (${syncW.events.length} events, codex included)`);
+  ok(JSON.stringify(yW.events) === JSON.stringify(syncW.events), 'EVENTS: the budgeted yielding walk ≡ the sync module walk');
+  ok(JSON.stringify(scanEvB) === JSON.stringify(syncW.events), 'EVENTS: ≡ the shipped scanner (byte-identical NDJSON)');
+  ok(JSON.stringify(yW.cursors) === JSON.stringify(syncW.cursors), 'CURSORS: the yielding walk ≡ the sync walk (whole lines only, the cut tail unconsumed)');
+  ok(JSON.stringify(scanCurB) === JSON.stringify(syncW.cursors), 'CURSORS: ≡ the shipped scanner\'s persisted cursor file');
+  ok(yW.filesTouched === syncW.filesTouched && syncW.filesTouched >= 4, `FILESTOUCHED: ${yW.filesTouched} ≡ ${syncW.filesTouched}`);
+  const cutFp = path.join(BPROJ, BSID + '.jsonl');
+  ok(syncW.cursors[cutFp].offset === fs.statSync(cutFp).size - Buffer.byteLength('{"type":"assistant","requestId":"req_cut"'), 'the incomplete trailing line stays unconsumed (offset stops at the last newline)');
+  // (b) the hook actually fires — at least once per budget of consumed bytes
+  // one yield per WHOLE budget of consumed bytes (a yield never splits a line):
+  // consumed = every cursor's offset (a zst cursor counts PLAIN bytes) — the
+  // cut tail is not consumed, so it is not counted either
+  const consumed = Object.values(syncW.cursors).reduce((a, c) => a + (c.offset || 0), 0);
+  ok(consumed > 7 * MiB && yields >= Math.floor(consumed / MiB) && yields <= Math.ceil(consumed / MiB),
+    `the walk yielded ${yields} times for ${(consumed / MiB).toFixed(2)} MiB consumed — one per whole 1 MiB budget (⌊⌋ = ${Math.floor(consumed / MiB)})`);
+  // …and a second hooked walk from the committed cursors consumes nothing new
+  let yields2 = 0;
+  const y2 = await walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: JSON.parse(JSON.stringify(yW.cursors)), budgetBytes: MiB, onBudget: () => { yields2++; return new Promise(setImmediate); } });
+  const s2w = walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: JSON.parse(JSON.stringify(syncW.cursors)) });
+  ok(y2.events.length === 0 && yields2 === 0 && JSON.stringify(y2.cursors) === JSON.stringify(s2w.cursors) && y2.filesTouched === s2w.filesTouched,
+    'a hooked re-walk from its own cursors emits nothing, never yields, and leaves the cursors exactly as a sync re-walk does', JSON.stringify({ ev: y2.events.length, yields2 }));
+  // a REJECTED hook fails the walk and closes the file it was suspended in
+  {
+    const fdsBefore = fs.readdirSync('/proc/self/fd').length;
+    let threw = null;
+    try { await walkB({ home: bHome, codexSessionsDir: cxRoot, cursors: {}, budgetBytes: MiB, onBudget: () => Promise.reject(new Error('hook down')) }); } catch (e) { threw = e; }
+    ok(threw && threw.message === 'hook down' && fs.readdirSync('/proc/self/fd').length === fdsBefore, 'a rejected hook rejects the walk and leaks no descriptor (the suspended file is closed)');
+  }
+
+  // NEGATIVE CONTROL (a scratch-dir patched copy): the plausible one-sided bug
+  // in writing a budget point — the line AT the budget point is consumed into
+  // the cursor but never handed to the line handler (the yield placed where the
+  // handler call was). The sync walk never reaches a budget point, so ONLY the
+  // yielding spelling diverges — and the parity legs above must see it.
+  {
+    // the copy goes through scripts/mutant-copy.mjs (test-architecture §51):
+    // the process's scratch dir, its relative requires re-bound to the real file
+    const M = mutantCopies('walkpar', REPO);
+    const src0 = fs.readFileSync(path.join(REPO, 'src/usage-walker.js'), 'utf-8');
+    const mutated = src0.replace("          onLine(line);\n          // the budget point: only here, after a WHOLE line is in the cursor\n          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }",
+      "          // the budget point: only here, after a WHOLE line is in the cursor\n          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; continue; }\n          onLine(line);");
+    ok(mutated !== src0, 'the control mutation applies to the shipped source (the budget point is where this suite expects it)');
+    const { runUsageWalk: walkCtl } = M.load('src/usage-walker.js', mutated, 'budget-swallow');
+    const cy = await walkCtl({ home: bHome, codexSessionsDir: cxRoot, cursors: {}, budgetBytes: 64 * 1024, onBudget: () => new Promise(setImmediate) });
+    const cs = walkCtl({ home: bHome, codexSessionsDir: cxRoot, cursors: {} });
+    ok(JSON.stringify(cs.events) === JSON.stringify(syncW.events) && JSON.stringify(cy.events) !== JSON.stringify(syncW.events),
+      `NEGATIVE CONTROL: a budget point that swallows its line leaves the sync spelling intact and FAILS the yielding ≡ sync event parity (${cy.events.length} vs ${syncW.events.length} events)`);
+  }
+
+  // (c) ROTATION MID-WALK: a file truncated between two yields resets on the
+  // next run EXACTLY as the sync walk resets after the same truncation.
+  {
+    const rHome = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-walkpar-rot-'));
+    const RFP = path.join(rHome, '.claude', 'projects', '-home-u-rot', '44444444-5555-4666-8777-888888888888.jsonl');
+    const bigBody = transcript(10 * MiB); // > the walk's 8 MiB read chunk, so a truncation really cuts the read short
+    const rotated = brec();
+    const noCodex = path.join(rHome, 'no-codex');
+    // the SYNC story: walk the whole file, then it is rotated, then the next run
+    write(RFP, bigBody);
+    const s1 = walkB({ home: rHome, codexSessionsDir: noCodex, cursors: {} });
+    fs.writeFileSync(RFP, rotated);
+    const s2 = walkB({ home: rHome, codexSessionsDir: noCodex, cursors: JSON.parse(JSON.stringify(s1.cursors)) });
+    // the YIELDING story: the rotation lands at the walk's first yield
+    write(RFP, bigBody);
+    let rotatedAt = -1, calls = 0;
+    const y1 = await walkB({ home: rHome, codexSessionsDir: noCodex, cursors: {}, budgetBytes: MiB,
+      onBudget: () => { if (calls++ === 0) { fs.writeFileSync(RFP, rotated); rotatedAt = calls; } return new Promise(setImmediate); } });
+    const y1off = y1.cursors[RFP]?.offset || 0;
+    ok(rotatedAt === 1 && y1off > 0 && y1off < Buffer.byteLength(bigBody), `the rotation really cut the yielding walk short (offset ${y1off} of ${Buffer.byteLength(bigBody)})`);
+    const y2r = walkB({ home: rHome, codexSessionsDir: noCodex, cursors: JSON.parse(JSON.stringify(y1.cursors)) });
+    ok(s2.events.length === 1 && JSON.parse(s2.events[0]).rid === JSON.parse(rotated).requestId, 'sync: the next run after a rotation resets and reads the new file from byte 0');
+    ok(JSON.stringify(y2r.events) === JSON.stringify(s2.events) && JSON.stringify(y2r.cursors) === JSON.stringify(s2.cursors),
+      'yielding: the next run resets EXACTLY as the sync walk does (same events, same cursors)');
+    fs.rmSync(rHome, { recursive: true, force: true });
+  }
+
+  // (d) NO HALF LEDGER VISIBLE: UsageHistory.scan() runs the yielding walk; a
+  // reader awaits scanSettled(), and the /api/usage-stats route answers only
+  // after it. The yield is a GATE this leg holds shut — the clock of the walk
+  // is the test's, not setImmediate's.
+  {
+    const prevCx = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = path.join(bHome, '.codex');
+    const gates = []; let open = false;
+    const gate = () => (open ? Promise.resolve() : new Promise((r) => gates.push(r)));
+    const uhB = new UsageHistory({ dataDir: bData, homeDir: bHome, scanBudgetBytes: MiB, scanYield: gate });
+    if (prevCx === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevCx;
+    let r0 = null, threw = null;
+    try { r0 = uhB.scan(true); } catch (e) { threw = e; }
+    ok(!threw && r0 && typeof r0.then === 'function' && typeof uhB.scanSettled === 'function', 'UsageHistory.scan() runs the yielding walk (a promise) and exposes scanSettled()');
+    if (r0 && typeof r0.then === 'function' && typeof uhB.scanSettled === 'function') {
+      await new Promise(setImmediate);
+      ok(gates.length === 1, `the walk is parked at its first budget point (${gates.length} gate)`);
+      const again = uhB.scan(true);
+      ok(again && again.skipped === true && typeof again.then !== 'function', 'a scan while one is in flight keeps the SYNC {skipped} answer (single-flight)');
+      const shardEvs = () => { const l = uhB._loadEvents(); return (l?.events || l || []).length; };
+      ok(shardEvs() === 0, 'nothing of the walk is visible yet — the ledger is appended once, at the end (no half ledger)');
+      // the route, through the real registration, on a fake app
+      const handlers = {};
+      const fakeApp = new Proxy({}, { get: (_t, verb) => (p, ...fns) => { handlers[String(verb).toUpperCase() + ' ' + p] = fns[fns.length - 1]; } });
+      let routeErr = null;
+      try {
+        require(path.join(REPO, 'src/server/account-usage-routes.js')).create({ app: fakeApp, rootDir: REPO, engine: {}, serverSetting: () => undefined,
+          getUsageHistory: () => uhB, getAccounts: () => ({}), getHosts: () => ({}), getMounts: () => ({}), getTelemetry: () => ({}), getLoginExpiryWatch: () => null });
+      } catch (e) { routeErr = e; }
+      const h = handlers['GET /api/usage-stats'];
+      ok(!routeErr && typeof h === 'function', 'the usage-stats route registers on a fake app' + (routeErr ? ` (${routeErr.message})` : ''));
+      let answered = null, settledAt = -1;
+      const res = { json: (b) => { answered = b; }, status() { return this; } };
+      const pRoute = h ? Promise.resolve(h({ query: {} }, res)) : Promise.resolve();
+      uhB.scanSettled().then(() => { settledAt = shardEvs(); });
+      await new Promise(setImmediate); await new Promise(setImmediate);
+      ok(answered === null, 'the route does NOT answer while the walk is parked (it awaits scanSettled())');
+      // release the walk one gate at a time until it settles
+      open = true; while (gates.length) gates.shift()();
+      const done = await uhB.scanSettled();
+      await pRoute;
+      ok(settledAt === syncW.events.length, `scanSettled() resolves after the LAST event is in the ledger (${settledAt}/${syncW.events.length})`);
+      ok(done && done.added === syncW.events.length && done.filesTouched === syncW.filesTouched, 'scanSettled() carries the scan\'s own answer {added, filesTouched}');
+      const post = uhB.aggregate({});
+      ok(answered && JSON.stringify(answered.totals) === JSON.stringify(post.totals) && answered.totals && post.totals && JSON.stringify(post.totals) !== JSON.stringify(new UsageHistory({ dataDir: path.join(bData, 'empty'), homeDir: path.join(bHome, 'nowhere') }).aggregate({}).totals),
+        'the route\'s totals EQUAL the post-walk totals (and are non-empty) — never a partial answer');
+      const cur2 = JSON.parse(fs.readFileSync(path.join(bData, 'usage-history', '_cursors.json'), 'utf-8'));
+      ok(JSON.stringify(cur2) === JSON.stringify(syncW.cursors), 'the persisted cursor store equals the sync walk\'s cursors');
+      ok(uhB.scan().skipped === true, 'the 15 s throttle keeps its meaning (an unforced scan right after answers {skipped})');
+      // the popup lookups await the settled walk too
+      const evR = await uhB.eventForRid('req_b1');
+      ok(evR && evR.rid === 'req_b1' && (await uhB.eventForMid('msg_b2'))?.rid === 'req_b2', 'eventForRid / eventForMid answer from the settled ledger');
+    }
+  }
+  fs.rmSync(bHome, { recursive: true, force: true });
+  fs.rmSync(bData, { recursive: true, force: true });
 }
 
 fs.rmSync(home, { recursive: true, force: true });

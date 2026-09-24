@@ -156,9 +156,14 @@ app.get('/api/telemetry/central-summary', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/usage-stats', (req, res) => {
+app.get('/api/usage-stats', async (req, res) => {
   try {
-    usageHistory.scan(); // pick up anything new before answering
+    // pick up anything new before answering — and answer only from the
+    // SETTLED walk: the scan yields every MiB (perf ⑥), so a reader that did
+    // not await would total a ledger the walk has not committed yet (or one a
+    // scan already in flight is about to extend)
+    usageHistory.scan();
+    await usageHistory.scanSettled();
     const from = req.query.from ? parseInt(req.query.from, 10) : null;
     const to = req.query.to ? parseInt(req.query.to, 10) : null;
     const backend = req.query.backend || null;
@@ -182,13 +187,13 @@ app.get('/api/usage-stats', (req, res) => {
 // Per-message account attribution for the msg-meta popup (2.266.1, user
 // request): which account served this requestId, per the ledger's baked
 // attribution (aname frozen at scan time; pool = billed THROUGH it).
-app.get('/api/usage-stats/rid-info', (req, res) => {
+app.get('/api/usage-stats/rid-info', async (req, res) => {
   try {
-    let ev = req.query.rid ? usageHistory.eventForRid(String(req.query.rid)) : null;
+    let ev = req.query.rid ? await usageHistory.eventForRid(String(req.query.rid)) : null;
     // live stdout records carry NO requestId — message.id is the join field
     // both transports share (the 2.267.3 rule), so the popup can attribute
     // EVERY reply, not just history-rebuilt ones.
-    if (!ev && req.query.mid) ev = usageHistory.eventForMid(String(req.query.mid));
+    if (!ev && req.query.mid) ev = await usageHistory.eventForMid(String(req.query.mid));
     if (!ev) return res.json({ found: false });
     let poolName = null;
     try { poolName = ev.pool ? (accounts.get(ev.pool)?.name || null) : null; } catch { }

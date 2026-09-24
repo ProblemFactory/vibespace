@@ -40,6 +40,7 @@
 const { peerDisplayName } = require('./message-manager');
 const fs = require('fs');
 const path = require('path');
+const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
 
 function asArray(v) { return Array.isArray(v) ? v : []; }
 function toTs(value) {
@@ -175,6 +176,8 @@ class AcpMessageManager {
   get total() { return this.messages.length; }
   get(id) { return this.messageIndex.get(id); }
   tail(n) { return this.messages.slice(-n); }
+  /** THE ATTACH SLAB — the claude normalizer's twin (src/text-window.js). */
+  tailWindow(opts) { return sliceTextWindow(this.messages, opts); }
   slice(offset, limit) { return this.messages.slice(offset, offset + limit); }
   status() { return { ...this._status }; }
   goalState() { return this._goalState; }      // ACP has no goal loop (stub — the status bar shows nothing)

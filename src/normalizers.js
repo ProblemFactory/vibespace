@@ -93,6 +93,10 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   for (const h of opHandlers) mm.onOp(h);
   session._normalizer = mm;
   session._normEpoch = Date.now();
+  // …and the op ring dies with the epoch (perf lane chunk D): its frames carry
+  // the OLD normalizer's ids; a client resuming by seq names the old epoch and
+  // takes the full attach. seq itself stays monotonic (a reset never reuses one).
+  if (session._opRing) session._opRing.reset();
   session._rebuildQueue = [];
   session._rebuildProgress = { done: 0, total: records?.length || 0 };
   const run = async () => {

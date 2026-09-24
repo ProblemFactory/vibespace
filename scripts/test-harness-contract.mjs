@@ -37,7 +37,7 @@ ok(threw, 'an unknown harness id THROWS (never a claude fallback)');
 ok(createMessageManager('claude', 'x') && (() => { try { createMessageManager('gemini', 'x'); return false; } catch { return true; } })(), 'normalizer registry: known id works, unknown id throws');
 
 const BASE_METHODS = ['formatChatInput', 'formatInterrupt', 'formatPermissionResponse', 'formatSetPermissionMode', 'formatSetModel', 'formatSetEffort', 'postInterrupt'];
-const NORM_METHODS = ['onOp', 'processLive', 'convertHistory', 'convertHistoryAsync', 'tail', 'slice', 'turnMap'];
+const NORM_METHODS = ['onOp', 'processLive', 'convertHistory', 'convertHistoryAsync', 'tail', 'tailWindow', 'slice', 'turnMap']; // tailWindow = the attach slab (src/text-window.js, perf lane A)
 const registry = createAdapterRegistry({ claudeCmd: 'claude', codexCmd: 'codex', codexSandboxSupported: true, chatWrapper: '/w/chat', codexChatWrapper: '/w/codex', acpWrapper: '/w/acp', acpCommands: { opencode: '/usr/bin/opencode' }, ptyWrapper: '/w/pty', buffersDir: '/b' });
 
 for (const id of harnessIds()) {

@@ -407,12 +407,10 @@ const CLAUDE_STREAM_TYPES = new Set([
 ]);
 const _seenStreamTypes = new Set();
 
-function broadcastToSession(session, id, msg) {
-  const json = JSON.stringify(msg);
-  for (const client of session.clients.keys()) {
-    if (client.readyState === WS_OPEN) { try { client.send(json); } catch {} }
-  }
-}
+// THE session broadcast choke point ⇒ src/server/session-broadcast.js (perf lane
+// chunk D): stamps `seq` on the session's own `msg` frames from its op ring and
+// cuts a capable client whose send queue stopped draining (ONE `lagged` frame).
+const { broadcastToSession } = require('./src/server/session-broadcast.js').createSessionBroadcast();
 
 // ── Usage + pool engine (src/server/usage-pool-engine.js, decomposition #5) ──
 const {
@@ -1166,11 +1164,13 @@ function recordUsageAttribution(meta) {
 }
 // Rescan the ledger periodically (incremental — only new JSONL bytes). Also
 // rescanned on demand when the Usage window opens.
-setTimeout(() => { try { usageHistory.scan(); usageHistory.warm(); } catch {} }, 8000);
+// The walk YIELDS every MiB (perf ⑥): warm() reads the ledger only once the
+// boot walk has settled, and the metric is the walk's WALL time (settle − start).
+setTimeout(() => { try { usageHistory.scan(); usageHistory.scanSettled().then(() => { try { usageHistory.warm(); } catch {} }); } catch {} }, 8000);
 setInterval(() => { try {
   const t0 = Date.now();
   const r = usageHistory.scan();
-  if (!r?.skipped) telemetry.record({ kind: 'metric', name: 'srv-usage-scan-ms', value: Date.now() - t0 });
+  if (!r?.skipped) Promise.resolve(r).then(() => telemetry.record({ kind: 'metric', name: 'srv-usage-scan-ms', value: Date.now() - t0 })).catch(() => {});
 } catch {} }, 180000);
 // Telemetry ingest (client errors + feature events) + diagnostics summary.
 // telemetry.enabled=false drops ingest silently (client still posts — cheap).

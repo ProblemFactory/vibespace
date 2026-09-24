@@ -156,6 +156,28 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   let tainted = 0;
   for (let i = 0; i < 8 && b.term === 0; i++) { now += 1000; hb.pulse(); now += 30000; hb.pulse(); r = hb.tick(); if (r.stalled) tainted++; }
   ok(b.term === 1 && tainted >= 6, `a client that never pongs across ${tainted} consecutive tainted rounds is terminated anyway (dead half-open under a chronically stalling server is still reaped)`);
+  // ④ perf lane ⑤b: the pulse's longest gap is a TELEMETRY METRIC (`srv-loop-gap-ms`), not only a
+  //    warn line past the 5 s taint — the reconnect-storm harness and Diagnostics read it
+  {
+    let t2 = 5000000; const got = [];
+    const w2 = { clients: new Set() };
+    const hb2 = createWsHeartbeat(w2, { intervalMs: 30000, stallGraceMs: 5000, now: () => t2, log: { warn() {} }, metric: (name, value) => got.push({ name, value }) });
+    hb2.start(); clearInterval(w2._heartbeatTimer); clearInterval(w2._heartbeatPulse);
+    const quiet = () => { for (let i = 0; i < 30; i++) { t2 += 1000 + (i % 3); hb2.pulse(); } };
+    quiet(); hb2.tick();
+    ok(got.length === 0, `a quiet round (timer jitter < the ${'50'} ms floor) records NOTHING — an idle server does not fill the ledger (${JSON.stringify(got)})`);
+    for (let i = 0; i < 10; i++) { t2 += 1000; hb2.pulse(); }
+    t2 += 1000 + 340; hb2.pulse();          // one 340 ms block inside the round (a sub-stall storm)
+    for (let i = 0; i < 19; i++) { t2 += 1000; hb2.pulse(); }
+    let r2 = hb2.tick();
+    ok(got.length === 1 && got[0].name === 'srv-loop-gap-ms' && got[0].value === 340 && !r2.stalled, `a 340 ms loop gap is recorded as srv-loop-gap-ms = 340 (and does not taint the round): ${JSON.stringify(got)}`);
+    quiet(); hb2.tick();
+    ok(got.length === 1, 'the next quiet round records nothing (the max is per round, reset at the tick)');
+    t2 += 1000; hb2.pulse(); t2 += 32000; hb2.pulse(); r2 = hb2.tick();
+    ok(got.length === 2 && got[1].value >= 30000 && r2.stalled, `a 32 s stall is recorded too (${got[1]?.value} ms) — the taint verdict is unchanged`);
+    const hbSrc = fs.readFileSync(path.join(REPO, 'src/server/ws-heartbeat.js'), 'utf8');
+    ok(/metric = \(name, value\) => global\.__vsMetric\?\.\(name, value\)/.test(hbSrc) && /LOOP_GAP_METRIC = 'srv-loop-gap-ms'/.test(hbSrc), 'production wiring: the default metric sink is the server\'s __vsMetric (the telemetry ledger)');
+  }
   const src = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   ok(/createWsHeartbeat\(wss\)\.start\(\)/.test(src) && !/setInterval\(\(\) => \{\s*for \(const client of wss\.clients\)/.test(src), 'ws-handler runs THIS heartbeat (the inline blind interval is gone)');
 }
@@ -232,6 +254,169 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
     'a stale-authority heal also RESETS the remembered state (else the next attach undoes the heal)');
   ok(/turnState: session\._turnStateSeen \? \(session\._turnState \|\| null\) : null,/.test(wsh),
     'the attach payload states the turn state tri-state (null = never reported, which is NOT idle)');
+}
+
+// ── ⑤ RESUME BY SEQ (perf lane chunk D — the one wire change) ──────────────
+// The REAL normalizer's ops through the REAL broadcast choke point
+// (src/server/session-broadcast.js — server.js's broadcastToSession since
+// chunk D) into fake ws clients, and the attach reply composed by the SAME
+// calls ws-handler makes (resumeFor → attachedFrameText → armResume, pinned
+// below). Red on the unfixed tree: no module, no `seq`, no cut, no replay.
+{
+  let SB = null;
+  try { SB = require(path.join(REPO, 'src/server/session-broadcast.js')); } catch { }
+  ok(!!SB && typeof SB.createSessionBroadcast === 'function', '⑤ the broadcast choke point is a module the suites can drive (src/server/session-broadcast.js)');
+  // On the unfixed tree the legs still RUN — against a VERBATIM copy of the
+  // 2.369.160 server.js broadcastToSession and today's attach payload — so
+  // each one is red for its own reason, not only for the missing module.
+  if (!SB) SB = {
+    createSessionBroadcast: () => ({ broadcastToSession(session, id, msg) { const json = JSON.stringify(msg); for (const client of session.clients.keys()) { if (client.readyState === 1) { try { client.send(json); } catch {} } } } }),
+    resumeFor: () => ({ held: false }), armResume() { }, clientCaps() { return null; },
+    attachedFrameText: (p, r, slabOf) => JSON.stringify({ ...p, ...slabOf() }),
+  };
+  {
+    const { createSessionBroadcast, resumeFor, attachedFrameText, armResume, clientCaps } = SB;
+    const events = [];
+    const { broadcastToSession } = createSessionBroadcast({ event: (name, detail) => events.push({ name, detail }), log: { warn() { } } });
+    const fakeWs = (name) => ({ name, readyState: 1, bufferedAmount: 0, frames: [], send(t) { this.frames.push(t); } });
+    const mkSession = (id) => {
+      const session = { backend: 'claude', clients: new Map(), _normalizer: createMessageManager('claude', id), _normEpoch: 1788550000000 };
+      session._normalizer.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op })); // the ws-create / boot-restore wiring, verbatim
+      return session;
+    };
+    // the ws-handler attach, reduced to the calls it makes (pinned below)
+    const attach = (session, id, ws, data) => {
+      session.clients.set(ws, { cols: 120, rows: 30, caps: clientCaps(data) });
+      const resume = resumeFor(session, data);
+      ws.send(attachedFrameText({ type: 'attached', sessionId: id, mode: 'chat', totalCount: session._normalizer.total, normEpoch: session._normEpoch || 0 }, resume, () => ({ messages: session._normalizer.tailWindow(), turnMap: session._normalizer.turnMap() })));
+      armResume(session, ws);
+      return JSON.parse(ws.frames[ws.frames.length - 1]);
+    };
+    const msgs = (ws) => ws.frames.map((f) => JSON.parse(f)).filter((m) => m.type === 'msg');
+    let T = 1788560100000;
+    const at = () => new Date(T += 1000).toISOString();
+    // seven live records: creates, tool edits (a tool_use then its result), and a tombstone
+    const live = [
+      { type: 'user', uuid: 'L-u1', timestamp: at(), message: { role: 'user', content: 'resume me' } },
+      { type: 'assistant', uuid: 'L-a1', timestamp: at(), message: { id: 'msg_L1', role: 'assistant', model: 'claude-x', content: [{ type: 'text', text: 'first answer' }] } },
+      { type: 'assistant', uuid: 'L-a2', timestamp: at(), message: { id: 'msg_L2', role: 'assistant', model: 'claude-x', content: [{ type: 'tool_use', id: 'toolu_L2', name: 'Bash', input: { command: 'ls' } }] } },
+      { type: 'user', uuid: 'L-r2', timestamp: at(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_L2', content: 'a\nb' }] } },
+      { type: 'assistant', uuid: 'L-a3', timestamp: at(), message: { id: 'msg_L3', role: 'assistant', model: 'claude-x', content: [{ type: 'text', text: 'a doomed answer' }] } },
+      { type: 'tombstone', message: { uuid: 'L-a3', message: { id: 'msg_L3' } } },
+      { type: 'assistant', uuid: 'L-a4', timestamp: at(), message: { id: 'msg_L4', role: 'assistant', model: 'claude-x', content: [{ type: 'text', text: 'the real answer' }] } },
+    ];
+
+    // (a) every msg frame carries seq
+    const id = 'sess-seq-a';
+    const S = mkSession(id);
+    await rebuildHistory(S, id, makeRecords(40), { budgetMs: 2 });
+    const A = fakeWs('A'), B = fakeWs('B'), OLD = fakeWs('old');
+    attach(S, id, A, { caps: ['op-seq'] });
+    const b0 = attach(S, id, B, { caps: ['op-seq'] });
+    attach(S, id, OLD, {}); // an old client: no caps
+    ok(typeof b0.opSeq === 'number' && Array.isArray(b0.messages) && b0.slab === undefined, `(a) a plain attach carries the capability advert opSeq (${b0.opSeq}) beside today's slab`);
+    feedLive(S, live[0]); feedLive(S, live[1]);
+    const bSeen = msgs(B);
+    const bLast = bSeen[bSeen.length - 1]?.seq;
+    S.clients.delete(B); // B's socket drops (ws 'close' removes it from the map)
+    for (const r of live.slice(2)) feedLive(S, r);
+    const aMsgs = msgs(A);
+    ok(aMsgs.length >= 7 && aMsgs.every((m) => Number.isInteger(m.seq)), `(a) every msg frame carries seq (${aMsgs.length} frames, seqs ${aMsgs.map((m) => m.seq).join(',')})`);
+    ok(aMsgs.every((m, i) => i === 0 || m.seq === aMsgs[i - 1].seq + 1), '(a) …consecutive, in the order the normalizer emitted them');
+    ok(aMsgs.some((m) => m.op === 'edit') && aMsgs.some((m) => m.op === 'meta' && m.subtype === 'rewound'), '(a) the stream holds creates, edits and the tombstone\'s rewound op');
+    ok(msgs(OLD).length === aMsgs.length && msgs(OLD).every((m, i) => m.seq === aMsgs[i].seq), '(a) an old client gets the same frames (it ignores the seq it does not read)');
+
+    // (c) a same-epoch resume inside the ring replays EXACTLY the frames A got after B's last, byte for byte
+    const B2 = fakeWs('B2');
+    const held = attach(S, id, B2, { caps: ['op-seq'], sinceSeq: bLast, sinceEpoch: S._normEpoch });
+    const want = A.frames.filter((f) => { const m = JSON.parse(f); return m.type === 'msg' && m.seq > bLast; });
+    const rawHeld = B2.frames[B2.frames.length - 1];
+    const gotReplay = (held.replay || []).map((x) => JSON.stringify(x));
+    ok(held.slab === 'held' && !('messages' in held) && !('turnMap' in held), `(c) the resume is HELD — no slab, no turn map (${Math.round(rawHeld.length / 1024 * 10) / 10} KB vs the slab's ${Math.round(A.frames[0].length / 1024 * 10) / 10} KB)`);
+    ok(gotReplay.length === want.length && gotReplay.length >= 5 && gotReplay.join('\n') === want.join('\n'), `(c) the replay is byte-identical to the ${want.length} frames the connected client received after seq ${bLast}`);
+    ok(held.opSeq === aMsgs[aMsgs.length - 1].seq, `(c) opSeq names the last frame (${held.opSeq})`);
+    ok(want.every((f) => rawHeld.includes(f)), '(c) the frames ride INSIDE the attached text verbatim (spliced, never re-serialized)');
+    // replayed into a fresh normalizer-side mirror, the resumed client ends where A is
+    const mirror = (frames) => { const m = new Map(); for (const f of frames) { const o = typeof f === 'string' ? JSON.parse(f) : f; if (o.type !== 'msg') continue; if (o.op === 'create') m.set((o.message || o.msg).id, JSON.stringify((o.message || o.msg).content)); if (o.op === 'edit' && m.has(o.id) && o.fields.content) m.set(o.id, JSON.stringify(o.fields.content)); } return [...m].join('|'); };
+    ok(mirror([...B.frames, ...(held.replay || [])]) === mirror(A.frames), '(c) B\'s frames before the drop + the replay = A\'s view of every live message (creates and edits)');
+
+    // (b) the cut: a caps client past the limit gets ONE lagged and nothing more; a no-caps client keeps everything
+    const C = fakeWs('C'), D = fakeWs('D');
+    attach(S, id, C, { caps: ['op-seq'] });
+    attach(S, id, D, {});
+    C.bufferedAmount = 5 * 1048576; D.bufferedAmount = 5 * 1048576;
+    const before = { c: C.frames.length, d: D.frames.length, ev: events.length, seq: (S._opRing?.seq ?? 0) };
+    const more = [
+      { type: 'user', uuid: 'L-u9', timestamp: at(), message: { role: 'user', content: 'while wedged 1' } },
+      { type: 'assistant', uuid: 'L-a9', timestamp: at(), message: { id: 'msg_L9', role: 'assistant', model: 'claude-x', content: [{ type: 'text', text: 'while wedged 2' }] } },
+      { type: 'user', uuid: 'L-u10', timestamp: at(), message: { role: 'user', content: 'while wedged 3' } },
+    ];
+    for (const r of more) feedLive(S, r);
+    const emitted = (S._opRing?.seq ?? 0) - before.seq;
+    const cNew = C.frames.slice(before.c).map((f) => JSON.parse(f));
+    const dNew = D.frames.slice(before.d).map((f) => JSON.parse(f));
+    ok(cNew.length === 1 && cNew[0].type === 'lagged' && cNew[0].sessionId === id && cNew[0].normEpoch === S._normEpoch && Number.isInteger(cNew[0].seq), `(b) the capable client past the limit got exactly ONE lagged frame naming {normEpoch, seq} and no msg (${JSON.stringify(cNew.map((m) => m.type))})`);
+    ok(emitted >= 3 && dNew.filter((m) => m.type === 'msg').length === emitted, `(b) the no-caps client past the SAME limit still got every frame (${dNew.length} of ${emitted}) — never a silent drop`);
+    const lagEv = events.slice(before.ev).filter((e) => e.name === 'ws-lagged');
+    ok(lagEv.length === 1 && /5242880 bytes queued/.test(lagEv[0].detail), `(b) telemetry ws-lagged once, with the queue size (${lagEv[0]?.detail})`);
+    // the lagged client resumes from the seq it names — the replay covers exactly what it missed
+    C.bufferedAmount = 0;
+    const cHeld = attach(S, id, C, { caps: ['op-seq'], sinceSeq: cNew[0].seq, sinceEpoch: S._normEpoch });
+    ok(cHeld.slab === 'held' && cHeld.replay?.length === emitted && cHeld.replay.map((x) => JSON.stringify(x)).join('\n') === D.frames.slice(-emitted).join('\n'), `(b) its re-attach resumes by seq: the ${emitted} frames it was cut from, byte-identical to what the uncut client got`);
+    feedLive(S, { type: 'user', uuid: 'L-u11', timestamp: at(), message: { role: 'user', content: 'after resume' } });
+    ok(JSON.parse(C.frames[C.frames.length - 1]).type === 'msg', '(b) after the re-attach its frames flow again');
+    // a caps client NOT yet answered by `attached` is never cut (it has no view to answer lagged with)
+    {
+      const E2 = fakeWs('E2'); E2.bufferedAmount = 9e6;
+      S.clients.set(E2, { cols: 120, rows: 30, caps: ['op-seq'] }); // mid-attach: registered, no attached yet
+      feedLive(S, { type: 'user', uuid: 'L-u12', timestamp: at(), message: { role: 'user', content: 'mid attach' } });
+      ok(E2.frames.length === 1 && JSON.parse(E2.frames[0]).type === 'msg', '(b) a client registered but not yet answered by attached keeps delivery (no lagged before a view exists)');
+      S.clients.delete(E2);
+    }
+    // an entry rewrite that is not an attach (a resize) keeps the caps + arming (seqStateOf, pinned below)
+    {
+      const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+      ok(/session\.clients\.set\(ws, \{ \.\.\.seqStateOf\(prev\), cols: data\.cols, rows: data\.rows, real: true \}\)/.test(wsh), '(b) a resize keeps the entry\'s op-seq state (caps / armed / lagged) — only an attach starts it over');
+    }
+
+    // (d) sinceSeq older than the ring ⇒ the full attached with messages
+    {
+      const id2 = 'sess-seq-d';
+      const S2 = mkSession(id2);
+      try { S2._opRing = require(path.join(REPO, 'src/op-seq.js')).createOpRing({ cap: 3 }); } catch { } // a tiny ring: the same code, a smaller bound
+      await rebuildHistory(S2, id2, makeRecords(10), { budgetMs: 2 });
+      const X = fakeWs('X');
+      attach(S2, id2, X, { caps: ['op-seq'] });
+      for (let i = 0; i < 6; i++) feedLive(S2, { type: 'user', uuid: 'D-u' + i, timestamp: at(), message: { role: 'user', content: 'd ' + i } });
+      const full = attach(S2, id2, fakeWs('Y'), { caps: ['op-seq'], sinceSeq: 1, sinceEpoch: S2._normEpoch });
+      ok(full.slab === undefined && Array.isArray(full.messages) && full.messages.length > 0 && !('replay' in full) && full.opSeq === 6, `(d) sinceSeq 1 fell off a 3-frame ring ⇒ the full attached with messages (${full.messages.length}) and opSeq ${full.opSeq}`);
+      // (e) an epoch mismatch ⇒ full attached
+      const ep = attach(S2, id2, fakeWs('Z'), { caps: ['op-seq'], sinceSeq: 5, sinceEpoch: S2._normEpoch - 1 });
+      ok(ep.slab === undefined && Array.isArray(ep.messages) && !('replay' in ep), '(e) a sinceEpoch that is not the session\'s ⇒ the full attached (the old ids mean nothing)');
+      // (f) the ring resets on rebuildHistory (a new epoch)
+      const heldBefore = attach(S2, id2, fakeWs('W'), { caps: ['op-seq'], sinceSeq: 5, sinceEpoch: S2._normEpoch });
+      ok(heldBefore.slab === 'held' && heldBefore.replay?.length === 1, '(f) (control) before the rebuild the same request is held');
+      const epochBefore = S2._normEpoch, seqBefore = (S2._opRing?.seq ?? 0);
+      await new Promise((r) => setTimeout(r, 2));
+      await rebuildHistory(S2, id2, makeRecords(12), { budgetMs: 2 });
+      ok(S2._normEpoch !== epochBefore && (S2._opRing?.size ?? -1) === 0 && (S2._opRing?.seq ?? 0) === seqBefore, `(f) rebuildHistory resets the ring with the epoch (held ${(S2._opRing?.size ?? -1)}, seq stays ${(S2._opRing?.seq ?? 0)} — never reused)`);
+      const afterOld = attach(S2, id2, fakeWs('V'), { caps: ['op-seq'], sinceSeq: 5, sinceEpoch: epochBefore });
+      const afterNewEpochOldSeq = attach(S2, id2, fakeWs('U'), { caps: ['op-seq'], sinceSeq: 5, sinceEpoch: S2._normEpoch });
+      ok(Array.isArray(afterOld.messages) && Array.isArray(afterNewEpochOldSeq.messages), '(f) after it, neither the old epoch nor an old seq under the new epoch is held');
+    }
+    // ordering: nothing between the verdict and the send awaits (a replay is followed by exactly the later frames)
+    {
+      const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+      const i0 = wsh.indexOf('const resume = resumeFor(session, data);');
+      const i1 = wsh.indexOf('armResume(session, ws);', i0);
+      ok(i0 > 0 && i1 > i0 && !/\bawait\b/.test(wsh.slice(i0, i1).replace(/\/\/.*$/gm, '')), 'wiring: ws-handler\'s live attach runs resumeFor → attachedFrameText → armResume with NO await between the verdict and the send');
+      ok(/ws\.send\(attachedFrameText\(livePayload, resume, \(\) => \(\{/.test(wsh) && /session\.clients\.set\(ws, \{ cols: 120, rows: 30, caps: clientCaps\(data\) \}\)/.test(wsh), 'wiring: the attach records the client\'s caps and sends the composed frame');
+      const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+      ok(/const \{ broadcastToSession \} = require\('\.\/src\/server\/session-broadcast\.js'\)\.createSessionBroadcast\(\);/.test(srv) && !/function broadcastToSession\(/.test(srv), 'wiring: server.js\'s broadcastToSession IS the module\'s (no second copy)');
+      const norm = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
+      ok(/session\._normEpoch = Date\.now\(\);[\s\S]{0,400}if \(session\._opRing\) session\._opRing\.reset\(\);/.test(norm), 'wiring: rebuildHistory resets the ring beside the epoch');
+    }
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

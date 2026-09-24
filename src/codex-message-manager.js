@@ -15,6 +15,7 @@ const { unknownFields: shapeUnknownFields, unknownFieldsSample } = require('./re
 const { peerDisplayName } = require('./message-manager');
 // web-search cards: the ONE results renderer + the twin-dedup key (PURE, shared with the client's title chip)
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
+const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
 const { agentName, collabSummaryText } = require('./collab-row');
 const { rewoundByTurns, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
@@ -504,6 +505,8 @@ class CodexMessageManager {
   get total() { return this.messages.length; }
   get(id) { return this.messageIndex.get(id); }
   tail(n) { return this.messages.slice(-n); }
+  /** THE ATTACH SLAB — the claude normalizer's twin (src/text-window.js). */
+  tailWindow(opts) { return sliceTextWindow(this.messages, opts); }
   slice(offset, limit) { return this.messages.slice(offset, offset + limit); }
 
   turnMap() {

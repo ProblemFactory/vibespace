@@ -219,7 +219,7 @@ const PAYLOAD = (recs) => ({
   const uh = new UsageHistory({ dataDir, homeDir: home, resolveAccount: (id) => (id === 'sub-true' ? { type: 'subscription', name: 'True', tail: '01' } : null) });
   uh.recordAttribution({ sid, acct: 'sub-configured', ts: Date.now() - 3600e3 }); // link intent says configured
   uh.setTruthLookup((rid) => (rid === 'req_bake1' ? 'sub-true' : undefined));
-  uh.scan(true);
+  await uh.scan(true);
   process.env.HOME = HOME0;
   const shards = fs.readdirSync(path.join(dataDir, 'usage-history')).filter((f) => f.startsWith('events-'));
   const evs = shards.flatMap((f) => fs.readFileSync(path.join(dataDir, 'usage-history', f), 'utf-8').trim().split('\n').map((l) => JSON.parse(l)));

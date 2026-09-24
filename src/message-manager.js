@@ -16,6 +16,7 @@
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
+const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -392,6 +393,11 @@ class MessageManager {
 
   /** Get last N messages */
   tail(n) { return this.messages.slice(-n); }
+
+  /** THE ATTACH SLAB (perf lane A): the tail counted in TEXT cards, not
+   *  records — src/text-window.js is the one rule, and all three normalizers
+   *  (claude / codex / acp) answer it the same way (twin parity). */
+  tailWindow(opts) { return sliceTextWindow(this.messages, opts); }
 
   /** Get messages by offset+limit */
   slice(offset, limit) { return this.messages.slice(offset, offset + limit); }

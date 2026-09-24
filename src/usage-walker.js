@@ -137,14 +137,51 @@ function makeProjectCwdReader() {
 }
 
 /** Walk ~/.claude/projects incrementally. Returns
- *  {events: [ndjson-line…], cursors, cursorFile} — cursor NOT persisted. */
-function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
+ *  {events: [ndjson-line…], cursors, cursorFile, filesTouched} — cursor NOT
+ *  persisted.
+ *
+ *  THE PER-TICK BYTE BUDGET (2.369.167, perf lane ⑥). An in-process caller on
+ *  a server's event loop (UsageHistory.scan()) passes `onBudget` — a function
+ *  returning a promise, typically `() => new Promise(setImmediate)` — and the
+ *  walk then YIELDS to it every `budgetBytes` of consumed transcript bytes: the
+ *  return value becomes a PROMISE of the same result, and the loop is never
+ *  held for longer than one budget's parse. Without a hook the walk is exactly
+ *  the synchronous function it always was (the daemon's `usage-scan` op runs in
+ *  a CHILD — a child has no loop to block — and the shipped scanner mirrors
+ *  that form); `budgetBytes` is ignored there. ONE WALK (2.297.0): the yield is
+ *  a hook inside the single implementation — the walk is a generator whose
+ *  `yield`s mark budget points, driven straight through (sync) or across an
+ *  `await onBudget()` per yield (hooked). A yield happens only AFTER a whole
+ *  line was consumed and its bytes added to the cursor, so a suspended walk's
+ *  cursors are always valid ones. scripts/test-usage-walk-parity.mjs pins the
+ *  yielding form against the sync form AND the shipped scanner (events,
+ *  cursors, filesTouched). */
+function runUsageWalk(opts = {}) {
+  const hooked = typeof opts.onBudget === 'function';
+  const budget = hooked && Number(opts.budgetBytes) > 0 ? Number(opts.budgetBytes) : Infinity;
+  const steps = walkSteps(opts, { spent: 0, budget });
+  if (!hooked) { let r; do { r = steps.next(); } while (!r.done); return r.value; }
+  return driveYielding(steps, opts.onBudget);
+}
+async function driveYielding(steps, onBudget) {
+  let r = { done: false };
+  try {
+    r = steps.next();
+    while (!r.done) { await onBudget(); r = steps.next(); }
+    return r.value;
+  } finally {
+    // a rejected hook leaves the walk suspended mid-file: run its finally
+    // blocks (the open fd closes) — never a leaked descriptor per failed scan
+    if (!r.done) { try { steps.return(); } catch { } }
+  }
+}
+function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   // 2.297.0 (the twin-killer): the LOCAL ledger walk consumes this module
   // in-process — explicit dir overrides + an injected cursor store + an
   // onEvent hook (parsed objects instead of NDJSON strings) are what let
   // UsageHistory.scan() delete its own copy of this walk. Defaults keep the
   // daemon/scan-op call shape byte-identical.
-  projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null } = {}) {
+  projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null } = {}, meter) {
   const PROJECTS = projectsDir || path.join(home, '.claude', 'projects');
   let cursors = injectedCursors;
   if (!cursors) { try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf-8')) || {}; } catch { cursors = {}; } }
@@ -189,7 +226,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
     });
   }
 
-  function scanFileWith(fp, cur, size, onLine) {
+  function* scanFileWith(fp, cur, size, onLine) {
     let fd;
     try { fd = fs.openSync(fp, 'r'); } catch { return; }
     try {
@@ -208,8 +245,11 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
         while ((idx = data.indexOf(10, lineStart)) !== -1) {
           const line = data.subarray(lineStart, idx).toString('utf8');
           lineStart = idx + 1;
-          cur.offset += Buffer.byteLength(line, 'utf8') + 1; // BYTES, never string length (CJK)
+          const nb = Buffer.byteLength(line, 'utf8') + 1;
+          cur.offset += nb; // BYTES, never string length (CJK)
           onLine(line);
+          // the budget point: only here, after a WHOLE line is in the cursor
+          if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }
         }
         rest = data.subarray(lineStart);
       }
@@ -261,7 +301,7 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
       // (an agent transcript with new bytes) — never for a main transcript,
       // whose own record already carries the authoritative value.
       const info = { origin, wf, agent, pcwd: origin === 'main' ? null : projectCwdFor(pdAbs, pd, sid, mains) };
-      scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur, info));
+      yield* scanFileWith(fp, cur, st.size, (line) => handleLine(line, cur, info));
       delete cur.sid;
       cursors[fp] = cur;
     }
@@ -292,14 +332,14 @@ function runUsageWalk({ home = os.homedir(), cursorFile = defaultCursorFile(),
     else { if (st.size < cur.offset) { cur.offset = 0; cur.lastRid = null; } if (st.size === cur.offset) { cursors[fp] = cur; continue; } }
     const sid = m[1].toLowerCase();
     filesTouched++;
-    const scanRollout = (onLine) => {
-      if (!zst) return scanFileWith(fp, cur, st.size, onLine);
+    const scanRollout = function* (onLine) {
+      if (!zst) { yield* scanFileWith(fp, cur, st.size, onLine); return; }
       let plain; try { plain = zstdPlain(fs.readFileSync(fp)); } catch { return; }
       if (plain.length < cur.offset) { cur.offset = 0; cur.lastRid = null; }
-      scanBufferWith(plain, cur, onLine);
+      yield* scanBufferSteps(plain, cur, onLine, meter);
       cur.zsize = st.size;
     };
-    scanRollout((line) => {
+    yield* scanRollout((line) => {
       if (line.indexOf('"turn_context"') >= 0) {
         let r; try { r = JSON.parse(line); } catch { return; }
         if (r.type === 'turn_context' && r.payload) {
@@ -382,14 +422,22 @@ function zstdPlain(buf) {
   }
   return parts.length === 1 ? parts[0] : Buffer.concat(parts);
 }
-function scanBufferWith(data, cur, onLine) {
+// A decompressed rollout's lines — the same budget points as a file's.
+function* scanBufferSteps(data, cur, onLine, meter) {
   let lineStart = cur.offset, idx;
   while ((idx = data.indexOf(10, lineStart)) !== -1) {
     const line = data.subarray(lineStart, idx).toString('utf8');
     lineStart = idx + 1;
-    cur.offset += Buffer.byteLength(line, 'utf8') + 1;
+    const nb = Buffer.byteLength(line, 'utf8') + 1;
+    cur.offset += nb;
     onLine(line);
+    if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }
   }
+}
+/** The synchronous spelling (exported; the budget never fires). */
+function scanBufferWith(data, cur, onLine) {
+  const steps = scanBufferSteps(data, cur, onLine, { spent: 0, budget: Infinity });
+  while (!steps.next().done) { }
 }
 
 module.exports = { runUsageWalk, defaultCursorFile, zstdPlain, scanBufferWith, ZSTD_OK, makeProjectCwdReader, encodeCwd };

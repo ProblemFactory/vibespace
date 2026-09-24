@@ -197,6 +197,14 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 const { REMOTE_PRELUDE, nodeFinder, buildRemoteExec } = require('./remote-shell.js');
 const { sweepWriters } = require('./writer-sweep.js');
 const { wrapperCaps, notificationSteerOf, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES } = require('./server/wrapper-files.js');
+// perf lane chunk D: resume BY SEQ — the attach's rung (PURE) + the entry's capability/arming state
+const { armResume, clientCaps, resumeFor, attachedFrameText } = require('./server/session-broadcast.js');
+// perf r1: the slab an attach asked for (`slab:'floor'|'text'`) → the text window's opts
+const { attachWindowOpts } = require('./text-window.js');
+/** The clients-map entry's op-seq state (caps / armed / lagged) survives an
+ *  entry rewrite that is not an attach (a resize, a subagent viewer's entry on
+ *  the parent) — only a new attach starts it over. */
+const seqStateOf = (prev) => (prev ? { caps: prev.caps || null, resumeArmed: !!prev.resumeArmed, lagged: prev.lagged || null } : {});
 
 function execFileAsync(cmd, args, { input, timeout = 20000, maxBuffer = 8 * 1024 * 1024, encoding = 'buffer' } = {}) {
   return new Promise((resolve, reject) => {
@@ -900,7 +908,7 @@ function registerWsHandler(wss, ctx) {
             // placeholder set at attach) — only these drive resizeSessionToMin
             const prev = session.clients.get(ws);
             const firstRealFit = !prev?.real;
-            session.clients.set(ws, { cols: data.cols, rows: data.rows, real: true });
+            session.clients.set(ws, { ...seqStateOf(prev), cols: data.cols, rows: data.rows, real: true });
             const before = session.pty ? { cols: session.pty.cols, rows: session.pty.rows } : null;
             resizeSessionToMin(session, data.sessionId);
             // Fresh attach (first real fit from this client): if the min-size
@@ -1006,7 +1014,7 @@ function registerWsHandler(wss, ctx) {
                 if (sess.subagentBuffers?.has(toolUseId)) {
                   // viewer:true — receive broadcasts but NEVER influence the
                   // parent session's PTY size (this read-only window has no terminal)
-                  sess.clients.set(ws, { cols: 120, rows: 30, viewer: true });
+                  sess.clients.set(ws, { ...seqStateOf(sess.clients.get(ws)), cols: 120, rows: 30, viewer: true });
                   attachedSessions.add(sid); // so ws close removes us from the parent's clients map
                   const rawMsgs = sess.subagentBuffers.get(toolUseId);
                   // Use existing sub-normalizer if available, or create one
@@ -1030,7 +1038,11 @@ function registerWsHandler(wss, ctx) {
 
           const session = activeSessions.get(data.sessionId);
           if (session) {
-            session.clients.set(ws, { cols: 120, rows: 30 });
+            // `caps` (perf lane chunk D): what this client can answer — `op-seq` =
+            // it reads `seq`, resumes by `sinceSeq` and re-attaches on `lagged`.
+            // A NEW entry: an attach starts the op-seq state over (armed again
+            // once `attached` is written below).
+            session.clients.set(ws, { cols: 120, rows: 30, caps: clientCaps(data) });
             attachedSessions.add(data.sessionId);
             if (session.mode === 'chat') {
               // Remote session: pull its transcript into the local cache BEFORE
@@ -1104,10 +1116,15 @@ function registerWsHandler(wss, ctx) {
                   }
                 }
               }
-              const messages = session._normalizer ? session._normalizer.tail(50) : [];
+              // THE ATTACH SLAB is a TEXT window (src/text-window.js), not tail(50): a
+              // deterministic function of the list, so a same-epoch re-attach ships the
+              // SAME slab and the client's identical-skip still fires (2.369.2).
+              // RESUME BY SEQ (perf lane chunk D) decides first: a same-epoch
+              // client whose last frame is still in the ring gets those frames
+              // replayed and NO slab — so neither the text window nor the turn
+              // map is computed for it.
+              const resume = resumeFor(session, data);
               const totalCount = session._normalizer ? session._normalizer.total : 0;
-
-              const turnMap = session._normalizer ? session._normalizer.turnMap() : [];
               const pendingPerms = sm.activePendingPermissions?.() || {};
               // session._isStreaming is tracked explicitly from protocol signals
               // (result/compact_boundary/user for claude and — since §2.5 — its
@@ -1208,8 +1225,10 @@ function registerWsHandler(wss, ctx) {
                 // strip's restart hint; null = unknown, never a hint.
                 return { queueSupported: !!served, queueVerbs: served || null, queueKnown: !served || published, queueNotifSteer: notificationSteerOf(wc, { inBand, published }) };
               })();
-              ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
-                messages, totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), turnMap, pendingPermissions: pendingPerms,
+              // ONE builder for every live fact; the slab (messages + turnMap) is
+              // the only thing the held rung leaves out.
+              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat',
+                totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), pendingPermissions: pendingPerms,
                 // The input queue as the normalizer knows it (the wrapper's
                 // queue_changed replays through the buffer on a rebuild) —
                 // ALWAYS present so a reconnecting client can clear a stale
@@ -1241,7 +1260,20 @@ function registerWsHandler(wss, ctx) {
                 backgroundTasks: session._normalizer?.backgroundTasks?.() || null, // the harness's last published level set (design-unknown-records) — null = never published
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
-                goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null }));
+                goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null,
+              };
+              // + `opSeq` on both rungs (the capability advert: the last seq this
+              // socket is current to), then the replay OR the slab. Written to
+              // the socket BEFORE any later live frame for this session
+              // (synchronous from the verdict to here — no await), so a replay is
+              // followed by exactly the frames after it.
+              ws.send(attachedFrameText(livePayload, resume, () => ({
+                // perf r1: the slab the attach ASKED for — 'floor' (a hidden view /
+                // a burst past its first few) = tail(50); else the text window
+                messages: session._normalizer ? session._normalizer.tailWindow(attachWindowOpts(data.slab)) : [],
+                turnMap: session._normalizer ? session._normalizer.turnMap() : [],
+              })));
+              armResume(session, ws);
               // ASK THE ONE PROCESS THAT KNOWS (2026-09-09, the ghost-row
               // incident). We just told the client our queue is a GUESS, so
               // the strip is showing NOTHING; the wrapper's answer is an
@@ -1337,7 +1369,7 @@ function registerWsHandler(wss, ctx) {
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view', { threadId: backendSessionId }); // the rendered conversation's id (codex ledger key)
             await mm.convertHistoryAsync(sm.raw()); // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once)
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
-              messages: mm.tail(50), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true }));
+              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true })); // the slab asked for, as the live attach (perf r1)
           } else {
             // Include sessionId so the requesting ChatView can correlate the
             // failure (otherwise it waits forever on a blank window)

@@ -13,6 +13,7 @@ import { FileViewer } from './file-viewer.js';
 import { CodeEditor } from './code-editor.js';
 import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
+import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { anchorFixedPopup, api, configureToasts, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl } from './utils.js';
 import { t, tc } from './i18n.js';
@@ -487,9 +488,18 @@ class App {
       }, 1500);
     });
 
+    // THE RECONNECT QUEUE (perf lane ⑤b, inc-mtndq0vb's third layer): a
+    // SUSPENDED ChatView (hidden desktop / mobile inactive / tab guest /
+    // minimized) waits for a slot instead of re-attaching in the same tick as
+    // every other window; displayed views attach at once. Slot order = the
+    // active desktop first, then the other desktops in their order, windows in
+    // their order within one (reconnect-queue.js; delays = view-visibility's
+    // PURE reconnectSlot). A drop resets it — the next pass supersedes.
+    this._reconnectQueue = createReconnectQueue({ rankOf: (view) => this._reconnectRank(view) });
+
     // Re-attach all terminal sessions on reconnect (chat sessions handle their own)
     this.ws.onStateChange((connected) => {
-      if (!connected) return;
+      if (!connected) { this._reconnectQueue.reset(); return; }
       this._checkBundleFreshness(); // stale-bundle tab after a server update → one-shot reload
       if (!this._vncAvailable) this._probeVncAvailability(); // may have failed during a restart-window page load
       // Broadcast-only stores go stale across an outage — refetch once per
@@ -539,6 +549,24 @@ class App {
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;
+  }
+
+  /** The reconnect queue's order key for a (suspended) ChatView: [desktop rank, window rank].
+   *  Desktop rank 0 = the active desktop (a minimized window / tab guest the user is next to),
+   *  then 1 + the desktop's index; window rank = the window's position in the manager's order
+   *  (a tab guest sits at its own window's position). An unknown view sorts last. */
+  _reconnectRank(view) {
+    let winId = null;
+    for (const [id, s] of this.sessions) if (s === view) { winId = id; break; }
+    const wins = [...this.wm.windows.keys()];
+    const wi = winId == null ? -1 : wins.indexOf(winId);
+    if (wi < 0) return [1e6, 1e6];
+    const win = this.wm.windows.get(winId);
+    const dm = this.desktopManager;
+    const desks = dm?.desktops || [];
+    const d = win?._desktopId;
+    const deskRank = !d || d === dm?.activeDesktopId ? 0 : 1 + Math.max(0, desks.findIndex((x) => x.id === d));
+    return [deskRank, wi];
   }
 
   _updateMobileNavTitle() {
