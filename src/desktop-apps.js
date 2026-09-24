@@ -729,6 +729,76 @@ function validateLaunchRequest(body, registry = []) {
   return { ok: true, error: null, launch: { source: 'adhoc', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale) } };
 }
 
+// ── which launches are WEB BROWSERS (takeover r2, T6 / I6) ─────────────────
+/**
+ * A desktop-app browser is the HUMAN'S window (its own profile, its logins; no
+ * mediation, no action trace, no egress policy) — the window-targets engine
+ * refuses it to agents `browser_is_human`. r1 recognised only a registry
+ * browser ROW or an ad-hoc launch of the SAME executable as one (firefox /
+ * chromium), so a human's dialog-launched Chrome, Edge, Brave or flatpak
+ * Chromium was attachable and AT-SPI-drivable. A browser is recognised by its
+ * NAME here, three ways:
+ *   · the executable's basename (`google-chrome-stable`, `/snap/bin/chromium`,
+ *     `microsoft-edge`, `brave-browser`, the Debian alternatives
+ *     `x-www-browser` / `gnome-www-browser` / `sensible-browser`, and the
+ *     binaries those run: `chrome`, `msedge`, `brave`, `vivaldi-bin` …);
+ *   · a reverse-DNS app id — a flatpak export (`…/exports/bin/org.chromium.
+ *     Chromium`) or the id `flatpak run` / `snap run` / `env` launch;
+ *   · the RUNNING process's own executable (`exe`, read by the engine from
+ *     /proc) — a wrapper the human typed (`x-www-browser`, their own script)
+ *     execs into the browser binary, and that binary's name decides.
+ * Precise names, never a prefix: `chromium-thumbnailer`, `infobrowser` (GNU
+ * info) and `browserslist` are not browsers (the suite's controls).
+ */
+const BROWSER_EXEC_RE = /^(?:google-chrome(?:-(?:stable|beta|unstable|canary))?|chrome|chromium(?:-browser|-freeworld)?|ungoogled-chromium|microsoft-edge(?:-(?:stable|beta|dev|canary))?|msedge|brave(?:-browser)?(?:-(?:stable|beta|nightly))?|opera(?:-(?:stable|beta|developer))?|vivaldi(?:-(?:stable|snapshot|bin))?|firefox(?:-(?:esr|bin|beta|nightly|devedition|developer-edition))?(?:\.real)?|librewolf|waterfox|floorp|zen-browser|zen(?:-bin)?|mullvad-browser|tor-browser|start-tor-browser|torbrowser-launcher|epiphany(?:-browser)?|falkon|konqueror|midori|qutebrowser|palemoon|seamonkey|basilisk|icecat|thorium-browser|cromite|yandex-browser(?:-(?:stable|beta))?|surf|luakit|nyxt|dillo|netsurf(?:-(?:gtk3?|fb))?|min|otter-browser|x-www-browser|gnome-www-browser|sensible-browser)$/i;
+const BROWSER_APP_ID_RE = /^(?:org\.chromium\.|com\.google\.chrome|com\.microsoft\.edge|com\.brave\.browser|com\.opera\.opera|com\.vivaldi\.vivaldi|org\.mozilla\.firefox|io\.gitlab\.librewolf|net\.waterfox\.|one\.ablaze\.floorp|app\.zen_browser\.|net\.mullvad\.mullvadbrowser|org\.torproject\.|org\.gnome\.epiphany|org\.kde\.falkon|org\.kde\.konqueror|org\.qutebrowser\.|io\.github\.ungoogled_software\.|ru\.yandex\.browser)/i;
+const baseOf = (x) => (typeof x === 'string' && x ? x.split('/').filter(Boolean).pop() || '' : '');
+/** Is this one executable / app-id name a web browser's? */
+function isBrowserName(name) {
+  const raw = typeof name === 'string' ? name : '';
+  const b = baseOf(raw.startsWith('/') ? raw : raw.replace(/\/\/.*$/, '')); // a flatpak ref's `//branch` is not a path
+  return !!b && (BROWSER_EXEC_RE.test(b) || BROWSER_APP_ID_RE.test(b));
+}
+/** The program a LAUNCHER runs: `flatpak run [--opt…] <app-id>`, `snap run
+ *  [--opt…] <name>`, `env [-i] [NAME=value…] <cmd>` — else null. */
+function launchedProgram(exec, args) {
+  const b = baseOf(exec);
+  const a = Array.isArray(args) ? args.map(String) : [];
+  const firstWord = (from) => { for (let i = from; i < a.length; i++) { if (a[i] === '--') return a[i + 1] || null; if (!a[i].startsWith('-')) return a[i]; } return null; };
+  if (b === 'flatpak' || b === 'snap') { const r = a.indexOf('run'); return r >= 0 ? firstWord(r + 1) : null; }
+  if (b === 'env') return envProgram(a);
+  return null;
+}
+/** takeover r3: GNU `env`'s program word — its VALUE-taking options skip their
+ *  value (`env -u FOO google-chrome` ran `FOO` as "the program" before), and
+ *  `-S` / `--split-string` hands its string back to env's own parse. */
+const ENV_VALUE_OPTS = new Set(['-u', '--unset', '-C', '--chdir', '-P', '-a', '--argv0']);
+function envProgram(a, depth = 0) {
+  for (let i = 0; i < a.length; i++) {
+    const t = a[i];
+    if (t === '--') { for (let j = i + 1; j < a.length; j++) if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(a[j])) return a[j]; return null; }
+    const split = t === '-S' || t === '--split-string' ? a[i + 1] : (t.startsWith('--split-string=') ? t.slice(15) : (/^-S./.test(t) ? t.slice(2) : null));
+    if (split != null) return depth > 3 ? null : envProgram([...String(split).trim().split(/\s+/).filter(Boolean), ...a.slice(i + (t === '-S' || t === '--split-string' ? 2 : 1))], depth + 1);
+    if (ENV_VALUE_OPTS.has(t)) { i++; continue; }
+    if (t.startsWith('-')) continue;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue;
+    return t;
+  }
+  return null;
+}
+/**
+ * → `{ browser, by: 'exec'|'launcher'|'process'|null, name }` for one launch
+ * record's `exec` / `args` and, when the engine could read it, the running
+ * app process's own executable `exe`.
+ */
+function browserLaunchVerdict({ exec = null, args = [], exe = null } = {}) {
+  if (isBrowserName(exec)) return { browser: true, by: 'exec', name: baseOf(exec) };
+  const prog = launchedProgram(exec, args);
+  if (prog && isBrowserName(prog)) return { browser: true, by: 'launcher', name: baseOf(prog) };
+  if (exe && isBrowserName(String(exe).replace(/ \(deleted\)$/, ''))) return { browser: true, by: 'process', name: baseOf(exe) };
+  return { browser: false, by: null, name: null };
+}
+
 /** The small default registry (§2 "a small default registry"): every row is
  *  PRESENCE-CHECKED by the keeper against PATH before it is offered — a row
  *  whose exec is absent is served with `available:false` and the reason, never
@@ -855,6 +925,7 @@ module.exports = {
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs,
+  BROWSER_EXEC_RE, BROWSER_APP_ID_RE, isBrowserName, launchedProgram, browserLaunchVerdict,
   SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel,
   OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
   BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX,

@@ -224,7 +224,7 @@ See the **[docs/](docs/)** directory for detailed guides:
 - [File Explorer](docs/file-explorer.md) — Browsing, bookmarks, viewers, code editor
 - [External Editor](docs/editor.md) — Ctrl+G split-pane CodeMirror integration
 - [Customize UI](docs/customize-ui.md) — Edit mode for the chrome: show/hide, drag, springs, alignment, extra rows
-- [Embedded Browser](docs/browser.md) — Iframe browser with proxy mode
+- [Web view](docs/browser.md) — the embedded iframe browser (toolbar globe) with proxy mode
 - [Settings](docs/settings.md) — All configuration options
 - [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — Complete reference
 

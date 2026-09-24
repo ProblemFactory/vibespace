@@ -69,7 +69,7 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `toolbar.showLayoutPresets` | boolean | `true` | Show the layout presets bar (built-in + custom grids + add button) |
 | `toolbar.showCommandMode` | boolean | `true` | Enable Ctrl+\\ command mode |
-| `toolbar.showBrowserButton` | boolean | `true` | Show the Browser button in the toolbar |
+| `toolbar.showBrowserButton` | boolean | `true` | Show the Web view button (the toolbar globe — the in-window iframe) in the toolbar |
 | `toolbar.showFileExplorerButton` | boolean | `true` | Show the Files button in the toolbar |
 | `toolbar.showTerminalButton` | boolean | `true` | Show the Terminal button in the toolbar |
 | `toolbar.showPresetsButton` | boolean | `true` | Show the saved-presets button in the toolbar |
@@ -127,13 +127,15 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `session.defaultMode` | enum | `chat` | Default mode for new sessions and single-click resume: Terminal or Chat |
 
-### Browser
+### Agent browser
 
-The agent browser (`agent-browser`, installed separately and run by the agent
-from its own shell). VibeSpace contributes four environment variables at spawn
-and nothing else — no extra process, no daemon. Turning the first one off
-restores exactly the pre-2026-09-13 behaviour: one shared profile, one shared
-session, and `agent-browser close --all` closing every agent's browser.
+The agent browser — the browser the AGENT drives (named **Agent browser** in the
+UI since 2.369.168; the toolbar's globe is the separate **Web view**, an iframe
+you drive). The agent reaches it only through `vibespace-browser <verb>`; the
+browser engine (`agent-browser`, installed separately) is hidden from the
+session PATH, and VibeSpace records, watches and reaps each conversation's own
+browser. Turning the first setting off gives every session one shared,
+unmanaged browser (a `close --all` is refused there, `shared_browser`).
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -142,7 +144,7 @@ session, and `agent-browser close --all` closing every agent's browser.
 | `browser.takeoverIdleMs` | number | `600000` | Also the idle window of a takeover on an agent's WINDOW (P9b — the same lease.input, the same rule). When you take over an agent's browser in the live view and walk away, control goes back to the agent by itself after this many ms without your input (an abandoned takeover never parks an agent for ever). `0` = never; anything under 30 s is raised to 30 s. |
 | `browser.announceIdleHandback` | boolean | `false` | Applies to a window takeover too (P9b). OFF: an idle handback tells the agent nothing until its next browser command succeeds or your next message (no billed turn is opened by a timer; one "For you" item is filed). ON: the lapse is announced into the conversation like an explicit Hand back — a billed turn under the same unattended-spend ceiling (Settings → Spending). |
 | `window.realDesktopTargets` | boolean | `false` | **Tier 3 (P10).** OFF: an agent may act only in windows VibeSpace started on its own private displays; your desktop is never listed. ON (a confirmation dialog is the consent): every application on this machine's accessibility bus becomes a window target an agent can read (the tree contains the text on your screen) and act in through the actions a node itself declares — including the window you are typing in; nothing is ever injected on this class (no chords, no point clicks); rows are marked "your desktop"; pause an agent per window under Desktop apps → Agents on your real desktop; turning it OFF drops every such lease at once. |
-| `browser.autoBindLiveView` | boolean | `true` | ON: when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window (design §4.6), under one shared window id so a second client never opens a second copy. OFF: open the live view yourself (session menu → Live browser view) and bind it with "Snap beside" (or group it with the session's window as tabs, then use the tab strip's side-by-side button or the window menu's "Show side by side"). No drag ever splits a window. Never on a phone (tabs only there); an ephemeral browser (no profile) is never auto-opened. |
+| `browser.autoBindLiveView` | boolean | `true` | ON: when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window (design §4.6), under one shared window id so a second client never opens a second copy. OFF: open the live view yourself (session menu → Agent browser — live view) and bind it with "Snap beside" (or group it with the session's window as tabs, then use the tab strip's side-by-side button or the window menu's "Show side by side"). No drag ever splits a window. Never on a phone (tabs only there); an ephemeral browser (no profile) is never auto-opened. |
 | `browser.headed` | enum | `""` (inherit) | Whether the agent's browser draws a real window on this machine's desktop: *inherit* (whatever your own `~/.agent-browser/config.json` says) / *show the window* / *headless*. Three states on purpose — a checkbox would render "inherit" as "off" and make the first click a decision you never made. One visible window per session is one framebuffer per session, and on the installed CLI it is also exempt from the idle timeout above. |
 | `browser.cloak.enabled` | boolean | `false` | OFF: the `cloak` provider is refused by name. ON: once its §7.2.1 egress measurement is recorded on this build, a `cloakserve` container may be started on this machine's loopback (free tier, one session) on an internal docker network whose only way out is the allowlisting egress proxy below. Turning it on downloads and starts nothing — the pinned package is installed by you, after the measurement. |
 | `browser.cloak.executablePath` | string | `""` (PATH) | Where the `cloakbrowser` binary is, for switching a profile to the `cloak` backend in place (the same profile directory opened by that binary with the profile's own fingerprint seed). Empty: looked up on PATH. VibeSpace never downloads it — installing it is your act, after the egress measurement is recorded. |

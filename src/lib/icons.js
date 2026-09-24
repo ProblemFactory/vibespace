@@ -108,6 +108,13 @@ export const UI_ICONS = {
   copy:      _s('<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5V3.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2"/>'),
   globe:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>'),
   monitor:   _s('<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/>'),
+  // THE AGENT BROWSER'S GLYPH (design-browser-faces direction B, 2.369.168): a
+  // browser window with a dot — the ⚙ row, the status-bar chip, the card menu,
+  // the phone sheet and the live view's window kind all read THIS one
+  // definition (test-architecture §53 counts the path: once in src/lib). The
+  // globe (`web` / `globe`) is the web view's alone. The rail's 24-grid variant
+  // is RAIL_ICONS.browser in sidebar-rail.js.
+  browserLive: _s('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9" r="1.6"/>'),
   info:      _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 7v4.5M8 4.8v.2"/>'),
   // Communication panel (docs/design-communication-panel-ui.md §4.7, a4
   // 2026-09-18): the channel KINDS (chat / mail / the built-in robot), the

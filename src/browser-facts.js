@@ -20,7 +20,40 @@
  * there is no binary"; it is a FACT, not an error, and it is cached like one.
  */
 const { execFile } = require('child_process');
+const path = require('path');
 const B = require('./browser-profiles.js');
+const VERBS = require('./browser-verbs.js');
+
+/**
+ * THE REAL BINARY, NEVER THE SHIM (design-browser-takeover §3.4 / §4). Agent
+ * sessions get a `agent-browser` SHIM first on their PATH; a server started
+ * from inside such a session (a scratch server, a remote daemon) inherits that
+ * PATH, and a bare `execFile('agent-browser')` would ask the shim its version
+ * (exit 2 ⇒ "unknown") or launch nothing. So the bare name is resolved through
+ * the ONE resolver the CLI uses — skipping this checkout's data/bin,
+ * ~/.vibespace/bin and any file carrying the shim's marker — and an explicit
+ * path is used as given. A caller that INJECTS its own executor
+ * (`execFileImpl`, the fast gate's fakes) owns name lookup: the name passes
+ * through untouched, exactly as before. Remembered for the version TTL (a
+ * few stat calls per 10 minutes, never per action); `null` = absent.
+ */
+const SHIM_DIRS = () => [path.join(__dirname, '..', 'data', 'bin'), path.join(require('os').homedir(), '.vibespace', 'bin')];
+function isShimFile(p) {
+  try { const fd = fs.openSync(p, 'r'); try { const b = Buffer.alloc(512); const n = fs.readSync(fd, b, 0, 512, 0); return b.slice(0, n).toString('utf8').includes(VERBS.SHIM_MARKER); } finally { fs.closeSync(fd); } } catch { return false; }
+}
+function isExecFile(p) { try { const st = fs.statSync(p); return st.isFile() && (st.mode & 0o111) !== 0; } catch { return false; } }
+function binaryResolver(cmd, env, { ttlMs = VERSION_TTL_MS, now = () => Date.now() } = {}) {
+  if (cmd !== VERBS.REAL_BINARY) return () => cmd; // an explicit path / a fake — as given
+  let memo = null;
+  return () => {
+    const PATH = String((env && env.PATH) || '');
+    const t = now();
+    if (memo && memo.PATH === PATH && t - memo.at < ttlMs) return memo.bin;
+    const r = VERBS.resolveRealBinary({ PATH, shimDirs: SHIM_DIRS(), exists: isExecFile, isShim: isShimFile });
+    memo = { PATH, at: t, bin: r.ok ? r.path : null };
+    return memo.bin;
+  };
+}
 
 /** 10 minutes. Long enough that no burst of session creates pays for a second
  *  fork; short enough that `npm i -g agent-browser@latest` is picked up within
@@ -50,6 +83,7 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
   let cached = null;          // { version: string|null, at: number, raw: string }
   let inFlight = null;
   const probeEnv = sanitizeProbeEnv(env);
+  const binOf = execFileImpl === execFile ? binaryResolver(cmd, env, { ttlMs, now }) : () => cmd;
 
   /** The installed version, or null when the binary is absent/unrunnable.
    *  NEVER throws: a probe that throws on a machine without the tool would turn
@@ -66,8 +100,11 @@ function createBrowserFacts({ cmd = 'agent-browser', execFileImpl = execFile, no
         inFlight = null;
         resolve(version);
       };
+      const bin = binOf();
+      // absent (or only the shim on PATH) = "there is no binary", the cached FACT
+      if (!bin) return finish(null, 'binary_absent: no browser CLI on PATH beside the shim');
       try {
-        execFileImpl(cmd, ['--version'], { timeout: 8000, encoding: 'utf8', env: probeEnv }, (err, stdout, stderr) => {
+        execFileImpl(bin, ['--version'], { timeout: 8000, encoding: 'utf8', env: probeEnv }, (err, stdout, stderr) => {
           // ENOENT = not installed. Any other failure is "we asked and could not
           // tell", which floorVerdict spells 'unknown' — deliberately NOT the
           // same answer as 'absent', because one of them deserves a sentence.
@@ -177,10 +214,13 @@ function treeUsage(pid, { depth = 3, readChildren = cliIdentity.readChildPids } 
  */
 function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null } = {}) {
   const base = sanitizeProbeEnv(env);
+  const binOf = execFileImpl === execFile ? binaryResolver(cmd, env) : () => cmd;
   const run = (args, extra, { timeout = 15000 } = {}) => new Promise((resolve) => {
     const e = { ...base, ...extra, AGENT_BROWSER_JSON: '1' };
+    const bin = binOf();
+    if (!bin) { resolve({ ok: false, code: 'ENOENT', stdout: '', stderr: '', json: null, error: 'binary_absent: the browser CLI is not installed on this machine (only the VibeSpace shim is on PATH, or nothing)' }); return; }
     try {
-      execFileImpl(cmd, args, { timeout, encoding: 'utf8', env: e, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFileImpl(bin, args, { timeout, encoding: 'utf8', env: e, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
         let json = null;
         try { json = JSON.parse(String(stdout || '').trim().split('\n').filter(Boolean).pop() || ''); } catch { json = null; }
         resolve({ ok: !err, code: err ? (err.code || err.status || 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), json, error: err ? String(err.message || err) : null });
@@ -200,8 +240,11 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   return {
     async streamStatus(ns, opts = {}) { return run(['stream', 'status', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000 }); },
     async streamEnable(ns, opts = {}) { return run(['stream', 'enable', '--json'], streamEnvOf(ns, opts), { timeout: opts.timeout || 60000 }); },
-    async info(ns, { dir = null } = {}) {
-      const r = await run(['session', 'info', '--json'], nsEnv(ns, dir));
+    /** takeover C3: with `ns` null and `extraEnv` = a MANAGED EPHEMERAL
+     *  browser's spawn pairs, the question is asked under exactly those (the
+     *  socket dir / config the session's own commands see) — never a guess. */
+    async info(ns, { dir = null, extraEnv = null } = {}) {
+      const r = await run(['session', 'info', '--json'], streamEnvOf(ns, { dir, extraEnv }));
       const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
       return { ok: r.ok && !!d, active: !!(d && d.active), pid: d && Number.isInteger(d.pid) ? d.pid : null, socketDir: d && d.socketDir ? String(d.socketDir) : null, version: d && d.version ? String(d.version) : null, raw: r };
     },
@@ -211,18 +254,18 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
      *  launch flags before `open` (`-p <name>` / `--executable-path` +
      *  `--args --fingerprint=<seed>`, src/browser-switch.js launchArgsFor). */
     async launch(ns, { dir, idleMs = 0, headed = null, url = 'about:blank', timeout = 60000, extraEnv = null, argvPrefix = null } = {}) {
-      const extra = { ...nsEnv(ns, dir), ...(extraEnv || {}), AGENT_BROWSER_IDLE_TIMEOUT_MS: String(Math.max(0, Number(idleMs) || 0)) };
+      const extra = { ...(ns ? nsEnv(ns, dir) : {}), ...(extraEnv || {}), AGENT_BROWSER_IDLE_TIMEOUT_MS: String(Math.max(0, Number(idleMs) || 0)) };
       if (headed === true) extra.AGENT_BROWSER_HEADED = '1';
       if (headed === false) extra.AGENT_BROWSER_HEADED = '0';
       return run([...(Array.isArray(argvPrefix) ? argvPrefix.map(String) : []), 'open', url], extra, { timeout });
     },
-    async cdpUrl(ns, { dir = null } = {}) {
-      const r = await run(['get', 'cdp-url'], nsEnv(ns, dir));
+    async cdpUrl(ns, { dir = null, extraEnv = null } = {}) {
+      const r = await run(['get', 'cdp-url'], { ...nsEnv(ns, dir), ...(extraEnv || {}) });
       const d = r.json && r.json.data;
       const url = typeof d === 'string' ? d : (d && typeof d === 'object' ? (d.url || d.cdpUrl || d.value || null) : null) || (r.ok ? r.stdout.trim().split('\n').pop() : null);
       return { ok: r.ok && !!url && /^(ws|http)s?:\/\//.test(String(url)), url: url ? String(url) : null, raw: r };
     },
-    async closeAll(ns, { dir = null, timeout = 20000 } = {}) { return run(['close', '--all'], nsEnv(ns, dir), { timeout }); },
+    async closeAll(ns, { dir = null, timeout = 20000, extraEnv = null } = {}) { return run(['close', '--all'], streamEnvOf(ns, { dir, extraEnv }), { timeout }); },
     /** P3 (§4.3): ONE upstream command under a lease's session (`confirm <id>` /
      *  `deny <id>`) — the profile's namespace + the lease's own session name,
      *  or the ephemeral browser's spawn pairs (`extraEnv`, no namespace of ours). */
@@ -246,4 +289,4 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   };
 }
 
-module.exports = { createBrowserFacts, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, readProcUsage, treeUsage };
+module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, readProcUsage, treeUsage };

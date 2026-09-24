@@ -250,19 +250,19 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     acctRow.appendChild(acctSel);
     bilSec.appendChild(acctRow);
 
-    // ── Browser (agent browser P1, §3.2.5's EXPLAINING surface) ──
+    // ── Agent browser (agent browser P1, §3.2.5's EXPLAINING surface; named for the face since direction B) ──
     // The pinned profile + WHICH rung chose it + how many sessions share it,
     // and the same picker the card menu opens. Only for a live local session
     // with a browser key while the client holds the profile digest.
     if (app._browserProfiles && s.browserKey && s.status === 'live' && s.webuiId && !s.host) {
-      const brSec = section(t('Browser'));
+      const brSec = section(t('Agent browser'));
       row(brSec, t('Pinned profile'), app.browserPinSummaryHtml(s), { wrap: true });
       const brRow = document.createElement('div');
       brRow.className = 'session-detail-row';
       brRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Pin'))}</span>`;
       const brBtn = document.createElement('button');
       brBtn.className = 'toolbar-btn';
-      brBtn.textContent = t('Browser profile…');
+      brBtn.textContent = t('Agent browser profile…');
       brBtn.onclick = (e) => app.showBrowserProfilePicker(s, { x: e.clientX, y: e.clientY });
       brRow.appendChild(brBtn);
       // P2 (§4.4): the live view — the same window the card menu and the status-bar chip open

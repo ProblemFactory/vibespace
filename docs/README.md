@@ -11,7 +11,7 @@ VibeSpace is a backend-agnostic web workspace for **coding agents** — it drive
 - **[Session Management](sessions.md)** — Claude/Codex discovery, tasks, star/archive, drag-drop, filters, dual-mode resume
 - **[File Explorer](file-explorer.md)** — Browsing, bookmarks, viewers, code editor, clickable paths
 - **[External Editor](editor.md)** — Ctrl+G split-pane CodeMirror integration
-- **[Embedded Browser](browser.md)** — Iframe browser with proxy mode
+- **[Web view](browser.md)** — the embedded iframe browser (toolbar globe) with proxy mode
 - [plugins.md](plugins.md) — Plugins: manifest, client tiers (sandboxed iframe / trusted module + consent), contributed settings & themes, server process under `node --permission`, agent tools, install/update/uninstall
 - **[Customize UI](customize-ui.md)** — Edit mode for the chrome: show/hide, drag between bars, springs, alignment, extra rows
 - **[Settings](settings.md)** — Global/per-terminal/chat settings plus Claude and Codex launch defaults

@@ -1,0 +1,15 @@
+#!/usr/bin/env node
+// VIBESPACE-AGENT-BROWSER-SHIM — the name on this session's PATH is VibeSpace's
+// (docs/design-browser-takeover.zh.md §4, owner 2026-09-24: "完全接管浏览器工具
+// … 不要兼容 agent 直接操作 agent-browser 的行为 … 从系统 path 隐藏"). STATIC
+// tracked, in AGENT_TOOLS (ships to ~/.vibespace/bin, which the remote prelude
+// puts FIRST on PATH). It refuses and points at the one road: it never
+// forwards, reads no environment, opens no network and spawns nothing. The
+// marker on the first comment line lets a resolver tell it from the real
+// binary by content (src/browser-verbs.js resolveRealBinary).
+'use strict';
+const args = process.argv.slice(2);
+const q = (s) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : "'" + String(s).replace(/'/g, "'\\''") + "'");
+const cmd = 'vibespace-browser ' + (args.length ? args.map(q).join(' ') : 'help');
+process.stderr.write('agent-browser is driven by VibeSpace here — run: ' + cmd + '\n');
+process.exit(2);

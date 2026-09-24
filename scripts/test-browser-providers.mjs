@@ -22,7 +22,7 @@
 //      remote cdp / local cdp browsers (never pid-signalled, stop closes the
 //      forward, the tick leaves them alone, boot re-adopts them by asking).
 //   ⑤ Routes + the shipped CLI: providers, create with host/cdpPort, the
-//      refusals by name, `use --print` withholding the CDP pair.
+//      refusals by name, `use` printing no env and no CDP url.
 //   ⑥ The allowlisting egress proxy over real loopback sockets.
 //
 // No real browser, no vendor call, port 0 everywhere, scratch dirs only; the
@@ -470,8 +470,8 @@ let srv = null;
   const nw = await cli(['new', 'Laptop Chrome', '--provider', 'cdp', '--host', 'dev-1', '--cdp-port', String(CDP2)]);
   ok(nw.status === 0 && /reaching an existing browser over CDP \(dev-1:\d+; nothing is started\)/.test(nw.stdout), 'vibespace-browser new --provider cdp --host --cdp-port says what it made', nw.stdout + nw.stderr);
   const newId = /\((bp-[0-9a-f]{8})\)/.exec(nw.stdout)?.[1];
-  const up = await cli(['use', newId, '--print']);
-  ok(up.status === 0 && !/AGENT_BROWSER_CDP=/.test(up.stdout) && /AGENT_BROWSER_NAMESPACE='?vs-bp-/.test(up.stdout) && /reached over CDP; that endpoint is not printed/.test(up.stdout), '`use --print` withholds the CDP pair and says so (§5.1: use never prints a CDP url)', up.stdout + up.stderr);
+  const up = await cli(['use', newId]);
+  ok(up.status === 0 && !/AGENT_BROWSER_CDP=|ws:\/\/|devtools/i.test(up.stdout + up.stderr) && !/export /.test(up.stdout) && /attached — run `vibespace-browser <verb>`/.test(up.stdout), '`use` of a reached browser prints no env and no CDP url (§5.1; takeover C2: there is nothing to export)', up.stdout + up.stderr);
   const cl = await cli(['new', 'Cloaked', '--provider', 'cloak']);
   ok(cl.status !== 0 && /provider_unavailable/.test(cl.stdout + cl.stderr), 'the CLI prints the typed refusal for cloak', cl.stdout + cl.stderr);
   const pf = await cli(['profiles']);

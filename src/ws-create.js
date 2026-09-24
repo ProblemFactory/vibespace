@@ -16,7 +16,7 @@ const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapter
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
-const { REMOTE_PRELUDE, buildRemoteExec, nodeFinder } = require('./remote-shell');
+const { REMOTE_PRELUDE, buildRemoteExec, nodeFinder, buildRemoteShellPrelude } = require('./remote-shell');
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { sweepWriters } = require('./writer-sweep');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
@@ -1189,7 +1189,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                   if (present.includes('code')) tarArgs.push('-C', path.dirname(EDITOR_CMD), 'code');
                   const tar = await execFileAsync('tar', [...tarArgs, ...tokArgs], { timeout: 15000 });
                   const h2 = hosts.get(data.hostId);
-                  await execFileAsync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
+                  await execFileAsync('ssh', [...hosts.sshArgs(h2, { multiplex: true }), '--', 'umask 077; mkdir -p "$HOME/.vibespace/bin" "$HOME/.vibespace/editor"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* "$HOME/.vibespace/bin/agent-browser" 2>/dev/null; [ -f "$HOME/.vibespace/bin/code" ] && { mv -f "$HOME/.vibespace/bin/code" "$HOME/.vibespace/editor/code"; chmod +x "$HOME/.vibespace/editor/code"; } || true'],
                     { input: tar, timeout: 20000 });
                   if (integrationOn) {
                     // NODE FINDER (2.244.4, userN's Novita — the chicken-and-egg
@@ -1208,7 +1208,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                     // base64 plan the install site sends — a host only ever
                     // spawned into (never Installed) gets the managed CLI-config
                     // keys at its next session start. base64 is shell-safe bare.
-                    prelude += 'export PATH="$HOME/.vibespace/bin:$PATH"; ' + nodeFinder()
+                    // ONE composition (src/remote-shell.js): REMOTE_PRELUDE → node
+                    // finder → tools LAST (so ~/.vibespace/bin — the browser shim
+                    // included — stays first on PATH over node's own bin dir)
+                    prelude = buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true })
                       + `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `;
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.
@@ -1282,7 +1285,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // chmod: tools executable, token 0600, then register the hook in
               // the device's OWN claude/codex configs (its local CLI fires it)
               await dm.runCmd('sh', ['-c',
-                `chmod +x "${bin}"/vibespace-* "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
+                `chmod +x "${bin}"/vibespace-* "${bin}/agent-browser" "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
                 // same POSIX node finder as the ssh prelude (2.244.4 — a bare
                 // `node` is unresolvable in dash/non-login shells on nvm hosts)
                 + nodeFinder()
@@ -1467,7 +1470,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // earlier ON spawn must not be name-resolvable in a pristine one
                 const shellCmd = buildRemoteExec({
                   cwd, shq,
-                  pre: REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : ''),
+                  pre: buildRemoteShellPrelude({ toolsOnPath: integrationOn, withNodeFinder: integrationOn }),
                   browser: spawnBrowserPre,
                   resolve: shellResolve, tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
                   parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd0, ...(backend === 'shell' ? ['-l'] : spawnArgs.map(shq))],
@@ -1638,7 +1641,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // tools PATH only while integrated (see the pty branch note)
                 const shellCmd = buildRemoteExec({
                   cwd, shq,
-                  pre: REMOTE_PRELUDE + (integrationOn ? 'export PATH="$HOME/.vibespace/bin:$PATH"; ' : ''),
+                  pre: buildRemoteShellPrelude({ toolsOnPath: integrationOn, withNodeFinder: integrationOn }),
                   browser: spawnBrowserPre,
                   tokenAssign: da.tokenAssign, acctEnv: dialAcctAssign,
                   parts: [...da.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmd, ...rargs.map(shq)],

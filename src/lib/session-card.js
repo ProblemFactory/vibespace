@@ -84,13 +84,13 @@ export function registerSessionCardMenu() {
   // agent browser P1 (§3.2.5): the pin's ONE entry point — the same class of
   // act as the billing switch (change an identity this session runs under);
   // shown only when the client holds a profile digest (the feature is on)
-  registerCommand({ id: 'session.pinBrowser', title: () => tr('Browser profile…'), run: (c) => c.app.showBrowserProfilePicker(c.s, { x: c.event.clientX, y: c.event.clientY }) });
+  registerCommand({ id: 'session.pinBrowser', title: () => tr('Agent browser profile…'), run: (c) => c.app.showBrowserProfilePicker(c.s, { x: c.event.clientX, y: c.event.clientY }) });
   // agent browser P2 (§4.4): the live view of this session's browser — one
   // window, N viewers on one upstream; shown for a live local session with a key
-  registerCommand({ id: 'session.browserLive', title: () => tr('Live browser view'), run: (c) => c.app.openBrowserLive({ sessionId: c.s.webuiId }) });
+  registerCommand({ id: 'session.browserLive', title: () => tr('Agent browser — live view'), run: (c) => c.app.openBrowserLive({ sessionId: c.s.webuiId }) });
   // agent browser P3 (§4.3): an EXPLICIT handback from the card — shown only
   // while the live fact says a human drives one of this session's browsers
-  registerCommand({ id: 'session.browserHandback', title: () => tr('Hand back the browser'), run: (c) => c.app.browserHandback?.(c.s.webuiId) });
+  registerCommand({ id: 'session.browserHandback', title: () => tr('Hand the agent browser back'), run: (c) => c.app.browserHandback?.(c.s.webuiId) });
   // transcript rescue (2.360.0, owner request after the 79928a2b 38MB
   // poisoning): stubs oversized records in place (full backup) so a
   // conversation whose resume dies / history blanks comes back

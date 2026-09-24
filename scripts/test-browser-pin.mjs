@@ -28,7 +28,7 @@
 //      to it (its own tab instead of a stolen one);
 //   ⑤ the routes on an in-process express app (a non-local host refused by
 //      name, every failure `{error, code}`, the UI answer never carries a CDP
-//      url) and the shipped CLI (`use --print` prints no CDP url, `close --all`
+//      url) and the shipped CLI (`use` prints no env and no CDP url, `close --all`
 //      is refused while another session is attached, the wrapper form passes
 //      `--pin-tab`, the no-token exit).
 //
@@ -520,7 +520,9 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   c = await cli(['profiles']);
   ok(c.status === 0 && /^\* Squad/m.test(c.stdout) && /^  Mine/m.test(c.stdout) && /\d\/2 browsers running/.test(c.stdout), '`profiles` lists every profile, marks mine with *, and says how many browsers run');
   c = await cli(['use', 'Squad', '--print']);
-  ok(c.status === 0 && /^export AGENT_BROWSER_NAMESPACE='vs-bp-/m.test(c.stdout) && /^export AGENT_BROWSER_SESSION='vs-bk-0000000a'/m.test(c.stdout) && /profile: Squad \(bp-/.test(c.stdout), '`use --print` prints the env to export and names the profile it acted on (§3.8 layer ①)');
+  ok(c.status === 1 && /\[not_offered\]/.test(c.stderr) && !/export /.test(c.stdout), '`use --print` is not offered (takeover C2): nothing to export');
+  c = await cli(['use', 'Squad']);
+  ok(c.status === 0 && !/export /.test(c.stdout) && /profile: Squad \(bp-/.test(c.stdout), '`use` attaches and names the profile it acted on (§3.8 layer ①) — no env, no subshell');
   ok(!/ws:\/\/|devtools|cdpUrl/i.test(c.stdout + c.stderr), '…and NEVER a CDP url (§5.1)');
   c = await cli(['use', 'nope']);
   ok(c.status === 1 && /\[not-found\]/.test(c.stderr), 'an unknown profile ⇒ exit 1 with the server\'s code');

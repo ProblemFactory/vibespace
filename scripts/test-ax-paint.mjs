@@ -206,6 +206,26 @@ function census(dir) {
     '④ NEGATIVE CONTROL: the glyph classifier takes escapes / symbols / the LRM and refuses words, a sentence with a dash, and the empty string');
 }
 
+// ── ⑥ the rail's icon-only items + the three browser faces' names (design-browser-faces direction B) ──
+// A rail item is a DOM-built <button> whose whole content is an 18 px SVG
+// (`b.innerHTML = RAIL_ICONS[id]`) and whose name used to live only in the
+// custom `data-tip` tooltip — a name the tree never saw. The helper now puts the
+// same label on `aria-label` (no `title`: the custom tip stays the only visible
+// tooltip). The agent's face is named 'Agent browser' on the rail; the toolbar
+// globe is the user's 'Web view' (a visible text label — named by content).
+{
+  const rail = read('src/lib/sidebar-rail.js');
+  const helper = /const item = \(id, label, onClick\) => \{([\s\S]*?)return b;\s*\};/.exec(rail)?.[1] || '';
+  ok(/b\.innerHTML = RAIL_ICONS\[id\]/.test(helper) && /b\.setAttribute\('aria-label', label\)/.test(helper) && !/b\.title\s*=/.test(helper),
+    '⑥ the rail item helper names every icon-only rail button: aria-label = its label (the custom data-tip stays the only visible tip)', helper.trim().slice(0, 240));
+  ok(/item\('browser', tr\('Agent browser'\), /.test(rail) && !/item\('browser', tr\('Browser profiles'\)/.test(rail), "⑥ the rail's browser item is named 'Agent browser' (the agent's face), never 'Browser profiles'");
+  const html = read('public/index.html');
+  const btn = /<button id="btn-browser"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1] || '';
+  ok(/<span data-i18n>Web view<\/span>/.test(btn) && /<circle cx="8" cy="8" r="6"\/>/.test(btn), "⑥ the toolbar globe is named by its visible text 'Web view' (and keeps the globe — the web view's alone)", btn.slice(-80));
+  const ops = read('src/lib/browser-live-window.js');
+  ok(/openBtn\.title = t\('Open this URL in a web view'\)/.test(ops), "⑥ the live view's icon-only hand-off button is titled 'Open this URL in a web view'");
+}
+
 // ── ⑤ ci.mjs ──
 ok(/\{ name: 'test-ax-paint', tier: 'fast' \}/.test(read('scripts/ci.mjs')), '⑤ ci.mjs carries test-ax-paint in the fast tier');
 

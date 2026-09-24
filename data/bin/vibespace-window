@@ -6,8 +6,8 @@
 // manual: vibespace-docs window.
 //
 // The one rule: you talk to the TREE, not to pixels. `snapshot` prints the
-// window's accessibility tree with @refs (the same habit as agent-browser's
-// @e3); `click <h> @e7` acts on THAT node through its own declared action —
+// window's accessibility tree with @refs (the same habit as
+// `vibespace-browser snapshot`'s @e3); `click <h> @e7` acts on THAT node through its own declared action —
 // a node that declares none is REFUSED (node_has_no_action), never turned
 // into a coordinate click behind your back. `key` and `click --at` are
 // injection and only work where an injection backend exists on that display

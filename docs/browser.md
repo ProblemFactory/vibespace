@@ -1,6 +1,6 @@
-# Embedded Browser
+# Web view (the embedded browser)
 
-Open an embedded browser window via the toolbar 🌐 button or command mode (`Ctrl+\` then `b`).
+Open a **Web view** — an embedded browser window you drive — via the toolbar's globe button (labelled *Web view*), the phone's "+" sheet, or command mode (`Ctrl+\` then `b`). It is not the **Agent browser** (the browser an agent drives, on the window-with-a-dot icon: rail, ⚙ Tools ▸ Agent browser…) and not a **Browser app** (a real Chromium/Firefox opened from Desktop apps); the three are told apart in `design-browser-faces.md`.
 
 ## Features
 

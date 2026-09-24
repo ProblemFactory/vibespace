@@ -58,7 +58,7 @@ const refuse = (code, why, extra = {}) => {
  *  undefined, a string, a stale client copy — is OFF. */
 function consentVerdict({ enabled } = {}) {
   if (enabled === true) return { ok: true };
-  return refuse('desktop_consent_off', `windows on your real desktop are OFF — the user turns them on in Settings → Browser → "${SETTING_LABEL}" (a switch with its own confirmation; until then nothing on the desktop is listed or addressable, and turning it off again drops every lease on that class at once)`);
+  return refuse('desktop_consent_off', `windows on your real desktop are OFF — the user turns them on in Settings → Agent browser → "${SETTING_LABEL}" (a switch with its own confirmation; until then nothing on the desktop is listed or addressable, and turning it off again drops every lease on that class at once)`);
 }
 
 /**
@@ -212,7 +212,7 @@ function hintAction(hint, { rowOf = () => null } = {}) {
   if (![1, 2, 3].includes(t)) return null;
   return { kind: 'suggestion', tier: t, backend: null, auto: false, by: hint.by || null,
     act: t === 3 ? 'open-window-target' : t === 2 ? 'switch-by-user' : 'none',
-    text: t === 3 ? `tier 3 = a window on the user's own desktop: the user turns on "${SETTING_LABEL}" (Settings → Browser), then the agent addresses their browser window with vibespace-window — no profile is created or re-pointed, and nothing escalates by itself` : t === 2 ? 'tier 2 = a fingerprint backend (cloak / cloud:*): the user picks it in the backend switcher — nothing escalates by itself' : 'tier 1 needs no act' };
+    text: t === 3 ? `tier 3 = a window on the user's own desktop: the user turns on "${SETTING_LABEL}" (Settings → Agent browser), then the agent addresses their browser window with vibespace-window — no profile is created or re-pointed, and nothing escalates by itself` : t === 2 ? 'tier 2 = a fingerprint backend (cloak / cloud:*): the user picks it in the backend switcher — nothing escalates by itself' : 'tier 1 needs no act' };
 }
 
 module.exports = {

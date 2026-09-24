@@ -1779,7 +1779,7 @@ const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
 const { desktopStream, windowEngine, boot: bootWindowLeases, shutdown: shutdownWindowLeases } = require('./src/server/window-live-wiring.js').install({
   app, auth, vnc, keeper: desktopKeeper, DESKTOP_SINGLETON_ID, dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), activeSessions: () => activeSessions, serverSetting: (k) => serverSetting(k), broadcast: (m) => bcastAll(m), browserHandback,
   netemEnabled: process.env.VIBESPACE_DESKTOP_NETEM === '1' }); // P8-2 D21 (c) validation slice: a dev-only latency/bit-rate injector on the xpra relay, never on by default
-desktopKeeper.adoptAll().then(() => desktopKeeper.start()).catch((e) => console.warn('[desktop] boot adoption failed:', e.message));
+desktopKeeper.adoptAll().then(() => desktopKeeper.start()).catch((e) => console.warn('[desktop] boot adoption failed:', e.message)); browserKeeper?.setOtherHolders?.(() => desktopKeeper.liveRecords().map((r) => ({ id: r.id, label: r.label || r.appId || r.id, kind: 'desktop-app' }))); // takeover C3 (D2): the ONE ceiling (CONCURRENT_CAP) counts the live desktop apps beside every browser
 const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B dial-in (2.144.0)
 
 // ── Start Server ──

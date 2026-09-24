@@ -763,8 +763,13 @@ class HostManager {
 
   /** The STATIC agent-tool set shipped to remotes. Readers use agentTools()
    *  (below), which appends the plugin-generated shims — the per-spawn
-   *  distribution in ws-create, agentToolsStatus/installAgentTools here. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-channels', 'vibespace-browser', 'vibespace-window', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+   *  distribution in ws-create, agentToolsStatus/installAgentTools here.
+   *  Browser takeover (design-browser-takeover §4): `agent-browser` is the
+   *  SHIM (the remote prelude puts ~/.vibespace/bin first, so it hides the
+   *  real binary from the agent) and `vibespace-browser-verbs.js` the verb
+   *  table the shipped `vibespace-browser` runs (copied at boot from
+   *  src/browser-verbs.js). test-architecture §52 fails a static tool left out. */
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'agent-browser', 'vibespace-window', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the
@@ -830,7 +835,7 @@ class HostManager {
     const tar = execFileSync('tar', ['-c', '-C', toolDir, ...present], { timeout: 15000, maxBuffer: 8 * 1024 * 1024 });
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
-        'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* 2>/dev/null || true; '
+        'umask 077; mkdir -p "$HOME/.vibespace/bin"; tar -x -C "$HOME/.vibespace/bin"; chmod +x "$HOME/.vibespace/bin"/vibespace-* "$HOME/.vibespace/bin/agent-browser" 2>/dev/null || true; '
         + REMOTE_PRELUDE
         // POSIX node finder (2.244.4): nvm.sh sourcing only works in bash — a
         // dash login shell leaves `node` unresolvable (userN's Novita)

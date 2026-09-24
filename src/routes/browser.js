@@ -47,7 +47,15 @@
  *   POST   /api/agent/browser/detach          { profile? }   a profile id, label or HANDLE
  *   GET    /api/agent/browser/status          leases + pin + the attachment SET (aliases, default, children)
  *   POST   /api/agent/browser/pin             { profile|null }
- *   POST   /api/agent/browser/resolve         { handle?, argv?, wrapper? }  WHICH browser a CLI command acts on (§3.7):
+ *   POST   /api/agent/browser/resolve         { handle?, argv?, wrapper? }  WHICH browser a CLI page verb acts on (§3.7) —
+ *                                             every page verb of `vibespace-browser` makes this ONE call (takeover C2);
+ *                                             no attachment on a local isolated rung ⇒ `keeper.ensureEphemeral` and
+ *                                             `kind:'ephemeral'` with the session's OWN spawn pairs + the record view
+ *                                             (takeover C3: started / adopted / counted — `browser_cap` names the
+ *                                             holders); a child handle gets its own record the same way; the shared
+ *                                             rung and a remote session stay `kind:'none'` (unmanaged, D7/D8);
+ *                                             `kind:'none'` carries `shared` (the rung), and `close --all` there is
+ *                                             refused `shared_browser` (D7):
  *                                             layer ①'s one-time `profile_changed` first, then `profile_required` /
  *                                             `not_attached` / `ambiguous` / `profile_path_refused`, else the env (+ cdpUrl
  *                                             for the wrapper); the "sub-agent" ASIDE rides only when this session has a
@@ -102,10 +110,13 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   backend_unavailable: 400, backend_no_key: 409, backend_seat_taken: 409, backend_seat_ceiling: 409, downgrade_refused: 409, downgrade_unknown: 409,
   switch_refused: 400, switch_export_only: 400, switch_noop: 409, browser_restarting: 409, hint_tier_with_backend: 400, host_underivable: 400, no_profile: 409,
   // §7.4 failure form (1): the INSTALL action's typed refusals (src/browser-switch.js INSTALL_CODES)
-  install_local_only: 400, already_installed: 409, install_running: 409, install_precondition_unmet: 409, install_unavailable: 503 };
+  install_local_only: 400, already_installed: 409, install_running: 409, install_precondition_unmet: 409, install_unavailable: 503,
+  // takeover C3 (design-browser-takeover §5): the managed ephemeral browser — the shared ceiling (D2), a record that is
+  // never attached / edited by id, pairs that name no browser of this conversation, the real CLI missing on this machine
+  browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503 };
 function fail(res, e) {
   const code = e?.code || null;
-  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}),
+  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
     ...(e?.action ? { action: e.action } : {}), ...(Array.isArray(e?.waysOut) && e.waysOut.length ? { waysOut: e.waysOut } : {}), ...(e?.needsConfirm ? { needsConfirm: true } : {}), ...(e?.provider ? { provider: e.provider } : {}), ...(e?.integrationId ? { integrationId: e.integrationId } : {}) });
 }
@@ -484,6 +495,61 @@ function childEnvOf(f, childKey) {
   }
   return B.childEnvFor({ childKey, parentVariant: variant, childConfigPath: cc ? cc.path : null, parentNamesProfile: cc ? cc.namesProfile : null });
 }
+/** takeover C3 (design-browser-takeover §5, D7/D8): is this session's OWN
+ *  browser one the keeper manages? A local session on an isolated rung whose
+ *  spawn pairs name its conversation's browser. The shared rung (isolation
+ *  off) and a remote session (rung H, ssh / paired device) stay unmanaged. */
+function managedPairs(f) {
+  const B = require('../browser-profiles.js');
+  const s = f.session || {};
+  if (!B.isolatedVariant(s._browserVariant) || s._browserVariant === B.VARIANTS.H) return null;
+  if (s.hostId || s.host) return null;
+  const v = B.ephemeralPairsVerdict(s._browserEnv, f.browserKey);
+  return v.ok ? v.pairs : null;
+}
+const sessionNameOf = (f) => String((f.session && (f.session.name || f.session.webuiName)) || f.sessionId || '');
+/** r1 (takeover finding 2): what the CLI builds its child env on. The CLI
+ *  drops EVERY `AGENT_BROWSER_*` key of its shell (each refused flag has an env
+ *  twin the browser CLI honours), so the server hands back the session's OWN
+ *  spawn pairs as recorded at spawn (`_browserEnv`; agentEnv() stripped every
+ *  other one) — `spawnEnv` — and, on rung H, the session name whose host-side
+ *  scratch dir the prelude may have exported (`hostProfile`). No record of the
+ *  pairs on an isolated rung (a session that predates it) ⇒ `spawnEnv` is
+ *  omitted and the CLI keeps the identity pairs as its shell has them.
+ *  r2 (the socket root is identity): a LOCAL session's answer names the root
+ *  the keeper's runtime uses for the browser `pairs` name (`socketDir`) and the
+ *  runtime dir it runs with (`runtimeDir`, null = none) — the CLI sets both on
+ *  the child last, so the shell's AGENT_BROWSER_SOCKET_DIR / XDG_RUNTIME_DIR
+ *  never pick the daemon. Rung H (unmanaged, D8) names only the BASE of the
+ *  short directory its prelude may export (`hostSocketBase`): the CLI keeps a
+ *  shell value only when it is exactly `<base>/vs-ab-<its uid>`. */
+function hostSocketBase() {
+  const B = require('../browser-profiles.js');
+  let base = null;
+  try { base = ctx.browserEnv?.()?.socketDirBase || null; } catch { base = null; }
+  return B.socketDirBaseOf(typeof base === 'string' ? base : B.SOCKET_DIR_BASE);
+}
+function envBasis(f, { k = null, pairs = null, ephemeral = true } = {}) {
+  const B = require('../browser-profiles.js');
+  const s = f.session || {};
+  const out = {};
+  if (Array.isArray(s._browserEnv)) out.spawnEnv = s._browserEnv.filter((kv) => typeof kv === 'string' && /^AGENT_BROWSER_[A-Z_]+=/.test(kv));
+  else if (!B.isolatedVariant(s._browserVariant)) out.spawnEnv = [];
+  if (s._browserVariant === B.VARIANTS.H && B.isBrowserKey(f.browserKey)) out.hostProfile = B.sessionNameFor(f.browserKey);
+  const remote = s._browserVariant === B.VARIANTS.H || !!(s.hostId || s.host);
+  if (s._browserVariant === B.VARIANTS.H) out.hostSocketBase = hostSocketBase();
+  else if (!remote && k && typeof k.socketRootOf === 'function') {
+    const sr = k.socketRootOf(Array.isArray(pairs) ? pairs : null);
+    out.socketDir = sr.socketDir;
+    out.runtimeDir = sr.runtimeDir;
+    // takeover r3 (finding 2): THE CONFIG IS NAMED — the file the keeper runs this browser with (the pairs'
+    // own generated config, else the keeper's machine file for the kind); the CLI sets it on the child LAST,
+    // so the binary never searches ./agent-browser.json in the agent's directory (a remote session gets none:
+    // its CLI composes one there by the same rule)
+    if (typeof k.configFileFor === 'function') { const c = k.configFileFor({ ephemeral, pairs: Array.isArray(pairs) ? pairs : null }); if (c) out.config = c; }
+  }
+  return out;
+}
 router.post('/api/agent/browser/resolve', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
@@ -491,14 +557,47 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   try {
     const v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session) });
     if (!v.ok) return failVerdict(res, v);
-    if (v.kind === 'none') { stampActive(f, ''); return res.json({ ok: true, kind: 'none', handle: null, env: [], handles: v.handles, pinTab: false }); }
+    if (v.kind === 'none') {
+      // D7 (design-browser-takeover §5.3): a session on the SHARED rung (isolation
+      // off, or the one local corner that gave it nothing) drives the machine's
+      // browser — `close --all` there would close every agent's browser, so it
+      // is refused BY NAME here, and the answer says the browser is shared
+      const shared = !B.isolatedVariant(f.session._browserVariant);
+      const argv = Array.isArray(req.body?.argv) ? req.body.argv.map(String) : [];
+      if (shared && argv[0] === 'close' && argv.includes('--all')) {
+        return res.status(409).json({ error: 'this session drives the machine\'s SHARED browser (per-session browsers are off here) — `close --all` would close every agent\'s browser', code: 'shared_browser', remedy: '`vibespace-browser close` closes your tab only; `tab close` closes the current tab', handles: v.handles || [] });
+      }
+      // takeover C3 (§5.1): no attachment on a local isolated rung ⇒ THIS
+      // conversation's managed ephemeral browser — recorded, counted, started
+      // (or adopted) under the session's OWN spawn pairs (never a re-run of
+      // the ladder); a refusal (browser_cap / runaway-parked / launch_failed)
+      // is typed like any other
+      const pairs = shared ? null : managedPairs(f);
+      if (pairs && typeof k.ensureEphemeral === 'function') {
+        const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
+        stampActive(f, '');
+        return res.json({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false });
+      }
+      stampActive(f, '');
+      return res.json({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false });
+    }
     if (v.kind === 'child') {
       const env = childEnvOf(f, v.handle);
-      return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, handles: v.handles, pinTab: false });
+      // takeover C3: a managed conversation's child handle gets its OWN
+      // ephemeral record (reaped with the parent), under the pairs a child
+      // command runs with (the parent's, minus the unset, plus the child's)
+      const parentPairs = managedPairs(f);
+      const childPairs = B.childPairsOver(parentPairs || (Array.isArray(f.session._browserEnv) ? f.session._browserEnv : []), env);
+      if (parentPairs && typeof k.ensureEphemeral === 'function') {
+        const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
+        return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser });
+      }
+      return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false });
     }
     const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds });
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
-    res.json({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), handles: v.handles, isDefault: !!v.attachment.isDefault });
+    // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
+    res.json({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/new-child', (req, res) => {
@@ -519,7 +618,10 @@ router.post('/api/agent/browser/audit', (req, res) => {
     const ref = req.body?.profile;
     const p = ref ? (k.profileByRef(ref) || null) : null;
     const a = !p || p.ambiguous ? k.setFor(f.browserKey).attachments.find((x) => x.alias === String(ref || '').trim()) : null;
-    const profileId = a ? a.profileId : (p && !p.ambiguous ? p.id : null);
+    // takeover C3: this conversation's (or its child's) managed ephemeral record names the line too — never another's
+    const eph = !a && (!p || p.ambiguous) && ref && typeof k.profile === 'function' ? k.profile(String(ref)) : null;
+    const ephOk = !!(eph && eph.ephemeral && eph.owner && require('../browser-profiles.js').parentKeyOf(eph.owner.id) === f.browserKey);
+    const profileId = a ? a.profileId : (p && !p.ambiguous ? p.id : (ephOk ? eph.id : null));
     // P4 (§7.4 step 1): a navigation stamps the lease's lastUrl — the URL a switch re-opens; the audit LINE stays verb-only
     if (profileId && typeof req.body?.url === 'string') k.noteLeaseUrl(f.browserKey, profileId, req.body.url);
     k.audit({ sessionId: f.sessionId, browserKey: f.browserKey, profileId, verb: req.body?.verb, ok: req.body?.ok !== false });
@@ -574,7 +676,9 @@ router.post('/api/agent/browser/detach', (req, res) => {
 router.get('/api/agent/browser/status', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
-  try { res.json({ ...k.statusFor(f.browserKey), sessionId: f.sessionId }); } catch (e) { fail(res, e); }
+  const B = require('../browser-profiles.js');
+  // `shared` (D7): the bare verbs of a session on the shared rung reach the machine's browser — status says so
+  try { res.json({ ...k.statusFor(f.browserKey), sessionId: f.sessionId, shared: !B.isolatedVariant(f.session._browserVariant) }); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/pin', (req, res) => {
   const k = keeperOr503(res); if (!k) return;

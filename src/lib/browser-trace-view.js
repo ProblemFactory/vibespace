@@ -22,8 +22,9 @@
 //   · THE TIMELINE (the live view's third pane, `createTraceTimeline`): the
 //     session's actions on the pane you are looking at (the profile's scope),
 //     seeded by one GET and grown by the stream's `trace` records.
-//   · THE BROWSER PROFILES PANEL (window type `browser-profiles`, ⚙ → Tools →
-//     Browser profiles…, `app.openBrowserProfiles({focus})`): the housekeeping
+//   · THE AGENT BROWSER WINDOW (window type `browser-profiles`, ⚙ → Tools →
+//     Agent browser…, the rail's window-with-a-dot, `app.openBrowserProfiles({focus})`;
+//     titled "Browser profiles" before the faces rename): the housekeeping
 //     view — states with their why, sizes, trace digests, recordings and the
 //     per-profile screencast opt-in (D7), the orphans to adopt or set aside
 //     (§8 step 3), the set-aside ledger where the ONE permanent deletion is
@@ -44,6 +45,16 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const STRIP_MAX = 12;
 const FLUSH_MS = 150;
 const APPEND_DEBOUNCE_MS = 600;
+
+/** takeover C3: an ephemeral browser's state in the device's words. */
+export function ephemeralStateText(e) {
+  if (!e) return '';
+  if (e.state === 'ready') return e.adopted ? t('running (adopted)') : t('running');
+  if (e.state === 'starting') return t('starting');
+  if (e.state === 'failed') return t('failed');
+  if (e.state === 'stopped') return e.stoppedBy === 'idle' ? t('idled out') : t('stopped');
+  return t('not started');
+}
 
 /** The kind word for a position (the wire's closed kinds → the device's words). */
 export function positionKindText(position) {
@@ -237,9 +248,9 @@ export function createCardTraceLoader(view) {
     if (sum) {
       if (error) sum.textContent = t('trace unavailable: {why}', { why: String(error) });
       else if (s.n) sum.textContent = t('{n} action(s)', { n: s.n }) + (s.failed ? ' · ' + t('{n} failed', { n: s.failed }) : '');
-      else if (off) sum.textContent = t('action trace is off (Settings → Browser)');
+      else if (off) sum.textContent = t('action trace is off (Settings → Agent browser)');
       else if (unknown) sum.textContent = t('no conversation id to look up');
-      else if (untraced) sum.textContent = t('not traced — this browser was not started through VibeSpace (Browser profiles)');
+      else if (untraced) sum.textContent = t('not traced — this browser was not started through VibeSpace (Agent browser)');
       else sum.textContent = h.closest('.chat-msg')?.querySelector('.chat-tool-output-pending') ? t('waiting for actions…') : t('no recorded actions in this call');
       sum.classList.toggle('empty', !s.n);
     }
@@ -312,7 +323,7 @@ export function createTraceTimeline(app, { sessionId } = {}) {
   function scopeQuery() { if (st.scope === undefined) return ''; return st.scope === null ? EPHEMERAL_SCOPE : String(st.scope); }
   function renderHead() {
     if (st.error) count.textContent = t('trace unavailable: {why}', { why: String(st.error) });
-    else if (st.off) count.textContent = t('action trace is off (Settings → Browser)');
+    else if (st.off) count.textContent = t('action trace is off (Settings → Agent browser)');
     else count.textContent = t('{n} action(s)', { n: st.entries.length }) + ' · ' + t('newest last');
     empty.style.display = st.entries.length || st.off || st.error ? 'none' : '';
   }
@@ -400,7 +411,7 @@ const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'applic
 export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   for (const [, w] of app.wm.windows) if (w.type === PANEL_TYPE) { app.wm.focusWindow(w.id); if (focus && w._browserProfiles) w._browserProfiles.focusRow(focus); return w; }
   app._hideWelcome?.();
-  const winInfo = app.wm.createWindow({ title: t('Browser profiles'), type: PANEL_TYPE, syncId, openSpec: { action: 'openBrowserProfiles' }, width: 860, height: 600 });
+  const winInfo = app.wm.createWindow({ title: t('Agent browser'), type: PANEL_TYPE, syncId, openSpec: { action: 'openBrowserProfiles' }, width: 860, height: 600 });
   const st = { view: null, error: null, busy: false, closed: false, timer: null, focus };
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
@@ -419,7 +430,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
 
   function renderHint(v) {
     const days = Math.round((v?.limits?.retentionMs || TRACE_RETENTION_MS) / 86400000), mb = Math.round((v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) / 1048576);
-    hint.textContent = t('Traces and recordings are kept {days} days or {mb} MB per profile, whichever comes first; frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { days, mb }) + (v && v.traceOn === false ? ' ' + t('The action trace is OFF (Settings → Browser → Action trace).') : '');
+    hint.textContent = t('Traces and recordings are kept {days} days or {mb} MB per profile, whichever comes first; frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { days, mb }) + (v && v.traceOn === false ? ' ' + t('The action trace is OFF (Settings → Agent browser → Action trace).') : '');
   }
   function renderSummary(v) {
     const rows = v?.profiles || [];
@@ -468,6 +479,24 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       load();
     };
     row.appendChild(forget);
+    return row;
+  }
+  /** takeover C3 (design-browser-takeover §5.3): one managed EPHEMERAL browser —
+   *  the record, whose conversation, its state, and the user's Stop (the
+   *  profile stop route; the conversation's next command starts it again). */
+  function ephemeralRow(e) {
+    const row = el('div', 'bprof-row bprof-ephemeral-browser');
+    row.dataset.profileId = String(e.profileId || '');
+    const ident = el('div', 'bprof-ident'); ident.appendChild(el('span', 'bprof-label', String(e.label || e.profileId || ''))); if (e.child) ident.appendChild(el('span', 'bprof-chip', t('sub-agent'))); ident.title = String(e.profileId || ''); row.appendChild(ident);
+    cell(row, 'bprof-conv bprof-mono', String(e.browserKey || ''), e.sessionId ? t('session {id}', { id: String(e.sessionId) }) : '');
+    const st = cell(row, 'bprof-state state-' + (e.live ? 'live' : 'kept'), ephemeralStateText(e));
+    if (e.lastError) st.title = String(e.lastError);
+    cell(row, 'bprof-age', e.startedAt ? t('started {ago}', { ago: agoText(Date.now() - Number(e.startedAt)) }) : '');
+    const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
+    stop.disabled = !e.live;
+    stop.title = e.live ? t('Stop this browser now — the conversation\'s next command starts it again (a login in it is gone)') : t('Not running');
+    stop.onclick = async () => { stop.disabled = true; const r = await act(`/api/browser/profiles/${encodeURIComponent(String(e.profileId || ''))}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (r) showToast(t('Stopped {label}', { label: String(e.label || '') }), { duration: 4000 }); load(); };
+    row.appendChild(stop);
     return row;
   }
   function orphanRow(o) {
@@ -526,6 +555,11 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
     cell(eph, 'bprof-trace', et.n ? t('{n} action(s)', { n: et.n }) + ' · ' + bytesText(et.bytes) : t('no actions'));
     prof.appendChild(eph);
+    // takeover C3: every conversation's managed ephemeral browser — watched like a profile, gone with its conversation
+    const ephs = section(t('Ephemeral browsers'), t('one per conversation that browses without a profile — started by its first command, stopped after its idle timeout, removed with the conversation'));
+    const erows = Array.isArray(v.ephemeralBrowsers) ? v.ephemeralBrowsers : [];
+    if (!erows.length) ephs.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — no conversation has browsed without a profile since its start.')));
+    for (const e of erows) ephs.appendChild(ephemeralRow(e));
     const orph = section(t('Unregistered directories'), v.orphansBase ? t('under {base} — a Chromium profile no record names; adopt the ones worth keeping, set the rest aside', { base: String(v.orphansBase) }) : '');
     if (v.orphansWhy) orph.appendChild(el('div', 'bprof-empty chat-status-dim', String(v.orphansWhy)));
     else if (!(v.orphans || []).length) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — every profile directory here is named by a record.')));
@@ -566,10 +600,10 @@ export function installBrowserTrace(App) {
   App.prototype.openBrowserProfiles = function (opts) { return openBrowserProfilesWindow(this, opts || {}); };
 }
 
-// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) + the ⚙ row (Tools ▸ Browser profiles…) ──
+// ── WINDOW-TYPE REGISTRATION (Plugin Ph1) + the ⚙ row (Tools ▸ Agent browser…; the window was "Browser profiles" before the faces rename) ──
 registerWindowType({
-  type: 'browser-profiles', label: 'Browser profiles', singleton: true, // a LITERAL type: the window-types census reads it (a constant reads as a dynamic plugin kind)
+  type: 'browser-profiles', label: 'Agent browser', singleton: true, // a LITERAL type: the window-types census reads it (a constant reads as a dynamic plugin kind)
   icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01M4 8h4M4 10.5h6"/>'),
   action: 'openBrowserProfiles', replay: (app, spec, { syncId } = {}) => app.openBrowserProfiles({ syncId }),
 });
-registerMenuItem({ menu: 'gear', parent: 'tools', order: 35, icon: UI_ICONS.globe, /* under Tools ▸ (Usage 10 · Background Work 20 · Desktop apps 30 · this 35 · Plugins 40) */ when: (c) => !!c.app._browserProfiles, label: () => t('Browser profiles…'), run: (c) => c.app.openBrowserProfiles() });
+registerMenuItem({ menu: 'gear', parent: 'tools', order: 35, icon: UI_ICONS.browserLive, /* under Tools ▸ (Usage 10 · Background Work 20 · Desktop apps 30 · this 35 · Plugins 40); the agent's face on its window-with-a-dot glyph — the globe is the web view's (design-browser-faces B) */ when: (c) => !!c.app._browserProfiles, label: () => t('Agent browser…'), run: (c) => c.app.openBrowserProfiles() });

@@ -275,7 +275,7 @@ console.log('\n④ the ladder (D12) and its reasons');
 // ladder half — but it still BOUNDS the rest: a line of no declared kind fails,
 // or a future flood would simply hide behind the filter.
 const LADDER_RE = /variant [A-Za-z]+ → [A-Za-z]+|remote sessions decide/;
-const CONFIG_RE = /the generated agent-browser config drops `|the profile pin was NOT applied|config also carries the project-level|could not be layered into the generated config|daemon socket would be \d+ bytes/;
+const CONFIG_RE = /the generated agent-browser config drops `|the profile pin was NOT applied|config also carries the project-level|could not be layered into the generated config|daemon socket would be \d+ bytes|NOT carried: a project file lives where the agent works|from `args` — a switch that opens a raw debugging endpoint/;
 const ladderOnly = (ls) => ls.filter((l) => LADDER_RE.test(String(l)));
 const undeclared = (ls) => ls.filter((l) => !LADDER_RE.test(String(l)) && !CONFIG_RE.test(String(l)));
 
@@ -746,8 +746,8 @@ console.log('\n⑦ wiring (a pure function nobody calls is a feature nobody has)
   const ar = read('src/agent-routes.js');
   ok(/browser: 'browser-manual\.md'/.test(ar), '`vibespace-docs browser` resolves to a manual');
   ok(fs.existsSync(path.join(REPO, 'docs/agent/browser-manual.md')), '…and that manual exists in this checkout (the route serves it off disk)');
-  ok(/agent-browser` CLI works as usual/.test(ar) && /vibespace-docs browser/.test(ar),
-    'the budgeted tools intro carries ONE line about it, pointing at the manual');
+  ok(/Browsing: `vibespace-browser <verb>`/.test(ar) && /vibespace-docs browser/.test(ar),
+    'the budgeted tools intro carries ONE line about it — the one tool (takeover C2) — pointing at the manual');
 
   const restore = read('src/server/boot-restore.js');
   ok((restore.match(/_browserKey: meta\.browserKey/g) || []).length === 3,
@@ -861,12 +861,16 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   const r = e.envFor({ browserKey: K, integrationOn: true, cwd: PROJ });
   const cfg = ok(!!r.configPath && fs.existsSync(r.configPath), 'setup: variant D wrote a config (a mutant must go RED, not crash)') ? JSON.parse(fs.readFileSync(r.configPath, 'utf8')) : {};
   ok(Array.isArray(cfg.allowedDomains) && cfg.allowedDomains[0] === 'example.com', 'THE FIX: the generated config carries the PROJECT-level fence');
-  ok(cfg.args === '--no-sandbox,--project' && cfg.confirmActions === 'navigate' && JSON.stringify(cfg.extensions) === '["/e/a","/e/b"]',
-    '…and the project `args`/`confirmActions`, with `extensions` merged — the CLI\'s own rule, not a preserve list');
+  // takeover r3 (finding 2): the project file only NARROWS — its `confirmActions` (a narrowing key) is carried,
+  // its `args` and `extensions` (launch keys) are NOT: the user file's stand, and the drop is journalled by name
+  ok(cfg.args === '--no-sandbox,--user' && cfg.confirmActions === 'navigate' && JSON.stringify(cfg.extensions) === '["/e/a"]',
+    'takeover r3: the project `confirmActions` is carried (it narrows); its `args` / `extensions` are NOT — the user file\'s launch keys stand', JSON.stringify(cfg));
+  ok(JSON.stringify(r.projectDropped) === '["args","extensions"]' && lines.some((l) => /NOT carried: a project file lives where the agent works/.test(l) && /args, extensions/.test(l) && l.includes(path.join(PROJ, 'agent-browser.json'))),
+    'takeover r3: …and the dropped project keys are SAID (the result + one journal line naming the file and the keys)', JSON.stringify({ pd: r.projectDropped, lines }));
   ok(r.projectConfig && r.projectConfig.path === path.join(PROJ, 'agent-browser.json') && r.projectConfig.keys.includes('allowedDomains'),
     'the resolver REPORTS the file it layered and the keys it took');
   const pl = lines.filter((l) => /config also carries the project-level/.test(l));
-  ok(pl.length === 1 && pl[0].includes(path.join(PROJ, 'agent-browser.json')) && /allowedDomains/.test(pl[0]),
+  ok(pl.length === 1 && pl[0].includes(path.join(PROJ, 'agent-browser.json')) && /allowedDomains/.test(pl[0]) && !/keys: [^)]*\bargs\b/.test(pl[0]),
     'ONE journal line names the file and its keys (round 2 wrote nothing — the drop was by omission)');
   ok(/cd's into/.test(pl[0]) && /per invocation directory/.test(pl[0]),
     '…and states the one boundary honestly: the CLI reads it per invocation directory, the generated config applies it to the whole session');
@@ -938,6 +942,30 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
     const pin2 = ep2.repointPin(K2, pinned);
     ok(pin2.ok === true && ep2.resolvedProfileDir(K2) === pinned,
       'PRE-FIX CONTROL #2: a pin rebuilt from ~/.agent-browser/config.json APPLIES over a project-level fence (round 2 would have shipped a browser that refuses every command, silently)');
+  }
+  // takeover r3 (finding 2): a raw-debugging / user-data-dir switch never reaches the generated config, from EITHER
+  // file — the verifier's shape: a session directory whose agent-browser.json names `--remote-debugging-port`
+  {
+    const H13r = path.join(ROOT, 'home-rawargs'); const PR = path.join(ROOT, 'proj-rawargs');
+    fs.mkdirSync(path.join(H13r, '.agent-browser'), { recursive: true }); fs.mkdirSync(PR, { recursive: true });
+    fs.writeFileSync(path.join(H13r, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox,--remote-debugging-port=41999,--ozone-platform=wayland', cdp: '9222', userAgent: 'U' }));
+    fs.writeFileSync(path.join(PR, 'agent-browser.json'), JSON.stringify({ args: '--no-sandbox,--remote-debugging-port=42945', userAgent: 'R3-UA-LAYERED', executablePath: '/x/dumpchrome', proxy: 'http://127.0.0.1:1', allowedDomains: ['example.com'] }));
+    const lr = [];
+    const rr = mk({ homeDir: H13r, log: { warn: (s2) => lr.push(String(s2)), log() { } } }).envFor({ browserKey: 'bk-13131308', integrationOn: true, cwd: PR });
+    const cr = JSON.parse(fs.readFileSync(rr.configPath, 'utf8'));
+    ok(cr.args === '--no-sandbox,--ozone-platform=wayland' && cr.userAgent === 'U' && !('executablePath' in cr) && !('proxy' in cr) && !('cdp' in cr) && JSON.stringify(cr.allowedDomains) === '["example.com"]',
+      'takeover r3: the verifier\'s rung-D shape — the project\'s args / userAgent / executablePath / proxy are not carried, the user\'s raw-debugging switch and `cdp` are dropped, the user\'s other args and the project FENCE stand', JSON.stringify(cr));
+    ok(JSON.stringify(rr.argsDropped) === '["--remote-debugging-port=41999"]' && lr.some((l) => /drops --remote-debugging-port=41999 from `args`/.test(l)) && undeclared(lr).length === 0,
+      'takeover r3: …the dropped switch is SAID in a declared journal line', JSON.stringify({ ad: rr.argsDropped, lr }));
+    // PRE-FIX CONTROL: the v2-r3 composition (the layered config whole, only EPHEMERAL_DENY dropped) in a patched copy of
+    // the PURE module carries the verifier's raw port and user agent into the generated config
+    const bsrc = read('src/browser-profiles.js');
+    const pre = bsrc.replace("const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });",
+      "const lay = layerProjectConfig(userConfig, projectConfig); const cfg0 = { ...lay }; for (const k of deniedKeys(lay)) delete cfg0[k]; const r = { config: cfg0, dropped: { project: [], keys: [], args: [] } };");
+    const m0 = { exports: {} }; new Function('module', 'exports', 'require', pre)(m0, m0.exports, (x) => require(x.startsWith('./') ? path.join(REPO, 'src', x) : x));
+    const pc = m0.exports.generatedConfig({ userConfig: JSON.parse(fs.readFileSync(path.join(H13r, '.agent-browser', 'config.json'), 'utf8')), projectConfig: JSON.parse(fs.readFileSync(path.join(PR, 'agent-browser.json'), 'utf8')) });
+    ok(pre !== bsrc && /--remote-debugging-port=42945/.test(pc.args) && pc.userAgent === 'R3-UA-LAYERED' && pc.executablePath === '/x/dumpchrome',
+      'takeover r3 PRE-FIX CONTROL: the v2-r3 layering (patched copy) carries the project\'s raw debugging port, user agent and executable into the generated config — the legs above can go red', JSON.stringify(pc));
   }
   // wiring: ws-create hands the resolver the session's cwd
   const src = read('src/ws-create.js');
@@ -1666,13 +1694,13 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   const ar = require('../src/agent-routes.js');
   const T = { status: true, ask: true, task: false, jobs: false };
   const line = (v) => ar.sessionToolsIntro(T, { browserVariant: v }).split('\n').find((l) => l.startsWith('Browsing:')) || '';
-  for (const v of B.ISOLATED_VARIANTS) ok(/THIS session already has its own browser/.test(line(v)) && /close --all` closes only yours/.test(line(v)), `rung ${v}: the intro says this session has its OWN browser and \`close --all\` is safe`);
+  for (const v of B.ISOLATED_VARIANTS) ok(/THIS conversation's own browser/.test(line(v)) && /close --all` closes only yours/.test(line(v)), `rung ${v}: the intro says this conversation has its OWN browser and \`close --all\` is safe`);
   for (const [label, v] of [['none', B.VARIANTS.NONE], ['null (feature off / resolver unavailable)', null], ['undefined (a session that predates the feature)', undefined], ['garbage', 'Z']]) {
     const l = line(v);
-    ok(/SHARES the machine/.test(l) && /Do NOT run `agent-browser close --all`/.test(l) && !/closes only yours/.test(l), `rung ${label}: the intro says the browser is SHARED and \`close --all\` is NOT safe (the manual's own words)`);
+    ok(/machine's SHARED browser/.test(l) && /never `close --all`/.test(l) && !/closes only yours/.test(l), `rung ${label}: the intro says the browser is SHARED and \`close --all\` is NOT safe (the manual's own words)`);
   }
-  ok(ar.sessionToolsIntro(T) === ar.sessionToolsIntro(T, {}) && /SHARES the machine/.test(ar.sessionToolsIntro(T)), 'no facts at all ⇒ the shared sentence (the conservative default: a caller that forgot the session cannot claim isolation)');
-  ok(/agent-browser` CLI works as usual/.test(line('none')) && /vibespace-docs browser/.test(line('none')), 'both sentences keep the two anchors leg ⑦ pins (the CLI works as usual; the manual pointer)');
+  ok(ar.sessionToolsIntro(T) === ar.sessionToolsIntro(T, {}) && /machine's SHARED browser/.test(ar.sessionToolsIntro(T)), 'no facts at all ⇒ the shared sentence (the conservative default: a caller that forgot the session cannot claim isolation)');
+  ok(/^Browsing: `vibespace-browser <verb>`/.test(line('none')) && /^Browsing: `vibespace-browser <verb>`/.test(line('D')) && /vibespace-docs browser/.test(line('none')), 'both sentences keep the two anchors leg ⑦ pins (the one tool; the manual pointer)');
   ok(B.isolatedVariant('D') && B.isolatedVariant('C') && B.isolatedVariant('N') && B.isolatedVariant('H') && !B.isolatedVariant('none') && !B.isolatedVariant(null) && !B.isolatedVariant(''), 'isolatedVariant is the ONE table (D/C/N/H yes; none/null/empty no)');
   const arSrc = read('src/agent-routes.js');
   const sites = arSrc.match(/sessionToolsIntro\((?:enabledTools\(\)|toolFlags), \{ browserVariant: s\._browserVariant(?:, browserSet: browserSetFacts\(s\))? \}\)/g) || []; // P1b added the set beside the variant; the pin follows the shipped call shape

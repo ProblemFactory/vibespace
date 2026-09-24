@@ -237,7 +237,7 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 
 ### 7.7 B-bfe6 — 浏览器作为桌面应用（2.369.166；owner 2026-09-23 "应用里面也可以加入一下浏览器"；本机：google-chrome（deb）+ snap firefox 156.0-1，xpra 6.5.3）
 
-**关系先说清。** 桌面应用里的浏览器是**人**的浏览器：一行注册表（§5——exec 绝不来自 agent），和其他应用一样走 xpra 逐窗口级，带一个由应用会话**自己拥有**的配置目录。它**不是** Agent 浏览器（design-agent-browser-v2 §3：配置在 `data/browser-*` 下，由浏览器配置 keeper 经 CDP 驱动——桌面应用浏览器没有 CDP 端口、没有任何自动化 flag），也绝不打开用户真正的配置。启动器用一句话说明，写在"Browsers"分区里，也写在每张浏览器卡片的 tooltip 里：*This is your own browser window (an app); the Agent browser (Browser profiles) is separate.*（中文：这是你自己的浏览器窗口（一个应用）；Agent 浏览器（浏览器配置）是另一回事。）
+**关系先说清。** 桌面应用里的浏览器是**人**的浏览器：一行注册表（§5——exec 绝不来自 agent），和其他应用一样走 xpra 逐窗口级，带一个由应用会话**自己拥有**的配置目录。它**不是** Agent 浏览器（design-agent-browser-v2 §3：配置在 `data/browser-*` 下，由浏览器配置 keeper 经 CDP 驱动——桌面应用浏览器没有 CDP 端口、没有任何自动化 flag），也绝不打开用户真正的配置。启动器用一句话说明，写在"Browsers"分区里，也写在每张浏览器卡片的 tooltip 里：*This is your own browser window (an app); the Agent browser is separate.*（中文：这是你自己的浏览器窗口（一个应用）；Agent 浏览器（浏览器配置）是另一回事。）
 
 | 部分 | 位置 | 内容 |
 |---|---|---|

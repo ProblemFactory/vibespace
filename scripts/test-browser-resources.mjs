@@ -165,7 +165,11 @@ function mutantBE(edits) {
  *  state one level down in `namespaces/` — 180 stale `vs-bk-*-vsres*` dirs
  *  (1.5 MB) from 12 earlier runs were still there. */
 function sockDirs() {
-  const roots = [path.join(os.homedir(), '.agent-browser'), `/run/user/${process.getuid?.() ?? 1000}/agent-browser`];
+  // the binary's own root precedence (SOCKET_DIR > $XDG_RUNTIME_DIR/agent-browser > $HOME/.agent-browser): the
+  // runtime dir this suite actually runs under — a literal /run/user/<uid> missed every daemon of a run given a
+  // scratch XDG_RUNTIME_DIR (takeover r3: the positive control below read 0 there)
+  const xdg = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() ?? 1000}`;
+  const roots = [path.join(os.homedir(), '.agent-browser'), path.join(xdg, 'agent-browser')];
   return roots.flatMap((r) => [r, path.join(r, 'namespaces')]);
 }
 function strayNamespaceDirs() {

@@ -38,7 +38,8 @@ const RAIL_ICONS = {
   ports: R('<path d="M9 7V3M15 7V3"/><rect x="6" y="7" width="12" height="8" rx="2"/><path d="M12 15v6"/>'),
   agents: R('<rect x="5" y="8" width="14" height="10" rx="2"/><circle cx="9.5" cy="13" r="1" fill="currentColor"/><circle cx="14.5" cy="13" r="1" fill="currentColor"/><path d="M12 8V5M8 3h8"/>'),
   plugins: R('<path d="M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>'),
-  browser: R('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18"/>'),
+  // the AGENT browser's window-with-a-dot, the 24-grid variant of UI_ICONS.browserLive (design-browser-faces B: the globe is the web view's alone)
+  browser: R('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M6.5 7h.01M9.5 7h.01"/><circle cx="12" cy="14" r="2.2"/>'),
   diagnostics: R('<path d="M3 12h4l2-7 4 14 2-7h6"/>'),
   settings: R('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
   system: R('<path d="M12 12l3.5-3.5"/><path d="M5 19a9 9 0 1 1 14 0"/>'),
@@ -71,7 +72,7 @@ export const PANEL_TABS = ['ports', 'agents', 'plugins', 'jobs', 'channels', 'sy
 // the only label saying which panel is showing).
 const RAIL_TITLES = {
   folders: 'Sessions', tasks: 'Task Groups', mounts: 'Remote',
-  ports: 'Ports', agents: 'Agents', plugins: 'Plugins', jobs: 'Background Work', channels: 'Channels', system: 'System', browser: 'Browser profiles',
+  ports: 'Ports', agents: 'Agents', plugins: 'Plugins', jobs: 'Background Work', channels: 'Channels', system: 'System', browser: 'Agent browser',
 };
 
 /** ⚙ → System… / Ports… (docs/design-mobile-gaps.md #9): the two rail-only
@@ -162,6 +163,8 @@ export function installSidebarRail(Sidebar) {
         b.dataset.rail = id;
         b.innerHTML = RAIL_ICONS[id] || '';
         b.dataset.tip = label;
+        // the icon is aria-hidden (icons carry no name) — the label is the button's accessible name; no `title` (the custom tip is the only visible tooltip)
+        b.setAttribute('aria-label', label);
         b.onclick = onClick;
         return b;
       };
@@ -175,8 +178,8 @@ export function installSidebarRail(Sidebar) {
         item('jobs', tr('Background Work'), () => this._railGo('jobs')),
         item('channels', tr('Channels'), () => this._railGo('channels')),
         item('system', tr('System'), () => this._railGo('system')),
-        // 2.369.145 (owner: "这个菜单藏太深了，建议放在rail能打开"): the Browser profiles window (⚙ ▸ Tools ▸ Browser profiles…) opens from the rail too — a window, not a panel, so no active state
-        item('browser', tr('Browser profiles'), () => this.app.openBrowserProfiles?.()),
+        // 2.369.145 (owner: "这个菜单藏太深了，建议放在rail能打开"): the Agent browser window (⚙ ▸ Tools ▸ Agent browser…) opens from the rail too — a window, not a panel, so no active state; named for the face it is since the direction-B rename (rail id `browser` unchanged)
+        item('browser', tr('Agent browser'), () => this.app.openBrowserProfiles?.()),
       );
       const spacer = document.createElement('div');
       spacer.className = 'rail-spacer';

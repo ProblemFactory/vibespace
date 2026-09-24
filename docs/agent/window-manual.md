@@ -7,7 +7,7 @@ default — *unless its toolkit exports an accessibility tree*. On Linux that
 tree is **AT-SPI2**, and `vibespace-window` treats it as the window's DOM:
 `snapshot` reads it and mints `@refs`, `click @ref` acts on a node through the
 action that node itself declares. Pixels are the fallback, never the primary
-read. The habit is the one you already have from `agent-browser snapshot`.
+read. The habit is the one you already have from `vibespace-browser snapshot`.
 
 This page describes what ships today: the verbs, the lease (persisted, one
 holder per window), and the live view's three modes on a window — the same
@@ -186,7 +186,7 @@ attach / detach / an orphaned lease dropped. Typed text is never recorded.
 Everything above is about windows **VibeSpace started**. There is a second
 class: applications on the **user's own desktop** — the window they may be
 typing in right now. It exists only while the user has turned on
-**Settings → Browser → "Let agents address windows on your real desktop
+**Settings → Agent browser → "Let agents address windows on your real desktop
 (tier 3)"** (a switch with its own confirmation; you cannot flip it, and you
 must not work around it). While it is on, `vibespace-window list` also
 prints the applications on the machine's accessibility bus, each marked

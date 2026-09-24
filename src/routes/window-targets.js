@@ -12,7 +12,8 @@
  *   GET  /api/agent/window/targets                 the rows I may address + the verb verdicts + the probe
  *   POST /api/agent/window/open      {appId, label?}   start a REGISTRY app on a private display, attach (`exec`/`args`/`cwd` ⇒ 403 exec_is_human: an exec is the user's, §5;
  *                                                     a BROWSER row, or `url`/`keepProfile` ⇒ 403 browser_is_human: the desktop-app browser is the user's, B-bfe6)
- *   POST /api/agent/window/attach    {handle}
+ *   POST /api/agent/window/attach    {handle}      a desktop-app BROWSER window ⇒ 403 browser_is_human (takeover T6 — snapshot / act /
+ *                                                  screenshot / watch refuse it the same; `targets` omits it)
  *   POST /api/agent/window/detach    {handle}
  *   POST /api/agent/window/snapshot  {handle, budget?, text?}
  *   POST /api/agent/window/act       {handle, verb: click|type|key, ref?, at?, text?, replace?, chord?, action?, button?}
@@ -50,7 +51,9 @@ const STATUS = {
   a11y_unavailable: 503, helper_missing: 503, python3_missing: 503, screenshot_unavailable: 503,
   helper_timeout: 504, helper_error: 502, action_failed: 502, ref_unreadable: 502, inject_failed: 502, screenshot_failed: 502,
   // P10 — the desktop class (src/window-desktop.js REFUSALS) + the user's pause/resume verdicts
-  desktop_consent_off: 403, provider_needs_consent: 403, escalation_needs_user: 403, exec_is_human: 403, browser_is_human: 403,
+  desktop_consent_off: 403, provider_needs_consent: 403, escalation_needs_user: 403, exec_is_human: 403,
+  // takeover C3 (T6): a desktop-app BROWSER is the user's own window — attach / snapshot / act / screenshot / watch refuse it
+  browser_is_human: 403,
   desktop_injection_refused: 409, no_live_view: 409, tier3_is_a_window_target: 409, no_lease: 409, held: 409, not_taken: 409,
   desktop_window_gone: 404,
   capture_needs_portal: 503, capture_unavailable: 503,
@@ -58,7 +61,7 @@ const STATUS = {
 function fail(res, e) {
   const code = e?.code || null;
   const body = { error: String(e?.message || e), code };
-  for (const k of ['node', 'backends', 'holder', 'since', 'takenAt', 'setting', 'verb', 'class', 'origin', 'yourDesktop', 'lease']) if (e && e[k] !== undefined) body[k] = e[k];
+  for (const k of ['node', 'backends', 'holder', 'since', 'takenAt', 'setting', 'verb', 'class', 'origin', 'yourDesktop', 'lease', 'handle']) if (e && e[k] !== undefined) body[k] = e[k];
   res.status(STATUS[code] || 500).json(body);
 }
 function engineOr503(res) {

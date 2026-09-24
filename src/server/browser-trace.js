@@ -472,7 +472,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     }
     const eph = { scope: T.EPHEMERAL_SCOPE, trace: T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)) };
     const o = await orphans();
-    return { profiles: rows, ephemeral: eph, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), sweep: lastSweep,
+    // takeover C3: every managed ephemeral browser — the record, whose conversation, its state (the panel's Stop is the profile stop route)
+    const ephemeralBrowsers = keeper && typeof keeper.ephemerals === 'function' ? keeper.ephemerals() : [];
+    return { profiles: rows, ephemeral: eph, ephemeralBrowsers, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), sweep: lastSweep,
       limits: { retentionMs: T.TRACE_RETENTION_MS, bytesPerProfile: T.TRACE_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR },
       traceOn: enabled(), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
   }
@@ -485,7 +487,8 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     let armed = 0;
     if (keeper && enabled()) {
       const reg = keeper._reg();
-      for (const l of reg.leases) { const rec = reg.browsers[l.profileId]; if (rec && rec.state === 'ready' && l.sessionId) { const r = await watch({ sessionId: l.sessionId, profileId: l.profileId }); if (r.ok) armed++; maybeStartRecording(l.profileId, l.browserKey, l.sessionId).catch(() => { }); } }
+      // takeover C3: a managed ephemeral browser's lease arms nothing here (its trace scope is `ephemeral`, armed by the live view's tap)
+      for (const l of reg.leases) { if (typeof keeper.isEphemeral === 'function' && keeper.isEphemeral(l.profileId)) continue; const rec = reg.browsers[l.profileId]; if (rec && rec.state === 'ready' && l.sessionId) { const r = await watch({ sessionId: l.sessionId, profileId: l.profileId }); if (r.ok) armed++; maybeStartRecording(l.profileId, l.browserKey, l.sessionId).catch(() => { }); } }
     }
     let sw = null; try { sw = sweep(); } catch (e) { log.warn?.(`[browser-trace] boot sweep failed: ${e && e.message}`); }
     if (!timer && sweepEveryMs > 0) { timer = setInterval(() => { try { sweep(); } catch (e) { log.warn?.(`[browser-trace] sweep failed: ${e && e.message}`); } }, sweepEveryMs); if (timer.unref) timer.unref(); }

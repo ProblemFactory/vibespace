@@ -150,6 +150,8 @@ ok(attached, 'a chat window for the session is open');
 const Q = (js) => evaluate(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.type === 'chat'); const chip = w && w.element.querySelector('.chat-status-browser'); ${js} })()`);
 const chipState = () => Q("return chip ? { text: chip.textContent.trim(), amber: chip.classList.contains('amber'), title: chip.title, winEl: !!w.element, barEl: !!w.element.querySelector('.chat-status-bar') } : null");
 ok(await until(async () => { const c = await chipState(); return c && /Work/.test(c.text); }, 15000, 200), 'the chip is drawn and names the PIN (Work)');
+// the three browser faces (design-browser-faces direction B): the chip says WHOSE browser it is — the agent's — and wears the browser-live glyph, never the web view's globe
+ok(await Q("return chip.textContent.trim().startsWith('Agent browser · Work') && chip.title.startsWith('Agent browser · ') && !!chip.querySelector('svg rect') && !chip.querySelector('svg circle[r=\"6\"]')"), "the chip reads 'Agent browser · Work', its tooltip's first line carries the same 'Agent browser · ' prefix, and its icon is the window-with-a-dot (no globe)");
 let c0 = await chipState();
 ok(c0 && !c0.amber && /nothing yet/.test(c0.title), 'NEUTRAL before the agent has used anything — the tooltip says so', JSON.stringify(c0));
 const digest0 = await evaluate('window.app.sidebar._sessionDigest');
@@ -191,7 +193,7 @@ ok(!/spendGuard|authorizeUnattendedSpend|spendReason|deliverToConversation/.test
 // back on the pin ⇒ neutral again, and the nudge has nothing to say
 r = await agent('POST', '/api/agent/browser/resolve', { handle: 'work', argv: ['snapshot'] });
 ok(r.status === 200 && r.json.ok && r.json.isDefault === true, 'the agent resolves onto Work (the pin)');
-ok(await until(async () => { const c = await chipState(); return c && !c.amber && /Work/.test(c.text); }, 10000, 200), 'the chip is NEUTRAL again and names Work');
+ok(await until(async () => { const c = await chipState(); return c && !c.amber && /^Agent browser · Work/.test(c.text); }, 10000, 200), 'the chip is NEUTRAL again and names Work (prefixed Agent browser ·)');
 r = await j('POST', '/api/browser/nudge', { sessionId });
 ok(r.status === 409 && r.json.code === 'nothing-to-remind', 'the nudge is refused `nothing-to-remind` when the agent is on the pin');
 // the ephemeral half: a resolve that lands on no attachment says '' and the chip names the ephemeral browser
@@ -200,7 +202,8 @@ await j('POST', '/api/browser/detach', { sessionId, profile: 'Work' });
 await j('POST', '/api/browser/pin', { sessionId, profile: null });
 r = await agent('POST', '/api/agent/browser/resolve', { handle: '', argv: ['snapshot'] });
 if (r.status === 409 && r.json.code === 'profile_changed') r = await agent('POST', '/api/agent/browser/resolve', { handle: '', argv: ['snapshot'] });
-ok(r.status === 200 && r.json.kind === 'none', 'with no attachment the agent\'s command resolves to its own ephemeral browser');
+// browser takeover chunk 2 (T3): the conversation's own browser is a MANAGED ephemeral record now — `/resolve` answers kind 'ephemeral' with the `(ephemeral) <session name>` record (was kind 'none' before the keeper watched it)
+ok(r.status === 200 && r.json.kind === 'ephemeral' && r.json.handle === null && /^\(ephemeral\) /.test(r.json.profile?.label || ''), 'with no attachment the agent\'s command resolves to its own MANAGED ephemeral browser (kind ephemeral, the `(ephemeral) <session>` record)', JSON.stringify(r).slice(0, 400));
 ok(await until(async () => { const c = await chipState(); return c && !c.amber && /ephemeral/.test(c.text); }, 10000, 200), 'the chip names the ephemeral browser, neutral (nothing pinned, nothing else used)');
 
 try { cdp.close(); } catch { }

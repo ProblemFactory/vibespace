@@ -109,5 +109,51 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
     ok(o.autoContinueAtUsageLimit === false && o.statusLine && spawnArgs.filter((a) => a === '--settings').length === 1, 'the statusline injection keeps the switch on the ONE flag'); }
 }
 
+// ── THE BROWSER SHIM STAYS FIRST ON A REMOTE PATH (design-browser-takeover §4, T2) ──
+// The node finder PREPENDS node's own bin dir — on an nvm / npm-global host the
+// very dir that holds the real browser CLI — so the tools dir must be prepended
+// AFTER it. Three ws-create builders hand-wrote the tools prepend; one ran it
+// BEFORE the finder, so the shim shipped to ~/.vibespace/bin was shadowed.
+{
+  const { TOOLS_ON_PATH } = require('../src/remote-shell.js');
+  const both = buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true });
+  ok(both.indexOf(TOOLS_ON_PATH) > both.indexOf('VS_NODE=') && both.indexOf('VS_NODE=') > both.indexOf('nvm.sh'), 'composition order: REMOTE_PRELUDE → node finder → tools (the tools prepend runs LAST, so it is FIRST on PATH)');
+  const wc = fs.readFileSync(new URL('../src/ws-create.js', import.meta.url), 'utf8');
+  ok(!wc.includes('export PATH="$HOME/.vibespace/bin'), 'drift guard: ws-create.js hand-writes NO ~/.vibespace/bin PATH prepend (every builder composes buildRemoteShellPrelude)');
+  ok((wc.match(/buildRemoteShellPrelude\(\{/g) || []).length === 3, `the three agent-tool builders (ssh setup, dial pty, dial pipe) compose it (${(wc.match(/buildRemoteShellPrelude\(\{/g) || []).length})`);
+  const hs = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
+  ok(/AGENT_TOOLS = \[[^\]]*'agent-browser'/.test(hs), 'the shim is an agent tool (it ships where the prelude puts it first)');
+  ok((wc.match(/"\$HOME\/\.vibespace\/bin\/agent-browser"|"\$\{bin\}\/agent-browser"/g) || []).length === 2 && /chmod \+x "\$HOME\/\.vibespace\/bin"\/vibespace-\* "\$HOME\/\.vibespace\/bin\/agent-browser"/.test(hs), 'every ship path chmods the shim (it does not match the vibespace-* glob)');
+
+  // a REAL `sh` over a fake home: no node on PATH, so the finder falls to the
+  // (fake) nvm install whose bin dir ALSO holds a fake real browser CLI; the
+  // shim sits in ~/.vibespace/bin. After the prelude, the name must resolve
+  // to the shim. CONTROL: the pre-fix order (tools before the finder) must
+  // resolve to the fake real binary — the leg can say no.
+  const { scratch } = await import('./scratch.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const path = (await import('node:path')).default;
+  const root = scratch('remote-shell-shim'); fs.rmSync(root, { recursive: true, force: true });
+  const home = path.join(root, 'home'); const nvmBin = path.join(home, '.nvm/versions/node/v0/bin'); const tools = path.join(home, '.vibespace/bin'); const box = path.join(root, 'box');
+  for (const d of [nvmBin, tools, box]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(nvmBin, 'node'), '#!/bin/sh\necho fake-node\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(nvmBin, 'agent-browser'), '#!/bin/sh\necho REAL\n', { mode: 0o755 });
+  fs.copyFileSync(new URL('../data/bin/agent-browser', import.meta.url), path.join(tools, 'agent-browser')); fs.chmodSync(path.join(tools, 'agent-browser'), 0o755);
+  // a toolbox PATH with exactly what the finder needs and NO node
+  const which = (b) => { for (const d of ['/usr/bin', '/bin', '/usr/local/bin']) { const p = path.join(d, b); if (fs.existsSync(p)) return p; } return null; };
+  for (const b of ['ls', 'sort', 'tail', 'dirname', 'cat']) { const p = which(b); if (p) fs.symlinkSync(p, path.join(box, b)); }
+  const shPath = which('sh') || '/bin/sh';
+  const resolveUnder = (prelude) => execFileSync(shPath, ['-c', prelude + 'command -v agent-browser'], { env: { HOME: home, PATH: box }, encoding: 'utf8' }).trim();
+  try {
+    const got = resolveUnder(buildRemoteShellPrelude({ toolsOnPath: true, withNodeFinder: true }));
+    ok(got === path.join(tools, 'agent-browser'), `a real sh: after the prelude \`agent-browser\` resolves to the SHIM in ~/.vibespace/bin (${got})`);
+    const preFix = REMOTE_PRELUDE + TOOLS_ON_PATH + nodeFinder();
+    const bad = resolveUnder(preFix);
+    ok(bad === path.join(nvmBin, 'agent-browser'), `CONTROL: the pre-fix order (tools before the finder) resolves to the real binary (${bad}) — the leg above can go red`);
+    const noTools = resolveUnder(buildRemoteShellPrelude({ toolsOnPath: false, withNodeFinder: true }));
+    ok(noTools === path.join(nvmBin, 'agent-browser'), 'integration OFF (no tools on PATH): nothing of ours shadows anything');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

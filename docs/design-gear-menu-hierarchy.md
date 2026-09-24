@@ -47,7 +47,7 @@ Top level, in order (name EN / zh / ja):
 
 1. **Appearance ▸** 外观 / 外観 — a PANEL flyout holding the existing inline controls (Theme + ✎, Font size, Font, UI scale, UI font size), then a rule, then `Customize UI…` (desktop only) and `Language ▸` (its 4 choices become real children instead of a detached showContextMenu). The head row shows a live caption: `Appearance ▸  Dark · 14px · 100%` so the common state is visible without opening it.
 2. **Manage agents…** — direct. Frequency: login expiry notices, pool switches, roster usage repaint every 8 s; it is the most-clicked admin row and the target of dozens of inbox messages ("in Manage agents first", i18n-zh.js:2358-2568).
-3. **Tools ▸** 工具 / ツール — `Usage…`, `Background work…`, `Desktop apps…`, `Plugins…`, rule, plugin-contributed windows (`expand`). Plugin rows registered with `parent:'tools'` land here; rows with no `parent` keep today's behavior (top-level tail, group-sorted) so no plugin breaks.
+3. **Tools ▸** 工具 / ツール — `Usage…` (10), `Background work…` (20), `Desktop apps…` (30), `Agent browser…` (35 — the agent browser's window, on the `browser-live` window-with-a-dot glyph; "Browser profiles…" before the direction-B rename of docs/design-browser-faces.zh.md, 2.369.168; the web view stays OUT of ⚙ — it lives on the toolbar, the phone sheet and the command palette), `Plugins…` (40), rule, plugin-contributed windows (`expand`). Plugin rows registered with `parent:'tools'` land here; rows with no `parent` keep today's behavior (top-level tail, group-sorted) so no plugin breaks.
 4. **Communication ▸** 通讯 / コミュニケーション — `Channels…`, `Outbox…`, `Integrations & keys…` (registered by their owning modules with `parent:'comm'`, keeping gear-menu.js's block untouched — the same ownership rule channels-panel.js:455-459 already states).
 5. **System ▸** 系统 / システム — `Report a problem…` (first: it is the panic action), `Diagnostics report…`, rule, `Restore a previous layout…`, `Backup & migrate…`, `Change password…`.
 6. **Update VibeSpace…  v2.369.120 → v…** — direct. The row's two-line version label IS the update indicator (gear-menu.js:96-113); burying it in a submenu hides "vX → vY".
@@ -126,6 +126,7 @@ Mobile accordion (full width, one head open, 44 px rows):
 │    📊 Usage…                     │
 │    📊 Background work…           │
 │    🖥 Desktop apps…              │
+│    ▣ Agent browser…              │
 │    🧩 Plugins…                   │
 │    ──────────────────────        │
 │    🧩 My plugin window           │

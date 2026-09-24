@@ -1,0 +1,83 @@
+{
+ "version": "0.32.0",
+ "measured": "2026-09-24",
+ "method": "`<flag> zzq9 session list` for every flag-shaped string in the binary (scripts/browser-flag-census.mjs); value = swallowed zzq9, bool = zzq9 became the unknown command",
+ "candidates": 792,
+ "value": [
+  "--action-policy",
+  "--allowed-domains",
+  "--args",
+  "--cdp",
+  "--color-scheme",
+  "--confirm-actions",
+  "--device",
+  "--download-path",
+  "--enable",
+  "--engine",
+  "--executable-path",
+  "--extension",
+  "--headers",
+  "--idle-timeout",
+  "--init-script",
+  "--max-output",
+  "--model",
+  "--namespace",
+  "--profile",
+  "--provider",
+  "--proxy",
+  "--proxy-bypass",
+  "--restore",
+  "--restore-check-fn",
+  "--restore-check-text",
+  "--restore-check-url",
+  "--restore-save",
+  "--screenshot-dir",
+  "--screenshot-format",
+  "--screenshot-quality",
+  "--session",
+  "--session-name",
+  "--state",
+  "--user-agent",
+  "-p"
+ ],
+ "bool": [
+  "--allow-file-access",
+  "--annotate",
+  "--auto-connect",
+  "--confirm-interactive",
+  "--content-boundaries",
+  "--debug",
+  "--fix",
+  "--headed",
+  "--hide-scrollbars",
+  "--ignore-https-errors",
+  "--json",
+  "--no-auto-dialog",
+  "--offline",
+  "--quick",
+  "--quiet",
+  "--verbose",
+  "--webgpu",
+  "-q",
+  "-v"
+ ],
+ "other": [
+  {
+   "flag": "--config",
+   "said": "⚠ config file not found: zzq9"
+  },
+  {
+   "flag": "--version",
+   "said": "agent-browser 0.32.0"
+  },
+  {
+   "flag": "-h",
+   "said": "agent-browser - fast browser automation CLI for AI agents"
+  },
+  {
+   "flag": "-V",
+   "said": "agent-browser 0.32.0"
+  }
+ ],
+ "localCount": 734
+}

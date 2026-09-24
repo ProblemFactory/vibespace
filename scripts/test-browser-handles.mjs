@@ -278,8 +278,10 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   const cliEnv = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: TOKEN_A, ...Object.fromEntries(env0.pairs.map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)])) };
   const cli = (args, env = cliEnv) => new Promise((resolve) => execFile(process.execPath, [CLI, ...args], { env, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
   let c = await cli(['use', 'Work account', '--alias', 'work', '--print']);
-  ok(c.status === 0 && /handle work/.test(c.stdout), '`use <profile> --alias work --print` attaches with the handle');
-  c = await cli(['use', 'Personal', '--print']);
+  ok(c.status === 1 && /\[not_offered\]/.test(c.stderr) && !/handle work/.test(c.stdout), '`use … --print` is not offered (takeover C2: nothing to export — the page verbs run through this tool) and attaches nothing');
+  c = await cli(['use', 'Work account', '--alias', 'work']);
+  ok(c.status === 0 && /handle work/.test(c.stdout) && /attached — run `vibespace-browser <verb>`/.test(c.stdout) && !/export /.test(c.stdout), '`use <profile> --alias work` attaches with the handle — no subshell, no env, the next step named');
+  c = await cli(['use', 'Personal']);
   ok(c.status === 0 && /handle personal/.test(c.stdout) && /holds 2 browsers/.test(c.stdout) && /--profile <handle>/.test(c.stdout), 'a second `use` names the set and the rule (two browsers ⇒ --profile on every command)');
   c = await cli(['--', 'snapshot']);
   ok(c.status === 1 && /\[profile_required\]/.test(c.stderr) && /handles: work \(bp-/.test(c.stderr) && /personal \(bp-/.test(c.stderr) && !/sub-agent/.test(c.stderr) && cmds().length === 0, 'a BARE command with two attachments is refused profile_required, listing every handle — and nothing ran');
@@ -324,8 +326,8 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   ok(JSON.parse(fs.readFileSync(cfgPath, 'utf8')).profile === pers.dir, 'precondition: the parent\'s config names the pinned directory');
   c = await cli(['new-child']);
   const childCfg = path.join(DATA, 'browser-env', KEY_A + '.1.json');
-  ok(c.status === 0 && /child handle bk-0000000a\.1 minted/.test(c.stdout) && /^export VIBESPACE_BROWSER='bk-0000000a\.1'/m.test(c.stdout) && /^export AGENT_BROWSER_SESSION='vs-bk-0000000a\.1'/m.test(c.stdout) && !/unset/.test(c.stdout), '`new-child` prints the child\'s own env (rung D: nothing to unset)');
-  ok(new RegExp('^export AGENT_BROWSER_CONFIG=\'' + childCfg.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&') + '\'', 'm').test(c.stdout) && fs.existsSync(childCfg), '…and on rung D a generated config of the child\'s OWN, beside the parent\'s (<key>.<n>.json)');
+  ok(c.status === 0 && /child handle bk-0000000a\.1 minted/.test(c.stderr) && c.stdout.trim() === 'export VIBESPACE_BROWSER=bk-0000000a.1', '`new-child` prints ONLY the child\'s handle on stdout (takeover C2 §3.4: the browser identity behind it is the server\'s business)', JSON.stringify(c.stdout));
+  ok(fs.existsSync(childCfg), '…and on rung D the server still generated a config of the child\'s OWN, beside the parent\'s (<key>.<n>.json) — the child\'s commands get it through /resolve');
   const childCfgBody = JSON.parse(fs.readFileSync(childCfg, 'utf8'));
   ok(!('profile' in childCfgBody) && !JSON.stringify(childCfgBody).includes(pers.dir) && !JSON.stringify(childCfgBody).includes(work.dir), 'the child\'s config names NO profile — the pinned parent\'s user-data-dir is in neither key nor value (two namespaces on one dir = SingletonLock, the measured variant-B shape)');
   c = await cli(['--profile', KEY_A + '.1', '--', 'snapshot']);
@@ -349,7 +351,7 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   ok(c.status === 1 && /\[profile_changed\]/.test(c.stderr), '…and the CLI\'s next command is refused once for the set change');
   c = await cli(['--', 'snapshot']);
   ok(c.status === 0, 'with one attachment left, a bare command runs again');
-  c = await cli(['use', 'Work account', '--alias', 'personal', '--print']);
+  c = await cli(['use', 'Work account', '--alias', 'personal']);
   ok(c.status === 1 && /\[alias_taken\]/.test(c.stderr), '`use --alias` refuses a handle another attachment holds');
   // --adopt (under the adoptable roots since 2026-09-21)
   const dir = path.join(HOME, '.agent-browser', 'existing-profile'); fs.mkdirSync(dir, { recursive: true });

@@ -38,7 +38,7 @@ export const CHROME_ELEMENTS = [
   { id: 'btn-new-session',   label: 'New Session button', hideKey: null,                             defaultZone: 'toolbar-right' },
   { id: 'btn-terminal',      label: 'Terminal button',    hideKey: 'toolbar.showTerminalButton',     defaultZone: 'toolbar-right' },
   { id: 'btn-file-explorer', label: 'Files button',       hideKey: 'toolbar.showFileExplorerButton', defaultZone: 'toolbar-right' },
-  { id: 'btn-browser',       label: 'Browser button',     hideKey: 'toolbar.showBrowserButton',      defaultZone: 'toolbar-right' },
+  { id: 'btn-browser',       label: 'Web view button',    hideKey: 'toolbar.showBrowserButton',      defaultZone: 'toolbar-right' },
   { id: 'btn-desktop-apps',  label: 'Apps button',        hideKey: 'toolbar.showDesktopAppsButton',  defaultZone: 'toolbar-right' },
   { id: 'btn-desktop',       label: 'Desktop button',     hideKey: 'toolbar.showDesktopButton',      defaultZone: 'toolbar-right' },
   { id: 'desktop-previews',  label: 'Desktop previews',   hideKey: 'taskbar.showDesktopPreviews',    defaultZone: 'taskbar-tray' },

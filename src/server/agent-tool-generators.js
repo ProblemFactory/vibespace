@@ -301,6 +301,23 @@ setTimeout(() => process.exit(0), 8000); // never hang a session start
 }
 createHookHelper();
 
+// THE BROWSER CLI'S VERB TABLE, beside the CLI (design-browser-takeover §3.1):
+// data/bin/vibespace-browser is a STATIC single file that ships to hosts with
+// no checkout, so the ONE router it runs (src/browser-verbs.js, PURE) rides
+// with it as data/bin/vibespace-browser-verbs.js — COPIED here at every boot
+// (gitignored, like vibespace-status: a generated file that is tracked
+// dirties the tree), and in AGENT_TOOLS so every ship path carries it. In a
+// checkout the CLI reads src/ itself; the copy is the remote's.
+function createBrowserVerbsCopy() {
+  try {
+    const src = fs.readFileSync(path.join(rootDir, 'src', 'browser-verbs.js'));
+    const dst = path.join(AGENT_BIN_DIR, 'vibespace-browser-verbs.js');
+    let cur = null; try { cur = fs.readFileSync(dst); } catch { cur = null; }
+    if (!cur || !cur.equals(src)) { ensureDir(AGENT_BIN_DIR); fs.writeFileSync(dst + '.tmp', src, { mode: 0o644 }); fs.renameSync(dst + '.tmp', dst); }
+  } catch (e) { console.warn('[tools] browser verb table not copied beside vibespace-browser: ' + e.message); }
+}
+createBrowserVerbsCopy();
+
 // Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
 // own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every
 // other key/entry (e.g. the task-tracker plugin's hooks) is left untouched.

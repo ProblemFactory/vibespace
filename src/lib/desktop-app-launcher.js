@@ -69,7 +69,7 @@ export function launchUiScale(v = uiScale()) {
 
 /** B-bfe6: the ONE sentence that tells a desktop-app browser apart from the Agent browser — the Browsers section
  *  prints it and every browser card carries it in its tooltip (a function: `t` must run after the language loads). */
-export const browserNote = () => t('This is your own browser window (an app); the Agent browser (Browser profiles) is separate');
+export const browserNote = () => t('This is your own browser window (an app); the Agent browser is separate');
 /** B-bfe6 r1: the SHORT, translated reason a dimmed browser card shows, by the keeper's verdict CODE (the verdict's
  *  own sentence — with its data-dir path — stays the card's tooltip). null ⇒ the card falls back to the sentence. */
 export function browserReasonShort(code) {
@@ -163,7 +163,7 @@ const patchUserState = (patch) => fetch('/api/user-state', { method: 'PATCH', he
 export async function showLaunchDialog(app) {
   const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: t('Desktop apps'), dialogClass: 'desktop-launch', escapeToClose: true });
   body.innerHTML = `
-    <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
+    <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard — the agent cannot reach it. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
     <div class="desktop-launch-avail"></div>
     <section class="desktop-launch-sec desktop-launch-running-sec is-empty">
       <h4>${escHtml(t('Running'))}<span class="desktop-launch-count"></span></h4>
@@ -262,7 +262,8 @@ export async function showLaunchDialog(app) {
       b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
       // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
       const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || row.reason || t('not on PATH'));
-      b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category)}</span><span class="desktop-launch-card-label">${escHtml(row.label)}</span><span class="desktop-launch-card-sub">${escHtml(sub)}</span>`;
+      // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
+      b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category)}</span><span class="desktop-launch-card-label">${escHtml(row.label)}</span><span class="desktop-launch-card-sub">${escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
       b.disabled = unavailable || dead || isLaunching;
       b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
       if (isLaunching) b.setAttribute('aria-busy', 'true');
@@ -351,10 +352,10 @@ export async function showLaunchDialog(app) {
     const d = await fetchJson('/api/window/desktop');
     if (!deskEl || !deskEl.isConnected) return;
     deskEl.innerHTML = '';
-    if (!d || d.error) { deskState.textContent = ''; deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml((d && d.error) || t('Off — turn it on in Settings → Browser'))}</div>`; return; }
-    deskState.textContent = d.enabled ? '' : t('Off — turn it on in Settings → Browser');
+    if (!d || d.error) { deskState.textContent = ''; deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml((d && d.error) || t('Off — turn it on in Settings → Agent browser'))}</div>`; return; }
+    deskState.textContent = d.enabled ? '' : t('Off — turn it on in Settings → Agent browser');
     const leases = d.enabled ? (d.leases || []) : [];
-    if (!leases.length) { deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(d.enabled ? t('No agent holds a window on your desktop') : t('Off — turn it on in Settings → Browser'))}</div>`; return; }
+    if (!leases.length) { deskEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(d.enabled ? t('No agent holds a window on your desktop') : t('Off — turn it on in Settings → Agent browser'))}</div>`; return; }
     for (const l of leases) {
       const row = document.createElement('div'); row.className = 'desktop-launch-run-row desktop-launch-desk-row';
       const paused = l.input === 'user';

@@ -1,7 +1,7 @@
 'use strict';
 /**
- * THE AGENT BROWSER'S IDENTITY AND ITS SPAWN ENVIRONMENT — PURE (imports
- * nothing). docs/design-agent-browser-v2.zh.md §3.2 / §3.2.1 / §3.2.2 / §3.2.3,
+ * THE AGENT BROWSER'S IDENTITY AND ITS SPAWN ENVIRONMENT — PURE (imports only
+ * the sibling PURE verb table, r3). docs/design-agent-browser-v2.zh.md §3.2 / §3.2.1 / §3.2.2 / §3.2.3,
  * phase P0 ("零干扰" — stop agents from closing each other's windows).
  *
  * WHAT P0 ACTUALLY IS. Today an agent runs the `agent-browser` CLI out of its
@@ -55,6 +55,10 @@
  * RESOLVED user-data-dir rather than the two env strings — asserting the
  * strings passes on variant B, the broken one.
  */
+
+// takeover r3: the ONE config rule (the sibling PURE verb table the shipped CLI
+// carries — a remote CLI composes a command's config by the same words)
+const VERBS = require('./browser-verbs.js');
 
 // ── names ───────────────────────────────────────────────────────────────────
 /** The agent-browser session/namespace name for a browser key. ONE spelling:
@@ -189,7 +193,7 @@ const REJECTED_VARIANTS = Object.freeze({
 function fencedRungReason(fence) {
   const list = Array.isArray(fence) && fence.length ? fence.join(', ') : 'allowedDomains';
   return `rung C refused: this session's effective config is fenced (allowedDomains: ${list}) and the CLI refuses `
-    + `--allowed-domains beside a profile, so a per-session profile directory would make EVERY agent-browser command `
+    + `--allowed-domains beside a profile, so a per-session profile directory would make EVERY browser command `
     + `fail where the bare CLI works (measured 0.32.0); the names alone keep the fence and the CLI's own ephemeral directory`;
 }
 function variantLadder({ configPath, profileDir, reasons = [], namesProfile = false, fenced = false }) {
@@ -208,7 +212,7 @@ function variantLadder({ configPath, profileDir, reasons = [], namesProfile = fa
   if (!namesProfile) return { variant: VARIANTS.N, configPath: null, profileDir: null, fallbacks };
   fallbacks.push({
     from: VARIANTS.N, to: VARIANTS.NONE,
-    why: 'this machine\'s agent-browser config names a `profile`, and the names alone would point every session\'s chromium at that ONE user-data-dir — the second browser fails to launch (measured: SingletonLock). Sharing, as today, is the smaller harm than a browser that cannot start',
+    why: 'this machine\'s browser config (~/.agent-browser/config.json) names a `profile`, and the names alone would point every session\'s chromium at that ONE user-data-dir — the second browser fails to launch (measured: SingletonLock). Sharing, as today, is the smaller harm than a browser that cannot start',
   });
   return { variant: VARIANTS.NONE, configPath: null, profileDir: null, fallbacks };
 }
@@ -620,7 +624,7 @@ function pinFenceConflict({ userConfig = {}, pinnedDir = null }) {
   return {
     key: 'allowedDomains',
     fence,
-    why: `this machine's agent-browser config restricts browsing to ${fence.join(', ')}, and the CLI refuses `
+    why: `this machine's browser config (~/.agent-browser/config.json) restricts browsing to ${fence.join(', ')}, and the CLI refuses `
       + `--allowed-domains together with a profile (Chrome may restore existing pages before network containment is `
       + `installed). A per-task domain allowlist and a persistent logged-in profile are mutually exclusive at the `
       + `browser layer — pinning here would make every command fail. Fence the persistent profile at its proxy `
@@ -628,15 +632,27 @@ function pinFenceConflict({ userConfig = {}, pinnedDir = null }) {
   };
 }
 
-function generatedConfig({ userConfig = {}, pinnedDir = null, headed = null }) {
-  const src = (userConfig && typeof userConfig === 'object') ? userConfig : {};
-  const out = { ...src };
-  for (const k of deniedKeys(src)) delete out[k];
-  // OUR value is ours to coerce; the user's rides across verbatim in the spread.
+/**
+ * THE GENERATED CONFIG (rung D). takeover r3 (finding 2): it is composed by the
+ * ONE rule every sanctioned command's config follows (`sanctionedConfig`, in
+ * the CLI's own verb table so a remote CLI composes by the same words): the
+ * user file carried minus EPHEMERAL_DENY and the raw CDP keys, its `args`
+ * minus the raw-debugging / user-data-dir switches, and the PROJECT file
+ * (`projectConfig`, the session directory's `./agent-browser.json`) only for
+ * the keys that NARROW — r3 of the v2 design layered it whole, so a repo
+ * carrying `{"args":"--remote-debugging-port=…"}` opened a raw port on the
+ * watched browser (measured). `userConfig` alone (no `projectConfig`) is the
+ * pre-r3 call shape and composes the same way.
+ */
+function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, headed = null }) {
+  const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });
+  const out = r.config;
+  // OUR value is ours to coerce; the user's rides across verbatim.
   if (headed !== null) out.headed = !!headed;
   if (pinnedDir) out.profile = String(pinnedDir);
-  return out;
+  return { config: out, dropped: r.dropped };
 }
+function generatedConfig(args) { return generatedConfigParts(args).config; }
 
 // ── §3.2.5 the pin ORIGIN ladder ───────────────────────────────────────────
 /**
@@ -690,8 +706,8 @@ function pinForCreate({ explicit, prior, forkParent, taskGroup, instanceDefault,
  *  depends on whether a lease exists right now, a fact that can be looked up"). */
 function pinApplyNotice({ liveBrowser = false } = {}) {
   return liveBrowser
-    ? `applies on the next agent-browser command, which RELAUNCHES the running browser on the new profile — pages open in it are lost (close it first to keep them)`
-    : `applies from the next agent-browser launch`;
+    ? `applies on your next \`vibespace-browser\` command, which RELAUNCHES the running browser on the new profile — pages open in it are lost (close it first to keep them)`
+    : `applies from your next \`vibespace-browser\` command (the browser launches on it)`;
 }
 
 // ═══ P1 — THE REGISTRY, THE LEASE AND THE KEEPER'S VERDICTS (§3.3–§3.5) ════
@@ -738,7 +754,7 @@ function profileDirName(id) { return 'vs-' + String(id); }
 //                may be used on this machine (`provider_needs_consent` otherwise —
 //                a user act with its own confirmation; agents cannot write settings)
 const PROVIDERS = Object.freeze({
-  chromium: Object.freeze({ tier: 1, wired: true, label: 'Chromium (agent-browser)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: 'browser-serve', starts: true, headed: null, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
+  chromium: Object.freeze({ tier: 1, wired: true, label: 'Chromium (a browser VibeSpace starts)', keyScope: 'none', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: 'browser-serve', starts: true, headed: null, binary: 'agent-browser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
   cloak: Object.freeze({ tier: 2, wired: false, label: 'CloakBrowser (the same profile directory opened by the cloakbrowser binary, seeded)', keyScope: 'local-only', canSwitchTo: 'in-place', ownsDir: true, leaseKind: 'tab', remote: null, starts: true, headed: false, binary: 'cloakbrowser', cdp: true, allowedDomains: true, pinTab: true, consent: null }),
   cdp: Object.freeze({ tier: 1, wired: true, label: 'An existing browser over CDP (yours, or one on a paired machine)', keyScope: 'none', canSwitchTo: 'no', ownsDir: false, leaseKind: 'tab', remote: 'tcp-forward', starts: false, headed: null, binary: null, cdp: true, allowedDomains: true, pinTab: true, consent: null }),
   // P10 (§7.6 tier 3, D27 (b), D31): WIRED — a window already open on the user's
@@ -866,7 +882,7 @@ function providerControl(provider, { host = null, desktopConsent = undefined } =
     const reason = why ? `its §7.2.1 egress measurement is recorded as ${why.refusal} (${why.date}): ${why.detail}` : (row.unwiredWhy || 'not wired in this release');
     return { ok: false, code: 'provider_unavailable', error: `provider "${id}" (${row.label}) cannot be used on this build — ${reason}` };
   }
-  if (row.consent && desktopConsent !== true) return { ok: false, code: 'provider_needs_consent', error: `provider "${id}" addresses windows on the user's REAL desktop and is off until the user turns on "${row.consent}" (Settings → Browser, a switch with its own confirmation) — nothing on the desktop is listed or addressable before that`, consent: row.consent };
+  if (row.consent && desktopConsent !== true) return { ok: false, code: 'provider_needs_consent', error: `provider "${id}" addresses windows on the user's REAL desktop and is off until the user turns on "${row.consent}" (Settings → Agent browser, a switch with its own confirmation) — nothing on the desktop is listed or addressable before that`, consent: row.consent };
   return { ok: true, row };
 }
 /** The refusal for ONE control a provider lacks (a disabled button's title):
@@ -945,7 +961,7 @@ const CLOAKSERVE_IMAGE = 'cloakhq/cloakserve:0.5.10';
  * vendor shipping a new binary, which a measurement alone does not.
  */
 function cloakservePlan({ enabled = false, proof = CLOAK_EGRESS_PROOF, allowlist = '', proxyPort = 0, port = 9222, image = CLOAKSERVE_IMAGE, network = 'vs-cloak-egress', name = 'vs-cloakserve' } = {}) {
-  if (!enabled) return { ok: false, code: 'cloak_opt_in_off', error: 'CloakBrowser is opt-in: turn on browser.cloak.enabled (Settings → Browser) first' };
+  if (!enabled) return { ok: false, code: 'cloak_opt_in_off', error: 'CloakBrowser is opt-in: turn on browser.cloak.enabled (Settings → Agent browser) first' };
   const pv = proofVerdict(proof);
   if (!pv.ok) return { ok: false, code: 'egress_proof_invalid', error: `the §7.2.1 egress record is malformed: ${pv.error}` };
   if (proof.status !== 'measured') return { ok: false, code: 'egress_not_measured', error: `the §7.2.1 egress precondition is recorded as ${proof.refusal} (${proof.date}) — measure first (scripts/measure-cloak-egress.mjs), then install the pinned package` };
@@ -1055,7 +1071,23 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
 /** `dir` is null for a row that owns no directory (`cdp`) and for a profile
  *  on a PAIRED machine (the device composes and owns its directory — the hub
  *  records what the device answered on the BROWSER record, never here). */
-function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null, notes = '', record = false, fingerprintSeed = null, owner = null, legacy = false, now = 0, host = null, cdpPort = null, defaultBackend = null, sharing = null } = {}) {
+function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null, notes = '', record = false, fingerprintSeed = null, owner = null, legacy = false, now = 0, host = null, cdpPort = null, defaultBackend = null, sharing = null, ephemeral = false } = {}) {
+  // takeover C3 (design-browser-takeover §5.1): a MANAGED EPHEMERAL record is
+  // owned by its CONVERSATION (kind 'conversation', id = the browser key — a
+  // child key included) and by nothing else: never mediated, never legacy,
+  // chromium, sharing 'owner'. A record that asks for `ephemeral` without a
+  // browser key is not one (the owner is what reaps it).
+  if (ephemeral) {
+    const key = owner && owner.id != null ? String(owner.id) : '';
+    if (!isBrowserKey(key) && !isChildKey(key)) throw new Error('an ephemeral browser record needs its conversation\'s browser key as its owner');
+    return {
+      id: String(id), label: cleanLabel(label) || ephemeralLabel(''), dir: dir == null ? null : String(dir), provider: 'chromium',
+      fingerprintSeed: null, proxy: null, host: null, cdpPort: null, allowedDomains: null,
+      owner: { kind: 'conversation', id: key }, sharing: 'owner', record: false, ephemeral: true,
+      lastChromiumMajor: null, lastBackend: null, legacy: false, defaultBackend: null, lastSwitchAt: 0,
+      createdAt: Number(now) || 0, lastUsedAt: 0, notes: '',
+    };
+  }
   const o = owner && OWNER_KINDS.includes(owner.kind) ? { kind: owner.kind, id: owner.id == null ? null : String(owner.id) } : { kind: 'instance', id: null };
   return {
     id: String(id), label: cleanLabel(label), dir: dir == null ? null : String(dir), provider: String(provider),
@@ -1079,7 +1111,10 @@ function normalizeRegistry(doc) {
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? { ...v } : {});
   return {
     version: 1,
-    profiles: list(d.profiles, (p) => isProfileId(p.id)),
+    // takeover C3: a managed ephemeral record is admitted only in its own
+    // shape (owner = a conversation's browser key) — a record claiming
+    // `ephemeral` with anything else is not ours to reap and is dropped
+    profiles: list(d.profiles, (p) => isProfileId(p.id) && (!p.ephemeral || isEphemeralProfile(p))),
     leases: list(d.leases, (l) => isProfileId(l.profileId) && (isBrowserKey(l.browserKey) || isChildKey(l.browserKey))),
     siteHints: list(d.siteHints, (h) => typeof h.host === 'string'),
     browsers: obj(d.browsers),
@@ -1143,7 +1178,39 @@ function sharingVerdict({ sharing, host = null, mediation = false } = {}) {
  *  legacy "Shared (legacy)" record keeps its cooperative, pre-P6 attachment
  *  (its sessions run the CLI's own default daemon path; it is labelled
  *  legacy and promises no isolation). */
-function isMediatedProfile(p) { return !!p && p.sharing === 'instance' && !p.legacy; }
+function isMediatedProfile(p) { return !!p && p.sharing === 'instance' && !p.legacy && !p.ephemeral; }
+
+// ── takeover C3 (design-browser-takeover §5): the MANAGED EPHEMERAL browser ──
+/** Is this a conversation's managed ephemeral record? The flag AND its shape:
+ *  owned by a conversation whose id is a browser key (a child key included). */
+function isEphemeralProfile(p) {
+  return !!p && p.ephemeral === true && !!p.owner && p.owner.kind === 'conversation' && (isBrowserKey(p.owner.id) || isChildKey(p.owner.id));
+}
+/** The label a managed ephemeral record carries: `(ephemeral) <session name>`. */
+function ephemeralLabel(sessionName) {
+  const n = String(sessionName == null ? '' : sessionName).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return `(ephemeral) ${n || 'this conversation'}`;
+}
+/** The pair list a managed ephemeral browser is started, probed and stopped
+ *  under: exactly the session's spawn pairs (never a re-run of the ladder —
+ *  the r3 lesson), and only when they NAME this conversation's browser
+ *  (`AGENT_BROWSER_SESSION`/`NAMESPACE` = `vs-<key>`). Anything else ⇒ not
+ *  managed (the shared rung, a remote rung, no pairs) with the reason. */
+function ephemeralPairsVerdict(pairs, browserKey) {
+  const list = Array.isArray(pairs) ? pairs.filter((s) => typeof s === 'string' && /^AGENT_BROWSER_[A-Z_]+=/.test(s)) : [];
+  if (!list.length) return { ok: false, why: 'no spawn pairs (per-session browsers are off for this session, or it predates them)' };
+  const want = sessionNameFor(browserKey);
+  const has = (k) => list.includes(`${k}=${want}`);
+  if (!has('AGENT_BROWSER_SESSION') || !has('AGENT_BROWSER_NAMESPACE')) return { ok: false, why: `the spawn pairs do not name this conversation's browser (${want})` };
+  return { ok: true, pairs: list };
+}
+/** The directory a managed ephemeral browser writes, when the rung names one
+ *  (rung C's per-session scratch dir) — null on D/N (the CLI's own temp dir).
+ *  Recorded, never deleted here: browser-env's sweep owns it. */
+function ephemeralDirOf(pairs) {
+  for (const s of Array.isArray(pairs) ? pairs : []) if (typeof s === 'string' && s.startsWith('AGENT_BROWSER_PROFILE=')) return s.slice('AGENT_BROWSER_PROFILE='.length) || null;
+  return null;
+}
 /**
  * Ownership is COOPERATIVE and it is by CONVERSATION (the browserKey), never
  * by webui session id, which churns on every resume. `instance`-owned (and
@@ -1243,14 +1310,30 @@ function browserIdle(rec, leases, now, idleMs) {
   return { leased, idleMs: idle, limit, expired: !leased && !!limit && idle >= limit };
 }
 /** The concurrency ceiling (§3.2.3/§3.5): shared with every keeper through
- *  src/keeper-limits.js. Refused LOUDLY, naming the holders and who leases them. */
-function ceilingVerdict(running, leases, limits) {
+ *  src/keeper-limits.js. Refused LOUDLY, naming the holders and who leases them.
+ *  takeover C3 (design-browser-takeover §5.3, D2): `running` includes the
+ *  managed EPHEMERAL browsers (they count), `others` are the holders another
+ *  keeper reports through the count seam (a desktop app: `{label, kind}`), and
+ *  `ephemeral:true` answers the typed `browser_cap` a conversation's FIRST
+ *  page verb gets — naming every holder and the two ways out (an idle-out, or
+ *  the user stopping one); a named profile's start keeps its `cap` sentence. */
+function ceilingVerdict(running, leases, limits, { others = [], ephemeral = false, idleMs = DEFAULT_IDLE_TIMEOUT_MS } = {}) {
   const cap = Number(limits && limits.CONCURRENT_CAP) || 6;
   const live = (running || []).filter(isLiveBrowser);
-  if (live.length < cap) return null;
-  const holders = live.map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, sessions: (leases || []).filter((l) => l.profileId === r.profileId).map((l) => l.browserKey) }));
-  const names = holders.map((h) => `${h.label} (${h.profileId}${h.sessions.length ? ', leased by ' + h.sessions.join(', ') : ', no lease'})`);
-  return { code: 'cap', cap, holders, error: `browser ceiling reached (${live.length}/${cap} running: ${names.join('; ')}) — stop one first (vibespace-browser detach, or Stop in the Browser panel)` };
+  const extra = (Array.isArray(others) ? others : []).filter((o) => o && typeof o === 'object');
+  if (live.length + extra.length < cap) return null;
+  const holders = [
+    ...live.map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: (leases || []).filter((l) => l.profileId === r.profileId).map((l) => l.browserKey), kind: r.ephemeral ? 'ephemeral' : 'profile' })),
+    ...extra.map((o) => ({ profileId: null, label: String(o.label || o.id || 'desktop app'), ephemeral: false, sessions: [], kind: String(o.kind || 'desktop-app') })),
+  ];
+  const n = live.length + extra.length;
+  if (ephemeral) {
+    const names = holders.map((h) => (h.kind === 'profile' ? `${h.label}${h.sessions.length ? ' (' + h.sessions.join(', ') + ')' : ''}` : h.kind === 'ephemeral' ? h.label : `${h.label} (${h.kind})`));
+    const min = Math.max(1, Math.round((Number(idleMs) > 0 ? Number(idleMs) : DEFAULT_IDLE_TIMEOUT_MS) / 60000));
+    return { code: 'browser_cap', cap, holders, error: `${n} browsers are running on this instance (the ceiling of ${cap} is shared with desktop apps): ${names.join(', ')}; yours starts when one idles out (${min} min without a command) or is stopped by the user (Agent browser panel). \`vibespace-browser status\` shows the holders; nothing of yours is queued`, remedy: `wait for an idle-out (${min} min) or ask the user to stop one of the holders — then run the same command again` };
+  }
+  const names = holders.map((h) => (h.profileId ? `${h.label} (${h.profileId}${h.sessions.length ? ', leased by ' + h.sessions.join(', ') : ', no lease'})` : `${h.label} (${h.kind})`));
+  return { code: 'cap', cap, holders, error: `browser ceiling reached (${n}/${cap} running: ${names.join('; ')}) — stop one first (vibespace-browser detach, or Stop in the Browser panel)` };
 }
 /** Per-PROVIDER runaway thresholds (§3.5: chromium's normal floor is higher
  *  than a serve's — measured 6 processes / 420–667 MB PSS per idle browser, so a
@@ -1394,7 +1477,10 @@ function looksLikePath(v) {
  */
 function attachmentsFor({ leases = [], profiles = [], browserKey, pin = null, children = [] } = {}) {
   const bk = String(browserKey || '');
-  const byId = new Map((profiles || []).map((p) => [p.id, p]));
+  // takeover C3: the managed EPHEMERAL browser's lease is not an attachment —
+  // it carries no handle, a bare command still lands on it (`kind:'none'`),
+  // and it never counts toward `profile_required`
+  const byId = new Map((profiles || []).filter((p) => p && !isEphemeralProfile(p)).map((p) => [p.id, p]));
   const mine = (leases || []).filter((l) => l.browserKey === bk && byId.has(l.profileId))
     .slice().sort((a, b) => (Number(a.since) || 0) - (Number(b.since) || 0));
   const taken = [];
@@ -1489,7 +1575,7 @@ function renderProfileChangeNotice(n) {
   const list = n.handles && n.handles.length ? ` Attached now: ${n.handles.join(', ')}.` : '';
   return '<system-reminder>\n'
     + `browser profile changed: ${was} → ${now} (by ${n.by || 'user'}).${list}\n`
-    + 'Your next agent-browser command lands on the NEW default; commands already issued through `vibespace-browser` will be refused once with profile_changed so you notice. `vibespace-browser status` shows the current set.\n'
+    + 'Your next `vibespace-browser` command lands on the NEW default after being refused once with profile_changed so you notice. `vibespace-browser status` shows the current set.\n'
     + '</system-reminder>';
 }
 
@@ -1570,6 +1656,18 @@ function childEnvFor({ childKey, parentVariant = null, childConfigPath = null, p
     return { pairs, unset: [], why: 'rung D: the inherited config names no profile — safe to share (each daemon gets its own ephemeral dir)' };
   }
   return { pairs, unset: [], why: null };
+}
+
+/** takeover C3: the FULL pair list a child handle's browser runs under — the
+ *  parent's spawn pairs, minus what `childEnvFor` unsets, overridden by the
+ *  child's own — i.e. exactly the environment the CLI composes for a child
+ *  command, so the keeper starts and probes the SAME daemon. */
+function childPairsOver(parentPairs, child) {
+  const drop = new Set((child && child.unset) || []);
+  const out = new Map();
+  for (const s of Array.isArray(parentPairs) ? parentPairs : []) { const i = String(s).indexOf('='); if (i > 0 && !drop.has(s.slice(0, i))) out.set(s.slice(0, i), s); }
+  for (const s of (child && child.pairs) || []) { const i = String(s).indexOf('='); if (i > 0) out.set(s.slice(0, i), s); }
+  return [...out.values()].filter((s) => /^AGENT_BROWSER_[A-Z_]+=/.test(s));
 }
 
 /** An absolute path with `.`/`..`/empty segments folded — the PURE module
@@ -1664,7 +1762,7 @@ function floorNotice(v) {
       + `Per-session isolation is on and working; profiles several sessions can share stay off until you upgrade (npm install -g agent-browser@${v.floor}).`;
   }
   return `Could not read the installed agent-browser version, so shared profiles stay off. `
-    + `Per-session isolation is on and working. Run \`agent-browser --version\` to see what it reports.`;
+    + `Per-session isolation is on and working. \`npm ls -g agent-browser\` shows what is installed.`;
 }
 
 module.exports = {
@@ -1676,14 +1774,14 @@ module.exports = {
   DEFAULT_IDLE_TIMEOUT_MS, idleTimeoutMs,
   browserEnvFor,
   REMOTE_SCRATCH_DIR_SH, REMOTE_SCRATCH_STALE_DAYS, TOP_LEVEL_PROFILE_AWK, remoteBrowserPrelude,
-  PIN_APPLIES_FROM, pinResolution, generatedConfig,
+  PIN_APPLIES_FROM, pinResolution, generatedConfig, generatedConfigParts,
   EPHEMERAL_DENY, deniedKeys, configFence, pinFenceConflict,
   PIN_ORIGINS, P0_PIN_ORIGINS, pinPick, pinForCreate, pinApplyNotice,
   FLOOR_VERSION, cmpVersion, parseVersion, floorVerdict, floorNotice,
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
   normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,
-  SHARING_VALUES, sharingVerdict, isMediatedProfile, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
+  SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, ephemeralPairsVerdict, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
   BROWSER_STATES, LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict, providerGuard, runawayVerdict, runawayParkVerdict,
   pidVerdict, adoptVerdict, attachedEnvFor,
@@ -1695,5 +1793,5 @@ module.exports = {
   // P1 second half (§3.7/§3.8): the attachment set, handles, the two refusals, the audit line
   ALIAS_RE, aliasFor, isAlias, childHandleFor, looksLikePath, attachmentsFor, handlesText, resolveHandle,
   profileChangedRefusal, profileChangeNotice, renderProfileChangeNotice, auditVerbOf, auditLine,
-  toldView, blindnessVerdict, nextChildN, childEnvFor, adoptDirVerdict, normAbsPath,
+  toldView, blindnessVerdict, nextChildN, childEnvFor, childPairsOver, adoptDirVerdict, normAbsPath,
 };

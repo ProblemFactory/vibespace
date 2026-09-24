@@ -1,0 +1,32 @@
+{
+  "measured": "2026-09-24 on the dev box (Ubuntu; google-chrome .deb, snap firefox) — `present` rows are ls + readlink -f of the files that exist there, `exe` the /proc/<pid>/exe of a RUNNING instance; `named` are the executables the round-2 verifier launched as a human would (ad-hoc, from the Desktop apps dialog) and found attachable",
+  "present": [
+    { "exec": "/usr/bin/google-chrome", "realpath": "/opt/google/chrome/google-chrome", "exe": "/opt/google/chrome/chrome" },
+    { "exec": "/usr/bin/google-chrome-stable", "realpath": "/opt/google/chrome/google-chrome", "exe": "/opt/google/chrome/chrome" },
+    { "exec": "/usr/bin/x-www-browser", "realpath": "/opt/google/chrome/google-chrome", "exe": "/opt/google/chrome/chrome" },
+    { "exec": "/usr/bin/gnome-www-browser", "realpath": "/opt/google/chrome/google-chrome", "exe": "/opt/google/chrome/chrome" },
+    { "exec": "/usr/bin/sensible-browser", "realpath": "/usr/bin/sensible-browser", "exe": null },
+    { "exec": "/opt/google/chrome/chrome", "realpath": "/opt/google/chrome/chrome", "exe": "/opt/google/chrome/chrome" },
+    { "exec": "/usr/bin/firefox", "realpath": "/usr/bin/firefox", "exe": "/snap/firefox/8929/usr/lib/firefox/firefox" },
+    { "exec": "/snap/bin/firefox", "realpath": "/usr/bin/snap", "exe": "/snap/firefox/8929/usr/lib/firefox/firefox" },
+    { "exec": "/home/u/.agent-browser/browsers/chrome-151.0.7922.34/chrome", "realpath": "/home/u/.agent-browser/browsers/chrome-151.0.7922.34/chrome", "exe": "/home/u/.agent-browser/browsers/chrome-151.0.7922.34/chrome" }
+  ],
+  "named": [
+    "/usr/bin/google-chrome", "google-chrome-stable", "/usr/bin/microsoft-edge", "microsoft-edge-stable", "/opt/microsoft/msedge/msedge",
+    "brave-browser", "/opt/brave.com/brave/brave", "/var/lib/flatpak/exports/bin/org.chromium.Chromium", "/usr/bin/chromium", "/snap/bin/chromium",
+    "chromium-browser", "vivaldi-stable", "opera", "epiphany-browser", "firefox-esr"
+  ],
+  "launchers": [
+    { "exec": "flatpak", "args": ["run", "com.google.Chrome"] },
+    { "exec": "/usr/bin/flatpak", "args": ["run", "--branch=stable", "org.mozilla.firefox"] },
+    { "exec": "flatpak", "args": ["run", "org.chromium.Chromium//stable"] },
+    { "exec": "snap", "args": ["run", "chromium"] },
+    { "exec": "env", "args": ["GDK_SCALE=2", "google-chrome", "--new-window"] }
+  ],
+  "controls": [
+    { "exec": "gedit", "args": [] }, { "exec": "xterm", "args": [] }, { "exec": "chromium-thumbnailer", "args": [] },
+    { "exec": "/usr/bin/infobrowser", "args": [] }, { "exec": "browserslist", "args": [] }, { "exec": "code", "args": ["--new-window"] },
+    { "exec": "gnome-calculator", "args": [] }, { "exec": "flatpak", "args": ["run", "org.gnome.gedit"] },
+    { "exec": "flatpak", "args": ["run", "org.mozilla.Thunderbird"] }, { "exec": "env", "args": ["FOO=1", "xterm"] }
+  ]
+}

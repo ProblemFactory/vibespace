@@ -1,0 +1,4 @@
+{
+  "source": "the browser CLI's `skills get core --full` on 0.32.0 (2026-09-24): top-level verbs the --help text does not list",
+  "verbs": ["addinitscript", "frame", "dialog", "keydown", "keyup", "window", "state"]
+}

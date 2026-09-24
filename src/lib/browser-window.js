@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 
@@ -9,7 +10,7 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
   app._hideWelcome();
   const startUrl = url || '';
   const openSpec = { action: 'openBrowser', url: startUrl, proxy: !!proxy };
-  let startTitle = 'Browser';
+  let startTitle = t('Web view');
   try { if (startUrl) startTitle = new URL(startUrl).hostname; } catch {} // scheme-less replayed URLs must not abort window creation
   const winInfo = app.wm.createWindow({ title: startTitle, type: 'browser', syncId, openSpec });
   const container = document.createElement('div');
@@ -105,7 +106,7 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
 
 // ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ──
 registerWindowType({
-  type: 'browser', label: 'Browser',
+  type: 'browser', label: 'Web view',
   icon: svgIcon16('<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>'),
   action: 'openBrowser', replay: (app, spec, { syncId } = {}) => app.openBrowser(spec.url, { syncId, proxy: spec.proxy }),
 });

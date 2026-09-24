@@ -81,7 +81,7 @@ async function runBrowserServeOp(bs, action, params = {}) {
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch (e) { return { ok: false, code: 'dir_unwritable', error: `cannot create the profile directory ${dir}: ${e.message}` }; }
     const headed = p.headed === true || p.headed === 'yes' ? true : (p.headed === false || p.headed === 'no' ? false : null);
     const r = await bs.runtime.launch(ns, { dir, idleMs: Number(p.idleMs) || 0, headed });
-    if (!r.ok) return { ok: false, code: 'launch_failed', error: `agent-browser open failed: ${(r.stderr || r.error || r.stdout || '').trim().slice(0, 300)}` };
+    if (!r.ok) return { ok: false, code: 'launch_failed', error: `the browser did not start: ${(r.stderr || r.error || r.stdout || '').trim().slice(0, 300)}` };
     const info = await bs.runtime.info(ns, { dir });
     if (!info.active) return { ok: false, code: 'launch_failed', error: 'the daemon did not report itself active after open' };
     const cdp = await bs.runtime.cdpUrl(ns, { dir });

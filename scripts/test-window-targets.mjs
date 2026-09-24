@@ -29,6 +29,12 @@
 //      B-bfe6 r1: a desktop-app BROWSER row (or url / keepProfile in the body) is
 //      refused browser_is_human (403) before the keeper; a patched copy (outside
 //      the tree) without the refusal is the negative control (it launches).
+//   takeover r2: a desktop-app BROWSER is the human's by row, exec name,
+//      launcher program or running exe — the measured fixture
+//      scripts/fixtures/window-targets/browser-execs.json, this box's installed
+//      browsers, a shell copy named `chrome` behind an unknown wrapper; gedit /
+//      chromium-thumbnailer / infobrowser stay attachable; the r1 rule in a
+//      patched engine copy is the negative control.
 // No fixed display, no fixed port, no fixed /tmp name (scripts/scratch.mjs).
 // Run: node scripts/test-window-targets.mjs
 import fs from 'node:fs';
@@ -320,7 +326,11 @@ console.log('§4 the engine over a fake keeper + the routes');
   const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta' }]]);
   let helperCalls = 0;
   const wt = { ...WT, actOnNode: (o) => { helperCalls++; return WT.actOnNode(o); } };
-  const engine = ENGINE.create({ keeper, dataDir: dir, env: () => base, activeSessions: sessions, wt, bins: real ? real.bins : { xdotool: null, gdbus: null }, log: { warn() { } } });
+  // takeover r2: the engine reads the RUNNING app's own executable — only for pids this suite owns (a fake
+  // record's pid 4242 may be anybody's process on the box, a browser included)
+  const ownedPids = new Set(real ? [real.pid] : []);
+  const procExeOwned = (pid) => { if (!ownedPids.has(pid)) return null; try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } };
+  const engine = ENGINE.create({ keeper, dataDir: dir, env: () => base, activeSessions: sessions, wt, bins: real ? real.bins : { xdotool: null, gdbus: null }, log: { warn() { } }, procExe: procExeOwned });
   const f1 = engine.factsForToken('vsst_aaaa'), f2 = engine.factsForToken('vsst_bbbb');
   ok(f1 && f1.sessionId === 's1' && f1.browserKey === 'bk-11111111' && engine.factsForToken('vsst_zzzz') === null && engine.factsForToken('cookie') === null, 'a vsst_ token resolves to its session; anything else to nothing');
   const list = await engine.list(f1);
@@ -366,8 +376,10 @@ console.log('§4 the engine over a fake keeper + the routes');
     {
       const M2 = require(mut);
       const e2 = M2.create({ keeper, dataDir: path.join(dir, 'mut'), env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
+      const prevNew = records.get('da-new');   // the fake keeper mints ONE id — the control's launch overwrites the gedit record
       const o2 = await e2.open({ appId: 'chromium', url: 'https://agent.example/' }, f2);
       ok(o2 && o2.handle && launched === 3, 'negative control: without the refusal the agent route LAUNCHES the browser row (and drops its url) — the leg above is what stops it');
+      records.set('da-new', prevNew);   // the browser the control launched is not a fixture of the legs below (a launched browser is the human's: T6 omits it from `list`)
     }
     // the tree is never written (B-0220): measured while the copy still exists
     for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(r.pass, '§4 tree: ' + r.name, r.pass ? undefined : r.detail);
@@ -433,6 +445,128 @@ console.log('§4 the engine over a fake keeper + the routes');
     if (real.hasInjection) { const pl = lines.find((l) => l.verb === 'click' && l.by === 'point'); ok(pl && pl.at && typeof pl.at.x === 'number', 'a point click is audited by:point with its coordinates'); }
   }
 
+  // takeover C3 (T6, design-browser-takeover §8): a desktop-app BROWSER window is the user's — never an agent's
+  records.set('da-web', mk('da-web', { label: 'Firefox (yours)', browser: true }));            // lane-desk's record shape
+  records.set('da-web2', mk('da-web2', { label: 'Chromium app', appId: 'chromium-app' }));    // the registry-row shape
+  keeper.registry = () => [{ id: 'chromium-app', label: 'Chromium', browser: true, available: true }, { id: 'gedit', label: 'Text editor', available: true }];
+  ok(engine.isHumanBrowser(records.get('da-web')) && engine.isHumanBrowser(records.get('da-web2')) && !engine.isHumanBrowser(records.get('da-one')), 'isHumanBrowser holds for BOTH shapes (a record carrying `browser`, a record whose registry row carries it) and not for an ordinary app');
+  const hb = await err(() => engine.attach('da-web', f1));
+  ok(hb && hb.code === 'browser_is_human' && /Firefox \(yours\) is a desktop-app browser/.test(hb.message) && /vibespace-browser/.test(hb.message) && !engine.leaseOf('da-web'), 'attach on a desktop-app browser ⇒ browser_is_human naming the road (`vibespace-browser`) — no lease taken', hb && hb.message);
+  ok((await err(() => engine.attach('da-web2', f1))).code === 'browser_is_human', '…and the registry-row shape the same');
+  ok((await err(() => engine.snapshot('da-web', f1))).code === 'browser_is_human' && (await err(() => engine.act('da-web2', f1, { verb: 'click', ref: '@e1' }))).code === 'browser_is_human' && (await err(() => engine.screenshot('da-web', f1))).code === 'browser_is_human' && (await err(() => engine.watch('da-web', f1))).code === 'browser_is_human', 'snapshot / act / screenshot / watch on a guessed handle refuse the same (before any lease check)');
+  const lw = await engine.list(f1);
+  ok(!lw.targets.some((r) => r.handle === 'da-web' || r.handle === 'da-web2') && lw.targets.some((r) => r.handle === 'da-one') && !lw.apps.some((a) => a.id === 'chromium-app') && lw.apps.some((a) => a.id === 'gedit'), '`list` omits them, and a browser registry row is not an id an agent may open');
+  ok(engine.attach('da-one', f1).handle === 'da-one', 'CONTROL: the same engine attaches an ordinary app (no `browser`) as before');
+  // r1 (finding 3): the REAL registry — spread the way desktop-app-keeper.registry() spreads it, records
+  // stamped `appId: row.id` exactly as the keeper's launch stamps them (the fixture-from-real-data rule:
+  // never a hand-written row). The lane's tree marked its browser rows by `category: 'browser'` ONLY (r1's
+  // miss: the engine tested `browser`); B-bfe6 (2.369.166) added the `browser` kind beside it. The leg runs
+  // on BOTH shapes — the real rows as they are, and the same rows with `browser` stripped (the r1 shape)
+  const REAL0 = require('../src/desktop-apps.js').DEFAULT_REGISTRY;
+  const withKind = REAL0.filter((r) => r.category === 'browser' && r.browser);
+  ok(withKind.length >= 2, `the real registry marks its browsers by category AND kind (${withKind.map((r) => r.id + ':' + r.browser).join(', ')}) — the B-bfe6 shape`);
+  for (const [shape, REAL] of [['real rows', REAL0], ['category only (the r1 shape)', REAL0.map(({ browser, ...r }) => r)]]) {
+    const saved = keeper.registry;
+    keeper.registry = () => REAL.map((row) => ({ ...row, args: [...row.args], available: true, path: '/usr/bin/' + row.exec, reason: null, parkedUntil: null }));
+    const browserRows = REAL.filter((r) => r.category === 'browser').map((r) => r.id);
+    ok(browserRows.length >= 2 && (shape === 'real rows' || REAL.every((r) => !('browser' in r))), `[${shape}] the leg's registry has its browser rows (${browserRows.join(', ')}) in the shape it names`);
+    for (const id of browserRows) records.set('da-real-' + id, mk('da-real-' + id, { label: REAL.find((r) => r.id === id).label, appId: id, exec: REAL.find((r) => r.id === id).exec }));
+    records.set('da-real-gedit', mk('da-real-gedit', { label: 'gedit', appId: 'gedit', exec: 'gedit' }));
+    records.set('da-real-adhoc', mk('da-real-adhoc', { label: 'chromium (ad hoc)', exec: '/usr/bin/chromium' }));
+    for (const id of browserRows) {
+      const e = await err(() => engine.attach('da-real-' + id, f1));
+      ok(engine.isHumanBrowser(records.get('da-real-' + id)) && e && e.code === 'browser_is_human' && !engine.leaseOf('da-real-' + id), `[${shape}] the real \`${id}\` row's launch record ⇒ browser_is_human, no lease taken`, e && (e.code + ' ' + e.message));
+    }
+    ok(engine.isHumanBrowser(records.get('da-real-adhoc')), `[${shape}] an AD-HOC launch of a registry browser's executable is the human's too (the exec names it)`);
+    const lr = await engine.list(f1);
+    ok(!lr.targets.some((r) => /^da-real-(?!gedit)/.test(r.handle)) && lr.targets.some((r) => r.handle === 'da-real-gedit') && !lr.apps.some((a) => browserRows.includes(a.id)) && lr.apps.some((a) => a.id === 'gedit'), `[${shape}] \`list\` omits them and \`open\` is never offered a browser row of the real registry`, JSON.stringify({ t: lr.targets.map((r) => r.handle), a: lr.apps.map((a) => a.id) }));
+    ok(!engine.isHumanBrowser(records.get('da-real-gedit')) && engine.attach('da-real-gedit', f1).handle === 'da-real-gedit', `[${shape}] CONTROL: the real \`gedit\` row attaches as before`);
+    engine.detach('da-real-gedit', f1);
+    for (const id of [...browserRows.map((x) => 'da-real-' + x), 'da-real-gedit', 'da-real-adhoc']) records.delete(id);
+    keeper.registry = saved;
+  }
+
+  // r2 (finding 3): a HUMAN's dialog-launched browser that is NOT one of the registry's two rows — Chrome,
+  // Edge, Brave, a flatpak / snap Chromium, a wrapper that execs into one — is the human's too. The fixture
+  // is measured (scripts/fixtures/window-targets/browser-execs.json: the dev box's present browsers + the
+  // executables the verifier launched), the registry is the REAL one, controls are real non-browsers
+  {
+    const REAL = require('../src/desktop-apps.js').DEFAULT_REGISTRY;
+    const saved = keeper.registry;
+    keeper.registry = () => REAL.map((row) => ({ ...row, args: [...row.args], available: true, path: '/usr/bin/' + row.exec, reason: null, parkedUntil: null }));
+    const FX = JSON.parse(fs.readFileSync(path.join(new URL('..', import.meta.url).pathname, 'scripts/fixtures/window-targets/browser-execs.json'), 'utf8'));
+    const adhoc = (exec, args = []) => mk('da-r2', { label: String(exec).split('/').pop(), exec, args, pids: { app: 4242, x: null, server: null, wm: null } });
+    const execs = [...new Set([...FX.present.map((r) => r.exec), ...FX.named])];
+    const missed = execs.filter((e) => !engine.isHumanBrowser(adhoc(e)));
+    ok(execs.length >= 20 && missed.length === 0, `r2: every measured browser executable launched ad hoc is the human's (${execs.length}; allowed: ${missed.join(', ') || 'none'})`);
+    const missedL = FX.launchers.filter((l) => !engine.isHumanBrowser(adhoc(l.exec, l.args)));
+    ok(FX.launchers.length >= 5 && missedL.length === 0, `r2: …through a launcher too — flatpak run / snap run / env (allowed: ${missedL.map((l) => [l.exec, ...l.args].join(' ')).join('; ') || 'none'})`);
+    const exes = [...new Set(FX.present.map((r) => r.exe).filter(Boolean))];
+    ok(exes.length >= 3 && exes.every((x) => require('../src/desktop-apps.js').browserLaunchVerdict({ exec: '/home/u/bin/web', exe: x }).by === 'process'), `r2: the RUNNING binaries a wrapper execs into are browsers by process (${exes.map((x) => x.split('/').pop()).join(', ')})`);
+    const wrong = FX.controls.filter((c) => engine.isHumanBrowser(adhoc(c.exec, c.args)));
+    ok(FX.controls.length >= 10 && wrong.length === 0, `r2 CONTROL: real non-browsers stay attachable — gedit, xterm, chromium-thumbnailer, infobrowser (GNU info), flatpak Thunderbird… (refused: ${wrong.map((c) => c.exec).join(', ') || 'none'})`);
+    // r3 (browser finding 4): the verifier's ~80-shape sweep found niche bare-exec browsers and `env` with a
+    // VALUE-taking option (`env -u FOO google-chrome` read `FOO` as the program) treated as attachable
+    {
+      const DA = require('../src/desktop-apps.js');
+      const niche = ['surf', 'luakit', 'nyxt', 'dillo', 'netsurf', 'netsurf-gtk3', 'min', 'otter-browser', 'basilisk', 'icecat', 'cromite', 'zen', 'zen-bin', '/opt/zen/zen-bin', 'start-tor-browser', '/usr/lib/firefox/firefox.real'];
+      const missedN = niche.filter((e) => !engine.isHumanBrowser(adhoc(e)));
+      ok(missedN.length === 0, `r3: the niche browsers the verifier's sweep let through are the human's (${niche.length}; allowed: ${missedN.join(', ') || 'none'})`);
+      const envs = [['-u', 'FOO', 'google-chrome'], ['--unset', 'FOO', 'google-chrome'], ['--unset=FOO', 'brave-browser'], ['-C', '/tmp', 'chromium'], ['--chdir', '/tmp', 'firefox'], ['-a', 'web', 'microsoft-edge'], ['-S', 'A=1 google-chrome --incognito'], ['--split-string=chromium --x'], ['-i', 'PATH=/x', '--', 'chromium']];
+      const missedE = envs.filter((a) => !engine.isHumanBrowser(adhoc('env', a)));
+      ok(missedE.length === 0, `r3: \`env\` with a value-taking option (-u / --unset / -C / --chdir / -a / -S / --split-string) still names the browser it runs (allowed: ${missedE.map((a) => a.join(' ')).join('; ') || 'none'})`);
+      const ctl = [['env', ['-u', 'google-chrome', 'gedit']], ['env', ['-C', '/opt/google/chrome', 'xterm']], ['arc', []], ['minidlna', []], ['surfraw', []], ['netsurfer', []], ['chromium-thumbnailer', []], ['infobrowser', []]];
+      const wrongC = ctl.filter(([e, a]) => engine.isHumanBrowser(adhoc(e, a)));
+      ok(wrongC.length === 0 && DA.launchedProgram('env', ['-u', 'google-chrome', 'gedit']) === 'gedit', `r3 CONTROL: a browser NAME as an option's value is not the program (\`env -u google-chrome gedit\` runs gedit); \`arc\` (on Linux an archiver — the Arc browser has no Linux build), surfraw, chromium-thumbnailer stay attachable (refused: ${wrongC.map(([e, a]) => [e, ...a].join(' ')).join('; ') || 'none'})`);
+      // NEGATIVE CONTROL: the r2 env parse (every `-x` skipped alone) in a patched copy reads `FOO` as the program
+      const dsrc = fs.readFileSync(require.resolve('../src/desktop-apps.js'), 'utf8');
+      const r2d = dsrc.replace("if (b === 'env') return envProgram(a);", "if (b === 'env') { for (let i = 0; i < a.length; i++) { if (a[i].startsWith('-')) continue; if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(a[i])) continue; return a[i]; } return null; }");
+      const dm = { exports: {} }; new Function('module', 'exports', 'require', r2d)(dm, dm.exports, require('module').createRequire(require.resolve('../src/desktop-apps.js')));
+      ok(r2d !== dsrc && dm.exports.launchedProgram('env', ['-u', 'FOO', 'google-chrome']) === 'FOO' && !dm.exports.browserLaunchVerdict({ exec: 'env', args: ['-u', 'FOO', 'google-chrome'] }).browser, 'r3 NEGATIVE CONTROL: the r2 `env` parse (patched copy) takes the -u value FOO for the program — the verifier\'s shape passed');
+    }
+    // the machine's own present browsers, live (SKIP with evidence where the box has none of them)
+    const here = FX.present.filter((r) => r.exec.startsWith('/usr/') || r.exec.startsWith('/opt/') || r.exec.startsWith('/snap/')).filter((r) => fs.existsSync(r.exec));
+    if (!here.length) skip(`r2: none of the fixture's browsers is installed here (${FX.present.map((r) => r.exec).join(', ')})`);
+    else ok(here.every((r) => engine.isHumanBrowser(adhoc(r.exec))), `r2: this machine's installed browsers (${here.map((r) => r.exec).join(', ')}) are refused by the exec the human would type`);
+    // attach refuses, list omits — the verifier's first repro, end to end
+    records.set('da-r2-chrome', mk('da-r2-chrome', { label: 'google-chrome', exec: '/usr/bin/google-chrome', pids: { app: 4242, x: null, server: null, wm: null } }));
+    const ec = await err(() => engine.attach('da-r2-chrome', f1));
+    const lc = await engine.list(f1);
+    ok(ec && ec.code === 'browser_is_human' && !engine.leaseOf('da-r2-chrome') && !lc.targets.some((r) => r.handle === 'da-r2-chrome'), 'r2: `vibespace-window attach` on a dialog-launched google-chrome ⇒ browser_is_human, no lease, not listed', ec && ec.message);
+    // the RUNNING process decides a wrapper nobody can name: a copy of the system shell named `chrome` (what
+    // /opt/google/chrome/google-chrome execs into) behind an exec called `my-web` — and `gedit` the control.
+    // A SHELL copy blocked in its `read` builtin: one process, no child to orphan (a multicall coreutils
+    // `sleep` refuses to run under another name — measured on this box)
+    const PD = path.join(dir, 'r2-proc'); fs.mkdirSync(PD, { recursive: true });
+    const shBin = fs.realpathSync('/bin/sh');
+    const kids = [];
+    const runAs = (name) => { const b = path.join(PD, name); fs.copyFileSync(shBin, b); fs.chmodSync(b, 0o755); const c = require('child_process').spawn(b, ['-c', 'read x'], { stdio: ['pipe', 'ignore', 'ignore'] }); kids.push(c); ownedPids.add(c.pid); return c.pid; };
+    try {
+      const chromePid = runAs('chrome'), geditPid = runAs('gedit');
+      for (let i = 0; i < 40 && !((procExeOwned(chromePid) || '').endsWith('/chrome') && (procExeOwned(geditPid) || '').endsWith('/gedit')); i++) await new Promise((r) => setTimeout(r, 25));
+      ok((procExeOwned(chromePid) || '').endsWith('/r2-proc/chrome'), 'r2: (the fixture process runs, /proc/<pid>/exe names it `chrome`)', procExeOwned(chromePid));
+      records.set('da-r2-wrap', mk('da-r2-wrap', { label: 'my-web', exec: path.join(PD, 'my-web'), args: ['--profile', 'mine'], pids: { app: chromePid, x: null, server: null, wm: null } }));
+      records.set('da-r2-sh', mk('da-r2-sh', { label: 'sh', exec: 'sh', args: ['-c', `exec ${path.join(PD, 'chrome')} 600`], pids: { app: chromePid, x: null, server: null, wm: null } }));
+      records.set('da-r2-ctl', mk('da-r2-ctl', { label: 'my-editor', exec: path.join(PD, 'my-editor'), pids: { app: geditPid, x: null, server: null, wm: null } }));
+      const ew = await err(() => engine.attach('da-r2-wrap', f1));
+      ok(ew && ew.code === 'browser_is_human' && engine.isHumanBrowser(records.get('da-r2-sh')), 'r2: a wrapper the human typed (`my-web`, `sh -c "exec …/chrome"`) is refused by the binary its RUNNING app process is (/proc/<pid>/exe)', ew && ew.message);
+      ok(!engine.isHumanBrowser(records.get('da-r2-ctl')) && engine.attach('da-r2-ctl', f1).handle === 'da-r2-ctl', 'r2 CONTROL: the same wrapper shape running a non-browser (`gedit`) attaches');
+      engine.detach('da-r2-ctl', f1);
+    } finally { for (const c of kids) { try { c.kill('SIGKILL'); } catch { /* gone */ } } }
+    // NEGATIVE CONTROL: the r1 engine (patched copy: no name / process verdict) lets the human's Chrome through
+    {
+      const ep = require.resolve('../src/server/window-targets-engine.js');
+      const src = fs.readFileSync(ep, 'utf8');
+      const r1src = src.replace('return M.browserLaunchVerdict({ exec: rec.exec, args: rec.args, exe: appExe(rec) }).browser;', 'return false;');
+      const m = { exports: {} };
+      new Function('module', 'exports', 'require', '__dirname', '__filename', r1src)(m, m.exports, require('module').createRequire(ep), path.dirname(ep), ep);
+      const e1 = m.exports.create({ keeper, dataDir: path.join(dir, 'r1-engine'), env: () => base, activeSessions: sessions, wt, bins: { xdotool: null, gdbus: null }, log: { warn() { } }, procExe: () => null });
+      ok(r1src !== src && !e1.isHumanBrowser(adhoc('/usr/bin/google-chrome')) && !e1.isHumanBrowser(adhoc('flatpak', ['run', 'org.chromium.Chromium'])) && e1.isHumanBrowser(adhoc('/usr/bin/chromium')), 'r2 NEGATIVE CONTROL: the r1 rule (patched copy) allows google-chrome and a flatpak Chromium — only a registry row\'s own exec was caught');
+    }
+    for (const id of ['da-r2-chrome', 'da-r2-wrap', 'da-r2-sh', 'da-r2-ctl']) records.delete(id);
+    keeper.registry = saved;
+  }
+
   // the routes
   const express = require('express');
   const app = express();
@@ -444,7 +578,7 @@ console.log('§4 the engine over a fake keeper + the routes');
   const api = async (method, p, body, token = 'vsst_aaaa') => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
   ok((await api('GET', '/api/agent/window/targets', null, null)).status === 401 && (await api('GET', '/api/agent/window/targets', null, 'vsst_nope')).status === 401, 'no / unknown token ⇒ 401');
   const t = await api('GET', '/api/agent/window/targets');
-  ok(t.status === 200 && t.j.targets.length === 2 && t.j.targets.some((r) => r.handle === 'da-one'), 'GET targets answers the rows');
+  ok(t.status === 200 && t.j.targets.length === 2 && t.j.targets.some((r) => r.handle === 'da-one'), 'GET targets answers the rows', JSON.stringify((t.j.targets || []).map((r) => r.handle)));
   ok((await api('GET', '/api/agent/window/targets?host=other')).status === 400 && (await api('POST', '/api/agent/window/attach', { handle: 'da-one', host: 'box' })).j.code === 'unsupported-host', 'a non-local host is refused by name');
   ok((await api('POST', '/api/agent/window/attach', { handle: 'nope' })).status === 404 && (await api('POST', '/api/agent/window/attach', {})).status === 400, 'attach: unknown ⇒ 404, no handle ⇒ 400');
   ok((await api('POST', '/api/agent/window/act', { handle: 'da-one', verb: 'key', chord: 'x;y' })).status === 400, 'a bad chord ⇒ 400');
@@ -453,6 +587,15 @@ console.log('§4 the engine over a fake keeper + the routes');
   ok((await api('POST', '/api/agent/window/detach', { handle: 'da-one' }, 'vsst_bbbb')).status === 404, 'not_attached ⇒ 404');
   const ww = await api('POST', '/api/agent/window/watch', { handle: 'da-one' });
   ok(ww.status === 200 && ww.j.openSpec.id === 'da-one', 'watch answers');
+  const hr = await api('POST', '/api/agent/window/attach', { handle: 'da-web' });
+  ok(hr.status === 403 && hr.j.code === 'browser_is_human' && hr.j.handle === 'da-web', 'the route maps browser_is_human to 403');
+  ok((await api('POST', '/api/agent/window/snapshot', { handle: 'da-web2' })).j.code === 'browser_is_human', '…snapshot through the route too');
+  { // the shipped CLI prints the refusal and its remedy line
+    const { execFile } = await import('node:child_process');
+    const CLI = path.join(new URL('..', import.meta.url).pathname, 'data/bin/vibespace-window');
+    const r = await new Promise((resolve) => execFile(process.execPath, [CLI, 'attach', 'da-web'], { env: { PATH: process.env.PATH, HOME: dir, VIBESPACE_API: `http://127.0.0.1:${port}`, VIBESPACE_SESSION_TOKEN: 'vsst_aaaa' }, encoding: 'utf8', timeout: 20000 }, (e, stdout, stderr) => resolve({ status: e ? e.code : 0, stderr: String(stderr || '') })));
+    ok(r.status === 1 && /\[browser_is_human\]/.test(r.stderr) && /for the web use YOUR browser: `vibespace-browser`/.test(r.stderr) && /do not look for another road/.test(r.stderr), '`vibespace-window attach <browser app>` prints the code and the remedy line', r.stderr);
+  }
   const uncovered = WT.REFUSALS.filter((c) => !(c in ROUTES.STATUS));
   ok(uncovered.length === 0, `every typed refusal has a status (${uncovered.join(', ') || 'none uncovered'}) — a 500 for a typed refusal would be a silent failure`);
   ok(!Object.values(ROUTES.STATUS).includes(500), 'no typed code maps to 500');

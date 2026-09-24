@@ -4522,6 +4522,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bprof-row { display: grid; grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 1fr) 90px minmax(120px, 1fr) minmax(120px, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 4px; border-bottom: 1px solid var(--border); border-radius: var(--radius-sm); }
 .bprof-row.bprof-orphan { grid-template-columns: minmax(200px, 2fr) 90px minmax(120px, 1fr) auto auto; }
 .bprof-row.bprof-forgotten { grid-template-columns: minmax(200px, 2fr) 90px minmax(120px, 1fr) auto; }
+.bprof-row.bprof-ephemeral-browser { grid-template-columns: minmax(180px, 1.6fr) minmax(120px, 1fr) minmax(90px, .8fr) minmax(100px, .8fr) auto; } /* takeover C3: the managed ephemeral browsers */
 .bprof-row.focus { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .bprof-ident { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .bprof-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }

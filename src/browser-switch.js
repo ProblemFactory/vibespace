@@ -206,7 +206,7 @@ function versionLadder({ target = null, targetMajor = null, recordedMajor = null
       error: `${name} runs Chromium ${tgt} but this profile directory was last written by Chromium ${wrote} — the profile stamp is one-way ("Your profile can not be used because it is from a newer version"), so opening it would destroy it`,
       waysOut: [
         `upgrade ${name} to a build with Chromium ${wrote} or newer`,
-        'clone the profile through export / import (agent-browser --state / --restore): cookies, localStorage and an opt-in IndexedDB snapshot cross; sessionStorage and non-extractable CryptoKeys do NOT — an app that keeps its local decryption keys as non-extractable CryptoKeys (WhatsApp Web is the known case) does not bring its login across',
+        'clone the profile through export / import — the user\'s act, not an agent verb (`vibespace-browser` refuses `--state` / `--restore`): cookies, localStorage and an opt-in IndexedDB snapshot cross; sessionStorage and non-extractable CryptoKeys do NOT — an app that keeps its local decryption keys as non-extractable CryptoKeys (WhatsApp Web is the known case) does not bring its login across',
       ],
     };
   }
@@ -501,7 +501,7 @@ function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf 
   }
   if (row.canSwitchTo === 'export-only' || fromRow.canSwitchTo === 'export-only') {
     const which = row.canSwitchTo === 'export-only' ? to : from;
-    return { ok: false, code: 'switch_export_only', provider: to, error: `${which} keeps its browser state with the vendor — its directory is not ours to open, so there is no in-place switch. The explicitly LOSSY path is export / import into a NEW profile on ${to} (vibespace-browser new <label> --provider ${to}, then agent-browser --state / --restore): cookies, localStorage and an opt-in IndexedDB snapshot cross; sessionStorage and non-extractable CryptoKeys do not (WhatsApp Web's login is the known casualty)` };
+    return { ok: false, code: 'switch_export_only', provider: to, error: `${which} keeps its browser state with the vendor — its directory is not ours to open, so there is no in-place switch. The explicitly LOSSY path is export / import into a NEW profile on ${to} (vibespace-browser new <label> --provider ${to}; carrying the old state across is the user's act, not an agent verb — --state / --restore are refused): cookies, localStorage and an opt-in IndexedDB snapshot cross; sessionStorage and non-extractable CryptoKeys do not (WhatsApp Web's login is the known casualty)` };
   }
   const integrationId = integrationIdFor(to);
   let key = null;

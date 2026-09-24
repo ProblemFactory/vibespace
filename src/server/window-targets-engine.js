@@ -82,6 +82,7 @@ const { execFile } = require('child_process');
 const WT = require('../window-targets');
 const T = require('../browser-takeover');
 const DESK = require('../window-desktop');
+const M = require('../desktop-apps'); // takeover r2: browserLaunchVerdict (which launches are web browsers)
 
 const AUDIT_FILE = 'window-audit.jsonl';
 const SHOT_DIR = 'window-shots';
@@ -109,7 +110,10 @@ function writeJsonAtomic(file, obj) {
  *   broadcast      — (msg) => void (window-leases-updated to every client)
  *   wt / bins      — injectable for the suite (the SHARED module / the input-backend binaries)
  */
-function create({ keeper, dataDir, env, activeSessions, log = console, now = Date.now, wt = WT, bins = null, python = 'python3', helper = undefined, serverSetting = () => undefined, broadcast = null, userEnv = () => process.env, selfPid = process.pid } = {}) {
+function create({ keeper, dataDir, env, activeSessions, log = console, now = Date.now, wt = WT, bins = null, python = 'python3', helper = undefined, serverSetting = () => undefined, broadcast = null, userEnv = () => process.env, selfPid = process.pid,
+  // takeover r2 (T6): the running app process's own executable — the name a wrapper the human typed execs
+  // INTO (x-www-browser → chrome). One readlink; injectable for the suite; null = no evidence
+  procExe = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } } } = {}) {
   if (!keeper) throw new Error('window-targets engine: keeper required');
   const leaseFile = path.join(dataDir, LEASE_FILE);
   const leases = new Map(); // handle → { handle, sessionId, browserKey, since, origin, refs, snapshotAt, carrierLostAt }
@@ -211,6 +215,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (DESK.isDesktopHandle(handle)) requireConsent();
     const rec = liveAny(handle);
     if (!rec) throw namedError(DESK.isDesktopHandle(handle) && desktopSeen.has(DESK.pidOfHandle(handle)) ? 'desktop_window_gone' : 'not-found', DESK.isDesktopHandle(handle) && desktopSeen.has(DESK.pidOfHandle(handle)) ? `the application behind ${handle} is gone (its pid exited) — \`vibespace-window list\` again` : notFoundMsg(handle));
+    if (isHumanBrowser(rec)) throw humanBrowserError(rec); // T6: a guessed handle is refused the same way (a lease could predate the rule)
     const l = leases.get(rec.id);
     if (!l || l.sessionId !== facts.sessionId) throw namedError('not_attached', `this session holds no lease on ${rec.id} (${rec.label}) — \`vibespace-window attach ${rec.id}\` first${l ? ' (another session holds it)' : ''}`);
     const st = inputs.get(rec.id);
@@ -229,17 +234,46 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
 
   // ── list ──
-  /** The registry ids an agent may `open` — with the keeper's presence verdict (never hidden). */
   /** The keeper's registry rows; a keeper without one (or one that throws) answers the PURE default registry, so
-   *  the browser-row refusal below never fails OPEN on a missing lookup. */
+   *  the browser-row refusals below never fail OPEN on a missing lookup (lane-desk's shape, ported by takeover C3). */
   function registryRowsNow() {
     try { if (typeof keeper.registry === 'function') return keeper.registry() || []; } catch { /* fall through */ }
-    return require('../desktop-apps').DEFAULT_REGISTRY;
+    try { return require('../desktop-apps').DEFAULT_REGISTRY || []; } catch { return []; }
   }
-  /** The ids an agent may open: every registry row EXCEPT a browser row (B-bfe6 — a desktop-app browser is the
-   *  human's; the agent's web road is `vibespace-browser`). */
+  /** takeover C3 (T6, design-browser-takeover §8): is this window a HUMAN'S
+   *  browser — a desktop app launched as a browser? A browser ROW is one
+   *  carrying `browser` (lane-desk's kind string) OR `category: 'browser'`
+   *  (the shape THIS tree's DEFAULT_REGISTRY has, and lane-desk keeps — r1:
+   *  the `browser`-only test never fired on the real rows). A record is a
+   *  browser when it carries either itself, when its `appId` names a browser
+   *  row (the keeper's registry launch stamps `appId = row.id`), when an
+   *  ad-hoc launch's executable is a browser row's, or — r2 — when the
+   *  launch NAMES a web browser (PURE `browserLaunchVerdict` in
+   *  desktop-apps.js: the executable's basename, a flatpak / snap / env
+   *  launcher's program, a reverse-DNS app id) or the RUNNING app process's
+   *  own executable does (a wrapper the human typed execs into the browser
+   *  binary). r1 knew only the two registry rows' execs, so a human's
+   *  dialog-launched Chrome / Edge / Brave / flatpak Chromium was attachable.
+   *  Such a window is never an agent's (no mediation, no action trace, no
+   *  egress policy): attach / snapshot / act / screenshot / watch refuse it
+   *  `browser_is_human`, `list` omits it, and `open` is never offered the row. */
+  const isBrowserRow = (r) => !!(r && (r.browser || r.category === 'browser'));
+  const execBase = (x) => (typeof x === 'string' && x ? x.split('/').pop() : '');
+  const appExe = (rec) => { const pid = rec && rec.pids && Number(rec.pids.app); if (!Number.isInteger(pid) || pid <= 0) return null; try { return procExe(pid) || null; } catch { return null; } };
+  function isHumanBrowser(rec) {
+    if (!rec || rec.origin === 'desktop') return false;
+    if (isBrowserRow(rec)) return true;
+    const id = rec.appId != null ? String(rec.appId) : '';
+    const rows = registryRowsNow().filter(isBrowserRow);
+    if (id && rows.some((r) => String(r.id) === id)) return true;
+    const ex = execBase(rec.exec);
+    if (ex && rows.some((r) => execBase(r.exec) === ex)) return true;
+    return M.browserLaunchVerdict({ exec: rec.exec, args: rec.args, exe: appExe(rec) }).browser;
+  }
+  const humanBrowserError = (rec) => namedError('browser_is_human', `${rec.label || rec.id} is a desktop-app browser — the user's own window with its own profile, never an agent's (no mediation, no action trace, no egress policy): for anything on the web use \`vibespace-browser\` (\`vibespace-docs browser\`)`, { handle: rec.id });
+  /** The registry ids an agent may `open` — with the keeper's presence verdict (never hidden); a browser row is the human's. */
   function registryApps() {
-    try { return registryRowsNow().filter((r) => !r.browser).map((r) => ({ id: r.id, label: r.label, available: !!r.available, reason: r.reason || null })); } catch { return []; }
+    try { return registryRowsNow().filter((r) => r && !isBrowserRow(r)).map((r) => ({ id: r.id, label: r.label, available: !!r.available, reason: r.reason || null })); } catch { return []; }
   }
   async function list(facts) {
     load();
@@ -247,7 +281,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const a11y = await wt.probeA11y({ env: base, ...helperOpts() });
     let a11yApps = [];
     if (a11y.ok) { const r = await wt.runHelper({ op: 'apps' }, { env: base, wallMs: 8000, ...helperOpts() }); if (r.ok) a11yApps = r.apps || []; }
-    const rows = wt.targetRows(keeper.listApps(), { a11yApps, sessionPids: (rec) => pidsOf(rec) }).map((r) => {
+    const rows = wt.targetRows((keeper.listApps() || []).filter((rec) => !isHumanBrowser(rec)), { a11yApps, sessionPids: (rec) => pidsOf(rec) }).map((r) => {
       const l = leases.get(r.handle);
       return { ...r, lease: leaseView(l), mine: !!(l && facts && l.sessionId === facts.sessionId) };
     });
@@ -288,7 +322,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // (`url` / `keepProfile`) — never silently dropped (2026-09-23, the verifier's finding).
     if ((b.url !== undefined && b.url !== null && b.url !== '') || b.keepProfile !== undefined) throw namedError('browser_is_human', `${b.url !== undefined && b.url !== null && b.url !== '' ? 'url' : 'keepProfile'} belongs to a desktop-app BROWSER, and a desktop-app browser is the user's own window, never an agent's — for anything on the web use the agent browser: \`vibespace-browser\` (\`vibespace-docs browser\`)`, { apps: registryApps() });
     const appId = b.appId || b.app || undefined;
-    const bRow = appId !== undefined ? registryRowsNow().find((r) => r && r.id === String(appId) && r.browser) : null;
+    const bRow = appId !== undefined ? registryRowsNow().find((r) => r && r.id === String(appId) && isBrowserRow(r)) : null;
     if (bRow) throw namedError('browser_is_human', `${bRow.label || bRow.id} is a desktop-app browser — the user's own window with its own profile, never an agent's (no mediation, no action trace, no egress policy): for anything on the web use the agent browser, \`vibespace-browser\` (\`vibespace-docs browser\`)`, { apps: registryApps() });
     const rec = await keeper.launch({ appId, label: b.label || b.title || undefined });
     const l = newLease(rec, facts);
@@ -302,6 +336,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (DESK.isDesktopHandle(handle)) requireConsent();
     const rec = liveAny(handle);
     if (!rec) throw namedError(DESK.isDesktopHandle(handle) && desktopSeen.has(DESK.pidOfHandle(handle)) ? 'desktop_window_gone' : 'not-found', DESK.isDesktopHandle(handle) && desktopSeen.has(DESK.pidOfHandle(handle)) ? `the application behind ${handle} is gone (its pid exited) — \`vibespace-window list\` again` : notFoundMsg(handle));
+    if (isHumanBrowser(rec)) throw humanBrowserError(rec); // T6: after liveAny, before any lease
     const cur = leases.get(rec.id);
     let orphanedFrom = null;
     if (cur && cur.sessionId !== facts.sessionId) {
@@ -635,13 +670,14 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     }
     const rec = liveRecord(handle);
     if (!rec) throw namedError('not-found', `no VibeSpace-launched window ${JSON.stringify(String(handle))} is live`);
+    if (isHumanBrowser(rec)) throw humanBrowserError(rec);
     const l = leases.get(rec.id);
     const v = leaseView(l);
     return { handle: rec.id, label: rec.label, origin: ORIGIN, form: 'window-live', openSpec: { action: 'openDesktopApp', id: rec.id }, streamPath: `/api/desktop/${rec.id}/stream`, lease: v,
       note: `the user watches ${rec.label} in its Desktop-app window (display ${rec.display}, the whole private display until the xpra transport); ${l ? `while you hold it the pane shows "Agent is driving" and their input is not relayed — Take over flips lease.input to 'user' (your verbs are refused window_paused, nothing is injected), Hand back returns it${v && v.input === 'user' ? '; the user is driving it RIGHT NOW' : ''}` : 'nobody holds it, so their input reaches it directly'}` };
   }
 
-  return { factsForToken, list, open, attach, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
+  return { factsForToken, list, open, attach, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
     leases: () => allViews(), auditFile: path.join(dataDir, AUDIT_FILE), leaseFile, ORIGIN,
     // P10: the other class

@@ -182,7 +182,9 @@ for (const [file, s] of Object.entries(src)) {
     const multi = body.match(/\bactions:\s*\{([^}]*)\}/)?.[1];
     if (multi) for (const k of multi.matchAll(/\b([A-Za-z]+)\s*:/g)) actions.push(k[1]);
     const replay = body.match(/\breplay:\s*\([^)]*\)\s*=>\s*([^\n]*)/)?.[1] || '';
-    regs.push({ file, fn: m[1], type, actions, persistFalse: /\bpersist:\s*false\b/.test(body), singleton: /\bsingleton:\s*true\b/.test(body), replay });
+    const label = body.match(/\blabel:\s*'([^']*)'/)?.[1] ?? null;
+    const iconExpr = body.match(/\bicon:\s*([^\n,]+(?:\([^\n]*\))?)/)?.[1] || '';
+    regs.push({ file, fn: m[1], type, actions, persistFalse: /\bpersist:\s*false\b/.test(body), singleton: /\bsingleton:\s*true\b/.test(body), replay, label, iconExpr });
   }
 }
 const typeRegs = regs.filter((r) => r.fn === 'registerWindowType');
@@ -216,6 +218,22 @@ ok(ladderReplays.every(replayForcesWindow), 'every replay that routes through a 
 ok(ladderReplays.every((r) => r.replay.trim().length > 0), 'the replay text was actually captured (an empty capture would pass the predicate vacuously)');
 // negative control: the r1 closure text (no forceWindow) fails the same predicate
 ok(!replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId }) });" }) && replayForcesWindow({ replay: "openRailPanel(app, 'system', { syncId, forceWindow: true }) });" }), 'negative control: the pre-fix closure text fails the predicate, the fixed one passes');
+
+// THE THREE BROWSER FACES (docs/design-browser-faces.zh.md direction B, owner
+// 2026-09-24 "那就选B吧"): the window kinds keep their ids (layout replay reads
+// ids) and carry the names that say WHO drives each one — the web view is the
+// user's iframe, the agent browser is the agent's. The globe belongs to the web
+// view alone; the agent's two kinds wear the window-with-a-dot glyph defined
+// ONCE in icons.js (UI_ICONS.browserLive).
+{
+  const lab = Object.fromEntries(typeRegs.map((r) => [r.type, r.label]));
+  ok(lab.browser === 'Web view' && lab['browser-live'] === 'Agent browser (live)' && lab['browser-profiles'] === 'Agent browser',
+    `the browser faces' kind labels: browser → 'Web view', browser-live → 'Agent browser (live)', browser-profiles → 'Agent browser' (${JSON.stringify([lab.browser, lab['browser-live'], lab['browser-profiles']])})`);
+  const ic = Object.fromEntries(typeRegs.map((r) => [r.type, r.iconExpr]));
+  ok(/^UI_ICONS\.browserLive\b/.test(ic['browser-live'] || ''), `the live view's kind icon IS UI_ICONS.browserLive, not a local copy of the path (${ic['browser-live']})`);
+  ok(/svgIcon16\('<circle cx="8" cy="8" r="6"\/>/.test(ic.browser || ''), 'the web view keeps the globe (the one meaning the globe has left)');
+  ok(/import \{[^}]*\bUI_ICONS\b[^}]*\} from '\.\/icons\.js'/.test(src['browser-live-window.js']), 'browser-live-window.js imports UI_ICONS (the icon comes from the one definition)');
+}
 
 // ownership: each kind registered in the module that opens it
 const owner = Object.fromEntries(typeRegs.map((r) => [r.type, r.file]));

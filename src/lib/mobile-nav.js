@@ -2,6 +2,7 @@ import { t } from './i18n.js';
 import { escHtml, showContextMenu } from './utils.js';
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
+import { getCommand, runCommand } from './contributions.js';
 
 /**
  * MobileNav — mobile navigation bar controller.
@@ -62,11 +63,38 @@ export class MobileNav {
       row(UI_ICONS.robot, t('Agent session'), () => app.showNewSessionDialog()),
       row(UI_ICONS.terminal, t('Terminal'), () => app.openShellTerminal()),
       row(FILE_ICONS.folder, t('Files'), () => app.openFileExplorer()),
-      row(UI_ICONS.globe, t('Browser'), () => app.openBrowser()),
+      row(UI_ICONS.globe, t('Web view'), () => app.openBrowser()),
     ];
     // gated exactly like the toolbar button (app._vncAvailable = /api/vnc/status)
     if (app._vncAvailable) items.push(row(UI_ICONS.monitor, t('Desktop'), () => app.openDesktop()));
+    // THE THREE BROWSER FACES on the phone (design-browser-faces direction B, D5):
+    // the web view above, then the desktop-app launcher (gated like its ⚙ row on
+    // the /api/desktop/apps probe; the ONE command, its own icon) and the AGENT
+    // browser (gated like its ⚙ row on the profile digest)
+    const APPS_ICON = getCommand('desktopApps.open')?.icon || UI_ICONS.monitor;
+    if (app._desktopAppsAvailable) items.push(row(APPS_ICON, t('Desktop app…'), () => runCommand('desktopApps.open', { app })));
+    if (app._browserProfiles) items.push(row(UI_ICONS.browserLive, t('Agent browser'), () => this._openAgentBrowser()));
     return this._sheet(items);
+  }
+
+  /** The phone's Agent browser row. The agent browser is SESSION-scoped (a live
+   *  view belongs to one conversation's browser), the "+" sheet is not — so:
+   *  the ACTIVE window's session when it holds a browser ⇒ its live view; else a
+   *  session picker over every live local session holding a browser (one row
+   *  each, then the Agent browser window itself); none ⇒ the Agent browser
+   *  window (profiles, ephemeral browsers, housekeeping). */
+  _openAgentBrowser() {
+    const app = this.app;
+    const rows = (app.sidebar?._allSessions || []).filter((s) => s && s.status === 'live' && s.webuiId && s.browserKey && !s.host);
+    const term = app.sessions?.get?.(app.wm.activeWindowId);
+    const here = term && rows.find((s) => s.webuiId === term.sessionId);
+    if (here) { app.openBrowserLive({ sessionId: here.webuiId }); return; }
+    if (!rows.length) { app.openBrowserProfiles(); return; }
+    const row = (icon, label, action) => ({ labelHtml: `${icon}<span>${escHtml(label)}</span>`, action });
+    this._sheet([
+      ...rows.map((s) => row(UI_ICONS.browserLive, s.webuiName || s.name || s.webuiId, () => app.openBrowserLive({ sessionId: s.webuiId }))),
+      row(UI_ICONS.browserLive, t('Agent browser…'), () => app.openBrowserProfiles()),
+    ]);
   }
 
   updateTitle() {

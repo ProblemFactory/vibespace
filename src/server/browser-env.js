@@ -224,11 +224,11 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
           const parsed = JSON.parse(raw);
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not a JSON object');
           project.keys = Object.keys(parsed);
-          return { config: B.layerProjectConfig(user, parsed), user, project };
+          return { config: B.layerProjectConfig(user, parsed), user, project, projectFile: parsed };
         } catch (e) { project.error = String(e && e.message); }
       }
     }
-    return { config: B.layerProjectConfig(user, null), user, project };
+    return { config: B.layerProjectConfig(user, null), user, project, projectFile: null };
   }
 
   const configPathFor = (key) => path.join(ENV_DIR, key + '.json');
@@ -346,10 +346,16 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // invalid file makes the CLI exit 1.
     let cfgPath = null;
     let dropped = [];
+    let composed = null;
     try {
       const p = configPathFor(key);
       dropped = B.deniedKeys(user);
-      const cfg = B.generatedConfig({ userConfig: user, pinnedDir: pin, headed: headedSetting() });
+      // takeover r3 (finding 2): the user file and the project file are handed
+      // SEPARATELY — the project file only narrows (the fence, the policy);
+      // its launch keys and every raw-debugging switch in `args` are dropped
+      // and said (`projectDropped` / `argsDropped`, journalled below)
+      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, headed: headedSetting() });
+      const cfg = composed.config;
       writeJson(p, cfg);
       const back = JSON.parse(fs.readFileSync(p, 'utf8'));
       if (!back || typeof back !== 'object') throw new Error('read-back was not an object');
@@ -389,7 +395,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         else { const r = ensureSocketDir(socket.dir); if (r.ok) socketDir = socket.dir; else socket.refused = r.why; }
       }
     }
-    return { ...ladder, dropped, pinRefused: conflict || null, projectConfig: eff.project, socket, socketDir };
+    return { ...ladder, dropped, projectDropped: composed ? composed.dropped.project : [], argsDropped: composed ? composed.dropped.args : [], pinRefused: conflict || null, projectConfig: eff.project, socket, socketDir };
   }
 
   /** One journal line per fallback, naming the rung it left, the rung it landed
@@ -437,10 +443,21 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         journalOnce(`project-unreadable:${pc.path}`, `${key}: ${pc.path} exists but could not be layered into the generated config — ${pc.error}. The CLI would refuse it too; fix the file and start a new session.`);
         try { telemetry?.event?.('browser-project-config-unreadable', pc.path); } catch { }
       } else {
-        journalOnce(`project:${pc.path}`, `${key}: the generated agent-browser config also carries the project-level ${pc.path} (keys: ${pc.keys.join(', ') || 'none'}), layered over ~/${B.USER_CONFIG_REL} the way the CLI does — `
+        const took = pc.keys.filter((k) => !(res.projectDropped || []).includes(k));
+        journalOnce(`project:${pc.path}`, `${key}: the generated agent-browser config also carries the project-level ${pc.path} (keys: ${took.join(', ') || 'none'}), layered over ~/${B.USER_CONFIG_REL} the way the CLI does — `
           + `it applies to this whole session; a different agent-browser.json in a directory the agent cd's into does not (the CLI reads that file per invocation directory, the generated config replaces both files).`);
-        try { telemetry?.event?.('browser-project-config-layered', pc.keys.length); } catch { }
+        try { telemetry?.event?.('browser-project-config-layered', took.length); } catch { }
+        // takeover r3: a project file only NARROWS — its launch keys are not carried, and that is SAID
+        if ((res.projectDropped || []).length) {
+          journalOnce(`project-dropped:${pc.path}`, `${key}: ${pc.path} also sets ${res.projectDropped.join(', ')} — NOT carried: a project file lives where the agent works, so it may only add a restriction (${require('../browser-verbs.js').PROJECT_CONFIG_KEYS.join(', ')}) that ~/${B.USER_CONFIG_REL} does not already set; how the browser launches is this machine's own file and VibeSpace's settings.`);
+          try { telemetry?.event?.('browser-project-config-dropped', res.projectDropped.join(',')); } catch { }
+        }
       }
+    }
+    // takeover r3: a raw-debugging / user-data-dir switch in `args` never reaches a browser VibeSpace hands an agent
+    if ((res.argsDropped || []).length) {
+      journalOnce(`args-dropped:${res.argsDropped.join(',')}`, `${key}: the generated agent-browser config drops ${res.argsDropped.join(' ')} from \`args\` — a switch that opens a raw debugging endpoint or picks the user-data-dir would go around the lease and the mediation (I3); every other launch arg is carried.`);
+      try { telemetry?.event?.('browser-config-args-dropped', res.argsDropped.length); } catch { }
     }
     // A DROPPED KEY IS A STATED DECISION (r2). Round 1's generated config was an
     // ALLOW list, so the user's browsing fence and the whole confirmation family
@@ -765,6 +782,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, liveKeysFromMeta, bindings, childConfigFor,
     // paths, so the suite asserts the real ones rather than its own guess
     ENV_DIR, PROFILE_DIR, configPathFor, linkPathFor, cwdPathFor, scratchDirFor, effectiveConfig, ensureSocketDir,
+    // takeover r2: the base the remote prelude's short socket dir is built on — `/resolve` names it to a
+    // rung-H CLI, which keeps a shell AGENT_BROWSER_SOCKET_DIR only when it is `<base>/vs-ab-<its uid>`
+    socketDirBase: B.socketDirBaseOf(socketDirBase),
     _facts: bf,
   };
 }

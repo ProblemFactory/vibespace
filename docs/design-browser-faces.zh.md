@@ -65,6 +65,9 @@
 ## 5. 建议
 
 ### 5.1 结论
+
+> **SHIPPED (B), 2.369.168**（2026-09-24，owner："那就选B吧"；落在 browser takeover 的第三块 —— `docs/design-browser-takeover.zh.md` §7 / D10，§5.3 的 D1–D7 全部按本文默认）。只改标签与图标：工具栏 **网页视图**（地球只留给它）；rail 项 + ⚙ Tools ▸ **Agent 浏览器…**（order 35）+ 状态栏芯片 "**Agent 浏览器 · <profile>**"（tooltip 首行同前缀）+ 会话卡片三条命令 + Session Properties 分区 + Settings 分类 **Agent 浏览器**（Services 组）全部换到 `browser-live` 的"带点的窗口"（`UI_ICONS.browserLive`，只在 `icons.js` 定义一次；rail 用 24 格版本 `RAIL_ICONS.browser`）；实时视图窗口类型标签 **Agent 浏览器(实时)**，交接按钮 "在网页视图里打开这个网址"；Apps 对话框导语补"agent 够不到它"，目录卡副标签 **浏览器应用 ·** 门控在 `row.browser`，只显示在**可启动**的卡上（随 B-bfe6 的 Browsers 分区在集成时生效 —— D7 在合并时定下；变灰的浏览器卡只留简短原因）；手机 "+" 表单补齐 网页视图 / 桌面应用… / Agent 浏览器（最后一行：当前窗口的会话有浏览器 ⇒ 它的实时视图；否则列出持有浏览器的活会话供选择；一个都没有 ⇒ Agent 浏览器窗口）。窗口类型 id、openSpec action、设置键、rail id 一个没动，布局回放不受影响。会话卡片菜单是纯文字行（`showContextMenu` 不画 `icon`），所以卡片菜单带的是**名字**不是图标。门：`test-browser-faces`（新，fast）+ `test-window-types` / `test-contributions` / `test-ax-paint`（rail 项补 `aria-label`）/ `test-browser-housekeeping` / `test-profile-blindness(-chip)` / `test-architecture` §53（图标只定义一次）/ `test-mobile-gaps`。
+
 **做 B，现在。** 它把 §2 的七条混淆里的 1 / 2 / 3 / 5 / 6 直接消掉（一个地球一个意思；三个名字三个东西；Settings 分类与提示文案跟着改名），4 / 7 由 B 的手机表单三行 + ⚙ 行改名覆盖；零结构改动、零迁移、一次提交。从 A 借**两样**：Apps 对话框导语补一句"谁来操作"，Chromium 卡的副标签写"浏览器应用"；手机 "+" 表单补齐三行。**C 不现在做**：它是 B-bfe6 落地、xpra 在机队里普及**之后**才值得问的问题（"网页视图还要不要作为一张脸存在"）——那时 B 已经把名字理顺，C 只是再删一个入口。A 的 hub 在 B 之后仍可作为**手机 sheet 的形态**回来，桌面上不需要它。
 
 ### 5.2 B 的逐文件改动清单（全部只改标签/图标；id 一律不动）

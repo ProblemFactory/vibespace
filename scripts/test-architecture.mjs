@@ -49,6 +49,9 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
   'src/browser-profiles.js', 'src/keeper-limits.js',
+  // BROWSER TAKEOVER (design-browser-takeover §3): the ONE browser CLI's verb table — the router,
+  // the child env and (r3) the config rule; imports nothing, shipped beside the CLI to hosts
+  'src/browser-verbs.js',
   // AGENT BROWSER P4 second half (design §7.4/§7.5/§7.6): the live backend SWITCH and the
   // key-consumer half as DECISIONS — version ladder, seats in three states, the six rows'
   // vendor env / launch args / derived test host, site hints, the blocked claim, the gate
@@ -1518,10 +1521,27 @@ console.log('§51 no suite writes a patched copy into the tree');
       const j = /path\.join\(\s*(\w+)\s*,/.exec(m[2]);
       if (j && vars.has(j[1])) vars.set(m[1], vars.get(j[1]) + ' ' + m[2]);
     }
+    // the TARGET argument: writeFileSync's first, copyFileSync's SECOND (its first is the source — copying a
+    // product module OUT of the tree into a scratch dir is exactly what a patched copy should do; the 2.369.168
+    // integration's test-browser-verbs controls were counted by their source path). Top-level commas only.
+    const targetAt = (from, nth) => {
+      let depth = 0, q = null, i = from, arg = 0, start = from;
+      for (; i < src.length && i < from + 600; i++) {
+        const ch = src[i];
+        if (q) { if (ch === '\\') i++; else if (ch === q) q = null; continue; }
+        if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}') { if (depth === 0) break; depth--; }
+        else if (ch === ',' && depth === 0) { if (arg === nth) break; arg++; start = i + 1; }
+      }
+      return arg === nth ? src.slice(start, i) : null;
+    };
     const hits = [];
-    for (const m of src.matchAll(/(?:writeFileSync|copyFileSync)\(\s*([^,]+),/g)) {
-      const a = m[1].trim();
-      const call = src.slice(m.index, m.index + 240).replace(/^(?:writeFileSync|copyFileSync)\(\s*/, '');
+    for (const m of src.matchAll(/(writeFileSync|copyFileSync)\(\s*/g)) {
+      const raw = targetAt(m.index + m[0].length, m[1] === 'copyFileSync' ? 1 : 0);
+      if (raw == null) continue;
+      const a = raw.trim();
+      const call = a;
       const direct = new RegExp('^' + inTree.source).test(call) || (/^path\.join\(\s*(\w+)\s*,/.test(a) && vars.has(/^path\.join\(\s*(\w+)/.exec(a)[1]));
       if (!(direct || vars.has(a))) continue;
       const line = src.slice(0, m.index).split('\n').length;
@@ -1539,8 +1559,10 @@ console.log('§51 no suite writes a patched copy into the tree');
     && judge(HDR + "const SRC_DIR = path.join(REPO, 'src/server');\nconst f = path.join(SRC_DIR, `vs-browser-mut-${process.pid}.js`);\nfs.writeFileSync(f, src);").length === 1
     && judge(HDR + "fs.writeFileSync(path.join(REPO, 'src/lib', `.chat-view.prefix-${process.pid}.js`), cut);").length === 1
     && judge(HDR + "const f = MUT.write('src/server/auto-resume.js', src);\nfs.writeFileSync(path.join(ROOT, 'src', 'x.js'), s);").length === 0
-    && judge(HDR + "const bv = path.join(REPO, 'src/lib/build-version.js');\nif (!fs.existsSync(bv)) fs.writeFileSync(bv, 'x');").length === 0,
-  '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not');
+    && judge(HDR + "const bv = path.join(REPO, 'src/lib/build-version.js');\nif (!fs.existsSync(bv)) fs.writeFileSync(bv, 'x');").length === 0
+    && judge(HDR + "fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D5, 'vibespace-browser-verbs.js'));").length === 0
+    && judge(HDR + "fs.copyFileSync(path.join(ROOT, 'x.js'), path.join(REPO, 'src/lib', `vs-x-${process.pid}.js`));").length === 1,
+  '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not; copyFileSync is judged by its DESTINATION (a copy out of src/ passes, a copy into src/ is caught)');
   const gi = fs.readFileSync('.gitignore', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const hides = gi.filter((l) => /\*/.test(l) && /\.js$/.test(l) && (l.startsWith('src/') || !l.includes('/')));
   ok(hides.length === 0, `§51 .gitignore hides no wildcard .js family under src/ (a stray copy must be visible)${hides.length ? ' — ' + hides.join(', ') : ''}`);
@@ -1557,6 +1579,208 @@ console.log('§51 no suite writes a patched copy into the tree');
   const eb = fs.readFileSync(esm, 'utf8');
   ok(esm.endsWith('.mjs') && !/from\s*['"]\.\.?\//.test(eb) && /from "file:\/\//.test(eb),
     '§51 mutant-copy: an ESM copy has every relative specifier rewritten to the real file\'s URL');
+}
+
+// 52. THE BROWSER TAKEOVER CENSUS (docs/design-browser-takeover.zh.md §2 I1/I5,
+//     owner 2026-09-24: "vibespace 完全接管浏览器工具 … 从系统 path 隐藏
+//     agent-browser"). Two facts the agent's road rests on, both grep-derived:
+//     (a) every executable STATIC tracked data/bin tool — each `vibespace-*`
+//         and the `agent-browser` SHIM — is in HostManager.AGENT_TOOLS, so it
+//         ships to every ssh host / paired device (a shim that stays home
+//         leaves the real binary first on a remote PATH). Two are shipped on
+//         demand by their own path and say so below.
+//     (b) I5 — the agent never hears the hidden CLI's NAME: zero occurrences in
+//         the teaching output (both Browsing variants, the attachment-set line,
+//         the whole tools intro with its window line), in docs/agent/*.md, and in
+//         the STRING LITERALS (acorn tokens — a comment is not something the
+//         agent is told) of EVERY tracked agent CLI (r2: data/bin/vibespace-*, the
+//         index's own list — r1 scanned two) and of the route / engine modules
+//         whose refusals reach the agent (r2 adds window-targets + browser-trace);
+//         the agentd bundle's hits must be floorNotice's user notice. The shim is the one exception (it
+//         must name what it hides to point past it). A file name that merely
+//         CONTAINS the word (`~/.agent-browser/`, `agent-browser.json`) is a
+//         path, not the tool, and is not counted.
+{
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const { HostManager } = require('../src/hosts.js');
+  const EXEMPT = { 'vibespace-usage-scan': 'shipped on demand by the usage harvest (hosts.js usage-scan rung)', 'vibespace-opencode-op': 'shipped on demand by opencode-access (base64 over ssh)' };
+  const ls = String(spawnSync('git', ['ls-files', '-s', 'data/bin'], { cwd: REPO, encoding: 'utf8', env: gitEnvFrom(process.env) }).stdout || '').trim().split('\n').filter(Boolean);
+  // the INDEX says what is a tracked tool (data/bin also holds generated and downloaded files)
+  const tracked = new Map(ls.map((l) => { const m = /^(\d+) \S+ \d+\t(.+)$/.exec(l); return [path.basename(m[2]), m[1]]; }));
+  const onDisk = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => (/^vibespace-/.test(n) || n === 'agent-browser') && tracked.has(n));
+  const execs = onDisk.filter((n) => (fs.statSync(path.join(REPO, 'data/bin', n)).mode & 0o111) !== 0);
+  ok(execs.length >= 15 && execs.includes('vibespace-browser'), `§52a census scope is non-vacuous (${execs.length} executable tracked tools)`);
+  const missingFrom = (list) => execs.filter((n) => !list.includes(n) && !EXEMPT[n]);
+  const missing = missingFrom(HostManager.AGENT_TOOLS);
+  ok(missing.length === 0, `§52a every executable static tool ships to remote hosts (AGENT_TOOLS) — missing: ${missing.join(', ') || 'none'}`);
+  ok(HostManager.AGENT_TOOLS.includes('agent-browser') && fs.existsSync(path.join(REPO, 'data/bin/agent-browser')), '§52a the agent-browser SHIM is a shipped tool');
+  ok(HostManager.AGENT_TOOLS.includes('vibespace-browser-verbs.js'), '§52a the verb table the shipped vibespace-browser runs ships beside it');
+  ok(JSON.stringify(missingFrom(HostManager.AGENT_TOOLS.filter((n) => n !== 'vibespace-browser'))) === '["vibespace-browser"]', '§52a NEGATIVE CONTROL: the list without vibespace-browser is reported missing exactly that tool');
+
+  const acorn = require('acorn');
+  const NAME = /(?<![.\w/-])agent-browser(?!\.json|[\w-])/g;
+  const count = (t) => (String(t).match(NAME) || []).length;
+  const literalsOf = (src, sourceType = 'script') => {
+    const out = [];
+    for (const tok of acorn.tokenizer(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType, allowReturnOutsideFunction: true })) {
+      if (tok.type === acorn.tokTypes.string || tok.type === acorn.tokTypes.template) out.push(String(tok.value));
+    }
+    return out;
+  };
+  const literalsOfModule = (src) => literalsOf(src, 'module');
+  const ar = require('../src/agent-routes.js');
+  const T = { status: true, ask: true, task: true, jobs: true };
+  const set1 = { attachments: [{ alias: 'work', isDefault: true, profileId: 'bp-00000001' }] };
+  const set2 = { attachments: [{ alias: 'work', isDefault: true, profileId: 'bp-00000001' }, { alias: 'personal', isDefault: false, profileId: 'bp-00000002' }] };
+  const teaching = [ar.browserIntroLine('D'), ar.browserIntroLine('none'), ar.browserSetLine(set1), ar.browserSetLine(set2),
+    ar.sessionToolsIntro(T, { browserVariant: 'D' }), ar.sessionToolsIntro(T, { browserVariant: 'none' })];
+  ok(teaching.every((t) => t.length > 50) && /vibespace-browser/.test(teaching[0]), '§52b the teaching scope is non-vacuous (both variants, the set line, the whole intro)');
+  const teachHits = teaching.reduce((n, t) => n + count(t), 0);
+  ok(teachHits === 0, `§52b the teaching lines never name the hidden CLI (${teachHits} occurrence(s))`);
+  const docs = fs.readdirSync(path.join(REPO, 'docs/agent')).filter((f) => f.endsWith('.md'));
+  ok(docs.length >= 10 && docs.includes('browser-manual.md') && docs.includes('web-access-skill.md'), `§52b the manual scope is non-vacuous (${docs.length} docs/agent/*.md, the browser manual and the skill text among them)`);
+  const docHits = docs.map((f) => [f, count(fs.readFileSync(path.join(REPO, 'docs/agent', f), 'utf8'))]).filter(([, n]) => n);
+  ok(docHits.length === 0, `§52b docs/agent/*.md never name the hidden CLI (${docHits.map(([f, n]) => f + ':' + n).join(', ') || 'none'})`);
+  // r2 (finding 4): EVERY tracked agent CLI (data/bin/vibespace-*, the index's own list — the design's I5
+  // names them all), not a hand-picked two; the two browser CLIs keep their non-vacuity floor
+  const cliFiles = onDisk.filter((n) => /^vibespace-/.test(n)).map((n) => 'data/bin/' + n);
+  ok(cliFiles.length >= 15 && cliFiles.includes('data/bin/vibespace-browser') && cliFiles.includes('data/bin/vibespace-window'), `§52b r2 the agent-CLI scope is the tracked census (${cliFiles.length} data/bin/vibespace-* files)`);
+  for (const f of cliFiles) {
+    const src = fs.readFileSync(path.join(REPO, f), 'utf8');
+    const lits = f.endsWith('.mjs') ? literalsOfModule(src) : literalsOf(src);
+    const hits = lits.filter((l) => count(l));
+    const floor = f === 'data/bin/vibespace-browser' || f === 'data/bin/vibespace-window' ? 20 : 0;
+    ok(lits.length > floor && hits.length === 0, `§52b ${f}'s string literals never name the hidden CLI (${lits.length} literals; ${hits.map((h) => JSON.stringify(h.slice(0, 60))).join(', ') || 'none'})`);
+  }
+  // r1 (finding 4): the ROUTE ERROR strings reach the agent too (`printRefusal` prints `error` / `remedy` /
+  // `waysOut` verbatim) — a remedy naming the hidden CLI is a dead road (the shim exits 2, `--state` is
+  // refused). Scope: every string literal (acorn tokens — comments are not told) of the modules whose
+  // refusals the browser routes and the keeper hand back. Explicit exceptions, each with its reason:
+  //   · a literal that IS the bare name (`'agent-browser'`) — a value (the binary a resolver spawns, a
+  //     provider row's `binary` field), never a sentence;
+  //   · `floorNotice` in browser-profiles.js — a server notice to the USER ('agent-browser-floor'), whose
+  //     remedy is the user's own install, never an agent-facing string;
+  //   · path / file-name shapes (`~/.agent-browser/config.json`, `agent-browser.json`) — the NAME regex.
+  // r2 (finding 4): + the window-targets and browser-trace route / engine modules — their refusals reach
+  // the agent through `vibespace-window` / the trace routes the same way (clean today; a planted sentence
+  // there must redden the gate, the negative control below proves it does)
+  // r3 (finding 3): the scope is a GLOB, not a hand-kept list — a new route module, or a browser / window
+  // engine module in src/server/, is scanned the moment it exists (r2's fixed nine-file array let a planted
+  // sentence in a new src/routes/zzz.js or the unlisted src/server/browser-stream.js stay green). The PURE
+  // decision modules whose refusal sentences the routes hand back stay named explicitly.
+  const ROUTE_PURE = ['src/browser-switch.js', 'src/browser-profiles.js', 'src/browser-serve.js'];
+  const routeScope = (routesListing, serverListing) => [
+    ...routesListing.filter((n) => n.endsWith('.js')).map((n) => 'src/routes/' + n),
+    ...serverListing.filter((n) => /^(browser|window)-[\w-]*\.js$/.test(n)).map((n) => 'src/server/' + n),
+    ...ROUTE_PURE,
+  ].sort();
+  const ROUTE_FILES = routeScope(fs.readdirSync(path.join(REPO, 'src/routes')), fs.readdirSync(path.join(REPO, 'src/server')));
+  ok(['src/routes/browser.js', 'src/routes/window-targets.js', 'src/routes/browser-trace.js', 'src/server/browser-keeper.js', 'src/server/window-targets-engine.js', 'src/server/browser-trace.js', 'src/server/browser-stream.js', 'src/server/browser-env.js'].every((f) => ROUTE_FILES.includes(f)) && ROUTE_FILES.length >= 20,
+    `§52b r3 the route/engine scope is the glob (every src/routes/*.js + src/server/{browser,window}-*.js + ${ROUTE_PURE.length} PURE modules: ${ROUTE_FILES.length} files), r2's nine included`);
+  ok(routeScope(['browser.js', 'zzz-r3probe.js'], ['browser-zzz.js', 'window-zzz.js', 'other.js']).join() === ['src/browser-profiles.js', 'src/browser-serve.js', 'src/browser-switch.js', 'src/routes/browser.js', 'src/routes/zzz-r3probe.js', 'src/server/browser-zzz.js', 'src/server/window-zzz.js'].join(),
+    '§52b r3 NEGATIVE CONTROL: a NEW route module and a NEW browser/window engine module enter the scope by existing (the verifier\'s zzz-r3probe.js shape)');
+  // user-facing-only functions, each with its reason — a hit inside one of these is not an agent-facing string:
+  //   · floorNotice — a server notice to the USER ('agent-browser-floor'), whose remedy is their own install;
+  //   · journal — browser-env's OPERATOR journal lines (the server log), never an answer to an agent
+  const USER_ONLY_FNS = { 'src/browser-profiles.js': ['floorNotice'], 'src/server/browser-env.js': ['journal'] };
+  const fnSpans = (src, names) => {
+    const out = [];
+    if (!names.length) return out;
+    const walk = (n) => {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n.type === 'FunctionDeclaration' && n.id && names.includes(n.id.name)) out.push([n.start, n.end, n.id.name]);
+      for (const k of Object.keys(n)) if (k !== 'type' && n[k] && typeof n[k] === 'object') walk(n[k]);
+    };
+    walk(acorn.parse(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType: 'script', allowReturnOutsideFunction: true }));
+    return out;
+  };
+  const routeHitsOf = (f, src) => {
+    const skip = fnSpans(src, USER_ONLY_FNS[f] || []);
+    const out = [];
+    for (const tok of acorn.tokenizer(src, { ecmaVersion: 'latest', allowHashBang: true, sourceType: 'script', allowReturnOutsideFunction: true })) {
+      if (tok.type !== acorn.tokTypes.string && tok.type !== acorn.tokTypes.template) continue;
+      const v = String(tok.value);
+      if (v === 'agent-browser' || !count(v)) continue;
+      if (skip.some(([a, b]) => tok.start > a && tok.start < b)) continue;
+      out.push(v);
+    }
+    return out;
+  };
+  let routeLits = 0;
+  for (const f of ROUTE_FILES) {
+    const src = fs.readFileSync(path.join(REPO, f), 'utf8');
+    routeLits += literalsOf(src).length;
+    const hits = routeHitsOf(f, src);
+    ok(hits.length === 0, `§52b r1 ${f}'s string literals (route errors, remedies, ways out, labels) never name the hidden CLI (${hits.map((h) => JSON.stringify(h.slice(0, 70))).join(', ') || 'none'})`);
+  }
+  ok(routeLits > 400 && Object.entries(USER_ONLY_FNS).every(([f, fns]) => fnSpans(read(f), fns).length === fns.length), `§52b r1 the route-string scope is non-vacuous (${routeLits} literals) and every user-only exception still exists (as a function the parser finds)`);
+  {
+    // r3: the exception is the FUNCTION, not the file — the same sentence outside `journal` is caught
+    const esrc = read('src/server/browser-env.js');
+    const plantedOut = esrc.replace('function create(', "const R3X = 'run agent-browser open to check';\nfunction create(");
+    ok(plantedOut !== esrc && routeHitsOf('src/server/browser-env.js', plantedOut).length === 1 && routeHitsOf('src/server/browser-env.js', esrc).length === 0,
+      '§52b r3 NEGATIVE CONTROL: the name planted in browser-env OUTSIDE its journal function is caught (the exception is one function wide)');
+    const ssrc = read('src/server/browser-stream.js');
+    const plantedS = ssrc.replace("'use strict';", "'use strict';\nconst X = 'run agent-browser stream enable';");
+    ok(plantedS !== ssrc && routeHitsOf('src/server/browser-stream.js', plantedS).length === 1, '§52b r3 NEGATIVE CONTROL: the name planted in a patched copy of src/server/browser-stream.js (unlisted in r2) is caught');
+  }
+  ok(routeHitsOf('src/browser-switch.js', fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8').replace("'use strict';", "'use strict';\nconst X = 'then agent-browser --state / --restore';")).length === 1, '§52b r1 NEGATIVE CONTROL: the pre-fix `switch_export_only` remedy planted into a patched copy is caught');
+  {
+    const wsrc = fs.readFileSync(path.join(REPO, 'src/routes/window-targets.js'), 'utf8');
+    const planted = wsrc.replace("'use strict';", "'use strict';\nconst X = 'for the web run agent-browser open <url>';");
+    ok(planted !== wsrc && routeHitsOf('src/routes/window-targets.js', planted).length === 1, '§52b r2 NEGATIVE CONTROL: the name planted into a patched copy of a NEWLY scanned module (routes/window-targets.js) is caught');
+  }
+  // r2: the agentd BUNDLE (data/bin/vibespace-agentd.js, a gitignored build output) carries the scanned sources;
+  // its only hits may be `floorNotice`'s — the user-only notice (esbuild re-chunks templates, so a hit must be
+  // a fragment of that function's rendered sentences, not a source literal)
+  {
+    const bundle = path.join(REPO, 'data/bin/vibespace-agentd.js');
+    if (!fs.existsSync(bundle)) console.log('  - §52b r2 the agentd bundle is not built in this tree (npm run build:agentd) — its sources are scanned above');
+    else {
+      const BP = require('../src/browser-profiles.js');
+      const rendered = [BP.floorNotice({ state: 'too-old', installed: '0.1.0', floor: '0.32.0' }), BP.floorNotice({ state: 'unknown' })].filter(Boolean);
+      const bHits = literalsOf(fs.readFileSync(bundle, 'utf8')).filter((l) => count(l));
+      const foreign = bHits.filter((h) => !rendered.some((r) => r.includes(h)));
+      ok(rendered.length === 2 && foreign.length === 0, `§52b r2 the agentd bundle names the hidden CLI only inside floorNotice's user notice (${bHits.length} fragment(s); foreign: ${foreign.map((h) => JSON.stringify(h.slice(0, 60))).join(', ') || 'none'})`);
+    }
+  }
+
+  // NEGATIVE CONTROLS: the census must be able to go red — a planted literal in
+  // a patched copy of the CLI, a planted word in a teaching line, and the path
+  // shapes it deliberately does NOT count
+  const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+  const planted = cliSrc.replace("'use strict';", "'use strict';\nconsole.log('try agent-browser directly');");
+  ok(literalsOf(planted).filter((l) => count(l)).length === 1, '§52b NEGATIVE CONTROL: a patched CLI copy with the name in one string literal is caught');
+  ok(count(teaching[0].replace('vibespace-browser <verb>', 'agent-browser <verb>')) === 1, '§52b NEGATIVE CONTROL: the word injected into a teaching line is caught');
+  ok(count('~/.agent-browser/config.json and ./agent-browser.json and design-agent-browser-v2') === 0 && count('run `agent-browser open`.') === 1, '§52b the counter ignores path/file-name shapes and counts the command name (backticked, at a sentence end)');
+}
+
+// §53 (2.369.168, design-browser-faces direction B): ONE GLYPH, ONE DEFINITION.
+// The agent browser's window-with-a-dot is the ⚙ row's, the status-bar chip's,
+// the phone sheet's and the live view's window-kind icon — a hand-copied path in
+// a second module is how two glyphs drift into two meanings (the globe did
+// exactly that: one path, three faces). Census over every src/lib module: the
+// 16-grid path string appears ONCE (icons.js); the 24-grid rail variant once
+// (sidebar-rail.js); the globe is no longer the agent's anywhere.
+{
+  const BL16 = '<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9" r="1.6"/>';
+  const BL24 = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M6.5 7h.01M9.5 7h.01"/><circle cx="12" cy="14" r="2.2"/>';
+  const libDir = path.join(REPO, 'src/lib');
+  const libs = fs.readdirSync(libDir).filter((f) => f.endsWith('.js') && f !== 'build-version.js');
+  const texts = Object.fromEntries(libs.map((f) => [f, fs.readFileSync(path.join(libDir, f), 'utf8')]));
+  const occIn = (tx, needle) => Object.entries(tx).flatMap(([f, s]) => { const n = s.split(needle).length - 1; return n ? [[f, n]] : []; });
+  const occ = (needle) => occIn(texts, needle);
+  const o16 = occ(BL16), o24 = occ(BL24);
+  ok(libs.length > 100 && o16.length === 1 && o16[0][0] === 'icons.js' && o16[0][1] === 1, `§53 the 16-grid browser-live glyph is defined ONCE, in icons.js (${JSON.stringify(o16)})`);
+  ok(/^\s*browserLive:\s*_s\('/m.test(read('src/lib/icons.js')), '§53 …as UI_ICONS.browserLive through `_s()` (aria-hidden + focusable=false like every icon)');
+  ok(o24.length === 1 && o24[0][0] === 'sidebar-rail.js' && o24[0][1] === 1 && /^\s*browser: R\('<rect x="3" y="5"/m.test(read('src/lib/sidebar-rail.js')), `§53 the 24-grid rail variant is RAIL_ICONS.browser, once (${JSON.stringify(o24)})`);
+  const users = libs.filter((f) => /UI_ICONS\.browserLive\b/.test(fs.readFileSync(path.join(libDir, f), 'utf8'))).sort();
+  // (the session card's menu renders text rows only — showContextMenu draws no `icon` — so the card menu carries the NAME, not the glyph)
+  ok(['browser-live-window.js', 'browser-trace-view.js', 'chat-status-bar.js', 'mobile-nav.js'].every((f) => users.includes(f)), `§53 its consumers read the one definition (${users.join(' ')})`);
+  // NEGATIVE CONTROL: a planted second copy in a scratch listing is counted
+  const planted = occIn({ ...texts, 'browser-live-window.js': texts['browser-live-window.js'] + `\nconst COPY = svgIcon16('${BL16}');` }, BL16);
+  ok(planted.length === 2 && planted.some(([f]) => f === 'browser-live-window.js'), `§53 NEGATIVE CONTROL: the pre-rename shape (a local svgIcon16 copy in browser-live-window.js) planted into a patched listing is caught (${JSON.stringify(planted)})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

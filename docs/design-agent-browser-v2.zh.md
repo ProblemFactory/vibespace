@@ -928,6 +928,8 @@ gate 的对象相反。
 
 ## 4. 实时视图（1.c）
 
+> **改名注记（takeover T5，2026-09-24，方向 B —— docs/design-browser-faces.zh.md）：** 本节的"实时视图"窗口（`browser-live`）在界面上叫 **Agent 浏览器 / Agent browser / エージェントブラウザ**；工具栏上的嵌入式浏览器叫 **网页视图 / Web view**；桌面应用里的浏览器卡片副标题为 **浏览器应用 / Browser app**。只改显示的名字 —— 窗口类型、openSpec、设置键、rail id 都不动。见 §11a。
+
 ### 4.1 Codex desktop 实际在做什么，以及我们取哪些
 
 根据 OpenAI 自己的文档和同期报道调研得来：
@@ -1581,7 +1583,7 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
   而一个没有任何一行列出的分类就是一个没人够得到的设置项（那道 build 普查之所以存在，就是因为有十个
   设置项、包括每一个花钱天花板，都是够不到的）。
 
-* **命名（2026-09-23，B-d03a）：** 这一节里的每个面都是产品里第二张叫"浏览器"的脸（另两张：工具栏的 iframe 网页视图、作为桌面应用的 Chromium）。地球图标今天同时指三者；三个方向的渲染稿、打分与建议（改名为 网页视图 / **Agent 浏览器** / 浏览器应用，agent 面统一用 `browser-live` 的"带点的窗口"图标）见 `docs/design-browser-faces.zh.md`。
+* **命名（2026-09-23，B-d03a）：** 这一节里的每个面都是产品里第二张叫"浏览器"的脸（另两张：工具栏的 iframe 网页视图、作为桌面应用的 Chromium）。地球图标今天同时指三者；三个方向的渲染稿、打分与建议（改名为 网页视图 / **Agent 浏览器** / 浏览器应用，agent 面统一用 `browser-live` 的"带点的窗口"图标）见 `docs/design-browser-faces.zh.md`。 **已交付 2.369.168（方向 B，takeover T5）：** 本节的各个面现在都叫 **Agent 浏览器** —— ⚙ 行 *Agent 浏览器…*、rail 项、芯片 *Agent 浏览器 · <profile>*、卡片命令 *Agent 浏览器配置…* / *Agent 浏览器 — 实时视图* / *交还 Agent 浏览器*、Session Properties 分区、Settings 分类 —— 全部用 `UI_ICONS.browserLive`；id、openSpec action、设置键不变。
 
 ---
 
@@ -2424,6 +2426,26 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 | **D33** | **切到一个没有配 key 的 backend 时怎么办？**（§7.4 / §7.5。） | (a) 大声拒绝并打开 Integrations 卡片；(b) 静默回落 `chromium`；(c) 回落 `chromium` 并发一条公告。 | **(a)。** 这与 §7.4 那条"那个二进制没装"是同一族的具名拒绝（`backend_unavailable` 旁边多一个 `backend_no_key`），而 Integrations 卡片就是那条**可执行的**出路 —— `app.openIntegration('cloak')`，一次点击，带 focus。(b) 被明确否掉：用户按下"用 CloakBrowser 打开"正是因为 `chromium` 已经打不开了，静默回落等于让他对着同一个失败再看一遍，并且不知道为什么 —— 这是本仓库"no silent failures"那条律的教科书形态。(c) 听起来温和但更糟：它花一个**计费 turn** 去说一句用户就在屏幕前的话（D11/D16 同一族的判据），而且它仍然把他留在打不开的那一页上。真正让 (a) 不刺人的不是拒绝本身，是**切换器在点开之前就说了**（未配置 = 一行禁用并写明理由的控件加一枚来源芯片，§7.1 的能力行纪律）—— 所以那条拒绝是最后一道网，不是第一道。 |
 | **D34** | **一个要 key 的 provider 会不会跑在本机之外的机器上？**（§7.5、§7.1 的 `keyScope` 格 —— D5 的 (b) 把 keeper 放到了配对设备上，而且**就在 P4**，与 key 这一半同一个阶段。） | (a) **拒绝** —— `keyScope: 'local-only'` 的 provider 在 `host != null` 时是一行带理由禁用的控件（`provider_needs_local_key`）；(b) 让那把 key 走 daemon 已有的**凭据材料**通道（sealed orders 的形状，`src/account-material.js`）。 | **(a)，而且现在就写进能力表。** 这不是保守，是**今天的文档只支持这一个答案**：§6.4 逐字写着"provider 授权 key 活在服务端的注册表里"，而 (b) 会让这句话在一个远端 profile 上直接变假；§9 第 (ii) 条腿（"spawn 出去的子进程环境里有那个 env 名、父进程里没有"）是一条**进程内**才做得出的断言，它今天没有远端臂。所以 (b) 要落地就欠三样东西，缺一不可：**这一行决定本身**、**§6.4 的一句话**说明那把 key 什么时候可以跨过 mux、以及 §9 那条腿的一条由**真 daemon** 驱动的远端臂。在三样齐备之前，一个含糊的默认会让明文 key 悄悄上路 —— 而 (a) 的代价在 P4 里是**零**：远程浏览器那条故事线（§7.3、D5）今天的答案本来就是"那台机器上一个自己登录过的 profile"，它跑的是 `chromium` 或 `cdp`，两行的 `keyScope` 都是 `none`。 |
 | **D35** | **要不要记录 agent 的操作轨迹？**（owner 2026-09-13："对于每个 agent browser session，agent 发送操作都记录前后画面变化（截图就行）以及操作位置，方便用户后面 review"。） | (a) 做成设置项，默认开：每个动作前后各一张 JPEG + 动作位置叠加层 + 命令，按 profile 保留 7 天或 200 MB 取小者，转录工具卡可展开、实时视图窗口有时间线；(b) 默认关，按 profile 开启；(c) 只记动作位置不记截图。 | **(a)。** 它是 D7 那张"每个动作一张 JPEG"的自然延伸——多拍一张"动作前"并把点击坐标 / 元素框画在图上，成本仍然接近免费，而 review 的价值全在"它点了哪里、页面变成了什么"；(b) 会让第一次需要 review 的那次操作恰好没有记录；(c) 没有画面就没有 review。保留期与 D8 同一套清扫；截图走 §6 同一套脱敏钩子。 |
+
+---
+
+## 11a. 接管（takeover，2026-09-24 —— docs/design-browser-takeover.zh.md 是它的权威设计）
+
+> owner（2026-09-24，原话）："那就选B吧 我还是觉得浏览器操作有点奇怪，另外建议vibespace完全接管浏览器工具，不要再给agent留agent-browser单独的入口了，也不要兼容agent直接操作agent-browser的行为。最好就是直接从系统path隐藏agent-browser，也修改一下web-access这个skill。"
+
+本节编号为 11a，是为了让 §11（D1–D35）和 §12 的锚点保持不变。它改写本设计里几条"两扇门"时代的前提：
+
+* **一扇门（T1/T2，chunk 1）。** `vibespace-browser <verb>` 直接接收每个页面动词（§5 里的 `-- <agent-browser args>` 只剩作为新动词的阀门），由 PURE 的 `src/browser-verbs.js` 分类；原始 CDP、身份/启动旗标、用户的动词在本地就被按名拒绝。会话 PATH 上的 `agent-browser` 是一个只拒绝、从不转发的 shim；远端 prelude 的顺序修正为 finder → tools。教学文字（§5 的那几行）不再出现被隐藏的 CLI 名字（test-architecture §52）。
+* **被管理的临时浏览器（T3，chunk 2 —— 替换 §3.2 "临时浏览器没人看着" 的那句）。** 一个对话在没有附着时的第一个页面动词，让 keeper 记下一条 `ephemeral:true` 的记录（归对话所有，ns = `vs-<browserKey>` —— P0 的四个会话变量**就是**它的身份，D1 保留它们），外加一条别名为 `ephemeral`、永远不算附着的租约；keeper 用会话**原样**的 spawn 变量启动它（或收养一个已经在跑的），**绝不**重跑 browser-env 的阶梯。它计入 `CONCURRENT_CAP`（与桌面应用共享的那一个，D2；第七个对话的第一个动词得到按名的 `browser_cap`，点出每个占位者和两条出路）、被失控守卫采样、空闲退出记为 `stopped`（不是错误）、重启后被收养；对话结束时租约掉落、浏览器停止、**记录自行删除**（具名 profile 永远不会）。实时视图的端口、接管键 `<bk>|ephemeral`、trace 作用域 `ephemeral` 一律不变（端口一致性有门禁钉住）。它是 `sharing:'owner'`、不经 CDP 中介：接管期间在 `/resolve` 处被 `browser_paused` 拦下。远端会话（rung H，D8）与关闭了 `browser.isolateSessions` 的实例（共享 rung，D7）仍然**不受管理**，如实写进手册。
+* **attach 的缺口（T6）。** 一个由桌面应用启动的浏览器窗口（记录或其注册表行带 `browser` 或 `category: 'browser'`——后者是本树 `DEFAULT_REGISTRY` 唯一的标记，r1 更正；临时启动的浏览器可执行文件同样算）是用户自己的窗口：`vibespace-window attach` / snapshot / act / screenshot / watch 一律按名拒绝 `browser_is_human`，`list` 不列出它。
+* **§4 的改名（T5，chunk 3，方向 B）。** 见 §4 开头的注记：三张"浏览器的脸"各有自己的名字 —— 网页视图 / Agent 浏览器 / 浏览器应用；id、openSpec、设置键和 rail id 一个都不动。
+
+* **r1（对抗验证后）。** 旗标可出现在动词与名词之间（`get --json cdp-url` 同样被拒）；每个被拒旗标的环境变量孪生不再经 `vibespace-browser` 到达真二进制（子进程环境由服务器的 `spawnEnv` 与 `/resolve` 的对构造，agent 自加的 `AGENT_BROWSER_*` 按名说明后丢弃）；路由错误文案不再教被隐藏的 CLI（test-architecture §52b 扩到路由模块的字符串）。权威文本：takeover 设计 §3.3 的 r1 补充与 §8。
+* **r2（第二轮对抗验证后）。** `get` 只由**名词**决定（`get attr @e cdp-url` 读的是名为 cdp-url 的属性，照常运行；布尔旗标可带的 `true`/`false` 随旗标一起跳过，所以 `get --json true cdp-url` 仍被拒——真二进制实测）；socket 根目录是身份——`/resolve` 点名 keeper 运行该浏览器所用的根，`vibespace-browser` 最后设置它，导出的 `AGENT_BROWSER_SOCKET_DIR` / `XDG_RUNTIME_DIR` 再也不能把命令指向 keeper 看不见的 daemon；桌面应用浏览器按可执行文件名、启动器运行的程序、app id 或正在运行的进程识别（Chrome、Edge、Brave、flatpak Chromium …），不再只认注册表的两行；§52b 扫描每个被跟踪的 agent CLI 与 window / trace 路由模块。权威：docs/design-browser-takeover.zh.md §3.3 r2 补充、§8 r2。
+* **r3（第三轮对抗核验）。** 路由的全局旗标表改为对二进制**实测**（`get --idle-timeout 5m cdp-url` 曾泄漏：该旗标只在环境变量里有文档）；`get` 只放行它读的名词；元数未知的旗标两种读法都判；配置**文件**被点名、从不被搜索 —— keeper 用点名的文件运行每个浏览器，`/resolve` 点名它，`vibespace-browser` 最后设置（或按同一规则合成一个）—— 而**项目** `agent-browser.json` 只能收窄（它的启动键不再被分层进生成配置：这撤回 §3.2.2 r3「按 CLI 的方式分层」的一半，围栏那一半保留），任何文件里的原始调试开关都到不了浏览器。权威文字：接管设计的 §3.3 r3 补充与 §8。
+* **r4（第四轮对抗核验）。** 二进制启动的每个浏览器都在随机的 `--remote-debugging-port=0` 上监听（实测），所以 §3.2.2 的「不留任何原始调试开关」指的是**固定**端口；让端点不出现在被认可的路上的是：`vibespace-browser` 拒绝离开 web 的导航（`open chrome://version` / `open file://…/DevToolsActivePort` 曾把它打印出来；`local_scheme_refused`，以这类 origin 做的 `state load` 也拒），「这台机器自己的配置」取自**账户**的 passwd home（从不取 `$HOME`），stdin 的 `batch` 以二进制自己的 JSON 形式交出，实测的旗标表只在测量过的版本上被信任。见 docs/design-browser-takeover §3.3 r4 / §9。
+
+门禁：test-browser-verbs、test-remote-shell、test-architecture §52（chunk 1）；test-browser-ephemeral、test-browser-mediation ⑤、test-window-targets §4 的 T6 腿、test-browser-housekeeping 的"Ephemeral browsers"段（chunk 2）。
 
 ---
 

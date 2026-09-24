@@ -206,7 +206,7 @@ Measured (test-desktop-xpra-window §6, a DPR-2 page; r1 numbers — r2: the rac
 
 ### 7.7 B-bfe6 — a browser as a desktop app (2.369.166; owner 2026-09-23 "应用里面也可以加入一下浏览器"; this box: google-chrome (deb) + snap firefox 156.0-1, xpra 6.5.3)
 
-**The relation, stated.** A desktop-app browser is a HUMAN'S browser: a registry row (§5 — never an agent's exec), on the xpra per-window rung like every app, with its OWN profile that the app session owns. It is **not** the Agent browser (design-agent-browser-v2 §3: profiles under `data/browser-*`, driven over CDP by the Browser profiles keeper — a desktop-app browser has no CDP port and no automation flag), and it never opens the user's real profiles. The launcher says so in one sentence, in the Browsers section and in each card's tooltip: *This is your own browser window (an app); the Agent browser (Browser profiles) is separate.*
+**The relation, stated.** A desktop-app browser is a HUMAN'S browser: a registry row (§5 — never an agent's exec), on the xpra per-window rung like every app, with its OWN profile that the app session owns. It is **not** the Agent browser (design-agent-browser-v2 §3: profiles under `data/browser-*`, driven over CDP by the Browser profiles keeper — a desktop-app browser has no CDP port and no automation flag), and it never opens the user's real profiles. The launcher says so in one sentence, in the Browsers section and in each card's tooltip: *This is your own browser window (an app); the Agent browser is separate.*
 
 | Piece | Where | What |
 |---|---|---|

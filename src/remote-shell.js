@@ -37,16 +37,28 @@ function nodeFinder() {
     + '[ -n "$VS_NODE" ] && export PATH="$(dirname "$VS_NODE"):$PATH"; ';
 }
 
+/** The agent-tool dir onto PATH — spelled ONCE (test-remote-shell's drift
+ *  guard fails a hand-written copy in ws-create). */
+const TOOLS_ON_PATH = 'export PATH="$HOME/.vibespace/bin:$PATH"; ';
+
 /**
+ * THE remote prelude, ONE composition: `REMOTE_PRELUDE → nodeFinder → tools`.
+ * The ORDER is load-bearing (design-browser-takeover §4, T2): the node finder
+ * PREPENDS node's directory — on an nvm/npm-global host that is exactly the
+ * directory holding the real browser CLI — so the tools dir must be prepended
+ * LAST to stay first on PATH, or the `agent-browser` shim VibeSpace ships
+ * there (the agent's only road is `vibespace-browser`) would be shadowed by
+ * the binary it exists to hide. Three ws-create builders once hand-wrote the
+ * tools prepend, one of them BEFORE the finder.
  * @param {object} [o]
- * @param {boolean} [o.toolsOnPath]  also put ~/.vibespace/bin on PATH (agent tools)
- * @param {boolean} [o.withNodeFinder] append the POSIX node finder
+ * @param {boolean} [o.toolsOnPath]  also put ~/.vibespace/bin on PATH (agent tools) — LAST, so first
+ * @param {boolean} [o.withNodeFinder] the POSIX node finder (before the tools)
  * @returns {string} a `;`-terminated shell prefix
  */
 function buildRemoteShellPrelude({ toolsOnPath = false, withNodeFinder = false } = {}) {
   let s = REMOTE_PRELUDE;
-  if (toolsOnPath) s += 'export PATH="$HOME/.vibespace/bin:$PATH"; ';
   if (withNodeFinder) s += nodeFinder();
+  if (toolsOnPath) s += TOOLS_ON_PATH;
   return s;
 }
 
@@ -82,4 +94,4 @@ function buildRemoteExec({ cwd, shq, pre = '', browser = '', resolve = '', token
     + 'exec env ' + parts.join(' ') + tail;
 }
 
-module.exports = { REMOTE_PRELUDE, nodeFinder, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET };
+module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET };

@@ -101,7 +101,7 @@ export function openBrowserLive(app, { sessionId, profileId = null, syncId, into
   if (!sessionId) { showToast(t('No session to view'), { type: 'error' }); return null; }
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({
-    title: t('Browser (live)'), type: 'browser-live', syncId, intoChain: intoChain || undefined,
+    title: t('Agent browser (live)'), type: 'browser-live', syncId, intoChain: intoChain || undefined,
     openSpec: { action: 'openBrowserLive', sessionId, profileId: profileId || null },
   });
   const L = createLiveView(app, winInfo, { sessionId, profileId });
@@ -131,7 +131,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over'); takeBtn.title = t('Take over the controls — the agent pauses until you hand back');
   const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand the controls back to the agent — it is told the current URL'); handBtn.style.display = 'none';
   const urlEl = document.createElement('span'); urlEl.className = 'browser-live-url'; urlEl.textContent = '';
-  const openBtn = document.createElement('button'); openBtn.className = 'file-tool-btn browser-live-open'; openBtn.innerHTML = UI_ICONS.web; openBtn.title = t('Open this URL in the embedded browser');
+  const openBtn = document.createElement('button'); openBtn.className = 'file-tool-btn browser-live-open'; openBtn.innerHTML = UI_ICONS.web; openBtn.title = t('Open this URL in a web view');
   const viewersEl = document.createElement('span'); viewersEl.className = 'browser-live-viewers';
   // P5 (D7): the RECORDING indicator reads the profile digest (`recording[profileId]` rides `browser-profiles-updated`); click = the Browser profiles panel where the per-profile opt-in lives
   const recEl = document.createElement('button'); recEl.className = 'file-tool-btn browser-live-rec'; recEl.textContent = t('not recording');
@@ -338,9 +338,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     recEl.classList.toggle('on', !!rec);
     if (rec) { recEl.textContent = t('recording'); recEl.title = t('Recording to {file} since {time}', { file: String(rec.file || ''), time: new Date(Number(rec.since) || 0).toLocaleTimeString() }); }
     else if (refused) { recEl.textContent = t('recording refused'); recEl.title = String(refused.error || refused.code || ''); }
-    else { recEl.textContent = t('not recording'); recEl.title = pid ? t('Recording is a per-profile opt-in — turn it on in Browser profiles…') : t('An ephemeral browser has no profile to record under'); }
+    else { recEl.textContent = t('not recording'); recEl.title = pid ? t('Recording is a per-profile opt-in — turn it on in Agent browser…') : t('An ephemeral browser has no profile to record under'); }
   };
-  recEl.onclick = () => { const pid = st.target && st.target.profileId ? st.target.profileId : null; if (app.openBrowserProfiles) app.openBrowserProfiles({ focus: pid }); else showToast(t('Browser profiles are not available'), { type: 'warn' }); };
+  recEl.onclick = () => { const pid = st.target && st.target.profileId ? st.target.profileId : null; if (app.openBrowserProfiles) app.openBrowserProfiles({ focus: pid }); else showToast(t('Agent browser is not available'), { type: 'warn' }); };
   /** P4 (§7.4): the chip + the blocked-claim banner, both read from the profile digest (never fetched here). */
   const renderBackend = () => {
     const pid = st.target && st.target.profileId ? st.target.profileId : null;
@@ -619,7 +619,7 @@ export function installBrowserLive(App) {
 
 // ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── one window per (session, pane); N windows = N viewers on ONE upstream
 registerWindowType({
-  type: 'browser-live', label: 'Browser (live)',
-  icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9" r="1.6"/>'),
+  type: 'browser-live', label: 'Agent browser (live)',
+  icon: UI_ICONS.browserLive, // the ONE agent-browser glyph (icons.js; design-browser-faces direction B)
   action: 'openBrowserLive', replay: (app, spec, { syncId } = {}) => app.openBrowserLive({ sessionId: spec.sessionId, profileId: spec.profileId || null, syncId }),
 });

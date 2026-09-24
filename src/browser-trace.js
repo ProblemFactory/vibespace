@@ -312,11 +312,13 @@ function isRecordingFile(name) { return RECORDING_FILE_RE.test(String(name || ''
 // ── housekeeping: scope, verdicts, forget, orphans ─────────────────────────
 /** The rows the sweep may act on: `ownsDir` on THIS machine. */
 function sweepScope(profiles, rowOf = B.providerRow) {
-  return (profiles || []).filter((p) => p && !p.host && !!((rowOf(p.provider) || {}).ownsDir));
+  // takeover C3: a managed EPHEMERAL record's directory (rung C's scratch dir) is browser-env's sweep to reclaim, never this one's
+  return (profiles || []).filter((p) => p && !p.host && !B.isEphemeralProfile(p) && !!((rowOf(p.provider) || {}).ownsDir));
 }
 /** May this record be queued for the sweep / forgotten / measured? A typed refusal names why not. */
 function queueVerdict(profile, rowOf = B.providerRow) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no profile' };
+  if (B.isEphemeralProfile(profile)) return { ok: false, code: 'not_ours', error: `"${profile.label}" is a conversation's managed ephemeral browser — it goes with its conversation (its scratch directory is swept by the per-session browser sweep), never set aside here` };
   const row = rowOf(profile.provider) || null;
   if (!row) return { ok: false, code: 'not_ours', error: `"${profile.label}" names an unknown provider ${JSON.stringify(profile.provider)} — its directory is not ours to touch` };
   if (!row.ownsDir) return { ok: false, code: 'not_ours', error: `"${profile.label}" is a ${profile.provider} profile — that browser's state is not a directory we own (§7.1 ownsDir: no), so nothing here may sweep, forget or delete it` };
@@ -331,7 +333,8 @@ function queueVerdict(profile, rowOf = B.providerRow) {
  */
 function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFacts = {}, now, staleDays = STALE_PROFILE_DAYS, graceMs = INFLIGHT_GRACE_MS, rowOf = B.providerRow } = {}) {
   const t = Number(now) || 0;
-  return (profiles || []).map((p) => {
+  // takeover C3: the managed ephemeral records have their OWN section (ephemeralRows), never a profile row
+  return (profiles || []).filter((p) => !B.isEphemeralProfile(p)).map((p) => {
     const q = queueVerdict(p, rowOf);
     const facts = dirFacts[p.id] || {};
     const held = (leases || []).filter((l) => l.profileId === p.id).length;

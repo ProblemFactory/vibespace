@@ -426,5 +426,50 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   fake.close();
 }
 
+// ═══ ⑤ takeover C3 (design-browser-takeover §3.2 / §5.3, I2 / I3) ═══════════
+console.log('— ⑤ the one door: raw CDP refused before any server call; the takeover pauses the MANAGED EPHEMERAL browser and an attachment alike');
+{
+  const V = require('../src/browser-verbs.js');
+  const CDP_FORMS = [['connect', '9222'], ['connect', 'ws://127.0.0.1:9222/devtools/browser/x'], ['get', 'cdp-url'], ['--cdp', '9222', 'snapshot'], ['open', 'https://example.com', '--auto-connect'], ['--', 'get', 'cdp-url']];
+  for (const argv of CDP_FORMS) { const c = V.classify(argv, { ours: true }); ok(c.kind === 'refused' && c.code === 'raw_cdp_refused' && !!c.remedy, `the router refuses \`${argv.join(' ')}\` raw_cdp_refused with a remedy`); }
+  // the SHIPPED CLI against a counting server: the refusal is LOCAL (zero calls)
+  let calls = 0;
+  const counter = http.createServer((req, res) => { calls++; res.writeHead(500); res.end('{}'); });
+  await new Promise((r) => counter.listen(0, '127.0.0.1', r));
+  const CLI = path.join(new URL('..', import.meta.url).pathname, 'data/bin/vibespace-browser');
+  const env = { PATH: PATH_ENV, HOME, VIBESPACE_API: `http://127.0.0.1:${counter.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_' + 'm'.repeat(24) };
+  const { execFile } = await import('node:child_process');
+  const run = (args) => new Promise((resolve) => execFile(process.execPath, [CLI, ...args], { env, encoding: 'utf8', timeout: 20000 }, (err, stdout, stderr) => resolve({ status: err ? err.code : 0, stderr: String(stderr || '') })));
+  for (const argv of [['connect', '9222'], ['get', 'cdp-url'], ['--cdp', '9222', 'snapshot'], ['snapshot', '--auto-connect']]) {
+    const r = await run(argv);
+    ok(r.status === 1 && /\[raw_cdp_refused\]/.test(r.stderr) && /remedy: /.test(r.stderr), `\`vibespace-browser ${argv.join(' ')}\` ⇒ raw_cdp_refused, exit 1`, r.stderr);
+  }
+  ok(calls === 0, `…and not one of them reached the server (${calls} calls)`);
+  counter.close();
+  // the REAL keeper: a takeover pauses resolveFor for the ephemeral browser AND for an attachment
+  const DATA5 = path.join(ROOT, 'data5'); fs.mkdirSync(DATA5, { recursive: true });
+  const KEY_E = 'bk-000000ee', KEY_T = 'bk-000000ef';
+  const rtEnv5 = { FAKE_AB_STATE: AB_STATE, PATH: PATH_ENV, HOME };
+  const k5 = K.create({ dataDir: DATA5, homeDir: HOME, env: () => rtEnv5, serverSetting: (k) => ({ 'browser.idleTimeoutMs': 600000 })[k], liveKeys: () => new Set([KEY_E, KEY_T]), runtime: F.createBrowserRuntime({ env: rtEnv5 }), facts: F.createBrowserFacts({ env: rtEnv5 }), log: { log() { }, warn() { }, error() { } }, install: false });
+  const pairsE = B.browserEnvFor({ browserKey: KEY_E, variant: B.VARIANTS.N, idleMs: 600000 });
+  const eph = await k5.ensureEphemeral({ browserKey: KEY_E, sessionId: 'sess-e', envPairs: pairsE, sessionName: 'e' });
+  ok(eph.created && eph.browser.state === 'ready' && eph.profile.ephemeral === true && eph.profile.mediated === false, 'a managed ephemeral browser (sharing owner — not CDP-mediated, one conversation)');
+  ok(k5.resolveFor({ browserKey: KEY_E }).kind === 'none', 'before a takeover a bare verb resolves to it (kind none ⇒ the managed ephemeral one)');
+  k5.takeover({ browserKey: KEY_E, profileId: null, viewerId: 'v-e', sessionId: 'sess-e' });
+  const pe = k5.resolveFor({ browserKey: KEY_E });
+  ok(!pe.ok && pe.code === 'browser_paused', 'the user takes over the EPHEMERAL browser ⇒ the page verb `click` resolves browser_paused (the `<bk>|ephemeral` key, unchanged)', pe);
+  const solo = k5.createProfile({ label: 'Solo5' }, { owner: { kind: 'session', id: KEY_T } });
+  await k5.attach({ profileId: solo.id, browserKey: KEY_T, sessionId: 'sess-t' });
+  k5.takeover({ browserKey: KEY_T, profileId: solo.id, viewerId: 'v-t', sessionId: 'sess-t' });
+  const pt = k5.resolveFor({ browserKey: KEY_T });
+  ok(!pt.ok && pt.code === 'browser_paused', '…and over an ATTACHMENT the same verb resolves browser_paused', pt);
+  k5.handback({ browserKey: KEY_E, profileId: null, viewerId: 'v-e', cause: 'explicit' });
+  k5.handback({ browserKey: KEY_T, profileId: solo.id, viewerId: 'v-t', cause: 'explicit' });
+  ok(k5.resolveFor({ browserKey: KEY_E }).ok && k5.resolveFor({ browserKey: KEY_T }).ok && k5.resolveFor({ browserKey: KEY_T }).kind === 'attachment', 'handed back, both resolve again');
+  for (const e of k5.ephemerals()) await k5.stop(e.profileId).catch(() => { });
+  await k5.stop(solo.id).catch(() => { });
+  k5.shutdown();
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

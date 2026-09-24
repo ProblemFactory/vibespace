@@ -11,7 +11,7 @@
 //   #8  every lifted touch target is ≥ 36 px (nav, sidebar header/search/tabs,
 //       status-bar chips, dropdown rows, terminal keys, explorer toolbar)
 //   #1  the nav inbox button carries the badge and opens the For-you sheet
-//   #3  "+" long-press → the create sheet (Agent / Terminal / Files / Browser
+//   #3  "+" long-press → the create sheet (Agent / Terminal / Files / Web view
 //       [/ Desktop when available]); its Files row opens the explorer
 //   #6  explorer phone layout: one Name column, no horizontal overflow, the
 //       bookmark strip above the list, long-press → Select… mode
@@ -275,9 +275,10 @@ try {
   // ── #3 "+" long-press sheet ──
   console.log('#3 "+" long-press sheet');
   await longPress('#mobile-nav-new');
-  const createSheet = await evalJs(`(() => { const m = document.querySelector('.context-menu.mobile-sheet'); if (!m) return null; const r = m.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), rows: [...m.querySelectorAll('.context-menu-item')].map((el) => ({ txt: el.textContent.trim(), h: Math.round(el.getBoundingClientRect().height), svg: !!el.querySelector('svg') })), vnc: !!app._vncAvailable }; })()`);
-  const wantRows = createSheet?.vnc ? ['Agent session', 'Terminal', 'Files', 'Browser', 'Desktop'] : ['Agent session', 'Terminal', 'Files', 'Browser'];
-  check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available)`, createSheet && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
+  const createSheet = await evalJs(`(() => { const m = document.querySelector('.context-menu.mobile-sheet'); if (!m) return null; const r = m.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), rows: [...m.querySelectorAll('.context-menu-item')].map((el) => ({ txt: el.textContent.trim(), h: Math.round(el.getBoundingClientRect().height), svg: !!el.querySelector('svg') })), vnc: !!app._vncAvailable, apps: !!app._desktopAppsAvailable, prof: !!app._browserProfiles }; })()`);
+  // the three browser faces (design-browser-faces direction B, D5): Web view always; Desktop app… when /api/desktop/apps has a backend; Agent browser when the profile digest is held
+  const wantRows = ['Agent session', 'Terminal', 'Files', 'Web view', ...(createSheet?.vnc ? ['Desktop'] : []), ...(createSheet?.apps ? ['Desktop app…'] : []), ...(createSheet?.prof ? ['Agent browser'] : [])];
+  check(`a real 700 ms press on "+" opens the create sheet with ${wantRows.join(' / ')} (Desktop only when /api/vnc/status says available; Desktop app… / Agent browser gated like their ⚙ rows)`, createSheet && JSON.stringify(createSheet.rows.map((r) => r.txt)) === JSON.stringify(wantRows), createSheet);
   check('the sheet is full-width under the nav and every row is ≥ 44 px with an SVG icon', createSheet && createSheet.l <= 12 && createSheet.r >= VW - 12 && createSheet.t >= 40 && createSheet.rows.length >= 4 && createSheet.rows.every((r) => r.h >= 44 && r.svg), createSheet);
   check('no window opened yet (the press did not also fire the tap)', await evalJs('app.wm.windows.size') === 0);
   await evalJs(`[...document.querySelectorAll('.mobile-sheet .context-menu-item')].find((el) => el.textContent.trim() === 'Files').click(); true`);
