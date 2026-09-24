@@ -99,6 +99,7 @@ const ok = (c, n, extra) => {
 //    src/.session-store.spawnfix-<pid>.js — a SIGKILL stranded it and every
 //    src/ scanner running beside this suite read a second session-store.
 const MUTS = mutantCopies('disc-spawn', REPO);
+let controlsRan = 0;   // negative controls that really ran (each writes ONE copy); a shallow checkout (the Actions mirror is depth 1) cannot `git show` the pre-fix ref and skips them all — §10 then expects NO copy, by name
 sweepLegacy(REPO, ['src'], /^\.session-store\.spawnfix-(\d+)\.js$/);   // what a pre-fix run stranded (dead PIDs only)
 
 const ident = require(path.join(REPO, 'src/cli-identity.js'));
@@ -279,6 +280,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   if (git.status !== 0 || !git.stdout) {
     ok(true, `NEGATIVE CONTROL SKIPPED — \`git show ${PRE_FIX_REF}:src/session-store.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
   } else {
+    controlsRan++;
     const pre = git.stdout;
     // the control must really BE the retired shape, or it controls nothing
     ok(/pgrep/.test(pre) && /'ps', \['-p', String\(pid\), '-o', 'ppid='\]/.test(pre),
@@ -476,6 +478,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     if (git.status !== 0 || !git.stdout) {
       ok(true, `NEGATIVE CONTROL SKIPPED — \`git show ${PRE_FIX_REF}:server.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
     } else {
+    controlsRan++;
       const preSrc = sliceFn(git.stdout, 'refreshWebuiPids');
       ok(!!preSrc && /execFileSync\('pgrep', \['-P'/.test(preSrc),
         'the control copy really carries the retired per-session `pgrep -P` (or it controls nothing)');
@@ -614,6 +617,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     if (git.status !== 0 || !git.stdout) {
       ok(true, `NEGATIVE CONTROL SKIPPED — \`git show ${PRE_FIX_REF}:src/ws-handler.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
     } else {
+    controlsRan++;
       const preSrc = sliceKillBody(git.stdout);
       ok(!!preSrc && /execFileAsync\('pgrep', \['-f', session\.socketPath\]/.test(preSrc),
         'the control copy really carries the retired `pgrep -f <socketPath>` (or it controls nothing)');
@@ -651,7 +655,12 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
 // `git status` never saw it) and any suite scanning src/ beside this one
 // counted a second session-store as product code.
 console.log('\n§10 the pre-fix copy never touches the tree');
-for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: 1 })) ok(r.pass, '§10 ' + r.name, r.pass ? undefined : r.detail);
+// only the session-store control WRITES a copy (the server.js / ws-handler
+// controls read `git show` output in memory), so the census keys on whether
+// ANY control ran — a checkout that can show the ref writes ≥ 1 copy, a
+// shallow one writes none and says so.
+ok((controlsRan > 0) === (MUTS.files.length > 0), `§10 copies exist exactly when a negative control ran (${controlsRan} ran, ${MUTS.files.length} written)`);
+for (const r of copiesCensus(MUTS.files, MUTS.dir, REPO, { minCopies: controlsRan ? 1 : 0, label: controlsRan ? '' : '(every negative control was SKIPPED — no git history for the pre-fix ref on this checkout, so nothing was written) ' })) ok(r.pass, '§10 ' + r.name, r.pass ? undefined : r.detail);
 
 cleanup();
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
