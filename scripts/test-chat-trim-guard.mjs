@@ -52,7 +52,7 @@ ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, an
 ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv));
 ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', cv.includes("'trimBottom' : 'trimTop'") && /zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv) && cv.includes("_trace('extendTop:done'") && cv.includes("_trace('trimSkipZone'"));
 ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els(, \{ live = false \} = \{\})?\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
-ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*if \(atTail && !this\._pinned\) \{/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /\(this\._readOnly \|\| !this\.sessionId\) && !\(this\._windowEnd < this\._total && this\._canPaginate\)/.test(cv));
+ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv) && /_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /\(this\._readOnly \|\| !this\.sessionId\) && !\(this\._windowEnd < this\._total && this\._canPaginate\)/.test(cv));
 ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', /const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv) && !/\} else if \(list\.children\.length\) \{/.test(cv) && /if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
 // The 2.369.36 gate `_windowStart > 0 && rendered < 30 && sh <= ch` was
@@ -758,6 +758,59 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     });
     ok(`the top-edge anchor is card "a" (sentinel + header skipped, delta 25): after a 500 px prepend the viewport is restored to it (scrollTop ${list.scrollTop}, pre-fix: 0 = the top of the fresh slab)`,
       ok1 === true && list.scrollTop === 500, JSON.stringify({ ok1, st: list.scrollTop }));
+  }
+  // ⑧ THE RE-PIN UNDER A PAGE-UP (2.369.167 r1, the Actions mirror's §4b red on
+  //    3207e03b): a window within the 50 px pin band of one viewport is "at the
+  //    live tail" at EVERY scrollTop, so the scroll the wheel-up itself produced
+  //    re-pinned the view and the grow loop stopped after one slab. The scroll
+  //    handler asks _repinVerdict; _extendTop raises `_extendingTop` for its whole
+  //    loading span. THE LOOP below is the real _extendTop over a fake list in the
+  //    band (428 px list, a 50-record slab = 48 px of folded cards, as measured on
+  //    the fold transcript), the scroll handler's decision applied during the
+  //    first fetch exactly where the browser delivers the wheel's scroll; THE
+  //    CONTROL is the same loop with the gate neutered on the instance.
+  {
+    const V = (over) => Object.assign(Object.create(ChatView.prototype), { _pinned: false, _extendingTop: false, ...over });
+    ok('unit: at the live tail, unpinned, no page in flight → re-pin (the designed pin)', V({})._repinVerdict(true) === 'repin');
+    ok('unit: …with an upward page in flight → skip (the wheel-up\'s own scroll never re-pins the view it just unpinned)', V({ _extendingTop: true })._repinVerdict(true) === 'skip');
+    ok('unit: already pinned, or not at the tail → no decision', V({ _pinned: true })._repinVerdict(true) === null && V({})._repinVerdict(false) === null && V({ _extendingTop: true })._repinVerdict(false) === null);
+    ok('the scroll handler routes its re-pin through _repinVerdict (skip traced as repinSkipPageUp) and _extendTop raises the flag with _loading and drops it in its finally',
+      /const repin = this\._repinVerdict\(atTail\);\n\s*if \(repin === 'skip'\) this\._trace\('repinSkipPageUp'/.test(cv) && /else if \(repin === 'repin'\) \{\n\s*this\._trace\('repin'/.test(cv)
+      && /this\._loading = true;\n\s*this\._extendingTop = true;/.test(cv) && /\} finally \{\n\s*this\._extendingTop = false;\n\s*endLoad\(\);/.test(cv));
+    const runLoop = async ({ neuter }) => {
+      const CHB = 428, PX_PER_RECORD = 48 / 50;
+      let contentPx = CHB + 25; // the band: the rendered window 25 px taller than its list
+      const list = { clientHeight: CHB, scrollTop: 0, childElementCount: 310, firstChild: null, _slabs: [] };
+      Object.defineProperty(list, 'scrollHeight', { get: () => Math.max(contentPx, CHB) });
+      list.querySelector = () => ({ parentNode: list });
+      list.insertBefore = (frag) => { list._slabs.push(frag.children.length); };
+      const verdicts = [], errors = [];
+      const v = Object.assign(Object.create(ChatView.prototype), {
+        _messageList: list, _windowStart: 1229, _windowEnd: 1539, _total: 1539, _pinned: false, _loading: false, _suspended: false, _traces: [],
+        _trace(tag, d) { this._traces.push({ tag, ...d }); }, _traceExpect() {}, _beginHistoryLoad: () => () => {}, _renderDetached: (m) => ({ m }),
+        _reserveFreshHeights() {}, _updateRuns() {}, _trimBottom() { return 0; }, _applyWheelCarry() {}, _scheduleAxSync() {}, _liftLoadLock() {},
+        _scrollToBottom() { this._retailed = (this._retailed || 0) + 1; list.scrollTop = list.scrollHeight - CHB; },
+        _showHistoryStatus(msg) { errors.push(String(msg)); },
+        async _fetchMessages(start, count) {
+          // the browser delivers the wheel's own scroll while the first slab is in flight: the handler's decision, applied as it applies it
+          if (!verdicts.length) { const d = this._repinVerdict(true); verdicts.push(d); if (d === 'repin') this._pinned = true; }
+          return Array.from({ length: count }, (_, i) => ({ id: 'm' + (start + i) }));
+        },
+        _withViewportAnchor(fn) { const n0 = list._slabs.length; fn(); const n = list._slabs[n0] || 0; contentPx += n * PX_PER_RECORD; list.scrollTop += n * PX_PER_RECORD; return true; },
+      });
+      if (neuter) Object.defineProperty(v, '_extendingTop', { configurable: true, get: () => false, set: () => {} });
+      const doc0 = globalThis.document;
+      globalThis.document = { createDocumentFragment: () => ({ children: [], appendChild(el) { this.children.push(el); } }) };
+      try { v._pinned = false; await v._extendTop(); } finally { globalThis.document = doc0; }
+      const passes = v._traces.filter((e) => e.tag === 'extendTop:done').length;
+      return { passes, grown: v._traces.some((e) => e.tag === 'extendTop:grown'), pinned: v._pinned, retailed: v._retailed || 0, verdicts, above: Math.round(list.scrollTop), ch: CHB, flagAfter: v._extendingTop, errors, slabs: list._slabs };
+    };
+    const fix = await runLoop({ neuter: false });
+    ok(`THE LOOP in the pin band: the wheel's own scroll is skipped (${fix.verdicts.join(',')}), the view stays unpinned and the loop GROWS by height until a viewport of history is above the reader (${fix.passes} passes, slabs ${fix.slabs.join('+')}, ${fix.above} px ≥ ${fix.ch}); the flag is down afterwards`,
+      fix.verdicts[0] === 'skip' && !fix.pinned && fix.retailed === 0 && fix.passes > 1 && fix.grown && fix.above >= fix.ch && fix.flagAfter === false && !fix.errors.length, JSON.stringify(fix));
+    const ctl = await runLoop({ neuter: true });
+    ok(`NEGATIVE CONTROL ⑧: the same loop with the gate neutered re-pins on the wheel's own scroll (${ctl.verdicts.join(',')}), stops after ONE slab and re-tails (${ctl.passes} pass, ${ctl.above} px above, retailed ${ctl.retailed}) — the runner's shape, and the unit can go red`,
+      ctl.verdicts[0] === 'repin' && ctl.pinned && ctl.passes === 1 && !ctl.grown && ctl.retailed >= 1 && ctl.above < ctl.ch, JSON.stringify(ctl));
   }
 }
 

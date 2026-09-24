@@ -64,10 +64,14 @@
 // ~3 s), every window's cards — ids, order, roles, status, content — equal the
 // server normalizer's slab for the same range fetched fresh after the storm
 // (printed for the control too: its catch-up fetches missed CREATES only);
-// (j) the lagged leg (fix): one displayed window's socket throttled while its
-// session emits 64 × 400 KB tool results ⇒ exactly one `ws-lagged` at the server, the
-// socket's send queue sampled ≤ limit + one frame (a harness preload patches
-// ws's send), and after un-throttling the window equals the server within 10 s.
+// (j) the lagged leg (fix): a CONTROL burst of 64 × 400 KB tool results (paced,
+// one per 0.15 s) on a displayed window that drains is never cut (0 ws-lagged, the page socket's queue
+// ≤ the limit); then the page's main thread is PAUSED (CDP Debugger.pause) and
+// its session emits the same paced tool results until the server cuts ⇒ exactly one
+// `ws-lagged`, the socket's send queue sampled ≤ limit + one frame (a harness
+// preload patches ws's send), and after the resume the window equals the server
+// within 10 s (2.369.167 r1: the stall is constructed — a network throttle the
+// runner's chrome never applied to websocket reads left the queue at 0).
 // WHAT THE CONTROL IS NOT (perf r1, the verifier's finding): the control is THIS
 // tree with the client's stagger and resume neutered — its server still ships
 // this tree's attach slab. Its bytes / p95 are therefore not master's: on the
@@ -145,19 +149,23 @@ done
 [ -n "$SID" ] || SID="${fixtureSid('57ff')}"
 printf '%s\\n' "{\\"type\\":\\"system\\",\\"subtype\\":\\"init\\",\\"session_id\\":\\"$SID\\",\\"model\\":\\"claude-fable-5\\",\\"cwd\\":\\"$PWD\\",\\"tools\\":[],\\"permissionMode\\":\\"default\\",\\"claude_code_version\\":\\"2.1.274\\"}"
 # chunk D: a prompt carrying VS_BURST is answered by LIVE records over ~3 s (text, then a
-# tool_use whose tool_result lands a beat later = a create and an EDIT); VS_BIG_BURST by
-# 64 tool calls whose results carry 400 KB each, at once (the lagged leg). Any other stdin line is ignored.
+# tool_use whose tool_result lands a beat later = a create and an EDIT); VS_BIG_BURST n=<n>
+# pace=<s> by up to n tool calls whose results carry 400 KB each, one every <s> seconds (the
+# lagged leg) — it stops early the moment the harness creates the STOP file, and reports
+# "<round> <emitted>" in the DONE file when the turn's result is out. Any other stdin line is ignored.
 R=0
 while IFS= read -r line; do
-  case "$line" in *VS_BIG_BURST*) N=64; BIG=1 ;; *VS_BURST*) N=12; BIG=0 ;; *) continue ;; esac
+  case "$line" in *VS_BIG_BURST*) N=$(printf '%s' "$line" | sed -n 's/.*VS_BIG_BURST n=\\([0-9][0-9]*\\).*/\\1/p'); [ -n "$N" ] || N=64; PACE=$(printf '%s' "$line" | sed -n 's/.* pace=\\([0-9.][0-9.]*\\).*/\\1/p'); BIG=1 ;; *VS_BURST*) N=12; BIG=0 ;; *) continue ;; esac
   R=$((R+1)); i=0
   while [ $i -lt $N ]; do
+    if [ $BIG = 1 ] && [ -e "${stub}.stop" ]; then break; fi
     i=$((i+1))
     if [ $BIG = 1 ]; then
       printf '{"type":"assistant","parent_tool_use_id":null,"session_id":"%s","message":{"id":"msg_big_%s_%s","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"toolu_big_%s_%s","name":"Bash","input":{"command":"cat big %s"}}]}}\\n' "$SID" "$R" "$i" "$R" "$i" "$i"
       printf '{"type":"user","parent_tool_use_id":null,"session_id":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_big_%s_%s","content":"' "$SID" "$R" "$i"
       head -c 400000 /dev/zero | tr '\\0' b
       printf '"}]}}\\n'
+      if [ -n "$PACE" ]; then sleep "$PACE"; fi
     else
       printf '{"type":"assistant","parent_tool_use_id":null,"session_id":"%s","message":{"id":"msg_b_%s_%s","role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"burst %s.%s answer"}]}}\\n' "$SID" "$R" "$i" "$R" "$i"
       printf '{"type":"assistant","parent_tool_use_id":null,"session_id":"%s","message":{"id":"msg_t_%s_%s","role":"assistant","model":"claude-fable-5","content":[{"type":"tool_use","id":"toolu_b_%s_%s","name":"Bash","input":{"command":"ls %s"}}]}}\\n' "$SID" "$R" "$i" "$R" "$i" "$i"
@@ -167,8 +175,10 @@ while IFS= read -r line; do
     fi
   done
   printf '{"type":"result","subtype":"success","session_id":"%s","duration_ms":1,"total_cost_usd":0,"is_error":false}\\n' "$SID"
+  if [ $BIG = 1 ]; then printf '%s %s\\n' "$R" "$i" > "${stub}.done"; fi
 done
 `, { mode: 0o755 });
+  dirs.add(stub + '.stop'); dirs.add(stub + '.done');
   // a throwaway worktree with the WORKING TREE overlaid (a pre-commit run tests what is about to ship)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
   execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.add(wt);
@@ -243,20 +253,27 @@ setInterval(() => { if (acc) { try { fs.appendFileSync(${JSON.stringify(jsonlLog
   const bufLog = scratch(`rstorm-${variant}-buf`); dirs.add(bufLog);
   fs.appendFileSync(preload, `{ const wt = require('worker_threads'); if (wt.isMainThread) { let WS = null; try { WS = require('module').createRequire(process.cwd() + '/server.js')('ws'); } catch {}
 if (WS && WS.prototype && typeof WS.prototype.send === 'function') { const s0 = WS.prototype.send; let mx = 0, fr = 0;
-let mmx = 0, mfr = 0;
+let mmx = 0, mfr = 0, pmx = 0;
+// a PAGE socket = one that advertised the op-seq capability on an attach (the harness's own control
+// socket never does): the queue the cut governs is measured on it alone (the (j) control leg)
+const e0 = WS.prototype.emit; WS.prototype.emit = function (ev, data, ...a) { if (ev === 'message' && !this.__opseq && data && data.length < 65536) { try { const t = String(data); if (t.startsWith('{"type":"attach"') && t.includes('"op-seq"')) this.__opseq = true; } catch {} } return e0.call(this, ev, data, ...a); };
 WS.prototype.send = function (data, ...a) { const r = s0.call(this, data, ...a); const b = this.bufferedAmount || 0; if (b > mx) mx = b; const n = data && data.length || 0; if (n > fr) fr = n;
+  if (this.__opseq && typeof data === 'string' && data.startsWith('{"type":"msg"') && b > pmx) pmx = b;
   // the queue the cut governs, on the sockets it cut: per socket the max right after a stamped msg
   // frame, folded into the logged max once (and from then on) that socket was sent a lagged frame
   if (typeof data === 'string' && data.startsWith('{"type":"msg"')) { if (b > (this.__mmx || 0)) this.__mmx = b; if (n > (this.__mfr || 0)) this.__mfr = n; if (this.__lagged) { if (b > mmx) mmx = b; if (n > mfr) mfr = n; } }
   else if (typeof data === 'string' && data.startsWith('{"type":"lagged"')) { this.__lagged = true; if ((this.__mmx || 0) > mmx) mmx = this.__mmx; if ((this.__mfr || 0) > mfr) mfr = this.__mfr; }
   return r; };
-setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(bufLog)}, Date.now() + ' ' + mx + ' ' + fr + ' ' + mmx + ' ' + mfr + '\\n'); } catch {} mx = 0; fr = 0; mmx = 0; mfr = 0; } }, 250).unref(); } } }
+setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(bufLog)}, Date.now() + ' ' + mx + ' ' + fr + ' ' + mmx + ' ' + mfr + ' ' + pmx + '\\n'); } catch {} mx = 0; fr = 0; mmx = 0; mfr = 0; pmx = 0; } }, 250).unref(); } } }
 `);
   let journal = '';
   const srv = spawn(process.execPath, ['-r', preload, 'server.js'], { cwd: wt, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
   procs.add(srv);
-  srv.stdout.on('data', (d) => { journal = (journal + d).slice(-20000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-20000); });
+  // (j): the server's own journal line for a cut is the FIRST sign of it (the telemetry ledger flushes seconds later) — it stops the burst
+  let cutSeenAt = 0;
+  const onOut = (d) => { journal = (journal + d).slice(-20000); if (!cutSeenAt && /a client stopped draining/.test(String(d))) cutSeenAt = Date.now(); };
+  srv.stdout.on('data', onOut); srv.stderr.on('data', onOut);
   const chromeDir = scratch(`rstorm-${variant}-chrome`); dirs.add(chromeDir);
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox',
     '--disable-dev-shm-usage', '--window-size=1500,1050', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
@@ -266,7 +283,7 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
 
   // ── 19 LIVE chat sessions through the real create path (stub CLI behind the real wrapper) ──
   const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-  const frames = []; ctl.on('message', (d) => { try { frames.push(JSON.parse(String(d))); } catch { } });
+  const frames = []; ctl.on('message', (d) => { if (d.length > 65536) return; try { frames.push(JSON.parse(String(d))); } catch { } }); // (a big-burst frame is nobody's evidence here)
   await new Promise((r, e) => { ctl.on('open', r); ctl.on('error', e); });
   const ids = [];
   for (let i = 0; i < N; i++) {
@@ -287,11 +304,12 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
   if (!target) throw new Error('chrome never exposed a CDP page target');
   const cdpWs = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
   await new Promise((r) => cdpWs.on('open', r));
-  let seq = 0; const pend = new Map(); const pageErrors = [];
+  let seq = 0; const pend = new Map(); const pageErrors = []; let debuggerPaused = 0;
   cdpWs.on('message', (d) => {
     const m = JSON.parse(d);
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
     if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params?.exceptionDetails?.exception?.description || m.params?.exceptionDetails?.text || '?');
+    if (m.method === 'Debugger.paused' && !debuggerPaused) debuggerPaused = Date.now(); // (j): the freeze landed
   });
   const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; pend.set(id, res); cdpWs.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => {
@@ -411,9 +429,10 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
   };
   const bufSamples = (fromWall, toWall) => {
     // buf/frame = every frame on every socket; msgBuf/msgFrame = on the socket(s) that were sent `lagged`, the queue right after a stamped `msg` frame went out (the frames the cut governs)
-    let buf = 0, frame = 0, msgBuf = 0, msgFrame = 0;
-    try { for (const l of fs.readFileSync(bufLog, 'utf8').split('\n')) { const [t, b, f, mb, mf] = l.split(' ').map(Number); if (t >= fromWall && t <= toWall + 250) { if (b > buf) buf = b; if (f > frame) frame = f; if (mb > msgBuf) msgBuf = mb; if (mf > msgFrame) msgFrame = mf; } } } catch { }
-    return { buf, frame, msgBuf, msgFrame };
+    // pageBuf = the largest queue right after a stamped `msg` frame on a PAGE socket (op-seq capable), cut or not
+    let buf = 0, frame = 0, msgBuf = 0, msgFrame = 0, pageBuf = 0;
+    try { for (const l of fs.readFileSync(bufLog, 'utf8').split('\n')) { const [t, b, f, mb, mf, pb] = l.split(' ').map(Number); if (t >= fromWall && t <= toWall + 250) { if (b > buf) buf = b; if (f > frame) frame = f; if (mb > msgBuf) msgBuf = mb; if (mf > msgFrame) msgFrame = mf; if (pb > pageBuf) pageBuf = pb; } } } catch { }
+    return { buf, frame, msgBuf, msgFrame, pageBuf };
   };
   const jsonlReads = (fromWall, toWall) => {
     const out = { main: 0, worker: 0 };
@@ -483,50 +502,88 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
   result.inflight = { storm: s3, dom: await ev('window.__stormDomCheck()') };
 
   // ── (j) chunk D, fix only: the LAGGED leg — one displayed window's socket stops draining ──
+  // THE STALL IS CONSTRUCTED, NOT HOPED FOR (2.369.167 r1 — the Actions mirror's red on 3207e03b,
+  // both attempts: ws-lagged 0, the queue 0). The first cut throttled the page's network with
+  // Network.emulateNetworkConditions and fell back to a 15 s busy-wait only after 20 s without a cut:
+  // the runner's chrome does not throttle websocket reads, so the page drained the whole 25.6 MB
+  // burst at full speed and the busy-wait froze a page whose burst was already over. THE FREEZE:
+  // the page's main thread is PAUSED (CDP Debugger.pause, confirmed by its Debugger.paused event)
+  // BEFORE the burst — a paused renderer reads nothing from its socket's data pipe, so the kernel
+  // buffers fill and the server MUST queue — and resumed only after the server was seen to cut.
+  // THE BURST IS BOUNDED BY THE CUT, not by a count: the stub emits 400 KB tool results until the
+  // harness creates its STOP file (at most BIG_MAX_FRAMES), so whatever the kernel's socket
+  // buffers absorb on a machine (tcp_rmem/tcp_wmem, the browser's pipe), the queue reaches the
+  // limit. BOTH BURSTS ARE PACED (one 400 KB frame per BIG_PACE_S): measured, the UNPACED burst is
+  // cut on this box with NO stall at all (the server emits faster than the renderer paints 400 KB
+  // cards — full CPU and `taskset -c 0` alike) while the runner's page drained it at 0 queue: the old
+  // leg was green here by the page's natural lag and red there by its absence. Paced, the freeze is
+  // the only difference between the two legs. THE CONTROL runs first: the same paced burst with no
+  // freeze on the same page must never be cut — the page's own socket queue printed, 0 ws-lagged —
+  // or the freeze proves nothing.
   if (variant === 'fix') {
     const LAG_WIN = 16;
     const lagSid = ids[LAG_WIN];
+    const BIG_CONTROL_FRAMES = 64, BIG_MAX_FRAMES = 160, BIG_PACE_S = process.env.VS_STORM_BIG_PACE || '0.15'; // (VS_STORM_BIG_PACE=none: the unpaced burst — a debugging aid, never the gate)
+    const STOP = stub + '.stop', DONE = stub + '.done';
     const lagBefore = telemetryEvents('ws-lagged', 0, Date.now() + 1).length;
     const traceLagged = () => ev(`(window.app.sessions.get(window.__stormWins[${LAG_WIN}])?._traceRing || []).filter((e) => e.tag === 'lagged').length`);
+    const bigBurst = (n) => {
+      try { fs.rmSync(STOP, { force: true }); fs.rmSync(DONE, { force: true }); } catch { }
+      const t = Date.now();
+      ctl.send(JSON.stringify({ type: 'chat-input', sessionId: lagSid, text: `VS_BIG_BURST n=${n} pace=${BIG_PACE_S} t=${t}`, msgId: 'big-' + t }));
+      return t;
+    };
+    const burstDone = (ms) => until(() => fs.existsSync(DONE), ms, 200);
+    const emitted = () => { try { return Number(fs.readFileSync(DONE, 'utf8').trim().split(' ')[1]); } catch { return null; } };
+    const settledEq = async (ms) => { let dom = null; const ok = await until(async () => { dom = (await ev('window.__stormDomCheck()'))[LAG_WIN]; return !!(dom && dom.eq && dom.domOrder); }, ms, 500); return { ok, dom }; };
+
+    // ① THE CONTROL: no freeze — the page drains, the cut never fires
+    const tracedC0 = await traceLagged();
+    const tC = bigBurst(BIG_CONTROL_FRAMES);
+    const cDone = await burstDone(90000);
+    const cEq = await settledEq(30000);
+    await sleep(600);
+    result.lagControl = { frames: emitted(), done: cDone, eq: cEq.ok, dom: cEq.dom, lagged: telemetryEvents('ws-lagged', tC - 50, Date.now() + 1).length, traced: (await traceLagged()) - tracedC0, buf: bufSamples(tC - 50, Date.now()), ms: Date.now() - tC };
+
+    // ② THE FREEZE: pause the page's main thread, THEN burst until the server cuts it
     const tracedBefore = await traceLagged();
-    await cdp('Network.enable');
-    // a crawl: the renderer drains ~2 KB/s, so the server's queue for this socket can only grow
-    await cdp('Network.emulateNetworkConditions', { offline: false, latency: 200, downloadThroughput: 2048, uploadThroughput: 2048 });
-    const tLag = Date.now();
-    ctl.send(JSON.stringify({ type: 'chat-input', sessionId: lagSid, text: 'VS_BIG_BURST ' + tLag, msgId: 'big-' + tLag }));
-    // the cut is visible SERVER-side (the page cannot read its frame until it drains): poll the ledger
+    await cdp('Debugger.enable');
+    debuggerPaused = 0;
+    const tPause = Date.now();
+    cdp('Debugger.pause'); // not awaited: the reply may wait for the pause to land
+    // the pause lands on the page's next statement (the app runs a timer or a frame callback every
+    // second); a no-op evaluation is the nudge if nothing ran
+    if (!await until(() => debuggerPaused, 1500, 20)) cdp('Runtime.evaluate', { expression: '0' });
+    const paused = await until(() => debuggerPaused, 8000, 20);
+    const pausedAfterMs = debuggerPaused ? debuggerPaused - tPause : null;
+    cutSeenAt = 0;
+    const tLag = bigBurst(BIG_MAX_FRAMES);
+    // the cut is visible SERVER-side (the page cannot read its frame until it drains): its journal
+    // line stops the burst at once, then the telemetry ledger (flushed ≤ 2 s later) is the count
+    await until(() => cutSeenAt, 90000, 50);
+    const tCut = cutSeenAt || Date.now();
+    fs.writeFileSync(STOP, String(tCut)); // the burst ends at the cut (the stub checks between frames)
     let lagged = [];
-    let how = 'network-throttle';
-    const waitLag = async (ms) => { await until(() => { lagged = telemetryEvents('ws-lagged', tLag - 50, Date.now() + 1); return lagged.length > 0; }, ms, 250); };
-    await waitLag(20000);
-    if (!lagged.length) {
-      // this chrome's throttle does not hold back websocket reads: stop the page's main thread
-      // instead (the renderer stops consuming its socket's data pipe ⇒ TCP backpressure)
-      how = 'main-thread block';
-      cdp('Runtime.evaluate', { expression: 'const t = Date.now(); while (Date.now() - t < 15000) {} 1' }); // not awaited: the page is busy for 15 s
-      await waitLag(20000);
-    }
-    const tCut = Date.now();
-    // the queue up to the moment the cut was SEEN (the ledger flushes ≤ 2 s after it): no re-attach
-    // can have happened yet (the page has not drained its `lagged`), so every frame queued here is
-    // the burst itself — this is the bound the cut enforces
+    await until(() => { lagged = telemetryEvents('ws-lagged', tLag - 50, Date.now() + 1); return lagged.length > 0; }, 15000, 250);
+    const stopped = await burstDone(60000);
+    // the queue up to the moment the cut was SEEN (the ledger flushes ≤ 2 s after it): the page is
+    // still paused, so no re-attach can have happened — every frame queued here is the burst itself
     const bufAtCut = bufSamples(tLag - 50, tCut);
-    const attachAt = await ev(`(window.__vsAttachFrames || []).filter((f) => f.t >= ${tLag} && f.sid === ${JSON.stringify(lagSid)}).map((f) => f.t)`);
-    await sleep(3000); // more of the burst is refused, never queued
-    const bufMax = bufSamples(tLag - 50, Date.now()); // printed: includes the recovery attach frame if it went out already
-    await cdp('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await sleep(1000); // more of the burst, if any, is refused, never queued
+    const bufMax = bufSamples(tLag - 50, Date.now());
+    const frozenMs = Date.now() - (debuggerPaused || tPause);
+    await cdp('Debugger.resume');
     const tOpen = Date.now();
-    let dom = null;
-    await until(async () => {
-      if (await ev('document.readyState') !== 'complete') return false;
-      dom = (await ev('window.__stormDomCheck()'))[LAG_WIN];
-      return dom && dom.eq && dom.domOrder;
-    }, 30000, 500);
-    const recoveredMs = dom && dom.eq ? Date.now() - tOpen : null;
+    await until(async () => (await ev('document.readyState')) === 'complete', 10000, 250);
+    const rec = await settledEq(30000);
+    const recoveredMs = rec.ok ? Date.now() - tOpen : null;
     await sleep(1500);
+    await cdp('Debugger.disable');
     const traced = (await traceLagged()) - tracedBefore;
-    result.lagged = { how, bufAtCut, reattachBeforeUnthrottle: (attachAt || []).map((t) => t - tLag), events: lagged.length, eventsTotal: telemetryEvents('ws-lagged', 0, Date.now() + 1).length - lagBefore, detail: lagged.map((e) => e.detail), cutAfterMs: tCut - tLag, bufMax, recoveredMs, dom, traced,
-      frames: await ev(`(window.__vsAttachFrames || []).filter((f) => f.t >= ${tLag} && f.sid === ${JSON.stringify(lagSid)}).map((f) => ({ len: f.len, slab: f.slab, held: f.held, replay: f.replay }))`) };
+    const attachFrames = await ev(`(window.__vsAttachFrames || []).filter((f) => f.t >= ${tLag} && f.sid === ${JSON.stringify(lagSid)}).map((f) => ({ t: f.t, len: f.len, slab: f.slab, held: f.held, replay: f.replay }))`);
+    result.lagged = { how: paused ? 'debugger-pause' : 'NOT PAUSED', pausedAfterMs, frozenMs, frames: emitted(), stopped, bufAtCut, reattachWhileFrozen: (attachFrames || []).filter((f) => f.t < tOpen).length,
+      events: lagged.length, eventsTotal: telemetryEvents('ws-lagged', 0, Date.now() + 1).length - lagBefore, detail: lagged.map((e) => e.detail), cutAfterMs: tCut - tLag, bufMax, recoveredMs, dom: rec.dom, traced,
+      attachFrames: (attachFrames || []).map((f) => ({ len: f.len, slab: f.slab, held: f.held, replay: f.replay })) };
   }
   result.pageErrors = pageErrors.slice(0, 5);
   await killAll();
@@ -615,13 +672,17 @@ if (F.inflight && C.inflight) {
   check(`(i) fix: every window resumed held (${F.inflight.frames.held}/19), none took a slab (${F.inflight.frames.slab}), a catch-up (${F.inflight.catchUps}) or a loadHistory (${F.inflight.lh}); the replays carried ${F.inflight.frames.replayOps} ops`, F.inflight.frames.held === 19 && F.inflight.frames.slab === 0 && F.inflight.catchUps === 0 && F.inflight.lh === 0 && F.inflight.frames.replayOps > 0);
 }
 {
-  const L = fix.lagged;
-  if (!L) check('(j) the lagged leg ran', false);
+  const L = fix.lagged, K = fix.lagControl;
+  if (!L || !K) check('(j) the lagged leg ran (control + freeze)', false);
   else {
-    console.log(`  lagged leg: stalled by ${L.how}; ws-lagged ${L.events} (${L.detail.join(' | ')}), cut seen ${L.cutAfterMs} ms after the burst began · server send queue right after a msg frame, max ${L.bufMax.msgBuf} B (limit ${LAG_LIMIT} + largest msg frame ${L.bufMax.msgFrame} B); any frame ${L.bufMax.buf} B (largest ${L.bufMax.frame} B — the recovery attach's slab) · the page's re-attach landed ${JSON.stringify(L.reattachBeforeUnthrottle)} ms after the burst began (before the un-throttle when listed) · the page traced ${L.traced} lagged · recovered to the server's state ${L.recoveredMs} ms after un-throttling · its attach frames after the burst ${JSON.stringify(L.frames)}`);
-    check(`(j) exactly ONE ws-lagged at the server for the stalled socket (${L.events}; total over the leg ${L.eventsTotal})`, L.events === 1 && L.eventsTotal === 1, L.detail);
-    check(`(j) the send queue the cut governs stayed bounded: after any msg frame ≤ limit ${LAG_LIMIT} + one msg frame (${L.bufMax.msgBuf} ≤ ${LAG_LIMIT + L.bufMax.msgFrame}) — never the 25.6 MB burst`, L.bufMax.msgBuf > LAG_LIMIT && L.bufMax.msgBuf <= LAG_LIMIT + L.bufMax.msgFrame && L.bufMax.msgFrame < 1048576);
-    check(`(j) the window received exactly one lagged and re-attached (${L.traced}); it equals the server within 10 s of the link coming back (${L.recoveredMs} ms)`, L.traced === 1 && L.recoveredMs != null && L.recoveredMs <= 10000 && L.dom?.eq && L.dom?.domOrder, L.dom);
+    console.log(`  lagged leg, CONTROL (no freeze): ${K.frames} × 400 KB emitted in ${K.ms} ms; the page's own socket queue after any msg frame max ${K.buf.pageBuf} B (limit ${LAG_LIMIT}); any socket ${K.buf.buf} B; ws-lagged ${K.lagged}; the page traced ${K.traced} lagged; equal to the server afterwards ${K.eq}`);
+    console.log(`  lagged leg, FREEZE: ${L.how} (landed ${L.pausedAfterMs} ms after the request, held ${L.frozenMs} ms); ${L.frames} × 400 KB emitted before the stop (the burst ends at the cut); ws-lagged ${L.events} (${L.detail.join(' | ')}), cut seen ${L.cutAfterMs} ms after the burst began · server send queue right after a msg frame, max ${L.bufMax.msgBuf} B (limit ${LAG_LIMIT} + largest msg frame ${L.bufMax.msgFrame} B); any frame ${L.bufMax.buf} B · re-attaches while frozen ${L.reattachWhileFrozen} · the page traced ${L.traced} lagged · recovered to the server's state ${L.recoveredMs} ms after the resume · its attach frames after the burst ${JSON.stringify(L.attachFrames)}`);
+    check(`(j) control: the same burst on a page that drains is never cut — 0 ws-lagged (${K.lagged}), the page traced none (${K.traced}), its socket's queue after any msg frame stayed ≤ the limit (${K.buf.pageBuf} ≤ ${LAG_LIMIT}), and it equals the server when the burst is done (${K.eq}) — else the freeze below proves nothing`,
+      K.done && K.frames === 64 && K.lagged === 0 && K.traced === 0 && K.buf.pageBuf <= LAG_LIMIT && K.eq, JSON.stringify(K).slice(0, 600));
+    check(`(j) the freeze was CONSTRUCTED: the page's main thread paused (Debugger.paused ${L.pausedAfterMs} ms after the request) before the burst began, and nothing re-attached while it was frozen (${L.reattachWhileFrozen})`, L.how === 'debugger-pause' && L.reattachWhileFrozen === 0, JSON.stringify(L).slice(0, 600));
+    check(`(j) exactly ONE ws-lagged at the server for the stalled socket (${L.events}; total over the leg, control included, ${L.eventsTotal})`, L.events === 1 && L.eventsTotal === 1, L.detail);
+    check(`(j) the send queue the cut governs stayed bounded: after any msg frame ≤ limit ${LAG_LIMIT} + one msg frame (${L.bufMax.msgBuf} ≤ ${LAG_LIMIT + L.bufMax.msgFrame}) — never the whole burst (${L.frames} × 400 KB)`, L.bufMax.msgBuf > LAG_LIMIT && L.bufMax.msgBuf <= LAG_LIMIT + L.bufMax.msgFrame && L.bufMax.msgFrame < 1048576);
+    check(`(j) the window received exactly one lagged and re-attached (${L.traced}); it equals the server within 10 s of the page resuming (${L.recoveredMs} ms)`, L.traced === 1 && L.recoveredMs != null && L.recoveredMs <= 10000 && L.dom?.eq && L.dom?.domOrder, L.dom);
   }
 }
 if (APPEND_KB > 0) {

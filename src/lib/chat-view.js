@@ -751,7 +751,9 @@ class ChatView {
         // follow, which walked them to the tail with no input. The DOM edge is
         // a paging boundary (pageDown below); only the live tail is a pin.
         const atTail = atBottom && this._atLiveTail(scrollTop, scrollHeight, clientHeight);
-        if (atTail && !this._pinned) {
+        const repin = this._repinVerdict(atTail);
+        if (repin === 'skip') this._trace('repinSkipPageUp', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight, ws: this._windowStart });
+        else if (repin === 'repin') {
           this._trace('repin', { st: Math.round(scrollTop), sh: scrollHeight, ch: clientHeight, we: this._windowEnd, total: this._total,
             structAge: Date.now() - (this._lastStructuralAt || 0), n: this._messageList.childElementCount,
             fsb: this._fsbActive ? (this._fsbFrames || 0) : -1, posAgo: this._lastPositionAt ? Date.now() - this._lastPositionAt : -1 });
@@ -2625,6 +2627,7 @@ class ChatView {
     if (this._suspended) return; // hidden-desktop window: no paging (inc-mtd1d0ft)
     if (this._loading || this._windowStart <= 0) return;
     this._loading = true;
+    this._extendingTop = true; // the scroll handler never re-pins under an upward page (_repinVerdict)
     const endLoad = this._beginHistoryLoad(t('Loading earlier messages…'));
     try {
       // GROW BY HEIGHT (inc-mub8xwrb-z57x; re-derived for inc-mubvu3a4-x8sb): a
@@ -2730,6 +2733,7 @@ class ChatView {
       });
       try { track('event', 'chat-extend-top-failed', String(e?.message || e).slice(0, 120)); } catch {}
     } finally {
+      this._extendingTop = false;
       endLoad();
       setTimeout(() => this._liftLoadLock(), 300);
     }
@@ -3361,6 +3365,27 @@ class ChatView {
     }, { root: this._messageList, rootMargin: kind === 'live' ? CV_HOLD_LIVE_MARGIN : CV_HOLD_SLAB_MARGIN });
     this[key] = io;
     return io;
+  }
+
+  /** THE SCROLL HANDLER'S RE-PIN, ONE DECISION (2.369.167 r1, the Actions
+   *  mirror's fold-leg red): `'repin'` | `'skip'` | null. A window whose whole
+   *  rendered height is within the 50 px band of one viewport is "at the live
+   *  tail" at EVERY scrollTop, so the scroll the wheel-up itself produced (its
+   *  native scroll to 0) re-pinned the view the wheel handler had just unpinned —
+   *  and _extendTop's grow loop reads the pin as "the live tail owns this view":
+   *  it stopped after ONE slab and re-tailed (measured on the fold transcript
+   *  with the list 25 px short of its content: `wheelTop repin(we 1539/1539)
+   *  trimSkipPinned pinnedRetail`, one 50-record slab = 48 px, the window left
+   *  1.17 viewports tall; the runner's fonts set that slab under the band where
+   *  this box's did not — the whole difference between green here and red
+   *  there). While an upward page is in flight (`_extendingTop`, raised and
+   *  dropped by _extendTop itself) the reader has said where they are going:
+   *  no re-pin; the landing's carried notch moves them out of the band, and a
+   *  later scroll re-pins honestly. Gates: test-chat-trim-guard ⑧ (unit + the
+   *  loop) and test-chat-paging §4b (the constructed band + its control). */
+  _repinVerdict(atTail) {
+    if (!atTail || this._pinned) return null;
+    return this._extendingTop ? 'skip' : 'repin';
   }
 
   /** PINNED ⇔ THE RENDERED WINDOW ENDS AT THE LIVE TAIL (inc-mubvu3a4-x8sb, H2).

@@ -67,11 +67,22 @@ export async function writeHugeTranscript({ file, sid, cwd, targetBytes = Number
   };
   const IMAGES = [png(480, 280, 40).toString('base64'), png(400, 320, 160).toString('base64')]; // ≈ 540 KB / 510 KB each
   const out = fs.createWriteStream(file);
+  // THE STOPPING POINT IS PART OF THE SHAPE (2.369.167 r1): every base() record
+  // carries `cwd`, and a suite's cwd is a scratch.mjs path that ends in its pid —
+  // five digits on a fresh Actions runner, seven here — so counting the REAL
+  // bytes moved where the loop stopped, where the dense tail began and which
+  // records the tail held: the same suite paged a different conversation on
+  // every machine (measured: test-chat-paging's tail 3,795 records with an
+  // image-free tail(50) of 68 KB on the runner, 3,785 with a 571 KB image in it
+  // here). The accounting counts every record as if its cwd were CANON_CWD, so
+  // the records are the same everywhere; only the cwd string differs.
+  const CANON_CWD = '/tmp/vs-huge-fixture-cwd-0000'; // 29 bytes: test-chat-paging's scratch cwd under a 7-digit pid — the shape the suites were tuned on
+  const cwdSkew = Buffer.byteLength(JSON.stringify(cwd)) - Buffer.byteLength(JSON.stringify(CANON_CWD));
   let bytes = 0, lines = 0, n = 0, t = Date.now() - 30 * 86400e3;
   const ts = () => new Date((t += 20e3)).toISOString();
   const uuid = () => fixtureSid((n++).toString(16)); // every record id is MINTED (test-fixture-isolation refuses a hand-spelled member of the family)
   const base = () => ({ parentUuid: null, isSidechain: false, userType: 'external', entrypoint: 'sdk-cli', cwd: cwd, sessionId: sid, version: '2.1.274', gitBranch: 'master', slug: 'huge-paging-fixture' });
-  const push = (o) => { const l = JSON.stringify(o) + '\n'; bytes += Buffer.byteLength(l); lines++; out.write(l); };
+  const push = (o) => { const l = JSON.stringify(o) + '\n'; bytes += Buffer.byteLength(l) - (o.cwd === cwd ? cwdSkew : 0); lines++; out.write(l); };
   const usage = () => ({ input_tokens: 4, cache_creation_input_tokens: 0, cache_read_input_tokens: 90000, output_tokens: irange(10, 400), service_tier: 'standard' });
   const asst = (content, id) => push({ ...base(), type: 'assistant', message: { model: 'claude-fable-5-1', id, type: 'message', role: 'assistant', content, stop_reason: 'tool_use', usage: usage() }, requestId: `req_${n}`, uuid: uuid(), timestamp: ts() });
   const bookkeeping = () => {

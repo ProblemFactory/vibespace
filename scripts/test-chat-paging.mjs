@@ -180,6 +180,10 @@ await cdp('Runtime.enable');
 await cdp('Page.enable');
 // every navigation below (pageReady's included) runs with the wizard pre-dismissed (test-architecture §47)
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+// VS_PAGING_UI_FONT=<family> (a debugging aid, never the gate): the UI's system font forced on every page —
+// 'DejaVu Sans' is the Actions runner's fallback for `system-ui` (this box resolves Noto Sans), and with it
+// the unfixed §4b reproduces the mirror's `481/1179 1087/629 1391/79 807/0` byte for byte
+if (process.env.VS_PAGING_UI_FONT) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = ${JSON.stringify(`body { font-family: ${JSON.stringify(process.env.VS_PAGING_UI_FONT)} !important; }`)}; document.head.appendChild(st); });` });
 const pageReady = async (port, label, ms = 150000) => {
   const end = Date.now() + ms; let navs = 0;
   while (Date.now() < end) {
@@ -292,42 +296,106 @@ check('no anchor-shift/teleport jumps while paging', analysis.jumpCount === 0, `
 // scrollTop clamped to 0 — "跳到上面一页的最顶部，跳过了中间内容", 15 extend/trim
 // cycles in 25 s and a frozen browser. Now: NO trim while the window is shorter
 // than two viewports, and one wheel notch GROWS the window until it is.
-console.log('§4b fold-dominated: one wheel notch = one landing on a full viewport; the bottom is never trimmed while short; the reader never lands on the top of a slab they did not ask for');
-const fold = await evaljs(`(async () => {
+// THE PIN BAND, CONSTRUCTED (2.369.167 r1 — the Actions mirror's red on 3207e03b,
+// both attempts: `481/1179 1087/629 1391/79 807/0`, the first notch ONE slab and no
+// grown landing). The fold window opens at the WM's default 700×500, and its attach
+// slab rendered 67 px taller than the list on this box (`system-ui` = Noto Sans) but
+// 48 px taller under the runner's DejaVu Sans (measured by forcing it here with
+// VS_PAGING_UI_FONT) — inside the pin band, where a window is "at the live tail" at
+// EVERY scrollTop. The scroll the
+// wheel-up itself produced re-pinned the view the wheel handler had just unpinned,
+// and the grow loop, reading the pin, stopped after one 50-record slab and
+// re-tailed (`wheelTop repin(we 1539/1539) trimSkipPinned pinnedRetail`,
+// reproduced here with the list sized 25 px short of its content: ws 1179 → 629
+// → 79 → 0, exactly the runner's sequence). THE PRODUCT FIX: the scroll handler
+// never re-pins while an upward page is in flight (`_extendingTop`,
+// `repinSkipPageUp`). THE LEG no longer inherits the geometry from the fonts: the
+// window is resized so its list is FOLD_BAND px shorter than the rendered content
+// (asserted and printed) — the hardest shape, identical on every machine — the
+// ORDER is constructed too (each fetch held three frames, so the wheel's own
+// scroll is decided while the first slab is in flight), and each notch waits for
+// its own landing (the loading span ends), never a fixed sleep. THE CONTROL: a second view in the same band with the new rule neutered
+// on the INSTANCE (`_extendingTop` an own accessor that reads false) must re-pin
+// and stop after one slab, or the leg proves nothing.
+const FOLD_BAND = 25;
+console.log(`§4b fold-dominated: one wheel notch = one landing on a full viewport; the bottom is never trimmed while short; the reader never lands on the top of a slab they did not ask for — in the PIN BAND (the list ${FOLD_BAND} px shorter than the rendered attach slab)`);
+const FOLD_RUN = (title, { neuter = false, maxNotches = 6 } = {}) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  window.app.viewSession('${SID2}', '${CWD}', 'fold test');
-  let v = null;
+  window.app.viewSession('${SID2}', '${CWD}', ${JSON.stringify(title)});
+  let v = null, w = null;
   for (let i = 0; i < 60; i++) {
-    const w = [...window.app.wm.windows.values()].find((w) => String(w.title || '').includes('fold test'));
+    w = [...window.app.wm.windows.values()].find((x) => String(x.title || '').includes(${JSON.stringify(title)}));
     v = (w && window.app.sessions.get(w.id)) || null;
     if (v && v._messageList && v._messageList.querySelectorAll('.chat-msg').length > 10) break;
     await sleep(300);
   }
   if (!v) return { ok: false };
+  try { await document.fonts.ready; } catch {}
   await sleep(1500); // initial render + fold settle
   const list = v._messageList;
+  const open = { ch: list.clientHeight, sh: list.scrollHeight, rendered: list.querySelectorAll(':scope > .chat-msg').length };
+  // THE BAND: resize the window until the list is FOLD_BAND px shorter than the content (heights settle after a resize)
+  let resizes = 0;
+  for (; resizes < 8; resizes++) {
+    const d = (list.scrollHeight - ${FOLD_BAND}) - list.clientHeight;
+    if (Math.abs(d) <= 3) break;
+    w.element.style.height = (w.element.offsetHeight + d) + 'px'; if (w.onResize) try { w.onResize(); } catch {}
+    await sleep(500);
+  }
+  await sleep(1800); // past the paging gates' 1.5 s structural horizon — a resize is no input
+  if (${neuter ? 'true' : 'false'}) Object.defineProperty(v, '_extendingTop', { configurable: true, get: () => false, set: () => {} });
+  // THE ORDER, CONSTRUCTED: the wheel's own scroll is decided (next frame, the handler's rAF) while the
+  // first slab is still in flight — each fetch is held three frames on the instance. A real server's round
+  // trip is longer than a frame (the mirror's was); a loopback one on an idle box can land FIRST, the
+  // landing's carried notch moves the reader out of the band, and no scroll ever reaches it (measured: the
+  // neutered control stayed unpinned under DejaVu Sans + taskset -c 0,1 without this hold)
+  { const f0 = v._fetchMessages; const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+    v._fetchMessages = async function (...a) { await frame(); await frame(); await frame(); return f0.apply(this, a); }; }
   const ch = list.clientHeight;
-  const out = { ok: true, ws0: v._windowStart, ch, rendered0: list.querySelectorAll('.chat-msg').length, sh0: list.scrollHeight, notches: [] };
-  for (let k = 0; k < 6; k++) {
+  const out = { ok: true, open, resizes, ws0: v._windowStart, ch, sh0: list.scrollHeight, band: list.scrollHeight - ch, pin0: !!v._pinned, rendered0: list.querySelectorAll(':scope > .chat-msg').length, notches: [] };
+  for (let k = 0; k < ${maxNotches}; k++) {
     if (v._windowStart <= 0) break;
-    const mark = (v._traceRing || []).length;
+    const mark = (v._traceRing || []).length, t0 = Date.now();
     list.scrollTop = 0;
     list.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
-    await sleep(2600);
+    // THE NOTCH'S OWN LANDING: the loading span (+ its 300 ms lock) has ended, twice in a row, after a landing
+    let quiet = 0;
+    while (Date.now() - t0 < 20000) {
+      await sleep(250);
+      const landed = (v._traceRing || []).slice(mark).some((e) => e.tag === 'extendTop:done');
+      quiet = landed && !v._loading ? quiet + 1 : 0;
+      if (quiet >= 2) break;
+    }
+    await sleep(400); // late layout (the fold's debounced pass, the slab reservation's release)
     const tail = (v._traceRing || []).slice(mark);
-    out.notches.push({ extends: tail.filter((e) => e.tag === 'extendTop:done').length, grown: tail.some((e) => e.tag === 'extendTop:grown'), trimBottom: tail.filter((e) => e.tag === 'trimBottom').length, foldCeiling: tail.filter((e) => e.tag === 'foldCeiling').length, st: Math.round(list.scrollTop), sh: list.scrollHeight, ws: v._windowStart, rendered: list.querySelectorAll('.chat-msg').length });
+    out.notches.push({ ms: Date.now() - t0, extends: tail.filter((e) => e.tag === 'extendTop:done').length, grown: tail.some((e) => e.tag === 'extendTop:grown'), trimBottom: tail.filter((e) => e.tag === 'trimBottom').length, foldCeiling: tail.filter((e) => e.tag === 'foldCeiling').length,
+      repins: tail.filter((e) => e.tag === 'repin').length, repinSkips: tail.filter((e) => e.tag === 'repinSkipPageUp').length, pinnedRetail: tail.filter((e) => e.tag === 'pinnedRetail').length,
+      st: Math.round(list.scrollTop), sh: list.scrollHeight, ws: v._windowStart, pin: !!v._pinned, rendered: list.querySelectorAll('.chat-msg').length });
   }
+  window.app.wm.closeWindow(w.id);
   return out;
-})()`);
-console.log('  fold:', JSON.stringify(fold).slice(0, 900));
+})()`;
+const fold = await evaljs(FOLD_RUN('fold test'));
+console.log('  fold:', JSON.stringify({ ...fold, notches: undefined }));
+for (const n of fold?.notches || []) console.log('    notch:', JSON.stringify(n));
 check('the fold-dominated view-only chat opened and paged at least twice', !!fold?.ok && fold.notches.length >= 2, JSON.stringify(fold));
 if (fold?.ok) {
   const N = fold.notches, ch = fold.ch;
-  check(`every notch that still has history above leaves the window ≥ 2 viewports tall (grow by HEIGHT) — (${N.map((n) => n.sh + '/' + n.ws).join(' ')})`, N.every((n) => n.ws === 0 || n.sh >= 2 * ch), N);
-  check('the first notch needed more than one slab (the fold makes 50 records a few hundred px) and fired ONE grown landing', N[0].extends > 1 && N[0].grown === true && N[0].extends <= 8, N[0]);
-  check('the bottom is never trimmed while the window is short (a trim there removes the content on screen)', N.every((n) => n.trimBottom === 0 || n.sh >= 2 * ch), N);
-  check(`the reader never lands on the very top with history still above (the incident\'s "跳到最顶部") — st per notch: ${N.map((n) => n.st).join(' ')}`, N.every((n) => n.ws === 0 || n.st > 0), N);
-  check('no fold ceiling was hit in six notches (the ceiling is the bound, not the routine)', N.every((n) => n.foldCeiling === 0), N);
+  check(`the PIN BAND was constructed: the list is ${fold.band} px shorter than the rendered attach slab (${FOLD_BAND} ± 3 — inside the 50 px band where every scrollTop is "at the live tail"), the view pinned at the tail with history above (ws ${fold.ws0}); ${fold.open.rendered} cards opened ${fold.open.sh} px tall in a ${fold.open.ch} px list (${(fold.open.sh / Math.max(1, fold.open.rendered)).toFixed(2)} px per card — the fonts' share of the geometry, printed)`, Math.abs(fold.band - FOLD_BAND) <= 3 && fold.pin0 && fold.ws0 > 0, JSON.stringify(fold));
+  check(`every notch that still has history above leaves the window ≥ 2 viewports tall (grow by HEIGHT) — (${N.map((n) => n.sh + '/' + n.ws).join(' ')})`, N.every((n) => n.ws === 0 || n.sh >= 2 * ch), JSON.stringify(N));
+  check('the first notch needed more than one slab (the fold makes 50 records a few hundred px) and fired ONE grown landing', N[0].extends > 1 && N[0].grown === true && N[0].extends <= 8, JSON.stringify(N[0]));
+  check(`the wheel-up is never overruled by the pin: the band's scroll reached the handler during the first notch's fetch and was SKIPPED (repinSkipPageUp ×${N[0].repinSkips}); no re-pin, no pinned re-tail during any notch`, N[0].repinSkips >= 1 && N.every((n) => n.repins === 0 && n.pinnedRetail === 0 && !n.pin), JSON.stringify(N));
+  check('the bottom is never trimmed while the window is short (a trim there removes the content on screen)', N.every((n) => n.trimBottom === 0 || n.sh >= 2 * ch), JSON.stringify(N));
+  check(`the reader never lands on the very top with history still above (the incident\'s "跳到最顶部") — st per notch: ${N.map((n) => n.st).join(' ')}`, N.every((n) => n.ws === 0 || n.st > 0), JSON.stringify(N));
+  check('no fold ceiling was hit in six notches (the ceiling is the bound, not the routine)', N.every((n) => n.foldCeiling === 0), JSON.stringify(N));
+}
+// NEGATIVE CONTROL §4b: the same band, the new rule neutered on the view instance — the notch re-pins
+{
+  const c = await evaljs(FOLD_RUN('fold control', { neuter: true, maxNotches: 1 }));
+  const n = c?.notches?.[0];
+  console.log('  fold control:', JSON.stringify({ ...c, notches: undefined }), n ? 'notch: ' + JSON.stringify(n) : '');
+  check(`NEGATIVE CONTROL §4b: in the same band (${c?.band} px) with the re-pin gate neutered, the notch's own scroll RE-PINS the view and the grow loop stops after one slab (repins ${n?.repins}, extends ${n?.extends}, grown ${n?.grown}, sh ${n?.sh} vs 2 × ${c?.ch}) — the legs can go red`,
+    !!n && Math.abs(c.band - FOLD_BAND) <= 3 && n.repins >= 1 && n.extends === 1 && !n.grown && n.sh < 2 * c.ch, JSON.stringify(c));
 }
 
 // ── 4c. THE HUGE COMPACT-MODE SESSION (inc-mubvu3a4-x8sb, 2026-09-21, owner on
@@ -375,6 +443,7 @@ const OPEN_HUGE = (sid, cwd, title) => `(async () => {
   await sleep(300);
   // the LIVE window's content-visibility (a read-only viewer runs with it off)
   v._readOnly = false; v._container.classList.remove('chat-no-content-visibility');
+  try { await document.fonts.ready; } catch {} // the self-hosted mono faces (fonts.css, font-display: swap) are in before anything is measured
   await sleep(2500); // initial render + fold + attach fill settle
   window.__v = v; window.__list = list;
   const r = list.getBoundingClientRect();
@@ -766,13 +835,20 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
 // ── 4f. FIRST PAINT BY TEXT COUNT (perf lane A, 2.369.167): the attach slab is a
 // TEXT window (src/text-window.js), not tail(50). On the §1c fixture, opened
 // exactly as §4c opens it, the view must — after attach and BEFORE any gesture —
-// hold ≥ minText text cards, be ≥ 2 viewports tall (the reader can scroll into
-// history without a page), and need NO rescue (no autoFill, no grown landing).
+// hold ≥ minText text cards (or, stopped by the growth budget, more than
+// tail(50)), render at least as tall as tail(50) does (it is a superset of it),
+// and obey THE RESCUE LAW: a first paint that fills its viewport pages nothing
+// before the first gesture; one that does not gets exactly one rescue (autoFill,
+// traced at sh ≤ ch). 2.369.167 r1: the lane's "≥ 2 viewports, no rescue" was a
+// reading of THIS box's fonts on THIS box's fixture — the mirror measured 1.58
+// (its system font sets the one-line cards shorter, and the fixture's tail
+// differed: see huge-transcript-fixture.mjs, the stopping point) — a geometry
+// the product never promised; the slab is chosen by TEXT, never by px.
 // THE CONTROL is a scratch copy whose server keeps tail(50) (the client is the
-// fix's): it must fail the text and height legs, or the legs test nothing.
+// fix's): it must fail the text leg, or the legs test nothing.
 // First paint (history-render-ms, kept on the view) and the attach frame's
 // length (ws.js `__vsAttachFrames`) are printed; the frame is bounded.
-console.log('§4f first paint by text count: the §1c attach slab holds ≥ minText text cards, is ≥ 2 viewports tall and needs no rescue; the control (server tail(50)) must not');
+console.log('§4f first paint by text count: the §1c attach slab holds ≥ minText text cards, renders at least as tall as tail(50) and obeys the rescue law; the control (server tail(50)) must fail the text leg');
 {
   const TW_SRC = fs.readFileSync(path.join(repo, 'src/text-window.js'), 'utf8');
   const { TEXT_WINDOW } = require('../src/text-window.js');
@@ -784,7 +860,7 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
     const ring = v._traceRing || [];
     const frames = (window.__vsAttachFrames || []).filter((f) => f.sid === v.sessionId);
     return { renderMs: v._lastHistoryRenderMs == null ? null : Math.round(v._lastHistoryRenderMs), n: cards.length, textCards: cards.filter((c) => tw.isTextCard(byId.get(c.dataset.msgId))).length,
-      sh: list.scrollHeight, ch: list.clientHeight, autoFill: ring.filter((e) => e.tag === 'autoFill').length, grown: ring.filter((e) => e.tag === 'extendTop:grown').length,
+      sh: list.scrollHeight, ch: list.clientHeight, autoFill: ring.filter((e) => e.tag === 'autoFill').length, fill: ring.filter((e) => e.tag === 'autoFill').map((e) => ({ sh: e.sh, ch: e.ch })), grown: ring.filter((e) => e.tag === 'extendTop:grown').length,
       extends: ring.filter((e) => e.tag === 'extendTop:done').length, ws: v._windowStart, total: v._total, frame: frames[frames.length - 1] || null, frames: frames.length };
   })()`;
   const firstPaint = async (port, label) => {
@@ -797,12 +873,13 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
     console.log(`  [${label}] first paint ${m.renderMs} ms; ${m.n} cards (${m.textCards} text) = window ${m.ws}..${m.total}; sh/ch ${m.sh}/${m.ch} = ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}, grown ${m.grown}, extends ${m.extends}; attached frame ${m.frame ? (m.frame.len / 1024).toFixed(0) + ' KB / ' + m.frame.n + ' records' : 'NOT SEEN'}`);
     return { opened, m };
   };
+  // THE RESCUE LAW (_shortViewNeedsFill / _scheduleAttachFill): no rescue ⇔ the first paint filled its viewport
+  const rescueLaw = (m) => m.autoFill === 0 ? (m.sh > m.ch && m.extends === 0 && m.grown === 0) : (m.autoFill === 1 && m.fill[0].sh <= m.fill[0].ch && m.extends >= 1);
   const fix = await firstPaint(PORT, 'fix');
   check('§4f the fix opened the §1c fixture and saw its attached frame', !!fix.m && !!fix.m.frame, JSON.stringify(fix.opened));
   if (fix.m) {
     const m = fix.m;
-    check(`§4f …and is ≥ 2 viewports tall (sh/ch ${(m.sh / m.ch).toFixed(2)})`, m.sh / m.ch >= 2, JSON.stringify(m));
-    check('§4f …and needed no rescue: zero autoFill, zero grown landings, zero extends before the first gesture', m.autoFill === 0 && m.grown === 0 && m.extends === 0, JSON.stringify(m));
+    check(`§4f …and obeys the rescue law (sh/ch ${m.sh}/${m.ch} = ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}${m.fill.length ? ' at ' + m.fill.map((f) => f.sh + '/' + f.ch).join(' ') : ''}; extends ${m.extends}) — a first paint that fills its viewport pages nothing before the first gesture, one that does not gets exactly one rescue`, rescueLaw(m), JSON.stringify(m));
     check(`§4f the attached frame is bounded: ${(m.frame.len / 1048576).toFixed(2)} MB ≤ 1.9 MB and the slab ≤ maxRecords (${m.frame.n}) (the tight bound — ≤ 128 KiB over tail(50) — is asserted against the control below)`, m.frame.len <= 1.9 * 1048576 && m.frame.n <= TEXT_WINDOW.maxRecords, JSON.stringify(m.frame));
     // the reconnect no-op (2.369.2) with the bigger slab: a SECOND attach of the same conversation (the reconnect
     // re-attach's round trip, sent by hand — the reconnect ladder skips read-only windows, and this view-only
@@ -845,7 +922,9 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
   check('§4f control: the fixture opened on the tail(50) copy', !!ctl.m && !!ctl.m.frame, JSON.stringify(ctl.opened));
   if (ctl.m) {
     const m = ctl.m;
-    check(`NEGATIVE CONTROL §4f: tail(50) ships 50 records holding fewer than minText text cards (${m.textCards}) and under 2 viewports (${(m.sh / m.ch).toFixed(2)}) — the legs can go red`, m.frame.n === 50 && m.textCards < TEXT_WINDOW.minText && m.sh / m.ch < 2, JSON.stringify(m));
+    check(`NEGATIVE CONTROL §4f: tail(50) ships 50 records holding fewer than minText text cards (${m.textCards}) — the text leg can go red`, m.frame.n === 50 && m.textCards < TEXT_WINDOW.minText, JSON.stringify(m));
+    check(`§4f control: tail(50) obeys the same rescue law (sh/ch ${(m.sh / m.ch).toFixed(2)}; autoFill ${m.autoFill}) — the law is the client's, whatever the slab`, rescueLaw(m), JSON.stringify(m));
+    if (fix.m) check(`§4f the text window renders at least as tall as tail(50) — it is a superset of it (${fix.m.sh} px vs ${m.sh} px in the same ${m.ch} px list)`, fix.m.sh >= m.sh - 2 && Math.abs(fix.m.ch - m.ch) <= 2, JSON.stringify({ fix: [fix.m.sh, fix.m.ch], ctl: [m.sh, m.ch] }));
     // perf r1: the window is bounded by GROWTH (≤ maxGrowthBytes past the floor), so on a cut whose next
     // records past the budget are heavy it may stop short of minText — it must then still hold MORE text than
     // tail(50) and have paid at most the growth budget over the control's frame (same turnMap, same live facts)
