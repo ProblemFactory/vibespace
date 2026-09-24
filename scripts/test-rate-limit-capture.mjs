@@ -203,7 +203,13 @@ fs.rmSync(dir, { recursive: true, force: true });
     && /noteWallSignal\(session, \{ bucket: hit\.kind[^}]*key: pinKey,/.test(eng),
     '⑥ …the banner\'s WRITE follows a proven re-file while its SIGNAL keeps the pin (moving the signal drops the pinned member\'s own wall)');
   ok(/function resolveUsageKey\(session\)[\s\S]{0,900}sessionBillingMember\(session, acct\)\.id/.test(eng), '⑥ VALUES follow the credential slot as well — there is no longer a "reading member" different from the billing member');
-  ok(/\(prev\.source \|\| 'unknown'\) === \(g\.cache\.source \|\| 'unknown'\)/.test(eng), '⑥ calib pairs are same-source (cross-source offset is attribution, not prediction error — mirrors extractPairs 2.340.0)');
+  // 2.369.164 (batch 8, B-a5c0) moved the anchor sweep — and with it the
+  // same-source rule — out of the engine into usage-estimator's
+  // sweepAnchorGroup; the engine now only CALLS it. The invariant is pinned
+  // where it lives, and the engine is pinned to hold no inline copy.
+  const est = fs2.readFileSync(new URL('../src/usage-estimator.js', import.meta.url), 'utf8');
+  ok(/\(prev\.source \|\| 'unknown'\) === \(cache\.source \|\| 'unknown'\)/.test(est), '⑥ calib pairs are same-source (cross-source offset is attribution, not prediction error — mirrors extractPairs 2.340.0; lives in usage-estimator.sweepAnchorGroup since 2.369.164)');
+  ok(!/\(prev\.source \|\| 'unknown'\) === \(g\.cache\.source \|\| 'unknown'\)/.test(engCode) && /sweepAnchorGroup\(/.test(engCode), '⑥ …and the engine holds no inline copy of the pairing rule — it calls the estimator\'s sweepAnchorGroup (ONE implementation)');
   const sv = fs2.readFileSync(new URL('../server.js', import.meta.url), 'utf8');
   ok(/getOtelIngest: \(\) => \{ try \{ return otelIngest; \}/.test(sv), '⑥ server.js hands the engine a lazy otelIngest (TDZ: created later in the file)');
   ok(/observedOrgFor\(sid\)/.test(fs2.readFileSync(new URL('../src/server/otel-ingest.js', import.meta.url), 'utf8')), '⑥ the ingest exposes the per-session observed org');
